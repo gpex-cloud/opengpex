@@ -50,6 +50,16 @@ async function ensureBlob(data: unknown): Promise<Blob | unknown> {
 export const Hydrating = {
   /**
    * Dehydrates: Deeply extracts Blobs and clears src recursively
+   * 
+   * [Bug Fix - 2026.06.19]:
+   * Previously, dehydrate was optimized to only traverse keys explicitly specified in `containers`.
+   * However, it missed 'checkpoint' (under history steps) and 'byId' (which holds the maps of layers and frames, e.g., layers.byId, frames.byId).
+   * Since 'byId' contains dynamic keys (layer/frame IDs) which are not in the whitelisted containers array, 
+   * traversal would stop, preventing layer asset extraction and image URL bleaching. This caused ERR_FILE_NOT_FOUND
+   * when opening cloud-saved .gpex files since asset binaries were never packed, and local blob URLs expired.
+   * 
+   * Solution: Added 'checkpoint' and 'byId' to the container list. Introduced the `isMap` parameter.
+   * When key is 'byId', `isMap = true` is passed to traverse all dynamic map entries (e.g. layers) in O(N).
    */
   async dehydrate(obj: unknown, assets: AssetService, assetsPool: Record<string, { blob: Blob }>, isMap = false): Promise<unknown> {
     if (!obj || typeof obj !== 'object' || obj instanceof Blob) return obj;
@@ -61,6 +71,7 @@ export const Hydrating = {
 
     const record = obj as Record<string, unknown>;
 
+    // Handle normalized byId maps (like layers.byId or frames.byId) containing dynamic keys
     if (isMap) {
       const result: Record<string, unknown> = {};
       let hasChanged = false;
