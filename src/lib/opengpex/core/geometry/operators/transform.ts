@@ -1,0 +1,204 @@
+/**
+ * OpenGPEX - An Open-source, Web-based Graphics and Photo editor.
+ * Copyright (C) 2026 The OpenGPEX Authors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
+import { Matrix3x3 } from '@opengpex/editor/core/geometry/matrix';
+import { Layer, Frame, IMatrix3x3, asLocalRect, LayerPoseOverride } from '@opengpex/editor/core/types';
+
+/**
+ * [Generic] Core geometric operator: calculate transform matrix of any asset in world coordinate system
+ */
+function computeWorldMatrix(props: {
+  cx: number;
+  cy: number;
+  rotation: number;
+  flip: { h: boolean; v: boolean };
+  rect: { x: number; y: number; w: number; h: number };
+}): Matrix3x3 {
+  const { cx, cy, rotation, flip, rect } = props;
+
+  return Matrix3x3.translate(cx, cy)
+    .multiply(getOrientationMatrix(rotation, flip))
+    .multiply(Matrix3x3.translate(-rect.w / 2, -rect.h / 2))
+    // Core contract compensation: because the atomic painter (painter.ts) draws logically cut fragments with visibleShape,
+    // it will directly draw at (v.x, v.y) in local space. To offset this drawing deviation, the matrix must inversely subtract rect.x/y,
+    // to keep the physical center of the layer at (cx, cy), while ensuring the UI selection box perfectly aligns with the fragment.
+    .multiply(Matrix3x3.translate(-rect.x, -rect.y));
+}
+
+/**
+ * [External] Convert semantic state to 2x2 rotation-mirror matrix part
+ */
+function getOrientationMatrix(rotation: number, flip?: { h: boolean, v: boolean }): Matrix3x3 {
+  const safeFlip = flip || { h: false, v: false };
+  const R = Matrix3x3.rotate(rotation);
+  const F = new Matrix3x3(safeFlip.h ? -1 : 1, 0, 0, safeFlip.v ? -1 : 1, 0, 0);
+  return R.multiply(F);
+}
+
+/**
+ * [External] Fuses all geometric elements: center position, viewport shape (visibleShape), rotation, flip, scaling, etc.
+ */
+export function getLayerWorldMatrix(layer: Layer, override?: LayerPoseOverride): Matrix3x3 {
+  // const activeMasks = layer.vectorMasks?.filter(m => m.enabled) || [];
+  // const hasVisibleShape = layer.visibleShape && (layer.visibleShape.type !== 'rect' || layer.visibleShape.rect.w !== layer.bounding.w || layer.visibleShape.rect.h !== layer.bounding.h);
+
+  const img_w = layer.bounding.w;
+  const img_h = layer.bounding.h;
+
+  const cx = override?.cx ?? layer.cx;
+  const cy = override?.cy ?? layer.cy;
+  const rotation = override?.rotation ?? layer.rotation;
+
+  const rect = layer.visibleShape?.rect || { x: 0, y: 0, w: img_w, h: img_h };
+
+  return computeWorldMatrix({
+    cx,
+    cy,
+    rotation,
+    flip: layer.flip,
+    rect
+  });
+}
+
+/**
+ * Derived method: directly get Local Space matrix (top-left reference)
+ */
+export function getLayerLocalMatrix(layer: Layer, canvasDim: { w: number, h: number }, override?: LayerPoseOverride): Matrix3x3 {
+  const w_matrix = getLayerWorldMatrix(layer, override);
+  return Matrix3x3.translate(canvasDim.w / 2, canvasDim.h / 2).multiply(w_matrix);
+}
+
+/**
+ * DecomposedMatrix: Semantic pose parameters after matrix decomposition
+ */
+export interface DecomposedMatrix {
+  rotation: number;
+  flip: { h: boolean; v: boolean };
+  scaleX: number;
+  scaleY: number;
+}
+
+/**
+ * [Internal] Matrix decomposition: extract rotation, scaling, flip and other parameters from IMatrix3x3
+ */
+export function decomposeMatrix(M: IMatrix3x3, refRotation: number = 0): DecomposedMatrix {
+  const { a, b, c, d } = M;
+
+  // 1. Calculate scaling (Scale)
+  // Pythagorean theorem: a^2 + b^2 = scaleX^2; c^2 + d^2 = scaleY^2
+  const scaleX = Math.sqrt(a * a + b * b);
+  const scaleY = Math.sqrt(c * c + d * d);
+
+  // 2. Determine mirroring (Determinant)
+  const det = a * d - b * c;
+  const isMirrored = det < 0;
+
+  const getAngleDist = (angleA: number, angleB: number) => {
+    const diff = Math.abs(angleA - (angleB % 360 + 360) % 360);
+    return Math.min(diff, 360 - diff);
+  };
+
+  // 3. Handle non-mirrored case
+  if (!isMirrored) {
+    let angle = Math.round((Math.atan2(b, a) * 180) / Math.PI);
+    angle = ((angle % 360) + 360) % 360;
+
+    const angleA = angle;
+    const angleB = (angle + 180) % 360;
+    const distA = getAngleDist(angleA, refRotation);
+    const distB = getAngleDist(angleB, refRotation);
+
+    if (distA <= distB) {
+      return { rotation: angleA, flip: { h: false, v: false }, scaleX, scaleY };
+    } else {
+      return { rotation: angleB, flip: { h: true, v: true }, scaleX, scaleY };
+    }
+  }
+
+  // 4. Handle mirrored case (horizontal flip or vertical flip)
+  let thetaH = Math.round((Math.atan2(-b, -a) * 180) / Math.PI);
+  thetaH = ((thetaH % 360) + 360) % 360;
+
+  let thetaV = Math.round((Math.atan2(b, a) * 180) / Math.PI);
+  thetaV = ((thetaV % 360) + 360) % 360;
+
+  const distH = getAngleDist(thetaH, refRotation);
+  const distV = getAngleDist(thetaV, refRotation);
+
+  if (distH <= distV) {
+    return { rotation: thetaH, flip: { h: true, v: false }, scaleX, scaleY };
+  } else {
+    return { rotation: thetaV, flip: { h: false, v: true }, scaleX, scaleY };
+  }
+}
+
+/**
+ * Execute artboard-level geometric update (rotation/flip)
+ */
+export function transformFrame(
+  frame: Frame,
+  operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v'
+) {
+  let O: Matrix3x3;
+  const isRotation = operation.startsWith('rotate');
+  const oldW = frame.canvas.w;
+  const oldH = frame.canvas.h;
+
+  switch (operation) {
+    case 'rotate_r': O = Matrix3x3.rotate90(1); break;
+    case 'rotate_l': O = Matrix3x3.rotate90(-1); break;
+    case 'flip_h': O = Matrix3x3.flipH(); break;
+    case 'flip_v': O = Matrix3x3.flipV(); break;
+    default: return frame;
+  }
+
+  const nextById: Record<string, typeof frame.layers.byId[string]> = {};
+  frame.layers.order.forEach(id => {
+    const l = frame.layers.byId[id];
+    const L_orient = getOrientationMatrix(l.rotation, l.flip);
+    const nextL_orient = O.multiply(L_orient);
+    const { rotation, flip } = decomposeMatrix(nextL_orient, l.rotation);
+    const nextP = O.apply({ x: l.cx, y: l.cy });
+
+    nextById[id] = { ...l, cx: nextP.x, cy: nextP.y, rotation, flip };
+  });
+
+  const nextW = isRotation ? oldH : oldW;
+  const nextH = isRotation ? oldW : oldH;
+  const delta = isRotation ? (operation === 'rotate_r' ? 90 : -90) : 0;
+
+  const nextCamera = { ...frame.camera };
+  if (isRotation) {
+    nextCamera.x += (oldW - nextW) / 2 * frame.camera.k;
+    nextCamera.y += (oldH - nextH) / 2 * frame.camera.k;
+  }
+
+  const nextImageCropBox = Matrix3x3.transformRect(frame.imageCropBox.rect, frame.canvas, operation);
+  const nextCanvasCropBox = Matrix3x3.transformRect(frame.canvasCropBox.rect, frame.canvas, operation);
+
+  return {
+    ...frame,
+    canvas: { w: nextW, h: nextH },
+    rotation: (frame.rotation || 0) + delta,
+    layers: { byId: nextById, order: frame.layers.order },
+    camera: nextCamera,
+    imageCropBox: { ...frame.imageCropBox, rect: asLocalRect(nextImageCropBox) },
+    canvasCropBox: { ...frame.canvasCropBox, rect: asLocalRect(nextCanvasCropBox) }
+  };
+}

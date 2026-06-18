@@ -1,0 +1,47 @@
+{
+  "name": "opengpex",
+  "version": "1.0.0-beta.1",
+  "license": "GPL-3.0-only",
+  "private": true,
+  "scripts": {
+    "scan-plugins": "node scripts/scan-plugins.mjs",
+    "sync-plugins": "node scripts/sync-plugins.mjs",
+    "pack-plugin": "node scripts/pack-plugin.mjs",
+    "dev": "pnpm sync-plugins && pnpm scan-plugins && next dev --port 3030",
+    "build": "pnpm sync-plugins && pnpm scan-plugins && pnpm lint && next build",
+    "build:release": "pnpm sync-plugins -- --release && pnpm scan-plugins && pnpm lint && next build",
+    "start": "next start --port 3030",
+    "lint": "eslint",
+    "postinstall": "node scripts/postinstall-exts.mjs && pnpm sync-plugins && pnpm scan-plugins"
+  },
+  "dependencies": {
+    "@jsquash/avif": "^2.1.1",
+    "@resvg/resvg-wasm": "^2.6.2",
+    "heic-to": "^1.4.1",
+    "exifr": "^7.1.3",
+    "exifreader": "^4.39.1",
+    "fflate": "^0.8.3",
+    "framer-motion": "^12.40.0",
+    "gsap": "^3.15.0",
+    "immer": "^11.1.8",
+    "localforage": "^1.10.0",
+    "lucide-react": "^0.542.0",
+    "next": "16.2.6",
+    "piexifjs": "^1.0.6",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "unzipper": "^0.12.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.0",
+    "@types/node": "^20.19.41",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@types/unzipper": "^0.10.11",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "16.2.6",
+    "raw-loader": "^4.0.2",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^5.9.3"
+  }
+}

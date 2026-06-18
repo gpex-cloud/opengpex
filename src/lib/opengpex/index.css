@@ -1,0 +1,81 @@
+/*
+ * OpenGPEX - An Open-source, Web-based Graphics and Photo editor.
+ * Copyright (C) 2026 The OpenGPEX Authors
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
+:root {
+  --editor-grid-color: rgba(0, 0, 0, 0.05);
+  --editor-scrollbar-thumb: #d4d4d8;
+  --editor-scrollbar-thumb-hover: rgba(0, 0, 0, 0.2);
+  --layer-selected-bg: rgba(79, 70, 229, 0.1);
+  --layer-selected-border: rgba(99, 102, 241, 0.8);
+  --layer-hover-bg: rgba(0, 0, 0, 0.05);
+  --canvas-bg: #ffffff;
+  --canvas-checker: #f0f0f0;
+
+  /* UI Palette (Light Mode defaults) */
+  --bg-stage: #f1f1f1;
+  --bg-panel: #ffffff;
+  --bg-header: #f8f9fa;
+  --border-subtle: #e5e7eb;
+  --border-light: #ffffff;
+  --text-main: #18181b;
+  --text-muted: #71717a;
+}
+
+.dark {
+  --editor-grid-color: rgba(255, 255, 255, 0.03);
+  --editor-scrollbar-thumb: #3f3f46;
+  --editor-scrollbar-thumb-hover: rgba(255, 255, 255, 0.15);
+  --layer-selected-bg: rgba(79, 70, 229, 0.25);
+  --layer-selected-border: rgba(99, 102, 241, 0.8);
+  --layer-hover-bg: rgba(255, 255, 255, 0.06);
+  --canvas-bg: #121212;
+  --canvas-checker: #242424;
+
+  /* UI Palette (Editor Pro Gray - Professional Dark Mode) */
+  --bg-stage: #1e1e1e;     /* Stage background */
+  --bg-panel: #2b2b2b;     /* Main UI panels (Toolbar, Sidebar) */
+  --bg-header: #333333;    /* Header / Option bar */
+  --border-subtle: #181818; /* Dark inset borders */
+  --border-light: #424242;  /* Light bevel borders / highlights */
+  --text-main: #cccccc;    /* Main UI text */
+  --text-muted: #888888;   /* Muted labels / shortcuts */
+}
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Adaptive scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--editor-scrollbar-thumb);
+  border-radius: 10px;
+  transition: background 0.3s;
+}
+
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: var(--editor-scrollbar-thumb-hover);
+}
+
+/* Smart divider: hide header, footer, and consecutive blank dividers */
+.slot-divider:first-child,
+.slot-divider:last-child,
+.slot-divider+.slot-divider {
+  display: none !important;
+}

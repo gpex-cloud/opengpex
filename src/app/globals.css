@@ -1,0 +1,36 @@
+/*
+ * OpenGPEX - An Open-source, Web-based Graphics and Photo editor.
+ * Copyright (C) 2026 The OpenGPEX Authors
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ==========================================================================
+   Global Theme Transitions - Site-wide smooth theme switching
+   ========================================================================== */
+*,
+*::before,
+*::after {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 300ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Performance optimization: allow instant transitions for specific elements if needed */
+.no-transition,
+.no-transition * {
+  transition: none !important;
+}
+
+/* ==========================================================================
+   End of Global Transitions
+   ========================================================================== */
+
+body {
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

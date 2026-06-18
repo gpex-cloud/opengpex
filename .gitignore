@@ -1,0 +1,90 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env.example
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# user plugins (development sandbox, ignore custom developer folders except README.md)
+/src/lib/opengpex/plugins/user/*
+!/src/lib/opengpex/plugins/user/README.md
+/src/lib/opengpex/plugins/registry-user.ts
+/src/lib/opengpex/core/plugin/registry.ts
+
+# dynamic plugin persistent storage
+/data/
+
+# External vendor assets (copied from node_modules via postinstall)
+/public/ext/
+
+# pack-plugin output
+/dist/
+
+# IDEs, Editors & Toolchains
+.vscode/
+.idea/
+*.iml
+*.iws
+.idx/
+.antigravitycli/
+.netrwhist
+*.swp
+
+# AI Assistants & Agents (LLM Tools)
+.cursor/
+cursor-tombstones/
+.windsurf/
+.claude/
+.bolt/
+.aider*
+.cline/
+.roocode/
+.roo/
+.continue/
+.codeium/
+.copilot/
+.gemini/
+.codex/
+.tabnine/
+.sourcegraph/
+.supermaven/
+.pieces/
+.tabby/
+mcp-config.json
+*.log
