@@ -58,11 +58,11 @@ export function popupOAuth(config: PopupOAuthConfig): Promise<PopupOAuthResult> 
   return new Promise((resolve, reject) => {
     const popupUrl = `${apiBaseUrl}/auth/oauth-popup?provider=${encodeURIComponent(provider)}&origin=${encodeURIComponent(origin)}`;
 
-    // Center the popup on screen
+    // Center the popup relative to the current browser window
     const width = 500;
     const height = 650;
-    const left = Math.round((screen.width - width) / 2);
-    const top = Math.round((screen.height - height) / 2);
+    const left = Math.round(window.screenX + (window.outerWidth - width) / 2);
+    const top = Math.round(window.screenY + (window.outerHeight - height) / 2);
     const popup = window.open(
       popupUrl,
       "gpex-oauth",

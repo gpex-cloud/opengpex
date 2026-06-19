@@ -163,7 +163,28 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const sysCommandsRegistered = useRef(false);
   useEffect(() => {
     async function init() {
-      const savedState = await storage.restore();
+      // Timeout guard: Prevents permanent hang if IndexedDB connection is stale
+      // (e.g., page restored from bfcache, multi-tab lock, or storage corruption)
+      const RESTORE_TIMEOUT_MS = 2500;
+      let savedState: Awaited<ReturnType<typeof storage.restore>> = null;
+
+      try {
+        savedState = await Promise.race([
+          storage.restore(),
+          new Promise<null>((_, reject) =>
+            setTimeout(() => reject(new Error("RESTORE_TIMEOUT")), RESTORE_TIMEOUT_MS)
+          ),
+        ]);
+      } catch (err) {
+        const isTimeout = err instanceof Error && err.message === "RESTORE_TIMEOUT";
+        console.warn(
+          isTimeout
+            ? "[EditorProvider] IndexedDB restore timed out. Loading empty workspace."
+            : "[EditorProvider] State restore failed. Loading empty workspace.",
+          err,
+        );
+        savedState = null;
+      }
 
       if (savedState) {
         dispatch({ type: "HYDRATE", payload: savedState });
