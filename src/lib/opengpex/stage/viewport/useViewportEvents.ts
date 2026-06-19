@@ -18,7 +18,7 @@
  */
 
 import React, { useRef, useCallback, useMemo } from 'react';
-import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
+import { useEditorState, useEditorServices, usePluginList } from '@opengpex/editor/core/context';
 import { Frame, Layer, InteractionEvent, asViewportPoint } from '@opengpex/editor/core/types';
 import { InteractionDispatcher } from '../interaction/Dispatcher';
 import { createViewportPanHandler } from '../interaction/handlers/ViewportPanHandler';
@@ -36,18 +36,19 @@ export function useViewportEvents(
   const { state, activeLayer } = useEditorState();
   const services = useEditorServices();
   const { geometry, actions, plugins } = services;
+  const pluginList = usePluginList();
 
   // 1. Initialize dispatcher and handlers (automatically aggregate built-in and plugin handlers)
   const dispatcher = useMemo(() => {
-    // Collect all handlers provided by plugins
-    const pluginInteractions = plugins.getAllPlugins().flatMap(p => p.interactions || []);
+    // Collect all handlers provided by plugins (reactively updated)
+    const pluginInteractions = pluginList.flatMap(p => p.interactions || []);
 
     return new InteractionDispatcher([
       ...pluginInteractions,
       createLayerMoveHandler(),
       createViewportPanHandler()
     ]);
-  }, [plugins]);
+  }, [pluginList]);
 
   // 2. Helper function to construct InteractionEvent
   const buildInteractionEvent = useCallback((e: React.MouseEvent | MouseEvent): InteractionEvent => {

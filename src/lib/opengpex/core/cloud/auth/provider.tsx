@@ -111,7 +111,6 @@ export function AuthProvider({ apiBaseUrl, branding, oauthProviders, children }:
               };
               setAccessToken(accessToken);
               setRefreshToken(refreshToken);
-              console.log("[Auth] SSO code exchanged successfully.");
             } else {
               console.warn("[Auth] SSO code exchange failed:", res.status);
             }

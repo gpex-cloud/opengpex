@@ -51,7 +51,6 @@ export class WorkerCache {
       case 'mid': this.MAX_ASSETS = 15; break;
       case 'high': this.MAX_ASSETS = 30; break;
     }
-    console.log(`[Worker] Initialized with memory class: ${config.memoryClass}, MAX_ASSETS: ${this.MAX_ASSETS}`);
   }
 
   /**

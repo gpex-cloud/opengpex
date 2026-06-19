@@ -181,8 +181,8 @@ export class AssetService {
       }
     }
 
-    if (count > 0) {
-      console.log(`[Assets] Hydrated ${count} active assets in ${Date.now() - start}ms`);
+    if (count > 0 && (typeof process !== 'undefined' && process.env.NODE_ENV === 'development')) {
+      console.debug(`[Assets] Hydrated ${count} active assets in ${Date.now() - start}ms`);
     }
   }
 

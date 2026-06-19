@@ -174,6 +174,9 @@ export const createTextResizeHandler = (): InteractionHandler => {
     priority: 160,
 
     test: (e) => {
+      // Must be in craft mode to resize text layer
+      if (e.state.interaction.interactionMode !== 'craft') return null;
+
       // Must have a text layer currently being edited
       const editingId = e.state.interaction.signals[EDITING_TEXT_KEY] as string | null;
       if (!editingId) return null;
