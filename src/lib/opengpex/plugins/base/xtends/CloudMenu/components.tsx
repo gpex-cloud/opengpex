@@ -19,7 +19,7 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   LogOut,
   LogIn,
@@ -39,12 +39,11 @@ import { CloudBrowser } from "./CloudBrowser";
 import FancyConfirm from "@opengpex/editor/widgets/FancyConfirm";
 import EditorPortal from "@opengpex/editor/widgets/Portal";
 import { DEFAULT_CLOUD_URL, type SavePhase } from "./protocols";
+import { API_AUTH_SSO_CODE } from "../../../../core/cloud/protocol";
 // IMPORTANT: Must use relative path to ensure importing the exact same in-memory token-store instance
 // as other auth files. Do NOT replace with alias path (like @opengpex/editor/...) to prevent bundle duplication.
-import {
-  getAccessToken,
-  getRefreshToken,
-} from "../../../../core/cloud/auth/token-store";
+import { authFetch } from "../../../../core/cloud/auth/http-client";
+import { getRefreshToken } from "../../../../core/cloud/auth/token-store";
 
 // ─── Sync Status Indicator ───────────────────────────────────────────────────
 
@@ -287,16 +286,43 @@ function CloudMenuInner() {
   const styles = getStyles();
   const isSaving = savePhase === "PACKING" || savePhase === "UPLOADING";
 
-  const getGpexCloudUrl = () => {
-    if (isSignedIn) {
-      const access = getAccessToken();
-      const refresh = getRefreshToken();
-      if (access && refresh) {
-        return `${DEFAULT_CLOUD_URL}/#access_token=${access}&refresh_token=${refresh}`;
-      }
+  /**
+   * Navigate to GPEX Cloud with SSO code for automatic login sync.
+   * If signed in, generates a one-time code via /api/auth/sso-code,
+   * then opens gpex-cloud with ?sso_code=xxx for seamless auth handoff.
+   * Falls back to direct navigation if code generation fails.
+   */
+  const handleGoToCloud = useCallback(async () => {
+    if (!isSignedIn) {
+      window.open(DEFAULT_CLOUD_URL, "_blank", "noopener,noreferrer");
+      return;
     }
-    return DEFAULT_CLOUD_URL;
-  };
+
+    const refresh = getRefreshToken();
+    if (!refresh) {
+      window.open(DEFAULT_CLOUD_URL, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    try {
+      const res = await authFetch(API_AUTH_SSO_CODE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: refresh }),
+      });
+
+      if (res.ok) {
+        const { code } = (await res.json()) as { code: string };
+        window.open(`${DEFAULT_CLOUD_URL}?sso_code=${code}`, "_blank", "noopener,noreferrer");
+      } else {
+        // Fallback: open without SSO
+        window.open(DEFAULT_CLOUD_URL, "_blank", "noopener,noreferrer");
+      }
+    } catch {
+      // Fallback: open without SSO
+      window.open(DEFAULT_CLOUD_URL, "_blank", "noopener,noreferrer");
+    }
+  }, [isSignedIn]);
 
   // Fetch real quota from cloud
   const [quota, setQuota] = useState<{
@@ -492,11 +518,9 @@ function CloudMenuInner() {
                   <span className={styles.menuItem.label}>Cloud Gallery</span>
                 </button>
 
-                <a
-                  href={getGpexCloudUrl()}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
                   className={styles.menuItem.button}
+                  onClick={handleGoToCloud}
                 >
                   <div className={styles.menuItem.icon}>
                     <ExternalLink size={14} />
@@ -504,7 +528,7 @@ function CloudMenuInner() {
                   <span className={styles.menuItem.label}>
                     Go to GPEX Cloud
                   </span>
-                </a>
+                </button>
 
                 <div className={styles.divider.className} />
 

@@ -17,18 +17,17 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-
 /**
  * cloud-sdk / auth / http-client
  *
- * Fetch wrapper that automatically attaches credentials:
- * - Same-origin: uses { credentials: 'include' } for cookie
- * - Cross-origin: attaches Authorization Bearer header
- * Handles automatic token refresh on 401.
+ * Fetch wrapper that automatically attaches Bearer token and
+ * handles automatic token refresh on 401.
+ *
+ * Always operates in cross-origin mode (opengpex ≠ gpex-cloud domain).
  */
 
 import { getAccessToken, setAccessToken, getRefreshToken, setRefreshToken, clearTokens } from "./token-store";
-
+import { API_AUTH_REFRESH } from "../protocol";
 
 export interface HttpClientConfig {
   apiBaseUrl: string;
@@ -41,51 +40,31 @@ export function initHttpClient(config: HttpClientConfig): void {
   clientConfig = config;
 }
 
-function isSameOrigin(): boolean {
-  if (!clientConfig || typeof window === "undefined") return false;
-  // Empty or relative apiBaseUrl = same-origin
-  if (!clientConfig.apiBaseUrl || !clientConfig.apiBaseUrl.startsWith("http")) return true;
-  try {
-    return new URL(clientConfig.apiBaseUrl).origin === window.location.origin;
-  } catch {
-    return true;
-  }
-}
+// ─── Token Refresh (deduplicated) ─────────────────────────────────────────────
 
 let refreshPromise: Promise<boolean> | null = null;
 
 async function refreshSession(): Promise<boolean> {
   if (!clientConfig) return false;
 
-  const sameOrigin = isSameOrigin();
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return false;
 
-  // In same-origin mode, cookies are auto-sent, just call refresh
-  // In cross-origin mode, send refresh token in body
-  const refreshToken = sameOrigin ? undefined : getRefreshToken();
-  if (!sameOrigin && !refreshToken) return false;
-
-  if (refreshPromise) {
-    return refreshPromise;
-  }
+  if (refreshPromise) return refreshPromise;
 
   refreshPromise = (async () => {
     try {
-      const res = await fetch(`${clientConfig.apiBaseUrl}/api/auth/refresh`, {
+      const res = await fetch(`${clientConfig.apiBaseUrl}${API_AUTH_REFRESH}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: sameOrigin ? "include" : "omit",
         body: JSON.stringify({ refreshToken }),
       });
 
       if (!res.ok) return false;
 
       const data = await res.json() as { accessToken?: string; refreshToken?: string };
-      if (data.accessToken) {
-        setAccessToken(data.accessToken);
-      }
-      if (data.refreshToken) {
-        setRefreshToken(data.refreshToken);
-      }
+      if (data.accessToken) setAccessToken(data.accessToken);
+      if (data.refreshToken) setRefreshToken(data.refreshToken);
       return true;
     } catch {
       return false;
@@ -97,28 +76,23 @@ async function refreshSession(): Promise<boolean> {
   return refreshPromise;
 }
 
+// ─── Authenticated Fetch ──────────────────────────────────────────────────────
+
 async function authFetch(path: string, options: RequestInit = {}): Promise<Response> {
   if (!clientConfig) throw new Error("HTTP client not initialized. Call initHttpClient() first.");
 
   const url = `${clientConfig.apiBaseUrl}${path}`;
-  const sameOrigin = isSameOrigin();
 
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string> || {}),
   };
 
-  if (!sameOrigin) {
-    const token = getAccessToken();
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
+  const token = getAccessToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const fetchOptions: RequestInit = {
-    ...options,
-    headers,
-    credentials: sameOrigin ? "include" : "omit",
-  };
+  const fetchOptions: RequestInit = { ...options, headers };
 
   let response = await fetch(url, fetchOptions);
 
@@ -126,16 +100,10 @@ async function authFetch(path: string, options: RequestInit = {}): Promise<Respo
   if (response.status === 401) {
     const refreshed = await refreshSession();
     if (refreshed) {
-      // Retry with new token
-      if (!sameOrigin) {
-        const newToken = getAccessToken();
-        if (newToken) {
-          headers["Authorization"] = `Bearer ${newToken}`;
-        }
-      }
+      const newToken = getAccessToken();
+      if (newToken) headers["Authorization"] = `Bearer ${newToken}`;
       response = await fetch(url, { ...fetchOptions, headers });
     } else {
-      // Session truly expired
       clearTokens();
       clientConfig.onSessionExpired?.();
     }
@@ -144,7 +112,4 @@ async function authFetch(path: string, options: RequestInit = {}): Promise<Respo
   return response;
 }
 
-
-
-/** Raw fetch with auth (for advanced use cases) */
 export { authFetch };

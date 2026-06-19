@@ -25,13 +25,16 @@
  * React Context Provider for authentication state.
  * Handles session initialization, login/logout, and state management.
  * Fully self-contained — communicates with gpex-cloud via HTTP only.
+ *
+ * Always operates in cross-origin mode (opengpex ≠ gpex-cloud domain).
  */
 
 import React, { createContext, useState, useEffect, useCallback, useRef } from "react";
 import type { AuthContextValue, AuthProviderProps, AuthUser } from "./types";
-import { setAccessToken, setRefreshToken, clearTokens } from "./token-store";
-import { initHttpClient } from "./http-client";
+import { getAccessToken, getRefreshToken, setAccessToken, setRefreshToken, clearTokens } from "./token-store";
+import { initHttpClient, authFetch } from "./http-client";
 import { LoginModal } from "./ui/LoginModal";
+import { API_AUTH_SESSION, API_AUTH_REFRESH, API_AUTH_LOGOUT, API_AUTH_SSO_CODE } from "../protocol";
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
@@ -41,76 +44,39 @@ export function AuthProvider({ apiBaseUrl, branding, oauthProviders, children }:
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const initialized = useRef(false);
 
-  const isSameOrigin = useCallback(() => {
-    if (!apiBaseUrl || !apiBaseUrl.startsWith("http")) return true;
-    try { return new URL(apiBaseUrl).origin === window.location.origin; }
-    catch { return true; }
-  }, [apiBaseUrl]);
-
   const restoreSession = useCallback(async () => {
     try {
-      const sameOrigin = isSameOrigin();
-
-      if (sameOrigin) {
-        // Same-origin: use cookie
-        const res = await fetch(`${apiBaseUrl}/api/auth/session`, {
-          credentials: "include",
+      // After page reload, accessToken is lost (memory-only).
+      // If we have a refreshToken, exchange it for a new accessToken first.
+      if (!getAccessToken() && getRefreshToken()) {
+        const refreshRes = await fetch(`${apiBaseUrl}${API_AUTH_REFRESH}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refreshToken: getRefreshToken() }),
         });
-        if (res.ok) {
-          const data = (await res.json()) as { user?: AuthUser };
-          if (data.user) { setUser(data.user); return; }
+        if (refreshRes.ok) {
+          const data = await refreshRes.json() as { accessToken?: string; refreshToken?: string };
+          if (data.accessToken) setAccessToken(data.accessToken);
+          if (data.refreshToken) setRefreshToken(data.refreshToken);
+        } else {
+          // Refresh token invalid — clear and bail
+          clearTokens();
+          return;
         }
-      } else {
-        // Cross-origin: try refresh token from localStorage to get new access token
-        const { getAccessToken, getRefreshToken } = await import("./token-store");
-        const existingToken = getAccessToken();
+      }
 
-        if (existingToken) {
-          // Try with existing access token
-          const res = await fetch(`${apiBaseUrl}/api/auth/session`, {
-            headers: { Authorization: `Bearer ${existingToken}` },
-          });
-          if (res.ok) {
-            const data = (await res.json()) as { user?: AuthUser };
-            if (data.user) { setUser(data.user); return; }
-          }
-        }
-
-        // Try refresh token (access token expired or missing after page reload)
-        const refreshToken = getRefreshToken();
-        if (refreshToken) {
-          const refreshRes = await fetch(`${apiBaseUrl}/api/auth/refresh`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ refreshToken }),
-          });
-          if (refreshRes.ok) {
-            const refreshData = (await refreshRes.json()) as { accessToken?: string; refreshToken?: string };
-            if (refreshData.accessToken) {
-              setAccessToken(refreshData.accessToken);
-              if (refreshData.refreshToken) setRefreshToken(refreshData.refreshToken);
-              // Now fetch session with new token
-              const sessionRes = await fetch(`${apiBaseUrl}/api/auth/session`, {
-                headers: { Authorization: `Bearer ${refreshData.accessToken}` },
-              });
-              if (sessionRes.ok) {
-                const sessionData = (await sessionRes.json()) as { user?: AuthUser };
-                if (sessionData.user) { setUser(sessionData.user); return; }
-              }
-            }
-          } else {
-            // Refresh token invalid — clear tokens
-            const { clearTokens } = await import("./token-store");
-            clearTokens();
-          }
-        }
+      // Now fetch session with the (possibly refreshed) access token
+      const res = await authFetch(API_AUTH_SESSION);
+      if (res.ok) {
+        const data = (await res.json()) as { user?: AuthUser };
+        if (data.user) { setUser(data.user); return; }
       }
     } catch {
       // Session restore failed — user stays logged out
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrl, isSameOrigin]);
+  }, [apiBaseUrl]);
 
   // Initialize HTTP client on mount (re-init if apiBaseUrl changes)
   useEffect(() => {
@@ -124,7 +90,49 @@ export function AuthProvider({ apiBaseUrl, branding, oauthProviders, children }:
     if (initialized.current) return;
     initialized.current = true;
 
-    // Restore existing session (from localStorage tokens or cookies)
+    // Check for SSO code in URL (cross-site login sync from gpex-cloud)
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const ssoCode = params.get("sso_code");
+      if (ssoCode) {
+        // Exchange SSO code for tokens, then restore session
+        (async () => {
+          try {
+            const res = await fetch(`${apiBaseUrl}${API_AUTH_SSO_CODE}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ code: ssoCode }),
+            });
+
+            if (res.ok) {
+              const { accessToken, refreshToken } = (await res.json()) as {
+                accessToken: string;
+                refreshToken: string;
+              };
+              setAccessToken(accessToken);
+              setRefreshToken(refreshToken);
+              console.log("[Auth] SSO code exchanged successfully.");
+            } else {
+              console.warn("[Auth] SSO code exchange failed:", res.status);
+            }
+          } catch (err) {
+            console.error("[Auth] SSO sync failed:", err);
+          }
+
+          // Clean URL params from address bar
+          const url = new URL(window.location.href);
+          url.searchParams.delete("sso_code");
+          window.history.replaceState(null, "", url.pathname + url.search);
+
+          // Restore session (will use the tokens we just stored)
+          restoreSession();
+        })();
+        return;
+      }
+    }
+
+    // Restore existing session (from localStorage tokens)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     restoreSession();
   }, [apiBaseUrl, restoreSession]);
 
@@ -140,18 +148,13 @@ export function AuthProvider({ apiBaseUrl, branding, oauthProviders, children }:
 
   const signOut = useCallback(async () => {
     try {
-      const sameOrigin = isSameOrigin();
-
-      await fetch(`${apiBaseUrl}/api/auth/logout`, {
-        method: "POST",
-        credentials: sameOrigin ? "include" : "omit",
-      });
+      await authFetch(API_AUTH_LOGOUT, { method: "POST" });
     } catch {
       // Logout request failed — clear local state anyway
     }
     clearTokens();
     setUser(null);
-  }, [apiBaseUrl, isSameOrigin]);
+  }, []);
 
   const value: AuthContextValue = {
     user,

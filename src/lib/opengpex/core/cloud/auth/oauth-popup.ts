@@ -28,6 +28,8 @@
  * code (60s TTL, single-use) is transmitted via postMessage.
  */
 
+import { API_AUTH_EXCHANGE_CODE } from "../protocol";
+
 export interface PopupOAuthConfig {
   apiBaseUrl: string;
   provider: string;
@@ -99,7 +101,7 @@ export function popupOAuth(config: PopupOAuthConfig): Promise<PopupOAuthResult> 
 
       try {
         // Exchange one-time code for tokens via HTTPS
-        const res = await fetch(`${apiBaseUrl}/api/auth/exchange-code`, {
+        const res = await fetch(`${apiBaseUrl}${API_AUTH_EXCHANGE_CODE}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ code: event.data.code }),

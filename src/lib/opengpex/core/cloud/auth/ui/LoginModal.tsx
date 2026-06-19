@@ -17,12 +17,12 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
 import type { AuthUser, Branding } from "../types";
 import { popupOAuth } from "../oauth-popup";
+import { API_AUTH_LOGIN, API_AUTH_VERIFY_OTP, API_AUTH_RESEND, API_AUTH_SESSION } from "../../protocol";
 import { OtpInput } from "./OtpInput";
 import { AlertBanner } from "./AlertBanner";
 import { StyledInput, SubmitButton, OAuthButton, TextLink } from "./components";
@@ -70,109 +70,67 @@ export function LoginModal({ isOpen, onClose, onSuccess, apiBaseUrl, branding, o
   const [otp, setOtp] = useState("");
   const [resendCountdown, setResendCountdown] = useState(0);
 
-  // Ref guard: prevents duplicate async submissions (e.g. React StrictMode double-mount edge cases)
   const submittingRef = useRef(false);
 
-  // Countdown timer for OTP resending
   useEffect(() => {
     if (resendCountdown <= 0) return;
-    const timer = setInterval(() => {
-      setResendCountdown((prev) => prev - 1);
-    }, 1000);
+    const timer = setInterval(() => setResendCountdown((p) => p - 1), 1000);
     return () => clearInterval(timer);
   }, [resendCountdown]);
 
   if (!isOpen) return null;
 
   const accent = branding?.accentColor || "#00F2FE";
-  const gradient = branding?.accentGradient || `linear-gradient(to right, #00F2FE, #4FACFE)`;
+  const gradient = branding?.accentGradient || "linear-gradient(to right, #00F2FE, #4FACFE)";
 
-  const goToLogin = () => {
-    setMode("login");
-    setOtp("");
-    setErrorMsg("");
-  };
+  const goToLogin = () => { setMode("login"); setOtp(""); setErrorMsg(""); };
 
-  // Helper: detect same-origin for credentials policy
-  const isSameOrigin = (() => {
-    if (!apiBaseUrl || !apiBaseUrl.startsWith("http")) return true;
-    try { return new URL(apiBaseUrl).origin === window.location.origin; }
-    catch { return true; }
-  })();
-
-  // ─── OTP handlers ───
+  // ─── OTP Submit ───
   const handleOtpSubmit = async (e?: React.FormEvent, tokenToVerify?: string) => {
     e?.preventDefault();
     const token = tokenToVerify || otp;
-    if (token.length !== 6) return;
-    if (submittingRef.current) return;
+    if (token.length !== 6 || submittingRef.current) return;
     submittingRef.current = true;
-    setErrorMsg("");
-    setLoading(true);
+    setErrorMsg(""); setLoading(true);
 
     try {
-      const res = await fetch(`${apiBaseUrl}/api/auth/verify-otp`, {
+      const res = await fetch(`${apiBaseUrl}${API_AUTH_VERIFY_OTP}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: isSameOrigin ? "include" : "omit",
         body: JSON.stringify({ email: email.trim().toLowerCase(), token, type: "email" }),
       });
-
-      const data = await res.json() as {
-        user?: AuthUser;
-        accessToken?: string;
-        refreshToken?: string;
-        error?: string;
-      };
-
-      if (!res.ok) {
-        throw new Error(data.error || "Verification failed");
-      }
-
+      const data = await res.json() as { user?: AuthUser; accessToken?: string; refreshToken?: string; error?: string };
+      if (!res.ok) throw new Error(data.error || "Verification failed");
       if (data.user) {
         resetRateLimit();
-        onSuccess(data.user, {
-          accessToken: data.accessToken,
-          refreshToken: data.refreshToken,
-        });
+        onSuccess(data.user, { accessToken: data.accessToken, refreshToken: data.refreshToken });
       }
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to verify code");
     } finally {
-      setLoading(false);
-      submittingRef.current = false;
+      setLoading(false); submittingRef.current = false;
     }
   };
 
+  // ─── Resend OTP ───
   const handleResendOtp = async () => {
     if (resendCountdown > 0) return;
-    setErrorMsg("");
-    setLoading(true);
-
+    setErrorMsg(""); setLoading(true);
     try {
-      const res = await fetch(`${apiBaseUrl}/api/auth/resend`, {
+      const res = await fetch(`${apiBaseUrl}${API_AUTH_RESEND}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: isSameOrigin ? "include" : "omit",
         body: JSON.stringify({ email: email.trim().toLowerCase() }),
       });
-
       const data = await res.json() as { error?: string };
-
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to resend code");
-      } else {
-        setResendCountdown(60);
-        setErrorMsg("");
-      }
+      if (!res.ok) throw new Error(data.error || "Failed to resend code");
+      setResendCountdown(60);
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to resend code");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
-  // ─── Rate limit helpers ───
+  // ─── Rate Limit Helpers ───
   const checkRateLimit = (): boolean => {
     const state = getRateLimitState();
     if (state.lockUntil > Date.now()) {
@@ -193,209 +151,133 @@ export function LoginModal({ isOpen, onClose, onSuccess, apiBaseUrl, branding, o
   const recordFailure = () => {
     const state = getRateLimitState();
     const newCount = state.failCount + 1;
-    if (newCount >= RATE_LIMIT_MAX) {
-      setRateLimitState({ failCount: newCount, lockUntil: Date.now() + RATE_LIMIT_COOLDOWN_MS });
-    } else {
-      setRateLimitState({ failCount: newCount, lockUntil: 0 });
-    }
+    setRateLimitState(newCount >= RATE_LIMIT_MAX
+      ? { failCount: newCount, lockUntil: Date.now() + RATE_LIMIT_COOLDOWN_MS }
+      : { failCount: newCount, lockUntil: 0 });
   };
 
-  const resetRateLimit = () => {
-    setRateLimitState({ failCount: 0, lockUntil: 0 });
-  };
+  const resetRateLimit = () => setRateLimitState({ failCount: 0, lockUntil: 0 });
 
-  // ─── Login submit handler (Passwordless OTP via API) ───
+  // ─── Login Submit (Passwordless OTP) ───
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submittingRef.current) return;
-    if (!checkRateLimit()) return;
+    if (submittingRef.current || !checkRateLimit()) return;
     submittingRef.current = true;
-    setErrorMsg("");
-    setLoading(true);
+    setErrorMsg(""); setLoading(true);
 
     try {
-      const res = await fetch(`${apiBaseUrl}/api/auth/login`, {
+      const res = await fetch(`${apiBaseUrl}${API_AUTH_LOGIN}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: isSameOrigin ? "include" : "omit",
         body: JSON.stringify({ email: email.trim().toLowerCase() }),
       });
-
-      const data = await res.json() as {
-        status?: string;
-        error?: string;
-      };
-
-      if (!res.ok) {
-        throw new Error(data.error || "Request failed");
-      }
-
-      // Handle email verification required (expected response)
+      const data = await res.json() as { status?: string; error?: string };
+      if (!res.ok) throw new Error(data.error || "Request failed");
       if (data.status === "email_verification_required") {
-        setOtp("");
-        setResendCountdown(60);
-        setMode("verify-otp");
-        return;
+        setOtp(""); setResendCountdown(60); setMode("verify-otp");
       }
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : "An error occurred");
       recordFailure();
-    } finally {
-      setLoading(false);
-      submittingRef.current = false;
-    }
+    } finally { setLoading(false); submittingRef.current = false; }
   };
 
-  // ─── OAuth handler (Popup) ───
+  // ─── OAuth (Popup) ───
   const handleOAuth = async (provider: string) => {
-    setErrorMsg("");
-    setLoading(true);
-    setOauthPending(true);
-
+    setErrorMsg(""); setLoading(true); setOauthPending(true);
     try {
       const tokens = await popupOAuth({ apiBaseUrl, provider });
-
-      // Fetch user info with the new token
-      const res = await fetch(`${apiBaseUrl}/api/auth/session`, {
+      const res = await fetch(`${apiBaseUrl}${API_AUTH_SESSION}`, {
         headers: { Authorization: `Bearer ${tokens.accessToken}` },
       });
-
       if (res.ok) {
         const data = (await res.json()) as { user?: AuthUser };
-        if (data.user) {
-          onSuccess(data.user, tokens);
-          return;
-        }
+        if (data.user) { onSuccess(data.user, tokens); return; }
       }
-
-      // Token valid but session fetch failed — still pass tokens
       onSuccess({ id: "", email: "" } as AuthUser, tokens);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "OAuth failed";
-      // Don't show error for user-initiated cancellation
-      if (msg !== "Login cancelled by user") {
-        setErrorMsg(msg);
-      }
-    } finally {
-      setLoading(false);
-      setOauthPending(false);
-    }
+      if (msg !== "Login cancelled by user") setErrorMsg(msg);
+    } finally { setLoading(false); setOauthPending(false); }
   };
 
   // ─── Render ───
-
   return (
-    <div
-      style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}
-    >
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-lg">
       <div
-        style={{ position: "relative", width: "100%", maxWidth: "400px", background: "var(--bg-panel, #1a1a2e)", border: "1px solid var(--border-subtle, #333)", borderRadius: "1rem", padding: "2rem", color: "var(--text-main, #eee)", overflow: "hidden" }}
+        className="relative w-full max-w-[400px] bg-[var(--bg-panel,#1a1a2e)] border border-[var(--border-subtle,#333)] rounded-2xl p-8 text-[var(--text-main,#eee)] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* OAuth pending overlay — blocks all interaction while popup is open */}
+        {/* OAuth pending overlay */}
         {oauthPending && (
-          <div style={{
-            position: "absolute", inset: 0, zIndex: 10,
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "1rem",
-            background: "rgba(26, 26, 46, 0.95)", borderRadius: "1rem",
-          }}>
-            {/* Animated spinner */}
-            <div style={{
-              width: "36px", height: "36px", border: "3px solid var(--border-subtle, #333)",
-              borderTopColor: accent, borderRadius: "50%",
-              animation: "gpex-spin 0.8s linear infinite",
-            }} />
-            <p style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-main, #eee)", margin: 0, textAlign: "center" }}>
-              Please complete sign-in in the popup window
-            </p>
-            <p style={{ fontSize: "0.7rem", color: "var(--text-muted, #888)", margin: 0, textAlign: "center" }}>
-              Waiting for authentication...
-            </p>
-            <style>{`@keyframes gpex-spin { to { transform: rotate(360deg); } }`}</style>
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-[rgba(26,26,46,0.95)] rounded-2xl">
+            <div className="w-9 h-9 border-3 border-[var(--border-subtle,#333)] border-t-[var(--accent,#00F2FE)] rounded-full animate-spin" style={{ borderTopColor: accent }} />
+            <p className="text-[0.85rem] font-semibold text-center">Please complete sign-in in the popup window</p>
+            <p className="text-[0.7rem] text-[var(--text-muted,#888)] text-center">Waiting for authentication...</p>
           </div>
         )}
 
         {/* Top accent line */}
-        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "2px", background: gradient, borderRadius: "1rem 1rem 0 0" }} />
+        <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-2xl" style={{ background: gradient }} />
 
         {/* Close button */}
         <button
           onClick={onClose}
           disabled={oauthPending}
-          style={{ position: "absolute", top: "1rem", right: "1rem", background: "none", border: "none", color: "var(--text-muted, #888)", cursor: oauthPending ? "not-allowed" : "pointer", fontSize: "1.2rem", opacity: oauthPending ? 0.3 : 1 }}
+          className="absolute top-4 right-4 bg-transparent border-none text-[var(--text-muted,#888)] text-xl cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
         >✕</button>
 
         {/* ─── Mode: Login ─── */}
         {mode === "login" && (
           <>
-            {/* Header */}
-            <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
+            <div className="text-center mb-6">
               {branding?.logo && (
-                <img src={branding.logo} alt={branding.logoAlt || "Logo"} style={{ width: "48px", height: "48px", margin: "0 auto 1.25rem", borderRadius: "0.75rem" }} />
+                <img src={branding.logo} alt={branding.logoAlt || "Logo"} className="w-12 h-12 mx-auto mb-5 rounded-xl" />
               )}
-              <h2 style={{ fontSize: "1.25rem", fontWeight: 700, margin: 0 }}>{branding?.title || "Sign In / Up"}</h2>
-              <p style={{ fontSize: "0.75rem", color: "var(--text-muted, #888)", marginTop: "0.5rem", lineHeight: 1.5 }}>
+              <h2 className="text-xl font-bold m-0">{branding?.title || "Sign In / Up"}</h2>
+              <p className="text-xs text-[var(--text-muted,#888)] mt-2 leading-relaxed">
                 {branding?.subtitle || "Sign in or create your account — it's free."}
               </p>
             </div>
 
-            {/* OAuth providers (top position) */}
+            {/* OAuth providers */}
             {oauthProviders && oauthProviders.length > 0 && (
               <>
-                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
+                <div className="flex gap-2 mb-4">
                   {oauthProviders.map((provider) => (
-                    <OAuthButton
-                      key={provider}
-                      provider={provider}
-                      onClick={() => handleOAuth(provider)}
-                      disabled={loading}
-                    />
+                    <OAuthButton key={provider} provider={provider} onClick={() => handleOAuth(provider)} disabled={loading} />
                   ))}
                 </div>
-
-                <div style={{ display: "flex", alignItems: "center", margin: "0.75rem 0", gap: "0.75rem" }}>
-                  <div style={{ flex: 1, height: "1px", background: "var(--border-subtle, #333)" }} />
-                  <span style={{ fontSize: "0.65rem", color: "var(--text-muted, #888)", fontWeight: 700, textTransform: "uppercase" }}>or</span>
-                  <div style={{ flex: 1, height: "1px", background: "var(--border-subtle, #333)" }} />
+                <div className="flex items-center my-3 gap-3">
+                  <div className="flex-1 h-px bg-[var(--border-subtle,#333)]" />
+                  <span className="text-[0.65rem] text-[var(--text-muted,#888)] font-bold uppercase">or</span>
+                  <div className="flex-1 h-px bg-[var(--border-subtle,#333)]" />
                 </div>
               </>
             )}
 
-            {/* Email-only form */}
+            {/* Email form */}
             <form onSubmit={handleSubmit}>
-              <div style={{ marginBottom: "1rem" }}>
-                <label style={{ display: "block", fontSize: "0.7rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.4rem", color: "var(--text-muted, #888)" }}>Email</label>
-                <StyledInput
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  accentColor={accent}
-                />
+              <div className="mb-4">
+                <label className="block text-[0.7rem] font-bold uppercase tracking-wider mb-1.5 text-[var(--text-muted,#888)]">Email</label>
+                <StyledInput type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" accentColor={accent} />
               </div>
-
               {errorMsg && <AlertBanner message={errorMsg} />}
-
               <SubmitButton loading={loading} gradient={gradient} label={branding?.buttonText || "Continue"} disabled={lockCountdown > 0} />
             </form>
 
-            <p style={{ fontSize: "0.65rem", color: "var(--text-muted, #666)", marginTop: "0.75rem", textAlign: "center", fontStyle: "italic" }}>
+            <p className="text-[0.65rem] text-[var(--text-muted,#666)] mt-3 text-center italic">
               We&apos;ll send you a verification code — no password needed.
             </p>
 
-            {/* Footer — Legal disclaimer */}
+            {/* Legal disclaimer */}
             {(branding?.termsUrl || branding?.privacyUrl) && (
-              <div style={{ marginTop: "1.25rem", textAlign: "center", fontSize: "0.6rem", color: "var(--text-muted, #666)", lineHeight: 1.6 }}>
-                <p style={{ margin: 0 }}>
+              <div className="mt-5 text-center text-[0.6rem] text-[var(--text-muted,#666)] leading-relaxed">
+                <p className="m-0">
                   By continuing, you agree to our{" "}
-                  {branding.termsUrl && (
-                    <a href={branding.termsUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--text-muted, #999)", textDecoration: "underline", textUnderlineOffset: "2px" }}>Terms of Service</a>
-                  )}
+                  {branding.termsUrl && <a href={branding.termsUrl} target="_blank" rel="noopener noreferrer" className="text-[var(--text-muted,#999)] underline underline-offset-2">Terms of Service</a>}
                   {branding.termsUrl && branding.privacyUrl && " and "}
-                  {branding.privacyUrl && (
-                    <a href={branding.privacyUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--text-muted, #999)", textDecoration: "underline", textUnderlineOffset: "2px" }}>Privacy Policy</a>
-                  )}
+                  {branding.privacyUrl && <a href={branding.privacyUrl} target="_blank" rel="noopener noreferrer" className="text-[var(--text-muted,#999)] underline underline-offset-2">Privacy Policy</a>}
                   .
                 </p>
               </div>
@@ -405,58 +287,40 @@ export function LoginModal({ isOpen, onClose, onSuccess, apiBaseUrl, branding, o
 
         {/* ─── Mode: Verify OTP ─── */}
         {mode === "verify-otp" && (
-          <div style={{ padding: "0.5rem 0" }}>
-            <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
-              <div style={{ fontSize: "2.5rem", marginBottom: "1rem" }}>✉️</div>
-              <h2 style={{ fontSize: "1.25rem", fontWeight: 700, margin: "0 0 0.75rem" }}>Check Your Email</h2>
-              <p style={{ fontSize: "0.8rem", color: "var(--text-muted, #aaa)", lineHeight: 1.6, margin: "0 0 0.5rem" }}>
+          <div className="py-2">
+            <div className="text-center mb-6">
+              <div className="text-4xl mb-4">✉️</div>
+              <h2 className="text-xl font-bold mb-3">Check Your Email</h2>
+              <p className="text-sm text-[var(--text-muted,#aaa)] leading-relaxed mb-2">
                 We&apos;ve sent a 6-digit verification code to:
               </p>
-              <p style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-main, #eee)", margin: "0 0 0.5rem" }}>
-                {email}
-              </p>
+              <p className="text-sm font-semibold text-[var(--text-main,#eee)] mb-2">{email}</p>
             </div>
 
             <form onSubmit={handleOtpSubmit}>
               <OtpInput
                 value={otp}
-                onChange={(val) => {
-                  setOtp(val);
-                  if (val.length === 6) {
-                    handleOtpSubmit(undefined, val);
-                  }
-                }}
+                onChange={(val) => { setOtp(val); if (val.length === 6) handleOtpSubmit(undefined, val); }}
                 accentColor={accent}
                 disabled={loading}
               />
-
               {errorMsg && <AlertBanner message={errorMsg} />}
-
-              <SubmitButton
-                loading={loading}
-                gradient={gradient}
-                label="Verify Code"
-                disabled={otp.length !== 6}
-              />
+              <SubmitButton loading={loading} gradient={gradient} label="Verify Code" disabled={otp.length !== 6} />
             </form>
 
-            <div style={{ textAlign: "center", marginTop: "1.5rem", fontSize: "0.75rem", color: "var(--text-muted, #888)" }}>
+            <div className="text-center mt-6 text-xs text-[var(--text-muted,#888)]">
               Didn&apos;t receive the code?{" "}
-              {resendCountdown > 0 ? (
-                <span>Resend in {resendCountdown}s</span>
-              ) : (
-                <TextLink onClick={handleResendOtp} style={{ color: accent, fontWeight: 600 }}>
-                  Resend Code
-                </TextLink>
-              )}
+              {resendCountdown > 0
+                ? <span>Resend in {resendCountdown}s</span>
+                : <TextLink onClick={handleResendOtp} style={{ color: accent, fontWeight: 600 }}>Resend Code</TextLink>
+              }
             </div>
 
-            <div style={{ textAlign: "center", marginTop: "1rem" }}>
+            <div className="text-center mt-4">
               <TextLink onClick={goToLogin}>← Back to login</TextLink>
             </div>
           </div>
         )}
-
       </div>
     </div>
   );

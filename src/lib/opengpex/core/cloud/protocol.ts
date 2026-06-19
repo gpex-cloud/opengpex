@@ -24,6 +24,32 @@
  * Centralized here so changes only need to happen in one place.
  */
 
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+/** GET - Get current session/user info */
+export const API_AUTH_SESSION = "/api/auth/session";
+
+/** POST - Send OTP to email */
+export const API_AUTH_LOGIN = "/api/auth/login";
+
+/** POST - Verify OTP code */
+export const API_AUTH_VERIFY_OTP = "/api/auth/verify-otp";
+
+/** POST - Resend OTP code */
+export const API_AUTH_RESEND = "/api/auth/resend";
+
+/** POST - Refresh access token using refresh token */
+export const API_AUTH_REFRESH = "/api/auth/refresh";
+
+/** POST - Sign out (invalidate session) */
+export const API_AUTH_LOGOUT = "/api/auth/logout";
+
+/** POST - Exchange popup OAuth one-time code for tokens */
+export const API_AUTH_EXCHANGE_CODE = "/api/auth/exchange-code";
+
+/** POST (generate) / PUT (redeem) - SSO code for cross-site login sync */
+export const API_AUTH_SSO_CODE = "/api/auth/sso-code";
+
 // ─── User Files ───────────────────────────────────────────────────────────────
 
 /** POST - Upload/overwrite a .gpex file (multipart, file only) */
