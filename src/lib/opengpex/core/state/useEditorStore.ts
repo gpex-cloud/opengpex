@@ -342,6 +342,9 @@ export function useEditorStore() {
           enhancedDispatch({ type: 'SET_INTERACTION', payload: { signals: { [key]: false } } });
         }
       },
+      notifyHUD: (message: string, type: 'info' | 'success' | 'error' = 'info') => {
+        enhancedDispatch({ type: 'SET_INTERACTION', payload: { hud: { message, type } } });
+      },
       askConfirm: (title: string, message: string, type: 'info' | 'danger' | 'warning' = 'info', variant: 'square' | 'rect' = 'square') => {
         return new Promise<boolean>((resolve) => {
           confirmResolverRef.current = resolve;

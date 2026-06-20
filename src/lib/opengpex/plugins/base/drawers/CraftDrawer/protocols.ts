@@ -42,16 +42,11 @@ export const CMD_DEACTIVATE_CRAFT = 'cmd.deactivate_craft';
 
 export const CMD_BRUSH_SIZE_UP = 'cmd.brush_size_up';
 export const CMD_BRUSH_SIZE_DOWN = 'cmd.brush_size_down';
-export const CMD_BRUSH_OPACITY_1 = 'cmd.brush_opacity_1';
-export const CMD_BRUSH_OPACITY_2 = 'cmd.brush_opacity_2';
-export const CMD_BRUSH_OPACITY_3 = 'cmd.brush_opacity_3';
-export const CMD_BRUSH_OPACITY_4 = 'cmd.brush_opacity_4';
-export const CMD_BRUSH_OPACITY_5 = 'cmd.brush_opacity_5';
-export const CMD_BRUSH_OPACITY_6 = 'cmd.brush_opacity_6';
-export const CMD_BRUSH_OPACITY_7 = 'cmd.brush_opacity_7';
-export const CMD_BRUSH_OPACITY_8 = 'cmd.brush_opacity_8';
-export const CMD_BRUSH_OPACITY_9 = 'cmd.brush_opacity_9';
-export const CMD_BRUSH_OPACITY_0 = 'cmd.brush_opacity_0';
+
+export const CMD_BRUSH_OPACITY_UP = 'cmd.brush_opacity_up';
+export const CMD_BRUSH_OPACITY_DOWN = 'cmd.brush_opacity_down';
+export const CMD_BRUSH_HARDNESS_UP = 'cmd.brush_hardness_up';
+export const CMD_BRUSH_HARDNESS_DOWN = 'cmd.brush_hardness_down';
 
 // ─── Cross-Plugin Constants (cross-plugin references) ───────────────────────────────────────
 

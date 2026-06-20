@@ -17,7 +17,6 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import React from "react";
 import { EditorPlugin } from "@opengpex/editor/core/types";
 import { Key } from "lucide-react";
 import { AIGenerationDrawer } from "./components";
@@ -34,7 +33,8 @@ export const plugin: EditorPlugin = {
     id: P.PLUGIN_ID,
     displayName: "AI Bridge",
     version: "2.0.0",
-    description: "Connect to external AI models for image generation, editing, and variations.",
+    description:
+      "Connect to external AI models for image generation, editing, and variations.",
     author: P.PLUGIN_AUTHOR,
     category: "drawers",
     requirements: {

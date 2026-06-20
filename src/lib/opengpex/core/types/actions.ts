@@ -67,6 +67,7 @@ export interface EditorActions {
   setStateSignal: (key: string, value: InteractionSignalValue) => void;
   toggleStateSignal: (key: string) => void;
   withSignal: <T>(key: string, task: () => Promise<T>) => Promise<T>;
+  notifyHUD: (message: string, type?: 'info' | 'success' | 'error') => void;
   setEngineStatus: (statuses: EngineStatus[]) => void;
 
   executeCommand: <P = unknown, R = unknown>(id: string, payload?: P) => R;

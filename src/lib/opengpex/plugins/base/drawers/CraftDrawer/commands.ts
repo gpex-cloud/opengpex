@@ -107,7 +107,7 @@ export const CRAFT_COMMANDS = {
     execute: (ctx: EditorContextValue) => {
       adjustBrushSize(ctx, 1);
     },
-    shortcut: { key: ']', shift: true },
+    shortcuts: [{ key: ']', shift: true }, { key: '}', shift: true }],
   } as EditorCommand<void, void>,
 
   brushSizeDown: {
@@ -116,89 +116,59 @@ export const CRAFT_COMMANDS = {
     execute: (ctx: EditorContextValue) => {
       adjustBrushSize(ctx, -1);
     },
-    shortcut: { key: '[', shift: true },
+    shortcuts: [{ key: '[', shift: true }, { key: '{', shift: true }],
   } as EditorCommand<void, void>,
 
-  brushOpacity1: {
-    id: P.CMD_BRUSH_OPACITY_1,
-    name: 'Brush Opacity 10%',
-    execute: (ctx: EditorContextValue) => { setBrushOpacity(ctx, 10); },
-    shortcut: { key: '1' },
+
+
+  brushOpacityUp: {
+    id: P.CMD_BRUSH_OPACITY_UP,
+    name: 'Increase Brush Opacity',
+    execute: (ctx: EditorContextValue) => {
+      adjustBrushOpacity(ctx, 10);
+    },
+    // shortcuts: [
+    //   { key: ']', shift: true, meta: true },
+    //   { key: '}', shift: true, meta: true }
+    // ]
   } as EditorCommand<void, void>,
 
-  brushOpacity2: {
-    id: P.CMD_BRUSH_OPACITY_2,
-    name: 'Brush Opacity 20%',
-    execute: (ctx: EditorContextValue) => { setBrushOpacity(ctx, 20); },
-    shortcut: { key: '2' },
+  brushOpacityDown: {
+    id: P.CMD_BRUSH_OPACITY_DOWN,
+    name: 'Decrease Brush Opacity',
+    execute: (ctx: EditorContextValue) => {
+      adjustBrushOpacity(ctx, -10);
+    },
+    // shortcuts: [
+    //   { key: '[', shift: true, meta: true },
+    //   { key: '{', shift: true, meta: true }
+    // ]
   } as EditorCommand<void, void>,
 
-  brushOpacity3: {
-    id: P.CMD_BRUSH_OPACITY_3,
-    name: 'Brush Opacity 30%',
-    execute: (ctx: EditorContextValue) => { setBrushOpacity(ctx, 30); },
-    shortcut: { key: '3' },
+  brushHardnessUp: {
+    id: P.CMD_BRUSH_HARDNESS_UP,
+    name: 'Increase Brush Hardness',
+    execute: (ctx: EditorContextValue) => {
+      adjustBrushHardness(ctx, 10);
+    },
+    // shortcuts: [
+    //   { key: ']', alt: true, meta: true }
+    // ]
   } as EditorCommand<void, void>,
 
-  brushOpacity4: {
-    id: P.CMD_BRUSH_OPACITY_4,
-    name: 'Brush Opacity 40%',
-    execute: (ctx: EditorContextValue) => { setBrushOpacity(ctx, 40); },
-    shortcut: { key: '4' },
-  } as EditorCommand<void, void>,
-
-  brushOpacity5: {
-    id: P.CMD_BRUSH_OPACITY_5,
-    name: 'Brush Opacity 50%',
-    execute: (ctx: EditorContextValue) => { setBrushOpacity(ctx, 50); },
-    shortcut: { key: '5' },
-  } as EditorCommand<void, void>,
-
-  brushOpacity6: {
-    id: P.CMD_BRUSH_OPACITY_6,
-    name: 'Brush Opacity 60%',
-    execute: (ctx: EditorContextValue) => { setBrushOpacity(ctx, 60); },
-    shortcut: { key: '6' },
-  } as EditorCommand<void, void>,
-
-  brushOpacity7: {
-    id: P.CMD_BRUSH_OPACITY_7,
-    name: 'Brush Opacity 70%',
-    execute: (ctx: EditorContextValue) => { setBrushOpacity(ctx, 70); },
-    shortcut: { key: '7' },
-  } as EditorCommand<void, void>,
-
-  brushOpacity8: {
-    id: P.CMD_BRUSH_OPACITY_8,
-    name: 'Brush Opacity 80%',
-    execute: (ctx: EditorContextValue) => { setBrushOpacity(ctx, 80); },
-    shortcut: { key: '8' },
-  } as EditorCommand<void, void>,
-
-  brushOpacity9: {
-    id: P.CMD_BRUSH_OPACITY_9,
-    name: 'Brush Opacity 90%',
-    execute: (ctx: EditorContextValue) => { setBrushOpacity(ctx, 90); },
-    shortcut: { key: '9' },
-  } as EditorCommand<void, void>,
-
-  brushOpacity0: {
-    id: P.CMD_BRUSH_OPACITY_0,
-    name: 'Brush Opacity 100%',
-    execute: (ctx: EditorContextValue) => { setBrushOpacity(ctx, 100); },
-    shortcut: { key: '0' },
+  brushHardnessDown: {
+    id: P.CMD_BRUSH_HARDNESS_DOWN,
+    name: 'Decrease Brush Hardness',
+    execute: (ctx: EditorContextValue) => {
+      adjustBrushHardness(ctx, -10);
+    },
+    // shortcuts: [
+    //   { key: '[', alt: true, meta: true }
+    // ]
   } as EditorCommand<void, void>,
 };
 
 // ─── Brush Shortcut Helpers ────────────────────────────────────────────────────
-
-const BRUSH_SIZE_STEP_TABLE = [
-  { max: 10, step: 1 },
-  { max: 50, step: 5 },
-  { max: 100, step: 10 },
-  { max: 200, step: 20 },
-  { max: 500, step: 50 },
-];
 
 function adjustBrushSize(ctx: EditorContextValue, direction: 1 | -1) {
   // Only responds in brush/eraser mode
@@ -208,30 +178,43 @@ function adjustBrushSize(ctx: EditorContextValue, direction: 1 | -1) {
   const config = ctx.scoped!.selfConfig as CraftDrawerConfig;
   const currentSize = config.brushSize || 12;
 
-  // Determine step size based on current size
-  let step = 50;
-  for (const entry of BRUSH_SIZE_STEP_TABLE) {
-    if (currentSize <= entry.max) { step = entry.step; break; }
-  }
+  // Round to nearest multiple of 5 first, then adjust by 5
+  const rounded = Math.round(currentSize / 5) * 5;
+  const targetSize = rounded + 5 * direction;
 
-  const newSize = Math.max(1, Math.min(500, currentSize + step * direction));
+  const newSize = Math.max(1, Math.min(500, targetSize));
   ctx.scoped!.setSelfConfig({ brushSize: newSize });
 
   // HUD feedback
-  ctx.actions.setInteraction({
-    hud: { message: `Size: ${newSize}px`, type: 'info' },
-  });
+  ctx.actions.notifyHUD(`Size: ${newSize}px`, 'info');
 }
 
-function setBrushOpacity(ctx: EditorContextValue, opacity: number) {
-  // Only responds in brush/eraser mode
+
+
+function adjustBrushOpacity(ctx: EditorContextValue, delta: number) {
   const craft = ctx.scoped!.getSignal<P.ActiveCraft>(P.SIGNAL_ACTIVE_CRAFT, null);
   if (craft !== 'brush' && craft !== 'eraser') return;
 
-  ctx.scoped!.setSelfConfig({ brushOpacity: opacity });
+  const config = ctx.scoped!.selfConfig as CraftDrawerConfig;
+  const currentOpacity = config.brushOpacity ?? 100;
+  const newOpacity = Math.max(10, Math.min(100, currentOpacity + delta));
+
+  ctx.scoped!.setSelfConfig({ brushOpacity: newOpacity });
 
   // HUD feedback
-  ctx.actions.setInteraction({
-    hud: { message: `Opacity: ${opacity}%`, type: 'info' },
-  });
+  ctx.actions.notifyHUD(`Opacity: ${newOpacity}%`, 'info');
+}
+
+function adjustBrushHardness(ctx: EditorContextValue, delta: number) {
+  const craft = ctx.scoped!.getSignal<P.ActiveCraft>(P.SIGNAL_ACTIVE_CRAFT, null);
+  if (craft !== 'brush' && craft !== 'eraser') return;
+
+  const config = ctx.scoped!.selfConfig as CraftDrawerConfig;
+  const currentHardness = config.brushHardness ?? 80;
+  const newHardness = Math.max(0, Math.min(100, currentHardness + delta));
+
+  ctx.scoped!.setSelfConfig({ brushHardness: newHardness });
+
+  // HUD feedback
+  ctx.actions.notifyHUD(`Hardness: ${newHardness}%`, 'info');
 }
