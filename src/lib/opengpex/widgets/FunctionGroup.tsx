@@ -61,7 +61,7 @@ export default function FunctionGroup<T extends string>({
               ${isActive 
                 ? (['crop'].includes(opt.value as string) 
                     ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20 active:scale-[0.98]' 
-                    : 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-sm dark:shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)]')
+                    : 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm dark:shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)]')
                 : 'text-zinc-500 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
               }
             `}
