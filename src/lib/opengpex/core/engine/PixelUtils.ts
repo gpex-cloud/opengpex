@@ -212,6 +212,8 @@ export const PixelUtils = {
     if (type === 'image/avif' || name.endsWith('.avif')) return 'avif';
     if (type === 'image/heic' || type === 'image/heif' || name.endsWith('.heic') || name.endsWith('.heif')) return 'heic';
     if (type === 'image/svg+xml' || name.endsWith('.svg')) return 'svg';
+    if (type === 'image/gif' || name.endsWith('.gif')) return 'gif';
+    if (type === 'image/bmp' || type === 'image/x-ms-bmp' || name.endsWith('.bmp')) return 'bmp';
     return 'unknown';
   },
 

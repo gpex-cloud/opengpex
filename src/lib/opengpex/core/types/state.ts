@@ -68,7 +68,7 @@ export interface UIConfig {
   isToolMenuPinned?: boolean;
 }
 
-export type SupportedImageFormat = 'jpeg' | 'png' | 'gif' | 'webp' | 'heic' | 'avif' | 'svg' | 'unknown';
+export type SupportedImageFormat = 'jpeg' | 'png' | 'gif' | 'webp' | 'heic' | 'avif' | 'svg' | 'bmp' | 'unknown';
 
 export interface EngineStatus {
   id: string;
