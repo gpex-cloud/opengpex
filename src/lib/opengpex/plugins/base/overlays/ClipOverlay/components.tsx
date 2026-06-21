@@ -100,15 +100,6 @@ export function ClipOverlayMain() {
         </svg>
       </div>
 
-      <style>{`
-        @keyframes marching-ants-flow {
-          to { stroke-dashoffset: -12; }
-        }
-        .marching-ants {
-          animation: marching-ants-flow 0.5s linear infinite;
-        }
-      `}</style>
-
       <div
         ref={boxRef}
         className="absolute pointer-events-auto cursor-move transition-[border-radius] duration-300"

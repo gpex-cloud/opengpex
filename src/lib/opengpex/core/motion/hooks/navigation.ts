@@ -17,10 +17,10 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import React, { useLayoutEffect, useCallback } from 'react';
+import React, { useLayoutEffect, useCallback, useRef } from 'react';
 import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
 import { LayerUtils } from '@opengpex/editor/core/layer/LayerUtils';
-import { VolatileState, Frame, CameraState, Rect, IMatrix3x3, LocalRect, WorldRect } from '@opengpex/editor/core/types';
+import { VolatileState, Frame, CameraState, Rect, IMatrix3x3, LocalRect, WorldRect, LocalShape } from '@opengpex/editor/core/types';
 import { useTicker } from './animation';
 import { Motion } from '../index';
 
@@ -207,3 +207,53 @@ export function useFastSvgGroupSync(
     ref.current.setAttribute('transform', `translate(${x}, ${y}) scale(${k})`);
   });
 }
+
+/**
+ * useFastMarchingAntsSync: Universal marching ants vector path synchronizer.
+ * Automatically handles:
+ * 1. Cache dirty checking (updates DOM 'd' attribute only when the shape/path changes).
+ * 2. Generating smooth or stair-stepped paths depending on the antiAliased option.
+ * 3. Support for direct SVG path string (d) input for custom selections (like lasso/wand).
+ */
+export function useFastMarchingAntsSync(
+  pathRef: React.RefObject<SVGPathElement | null>,
+  isActive: boolean,
+  options: {
+    selector: (v: VolatileState, frame: Frame, cam: CameraState) => LocalShape | string | null;
+    antiAliased?: boolean;
+  }
+) {
+  const { geometry } = useEditorServices();
+  const { selector, antiAliased = true } = options;
+  const lastD = useRef<string | null>(null);
+  const lastEl = useRef<SVGPathElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!isActive) {
+      lastD.current = null;
+      lastEl.current = null;
+    }
+  }, [isActive]);
+
+  useFastSync(pathRef, isActive, (v, f, cam) => {
+    const val = selector(v, f, cam);
+    if (!val || !pathRef.current) return;
+
+    let dPath = '';
+    if (typeof val === 'string') {
+      dPath = val;
+    } else {
+      dPath = (val.antiAliased ?? antiAliased) === false
+        ? geometry.shape.getStairedSvgPath(val)
+        : geometry.shape.getSmoothSvgPath(val);
+    }
+
+    if (dPath !== lastD.current || pathRef.current !== lastEl.current) {
+      lastD.current = dPath;
+      lastEl.current = pathRef.current;
+      pathRef.current.setAttribute('d', dPath);
+    }
+  });
+}
+
+
