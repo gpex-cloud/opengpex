@@ -19,11 +19,8 @@
 
 "use client";
 
-import React from "react";
 import { EditorPlugin } from "@opengpex/editor/core/types";
-import { Sliders } from "lucide-react";
 import { SettingsTrigger, SettingsPanel } from "./components";
-import PreferencesPanel from "./panels/Preferences";
 import { SETTINGS_COMMANDS } from "./commands";
 import * as P from "./protocols";
 
@@ -68,14 +65,6 @@ export const plugin: EditorPlugin = {
     {
       slot: "ROOT_OVERLAY",
       component: SettingsPanel,
-    },
-    {
-      slot: "SETTINGS_CONFIG_PANEL",
-      group: "Preferences",
-      component: PreferencesPanel,
-      title: "Preferences",
-      icon: <Sliders size={12} />,
-      order: 50,
     },
   ],
 };

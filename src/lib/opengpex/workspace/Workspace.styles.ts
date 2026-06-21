@@ -33,9 +33,7 @@ export const WORKSPACE_GEOMETRY = {
 /**
  * getWorkspaceLayout: Provides numeric layout metadata for logic consumers (Camera, Viewport).
  */
-export const getWorkspaceLayout = (hasSidebar: boolean = true, sidebarMode: 'DOCKED' | 'FLOATING' = 'FLOATING') => {
-    void hasSidebar;
-    void sidebarMode;
+export const getWorkspaceLayout = () => {
     return {
         ...WORKSPACE_GEOMETRY,
         offsets: {

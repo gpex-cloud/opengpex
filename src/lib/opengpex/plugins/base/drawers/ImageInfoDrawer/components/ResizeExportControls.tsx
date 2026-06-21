@@ -336,7 +336,7 @@ export function ResizeExportControls({
                   variant="zinc"
                   subtle={true}
                   size="xs"
-                  className="w-16 shadow-sm"
+                  className="w-16"
                 >
                   {(config.format || "image/png").split("/")[1].toUpperCase()}{" "}
                   <ChevronDown size={8} className="opacity-50" />
@@ -349,7 +349,7 @@ export function ResizeExportControls({
               loading={isProcessing}
               variant={isClipMode ? "amber" : "green"}
               size="xs"
-              className="flex-1 shadow-sm"
+              className="flex-1"
             >
               {!isProcessing && (
                 <Download size={12} className="text-white/80" />

@@ -59,6 +59,11 @@ export interface TransformHandlerConfig<T> {
    * Called when the interaction finishes.
    */
   onEnd?: (e: InteractionEvent, tx: InteractionTransaction, startCanvas: { x: number; y: number }) => void;
+
+  /**
+   * If true or returns true, the interaction transaction is run silently (no undo checkpoint is generated)
+   */
+  silent?: boolean | ((e: InteractionEvent) => boolean);
 }
 
 /**
@@ -109,7 +114,9 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
 
       // Initialize Transaction
       tx = new InteractionTransaction(e);
-      tx.begin();
+      // Support running interaction silently to avoid triggering SIGNAL_COMMIT (no intermediate undo checkpoints)
+      const isSilent = typeof config.silent === 'function' ? config.silent(e) : !!config.silent;
+      tx.begin(isSilent);
     },
 
     onMove: (e) => {

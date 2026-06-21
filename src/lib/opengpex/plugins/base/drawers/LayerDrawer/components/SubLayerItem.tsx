@@ -22,7 +22,7 @@
 "use client";
 
 import React from "react";
-import { Eye, EyeOff, Lock, Unlock, ChevronLeft } from "lucide-react";
+import { Eye, EyeOff, Lock, Unlock, Minus } from "lucide-react";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import ImageAsset from "@opengpex/editor/widgets/ImageAsset";
 import { useLayerCommands } from "../hooks";
@@ -45,7 +45,7 @@ export const SubLayerItem = React.memo(
 
     return (
       <div
-        className={`flex items-center gap-1.5 px-1 py-0.5 rounded transition-all h-[24px] group/sub ${layer.visible ? "" : "opacity-35 grayscale"}`}
+        className="flex items-center gap-2 px-2 py-1 rounded-md transition-all h-[28px] group/sub select-none bg-[var(--bg-stage)]/30 hover:bg-[var(--bg-stage)]/60 border border-[var(--border-subtle)]/60 hover:border-[var(--border-subtle)]"
       >
         {onCollapse && (
           <button
@@ -53,13 +53,13 @@ export const SubLayerItem = React.memo(
               e.stopPropagation();
               onCollapse();
             }}
-            className="w-3.5 h-3.5 flex items-center justify-center shrink-0 rounded transition-colors group/collapse outline-none opacity-40 hover:opacity-100"
+            className="w-4 h-4 flex items-center justify-center shrink-0 rounded hover:bg-[var(--bg-stage)]/60 transition-colors group/collapse outline-none"
             title="Collapse"
           >
-            <ChevronLeft size={9} className="text-[var(--text-muted)]" />
+            <Minus size={10} strokeWidth={3} className="text-[var(--text-muted)] group-hover/collapse:text-[var(--text-main)]" />
           </button>
         )}
-        <div className="w-4 h-4 rounded-sm overflow-hidden border border-[var(--border-subtle)] bg-[var(--bg-stage)] shrink-0">
+        <div className={`w-[18px] h-[18px] rounded-sm overflow-hidden border border-[var(--border-subtle)] bg-[var(--bg-panel)] shrink-0 flex items-center justify-center transition-all ${!layer.visible ? "opacity-30 grayscale" : "opacity-100"}`}>
           <ImageAsset
             assetId={layer.assetId}
             src={layer.src}
@@ -68,13 +68,13 @@ export const SubLayerItem = React.memo(
           />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-[9px] font-semibold truncate text-[var(--text-muted)] uppercase tracking-tight">
-            {layer.role}
-          </div>
+          <span className="text-[10px] font-bold text-[var(--text-main)] truncate select-none leading-none tracking-tight">
+            {layer.role === 'exchange' ? 'Exchange Layer' : layer.role === 'frag' ? 'Fragment Layer' : layer.name}
+          </span>
         </div>
         <div className="flex items-center gap-0 opacity-0 group-hover/sub:opacity-100 transition-opacity">
           <ActionButton
-            icon={layer.visible ? <Eye size={10} /> : <EyeOff size={10} />}
+            icon={layer.visible ? <Eye size={11} /> : <EyeOff size={11} className="text-rose-500" />}
             onClick={(e) => {
               e.stopPropagation();
               visibilityCmd?.execute({
@@ -85,14 +85,14 @@ export const SubLayerItem = React.memo(
             }}
             variant="glass"
             size="sm"
-            className="w-4 h-4"
+            className="w-5 h-5"
           />
           <ActionButton
             icon={
               layer.locked ? (
-                <Lock size={10} className="text-rose-500" />
+                <Lock size={11} className="text-rose-500" />
               ) : (
-                <Unlock size={10} />
+                <Unlock size={11} />
               )
             }
             onClick={(e) => {
@@ -105,7 +105,7 @@ export const SubLayerItem = React.memo(
             }}
             variant="glass"
             size="sm"
-            className="w-4 h-4"
+            className="w-5 h-5"
           />
         </div>
       </div>

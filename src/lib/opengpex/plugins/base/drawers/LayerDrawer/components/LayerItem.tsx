@@ -318,7 +318,7 @@ export const LayerItem = React.memo(
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="ml-6 mr-1 mb-0.5 pl-2 border-l border-[var(--border-subtle)] flex flex-col gap-px overflow-hidden opacity-75 hover:opacity-100 transition-opacity"
+              className="ml-6 mr-1 mt-1 mb-1.5 pl-2.5 border-l-2 border-indigo-500/25 dark:border-indigo-500/40 flex flex-col gap-1 overflow-hidden"
             >
               {childLayers.map((subLayer, idx) => (
                 <SubLayerItem
@@ -338,7 +338,7 @@ export const LayerItem = React.memo(
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="ml-6 mr-1 mb-0.5 pl-2 border-l border-[var(--border-subtle)] flex flex-col gap-px overflow-hidden opacity-75 hover:opacity-100 transition-opacity"
+              className="ml-6 mr-1 mt-1 mb-1.5 pl-2.5 border-l-2 border-emerald-500/25 dark:border-emerald-500/40 flex flex-col gap-1 overflow-hidden"
             >
               {layer.vectorMasks &&
                 [...layer.vectorMasks].reverse().map((mask: VectorMask) => {

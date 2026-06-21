@@ -28,14 +28,14 @@ import { getWorkspaceLayout } from '../Workspace.styles';
  * Responsible for syncing current layout config (margins) to Redux State.
  */
 export function useLayoutSync(state: EditorData, actions: EditorActions) {
-    const { activeFrameId, ui: { theme, sidebarMode }, isLoaded } = state;
+    const { ui: { theme }, isLoaded } = state;
 
     useLayoutEffect(() => {
         // [FIX] Skip layout sync during BOOTING phase to prevent updateUI from triggering
         // unnecessary re-renders that cause FancyOverlay to flash/re-animate.
         if (!isLoaded) return;
 
-        const layout = getWorkspaceLayout(!!activeFrameId, sidebarMode);
+        const layout = getWorkspaceLayout();
 
         const targetInsets = layout.offsets;
         const currentInsets = theme.config.insets;
@@ -57,6 +57,6 @@ export function useLayoutSync(state: EditorData, actions: EditorActions) {
                 }
             });
         }
-    }, [theme.active, theme.config.insets, activeFrameId, sidebarMode, actions, isLoaded]);
+    }, [theme.active, theme.config.insets, actions, isLoaded]);
 
 }

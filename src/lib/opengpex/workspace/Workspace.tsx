@@ -85,7 +85,7 @@ export function Workspace() {
   return (
     <LayoutProvider
       viewportDim={state.ui.viewportDim}
-      syncKey={`${activeFrameId}-${activeSidebarIds.join(",")}-${sidebarMode}`}
+      syncKey={`${activeFrameId}-${sidebarMode}`}
     >
       <div
         ref={rootRef}
@@ -135,16 +135,14 @@ export function Workspace() {
             )}
 
             {/* Viewport Overlay (TL/TR/BL/BR/DOCK & VIEWPORT_OVERLAY) - add key to ensure UI resets synchronously on frame switches */}
-            <ViewportHUD
-              key={`hud-${activeFrameId}`}
-            />
+            <ViewportHUD key={`hud-${activeFrameId}`} />
 
             {/* Global Dock Area - independent of Frame lifecycle to ensure interaction stability */}
             {hasFrames && (
               <PluginSlot
                 name="DOCK"
                 className="absolute inset-0 pointer-events-none"
-                style={{ zIndex: EDITOR_Z_INDEX.UI.WORKSPACE_BASE + 20 }}
+                style={{ zIndex: EDITOR_Z_INDEX.UI.OVERLAY + 20 }}
               />
             )}
           </div>

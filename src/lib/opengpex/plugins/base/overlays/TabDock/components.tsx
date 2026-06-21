@@ -108,15 +108,19 @@ function BranchMenu({
             Branches
           </span>
         </div>
-        <div className="flex flex-col gap-1 max-h-[300px] overflow-y-auto px-1 pr-2 custom-scrollbar">
+        <div className="flex flex-col gap-1 max-h-[300px] overflow-y-auto px-1 pr-2 pb-1.5 custom-scrollbar">
           {branches.map(({ frame: snapFrame, depth }) => {
             const firstLayerId = snapFrame.layers.order[0];
-            const firstLayer = firstLayerId ? snapFrame.layers.byId[firstLayerId] : undefined;
+            const firstLayer = firstLayerId
+              ? snapFrame.layers.byId[firstLayerId]
+              : undefined;
             const assetUrl = firstLayer?.assetId
               ? assets.getURL(firstLayer.assetId)
               : firstLayer?.src;
             const thumbnailSrc =
               snapFrame.thumbnail?.src || assetUrl || undefined;
+
+            const isBranchActive = snapFrame.id === state.activeFrameId;
 
             return (
               <div
@@ -136,19 +140,32 @@ function BranchMenu({
                 )}
                 <button
                   onClick={() => switchFrame(snapFrame.id)}
-                  className={`flex items-center gap-2 p-1.5 pr-8 rounded-xl transition-all w-full
-                  ${snapFrame.id === trunkId ? "bg-indigo-500/15 ring-1 ring-indigo-500/30" : "hover "}
+                  className={`flex items-center gap-2 p-1.5 pr-8 rounded-xl transition-all w-full relative
+                  ${isBranchActive ? "bg-orange-500/10 ring-1 ring-orange-600/30 dark:ring-orange-500/30" : "hover"}
                   `}
                 >
-                  <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 border border-[var(--border-subtle)] bg-[var(--bg-stage)] ">
+                  {isBranchActive && (
+                    <motion.div
+                      layoutId="active-branch-indicator"
+                      className="absolute left-1 w-1 h-5 rounded-full bg-orange-600 dark:bg-orange-500 shadow-[0_0_8px_rgba(234,88,12,0.6)] dark:shadow-[0_0_8px_rgba(249,115,22,0.6)]"
+                      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                    />
+                  )}
+                  <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 border border-[var(--border-subtle)] bg-[var(--bg-stage)] isolate">
                     <img
                       src={thumbnailSrc}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover rounded-lg"
                       alt=""
                     />
                   </div>
                   <div className="flex flex-col items-start overflow-hidden text-left">
-                    <span className="text-[10px] font-bold truncate max-w-[100px] text-[var(--text-main)] ">
+                    <span
+                      className={`text-[10px] truncate max-w-[100px] transition-colors ${
+                        isBranchActive
+                          ? "text-orange-600 dark:text-orange-400 font-extrabold"
+                          : "font-bold text-[var(--text-main)]"
+                      }`}
+                    >
                       {snapFrame.seqNum ||
                         snapFrame.name.split("__")[1] ||
                         snapFrame.name}
@@ -213,6 +230,21 @@ function FrameThumbnail({
   const firstLayerId = frame.layers.order[0];
   const firstLayer = firstLayerId ? frame.layers.byId[firstLayerId] : undefined;
 
+  const isTrunkActive = state.activeFrameId === frame.id;
+  const isBranchActiveOfThisTrunk = state.activeTrunkId === frame.id && !isTrunkActive;
+
+  const shadowClass = isTrunkActive
+    ? "shadow-xl shadow-orange-600/45 dark:shadow-orange-500/40 z-10"
+    : isBranchActiveOfThisTrunk
+      ? "shadow-xl shadow-indigo-600/45 dark:shadow-indigo-500/40 z-10"
+      : "";
+
+  const ringClass = isTrunkActive
+    ? "ring-2 ring-orange-600 dark:ring-orange-500"
+    : isBranchActiveOfThisTrunk
+      ? "ring-2 ring-indigo-600 dark:ring-indigo-500"
+      : "group-hover:ring-2 group-hover:ring-white/20";
+
   if (!isVisible) return null;
 
   return (
@@ -240,7 +272,7 @@ function FrameThumbnail({
           e.stopPropagation();
           switchFrame(frame.id);
         }}
-        className={`relative group shrink-0 w-12 h-12 cursor-pointer ${isActive ? "shadow-lg shadow-indigo-500/25 z-10" : ""}`}
+        className={`relative group shrink-0 w-12 h-12 cursor-pointer rounded-2xl ${shadowClass}`}
         style={{
           originX: isHorizontal ? 0.5 : isRight ? 1 : 0,
           originY: isHorizontal ? (isBottom ? 1 : 0) : 0.5,
@@ -258,13 +290,18 @@ function FrameThumbnail({
           zIndex: state.hoveredTrunkId === frame.id ? 1060 : 1,
         }}
       >
+        {branches.length > 0 && (
+          <div className="absolute -top-1.5 -left-1.5 z-20 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-orange-500 text-white text-[9px] font-black shadow-md border border-[var(--bg-panel)] select-none pointer-events-none">
+            {branches.length}
+          </div>
+        )}
         <div
-          className={`w-full h-full rounded-2xl overflow-hidden relative bg-[var(--bg-panel)] transition-all ${isActive ? "ring-2 ring-indigo-500" : "group-hover:ring-2 group-hover:ring-white/20"}`}
+          className={`w-full h-full rounded-2xl overflow-hidden relative bg-[var(--bg-panel)] transition-all isolate ${ringClass}`}
         >
           <ImageAsset
             assetId={frame.thumbnail?.assetId || firstLayer?.assetId}
             src={frame.thumbnail?.src || firstLayer?.src}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover rounded-2xl"
           />
           <motion.div
             animate={
@@ -272,7 +309,7 @@ function FrameThumbnail({
                 ? { opacity: 0 }
                 : { opacity: 0.8 }
             }
-            className="absolute bottom-0 left-0 right-0 bg-black/60 pb-0.5"
+            className="absolute bottom-0 left-0 right-0 bg-black/60 pb-0.5 rounded-b-2xl"
           >
             <p className="text-[7px] text-[var(--text-main)] font-bold text-center truncate px-1 uppercase tracking-tighter">
               {frame.name}
@@ -441,6 +478,10 @@ export function TabDockSettings() {
   const { state, updateConfig } = useTabDock();
   const { config } = state;
 
+  // Feature toggles to easily toggle read-only behavior for settings
+  const IS_LAYOUT_READ_ONLY = true;
+  const IS_GRID_RESTRICTED_READ_ONLY = true; // when true, grid items other than BL, BC, BR are read-only
+
   return (
     <div className="flex flex-col gap-3">
       <h5 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest pl-1">
@@ -452,26 +493,35 @@ export function TabDockSettings() {
         {[
           { id: "horizontal", icon: <Rows2 size={13} />, label: "Horizontal" },
           { id: "vertical", icon: <Columns2 size={13} />, label: "Vertical" },
-        ].map((item) => (
-          <button
-            key={item.id}
-            onClick={() =>
-              updateConfig({
-                orientation: item.id as "horizontal" | "vertical",
-              })
-            }
-            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg transition-all ${
-              (config.orientation || "horizontal") === item.id
-                ? "bg-[var(--bg-panel)] text-indigo-500 shadow-sm"
-                : "text-[var(--text-muted)] hover:text-[var(--text-main)] "
-            }`}
-          >
-            {item.icon}{" "}
-            <span className="text-[10px] font-black uppercase tracking-tight">
-              {item.label}
-            </span>
-          </button>
-        ))}
+        ].map((item) => {
+          const isActive = (config.orientation || "horizontal") === item.id;
+          return (
+            <button
+              key={item.id}
+              disabled={IS_LAYOUT_READ_ONLY}
+              onClick={() => {
+                if (IS_LAYOUT_READ_ONLY) return;
+                updateConfig({
+                  orientation: item.id as "horizontal" | "vertical",
+                });
+              }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg transition-all ${
+                isActive
+                  ? IS_LAYOUT_READ_ONLY
+                    ? "bg-[var(--bg-panel)]/60 text-indigo-500/60 shadow-none"
+                    : "bg-[var(--bg-panel)] text-indigo-500 shadow-sm"
+                  : IS_LAYOUT_READ_ONLY
+                    ? "text-[var(--text-muted)]/50"
+                    : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
+              } ${IS_LAYOUT_READ_ONLY ? "cursor-not-allowed opacity-50" : ""}`}
+            >
+              {item.icon}{" "}
+              <span className="text-[10px] font-black uppercase tracking-tight">
+                {item.label}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* 2. Always Expand Switch */}
@@ -559,6 +609,10 @@ export function TabDockSettings() {
                   ? snap === "ML" || snap === "MR"
                   : snap === "TC" || snap === "BC");
 
+              const isSnapReadOnly =
+                IS_GRID_RESTRICTED_READ_ONLY &&
+                !["BL", "BC", "BR"].includes(snap);
+
               return isInactive ? (
                 <div
                   key={snap}
@@ -569,18 +623,30 @@ export function TabDockSettings() {
               ) : (
                 <button
                   key={snap}
-                  onClick={() => updateConfig({ snap, position: undefined })}
+                  disabled={isSnapReadOnly}
+                  onClick={() => {
+                    if (isSnapReadOnly) return;
+                    updateConfig({ snap, position: undefined });
+                  }}
                   className={`group/snap relative rounded-md transition-all flex items-center justify-center ${
                     (config.snap || "BC") === snap
-                      ? "bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]"
-                      : "bg-[var(--bg-panel)] hover:bg-[var(--border-subtle)] "
-                  }`}
+                      ? isSnapReadOnly
+                        ? "bg-indigo-500/40 shadow-none"
+                        : "bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]"
+                      : `bg-[var(--bg-panel)]/50 ${isSnapReadOnly ? "" : "hover:bg-[var(--border-subtle)]"}`
+                  } ${isSnapReadOnly ? "cursor-not-allowed opacity-40" : ""}`}
                 >
                   <div
                     className={`w-1 h-1 rounded-full transition-all duration-300 ${
                       (config.snap || "BC") === snap
-                        ? "bg-[var(--text-main)]"
-                        : "bg-[var(--text-muted)] opacity-50 group-hover/snap:bg-[var(--text-main)] group-hover/snap:opacity-100 "
+                        ? isSnapReadOnly
+                          ? "bg-[var(--text-main)]/50"
+                          : "bg-[var(--text-main)]"
+                        : `bg-[var(--text-muted)] opacity-50 ${
+                            isSnapReadOnly
+                              ? ""
+                              : "group-hover/snap:bg-[var(--text-main)] group-hover/snap:opacity-100"
+                          }`
                     }`}
                   />
                 </button>

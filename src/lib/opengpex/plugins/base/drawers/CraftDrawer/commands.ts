@@ -22,6 +22,10 @@
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
 import * as P from './protocols';
 import type { CraftType, CraftDrawerConfig } from './protocols';
+import {
+  TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID,
+  TEXT_OVERLAY_CMD_UPDATE_PROPERTIES,
+} from '../../overlays/TextOverlay/protocols';
 
 // ─── Shared Logic ──────────────────────────────────────────────────────────────
 
@@ -105,7 +109,7 @@ export const CRAFT_COMMANDS = {
     id: P.CMD_BRUSH_SIZE_UP,
     name: 'Increase Brush Size',
     execute: (ctx: EditorContextValue) => {
-      adjustBrushSize(ctx, 1);
+      adjustCraftSize(ctx, 1);
     },
     shortcuts: [{ key: ']', shift: true }, { key: '}', shift: true }],
   } as EditorCommand<void, void>,
@@ -114,7 +118,7 @@ export const CRAFT_COMMANDS = {
     id: P.CMD_BRUSH_SIZE_DOWN,
     name: 'Decrease Brush Size',
     execute: (ctx: EditorContextValue) => {
-      adjustBrushSize(ctx, -1);
+      adjustCraftSize(ctx, -1);
     },
     shortcuts: [{ key: '[', shift: true }, { key: '{', shift: true }],
   } as EditorCommand<void, void>,
@@ -168,11 +172,39 @@ export const CRAFT_COMMANDS = {
   } as EditorCommand<void, void>,
 };
 
-// ─── Brush Shortcut Helpers ────────────────────────────────────────────────────
+// ─── Brush/Text Shortcut Helpers ───────────────────────────────────────────────
 
-function adjustBrushSize(ctx: EditorContextValue, direction: 1 | -1) {
-  // Only responds in brush/eraser mode
+function adjustCraftSize(ctx: EditorContextValue, direction: 1 | -1) {
   const craft = ctx.scoped!.getSignal<P.ActiveCraft>(P.SIGNAL_ACTIVE_CRAFT, null);
+  const frameId = ctx.state.activeFrameId;
+  const activeFrame = frameId ? ctx.state.frames.byId[frameId] : null;
+  const activeLayer = activeFrame?.activeLayerId ? activeFrame.layers.byId[activeFrame.activeLayerId] : null;
+
+  // Support adjusting text size with same hotkeys when in text tool or when a text layer is selected
+  if (craft === 'text' || (craft === null && activeLayer?.type === 'text')) {
+    if (activeLayer && activeLayer.type === 'text' && activeLayer.textData) {
+      const currentSize = activeLayer.textData.fontSize || 24;
+      const targetSize = currentSize + 2 * direction;
+      const newSize = Math.max(6, Math.min(200, targetSize));
+
+      const editingLayerId = ctx.state.interaction.signals[TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID] as string | null;
+      if (editingLayerId) {
+        ctx.actions.updateLayer(frameId!, activeLayer.id, {
+          textData: { ...activeLayer.textData, fontSize: newSize },
+        });
+      } else {
+        ctx.actions.executeCommand(TEXT_OVERLAY_CMD_UPDATE_PROPERTIES, {
+          frameId: frameId!,
+          layerId: activeLayer.id,
+          patch: { fontSize: newSize },
+        });
+      }
+      ctx.actions.notifyHUD(`Text Size: ${newSize}px`, 'info');
+    }
+    return;
+  }
+
+  // Only responds in brush/eraser mode
   if (craft !== 'brush' && craft !== 'eraser') return;
 
   const config = ctx.scoped!.selfConfig as CraftDrawerConfig;

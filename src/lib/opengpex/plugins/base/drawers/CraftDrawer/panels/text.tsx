@@ -57,8 +57,6 @@ const FONT_OPTIONS = [
   { value: "'JetBrains Mono', monospace", label: "JetBrains Mono" },
 ];
 
-const FONT_SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96];
-
 const FONT_WEIGHT_MAP: Record<string, number> = {
   "Light": 300,
   "Regular": 400,
@@ -74,6 +72,20 @@ const FONT_WEIGHT_LABELS: Record<number, string> = {
   600: "Semi Bold",
   700: "Bold",
 };
+
+// ─── Logarithmic Slider Helpers ────────────────────────────────────────────────
+
+const TEXT_SIZE_POWER = 2.5;
+const TEXT_SIZE_MAX = 200;
+const TEXT_SIZE_MIN = 6;
+
+function sliderToTextSize(percent: number): number {
+  return Math.round(TEXT_SIZE_MIN + (TEXT_SIZE_MAX - TEXT_SIZE_MIN) * Math.pow(percent / 100, TEXT_SIZE_POWER));
+}
+
+function textSizeToSlider(size: number): number {
+  return Math.round(Math.pow((size - TEXT_SIZE_MIN) / (TEXT_SIZE_MAX - TEXT_SIZE_MIN), 1 / TEXT_SIZE_POWER) * 100);
+}
 
 // ─── TextPanel ─────────────────────────────────────────────────────────────────
 
@@ -96,29 +108,63 @@ export const TextPanel = React.memo(function TextPanel() {
     <div className="flex flex-col gap-2">
       {/* Typography Card */}
       <div className="flex flex-col gap-2.5 p-1">
-        {/* Font Family */}
-        <ComboInput
-          label="Font"
-          value={currentFontLabel}
-          readOnly={true}
-          options={FONT_OPTIONS.map((f) => f.label)}
-          onChange={(val) => {
-            const found = FONT_OPTIONS.find((f) => f.label === val);
-            if (found) {
-              updateTextData({ fontFamily: found.value });
-            }
-          }}
-        />
+        {/* Size (logarithmic slider) */}
+        <div className="flex items-center gap-2 px-1">
+          <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
+            Size
+          </span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={textSizeToSlider(textData?.fontSize || 24)}
+            onChange={(e) => {
+              const newSize = sliderToTextSize(Number(e.target.value));
+              updateTextDataLive({ fontSize: newSize });
+            }}
+            onMouseUp={(e) => {
+              const newSize = sliderToTextSize(Number(e.currentTarget.value));
+              updateTextData({ fontSize: newSize });
+              e.currentTarget.blur();
+            }}
+            onTouchEnd={(e) => {
+              const newSize = sliderToTextSize(Number(e.currentTarget.value));
+              updateTextData({ fontSize: newSize });
+              e.currentTarget.blur();
+            }}
+            className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
+          />
+          <div className="flex items-center gap-0.5 text-right w-12 justify-end text-indigo-400 font-black text-[10px] tabular-nums">
+            <input
+              type="number"
+              min={TEXT_SIZE_MIN}
+              max={TEXT_SIZE_MAX}
+              value={textData?.fontSize || 24}
+              onChange={(e) => {
+                const val = Math.max(TEXT_SIZE_MIN, Math.min(TEXT_SIZE_MAX, Number(e.target.value) || TEXT_SIZE_MIN));
+                updateTextData({ fontSize: val });
+              }}
+              className="w-8 bg-transparent text-right focus:outline-none outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            />
+            <span className="text-[8px] font-bold text-[var(--text-muted)] shrink-0">px</span>
+          </div>
+        </div>
 
-        {/* Font Size & Weight */}
+        {/* Font Family & Weight */}
         <div className="flex gap-2">
           <div className="flex-1">
             <ComboInput
-              label="Size"
-              value={textData?.fontSize || 24}
-              type="number"
-              options={FONT_SIZES}
-              onChange={(val) => updateTextData({ fontSize: Number(val) })}
+              label="Font"
+              value={currentFontLabel}
+              readOnly={true}
+              options={FONT_OPTIONS.map((f) => f.label)}
+              onChange={(val) => {
+                const found = FONT_OPTIONS.find((f) => f.label === val);
+                if (found) {
+                  updateTextData({ fontFamily: found.value });
+                }
+              }}
             />
           </div>
           <div className="flex-1">

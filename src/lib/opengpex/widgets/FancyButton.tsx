@@ -92,10 +92,12 @@ const VARIANT_THEMES: Record<
     active: "bg-blue-700 text-white border-blue-600 shadow-inner",
   },
   zinc: {
-    solid: "bg-zinc-800 text-zinc-200 hover:bg-zinc-700 border border-zinc-700/50",
+    solid:
+      "bg-zinc-900 text-zinc-50 border-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-100 dark:hover:bg-zinc-200",
     subtle:
-      "bg-zinc-800/30 text-zinc-400 border border-zinc-700/30 hover:bg-zinc-800 hover:text-zinc-200",
-    active: "bg-zinc-950 text-white border-zinc-800 shadow-inner",
+      "bg-zinc-100 text-zinc-700 border-zinc-200 hover:bg-zinc-200/80 dark:bg-zinc-800 dark:text-zinc-200 dark:border-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-50",
+    active:
+      "bg-zinc-200 text-zinc-900 border-zinc-300 dark:bg-zinc-950 dark:text-white dark:border-zinc-800 shadow-inner",
   },
   gray: {
     solid:

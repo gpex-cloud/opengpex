@@ -58,7 +58,7 @@ export const MaskItem = React.memo(
 
     return (
       <div
-        className={`flex items-center gap-1.5 p-1 rounded-md transition-all h-[28px] ${mask.enabled ? "bg-[var(--bg-panel)] shadow-sm" : "opacity-40 grayscale"}`}
+        className="flex items-center gap-2 px-2 py-1 rounded-md transition-all h-[28px] group/mask select-none bg-[var(--bg-stage)]/30 hover:bg-[var(--bg-stage)]/60 border border-[var(--border-subtle)]/60 hover:border-[var(--border-subtle)] shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
       >
         {onCollapse && (
           <button
@@ -66,19 +66,20 @@ export const MaskItem = React.memo(
               e.stopPropagation();
               onCollapse();
             }}
-            className="w-4 h-5 flex items-center justify-center shrink-0 hover rounded transition-colors group/collapse outline-none"
+            className="w-4 h-4 flex items-center justify-center shrink-0 rounded hover:bg-[var(--bg-stage)]/60 transition-colors group/collapse outline-none"
             title="Collapse Masks"
           >
             <Minus
               size={10}
-              className="text-[var(--text-muted)] group-hover/collapse:text-[var(--text-main)] "
+              strokeWidth={3}
+              className="text-[var(--text-muted)] group-hover/collapse:text-[var(--text-main)]"
             />
           </button>
         )}
         
         {isBitmap ? (
           <div
-            className={`w-5 h-5 rounded-sm overflow-hidden flex items-center justify-center shrink-0 border transition-colors border-emerald-500/20 bg-black`}
+            className={`w-[18px] h-[18px] rounded-sm overflow-hidden flex items-center justify-center shrink-0 border border-emerald-500/20 bg-black transition-all ${!mask.enabled ? "opacity-30 grayscale" : "opacity-100"}`}
           >
             {mask.src ? (
               <ImageAsset
@@ -92,7 +93,12 @@ export const MaskItem = React.memo(
           </div>
         ) : (
           <div
-            className={`w-5 h-5 rounded-sm flex items-center justify-center shrink-0 border transition-colors ${mask.inverted ? "border-rose-500/20 bg-rose-500/5 text-rose-500" : "border-emerald-500/20 bg-emerald-500/5 text-emerald-500"}`}
+            className={`w-[18px] h-[18px] rounded-sm flex items-center justify-center shrink-0 border transition-all
+              ${mask.inverted
+                ? "border-rose-500/20 bg-rose-500/5 text-rose-500"
+                : "border-emerald-500/20 bg-emerald-500/5 text-emerald-500"
+              }
+              ${!mask.enabled ? "opacity-30 grayscale" : "opacity-100"}`}
           >
             {mask.reserved ? (
               <Lock size={10} />
@@ -106,14 +112,14 @@ export const MaskItem = React.memo(
 
         <div className="flex-1 min-w-0 flex items-center gap-1.5">
           <div
-            className={`w-1 h-1 rounded-full shrink-0 ${mask.inverted ? "bg-rose-500" : "bg-emerald-500"}`}
+            className={`w-1.5 h-1.5 rounded-full shrink-0 ${mask.inverted ? "bg-rose-500" : "bg-emerald-500"} ${!mask.enabled ? "opacity-30" : "opacity-100"}`}
           />
-          <div className="text-[9px] font-bold truncate text-[var(--text-main)] uppercase tracking-tighter">
-            {isBitmap ? "Bitmap Mask" : "Mask"} #{index + 1}
-          </div>
+          <span className="text-[10px] font-bold text-[var(--text-main)] truncate select-none leading-none tracking-tight">
+            {mask.inverted ? "Inverted " : ""}{isBitmap ? "Bitmap Mask" : "Mask"} #{index + 1}
+          </span>
         </div>
 
-        <div className="flex items-center gap-0">
+        <div className="flex items-center gap-0 opacity-0 group-hover/mask:opacity-100 transition-opacity">
           {!isBitmap && (
             <ActionButton
               icon={<Maximize2 size={11} />}
@@ -130,7 +136,7 @@ export const MaskItem = React.memo(
           {!( "reserved" in mask && mask.reserved ) && (
             <>
               <ActionButton
-                icon={mask.enabled ? <Eye size={11} /> : <EyeOff size={11} />}
+                icon={mask.enabled ? <Eye size={11} /> : <EyeOff size={11} className="text-rose-500" />}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (isBitmap) {

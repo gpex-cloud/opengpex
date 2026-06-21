@@ -125,7 +125,11 @@ export const createTextMoveHandler = (): InteractionHandler => {
       startLayerPos = { x: layer.cx, y: layer.cy };
 
       tx = new InteractionTransaction(e);
-      tx.begin();
+      const editingId = e.state.interaction.signals[EDITING_TEXT_KEY] as string | null;
+      // If the target layer is currently being edited, run silently to avoid creating
+      // intermediate undo checkpoints with unrasterized (empty assetId/src) temporary state.
+      const isSilent = !!(editingId && targetLayerId === editingId);
+      tx.begin(isSilent);
 
       // Set grabbing onStart
       e.actions.setInteraction({ cursorOverride: 'grabbing' });
@@ -172,6 +176,9 @@ export const createTextResizeHandler = (): InteractionHandler => {
   return createTransformHandler({
     id: 'text-resize',
     priority: 160,
+    // Always run silently because resize handle drags only occur in active text editing mode.
+    // This prevents checkpointing unrasterized (empty assetId/src) temporary states in the history stack.
+    silent: true,
 
     test: (e) => {
       // Must be in craft mode to resize text layer
