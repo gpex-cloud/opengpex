@@ -50,7 +50,7 @@ export function Workspace() {
 
   const status = useEditorStatus();
   const { activeFrameId, ui } = state;
-  const { theme, activeSidebarIds, sidebarMode } = ui;
+  const { theme, activeSidebarIds, sidebarMode, isToolMenuPinned } = ui;
 
   // 1. Initialize system services (plugins, shortcuts)
   usePluginInit(actions);
@@ -59,15 +59,16 @@ export function Workspace() {
   const styles = getWorkspaceStyles(
     activeSidebarIds.length > 0,
     theme.config.insets,
+    isToolMenuPinned,
   );
 
   const hasFrames = state.frames.order.length > 0;
-  const rootRef = useRef<HTMLDivElement>(null);
+  const midContainerRef = useRef<HTMLDivElement>(null);
 
   // 3. Top-level size perception logic (Workspace Heartbeat)
   // Follows EditorStatus timing: physical size syncing to global state is allowed only in READY state
   useEffect(() => {
-    if (!rootRef.current || status !== "READY") return;
+    if (!midContainerRef.current || status !== "READY") return;
 
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
@@ -78,7 +79,7 @@ export function Workspace() {
       }
     });
 
-    observer.observe(rootRef.current);
+    observer.observe(midContainerRef.current);
     return () => observer.disconnect();
   }, [actions, status]); // Add status dependency to re-evaluate measurement permissions on state transitions
 
@@ -88,7 +89,6 @@ export function Workspace() {
       syncKey={`${activeFrameId}-${sidebarMode}`}
     >
       <div
-        ref={rootRef}
         className={styles.root.className}
         style={styles.root.style}
       >
@@ -111,7 +111,7 @@ export function Workspace() {
           <ToolMenu />
         </div>
 
-        <div className={styles.midContainer.className}>
+        <div ref={midContainerRef} className={styles.midContainer.className}>
           {/* --- B. OptionBar --- */}
           <OptionBar isVisible={hasFrames} />
 

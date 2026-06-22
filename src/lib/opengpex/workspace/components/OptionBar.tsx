@@ -33,11 +33,12 @@ export function OptionBar({ isVisible }: OptionBarProps) {
   const { state } = useEditorState();
   const { registerSlot, unregisterSlot } = useLayout();
 
-  const { activeSidebarIds, theme } = state.ui;
+  const { activeSidebarIds, theme, isToolMenuPinned } = state.ui;
 
   const styles = getWorkspaceStyles(
     activeSidebarIds.length > 0,
     theme.config.insets,
+    isToolMenuPinned,
   );
 
   useEffect(() => {

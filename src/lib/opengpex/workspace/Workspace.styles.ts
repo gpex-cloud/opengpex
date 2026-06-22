@@ -28,6 +28,7 @@ export const WORKSPACE_GEOMETRY = {
     SIDEBAR_WIDTH: 320,
     DRAWER_BAR_WIDTH: 40,
     HEADER_HEIGHT: 48,
+    TOOL_MENU_WIDTH: 48,
 };
 
 /**
@@ -54,7 +55,11 @@ export interface WorkspaceStyleItem {
 /**
  * Workspace Styles: Decouples layout ClassNames from the main component logic.
  */
-export const getWorkspaceStyles = (hasSidebar: boolean = true, insets: { top: number; left: number; right: number; bottom: number } = { top: 0, left: 0, right: 0, bottom: 0 }): Record<string, WorkspaceStyleItem> => {
+export const getWorkspaceStyles = (
+    hasSidebar: boolean = true,
+    insets: { top: number; left: number; right: number; bottom: number } = { top: 0, left: 0, right: 0, bottom: 0 },
+    isToolMenuPinned: boolean = false
+): Record<string, WorkspaceStyleItem> => {
     void hasSidebar;
     const { SIDEBAR_WIDTH } = WORKSPACE_GEOMETRY;
 
@@ -96,9 +101,12 @@ export const getWorkspaceStyles = (hasSidebar: boolean = true, insets: { top: nu
 
         // --- Tool Menu ---
         toolMenu: {
-            className: `absolute pointer-events-auto transition-all duration-300 left-[11px] top-2`,
+            className: isToolMenuPinned
+                ? `relative pointer-events-auto transition-all duration-300 h-full shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-panel)]/40 backdrop-blur-3xl shadow-[4px_0_24px_rgba(0,0,0,0.05)]`
+                : `absolute pointer-events-auto transition-all duration-300 left-[11px] top-2`,
             style: {
-                zIndex: EDITOR_Z_INDEX.UI.POPOVER + 5
+                zIndex: EDITOR_Z_INDEX.UI.POPOVER + 5,
+                width: isToolMenuPinned ? `${WORKSPACE_GEOMETRY.TOOL_MENU_WIDTH}px` : undefined,
             }
         },
 

@@ -23,7 +23,10 @@ import React, { useState, useEffect, useRef } from "react";
 import { ImagePlus, Image as ImageIcon, Loader2 } from "lucide-react";
 import EditorHUD from "@opengpex/editor/widgets/EditorHUD";
 import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
-import { usePluginCommands, useEditorState } from "@opengpex/editor/core/context";
+import {
+  usePluginCommands,
+  useEditorState,
+} from "@opengpex/editor/core/context";
 
 /**
  * FileLoaderComponent: Flagship global drag-and-drop service component (main component)
@@ -33,8 +36,8 @@ export function FileLoaderComponent() {
   const [isOver, setIsOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { state } = useEditorState();
-  const isTranscoding = !!state.interaction.signals['sys.asset.transcoding'];
-  const isDownloading = !!state.interaction.signals['sys.asset.downloading'];
+  const isTranscoding = !!state.interaction.signals["sys.asset.transcoding"];
+  const isDownloading = !!state.interaction.signals["sys.asset.downloading"];
 
   useEffect(() => {
     const onDragOver = (e: DragEvent) => {
@@ -105,10 +108,18 @@ export function FileLoaderComponent() {
         <EditorHUD
           isVisible={isTranscoding || isDownloading}
           title={isTranscoding ? "Converting…" : "Downloading…"}
-          subtitle={isTranscoding ? "Transcoding file for engine" : "Fetching remote asset"}
+          subtitle={
+            isTranscoding
+              ? "Transcoding file for engine"
+              : "Fetching remote asset"
+          }
           icon={
             <div className="w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center shadow-lg shadow-amber-500/40">
-              <Loader2 size={11} className="text-white animate-spin" strokeWidth={3} />
+              <Loader2
+                size={11}
+                className="text-white animate-spin"
+                strokeWidth={3}
+              />
             </div>
           }
         />
@@ -127,20 +138,20 @@ export function FileLoaderAction() {
     <>
       <FunctionButton
         onClick={() => pickCmd?.execute()}
-        title={`Upload Image (${pickCmd?.shortcutLabel || ''})`}
+        title={`Upload Image (${pickCmd?.shortcutLabel || ""})`}
         tooltipPosition="right"
         variant="glass"
       >
         <ImagePlus size={18} />
       </FunctionButton>
-      <FunctionButton
+      {/* <FunctionButton
         onClick={() => {}}
         title="Open from Gallery"
         tooltipPosition="right"
         variant="glass"
       >
         <ImageIcon size={18} />
-      </FunctionButton>
+      </FunctionButton> */}
     </>
   );
 }

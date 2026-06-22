@@ -53,7 +53,7 @@ export default function DrawerBar({
   const { actions, plugins } = useEditorServices();
   const { ui } = state;
   const pluginList = usePluginList();
-  const styles = getWorkspaceStyles(true, ui.theme.config.insets);
+  const styles = getWorkspaceStyles(true, ui.theme.config.insets, ui.isToolMenuPinned);
 
   const { registerSlot, unregisterSlot, cornerBlocks } = useLayout();
 
@@ -172,10 +172,24 @@ export default function DrawerBar({
     });
   };
 
-  const drawerBarClass = `${styles.drawerBar.className} ${side === "left" ? "left-2" : "right-2"} border-[var(--border-subtle)]`;
+  const drawerBarClass = `${styles.drawerBar.className} ${
+    side === "left"
+      ? ui.isToolMenuPinned
+        ? ""
+        : "left-2"
+      : "right-2"
+  } border-[var(--border-subtle)]`;
+
+  const customStyle =
+    side === "left" && ui.isToolMenuPinned
+      ? {
+          ...styles.drawerBar.style,
+          left: `${WORKSPACE_GEOMETRY.TOOL_MENU_WIDTH + 8}px`,
+        }
+      : styles.drawerBar.style;
 
   return (
-    <div className={drawerBarClass} style={styles.drawerBar.style}>
+    <div className={drawerBarClass} style={customStyle}>
       {/* Full-height vertical scrolling container, does not block events in inactive areas */}
       <div
         className={`absolute top-0 bottom-0 w-[100vw] overflow-y-auto scrollbar-hide pointer-events-none z-[900] ${side === "left" ? "left-0" : "right-0"}`}

@@ -37,6 +37,7 @@ import { useTheme } from "@opengpex/components/theme/ThemeContext";
 // Import isolated local styles
 import { getToolMenuStyles } from "../styles//ToolMenu.styles";
 import PluginSlot from "./PluginSlot";
+import Tooltip from "../../widgets/Tooltip";
 
 // --- 1. Define infinitely recursive menu item data structure ---
 interface MenuItemData {
@@ -52,9 +53,11 @@ interface MenuItemData {
 function NativeMenuItem({
   data,
   styles,
+  isPinned = false,
 }: {
   data: MenuItemData;
   styles: ReturnType<typeof getToolMenuStyles>;
+  isPinned?: boolean;
 }) {
   const [activeSubMenu, setActiveSubMenu] = useState<string | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -83,35 +86,44 @@ function NativeMenuItem({
     };
   }, []);
 
+  const buttonContent = (
+    <button
+      onClick={(e) => {
+        if (data.onClick) {
+          e.stopPropagation();
+          data.onClick();
+        }
+      }}
+      className={`${styles.menuItem.button} ${isOpen ? "bg-[var(--bg-stage)]" : ""}`}
+    >
+      <div className={styles.menuItem.icon}>{data.icon}</div>
+      <span className={styles.menuItem.label}>{data.label}</span>
+      {data.shortcut && (
+        <span className={styles.menuItem.shortcut}>{data.shortcut}</span>
+      )}
+
+      {/* If there is a submenu (including slot), show right arrow */}
+      {hasSubMenu && !isPinned && (
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] opacity-60">
+          <ChevronRight size={12} />
+        </span>
+      )}
+    </button>
+  );
+
   return (
     <div
       className="relative w-full"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      {/* Single menu item button */}
-      <button
-        onClick={(e) => {
-          if (data.onClick) {
-            e.stopPropagation();
-            data.onClick();
-          }
-        }}
-        className={`${styles.menuItem.button} ${isOpen ? "bg-[var(--bg-stage)]" : ""}`}
-      >
-        <div className={styles.menuItem.icon}>{data.icon}</div>
-        <span className={styles.menuItem.label}>{data.label}</span>
-        {data.shortcut && (
-          <span className={styles.menuItem.shortcut}>{data.shortcut}</span>
-        )}
-
-        {/* If there is a submenu (including slot), show right arrow */}
-        {hasSubMenu && (
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] opacity-60">
-            <ChevronRight size={12} />
-          </span>
-        )}
-      </button>
+      {isPinned && !hasSubMenu ? (
+        <Tooltip content={data.label} position="right" align="center" display="block">
+          {buttonContent}
+        </Tooltip>
+      ) : (
+        buttonContent
+      )}
 
       {/* --- Recursively mount next level cascade panel --- */}
       {hasSubMenu && isOpen && (
@@ -135,6 +147,7 @@ function NativeMenuItem({
                   key={child.label}
                   data={child}
                   styles={styles}
+                  isPinned={isPinned}
                 />
               ))}
             </div>
@@ -157,7 +170,7 @@ export default function ToolMenu() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const isCollapsed = !(isOpen || isToolMenuPinned);
-  const styles = getToolMenuStyles(isCollapsed);
+  const styles = getToolMenuStyles(isCollapsed, isToolMenuPinned);
 
   useEffect(() => {
     if (!isOpen || isToolMenuPinned) return;
@@ -216,26 +229,28 @@ export default function ToolMenu() {
 
         {!isCollapsed && (
           <>
-            <div className="flex flex-col items-start leading-tight gap-1 text-left animate-in fade-in slide-in-from-left-2 duration-300">
-              <span className="text-[10px] font-black text-amber-600 tracking-[0.2em]">
-                OpenGPEX
-              </span>
-              <a
-                href="https://github.com/gpex-cloud/opengpex"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[9px] font-bold text-[var(--text-muted)] hover:text-amber-500 transition-colors"
-              >
-                github.com/gpex-cloud/opengpex
-              </a>
-            </div>
+            {!isToolMenuPinned && (
+              <div className="flex flex-col items-start leading-tight gap-1 text-left animate-in fade-in slide-in-from-left-2 duration-300">
+                <span className="text-[10px] font-black text-amber-600 tracking-[0.2em]">
+                  OpenGPEX
+                </span>
+                <a
+                  href="https://github.com/gpex-cloud/opengpex"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[9px] font-bold text-[var(--text-muted)] hover:text-amber-500 transition-colors"
+                >
+                  github.com/gpex-cloud/opengpex
+                </a>
+              </div>
+            )}
 
             <button
               onClick={togglePin}
-              className={`ml-auto p-1.5 rounded-md transition-colors ${
+              className={`p-1.5 rounded-md transition-colors ${
                 isToolMenuPinned
                   ? "text-amber-500 bg-amber-500/10 hover:bg-amber-500/20"
-                  : "text-[var(--text-muted)] hover:bg-[var(--bg-panel)]/40"
+                  : "ml-auto text-[var(--text-muted)] hover:bg-[var(--bg-panel)]/40"
               }`}
             >
               {isToolMenuPinned ? <PinOff size={13} /> : <Pin size={13} />}
@@ -252,7 +267,7 @@ export default function ToolMenu() {
           {/* 1. Tool slot 1: TOOL_MENU */}
           <PluginSlot
             name="TOOL_MENU"
-            className={`suppress-tooltips ${styles.pluginSlotWrapper.className}`}
+            className={`${isToolMenuPinned ? "" : "suppress-tooltips"} ${styles.topLevelPluginSlotWrapper.className}`}
           />
 
           <div className={styles.divider.className} />
@@ -266,6 +281,7 @@ export default function ToolMenu() {
                 slotName: "TOOL_SETTINGS",
               }}
               styles={styles}
+              isPinned={isToolMenuPinned}
             />
           </div>
 
@@ -283,6 +299,7 @@ export default function ToolMenu() {
                 onClick: () => switchTheme(),
               }}
               styles={styles}
+              isPinned={isToolMenuPinned}
             />
           </div>
         </div>
