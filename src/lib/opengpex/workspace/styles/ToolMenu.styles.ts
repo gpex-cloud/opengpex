@@ -30,7 +30,7 @@ export const getToolMenuStyles = (isCollapsed: boolean) => {
             className: `
                 relative flex flex-col transition-all duration-300 overflow-visible
                 bg-[var(--bg-panel)]/40 backdrop-blur-3xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] rounded-xl
-                ${!isCollapsed ? 'w-[260px] h-auto rounded-2xl' : 'w-[34px] h-[34px]'}
+                ${!isCollapsed ? 'w-[280px] h-auto rounded-2xl' : 'w-[34px] h-[34px]'}
             `
         },
         // Top Logo bar
