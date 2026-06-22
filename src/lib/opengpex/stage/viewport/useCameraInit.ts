@@ -20,11 +20,37 @@
 import React, { useRef, useEffect } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
 import { Frame, EditorData, EditorActions } from '@opengpex/editor/core/types';
+import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
 import { useLayout } from '@opengpex/editor/workspace/LayoutContext';
 
 /**
- * useCameraInit: Viewport camera auto-centering logic
- * Solves DOM measurement latency and initialization race conditions during frame switching.
+ * useCameraInit: Viewport camera auto-centering & layout-change reaction.
+ *
+ * Two distinct behaviors keyed off the current frame and `safeRect`:
+ *
+ *  A. **Auto-fit (zoom + pan)** — fired only when:
+ *       - the hook mounts for the first time, OR
+ *       - the active frame.id has changed (cross-frame switch).
+ *     In both cases the user has no expectation of preserving zoom, so we
+ *     compute a fresh `getFitCamera` to center the canvas inside the safeRect.
+ *
+ *  B. **Pan-only compensation** — fired when the same frame stays active
+ *     but `safeRect` shifts (drawer panel opened/closed, ToolMenu pin toggled,
+ *     window resized, etc.). Re-fitting at that moment would discard the
+ *     user's manual zoom/pan — terrible UX when editing pixel-level details
+ *     at high zoom. Instead we translate the camera by `Δcenter(safeRect)` so
+ *     that whatever world point sat at the center of the OLD safeRect remains
+ *     at the center of the NEW safeRect; zoom is preserved exactly.
+ *
+ * The math: in the camera matrix
+ *     Screen = Translate(cam.x, cam.y) · Scale(cam.k) · Translate(W/2, H/2)
+ * the screen position of any world point is a pure function of `cam.{x,y}`
+ * up to a constant. Hence shifting `cam.{x,y}` by `(Δcx, Δcy)` shifts the
+ * entire image on screen by exactly that amount — which is precisely what
+ * "keep the focal point centered in the new safe area" requires.
+ *
+ * Both branches gate on `status === 'STABLE'` to avoid acting on transient
+ * intermediate measurements during MEASURING.
  */
 export function useCameraInit(
   containerRef: React.RefObject<HTMLDivElement | null>,
@@ -33,71 +59,101 @@ export function useCameraInit(
   actions: EditorActions
 ) {
   const { geometry } = useEditorServices();
-  const isInitializedRef = useRef<string | null>(null);
-  const lastInitializedRectRef = useRef<string>('');
   const { safeRect, status } = useLayout();
 
+  // Tracks the frame.id we last "centered" on (auto-fit). Null = never yet.
+  const initializedFrameIdRef = useRef<string | null>(null);
+  // Tracks the safeRect signature we last reacted to, to elide redundant work.
+  const lastRectKeyRef = useRef<string>('');
+  // Tracks the safeRect *center* we last saw, used for Δ pan-compensation.
+  const lastSafeCenterRef = useRef<{ x: number; y: number } | null>(null);
+
   useEffect(() => {
-    // [Timing Optimization] Core startup logic
-    // 1. Determine if this is the "first startup" of the current viewport instance
-    const isInitialMount = isInitializedRef.current === null;
-
-    // 2. All alignments must wait for layout STABLE, preventing image jumps or double shrinking due to safeRect changes during sidebar loading
     if (status !== 'STABLE') return;
-
-    // 3. Status check: skip if already initialized for the current frameId and safeRect
-    const rectKey = `${safeRect.x}-${safeRect.y}-${safeRect.w}-${safeRect.h}`;
-    if (isInitializedRef.current === frame.id && lastInitializedRectRef.current === rectKey) return;
-
-    // 4. Data completeness guard
     if (!containerRef.current || frame.layers.order.length === 0) return;
 
     const containerRect = containerRef.current.getBoundingClientRect();
     if (containerRect.width === 0 || containerRect.height === 0) return;
 
-    const layoutChanged = lastInitializedRectRef.current !== rectKey;
-
-    // If neither first mount nor layout changed, initialization is unnecessary
-    if (!isInitialMount && !layoutChanged) return;
-
-    // [FIX] Calculate relativeOffset directly using container-relative safeRect coordinates.
-    // This avoids subtracting screen-relative window offsets (containerRect.left/top) from
-    // container-relative coordinates, which caused centering skew when ToolMenu was pinned.
-    const relativeOffset = {
-      left: Math.max(0, safeRect.x),
-      top: Math.max(0, safeRect.y),
-      right: Math.max(0, state.ui.viewportDim.w - safeRect.w - safeRect.x),
-      bottom: Math.max(0, state.ui.viewportDim.h - safeRect.h - safeRect.y)
+    const rectKey = `${safeRect.x}-${safeRect.y}-${safeRect.w}-${safeRect.h}`;
+    const newCenter = {
+      x: safeRect.x + safeRect.w / 2,
+      y: safeRect.y + safeRect.h / 2,
     };
 
-    const finalCamera = geometry.camera.getFitCamera(
-      { w: containerRect.width, h: containerRect.height },
-      frame.canvas,
-      {
-        padding: 80,
-        maxScale: 1,
-        offsetLeft: relativeOffset.left,
-        offsetTop: relativeOffset.top,
-        offsetRight: relativeOffset.right,
-        offsetBottom: relativeOffset.bottom
+    const isFirstMount = initializedFrameIdRef.current === null;
+    const isFrameSwitched = !isFirstMount && initializedFrameIdRef.current !== frame.id;
+    const isLayoutChanged = !isFirstMount && !isFrameSwitched && lastRectKeyRef.current !== rectKey;
+
+    // Nothing to do.
+    if (!isFirstMount && !isFrameSwitched && !isLayoutChanged) return;
+
+    if (isFirstMount || isFrameSwitched) {
+      // ── Branch A: Auto-fit ──────────────────────────────────────────────
+      // Compute insets directly from container-relative safeRect coords
+      // (avoids subtracting screen-relative offsets that misalign when the
+      // ToolMenu is pinned).
+      const relativeOffset = {
+        left: Math.max(0, safeRect.x),
+        top: Math.max(0, safeRect.y),
+        right: Math.max(0, state.ui.viewportDim.w - safeRect.w - safeRect.x),
+        bottom: Math.max(0, state.ui.viewportDim.h - safeRect.h - safeRect.y),
+      };
+
+      const finalCamera = geometry.camera.getFitCamera(
+        { w: containerRect.width, h: containerRect.height },
+        frame.canvas,
+        {
+          padding: VIEWPORT_FIT_PADDING,
+          maxScale: 1,
+          offsetLeft: relativeOffset.left,
+          offsetTop: relativeOffset.top,
+          offsetRight: relativeOffset.right,
+          offsetBottom: relativeOffset.bottom,
+        },
+      );
+
+      actions.updateCamera(frame.id, finalCamera);
+    } else {
+      // ── Branch B: Pan-only compensation ─────────────────────────────────
+      // Preserve user's zoom AND keep the focal world point centered in the
+      // new safe area. Skip if there is no prior center recorded (defensive).
+      const oldCenter = lastSafeCenterRef.current;
+      if (oldCenter) {
+        const dx = newCenter.x - oldCenter.x;
+        const dy = newCenter.y - oldCenter.y;
+        // Sub-pixel deltas aren't worth a Redux dispatch.
+        if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5) {
+          actions.updateCamera(frame.id, {
+            x: frame.camera.x + dx,
+            y: frame.camera.y + dy,
+            k: frame.camera.k,
+          });
+        }
       }
-    );
+    }
 
-    actions.updateCamera(frame.id, finalCamera);
-
-    // Record initialization flag
-    isInitializedRef.current = frame.id;
-    lastInitializedRectRef.current = rectKey;
+    // Always remember where we are now so the *next* layout change can
+    // compute its own delta correctly.
+    initializedFrameIdRef.current = frame.id;
+    lastRectKeyRef.current = rectKey;
+    lastSafeCenterRef.current = newCenter;
   }, [
     frame.id,
     frame.layers.order.length,
-    frame.camera.k,
     frame.canvas,
+    frame.camera.x,
+    frame.camera.y,
+    frame.camera.k,
     status,
-    safeRect,
-    state.ui.viewportDim,
+    safeRect.x,
+    safeRect.y,
+    safeRect.w,
+    safeRect.h,
+    state.ui.viewportDim.w,
+    state.ui.viewportDim.h,
     actions,
     containerRef,
-    geometry.camera
+    geometry.camera,
   ]);
 }

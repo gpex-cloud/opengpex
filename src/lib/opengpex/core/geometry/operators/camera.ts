@@ -19,7 +19,6 @@
 
 import { Matrix3x3 } from '@opengpex/editor/core/geometry/matrix';
 import { CameraState, Dimensions, ViewportPoint, Point2D, WorldRect, asWorldRect } from '@opengpex/editor/core/types';
-import { VIEWPORT_FIT_FACTOR } from '@opengpex/editor/core/helpers/presets';
 
 export interface CameraCenterOptions {
   padding?: number;
@@ -62,9 +61,10 @@ function calculateFit(
     k = fixedScale;
   } else {
     const fitK = Math.min(availableW / content.w, availableH / content.h);
-    const baseK = maxScale !== undefined ? Math.min(maxScale, fitK) : fitK;
-    // Uniformly apply visual scaling coefficient, leaving space for the viewport (defined by config.ts)
-    k = baseK * VIEWPORT_FIT_FACTOR;
+    // [REFACTOR-2026-06-22] Removed `* VIEWPORT_FIT_FACTOR (0.90)`; breathing
+    // room is now expressed solely via the explicit `padding` option, avoiding
+    // double-compensation between padding and an implicit shrink factor.
+    k = maxScale !== undefined ? Math.min(maxScale, fitK) : fitK;
   }
 
   // Derive via matrix: we need the content center to coincide with the usable area center

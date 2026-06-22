@@ -120,6 +120,38 @@ export default function DrawerBar({
       });
   }, [sidebarPlugins, ui.sidebarOrder, side]);
 
+  // [REFACTOR-Step1] Aggregate slot for the currently expanded sidebar panels on this side.
+  // Width = DrawerBar self width (40px) + max(preferredWidth) among active panels on this side,
+  // so that LayoutProvider's safeRect (and downstream insets) avoids being occluded by the panel.
+  // Registered as a SINGLE aggregated slot (`drawerbar-active-${side}`) to avoid scattered
+  // register/unregister races when multiple panels open/close simultaneously.
+  const activePanelMaxWidth = React.useMemo(() => {
+    const ids = ui.activeSidebarIds || [];
+    let maxWidth = 0;
+    for (const plugin of sortedPlugins) {
+      if (!ids.includes(plugin.uid)) continue;
+      const raw = plugin.initialConfig?.preferredWidth;
+      const width = typeof raw === "number" && raw > 0 ? raw : 320;
+      if (width > maxWidth) maxWidth = width;
+    }
+    return maxWidth;
+  }, [sortedPlugins, ui.activeSidebarIds]);
+
+  React.useEffect(() => {
+    const slotId = `drawerbar-active-${side}`;
+    if (activePanelMaxWidth > 0) {
+      registerSlot({
+        id: slotId,
+        role: side === "left" ? "LEFT_PUSH" : "RIGHT_PUSH",
+        width: WORKSPACE_GEOMETRY.DRAWER_BAR_WIDTH + activePanelMaxWidth,
+        height: 0,
+      });
+    } else {
+      unregisterSlot(slotId);
+    }
+    return () => unregisterSlot(slotId);
+  }, [side, activePanelMaxWidth, registerSlot, unregisterSlot]);
+
   // 2. Interaction handling
   const clickTimer = React.useRef<NodeJS.Timeout | null>(null);
   const isDraggingRef = React.useRef(false);

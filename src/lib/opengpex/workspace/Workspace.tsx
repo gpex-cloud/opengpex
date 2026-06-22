@@ -26,6 +26,7 @@ import {
 } from "@opengpex/editor/core/context";
 import { usePluginInit } from "./hooks/usePluginInit";
 import { useEditorStatus } from "./hooks/useEditorStatus";
+import { useLayoutSync } from "./hooks/useLayoutSync";
 import { getWorkspaceStyles } from "./Workspace.styles";
 import Viewport from "@opengpex/editor/stage/viewport/Viewport";
 import { LayoutProvider } from "./LayoutContext";
@@ -88,6 +89,8 @@ export function Workspace() {
       viewportDim={state.ui.viewportDim}
       syncKey={`${activeFrameId}-${sidebarMode}`}
     >
+      {/* [REFACTOR-Step2] LayoutSyncBridge: forwards LayoutContext.safeRect → Redux insets */}
+      <LayoutSyncBridge />
       <div
         className={styles.root.className}
         style={styles.root.style}
@@ -166,4 +169,13 @@ export function Workspace() {
       </div>
     </LayoutProvider>
   );
+}
+
+/**
+ * LayoutSyncBridge: invokes useLayoutSync inside the LayoutProvider subtree.
+ * Renders nothing; exists solely to host the sync-effect hook.
+ */
+function LayoutSyncBridge() {
+  useLayoutSync();
+  return null;
 }

@@ -22,6 +22,7 @@
 import { EditorCommand, EditorContextValue, Frame, asLocalShape, Layer } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { MetadataHelper } from '@opengpex/editor/core/helpers/metadata';
+import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
 
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
@@ -81,7 +82,7 @@ export const FrameCreateCommands = {
       const initialCamera = geometry.camera.getFitCamera(
         state.ui.viewportDim,
         dimension,
-        { padding: 80, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
+        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
       );
       const defaultCropBox = asLocalShape({ x: dimension.w * 0.25, y: dimension.h * 0.25, w: dimension.w * 0.5, h: dimension.h * 0.5 });
 
@@ -150,7 +151,7 @@ export const FrameCreateCommands = {
         const initialCamera = geometry.camera.getFitCamera(
           state.ui.viewportDim,
           canvasDim,
-          { maxScale: 1, padding: 80, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
+          { maxScale: 1, padding: VIEWPORT_FIT_PADDING, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
         );
 
         const siblings = state.frames.order.map(id => state.frames.byId[id]).filter(f => f.parentId === activeFrame.id);
@@ -260,7 +261,7 @@ export const FrameCreateCommands = {
         const newCamera = geometry.camera.getFitCamera(
           state.ui.viewportDim,
           dimension,
-          { padding: 80, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
+          { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
         );
 
         // 💡 5. Fully refresh the artboard's canvas size, camera, crop boxes, and all layers

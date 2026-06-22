@@ -20,6 +20,7 @@
 'use client';
 
 import { asLocalShape, EditorContextValue, EditorCommand, Layer } from '@opengpex/editor/core/types';
+import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**
@@ -56,7 +57,7 @@ export const FrameResizeCommands = {
       const newCamera = geometry.camera.getFitCamera(
         state.ui.viewportDim,
         newCanvas,
-        { padding: 80, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
+        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
       );
 
       actions.updateFrame(activeFrame.id, {
@@ -113,7 +114,7 @@ export const FrameResizeCommands = {
       const newCamera = geometry.camera.getFitCamera(
         state.ui.viewportDim,
         targetDim,
-        { padding: 80, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
+        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
       );
 
       actions.updateFrame(activeFrame.id, {

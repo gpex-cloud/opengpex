@@ -20,6 +20,7 @@
 'use client';
 
 import { EditorCommand, EditorContextValue } from '@opengpex/editor/core/types';
+import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**
@@ -43,7 +44,7 @@ export const ViewportTranslateCommands = {
         { w, h },
         activeFrame.canvas,
         {
-          padding: 80,
+          padding: VIEWPORT_FIT_PADDING,
           maxScale: 1,
           offsetTop: insets.top,
           offsetLeft: insets.left,
@@ -54,7 +55,8 @@ export const ViewportTranslateCommands = {
 
       actions.updateCamera(activeFrame.id, nextCamera);
     },
-    shortcuts: [{ key: '0', meta: true }, { key: '0', ctrl: true }]
+    // [Shortcut] Fit Visible: ⌘+1 / Ctrl+1
+    shortcuts: [{ key: '1', meta: true }, { key: '1', ctrl: true }]
   } as EditorCommand<void, void>,
 
   actualSize: {
@@ -84,7 +86,8 @@ export const ViewportTranslateCommands = {
 
       actions.updateCamera(activeFrame.id, nextCamera);
     },
-    shortcuts: [{ key: '1', meta: true }, { key: '1', ctrl: true }]
+    // [Shortcut] Actual Size (1:1): ⌘+2 / Ctrl+2
+    shortcuts: [{ key: '2', meta: true }, { key: '2', ctrl: true }]
   } as EditorCommand<void, void>,
 
   zoomBy: {

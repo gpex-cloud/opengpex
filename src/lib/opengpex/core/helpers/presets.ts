@@ -22,7 +22,28 @@
 /** -----------------------------------------------------------------*/
 /** Viewport Settings -----------------------------------------------*/
 /** -----------------------------------------------------------------*/
-export const VIEWPORT_FIT_FACTOR = 0.90;
+// [REFACTOR-2026-06-22] `VIEWPORT_FIT_FACTOR` (0.90) was removed:
+// it duplicated the role of `padding` (numeric breathing room) inside
+// `getFitCamera`, causing fit-paths to apply both an 80px padding AND
+// an extra 10% shrink — wasting space on large screens, cramping small.
+// The single source of breathing room is now `padding` passed via
+// `CameraCenterOptions`.
+
+/**
+ * Default fit-camera padding (in viewport pixels).
+ *
+ * Geometric breathing room between the canvas and the safe-area boundary
+ * during any "fit" computation (`getFitCamera`). This is **orthogonal** to
+ * `offsetXxx` (which represents chrome occupancy from LayoutProvider slots).
+ *
+ * Adjust here to globally tighten/loosen fit results across:
+ * - `viewport.fit` / `viewport.actualSize` (translate.ts)
+ * - `frame.create.trunk` / `branch` / `revert` (create.ts)
+ * - `frame.resize.resizeCanvas` / `resample` (resize.ts)
+ * - `useCameraInit` (auto-fit)
+ */
+export const VIEWPORT_FIT_PADDING = 40;
+
 
 /**
  * Checkerboard background configuration

@@ -31,21 +31,10 @@ export const WORKSPACE_GEOMETRY = {
     TOOL_MENU_WIDTH: 48,
 };
 
-/**
- * getWorkspaceLayout: Provides numeric layout metadata for logic consumers (Camera, Viewport).
- */
-export const getWorkspaceLayout = () => {
-    return {
-        ...WORKSPACE_GEOMETRY,
-        offsets: {
-            top: WORKSPACE_GEOMETRY.HEADER_HEIGHT,
-            left: WORKSPACE_GEOMETRY.DRAWER_BAR_WIDTH,
-            right: WORKSPACE_GEOMETRY.DRAWER_BAR_WIDTH,
-            bottom: 0
-        }
-    };
-};
-
+// [REFACTOR-Step2] `getWorkspaceLayout()` (and its `offsets` field) was the static
+// constant feed for `useLayoutSync`. Now that `useLayoutSync` derives insets from
+// the dynamic `LayoutContext.safeRect`, this helper is no longer consumed and has
+// been removed. Geometry constants remain in `WORKSPACE_GEOMETRY`.
 
 export interface WorkspaceStyleItem {
     className: string;

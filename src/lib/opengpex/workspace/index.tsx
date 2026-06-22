@@ -20,31 +20,20 @@
 'use client';
 
 import React from 'react';
-import { EditorProvider, useEditorServices, useEditorState } from '@opengpex/editor/core/context';
+import { EditorProvider } from '@opengpex/editor/core/context';
 import { Workspace as WorkspaceController } from './Workspace';
-import { useLayoutSync } from './hooks/useLayoutSync';
 
 /**
- * WorkspaceShell: State gateway
- * Handles global services initialization and layout synchronization.
- */
-function WorkspaceShell() {
- const { actions } = useEditorServices();
- const { state } = useEditorState();
- 
- // 1. Sync layout config to State
- useLayoutSync(state, actions);
-
- return <WorkspaceController />;
-}
-
-/**
- * Workspace: Top-level editor entry point
+ * Workspace: Top-level editor entry point.
+ *
+ * Note: Layout-to-Redux sync (useLayoutSync) is now invoked inside
+ * <LayoutProvider> subtree from `Workspace.tsx`, since the hook depends
+ * on the LayoutContext (`safeRect` / `status`) provided by it.
  */
 export default function Workspace() {
  return (
  <EditorProvider>
- <WorkspaceShell />
+ <WorkspaceController />
  </EditorProvider>
  );
 }

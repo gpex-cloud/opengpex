@@ -19,44 +19,81 @@
 
 'use client';
 
-import { useLayoutEffect } from 'react';
-import { EditorData, EditorActions } from '@opengpex/editor/core/types';
-import { getWorkspaceLayout } from '../Workspace.styles';
+import { useEffect, useRef } from 'react';
+import {
+    useEditorServices,
+    useEditorState,
+} from '@opengpex/editor/core/context';
+import { useLayout } from '../LayoutContext';
 
 /**
- * useLayoutSync: Layout auto sync hook
- * Responsible for syncing current layout config (margins) to Redux State.
+ * useLayoutSync: Single-source-of-truth bridge from LayoutContext to Redux.
+ *
+ * [REFACTOR-Step2] Switched from "static constants → Redux" to
+ * "dynamic safeRect → Redux insets" so that command-side consumers
+ * (fit / actualSize / zoomBy) read the same authoritative insets that
+ * the viewport-side consumer (useCameraInit, via Context) already sees.
+ *
+ * Sync rules:
+ *  - Only writes when `status === 'STABLE'` to avoid intermediate
+ *    measurements during MEASURING transitions.
+ *  - Skips during BOOTING phase (FancyOverlay anti-flicker).
+ *  - Uses ref to read current insets without re-triggering the effect
+ *    when its own dispatch updates Redux (prevents render dead-loops).
+ *  - Performs precise field comparison to elide redundant dispatches.
+ *
+ * MUST be called inside a `<LayoutProvider>` subtree.
  */
-export function useLayoutSync(state: EditorData, actions: EditorActions) {
-    const { ui: { theme }, isLoaded } = state;
+export function useLayoutSync() {
+    const { state } = useEditorState();
+    const { actions } = useEditorServices();
+    const { safeRect, status } = useLayout();
 
-    useLayoutEffect(() => {
-        // [FIX] Skip layout sync during BOOTING phase to prevent updateUI from triggering
-        // unnecessary re-renders that cause FancyOverlay to flash/re-animate.
+    const { isLoaded, ui } = state;
+    const { theme, viewportDim } = ui;
+
+    // Snapshot ref of current insets so the effect doesn't re-fire
+    // when our own dispatch causes Redux to emit a new state.
+    const currentInsetsRef = useRef(theme.config.insets);
+    currentInsetsRef.current = theme.config.insets;
+
+    useEffect(() => {
         if (!isLoaded) return;
+        if (status !== 'STABLE') return;
+        if (viewportDim.w <= 0 || viewportDim.h <= 0) return;
 
-        const layout = getWorkspaceLayout();
+        const targetInsets = {
+            top: Math.max(0, Math.round(safeRect.y)),
+            left: Math.max(0, Math.round(safeRect.x)),
+            right: Math.max(0, Math.round(viewportDim.w - safeRect.w - safeRect.x)),
+            bottom: Math.max(0, Math.round(viewportDim.h - safeRect.h - safeRect.y)),
+        };
 
-        const targetInsets = layout.offsets;
-        const currentInsets = theme.config.insets;
-
-        // Precise comparison to avoid expensive JSON.stringify
+        const current = currentInsetsRef.current;
         const isChanged =
-            targetInsets.top !== currentInsets.top ||
-            targetInsets.left !== currentInsets.left ||
-            targetInsets.right !== currentInsets.right ||
-            targetInsets.bottom !== currentInsets.bottom;
+            targetInsets.top !== current.top ||
+            targetInsets.left !== current.left ||
+            targetInsets.right !== current.right ||
+            targetInsets.bottom !== current.bottom;
 
-        if (isChanged) {
-            actions.updateUI({
-                theme: {
-                    active: theme.active,
-                    config: {
-                        insets: targetInsets
-                    }
-                }
-            });
-        }
-    }, [theme.active, theme.config.insets, actions, isLoaded]);
+        if (!isChanged) return;
 
+        actions.updateUI({
+            theme: {
+                active: theme.active,
+                config: { insets: targetInsets },
+            },
+        });
+    }, [
+        isLoaded,
+        status,
+        safeRect.x,
+        safeRect.y,
+        safeRect.w,
+        safeRect.h,
+        viewportDim.w,
+        viewportDim.h,
+        theme.active,
+        actions,
+    ]);
 }

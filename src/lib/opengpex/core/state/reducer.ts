@@ -33,7 +33,12 @@ export const initialState: EditorData = {
     theme: {
       active: 'DEFAULT',
       config: {
-        insets: { top: 0, left: 0, right: 0, bottom: 0 }
+        // [REFACTOR-Step3] Seed insets with the default chrome geometry
+        // (HEADER 48 + DRAWER_BAR 40 on both sides) so command-side consumers
+        // (fit / actualSize / zoomBy) compute correct centering during the
+        // very first render — before LayoutProvider reaches STABLE and
+        // useLayoutSync overwrites it with the live safeRect-derived values.
+        insets: { top: 48, left: 40, right: 40, bottom: 0 }
       }
     },
     appearance: 'system',
