@@ -41,37 +41,40 @@ export function useCameraInit(
     // [Timing Optimization] Core startup logic
     // 1. Determine if this is the "first startup" of the current viewport instance
     const isInitialMount = isInitializedRef.current === null;
-    
+
     // 2. All alignments must wait for layout STABLE, preventing image jumps or double shrinking due to safeRect changes during sidebar loading
     if (status !== 'STABLE') return;
-    
+
     // 3. Status check: skip if already initialized for the current frameId and safeRect
     const rectKey = `${safeRect.x}-${safeRect.y}-${safeRect.w}-${safeRect.h}`;
     if (isInitializedRef.current === frame.id && lastInitializedRectRef.current === rectKey) return;
-    
+
     // 4. Data completeness guard
     if (!containerRef.current || frame.layers.order.length === 0) return;
-    
+
     const containerRect = containerRef.current.getBoundingClientRect();
     if (containerRect.width === 0 || containerRect.height === 0) return;
 
     const layoutChanged = lastInitializedRectRef.current !== rectKey;
-    
+
     // If neither first mount nor layout changed, initialization is unnecessary
     if (!isInitialMount && !layoutChanged) return;
 
+    // [FIX] Calculate relativeOffset directly using container-relative safeRect coordinates.
+    // This avoids subtracting screen-relative window offsets (containerRect.left/top) from
+    // container-relative coordinates, which caused centering skew when ToolMenu was pinned.
     const relativeOffset = {
-      left: Math.max(0, safeRect.x - containerRect.left),
-      top: Math.max(0, safeRect.y - containerRect.top),
-      right: Math.max(0, (state.ui.viewportDim.w - safeRect.w - safeRect.x) - (state.ui.viewportDim.w - containerRect.width - containerRect.left)),
-      bottom: Math.max(0, (state.ui.viewportDim.h - safeRect.h - safeRect.y) - (state.ui.viewportDim.h - containerRect.height - containerRect.top))
+      left: Math.max(0, safeRect.x),
+      top: Math.max(0, safeRect.y),
+      right: Math.max(0, state.ui.viewportDim.w - safeRect.w - safeRect.x),
+      bottom: Math.max(0, state.ui.viewportDim.h - safeRect.h - safeRect.y)
     };
 
     const finalCamera = geometry.camera.getFitCamera(
       { w: containerRect.width, h: containerRect.height },
       frame.canvas,
-      { 
-        padding: 80, 
+      {
+        padding: 80,
         maxScale: 1,
         offsetLeft: relativeOffset.left,
         offsetTop: relativeOffset.top,
@@ -81,7 +84,7 @@ export function useCameraInit(
     );
 
     actions.updateCamera(frame.id, finalCamera);
-    
+
     // Record initialization flag
     isInitializedRef.current = frame.id;
     lastInitializedRectRef.current = rectKey;

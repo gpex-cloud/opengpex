@@ -96,7 +96,9 @@ export const getWorkspaceStyles = (
 
         // Stage Area Container
         stageWrapper: {
-            className: `relative overflow-hidden bg-[var(--bg-stage)] transition-all h-full`
+            // [FIX] Removed 'transition-all' to ensure instant size updates when ToolMenu pins/unpins.
+            // This prevents the stability timer in LayoutProvider from measuring transitioning/incorrect dimensions.
+            className: `relative overflow-hidden bg-[var(--bg-stage)] h-full`
         },
 
         // --- Tool Menu ---
