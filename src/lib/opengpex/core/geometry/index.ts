@@ -30,12 +30,17 @@ import {
   asWorldRect, asLocalRect, asWorldPoint, asViewportRect,
   GeometryService, Frame, Layer, WorldRect, IMatrix3x3, LayerPoseOverride,
   CameraState, Rect, Point2D, Dimensions, WorldPoint,
-  ViewportPoint, CameraCenterOptions, WorldShape, LocalShape, Shape, NormalizedState
+  ViewportPoint, CameraCenterOptions, WorldShape, LocalShape, Shape, NormalizedState,
+  LocalPolygon, WorldPolygon
 } from '@opengpex/editor/core/types';
 import {
   frameLocalToLayerLocal, layerLocalToFrameLocal, intersectWithLayer, getStairedSvgPath, getSmoothSvgPath,
   localToWorldShape, worldToLocalShape, unitedShapeOfLayers
 } from './operators/shape';
+import {
+  computePolygonBounds, localToWorldPolygon, worldToLocalPolygon,
+  frameLocalToLayerLocalPolygon, polygonToSvgPathD
+} from './operators/polygon';
 import { snapRect, snapToPixel, snapRectToPixel } from './operators/snapping';
 import {
   decomposeMatrix,
@@ -136,6 +141,13 @@ export function createGeometryService(): GeometryService {
       worldToLocalShape: (shape: WorldShape, target: Layer | Frame) => worldToLocalShape(shape, target),
       layerLocalToFrameLocal: (shape: Shape, layer: Layer, frame: Frame) => layerLocalToFrameLocal(shape, layer, frame),
       unitedShapeOfLayers: (layers: Layer[]) => unitedShapeOfLayers(layers),
+    },
+    polygon: {
+      computePolygonBounds: (rings: Point2D[][]) => computePolygonBounds(rings),
+      localToWorldPolygon: (poly: LocalPolygon, source: Layer | Frame) => localToWorldPolygon(poly, source),
+      worldToLocalPolygon: (poly: WorldPolygon, target: Layer | Frame) => worldToLocalPolygon(poly, target),
+      frameLocalToLayerLocalPolygon: (poly: LocalPolygon, frame: Frame, layer: Layer) => frameLocalToLayerLocalPolygon(poly, frame, layer),
+      polygonToSvgPathD: (poly: LocalPolygon) => polygonToSvgPathD(poly),
     },
     getScale: (frame: Frame, camera?: CameraState) => (camera || frame.camera).k,
     asWorldRect: (r: Rect) => asWorldRect(r),

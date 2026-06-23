@@ -54,6 +54,15 @@ export const plugin: EditorPlugin = {
       defaultValue: false,
       scope: "public",
     },
+    {
+      // Active crop tool — read by ClipOverlay (via getStateSignal in hooks.ts)
+      // to drive isRegularTool / isIrregularTool channel routing. Public scope
+      // is required because ClipOverlay lives in a different plugin namespace.
+      id: P.SIGNAL_CROP_TOOL,
+      name: "Active Crop Tool",
+      defaultValue: "rect",
+      scope: "public",
+    },
   ],
   interceptors: {
     command: {

@@ -31,6 +31,7 @@ import { LayerBitmapMaskCommands } from './commands/layer/bmask';
 import { ViewportTranslateCommands } from './commands/viewport/translate';
 import { SystemAssetCommands } from './commands/system/assets';
 import { ViewportTransformCommands } from './commands/viewport/transform';
+import { IrregularSelectionCommands } from './commands/irregular/selection';
 
 /**
  * Advanced command protocol definitions
@@ -53,6 +54,7 @@ export * from './commands/layer/bmask';
 export * from './commands/viewport/translate';
 export * from './commands/system/assets';
 export * from './commands/viewport/transform';
+export * from './commands/irregular/selection';
 
 /**
  * Register all built-in advanced commands to the command bus
@@ -71,7 +73,8 @@ export function registerAdvancedCommands(ctx: EditorContextValue['actions']) {
     LayerBitmapMaskCommands,
     ViewportTranslateCommands,
     SystemAssetCommands,
-    ViewportTransformCommands
+    ViewportTransformCommands,
+    IrregularSelectionCommands
   ];
 
   allCommandSets.forEach(cmdSet => {

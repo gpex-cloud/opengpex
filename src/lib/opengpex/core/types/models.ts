@@ -20,7 +20,7 @@
 /**
  * Model Types: Editor core business model definitions
  */
-import { Dimensions, LocalShape, LocalRect } from './primitives';
+import { Dimensions, LocalShape, LocalRect, LocalPolygon } from './primitives';
 
 export type RenderEngine = 'canvas' | 'webgpu';
 export const LAYER_ROLES = ['host', 'frag', 'exchange'] as const;
@@ -193,6 +193,16 @@ export interface Frame {
   // Clipping attributes
   imageCropBox: LocalShape;
   canvasCropBox: LocalShape;
+  /**
+   * Irregular selection box (lasso / wand / AI-matting bitmap → polygon).
+   * Independent type from `LocalShape` — does NOT participate in the rendering pipeline
+   * crop in Phase 1. Only consumed by:
+   *   - `useFastMarchingAntsSync` for purple marching-ants preview
+   *   - `adv.irregular.toLayerMask` for baking into a `BitmapMask`
+   *
+   * Both `null` and `undefined` mean "no irregular selection".
+   */
+  irregularCropBox?: LocalPolygon | null;
   imageAspect?: number;
   canvasAspect?: number;
 

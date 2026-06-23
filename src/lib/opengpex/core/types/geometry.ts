@@ -22,7 +22,8 @@ export * from './primitives';
 import {
   Point2D, Dimensions, Rect, IMatrix3x3, IMatrix3x3Constructor,
   WorldPoint, WorldRect, LocalPoint, LocalRect, ViewportPoint, ViewportRect,
-  WorldShape, LocalShape, Shape
+  WorldShape, LocalShape, Shape,
+  LocalPolygon, WorldPolygon
 } from './primitives';
 
 /** 
@@ -208,5 +209,25 @@ export interface GeometryService {
     layerLocalToFrameLocal: (shape: Shape, layer: Layer, frame: Frame) => LocalShape;
     /** Calculates joint bounding box shape of a set of layers in world space */
     unitedShapeOfLayers: (layers: Layer[]) => WorldShape | null;
+  };
+
+  /**
+   * Polygon engine service: independent multi-ring vector polygon utilities for irregular selection.
+   * Parallel to `shape.*` and intentionally kept separate (see phase1_irregular_clip_spec §2.0).
+   */
+  polygon: {
+    /** Computes axis-aligned bounding box of a multi-ring point set (no brand). */
+    computePolygonBounds: (rings: Point2D[][]) => Rect;
+    /** Projects polygon from local space to world space (Layer or Frame source). */
+    localToWorldPolygon: (poly: LocalPolygon, source: Layer | Frame) => WorldPolygon;
+    /** Projects polygon from world space to local space (Layer or Frame target). */
+    worldToLocalPolygon: (poly: WorldPolygon, target: Layer | Frame) => LocalPolygon;
+    /** Composes frame-local -> world -> layer-local polygon projection. */
+    frameLocalToLayerLocalPolygon: (poly: LocalPolygon, frame: Frame, layer: Layer) => LocalPolygon;
+    /**
+     * Generates a multi-ring SVG path `d` string (relative to `poly.bounds.x/y`),
+     * suitable for evenodd fill rule rendering.
+     */
+    polygonToSvgPathD: (poly: LocalPolygon) => string;
   };
 }

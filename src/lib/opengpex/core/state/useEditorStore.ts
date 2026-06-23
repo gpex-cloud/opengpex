@@ -22,7 +22,7 @@ import {
   EditorData, EditorState, EditorAction, Layer, Frame, CameraState, UIConfig,
   BuiltPlugin, EditorShortcut, BuiltCommand, Dimensions, NormalizedState,
   EditorActions, EditorContextValue, GlobalHistoryState, EngineStatus, LocalShape,
-  InteractionSignalValue, ClipboardLayerMetadata, BitmapMask
+  InteractionSignalValue, ClipboardLayerMetadata, BitmapMask, LocalPolygon
 } from '@opengpex/editor/core/types';
 import { LayerUtils } from '@opengpex/editor/core/layer/LayerUtils';
 import { initialState, editorReducer } from './reducer';
@@ -301,6 +301,12 @@ export function useEditorStore() {
       },
       setImageCropBox: (frameId: string, cropBox: LocalShape) => enhancedDispatch({ type: 'SET_IMAGE_CROP_BOX', payload: { frameId, cropBox } }),
       setCanvasCropBox: (frameId: string, cropBox: LocalShape) => enhancedDispatch({ type: 'SET_CANVAS_CROP_BOX', payload: { frameId, cropBox } }),
+      setIrregularCropBox: (frameId: string, polygon: LocalPolygon | null) =>
+        enhancedDispatch(
+          polygon == null
+            ? { type: 'CLEAR_IRREGULAR_CROP_BOX', payload: { frameId } }
+            : { type: 'SET_IRREGULAR_CROP_BOX', payload: { frameId, polygon } }
+        ),
       setImageAspect: (frameId: string, aspect: number | undefined) => enhancedDispatch({ type: 'SET_IMAGE_ASPECT', payload: { frameId, aspect } }),
       setCanvasAspect: (frameId: string, aspect: number | undefined) => enhancedDispatch({ type: 'SET_CANVAS_ASPECT', payload: { frameId, aspect } }),
       updateCamera: (frameId: string, camera: CameraState) => enhancedDispatch({ type: 'UPDATE_CAMERA', payload: { frameId, camera } }),
@@ -501,6 +507,14 @@ export function useEditorStore() {
           },
           engines: {
             probe: advRef(P.ADV_SYSTEM_PROBE_ENGINES, () => executeCommand(P.ADV_SYSTEM_PROBE_ENGINES)),
+          },
+        },
+        irregular: {
+          selection: {
+            // Pre-PR-6-2: `set` / `clear` removed — producers (lasso / wand /
+            // AI matting) call `actions.setIrregularCropBox(frameId, polygon | null)`
+            // directly. See `phase1_irregular_clip_spec.md` §6 Pre-PR-6-2.0 / .1.
+            toLayerMask: advRef(P.ADV_IRREGULAR_TO_LAYER_MASK, (payload?: { layerId?: string }) => executeCommand<{ layerId?: string } | undefined, Promise<void>>(P.ADV_IRREGULAR_TO_LAYER_MASK, payload)),
           },
         },
       }

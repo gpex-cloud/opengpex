@@ -21,7 +21,6 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import {
-  Square,
   Split,
   ChevronDown,
   Maximize,
@@ -33,8 +32,7 @@ import {
   Scissors,
   Copy as CopyIcon,
   ClipboardPaste,
-  Circle,
-  CircleDashed,
+  ScissorsLineDashed,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -44,6 +42,7 @@ import {
 import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import { useClipOptionsCommands } from "./hooks";
+import { CROP_TOOL_STRATEGIES, type CropToolStrategy } from "./protocols";
 
 const ASPECT_RATIOS = [
   { label: "FREE", value: undefined },
@@ -69,8 +68,12 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
     setAspectCmd,
     branchCreateCmd,
     updateClipBox,
-    setShapeType,
     closeReCanvas,
+    cropToolSetCmd,
+    applyMaskCmd,
+    cropTool,
+    isIrregularTool,
+    hasIrregularBox,
   } = useClipOptionsCommands();
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -132,6 +135,23 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
   const disabledClasses =
     "opacity-40 cursor-not-allowed grayscale-[0.5] pointer-events-none";
 
+  // ─── Crop tool → main-button visual mapping (§3.2.2 / Pre-PR-6-2) ─────────
+  // The per-tool icon + accent palette now lives entirely in
+  // `CROP_TOOL_STRATEGIES` (single source of truth in `protocols.ts`). The
+  // local `TOOL_VISUAL` table that used to mirror those rows was removed —
+  // adding a new tool no longer requires touching this file.
+  const activeStrategy = CROP_TOOL_STRATEGIES[cropTool] ?? CROP_TOOL_STRATEGIES.rect;
+  const ToolIcon = activeStrategy.icon;
+  // Map abstract `accent` palette to Tailwind utility strings. We deliberately
+  // keep this thin map at the call-site (rather than embedding Tailwind class
+  // strings inside the strategy table) so `protocols.ts` stays free of
+  // styling concerns and reusable across L3–L6 consumers.
+  const ACCENT_CLASSES = {
+    amber:  { textClass: "text-amber-600 dark:text-amber-500", borderOpenClass: "border-amber-500/50",  activeBg: "bg-amber-500/10 text-amber-600 dark:text-amber-400"  },
+    purple: { textClass: "text-purple-500",                    borderOpenClass: "border-purple-500/50", activeBg: "bg-purple-500/10 text-purple-600 dark:text-purple-400" },
+  } as const;
+  const toolVisual = ACCENT_CLASSES[activeStrategy.accent];
+
   return (
     <div className="flex items-center gap-1 -mr-1 animate-in fade-in slide-in-from-left-2 duration-300">
       {/* 1. Header Section */}
@@ -155,13 +175,13 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
         <div
           className={`relative flex items-center h-7 rounded-xl transition-all border shadow-sm
           ${
-            isDropdownOpen && !isPanMode
-              ? "bg-[var(--bg-panel)] border-amber-500/50 shadow-lg"
+            (isDropdownOpen || isShapeDropdownOpen) && !isPanMode
+              ? `bg-[var(--bg-panel)] ${toolVisual.borderOpenClass} shadow-lg`
               : "bg-[var(--bg-panel)] border-[var(--border-subtle)] hover:border-[var(--border-light)]"
           }
         `}
         >
-          {/* Segment 1: Mode Toggle & Shape Selector */}
+          {/* Segment 1: Mode Toggle & Tool Selector — icon/colour follows cropTool (§3.2.2) */}
           <div className="relative h-full">
             <button
               onClick={() => toggleModeCmd?.execute()}
@@ -175,23 +195,8 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
             >
               {isPanMode ? (
                 <Hand size={13} className="text-[var(--text-muted)]" />
-              ) : cropShape.type === "circle" ? (
-                cropShape.antiAliased !== false ? (
-                  <Circle
-                    size={13}
-                    className="text-amber-600 dark:text-amber-500"
-                  />
-                ) : (
-                  <CircleDashed
-                    size={13}
-                    className="text-amber-600 dark:text-amber-500"
-                  />
-                )
               ) : (
-                <Square
-                  size={13}
-                  className="text-amber-600 dark:text-amber-500"
-                />
+                <ToolIcon size={13} className={toolVisual.textClass} />
               )}
             </button>
 
@@ -203,59 +208,50 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                   exit={{ opacity: 0, scale: 0.95, y: 5 }}
                   onMouseEnter={handleShapeMouseEnter}
                   onMouseLeave={handleShapeMouseLeave}
-                  className="absolute top-full left-0 mt-1.5 w-42 bg-[var(--bg-panel)] backdrop-blur-xl border border-[var(--border-subtle)] rounded-xl shadow-2xl overflow-hidden z-50 p-1 ring-1 ring-black/5"
+                  className="absolute top-full left-0 mt-1.5 w-44 bg-[var(--bg-panel)] backdrop-blur-xl border border-[var(--border-subtle)] rounded-xl shadow-2xl overflow-hidden z-50 p-1 ring-1 ring-black/5"
                 >
                   <div className="flex flex-col gap-0.5">
-                    {[
-                      {
-                        id: "rect",
-                        label: "Rectangle",
-                        icon: Square,
-                        active: cropShape.type === "rect",
-                        onClick: () => setShapeType("rect"),
-                      },
-                      {
-                        id: "circle-smooth",
-                        label: "Ellipse (Smooth)",
-                        icon: Circle,
-                        active:
-                          cropShape.type === "circle" &&
-                          cropShape.antiAliased !== false,
-                        onClick: () => setShapeType("circle", true),
-                      },
-                      {
-                        id: "circle-pixelated",
-                        label: "Ellipse (Pixel)",
-                        icon: CircleDashed,
-                        active:
-                          cropShape.type === "circle" &&
-                          cropShape.antiAliased === false,
-                        onClick: () => setShapeType("circle", false),
-                      },
-                    ].map((shape) => (
-                      <button
-                        key={shape.id}
-                        onClick={() => {
-                          shape.onClick();
-                          setIsShapeDropdownOpen(false);
-                        }}
-                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors text-left
-                          ${
-                            shape.active
-                              ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                              : "text-[var(--text-muted)] hover:bg-[var(--bg-stage)] hover:text-[var(--text-main)]"
-                          }
-                        `}
-                      >
-                        <shape.icon size={12} className="shrink-0" />
-                        <span className="text-[10px] font-bold uppercase tracking-wide whitespace-nowrap">
-                          {shape.label}
-                        </span>
-                        {shape.active && (
-                          <Check size={10} className="ml-auto" />
-                        )}
-                      </button>
-                    ))}
+                    {/*
+                     * Pre-PR-6-2: dropdown items are now generated by iterating
+                     * `Object.values(CROP_TOOL_STRATEGIES)`. A divider is
+                     * inserted automatically between consecutive items whose
+                     * `family` differs (currently regular → irregular). Adding
+                     * a new tool to the strategy table makes it appear here
+                     * without touching this file.
+                     */}
+                    {(Object.values(CROP_TOOL_STRATEGIES) as CropToolStrategy[]).map((s, idx, arr) => {
+                      const Icon = s.icon;
+                      const active = cropTool === s.id;
+                      const accent = ACCENT_CLASSES[s.accent];
+                      // Insert a separator immediately before the first item
+                      // of a new family group (so we don't get a leading or
+                      // trailing divider).
+                      const showDivider = idx > 0 && arr[idx - 1].family !== s.family;
+                      return (
+                        <React.Fragment key={s.id}>
+                          {showDivider && <div className="my-1 h-px bg-[var(--border-subtle)]" />}
+                          <button
+                            onClick={() => {
+                              cropToolSetCmd?.execute({ tool: s.id });
+                              setIsShapeDropdownOpen(false);
+                            }}
+                            className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors text-left
+                              ${
+                                active
+                                  ? accent.activeBg
+                                  : "text-[var(--text-muted)] hover:bg-[var(--bg-stage)] hover:text-[var(--text-main)]"
+                              }
+                            `}
+                          >
+                            <Icon size={12} className="shrink-0" />
+                            <span className="text-[10px] font-bold uppercase tracking-wide whitespace-nowrap">
+                              {s.label}
+                            </span>
+                            {active && <Check size={10} className="ml-auto" />}
+                          </button>
+                        </React.Fragment>
+                      );
+                    })}
                   </div>
                 </motion.div>
               )}
@@ -264,15 +260,21 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
 
           <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20" />
 
-          {/* Segment 2: Aspect Ratio Selector */}
+          {/* Segment 2: Aspect Ratio Selector — disabled on irregular tools (§3.2.4) */}
           <button
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
+            onMouseEnter={isIrregularTool ? undefined : handleMouseEnter}
+            onMouseLeave={isIrregularTool ? undefined : handleMouseLeave}
             className="flex items-center h-full outline-none select-none"
+            disabled={isIrregularTool}
+            title={isIrregularTool ? "Aspect ratio is N/A for lasso / wand selection" : undefined}
           >
             <div
               className={`flex items-center gap-1.5 px-2 h-full rounded-r-xl transition-colors outline-none select-none
-              ${isPanMode ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
+              ${
+                isPanMode || isIrregularTool
+                  ? disabledClasses
+                  : "hover:bg-[var(--bg-stage)]"
+              }
             `}
             >
               <span className="text-[10px] font-black text-[var(--text-main)] min-w-[32px] text-center">
@@ -288,7 +290,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
 
         {/* Floating Dropdown */}
         <AnimatePresence>
-          {isDropdownOpen && !isPanMode && (
+          {isDropdownOpen && !isPanMode && !isIrregularTool && (
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 5 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -326,6 +328,27 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
         >
           <Split size={13} className="text-emerald-500" />
         </FunctionButton>
+
+        {/*
+         * Apply Mask — purple, lasso/wand-only (§3.2.5).
+         * Renders only when:
+         *   - the active tool is irregular (lasso/wand), AND
+         *   - the user has actually committed a polygon (irregularCropBox != null), AND
+         *   - we are in clip mode and not Re-Canvas.
+         * The space at the right of `branchCreateCmd` is reserved for the future
+         * "antiAliased toggle" sibling per §5.2 #4 — do NOT wrap into a PluginSlot.
+         */}
+        {isIrregularTool && hasIrregularBox && !isPanMode && !isReCanvas && (
+          <FunctionButton
+            onClick={() => applyMaskCmd?.execute({})}
+            title="Apply Selection as Mask"
+            variant="ghost"
+            tooltipPosition="bottom"
+            className="w-6 h-6"
+          >
+            <ScissorsLineDashed size={13} className="text-purple-500" />
+          </FunctionButton>
+        )}
 
         <div className="relative">
           <FunctionButton

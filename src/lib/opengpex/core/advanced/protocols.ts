@@ -81,7 +81,18 @@ export const ADV_LAYER_BITMAP_MASK_CLEAR = 'adv.layer.bitmapMask.clear_all';
 // 5. Runtime & System Probing
 export const ADV_SYSTEM_PROBE_ENGINES = 'adv.system.probe_engines';
 
-// 6. System Signals
+// 6. Irregular Selection (lasso / wand / AI matting → polygon → bitmap mask)
+//
+// Note (Pre-PR-6-2): there is intentionally NO `set` / `clear` adv command
+// here. Producers (lasso / wand handlers, AI matting pipelines) write the
+// frame's `irregularCropBox` directly via `actions.setIrregularCropBox`,
+// matching the rect/ellipse pattern of writing `imageCropBox` /
+// `canvasCropBox` directly. The only adv command in this group is
+// `toLayerMask`, which is an irreducible 3-step transaction (project +
+// bake + addBitmapMask + clear) that needs the executeCommand atom.
+export const ADV_IRREGULAR_TO_LAYER_MASK = 'adv.irregular.toLayerMask';
+
+// 7. System Signals
 // Used to synchronize temporary flags across plug-ins in the global state
 export const SIGNAL_SYS_ASSET_CONVERTING = 'sys.asset.converting';
 export const SIGNAL_SYS_CANVAS_DIRTY = 'sys.canvas.dirty';

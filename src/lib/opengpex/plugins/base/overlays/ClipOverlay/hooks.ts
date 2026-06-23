@@ -21,7 +21,13 @@ import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { Motion } from '@opengpex/editor/core/motion';
 import { asLocalShape } from '@opengpex/editor/core/types';
-import { CLIP_OPTIONS_SIGNAL_RE_CANVAS, CLIP_OPTIONS_CMD_RESET_BOX } from '../../options/ClipOptions/protocols';
+import {
+  CLIP_OPTIONS_SIGNAL_RE_CANVAS,
+  CLIP_OPTIONS_CMD_RESET_BOX,
+  CLIP_OPTIONS_SIGNAL_CROP_TOOL,
+  CROP_TOOL_STRATEGIES,
+  CropTool,
+} from '../../options/ClipOptions/protocols';
 
 /**
  * useClipOverlayCommands: Encapsulates UI helper logic and command proxies for the cropping overlay.
@@ -36,6 +42,16 @@ export function useClipOverlayCommands() {
 
   const isReCanvas = state.getStateSignal(CLIP_OPTIONS_SIGNAL_RE_CANVAS);
   const isClipActive = state.interaction.interactionMode === 'clip';
+
+  // Active crop / selection tool. Default 'rect' so the regular flow keeps working
+  // even before ClipOptions registers the SIGNAL_CROP_TOOL signal (PR-5).
+  const cropTool = state.getStateSignal<CropTool>(CLIP_OPTIONS_SIGNAL_CROP_TOOL, 'rect');
+  // Pre-PR-6-2: derive regular/irregular split from the strategy table's
+  // `family` field. Adding a future tool only requires a row in
+  // `CROP_TOOL_STRATEGIES`; this hook needs no edits.
+  const family = CROP_TOOL_STRATEGIES[cropTool].family;
+  const isRegularTool = family === 'regular';
+  const isIrregularTool = family === 'irregular';
 
   const { imageCropBox, canvasCropBox, canvas: canvasDim } = activeFrame || {
     imageCropBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
@@ -74,6 +90,8 @@ export function useClipOverlayCommands() {
     };
   }, []);
 
+  const hasIrregularBox = !!activeFrame?.irregularCropBox;
+
   return {
     activeFrame,
     cropBox,
@@ -83,6 +101,10 @@ export function useClipOverlayCommands() {
     canvasDim,
     isReCanvas,
     isClipActive,
+    cropTool,
+    isRegularTool,
+    isIrregularTool,
+    hasIrregularBox,
     dragType: state.interaction.isInteracting ? 'move' : '',
     showError,
     boxRef,

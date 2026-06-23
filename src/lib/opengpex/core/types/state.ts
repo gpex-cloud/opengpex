@@ -22,7 +22,7 @@
  */
 import { Frame, Layer, CameraState, NormalizedState } from './models';
 import { Dimensions, SmartGuideData } from './geometry';
-import { LocalShape } from './primitives';
+import { LocalShape, LocalPolygon } from './primitives';
 import { Patch } from 'immer';
 
 export type CoreEditorSlot = 'TL' | 'TR' | 'BL' | 'BR' | 'DOCK' | 'SIDE_BAR' | 'ROOT_OVERLAY' | 'VIEWPORT_OVERLAY' | 'STAGE_OVERLAY' | 'STAGE_GIZMOS' | 'OPTION_BAR' | 'TOOL_MENU' | 'HIDDEN';
@@ -134,6 +134,8 @@ export type EditorAction =
   | { type: 'UPDATE_CAMERA'; payload: { frameId: string; camera: CameraState } }
   | { type: 'SET_IMAGE_CROP_BOX'; payload: { frameId: string; cropBox: LocalShape } }
   | { type: 'SET_CANVAS_CROP_BOX'; payload: { frameId: string; cropBox: LocalShape } }
+  | { type: 'SET_IRREGULAR_CROP_BOX'; payload: { frameId: string; polygon: LocalPolygon } }
+  | { type: 'CLEAR_IRREGULAR_CROP_BOX'; payload: { frameId: string } }
   | { type: 'SET_IMAGE_ASPECT'; payload: { frameId: string; aspect: number | undefined } }
   | { type: 'SET_CANVAS_ASPECT'; payload: { frameId: string; aspect: number | undefined } }
   | { type: 'SIGNAL_COMMIT'; payload: { frameId: string } }

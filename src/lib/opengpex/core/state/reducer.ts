@@ -360,6 +360,40 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
       };
     }
 
+    case 'SET_IRREGULAR_CROP_BOX': {
+      const { frameId, polygon } = action.payload;
+      const frame = state.frames.byId[frameId];
+      if (!frame) return state;
+      return {
+        ...state,
+        frames: {
+          ...state.frames,
+          byId: {
+            ...state.frames.byId,
+            [frameId]: { ...frame, irregularCropBox: polygon }
+          }
+        }
+      };
+    }
+
+    case 'CLEAR_IRREGULAR_CROP_BOX': {
+      const { frameId } = action.payload;
+      const frame = state.frames.byId[frameId];
+      if (!frame) return state;
+      // Idempotent: if already absent, skip allocation to avoid noise patches in history
+      if (frame.irregularCropBox == null) return state;
+      return {
+        ...state,
+        frames: {
+          ...state.frames,
+          byId: {
+            ...state.frames.byId,
+            [frameId]: { ...frame, irregularCropBox: null }
+          }
+        }
+      };
+    }
+
     case 'SET_IMAGE_ASPECT': {
       const { frameId, aspect } = action.payload;
       const frame = state.frames.byId[frameId];

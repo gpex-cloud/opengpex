@@ -28,13 +28,109 @@ export const CMD_RESET_ASPECT = 'cmd.reset_aspect';
 export const CMD_BRANCH = 'cmd.branch.create';
 export const CMD_RESET_BOX = 'cmd.box.reset';
 export const CMD_TOGGLE_ANTI_ALIAS = 'cmd.anti_alias.toggle';
+export const CMD_SET_CROP_TOOL = 'cmd.crop_tool.set';
 
 export const SIGNAL_RE_CANVAS = 'signal.re_canvas.active';
+export const SIGNAL_CROP_TOOL = 'signal.crop_tool';
 
+/**
+ * CropTool: Active crop / selection tool.
+ *
+ * - 'rect' / 'ellipse-smooth' / 'ellipse-pixel'  → regular shapes that write `imageCropBox` / `canvasCropBox` (amber UI accent).
+ * - 'lasso' / 'wand'                              → irregular selections that write `irregularCropBox` (purple UI accent).
+ *
+ * Strictly separated from `Shape.type`: the relationship is one-way (CropTool → Shape.type / antiAliased),
+ * driven by the `setCropTool` command at tool-switch time. The reverse is forbidden.
+ */
+export type CropTool = 'rect' | 'ellipse-smooth' | 'ellipse-pixel' | 'lasso' | 'wand';
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Pre-PR-6-2  ::  CropTool Strategy Table (Single Source of Truth)
+ *
+ * The five-or-more flavour properties of every clip tool — UI icon, palette,
+ * data-write family, interaction handler kind, projection-on-switch, and
+ * Re-Canvas mutual-exclusion — used to be scattered as if/else branches across
+ * six call-sites:
+ *   L1 visual    : ClipOptions/components.tsx        (TOOL_VISUAL table)
+ *   L2 behavior  : ClipOptions/commands.ts           (setCropTool if-chain)
+ *   L3 channel   : ClipOverlay/components.tsx        (isRegularTool / isIrregularTool literal)
+ *   L4 handler   : ClipOverlay/interactions.ts       (per-handler test() guards)
+ *   L5 data write: ClipOverlay/interactions.ts       (lasso onEnd → adv.irregular.set vs setIrregularCropBox)
+ *   L6 mutex     : ClipOptions/commands.ts           (Re-Canvas force-rect interceptor)
+ *
+ * Each new tool used to require a 6-touch coordinated change with no compiler
+ * help, exactly the failure mode this table eliminates: now a new tool is
+ * literally one row added to `CROP_TOOL_STRATEGIES`. The narrow `LucideIcon`
+ * import is local-only on purpose so this file remains shareable across L3–L6
+ * consumers without dragging in unrelated UI deps.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+import type { LucideIcon } from 'lucide-react';
+import { Square, Circle, CircleDashed, Lasso, Wand2 } from 'lucide-react';
+
+export type CropFamily = 'regular' | 'irregular';
+
+export interface CropToolStrategy {
+  /** L1 visual */
+  readonly id: CropTool;
+  readonly label: string;
+  readonly icon: LucideIcon;
+  readonly accent: 'amber' | 'purple';
+
+  /** L2 / L5 data-write routing — `regular` writes imageCropBox, `irregular` writes irregularCropBox. */
+  readonly family: CropFamily;
+
+  /**
+   * L4 handler dispatch hint — consumed only inside ClipOverlay/interactions.ts
+   * via `makeCropToolGuard(handlerKind)`. External call-sites must not branch
+   * on this; use `family` instead.
+   */
+  readonly handlerKind: 'clipbox' | 'lasso' | 'wand';
+
+  /**
+   * L2 projection on tool-switch — only meaningful for `regular` tools (which
+   * project onto imageCropBox / canvasCropBox). `undefined` for irregular
+   * tools to skip the projection branch entirely (no special-case if needed).
+   */
+  readonly projectShape?: () => { type: 'rect' | 'circle'; antiAliased: boolean };
+
+  /**
+   * L6 Re-Canvas mutex — `true` means switching into Re-Canvas mode while this
+   * tool is active forces a fallback to 'rect' (canvas resizing only operates
+   * on a rectangular footprint).
+   */
+  readonly forbiddenInReCanvas: boolean;
+}
+
+/**
+ * CROP_TOOL_STRATEGIES — Single Source of Truth.
+ *
+ * Adding a new tool: add one row here, then
+ *   1. (optional) add a handler factory in ClipOverlay/interactions.ts whose
+ *      `test()` uses `makeCropToolGuard('<your-handlerKind>')`
+ *   2. nothing else — L1/L2/L3/L6 derive automatically.
+ */
+export const CROP_TOOL_STRATEGIES: Record<CropTool, CropToolStrategy> = {
+  'rect':           { id: 'rect',           label: 'Rectangle',        icon: Square,       accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'rect',   antiAliased: true  }), forbiddenInReCanvas: false },
+  'ellipse-smooth': { id: 'ellipse-smooth', label: 'Ellipse (Smooth)', icon: Circle,       accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'circle', antiAliased: true  }), forbiddenInReCanvas: false },
+  'ellipse-pixel':  { id: 'ellipse-pixel',  label: 'Ellipse (Pixel)',  icon: CircleDashed, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'circle', antiAliased: false }), forbiddenInReCanvas: false },
+  'lasso':          { id: 'lasso',          label: 'Lasso',            icon: Lasso,        accent: 'purple', family: 'irregular', handlerKind: 'lasso',                                                                  forbiddenInReCanvas: true  },
+  'wand':           { id: 'wand',           label: 'Magic Wand',       icon: Wand2,        accent: 'purple', family: 'irregular', handlerKind: 'wand',                                                                   forbiddenInReCanvas: true  },
+};
+
+/**
+ * Derived helpers — kept as named exports for searchability and call-site
+ * readability. Both go through CROP_TOOL_STRATEGIES so there is no duplicate
+ * source of truth (`if (isIrregularTool(tool))` ≡ `if (CROP_TOOL_STRATEGIES[tool].family === 'irregular')`).
+ */
+export const isRegularTool   = (t: CropTool): boolean => CROP_TOOL_STRATEGIES[t].family === 'regular';
+export const isIrregularTool = (t: CropTool): boolean => CROP_TOOL_STRATEGIES[t].family === 'irregular';
 
 // Cross-plugin reference UIDs (for use by external consumers via actions.executeCommand)
 export const CLIP_OPTIONS_CMD_TOGGLE_MODE = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_TOGGLE_MODE}`;
 export const CLIP_OPTIONS_CMD_RESET_BOX = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_RESET_BOX}`;
 export const CLIP_OPTIONS_CMD_BRANCH = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_BRANCH}`;
+export const CLIP_OPTIONS_CMD_SET_CROP_TOOL = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CROP_TOOL}`;
 export const CLIP_OPTIONS_SIGNAL_RE_CANVAS = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_RE_CANVAS}`;
+export const CLIP_OPTIONS_SIGNAL_CROP_TOOL = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_CROP_TOOL}`;
 

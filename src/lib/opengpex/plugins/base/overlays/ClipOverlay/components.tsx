@@ -17,19 +17,34 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 import {
   useOverlayRotationSync,
   useEditorState,
 } from "@opengpex/editor/core/context";
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
 import { useClipOverlayCommands } from "./hooks";
-import { useCropDimSync, useCropBoxSync } from "./useFastSync";
+import {
+  useCropDimSync,
+  useRegularCropSync,
+  useIrregularSelectionSync,
+} from "./useFastSync";
+import { lassoPreviewPathRef } from "./interactions";
 import { PIXEL_GRID_CONFIG_KEY } from "../PixelGridOverlay/protocols";
 
 /**
  * ClipOverlayMain: UI layer for the cropping tool.
- * Responsible for rendering SVG masks, grid lines, resize handles, and real-time dimension labels.
+ *
+ * Two SVG marching-ants channels coexist permanently in the DOM (mounted but
+ * inactive when not relevant) so the CSS keyframe animation never resets:
+ *   - Channel 1 (white / red): regular crop box (rect / ellipse), driven by
+ *     `useRegularCropSync` and active only when `cropTool ∈ {rect, ellipse-*}`.
+ *   - Channel 2 (purple): irregular polygon selection (lasso / wand), driven
+ *     by `useIrregularSelectionSync`, active only when `cropTool ∈ {lasso, wand}`
+ *     **and** `irregularCropBox` is non-null.
+ *   - Channel 3 (purple, screen-space): the live lasso preview during pointer
+ *     drag. Updated imperatively by `createLassoHandler` via `lassoPreviewPathRef`,
+ *     bypassing React entirely. Hidden when the trail is empty (`d=""`).
  */
 export function ClipOverlayMain() {
   const {
@@ -41,6 +56,8 @@ export function ClipOverlayMain() {
     showError,
     boxRef,
     cropType,
+    isRegularTool,
+    isIrregularTool,
   } = useClipOverlayCommands();
   const { state } = useEditorState();
 
@@ -56,19 +73,63 @@ export function ClipOverlayMain() {
     ? (gridConfig.zoomThreshold ?? 8)
     : null;
 
-  // 2. Selection Box and Mask Sync
-  const { syncStyle, groupRef, pathRef, guidesRef } = useCropBoxSync(
+  // 2a. Regular crop sync (rect / ellipse) — pause when on lasso/wand
+  const { syncStyle, groupRef, pathRef, guidesRef } = useRegularCropSync(
     boxRef,
     cropBox,
-    isClipActive,
+    isClipActive && isRegularTool,
     isReCanvas,
     showGridThreshold,
   );
-  const { dimLabelRef } = useCropDimSync(isClipActive, isReCanvas);
+
+  // 2b. Irregular polygon sync (lasso / wand) — selector returns null when
+  //     irregularCropBox is empty so the path naturally hides.
+  const polyGroupRef = useRef<SVGGElement>(null);
+  const polyPathRef = useRef<SVGPathElement>(null);
+  useIrregularSelectionSync(
+    polyGroupRef,
+    polyPathRef,
+    isClipActive && isIrregularTool,
+  );
+
+  // 2c. Lasso preview path: install/uninstall the module-level ref slot used
+  //     by `createLassoHandler` to paint the in-progress trail without redux.
+  //
+  // [Pre-PR-6 缺陷 B 真因修复] We MUST use a ref callback instead of a
+  // useRef + useEffect([]) pair. Reason:
+  //
+  //   - `if (!activeFrame || !isClipActive) return null;` early-exits below.
+  //   - On the very first render (non-clip mode), the <path> below is NEVER
+  //     rendered, so `previewPathRef.current === null`.
+  //   - The useEffect with `[]` deps then captures that null and assigns it
+  //     to the module-level `lassoPreviewPathRef.current`.
+  //   - When the user later switches to clip mode the component re-renders,
+  //     the <path> mounts, but the empty-deps effect never runs again, so
+  //     `lassoPreviewPathRef.current` stays null forever.
+  //   - Result: `createLassoHandler.onStart` reports `previewRef=false` even
+  //     though pointermove fires — exactly what the live trace showed.
+  //
+  // The ref callback below fires synchronously on EVERY mount/unmount of the
+  // <path> element, so the module-level ref is always in sync with the DOM
+  // regardless of conditional rendering above.
+  const previewPathRef = useRef<SVGPathElement | null>(null);
+  const setPreviewPathRef = useCallback((el: SVGPathElement | null) => {
+    previewPathRef.current = el;
+    lassoPreviewPathRef.current = el;
+  }, []);
+
+  const { dimLabelRef } = useCropDimSync(
+    isClipActive && isRegularTool,
+    isReCanvas,
+  );
 
   if (!activeFrame || !isClipActive) return null;
 
-  const cursor = dragType === "move" ? "move" : "default";
+  const cursor = dragType === "move"
+    ? "move"
+    : isIrregularTool
+      ? "crosshair"
+      : "default";
 
   return (
     <div
@@ -79,6 +140,7 @@ export function ClipOverlayMain() {
       {/* 1. Marching Ants Vector Layer (Full Viewport SVG, transformed via group) */}
       <div className="absolute inset-0 pointer-events-none overflow-visible">
         <svg className="absolute inset-0 w-full h-full overflow-visible">
+          {/* Channel 1: regular crop (rect / ellipse) */}
           <g
             ref={groupRef}
             style={{
@@ -97,109 +159,143 @@ export function ClipOverlayMain() {
               className="marching-ants"
             />
           </g>
+
+          {/* Channel 2: irregular polygon selection (lasso / wand) */}
+          <g
+            ref={polyGroupRef}
+            style={{ filter: "drop-shadow(0 0 1px rgba(0,0,0,0.5))" }}
+          >
+            <path
+              ref={polyPathRef}
+              fill="rgba(168, 85, 247, 0.08)"
+              fillRule="evenodd"
+              stroke="#a855f7"
+              strokeWidth="1"
+              vectorEffect="non-scaling-stroke"
+              strokeDasharray="6,6"
+              className="marching-ants"
+            />
+          </g>
+
+          {/* Channel 3: live lasso preview (screen-space, imperatively updated) */}
+          <path
+            ref={setPreviewPathRef}
+            fill="rgba(168, 85, 247, 0.06)"
+            fillRule="evenodd"
+            stroke="#a855f7"
+            strokeWidth="1"
+            strokeDasharray="4,4"
+            vectorEffect="non-scaling-stroke"
+            pointerEvents="none"
+          />
         </svg>
       </div>
 
-      <div
-        ref={boxRef}
-        className="absolute pointer-events-auto cursor-move transition-[border-radius] duration-300"
-        style={{
-          ...syncStyle,
-          borderRadius: cropType === "circle" ? "50%" : "0%",
-        }}
-        data-handle="move"
-      >
-        {showError && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in duration-300">
-            <div className="bg-red-500 text-white font-black uppercase text-[10px] tracking-widest px-3 py-1.5 rounded shadow-2xl flex items-center gap-2">
-              <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-              <span>Area is empty</span>
-            </div>
-          </div>
-        )}
-
-        {/* Resize Handles - Initially transparent, appears on hover */}
-        {[
-          { h: "nw", c: "top-0 left-0", cursor: "nwse-resize" },
-          { h: "ne", c: "top-0 right-0", cursor: "nesw-resize" },
-          { h: "sw", c: "bottom-0 left-0", cursor: "nesw-resize" },
-          { h: "se", c: "bottom-0 right-0", cursor: "nwse-resize" },
-        ].map((p) => (
-          <div
-            key={p.h}
-            className={`absolute w-6 h-6 transition-all group/handle ${p.c}`}
-            style={{
-              cursor: p.cursor,
-              transform: `translate(${p.h.includes("w") ? "-30%" : "-70%"}, ${p.h.includes("n") ? "-30%" : "-70%"})`,
-              left: p.h.includes("e") ? "100%" : "0%",
-              top: p.h.includes("s") ? "100%" : "0%",
-              zIndex: 10,
-            }}
-            data-handle={p.h}
-          >
-            <div
-              className={`absolute w-full h-[3px] transition-opacity duration-200 opacity-0 group-hover/handle:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"} ${p.h.includes("n") ? "top-0" : "bottom-0"}`}
-            />
-            <div
-              className={`absolute w-[3px] h-full transition-opacity duration-200 opacity-0 group-hover/handle:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"} ${p.h.includes("w") ? "left-0" : "right-0"}`}
-            />
-          </div>
-        ))}
-
+      {/* Regular crop's draggable rect + handles + dim label.
+          Hidden entirely on irregular tools — lasso/wand selections
+          are not draggable / resizable in Phase 1. */}
+      {isRegularTool && (
         <div
-          className={`absolute top-1/2 -left-px w-1 h-8 shadow-sm cursor-ew-resize transition-all opacity-0 hover:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`}
-          style={{ transform: "translate(-50%, -50%)" }}
-          data-handle="w"
-        />
-        <div
-          className={`absolute top-1/2 -right-px w-1 h-8 shadow-sm cursor-ew-resize transition-all opacity-0 hover:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`}
-          style={{ transform: "translate(50%, -50%)" }}
-          data-handle="e"
-        />
-        <div
-          className={`absolute left-1/2 -top-px w-8 h-1 shadow-sm cursor-ns-resize transition-all opacity-0 hover:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`}
-          style={{ transform: "translate(-50%, -50%)" }}
-          data-handle="n"
-        />
-        <div
-          className={`absolute left-1/2 -bottom-px w-8 h-1 shadow-sm cursor-ns-resize transition-all opacity-0 hover:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`}
-          style={{ transform: "translate(-50%, 50%)" }}
-          data-handle="s"
-        />
-
-        {/* Rule of Thirds Grid Lines - Only internal lines and clipped to shape */}
-        <div
-          ref={guidesRef}
-          className="absolute inset-0 opacity-20 pointer-events-none overflow-hidden"
-          style={{ borderRadius: cropType === "circle" ? "50%" : "0%" }}
-        >
-          {/* Horizontal lines */}
-          <div className="absolute top-1/3 left-0 w-full h-px bg-white" />
-          <div className="absolute top-2/3 left-0 w-full h-px bg-white" />
-          {/* Vertical lines */}
-          <div className="absolute left-1/3 top-0 h-full w-px bg-white" />
-          <div className="absolute left-2/3 top-0 h-full w-px bg-white" />
-        </div>
-
-        {/* Dimension Labels */}
-        <div
-          className="absolute left-0 bg-zinc-900/90 backdrop-blur-md border border-white/10 rounded flex items-center shadow-2xl pointer-events-none whitespace-nowrap"
+          ref={boxRef}
+          className="absolute pointer-events-auto cursor-move transition-[border-radius] duration-300"
           style={{
-            top: "calc(100% + 6px)",
-            padding: "1px 5px",
-            gap: "2px",
-            transformOrigin: "top left",
+            ...syncStyle,
+            borderRadius: cropType === "circle" ? "50%" : "0%",
           }}
+          data-handle="move"
         >
-          <span
-            ref={dimLabelRef}
-            className="text-[11px] font-black text-white tabular-nums tracking-tighter"
+          {showError && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in duration-300">
+              <div className="bg-red-500 text-white font-black uppercase text-[10px] tracking-widest px-3 py-1.5 rounded shadow-2xl flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                <span>Area is empty</span>
+              </div>
+            </div>
+          )}
+
+          {/* Resize Handles - Initially transparent, appears on hover */}
+          {[
+            { h: "nw", c: "top-0 left-0", cursor: "nwse-resize" },
+            { h: "ne", c: "top-0 right-0", cursor: "nesw-resize" },
+            { h: "sw", c: "bottom-0 left-0", cursor: "nesw-resize" },
+            { h: "se", c: "bottom-0 right-0", cursor: "nwse-resize" },
+          ].map((p) => (
+            <div
+              key={p.h}
+              className={`absolute w-6 h-6 transition-all group/handle ${p.c}`}
+              style={{
+                cursor: p.cursor,
+                transform: `translate(${p.h.includes("w") ? "-30%" : "-70%"}, ${p.h.includes("n") ? "-30%" : "-70%"})`,
+                left: p.h.includes("e") ? "100%" : "0%",
+                top: p.h.includes("s") ? "100%" : "0%",
+                zIndex: 10,
+              }}
+              data-handle={p.h}
+            >
+              <div
+                className={`absolute w-full h-[3px] transition-opacity duration-200 opacity-0 group-hover/handle:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"} ${p.h.includes("n") ? "top-0" : "bottom-0"}`}
+              />
+              <div
+                className={`absolute w-[3px] h-full transition-opacity duration-200 opacity-0 group-hover/handle:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"} ${p.h.includes("w") ? "left-0" : "right-0"}`}
+              />
+            </div>
+          ))}
+
+          <div
+            className={`absolute top-1/2 -left-px w-1 h-8 shadow-sm cursor-ew-resize transition-all opacity-0 hover:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`}
+            style={{ transform: "translate(-50%, -50%)" }}
+            data-handle="w"
+          />
+          <div
+            className={`absolute top-1/2 -right-px w-1 h-8 shadow-sm cursor-ew-resize transition-all opacity-0 hover:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`}
+            style={{ transform: "translate(50%, -50%)" }}
+            data-handle="e"
+          />
+          <div
+            className={`absolute left-1/2 -top-px w-8 h-1 shadow-sm cursor-ns-resize transition-all opacity-0 hover:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`}
+            style={{ transform: "translate(-50%, -50%)" }}
+            data-handle="n"
+          />
+          <div
+            className={`absolute left-1/2 -bottom-px w-8 h-1 shadow-sm cursor-ns-resize transition-all opacity-0 hover:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`}
+            style={{ transform: "translate(-50%, 50%)" }}
+            data-handle="s"
+          />
+
+          {/* Rule of Thirds Grid Lines - Only internal lines and clipped to shape */}
+          <div
+            ref={guidesRef}
+            className="absolute inset-0 opacity-20 pointer-events-none overflow-hidden"
+            style={{ borderRadius: cropType === "circle" ? "50%" : "0%" }}
           >
-            {Math.round(cropBox.w)} × {Math.round(cropBox.h)}
-          </span>
-          <span className="text-[11px] font-bold text-white/40 ml-0.5">px</span>
+            {/* Horizontal lines */}
+            <div className="absolute top-1/3 left-0 w-full h-px bg-white" />
+            <div className="absolute top-2/3 left-0 w-full h-px bg-white" />
+            {/* Vertical lines */}
+            <div className="absolute left-1/3 top-0 h-full w-px bg-white" />
+            <div className="absolute left-2/3 top-0 h-full w-px bg-white" />
+          </div>
+
+          {/* Dimension Labels */}
+          <div
+            className="absolute left-0 bg-zinc-900/90 backdrop-blur-md border border-white/10 rounded flex items-center shadow-2xl pointer-events-none whitespace-nowrap"
+            style={{
+              top: "calc(100% + 6px)",
+              padding: "1px 5px",
+              gap: "2px",
+              transformOrigin: "top left",
+            }}
+          >
+            <span
+              ref={dimLabelRef}
+              className="text-[11px] font-black text-white tabular-nums tracking-tighter"
+            >
+              {Math.round(cropBox.w)} × {Math.round(cropBox.h)}
+            </span>
+            <span className="text-[11px] font-bold text-white/40 ml-0.5">px</span>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

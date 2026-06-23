@@ -189,3 +189,73 @@ export const asLocalShape = (rect: Rect, type: ShapeType = 'rect', antiAliased: 
   antiAliased
 } as LocalShape);
 
+/**
+ * Polygon Engine Models: Independent vector polygon for irregular selection
+ *
+ * Polygon is a SEPARATE type system from Shape:
+ *   - Shape  = single rect + regular type (rect/circle/path), used by render pipeline / hit-test / clip masks
+ *   - Polygon = multi-ring point set (outer ring + inner holes), used by lasso / wand / AI matting selections
+ *
+ * The two MUST NOT be merged into a union type. See docs/opengpex/phase1_irregular_clip_spec.md §2.0.
+ */
+
+/**
+ * Polygon: base structure (multi-ring with bounds)
+ *
+ *  - rings[0]    = outer ring (winding: CW / clockwise)
+ *  - rings[1..]  = inner holes (winding: CCW / counter-clockwise)
+ *  - evenodd fill rule applies, so disconnected rings are also supported
+ *  - bounds      = axis-aligned bounding box, computed at construction time and frozen,
+ *                  used for SVG group projection / hit-test optimization / offscreen mask sizing
+ */
+export interface Polygon {
+  rings: Point2D[][];
+  bounds: Rect;
+  /**
+   * Reserved for Phase 2 pixel variant; default true behavior (smooth float lines).
+   * Phase 1 declares this field but does NOT consume it; all Phase 1 polygon operators
+   * treat polygons as anti-aliased (smooth) regardless of this value.
+   */
+  antiAliased?: boolean;
+}
+
+/** Polygon in canvas-local coordinate space (origin (0,0) at canvas top-left). */
+export interface LocalPolygon extends Polygon {
+  readonly __brand: 'local';
+  rings: LocalPoint[][];
+  bounds: LocalRect;
+}
+
+/**
+ * Polygon in world coordinate space (origin (0,0) at artboard center).
+ * Used purely as a transit form: frame-local -> world -> layer-local.
+ */
+export interface WorldPolygon extends Polygon {
+  readonly __brand: 'world';
+  rings: WorldPoint[][];
+  bounds: WorldRect;
+}
+
+/** Polygon casters (parallel to asLocalShape / asWorldShape). */
+export const asLocalPolygon = (
+  rings: LocalPoint[][],
+  bounds: LocalRect,
+  antiAliased: boolean = true
+): LocalPolygon => ({
+  rings,
+  bounds,
+  antiAliased,
+  __brand: 'local'
+} as LocalPolygon);
+
+export const asWorldPolygon = (
+  rings: WorldPoint[][],
+  bounds: WorldRect,
+  antiAliased: boolean = true
+): WorldPolygon => ({
+  rings,
+  bounds,
+  antiAliased,
+  __brand: 'world'
+} as WorldPolygon);
+

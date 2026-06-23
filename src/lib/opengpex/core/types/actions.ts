@@ -18,7 +18,7 @@
  */
 
 import { Frame, Layer, CameraState, NormalizedState, BitmapMask } from './models';
-import { Dimensions, LocalShape, LocalRect } from './primitives';
+import { Dimensions, LocalShape, LocalRect, LocalPolygon } from './primitives';
 import { VolatileState, InteractionState, UIConfig, EngineStatus, GlobalHistoryState, InteractionSignalValue } from './state';
 import { BuiltCommand, EditorShortcut, BuiltPlugin } from './plugins';
 import { ClipboardLayerMetadata } from './services';
@@ -58,6 +58,11 @@ export interface EditorActions {
   updateCamera: (frameId: string, camera: CameraState) => void;
   setImageCropBox: (frameId: string, cropBox: LocalShape) => void;
   setCanvasCropBox: (frameId: string, cropBox: LocalShape) => void;
+  /**
+   * Sets or clears the irregular polygon selection on the frame.
+   * Pass `null` to clear (idempotent — no-op when already absent).
+   */
+  setIrregularCropBox: (frameId: string, polygon: LocalPolygon | null) => void;
   setImageAspect: (frameId: string, aspect: number | undefined) => void;
   setCanvasAspect: (frameId: string, aspect: number | undefined) => void;
 
@@ -171,6 +176,13 @@ export interface EditorActions {
       };
       engines: {
         probe: AdvCommandRef;
+      };
+    };
+    irregular: {
+      selection: {
+        // Pre-PR-6-2: `set` / `clear` removed — write `irregularCropBox`
+        // directly via `setIrregularCropBox(frameId, polygon | null)`.
+        toLayerMask: AdvCommandRef<{ layerId?: string } | undefined, Promise<void>>;
       };
     };
   };
