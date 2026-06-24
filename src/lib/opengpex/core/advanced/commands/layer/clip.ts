@@ -19,11 +19,10 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, ClipboardLayerMetadata, isPolygon } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, ClipboardLayerMetadata, LocalShape, isPolygon } from '@opengpex/editor/core/types';
 import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
-import { resolveActiveSelection } from '@opengpex/editor/core/helpers/selection';
+import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import * as P from '@opengpex/editor/core/advanced/protocols';
-import { CLIP_OPTIONS_SIGNAL_CROP_TOOL } from '@opengpex/editor/plugins/base/options/ClipOptions/protocols';
 
 
 // Removed direct dependency on storage singleton, using ctx injection instead
@@ -34,7 +33,6 @@ import { CLIP_OPTIONS_SIGNAL_CROP_TOOL } from '@opengpex/editor/plugins/base/opt
  */
 async function copyCropBoxToClipboard(
   ctx: EditorContextValue,
-  selection: NonNullable<ReturnType<typeof resolveActiveSelection>>,
   nameType: 'Layer'
 ) {
   const { activeFrame, activeLayer, actions } = ctx;
@@ -43,14 +41,14 @@ async function copyCropBoxToClipboard(
   const latestLayer = actions.fast.latestLayer(activeFrame.id, activeLayer.id) || activeLayer;
 
   // 1. Generate Physical Track: bake PNG Blob, primarily for external applications (e.g., WeChat, Word) to paste
-  const physicalResult = await ctx.layers.fragmentToLayerPhysical(activeFrame, latestLayer, selection, nameType);
+  const physicalResult = await ctx.layers.fragmentToLayerPhysical(activeFrame, latestLayer, nameType);
   if (!physicalResult) {
     actions.setInteraction({ selectionErrorPulse: Date.now() });
     return null;
   }
 
   // 2. Generate Logical Track: generate a lossless layer object referencing the original image plus a visibleShape mask, specifically for internal system pasting
-  const logicalResult = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, selection, nameType);
+  const logicalResult = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, nameType);
 
   // 3. Composite clipboard write: external software reads physicalResult.url (Blob), internal Paste command reads Metadata.layer (Logical Layer)
   await ctx.clipboard.writeByUrl(physicalResult.url, {
@@ -83,11 +81,10 @@ export const LayerClipCommands = {
         }
 
         try {
-          const activeTool = state.interaction.signals[CLIP_OPTIONS_SIGNAL_CROP_TOOL] as string | undefined;
-          const selection = resolveActiveSelection(activeFrame, activeTool);
+          const box = getClipBox(activeFrame);
 
-          if (selection) {
-            await copyCropBoxToClipboard(ctx, selection, 'Layer');
+          if (box) {
+            await copyCropBoxToClipboard(ctx, 'Layer');
           } else {
             // Without selection: copy the entire layer
             await ctx.clipboard.writeByUrl(activeLayer.src, {
@@ -118,11 +115,10 @@ export const LayerClipCommands = {
         }
 
         try {
-          const activeTool = state.interaction.signals[CLIP_OPTIONS_SIGNAL_CROP_TOOL] as string | undefined;
-          const selection = resolveActiveSelection(activeFrame, activeTool);
+          const box = getClipBox(activeFrame);
 
-          if (selection) {
-            const result = await copyCropBoxToClipboard(ctx, selection, 'Layer');
+          if (box) {
+            const result = await copyCropBoxToClipboard(ctx, 'Layer');
             if (!result) return;
 
             ctx.layers.updateLayer(activeFrame.id, tx => {
@@ -229,6 +225,56 @@ export const LayerClipCommands = {
     }
   } as EditorCommand<ClipboardLayerMetadata, Promise<void>>,
 
+  toMask: {
+    id: P.ADV_LAYER_CLIP_TO_MASK,
+    name: 'Apply Selection as Layer Mask',
+    undoable: true,
+    execute: async (ctx: EditorContextValue, payload?: { layerId?: string }): Promise<void> => {
+      const { activeFrame, activeLayer, actions, geometry, layers } = ctx;
+      if (!activeFrame) return;
+
+      const box = getClipBox(activeFrame);
+      if (!box) {
+        actions.setInteraction({ selectionErrorPulse: Date.now() });
+        return;
+      }
+
+      // Resolve target layer: explicit payload > activeLayer
+      const targetLayerId = payload?.layerId ?? activeLayer?.id;
+      if (!targetLayerId) {
+        actions.setInteraction({ selectionErrorPulse: Date.now() });
+        return;
+      }
+      const targetLayer = activeFrame.layers.byId[targetLayerId];
+      if (!targetLayer) {
+        actions.setInteraction({ selectionErrorPulse: Date.now() });
+        return;
+      }
+
+      // Derive LocalShape for the mask:
+      let localShape: LocalShape;
+      if (!box.regular) {
+        // Irregular path (lasso/wand): project frame-local → layer-local, then to shape
+        const layerPoly = geometry.polygon.frameLocalToLayerLocal(box.spatial, activeFrame, targetLayer);
+        localShape = polygonToShape(layerPoly);
+      } else {
+        // Regular shape (rect/ellipse): already a LocalShape, use directly
+        localShape = box.spatial;
+      }
+
+      // Apply as VectorMask (Reveal Selection — inverted=false)
+      layers.updateLayer(activeFrame.id, tx => {
+        tx.edit(targetLayer.id).applyMask(localShape, false);
+      });
+
+      // Clear the applied selection slot (shares the same undo atom):
+      if (!box.regular) {
+        const clipToolId = activeFrame.latestClipTool || 'rect';
+        actions.setClipBox(activeFrame.id, clipToolId, null);
+      }
+    },
+  } as EditorCommand<{ layerId?: string } | undefined, Promise<void>>,
+
   drill: {
     id: P.ADV_LAYER_CLIP_DRILL,
     name: 'Delete Selection',
@@ -241,13 +287,12 @@ export const LayerClipCommands = {
       try {
         const latestLayer = actions.fast.latestLayer(activeFrame.id, activeLayer.id) || activeLayer;
 
-        const activeTool = ctx.state.interaction.signals[CLIP_OPTIONS_SIGNAL_CROP_TOOL] as string | undefined;
-        const selection = resolveActiveSelection(activeFrame, activeTool);
-        if (!selection) return;
+        const box = getClipBox(activeFrame);
+        if (!box) return;
 
-        const localShape = isPolygon(selection)
-          ? polygonToShape(geometry.polygon.frameLocalToLayerLocalPolygon(selection, activeFrame, latestLayer))
-          : geometry.shape.frameLocalToLayerLocal(selection, activeFrame, latestLayer);
+        const localShape = !box.regular
+          ? polygonToShape(geometry.polygon.frameLocalToLayerLocal(box.spatial, activeFrame, latestLayer))
+          : geometry.shape.frameLocalToLayerLocal(box.spatial, activeFrame, latestLayer);
 
         ctx.layers.updateLayer(activeFrame.id, tx => {
           tx.edit(activeLayer.id)

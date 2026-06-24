@@ -223,11 +223,11 @@ export interface GeometryService {
     /** Projects polygon from world space to local space (Layer or Frame target). */
     worldToLocalPolygon: (poly: WorldPolygon, target: Layer | Frame) => LocalPolygon;
     /** Composes frame-local -> world -> layer-local polygon projection. */
-    frameLocalToLayerLocalPolygon: (poly: LocalPolygon, frame: Frame, layer: Layer) => LocalPolygon;
+    frameLocalToLayerLocal: (poly: LocalPolygon, frame: Frame, layer: Layer) => LocalPolygon;
     /** Inverse: layer-local -> world -> frame-local polygon projection. */
-    layerLocalToFrameLocalPolygon: (poly: LocalPolygon, layer: Layer, frame: Frame) => LocalPolygon;
+    layerLocalToFrameLocal: (poly: LocalPolygon, layer: Layer, frame: Frame) => LocalPolygon;
     /**
-     * Generates a multi-ring SVG path `d` string (relative to `poly.bounds.x/y`),
+     * Generates a multi-ring SVG path `d` string (relative to `poly.rect.x/y`),
      * suitable for evenodd fill rule rendering.
      */
     polygonToSvgPathD: (poly: LocalPolygon) => string;

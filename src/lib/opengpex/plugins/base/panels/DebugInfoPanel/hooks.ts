@@ -23,6 +23,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useEditorState, useEditorServices, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
+import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import * as P from './protocols';
 import { CLIP_OPTIONS_SIGNAL_RE_CANVAS } from '../../options/ClipOptions/protocols';
 
@@ -109,7 +110,7 @@ export const useDebugInfo = () => {
 
     // Clip core metrics
     const isReCanvas = state.getStateSignal(CLIP_OPTIONS_SIGNAL_RE_CANVAS);
-    const cropShape = isReCanvas ? activeFrame.canvasCropBox : activeFrame.imageCropBox;
+    const cropShape = isReCanvas ? activeFrame.canvasCropBox : getRegularClipShape(activeFrame);
     const cropBox = cropShape?.rect || { x: 0, y: 0, w: 0, h: 0 };
     const screenCropPos = cropShape ? geometry.space.localToScreen(cropBox.x, cropBox.y, activeFrame, cam) : { x: 0, y: 0 };
 

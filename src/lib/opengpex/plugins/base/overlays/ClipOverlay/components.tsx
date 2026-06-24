@@ -182,17 +182,12 @@ export function ClipOverlayMain() {
           </g>
 
           {/* ─── Channel 2: irregular polygon selection (lasso / wand) ────────
-           * Single-pass marching ants in a *bright* purple. An earlier
-           * 2026-06-23 attempt layered a `<use>` underlay in solid white
-           * to fake purple/white alternating ants, but the technique never
-           * looked right in practice (SVG2 `<use>` shadow-tree inheritance
-           * coupled with the shared `.marching-ants` animation produced
-           * subtle phase-locking artefacts on real images). Brightening
-           * the stroke color from purple-500 (`#a855f7`) to fuchsia-400
-           * (`#e879f9`) gives the contour a high-luminance, near-neon look
-           * that pops on busy / mid-tone backgrounds without the underlay
-           * complexity. The `drop-shadow` filter on the parent <g> still
-           * provides a 1-px black halo for contrast on pure-white regions.
+           * Near-white lavender marching ants (`#f0e6ff`). The stroke is
+           * intentionally almost-white with a subtle purple tint — this
+           * maximizes contrast on all image types (dark, busy, mid-tone)
+           * while the `drop-shadow` black halo on the parent <g> ensures
+           * visibility on pure-white / bright regions. The purple identity
+           * is maintained through the tint rather than saturation.
            */}
           <g
             ref={polyGroupRef}
@@ -200,9 +195,9 @@ export function ClipOverlayMain() {
           >
             <path
               ref={polyPathRef}
-              fill="rgba(232, 121, 249, 0.10)"
+              fill="rgba(240, 230, 255, 0.12)"
               fillRule="evenodd"
-              stroke="#e879f9"
+              stroke="#f0e6ff"
               strokeWidth="1"
               vectorEffect="non-scaling-stroke"
               strokeDasharray="6,6"
@@ -211,14 +206,14 @@ export function ClipOverlayMain() {
           </g>
 
           {/* ─── Channel 3: live lasso preview (screen-space) ────────────────
-           * Same bright fuchsia as channel 2 for visual consistency. Single
-           * <path>, no underlay (see channel-2 rationale above).
+           * Same near-white lavender as channel 2 for visual consistency.
+           * Single <path>, no underlay (see channel-2 rationale above).
            */}
           <path
             ref={setPreviewPathRef}
             fill="none"
             fillRule="evenodd"
-            stroke="#e879f9"
+            stroke="#f0e6ff"
             strokeWidth="1"
             strokeDasharray="4,4"
             vectorEffect="non-scaling-stroke"

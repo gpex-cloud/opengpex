@@ -19,7 +19,8 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, LocalShape } from '@opengpex/editor/core/types';
+import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**
@@ -44,7 +45,13 @@ export const LayerPeelCommands = {
           return;
         }
 
-        const result = ctx.layers.fragmentToExistLayer(activeFrame, latestLayer, exchangeLayer, activeFrame.imageCropBox);
+        // Resolve the clip shape from `frame.latestClipTool`. Peel only
+        // fires via Meta+drag on the clip box (createClipBoxHandler), so the
+        // active tool's slot in clipBoxes is guaranteed non-empty at this point.
+        const box = getClipBox(activeFrame);
+        const clipShape = box?.regular ? box.spatial : null;
+        if (!clipShape) return; // defensive — should never happen during a real peel
+        const result = ctx.layers.fragmentToExistLayer(activeFrame, latestLayer, exchangeLayer, clipShape);
         if (!result) return;
 
         const timestamp = Date.now();

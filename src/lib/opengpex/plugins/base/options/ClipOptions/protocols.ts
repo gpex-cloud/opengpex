@@ -48,7 +48,6 @@ export const CMD_TOGGLE_ANTI_ALIAS = 'cmd.anti_alias.toggle';
 export const CMD_SET_CROP_TOOL = 'cmd.crop_tool.set';
 
 export const SIGNAL_RE_CANVAS = 'signal.re_canvas.active';
-export const SIGNAL_CROP_TOOL = 'signal.crop_tool';
 
 /**
  * CropTool: Active crop / selection tool.
@@ -168,5 +167,4 @@ export const CLIP_OPTIONS_CMD_RESET_BOX = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_R
 export const CLIP_OPTIONS_CMD_BRANCH = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_BRANCH}`;
 export const CLIP_OPTIONS_CMD_SET_CROP_TOOL = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CROP_TOOL}`;
 export const CLIP_OPTIONS_SIGNAL_RE_CANVAS = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_RE_CANVAS}`;
-export const CLIP_OPTIONS_SIGNAL_CROP_TOOL = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_CROP_TOOL}`;
 

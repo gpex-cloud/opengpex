@@ -56,25 +56,17 @@ export interface EditorActions {
   setActiveLayer: (frameId: string, layerId: string | null) => void;
 
   updateCamera: (frameId: string, camera: CameraState) => void;
-  setImageCropBox: (frameId: string, cropBox: LocalShape) => void;
-  setCanvasCropBox: (frameId: string, cropBox: LocalShape) => void;
   /**
-   * Sets or clears the irregular polygon selection slot for a specific tool.
+   * Sets or clears a clip selection slot for a specific tool.
    *
-   * @param frameId  Target frame.
-   * @param toolId   Producing tool id (e.g. `'lasso'`, `'wand'`). Each tool has
-   *                 its own slot in `Frame.irregularCropBoxes` so switching
-   *                 tools does not clobber another tool's polygon.
-   * @param polygon  The polygon to store, or `null` to clear *only this tool's*
-   *                 slot (idempotent — no-op when already absent).
+   * @param frameId     Target frame.
+   * @param clipToolId  Producing tool id (e.g. `'rect'`, `'ellipse'`, `'lasso'`, `'wand'`).
+   *                    Each tool has its own slot in `Frame.clipBoxes`.
+   * @param value       The selection to store (LocalShape for rect/ellipse,
+   *                    LocalPolygon for lasso/wand), or `null` to clear the slot.
    */
-  setIrregularCropBox: (frameId: string, toolId: string, polygon: LocalPolygon | null) => void;
-  /**
-   * Clears every irregular selection slot in the frame, regardless of tool.
-   * Used by `adv.irregular.selection.toLayerMask` when the user bakes a
-   * selection (the polygon is consumed, so all tools should stop showing it).
-   */
-  clearAllIrregularCropBoxes: (frameId: string) => void;
+  setClipBox: (frameId: string, clipToolId: string, value: LocalShape | LocalPolygon | null) => void;
+  setCanvasCropBox: (frameId: string, cropBox: LocalShape) => void;
 
   setImageAspect: (frameId: string, aspect: number | undefined) => void;
   setCanvasAspect: (frameId: string, aspect: number | undefined) => void;
@@ -154,6 +146,7 @@ export interface EditorActions {
         copy: AdvCommandRef;
         paste: AdvCommandRef<ClipboardLayerMetadata | { e?: ClipboardEvent } | undefined>;
         drill: AdvCommandRef;
+        toMask: AdvCommandRef<{ layerId?: string } | undefined, Promise<void>>;
       };
       cmdj: {
         copy: AdvCommandRef;
@@ -189,16 +182,6 @@ export interface EditorActions {
       };
       engines: {
         probe: AdvCommandRef;
-      };
-    };
-    irregular: {
-      selection: {
-        // Pre-PR-6-3: per-tool slot model. Producers write each tool's polygon
-        // into its own slot via `setIrregularCropBox(frameId, toolId, polygon | null)`.
-        // `toLayerMask` accepts an optional `toolId` payload so callers can
-        // pinpoint exactly which slot to bake; if omitted the command falls
-        // back to a deterministic first-non-empty-slot scan.
-        toLayerMask: AdvCommandRef<{ layerId?: string; toolId?: string } | undefined, Promise<void>>;
       };
     };
 

@@ -133,7 +133,7 @@ export function polygonToShape(poly: LocalPolygon | WorldPolygon): LocalShape | 
 
   return {
     type: 'path' as const,
-    rect: poly.bounds,
+    rect: poly.rect,
     hardEdge: false,
     antiAliased: poly.antiAliased !== false,
     pathData: pathD,

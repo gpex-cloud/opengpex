@@ -19,7 +19,9 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, asLocalRect, Frame, LocalRect, EditorActions } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, asLocalRect, asLocalShape, Frame, LocalRect, LocalShape, EditorActions } from '@opengpex/editor/core/types';
+import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+import { CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS } from '@opengpex/editor/core/helpers/presets';
 import * as P from './protocols';
 import type { CropTool } from './protocols';
 
@@ -47,7 +49,9 @@ export function exitClipMode(ctx: EditorContextValue): void {
 export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: EditorActions }, isReCanvas: boolean) {
   const { activeFrame, actions } = ctx;
   if (!activeFrame) return null;
-  const shape = isReCanvas ? activeFrame.canvasCropBox : activeFrame.imageCropBox;
+  const shape: LocalShape = isReCanvas
+    ? activeFrame.canvasCropBox
+    : (getRegularClipShape(activeFrame) || asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
 
   return {
     isReCanvas,
@@ -58,9 +62,13 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
       const setter = isReCanvas ? actions.setCanvasAspect : actions.setImageAspect;
       setter(activeFrame.id, val);
     },
-    updateShape: (patch: Partial<typeof shape>) => {
-      const setter = isReCanvas ? actions.setCanvasCropBox : actions.setImageCropBox;
-      setter(activeFrame.id, { ...shape, ...patch });
+    updateShape: (patch: Partial<LocalShape>) => {
+      if (isReCanvas) {
+        actions.setCanvasCropBox(activeFrame.id, { ...shape, ...patch } as LocalShape);
+      } else {
+        const toolId = shape.type === 'circle' ? 'ellipse' : 'rect';
+        actions.setClipBox(activeFrame.id, toolId, { ...shape, ...patch } as LocalShape);
+      }
     },
     clampRect: (box: LocalRect) => {
       if (isReCanvas) return box;
@@ -89,7 +97,7 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
  */
 function cycleCropTool(ctx: EditorContextValue, step: 1 | -1): void {
   const order = (Object.keys(P.CROP_TOOL_STRATEGIES) as CropTool[]);
-  const current = (ctx.scoped?.getSignal(P.SIGNAL_CROP_TOOL) as CropTool | undefined) ?? order[0];
+  const current = (ctx.activeFrame?.latestClipTool as CropTool | undefined) ?? order[0];
   const idx = order.indexOf(current);
   // `(idx + step + len) % len` keeps the modulo non-negative even for step=-1.
   const next = order[(idx + step + order.length) % order.length];
@@ -395,7 +403,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       if (ctx.state.interaction.interactionMode !== 'clip') return;
       const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
       if (isReCanvas) return; // canvas-resize is a frozen rectangle
-      const tool = (ctx.scoped?.getSignal(P.SIGNAL_CROP_TOOL) as CropTool | undefined) ?? 'rect';
+      const tool = (ctx.activeFrame?.latestClipTool as CropTool | undefined) ?? 'rect';
       if (!P.CROP_TOOL_STRATEGIES[tool]?.supportsAntiAlias) return;
 
 
@@ -421,7 +429,7 @@ export const CLIP_OPTIONS_COMMANDS = {
    *                           is preserved for round-trip symmetry.
    *
    * Slot clears only happen via:
-   *   1) `adv.irregular.selection.toLayerMask` (mission accomplished);
+   *   1) `adv.layer.clip.toMask` (mission accomplished);
    *   2) explicit "Clear Selection" command (future).
    *
    * Atomicity: signal is written first (session-only), projection second
@@ -437,14 +445,9 @@ export const CLIP_OPTIONS_COMMANDS = {
       if (!activeFrame || !payload?.tool) return;
 
       const tool = payload.tool;
-      scoped?.setSignal(P.SIGNAL_CROP_TOOL, tool);
 
-      // Persist to pluginConfig for cross-session restoration. The volatile
-      // signal resets to 'rect' on page refresh, but pluginConfig survives
-      // via the auto-save pipeline (IndexedDB / StateStorage). The hook
-      // `useClipOptionsCommands` reads this on mount to restore the signal.
-      const pluginUid = `${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}`;
-      actions.updatePluginConfig(pluginUid, { lastCropTool: tool });
+      // Write to frame model (per-frame, persistent, participates in undo).
+      actions.updateFrame(activeFrame.id, { latestClipTool: tool });
 
       const strategy = P.CROP_TOOL_STRATEGIES[tool];
 
@@ -455,9 +458,49 @@ export const CLIP_OPTIONS_COMMANDS = {
       const projection = strategy.projectShape?.();
       if (projection) {
         const isReCanvas = !!scoped?.getSignal(P.SIGNAL_RE_CANVAS);
-        const setter = isReCanvas ? actions.setCanvasCropBox : actions.setImageCropBox;
-        const target = isReCanvas ? activeFrame.canvasCropBox : activeFrame.imageCropBox;
-        setter(activeFrame.id, { ...target, ...projection });
+        if (isReCanvas) {
+          actions.setCanvasCropBox(activeFrame.id, { ...activeFrame.canvasCropBox, ...projection });
+        } else {
+          const newSlot = projection.type === 'circle' ? 'ellipse' : 'rect';
+          const oldSlot = newSlot === 'ellipse' ? 'rect' : 'ellipse';
+
+          if (CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS) {
+            // Inherit mode: copy bounds from the previous regular slot into the
+            // new slot with the projected shape type. The user sees the same
+            // area but a different shape — good for "try ellipse on the same
+            // region" workflows.
+            //
+            // IMPORTANT: Do NOT use `getRegularClipShape(activeFrame)` here.
+            // `activeFrame` is the pre-update snapshot — `latestClipTool` is
+            // stale (still the old tool). If coming from an irregular tool
+            // (lasso/wand), the stale pointer makes `getClipBox` read the
+            // polygon slot, fail the `regular` check, return undefined, and
+            // the fallback overwrites the user's rect/ellipse with an empty
+            // 0×0 shape — destroying the selection they expect to see on
+            // return. Reading clipBoxes directly avoids this trap.
+            const sourceClip = (activeFrame.clipBoxes[oldSlot] as LocalShape | undefined)
+                             ?? (activeFrame.clipBoxes[newSlot] as LocalShape | undefined)
+                             ?? asLocalShape({ x: 0, y: 0, w: 0, h: 0 });
+            actions.setClipBox(activeFrame.id, newSlot, { ...sourceClip, ...projection } as LocalShape);
+          } else {
+            // Independent mode (Photoshop-style): new tool starts clean. Only
+            // project the shape type; don't copy bounds from the old tool.
+            // The user must draw a fresh selection.
+            const existing = activeFrame.clipBoxes[newSlot];
+            if (existing) {
+              actions.setClipBox(activeFrame.id, newSlot, { ...existing, ...projection } as LocalShape);
+            }
+          }
+
+          // Always clear the old regular slot so `getRegularClipShape` (which
+          // returns the first non-empty REGULAR_CLIP_SLOTS entry) doesn't keep
+          // returning the stale slot. Without this, switching rect→ellipse
+          // leaves clipBoxes['rect'] populated and the overlay keeps rendering
+          // the old rectangular selection instead of the new elliptical one.
+          if (activeFrame.clipBoxes[oldSlot]) {
+            actions.setClipBox(activeFrame.id, oldSlot, null);
+          }
+        }
       }
     }
   } as EditorCommand<{ tool: CropTool }, void>

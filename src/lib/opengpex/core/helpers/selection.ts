@@ -17,37 +17,60 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import type { Frame, LocalShape, LocalPolygon } from '@opengpex/editor/core/types';
+import type { Frame, LocalShape, LocalPolygon, LocalSpatial } from '@opengpex/editor/core/types';
+import { isPolygon } from '@opengpex/editor/core/types';
 
 /**
- * resolveActiveSelection — unified selection resolver for clip commands.
+ * getRegularClipShape — convenience wrapper over `getClipBox` that returns
+ * the active selection ONLY when it is a regular (rect/ellipse) LocalShape.
  *
- * Given the active tool ID (from SIGNAL_CROP_TOOL), returns the appropriate
- * selection data from the frame:
- *   - irregular tools (lasso/wand/future): reads `irregularCropBoxes[toolId]`
- *   - regular tools (rect/ellipse/future): reads `imageCropBox`
+ * Delegates entirely to `getClipBox(frame)` which reads `frame.latestClipTool`
+ * as the single source of truth. No more blind-scanning of slot arrays.
  *
- * Returns `null` when no valid selection exists (empty/zero-size), which
- * signals callers to take the "no selection" branch.
- *
- * Design: accepts `toolId: string` (not a CropTool enum) so core layer
- * has zero coupling to the plugin-level tool registry. The routing logic
- * is purely data-driven: if the tool's slot exists in `irregularCropBoxes`,
- * use it; otherwise fall back to `imageCropBox`.
+ * Returns `undefined` when no valid regular clip shape is active (either the
+ * active tool is irregular, or the slot is empty/zero-sized).
  */
-export function resolveActiveSelection(
-  frame: Frame,
-  toolId: string | undefined
-): LocalShape | LocalPolygon | null {
-  // 1. Try irregular slot (keyed by toolId)
-  if (toolId) {
-    const irregular = frame.irregularCropBoxes?.[toolId] ?? null;
-    if (irregular) return irregular;
+export function getRegularClipShape(frame: { latestClipTool?: string; clipBoxes: Record<string, LocalShape | LocalPolygon> }): LocalShape | undefined {
+  const box = getClipBox(frame as Frame);
+  return box?.regular ? box.spatial : undefined;
+}
+
+/**
+ * getClipBox — unified selection resolver for clip commands.
+ *
+ * Reads `frame.latestClipTool` to determine which slot in `frame.clipBoxes`
+ * holds the active selection, wraps the result in a `LocalSpatial`
+ * discriminated union so callers can branch on `result.regular` without
+ * needing to import `isPolygon`.
+ *
+ * Returns `null` when no valid selection exists (empty/zero-size for
+ * LocalShape, or missing slot), which signals callers to take the
+ * "no selection" branch.
+ *
+ * @example
+ * ```ts
+ * const box = getClipBox(frame);
+ * if (!box) return; // no active selection
+ * if (box.regular) {
+ *   // box.spatial is narrowed to LocalShape
+ *   applyRectCrop(box.spatial.rect);
+ * } else {
+ *   // box.spatial is narrowed to LocalPolygon
+ *   applyPolygonMask(box.spatial.rings);
+ * }
+ * ```
+ */
+export function getClipBox(frame: Frame): LocalSpatial | null {
+  const clipToolId = frame.latestClipTool || 'rect';
+
+  const entry = frame.clipBoxes[clipToolId] ?? null;
+  if (!entry) return null;
+
+  if (!isPolygon(entry)) {
+    // LocalShape — validate non-zero dimensions
+    if (entry.rect.w <= 0 || entry.rect.h <= 0) return null;
+    return { regular: true, spatial: entry };
   }
-
-  // 2. Fall back to regular imageCropBox
-  const box = frame.imageCropBox;
-  if (box && box.rect.w > 0 && box.rect.h > 0) return box;
-
-  return null;
+  // LocalPolygon — trust that it has valid points
+  return { regular: false, spatial: entry };
 }

@@ -20,6 +20,7 @@
 'use client';
 
 import { EditorCommand, EditorContextValue, asLocalShape } from '@opengpex/editor/core/types';
+import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 
 import * as P from './protocols';
 
@@ -40,11 +41,12 @@ export const COLOR_OPTIONS_COMMANDS = {
       let w, h, box_cx, box_cy;
 
       if (isClipMode) {
-        const box = activeFrame.imageCropBox.rect;
-        if (box.w <= 0 || box.h <= 0) {
+        const clipEntry = getRegularClipShape(activeFrame);
+        if (!clipEntry || clipEntry.rect.w <= 0 || clipEntry.rect.h <= 0) {
           actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
           return;
         }
+        const box = clipEntry.rect;
         w = box.w;
         h = box.h;
         box_cx = box.x + w / 2;
@@ -59,8 +61,9 @@ export const COLOR_OPTIONS_COMMANDS = {
       const cx = box_cx - activeFrame.canvas.w / 2;
       const cy = box_cy - activeFrame.canvas.h / 2;
 
-      const cropType = isClipMode ? activeFrame.imageCropBox.type : 'rect';
-      const cropAntiAliased = isClipMode ? (activeFrame.imageCropBox.antiAliased !== false) : true;
+      const clipEntry2 = getRegularClipShape(activeFrame);
+      const cropType = isClipMode && clipEntry2 ? clipEntry2.type : 'rect';
+      const cropAntiAliased = isClipMode && clipEntry2 ? (clipEntry2.antiAliased !== false) : true;
 
       const newLayer = layers.getNewLayer({
         name: 'Fill Layer',

@@ -53,8 +53,9 @@ export const LayerFactory = {
       rotation: 0,
       layers: { byId: {}, order: [] },
       camera: { x: 0, y: 0, k: 1 },
-      imageCropBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
+      clipBoxes: {},
       canvasCropBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
+      latestClipTool: 'rect',
       ...patch
     } as Frame;
   },

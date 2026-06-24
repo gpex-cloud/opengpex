@@ -18,6 +18,7 @@
  */
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
+import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 
 import { MetadataHelper } from '@opengpex/editor/core/helpers/metadata';
 import { calcFinalDims } from './utils';
@@ -39,16 +40,16 @@ export const IMAGE_INFO_COMMANDS = {
 
          const config = selfConfig as P.ExportConfig;
           const isClipMode = state.interaction.interactionMode === 'clip';
-          const cropBox = activeFrame.imageCropBox;
+           const cropBox = getRegularClipShape(activeFrame);
 
-          // Guard: abort if in clip mode but no active selection
-          if (isClipMode && (cropBox.rect.w <= 0 || cropBox.rect.h <= 0)) {
+           // Guard: abort if in clip mode but no active selection
+           if (isClipMode && (!cropBox || cropBox.rect.w <= 0 || cropBox.rect.h <= 0)) {
             ctx.actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
             return;
           }
 
-          const baseW = isClipMode ? cropBox.rect.w : activeFrame.canvas.w;
-          const baseH = isClipMode ? cropBox.rect.h : activeFrame.canvas.h;
+           const baseW = isClipMode && cropBox ? cropBox.rect.w : activeFrame.canvas.w;
+          const baseH = isClipMode && cropBox ? cropBox.rect.h : activeFrame.canvas.h;
 
          const { w: exportW, h: exportH } = calcFinalDims(baseW, baseH, config);
 

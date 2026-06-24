@@ -90,7 +90,7 @@ export const ADV_SYSTEM_PROBE_ENGINES = 'adv.system.probe_engines';
 // `canvasCropBox` directly. The only adv command in this group is
 // `toLayerMask`, which is an irreducible 3-step transaction (project +
 // bake + addBitmapMask + clear) that needs the executeCommand atom.
-export const ADV_IRREGULAR_TO_LAYER_MASK = 'adv.irregular.toLayerMask';
+export const ADV_LAYER_CLIP_TO_MASK = 'adv.layer.clip.toMask';
 
 // 7. System Signals
 // Used to synchronize temporary flags across plug-ins in the global state

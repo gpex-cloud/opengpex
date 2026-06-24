@@ -42,7 +42,7 @@ export const ViewportTransformCommands = {
 
       actions.updateFrame(activeFrame.id, {
         ...nextFramePatch,
-        imageCropBox: nextFramePatch.imageCropBox,
+        clipBoxes: nextFramePatch.clipBoxes,
         canvasCropBox: nextFramePatch.canvasCropBox,
         imageAspect: activeFrame.imageAspect ? 1 / activeFrame.imageAspect : undefined,
         canvasAspect: activeFrame.canvasAspect ? 1 / activeFrame.canvasAspect : undefined
@@ -81,7 +81,7 @@ export const ViewportTransformCommands = {
 
       actions.updateFrame(activeFrame.id, {
         ...nextFramePatch,
-        imageCropBox: nextFramePatch.imageCropBox,
+        clipBoxes: nextFramePatch.clipBoxes,
         canvasCropBox: nextFramePatch.canvasCropBox,
       });
     }
@@ -141,9 +141,8 @@ export const ViewportTransformCommands = {
         canvas: nextFrame.canvas,
         rotation: 0,
         layers: nextFrame.layers,
-        imageCropBox: nextFrame.imageCropBox,
+        clipBoxes: nextFrame.clipBoxes,
         canvasCropBox: nextFrame.canvasCropBox,
-        irregularCropBoxes: nextFrame.irregularCropBoxes,
         camera: nextFrame.camera
       });
     },

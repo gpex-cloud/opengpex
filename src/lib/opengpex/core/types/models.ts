@@ -191,25 +191,33 @@ export interface Frame {
   activeLayerId: string | null;
 
   // Clipping attributes
-  imageCropBox: LocalShape;
-  canvasCropBox: LocalShape;
   /**
-   * Irregular selection boxes — **keyed by producing tool id** (e.g. `'lasso'`,
-   * `'wand'`, future `'polygon-lasso'`, `'ai-matting'`). Each irregular tool
-   * owns its own slot so switching tools never clobbers another tool's polygon
-   * and the canvas only ever shows the polygon belonging to the *currently
-   * active* tool (read by `useIrregularSelectionSync` via the active cropTool
-   * signal). See `docs/opengpex/20260623_clip_tool_guide.md` §2.1 / §2.5.1.
+   * Unified per-tool clip selection map — **keyed by producing tool id**
+   * (e.g. `'rect'`, `'ellipse'`, `'lasso'`, `'wand'`, future `'polygon-lasso'`,
+   * `'ai-matting'`).
    *
-   * Independent type from `LocalShape` — does NOT participate in the rendering
-   * pipeline crop in Phase 1. Only consumed by:
-   *   - `useIrregularSelectionSync` for purple marching-ants preview (per-tool)
-   *   - `adv.irregular.selection.toLayerMask` for baking into a `BitmapMask`
+   * Each tool owns its own slot so switching tools never clobbers another
+   * tool's selection. The canvas only shows the selection belonging to the
+   * *currently active* tool (read via `latestClipTool`).
    *
-   * `undefined` (or missing key) means "no selection produced by that tool yet".
-   * The whole record being `undefined` means "no irregular selection of any kind".
+   * Value is either a `LocalShape` (for rect/ellipse tools — participates in
+   * the rendering pipeline crop) or a `LocalPolygon` (for lasso/wand tools —
+   * consumed by marching-ants preview and `toLayerMask`).
+   *
+   * Missing key means "no selection produced by that tool yet".
+   *
+   * See `docs/opengpex/phase2_irregular_unified_clip_spec.md` §3.
    */
-  irregularCropBoxes?: Record<string, LocalPolygon>;
+  clipBoxes: Record<string, LocalShape | LocalPolygon>;
+  /** Re-Canvas dedicated crop box — orthogonal to tool-based selections. */
+  canvasCropBox: LocalShape;
+
+  /**
+   * Per-frame active clip tool. Persisted with the frame so switching frames
+   * restores the tool the user last used on that specific frame.
+   * Default: 'rect'. Updated by `setCropTool`.
+   */
+  latestClipTool: string; // 'rect' | 'ellipse' | 'lasso' | 'wand'
 
   imageAspect?: number;
   canvasAspect?: number;

@@ -22,7 +22,8 @@ import {
   EditorData, EditorState, EditorAction, Layer, Frame, CameraState, UIConfig,
   BuiltPlugin, EditorShortcut, BuiltCommand, Dimensions, NormalizedState,
   EditorActions, EditorContextValue, GlobalHistoryState, EngineStatus, LocalShape,
-  InteractionSignalValue, ClipboardLayerMetadata, BitmapMask, LocalPolygon
+  InteractionSignalValue, ClipboardLayerMetadata, BitmapMask, LocalPolygon,
+  isPolygon
 } from '@opengpex/editor/core/types';
 import { LayerUtils } from '@opengpex/editor/core/layer/LayerUtils';
 import { initialState, editorReducer } from './reducer';
@@ -136,27 +137,38 @@ export function useEditorStore() {
     }
 
     // D. [Unified Architecture Snapping Gateway] 
-    // Standardize subpixel physical alignment for the image crop box (imageCropBox) at the dispatch entry.
-    // Completely resolves subpixel deviation issues between "logical cropping" and "physical cropping" caused by actions like Reset, manual settings, aspect ratio locking, etc.
+    // Standardize subpixel physical alignment for clip boxes (LocalShape only, not polygon)
+    // at the dispatch entry. Completely resolves subpixel deviation issues between
+    // "logical cropping" and "physical cropping" caused by actions like Reset, manual
+    // settings, aspect ratio locking, etc.
     let alignedAction = action;
-    if (action.type === 'SET_IMAGE_CROP_BOX') {
-      const { cropBox } = action.payload;
-      if (cropBox) {
+    if (action.type === 'SET_CLIP_BOX') {
+      const { value } = action.payload;
+      // Only snap LocalShape values (rect/ellipse); polygons pass through unmodified.
+      if (value && !isPolygon(value)) {
         alignedAction = {
           ...action,
-          payload: { ...action.payload, cropBox: snapCropBoxToPixels(cropBox) }
+          payload: { ...action.payload, value: snapCropBoxToPixels(value) }
         };
       }
     } else if (action.type === 'UPDATE_FRAME') {
       const { patch } = action.payload;
-      if (patch?.imageCropBox) {
-        alignedAction = {
-          ...action,
-          payload: {
-            ...action.payload,
-            patch: { ...patch, imageCropBox: snapCropBoxToPixels(patch.imageCropBox) }
+      if (patch?.clipBoxes) {
+        // Snap all non-polygon entries in the clipBoxes patch
+        const snappedBoxes = { ...patch.clipBoxes };
+        let mutated = false;
+        for (const [key, val] of Object.entries(snappedBoxes)) {
+          if (val && !isPolygon(val)) {
+            snappedBoxes[key] = snapCropBoxToPixels(val);
+            mutated = true;
           }
-        };
+        }
+        if (mutated) {
+          alignedAction = {
+            ...action,
+            payload: { ...action.payload, patch: { ...patch, clipBoxes: snappedBoxes } }
+          };
+        }
       }
     } else if (action.type === 'BATCH_UPDATE_FRAME') {
       const { patches } = action.payload;
@@ -164,12 +176,19 @@ export function useEditorStore() {
         const alignedPatches = { ...patches };
         let mutated = false;
         for (const [fId, p] of Object.entries(alignedPatches)) {
-          if (p?.imageCropBox) {
-            alignedPatches[fId] = {
-              ...p,
-              imageCropBox: snapCropBoxToPixels(p.imageCropBox)
-            };
-            mutated = true;
+          if (p?.clipBoxes) {
+            const snappedBoxes = { ...p.clipBoxes };
+            let boxMutated = false;
+            for (const [key, val] of Object.entries(snappedBoxes)) {
+              if (val && !isPolygon(val)) {
+                snappedBoxes[key] = snapCropBoxToPixels(val);
+                boxMutated = true;
+              }
+            }
+            if (boxMutated) {
+              alignedPatches[fId] = { ...p, clipBoxes: snappedBoxes };
+              mutated = true;
+            }
           }
         }
         if (mutated) {
@@ -299,16 +318,9 @@ export function useEditorStore() {
           : frames;
         enhancedDispatch({ type: 'SET_FRAMES', payload });
       },
-      setImageCropBox: (frameId: string, cropBox: LocalShape) => enhancedDispatch({ type: 'SET_IMAGE_CROP_BOX', payload: { frameId, cropBox } }),
+      setClipBox: (frameId: string, toolId: string, value: LocalShape | LocalPolygon | null) =>
+        enhancedDispatch({ type: 'SET_CLIP_BOX', payload: { frameId, toolId, value } }),
       setCanvasCropBox: (frameId: string, cropBox: LocalShape) => enhancedDispatch({ type: 'SET_CANVAS_CROP_BOX', payload: { frameId, cropBox } }),
-      setIrregularCropBox: (frameId: string, toolId: string, polygon: LocalPolygon | null) =>
-        enhancedDispatch(
-          polygon == null
-            ? { type: 'CLEAR_IRREGULAR_CROP_BOX', payload: { frameId, toolId } }
-            : { type: 'SET_IRREGULAR_CROP_BOX', payload: { frameId, toolId, polygon } }
-        ),
-      clearAllIrregularCropBoxes: (frameId: string) =>
-        enhancedDispatch({ type: 'CLEAR_ALL_IRREGULAR_CROP_BOXES', payload: { frameId } }),
 
       setImageAspect: (frameId: string, aspect: number | undefined) => enhancedDispatch({ type: 'SET_IMAGE_ASPECT', payload: { frameId, aspect } }),
       setCanvasAspect: (frameId: string, aspect: number | undefined) => enhancedDispatch({ type: 'SET_CANVAS_ASPECT', payload: { frameId, aspect } }),
@@ -503,6 +515,7 @@ export function useEditorStore() {
             copy: advRef(P.ADV_LAYER_CLIP_COPY, () => executeCommand(P.ADV_LAYER_CLIP_COPY)),
             paste: advRef(P.ADV_LAYER_CLIP_PASTE, (payload?: ClipboardLayerMetadata | { e?: ClipboardEvent } | undefined) => executeCommand(P.ADV_LAYER_CLIP_PASTE, payload)),
             drill: advRef(P.ADV_LAYER_CLIP_DRILL, () => executeCommand(P.ADV_LAYER_CLIP_DRILL)),
+            toMask: advRef(P.ADV_LAYER_CLIP_TO_MASK, (payload?: { layerId?: string }) => executeCommand<{ layerId?: string } | undefined, Promise<void>>(P.ADV_LAYER_CLIP_TO_MASK, payload)),
           },
           cmdj: {
             copy: advRef(P.ADV_LAYER_CMDJ_COPY, () => executeCommand(P.ADV_LAYER_CMDJ_COPY)),
@@ -538,15 +551,6 @@ export function useEditorStore() {
           },
           engines: {
             probe: advRef(P.ADV_SYSTEM_PROBE_ENGINES, () => executeCommand(P.ADV_SYSTEM_PROBE_ENGINES)),
-          },
-        },
-        irregular: {
-          selection: {
-            // Pre-PR-6-2: `set` / `clear` removed — producers (lasso / wand /
-            // AI matting) call `actions.setIrregularCropBox(frameId, polygon | null)`
-            // directly. See `phase1_irregular_clip_spec.md` §6 Pre-PR-6-2.0 / .1.
-            toLayerMask: advRef(P.ADV_IRREGULAR_TO_LAYER_MASK, (payload?: { layerId?: string; toolId?: string }) => executeCommand<{ layerId?: string; toolId?: string } | undefined, Promise<void>>(P.ADV_IRREGULAR_TO_LAYER_MASK, payload)),
-
           },
         },
       }

@@ -118,25 +118,25 @@ export function worldToLocalPolygon(poly: WorldPolygon, target: Layer | Frame): 
 }
 
 /**
- * frameLocalToLayerLocalPolygon: Project polygon under artboard space (Frame) to layer (Layer) local space.
+ * frameLocalToLayerLocal: Project polygon under artboard space (Frame) to layer (Layer) local space.
  * Composition: localToWorldPolygon(frame) -> worldToLocalPolygon(layer).
  *
  * Mirrors `shape.ts::frameLocalToLayerLocal`.
  */
-export function frameLocalToLayerLocalPolygon(poly: LocalPolygon, frame: Frame, layer: Layer): LocalPolygon {
+export function frameLocalToLayerLocal(poly: LocalPolygon, frame: Frame, layer: Layer): LocalPolygon {
   const world = localToWorldPolygon(poly, frame);
   return worldToLocalPolygon(world, layer);
 }
 
 /**
- * layerLocalToFrameLocalPolygon: Inverse of `frameLocalToLayerLocalPolygon`.
+ * layerLocalToFrameLocal: Inverse of `frameLocalToLayerLocal`.
  * Composition: localToWorldPolygon(layer) -> worldToLocalPolygon(frame).
  *
  * Mirrors `shape.ts::layerLocalToFrameLocal`. Used by the magic-wand handler
  * to project Worker-produced layer-local rings back into frame-local polygon
  * space before writing `irregularCropBox`.
  */
-export function layerLocalToFrameLocalPolygon(poly: LocalPolygon, layer: Layer, frame: Frame): LocalPolygon {
+export function layerLocalToFrameLocal(poly: LocalPolygon, layer: Layer, frame: Frame): LocalPolygon {
   const world = localToWorldPolygon(poly, layer);
   return worldToLocalPolygon(world, frame);
 }
@@ -144,8 +144,8 @@ export function layerLocalToFrameLocalPolygon(poly: LocalPolygon, layer: Layer, 
 /**
  * polygonToSvgPathD: Generate a multi-ring SVG path `d` string with evenodd fill rule.
  *
- * Output is RELATIVE to `poly.bounds.x/y` (subtracted), so the resulting `d` is meant to be
- * placed inside an SVG <g> whose transform translates by (bounds.x, bounds.y). This matches
+ * Output is RELATIVE to `poly.rect.x/y` (subtracted), so the resulting `d` is meant to be
+ * placed inside an SVG <g> whose transform translates by (rect.x, rect.y). This matches
  * the existing `getSmoothSvgPath(LocalShape)` convention (which also outputs from origin (0,0)).
  *
  * Each ring becomes an "M x y L x y L ... Z" subpath. Empty rings are skipped.
@@ -156,8 +156,8 @@ export function layerLocalToFrameLocalPolygon(poly: LocalPolygon, layer: Layer, 
 export function polygonToSvgPathD(poly: LocalPolygon): string {
   if (!poly.rings.length) return '';
 
-  const ox = poly.bounds.x;
-  const oy = poly.bounds.y;
+  const ox = poly.rect.x;
+  const oy = poly.rect.y;
 
   const parts: string[] = [];
   for (const ring of poly.rings) {

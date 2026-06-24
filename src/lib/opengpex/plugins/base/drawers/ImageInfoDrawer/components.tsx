@@ -25,6 +25,7 @@ import {
   useEditorState,
   useEditorServices,
 } from "@opengpex/editor/core/context";
+import { getRegularClipShape } from "@opengpex/editor/core/helpers/selection";
 
 import { useImageInfoCommands } from "./hooks";
 import { SourceFilePanel } from "./components/SourceFilePanel";
@@ -74,7 +75,7 @@ export function ImageInfoComponent() {
 
   if (!activeFrame) return null;
 
-  const cropBox = activeFrame?.imageCropBox;
+  const cropBox = getRegularClipShape(activeFrame);
   const baseW =
     isClipMode && cropBox ? cropBox.rect.w : activeFrame?.canvas.w || 0;
   const baseH =

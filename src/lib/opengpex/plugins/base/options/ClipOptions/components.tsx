@@ -38,6 +38,7 @@ import {
   useEditorState,
   usePluginSignals,
 } from "@opengpex/editor/core/context";
+import { getRegularClipShape } from "@opengpex/editor/core/helpers/selection";
 
 import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
@@ -124,7 +125,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
   const isReCanvas = !!reCanvasActiveSignal.value;
   const cropShape = isReCanvas
     ? activeFrame.canvasCropBox
-    : activeFrame.imageCropBox;
+    : (getRegularClipShape(activeFrame) || activeFrame.canvasCropBox);
   const cropRect = cropShape.rect;
   const activeAspect = isReCanvas
     ? activeFrame.canvasAspect
@@ -476,7 +477,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
             const maskDisabled = !hasAnySelection || isPanMode || isReCanvas;
             return (
               <button
-                onClick={() => applyMaskCmd?.execute({ toolId: cropTool })}
+                onClick={() => applyMaskCmd?.execute(undefined)}
                 disabled={maskDisabled}
                 className={`flex items-center justify-center w-7 h-7 rounded-r-xl transition-colors outline-none select-none
                   ${maskDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
@@ -648,7 +649,7 @@ function AspectGrid({
   const isReCanvas = !!reCanvasActiveSignal.value;
   const cropBox = isReCanvas
     ? activeFrame?.canvasCropBox
-    : activeFrame?.imageCropBox;
+    : (activeFrame ? getRegularClipShape(activeFrame) : undefined);
   const isEllipse = cropBox?.type === "circle";
   const isDashed = isEllipse && cropBox?.antiAliased === false;
 

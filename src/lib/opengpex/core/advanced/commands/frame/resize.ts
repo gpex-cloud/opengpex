@@ -57,14 +57,14 @@ export const FrameResizeCommands = {
       const newCamera = geometry.camera.getFitCamera(
         state.ui.viewportDim,
         newCanvas,
-        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left + insets.varied.left, offsetRight: insets.fixed.right + insets.varied.right }
+        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
       );
 
       actions.updateFrame(activeFrame.id, {
         canvas: newCanvas,
         layers: { byId: nextById, order: layers.order },
         camera: newCamera,
-        imageCropBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
+        clipBoxes: {},
         canvasCropBox: asLocalShape({
           x: newCanvas.w * 0.25,
           y: newCanvas.h * 0.25,
@@ -109,13 +109,13 @@ export const FrameResizeCommands = {
       const newCamera = geometry.camera.getFitCamera(
         state.ui.viewportDim,
         targetDim,
-        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left + insets.varied.left, offsetRight: insets.fixed.right + insets.varied.right }
+        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
       );
 
       actions.updateFrame(activeFrame.id, {
         canvas: targetDim,
         camera: newCamera,
-        imageCropBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
+        clipBoxes: {},
         canvasCropBox: asLocalShape({ x: targetDim.w * 0.25, y: targetDim.h * 0.25, w: targetDim.w * 0.5, h: targetDim.h * 0.5 })
       });
 

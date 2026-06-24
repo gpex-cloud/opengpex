@@ -49,8 +49,8 @@ export interface LayerService {
   getNewFrame: (patch: Partial<Frame>) => Frame;
   getNewLayerName: (layers: Array<{ name: string }>, baseName: string) => string;
   sortLayers: (layers: Layer[]) => Layer[];
-  fragmentToLayerPhysical: (frame: Frame, layer: Layer, selection: LocalShape | LocalPolygon, nameType: string) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
-  fragmentToLayerLogical: (frame: Frame, layer: Layer, selection: LocalShape | LocalPolygon, nameType: string) => { newLayer: Layer, localShape: LocalShape } | null;
+  fragmentToLayerPhysical: (frame: Frame, layer: Layer, nameType: string) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
+  fragmentToLayerLogical: (frame: Frame, layer: Layer, nameType: string) => { newLayer: Layer, localShape: LocalShape } | null;
   /** Physically resamples layer: adjusts pixel resolution and proportionally scales visible areas and masks */
   resampleLayerPhysical: (layer: Layer, scaleX: number, scaleY: number) => Promise<{ newUrl: string, newAssetId: string, patch: Partial<Layer> } | null>;
   /** Applies a fragment to an existing layer (e.g. Exchange layer) */

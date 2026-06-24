@@ -39,7 +39,7 @@ import {
 } from './operators/shape';
 import {
   computePolygonBounds, localToWorldPolygon, worldToLocalPolygon,
-  frameLocalToLayerLocalPolygon, layerLocalToFrameLocalPolygon, polygonToSvgPathD
+  frameLocalToLayerLocal as polyFrameToLayer, layerLocalToFrameLocal as polyLayerToFrame, polygonToSvgPathD
 } from './operators/polygon';
 import { snapRect, snapToPixel, snapRectToPixel } from './operators/snapping';
 import {
@@ -146,8 +146,8 @@ export function createGeometryService(): GeometryService {
       computePolygonBounds: (rings: Point2D[][]) => computePolygonBounds(rings),
       localToWorldPolygon: (poly: LocalPolygon, source: Layer | Frame) => localToWorldPolygon(poly, source),
       worldToLocalPolygon: (poly: WorldPolygon, target: Layer | Frame) => worldToLocalPolygon(poly, target),
-      frameLocalToLayerLocalPolygon: (poly: LocalPolygon, frame: Frame, layer: Layer) => frameLocalToLayerLocalPolygon(poly, frame, layer),
-      layerLocalToFrameLocalPolygon: (poly: LocalPolygon, layer: Layer, frame: Frame) => layerLocalToFrameLocalPolygon(poly, layer, frame),
+      frameLocalToLayerLocal: (poly: LocalPolygon, frame: Frame, layer: Layer) => polyFrameToLayer(poly, frame, layer),
+      layerLocalToFrameLocal: (poly: LocalPolygon, layer: Layer, frame: Frame) => polyLayerToFrame(poly, layer, frame),
       polygonToSvgPathD: (poly: LocalPolygon) => polygonToSvgPathD(poly),
     },
     getScale: (frame: Frame, camera?: CameraState) => (camera || frame.camera).k,

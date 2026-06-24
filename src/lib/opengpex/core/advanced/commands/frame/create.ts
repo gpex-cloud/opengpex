@@ -19,10 +19,11 @@
 
 'use client';
 
-import { EditorCommand, EditorContextValue, Frame, asLocalShape, Layer } from '@opengpex/editor/core/types';
+import { EditorCommand, EditorContextValue, Frame, LocalShape, asLocalShape, Layer, isPolygon } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { MetadataHelper } from '@opengpex/editor/core/helpers/metadata';
 import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
+import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
@@ -82,7 +83,7 @@ export const FrameCreateCommands = {
       const initialCamera = geometry.camera.getFitCamera(
         state.ui.viewportDim,
         dimension,
-        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left + insets.varied.left, offsetRight: insets.fixed.right + insets.varied.right }
+        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
       );
       const defaultCanvasCropBox = asLocalShape({ x: dimension.w * 0.25, y: dimension.h * 0.25, w: dimension.w * 0.5, h: dimension.h * 0.5 });
 
@@ -126,17 +127,55 @@ export const FrameCreateCommands = {
       const { activeFrame, actions, state, geometry, pixels } = ctx;
       if (!activeFrame) return;
 
-      // Guard: abort if imageCropBox is empty (no active selection)
-      const cropRect = activeFrame.imageCropBox.rect;
-      if (cropRect.w <= 0 || cropRect.h <= 0) {
+      // Resolve the active selection from `frame.latestClipTool`.
+      // For non-rectangular selections, the branch preserves the selection
+      // shape — pixels outside the selection are transparent in the PNG.
+      const box = getClipBox(activeFrame);
+      if (!box) {
         actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
         return;
       }
+      const cropRect = box.spatial.rect;
 
       try {
+        // Convert the selection to a LocalShape for shapeToBlob.
+        //
+        // For polygon selections: we must produce pathData with coordinates
+        // RELATIVE to the bounding rect origin, because `mergeLayersWithShape`
+        // internally zeros the rect to {0,0,w,h} and shifts layer matrices by
+        // (-rect.x, -rect.y). If pathData uses absolute frame-local coords
+        // (as `polygonToShape` does), the clip path would be misaligned with
+        // the rendered layers. Subtracting poly.rect.x/y from each point
+        // ensures the clip aligns with the shifted layer content.
+        let branchShape: LocalShape;
+        if (!box.regular) {
+          const poly = box.spatial;
+          const parts: string[] = [];
+          for (const ring of poly.rings) {
+            if (ring.length < 2) continue;
+            const segs: string[] = [];
+            for (let i = 0; i < ring.length; i++) {
+              const p = ring[i];
+              segs.push(`${i === 0 ? 'M' : 'L'} ${p.x - poly.rect.x} ${p.y - poly.rect.y}`);
+            }
+            segs.push('Z');
+            parts.push(segs.join(' '));
+          }
+          branchShape = {
+            type: 'path',
+            rect: poly.rect,
+            hardEdge: false,
+            antiAliased: poly.antiAliased !== false,
+            pathData: parts.join(' '),
+            __brand: 'local',
+          } as LocalShape;
+        } else {
+          branchShape = box.spatial;
+        }
+
         const highResBlob = await pixels.render.shapeToBlob(
           activeFrame,
-          activeFrame.imageCropBox,
+          branchShape,
           { format: 'image/png', quality: 1.0 }
         );
 
@@ -148,8 +187,8 @@ export const FrameCreateCommands = {
         const thumbnailUrl = ctx.assets.getURL(thumbId)!;
 
         const canvasDim = {
-          w: Math.round(activeFrame.imageCropBox.rect.w),
-          h: Math.round(activeFrame.imageCropBox.rect.h)
+          w: Math.round(cropRect.w),
+          h: Math.round(cropRect.h)
         };
 
         const { insets } = state.ui.theme.config;
@@ -157,7 +196,7 @@ export const FrameCreateCommands = {
         const initialCamera = geometry.camera.getFitCamera(
           state.ui.viewportDim,
           canvasDim,
-          { maxScale: 1, padding: VIEWPORT_FIT_PADDING, offsetTop: insets.top, offsetLeft: insets.fixed.left + insets.varied.left, offsetRight: insets.fixed.right + insets.varied.right }
+          { maxScale: 1, padding: VIEWPORT_FIT_PADDING, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
         );
 
         const siblings = state.frames.order.map(id => state.frames.byId[id]).filter(f => f.parentId === activeFrame.id);
@@ -261,7 +300,7 @@ export const FrameCreateCommands = {
         const newCamera = geometry.camera.getFitCamera(
           state.ui.viewportDim,
           dimension,
-          { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left + insets.varied.left, offsetRight: insets.fixed.right + insets.varied.right }
+          { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
         );
 
         // 💡 5. Fully refresh the artboard's canvas size, camera, crop boxes, and all layers
@@ -292,7 +331,7 @@ export const FrameCreateCommands = {
         actions.updateFrame(activeFrame.id, {
           canvas: dimension,
           camera: newCamera,
-          imageCropBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
+          clipBoxes: {},
           canvasCropBox: asLocalShape({
             x: dimension.w * 0.25,
             y: dimension.h * 0.25,

@@ -59,7 +59,7 @@ export function useCameraInit(
   actions: EditorActions
 ) {
   const { geometry } = useEditorServices();
-  const { safeRect, status } = useLayout();
+  const { status } = useLayout();
 
   // Tracks the frame.id we last "centered" on (auto-fit). Null = never yet.
   const initializedFrameIdRef = useRef<string | null>(null);
@@ -78,15 +78,10 @@ export function useCameraInit(
     if (!isFirstMount && !isFrameSwitched) return;
 
     // ── Branch A: Auto-fit ──────────────────────────────────────────────
-    // Compute insets directly from container-relative safeRect coords
-    // (avoids subtracting screen-relative offsets that misalign when the
-    // ToolMenu is pinned).
-    const relativeOffset = {
-      left: Math.max(0, safeRect.x),
-      top: Math.max(0, safeRect.y),
-      right: Math.max(0, state.ui.viewportDim.w - safeRect.w - safeRect.x),
-      bottom: Math.max(0, state.ui.viewportDim.h - safeRect.h - safeRect.y),
-    };
+    // Use only the fixed insets (DrawerBar icon columns) for canvas
+    // positioning. The varied portion (expanded panel width) is intentionally
+    // excluded so the canvas stays stable when panels open/close.
+    const { insets } = state.ui.theme.config;
 
     const finalCamera = geometry.camera.getFitCamera(
       { w: containerRect.width, h: containerRect.height },
@@ -94,10 +89,10 @@ export function useCameraInit(
       {
         padding: VIEWPORT_FIT_PADDING,
         maxScale: 1,
-        offsetLeft: relativeOffset.left,
-        offsetTop: relativeOffset.top,
-        offsetRight: relativeOffset.right,
-        offsetBottom: relativeOffset.bottom,
+        offsetLeft: insets.fixed.left,
+        offsetTop: insets.top,
+        offsetRight: insets.fixed.right,
+        offsetBottom: insets.bottom,
       },
     );
 
@@ -111,12 +106,9 @@ export function useCameraInit(
     frame.layers.order.length,
     frame.canvas,
     status,
-    safeRect.x,
-    safeRect.y,
-    safeRect.w,
-    safeRect.h,
     state.ui.viewportDim.w,
     state.ui.viewportDim.h,
+    state.ui.theme.config.insets,
     actions,
     containerRef,
     geometry.camera,

@@ -31,8 +31,10 @@
   --layer-selected-bg: rgba(79, 70, 229, 0.25);
   --layer-selected-border: rgba(99, 102, 241, 0.8);
   --layer-hover-bg: rgba(255, 255, 255, 0.06);
-  --canvas-bg: #121212;
-  --canvas-checker: #242424;
+  /* Canvas checkerboard intentionally stays light regardless of theme (same as Photoshop).
+     Dark checkerboard makes image fragment edges invisible against the backdrop. */
+  --canvas-bg: #ffffff;
+  --canvas-checker: #f0f0f0;
 
   /* UI Palette (Editor Pro Gray - Professional Dark Mode) */
   --bg-stage: #1e1e1e;     /* Stage background */

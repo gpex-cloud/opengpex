@@ -210,7 +210,7 @@ export const asLocalShape = (rect: Rect, type: ShapeType = 'rect', antiAliased: 
  */
 export interface Polygon {
   rings: Point2D[][];
-  bounds: Rect;
+  rect: Rect;
   /**
    * Reserved for Phase 2 pixel variant; default true behavior (smooth float lines).
    * Phase 1 declares this field but does NOT consume it; all Phase 1 polygon operators
@@ -223,7 +223,7 @@ export interface Polygon {
 export interface LocalPolygon extends Polygon {
   readonly __brand: 'local';
   rings: LocalPoint[][];
-  bounds: LocalRect;
+  rect: LocalRect;
 }
 
 /**
@@ -233,28 +233,28 @@ export interface LocalPolygon extends Polygon {
 export interface WorldPolygon extends Polygon {
   readonly __brand: 'world';
   rings: WorldPoint[][];
-  bounds: WorldRect;
+  rect: WorldRect;
 }
 
 /** Polygon casters (parallel to asLocalShape / asWorldShape). */
 export const asLocalPolygon = (
   rings: LocalPoint[][],
-  bounds: LocalRect,
+  rect: LocalRect,
   antiAliased: boolean = true
 ): LocalPolygon => ({
   rings,
-  bounds,
+  rect,
   antiAliased,
   __brand: 'local'
 } as LocalPolygon);
 
 export const asWorldPolygon = (
   rings: WorldPoint[][],
-  bounds: WorldRect,
+  rect: WorldRect,
   antiAliased: boolean = true
 ): WorldPolygon => ({
   rings,
-  bounds,
+  rect,
   antiAliased,
   __brand: 'world'
 } as WorldPolygon);
@@ -268,4 +268,24 @@ export function isPolygon(sel: WorldShape | WorldPolygon): sel is WorldPolygon;
 export function isPolygon(sel: Shape | Polygon): sel is Polygon {
   return Array.isArray((sel as Polygon).rings);
 }
+
+/**
+ * LocalSpatial — discriminated union wrapping a clip selection.
+ *
+ * `regular: true`  → `spatial` is a `LocalShape` (rect / ellipse family).
+ * `regular: false` → `spatial` is a `LocalPolygon` (lasso / wand family).
+ *
+ * This enables TypeScript narrowing at call sites:
+ * ```ts
+ * const box = getClipBox(frame);
+ * if (box?.regular) {
+ *   // box.spatial is narrowed to LocalShape
+ * } else if (box) {
+ *   // box.spatial is narrowed to LocalPolygon
+ * }
+ * ```
+ */
+export type LocalSpatial =
+  | { regular: true;  spatial: LocalShape }
+  | { regular: false; spatial: LocalPolygon };
 

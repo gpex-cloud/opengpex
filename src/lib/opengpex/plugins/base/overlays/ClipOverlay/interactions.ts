@@ -22,16 +22,18 @@ import {
   InteractionEvent,
   LocalPoint,
   Layer,
+  Frame,
+  GeometryService,
   asLocalPoint,
   asLocalRect,
   asLocalPolygon,
 } from '@opengpex/editor/core/types';
 import { computePolygonBounds } from '@opengpex/editor/core/geometry/operators/polygon';
+import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
 import { magicWandClient } from './wand/client';
 import {
   CLIP_OPTIONS_SIGNAL_RE_CANVAS,
-  CLIP_OPTIONS_SIGNAL_CROP_TOOL,
   CLIP_OPTIONS_CMD_RESET_BOX,
   CROP_TOOL_STRATEGIES,
   CropTool,
@@ -70,7 +72,7 @@ function makeCropToolGuard(targetKind: CropToolStrategy['handlerKind']) {
     // clipbox handler to dispatch — so synthesize `'rect'` as the active
     // tool here. This mirrors the synthesis done in `ClipOverlay/hooks.ts`
     // for the rendering side.
-    const rawTool = e.state.getStateSignal<CropTool>(CLIP_OPTIONS_SIGNAL_CROP_TOOL, 'rect');
+    const rawTool = (e.activeFrame?.latestClipTool as CropTool) || 'rect';
     const effectiveTool: CropTool = inReCanvas ? 'rect' : rawTool;
     return CROP_TOOL_STRATEGIES[effectiveTool].handlerKind === targetKind;
   };
@@ -138,9 +140,9 @@ export const createClipBoxHandler = (): InteractionHandler => {
 
     getInitialState: (e) => {
       const isReCanvas = e.state.getStateSignal(CLIP_OPTIONS_SIGNAL_RE_CANVAS) || false;
-      const currentShape = isReCanvas ? e.activeFrame.canvasCropBox : e.activeFrame.imageCropBox;
+      const currentShape = isReCanvas ? e.activeFrame.canvasCropBox : getRegularClipShape(e.activeFrame);
       hasPeeled = false;
-      return currentShape.rect;
+      return currentShape?.rect || asLocalRect({ x: 0, y: 0, w: 0, h: 0 });
     },
 
     getConstraints: (e) => {
@@ -155,8 +157,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
     onUpdate: (e, newRect, tx, { dx, dy, type }) => {
       const frame = e.activeFrame;
       const isReCanvas = e.state.getStateSignal(CLIP_OPTIONS_SIGNAL_RE_CANVAS) || false;
-      const boxKey = isReCanvas ? 'canvasCropBox' : 'imageCropBox';
-      const currentShape = isReCanvas ? frame.canvasCropBox : frame.imageCropBox;
+      const currentShape = isReCanvas ? frame.canvasCropBox : getRegularClipShape(frame);
 
       if (type === 'peel' && (e.nativeEvent as MouseEvent).metaKey) {
         if (!hasPeeled) {
@@ -168,7 +169,18 @@ export const createClipBoxHandler = (): InteractionHandler => {
         }
       }
 
-      tx.update({ [boxKey]: { ...currentShape, rect: newRect } }, 'frame');
+      if (isReCanvas) {
+        tx.update({ canvasCropBox: { ...currentShape, rect: newRect } }, 'frame');
+      } else {
+        // Determine the active tool slot from the per-frame field, NOT from
+        // the existing shape's type. This ensures that when the user selects
+        // 'rect' but an old 'ellipse' entry exists, the write goes to the
+        // correct 'rect' slot.
+        const latestTool = (frame.latestClipTool as CropTool) || 'rect';
+        const activeTool = latestTool === 'ellipse' ? 'ellipse' : 'rect';
+        const shapeType = latestTool === 'ellipse' ? 'circle' : 'rect';
+        tx.update({ clipBoxes: { ...frame.clipBoxes, [activeTool]: { ...currentShape, type: shapeType, rect: newRect } } }, 'frame');
+      }
 
       // Sync exchange layer if needed
       if (!isReCanvas && frame.activeLayerId) {
@@ -190,8 +202,8 @@ export const createClipBoxHandler = (): InteractionHandler => {
       // Handle Double Click to reset
       if (InteractionMath.isDoubleClick(e, startCanvas)) {
         const isReCanvas = e.state.getStateSignal(CLIP_OPTIONS_SIGNAL_RE_CANVAS) || false;
-        const currentShape = isReCanvas ? e.activeFrame.canvasCropBox : e.activeFrame.imageCropBox;
-
+        const currentShape = isReCanvas ? e.activeFrame.canvasCropBox : getRegularClipShape(e.activeFrame);
+        if (!currentShape) return;
         const isInside = e.geometry.space.isPointInRect(e.point.canvas, currentShape.rect);
         if (isInside) {
           e.actions.executeCommand(CLIP_OPTIONS_CMD_RESET_BOX);
@@ -221,7 +233,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
  */
 function buildScreenPathD(
   trail: LocalPoint[],
-  e: { activeFrame: import('@opengpex/editor/core/types').Frame; geometry: import('@opengpex/editor/core/types').GeometryService }
+  e: { activeFrame: Frame; geometry: GeometryService }
 ): string {
   if (trail.length < 2) return '';
   const segs: string[] = [];
@@ -346,7 +358,7 @@ export const createLassoHandler = (): InteractionHandler => {
         // ensures switching to wand never clobbers the lasso polygon (and
         // vice-versa); the visual gate then naturally hides this slot when
         // the active cropTool is something other than lasso.
-        e.actions.setIrregularCropBox(e.activeFrame.id, 'lasso', polygon);
+        e.actions.setClipBox(e.activeFrame.id, 'lasso', polygon);
         committed = true;
 
       } finally {
@@ -505,7 +517,7 @@ async function getLayerImageData(layer: Layer): Promise<ImageData> {
  *      Douglas–Peucker; see `wand/wand.worker.ts`). The pixel buffer is sent
  *      via Transferable so a 4K image is zero-copy.
  *   5. Project Worker-produced layer-local rings → frame-local rings via the
- *      polygon engine (`layerLocalToFrameLocalPolygon`).
+ *      polygon engine (`layerLocalToFrameLocal`).
  *   6. Wrap as `LocalPolygon` and write `irregularCropBox` directly (Pre-PR-6-2
  *      symmetry with rect/ellipse — no `adv.irregular.selection.set` wrapper).
  *
@@ -624,7 +636,7 @@ export const createWandHandler = (): InteractionHandler => {
         const layerRings = resp.rings.map(ring => ring.map(p => asLocalPoint({ x: p.x, y: p.y })));
         const layerBounds = asLocalRect(computePolygonBounds(layerRings));
         const layerPoly = asLocalPolygon(layerRings, layerBounds);
-        const framePoly = e.geometry.polygon.layerLocalToFrameLocalPolygon(
+        const framePoly = e.geometry.polygon.layerLocalToFrameLocal(
           layerPoly, layer, e.activeFrame
         );
 
@@ -633,7 +645,7 @@ export const createWandHandler = (): InteractionHandler => {
         //    command. The dispatcher's standard reducer pipeline establishes a
         //    history checkpoint. Per-tool slot ensures switching to lasso
         //    never clobbers the wand polygon (and vice-versa).
-        e.actions.setIrregularCropBox(e.activeFrame.id, 'wand', framePoly);
+        e.actions.setClipBox(e.activeFrame.id, 'wand', framePoly);
 
 
         if (resp.debug) {

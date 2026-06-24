@@ -57,6 +57,28 @@ export const BACKDROP_GRID_CONFIG = {
 
 
 /** -----------------------------------------------------------------*/
+/** Clip / Selection Tool Settings ----------------------------------*/
+/** -----------------------------------------------------------------*/
+
+/**
+ * Whether switching between regular clip tools (rect ↔ ellipse) inherits
+ * the bounding box from the previous tool.
+ *
+ * - `true`  (default): rect→ellipse copies the rect's bounds into the
+ *   ellipse slot (same area, different shape). Good for "crop mode" UX
+ *   where the user adjusts a persistent region and wants to preview
+ *   different shapes without redrawing.
+ *
+ * - `false`: each tool maintains its own independent slot. Switching
+ *   tools starts from an empty selection (Photoshop-style marquee
+ *   behavior). The user must draw a fresh selection after switching.
+ *
+ * Future: wire this into Preferences UI so users can choose their
+ * preferred workflow.
+ */
+export const CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS = true;
+
+/** -----------------------------------------------------------------*/
 /** Export Settings -------------------------------------------------*/
 /** -----------------------------------------------------------------*/
 

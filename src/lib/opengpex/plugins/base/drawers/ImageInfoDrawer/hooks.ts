@@ -21,6 +21,8 @@
 
 import { useMemo } from 'react';
 import { useEditorState, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
+import { LocalShape } from '@opengpex/editor/core/types';
+import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import * as P from './protocols';
 
 import { formatBytes } from '@opengpex/editor/core/helpers/file';
@@ -39,7 +41,7 @@ export const useImageInfoCommands = () => {
        const metadata = mainLayer?.metadata;
 
        const isClipMode = state.interaction.interactionMode === 'clip';
-       const cropBox = activeFrame?.imageCropBox;
+       const cropBox = activeFrame ? getRegularClipShape(activeFrame) : undefined;
        const baseW = isClipMode && cropBox ? cropBox.rect.w : (activeFrame?.canvas.w || 0);
        const baseH = isClipMode && cropBox ? cropBox.rect.h : (activeFrame?.canvas.h || 0);
 

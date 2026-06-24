@@ -20,7 +20,7 @@
 import React, { useLayoutEffect, useCallback, useRef } from 'react';
 import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
 import { LayerUtils } from '@opengpex/editor/core/layer/LayerUtils';
-import { VolatileState, Frame, CameraState, Rect, IMatrix3x3, LocalRect, WorldRect, LocalShape } from '@opengpex/editor/core/types';
+import { VolatileState, Frame, CameraState, Rect, IMatrix3x3, LocalRect, WorldRect, LocalShape, Layer } from '@opengpex/editor/core/types';
 import { useTicker } from './animation';
 import { Motion } from '../index';
 
@@ -66,7 +66,7 @@ export function useFastSync<T extends Element>(
       latestFrame = { ...frame, ...frameDraft };
       // Deep stitching: merge fast-track layer increments into the layers array
       if (hasLayerDrafts) {
-        const nextById: Record<string, import('@opengpex/editor/core/types').Layer> = {};
+        const nextById: Record<string, Layer> = {};
         for (const id of frame.layers.order) {
           nextById[id] = LayerUtils.mergeLayerDraft(frame.layers.byId[id], v.buffered.layers[LayerUtils.getCompositeKey(frame.id, id)]);
         }

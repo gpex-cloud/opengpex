@@ -20,12 +20,12 @@
 
 'use client';
 
-import { useMemo, useEffect, useRef } from 'react';
+import { useMemo } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals } from '@opengpex/editor/core/context';
-import { asLocalRect, ShapeType, LocalShape } from '@opengpex/editor/core/types';
-import { resolveActiveSelection } from '@opengpex/editor/core/helpers/selection';
+import { asLocalRect, asLocalShape, ShapeType, LocalShape, isPolygon } from '@opengpex/editor/core/types';
+import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { getActiveTarget } from './commands';
-import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn, CROP_TOOL_STRATEGIES, PLUGIN_AUTHOR, PLUGIN_ID } from './protocols';
+import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn, CROP_TOOL_STRATEGIES } from './protocols';
 import type { CropTool } from './protocols';
 
 /**
@@ -50,33 +50,13 @@ export const useClipOptionsCommands = () => {
     cropToolSetCmd, // ← derived from CMD_SET_CROP_TOOL = 'cmd.crop_tool.set'
   } = usePluginCommands();
 
-  const { reCanvasActiveSignal, cropToolSignal } = usePluginSignals();
-
-  // ─── Restore persisted crop tool on hydration (one-shot) ──────────────
-  // The volatile signal `SIGNAL_CROP_TOOL` resets to 'rect' on every page
-  // refresh. The `setCropTool` command persists the last-selected tool into
-  // `pluginConfig.lastCropTool` (survives via IndexedDB auto-save). On
-  // first mount after hydration we read that value back and restore the
-  // signal so the UI shows the correct tool (rect / ellipse / lasso / wand).
-  const pluginUid = `${PLUGIN_AUTHOR}.${PLUGIN_ID}`;
-  const persistedCropTool = (state.pluginConfig[pluginUid] as { lastCropTool?: CropTool } | undefined)?.lastCropTool;
-  const hasRestoredCropTool = useRef(false);
-  useEffect(() => {
-    if (hasRestoredCropTool.current || !cropToolSignal || !state.isLoaded) return;
-    hasRestoredCropTool.current = true;
-
-    if (persistedCropTool && persistedCropTool !== (cropToolSignal.value as CropTool)) {
-      cropToolSignal.set(persistedCropTool);
-    }
-  }, [state.isLoaded, cropToolSignal, persistedCropTool]);
+  const { reCanvasActiveSignal } = usePluginSignals();
 
   return useMemo(() => {
     const isReCanvas = !!reCanvasActiveSignal?.value;
 
-    // Active crop tool (single source of truth for the UI). Falls back to 'rect'
-    // before the signal is registered (defensive — usePluginSignals always
-    // registers it once the plugin mounts).
-    const cropTool = (cropToolSignal?.value as CropTool | undefined) ?? 'rect';
+    // Active crop tool — read directly from the per-frame field.
+    const cropTool = (activeFrame?.latestClipTool as CropTool | undefined) ?? 'rect';
     // Pre-PR-6-2: derive from CROP_TOOL_STRATEGIES via the helper functions
     // exported from protocols.ts. This eliminates the previous duplicate
     // truth source (literal `cropTool === 'rect' || ...`) and makes the
@@ -88,10 +68,10 @@ export const useClipOptionsCommands = () => {
     // Uses the unified `resolveActiveSelection` helper which checks both
     // `irregularCropBoxes[toolId]` and `imageCropBox` with size validation.
     const hasIrregularBox = isIrregularTool
-      ? !!activeFrame?.irregularCropBoxes?.[cropTool]
+      ? !!(activeFrame?.clipBoxes[cropTool] && isPolygon(activeFrame.clipBoxes[cropTool]!))
       : false;
     const hasAnySelection = activeFrame
-      ? !!resolveActiveSelection(activeFrame, cropTool)
+      ? !!getClipBox(activeFrame)
       : false;
 
     // ─── Anti-alias derivations (2026/06/23 redesign) ──────────────────────
@@ -103,7 +83,8 @@ export const useClipOptionsCommands = () => {
     // is implicit — for the AA toggle UI we only ever care about imageCropBox
     // because Re-Canvas always force-rects, where AA is meaningless). Default
     // to `true` to match the field's documented default in `primitives.ts`.
-    const isAntiAliased = activeFrame?.imageCropBox.antiAliased !== false;
+    const currentClipShape = activeFrame ? getRegularClipShape(activeFrame) : undefined;
+    const isAntiAliased = currentClipShape?.antiAliased !== false;
 
 
     return {
@@ -127,8 +108,8 @@ export const useClipOptionsCommands = () => {
       drillCmd: actions.adv.layer.clip.drill,
       // Apply selection as bitmap mask on the active layer (purple "Apply Mask" button).
       // Atomic with selection-clear inside the command body — see
-      // `core/advanced/commands/irregular/selection.ts::toLayerMask`.
-      applyMaskCmd: actions.adv.irregular.selection.toLayerMask,
+      // `core/advanced/commands/layer/clip.ts::toMask`.
+      applyMaskCmd: actions.adv.layer.clip.toMask,
 
       // Tool / state derived helpers
       cropTool,
@@ -155,13 +136,17 @@ export const useClipOptionsCommands = () => {
        */
       setShapeType: (type: ShapeType, antiAliased?: boolean) => {
         if (!activeFrame) return;
-        const setter = isReCanvas ? actions.setCanvasCropBox : actions.setImageCropBox;
-        const target = isReCanvas ? activeFrame.canvasCropBox : activeFrame.imageCropBox;
-        const patch: LocalShape = { ...target, type };
-        if (antiAliased !== undefined) {
-          patch.antiAliased = antiAliased;
+        if (isReCanvas) {
+          const patch: LocalShape = { ...activeFrame.canvasCropBox, type };
+          if (antiAliased !== undefined) patch.antiAliased = antiAliased;
+          actions.setCanvasCropBox(activeFrame.id, patch);
+        } else {
+          const currentClip = getRegularClipShape(activeFrame) || asLocalShape({ x: 0, y: 0, w: 0, h: 0 });
+          const patch: LocalShape = { ...currentClip, type };
+          if (antiAliased !== undefined) patch.antiAliased = antiAliased;
+          const toolId = type === 'circle' ? 'ellipse' : 'rect';
+          actions.setClipBox(activeFrame.id, toolId, patch);
         }
-        setter(activeFrame.id, patch);
       },
       closeReCanvas: () => reCanvasActiveSignal?.set(false),
     };
@@ -169,7 +154,6 @@ export const useClipOptionsCommands = () => {
     actions,
     activeFrame,
     reCanvasActiveSignal,
-    cropToolSignal,
     toggleModeCmd,
     exitClipModeCmd,
     reCanvasToggleCmd,

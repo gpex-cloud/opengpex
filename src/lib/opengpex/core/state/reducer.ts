@@ -332,17 +332,30 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
       };
     }
 
-    case 'SET_IMAGE_CROP_BOX': {
-      const { frameId, cropBox } = action.payload;
+    case 'SET_CLIP_BOX': {
+      const { frameId, toolId, value } = action.payload;
       const frame = state.frames.byId[frameId];
       if (!frame) return state;
+
+      let nextClipBoxes: Record<string, typeof value & {}>;
+      if (value == null) {
+        // Clear: remove the tool's slot. Idempotent — no-op when already absent.
+        if (frame.clipBoxes[toolId] == null) return state;
+        const { [toolId]: _omit, ...rest } = frame.clipBoxes;
+        void _omit;
+        nextClipBoxes = rest;
+      } else {
+        // Set: write the tool's slot.
+        nextClipBoxes = { ...frame.clipBoxes, [toolId]: value };
+      }
+
       return {
         ...state,
         frames: {
           ...state.frames,
           byId: {
             ...state.frames.byId,
-            [frameId]: { ...frame, imageCropBox: cropBox }
+            [frameId]: { ...frame, clipBoxes: nextClipBoxes }
           }
         }
       };
@@ -359,66 +372,6 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
           byId: {
             ...state.frames.byId,
             [frameId]: { ...frame, canvasCropBox: cropBox }
-          }
-        }
-      };
-    }
-
-    case 'SET_IRREGULAR_CROP_BOX': {
-      const { frameId, toolId, polygon } = action.payload;
-      const frame = state.frames.byId[frameId];
-      if (!frame) return state;
-      const nextBoxes = { ...(frame.irregularCropBoxes || {}), [toolId]: polygon };
-      return {
-        ...state,
-        frames: {
-          ...state.frames,
-          byId: {
-            ...state.frames.byId,
-            [frameId]: { ...frame, irregularCropBoxes: nextBoxes }
-          }
-        }
-      };
-    }
-
-    case 'CLEAR_IRREGULAR_CROP_BOX': {
-      const { frameId, toolId } = action.payload;
-      const frame = state.frames.byId[frameId];
-      if (!frame) return state;
-      // Idempotent: if the tool's slot is already absent, skip allocation to
-      // avoid noise patches in the history stack.
-      const current = frame.irregularCropBoxes;
-      if (!current || current[toolId] == null) return state;
-      const { [toolId]: _omit, ...rest } = current;
-      void _omit;
-      const nextBoxes = Object.keys(rest).length === 0 ? undefined : rest;
-      return {
-        ...state,
-        frames: {
-          ...state.frames,
-          byId: {
-            ...state.frames.byId,
-            [frameId]: { ...frame, irregularCropBoxes: nextBoxes }
-          }
-        }
-      };
-    }
-
-    case 'CLEAR_ALL_IRREGULAR_CROP_BOXES': {
-      const { frameId } = action.payload;
-      const frame = state.frames.byId[frameId];
-      if (!frame) return state;
-      // Idempotent: if no slots exist, skip allocation.
-      if (!frame.irregularCropBoxes || Object.keys(frame.irregularCropBoxes).length === 0) {
-        return state;
-      }
-      return {
-        ...state,
-        frames: {
-          ...state.frames,
-          byId: {
-            ...state.frames.byId,
-            [frameId]: { ...frame, irregularCropBoxes: undefined }
           }
         }
       };

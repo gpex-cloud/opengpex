@@ -20,7 +20,14 @@
 import { useEffect, useRef } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync, useFastRectSync, useFastSvgGroupSync, useFastMarchingAntsSync } from '@opengpex/editor/core/motion/hooks/navigation';
-import { LocalRect } from '@opengpex/editor/core/types';
+import { LocalRect, LocalShape, LocalPolygon, asLocalShape, isPolygon } from '@opengpex/editor/core/types';
+import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+
+const EMPTY_SHAPE: LocalShape = asLocalShape({ x: 0, y: 0, w: 0, h: 0 });
+function resolveRegularClip(f: { clipBoxes: Record<string, unknown>; canvasCropBox: LocalShape }, isReCanvas: boolean): LocalShape {
+  if (isReCanvas) return f.canvasCropBox;
+  return getRegularClipShape(f as { clipBoxes: Record<string, LocalShape | LocalPolygon> }) || EMPTY_SHAPE;
+}
 
 /**
  * useCropDimSync: Fast track Hook dedicated to synchronizing selection dimension display
@@ -32,7 +39,7 @@ export function useCropDimSync(
   const dimLabelRef = useRef<HTMLSpanElement>(null);
 
   useFastSync(dimLabelRef, isActive, (_v, f) => {
-    const currentShape = isReCanvas ? f.canvasCropBox : f.imageCropBox;
+    const currentShape = resolveRegularClip(f, isReCanvas);
     const currentBox = currentShape.rect;
 
     if (dimLabelRef.current) {
@@ -72,8 +79,7 @@ export function useRegularCropSync(
 
   useFastRectSync(ref, isActive, {
     selector: (_v, f) => {
-      const shape = isReCanvas ? f.canvasCropBox : f.imageCropBox;
-      return shape.rect;
+      return resolveRegularClip(f, isReCanvas).rect;
     },
     space: 'local'
   });
@@ -83,7 +89,7 @@ export function useRegularCropSync(
   // an instant show. This replaces the old React-level conditional rendering
   // which broke the fast-track "drag to create" flow.
   useFastSync(ref, isActive, (_v, f) => {
-    const shape = isReCanvas ? f.canvasCropBox : f.imageCropBox;
+    const shape = resolveRegularClip(f, isReCanvas);
     const rect = shape.rect;
     const isEmpty = rect.w <= 0 || rect.h <= 0;
     if (ref.current) {
@@ -96,8 +102,7 @@ export function useRegularCropSync(
 
   useFastSvgGroupSync(groupRef, isActive, {
     selector: (_v, f) => {
-      const shape = isReCanvas ? f.canvasCropBox : f.imageCropBox;
-      return shape.rect;
+      return resolveRegularClip(f, isReCanvas).rect;
     },
     space: 'local'
   });
@@ -114,7 +119,7 @@ export function useRegularCropSync(
   });
 
   useFastMarchingAntsSync(pathRef, isActive, {
-    selector: (_v, f) => isReCanvas ? f.canvasCropBox : f.imageCropBox
+    selector: (_v, f) => resolveRegularClip(f, isReCanvas)
   });
 
   // [Pre-PR-6 缺陷 A 修复] When isActive flips to false, the upstream
@@ -204,13 +209,17 @@ export function useIrregularSelectionSync(
   const { geometry } = useEditorServices();
 
   useFastSvgGroupSync(polyGroupRef, isActive, {
-    selector: (_v, f) => f.irregularCropBoxes?.[activeToolId]?.bounds || null,
+    selector: (_v, f) => {
+      const entry = f.clipBoxes[activeToolId];
+      return (entry && isPolygon(entry)) ? (entry as LocalPolygon).rect : null;
+    },
     space: 'local'
   });
 
   useFastMarchingAntsSync(polyPathRef, isActive, {
     selector: (_v, f) => {
-      const poly = f.irregularCropBoxes?.[activeToolId];
+      const entry = f.clipBoxes[activeToolId];
+      const poly = (entry && isPolygon(entry)) ? entry as LocalPolygon : undefined;
       if (!poly) return null;
       return geometry.polygon.polygonToSvgPathD(poly);
     },

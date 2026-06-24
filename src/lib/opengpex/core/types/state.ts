@@ -137,11 +137,8 @@ export type EditorAction =
   | { type: 'SET_LAYERS'; payload: { frameId: string; layers: Layer[] } }
   | { type: 'SET_ACTIVE_LAYER'; payload: { frameId: string; layerId: string | null } }
   | { type: 'UPDATE_CAMERA'; payload: { frameId: string; camera: CameraState } }
-  | { type: 'SET_IMAGE_CROP_BOX'; payload: { frameId: string; cropBox: LocalShape } }
+  | { type: 'SET_CLIP_BOX'; payload: { frameId: string; toolId: string; value: LocalShape | LocalPolygon | null } }
   | { type: 'SET_CANVAS_CROP_BOX'; payload: { frameId: string; cropBox: LocalShape } }
-  | { type: 'SET_IRREGULAR_CROP_BOX'; payload: { frameId: string; toolId: string; polygon: LocalPolygon } }
-  | { type: 'CLEAR_IRREGULAR_CROP_BOX'; payload: { frameId: string; toolId: string } }
-  | { type: 'CLEAR_ALL_IRREGULAR_CROP_BOXES'; payload: { frameId: string } }
 
   | { type: 'SET_IMAGE_ASPECT'; payload: { frameId: string; aspect: number | undefined } }
   | { type: 'SET_CANVAS_ASPECT'; payload: { frameId: string; aspect: number | undefined } }

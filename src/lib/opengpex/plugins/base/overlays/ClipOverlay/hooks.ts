@@ -20,11 +20,11 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { Motion } from '@opengpex/editor/core/motion';
-import { asLocalShape } from '@opengpex/editor/core/types';
+import { asLocalShape, isPolygon, LocalShape, LocalPolygon } from '@opengpex/editor/core/types';
+import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import {
   CLIP_OPTIONS_SIGNAL_RE_CANVAS,
   CLIP_OPTIONS_CMD_RESET_BOX,
-  CLIP_OPTIONS_SIGNAL_CROP_TOOL,
   CROP_TOOL_STRATEGIES,
   CropTool,
 } from '../../options/ClipOptions/protocols';
@@ -43,9 +43,8 @@ export function useClipOverlayCommands() {
   const isReCanvas = state.getStateSignal(CLIP_OPTIONS_SIGNAL_RE_CANVAS);
   const isClipActive = state.interaction.interactionMode === 'clip';
 
-  // Active crop / selection tool. Default 'rect' so the regular flow keeps working
-  // even before ClipOptions registers the SIGNAL_CROP_TOOL signal (PR-5).
-  const rawTool = state.getStateSignal<CropTool>(CLIP_OPTIONS_SIGNAL_CROP_TOOL, 'rect');
+  // Active crop / selection tool — read from per-frame field.
+  const rawTool = (activeFrame?.latestClipTool as CropTool) || 'rect';
   // ─── Re-Canvas vs Clip orthogonality (2026-06-23 fix) ───────────────────
   // Re-Canvas owns its own visual chrome: a rose-tinted, draggable rect on
   // `canvasCropBox`. It does *not* care about the user's last-selected crop
@@ -69,13 +68,14 @@ export function useClipOverlayCommands() {
   const isIrregularTool = family === 'irregular';
 
 
-  const { imageCropBox, canvasCropBox, canvas: canvasDim } = activeFrame || {
-    imageCropBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
+  const { clipBoxes, canvasCropBox, canvas: canvasDim } = activeFrame || {
+    clipBoxes: {} as Record<string, LocalShape | LocalPolygon>,
     canvasCropBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
     canvas: { w: 0, h: 0 }
   };
 
-  const cropShape = isReCanvas ? canvasCropBox : imageCropBox;
+  const imageCropBox = getRegularClipShape({ clipBoxes: clipBoxes as Record<string, LocalShape | LocalPolygon> });
+  const cropShape = isReCanvas ? canvasCropBox : (imageCropBox || asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
   const cropBox = cropShape.rect;
   const cropType = cropShape.type;
 
@@ -121,7 +121,7 @@ export function useClipOverlayCommands() {
   // pane's "Apply" / "Clear" buttons read this flag to decide whether to show
   // the irregular-mode CTA chrome.
   const hasIrregularBox = isIrregularTool
-    ? !!activeFrame?.irregularCropBoxes?.[cropTool]
+    ? !!(activeFrame?.clipBoxes[cropTool] && isPolygon(activeFrame.clipBoxes[cropTool]!))
     : false;
 
 
@@ -129,7 +129,7 @@ export function useClipOverlayCommands() {
     activeFrame,
     cropBox,
     cropType,
-    imageCropBox,
+    imageCropBox: imageCropBox || asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
     canvasCropBox,
     canvasDim,
     isReCanvas,

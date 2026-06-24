@@ -21,8 +21,7 @@
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
 import * as P from '@opengpex/editor/core/advanced/protocols';
-import { resolveActiveSelection } from '@opengpex/editor/core/helpers/selection';
-import { CLIP_OPTIONS_SIGNAL_CROP_TOOL } from '@opengpex/editor/plugins/base/options/ClipOptions/protocols';
+import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
 /**
  * CMD+J commands: Create new layers by copying or cutting selections.
@@ -42,12 +41,11 @@ export const LayerCmdJCommands = {
 
       try {
         const latestLayer = ctx.actions.fast.latestLayer(activeFrame.id, activeLayer.id) || activeLayer;
-        const activeTool = ctx.state.interaction.signals[CLIP_OPTIONS_SIGNAL_CROP_TOOL] as string | undefined;
-        const selection = resolveActiveSelection(activeFrame, activeTool);
+        const box = getClipBox(activeFrame);
 
-        if (selection) {
+        if (box) {
           // With selection: copy selection
-          const result = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, selection, 'Layer');
+          const result = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, 'Layer');
           if (!result) {
             ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
             return;
@@ -85,13 +83,12 @@ export const LayerCmdJCommands = {
 
       try {
         const latestLayer = actions.fast.latestLayer(activeFrame.id, activeLayer.id) || activeLayer;
-        const activeTool = ctx.state.interaction.signals[CLIP_OPTIONS_SIGNAL_CROP_TOOL] as string | undefined;
-        const selection = resolveActiveSelection(activeFrame, activeTool);
-        if (!selection) {
+        const box = getClipBox(activeFrame);
+        if (!box) {
           actions.setInteraction({ selectionErrorPulse: Date.now() });
           return;
         }
-        const result = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, selection, 'Layer');
+        const result = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, 'Layer');
         if (!result) {
           actions.setInteraction({ selectionErrorPulse: Date.now() });
           return;
