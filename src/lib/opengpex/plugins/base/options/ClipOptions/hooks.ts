@@ -23,6 +23,7 @@
 import { useMemo, useEffect, useRef } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals } from '@opengpex/editor/core/context';
 import { asLocalRect, ShapeType, LocalShape } from '@opengpex/editor/core/types';
+import { resolveActiveSelection } from '@opengpex/editor/core/helpers/selection';
 import { getActiveTarget } from './commands';
 import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn, CROP_TOOL_STRATEGIES, PLUGIN_AUTHOR, PLUGIN_ID } from './protocols';
 import type { CropTool } from './protocols';
@@ -82,12 +83,15 @@ export const useClipOptionsCommands = () => {
     // tool family completely table-driven.
     const isRegularTool = isRegularToolFn(cropTool);
     const isIrregularTool = isIrregularToolFn(cropTool);
-    // Pre-PR-6-3: per-tool slot lookup. The "Apply" / "Clear" CTA visibility
-    // tracks the slot belonging to the currently active irregular tool only,
-    // so the Options pane stays in sync with the canvas (which also reads
-    // per-tool via `useIrregularSelectionSync`).
+    // Phase 2 redesign: Apply Mask button is now visible for ANY valid
+    // selection (rect/ellipse/lasso/wand), not just irregular tools.
+    // Uses the unified `resolveActiveSelection` helper which checks both
+    // `irregularCropBoxes[toolId]` and `imageCropBox` with size validation.
     const hasIrregularBox = isIrregularTool
       ? !!activeFrame?.irregularCropBoxes?.[cropTool]
+      : false;
+    const hasAnySelection = activeFrame
+      ? !!resolveActiveSelection(activeFrame, cropTool)
       : false;
 
     // ─── Anti-alias derivations (2026/06/23 redesign) ──────────────────────
@@ -131,6 +135,7 @@ export const useClipOptionsCommands = () => {
       isRegularTool,
       isIrregularTool,
       hasIrregularBox,
+      hasAnySelection,
       supportsAntiAlias,
       isAntiAliased,
 

@@ -19,7 +19,7 @@
 
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Split,
   ChevronDown,
@@ -78,6 +78,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
     cropTool,
     isIrregularTool,
     hasIrregularBox,
+    hasAnySelection,
     supportsAntiAlias,
     isAntiAliased,
   } = useClipOptionsCommands();
@@ -86,28 +87,11 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
   const { reCanvasActiveSignal } = usePluginSignals();
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-
-
-  const handleMouseEnter = () => {
-    if (!activeFrame || isPanMode) return;
-    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-    setIsDropdownOpen(true);
+  const handleDropdownClick = () => {
+    if (!activeFrame || isPanMode || isIrregularTool) return;
+    setIsDropdownOpen((prev) => !prev);
   };
-
-
-  const handleMouseLeave = () => {
-    hoverTimeoutRef.current = setTimeout(() => {
-      setIsDropdownOpen(false);
-    }, 150);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-    };
-  }, []);
 
   // ─── AA double-tap shortcut ─────────────────────────────────────────────
   // The "double-tap A → toggle Anti-Alias" gesture used to live here as a
@@ -392,7 +376,58 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
           <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20" />
 
           {/*
-           * Segment 2: AA toggle. Orthogonal to tool identity — reads
+           * Segment 2: Aspect Ratio Selector — disabled on irregular tools (§3.2.4).
+           * Click-triggered dropdown (changed from hover-to-open in 2026-06-24).
+           */}
+          <Popover
+            isOpen={isDropdownOpen && !isPanMode && !isIrregularTool}
+            onClose={() => setIsDropdownOpen(false)}
+            position="bottom"
+            align="start"
+            offset={6}
+            display="inline-flex"
+            content={
+              <div className="w-48 p-1.5">
+                <AspectGrid
+                  activeAspect={activeAspect}
+                  onSelect={(val) => {
+                    setAspectCmd?.execute({ aspect: val });
+                    setIsDropdownOpen(false);
+                  }}
+                />
+              </div>
+            }
+          >
+            <button
+              onClick={handleDropdownClick}
+              className="flex items-center h-full outline-none select-none"
+              disabled={isIrregularTool}
+              title={isIrregularTool ? "Aspect ratio is N/A for lasso / wand selection" : undefined}
+            >
+              <div
+                className={`flex items-center gap-1.5 px-2 h-full transition-colors outline-none select-none
+                ${
+                  isPanMode || isIrregularTool
+                    ? disabledClasses
+                    : "hover:bg-[var(--bg-stage)]"
+                }
+              `}
+              >
+                <span className="text-[10px] font-black text-[var(--text-main)] min-w-[32px] text-center">
+                  {currentRatio.label}
+                </span>
+                <ChevronDown
+                  size={10}
+                  className={`text-[var(--text-muted)] transition-transform duration-300 ${isDropdownOpen ? "rotate-180" : ""}`}
+                />
+              </div>
+            </button>
+          </Popover>
+
+          <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20" />
+
+          {/*
+           * Segment 3: AA toggle. Orthogonal to tool identity — reads
            * `supportsAntiAlias` from the active tool's strategy row to decide
            * its `disabled` state. Strikethrough on the `AA` glyph signals OFF
            * without needing a second icon. Wired to `CMD_TOGGLE_ANTI_ALIAS`.
@@ -411,8 +446,6 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                     ? "Anti-aliasing only applies to the Ellipse tool"
                     : `Anti-Alias: ${isAntiAliased ? "ON" : "OFF"}${antiAliasToggleCmd?.shortcutLabel ? ` (${antiAliasToggleCmd.shortcutLabel})` : ""}`
                 }
-
-
               >
                 <span
                   className={`text-[10px] font-black tracking-tight transition-colors ${
@@ -434,80 +467,26 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
           <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20" />
 
           {/*
-           * Segment 3: Aspect Ratio Selector — disabled on irregular tools (§3.2.4).
-           *
-           * ─── Popover migration (2026-06-23) ───────────────────────────
-           * Previously the aspect grid was a portal-less `motion.div`
-           * absolutely positioned at `top-full left-0`. It worked, but:
-           *   1) it could be clipped by parent `overflow: hidden` (e.g.
-           *      inside narrow toolbar containers),
-           *   2) it had no arrow / shared "bubble" chrome, making it
-           *      visually inconsistent with the sibling clip-tool strip
-           *      and Re-Canvas popovers in this same file,
-           *   3) z-index management was ad-hoc (a hard-coded `z-50`).
-           * Migrating to `<Popover>` (portal + shared theme + arrow
-           * anchoring) gives us free dark-mode theming, escape / outside
-           * click semantics, and the same visual language as the other
-           * two popovers on this toolbar.
-           *
-           * Hover-to-open / hover-to-close UX is preserved by:
-           *   - `isOpen` bound to local `isDropdownOpen` state,
-           *   - mouse handlers on BOTH the trigger button AND the popover
-           *     content (so moving the cursor onto the bubble doesn't
-           *     trigger the leave timeout),
-           *   - dismissOnOutsideClick / dismissOnEscape kept ON, with
-           *     `onClose` flipping the same state — gives users a
-           *     keyboard/click escape hatch in addition to hover-out.
+           * Segment 4: Apply Mask — always visible, disabled when no valid
+           * selection or in pan/re-canvas mode.
+           * Moved into the union button group (2026-06-24) for better
+           * proximity to the AA toggle.
            */}
-          <Popover
-            isOpen={isDropdownOpen && !isPanMode && !isIrregularTool}
-            onClose={() => setIsDropdownOpen(false)}
-            position="bottom"
-            align="start"
-            offset={6}
-            display="inline-flex"
-            content={
-              <div
-                onMouseEnter={handleMouseEnter}
-                onMouseLeave={handleMouseLeave}
-                className="w-48 p-1.5"
+          {(() => {
+            const maskDisabled = !hasAnySelection || isPanMode || isReCanvas;
+            return (
+              <button
+                onClick={() => applyMaskCmd?.execute({ toolId: cropTool })}
+                disabled={maskDisabled}
+                className={`flex items-center justify-center w-7 h-7 rounded-r-xl transition-colors outline-none select-none
+                  ${maskDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
+                `}
+                title="Apply Selection as Mask"
               >
-                <AspectGrid
-                  activeAspect={activeAspect}
-                  onSelect={(val) => {
-                    setAspectCmd?.execute({ aspect: val });
-                    setIsDropdownOpen(false);
-                  }}
-                />
-              </div>
-            }
-          >
-            <button
-              onMouseEnter={isIrregularTool ? undefined : handleMouseEnter}
-              onMouseLeave={isIrregularTool ? undefined : handleMouseLeave}
-              className="flex items-center h-full outline-none select-none"
-              disabled={isIrregularTool}
-              title={isIrregularTool ? "Aspect ratio is N/A for lasso / wand selection" : undefined}
-            >
-              <div
-                className={`flex items-center gap-1.5 px-2 h-full rounded-r-xl transition-colors outline-none select-none
-                ${
-                  isPanMode || isIrregularTool
-                    ? disabledClasses
-                    : "hover:bg-[var(--bg-stage)]"
-                }
-              `}
-              >
-                <span className="text-[10px] font-black text-[var(--text-main)] min-w-[32px] text-center">
-                  {currentRatio.label}
-                </span>
-                <ChevronDown
-                  size={10}
-                  className={`text-[var(--text-muted)] transition-transform duration-300 ${isDropdownOpen ? "rotate-180" : ""}`}
-                />
-              </div>
-            </button>
-          </Popover>
+                <ScissorsLineDashed size={13} className={isIrregularTool ? "text-purple-500" : "text-amber-500"} />
+              </button>
+            );
+          })()}
         </div>
       </div>
 
@@ -529,28 +508,6 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
         >
           <Split size={13} className="text-emerald-500" />
         </FunctionButton>
-
-        {/*
-         * Apply Mask — purple, lasso/wand-only (§3.2.5).
-         * Renders only when:
-         *   - the active tool is irregular (lasso/wand), AND
-         *   - the user has actually committed a polygon (irregularCropBox != null), AND
-         *   - we are in clip mode and not Re-Canvas.
-         * The space at the right of `branchCreateCmd` is reserved for the future
-         * "antiAliased toggle" sibling per §5.2 #4 — do NOT wrap into a PluginSlot.
-         */}
-        {isIrregularTool && hasIrregularBox && !isPanMode && !isReCanvas && (
-          <FunctionButton
-            onClick={() => applyMaskCmd?.execute({ toolId: cropTool })}
-
-            title="Apply Selection as Mask"
-            variant="ghost"
-            tooltipPosition="bottom"
-            className="w-6 h-6"
-          >
-            <ScissorsLineDashed size={13} className="text-purple-500" />
-          </FunctionButton>
-        )}
 
         {/*
          * Re-Canvas — clickable from both pan and clip mode. The
