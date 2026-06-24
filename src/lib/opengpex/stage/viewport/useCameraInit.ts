@@ -63,10 +63,6 @@ export function useCameraInit(
 
   // Tracks the frame.id we last "centered" on (auto-fit). Null = never yet.
   const initializedFrameIdRef = useRef<string | null>(null);
-  // Tracks the safeRect signature we last reacted to, to elide redundant work.
-  const lastRectKeyRef = useRef<string>('');
-  // Tracks the safeRect *center* we last saw, used for Δ pan-compensation.
-  const lastSafeCenterRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (status !== 'STABLE') return;
@@ -75,76 +71,45 @@ export function useCameraInit(
     const containerRect = containerRef.current.getBoundingClientRect();
     if (containerRect.width === 0 || containerRect.height === 0) return;
 
-    const rectKey = `${safeRect.x}-${safeRect.y}-${safeRect.w}-${safeRect.h}`;
-    const newCenter = {
-      x: safeRect.x + safeRect.w / 2,
-      y: safeRect.y + safeRect.h / 2,
-    };
-
     const isFirstMount = initializedFrameIdRef.current === null;
     const isFrameSwitched = !isFirstMount && initializedFrameIdRef.current !== frame.id;
-    const isLayoutChanged = !isFirstMount && !isFrameSwitched && lastRectKeyRef.current !== rectKey;
 
     // Nothing to do.
-    if (!isFirstMount && !isFrameSwitched && !isLayoutChanged) return;
+    if (!isFirstMount && !isFrameSwitched) return;
 
-    if (isFirstMount || isFrameSwitched) {
-      // ── Branch A: Auto-fit ──────────────────────────────────────────────
-      // Compute insets directly from container-relative safeRect coords
-      // (avoids subtracting screen-relative offsets that misalign when the
-      // ToolMenu is pinned).
-      const relativeOffset = {
-        left: Math.max(0, safeRect.x),
-        top: Math.max(0, safeRect.y),
-        right: Math.max(0, state.ui.viewportDim.w - safeRect.w - safeRect.x),
-        bottom: Math.max(0, state.ui.viewportDim.h - safeRect.h - safeRect.y),
-      };
+    // ── Branch A: Auto-fit ──────────────────────────────────────────────
+    // Compute insets directly from container-relative safeRect coords
+    // (avoids subtracting screen-relative offsets that misalign when the
+    // ToolMenu is pinned).
+    const relativeOffset = {
+      left: Math.max(0, safeRect.x),
+      top: Math.max(0, safeRect.y),
+      right: Math.max(0, state.ui.viewportDim.w - safeRect.w - safeRect.x),
+      bottom: Math.max(0, state.ui.viewportDim.h - safeRect.h - safeRect.y),
+    };
 
-      const finalCamera = geometry.camera.getFitCamera(
-        { w: containerRect.width, h: containerRect.height },
-        frame.canvas,
-        {
-          padding: VIEWPORT_FIT_PADDING,
-          maxScale: 1,
-          offsetLeft: relativeOffset.left,
-          offsetTop: relativeOffset.top,
-          offsetRight: relativeOffset.right,
-          offsetBottom: relativeOffset.bottom,
-        },
-      );
+    const finalCamera = geometry.camera.getFitCamera(
+      { w: containerRect.width, h: containerRect.height },
+      frame.canvas,
+      {
+        padding: VIEWPORT_FIT_PADDING,
+        maxScale: 1,
+        offsetLeft: relativeOffset.left,
+        offsetTop: relativeOffset.top,
+        offsetRight: relativeOffset.right,
+        offsetBottom: relativeOffset.bottom,
+      },
+    );
 
-      actions.updateCamera(frame.id, finalCamera);
-    } else {
-      // ── Branch B: Pan-only compensation ─────────────────────────────────
-      // Preserve user's zoom AND keep the focal world point centered in the
-      // new safe area. Skip if there is no prior center recorded (defensive).
-      const oldCenter = lastSafeCenterRef.current;
-      if (oldCenter) {
-        const dx = newCenter.x - oldCenter.x;
-        const dy = newCenter.y - oldCenter.y;
-        // Sub-pixel deltas aren't worth a Redux dispatch.
-        if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5) {
-          actions.updateCamera(frame.id, {
-            x: frame.camera.x + dx,
-            y: frame.camera.y + dy,
-            k: frame.camera.k,
-          });
-        }
-      }
-    }
+    actions.updateCamera(frame.id, finalCamera);
 
     // Always remember where we are now so the *next* layout change can
     // compute its own delta correctly.
     initializedFrameIdRef.current = frame.id;
-    lastRectKeyRef.current = rectKey;
-    lastSafeCenterRef.current = newCenter;
   }, [
     frame.id,
     frame.layers.order.length,
     frame.canvas,
-    frame.camera.x,
-    frame.camera.y,
-    frame.camera.k,
     status,
     safeRect.x,
     safeRect.y,

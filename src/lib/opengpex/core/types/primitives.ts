@@ -259,3 +259,13 @@ export const asWorldPolygon = (
   __brand: 'world'
 } as WorldPolygon);
 
+/**
+ * Type guard: discriminates whether a selection is a Polygon or a Shape.
+ * Used by LayerService and commands to handle the `LocalShape | LocalPolygon` union.
+ */
+export function isPolygon(sel: LocalShape | LocalPolygon): sel is LocalPolygon;
+export function isPolygon(sel: WorldShape | WorldPolygon): sel is WorldPolygon;
+export function isPolygon(sel: Shape | Polygon): sel is Polygon {
+  return Array.isArray((sel as Polygon).rings);
+}
+

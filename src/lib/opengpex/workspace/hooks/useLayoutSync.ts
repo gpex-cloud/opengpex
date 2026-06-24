@@ -47,7 +47,7 @@ import { useLayout } from '../LayoutContext';
 export function useLayoutSync() {
     const { state } = useEditorState();
     const { actions } = useEditorServices();
-    const { safeRect, status } = useLayout();
+    const { safeRect, status, slots } = useLayout();
 
     const { isLoaded, ui } = state;
     const { theme, viewportDim } = ui;
@@ -62,19 +62,53 @@ export function useLayoutSync() {
         if (status !== 'STABLE') return;
         if (viewportDim.w <= 0 || viewportDim.h <= 0) return;
 
+        let fixedLeft = 0;
+        let variedLeft = 0;
+        let fixedRight = 0;
+        let variedRight = 0;
+
+        Object.values(slots).forEach((slot) => {
+            if (slot.role === 'LEFT_PUSH') {
+                if (slot.id === 'drawerbar-left') {
+                    fixedLeft = Math.max(fixedLeft, slot.width);
+                } else if (slot.id === 'drawerbar-active-left') {
+                    variedLeft = Math.max(variedLeft, slot.width - 40);
+                } else {
+                    fixedLeft = Math.max(fixedLeft, slot.width);
+                }
+            }
+            if (slot.role === 'RIGHT_PUSH') {
+                if (slot.id === 'drawerbar-right') {
+                    fixedRight = Math.max(fixedRight, slot.width);
+                } else if (slot.id === 'drawerbar-active-right') {
+                    variedRight = Math.max(variedRight, slot.width - 40);
+                } else {
+                    fixedRight = Math.max(fixedRight, slot.width);
+                }
+            }
+        });
+
         const targetInsets = {
             top: Math.max(0, Math.round(safeRect.y)),
-            left: Math.max(0, Math.round(safeRect.x)),
-            right: Math.max(0, Math.round(viewportDim.w - safeRect.w - safeRect.x)),
             bottom: Math.max(0, Math.round(viewportDim.h - safeRect.h - safeRect.y)),
+            fixed: {
+                left: Math.max(0, Math.round(fixedLeft)),
+                right: Math.max(0, Math.round(fixedRight)),
+            },
+            varied: {
+                left: Math.max(0, Math.round(variedLeft)),
+                right: Math.max(0, Math.round(variedRight)),
+            }
         };
 
         const current = currentInsetsRef.current;
         const isChanged =
             targetInsets.top !== current.top ||
-            targetInsets.left !== current.left ||
-            targetInsets.right !== current.right ||
-            targetInsets.bottom !== current.bottom;
+            targetInsets.bottom !== current.bottom ||
+            targetInsets.fixed.left !== current.fixed?.left ||
+            targetInsets.fixed.right !== current.fixed?.right ||
+            targetInsets.varied.left !== current.varied?.left ||
+            targetInsets.varied.right !== current.varied?.right;
 
         if (!isChanged) return;
 
@@ -87,9 +121,8 @@ export function useLayoutSync() {
     }, [
         isLoaded,
         status,
-        safeRect.x,
+        slots,
         safeRect.y,
-        safeRect.w,
         safeRect.h,
         viewportDim.w,
         viewportDim.h,

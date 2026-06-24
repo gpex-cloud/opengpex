@@ -56,9 +56,11 @@ export function ClipOverlayMain() {
     showError,
     boxRef,
     cropType,
+    cropTool,
     isRegularTool,
     isIrregularTool,
   } = useClipOverlayCommands();
+
   const { state } = useEditorState();
 
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -73,11 +75,23 @@ export function ClipOverlayMain() {
     ? (gridConfig.zoomThreshold ?? 8)
     : null;
 
-  // 2a. Regular crop sync (rect / ellipse) — pause when on lasso/wand
+  // ─── 2a / 2b: fast-track activation gates ───────────────────────────────
+  // The overlay is mounted whenever the user is *either* in clip mode OR
+  // Re-Canvas is active (the two now operate as orthogonal modals — see
+  // `useClipOverlayCommands` for the `cropTool` synthesis that pins family
+  // to 'regular' during Re-Canvas). The activation gate for the *regular*
+  // channel is therefore `(isClipActive || isReCanvas) && isRegularTool`:
+  // Re-Canvas always wants the rect draggable, regardless of what tool the
+  // user had selected before opening Re-Canvas.
+  //
+  // The irregular channel never activates during Re-Canvas (Re-Canvas is
+  // rect-only), so its gate keeps the stricter `isClipActive` check.
+  const isOverlayActive = isClipActive || isReCanvas;
+
   const { syncStyle, groupRef, pathRef, guidesRef } = useRegularCropSync(
     boxRef,
     cropBox,
-    isClipActive && isRegularTool,
+    isOverlayActive && isRegularTool,
     isReCanvas,
     showGridThreshold,
   );
@@ -90,7 +104,10 @@ export function ClipOverlayMain() {
     polyGroupRef,
     polyPathRef,
     isClipActive && isIrregularTool,
+    cropTool,
   );
+
+
 
   // 2c. Lasso preview path: install/uninstall the module-level ref slot used
   //     by `createLassoHandler` to paint the in-progress trail without redux.
@@ -119,11 +136,15 @@ export function ClipOverlayMain() {
   }, []);
 
   const { dimLabelRef } = useCropDimSync(
-    isClipActive && isRegularTool,
+    isOverlayActive && isRegularTool,
     isReCanvas,
   );
 
-  if (!activeFrame || !isClipActive) return null;
+  // Mount whenever clip OR Re-Canvas is active. Re-Canvas users expect the
+  // canvas rect (with handles + dim label) to be visible & draggable even
+  // outside of explicit clip mode — see commands.ts::toggleReCanvas notes.
+  if (!activeFrame || !isOverlayActive) return null;
+
 
   const cursor = dragType === "move"
     ? "move"
@@ -160,16 +181,28 @@ export function ClipOverlayMain() {
             />
           </g>
 
-          {/* Channel 2: irregular polygon selection (lasso / wand) */}
+          {/* ─── Channel 2: irregular polygon selection (lasso / wand) ────────
+           * Single-pass marching ants in a *bright* purple. An earlier
+           * 2026-06-23 attempt layered a `<use>` underlay in solid white
+           * to fake purple/white alternating ants, but the technique never
+           * looked right in practice (SVG2 `<use>` shadow-tree inheritance
+           * coupled with the shared `.marching-ants` animation produced
+           * subtle phase-locking artefacts on real images). Brightening
+           * the stroke color from purple-500 (`#a855f7`) to fuchsia-400
+           * (`#e879f9`) gives the contour a high-luminance, near-neon look
+           * that pops on busy / mid-tone backgrounds without the underlay
+           * complexity. The `drop-shadow` filter on the parent <g> still
+           * provides a 1-px black halo for contrast on pure-white regions.
+           */}
           <g
             ref={polyGroupRef}
             style={{ filter: "drop-shadow(0 0 1px rgba(0,0,0,0.5))" }}
           >
             <path
               ref={polyPathRef}
-              fill="rgba(168, 85, 247, 0.08)"
+              fill="rgba(232, 121, 249, 0.10)"
               fillRule="evenodd"
-              stroke="#a855f7"
+              stroke="#e879f9"
               strokeWidth="1"
               vectorEffect="non-scaling-stroke"
               strokeDasharray="6,6"
@@ -177,17 +210,23 @@ export function ClipOverlayMain() {
             />
           </g>
 
-          {/* Channel 3: live lasso preview (screen-space, imperatively updated) */}
+          {/* ─── Channel 3: live lasso preview (screen-space) ────────────────
+           * Same bright fuchsia as channel 2 for visual consistency. Single
+           * <path>, no underlay (see channel-2 rationale above).
+           */}
           <path
             ref={setPreviewPathRef}
-            fill="rgba(168, 85, 247, 0.06)"
+            fill="none"
             fillRule="evenodd"
-            stroke="#a855f7"
+            stroke="#e879f9"
             strokeWidth="1"
             strokeDasharray="4,4"
             vectorEffect="non-scaling-stroke"
             pointerEvents="none"
+            className="marching-ants"
           />
+
+
         </svg>
       </div>
 

@@ -19,30 +19,38 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, ClipboardLayerMetadata } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, ClipboardLayerMetadata, isPolygon } from '@opengpex/editor/core/types';
+import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
+import { resolveActiveSelection } from '@opengpex/editor/core/helpers/selection';
 import * as P from '@opengpex/editor/core/advanced/protocols';
+import { CLIP_OPTIONS_SIGNAL_CROP_TOOL } from '@opengpex/editor/plugins/base/options/ClipOptions/protocols';
 
 
 // Removed direct dependency on storage singleton, using ctx injection instead
 
 /**
- * Extract common logic of Cut and Copy: generate physical fragment and write to clipboard
+ * Extract common logic of Cut and Copy: generate physical fragment and write to clipboard.
+ * Caller must pass an already-resolved non-null `selection`.
  */
-async function copyCropBoxToClipboard(ctx: EditorContextValue, nameType: 'Layer') {
+async function copyCropBoxToClipboard(
+  ctx: EditorContextValue,
+  selection: NonNullable<ReturnType<typeof resolveActiveSelection>>,
+  nameType: 'Layer'
+) {
   const { activeFrame, activeLayer, actions } = ctx;
   if (!activeFrame || !activeLayer) return null;
 
   const latestLayer = actions.fast.latestLayer(activeFrame.id, activeLayer.id) || activeLayer;
 
   // 1. Generate Physical Track: bake PNG Blob, primarily for external applications (e.g., WeChat, Word) to paste
-  const physicalResult = await ctx.layers.fragmentToLayerPhysical(activeFrame, latestLayer, nameType);
+  const physicalResult = await ctx.layers.fragmentToLayerPhysical(activeFrame, latestLayer, selection, nameType);
   if (!physicalResult) {
     actions.setInteraction({ selectionErrorPulse: Date.now() });
     return null;
   }
 
   // 2. Generate Logical Track: generate a lossless layer object referencing the original image plus a visibleShape mask, specifically for internal system pasting
-  const logicalResult = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, nameType);
+  const logicalResult = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, selection, nameType);
 
   // 3. Composite clipboard write: external software reads physicalResult.url (Blob), internal Paste command reads Metadata.layer (Logical Layer)
   await ctx.clipboard.writeByUrl(physicalResult.url, {
@@ -75,10 +83,11 @@ export const LayerClipCommands = {
         }
 
         try {
-          const hasSelection = activeFrame.imageCropBox && activeFrame.imageCropBox.rect.w > 0 && activeFrame.imageCropBox.rect.h > 0;
+          const activeTool = state.interaction.signals[CLIP_OPTIONS_SIGNAL_CROP_TOOL] as string | undefined;
+          const selection = resolveActiveSelection(activeFrame, activeTool);
 
-          if (hasSelection) {
-            await copyCropBoxToClipboard(ctx, 'Layer');
+          if (selection) {
+            await copyCropBoxToClipboard(ctx, selection, 'Layer');
           } else {
             // Without selection: copy the entire layer
             await ctx.clipboard.writeByUrl(activeLayer.src, {
@@ -109,10 +118,11 @@ export const LayerClipCommands = {
         }
 
         try {
-          const hasSelection = activeFrame.imageCropBox && activeFrame.imageCropBox.rect.w > 0 && activeFrame.imageCropBox.rect.h > 0;
+          const activeTool = state.interaction.signals[CLIP_OPTIONS_SIGNAL_CROP_TOOL] as string | undefined;
+          const selection = resolveActiveSelection(activeFrame, activeTool);
 
-          if (hasSelection) {
-            const result = await copyCropBoxToClipboard(ctx, 'Layer');
+          if (selection) {
+            const result = await copyCropBoxToClipboard(ctx, selection, 'Layer');
             if (!result) return;
 
             ctx.layers.updateLayer(activeFrame.id, tx => {
@@ -226,11 +236,18 @@ export const LayerClipCommands = {
     execute: async (ctx: EditorContextValue): Promise<void> => {
       const { activeFrame, activeLayer, actions, geometry } = ctx;
       const isClipActive = ctx.state.interaction.interactionMode === 'clip';
-      if (!activeFrame || !activeLayer || !isClipActive || !activeFrame.imageCropBox) return;
+      if (!activeFrame || !activeLayer || !isClipActive) return;
 
       try {
         const latestLayer = actions.fast.latestLayer(activeFrame.id, activeLayer.id) || activeLayer;
-        const localShape = geometry.shape.frameLocalToLayerLocal(activeFrame.imageCropBox, activeFrame, latestLayer);
+
+        const activeTool = ctx.state.interaction.signals[CLIP_OPTIONS_SIGNAL_CROP_TOOL] as string | undefined;
+        const selection = resolveActiveSelection(activeFrame, activeTool);
+        if (!selection) return;
+
+        const localShape = isPolygon(selection)
+          ? polygonToShape(geometry.polygon.frameLocalToLayerLocalPolygon(selection, activeFrame, latestLayer))
+          : geometry.shape.frameLocalToLayerLocal(selection, activeFrame, latestLayer);
 
         ctx.layers.updateLayer(activeFrame.id, tx => {
           tx.edit(activeLayer.id)

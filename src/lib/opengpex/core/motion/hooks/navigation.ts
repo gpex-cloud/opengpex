@@ -221,10 +221,28 @@ export function useFastMarchingAntsSync(
   options: {
     selector: (v: VolatileState, frame: Frame, cam: CameraState) => LocalShape | string | null;
     antiAliased?: boolean;
+    /**
+     * Optional cache-invalidation key. The hook keeps a `lastD` cache so a
+     * stable shape doesn't trigger a redundant `setAttribute('d', ...)` every
+     * tick. That cache is sufficient when the *only* thing that changes is
+     * the shape geometry, but it falls down when the **selector's logical
+     * target** changes while `isActive` stays `true` — for example, the
+     * irregular-selection sync hook switches between
+     * `irregularCropBoxes['lasso']` and `irregularCropBoxes['wand']` based on
+     * the active tool. If the new target's `d` happens to equal the old one,
+     * or the old `d` was just imperatively cleared by a sibling effect, the
+     * dirty-check would skip the write and the DOM would never repaint.
+     *
+     * Pass anything that uniquely identifies the current selector target
+     * (e.g. the active tool id); the hook resets `lastD` whenever it
+     * changes. Same effect as flipping `isActive` off-then-on, but without
+     * the visible animation reset.
+     */
+    resetKey?: unknown;
   }
 ) {
   const { geometry } = useEditorServices();
-  const { selector, antiAliased = true } = options;
+  const { selector, antiAliased = true, resetKey } = options;
   const lastD = useRef<string | null>(null);
   const lastEl = useRef<SVGPathElement | null>(null);
 
@@ -235,9 +253,36 @@ export function useFastMarchingAntsSync(
     }
   }, [isActive]);
 
+  // Cache-invalidation point #2 — driven by callers that switch the
+  // selector's *logical target* without flipping `isActive`. We do not gate
+  // by `isActive` here: even when active, a target switch must invalidate
+  // the cache so the next tick is forced to re-write `d`. See `resetKey`
+  // option doc for the full rationale.
+  useLayoutEffect(() => {
+    lastD.current = null;
+    lastEl.current = null;
+  }, [resetKey]);
+
+
   useFastSync(pathRef, isActive, (v, f, cam) => {
+    if (!pathRef.current) return;
     const val = selector(v, f, cam);
-    if (!val || !pathRef.current) return;
+
+    // selector → null while active means "I am still the live channel, but
+    // I have nothing to paint right now" (e.g. the irregular-selection sync
+    // hook on a tool whose slot is empty). Without this branch, the previous
+    // tick's `d` would linger on the DOM with the .marching-ants animation
+    // still spinning over it. We explicitly clear once and then idle: the
+    // `lastD === null` guard makes follow-up ticks zero-cost until the
+    // selector starts returning data again.
+    if (!val) {
+      if (lastD.current !== null) {
+        lastD.current = null;
+        lastEl.current = null;
+        pathRef.current.setAttribute('d', '');
+      }
+      return;
+    }
 
     let dPath = '';
     if (typeof val === 'string') {
@@ -254,6 +299,7 @@ export function useFastMarchingAntsSync(
       pathRef.current.setAttribute('d', dPath);
     }
   });
+
 }
 
 

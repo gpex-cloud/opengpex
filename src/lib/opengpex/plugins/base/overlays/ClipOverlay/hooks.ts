@@ -45,13 +45,29 @@ export function useClipOverlayCommands() {
 
   // Active crop / selection tool. Default 'rect' so the regular flow keeps working
   // even before ClipOptions registers the SIGNAL_CROP_TOOL signal (PR-5).
-  const cropTool = state.getStateSignal<CropTool>(CLIP_OPTIONS_SIGNAL_CROP_TOOL, 'rect');
-  // Pre-PR-6-2: derive regular/irregular split from the strategy table's
-  // `family` field. Adding a future tool only requires a row in
-  // `CROP_TOOL_STRATEGIES`; this hook needs no edits.
+  const rawTool = state.getStateSignal<CropTool>(CLIP_OPTIONS_SIGNAL_CROP_TOOL, 'rect');
+  // ─── Re-Canvas vs Clip orthogonality (2026-06-23 fix) ───────────────────
+  // Re-Canvas owns its own visual chrome: a rose-tinted, draggable rect on
+  // `canvasCropBox`. It does *not* care about the user's last-selected crop
+  // tool (lasso / wand / ellipse) — those are clip-mode concerns. So when
+  // Re-Canvas is active we present the tool as a synthetic `'rect'` to the
+  // rest of the overlay code path:
+  //   • family derivation → always 'regular' → useRegularCropSync's isActive
+  //     becomes true → the canvas box becomes draggable;
+  //   • polyGroup / polyPath fast-track stays paused;
+  //   • `useFastMarchingAntsSync`'s `resetKey` is the synthetic tool (always
+  //     'rect' here), so re-entering / re-leaving Re-Canvas does not bleed
+  //     stale lasso paths into the canvas channel.
+  // We deliberately *do not* mutate `SIGNAL_CROP_TOOL` itself — when the user
+  // closes Re-Canvas the original tool returns automatically (it's still the
+  // raw signal value). This is the only place where the synthetic projection
+  // is needed; all the other consumers (Options bar, ClipOverlay handlers)
+  // already check `isReCanvas` explicitly before deciding what to do.
+  const cropTool: CropTool = isReCanvas ? 'rect' : rawTool;
   const family = CROP_TOOL_STRATEGIES[cropTool].family;
   const isRegularTool = family === 'regular';
   const isIrregularTool = family === 'irregular';
+
 
   const { imageCropBox, canvasCropBox, canvas: canvasDim } = activeFrame || {
     imageCropBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
@@ -86,11 +102,28 @@ export function useClipOverlayCommands() {
 
   useEffect(() => {
     return () => {
-      actionsRef.current.adv.layer.merge.mergeHost.execute();
+      // Defer to next microtask so React can finish the unmount commit + paint
+      // before kicking off the merge. Mirrors the latency optimisation in
+      // ClipOptions::exitClipMode (the centralised exit path); both routes are
+      // idempotent thanks to mergeHost's dirty short-circuit, so the duplicate
+      // call across the two cleanup paths is safe.
+      const actions = actionsRef.current;
+      queueMicrotask(() => {
+        actions.adv.layer.merge.mergeHost.execute();
+      });
     };
   }, []);
 
-  const hasIrregularBox = !!activeFrame?.irregularCropBox;
+  // Pre-PR-6-3: per-tool slot lookup. We only consider the slot that belongs
+  // to the *currently active* irregular tool — other slots may still hold
+  // stale polygons (preserved on tool switch so the user can come back to
+  // them) but are not "the active selection" from the user's POV. The Options
+  // pane's "Apply" / "Clear" buttons read this flag to decide whether to show
+  // the irregular-mode CTA chrome.
+  const hasIrregularBox = isIrregularTool
+    ? !!activeFrame?.irregularCropBoxes?.[cropTool]
+    : false;
+
 
   return {
     activeFrame,

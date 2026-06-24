@@ -92,8 +92,8 @@ export function PopupPanel({
   const dragStartCoords = useRef({ x: 0, b: 0 });
 
   const finalPosition = position || (anchor ? "AN" : "CT");
-  const leftInset = state.ui.theme.config.insets.left || 0;
-  const rightInset = state.ui.theme.config.insets.right || 0;
+  const leftInset = (state.ui.theme.config.insets.fixed?.left ?? 0) + (state.ui.theme.config.insets.varied?.left ?? 0);
+  const rightInset = (state.ui.theme.config.insets.fixed?.right ?? 0) + (state.ui.theme.config.insets.varied?.right ?? 0);
 
   const recalculateStacking = useCallback(() => {
     if (!panelRef.current || !isVisible || hasDragged || finalPosition === "CT")

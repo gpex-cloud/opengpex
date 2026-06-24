@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Shape } from '@opengpex/editor/core/types';
+import { Shape, LocalShape, WorldShape, LocalPolygon, WorldPolygon, Polygon } from '@opengpex/editor/core/types';
 
 /**
  * Converts shape descriptors to browser-native Path2D objects
@@ -99,4 +99,44 @@ export function shapeToPath2D(shape: Shape): Path2D {
   }
   
   return p;
+}
+
+/**
+ * Converts a Polygon to an equivalent Shape{type:'path'} descriptor.
+ * This bridges the polygon type system into the vectorMask / clip pipeline.
+ *
+ * Unlike `polygonToSvgPathD` (which outputs bounds-relative coordinates for SVG overlay use),
+ * this function generates ABSOLUTE coordinates suitable for direct Path2D consumption
+ * via `shapeToPath2D` → `new Path2D(pathData)`.
+ *
+ * Overloaded: LocalPolygon → LocalShape, WorldPolygon → WorldShape.
+ */
+export function polygonToShape(poly: LocalPolygon): LocalShape;
+export function polygonToShape(poly: WorldPolygon): WorldShape;
+export function polygonToShape(poly: LocalPolygon | WorldPolygon): LocalShape | WorldShape {
+  // Generate absolute-coordinate SVG path string (no bounds offset subtraction)
+  let pathD = '';
+  if (poly.rings.length) {
+    const parts: string[] = [];
+    for (const ring of poly.rings) {
+      if (ring.length < 2) continue;
+      const segs: string[] = [];
+      for (let i = 0; i < ring.length; i++) {
+        const p = ring[i];
+        segs.push(`${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`);
+      }
+      segs.push('Z');
+      parts.push(segs.join(' '));
+    }
+    pathD = parts.join(' ');
+  }
+
+  return {
+    type: 'path' as const,
+    rect: poly.bounds,
+    hardEdge: false,
+    antiAliased: poly.antiAliased !== false,
+    pathData: pathD,
+    __brand: poly.__brand,
+  } as LocalShape | WorldShape;
 }

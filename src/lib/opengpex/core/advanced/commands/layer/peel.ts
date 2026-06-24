@@ -44,7 +44,7 @@ export const LayerPeelCommands = {
           return;
         }
 
-        const result = ctx.layers.fragmentToExistLayer(activeFrame, latestLayer, exchangeLayer);
+        const result = ctx.layers.fragmentToExistLayer(activeFrame, latestLayer, exchangeLayer, activeFrame.imageCropBox);
         if (!result) return;
 
         const timestamp = Date.now();
@@ -96,9 +96,19 @@ export const LayerPeelCommands = {
 
         const { host, exchange, frag } = triplet.group;
 
-        // [2] Admission check
+        // [2] Admission check — when the triplet is clean (no peel happened
+        // since last commit), short-circuit to avoid spending a Zustand
+        // dispatch / reducer pipeline / re-render budget on a no-op. We only
+        // re-activate the host when the active layer is *not* already the
+        // host (e.g. a stale exchange focus from an aborted peel) — in the
+        // common "user toggled clip mode without doing anything" path the
+        // active layer is already host, so this whole branch becomes a few
+        // hash lookups and returns immediately. Critical for keeping the
+        // space-bar exit-clip latency imperceptible (see clip tool guide §4.2).
         if (!triplet.dirty) {
-          layers.activate(activeFrame.id, host.id);
+          if (activeLayer.id !== host.id) {
+            layers.activate(activeFrame.id, host.id);
+          }
           return;
         }
 

@@ -93,3 +93,46 @@
   stroke-dasharray: 6, 6;
   animation: marching-ants-flow 0.5s linear infinite;
 }
+
+/* ==========================================================================
+   Popover bubble — kill native UA chrome
+   --------------------------------------------------------------------------
+   The Popover widget (`widgets/Popover.tsx`) renders its content into a
+   portal. Inside the bubble we frequently host *interactive* elements
+   (buttons, links) where the browser's default focus / selection chrome
+   (blue dotted outlines, blue text-selection highlight, native button
+   inset shadows) actively fights with the editor's accent palette. Every
+   one of those defaults can be killed locally without affecting the rest
+   of the app.
+
+   We DO keep `:focus-visible` accessibility for actual keyboard nav by
+   only nuking the *non-visible* focus ring (`:focus:not(:focus-visible)`),
+   but in practice the popovers are pointer-driven so the result is the
+   same: a clean, themed surface with no rogue browser highlights.
+   ========================================================================== */
+.popover-bubble,
+.popover-bubble * {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.popover-bubble button,
+.popover-bubble [role="button"] {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Suppress the residual focus ring on pointer-activated buttons but keep
+   the keyboard-driven one (focus-visible) intact for a11y. */
+.popover-bubble :focus:not(:focus-visible) {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Themed text-selection inside the bubble — soft accent that works on
+   both light (`--bg-panel: #fff`) and dark (`#2b2b2b`) backgrounds. */
+.popover-bubble ::selection {
+  background-color: rgba(99, 102, 241, 0.25); /* indigo-500/25 */
+  color: inherit;
+}
+

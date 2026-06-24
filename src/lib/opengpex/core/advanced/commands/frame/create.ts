@@ -82,7 +82,7 @@ export const FrameCreateCommands = {
       const initialCamera = geometry.camera.getFitCamera(
         state.ui.viewportDim,
         dimension,
-        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
+        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left + insets.varied.left, offsetRight: insets.fixed.right + insets.varied.right }
       );
       const defaultCropBox = asLocalShape({ x: dimension.w * 0.25, y: dimension.h * 0.25, w: dimension.w * 0.5, h: dimension.h * 0.5 });
 
@@ -151,7 +151,7 @@ export const FrameCreateCommands = {
         const initialCamera = geometry.camera.getFitCamera(
           state.ui.viewportDim,
           canvasDim,
-          { maxScale: 1, padding: VIEWPORT_FIT_PADDING, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
+          { maxScale: 1, padding: VIEWPORT_FIT_PADDING, offsetTop: insets.top, offsetLeft: insets.fixed.left + insets.varied.left, offsetRight: insets.fixed.right + insets.varied.right }
         );
 
         const siblings = state.frames.order.map(id => state.frames.byId[id]).filter(f => f.parentId === activeFrame.id);
@@ -261,7 +261,7 @@ export const FrameCreateCommands = {
         const newCamera = geometry.camera.getFitCamera(
           state.ui.viewportDim,
           dimension,
-          { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
+          { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left + insets.varied.left, offsetRight: insets.fixed.right + insets.varied.right }
         );
 
         // 💡 5. Fully refresh the artboard's canvas size, camera, crop boxes, and all layers

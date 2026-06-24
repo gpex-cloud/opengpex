@@ -18,7 +18,7 @@
  */
 
 import { Frame, Layer, VectorMask, BitmapMask } from '@opengpex/editor/core/types/models';
-import { LocalShape, LocalRect, Dimensions } from '@opengpex/editor/core/types/primitives';
+import { LocalShape, LocalPolygon, LocalRect, Dimensions } from '@opengpex/editor/core/types/primitives';
 
 /**
  * LayerService: Layer domain model service (Domain: Layer)
@@ -49,12 +49,12 @@ export interface LayerService {
   getNewFrame: (patch: Partial<Frame>) => Frame;
   getNewLayerName: (layers: Array<{ name: string }>, baseName: string) => string;
   sortLayers: (layers: Layer[]) => Layer[];
-  fragmentToLayerPhysical: (frame: Frame, layer: Layer, nameType: string) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
-  fragmentToLayerLogical: (frame: Frame, layer: Layer, nameType: string) => { newLayer: Layer, localShape: LocalShape } | null;
+  fragmentToLayerPhysical: (frame: Frame, layer: Layer, selection: LocalShape | LocalPolygon, nameType: string) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
+  fragmentToLayerLogical: (frame: Frame, layer: Layer, selection: LocalShape | LocalPolygon, nameType: string) => { newLayer: Layer, localShape: LocalShape } | null;
   /** Physically resamples layer: adjusts pixel resolution and proportionally scales visible areas and masks */
   resampleLayerPhysical: (layer: Layer, scaleX: number, scaleY: number) => Promise<{ newUrl: string, newAssetId: string, patch: Partial<Layer> } | null>;
   /** Applies a fragment to an existing layer (e.g. Exchange layer) */
-  fragmentToExistLayer: (frame: Frame, sourceLayer: Layer, targetLayer: Layer) => { updatedLayer: Layer, localShape: LocalShape } | null;
+  fragmentToExistLayer: (frame: Frame, sourceLayer: Layer, targetLayer: Layer, selection: LocalShape | LocalPolygon) => { updatedLayer: Layer, localShape: LocalShape } | null;
   /** Creates a layer from an external image Blob (handles asset registration and position calculation) */
   createLayerFromBlob: (blob: Blob, frame: Frame, screenPoint?: { x: number, y: number }) => Promise<Layer>;
   getBlank: () => Partial<Layer>;

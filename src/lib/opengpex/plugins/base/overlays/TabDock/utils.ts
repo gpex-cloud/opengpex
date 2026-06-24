@@ -41,8 +41,8 @@ export const calculateDockPosition = (config: TabDockConfig) => {
   }
   const snap = config.snap || 'BC';
   
-  const OFF_L = 'var(--v-offset-left)';
-  const OFF_R = 'var(--v-offset-right)';
+  const OFF_L = 'var(--v-offset-fixed-left)';
+  const OFF_R = 'var(--v-offset-fixed-right)';
   const OFF_T = 'var(--v-offset-top)';
   const OFF_B = 'var(--v-offset-bottom)';
 

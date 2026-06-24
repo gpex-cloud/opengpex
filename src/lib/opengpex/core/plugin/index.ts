@@ -188,8 +188,10 @@ export function createPluginService(): PluginService {
         ctrl: sc.ctrl,
         shift: sc.shift,
         alt: sc.alt,
-        meta: sc.meta
+        meta: sc.meta,
+        taps: sc.taps
       }));
+
     },
 
     registerSignal: (signal: BuiltSignal, triggerNotify = true) => {

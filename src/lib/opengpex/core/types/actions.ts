@@ -59,10 +59,23 @@ export interface EditorActions {
   setImageCropBox: (frameId: string, cropBox: LocalShape) => void;
   setCanvasCropBox: (frameId: string, cropBox: LocalShape) => void;
   /**
-   * Sets or clears the irregular polygon selection on the frame.
-   * Pass `null` to clear (idempotent — no-op when already absent).
+   * Sets or clears the irregular polygon selection slot for a specific tool.
+   *
+   * @param frameId  Target frame.
+   * @param toolId   Producing tool id (e.g. `'lasso'`, `'wand'`). Each tool has
+   *                 its own slot in `Frame.irregularCropBoxes` so switching
+   *                 tools does not clobber another tool's polygon.
+   * @param polygon  The polygon to store, or `null` to clear *only this tool's*
+   *                 slot (idempotent — no-op when already absent).
    */
-  setIrregularCropBox: (frameId: string, polygon: LocalPolygon | null) => void;
+  setIrregularCropBox: (frameId: string, toolId: string, polygon: LocalPolygon | null) => void;
+  /**
+   * Clears every irregular selection slot in the frame, regardless of tool.
+   * Used by `adv.irregular.selection.toLayerMask` when the user bakes a
+   * selection (the polygon is consumed, so all tools should stop showing it).
+   */
+  clearAllIrregularCropBoxes: (frameId: string) => void;
+
   setImageAspect: (frameId: string, aspect: number | undefined) => void;
   setCanvasAspect: (frameId: string, aspect: number | undefined) => void;
 
@@ -180,11 +193,15 @@ export interface EditorActions {
     };
     irregular: {
       selection: {
-        // Pre-PR-6-2: `set` / `clear` removed — write `irregularCropBox`
-        // directly via `setIrregularCropBox(frameId, polygon | null)`.
-        toLayerMask: AdvCommandRef<{ layerId?: string } | undefined, Promise<void>>;
+        // Pre-PR-6-3: per-tool slot model. Producers write each tool's polygon
+        // into its own slot via `setIrregularCropBox(frameId, toolId, polygon | null)`.
+        // `toLayerMask` accepts an optional `toolId` payload so callers can
+        // pinpoint exactly which slot to bake; if omitted the command falls
+        // back to a deterministic first-non-empty-slot scan.
+        toLayerMask: AdvCommandRef<{ layerId?: string; toolId?: string } | undefined, Promise<void>>;
       };
     };
+
   };
 
   fast: {

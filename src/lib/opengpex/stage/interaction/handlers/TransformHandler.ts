@@ -174,7 +174,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
           effectiveAspect = (startState.w > 0 && startState.h > 0) ? startState.w / startState.h : 1;
         }
 
-        if (!constraints.clamp) {
+        if (constraints.clamp) {
           // Standard bounding box scaling (Elastic Rect)
           nextRect = InteractionMath.calculateElasticRect(e, {
             curX, curY, startAnchor,

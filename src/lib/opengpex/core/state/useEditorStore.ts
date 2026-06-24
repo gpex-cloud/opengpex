@@ -301,12 +301,15 @@ export function useEditorStore() {
       },
       setImageCropBox: (frameId: string, cropBox: LocalShape) => enhancedDispatch({ type: 'SET_IMAGE_CROP_BOX', payload: { frameId, cropBox } }),
       setCanvasCropBox: (frameId: string, cropBox: LocalShape) => enhancedDispatch({ type: 'SET_CANVAS_CROP_BOX', payload: { frameId, cropBox } }),
-      setIrregularCropBox: (frameId: string, polygon: LocalPolygon | null) =>
+      setIrregularCropBox: (frameId: string, toolId: string, polygon: LocalPolygon | null) =>
         enhancedDispatch(
           polygon == null
-            ? { type: 'CLEAR_IRREGULAR_CROP_BOX', payload: { frameId } }
-            : { type: 'SET_IRREGULAR_CROP_BOX', payload: { frameId, polygon } }
+            ? { type: 'CLEAR_IRREGULAR_CROP_BOX', payload: { frameId, toolId } }
+            : { type: 'SET_IRREGULAR_CROP_BOX', payload: { frameId, toolId, polygon } }
         ),
+      clearAllIrregularCropBoxes: (frameId: string) =>
+        enhancedDispatch({ type: 'CLEAR_ALL_IRREGULAR_CROP_BOXES', payload: { frameId } }),
+
       setImageAspect: (frameId: string, aspect: number | undefined) => enhancedDispatch({ type: 'SET_IMAGE_ASPECT', payload: { frameId, aspect } }),
       setCanvasAspect: (frameId: string, aspect: number | undefined) => enhancedDispatch({ type: 'SET_CANVAS_ASPECT', payload: { frameId, aspect } }),
       updateCamera: (frameId: string, camera: CameraState) => enhancedDispatch({ type: 'UPDATE_CAMERA', payload: { frameId, camera } }),
@@ -371,15 +374,43 @@ export function useEditorStore() {
         const ctx = contextValueRef.current;
         if (ctx) ctx.plugins.registerPlugin(plugin);
 
-        // Automatically initialize default values of registered signals into the state machine
+        // Automatically initialize default values of registered signals into the
+        // state machine — but ONLY for signals that have no current value yet.
+        //
+        // [Bug fix 2026-06-23] Previously this branch unconditionally wrote
+        // `sig.defaultValue` over whatever was already in `state.interaction.signals[uid]`.
+        // That broke any flow in which a plugin gets re-registered after the
+        // user has already changed a signal:
+        //   • React Strict Mode double-mount on first render
+        //   • HMR re-evaluating the plugin module
+        //   • Any conditional unmount+remount of the host component (e.g.
+        //     ClipOptions briefly unmounting due to a parent re-render around
+        //     re-canvas toggle) would slam SIGNAL_CROP_TOOL back to 'rect',
+        //     even though the user had just selected ellipse / lasso / wand.
+        //
+        // The user-visible symptom that motivated this fix: select ellipse →
+        // switch to lasso → click re-canvas → press Esc → toolbar reverts to
+        // 'rect' even though the on-canvas selection is still the ellipse.
+        //
+        // Correct semantics: defaults are *initial* values, not *reset* values.
+        // Use the existing value if present; only fall back to defaultValue
+        // when the slot is genuinely uninitialised.
         if (plugin.signals) {
+          const currentSignals = stateRef.current.interaction.signals;
           const initialSignals: Record<string, InteractionSignalValue> = {};
+          let hasNewSignals = false;
           plugin.signals.forEach(sig => {
             const key = sig.uid;
-            initialSignals[key] = sig.defaultValue;
+            if (currentSignals[key] === undefined) {
+              initialSignals[key] = sig.defaultValue;
+              hasNewSignals = true;
+            }
           });
-          enhancedDispatch({ type: 'SET_INTERACTION', payload: { signals: initialSignals } });
+          if (hasNewSignals) {
+            enhancedDispatch({ type: 'SET_INTERACTION', payload: { signals: initialSignals } });
+          }
         }
+
 
         if (plugin.initialConfig) {
           enhancedDispatch({ type: 'INIT_PLUGIN_CONFIG', payload: { pluginId: plugin.uid, initialConfig: plugin.initialConfig } });
@@ -514,7 +545,8 @@ export function useEditorStore() {
             // Pre-PR-6-2: `set` / `clear` removed — producers (lasso / wand /
             // AI matting) call `actions.setIrregularCropBox(frameId, polygon | null)`
             // directly. See `phase1_irregular_clip_spec.md` §6 Pre-PR-6-2.0 / .1.
-            toLayerMask: advRef(P.ADV_IRREGULAR_TO_LAYER_MASK, (payload?: { layerId?: string }) => executeCommand<{ layerId?: string } | undefined, Promise<void>>(P.ADV_IRREGULAR_TO_LAYER_MASK, payload)),
+            toLayerMask: advRef(P.ADV_IRREGULAR_TO_LAYER_MASK, (payload?: { layerId?: string; toolId?: string }) => executeCommand<{ layerId?: string; toolId?: string } | undefined, Promise<void>>(P.ADV_IRREGULAR_TO_LAYER_MASK, payload)),
+
           },
         },
       }

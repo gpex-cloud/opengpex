@@ -30,9 +30,16 @@ export interface Modifiers {
   shift?: boolean;
   alt?: boolean;
   meta?: boolean;
+  /**
+   * Number of consecutive taps required, default 1. When >1 the formatted
+   * label gets prefixed with `Nx ` (e.g. `2x A`) so tooltips and the
+   * shortcut panel surface the multi-tap requirement to users.
+   */
+  taps?: number;
 }
 
 export function formatShortcut(key: string, mods: Modifiers): string {
+
   const parts: string[] = [];
 
   if (isMac) {
@@ -74,6 +81,13 @@ export function formatShortcut(key: string, mods: Modifiers): string {
 
   parts.push(getLabel(key));
 
-  return parts.join(isMac ? '' : ' + ');
+  const base = parts.join(isMac ? '' : ' + ');
+  // Multi-tap prefix: render `2x A`, `3x A`, etc. so the multi-tap
+  // requirement is visible everywhere the label appears (tooltips,
+  // shortcut panel). Single-tap (default) falls through unchanged so no
+  // existing label is altered.
+  const taps = mods.taps ?? 1;
+  return taps > 1 ? `${taps}x ${base}` : base;
 }
+
 

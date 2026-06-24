@@ -24,6 +24,24 @@ import * as P from './protocols';
 import type { CropTool } from './protocols';
 
 /**
+ * Single source of truth for "leave clip mode and commit any in-flight
+ * peel/exchange triplet". Used by `exitClip` (Esc) and `applyReCanvas`, plus
+ * the `ClipOverlay` unmount cleanup. See clip tool guide §4.6 for the full
+ * latency rationale.
+ *
+ * Order matters: flip mode FIRST so React/Zustand can tear down ClipOverlay
+ * synchronously; defer `mergeHost` to a microtask so the dirty-check fast
+ * path (no peel happened) doesn't block the visible mode flip. `mergeHost`
+ * is idempotent — duplicate calls from the unmount effect short-circuit.
+ */
+export function exitClipMode(ctx: EditorContextValue): void {
+  ctx.actions.setInteraction({ interactionMode: 'pan' });
+  queueMicrotask(() => {
+    ctx.actions.adv.layer.merge.mergeHost.execute();
+  });
+}
+
+/**
  * Helper: Unifies the retrieval and updating of the active crop target (Image vs Canvas).
  */
 export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: EditorActions }, isReCanvas: boolean) {
@@ -54,33 +72,174 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
 }
 
 /**
+ * Cycle the active crop tool by `step` (+1 forward, -1 backward) within
+ * the declaration order of `CROP_TOOL_STRATEGIES`. Shared by `toggleMode`
+ * (Space) and `cycleToolBackward` (Shift+Space) so the dispatch path,
+ * undo semantics and signal-read freshness stay in one place.
+ *
+ * We delegate the actual write to `setCropTool` (via the ClipOptions
+ * instance UID) rather than calling `scoped.setSignal` directly, because
+ * `setCropTool` carries the strategy projection (e.g. patching
+ * `imageCropBox.type` to 'circle' when switching to ellipse) plus the
+ * pluginConfig persistence (so cross-session restoration survives).
+ *
+ * Reading `SIGNAL_CROP_TOOL` directly (rather than caching a local copy)
+ * means we always pick up the *latest* tool regardless of who last set it
+ * (toolbar click, popover, or this very command in a previous beat).
+ */
+function cycleCropTool(ctx: EditorContextValue, step: 1 | -1): void {
+  const order = (Object.keys(P.CROP_TOOL_STRATEGIES) as CropTool[]);
+  const current = (ctx.scoped?.getSignal(P.SIGNAL_CROP_TOOL) as CropTool | undefined) ?? order[0];
+  const idx = order.indexOf(current);
+  // `(idx + step + len) % len` keeps the modulo non-negative even for step=-1.
+  const next = order[(idx + step + order.length) % order.length];
+  ctx.actions.executeCommand(
+    `${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}.${P.CMD_SET_CROP_TOOL}`,
+    { tool: next }
+  );
+}
+
+/**
  * CLIP_OPTIONS_COMMANDS: Declarative command configuration (Single Source of Truth).
  * Contains command metadata (ID, name, shortcuts) and implementation logic.
  */
 export const CLIP_OPTIONS_COMMANDS = {
+  /**
+   * Space — context-sensitive single-key handler:
+   *   1) From any non-clip mode → enter clip mode (no tool change).
+   *   2) Already in clip mode  → cycle through `CROP_TOOL_STRATEGIES`
+   *      in declaration order (rect → ellipse → lasso → wand → rect → …).
+   *
+   * Why fold cycling into the same key as enter? Because the user's mental
+   * model is "Space toggles between work-modes": the first press lands them
+   * in clip-with-the-last-tool, subsequent presses navigate within clip
+   * without forcing a return trip to the toolbar Popover. Re-Canvas guard
+   * (`forbiddenInReCanvas`) is honored — when Re-Canvas is active we skip
+   * irregular tools so we don't push the user into an immediately-coerced
+   * state (the Re-Canvas interceptor would yank them back to rect anyway).
+   *
+   * Exit is always `Esc` (`exitClip`); Space never leaves clip mode.
+   */
   toggleMode: {
     id: P.CMD_TOGGLE_MODE,
-    name: 'Toggle Pan/Clip Mode',
+    name: 'Enter / Cycle Clip Tool',
     execute: (ctx: EditorContextValue) => {
-      const currentMode = ctx.state.interaction.interactionMode;
+      // Re-Canvas is a fully *orthogonal* modal — it sits on top of pan and
+      // owns its own visual chrome (rose-tinted rect on `canvasCropBox`).
+      // We must NOT let Space leak into it, otherwise:
+      //   1) "first press = enter clip" would yank the user out of pure
+      //      Re-Canvas into a clip + Re-Canvas hybrid;
+      //   2) "subsequent press = cycle tool" would write `SIGNAL_CROP_TOOL`,
+      //      `setCropTool` would project shape onto `canvasCropBox` (since
+      //      `isReCanvas` is true), and the rose-tinted rect would flip to
+      //      a circle. Both are confusing and violate the §3.2 orthogonality
+      //      contract.
+      // Solution: when Re-Canvas is active, Space is a no-op. Esc remains
+      // the single exit (handled by `exitClip` below — it closes Re-Canvas
+      // first, then leaves clip if applicable).
+      if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
 
-      // Space bar behavior:
-      // - From clip → go to pan (and commit composite layer merge)
-      // - From any other mode (pan, craft) → go to clip
-      if (currentMode === 'clip') {
-        ctx.actions.adv.layer.merge.mergeHost.execute();
-        ctx.actions.setInteraction({
-          interactionMode: 'pan',
-        });
-      } else {
-        ctx.actions.setInteraction({
-          interactionMode: 'clip',
-        });
+      // First press: just enter clip mode, keep current tool.
+      if (ctx.state.interaction.interactionMode !== 'clip') {
+        ctx.actions.setInteraction({ interactionMode: 'clip' });
+        return;
       }
+
+      // Subsequent presses: cycle tool forward.
+      cycleCropTool(ctx, +1);
     },
     shortcut: { key: ' ' }
   } as EditorCommand<void, void>,
 
+  /**
+   * Shift+Space — reverse cycle through clip tools (rect ← ellipse ← lasso
+   * ← wand ← rect …). Mirror of `toggleMode`'s subsequent-press behavior
+   * for users who overshoot the desired tool.
+   *
+   * Behavior contract (parity with `toggleMode`):
+   *   1) Re-Canvas active            → no-op (orthogonal modal owns Space).
+   *   2) Not in clip mode            → enter clip mode, no tool change.
+   *      (Same as plain Space; Shift accidentally held while entering
+   *      shouldn't punish the user with a tool jump.)
+   *   3) In clip mode                → cycle backward via `setCropTool`.
+   *
+   * Implementation shares `cycleCropTool` with `toggleMode`, so the
+   * Re-Canvas-skip filter, undo semantics, and signal-read freshness all
+   * stay in one place.
+   */
+  cycleToolBackward: {
+    id: P.CMD_CYCLE_TOOL_BACKWARD,
+    name: 'Cycle Clip Tool (Backward)',
+    execute: (ctx: EditorContextValue) => {
+      if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
+      if (ctx.state.interaction.interactionMode !== 'clip') {
+        ctx.actions.setInteraction({ interactionMode: 'clip' });
+        return;
+      }
+      cycleCropTool(ctx, -1);
+    },
+    shortcut: { key: ' ', shift: true }
+  } as EditorCommand<void, void>,
+
+
+
+  /**
+   * Escape — context-sensitive exit. Three branches, in priority order:
+   *   1) Re-Canvas open  → close Re-Canvas only (its rect / popover collapses).
+   *                        Mode is preserved. If we were in pure Re-Canvas
+   *                        from pan, we stay in pan; if we were in clip,
+   *                        we stay in clip.
+   *   2) Clip mode       → exit clip via the standard `exitClipMode` helper
+   *                        (mode → 'pan' + microtask mergeHost).
+   *   3) Neither         → no-op (let overlay-level Esc handlers — text,
+   *                        brush, etc. — run their own logic without
+   *                        conflict).
+   *
+   * Why split (1) and (2)? Before 2026-06-23 Re-Canvas was a sub-modal of
+   * clip, so closing it always implied "still in clip". Re-Canvas is now an
+   * orthogonal modal (you can be in pure pan + Re-Canvas), so the two
+   * dismissals must be independent.
+   */
+  exitClip: {
+    id: P.CMD_EXIT_CLIP_MODE,
+    name: 'Exit Clip / Re-Canvas',
+    execute: (ctx: EditorContextValue) => {
+      if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) {
+        ctx.scoped.setSignal(P.SIGNAL_RE_CANVAS, false);
+        return;
+      }
+      if (ctx.state.interaction.interactionMode !== 'clip') return;
+      exitClipMode(ctx);
+    },
+    shortcut: { key: 'Escape' }
+  } as EditorCommand<void, void>,
+
+  /**
+   * toggleReCanvas — opens / closes the canvas-resize modal.
+   *
+   * As of 2026-06-23, Re-Canvas is a *fully orthogonal* modal layered on
+   * top of pan; it is NOT a sub-modal of clip. The previous "auto-promote
+   * to clip mode on activation" behaviour has been removed because it
+   * caused two surprises:
+   *   1) clicking Re-Canvas from pan would force the user into clip mode
+   *      (visible by the side-bar toggle flipping), which they didn't ask
+   *      for;
+   *   2) once in that hybrid state, Space (cycle tool) would project
+   *      lasso / wand / circle shapes onto `canvasCropBox`, flipping the
+   *      rose-tinted rect into a circle — also unexpected.
+   *
+   * Now: activating Re-Canvas only writes the `SIGNAL_RE_CANVAS` signal +
+   * coerces `canvasCropBox.type` to 'rect' (resizing only makes sense on
+   * a rectangular footprint). The ClipOverlay mounts whenever Re-Canvas
+   * is on (see `components.tsx::isOverlayActive`) regardless of
+   * interactionMode, and the clipbox InteractionHandler admits pointer
+   * events whenever Re-Canvas is on (see `interactions.ts::makeCropToolGuard`).
+   *
+   * Deactivation never changes mode, mirroring activation — this leaves
+   * the user wherever they were (pan, clip, etc.) before opening
+   * Re-Canvas. Esc closes Re-Canvas first (see `exitClip` above), so a
+   * single Esc from "pan + Re-Canvas" returns to plain pan.
+   */
   toggleReCanvas: {
     id: P.CMD_RE_CANVAS_TOGGLE,
     name: 'Toggle Resize Canvas Mode',
@@ -88,7 +247,6 @@ export const CLIP_OPTIONS_COMMANDS = {
       const isActivating = !ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS);
 
       if (isActivating && ctx.activeFrame) {
-        // Force Rectangular shape for Canvas Resizing
         ctx.actions.setCanvasCropBox(ctx.activeFrame.id, {
           ...ctx.activeFrame.canvasCropBox,
           type: 'rect'
@@ -99,6 +257,7 @@ export const CLIP_OPTIONS_COMMANDS = {
     }
   } as EditorCommand<void, void>,
 
+
   applyReCanvas: {
     id: P.CMD_RE_CANVAS_APPLY,
     name: 'Apply Canvas Resize',
@@ -107,9 +266,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       if (!ctx.activeFrame) return;
       ctx.actions.adv.frame.resize.resizeCanvas.execute();
       ctx.scoped?.setSignal(P.SIGNAL_RE_CANVAS, false);
-      ctx.actions.setInteraction({
-        interactionMode: 'pan',
-      });
+      exitClipMode(ctx);
     }
   } as EditorCommand<void, void>,
 
@@ -212,44 +369,64 @@ export const CLIP_OPTIONS_COMMANDS = {
     id: P.CMD_TOGGLE_ANTI_ALIAS,
     name: 'Toggle Anti-Alias',
     undoable: true,
+    // ─── Shortcut: double-tap `A` ──────────────────────────────────────────
+    // Why double-tap rather than single?
+    //   1) The single-letter `A` collides with too many adjacent idioms
+    //      (selection/navigation in other UIs) — would mis-fire constantly.
+    //   2) Tap-tap matches the muscle memory used elsewhere in the editor
+    //      for "commit a transient toggle".
+    // The `HotkeyManager` honours `taps` declaratively (≥2 → enforce a
+    // 400ms tap window, swallow intermediate keystrokes, reject `e.repeat`).
+    // Modifier-key shortcuts (Cmd+A select-all) remain on the single-tap
+    // path because their modifier mask differs.
+    //
+    // Runtime guards (mode / re-canvas / tool family) are enforced **inside
+    // execute()** below so the shortcut is silently no-op'd when invalid —
+    // we deliberately do NOT block at the `beforeExecute` interceptor
+    // layer, because the UI button calling this command also relies on the
+    // same guards being honoured by the command itself (defence in depth).
+    shortcut: { key: 'a', taps: 2 },
     execute: (ctx: EditorContextValue) => {
+      // ─── Guards ────────────────────────────────────────────────────────
+      // Mirror the AA button's `disabled` rules (clip mode active, active
+      // strategy supports AA, not in Re-Canvas). Re-evaluated at fire time
+      // so toggling tools / opening Re-Canvas mid-keystroke can't dispatch
+      // on stale state.
+      if (ctx.state.interaction.interactionMode !== 'clip') return;
       const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
+      if (isReCanvas) return; // canvas-resize is a frozen rectangle
+      const tool = (ctx.scoped?.getSignal(P.SIGNAL_CROP_TOOL) as CropTool | undefined) ?? 'rect';
+      if (!P.CROP_TOOL_STRATEGIES[tool]?.supportsAntiAlias) return;
+
+
       const target = getActiveTarget(ctx, isReCanvas);
       if (target) target.updateShape({ antiAliased: target.shape.antiAliased === false ? true : false });
     }
   } as EditorCommand<void, void>,
 
+
   /**
-   * setCropTool — unified entry for tool switching (§3.2.3).
+   * setCropTool — strategy-driven tool switch.
    *
-   * Side-effect matrix:
-   *   - rect / ellipse-smooth / ellipse-pixel:
-   *       1. write `cropTool` signal
-   *       2. project onto active `imageCropBox` / `canvasCropBox`:
-   *            type        = tool === 'rect' ? 'rect' : 'circle'
-   *            antiAliased = tool === 'ellipse-pixel' ? false : true
-   *       NOTE: `irregularCropBox` is intentionally **NOT cleared** here. The
-   *       purple polygon channel is hidden purely via the visual gate inside
-   *       `useIrregularSelectionSync` (`isActive = isClipActive && isIrregularTool`),
-   *       which fires `display:none` + `d=""` on the SVG. Preserving the data
-   *       lets users round-trip lasso → rect → lasso without losing their
-   *       polygon — symmetric with how rect/ellipse keep `imageCropBox` across
-   *       tool switches. Explicit clearing now requires a user gesture
-   *       (Apply Mask button → toLayerMask command, or future "Clear Selection"
-   *       command). The Re-Canvas interceptor only flips the *tool signal* back
-   *       to 'rect' (so the irregular SVG channel hides via §A DOM cleanup);
-   *       it does **not** clear `irregularCropBox` either — see §3.2.4 + the
-   *       second-pass fix comment in `CLIP_INTERCEPTORS.beforeExecute` below.
-   *   - lasso / wand:
-   *       1. write `cropTool` signal
-   *       2. NO immediate write to `irregularCropBox` — wait for the user's first
-   *          drag (lasso) / click (wand) so the empty state is preserved until
-   *          they actually commit a selection.
+   * Side-effect matrix (by `family`):
+   *   - regular → regular   : `projectShape()` patches imageCropBox.type.
+   *   - regular → irregular : no data write; regular box visually hides via
+   *                           `useRegularCropSync` isActive=false cleanup.
+   *   - irregular → regular : no data write; irregular polygon visually hides
+   *                           via `useIrregularSelectionSync` isActive=false.
+   *   - irregular → irregular : no data write. Per-tool slots in
+   *                           `irregularCropBoxes` mean the visual gate reads
+   *                           the new tool's (empty) slot and the canvas
+   *                           clears automatically; the previous tool's slot
+   *                           is preserved for round-trip symmetry.
    *
-   * Atomicity: this command intentionally writes the signal FIRST and only then
-   * does the projection. The signal is session-only (not undoable), the box
-   * mutation IS undoable; combined the user can Cmd+Z the projection but the
-   * tool stays selected — matches Photoshop's behaviour.
+   * Slot clears only happen via:
+   *   1) `adv.irregular.selection.toLayerMask` (mission accomplished);
+   *   2) explicit "Clear Selection" command (future).
+   *
+   * Atomicity: signal is written first (session-only), projection second
+   * (undoable), so Cmd+Z reverts the box mutation while the tool stays
+   * selected — matches Photoshop.
    */
   setCropTool: {
     id: P.CMD_SET_CROP_TOOL,
@@ -262,12 +439,19 @@ export const CLIP_OPTIONS_COMMANDS = {
       const tool = payload.tool;
       scoped?.setSignal(P.SIGNAL_CROP_TOOL, tool);
 
-      // Pre-PR-6-2: replace the previous 30-line if-chain with a strategy
-      // table lookup. `projectShape` is `undefined` for irregular tools
-      // (lasso / wand), so the projection branch is skipped naturally —
-      // the data-preservation rule "do NOT clear irregularCropBox on tool
-      // switch" still holds, simply because we don't touch it.
+      // Persist to pluginConfig for cross-session restoration. The volatile
+      // signal resets to 'rect' on page refresh, but pluginConfig survives
+      // via the auto-save pipeline (IndexedDB / StateStorage). The hook
+      // `useClipOptionsCommands` reads this on mount to restore the signal.
+      const pluginUid = `${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}`;
+      actions.updatePluginConfig(pluginUid, { lastCropTool: tool });
+
       const strategy = P.CROP_TOOL_STRATEGIES[tool];
+
+      // Regular projection: patch `shape.type` on the active crop box.
+      // `projectShape` is `undefined` for irregular tools — branch skipped.
+      // Spread order: `target` first inherits `antiAliased`, then `projection`
+      // overrides `type` (and `antiAliased` only if a tool explicitly pins it).
       const projection = strategy.projectShape?.();
       if (projection) {
         const isReCanvas = !!scoped?.getSignal(P.SIGNAL_RE_CANVAS);
@@ -275,12 +459,9 @@ export const CLIP_OPTIONS_COMMANDS = {
         const target = isReCanvas ? activeFrame.canvasCropBox : activeFrame.imageCropBox;
         setter(activeFrame.id, { ...target, ...projection });
       }
-      // Note: we deliberately do NOT clear `irregularCropBox` for
-      // family === 'irregular' tools either; round-trip preservation
-      // (lasso → rect → lasso keeps the polygon) is the documented
-      // contract — see Pre-PR-6 second-pass fix in the interceptor below.
     }
   } as EditorCommand<{ tool: CropTool }, void>
+
 };
 
 
@@ -290,41 +471,38 @@ export const CLIP_OPTIONS_COMMANDS = {
  */
 export const CLIP_INTERCEPTORS = {
   beforeExecute: (id: string, ctx: EditorContextValue): boolean => {
-    if (id.endsWith(P.CMD_TOGGLE_MODE) || id.endsWith(P.CMD_RE_CANVAS_TOGGLE)) {
-      if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) {
-        ctx.scoped?.setSignal(P.SIGNAL_RE_CANVAS, false);
-        return true;
-      }
+    if (!id.endsWith(P.CMD_RE_CANVAS_TOGGLE)) return false;
+
+    // Pressing Re-Canvas while it is already on collapses it back to plain
+    // clip mode (swallow the toggle).
+    if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) {
+      ctx.scoped?.setSignal(P.SIGNAL_RE_CANVAS, false);
+      return true;
     }
 
-    // Re-Canvas force-rect (§3.2.4): when the user toggles into Re-Canvas mode
-    // while an irregular tool is active, we must coerce cropTool back to 'rect'
-    // because canvas resizing operates on a rectangular footprint only. The
-    // signal flip here is intentionally unconditional (no return true) so the
-    // Re-Canvas toggle command itself still proceeds.
+    // ─── Why we DO NOT mutate SIGNAL_CROP_TOOL on Re-Canvas entry ──────────
+    // Earlier revisions force-set SIGNAL_CROP_TOOL to 'rect' here whenever
+    // the user entered Re-Canvas with an irregular tool (lasso / wand)
+    // selected, on the theory that "canvas-resize is rectangular-only".
+    // That mutation was destructive: there was no symmetric restore on
+    // Re-Canvas exit, so closing Re-Canvas (Esc) left the user on 'rect'
+    // even when they had originally been on lasso / wand / ellipse — the
+    // canvas would then render the *previous* shape (e.g. the ellipse the
+    // user had just drawn) under a toolbar that claimed 'rect' was active,
+    // giving the misleading "tool says rect, selection is ellipse" UX
+    // reported as the 2026-06-23 bug 1 in the clip-tool guide.
     //
-    // [Pre-PR-6 second-pass fix] DO NOT clear `irregularCropBox` here either —
-    // visual hiding is already guaranteed by §A's `useIrregularSelectionSync`
-    // `useEffect([isActive])` cleanup (cropTool flipped to 'rect' →
-    // isIrregularTool=false → display:none + d=""). Clearing the polygon data
-    // would break round-trip preservation: user reported scenario "draw lasso
-    // → click re-canvas → exit/re-enter clip → switch back to lasso" lost the
-    // polygon, asymmetric with rect/ellipse keeping their box across the same
-    // round-trip. The only places that should clear `irregularCropBox` are:
-    //   1) `adv.irregular.selection.toLayerMask` (mission accomplished, atomic clear)
-    //   2) explicit user "Clear Selection" command (future)
-    if (id.endsWith(P.CMD_RE_CANVAS_TOGGLE)) {
-      const tool = ctx.scoped?.getSignal(P.SIGNAL_CROP_TOOL) as CropTool | undefined;
-      // Pre-PR-6-2: replace the literal `tool === 'lasso' || tool === 'wand'`
-      // check with a strategy-driven `forbiddenInReCanvas` flag — adding a
-      // future tool that should also be force-fallback-to-rect requires zero
-      // changes here, just `forbiddenInReCanvas: true` on its row.
-      if (tool && P.CROP_TOOL_STRATEGIES[tool].forbiddenInReCanvas) {
-        ctx.scoped?.setSignal(P.SIGNAL_CROP_TOOL, 'rect');
-        // NOTE: do not touch irregularCropBox — see comment above.
-      }
-    }
-
+    // The "rect-only during Re-Canvas" semantic is already enforced
+    // *non-destructively* by the synthesis layer:
+    //   • ClipOverlay/hooks.ts → `effectiveTool: CropTool = isReCanvas ? 'rect' : rawTool`
+    //   • interactions.ts::makeCropToolGuard → same synthesis on the dispatch path
+    // so during Re-Canvas the canvas rect is draggable and the ellipse /
+    // lasso / wand handlers are filtered out, all without touching the
+    // user's actual tool selection. When Re-Canvas closes, the original
+    // signal value is preserved and the user lands back on whichever tool
+    // they had — exactly the round-trip behaviour the orthogonal-modal
+    // design (§3.2 of the guide) promises.
     return false;
   }
 };
+

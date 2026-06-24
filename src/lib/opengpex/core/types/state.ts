@@ -32,7 +32,12 @@ export type AppearanceMode = 'light' | 'dark' | 'system';
 export interface WorkspaceThemeState {
   active: string;
   config: {
-    insets: { top: number; left: number; right: number; bottom: number };
+    insets: {
+      top: number;
+      bottom: number;
+      fixed: { left: number; right: number };
+      varied: { left: number; right: number };
+    };
   };
 }
 
@@ -134,8 +139,10 @@ export type EditorAction =
   | { type: 'UPDATE_CAMERA'; payload: { frameId: string; camera: CameraState } }
   | { type: 'SET_IMAGE_CROP_BOX'; payload: { frameId: string; cropBox: LocalShape } }
   | { type: 'SET_CANVAS_CROP_BOX'; payload: { frameId: string; cropBox: LocalShape } }
-  | { type: 'SET_IRREGULAR_CROP_BOX'; payload: { frameId: string; polygon: LocalPolygon } }
-  | { type: 'CLEAR_IRREGULAR_CROP_BOX'; payload: { frameId: string } }
+  | { type: 'SET_IRREGULAR_CROP_BOX'; payload: { frameId: string; toolId: string; polygon: LocalPolygon } }
+  | { type: 'CLEAR_IRREGULAR_CROP_BOX'; payload: { frameId: string; toolId: string } }
+  | { type: 'CLEAR_ALL_IRREGULAR_CROP_BOXES'; payload: { frameId: string } }
+
   | { type: 'SET_IMAGE_ASPECT'; payload: { frameId: string; aspect: number | undefined } }
   | { type: 'SET_CANVAS_ASPECT'; payload: { frameId: string; aspect: number | undefined } }
   | { type: 'SIGNAL_COMMIT'; payload: { frameId: string } }

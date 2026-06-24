@@ -19,7 +19,7 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, asLocalRect } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, asLocalRect, LocalPolygon } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
@@ -28,10 +28,11 @@ import * as P from '@opengpex/editor/core/advanced/protocols';
  *
  * Phase 1 irregular-selection (lasso / wand / AI matting) command set.
  *
- * Pre-PR-6-2 architecture:
- *   - Producers (lasso handler / wand handler / AI matting result) write
- *     `irregularCropBox` directly via `actions.setIrregularCropBox(frameId, polygon)`,
- *     symmetric with rect/ellipse writing `imageCropBox` / `canvasCropBox`.
+ * Pre-PR-6-3 architecture (per-tool slot model):
+ *   - Producers (lasso handler / wand handler / AI matting result) write a
+ *     polygon into THEIR OWN slot of `frame.irregularCropBoxes` via
+ *     `actions.setIrregularCropBox(frameId, toolId, polygon)`, symmetric with
+ *     rect/ellipse writing `imageCropBox` / `canvasCropBox`.
  *   - There is NO `set` / `clear` adv command — those would be value-less thin
  *     wrappers around the action; the executeCommand atom only buys you a
  *     pre-execute history checkpoint, but `actions.setIrregularCropBox` already
@@ -41,14 +42,32 @@ import * as P from '@opengpex/editor/core/advanced/protocols';
  *     transaction (project + bake offscreen mask + addBitmapMask + clear) and
  *     therefore needs the undo-atom guarantee.
  *
+ * **Active-slot resolution.** The user only ever has one polygon visible on
+ * the canvas — the one belonging to the currently active irregular tool, as
+ * surfaced by `useIrregularSelectionSync` in ClipOverlay. So when the user
+ * clicks "Apply Mask", we need to bake exactly that slot. There are two ways
+ * to identify it:
+ *   (a) Caller passes `toolId` in payload — explicit, no plugin coupling.
+ *   (b) Command auto-detects by reading the `signal.crop_tool` signal.
+ * We chose (a) because:
+ *   - keeps `core/advanced` decoupled from `plugins/base/options/ClipOptions`
+ *     (no cross-package dependency on a plugin-namespaced signal key);
+ *   - lets non-clip callers (future scripting, batch export, etc.) target a
+ *     specific slot without having to first synthesize the signal;
+ *   - if no toolId is passed, we fall back to a deterministic scan (first
+ *     non-empty slot in insertion order) so existing callers that don't yet
+ *     pass toolId still work — useful during incremental rollout.
+ *
  * Lifecycle:
- *   1) Producer writes polygon  → `actions.setIrregularCropBox(frameId, polygon)`
- *   2) ClipOverlay reads it via `useIrregularSelectionSync` for purple ants preview
- *   3) User clicks "Apply Mask" → `toLayerMask` (this command)
- *   4) Switching tool / cancel / re-canvas → no automatic clear; data persists
- *      across tool switches for round-trip symmetry. The only paths that clear
- *      `irregularCropBox` are (a) `toLayerMask` itself (after baking) and
- *      (b) a future explicit "Clear Selection" user gesture (not in Phase 1).
+ *   1) Producer writes polygon  → `actions.setIrregularCropBox(frameId, toolId, polygon)`
+ *   2) ClipOverlay reads `irregularCropBoxes[activeToolId]` via
+ *      `useIrregularSelectionSync` for purple ants preview
+ *   3) User clicks "Apply Mask" → `toLayerMask({ toolId })` (this command)
+ *   4) Switching tool / cancel / re-canvas → no automatic clear; per-tool slot
+ *      data persists across tool switches for round-trip symmetry. The only
+ *      paths that clear a slot are (a) `toLayerMask` itself after baking
+ *      (clears the just-applied tool's slot) and (b) a future explicit
+ *      "Clear Selection" user gesture (not in Phase 1).
  *
  * Atomicity:
  *   The runtime sets a history checkpoint BEFORE every `undoable: true` command.
@@ -63,17 +82,33 @@ export const IrregularSelectionCommands = {
     id: P.ADV_IRREGULAR_TO_LAYER_MASK,
     name: 'Apply Selection as Layer Mask',
     undoable: true,
-    execute: (ctx: EditorContextValue, payload?: { layerId?: string }): Promise<void> => {
+    execute: (ctx: EditorContextValue, payload?: { layerId?: string; toolId?: string }): Promise<void> => {
       const { assets } = ctx;
       return assets.withSession(async () => {
         const { activeFrame, activeLayer, actions, geometry } = ctx;
         if (!activeFrame) return;
 
-        const polygon = activeFrame.irregularCropBox;
-        if (!polygon || !polygon.rings.length) {
+        // Resolve which slot to apply. Explicit `payload.toolId` wins; otherwise
+        // fall back to the first non-empty slot in insertion order. The fallback
+        // is deterministic but caller-opaque; new callers should prefer passing
+        // toolId explicitly (see "Active-slot resolution" in the JSDoc above).
+        const slots = activeFrame.irregularCropBoxes ?? {};
+        let toolId: string | undefined = payload?.toolId;
+        let polygon: LocalPolygon | null | undefined = toolId ? slots[toolId] : undefined;
+        if (!polygon) {
+          for (const [k, v] of Object.entries(slots)) {
+            if (v && v.rings.length) {
+              toolId = k;
+              polygon = v;
+              break;
+            }
+          }
+        }
+        if (!toolId || !polygon || !polygon.rings.length) {
           actions.setInteraction({ selectionErrorPulse: Date.now() });
           return;
         }
+
 
         // Resolve target layer: explicit payload > activeLayer
         const targetLayerId = payload?.layerId ?? activeLayer?.id;
@@ -154,8 +189,12 @@ export const IrregularSelectionCommands = {
             bitmapMasks: [...(targetLayer.bitmapMasks || []), newMask],
           });
 
-          // 6. Clear the irregular selection (also shares the same undo atom)
-          actions.setIrregularCropBox(activeFrame.id, null);
+          // 6. Clear the just-applied tool's slot (mission accomplished). Other
+          //    tools' slots are preserved so the user keeps their lasso polygon
+          //    when they move on to wand, etc. Shares the same undo atom as the
+          //    addBitmapMask above.
+          actions.setIrregularCropBox(activeFrame.id, toolId, null);
+
         } catch (err) {
           console.error('[IrregularSelection] toLayerMask failed:', err);
         }

@@ -129,6 +129,19 @@ export function frameLocalToLayerLocalPolygon(poly: LocalPolygon, frame: Frame, 
 }
 
 /**
+ * layerLocalToFrameLocalPolygon: Inverse of `frameLocalToLayerLocalPolygon`.
+ * Composition: localToWorldPolygon(layer) -> worldToLocalPolygon(frame).
+ *
+ * Mirrors `shape.ts::layerLocalToFrameLocal`. Used by the magic-wand handler
+ * to project Worker-produced layer-local rings back into frame-local polygon
+ * space before writing `irregularCropBox`.
+ */
+export function layerLocalToFrameLocalPolygon(poly: LocalPolygon, layer: Layer, frame: Frame): LocalPolygon {
+  const world = localToWorldPolygon(poly, layer);
+  return worldToLocalPolygon(world, frame);
+}
+
+/**
  * polygonToSvgPathD: Generate a multi-ring SVG path `d` string with evenodd fill rule.
  *
  * Output is RELATIVE to `poly.bounds.x/y` (subtracted), so the resulting `d` is meant to be

@@ -47,8 +47,8 @@ export const ViewportTranslateCommands = {
           padding: VIEWPORT_FIT_PADDING,
           maxScale: 1,
           offsetTop: insets.top,
-          offsetLeft: insets.left,
-          offsetRight: insets.right,
+          offsetLeft: insets.fixed.left + insets.varied.left,
+          offsetRight: insets.fixed.right + insets.varied.right,
           offsetBottom: insets.bottom
         }
       );
@@ -78,8 +78,8 @@ export const ViewportTranslateCommands = {
         {
           fixedScale: 1,
           offsetTop: insets.top,
-          offsetLeft: insets.left,
-          offsetRight: insets.right,
+          offsetLeft: insets.fixed.left + insets.varied.left,
+          offsetRight: insets.fixed.right + insets.varied.right,
           offsetBottom: insets.bottom
         }
       );
@@ -113,7 +113,7 @@ export const ViewportTranslateCommands = {
 
       const boundedK = Math.max(0.01, Math.min(10, k));
 
-      const centerX = (vw + insets.left - insets.right) / 2;
+      const centerX = (vw + (insets.fixed.left + insets.varied.left) - (insets.fixed.right + insets.varied.right)) / 2;
       const centerY = (vh + insets.top - insets.bottom) / 2;
 
       const nextX = centerX - (centerX - x) * (boundedK / oldK);

@@ -22,7 +22,24 @@ export const PLUGIN_AUTHOR = 'opengpex';
 
 export const CMD_RE_CANVAS_TOGGLE = 'cmd.re_canvas.toggle';
 export const CMD_RE_CANVAS_APPLY = 'cmd.re_canvas.apply';
+/** Space — enter clip mode (no-op when already in clip). Pairs with `CMD_EXIT_CLIP_MODE`. */
 export const CMD_TOGGLE_MODE = 'cmd.toggle_mode';
+/**
+ * Shift+Space — reverse cycle through clip tools while already in clip
+ * mode. Mirrors `CMD_TOGGLE_MODE`'s subsequent-press cycling but stepping
+ * backward (rect ← ellipse ← lasso ← wand ← rect …). When NOT yet in clip
+ * mode, behaves identically to `CMD_TOGGLE_MODE` (just enters clip),
+ * because shift accidentally held while pressing Space shouldn't yank
+ * the user backward through the tool list.
+ */
+export const CMD_CYCLE_TOOL_BACKWARD = 'cmd.crop_tool.cycle_backward';
+
+/**
+ * Escape — leave clip mode. Atomically clears the Re-Canvas signal if set,
+ * then routes through `exitClipMode` to commit the cascade-state-machine
+ * triplet and flip interactionMode → 'pan'.
+ */
+export const CMD_EXIT_CLIP_MODE = 'cmd.exit_clip_mode';
 export const CMD_SET_ASPECT = 'cmd.set_aspect';
 export const CMD_RESET_ASPECT = 'cmd.reset_aspect';
 export const CMD_BRANCH = 'cmd.branch.create';
@@ -36,13 +53,18 @@ export const SIGNAL_CROP_TOOL = 'signal.crop_tool';
 /**
  * CropTool: Active crop / selection tool.
  *
- * - 'rect' / 'ellipse-smooth' / 'ellipse-pixel'  → regular shapes that write `imageCropBox` / `canvasCropBox` (amber UI accent).
- * - 'lasso' / 'wand'                              → irregular selections that write `irregularCropBox` (purple UI accent).
+ * - 'rect' / 'ellipse'  → regular shapes that write `imageCropBox` / `canvasCropBox` (amber UI accent).
+ * - 'lasso' / 'wand'    → irregular selections that write `irregularCropBox` (purple UI accent).
  *
- * Strictly separated from `Shape.type`: the relationship is one-way (CropTool → Shape.type / antiAliased),
+ * Strictly separated from `Shape.type`: the relationship is one-way (CropTool → Shape.type),
  * driven by the `setCropTool` command at tool-switch time. The reverse is forbidden.
+ *
+ * Anti-aliasing is **orthogonal** to tool identity — driven by the standalone
+ * `AA` button (command `CMD_TOGGLE_ANTI_ALIAS`) which toggles
+ * `Frame.imageCropBox.antiAliased`. The strategy table below declares which
+ * tools expose this control via `supportsAntiAlias`.
  */
-export type CropTool = 'rect' | 'ellipse-smooth' | 'ellipse-pixel' | 'lasso' | 'wand';
+export type CropTool = 'rect' | 'ellipse' | 'lasso' | 'wand';
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Pre-PR-6-2  ::  CropTool Strategy Table (Single Source of Truth)
@@ -66,7 +88,7 @@ export type CropTool = 'rect' | 'ellipse-smooth' | 'ellipse-pixel' | 'lasso' | '
  * ──────────────────────────────────────────────────────────────────────── */
 
 import type { LucideIcon } from 'lucide-react';
-import { Square, Circle, CircleDashed, Lasso, Wand2 } from 'lucide-react';
+import { Square, Circle, Lasso, Wand2 } from 'lucide-react';
 
 export type CropFamily = 'regular' | 'irregular';
 
@@ -90,9 +112,14 @@ export interface CropToolStrategy {
   /**
    * L2 projection on tool-switch — only meaningful for `regular` tools (which
    * project onto imageCropBox / canvasCropBox). `undefined` for irregular
-   * tools to skip the projection branch entirely (no special-case if needed).
+   * tools to skip the projection branch entirely.
+   *
+   * `antiAliased` is intentionally optional: when omitted, `setCropTool`
+   * preserves the box's existing AA flag so the orthogonal AA toggle remains
+   * the sole owner of that field. A tool may opt into an explicit value to
+   * pin a specific AA mode on switch.
    */
-  readonly projectShape?: () => { type: 'rect' | 'circle'; antiAliased: boolean };
+  readonly projectShape?: () => { type: 'rect' | 'circle'; antiAliased?: boolean };
 
   /**
    * L6 Re-Canvas mutex — `true` means switching into Re-Canvas mode while this
@@ -100,6 +127,15 @@ export interface CropToolStrategy {
    * on a rectangular footprint).
    */
   readonly forbiddenInReCanvas: boolean;
+
+  /**
+   * Whether the tool's projected shape has a meaningful anti-alias mode. The
+   * Options-bar `AA` button reads this to decide its `disabled` state.
+   * `rect` is pixel-aligned by definition; `lasso` / `wand` write polygon
+   * data via a path that does not yet carry an AA field. Only `ellipse`
+   * returns `true` today.
+   */
+  readonly supportsAntiAlias: boolean;
 }
 
 /**
@@ -111,11 +147,11 @@ export interface CropToolStrategy {
  *   2. nothing else — L1/L2/L3/L6 derive automatically.
  */
 export const CROP_TOOL_STRATEGIES: Record<CropTool, CropToolStrategy> = {
-  'rect':           { id: 'rect',           label: 'Rectangle',        icon: Square,       accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'rect',   antiAliased: true  }), forbiddenInReCanvas: false },
-  'ellipse-smooth': { id: 'ellipse-smooth', label: 'Ellipse (Smooth)', icon: Circle,       accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'circle', antiAliased: true  }), forbiddenInReCanvas: false },
-  'ellipse-pixel':  { id: 'ellipse-pixel',  label: 'Ellipse (Pixel)',  icon: CircleDashed, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'circle', antiAliased: false }), forbiddenInReCanvas: false },
-  'lasso':          { id: 'lasso',          label: 'Lasso',            icon: Lasso,        accent: 'purple', family: 'irregular', handlerKind: 'lasso',                                                                  forbiddenInReCanvas: true  },
-  'wand':           { id: 'wand',           label: 'Magic Wand',       icon: Wand2,        accent: 'purple', family: 'irregular', handlerKind: 'wand',                                                                   forbiddenInReCanvas: true  },
+  'rect':    { id: 'rect',    label: 'Rect',    icon: Square, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'rect'   }), forbiddenInReCanvas: false, supportsAntiAlias: false },
+  'ellipse': { id: 'ellipse', label: 'Ellipse', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'circle' }), forbiddenInReCanvas: false, supportsAntiAlias: true  },
+  'lasso':   { id: 'lasso',   label: 'Lasso',   icon: Lasso,  accent: 'purple', family: 'irregular', handlerKind: 'lasso',                                              forbiddenInReCanvas: true,  supportsAntiAlias: false },
+  'wand':    { id: 'wand',    label: 'Wand',    icon: Wand2,  accent: 'purple', family: 'irregular', handlerKind: 'wand',                                               forbiddenInReCanvas: true,  supportsAntiAlias: false },
+
 };
 
 /**

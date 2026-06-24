@@ -194,15 +194,23 @@ export interface Frame {
   imageCropBox: LocalShape;
   canvasCropBox: LocalShape;
   /**
-   * Irregular selection box (lasso / wand / AI-matting bitmap → polygon).
-   * Independent type from `LocalShape` — does NOT participate in the rendering pipeline
-   * crop in Phase 1. Only consumed by:
-   *   - `useFastMarchingAntsSync` for purple marching-ants preview
-   *   - `adv.irregular.toLayerMask` for baking into a `BitmapMask`
+   * Irregular selection boxes — **keyed by producing tool id** (e.g. `'lasso'`,
+   * `'wand'`, future `'polygon-lasso'`, `'ai-matting'`). Each irregular tool
+   * owns its own slot so switching tools never clobbers another tool's polygon
+   * and the canvas only ever shows the polygon belonging to the *currently
+   * active* tool (read by `useIrregularSelectionSync` via the active cropTool
+   * signal). See `docs/opengpex/20260623_clip_tool_guide.md` §2.1 / §2.5.1.
    *
-   * Both `null` and `undefined` mean "no irregular selection".
+   * Independent type from `LocalShape` — does NOT participate in the rendering
+   * pipeline crop in Phase 1. Only consumed by:
+   *   - `useIrregularSelectionSync` for purple marching-ants preview (per-tool)
+   *   - `adv.irregular.selection.toLayerMask` for baking into a `BitmapMask`
+   *
+   * `undefined` (or missing key) means "no selection produced by that tool yet".
+   * The whole record being `undefined` means "no irregular selection of any kind".
    */
-  irregularCropBox?: LocalPolygon | null;
+  irregularCropBoxes?: Record<string, LocalPolygon>;
+
   imageAspect?: number;
   canvasAspect?: number;
 

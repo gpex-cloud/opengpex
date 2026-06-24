@@ -20,11 +20,11 @@
 
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useEffect, useRef } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals } from '@opengpex/editor/core/context';
 import { asLocalRect, ShapeType, LocalShape } from '@opengpex/editor/core/types';
 import { getActiveTarget } from './commands';
-import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn } from './protocols';
+import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn, CROP_TOOL_STRATEGIES, PLUGIN_AUTHOR, PLUGIN_ID } from './protocols';
 import type { CropTool } from './protocols';
 
 /**
@@ -33,11 +33,12 @@ import type { CropTool } from './protocols';
  * Non-command helper operations remain in bare function form.
  */
 export const useClipOptionsCommands = () => {
-  const { activeFrame } = useEditorState();
+  const { activeFrame, state } = useEditorState();
   const { actions } = useEditorServices();
 
   const {
     toggleModeCmd,
+    exitClipModeCmd, // ← derived from CMD_EXIT_CLIP_MODE = 'cmd.exit_clip_mode' (also bound to Esc)
     reCanvasToggleCmd,
     reCanvasApplyCmd,
     setAspectCmd,
@@ -47,7 +48,26 @@ export const useClipOptionsCommands = () => {
     boxResetCmd,
     cropToolSetCmd, // ← derived from CMD_SET_CROP_TOOL = 'cmd.crop_tool.set'
   } = usePluginCommands();
+
   const { reCanvasActiveSignal, cropToolSignal } = usePluginSignals();
+
+  // ─── Restore persisted crop tool on hydration (one-shot) ──────────────
+  // The volatile signal `SIGNAL_CROP_TOOL` resets to 'rect' on every page
+  // refresh. The `setCropTool` command persists the last-selected tool into
+  // `pluginConfig.lastCropTool` (survives via IndexedDB auto-save). On
+  // first mount after hydration we read that value back and restore the
+  // signal so the UI shows the correct tool (rect / ellipse / lasso / wand).
+  const pluginUid = `${PLUGIN_AUTHOR}.${PLUGIN_ID}`;
+  const persistedCropTool = (state.pluginConfig[pluginUid] as { lastCropTool?: CropTool } | undefined)?.lastCropTool;
+  const hasRestoredCropTool = useRef(false);
+  useEffect(() => {
+    if (hasRestoredCropTool.current || !cropToolSignal || !state.isLoaded) return;
+    hasRestoredCropTool.current = true;
+
+    if (persistedCropTool && persistedCropTool !== (cropToolSignal.value as CropTool)) {
+      cropToolSignal.set(persistedCropTool);
+    }
+  }, [state.isLoaded, cropToolSignal, persistedCropTool]);
 
   return useMemo(() => {
     const isReCanvas = !!reCanvasActiveSignal?.value;
@@ -62,11 +82,30 @@ export const useClipOptionsCommands = () => {
     // tool family completely table-driven.
     const isRegularTool = isRegularToolFn(cropTool);
     const isIrregularTool = isIrregularToolFn(cropTool);
-    const hasIrregularBox = !!activeFrame?.irregularCropBox;
+    // Pre-PR-6-3: per-tool slot lookup. The "Apply" / "Clear" CTA visibility
+    // tracks the slot belonging to the currently active irregular tool only,
+    // so the Options pane stays in sync with the canvas (which also reads
+    // per-tool via `useIrregularSelectionSync`).
+    const hasIrregularBox = isIrregularTool
+      ? !!activeFrame?.irregularCropBoxes?.[cropTool]
+      : false;
+
+    // ─── Anti-alias derivations (2026/06/23 redesign) ──────────────────────
+    // Whether the active tool's projected shape *has* a meaningful AA mode.
+    // Drives the AA button's `disabled` state so the button is greyed-out for
+    // rect (always pixel-aligned) and lasso/wand (polygon path, AA n/a).
+    const supportsAntiAlias = CROP_TOOL_STRATEGIES[cropTool].supportsAntiAlias;
+    // Read the *currently active* crop box's AA flag (image vs canvas branch
+    // is implicit — for the AA toggle UI we only ever care about imageCropBox
+    // because Re-Canvas always force-rects, where AA is meaningless). Default
+    // to `true` to match the field's documented default in `primitives.ts`.
+    const isAntiAliased = activeFrame?.imageCropBox.antiAliased !== false;
+
 
     return {
       // Plugin Commands (transparently passed Cmd references, explicitly called in component layer via .execute())
       toggleModeCmd,
+      exitClipModeCmd,
       reCanvasToggleCmd,
       reCanvasApplyCmd,
       setAspectCmd,
@@ -75,6 +114,7 @@ export const useClipOptionsCommands = () => {
       branchCreateCmd,
       boxResetCmd,
       cropToolSetCmd,
+
 
       // System Commands (cross-plugin, via actions.adv API — AdvCommandRef)
       cutCmd: actions.adv.layer.clip.cut,
@@ -91,6 +131,8 @@ export const useClipOptionsCommands = () => {
       isRegularTool,
       isIrregularTool,
       hasIrregularBox,
+      supportsAntiAlias,
+      isAntiAliased,
 
       // Helpers (plain functions — non-command logic)
       updateClipBox: (payload: { x?: number; y?: number; w?: number; h?: number }) => {
@@ -124,6 +166,7 @@ export const useClipOptionsCommands = () => {
     reCanvasActiveSignal,
     cropToolSignal,
     toggleModeCmd,
+    exitClipModeCmd,
     reCanvasToggleCmd,
     reCanvasApplyCmd,
     setAspectCmd,
@@ -133,4 +176,5 @@ export const useClipOptionsCommands = () => {
     boxResetCmd,
     cropToolSetCmd,
   ]);
+
 };

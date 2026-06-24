@@ -46,11 +46,26 @@ export interface WorkspaceStyleItem {
  */
 export const getWorkspaceStyles = (
     hasSidebar: boolean = true,
-    insets: { top: number; left: number; right: number; bottom: number } = { top: 0, left: 0, right: 0, bottom: 0 },
+    insets: {
+        top: number;
+        bottom: number;
+        fixed?: { left: number; right: number };
+        varied?: { left: number; right: number };
+        left?: number;
+        right?: number;
+    } = { top: 0, bottom: 0, fixed: { left: 0, right: 0 }, varied: { left: 0, right: 0 } },
     isToolMenuPinned: boolean = false
 ): Record<string, WorkspaceStyleItem> => {
     void hasSidebar;
     const { SIDEBAR_WIDTH } = WORKSPACE_GEOMETRY;
+
+    const fixedLeft = insets.fixed?.left ?? insets.left ?? 0;
+    const variedLeft = insets.varied?.left ?? 0;
+    const fixedRight = insets.fixed?.right ?? insets.right ?? 0;
+    const variedRight = insets.varied?.right ?? 0;
+
+    const leftVal = fixedLeft + variedLeft;
+    const rightVal = fixedRight + variedRight;
 
     return {
         // Top-level layout container
@@ -58,9 +73,11 @@ export const getWorkspaceStyles = (
             className: "relative flex h-full w-full bg-[var(--bg-panel)] text-[var(--text-main)] font-sans overflow-hidden select-none",
             style: {
                 '--v-offset-top': `${insets.top}px`,
-                '--v-offset-left': `${insets.left}px`,
-                '--v-offset-right': `${insets.right}px`,
+                '--v-offset-left': `${leftVal}px`,
+                '--v-offset-right': `${rightVal}px`,
                 '--v-offset-bottom': `${insets.bottom}px`,
+                '--v-offset-fixed-left': `${fixedLeft}px`,
+                '--v-offset-fixed-right': `${fixedRight}px`,
             } as React.CSSProperties
         },
 
@@ -71,7 +88,7 @@ export const getWorkspaceStyles = (
 
         // Top Bar Layout Wrapper
         topBarOuter: {
-            className: `absolute top-0 left-[var(--v-offset-left)] right-[var(--v-offset-right)] border-transparent pointer-events-none flex items-center justify-center transition-all duration-500`,
+            className: `absolute top-0 left-[var(--v-offset-fixed-left)] right-[var(--v-offset-fixed-right)] border-transparent pointer-events-none flex items-center justify-center transition-all duration-500`,
             style: {
                 zIndex: EDITOR_Z_INDEX.UI.WORKSPACE_BASE + 5,
                 height: `${WORKSPACE_GEOMETRY.HEADER_HEIGHT}px`

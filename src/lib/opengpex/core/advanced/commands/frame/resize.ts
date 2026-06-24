@@ -57,7 +57,7 @@ export const FrameResizeCommands = {
       const newCamera = geometry.camera.getFitCamera(
         state.ui.viewportDim,
         newCanvas,
-        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
+        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left + insets.varied.left, offsetRight: insets.fixed.right + insets.varied.right }
       );
 
       actions.updateFrame(activeFrame.id, {
@@ -114,7 +114,7 @@ export const FrameResizeCommands = {
       const newCamera = geometry.camera.getFitCamera(
         state.ui.viewportDim,
         targetDim,
-        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.left, offsetRight: insets.right }
+        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left + insets.varied.left, offsetRight: insets.fixed.right + insets.varied.right }
       );
 
       actions.updateFrame(activeFrame.id, {

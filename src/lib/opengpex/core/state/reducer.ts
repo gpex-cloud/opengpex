@@ -37,8 +37,12 @@ export const initialState: EditorData = {
         // (HEADER 48 + DRAWER_BAR 40 on both sides) so command-side consumers
         // (fit / actualSize / zoomBy) compute correct centering during the
         // very first render — before LayoutProvider reaches STABLE and
-        // useLayoutSync overwrites it with the live safeRect-derived values.
-        insets: { top: 48, left: 40, right: 40, bottom: 0 }
+        insets: {
+          top: 48,
+          bottom: 0,
+          fixed: { left: 40, right: 40 },
+          varied: { left: 0, right: 0 }
+        }
       }
     },
     appearance: 'system',
@@ -361,38 +365,65 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
     }
 
     case 'SET_IRREGULAR_CROP_BOX': {
-      const { frameId, polygon } = action.payload;
+      const { frameId, toolId, polygon } = action.payload;
       const frame = state.frames.byId[frameId];
       if (!frame) return state;
+      const nextBoxes = { ...(frame.irregularCropBoxes || {}), [toolId]: polygon };
       return {
         ...state,
         frames: {
           ...state.frames,
           byId: {
             ...state.frames.byId,
-            [frameId]: { ...frame, irregularCropBox: polygon }
+            [frameId]: { ...frame, irregularCropBoxes: nextBoxes }
           }
         }
       };
     }
 
     case 'CLEAR_IRREGULAR_CROP_BOX': {
-      const { frameId } = action.payload;
+      const { frameId, toolId } = action.payload;
       const frame = state.frames.byId[frameId];
       if (!frame) return state;
-      // Idempotent: if already absent, skip allocation to avoid noise patches in history
-      if (frame.irregularCropBox == null) return state;
+      // Idempotent: if the tool's slot is already absent, skip allocation to
+      // avoid noise patches in the history stack.
+      const current = frame.irregularCropBoxes;
+      if (!current || current[toolId] == null) return state;
+      const { [toolId]: _omit, ...rest } = current;
+      void _omit;
+      const nextBoxes = Object.keys(rest).length === 0 ? undefined : rest;
       return {
         ...state,
         frames: {
           ...state.frames,
           byId: {
             ...state.frames.byId,
-            [frameId]: { ...frame, irregularCropBox: null }
+            [frameId]: { ...frame, irregularCropBoxes: nextBoxes }
           }
         }
       };
     }
+
+    case 'CLEAR_ALL_IRREGULAR_CROP_BOXES': {
+      const { frameId } = action.payload;
+      const frame = state.frames.byId[frameId];
+      if (!frame) return state;
+      // Idempotent: if no slots exist, skip allocation.
+      if (!frame.irregularCropBoxes || Object.keys(frame.irregularCropBoxes).length === 0) {
+        return state;
+      }
+      return {
+        ...state,
+        frames: {
+          ...state.frames,
+          byId: {
+            ...state.frames.byId,
+            [frameId]: { ...frame, irregularCropBoxes: undefined }
+          }
+        }
+      };
+    }
+
 
     case 'SET_IMAGE_ASPECT': {
       const { frameId, aspect } = action.payload;

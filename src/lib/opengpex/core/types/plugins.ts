@@ -35,9 +35,36 @@ export interface EditorShortcut {
   shift?: boolean;
   alt?: boolean;
   meta?: boolean;
+  /**
+   * Number of consecutive taps required to fire this shortcut, default 1.
+   *
+   * When `taps > 1`, the same key (with matching modifier set) must be
+   * pressed `taps` times within `tapWindowMs` of each other for `action`
+   * to dispatch. Intermediate presses are swallowed via `preventDefault`
+   * so a half-completed gesture doesn't leak into other listeners
+   * (browser find, form fields, etc.).
+   *
+   * Auto-repeat (`KeyboardEvent.repeat`) is never counted as a tap, so
+   * holding the key down can't be mistaken for a multi-tap.
+   *
+   * Why this lives on the shortcut definition (not in user-land code):
+   * mirrors a common UX gesture (e.g. "double-tap A to toggle AA") in a
+   * single declarative line, with the matching label automatically
+   * propagated through `formatShortcut` → `shortcutLabel`.
+   */
+  taps?: number;
+  /**
+   * Max ms between consecutive taps when `taps > 1`, default 400ms.
+   * 400 mirrors macOS double-click default and the de-facto "intentional
+   * double-tap" range across desktop UIs; below ~250ms deliberate
+   * presses get rejected, above ~500ms unrelated subsequent presses
+   * start chaining into accidental fires.
+   */
+  tapWindowMs?: number;
   action: () => void;
   description: string;
 }
+
 
 
 
