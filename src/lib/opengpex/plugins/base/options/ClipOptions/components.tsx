@@ -526,7 +526,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
           isOpen={isReCanvas}
           onClose={() => { /* lifecycle bound to isReCanvas — outside click & Esc must NOT dismiss */ }}
           position="bottom"
-          align="start"
+          align="center"
           offset={8}
           dismissOnOutsideClick={false}
           dismissOnEscape={false}

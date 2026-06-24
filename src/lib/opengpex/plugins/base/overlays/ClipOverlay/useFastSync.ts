@@ -78,6 +78,22 @@ export function useRegularCropSync(
     space: 'local'
   });
 
+  // Visibility gate: hide box + marching ants when the selection rect is empty
+  // (0×0 = no active selection). Runs at 60fps so the first drag pixel triggers
+  // an instant show. This replaces the old React-level conditional rendering
+  // which broke the fast-track "drag to create" flow.
+  useFastSync(ref, isActive, (_v, f) => {
+    const shape = isReCanvas ? f.canvasCropBox : f.imageCropBox;
+    const rect = shape.rect;
+    const isEmpty = rect.w <= 0 || rect.h <= 0;
+    if (ref.current) {
+      (ref.current as HTMLElement).style.visibility = isEmpty ? 'hidden' : '';
+    }
+    if (groupRef.current) {
+      groupRef.current.style.visibility = isEmpty ? 'hidden' : '';
+    }
+  });
+
   useFastSvgGroupSync(groupRef, isActive, {
     selector: (_v, f) => {
       const shape = isReCanvas ? f.canvasCropBox : f.imageCropBox;

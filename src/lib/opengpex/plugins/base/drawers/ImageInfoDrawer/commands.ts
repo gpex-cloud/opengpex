@@ -38,11 +38,17 @@ export const IMAGE_INFO_COMMANDS = {
          if (!activeFrame) return;
 
          const config = selfConfig as P.ExportConfig;
-         const isClipMode = state.interaction.interactionMode === 'clip';
-         const cropBox = activeFrame.imageCropBox;
+          const isClipMode = state.interaction.interactionMode === 'clip';
+          const cropBox = activeFrame.imageCropBox;
 
-         const baseW = isClipMode ? cropBox.rect.w : activeFrame.canvas.w;
-         const baseH = isClipMode ? cropBox.rect.h : activeFrame.canvas.h;
+          // Guard: abort if in clip mode but no active selection
+          if (isClipMode && (cropBox.rect.w <= 0 || cropBox.rect.h <= 0)) {
+            ctx.actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
+            return;
+          }
+
+          const baseW = isClipMode ? cropBox.rect.w : activeFrame.canvas.w;
+          const baseH = isClipMode ? cropBox.rect.h : activeFrame.canvas.h;
 
          const { w: exportW, h: exportH } = calcFinalDims(baseW, baseH, config);
 

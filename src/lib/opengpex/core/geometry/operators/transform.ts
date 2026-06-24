@@ -17,8 +17,9 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Matrix3x3 } from '@opengpex/editor/core/geometry/matrix';
-import { Layer, Frame, IMatrix3x3, asLocalRect, LayerPoseOverride } from '@opengpex/editor/core/types';
+import { Matrix3x3, GeometryOp } from '@opengpex/editor/core/geometry/matrix';
+import { Layer, Frame, IMatrix3x3, asLocalRect, asLocalPoint, asLocalPolygon, LocalPolygon, LayerPoseOverride } from '@opengpex/editor/core/types';
+import { computePolygonBounds } from './polygon';
 
 /**
  * [Generic] Core geometric operator: calculate transform matrix of any asset in world coordinate system
@@ -149,6 +150,41 @@ export function decomposeMatrix(M: IMatrix3x3, refRotation: number = 0): Decompo
 }
 
 /**
+ * Transform a LocalPolygon by applying a D4 symmetry operation (rotation / flip)
+ * within a container of size (oldW, oldH).
+ *
+ * Point transforms (derived from Matrix3x3.transformRect with w=0, h=0):
+ *   rotate_r: (px, py) → (oldH - py, px)
+ *   rotate_l: (px, py) → (py, oldW - px)
+ *   flip_h:   (px, py) → (oldW - px, py)
+ *   flip_v:   (px, py) → (px, oldH - py)
+ */
+function transformPolygon(
+  poly: LocalPolygon,
+  container: { w: number; h: number },
+  op: GeometryOp
+): LocalPolygon {
+  const { w: oldW, h: oldH } = container;
+
+  const transformPoint = (px: number, py: number): { x: number; y: number } => {
+    switch (op) {
+      case 'rotate_r': return { x: oldH - py, y: px };
+      case 'rotate_l': return { x: py, y: oldW - px };
+      case 'flip_h':   return { x: oldW - px, y: py };
+      case 'flip_v':   return { x: px, y: oldH - py };
+      default:         return { x: px, y: py };
+    }
+  };
+
+  const nextRings = poly.rings.map(ring =>
+    ring.map(p => asLocalPoint(transformPoint(p.x, p.y)))
+  );
+
+  const nextBounds = asLocalRect(computePolygonBounds(nextRings));
+  return asLocalPolygon(nextRings, nextBounds, poly.antiAliased);
+}
+
+/**
  * Execute artboard-level geometric update (rotation/flip)
  */
 export function transformFrame(
@@ -192,6 +228,22 @@ export function transformFrame(
   const nextImageCropBox = Matrix3x3.transformRect(frame.imageCropBox.rect, frame.canvas, operation);
   const nextCanvasCropBox = Matrix3x3.transformRect(frame.canvasCropBox.rect, frame.canvas, operation);
 
+  // Transform irregularCropBoxes (lasso / wand polygon selections).
+  // Each tool slot stores an independent LocalPolygon in frame-local coordinates;
+  // they must follow the same D4 symmetry operation applied to imageCropBox so
+  // the selection region stays aligned with the underlying pixel content after
+  // rotation or flip.
+  let nextIrregularCropBoxes: Record<string, LocalPolygon> | undefined;
+  if (frame.irregularCropBoxes) {
+    const entries = Object.entries(frame.irregularCropBoxes);
+    if (entries.length > 0) {
+      nextIrregularCropBoxes = {};
+      for (const [toolId, poly] of entries) {
+        nextIrregularCropBoxes[toolId] = transformPolygon(poly, frame.canvas, operation);
+      }
+    }
+  }
+
   return {
     ...frame,
     canvas: { w: nextW, h: nextH },
@@ -199,6 +251,7 @@ export function transformFrame(
     layers: { byId: nextById, order: frame.layers.order },
     camera: nextCamera,
     imageCropBox: { ...frame.imageCropBox, rect: asLocalRect(nextImageCropBox) },
-    canvasCropBox: { ...frame.canvasCropBox, rect: asLocalRect(nextCanvasCropBox) }
+    canvasCropBox: { ...frame.canvasCropBox, rect: asLocalRect(nextCanvasCropBox) },
+    ...(nextIrregularCropBoxes !== undefined && { irregularCropBoxes: nextIrregularCropBoxes })
   };
 }

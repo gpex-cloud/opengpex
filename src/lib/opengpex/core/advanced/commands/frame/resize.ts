@@ -64,12 +64,7 @@ export const FrameResizeCommands = {
         canvas: newCanvas,
         layers: { byId: nextById, order: layers.order },
         camera: newCamera,
-        imageCropBox: asLocalShape({
-          x: newCanvas.w * 0.25,
-          y: newCanvas.h * 0.25,
-          w: newCanvas.w * 0.5,
-          h: newCanvas.h * 0.5
-        }),
+        imageCropBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
         canvasCropBox: asLocalShape({
           x: newCanvas.w * 0.25,
           y: newCanvas.h * 0.25,
@@ -120,7 +115,7 @@ export const FrameResizeCommands = {
       actions.updateFrame(activeFrame.id, {
         canvas: targetDim,
         camera: newCamera,
-        imageCropBox: asLocalShape({ x: targetDim.w * 0.25, y: targetDim.h * 0.25, w: targetDim.w * 0.5, h: targetDim.h * 0.5 }),
+        imageCropBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
         canvasCropBox: asLocalShape({ x: targetDim.w * 0.25, y: targetDim.h * 0.25, w: targetDim.w * 0.5, h: targetDim.h * 0.5 })
       });
 

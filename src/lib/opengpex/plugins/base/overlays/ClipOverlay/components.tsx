@@ -232,7 +232,9 @@ export function ClipOverlayMain() {
 
       {/* Regular crop's draggable rect + handles + dim label.
           Hidden entirely on irregular tools — lasso/wand selections
-          are not draggable / resizable in Phase 1. */}
+          are not draggable / resizable in Phase 1.
+          When imageCropBox is 0×0 the fast-track paints width/height=0 so
+          the div is invisible; visibility toggles in useRegularCropSync. */}
       {isRegularTool && (
         <div
           ref={boxRef}

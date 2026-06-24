@@ -258,9 +258,21 @@ export function useFastMarchingAntsSync(
   // by `isActive` here: even when active, a target switch must invalidate
   // the cache so the next tick is forced to re-write `d`. See `resetKey`
   // option doc for the full rationale.
+  //
+  // IMPORTANT: we also proactively clear the DOM `d` attribute here. Without
+  // this, the "non-empty → empty" transition (e.g. lasso polygon → wand with
+  // no selection yet) leaves a stale path on screen: the cache is nulled by
+  // this effect, but on the next tick the selector returns null, and the
+  // `if (lastD.current !== null)` guard in the fast-sync callback already
+  // sees null — skipping the DOM clear entirely. Eagerly blanking `d` here
+  // closes that one-frame race. If the next tick's selector produces real
+  // data it will re-write `d` immediately, so we never lose a valid path.
   useLayoutEffect(() => {
     lastD.current = null;
     lastEl.current = null;
+    if (pathRef.current) {
+      pathRef.current.setAttribute('d', '');
+    }
   }, [resetKey]);
 
 

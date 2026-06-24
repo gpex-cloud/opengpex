@@ -41,6 +41,10 @@ export const COLOR_OPTIONS_COMMANDS = {
 
       if (isClipMode) {
         const box = activeFrame.imageCropBox.rect;
+        if (box.w <= 0 || box.h <= 0) {
+          actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
+          return;
+        }
         w = box.w;
         h = box.h;
         box_cx = box.x + w / 2;

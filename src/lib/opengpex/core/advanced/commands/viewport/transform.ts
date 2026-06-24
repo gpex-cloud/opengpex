@@ -143,6 +143,7 @@ export const ViewportTransformCommands = {
         layers: nextFrame.layers,
         imageCropBox: nextFrame.imageCropBox,
         canvasCropBox: nextFrame.canvasCropBox,
+        irregularCropBoxes: nextFrame.irregularCropBoxes,
         camera: nextFrame.camera
       });
     },

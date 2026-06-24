@@ -84,7 +84,7 @@ export const FrameCreateCommands = {
         dimension,
         { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left + insets.varied.left, offsetRight: insets.fixed.right + insets.varied.right }
       );
-      const defaultCropBox = asLocalShape({ x: dimension.w * 0.25, y: dimension.h * 0.25, w: dimension.w * 0.5, h: dimension.h * 0.5 });
+      const defaultCanvasCropBox = asLocalShape({ x: dimension.w * 0.25, y: dimension.h * 0.25, w: dimension.w * 0.5, h: dimension.h * 0.5 });
 
       // 5. Assemble domain entities
       const baseLayer = LayerFactory.getNewLayer({
@@ -107,8 +107,7 @@ export const FrameCreateCommands = {
         layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
         activeLayerId: baseLayer.id,
         camera: initialCamera,
-        imageCropBox: defaultCropBox,
-        canvasCropBox: defaultCropBox,
+        canvasCropBox: defaultCanvasCropBox,
         assetId,
         thumbnail: { src: thumbAssetUrl, assetId: thumbAssetId },
         extra
@@ -124,8 +123,15 @@ export const FrameCreateCommands = {
     name: 'Create Branch',
     undoable: true,
     execute: async (ctx: EditorContextValue): Promise<string | undefined> => {
-      const { activeFrame, state, geometry, pixels } = ctx;
+      const { activeFrame, actions, state, geometry, pixels } = ctx;
       if (!activeFrame) return;
+
+      // Guard: abort if imageCropBox is empty (no active selection)
+      const cropRect = activeFrame.imageCropBox.rect;
+      if (cropRect.w <= 0 || cropRect.h <= 0) {
+        actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
+        return;
+      }
 
       try {
         const highResBlob = await pixels.render.shapeToBlob(
@@ -188,12 +194,6 @@ export const FrameCreateCommands = {
           layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
           activeLayerId: baseLayer.id,
           camera: initialCamera,
-          imageCropBox: asLocalShape({
-            x: canvasDim.w * 0.25,
-            y: canvasDim.h * 0.25,
-            w: canvasDim.w * 0.5,
-            h: canvasDim.h * 0.5
-          }),
           canvasCropBox: asLocalShape({
             x: canvasDim.w * 0.25,
             y: canvasDim.h * 0.25,
@@ -292,12 +292,7 @@ export const FrameCreateCommands = {
         actions.updateFrame(activeFrame.id, {
           canvas: dimension,
           camera: newCamera,
-          imageCropBox: asLocalShape({
-            x: dimension.w * 0.25,
-            y: dimension.h * 0.25,
-            w: dimension.w * 0.5,
-            h: dimension.h * 0.5
-          }),
+          imageCropBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
           canvasCropBox: asLocalShape({
             x: dimension.w * 0.25,
             y: dimension.h * 0.25,

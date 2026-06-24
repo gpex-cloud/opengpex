@@ -58,6 +58,10 @@ export function snapCropBoxToPixels<T extends { rect: LocalRect }>(cropBox: T): 
   const { rect } = cropBox;
   if (!rect) return cropBox;
 
+  // Intentionally empty rect (no active selection) — skip snapping to avoid
+  // the Math.max(1,...) floor from synthesizing a 1×1 ghost box.
+  if (rect.w <= 0 && rect.h <= 0) return cropBox;
+
   const x1 = Math.round(rect.x);
   const y1 = Math.round(rect.y);
   const x2 = Math.round(rect.x + rect.w);
