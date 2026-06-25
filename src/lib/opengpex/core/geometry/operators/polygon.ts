@@ -148,13 +148,21 @@ export function layerLocalToFrameLocal(poly: LocalPolygon, layer: Layer, frame: 
  * placed inside an SVG <g> whose transform translates by (rect.x, rect.y). This matches
  * the existing `getSmoothSvgPath(LocalShape)` convention (which also outputs from origin (0,0)).
  *
- * Each ring becomes an "M x y L x y L ... Z" subpath. Empty rings are skipped.
- *
- * NOTE: name is intentionally NEUTRAL (not `polygonToSmoothSvgPathD`). Phase 2 may add a
- * sibling `polygonToStairedSvgPathD` and route through `poly.antiAliased`.
+ * Routing by `poly.antiAliased`:
+ *   - `true` (default): Linear `M/L/Z` — connects integer-coordinate vertices directly.
+ *     Sub-pixel smoothing happens at the mask bake stage (Canvas 2D AA).
+ *   - `false`: Stair-stepped `M/H/V/Z` — every segment between consecutive vertices is
+ *     Bresenham-interpolated into purely horizontal (H) and vertical (V) steps. This
+ *     eliminates half-pixel diagonal crossings and produces the classic pixel-staircase
+ *     appearance expected in "No Anti-Alias" mode.
  */
 export function polygonToSvgPathD(poly: LocalPolygon): string {
   if (!poly.rings.length) return '';
+
+  // Route to stair-stepped path when AA is explicitly OFF.
+  if (poly.antiAliased === false) {
+    return polygonToStairedPathD(poly);
+  }
 
   const ox = poly.rect.x;
   const oy = poly.rect.y;
@@ -174,4 +182,97 @@ export function polygonToSvgPathD(poly: LocalPolygon): string {
   }
 
   return parts.join(' ');
+}
+
+/**
+ * polygonToStairedPathD: Bresenham stair-stepped path for No-AA polygons.
+ *
+ * Converts every segment between consecutive integer-coordinate vertices into
+ * a sequence of single-pixel horizontal (H) and vertical (V) SVG commands.
+ * This ensures the rendered path never crosses pixel boundaries diagonally,
+ * producing the classic pixel-art staircase outline.
+ *
+ * Algorithm: for each segment (x0,y0)→(x1,y1), we run integer Bresenham and
+ * emit H/V steps. The closing `Z` segment (last→first) is also stair-stepped
+ * by explicitly walking it rather than relying on SVG's implicit close.
+ */
+function polygonToStairedPathD(poly: LocalPolygon): string {
+  const ox = poly.rect.x;
+  const oy = poly.rect.y;
+
+  const parts: string[] = [];
+  for (const ring of poly.rings) {
+    if (ring.length < 2) continue;
+
+    const segs: string[] = [];
+    const x0 = Math.round(ring[0].x - ox);
+    const y0 = Math.round(ring[0].y - oy);
+    segs.push(`M ${x0} ${y0}`);
+
+    // Walk all edges including the closing edge (last → first).
+    const len = ring.length;
+    for (let i = 0; i < len; i++) {
+      const next = (i + 1) % len;
+      const ax = Math.round(ring[i].x - ox);
+      const ay = Math.round(ring[i].y - oy);
+      const bx = Math.round(ring[next].x - ox);
+      const by = Math.round(ring[next].y - oy);
+
+      // Skip zero-length segments.
+      if (ax === bx && ay === by) continue;
+
+      // Pure horizontal or vertical — emit directly.
+      if (ay === by) {
+        segs.push(`H ${bx}`);
+        continue;
+      }
+      if (ax === bx) {
+        segs.push(`V ${by}`);
+        continue;
+      }
+
+      // Diagonal: Bresenham stair-step decomposition.
+      bresenhamSteps(ax, ay, bx, by, segs);
+    }
+
+    segs.push('Z');
+    parts.push(segs.join(' '));
+  }
+
+  return parts.join(' ');
+}
+
+/**
+ * Bresenham integer line: emits H/V steps from (x0,y0) to (x1,y1).
+ * Does NOT emit the starting point (assumes cursor is already there).
+ * Uses the classic octant-agnostic Bresenham with H-priority steps
+ * (horizontal steps are emitted first when both axes advance).
+ */
+function bresenhamSteps(
+  x0: number, y0: number,
+  x1: number, y1: number,
+  segs: string[]
+): void {
+  let dx = Math.abs(x1 - x0);
+  let dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+
+  let cx = x0;
+  let cy = y0;
+
+  while (cx !== x1 || cy !== y1) {
+    const e2 = 2 * err;
+    if (e2 > -dy) {
+      err -= dy;
+      cx += sx;
+      segs.push(`H ${cx}`);
+    }
+    if (e2 < dx) {
+      err += dx;
+      cy += sy;
+      segs.push(`V ${cy}`);
+    }
+  }
 }

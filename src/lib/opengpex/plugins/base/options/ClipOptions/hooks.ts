@@ -22,7 +22,7 @@
 
 import { useMemo } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals } from '@opengpex/editor/core/context';
-import { asLocalRect, asLocalShape, ShapeType, LocalShape, isPolygon } from '@opengpex/editor/core/types';
+import { asLocalRect, asLocalShape, ShapeType, LocalShape } from '@opengpex/editor/core/types';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { getActiveTarget } from './commands';
 import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn, CROP_TOOL_STRATEGIES } from './protocols';
@@ -63,28 +63,22 @@ export const useClipOptionsCommands = () => {
     // tool family completely table-driven.
     const isRegularTool = isRegularToolFn(cropTool);
     const isIrregularTool = isIrregularToolFn(cropTool);
-    // Phase 2 redesign: Apply Mask button is now visible for ANY valid
-    // selection (rect/ellipse/lasso/wand), not just irregular tools.
-    // Uses the unified `resolveActiveSelection` helper which checks both
-    // `irregularCropBoxes[toolId]` and `imageCropBox` with size validation.
-    const hasIrregularBox = isIrregularTool
-      ? !!(activeFrame?.clipBoxes[cropTool] && isPolygon(activeFrame.clipBoxes[cropTool]!))
-      : false;
-    const hasAnySelection = activeFrame
-      ? !!getClipBox(activeFrame)
-      : false;
+
+    // ─── Unified clip box read (Single Source of Truth) ────────────────────
+    // `getClipBox` resolves the correct slot by `frame.latestClipTool` and
+    // returns `{ regular, spatial }` or null. All downstream derivations
+    // (hasIrregularBox, hasAnySelection, isAntiAliased) branch on this.
+    const clipBox = activeFrame ? getClipBox(activeFrame) : null;
+    const hasIrregularBox = isIrregularTool && clipBox !== null && !clipBox.regular;
+    const hasAnySelection = clipBox !== null;
 
     // ─── Anti-alias derivations (2026/06/23 redesign) ──────────────────────
     // Whether the active tool's projected shape *has* a meaningful AA mode.
     // Drives the AA button's `disabled` state so the button is greyed-out for
-    // rect (always pixel-aligned) and lasso/wand (polygon path, AA n/a).
+    // rect (always pixel-aligned).
     const supportsAntiAlias = CROP_TOOL_STRATEGIES[cropTool].supportsAntiAlias;
-    // Read the *currently active* crop box's AA flag (image vs canvas branch
-    // is implicit — for the AA toggle UI we only ever care about imageCropBox
-    // because Re-Canvas always force-rects, where AA is meaningless). Default
-    // to `true` to match the field's documented default in `primitives.ts`.
-    const currentClipShape = activeFrame ? getRegularClipShape(activeFrame) : undefined;
-    const isAntiAliased = currentClipShape?.antiAliased !== false;
+    // All tools default to AA ON (true) when no explicit value is set.
+    const isAntiAliased = clipBox?.spatial.antiAliased ?? true;
 
 
     return {

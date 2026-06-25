@@ -20,8 +20,8 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { Motion } from '@opengpex/editor/core/motion';
-import { asLocalShape, isPolygon, LocalShape, LocalPolygon } from '@opengpex/editor/core/types';
-import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+import { asLocalShape, LocalShape, LocalPolygon } from '@opengpex/editor/core/types';
+import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import {
   CLIP_OPTIONS_SIGNAL_RE_CANVAS,
   CLIP_OPTIONS_CMD_RESET_BOX,
@@ -119,15 +119,12 @@ export function useClipOverlayCommands() {
     };
   }, []);
 
-  // Pre-PR-6-3: per-tool slot lookup. We only consider the slot that belongs
-  // to the *currently active* irregular tool — other slots may still hold
-  // stale polygons (preserved on tool switch so the user can come back to
-  // them) but are not "the active selection" from the user's POV. The Options
-  // pane's "Apply" / "Clear" buttons read this flag to decide whether to show
-  // the irregular-mode CTA chrome.
-  const hasIrregularBox = isIrregularTool
-    ? !!(activeFrame?.clipBoxes[cropTool] && isPolygon(activeFrame.clipBoxes[cropTool]!))
-    : false;
+  // Pre-PR-6-3: unified via getClipBox. We only consider the slot that belongs
+  // to the *currently active* tool — other slots may still hold stale data
+  // (preserved on tool switch) but are not "the active selection" from the
+  // user's POV.
+  const overlayClipBox = activeFrame ? getClipBox(activeFrame) : null;
+  const hasIrregularBox = isIrregularTool && overlayClipBox !== null && !overlayClipBox.regular;
 
 
   return {

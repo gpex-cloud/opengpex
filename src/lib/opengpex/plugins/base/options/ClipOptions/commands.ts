@@ -20,7 +20,7 @@
 'use client';
 
 import { EditorContextValue, EditorCommand, asLocalRect, asLocalShape, Frame, LocalRect, LocalShape, EditorActions } from '@opengpex/editor/core/types';
-import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS } from '@opengpex/editor/core/helpers/presets';
 import * as P from './protocols';
 import type { CropTool } from './protocols';
@@ -443,9 +443,25 @@ export const CLIP_OPTIONS_COMMANDS = {
       const tool = (ctx.activeFrame?.latestClipTool as CropTool | undefined) ?? 'rect';
       if (!P.CROP_TOOL_STRATEGIES[tool]?.supportsAntiAlias) return;
 
+      // ─── Unified path via getClipBox ─────────────────────────────────
+      // getClipBox resolves the correct slot by latestClipTool and returns
+      // `{ regular, spatial }`. We branch on `.regular` (data-level truth)
+      // rather than on strategy.family (config-level declaration).
+      const frame = ctx.activeFrame;
+      if (!frame) return;
+      const clipBox = getClipBox(frame);
+      if (!clipBox) return;
 
-      const target = getActiveTarget(ctx, isReCanvas);
-      if (target) target.updateShape({ antiAliased: target.shape.antiAliased === false ? true : false });
+      const currentAA = clipBox.spatial.antiAliased ?? true;
+      if (clipBox.regular) {
+        // Regular (ellipse): route through getActiveTarget for proper write
+        const target = getActiveTarget(ctx, isReCanvas);
+        if (target) target.updateShape({ antiAliased: !currentAA });
+      } else {
+        // Irregular (lasso / wand): patch polygon directly
+        const newPoly = { ...clipBox.spatial, antiAliased: !currentAA };
+        ctx.actions.setClipBox(frame.id, tool, newPoly);
+      }
     }
   } as EditorCommand<void, void>,
 

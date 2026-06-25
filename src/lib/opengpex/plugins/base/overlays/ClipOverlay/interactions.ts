@@ -29,7 +29,7 @@ import {
   asLocalPolygon,
 } from '@opengpex/editor/core/types';
 import { computePolygonBounds } from '@opengpex/editor/core/geometry/operators/polygon';
-import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
 import { magicWandClient } from './wand/client';
 import {
@@ -290,6 +290,9 @@ function clearPreview() {
 export const createLassoHandler = (): InteractionHandler => {
   let trail: LocalPoint[] = [];
   let active = false;
+  // Cached AA state for the current gesture — read once at onStart from the
+  // existing lasso polygon (or default=true). Used in onMove to decide pixel snap.
+  let gestureAA = true;
 
   return {
     id: 'clip-lasso',
@@ -315,21 +318,38 @@ export const createLassoHandler = (): InteractionHandler => {
 
     onStart: (e) => {
       active = true;
-      const clampedX = Math.max(0, Math.min(e.point.canvas.x, e.activeFrame.canvas.w));
-      const clampedY = Math.max(0, Math.min(e.point.canvas.y, e.activeFrame.canvas.h));
+      // Read AA state from existing clip box (inherit) or default ON.
+      // getClipBox resolves the correct slot by frame.latestClipTool.
+      const clipBox = getClipBox(e.activeFrame);
+      gestureAA = clipBox?.spatial.antiAliased ?? true;
+
+      let clampedX = Math.max(0, Math.min(e.point.canvas.x, e.activeFrame.canvas.w));
+      let clampedY = Math.max(0, Math.min(e.point.canvas.y, e.activeFrame.canvas.h));
+      // AA OFF: snap trail points to integer pixels for WYSIWYG pixel alignment.
+      if (!gestureAA) {
+        const snapped = e.geometry.snapping.snapToPixel({ x: clampedX, y: clampedY });
+        clampedX = snapped.x;
+        clampedY = snapped.y;
+      }
       trail = [asLocalPoint({ x: clampedX, y: clampedY })];
       // Initialize preview to a single moveTo so the path element is non-empty.
       if (lassoPreviewPathRef.current) {
         const sp = e.geometry.space.localToScreen(clampedX, clampedY, e.activeFrame);
         lassoPreviewPathRef.current.setAttribute('d', `M ${sp.x} ${sp.y}`);
       }
-      lassoTrace('onStart', 'trail=', trail.length, 'previewRef=', !!lassoPreviewPathRef.current);
+      lassoTrace('onStart', 'trail=', trail.length, 'previewRef=', !!lassoPreviewPathRef.current, 'aa=', gestureAA);
     },
 
     onMove: (e) => {
       if (!active) return;
-      const clampedX = Math.max(0, Math.min(e.point.canvas.x, e.activeFrame.canvas.w));
-      const clampedY = Math.max(0, Math.min(e.point.canvas.y, e.activeFrame.canvas.h));
+      let clampedX = Math.max(0, Math.min(e.point.canvas.x, e.activeFrame.canvas.w));
+      let clampedY = Math.max(0, Math.min(e.point.canvas.y, e.activeFrame.canvas.h));
+      // AA OFF: snap to pixel grid using system snapping service.
+      if (!gestureAA) {
+        const snapped = e.geometry.snapping.snapToPixel({ x: clampedX, y: clampedY });
+        clampedX = snapped.x;
+        clampedY = snapped.y;
+      }
       const p = asLocalPoint({ x: clampedX, y: clampedY });
       trail.push(p);
       if (lassoPreviewPathRef.current) {
@@ -350,7 +370,7 @@ export const createLassoHandler = (): InteractionHandler => {
 
         const ring = trail.slice(); // evenodd renderer + path Z auto-closes the contour
         const bounds = computePolygonBounds([ring]);
-        const polygon = asLocalPolygon([ring], asLocalRect(bounds));
+        const polygon = asLocalPolygon([ring], asLocalRect(bounds), gestureAA);
         // Pre-PR-6-2: write irregularCropBoxes['lasso'] directly, symmetric
         // with how rect/ellipse handlers write imageCropBox. The dispatcher
         // provides a history checkpoint via the standard reducer pipeline, so
@@ -365,6 +385,7 @@ export const createLassoHandler = (): InteractionHandler => {
         lassoTrace('onEnd  ', 'trail=', trail.length, 'committed=', committed);
         trail = [];
         active = false;
+        gestureAA = true;
         clearPreview();
       }
     },
@@ -633,9 +654,13 @@ export const createWandHandler = (): InteractionHandler => {
         // 5. Project layer-local rings → frame-local. We construct a
         //    minimal LocalPolygon in layer-space and let the polygon engine
         //    walk the rings.
+        // Read AA state from existing clip box (inherit) or default ON.
+        const clipBox = getClipBox(e.activeFrame);
+        const wandAA = clipBox?.spatial.antiAliased ?? true;
+
         const layerRings = resp.rings.map(ring => ring.map(p => asLocalPoint({ x: p.x, y: p.y })));
         const layerBounds = asLocalRect(computePolygonBounds(layerRings));
-        const layerPoly = asLocalPolygon(layerRings, layerBounds);
+        const layerPoly = asLocalPolygon(layerRings, layerBounds, wandAA);
         const framePoly = e.geometry.polygon.layerLocalToFrameLocal(
           layerPoly, layer, e.activeFrame
         );
