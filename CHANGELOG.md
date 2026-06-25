@@ -4,6 +4,17 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.10
+
+- Add custom cursors for clip tools (rect, ellipse, lasso, wand — each with crosshair + tool badge)
+- Implement useClipCursor hook to auto-apply cursor override when clip mode is active
+- Add dedicated TOOLTIP z-index (10100) to ensure tooltips always float above popovers
+- Add tool identity badge to brush cursor (droplet for brush, × for eraser)
+- Add anti-alias (AA) support for lasso and wand tools
+- Decouple clip bake from Esc key, rebind to Enter
+
+---
+
 ## v1.0.0-beta.9
 
 - Migrate clip tool to per-frame model with independent imageCropBox / irregularCropBoxes per frame
