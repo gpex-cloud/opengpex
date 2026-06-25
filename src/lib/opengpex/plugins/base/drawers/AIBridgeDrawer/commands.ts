@@ -136,6 +136,15 @@ async function callGenerate(
     if (seed >= 0) body.seed = seed;
   }
 
+  // Workaround for litellm/Azure gateway bug: gpt-image-1 requests routed through litellm can
+  // fail with "Attempted to access streaming request content, without having called `read()`"
+  // because litellm's image generation handler incorrectly treats the request as a streaming
+  // request. Explicitly setting stream=false forces it onto the non-streaming code path.
+  // See: https://github.com/BerriAI/litellm/issues (image generation + Azure)
+  if (/^gpt-image/i.test(provider.model || '')) {
+    body.stream = false;
+  }
+
   const res = await proxyFetch({
     targetUrl: endpoint,
     apiKey: provider.apiKey,
@@ -152,7 +161,7 @@ async function callGenerate(
   return extractImageFromResponse(res);
 }
 
-// ─── Helper: Call OpenAI-compatible Edit endpoint (multipart) ──────────────────
+// ─── Helper: Call OpenAI-compatible Edit endpoint ──────────────────────────────
 
 async function callEdit(
   provider: AIProvider,
@@ -370,9 +379,24 @@ export const AI_BRIDGE_COMMANDS = {
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.warn('[AIBridge] Generation failed:', errMsg);
-        // HUD message truncated to avoid displaying excessively long error stacks
-        const hudMsg = errMsg.length > 80 ? errMsg.slice(0, 80) + '…' : errMsg;
-        actions.setInteraction({ hud: { message: `Generation Failed: ${hudMsg}`, type: 'error' } });
+
+        // Detect known litellm gateway bug: /images/edits and /images/variations endpoints
+        // are broken in certain litellm versions — they fail with a streaming request error
+        // regardless of model or provider. This is a server-side bug, not a client issue.
+        const isLitellmStreamingBug = /streaming request content.*without having called.*read/i.test(errMsg);
+        let hudMsg: string;
+        if (isLitellmStreamingBug && mode !== 'generate') {
+          hudMsg = '⚠️ Gateway bug: image edit/variations not supported by your API gateway (litellm). Please upgrade litellm or use a direct API endpoint.';
+          console.error(
+            '[AIBridge] Known litellm bug detected: the /images/edits endpoint handler in litellm has a streaming bug.\n' +
+            'This affects ALL models when using Edit/Variations mode through litellm.\n' +
+            'Fix: upgrade litellm to a version that fixes this issue, or connect directly to the provider API.',
+          );
+        } else {
+          hudMsg = errMsg.length > 80 ? errMsg.slice(0, 80) + '…' : errMsg;
+          hudMsg = `Generation Failed: ${hudMsg}`;
+        }
+        actions.setInteraction({ hud: { message: hudMsg, type: 'error' } });
 
         // Record failed history
         const durationMs = Date.now() - startTime;

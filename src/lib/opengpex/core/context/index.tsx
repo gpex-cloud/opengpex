@@ -225,7 +225,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
 
     const handleGlobalPaste = (e: ClipboardEvent) => {
       const ctx = contextValueRef.current;
-      if (!ctx || !ctx.activeFrame) return;
+      if (!ctx) return;
+      // Allow paste even without activeFrame — the paste command handles
+      // creating a new frame from clipboard when no frame is open.
       ctx.actions.adv.layer.clip.paste.execute({ e });
     };
 

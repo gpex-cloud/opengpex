@@ -204,6 +204,7 @@ export function useEditorStore() {
   }, [scheduleAssetSync, ASSET_CRITICAL_ACTIONS, mutateVolatile]);
 
   const confirmResolverRef = useRef<((val: boolean) => void) | null>(null);
+  const choiceResolverRef = useRef<((val: string | null) => void) | null>(null);
 
   // --- 4. Semantic Action Definition (Semantic Actions) ---
   const actions: EditorActions = useMemo(() => {
@@ -378,6 +379,19 @@ export function useEditorStore() {
           confirmResolverRef.current = null;
         }
         enhancedDispatch({ type: 'HIDE_CONFIRM' });
+      },
+      askChoice: (title: string, options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>) => {
+        return new Promise<string | null>((resolve) => {
+          choiceResolverRef.current = resolve;
+          enhancedDispatch({ type: 'SHOW_CHOICE', payload: { title, options } });
+        });
+      },
+      resolveChoice: (val: string | null) => {
+        if (choiceResolverRef.current) {
+          choiceResolverRef.current(val);
+          choiceResolverRef.current = null;
+        }
+        enhancedDispatch({ type: 'HIDE_CHOICE' });
       },
     };
 

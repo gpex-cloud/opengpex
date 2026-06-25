@@ -82,6 +82,10 @@ export function useCameraInit(
     // positioning. The varied portion (expanded panel width) is intentionally
     // excluded so the canvas stays stable when panels open/close.
     const { insets } = state.ui.theme.config;
+    // Guard: legacy saved data may use flat insets.left/right instead of insets.fixed.{left,right}.
+    const legacyInsets = insets as unknown as Record<string, unknown>;
+    const fixedLeft = insets.fixed?.left ?? Number(legacyInsets.left ?? 0);
+    const fixedRight = insets.fixed?.right ?? Number(legacyInsets.right ?? 0);
 
     const finalCamera = geometry.camera.getFitCamera(
       { w: containerRect.width, h: containerRect.height },
@@ -89,10 +93,10 @@ export function useCameraInit(
       {
         padding: VIEWPORT_FIT_PADDING,
         maxScale: 1,
-        offsetLeft: insets.fixed.left,
-        offsetTop: insets.top,
-        offsetRight: insets.fixed.right,
-        offsetBottom: insets.bottom,
+        offsetLeft: fixedLeft,
+        offsetTop: insets.top ?? 0,
+        offsetRight: fixedRight,
+        offsetBottom: insets.bottom ?? 0,
       },
     );
 

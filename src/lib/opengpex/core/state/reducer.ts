@@ -52,6 +52,7 @@ export const initialState: EditorData = {
   },
   isLoaded: false,
   confirm: null,
+  choice: null,
   interaction: {
     smartguides: null,
     interactionMode: 'pan',
@@ -781,6 +782,14 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
 
     case 'HIDE_CONFIRM':
       return { ...state, confirm: null };
+
+    case 'SHOW_CHOICE':
+      return {
+        ...state,
+        choice: { isVisible: true, ...action.payload }
+      };
+    case 'HIDE_CHOICE':
+      return { ...state, choice: null };
 
 
 

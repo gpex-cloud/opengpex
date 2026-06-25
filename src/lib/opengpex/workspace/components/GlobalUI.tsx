@@ -24,16 +24,35 @@ import {
   useEditorServices,
 } from "@opengpex/editor/core/context";
 import FancyConfirm from "@opengpex/editor/widgets/FancyConfirm";
+import FancyChoice from "@opengpex/editor/widgets/FancyChoice";
+import type { ChoiceOption } from "@opengpex/editor/widgets/FancyChoice";
 import EditorHUD from "@opengpex/editor/widgets/EditorHUD";
 import BranchFlyEffect from "@opengpex/editor/widgets/BranchFlyEffect";
-import { AlertCircle, CheckCircle2, Info } from "lucide-react";
+import { AlertCircle, CheckCircle2, Info, Layers, PlusSquare, type LucideIcon } from "lucide-react";
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
+import { useMemo } from "react";
+
+/** Icon lookup: maps string names stored in state to LucideIcon components */
+const ICON_MAP: Record<string, LucideIcon> = {
+  Layers,
+  PlusSquare,
+};
 
 export const GlobalUI = () => {
   const { state } = useEditorState();
   const { actions } = useEditorServices();
   const hud = state.interaction.hud;
   const confirm = state.confirm;
+  const choice = state.choice;
+
+  /** Map serialized choice options to ChoiceOption[] with real icon components */
+  const choiceOptions: ChoiceOption[] = useMemo(() => {
+    if (!choice?.options) return [];
+    return choice.options.map((opt) => ({
+      ...opt,
+      icon: opt.icon ? ICON_MAP[opt.icon] : undefined,
+    }));
+  }, [choice?.options]);
 
   return (
     <>
@@ -75,7 +94,16 @@ export const GlobalUI = () => {
         onCancel={() => actions.confirm(false)}
       />
 
-      {/* 3. Branch animation */}
+      {/* 3. Multi-choice dialog */}
+      <FancyChoice
+        isVisible={!!choice?.isVisible}
+        title={choice?.title || ""}
+        options={choiceOptions}
+        onSelect={(id) => actions.resolveChoice(id)}
+        onCancel={() => actions.resolveChoice(null)}
+      />
+
+      {/* 4. Branch animation */}
       <BranchFlyEffect />
 
       {/* 4. Portal root node */}

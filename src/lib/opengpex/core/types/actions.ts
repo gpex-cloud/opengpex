@@ -92,6 +92,8 @@ export interface EditorActions {
 
   askConfirm: (title: string, message: string, type?: 'info' | 'danger' | 'warning', variant?: 'square' | 'rect') => Promise<boolean>;
   confirm: (val: boolean) => void;
+  askChoice: (title: string, options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>) => Promise<string | null>;
+  resolveChoice: (val: string | null) => void;
 
   clearAllData: () => void;
   updateStorageStats: () => void;

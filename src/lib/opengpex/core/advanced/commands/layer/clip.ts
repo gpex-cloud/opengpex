@@ -149,10 +149,10 @@ export const LayerClipCommands = {
     name: 'Paste',
     undoable: true,
     execute: async (ctx: EditorContextValue, payload?: ClipboardLayerMetadata | { e?: ClipboardEvent }): Promise<void> => {
-      const { activeFrame, activeLayer, geometry, clipboard, state } = ctx;
-      if (!activeFrame) return;
+      const { activeFrame, activeLayer, geometry, clipboard, state, actions } = ctx;
 
       try {
+        // ═══ Step 1: Read clipboard content first (before any frame check) ═══
         let meta: ClipboardLayerMetadata | undefined = (payload && 'assetId' in payload) ? payload : undefined;
         const event = (payload && 'e' in payload) ? payload.e : undefined;
         let blob: Blob | undefined = undefined;
@@ -163,22 +163,57 @@ export const LayerClipCommands = {
           blob = res?.blob;
         }
 
+        // Nothing useful in clipboard — abort
+        if (!meta && !blob) return;
+
+        // ═══ Step 2: No active frame — create a new frame from clipboard image ═══
+        if (!activeFrame) {
+          if (blob) {
+            const file = new File(
+              [blob],
+              `Pasted Image ${new Date().toLocaleTimeString()}.png`,
+              { type: blob.type || 'image/png' }
+            );
+            await actions.adv.frame.create.trunk.execute({ source: file });
+          } else if (meta?.layer?.src) {
+            // Internal clipboard with no active frame (edge case)
+            await actions.adv.frame.create.trunk.execute({ source: meta.layer.src });
+          }
+          return;
+        }
+
+        // ═══ Step 3: Active frame exists + external image → ask user choice ═══
+        if (!meta?.layer && blob) {
+          const choice = await actions.askChoice("Paste Image", [
+            { id: 'layer', label: 'New Layer', description: 'Add to current creation as a new layer', icon: 'Layers', iconGradient: 'from-indigo-500 to-purple-600' },
+            { id: 'frame', label: 'New Frame', description: 'Start a brand-new independent creation', icon: 'PlusSquare', iconGradient: 'from-amber-500 to-orange-600' },
+          ]);
+
+          if (choice === null) return; // User cancelled (X button or Escape)
+
+          if (choice === 'frame') {
+            const file = new File(
+              [blob],
+              `Pasted Image ${new Date().toLocaleTimeString()}.png`,
+              { type: blob.type || 'image/png' }
+            );
+            await actions.adv.frame.create.trunk.execute({ source: file });
+            return;
+          }
+          // choice === 'layer' → fall through to "add as layer" logic below
+        }
+
+        // ═══ Step 4: Add as layer (existing behavior) ═══
         let newLayer;
 
         if (meta?.layer) {
-          // ==========================================
-          // Block 1: Internal Paste (contains full layer object)
-          // Remap the paste position to the center of the current viewport, avoiding coordinate misalignment across boards or after viewport changes
-          // ==========================================
+          // Internal Paste (contains full layer object)
           const { id: _oldId, ...layerWithoutId } = meta.layer;
           const smartName = ctx.layers.getNewLayerName(activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), 'Layer');
 
-          // Calculate the world coordinates corresponding to the center of the current viewport (layer.cx/cy use the world coordinate system, origin at the canvas center)
           const vDim = state.ui.viewportDim;
           const worldCenter = geometry.space.screenToWorld(vDim.w / 2, vDim.h / 2, activeFrame);
 
-          // Logical paste should remain in-place (in-place paste) because cx/cy and visibleShape of logical fragments are designed for precise re-pasting
-          // Only remap to the viewport center if the source artboard and target artboard are different
           console.debug(
             '[ClipCommands:paste] Internal paste positioning debug:',
             `\n  meta.layer cx/cy: (${meta.layer.cx}, ${meta.layer.cy})`,
@@ -196,12 +231,9 @@ export const LayerClipCommands = {
             name: smartName
           });
         } else if (blob) {
-          // ==========================================
-          // Block 2: External Image Paste (Blob)
-          // ==========================================
+          // External Image Paste (Blob)
           newLayer = await ctx.layers.createLayerFromBlob(blob, activeFrame);
         } else {
-          // Neither internal paste nor image, ignore directly
           return;
         }
 

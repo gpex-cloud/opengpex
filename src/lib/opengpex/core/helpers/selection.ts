@@ -63,10 +63,13 @@ export function getRegularClipShape(frame: { latestClipTool?: string; clipBoxes:
 export function getClipBox(frame: Frame): LocalSpatial | null {
   const clipToolId = frame.latestClipTool || 'rect';
 
-  const entry = frame.clipBoxes[clipToolId] ?? null;
+  // Guard: legacy imported data may not have clipBoxes at all.
+  const entry = frame.clipBoxes?.[clipToolId] ?? null;
   if (!entry) return null;
 
   if (!isPolygon(entry)) {
+    // Guard: legacy entries may be missing the rect field.
+    if (!entry.rect) return null;
     // LocalShape — validate non-zero dimensions
     if (entry.rect.w <= 0 || entry.rect.h <= 0) return null;
     return { regular: true, spatial: entry };
