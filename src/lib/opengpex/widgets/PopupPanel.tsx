@@ -371,7 +371,7 @@ export function PopupPanel({
              ======================================================== */}
           <div
             onMouseDown={handleMouseDown}
-            className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)] flex-shrink-0 cursor-grab active:cursor-grabbing hover:bg-[var(--bg-stage)] transition-colors"
+            className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)] flex-shrink-0 cursor-grab active:cursor-grabbing hover:bg-[var(--bg-stage)] dark:hover:bg-white/[0.06] transition-colors"
           >
             <div className="flex items-center gap-2.5 min-w-0">
               {hasActiveStatus && (

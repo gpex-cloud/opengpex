@@ -4,6 +4,15 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.11
+
+- Add Onboarding plugin with spotlight bubbles and everyday tips guidance system
+- Smart paste workflow: auto-create frame when pasting with no canvas, show choice dialog (New Layer / New Frame) when pasting with active frame
+- Redesign landing page with animated orbs, mesh grid, and fluid blob accents (pure CSS GPU animations)
+- Fix AI Bridge streaming error when calling gpt-image models via litellm gateway
+
+---
+
 ## v1.0.0-beta.10
 
 - Add custom cursors for clip tools (rect, ellipse, lasso, wand — each with crosshair + tool badge)

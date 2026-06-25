@@ -221,8 +221,8 @@ export default function TabbedPluginSlot({
  relative flex-1 flex items-center justify-center gap-2 py-2 rounded-lg transition-all duration-300
  ${
    isActive
-     ? "text-indigo-600 "
-     : "text-[var(--text-muted)] hover:text-[var(--text-main)] :text-[var(--text-muted)]"
+     ? "text-indigo-600 dark:text-indigo-400"
+     : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
  }
 `}
           >

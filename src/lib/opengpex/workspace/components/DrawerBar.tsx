@@ -221,7 +221,7 @@ export default function DrawerBar({
       : styles.drawerBar.style;
 
   return (
-    <div className={drawerBarClass} style={customStyle}>
+    <div className={drawerBarClass} style={customStyle} data-drawer-bar={side}>
       {/* Full-height vertical scrolling container, does not block events in inactive areas */}
       <div
         className={`absolute top-0 bottom-0 w-[100vw] overflow-y-auto scrollbar-hide pointer-events-none z-[900] ${side === "left" ? "left-0" : "right-0"}`}
