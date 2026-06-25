@@ -23,7 +23,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useEditorState } from "@opengpex/editor/core/context";
 import { useOnboarding, useTipRotation } from "./hooks";
 import { DEFAULT_CONFIG, type SpotlightDef, type SpotlightPosition } from "./protocols";
-import { X, ChevronRight, Sparkles, Lightbulb } from "lucide-react";
+import { X, Sparkles, Lightbulb } from "lucide-react";
 
 /**
  * OnboardingComponent: ROOT_OVERLAY plugin component.
@@ -189,10 +189,14 @@ function SpotlightBubble({
     return () => window.removeEventListener("resize", handleResize);
   }, [visible, locateTarget]);
 
-  // Hide when any drawer panel is expanded (DOM-based observation)
+  // Hide when any drawer panel is expanded AND re-locate when drawer shifts
+  // (e.g. XTEND_SLOT resize pushes drawer icons down)
   useEffect(() => {
     if (!visible) return;
-    const check = () => setHidden(isAnyDrawerExpanded());
+    const check = () => {
+      setHidden(isAnyDrawerExpanded());
+      locateTarget();
+    };
     check(); // initial check
     const observer = new MutationObserver(check);
     const bars = document.querySelectorAll("[data-drawer-bar]");
@@ -200,7 +204,7 @@ function SpotlightBubble({
       observer.observe(bar, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] }),
     );
     return () => observer.disconnect();
-  }, [visible]);
+  }, [visible, locateTarget]);
 
   if (!visible || !posStyle || hidden) return null;
 
