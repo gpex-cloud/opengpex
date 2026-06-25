@@ -57,7 +57,6 @@ function useTabDockContext() {
 }
 
 function BranchMenu({
-  trunkId,
   branches,
   orientation,
   snap,
@@ -148,7 +147,11 @@ function BranchMenu({
                     <motion.div
                       layoutId="active-branch-indicator"
                       className="absolute left-1 w-1 h-5 rounded-full bg-orange-600 dark:bg-orange-500 shadow-[0_0_8px_rgba(234,88,12,0.6)] dark:shadow-[0_0_8px_rgba(249,115,22,0.6)]"
-                      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                      transition={{
+                        type: "spring",
+                        stiffness: 300,
+                        damping: 30,
+                      }}
                     />
                   )}
                   <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 border border-[var(--border-subtle)] bg-[var(--bg-stage)] isolate">
@@ -231,7 +234,8 @@ function FrameThumbnail({
   const firstLayer = firstLayerId ? frame.layers.byId[firstLayerId] : undefined;
 
   const isTrunkActive = state.activeFrameId === frame.id;
-  const isBranchActiveOfThisTrunk = state.activeTrunkId === frame.id && !isTrunkActive;
+  const isBranchActiveOfThisTrunk =
+    state.activeTrunkId === frame.id && !isTrunkActive;
 
   const shadowClass = isTrunkActive
     ? "shadow-xl shadow-orange-600/45 dark:shadow-orange-500/40 z-10"

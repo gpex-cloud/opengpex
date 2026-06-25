@@ -19,7 +19,6 @@
 
 // ToolMenu.styles.ts
 import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
-import { WORKSPACE_GEOMETRY } from '../Workspace.styles';
 
 /**
  * ToolMenu style generator.

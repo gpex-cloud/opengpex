@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Shape, LocalShape, WorldShape, LocalPolygon, WorldPolygon, Polygon } from '@opengpex/editor/core/types';
+import { Shape, LocalShape, WorldShape, LocalPolygon, WorldPolygon } from '@opengpex/editor/core/types';
 
 /**
  * Converts shape descriptors to browser-native Path2D objects
@@ -26,7 +26,7 @@ import { Shape, LocalShape, WorldShape, LocalPolygon, WorldPolygon, Polygon } fr
 export function shapeToPath2D(shape: Shape): Path2D {
   const p = new Path2D();
   const { type, rect, antiAliased } = shape;
-  
+
   if (type === 'rect') {
     p.rect(rect.x, rect.y, rect.w, rect.h);
   } else if (type === 'circle') {
@@ -97,7 +97,7 @@ export function shapeToPath2D(shape: Shape): Path2D {
     const svgPath = new Path2D(shape.pathData);
     p.addPath(svgPath);
   }
-  
+
   return p;
 }
 

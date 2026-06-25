@@ -19,7 +19,7 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, LocalShape } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 

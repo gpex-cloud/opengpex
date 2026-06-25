@@ -55,7 +55,9 @@ export function useLayoutSync() {
     // Snapshot ref of current insets so the effect doesn't re-fire
     // when our own dispatch causes Redux to emit a new state.
     const currentInsetsRef = useRef(theme.config.insets);
-    currentInsetsRef.current = theme.config.insets;
+    useEffect(() => {
+        currentInsetsRef.current = theme.config.insets;
+    });
 
     useEffect(() => {
         if (!isLoaded) return;

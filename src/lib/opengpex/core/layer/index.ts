@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { GeometryService, PixelService, AssetService, LayerService, LayerUpdateTx, LayerEditor, asLocalShape, asLocalRect, asWorldShape, EditorActions, EditorData, Layer, VectorMask, BitmapMask, isPolygon, LocalShape, LocalPolygon } from '@opengpex/editor/core/types';
+import { GeometryService, PixelService, AssetService, LayerService, LayerUpdateTx, LayerEditor, asLocalShape, asLocalRect, asWorldShape, EditorActions, EditorData, Layer, VectorMask, BitmapMask, isPolygon } from '@opengpex/editor/core/types';
 import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { LayerFactory } from './LayerFactory';

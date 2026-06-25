@@ -21,7 +21,6 @@
 
 import { useMemo } from 'react';
 import { useEditorState, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
-import { LocalShape } from '@opengpex/editor/core/types';
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import * as P from './protocols';
 
@@ -34,34 +33,34 @@ import { calcFinalDims } from './utils';
 export const useImageInfoCommands = () => {
    const { state, activeFrame } = useEditorState();
    const [selfConfig, setSelfConfig] = usePluginSelfConfig<P.ExportConfig>();
-    const { downloadCmd, applyResizeCmd } = usePluginCommands();
+   const { downloadCmd, applyResizeCmd } = usePluginCommands();
 
-    return useMemo(() => {
-       const mainLayer = activeFrame ? activeFrame.layers.byId[activeFrame.layers.order[0]] : undefined;
-       const metadata = mainLayer?.metadata;
+   return useMemo(() => {
+      const mainLayer = activeFrame ? activeFrame.layers.byId[activeFrame.layers.order[0]] : undefined;
+      const metadata = mainLayer?.metadata;
 
-       const isClipMode = state.interaction.interactionMode === 'clip';
-       const cropBox = activeFrame ? getRegularClipShape(activeFrame) : undefined;
-       const baseW = isClipMode && cropBox ? cropBox.rect.w : (activeFrame?.canvas.w || 0);
-       const baseH = isClipMode && cropBox ? cropBox.rect.h : (activeFrame?.canvas.h || 0);
+      const isClipMode = state.interaction.interactionMode === 'clip';
+      const cropBox = activeFrame ? getRegularClipShape(activeFrame) : undefined;
+      const baseW = isClipMode && cropBox ? cropBox.rect.w : (activeFrame?.canvas.w || 0);
+      const baseH = isClipMode && cropBox ? cropBox.rect.h : (activeFrame?.canvas.h || 0);
 
-       return {
-          state: {
-             config: selfConfig,
-             activeFrame,
-             isClipMode,
-             finalDims: activeFrame ? calcFinalDims(baseW, baseH, selfConfig) : { w: 0, h: 0 },
-             fileSize: metadata?.size ? formatBytes(metadata.size) : '---',
-             fileFormat: (metadata?.format || 'image/png').split('/')[1]?.toUpperCase() || 'PNG',
-             fileName: activeFrame?.name || 'Untitled',
-             layerCount: activeFrame?.layers.order.length || 0,
-             engineStatuses: state.runtime.engineStatuses || [],
-             exif: metadata?.exif,
-          },
-          updateConfig: setSelfConfig,
-          // Plugin Commands (transparently passed Cmd references)
-          downloadCmd,
-          applyResizeCmd,
-       };
-    }, [state, selfConfig, activeFrame, setSelfConfig, downloadCmd, applyResizeCmd]);
+      return {
+         state: {
+            config: selfConfig,
+            activeFrame,
+            isClipMode,
+            finalDims: activeFrame ? calcFinalDims(baseW, baseH, selfConfig) : { w: 0, h: 0 },
+            fileSize: metadata?.size ? formatBytes(metadata.size) : '---',
+            fileFormat: (metadata?.format || 'image/png').split('/')[1]?.toUpperCase() || 'PNG',
+            fileName: activeFrame?.name || 'Untitled',
+            layerCount: activeFrame?.layers.order.length || 0,
+            engineStatuses: state.runtime.engineStatuses || [],
+            exif: metadata?.exif,
+         },
+         updateConfig: setSelfConfig,
+         // Plugin Commands (transparently passed Cmd references)
+         downloadCmd,
+         applyResizeCmd,
+      };
+   }, [state, selfConfig, activeFrame, setSelfConfig, downloadCmd, applyResizeCmd]);
 };

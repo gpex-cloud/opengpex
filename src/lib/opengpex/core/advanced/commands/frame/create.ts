@@ -19,7 +19,7 @@
 
 'use client';
 
-import { EditorCommand, EditorContextValue, Frame, LocalShape, asLocalShape, Layer, isPolygon } from '@opengpex/editor/core/types';
+import { EditorCommand, EditorContextValue, Frame, LocalShape, asLocalShape, Layer } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { MetadataHelper } from '@opengpex/editor/core/helpers/metadata';
 import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';

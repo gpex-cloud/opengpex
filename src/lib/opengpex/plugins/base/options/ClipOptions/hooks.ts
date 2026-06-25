@@ -34,7 +34,7 @@ import type { CropTool } from './protocols';
  * Non-command helper operations remain in bare function form.
  */
 export const useClipOptionsCommands = () => {
-  const { activeFrame, state } = useEditorState();
+  const { activeFrame } = useEditorState();
   const { actions } = useEditorServices();
 
   const {

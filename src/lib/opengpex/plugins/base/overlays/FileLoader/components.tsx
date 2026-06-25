@@ -19,8 +19,8 @@
 
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
-import { ImagePlus, Image as ImageIcon, Loader2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { ImagePlus, Loader2 } from "lucide-react";
 import EditorHUD from "@opengpex/editor/widgets/EditorHUD";
 import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
 import {

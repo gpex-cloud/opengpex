@@ -35,7 +35,7 @@ export function useViewportEvents(
 ) {
   const { state, activeLayer } = useEditorState();
   const services = useEditorServices();
-  const { geometry, actions, plugins } = services;
+  const { geometry, actions } = services;
   const pluginList = usePluginList();
 
   // 1. Initialize dispatcher and handlers (automatically aggregate built-in and plugin handlers)

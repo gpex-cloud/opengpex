@@ -273,7 +273,7 @@ export function useFastMarchingAntsSync(
     if (pathRef.current) {
       pathRef.current.setAttribute('d', '');
     }
-  }, [resetKey]);
+  }, [resetKey, pathRef]);
 
 
   useFastSync(pathRef, isActive, (v, f, cam) => {

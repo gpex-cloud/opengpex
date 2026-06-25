@@ -108,7 +108,7 @@ export function useCameraInit(
     status,
     state.ui.viewportDim.w,
     state.ui.viewportDim.h,
-    state.ui.theme.config.insets,
+    state.ui.theme.config,
     actions,
     containerRef,
     geometry.camera,
