@@ -227,7 +227,7 @@ export const LayerClipCommands = {
 
   toMask: {
     id: P.ADV_LAYER_CLIP_TO_MASK,
-    name: 'Apply Selection as Layer Mask',
+    name: 'Apply as Layer Mask',
     undoable: true,
     execute: async (ctx: EditorContextValue, payload?: { layerId?: string }): Promise<void> => {
       const { activeFrame, activeLayer, actions, geometry, layers } = ctx;

@@ -29,9 +29,10 @@ export const EDITOR_Z_INDEX = {
   // Workspace (Global UI) - Layout tiling zone
   UI: {
     WORKSPACE_BASE: 2000, // Sidebar, top bar, action bar
-    POPOVER: 5000,        // Tooltip, Popover, Dropdown (requires Portal)
     OVERLAY: 4000,        // Global overlay plugins
+    POPOVER: 5000,        // Popover, Dropdown (requires Portal)
     MODAL: 6000,          // Modal dialogs and warnings
+    TOOLTIP: 10100,       // Tooltip — must float above Popover (default 9999)
   }
 };
 

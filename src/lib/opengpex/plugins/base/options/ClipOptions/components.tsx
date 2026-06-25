@@ -43,6 +43,7 @@ import { getRegularClipShape } from "@opengpex/editor/core/helpers/selection";
 import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import Popover from "@opengpex/editor/widgets/Popover";
+import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import { useClipOptionsCommands } from "./hooks";
 import { CROP_TOOL_STRATEGIES, type CropToolStrategy } from "./protocols";
 
@@ -197,7 +198,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
       {/* 2. Aspect Ratio 2-Segment Split Button */}
       <div className="relative flex items-center">
         <div
-          className={`relative flex items-center h-7 rounded-xl transition-all border shadow-sm
+          className={`relative flex items-center h-7 rounded-xl overflow-hidden transition-all border shadow-sm
           ${
             isDropdownOpen && !isPanMode
               ? `bg-[var(--bg-panel)] ${toolVisual.borderOpenClass} shadow-lg`
@@ -283,39 +284,26 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                       {showDivider && (
                         <div className="mx-1 w-px h-5 bg-[var(--border-subtle)]" />
                       )}
-                      <button
-                        onClick={() => cropToolSetCmd?.execute({ tool: s.id })}
-                        className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-colors whitespace-nowrap
-                          ${
-                            active
-                              ? popActiveBg
-                              : "text-[var(--text-muted)] hover:bg-[var(--bg-stage)] hover:text-[var(--text-main)]"
-                          }
-                        `}
-                        title={s.label}
-                      >
-                        {/*
-                         * Per-item dashed override: only the *currently
-                         * active* AA-supporting tool follows the AA-OFF
-                         * dashed-outline rule. Non-active items always
-                         * render solid because their AA flag isn't being
-                         * mutated by the AA toggle right now (the AA flag
-                         * is per-active-shape, not per-tool). This avoids
-                         * the popover going "all dashed" the moment the
-                         * user disables AA on ellipse — only the ellipse
-                         * entry should reflect that mode.
-                         */}
-                        <Icon
-                          size={12}
-                          className="shrink-0"
-                          {...(active && s.supportsAntiAlias && isAntiAliased === false
-                            ? ({ strokeDasharray: '3 3' } as React.SVGAttributes<SVGSVGElement>)
-                            : {})}
-                        />
-                        {/* <span className="text-[10px] font-bold uppercase tracking-wide">
-                          {s.label}
-                        </span> */}
-                      </button>
+                      <Tooltip content={s.label} position="bottom" display="inline-flex">
+                        <button
+                          onClick={() => cropToolSetCmd?.execute({ tool: s.id })}
+                          className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-colors whitespace-nowrap
+                            ${
+                              active
+                                ? popActiveBg
+                                : "text-[var(--text-muted)] hover:bg-[var(--bg-stage)] hover:text-[var(--text-main)]"
+                            }
+                          `}
+                        >
+                          <Icon
+                            size={12}
+                            className="shrink-0"
+                            {...(active && s.supportsAntiAlias && isAntiAliased === false
+                              ? ({ strokeDasharray: '3 3' } as React.SVGAttributes<SVGSVGElement>)
+                              : {})}
+                          />
+                        </button>
+                      </Tooltip>
                     </React.Fragment>
                   );
                 })}
@@ -340,37 +328,43 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                  * matrix.
                  */}
                 <div className="mx-1 w-px h-5 bg-[var(--border-subtle)]" />
-                <button
-                  onClick={() => exitClipModeCmd?.execute()}
-                  className="flex items-center justify-center w-6 h-6 text-[var(--text-muted)] hover:text-rose-500 hover:bg-[var(--bg-stage)] rounded-md transition-colors"
-                  title={`Exit Clip Mode (${exitClipModeCmd?.shortcutLabel || 'Esc'})`}
+                <Tooltip
+                  content={`Exit Clip Mode (${exitClipModeCmd?.shortcutLabel || 'Esc'})`}
+                  position="bottom"
+                  display="inline-flex"
                 >
-                  <X size={12} />
-                </button>
+                  <button
+                    onClick={() => exitClipModeCmd?.execute()}
+                    className="flex items-center justify-center w-6 h-6 text-[var(--text-muted)] hover:text-rose-500 hover:bg-[var(--bg-stage)] rounded-md transition-colors"
+                  >
+                    <X size={12} />
+                  </button>
+                </Tooltip>
 
               </div>
 
             }
           >
 
-            <button
-              onClick={() => toggleModeCmd?.execute()}
-              disabled={isReCanvas}
-              className={`flex items-center justify-center w-8 h-7 rounded-l-xl transition-colors group outline-none select-none
-                ${isReCanvas ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
-              `}
-              title={`Toggle Mode (${toggleModeCmd?.shortcutLabel || ""})`}
+            <Tooltip
+              content={`Toggle Mode (${toggleModeCmd?.shortcutLabel || ""})`}
+              position="bottom"
+              display="inline-flex"
             >
-              {isPanMode ? (
-                <Hand size={13} className="text-[var(--text-muted)]" />
-              ) : (
-                // `dashedIconProps` injects `strokeDasharray="3 3"` when the
-                // current tool supports AA and AA is OFF — see comment block
-                // above `dashedIconProps` for the rationale.
-                <ToolIcon size={13} className={toolVisual.textClass} {...dashedIconProps} />
-              )}
-
-            </button>
+              <button
+                onClick={() => toggleModeCmd?.execute()}
+                disabled={isReCanvas}
+                className={`flex items-center justify-center w-8 h-7 transition-colors group outline-none select-none
+                  ${isReCanvas ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
+                `}
+              >
+                {isPanMode ? (
+                  <Hand size={13} className="text-[var(--text-muted)]" />
+                ) : (
+                  <ToolIcon size={13} className={toolVisual.textClass} {...dashedIconProps} />
+                )}
+              </button>
+            </Tooltip>
           </Popover>
 
 
@@ -399,20 +393,21 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
               </div>
             }
           >
-            <button
-              onClick={handleDropdownClick}
-              className="flex items-center h-full outline-none select-none"
-              disabled={isIrregularTool}
-              title={isIrregularTool ? "Aspect ratio is N/A for lasso / wand selection" : undefined}
+            <Tooltip
+              content="Aspect Ratio"
+              position="bottom"
+              display="inline-flex"
             >
-              <div
-                className={`flex items-center gap-1.5 px-2 h-full transition-colors outline-none select-none
-                ${
-                  isPanMode || isIrregularTool
-                    ? disabledClasses
-                    : "hover:bg-[var(--bg-stage)]"
-                }
-              `}
+              <button
+                onClick={handleDropdownClick}
+                className={`flex items-center gap-1.5 px-2 h-7 transition-colors outline-none select-none
+                  ${
+                    isPanMode || isIrregularTool
+                      ? disabledClasses
+                      : "hover:bg-[var(--bg-stage)]"
+                  }
+                `}
+                disabled={isIrregularTool}
               >
                 <span className="text-[10px] font-black text-[var(--text-main)] min-w-[32px] text-center">
                   {currentRatio.label}
@@ -421,8 +416,8 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                   size={10}
                   className={`text-[var(--text-muted)] transition-transform duration-300 ${isDropdownOpen ? "rotate-180" : ""}`}
                 />
-              </div>
-            </button>
+              </button>
+            </Tooltip>
           </Popover>
 
           <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20" />
@@ -436,32 +431,37 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
           {(() => {
             const aaDisabled = isPanMode || isReCanvas || !supportsAntiAlias;
             return (
-              <button
-                onClick={() => antiAliasToggleCmd?.execute()}
-                disabled={aaDisabled}
-                className={`flex items-center justify-center w-7 h-7 transition-colors outline-none select-none
-                  ${aaDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
-                `}
-                title={
+              <Tooltip
+                content={
                   !supportsAntiAlias
                     ? "Anti-aliasing only applies to the Ellipse tool"
-                    : `Anti-Alias: ${isAntiAliased ? "ON" : "OFF"}${antiAliasToggleCmd?.shortcutLabel ? ` (${antiAliasToggleCmd.shortcutLabel})` : ""}`
+                    : `Anti-Alias: ${isAntiAliased ? "ON" : "OFF"} (Dbl-Click A)`
                 }
+                position="bottom"
+                display="inline-flex"
               >
-                <span
-                  className={`text-[10px] font-black tracking-tight transition-colors ${
-                    isAntiAliased && supportsAntiAlias && !aaDisabled
-                      ? "text-amber-600 dark:text-amber-500"
-                      : "text-[var(--text-muted)]"
-                  } ${
-                    !isAntiAliased && supportsAntiAlias && !aaDisabled
-                      ? "line-through decoration-2"
-                      : ""
-                  }`}
+                <button
+                  onClick={() => antiAliasToggleCmd?.execute()}
+                  disabled={aaDisabled}
+                  className={`flex items-center justify-center w-7 h-7 transition-colors outline-none select-none
+                    ${aaDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
+                  `}
                 >
-                  AA
-                </span>
-              </button>
+                  <span
+                    className={`text-[10px] font-black tracking-tight transition-colors ${
+                      isAntiAliased && supportsAntiAlias && !aaDisabled
+                        ? "text-amber-600 dark:text-amber-500"
+                        : "text-[var(--text-muted)]"
+                    } ${
+                      !isAntiAliased && supportsAntiAlias && !aaDisabled
+                        ? "line-through decoration-2"
+                        : ""
+                    }`}
+                  >
+                    AA
+                  </span>
+                </button>
+              </Tooltip>
             );
           })()}
 
@@ -476,16 +476,21 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
           {(() => {
             const maskDisabled = !hasAnySelection || isPanMode || isReCanvas;
             return (
-              <button
-                onClick={() => applyMaskCmd?.execute(undefined)}
-                disabled={maskDisabled}
-                className={`flex items-center justify-center w-7 h-7 rounded-r-xl transition-colors outline-none select-none
-                  ${maskDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
-                `}
-                title="Apply Selection as Mask"
+              <Tooltip
+                content="Apply as Mask"
+                position="bottom"
+                display="inline-flex"
               >
-                <ScissorsLineDashed size={13} className={isIrregularTool ? "text-purple-500" : "text-amber-500"} />
-              </button>
+                <button
+                  onClick={() => applyMaskCmd?.execute(undefined)}
+                  disabled={maskDisabled}
+                  className={`flex items-center justify-center w-7 h-7 transition-colors outline-none select-none
+                    ${maskDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
+                  `}
+                >
+                  <ScissorsLineDashed size={13} className={isIrregularTool ? "text-purple-500" : "text-amber-500"} />
+                </button>
+              </Tooltip>
             );
           })()}
         </div>

@@ -23,7 +23,7 @@ import {
   useEditorState,
 } from "@opengpex/editor/core/context";
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
-import { useClipOverlayCommands } from "./hooks";
+import { useClipOverlayCommands, useClipCursor } from "./hooks";
 import {
   useCropDimSync,
   useRegularCropSync,
@@ -60,6 +60,9 @@ export function ClipOverlayMain() {
     isRegularTool,
     isIrregularTool,
   } = useClipOverlayCommands();
+
+  // Per-tool custom cursor (crosshair + badge) via cursorOverride signal
+  useClipCursor(isClipActive, cropTool);
 
   const { state } = useEditorState();
 

@@ -146,3 +146,39 @@ export function useClipOverlayCommands() {
     reset: resetBox // Use the standardized command
   };
 }
+
+// ─── useClipCursor ─────────────────────────────────────────────────────────────
+
+/**
+ * useClipCursor: Sets per-tool custom cursor when clip mode is active.
+ *
+ * Lifecycle:
+ * - Enter clip mode → set cursor for current tool (from CROP_TOOL_STRATEGIES)
+ * - Switch tool within clip mode → update cursor
+ * - Exit clip mode → clear to null (fallback to Viewport default)
+ * - Component unmount → clear to null (safety net)
+ *
+ * Only clears `cursorOverride` if it currently holds one of our cursors,
+ * avoiding interference with other cursor owners (TextOverlay, BrushOverlay, etc.).
+ */
+export function useClipCursor(isClipActive: boolean, cropTool: CropTool) {
+  const { actions } = useEditorServices();
+
+  useEffect(() => {
+    if (isClipActive) {
+      // Active: set the tool-specific cursor
+      const toolCursor = CROP_TOOL_STRATEGIES[cropTool].cursor;
+      actions.setInteraction({ cursorOverride: toolCursor });
+    } else {
+      // Deactivated: clear cursor (reset to viewport default)
+      actions.setInteraction({ cursorOverride: null });
+    }
+  }, [isClipActive, cropTool, actions]);
+
+  // Cleanup on unmount — safety net
+  useEffect(() => {
+    return () => {
+      actions.setInteraction({ cursorOverride: null });
+    };
+  }, [actions]);
+}

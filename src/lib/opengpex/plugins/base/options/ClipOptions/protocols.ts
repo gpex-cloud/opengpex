@@ -98,6 +98,12 @@ export type CropTool = 'rect' | 'ellipse' | 'lasso' | 'wand';
 
 import type { LucideIcon } from 'lucide-react';
 import { Square, Circle, Lasso, Wand2 } from 'lucide-react';
+import {
+  CLIP_RECT_CURSOR,
+  CLIP_ELLIPSE_CURSOR,
+  CLIP_LASSO_CURSOR,
+  CLIP_WAND_CURSOR,
+} from '@opengpex/editor/icons';
 
 export type CropFamily = 'regular' | 'irregular';
 
@@ -157,6 +163,14 @@ export interface CropToolStrategy {
    * All tools default AA to ON (true); user can toggle OFF at any time.
    */
   readonly supportsAntiAlias: boolean;
+
+  /**
+   * Custom cursor for this clip tool — applied to the viewport via
+   * `cursorOverride` when this tool is active in clip mode. Uses CSS cursor
+   * syntax (supports data URL SVG cursors with hotspot specification).
+   * Consumed by `useClipCursor` hook in ClipOverlay.
+   */
+  readonly cursor: string;
 }
 
 /**
@@ -168,10 +182,10 @@ export interface CropToolStrategy {
  *   2. nothing else — L1/L2/L3/L6 derive automatically.
  */
 export const CROP_TOOL_STRATEGIES: Record<CropTool, CropToolStrategy> = {
-  'rect':    { id: 'rect',    label: 'Rect',    icon: Square, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'rect'   }), forbiddenInReCanvas: false, supportsAntiAlias: false },
-  'ellipse': { id: 'ellipse', label: 'Ellipse', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'circle' }), forbiddenInReCanvas: false, supportsAntiAlias: true  },
-  'lasso':   { id: 'lasso',   label: 'Lasso',   icon: Lasso,  accent: 'purple', family: 'irregular', handlerKind: 'lasso',                                              forbiddenInReCanvas: true,  supportsAntiAlias: true  },
-  'wand':    { id: 'wand',    label: 'Wand',    icon: Wand2,  accent: 'purple', family: 'irregular', handlerKind: 'wand',                                               forbiddenInReCanvas: true,  supportsAntiAlias: true  },
+  'rect':    { id: 'rect',    label: 'Rect',    icon: Square, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'rect'   }), forbiddenInReCanvas: false, supportsAntiAlias: false, cursor: CLIP_RECT_CURSOR    },
+  'ellipse': { id: 'ellipse', label: 'Ellipse', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'circle' }), forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_CURSOR },
+  'lasso':   { id: 'lasso',   label: 'Lasso',   icon: Lasso,  accent: 'purple', family: 'irregular', handlerKind: 'lasso',                                              forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_LASSO_CURSOR   },
+  'wand':    { id: 'wand',    label: 'Wand',    icon: Wand2,  accent: 'purple', family: 'irregular', handlerKind: 'wand',                                               forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_WAND_CURSOR    },
 
 };
 

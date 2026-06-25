@@ -18,8 +18,8 @@
  */
 
 import React, { ReactNode, useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
-import EditorPortal from './Portal';
 
 export type TooltipPosition = 'top' | 'bottom' | 'left' | 'right';
 export type TooltipAlign = 'start' | 'center' | 'end';
@@ -147,7 +147,7 @@ export default function Tooltip({
       top,
       left,
       transform,
-      zIndex: EDITOR_Z_INDEX.UI.POPOVER,
+      zIndex: EDITOR_Z_INDEX.UI.TOOLTIP,
       pointerEvents: 'none' as const
     };
   };
@@ -187,18 +187,17 @@ export default function Tooltip({
       onMouseLeave={handleMouseLeave}
     >
       {children}
-      {(alwaysShow || (isVisible && showOnHover)) && (
-        <EditorPortal>
-          <div
-            style={getTooltipStyle()}
-            className={`whitespace-nowrap animate-in fade-in zoom-in-95 duration-200 ${className}`}
-          >
-            <div className={`bg-white dark:bg-zinc-900 text-zinc-800 dark:text-white text-[10px] rounded-lg py-1.5 px-2.5 shadow-2xl border border-zinc-200 dark:border-white/10 ${uppercase ? 'uppercase font-bold tracking-wider' : 'font-medium tracking-tight whitespace-pre-line leading-relaxed'} ${contentClassName}`}>
-              {content}
-            </div>
-            <div className={`border-4 border-transparent w-0 h-0 absolute ${arrowStyles[position][align]}`}></div>
+      {(alwaysShow || (isVisible && showOnHover)) && typeof document !== 'undefined' && createPortal(
+        <div
+          style={getTooltipStyle()}
+          className={`whitespace-nowrap animate-in fade-in zoom-in-95 duration-200 ${className}`}
+        >
+          <div className={`bg-white dark:bg-zinc-900 text-zinc-800 dark:text-white text-[10px] rounded-lg py-1.5 px-2.5 shadow-2xl border border-zinc-200 dark:border-white/10 ${uppercase ? 'uppercase font-bold tracking-wider' : 'font-medium tracking-tight whitespace-pre-line leading-relaxed'} ${contentClassName}`}>
+            {content}
           </div>
-        </EditorPortal>
+          <div className={`border-4 border-transparent w-0 h-0 absolute ${arrowStyles[position][align]}`}></div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -23,6 +23,7 @@ import React, { useRef, useState, useEffect } from "react";
 import { Palette, PaintBucket, Pin, Pipette } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ColorPickerPro } from "@opengpex/editor/widgets/ColorPickerPro";
+import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import PluginSlot from "@opengpex/editor/workspace/components/PluginSlot";
 import { useColorOptions } from "./hooks";
 import { COLOR_OPTIONS_CRAFT_SLOT } from "./protocols";
@@ -96,56 +97,59 @@ export const ColorOptionsComponent = React.memo(
           >
             {typeof window !== "undefined" && "EyeDropper" in window && (
               <>
-                <button
-                  onClick={sampleColor}
-                  title="Sample Color"
-                  className="flex items-center justify-center w-8 h-full rounded-l-xl transition-all hover:bg-[var(--bg-stage)] outline-none group"
-                >
-                  <Pipette
-                    size={13}
-                    className="text-[var(--text-muted)] group-hover:text-amber-500 transition-colors"
-                  />
-                </button>
+                <Tooltip content="Sample Color" position="bottom" display="inline-flex">
+                  <button
+                    onClick={sampleColor}
+                    className="flex items-center justify-center w-8 h-full rounded-l-xl transition-all hover:bg-[var(--bg-stage)] outline-none group"
+                  >
+                    <Pipette
+                      size={13}
+                      className="text-[var(--text-muted)] group-hover:text-amber-500 transition-colors"
+                    />
+                  </button>
+                </Tooltip>
                 <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20 shrink-0" />
               </>
             )}
 
-            <button
-              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              title="Pick Color"
-              className={`flex items-center justify-center w-8 h-full transition-colors outline-none hover:bg-[var(--bg-stage)] 
-              ${!(typeof window !== "undefined" && "EyeDropper" in window) ? "rounded-l-xl" : ""}
-            `}
-            >
-              <div
-                className="w-4 h-4 rounded shadow-inner ring-1 ring-black/10 dark:ring-white/10 transition-transform active:scale-90"
-                style={{ backgroundColor: currentColor }}
-              />
-            </button>
+            <Tooltip content="Pick Color" position="bottom" display="inline-flex">
+              <button
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className={`flex items-center justify-center w-8 h-full transition-colors outline-none hover:bg-[var(--bg-stage)] 
+                ${!(typeof window !== "undefined" && "EyeDropper" in window) ? "rounded-l-xl" : ""}
+              `}
+              >
+                <div
+                  className="w-4 h-4 rounded shadow-inner ring-1 ring-black/10 dark:ring-white/10 transition-transform active:scale-90"
+                  style={{ backgroundColor: currentColor }}
+                />
+              </button>
+            </Tooltip>
 
             <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20 shrink-0" />
 
-            <button
-              onClick={() =>
-                fillAsLayerCmd?.execute({ fillColor: currentColor })
-              }
-              title={`${fillAsLayerCmd?.name || "Fill"} (${fillAsLayerCmd?.shortcutLabel || ""})`}
-              className="flex items-center justify-center w-8 h-full rounded-r-xl transition-all hover:bg-[var(--bg-stage)] outline-none group relative"
-            >
-              {/* Subtle color glow background */}
-              <div
-                className="absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity rounded-r-xl"
-                style={{ backgroundColor: currentColor }}
-              />
-              <PaintBucket
-                size={13}
-                className="transition-all transform group-active:scale-95"
-                style={{
-                  color: currentColor,
-                  filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.1))",
-                }}
-              />
-            </button>
+            <Tooltip content={`${fillAsLayerCmd?.name || "Fill"} (${fillAsLayerCmd?.shortcutLabel || ""})`} position="bottom" display="inline-flex">
+              <button
+                onClick={() =>
+                  fillAsLayerCmd?.execute({ fillColor: currentColor })
+                }
+                className="flex items-center justify-center w-8 h-full rounded-r-xl transition-all hover:bg-[var(--bg-stage)] outline-none group relative"
+              >
+                {/* Subtle color glow background */}
+                <div
+                  className="absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity rounded-r-xl"
+                  style={{ backgroundColor: currentColor }}
+                />
+                <PaintBucket
+                  size={13}
+                  className="transition-all transform group-active:scale-95"
+                  style={{
+                    color: currentColor,
+                    filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.1))",
+                  }}
+                />
+              </button>
+            </Tooltip>
           </div>
 
           {/* Floating Dropdown Picker */}
@@ -161,26 +165,28 @@ export const ColorOptionsComponent = React.memo(
               >
                 <div className="flex justify-between items-center mb-2">
                   {typeof window !== "undefined" && "EyeDropper" in window ? (
-                    <button
-                      onClick={sampleColor}
-                      title="Pick color from screen"
-                      className="p-1 rounded-md transition-colors text-[var(--text-muted)] hover:text-amber-500 hover:bg-[var(--bg-stage)] group"
-                    >
-                      <Pipette
-                        size={14}
-                        className="group-hover:scale-110 transition-transform"
-                      />
-                    </button>
+                    <Tooltip content="Pick color from screen" position="bottom" display="inline-flex">
+                      <button
+                        onClick={sampleColor}
+                        className="p-1 rounded-md transition-colors text-[var(--text-muted)] hover:text-amber-500 hover:bg-[var(--bg-stage)] group"
+                      >
+                        <Pipette
+                          size={14}
+                          className="group-hover:scale-110 transition-transform"
+                        />
+                      </button>
+                    </Tooltip>
                   ) : (
                     <div />
                   )}
-                  <button
-                    onClick={() => setIsPinned(!isPinned)}
-                    className={`p-1 rounded-md transition-colors ${isPinned ? "text-amber-500 bg-amber-500/10" : "text-[var(--text-muted)] hover:bg-[var(--bg-stage)]"}`}
-                    title={isPinned ? "Unpin" : "Pin Color Picker"}
-                  >
-                    <Pin size={14} className={isPinned ? "fill-current" : ""} />
-                  </button>
+                  <Tooltip content={isPinned ? "Unpin" : "Pin Color Picker"} position="bottom" display="inline-flex">
+                    <button
+                      onClick={() => setIsPinned(!isPinned)}
+                      className={`p-1 rounded-md transition-colors ${isPinned ? "text-amber-500 bg-amber-500/10" : "text-[var(--text-muted)] hover:bg-[var(--bg-stage)]"}`}
+                    >
+                      <Pin size={14} className={isPinned ? "fill-current" : ""} />
+                    </button>
+                  </Tooltip>
                 </div>
                 <ColorPickerPro
                   color={currentColor}

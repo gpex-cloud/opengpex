@@ -88,6 +88,35 @@ export function MergeVisibleIcon({ size = 12 }: { size?: number }) {
  */
 export const TEXT_PREEDIT_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3C!-- Arrow pointer (top-left) --%3E%3Cpath d='M3 1 L3 14 L6.5 10.5 L9.5 16 L11.5 15 L8.5 9 L13 9 Z' fill='white' stroke='black' stroke-width='1' stroke-linejoin='round'/%3E%3C!-- T character (bottom-right) --%3E%3Cpath d='M14 13 L22 13 M18 13 L18 23' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3Cpath d='M14 13 L22 13 M18 13 L18 23' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E") 3 1, default`;
 
+// ─── Clip Tool Cursors ─────────────────────────────────────────────────────────
+// Each clip tool has a unique cursor: crosshair (center) + tool badge (bottom-right).
+// 24×24 SVG, hotspot at crosshair center (8,8), fallback: crosshair.
+// Double-stroke (white thick + black thin) ensures visibility on all backgrounds.
+
+/**
+ * CLIP_RECT_CURSOR: Crosshair + small square badge
+ * Hotspot: (8, 8)
+ */
+export const CLIP_RECT_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Crect x='15' y='15' width='7' height='7' rx='1' stroke='white' stroke-width='2.5' fill='none'/%3E%3Crect x='15' y='15' width='7' height='7' rx='1' stroke='black' stroke-width='1' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+/**
+ * CLIP_ELLIPSE_CURSOR: Crosshair + small circle badge
+ * Hotspot: (8, 8)
+ */
+export const CLIP_ELLIPSE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Ccircle cx='18.5' cy='18.5' r='3.5' stroke='white' stroke-width='2.5' fill='none'/%3E%3Ccircle cx='18.5' cy='18.5' r='3.5' stroke='black' stroke-width='1' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+/**
+ * CLIP_LASSO_CURSOR: Crosshair + freehand curve badge
+ * Hotspot: (8, 8)
+ */
+export const CLIP_LASSO_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M15 20c1-3 3-5 5-5s3 2 3 3.5c0 2-2 3-4 2.5' stroke='white' stroke-width='2.5' stroke-linecap='round' fill='none'/%3E%3Cpath d='M15 20c1-3 3-5 5-5s3 2 3 3.5c0 2-2 3-4 2.5' stroke='black' stroke-width='1' stroke-linecap='round' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+/**
+ * CLIP_WAND_CURSOR: Crosshair + magic wand badge (angled stick + sparkle)
+ * Hotspot: (8, 8)
+ */
+export const CLIP_WAND_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M15 22l6-6' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3Cpath d='M15 22l6-6' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M19 14v-1M20 15h1M17 15h-1M19 17v1' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M19 14v-1M20 15h1M17 15h-1M19 17v1' stroke='black' stroke-width='0.8' stroke-linecap='round'/%3E%3C/svg%3E") 8 8, crosshair`;
+
 /**
  * PremiumCloud: Cyber Neon Cloud Icon
  * Used as trigger button for CloudMenu plugin

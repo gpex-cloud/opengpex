@@ -163,6 +163,32 @@ const BrushCursor = React.memo(function BrushCursor({ isEraser }: BrushCursorPro
         }}
       />
 
+      {/* Tool identity badge (bottom-right): droplet (brush) or × (eraser) */}
+      <svg
+        data-badge="tool-id"
+        className="absolute pointer-events-none"
+        width="10"
+        height="10"
+        viewBox="0 0 10 10"
+        fill="none"
+        style={{
+          left: `${Math.max(screenDiameter - 1, halfSize + 2)}px`,
+          top: `${Math.max(screenDiameter - 1, halfSize + 2)}px`,
+          filter: 'drop-shadow(0 0.5px 1px rgba(0,0,0,0.9))',
+        }}
+      >
+        {isEraser ? (
+          /* × symbol: two crossed lines */
+          <>
+            <line x1="2" y1="2" x2="8" y2="8" stroke="white" strokeWidth="1.8" strokeLinecap="round" />
+            <line x1="8" y1="2" x2="2" y2="8" stroke="white" strokeWidth="1.8" strokeLinecap="round" />
+          </>
+        ) : (
+          /* Droplet: teardrop shape, filled white */
+          <path d="M5 1C5 1 2 4.5 2 6.5C2 8.5 3.3 9.5 5 9.5C6.7 9.5 8 8.5 8 6.5C8 4.5 5 1 5 1Z" fill="white" />
+        )}
+      </svg>
+
       {/* "+" new layer indicator badge: displayed when Cmd/Ctrl is pressed (bottom right) */}
       <div
         data-badge="new-layer"
