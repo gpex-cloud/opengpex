@@ -30,7 +30,6 @@ import EditorHUD from "@opengpex/editor/widgets/EditorHUD";
 import BranchFlyEffect from "@opengpex/editor/widgets/BranchFlyEffect";
 import { AlertCircle, CheckCircle2, Info, Layers, PlusSquare, type LucideIcon } from "lucide-react";
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
-import { useMemo } from "react";
 
 /** Icon lookup: maps string names stored in state to LucideIcon components */
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -46,13 +45,12 @@ export const GlobalUI = () => {
   const choice = state.choice;
 
   /** Map serialized choice options to ChoiceOption[] with real icon components */
-  const choiceOptions: ChoiceOption[] = useMemo(() => {
-    if (!choice?.options) return [];
-    return choice.options.map((opt) => ({
-      ...opt,
-      icon: opt.icon ? ICON_MAP[opt.icon] : undefined,
-    }));
-  }, [choice?.options]);
+  const choiceOptions: ChoiceOption[] = choice?.options
+    ? choice.options.map((opt) => ({
+        ...opt,
+        icon: opt.icon ? ICON_MAP[opt.icon] : undefined,
+      }))
+    : [];
 
   return (
     <>
