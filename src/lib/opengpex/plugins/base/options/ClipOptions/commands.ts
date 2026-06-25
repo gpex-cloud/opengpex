@@ -26,20 +26,24 @@ import * as P from './protocols';
 import type { CropTool } from './protocols';
 
 /**
- * Single source of truth for "leave clip mode and commit any in-flight
- * peel/exchange triplet". Used by `exitClip` (Esc) and `applyReCanvas`, plus
- * the `ClipOverlay` unmount cleanup. See clip tool guide §4.6 for the full
- * latency rationale.
+ * Single source of truth for "leave clip mode and discard any in-flight
+ * peel/exchange triplet". Used by `exitClip` (Esc) and the `ClipOverlay`
+ * unmount cleanup. See clip tool guide §4.6 for the full latency rationale.
+ *
+ * 2026-06-25 refactor: ESC now means "cancel" — if a peel was in progress,
+ * the exchange is discarded (host hole mask removed, exchange reset) instead
+ * of being baked. Baking is explicitly triggered by Enter (`commitPeel`).
+ * This matches the universal "Enter = confirm, Esc = cancel" mental model.
  *
  * Order matters: flip mode FIRST so React/Zustand can tear down ClipOverlay
- * synchronously; defer `mergeHost` to a microtask so the dirty-check fast
- * path (no peel happened) doesn't block the visible mode flip. `mergeHost`
- * is idempotent — duplicate calls from the unmount effect short-circuit.
+ * synchronously; defer `discardExchange` to a microtask so the dirty-check
+ * fast path (no peel happened) doesn't block the visible mode flip.
+ * `discardExchange` is idempotent — duplicate calls short-circuit.
  */
 export function exitClipMode(ctx: EditorContextValue): void {
   ctx.actions.setInteraction({ interactionMode: 'pan' });
   queueMicrotask(() => {
-    ctx.actions.adv.layer.merge.mergeHost.execute();
+    ctx.actions.adv.layer.peel.discardExchange.execute();
   });
 }
 
@@ -221,6 +225,39 @@ export const CLIP_OPTIONS_COMMANDS = {
     },
     shortcut: { key: 'Escape' }
   } as EditorCommand<void, void>,
+
+  /**
+   * Enter — commit the peel (bake exchange into host) and exit clip mode.
+   *
+   * This is the explicit "confirm" gesture for peel operations. If no peel
+   * is in progress (triplet is clean), the command still exits clip mode as
+   * a convenient "done editing selections" shortcut — matching Photoshop's
+   * Enter-exits-transform behaviour.
+   *
+   * Flow:
+   *   1) Call `mergeHost` to bake any dirty peel triplet.
+   *   2) Exit clip mode via `exitClipMode` (which now only discards —
+   *      but since we just merged, the triplet is already clean so the
+   *      discard call inside `exitClipMode` becomes a no-op).
+   *
+   * Only active while in clip mode; no-op otherwise so Enter doesn't
+   * interfere with text inputs or other overlay interactions.
+   */
+  commitPeel: {
+    id: P.CMD_COMMIT_PEEL,
+    name: 'Commit Peel & Exit Clip',
+    execute: async (ctx: EditorContextValue) => {
+      if (ctx.state.interaction.interactionMode !== 'clip') return;
+
+      // Bake the peel (mergeHost is async — waits for off-screen composite).
+      await ctx.actions.adv.layer.merge.mergeHost.execute();
+
+      // Exit clip mode. Since we just merged, the triplet is now clean and
+      // the discardExchange inside exitClipMode will be a no-op.
+      exitClipMode(ctx);
+    },
+    shortcut: { key: 'Enter' }
+  } as EditorCommand<void, Promise<void>>,
 
   /**
    * toggleReCanvas — opens / closes the canvas-resize modal.

@@ -154,6 +154,7 @@ export interface EditorActions {
       };
       peel: {
         peelToExchange: AdvCommandRef<{ isCopy: boolean }>;
+        discardExchange: AdvCommandRef;
       };
       mask: {
         toggle: AdvCommandRef<{ layerId: string; maskId: string; frameId?: string }>;

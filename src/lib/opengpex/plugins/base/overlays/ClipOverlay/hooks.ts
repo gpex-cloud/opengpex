@@ -103,13 +103,18 @@ export function useClipOverlayCommands() {
   useEffect(() => {
     return () => {
       // Defer to next microtask so React can finish the unmount commit + paint
-      // before kicking off the merge. Mirrors the latency optimisation in
+      // before kicking off the discard. Mirrors the latency optimisation in
       // ClipOptions::exitClipMode (the centralised exit path); both routes are
-      // idempotent thanks to mergeHost's dirty short-circuit, so the duplicate
-      // call across the two cleanup paths is safe.
+      // idempotent thanks to discardExchange's dirty short-circuit, so the
+      // duplicate call across the two cleanup paths is safe.
+      //
+      // 2026-06-25: Changed from mergeHost (bake) to discardExchange (cancel).
+      // Baking now requires explicit Enter key (commitPeel command). If the
+      // overlay unmounts without the user pressing Enter, any in-flight peel
+      // is treated as cancelled — host hole mask removed, exchange reset.
       const actions = actionsRef.current;
       queueMicrotask(() => {
-        actions.adv.layer.merge.mergeHost.execute();
+        actions.adv.layer.peel.discardExchange.execute();
       });
     };
   }, []);

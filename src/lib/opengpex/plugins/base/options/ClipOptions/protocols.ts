@@ -40,6 +40,13 @@ export const CMD_CYCLE_TOOL_BACKWARD = 'cmd.crop_tool.cycle_backward';
  * triplet and flip interactionMode → 'pan'.
  */
 export const CMD_EXIT_CLIP_MODE = 'cmd.exit_clip_mode';
+/**
+ * Enter — commit the peel (merge exchange into host). Separated from Esc
+ * (which now only discards/cancels) so that baking requires an explicit
+ * confirmation gesture. Matches the Photoshop "Enter = confirm transform"
+ * mental model.
+ */
+export const CMD_COMMIT_PEEL = 'cmd.peel.commit';
 export const CMD_SET_ASPECT = 'cmd.set_aspect';
 export const CMD_RESET_ASPECT = 'cmd.reset_aspect';
 export const CMD_BRANCH = 'cmd.branch.create';

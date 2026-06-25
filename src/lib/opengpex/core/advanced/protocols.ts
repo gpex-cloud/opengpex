@@ -54,10 +54,11 @@ export const ADV_ASSET_SYNC = 'adv.system.asset.sync';
 export const ADV_LAYER_TOGGLE_ALL = 'adv.layer.toggle_all';
 export const ADV_LAYER_TOGGLE_OTHERS = 'adv.layer.toggle_others';
 export const ADV_LAYER_PEEL_EXCHANGE = 'adv.layer.peel.exchange';
+export const ADV_LAYER_PEEL_DISCARD = 'adv.layer.peel.discard';
 export const ADV_LAYER_MERGE_HOST = 'adv.layer.merge.host';
-export const ADV_LAYER_MERGE_DOWN = 'cmd.layer_panel.merge.down';
-export const ADV_LAYER_MERGE_VISIBLE = 'cmd.layer_panel.merge.visible';
-export const ADV_LAYER_MERGE_RASTERIZE = 'cmd.layer_panel.merge.rasterize';
+export const ADV_LAYER_MERGE_DOWN = 'adv.layer.merge.down';
+export const ADV_LAYER_MERGE_VISIBLE = 'adv.layer.merge.visible';
+export const ADV_LAYER_MERGE_RASTERIZE = 'adv.layer.merge.rasterize';
 
 // 4. Clip & Selection Operations
 export const ADV_LAYER_CLIP_CUT = 'adv.layer.clip.cut';

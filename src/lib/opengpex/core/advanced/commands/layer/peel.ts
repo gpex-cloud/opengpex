@@ -87,6 +87,42 @@ export const LayerPeelCommands = {
     }
   } as EditorCommand<{ isCopy: boolean }, Promise<void>>,
 
+  discardExchange: {
+    id: P.ADV_LAYER_PEEL_DISCARD,
+    name: 'Discard Peel (Cancel)',
+    undoable: true,
+    execute: (ctx: EditorContextValue): void => {
+      const { activeFrame, activeLayer, layers } = ctx;
+      if (!activeFrame || !activeLayer) return;
+
+      const triplet = layers.getTriplet(activeFrame.id, activeLayer.id);
+      if (!triplet) return;
+
+      const { host, exchange, frag } = triplet.group;
+
+      // Clean triplet → just re-activate host (no data to discard).
+      if (!triplet.dirty) {
+        if (activeLayer.id !== host.id) {
+          layers.activate(activeFrame.id, host.id);
+        }
+        return;
+      }
+
+      // Dirty triplet → rollback: remove the hole mask from host, reset
+      // exchange (and frag if present). This restores the host to its
+      // pre-peel state without any off-screen compositing.
+      layers.updateLayer(activeFrame.id, (tx) => {
+        tx.edit(host.id).removeMask('mask-peel-hole');
+        tx.edit(exchange.id).reset();
+        if (frag) {
+          tx.edit(frag.id).reset();
+        }
+      });
+
+      layers.activate(activeFrame.id, host.id);
+    }
+  } as EditorCommand<void, void>,
+
   mergeExchange: {
     id: P.ADV_LAYER_MERGE_HOST,
     name: 'Commit Composite Layers',

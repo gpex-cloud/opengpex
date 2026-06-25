@@ -523,6 +523,7 @@ export function useEditorStore() {
           },
           peel: {
             peelToExchange: advRef(P.ADV_LAYER_PEEL_EXCHANGE, (payload: { isCopy: boolean }) => executeCommand(P.ADV_LAYER_PEEL_EXCHANGE, payload)),
+            discardExchange: advRef(P.ADV_LAYER_PEEL_DISCARD, () => executeCommand(P.ADV_LAYER_PEEL_DISCARD)),
           },
           mask: {
             toggle: advRef(P.ADV_LAYER_MASK_TOGGLE, (payload: { layerId: string; maskId: string; frameId?: string }) => executeCommand(P.ADV_LAYER_MASK_TOGGLE, payload)),
