@@ -19,8 +19,6 @@
 
 'use client';
 
-/* eslint-disable react-hooks/set-state-in-effect */
-
 import React, { useEffect, useRef, useState } from 'react';
 import { Motion } from '@opengpex/editor/core/motion';
 import { X, type LucideIcon } from 'lucide-react';
