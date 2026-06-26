@@ -20,6 +20,7 @@
 import { workerBridge } from '@opengpex/editor/core/engine/worker/WorkerBridge';
 import { TileMetadata } from '@opengpex/editor/core/types';
 import { assetStore, ASSET_VERSION } from './AssetStore';
+import { resourceTracker } from '@opengpex/editor/core/advanced/ResourceTracker';
 
 /**
  * AssetState: Asset state machine
@@ -127,6 +128,7 @@ export class AssetService {
       owners: new Set(),
       lastUsedAt: Date.now()
     });
+    resourceTracker.track(`asset:${hash}`, 'image_decoded', blob.size, `Image ${hash.slice(0, 8)}`);
 
     return hash;
   }
@@ -149,6 +151,7 @@ export class AssetService {
       owners: new Set(),
       lastUsedAt: Date.now()
     });
+    resourceTracker.track(`asset:${hash}`, 'image_decoded', blob.size, `Injected ${hash.slice(0, 8)}`);
 
     workerBridge.request('DECODE_AND_TILE', { hash, blob }).catch(() => { });
     return hash;
@@ -198,6 +201,7 @@ export class AssetService {
       owners: new Set(),
       lastUsedAt: Date.now()
     });
+    resourceTracker.track(`asset:${item.id}`, 'image_decoded', item.blob.size, `Hydrated ${item.id.slice(0, 8)}`);
 
     workerBridge.request('DECODE_AND_TILE', { hash: item.id, blob: item.blob }).catch(() => { });
   }
@@ -308,6 +312,7 @@ export class AssetService {
     if (asset) {
       URL.revokeObjectURL(asset.url);
       this.pool.delete(id);
+      resourceTracker.release(`asset:${id}`);
       workerBridge.request('FORGET_ASSET', id).catch(() => { });
       // 💡 Completely erased at the physical layer: prevents orphaned/zombie Blobs in IndexedDB from causing storage bloat
       assetStore.remove(id).catch(err => {

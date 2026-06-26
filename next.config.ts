@@ -17,10 +17,10 @@ import fs from "fs";
 import path from "path";
 
 // Read package.json version and inject as CORE_VERSION to client (determined at build time, auto-synced on release)
-const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf-8"));
+const pkg = JSON.parse(fs.readFileSync(path.resolve(/*turbopackIgnore: true*/ process.cwd(), "package.json"), "utf-8"));
 
 // 🛡️ [OpenGPEX Config] Ensure registry-user.ts exists to prevent compilation failure if missing
-const userRegistryPath = path.resolve(process.cwd(), "src/lib/opengpex/plugins/registry-user.ts");
+const userRegistryPath = path.resolve(/*turbopackIgnore: true*/ process.cwd(), "src/lib/opengpex/plugins/registry-user.ts");
 if (!fs.existsSync(userRegistryPath)) {
   console.log("[OpenGPEX Config] registry-user.ts is missing. Creating fallback empty registry...");
   fs.mkdirSync(path.dirname(userRegistryPath), { recursive: true });
@@ -40,8 +40,10 @@ if (!fs.existsSync(userRegistryPath)) {
 const nextConfig: NextConfig = {
   reactStrictMode: true,
 
-  // Prevent Next.js/Turbopack from trying to bundle unzipper and its dynamic requires
-  serverExternalPackages: ["unzipper"],
+  // Prevent Next.js/Turbopack from trying to bundle unzipper and its dynamic requires.
+  // @huggingface/transformers + onnxruntime-web are client-only (Web Worker inference)
+  // and must not be resolved/bundled server-side.
+  serverExternalPackages: ["unzipper", "@huggingface/transformers", "onnxruntime-web"],
 
   // Inject CORE_VERSION at build time, accessible via process.env.NEXT_PUBLIC_CORE_VERSION on client
   // Value comes from package.json.version, auto-synced on npm version patch/minor releases

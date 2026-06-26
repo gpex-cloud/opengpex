@@ -33,10 +33,12 @@ export const CMD_GENERATE = 'cmd.generate';
 export const CMD_OPEN_SETTINGS = 'cmd.open_settings';
 export const CMD_FETCH_MODELS = 'cmd.fetch_models';
 
-/** Signal ID: Generating flag (survives across components, not lost when drawer is closed and reopened) */
+/**
+ * @deprecated Use PluginService.isBusy() instead.
+ * Kept for backward compatibility with any external consumers.
+ */
 export const SIGNAL_IS_GENERATING = 'signal.is_generating';
-
-/** Cross-plugin signal storage key (for external consumers) */
+/** @deprecated Use PluginService.isBusy() instead. */
 export const AI_BRIDGE_SIGNAL_IS_GENERATING = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_IS_GENERATING}`;
 
 // ─── AI Mode ───────────────────────────────────────────────────────────────────

@@ -19,7 +19,47 @@
 
 'use client';
 
+import type { LocalShape, LocalSpatial } from '@opengpex/editor/core/types';
 import * as P from './protocols';
+
+/**
+ * clipBoxToExportShape — converts the unified `LocalSpatial` (from `getClipBox`)
+ * into a `LocalShape` suitable for `pixels.render.shapeToBlob`.
+ *
+ * - Regular selections (rect/ellipse): returns the shape as-is.
+ * - Irregular selections (lasso/wand polygon): creates a `LocalShape{type:'path'}`
+ *   with pathData in bounds-relative coordinates. This is required because
+ *   `mergeLayersWithShape` internally zeros the rect to {0,0,w,h} and shifts
+ *   layer matrices by (-rect.x, -rect.y).
+ */
+export function clipBoxToExportShape(box: LocalSpatial): LocalShape {
+  if (box.regular) {
+    return box.spatial;
+  }
+
+  // Irregular polygon → LocalShape{type:'path'} with bounds-relative coordinates
+  const poly = box.spatial;
+  const parts: string[] = [];
+  for (const ring of poly.rings) {
+    if (ring.length < 2) continue;
+    const segs: string[] = [];
+    for (let i = 0; i < ring.length; i++) {
+      const p = ring[i];
+      segs.push(`${i === 0 ? 'M' : 'L'} ${p.x - poly.rect.x} ${p.y - poly.rect.y}`);
+    }
+    segs.push('Z');
+    parts.push(segs.join(' '));
+  }
+
+  return {
+    type: 'path',
+    rect: poly.rect,
+    hardEdge: false,
+    antiAliased: poly.antiAliased !== false,
+    pathData: parts.join(' '),
+    __brand: 'local',
+  } as LocalShape;
+}
 
 /**
  * Calculates the final physical dimensions for export or canvas resizing

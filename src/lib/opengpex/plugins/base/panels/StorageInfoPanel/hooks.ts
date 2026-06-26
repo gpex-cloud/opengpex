@@ -19,7 +19,7 @@
 
 'use client';
 
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { useEditorState, useEditorServices, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import { Frame, Layer, AssetEntryInfo } from '@opengpex/editor/core/types';
 import * as P from './protocols';
@@ -405,4 +405,124 @@ export const copyAssetUsages = (asset: P.AssetMetric) => {
   navigator.clipboard.writeText(text).then(() => {
     console.log('Copied asset usages to clipboard');
   });
+};
+
+// ─── Model Cache Metrics ─────────────────────────────────────────────────────
+
+/**
+ * Information about downloaded AI model files in Cache Storage.
+ */
+export interface ModelCacheFileEntry {
+  /** Short display name extracted from the URL */
+  name: string;
+  /** Full request URL */
+  url: string;
+  /** File size in bytes */
+  size: number;
+  /** Which cache bucket this file belongs to */
+  cacheName: string;
+}
+
+export interface ModelCacheInfo {
+  /** Total size of all cached model files in bytes */
+  totalBytes: number;
+  /** Number of cached files (ONNX weights, configs, tokenizers, etc.) */
+  fileCount: number;
+  /** Names of matched Cache Storage buckets */
+  cacheNames: string[];
+  /** Individual file entries with name, url, size, cacheName */
+  files: ModelCacheFileEntry[];
+}
+
+const EMPTY_MODEL_CACHE: ModelCacheInfo = { totalBytes: 0, fileCount: 0, cacheNames: [], files: [] };
+
+/**
+ * Measure the total size of AI model files stored in Cache Storage.
+ * transformers.js uses the Cache API to persist downloaded ONNX models.
+ * Caches are identified by names containing 'transformers', 'huggingface', or 'onnx'.
+ */
+async function measureModelCache(): Promise<ModelCacheInfo> {
+  try {
+    if (typeof caches === 'undefined') return EMPTY_MODEL_CACHE;
+    const names = await caches.keys();
+    const matched: string[] = [];
+    const files: ModelCacheFileEntry[] = [];
+    let total = 0;
+    let count = 0;
+    for (const name of names) {
+      if (name.includes('transformers') || name.includes('huggingface') || name.includes('onnx')) {
+        matched.push(name);
+        const cache = await caches.open(name);
+        const keys = await cache.keys();
+        for (const req of keys) {
+          const resp = await cache.match(req);
+          if (resp) {
+            let fileSize = 0;
+            // Use Content-Length header first (avoids reading entire body)
+            const cl = resp.headers.get('content-length');
+            if (cl) {
+              fileSize = parseInt(cl, 10);
+            } else {
+              const blob = await resp.blob();
+              fileSize = blob.size;
+            }
+            total += fileSize;
+            count++;
+
+            // Extract a short display name from the URL
+            const url = req.url;
+            const segments = url.split('/');
+            const displayName = segments.slice(-2).join('/'); // e.g. "onnx/model_quantized.onnx"
+
+            files.push({ name: displayName, url, size: fileSize, cacheName: name });
+          }
+        }
+      }
+    }
+    // Sort files by size descending for better visibility
+    files.sort((a, b) => b.size - a.size);
+    return { totalBytes: total, fileCount: count, cacheNames: matched, files };
+  } catch {
+    return EMPTY_MODEL_CACHE;
+  }
+}
+
+/**
+ * Delete all AI model caches from Cache Storage and dispose the BgRemoval worker.
+ */
+export async function purgeModelCacheStorage(): Promise<void> {
+  try {
+    if (typeof caches === 'undefined') return;
+    const names = await caches.keys();
+    for (const name of names) {
+      if (name.includes('transformers') || name.includes('huggingface') || name.includes('onnx')) {
+        await caches.delete(name);
+      }
+    }
+    // Dispose the BgRemoval worker to release in-memory model instances
+    const { bgRemovalClient } = await import('../../drawers/BgRemovalDrawer/worker/client');
+    bgRemovalClient.dispose();
+  } catch (err) {
+    console.warn('[StorageInfo] Failed to purge model cache:', err);
+  }
+}
+
+/**
+ * useModelCacheMetrics: Asynchronously measures downloaded AI model cache size.
+ * Returns the current cache info and a refresh function.
+ */
+export const useModelCacheMetrics = () => {
+  const [info, setInfo] = useState<ModelCacheInfo>(EMPTY_MODEL_CACHE);
+
+  const refresh = useCallback(async () => {
+    const result = await measureModelCache();
+    setInfo(result);
+  }, []);
+
+  // Measure on mount
+  useEffect(() => {
+    measureModelCache().then(setInfo);
+  }, []);
+
+  return { modelCache: info, refreshModelCache: refresh };
 };

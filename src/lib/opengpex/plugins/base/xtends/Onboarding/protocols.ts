@@ -107,6 +107,6 @@ export interface OnboardingConfig {
 }
 
 export const DEFAULT_CONFIG: OnboardingConfig = {
-  spotlightDelay: 600,
+  spotlightDelay: 900,
   tipRotationInterval: 6000,
 };

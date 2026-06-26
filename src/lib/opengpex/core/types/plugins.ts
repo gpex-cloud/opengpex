@@ -204,6 +204,11 @@ export interface BuiltPlugin extends Omit<EditorPlugin, 'commands' | 'signals'> 
 export interface PluginService {
   subscribe(listener: () => void): () => void;
   isPluginVisible(plugin: BuiltPlugin, context: { hasActiveFrame: boolean }): boolean;
+
+  /** Check if a plugin is currently in "busy" state (e.g. running async task) */
+  isBusy(pluginUid: string): boolean;
+  /** Set the busy state for a plugin — triggers DrawerBar icon animation */
+  setBusy(pluginUid: string, busy: boolean): void;
   registerPlugin(plugin: BuiltPlugin): void;
   unregisterPlugin(pluginId: string): void;
   getPlugin(pluginId: string): BuiltPlugin | undefined;

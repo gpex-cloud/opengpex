@@ -315,7 +315,7 @@ export const AI_BRIDGE_COMMANDS = {
       const mode = config.mode || 'generate';
       const startTime = Date.now();
       // Sets generating signal (not lost when drawer is closed and reopened, auto-prefixed with plugin uid via scoped)
-      ctx.scoped!.setSignal(P.SIGNAL_IS_GENERATING, true);
+      ctx.scoped!.setBusy(true);
 
       try {
         let imageBlob: Blob;
@@ -374,7 +374,7 @@ export const AI_BRIDGE_COMMANDS = {
           seed: actualSeed, size, success: true, durationMs,
         });
 
-        ctx.scoped!.setSignal(P.SIGNAL_IS_GENERATING, false);
+        ctx.scoped!.setBusy(false);
         return { success: true, seed: actualSeed };
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
@@ -407,7 +407,7 @@ export const AI_BRIDGE_COMMANDS = {
           seed: actualSeed, size, success: false, error: errMsg, durationMs,
         });
 
-        ctx.scoped!.setSignal(P.SIGNAL_IS_GENERATING, false);
+        ctx.scoped!.setBusy(false);
         return { success: false, error: errMsg };
       }
     },

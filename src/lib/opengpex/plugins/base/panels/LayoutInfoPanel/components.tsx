@@ -21,7 +21,7 @@
 
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Target,
   RotateCw,
@@ -121,9 +121,10 @@ const LayoutInfoPanel = React.memo(function LayoutInfoPanel({
   const [focusedLayer, setFocusedLayer] = useState<string | null>(null);
   const isDragging3D = useRef(false);
   const drag3DStart = useRef({ x: 0, y: 0, startPanX: 0, startPanY: 0 });
+  const view3DElRef = useRef<HTMLDivElement | null>(null);
 
   // 3D pan drag handler (window-level move/up for smooth tracking)
-  // Mouse drag = pan viewport, Trackpad scroll = 3D rotate
+  // Mouse drag = pan viewport
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDragging3D.current) return;
@@ -143,6 +144,96 @@ const LayoutInfoPanel = React.memo(function LayoutInfoPanel({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
+  }, []);
+
+  /**
+   * Native wheel event listener with { passive: false } to properly preventDefault.
+   * This is required because:
+   * 1. React's onWheel is registered as passive by default in modern browsers
+   * 2. Passive listeners cannot call preventDefault()
+   * 3. Without preventDefault(), Ctrl+wheel / pinch-to-zoom triggers browser page zoom
+   *
+   * Interaction model:
+   * - Plain scroll (no modifier): ZOOM in/out (most intuitive for users)
+   * - Shift+scroll: ROTATE the 3D view
+   * - Ctrl/Meta+scroll (trackpad pinch): ZOOM (same as plain scroll, but prevents browser zoom)
+   *
+   * Uses a stable ref to avoid stale closure issues with the callback ref pattern.
+   */
+  const handleWheel3DRef = useRef<(e: WheelEvent) => void>(() => {});
+
+  // Keep the wheel handler ref in sync with the latest closure values.
+  // Must be inside useEffect (not render body) to comply with React's rule
+  // that refs must not be accessed/mutated during render.
+  useEffect(() => {
+    handleWheel3DRef.current = (e: WheelEvent) => {
+      // Always prevent default to block browser zoom and page scroll
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.shiftKey) {
+        // Shift+scroll = 3D rotate
+        setRotateAngles((prev) => ({
+          x: Math.max(5, Math.min(85, prev.x + e.deltaY * 0.3)),
+          z: prev.z + e.deltaX * 0.3,
+        }));
+      } else if (e.ctrlKey || e.metaKey) {
+        // Ctrl/Meta+scroll = zoom (trackpad pinch gesture sends ctrlKey=true)
+        setZoomScale((prev) =>
+          Math.min(2.5, Math.max(0.4, prev - e.deltaY * 0.01)),
+        );
+      } else {
+        // Plain scroll = zoom (most natural for mouse wheel users)
+        setZoomScale((prev) =>
+          Math.min(2.5, Math.max(0.4, prev - e.deltaY * 0.005)),
+        );
+      }
+    };
+  });
+
+  // Stable wheel handler proxy that always delegates to the latest ref
+  const stableWheelHandler = useRef((e: WheelEvent) => {
+    handleWheel3DRef.current(e);
+  });
+
+  /**
+   * Callback ref for the 3D container: attaches/detaches non-passive wheel listener
+   * AND gesture event listeners (Safari/WebKit pinch-to-zoom) whenever the element
+   * mounts/unmounts (handles conditional rendering correctly).
+   *
+   * KEY FIX: On macOS trackpad, pinch-to-zoom may fire native `gesturestart`/`gesturechange`
+   * events (Safari/WebKit) which bypass the wheel handler entirely. We must intercept
+   * these as well. Additionally, `touch-action: none` CSS is applied inline to prevent
+   * the browser from interpreting touch/pinch gestures natively.
+   */
+  const gestureStartRef = useRef<(e: Event) => void>((e) => {
+    e.preventDefault();
+  });
+  const gestureChangeRef = useRef<(e: Event) => void>((e) => {
+    e.preventDefault();
+    // GestureEvent has a `scale` property (Safari-only)
+    const ge = e as unknown as { scale: number };
+    if (ge.scale !== undefined) {
+      setZoomScale((prev) =>
+        Math.min(2.5, Math.max(0.4, prev * ge.scale)),
+      );
+    }
+  });
+
+  const view3DContainerRef = useCallback((el: HTMLDivElement | null) => {
+    // Cleanup previous element
+    if (view3DElRef.current) {
+      view3DElRef.current.removeEventListener("wheel", stableWheelHandler.current);
+      view3DElRef.current.removeEventListener("gesturestart", gestureStartRef.current);
+      view3DElRef.current.removeEventListener("gesturechange", gestureChangeRef.current);
+    }
+    view3DElRef.current = el;
+    // Attach to new element
+    if (el) {
+      el.addEventListener("wheel", stableWheelHandler.current, { passive: false });
+      el.addEventListener("gesturestart", gestureStartRef.current, { passive: false } as AddEventListenerOptions);
+      el.addEventListener("gesturechange", gestureChangeRef.current, { passive: false } as AddEventListenerOptions);
+    }
   }, []);
 
   // Helper: compute layer opacity based on focus state
@@ -521,10 +612,15 @@ const LayoutInfoPanel = React.memo(function LayoutInfoPanel({
  2. 3D ISOMETRIC STACKED LAYER VIEW (WOW-Factor!)
  ======================================================== */
                     <div
+                      ref={view3DContainerRef}
                       className={`w-full h-full flex items-center justify-center ${isDragging3D.current ? "cursor-grabbing" : "cursor-grab"}`}
-                      style={{ perspective: "900px" }}
+                      style={{ perspective: "900px", touchAction: "none" }}
                       onMouseEnter={() => setIsExploding(true)}
                       onMouseLeave={() => setIsExploding(false)}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        reset3DView();
+                      }}
                       onMouseDown={(e) => {
                         if (e.button !== 0) return;
                         const target = e.target as HTMLElement;
@@ -538,27 +634,6 @@ const LayoutInfoPanel = React.memo(function LayoutInfoPanel({
                           startPanX: panOffset.x,
                           startPanY: panOffset.y,
                         };
-                      }}
-                      onWheel={(e) => {
-                        e.stopPropagation();
-                        if (e.ctrlKey || e.metaKey) {
-                          // Pinch-to-zoom gesture (trackpad)
-                          setZoomScale((prev) =>
-                            Math.min(
-                              2.5,
-                              Math.max(0.4, prev - e.deltaY * 0.01),
-                            ),
-                          );
-                        } else {
-                          // Two-finger scroll = 3D rotate (natural direction)
-                          setRotateAngles((prev) => ({
-                            x: Math.max(
-                              5,
-                              Math.min(85, prev.x + e.deltaY * 0.3),
-                            ),
-                            z: prev.z + e.deltaX * 0.3,
-                          }));
-                        }
                       }}
                     >
                       {/* Pan translation wrapper (screen-space) */}
@@ -842,7 +917,7 @@ const LayoutInfoPanel = React.memo(function LayoutInfoPanel({
                       <Compass size={8} />
                       {""}
                       {viewMode === "3d_exploded"
-                        ? "Drag: pan · Scroll: rotate · Pinch: zoom · Click layer: focus"
+                        ? "Drag: pan · Scroll: zoom · ⇧Scroll: rotate · DblClick: reset · Click: focus"
                         : "2D interactive blueprint coordinates"}
                     </div>
                     {viewMode === "3d_exploded" && (

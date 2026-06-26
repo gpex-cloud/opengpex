@@ -199,15 +199,11 @@ export const createClipBoxHandler = (): InteractionHandler => {
     },
 
     onEnd: (e, tx, startCanvas) => {
-      // Handle Double Click to reset
+      // Handle Double Click to clear selection (Photoshop-style: double-click
+      // anywhere on canvas = deselect). Works for rect/ellipse; lasso/wand
+      // have their own double-click handlers in their respective onEnd.
       if (InteractionMath.isDoubleClick(e, startCanvas)) {
-        const isReCanvas = e.state.getStateSignal(CLIP_OPTIONS_SIGNAL_RE_CANVAS) || false;
-        const currentShape = isReCanvas ? e.activeFrame.canvasCropBox : getRegularClipShape(e.activeFrame);
-        if (!currentShape) return;
-        const isInside = e.geometry.space.isPointInRect(e.point.canvas, currentShape.rect);
-        if (isInside) {
-          e.actions.executeCommand(CLIP_OPTIONS_CMD_RESET_BOX);
-        }
+        e.actions.executeCommand(CLIP_OPTIONS_CMD_RESET_BOX);
       }
 
       tx.commit();
@@ -366,7 +362,16 @@ export const createLassoHandler = (): InteractionHandler => {
       let committed = false;
       try {
         if (!active) return;
-        if (trail.length < 3) return; // noise-suppression: too short to form a polygon
+
+        // Double-click to clear lasso selection (symmetric with clipbox handler).
+        // A double-click produces trail.length <= 1 (no drag), so it falls
+        // below the polygon threshold — intercept it here to clear.
+        if (trail.length < 3) {
+          if ((e.nativeEvent as MouseEvent).detail === 2) {
+            e.actions.executeCommand(CLIP_OPTIONS_CMD_RESET_BOX);
+          }
+          return;
+        }
 
         const ring = trail.slice(); // evenodd renderer + path Z auto-closes the contour
         const bounds = computePolygonBounds([ring]);
@@ -579,6 +584,14 @@ export const createWandHandler = (): InteractionHandler => {
     },
 
     onEnd: async (e) => {
+      // Double-click to clear wand selection (symmetric with clipbox/lasso).
+      // Check BEFORE the `busy` guard because the first click of a double-click
+      // may have started an async wand worker that's still in-flight.
+      if ((e.nativeEvent as MouseEvent).detail === 2) {
+        e.actions.executeCommand(CLIP_OPTIONS_CMD_RESET_BOX);
+        return;
+      }
+
       if (busy) {
         e.actions.setInteraction({ selectionErrorPulse: Date.now() });
         return;

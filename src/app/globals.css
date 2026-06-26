@@ -34,3 +34,20 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* ==========================================================================
+   DrawerBar Busy Icon Animation
+   Colorful pulsing glow effect for plugins with running async tasks.
+   ========================================================================== */
+
+@keyframes drawer-busy-glow {
+  0%   { filter: drop-shadow(0 0 4px rgba(99, 102, 241, 0.9));  color: rgb(129, 140, 248); }
+  25%  { filter: drop-shadow(0 0 6px rgba(168, 85, 247, 0.9));  color: rgb(192, 132, 252); }
+  50%  { filter: drop-shadow(0 0 6px rgba(236, 72, 153, 0.9));  color: rgb(244, 114, 182); }
+  75%  { filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.9));  color: rgb(103, 232, 249); }
+  100% { filter: drop-shadow(0 0 4px rgba(99, 102, 241, 0.9));  color: rgb(129, 140, 248); }
+}
+
+.drawer-icon-busy {
+  animation: drawer-busy-glow 2s ease-in-out infinite;
+}

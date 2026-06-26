@@ -171,6 +171,7 @@ export interface CropToolStrategy {
    * Consumed by `useClipCursor` hook in ClipOverlay.
    */
   readonly cursor: string;
+
 }
 
 /**
@@ -186,7 +187,6 @@ export const CROP_TOOL_STRATEGIES: Record<CropTool, CropToolStrategy> = {
   'ellipse': { id: 'ellipse', label: 'Ellipse', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'circle' }), forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_CURSOR },
   'lasso':   { id: 'lasso',   label: 'Lasso',   icon: Lasso,  accent: 'purple', family: 'irregular', handlerKind: 'lasso',                                              forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_LASSO_CURSOR   },
   'wand':    { id: 'wand',    label: 'Wand',    icon: Wand2,  accent: 'purple', family: 'irregular', handlerKind: 'wand',                                               forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_WAND_CURSOR    },
-
 };
 
 /**
@@ -194,8 +194,8 @@ export const CROP_TOOL_STRATEGIES: Record<CropTool, CropToolStrategy> = {
  * readability. Both go through CROP_TOOL_STRATEGIES so there is no duplicate
  * source of truth (`if (isIrregularTool(tool))` ≡ `if (CROP_TOOL_STRATEGIES[tool].family === 'irregular')`).
  */
-export const isRegularTool   = (t: CropTool): boolean => CROP_TOOL_STRATEGIES[t].family === 'regular';
-export const isIrregularTool = (t: CropTool): boolean => CROP_TOOL_STRATEGIES[t].family === 'irregular';
+export const isRegularTool   = (t: CropTool): boolean => CROP_TOOL_STRATEGIES[t]?.family === 'regular';
+export const isIrregularTool = (t: CropTool): boolean => CROP_TOOL_STRATEGIES[t]?.family === 'irregular';
 
 // Cross-plugin reference UIDs (for use by external consumers via actions.executeCommand)
 export const CLIP_OPTIONS_CMD_TOGGLE_MODE = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_TOGGLE_MODE}`;

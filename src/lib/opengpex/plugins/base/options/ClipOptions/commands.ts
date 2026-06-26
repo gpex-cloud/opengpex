@@ -100,7 +100,7 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
  * (toolbar click, popover, or this very command in a previous beat).
  */
 function cycleCropTool(ctx: EditorContextValue, step: 1 | -1): void {
-  const order = (Object.keys(P.CROP_TOOL_STRATEGIES) as CropTool[]);
+  const order = Object.keys(P.CROP_TOOL_STRATEGIES) as CropTool[];
   const current = (ctx.activeFrame?.latestClipTool as CropTool | undefined) ?? order[0];
   const idx = order.indexOf(current);
   // `(idx + step + len) % len` keeps the modulo non-negative even for step=-1.
@@ -393,20 +393,30 @@ export const CLIP_OPTIONS_COMMANDS = {
 
   resetBox: {
     id: P.CMD_RESET_BOX,
-    name: 'Reset Crop Box',
+    name: 'Clear Selection',
     undoable: true,
+    /**
+     * Double-click (or programmatic) clear — removes the active tool's
+     * selection. Works for ALL clip tools (rect / ellipse / lasso / wand).
+     *
+     * Re-Canvas mode is excluded (the canvas crop box must always exist).
+     *
+     * Uses `getClipBox` to resolve the active slot, then writes `null` to
+     * clear it. This is the "Clear Selection" entry point referenced in the
+     * clip tool guide §7.2 roadmap.
+     */
     execute: (ctx: EditorContextValue) => {
       const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
-      const target = getActiveTarget(ctx, isReCanvas);
-      if (!target || ctx.activeFrame!.canvas.w === 0) return;
+      if (isReCanvas) return; // Re-Canvas crop box must always exist
 
-      const canvasDim = ctx.activeFrame!.canvas;
-      const w = canvasDim.w * 0.5;
-      const h = canvasDim.h * 0.5;
-      const x = (canvasDim.w - w) / 2;
-      const y = (canvasDim.h - h) / 2;
+      const frame = ctx.activeFrame;
+      if (!frame) return;
 
-      target.updateShape({ rect: asLocalRect({ x, y, w, h }) });
+      const tool = (frame.latestClipTool as CropTool) || 'rect';
+      const clipBox = getClipBox(frame);
+      if (!clipBox) return; // already empty — nothing to clear
+
+      ctx.actions.setClipBox(frame.id, tool, null);
     }
   } as EditorCommand<void, void>,
 

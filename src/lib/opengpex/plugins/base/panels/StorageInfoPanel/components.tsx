@@ -44,17 +44,21 @@ import {
   Unlock,
   AlertCircle,
   Package,
+  Brain,
 } from "lucide-react";
 import {
   useEditorState,
   useEditorServices,
 } from "@opengpex/editor/core/context";
 import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import DelayedConfirm from "@opengpex/editor/widgets/DelayedConfirm";
 import { PopupPanel } from "@opengpex/editor/widgets/PopupPanel";
 import {
   useStorageMetrics,
   useStorageConfig,
+  useModelCacheMetrics,
+  purgeModelCacheStorage,
   copyAssetUsages,
 } from "./hooks";
 import * as Prot from "./protocols";
@@ -115,6 +119,8 @@ export function StorageInfoComponent() {
   }, [storage, refresh]);
 
   const purgeAll = useCallback(async () => {
+    // Clear AI model cache from Cache Storage
+    await purgeModelCacheStorage();
     await storage.clear();
     await assets.clear();
     window.location.reload();
@@ -184,6 +190,14 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
   handleSelectFrame,
   onClose,
 }: InnerPanelProps) {
+  // Downloaded AI model cache metrics (Cache Storage)
+  const { modelCache, refreshModelCache } = useModelCacheMetrics();
+
+  const purgeDownloadedModels = useCallback(async () => {
+    await purgeModelCacheStorage();
+    await refreshModelCache();
+  }, [refreshModelCache]);
+
   // Tree nodes expanded state
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({
     project: true,
@@ -228,12 +242,14 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
   );
   const orphanSize = metrics.detached.reduce((sum, a) => sum + a.size, 0);
   const stateSize = metrics.stateBytes || 0;
-  const grandTotal = activeSize + historySize + orphanSize + stateSize || 1;
+  const modelSize = modelCache.totalBytes;
+  const grandTotal = activeSize + historySize + orphanSize + stateSize + modelSize || 1;
 
   const pActive = (activeSize / grandTotal) * 100;
   const pHistory = (historySize / grandTotal) * 100;
   const pOrphan = (orphanSize / grandTotal) * 100;
   const pState = (stateSize / grandTotal) * 100;
+  const pModels = (modelSize / grandTotal) * 100;
 
   // --- DUAL MODE RENDERING ---
   return (
@@ -277,7 +293,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
 
               {/* Compact stats grid */}
               <div className="grid grid-cols-2 gap-2 flex-shrink-0">
-                <div className="bg-[var(--bg-stage)] p-2.5 rounded-xl border border-[var(--border-subtle)] ">
+                <div className="bg-[var(--bg-stage)] p-2.5 rounded-xl border border-[var(--border-subtle)] dark:border-white/[0.08] ">
                   <div className="text-[7px] font-black uppercase tracking-widest text-[var(--text-muted)] mb-1">
                     TOTAL ASSETS
                   </div>
@@ -285,7 +301,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                     {formatBytes(metrics.totalBytes)}
                   </div>
                 </div>
-                <div className="bg-[var(--bg-stage)] p-2.5 rounded-xl border border-[var(--border-subtle)] ">
+                <div className="bg-[var(--bg-stage)] p-2.5 rounded-xl border border-[var(--border-subtle)] dark:border-white/[0.08] ">
                   <div className="text-[7px] font-black uppercase tracking-widest text-[var(--text-muted)] mb-1">
                     DATABASE STATE
                   </div>
@@ -293,6 +309,20 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                     {formatBytes(metrics.stateBytes)}
                   </div>
                 </div>
+                {modelCache.totalBytes > 0 && (
+                  <div className="bg-[var(--bg-stage)] p-2.5 rounded-xl border border-purple-200 dark:border-purple-500/20 col-span-2">
+                    <div className="text-[7px] font-black uppercase tracking-widest text-purple-500 mb-1 flex items-center gap-1">
+                      <Brain size={8} />
+                      AI MODELS CACHE
+                    </div>
+                    <div className="text-sm font-mono text-[var(--text-main)] font-bold tabular-nums">
+                      {formatBytes(modelCache.totalBytes)}
+                      <span className="text-[8px] text-[var(--text-muted)] font-normal ml-1.5">
+                        ({modelCache.fileCount} files)
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Dynamic Topology Explorer */}
@@ -309,10 +339,10 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                   {metrics.frames.map((frame) => (
                     <div
                       key={frame.id}
-                      className="bg-[var(--bg-stage)] rounded-xl border border-[var(--border-subtle)] overflow-hidden"
+                      className="bg-[var(--bg-stage)] rounded-xl border border-[var(--border-subtle)] dark:border-white/[0.08] overflow-hidden"
                     >
                       {/* Frame Header */}
-                      <div className="bg-[var(--bg-stage)] px-3 py-1.5 border-b border-[var(--border-subtle)] flex items-center justify-between">
+                      <div className="bg-[var(--bg-stage)] px-3 py-1.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] flex items-center justify-between">
                         <div
                           className="flex items-center gap-1.5 min-w-0 cursor-pointer"
                           onClick={() => handleSelectFrame(frame.id)}
@@ -368,17 +398,17 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                 {/* Compact Orphans Section */}
                 {metrics.detached.length > 0 && (
                   <div className="space-y-2">
-                    <div className="flex items-center gap-2 pl-1 text-rose-500/75 opacity-80">
+                    <div className="flex items-center gap-2 pl-1 text-rose-500 opacity-80">
                       <Trash2 size={10} />
                       <span className="text-[9px] font-black uppercase tracking-widest">
                         Detached Trash ({metrics.detached.length})
                       </span>
                     </div>
-                    <div className="bg-rose-500/5 rounded-xl border border-rose-200 p-2 text-[9px] space-y-1">
+                    <div className="bg-rose-500/5 rounded-xl border border-rose-500/20 p-2 text-[9px] space-y-1">
                       {metrics.detached.slice(0, 3).map((asset) => (
                         <div
                           key={asset.id}
-                          className="flex justify-between items-center text-rose-700 opacity-80"
+                          className="flex justify-between items-center text-rose-500 opacity-80"
                         >
                           <span className="truncate max-w-[150px] font-mono">
                             {asset.id.slice(0, 12)}
@@ -389,7 +419,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                         </div>
                       ))}
                       {metrics.detached.length > 3 && (
-                        <div className="text-[8px] opacity-40 text-center pt-1 text-rose-700 ">
+                        <div className="text-[8px] opacity-60 text-center pt-1 text-rose-500">
                           + {metrics.detached.length - 3} more orphans
                         </div>
                       )}
@@ -399,7 +429,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
               </div>
 
               {/* Footer */}
-              <div className="pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between opacity-50 flex-shrink-0">
+              <div className="pt-2 border-t border-[var(--border-subtle)] dark:border-t-white/[0.06] flex items-center justify-between opacity-50 flex-shrink-0">
                 <span className="text-[8px] font-mono text-[var(--text-muted)] ">
                   v2.5 optimized
                 </span>
@@ -409,7 +439,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
             /* DASHBOARD MODE */
             <div className="flex-1 min-h-0 flex font-sans text-[var(--text-main)] select-none">
               {/* Left Column - Analytics Dashboard */}
-              <div className="w-[380px] border-r border-[var(--border-subtle)] p-6 flex flex-col gap-6 overflow-y-auto bg-[var(--bg-stage)] ">
+              <div className="w-[380px] border-r border-[var(--border-subtle)] dark:border-r-white/[0.06] p-6 flex flex-col gap-6 overflow-y-auto bg-[var(--bg-stage)] ">
                 {/* Classification Segment Bar */}
                 <div className="space-y-3">
                   <div className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] flex items-center justify-between">
@@ -441,11 +471,16 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                       className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-500"
                       title="Database State Size"
                     />
+                    <div
+                      style={{ width: `${pModels}%` }}
+                      className="h-full bg-gradient-to-r from-purple-500 to-fuchsia-500 transition-all duration-500"
+                      title="Downloaded Models (Cache Storage)"
+                    />
                   </div>
 
                   {/* Legends Grid */}
                   <div className="grid grid-cols-2 gap-2.5 pt-1 text-[9px]">
-                    <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] ">
+                    <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] ">
                       <div className="flex items-center gap-1.5 text-[var(--text-muted)] ">
                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
                         <span>Active Frames</span>
@@ -455,7 +490,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                       </span>
                     </div>
 
-                    <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] ">
+                    <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] ">
                       <div className="flex items-center gap-1.5 text-[var(--text-muted)] ">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
                         <span>Undo Backlog</span>
@@ -465,7 +500,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                       </span>
                     </div>
 
-                    <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] ">
+                    <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] ">
                       <div className="flex items-center gap-1.5 text-[var(--text-muted)] ">
                         <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
                         <span>Detached Trash</span>
@@ -475,7 +510,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                       </span>
                     </div>
 
-                    <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] ">
+                    <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] ">
                       <div className="flex items-center gap-1.5 text-[var(--text-muted)] ">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                         <span>DB State Shards</span>
@@ -484,11 +519,27 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                         {formatBytes(stateSize)} ({pState.toFixed(1)}%)
                       </span>
                     </div>
+
+                    <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] col-span-2">
+                      <div className="flex items-center gap-1.5 text-[var(--text-muted)] ">
+                        <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                        <Brain size={9} className="text-purple-500" />
+                        <span>Downloaded Models</span>
+                      </div>
+                      <span className="font-mono text-[var(--text-main)] font-bold pl-3">
+                        {formatBytes(modelSize)} ({pModels.toFixed(1)}%)
+                        {modelCache.fileCount > 0 && (
+                          <span className="text-[var(--text-muted)] font-normal ml-2">
+                            {modelCache.fileCount} files
+                          </span>
+                        )}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
                 {/* Shard & Database Metrics */}
-                <div className="space-y-3 bg-[var(--bg-stage)] border border-[var(--border-subtle)] p-4 rounded-2xl">
+                <div className="space-y-3 bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] p-4 rounded-2xl">
                   <div className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] flex items-center justify-between">
                     <span>IndexedDB Shard Index</span>
                     <span className="font-mono text-[9px] text-[var(--text-muted)] ">
@@ -500,7 +551,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                     {metrics.shards.map((shard) => (
                       <div
                         key={shard.key}
-                        className="flex justify-between items-center py-1 border-b border-[var(--border-subtle)] last:border-0 text-[var(--text-muted)] "
+                        className="flex justify-between items-center py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] last:border-0 text-[var(--text-muted)] "
                       >
                         <div className="flex items-center gap-1.5">
                           <span
@@ -528,7 +579,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                     System Profiles
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-[9px]">
-                    <div className="p-2.5 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] flex items-center gap-2">
+                    <div className="p-2.5 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] flex items-center gap-2">
                       <Cpu size={12} className="text-indigo-500 " />
                       <div>
                         <div className="text-[var(--text-muted)] leading-none mb-0.5 font-bold uppercase tracking-tight">
@@ -539,7 +590,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                         </div>
                       </div>
                     </div>
-                    <div className="p-2.5 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] flex items-center gap-2">
+                    <div className="p-2.5 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] flex items-center gap-2">
                       <ShieldCheck size={12} className="text-emerald-500 " />
                       <div>
                         <div className="text-[var(--text-muted)] leading-none mb-0.5 font-bold uppercase tracking-tight">
@@ -554,43 +605,74 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                 </div>
 
                 {/* Action Suite Control panel */}
-                <div className="mt-auto pt-4 border-t border-[var(--border-subtle)] space-y-2.5">
-                  <button
-                    onClick={triggerGC}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-[var(--bg-stage)] hover border border-[var(--border-subtle)] text-[var(--text-muted)] text-[10px] font-black uppercase tracking-wider transition-all"
-                  >
-                    <Trash2 size={12} />
-                    Force Physical GC Sweep
-                  </button>
-
-                  <DelayedConfirm
-                    onConfirm={purgeAll}
-                    delayTime={3000}
-                    className="w-full"
-                    confirmClassName="bg-rose-500/20 "
-                    ringColor="text-rose-500"
-                  >
-                    <button className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-rose-500/10 hover border border-rose-200 text-rose-600 text-[10px] font-black uppercase tracking-wider transition-all">
-                      <Trash2 size={12} />
-                      Purge All (Wipe All Data)
-                    </button>
-                  </DelayedConfirm>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={clearHistory}
-                      className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-[var(--bg-stage)] hover border border-[var(--border-subtle)] text-[var(--text-muted)] text-[9px] font-black uppercase tracking-wider transition-all"
+                <div className="mt-auto pt-4 border-t border-[var(--border-subtle)] dark:border-t-white/[0.06] space-y-4">
+                  {/* Utilities */}
+                  <div className="flex gap-2">
+                    <FancyButton
+                      onClick={triggerGC}
+                      variant="zinc"
+                      shape="pill"
+                      size="xs"
+                      subtle
                     >
-                      <History size={10} />
-                      Purge History
-                    </button>
-                    <button
+                      <Trash2 size={10} />
+                      Force GC
+                    </FancyButton>
+                    <FancyButton
                       onClick={forceSave}
-                      className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-[var(--bg-stage)] hover border border-[var(--border-subtle)] text-[var(--text-muted)] text-[9px] font-black uppercase tracking-wider transition-all"
+                      variant="zinc"
+                      shape="pill"
+                      size="xs"
+                      subtle
                     >
                       <HardDrive size={10} />
                       Save Shards
-                    </button>
+                    </FancyButton>
+                  </div>
+
+                  {/* Data Purging */}
+                  <div className="space-y-2 p-3 rounded-xl border border-[var(--border-subtle)] dark:border-white/[0.08] bg-[var(--bg-stage)]">
+                    <div className="text-[8px] font-black uppercase tracking-widest text-[var(--text-muted)]">
+                      Data Purging
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <DelayedConfirm
+                        onConfirm={purgeAll}
+                        delayTime={3000}
+                        confirmClassName="bg-rose-500/20"
+                        ringColor="text-rose-500"
+                      >
+                        <FancyButton variant="red" shape="pill" size="xs" subtle>
+                          <Trash2 size={10} />
+                          Wipe All
+                        </FancyButton>
+                      </DelayedConfirm>
+
+                      <FancyButton
+                        onClick={clearHistory}
+                        variant="amber"
+                        shape="pill"
+                        size="xs"
+                        subtle
+                      >
+                        <History size={10} />
+                        History
+                      </FancyButton>
+
+                      {modelCache.totalBytes > 0 && (
+                        <DelayedConfirm
+                          onConfirm={purgeDownloadedModels}
+                          delayTime={2000}
+                          confirmClassName="bg-purple-500/20"
+                          ringColor="text-purple-500"
+                        >
+                          <FancyButton variant="indigo" shape="pill" size="xs" subtle>
+                            <Brain size={10} />
+                            AI Models
+                          </FancyButton>
+                        </DelayedConfirm>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -631,7 +713,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                       </div>
 
                       {expandedNodes.project && (
-                        <div className="pl-4 border-l border-[var(--border-subtle)] ml-3.5 mt-0.5 space-y-1">
+                        <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 mt-0.5 space-y-1">
                           {/* Frame Nodes */}
                           {metrics.frames.map((frame) => {
                             const frameKey = `frame:${frame.id}`;
@@ -642,7 +724,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                               <div key={frame.id} className="flex flex-col">
                                 <div
                                   onClick={() => toggleNode(frameKey)}
-                                  className={`flex items-center justify-between py-1 px-2 rounded-lg hover cursor-pointer transition-colors ${selectedNode?.id === frame.id ? "bg-indigo-50 border border-indigo-100 text-indigo-650 " : "text-[var(--text-muted)]"}`}
+                                  className={`flex items-center justify-between py-1 px-2 rounded-lg hover cursor-pointer transition-colors ${selectedNode?.id === frame.id ? "bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 text-indigo-650 " : "text-[var(--text-muted)]"}`}
                                 >
                                   <div className="flex items-center gap-2 min-w-0">
                                     {isFrameExpanded ? (
@@ -689,7 +771,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
 
                                 {/* Expanded Frame items */}
                                 {isFrameExpanded && (
-                                  <div className="pl-4 border-l border-[var(--border-subtle)] ml-3 mt-0.5 space-y-1">
+                                  <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3 mt-0.5 space-y-1">
                                     {/* Frame Thumbnail Item */}
                                     {frame.thumbnail && (
                                       <div
@@ -745,7 +827,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
 
                                       {expandedNodes[`${frameKey}:layers`] !==
                                         false && (
-                                        <div className="pl-3 border-l border-[var(--border-subtle)] ml-3.5 space-y-0.5">
+                                        <div className="pl-3 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 space-y-0.5">
                                           {frame.layers.map((layer) => {
                                             return (
                                               <div
@@ -760,7 +842,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                                     },
                                                   })
                                                 }
-                                                className={`flex items-center justify-between py-0.5 px-2 rounded hover cursor-pointer transition-colors ${selectedNode?.id === layer.id ? "bg-indigo-50 text-indigo-600 font-bold" : "text-[var(--text-muted)]"}`}
+                                                className={`flex items-center justify-between py-0.5 px-2 rounded hover cursor-pointer transition-colors ${selectedNode?.id === layer.id ? "bg-indigo-500/10 text-indigo-500 font-bold" : "text-[var(--text-muted)]"}`}
                                                 onMouseEnter={() =>
                                                   layer.asset &&
                                                   setHoveredAsset(layer.asset)
@@ -861,7 +943,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                             </div>
 
                             {expandedNodes.history && (
-                              <div className="pl-4 border-l border-[var(--border-subtle)] ml-3.5 space-y-1 mt-0.5">
+                              <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 space-y-1 mt-0.5">
                                 {metrics.history.map((moment) => (
                                   <div
                                     key={moment.id}
@@ -872,7 +954,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                         data: moment,
                                       })
                                     }
-                                    className={`flex justify-between items-center py-0.5 px-2 rounded hover cursor-pointer ${selectedNode?.id === moment.id ? "bg-amber-50 text-amber-600 font-bold" : "text-[var(--text-muted)]"}`}
+                                    className={`flex justify-between items-center py-0.5 px-2 rounded hover cursor-pointer ${selectedNode?.id === moment.id ? "bg-amber-500/10 text-amber-500 font-bold" : "text-[var(--text-muted)]"}`}
                                   >
                                     <div className="flex items-center gap-2 min-w-0">
                                       <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
@@ -915,7 +997,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                             </div>
 
                             {expandedNodes.detached && (
-                              <div className="pl-4 border-l border-[var(--border-subtle)] ml-3.5 space-y-1 mt-0.5">
+                              <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 space-y-1 mt-0.5">
                                 {metrics.detached.map((asset) => (
                                   <div
                                     key={asset.id}
@@ -928,7 +1010,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                     }
                                     onMouseEnter={() => setHoveredAsset(asset)}
                                     onMouseLeave={() => setHoveredAsset(null)}
-                                    className={`flex justify-between items-center py-0.5 px-2 rounded hover cursor-pointer ${selectedNode?.id === asset.id ? "bg-rose-50 text-rose-600 font-bold" : "text-[var(--text-muted)]"}`}
+                                    className={`flex justify-between items-center py-0.5 px-2 rounded hover cursor-pointer ${selectedNode?.id === asset.id ? "bg-rose-500/10 text-rose-500 font-bold" : "text-[var(--text-muted)]"}`}
                                   >
                                     <div className="flex items-center gap-2 min-w-0">
                                       <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
@@ -944,6 +1026,69 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                               </div>
                             )}
                           </div>
+
+                          {/* 4. Downloaded Models (Cache Storage) Folder Node */}
+                          <div className="flex flex-col">
+                            <div
+                              onClick={() => toggleNode("models")}
+                              className="flex items-center gap-2 py-1 px-2 rounded-lg hover cursor-pointer text-[var(--text-main)] font-bold transition-colors"
+                            >
+                              {expandedNodes.models ? (
+                                <ChevronDown
+                                  size={11}
+                                  className="text-[var(--text-muted)]"
+                                />
+                              ) : (
+                                <ChevronRight
+                                  size={11}
+                                  className="text-[var(--text-muted)]"
+                                />
+                              )}
+                              <Brain size={11} className="text-purple-500 " />
+                              <span>
+                                downloaded-models ({modelCache.fileCount} files)
+                              </span>
+                            </div>
+
+                            {expandedNodes.models && (
+                              <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 space-y-1 mt-0.5">
+                                {modelCache.fileCount > 0 ? (
+                                  <>
+                                    <div className="flex justify-between items-center py-0.5 px-2 text-[var(--text-muted)]">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                                        <span>Total Size</span>
+                                      </div>
+                                      <span className="font-mono text-[8px] text-purple-500 font-bold">
+                                        {formatBytes(modelCache.totalBytes)}
+                                      </span>
+                                    </div>
+                                    {modelCache.files.map((file, idx) => (
+                                      <div
+                                        key={`${file.cacheName}-${idx}`}
+                                        className="flex justify-between items-center py-0.5 px-2 text-[var(--text-muted)]"
+                                        title={file.url}
+                                      >
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <span className="w-1 h-1 rounded bg-purple-400" />
+                                          <span className="truncate text-[9px] font-mono">
+                                            {file.name}
+                                          </span>
+                                        </div>
+                                        <span className="font-mono text-[8px] text-[var(--text-muted)] flex-shrink-0 ml-2">
+                                          {formatBytes(file.size)}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </>
+                                ) : (
+                                  <div className="py-1 px-2 text-[var(--text-muted)] text-[9px] opacity-60">
+                                    No models downloaded yet
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -951,11 +1096,11 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                 </div>
 
                 {/* Details Inspector Pane (Right Part of Tree Explorer) */}
-                <div className="w-[300px] border-l border-[var(--border-subtle)] p-6 flex flex-col gap-5 overflow-y-auto bg-[var(--bg-stage)] relative select-none">
+                <div className="w-[300px] border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] p-6 flex flex-col gap-5 overflow-y-auto bg-[var(--bg-stage)] relative select-none">
                   {selectedNode ? (
                     <>
                       {/* Header */}
-                      <div className="flex justify-between items-start border-b border-[var(--border-subtle)] pb-3">
+                      <div className="flex justify-between items-start border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] pb-3">
                         <div>
                           <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-650 font-mono">
                             {selectedNode.type} Details
@@ -984,7 +1129,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                         {/* Frame Attributes */}
                         {selectedNode.type === "frame" && (
                           <div className="space-y-2">
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 FRAME ID
                               </span>
@@ -992,7 +1137,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {selectedNode.data.id}
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 CANVAS WIDTH
                               </span>
@@ -1000,7 +1145,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {selectedNode.data.canvas.w} px
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 CANVAS HEIGHT
                               </span>
@@ -1008,7 +1153,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {selectedNode.data.canvas.h} px
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 CAMERA SCALE
                               </span>
@@ -1017,7 +1162,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 %
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 CAMERA COORD
                               </span>
@@ -1027,7 +1172,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {selectedNode.data.camera.y.toFixed(0)}
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 LAYERS TOTAL
                               </span>
@@ -1041,7 +1186,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                         {/* Layer Attributes */}
                         {selectedNode.type === "layer" && (
                           <div className="space-y-2">
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 LAYER ID
                               </span>
@@ -1049,7 +1194,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {selectedNode.data.id}
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 TYPE
                               </span>
@@ -1057,7 +1202,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {selectedNode.data.type}
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 OPACITY
                               </span>
@@ -1065,7 +1210,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {selectedNode.data.opacity} %
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 VISIBILITY
                               </span>
@@ -1081,7 +1226,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                   : "Hidden"}
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 LOCKED
                               </span>
@@ -1089,7 +1234,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {selectedNode.data.locked ? "Yes" : "No"}
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 BOUNDS
                               </span>
@@ -1100,11 +1245,11 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                             </div>
 
                             {selectedNode.data.asset ? (
-                              <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] space-y-2">
+                              <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] dark:border-t-white/[0.06] space-y-2">
                                 <div className="text-[8px] font-black uppercase text-[var(--text-muted)] ">
                                   Linked Physical Asset
                                 </div>
-                                <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                                <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                                   <span className="text-[var(--text-muted)] ">
                                     HASH ID
                                   </span>
@@ -1112,7 +1257,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                     {selectedNode.data.asset.id}
                                   </span>
                                 </div>
-                                <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                                <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                                   <span className="text-[var(--text-muted)] ">
                                     FILE SIZE
                                   </span>
@@ -1120,7 +1265,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                     {formatBytes(selectedNode.data.asset.size)}
                                   </span>
                                 </div>
-                                <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                                <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                                   <span className="text-[var(--text-muted)] ">
                                     MIME-TYPE
                                   </span>
@@ -1128,7 +1273,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                     {selectedNode.data.asset.type}
                                   </span>
                                 </div>
-                                <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                                <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                                   <span className="text-[var(--text-muted)] ">
                                     REF COUNT
                                   </span>
@@ -1150,7 +1295,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                             {/* Cascade Sub Layers Display */}
                             {selectedNode.data.subLayers &&
                               selectedNode.data.subLayers.length > 0 && (
-                                <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] space-y-2">
+                                <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] dark:border-t-white/[0.06] space-y-2">
                                   <div className="text-[8px] font-black uppercase text-[var(--text-muted)] ">
                                     Sub Layers (Cascade Roles)
                                   </div>
@@ -1159,7 +1304,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                       (sub: Prot.LayerMetric) => (
                                         <div
                                           key={sub.id}
-                                          className="p-2 rounded-lg bg-[var(--bg-stage)] border border-[var(--border-subtle)] space-y-1.5"
+                                          className="p-2 rounded-lg bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] space-y-1.5"
                                         >
                                           <div className="flex justify-between items-center text-[9px] font-bold text-[var(--text-main)] ">
                                             <span className="truncate max-w-[120px]">
@@ -1179,7 +1324,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                             </div>
                                           </div>
                                           {sub.asset ? (
-                                            <div className="flex justify-between items-center text-[8px] pt-1 border-t border-[var(--border-subtle)] text-[var(--text-muted)] ">
+                                            <div className="flex justify-between items-center text-[8px] pt-1 border-t border-[var(--border-subtle)] dark:border-t-white/[0.06] text-[var(--text-muted)] ">
                                               <span className="font-mono">
                                                 Asset:{" "}
                                                 {sub.asset.id.slice(0, 8)}
@@ -1202,12 +1347,12 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
 
                             {/* EXIF Data Panel */}
                             {selectedNode.data.exif && (
-                              <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] space-y-1.5">
+                              <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] dark:border-t-white/[0.06] space-y-1.5">
                                 <div className="text-[8px] font-black uppercase text-[var(--text-muted)] ">
                                   EXIF Meta Profile
                                 </div>
                                 {selectedNode.data.exif.Make && (
-                                  <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] text-[var(--text-muted)] ">
+                                  <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] text-[var(--text-muted)] ">
                                     <span>Camera Make</span>
                                     <span className="text-[var(--text-main)] ">
                                       {selectedNode.data.exif.Make}
@@ -1215,7 +1360,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                   </div>
                                 )}
                                 {selectedNode.data.exif.Model && (
-                                  <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] text-[var(--text-muted)] ">
+                                  <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] text-[var(--text-muted)] ">
                                     <span>Camera Model</span>
                                     <span className="text-[var(--text-main)] truncate max-w-[130px]">
                                       {selectedNode.data.exif.Model}
@@ -1223,7 +1368,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                   </div>
                                 )}
                                 {selectedNode.data.exif.DateTimeOriginal && (
-                                  <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] text-[var(--text-muted)] ">
+                                  <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] text-[var(--text-muted)] ">
                                     <span>DateTime</span>
                                     <span className="text-[var(--text-main)] truncate max-w-[130px]">
                                       {selectedNode.data.exif.DateTimeOriginal}
@@ -1231,7 +1376,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                   </div>
                                 )}
                                 {selectedNode.data.exif.LensModel && (
-                                  <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] text-[var(--text-muted)] ">
+                                  <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] text-[var(--text-muted)] ">
                                     <span>Lens Model</span>
                                     <span className="text-[var(--text-main)] truncate max-w-[130px]">
                                       {selectedNode.data.exif.LensModel}
@@ -1239,7 +1384,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                   </div>
                                 )}
                                 {selectedNode.data.exif.ExposureTime && (
-                                  <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] text-[var(--text-muted)] ">
+                                  <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] text-[var(--text-muted)] ">
                                     <span>Shutter Speed</span>
                                     <span className="text-[var(--text-main)] ">
                                       {selectedNode.data.exif.ExposureTime}s
@@ -1247,7 +1392,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                   </div>
                                 )}
                                 {selectedNode.data.exif.FNumber && (
-                                  <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] text-[var(--text-muted)] ">
+                                  <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] text-[var(--text-muted)] ">
                                     <span>Aperture Value</span>
                                     <span className="text-[var(--text-main)] ">
                                       f/{selectedNode.data.exif.FNumber}
@@ -1255,7 +1400,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                   </div>
                                 )}
                                 {selectedNode.data.exif.ISOSpeedRatings && (
-                                  <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] text-[var(--text-muted)] ">
+                                  <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] text-[var(--text-muted)] ">
                                     <span>ISO Rating</span>
                                     <span className="text-[var(--text-main)] ">
                                       {selectedNode.data.exif.ISOSpeedRatings}
@@ -1270,7 +1415,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                         {/* Asset Attributes */}
                         {selectedNode.type === "asset" && (
                           <div className="space-y-2">
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 HASH SHA-256
                               </span>
@@ -1278,7 +1423,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {selectedNode.data.id}
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 RAW SIZE
                               </span>
@@ -1286,7 +1431,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {formatBytes(selectedNode.data.size)}
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 MIME-TYPE
                               </span>
@@ -1294,7 +1439,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {selectedNode.data.type}
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 REF COUNT
                               </span>
@@ -1302,7 +1447,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {selectedNode.data.refCount} Owners
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 TAGS
                               </span>
@@ -1312,11 +1457,11 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                             </div>
 
                             {selectedNode.data.tileMeta && (
-                              <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] space-y-2">
+                              <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] dark:border-t-white/[0.06] space-y-2">
                                 <div className="text-[8px] font-black uppercase text-[var(--text-muted)] ">
                                   Decoding Tile Meta
                                 </div>
-                                <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                                <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                                   <span className="text-[var(--text-muted)] ">
                                     RESOLUTION
                                   </span>
@@ -1325,7 +1470,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                     {selectedNode.data.tileMeta.height} px
                                   </span>
                                 </div>
-                                <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                                <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                                   <span className="text-[var(--text-muted)] ">
                                     COLUMNS / ROWS
                                   </span>
@@ -1346,7 +1491,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                               </div>
                             )}
 
-                            <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] flex gap-2">
+                            <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] dark:border-t-white/[0.06] flex gap-2">
                               <button
                                 onClick={() =>
                                   copyAssetUsages(selectedNode.data)
@@ -1362,7 +1507,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                         {/* History moment Attributes */}
                         {selectedNode.type === "history" && (
                           <div className="space-y-2">
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 MOMENT ID
                               </span>
@@ -1370,7 +1515,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {selectedNode.data.id}
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 TIME DIFFERENCE
                               </span>
@@ -1378,7 +1523,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 Momentary save
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 TOTAL ASSETS
                               </span>
@@ -1386,7 +1531,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {selectedNode.data.assets.length} Assets
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 SNAPSHOT WEIGHT
                               </span>
@@ -1394,7 +1539,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 {formatBytes(selectedNode.data.totalSize)}
                               </span>
                             </div>
-                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] ">
+                            <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
                               <span className="text-[var(--text-muted)] ">
                                 EXCLUSIVE WASTE
                               </span>
@@ -1430,12 +1575,12 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
 
                   {/* Dynamic asset hover card */}
                   {hoveredAsset && (
-                    <div className="absolute bottom-6 left-6 right-6 p-3 rounded-2xl bg-[var(--bg-panel)] border border-[var(--border-subtle)] shadow-3xl flex flex-col gap-2 font-mono text-[8px] animate-in fade-in slide-in-from-bottom-2 duration-200 text-[var(--text-main)] ">
+                    <div className="absolute bottom-6 left-6 right-6 p-3 rounded-2xl bg-[var(--bg-panel)] border border-[var(--border-subtle)] dark:border-white/[0.08] shadow-3xl flex flex-col gap-2 font-mono text-[8px] animate-in fade-in slide-in-from-bottom-2 duration-200 text-[var(--text-main)] ">
                       <div className="text-[7px] font-black uppercase text-[var(--text-muted)] leading-none">
                         Live Asset Preview
                       </div>
 
-                      <div className="w-full h-24 rounded-lg bg-[var(--bg-stage)] border border-[var(--border-subtle)] overflow-hidden flex items-center justify-center">
+                      <div className="w-full h-24 rounded-lg bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] overflow-hidden flex items-center justify-center">
                         <img
                           src={hoveredAsset.url}
                           alt=""

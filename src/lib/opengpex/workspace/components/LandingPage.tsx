@@ -19,7 +19,7 @@
 
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import PluginSlot from "./PluginSlot";
 
 /**
@@ -88,6 +88,16 @@ export const LandingPage = () => {
   // Generate randomized orbs once per component mount
   const orbs = useMemo(() => generateOrbs(6), []);
 
+  // Pre-check hero image existence to avoid 404 in network/console
+  const [heroSrc, setHeroSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/welcomed.webp", { method: "HEAD" })
+      .then(res => { if (res.ok && !cancelled) setHeroSrc("/welcomed.webp"); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   return (
   <div className="absolute inset-0 flex items-center justify-center select-none overflow-hidden">
     {/* ─── Edge Vignette: ensures ALL decorations fade before hitting container edges ─── */}
@@ -132,7 +142,7 @@ export const LandingPage = () => {
     />
 
     {/* ─── Centered Two-Column Layout ─── */}
-    <div className="relative z-10 flex flex-col lg:flex-row items-center justify-center gap-8 lg:gap-12 w-full max-w-5xl px-8">
+    <div className="relative z-10 flex flex-col lg:flex-row items-center lg:justify-between gap-8 lg:gap-16 w-full max-w-6xl px-8 lg:px-12">
       {/* Left: Content (Plugin Slot) */}
       <div className="flex-shrink-0 w-full lg:w-auto lg:max-w-md">
         <PluginSlot name="LANDING_PAGE">
@@ -148,43 +158,42 @@ export const LandingPage = () => {
         </PluginSlot>
       </div>
 
-      {/* Right: Hero image with blend mode + float animation */}
-      <div className="hidden lg:block flex-1 max-w-[400px] relative animate-[fadeInScale_1s_ease-out_0.3s_both]">
-        {/* Ambient glow behind (syncs with image) */}
-        <div
-          className="absolute inset-[-20%] -z-10 animate-[breathe_6s_ease-in-out_infinite]"
-          style={{
-            background:
-              "radial-gradient(ellipse 50% 45% at 50% 50%, #a78bfa 0%, transparent 65%)",
-            opacity: 0.15,
-            filter: "blur(40px)",
-          }}
-        />
+      {/* Right: Hero image with blend mode + fade-in animation.
+          Only rendered if a valid image source was detected (avoids 404). */}
+      {heroSrc && (
+        <div className="hidden dark:lg:block flex-1 max-w-[640px] relative -mt-12 animate-[fadeInScale_1s_ease-out_0.3s_both]">
+          {/* Ambient glow behind (syncs with image) */}
+          <div
+            className="absolute inset-[-20%] -z-10 animate-[breathe_6s_ease-in-out_infinite]"
+            style={{
+              background:
+                "radial-gradient(ellipse 50% 45% at 50% 50%, #a78bfa 0%, transparent 65%)",
+              opacity: 0.15,
+              filter: "blur(40px)",
+            }}
+          />
 
-        {/* The image: mix-blend-mode screen makes black → transparent */}
-        {/* <img
-          src="/screenshot.webp"
-          alt=""
-          className="w-full aspect-[3/4] object-cover animate-[float_8s_ease-in-out_infinite]"
-          draggable={false}
-          style={{
-            mixBlendMode: "screen",
-            maskImage:
-              "radial-gradient(ellipse 75% 72% at 50% 45%, black 50%, transparent 95%)",
-            WebkitMaskImage:
-              "radial-gradient(ellipse 75% 72% at 50% 45%, black 50%, transparent 95%)",
-            filter: "contrast(1.1) brightness(1.05)",
-          }}
-          onError={(e) => {
-            const img = e.target as HTMLImageElement;
-            if (img.src.endsWith(".webp")) {
-              img.src = "/screenshot.png";
-            } else {
-              (img.parentElement as HTMLElement).style.display = "none";
-            }
-          }}
-        /> */}
-      </div>
+          {/* The image: mix-blend-mode screen makes black → transparent.
+              Static after fadeIn — no floating animation for stability.
+              Bottom + right edges fade to transparent via composite mask. */}
+          <img
+            src={heroSrc}
+            alt=""
+            className="w-full aspect-[3/4] object-cover"
+            draggable={false}
+            style={{
+              mixBlendMode: "screen",
+              maskImage:
+                "linear-gradient(to bottom, black 0%, black 60%, transparent 100%), linear-gradient(to left, transparent 0%, black 15%, black 100%)",
+              WebkitMaskImage:
+                "linear-gradient(to bottom, black 0%, black 60%, transparent 100%), linear-gradient(to left, transparent 0%, black 15%, black 100%)",
+              maskComposite: "intersect",
+              WebkitMaskComposite: "destination-in" as string,
+              filter: "contrast(1.1) brightness(1.05)",
+            }}
+          />
+        </div>
+      )}
     </div>
 
     {/* ─── Fluid blob accents (single-color, soft) ─── */}

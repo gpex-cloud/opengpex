@@ -56,7 +56,10 @@ export const useClipOptionsCommands = () => {
     const isReCanvas = !!reCanvasActiveSignal?.value;
 
     // Active crop tool — read directly from the per-frame field.
-    const cropTool = (activeFrame?.latestClipTool as CropTool | undefined) ?? 'rect';
+    // Safety: if the stored value doesn't exist in CROP_TOOL_STRATEGIES (e.g.
+    // stale data from a removed tool), fall back to 'rect'.
+    const rawCropTool = (activeFrame?.latestClipTool as CropTool | undefined) ?? 'rect';
+    const cropTool: CropTool = CROP_TOOL_STRATEGIES[rawCropTool] ? rawCropTool : 'rect';
     // Pre-PR-6-2: derive from CROP_TOOL_STRATEGIES via the helper functions
     // exported from protocols.ts. This eliminates the previous duplicate
     // truth source (literal `cropTool === 'rect' || ...`) and makes the

@@ -62,5 +62,7 @@ export type EditorContextValue = EditorServiceContextValue & EditorStateContextV
     getSignal: <T = boolean>(key: string, defaultValue?: T) => T;
     setSignal: (key: string, value: InteractionSignalValue) => void;
     toggleSignal: (key: string) => void;
+    /** Set the busy state for this plugin — controls DrawerBar icon animation */
+    setBusy: (busy: boolean) => void;
   };
 };

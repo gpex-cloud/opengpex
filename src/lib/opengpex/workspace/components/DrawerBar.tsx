@@ -284,7 +284,9 @@ function SidebarItem({
   isDraggingRef: React.RefObject<boolean>;
   side: "left" | "right";
 }) {
+  const { plugins } = useEditorServices();
   const isActive = (ui.activeSidebarIds || []).includes(plugin.uid);
+  const isBusy = plugins.isBusy(plugin.uid);
   const panelWidth = plugin.initialConfig?.preferredWidth || 320;
   const dragControls = useDragControls();
 
@@ -352,6 +354,7 @@ function SidebarItem({
                 <DrawerItem
                   icon={plugin.icon || <Sparkles size={18} />}
                   active={false}
+                  busy={isBusy}
                   onClick={(e) => handleCombinedClick(plugin.uid, e)}
                   label={plugin.manifest?.displayName || plugin.uid}
                   styles={styles}
@@ -443,12 +446,14 @@ function SidebarItem({
 function DrawerItem({
   icon,
   active,
+  busy,
   onClick,
   styles,
   side,
 }: {
   icon: React.ReactNode;
   active?: boolean;
+  busy?: boolean;
   onClick: (e: React.MouseEvent) => void;
   label: string;
   styles: Record<string, WorkspaceStyleItem>;
@@ -460,7 +465,7 @@ function DrawerItem({
       onClick={onClick}
     >
       <div
-        className={`transition-all duration-300 group-hover:scale-110 ${active ? "scale-110" : ""}`}
+        className={`transition-all duration-300 group-hover:scale-110 ${active ? "scale-110" : ""} ${busy ? "drawer-icon-busy" : ""}`}
       >
         {icon}
       </div>

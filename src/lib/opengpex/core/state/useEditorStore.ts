@@ -233,6 +233,9 @@ export function useEditorStore() {
             toggleSignal: (key: string) => {
               const targetKey = key.startsWith(pluginUid) ? key : `${pluginUid}.${key}`;
               context.actions.toggleStateSignal(targetKey);
+            },
+            setBusy: (busy: boolean) => {
+              context.plugins.setBusy(pluginUid, busy);
             }
           }
         };

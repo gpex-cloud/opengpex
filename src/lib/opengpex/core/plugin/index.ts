@@ -25,6 +25,7 @@ export function createPluginService(): PluginService {
   const commands = new Map<string, BuiltCommand>();
   const shortcuts = new Map<string, EditorShortcut>();
   const signals = new Map<string, BuiltSignal>();
+  const busySet = new Set<string>();
 
   // Track which commands, shortcuts and signals belong to which plugin for cascading teardown
   const pluginAssets = new Map<string, { commands: Set<string>; shortcuts: Set<string>; signals: Set<string> }>();
@@ -58,6 +59,18 @@ export function createPluginService(): PluginService {
         return false;
       }
       return true;
+    },
+
+    isBusy: (pluginUid: string) => busySet.has(pluginUid),
+
+    setBusy: (pluginUid: string, busy: boolean) => {
+      const changed = busy ? !busySet.has(pluginUid) : busySet.has(pluginUid);
+      if (!changed) return;
+      if (busy) busySet.add(pluginUid);
+      else busySet.delete(pluginUid);
+      // Force plugins snapshot to regenerate so useSyncExternalStore detects the change
+      _pluginsDirty = true;
+      notify();
     },
 
     registerPlugin: (plugin: BuiltPlugin) => {

@@ -18,9 +18,9 @@
  */
 
 import { EditorPlugin } from "@opengpex/editor/core/types";
-import { LineSquiggle } from "lucide-react";
 import { CraftDrawerComponent, CraftTriggerButtons } from "./components";
 import { CRAFT_COMMANDS } from "./commands";
+import { CraftDrawerIcon } from "./icon";
 import { COLOR_OPTIONS_CRAFT_SLOT } from "../../options/ColorOptions/protocols";
 import * as P from "./protocols";
 
@@ -46,7 +46,7 @@ export const plugin: EditorPlugin = {
   },
 
   // --- 2. UI Entry ---
-  icon: <LineSquiggle size={16} />,
+  icon: <CraftDrawerIcon />,
   slot: "SIDE_BAR",
   show: "frame-required",
   order: 300,

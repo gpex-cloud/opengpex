@@ -46,7 +46,7 @@ export const plugin: EditorPlugin = {
   // --- 2. UI Entry ---
   icon: <AIBridgeIcon />,
   slot: "SIDE_BAR",
-  order: 90,
+  order: 500,
 
   // --- 3. Core Implementation ---
   component: AIGenerationDrawer,
@@ -68,16 +68,6 @@ export const plugin: EditorPlugin = {
 
   // --- 5. Commands ---
   commands: Object.values(AI_BRIDGE_COMMANDS),
-
-  // --- 5.5 Signals ---
-  signals: [
-    {
-      id: P.SIGNAL_IS_GENERATING,
-      name: "AI Generation In Progress",
-      defaultValue: false,
-      scope: "public",
-    },
-  ],
 
   // --- 6. Lifecycle ---
   onInit,

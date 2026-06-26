@@ -62,7 +62,9 @@ export function useClipOverlayCommands() {
   // raw signal value). This is the only place where the synthetic projection
   // is needed; all the other consumers (Options bar, ClipOverlay handlers)
   // already check `isReCanvas` explicitly before deciding what to do.
-  const cropTool: CropTool = isReCanvas ? 'rect' : rawTool;
+  // Safety: if rawTool points to a tool that no longer exists in the strategy
+  // table (e.g. after removing 'bg-removal'), fall back to 'rect'.
+  const cropTool: CropTool = isReCanvas ? 'rect' : (CROP_TOOL_STRATEGIES[rawTool] ? rawTool : 'rect');
   const family = CROP_TOOL_STRATEGIES[cropTool].family;
   const isRegularTool = family === 'regular';
   const isIrregularTool = family === 'irregular';

@@ -18,10 +18,10 @@
  */
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
-import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
 import { MetadataHelper } from '@opengpex/editor/core/helpers/metadata';
-import { calcFinalDims } from './utils';
+import { calcFinalDims, clipBoxToExportShape } from './utils';
 import { FormatConverter } from './services/FormatConverter';
 
 import * as P from './protocols';
@@ -39,17 +39,21 @@ export const IMAGE_INFO_COMMANDS = {
          if (!activeFrame) return;
 
          const config = selfConfig as P.ExportConfig;
-          const isClipMode = state.interaction.interactionMode === 'clip';
-           const cropBox = getRegularClipShape(activeFrame);
+         const isClipMode = state.interaction.interactionMode === 'clip';
+         const box = getClipBox(activeFrame);
 
-           // Guard: abort if in clip mode but no active selection
-           if (isClipMode && (!cropBox || cropBox.rect.w <= 0 || cropBox.rect.h <= 0)) {
+         // Guard: abort if in clip mode but no active selection
+         if (isClipMode && !box) {
             ctx.actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
             return;
-          }
+         }
 
-           const baseW = isClipMode && cropBox ? cropBox.rect.w : activeFrame.canvas.w;
-          const baseH = isClipMode && cropBox ? cropBox.rect.h : activeFrame.canvas.h;
+         // Resolve the export shape: for irregular selections (lasso/wand),
+         // convert polygon to LocalShape{type:'path'} with bounds-relative pathData.
+         const cropBox = isClipMode && box ? clipBoxToExportShape(box) : undefined;
+
+         const baseW = isClipMode && cropBox ? cropBox.rect.w : activeFrame.canvas.w;
+         const baseH = isClipMode && cropBox ? cropBox.rect.h : activeFrame.canvas.h;
 
          const { w: exportW, h: exportH } = calcFinalDims(baseW, baseH, config);
 
@@ -57,7 +61,7 @@ export const IMAGE_INFO_COMMANDS = {
             let blob = await FormatConverter.export(ctx, {
                format: config.format,
                quality: config.quality,
-               isClipMode,
+               isClipMode: !!(isClipMode && cropBox),
                cropBox
             });
 
