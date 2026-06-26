@@ -465,7 +465,7 @@ export function BgRemovalDrawerContent() {
               shape="rect"
               className="shrink-0"
               onClick={() => actions.executeCommand(`${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}.${P.CMD_ABORT}`)}
-              title="Cancel download"
+              aria-label="Cancel"
             >
               <X size={14} />
             </FancyButton>
