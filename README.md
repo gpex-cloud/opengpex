@@ -103,6 +103,19 @@ Contributions are welcome! Please open an issue to discuss your idea before subm
 
 ---
 
+## Third-party Models
+
+The AI background removal feature downloads pre-trained models at runtime from HuggingFace. These models are **not bundled** with this project and are subject to their own licenses.
+
+| Model | Source | License |
+|-------|--------|---------|
+| RMBG 1.4 | [briaai/RMBG-1.4](https://huggingface.co/briaai/RMBG-1.4) | BRIA RMBG-1.4 (non-commercial) |
+| InSPyReNet Ultra | [OS-Software/InSPyReNet-SwinB-Plus-Ultra-ONNX](https://huggingface.co/OS-Software/InSPyReNet-SwinB-Plus-Ultra-ONNX) | MIT |
+
+Users may also add custom HuggingFace models. Please verify the license of any model you use.
+
+---
+
 ## Plugin Licensing
 
 OpenGPEX is licensed under GPL-3.0-only. However, third-party plugins loaded dynamically at runtime are considered independent works and may use any license chosen by their authors. Plugins shipped directly in the source tree are covered by the same GPL-3.0 license.

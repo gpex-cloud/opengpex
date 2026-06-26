@@ -4,6 +4,16 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.12
+
+- Add AI background removal plugin (BgRemovalDrawer) with RMBG 1.4 and InSPyReNet models, custom HuggingFace model support, fully client-side inference (WebGPU → WASM fallback)
+- Add application-level memory tracker (ResourceTracker) with per-category allocation stats and top-N large object visibility
+- Redesign DebugInfoPanel with real-time FPS counter, JS heap metrics, and ResourceTracker integration
+- Enhance LayoutInfoPanel and StorageInfoPanel with richer diagnostics
+- Refine ClipOverlay interactions and ClipOptions commands
+
+---
+
 ## v1.0.0-beta.11
 
 - Add Onboarding plugin with spotlight bubbles and everyday tips guidance system
