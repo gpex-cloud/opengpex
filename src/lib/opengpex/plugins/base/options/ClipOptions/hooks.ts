@@ -170,6 +170,7 @@ export const useClipOptionsCommands = () => {
     activeFrame,
     reCanvasActiveSignal,
     cropFeatherValueSignal,
+    setSelfConfig,
     toggleModeCmd,
     exitClipModeCmd,
     reCanvasToggleCmd,

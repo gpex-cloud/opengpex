@@ -19,7 +19,7 @@
 
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   Split,
   ChevronDown,
@@ -91,6 +91,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isFeatherOpen, setIsFeatherOpen] = useState(false);
+  const featherPopoverTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleDropdownClick = () => {
     if (!activeFrame || isPanMode || isIrregularTool) return;
@@ -507,15 +508,15 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                   <div
                     className="flex items-center gap-0.5 p-1"
                     onMouseEnter={() => {
-                      if ((window as any).__featherPopoverTimer) {
-                        clearTimeout((window as any).__featherPopoverTimer);
-                        (window as any).__featherPopoverTimer = null;
+                      if (featherPopoverTimerRef.current) {
+                        clearTimeout(featherPopoverTimerRef.current);
+                        featherPopoverTimerRef.current = null;
                       }
                     }}
                     onMouseLeave={() => {
-                      (window as any).__featherPopoverTimer = setTimeout(() => {
+                      featherPopoverTimerRef.current = setTimeout(() => {
                         setIsFeatherOpen(false);
-                        (window as any).__featherPopoverTimer = null;
+                        featherPopoverTimerRef.current = null;
                       }, 1500);
                     }}
                   >

@@ -4,6 +4,15 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.13
+
+- Add selection feather (0–250px edge softening) for masks, drill, layer-via-copy/cut operations
+- Add camera RAW format support (CR2, CR3, NEF, ARW, DNG, etc. 1200+ formats) via libraw-wasm client-side decoding
+- Improve magic wand selection quality: 4-neighbor BFS to prevent diagonal leakage, morphological closing to fill holes, connected-component filtering, Chaikin curve smoothing
+- Reorganize sidebar drawer layout (left/right split), improve AI Bridge drawer UX, add hover glow on drawer bar items
+
+---
+
 ## v1.0.0-beta.12
 
 - Add AI background removal plugin (BgRemovalDrawer) with RMBG 1.4 and InSPyReNet models, custom HuggingFace model support, fully client-side inference (WebGPU → WASM fallback)

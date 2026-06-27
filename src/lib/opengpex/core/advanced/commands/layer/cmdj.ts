@@ -19,7 +19,7 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, LocalShape } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, LocalShape, LocalSpatial, Frame, Layer } from '@opengpex/editor/core/types';
 import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
@@ -28,9 +28,9 @@ import { getClipBox } from '@opengpex/editor/core/helpers/selection';
  * Resolve the selection box into a LocalShape in the target layer's local coordinates.
  */
 function resolveLocalShape(
-  box: { regular: boolean; spatial: any },
-  activeFrame: any,
-  targetLayer: any,
+  box: LocalSpatial,
+  activeFrame: Frame,
+  targetLayer: Layer,
   geometry: EditorContextValue['geometry']
 ): LocalShape {
   if (!box.regular) {
