@@ -29,18 +29,76 @@
  * bundler (Turbopack/Webpack) handles the worker URL resolution.
  */
 
-import type { RawImageData } from 'libraw-wasm';
+import type { RawImageData, LibRawSettings } from 'libraw-wasm';
 
-let LibRawClass: typeof import('libraw-wasm').default | null = null;
+class LibRaw {
+  private worker: Worker;
+  private pending: Map<number, { resolve: (val: unknown) => void; reject: (err: Error) => void }>;
+  private nextId: number = 0;
+  private tail: Promise<unknown> = Promise.resolve();
+  private disposed: boolean = false;
 
-/**
- * Dynamically imports libraw-wasm (deferred to avoid bundling cost on startup).
- */
-async function getLibRawClass() {
-  if (LibRawClass) return LibRawClass;
-  const mod = await import('libraw-wasm');
-  LibRawClass = mod.default;
-  return LibRawClass;
+  constructor() {
+    // Instantiate our static, pre-copied worker directly from public/ext/wasm/
+    this.worker = new Worker('/ext/wasm/libraw-worker.js', { type: 'module' });
+    this.pending = new Map();
+    this.worker.onmessage = ({ data: e }) => {
+      const t = this.pending.get(e?.id);
+      if (t) {
+        this.pending.delete(e.id);
+        if (e?.error) {
+          t.reject(new Error(e.error));
+        } else {
+          t.resolve(e?.out);
+        }
+      }
+    };
+  }
+
+  dispose() {
+    this.disposed = true;
+    this.worker.terminate();
+    for (const { reject } of this.pending.values()) {
+      reject(new Error('LibRaw disposed'));
+    }
+    this.pending.clear();
+  }
+
+  private runFn(fn: string, ...args: unknown[]): Promise<unknown> {
+    const n = () => new Promise<unknown>((resolve, reject) => {
+      if (this.disposed) {
+        reject(new Error('LibRaw disposed'));
+        return;
+      }
+      const id = this.nextId++;
+      this.pending.set(id, { resolve, reject });
+      
+      // Isolate TypedArray and ArrayBuffer inputs for transferable transfer
+      const transferables = args.map(r => {
+        if (r && typeof r === 'object' && 'buffer' in r && r.buffer instanceof ArrayBuffer) {
+          return r.buffer;
+        }
+        if (r instanceof ArrayBuffer) {
+          return r;
+        }
+        return null;
+      }).filter((r): r is ArrayBuffer => !!r);
+
+      this.worker.postMessage({ id, fn, args }, transferables);
+    });
+
+    const a = this.tail.then(n, n);
+    this.tail = a.then(() => {}, () => {});
+    return a;
+  }
+
+  async open(bytes: BufferSource, settings?: LibRawSettings): Promise<void> {
+    await this.runFn('open', bytes, settings);
+  }
+
+  async imageData(): Promise<RawImageData | undefined> {
+    return (await this.runFn('imageData')) as RawImageData | undefined;
+  }
 }
 
 /**
@@ -53,7 +111,6 @@ async function getLibRawClass() {
  * @returns PNG Blob (sRGB, 8-bit)
  */
 export async function convertRawToBlob(file: File): Promise<Blob> {
-  const LibRaw = await getLibRawClass();
   const instance = new LibRaw();
 
   try {

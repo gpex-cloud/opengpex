@@ -33,6 +33,10 @@ const wasmFiles = [
     dest: 'libraw.wasm',
   },
   {
+    src: 'node_modules/libraw-wasm/dist/libraw.js',
+    dest: 'libraw.js',
+  },
+  {
     src: 'node_modules/libraw-wasm/dist/worker.js',
     dest: 'libraw-worker.js',
   },
