@@ -49,7 +49,7 @@ export const plugin: EditorPlugin = {
   icon: <CraftDrawerIcon />,
   slot: "SIDE_BAR",
   show: "frame-required",
-  order: 300,
+  order: 3100,
 
   // --- 3. Core Implementation ---
   component: CraftDrawerComponent,

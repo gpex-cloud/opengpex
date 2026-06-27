@@ -461,7 +461,7 @@ function DrawerItem({
 }) {
   return (
     <div
-      className={`${styles.drawerBarItem.className} ${active ? styles.drawerBarItemActive.className : ""} group`}
+      className={`${styles.drawerBarItem.className} ${active ? styles.drawerBarItemActive.className : "hover:bg-indigo-500 hover:text-white hover:border-indigo-500/50 hover:shadow-[0_0_12px_rgba(99,102,241,0.4)]"} group`}
       onClick={onClick}
     >
       <div

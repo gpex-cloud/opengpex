@@ -49,7 +49,7 @@ export const plugin: EditorPlugin = {
   // --- 2. UI Entry ---
   icon: <Sliders size={20} />,
   slot: "SIDE_BAR",
-  order: 400,
+  order: 3200,
   show: "frame-required",
 
   // --- 3. Core Implementation ---

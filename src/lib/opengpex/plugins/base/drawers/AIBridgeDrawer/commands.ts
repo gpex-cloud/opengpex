@@ -33,7 +33,7 @@ import * as P from './protocols';
 
 // ─── Helper: Generate mock image via local Canvas ──────────────────────────────
 
-function createMockImageBlob(prompt: string, size: string): Promise<Blob> {
+function createMockImageBlob(_prompt: string, size: string): Promise<Blob> {
   return new Promise((resolve) => {
     const [w, h] = size.split('x').map(Number);
     const canvas = document.createElement('canvas');
@@ -59,16 +59,6 @@ function createMockImageBlob(prompt: string, size: string): Promise<Blob> {
         Math.random() * 4 + 1,
       );
     }
-
-    // stamp text
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.font = `bold ${Math.round(canvas.width / 20)}px monospace`;
-    ctx.textAlign = 'center';
-    ctx.fillText('AI MOCK', canvas.width / 2, canvas.height / 2 - 20);
-    ctx.font = `${Math.round(canvas.width / 40)}px monospace`;
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    const displayPrompt = prompt.length > 40 ? prompt.slice(0, 40) + '…' : (prompt || 'No prompt');
-    ctx.fillText(displayPrompt, canvas.width / 2, canvas.height / 2 + 30);
 
     canvas.toBlob((blob) => resolve(blob!), 'image/png');
   });

@@ -63,7 +63,7 @@ export const plugin: EditorPlugin = {
   slot: "SIDE_BAR",
   show: 'frame-required',
 
-  order: 220, // Between Adjustment (80) and AIBridge (90)
+  order: 2200, // Between Adjustment (80) and AIBridge (90)
 
   // --- 3. Core Implementation ---
   component: BgRemovalDrawerContent,
@@ -92,7 +92,7 @@ export const plugin: EditorPlugin = {
       component: BgRemovalModelSettings,
       title: "BG Removal Models",
       icon: <Cpu size={12} />,
-      order: 210,
+      order: 310,
     },
   ],
 };

@@ -46,7 +46,7 @@ export const plugin: EditorPlugin = {
   // --- 2. UI Entry ---
   icon: <AIBridgeIcon />,
   slot: "SIDE_BAR",
-  order: 500,
+  order: 2100,
 
   // --- 3. Core Implementation ---
   component: AIGenerationDrawer,
@@ -81,7 +81,7 @@ export const plugin: EditorPlugin = {
       component: AIBridgeSettings,
       title: "Universal AI",
       icon: <Key size={12} />,
-      order: 200,
+      order: 320,
     },
   ],
 };

@@ -25,11 +25,15 @@ import { EngineStatus } from "@opengpex/editor/core/types";
 
 interface ImagingEnginesPanelProps {
   engineStatuses: EngineStatus[];
+  show: boolean;
 }
 
 export function ImagingEnginesPanel({
   engineStatuses,
+  show,
 }: ImagingEnginesPanelProps) {
+  if (!show) return null;
+
   return (
     <div className="pt-2">
       <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-widest mb-2 block">

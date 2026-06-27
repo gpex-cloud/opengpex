@@ -128,7 +128,7 @@ export function ImageInfoComponent() {
 
         <AiGenerationPanel extra={activeFrame?.extra} />
 
-        <ImagingEnginesPanel engineStatuses={engineStatuses} />
+        <ImagingEnginesPanel engineStatuses={engineStatuses} show={false} />
       </div>
 
       <ResizeExportControls

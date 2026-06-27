@@ -118,9 +118,13 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
           <p className="text-[10px] font-bold text-[var(--text-main)] mb-1">
             API Key Missing
           </p>
-          <p className="text-[9px] text-[var(--text-muted)] mb-4 px-2 leading-relaxed">
+          <p className="text-[9px] text-[var(--text-muted)] mb-2 px-2 leading-relaxed">
             Configure your AI endpoint and key in Settings to start generating
             images.
+          </p>
+          <p className="text-[9px] font-bold text-[var(--text-muted)] mb-4 px-2 leading-relaxed">
+            🔒 Your API key is stored only in your browser&apos;s local storage
+            and never sent to our servers.
           </p>
           <FancyButton
             onClick={() => openSettingsCmd?.execute()}
@@ -133,7 +137,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
 
           <div className="mt-4 pt-4 border-t border-rose-500/20 w-full flex flex-col items-center gap-2">
             <span className="text-[8px] text-[var(--text-muted)] uppercase tracking-widest font-black">
-              Or try it for free
+              Or generate a placeholder
             </span>
             <button
               onClick={() => updateConfig({ isMockMode: true })}
@@ -227,7 +231,22 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
               }))}
               value={mode}
               onChange={setMode}
+              disabled={config.isMockMode}
             />
+            {/* Mock Mode Exit */}
+            {config.isMockMode && (
+              <div className="flex items-center justify-between px-2.5 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                <span className="text-[9px] font-bold text-amber-600">
+                  Mock Mode Active
+                </span>
+                <button
+                  onClick={() => updateConfig({ isMockMode: false })}
+                  className="text-[8px] font-black text-amber-600 hover:text-amber-500 uppercase tracking-wider transition-colors focus:outline-none"
+                >
+                  Exit Mock
+                </button>
+              </div>
+            )}
 
             {/* Model Selector */}
             {!config.isMockMode && (
@@ -475,7 +494,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                 onClick={handleGenerate}
                 disabled={!canGenerate}
                 loading={isGenerating}
-                variant="indigo"
+                variant={config.isMockMode ? "amber" : "indigo"}
                 size="xs"
                 className="flex-[2] focus:outline-none"
               >
@@ -485,11 +504,13 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                 <span className="uppercase font-bold tracking-wider">
                   {isGenerating
                     ? "Processing..."
-                    : mode === "generate"
-                      ? "Generate"
-                      : mode === "edit"
-                        ? "Edit"
-                        : "Vary"}
+                    : config.isMockMode
+                      ? "Mock"
+                      : mode === "generate"
+                        ? "Generate"
+                        : mode === "edit"
+                          ? "Edit"
+                          : "Vary"}
                 </span>
               </FancyButton>
               <FancyButton

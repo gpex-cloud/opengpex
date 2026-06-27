@@ -48,7 +48,8 @@ export const plugin: EditorPlugin = {
   // --- 2. UI Entry ---
   icon: <Info size={20} />,
   slot: "SIDE_BAR",
-  order: 100,
+  side: "left",
+  order: 1100,
   show: "frame-required",
 
   // --- 3. Core Implementation ---
