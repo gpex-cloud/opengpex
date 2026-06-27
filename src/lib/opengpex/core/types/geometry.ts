@@ -231,5 +231,26 @@ export interface GeometryService {
      * suitable for evenodd fill rule rendering.
      */
     polygonToSvgPathD: (poly: LocalPolygon) => string;
+    /**
+     * Determines whether a point lies inside a multi-ring polygon using ray-casting
+     * (even-odd rule). Useful for hit-testing clicks against irregular selections.
+     */
+    isPointInPolygon: (point: Point2D, rings: Point2D[][]) => boolean;
+    /**
+     * Calculates the unsigned area of a single closed ring using the Shoelace formula.
+     * Returns absolute value regardless of winding direction.
+     */
+    computeRingArea: (ring: Point2D[]) => number;
+    /**
+     * Douglas–Peucker simplification for an open polyline. Retains first/last vertices
+     * and drops intermediate points within `epsilon` perpendicular distance of the
+     * simplified line.
+     */
+    simplifyOpen: (points: Point2D[], epsilon: number) => Point2D[];
+    /**
+     * Douglas–Peucker simplification for a closed polygon ring. Wraps the ring into
+     * an open polyline, simplifies, then removes the trailing duplicate.
+     */
+    simplifyRing: (ring: Point2D[], epsilon: number) => Point2D[];
   };
 }

@@ -169,6 +169,148 @@ function floodFill(
   return { mask, floodPixels };
 }
 
+// ─────────────────────────── Phase 1.5: Morphological Close ────────────────────
+
+/**
+ * Perform 3x3 Morphological Dilation on the mask.
+ * For boundary pixels, we leave them as 0 to ensure safety (no array out-of-bounds).
+ */
+function dilate3x3(src: Uint8Array, dst: Uint8Array, w: number, h: number): void {
+  for (let y = 1; y < h - 1; y++) {
+    const row = y * w;
+    const prevRow = row - w;
+    const nextRow = row + w;
+    for (let x = 1; x < w - 1; x++) {
+      const idx = row + x;
+      if (
+        src[idx] !== 0 ||
+        src[idx - 1] !== 0 || src[idx + 1] !== 0 ||
+        src[prevRow + x] !== 0 || src[prevRow + x - 1] !== 0 || src[prevRow + x + 1] !== 0 ||
+        src[nextRow + x] !== 0 || src[nextRow + x - 1] !== 0 || src[nextRow + x + 1] !== 0
+      ) {
+        dst[idx] = 1;
+      }
+    }
+  }
+}
+
+/**
+ * Perform 3x3 Morphological Erosion on the mask.
+ * For boundary pixels, we leave them as 0 to ensure safety (no array out-of-bounds).
+ */
+function erode3x3(src: Uint8Array, dst: Uint8Array, w: number, h: number): void {
+  for (let y = 1; y < h - 1; y++) {
+    const row = y * w;
+    const prevRow = row - w;
+    const nextRow = row + w;
+    for (let x = 1; x < w - 1; x++) {
+      const idx = row + x;
+      if (
+        src[idx] !== 0 &&
+        src[idx - 1] !== 0 && src[idx + 1] !== 0 &&
+        src[prevRow + x] !== 0 && src[prevRow + x - 1] !== 0 && src[prevRow + x + 1] !== 0 &&
+        src[nextRow + x] !== 0 && src[nextRow + x - 1] !== 0 && src[nextRow + x + 1] !== 0
+      ) {
+        dst[idx] = 1;
+      }
+    }
+  }
+}
+
+/**
+ * Perform morphological Close (dilation followed by erosion) to clean up 1px holes and cracks.
+ */
+function morphClose(mask: Uint8Array, w: number, h: number): Uint8Array {
+  const dilated = new Uint8Array(w * h);
+  dilate3x3(mask, dilated, w, h);
+  const eroded = new Uint8Array(w * h);
+  erode3x3(dilated, eroded, w, h);
+  return eroded;
+}
+
+/**
+ * After morphClose, isolated fragments may appear near jagged boundaries
+ * (dilate bridges gaps → erode disconnects the bridge → orphaned pixels).
+ * Re-flood from the seed over the cleaned mask to keep only the connected component.
+ *
+ * Cost: O(width*height) — same order as the original BFS. Only runs when
+ * `contiguous=true` (non-contiguous mode intentionally keeps all fragments).
+ */
+function keepConnectedToSeed(
+  mask: Uint8Array,
+  originalFloodMask: Uint8Array,
+  w: number,
+  h: number,
+  seed: { x: number; y: number },
+): Uint8Array {
+  const total = w * h;
+  const out = new Uint8Array(total);
+  const seedP = seed.y * w + seed.x;
+
+  let startP = seedP;
+  if (!mask[startP]) {
+    // If the seed pixel itself was eroded away, search for the closest pixel that survived
+    // in the cleaned mask, restricted only to the pixels of the original connected component.
+    const searchQ = new IndexQueue(total);
+    const visited = new Uint8Array(total);
+    searchQ.push(seedP);
+    visited[seedP] = 1;
+    let found = false;
+    while (searchQ.size > 0) {
+      const curr = searchQ.shift();
+      if (mask[curr] && originalFloodMask[curr]) {
+        startP = curr;
+        found = true;
+        break;
+      }
+      const cx = curr % w;
+      const cy = (curr - cx) / w;
+
+      const checkNeighbor = (nx: number, ny: number) => {
+        const np = ny * w + nx;
+        if (!visited[np] && originalFloodMask[np]) {
+          visited[np] = 1;
+          searchQ.push(np);
+        }
+      };
+
+      if (cx > 0) checkNeighbor(cx - 1, cy);
+      if (cx < w - 1) checkNeighbor(cx + 1, cy);
+      if (cy > 0) checkNeighbor(cx, cy - 1);
+      if (cy < h - 1) checkNeighbor(cx, cy + 1);
+      if (cx > 0 && cy > 0) checkNeighbor(cx - 1, cy - 1);
+      if (cx < w - 1 && cy > 0) checkNeighbor(cx + 1, cy - 1);
+      if (cx > 0 && cy < h - 1) checkNeighbor(cx - 1, cy + 1);
+      if (cx < w - 1 && cy < h - 1) checkNeighbor(cx + 1, cy + 1);
+    }
+
+    // If the entire original component was erased by closing (highly rare), return empty mask.
+    if (!found) return out;
+  }
+
+  const q = new IndexQueue(total);
+  q.push(startP);
+  out[startP] = 1;
+
+  while (q.size > 0) {
+    const p = q.shift();
+    const x = p % w;
+    const y = (p - x) / w;
+
+    // 8-connected neighbors (matching the BFS flood connectivity)
+    if (x > 0) { const np = p - 1; if (!out[np] && mask[np]) { out[np] = 1; q.push(np); } }
+    if (x < w - 1) { const np = p + 1; if (!out[np] && mask[np]) { out[np] = 1; q.push(np); } }
+    if (y > 0) { const np = p - w; if (!out[np] && mask[np]) { out[np] = 1; q.push(np); } }
+    if (y < h - 1) { const np = p + w; if (!out[np] && mask[np]) { out[np] = 1; q.push(np); } }
+    if (x > 0 && y > 0) { const np = p - w - 1; if (!out[np] && mask[np]) { out[np] = 1; q.push(np); } }
+    if (x < w - 1 && y > 0) { const np = p - w + 1; if (!out[np] && mask[np]) { out[np] = 1; q.push(np); } }
+    if (x > 0 && y < h - 1) { const np = p + w - 1; if (!out[np] && mask[np]) { out[np] = 1; q.push(np); } }
+    if (x < w - 1 && y < h - 1) { const np = p + w + 1; if (!out[np] && mask[np]) { out[np] = 1; q.push(np); } }
+  }
+
+  return out;
+}
+
 // ─────────────────────── Phase 2: Boundary tracing ─────────────────────────────
 
 /**
@@ -303,6 +445,34 @@ function traceBoundary(
   return { rings, rawCount };
 }
 
+// ───────────────────────── Phase 2.5: Small Ring Filtering ────────────────────
+
+/**
+ * Calculate the signed area of a closed ring using the Shoelace formula.
+ */
+function ringArea(ring: { x: number; y: number }[]): number {
+  let area = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    area += (ring[j].x + ring[i].x) * (ring[j].y - ring[i].y);
+  }
+  return Math.abs(area) / 2;
+}
+
+/**
+ * Determine if a point `p` is inside a polygon using Ray-Casting algorithm.
+ */
+function pointInPolygon(p: { x: number; y: number }, polygon: { x: number; y: number }[]): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x, yi = polygon[i].y;
+    const xj = polygon[j].x, yj = polygon[j].y;
+    const intersect = ((yi > p.y) !== (yj > p.y))
+        && (p.x < (xj - xi) * (p.y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 // ───────────────────────── Phase 3: RDP simplification ────────────────────────
 
 /**
@@ -380,6 +550,22 @@ function simplifyRing(ring: { x: number; y: number }[], epsilon: number): { x: n
   return simplified;
 }
 
+/**
+ * Apply Chaikin's corner cutting algorithm (1 iteration) to smooth out 90-degree jagged edges.
+ */
+function chaikinSmooth(ring: { x: number; y: number }[]): { x: number; y: number }[] {
+  if (ring.length < 3) return ring;
+  const out: { x: number; y: number }[] = [];
+  const n = ring.length;
+  for (let i = 0; i < n; i++) {
+    const curr = ring[i];
+    const next = ring[(i + 1) % n];
+    out.push({ x: 0.75 * curr.x + 0.25 * next.x, y: 0.75 * curr.y + 0.25 * next.y });
+    out.push({ x: 0.25 * curr.x + 0.75 * next.x, y: 0.25 * curr.y + 0.75 * next.y });
+  }
+  return out;
+}
+
 // ────────────────────────── Pipeline glue / main entry ─────────────────────────
 
 function runWand(req: WandRequest): WandResponse {
@@ -407,14 +593,40 @@ function runWand(req: WandRequest): WandResponse {
     return { reqId: req.reqId, rings: [] };
   }
 
-  // Phase 2
-  const traced = traceBoundary(flood.mask, width, height);
+  // Phase 1.5: Morphological Close
+  const closedMask = morphClose(flood.mask, width, height);
+
+  // Phase 1.6: Connected-component filter — remove orphaned fragments introduced
+  // by morphClose (dilate bridges jagged edges → erode disconnects → orphans).
+  // Only needed in contiguous mode; non-contiguous intentionally keeps all islands.
+  const cleanMask = req.contiguous
+    ? keepConnectedToSeed(closedMask, flood.mask, width, height, req.seed)
+    : closedMask;
+
+  // Phase 2: Boundary tracing
+  const traced = traceBoundary(cleanMask, width, height);
   if (!traced.rings.length) {
     return { reqId: req.reqId, rings: [] };
   }
 
-  // Phase 3
-  const simplified = traced.rings
+  // Phase 2.5: Small area ring filtering (MIN_RING_AREA = 8)
+  // Check if the ring contains the clicked seed center point
+  const seedCenter = { x: req.seed.x + 0.5, y: req.seed.y + 0.5 };
+  const MIN_RING_AREA = 8;
+  const significantRings = traced.rings.filter(r => {
+    if (pointInPolygon(seedCenter, r)) {
+      return true; // Always keep the clicked seed's ring
+    }
+    return ringArea(r) >= MIN_RING_AREA;
+  });
+
+  if (!significantRings.length) {
+    return { reqId: req.reqId, rings: [] };
+  }
+
+  // Phase 3: Chaikin smoothing + Douglas-Peucker simplification
+  const smoothed = significantRings.map(r => chaikinSmooth(r));
+  const simplified = smoothed
     .map(r => simplifyRing(r, req.simplifyEpsilon))
     .filter(r => r.length >= 3);
 
@@ -428,6 +640,8 @@ function runWand(req: WandRequest): WandResponse {
     rings: simplified,
     debug: {
       floodPixels: flood.floodPixels,
+      ringsBeforeFilter: traced.rings.length,
+      ringsAfterFilter: significantRings.length,
       rawContourPoints: traced.rawCount,
       simplifiedPoints: simplifiedCount,
       ms: Math.round(t1 - t0),

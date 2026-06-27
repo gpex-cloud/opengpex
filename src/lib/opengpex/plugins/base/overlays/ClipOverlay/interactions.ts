@@ -28,7 +28,7 @@ import {
   asLocalRect,
   asLocalPolygon,
 } from '@opengpex/editor/core/types';
-import { computePolygonBounds } from '@opengpex/editor/core/geometry/operators/polygon';
+import { computePolygonBounds, computeRingArea } from '@opengpex/editor/core/geometry/operators/polygon';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
 import { magicWandClient } from './wand/client';
@@ -374,6 +374,15 @@ export const createLassoHandler = (): InteractionHandler => {
         }
 
         const ring = trail.slice(); // evenodd renderer + path Z auto-closes the contour
+
+        // Area validation: discard lasso gestures that are too small to be intentional
+        // (e.g. accidental micro-drags, hand tremor). Mirrors the MIN_RING_AREA filter
+        // used in the wand worker. Threshold is 8 sq-px (a 2×4 or 3×3 area).
+        const MIN_LASSO_AREA = 8;
+        if (computeRingArea(ring) < MIN_LASSO_AREA) {
+          return;
+        }
+
         const bounds = computePolygonBounds([ring]);
         const polygon = asLocalPolygon([ring], asLocalRect(bounds), gestureAA);
         // Pre-PR-6-2: write irregularCropBoxes['lasso'] directly, symmetric
@@ -430,8 +439,8 @@ const WAND_TIMEOUT_MS = 5_000;
  * scale=0.01 would otherwise yield epsilon=100 and over-collapse the polygon
  * into a near-triangle). 5 layer-pixels is the empirical sweet spot.
  */
-const WAND_SIMPLIFY_COEF = 1.0;
-const WAND_SIMPLIFY_FLOOR = 5;
+const WAND_SIMPLIFY_COEF = 0.8;
+const WAND_SIMPLIFY_FLOOR = 1.5;
 
 
 /**

@@ -141,6 +141,137 @@ export function layerLocalToFrameLocal(poly: LocalPolygon, layer: Layer, frame: 
   return worldToLocalPolygon(world, frame);
 }
 
+// ─────────────────────────── Polygon Utility Algorithms ────────────────────────
+
+/**
+ * isPointInPolygon: Determines whether a point lies inside a multi-ring polygon
+ * using the ray-casting (even-odd) algorithm.
+ *
+ * Works with the evenodd fill rule: a point is "inside" if the total number of
+ * ring boundary crossings (by a horizontal ray to +∞) is odd.
+ *
+ * @param point  The test point.
+ * @param rings  Array of closed rings (each ring is an array of Point2D vertices).
+ * @returns `true` if the point is inside the polygon (evenodd sense).
+ */
+export function isPointInPolygon(point: Point2D, rings: Point2D[][]): boolean {
+  let inside = false;
+  for (const ring of rings) {
+    const n = ring.length;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const xi = ring[i].x, yi = ring[i].y;
+      const xj = ring[j].x, yj = ring[j].y;
+      const intersect = ((yi > point.y) !== (yj > point.y))
+        && (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * computeRingArea: Calculates the unsigned area of a single closed ring using the
+ * Shoelace formula (Gauss's area formula).
+ *
+ * Returns the absolute value so callers don't need to worry about winding direction.
+ *
+ * @param ring  Array of vertices forming a closed polygon ring.
+ * @returns Absolute area in square units of the coordinate system.
+ */
+export function computeRingArea(ring: Point2D[]): number {
+  let area = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    area += (ring[j].x + ring[i].x) * (ring[j].y - ring[i].y);
+  }
+  return Math.abs(area) / 2;
+}
+
+/**
+ * simplifyOpen: Iterative Douglas–Peucker simplification for an OPEN polyline.
+ *
+ * Returns a simplified copy of `points`, keeping only vertices whose perpendicular
+ * distance to the active line segment exceeds `epsilon`.
+ *
+ * @param points  Open polyline vertices (first and last are always retained).
+ * @param epsilon Distance threshold — vertices closer than this to the simplified
+ *                line are dropped. Must be > 0; if ≤ 0 returns a copy of the input.
+ * @returns New array containing the simplified vertices.
+ */
+export function simplifyOpen(points: Point2D[], epsilon: number): Point2D[] {
+  const n = points.length;
+  if (n < 3 || epsilon <= 0) return points.slice();
+
+  const keep = new Uint8Array(n);
+  keep[0] = 1;
+  keep[n - 1] = 1;
+
+  // Stack of [start, end] index pairs.
+  const stack: number[] = [0, n - 1];
+  while (stack.length > 0) {
+    const e = stack.pop() as number;
+    const s = stack.pop() as number;
+    if (e <= s + 1) continue;
+
+    const ax = points[s].x, ay = points[s].y;
+    const bx = points[e].x, by = points[e].y;
+    const dx = bx - ax, dy = by - ay;
+    const segLen2 = dx * dx + dy * dy;
+
+    let maxD2 = -1;
+    let maxIdx = -1;
+    for (let i = s + 1; i < e; i++) {
+      const px = points[i].x, py = points[i].y;
+      let d2: number;
+      if (segLen2 === 0) {
+        const ex = px - ax, ey = py - ay;
+        d2 = ex * ex + ey * ey;
+      } else {
+        // Perpendicular distance squared from p to line (a, b).
+        const cross = (dx * (ay - py) - (ax - px) * dy);
+        d2 = (cross * cross) / segLen2;
+      }
+      if (d2 > maxD2) { maxD2 = d2; maxIdx = i; }
+    }
+
+    if (maxIdx >= 0 && maxD2 > epsilon * epsilon) {
+      keep[maxIdx] = 1;
+      stack.push(s, maxIdx, maxIdx, e);
+    }
+  }
+
+  const out: Point2D[] = [];
+  for (let i = 0; i < n; i++) {
+    if (keep[i]) out.push(points[i]);
+  }
+  return out;
+}
+
+/**
+ * simplifyRing: Douglas–Peucker simplification for a CLOSED polygon ring.
+ *
+ * Appends a copy of the first vertex, runs the open-polyline simplification,
+ * then removes the trailing duplicate before returning.
+ *
+ * @param ring    Closed ring vertices (no duplicated start/end vertex expected).
+ * @param epsilon Distance threshold (same semantics as `simplifyOpen`).
+ * @returns Simplified ring. Guaranteed to have ≥ 3 vertices if the input did,
+ *          unless epsilon is extremely large.
+ */
+export function simplifyRing(ring: Point2D[], epsilon: number): Point2D[] {
+  if (ring.length < 4 || epsilon <= 0) return ring.slice();
+  const closed = ring.slice();
+  closed.push(ring[0]);
+  const simplified = simplifyOpen(closed, epsilon);
+  if (simplified.length > 1 &&
+      simplified[0].x === simplified[simplified.length - 1].x &&
+      simplified[0].y === simplified[simplified.length - 1].y) {
+    simplified.pop();
+  }
+  return simplified;
+}
+
+// ─────────────────────────── SVG Path Generation ───────────────────────────────
+
 /**
  * polygonToSvgPathD: Generate a multi-ring SVG path `d` string with evenodd fill rule.
  *

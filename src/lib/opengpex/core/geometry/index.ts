@@ -39,7 +39,8 @@ import {
 } from './operators/shape';
 import {
   computePolygonBounds, localToWorldPolygon, worldToLocalPolygon,
-  frameLocalToLayerLocal as polyFrameToLayer, layerLocalToFrameLocal as polyLayerToFrame, polygonToSvgPathD
+  frameLocalToLayerLocal as polyFrameToLayer, layerLocalToFrameLocal as polyLayerToFrame, polygonToSvgPathD,
+  isPointInPolygon, computeRingArea, simplifyOpen, simplifyRing
 } from './operators/polygon';
 import { snapRect, snapToPixel, snapRectToPixel } from './operators/snapping';
 import {
@@ -149,6 +150,10 @@ export function createGeometryService(): GeometryService {
       frameLocalToLayerLocal: (poly: LocalPolygon, frame: Frame, layer: Layer) => polyFrameToLayer(poly, frame, layer),
       layerLocalToFrameLocal: (poly: LocalPolygon, layer: Layer, frame: Frame) => polyLayerToFrame(poly, layer, frame),
       polygonToSvgPathD: (poly: LocalPolygon) => polygonToSvgPathD(poly),
+      isPointInPolygon: (point: Point2D, rings: Point2D[][]) => isPointInPolygon(point, rings),
+      computeRingArea: (ring: Point2D[]) => computeRingArea(ring),
+      simplifyOpen: (points: Point2D[], epsilon: number) => simplifyOpen(points, epsilon),
+      simplifyRing: (ring: Point2D[], epsilon: number) => simplifyRing(ring, epsilon),
     },
     getScale: (frame: Frame, camera?: CameraState) => (camera || frame.camera).k,
     asWorldRect: (r: Rect) => asWorldRect(r),

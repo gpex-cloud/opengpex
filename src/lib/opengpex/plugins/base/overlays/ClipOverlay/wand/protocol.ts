@@ -96,6 +96,8 @@ export interface WandResponse {
   /** Optional debug stats — `client.ts` may surface these to DevTools. */
   debug?: {
     floodPixels: number;
+    ringsBeforeFilter?: number;
+    ringsAfterFilter?: number;
     rawContourPoints: number;
     simplifiedPoints: number;
     ms: number;
