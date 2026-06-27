@@ -147,12 +147,12 @@ export interface EditorActions {
         cut: AdvCommandRef;
         copy: AdvCommandRef;
         paste: AdvCommandRef<ClipboardLayerMetadata | { e?: ClipboardEvent } | undefined>;
-        drill: AdvCommandRef;
-        toMask: AdvCommandRef<{ layerId?: string } | undefined, Promise<void>>;
+        drill: AdvCommandRef<{ feather?: number } | undefined>;
+        toMask: AdvCommandRef<{ layerId?: string; feather?: number } | undefined, Promise<void>>;
       };
       cmdj: {
-        copy: AdvCommandRef;
-        cut: AdvCommandRef;
+        copy: AdvCommandRef<{ feather?: number } | undefined>;
+        cut: AdvCommandRef<{ feather?: number } | undefined>;
       };
       peel: {
         peelToExchange: AdvCommandRef<{ isCopy: boolean }>;

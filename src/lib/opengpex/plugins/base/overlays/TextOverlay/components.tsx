@@ -143,10 +143,12 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
         e.preventDefault();
         e.stopPropagation();
         cancelEditing();
-      } else if (e.key === "Enter" && e.metaKey) {
+      } else if (e.key === "Enter" && !e.shiftKey) {
+        // Enter without Shift → commit editing
         e.preventDefault();
         commitEditing();
       }
+      // Shift+Enter → default behavior (newline in contenteditable)
     },
     [cancelEditing, commitEditing],
   );

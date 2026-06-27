@@ -40,6 +40,21 @@ export interface PainterOptions {
  * Follows the top-left origin (0, 0) coordinate system.
  */
 
+/**
+ * Checks whether a clip sequence contains any feathered masks.
+ * When true, the rendering pipeline must use the offscreen compositing path
+ * instead of the simple ctx.clip() path.
+ */
+export function hasFeatheredClips(clipSequence: ClipDescriptor[]): boolean {
+  if (!clipSequence || clipSequence.length === 0) return false;
+  return clipSequence.some(clip => (clip.feather || 0) > 0);
+}
+
+/**
+ * applyClipSequence: Apply hard-edge vector mask clipping (feather === 0 path only).
+ * This function is the zero-overhead fast path for masks without feathering.
+ * When feather > 0 masks exist, they are handled by applyFeatheredClipComposite instead.
+ */
 export function applyClipSequence(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   layer: Layer,
@@ -49,6 +64,9 @@ export function applyClipSequence(
 
   const padding = 2000;
   for (const clip of clipSequence) {
+    // Skip feathered clips — they are handled separately via offscreen compositing
+    if ((clip.feather || 0) > 0) continue;
+
     const path = clip.__compiledPath2D || shapeToPath2D(shrinkInvertedMask(clip.shape, clip.inverted));
     if (clip.inverted) {
       // [Bugfix]: Correct local coordinate offset clipping boundary overrun issues when drawing inverted masks (hole punching).
@@ -67,6 +85,102 @@ export function applyClipSequence(
     }
   }
 }
+
+/**
+ * applyFeatheredClipComposite: Applies feathered vector masks via offscreen canvas compositing.
+ *
+ * Algorithm:
+ * 1. For each feathered clip descriptor, create a padded mask canvas.
+ * 2. Fill the mask shape (offset by padding) with white on the mask canvas.
+ * 3. Apply Gaussian blur (ctx.filter = 'blur(Npx)') by re-drawing the mask onto itself.
+ * 4. Composite the blurred mask onto the layerCanvas using destination-in.
+ *
+ * The mask canvas is enlarged by `ceil(feather * 3)` padding on each side to prevent
+ * Gaussian blur truncation at canvas edges. The final composite draws the padded mask
+ * at negative offset to align it back with the layer content.
+ *
+ * This function is called AFTER the layer content has been drawn onto `layerCanvas`.
+ * The `dprScale` parameter converts logical feather px to physical blur radius.
+ */
+export function applyFeatheredClipComposite(
+  layerCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  layer: Layer,
+  clipSequence: ClipDescriptor[],
+  canvasWidth: number,
+  canvasHeight: number,
+  dprScale: number = 1
+) {
+  if (!clipSequence || clipSequence.length === 0) return;
+
+  const invertedPadding = 2000;
+
+  for (const clip of clipSequence) {
+    const feather = clip.feather || 0;
+    if (feather <= 0) continue; // Non-feathered clips are already handled by applyClipSequence
+
+    // Compute physical blur radius (feather is in layer-local logical pixels)
+    const physicalRadius = feather * dprScale;
+
+    // Padding to prevent blur truncation at canvas edges.
+    // Gaussian blur at radius R extends ~3R pixels beyond the source edge.
+    const blurPad = Math.ceil(physicalRadius * 3);
+
+    // Create a padded mask canvas
+    const maskW = canvasWidth + blurPad * 2;
+    const maskH = canvasHeight + blurPad * 2;
+    const maskCanvas = new OffscreenCanvas(maskW, maskH);
+    const maskCtx = maskCanvas.getContext('2d')!;
+
+    let vx = 0, vy = 0;
+    if (layer.visibleShape) {
+      vx = layer.visibleShape.rect.x;
+      vy = layer.visibleShape.rect.y;
+    }
+
+    // [Coordinate Translation Rationale]
+    // The feathered vector mask shape is defined in the original/parent layer coordinates (with vx, vy offset).
+    // Since the layer content has been translated to land at (0,0) of the offscreen canvas, we must also
+    // translate the mask shape by (-vx, -vy) in addition to the blurPad (which offsets the Gaussian blur padding).
+    // This ensures both the blurred mask and the content align perfectly at (0,0) of the offscreen canvas.
+    maskCtx.translate(blurPad - vx, blurPad - vy);
+
+    // Draw the mask shape (white fill on transparent background)
+    const path = clip.__compiledPath2D || shapeToPath2D(shrinkInvertedMask(clip.shape, clip.inverted));
+
+    if (clip.inverted) {
+      // For inverted feathered masks: fill the entire area white, then cut out the shape
+      const invertedPath = new Path2D();
+      invertedPath.rect(vx - invertedPadding, vy - invertedPadding, layer.bounding.w + invertedPadding * 2, layer.bounding.h + invertedPadding * 2);
+      invertedPath.addPath(path);
+      maskCtx.fillStyle = '#ffffff';
+      maskCtx.fill(invertedPath, 'evenodd');
+    } else {
+      // For non-inverted feathered masks: fill only the shape area
+      maskCtx.fillStyle = '#ffffff';
+      maskCtx.fill(path, 'nonzero');
+    }
+
+    // Apply Gaussian blur to the mask by re-drawing with filter
+    if (physicalRadius > 0) {
+      const blurCanvas = new OffscreenCanvas(maskW, maskH);
+      const blurCtx = blurCanvas.getContext('2d')!;
+      blurCtx.filter = `blur(${physicalRadius}px)`;
+      blurCtx.drawImage(maskCanvas, 0, 0);
+
+      // Clear original mask and copy blurred result back
+      maskCtx.setTransform(1, 0, 0, 1, 0, 0); // Reset before clearing
+      maskCtx.clearRect(0, 0, maskW, maskH);
+      maskCtx.drawImage(blurCanvas, 0, 0);
+    }
+
+    // Composite: draw the padded+blurred mask at (-blurPad, -blurPad) to align with layer content
+    layerCtx.save();
+    layerCtx.setTransform(1, 0, 0, 1, 0, 0); // Reset to identity for pixel-space compositing
+    layerCtx.globalCompositeOperation = 'destination-in';
+    layerCtx.drawImage(maskCanvas, -blurPad, -blurPad);
+    layerCtx.restore();
+  }
+}
 export function drawLayerInstance(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   layer: Layer,
@@ -78,24 +192,102 @@ export function drawLayerInstance(
     imageSmoothingQuality = 'high', tileCount, dprScale
   } = options;
 
-  ctx.save();
+  // Detect if feathered compositing path is needed
+  const needsFeather = hasFeatheredClips(clipSequence || []);
 
-  // 1. Inject geometric transformations
-  if (matrix) {
-    ctx.setTransform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.tx, matrix.ty);
+  if (needsFeather) {
+    // ═══════════════════════════════════════════════════════════════════════════
+    // FEATHERED PATH: Offscreen canvas compositing
+    // The offscreen operates in LAYER-LOCAL coordinates (identity transform).
+    // Only the final composite step applies the full viewport matrix.
+    // ═══════════════════════════════════════════════════════════════════════════
+    const canvasW = Math.ceil(layer.bounding.w);
+    const canvasH = Math.ceil(layer.bounding.h);
+    if (canvasW <= 0 || canvasH <= 0) return;
+
+    const offscreen = new OffscreenCanvas(canvasW, canvasH);
+    const offCtx = offscreen.getContext('2d')!;
+
+    // Draw content onto offscreen in layer-local space (NO matrix — identity)
+    offCtx.save();
+    // [Coordinate Translation Rationale]
+    // Cropped layers (fragments) draw their pixel content at original offset coordinates (vx, vy).
+    // Because the offscreen canvas is compact (only matching the cropped width/height),
+    // we translate offCtx by (-vx, -vy) so that the drawn content lands exactly at (0, 0)
+    // inside the offscreen canvas boundaries, preventing it from being drawn out-of-bounds.
+    if (layer.visibleShape) {
+      offCtx.translate(-layer.visibleShape.rect.x, -layer.visibleShape.rect.y);
+    }
+    offCtx.imageSmoothingEnabled = false;
+    offCtx.imageSmoothingQuality = imageSmoothingQuality;
+    offCtx.filter = getAdjustmentsData(layer.adjustments);
+
+    // Apply only hard clips (feather === 0 clips) — these are already in layer-local coords
+    applyClipSequence(offCtx, layer, clipSequence || []);
+
+    // Draw content in layer-local space
+    drawLayerContent(offCtx, layer, source, drawRect, dprScale, tileCount);
+    offCtx.restore();
+
+    // Apply feathered masks via offscreen compositing (layer-local space, dprScale=1)
+    applyFeatheredClipComposite(offCtx, layer, clipSequence || [], canvasW, canvasH, 1);
+
+    // Composite offscreen result to main canvas with full viewport matrix
+    ctx.save();
+    if (matrix) {
+      ctx.setTransform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.tx, matrix.ty);
+    }
+    ctx.globalAlpha = opacity ?? layer.opacity;
+    let vx = 0, vy = 0;
+    if (layer.visibleShape) {
+      vx = layer.visibleShape.rect.x;
+      vy = layer.visibleShape.rect.y;
+    }
+    // [Coordinate Translation Rationale]
+    // The layer's world matrix applied to ctx compensates for the visible shape offset by shifting (-vx, -vy).
+    // To counteract this shift and align the offscreen canvas (where the feathered fragment sits at 0,0) with
+    // the layer's correct layout and hit-test boundaries, we must draw the offscreen canvas at (vx, vy).
+    ctx.drawImage(offscreen, vx, vy, layer.bounding.w, layer.bounding.h);
+    ctx.restore();
+  } else {
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STANDARD PATH: Direct rendering with ctx.clip() (zero overhead when no feather)
+    // ═══════════════════════════════════════════════════════════════════════════
+    ctx.save();
+
+    // 1. Inject geometric transformations
+    if (matrix) {
+      ctx.setTransform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.tx, matrix.ty);
+    }
+
+    // 2. Inject style context
+    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingQuality = imageSmoothingQuality;
+    ctx.filter = getAdjustmentsData(layer.adjustments);
+    ctx.globalAlpha = opacity ?? layer.opacity;
+
+    // 3. Inject mask clipping sequence (all hard-edge since no feather)
+    applyClipSequence(ctx, layer, clipSequence || []);
+
+    // 4. Execute pixel drawing
+    drawLayerContent(ctx, layer, source, drawRect, dprScale, tileCount);
+
+    ctx.restore();
   }
+}
 
-  // 2. Inject style context
-  ctx.imageSmoothingEnabled = false;
-  ctx.imageSmoothingQuality = imageSmoothingQuality;
-  ctx.filter = getAdjustmentsData(layer.adjustments);
-  ctx.globalAlpha = opacity ?? layer.opacity;
-
-
-  // 3. Inject mask clipping sequence
-  applyClipSequence(ctx, layer, clipSequence || []);
-
-  // 4. Execute pixel drawing (follows matrix positioning, starts drawing directly from (0,0))
+/**
+ * drawLayerContent: Internal helper that draws the actual layer pixels.
+ * Extracted to avoid duplication between the standard path and the feathered offscreen path.
+ */
+function drawLayerContent(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  layer: Layer,
+  source: CanvasImageSource | ImageBitmap | TileData[] | null | undefined,
+  drawRect: { x: number, y: number, w: number, h: number } | undefined,
+  dprScale: number | undefined,
+  tileCount: number | undefined
+) {
   if (layer.type === 'color') {
     ctx.fillStyle = layer.metadata?.fillColor || '#000000';
     let clipped = false;
@@ -220,8 +412,6 @@ export function drawLayerInstance(
       ctx.drawImage(source, 0, 0, layer.bounding.w, layer.bounding.h);
     }
   }
-
-  ctx.restore();
 }
 
 /** Splits text by character to implement auto line-wrap (supports Chinese) */

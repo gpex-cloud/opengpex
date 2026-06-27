@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Matrix3x3 } from '@opengpex/editor/core/geometry/matrix';
+import { Matrix3x3 } from '../matrix';
 import { CameraState, Dimensions, ViewportPoint, Point2D, WorldRect, asWorldRect } from '@opengpex/editor/core/types';
 
 export interface CameraCenterOptions {

@@ -104,12 +104,12 @@ export const LayerFactory = {
   /**
    * getNewVectorMask: Creates a standardized vector mask object.
    */
-  getNewVectorMask(shape: LocalShape, inverted = false): VectorMask {
+  getNewVectorMask(shape: LocalShape, inverted = false, feather = 0): VectorMask {
     return {
       id: `mask-${shape.type}-${Date.now()}`,
       shape: { ...shape } as LocalShape,
       inverted,
-      feather: 0,
+      feather,
       enabled: true
     };
   },

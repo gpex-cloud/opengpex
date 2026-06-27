@@ -69,6 +69,7 @@ export async function mergeLayersToLayer(
     const clipSequence = layer.vectorMasks?.map(m => ({
       shape: m.shape,
       inverted: m.inverted,
+      feather: m.feather || 0,
       __compiledPath2D: shapeToPath2D(shrinkInvertedMask(m.shape, m.inverted))
     })) as ClipDescriptor[];
 
@@ -118,6 +119,11 @@ export async function mergeLayersToLayer(
         if (maskBitmap) {
           tempCtx.save();
           tempCtx.setTransform(scaledMatrix.a, scaledMatrix.b, scaledMatrix.c, scaledMatrix.d, scaledMatrix.tx, scaledMatrix.ty);
+          // Apply feather (Gaussian blur) if specified on this bitmap mask
+          if (bm.feather > 0) {
+            const physicalRadius = bm.feather * scaledMatrix.a;
+            tempCtx.filter = `blur(${physicalRadius}px)`;
+          }
           tempCtx.globalCompositeOperation = bm.inverted ? 'destination-out' : 'destination-in';
           tempCtx.drawImage(maskBitmap, bm.bounds.x, bm.bounds.y, bm.bounds.w, bm.bounds.h);
           tempCtx.restore();
@@ -187,6 +193,7 @@ export async function mergeLayersWithShape(
     const clipSequence = layer.vectorMasks?.map(m => ({
       shape: m.shape,
       inverted: m.inverted,
+      feather: m.feather || 0,
       __compiledPath2D: shapeToPath2D(shrinkInvertedMask(m.shape, m.inverted))
     })) as ClipDescriptor[];
 
@@ -238,6 +245,11 @@ export async function mergeLayersWithShape(
         if (maskBitmap) {
           tempCtx.save();
           tempCtx.setTransform(scaledMatrix.a, scaledMatrix.b, scaledMatrix.c, scaledMatrix.d, scaledMatrix.tx, scaledMatrix.ty);
+          // Apply feather (Gaussian blur) if specified on this bitmap mask
+          if (bm.feather > 0) {
+            const physicalRadius = bm.feather * scaledMatrix.a;
+            tempCtx.filter = `blur(${physicalRadius}px)`;
+          }
           tempCtx.globalCompositeOperation = bm.inverted ? 'destination-out' : 'destination-in';
           tempCtx.drawImage(maskBitmap, bm.bounds.x, bm.bounds.y, bm.bounds.w, bm.bounds.h);
           tempCtx.restore();

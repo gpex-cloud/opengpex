@@ -567,6 +567,9 @@ export const createWandHandler = (): InteractionHandler => {
   // still running is a no-op (we don't queue). The Worker timeout puts an
   // upper bound on lock duration.
   let busy = false;
+  // Discard flag: set when double-click clears selection while a wand worker
+  // is still in-flight. The pending result is silently dropped on completion.
+  let discardPending = false;
 
   return {
     id: 'clip-wand',
@@ -597,6 +600,9 @@ export const createWandHandler = (): InteractionHandler => {
       // Check BEFORE the `busy` guard because the first click of a double-click
       // may have started an async wand worker that's still in-flight.
       if ((e.nativeEvent as MouseEvent).detail === 2) {
+        // Mark any in-flight wand request as discarded so it won't write back
+        // a new selection after the clear.
+        discardPending = true;
         e.actions.executeCommand(CLIP_OPTIONS_CMD_RESET_BOX);
         return;
       }
@@ -606,6 +612,7 @@ export const createWandHandler = (): InteractionHandler => {
         return;
       }
       busy = true;
+      discardPending = false; // Reset for the new request
 
       try {
         // 1. Pick target layer.
@@ -672,6 +679,10 @@ export const createWandHandler = (): InteractionHandler => {
           e.actions.setInteraction({ selectionErrorPulse: Date.now() });
           return;
         }
+
+        // If a double-click occurred while the worker was running, discard
+        // the result — the user already cleared the selection intentionally.
+        if (discardPending) return;
 
         // 5. Project layer-local rings → frame-local. We construct a
         //    minimal LocalPolygon in layer-space and let the polygon engine

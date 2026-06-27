@@ -304,6 +304,11 @@ export class Canvas2dEngine implements IRenderer {
             offscreenMatrix.ty
           );
         }
+        // Apply feather (Gaussian blur) if specified on this bitmap mask
+        if (bm.feather > 0) {
+          const physicalRadius = bm.feather * (offscreenMatrix?.a || 1);
+          offCtx.filter = `blur(${physicalRadius}px)`;
+        }
         offCtx.imageSmoothingEnabled = false; // Match content layer to avoid double-linear interpolation causing mask edge feathering
         offCtx.globalCompositeOperation = bm.inverted ? 'destination-out' : 'destination-in';
         offCtx.drawImage(maskSource as CanvasImageSource, bm.bounds.x, bm.bounds.y, bm.bounds.w, bm.bounds.h);

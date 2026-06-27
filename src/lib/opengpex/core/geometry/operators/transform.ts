@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Matrix3x3, GeometryOp } from '@opengpex/editor/core/geometry/matrix';
+import { Matrix3x3, GeometryOp } from '../matrix';
 import { Layer, Frame, IMatrix3x3, asLocalRect, asLocalPoint, asLocalPolygon, LocalPolygon, LocalShape, LayerPoseOverride, isPolygon } from '@opengpex/editor/core/types';
 import { computePolygonBounds } from './polygon';
 
@@ -170,9 +170,9 @@ function transformPolygon(
     switch (op) {
       case 'rotate_r': return { x: oldH - py, y: px };
       case 'rotate_l': return { x: py, y: oldW - px };
-      case 'flip_h':   return { x: oldW - px, y: py };
-      case 'flip_v':   return { x: px, y: oldH - py };
-      default:         return { x: px, y: py };
+      case 'flip_h': return { x: oldW - px, y: py };
+      case 'flip_v': return { x: px, y: oldH - py };
+      default: return { x: px, y: py };
     }
   };
 

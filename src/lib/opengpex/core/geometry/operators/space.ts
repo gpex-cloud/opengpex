@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Matrix3x3 } from '@opengpex/editor/core/geometry/matrix';
+import { Matrix3x3 } from '../matrix';
 import {
   CameraState, Dimensions, WorldPoint, ViewportPoint, LocalPoint,
   LocalRect, WorldRect, Rect, asWorldPoint, asViewportPoint,
@@ -255,7 +255,7 @@ export function clampRectWithAspect(
  * Constrain point within rectangle and return overflow vector (Delta)
  */
 export function clampPointToRect(
-  p: Point2D, 
+  p: Point2D,
   rect: Dimensions
 ): { x: number, y: number, dx: number, dy: number } {
   const nextX = Math.max(0, Math.min(p.x, rect.w));
@@ -297,8 +297,8 @@ export function balanceVectorByAspect(
  * Prevents selection or layer from moving completely out of visible area.
  */
 export function clampRectWithOverlap<T extends Rect>(
-  rect: T, 
-  boundary: Dimensions, 
+  rect: T,
+  boundary: Dimensions,
   minOverlap = 1
 ): T {
   const next = { ...rect };

@@ -204,3 +204,29 @@ export const CLIP_OPTIONS_CMD_BRANCH = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_BRAN
 export const CLIP_OPTIONS_CMD_SET_CROP_TOOL = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CROP_TOOL}`;
 export const CLIP_OPTIONS_SIGNAL_RE_CANVAS = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_RE_CANVAS}`;
 
+// Feather selection signal — stores the current feather radius (px) for Apply Mask / Drill
+export const SIGNAL_CROP_FEATHER = 'signal.crop_feather.value';
+export const CLIP_OPTIONS_SIGNAL_CROP_FEATHER = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_CROP_FEATHER}`;
+
+/**
+ * CMD_DRILL_SELECTION — Plugin-level wrapper around `adv.layer.clip.drill`.
+ * Owns the Backspace/Delete keyboard shortcuts and reads the feather signal
+ * before delegating to the core drill command with the feather payload.
+ * This keeps core independent of plugin signal knowledge.
+ */
+export const CMD_DRILL_SELECTION = 'cmd.drill_selection';
+
+/**
+ * CMD_LAYER_VIA_COPY — Plugin-level wrapper around `adv.layer.cmdj.copy`.
+ * Owns the Cmd+J keyboard shortcut and reads the feather signal before
+ * delegating to the core command with the feather payload.
+ */
+export const CMD_LAYER_VIA_COPY = 'cmd.layer_via_copy';
+
+/**
+ * CMD_LAYER_VIA_CUT — Plugin-level wrapper around `adv.layer.cmdj.cut`.
+ * Owns the Cmd+Shift+J keyboard shortcut and reads the feather signal before
+ * delegating to the core command with the feather payload.
+ */
+export const CMD_LAYER_VIA_CUT = 'cmd.layer_via_cut';
+

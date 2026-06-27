@@ -79,6 +79,7 @@ export async function bakeAssetMasks(hash: string, masks: VectorMask[]): Promise
   const clipSequence = masks.map(m => ({
     shape: m.shape,
     inverted: m.inverted,
+    feather: m.feather || 0,
     __compiledPath2D: shapeToPath2D(shrinkInvertedMask(m.shape, m.inverted))
   })) as ClipDescriptor[];
 

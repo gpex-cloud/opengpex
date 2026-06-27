@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Matrix3x3 } from '@opengpex/editor/core/geometry/matrix';
+import { Matrix3x3 } from '../matrix';
 import { Dimensions, Frame, WorldPoint, Rect, asWorldPoint, Point2D, WorldRect, asLocalRect } from '@opengpex/editor/core/types';
 import { getLayerWorldMatrix } from './transform';
 import { worldToLocalRect, localToWorldRect } from './space';

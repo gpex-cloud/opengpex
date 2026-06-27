@@ -125,7 +125,7 @@ export const PixelUtils = {
     const activeMasks = layer.vectorMasks?.filter(m => m.enabled);
     if (activeMasks) {
       for (const mask of activeMasks) {
-        pipeline.push({ shape: mask.shape, inverted: mask.inverted });
+        pipeline.push({ shape: mask.shape, inverted: mask.inverted, feather: mask.feather || 0 });
       }
     }
     return pipeline;

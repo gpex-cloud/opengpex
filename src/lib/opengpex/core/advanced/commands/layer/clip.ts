@@ -24,7 +24,6 @@ import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
-
 // Removed direct dependency on storage singleton, using ctx injection instead
 
 /**
@@ -261,7 +260,7 @@ export const LayerClipCommands = {
     id: P.ADV_LAYER_CLIP_TO_MASK,
     name: 'Apply as Layer Mask',
     undoable: true,
-    execute: async (ctx: EditorContextValue, payload?: { layerId?: string }): Promise<void> => {
+    execute: async (ctx: EditorContextValue, payload?: { layerId?: string; feather?: number }): Promise<void> => {
       const { activeFrame, activeLayer, actions, geometry, layers } = ctx;
       if (!activeFrame) return;
 
@@ -294,9 +293,12 @@ export const LayerClipCommands = {
         localShape = box.spatial;
       }
 
+      // Read feather radius from payload (0 = no feather)
+      const feather = payload?.feather ?? 0;
+
       // Apply as VectorMask (Reveal Selection — inverted=false)
       layers.updateLayer(activeFrame.id, tx => {
-        tx.edit(targetLayer.id).applyMask(localShape, false);
+        tx.edit(targetLayer.id).applyMask(localShape, false, feather);
       });
 
       // Clear the applied selection slot (shares the same undo atom):
@@ -305,13 +307,13 @@ export const LayerClipCommands = {
         actions.setClipBox(activeFrame.id, clipToolId, null);
       }
     },
-  } as EditorCommand<{ layerId?: string } | undefined, Promise<void>>,
+  } as EditorCommand<{ layerId?: string; feather?: number } | undefined, Promise<void>>,
 
   drill: {
     id: P.ADV_LAYER_CLIP_DRILL,
     name: 'Delete Selection',
     undoable: true,
-    execute: async (ctx: EditorContextValue): Promise<void> => {
+    execute: async (ctx: EditorContextValue, payload?: { feather?: number }): Promise<void> => {
       const { activeFrame, activeLayer, actions, geometry } = ctx;
       const isClipActive = ctx.state.interaction.interactionMode === 'clip';
       if (!activeFrame || !activeLayer || !isClipActive) return;
@@ -326,17 +328,16 @@ export const LayerClipCommands = {
           ? polygonToShape(geometry.polygon.frameLocalToLayerLocal(box.spatial, activeFrame, latestLayer))
           : geometry.shape.frameLocalToLayerLocal(box.spatial, activeFrame, latestLayer);
 
+        // Read feather radius from payload (0 = no feather)
+        const feather = payload?.feather ?? 0;
+
         ctx.layers.updateLayer(activeFrame.id, tx => {
           tx.edit(activeLayer.id)
-            .applyMask(localShape, true);
+            .applyMask(localShape, true, feather);
         });
       } catch (err) {
         console.error('[ClipCommands] Drill selection failed:', err);
       }
     },
-    shortcuts: [
-      { key: 'Backspace' },
-      { key: 'Delete' }
-    ]
-  } as EditorCommand<void, Promise<void>>
+  } as EditorCommand<{ feather?: number } | undefined, Promise<void>>
 };

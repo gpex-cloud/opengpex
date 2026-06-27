@@ -566,7 +566,56 @@ export const CLIP_OPTIONS_COMMANDS = {
         }
       }
     }
-  } as EditorCommand<{ tool: CropTool }, void>
+  } as EditorCommand<{ tool: CropTool }, void>,
+
+  /**
+   * CMD_DRILL_SELECTION — Plugin-level wrapper around `adv.layer.clip.drill`.
+   * Owns the Backspace/Delete keyboard shortcuts and reads the feather signal
+   * before delegating to the core drill command with the feather payload.
+   * This keeps core (`clip.ts`) completely independent of plugin signal knowledge.
+   */
+  drillSelection: {
+    id: P.CMD_DRILL_SELECTION,
+    name: 'Delete Selection (Feathered)',
+    shortcuts: [
+      { key: 'Backspace' },
+      { key: 'Delete' }
+    ],
+    execute: (ctx: EditorContextValue) => {
+      const feather = (ctx.scoped?.getSignal(P.SIGNAL_CROP_FEATHER) as number) || 0;
+      ctx.actions.adv.layer.clip.drill.execute({ feather });
+    }
+  } as EditorCommand<void, void>,
+
+  /**
+   * CMD_LAYER_VIA_COPY — Plugin-level wrapper around `adv.layer.cmdj.copy`.
+   * Owns the Cmd+J keyboard shortcut and reads the feather signal before
+   * delegating to the core command with the feather payload.
+   */
+  layerViaCopy: {
+    id: P.CMD_LAYER_VIA_COPY,
+    name: 'Layer via Copy',
+    shortcut: { key: 'j', meta: true },
+    execute: (ctx: EditorContextValue) => {
+      const feather = (ctx.scoped?.getSignal(P.SIGNAL_CROP_FEATHER) as number) || 0;
+      ctx.actions.adv.layer.cmdj.copy.execute({ feather });
+    }
+  } as EditorCommand<void, void>,
+
+  /**
+   * CMD_LAYER_VIA_CUT — Plugin-level wrapper around `adv.layer.cmdj.cut`.
+   * Owns the Cmd+Shift+J keyboard shortcut and reads the feather signal before
+   * delegating to the core command with the feather payload.
+   */
+  layerViaCut: {
+    id: P.CMD_LAYER_VIA_CUT,
+    name: 'Layer via Cut',
+    shortcut: { key: 'j', meta: true, shift: true },
+    execute: (ctx: EditorContextValue) => {
+      const feather = (ctx.scoped?.getSignal(P.SIGNAL_CROP_FEATHER) as number) || 0;
+      ctx.actions.adv.layer.cmdj.cut.execute({ feather });
+    }
+  } as EditorCommand<void, void>
 
 };
 

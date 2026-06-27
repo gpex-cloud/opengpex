@@ -58,7 +58,7 @@ export interface LayerService {
   /** Creates a layer from an external image Blob (handles asset registration and position calculation) */
   createLayerFromBlob: (blob: Blob, frame: Frame, screenPoint?: { x: number, y: number }) => Promise<Layer>;
   getBlank: () => Partial<Layer>;
-  getNewVectorMask: (shape: LocalShape, inverted?: boolean) => VectorMask;
+  getNewVectorMask: (shape: LocalShape, inverted?: boolean, feather?: number) => VectorMask;
   getNewBitmapMask: (src: string, assetId: string, bounds: LocalRect) => BitmapMask;
 }
 
@@ -96,7 +96,7 @@ export interface LayerEditor {
   /** Removes masks (supports pattern matching) */
   removeMask: (pattern: string) => LayerEditor;
   /** Adds a mask */
-  applyMask: (shape: LocalShape, inverted?: boolean) => LayerEditor;
+  applyMask: (shape: LocalShape, inverted?: boolean, feather?: number) => LayerEditor;
   /** General patch (for quickly setting other attributes) */
   patch: (data: Partial<Layer>) => LayerEditor;
   /** Resets the layer to the system default blank state */

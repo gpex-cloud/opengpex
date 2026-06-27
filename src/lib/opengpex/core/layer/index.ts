@@ -72,9 +72,9 @@ export function createLayerService(
               patches[layerId].vectorMasks = newMasks;
               return editor;
             },
-            applyMask: (shape, inverted = false) => {
+            applyMask: (shape, inverted = false, feather = 0) => {
               const currentMasks = patches[layerId].vectorMasks || [];
-              const newMask = LayerFactory.getNewVectorMask(shape, inverted);
+              const newMask = LayerFactory.getNewVectorMask(shape, inverted, feather);
               patches[layerId].vectorMasks = [...currentMasks, newMask];
               return editor;
             },

@@ -19,20 +19,40 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, LocalShape } from '@opengpex/editor/core/types';
+import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
 /**
+ * Resolve the selection box into a LocalShape in the target layer's local coordinates.
+ */
+function resolveLocalShape(
+  box: { regular: boolean; spatial: any },
+  activeFrame: any,
+  targetLayer: any,
+  geometry: EditorContextValue['geometry']
+): LocalShape {
+  if (!box.regular) {
+    const layerPoly = geometry.polygon.frameLocalToLayerLocal(box.spatial, activeFrame, targetLayer);
+    return polygonToShape(layerPoly);
+  }
+  return geometry.shape.frameLocalToLayerLocal(box.spatial, activeFrame, targetLayer);
+}
+
+/**
  * CMD+J commands: Create new layers by copying or cutting selections.
+ *
+ * feather === 0: uses fragmentToLayerLogical (geometric crop, zero overhead).
+ * feather > 0: duplicates the full layer + VectorMask (no hard edges).
  */
 export const LayerCmdJCommands = {
   copyToLayer: {
     id: P.ADV_LAYER_CMDJ_COPY,
     name: 'Copy to Layer',
     undoable: true,
-    execute: async (ctx: EditorContextValue): Promise<void> => {
-      const { activeFrame, activeLayer, state } = ctx;
+    execute: async (ctx: EditorContextValue, payload?: { feather?: number }): Promise<void> => {
+      const { activeFrame, activeLayer, state, geometry } = ctx;
       const isClipMode = state.interaction.interactionMode === 'clip';
       if (!activeFrame || !activeLayer || !isClipMode || activeLayer.type !== 'image') {
         ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
@@ -42,39 +62,47 @@ export const LayerCmdJCommands = {
       try {
         const latestLayer = ctx.actions.fast.latestLayer(activeFrame.id, activeLayer.id) || activeLayer;
         const box = getClipBox(activeFrame);
+        const feather = payload?.feather ?? 0;
 
         if (box) {
-          // With selection: copy selection
-          const result = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, 'Layer');
-          if (!result) {
-            ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
-            return;
+          if (feather > 0) {
+            // Feathered: duplicate full layer + reveal VectorMask.
+            const localShape = resolveLocalShape(box, activeFrame, latestLayer, geometry);
+            const newName = ctx.layers.getNewLayerName(
+              activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), 'Layer'
+            );
+            const { id: _id, parentId: _pid, role: _role, ...layerData } = latestLayer;
+            const newLayer = ctx.layers.getNewLayer({
+              ...layerData, name: newName, vectorMasks: [],
+            });
+            newLayer.vectorMasks = [ctx.layers.getNewVectorMask(localShape, false, feather)];
+            ctx.layers.addLayer(activeFrame.id, newLayer);
+          } else {
+            // Non-feathered: geometric fragment crop.
+            const result = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, 'Layer');
+            if (!result) { ctx.actions.setInteraction({ selectionErrorPulse: Date.now() }); return; }
+            ctx.layers.addLayer(activeFrame.id, result.newLayer);
           }
-          ctx.layers.addLayer(activeFrame.id, result.newLayer);
         } else {
-          // Without selection: copy the entire layer
-          const newName = ctx.layers.getNewLayerName(activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), `${latestLayer.name} Copy`);
-          const newLayer = ctx.layers.getNewLayer({
-            ...latestLayer,
-            id: undefined,
-            name: newName,
-            parentId: undefined
-          });
+          // No selection: copy entire layer
+          const newName = ctx.layers.getNewLayerName(
+            activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), `${latestLayer.name} Copy`
+          );
+          const newLayer = ctx.layers.getNewLayer({ ...latestLayer, id: undefined, name: newName, parentId: undefined });
           ctx.layers.addLayer(activeFrame.id, newLayer);
         }
       } catch (err) {
         console.error('[ClipCommands] Layer via Copy failed:', err);
       }
     },
-    shortcut: { key: 'j', meta: true }
-  } as EditorCommand<void, Promise<void>>,
+  } as EditorCommand<{ feather?: number } | undefined, Promise<void>>,
 
   cutToLayer: {
     id: P.ADV_LAYER_CMDJ_CUT,
     name: 'Cut to Layer',
     undoable: true,
-    execute: async (ctx: EditorContextValue): Promise<void> => {
-      const { activeFrame, activeLayer, actions, state } = ctx;
+    execute: async (ctx: EditorContextValue, payload?: { feather?: number }): Promise<void> => {
+      const { activeFrame, activeLayer, actions, state, geometry } = ctx;
       const isClipMode = state.interaction.interactionMode === 'clip';
       if (!activeFrame || !activeLayer || !isClipMode || activeLayer.type !== 'image') {
         actions.setInteraction({ selectionErrorPulse: Date.now() });
@@ -88,22 +116,35 @@ export const LayerCmdJCommands = {
           actions.setInteraction({ selectionErrorPulse: Date.now() });
           return;
         }
-        const result = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, 'Layer');
-        if (!result) {
-          actions.setInteraction({ selectionErrorPulse: Date.now() });
-          return;
-        }
 
-        // Apply a hole mask to the original layer
+        const feather = payload?.feather ?? 0;
+        const localShape = resolveLocalShape(box, activeFrame, latestLayer, geometry);
+
+        // Punch a hole in the original layer (inverted mask)
         ctx.layers.updateLayer(activeFrame.id, (tx) => {
-          tx.edit(activeLayer.id).applyMask(result.localShape, true);
+          tx.edit(activeLayer.id).applyMask(localShape, true, feather);
         });
 
-        ctx.layers.addLayer(activeFrame.id, result.newLayer);
+        if (feather > 0) {
+          // Feathered: duplicate full layer + reveal VectorMask.
+          const newName = ctx.layers.getNewLayerName(
+            activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), 'Layer'
+          );
+          const { id: _id, parentId: _pid, role: _role, ...layerData } = latestLayer;
+          const newLayer = ctx.layers.getNewLayer({
+            ...layerData, name: newName, vectorMasks: [],
+          });
+          newLayer.vectorMasks = [ctx.layers.getNewVectorMask(localShape, false, feather)];
+          ctx.layers.addLayer(activeFrame.id, newLayer);
+        } else {
+          // Non-feathered: geometric fragment crop.
+          const result = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, 'Layer');
+          if (!result) { actions.setInteraction({ selectionErrorPulse: Date.now() }); return; }
+          ctx.layers.addLayer(activeFrame.id, result.newLayer);
+        }
       } catch (err) {
         console.error('[ClipCommands] Layer via Cut failed:', err);
       }
     },
-    shortcut: { key: 'j', meta: true, shift: true }
-  } as EditorCommand<void, Promise<void>>
+  } as EditorCommand<{ feather?: number } | undefined, Promise<void>>
 };

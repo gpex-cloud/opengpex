@@ -20,8 +20,8 @@
 
 'use client';
 
-import { useMemo } from 'react';
-import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals } from '@opengpex/editor/core/context';
+import { useMemo, useEffect, useRef } from 'react';
+import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals, usePluginSelfConfig } from '@opengpex/editor/core/context';
 import { asLocalRect, asLocalShape, ShapeType, LocalShape } from '@opengpex/editor/core/types';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { getActiveTarget } from './commands';
@@ -50,7 +50,19 @@ export const useClipOptionsCommands = () => {
     cropToolSetCmd, // ← derived from CMD_SET_CROP_TOOL = 'cmd.crop_tool.set'
   } = usePluginCommands();
 
-  const { reCanvasActiveSignal } = usePluginSignals();
+  const { reCanvasActiveSignal, cropFeatherValueSignal } = usePluginSignals();
+
+  // ─── Feather persistence (Path B: signal for real-time, config for persistence) ──
+  // Read persisted feather from pluginConfig on mount and hydrate the signal.
+  // The signal drives real-time UI; pluginConfig survives page refresh via IndexedDB.
+  const [selfConfig, setSelfConfig] = usePluginSelfConfig<{ feather?: number }>();
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (!hydratedRef.current && cropFeatherValueSignal && selfConfig.feather != null) {
+      cropFeatherValueSignal.set(selfConfig.feather);
+      hydratedRef.current = true;
+    }
+  }, [cropFeatherValueSignal, selfConfig.feather]);
 
   return useMemo(() => {
     const isReCanvas = !!reCanvasActiveSignal?.value;
@@ -146,11 +158,18 @@ export const useClipOptionsCommands = () => {
         }
       },
       closeReCanvas: () => reCanvasActiveSignal?.set(false),
+
+      // Feather signal (read/write) — consumed by Apply Mask button and Feather Popover.
+      // Signal drives real-time UI; `persistFeather` writes to pluginConfig for IndexedDB survival.
+      featherValue: (cropFeatherValueSignal?.value as number) || 0,
+      setFeatherValue: (val: number) => cropFeatherValueSignal?.set(val),
+      persistFeather: (val: number) => setSelfConfig({ feather: val }),
     };
   }, [
     actions,
     activeFrame,
     reCanvasActiveSignal,
+    cropFeatherValueSignal,
     toggleModeCmd,
     exitClipModeCmd,
     reCanvasToggleCmd,

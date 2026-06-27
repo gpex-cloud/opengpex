@@ -142,6 +142,8 @@ export interface TileData {
 export interface ClipDescriptor {
   shape: LocalShape;
   inverted: boolean;
+  /** Feather radius in logical pixels (0 = no feather, sharp clip) */
+  feather?: number;
   /** Pre-compiled Path2D cache (worker/render perf optimization) */
   __compiledPath2D?: Path2D;
 }
