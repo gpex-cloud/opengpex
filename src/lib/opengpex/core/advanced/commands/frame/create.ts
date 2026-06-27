@@ -53,7 +53,10 @@ export const FrameCreateCommands = {
       let safeFile = file;
       const format = pixels.utils.detectFormat(file);
 
-      if (format === 'heic' || format === 'svg') {
+      // Extract EXIF from original file BEFORE transcoding (RAW/HEIC contain rich EXIF that transcoded PNG won't carry)
+      const exif = await MetadataHelper.extractExif(file);
+
+      if (format === 'heic' || format === 'svg' || format === 'raw') {
         safeFile = await actions.withSignal(
           'sys.asset.transcoding',
           () => pixels.process.preTranscode(file)
@@ -63,9 +66,6 @@ export const FrameCreateCommands = {
       // 1. Register original asset
       const assetId = await assets.register(safeFile);
       const assetUrl = assets.getURL(assetId)!;
-
-      // Extract EXIF data
-      const exif = await MetadataHelper.extractExif(safeFile);
 
       // 2. Concurrently execute time-consuming tasks: decode dimensions, decode bounding box, generate thumbnail
       const [dimension, contentBounds, thumbBlob] = await Promise.all([

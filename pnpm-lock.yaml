@@ -38,6 +38,9 @@ importers:
       immer:
         specifier: ^11.1.8
         version: 11.1.8
+      libraw-wasm:
+        specifier: ^1.5.0
+        version: 1.5.0
       localforage:
         specifier: ^1.10.0
         version: 1.10.0
@@ -1740,6 +1743,9 @@ packages:
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
+
+  libraw-wasm@1.5.0:
+    resolution: {integrity: sha512-dYNuOnuGQVq6ldkOLoHz5BrY63aewpEuLaAfJdv7pxrfdHrtRxzuWywAmtwRDU3UB66Gl4Hk33N1qG/HjV1oXA==}
 
   lie@3.1.1:
     resolution: {integrity: sha512-RiNhHysUjhrDQntfYSfY4MU24coXXdEOgw9WGcKHNeEwffDYbF//u87M1EWaMGzuFoSbqW0C9C6lEEhDOAswfw==}
@@ -4227,6 +4233,8 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
       type-check: 0.4.0
+
+  libraw-wasm@1.5.0: {}
 
   lie@3.1.1:
     dependencies:

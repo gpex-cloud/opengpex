@@ -28,6 +28,14 @@ const wasmFiles = [
     src: 'node_modules/@jsquash/avif/codec/enc/avif_enc.wasm',
     dest: 'avif_enc.wasm',
   },
+  {
+    src: 'node_modules/libraw-wasm/dist/libraw.wasm',
+    dest: 'libraw.wasm',
+  },
+  {
+    src: 'node_modules/libraw-wasm/dist/worker.js',
+    dest: 'libraw-worker.js',
+  },
 ];
 
 let copied = 0;

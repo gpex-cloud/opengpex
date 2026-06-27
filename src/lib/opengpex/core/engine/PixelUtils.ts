@@ -214,6 +214,16 @@ export const PixelUtils = {
     if (type === 'image/svg+xml' || name.endsWith('.svg')) return 'svg';
     if (type === 'image/gif' || name.endsWith('.gif')) return 'gif';
     if (type === 'image/bmp' || type === 'image/x-ms-bmp' || name.endsWith('.bmp')) return 'bmp';
+    // Camera RAW formats (LibRaw supported — 1200+ camera models)
+    const rawExtensions = [
+      '.cr2', '.cr3', '.nef', '.nrw', '.arw', '.srf', '.sr2',
+      '.dng', '.orf', '.rw2', '.raf', '.pef', '.srw',
+      '.raw', '.rwl', '.3fr', '.fff', '.iiq'
+    ];
+    if (rawExtensions.some(ext => name.endsWith(ext))) return 'raw';
+    if (type === 'image/x-dcraw' || type === 'image/x-adobe-dng' ||
+        type === 'image/x-canon-cr2' || type === 'image/x-nikon-nef' ||
+        type === 'image/x-sony-arw') return 'raw';
     return 'unknown';
   },
 

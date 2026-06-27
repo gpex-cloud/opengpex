@@ -49,7 +49,7 @@ export function ExifInfoPanel({ exif }: ExifInfoPanelProps) {
       ? `1/${Math.round(1 / exif.ExposureTime)}s`
       : null,
     exif.ISOSpeedRatings ? `ISO${exif.ISOSpeedRatings}` : null,
-    exif.FocalLength ? `${exif.FocalLength}mm` : null,
+    exif.FocalLength ? `${parseFloat(exif.FocalLength.toFixed(2))}mm` : null,
   ]
     .filter(Boolean)
     .join(" • ");
@@ -81,7 +81,7 @@ export function ExifInfoPanel({ exif }: ExifInfoPanelProps) {
     },
     {
       label: "Focal Length",
-      value: exif.FocalLength ? `${exif.FocalLength}mm` : null,
+      value: exif.FocalLength ? `${parseFloat(exif.FocalLength.toFixed(2))}mm` : null,
     },
     {
       label: "Original Date",

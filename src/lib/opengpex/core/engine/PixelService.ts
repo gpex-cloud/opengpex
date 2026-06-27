@@ -147,6 +147,12 @@ export function createPixelService(
           return new File([pngBlob], file.name.replace(/\.svg$/i, '.png'), { type: 'image/png' });
         }
 
+        if (format === 'raw') {
+          const { convertRawToBlob } = await import('../helpers/raw');
+          const pngBlob = await convertRawToBlob(file);
+          return new File([pngBlob], file.name.replace(/\.\w+$/i, '.png'), { type: 'image/png' });
+        }
+
         return file;
       }
     },
