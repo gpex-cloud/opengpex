@@ -25,6 +25,7 @@ import { useMemo, useState, useEffect, useRef } from 'react';
 import { useEditorState, useEditorServices, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import * as P from './protocols';
 import { calculateDockPosition, calculateBranches } from './utils';
+import type { TabDockCommandsMap } from './commands.d';
 
 /**
  * useTabDock: Unified hook for bottom operation bar (State + Geometry + Commands).
@@ -33,7 +34,7 @@ export const useTabDock = () => {
   const { state, activeFrame } = useEditorState();
   const { actions } = useEditorServices();
   const [selfConfig] = usePluginSelfConfig<P.TabDockConfig>();
-  const { configUpdateCmd, openSettingsCmd } = usePluginCommands();
+  const { configUpdateCmd, openSettingsCmd } = usePluginCommands<TabDockCommandsMap>();
 
   const { frames, activeFrameId } = state;
   const config = selfConfig;

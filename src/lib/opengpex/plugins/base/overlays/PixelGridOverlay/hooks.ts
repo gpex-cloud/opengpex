@@ -22,13 +22,14 @@
 import { useMemo } from 'react';
 import { usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import * as P from './protocols';
+import type { PixelGridOverlayCommandsMap } from './commands.d';
 
 /**
  * usePixelGridCommands: Config + Command discovery hook.
  */
 export function usePixelGridCommands() {
   const [selfConfig] = usePluginSelfConfig<P.PixelGridConfig>();
-  const { toggleCmd, hardedgeToggleCmd } = usePluginCommands();
+  const { toggleCmd, hardedgeToggleCmd } = usePluginCommands<PixelGridOverlayCommandsMap>();
 
   const isEnabled = selfConfig?.enabled ?? true;
   const isHardEdge = selfConfig?.hardEdge ?? false;

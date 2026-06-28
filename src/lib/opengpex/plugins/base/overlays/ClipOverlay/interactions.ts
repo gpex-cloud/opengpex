@@ -33,8 +33,7 @@ import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/s
 import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
 import { magicWandClient } from './wand/client';
 import {
-  CLIP_OPTIONS_SIGNAL_RE_CANVAS,
-  CLIP_OPTIONS_CMD_RESET_BOX,
+  ClipOptionsAPI,
   CROP_TOOL_STRATEGIES,
   CropTool,
   CropToolStrategy,
@@ -63,7 +62,7 @@ function makeCropToolGuard(targetKind: CropToolStrategy['handlerKind']) {
     // *only* for the `clipbox` handlerKind — lasso / wand are strictly
     // clip-mode concerns (Re-Canvas is rectangular-only by definition).
     const inClip = e.state.interaction.interactionMode === 'clip';
-    const inReCanvas = !!e.state.getStateSignal(CLIP_OPTIONS_SIGNAL_RE_CANVAS);
+    const inReCanvas = !!e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas);
     if (!inClip && !(inReCanvas && targetKind === 'clipbox')) return false;
 
     // ─── Tool admission ────────────────────────────────────────────────
@@ -139,14 +138,14 @@ export const createClipBoxHandler = (): InteractionHandler => {
     },
 
     getInitialState: (e) => {
-      const isReCanvas = e.state.getStateSignal(CLIP_OPTIONS_SIGNAL_RE_CANVAS) || false;
+      const isReCanvas = e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas) || false;
       const currentShape = isReCanvas ? e.activeFrame.canvasCropBox : getRegularClipShape(e.activeFrame);
       hasPeeled = false;
       return currentShape?.rect || asLocalRect({ x: 0, y: 0, w: 0, h: 0 });
     },
 
     getConstraints: (e) => {
-      const isReCanvas = e.state.getStateSignal(CLIP_OPTIONS_SIGNAL_RE_CANVAS) || false;
+      const isReCanvas = e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas) || false;
       return {
         aspect: isReCanvas ? e.activeFrame.canvasAspect : e.activeFrame.imageAspect,
         clamp: !isReCanvas,
@@ -156,7 +155,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
 
     onUpdate: (e, newRect, tx, { dx, dy, type }) => {
       const frame = e.activeFrame;
-      const isReCanvas = e.state.getStateSignal(CLIP_OPTIONS_SIGNAL_RE_CANVAS) || false;
+      const isReCanvas = e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas) || false;
       const currentShape = isReCanvas ? frame.canvasCropBox : getRegularClipShape(frame);
 
       if (type === 'peel' && (e.nativeEvent as MouseEvent).metaKey) {
@@ -203,7 +202,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
       // anywhere on canvas = deselect). Works for rect/ellipse; lasso/wand
       // have their own double-click handlers in their respective onEnd.
       if (InteractionMath.isDoubleClick(e, startCanvas)) {
-        e.actions.executeCommand(CLIP_OPTIONS_CMD_RESET_BOX);
+        e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
       }
 
       tx.commit();
@@ -368,7 +367,7 @@ export const createLassoHandler = (): InteractionHandler => {
         // below the polygon threshold — intercept it here to clear.
         if (trail.length < 3) {
           if ((e.nativeEvent as MouseEvent).detail === 2) {
-            e.actions.executeCommand(CLIP_OPTIONS_CMD_RESET_BOX);
+            e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
           }
           return;
         }
@@ -603,7 +602,7 @@ export const createWandHandler = (): InteractionHandler => {
         // Mark any in-flight wand request as discarded so it won't write back
         // a new selection after the clear.
         discardPending = true;
-        e.actions.executeCommand(CLIP_OPTIONS_CMD_RESET_BOX);
+        e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
         return;
       }
 

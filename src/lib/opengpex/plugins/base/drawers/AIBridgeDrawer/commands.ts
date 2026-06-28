@@ -25,7 +25,7 @@
  */
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
-import { SETTINGS_PANEL_SIGNAL_OPEN, SETTINGS_PANEL_SIGNAL_TAB } from '../../panels/SettingsPanel/protocols';
+import { SettingsPanelAPI } from '../../panels/SettingsPanel/protocols';
 import { AIBridgeConfig, AIProvider, AIMode, AI_MODE_META, AIModelInfo, GenerationRecord } from './protocols';
 import { IMAGE_MODEL_KEYWORDS } from '@opengpex/editor/core/helpers/presets';
 
@@ -463,8 +463,8 @@ export const AI_BRIDGE_COMMANDS = {
     name: 'Open AI Settings',
     execute: (ctx: EditorContextValue) => {
       // Cross-plugin call: uses fully qualified signal storage keys exported by SettingsPanel
-      ctx.actions.setStateSignal(SETTINGS_PANEL_SIGNAL_TAB, 'API Keys');
-      ctx.actions.setStateSignal(SETTINGS_PANEL_SIGNAL_OPEN, true);
+      ctx.actions.setStateSignal(SettingsPanelAPI.signals.tab, 'API Keys');
+      ctx.actions.setStateSignal(SettingsPanelAPI.signals.open, true);
     },
   } as EditorCommand<void, void>,
 };

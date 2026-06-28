@@ -22,6 +22,7 @@
 import { useMemo } from 'react';
 import { useEditorState, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import type { ImageInfoCommandsMap } from './commands.d';
 import * as P from './protocols';
 
 import { formatBytes } from '@opengpex/editor/core/helpers/file';
@@ -33,7 +34,7 @@ import { calcFinalDims } from './utils';
 export const useImageInfoCommands = () => {
    const { state, activeFrame } = useEditorState();
    const [selfConfig, setSelfConfig] = usePluginSelfConfig<P.ExportConfig>();
-   const { downloadCmd, applyResizeCmd } = usePluginCommands();
+   const { downloadCmd, applyResizeCmd } = usePluginCommands<ImageInfoCommandsMap>();
 
    return useMemo(() => {
       const mainLayer = activeFrame ? activeFrame.layers.byId[activeFrame.layers.order[0]] : undefined;

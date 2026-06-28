@@ -20,6 +20,7 @@
 'use client';
 
 import { usePluginSelfConfig, usePluginCommands, usePluginSignals } from '@opengpex/editor/core/context';
+import type { SettingsPanelCommandsMap, SettingsPanelSignalsMap } from './commands.d';
 import * as P from './protocols';
 
 /**
@@ -28,8 +29,8 @@ import * as P from './protocols';
  */
 export const useSettingsPanel = () => {
   const [selfConfig] = usePluginSelfConfig<P.SettingsConfig>();
-  const { toggleCmd } = usePluginCommands();
-  const { openSignal, tabSignal } = usePluginSignals();
+  const { toggleCmd } = usePluginCommands<SettingsPanelCommandsMap>();
+  const { openSignal, tabSignal } = usePluginSignals<SettingsPanelSignalsMap>();
 
   const isActive = !!openSignal?.value;
   const activeTabId = typeof tabSignal?.value === 'string' ? tabSignal.value : undefined;

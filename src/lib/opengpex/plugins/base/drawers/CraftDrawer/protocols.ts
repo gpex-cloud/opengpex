@@ -48,16 +48,28 @@ export const CMD_BRUSH_OPACITY_DOWN = 'cmd.brush_opacity_down';
 export const CMD_BRUSH_HARDNESS_UP = 'cmd.brush_hardness_up';
 export const CMD_BRUSH_HARDNESS_DOWN = 'cmd.brush_hardness_down';
 
-// ─── Cross-Plugin Constants (cross-plugin references) ───────────────────────────────────────
+// ─── Cross-Plugin Typed Facade ──────────────────────────────────────────────────
 
-/** Cross-plugin config storage key: craft tool panel configuration */
-export const CRAFT_DRAWER_CONFIG_KEY = `${PLUGIN_AUTHOR}.${PLUGIN_ID}`;
-
-/** Cross-plugin signal storage key: currently active craft tool */
-export const CRAFT_DRAWER_SIGNAL_ACTIVE_CRAFT = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_ACTIVE_CRAFT}`;
-
-/** Cross-plugin command UID: deactivate current craft tool (called by external plugins like BrushOverlay / TextOverlay to exit) */
-export const CRAFT_DRAWER_CMD_DEACTIVATE_CRAFT = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_DEACTIVATE_CRAFT}`;
+/**
+ * CraftDrawerAPI: Structured cross-plugin facade for external consumers.
+ *
+ * Usage:
+ *   import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
+ *   state.interaction.signals[CraftDrawerAPI.signals.activeCraft];
+ *   actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
+ */
+export const CraftDrawerAPI = {
+  signals: {
+    /** Currently active craft tool (null = no active tool) */
+    activeCraft: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_ACTIVE_CRAFT}` as const,
+  },
+  commands: {
+    /** Deactivate current craft tool */
+    deactivate: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_DEACTIVATE_CRAFT}` } as { uid: string; _payload: void },
+  },
+  /** pluginConfig storage key */
+  configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
+} as const;
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 

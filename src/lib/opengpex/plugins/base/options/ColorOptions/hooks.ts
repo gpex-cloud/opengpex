@@ -24,6 +24,7 @@
 import { useMemo, useCallback } from 'react';
 import { useEditorState, useEditorServices, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import { ColorOptionsConfig } from './protocols';
+import type { ColorCommandsMap } from './commands.d';
 
 /**
  * useColorOptions: Command Discovery Hook for the ColorOptions plugin.
@@ -32,7 +33,7 @@ import { ColorOptionsConfig } from './protocols';
 export const useColorOptions = () => {
   const { state, activeFrame, activeLayer } = useEditorState();
   const { actions } = useEditorServices();
-  const { fillAsLayerCmd } = usePluginCommands();
+  const { fillAsLayerCmd } = usePluginCommands<ColorCommandsMap>();
 
   // Global pending color for the next fill (persisted in plugin config)
   const [config, setConfig] = usePluginSelfConfig<ColorOptionsConfig>();

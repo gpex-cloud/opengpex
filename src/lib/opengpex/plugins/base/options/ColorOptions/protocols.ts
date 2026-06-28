@@ -25,9 +25,28 @@ export const CMD_FILL_AS_LAYER = 'cmd.fill_as_layer';
 /** Contribution slot: tool trigger button injection slot (contributed by plugins like CraftDrawer) */
 export const COLOR_OPTIONS_CRAFT_SLOT = 'COLOR_OPTIONS_CRAFT_SLOT';
 
-/** Cross-plugin config storage key: color configuration */
-export const COLOR_OPTIONS_CONFIG_KEY = `${PLUGIN_AUTHOR}.${PLUGIN_ID}`;
-
 export interface ColorOptionsConfig {
   pendingColor: string;
 }
+
+// ─── Cross-Plugin Typed Facade ──────────────────────────────────────────────────
+
+/**
+ * ColorOptionsAPI: Structured cross-plugin facade for external consumers.
+ *
+ * Usage:
+ *   import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
+ *   const [config] = usePluginConfig<ColorOptionsConfig>(ColorOptionsAPI.configKey);
+ *   actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: '#FF0000' });
+ *   // Contribution slot:
+ *   contributions: [{ slot: ColorOptionsAPI.slots.craft, component: MyButtons }]
+ */
+export const ColorOptionsAPI = {
+  /** pluginConfig storage key */
+  configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
+  /** Contribution slots exposed for external plugin injection */
+  slots: {
+    /** Tool trigger buttons slot (contributed by CraftDrawer) */
+    craft: COLOR_OPTIONS_CRAFT_SLOT,
+  },
+} as const;

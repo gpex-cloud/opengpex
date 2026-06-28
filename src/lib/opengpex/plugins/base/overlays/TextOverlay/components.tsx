@@ -24,7 +24,7 @@ import { useEditorState } from "@opengpex/editor/core/context";
 import { TEXT_LAYER_PADDING } from "@opengpex/editor/core/helpers/config";
 import { useTextEditorFastSync, useTextBoundingFastSync } from "./useFastSync";
 import { useTextOverlayState, useInlineTextEditing } from "./hooks";
-import { CRAFT_DRAWER_SIGNAL_ACTIVE_CRAFT } from "../../drawers/CraftDrawer/protocols";
+import { CraftDrawerAPI } from "../../drawers/CraftDrawer/protocols";
 
 // ─── TextOverlayMain ───────────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ const TextBoundingOverlay = React.memo(function TextBoundingOverlay() {
   // Only show borders in text craft mode (pre-editing state)
   const isTextCraftMode =
     state.interaction.interactionMode === "craft" &&
-    state.interaction.signals[CRAFT_DRAWER_SIGNAL_ACTIVE_CRAFT] === "text";
+    state.interaction.signals[CraftDrawerAPI.signals.activeCraft] === "text";
 
   if (!activeFrame || !isTextCraftMode) return null;
 

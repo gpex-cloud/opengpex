@@ -22,6 +22,7 @@
 import { useMemo } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands } from '@opengpex/editor/core/context';
 import { Layer } from '@opengpex/editor/core/types';
+import type { LayerCommandsMap } from './commands.d';
 import { calcFullLayerStack } from './utils';
 
 /**
@@ -41,7 +42,7 @@ export const useLayerCommands = () => {
         renameCmd,
         syncOverlayCmd,
         maskSyncOverlayCmd
-    } = usePluginCommands();
+    } = usePluginCommands<LayerCommandsMap>();
 
     return useMemo(() => ({
         // Plugin Commands (transparently passed Cmd references)

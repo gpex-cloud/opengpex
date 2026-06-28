@@ -22,7 +22,7 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { asLocalShape } from '@opengpex/editor/core/types';
-import { CRAFT_DRAWER_SIGNAL_ACTIVE_CRAFT, CRAFT_DRAWER_CMD_DEACTIVATE_CRAFT } from '../../drawers/CraftDrawer/protocols';
+import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID } from './protocols';
 import { TEXT_PREEDIT_CURSOR } from '@opengpex/editor/icons';
 
@@ -38,7 +38,7 @@ export function useTextOverlayState() {
   const { state, activeFrame } = useEditorState();
   const { actions } = useEditorServices();
 
-  const activeCraft = state.interaction.signals[CRAFT_DRAWER_SIGNAL_ACTIVE_CRAFT];
+  const activeCraft = state.interaction.signals[CraftDrawerAPI.signals.activeCraft];
   const editingLayerId = state.interaction.signals[TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID] as string | null;
 
   // Detect if the layer pointed by signal is still valid
@@ -59,7 +59,7 @@ export function useTextOverlayState() {
         e.preventDefault();
         e.stopPropagation();
         // Deactivate tool via CraftDrawer's command system (following signal ownership boundaries)
-        actions.executeCommand(CRAFT_DRAWER_CMD_DEACTIVATE_CRAFT);
+        actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
       }
     };
 

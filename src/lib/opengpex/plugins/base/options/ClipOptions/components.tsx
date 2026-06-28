@@ -47,6 +47,7 @@ import Popover from "@opengpex/editor/widgets/Popover";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import { useClipOptionsCommands } from "./hooks";
 import { CROP_TOOL_STRATEGIES, type CropToolStrategy } from "./protocols";
+import type { ClipSignalsMap } from "./commands.d";
 
 const ASPECT_RATIOS = [
   { label: "FREE", value: undefined },
@@ -87,7 +88,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
     persistFeather,
   } = useClipOptionsCommands();
 
-  const { reCanvasActiveSignal } = usePluginSignals();
+  const { reCanvasActiveSignal } = usePluginSignals<ClipSignalsMap>();
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isFeatherOpen, setIsFeatherOpen] = useState(false);
@@ -776,7 +777,7 @@ function AspectGrid({
   onSelect: (val: number | undefined) => void;
 }) {
   const { activeFrame } = useEditorState();
-  const { reCanvasActiveSignal } = usePluginSignals();
+  const { reCanvasActiveSignal } = usePluginSignals<ClipSignalsMap>();
   const isReCanvas = !!reCanvasActiveSignal.value;
   const cropBox = isReCanvas
     ? activeFrame?.canvasCropBox

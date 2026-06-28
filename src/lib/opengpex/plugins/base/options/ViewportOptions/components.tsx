@@ -145,7 +145,7 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
       </div>
 
       {/* Resolution Display */}
-      <div className="flex items-center gap-1 px-1">
+      {/* <div className="flex items-center gap-1 px-1">
         <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tighter opacity-70">
           Res
         </span>
@@ -154,7 +154,7 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
           <span className="text-[var(--text-muted)] font-normal">×</span>{" "}
           {Math.round(activeFrame.canvas.h)}
         </span>
-      </div>
+      </div> */}
 
       {/* Zoom Control */}
       <div

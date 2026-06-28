@@ -30,7 +30,7 @@ import {
   useIrregularSelectionSync,
 } from "./useFastSync";
 import { lassoPreviewPathRef } from "./interactions";
-import { PIXEL_GRID_CONFIG_KEY } from "../PixelGridOverlay/protocols";
+import { PixelGridOverlayAPI } from "../PixelGridOverlay/protocols";
 
 /**
  * ClipOverlayMain: UI layer for the cropping tool.
@@ -71,7 +71,7 @@ export function ClipOverlayMain() {
   // 1. Core Geometric Sync: Smooth rotation via global counter-animation hook
   useOverlayRotationSync(overlayRef, activeFrame);
 
-  const gridConfig = state.pluginConfig[PIXEL_GRID_CONFIG_KEY] as
+  const gridConfig = state.pluginConfig[PixelGridOverlayAPI.configKey] as
     | { enabled?: boolean; zoomThreshold?: number }
     | undefined;
   const showGridThreshold = gridConfig?.enabled

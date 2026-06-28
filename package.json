@@ -1,9 +1,10 @@
 {
   "name": "opengpex",
-  "version": "1.0.0-beta.13",
+  "version": "1.0.0-beta.14",
   "license": "GPL-3.0-only",
   "private": true,
   "scripts": {
+    "gen-plugin-types": "node scripts/gen-plugin-types.mjs",
     "scan-plugins": "node scripts/scan-plugins.mjs",
     "sync-plugins": "node scripts/sync-plugins.mjs",
     "pack-plugin": "node scripts/pack-plugin.mjs",

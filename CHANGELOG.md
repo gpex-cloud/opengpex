@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.14
+
+- Add declarative drawer auto-reveal/auto-collapse system driven by editor state transitions (e.g., active tools, layer counts)
+- Resolve TypeScript type resolution issues by introducing `gen-plugin-types` script to auto-generate `commands.d.ts` declarations for all plugins
+- Refactor cross-plugin constants into namespace-grouped typed API schemas to enhance auto-completion and type safety
+
+---
+
 ## v1.0.0-beta.13
 
 - Add selection feather (0–250px edge softening) for masks, drill, layer-via-copy/cut operations

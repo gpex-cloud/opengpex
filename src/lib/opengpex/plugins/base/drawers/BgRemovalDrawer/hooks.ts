@@ -20,9 +20,10 @@
 "use client";
 
 import { useCallback, useRef } from "react";
-import { useEditorState, useEditorServices } from "@opengpex/editor/core/context";
+import { useEditorState, usePluginSignals } from "@opengpex/editor/core/context";
 import type { BgRemovalStatus } from "./protocols";
-import { INITIAL_STATUS, BG_REMOVAL_SIGNAL_STATUS } from "./protocols";
+import { INITIAL_STATUS } from "./protocols";
+import type { BgRemovalSignalsMap } from "./commands.d";
 
 /**
  * SpeedEstimator — Sliding-window speed calculation for download progress.
@@ -74,8 +75,8 @@ export class SpeedEstimator {
  * drives the Drawer UI state machine.
  */
 export function useBgRemovalStatus(): BgRemovalStatus {
-  const { state } = useEditorState();
-  const status = state.getStateSignal(BG_REMOVAL_SIGNAL_STATUS) as BgRemovalStatus | undefined;
+  const { statusSignal } = usePluginSignals<BgRemovalSignalsMap>();
+  const status = statusSignal?.value as BgRemovalStatus | undefined;
   return status ?? INITIAL_STATUS;
 }
 
@@ -88,16 +89,15 @@ export function useBgRemovalStatus(): BgRemovalStatus {
  * for download progress calculations.
  */
 export function useBgRemovalActions() {
-  const { state } = useEditorState();
-  const { actions } = useEditorServices();
+  const { statusSignal } = usePluginSignals<BgRemovalSignalsMap>();
   const speedEstimator = useRef(new SpeedEstimator());
 
   const updateStatus = useCallback(
     (patch: Partial<BgRemovalStatus>) => {
-      const current = (state.getStateSignal(BG_REMOVAL_SIGNAL_STATUS) as BgRemovalStatus | undefined) ?? INITIAL_STATUS;
-      actions.setStateSignal(BG_REMOVAL_SIGNAL_STATUS, { ...current, ...patch });
+      const current = (statusSignal?.value as BgRemovalStatus | undefined) ?? INITIAL_STATUS;
+      statusSignal?.set({ ...current, ...patch });
     },
-    [state, actions]
+    [statusSignal]
   );
 
   const updateDownloadProgress = useCallback(

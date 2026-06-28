@@ -23,8 +23,8 @@ import { useEffect, useRef } from 'react';
 import { useEditorState, useEditorServices, usePluginConfig } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { VolatileState, Frame, CameraState } from '@opengpex/editor/core/types';
-import { CRAFT_DRAWER_SIGNAL_ACTIVE_CRAFT, CRAFT_DRAWER_CMD_DEACTIVATE_CRAFT, CRAFT_DRAWER_CONFIG_KEY } from '../../drawers/CraftDrawer/protocols';
-import { COLOR_OPTIONS_CONFIG_KEY } from '../../options/ColorOptions/protocols';
+import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
+import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
 import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
 import { DEFAULT_BRUSH_SIZE } from './protocols';
 
@@ -40,7 +40,7 @@ export function useBrushOverlayState() {
   const { state, activeFrame } = useEditorState();
   const { actions } = useEditorServices();
 
-  const activeCraft = state.interaction.signals[CRAFT_DRAWER_SIGNAL_ACTIVE_CRAFT] as string | null;
+  const activeCraft = state.interaction.signals[CraftDrawerAPI.signals.activeCraft] as string | null;
   const isBrushMode = activeCraft === 'brush' || activeCraft === 'eraser' || activeCraft === 'restore';
 
   // Sets/clears cursorOverride: 'none' to hide system cursor (replaced by DOM circle)
@@ -65,7 +65,7 @@ export function useBrushOverlayState() {
         e.preventDefault();
         e.stopPropagation();
         // Deactivate tool via CraftDrawer's command system (following signal ownership boundaries)
-        actions.executeCommand(CRAFT_DRAWER_CMD_DEACTIVATE_CRAFT);
+        actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
         actions.setInteraction({ cursorOverride: null });
       }
     };
@@ -273,7 +273,7 @@ export function useBrushCursorTracking(
  * Reads brush parameters from CraftDrawer's pluginConfig, returning currently active size/opacity/hardness.
  */
 export function useBrushParams() {
-  const [craftConfig] = usePluginConfig<CraftDrawerConfig>(CRAFT_DRAWER_CONFIG_KEY);
+  const [craftConfig] = usePluginConfig<CraftDrawerConfig>(CraftDrawerAPI.configKey);
 
   const brushSize = craftConfig?.brushSize ?? DEFAULT_BRUSH_SIZE;
   const brushOpacity = craftConfig?.brushOpacity ?? 100;
@@ -290,6 +290,6 @@ export function useBrushParams() {
  * Reads pendingColor from ColorOptions' pluginConfig as the brush color.
  */
 export function useBrushColor(): string {
-  const [colorConfig] = usePluginConfig<{ pendingColor?: string }>(COLOR_OPTIONS_CONFIG_KEY);
+  const [colorConfig] = usePluginConfig<{ pendingColor?: string }>(ColorOptionsAPI.configKey);
   return colorConfig?.pendingColor || '#FFFFFF';
 }

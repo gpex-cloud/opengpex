@@ -21,10 +21,11 @@
 
 import { useCallback, useMemo, useEffect, useRef } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals, usePluginSelfConfig, usePluginConfig } from '@opengpex/editor/core/context';
-import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, TEXT_OVERLAY_CMD_UPDATE_PROPERTIES } from '../../overlays/TextOverlay/protocols';
-import { COLOR_OPTIONS_CONFIG_KEY } from '../../options/ColorOptions/protocols';
+import { TextOverlayAPI } from '../../overlays/TextOverlay/protocols';
+import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
 import type { ActiveCraft, CraftType, CraftDrawerConfig } from './protocols';
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
+import type { CraftCommandsMap, CraftSignalsMap } from './commands.d';
 
 // ─── useCraftDrawer ────────────────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ import type { TextLayerData } from '@opengpex/editor/core/types/models';
  * - activeCraft=null infers panel by selected layer type (text -> TextPanel, paint -> BrushPanel)
  */
 export function useCraftDrawer() {
-  const { activeCraftSignal } = usePluginSignals();
+  const { activeCraftSignal } = usePluginSignals<CraftSignalsMap>();
   const { activeLayer } = useEditorState();
 
   const activeCraft = (activeCraftSignal?.value ?? null) as ActiveCraft;
@@ -55,8 +56,8 @@ export function useCraftDrawer() {
  * Encapsulates states and commands required for tool button group.
  */
 export function useCraftTrigger() {
-  const { setCraftCmd } = usePluginCommands();
-  const { activeCraftSignal } = usePluginSignals();
+  const { setCraftCmd } = usePluginCommands<CraftCommandsMap>();
+  const { activeCraftSignal } = usePluginSignals<CraftSignalsMap>();
 
   const activeCraft = (activeCraftSignal?.value ?? null) as ActiveCraft;
 
@@ -85,8 +86,8 @@ export function useCraftTrigger() {
  *    - otherwise -> switch to new craft
  */
 export function useCraftButtonGroup() {
-  const { setCraftCmd, deactivateCraftCmd } = usePluginCommands();
-  const { activeCraftSignal } = usePluginSignals();
+  const { setCraftCmd, deactivateCraftCmd } = usePluginCommands<CraftCommandsMap>();
+  const { activeCraftSignal } = usePluginSignals<CraftSignalsMap>();
   const { activeLayer } = useEditorState();
 
   // Local control switch: true uses scheme 1 (go home logic), false uses scheme 2 (switch tool directly)
@@ -138,7 +139,7 @@ export function useTextPanel() {
   const { state, activeFrame, activeLayer } = useEditorState();
   const { actions } = useEditorServices();
 
-  const editingLayerId = state.interaction.signals[TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID] as string | null;
+  const editingLayerId = state.interaction.signals[TextOverlayAPI.signals.editingTextLayerId] as string | null;
 
   // Gets text layer currently editing (prioritizes editing signal, followed by activeLayer)
   const targetLayerId = editingLayerId || (activeLayer?.type === 'text' ? activeLayer.id : null);
@@ -157,7 +158,7 @@ export function useTextPanel() {
         });
       } else {
         // Non-editing state: updates via undoable command (generates independent undo point)
-        actions.executeCommand(TEXT_OVERLAY_CMD_UPDATE_PROPERTIES, {
+        actions.executeCommand(TextOverlayAPI.commands.updateProperties.uid, {
           frameId: activeFrame.id,
           layerId: targetLayerId,
           patch,
@@ -182,13 +183,13 @@ export function useTextPanel() {
   );
 
   // ─── Color Synchronization ──────────────────────────────────────────────────
-  const [colorConfig] = usePluginConfig<{ pendingColor?: string }>(COLOR_OPTIONS_CONFIG_KEY);
+  const [colorConfig] = usePluginConfig<{ pendingColor?: string }>(ColorOptionsAPI.configKey);
   const globalColor = colorConfig?.pendingColor || '#FFFFFF';
   const textColor = textData?.color || globalColor;
 
   const updateTextColor = useCallback(
     (color: string) => {
-      actions.updatePluginConfig(COLOR_OPTIONS_CONFIG_KEY, { pendingColor: color });
+      actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: color });
       if (targetLayerId && textData) {
         updateTextData({ color });
       }
@@ -198,7 +199,7 @@ export function useTextPanel() {
 
   const updateTextColorLive = useCallback(
     (color: string) => {
-      actions.updatePluginConfig(COLOR_OPTIONS_CONFIG_KEY, { pendingColor: color });
+      actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: color });
       if (targetLayerId && textData) {
         updateTextDataLive({ color });
       }
@@ -214,7 +215,7 @@ export function useTextPanel() {
       lastTargetLayerIdRef.current = targetLayerId;
       if (targetLayerId && textData?.color) {
         // Synchronize color of selected layer to global ColorOptions
-        actions.updatePluginConfig(COLOR_OPTIONS_CONFIG_KEY, { pendingColor: textData.color });
+        actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: textData.color });
       }
     } else {
       // Layer selection unchanged (only globalColor change or textData.color change could occur)
@@ -247,7 +248,7 @@ export function useTextPanel() {
  * Parameters are stored in pluginConfig['opengpex.drawers.craft_drawer'].
  */
 export function useBrushPanel() {
-  const { activeCraftSignal } = usePluginSignals();
+  const { activeCraftSignal } = usePluginSignals<CraftSignalsMap>();
   const { actions } = useEditorServices();
   const [selfConfig, setSelfConfig] = usePluginSelfConfig<CraftDrawerConfig>();
 
@@ -259,7 +260,7 @@ export function useBrushPanel() {
   const brushHardness = selfConfig.brushHardness ?? 80;
 
   // Reads brush color (from pendingColor of ColorOptions)
-  const [colorConfig] = usePluginConfig<{ pendingColor?: string }>(COLOR_OPTIONS_CONFIG_KEY);
+  const [colorConfig] = usePluginConfig<{ pendingColor?: string }>(ColorOptionsAPI.configKey);
   const brushColor = colorConfig?.pendingColor || '#FFFFFF';
 
   const updateBrushParam = useCallback(
@@ -271,7 +272,7 @@ export function useBrushPanel() {
 
   const updateBrushColor = useCallback(
     (color: string) => {
-      actions.updatePluginConfig(COLOR_OPTIONS_CONFIG_KEY, { pendingColor: color });
+      actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: color });
     },
     [actions]
   );

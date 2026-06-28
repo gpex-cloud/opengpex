@@ -45,7 +45,24 @@ export const SIGNAL_TAB = 'signal.tab';
 
 /**
  * Cross-plugin reference UIDs (for external consumer usage)
+ *
+ * Usage:
+ *   import { SettingsPanelAPI } from '../../panels/SettingsPanel/protocols';
+ *   ctx.actions.setStateSignal(SettingsPanelAPI.signals.open, true);
+ *   ctx.actions.setStateSignal(SettingsPanelAPI.signals.tab, 'API Keys');
+ *   actions.executeCommand(SettingsPanelAPI.commands.toggle.uid);
  */
-export const SETTINGS_PANEL_SIGNAL_OPEN = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_OPEN}`;
-export const SETTINGS_PANEL_SIGNAL_TAB = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_TAB}`;
-export const SETTINGS_PANEL_CMD_TOGGLE = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_TOGGLE}`;
+export const SettingsPanelAPI = {
+  signals: {
+    /** Panel open state (boolean) */
+    open: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_OPEN}` as const,
+    /** Active tab name (string | null) */
+    tab: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_TAB}` as const,
+  },
+  commands: {
+    /** Toggle settings panel visibility */
+    toggle: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_TOGGLE}` } as { uid: string; _payload: void },
+  },
+  /** pluginConfig storage key */
+  configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
+} as const;

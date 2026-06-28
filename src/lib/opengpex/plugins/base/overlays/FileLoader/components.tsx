@@ -36,12 +36,13 @@ import {
   usePluginCommands,
   useEditorState,
 } from "@opengpex/editor/core/context";
+import type { FileLoaderCommandsMap } from './commands.d';
 
 /**
  * FileLoaderComponent: Flagship global drag-and-drop service component (main component)
  */
 export function FileLoaderComponent() {
-  const { importCmd } = usePluginCommands();
+  const { importCmd } = usePluginCommands<FileLoaderCommandsMap>();
   const [isOver, setIsOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { state } = useEditorState();
@@ -141,7 +142,7 @@ export function FileLoaderComponent() {
  * FileLoaderAction: Trigger button contributed to TOOL_BAR
  */
 export function FileLoaderAction() {
-  const { pickCmd } = usePluginCommands();
+  const { pickCmd } = usePluginCommands<FileLoaderCommandsMap>();
 
   return (
     <>
@@ -178,7 +179,7 @@ const FEATURES = [
 ];
 
 export function FileLoaderLandingAction() {
-  const { pickCmd } = usePluginCommands();
+  const { pickCmd } = usePluginCommands<FileLoaderCommandsMap>();
 
   return (
     <div className="w-full max-w-md space-y-8 text-center lg:text-left animate-[fadeInUp_0.6s_ease-out_both]">

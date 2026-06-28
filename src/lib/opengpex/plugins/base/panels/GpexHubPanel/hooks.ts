@@ -20,6 +20,7 @@
 'use client';
 
 import { usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
+import type { GpexHubPanelCommandsMap } from './commands.d';
 import * as P from './protocols';
 
 /**
@@ -28,7 +29,7 @@ import * as P from './protocols';
  */
 export const useGpexHubConfig = () => {
   const [selfConfig, setSelfConfig] = usePluginSelfConfig<P.GpexHubConfig>();
-  const { toggleCmd } = usePluginCommands();
+  const { toggleCmd } = usePluginCommands<GpexHubPanelCommandsMap>();
 
   const isOpen = selfConfig?.open === true;
   const activeTab = selfConfig?.activeTab ?? 'explore';

@@ -161,6 +161,34 @@ export interface InteractionHandler {
   onEnd: (e: InteractionEvent) => unknown;
 }
 
+/**
+ * AutoRevealRule: Declarative auto-reveal configuration for SIDE_BAR plugins.
+ *
+ * Drives edge-triggered (not level-triggered) drawer expansion/collapse
+ * based on editor state conditions.
+ */
+export interface AutoRevealRule {
+  /**
+   * Condition function: returns whether this drawer should be open.
+   * Only triggers expansion at the false → true edge (not while staying true).
+   * Must be a pure function with O(1) complexity — no deep traversal.
+   */
+  when: (state: EditorState) => boolean;
+
+  /**
+   * When true, the drawer auto-collapses when `when()` transitions from true → false.
+   * Default: false (drawer stays open until user manually closes it).
+   * This is intentionally separate from `when` so each behavior can be toggled independently.
+   */
+  collapseWhenFalse?: boolean;
+
+  /**
+   * Priority: higher value = higher precedence when multiple drawers reveal simultaneously.
+   * Default: 0.
+   */
+  priority?: number;
+}
+
 export interface EditorPlugin {
   // --- 1. Identity & Metadata ---
   manifest: PluginManifest;
@@ -187,6 +215,10 @@ export interface EditorPlugin {
   interactions?: InteractionHandler[];
   onAction?: (action: EditorAction, state: EditorState, actions: EditorActions) => void;
   deprecated?: boolean | string;
+
+  // --- 4. Drawer Auto-Reveal ---
+  /** Declarative auto-reveal rule for SIDE_BAR plugins */
+  autoReveal?: AutoRevealRule;
 
   // Lifecycle
   onInit?: (ctx: EditorContextValue) => void;

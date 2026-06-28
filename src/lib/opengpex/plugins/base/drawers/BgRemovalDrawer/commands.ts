@@ -22,7 +22,7 @@
 import { EditorContextValue, EditorCommand, asLocalPoint, asLocalPolygon, asLocalRect } from '@opengpex/editor/core/types';
 import { computePolygonBounds } from '@opengpex/editor/core/geometry/operators/polygon';
 import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
-import { SETTINGS_PANEL_SIGNAL_OPEN, SETTINGS_PANEL_SIGNAL_TAB } from '../../panels/SettingsPanel/protocols';
+import { SettingsPanelAPI } from '../../panels/SettingsPanel/protocols';
 import { bgRemovalClient } from './worker/client';
 import { SpeedEstimator } from './hooks';
 import type { BgRemovalProgress } from './worker/protocol';
@@ -43,8 +43,8 @@ let activeAbortController: AbortController | null = null;
  * Helper: Update the BgRemoval status signal.
  */
 function setStatus(ctx: EditorContextValue, patch: Partial<BgRemovalStatus>): void {
-  const current = (ctx.state.getStateSignal(P.BG_REMOVAL_SIGNAL_STATUS) as BgRemovalStatus | undefined) ?? P.INITIAL_STATUS;
-  ctx.actions.setStateSignal(P.BG_REMOVAL_SIGNAL_STATUS, { ...current, ...patch });
+  const current = (ctx.scoped!.getSignal<BgRemovalStatus>(P.SIGNAL_STATUS, P.INITIAL_STATUS)) ?? P.INITIAL_STATUS;
+  ctx.scoped!.setSignal(P.SIGNAL_STATUS, { ...current, ...patch });
 }
 
 /**
@@ -271,7 +271,7 @@ export const BG_REMOVAL_COMMANDS = {
 
         // Auto-reset to idle after a brief display period
         setTimeout(() => {
-          const current = ctx.state.getStateSignal(P.BG_REMOVAL_SIGNAL_STATUS) as BgRemovalStatus | undefined;
+          const current = ctx.scoped!.getSignal<BgRemovalStatus>(P.SIGNAL_STATUS, P.INITIAL_STATUS);
           // Only reset if still in 'done' state (avoid clobbering a new inference)
           if (current?.stage === 'done') {
             setStatus(ctx, { ...P.INITIAL_STATUS });
@@ -377,8 +377,8 @@ export const BG_REMOVAL_COMMANDS = {
     id: P.CMD_OPEN_SETTINGS,
     name: 'Open BG Removal Settings',
     execute: (ctx: EditorContextValue) => {
-      ctx.actions.setStateSignal(SETTINGS_PANEL_SIGNAL_TAB, 'BG Remover');
-      ctx.actions.setStateSignal(SETTINGS_PANEL_SIGNAL_OPEN, true);
+      ctx.actions.setStateSignal(SettingsPanelAPI.signals.tab, 'BG Remover');
+      ctx.actions.setStateSignal(SettingsPanelAPI.signals.open, true);
     },
   } as EditorCommand<void, void>,
 };

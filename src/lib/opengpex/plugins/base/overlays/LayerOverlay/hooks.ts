@@ -22,13 +22,14 @@
 import { useMemo } from 'react';
 import { usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import * as P from './protocols';
+import type { LayerOverlayCommandsMap } from './commands.d';
 
 /**
  * useLayerOverlayCommands: Config + Command discovery hook.
  */
 export function useLayerOverlayCommands() {
   const [selfConfig] = usePluginSelfConfig<P.LayerOverlayConfig>();
-  const { toggleCmd } = usePluginCommands();
+  const { toggleCmd } = usePluginCommands<LayerOverlayCommandsMap>();
 
   const isAlwaysOn = selfConfig?.showAlways ?? false;
 

@@ -22,6 +22,7 @@
 import { useMemo } from 'react';
 import { useEditorState, usePluginSelfConfig, usePluginCommands, usePluginList } from '@opengpex/editor/core/context';
 import { useLayout } from '@opengpex/editor/workspace/LayoutContext';
+import type { LayoutInfoPanelCommandsMap } from './commands.d';
 import * as P from './protocols';
 import type { EditorSlot } from '@opengpex/editor/core/types';
 
@@ -54,7 +55,7 @@ export interface RuntimeSlotGroup {
  */
 export const useLayoutConfig = () => {
   const [selfConfig] = usePluginSelfConfig<P.LayoutConfig>();
-  const { toggleCmd } = usePluginCommands();
+  const { toggleCmd } = usePluginCommands<LayoutInfoPanelCommandsMap>();
 
   return {
     isEnabled: selfConfig?.enabled === true,

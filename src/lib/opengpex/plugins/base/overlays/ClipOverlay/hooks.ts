@@ -23,8 +23,7 @@ import { Motion } from '@opengpex/editor/core/motion';
 import { asLocalShape, LocalShape, LocalPolygon } from '@opengpex/editor/core/types';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import {
-  CLIP_OPTIONS_SIGNAL_RE_CANVAS,
-  CLIP_OPTIONS_CMD_RESET_BOX,
+  ClipOptionsAPI,
   CROP_TOOL_STRATEGIES,
   CropTool,
 } from '../../options/ClipOptions/protocols';
@@ -35,12 +34,12 @@ import {
 export function useClipOverlayCommands() {
   const { state, activeFrame } = useEditorState();
   const { actions } = useEditorServices();
-  const resetBox = () => actions.executeCommand(CLIP_OPTIONS_CMD_RESET_BOX);
+  const resetBox = () => actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
 
   const boxRef = useRef<HTMLDivElement>(null);
   const [showError, setShowError] = useState(false);
 
-  const isReCanvas = state.getStateSignal(CLIP_OPTIONS_SIGNAL_RE_CANVAS);
+  const isReCanvas = state.getStateSignal(ClipOptionsAPI.signals.reCanvas);
   const isClipActive = state.interaction.interactionMode === 'clip';
 
   // Active crop / selection tool — read from per-frame field.

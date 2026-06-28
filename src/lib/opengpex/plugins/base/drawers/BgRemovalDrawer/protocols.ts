@@ -40,8 +40,7 @@ export const CMD_OPEN_SETTINGS = 'cmd.open_settings';
 export const SIGNAL_STATUS = 'signal.status';
 
 /* Cross-plugin UIDs */
-export const BG_REMOVAL_CMD_REMOVE_BG = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_REMOVE_BG}`;
-export const BG_REMOVAL_SIGNAL_STATUS = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_STATUS}`;
+// (None — no external consumers currently import from this plugin)
 
 /* Status types */
 export type BgRemovalStage =
@@ -130,19 +129,19 @@ export interface BgRemovalConfig {
 
 export const BUILTIN_MODELS: BgModelEntry[] = [
   {
-    id: 'briaai/RMBG-1.4',
-    name: 'RMBG 1.4',
-    modelId: 'briaai/RMBG-1.4',
-    size: '~176 MB',
-    description: 'Fast, general-purpose background removal',
-    builtin: true,
-  },
-  {
     id: 'OS-Software/InSPyReNet-SwinB-Plus-Ultra-ONNX',
     name: 'InSPyReNet Ultra',
     modelId: 'OS-Software/InSPyReNet-SwinB-Plus-Ultra-ONNX',
     size: '~300 MB',
     description: 'Sharp edges, excellent for products & e-commerce',
+    builtin: true,
+  },
+  {
+    id: 'briaai/RMBG-1.4',
+    name: 'RMBG 1.4',
+    modelId: 'briaai/RMBG-1.4',
+    size: '~176 MB',
+    description: 'Fast, general-purpose background removal',
     builtin: true,
   },
 ];

@@ -59,3 +59,24 @@ export const _CMD_PLACE_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PLACE}`;
 /** Internal command UID: enter editing state */
 export const _CMD_EDIT_START_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_EDIT_START}`;
 
+// ─── Cross-Plugin Typed Facade ──────────────────────────────────────────────────
+
+/**
+ * TextOverlayAPI: Structured cross-plugin facade for external consumers.
+ *
+ * Usage:
+ *   import { TextOverlayAPI } from '../../overlays/TextOverlay/protocols';
+ *   const editingId = state.interaction.signals[TextOverlayAPI.signals.editingTextLayerId];
+ *   actions.executeCommand(TextOverlayAPI.commands.updateProperties.uid, payload);
+ */
+export const TextOverlayAPI = {
+  signals: {
+    /** ID of the text layer currently being edited (null = idle) */
+    editingTextLayerId: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_EDITING_TEXT_LAYER_ID}` as const,
+  },
+  commands: {
+    /** Update text layer style attributes (font size/color/alignment) */
+    updateProperties: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_UPDATE_PROPERTIES}` } as { uid: string; _payload: { frameId: string; layerId: string; patch: unknown } },
+  },
+} as const;
+

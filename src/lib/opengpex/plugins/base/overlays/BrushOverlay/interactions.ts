@@ -19,15 +19,15 @@
 
 import { InteractionHandler, InteractionEvent, Layer, Frame, asLocalRect, IMatrix3x3 } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
-import { CRAFT_DRAWER_SIGNAL_ACTIVE_CRAFT, CRAFT_DRAWER_CONFIG_KEY } from '../../drawers/CraftDrawer/protocols';
-import { COLOR_OPTIONS_CONFIG_KEY } from '../../options/ColorOptions/protocols';
+import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
+import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
 import { BRUSH_OVERLAY_SIGNAL_IS_STROKING, DEFAULT_BRUSH_SIZE, _CMD_BAKE_UID } from './protocols';
 import { StrokeSmoother, drawSmoothSegment, Point2D } from './smoothing';
 import { stampBrush, stampAlongPath } from './hardness';
 import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
 
 /** Shared signal key */
-const ACTIVE_CRAFT_KEY = CRAFT_DRAWER_SIGNAL_ACTIVE_CRAFT;
+const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
 const IS_STROKING_KEY = BRUSH_OVERLAY_SIGNAL_IS_STROKING;
 
 /** Command UID (from protocols, Single Source of Truth) */
@@ -132,10 +132,10 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
       forceNewLayerFlag = craft === 'brush' && isCmdPressed;
 
       // Read brush parameters (from pluginConfig)
-      const craftConfig = e.state.pluginConfig[CRAFT_DRAWER_CONFIG_KEY] || {};
+      const craftConfig = e.state.pluginConfig[CraftDrawerAPI.configKey] || {};
       const brushSize = (craftConfig.brushSize as number) ?? DEFAULT_BRUSH_SIZE;
       const brushOpacity = (craftConfig.brushOpacity as number) ?? 100;
-      const colorConfig = e.state.pluginConfig[COLOR_OPTIONS_CONFIG_KEY] || {};
+      const colorConfig = e.state.pluginConfig[ColorOptionsAPI.configKey] || {};
       const brushColor = (colorConfig.pendingColor as string) || '#FFFFFF';
       const brushHardness = (craftConfig.brushHardness as number) ?? 80;
 

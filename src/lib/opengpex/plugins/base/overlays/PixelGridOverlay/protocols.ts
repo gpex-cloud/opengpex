@@ -25,9 +25,6 @@
 export const PLUGIN_ID = 'overlays.pixel_grid_overlay';
 export const PLUGIN_AUTHOR = 'opengpex';
 
-/** Cross-plugin config storage key: pixel grid configuration */
-export const PIXEL_GRID_CONFIG_KEY = `${PLUGIN_AUTHOR}.${PLUGIN_ID}`;
-
 /**
  * Custom Config Interface
  */
@@ -43,4 +40,18 @@ export interface PixelGridConfig {
  */
 export const CMD_TOGGLE = 'cmd.toggle';
 export const CMD_HARD_EDGE_TOGGLE = 'cmd.hardedge.toggle';
+
+// ─── Cross-Plugin Typed Facade ──────────────────────────────────────────────────
+
+/**
+ * PixelGridOverlayAPI: Structured cross-plugin facade for external consumers.
+ *
+ * Usage:
+ *   import { PixelGridOverlayAPI } from '../PixelGridOverlay/protocols';
+ *   const gridConfig = state.pluginConfig[PixelGridOverlayAPI.configKey];
+ */
+export const PixelGridOverlayAPI = {
+  /** pluginConfig storage key */
+  configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
+} as const;
 

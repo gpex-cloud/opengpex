@@ -26,8 +26,9 @@ import { useEditorState, useEditorServices, usePluginSelfConfig, usePluginComman
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { resourceTracker } from '@opengpex/editor/core/advanced/ResourceTracker';
 import type { ResourceSummary } from '@opengpex/editor/core/advanced/ResourceTracker';
+import type { DebugInfoPanelCommandsMap } from './commands.d';
 import * as P from './protocols';
-import { CLIP_OPTIONS_SIGNAL_RE_CANVAS } from '../../options/ClipOptions/protocols';
+import { ClipOptionsAPI } from '../../options/ClipOptions/protocols';
 
 // ─── Performance Metrics Types ───────────────────────────────────────────────
 
@@ -204,7 +205,7 @@ export const useDebugInfo = () => {
   const { state, activeFrame, activeLayer } = useEditorState();
   const { actions, geometry } = useEditorServices();
   const [selfConfig] = usePluginSelfConfig<P.DebugConfig>();
-  const { toggleCmd } = usePluginCommands();
+  const { toggleCmd } = usePluginCommands<DebugInfoPanelCommandsMap>();
   const isEnabled = selfConfig?.enabled ?? false;
 
   // Performance metrics (RAF-driven, 1Hz setState)
@@ -300,7 +301,7 @@ export const useDebugInfo = () => {
     const mouseP = geometry.space.screenToLocal(currentMouse.vx, currentMouse.vy, activeFrame, cam);
 
     // Clip core metrics
-    const isReCanvas = state.getStateSignal(CLIP_OPTIONS_SIGNAL_RE_CANVAS);
+    const isReCanvas = state.getStateSignal(ClipOptionsAPI.signals.reCanvas);
     const cropShape = isReCanvas ? activeFrame.canvasCropBox : getRegularClipShape(activeFrame);
     const cropBox = cropShape?.rect || { x: 0, y: 0, w: 0, h: 0 };
 

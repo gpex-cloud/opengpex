@@ -18,7 +18,7 @@
  */
 
 import { EditorCommand, EditorContextValue } from '@opengpex/editor/core/types';
-import { SETTINGS_PANEL_SIGNAL_OPEN, SETTINGS_PANEL_SIGNAL_TAB } from '../../panels/SettingsPanel/protocols';
+import { SettingsPanelAPI } from '../../panels/SettingsPanel/protocols';
 import * as P from './protocols';
 
 /**
@@ -67,8 +67,8 @@ export const TAB_DOCK_COMMANDS = {
     name: 'Open Viewport Settings',
     execute: (ctx: EditorContextValue) => {
       // Cross-plugin call: uses fully qualified signal storage key exported by SettingsPanel
-      ctx.actions.setStateSignal(SETTINGS_PANEL_SIGNAL_TAB, 'Viewport');
-      ctx.actions.setStateSignal(SETTINGS_PANEL_SIGNAL_OPEN, true);
+      ctx.actions.setStateSignal(SettingsPanelAPI.signals.tab, 'Viewport');
+      ctx.actions.setStateSignal(SettingsPanelAPI.signals.open, true);
     },
   } as EditorCommand<void, void>,
 };

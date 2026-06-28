@@ -43,6 +43,7 @@ import PluginSlot from "./PluginSlot";
 
 import { useLayout } from "../LayoutContext";
 import { WORKSPACE_GEOMETRY } from "../Workspace.styles";
+import { useDrawerReveal } from "../hooks/useDrawerReveal";
 
 export default function DrawerBar({
   side = "right",
@@ -152,18 +153,33 @@ export default function DrawerBar({
     return () => unregisterSlot(slotId);
   }, [side, activePanelMaxWidth, registerSlot, unregisterSlot]);
 
-  // 2. Interaction handling
+  // 2. Auto-reveal engine — only for plugins with autoReveal rules on this side
+  const revealPlugins = React.useMemo(
+    () => sortedPlugins.filter((p) => !!p.autoReveal),
+    [sortedPlugins]
+  );
+  useDrawerReveal(revealPlugins, state, actions);
+
+  // 3. Interaction handling
   const clickTimer = React.useRef<NodeJS.Timeout | null>(null);
   const isDraggingRef = React.useRef(false);
 
   const handleToggle = (id: string) => {
     const currentIds = ui.activeSidebarIds || [];
+    const dismissed = ui.autoRevealDismissed || [];
+
     if (currentIds.includes(id)) {
+      // User manually closing → add to dismissed (suppresses future auto-reveal)
       actions.updateUI({
         activeSidebarIds: currentIds.filter((i) => i !== id),
+        autoRevealDismissed: dismissed.includes(id) ? dismissed : [...dismissed, id],
       });
     } else {
-      actions.updateUI({ activeSidebarIds: [...currentIds, id] });
+      // User manually opening → remove from dismissed (restores auto-reveal rights)
+      actions.updateUI({
+        activeSidebarIds: [...currentIds, id],
+        autoRevealDismissed: dismissed.filter((i) => i !== id),
+      });
     }
   };
 

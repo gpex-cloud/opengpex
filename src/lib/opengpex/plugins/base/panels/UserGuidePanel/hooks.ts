@@ -22,6 +22,7 @@
 import { useMemo, useSyncExternalStore } from 'react';
 import { usePluginSelfConfig, usePluginCommands, usePluginSignals, useEditorServices } from '@opengpex/editor/core/context';
 import { BuiltCommand } from '@opengpex/editor/core/types';
+import type { UserGuidePanelCommandsMap, UserGuidePanelSignalsMap } from './commands.d';
 import * as P from './protocols';
 
 export interface GroupedCategory {
@@ -34,8 +35,8 @@ export interface GroupedCategory {
  */
 export const useUserGuide = () => {
   const [selfConfig] = usePluginSelfConfig<P.GuideConfig>();
-  const { toggleCmd } = usePluginCommands();
-  const { openSignal } = usePluginSignals();
+  const { toggleCmd } = usePluginCommands<UserGuidePanelCommandsMap>();
+  const { openSignal } = usePluginSignals<UserGuidePanelSignalsMap>();
   const { plugins } = useEditorServices();
 
   // Subscribe to changes in the plugins store so that we reactively compute the data when plugins/commands register

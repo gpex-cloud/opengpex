@@ -21,11 +21,12 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Sparkles, Download, Trash2, Loader2, ChevronDown, CheckCircle2, Settings, RefreshCw, X } from 'lucide-react';
-import { useEditorServices, usePluginSelfConfig } from '@opengpex/editor/core/context';
+import { useEditorServices, usePluginSelfConfig, usePluginCommands, usePluginSignals } from '@opengpex/editor/core/context';
 import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
 import { useBgRemovalStatus } from './hooks';
 import { bgRemovalClient } from './worker/client';
 import type { BgRemovalConfig, BgModelEntry } from './protocols';
+import type { BgRemovalCommandsMap, BgRemovalSignalsMap } from './commands.d';
 import * as P from './protocols';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -125,6 +126,8 @@ async function deleteModelCache(modelId: string): Promise<boolean> {
 
 export function BgRemovalDrawerContent() {
   const { actions } = useEditorServices();
+  const { removeBgCmd, abortCmd, openSettingsCmd } = usePluginCommands<BgRemovalCommandsMap>();
+  const { statusSignal } = usePluginSignals<BgRemovalSignalsMap>();
   const status = useBgRemovalStatus();
   const [config, setConfig] = usePluginSelfConfig<BgRemovalConfig>();
 
@@ -213,26 +216,26 @@ export function BgRemovalDrawerContent() {
     if (status.context?.frameId) {
       actions.setClipBox(status.context.frameId as string, 'wand', null);
     }
-    actions.setStateSignal(P.BG_REMOVAL_SIGNAL_STATUS, { ...P.INITIAL_STATUS });
-  }, [setConfig, config.models, status, actions]);
+    statusSignal?.set({ ...P.INITIAL_STATUS });
+  }, [setConfig, config.models, status, actions, statusSignal]);
 
   const handleRemoveBg = useCallback(() => {
     // Immediately mark as submitting so the button disables in the same render tick.
     // The command's own setStatus(stage:'loading') will arrive shortly after,
     // at which point isBusy becomes true and isSubmitting is cleared (see useEffect above).
     setIsSubmitting(true);
-    actions.executeCommand(`${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}.${P.CMD_REMOVE_BG}`);
-  }, [actions]);
+    removeBgCmd?.execute();
+  }, [removeBgCmd]);
 
   const handleOpenSettings = useCallback(() => {
-    actions.executeCommand(`${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}.${P.CMD_OPEN_SETTINGS}`);
-  }, [actions]);
+    openSettingsCmd?.execute();
+  }, [openSettingsCmd]);
 
   const handleDownloadModel = useCallback(() => {
     // Trigger the remove bg command which will download the model if needed
     // (the inference pipeline handles downloading automatically)
-    actions.executeCommand(`${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}.${P.CMD_REMOVE_BG}`);
-  }, [actions]);
+    removeBgCmd?.execute();
+  }, [removeBgCmd]);
 
   const activeModelId = activeModel?.modelId;
   const activeModelName = activeModel?.name;
@@ -435,7 +438,7 @@ export function BgRemovalDrawerContent() {
               <span className="font-semibold">Error:</span> {status.errorMessage as string}
             </p>
             <button
-              onClick={() => actions.setStateSignal(P.BG_REMOVAL_SIGNAL_STATUS, { ...P.INITIAL_STATUS })}
+              onClick={() => statusSignal?.set({ ...P.INITIAL_STATUS })}
               className="mt-1 text-[9px] text-rose-400/70 hover:text-rose-300 underline"
             >
               Dismiss
@@ -464,7 +467,7 @@ export function BgRemovalDrawerContent() {
               size="sm"
               shape="rect"
               className="shrink-0"
-              onClick={() => actions.executeCommand(`${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}.${P.CMD_ABORT}`)}
+              onClick={() => abortCmd?.execute()}
               aria-label="Cancel"
             >
               <X size={14} />

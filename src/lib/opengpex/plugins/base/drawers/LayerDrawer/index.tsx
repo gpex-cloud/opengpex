@@ -58,6 +58,17 @@ export const plugin: EditorPlugin = {
     preferredWidth: 320,
   },
 
-  // --- 4. Capabilities ---
+  // --- 4. Auto-Reveal ---
+  autoReveal: {
+    // Expand when active frame has more than 1 layer
+    when: (state) => {
+      if (!state.activeFrameId) return false;
+      const frame = state.frames.byId[state.activeFrameId];
+      return !!frame && frame.layers.order.length > 1;
+    },
+    priority: 90,
+  },
+
+  // --- 5. Capabilities ---
   commands: Object.values(LAYER_COMMANDS),
 };

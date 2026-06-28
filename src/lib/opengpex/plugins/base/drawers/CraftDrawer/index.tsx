@@ -21,7 +21,7 @@ import { EditorPlugin } from "@opengpex/editor/core/types";
 import { CraftDrawerComponent, CraftTriggerButtons } from "./components";
 import { CRAFT_COMMANDS } from "./commands";
 import { CraftDrawerIcon } from "./icon";
-import { COLOR_OPTIONS_CRAFT_SLOT } from "../../options/ColorOptions/protocols";
+import { ColorOptionsAPI } from "../../options/ColorOptions/protocols";
 import * as P from "./protocols";
 
 /**
@@ -70,13 +70,22 @@ export const plugin: EditorPlugin = {
   // --- 6. Contributions ---
   contributions: [
     {
-      slot: COLOR_OPTIONS_CRAFT_SLOT,
+      slot: ColorOptionsAPI.slots.craft,
       component: CraftTriggerButtons,
       order: 100,
     },
   ],
 
-  // --- 7. Bidirectional Linkage ---
+  // --- 7. Auto-Reveal ---
+  autoReveal: {
+    // Expand when any craft tool is activated (user clicked a trigger button or pressed T/B/E)
+    when: (state) => state.interaction.signals[P.CraftDrawerAPI.signals.activeCraft] != null,
+    // Auto-collapse when craft tool is deactivated (user pressed V or mode changed externally)
+    collapseWhenFalse: true,
+    priority: 200,
+  },
+
+  // --- 8. Bidirectional Linkage ---
   // Automatically clear activeCraft signal when interactionMode is externally changed to non-'craft'
   onAction: (action, state, actions) => {
     if (action.type === "SET_INTERACTION") {
@@ -84,9 +93,9 @@ export const plugin: EditorPlugin = {
       // Detects when interactionMode is explicitly set to non-'craft' in payload
       if (payload.interactionMode && payload.interactionMode !== "craft") {
         if (
-          state.interaction.signals[P.CRAFT_DRAWER_SIGNAL_ACTIVE_CRAFT] != null
+          state.interaction.signals[P.CraftDrawerAPI.signals.activeCraft] != null
         ) {
-          actions.setStateSignal(P.CRAFT_DRAWER_SIGNAL_ACTIVE_CRAFT, null);
+          actions.setStateSignal(P.CraftDrawerAPI.signals.activeCraft, null);
         }
       }
     }

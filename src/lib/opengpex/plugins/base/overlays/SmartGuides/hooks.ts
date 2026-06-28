@@ -22,6 +22,7 @@
 import { useMemo } from 'react';
 import { usePluginSelfConfig, usePluginCommands, useEditorState } from '@opengpex/editor/core/context';
 import * as P from './protocols';
+import type { SmartGuidesCommandsMap } from './commands.d';
 
 /**
  * useSmartGuides: Unified hook for smart guides (State observation + commands).
@@ -29,7 +30,7 @@ import * as P from './protocols';
 export const useSmartGuides = () => {
   const { state, activeFrame } = useEditorState();
   const [selfConfig] = usePluginSelfConfig<P.SmartGuidesConfig>();
-  const { toggleCmd } = usePluginCommands();
+  const { toggleCmd } = usePluginCommands<SmartGuidesCommandsMap>();
 
   return useMemo(() => {
     const { smartguides } = state.interaction;

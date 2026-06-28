@@ -25,8 +25,9 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useGpexCloud } from '@opengpex/editor/core/cloud';
 import type { GpexManifest } from '@opengpex/editor/core/helpers/gpex-format';
 import { useEditorState, usePluginCommands } from '@opengpex/editor/core/context';
+import type { CloudMenuCommandsMap } from './commands.d';
 import { hasUnsavedChanges, saveSyncRecord, loadSyncRecord } from './commands';
-import type { SavePhase, SaveResult } from './protocols';
+import type { SavePhase } from './protocols';
 import type { Frame } from '@opengpex/editor/core/types';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -57,7 +58,7 @@ interface ConflictState {
 export const useCloudMenu = () => {
   const { user, isSignedIn, openLogin, signOut } = useGpexCloud();
   const { state, activeFrame } = useEditorState();
-  const { saveToCloudCmd, openFromCloudCmd, deleteFromCloudCmd } = usePluginCommands();
+  const { saveToCloudCmd, openFromCloudCmd, deleteFromCloudCmd } = usePluginCommands<CloudMenuCommandsMap>();
 
   // ─── Menu toggle state ──────────────────────────────────────────
   const [isOpen, setIsOpen] = useState(false);
@@ -128,7 +129,7 @@ export const useCloudMenu = () => {
       const result = await saveToCloudCmd.execute({
         frame: activeFrame,
         onPhaseChange: setSavePhase,
-      }) as SaveResult;
+      });
 
       // Record sync state: snapshot current history length as baseline
       const historyPastLength = state.history?.past?.length ?? 0;
@@ -174,7 +175,7 @@ export const useCloudMenu = () => {
             setConflictState({ existingFrame, manifest, resolve });
           });
         },
-      }) as Frame | null;
+      });
       // Only close browser if file was actually opened (not cancelled)
       if (result) {
         setShowBrowser(false);

@@ -23,8 +23,7 @@ import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
 import * as P from './protocols';
 import type { CraftType, CraftDrawerConfig } from './protocols';
 import {
-  TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID,
-  TEXT_OVERLAY_CMD_UPDATE_PROPERTIES,
+  TextOverlayAPI,
 } from '../../overlays/TextOverlay/protocols';
 
 // ─── Shared Logic ──────────────────────────────────────────────────────────────
@@ -187,13 +186,13 @@ function adjustCraftSize(ctx: EditorContextValue, direction: 1 | -1) {
       const targetSize = currentSize + 2 * direction;
       const newSize = Math.max(6, Math.min(200, targetSize));
 
-      const editingLayerId = ctx.state.interaction.signals[TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID] as string | null;
+      const editingLayerId = ctx.state.interaction.signals[TextOverlayAPI.signals.editingTextLayerId] as string | null;
       if (editingLayerId) {
         ctx.actions.updateLayer(frameId!, activeLayer.id, {
           textData: { ...activeLayer.textData, fontSize: newSize },
         });
       } else {
-        ctx.actions.executeCommand(TEXT_OVERLAY_CMD_UPDATE_PROPERTIES, {
+        ctx.actions.executeCommand(TextOverlayAPI.commands.updateProperties.uid, {
           frameId: frameId!,
           layerId: activeLayer.id,
           patch: { fontSize: newSize },

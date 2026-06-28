@@ -23,6 +23,7 @@ import { useMemo, useState, useCallback } from 'react';
 import { usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import { useEditorState } from '@opengpex/editor/core/context';
 import { AIBridgeConfig, AIMode, AIModelInfo, DEFAULT_PROVIDERS, AIProvider } from './protocols';
+import type { AIBridgeCommandsMap } from './commands.d';
 
 /**
  * useAIBridgeState: Semantic state hook for AIBridge drawer.
@@ -32,7 +33,7 @@ import { AIBridgeConfig, AIMode, AIModelInfo, DEFAULT_PROVIDERS, AIProvider } fr
  */
 export function useAIBridgeState() {
   const [config, setSelfConfig] = usePluginSelfConfig<AIBridgeConfig>();
-  const { generateCmd, openSettingsCmd, fetchModelsCmd } = usePluginCommands();
+  const { generateCmd, openSettingsCmd, fetchModelsCmd } = usePluginCommands<AIBridgeCommandsMap>();
   const { activeLayer } = useEditorState();
 
   // Local loading state (transient, not persisted)

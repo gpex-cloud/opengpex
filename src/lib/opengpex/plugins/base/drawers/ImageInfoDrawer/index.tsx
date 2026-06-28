@@ -63,7 +63,14 @@ export const plugin: EditorPlugin = {
     keepExif: true,
   },
 
-  // --- 4. Capabilities ---
+  // --- 4. Auto-Reveal ---
+  autoReveal: {
+    // Expand when a frame (image) is opened
+    when: (state) => !!state.activeFrameId,
+    priority: 100,
+  },
+
+  // --- 5. Capabilities ---
   commands: Object.values(IMAGE_INFO_COMMANDS),
 };
 

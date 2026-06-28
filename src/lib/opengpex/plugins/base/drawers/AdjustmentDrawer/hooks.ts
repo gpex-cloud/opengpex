@@ -21,13 +21,14 @@
 
 import { useMemo } from 'react';
 import { usePluginCommands } from '@opengpex/editor/core/context';
+import type { AdjustmentCommandsMap } from './commands.d';
 
 /**
  * useAdjustmentCommands: Command Discovery Hook.
  * Transparently passes Cmd references, component layer calls .execute() explicitly.
  */
 export const useAdjustmentCommands = () => {
-    const { updateCmd, beginEditCmd, resetCmd } = usePluginCommands();
+    const { updateCmd, beginEditCmd, resetCmd } = usePluginCommands<AdjustmentCommandsMap>();
 
     return useMemo(() => ({
         // Plugin Commands (Transparently passed Cmd references)

@@ -27,6 +27,7 @@ import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/s
 import { getActiveTarget } from './commands';
 import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn, CROP_TOOL_STRATEGIES } from './protocols';
 import type { CropTool } from './protocols';
+import type { ClipCommandsMap, ClipSignalsMap } from './commands.d';
 
 /**
  * useClipOptionsCommands: Command Discovery Hook.
@@ -48,9 +49,9 @@ export const useClipOptionsCommands = () => {
     branchCreateCmd,
     boxResetCmd,
     cropToolSetCmd, // ← derived from CMD_SET_CROP_TOOL = 'cmd.crop_tool.set'
-  } = usePluginCommands();
+  } = usePluginCommands<ClipCommandsMap>();
 
-  const { reCanvasActiveSignal, cropFeatherValueSignal } = usePluginSignals();
+  const { reCanvasActiveSignal, cropFeatherValueSignal } = usePluginSignals<ClipSignalsMap>();
 
   // ─── Feather persistence (Path B: signal for real-time, config for persistence) ──
   // Read persisted feather from pluginConfig on mount and hydrate the signal.

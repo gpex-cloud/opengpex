@@ -17,13 +17,25 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+import type { LucideIcon } from 'lucide-react';
+import { Square, Circle, Lasso, Wand2 } from 'lucide-react';
+import {
+  CLIP_RECT_CURSOR,
+  CLIP_ELLIPSE_CURSOR,
+  CLIP_LASSO_CURSOR,
+  CLIP_WAND_CURSOR,
+} from '@opengpex/editor/icons';
+
+// ─── Plugin Identity ────────────────────────────────────────────────────────────
+
 export const PLUGIN_ID = 'options.clip_options';
 export const PLUGIN_AUTHOR = 'opengpex';
 
-export const CMD_RE_CANVAS_TOGGLE = 'cmd.re_canvas.toggle';
-export const CMD_RE_CANVAS_APPLY = 'cmd.re_canvas.apply';
-/** Space — enter clip mode (no-op when already in clip). Pairs with `CMD_EXIT_CLIP_MODE`. */
+// ─── Command IDs ────────────────────────────────────────────────────────────────
+
+/** Space — enter clip mode / cycle tool forward. Pairs with `CMD_EXIT_CLIP_MODE`. */
 export const CMD_TOGGLE_MODE = 'cmd.toggle_mode';
+
 /**
  * Shift+Space — reverse cycle through clip tools while already in clip
  * mode. Mirrors `CMD_TOGGLE_MODE`'s subsequent-press cycling but stepping
@@ -40,6 +52,7 @@ export const CMD_CYCLE_TOOL_BACKWARD = 'cmd.crop_tool.cycle_backward';
  * triplet and flip interactionMode → 'pan'.
  */
 export const CMD_EXIT_CLIP_MODE = 'cmd.exit_clip_mode';
+
 /**
  * Enter — commit the peel (merge exchange into host). Separated from Esc
  * (which now only discards/cancels) so that baking requires an explicit
@@ -47,6 +60,9 @@ export const CMD_EXIT_CLIP_MODE = 'cmd.exit_clip_mode';
  * mental model.
  */
 export const CMD_COMMIT_PEEL = 'cmd.peel.commit';
+
+export const CMD_RE_CANVAS_TOGGLE = 'cmd.re_canvas.toggle';
+export const CMD_RE_CANVAS_APPLY = 'cmd.re_canvas.apply';
 export const CMD_SET_ASPECT = 'cmd.set_aspect';
 export const CMD_RESET_ASPECT = 'cmd.reset_aspect';
 export const CMD_BRANCH = 'cmd.branch.create';
@@ -54,7 +70,35 @@ export const CMD_RESET_BOX = 'cmd.box.reset';
 export const CMD_TOGGLE_ANTI_ALIAS = 'cmd.anti_alias.toggle';
 export const CMD_SET_CROP_TOOL = 'cmd.crop_tool.set';
 
+/**
+ * Plugin-level wrapper around `adv.layer.clip.drill`.
+ * Owns the Backspace/Delete keyboard shortcuts and reads the feather signal
+ * before delegating to the core drill command with the feather payload.
+ */
+export const CMD_DRILL_SELECTION = 'cmd.drill_selection';
+
+/**
+ * Plugin-level wrapper around `adv.layer.cmdj.copy`.
+ * Owns the Cmd+J keyboard shortcut and reads the feather signal before
+ * delegating to the core command with the feather payload.
+ */
+export const CMD_LAYER_VIA_COPY = 'cmd.layer_via_copy';
+
+/**
+ * Plugin-level wrapper around `adv.layer.cmdj.cut`.
+ * Owns the Cmd+Shift+J keyboard shortcut and reads the feather signal before
+ * delegating to the core command with the feather payload.
+ */
+export const CMD_LAYER_VIA_CUT = 'cmd.layer_via_cut';
+
+// ─── Signal IDs ─────────────────────────────────────────────────────────────────
+
 export const SIGNAL_RE_CANVAS = 'signal.re_canvas.active';
+
+/** Feather radius (px) for Apply Mask / Drill */
+export const SIGNAL_CROP_FEATHER = 'signal.crop_feather.value';
+
+// ─── Types ──────────────────────────────────────────────────────────────────────
 
 /**
  * CropTool: Active crop / selection tool.
@@ -75,40 +119,9 @@ export const SIGNAL_RE_CANVAS = 'signal.re_canvas.active';
  */
 export type CropTool = 'rect' | 'ellipse' | 'lasso' | 'wand';
 
-/* ──────────────────────────────────────────────────────────────────────────
- * Pre-PR-6-2  ::  CropTool Strategy Table (Single Source of Truth)
- *
- * The five-or-more flavour properties of every clip tool — UI icon, palette,
- * data-write family, interaction handler kind, projection-on-switch, and
- * Re-Canvas mutual-exclusion — used to be scattered as if/else branches across
- * six call-sites:
- *   L1 visual    : ClipOptions/components.tsx        (TOOL_VISUAL table)
- *   L2 behavior  : ClipOptions/commands.ts           (setCropTool if-chain)
- *   L3 channel   : ClipOverlay/components.tsx        (isRegularTool / isIrregularTool literal)
- *   L4 handler   : ClipOverlay/interactions.ts       (per-handler test() guards)
- *   L5 data write: ClipOverlay/interactions.ts       (lasso onEnd → adv.irregular.set vs setIrregularCropBox)
- *   L6 mutex     : ClipOptions/commands.ts           (Re-Canvas force-rect interceptor)
- *
- * Each new tool used to require a 6-touch coordinated change with no compiler
- * help, exactly the failure mode this table eliminates: now a new tool is
- * literally one row added to `CROP_TOOL_STRATEGIES`. The narrow `LucideIcon`
- * import is local-only on purpose so this file remains shareable across L3–L6
- * consumers without dragging in unrelated UI deps.
- * ──────────────────────────────────────────────────────────────────────── */
-
-import type { LucideIcon } from 'lucide-react';
-import { Square, Circle, Lasso, Wand2 } from 'lucide-react';
-import {
-  CLIP_RECT_CURSOR,
-  CLIP_ELLIPSE_CURSOR,
-  CLIP_LASSO_CURSOR,
-  CLIP_WAND_CURSOR,
-} from '@opengpex/editor/icons';
-
 export type CropFamily = 'regular' | 'irregular';
 
 export interface CropToolStrategy {
-  /** L1 visual */
   readonly id: CropTool;
   readonly label: string;
   readonly icon: LucideIcon;
@@ -118,19 +131,12 @@ export interface CropToolStrategy {
    * Semantic category — purely describes the geometry kind this tool produces:
    *   - `regular`:   LocalShape (rect/circle with axis-aligned bounding rect)
    *   - `irregular`: LocalPolygon (multi-ring point set)
-   *
-   * Data-write routing is unified: all tools write to `clipBoxes[toolId]` via
-   * `actions.setClipBox(frameId, toolId, data)`. The `family` field is no longer
-   * used for routing; it serves only as a semantic discriminator for:
-   *   - UI accent colour (amber = regular, purple = irregular)
-   *   - `setCropTool` projection logic (only regular tools project `type`)
-   *   - `getClipBox().regular` mirrors this at read time
    */
   readonly family: CropFamily;
 
   /**
-   * L4 handler dispatch hint — consumed only inside ClipOverlay/interactions.ts
-   * via `makeCropToolGuard(handlerKind)`. External call-sites should use
+   * Handler dispatch hint — consumed by `makeCropToolGuard(handlerKind)` in
+   * ClipOverlay/interactions.ts. External call-sites should use
    * `getClipBox().regular` for data-level branching.
    */
   readonly handlerKind: 'clipbox' | 'lasso' | 'wand';
@@ -139,49 +145,36 @@ export interface CropToolStrategy {
    * Shape projection on tool-switch — only meaningful for `regular` tools.
    * When defined, `setCropTool` patches `clipBoxes[newSlot].type` to the
    * returned value. `undefined` for irregular tools → no projection.
-   *
-   * `antiAliased` is intentionally optional: when omitted, `setCropTool`
-   * preserves the box's existing AA flag so the orthogonal AA toggle remains
-   * the sole owner of that field.
    */
   readonly projectShape?: () => { type: 'rect' | 'circle'; antiAliased?: boolean };
 
   /**
    * Re-Canvas mutex — `true` means this tool cannot operate while Re-Canvas
    * is active (canvas resizing only makes sense on a rectangular footprint).
-   * The guard is purely visual/dispatch — no data coercion occurs.
    */
   readonly forbiddenInReCanvas: boolean;
 
   /**
    * Whether the tool supports the anti-alias toggle. Drives the Options-bar
-   * `AA` button's `disabled` state.
-   *
-   * `rect` is always pixel-aligned → `false`.
-   * All other tools (`ellipse`, `lasso`, `wand`) support AA toggling via the
-   * `antiAliased` field on their respective spatial (LocalShape or LocalPolygon).
-   * All tools default AA to ON (true); user can toggle OFF at any time.
+   * `AA` button's `disabled` state. `rect` is always pixel-aligned → `false`.
    */
   readonly supportsAntiAlias: boolean;
 
   /**
    * Custom cursor for this clip tool — applied to the viewport via
-   * `cursorOverride` when this tool is active in clip mode. Uses CSS cursor
-   * syntax (supports data URL SVG cursors with hotspot specification).
-   * Consumed by `useClipCursor` hook in ClipOverlay.
+   * `cursorOverride` when this tool is active in clip mode.
    */
   readonly cursor: string;
-
 }
 
-/**
- * CROP_TOOL_STRATEGIES — Single Source of Truth.
- *
- * Adding a new tool: add one row here, then
- *   1. (optional) add a handler factory in ClipOverlay/interactions.ts whose
- *      `test()` uses `makeCropToolGuard('<your-handlerKind>')`
- *   2. nothing else — L1/L2/L3/L6 derive automatically.
- */
+// ─── Strategy Table ─────────────────────────────────────────────────────────────
+//
+// Single Source of Truth for all clip tool properties. Adding a new tool:
+//   1. Add one row here.
+//   2. (optional) Add a handler factory in ClipOverlay/interactions.ts whose
+//      `test()` uses `makeCropToolGuard('<your-handlerKind>')`.
+//   3. Nothing else — all derived code reads from this table.
+
 export const CROP_TOOL_STRATEGIES: Record<CropTool, CropToolStrategy> = {
   'rect':    { id: 'rect',    label: 'Rect',    icon: Square, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'rect'   }), forbiddenInReCanvas: false, supportsAntiAlias: false, cursor: CLIP_RECT_CURSOR    },
   'ellipse': { id: 'ellipse', label: 'Ellipse', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'circle' }), forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_CURSOR },
@@ -189,44 +182,37 @@ export const CROP_TOOL_STRATEGIES: Record<CropTool, CropToolStrategy> = {
   'wand':    { id: 'wand',    label: 'Wand',    icon: Wand2,  accent: 'purple', family: 'irregular', handlerKind: 'wand',                                               forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_WAND_CURSOR    },
 };
 
-/**
- * Derived helpers — kept as named exports for searchability and call-site
- * readability. Both go through CROP_TOOL_STRATEGIES so there is no duplicate
- * source of truth (`if (isIrregularTool(tool))` ≡ `if (CROP_TOOL_STRATEGIES[tool].family === 'irregular')`).
- */
+// ─── Derived Helpers ────────────────────────────────────────────────────────────
+
 export const isRegularTool   = (t: CropTool): boolean => CROP_TOOL_STRATEGIES[t]?.family === 'regular';
 export const isIrregularTool = (t: CropTool): boolean => CROP_TOOL_STRATEGIES[t]?.family === 'irregular';
 
-// Cross-plugin reference UIDs (for use by external consumers via actions.executeCommand)
-export const CLIP_OPTIONS_CMD_TOGGLE_MODE = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_TOGGLE_MODE}`;
-export const CLIP_OPTIONS_CMD_RESET_BOX = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_RESET_BOX}`;
-export const CLIP_OPTIONS_CMD_BRANCH = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_BRANCH}`;
-export const CLIP_OPTIONS_CMD_SET_CROP_TOOL = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CROP_TOOL}`;
-export const CLIP_OPTIONS_SIGNAL_RE_CANVAS = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_RE_CANVAS}`;
-
-// Feather selection signal — stores the current feather radius (px) for Apply Mask / Drill
-export const SIGNAL_CROP_FEATHER = 'signal.crop_feather.value';
-export const CLIP_OPTIONS_SIGNAL_CROP_FEATHER = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_CROP_FEATHER}`;
+// ─── Cross-Plugin Typed Facade ──────────────────────────────────────────────────
 
 /**
- * CMD_DRILL_SELECTION — Plugin-level wrapper around `adv.layer.clip.drill`.
- * Owns the Backspace/Delete keyboard shortcuts and reads the feather signal
- * before delegating to the core drill command with the feather payload.
- * This keeps core independent of plugin signal knowledge.
+ * ClipOptionsAPI: Structured cross-plugin facade for external consumers.
+ *
+ * Usage:
+ *   import { ClipOptionsAPI } from '../../options/ClipOptions/protocols';
+ *   state.getStateSignal(ClipOptionsAPI.signals.reCanvas);
+ *   actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
  */
-export const CMD_DRILL_SELECTION = 'cmd.drill_selection';
-
-/**
- * CMD_LAYER_VIA_COPY — Plugin-level wrapper around `adv.layer.cmdj.copy`.
- * Owns the Cmd+J keyboard shortcut and reads the feather signal before
- * delegating to the core command with the feather payload.
- */
-export const CMD_LAYER_VIA_COPY = 'cmd.layer_via_copy';
-
-/**
- * CMD_LAYER_VIA_CUT — Plugin-level wrapper around `adv.layer.cmdj.cut`.
- * Owns the Cmd+Shift+J keyboard shortcut and reads the feather signal before
- * delegating to the core command with the feather payload.
- */
-export const CMD_LAYER_VIA_CUT = 'cmd.layer_via_cut';
+export const ClipOptionsAPI = {
+  signals: {
+    /** Canvas Re-Size active status */
+    reCanvas: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_RE_CANVAS}` as const,
+    /** Feather radius (px) for Apply Mask / Drill */
+    cropFeather: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_CROP_FEATHER}` as const,
+  },
+  commands: {
+    /** Clear the active selection (double-click reset) */
+    resetBox: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_RESET_BOX}` } as { uid: string; _payload: void },
+    /** Enter / Cycle Clip Tool */
+    toggleMode: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_TOGGLE_MODE}` } as { uid: string; _payload: void },
+    /** Set crop tool */
+    setCropTool: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CROP_TOOL}` } as { uid: string; _payload: { tool: CropTool } },
+  },
+  /** pluginConfig storage key */
+  configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
+} as const;
 

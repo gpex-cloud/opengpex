@@ -22,6 +22,7 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { useEditorState, useEditorServices, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import { Frame, Layer, AssetEntryInfo } from '@opengpex/editor/core/types';
+import type { StorageInfoPanelCommandsMap } from './commands.d';
 import * as P from './protocols';
 
 /**
@@ -51,7 +52,7 @@ const MOUNT_TIME = Date.now();
  */
 export const useStorageConfig = () => {
   const [selfConfig] = usePluginSelfConfig<P.StoragePluginConfig>();
-  const { toggleCmd, toggleDashboardCmd } = usePluginCommands();
+  const { toggleCmd, toggleDashboardCmd } = usePluginCommands<StorageInfoPanelCommandsMap>();
 
   return {
     isEnabled: selfConfig?.enabled === true,

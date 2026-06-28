@@ -21,12 +21,12 @@ import { InteractionHandler, Layer, Frame, LocalRect, asLocalShape, asWorldRect 
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import { createTransformHandler } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
-import { CRAFT_DRAWER_SIGNAL_ACTIVE_CRAFT } from '../../drawers/CraftDrawer/protocols';
+import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, _CMD_PLACE_UID, _CMD_EDIT_START_UID } from './protocols';
-import { COLOR_OPTIONS_CONFIG_KEY } from '../../options/ColorOptions/protocols';
+import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
 
 /** Shared signal keys (cross-plugin constants) */
-const ACTIVE_CRAFT_KEY = CRAFT_DRAWER_SIGNAL_ACTIVE_CRAFT;
+const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
 const EDITING_TEXT_KEY = TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID;
 
 /** Command UIDs (from protocols, Single Source of Truth) */
@@ -318,7 +318,7 @@ export const createTextPlaceHandler = (): InteractionHandler => {
       const alignedCx = alignedCenter.x;
       const alignedCy = alignedCenter.y;
 
-      const colorConfig = e.state.pluginConfig[COLOR_OPTIONS_CONFIG_KEY] as { pendingColor?: string } | undefined;
+      const colorConfig = e.state.pluginConfig[ColorOptionsAPI.configKey] as { pendingColor?: string } | undefined;
       const initialColor = colorConfig?.pendingColor || '#FFFFFF';
 
       const layersArray = frame.layers.order.map(id => frame.layers.byId[id]);
