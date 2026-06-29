@@ -34,6 +34,8 @@ interface ComboInputProps<T extends string | number> {
   readOnly?: boolean;
   /** Optional inline style applied to the input element (for font preview etc.) */
   inputStyle?: React.CSSProperties;
+  /** Whether to render dropdown via Portal (default: true). Set to false to keep dropdown in-container. */
+  byPortal?: boolean;
 }
 
 /**
@@ -49,7 +51,8 @@ export default function ComboInput<T extends string | number>({
   className = "",
   type = 'text',
   readOnly = false,
-  inputStyle
+  inputStyle,
+  byPortal = true,
 }: ComboInputProps<T>) {
   const [isOpen, setIsOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
@@ -68,7 +71,7 @@ export default function ComboInput<T extends string | number>({
     };
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
-      if (containerRef.current) {
+      if (byPortal && containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
         setCoords({
           top: rect.bottom + window.scrollY,
@@ -78,11 +81,36 @@ export default function ComboInput<T extends string | number>({
       }
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen]);
+  }, [isOpen, byPortal]);
 
   const handleInputClick = () => {
     if (readOnly) setIsOpen(!isOpen);
   };
+
+  // ─── Dropdown content (shared between portal and inline modes) ────────
+  const dropdownContent = (
+    <div className="max-h-[300px] overflow-y-auto py-1.5">
+      {options.map((opt) => (
+        <button
+          key={opt}
+          onClick={(e) => {
+            e.stopPropagation();
+            onChange(opt);
+            setIsOpen(false);
+          }}
+          className={`
+            w-full px-4 py-2 text-left text-[10px] font-bold tabular-nums transition-colors cursor-pointer
+            ${value === opt 
+              ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20' 
+              : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-100'
+            }
+          `}
+        >
+          {opt}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <div ref={containerRef} className={`relative flex items-center bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 gap-1.5 transition-all focus-within:border-indigo-500/50 focus-within:ring-1 focus-within:ring-indigo-500/20 ${disabled ? 'opacity-50 pointer-events-none' : ''} ${className}`}>
@@ -129,41 +157,30 @@ export default function ComboInput<T extends string | number>({
       )}
 
       {isOpen && options && options.length > 0 && (
-        <EditorPortal>
-          <div 
-            ref={dropdownRef}
-            style={{
-               position: 'fixed',
-               top: coords.top + 6,
-               left: coords.left,
-               width: coords.width,
-               zIndex: 1100
-            }}
-            className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-200 ring-1 ring-black/5 pointer-events-auto"
-          >
-            <div className="max-h-[300px] overflow-y-auto py-1.5">
-              {options.map((opt) => (
-                <button
-                  key={opt}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onChange(opt);
-                    setIsOpen(false);
-                  }}
-                  className={`
-                    w-full px-4 py-2 text-left text-[10px] font-bold tabular-nums transition-colors cursor-pointer
-                    ${value === opt 
-                      ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20' 
-                      : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-100'
-                    }
-                  `}
-                >
-                  {opt}
-                </button>
-              ))}
+        byPortal ? (
+          <EditorPortal>
+            <div 
+              ref={dropdownRef}
+              data-drawer-bar="portal"
+              style={{
+                position: 'fixed',
+                top: coords.top + 6,
+                left: coords.left,
+                width: coords.width,
+                zIndex: 1100
+              }}
+              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-200 ring-1 ring-black/5 pointer-events-auto"
+            >
+              {dropdownContent}
             </div>
+          </EditorPortal>
+        ) : (
+          <div 
+            className="absolute top-full left-0 right-0 mt-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-200 ring-1 ring-black/5 z-50"
+          >
+            {dropdownContent}
           </div>
-        </EditorPortal>
+        )
       )}
     </div>
   );

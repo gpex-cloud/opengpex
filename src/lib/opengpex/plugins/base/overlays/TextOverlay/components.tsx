@@ -19,7 +19,7 @@
 
 "use client";
 
-import React, { useRef, useCallback } from "react";
+import React, { useRef, useCallback, useEffect } from "react";
 import { useEditorState } from "@opengpex/editor/core/context";
 import { TEXT_LAYER_PADDING } from "@opengpex/editor/core/helpers/config";
 import { useTextEditorFastSync, useTextBoundingFastSync } from "./useFastSync";
@@ -168,10 +168,41 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
     [cancelEditing, commitEditing],
   );
 
-  // Auto commit on blur
-  const handleBlur = useCallback(() => {
-    commitEditing();
-  }, [commitEditing]);
+  // Track whether the blur was caused by clicking on a drawer panel control.
+  // relatedTarget alone is unreliable: non-focusable elements (dropdown items, spans)
+  // won't appear as relatedTarget. We use a mousedown listener as a robust fallback.
+  const drawerClickRef = useRef(false);
+
+  useEffect(() => {
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      drawerClickRef.current = !!(target?.closest("[data-drawer-bar]"));
+    };
+    document.addEventListener("mousedown", handleMouseDown, true); // capture phase
+    return () => document.removeEventListener("mousedown", handleMouseDown, true);
+  }, []);
+
+  // Auto commit on blur (but NOT when focus moves to drawer panel controls)
+  const handleBlur = useCallback(
+    (e: React.FocusEvent) => {
+      // Check 1: relatedTarget (works for focusable elements like <input>, <button>)
+      const related = e.relatedTarget as HTMLElement | null;
+      if (related?.closest("[data-drawer-bar]")) {
+        // Drawer panel interaction — schedule refocus back to editor
+        setTimeout(() => editorRef.current?.focus(), 0);
+        return;
+      }
+      // Check 2: mousedown flag (works for non-focusable elements like dropdown items)
+      if (drawerClickRef.current) {
+        drawerClickRef.current = false;
+        // Drawer panel interaction — schedule refocus back to editor
+        setTimeout(() => editorRef.current?.focus(), 0);
+        return;
+      }
+      commitEditing();
+    },
+    [commitEditing, editorRef],
+  );
 
   if (!activeFrame || !layer || !textData) return null;
 
@@ -195,7 +226,7 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
           transform: `scale(${camera.k})`,
           transformOrigin: "top left",
           minWidth: "80px",
-          maxWidth: `${Math.max(200, canvas.w - localX)}px`,
+          maxWidth: boxMode === "fixed" ? undefined : `${Math.max(200, canvas.w - localX)}px`,
         }}
       >
         {/* Relative wrapper: ensures handles align to editor bounds */}

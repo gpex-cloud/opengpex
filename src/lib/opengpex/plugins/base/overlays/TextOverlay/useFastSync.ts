@@ -39,8 +39,9 @@ export function useTextEditorFastSync(
   const { actions } = useEditorServices();
   const { activeFrame } = useEditorState();
 
-  // Cache the previous bounding to avoid unnecessary fast track writes
-  const lastBoundingRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
+  // Track cumulative bounding + position to correctly compensate cx/cy across rapid calls
+  // (React state may be stale between batched updates, so we maintain our own source of truth)
+  const lastStateRef = useRef<{ w: number; h: number; cx: number; cy: number } | null>(null);
 
   useFastSync(containerRef, isActive, (v: VolatileState, f: Frame, cam: CameraState) => {
     const el = containerRef.current;
@@ -80,16 +81,33 @@ export function useTextEditorFastSync(
   });
 
   /**
-   * notifyBoundingChange: When editor content size changes, synchronize writing to fast track buffer
+   * notifyBoundingChange: When editor content size changes, synchronize writing to fast track buffer.
    * This allows LayerOverlay's gizmo to immediately perceive bounding changes via fast track.
    * Also synchronize updating visibleShape to ensure rendering pipeline doesn't crop text to old size.
+   *
+   * cx/cy compensation: When bounding width/height changes, cx/cy are adjusted so that the
+   * top-left corner of the text box stays fixed (the box expands rightward/downward only).
    */
   const notifyBoundingChange = useCallback((w: number, h: number) => {
     if (!activeFrame) return;
+    const layer = activeFrame.layers.byId[layerId];
+    if (!layer) return;
+
+    // Initialize tracking state from current layer on first call
+    if (!lastStateRef.current) {
+      lastStateRef.current = { w: layer.bounding.w, h: layer.bounding.h, cx: layer.cx, cy: layer.cy };
+    }
 
     // Debounce: write only when size actually changes
-    if (lastBoundingRef.current.w === w && lastBoundingRef.current.h === h) return;
-    lastBoundingRef.current = { w, h };
+    if (lastStateRef.current.w === w && lastStateRef.current.h === h) return;
+
+    // Compute cx/cy compensation to keep top-left corner fixed
+    const deltaW = w - lastStateRef.current.w;
+    const deltaH = h - lastStateRef.current.h;
+    const newCx = lastStateRef.current.cx + deltaW / 2;
+    const newCy = lastStateRef.current.cy + deltaH / 2;
+
+    lastStateRef.current = { w, h, cx: newCx, cy: newCy };
 
     // visibleShape must be expanded in sync with bounding, otherwise rendering engine will crop text to old visibleShape area
     const newVisibleShape = asLocalShape({ x: 0, y: 0, w, h });
@@ -102,12 +120,16 @@ export function useTextEditorFastSync(
       }
       v.buffered.layers[compositeKey].bounding = { w, h };
       v.buffered.layers[compositeKey].visibleShape = newVisibleShape;
+      v.buffered.layers[compositeKey].cx = newCx;
+      v.buffered.layers[compositeKey].cy = newCy;
     });
 
     // Also update slow track (Redux) to keep React state eventually consistent
     actions.updateLayer(activeFrame.id, layerId, {
       bounding: { w, h },
       visibleShape: newVisibleShape,
+      cx: newCx,
+      cy: newCy,
     });
   }, [activeFrame, layerId, actions]);
 

@@ -318,8 +318,7 @@ export const createLassoHandler = (): InteractionHandler => {
       const clipBox = getClipBox(e.activeFrame);
       gestureAA = clipBox?.spatial.antiAliased ?? true;
 
-      let clampedX = Math.max(0, Math.min(e.point.canvas.x, e.activeFrame.canvas.w));
-      let clampedY = Math.max(0, Math.min(e.point.canvas.y, e.activeFrame.canvas.h));
+      let { x: clampedX, y: clampedY } = e.geometry.space.clampPointToRect(e.point.canvas, e.activeFrame.canvas);
       // AA OFF: snap trail points to integer pixels for WYSIWYG pixel alignment.
       if (!gestureAA) {
         const snapped = e.geometry.snapping.snapToPixel({ x: clampedX, y: clampedY });
@@ -337,8 +336,7 @@ export const createLassoHandler = (): InteractionHandler => {
 
     onMove: (e) => {
       if (!active) return;
-      let clampedX = Math.max(0, Math.min(e.point.canvas.x, e.activeFrame.canvas.w));
-      let clampedY = Math.max(0, Math.min(e.point.canvas.y, e.activeFrame.canvas.h));
+      let { x: clampedX, y: clampedY } = e.geometry.space.clampPointToRect(e.point.canvas, e.activeFrame.canvas);
       // AA OFF: snap to pixel grid using system snapping service.
       if (!gestureAA) {
         const snapped = e.geometry.snapping.snapToPixel({ x: clampedX, y: clampedY });

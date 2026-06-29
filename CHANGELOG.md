@@ -11,6 +11,8 @@ All notable changes to OpenGPEX are documented in this file.
 - Implement resolution-adaptive default text sizes and dynamic size slider limits based on canvas dimensions
 - Scale text resize handles counter-proportionally to canvas zoom to keep their screen size constant (8px)
 - Add custom canvas pixel `ColorSampler` with precision crosshairs and a magnifier grid overlay (shortcut 'I')
+- Refactor inline text editing into a session-driven pattern (create/modify) and fix panel height flicker on cancel/empty commit
+- Compensate center coordinates (cx/cy) during text bounding box updates to keep its top-left corner anchored
 
 ---
 

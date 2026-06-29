@@ -190,6 +190,7 @@ export const TextPanel = React.memo(function TextPanel() {
           value={currentWeightLabel}
           readOnly={true}
           options={weightOptions}
+          byPortal={false}
           onChange={(val) => {
             // Find corresponding numeric weight value for the selected label name
             const weightEntry = Object.entries(ALL_WEIGHT_LABELS).find(([_, label]) => label === val);
