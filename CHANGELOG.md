@@ -4,6 +4,15 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.15
+
+- Add dynamic `FontService` supporting IndexedDB local caching, Google Fonts discovery, and local font access
+- Add `FontPicker` widget to the text craft panel with fallback alignment to closest available weights
+- Implement resolution-adaptive default text sizes and dynamic size slider limits based on canvas dimensions
+- Scale text resize handles counter-proportionally to canvas zoom to keep their screen size constant (8px)
+
+---
+
 ## v1.0.0-beta.14
 
 - Add declarative drawer auto-reveal/auto-collapse system driven by editor state transitions (e.g., active tools, layer counts)
