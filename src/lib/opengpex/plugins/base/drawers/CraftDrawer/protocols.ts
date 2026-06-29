@@ -96,3 +96,70 @@ export interface CraftDrawerConfig {
   /** User-configured text style preset for next text layer creation */
   pendingTextData?: PendingTextData;
 }
+
+// ─── Text Size Adaptive Utilities ──────────────────────────────────────────────
+
+/**
+ * Reference font size calculation constants.
+ * Strategy: use a percentage of the canvas short side, clamped to a reasonable range.
+ */
+const REF_RATIO = 0.04;    // 4% of canvas short side
+const REF_MIN = 18;         // Minimum reference value (floor for tiny canvases)
+const REF_MAX = 200;        // Maximum reference value (cap to avoid overly large initial size)
+
+/**
+ * Snaps a raw font size value to a "nice" number for better UX.
+ * Rounding thresholds:
+ *   ≥ 100 → snap to nearest 10 (100, 110, 120, ...)
+ *    ≥ 50 → snap to nearest 5  (50, 55, 60, ...)
+ *     < 50 → snap to nearest even number (18, 20, 22, 24, ...)
+ */
+function snapToNiceSize(raw: number): number {
+  if (raw >= 100) return Math.round(raw / 10) * 10;
+  if (raw >= 50) return Math.round(raw / 5) * 5;
+  return Math.round(raw / 2) * 2;
+}
+
+/**
+ * Computes a resolution-adaptive reference font size based on canvas dimensions.
+ *
+ * Formula: fontSize = snapToNice(clamp(shortSide × RATIO, MIN, MAX))
+ *
+ * Examples:
+ *   800×600   → 24px (web-level)
+ *   1920×1080 → 44px (presentation-level)
+ *   3024×4032 → 120px (photography-level)
+ *   530×530   → 22px (small canvas)
+ *   300×300   → 18px (floor)
+ */
+export function getReferenceFontSize(canvasW: number, canvasH: number): number {
+  const shortSide = Math.min(canvasW, canvasH);
+  const raw = Math.max(REF_MIN, Math.min(REF_MAX, shortSide * REF_RATIO));
+  return snapToNiceSize(raw);
+}
+
+/**
+ * Static fallback for slider max when canvas dimensions are unavailable.
+ */
+const TEXT_SIZE_STATIC_MAX = 200;
+
+/**
+ * Computes a dynamic slider maximum for text size based on canvas dimensions.
+ *
+ * Rules:
+ * - Always >= 200 (ensures basic usability)
+ * - For large canvases, expands to 50% of the canvas short side
+ *   (e.g. 3000px canvas → max=1500)
+ * - Hard cap at 2000 (prevents extreme edge cases)
+ */
+export function getDynamicTextSizeMax(canvasW?: number, canvasH?: number): number {
+  if (!canvasW || !canvasH) return TEXT_SIZE_STATIC_MAX;
+  const shortSide = Math.min(canvasW, canvasH);
+  return Math.min(2000, Math.max(TEXT_SIZE_STATIC_MAX, Math.round(shortSide * 0.5)));
+}
+
+/** Absolute maximum for number input (regardless of slider range) */
+export const ABSOLUTE_TEXT_SIZE_MAX = 2000;
+
+/** Minimum font size constant */
+export const TEXT_SIZE_MIN = 6;

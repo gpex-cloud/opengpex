@@ -26,6 +26,8 @@ import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import { FontPicker } from "@opengpex/editor/widgets/FontPicker";
 import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
 import { useTextPanel } from "../hooks";
+import { getDynamicTextSizeMax, TEXT_SIZE_MIN, ABSOLUTE_TEXT_SIZE_MAX } from "../protocols";
+import { useEditorState } from "@opengpex/editor/core/context";
 
 import { FONT_REGISTRY } from "@opengpex/editor/core/fonts/registry";
 
@@ -47,16 +49,15 @@ const ALL_WEIGHT_LABELS: Record<number, string> = {
 
 // ─── Logarithmic Slider Helpers ────────────────────────────────────────────────
 
-const TEXT_SIZE_POWER = 2.5;
-const TEXT_SIZE_MAX = 200;
-const TEXT_SIZE_MIN = 6;
+const TEXT_SIZE_POWER = 2.8;  // Increased from 2.5 for better small-value precision
 
-function sliderToTextSize(percent: number): number {
-  return Math.round(TEXT_SIZE_MIN + (TEXT_SIZE_MAX - TEXT_SIZE_MIN) * Math.pow(percent / 100, TEXT_SIZE_POWER));
+function sliderToTextSize(percent: number, max: number): number {
+  return Math.round(TEXT_SIZE_MIN + (max - TEXT_SIZE_MIN) * Math.pow(percent / 100, TEXT_SIZE_POWER));
 }
 
-function textSizeToSlider(size: number): number {
-  return Math.round(Math.pow((size - TEXT_SIZE_MIN) / (TEXT_SIZE_MAX - TEXT_SIZE_MIN), 1 / TEXT_SIZE_POWER) * 100);
+function textSizeToSlider(size: number, max: number): number {
+  const clamped = Math.min(size, max);  // Values exceeding slider range pin to top
+  return Math.round(Math.pow((clamped - TEXT_SIZE_MIN) / (max - TEXT_SIZE_MIN), 1 / TEXT_SIZE_POWER) * 100);
 }
 
 /**
@@ -92,6 +93,10 @@ function getClosestWeight(targetWeight: number, availableWeights: number[]): num
  */
 export const TextPanel = React.memo(function TextPanel() {
   const { targetLayer, textData, updateTextData, updateTextDataLive, textColor, updateTextColor, updateTextColorLive } = useTextPanel();
+  const { activeFrame } = useEditorState();
+
+  // Dynamic slider max based on canvas dimensions
+  const dynamicMax = getDynamicTextSizeMax(activeFrame?.canvas.w, activeFrame?.canvas.h);
 
   // Retrieve the active font family (defaulting to "Inter")
   const selectedFamily = textData?.fontFamily || "Inter";
@@ -125,18 +130,18 @@ export const TextPanel = React.memo(function TextPanel() {
             min="0"
             max="100"
             step="1"
-            value={textSizeToSlider(textData?.fontSize || 24)}
+            value={textSizeToSlider(textData?.fontSize || 24, dynamicMax)}
             onChange={(e) => {
-              const newSize = sliderToTextSize(Number(e.target.value));
+              const newSize = sliderToTextSize(Number(e.target.value), dynamicMax);
               updateTextDataLive({ fontSize: newSize });
             }}
             onMouseUp={(e) => {
-              const newSize = sliderToTextSize(Number(e.currentTarget.value));
+              const newSize = sliderToTextSize(Number(e.currentTarget.value), dynamicMax);
               updateTextData({ fontSize: newSize });
               e.currentTarget.blur();
             }}
             onTouchEnd={(e) => {
-              const newSize = sliderToTextSize(Number(e.currentTarget.value));
+              const newSize = sliderToTextSize(Number(e.currentTarget.value), dynamicMax);
               updateTextData({ fontSize: newSize });
               e.currentTarget.blur();
             }}
@@ -146,10 +151,10 @@ export const TextPanel = React.memo(function TextPanel() {
             <input
               type="number"
               min={TEXT_SIZE_MIN}
-              max={TEXT_SIZE_MAX}
+              max={ABSOLUTE_TEXT_SIZE_MAX}
               value={textData?.fontSize || 24}
               onChange={(e) => {
-                const val = Math.max(TEXT_SIZE_MIN, Math.min(TEXT_SIZE_MAX, Number(e.target.value) || TEXT_SIZE_MIN));
+                const val = Math.max(TEXT_SIZE_MIN, Math.min(ABSOLUTE_TEXT_SIZE_MAX, Number(e.target.value) || TEXT_SIZE_MIN));
                 updateTextData({ fontSize: val });
               }}
               className="w-8 bg-transparent text-right focus:outline-none outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"

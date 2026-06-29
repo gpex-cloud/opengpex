@@ -186,63 +186,66 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
   const screenY = localY * camera.k + camera.y;
 
   return (
-    <div
-      ref={containerRef}
-      className="absolute pointer-events-auto"
-      style={{
-        left: `${screenX}px`,
-        top: `${screenY}px`,
-        transform: `scale(${camera.k})`,
-        transformOrigin: "top left",
-        minWidth: "80px",
-        maxWidth: `${Math.max(200, (canvas.w - localX) * camera.k)}px`,
-      }}
-    >
       <div
-        ref={editorRef}
-        contentEditable
-        suppressContentEditableWarning
-        onInput={handleInput}
-        onKeyDown={handleKeyDown}
-        onBlur={handleBlur}
-        className="outline-none whitespace-pre-wrap break-words caret-[var(--accent)]"
+        ref={containerRef}
+        className="absolute pointer-events-auto"
         style={{
-          fontFamily: textData.fontFamily,
-          fontSize: `${textData.fontSize}px`,
-          fontWeight: textData.fontWeight,
-          fontStyle: textData.italic ? "italic" : "normal",
-          textDecoration:
-            [
-              textData.underline ? "underline" : "",
-              textData.strikethrough ? "line-through" : "",
-            ]
-              .filter(Boolean)
-              .join(" ") || "none",
-          color: textData.color,
-          textAlign: textData.align,
-          lineHeight: textData.lineHeight,
-          minHeight: "1em",
-          // Editing state border (always displayed - dashed line)
-          border: "1px dashed rgba(180, 180, 180, 0.6)",
-          borderRadius: "2px",
-          padding: `${TEXT_LAYER_PADDING.y}px ${TEXT_LAYER_PADDING.x}px`,
-          cursor: (state.interaction.cursorOverride === 'grab' || state.interaction.cursorOverride === 'grabbing')
-            ? state.interaction.cursorOverride
-            : "text",
-          // fixed mode: force width/height + text wrapping + overflow hidden
-          ...(boxMode === "fixed" && {
-            width: `${textData.boxWidth}px`,
-            height: `${textData.boxHeight}px`,
-            overflow: "hidden",
-            wordWrap: "break-word" as const,
-            overflowWrap: "break-word" as const,
-          }),
+          left: `${screenX}px`,
+          top: `${screenY}px`,
+          transform: `scale(${camera.k})`,
+          transformOrigin: "top left",
+          minWidth: "80px",
+          maxWidth: `${Math.max(200, canvas.w - localX)}px`,
         }}
-      />
+      >
+        {/* Relative wrapper: ensures handles align to editor bounds */}
+        <div className="relative">
+          <div
+            ref={editorRef}
+            contentEditable
+            suppressContentEditableWarning
+            onInput={handleInput}
+            onKeyDown={handleKeyDown}
+            onBlur={handleBlur}
+            className="outline-none whitespace-pre-wrap break-words caret-[var(--accent)]"
+            style={{
+              fontFamily: textData.fontFamily,
+              fontSize: `${textData.fontSize}px`,
+              fontWeight: textData.fontWeight,
+              fontStyle: textData.italic ? "italic" : "normal",
+              textDecoration:
+                [
+                  textData.underline ? "underline" : "",
+                  textData.strikethrough ? "line-through" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ") || "none",
+              color: textData.color,
+              textAlign: textData.align,
+              lineHeight: textData.lineHeight,
+              minHeight: "1em",
+              // Editing state border (always displayed - dashed line)
+              border: "1px dashed rgba(180, 180, 180, 0.6)",
+              borderRadius: "2px",
+              padding: `${TEXT_LAYER_PADDING.y}px ${TEXT_LAYER_PADDING.x}px`,
+              cursor: (state.interaction.cursorOverride === 'grab' || state.interaction.cursorOverride === 'grabbing')
+                ? state.interaction.cursorOverride
+                : "text",
+              // fixed mode: force width/height + text wrapping + overflow hidden
+              ...(boxMode === "fixed" && {
+                width: `${textData.boxWidth}px`,
+                height: `${textData.boxHeight}px`,
+                overflow: "hidden",
+                wordWrap: "break-word" as const,
+                overflowWrap: "break-word" as const,
+              }),
+            }}
+          />
 
-      {/* Resize Handles (always visible during editing) */}
-      <TextResizeHandles />
-    </div>
+          {/* Resize Handles (always visible during editing, counter-scaled for consistent screen size) */}
+          <TextResizeHandles cameraK={camera.k} />
+        </div>
+      </div>
   );
 });
 
@@ -252,29 +255,33 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
  * TextResizeHandles: 8-direction resize handles (circular dots on the border)
  * - always visible during editing
  * - all handles are standard circular dots positioned on the dashed border
+ * - counter-scaled by 1/cameraK so they appear constant screen size regardless of zoom
  * - handle elements have pointer-events-auto + preventDefault to prevent loss of focus
  * - interaction area keeps pointer-events-none to avoid intercepting contenteditable clicks
  */
-function TextResizeHandles() {
+function TextResizeHandles({ cameraK }: { cameraK: number }) {
   // Prevent default mousedown behavior on handle to avoid contenteditable loss of focus
   const preventBlur = (e: React.MouseEvent) => {
     e.preventDefault();
   };
 
-  const HANDLE_SIZE = 8; // px
-  const HALF = HANDLE_SIZE / 2;
+  // Screen-space handle size (constant regardless of zoom)
+  const SCREEN_SIZE = 8; // px on screen
+  // Canvas-space size: counter-scale to maintain constant screen appearance
+  const canvasSize = SCREEN_SIZE / cameraK;
+  const half = canvasSize / 2;
 
   const handles = [
     // Corners
-    { h: "nw", cursor: "nwse-resize", style: { top: -HALF, left: -HALF } },
-    { h: "ne", cursor: "nesw-resize", style: { top: -HALF, right: -HALF } },
-    { h: "sw", cursor: "nesw-resize", style: { bottom: -HALF, left: -HALF } },
-    { h: "se", cursor: "nwse-resize", style: { bottom: -HALF, right: -HALF } },
+    { h: "nw", cursor: "nwse-resize", style: { top: -half, left: -half } },
+    { h: "ne", cursor: "nesw-resize", style: { top: -half, right: -half } },
+    { h: "sw", cursor: "nesw-resize", style: { bottom: -half, left: -half } },
+    { h: "se", cursor: "nwse-resize", style: { bottom: -half, right: -half } },
     // Edges
-    { h: "n", cursor: "ns-resize", style: { top: -HALF, left: "50%", marginLeft: -HALF } },
-    { h: "s", cursor: "ns-resize", style: { bottom: -HALF, left: "50%", marginLeft: -HALF } },
-    { h: "w", cursor: "ew-resize", style: { left: -HALF, top: "50%", marginTop: -HALF } },
-    { h: "e", cursor: "ew-resize", style: { right: -HALF, top: "50%", marginTop: -HALF } },
+    { h: "n", cursor: "ns-resize", style: { top: -half, left: "50%", marginLeft: -half } },
+    { h: "s", cursor: "ns-resize", style: { bottom: -half, left: "50%", marginLeft: -half } },
+    { h: "w", cursor: "ew-resize", style: { left: -half, top: "50%", marginTop: -half } },
+    { h: "e", cursor: "ew-resize", style: { right: -half, top: "50%", marginTop: -half } },
   ] as const;
 
   return (
@@ -284,8 +291,13 @@ function TextResizeHandles() {
           key={h}
           data-handle={h}
           onMouseDown={preventBlur}
-          className="absolute w-2 h-2 rounded-full bg-white border border-gray-400 shadow-sm pointer-events-auto hover:scale-125 transition-transform duration-150"
-          style={{ cursor, ...style }}
+          className="absolute rounded-full bg-white border border-gray-400 shadow-sm pointer-events-auto hover:scale-125 transition-transform duration-150"
+          style={{
+            width: `${canvasSize}px`,
+            height: `${canvasSize}px`,
+            cursor,
+            ...style,
+          }}
         />
       ))}
     </div>

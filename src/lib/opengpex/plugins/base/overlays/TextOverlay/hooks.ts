@@ -19,7 +19,7 @@
 
 'use client';
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { asLocalShape } from '@opengpex/editor/core/types';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
@@ -166,21 +166,11 @@ export function useInlineTextEditing(
   const layer = activeFrame?.layers.byId[layerId];
   const textData = layer?.textData;
 
-  // Snapshot: save content and assetId when entering edit
-  const snapshotRef = useRef<{ content: string; assetId: string; src: string }>({
-    content: textData?.content || '',
-    assetId: layer?.assetId || '',
-    src: layer?.src || '',
-  });
-
-  // Enter editing state: clear assetId
+  // Enter editing state: clear assetId (show raw text instead of rasterized image)
   useEffect(() => {
     if (!activeFrame || !layer) return;
     if (layer.assetId) {
-      snapshotRef.current = { content: textData?.content || '', assetId: layer.assetId, src: layer.src };
       actions.updateLayer(activeFrame.id, layerId, { assetId: '', src: '' });
-    } else {
-      snapshotRef.current = { content: textData?.content || '', assetId: '', src: '' };
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -249,8 +239,8 @@ export function useInlineTextEditing(
     const content = editorRef.current?.innerText?.trim() || '';
 
     if (!content) {
-      actions.removeLayers(activeFrame.id, [layerId]);
-      actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
+      // No content → same as cancel: undo back to baseline to properly restore activeLayerId
+      actions.history.undo();
       return;
     }
 
@@ -304,25 +294,11 @@ export function useInlineTextEditing(
     actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
   }, [actions, activeFrame, layer, layerId, textData, pixels, editorRef]);
 
-  // Cancel edit
+  // Cancel edit (Esc): undo back to the baseline established by placeCommand/editStartCommand.
+  // This properly restores activeLayerId, removes new layers, and reverts content for existing layers.
   const cancelEditing = useCallback(() => {
-    if (!activeFrame) return;
-    const currentContent = editorRef.current?.innerText?.trim() || '';
-    const snapshot = snapshotRef.current;
-
-    if (!currentContent && !snapshot.content) {
-      // No text now and no text before → layer is meaningless, remove it
-      actions.removeLayers(activeFrame.id, [layerId]);
-    } else {
-      // Restore to snapshot state
-      actions.updateLayer(activeFrame.id, layerId, {
-        assetId: snapshot.assetId,
-        src: snapshot.src,
-        textData: { ...textData!, content: snapshot.content },
-      });
-    }
-    actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
-  }, [actions, activeFrame, layerId, textData, editorRef]);
+    actions.history.undo();
+  }, [actions]);
 
   return {
     layer,

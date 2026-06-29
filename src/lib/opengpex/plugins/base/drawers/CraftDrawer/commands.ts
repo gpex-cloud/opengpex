@@ -21,6 +21,7 @@
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
 import * as P from './protocols';
+import { getDynamicTextSizeMax } from './protocols';
 import type { CraftType, CraftDrawerConfig } from './protocols';
 import {
   TextOverlayAPI,
@@ -183,8 +184,12 @@ function adjustCraftSize(ctx: EditorContextValue, direction: 1 | -1) {
   if (craft === 'text' || (craft === null && activeLayer?.type === 'text')) {
     if (activeLayer && activeLayer.type === 'text' && activeLayer.textData) {
       const currentSize = activeLayer.textData.fontSize || 24;
-      const targetSize = currentSize + 2 * direction;
-      const newSize = Math.max(6, Math.min(200, targetSize));
+      // Dynamic step: finer control at small sizes, coarser at large sizes
+      const step = currentSize < 50 ? 1 : currentSize < 200 ? 2 : 4;
+      const targetSize = currentSize + step * direction;
+      // Dynamic max based on canvas dimensions
+      const dynamicMax = getDynamicTextSizeMax(activeFrame?.canvas.w, activeFrame?.canvas.h);
+      const newSize = Math.max(6, Math.min(dynamicMax, targetSize));
 
       const editingLayerId = ctx.state.interaction.signals[TextOverlayAPI.signals.editingTextLayerId] as string | null;
       if (editingLayerId) {

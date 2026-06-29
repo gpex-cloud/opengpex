@@ -23,6 +23,7 @@ import { useCallback, useMemo, useEffect, useRef } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals, usePluginSelfConfig, usePluginConfig } from '@opengpex/editor/core/context';
 import { TextOverlayAPI } from '../../overlays/TextOverlay/protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
+import { getReferenceFontSize } from './protocols';
 import type { ActiveCraft, CraftType, CraftDrawerConfig, PendingTextData } from './protocols';
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
 import type { CraftCommandsMap, CraftSignalsMap } from './commands.d';
@@ -165,16 +166,28 @@ export function useTextPanel() {
   // ─── Pending Text Data (pre-edit state persistence) ─────────────────────────
   const pendingTextData = selfConfig.pendingTextData || DEFAULT_TEXT_STYLE;
 
+  // Resolution-adaptive reference font size (used as fallback when user hasn't explicitly set a preference)
+  const referenceFontSize = activeFrame
+    ? getReferenceFontSize(activeFrame.canvas.w, activeFrame.canvas.h)
+    : 24;
+
+  // Read fontSize directly from raw config (bypasses DEFAULT_TEXT_STYLE fallback).
+  // Only truthy when user has explicitly changed font size in the panel.
+  const userExplicitFontSize = selfConfig.pendingTextData?.fontSize;
+
   /**
    * Synthesized textData: When a target layer exists, use layer's textData;
    * otherwise use pendingTextData to drive the panel UI.
+   *
+   * For fontSize: uses explicit user preference if set,
+   * otherwise falls back to resolution-adaptive reference size.
    */
   const textData: TextLayerData | undefined = layerTextData
     ? layerTextData
     : ({
         content: '',
         fontFamily: pendingTextData.fontFamily ?? DEFAULT_TEXT_STYLE.fontFamily,
-        fontSize: pendingTextData.fontSize ?? DEFAULT_TEXT_STYLE.fontSize,
+        fontSize: userExplicitFontSize ?? referenceFontSize,
         fontWeight: pendingTextData.fontWeight ?? DEFAULT_TEXT_STYLE.fontWeight,
         align: pendingTextData.align ?? DEFAULT_TEXT_STYLE.align,
         lineHeight: pendingTextData.lineHeight ?? DEFAULT_TEXT_STYLE.lineHeight,
@@ -303,6 +316,20 @@ export function useTextPanel() {
     [actions, targetLayerId, layerTextData, updateTextDataLive]
   );
 
+  // ─── Mount-time cleanup: clear stale fontSize from legacy sync behavior ─────
+  // Old code always synced fontSize to pendingTextData; new adaptive logic requires
+  // fontSize to only be present when user explicitly sets it via the panel.
+  const didCleanupRef = useRef(false);
+  useEffect(() => {
+    if (!didCleanupRef.current && selfConfig.pendingTextData?.fontSize !== undefined && !targetLayerId) {
+      didCleanupRef.current = true;
+      setSelfConfig({
+        pendingTextData: { ...selfConfig.pendingTextData, fontSize: undefined },
+      } as Partial<CraftDrawerConfig>);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ─── Layer Selection Change: Sync color and pendingTextData ─────────────────
   const lastTargetLayerIdRef = useRef<string | null>(null);
 
@@ -315,11 +342,16 @@ export function useTextPanel() {
         if (layerTextData.color) {
           actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: layerTextData.color });
         }
-        // Sync selected layer's text style to pendingTextData
+        // Sync selected layer's text style to pendingTextData.
+        // fontSize is intentionally CLEARED on layer selection change:
+        // - Only persisted when user explicitly changes it in the panel (updateTextData)
+        // - This allows getReferenceFontSize() to serve as the adaptive default
+        //   for new layer creation on different canvas sizes
+        // - Handles migration from old code that always synced fontSize: 24
         setSelfConfig({
           pendingTextData: {
+            fontSize: undefined,  // Clear: adaptive default will be used for new layers
             fontFamily: layerTextData.fontFamily || DEFAULT_TEXT_STYLE.fontFamily,
-            fontSize: layerTextData.fontSize || DEFAULT_TEXT_STYLE.fontSize,
             fontWeight: layerTextData.fontWeight || DEFAULT_TEXT_STYLE.fontWeight,
             align: layerTextData.align || DEFAULT_TEXT_STYLE.align,
             lineHeight: layerTextData.lineHeight || DEFAULT_TEXT_STYLE.lineHeight,

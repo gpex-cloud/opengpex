@@ -21,7 +21,7 @@ import { InteractionHandler, Layer, Frame, LocalRect, asLocalShape, asWorldRect 
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import { createTransformHandler } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
-import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
+import { CraftDrawerAPI, getReferenceFontSize } from '../../drawers/CraftDrawer/protocols';
 import type { PendingTextData } from '../../drawers/CraftDrawer/protocols';
 import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, _CMD_PLACE_UID, _CMD_EDIT_START_UID } from './protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
@@ -339,7 +339,7 @@ export const createTextPlaceHandler = (): InteractionHandler => {
         textData: {
           content: '',
           fontFamily: pending?.fontFamily || 'Inter',
-          fontSize: pending?.fontSize || 24,
+          fontSize: pending?.fontSize || getReferenceFontSize(frame.canvas.w, frame.canvas.h),
           fontWeight: pending?.fontWeight || 400,
           color: initialColor,
           align: pending?.align || 'left',
