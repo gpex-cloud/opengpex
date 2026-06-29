@@ -86,5 +86,16 @@ export const COLOR_OPTIONS_COMMANDS = {
         actions.setInteraction({ interactionMode: 'pan' });
       }
     }
-  } as EditorCommand<{ fillColor: string }, void>
+  } as EditorCommand<{ fillColor: string }, void>,
+
+  sampleColor: {
+    id: P.CMD_SAMPLE_COLOR,
+    name: 'Sample Color',
+    undoable: false,
+    shortcut: { key: 'i' },
+    execute: () => {
+      // Toggle sampling mode via DOM event (ephemeral, not persisted)
+      window.dispatchEvent(new CustomEvent('coloroptions:toggle-sampler'));
+    }
+  } as EditorCommand<void, void>
 };

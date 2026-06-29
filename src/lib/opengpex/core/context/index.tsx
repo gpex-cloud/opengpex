@@ -217,7 +217,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       }
     }
     init();
-  }, [dispatch, isHydrated, contextValueRef, storage]);
+  }, [dispatch, isHydrated, contextValueRef, storage, fonts]);
 
   // 4.2 Auto-save debouncing (Auto-Save)
   useEffect(() => {

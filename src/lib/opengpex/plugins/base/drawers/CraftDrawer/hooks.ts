@@ -182,21 +182,22 @@ export function useTextPanel() {
    * For fontSize: uses explicit user preference if set,
    * otherwise falls back to resolution-adaptive reference size.
    */
-  const textData: TextLayerData | undefined = layerTextData
-    ? layerTextData
-    : ({
-        content: '',
-        fontFamily: pendingTextData.fontFamily ?? DEFAULT_TEXT_STYLE.fontFamily,
-        fontSize: userExplicitFontSize ?? referenceFontSize,
-        fontWeight: pendingTextData.fontWeight ?? DEFAULT_TEXT_STYLE.fontWeight,
-        align: pendingTextData.align ?? DEFAULT_TEXT_STYLE.align,
-        lineHeight: pendingTextData.lineHeight ?? DEFAULT_TEXT_STYLE.lineHeight,
-        italic: pendingTextData.italic ?? DEFAULT_TEXT_STYLE.italic,
-        underline: pendingTextData.underline ?? DEFAULT_TEXT_STYLE.underline,
-        strikethrough: pendingTextData.strikethrough ?? DEFAULT_TEXT_STYLE.strikethrough,
-        color: '#FFFFFF', // placeholder, actual color managed by ColorOptions
-        boxMode: 'auto',
-      } as TextLayerData);
+  const textData: TextLayerData | undefined = useMemo(() => {
+    if (layerTextData) return layerTextData;
+    return {
+      content: '',
+      fontFamily: pendingTextData.fontFamily ?? DEFAULT_TEXT_STYLE.fontFamily,
+      fontSize: userExplicitFontSize ?? referenceFontSize,
+      fontWeight: pendingTextData.fontWeight ?? DEFAULT_TEXT_STYLE.fontWeight,
+      align: pendingTextData.align ?? DEFAULT_TEXT_STYLE.align,
+      lineHeight: pendingTextData.lineHeight ?? DEFAULT_TEXT_STYLE.lineHeight,
+      italic: pendingTextData.italic ?? DEFAULT_TEXT_STYLE.italic,
+      underline: pendingTextData.underline ?? DEFAULT_TEXT_STYLE.underline,
+      strikethrough: pendingTextData.strikethrough ?? DEFAULT_TEXT_STYLE.strikethrough,
+      color: '#FFFFFF', // placeholder, actual color managed by ColorOptions
+      boxMode: 'auto',
+    } as TextLayerData;
+  }, [layerTextData, pendingTextData, userExplicitFontSize, referenceFontSize]);
 
   const updateTextData = useCallback(
     (patch: Partial<TextLayerData>) => {

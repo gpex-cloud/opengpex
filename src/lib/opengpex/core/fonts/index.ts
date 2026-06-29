@@ -82,14 +82,12 @@ export function createFontService(): FontService {
 
   // Cached snapshot for useSyncExternalStore (must be referentially stable between changes)
   let cachedFamilies: string[] = [];
-  let cacheVersion = 0;
 
   const MAX_RETRIES = 3;
   const RETRY_COOLDOWN_MS = 30_000;
   const FETCH_TIMEOUT_MS = 8_000;
 
   function invalidateCache(): void {
-    cacheVersion++;
     cachedFamilies = Array.from(loadedFonts);
   }
 

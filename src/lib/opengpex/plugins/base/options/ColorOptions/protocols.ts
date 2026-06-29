@@ -21,6 +21,7 @@ export const PLUGIN_ID = 'options.color_options';
 export const PLUGIN_AUTHOR = 'opengpex';
 
 export const CMD_FILL_AS_LAYER = 'cmd.fill_as_layer';
+export const CMD_SAMPLE_COLOR = 'cmd.sample_color';
 
 /** Contribution slot: tool trigger button injection slot (contributed by plugins like CraftDrawer) */
 export const COLOR_OPTIONS_CRAFT_SLOT = 'COLOR_OPTIONS_CRAFT_SLOT';

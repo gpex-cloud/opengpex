@@ -10,6 +10,7 @@ All notable changes to OpenGPEX are documented in this file.
 - Add `FontPicker` widget to the text craft panel with fallback alignment to closest available weights
 - Implement resolution-adaptive default text sizes and dynamic size slider limits based on canvas dimensions
 - Scale text resize handles counter-proportionally to canvas zoom to keep their screen size constant (8px)
+- Add custom canvas pixel `ColorSampler` with precision crosshairs and a magnifier grid overlay (shortcut 'I')
 
 ---
 

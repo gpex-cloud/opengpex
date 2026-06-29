@@ -42,7 +42,7 @@ import * as P from "./protocols";
 export const plugin: EditorPlugin = {
   manifest: {
     id: P.PLUGIN_ID,
-    displayName: "Font Loader Service",
+    displayName: "Font Loader",
     version: "1.0.0",
     description:
       "System-wide dynamic font loading, caching, and configuration management.",

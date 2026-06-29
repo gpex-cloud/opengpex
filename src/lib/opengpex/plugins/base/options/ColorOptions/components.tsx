@@ -20,9 +20,10 @@
 "use client";
 
 import React, { useRef, useState, useEffect } from "react";
-import { Palette, PaintBucket, Pin, Pipette } from "lucide-react";
+import { Palette, PaintBucket, Pin, Pipette, MonitorUp } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ColorPickerPro } from "@opengpex/editor/widgets/ColorPickerPro";
+import { ColorSampler } from "@opengpex/editor/widgets/ColorSampler";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import PluginSlot from "@opengpex/editor/workspace/components/PluginSlot";
 import { useColorOptions } from "./hooks";
@@ -35,6 +36,10 @@ export const ColorOptionsComponent = React.memo(
       applyColor,
       fillAsLayerCmd,
       sampleColor,
+      sampleColorNative,
+      isSampling,
+      handleSampled,
+      cancelSampling,
       activeFrame,
     } = useColorOptions();
 
@@ -164,10 +169,10 @@ export const ColorOptionsComponent = React.memo(
                 className="absolute top-full mt-3 bg-[var(--bg-panel)] backdrop-blur-xl border border-[var(--border-subtle)] rounded-2xl shadow-2xl overflow-hidden z-[999] p-3 ring-1 ring-black/5"
               >
                 <div className="flex justify-between items-center mb-2">
-                  {typeof window !== "undefined" && "EyeDropper" in window ? (
-                    <Tooltip content="Pick color from screen" position="bottom" display="inline-flex">
+                  <div className="flex items-center gap-0.5">
+                    <Tooltip content="Sample from canvas" position="bottom" display="inline-flex">
                       <button
-                        onClick={sampleColor}
+                        onClick={() => { setIsDropdownOpen(false); sampleColor(); }}
                         className="p-1 rounded-md transition-colors text-[var(--text-muted)] hover:text-amber-500 hover:bg-[var(--bg-stage)] group"
                       >
                         <Pipette
@@ -176,9 +181,20 @@ export const ColorOptionsComponent = React.memo(
                         />
                       </button>
                     </Tooltip>
-                  ) : (
-                    <div />
-                  )}
+                    {typeof window !== "undefined" && "EyeDropper" in window && (
+                      <Tooltip content="Sample from screen (native)" position="bottom" display="inline-flex">
+                        <button
+                          onClick={() => { setIsDropdownOpen(false); sampleColorNative(); }}
+                          className="p-1 rounded-md transition-colors text-[var(--text-muted)] hover:text-indigo-500 hover:bg-[var(--bg-stage)] group"
+                        >
+                          <MonitorUp
+                            size={14}
+                            className="group-hover:scale-110 transition-transform"
+                          />
+                        </button>
+                      </Tooltip>
+                    )}
+                  </div>
                   <Tooltip content={isPinned ? "Unpin" : "Pin Color Picker"} position="bottom" display="inline-flex">
                     <button
                       onClick={() => setIsPinned(!isPinned)}
@@ -202,6 +218,13 @@ export const ColorOptionsComponent = React.memo(
         <PluginSlot
           name={COLOR_OPTIONS_CRAFT_SLOT}
           className="flex items-center ml-1"
+        />
+
+        {/* ColorSampler: Custom canvas pixel sampler overlay */}
+        <ColorSampler
+          active={isSampling}
+          onSample={handleSampled}
+          onCancel={cancelSampling}
         />
       </div>
     );

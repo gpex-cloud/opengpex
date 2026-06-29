@@ -166,19 +166,14 @@ export default function DrawerBar({
 
   const handleToggle = (id: string) => {
     const currentIds = ui.activeSidebarIds || [];
-    const dismissed = ui.autoRevealDismissed || [];
 
     if (currentIds.includes(id)) {
-      // User manually closing → add to dismissed (suppresses future auto-reveal)
       actions.updateUI({
         activeSidebarIds: currentIds.filter((i) => i !== id),
-        autoRevealDismissed: dismissed.includes(id) ? dismissed : [...dismissed, id],
       });
     } else {
-      // User manually opening → remove from dismissed (restores auto-reveal rights)
       actions.updateUI({
         activeSidebarIds: [...currentIds, id],
-        autoRevealDismissed: dismissed.filter((i) => i !== id),
       });
     }
   };
@@ -306,6 +301,43 @@ function SidebarItem({
   const panelWidth = plugin.initialConfig?.preferredWidth || 320;
   const dragControls = useDragControls();
 
+  const [measuredHeight, setMeasuredHeight] = React.useState<number>(34);
+  const [isClosing, setIsClosing] = React.useState(false);
+  const [isOpening, setIsOpening] = React.useState(false);
+  const [prevActive, setPrevActive] = React.useState(isActive);
+
+  if (isActive !== prevActive) {
+    setPrevActive(isActive);
+    if (isActive) {
+      setIsOpening(true);
+      setIsClosing(false);
+    } else {
+      setIsClosing(true);
+      setIsOpening(false);
+    }
+  }
+
+  const observerRef = React.useRef<ResizeObserver | null>(null);
+  const panelRef = React.useCallback((node: HTMLDivElement | null) => {
+    if (node) {
+      const observer = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const height = entry.target.clientHeight;
+          if (height > 0) {
+            setMeasuredHeight(height);
+          }
+        }
+      });
+      observer.observe(node);
+      observerRef.current = observer;
+    } else {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
+    }
+  }, []);
+
   const switchSide = (e: React.MouseEvent) => {
     e.stopPropagation();
 
@@ -347,114 +379,133 @@ function SidebarItem({
       className="w-full flex shrink-0 relative pointer-events-none"
       style={{ overflow: "visible" }}
     >
-      <AnimatePresence>
-        {!isActive ? (
-          <motion.div
-            key="icon"
-            layout={false}
-            initial={{ opacity: 0, scale: 0.8, x: 20 }}
-            animate={{ opacity: 1, scale: 1, x: 0 }}
-            exit={{ opacity: 0, scale: 0.8, x: 20, position: "absolute" }}
-            transition={{ duration: 0.3 }}
-            className={`w-full flex ${side === "left" ? "justify-start" : "justify-end"} pointer-events-none`}
-          >
-            <div
-              className="flex justify-center w-[40px] pointer-events-auto cursor-pointer"
-              onPointerDown={(e) => dragControls.start(e)}
-            >
-              <Tooltip
-                content={plugin.manifest?.displayName || plugin.uid}
-                position={side === "left" ? "right" : "left"}
-                align="center"
-              >
-                <DrawerItem
-                  icon={plugin.icon || <Sparkles size={18} />}
-                  active={false}
-                  busy={isBusy}
-                  onClick={(e) => handleCombinedClick(plugin.uid, e)}
-                  label={plugin.manifest?.displayName || plugin.uid}
-                  styles={styles}
-                  side={side}
-                />
-              </Tooltip>
-            </div>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="panel"
-            layout={false}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, position: "absolute" }}
-            transition={{ duration: 0.3 }}
-            className={`w-full flex ${side === "left" ? "justify-start" : "justify-end"} relative pointer-events-none`}
-          >
-            {/* 2. Plugin panel */}
+      <motion.div
+        animate={{ height: isActive ? "auto" : 34 }}
+        transition={{ duration: 0.3, ease: "easeInOut" }}
+        onAnimationComplete={() => {
+          if (isClosing) {
+            setIsClosing(false);
+          }
+          if (isOpening) {
+            setIsOpening(false);
+          }
+        }}
+        className="w-full relative"
+        style={{
+          overflow: isActive ? "visible" : "hidden",
+          height: isOpening ? 34 : isActive ? "auto" : isClosing ? measuredHeight : 34,
+        }}
+      >
+        <AnimatePresence>
+          {!isActive ? (
             <motion.div
+              key="icon"
               layout={false}
-              initial={{
-                x: side === "left" ? -panelWidth : (panelWidth as number),
-                opacity: 0,
-              }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{
-                x: (side === "left" ? -panelWidth : panelWidth) as number,
-                opacity: 0,
-              }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
-              className={`${styles.sidebarFloating.className} relative pointer-events-auto shrink-0`}
-              style={{
-                width: `${panelWidth}px`,
-                zIndex: 900,
-              }}
+              initial={{ opacity: 0, scale: 0.8, x: 20 }}
+              animate={{ opacity: 1, scale: 1, x: 0 }}
+              exit={{ opacity: 0, scale: 0.8, x: 20, position: "absolute" }}
+              transition={{ duration: 0.3 }}
+              className={`w-full flex ${side === "left" ? "justify-start" : "justify-end"} pointer-events-none`}
             >
               <div
-                className={styles.sidebarInner.className}
-                style={{
-                  paddingLeft: side === "left" ? "4px" : "12px",
-                  paddingRight: side === "left" ? "12px" : "4px",
-                }}
-              >
-                <PluginSlot
-                  name="SIDE_BAR"
-                  filter={plugin.uid}
-                  fallback={<SidebarSkeleton />}
-                />
-              </div>
-
-              {/* 3. Side touch handle */}
-              <div
-                className={`absolute top-0 bottom-0 w-4 cursor-pointer z-[910] hover/5 group pointer-events-auto flex items-center justify-center ${side === "left" ? "right-0" : "left-0"}`}
+                className="flex justify-center w-[40px] pointer-events-auto cursor-pointer"
                 onPointerDown={(e) => dragControls.start(e)}
-                onClick={(e) => handleCombinedClick(plugin.uid, e)}
-                title="Click to close | Drag to reorder"
               >
-                {/* Switch Side Button */}
-                <div
-                  className="absolute top-5 w-full flex justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  onClick={switchSide}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  title={`Dock to ${side === "left" ? "Right" : "Left"}`}
+                <Tooltip
+                  content={plugin.manifest?.displayName || plugin.uid}
+                  position={side === "left" ? "right" : "left"}
+                  align="center"
                 >
-                  {side === "left" ? (
-                    <ChevronRight
-                      size={14}
-                      className="text-[var(--text-muted)] hover:text-[var(--text-main)]"
-                    />
-                  ) : (
-                    <ChevronLeft
-                      size={14}
-                      className="text-[var(--text-muted)] hover:text-[var(--text-main)]"
-                    />
-                  )}
-                </div>
-
-                <div className="w-[3px] h-8 bg-[var(--text-muted)] opacity-30 rounded-full transition-all group-hover:h-12 group-hover:opacity-60 group-hover:bg-[var(--text-main)]" />
+                  <DrawerItem
+                    icon={plugin.icon || <Sparkles size={18} />}
+                    active={false}
+                    busy={isBusy}
+                    onClick={(e) => handleCombinedClick(plugin.uid, e)}
+                    label={plugin.manifest?.displayName || plugin.uid}
+                    styles={styles}
+                    side={side}
+                  />
+                </Tooltip>
               </div>
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          ) : (
+            <motion.div
+              key="panel"
+              layout={false}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, position: "absolute" }}
+              transition={{ duration: 0.3 }}
+              className={`w-full flex ${side === "left" ? "justify-start" : "justify-end"} relative pointer-events-none`}
+            >
+              {/* 2. Plugin panel */}
+              <motion.div
+                ref={panelRef}
+                layout={false}
+                initial={{
+                  x: side === "left" ? -panelWidth : (panelWidth as number),
+                  opacity: 0,
+                }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{
+                  x: (side === "left" ? -panelWidth : panelWidth) as number,
+                  opacity: 0,
+                }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+                className={`${styles.sidebarFloating.className} relative pointer-events-auto shrink-0`}
+                style={{
+                  width: `${panelWidth}px`,
+                  zIndex: 900,
+                }}
+              >
+                <div
+                  className={styles.sidebarInner.className}
+                  style={{
+                    paddingLeft: side === "left" ? "4px" : "12px",
+                    paddingRight: side === "left" ? "12px" : "4px",
+                  }}
+                >
+                  <PluginSlot
+                    name="SIDE_BAR"
+                    filter={plugin.uid}
+                    fallback={<SidebarSkeleton />}
+                  />
+                </div>
+
+                {/* 3. Side touch handle */}
+                <div
+                  className={`absolute top-0 bottom-0 w-4 cursor-pointer z-[910] hover/5 group pointer-events-auto flex items-center justify-center ${side === "left" ? "right-0" : "left-0"}`}
+                  onPointerDown={(e) => dragControls.start(e)}
+                  onClick={(e) => handleCombinedClick(plugin.uid, e)}
+                  title="Click to close | Drag to reorder"
+                >
+                  {/* Switch Side Button */}
+                  <div
+                    className="absolute top-5 w-full flex justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={switchSide}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    title={`Dock to ${side === "left" ? "Right" : "Left"}`}
+                  >
+                    {side === "left" ? (
+                      <ChevronRight
+                        size={14}
+                        className="text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                      />
+                    ) : (
+                      <ChevronLeft
+                        size={14}
+                        className="text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                      />
+                    )}
+                  </div>
+
+                  <div className="w-[3px] h-8 bg-[var(--text-muted)] opacity-30 rounded-full transition-all group-hover:h-12 group-hover:opacity-60 group-hover:bg-[var(--text-main)]" />
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
     </Reorder.Item>
   );
 }

@@ -33,7 +33,6 @@ import {
   getRecommendedFonts,
   splitFontsByLocale,
 } from "@opengpex/editor/core/fonts/locale";
-import { FONT_REGISTRY } from "@opengpex/editor/core/fonts/registry";
 import type { WebFont } from "@opengpex/editor/core/fonts/registry";
 import {
   searchGoogleFonts,

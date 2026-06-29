@@ -25,7 +25,6 @@ import { useEditorServices } from "@opengpex/editor/core/context";
 import type { WebFont } from "@opengpex/editor/core/fonts/registry";
 import { isLocalFontAccessSupported, queryLocalFonts, getPersistedLocalFonts, clearPersistedLocalFonts } from "@opengpex/editor/core/fonts/local";
 import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
-import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 
 // ─── Category grouping helpers ──────────────────────────────────────────────────
@@ -307,7 +306,7 @@ export const FontSettings = React.memo(function FontSettings() {
   }, [fonts, fullRegistry]);
 
   // Check if local fonts have been scanned (persisted)
-  const hasLocalFonts = useMemo(() => getPersistedLocalFonts().length > 0, [fullRegistry]);
+  const hasLocalFonts = useMemo(() => getPersistedLocalFonts().length > 0, []);
 
   const handleScanLocalFonts = useCallback(async () => {
     setScanning(true);

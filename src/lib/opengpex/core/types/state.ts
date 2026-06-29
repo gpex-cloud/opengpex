@@ -72,12 +72,6 @@ export interface UIConfig {
   sidebarMode: 'DOCKED' | 'FLOATING';
   isToolMenuPinned?: boolean;
 
-  /**
-   * Plugin UIDs that user has manually closed during this session.
-   * Suppresses auto-reveal for those plugins until context changes (e.g. frame switch).
-   * Not persisted to localStorage — resets on page refresh.
-   */
-  autoRevealDismissed?: string[];
 }
 
 export type SupportedImageFormat = 'jpeg' | 'png' | 'gif' | 'webp' | 'heic' | 'avif' | 'svg' | 'bmp' | 'raw' | 'unknown';
