@@ -86,7 +86,7 @@ const TextBoundingOverlay = React.memo(function TextBoundingOverlay() {
       <style>{`
         @keyframes gpex-text-breathe {
           0%, 100% { border-color: rgba(210, 210, 210, 0.9); }
-          50% { border-color: rgba(140, 140, 140, 0.3); }
+          50% { border-color: rgba(180, 180, 180, 0.55); }
         }
         .gpex-text-breathe {
           animation: gpex-text-breathe 1.6s ease-in-out infinite;

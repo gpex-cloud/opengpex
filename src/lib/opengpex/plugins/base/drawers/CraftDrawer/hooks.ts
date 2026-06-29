@@ -157,9 +157,10 @@ export function useTextPanel() {
   const [selfConfig, setSelfConfig] = usePluginSelfConfig<CraftDrawerConfig>();
 
   const editingLayerId = state.interaction.signals[TextOverlayAPI.signals.editingTextLayerId] as string | null;
+  const editingLayerExists = !!(editingLayerId && activeFrame?.layers.byId[editingLayerId]);
 
   // Gets text layer currently editing (prioritizes editing signal, followed by activeLayer)
-  const targetLayerId = editingLayerId || (activeLayer?.type === 'text' ? activeLayer.id : null);
+  const targetLayerId = (editingLayerExists ? editingLayerId : null) || (activeLayer?.type === 'text' ? activeLayer.id : null);
   const targetLayer = targetLayerId && activeFrame ? activeFrame.layers.byId[targetLayerId] : null;
   const layerTextData = targetLayer?.textData;
 

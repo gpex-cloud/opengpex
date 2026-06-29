@@ -92,7 +92,7 @@ function getClosestWeight(targetWeight: number, availableWeights: number[]): num
  * Property changes synchronized to currently editing text layer in real time.
  */
 export const TextPanel = React.memo(function TextPanel() {
-  const { targetLayer, textData, updateTextData, updateTextDataLive, textColor, updateTextColor, updateTextColorLive } = useTextPanel();
+  const { textData, updateTextData, updateTextDataLive, textColor, updateTextColor, updateTextColorLive } = useTextPanel();
   const { activeFrame } = useEditorState();
 
   // Dynamic slider max based on canvas dimensions
@@ -318,12 +318,6 @@ export const TextPanel = React.memo(function TextPanel() {
           </span>
         </div>
       </div>
-
-      {!targetLayer && (
-        <div className="text-[9px] text-[var(--text-muted)] italic mt-1 bg-[var(--bg-stage)] p-2.5 rounded-xl border border-[var(--border-subtle)] text-center">
-          Click on canvas to create a text layer, or select an existing one.
-        </div>
-      )}
     </div>
   );
 });

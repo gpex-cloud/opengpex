@@ -19,11 +19,13 @@
 
 'use client';
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { asLocalShape } from '@opengpex/editor/core/types';
+import type { TextLayerData } from '@opengpex/editor/core/types/models';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
-import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID } from './protocols';
+import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, TEXT_OVERLAY_SIGNAL_SESSION_TYPE, _CMD_MODIFY_COMMIT_UID } from './protocols';
+import type { TextEditingSession } from './protocols';
 import { TEXT_PREEDIT_CURSOR } from '@opengpex/editor/icons';
 
 // ─── useTextOverlayState ───────────────────────────────────────────────────────
@@ -150,25 +152,57 @@ export function useTextOverlayState() {
 // ─── useInlineTextEditing ──────────────────────────────────────────────────────
 
 /**
- * useInlineTextEditing: InlineTextEditor editing logic Hook
+ * useInlineTextEditing: InlineTextEditor editing logic Hook (Session-driven)
  *
- * Encapsulates inline editor's commit / cancel / input callbacks.
- * Requires editorRef to read DOM content.
+ * Uses TextEditingSession pattern to manage editing lifecycle:
+ * - CreateSession (new layer): cancel = undo (removes layer), commit = rasterize
+ * - ModifySession (existing layer): cancel = restore snapshot (zero undo impact),
+ *   commit = checkpoint only when actual changes detected
+ *
+ * The `disposed` guard on the session prevents blur/cancel race conditions.
  */
 export function useInlineTextEditing(
   layerId: string,
   editorRef: React.RefObject<HTMLDivElement | null>,
   notifyBoundingChange: (w: number, h: number) => void,
 ) {
-  const { activeFrame } = useEditorState();
+  const { activeFrame, state } = useEditorState();
   const { actions, pixels } = useEditorServices();
 
   const layer = activeFrame?.layers.byId[layerId];
   const textData = layer?.textData;
 
-  // Enter editing state: clear assetId (show raw text instead of rasterized image)
+  // ─── Session Management ───────────────────────────────────────────────
+  const sessionRef = useRef<TextEditingSession | null>(null);
+  const sessionType = state.interaction.signals[TEXT_OVERLAY_SIGNAL_SESSION_TYPE] as 'create' | 'modify' | null;
+
+  // Session initialization + clear assetId (merged into single mount effect)
   useEffect(() => {
-    if (!activeFrame || !layer) return;
+    if (!activeFrame || !layer || sessionRef.current) return;
+
+    const session: TextEditingSession = {
+      type: sessionType || 'modify',
+      layerId,
+      frameId: activeFrame.id,
+      originalSnapshot: null,
+      disposed: false,
+    };
+
+    if (session.type === 'modify') {
+      session.originalSnapshot = {
+        assetId: layer.assetId || '',
+        src: layer.src || '',
+        textData: { ...layer.textData! },
+        bounding: { ...layer.bounding },
+        visibleShape: layer.visibleShape!,
+        cx: layer.cx,
+        cy: layer.cy,
+      };
+    }
+
+    sessionRef.current = session;
+
+    // Clear assetId to show raw text instead of rasterized image
     if (layer.assetId) {
       actions.updateLayer(activeFrame.id, layerId, { assetId: '', src: '' });
     }
@@ -195,14 +229,12 @@ export function useInlineTextEditing(
         if (activeFrame) {
           const mode = textData?.boxMode || 'auto';
           if (mode === 'auto') {
-            // auto mode: measure actual dimensions from DOM
             const rect = el.getBoundingClientRect();
             const k = activeFrame.camera.k || 1;
             const w = Math.max(Math.ceil(rect.width / k), 20);
             const h = Math.max(Math.ceil(rect.height / k), 20);
             notifyBoundingChange(w, h);
           }
-          // fixed mode: bounding is already boxWidth x boxHeight, no measurement needed
         }
       }, 0);
     });
@@ -210,7 +242,7 @@ export function useInlineTextEditing(
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Input handling
+  // ─── handleInput (unchanged) ──────────────────────────────────────────
   const handleInput = useCallback(() => {
     const el = editorRef.current;
     if (!el || !activeFrame) return;
@@ -218,87 +250,137 @@ export function useInlineTextEditing(
     const mode = textData?.boxMode || 'auto';
 
     if (mode === 'auto') {
-      // auto mode: remeasure and sync bounding on each input
       const camera = activeFrame.camera;
       const rect = el.getBoundingClientRect();
       const actualW = Math.ceil(rect.width / camera.k) || 4;
       const actualH = Math.ceil(rect.height / camera.k) || 20;
       notifyBoundingChange(actualW, actualH);
     }
-    // fixed mode: bounding is fixed, no measurement
 
-    // Both modes update content
     actions.updateLayer(activeFrame.id, layerId, {
       textData: { ...textData!, content },
     });
   }, [actions, activeFrame, layerId, textData, notifyBoundingChange, editorRef]);
 
-  // Commit edit
-  const commitEditing = useCallback(async () => {
-    if (!activeFrame || !layer) return;
-    const content = editorRef.current?.innerText?.trim() || '';
+  // ─── cancelEditing (session-aware) ────────────────────────────────────
+  const cancelEditing = useCallback(() => {
+    const session = sessionRef.current;
+    if (!session || session.disposed) return;
+    session.disposed = true;
 
-    if (!content) {
-      // No content → same as cancel: undo back to baseline to properly restore activeLayerId
+    if (session.type === 'create') {
+      // CreateSession: clear signals FIRST to prevent one-frame state tearing,
+      // then undo removes the newly created layer. React batches both in same render.
+      actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
+      actions.setStateSignal(TEXT_OVERLAY_SIGNAL_SESSION_TYPE, null);
       actions.history.undo();
+    } else {
+      // ModifySession: restore snapshot silently, zero undo impact
+      if (session.originalSnapshot) {
+        actions.updateLayer(session.frameId, session.layerId, session.originalSnapshot);
+      }
+      actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
+      actions.setStateSignal(TEXT_OVERLAY_SIGNAL_SESSION_TYPE, null);
+    }
+    sessionRef.current = null;
+  }, [actions]);
+
+  // ─── commitEditing (session-aware) ────────────────────────────────────
+  const commitEditing = useCallback(async () => {
+    const session = sessionRef.current;
+    if (!session || session.disposed) return;
+    session.disposed = true;
+
+    if (!activeFrame || !layer) {
+      sessionRef.current = null;
       return;
     }
 
-    const mode = textData?.boxMode || 'auto';
+    const content = editorRef.current?.innerText?.trim() || '';
 
-    // Build latest layer copy for rasterization (avoids empty asset from stale reference)
-    let updatedLayer = { ...layer };
+    // ── Empty content: equivalent to cancel ──
+    if (!content) {
+      if (session.type === 'create') {
+        // Clear signals FIRST to prevent state tearing, then undo
+        actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
+        actions.setStateSignal(TEXT_OVERLAY_SIGNAL_SESSION_TYPE, null);
+        actions.history.undo();
+      } else if (session.originalSnapshot) {
+        actions.updateLayer(session.frameId, session.layerId, session.originalSnapshot);
+        actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
+        actions.setStateSignal(TEXT_OVERLAY_SIGNAL_SESSION_TYPE, null);
+      }
+      sessionRef.current = null;
+      return;
+    }
+
+    // ── Has content: measure final bounding ──
+    const mode = textData?.boxMode || 'auto';
+    let finalBounding = layer.bounding;
+    let finalVisibleShape = layer.visibleShape!;
 
     if (mode === 'auto') {
-      // auto mode: last measurement ensures precise bounding
       const el = editorRef.current;
       if (el) {
         const rect = el.getBoundingClientRect();
         const k = activeFrame.camera.k || 1;
-        const finalW = Math.max(Math.ceil(rect.width / k), 4);
-        const finalH = Math.max(Math.ceil(rect.height / k), 20);
-
-        updatedLayer = {
-          ...layer,
-          bounding: { w: finalW, h: finalH },
-          visibleShape: asLocalShape({ x: 0, y: 0, w: finalW, h: finalH }),
-          textData: { ...textData!, content },
-        };
-
-        actions.updateLayer(activeFrame.id, layerId, {
-          bounding: { w: finalW, h: finalH },
-          visibleShape: asLocalShape({ x: 0, y: 0, w: finalW, h: finalH }),
-          textData: { ...textData!, content },
-        });
+        const w = Math.max(Math.ceil(rect.width / k), 4);
+        const h = Math.max(Math.ceil(rect.height / k), 20);
+        finalBounding = { w, h };
+        finalVisibleShape = asLocalShape({ x: 0, y: 0, w, h });
       }
-    } else {
-      // fixed mode: only update content (bounding already determined by handle operation)
-      updatedLayer = {
-        ...layer,
-        textData: { ...textData!, content },
-      };
-
-      actions.updateLayer(activeFrame.id, layerId, {
-        textData: { ...textData!, content },
-      });
     }
 
+    // Build final state
+    const finalState = {
+      cx: layer.cx,
+      cy: layer.cy,
+      bounding: finalBounding,
+      visibleShape: finalVisibleShape,
+      textData: { ...textData!, content },
+    };
+
+    // ModifySession: check dirty and handle checkpoint via undoable command
+    if (session.type === 'modify' && session.originalSnapshot) {
+      const dirty = isSessionDirty(finalState, session.originalSnapshot);
+      if (!dirty) {
+        // No changes: restore assetId silently, exit with zero undo impact
+        actions.updateLayer(session.frameId, session.layerId, {
+          assetId: session.originalSnapshot.assetId,
+          src: session.originalSnapshot.src,
+        });
+        actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
+        actions.setStateSignal(TEXT_OVERLAY_SIGNAL_SESSION_TYPE, null);
+        sessionRef.current = null;
+        return;
+      }
+
+      // Has changes: restore snapshot → execute undoable command (creates checkpoint + applies patch)
+      actions.updateLayer(session.frameId, session.layerId, session.originalSnapshot);
+      actions.executeCommand(_CMD_MODIFY_COMMIT_UID, {
+        frameId: session.frameId,
+        layerId: session.layerId,
+        patch: finalState,
+      });
+    } else {
+      // CreateSession: just apply final state (checkpoint already exists from cmd.place)
+      actions.updateLayer(activeFrame.id, layerId, finalState);
+    }
+
+    // Build updated layer copy for rasterization
+    const updatedLayer = { ...layer, ...finalState };
+
     try {
-      // Use the built latest copy for rasterization to ensure content and dimensions are precise
       const asset = await pixels.rasterize.layer(updatedLayer);
       actions.updateLayer(activeFrame.id, layerId, { assetId: asset.id, src: asset.url });
     } catch (err) {
-      console.warn('[TextOverlay] Rasterize failed, falling back:', err);
+      console.warn('[TextOverlay] Rasterize failed:', err);
     }
 
     actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
+    actions.setStateSignal(TEXT_OVERLAY_SIGNAL_SESSION_TYPE, null);
+    sessionRef.current = null;
   }, [actions, activeFrame, layer, layerId, textData, pixels, editorRef]);
-
-  // Cancel edit (Esc): undo back to the baseline established by placeCommand/editStartCommand.
-  // This properly restores activeLayerId, removes new layers, and reverts content for existing layers.
-  const cancelEditing = useCallback(() => {
-    actions.history.undo();
-  }, [actions]);
 
   return {
     layer,
@@ -307,4 +389,36 @@ export function useInlineTextEditing(
     commitEditing,
     cancelEditing,
   };
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Comprehensive dirty check: covers content, style, position, and bounding */
+function isSessionDirty(
+  current: { cx: number; cy: number; bounding: { w: number; h: number }; textData: TextLayerData },
+  original: NonNullable<TextEditingSession['originalSnapshot']>,
+): boolean {
+  // Position change
+  if (current.cx !== original.cx || current.cy !== original.cy) return true;
+  // Bounding change
+  if (current.bounding.w !== original.bounding.w || current.bounding.h !== original.bounding.h) return true;
+  // Content change
+  if (current.textData.content !== original.textData.content) return true;
+  // Style changes
+  const c = current.textData;
+  const o = original.textData;
+  return (
+    c.fontFamily !== o.fontFamily ||
+    c.fontSize !== o.fontSize ||
+    c.fontWeight !== o.fontWeight ||
+    c.color !== o.color ||
+    c.align !== o.align ||
+    c.lineHeight !== o.lineHeight ||
+    c.italic !== o.italic ||
+    c.underline !== o.underline ||
+    c.strikethrough !== o.strikethrough ||
+    c.boxMode !== o.boxMode ||
+    c.boxWidth !== o.boxWidth ||
+    c.boxHeight !== o.boxHeight
+  );
 }

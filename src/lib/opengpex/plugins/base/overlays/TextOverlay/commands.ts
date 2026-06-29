@@ -41,22 +41,25 @@ const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
     ctx.layers.addLayer(payload.frameId, payload.layer);
     ctx.layers.activate(payload.frameId, payload.layer.id);
     ctx.scoped!.setSignal(P.SIGNAL_EDITING_TEXT_LAYER_ID, payload.layer.id);
+    ctx.scoped!.setSignal(P.SIGNAL_SESSION_TYPE, 'create');
   },
 };
 
 /**
  * cmd.edit_start: Activates an existing text layer and enters editing state
  *
- * undoable: true → Automatically establish SIGNAL_COMMIT undo baseline before execution.
- * Undo after editing will roll back the layer content to pre-edit state in one step.
+ * undoable: false → No automatic checkpoint. The editing session (ModifySession)
+ * manages its own snapshot and creates a checkpoint only at commit time when
+ * actual changes are detected. Cancel restores from snapshot with zero undo impact.
  */
 const editStartCommand: EditorCommand<{ frameId: string; layerId: string }, void> = {
   id: P.CMD_EDIT_START,
   name: 'Start Text Editing',
-  undoable: true,
+  undoable: false,
   execute: (ctx: EditorContextValue, payload: { frameId: string; layerId: string }) => {
     ctx.actions.setActiveLayer(payload.frameId, payload.layerId);
     ctx.scoped!.setSignal(P.SIGNAL_EDITING_TEXT_LAYER_ID, payload.layerId);
+    ctx.scoped!.setSignal(P.SIGNAL_SESSION_TYPE, 'modify');
   },
 };
 
@@ -84,10 +87,27 @@ const updatePropertiesCommand: EditorCommand<{ frameId: string; layerId: string;
   },
 };
 
+/**
+ * cmd.modify_commit: Commits a modify session with full layer patch
+ *
+ * undoable: true → Creates the undo baseline automatically (SIGNAL_COMMIT).
+ * Called AFTER restoring the original snapshot so that undo reverts to pre-edit state.
+ * The payload contains the full final layer state to apply.
+ */
+const modifyCommitCommand: EditorCommand<{ frameId: string; layerId: string; patch: Partial<Layer> }, void> = {
+  id: P.CMD_MODIFY_COMMIT,
+  name: 'Commit Text Modification',
+  undoable: true,
+  execute: (ctx: EditorContextValue, payload: { frameId: string; layerId: string; patch: Partial<Layer> }) => {
+    ctx.actions.updateLayer(payload.frameId, payload.layerId, payload.patch);
+  },
+};
+
 // ─── Export ────────────────────────────────────────────────────────────────────
 
 export const TEXT_OVERLAY_COMMANDS = [
   placeCommand,
   editStartCommand,
   updatePropertiesCommand,
+  modifyCommitCommand,
 ];
