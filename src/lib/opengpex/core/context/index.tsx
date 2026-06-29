@@ -57,6 +57,7 @@ import {
   useOverlayRotationSync as useCoreOverlayRotationSync,
 } from "@opengpex/editor/core/motion/hooks/animation";
 import { createPluginService } from "@opengpex/editor/core/plugin";
+import { createFontService } from "@opengpex/editor/core/fonts";
 import { CORE_VERSION } from "@opengpex/editor/core/plugin/version";
 import "../../index.css";
 
@@ -114,6 +115,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const storage = useMemo(() => createStateStorage(assets), [assets]);
   const clipboard = useMemo(() => createClipboardService(), []);
   const plugins = useMemo(() => createPluginService(), []);
+  const fonts = useMemo(() => createFontService(), []);
 
   // 3. Construct split static/dynamic context values
   const stateContextValue = useMemo(
@@ -135,6 +137,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       storage,
       clipboard,
       plugins,
+      fonts,
       volatileRef,
       coreVersion: CORE_VERSION,
     }),
@@ -147,6 +150,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       storage,
       clipboard,
       plugins,
+      fonts,
       volatileRef,
     ],
   );
@@ -193,6 +197,11 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       }
 
       isHydrated.current = true;
+
+      // Font hydration: restore cached fonts from IndexedDB (non-blocking, fire-and-forget)
+      fonts.hydrate().catch((e) => {
+        console.warn("[EditorProvider] Font hydration failed (non-fatal):", e);
+      });
 
       // Register advanced system global commands
       if (!sysCommandsRegistered.current) {

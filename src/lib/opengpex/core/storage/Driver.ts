@@ -36,6 +36,12 @@ export const AssetDriver = localforage.createInstance({
   storeName: 'Assets_V2'
 });
 
+// 3. Font driver (stores WOFF2 binary font data)
+export const FontDriver = localforage.createInstance({
+  name: 'OpenGPEXFonts',
+  storeName: 'Fonts_V1'
+});
+
 /**
  * Sharded state driver: Wraps StateDriver, providing pseudo-transactional batch write and delete capabilities
  */

@@ -55,7 +55,8 @@ export function SettingsTrigger() {
  * Gets panel state and tab signals via useSettingsPanel, eliminating direct state access.
  */
 export function SettingsPanel() {
-  const { toggleCmd, isActive, panelPosition, activeTabId, tabSignal } = useSettingsPanel();
+  const { toggleCmd, isActive, panelPosition, activeTabId, tabSignal } =
+    useSettingsPanel();
 
   return (
     <PopupPanel
@@ -67,7 +68,8 @@ export function SettingsPanel() {
       anchor="trigger-settings"
       position={panelPosition}
       closeOnOutsideClick={false}
-      className="w-[650px]"
+      scrollable={false}
+      className="w-[750px] h-[640px] max-h-[720px]"
     >
       <div className="flex flex-col flex-1 min-h-0 p-4">
         <TabbedPluginSlot

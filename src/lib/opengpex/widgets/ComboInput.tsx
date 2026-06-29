@@ -32,6 +32,8 @@ interface ComboInputProps<T extends string | number> {
   className?: string;
   type?: 'number' | 'text';
   readOnly?: boolean;
+  /** Optional inline style applied to the input element (for font preview etc.) */
+  inputStyle?: React.CSSProperties;
 }
 
 /**
@@ -46,7 +48,8 @@ export default function ComboInput<T extends string | number>({
   options = [],
   className = "",
   type = 'text',
-  readOnly = false
+  readOnly = false,
+  inputStyle
 }: ComboInputProps<T>) {
   const [isOpen, setIsOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
@@ -112,6 +115,7 @@ export default function ComboInput<T extends string | number>({
           }
         }}
         className={`bg-transparent ${label ? 'text-right' : 'text-center pl-1'} text-[10px] w-full outline-none font-bold tabular-nums text-zinc-900 dark:text-zinc-200 placeholder-zinc-400 dark:placeholder-zinc-700 ${readOnly ? 'cursor-pointer' : ''}`}
+        style={inputStyle}
         placeholder="-"
       />
 
@@ -146,7 +150,13 @@ export default function ComboInput<T extends string | number>({
                     onChange(opt);
                     setIsOpen(false);
                   }}
-                  className={`w-full px-4 py-2 text-left text-[10px] font-bold tabular-nums transition-colors hover:bg-indigo-600 hover:text-white ${value === opt ? 'text-white bg-indigo-600' : 'text-zinc-600 dark:text-zinc-300'}`}
+                  className={`
+                    w-full px-4 py-2 text-left text-[10px] font-bold tabular-nums transition-colors cursor-pointer
+                    ${value === opt 
+                      ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20' 
+                      : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-100'
+                    }
+                  `}
                 >
                   {opt}
                 </button>

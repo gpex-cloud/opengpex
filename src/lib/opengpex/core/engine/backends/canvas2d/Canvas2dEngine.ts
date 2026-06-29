@@ -18,6 +18,7 @@
  */
 
 import { Layer, AssetService, Shape, LocalShape, TileData, asLocalRect } from '@opengpex/editor/core/types';
+import { FontService } from '@opengpex/editor/core/fonts';
 import { MAX_SAFE_EXPORT_PIXELS } from '@opengpex/editor/core/helpers/config';
 import { imageCache } from '../../cache/ImageCache';
 import { tileCache } from '../../cache/TileCache';
@@ -37,6 +38,25 @@ export class Canvas2dEngine implements IRenderer {
   private currentDim: { w: number; h: number } | null = null;
   private tilePool: TileData[] = []; // [Optimization] Zero-allocation object pool for tile jobs
   private offscreenPool: OffscreenCanvas[] = []; // [Optimization] OffscreenCanvas pool for bitmap mask compositing
+
+  // [Font Loading] Dynamic font service integration
+  private fontService?: FontService;
+  private pendingFontLoads = new Set<string>();
+  private fontReadyCallback?: () => void;
+
+  /**
+   * Inject FontService and redraw callback.
+   * Called by CanvasStage during initialization to enable font-aware rendering.
+   *
+   * When a text layer references a font that is not yet loaded:
+   * 1. This frame renders with CSS fallback (text is visible but uses generic font)
+   * 2. FontService.load() is triggered asynchronously
+   * 3. On success, fontReadyCallback fires to schedule a redraw with the correct font
+   */
+  setFontService(fonts: FontService, onFontReady: () => void): void {
+    this.fontService = fonts;
+    this.fontReadyCallback = onFontReady;
+  }
 
   /** Inject drawing context (due to strong DOM binding, must be injected at component layer) */
   attach(ctx: CanvasRenderingContext2D) {
@@ -61,6 +81,24 @@ export class Canvas2dEngine implements IRenderer {
 
     for (const cmd of this.commandQueue) {
       if (cmd.type === 'layer') {
+        // [Font Loading] Check font readiness for text layers before rendering
+        if (cmd.layer.type === 'text' && cmd.layer.textData && this.fontService) {
+          const family = cmd.layer.textData.fontFamily;
+          if (family && !this.fontService.isLoaded(family)) {
+            // Font not yet available — trigger async load (deduplicated)
+            if (!this.pendingFontLoads.has(family)) {
+              this.pendingFontLoads.add(family);
+              this.fontService.load(family).then((ok) => {
+                this.pendingFontLoads.delete(family);
+                if (ok && this.fontReadyCallback) {
+                  // Schedule redraw on next animation frame once font is ready
+                  requestAnimationFrame(() => this.fontReadyCallback!());
+                }
+              });
+            }
+            // Continue rendering this frame with CSS fallback font (FOUT strategy)
+          }
+        }
         this.drawLayerDirect(cmd.layer, cmd.options, assetService);
       }
     }

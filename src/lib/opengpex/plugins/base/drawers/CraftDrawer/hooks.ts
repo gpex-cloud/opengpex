@@ -23,7 +23,7 @@ import { useCallback, useMemo, useEffect, useRef } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals, usePluginSelfConfig, usePluginConfig } from '@opengpex/editor/core/context';
 import { TextOverlayAPI } from '../../overlays/TextOverlay/protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
-import type { ActiveCraft, CraftType, CraftDrawerConfig } from './protocols';
+import type { ActiveCraft, CraftType, CraftDrawerConfig, PendingTextData } from './protocols';
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
 import type { CraftCommandsMap, CraftSignalsMap } from './commands.d';
 
@@ -128,33 +128,92 @@ export function useCraftButtonGroup() {
   return { activeCraft, activeLayerIsText, activeLayerIsPaint, handleButtonClick };
 }
 
+// ─── Default text style constants ──────────────────────────────────────────────
+
+const DEFAULT_TEXT_STYLE: Required<PendingTextData> = {
+  fontFamily: 'Inter',
+  fontSize: 24,
+  fontWeight: 400,
+  align: 'left',
+  lineHeight: 1.4,
+  italic: false,
+  underline: false,
+  strikethrough: false,
+};
+
 // ─── useTextPanel ──────────────────────────────────────────────────────────────
 
 /**
  * useTextPanel: Semantic Hook for TextPanel text attribute panel
  *
  * Provides currently editing text layer data and attribute update methods.
+ * When no target layer exists (pre-edit state), reads/writes from pendingTextData
+ * in pluginConfig to persist user's text style choices across layer creation.
  */
 export function useTextPanel() {
   const { state, activeFrame, activeLayer } = useEditorState();
   const { actions } = useEditorServices();
+  const [selfConfig, setSelfConfig] = usePluginSelfConfig<CraftDrawerConfig>();
 
   const editingLayerId = state.interaction.signals[TextOverlayAPI.signals.editingTextLayerId] as string | null;
 
   // Gets text layer currently editing (prioritizes editing signal, followed by activeLayer)
   const targetLayerId = editingLayerId || (activeLayer?.type === 'text' ? activeLayer.id : null);
   const targetLayer = targetLayerId && activeFrame ? activeFrame.layers.byId[targetLayerId] : null;
-  const textData = targetLayer?.textData;
+  const layerTextData = targetLayer?.textData;
+
+  // ─── Pending Text Data (pre-edit state persistence) ─────────────────────────
+  const pendingTextData = selfConfig.pendingTextData || DEFAULT_TEXT_STYLE;
+
+  /**
+   * Synthesized textData: When a target layer exists, use layer's textData;
+   * otherwise use pendingTextData to drive the panel UI.
+   */
+  const textData: TextLayerData | undefined = layerTextData
+    ? layerTextData
+    : ({
+        content: '',
+        fontFamily: pendingTextData.fontFamily ?? DEFAULT_TEXT_STYLE.fontFamily,
+        fontSize: pendingTextData.fontSize ?? DEFAULT_TEXT_STYLE.fontSize,
+        fontWeight: pendingTextData.fontWeight ?? DEFAULT_TEXT_STYLE.fontWeight,
+        align: pendingTextData.align ?? DEFAULT_TEXT_STYLE.align,
+        lineHeight: pendingTextData.lineHeight ?? DEFAULT_TEXT_STYLE.lineHeight,
+        italic: pendingTextData.italic ?? DEFAULT_TEXT_STYLE.italic,
+        underline: pendingTextData.underline ?? DEFAULT_TEXT_STYLE.underline,
+        strikethrough: pendingTextData.strikethrough ?? DEFAULT_TEXT_STYLE.strikethrough,
+        color: '#FFFFFF', // placeholder, actual color managed by ColorOptions
+        boxMode: 'auto',
+      } as TextLayerData);
 
   const updateTextData = useCallback(
     (patch: Partial<TextLayerData>) => {
-      if (!activeFrame || !targetLayerId || !textData) return;
+      if (!targetLayerId || !layerTextData) {
+        // Pre-edit state: persist to pendingTextData in pluginConfig
+        const pendingPatch: Partial<PendingTextData> = {};
+        if (patch.fontFamily !== undefined) pendingPatch.fontFamily = patch.fontFamily;
+        if (patch.fontSize !== undefined) pendingPatch.fontSize = patch.fontSize;
+        if (patch.fontWeight !== undefined) pendingPatch.fontWeight = patch.fontWeight;
+        if (patch.align !== undefined) pendingPatch.align = patch.align;
+        if (patch.lineHeight !== undefined) pendingPatch.lineHeight = patch.lineHeight;
+        if (patch.italic !== undefined) pendingPatch.italic = patch.italic;
+        if (patch.underline !== undefined) pendingPatch.underline = patch.underline;
+        if (patch.strikethrough !== undefined) pendingPatch.strikethrough = patch.strikethrough;
+
+        if (Object.keys(pendingPatch).length > 0) {
+          setSelfConfig({
+            pendingTextData: { ...pendingTextData, ...pendingPatch },
+          } as Partial<CraftDrawerConfig>);
+        }
+        return;
+      }
+
+      if (!activeFrame) return;
 
       if (editingLayerId) {
         // Editing state: directly updates via updateLayer (without creating independent undo point,
         // attribute modifications are included in the overall editing transaction, rolling back with checkpoint of cmd.edit_start)
         actions.updateLayer(activeFrame.id, targetLayerId, {
-          textData: { ...textData, ...patch },
+          textData: { ...layerTextData, ...patch },
         });
       } else {
         // Non-editing state: updates via undoable command (generates independent undo point)
@@ -164,8 +223,25 @@ export function useTextPanel() {
           patch,
         });
       }
+
+      // Also sync to pendingTextData so next layer creation uses latest settings
+      const pendingSync: Partial<PendingTextData> = {};
+      if (patch.fontFamily !== undefined) pendingSync.fontFamily = patch.fontFamily;
+      if (patch.fontSize !== undefined) pendingSync.fontSize = patch.fontSize;
+      if (patch.fontWeight !== undefined) pendingSync.fontWeight = patch.fontWeight;
+      if (patch.align !== undefined) pendingSync.align = patch.align;
+      if (patch.lineHeight !== undefined) pendingSync.lineHeight = patch.lineHeight;
+      if (patch.italic !== undefined) pendingSync.italic = patch.italic;
+      if (patch.underline !== undefined) pendingSync.underline = patch.underline;
+      if (patch.strikethrough !== undefined) pendingSync.strikethrough = patch.strikethrough;
+
+      if (Object.keys(pendingSync).length > 0) {
+        setSelfConfig({
+          pendingTextData: { ...pendingTextData, ...pendingSync },
+        } as Partial<CraftDrawerConfig>);
+      }
     },
-    [actions, activeFrame, targetLayerId, textData, editingLayerId]
+    [actions, activeFrame, targetLayerId, layerTextData, editingLayerId, pendingTextData, setSelfConfig]
   );
 
   /**
@@ -174,59 +250,95 @@ export function useTextPanel() {
    */
   const updateTextDataLive = useCallback(
     (patch: Partial<TextLayerData>) => {
-      if (!activeFrame || !targetLayerId || !textData) return;
+      if (!targetLayerId || !layerTextData) {
+        // Pre-edit state: same as updateTextData (write to pendingTextData)
+        const pendingPatch: Partial<PendingTextData> = {};
+        if (patch.fontFamily !== undefined) pendingPatch.fontFamily = patch.fontFamily;
+        if (patch.fontSize !== undefined) pendingPatch.fontSize = patch.fontSize;
+        if (patch.fontWeight !== undefined) pendingPatch.fontWeight = patch.fontWeight;
+        if (patch.align !== undefined) pendingPatch.align = patch.align;
+        if (patch.lineHeight !== undefined) pendingPatch.lineHeight = patch.lineHeight;
+        if (patch.italic !== undefined) pendingPatch.italic = patch.italic;
+        if (patch.underline !== undefined) pendingPatch.underline = patch.underline;
+        if (patch.strikethrough !== undefined) pendingPatch.strikethrough = patch.strikethrough;
+
+        if (Object.keys(pendingPatch).length > 0) {
+          setSelfConfig({
+            pendingTextData: { ...pendingTextData, ...pendingPatch },
+          } as Partial<CraftDrawerConfig>);
+        }
+        return;
+      }
+
+      if (!activeFrame) return;
       actions.updateLayer(activeFrame.id, targetLayerId, {
-        textData: { ...textData, ...patch },
+        textData: { ...layerTextData, ...patch },
       });
     },
-    [actions, activeFrame, targetLayerId, textData]
+    [actions, activeFrame, targetLayerId, layerTextData, pendingTextData, setSelfConfig]
   );
 
   // ─── Color Synchronization ──────────────────────────────────────────────────
   const [colorConfig] = usePluginConfig<{ pendingColor?: string }>(ColorOptionsAPI.configKey);
   const globalColor = colorConfig?.pendingColor || '#FFFFFF';
-  const textColor = textData?.color || globalColor;
+  const textColor = layerTextData?.color || globalColor;
 
   const updateTextColor = useCallback(
     (color: string) => {
       actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: color });
-      if (targetLayerId && textData) {
+      if (targetLayerId && layerTextData) {
         updateTextData({ color });
       }
     },
-    [actions, targetLayerId, textData, updateTextData]
+    [actions, targetLayerId, layerTextData, updateTextData]
   );
 
   const updateTextColorLive = useCallback(
     (color: string) => {
       actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: color });
-      if (targetLayerId && textData) {
+      if (targetLayerId && layerTextData) {
         updateTextDataLive({ color });
       }
     },
-    [actions, targetLayerId, textData, updateTextDataLive]
+    [actions, targetLayerId, layerTextData, updateTextDataLive]
   );
 
+  // ─── Layer Selection Change: Sync color and pendingTextData ─────────────────
   const lastTargetLayerIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (targetLayerId !== lastTargetLayerIdRef.current) {
       // Layer selection changed
       lastTargetLayerIdRef.current = targetLayerId;
-      if (targetLayerId && textData?.color) {
+      if (targetLayerId && layerTextData) {
         // Synchronize color of selected layer to global ColorOptions
-        actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: textData.color });
+        if (layerTextData.color) {
+          actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: layerTextData.color });
+        }
+        // Sync selected layer's text style to pendingTextData
+        setSelfConfig({
+          pendingTextData: {
+            fontFamily: layerTextData.fontFamily || DEFAULT_TEXT_STYLE.fontFamily,
+            fontSize: layerTextData.fontSize || DEFAULT_TEXT_STYLE.fontSize,
+            fontWeight: layerTextData.fontWeight || DEFAULT_TEXT_STYLE.fontWeight,
+            align: layerTextData.align || DEFAULT_TEXT_STYLE.align,
+            lineHeight: layerTextData.lineHeight || DEFAULT_TEXT_STYLE.lineHeight,
+            italic: layerTextData.italic ?? DEFAULT_TEXT_STYLE.italic,
+            underline: layerTextData.underline ?? DEFAULT_TEXT_STYLE.underline,
+            strikethrough: layerTextData.strikethrough ?? DEFAULT_TEXT_STYLE.strikethrough,
+          },
+        } as Partial<CraftDrawerConfig>);
       }
     } else {
       // Layer selection unchanged (only globalColor change or textData.color change could occur)
-      if (targetLayerId && textData) {
-        if (textData.color !== globalColor) {
+      if (targetLayerId && layerTextData) {
+        if (layerTextData.color !== globalColor) {
           // If it is a global pendingColor change (e.g. user operated the top global color palette), synchronize to text layer
           updateTextData({ color: globalColor });
         }
       }
     }
-  }, [targetLayerId, textData, globalColor, actions, updateTextData]);
+  }, [targetLayerId, layerTextData, globalColor, actions, updateTextData, setSelfConfig]);
 
   return useMemo(() => ({
     targetLayer,

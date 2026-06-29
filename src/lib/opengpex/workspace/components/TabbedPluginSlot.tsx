@@ -78,7 +78,7 @@ export default function TabbedPluginSlot({
   className = "",
   style,
   defaultTitle = "General",
-  contentClassName = "flex flex-col gap-4", // Default vertical spacing layout
+  contentClassName = "flex flex-col gap-4 min-h-0", // Default vertical spacing layout
   renderHeader,
   renderContent,
   activeTabId,
@@ -281,7 +281,7 @@ export default function TabbedPluginSlot({
       {headerContent}
 
       {/* Tab Content */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative min-h-0 overflow-y-auto custom-scrollbar">
         {mainContent}
       </div>
     </div>

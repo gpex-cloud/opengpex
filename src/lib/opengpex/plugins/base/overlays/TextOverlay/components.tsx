@@ -53,10 +53,11 @@ export const TextOverlayMain = React.memo(function TextOverlayMain() {
  * TextBoundingOverlay: Pre-editing bounding borders display
  *
  * In text craft mode (but not yet editing), for all visible text layers on canvas
- * renders dashed borders to let users visually see the position and boundaries of text blocks.
+ * renders dashed borders to indicate text layer positions and boundaries.
+ * No handles shown here — resize only available after entering editing state.
  */
 const TextBoundingOverlay = React.memo(function TextBoundingOverlay() {
-  const { activeFrame, state } = useEditorState();
+  const { activeFrame, state, activeLayer } = useEditorState();
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Use FastSync Ticker to follow camera changes
@@ -77,26 +78,40 @@ const TextBoundingOverlay = React.memo(function TextBoundingOverlay() {
 
   const camera = activeFrame.camera;
   const canvas = activeFrame.canvas;
+  const activeLayerId = activeLayer?.id;
 
   return (
     <div ref={containerRef} className="absolute inset-0 pointer-events-none">
+      {/* Breathing pulse animation for selected text layer */}
+      <style>{`
+        @keyframes gpex-text-breathe {
+          0%, 100% { border-color: rgba(210, 210, 210, 0.9); }
+          50% { border-color: rgba(140, 140, 140, 0.3); }
+        }
+        .gpex-text-breathe {
+          animation: gpex-text-breathe 1.6s ease-in-out infinite;
+        }
+      `}</style>
       {textLayers.map((layer) => {
         const localX = canvas.w / 2 + layer.cx - layer.bounding.w / 2;
         const localY = canvas.h / 2 + layer.cy - layer.bounding.h / 2;
         const screenX = localX * camera.k + camera.x;
         const screenY = localY * camera.k + camera.y;
+        const isActive = layer.id === activeLayerId;
 
         return (
           <div
             key={layer.id}
-            className="absolute pointer-events-none"
+            className={`absolute${isActive ? ' gpex-text-breathe' : ''}`}
             data-text-layer-id={layer.id}
             style={{
               left: `${screenX}px`,
               top: `${screenY}px`,
               width: `${layer.bounding.w * camera.k}px`,
               height: `${layer.bounding.h * camera.k}px`,
-              border: "1px solid rgba(180, 180, 180, 0.5)",
+              border: isActive
+                ? "1.5px dashed rgba(210, 210, 210, 0.9)"
+                : "1px dashed rgba(180, 180, 180, 0.6)",
               borderRadius: "2px",
             }}
           />
@@ -121,7 +136,7 @@ interface InlineTextEditorProps {
 const InlineTextEditor = React.memo(function InlineTextEditor({
   layerId,
 }: InlineTextEditorProps) {
-  const { activeFrame } = useEditorState();
+  const { activeFrame, state } = useEditorState();
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
 
@@ -155,9 +170,7 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
 
   // Auto commit on blur
   const handleBlur = useCallback(() => {
-    setTimeout(() => {
-      commitEditing();
-    }, 0);
+    commitEditing();
   }, [commitEditing]);
 
   if (!activeFrame || !layer || !textData) return null;
@@ -209,11 +222,13 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
           textAlign: textData.align,
           lineHeight: textData.lineHeight,
           minHeight: "1em",
-          // Editing state border (always displayed - light gray solid line)
-          border: "1px solid rgba(180, 180, 180, 0.6)",
+          // Editing state border (always displayed - dashed line)
+          border: "1px dashed rgba(180, 180, 180, 0.6)",
           borderRadius: "2px",
           padding: `${TEXT_LAYER_PADDING.y}px ${TEXT_LAYER_PADDING.x}px`,
-          cursor: "text",
+          cursor: (state.interaction.cursorOverride === 'grab' || state.interaction.cursorOverride === 'grabbing')
+            ? state.interaction.cursorOverride
+            : "text",
           // fixed mode: force width/height + text wrapping + overflow hidden
           ...(boxMode === "fixed" && {
             width: `${textData.boxWidth}px`,
@@ -225,7 +240,7 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
         }}
       />
 
-      {/* Resize Handles (hidden by default, displayed when container hovered) */}
+      {/* Resize Handles (always visible during editing) */}
       <TextResizeHandles />
     </div>
   );
@@ -234,10 +249,9 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
 // ─── TextResizeHandles ─────────────────────────────────────────────────────────
 
 /**
- * TextResizeHandles: 8-direction resize handles
- * - defaults to opacity-0, opacity-100 when parent container hovered
- * - corner handles are L-shaped markers (borrowed from ClipOverlay)
- * - edge handles are short rectangular bars
+ * TextResizeHandles: 8-direction resize handles (circular dots on the border)
+ * - always visible during editing
+ * - all handles are standard circular dots positioned on the dashed border
  * - handle elements have pointer-events-auto + preventDefault to prevent loss of focus
  * - interaction area keeps pointer-events-none to avoid intercepting contenteditable clicks
  */
@@ -247,54 +261,33 @@ function TextResizeHandles() {
     e.preventDefault();
   };
 
+  const HANDLE_SIZE = 8; // px
+  const HALF = HANDLE_SIZE / 2;
+
+  const handles = [
+    // Corners
+    { h: "nw", cursor: "nwse-resize", style: { top: -HALF, left: -HALF } },
+    { h: "ne", cursor: "nesw-resize", style: { top: -HALF, right: -HALF } },
+    { h: "sw", cursor: "nesw-resize", style: { bottom: -HALF, left: -HALF } },
+    { h: "se", cursor: "nwse-resize", style: { bottom: -HALF, right: -HALF } },
+    // Edges
+    { h: "n", cursor: "ns-resize", style: { top: -HALF, left: "50%", marginLeft: -HALF } },
+    { h: "s", cursor: "ns-resize", style: { bottom: -HALF, left: "50%", marginLeft: -HALF } },
+    { h: "w", cursor: "ew-resize", style: { left: -HALF, top: "50%", marginTop: -HALF } },
+    { h: "e", cursor: "ew-resize", style: { right: -HALF, top: "50%", marginTop: -HALF } },
+  ] as const;
+
   return (
-    <div className="absolute -inset-3 pointer-events-none">
-      {/* Corner handles - each handle has individual pointer-events-auto */}
-      {(
-        [
-          { h: "nw", cursor: "nwse-resize", left: "0", top: "0" },
-          { h: "ne", cursor: "nesw-resize", right: "0", top: "0" },
-          { h: "sw", cursor: "nesw-resize", left: "0", bottom: "0" },
-          { h: "se", cursor: "nwse-resize", right: "0", bottom: "0" },
-        ] as const
-      ).map(({ h, cursor, ...pos }) => (
+    <div className="absolute inset-0 pointer-events-none">
+      {handles.map(({ h, cursor, style }) => (
         <div
           key={h}
           data-handle={h}
           onMouseDown={preventBlur}
-          className="absolute w-4 h-4 opacity-0 hover:opacity-100 transition-opacity duration-200 pointer-events-auto"
-          style={{ cursor, ...pos }}
-        >
-          <div
-            className={`absolute w-full h-[2px] bg-white/80 ${h.includes("n") ? "top-0" : "bottom-0"}`}
-          />
-          <div
-            className={`absolute h-full w-[2px] bg-white/80 ${h.includes("w") ? "left-0" : "right-0"}`}
-          />
-        </div>
+          className="absolute w-2 h-2 rounded-full bg-white border border-gray-400 shadow-sm pointer-events-auto hover:scale-125 transition-transform duration-150"
+          style={{ cursor, ...style }}
+        />
       ))}
-
-      {/* Edge handles */}
-      <div
-        data-handle="n"
-        onMouseDown={preventBlur}
-        className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-1.5 bg-white/70 rounded-full opacity-0 hover:opacity-100 transition-opacity duration-200 cursor-ns-resize pointer-events-auto"
-      />
-      <div
-        data-handle="s"
-        onMouseDown={preventBlur}
-        className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-1.5 bg-white/70 rounded-full opacity-0 hover:opacity-100 transition-opacity duration-200 cursor-ns-resize pointer-events-auto"
-      />
-      <div
-        data-handle="w"
-        onMouseDown={preventBlur}
-        className="absolute left-0 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-white/70 rounded-full opacity-0 hover:opacity-100 transition-opacity duration-200 cursor-ew-resize pointer-events-auto"
-      />
-      <div
-        data-handle="e"
-        onMouseDown={preventBlur}
-        className="absolute right-0 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-white/70 rounded-full opacity-0 hover:opacity-100 transition-opacity duration-200 cursor-ew-resize pointer-events-auto"
-      />
     </div>
   );
 }

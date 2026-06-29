@@ -67,11 +67,13 @@ export function useTextOverlayState() {
     return () => document.removeEventListener('keydown', handleEscape);
   }, [activeCraft, editingLayerId, actions]);
 
-  // Dynamic cursor and keyboard modifier key control (listens to Cmd/Ctrl switching to grab in pre-edit state)
+  // Dynamic cursor and keyboard modifier key control (Cmd/Ctrl → grab in both pre-edit and editing states)
   useEffect(() => {
-    const isPreEdit = activeCraft === 'text' && !editingLayerId;
-    if (!isPreEdit) {
-      // When exiting pre-edit state, if current cursor is pre-edit or grab, restore it to null
+    const isTextCraft = activeCraft === 'text';
+    const isPreEdit = isTextCraft && !editingLayerId;
+
+    if (!isTextCraft) {
+      // Not in text craft mode at all, clean up any lingering cursors
       if (
         state.interaction.cursorOverride === TEXT_PREEDIT_CURSOR ||
         state.interaction.cursorOverride === 'grab'
@@ -81,14 +83,19 @@ export function useTextOverlayState() {
       return;
     }
 
-    // Initialize/fallback set pre-edit state cursor
-    if (
-      state.interaction.cursorOverride !== 'grab' &&
-      state.interaction.cursorOverride !== 'grabbing' &&
-      state.interaction.cursorOverride !== TEXT_PREEDIT_CURSOR
-    ) {
-      actions.setInteraction({ cursorOverride: TEXT_PREEDIT_CURSOR });
+    // Default cursor for pre-edit state
+    if (isPreEdit) {
+      if (
+        state.interaction.cursorOverride !== 'grab' &&
+        state.interaction.cursorOverride !== 'grabbing' &&
+        state.interaction.cursorOverride !== TEXT_PREEDIT_CURSOR
+      ) {
+        actions.setInteraction({ cursorOverride: TEXT_PREEDIT_CURSOR });
+      }
     }
+
+    // The "rest" cursor when Cmd is released (pre-edit → preedit cursor; editing → null)
+    const restCursor = isPreEdit ? TEXT_PREEDIT_CURSOR : null;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey) {
@@ -104,25 +111,25 @@ export function useTextOverlayState() {
     const handleKeyUp = (e: KeyboardEvent) => {
       if (!e.metaKey && !e.ctrlKey) {
         if (state.interaction.cursorOverride === 'grab') {
-          actions.setInteraction({ cursorOverride: TEXT_PREEDIT_CURSOR });
+          actions.setInteraction({ cursorOverride: restCursor });
         }
       }
     };
 
-    const handleBlur = () => {
+    const handleWindowBlur = () => {
       if (state.interaction.cursorOverride === 'grab') {
-        actions.setInteraction({ cursorOverride: TEXT_PREEDIT_CURSOR });
+        actions.setInteraction({ cursorOverride: restCursor });
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('blur', handleBlur);
+    window.addEventListener('blur', handleWindowBlur);
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('blur', handleWindowBlur);
     };
   }, [activeCraft, editingLayerId, state.interaction.cursorOverride, actions]);
 
@@ -300,11 +307,14 @@ export function useInlineTextEditing(
   // Cancel edit
   const cancelEditing = useCallback(() => {
     if (!activeFrame) return;
+    const currentContent = editorRef.current?.innerText?.trim() || '';
     const snapshot = snapshotRef.current;
 
-    if (!snapshot.content && !snapshot.assetId) {
+    if (!currentContent && !snapshot.content) {
+      // No text now and no text before → layer is meaningless, remove it
       actions.removeLayers(activeFrame.id, [layerId]);
     } else {
+      // Restore to snapshot state
       actions.updateLayer(activeFrame.id, layerId, {
         assetId: snapshot.assetId,
         src: snapshot.src,
@@ -312,7 +322,7 @@ export function useInlineTextEditing(
       });
     }
     actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
-  }, [actions, activeFrame, layerId, textData]);
+  }, [actions, activeFrame, layerId, textData, editorRef]);
 
   return {
     layer,

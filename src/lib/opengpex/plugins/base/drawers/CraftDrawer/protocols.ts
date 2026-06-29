@@ -76,9 +76,23 @@ export const CraftDrawerAPI = {
 export type CraftType = 'text' | 'brush' | 'eraser';
 export type ActiveCraft = CraftType | null;
 
+/** Pending text style preset (persisted across tool activations) */
+export interface PendingTextData {
+  fontFamily?: string;
+  fontSize?: number;
+  fontWeight?: number;
+  align?: 'left' | 'center' | 'right';
+  lineHeight?: number;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
+}
+
 /** CraftDrawer plugin local configuration interface */
 export interface CraftDrawerConfig {
   brushSize: number;
   brushOpacity: number;
   brushHardness: number;
+  /** User-configured text style preset for next text layer creation */
+  pendingTextData?: PendingTextData;
 }

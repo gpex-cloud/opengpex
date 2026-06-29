@@ -23,54 +23,26 @@ import React from "react";
 import { AlignLeft, AlignCenter, AlignRight } from "lucide-react";
 import { ColorPickerPro } from "@opengpex/editor/widgets/ColorPickerPro";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
+import { FontPicker } from "@opengpex/editor/widgets/FontPicker";
 import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
 import { useTextPanel } from "../hooks";
 
-// ─── Constants ─────────────────────────────────────────────────────────────────
+import { FONT_REGISTRY } from "@opengpex/editor/core/fonts/registry";
 
-const FONT_OPTIONS = [
-  // --- Mobile & OS Defaults ---
-  { value: "system-ui, -apple-system, BlinkMacSystemFont, sans-serif", label: "Apple System" },
-  { value: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif", label: "Segoe UI" },
-  { value: "Roboto, sans-serif", label: "Roboto" },
-
-  // --- Web Creative Sans-Serif ---
-  { value: "Inter, sans-serif", label: "Inter" },
-  { value: "'Avenir Next', Avenir, sans-serif", label: "Avenir Next" },
-  { value: "'Helvetica Neue', Helvetica, Arial, sans-serif", label: "Helvetica" },
-  { value: "'Plus Jakarta Sans', sans-serif", label: "Plus Jakarta Sans" },
-  { value: "Poppins, sans-serif", label: "Poppins" },
-  { value: "Outfit, sans-serif", label: "Outfit" },
-
-  // --- Chinese Mainstream ---
-  { value: "'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif", label: "PingFang SC" },
-  { value: "'Microsoft YaHei', \u5fae\u8f6f\u96c5\u9ed1, sans-serif", label: "Microsoft YaHei" },
-
-  // --- Creative Serif ---
-  { value: "'Playfair Display', serif", label: "Playfair Display" },
-  { value: "'DM Serif Display', serif", label: "DM Serif Display" },
-  { value: "Lora, serif", label: "Lora" },
-  { value: "Georgia, serif", label: "Georgia" },
-
-  // --- Monospace Code ---
-  { value: "'Geist Mono', monospace", label: "Geist Mono" },
-  { value: "'JetBrains Mono', monospace", label: "JetBrains Mono" },
-];
-
-const FONT_WEIGHT_MAP: Record<string, number> = {
-  "Light": 300,
-  "Regular": 400,
-  "Medium": 500,
-  "Semi Bold": 600,
-  "Bold": 700,
-};
-
-const FONT_WEIGHT_LABELS: Record<number, string> = {
+/**
+ * Global map linking CSS font-weight numeric values to their localized/user-friendly
+ * string representation. Conforms strictly to the W3C CSS Fonts specification.
+ */
+const ALL_WEIGHT_LABELS: Record<number, string> = {
+  100: "Thin",
+  200: "Extra Light",
   300: "Light",
   400: "Regular",
   500: "Medium",
   600: "Semi Bold",
   700: "Bold",
+  800: "Ultra Bold",
+  900: "Black",
 };
 
 // ─── Logarithmic Slider Helpers ────────────────────────────────────────────────
@@ -87,6 +59,29 @@ function textSizeToSlider(size: number): number {
   return Math.round(Math.pow((size - TEXT_SIZE_MIN) / (TEXT_SIZE_MAX - TEXT_SIZE_MIN), 1 / TEXT_SIZE_POWER) * 100);
 }
 
+/**
+ * Finds the nearest matching numeric font weight from a given list of available weights.
+ * Used to gracefully fallback when switching to a font family that does not support
+ * the active font weight (e.g. switching from Poppins 800 to Lora which only goes up to 700).
+ *
+ * @param targetWeight The currently selected font weight.
+ * @param availableWeights The array of weights supported by the newly selected font.
+ * @returns The closest available font weight.
+ */
+function getClosestWeight(targetWeight: number, availableWeights: number[]): number {
+  if (availableWeights.includes(targetWeight)) return targetWeight;
+  let closest = availableWeights[0] || 400;
+  let minDiff = Math.abs(closest - targetWeight);
+  for (const w of availableWeights) {
+    const diff = Math.abs(w - targetWeight);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closest = w;
+    }
+  }
+  return closest;
+}
+
 // ─── TextPanel ─────────────────────────────────────────────────────────────────
 
 /**
@@ -98,11 +93,23 @@ function textSizeToSlider(size: number): number {
 export const TextPanel = React.memo(function TextPanel() {
   const { targetLayer, textData, updateTextData, updateTextDataLive, textColor, updateTextColor, updateTextColorLive } = useTextPanel();
 
-  const currentFontLabel =
-    FONT_OPTIONS.find((f) => f.value === (textData?.fontFamily || "Inter, sans-serif"))?.label || "Inter";
+  // Retrieve the active font family (defaulting to "Inter")
+  const selectedFamily = textData?.fontFamily || "Inter";
+  
+  // Find the metadata of the selected font from the registry
+  const fontInfo = FONT_REGISTRY.find(
+    (f) => f.family.toLowerCase() === selectedFamily.toLowerCase()
+  );
+  
+  // Obtain the array of supported weights (defaulting to [400, 700] if not found)
+  const availableWeights = fontInfo?.weights || [400, 700];
 
+  // Map numeric weights (e.g. [400, 700]) to readable names (e.g. ["Regular", "Bold"])
+  const weightOptions = availableWeights.map(w => ALL_WEIGHT_LABELS[w] || String(w));
+
+  // Determine the display label of the active font weight (defaulting to "Regular")
   const currentWeightLabel =
-    FONT_WEIGHT_LABELS[textData?.fontWeight || 400] || "Regular";
+    ALL_WEIGHT_LABELS[textData?.fontWeight || 400] || "Regular";
 
   return (
     <div className="flex flex-col gap-2">
@@ -151,37 +158,42 @@ export const TextPanel = React.memo(function TextPanel() {
           </div>
         </div>
 
-        {/* Font Family & Weight */}
-        <div className="flex gap-2">
-          <div className="flex-1">
-            <ComboInput
-              label="Font"
-              value={currentFontLabel}
-              readOnly={true}
-              options={FONT_OPTIONS.map((f) => f.label)}
-              onChange={(val) => {
-                const found = FONT_OPTIONS.find((f) => f.label === val);
-                if (found) {
-                  updateTextData({ fontFamily: found.value });
-                }
-              }}
-            />
-          </div>
-          <div className="flex-1">
-            <ComboInput
-              label="Weight"
-              value={currentWeightLabel}
-              readOnly={true}
-              options={Object.keys(FONT_WEIGHT_MAP)}
-              onChange={(val) => {
-                const weight = FONT_WEIGHT_MAP[val];
-                if (weight) {
-                  updateTextData({ fontWeight: weight });
-                }
-              }}
-            />
-          </div>
-        </div>
+        {/* Font Family Selection */}
+        <FontPicker
+          value={textData?.fontFamily || "Inter"}
+          onChange={(family) => {
+            const fontInfo = FONT_REGISTRY.find(
+              (f) => f.family.toLowerCase() === family.toLowerCase()
+            );
+            const nextWeights = fontInfo?.weights || [400, 700];
+            const currentWeight = textData?.fontWeight || 400;
+            // Align active weight to the closest available weight of the new font family
+            const newWeight = getClosestWeight(currentWeight, nextWeights);
+            
+            updateTextData({
+              fontFamily: family,
+              ...(newWeight !== currentWeight ? { fontWeight: newWeight } : {}),
+            });
+          }}
+          label="Font"
+          fontWeight={textData?.fontWeight || 400}
+        />
+
+        {/* Font Weight Selection */}
+        <ComboInput
+          label="Weight"
+          value={currentWeightLabel}
+          readOnly={true}
+          options={weightOptions}
+          onChange={(val) => {
+            // Find corresponding numeric weight value for the selected label name
+            const weightEntry = Object.entries(ALL_WEIGHT_LABELS).find(([_, label]) => label === val);
+            if (weightEntry) {
+              updateTextData({ fontWeight: Number(weightEntry[0]) });
+            }
+          }}
+          inputStyle={{ fontFamily: textData?.fontFamily || "Inter", fontWeight: textData?.fontWeight || 400, fontSize: 12 }}
+        />
       </div>
 
       {/* Style & Alignment Card */}

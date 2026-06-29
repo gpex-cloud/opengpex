@@ -96,7 +96,7 @@ export function AIBridgeSettings() {
           </h5>
           <button
             onClick={addProvider}
-            className="flex items-center gap-1 text-[9px] font-bold text-indigo-500 hover transition-colors uppercase tracking-wider"
+            className="flex items-center gap-1 text-[9px] font-bold text-amber-500 hover transition-colors uppercase tracking-wider"
           >
             <Plus size={10} /> Add
           </button>
@@ -111,7 +111,7 @@ export function AIBridgeSettings() {
                 key={provider.id}
                 className={`flex flex-col gap-3 rounded-xl p-3 border transition-all ${
                   isActive
-                    ? "bg-[var(--bg-stage)] border-indigo-500/50"
+                    ? "bg-[var(--bg-stage)] border-amber-500/50"
                     : "bg-[var(--bg-stage)] border-[var(--border-subtle)] "
                 }`}
               >
@@ -122,7 +122,7 @@ export function AIBridgeSettings() {
                       onClick={() =>
                         setConfig({ activeProviderId: provider.id })
                       }
-                      className={`p-1 rounded-full transition-colors ${isActive ? "text-indigo-500" : "text-[var(--text-muted)] hover:text-[var(--text-main)]"}`}
+                      className={`p-1 rounded-full transition-colors ${isActive ? "text-amber-500" : "text-[var(--text-muted)] hover:text-[var(--text-main)]"}`}
                       title={isActive ? "Active Provider" : "Set as Active"}
                     >
                       <CheckCircle2
@@ -136,7 +136,7 @@ export function AIBridgeSettings() {
                       onChange={(e) =>
                         updateProvider(provider.id, { name: e.target.value })
                       }
-                      className="bg-transparent border-none text-[11px] font-bold text-[var(--text-main)] focus:outline-none w-32 focus:ring-1 focus:ring-indigo-500/50 rounded px-1 -ml-1"
+                      className="bg-transparent border-none text-[11px] font-bold text-[var(--text-main)] focus:outline-none w-32 focus:ring-1 focus:ring-amber-500/50 rounded px-1 -ml-1"
                     />
                   </div>
                   {config.providers.length > 1 && (
@@ -168,7 +168,7 @@ export function AIBridgeSettings() {
                       className={`w-full bg-[var(--bg-panel)] border rounded-lg px-2 py-1.5 text-[10px] text-[var(--text-main)] focus:outline-none transition-all ${
                         warning
                           ? "border-amber-500/50 focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
-                          : "border-[var(--border-subtle)] focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                          : "border-[var(--border-subtle)] focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
                       }`}
                     />
                     {warning && (
@@ -196,7 +196,7 @@ export function AIBridgeSettings() {
                           updateProvider(provider.id, { apiKey: e.target.value })
                         }
                         placeholder="sk-..."
-                        className="w-full bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg px-2 py-1.5 pr-8 text-[10px] text-[var(--text-main)] focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all placeholder:text-[var(--text-muted)]"
+                        className="w-full bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg px-2 py-1.5 pr-8 text-[10px] text-[var(--text-main)] focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all placeholder:text-[var(--text-muted)]"
                       />
                       <button
                         type="button"

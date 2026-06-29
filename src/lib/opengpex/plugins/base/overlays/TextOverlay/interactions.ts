@@ -22,6 +22,7 @@ import { LayerFactory } from '@opengpex/editor/core/layer';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import { createTransformHandler } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
+import type { PendingTextData } from '../../drawers/CraftDrawer/protocols';
 import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, _CMD_PLACE_UID, _CMD_EDIT_START_UID } from './protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
 
@@ -278,9 +279,9 @@ export const createTextPlaceHandler = (): InteractionHandler => {
       // No response if existing layer is being edited (taken over by InlineTextEditor)
       if (e.state.interaction.signals[EDITING_TEXT_KEY]) return false;
 
-      // Exclude UI element clicks
+      // Exclude UI element clicks and resize handles
       const target = e.nativeEvent.target as HTMLElement;
-      if (target.closest('button, a, input, [data-role="ui"], [contenteditable]')) return false;
+      if (target.closest('button, a, input, [data-role="ui"], [contenteditable], [data-handle]')) return false;
 
       // Click within canvas range
       const frame = e.activeFrame;
@@ -321,6 +322,10 @@ export const createTextPlaceHandler = (): InteractionHandler => {
       const colorConfig = e.state.pluginConfig[ColorOptionsAPI.configKey] as { pendingColor?: string } | undefined;
       const initialColor = colorConfig?.pendingColor || '#FFFFFF';
 
+      // Read pending text style from CraftDrawer's pluginConfig (user's pre-edit choices)
+      const craftConfig = e.state.pluginConfig[CraftDrawerAPI.configKey] as { pendingTextData?: PendingTextData } | undefined;
+      const pending = craftConfig?.pendingTextData;
+
       const layersArray = frame.layers.order.map(id => frame.layers.byId[id]);
       const smartName = LayerFactory.getNewLayerName(layersArray, 'Text');
 
@@ -333,12 +338,15 @@ export const createTextPlaceHandler = (): InteractionHandler => {
         visible: true,
         textData: {
           content: '',
-          fontFamily: 'Inter, sans-serif',
-          fontSize: 24,
-          fontWeight: 400,
+          fontFamily: pending?.fontFamily || 'Inter',
+          fontSize: pending?.fontSize || 24,
+          fontWeight: pending?.fontWeight || 400,
           color: initialColor,
-          align: 'left',
-          lineHeight: 1.4,
+          align: pending?.align || 'left',
+          lineHeight: pending?.lineHeight || 1.4,
+          italic: pending?.italic || false,
+          underline: pending?.underline || false,
+          strikethrough: pending?.strikethrough || false,
           boxMode: 'auto',
         },
       });

@@ -47,6 +47,8 @@ interface PopupPanelProps {
   status?: "STABLE" | "MEASURING" | "NONE" | string;
   /** Optional content rendered in the header right area, before the close button */
   headerRight?: React.ReactNode;
+  /** Optional scroll configuration for internal content area (default: true) */
+  scrollable?: boolean;
 }
 
 export function PopupPanel({
@@ -68,6 +70,7 @@ export function PopupPanel({
   position,
   status = "NONE",
   headerRight,
+  scrollable = true,
 }: PopupPanelProps) {
   const { state } = useEditorState();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -323,15 +326,26 @@ export function PopupPanel({
 
   const getSizeClasses = () => {
     if (currentExpanded) return "w-[1120px] h-[720px] max-h-[720px]";
-    switch (size) {
-      case "sm":
-        return "w-80 h-[480px] max-h-[480px]";
-      case "lg":
-        return "w-[1120px] h-[720px] max-h-[720px]";
-      case "md":
-      default:
-        return "w-[650px] h-[550px] max-h-[550px]";
+
+    const hasCustomWidth = className.split(/\s+/).some(c => c.startsWith("w-") || c.startsWith("min-w-") || c.startsWith("max-w-"));
+    const hasCustomHeight = className.split(/\s+/).some(c => c.startsWith("h-") || c.startsWith("min-h-") || c.startsWith("max-h-"));
+
+    let wClass = "";
+    let hClass = "";
+
+    if (!hasCustomWidth) {
+      if (size === "sm") wClass = "w-80";
+      else if (size === "lg") wClass = "w-[1120px]";
+      else wClass = "w-[650px]";
     }
+
+    if (!hasCustomHeight) {
+      if (size === "sm") hClass = "h-[480px] max-h-[480px]";
+      else if (size === "lg") hClass = "h-[720px] max-h-[720px]";
+      else hClass = "h-[550px] max-h-[550px]";
+    }
+
+    return `${wClass} ${hClass}`.trim();
   };
 
   const getStatusColor = (statusText: string) => {
@@ -445,7 +459,7 @@ export function PopupPanel({
           {/* ========================================================
               2. Absolutely pure content area (padding completely determined by children)
              ======================================================== */}
-          <div className="flex-1 min-h-0 relative flex flex-col custom-scrollbar overflow-y-auto">
+          <div className={`flex-1 min-h-0 relative flex flex-col ${scrollable ? "custom-scrollbar overflow-y-auto" : ""}`}>
             {typeof children === "function"
               ? children(currentExpanded)
               : children}

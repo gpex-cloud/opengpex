@@ -21,6 +21,7 @@
 
 import React, { useRef, useEffect, useLayoutEffect } from 'react';
 import { Frame, CameraState } from '@opengpex/editor/core/types';
+import { FontService } from '@opengpex/editor/core/fonts';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { useOverlayRotationSync } from '@opengpex/editor/core/motion/hooks/animation';
@@ -36,7 +37,7 @@ import { engine } from '@opengpex/editor/core/engine';
  */
 export default function CanvasStage() {
   const { state, activeFrame } = useEditorState();
-  const { geometry, assets } = useEditorServices();
+  const { geometry, assets, fonts } = useEditorServices();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // 1. Animation state management (Encapsulated)
@@ -49,6 +50,15 @@ export default function CanvasStage() {
    * renderLoop: Core synchronized rendering logic
    */
   const needsRenderRef = useRef(true); // Default to first render
+
+  // [Font Loading] Inject FontService into engine with redraw callback
+  useEffect(() => {
+    if ('setFontService' in engine) {
+      (engine as { setFontService: (fonts: FontService, cb: () => void) => void }).setFontService(fonts, () => {
+        needsRenderRef.current = true;
+      });
+    }
+  }, [fonts]);
 
   // 1. Subscribe to cache changes; mark redraw needed once slices or full images load
   useEffect(() => {

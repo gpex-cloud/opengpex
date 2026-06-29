@@ -22,6 +22,7 @@ import { GeometryService } from './geometry';
 import { PixelService, AssetService, ClipboardService, StateStorage, LayerService } from './services';
 import { EditorState, VolatileState, InteractionSignalValue } from './state';
 import { Frame, Layer } from './models';
+import { FontService } from '@opengpex/editor/core/fonts';
 
 import { PluginService } from './plugins';
 
@@ -37,6 +38,7 @@ export interface EditorServiceContextValue {
   storage: StateStorage;
   clipboard: ClipboardService;
   plugins: PluginService;
+  fonts: FontService;
   volatileRef: React.RefObject<VolatileState>;
   /** Current core version (from package.json, injected at build time) */
   coreVersion: string;
