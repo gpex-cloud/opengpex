@@ -39,7 +39,7 @@ import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
 import FunctionGroup from "@opengpex/editor/widgets/FunctionGroup";
 import { useAIBridgeState } from "./hooks";
-import { usePluginSignals } from "@opengpex/editor/core/context";
+import { usePluginSelfBusy } from "@opengpex/editor/core/context";
 import { AIBridgeConfig, AIMode, AI_MODE_META } from "./protocols";
 import { AIBridgeHistory } from "./panels/history";
 
@@ -87,9 +87,8 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
     openSettingsCmd,
   } = useAIBridgeState();
 
-  // Reads generating state signal via usePluginSignals — not lost even if drawer is closed and reopened
-  const { isGeneratingSignal } = usePluginSignals();
-  const isGenerating = Boolean(isGeneratingSignal?.value);
+  // Reads generating state via usePluginSelfBusy (derived from PluginService.isBusy) — not lost even if drawer is closed and reopened
+  const isGenerating = usePluginSelfBusy();
   const [showNegative, setShowNegative] = useState(
     Boolean(config.negativePrompt),
   );
@@ -128,7 +127,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
           </p>
           <FancyButton
             onClick={() => openSettingsCmd?.execute()}
-            variant="indigo"
+            variant="blue"
             size="xs"
             className="w-full focus:outline-none"
           >
@@ -156,9 +155,9 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
       {/* Header (always visible) */}
-      <div className="flex justify-between items-center mb-1 shrink-0">
+      <div className="flex justify-between items-center shrink-0">
         <div className="flex items-center gap-2">
-          <span className="font-black text-[12px] uppercase leading-none text-indigo-500 opacity-80 px-[1px]">
+          <span className="font-black text-[12px] uppercase leading-none text-indigo-600 dark:text-indigo-400 px-[1px]">
             AI
           </span>
           {config.isMockMode || config.providers.length <= 1 ? (
@@ -207,7 +206,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
               variant="zinc"
               subtle={true}
               size="xs"
-              className="w-full hover:border-indigo-500/50 bg-[var(--bg-stage)] border-[var(--border-subtle)] text-[var(--text-main)] focus:outline-none"
+              className="w-full hover:border-blue-500/50 bg-[var(--bg-stage)] border-[var(--border-subtle)] text-[var(--text-main)] focus:outline-none"
             >
               <Clock size={11} />
               <span className="uppercase font-bold tracking-wider">
@@ -286,7 +285,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                       value={activeProvider?.model ?? ""}
                       onChange={(e) => setModel(e.target.value)}
                       placeholder="e.g. gpt-image-1"
-                      className="flex-1 w-full bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-md px-2 py-1 text-[9px] text-[var(--text-main)] focus:outline-none focus:border-indigo-500"
+                      className="flex-1 w-full bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-md px-2 py-1 text-[9px] text-[var(--text-main)] focus:outline-none focus:border-blue-500"
                     />
                   )}
                 </div>
@@ -296,8 +295,8 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                   title="Fetch available models"
                   className={`p-1.5 rounded-md transition-colors focus:outline-none ${
                     isFetchingModels
-                      ? "text-indigo-500"
-                      : "text-[var(--text-muted)] hover:text-indigo-500"
+                      ? "text-blue-400"
+                      : "text-[var(--text-muted)] hover:text-blue-400"
                   }`}
                 >
                   <RefreshCw
@@ -353,7 +352,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
 
             {/* Prompt Area (shown for Generate and Edit modes) */}
             {(mode === "generate" || mode === "edit") && (
-              <div className="flex flex-col bg-[var(--bg-stage)] p-2 rounded-xl border border-[var(--border-subtle)] focus-within:border-indigo-500/50 transition-colors">
+              <div className="flex flex-col bg-[var(--bg-stage)] p-2 rounded-xl border border-[var(--border-subtle)] focus-within:border-blue-500/50 transition-colors">
                 <div className="flex items-center justify-between mb-1.5 px-1">
                   <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight">
                     Prompt
@@ -376,7 +375,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                       ? "Describe the changes you want to make..."
                       : "A cinematic shot of a cyberpunk city..."
                   }
-                  className="w-full h-24 bg-transparent border-none text-[11px] text-[var(--text-main)] resize-none focus:outline-none placeholder:text-[var(--text-muted)] leading-relaxed px-1"
+                  className="w-full h-48 bg-transparent border-none text-[11px] text-[var(--text-main)] resize-none focus:outline-none placeholder:text-[var(--text-muted)] leading-relaxed px-1"
                 />
 
                 {/* Negative prompt toggle (only for generate mode) */}
@@ -456,7 +455,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                         updateConfig({ seed: parseInt(e.target.value) || -1 })
                       }
                       placeholder="-1 (Random)"
-                      className="flex-1 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-md px-2 py-1 text-[10px] text-[var(--text-main)] focus:outline-none focus:border-indigo-500"
+                      className="flex-1 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-md px-2 py-1 text-[10px] text-[var(--text-main)] focus:outline-none focus:border-blue-500"
                     />
                     <button
                       onClick={() =>
@@ -465,7 +464,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                         })
                       }
                       title="Randomize Seed"
-                      className="p-1.5 text-[var(--text-muted)] hover:text-indigo-500 transition-colors focus:outline-none"
+                      className="p-1.5 text-[var(--text-muted)] hover:text-blue-400 transition-colors focus:outline-none"
                     >
                       <Dice5 size={12} />
                     </button>
@@ -494,7 +493,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                 onClick={handleGenerate}
                 disabled={!canGenerate}
                 loading={isGenerating}
-                variant={config.isMockMode ? "amber" : "indigo"}
+                variant={config.isMockMode ? "amber" : "blue"}
                 size="xs"
                 className="flex-[2] focus:outline-none"
               >
@@ -519,7 +518,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                 variant="zinc"
                 subtle={true}
                 size="xs"
-                className="flex-[1] bg-[var(--bg-stage)] border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-indigo-500/30 focus:outline-none disabled:opacity-40"
+                className="flex-[1] bg-[var(--bg-stage)] border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-blue-500/30 focus:outline-none disabled:opacity-40"
               >
                 <Clock size={11} />
                 <span className="uppercase font-bold tracking-wider">

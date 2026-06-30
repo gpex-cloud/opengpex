@@ -65,15 +65,15 @@ function LayerComponentInner({ activeFrame }: { activeFrame: Frame }) {
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
-      <div className="flex items-center justify-between mb-1 shrink-0">
+      <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
-          <Layers size={12} className="text-indigo-500 opacity-80" />
+          <Layers size={12} className="text-indigo-600 dark:text-indigo-400" />
           <div className="flex items-baseline gap-1">
             <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)] ">
               Layers
             </span>
             <span className="text-[9px] font-bold text-[var(--text-muted)] tabular-nums">
-              {hostLayers.length}
+              ({hostLayers.length})
             </span>
           </div>
         </div>

@@ -40,6 +40,22 @@ interface LoginModalProps {
   oauthProviders?: string[];
 }
 
+// ─── OAuth Error Messages ───
+
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  service_unavailable: "Authentication service is temporarily unavailable. Please try again later.",
+  google_token_exchange_failed: "Failed to authenticate with Google. Please try again.",
+  github_token_exchange_failed: "Failed to authenticate with GitHub. Please try again.",
+  google_session_failed: "Failed to create login session. Please try again.",
+  github_session_failed: "Failed to create login session. Please try again.",
+  user_banned: "Your account has been suspended. Please contact support.",
+  auth_callback_failed: "Authentication failed. Please try again.",
+};
+
+function formatOAuthError(msg: string): string {
+  return OAUTH_ERROR_MESSAGES[msg] || msg.replace(/_/g, " ");
+}
+
 // ─── Rate Limiting ───
 
 const RATE_LIMIT_MAX = 5;
@@ -197,13 +213,13 @@ export function LoginModal({ isOpen, onClose, onSuccess, apiBaseUrl, branding, o
       onSuccess({ id: "", email: "" } as AuthUser, tokens);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "OAuth failed";
-      if (msg !== "Login cancelled by user") setErrorMsg(msg);
+      if (msg !== "Login cancelled by user") setErrorMsg(formatOAuthError(msg));
     } finally { setLoading(false); setOauthPending(false); }
   };
 
   // ─── Render ───
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-lg">
+    <div className="fixed inset-0 z-[6000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-lg">
       <div
         className="relative w-full max-w-[400px] bg-[var(--bg-panel,#1a1a2e)] border border-[var(--border-subtle,#333)] rounded-2xl p-8 text-[var(--text-main,#eee)] overflow-hidden"
         onClick={(e) => e.stopPropagation()}

@@ -116,8 +116,8 @@ export const createTextMoveHandler = (): InteractionHandler => {
       const isSilent = !!(editingId && targetLayerId === editingId);
       tx.begin(isSilent);
 
-      // Set grabbing onStart
-      e.actions.setInteraction({ cursorOverride: 'grabbing' });
+      // Set grabbing onStart (fast-track, no React re-render)
+      e.actions.fast.setCursor('grabbing');
     },
 
     onMove: (e) => {
@@ -141,9 +141,7 @@ export const createTextMoveHandler = (): InteractionHandler => {
 
       // If still holding Cmd/Ctrl when drag ends, restore to grab, otherwise reset to null
       const stillHoldingCmd = e.keys.meta;
-      e.actions.setInteraction({
-        cursorOverride: stillHoldingCmd ? 'grab' : null,
-      });
+      e.actions.fast.setCursor(stillHoldingCmd ? 'grab' : null);
     },
   };
 };

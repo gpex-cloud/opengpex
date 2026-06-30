@@ -32,14 +32,15 @@
  * and positioned in their respective quadrants. Diagonal divider line matches
  * BgRemovalIcon's style (bottom-left to top-right, rounded caps, 0.85 opacity).
  */
-export function CraftDrawerIcon() {
+export function CraftDrawerIcon({ size = 20, className }: { size?: number; className?: string } = {}) {
   return (
     <svg
-      width="20"
-      height="20"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
+      className={className}
       aria-hidden="true"
     >
       {/* Lucide "Type" icon paths — scaled and positioned in upper-left quadrant */}

@@ -33,51 +33,88 @@ export function AiGenerationPanel({ extra }: AiGenerationPanelProps) {
   if (!extra?.ai_generation) return null;
 
   const aiProvider = String(extra.ai_provider || "Unknown Provider");
+  const aiModel = extra.ai_model ? String(extra.ai_model) : null;
+  const aiModeRaw = extra.ai_mode ? String(extra.ai_mode) : null;
+  const aiMode = aiModeRaw === "generate" ? "Generate"
+    : aiModeRaw === "edit" ? "Edit"
+    : aiModeRaw === "variations" ? "Vary"
+    : aiModeRaw;
+  const aiSize = extra.ai_size ? String(extra.ai_size) : null;
+  const aiSeed = extra.ai_seed !== undefined ? String(extra.ai_seed) : null;
+  const aiDurationMs = extra.ai_duration_ms !== undefined ? String(extra.ai_duration_ms) : null;
   const aiPrompt = String(extra.ai_prompt || "");
   const aiNegativePrompt = extra.ai_negative_prompt
     ? String(extra.ai_negative_prompt)
     : null;
-  const aiSeed =
-    extra.ai_seed !== undefined ? String(extra.ai_seed) : null;
 
-  const detailedItems = [
+  const metaItems = [
+    { label: "Provider", value: aiProvider },
+    { label: "Model", value: aiModel },
+    { label: "Mode", value: aiMode },
+    { label: "Size", value: aiSize },
+    { label: "Seed", value: aiSeed },
+    { label: "Duration", value: aiDurationMs ? `${aiDurationMs}ms` : null },
+  ].filter((item) => !!item.value);
+
+  const textItems = [
     { label: "Prompt", value: aiPrompt },
     { label: "Negative Prompt", value: aiNegativePrompt },
-    { label: "Seed", value: aiSeed },
   ].filter((item) => !!item.value);
+
+  // Summary line: model + mode
+  const summaryLine = [aiModel, aiMode].filter(Boolean).join(" • ");
 
   return (
     <div>
-      <div className="flex flex-col bg-indigo-500/5 rounded-xl border border-indigo-500/20 overflow-hidden transition-all duration-300 mt-2">
+      <div className="flex flex-col bg-[var(--bg-stage)] rounded-xl border border-[var(--border-subtle)] overflow-hidden transition-all duration-300">
         {/* Summary Header */}
         <button
           onClick={() => setIsAiInfoExpanded(!isAiInfoExpanded)}
-          className="w-full flex items-center justify-between p-2 hover:bg-indigo-500/10 transition-colors text-left select-none"
+          className="w-full flex items-center justify-between p-2 hover:bg-[var(--bg-stage)] transition-colors text-left select-none"
         >
           <div className="flex flex-col pr-2 overflow-hidden">
-            <span className="text-[8px] font-black text-indigo-400 uppercase tracking-tight mb-1">
+            <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight mb-1">
               AI Generation Data
             </span>
-            <span className="text-[10px] font-black text-indigo-400 truncate">
+            <span className="text-[10px] font-black text-[var(--text-main)] truncate">
+              {summaryLine || aiProvider}
+            </span>
+            <span className="text-[8px] font-bold text-[var(--text-muted)] truncate mt-0.5">
               {aiProvider}
             </span>
           </div>
           <ChevronDown
             size={14}
-            className={`text-indigo-400 shrink-0 transition-transform duration-300 ${isAiInfoExpanded ? "rotate-180" : ""}`}
+            className={`text-[var(--text-muted)] shrink-0 transition-transform duration-300 ${isAiInfoExpanded ? "rotate-180" : ""}`}
           />
         </button>
 
         {/* Expanded Details */}
         {isAiInfoExpanded && (
-          <div className="flex flex-col gap-1.5 p-2 pt-0 border-t border-indigo-500/20 mt-1 pt-2 animate-in fade-in slide-in-from-top-1 duration-200">
-            {detailedItems.map((item, i) => (
+          <div className="flex flex-col gap-1.5 p-2 pt-0 border-t border-[var(--border-subtle)] mt-1 pt-2 animate-in fade-in slide-in-from-top-1 duration-200">
+            {/* Short Metadata Rows */}
+            {metaItems.map((item, i) => (
               <div
                 key={i}
-                className="flex flex-col gap-1 mb-1 group relative"
+                className="flex justify-between items-baseline gap-2"
+              >
+                <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-wider shrink-0">
+                  {item.label}
+                </span>
+                <span className="text-[9px] font-semibold text-[var(--text-main)] text-right break-words">
+                  {String(item.value)}
+                </span>
+              </div>
+            ))}
+
+            {/* Long Text Metadata (Prompts) */}
+            {textItems.map((item, i) => (
+              <div
+                key={`text-${i}`}
+                className="flex flex-col gap-1 mt-1.5 pt-1.5 border-t border-[var(--border-subtle)]"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-[8px] font-bold text-indigo-400 uppercase tracking-wider">
+                  <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
                     {item.label}
                   </span>
                   <button
@@ -98,14 +135,14 @@ export function AiGenerationPanel({ extra }: AiGenerationPanelProps) {
                     ) : (
                       <Copy
                         size={10}
-                        className="text-indigo-400 hover transition-colors"
+                        className="text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
                       />
                     )}
                   </button>
                 </div>
-                <span className="text-[9px] font-semibold text-[var(--text-main)] break-words">
+                <p className="text-[9px] font-semibold text-[var(--text-main)] leading-relaxed break-words whitespace-pre-wrap max-h-[80px] overflow-y-auto">
                   {String(item.value)}
-                </span>
+                </p>
               </div>
             ))}
           </div>

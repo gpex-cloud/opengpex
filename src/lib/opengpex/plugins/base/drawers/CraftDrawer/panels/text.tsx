@@ -147,7 +147,7 @@ export const TextPanel = React.memo(function TextPanel() {
             }}
             className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
           />
-          <div className="flex items-center gap-0.5 text-right w-12 justify-end text-indigo-400 font-black text-[10px] tabular-nums">
+          <div className="flex items-center gap-0.5 text-right w-12 justify-end text-indigo-600 dark:text-indigo-400 font-black text-[10px] tabular-nums">
             <input
               type="number"
               min={TEXT_SIZE_MIN}
@@ -314,7 +314,7 @@ export const TextPanel = React.memo(function TextPanel() {
             }}
             className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
           />
-          <span className="text-[10px] font-black w-8 text-right tabular-nums text-indigo-400">
+          <span className="text-[10px] font-black w-8 text-right tabular-nums text-indigo-600 dark:text-indigo-400">
             {(textData?.lineHeight || 1.4).toFixed(1)}
           </span>
         </div>

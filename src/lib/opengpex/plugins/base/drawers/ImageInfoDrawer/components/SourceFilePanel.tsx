@@ -86,7 +86,7 @@ export function SourceFilePanel({
         </div>
       </div>
       <span
-        className="text-[11px] font-black text-indigo-400 truncate tracking-tight pt-0.5 pb-1"
+        className="text-[11px] font-black text-[var(--text-main)] truncate tracking-tight pt-0.5 pb-1"
         title={fileName}
       >
         {fileName}

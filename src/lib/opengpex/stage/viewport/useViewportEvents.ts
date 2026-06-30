@@ -98,17 +98,12 @@ export function useViewportEvents(
       // Basic hover determination logic (temporarily kept in Viewport layer, can be moved to plugins in the future)
       const layersAtPoint = geometry.space.pickLayersAt(event.point.world, frame.layers);
       const hoveredId = layersAtPoint[0]?.id || null;
-
-      if (state.interaction.hoveredLayerId !== hoveredId) {
-        actions.setInteraction({ hoveredLayerId: hoveredId });
-      }
-
       const isHoveringActive = activeLayer ? layersAtPoint.some((l: Layer) => l.id === activeLayer.id) : false;
-      if (state.interaction.isHoveringActiveLayer !== isHoveringActive) {
-        actions.setInteraction({ isHoveringActiveLayer: isHoveringActive });
-      }
+
+      // Write to VIS (fast-track, no React re-render)
+      services.actions.fast.setHover(hoveredId, isHoveringActive);
     }
-  }, [buildInteractionEvent, dispatcher, geometry, frame.layers, state.interaction.hoveredLayerId, state.interaction.isHoveringActiveLayer, activeLayer, actions]);
+  }, [buildInteractionEvent, dispatcher, geometry, frame.layers, activeLayer, services.actions]);
 
   // --- Mouse Up: End dispatch and reset fast-track ---
   const handleMouseUp = useCallback(() => {
@@ -128,8 +123,9 @@ export function useViewportEvents(
 
   const handleMouseLeave = useCallback(() => {
     handleMouseUp();
-    actions.setInteraction({ hoveredLayerId: null, isHoveringActiveLayer: false });
-  }, [handleMouseUp, actions]);
+    // Clear hover via VIS (fast-track, no React re-render)
+    services.actions.fast.setHover(null, false);
+  }, [handleMouseUp, services.actions]);
 
   // --- Wheel Interaction: zoom and canvas panning (taken over by independent Hook) ---
   useViewportScroll(containerRef, frame, actions, geometry);

@@ -4,6 +4,16 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.16
+
+- Add config-driven filtering for `SmartGuides` snapping targets and exclude layer types in a new settings panel
+- Implement `useVolatileInteraction` hook for high-frequency interaction subscriptions to prevent unnecessary global React renders
+- Optimize `DrawerBar` layout transitions: support double-click to isolate panels, smooth drag-and-drop animations, and styled side-dock/collapse buttons
+- Refactor `AiGenerationPanel` in `ImageInfoDrawer` using CSS theme variables and a cleaner two-column details layout
+- Improve authentication dialog mounting by portal-rendering the `LoginModal` to the document body to resolve z-index bugs
+
+---
+
 ## v1.0.0-beta.15
 
 - Add dynamic `FontService` supporting IndexedDB local caching, Google Fonts discovery, and local font access

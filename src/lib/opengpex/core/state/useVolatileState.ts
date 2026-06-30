@@ -36,6 +36,14 @@ export const INITIAL_VOLATILE: VolatileState = {
     project: {},
   },
   transient: {},
+  interaction: {
+    hoveredLayerId: null,
+    isHoveringActiveLayer: false,
+    cursorOverride: null,
+    hud: null,
+    smartguides: null,
+    selectionErrorPulse: 0,
+  },
 };
 
 /**

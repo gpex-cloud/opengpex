@@ -18,6 +18,7 @@
  */
 
 import { InteractionEvent, LocalRect, asWorldPoint } from '@opengpex/editor/core/types';
+import type { SnapFilterOptions } from '@opengpex/editor/core/geometry/operators/snapping';
 
 /**
  * InteractionMath: Interaction Helper Utilities
@@ -108,6 +109,19 @@ export const InteractionMath = {
     const isSnapping = e.state.interaction.isSnapping;
     const frame = e.activeFrame;
 
+    // Read SmartGuides plugin config for fine-grained filtering
+    const sgConfig = e.state.pluginConfig?.['opengpex.overlays.smart_guides'] as Record<string, unknown> | undefined;
+    const filterOptions: SnapFilterOptions = sgConfig ? {
+      snapToCanvas: sgConfig.snapToCanvas as boolean | undefined,
+      snapToBirth: sgConfig.snapToBirth as boolean | undefined,
+      snapToLayers: sgConfig.snapToLayers as boolean | undefined,
+      excludeLayerTypes: sgConfig.excludeLayerTypes as string[] | undefined,
+      ignoreLockedLayers: sgConfig.ignoreLockedLayers as boolean | undefined,
+      ignoreSmallLayers: sgConfig.ignoreSmallLayers as boolean | undefined,
+      smallLayerThreshold: sgConfig.smallLayerThreshold as number | undefined,
+      maxSnapTargets: sgConfig.maxSnapTargets as number | undefined,
+    } : {};
+
     if (!isSnapping) {
       // If snapping is disabled, clear guides but still respect clamping if requested
       e.actions.fast.setTransient('smartguides', null);
@@ -126,7 +140,8 @@ export const InteractionMath = {
 
     const snapped = e.geometry.snapping.snapRect(rect, frame, { 
       clamp: options.clamp,
-      excludeLayerId: options.excludeLayerId 
+      excludeLayerId: options.excludeLayerId,
+      ...filterOptions
     });
 
     // Throttle guide distribution (sync to fast-track transient)

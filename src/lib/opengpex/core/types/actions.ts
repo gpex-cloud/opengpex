@@ -209,6 +209,16 @@ export interface EditorActions {
     commit: (id?: string | null, type?: 'layer' | 'layers' | 'frame' | 'frames' | 'project') => void;
     signal: (frameId: string) => void;
     reset: () => void;
+
+    // ─── Volatile Interaction (high-frequency transient state) ─────────
+    /** Set cursor override (null = use default logic) */
+    setCursor: (cursor: string | null) => void;
+    /** Get current cursor override */
+    getCursor: () => string | null;
+    /** Set hovered layer */
+    setHover: (layerId: string | null, isHoveringActive?: boolean) => void;
+    /** Subscribe to a volatile interaction field change. Returns unsubscribe function. */
+    subscribeInteraction: (key: string, listener: () => void) => () => void;
   };
 
   mutateVolatile: (mutator: (v: VolatileState) => void) => void;

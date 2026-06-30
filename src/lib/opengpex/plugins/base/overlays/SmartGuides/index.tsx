@@ -21,7 +21,9 @@
 
 import { EditorPlugin } from '@opengpex/editor/core/types';
 import { SmartGuides, SmartGuidesToggle } from './components';
+import { SmartGuidesSettings } from './panels/settings';
 import { SMART_GUIDES_COMMANDS } from './commands';
+import { Magnet } from 'lucide-react';
 import * as P from './protocols';
 
 /**
@@ -43,13 +45,31 @@ export const plugin: EditorPlugin = {
   slot: 'VIEWPORT_OVERLAY',
   show: 'frame-required',
   component: SmartGuides,
-  initialConfig: { enabled: true },
+  initialConfig: {
+    enabled: true,
+    snapToCanvas: true,
+    snapToBirth: true,
+    snapToLayers: true,
+    excludeLayerTypes: [],
+    ignoreLockedLayers: true,
+    ignoreSmallLayers: true,
+    smallLayerThreshold: 400,
+    maxSnapTargets: 8
+  },
   commands: Object.values(SMART_GUIDES_COMMANDS),
   contributions: [
     {
       slot: 'TOOL_MENU',
       component: SmartGuidesToggle,
       order: 2010
+    },
+    {
+      slot: 'SETTINGS_CONFIG_PANEL',
+      group: 'Smart Guides',
+      component: SmartGuidesSettings,
+      title: 'Smart Guides',
+      icon: <Magnet size={12} />,
+      order: 200
     }
   ]
 };

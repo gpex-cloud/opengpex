@@ -305,6 +305,7 @@ function SidebarItem({
   const [isClosing, setIsClosing] = React.useState(false);
   const [isOpening, setIsOpening] = React.useState(false);
   const [prevActive, setPrevActive] = React.useState(isActive);
+  const [isDragging, setIsDragging] = React.useState(false);
 
   if (isActive !== prevActive) {
     setPrevActive(isActive);
@@ -368,16 +369,23 @@ function SidebarItem({
       dragControls={dragControls}
       dragListener={false}
       onDragStart={() => {
+        setIsDragging(true);
         if (isDraggingRef.current !== undefined) isDraggingRef.current = true;
       }}
       onDragEnd={() => {
+        setTimeout(() => {
+          setIsDragging(false);
+        }, 300); // Maintain z-index during snap-back layout animation
         setTimeout(() => {
           if (isDraggingRef.current !== undefined)
             isDraggingRef.current = false;
         }, 100);
       }}
       className="w-full flex shrink-0 relative pointer-events-none"
-      style={{ overflow: "visible" }}
+      style={{
+        overflow: "visible",
+        zIndex: isDragging ? 1000 : "auto",
+      }}
     >
       <motion.div
         animate={{ height: isActive ? "auto" : 34 }}
@@ -456,6 +464,7 @@ function SidebarItem({
                 style={{
                   width: `${panelWidth}px`,
                   zIndex: 900,
+                  overflow: "visible", // Prevent clipping of the circular Switch Side button
                 }}
               >
                 <div
@@ -474,27 +483,64 @@ function SidebarItem({
 
                 {/* 3. Side touch handle */}
                 <div
-                  className={`absolute top-0 bottom-0 w-4 cursor-pointer z-[910] hover/5 group pointer-events-auto flex items-center justify-center ${side === "left" ? "right-0" : "left-0"}`}
+                  className={`absolute top-0 bottom-0 w-4 cursor-grab active:cursor-grabbing z-[910] hover/5 group pointer-events-auto flex items-center justify-center ${side === "left" ? "right-0" : "left-0"}`}
                   onPointerDown={(e) => dragControls.start(e)}
-                  onClick={(e) => handleCombinedClick(plugin.uid, e)}
-                  title="Click to close | Drag to reorder"
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    actions.updateUI({ activeSidebarIds: [plugin.uid] });
+                  }}
+                  title="Double click to isolate | Drag to reorder"
                 >
                   {/* Switch Side Button */}
                   <div
-                    className="absolute top-5 w-full flex justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                     onClick={switchSide}
                     onPointerDown={(e) => e.stopPropagation()}
+                    className={`absolute top-5 w-[22px] h-[22px] rounded-full flex items-center justify-center bg-[var(--bg-panel)] border border-[var(--border-subtle)] shadow-md hover:bg-[var(--bg-stage)] hover:border-[var(--border-light)] transition-all duration-200 opacity-0 group-hover:opacity-100 pointer-events-auto cursor-pointer hover:scale-110 active:scale-95 ${
+                      side === "left"
+                        ? "right-0 translate-x-1/2"
+                        : "left-0 -translate-x-1/2"
+                    }`}
                     title={`Dock to ${side === "left" ? "Right" : "Left"}`}
                   >
                     {side === "left" ? (
                       <ChevronRight
-                        size={14}
-                        className="text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                        size={12}
+                        className="text-[var(--text-main)] hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
                       />
                     ) : (
                       <ChevronLeft
-                        size={14}
-                        className="text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                        size={12}
+                        className="text-[var(--text-main)] hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                      />
+                    )}
+                  </div>
+
+                  {/* Collapse Button */}
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const currentIds = ui.activeSidebarIds || [];
+                      actions.updateUI({
+                        activeSidebarIds: currentIds.filter((id) => id !== plugin.uid),
+                      });
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className={`absolute top-12 w-[22px] h-[22px] rounded-full flex items-center justify-center bg-[var(--bg-panel)] border border-[var(--border-subtle)] shadow-md hover:bg-[var(--bg-stage)] hover:border-[var(--border-light)] transition-all duration-200 opacity-0 group-hover:opacity-100 pointer-events-auto cursor-pointer hover:scale-110 active:scale-95 ${
+                      side === "left"
+                        ? "right-0 translate-x-1/2"
+                        : "left-0 -translate-x-1/2"
+                    }`}
+                    title="Collapse panel"
+                  >
+                    {side === "left" ? (
+                      <ChevronLeft
+                        size={12}
+                        className="text-[var(--text-main)] hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                      />
+                    ) : (
+                      <ChevronRight
+                        size={12}
+                        className="text-[var(--text-main)] hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
                       />
                     )}
                   </div>

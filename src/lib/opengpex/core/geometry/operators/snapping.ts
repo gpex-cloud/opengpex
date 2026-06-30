@@ -61,12 +61,26 @@ export interface SmartGuideData {
 }
 
 /**
+ * Snap filter options for fine-grained control over which layers participate.
+ */
+export interface SnapFilterOptions {
+  snapToCanvas?: boolean;
+  snapToBirth?: boolean;
+  snapToLayers?: boolean;
+  excludeLayerTypes?: string[];
+  ignoreLockedLayers?: boolean;
+  ignoreSmallLayers?: boolean;
+  smallLayerThreshold?: number;
+  maxSnapTargets?: number;
+}
+
+/**
  * Rectangle-level snapping (usually used for layer dragging)
  */
 export function snapRect(
   rect: Rect,
   frame: Frame,
-  options: { clamp?: boolean, threshold?: number, excludeLayerId?: string } = {}
+  options: { clamp?: boolean, threshold?: number, excludeLayerId?: string } & SnapFilterOptions = {}
 ): { x: number, y: number, smartguides: SmartGuideData | null } {
   const { w: iw, h: ih } = frame.canvas;
   const c2w = Matrix3x3.translate(-iw / 2, -ih / 2);
@@ -74,7 +88,8 @@ export function snapRect(
 
   const snapped = getSnappedPosition(
     asWorldPoint(c2w.apply({ x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 })),
-    { w: rect.w, h: rect.h }, frame, options.excludeLayerId || '', options.threshold ?? 15
+    { w: rect.w, h: rect.h }, frame, options.excludeLayerId || '', options.threshold ?? 15,
+    options
   );
 
   const sc = w2c.apply({ x: snapped.x, y: snapped.y });
@@ -95,7 +110,8 @@ function getSnappedPosition(
   targetDim: Dimensions,
   frame: Frame,
   activeLayerId: string,
-  threshold: number = 15
+  threshold: number = 15,
+  filterOptions: SnapFilterOptions = {}
 ): { x: number, y: number, smartguides: SmartGuideData | null } {
   const cameraScale = frame.camera?.k || 1;
   // 💡 1. Dynamic alignment threshold: constant screen pixel visual snapping hot zone, ensuring extremely fine pixel-level tuning when zoomed in
@@ -112,32 +128,69 @@ function getSnappedPosition(
 
   const activeLayer = activeLayerId ? frame.layers.byId[activeLayerId] : null;
 
-  // 💡 2. Spatial filter: when the number of layers is large, only align and snap layers within a physical distance (within screen 1500px), effectively filtering out alignment noise
-  const snappables: SnappableSource[] = [
-    { matrix: Matrix3x3.identity(), size: frame.canvas, type: 'canvas' },
-    ...(activeLayer?.birthCenter ? [{
+  // 💡 2. Build snappables with config-driven filtering
+  const snappables: SnappableSource[] = [];
+
+  // Canvas (configurable)
+  if (filterOptions.snapToCanvas !== false) {
+    snappables.push({ matrix: Matrix3x3.identity(), size: frame.canvas, type: 'canvas' });
+  }
+
+  // Birth position (configurable)
+  if (filterOptions.snapToBirth !== false && activeLayer?.birthCenter) {
+    snappables.push({
       matrix: Matrix3x3.translate(activeLayer.birthCenter.cx, activeLayer.birthCenter.cy),
       size: { w: 0, h: 0 } as Dimensions,
       type: 'birth' as const
-    }] : []),
-    ...frame.layers.order
+    });
+  }
+
+  // Layers (configurable, with fine-grained filtering)
+  if (filterOptions.snapToLayers !== false) {
+    const layerTargets = frame.layers.order
       .map(id => frame.layers.byId[id])
       .filter(l => l.id !== activeLayerId && l.visible && l.role === 'host')
+      // Layer type exclusion
+      .filter(l => {
+        const excludeTypes = filterOptions.excludeLayerTypes || [];
+        return !excludeTypes.includes(l.type);
+      })
+      // Locked layer exclusion
+      .filter(l => {
+        if (filterOptions.ignoreLockedLayers === false) return true;
+        return !l.locked;
+      })
+      // Small fragment area filter
+      .filter(l => {
+        if (filterOptions.ignoreSmallLayers === false) return true;
+        const areaThreshold = filterOptions.smallLayerThreshold || 400;
+        const screenArea = l.bounding.w * l.bounding.h * cameraScale * cameraScale;
+        return screenArea > areaThreshold;
+      })
+      // Spatial distance filter
       .filter(l => {
         const dx = l.cx - w_pos.x;
         const dy = l.cy - w_pos.y;
         const distOnScreen = Math.sqrt(dx * dx + dy * dy) * cameraScale;
         return distOnScreen < 1500;
       })
-      .map(l => {
-        const rect = l.visibleShape?.rect || { x: 0, y: 0, w: l.bounding.w, h: l.bounding.h };
-        return {
-          matrix: getLayerWorldMatrix(l).multiply(Matrix3x3.translate(rect.x + rect.w / 2, rect.y + rect.h / 2)),
-          size: { w: rect.w, h: rect.h } as Dimensions,
-          type: 'layer' as const
-        };
+      // Sort by distance and limit count
+      .sort((a, b) => {
+        const da = Math.hypot(a.cx - w_pos.x, a.cy - w_pos.y);
+        const db = Math.hypot(b.cx - w_pos.x, b.cy - w_pos.y);
+        return da - db;
       })
-  ];
+      .slice(0, filterOptions.maxSnapTargets || 8);
+
+    for (const l of layerTargets) {
+      const rect = l.visibleShape?.rect || { x: 0, y: 0, w: l.bounding.w, h: l.bounding.h };
+      snappables.push({
+        matrix: getLayerWorldMatrix(l).multiply(Matrix3x3.translate(rect.x + rect.w / 2, rect.y + rect.h / 2)),
+        size: { w: rect.w, h: rect.h } as Dimensions,
+        type: 'layer' as const
+      });
+    }
+  }
 
   const [dw, dh] = [targetDim.w / 2, targetDim.h / 2];
   // 💡 Adjust alignment axis order: put center point 0 first, making center alignment hit first under equal deviation

@@ -168,7 +168,7 @@ export function ResizeExportControls({
               <FancyButton
                 onClick={() => updateConfig({ lockAspect: !config.lockAspect })}
                 active={config.lockAspect}
-                variant={config.lockAspect ? "blue" : "red"}
+                variant={config.lockAspect ? "indigo" : "red"}
                 subtle={true}
                 disabled={isClipMode}
                 size="xs"
@@ -215,7 +215,7 @@ export function ResizeExportControls({
             className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner disabled:opacity-30 disabled:cursor-not-allowed"
           />
           <span
-            className={`text-[10px] font-black w-10 text-right tabular-nums ${!config.lockAspect ? "text-[var(--text-muted)]" : "text-indigo-400 "}`}
+            className={`text-[10px] font-black w-10 text-right tabular-nums ${!config.lockAspect ? "text-[var(--text-muted)]" : "text-indigo-600 dark:text-indigo-400"}`}
           >
             {currentPercent}%
           </span>

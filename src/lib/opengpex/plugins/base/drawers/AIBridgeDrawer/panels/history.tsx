@@ -128,7 +128,7 @@ export function AIBridgeHistory() {
         <div className="flex items-center gap-2">
           <button
             onClick={downloadHistory}
-            className="flex items-center gap-1 text-[9px] font-bold text-indigo-500 hover:text-indigo-400 transition-colors uppercase tracking-wider"
+            className="flex items-center gap-1 text-[9px] font-bold text-blue-400 hover:text-blue-400 transition-colors uppercase tracking-wider"
             title="Download as text file"
           >
             <Download size={10} /> Export
@@ -182,7 +182,7 @@ export function AIBridgeHistory() {
                   </span>
                   <button
                     onClick={(e) => copyRecord(record, e)}
-                    className="p-0.5 text-[var(--text-muted)] hover:text-indigo-500 transition-colors opacity-0 group-hover/record:opacity-100 focus:outline-none"
+                    className="p-0.5 text-[var(--text-muted)] hover:text-blue-400 transition-colors opacity-0 group-hover/record:opacity-100 focus:outline-none"
                     title="Copy record info"
                   >
                     {copiedId === record.id ? <Check size={10} className="text-emerald-500" /> : <Copy size={10} />}

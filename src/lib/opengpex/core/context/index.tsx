@@ -39,6 +39,7 @@ import {
   BuiltPlugin,
   CommandInstance,
   InteractionSignalValue,
+  VolatileInteraction,
   Layer,
   Frame,
 } from "@opengpex/editor/core/types";
@@ -479,6 +480,29 @@ export function usePluginList(): BuiltPlugin[] {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+/**
+ * usePluginSelfBusy: Gets the busy status of the current plugin scope reactively.
+ */
+export function usePluginSelfBusy(): boolean {
+  const scope = useContext(PluginContext);
+  const { plugins } = useEditorServices();
+
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      return plugins.subscribe(onStoreChange);
+    },
+    [plugins],
+  );
+
+  const getSnapshot = useCallback(() => {
+    if (!scope?.uid) return false;
+    return plugins.isBusy(scope.uid);
+  }, [plugins, scope]);
+
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+
 /* ==========================================================================
    SECTION 4: Dynamic Runtime State Hooks (Reactive Subscriptions)
    ========================================================================== */
@@ -602,4 +626,42 @@ export function useOverlayRotationSync(
   frame: Frame | null,
 ) {
   return useCoreOverlayRotationSync(ref, frame);
+}
+
+/* ==========================================================================
+   SECTION 6: Volatile Interaction Hooks (Fast-Track Subscriptions)
+   ========================================================================== */
+
+/**
+ * useVolatileInteraction: Subscribe to a specific field of the Volatile Interaction Store.
+ * Only triggers a re-render when the subscribed field changes — NOT on every state update.
+ *
+ * This is the recommended way to read high-frequency interaction data
+ * (hover, cursor, HUD) in React components without causing global re-renders.
+ *
+ * @example
+ * ```tsx
+ * const hoveredId = useVolatileInteraction('hoveredLayerId');
+ * const cursor = useVolatileInteraction('cursorOverride');
+ * ```
+ *
+ * @see docs/opengpex/20260630_interaction_state_volatile_migration_spec.md
+ */
+export function useVolatileInteraction<K extends keyof VolatileInteraction>(
+  key: K,
+): VolatileInteraction[K] {
+  const { actions, volatileRef } = useEditorServices();
+
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      return actions.fast.subscribeInteraction(key, onStoreChange);
+    },
+    [actions, key],
+  );
+
+  const getSnapshot = useCallback(() => {
+    return volatileRef.current.interaction[key];
+  }, [volatileRef, key]);
+
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

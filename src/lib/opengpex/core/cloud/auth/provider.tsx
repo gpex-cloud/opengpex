@@ -30,6 +30,7 @@
  */
 
 import React, { createContext, useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import type { AuthContextValue, AuthProviderProps, AuthUser } from "./types";
 import { getAccessToken, getRefreshToken, setAccessToken, setRefreshToken, clearTokens } from "./token-store";
 import { initHttpClient, authFetch } from "./http-client";
@@ -168,14 +169,17 @@ export function AuthProvider({ apiBaseUrl, branding, oauthProviders, children }:
   return (
     <AuthContext.Provider value={value}>
       {children}
-      <LoginModal
-        isOpen={isLoginOpen}
-        onClose={closeLogin}
-        onSuccess={handleLoginSuccess}
-        apiBaseUrl={apiBaseUrl}
-        branding={branding}
-        oauthProviders={oauthProviders}
-      />
+      {typeof document !== "undefined" && createPortal(
+        <LoginModal
+          isOpen={isLoginOpen}
+          onClose={closeLogin}
+          onSuccess={handleLoginSuccess}
+          apiBaseUrl={apiBaseUrl}
+          branding={branding}
+          oauthProviders={oauthProviders}
+        />,
+        document.body
+      )}
     </AuthContext.Provider>
   );
 }

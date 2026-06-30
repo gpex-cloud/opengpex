@@ -340,6 +340,7 @@ export const AI_BRIDGE_COMMANDS = {
           : 'png';
         const fileName = `aigen_${safeProviderName}_${mode}_${Date.now()}.${ext}`;
         const file = new File([imageBlob], fileName, { type: imageBlob.type });
+        const durationMs = Date.now() - startTime;
 
         const extra = {
           ai_generation: true,
@@ -350,13 +351,13 @@ export const AI_BRIDGE_COMMANDS = {
           ai_seed: actualSeed,
           ai_size: size,
           ai_model: activeProvider?.model || undefined,
+          ai_duration_ms: durationMs,
         };
 
         actions.adv.frame.create.trunk.execute({ source: file, switchFrame: false, extra });
         actions.setInteraction({ hud: { message: '✨ AI image added to canvas', type: 'success' } });
 
         // Record successful history
-        const durationMs = Date.now() - startTime;
         appendHistoryRecord(ctx, {
           provider: config.isMockMode ? 'Mock Mode' : activeProvider.name,
           model: activeProvider?.model || 'unknown',

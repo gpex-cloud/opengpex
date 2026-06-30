@@ -167,6 +167,28 @@ export type EditorAction =
   | { type: 'HISTORY_RESET' }
   | { type: 'REPLACE_FRAME'; payload: { frameId: string; frame: Frame } };
 
+/**
+ * VolatileInteraction: High-frequency interaction transient data.
+ * Lives in the fast-track (volatileRef), NOT in the Reducer state.
+ * Does not trigger React re-renders when mutated.
+ * 
+ * @see docs/opengpex/20260630_interaction_state_volatile_migration_spec.md
+ */
+export interface VolatileInteraction {
+  /** Currently hovered layer ID (null = no hover) */
+  hoveredLayerId: string | null;
+  /** Whether the cursor is hovering the active (selected) layer */
+  isHoveringActiveLayer: boolean;
+  /** Cursor override value set by plugins/tools (null = use default logic) */
+  cursorOverride: string | null;
+  /** HUD toast message (null = no message) */
+  hud: { message: string; type: 'info' | 'success' | 'error' } | null;
+  /** Smart guide alignment data during interactions */
+  smartguides: SmartGuideData | null;
+  /** Selection error pulse counter */
+  selectionErrorPulse: number;
+}
+
 export interface VolatileState {
   /** Synthesized active state signal */
   activeState: {
@@ -185,6 +207,9 @@ export interface VolatileState {
 
   /** Transient data container for plugins and features */
   transient: Record<string, Record<string, unknown>>;
+
+  /** High-frequency interaction transient store (fast-track, not reactive) */
+  interaction: VolatileInteraction;
 }
 export interface VolatileStateHandle {
   volatileRef: React.RefObject<VolatileState>;

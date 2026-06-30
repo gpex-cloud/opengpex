@@ -27,6 +27,7 @@ import { Focus } from "lucide-react";
 import {
   useEditorState,
   useOverlayRotationSync,
+  useVolatileInteraction,
 } from "@opengpex/editor/core/context";
 import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
 import { useLayerOverlayCommands } from "./hooks";
@@ -148,8 +149,8 @@ export function LayerOverlayContainer() {
 
 function LayerOverlayContent() {
   const { activeFrame, state } = useEditorState();
-  const { hoveredLayerId, isHoveringActiveLayer: isHoveringActive = false } =
-    state.interaction;
+  const hoveredLayerId = useVolatileInteraction('hoveredLayerId');
+  const isHoveringActive = useVolatileInteraction('isHoveringActiveLayer');
   const activeLayerId = activeFrame?.activeLayerId;
   const { isAlwaysOn: showAlways } = useLayerOverlayCommands();
 

@@ -163,23 +163,23 @@ export function useClipOverlayCommands() {
  * avoiding interference with other cursor owners (TextOverlay, BrushOverlay, etc.).
  */
 export function useClipCursor(isClipActive: boolean, cropTool: CropTool) {
-  const { actions } = useEditorServices();
+const { actions } = useEditorServices();
 
   useEffect(() => {
     if (isClipActive) {
       // Active: set the tool-specific cursor
       const toolCursor = CROP_TOOL_STRATEGIES[cropTool].cursor;
-      actions.setInteraction({ cursorOverride: toolCursor });
+      actions.fast.setCursor(toolCursor);
     } else {
       // Deactivated: clear cursor (reset to viewport default)
-      actions.setInteraction({ cursorOverride: null });
+      actions.fast.setCursor(null);
     }
   }, [isClipActive, cropTool, actions]);
 
   // Cleanup on unmount — safety net
   useEffect(() => {
     return () => {
-      actions.setInteraction({ cursorOverride: null });
+      actions.fast.setCursor(null);
     };
   }, [actions]);
 }

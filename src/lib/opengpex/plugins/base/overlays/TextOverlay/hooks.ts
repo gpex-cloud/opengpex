@@ -89,10 +89,10 @@ export function useTextOverlayState() {
     if (!isTextCraft) {
       // Not in text craft mode at all, clean up any lingering cursors
       if (
-        state.interaction.cursorOverride === TEXT_PREEDIT_CURSOR ||
-        state.interaction.cursorOverride === 'grab'
+        actions.fast.getCursor() === TEXT_PREEDIT_CURSOR ||
+        actions.fast.getCursor() === 'grab'
       ) {
-        actions.setInteraction({ cursorOverride: null });
+        actions.fast.setCursor(null);
       }
       return;
     }
@@ -100,11 +100,11 @@ export function useTextOverlayState() {
     // Default cursor for pre-edit state
     if (isPreEdit) {
       if (
-        state.interaction.cursorOverride !== 'grab' &&
-        state.interaction.cursorOverride !== 'grabbing' &&
-        state.interaction.cursorOverride !== TEXT_PREEDIT_CURSOR
+        actions.fast.getCursor() !== 'grab' &&
+        actions.fast.getCursor() !== 'grabbing' &&
+        actions.fast.getCursor() !== TEXT_PREEDIT_CURSOR
       ) {
-        actions.setInteraction({ cursorOverride: TEXT_PREEDIT_CURSOR });
+        actions.fast.setCursor(TEXT_PREEDIT_CURSOR);
       }
     }
 
@@ -114,25 +114,25 @@ export function useTextOverlayState() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey) {
         if (
-          state.interaction.cursorOverride !== 'grab' &&
-          state.interaction.cursorOverride !== 'grabbing'
+          actions.fast.getCursor() !== 'grab' &&
+          actions.fast.getCursor() !== 'grabbing'
         ) {
-          actions.setInteraction({ cursorOverride: 'grab' });
+          actions.fast.setCursor('grab');
         }
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (!e.metaKey && !e.ctrlKey) {
-        if (state.interaction.cursorOverride === 'grab') {
-          actions.setInteraction({ cursorOverride: restCursor });
+        if (actions.fast.getCursor() === 'grab') {
+          actions.fast.setCursor(restCursor);
         }
       }
     };
 
     const handleWindowBlur = () => {
-      if (state.interaction.cursorOverride === 'grab') {
-        actions.setInteraction({ cursorOverride: restCursor });
+      if (actions.fast.getCursor() === 'grab') {
+        actions.fast.setCursor(restCursor);
       }
     };
 
@@ -145,12 +145,12 @@ export function useTextOverlayState() {
       document.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [activeCraft, editingLayerId, state.interaction.cursorOverride, actions]);
+  }, [activeCraft, editingLayerId, actions]);
 
   useEffect(() => {
     return () => {
       // Restore cursor when component unmounts
-      actions.setInteraction({ cursorOverride: null });
+      actions.fast.setCursor(null);
     };
   }, [actions]);
 

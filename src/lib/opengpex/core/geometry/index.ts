@@ -126,7 +126,7 @@ export function createGeometryService(): GeometryService {
     snapping: {
       snapToPixel: <T extends Rect | Point2D>(r: T, strategy?: 'round' | 'floor' | 'ceil') => snapToPixel(r as Rect & Point2D, strategy) as T,
       snapPoint: (pos: Point2D) => snapToPixel(pos),
-      snapRect: (rect: Rect, frame: Frame, options?: { clamp?: boolean; threshold?: number; excludeLayerId?: string }) => snapRect(rect, frame, options),
+      snapRect: (rect: Rect, frame: Frame, options?: { clamp?: boolean; threshold?: number; excludeLayerId?: string; snapToCanvas?: boolean; snapToBirth?: boolean; snapToLayers?: boolean; excludeLayerTypes?: string[]; ignoreLockedLayers?: boolean; ignoreSmallLayers?: boolean; smallLayerThreshold?: number; maxSnapTargets?: number }) => snapRect(rect, frame, options),
       snapRectToPixel: (
         targetRect: WorldRect,
         canvasDim: Dimensions,

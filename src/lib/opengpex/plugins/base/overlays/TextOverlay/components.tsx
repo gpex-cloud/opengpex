@@ -20,7 +20,7 @@
 "use client";
 
 import React, { useRef, useCallback, useEffect } from "react";
-import { useEditorState } from "@opengpex/editor/core/context";
+import { useEditorState, useVolatileInteraction } from "@opengpex/editor/core/context";
 import { TEXT_LAYER_PADDING } from "@opengpex/editor/core/helpers/config";
 import { useTextEditorFastSync } from "./useFastSync";
 import { useTextOverlayState, useInlineTextEditing } from "./hooks";
@@ -61,7 +61,8 @@ interface InlineTextEditorProps {
 const InlineTextEditor = React.memo(function InlineTextEditor({
   layerId,
 }: InlineTextEditorProps) {
-  const { activeFrame, state } = useEditorState();
+  const { activeFrame } = useEditorState();
+  const cursorOverride = useVolatileInteraction('cursorOverride');
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
 
@@ -184,8 +185,8 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
               border: "0.5px dashed rgba(180, 180, 180, 0.5)",
               borderRadius: "2px",
               padding: `${TEXT_LAYER_PADDING.y}px ${TEXT_LAYER_PADDING.x}px`,
-              cursor: (state.interaction.cursorOverride === 'grab' || state.interaction.cursorOverride === 'grabbing')
-                ? state.interaction.cursorOverride
+              cursor: (cursorOverride === 'grab' || cursorOverride === 'grabbing')
+                ? cursorOverride
                 : "text",
               // fixed mode: force width/height + text wrapping + overflow hidden
               ...(boxMode === "fixed" && {

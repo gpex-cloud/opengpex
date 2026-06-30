@@ -30,10 +30,33 @@ export const PLUGIN_AUTHOR = 'opengpex';
  */
 export interface SmartGuidesConfig {
   enabled: boolean;
+
+  // ─── Snap Target Categories ───
+  /** Snap to canvas edges and center lines */
+  snapToCanvas: boolean;
+  /** Snap to layer's birth position (initial spawn center) */
+  snapToBirth: boolean;
+  /** Snap to other layers */
+  snapToLayers: boolean;
+
+  // ─── Layer Type Exclusion ───
+  /** Layer types excluded from snapping source */
+  excludeLayerTypes: Array<'text' | 'paint' | 'vector' | 'color'>;
+
+  // ─── Advanced Filtering ───
+  /** Ignore locked layers as snap targets */
+  ignoreLockedLayers: boolean;
+  /** Ignore layers with screen projection area below threshold */
+  ignoreSmallLayers: boolean;
+  /** Small layer threshold in screen pixels² (default 400 ≈ 20×20) */
+  smallLayerThreshold: number;
+  /** Maximum number of layers participating in snap calculation */
+  maxSnapTargets: number;
 }
 
 /**
  * Command IDs
  */
 export const CMD_TOGGLE = 'cmd.toggle';
+export const CMD_OPEN_SETTINGS = 'cmd.open_settings';
 

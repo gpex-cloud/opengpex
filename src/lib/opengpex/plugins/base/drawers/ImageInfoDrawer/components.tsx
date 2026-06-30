@@ -21,10 +21,8 @@
 
 import React from "react";
 import { Info } from "lucide-react";
-import {
-  useEditorState,
-  useEditorServices,
-} from "@opengpex/editor/core/context";
+import { useVolatileInteraction } from "@opengpex/editor/core/context";
+import { useEditorServices } from "@opengpex/editor/core/context";
 import { getClipBox } from "@opengpex/editor/core/helpers/selection";
 
 import { useImageInfoCommands } from "./hooks";
@@ -40,7 +38,6 @@ import { ResizeExportControls } from "./components/ResizeExportControls";
  * Responsible for rendering zoom control, quality adjustment, and export operations
  */
 export function ImageInfoComponent() {
-  const { state } = useEditorState();
   const { actions } = useEditorServices();
   const {
     state: exportState,
@@ -64,6 +61,8 @@ export function ImageInfoComponent() {
     actions.updateStorageStats();
   }, [actions]);
 
+  const hoveredLayerId = useVolatileInteraction('hoveredLayerId');
+
   React.useEffect(() => {
     // Reset overriding pixels when switching frames,
     // so the scale/pixels always reset to the new frame's original size (100%)
@@ -81,7 +80,6 @@ export function ImageInfoComponent() {
   const baseH =
     isClipMode && box ? box.spatial.rect.h : activeFrame?.canvas.h || 0;
 
-  const hoveredLayerId = state.interaction.hoveredLayerId;
   const targetLayerId = hoveredLayerId || activeFrame.activeLayerId;
   const targetLayer = targetLayerId
     ? activeFrame.layers.byId[targetLayerId]
@@ -92,14 +90,14 @@ export function ImageInfoComponent() {
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
-      <div className="flex justify-between items-center mb-1 shrink-0">
+      <div className="flex justify-between items-center h-7 shrink-0">
         <div className="flex items-center gap-2">
-          <Info size={12} className="text-indigo-400 opacity-80" />
+          <Info size={12} className="text-indigo-600 dark:text-indigo-400" />
           <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
             Informations
           </span>
           {!!activeFrame?.extra?.ai_generation && (
-            <span className="ml-1 text-[8px] font-bold text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded shadow-sm border border-indigo-500/20 uppercase flex items-center gap-1">
+            <span className="ml-1 text-[8px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded shadow-sm border border-indigo-500/20 uppercase flex items-center gap-1">
               AI Generated
             </span>
           )}

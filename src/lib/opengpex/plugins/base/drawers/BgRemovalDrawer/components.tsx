@@ -20,10 +20,11 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Sparkles, Download, Trash2, Loader2, ChevronDown, CheckCircle2, Settings, RefreshCw, X } from 'lucide-react';
+import { Download, Trash2, Loader2, ChevronDown, CheckCircle2, Settings, RefreshCw, X } from 'lucide-react';
 import { useEditorServices, usePluginSelfConfig, usePluginCommands, usePluginSignals } from '@opengpex/editor/core/context';
 import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
 import { useBgRemovalStatus } from './hooks';
+import { BgRemovalIcon } from './icon';
 import { bgRemovalClient } from './worker/client';
 import type { BgRemovalConfig, BgModelEntry } from './protocols';
 import type { BgRemovalCommandsMap, BgRemovalSignalsMap } from './commands.d';
@@ -258,9 +259,9 @@ export function BgRemovalDrawerContent() {
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
       {/* ─── Header ──────────────────────────────────────────────── */}
-      <div className="flex justify-between items-center mb-1 shrink-0">
+      <div className="flex justify-between items-center shrink-0">
         <div className="flex items-center gap-2">
-          <Sparkles size={12} className="text-amber-400 opacity-80" />
+          <BgRemovalIcon size={12} className="text-indigo-600 dark:text-indigo-400" />
           <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
             AI Background Removal
           </span>

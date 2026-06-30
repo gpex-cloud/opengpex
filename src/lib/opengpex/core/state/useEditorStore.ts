@@ -59,6 +59,12 @@ export function useEditorStore() {
     reset: resetVolatile
   } = useVolatileState();
 
+  // Volatile Interaction event bus: lightweight per-field listener map
+  const viListenersRef = useRef(new Map<string, Set<() => void>>());
+  const viNotify = useCallback((key: string) => {
+    viListenersRef.current.get(key)?.forEach(fn => fn());
+  }, []);
+
   // --- 2. Asset Sentinel Scheduler (Asset Sentinel) ---
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ASSET_CRITICAL_ACTIONS = useMemo<Set<EditorAction['type']>>(() => new Set([
@@ -687,6 +693,29 @@ export function useEditorStore() {
           enhancedDispatch({ type: 'SIGNAL_COMMIT', payload: { frameId } });
         },
         reset: resetVolatile,
+
+        // ─── Volatile Interaction (high-frequency transient state) ─────────
+        setCursor: (cursor: string | null) => {
+          const vi = volatileRef.current.interaction;
+          if (vi.cursorOverride === cursor) return;
+          vi.cursorOverride = cursor;
+          viNotify('cursorOverride');
+        },
+        getCursor: () => volatileRef.current.interaction.cursorOverride,
+        setHover: (layerId: string | null, isHoveringActive = false) => {
+          const vi = volatileRef.current.interaction;
+          const hoverChanged = vi.hoveredLayerId !== layerId;
+          const activeChanged = vi.isHoveringActiveLayer !== isHoveringActive;
+          if (!hoverChanged && !activeChanged) return;
+          if (hoverChanged) { vi.hoveredLayerId = layerId; viNotify('hoveredLayerId'); }
+          if (activeChanged) { vi.isHoveringActiveLayer = isHoveringActive; viNotify('isHoveringActiveLayer'); }
+        },
+        subscribeInteraction: (key: string, listener: () => void) => {
+          const map = viListenersRef.current;
+          if (!map.has(key)) map.set(key, new Set());
+          map.get(key)!.add(listener);
+          return () => { map.get(key)?.delete(listener); };
+        },
       }
     };
 
@@ -714,7 +743,7 @@ export function useEditorStore() {
       commitVolatile,
       resetVolatile,
     };
-  }, [enhancedDispatch, mutateVolatile, updateVolatile, commitVolatile, resetVolatile, volatileRef]);
+  }, [enhancedDispatch, mutateVolatile, updateVolatile, commitVolatile, resetVolatile, volatileRef, viNotify]);
 
   // --- 5. State Synchronization and Facade ---
   const activeFrame = useMemo<Frame | null>(() =>

@@ -20,12 +20,15 @@
 "use client";
 
 import React from "react";
-import { Type, Paintbrush, Eraser } from "lucide-react";
+import { Type, Paintbrush, Eraser, Settings } from "lucide-react";
+import { useEditorServices } from "@opengpex/editor/core/context";
+import { SettingsPanelAPI } from "../../panels/SettingsPanel/protocols";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
 import { TextPanel } from "./panels/text";
 import { BrushPanel } from "./panels/brush";
 import { useCraftDrawer, useCraftTrigger, useCraftButtonGroup } from "./hooks";
+import { CraftDrawerIcon } from "./icon";
 import type { CraftType } from "./protocols";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -105,7 +108,7 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
               title={btn.label}
               variant="glass"
               tooltipPosition="bottom"
-              className="w-7 h-7 rounded-lg text-indigo-500"
+              className="w-7 h-7 rounded-lg text-blue-400"
             >
               {btn.icon}
             </FunctionButton>
@@ -220,6 +223,12 @@ const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
 export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
   const { activeCraft, activeLayerIsText, activeLayerIsPaint } =
     useCraftDrawer();
+  const { actions } = useEditorServices();
+
+  const handleOpenSettings = React.useCallback(() => {
+    actions.setStateSignal(SettingsPanelAPI.signals.tab, 'Fonts');
+    actions.setStateSignal(SettingsPanelAPI.signals.open, true);
+  }, [actions]);
 
   // Mutually exclusive panel decisions (priority from high to low)
   const showTextPanel =
@@ -234,14 +243,23 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
-      <div className="flex justify-between items-center mb-1 shrink-0">
+      <div className="flex justify-between items-center shrink-0">
         <div className="flex items-center gap-2">
-          <Paintbrush size={12} className="text-indigo-400 opacity-80" />
+          <CraftDrawerIcon size={12} className="text-indigo-600 dark:text-indigo-400" />
           <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
             Drawing Tools
           </span>
         </div>
-        <CraftPanelButtonGroup />
+        <div className="flex items-center gap-1.5">
+          <CraftPanelButtonGroup />
+          <button
+            onClick={handleOpenSettings}
+            className="p-1 rounded hover:bg-white/5 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
+            title="Font Settings"
+          >
+            <Settings size={12} />
+          </button>
+        </div>
       </div>
 
       {showTextPanel && <TextPanel />}

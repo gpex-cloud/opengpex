@@ -145,7 +145,7 @@ export const LayerItem = React.memo(
             <div
               onPointerDown={(e) => dragControls.start(e)}
               style={{ touchAction: "none" }}
-              className={`relative w-[26px] h-[26px] shrink-0 rounded-md border overflow-hidden flex items-center justify-center transition-all cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-indigo-500/20 select-none
+              className={`relative w-[26px] h-[26px] shrink-0 rounded-md border overflow-hidden flex items-center justify-center transition-all cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-[var(--border-light)] select-none
  ${
    isActive
      ? "border-[var(--border-light)] bg-[var(--bg-panel)] shadow-sm"
@@ -227,7 +227,7 @@ export const LayerItem = React.memo(
                 {(hasSubLayers || hasMasks) && (
                   <div className="flex gap-0.5 shrink-0 opacity-40">
                     {hasSubLayers && (
-                      <div className="w-1 h-1 rounded-full bg-indigo-500" />
+                      <div className="w-1 h-1 rounded-full bg-blue-400" />
                     )}
                     {hasMasks && (
                       <div className="w-1 h-1 rounded-full bg-emerald-500" />
@@ -250,7 +250,7 @@ export const LayerItem = React.memo(
                 tooltip="Refocus"
                 variant="glass"
                 size="sm"
-                className={`w-6 h-6 ${isActive ? "text-indigo-500" : "text-[var(--text-muted)] group-hover/layer"}`}
+                className={`w-6 h-6 ${isActive ? "text-blue-400" : "text-[var(--text-muted)] group-hover/layer"}`}
               />
               <ActionButton
                 onClick={(e) => {
@@ -270,7 +270,7 @@ export const LayerItem = React.memo(
                 }
                 variant="glass"
                 size="sm"
-                className={`w-6 h-6 ${layer.visible ? (isActive ? "text-indigo-400" : "text-[var(--text-main)] group-hover/layer") : ""}`}
+                className={`w-6 h-6 ${layer.visible ? (isActive ? "text-blue-400" : "text-[var(--text-main)] group-hover/layer") : ""}`}
               />
               <ActionButton
                 onClick={(e) => {
@@ -318,7 +318,7 @@ export const LayerItem = React.memo(
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="ml-6 mr-1 mt-1 mb-1.5 pl-2.5 border-l-2 border-indigo-500/25 dark:border-indigo-500/40 flex flex-col gap-1 overflow-hidden"
+              className="ml-6 mr-1 mt-1 mb-1.5 pl-2.5 border-l-2 border-[var(--border-light)] flex flex-col gap-1 overflow-hidden"
             >
               {childLayers.map((subLayer, idx) => (
                 <SubLayerItem

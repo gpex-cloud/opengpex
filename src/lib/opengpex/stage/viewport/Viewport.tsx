@@ -26,7 +26,7 @@ import {
 } from "@opengpex/editor/core/context";
 import PluginSlot from "@opengpex/editor/workspace/components/PluginSlot";
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
-import { useViewportSync } from "@opengpex/editor/core/context";
+import { useViewportSync, useVolatileInteraction } from "@opengpex/editor/core/context";
 import { useViewportEvents } from "./useViewportEvents";
 import { useCameraInit } from "./useCameraInit";
 import CanvasBackdrop from "./CanvasBackdrop";
@@ -79,7 +79,7 @@ function ViewportInner({ frame }: ViewportInnerProps) {
   // 3. Unified Sync Master (unified geometric synchronization proxy)
   const { isGroomed } = useViewportSync(stageRef, artboardRef, frame);
 
-  const cursorOverride = state.interaction.cursorOverride;
+  const cursorOverride = useVolatileInteraction('cursorOverride');
   const cursorClass = cursorOverride
     ? ""
     : state.interaction.interactionMode === "pan"

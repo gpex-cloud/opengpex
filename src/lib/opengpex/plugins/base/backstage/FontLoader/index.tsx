@@ -69,6 +69,7 @@ export const plugin: EditorPlugin = {
   contributions: [
     {
       slot: "SETTINGS_CONFIG_PANEL",
+      group: "Fonts",
       component: FontSettings,
       title: "Fonts",
       icon: <Type size={12} />,

@@ -84,7 +84,7 @@ export default function Popover({
   dismissOnEscape = true,
   display = 'inline-flex',
   offset = 8,
-  zIndex = 9999,
+  zIndex = 5000,
 }: PopoverProps) {
 
   const triggerRef = useRef<HTMLDivElement>(null);

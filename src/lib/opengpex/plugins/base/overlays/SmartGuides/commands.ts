@@ -18,6 +18,7 @@
  */
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
+import { SettingsPanelAPI } from '../../panels/SettingsPanel/protocols';
 import * as P from './protocols';
 
 /**
@@ -31,6 +32,17 @@ export const SMART_GUIDES_COMMANDS = {
       const { selfConfig, setSelfConfig } = ctx.scoped || {};
       const current = (selfConfig as P.SmartGuidesConfig)?.enabled ?? true;
       setSelfConfig?.({ enabled: !current });
+    },
+    shortcut: { key: ';', meta: true, shift: true }
+  } as EditorCommand<void, void>,
+
+  openSettings: {
+    id: P.CMD_OPEN_SETTINGS,
+    name: 'Smart Guides Settings',
+    execute: (ctx: EditorContextValue) => {
+      // Open settings panel and navigate to the Guides tab
+      ctx.actions.setStateSignal(SettingsPanelAPI.signals.open, true);
+      ctx.actions.setStateSignal(SettingsPanelAPI.signals.tab, 'Guides');
     },
     shortcut: { key: ';', meta: true }
   } as EditorCommand<void, void>

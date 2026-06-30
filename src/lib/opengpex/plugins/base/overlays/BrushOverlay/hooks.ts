@@ -47,14 +47,14 @@ export function useBrushOverlayState() {
   useEffect(() => {
     if (isBrushMode) {
       // Hide system cursor, use custom DOM cursor instead
-      actions.setInteraction({ cursorOverride: 'none' });
+      actions.fast.setCursor('none');
     } else {
       // When exiting brush mode, restore default if current cursor is 'none' (set by this plugin)
-      if (state.interaction.cursorOverride === 'none') {
-        actions.setInteraction({ cursorOverride: null });
+      if (actions.fast.getCursor() === 'none') {
+        actions.fast.setCursor(null);
       }
     }
-  }, [isBrushMode, actions]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isBrushMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Escape key exits brush/eraser mode (via CraftDrawer's deactivate command, following cross-plugin boundaries)
   useEffect(() => {
@@ -66,7 +66,7 @@ export function useBrushOverlayState() {
         e.stopPropagation();
         // Deactivate tool via CraftDrawer's command system (following signal ownership boundaries)
         actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
-        actions.setInteraction({ cursorOverride: null });
+        actions.fast.setCursor(null);
       }
     };
 
@@ -77,11 +77,11 @@ export function useBrushOverlayState() {
   // Restore cursor on component unmount
   useEffect(() => {
     return () => {
-      if (state.interaction.cursorOverride === 'none') {
-        actions.setInteraction({ cursorOverride: null });
+      if (actions.fast.getCursor() === 'none') {
+        actions.fast.setCursor(null);
       }
     };
-  }, [actions]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     isBrushMode,

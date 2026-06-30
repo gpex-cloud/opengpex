@@ -30,14 +30,15 @@
  * Uses inline SVG for full control over text positioning and line rendering.
  * The horizontal line uses `stroke-linecap: round` for polished endpoints.
  */
-export function BgRemovalIcon() {
+export function BgRemovalIcon({ size = 20, className }: { size?: number; className?: string } = {}) {
   return (
     <svg
-      width="20"
-      height="20"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
+      className={className}
       aria-hidden="true"
     >
       {/* "BG" text — extra large and bold for maximum readability */}
