@@ -17,7 +17,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionHandler, Layer, Frame, LocalRect, asLocalShape, asWorldRect } from '@opengpex/editor/core/types';
+import { InteractionHandler, Layer, Frame, LocalRect, WorldPoint, asLocalShape, asWorldRect } from '@opengpex/editor/core/types';
+import { pickLayersAt } from '@opengpex/editor/core/geometry/operators/space';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import { createTransformHandler } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
@@ -35,32 +36,15 @@ const CMD_PLACE_UID = _CMD_PLACE_UID;
 const CMD_EDIT_START_UID = _CMD_EDIT_START_UID;
 
 /**
- * Finds hit layer of type 'text' in canvas-local coordinates
- * Returns the first hit visible text layer, detecting from top to bottom in layer order
+ * Finds hit layer of type 'text' using core geometry hit-testing.
+ * Uses pickLayersAt (supports visibleShape, rotation, interactive flag) filtered to text layers.
+ * Accepts canvas-local point and converts to world coordinates internally.
  */
 function findTextLayerAtPoint(frame: Frame, point: { x: number; y: number }): Layer | null {
-  const canvas = frame.canvas;
-  // Traverse from top layer to bottom layer (end of order = top layer)
-  for (let i = frame.layers.order.length - 1; i >= 0; i--) {
-    const layer = frame.layers.byId[frame.layers.order[i]];
-    if (!layer || layer.type !== 'text' || !layer.visible) continue;
-
-    // Position of top-left corner of layer in canvas coordinate system
-    const layerLeft = canvas.w / 2 + layer.cx - layer.bounding.w / 2;
-    const layerTop = canvas.h / 2 + layer.cy - layer.bounding.h / 2;
-    const layerRight = layerLeft + layer.bounding.w;
-    const layerBottom = layerTop + layer.bounding.h;
-
-    if (
-      point.x >= layerLeft &&
-      point.x <= layerRight &&
-      point.y >= layerTop &&
-      point.y <= layerBottom
-    ) {
-      return layer;
-    }
-  }
-  return null;
+  // Convert canvas-local point to world coordinates (origin at canvas center)
+  const worldPoint = { x: point.x - frame.canvas.w / 2, y: point.y - frame.canvas.h / 2 } as WorldPoint;
+  const hits = pickLayersAt(worldPoint, frame.layers);
+  return hits.find(l => l.type === 'text') || null;
 }
 
 // ─── TextMoveHandler ───────────────────────────────────────────────────────────
@@ -307,8 +291,8 @@ export const createTextPlaceHandler = (): InteractionHandler => {
       // No hit -> create new text layer via LayerFactory (automatically fill in all defaults)
       // Pixel alignment: use snapRectToPixel to align initial bounding box to canvas physical grid
       // (consistent with LayerMoveHandler onEnd)
-      const rawCx = e.point.canvas.x - frame.canvas.w / 2;
-      const rawCy = e.point.canvas.y - frame.canvas.h / 2;
+      const rawCx = e.point.world.x;
+      const rawCy = e.point.world.y;
       const initW = 100;
       const initH = 34;
       const alignedRect = e.geometry.snapping.snapRectToPixel(

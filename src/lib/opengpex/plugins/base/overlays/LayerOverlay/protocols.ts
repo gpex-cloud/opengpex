@@ -38,6 +38,19 @@ export interface LayerOverlayConfig {
 export const CMD_TOGGLE = 'cmd.toggle';
 
 /**
+ * Signals
+ *
+ * SIGNAL_FORCE_SHOW_TYPES: When set (via `setStateSignal`), forces LayerOverlay
+ * to show outlines for all layers whose `type` is in the provided array,
+ * regardless of hover/active state or showAlways config. This enables other
+ * plugins (e.g. TextOverlay) to request persistent visibility for specific
+ * layer types without coupling LayerOverlay to their internal state.
+ *
+ * Value: string[] (e.g. ['text']) or null to clear.
+ */
+export const SIGNAL_FORCE_SHOW_TYPES = 'layer_overlay.force_show_types';
+
+/**
  * Cross-plugin Reference UIDs
  */
 export const LAYER_OVERLAY_CMD_TOGGLE = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_TOGGLE}`;

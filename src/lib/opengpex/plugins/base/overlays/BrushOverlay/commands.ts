@@ -45,6 +45,9 @@ const bakeCommand: EditorCommand<{ frameId: string; layer: Layer; isNew: boolean
         assetId: payload.layer.assetId,
         src: payload.layer.src,
         bounding: payload.layer.bounding,
+        cx: payload.layer.cx,
+        cy: payload.layer.cy,
+        visibleShape: payload.layer.visibleShape,
       });
     }
   },

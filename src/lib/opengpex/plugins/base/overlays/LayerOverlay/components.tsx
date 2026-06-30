@@ -30,6 +30,7 @@ import {
 } from "@opengpex/editor/core/context";
 import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
 import { useLayerOverlayCommands } from "./hooks";
+import { SIGNAL_FORCE_SHOW_TYPES } from "./protocols";
 
 import { useLayerOverlaySync } from "./useFastSync";
 
@@ -43,6 +44,7 @@ export function LayerOverlayItem({
   isHoveringActive,
   isHovered,
   showAlways,
+  forceShow,
 }: {
   activeFrame: Frame;
   layer: Layer;
@@ -51,11 +53,12 @@ export function LayerOverlayItem({
   isHoveringActive: boolean;
   isHovered: boolean;
   showAlways: boolean;
+  forceShow: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
   const prevVisibleRef = useRef(false);
-  const isVisible = showAlways || (isActive && isHoveringActive) || isHovered;
+  const isVisible = showAlways || forceShow || (isActive && isHoveringActive) || isHovered;
 
   // Use viewport-unified sync hook: Optimized for Screen Space (Ticker + Matrix)
   useLayerOverlaySync(ref, labelRef, layer, true);
@@ -150,6 +153,9 @@ function LayerOverlayContent() {
   const activeLayerId = activeFrame?.activeLayerId;
   const { isAlwaysOn: showAlways } = useLayerOverlayCommands();
 
+  // Read force-show signal: other plugins can request specific layer types to be always visible
+  const forceShowTypes = state.interaction.signals[SIGNAL_FORCE_SHOW_TYPES] as string[] | null;
+
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Core: Sync viewport rotation animation (counter-animation protocol)
@@ -175,6 +181,7 @@ function LayerOverlayContent() {
             isHoveringActive={isHoveringActive}
             isHovered={layer.id === hoveredLayerId}
             showAlways={!!showAlways}
+            forceShow={!!forceShowTypes?.includes(layer.type)}
           />
         ))}
     </div>

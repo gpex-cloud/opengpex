@@ -24,6 +24,7 @@ import { useEditorState, useEditorServices } from '@opengpex/editor/core/context
 import { asLocalShape } from '@opengpex/editor/core/types';
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
+import { SIGNAL_FORCE_SHOW_TYPES } from '../../overlays/LayerOverlay/protocols';
 import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, TEXT_OVERLAY_SIGNAL_SESSION_TYPE, _CMD_MODIFY_COMMIT_UID } from './protocols';
 import type { TextEditingSession } from './protocols';
 import { TEXT_PREEDIT_CURSOR } from '@opengpex/editor/icons';
@@ -51,6 +52,17 @@ export function useTextOverlayState() {
       actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
     }
   }, [editingLayerId, layerExists, actions]);
+
+  // Force-show text layers in LayerOverlay when in text craft mode (pre-edit state)
+  useEffect(() => {
+    const isTextCraftPreEdit = activeCraft === 'text' && !editingLayerId;
+    if (isTextCraftPreEdit) {
+      actions.setStateSignal(SIGNAL_FORCE_SHOW_TYPES, ['text']);
+    } else {
+      // Clear the signal when leaving text craft mode or entering editing state
+      actions.setStateSignal(SIGNAL_FORCE_SHOW_TYPES, null);
+    }
+  }, [activeCraft, editingLayerId, actions]);
 
   // Escape in pre-edit state -> exits craft mode (via CraftDrawer's deactivate command, following cross-plugin boundaries)
   useEffect(() => {

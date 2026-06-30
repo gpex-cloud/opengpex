@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionHandler, InteractionEvent, Layer, Frame, asLocalRect, IMatrix3x3 } from '@opengpex/editor/core/types';
+import { InteractionHandler, InteractionEvent, Layer, Frame, asLocalRect, asLocalShape, IMatrix3x3 } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
@@ -25,6 +25,7 @@ import { BRUSH_OVERLAY_SIGNAL_IS_STROKING, DEFAULT_BRUSH_SIZE, _CMD_BAKE_UID } f
 import { StrokeSmoother, drawSmoothSegment, Point2D } from './smoothing';
 import { stampBrush, stampAlongPath } from './hardness';
 import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
+import { PixelUtils } from '@opengpex/editor/core/engine/PixelUtils';
 
 /** Shared signal key */
 const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
@@ -480,7 +481,10 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
             if (targetLayer.src && !targetLayerInfo.isNew) {
               try {
                 const existingBitmap = await loadImageBitmap(targetLayer.src);
-                compositeCtx.drawImage(existingBitmap, 0, 0);
+                // If existing layer was cropped (bounding < canvas), draw at correct offset
+                const drawX = frame.canvas.w / 2 + targetLayer.cx - targetLayer.bounding.w / 2;
+                const drawY = frame.canvas.h / 2 + targetLayer.cy - targetLayer.bounding.h / 2;
+                compositeCtx.drawImage(existingBitmap, drawX, drawY);
                 existingBitmap.close();
               } catch (loadErr) {
                 console.warn('[BrushOverlay] Failed to load existing layer bitmap:', loadErr);
@@ -490,7 +494,30 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
             compositeCtx.globalCompositeOperation = 'source-over';
             compositeCtx.drawImage(currentStroke.canvas, 0, 0);
 
-            const blob = await compositeCanvas.convertToBlob({ type: 'image/png' });
+            // Compute minimal content bounding box via PixelUtils (crop transparent edges)
+            const compositeBitmap = await createImageBitmap(compositeCanvas);
+            const contentBounds = await PixelUtils.calculateContentBounds(compositeBitmap);
+            compositeBitmap.close();
+
+            let finalCanvas: OffscreenCanvas;
+            // Add 1px padding to avoid sub-pixel edge clipping artifacts
+            const cropX = Math.max(0, contentBounds.x - 1);
+            const cropY = Math.max(0, contentBounds.y - 1);
+            const cropR = Math.min(frame.canvas.w, contentBounds.x + contentBounds.w + 1);
+            const cropB = Math.min(frame.canvas.h, contentBounds.y + contentBounds.h + 1);
+            const cropW = cropR - cropX;
+            const cropH = cropB - cropY;
+
+            // Only crop if content is smaller than the full canvas
+            if (cropW < frame.canvas.w || cropH < frame.canvas.h) {
+              finalCanvas = new OffscreenCanvas(cropW, cropH);
+              const finalCtx = finalCanvas.getContext('2d')!;
+              finalCtx.drawImage(compositeCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+            } else {
+              finalCanvas = compositeCanvas;
+            }
+
+            const blob = await finalCanvas.convertToBlob({ type: 'image/png' });
             const asset = await e.actions.adv.system.assets.register.execute(blob);
 
             await new Promise<void>((resolve) => {
@@ -504,11 +531,22 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
               img.src = asset.url;
             });
 
+            // Calculate cx/cy: convert from canvas-local crop rect center to world center offset
+            // Canvas-local center of the crop region:
+            const cropCenterLocalX = cropX + cropW / 2;
+            const cropCenterLocalY = cropY + cropH / 2;
+            // World cx/cy = offset from canvas center (canvas center = local w/2, h/2)
+            const newCx = cropCenterLocalX - frame.canvas.w / 2;
+            const newCy = cropCenterLocalY - frame.canvas.h / 2;
+
             const completeLayer: Layer = {
               ...targetLayer,
               assetId: asset.id,
               src: asset.url,
-              bounding: { w: frame.canvas.w, h: frame.canvas.h },
+              bounding: { w: cropW, h: cropH },
+              visibleShape: asLocalShape({ x: 0, y: 0, w: cropW, h: cropH }),
+              cx: newCx,
+              cy: newCy,
             };
 
             e.actions.executeCommand(CMD_BAKE_UID, {
@@ -704,4 +742,5 @@ async function loadImageBitmap(src: string): Promise<ImageBitmap> {
   const blob = await response.blob();
   return createImageBitmap(blob);
 }
+
 
