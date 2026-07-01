@@ -47,9 +47,15 @@ export type RenderCommand = RenderLayerCommand;
  */
 export interface IRenderer {
   /** 
-   * Initializes frame drawing, clears canvas 
+   * Initializes frame drawing, clears canvas.
+   * @param dim - The logical frame dimensions (for internal tracking)
+   * @param artboardClip - Optional clip rect (in physical pixel space) that
+   *   restricts all subsequent rendering to the artboard boundary. When
+   *   provided, pixels outside this rect are never drawn — this ensures
+   *   layers that extend beyond the canvas are visually hidden without
+   *   destructively modifying their data.
    */
-  beginFrame(dim: Dimensions): void;
+  beginFrame(dim: Dimensions, artboardClip?: Rect): void;
 
   /** 
    * Pushes instruction to rendering queue (Display List mode)

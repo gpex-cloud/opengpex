@@ -74,7 +74,17 @@ export class StageComposer {
     const M_dpr = geometry.Matrix.scale(dpr);
 
     // 3. Start a new frame, reset and clear canvas
-    renderer.beginFrame({ w: f.canvas.w * dpr, h: f.canvas.h * dpr });
+    // [Artboard Boundary Clip] Calculate the canvas boundary in physical pixel
+    // (screen) space. This rect is passed to beginFrame so the renderer clips
+    // all layer drawing to the artboard area — content that extends beyond the
+    // canvas is visually hidden without destructively modifying the layer data.
+    const artboardClip = {
+      x: cam.x * dpr,
+      y: cam.y * dpr,
+      w: f.canvas.w * cam.k * dpr,
+      h: f.canvas.h * cam.k * dpr,
+    };
+    renderer.beginFrame({ w: f.canvas.w * dpr, h: f.canvas.h * dpr }, artboardClip);
 
     // 4. Push background drawing as a Command (deprecated, handled by CanvasBackdrop instead)
 
@@ -116,6 +126,37 @@ export class StageComposer {
 
         const drawRect = geometry.space.getRectIntersection(sourceRect, layerLocalRect);
         if (!drawRect) continue;
+
+        // [DEBUG] Seam diagnosis: log transform and draw info for layers with visibleShape or inverted masks
+        if ((window as unknown as Record<string, unknown>).__SEAM_DEBUG) {
+          const hasInvertedMask = clipSequence?.some(c => c.inverted);
+          const isFragment = !!(layer.visibleShape && (layer.visibleShape.rect.x > 0 || layer.visibleShape.rect.y > 0));
+          if (isFragment || hasInvertedMask) {
+            console.log(`[SeamDebug] layer="${layer.name}" id=${layer.id}`, {
+              isFragment,
+              hasInvertedMask,
+              'M_final.tx': M_final.tx,
+              'M_final.ty': M_final.ty,
+              'M_final.a': M_final.a,
+              'M_final.d': M_final.d,
+              cx: layer.cx,
+              cy: layer.cy,
+              bounding: layer.bounding,
+              visibleShape: layer.visibleShape?.rect,
+              drawRect,
+              sourceRect,
+              layerLocalRect,
+              clipCount: clipSequence?.length || 0,
+              clips: clipSequence?.map(c => ({
+                inverted: c.inverted,
+                shape: c.shape?.rect,
+                feather: c.feather
+              })),
+              cam: { x: cam.x, y: cam.y, k: cam.k },
+              dpr,
+            });
+          }
+        }
 
         // 4e. Build Layer Render Command and push to queue
         renderer.pushCommand({

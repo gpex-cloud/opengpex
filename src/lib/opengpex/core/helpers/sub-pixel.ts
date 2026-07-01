@@ -21,13 +21,22 @@ import { LocalRect, Shape } from '@opengpex/editor/core/types';
 
 /**
  * shrinkInvertedMask: Physical anti-aliasing seam prevention mask shrinker (Subpixel Mask Seam Prevention)
- * Specially used at the physical rendering level to automatically shrink "inverted masks" (e.g. holes, peeled cutouts with inverted = true) inward by 0.5px.
- * - For rectangles (rect): shrink the bounding box inward by 0.5px (increase x and y by 0.5, decrease width and height by 1px).
- * - For circles (circle): similarly shrink their bounding rectangle, mathematically equivalent to shrinking the circle radius inward by 0.5px!
- * By establishing a perfect physical pixel overlap zone, completely prevent browser GPUs from anti-aliasing translucent leaks when rasterizing subpixel boundaries.
+ * Specially used at the physical rendering level to automatically shrink "inverted masks" (e.g. holes, peeled cutouts with inverted = true) inward.
+ *
+ * [Fix Principle]:
+ * To eliminate the 1px semi-transparent seam (Anti-Aliasing border) caused by Canvas 2D clip under camera scaling/zoom:
+ * Instead of a fixed logical shrink (e.g. 0.5px), we dynamically calculate the logical shrink based on the current rendering scale:
+ * `shrinkLogical = 0.75 / scale`.
+ *
+ * This ensures that when the browser applies the transformation matrix, the physical shrink in screen space is ALWAYS
+ * exactly 0.75 physical pixels. This constant screen-space overlap completely absorbs the browser's anti-aliasing border
+ * and any floating-point sub-pixel inaccuracies, ensuring perfect layout seamlessness at all zoom levels (e.g. 10% to 1000%).
+ *
+ * We clamp the logical shrink to at most 25% of the shape's smaller dimension to prevent self-inversion for tiny shapes.
+ *
  * Shared pure function supporting geometric operations under both the main thread and the WebWorker background compositing thread.
  */
-export function shrinkInvertedMask<T extends Shape>(shape: T, inverted: boolean): T {
+export function shrinkInvertedMask<T extends Shape>(shape: T, inverted: boolean, scale = 1): T {
   // If in hard-edge (non-anti-aliasing) mode, absolutely immune to any subpixel level position offsets!
   // Otherwise it will break the integer pixel alignment of hard edges, causing anti-aliasing to reappear.
   if (shape.antiAliased === false) {
@@ -35,14 +44,19 @@ export function shrinkInvertedMask<T extends Shape>(shape: T, inverted: boolean)
   }
 
   if (inverted && (shape.type === 'rect' || shape.type === 'circle')) {
+    // 0.75 physical pixels, mapped to logical space.
+    // Clamp to at most 25% of the shape's smaller dimension to prevent self-intersection/disappearance.
+    const maxShrink = 0.25 * Math.min(shape.rect.w, shape.rect.h);
+    const shrinkLogical = Math.min(0.75 / scale, maxShrink);
+
     return {
       ...shape,
       rect: {
         ...shape.rect,
-        x: shape.rect.x + 0.5,
-        y: shape.rect.y + 0.5,
-        w: Math.max(0.1, shape.rect.w - 1),
-        h: Math.max(0.1, shape.rect.h - 1)
+        x: shape.rect.x + shrinkLogical,
+        y: shape.rect.y + shrinkLogical,
+        w: Math.max(0.1, shape.rect.w - 2 * shrinkLogical),
+        h: Math.max(0.1, shape.rect.h - 2 * shrinkLogical)
       } as typeof shape.rect
     };
   }

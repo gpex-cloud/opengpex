@@ -38,6 +38,7 @@ export class Canvas2dEngine implements IRenderer {
   private currentDim: { w: number; h: number } | null = null;
   private tilePool: TileData[] = []; // [Optimization] Zero-allocation object pool for tile jobs
   private offscreenPool: OffscreenCanvas[] = []; // [Optimization] OffscreenCanvas pool for bitmap mask compositing
+  private artboardClipActive = false; // Whether artboard boundary clip is currently applied
 
   // [Font Loading] Dynamic font service integration
   private fontService?: FontService;
@@ -63,13 +64,25 @@ export class Canvas2dEngine implements IRenderer {
     this.ctx = ctx;
   }
 
-  beginFrame(dim: { w: number; h: number }): void {
+  beginFrame(dim: { w: number; h: number }, artboardClip?: { x: number; y: number; w: number; h: number }): void {
     if (!this.ctx) return;
     this.currentDim = dim;
     this.commandQueue = [];
+    this.artboardClipActive = false;
 
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.clearRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
+
+    // [Artboard Boundary Clip] When provided, restrict all subsequent rendering
+    // to the artboard area. This non-destructively hides layer content that
+    // extends beyond the canvas boundary (e.g. after Re-Canvas resize).
+    if (artboardClip) {
+      this.ctx.save();
+      this.ctx.beginPath();
+      this.ctx.rect(artboardClip.x, artboardClip.y, artboardClip.w, artboardClip.h);
+      this.ctx.clip();
+      this.artboardClipActive = true;
+    }
   }
 
   pushCommand(cmd: RenderCommand): void {
@@ -104,6 +117,12 @@ export class Canvas2dEngine implements IRenderer {
     }
 
     this.commandQueue = [];
+
+    // [Artboard Boundary Clip] Restore context state if artboard clip was applied in beginFrame
+    if (this.artboardClipActive) {
+      this.ctx.restore();
+      this.artboardClipActive = false;
+    }
   }
 
 
@@ -377,8 +396,13 @@ export class Canvas2dEngine implements IRenderer {
       isExporting
     } = options;
 
+    const scale = matrix ? Math.sqrt(matrix.a * matrix.a + matrix.b * matrix.b) : 1;
+
     // [Bitmap Mask Dispatch] If active durable/preview bitmap mask exists, use offscreen composition path
     if (this.needsOffscreenComposite(layer, options)) {
+      if ((window as unknown as Record<string, unknown>).__SEAM_DEBUG) {
+        console.log(`[SeamDebug:Engine] layer="${layer.name}" → OFFSCREEN path (bitmapMask)`);
+      }
       this.drawLayerOffscreen(layer, options, assetService);
       return;
     }
@@ -386,7 +410,7 @@ export class Canvas2dEngine implements IRenderer {
     if (layer.type === 'color') {
       const preparedClips = clipSequence?.map(clip => ({
         ...clip,
-        __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted))
+        __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale))
       }));
       drawLayerInstance(ctx, layer, null, {
         matrix, opacity, clipSequence: preparedClips, width: options.width, height: options.height, drawRect, imageSmoothingQuality
@@ -409,7 +433,7 @@ export class Canvas2dEngine implements IRenderer {
       // Tiling mode has unique per-tile translation and scaling logic; we apply context transformation separately here
       const preparedClips = clipSequence?.map(clip => ({
         ...clip,
-        __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted))
+        __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale))
       }));
 
       const tileCount = PixelUtils.computeTileJobs(
@@ -423,12 +447,18 @@ export class Canvas2dEngine implements IRenderer {
       );
 
       if (tileCount > 0) {
+        if ((window as unknown as Record<string, unknown>).__SEAM_DEBUG) {
+          console.log(`[SeamDebug:Engine] layer="${layer.name}" → TILES path (${tileCount} tiles), dprScale=${dprScale}, drawRect=`, drawRect);
+        }
         drawLayerInstance(ctx, layer, this.tilePool, {
           matrix, opacity, clipSequence: preparedClips, width: options.width, height: options.height, drawRect, imageSmoothingQuality,
           tileCount, dprScale
         });
       } else if (layer.src) {
         // If tile is not ready, fall back to single image, using assetService.resolve to ensure retrieving the latest valid Object URL
+        if ((window as unknown as Record<string, unknown>).__SEAM_DEBUG) {
+          console.log(`[SeamDebug:Engine] layer="${layer.name}" → TILE FALLBACK (single image, tiles not ready)`);
+        }
         const fallbackSrc = assetService ? assetService.resolve(layer.assetId, layer.src) : layer.src;
         const img = imageCache.getOrFetch(fallbackSrc);
         if (img) {
@@ -441,13 +471,16 @@ export class Canvas2dEngine implements IRenderer {
 
     } else {
       // --- 4B. Single Image Rendering Path (vector mask unified ctx.clip directly, bypassing Worker) ---
+      if ((window as unknown as Record<string, unknown>).__SEAM_DEBUG) {
+        console.log(`[SeamDebug:Engine] layer="${layer.name}" → SINGLE IMAGE path, isTiled=${tileMeta?.isTiled}, assetId=${layer.assetId}`);
+      }
       const currentSrc = assetService ? assetService.resolve(layer.assetId, layer.src) : layer.src;
       const img = imageOverride || (currentSrc ? imageCache.getOrFetch(currentSrc) : null);
 
       if (img) {
         const preparedClips = clipSequence?.map(clip => ({
           ...clip,
-          __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted))
+          __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale))
         }));
         drawLayerInstance(ctx, layer, img, {
           matrix, opacity, clipSequence: preparedClips, width: options.width, height: options.height, drawRect, imageSmoothingQuality,

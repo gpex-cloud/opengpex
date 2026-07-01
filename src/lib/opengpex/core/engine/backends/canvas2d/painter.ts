@@ -62,15 +62,26 @@ export function applyClipSequence(
 ) {
   if (!clipSequence || clipSequence.length === 0) return;
 
+  // [DEBUG] Skip inverted clips to test if seam disappears
+  if ((globalThis as unknown as Record<string, unknown>).__SEAM_SKIP_CLIP) return;
+
+  let scale = 1;
+  try {
+    const transform = ctx.getTransform();
+    scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+  } catch {
+    // Fallback if getTransform is not supported
+  }
+
   const padding = 2000;
   for (const clip of clipSequence) {
     // Skip feathered clips — they are handled separately via offscreen compositing
     if ((clip.feather || 0) > 0) continue;
 
-    const path = clip.__compiledPath2D || shapeToPath2D(shrinkInvertedMask(clip.shape, clip.inverted));
     if (clip.inverted) {
       // [Bugfix]: Correct local coordinate offset clipping boundary overrun issues when drawing inverted masks (hole punching).
       // Ensure the outer safety protection ring moves along with fragment position even if tile coordinate offset is very large.
+      const path = clip.__compiledPath2D || shapeToPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale));
       const invertedPath = new Path2D();
       let vx = 0, vy = 0;
       if (layer.visibleShape) {
@@ -81,6 +92,7 @@ export function applyClipSequence(
       invertedPath.addPath(path);
       ctx.clip(invertedPath, 'evenodd');
     } else {
+      const path = clip.__compiledPath2D || shapeToPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale));
       ctx.clip(path, 'nonzero');
     }
   }
