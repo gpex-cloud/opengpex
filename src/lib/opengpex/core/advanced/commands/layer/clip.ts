@@ -19,7 +19,7 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, ClipboardLayerMetadata, LocalShape } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, ClipboardLayerMetadata, LocalShape, asLocalRect } from '@opengpex/editor/core/types';
 import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import * as P from '@opengpex/editor/core/advanced/protocols';
@@ -261,7 +261,7 @@ export const LayerClipCommands = {
     name: 'Apply as Layer Mask',
     undoable: true,
     execute: async (ctx: EditorContextValue, payload?: { layerId?: string; feather?: number }): Promise<void> => {
-      const { activeFrame, activeLayer, actions, geometry, layers } = ctx;
+      const { activeFrame, activeLayer, actions, geometry, layers, pixels } = ctx;
       if (!activeFrame) return;
 
       const box = getClipBox(activeFrame);
@@ -282,30 +282,39 @@ export const LayerClipCommands = {
         return;
       }
 
-      // Derive LocalShape for the mask:
-      let localShape: LocalShape;
-      if (!box.regular) {
-        // Irregular path (lasso/wand): project frame-local → layer-local, then to shape
-        const layerPoly = geometry.polygon.frameLocalToLayerLocal(box.spatial, activeFrame, targetLayer);
-        localShape = polygonToShape(layerPoly);
-      } else {
-        // Regular shape (rect/ellipse): already a LocalShape, use directly
-        localShape = box.spatial;
-      }
-
       // Read feather radius from payload (0 = no feather)
       const feather = payload?.feather ?? 0;
 
-      // Apply as VectorMask (Reveal Selection — inverted=false)
-      layers.updateLayer(activeFrame.id, tx => {
-        tx.edit(targetLayer.id).applyMask(localShape, false, feather);
-      });
+      if (box.regular) {
+        // ═══ Regular selection (rect/ellipse) → Vector Mask ═══
+        // Lightweight, geometrically precise, scalable without quality loss.
+        const localShape: LocalShape = box.spatial;
+        layers.updateLayer(activeFrame.id, tx => {
+          tx.edit(targetLayer.id).applyMask(localShape, false, feather);
+        });
+      } else {
+        // ═══ Irregular selection (lasso/wand/AI) → Bitmap Mask ═══
+        // Complex edges benefit from pixel-level representation; enables future brush refinement.
+        const layerPoly = geometry.polygon.frameLocalToLayerLocal(box.spatial, activeFrame, targetLayer);
 
-      // Clear the applied selection slot (shares the same undo atom):
-      if (!box.regular) {
-        const clipToolId = activeFrame.latestClipTool || 'rect';
-        actions.setClipBox(activeFrame.id, clipToolId, null);
+        const maskAsset = await pixels.rasterize.mask(layerPoly, targetLayer.bounding, feather);
+        if (!maskAsset) {
+          actions.setInteraction({ selectionErrorPulse: Date.now() });
+          return;
+        }
+
+        layers.updateLayer(activeFrame.id, tx => {
+          tx.edit(targetLayer.id).applyBitmapMask(
+            maskAsset.url,
+            maskAsset.id,
+            asLocalRect({ x: 0, y: 0, w: targetLayer.bounding.w, h: targetLayer.bounding.h })
+          );
+        });
       }
+
+      // Clear the applied selection slot (unified: both regular and irregular)
+      const clipToolId = activeFrame.latestClipTool || 'rect';
+      actions.setClipBox(activeFrame.id, clipToolId, null);
     },
   } as EditorCommand<{ layerId?: string; feather?: number } | undefined, Promise<void>>,
 

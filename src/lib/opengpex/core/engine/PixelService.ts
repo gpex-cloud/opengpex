@@ -20,7 +20,7 @@
 import { imageCache } from './cache/ImageCache';
 import { tileCache } from './cache/TileCache';
 import {
-  Layer, PixelService, GeometryService, AssetService, WorkerProxy, Shape, LocalShape, Frame, WorkerResult
+  Layer, PixelService, GeometryService, AssetService, WorkerProxy, Shape, LocalShape, LocalPolygon, Frame, WorkerResult
 } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { PixelUtils } from './PixelUtils';
@@ -323,6 +323,61 @@ export function createPixelService(
         const blob = await canvas.convertToBlob({ type: 'image/png' });
         const id = await assets.register(blob, dpr);
         return { id, url: assets.getURL(id)! };
+      },
+
+      /**
+       * rasterize.mask: Rasterizes a polygon selection into an alpha-channel mask PNG asset.
+       * Alpha=255 (opaque) = visible area, Alpha=0 (transparent) = hidden area.
+       * The rendering engine uses `destination-in` compositing which operates on alpha,
+       * so the mask must encode visibility in the alpha channel (not RGB luminance).
+       * Supports feathering via Gaussian blur on the mask edges.
+       * Returns { id, url } ready for LayerEditor.applyBitmapMask, or null if bounds invalid.
+       */
+      async mask(polygon: LocalPolygon, bounds: { w: number; h: number }, feather = 0) {
+        const w = Math.ceil(bounds.w);
+        const h = Math.ceil(bounds.h);
+        if (w <= 0 || h <= 0) return null;
+
+        const canvas = new OffscreenCanvas(w, h);
+        const ctx = canvas.getContext('2d')!;
+
+        // Canvas starts fully transparent (alpha=0 everywhere = hidden)
+        // Draw selection polygon as opaque white (alpha=255 = visible)
+        ctx.fillStyle = '#ffffff';
+        const path = new Path2D();
+
+        // Build path from polygon rings (LocalPolygon.rings: LocalPoint[][])
+        const rings = polygon.rings;
+        for (let r = 0; r < rings.length; r++) {
+          const ring = rings[r];
+          if (ring && ring.length > 0) {
+            path.moveTo(ring[0].x, ring[0].y);
+            for (let i = 1; i < ring.length; i++) {
+              path.lineTo(ring[i].x, ring[i].y);
+            }
+            path.closePath();
+          }
+        }
+
+        ctx.fill(path, 'evenodd');
+
+        // Apply feather via Gaussian blur (if requested)
+        // Blur on the alpha channel creates a soft transition at edges
+        if (feather > 0) {
+          const blurCanvas = new OffscreenCanvas(w, h);
+          const blurCtx = blurCanvas.getContext('2d')!;
+          blurCtx.filter = `blur(${feather}px)`;
+          blurCtx.drawImage(canvas, 0, 0);
+          ctx.clearRect(0, 0, w, h);
+          ctx.drawImage(blurCanvas, 0, 0);
+        }
+
+        // Export as PNG and register in asset service
+        const blob = await canvas.convertToBlob({ type: 'image/png' });
+        const id = await assets.register(blob);
+        const url = assets.getURL(id);
+        if (!url) return null;
+        return { id, url };
       }
     },
 

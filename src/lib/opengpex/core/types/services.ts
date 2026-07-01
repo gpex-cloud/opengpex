@@ -20,7 +20,7 @@
 import { Frame, Layer, AdjustmentState, VectorMask, BitmapMask } from './models';
 import {
   LocalRect, Dimensions, ClipDescriptor,
-  Shape, LocalShape, ShapeType, TileMetadata
+  Shape, LocalShape, LocalPolygon, ShapeType, TileMetadata
 } from './primitives';
 import { EditorData, EngineStatus, SupportedImageFormat } from './state';
 
@@ -149,6 +149,8 @@ export interface PixelService {
   rasterize: {
     /** Rasterizes any layer to bitmap Asset (text -> fillText, color -> fillRect, image -> flatten masks/adjustments) */
     layer: (layer: Layer) => Promise<{ id: string; url: string }>;
+    /** Rasterizes a polygon selection into a grayscale mask PNG asset (white=visible, black=hidden) */
+    mask: (polygon: LocalPolygon, bounds: { w: number; h: number }, feather?: number) => Promise<{ id: string; url: string } | null>;
   };
 
   cache: {
