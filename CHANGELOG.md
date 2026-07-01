@@ -4,6 +4,17 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.17
+
+- Implement bitmap mask editing mode with integrated eraser/restore sub-modes (Tab key toggle) and active tool linkage in `LayerDrawer` and `CraftDrawer`
+- Add visual mask focus isolation overlay showing masked (hidden) areas with a semi-transparent green tint
+- Support OffscreenCanvas compositing and asset registration for irregular mask cutouts/drilled selection deletion
+- Support rasterizing irregular selections (lasso, wand, AI) to alpha-channel mask PNG assets with optional edge feathering
+- Fix subpixel anti-aliasing seam gaps in `cutToLayer` by calculating dynamic logical shrink based on rendering scale
+- Enhance `ActionDropdown` with option dividers, improved viewport positioning relative to window scroll, and updated click event triggers
+
+---
+
 ## v1.0.0-beta.16
 
 - Add config-driven filtering for `SmartGuides` snapping targets and exclude layer types in a new settings panel

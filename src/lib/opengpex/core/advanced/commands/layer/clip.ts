@@ -20,7 +20,6 @@
 'use client';
 
 import { EditorContextValue, EditorCommand, ClipboardLayerMetadata, LocalShape, asLocalRect } from '@opengpex/editor/core/types';
-import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
@@ -323,7 +322,7 @@ export const LayerClipCommands = {
     name: 'Delete Selection',
     undoable: true,
     execute: async (ctx: EditorContextValue, payload?: { feather?: number }): Promise<void> => {
-      const { activeFrame, activeLayer, actions, geometry } = ctx;
+      const { activeFrame, activeLayer, actions, geometry, assets } = ctx;
       const isClipActive = ctx.state.interaction.interactionMode === 'clip';
       if (!activeFrame || !activeLayer || !isClipActive) return;
 
@@ -333,17 +332,126 @@ export const LayerClipCommands = {
         const box = getClipBox(activeFrame);
         if (!box) return;
 
-        const localShape = !box.regular
-          ? polygonToShape(geometry.polygon.frameLocalToLayerLocal(box.spatial, activeFrame, latestLayer))
-          : geometry.shape.frameLocalToLayerLocal(box.spatial, activeFrame, latestLayer);
-
-        // Read feather radius from payload (0 = no feather)
         const feather = payload?.feather ?? 0;
+        const w = Math.ceil(latestLayer.bounding.w);
+        const h = Math.ceil(latestLayer.bounding.h);
+        if (w <= 0 || h <= 0) return;
 
-        ctx.layers.updateLayer(activeFrame.id, tx => {
-          tx.edit(activeLayer.id)
-            .applyMask(localShape, true, feather);
-        });
+        // ═══ Merged Drilled BitmapMask: find or create ═══
+        const existingMasks = latestLayer.bitmapMasks || [];
+        const drilledMask = existingMasks.find(m => m.tag === 'drilled');
+
+        // Create OffscreenCanvas for mask composition
+        const maskCanvas = new OffscreenCanvas(w, h);
+        const maskCtx = maskCanvas.getContext('2d')!;
+
+        if (drilledMask) {
+          // Load existing drilled mask image
+          const response = await fetch(drilledMask.src);
+          const blob = await response.blob();
+          const img = await createImageBitmap(blob);
+          maskCtx.drawImage(img, 0, 0, w, h);
+        } else {
+          // Start with full white (alpha=255 everywhere = all visible)
+          maskCtx.fillStyle = '#ffffff';
+          maskCtx.fillRect(0, 0, w, h);
+        }
+
+        // Punch hole using destination-out composite
+        maskCtx.globalCompositeOperation = 'destination-out';
+
+        if (!box.regular) {
+          // Irregular selection → polygon path
+          const layerPoly = geometry.polygon.frameLocalToLayerLocal(box.spatial, activeFrame, latestLayer);
+          const path = new Path2D();
+          for (const ring of layerPoly.rings) {
+            if (ring && ring.length > 0) {
+              path.moveTo(ring[0].x, ring[0].y);
+              for (let i = 1; i < ring.length; i++) {
+                path.lineTo(ring[i].x, ring[i].y);
+              }
+              path.closePath();
+            }
+          }
+
+          if (feather > 0) {
+            const holeCanvas = new OffscreenCanvas(w, h);
+            const holeCtx = holeCanvas.getContext('2d')!;
+            holeCtx.fillStyle = '#ffffff';
+            holeCtx.fill(path, 'evenodd');
+            const blurCanvas = new OffscreenCanvas(w, h);
+            const blurCtx = blurCanvas.getContext('2d')!;
+            blurCtx.filter = `blur(${feather}px)`;
+            blurCtx.drawImage(holeCanvas, 0, 0);
+            maskCtx.drawImage(blurCanvas, 0, 0);
+          } else {
+            maskCtx.fillStyle = '#ffffff';
+            maskCtx.fill(path, 'evenodd');
+          }
+        } else {
+          // Regular selection → rect/ellipse shape
+          const localShape = geometry.shape.frameLocalToLayerLocal(box.spatial, activeFrame, latestLayer);
+          const { x, y, w: sw, h: sh } = localShape.rect;
+
+          if (feather > 0) {
+            const holeCanvas = new OffscreenCanvas(w, h);
+            const holeCtx = holeCanvas.getContext('2d')!;
+            holeCtx.fillStyle = '#ffffff';
+            if (localShape.type === 'circle') {
+              holeCtx.beginPath();
+              holeCtx.ellipse(x + sw / 2, y + sh / 2, sw / 2, sh / 2, 0, 0, Math.PI * 2);
+              holeCtx.fill();
+            } else {
+              holeCtx.fillRect(x, y, sw, sh);
+            }
+            const blurCanvas = new OffscreenCanvas(w, h);
+            const blurCtx = blurCanvas.getContext('2d')!;
+            blurCtx.filter = `blur(${feather}px)`;
+            blurCtx.drawImage(holeCanvas, 0, 0);
+            maskCtx.drawImage(blurCanvas, 0, 0);
+          } else {
+            maskCtx.fillStyle = '#ffffff';
+            if (localShape.type === 'circle') {
+              maskCtx.beginPath();
+              maskCtx.ellipse(x + sw / 2, y + sh / 2, sw / 2, sh / 2, 0, 0, Math.PI * 2);
+              maskCtx.fill();
+            } else {
+              maskCtx.fillRect(x, y, sw, sh);
+            }
+          }
+        }
+
+        // Export drilled mask as PNG and register in asset service
+        const blob = await maskCanvas.convertToBlob({ type: 'image/png' });
+        const assetId = await assets.register(blob);
+        const url = assets.getURL(assetId);
+        if (!url) return;
+
+        // Update existing drilled mask or create new one
+        if (drilledMask) {
+          ctx.layers.updateLayer(activeFrame.id, tx => {
+            tx.edit(latestLayer.id).updateBitmapMask(drilledMask.id, { src: url, assetId });
+          });
+        } else {
+          // Create new BitmapMask with tag='drilled'
+          const newMask = {
+            id: `bmask-drilled-${Date.now()}`,
+            src: url,
+            assetId,
+            bounds: asLocalRect({ x: 0, y: 0, w, h }),
+            inverted: false,
+            enabled: true,
+            feather: 0,
+            tag: 'drilled',
+          };
+          ctx.layers.updateLayer(activeFrame.id, tx => {
+            tx.edit(latestLayer.id).patch({ bitmapMasks: [newMask, ...existingMasks] });
+          });
+        }
+
+        // Clear the applied selection slot
+        const clipToolId = activeFrame.latestClipTool || 'rect';
+        actions.setClipBox(activeFrame.id, clipToolId, null);
       } catch (err) {
         console.error('[ClipCommands] Drill selection failed:', err);
       }

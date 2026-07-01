@@ -33,7 +33,8 @@ function activateCraft(ctx: EditorContextValue, craft: CraftType) {
   const current = ctx.scoped!.getSignal<P.ActiveCraft>(P.SIGNAL_ACTIVE_CRAFT, null);
 
   // Toggle: If current tool matches target, deactivate
-  if (current === craft) {
+  // restore is a sub-mode of eraser, so clicking eraser while in restore also deactivates
+  if (current === craft || (craft === 'eraser' && current === 'restore')) {
     ctx.scoped!.setSignal(P.SIGNAL_ACTIVE_CRAFT, null);
     ctx.actions.setInteraction({ interactionMode: 'pan' });
     return;

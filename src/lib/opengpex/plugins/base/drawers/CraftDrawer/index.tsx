@@ -86,16 +86,25 @@ export const plugin: EditorPlugin = {
   },
 
   // --- 8. Bidirectional Linkage ---
-  // Automatically clear activeCraft signal when interactionMode is externally changed to non-'craft'
+  // Forward: activeCraft set to non-null → auto-set interactionMode='craft'
+  // Reverse: interactionMode leaves 'craft' → auto-clear activeCraft
   onAction: (action, state, actions) => {
     if (action.type === "SET_INTERACTION") {
-      const payload = action.payload as { interactionMode?: string };
-      // Detects when interactionMode is explicitly set to non-'craft' in payload
+      const payload = action.payload as { interactionMode?: string; signals?: Record<string, unknown> };
+      const craftKey = P.CraftDrawerAPI.signals.activeCraft;
+
+      // Reverse linkage: mode explicitly set to non-'craft' → clear activeCraft
       if (payload.interactionMode && payload.interactionMode !== "craft") {
-        if (
-          state.interaction.signals[P.CraftDrawerAPI.signals.activeCraft] != null
-        ) {
-          actions.setStateSignal(P.CraftDrawerAPI.signals.activeCraft, null);
+        if (state.interaction.signals[craftKey] != null) {
+          actions.setStateSignal(craftKey, null);
+        }
+      }
+
+      // Forward linkage: activeCraft set to non-null → auto-set mode='craft'
+      if (payload.signals && craftKey in payload.signals) {
+        const newCraft = payload.signals[craftKey];
+        if (newCraft != null && state.interaction.interactionMode !== "craft" && !payload.interactionMode) {
+          actions.setInteraction({ interactionMode: "craft" });
         }
       }
     }

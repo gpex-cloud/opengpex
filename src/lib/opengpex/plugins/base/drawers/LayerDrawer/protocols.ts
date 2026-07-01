@@ -28,3 +28,35 @@ export const CMD_LOCK = 'cmd.lock';
 export const CMD_RENAME = 'cmd.rename';
 export const CMD_SYNC_TO_OVERLAY = 'cmd.sync.overlay';
 export const CMD_MASK_SYNC_TO_OVERLAY = 'cmd.sync.mask';
+
+// ─── Mask Edit Signal ──────────────────────────────────────────────────────────
+
+/** Signal key for mask editing target (stored in interaction.signals) */
+export const MASK_EDITING_KEY = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.signal.mask_editing`;
+
+/** Signal key for mask focus highlight overlay toggle */
+export const MASK_FOCUS_KEY = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.signal.mask_focus`;
+
+/**
+ * MaskEditingSignal: Indicates which bitmap mask is currently being edited.
+ * null = no mask is being edited.
+ */
+export type MaskEditingSignal = {
+  layerId: string;
+  maskId: string;
+} | null;
+
+/**
+ * MaskFocusSignal: Whether to highlight/isolate the mask currently being edited.
+ */
+export type MaskFocusSignal = boolean;
+
+/**
+ * LayerDrawerAPI: Cross-plugin typed facade for external consumers.
+ */
+export const LayerDrawerAPI = {
+  signals: {
+    maskEditing: MASK_EDITING_KEY,
+    maskFocus: MASK_FOCUS_KEY,
+  },
+} as const;

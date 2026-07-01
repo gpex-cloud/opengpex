@@ -22,20 +22,17 @@
 "use client";
 
 import React from "react";
-import { Eye, EyeOff, Lock, Unlock, Minus } from "lucide-react";
+import { Eye, EyeOff, Lock, Unlock } from "lucide-react";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
-import ImageAsset from "@opengpex/editor/widgets/ImageAsset";
 import { useLayerCommands } from "../hooks";
 import { useEditorState } from "@opengpex/editor/core/context";
 
 export const SubLayerItem = React.memo(
   ({
     layerId,
-    onCollapse,
   }: {
     layerId: string;
     index: number;
-    onCollapse?: () => void;
   }) => {
     const { activeFrame } = useEditorState();
     const layer = activeFrame?.layers.byId[layerId];
@@ -47,25 +44,8 @@ export const SubLayerItem = React.memo(
       <div
         className="flex items-center gap-2 px-2 py-1 rounded-md transition-all h-[28px] group/sub select-none bg-[var(--bg-stage)]/30 hover:bg-[var(--bg-stage)]/60 border border-[var(--border-subtle)]/60 hover:border-[var(--border-subtle)]"
       >
-        {onCollapse && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onCollapse();
-            }}
-            className="w-4 h-4 flex items-center justify-center shrink-0 rounded hover:bg-[var(--bg-stage)]/60 transition-colors group/collapse outline-none"
-            title="Collapse"
-          >
-            <Minus size={10} strokeWidth={3} className="text-[var(--text-muted)] group-hover/collapse:text-[var(--text-main)]" />
-          </button>
-        )}
-        <div className={`w-[18px] h-[18px] rounded-sm overflow-hidden border border-[var(--border-subtle)] bg-[var(--bg-panel)] shrink-0 flex items-center justify-center transition-all ${!layer.visible ? "opacity-30 grayscale" : "opacity-100"}`}>
-          <ImageAsset
-            assetId={layer.assetId}
-            src={layer.src}
-            className="w-full h-full object-cover"
-            alt={layer.role}
-          />
+        <div className={`w-[18px] h-[18px] rounded-sm border border-zinc-400 bg-zinc-400 text-zinc-950 text-[12px] font-black shrink-0 flex items-center justify-center transition-all ${!layer.visible ? "opacity-30 grayscale" : "opacity-100"}`}>
+          e
         </div>
         <div className="flex-1 min-w-0">
           <span className="text-[10px] font-bold text-[var(--text-main)] truncate select-none leading-none tracking-tight">

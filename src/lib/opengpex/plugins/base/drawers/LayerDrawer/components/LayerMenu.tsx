@@ -66,19 +66,19 @@ export const LayerMenu = React.memo(
 
     const options: ActionOption[] = [];
 
-    if (hasSubLayers && !isSubLayersExpanded) {
+    if (hasSubLayers) {
       options.push({
-        label: "Show Sub-layers",
-        value: "open-sublayers",
+        label: isSubLayersExpanded ? "Hide Sub-layers" : "Show Sub-layers",
+        value: isSubLayersExpanded ? "close-sublayers" : "open-sublayers",
         icon: <SquareStack size={12} />,
         description: `(${childLayersLength})`,
       });
     }
 
-    if (hasMasks && !isMasksExpanded) {
+    if (hasMasks) {
       options.push({
-        label: "Show Masks",
-        value: "open-masks",
+        label: isMasksExpanded ? "Hide Masks" : "Show Masks",
+        value: isMasksExpanded ? "close-masks" : "open-masks",
         icon: <VenetianMask size={12} />,
         description: `(${masksLength})`,
       });
@@ -92,6 +92,10 @@ export const LayerMenu = React.memo(
       });
 
       options.push({
+        divider: true,
+      });
+
+      options.push({
         label: "Delete Layer",
         value: "delete",
         icon: <Trash2 size={12} />,
@@ -102,8 +106,12 @@ export const LayerMenu = React.memo(
     const handleSelect = (val: string) => {
       if (val === "open-sublayers") {
         setIsSubLayersExpanded(true);
+      } else if (val === "close-sublayers") {
+        setIsSubLayersExpanded(false);
       } else if (val === "open-masks") {
         setIsMasksExpanded(true);
+      } else if (val === "close-masks") {
+        setIsMasksExpanded(false);
       } else if (val === "rasterize") {
         mergeRasterize.execute({ layerId });
       } else if (val === "delete") {

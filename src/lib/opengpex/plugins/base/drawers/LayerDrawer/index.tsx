@@ -71,4 +71,20 @@ export const plugin: EditorPlugin = {
 
   // --- 5. Capabilities ---
   commands: Object.values(LAYER_COMMANDS),
+
+  // --- 6. Signals ---
+  signals: [
+    {
+      id: P.MASK_EDITING_KEY,
+      name: "Mask Editing Target",
+      defaultValue: null,
+      scope: "public",
+    },
+    {
+      id: P.MASK_FOCUS_KEY,
+      name: "Mask Focus Overlay Active",
+      defaultValue: true,
+      scope: "public",
+    },
+  ],
 };

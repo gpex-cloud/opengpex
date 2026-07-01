@@ -76,8 +76,8 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
       ? "Click canvas to place text\nHold Cmd/Ctrl to move\nEsc to exit"
       : activeCraft === "brush"
         ? "Draw on canvas\nEsc to exit"
-        : activeCraft === "eraser"
-          ? "Erase on canvas\nHold Cmd/Ctrl to restore pixels\nEsc to exit"
+        : activeCraft === "eraser" || activeCraft === "restore"
+          ? "Erase / Restore mask pixels\nTab to toggle eraser ↔ restore\nCmd/Ctrl+click to create new mask\nEsc to exit"
           : null;
 
   return (
@@ -87,7 +87,7 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
       align={
         activeCraft === "text"
           ? "start"
-          : activeCraft === "eraser"
+          : activeCraft === "eraser" || activeCraft === "restore"
             ? "end"
             : "center"
       }
@@ -99,7 +99,7 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
     >
       <div className="flex items-center gap-1">
         {CRAFT_BUTTONS.map((btn) => {
-          const isActive = activeCraft === btn.type;
+          const isActive = activeCraft === btn.type || (btn.type === 'eraser' && activeCraft === 'restore');
           return (
             <FunctionButton
               key={btn.type}
@@ -147,7 +147,9 @@ const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
     type: CraftType,
   ): "active" | "inferred" | "default" => {
     // Explicitly activated tool -> accent highlight
+    // restore is a sub-mode of eraser (Tab toggles between them), so eraser stays "active"
     if (activeCraft === type) return "active";
+    if (type === "eraser" && activeCraft === "restore") return "active";
     // eraser shares brush's panel, so brush button does not need special status when eraser is active
     // Inference state: judged by layer type when no tool is active
     if (activeCraft === null) {
@@ -237,6 +239,7 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
   const showBrushPanel =
     activeCraft === "brush" ||
     activeCraft === "eraser" ||
+    activeCraft === "restore" ||
     (activeCraft === null && activeLayerIsPaint);
 
   const showPlaceholder = !showTextPanel && !showBrushPanel;

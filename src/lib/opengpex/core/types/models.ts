@@ -81,6 +81,7 @@ export interface BitmapMask {
   inverted: boolean;        // Inversion effect (true: destination-out, false: destination-in)
   enabled: boolean;         // Whether enabled
   feather: number;          // Feather radius (px), applies Gaussian blur during rendering (0 = no feather)
+  tag?: string;             // Optional semantic tag (e.g. 'drilled' for drill-merged mask)
 }
 
 export interface Snapshot {

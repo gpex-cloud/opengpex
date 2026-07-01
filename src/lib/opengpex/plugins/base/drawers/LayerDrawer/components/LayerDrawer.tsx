@@ -25,7 +25,7 @@ import { Reorder } from "framer-motion";
 import { useEditorState } from "@opengpex/editor/core/context";
 import { Layer, Frame } from "@opengpex/editor/core/types";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
-import { useLayerCommands } from "../hooks";
+import { useLayerCommands, useMaskEditMonitor } from "../hooks";
 import { MergeDownIcon, MergeVisibleIcon } from "@opengpex/editor/icons";
 import { LayerItem } from "./LayerItem";
 
@@ -38,6 +38,9 @@ export const LayerComponent = React.memo(function LayerComponent() {
 function LayerComponentInner({ activeFrame }: { activeFrame: Frame }) {
   const { reorder, mergeDown, mergeVisible, toggleAll, isolateSelection } =
     useLayerCommands();
+
+  // Monitor mask edit exit conditions (tool switch, mode change, mask deletion)
+  useMaskEditMonitor();
 
   const [isScrolling, setIsScrolling] = React.useState(false);
   const scrollTimeout = useRef<NodeJS.Timeout | null>(null);

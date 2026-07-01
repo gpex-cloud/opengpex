@@ -19,12 +19,13 @@
 
 'use client';
 
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { useEditorState } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { VolatileState, Frame, CameraState } from '@opengpex/editor/core/types';
 import { useBrushOverlayState, useBrushCursorTracking, useBrushParams, useBrushColor } from './hooks';
 import { getStrokeBuffer, getStrokeVersion } from './interactions';
+import { MASK_EDITING_KEY, MASK_FOCUS_KEY, type MaskEditingSignal } from '../../drawers/LayerDrawer/protocols';
 
 // ─── BrushOverlayMain ──────────────────────────────────────────────────────────
 
@@ -42,7 +43,8 @@ export const BrushOverlayMain = React.memo(function BrushOverlayMain() {
 
   return (
     <>
-      <BrushCursor isEraser={activeCraft === 'eraser'} />
+      <MaskFocusOverlay />
+      <BrushCursor isEraser={activeCraft === 'eraser' || activeCraft === 'restore'} activeCraft={activeCraft || ''} />
       <StrokePreview />
     </>
   );
@@ -65,16 +67,17 @@ export const BrushOverlayMain = React.memo(function BrushOverlayMain() {
  */
 interface BrushCursorProps {
   isEraser: boolean;
+  activeCraft: string;
 }
 
-const BrushCursor = React.memo(function BrushCursor({ isEraser }: BrushCursorProps) {
+const BrushCursor = React.memo(function BrushCursor({ isEraser, activeCraft }: BrushCursorProps) {
   const cursorRef = useRef<HTMLDivElement>(null);
   const { brushSize } = useBrushParams();
   const brushColor = useBrushColor();
   const { activeFrame } = useEditorState();
 
   // 60fps mouse position tracking + camera.k real-time sync size + Cmd/Ctrl modifier key listening
-  useBrushCursorTracking(cursorRef, true, brushSize);
+  useBrushCursorTracking(cursorRef, true, brushSize, activeCraft);
 
   // Calculate cursor diameter on screen (brushSize * camera zoom ratio)
   const cameraK = activeFrame?.camera.k || 1;
@@ -163,13 +166,13 @@ const BrushCursor = React.memo(function BrushCursor({ isEraser }: BrushCursorPro
         }}
       />
 
-      {/* Tool identity badge (bottom-right): droplet (brush) or × (eraser) */}
+      {/* Tool identity badge (bottom-right): eraser / undo-arrow (restore) / droplet (brush) */}
       <svg
         data-badge="tool-id"
         className="absolute pointer-events-none"
-        width="10"
-        height="10"
-        viewBox="0 0 10 10"
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
         fill="none"
         style={{
           left: `${Math.max(screenDiameter - 1, halfSize + 2)}px`,
@@ -177,26 +180,32 @@ const BrushCursor = React.memo(function BrushCursor({ isEraser }: BrushCursorPro
           filter: 'drop-shadow(0 0.5px 1px rgba(0,0,0,0.9))',
         }}
       >
-        {isEraser ? (
-          /* × symbol: two crossed lines */
+        {activeCraft === 'eraser' ? (
+          /* Eraser icon (matches lucide Eraser) */
           <>
-            <line x1="2" y1="2" x2="8" y2="8" stroke="white" strokeWidth="1.8" strokeLinecap="round" />
-            <line x1="8" y1="2" x2="2" y2="8" stroke="white" strokeWidth="1.8" strokeLinecap="round" />
+            <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M22 21H7" stroke="white" strokeWidth="3" strokeLinecap="round" />
+          </>
+        ) : activeCraft === 'restore' ? (
+          /* Undo-2 icon (matches lucide Undo2) */
+          <>
+            <path d="M9 14 4 9l5-5" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
           </>
         ) : (
-          /* Droplet: teardrop shape, filled white */
-          <path d="M5 1C5 1 2 4.5 2 6.5C2 8.5 3.3 9.5 5 9.5C6.7 9.5 8 8.5 8 6.5C8 4.5 5 1 5 1Z" fill="white" />
+          /* Droplet: teardrop shape (brush) */
+          <path d="M12 2C12 2 5 10 5 15C5 19 8 22 12 22C16 22 19 19 19 15C19 10 12 2 12 2Z" fill="white" />
         )}
       </svg>
 
-      {/* "+" new layer indicator badge: displayed when Cmd/Ctrl is pressed (bottom right) */}
+      {/* "+" new layer/mask indicator badge: displayed when Cmd/Ctrl is pressed (right of tool icon) */}
       <div
         data-badge="new-layer"
         className="absolute"
         style={{
           opacity: 0, // hidden by default, dynamically controlled by keydown/keyup in hooks
-          left: `${screenDiameter - 2}px`,
-          top: `${screenDiameter - 2}px`,
+          left: `${Math.max(screenDiameter - 1, halfSize + 2) + 15}px`,
+          top: `${Math.max(screenDiameter - 1, halfSize + 2) + 1}px`,
           width: '12px',
           height: '12px',
           borderRadius: '50%',
@@ -204,7 +213,7 @@ const BrushCursor = React.memo(function BrushCursor({ isEraser }: BrushCursorPro
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          fontSize: '9px',
+          fontSize: '11px',
           fontWeight: 900,
           color: '#fff',
           lineHeight: 1,
@@ -322,6 +331,102 @@ const StrokePreview = React.memo(function StrokePreview() {
           width: `${canvasW}px`,
           height: `${canvasH}px`,
           imageRendering: 'pixelated',
+        }}
+      />
+    </div>
+  );
+});
+
+// ─── MaskFocusOverlay ──────────────────────────────────────────────────────────
+
+/**
+ * MaskFocusOverlay: Rubylith-style overlay showing masked (hidden) areas.
+ *
+ * When maskEditing signal is set AND maskFocus signal is true:
+ * - Loads the bitmap mask being edited
+ * - Renders a semi-transparent red tint over areas hidden by the mask
+ * - Helps the user visualize what's masked vs visible
+ *
+ * Follows camera via useFastSync (same positioning as StrokePreview).
+ */
+const MaskFocusOverlay = React.memo(function MaskFocusOverlay() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { activeFrame, state } = useEditorState();
+
+  const maskEditing = state.interaction.signals[MASK_EDITING_KEY] as MaskEditingSignal;
+  const maskFocus = state.interaction.signals[MASK_FOCUS_KEY] as boolean ?? true;
+
+  // Resolve layer & mask
+  const layer = maskEditing && activeFrame ? activeFrame.layers.byId[maskEditing.layerId] : null;
+  const mask = layer?.bitmapMasks?.find(m => m.id === maskEditing?.maskId);
+
+  const canvasW = activeFrame?.canvas?.w || 0;
+  const canvasH = activeFrame?.canvas?.h || 0;
+
+  // Load mask image and render green highlight overlay
+  useEffect(() => {
+    const cvs = canvasRef.current;
+    if (!cvs || !mask || !maskFocus || !layer || !canvasW || !canvasH) {
+      if (cvs) {
+        const ctx = cvs.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, cvs.width, cvs.height);
+      }
+      return;
+    }
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const ctx = cvs.getContext('2d');
+      if (!ctx) return;
+
+      ctx.clearRect(0, 0, cvs.width, cvs.height);
+
+      const lw = layer.bounding.w;
+      const lh = layer.bounding.h;
+      const lx = layer.cx + canvasW / 2 - lw / 2;
+      const ly = layer.cy + canvasH / 2 - lh / 2;
+
+      // Green semi-transparent highlight over visible mask areas
+      ctx.fillStyle = 'rgba(34, 197, 94, 0.4)';
+      ctx.fillRect(lx, ly, lw, lh);
+
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.drawImage(img, lx, ly, lw, lh);
+      ctx.globalCompositeOperation = 'source-over';
+    };
+    img.src = mask.src;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mask?.src, maskFocus, maskEditing?.layerId, maskEditing?.maskId, layer?.cx, layer?.cy, layer?.bounding?.w, layer?.bounding?.h, canvasW, canvasH]);
+
+  // Follow camera positioning (same as StrokePreview)
+  useFastSync(containerRef, true, (_v: VolatileState, _f: Frame, cam: CameraState) => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.style.transform = `translate(${cam.x}px, ${cam.y}px) scale(${cam.k})`;
+  });
+
+  // Don't render if no mask editing or focus disabled
+  if (!maskEditing || !maskFocus || !activeFrame || !layer || !mask || !canvasW || !canvasH) return null;
+
+  return (
+    <div
+      ref={containerRef}
+      className="absolute top-0 left-0 pointer-events-none"
+      style={{
+        transformOrigin: '0 0',
+        willChange: 'transform',
+      }}
+    >
+      <canvas
+        ref={canvasRef}
+        width={canvasW}
+        height={canvasH}
+        className="block"
+        style={{
+          width: `${canvasW}px`,
+          height: `${canvasH}px`,
         }}
       />
     </div>

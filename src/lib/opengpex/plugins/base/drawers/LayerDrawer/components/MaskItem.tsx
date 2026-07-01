@@ -25,17 +25,16 @@ import React from "react";
 import {
   Eye,
   EyeOff,
-  Lock,
   Trash2,
   Maximize2,
-  Scissors,
-  Minus,
-  VenetianMask,
+  Pencil,
 } from "lucide-react";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
-import ImageAsset from "@opengpex/editor/widgets/ImageAsset";
-import { useEditorState, useEditorServices } from "@opengpex/editor/core/context";
-import { useLayerCommands } from "../hooks";
+import {
+  useEditorState,
+  useEditorServices,
+} from "@opengpex/editor/core/context";
+import { useLayerCommands, useMaskEdit } from "../hooks";
 import { VectorMask, BitmapMask } from "@opengpex/editor/core/types";
 
 export const MaskItem = React.memo(
@@ -43,70 +42,44 @@ export const MaskItem = React.memo(
     layerId,
     mask,
     index,
-    onCollapse,
   }: {
     layerId: string;
     mask: VectorMask | BitmapMask;
     index: number;
-    onCollapse?: () => void;
   }) => {
     const { activeFrame } = useEditorState();
     const { actions } = useEditorServices();
-    const { maskToggle, maskRemove, maskSyncOverlayCmd } = useLayerCommands();
+    const { maskToggle, maskRemove, syncMaskCmd } = useLayerCommands();
+    const { maskEditing, toggleMaskEdit } = useMaskEdit();
 
     const isBitmap = "src" in mask;
+    const isEditing =
+      isBitmap &&
+      maskEditing?.layerId === layerId &&
+      maskEditing?.maskId === mask.id;
 
     return (
       <div
-        className="flex items-center gap-2 px-2 py-1 rounded-md transition-all h-[28px] group/mask select-none bg-[var(--bg-stage)]/30 hover:bg-[var(--bg-stage)]/60 border border-[var(--border-subtle)]/60 hover:border-[var(--border-subtle)] shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+        className={`flex items-center gap-2 px-2 py-1 rounded-md transition-all h-[28px] group/mask select-none shadow-[0_1px_2px_rgba(0,0,0,0.02)] ${
+          isEditing
+            ? "bg-emerald-500/10 border border-emerald-500/50 ring-1 ring-emerald-500/20"
+            : "bg-[var(--bg-stage)]/30 hover:bg-[var(--bg-stage)]/60 border border-[var(--border-subtle)]/60 hover:border-[var(--border-subtle)]"
+        }`}
       >
-        {onCollapse && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onCollapse();
-            }}
-            className="w-4 h-4 flex items-center justify-center shrink-0 rounded hover:bg-[var(--bg-stage)]/60 transition-colors group/collapse outline-none"
-            title="Collapse Masks"
-          >
-            <Minus
-              size={10}
-              strokeWidth={3}
-              className="text-[var(--text-muted)] group-hover/collapse:text-[var(--text-main)]"
-            />
-          </button>
-        )}
-        
+
         {isBitmap ? (
           <div
-            className={`w-[18px] h-[18px] rounded-sm overflow-hidden flex items-center justify-center shrink-0 border border-emerald-500/20 bg-black transition-all ${!mask.enabled ? "opacity-30 grayscale" : "opacity-100"}`}
+            className={`w-[18px] h-[18px] rounded-sm flex items-center justify-center shrink-0 border border-emerald-500/20 bg-black text-white text-[10px] font-black tracking-tighter transition-all ${!mask.enabled ? "opacity-30 grayscale" : "opacity-100"}`}
           >
-            {mask.src ? (
-              <ImageAsset
-                assetId={mask.assetId}
-                src={mask.src}
-                className="w-full h-full object-cover select-none pointer-events-none"
-              />
-            ) : (
-              <VenetianMask size={10} className="text-emerald-500" />
-            )}
+            B
           </div>
         ) : (
           <div
-            className={`w-[18px] h-[18px] rounded-sm flex items-center justify-center shrink-0 border transition-all
-              ${mask.inverted
-                ? "border-rose-500/20 bg-rose-500/5 text-rose-500"
-                : "border-emerald-500/20 bg-emerald-500/5 text-emerald-500"
-              }
-              ${!mask.enabled ? "opacity-30 grayscale" : "opacity-100"}`}
+            className={`w-[18px] h-[18px] rounded-sm flex items-center justify-center shrink-0 border ${
+              mask.inverted ? "border-rose-500/20" : "border-emerald-500/20"
+            } bg-black text-white text-[10px] font-black tracking-tighter transition-all ${!mask.enabled ? "opacity-30 grayscale" : "opacity-100"}`}
           >
-            {mask.reserved ? (
-              <Lock size={10} />
-            ) : mask.inverted ? (
-              <Scissors size={10} />
-            ) : (
-              <VenetianMask size={10} />
-            )}
+            V
           </div>
         )}
 
@@ -115,32 +88,68 @@ export const MaskItem = React.memo(
             className={`w-1.5 h-1.5 rounded-full shrink-0 ${mask.inverted ? "bg-rose-500" : "bg-emerald-500"} ${!mask.enabled ? "opacity-30" : "opacity-100"}`}
           />
           <span className="text-[10px] font-bold text-[var(--text-main)] truncate select-none leading-none tracking-tight">
-            {mask.inverted ? "Inverted " : ""}{isBitmap ? "Bitmap Mask" : "Mask"} #{index + 1}
+            {"tag" in mask && mask.tag?.toLowerCase() === "drilled"
+              ? "Mask Cutouts"
+              : (isBitmap && mask.inverted ? "Inverted " : "") + `Mask #${index + 1}`}
           </span>
+          {isEditing && (
+            <span className="text-[9px] font-semibold text-emerald-500 shrink-0 leading-none">
+              Editing
+            </span>
+          )}
         </div>
 
-        <div className="flex items-center gap-0 opacity-0 group-hover/mask:opacity-100 transition-opacity">
+        <div
+          className={`flex items-center gap-0 transition-opacity ${isEditing ? "opacity-100" : "opacity-0 group-hover/mask:opacity-100"}`}
+        >
+          {isBitmap && (
+            <ActionButton
+              icon={<Pencil size={11} />}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleMaskEdit(layerId, mask.id);
+              }}
+              variant="glass"
+              size="sm"
+              className={`w-5 h-5 ${isEditing ? "text-emerald-500" : ""}`}
+            />
+          )}
+
           {!isBitmap && (
             <ActionButton
               icon={<Maximize2 size={11} />}
               onClick={(e) => {
                 e.stopPropagation();
-                maskSyncOverlayCmd?.execute({ frameId: activeFrame?.id, layerId, maskId: mask.id });
+                syncMaskCmd?.execute({
+                  frameId: activeFrame?.id,
+                  layerId,
+                  maskId: mask.id,
+                });
               }}
               variant="glass"
               size="sm"
               className="w-5 h-5"
             />
           )}
-          
-          {!( "reserved" in mask && mask.reserved ) && (
+
+          {!("reserved" in mask && mask.reserved) && (
             <>
               <ActionButton
-                icon={mask.enabled ? <Eye size={11} /> : <EyeOff size={11} className="text-rose-500" />}
+                icon={
+                  mask.enabled ? (
+                    <Eye size={11} />
+                  ) : (
+                    <EyeOff size={11} className="text-rose-500" />
+                  )
+                }
                 onClick={(e) => {
                   e.stopPropagation();
                   if (isBitmap) {
-                    actions.adv.layer.bitmapMask.toggle.execute({ frameId: activeFrame?.id, layerId, maskId: mask.id });
+                    actions.adv.layer.bitmapMask.toggle.execute({
+                      frameId: activeFrame?.id,
+                      layerId,
+                      maskId: mask.id,
+                    });
                   } else {
                     maskToggle.execute({ layerId, maskId: mask.id });
                   }
@@ -154,7 +163,11 @@ export const MaskItem = React.memo(
                 onClick={(e) => {
                   e.stopPropagation();
                   if (isBitmap) {
-                    actions.adv.layer.bitmapMask.remove.execute({ frameId: activeFrame?.id, layerId, maskId: mask.id });
+                    actions.adv.layer.bitmapMask.remove.execute({
+                      frameId: activeFrame?.id,
+                      layerId,
+                      maskId: mask.id,
+                    });
                   } else {
                     maskRemove.execute({ layerId, maskId: mask.id });
                   }

@@ -21,8 +21,9 @@ import { InteractionHandler, InteractionEvent, Layer, Frame, asLocalRect, asLoca
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
+import { LayerDrawerAPI, type MaskEditingSignal } from '../../drawers/LayerDrawer/protocols';
 import { BRUSH_OVERLAY_SIGNAL_IS_STROKING, DEFAULT_BRUSH_SIZE, _CMD_BAKE_UID } from './protocols';
-import { StrokeSmoother, drawSmoothSegment, Point2D } from './smoothing';
+import { StrokeSmoother, Point2D } from './smoothing';
 import { stampBrush, stampAlongPath } from './hardness';
 import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
 import { PixelUtils } from '@opengpex/editor/core/engine/PixelUtils';
@@ -125,12 +126,16 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
       const pointerEvent = e.nativeEvent as PointerEvent;
       const isCmdPressed = pointerEvent.metaKey || pointerEvent.ctrlKey;
 
-      const isEraser = craft === 'eraser' && !isCmdPressed;
-      const isRestore = craft === 'restore' || (craft === 'eraser' && isCmdPressed);
+      const isEraser = craft === 'eraser';
+      const isRestore = craft === 'restore';
       const isMaskEdit = craft === 'eraser' || craft === 'restore';
 
-      // Detect Cmd/Ctrl modifier: force creation of new Paint Layer (only meaningful for brush mode)
+      // Detect Cmd/Ctrl modifier:
+      //   - brush mode: force creation of new Paint Layer
+      //   - eraser mode + Cmd: force creation of new Bitmap Mask (skip editing existing)
+      //   - restore mode + Cmd: no-op (restore always edits existing, creating empty mask is meaningless)
       forceNewLayerFlag = craft === 'brush' && isCmdPressed;
+      const forceNewMask = isEraser && isCmdPressed;
 
       // Read brush parameters (from pluginConfig)
       const craftConfig = e.state.pluginConfig[CraftDrawerAPI.configKey] || {};
@@ -213,8 +218,20 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
         }
         const targetLayer = targetLayerInfo.layer;
 
-        const activeMask = targetLayer.bitmapMasks?.[0];
-        const maskId = activeMask?.id || `mask-${Date.now()}`;
+        // Mask target selection strategy:
+        //   1. Check maskEditing signal (from LayerDrawerAPI)
+        //   2. Fallback to topmost (last in array) enabled mask
+        //   3. Or force create new mask (Eraser + Cmd)
+        const maskEditing = e.state.interaction.signals[LayerDrawerAPI.signals.maskEditing] as MaskEditingSignal;
+        const hasFocusedMask = maskEditing && maskEditing.layerId === targetLayer.id;
+
+        const enabledMasks = targetLayer.bitmapMasks?.filter(m => m.enabled) ?? [];
+        const activeMask = forceNewMask
+          ? undefined
+          : (hasFocusedMask
+              ? targetLayer.bitmapMasks?.find(m => m.id === maskEditing.maskId)
+              : (enabledMasks.length > 0 ? enabledMasks[enabledMasks.length - 1] : undefined));
+        const maskId = activeMask?.id || (hasFocusedMask ? maskEditing.maskId : `mask-${Date.now()}`);
         const localMatrix = e.geometry.transform.getLayerLocalMatrix(targetLayer, frame);
         const localMatrixInverse = localMatrix.inverse();
 
@@ -298,24 +315,10 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
             localBrushSize,
           };
 
-          // Draw initial circle dot
+          // Draw initial stamp dot (using stamp engine for hardness support)
           maskCtx.save();
-          maskCtx.lineCap = 'round';
-          maskCtx.lineJoin = 'round';
-          maskCtx.lineWidth = localBrushSize;
-          maskCtx.globalAlpha = brushOpacity / 100;
-          if (isEraser) {
-            maskCtx.globalCompositeOperation = 'destination-out';
-            maskCtx.fillStyle = '#FFFFFF';
-            maskCtx.strokeStyle = '#FFFFFF';
-          } else {
-            maskCtx.globalCompositeOperation = 'source-over';
-            maskCtx.fillStyle = '#FFFFFF';
-            maskCtx.strokeStyle = '#FFFFFF';
-          }
-          maskCtx.beginPath();
-          maskCtx.arc(localStartPoint.x, localStartPoint.y, localBrushSize / 2, 0, Math.PI * 2);
-          maskCtx.fill();
+          maskCtx.globalCompositeOperation = isEraser ? 'destination-out' : 'source-over';
+          stampBrush(maskCtx as unknown as OffscreenCanvasRenderingContext2D, localStartPoint.x, localStartPoint.y, localBrushSize, brushHardness, '#FFFFFF', brushOpacity / 100);
           maskCtx.restore();
 
           smoother = new StrokeSmoother();
@@ -367,41 +370,43 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
           stampAlongPath(ctx, [newPoint], strokeBuffer);
         }
       } else {
-        const { maskCtx, localMatrixInverse, localBrushSize, brushOpacity, maskCanvas, maskId, targetLayerId } = strokeBuffer;
+        const { maskCtx, localMatrixInverse, localBrushSize, maskCanvas, maskId, targetLayerId } = strokeBuffer;
         if (maskCtx && localMatrixInverse && localBrushSize && maskCanvas && maskId && targetLayerId) {
-          const localLastPoint = localMatrixInverse.apply(lastDrawnPoint!);
           const localSmoothPoints = smoothPoints.map(p => localMatrixInverse.apply(p));
 
+          // Determine erase vs restore from current craft signal (toggled via Tab key)
           const craft = e.state.interaction.signals[ACTIVE_CRAFT_KEY] as string;
-          const pointerEvent = e.nativeEvent as PointerEvent;
-          const isCmdPressed = pointerEvent.metaKey || pointerEvent.ctrlKey;
-          const currentIsRestore = craft === 'restore' || (craft === 'eraser' && isCmdPressed);
+          const currentIsRestore = craft === 'restore';
 
+          // Use stamp engine along path (supports hardness)
           maskCtx.save();
-          maskCtx.lineCap = 'round';
-          maskCtx.lineJoin = 'round';
-          maskCtx.lineWidth = localBrushSize;
-          maskCtx.globalAlpha = brushOpacity / 100;
-          if (!currentIsRestore) {
-            maskCtx.globalCompositeOperation = 'destination-out';
-            maskCtx.strokeStyle = '#FFFFFF';
-            maskCtx.fillStyle = '#FFFFFF';
-          } else {
-            maskCtx.globalCompositeOperation = 'source-over';
-            maskCtx.strokeStyle = '#FFFFFF';
-            maskCtx.fillStyle = '#FFFFFF';
+          maskCtx.globalCompositeOperation = currentIsRestore ? 'source-over' : 'destination-out';
+
+          // Build stamp state with local-space brushSize and white color
+          const maskStampState = {
+            lastStampX: strokeBuffer.lastStampX,
+            lastStampY: strokeBuffer.lastStampY,
+            accDistance: strokeBuffer.accDistance,
+            stampSpacing: strokeBuffer.stampSpacing,
+            brushSize: localBrushSize,
+            brushHardness: strokeBuffer.brushHardness,
+            brushColor: '#FFFFFF',
+            brushOpacity: strokeBuffer.brushOpacity,
+          };
+
+          if (localSmoothPoints.length > 0) {
+            stampAlongPath(maskCtx as unknown as OffscreenCanvasRenderingContext2D, localSmoothPoints, maskStampState);
+            lastDrawnPoint = smoothPoints[smoothPoints.length - 1];
+          } else if (points.length === 2) {
+            const localNewPoint = localMatrixInverse.apply(newPoint);
+            stampAlongPath(maskCtx as unknown as OffscreenCanvasRenderingContext2D, [localNewPoint], maskStampState);
           }
 
-          if (localSmoothPoints.length > 0 && localLastPoint) {
-            drawSmoothSegment(maskCtx, localLastPoint, localSmoothPoints);
-            lastDrawnPoint = smoothPoints[smoothPoints.length - 1];
-          } else if (points.length === 2 && localLastPoint) {
-            const localNewPoint = localMatrixInverse.apply(newPoint);
-            maskCtx.beginPath();
-            maskCtx.moveTo(localLastPoint.x, localLastPoint.y);
-            maskCtx.lineTo(localNewPoint.x, localNewPoint.y);
-            maskCtx.stroke();
-          }
+          // Write back stamp state
+          strokeBuffer.lastStampX = maskStampState.lastStampX;
+          strokeBuffer.lastStampY = maskStampState.lastStampY;
+          strokeBuffer.accDistance = maskStampState.accDistance;
+
           maskCtx.restore();
 
           // Trigger real-time fast-track override
@@ -429,30 +434,32 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
           if (!isMaskEdit && currentStroke.ctx) {
             stampAlongPath(currentStroke.ctx, finalSegment, currentStroke);
           } else if (isMaskEdit && currentStroke.maskCtx && currentStroke.localMatrixInverse && currentStroke.localBrushSize) {
-            const localLastPoint = currentStroke.localMatrixInverse.apply(lastDrawnPoint);
             const localFinalSegment = finalSegment.map(p => currentStroke.localMatrixInverse!.apply(p));
 
-            const { maskCtx, localBrushSize, brushOpacity } = currentStroke;
+            const { maskCtx, localBrushSize } = currentStroke;
+            // Determine erase vs restore from current craft signal (toggled via Tab key)
             const craft = e.state.interaction.signals[ACTIVE_CRAFT_KEY] as string;
-            const pointerEvent = e.nativeEvent as PointerEvent;
-            const isCmdPressed = pointerEvent.metaKey || pointerEvent.ctrlKey;
-            const currentIsRestore = craft === 'restore' || (craft === 'eraser' && isCmdPressed);
+            const currentIsRestore = craft === 'restore';
 
             maskCtx.save();
-            maskCtx.lineCap = 'round';
-            maskCtx.lineJoin = 'round';
-            maskCtx.lineWidth = localBrushSize;
-            maskCtx.globalAlpha = brushOpacity / 100;
-            if (!currentIsRestore) {
-              maskCtx.globalCompositeOperation = 'destination-out';
-              maskCtx.strokeStyle = '#FFFFFF';
-              maskCtx.fillStyle = '#FFFFFF';
-            } else {
-              maskCtx.globalCompositeOperation = 'source-over';
-              maskCtx.strokeStyle = '#FFFFFF';
-              maskCtx.fillStyle = '#FFFFFF';
-            }
-            drawSmoothSegment(maskCtx, localLastPoint, localFinalSegment);
+            maskCtx.globalCompositeOperation = currentIsRestore ? 'source-over' : 'destination-out';
+
+            const maskStampState = {
+              lastStampX: currentStroke.lastStampX,
+              lastStampY: currentStroke.lastStampY,
+              accDistance: currentStroke.accDistance,
+              stampSpacing: currentStroke.stampSpacing,
+              brushSize: localBrushSize,
+              brushHardness: currentStroke.brushHardness,
+              brushColor: '#FFFFFF',
+              brushOpacity: currentStroke.brushOpacity,
+            };
+            stampAlongPath(maskCtx as unknown as OffscreenCanvasRenderingContext2D, localFinalSegment, maskStampState);
+
+            currentStroke.lastStampX = maskStampState.lastStampX;
+            currentStroke.lastStampY = maskStampState.lastStampY;
+            currentStroke.accDistance = maskStampState.accDistance;
+
             maskCtx.restore();
           }
           strokeVersion++;
@@ -591,7 +598,10 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
               img.src = asset.url;
             });
 
-            const existingMask = targetLayer.bitmapMasks?.[0];
+            // Use the maskId captured in onStart (from the first enabled bitmap mask)
+            const existingMask = currentStroke.maskId
+              ? targetLayer.bitmapMasks?.find(m => m.id === currentStroke.maskId)
+              : targetLayer.bitmapMasks?.find(m => m.enabled);
             if (existingMask) {
               await e.actions.adv.layer.bitmapMask.update.execute({
                 frameId: frame.id,

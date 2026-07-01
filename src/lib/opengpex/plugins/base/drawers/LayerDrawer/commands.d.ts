@@ -8,10 +8,9 @@
  */
 
 import type { CommandInstance } from '@opengpex/editor/core/types';
-import type { Layer } from '@opengpex/editor/core/types';
 
-/** Type map for usePluginCommands<LayerCommandsMap>() */
-export interface LayerCommandsMap {
+/** Type map for usePluginCommands<LayerDrawerCommandsMap>() */
+export interface LayerDrawerCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   reorderCmd: CommandInstance<{ frameId: string; layers: Layer[] }>;
   removeCmd: CommandInstance<{ frameId?: string; layerId?: string }>;
@@ -19,5 +18,5 @@ export interface LayerCommandsMap {
   lockCmd: CommandInstance<{ frameId?: string; layerId: string; locked: boolean }>;
   renameCmd: CommandInstance<{ frameId?: string; layerId: string; name: string }>;
   syncOverlayCmd: CommandInstance<{ frameId?: string; layerId: string }>;
-  maskSyncOverlayCmd: CommandInstance<{ frameId?: string; layerId: string; maskId: string }>;
+  syncMaskCmd: CommandInstance<{ frameId?: string; layerId: string; maskId: string }>;
 }

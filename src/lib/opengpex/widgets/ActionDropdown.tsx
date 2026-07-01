@@ -24,11 +24,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import EditorPortal from './Portal';
 
 export interface ActionOption {
-  label: string;
-  value: string;
+  label?: string;
+  value?: string;
   description?: string;
   icon?: React.ReactNode;
   variant?: 'default' | 'danger' | 'success';
+  divider?: boolean;
 }
 
 interface ActionDropdownProps {
@@ -63,30 +64,38 @@ export default function ActionDropdown({
         setIsOpen(false);
       }
     };
+
     if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        setCoords({
-          top: rect.bottom,
-          left: rect.left,
-          width: rect.width
-        });
-      }
+      document.addEventListener('click', handleClickOutside);
     }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
   }, [isOpen]);
 
-  const toggle = (e: React.MouseEvent) => {
+  const updateCoords = () => {
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      setCoords({
+        top: rect.top + window.scrollY,
+        left: rect.left + window.scrollX,
+        width: rect.width
+      });
+    }
+  };
+
+  const handleTriggerClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!disabled) setIsOpen(!isOpen);
+    if (disabled) return;
+    updateCoords();
+    setIsOpen(!isOpen);
   };
 
   return (
     <div ref={containerRef} className={`relative inline-block ${className}`}>
       {/* Trigger Area */}
       <div 
-        onClick={toggle}
+        onClick={handleTriggerClick}
         className={`cursor-pointer select-none transition-all ${disabled ? 'opacity-50 pointer-events-none' : ''}`}
       >
         {typeof trigger === 'function' ? trigger(isOpen) : trigger}
@@ -117,37 +126,47 @@ export default function ActionDropdown({
               `}
             >
               <div className="flex flex-col gap-0.5">
-                {options.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSelect(opt.value);
-                      setIsOpen(false);
-                    }}
-                    className={`
-                      flex items-center justify-between gap-3 w-full px-2 py-1.5 rounded-lg
-                      text-[9px] font-black uppercase tracking-tight text-left
-                      transition-all active:scale-[0.98] cursor-pointer
-                      ${opt.variant === 'danger' 
-                        ? 'text-rose-500 hover:bg-rose-500/10' 
-                        : opt.variant === 'success'
-                          ? 'text-emerald-500 hover:bg-emerald-500/10'
-                          : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-100'
-                      }
-                    `}
-                  >
-                    <div className="flex items-center gap-2">
-                      {opt.icon && <span className="opacity-70 flex items-center justify-center scale-90">{opt.icon}</span>}
-                      <span>{opt.label}</span>
-                    </div>
-                    {opt.description && (
-                      <span className="text-[7.5px] font-bold opacity-40 tabular-nums">
-                        {opt.description}
-                      </span>
-                    )}
-                  </button>
-                ))}
+                {options.map((opt, idx) => {
+                  if (opt.divider) {
+                    return (
+                      <div
+                        key={`div-${idx}`}
+                        className="my-0.5 border-t border-zinc-200 dark:border-white/10"
+                      />
+                    );
+                  }
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (opt.value) onSelect(opt.value);
+                        setIsOpen(false);
+                      }}
+                      className={`
+                        flex items-center justify-between gap-3 w-full px-2 py-1.5 rounded-lg
+                        text-[9px] font-black uppercase tracking-tight text-left
+                        transition-all active:scale-[0.98] cursor-pointer
+                        ${opt.variant === 'danger' 
+                          ? 'text-rose-500 hover:bg-rose-500/10' 
+                          : opt.variant === 'success'
+                            ? 'text-emerald-500 hover:bg-emerald-500/10'
+                            : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-100'
+                        }
+                      `}
+                    >
+                      <div className="flex items-center gap-2">
+                        {opt.icon && <span className="opacity-70 flex items-center justify-center scale-90">{opt.icon}</span>}
+                        <span>{opt.label}</span>
+                      </div>
+                      {opt.description && (
+                        <span className="text-[7.5px] font-bold opacity-40 tabular-nums">
+                          {opt.description}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </motion.div>
           </EditorPortal>

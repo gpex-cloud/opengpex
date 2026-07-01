@@ -84,7 +84,8 @@ export const LayerItem = React.memo(
     const isActive =
       layer.id === activeLayer?.id || activeLayer?.parentId === layer.id;
     const childLayers = getChildLayers(layer.id);
-    const hasSubLayers = childLayers.length > 0;
+    // Only show sub-layers dot if there are non-internal (exchange/frag) child layers
+    const hasSubLayers = childLayers.some(cl => cl.role !== 'exchange' && cl.role !== 'frag');
     const hasMasks = !!(
       (layer.vectorMasks && layer.vectorMasks.length > 0) ||
       (layer.bitmapMasks && layer.bitmapMasks.length > 0)
@@ -224,13 +225,16 @@ export const LayerItem = React.memo(
  ${isActive ? "text-[var(--text-main)]" : "text-[var(--text-muted)] group-hover/layer:text-[var(--text-main)]"}
 `}
                 />
+                {/* Indicator dots: amber = has user sub-layers, teal = has masks.
+                    Only shown when the layer has collapsed content underneath.
+                    exchange/frag sub-layers (internal clip system) are excluded. */}
                 {(hasSubLayers || hasMasks) && (
                   <div className="flex gap-0.5 shrink-0 opacity-40">
                     {hasSubLayers && (
-                      <div className="w-1 h-1 rounded-full bg-blue-400" />
+                      <div className="w-1 h-1 rounded-full bg-amber-400" />
                     )}
                     {hasMasks && (
-                      <div className="w-1 h-1 rounded-full bg-emerald-500" />
+                      <div className="w-1 h-1 rounded-full" style={{ backgroundColor: '#00D5BE' }} />
                     )}
                   </div>
                 )}
@@ -318,14 +322,13 @@ export const LayerItem = React.memo(
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="ml-6 mr-1 mt-1 mb-1.5 pl-2.5 border-l-2 border-[var(--border-light)] flex flex-col gap-1 overflow-hidden"
+              className="ml-4 mr-1 mt-1 mb-1.5 pl-2.5 border-l-2 border-[var(--border-light)] flex flex-col gap-1 overflow-hidden"
             >
               {childLayers.map((subLayer, idx) => (
                 <SubLayerItem
                   key={subLayer.id}
                   layerId={subLayer.id}
                   index={idx}
-                  onCollapse={() => setIsSubLayersExpanded(false)}
                 />
               ))}
             </motion.div>
@@ -338,7 +341,7 @@ export const LayerItem = React.memo(
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="ml-6 mr-1 mt-1 mb-1.5 pl-2.5 border-l-2 border-emerald-500/25 dark:border-emerald-500/40 flex flex-col gap-1 overflow-hidden"
+              className="ml-4 mr-1 mt-1 mb-1.5 pl-2.5 border-l-2 border-emerald-500/25 dark:border-emerald-500/40 flex flex-col gap-1 overflow-hidden"
             >
               {layer.vectorMasks &&
                 [...layer.vectorMasks].reverse().map((mask: VectorMask) => {
@@ -351,7 +354,6 @@ export const LayerItem = React.memo(
                       layerId={layer.id}
                       mask={mask}
                       index={originalIdx}
-                      onCollapse={() => setIsMasksExpanded(false)}
                     />
                   );
                 })}
@@ -366,7 +368,6 @@ export const LayerItem = React.memo(
                       layerId={layer.id}
                       mask={mask}
                       index={originalIdx}
-                      onCollapse={() => setIsMasksExpanded(false)}
                     />
                   );
                 })}

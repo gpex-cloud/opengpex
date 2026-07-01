@@ -100,8 +100,8 @@ export function useCraftButtonGroup() {
 
   const handleButtonClick = useCallback(
     (buttonType: CraftType) => {
-      if (activeCraft === buttonType) {
-        // Rule 1: Toggle off — current tool -> deactivate
+      if (activeCraft === buttonType || (buttonType === 'eraser' && activeCraft === 'restore')) {
+        // Rule 1: Toggle off — current tool -> deactivate (restore is sub-mode of eraser)
         deactivateCraftCmd?.execute();
       } else if (activeCraft === null) {
         // Rule 2: No tool active -> activate target tool
@@ -399,7 +399,7 @@ export function useBrushPanel() {
   const [selfConfig, setSelfConfig] = usePluginSelfConfig<CraftDrawerConfig>();
 
   const activeCraft = (activeCraftSignal?.value ?? null) as ActiveCraft;
-  const isEraser = activeCraft === 'eraser';
+  const isEraser = activeCraft === 'eraser' || activeCraft === 'restore';
 
   const brushSize = selfConfig.brushSize ?? 12;
   const brushOpacity = selfConfig.brushOpacity ?? 100;

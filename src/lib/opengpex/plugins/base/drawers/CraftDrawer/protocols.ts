@@ -73,7 +73,7 @@ export const CraftDrawerAPI = {
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-export type CraftType = 'text' | 'brush' | 'eraser';
+export type CraftType = 'text' | 'brush' | 'eraser' | 'restore';
 export type ActiveCraft = CraftType | null;
 
 /** Pending text style preset (persisted across tool activations) */

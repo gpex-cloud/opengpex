@@ -74,6 +74,23 @@ export function useBrushOverlayState() {
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isBrushMode, actions]);
 
+  // Tab key toggles eraser ↔ restore (only when in eraser/restore craft mode)
+  useEffect(() => {
+    if (activeCraft !== 'eraser' && activeCraft !== 'restore') return;
+
+    const handleTab = (e: KeyboardEvent) => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        e.stopPropagation();
+        const nextCraft = activeCraft === 'eraser' ? 'restore' : 'eraser';
+        actions.setStateSignal(CraftDrawerAPI.signals.activeCraft, nextCraft);
+      }
+    };
+
+    document.addEventListener('keydown', handleTab);
+    return () => document.removeEventListener('keydown', handleTab);
+  }, [activeCraft, actions]);
+
   // Restore cursor on component unmount
   useEffect(() => {
     return () => {
@@ -107,6 +124,7 @@ export function useBrushCursorTracking(
   cursorRef: React.RefObject<HTMLDivElement | null>,
   isActive: boolean,
   brushSize: number = DEFAULT_BRUSH_SIZE,
+  activeCraft: string = 'brush',
 ) {
   // Store latest mouse screen coordinates (relative to viewport container)
   const pointerRef = useRef({ x: 0, y: 0 });
@@ -223,7 +241,13 @@ export function useBrushCursorTracking(
     };
   }, [isActive, cursorRef]);
 
-  // ─── Cmd/Ctrl modifier key listening: control visibility of "+" new layer badge ────────────────────────────
+  // Keep a ref to the latest activeCraft for use in event handlers (avoids stale closure)
+  const activeCraftRef = useRef(activeCraft);
+  useEffect(() => {
+    activeCraftRef.current = activeCraft;
+  }, [activeCraft]);
+
+  // ─── Cmd/Ctrl modifier key listening: control visibility of "+" new layer/mask badge ────────────────────────────
   useEffect(() => {
     if (!isActive) return;
 
@@ -238,6 +262,8 @@ export function useBrushCursorTracking(
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Meta' || e.key === 'Control') {
+        // Restore mode: Cmd has no effect, don't show badge
+        if (activeCraftRef.current === 'restore') return;
         setBadgeVisibility(true);
       }
     };
