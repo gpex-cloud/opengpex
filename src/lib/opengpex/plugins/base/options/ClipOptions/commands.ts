@@ -85,9 +85,9 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
 
 /**
  * Cycle the active crop tool by `step` (+1 forward, -1 backward) within
- * the declaration order of `CROP_TOOL_STRATEGIES`. Shared by `toggleMode`
- * (Space) and `cycleToolBackward` (Shift+Space) so the dispatch path,
- * undo semantics and signal-read freshness stay in one place.
+ * the declaration order of `CROP_TOOL_STRATEGIES`. Shared by
+ * `cycleToolForward` (Tab) and `cycleToolBackward` (Shift+Tab) so the
+ * dispatch path, undo semantics and signal-read freshness stay in one place.
  *
  * We delegate the actual write to `setCropTool` (via the ClipOptions
  * instance UID) rather than calling `scoped.setSignal` directly, because
@@ -117,80 +117,71 @@ function cycleCropTool(ctx: EditorContextValue, step: 1 | -1): void {
  */
 export const CLIP_OPTIONS_COMMANDS = {
   /**
-   * Space — context-sensitive single-key handler:
+   * Space — pure toggle between pan and clip mode:
    *   1) From any non-clip mode → enter clip mode (no tool change).
-   *   2) Already in clip mode  → cycle through `CROP_TOOL_STRATEGIES`
-   *      in declaration order (rect → ellipse → lasso → wand → rect → …).
+   *   2) Already in clip mode  → exit clip mode (back to pan).
    *
-   * Why fold cycling into the same key as enter? Because the user's mental
-   * model is "Space toggles between work-modes": the first press lands them
-   * in clip-with-the-last-tool, subsequent presses navigate within clip
-   * without forcing a return trip to the toolbar Popover. Re-Canvas guard
-   * (`forbiddenInReCanvas`) is honored — when Re-Canvas is active we skip
-   * irregular tools so we don't push the user into an immediately-coerced
-   * state (the Re-Canvas interceptor would yank them back to rect anyway).
+   * Tool cycling is handled separately by Tab / Shift+Tab commands
+   * (`cycleToolForward` / `cycleToolBackward`), keeping Space as a clean
+   * enter/exit toggle — matching the mental model of a play/pause button.
    *
-   * Exit is always `Esc` (`exitClip`); Space never leaves clip mode.
+   * Re-Canvas guard: when Re-Canvas is active, Space is a no-op. Esc
+   * remains the single exit (handled by `exitClip` below — it closes
+   * Re-Canvas first, then leaves clip if applicable).
    */
   toggleMode: {
     id: P.CMD_TOGGLE_MODE,
-    name: 'Enter / Cycle Clip Tool',
+    name: 'Toggle Clip Mode',
     execute: (ctx: EditorContextValue) => {
-      // Re-Canvas is a fully *orthogonal* modal — it sits on top of pan and
-      // owns its own visual chrome (rose-tinted rect on `canvasCropBox`).
-      // We must NOT let Space leak into it, otherwise:
-      //   1) "first press = enter clip" would yank the user out of pure
-      //      Re-Canvas into a clip + Re-Canvas hybrid;
-      //   2) "subsequent press = cycle tool" would write `SIGNAL_CROP_TOOL`,
-      //      `setCropTool` would project shape onto `canvasCropBox` (since
-      //      `isReCanvas` is true), and the rose-tinted rect would flip to
-      //      a circle. Both are confusing and violate the §3.2 orthogonality
-      //      contract.
-      // Solution: when Re-Canvas is active, Space is a no-op. Esc remains
-      // the single exit (handled by `exitClip` below — it closes Re-Canvas
-      // first, then leaves clip if applicable).
+      // Re-Canvas is a fully *orthogonal* modal — Space must not leak into it.
       if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
 
-      // First press: just enter clip mode, keep current tool.
+      // First press: enter clip mode, keep current tool.
       if (ctx.state.interaction.interactionMode !== 'clip') {
         ctx.actions.setInteraction({ interactionMode: 'clip' });
         return;
       }
 
-      // Subsequent presses: cycle tool forward.
-      cycleCropTool(ctx, +1);
+      // Already in clip mode: exit (pure toggle semantics).
+      exitClipMode(ctx);
     },
     shortcut: { key: ' ' }
   } as EditorCommand<void, void>,
 
   /**
-   * Shift+Space — reverse cycle through clip tools (rect ← ellipse ← lasso
-   * ← wand ← rect …). Mirror of `toggleMode`'s subsequent-press behavior
-   * for users who overshoot the desired tool.
+   * Tab — cycle through clip tools forward while already in clip mode
+   * (rect → ellipse → lasso → wand → rect …).
    *
-   * Behavior contract (parity with `toggleMode`):
-   *   1) Re-Canvas active            → no-op (orthogonal modal owns Space).
-   *   2) Not in clip mode            → enter clip mode, no tool change.
-   *      (Same as plain Space; Shift accidentally held while entering
-   *      shouldn't punish the user with a tool jump.)
-   *   3) In clip mode                → cycle backward via `setCropTool`.
+   * Only active when `interactionMode === 'clip'`; no-op in any other mode.
+   * Re-Canvas guard: no-op when active (Re-Canvas is rect-only).
+   */
+  cycleToolForward: {
+    id: P.CMD_CYCLE_TOOL_FORWARD,
+    name: 'Cycle Clip Tool (Forward)',
+    execute: (ctx: EditorContextValue) => {
+      if (ctx.state.interaction.interactionMode !== 'clip') return;
+      if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
+      cycleCropTool(ctx, +1);
+    },
+    shortcut: { key: 'Tab' }
+  } as EditorCommand<void, void>,
+
+  /**
+   * Shift+Tab — reverse cycle through clip tools while already in clip mode
+   * (rect ← ellipse ← lasso ← wand ← rect …).
    *
-   * Implementation shares `cycleCropTool` with `toggleMode`, so the
-   * Re-Canvas-skip filter, undo semantics, and signal-read freshness all
-   * stay in one place.
+   * Only active when `interactionMode === 'clip'`; no-op in any other mode.
+   * Re-Canvas guard: no-op when active (Re-Canvas is rect-only).
    */
   cycleToolBackward: {
     id: P.CMD_CYCLE_TOOL_BACKWARD,
     name: 'Cycle Clip Tool (Backward)',
     execute: (ctx: EditorContextValue) => {
+      if (ctx.state.interaction.interactionMode !== 'clip') return;
       if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
-      if (ctx.state.interaction.interactionMode !== 'clip') {
-        ctx.actions.setInteraction({ interactionMode: 'clip' });
-        return;
-      }
       cycleCropTool(ctx, -1);
     },
-    shortcut: { key: ' ', shift: true }
+    shortcut: { key: 'Tab', shift: true }
   } as EditorCommand<void, void>,
 
 

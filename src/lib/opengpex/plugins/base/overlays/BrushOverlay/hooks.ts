@@ -262,7 +262,7 @@ export function useBrushCursorTracking(
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Meta' || e.key === 'Control') {
-        // Restore mode: Cmd has no effect, don't show badge
+        // Restore mode: Cmd has no effect (can't create new mask), badge stays as-is
         if (activeCraftRef.current === 'restore') return;
         setBadgeVisibility(true);
       }
@@ -270,12 +270,16 @@ export function useBrushCursorTracking(
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'Meta' || e.key === 'Control') {
+        // Restore mode: badge is always visible (React controls it), don't hide
+        if (activeCraftRef.current === 'restore') return;
         setBadgeVisibility(false);
       }
     };
 
     // Also clear badge on window blur (prevents residual Meta key state after switching windows)
     const handleBlur = () => {
+      // Restore mode: badge is permanently visible, don't hide on blur
+      if (activeCraftRef.current === 'restore') return;
       setBadgeVisibility(false);
     };
 

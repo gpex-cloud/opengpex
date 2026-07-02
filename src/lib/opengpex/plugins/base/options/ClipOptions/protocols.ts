@@ -33,16 +33,20 @@ export const PLUGIN_AUTHOR = 'opengpex';
 
 // ─── Command IDs ────────────────────────────────────────────────────────────────
 
-/** Space — enter clip mode / cycle tool forward. Pairs with `CMD_EXIT_CLIP_MODE`. */
+/** Space — toggle clip mode (enter ↔ exit). Pairs with `CMD_EXIT_CLIP_MODE` (Esc). */
 export const CMD_TOGGLE_MODE = 'cmd.toggle_mode';
 
 /**
- * Shift+Space — reverse cycle through clip tools while already in clip
- * mode. Mirrors `CMD_TOGGLE_MODE`'s subsequent-press cycling but stepping
- * backward (rect ← ellipse ← lasso ← wand ← rect …). When NOT yet in clip
- * mode, behaves identically to `CMD_TOGGLE_MODE` (just enters clip),
- * because shift accidentally held while pressing Space shouldn't yank
- * the user backward through the tool list.
+ * Tab — cycle through clip tools forward while already in clip mode
+ * (rect → ellipse → lasso → wand → rect …). Only active when
+ * `interactionMode === 'clip'`; no-op in any other mode.
+ */
+export const CMD_CYCLE_TOOL_FORWARD = 'cmd.crop_tool.cycle_forward';
+
+/**
+ * Shift+Tab — reverse cycle through clip tools while already in clip
+ * mode (rect ← ellipse ← lasso ← wand ← rect …). Only active when
+ * `interactionMode === 'clip'`; no-op in any other mode.
  */
 export const CMD_CYCLE_TOOL_BACKWARD = 'cmd.crop_tool.cycle_backward';
 

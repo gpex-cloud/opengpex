@@ -295,6 +295,22 @@ export const LayerFactory = {
   },
 
   /**
+   * collectDescendants: BFS collects root IDs plus all their descendants from a flat parent-child list.
+   * Generic utility for both layer and frame tree traversal.
+   */
+  collectDescendants(rootIds: string[], items: { id: string; parentId?: string | null }[]): Set<string> {
+    const result = new Set<string>(rootIds);
+    let prev: number;
+    do {
+      prev = result.size;
+      for (const item of items) {
+        if (item.parentId && result.has(item.parentId)) result.add(item.id);
+      }
+    } while (result.size !== prev);
+    return result;
+  },
+
+  /**
    * canLayerBeActivated: Determines if the layer can be activated (selected) by the user.
    */
   canLayerBeActivated(layer: Layer): boolean {

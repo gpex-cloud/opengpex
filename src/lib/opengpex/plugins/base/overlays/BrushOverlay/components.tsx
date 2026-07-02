@@ -166,7 +166,7 @@ const BrushCursor = React.memo(function BrushCursor({ isEraser, activeCraft }: B
         }}
       />
 
-      {/* Tool identity badge (bottom-right): eraser / undo-arrow (restore) / droplet (brush) */}
+      {/* Tool identity badge (bottom-right): eraser (shared by eraser & restore) / droplet (brush) */}
       <svg
         data-badge="tool-id"
         className="absolute pointer-events-none"
@@ -180,17 +180,11 @@ const BrushCursor = React.memo(function BrushCursor({ isEraser, activeCraft }: B
           filter: 'drop-shadow(0 0.5px 1px rgba(0,0,0,0.9))',
         }}
       >
-        {activeCraft === 'eraser' ? (
-          /* Eraser icon (matches lucide Eraser) */
+        {(activeCraft === 'eraser' || activeCraft === 'restore') ? (
+          /* Eraser icon (matches lucide Eraser) — used for both eraser and restore modes */
           <>
             <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
             <path d="M22 21H7" stroke="white" strokeWidth="3" strokeLinecap="round" />
-          </>
-        ) : activeCraft === 'restore' ? (
-          /* Undo-2 icon (matches lucide Undo2) */
-          <>
-            <path d="M9 14 4 9l5-5" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
           </>
         ) : (
           /* Droplet: teardrop shape (brush) */
@@ -198,13 +192,14 @@ const BrushCursor = React.memo(function BrushCursor({ isEraser, activeCraft }: B
         )}
       </svg>
 
-      {/* "+" new layer/mask indicator badge: displayed when Cmd/Ctrl is pressed (right of tool icon) */}
+      {/* Mode indicator badge: "+" (eraser + Cmd, controlled imperatively by hooks.ts) / undo-2 (restore, always visible) */}
       <div
         data-badge="new-layer"
         className="absolute"
         style={{
-          opacity: 0, // hidden by default, dynamically controlled by keydown/keyup in hooks
-          left: `${Math.max(screenDiameter - 1, halfSize + 2) + 15}px`,
+          // restore: always visible; eraser: hidden by default, hooks.ts toggles on Cmd press
+          opacity: activeCraft === 'restore' ? 1 : 0,
+          left: `${Math.max(screenDiameter - 1, halfSize + 2) + 17}px`,
           top: `${Math.max(screenDiameter - 1, halfSize + 2) + 1}px`,
           width: '12px',
           height: '12px',
@@ -218,10 +213,18 @@ const BrushCursor = React.memo(function BrushCursor({ isEraser, activeCraft }: B
           color: '#fff',
           lineHeight: 1,
           boxShadow: '0 1px 3px rgba(0,0,0,0.5)',
-          transition: 'opacity 0.1s ease',
+          // No CSS transition — prevents flash of "+" during restore→eraser switch.
+          // Imperative show/hide in hooks.ts is already instant.
         }}
       >
-        +
+        {activeCraft === 'restore' ? (
+          <svg width="8" height="8" viewBox="0 0 24 24" fill="none">
+            <path d="M9 14 4 9l5-5" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        ) : (
+          '+'
+        )}
       </div>
     </div>
   );

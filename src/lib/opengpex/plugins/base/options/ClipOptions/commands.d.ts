@@ -14,6 +14,7 @@ import type { CropTool } from './protocols';
 export interface ClipCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   toggleModeCmd: CommandInstance;
+  cropToolCycleForwardCmd: CommandInstance;
   cropToolCycleBackwardCmd: CommandInstance;
   exitClipModeCmd: CommandInstance;
   peelCommitCmd: CommandInstance;

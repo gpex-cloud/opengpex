@@ -192,74 +192,36 @@ export function createLayerService(
 
     // Upgraded version: supports passing either a single ID or an array of IDs (multi-selection delete)
     removeLayers: (frameId: string, layerIds: string | string[]) => {
-      const state = getState();
-      const frame = state.frames.byId[frameId];
+      const frame = getState().frames.byId[frameId];
       if (!frame) return;
 
-      // 1. Standardize into array, regardless of single or multi selection
       const targetIds = Array.isArray(layerIds) ? layerIds : [layerIds];
+      const allLayers = frame.layers.order.map(id => frame.layers.byId[id]);
+      const idsToRemove = LayerFactory.collectDescendants(targetIds, allLayers);
 
-      // 2. Collect all selected layers and their respective descendants
-      const idsToRemove = new Set<string>(targetIds);
-      let previousSize: number;
-      do {
-        previousSize = idsToRemove.size;
-        frame.layers.order.forEach((id) => {
-          const l = frame.layers.byId[id];
-          if (l.parentId && idsToRemove.has(l.parentId)) {
-            idsToRemove.add(l.id);
-          }
-        });
-      } while (idsToRemove.size !== previousSize);
-
-      // 3. Compute focus (uses the index of the first selected layer in multi-delete as the reference frame)
-      const firstTargetId = targetIds[0];
-      const targetIndex = frame.layers.order.indexOf(firstTargetId);
-      const nextLayers = frame.layers.order.map(id => frame.layers.byId[id]).filter((l) => !idsToRemove.has(l.id));
-
-      let nextActiveId = frame.activeLayerId;
-      const needsNewSelection =
-        idsToRemove.has(frame.activeLayerId || '') ||
-        !frame.activeLayerId ||
-        !nextLayers.some((l) => l.id === frame.activeLayerId);
-
-      if (needsNewSelection) {
-        if (nextLayers.length === 0) {
-          nextActiveId = null;
-        } else {
-          const safeIndex = Math.min(targetIndex, nextLayers.length - 1);
-          nextActiveId = nextLayers[safeIndex >= 0 ? safeIndex : 0].id;
-        }
+      // Focus migration: pick nearest host layer if active is being removed
+      let nextActiveId: string | null = frame.activeLayerId ?? null;
+      if (!nextActiveId || idsToRemove.has(nextActiveId)) {
+        const candidates = LayerFactory.getHostLayers(allLayers.filter(l => !idsToRemove.has(l.id)));
+        const targetIndex = frame.layers.order.indexOf(targetIds[0]);
+        const safeIndex = Math.min(targetIndex, candidates.length - 1);
+        nextActiveId = candidates[safeIndex >= 0 ? safeIndex : 0]?.id ?? null;
       }
 
-      // 4. Dispatch result (Reducer requires no changes as it naturally accepts arrays!)
       actions.removeLayers(frameId, Array.from(idsToRemove), nextActiveId);
     },
 
     removeFrame: (frameId: string) => {
       const state = getState();
+      const allFrames = state.frames.order.map(id => state.frames.byId[id]);
+      const idsToRemove = LayerFactory.collectDescendants([frameId], allFrames);
 
-      // 1. BFS to collect all descendant artboard IDs
-      const idsToRemove = new Set<string>([frameId]);
-      let previousSize: number;
-      do {
-        previousSize = idsToRemove.size;
-        state.frames.order.forEach((id) => {
-          const f = state.frames.byId[id];
-          if (f.parentId && idsToRemove.has(f.parentId)) {
-            idsToRemove.add(f.id);
-          }
-        });
-      } while (idsToRemove.size !== previousSize);
-
-      // 2. Focus migration calculation: if the active artboard is deleted, select the first surviving artboard
-      const nextFrames = state.frames.order.map(id => state.frames.byId[id]).filter(f => !idsToRemove.has(f.id));
-      let nextActiveFrameId = state.activeFrameId;
-      if (idsToRemove.has(state.activeFrameId || '')) {
-        nextActiveFrameId = nextFrames.length > 0 ? nextFrames[0].id : null;
+      // Focus migration: pick first surviving frame
+      let nextActiveFrameId: string | null = state.activeFrameId ?? null;
+      if (nextActiveFrameId && idsToRemove.has(nextActiveFrameId)) {
+        nextActiveFrameId = allFrames.find(f => !idsToRemove.has(f.id))?.id ?? null;
       }
 
-      // 3. Dispatch precalculated results to Reducer (Reducer only performs pure state operations + history internal cleanup)
       actions.removeFrame(Array.from(idsToRemove), nextActiveFrameId);
     },
 
@@ -360,19 +322,7 @@ export function createLayerService(
 
           return { newUrl: url, newAssetId: id || '', patch };
         } else {
-          const M = geometry.transform.getLayerWorldMatrix(layer);
-          const w = layer.bounding.w;
-          const h = layer.bounding.h;
-          const corners = [
-            { x: 0, y: 0 }, { x: w, y: 0 }, { x: 0, y: h }, { x: w, y: h }
-          ].map(p => M.apply(p));
-
-          const minX = Math.min(...corners.map(p => p.x));
-          const maxX = Math.max(...corners.map(p => p.x));
-          const minY = Math.min(...corners.map(p => p.y));
-          const maxY = Math.max(...corners.map(p => p.y));
-
-          const aabb = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+          const aabb = geometry.space.getLayerBoundingBox(layer);
 
           let finalUrl = layer.src;
           let finalId = layer.assetId;

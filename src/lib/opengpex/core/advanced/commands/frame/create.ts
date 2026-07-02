@@ -94,6 +94,7 @@ export const FrameCreateCommands = {
         assetId,
         cx: 0,
         cy: 0,
+        locked: true, // Background layer is locked by default (like Photoshop)
         bounding: dimension,
         visibleShape: asLocalShape(contentBounds),
         metadata: { format: safeFile.type, size: safeFile.size, source: sourceType, originalName: safeFile.name, exif }
@@ -217,6 +218,7 @@ export const FrameCreateCommands = {
           name: 'Branch Base',
           src: highResUrl,
           assetId: highResId,
+          locked: true, // Branch base layer is locked by default
           bounding: canvasDim,
           visibleShape: asLocalShape({ x: 0, y: 0, ...canvasDim }),
           ancestor: true

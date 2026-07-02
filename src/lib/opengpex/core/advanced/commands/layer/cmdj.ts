@@ -54,6 +54,7 @@ export const LayerCmdJCommands = {
     execute: async (ctx: EditorContextValue, payload?: { feather?: number }): Promise<void> => {
       const { activeFrame, activeLayer, state, geometry } = ctx;
       const isClipMode = state.interaction.interactionMode === 'clip';
+
       if (!activeFrame || !activeLayer || !isClipMode || activeLayer.type !== 'image') {
         ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
         return;

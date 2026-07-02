@@ -191,10 +191,10 @@ export default function FancyConfirm({
         <div className={`mb-4 w-12 h-12 rounded-2xl flex items-center justify-center border shadow-sm ${theme.squareIconBg}`}>
           {theme.icon}
         </div>
-        <h3 className="text-[var(--text-main)] text-lg font-black tracking-tight leading-tight uppercase italic mb-1 truncate w-full" title={title}>
+        <h3 className="text-[var(--text-main)] text-sm font-black tracking-tight leading-snug uppercase italic mb-2 w-full line-clamp-3 break-all" title={title}>
           {title}
         </h3>
-        <p className="text-[var(--text-muted)] text-[11px] font-bold leading-relaxed max-w-[220px]">
+        <p className="text-[var(--text-muted)] text-[11px] font-bold leading-relaxed max-w-[260px] break-words">
           {message}
         </p>
       </div>
@@ -233,10 +233,10 @@ export default function FancyConfirm({
 
       <div className="flex-1 flex flex-col p-8 pl-10 pr-12 min-w-0">
         <div className="mb-8">
-          <h3 className="text-[var(--text-main)] text-2xl font-black tracking-tighter leading-none italic uppercase mb-3 truncate" title={title}>
+          <h3 className="text-[var(--text-main)] text-lg font-black tracking-tight leading-snug italic uppercase mb-3 line-clamp-2 break-all" title={title}>
             {title}
           </h3>
-          <p className="text-[var(--text-muted)] text-xs font-bold leading-relaxed uppercase tracking-wide">
+          <p className="text-[var(--text-muted)] text-xs font-bold leading-relaxed uppercase tracking-wide break-words">
             {message}
           </p>
         </div>

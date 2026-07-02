@@ -4,6 +4,15 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.18
+
+- Lock background layer and branch base layer by default during frame/layer creation (Photoshop parity)
+- Redesign Clip Mode navigation: Space key toggles clip mode (enter/exit), while Tab and Shift+Tab handle forward/backward tool cycling
+- Eliminate opacity transitions on the Brush overlay badge to prevent a transient "+" symbol flash during mode switches
+- Improve responsiveness of `FancyConfirm` dialogs by increasing max-width and enabling multi-line wrapping with auto word breaking to prevent truncation issues
+
+---
+
 ## v1.0.0-beta.17
 
 - Implement bitmap mask editing mode with integrated eraser/restore sub-modes (Tab key toggle) and active tool linkage in `LayerDrawer` and `CraftDrawer`

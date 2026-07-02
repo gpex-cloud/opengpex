@@ -20,7 +20,7 @@
 "use client";
 
 import React from "react";
-import { Type, Paintbrush, Eraser, Settings } from "lucide-react";
+import { Type, Paintbrush, Eraser, Undo2, Settings } from "lucide-react";
 import { useEditorServices } from "@opengpex/editor/core/context";
 import { SettingsPanelAPI } from "../../panels/SettingsPanel/protocols";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
@@ -100,17 +100,21 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
       <div className="flex items-center gap-1">
         {CRAFT_BUTTONS.map((btn) => {
           const isActive = activeCraft === btn.type || (btn.type === 'eraser' && activeCraft === 'restore');
+          // Dynamic icon: show Undo2 when eraser button is in restore sub-mode
+          const displayIcon = (btn.type === 'eraser' && activeCraft === 'restore')
+            ? <Undo2 size={13} />
+            : btn.icon;
           return (
             <FunctionButton
               key={btn.type}
               onClick={() => selectCraft(btn.type)}
               active={isActive}
-              title={btn.label}
+              title={btn.type === 'eraser' && activeCraft === 'restore' ? 'Restore Mode (Tab)' : btn.label}
               variant="glass"
               tooltipPosition="bottom"
               className="w-7 h-7 rounded-lg text-blue-400"
             >
-              {btn.icon}
+              {displayIcon}
             </FunctionButton>
           );
         })}
@@ -163,6 +167,10 @@ const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
     <div className="flex items-center h-5 rounded-md overflow-hidden border border-[var(--border-subtle)]">
       {CRAFT_BUTTONS.map((btn, index) => {
         const state = getButtonState(btn.type);
+        // Dynamic icon: show Undo2 when eraser button is in restore sub-mode
+        const displayIconSmall = (btn.type === 'eraser' && activeCraft === 'restore')
+          ? <Undo2 size={10} />
+          : btn.iconSmall;
         return (
           <React.Fragment key={btn.type}>
             {index > 0 && (
@@ -199,9 +207,9 @@ const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
                         WebkitTapHighlightColor: "transparent",
                       }
               }
-              title={btn.label}
+              title={btn.type === 'eraser' && activeCraft === 'restore' ? 'Restore Mode (Tab)' : btn.label}
             >
-              {btn.iconSmall}
+              {displayIconSmall}
             </button>
           </React.Fragment>
         );
