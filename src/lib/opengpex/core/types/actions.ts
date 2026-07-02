@@ -92,7 +92,7 @@ export interface EditorActions {
 
   askConfirm: (title: string, message: string, type?: 'info' | 'danger' | 'warning', variant?: 'square' | 'rect') => Promise<boolean>;
   confirm: (val: boolean) => void;
-  askChoice: (title: string, options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>) => Promise<string | null>;
+  askChoice: (title: string, options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>, helpText?: string) => Promise<string | null>;
   resolveChoice: (val: string | null) => void;
 
   clearAllData: () => void;
@@ -135,7 +135,7 @@ export interface EditorActions {
       };
       resize: {
         resizeCanvas: AdvCommandRef;
-        resample: AdvCommandRef<{ targetDim: Dimensions }, Promise<void>>;
+        resample: AdvCommandRef<{ targetDim: Dimensions; dpi?: number }, Promise<void>>;
       };
     };
     layer: {

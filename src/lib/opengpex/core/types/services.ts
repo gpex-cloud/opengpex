@@ -94,7 +94,9 @@ export interface WorkerProxy {
   /** Ensures asset blob is decoded in Worker cache (used for bitmapMask etc. which are only rendered in main thread) */
   ensureAssetInWorker: (hash: string, blob: Blob) => Promise<void>;
   /** Transcodes SVG blob to PNG raster via resvg-wasm in Worker */
-  transcodeSvg: (blob: Blob, maxDimension?: number) => Promise<Blob>;
+  transcodeSvg: (blob: Blob, params?: { width?: number; height?: number; maxDimension?: number }) => Promise<Blob>;
+  /** Transcodes EPS blob to PNG raster via Ghostscript WASM in Worker */
+  transcodeEps: (blob: Blob, params: { width: number; height: number; dpi: number }) => Promise<Blob>;
 }
 
 /**
@@ -111,8 +113,8 @@ export interface PixelService {
   process: {
     thumbnail: (source: HTMLImageElement | string, maxSize?: number) => Promise<Blob>;
     resample: (src: string, options: { targetSize: { w: number; h: number } }) => Promise<Blob>;
-    /** Pre-transcodes non-standard formats (HEIC, SVG) to engine-compatible raster before asset registration */
-    preTranscode: (file: File) => Promise<File>;
+    /** Pre-transcodes non-standard formats (HEIC, SVG, EPS) to engine-compatible raster before asset registration */
+    preTranscode: (file: File, options?: { targetWidth?: number; targetHeight?: number; dpi?: number }) => Promise<File>;
   };
 
   render: {

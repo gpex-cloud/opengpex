@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.19
+
+- Add DPI / resolution system: per-frame DPI, EXIF extraction on import, DPI preset dropdown with print-size display and resample toggle in Image Info panel
+- Add EPS format import via Ghostscript WASM rasterization with user-selectable DPI dialog
+- Enhance SVG import with user-selectable rasterization DPI and pixel-dimension preview
+
+---
+
 ## v1.0.0-beta.18
 
 - Lock background layer and branch base layer by default during frame/layer creation (Photoshop parity)

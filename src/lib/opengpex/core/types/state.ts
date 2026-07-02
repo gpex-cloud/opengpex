@@ -74,7 +74,7 @@ export interface UIConfig {
 
 }
 
-export type SupportedImageFormat = 'jpeg' | 'png' | 'gif' | 'webp' | 'heic' | 'avif' | 'svg' | 'bmp' | 'raw' | 'unknown';
+export type SupportedImageFormat = 'jpeg' | 'png' | 'gif' | 'webp' | 'heic' | 'avif' | 'svg' | 'eps' | 'bmp' | 'raw' | 'unknown';
 
 export interface EngineStatus {
   id: string;
@@ -91,7 +91,7 @@ export interface EditorData {
   isLoaded: boolean;
   storageUsage?: { totalBytes: number; blobCount: number };
   confirm: { isVisible: boolean; title: string; message: string; type?: 'info' | 'danger' | 'warning'; variant?: 'square' | 'rect' } | null;
-  choice: { isVisible: boolean; title: string; options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }> } | null;
+  choice: { isVisible: boolean; title: string; options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>; helpText?: string } | null;
   interaction: InteractionState;
   history: GlobalHistoryState;
   runtime: {
@@ -152,7 +152,7 @@ export type EditorAction =
   | { type: 'HYDRATE'; payload: Partial<EditorState> }
   | { type: 'SHOW_CONFIRM'; payload: { title: string; message: string; type?: 'info' | 'danger' | 'warning'; variant?: 'square' | 'rect' } }
   | { type: 'HIDE_CONFIRM' }
-  | { type: 'SHOW_CHOICE'; payload: { title: string; options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }> } }
+  | { type: 'SHOW_CHOICE'; payload: { title: string; options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>; helpText?: string } }
   | { type: 'HIDE_CHOICE' }
   | { type: 'UPDATE_VIEW_SIZE'; payload: { w: number; h: number } }
   | { type: 'SET_ENGINE_STATUS'; payload: EngineStatus[] }

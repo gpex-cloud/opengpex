@@ -109,7 +109,7 @@ export function ImageInfoComponent() {
           fileName={fileName}
           fileFormat={fileFormat}
           fileSize={fileSize}
-          exif={exif}
+          dpi={activeFrame.dpi || 72}
         />
 
         <LayerDimensionsPanel
@@ -134,6 +134,7 @@ export function ImageInfoComponent() {
         updateConfig={updateConfig}
         baseW={baseW}
         baseH={baseH}
+        frameDpi={activeFrame.dpi || 72}
         isClipMode={isClipMode}
         applyResizeCmd={applyResizeCmd}
         downloadCmd={downloadCmd}

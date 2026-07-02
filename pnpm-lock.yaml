@@ -14,6 +14,9 @@ importers:
       '@jsquash/avif':
         specifier: ^2.1.1
         version: 2.1.1
+      '@okathira/ghostpdl-wasm':
+        specifier: 1.1.0
+        version: 1.1.0
       '@resvg/resvg-wasm':
         specifier: ^2.6.2
         version: 2.6.2
@@ -499,6 +502,9 @@ packages:
     resolution: {integrity: sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA==}
     engines: {node: '>=12.4.0'}
 
+  '@okathira/ghostpdl-wasm@1.1.0':
+    resolution: {integrity: sha512-BX0Y8B0G/c0nsf7pZGHPQTZ8IiT4w0IEbZGDnziN4pkcmxU1eEaWI/LA0bfE5Y+uSP3Qj1oZ6JhITOJbJsyE0w==}
+
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
 
@@ -630,6 +636,9 @@ packages:
 
   '@tybys/wasm-util@0.10.2':
     resolution: {integrity: sha512-RoBvJ2X0wuKlWFIjrwffGw1IqZHKQqzIchKaadZZfnNpsAYp2mM0h36JtPCjNDAHGgYez/15uMBpfGwchhiMgg==}
+
+  '@types/emscripten@1.41.5':
+    resolution: {integrity: sha512-cMQm7pxu6BxtHyqJ7mQZ2kXWV5SLmugybFdHCBbJ5eHzOo6VhBckEgAT3//rP5FwPHNPeEiq4SmQ5ucBwsOo4Q==}
 
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
@@ -2865,6 +2874,10 @@ snapshots:
 
   '@nolyfill/is-core-module@1.0.39': {}
 
+  '@okathira/ghostpdl-wasm@1.1.0':
+    dependencies:
+      '@types/emscripten': 1.41.5
+
   '@protobufjs/aspromise@1.1.2': {}
 
   '@protobufjs/base64@1.1.2': {}
@@ -2966,6 +2979,8 @@ snapshots:
     dependencies:
       tslib: 2.8.1
     optional: true
+
+  '@types/emscripten@1.41.5': {}
 
   '@types/estree@1.0.9': {}
 

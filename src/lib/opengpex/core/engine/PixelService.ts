@@ -132,7 +132,7 @@ export function createPixelService(
         const result = await service.worker.resampleImage(src, targetSize);
         return result.blob!;
       },
-      async preTranscode(file: File): Promise<File> {
+      async preTranscode(file: File, options?: { targetWidth?: number; targetHeight?: number; dpi?: number }): Promise<File> {
         const format = PixelUtils.detectFormat(file);
 
         if (format === 'heic') {
@@ -143,8 +143,21 @@ export function createPixelService(
 
         if (format === 'svg') {
           const blob = new Blob([await file.arrayBuffer()], { type: 'image/svg+xml' });
-          const pngBlob = await processor.transcodeSvg(blob);
+          const pngBlob = await processor.transcodeSvg(blob, {
+            width: options?.targetWidth,
+            height: options?.targetHeight,
+          });
           return new File([pngBlob], file.name.replace(/\.svg$/i, '.png'), { type: 'image/png' });
+        }
+
+        if (format === 'eps') {
+          const blob = new Blob([await file.arrayBuffer()], { type: 'application/postscript' });
+          const pngBlob = await processor.transcodeEps(blob, {
+            width: options?.targetWidth || 2480,
+            height: options?.targetHeight || 3508,
+            dpi: options?.dpi || 300,
+          });
+          return new File([pngBlob], file.name.replace(/\.eps[f]?$/i, '.png'), { type: 'image/png' });
         }
 
         if (format === 'raw') {
@@ -154,7 +167,7 @@ export function createPixelService(
         }
 
         return file;
-      }
+      },
     },
 
     // 3. Scene rendering and synthesis namespace

@@ -94,7 +94,7 @@ export function FileLoaderComponent() {
           }
           e.target.value = "";
         }}
-        accept="image/*"
+        accept="image/*,.eps,.epsf,application/postscript"
         multiple
         className="hidden"
       />

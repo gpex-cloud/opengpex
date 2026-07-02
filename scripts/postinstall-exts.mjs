@@ -40,6 +40,14 @@ const wasmFiles = [
     src: 'node_modules/libraw-wasm/dist/worker.js',
     dest: 'libraw-worker.js',
   },
+  {
+    src: 'node_modules/@okathira/ghostpdl-wasm/dist/gs.wasm',
+    dest: 'gs.wasm',
+  },
+  {
+    src: 'node_modules/@okathira/ghostpdl-wasm/dist/gs.js',
+    dest: 'gs.js',
+  },
 ];
 
 let copied = 0;

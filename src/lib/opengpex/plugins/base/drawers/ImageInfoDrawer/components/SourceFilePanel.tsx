@@ -21,21 +21,20 @@
 
 import React from "react";
 import { Check, Copy } from "lucide-react";
-import { ExifData } from "@opengpex/editor/core/types";
 import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
 
 interface SourceFilePanelProps {
   fileName: string;
   fileFormat: string;
   fileSize: string;
-  exif?: ExifData;
+  dpi: number;
 }
 
 export function SourceFilePanel({
   fileName,
   fileFormat,
   fileSize,
-  exif,
+  dpi,
 }: SourceFilePanelProps) {
   const [copied, setCopied] = React.useState(false);
 
@@ -71,18 +70,11 @@ export function SourceFilePanel({
             {fileFormat}
           </span>
           <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
+            {dpi} DPI
+          </span>
+          <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
             {fileSize}
           </span>
-          {exif?.XResolution && (
-            <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
-              {exif.XResolution}{" "}
-              {exif.ResolutionUnit === 2
-                ? "PPI"
-                : exif.ResolutionUnit === 3
-                  ? "PPCM"
-                  : "DPI"}
-            </span>
-          )}
         </div>
       </div>
       <span

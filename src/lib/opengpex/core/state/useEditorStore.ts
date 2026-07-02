@@ -389,10 +389,10 @@ export function useEditorStore() {
         }
         enhancedDispatch({ type: 'HIDE_CONFIRM' });
       },
-      askChoice: (title: string, options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>) => {
+      askChoice: (title: string, options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>, helpText?: string) => {
         return new Promise<string | null>((resolve) => {
           choiceResolverRef.current = resolve;
-          enhancedDispatch({ type: 'SHOW_CHOICE', payload: { title, options } });
+          enhancedDispatch({ type: 'SHOW_CHOICE', payload: { title, options, helpText } });
         });
       },
       resolveChoice: (val: string | null) => {
@@ -519,7 +519,7 @@ export function useEditorStore() {
           },
           resize: {
             resizeCanvas: advRef(P.ADV_FRAME_RESIZE_CANVAS, () => executeCommand(P.ADV_FRAME_RESIZE_CANVAS)),
-            resample: advRef(P.ADV_FRAME_RESAMPLE, (payload: { targetDim: Dimensions }) => executeCommand<{ targetDim: Dimensions }, Promise<void>>(P.ADV_FRAME_RESAMPLE, payload)),
+            resample: advRef(P.ADV_FRAME_RESAMPLE, (payload: { targetDim: Dimensions; dpi?: number }) => executeCommand<{ targetDim: Dimensions; dpi?: number }, Promise<void>>(P.ADV_FRAME_RESAMPLE, payload)),
           },
         },
         layer: {

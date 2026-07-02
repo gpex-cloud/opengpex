@@ -99,6 +99,7 @@ export const GlobalUI = () => {
         options={choiceOptions}
         onSelect={(id) => actions.resolveChoice(id)}
         onCancel={() => actions.resolveChoice(null)}
+        helpText={choice?.helpText}
       />
 
       {/* 4. Branch animation */}

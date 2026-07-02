@@ -186,6 +186,8 @@ export interface Frame {
   parentId?: string;
 
   canvas: Dimensions;
+  /** Document resolution in dots per inch. Default 72 (screen). */
+  dpi: number;
   camera: CameraState;
 
   layers: NormalizedState<Layer>;

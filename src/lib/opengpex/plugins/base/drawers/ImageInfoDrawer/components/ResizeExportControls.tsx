@@ -34,6 +34,7 @@ import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
 
 import { ExifData, CommandInstance } from "@opengpex/editor/core/types";
+import { formatPrintSize, DPI_PRESETS } from "@opengpex/editor/core/helpers/dpi";
 import * as P from "../protocols";
 import {
   deriveResizeState,
@@ -47,6 +48,8 @@ interface ResizeExportControlsProps {
   updateConfig: (cfg: Partial<P.ExportConfig>) => void;
   baseW: number;
   baseH: number;
+  /** Frame's committed DPI (used as fallback when config.dpi is 0) */
+  frameDpi: number;
   isClipMode: boolean;
   applyResizeCmd?: CommandInstance;
   downloadCmd?: CommandInstance;
@@ -58,11 +61,14 @@ export function ResizeExportControls({
   updateConfig,
   baseW,
   baseH,
+  frameDpi,
   isClipMode,
   applyResizeCmd,
   downloadCmd,
   exif,
 }: ResizeExportControlsProps) {
+  // Effective DPI: pending override in config, or frame's committed value
+  const effectiveDpi = config.dpi || frameDpi;
   const [isProcessing, setIsProcessing] = React.useState(false);
 
   const { currentW, currentH, currentPercent } = deriveResizeState(
@@ -74,8 +80,9 @@ export function ResizeExportControls({
   const hasDimensionChange =
     Math.round(currentW) !== Math.round(baseW) ||
     Math.round(currentH) !== Math.round(baseH);
-  // Apply button is only for permanently resampling the full canvas. Disable it in Clip Mode.
-  const canApply = hasDimensionChange && !isClipMode;
+  const hasDpiChange = config.dpi > 0 && config.dpi !== frameDpi;
+  // Apply button activates when pixels or DPI changed. Disable in Clip Mode.
+  const canApply = (hasDimensionChange || hasDpiChange) && !isClipMode;
 
   const handlePixelW = (val: number) => {
     updateConfig({
@@ -107,7 +114,7 @@ export function ResizeExportControls({
   };
 
   const handleReset = () => {
-    updateConfig({ pixels: { w: baseW, h: baseH } });
+    updateConfig({ pixels: { w: baseW, h: baseH }, dpi: 0 });
   };
 
   const handleFormatSelect = async (val: string) => {
@@ -180,7 +187,7 @@ export function ResizeExportControls({
             <Tooltip content="Reset to Original">
               <FancyButton
                 onClick={handleReset}
-                disabled={isClipMode || !hasDimensionChange}
+                disabled={isClipMode || (!hasDimensionChange && !hasDpiChange)}
                 variant="zinc"
                 subtle={true}
                 size="xs"
@@ -192,7 +199,57 @@ export function ResizeExportControls({
           </div>
         </div>
 
-        {/* Row 2: Scale Slider */}
+        {/* Row 2: DPI & Print Size + Resample Toggle */}
+        <div className="flex items-center gap-2 px-1 mt-0.5">
+          <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-8">
+            DPI
+          </span>
+          <ActionDropdown
+            onSelect={(val: string) => {
+              const newDpi = parseInt(val, 10);
+              if (newDpi <= 0 || newDpi === effectiveDpi) return;
+              if (config.resample) {
+                // Resample: scale pixels proportionally to maintain physical size
+                const ratio = newDpi / effectiveDpi;
+                const newW = Math.round(baseW * ratio);
+                const newH = Math.round(baseH * ratio);
+                updateConfig({ dpi: newDpi, pixels: { w: newW, h: newH } });
+              } else {
+                // Metadata-only: just update DPI tag (print size changes, pixels unchanged)
+                updateConfig({ dpi: newDpi });
+              }
+            }}
+            className="shrink-0"
+            options={DPI_PRESETS.map((p) => ({
+              label: `${p.value}`,
+              value: String(p.value),
+              description: p.label,
+            }))}
+            trigger={
+              <button className="flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-stage)] text-[10px] font-black text-[var(--text-main)] tabular-nums hover:bg-[var(--border-subtle)] transition-colors">
+                {effectiveDpi} <ChevronDown size={8} className="opacity-40" />
+              </button>
+            }
+          />
+          <Tooltip content={config.resample ? "Resample ON" : "Resample OFF"}>
+            <FancyButton
+              onClick={() => updateConfig({ resample: !config.resample })}
+              active={config.resample}
+              variant={config.resample ? "amber" : "zinc"}
+              subtle={true}
+              size="xs"
+              iconOnly={true}
+              disabled={isClipMode}
+            >
+              <Link2 size={10} className={config.resample ? "text-amber-500" : ""} />
+            </FancyButton>
+          </Tooltip>
+          <span className="text-[9px] text-[var(--text-muted)] truncate flex-1 text-right">
+            {formatPrintSize(Math.round(currentW), Math.round(currentH), effectiveDpi)}
+          </span>
+        </div>
+
+        {/* Row 3: Scale Slider */}
         <div className="flex items-center gap-2 px-1 mt-1">
           <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-8">
             Scale

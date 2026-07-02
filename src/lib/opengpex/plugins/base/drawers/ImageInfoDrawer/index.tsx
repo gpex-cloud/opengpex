@@ -59,6 +59,8 @@ export const plugin: EditorPlugin = {
     lockAspect: true,
     format: "image/webp",
     quality: 92,
+    dpi: 0,
+    resample: false,
     preferredWidth: 320,
     keepExif: true,
   },

@@ -22,6 +22,8 @@
 import { EditorCommand, EditorContextValue, Frame, LocalShape, asLocalShape, Layer } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { MetadataHelper } from '@opengpex/editor/core/helpers/metadata';
+import { extractDpiFromExif, DPI_PRESETS } from '@opengpex/editor/core/helpers/dpi';
+import { getVectorIntrinsicSize } from '@opengpex/editor/core/helpers/vector';
 import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
@@ -55,8 +57,57 @@ export const FrameCreateCommands = {
 
       // Extract EXIF from original file BEFORE transcoding (RAW/HEIC contain rich EXIF that transcoded PNG won't carry)
       const exif = await MetadataHelper.extractExif(file);
+      let chosenFrameDpi: number | undefined; // Tracks user-chosen DPI for vector imports
 
-      if (format === 'heic' || format === 'svg' || format === 'raw') {
+      if (format === 'svg' || format === 'eps') {
+        // Vector format: lightweight main-thread size parsing (no Worker/WASM needed)
+        const formatLabel = format.toUpperCase();
+        const DEFAULT_DPI = 300;
+        const MAX_RASTER_DIMENSION = 16384; // Safety limit: prevent OOM on extreme sizes
+
+        let intrinsicSize: { w: number; h: number };
+        try {
+          intrinsicSize = await getVectorIntrinsicSize(file);
+        } catch (err) {
+          console.error(`[FrameCreate] Failed to parse ${formatLabel} intrinsic size:`, err);
+          actions.notifyHUD(`Failed to parse ${formatLabel} file dimensions. The file may be corrupted.`, 'error');
+          return '';
+        }
+
+        const allOptions = DPI_PRESETS.map(p => ({
+          id: String(p.value),
+          label: `${p.value} DPI`,
+          description: `${p.label} · ${Math.round(intrinsicSize.w * p.value / 72)}×${Math.round(intrinsicSize.h * p.value / 72)} px`,
+          primary: p.value === DEFAULT_DPI,
+        }));
+        const vectorHelpText = `OpenGPEX is a raster (pixel) image editor and does not support native vector editing for ${formatLabel} files. The file will be rasterized at the selected resolution for pixel-level editing.`;
+        const chosenDpi = await actions.askChoice(`${formatLabel} Rasterize Resolution`, allOptions, vectorHelpText);
+        if (!chosenDpi) return '';  // User cancelled — silently abort without creating frame
+        const dpi = parseInt(chosenDpi, 10) || DEFAULT_DPI;
+        chosenFrameDpi = dpi;
+        const scale = dpi / 72;
+        let targetWidth = Math.round(intrinsicSize.w * scale);
+        let targetHeight = Math.round(intrinsicSize.h * scale);
+
+        // Clamp to safety maximum to prevent memory exhaustion
+        if (targetWidth > MAX_RASTER_DIMENSION || targetHeight > MAX_RASTER_DIMENSION) {
+          const clampRatio = MAX_RASTER_DIMENSION / Math.max(targetWidth, targetHeight);
+          targetWidth = Math.round(targetWidth * clampRatio);
+          targetHeight = Math.round(targetHeight * clampRatio);
+          actions.notifyHUD(`Output clamped to ${targetWidth}×${targetHeight} px (maximum ${MAX_RASTER_DIMENSION} px per side).`, 'info');
+        }
+
+        try {
+          safeFile = await actions.withSignal(
+            'sys.asset.transcoding',
+            () => pixels.process.preTranscode(file, { targetWidth, targetHeight, dpi })
+          );
+        } catch (err) {
+          console.error(`[FrameCreate] ${formatLabel} rasterization failed:`, err);
+          actions.notifyHUD(`${formatLabel} rasterization failed. Try a lower resolution or check the file.`, 'error');
+          return '';
+        }
+      } else if (format === 'heic' || format === 'raw') {
         safeFile = await actions.withSignal(
           'sys.asset.transcoding',
           () => pixels.process.preTranscode(file)
@@ -106,6 +157,7 @@ export const FrameCreateCommands = {
         id: `f-${Date.now().toString(36)}-trunk`,
         name: safeFile.name,
         canvas: dimension,
+        dpi: chosenFrameDpi || extractDpiFromExif(exif),
         layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
         activeLayerId: baseLayer.id,
         camera: initialCamera,

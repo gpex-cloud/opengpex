@@ -37,11 +37,42 @@ export interface ExportMetadata {
   viewportScale: number;
 }
 
+/**
+ * EXIF-capable file types whitelist.
+ * Only these formats are worth attempting EXIF extraction on.
+ * Others (PNG, SVG, BMP, GIF) will be silently skipped.
+ */
+const EXIF_SUPPORTED_TYPES = new Set([
+  'image/jpeg', 'image/tiff',
+  'image/heic', 'image/heif',
+  'image/webp', 'image/avif',
+  'image/x-dcraw', 'image/x-adobe-dng',
+  'image/x-canon-cr2', 'image/x-nikon-nef', 'image/x-sony-arw',
+]);
+
+const EXIF_SUPPORTED_EXTENSIONS = new Set([
+  '.jpg', '.jpeg', '.tiff', '.tif',
+  '.heic', '.heif',
+  '.webp', '.avif',
+  '.cr2', '.cr3', '.nef', '.nrw', '.arw', '.srf', '.sr2',
+  '.dng', '.orf', '.rw2', '.raf', '.pef', '.srw',
+  '.raw', '.rwl', '.3fr', '.fff', '.iiq',
+]);
+
 export const MetadataHelper = {
   /**
-   * extractExif: Extract parsed EXIF data and raw piexif object
+   * extractExif: Extract parsed EXIF data and raw piexif object.
+   * Only attempts extraction for known EXIF-capable formats (JPEG, TIFF, HEIC, RAW, WebP, AVIF).
+   * Silently skips unsupported formats (PNG, SVG, BMP, GIF) to avoid noisy console errors.
    */
   async extractExif(file: File): Promise<ExifData | undefined> {
+    // Pre-check: skip formats that never carry EXIF
+    const type = file.type.toLowerCase();
+    const ext = '.' + (file.name.split('.').pop()?.toLowerCase() || '');
+    if (!EXIF_SUPPORTED_TYPES.has(type) && !EXIF_SUPPORTED_EXTENSIONS.has(ext)) {
+      return undefined;
+    }
+
     try {
       // 1. Extract human-readable EXIF using exifr (including makerNote for specific lens info)
       const parsed = await exifr.parse(file, { tiff: true, exif: true, makerNote: true });
@@ -123,7 +154,8 @@ export const MetadataHelper = {
 
       return exifData;
     } catch (err) {
-      console.warn('[MetadataHelper] EXIF extraction failed:', err);
+      // Downgrade to debug: expected for WebP/AVIF variants that exifr cannot parse
+      console.debug('[MetadataHelper] EXIF not available for', file.name, '-', (err as Error).message);
       return undefined;
     }
   },
@@ -162,9 +194,10 @@ export const MetadataHelper = {
   },
 
   /**
-   * injectToBlob: Inject EXIF tags and custom metadata into JPEG Blob
+   * injectToBlob: Inject EXIF tags and custom metadata into JPEG Blob.
+   * @param dpi - Optional DPI to write as XResolution/YResolution (overrides original EXIF resolution).
    */
-  async injectToBlob(blob: Blob, meta: Partial<ExportMetadata>, originalExifData?: ExifData): Promise<Blob> {
+  async injectToBlob(blob: Blob, meta: Partial<ExportMetadata>, originalExifData?: ExifData, dpi?: number): Promise<Blob> {
     // Only process JPEG for EXIF injection via piexifjs
     if (blob.type !== 'image/jpeg') {
       return blob;
@@ -184,6 +217,13 @@ export const MetadataHelper = {
       // Inject custom meta into 0th IFD Software tag
       const tagsString = this.generateExportTags(meta);
       exifObj["0th"][piexif.ImageIFD.Software] = tagsString;
+
+      // Inject DPI as XResolution / YResolution (RATIONAL = [numerator, denominator])
+      if (dpi && dpi > 0) {
+        exifObj["0th"][piexif.ImageIFD.XResolution] = [dpi, 1];
+        exifObj["0th"][piexif.ImageIFD.YResolution] = [dpi, 1];
+        exifObj["0th"][piexif.ImageIFD.ResolutionUnit] = 2; // 2 = inches (DPI)
+      }
 
       const exifStr = piexif.dump(exifObj);
       const newBase64 = piexif.insert(exifStr, base64);

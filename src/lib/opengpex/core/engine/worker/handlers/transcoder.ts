@@ -41,25 +41,118 @@ async function ensureResvgReady() {
   resvgInitialized = true;
 }
 
+export interface RasterizeParams {
+  width?: number;
+  height?: number;
+  maxDimension?: number;  // fallback if width/height not specified
+}
+
 /**
  * Transcodes an SVG Blob to a PNG raster Blob using resvg-wasm.
  * Runs entirely in the Worker thread — does not require DOM access.
  *
  * @param blob - The SVG file as a Blob (type: image/svg+xml)
- * @param maxDimension - Maximum output width (default 4096px, prevents excessive memory usage)
+ * @param params - Rasterization parameters (width, height, or maxDimension fallback)
  * @returns PNG Blob
  */
-export async function transcodeSvgToRaster(blob: Blob, maxDimension = 4096): Promise<Blob> {
+export async function transcodeSvgToRaster(blob: Blob, params?: RasterizeParams): Promise<Blob> {
   await ensureResvgReady();
 
   const svgText = await blob.text();
 
-  const resvg = new ResvgModule.Resvg(svgText, {
-    fitTo: { mode: 'width', value: maxDimension }
-  });
+  let fitTo: { mode: string; value: number };
+  if (params?.width) {
+    fitTo = { mode: 'width', value: params.width };
+  } else if (params?.height) {
+    fitTo = { mode: 'height', value: params.height };
+  } else {
+    fitTo = { mode: 'width', value: params?.maxDimension || 4096 };
+  }
+
+  const resvg = new ResvgModule.Resvg(svgText, { fitTo });
 
   const rendered = resvg.render();
   const pngData = rendered.asPng();
 
   return new Blob([pngData.buffer], { type: 'image/png' });
 }
+
+/**
+ * EPS Transcoding via Ghostscript WASM (@okathira/ghostpdl-wasm)
+ *
+ * Uses the Emscripten-compiled GhostPDL module which provides:
+ * - `callMain(args)`: Executes Ghostscript with CLI arguments
+ * - `FS`: Emscripten virtual filesystem for input/output
+ *
+ * The module factory is loaded once (lazy) from /ext/wasm/gs.js and
+ * instantiated with `locateFile` pointing to /ext/wasm/gs.wasm.
+ */
+
+let gsInstance: any = null;
+
+async function ensureGsReady() {
+  if (gsInstance) return;
+
+  // Dynamic import from served static path (bypasses bundler)
+  // @ts-expect-error — runtime-only path, not a TS module
+  const { default: GsModuleFactory } = await import(/* webpackIgnore: true */ '/ext/wasm/gs.js');
+
+  // Instantiate the Emscripten module, pointing locateFile to our served WASM
+  gsInstance = await GsModuleFactory({
+    locateFile: (path: string) => `/ext/wasm/${path}`,
+    // Suppress Emscripten stdout/stderr logging in Worker
+    print: () => {},
+    printErr: () => {},
+  });
+}
+
+export interface EpsRasterizeParams {
+  width: number;
+  height: number;
+  dpi: number;
+}
+
+/**
+ * Transcodes an EPS Blob to a PNG raster Blob using Ghostscript WASM.
+ * Runs entirely in the Worker thread — does not require DOM access.
+ *
+ * @param blob - The EPS file as a Blob (type: application/postscript)
+ * @param params - Rasterization parameters (width, height, dpi)
+ * @returns PNG Blob
+ */
+export async function transcodeEpsToRaster(blob: Blob, params: EpsRasterizeParams): Promise<Blob> {
+  await ensureGsReady();
+
+  const epsData = new Uint8Array(await blob.arrayBuffer());
+
+  // Write EPS to Ghostscript virtual filesystem
+  gsInstance.FS.writeFile('/input.eps', epsData);
+
+  // Ghostscript command-line arguments: EPS → PNG with alpha
+  const args = [
+    '-sDEVICE=pngalpha',
+    `-r${params.dpi}`,
+    `-g${params.width}x${params.height}`,
+    '-dEPSCrop',
+    '-dBATCH',
+    '-dNOPAUSE',
+    '-dQUIET',
+    '-sOutputFile=/output.png',
+    '-f', '/input.eps'
+  ];
+
+  // Execute Ghostscript
+  gsInstance.callMain(args);
+
+  // Read output PNG from virtual filesystem
+  const pngData: Uint8Array = gsInstance.FS.readFile('/output.png');
+
+  // Clean up virtual filesystem
+  try {
+    gsInstance.FS.unlink('/input.eps');
+    gsInstance.FS.unlink('/output.png');
+  } catch { /* ignore cleanup errors */ }
+
+  return new Blob([new Uint8Array(pngData)], { type: 'image/png' });
+}
+

@@ -28,6 +28,10 @@ export interface ExportConfig {
     format: ExportFormat;
     quality: number;
     keepExif: boolean;
+    /** Pending DPI override (0 = use frame.dpi). Committed on Apply. */
+    dpi: number;
+    /** When true, changing DPI auto-resamples pixels to maintain physical size. */
+    resample: boolean;
 }
 
 /* Constants */

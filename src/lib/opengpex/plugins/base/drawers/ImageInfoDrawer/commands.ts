@@ -21,6 +21,7 @@ import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
 import { MetadataHelper } from '@opengpex/editor/core/helpers/metadata';
+import { injectPngDpi } from '@opengpex/editor/core/helpers/dpi';
 import { calcFinalDims, clipBoxToExportShape } from './utils';
 import { FormatConverter } from './services/FormatConverter';
 
@@ -73,16 +74,22 @@ export const IMAGE_INFO_COMMANDS = {
             const extension = actualFormat.split('/')[1] || 'png';
             const filename = await pixels.utils.getExportFilename(activeFrame.name, exportW, exportH, extension);
 
+            // Inject DPI & EXIF metadata into exported file
+            // Use pending config.dpi if set, otherwise fall back to frame's committed dpi
+            const dpi = config.dpi || activeFrame.dpi || 72;
             const exif = activeFrame.layers.byId[activeFrame.layers.order[0]]?.metadata?.exif;
-            if (config.keepExif && exif) {
-               blob = await MetadataHelper.injectToBlob(blob as Blob, {
-                  engine: 'canvas2d',
-                  version: '2.1.0-hybrid',
-                  renderMode: 'original',
-                  timestamp: Date.now(),
-                  isSafeExport: true,
-                  viewportScale: 1
-               }, exif);
+
+            if (actualFormat === 'image/jpeg') {
+               // JPEG: inject EXIF (optionally full original EXIF + always DPI)
+               blob = await MetadataHelper.injectToBlob(
+                  blob as Blob,
+                  { engine: 'canvas2d', version: '2.1.0-hybrid', renderMode: 'original', timestamp: Date.now(), isSafeExport: true, viewportScale: 1 },
+                  config.keepExif ? exif : undefined,
+                  dpi
+               );
+            } else if (actualFormat === 'image/png') {
+               // PNG: inject pHYs chunk for DPI
+               blob = await injectPngDpi(blob as Blob, dpi);
             }
 
             await pixels.utils.download(blob as Blob, filename);
@@ -104,11 +111,16 @@ export const IMAGE_INFO_COMMANDS = {
          const config = selfConfig as P.ExportConfig;
          const { w, h } = calcFinalDims(activeFrame.canvas.w, activeFrame.canvas.h, config);
 
-         // Use the advanced facade instead of raw command execution
-         await actions.adv.frame.resize.resample.execute({ targetDim: { w, h } });
+         // Pass pending DPI along with dimensions so it's bundled in the same undo snapshot
+         const pendingDpi = (config.dpi && config.dpi !== activeFrame.dpi) ? config.dpi : undefined;
 
+         // Use the advanced facade — dpi is included in the same updateFrame call for atomic undo
+         await actions.adv.frame.resize.resample.execute({ targetDim: { w, h }, dpi: pendingDpi });
+
+         // Reset pending overrides
          setSelfConfig?.({
-            pixels: { w: 0, h: 0 }
+            pixels: { w: 0, h: 0 },
+            dpi: 0  // Clear pending DPI (now committed)
          });
       }
    } as EditorCommand<void, Promise<void>>

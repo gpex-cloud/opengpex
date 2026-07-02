@@ -50,6 +50,7 @@ export const LayerFactory = {
       id,
       name: 'New Project',
       canvas: { w: 0, h: 0 },
+      dpi: 72,
       rotation: 0,
       layers: { byId: {}, order: [] },
       camera: { x: 0, y: 0, k: 1 },

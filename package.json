@@ -1,6 +1,6 @@
 {
   "name": "opengpex",
-  "version": "1.0.0-beta.18",
+  "version": "1.0.0-beta.19",
   "license": "GPL-3.0-only",
   "private": true,
   "scripts": {
@@ -18,6 +18,7 @@
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
     "@jsquash/avif": "^2.1.1",
+    "@okathira/ghostpdl-wasm": "1.1.0",
     "@resvg/resvg-wasm": "^2.6.2",
     "exifr": "^7.1.3",
     "exifreader": "^4.39.1",

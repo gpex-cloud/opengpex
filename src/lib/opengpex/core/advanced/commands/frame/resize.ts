@@ -79,11 +79,11 @@ export const FrameResizeCommands = {
     id: P.ADV_FRAME_RESAMPLE,
     name: 'Resample Frame',
     undoable: true,
-    execute: async (ctx: EditorContextValue, payload: { targetDim: { w: number, h: number } }): Promise<void> => {
+    execute: async (ctx: EditorContextValue, payload: { targetDim: { w: number, h: number }; dpi?: number }): Promise<void> => {
       const { activeFrame, state, actions, geometry, layers } = ctx;
       if (!activeFrame) return;
 
-      const { targetDim } = payload;
+      const { targetDim, dpi } = payload;
       const oldW = activeFrame.canvas.w;
       const oldH = activeFrame.canvas.h;
 
@@ -116,7 +116,8 @@ export const FrameResizeCommands = {
         canvas: targetDim,
         camera: newCamera,
         clipBoxes: {},
-        canvasCropBox: asLocalShape({ x: targetDim.w * 0.25, y: targetDim.h * 0.25, w: targetDim.w * 0.5, h: targetDim.h * 0.5 })
+        canvasCropBox: asLocalShape({ x: targetDim.w * 0.25, y: targetDim.h * 0.25, w: targetDim.w * 0.5, h: targetDim.h * 0.5 }),
+        ...(dpi ? { dpi } : {})
       });
 
       layers.updateLayer(activeFrame.id, tx => {
@@ -125,5 +126,5 @@ export const FrameResizeCommands = {
         }
       });
     }
-  } as EditorCommand<{ targetDim: { w: number, h: number } }, Promise<void>>,
+  } as EditorCommand<{ targetDim: { w: number, h: number }; dpi?: number }, Promise<void>>,
 };

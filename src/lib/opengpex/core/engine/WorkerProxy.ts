@@ -108,15 +108,33 @@ export class WorkerProxy {
   }
 
   /**
-   * Transcodes SVG to PNG raster via resvg-wasm in Worker
+   * Transcodes SVG to PNG raster via resvg-wasm in Worker.
+   * Supports explicit width/height or falls back to maxDimension.
    */
-  async transcodeSvg(blob: Blob, maxDimension = 4096): Promise<Blob> {
+  async transcodeSvg(blob: Blob, params?: { width?: number; height?: number; maxDimension?: number }): Promise<Blob> {
     const result = await workerBridge.request<{ blob: Blob }>('TRANSCODE_SVG', {
       blob,
-      maxDimension
+      width: params?.width,
+      height: params?.height,
+      maxDimension: params?.maxDimension,
     });
     return result.blob;
   }
+
+  /**
+   * Transcodes EPS to PNG raster via Ghostscript WASM in Worker.
+   * Requires explicit width, height, and dpi.
+   */
+  async transcodeEps(blob: Blob, params: { width: number; height: number; dpi: number }): Promise<Blob> {
+    const result = await workerBridge.request<{ blob: Blob }>('TRANSCODE_EPS', {
+      blob,
+      width: params.width,
+      height: params.height,
+      dpi: params.dpi,
+    });
+    return result.blob;
+  }
+
 }
 
 
