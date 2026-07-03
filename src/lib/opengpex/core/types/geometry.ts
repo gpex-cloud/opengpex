@@ -252,5 +252,32 @@ export interface GeometryService {
      * an open polyline, simplifies, then removes the trailing duplicate.
      */
     simplifyRing: (ring: Point2D[], epsilon: number) => Point2D[];
+
+  };
+
+  /**
+   * Point2D ring service: raw `Point2D[][]` ↔ container conversions and
+   * foundational ring operations. This is the unbranded data layer beneath
+   * LocalShape / LocalPolygon.
+   *
+   * Intentionally separate from `polygon` (branded containers) and `shape`
+   * (rendering paths). See dependency layering:
+   *   point2d → types only
+   *   polygon → point2d (for bounds, polygon construction)
+   *   shape   → independent
+   */
+  point2d: {
+    /** Decomposes a LocalShape into plain Point2D rings. */
+    shapeToPoint2D: (shape: LocalShape) => Point2D[][];
+    /** Attempts to convert Point2D rings back into a LocalShape (null if not representable). */
+    point2dToLocalShape: (rings: readonly Point2D[][], antiAliased: boolean) => LocalShape | null;
+    /** Builds a LocalPolygon from raw Point2D rings, computing bounding rect automatically. */
+    point2dToLocalPolygon: (rings: Point2D[][], antiAliased: boolean) => LocalPolygon;
+    /** Inverts rings against bounding area (evenodd semantics). Null = empty selection. */
+    invertRings: (rings: Point2D[][], boundingW: number, boundingH: number) => Point2D[][] | null;
+    /** Checks if a ring matches the canvas bounding rectangle. */
+    isBoundingRing: (ring: readonly Point2D[], boundingW: number, boundingH: number) => boolean;
+    /** Computes axis-aligned bounding box of a multi-ring point set (no brand). */
+    computePolygonBounds: (rings: Point2D[][]) => Rect;
   };
 }

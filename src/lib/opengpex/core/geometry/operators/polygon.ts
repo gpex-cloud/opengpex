@@ -27,6 +27,7 @@ import {
   asLocalPolygon, asWorldPolygon,
 } from '@opengpex/editor/core/types';
 import { getLayerWorldMatrix } from './transform';
+import { computePolygonBounds } from './point2d';
 
 /**
  * Detects whether a source/target is a Layer (image/text/vector/color) vs a Frame.
@@ -36,29 +37,8 @@ function isLayerSource(s: Layer | Frame): s is Layer {
   return 'type' in s && (s.type === 'image' || s.type === 'text' || s.type === 'vector' || s.type === 'color');
 }
 
-/**
- * computePolygonBounds: Calculates the axis-aligned bounding box of a multi-ring point set.
- *
- * Returns a generic Rect (no brand) so the caller can wrap with the appropriate caster
- * (`asLocalRect` / `asWorldRect`) to match the polygon space.
- */
-export function computePolygonBounds(rings: Point2D[][]): Rect {
-  if (!rings.length || !rings.some(r => r.length > 0)) {
-    return { x: 0, y: 0, w: 0, h: 0 };
-  }
-
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const ring of rings) {
-    for (const p of ring) {
-      if (p.x < minX) minX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y > maxY) maxY = p.y;
-    }
-  }
-
-  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-}
+// computePolygonBounds re-exported from point2d.ts for backward compatibility
+export { computePolygonBounds } from './point2d';
 
 /**
  * localToWorldPolygon: Project polygon from local space to world space.
@@ -407,3 +387,7 @@ function bresenhamSteps(
     }
   }
 }
+
+// Re-export point2d functions for backward compatibility (consumers may still
+// import from polygon.ts). Canonical source is now point2d.ts.
+export { isBoundingRing, point2dToLocalShape, point2dToLocalPolygon, invertRings } from './point2d';

@@ -34,6 +34,7 @@ import {
   ClipboardPaste,
   ScissorsLineDashed,
   Feather,
+  Expand,
 } from "lucide-react";
 import {
   useEditorState,
@@ -45,6 +46,7 @@ import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import Popover from "@opengpex/editor/widgets/Popover";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
+import { InvertIcon, AlphaIcon } from "@opengpex/editor/icons";
 import { useClipOptionsCommands } from "./hooks";
 import { CROP_TOOL_STRATEGIES, type CropToolStrategy } from "./protocols";
 import type { ClipSignalsMap } from "./commands.d";
@@ -78,6 +80,10 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
     cropToolSetCmd,
     applyMaskCmd,
     antiAliasToggleCmd,
+    invertSelectionCmd,
+    selectFromAlphaCmd,
+    offsetSelectionCmd,
+    isImageLayer,
     cropTool,
     isIrregularTool,
     hasAnySelection,
@@ -92,6 +98,8 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isFeatherOpen, setIsFeatherOpen] = useState(false);
+  const [isOffsetOpen, setIsOffsetOpen] = useState(false);
+  const [offsetValue, setOffsetValue] = useState(0);
   const featherPopoverTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleDropdownClick = () => {
@@ -487,6 +495,161 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
             );
           })()}
 
+          {/*
+           * Segment 3b: Invert Selection — Flips the active selection
+           * (selected ↔ unselected). Shortcut: Cmd+Shift+I.
+           */}
+          {(() => {
+            const invertDisabled = !hasAnySelection || isPanMode || isReCanvas;
+            return (
+              <Tooltip
+                content={`Invert Selection (${invertSelectionCmd?.shortcutLabel || "⇧⌘I"})`}
+                position="bottom"
+                display="inline-flex"
+              >
+                <button
+                  onClick={() => invertSelectionCmd?.execute()}
+                  disabled={invertDisabled}
+                  className={`flex items-center justify-center w-7 h-7 transition-colors outline-none select-none
+                    ${invertDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
+                  `}
+                >
+                  <InvertIcon
+                    size={13}
+                    className={
+                      isIrregularTool ? "text-purple-500" : "text-amber-500"
+                    }
+                  />
+                </button>
+              </Tooltip>
+            );
+           })()}
+
+          {/*
+           * Segment 3c: Select from Alpha — Load selection from layer transparency.
+           * Only enabled for image layers (not text/paint). Shortcut: Cmd+Shift+A.
+           */}
+          {(() => {
+            const alphaDisabled = isPanMode || isReCanvas || !isImageLayer;
+            return (
+              <Tooltip
+                content={`Select from Alpha (${selectFromAlphaCmd?.shortcutLabel || "⇧⌘A"})`}
+                position="bottom"
+                display="inline-flex"
+              >
+                <button
+                  onClick={() => selectFromAlphaCmd?.execute()}
+                  disabled={alphaDisabled}
+                  className={`flex items-center justify-center w-7 h-7 transition-colors outline-none select-none
+                    ${alphaDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
+                  `}
+                >
+                  <AlphaIcon
+                    size={13}
+                    className={
+                      isIrregularTool ? "text-purple-500" : "text-amber-500"
+                    }
+                  />
+                </button>
+              </Tooltip>
+            );
+          })()}
+
+          {/*
+           * Segment 3d: Offset Selection — Expand (positive) or contract (negative)
+           * the active selection by N pixels. Click opens a Popover with numeric input + APPLY.
+           */}
+          {(() => {
+            const offsetDisabled = !hasAnySelection || isPanMode || isReCanvas;
+            return (
+              <Popover
+                isOpen={isOffsetOpen}
+                onClose={() => setIsOffsetOpen(false)}
+                position="bottom"
+                align="start"
+                offset={8}
+                display="inline-flex"
+                content={
+                  <div className="flex flex-col gap-2 p-2.5 min-w-[170px]">
+                    {/* Row 1: Title + Close */}
+                    <div className="flex justify-between items-center px-0.5">
+                      <span className="text-[10px] font-black text-[var(--text-main)] uppercase tracking-wider">
+                        Offset Selection
+                      </span>
+                      <button
+                        onClick={() => { setIsOffsetOpen(false); setOffsetValue(0); }}
+                        className="flex items-center justify-center w-5 h-5 text-[var(--text-muted)] hover:text-rose-500 hover:bg-[var(--bg-stage)] rounded-md transition-colors"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                    {/* Row 2: Input + APPLY pill */}
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        value={offsetValue}
+                        onChange={(e) => setOffsetValue(Number(e.target.value))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            if (offsetValue !== 0) {
+                              offsetSelectionCmd?.execute({ distance: -offsetValue });
+                            }
+                            setIsOffsetOpen(false);
+                            setOffsetValue(0);
+                          } else if (e.key === 'Escape') {
+                            setIsOffsetOpen(false);
+                            setOffsetValue(0);
+                          }
+                        }}
+                        autoFocus
+                        className="w-[60px] h-6 px-1.5 text-[10px] font-bold text-center tabular-nums rounded border border-[var(--border-subtle)] bg-[var(--bg-stage)] text-[var(--text-main)] outline-none focus:border-amber-500/50"
+                        placeholder="±px"
+                      />
+                      <span className="text-[9px] text-[var(--text-muted)]">px</span>
+                      <button
+                        onClick={() => {
+                          if (offsetValue !== 0) {
+                            offsetSelectionCmd?.execute({ distance: -offsetValue });
+                          }
+                          setIsOffsetOpen(false);
+                          setOffsetValue(0);
+                        }}
+                        className={`h-6 px-3 text-[10px] font-black rounded-full transition-colors
+                          ${isIrregularTool
+                            ? "bg-purple-500 hover:bg-purple-600 text-white"
+                            : "bg-amber-500 hover:bg-amber-600 text-white"
+                          }`}
+                      >
+                        APPLY
+                      </button>
+                    </div>
+                  </div>
+                }
+              >
+                <Tooltip
+                  content="Offset Selection (±px)"
+                  position="bottom"
+                  display="inline-flex"
+                >
+                  <button
+                    onClick={() => setIsOffsetOpen((prev) => !prev)}
+                    disabled={offsetDisabled}
+                    className={`flex items-center justify-center w-7 h-7 transition-colors outline-none select-none
+                      ${offsetDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
+                    `}
+                  >
+                    <Expand
+                      size={13}
+                      className={
+                        isIrregularTool ? "text-purple-500" : "text-amber-500"
+                      }
+                    />
+                  </button>
+                </Tooltip>
+              </Popover>
+            );
+          })()}
+
           <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20" />
 
           {/*
@@ -624,6 +787,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
               </Tooltip>
             );
           })()}
+
         </div>
       </div>
 

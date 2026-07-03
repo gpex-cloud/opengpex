@@ -26,25 +26,28 @@ import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
 import { useClipOverlayCommands, useClipCursor } from "./hooks";
 import {
   useCropDimSync,
-  useRegularCropSync,
-  useIrregularSelectionSync,
+  useRegularBoxSync,
+  useSelectionAntsSync,
 } from "./useFastSync";
 import { lassoPreviewPathRef } from "./interactions";
 import { PixelGridOverlayAPI } from "../PixelGridOverlay/protocols";
 
 /**
- * ClipOverlayMain: UI layer for the cropping tool.
+ * ClipOverlayMain: UI layer for the cropping / selection tool.
  *
- * Two SVG marching-ants channels coexist permanently in the DOM (mounted but
- * inactive when not relevant) so the CSS keyframe animation never resets:
- *   - Channel 1 (white / red): regular crop box (rect / ellipse), driven by
- *     `useRegularCropSync` and active only when `cropTool ∈ {rect, ellipse-*}`.
- *   - Channel 2 (purple): irregular polygon selection (lasso / wand), driven
- *     by `useIrregularSelectionSync`, active only when `cropTool ∈ {lasso, wand}`
- *     **and** `irregularCropBox` is non-null.
- *   - Channel 3 (purple, screen-space): the live lasso preview during pointer
- *     drag. Updated imperatively by `createLassoHandler` via `lassoPreviewPathRef`,
- *     bypassing React entirely. Hidden when the trail is empty (`d=""`).
+ * Architecture (2026-07-03 unified renderer):
+ *
+ *   - Single marching-ants <g>+<path>: renders ALL selection types (rect,
+ *     ellipse, polygon, inverted) via `useSelectionAntsSync`. The unified
+ *     selector reads the active slot and produces SVG path `d` regardless
+ *     of data type. Fill switches dynamically (none for shapes, semi-
+ *     transparent for polygons).
+ *
+ *   - Lasso preview <path> (screen-space): live trail during pointer drag.
+ *     Updated imperatively by `createLassoHandler` via `lassoPreviewPathRef`.
+ *
+ *   - Regular box (CSS div): handles, dim label, rule-of-thirds guides.
+ *     Only active when tool is regular (rect/ellipse) or Re-Canvas.
  */
 export function ClipOverlayMain() {
   const {
@@ -61,14 +64,11 @@ export function ClipOverlayMain() {
     isIrregularTool,
   } = useClipOverlayCommands();
 
-  // Per-tool custom cursor (crosshair + badge) via cursorOverride signal
   useClipCursor(isClipActive, cropTool);
 
   const { state } = useEditorState();
-
   const overlayRef = useRef<HTMLDivElement>(null);
 
-  // 1. Core Geometric Sync: Smooth rotation via global counter-animation hook
   useOverlayRotationSync(overlayRef, activeFrame);
 
   const gridConfig = state.pluginConfig[PixelGridOverlayAPI.configKey] as
@@ -78,76 +78,41 @@ export function ClipOverlayMain() {
     ? (gridConfig.zoomThreshold ?? 8)
     : null;
 
-  // ─── 2a / 2b: fast-track activation gates ───────────────────────────────
-  // The overlay is mounted whenever the user is *either* in clip mode OR
-  // Re-Canvas is active (the two now operate as orthogonal modals — see
-  // `useClipOverlayCommands` for the `cropTool` synthesis that pins family
-  // to 'regular' during Re-Canvas). The activation gate for the *regular*
-  // channel is therefore `(isClipActive || isReCanvas) && isRegularTool`:
-  // Re-Canvas always wants the rect draggable, regardless of what tool the
-  // user had selected before opening Re-Canvas.
-  //
-  // The irregular channel never activates during Re-Canvas (Re-Canvas is
-  // rect-only), so its gate keeps the stricter `isClipActive` check.
+  // ─── Activation gates ────────────────────────────────────────────────────
   const isOverlayActive = isClipActive || isReCanvas;
 
-  const { syncStyle, groupRef, pathRef, guidesRef } = useRegularCropSync(
+  // Unified ants: always active when overlay is active (handles all data types)
+  const antsActive = isOverlayActive;
+
+  // Box (handles + dim label): only for regular tools or Re-Canvas
+  const boxActive = isOverlayActive && (isReCanvas || isRegularTool);
+
+  // ─── Fast-track hooks ────────────────────────────────────────────────────
+
+  // Unified marching ants (single <g> + <path>)
+  const groupRef = useRef<SVGGElement>(null);
+  const pathRef = useRef<SVGPathElement>(null);
+  useSelectionAntsSync(groupRef, pathRef, antsActive, isReCanvas, cropTool);
+
+  // CSS box for drag handles + guides (regular tools only)
+  const { guidesRef } = useRegularBoxSync(
     boxRef,
-    cropBox,
-    isOverlayActive && isRegularTool,
+    boxActive,
     isReCanvas,
     showGridThreshold,
   );
 
-  // 2b. Irregular polygon sync (lasso / wand) — selector returns null when
-  //     irregularCropBox is empty so the path naturally hides.
-  const polyGroupRef = useRef<SVGGElement>(null);
-  const polyPathRef = useRef<SVGPathElement>(null);
-  useIrregularSelectionSync(
-    polyGroupRef,
-    polyPathRef,
-    isClipActive && isIrregularTool,
-    cropTool,
-  );
+  // Dimension label
+  const { dimLabelRef } = useCropDimSync(boxActive, isReCanvas);
 
-
-
-  // 2c. Lasso preview path: install/uninstall the module-level ref slot used
-  //     by `createLassoHandler` to paint the in-progress trail without redux.
-  //
-  // [Pre-PR-6 缺陷 B 真因修复] We MUST use a ref callback instead of a
-  // useRef + useEffect([]) pair. Reason:
-  //
-  //   - `if (!activeFrame || !isClipActive) return null;` early-exits below.
-  //   - On the very first render (non-clip mode), the <path> below is NEVER
-  //     rendered, so `previewPathRef.current === null`.
-  //   - The useEffect with `[]` deps then captures that null and assigns it
-  //     to the module-level `lassoPreviewPathRef.current`.
-  //   - When the user later switches to clip mode the component re-renders,
-  //     the <path> mounts, but the empty-deps effect never runs again, so
-  //     `lassoPreviewPathRef.current` stays null forever.
-  //   - Result: `createLassoHandler.onStart` reports `previewRef=false` even
-  //     though pointermove fires — exactly what the live trace showed.
-  //
-  // The ref callback below fires synchronously on EVERY mount/unmount of the
-  // <path> element, so the module-level ref is always in sync with the DOM
-  // regardless of conditional rendering above.
+  // ─── Lasso preview path ref callback ─────────────────────────────────────
   const previewPathRef = useRef<SVGPathElement | null>(null);
   const setPreviewPathRef = useCallback((el: SVGPathElement | null) => {
     previewPathRef.current = el;
     lassoPreviewPathRef.current = el;
   }, []);
 
-  const { dimLabelRef } = useCropDimSync(
-    isOverlayActive && isRegularTool,
-    isReCanvas,
-  );
-
-  // Mount whenever clip OR Re-Canvas is active. Re-Canvas users expect the
-  // canvas rect (with handles + dim label) to be visible & draggable even
-  // outside of explicit clip mode — see commands.ts::toggleReCanvas notes.
   if (!activeFrame || !isOverlayActive) return null;
-
 
   const cursor = dragType === "move"
     ? "move"
@@ -161,10 +126,10 @@ export function ClipOverlayMain() {
       className="absolute inset-0 pointer-events-none"
       style={{ cursor, zIndex: EDITOR_Z_INDEX.STAGE.SYSTEM_TOOLS }}
     >
-      {/* 1. Marching Ants Vector Layer (Full Viewport SVG, transformed via group) */}
+      {/* SVG layer: marching ants + lasso preview */}
       <div className="absolute inset-0 pointer-events-none overflow-visible">
         <svg className="absolute inset-0 w-full h-full overflow-visible">
-          {/* Channel 1: regular crop (rect / ellipse) */}
+          {/* Unified selection ants (white / red for Re-Canvas) */}
           <g
             ref={groupRef}
             style={{
@@ -176,6 +141,7 @@ export function ClipOverlayMain() {
             <path
               ref={pathRef}
               fill="none"
+              fillRule="evenodd"
               stroke={isReCanvas ? "#ef4444" : "white"}
               strokeWidth="1"
               vectorEffect="non-scaling-stroke"
@@ -184,34 +150,7 @@ export function ClipOverlayMain() {
             />
           </g>
 
-          {/* ─── Channel 2: irregular polygon selection (lasso / wand) ────────
-           * Near-white lavender marching ants (`#f0e6ff`). The stroke is
-           * intentionally almost-white with a subtle purple tint — this
-           * maximizes contrast on all image types (dark, busy, mid-tone)
-           * while the `drop-shadow` black halo on the parent <g> ensures
-           * visibility on pure-white / bright regions. The purple identity
-           * is maintained through the tint rather than saturation.
-           */}
-          <g
-            ref={polyGroupRef}
-            style={{ filter: "drop-shadow(0 0 1px rgba(0,0,0,0.5))" }}
-          >
-            <path
-              ref={polyPathRef}
-              fill="rgba(240, 230, 255, 0.12)"
-              fillRule="evenodd"
-              stroke="#f0e6ff"
-              strokeWidth="1"
-              vectorEffect="non-scaling-stroke"
-              strokeDasharray="6,6"
-              className="marching-ants"
-            />
-          </g>
-
-          {/* ─── Channel 3: live lasso preview (screen-space) ────────────────
-           * Same near-white lavender as channel 2 for visual consistency.
-           * Single <path>, no underlay (see channel-2 rationale above).
-           */}
+          {/* Lasso preview (screen-space, during pointer drag) */}
           <path
             ref={setPreviewPathRef}
             fill="none"
@@ -223,24 +162,16 @@ export function ClipOverlayMain() {
             pointerEvents="none"
             className="marching-ants"
           />
-
-
         </svg>
       </div>
 
-      {/* Regular crop's draggable rect + handles + dim label.
-          Hidden entirely on irregular tools — lasso/wand selections
-          are not draggable / resizable in Phase 1.
-          When imageCropBox is 0×0 the fast-track paints width/height=0 so
-          the div is invisible; visibility toggles in useRegularCropSync. */}
+      {/* Regular crop box: handles + dim label + guides.
+          Hidden when tool is irregular or data is polygon (via visibility gate). */}
       {isRegularTool && (
         <div
           ref={boxRef}
           className="absolute pointer-events-auto cursor-move transition-[border-radius] duration-300"
-          style={{
-            ...syncStyle,
-            borderRadius: cropType === "circle" ? "50%" : "0%",
-          }}
+          style={{ borderRadius: cropType === "circle" ? "50%" : "0%" }}
           data-handle="move"
         >
           {showError && (
@@ -252,7 +183,7 @@ export function ClipOverlayMain() {
             </div>
           )}
 
-          {/* Resize Handles - Initially transparent, appears on hover */}
+          {/* Resize Handles */}
           {[
             { h: "nw", c: "top-0 left-0", cursor: "nwse-resize" },
             { h: "ne", c: "top-0 right-0", cursor: "nesw-resize" },
@@ -301,16 +232,14 @@ export function ClipOverlayMain() {
             data-handle="s"
           />
 
-          {/* Rule of Thirds Grid Lines - Only internal lines and clipped to shape */}
+          {/* Rule of Thirds Grid */}
           <div
             ref={guidesRef}
             className="absolute inset-0 opacity-20 pointer-events-none overflow-hidden"
             style={{ borderRadius: cropType === "circle" ? "50%" : "0%" }}
           >
-            {/* Horizontal lines */}
             <div className="absolute top-1/3 left-0 w-full h-px bg-white" />
             <div className="absolute top-2/3 left-0 w-full h-px bg-white" />
-            {/* Vertical lines */}
             <div className="absolute left-1/3 top-0 h-full w-px bg-white" />
             <div className="absolute left-2/3 top-0 h-full w-px bg-white" />
           </div>

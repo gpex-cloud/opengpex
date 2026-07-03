@@ -35,7 +35,7 @@ import type { ClipCommandsMap, ClipSignalsMap } from './commands.d';
  * Non-command helper operations remain in bare function form.
  */
 export const useClipOptionsCommands = () => {
-  const { activeFrame } = useEditorState();
+  const { activeFrame, activeLayer } = useEditorState();
   const { actions } = useEditorServices();
 
   const {
@@ -49,6 +49,9 @@ export const useClipOptionsCommands = () => {
     branchCreateCmd,
     boxResetCmd,
     cropToolSetCmd, // ← derived from CMD_SET_CROP_TOOL = 'cmd.crop_tool.set'
+    invertSelectionCmd, // ← derived from CMD_INVERT_SELECTION = 'cmd.invert_selection'
+    selectFromAlphaCmd, // ← derived from CMD_SELECT_FROM_ALPHA = 'cmd.select_from_alpha'
+    offsetSelectionCmd, // ← derived from CMD_OFFSET_SELECTION = 'cmd.offset_selection'
   } = usePluginCommands<ClipCommandsMap>();
 
   const { reCanvasActiveSignal, cropFeatherValueSignal } = usePluginSignals<ClipSignalsMap>();
@@ -109,7 +112,9 @@ export const useClipOptionsCommands = () => {
       branchCreateCmd,
       boxResetCmd,
       cropToolSetCmd,
-
+      invertSelectionCmd,
+      selectFromAlphaCmd,
+      offsetSelectionCmd,
 
       // System Commands (cross-plugin, via actions.adv API — AdvCommandRef)
       cutCmd: actions.adv.layer.clip.cut,
@@ -129,6 +134,7 @@ export const useClipOptionsCommands = () => {
       hasAnySelection,
       supportsAntiAlias,
       isAntiAliased,
+      isImageLayer: activeLayer?.type === 'image',
 
       // Helpers (plain functions — non-command logic)
       updateClipBox: (payload: { x?: number; y?: number; w?: number; h?: number }) => {
@@ -182,6 +188,10 @@ export const useClipOptionsCommands = () => {
     branchCreateCmd,
     boxResetCmd,
     cropToolSetCmd,
+    invertSelectionCmd,
+    selectFromAlphaCmd,
+    offsetSelectionCmd,
+    activeLayer,
   ]);
 
 };

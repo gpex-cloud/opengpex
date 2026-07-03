@@ -118,6 +118,75 @@ export const CLIP_LASSO_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://w
 export const CLIP_WAND_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M15 22l6-6' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3Cpath d='M15 22l6-6' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M19 14v-1M20 15h1M17 15h-1M19 17v1' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M19 14v-1M20 15h1M17 15h-1M19 17v1' stroke='black' stroke-width='0.8' stroke-linecap='round'/%3E%3C/svg%3E") 8 8, crosshair`;
 
 /**
+ * InvertIcon: Square with a single diagonal from bottom-left to top-right.
+ * Left half (below the diagonal) is filled black/currentColor.
+ * Represents "invert selection" — two contrasting halves.
+ * Based on lucide Square (24×24, rect 3,3 18×18 rx=2).
+ */
+export function InvertIcon({ size = 12, className }: { size?: number; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`lucide-icon ${className || ''}`}
+    >
+      {/* Left half filled: triangle from bottom-left corner up the diagonal, clipped to rect */}
+      <defs>
+        <clipPath id="inv-clip">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+        </clipPath>
+      </defs>
+      <polygon
+        points="3,21 21,3 3,3"
+        fill="currentColor"
+        stroke="none"
+        clipPath="url(#inv-clip)"
+      />
+      {/* Square outline */}
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      {/* Single diagonal: bottom-left to top-right */}
+      <line x1="3" y1="21" x2="21" y2="3" />
+    </svg>
+  );
+}
+
+/**
+ * AlphaIcon: Dashed single-stroke head+shoulders silhouette (no outer frame).
+ * Represents "select from alpha" — the dashed outline evokes a
+ * marching-ants selection around a person cutout.
+ * One continuous path (one stroke) to visually read as a single contour.
+ */
+export function AlphaIcon({ size = 12, className }: { size?: number; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeDasharray="2.5 2"
+      className={`lucide-icon ${className || ''}`}
+    >
+      {/*
+       * Single continuous path: start at left shoulder base → curve up to
+       * left neck → head oval (top) → right neck → curve down to right
+       * shoulder base. One stroke, no breaks.
+       */}
+      <path d="M3 21c0-4 2.5-7 5-8.5C6.5 11 5.5 9 5.5 7c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5c0 2-1 4-2.5 5.5 2.5 1.5 5 4.5 5 8.5H3Z" />
+    </svg>
+  );
+}
+
+/**
  * PremiumCloud: Cyber Neon Cloud Icon
  * Used as trigger button for CloudMenu plugin
  */

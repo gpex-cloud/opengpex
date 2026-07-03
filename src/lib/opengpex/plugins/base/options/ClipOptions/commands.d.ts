@@ -29,6 +29,9 @@ export interface ClipCommandsMap {
   drillSelectionCmd: CommandInstance;
   layerViaCopyCmd: CommandInstance;
   layerViaCutCmd: CommandInstance;
+  invertSelectionCmd: CommandInstance;
+  selectFromAlphaCmd: CommandInstance;
+  offsetSelectionCmd: CommandInstance<{ distance: number }>;
 }
 
 /** Type map for usePluginSignals<ClipSignalsMap>() */

@@ -21,7 +21,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { Motion } from '@opengpex/editor/core/motion';
 import { asLocalShape, LocalShape, LocalPolygon } from '@opengpex/editor/core/types';
-import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import {
   ClipOptionsAPI,
   CROP_TOOL_STRATEGIES,
@@ -29,7 +29,8 @@ import {
 } from '../../options/ClipOptions/protocols';
 
 /**
- * useClipOverlayCommands: Encapsulates UI helper logic and command proxies for the cropping overlay.
+ * useClipOverlayCommands: Encapsulates UI helper logic and command proxies
+ * for the cropping overlay.
  */
 export function useClipOverlayCommands() {
   const { state, activeFrame } = useEditorState();
@@ -44,30 +45,12 @@ export function useClipOverlayCommands() {
 
   // Active crop / selection tool — read from per-frame field.
   const rawTool = (activeFrame?.latestClipTool as CropTool) || 'rect';
-  // ─── Re-Canvas vs Clip orthogonality (2026-06-23 fix) ───────────────────
-  // Re-Canvas owns its own visual chrome: a rose-tinted, draggable rect on
-  // `canvasCropBox`. It does *not* care about the user's last-selected crop
-  // tool (lasso / wand / ellipse) — those are clip-mode concerns. So when
-  // Re-Canvas is active we present the tool as a synthetic `'rect'` to the
-  // rest of the overlay code path:
-  //   • family derivation → always 'regular' → useRegularCropSync's isActive
-  //     becomes true → the canvas box becomes draggable;
-  //   • polyGroup / polyPath fast-track stays paused;
-  //   • `useFastMarchingAntsSync`'s `resetKey` is the synthetic tool (always
-  //     'rect' here), so re-entering / re-leaving Re-Canvas does not bleed
-  //     stale lasso paths into the canvas channel.
-  // We deliberately *do not* mutate `SIGNAL_CROP_TOOL` itself — when the user
-  // closes Re-Canvas the original tool returns automatically (it's still the
-  // raw signal value). This is the only place where the synthetic projection
-  // is needed; all the other consumers (Options bar, ClipOverlay handlers)
-  // already check `isReCanvas` explicitly before deciding what to do.
-  // Safety: if rawTool points to a tool that no longer exists in the strategy
-  // table (e.g. after removing 'bg-removal'), fall back to 'rect'.
+
+  // Re-Canvas pins tool to 'rect' (canvas resize is always rectangular).
   const cropTool: CropTool = isReCanvas ? 'rect' : (CROP_TOOL_STRATEGIES[rawTool] ? rawTool : 'rect');
   const family = CROP_TOOL_STRATEGIES[cropTool].family;
   const isRegularTool = family === 'regular';
   const isIrregularTool = family === 'irregular';
-
 
   const { clipBoxes, canvasCropBox, canvas: canvasDim } = activeFrame || {
     clipBoxes: {} as Record<string, LocalShape | LocalPolygon>,
@@ -80,6 +63,7 @@ export function useClipOverlayCommands() {
   const cropBox = cropShape.rect;
   const cropType = cropShape.type;
 
+  // Error pulse animation
   const lastPulse = useRef(state.interaction.selectionErrorPulse);
   useEffect(() => {
     if (state.interaction.selectionErrorPulse && state.interaction.selectionErrorPulse !== lastPulse.current) {
@@ -96,6 +80,7 @@ export function useClipOverlayCommands() {
     }
   }, [state.interaction.selectionErrorPulse]);
 
+  // Unmount cleanup: discard any in-flight peel
   const actionsRef = useRef(actions);
   useLayoutEffect(() => {
     actionsRef.current = actions;
@@ -103,30 +88,12 @@ export function useClipOverlayCommands() {
 
   useEffect(() => {
     return () => {
-      // Defer to next microtask so React can finish the unmount commit + paint
-      // before kicking off the discard. Mirrors the latency optimisation in
-      // ClipOptions::exitClipMode (the centralised exit path); both routes are
-      // idempotent thanks to discardExchange's dirty short-circuit, so the
-      // duplicate call across the two cleanup paths is safe.
-      //
-      // 2026-06-25: Changed from mergeHost (bake) to discardExchange (cancel).
-      // Baking now requires explicit Enter key (commitPeel command). If the
-      // overlay unmounts without the user pressing Enter, any in-flight peel
-      // is treated as cancelled — host hole mask removed, exchange reset.
       const actions = actionsRef.current;
       queueMicrotask(() => {
         actions.adv.layer.peel.discardExchange.execute();
       });
     };
   }, []);
-
-  // Pre-PR-6-3: unified via getClipBox. We only consider the slot that belongs
-  // to the *currently active* tool — other slots may still hold stale data
-  // (preserved on tool switch) but are not "the active selection" from the
-  // user's POV.
-  const overlayClipBox = activeFrame ? getClipBox(activeFrame) : null;
-  const hasIrregularBox = isIrregularTool && overlayClipBox !== null && !overlayClipBox.regular;
-
 
   return {
     activeFrame,
@@ -140,11 +107,10 @@ export function useClipOverlayCommands() {
     cropTool,
     isRegularTool,
     isIrregularTool,
-    hasIrregularBox,
     dragType: state.interaction.isInteracting ? 'move' : '',
     showError,
     boxRef,
-    reset: resetBox // Use the standardized command
+    reset: resetBox
   };
 }
 
@@ -152,31 +118,19 @@ export function useClipOverlayCommands() {
 
 /**
  * useClipCursor: Sets per-tool custom cursor when clip mode is active.
- *
- * Lifecycle:
- * - Enter clip mode → set cursor for current tool (from CROP_TOOL_STRATEGIES)
- * - Switch tool within clip mode → update cursor
- * - Exit clip mode → clear to null (fallback to Viewport default)
- * - Component unmount → clear to null (safety net)
- *
- * Only clears `cursorOverride` if it currently holds one of our cursors,
- * avoiding interference with other cursor owners (TextOverlay, BrushOverlay, etc.).
  */
 export function useClipCursor(isClipActive: boolean, cropTool: CropTool) {
-const { actions } = useEditorServices();
+  const { actions } = useEditorServices();
 
   useEffect(() => {
     if (isClipActive) {
-      // Active: set the tool-specific cursor
       const toolCursor = CROP_TOOL_STRATEGIES[cropTool].cursor;
       actions.fast.setCursor(toolCursor);
     } else {
-      // Deactivated: clear cursor (reset to viewport default)
       actions.fast.setCursor(null);
     }
   }, [isClipActive, cropTool, actions]);
 
-  // Cleanup on unmount — safety net
   useEffect(() => {
     return () => {
       actions.fast.setCursor(null);

@@ -19,11 +19,14 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, asLocalRect, asLocalShape, Frame, LocalRect, LocalShape, EditorActions } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, asLocalRect, asLocalShape, Frame, LocalRect, LocalShape, LocalPolygon, EditorActions, Point2D } from '@opengpex/editor/core/types';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS } from '@opengpex/editor/core/helpers/presets';
+import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
+import { clipComputeClient } from './workers/client';
 import * as P from './protocols';
 import type { CropTool } from './protocols';
+
 
 /**
  * Single source of truth for "leave clip mode and discard any in-flight
@@ -110,6 +113,7 @@ function cycleCropTool(ctx: EditorContextValue, step: 1 | -1): void {
     { tool: next }
   );
 }
+
 
 /**
  * CLIP_OPTIONS_COMMANDS: Declarative command configuration (Single Source of Truth).
@@ -472,15 +476,14 @@ export const CLIP_OPTIONS_COMMANDS = {
    *
    * Side-effect matrix (by `family`):
    *   - regular → regular   : `projectShape()` patches imageCropBox.type.
-   *   - regular → irregular : no data write; regular box visually hides via
-   *                           `useRegularCropSync` isActive=false cleanup.
-   *   - irregular → regular : no data write; irregular polygon visually hides
-   *                           via `useIrregularSelectionSync` isActive=false.
-   *   - irregular → irregular : no data write. Per-tool slots in
-   *                           `irregularCropBoxes` mean the visual gate reads
-   *                           the new tool's (empty) slot and the canvas
-   *                           clears automatically; the previous tool's slot
-   *                           is preserved for round-trip symmetry.
+   *   - regular → irregular : no data write; unified ants selector reads the
+   *                           new tool's (empty) slot → path clears.
+   *   - irregular → regular : no data write; ants selector reads the new
+   *                           tool's slot (empty or shape) → path updates.
+   *   - irregular → irregular : no data write. Per-tool slots mean the ants
+   *                           selector reads the new tool's (empty) slot and
+   *                           the path clears; previous tool's slot is
+   *                           preserved for round-trip symmetry.
    *
    * Slot clears only happen via:
    *   1) `adv.layer.clip.toMask` (mission accomplished);
@@ -606,7 +609,219 @@ export const CLIP_OPTIONS_COMMANDS = {
       const feather = (ctx.scoped?.getSignal(P.SIGNAL_CROP_FEATHER) as number) || 0;
       ctx.actions.adv.layer.cmdj.cut.execute({ feather });
     }
-  } as EditorCommand<void, void>
+  } as EditorCommand<void, void>,
+
+  /**
+   * CMD_SELECT_FROM_ALPHA — Select from Alpha (Cmd+Shift+A).
+   *
+   * Reads the active image layer's alpha channel, sends it to the wand worker
+   * (alpha handler), and writes the resulting polygon selection to the current
+   * tool's slot. Does NOT switch tools — aligned with Invert's design principle.
+   */
+  selectFromAlpha: {
+    id: P.CMD_SELECT_FROM_ALPHA,
+    name: 'Select from Alpha',
+    undoable: true,
+    shortcut: { key: 'a', meta: true, shift: true },
+    execute: async (ctx: EditorContextValue) => {
+      // ─── Guards ────────────────────────────────────────────────────────
+      if (ctx.state.interaction.interactionMode !== 'clip') return;
+      const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
+      if (isReCanvas) return;
+
+      const frame = ctx.activeFrame;
+      if (!frame) return;
+
+      // Must have an active image layer
+      const layer = ctx.activeLayer;
+      if (!layer || layer.type !== 'image') return;
+
+      // ─── Get layer pixel data ──────────────────────────────────────────
+      let imageData: ImageData;
+      try {
+        let img = imageCache.get(layer.src);
+        if (!img) {
+          img = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const el = new Image();
+            el.crossOrigin = 'anonymous';
+            el.onload = () => resolve(el);
+            el.onerror = reject;
+            el.src = layer.src;
+          });
+        }
+        const w = layer.bounding.w;
+        const h = layer.bounding.h;
+        let canvas: OffscreenCanvas | HTMLCanvasElement;
+        let ctxCanvas: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null;
+        if (typeof OffscreenCanvas !== 'undefined') {
+          canvas = new OffscreenCanvas(w, h);
+          ctxCanvas = canvas.getContext('2d');
+        } else {
+          canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          ctxCanvas = canvas.getContext('2d');
+        }
+        if (!ctxCanvas) return;
+        ctxCanvas.drawImage(img, 0, 0, w, h);
+        imageData = ctxCanvas.getImageData(0, 0, w, h);
+      } catch (err) {
+        console.error('[SelectFromAlpha] Failed to read layer image data:', err);
+        ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
+        return;
+      }
+
+      // ─── Run alpha worker ──────────────────────────────────────────────
+      try {
+        const response = await clipComputeClient.runAlpha({
+          type: 'alpha',
+          imageData: {
+            data: imageData.data.buffer as ArrayBuffer,
+            width: imageData.width,
+            height: imageData.height,
+          },
+          threshold: 0,
+          simplifyEpsilon: 1.0,
+        });
+
+        if (!response.rings) {
+          // No opaque pixels → error pulse
+          ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
+          return;
+        }
+
+        // ─── Build polygon and coordinate-transform ────────────────────
+        const layerPoly = ctx.geometry.point2d.point2dToLocalPolygon(response.rings as Point2D[][], true);
+        const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(layerPoly, layer, frame);
+
+        // ─── Write to current tool's slot (don't switch tool) ──────────
+        const tool = (frame.latestClipTool as P.CropTool) || 'rect';
+        ctx.actions.setClipBox(frame.id, tool, framePoly);
+
+        if (response.debug) {
+          console.debug('[SelectFromAlpha]', response.debug);
+        }
+      } catch (err) {
+        console.warn('[SelectFromAlpha] Worker failed:', err);
+        ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
+      }
+    }
+  } as EditorCommand<void, Promise<void>>,
+
+  /**
+   * CMD_INVERT_SELECTION — Invert the active selection (Cmd+Shift+I).
+   *
+   * Constructs a polygon where outer ring = canvas boundary rectangle and
+   * inner rings = original selection rings, using evenodd fill rule.
+   *
+   * Design principles (aligned with Photoshop):
+   *   - Does NOT switch tools (`latestClipTool` unchanged).
+   *   - Writes result to the same slot (current tool's clipBoxes entry).
+   *   - For regular selections (rect/ellipse): converts to polygon first.
+   *   - Double-invert = round-trip (attempts `tryPolygonToShape` restore).
+   *   - Full-canvas selection inverted = clear (empty selection).
+   */
+  invertSelection: {
+    id: P.CMD_INVERT_SELECTION,
+    name: 'Invert Selection',
+    undoable: true,
+    shortcut: { key: 'i', meta: true, shift: true },
+    execute: (ctx: EditorContextValue) => {
+      // ─── Guards ────────────────────────────────────────────────────────
+      if (ctx.state.interaction.interactionMode !== 'clip') return;
+      const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
+      if (isReCanvas) return;
+
+      const frame = ctx.activeFrame;
+      if (!frame) return;
+
+      const clipBox = getClipBox(frame);
+      if (!clipBox) return; // no selection to invert
+
+      const tool = (frame.latestClipTool as CropTool) || 'rect';
+      const { w: canvasW, h: canvasH } = frame.canvas;
+      const antiAliased = clipBox.spatial.antiAliased ?? true;
+
+      const { point2d: geo } = ctx.geometry;
+
+      // 1. Unbox: container → Point2D[][]
+      const rings: Point2D[][] = clipBox.regular
+        ? geo.shapeToPoint2D(clipBox.spatial as LocalShape)
+        : (clipBox.spatial as LocalPolygon).rings as unknown as Point2D[][];
+
+      // 2. Core transform: pure inversion logic
+      const result = geo.invertRings(rings, canvasW, canvasH);
+
+      // 3. Rebox: Point2D[][] → best container, then write
+      if (result === null) {
+        ctx.actions.setClipBox(frame.id, tool, null);
+      } else {
+        const container = geo.point2dToLocalShape(result, antiAliased) ?? geo.point2dToLocalPolygon(result, antiAliased);
+        ctx.actions.setClipBox(frame.id, tool, container);
+      }
+    }
+  } as EditorCommand<void, void>,
+
+  /**
+   * CMD_OFFSET_SELECTION — Expand or contract the active selection by N pixels.
+   *
+   * Payload: { distance: number } where positive = expand, negative = contract.
+   *
+   * Now async — delegates heavy offset computation to offset.worker.ts via
+   * clipComputeClient. This prevents main-thread stalls on large selections.
+   */
+  offsetSelection: {
+    id: P.CMD_OFFSET_SELECTION,
+    name: 'Offset Selection',
+    undoable: true,
+    execute: async (ctx: EditorContextValue, payload: { distance: number }) => {
+      // ─── Guards ────────────────────────────────────────────────────────
+      if (ctx.state.interaction.interactionMode !== 'clip') return;
+      const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
+      if (isReCanvas) return;
+
+      const frame = ctx.activeFrame;
+      if (!frame) return;
+
+      const clipBox = getClipBox(frame);
+      if (!clipBox) return; // no selection to offset
+
+      const { distance } = payload;
+      if (distance === 0) return;
+
+      const tool = (frame.latestClipTool as CropTool) || 'rect';
+      const { w: canvasW, h: canvasH } = frame.canvas;
+      const antiAliased = clipBox.spatial.antiAliased ?? true;
+
+      const { point2d: geo } = ctx.geometry;
+
+      // 1. Unbox: container → Point2D[][]
+      const rings: Point2D[][] = clipBox.regular
+        ? geo.shapeToPoint2D(clipBox.spatial as LocalShape)
+        : (clipBox.spatial as LocalPolygon).rings as unknown as Point2D[][];
+
+      // 2. Delegate to offset worker
+      const algorithm = clipBox.regular ? 'vertex-normal' : 'morphological';
+      const response = await clipComputeClient.runOffset({
+        type: 'offset',
+        rings,
+        distance,
+        canvasW,
+        canvasH,
+        algorithm,
+      });
+
+      // 3. Rebox: Point2D[][] → best container, then write
+      if (response.rings === null) {
+        // Contraction eliminated the selection
+        ctx.actions.setClipBox(frame.id, tool, null);
+      } else {
+        const container = geo.point2dToLocalShape(response.rings as Point2D[][], antiAliased)
+          ?? geo.point2dToLocalPolygon(response.rings as Point2D[][], antiAliased);
+        ctx.actions.setClipBox(frame.id, tool, container);
+      }
+    }
+  } as EditorCommand<{ distance: number }, Promise<void>>
 
 };
 

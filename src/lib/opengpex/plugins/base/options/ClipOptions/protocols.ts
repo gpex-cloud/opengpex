@@ -95,6 +95,27 @@ export const CMD_LAYER_VIA_COPY = 'cmd.layer_via_copy';
  */
 export const CMD_LAYER_VIA_CUT = 'cmd.layer_via_cut';
 
+/**
+ * Cmd+Shift+I — Invert selection (selected ↔ unselected).
+ * Constructs a polygon where the outer ring = canvas boundary and inner rings =
+ * original selection, using evenodd fill rule. Does NOT switch tools.
+ */
+export const CMD_INVERT_SELECTION = 'cmd.invert_selection';
+
+/**
+ * Cmd+Shift+A — Select from Alpha (load selection from layer transparency).
+ * Reads the active image layer's alpha channel and generates a polygon selection
+ * around all opaque pixels. Does NOT switch tools.
+ */
+export const CMD_SELECT_FROM_ALPHA = 'cmd.select_from_alpha';
+
+/**
+ * Offset Selection — Expand (positive) or contract (negative) the active selection
+ * by N pixels. Triggered from the Offset Popover with an explicit APPLY confirmation.
+ * Does NOT switch tools.
+ */
+export const CMD_OFFSET_SELECTION = 'cmd.offset_selection';
+
 // ─── Signal IDs ─────────────────────────────────────────────────────────────────
 
 export const SIGNAL_RE_CANVAS = 'signal.re_canvas.active';

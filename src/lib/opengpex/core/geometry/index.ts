@@ -42,6 +42,10 @@ import {
   frameLocalToLayerLocal as polyFrameToLayer, layerLocalToFrameLocal as polyLayerToFrame, polygonToSvgPathD,
   isPointInPolygon, computeRingArea, simplifyOpen, simplifyRing
 } from './operators/polygon';
+import {
+  shapeToPoint2D, point2dToLocalShape, point2dToLocalPolygon,
+  invertRings, isBoundingRing, computePolygonBounds as computePolygonBoundsP2D
+} from './operators/point2d';
 import { snapRect, snapToPixel, snapRectToPixel } from './operators/snapping';
 import {
   decomposeMatrix,
@@ -154,6 +158,14 @@ export function createGeometryService(): GeometryService {
       computeRingArea: (ring: Point2D[]) => computeRingArea(ring),
       simplifyOpen: (points: Point2D[], epsilon: number) => simplifyOpen(points, epsilon),
       simplifyRing: (ring: Point2D[], epsilon: number) => simplifyRing(ring, epsilon),
+    },
+    point2d: {
+      shapeToPoint2D: (shape: LocalShape) => shapeToPoint2D(shape),
+      point2dToLocalShape: (rings: readonly Point2D[][], antiAliased: boolean) => point2dToLocalShape(rings, antiAliased),
+      point2dToLocalPolygon: (rings: Point2D[][], antiAliased: boolean) => point2dToLocalPolygon(rings, antiAliased),
+      invertRings: (rings: Point2D[][], boundingW: number, boundingH: number) => invertRings(rings, boundingW, boundingH),
+      isBoundingRing: (ring: readonly Point2D[], boundingW: number, boundingH: number) => isBoundingRing(ring, boundingW, boundingH),
+      computePolygonBounds: (rings: Point2D[][]) => computePolygonBoundsP2D(rings),
     },
     getScale: (frame: Frame, camera?: CameraState) => (camera || frame.camera).k,
     asWorldRect: (r: Rect) => asWorldRect(r),

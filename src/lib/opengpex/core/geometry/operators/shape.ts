@@ -234,3 +234,6 @@ export function getStairedSvgPath(shape: LocalShape): string {
 
   return path;
 }
+
+// Re-export from canonical source (point2d.ts) for backward compatibility
+export { shapeToPoint2D } from './point2d';

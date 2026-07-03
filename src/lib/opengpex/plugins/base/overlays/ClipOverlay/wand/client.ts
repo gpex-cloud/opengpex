@@ -45,16 +45,16 @@ export class MagicWandClient {
   private worker: Worker | null = null;
   private currentReqId = 0;
 
-  /** Lazy-create or reuse the singleton worker. */
+  /** Lazy-create or reuse the wand worker. */
   private ensure(): Worker {
     if (this.worker) return this.worker;
     if (typeof Worker === 'undefined') {
-      // SSR / Cloudflare Workers / sandboxed iframe without DOM Worker
       throw new Error('Web Worker is not available in this environment');
     }
     this.worker = new Worker(new URL('./wand.worker.ts', import.meta.url), { type: 'module' });
     return this.worker;
   }
+
 
   /**
    * Submit a wand request and resolve with the response.
@@ -126,7 +126,7 @@ export class MagicWandClient {
     });
   }
 
-  /** Terminate the worker and release its memory. Idempotent. */
+  /** Terminate the wand worker and release its memory. Idempotent. */
   dispose(): void {
     if (this.worker) {
       this.worker.terminate();

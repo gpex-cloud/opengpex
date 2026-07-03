@@ -106,3 +106,4 @@ export interface WandResponse {
   /** Set when the worker hit an internal failure (caller should fall back). */
   error?: string;
 }
+
