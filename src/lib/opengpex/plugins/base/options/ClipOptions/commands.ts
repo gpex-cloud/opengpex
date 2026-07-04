@@ -500,14 +500,16 @@ export const CLIP_OPTIONS_COMMANDS = {
    *   1) `adv.layer.clip.toMask` (mission accomplished);
    *   2) explicit "Clear Selection" command (future).
    *
-   * Atomicity: signal is written first (session-only), projection second
-   * (undoable), so Cmd+Z reverts the box mutation while the tool stays
-   * selected — matches Photoshop.
+   * [noundo] Tool switching is a UI navigation action, not a document edit.
+   * It does NOT create an undo checkpoint — pressing Cmd+Z after a Tab cycle
+   * will not revert the tool selection. This matches the expectation that
+   * undo should only affect meaningful document mutations (selections, masks,
+   * pixel edits), not ephemeral tool-palette navigation.
    */
   setCropTool: {
     id: P.CMD_SET_CROP_TOOL,
     name: 'Set Crop Tool',
-    undoable: true,
+    undoable: false,
     execute: (ctx: EditorContextValue, payload: { tool: CropTool }) => {
       const { activeFrame, actions, scoped } = ctx;
       if (!activeFrame || !payload?.tool) return;

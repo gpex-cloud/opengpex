@@ -113,9 +113,11 @@ export function reconcileEditorState(draft: EditorReconcileSubset, source: Edito
         // [Architecture Design: Time machine exclusion and bypass rules]
         // - camera: Must be excluded! Because viewport camera adjustment is an asynchronous fine-tuning operation in the UI layer, and does not represent a change in the physical state of the document.
         //   If not excluded, the automatic Camera Fit when opening a new drawing will pollute the undo stack, causing ghost steps that require cmd+z to be pressed twice to undo.
+        // - latestClipTool: Must be excluded! Tool switching (Tab/Shift+Tab) is a UI navigation action, not a document edit.
+        //   Without this exclusion, cycling tools (rect→ellipse→lasso) creates undo steps, and Cmd+Z reverts the tool selection — completely unexpected.
         // - activeLayerId: Must be allowed! Because when actual layer additions, deletions, or modifications occur, we need the focus selection state to naturally bounce back during undo.
         //   Moreover, clicking the layer list alone only dispatches SET_ACTIVE_LAYER and does not trigger SIGNAL_COMMIT, so it will never generate ghost steps.
-        if (key === 'canvas' || key === 'camera') return; // Excluded from history tracking
+        if (key === 'canvas' || key === 'camera' || key === 'latestClipTool') return; // Excluded from history tracking
 
         if (key === 'layers') {
           // Deep reconcile layers NormalizedState
@@ -219,4 +221,96 @@ export function mergeLiveCameras(restoredFrames: NormalizedState<Frame>, current
     }
   });
   return { byId: nextById, order: restoredFrames.order };
+}
+
+/**
+ * Per-frame reconciler: Reconciles a single frame's state for Immer patch generation.
+ * Same exclusion rules as reconcileEditorState (camera excluded, layers deep-reconciled).
+ * Called inside `produceWithPatches(checkpoint, draft => reconcileFrameState(draft, currentFrame))`.
+ */
+export function reconcileFrameState(draft: Frame, source: Frame): void {
+  const df = draft as unknown as Record<string, unknown>;
+  const fAny = source as unknown as Record<string, unknown>;
+
+  // Ensure canvas is always explicitly preserved
+  if (fAny.canvas) {
+    const dfCanvas = df.canvas as { w: number; h: number } | undefined;
+    const fAnyCanvas = fAny.canvas as { w: number; h: number };
+    if (!dfCanvas || dfCanvas.w !== fAnyCanvas.w || dfCanvas.h !== fAnyCanvas.h) {
+      df.canvas = { ...fAnyCanvas };
+    }
+  }
+
+  const allKeys = new Set([...Reflect.ownKeys(df), ...Reflect.ownKeys(fAny)]);
+  allKeys.forEach(key => {
+    // Same exclusion rules: camera and latestClipTool excluded from history tracking
+    if (key === 'canvas' || key === 'camera' || key === 'latestClipTool') return;
+
+    if (key === 'layers') {
+      // Deep reconcile layers NormalizedState
+      const dfLayers = df.layers as unknown as NormalizedState<Layer>;
+      const fAnyLayers = fAny.layers as unknown as NormalizedState<Layer>;
+
+      if (dfLayers.order.join(',') !== fAnyLayers.order.join(',')) {
+        dfLayers.order = [...fAnyLayers.order];
+      }
+      Object.keys(dfLayers.byId).forEach(lId => {
+        if (!fAnyLayers.byId[lId]) {
+          delete dfLayers.byId[lId];
+        }
+      });
+      fAnyLayers.order.forEach((lId: string) => {
+        const l = fAnyLayers.byId[lId];
+        if (!dfLayers.byId[lId]) {
+          dfLayers.byId[lId] = l;
+        } else {
+          const dl = dfLayers.byId[lId] as unknown as Record<string, unknown>;
+          const lAny = l as unknown as Record<string, unknown>;
+          const allLayerKeys = new Set([...Reflect.ownKeys(dl), ...Reflect.ownKeys(lAny)]);
+          allLayerKeys.forEach(lk => {
+            dl[lk as string] = reconcileDeep(dl[lk as string], lAny[lk as string]);
+          });
+          Reflect.ownKeys(dl).forEach(lk => {
+            if (!(lk in lAny)) {
+              delete dl[lk as string];
+            }
+          });
+        }
+      });
+      return;
+    }
+
+    // General adaptive deep reconciliation
+    df[key as string] = reconcileDeep(df[key as string], fAny[key as string]);
+  });
+
+  Reflect.ownKeys(df).forEach(key => {
+    if (key === 'canvas' || key === 'layers' || key === 'camera') return;
+    if (!(key in fAny)) {
+      delete df[key as string];
+    }
+  });
+}
+
+/**
+ * Merge live camera into a single restored frame.
+ * Used by per-frame UNDO/REDO to preserve the user's current viewpoint.
+ */
+export function mergeLiveCameraForFrame(restoredFrame: Frame, liveFrame: Frame | undefined): Frame {
+  if (!liveFrame) return restoredFrame;
+  if (liveFrame.canvas.w === restoredFrame.canvas.w && liveFrame.canvas.h === restoredFrame.canvas.h) {
+    return { ...restoredFrame, camera: { ...liveFrame.camera } };
+  }
+  // Canvas size changed: recalculate camera offset to preserve visual center
+  const cam = liveFrame.camera;
+  const dw = liveFrame.canvas.w - restoredFrame.canvas.w;
+  const dh = liveFrame.canvas.h - restoredFrame.canvas.h;
+  return {
+    ...restoredFrame,
+    camera: {
+      x: cam.x + dw / 2 * cam.k,
+      y: cam.y + dh / 2 * cam.k,
+      k: cam.k
+    }
+  };
 }

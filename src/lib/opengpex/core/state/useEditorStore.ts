@@ -760,7 +760,17 @@ export function useEditorStore() {
       history: {
         undo: () => enhancedDispatch({ type: 'HISTORY_UNDO' }),
         redo: () => enhancedDispatch({ type: 'HISTORY_REDO' }),
-        purge: () => enhancedDispatch({ type: 'SET_HISTORY', payload: { past: [], future: [], checkpoint: null } }),
+        purge: () => enhancedDispatch({ type: 'SET_HISTORY', payload: { byFrameId: {} } }),
+        canUndo: () => {
+          const s = stateRef.current;
+          const h = (s.activeFrameId && s.history.byFrameId[s.activeFrameId]) || { past: [], future: [], checkpoint: null };
+          return h.past.length > 0 || !!h.checkpoint;
+        },
+        canRedo: () => {
+          const s = stateRef.current;
+          const h = (s.activeFrameId && s.history.byFrameId[s.activeFrameId]) || { past: [], future: [], checkpoint: null };
+          return h.future.length > 0;
+        },
       },
       setEngineStatus: (statuses: EngineStatus[]) => enhancedDispatch({ type: 'SET_ENGINE_STATUS', payload: statuses }),
       clearAllData: () => { resetVolatile(); enhancedDispatch({ type: 'CLEAR_ALL_DATA' }); },

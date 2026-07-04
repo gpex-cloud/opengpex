@@ -397,6 +397,11 @@ export const FrameCreateCommands = {
           activeLayerId: refreshedLayers[0]?.id
         });
 
+        // Clear undo/redo history — the old entries reference stale state
+        // (deleted layers, old transforms, etc.) that no longer exists after
+        // a full revert. Keeping them would cause data corruption on undo.
+        actions.resetHistory();
+
         actions.setInteraction({ hud: { message: 'Frame reloaded and reverted to original.', type: 'success' } });
       } catch (err) {
         console.error('[FrameService] True revert reload failed:', err);

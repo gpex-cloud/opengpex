@@ -25,26 +25,6 @@ import { Frame, Layer, AssetEntryInfo } from '@opengpex/editor/core/types';
 import type { StorageInfoPanelCommandsMap } from './commands.d';
 import * as P from './protocols';
 
-/**
- * Shape of frame-like data within history snapshots (serialized/legacy format).
- * Snapshots may store layers as plain arrays rather than NormalizedState.
- */
-interface SnapshotFrameData {
-  id?: string;
-  name?: string;
-  thumbnail?: { assetId?: string };
-  thumbnailAssetId?: string;
-  layers?: { assetId?: string; name?: string }[];
-}
-
-/**
- * Shape of history snapshot content for storage audit purposes.
- * May contain a `frames` array (multi-frame) or be frame-like itself (legacy single-frame).
- */
-interface SnapshotContent extends SnapshotFrameData {
-  frames?: SnapshotFrameData[];
-}
-
 const MOUNT_TIME = Date.now();
 
 /**
@@ -103,15 +83,18 @@ export const useStorageMetrics = () => {
       return `${fid}:${f.name}:${f.canvas.w}x${f.canvas.h}:${f.thumbnail?.assetId || ''}[${layerSigs}]`;
     }).join('|');
 
-    const pastSig = state.history.past.map(s => s.id).join(',');
-    const futureSig = state.history.future.map(s => s.id).join(',');
+    // Aggregate all per-frame history steps for signature
+    const allPast = Object.values(state.history.byFrameId).flatMap(fh => fh.past);
+    const allFuture = Object.values(state.history.byFrameId).flatMap(fh => fh.future);
+    const pastSig = allPast.map(s => s.id).join(',');
+    const futureSig = allFuture.map(s => s.id).join(',');
 
     const poolSigs = Object.values(assets.getPool())
       .map(e => `${e.id}:${e.state}`)
       .join(',');
 
     return `${frameSigs}##${pastSig}##${futureSig}##${poolSigs}##${refreshKey}`;
-  }, [state.frames.order, state.frames.byId, state.history.past, state.history.future, assets, isEnabled, refreshKey]);
+  }, [state.frames.order, state.frames.byId, state.history.byFrameId, assets, isEnabled, refreshKey]);
 
   // 3. Full asset and state topology audit logic
   const summary = useMemo<P.StorageSummary | null>(() => {
@@ -153,35 +136,8 @@ export const useStorageMetrics = () => {
       });
     });
 
-    // 3.2 Scan history records
-    const scanSnapshot = (snapshot: SnapshotContent, tag: P.AssetMetric['tags'][number]) => {
-      const frames = snapshot.frames || [snapshot];
-      frames.forEach((f) => {
-        const thumbAssetId = f.thumbnail?.assetId || f.thumbnailAssetId;
-        if (thumbAssetId) {
-          addUsage(thumbAssetId, {
-            assetId: thumbAssetId,
-            source: 'thumbnail',
-            frameId: f.id || 'snapshot',
-            frameName: f.name || 'History Item'
-          }, tag);
-        }
-        f.layers?.forEach((l) => {
-          if (l.assetId) {
-            addUsage(l.assetId, {
-              assetId: l.assetId,
-              source: 'history',
-              frameId: f.id || 'snapshot',
-              frameName: f.name || 'History Item',
-              layerName: l.name
-            }, tag);
-          }
-        });
-      });
-    };
-
-    state.history.past.forEach(s => scanSnapshot(s as SnapshotContent, 'history'));
-    state.history.future.forEach(s => scanSnapshot(s as SnapshotContent, 'history'));
+    // Per-frame history stores Immer patches (not full snapshots), so snapshot scanning
+    // is not applicable. Asset GC relies on active frame scanning above.
 
     const buildAssetMetric = (id: string, entry: AssetEntryInfo): P.AssetMetric => {
       const usages = usagesMap.get(id) || [];
@@ -263,63 +219,30 @@ export const useStorageMetrics = () => {
         rotation: f.rotation || 0,
         thumbnail: thumb,
         layers,
-        historyCount: f.history?.past?.length || 0
+        historyCount: state.history.byFrameId[f.id]?.past?.length || 0
       };
     });
 
-    // Build history rollback record metrics
-    const history: P.HistoryMoment[] = [...state.history.past].reverse().slice(0, 10).map((snapshot, i) => {
-      const snap = snapshot as unknown as SnapshotContent;
-      const snapFrames = snap.frames || [snap];
-      const momentAssets: P.AssetMetric[] = [];
-      const seenIds = new Set<string>();
-
-      snapFrames.forEach((f) => {
-        const thumbAssetId = f.thumbnail?.assetId || f.thumbnailAssetId;
-        if (thumbAssetId && pool[thumbAssetId] && !seenIds.has(thumbAssetId)) {
-          momentAssets.push(buildAssetMetric(thumbAssetId, pool[thumbAssetId]));
-          seenIds.add(thumbAssetId);
-        }
-        f.layers?.forEach((l) => {
-          if (l.assetId && pool[l.assetId] && !seenIds.has(l.assetId)) {
-            momentAssets.push(buildAssetMetric(l.assetId, pool[l.assetId]));
-            seenIds.add(l.assetId);
-          }
-        });
-      });
-
-      momentAssets.forEach(a => activeAssetIds.add(a.id));
-
-      const firstAsset = momentAssets.find(a => a.type.startsWith('image')) || momentAssets[0];
-      const exclusiveAssets = momentAssets.filter(a =>
-        !state.frames.order.map(id => state.frames.byId[id]).some(f =>
-          f.thumbnail?.assetId === a.id ||
-          f.layers.order.map(lid => f.layers.byId[lid]).some(l => l.assetId === a.id)
-        )
+    // Per-frame history now stores Immer patches rather than full frame snapshots.
+    // Build history moments from the per-frame step metadata, estimating size from patch payloads.
+    const allSteps = Object.entries(state.history.byFrameId).flatMap(([fId, fh]) =>
+      fh.past.map(step => ({ ...step, frameId: fId }))
+    );
+    const history: P.HistoryMoment[] = allSteps.slice(-10).reverse().map((step, i) => {
+      // Estimate patch storage size (serialized JSON of undo + redo patches)
+      const patchSize = (
+        JSON.stringify(step.undoPatches || []).length +
+        JSON.stringify(step.redoPatches || []).length
       );
-
       return {
-        id: `moment-${i}`,
+        id: step.id,
         timestamp: MOUNT_TIME - (i * 1000),
-        label: snap.name || `Snapshot #${state.history.past.length - i}`,
-        thumbnailUrl: firstAsset?.url || '',
-        assets: momentAssets,
-        totalSize: momentAssets.reduce((s, a) => s + a.size, 0),
-        exclusiveSize: exclusiveAssets.reduce((s, a) => s + a.size, 0)
+        label: step.name || `Step #${allSteps.length - i}`,
+        thumbnailUrl: '',
+        assets: [],
+        totalSize: patchSize,
+        exclusiveSize: patchSize
       };
-    });
-
-    // Scan the Future stack to avoid false orphans during undo/redo
-    state.history.future.forEach((snapshot) => {
-      const snap = snapshot as unknown as SnapshotContent;
-      const snapFrames = snap.frames || [snap];
-      snapFrames.forEach((f) => {
-        const thumbAssetId = f.thumbnail?.assetId || f.thumbnailAssetId;
-        if (thumbAssetId) activeAssetIds.add(thumbAssetId);
-        f.layers?.forEach((l) => {
-          if (l.assetId) activeAssetIds.add(l.assetId);
-        });
-      });
     });
 
     const detached: P.AssetMetric[] = Object.entries(pool)
@@ -362,12 +285,8 @@ export const useStorageMetrics = () => {
       stateBytes += frameStr.length;
     });
 
-    // C. history_index
-    const historyObj = {
-      past: state.history.past,
-      future: state.history.future
-    };
-    const historyStr = JSON.stringify(historyObj);
+    // C. history_index (per-frame map)
+    const historyStr = JSON.stringify(state.history.byFrameId);
     shards.push({ key: 'history_index', type: 'history_index', sizeBytes: historyStr.length });
     stateBytes += historyStr.length;
 
@@ -387,8 +306,7 @@ export const useStorageMetrics = () => {
     state.activeFrameId,
     state.frames.byId,
     state.frames.order,
-    state.history.future,
-    state.history.past
+    state.history.byFrameId
   ]);
 
   return { summary, refresh, isRefreshing };

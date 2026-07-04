@@ -113,6 +113,8 @@ export interface EditorActions {
     undo: () => void;
     redo: () => void;
     purge: () => void;
+    canUndo: () => boolean;
+    canRedo: () => boolean;
   };
 
   adv: {

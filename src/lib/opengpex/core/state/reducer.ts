@@ -17,11 +17,14 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { EditorData, EditorAction, Frame, Layer, HistoryCheckpoint } from '@opengpex/editor/core/types';
+import { EditorData, EditorAction, Frame, Layer, FrameHistoryState, GlobalHistoryState } from '@opengpex/editor/core/types';
 import { produceWithPatches, enablePatches, applyPatches, Patch } from 'immer';
-import { reconcileEditorState, mergeLiveCameras } from './reducer-utils';
+import { reconcileFrameState, mergeLiveCameraForFrame } from './reducer-utils';
 
 enablePatches();
+
+/** Maximum undo steps per frame */
+const MAX_HISTORY_STEPS = 50;
 
 export const initialState: EditorData = {
   frames: { byId: {}, order: [] },
@@ -62,9 +65,7 @@ export const initialState: EditorData = {
     cursorOverride: null,
   },
   history: {
-    past: [],
-    future: [],
-    checkpoint: null
+    byFrameId: {}
   },
   runtime: {
     engineStatuses: []
@@ -90,13 +91,12 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
         ...state,
         frames: nextFrames,
         activeFrameId: nextActiveFrameId,
+        // New frame gets an empty history stack (natural undo floor)
         history: {
-          ...state.history,
-          checkpoint: state.history.checkpoint ? {
-            ...state.history.checkpoint,
-            frames: nextFrames,
-            activeFrameId: nextActiveFrameId
-          } : null
+          byFrameId: {
+            ...state.history.byFrameId,
+            [frame.id]: { past: [], future: [], checkpoint: null }
+          }
         }
       };
     }
@@ -143,63 +143,21 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
       const nextById = { ...state.frames.byId };
       idsToRemove.forEach(id => delete nextById[id]);
 
-      // 2. History snapshot cleanup (Reducer housekeeping: clean up deleted frame references in checkpoint)
-      const filterPatches = (patches: Patch[]) => patches.filter(p => {
-        if (p.path[0] === 'frames' && p.path[1] === 'byId') {
-           const frameId = p.path[2] as string;
-           if (idsToRemove.has(frameId)) return false;
-        }
-        return true;
-      });
-
-      const nextPast = state.history.past.map(step => ({
-        ...step,
-        activeFrameIdBefore: idsToRemove.has(step.activeFrameIdBefore || '') ? nextActiveFrameId : step.activeFrameIdBefore,
-        activeFrameIdAfter: idsToRemove.has(step.activeFrameIdAfter || '') ? nextActiveFrameId : step.activeFrameIdAfter,
-        undoPatches: filterPatches(step.undoPatches),
-        redoPatches: filterPatches(step.redoPatches)
-      })).filter(step => step.undoPatches.length > 0 || step.redoPatches.length > 0);
-
-      const nextFuture = state.history.future.map(step => ({
-        ...step,
-        activeFrameIdBefore: idsToRemove.has(step.activeFrameIdBefore || '') ? nextActiveFrameId : step.activeFrameIdBefore,
-        activeFrameIdAfter: idsToRemove.has(step.activeFrameIdAfter || '') ? nextActiveFrameId : step.activeFrameIdAfter,
-        undoPatches: filterPatches(step.undoPatches),
-        redoPatches: filterPatches(step.redoPatches)
-      })).filter(step => step.undoPatches.length > 0 || step.redoPatches.length > 0);
-
-      const filterCheckpoint = (checkpoint: HistoryCheckpoint | null) => {
-        if (!checkpoint) return null;
-        const filteredOrder = checkpoint.frames.order.filter((id: string) => !idsToRemove.has(id));
-        const filteredById = { ...checkpoint.frames.byId };
-        idsToRemove.forEach((id: string) => delete filteredById[id]);
-        
-        let nextSnapActiveId = checkpoint.activeFrameId;
-        if (idsToRemove.has(checkpoint.activeFrameId || '')) {
-          nextSnapActiveId = filteredOrder.length > 0 ? filteredOrder[0] : null;
-        }
-        return {
-          ...checkpoint,
-          frames: { byId: filteredById, order: filteredOrder },
-          activeFrameId: nextSnapActiveId
-        };
-      };
+      // 2. Per-frame history cleanup: simply remove deleted frames' history entries
+      const nextByFrameId = { ...state.history.byFrameId };
+      idsToRemove.forEach(id => delete nextByFrameId[id]);
 
       return {
         ...state,
         frames: { byId: nextById, order: nextOrder },
         activeFrameId: nextActiveFrameId,
-        history: {
-          past: nextPast,
-          future: nextFuture,
-          checkpoint: filterCheckpoint(state.history.checkpoint)
-        }
+        history: { byFrameId: nextByFrameId }
       };
     }
 
 
     case 'CLEAR_ALL_DATA': {
-      return { ...state, frames: { byId: {}, order: [] }, activeFrameId: null };
+      return { ...state, frames: { byId: {}, order: [] }, activeFrameId: null, history: { byFrameId: {} } };
     }
 
     case 'REORDER_FRAMES': {
@@ -497,8 +455,6 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
 
       let nextActiveId = nextActiveLayerId;
       // [Photoshop-style UX: Adjacent fallback activation protection mechanism for layer deletion]
-      // - If the deleted layers include the currently active layer, and no next active layer ID is assigned from above,
-      // - we will automatically activate the previous valid layer adjacent to its original position (or the next one if none, or fall back to the first in the remaining list) to physically prevent selection loss (loss of focus) in the layer list.
       if (!nextActiveId && idsToRemove.has(frame.activeLayerId || '')) {
         const activeIndex = frame.layers.order.indexOf(frame.activeLayerId || '');
         if (activeIndex !== -1) {
@@ -553,87 +509,88 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
       };
     }
 
+    // ─── Per-Frame History: SIGNAL_COMMIT ─────────────────────────────────
     case 'SIGNAL_COMMIT': {
-      let past = state.history.past;
-      const checkpoint = state.history.checkpoint;
-      let future = state.history.future;
+      const frameId = action.payload.frameId;
+      if (!frameId || !state.frames.byId[frameId]) return state;
 
-      if (checkpoint) {
-        const base = {
-          frames: checkpoint.frames,
-          activeFrameId: checkpoint.activeFrameId
-        };
-        const [, patches, inversePatches] = produceWithPatches(base, (draft) => {
-          reconcileEditorState(draft, state);
+      const frameHistory = state.history.byFrameId[frameId] ?? { past: [], future: [], checkpoint: null };
+      const currentFrame = state.frames.byId[frameId];
+
+      let nextPast = frameHistory.past;
+      let nextFuture = frameHistory.future;
+
+      if (frameHistory.checkpoint) {
+        // Diff checkpoint vs current frame using Immer produceWithPatches
+        const [, patches, inversePatches] = produceWithPatches(frameHistory.checkpoint, (draft) => {
+          reconcileFrameState(draft, currentFrame);
         });
 
         if (patches.length > 0) {
           // [Architecture Design: Strict physical change determination and Redo stack protection rules]
-          // - Only when actual document physical changes occur (patches.length > 0) is a new historical Edit Step generated and pushed to the past stack.
+          // - Only when actual document physical changes occur (patches.length > 0) is a new historical Edit Step generated.
           // - Likewise, only at this point do we reset/clear the future stack (future = []).
-          // - If patches.length === 0 (e.g., empty commits with no physical changes triggered by switchFrame or updateCamera),
-          //   we must not clear the user's redo stack; future should be kept as-is, preventing it from being wiped out by accidental factors like component lifecycle re-renders.
           const step = {
             id: Math.random().toString(36).substring(2, 9),
             name: 'Edit',
             undoPatches: inversePatches,
             redoPatches: patches,
-            activeFrameIdBefore: checkpoint.activeFrameId,
-            activeFrameIdAfter: state.activeFrameId
           };
-          past = [...past.slice(-49), step];
-          future = []; // Only clear Redo stack when a new change is made
+          nextPast = [...nextPast.slice(-(MAX_HISTORY_STEPS - 1)), step];
+          nextFuture = []; // Only clear Redo stack when a new change is made
         }
       }
+
+      // Set new checkpoint to current frame state
+      const updatedFrameHistory: FrameHistoryState = {
+        past: nextPast,
+        future: nextFuture,
+        checkpoint: currentFrame
+      };
 
       return {
         ...state,
         history: {
-          past,
-          future,
-          checkpoint: {
-            frames: state.frames,
-            activeFrameId: state.activeFrameId
+          byFrameId: {
+            ...state.history.byFrameId,
+            [frameId]: updatedFrameHistory
           }
         }
       };
     }
 
+    // ─── Per-Frame History: UNDO ──────────────────────────────────────────
     case 'HISTORY_UNDO': {
-      const { history } = state;
-      if (history.past.length === 0 && !history.checkpoint) return state;
+      const frameId = state.activeFrameId;
+      if (!frameId || !state.frames.byId[frameId]) return state;
 
+      const frameHistory = state.history.byFrameId[frameId];
+      if (!frameHistory || (frameHistory.past.length === 0 && !frameHistory.checkpoint)) return state;
+
+      const currentFrame = state.frames.byId[frameId];
       let undoPatches: Patch[] = [];
-      let activeFrameIdBefore: string | null = null;
-      const past = [...history.past];
-      let future = [...history.future];
+      const past = [...frameHistory.past];
+      let future = [...frameHistory.future];
 
-      if (history.checkpoint) {
-        const base = {
-          frames: history.checkpoint.frames,
-          activeFrameId: history.checkpoint.activeFrameId
-        };
-        const [, patches, inversePatches] = produceWithPatches(base, (draft) => {
-          reconcileEditorState(draft, state);
+      if (frameHistory.checkpoint) {
+        // Diff checkpoint vs current to capture any unsaved changes before undo
+        const [, patches, inversePatches] = produceWithPatches(frameHistory.checkpoint, (draft) => {
+          reconcileFrameState(draft, currentFrame);
         });
 
         if (patches.length > 0) {
+          // There are unsaved changes since last commit — treat them as a step
           undoPatches = inversePatches;
-          activeFrameIdBefore = history.checkpoint.activeFrameId;
-
           const step = {
             id: Math.random().toString(36).substring(2, 9),
             name: 'Edit',
             undoPatches: inversePatches,
             redoPatches: patches,
-            activeFrameIdBefore: history.checkpoint.activeFrameId,
-            activeFrameIdAfter: state.activeFrameId
           };
           future = [step, ...future];
         } else if (past.length > 0) {
           const step = past.pop()!;
           undoPatches = step.undoPatches;
-          activeFrameIdBefore = step.activeFrameIdBefore;
           future = [step, ...future];
         } else {
           return state;
@@ -642,44 +599,72 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
         if (past.length === 0) return state;
         const step = past.pop()!;
         undoPatches = step.undoPatches;
-        activeFrameIdBefore = step.activeFrameIdBefore;
         future = [step, ...future];
       }
 
-      // Apply undo patches
-      const baseObj = { frames: state.frames, activeFrameId: state.activeFrameId };
-      const nextObj = applyPatches(baseObj, undoPatches);
+      // Apply undo patches directly to the frame
+      const restoredFrame = mergeLiveCameraForFrame(applyPatches(currentFrame, undoPatches), currentFrame);
 
-      // Merge live cameras to prevent viewport jumping on undo
-      const restoredFrames = mergeLiveCameras(nextObj.frames, state);
+      const updatedFrameHistory: FrameHistoryState = {
+        past,
+        future,
+        checkpoint: null
+      };
 
       return {
         ...state,
-        frames: restoredFrames,
-        activeFrameId: activeFrameIdBefore ?? nextObj.activeFrameId,
-        history: { past, future, checkpoint: null }
+        frames: {
+          ...state.frames,
+          byId: {
+            ...state.frames.byId,
+            [frameId]: restoredFrame
+          }
+        },
+        history: {
+          byFrameId: {
+            ...state.history.byFrameId,
+            [frameId]: updatedFrameHistory
+          }
+        }
       };
     }
 
+    // ─── Per-Frame History: REDO ──────────────────────────────────────────
     case 'HISTORY_REDO': {
-      const { history } = state;
-      if (history.future.length === 0) return state;
+      const frameId = state.activeFrameId;
+      if (!frameId || !state.frames.byId[frameId]) return state;
 
-      const future = [...history.future];
+      const frameHistory = state.history.byFrameId[frameId];
+      if (!frameHistory || frameHistory.future.length === 0) return state;
+
+      const currentFrame = state.frames.byId[frameId];
+      const future = [...frameHistory.future];
       const step = future.shift()!;
 
-      // Apply redo patches
-      const baseObj = { frames: state.frames, activeFrameId: state.activeFrameId };
-      const nextObj = applyPatches(baseObj, step.redoPatches);
+      // Apply redo patches directly to the frame
+      const restoredFrame = mergeLiveCameraForFrame(applyPatches(currentFrame, step.redoPatches), currentFrame);
 
-      // Merge live cameras to prevent viewport jumping on redo
-      const restoredFrames = mergeLiveCameras(nextObj.frames, state);
+      const updatedFrameHistory: FrameHistoryState = {
+        past: [...frameHistory.past, step],
+        future,
+        checkpoint: null
+      };
 
       return {
         ...state,
-        frames: restoredFrames,
-        activeFrameId: step.activeFrameIdAfter ?? nextObj.activeFrameId,
-        history: { past: [...history.past, step], future, checkpoint: null }
+        frames: {
+          ...state.frames,
+          byId: {
+            ...state.frames.byId,
+            [frameId]: restoredFrame
+          }
+        },
+        history: {
+          byFrameId: {
+            ...state.history.byFrameId,
+            [frameId]: updatedFrameHistory
+          }
+        }
       };
     }
 
@@ -688,7 +673,7 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
       const payload = { ...action.payload };
 
       let migratedFrames = payload.frames;
-      let migratedHistory = payload.history;
+      let migratedHistory: GlobalHistoryState | undefined = undefined;
 
       // Migrate legacy Array frames to NormalizedState
       if (Array.isArray(migratedFrames)) {
@@ -709,7 +694,7 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
         migratedFrames = { byId, order };
 
         // Legacy history patches are incompatible with new shape, must clear them
-        migratedHistory = { past: [], future: [], checkpoint: null };
+        migratedHistory = { byFrameId: {} };
       } else if (migratedFrames && migratedFrames.byId) {
         // Even if frames is an object, make sure layers inside are migrated if they are arrays
         const nextOrder = migratedFrames.order || [];
@@ -730,7 +715,7 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
 
         migratedFrames = { byId: nextById, order: nextOrder };
         if (historyIncompatible) {
-          migratedHistory = { past: [], future: [], checkpoint: null };
+          migratedHistory = { byFrameId: {} };
         }
       }
 
@@ -750,6 +735,24 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
         });
       }
 
+      // [Migration] Legacy global history → per-frame history
+      // If payload.history has the old shape { past, future, checkpoint }, convert it
+      const rawHistory = payload.history as unknown;
+      if (rawHistory && typeof rawHistory === 'object' && 'past' in (rawHistory as object) && !('byFrameId' in (rawHistory as object))) {
+        // Old format: discard — patches used global frame paths, incompatible with per-frame
+        migratedHistory = { byFrameId: {} };
+      }
+
+      // Determine final history: prefer migratedHistory > payload.history (if new format) > state.history > empty
+      let finalHistory: GlobalHistoryState;
+      if (migratedHistory) {
+        finalHistory = migratedHistory;
+      } else if (payload.history && 'byFrameId' in payload.history) {
+        finalHistory = payload.history as GlobalHistoryState;
+      } else {
+        finalHistory = state.history || { byFrameId: {} };
+      }
+
       return {
         // [Standardization] Persistence restoration is a crash-prone period; we must first destructure old state to retain command sets
         // then destructure payload to override business data (frames, config, etc.)
@@ -759,7 +762,7 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
         // Ensure UI and History always have fallback values to prevent component crashes due to empty data
         ui: payload.ui ? { ...state.ui, ...payload.ui } : state.ui,
         pluginConfig: payload.pluginConfig ? { ...state.pluginConfig, ...payload.pluginConfig } : state.pluginConfig,
-        history: migratedHistory || state.history || { past: [], future: [], checkpoint: null },
+        history: finalHistory,
         isLoaded: true,
         confirm: null,
       };
@@ -813,11 +816,22 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
     // Used by plugins (e.g. CloudMenu) via standard dispatch.
     // Not cloud-specific — also useful for "New Project", version rollback, etc.
 
-    case 'HISTORY_RESET':
+    case 'HISTORY_RESET': {
+      // Reset only the active frame's history (per-frame undo floor)
+      const resetFrameId = state.activeFrameId;
+      if (!resetFrameId) {
+        return { ...state, history: { byFrameId: {} } };
+      }
       return {
         ...state,
-        history: { past: [], future: [], checkpoint: null }
+        history: {
+          byFrameId: {
+            ...state.history.byFrameId,
+            [resetFrameId]: { past: [], future: [], checkpoint: null }
+          }
+        }
       };
+    }
 
     case 'REPLACE_FRAME': {
       const { frameId, frame } = action.payload;

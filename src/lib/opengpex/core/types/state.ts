@@ -103,24 +103,24 @@ export interface EditorState extends EditorData {
   getStateSignal: <T = boolean>(key: string, defaultValue?: T) => T;
 }
 
-export interface HistoryCheckpoint {
-  frames: NormalizedState<Frame>;
-  activeFrameId: string | null;
-}
-
 export interface HistoryStep {
   id: string;
   name: string;
   undoPatches: Patch[];
   redoPatches: Patch[];
-  activeFrameIdBefore: string | null;
-  activeFrameIdAfter: string | null;
 }
 
-export interface GlobalHistoryState {
+/** Single frame's independent history stack */
+export interface FrameHistoryState {
   past: HistoryStep[];
   future: HistoryStep[];
-  checkpoint: HistoryCheckpoint | null;
+  /** Snapshot of the frame at last commit — used to diff against current state */
+  checkpoint: Frame | null;
+}
+
+/** Global history container: per-frame map keyed by frameId */
+export interface GlobalHistoryState {
+  byFrameId: Record<string, FrameHistoryState>;
 }
 
 export type EditorAction =

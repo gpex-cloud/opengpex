@@ -34,12 +34,11 @@ import { formatBytes } from "@opengpex/editor/core/helpers/file";
  * TimeTravelAction: Time machine button group contributed to TOOL_BAR
  */
 export const TimeTravelAction = React.memo(function TimeTravelAction() {
-  const { state } = useEditorState();
+  const { actions } = useEditorServices();
   const { undoCmd, redoCmd, revertCmd } = usePluginCommands();
 
-  const history = state.history || { past: [], future: [] };
-  const canUndo = (history.past || []).length > 0;
-  const canRedo = (history.future || []).length > 0;
+  const canUndo = actions.history.canUndo();
+  const canRedo = actions.history.canRedo();
 
   // Remove all outer div layouts, returning purely an array of functional buttons!
   return (

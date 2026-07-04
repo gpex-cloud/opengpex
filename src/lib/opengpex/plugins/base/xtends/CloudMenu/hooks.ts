@@ -92,9 +92,12 @@ export const useCloudMenu = () => {
   const [conflictState, setConflictState] = useState<ConflictState | null>(null);
 
   // ─── Sync Status (History-based Dirty Detection) ────────────────
-  // Use state.history.past.length as the dirty-check signal source.
+  // Use active frame's history.past.length as the dirty-check signal source.
   // Only true user edit operations (SIGNAL_COMMIT) will change history.past.length,
   // internal system operations (import, thumbnail update, re-render) will not.
+  const activeFrameHistory = activeFrame ? state.history.byFrameId[activeFrame.id] : null;
+  const activeHistoryPastLength = activeFrameHistory?.past?.length ?? 0;
+
   const syncStatus: SyncStatus = useMemo(() => {
     if (!isSignedIn) return 'OFFLINE';
     if (!activeFrame) return 'NEVER_SAVED';
@@ -102,9 +105,8 @@ export const useCloudMenu = () => {
     const record = loadSyncRecord(activeFrame.id);
     if (!record) return 'NEVER_SAVED';
 
-    const historyPastLength = state.history?.past?.length ?? 0;
-    return hasUnsavedChanges(activeFrame.id, historyPastLength) ? 'LOCAL_AHEAD' : 'SYNCED';
-  }, [activeFrame, isSignedIn, state.history?.past?.length]);
+    return hasUnsavedChanges(activeFrame.id, activeHistoryPastLength) ? 'LOCAL_AHEAD' : 'SYNCED';
+  }, [activeFrame, isSignedIn, activeHistoryPastLength]);
 
   // Populate lastSaveResult from localStorage when frame changes
   useEffect(() => {
@@ -131,8 +133,8 @@ export const useCloudMenu = () => {
         onPhaseChange: setSavePhase,
       });
 
-      // Record sync state: snapshot current history length as baseline
-      const historyPastLength = state.history?.past?.length ?? 0;
+      // Record sync state: snapshot current frame's history length as baseline
+      const historyPastLength = state.history.byFrameId[activeFrame.id]?.past?.length ?? 0;
       saveSyncRecord(activeFrame.id, {
         version: result.version,
         savedAt: new Date().toISOString(),
