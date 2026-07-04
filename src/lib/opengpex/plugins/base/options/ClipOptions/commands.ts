@@ -42,11 +42,16 @@ import type { CropTool } from './protocols';
  * synchronously; defer `discardExchange` to a microtask so the dirty-check
  * fast path (no peel happened) doesn't block the visible mode flip.
  * `discardExchange` is idempotent — duplicate calls short-circuit.
+ *
+ * [noundo] discardExchange is called via `.execute.noundo()` because it runs
+ * inside the peel interaction transaction — the undo boundary is already owned
+ * by `peelToExchange` (undoable: true). Generating an additional checkpoint
+ * here would create a spurious undo step. See peel.ts for architecture notes.
  */
 export function exitClipMode(ctx: EditorContextValue): void {
   ctx.actions.setInteraction({ interactionMode: 'pan' });
   queueMicrotask(() => {
-    ctx.actions.adv.layer.peel.discardExchange.execute();
+    ctx.actions.adv.layer.peel.discardExchange.execute.noundo();
   });
 }
 
@@ -136,7 +141,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   toggleMode: {
     id: P.CMD_TOGGLE_MODE,
     name: 'Toggle Clip Mode',
-    execute: (ctx: EditorContextValue) => {
+    execute: async (ctx: EditorContextValue) => {
       // Re-Canvas is a fully *orthogonal* modal — Space must not leak into it.
       if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
 
@@ -146,11 +151,15 @@ export const CLIP_OPTIONS_COMMANDS = {
         return;
       }
 
-      // Already in clip mode: exit (pure toggle semantics).
+      // Already in clip mode: merge any dirty peel first (same as Enter),
+      // then exit. This ensures peeled fragments are committed, not discarded.
+      // [noundo] mergeHost runs inside the peel transaction — the undo boundary
+      // is owned by `peelToExchange`. See peel.ts for architecture notes.
+      await ctx.actions.adv.layer.merge.mergeHost.execute.noundo();
       exitClipMode(ctx);
     },
     shortcut: { key: ' ' }
-  } as EditorCommand<void, void>,
+  } as EditorCommand<void, Promise<void>>,
 
   /**
    * Tab — cycle through clip tools forward while already in clip mode
@@ -245,7 +254,9 @@ export const CLIP_OPTIONS_COMMANDS = {
       if (ctx.state.interaction.interactionMode !== 'clip') return;
 
       // Bake the peel (mergeHost is async — waits for off-screen composite).
-      await ctx.actions.adv.layer.merge.mergeHost.execute();
+      // [noundo] mergeHost runs inside the peel transaction — the undo boundary
+      // is owned by `peelToExchange`. See peel.ts for architecture notes.
+      await ctx.actions.adv.layer.merge.mergeHost.execute.noundo();
 
       // Exit clip mode. Since we just merged, the triplet is now clean and
       // the discardExchange inside exitClipMode will be a no-op.

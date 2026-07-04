@@ -23,23 +23,36 @@ import { computePolygonBounds } from './polygon';
 
 /**
  * [Generic] Core geometric operator: calculate transform matrix of any asset in world coordinate system
+ *
+ * Design contract:
+ *   Matrix = Translate(cx, cy) × Orientation(rotation, flip) × Translate(-bounding.w/2, -bounding.h/2)
+ *
+ * This places the center of the layer's BOUNDING BOX at world coordinate (cx, cy).
+ * The painter (painter.ts) then draws content at visibleShape.rect offset (vx, vy) within
+ * this bounding-local coordinate space, so content naturally appears at its correct position.
+ *
+ * [Historical note / Bugfix 2026-07-04]
+ * Previously this function used visibleShape.rect for centering and included a -rect.x/-rect.y
+ * "compensation" translation. That design caused imported images with non-zero contentBounds
+ * (e.g., images with transparent borders) to have their visible content forced to canvas center
+ * instead of appearing at its true position. The fix: always center on bounding, let the painter
+ * handle visibleShape offset naturally via drawImage(source, vx, vy, vw, vh, vx, vy, vw, vh).
+ *
+ * Safe because all existing fragment layers have visibleShape.rect at (0, 0) — the old
+ * compensation was always a no-op for them.
  */
 function computeWorldMatrix(props: {
   cx: number;
   cy: number;
   rotation: number;
   flip: { h: boolean; v: boolean };
-  rect: { x: number; y: number; w: number; h: number };
+  bounding: { w: number; h: number };
 }): Matrix3x3 {
-  const { cx, cy, rotation, flip, rect } = props;
+  const { cx, cy, rotation, flip, bounding } = props;
 
   return Matrix3x3.translate(cx, cy)
     .multiply(getOrientationMatrix(rotation, flip))
-    .multiply(Matrix3x3.translate(-rect.w / 2, -rect.h / 2))
-    // Core contract compensation: because the atomic painter (painter.ts) draws logically cut fragments with visibleShape,
-    // it will directly draw at (v.x, v.y) in local space. To offset this drawing deviation, the matrix must inversely subtract rect.x/y,
-    // to keep the physical center of the layer at (cx, cy), while ensuring the UI selection box perfectly aligns with the fragment.
-    .multiply(Matrix3x3.translate(-rect.x, -rect.y));
+    .multiply(Matrix3x3.translate(-bounding.w / 2, -bounding.h / 2));
 }
 
 /**
@@ -56,24 +69,16 @@ function getOrientationMatrix(rotation: number, flip?: { h: boolean, v: boolean 
  * [External] Fuses all geometric elements: center position, viewport shape (visibleShape), rotation, flip, scaling, etc.
  */
 export function getLayerWorldMatrix(layer: Layer, override?: LayerPoseOverride): Matrix3x3 {
-  // const activeMasks = layer.vectorMasks?.filter(m => m.enabled) || [];
-  // const hasVisibleShape = layer.visibleShape && (layer.visibleShape.type !== 'rect' || layer.visibleShape.rect.w !== layer.bounding.w || layer.visibleShape.rect.h !== layer.bounding.h);
-
-  const img_w = layer.bounding.w;
-  const img_h = layer.bounding.h;
-
   const cx = override?.cx ?? layer.cx;
   const cy = override?.cy ?? layer.cy;
   const rotation = override?.rotation ?? layer.rotation;
-
-  const rect = layer.visibleShape?.rect || { x: 0, y: 0, w: img_w, h: img_h };
 
   return computeWorldMatrix({
     cx,
     cy,
     rotation,
     flip: layer.flip,
-    rect
+    bounding: layer.bounding
   });
 }
 

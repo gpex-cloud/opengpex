@@ -206,7 +206,8 @@ export const LayerClipCommands = {
 
         if (meta?.layer) {
           // Internal Paste (contains full layer object)
-          const { id: _oldId, ...layerWithoutId } = meta.layer;
+          // New layers must never inherit lock/interactive state from the source
+          const { id: _oldId, locked: _locked, interactive: _inter, ...layerWithoutId } = meta.layer;
           const smartName = ctx.layers.getNewLayerName(activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), 'Layer');
 
           const vDim = state.ui.viewportDim;
@@ -449,9 +450,11 @@ export const LayerClipCommands = {
           });
         }
 
-        // Clear the applied selection slot
-        const clipToolId = activeFrame.latestClipTool || 'rect';
-        actions.setClipBox(activeFrame.id, clipToolId, null);
+        // NOTE: Selection is intentionally preserved after drill.
+        // Unlike toMask (which is a "finalize" operation), drill is an
+        // editing action — the user expects the marching ants to remain
+        // so they can drill again, switch layers, or continue editing
+        // with the same selection. This matches Photoshop's Delete behavior.
       } catch (err) {
         console.error('[ClipCommands] Drill selection failed:', err);
       }

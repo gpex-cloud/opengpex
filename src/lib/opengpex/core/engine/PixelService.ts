@@ -173,7 +173,16 @@ export function createPixelService(
     // 3. Scene rendering and synthesis namespace
     render: {
       async shapeToBlob(frame: Frame, shape: LocalShape, options: { format?: string; quality?: number } = {}) {
-        const targetLayers = LayerFactory.getHostLayers(frame.layers.order.map(id => frame.layers.byId[id]));
+        // Filter: host layers only + exclude hidden layers
+        const allHostLayers = LayerFactory.getHostLayers(frame.layers.order.map(id => frame.layers.byId[id]));
+        const targetLayers = allHostLayers.filter(l => l.visible !== false);
+
+        if (targetLayers.length === 0) {
+          console.warn('[PixelService.shapeToBlob] No visible layers to export. All %d host layers are hidden.', allHostLayers.length);
+        } else if (targetLayers.length < allHostLayers.length) {
+          console.debug('[PixelService.shapeToBlob] Export: %d/%d layers visible (filtered %d hidden)',
+            targetLayers.length, allHostLayers.length, allHostLayers.length - targetLayers.length);
+        }
 
         const worldShape = geometry.shape.localToWorldShape(shape, frame);
 
@@ -182,8 +191,16 @@ export function createPixelService(
         return result.blob!;
       },
       async frameToBlob(frame: Frame, options: { format?: string; quality?: number } = {}) {
-        // Filter out all exchange sub-layers, keeping only the root layer for export
-        const targetLayers = LayerFactory.getHostLayers(frame.layers.order.map(id => frame.layers.byId[id]));
+        // Filter: host layers only + exclude hidden layers
+        const allHostLayers = LayerFactory.getHostLayers(frame.layers.order.map(id => frame.layers.byId[id]));
+        const targetLayers = allHostLayers.filter(l => l.visible !== false);
+
+        if (targetLayers.length === 0) {
+          console.warn('[PixelService.frameToBlob] No visible layers to export. All %d host layers are hidden.', allHostLayers.length);
+        } else if (targetLayers.length < allHostLayers.length) {
+          console.debug('[PixelService.frameToBlob] Export: %d/%d layers visible (filtered %d hidden)',
+            targetLayers.length, allHostLayers.length, allHostLayers.length - targetLayers.length);
+        }
 
         const fullShape = {
           type: 'rect' as const,
@@ -210,10 +227,19 @@ export function createPixelService(
           ...items
         ];
 
+        // Ensure all layer assets are decoded in Worker cache before merging.
+        // The Worker's LRU may have evicted bitmaps+blobs for infrequently-used
+        // assets; re-sending the blob guarantees the merger fallback can re-decode.
         await Promise.all(allWrappedItems.map(async item => {
           const layer = ('layer' in item) ? item.layer : (item as Layer);
           const resolvedSrc = assets.resolve(layer.assetId, layer.src);
-          return resolvedSrc ? await service.decode.htmlImage(resolvedSrc) : null;
+          if (resolvedSrc) await service.decode.htmlImage(resolvedSrc);
+          if (layer.assetId) {
+            const asset = assets.get(layer.assetId);
+            if (asset?.blob) {
+              await processor.ensureAssetInWorker(layer.assetId, asset.blob);
+            }
+          }
         }));
 
         const processedItems = allWrappedItems.map((item) => {

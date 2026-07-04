@@ -254,8 +254,11 @@ export function createLayerService(
       const v = intersection.visibleShape.rect;
       newLayer.bounding = { w: v.w, h: v.h };
       newLayer.visibleShape = { ...intersection.visibleShape };
-      newLayer.cx = intersection.center.x;
-      newLayer.cy = intersection.center.y;
+      // With the bounding-centered matrix (translate(cx,cy) * translate(-bw/2,-bh/2)),
+      // content at (vx, vy) maps to world (cx + vx, cy + vy). To place the content
+      // center at intersection.center, we solve: cx = center.x - vx, cy = center.y - vy.
+      newLayer.cx = intersection.center.x - v.x;
+      newLayer.cy = intersection.center.y - v.y;
       newLayer.birthCenter = { cx: newLayer.cx, cy: newLayer.cy }; // 💡 Record birth center to trigger the golden return guide line when dragging fragments
 
       return { newLayer, localShape };
@@ -378,8 +381,9 @@ export function createLayerService(
         ...targetLayer,
         src: sourceLayer.src,
         assetId: sourceLayer.assetId,
-        cx: intersection.center.x,
-        cy: intersection.center.y,
+        // Bounding-centered matrix compensation (same as fragmentToLayerLogical)
+        cx: intersection.center.x - v.x,
+        cy: intersection.center.y - v.y,
         scale: 1,
         rotation: sourceLayer.rotation,
         flip: { ...sourceLayer.flip },

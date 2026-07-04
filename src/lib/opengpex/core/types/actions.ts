@@ -27,12 +27,20 @@ import { ClipboardLayerMetadata } from './services';
  * AdvCommandRef: Rich reference object for advanced commands
  * Carries both execution capability and command metadata (id, name, shortcut label),
  * allowing plugins to get the full view of the command without importing additional protocol constants.
+ *
+ * Each `execute` function also exposes a `.noundo(...)` variant that suppresses
+ * the pre-execution SIGNAL_COMMIT checkpoint. Use `.noundo()` when invoking a
+ * command inside an interaction transaction whose undo boundary is already owned
+ * by a parent gesture (e.g. peel commit/cancel within the peel session).
  */
 export interface AdvCommandRef<TPayload = void, TReturn = void> {
   readonly id: string;
   readonly name: string;
   readonly shortcutLabel: string;
-  execute: [TPayload] extends [void] ? () => TReturn : (payload: TPayload) => TReturn;
+  execute: ([TPayload] extends [void] ? () => TReturn : (payload: TPayload) => TReturn) & {
+    /** Execute without generating an undo checkpoint (suppress SIGNAL_COMMIT). */
+    noundo: [TPayload] extends [void] ? () => TReturn : (payload: TPayload) => TReturn;
+  };
 }
 
 /** 

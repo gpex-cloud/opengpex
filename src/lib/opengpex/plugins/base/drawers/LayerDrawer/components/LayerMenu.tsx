@@ -28,6 +28,7 @@ import {
   Trash2,
   MoreVertical,
   Image as ImageIcon,
+  Copy,
 } from "lucide-react";
 import { useEditorState } from "@opengpex/editor/core/context";
 import { useLayerCommands } from "../hooks";
@@ -62,9 +63,16 @@ export const LayerMenu = React.memo(
     setIsMasksExpanded,
   }: LayerMenuProps) => {
     const { activeFrame } = useEditorState();
-    const { removeCmd, mergeRasterize } = useLayerCommands();
+    const { removeCmd, duplicateLayerCmd, mergeRasterize } = useLayerCommands();
 
     const options: ActionOption[] = [];
+
+    // Duplicate Layer — always available
+    options.push({
+      label: "Duplicate Layer",
+      value: "duplicate",
+      icon: <Copy size={12} />,
+    });
 
     if (hasSubLayers) {
       options.push({
@@ -104,7 +112,9 @@ export const LayerMenu = React.memo(
     }
 
     const handleSelect = (val: string) => {
-      if (val === "open-sublayers") {
+      if (val === "duplicate") {
+        duplicateLayerCmd?.execute({ layerId });
+      } else if (val === "open-sublayers") {
         setIsSubLayersExpanded(true);
       } else if (val === "close-sublayers") {
         setIsSubLayersExpanded(false);

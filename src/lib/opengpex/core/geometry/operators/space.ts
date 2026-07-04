@@ -327,18 +327,15 @@ export function getRectIntersection<T extends Rect>(r1: T, r2: T, minSize = 0.5)
 /**
  * Calculate physical bounding box (AABB) of layer in world coordinates
  * 
- * [Coordinate System Offset Compensation Description]
- * When a layer is a cropped fragment layer (e.g., a local layer cut out by Cmd+J), its underlying asset is actually still the uncropped original large image.
- * To ensure the UI selection frame and transform center point logically align with user intuition, the geometry engine adopts a "relative offset" design:
- * 1. Fragment's local coordinate system completely coincides with the original large image (origin 0,0 corresponds to top-left of the large image).
- * 2. Fragment's actual valid pixels are bound by `visibleShape.rect` (i.e. rect.x, rect.y), and the renderer draws the original image at this offset.
- * 3. As compensation, `getLayerWorldMatrix` (the incoming M matrix) automatically superimposes a reverse translation of `-rect.x, -rect.y` internally,
- *    thereby "pulling back" these offset pixels to the user-specified world coordinate center (cx, cy).
- * 
- * Therefore, when deriving the physical bounding box actually occupying the screen, we cannot simply extract a rectangle from `0, 0` to `w, h`.
- * The real pixel physical center is located at `(rect.x + rect.w / 2, rect.y + rect.h / 2)` in the large image coordinate system.
- * Only by inputting this offset center coordinate into the M matrix will it perfectly hedge with the internal negative offset of M,
- * ultimately outputting an absolutely accurate world bounding box. This prevents frustum culling at high magnifications from accidentally deleting the current fragment.
+ * [Bounding Box Calculation]
+ * The world matrix M centers the layer's BOUNDING BOX at (cx, cy):
+ *   M = translate(cx, cy) * orient * translate(-bounding.w/2, -bounding.h/2)
+ *
+ * The painter renders content at `visibleShape.rect` offset (vx, vy) within bounding-local coordinate space.
+ * To compute the screen bounding box of the VISIBLE content (not the full bounding), we translate M by the
+ * visibleShape center offset `(rect.x + rect.w/2, rect.y + rect.h/2)` to obtain the world center of the content,
+ * then extract the AABB with the visibleShape dimensions. This ensures frustum culling and hit-testing
+ * operate on the actual pixel footprint rather than the full bounding rectangle.
  */
 export function getLayerBoundingBox(l: Layer, w_matrix?: IMatrix3x3): WorldRect {
   const rect = l.visibleShape?.rect || { x: 0, y: 0, w: l.bounding.w, h: l.bounding.h };

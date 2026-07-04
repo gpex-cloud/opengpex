@@ -93,7 +93,10 @@ export function applyClipSequence(
       ctx.clip(invertedPath, 'evenodd');
     } else {
       const path = clip.__compiledPath2D || shapeToPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale));
-      ctx.clip(path, 'nonzero');
+      // Path-type shapes (polygon-derived, e.g. inverted selections with multi-ring
+      // geometry) require 'evenodd' to correctly produce holes. Rect/circle shapes
+      // are single-path and 'nonzero' is fine (avoids sub-pixel seam differences).
+      ctx.clip(path, clip.shape.type === 'path' ? 'evenodd' : 'nonzero');
     }
   }
 }
@@ -167,9 +170,11 @@ export function applyFeatheredClipComposite(
       maskCtx.fillStyle = '#ffffff';
       maskCtx.fill(invertedPath, 'evenodd');
     } else {
-      // For non-inverted feathered masks: fill only the shape area
+      // For non-inverted feathered masks: fill only the shape area.
+      // Path-type shapes (polygon-derived, e.g. inverted selections) require 'evenodd'
+      // to correctly produce holes in multi-ring paths.
       maskCtx.fillStyle = '#ffffff';
-      maskCtx.fill(path, 'nonzero');
+      maskCtx.fill(path, clip.shape.type === 'path' ? 'evenodd' : 'nonzero');
     }
 
     // Apply Gaussian blur to the mask by re-drawing with filter
@@ -307,7 +312,7 @@ function drawLayerContent(
       ctx.save();
       clipped = true;
       const path = shapeToPath2D(layer.visibleShape);
-      ctx.clip(path);
+      ctx.clip(path, layer.visibleShape.type === 'path' ? 'evenodd' : 'nonzero');
     }
     if (layer.visibleShape) {
       const v = layer.visibleShape.rect;
@@ -408,7 +413,9 @@ function drawLayerContent(
         ctx.save();
         clipped = true;
         const path = shapeToPath2D(layer.visibleShape);
-        ctx.clip(path);
+        // Path-type visibleShapes (polygon-derived, e.g. from inverted selections
+        // via fragmentToLayerLogical) require 'evenodd' to produce correct holes.
+        ctx.clip(path, layer.visibleShape.type === 'path' ? 'evenodd' : 'nonzero');
       }
 
       ctx.drawImage(

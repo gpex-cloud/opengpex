@@ -17,7 +17,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Layer, EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
+import { Layer, EditorContextValue, EditorCommand, asLocalShape } from '@opengpex/editor/core/types';
+import { LayerFactory } from '@opengpex/editor/core/layer';
 
 import { syncToCanvasOverlay } from './utils';
 
@@ -100,6 +101,65 @@ export const LAYER_COMMANDS = {
             syncToCanvasOverlay(ctx, frame, worldCenter, rect.w, rect.h);
         }
     } as EditorCommand<{ frameId?: string; layerId: string }, void>,
+
+    addBlankLayer: {
+        id: P.CMD_ADD_BLANK_LAYER,
+        name: 'New Blank Layer',
+        undoable: true,
+        execute: (ctx: EditorContextValue) => {
+            const { activeFrame } = ctx;
+            if (!activeFrame) return;
+
+            const layersArray = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]);
+            const hostLayers = LayerFactory.getHostLayers(layersArray);
+            const name = LayerFactory.getNewLayerName(hostLayers, 'Layer');
+
+            const newLayer = LayerFactory.getNewLayer({
+                name,
+                type: 'image',
+                bounding: activeFrame.canvas,
+                visibleShape: asLocalShape({ x: 0, y: 0, w: activeFrame.canvas.w, h: activeFrame.canvas.h }),
+                cx: 0,
+                cy: 0,
+                locked: false,
+            });
+
+            // Insert above the currently active layer
+            const activeIdx = hostLayers.findIndex(l => l.id === activeFrame.activeLayerId);
+            ctx.layers.addLayer(activeFrame.id, newLayer, activeIdx >= 0 ? activeIdx + 1 : undefined);
+        }
+    } as EditorCommand<void, void>,
+
+    duplicateLayer: {
+        id: P.CMD_DUPLICATE_LAYER,
+        name: 'Duplicate Layer',
+        undoable: true,
+        execute: (ctx: EditorContextValue, payload?: { layerId?: string }) => {
+            const { activeFrame } = ctx;
+            if (!activeFrame) return;
+
+            const targetId = payload?.layerId || activeFrame.activeLayerId;
+            if (!targetId) return;
+
+            const layer = activeFrame.layers.byId[targetId];
+            if (!layer || layer.parentId) return; // Only allow duplicating host layers
+
+            const layersArray = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]);
+            const hostLayers = LayerFactory.getHostLayers(layersArray);
+            const newName = LayerFactory.getNewLayerName(hostLayers, `${layer.name} Copy`);
+
+            const { id: _id, parentId: _pid, role: _role, ...layerData } = layer;
+            const newLayer = LayerFactory.getNewLayer({
+                ...layerData,
+                name: newName,
+                locked: false, // Duplicated layer is always unlocked
+            });
+
+            // Insert above the original layer
+            const insertIdx = hostLayers.findIndex(l => l.id === targetId);
+            ctx.layers.addLayer(activeFrame.id, newLayer, insertIdx >= 0 ? insertIdx + 1 : undefined);
+        }
+    } as EditorCommand<{ layerId?: string } | undefined, void>,
 
     syncMaskToOverlay: {
         id: P.CMD_MASK_SYNC_TO_OVERLAY,

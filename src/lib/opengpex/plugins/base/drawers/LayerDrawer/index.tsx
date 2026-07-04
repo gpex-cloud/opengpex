@@ -86,5 +86,11 @@ export const plugin: EditorPlugin = {
       defaultValue: true,
       scope: "public",
     },
+    {
+      id: P.SHOW_SUB_LAYERS_KEY,
+      name: "Show Sub-layers Button",
+      defaultValue: false,
+      scope: "public",
+    },
   ],
 };

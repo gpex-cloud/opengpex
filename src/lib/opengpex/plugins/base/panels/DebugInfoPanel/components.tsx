@@ -40,9 +40,13 @@ import {
   Crosshair,
   ChevronDown,
   Database,
+  Settings,
 } from "lucide-react";
 import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
+import Switch from "@opengpex/editor/widgets/Switch";
+import { useEditorState, useEditorServices } from "@opengpex/editor/core/context";
+import { LayerDrawerAPI } from "../../drawers/LayerDrawer/protocols";
 import { useDebugInfo } from "./hooks";
 import type { PerfMetrics, MemoryMetrics, DebugMetrics, AppResourceMetrics } from "./hooks";
 import { PopupPanel } from "@opengpex/editor/widgets/PopupPanel";
@@ -117,6 +121,10 @@ const DebugInfoPanel = React.memo(function DebugInfoPanel({
 }: DebugInfoPanelProps) {
   const { activeLayer } = metrics;
   const [showTop5, setShowTop5] = useState(false);
+  const { state } = useEditorState();
+  const { actions } = useEditorServices();
+
+  const showSubLayers = state.getStateSignal(LayerDrawerAPI.signals.showSubLayers) ?? false;
 
   return (
     <PopupPanel
@@ -133,9 +141,9 @@ const DebugInfoPanel = React.memo(function DebugInfoPanel({
       }
       position="BR"
       closeOnOutsideClick={false}
-      className="!h-[625px] !max-h-[625px]"
+      className="!h-[685px] !max-h-[685px]"
     >
-      <div className="space-y-3.5 p-4 pr-3 text-[11px] text-[var(--text-main)] select-none overflow-y-auto max-h-[560px] scrollbar-hide">
+      <div className="space-y-3.5 p-4 pr-3 text-[11px] text-[var(--text-main)] select-none overflow-y-auto max-h-[620px] scrollbar-hide">
         {/* ─── 1. Performance HUD ─────────────────────────────────────── */}
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -534,6 +542,30 @@ const DebugInfoPanel = React.memo(function DebugInfoPanel({
             </div>
           </div>
         )}
+
+        {/* ─── 6. Inspector Options ──────────────────────────────────── */}
+        <div className="space-y-2 pt-2 border-t border-[var(--border-subtle)]">
+          <div className="flex items-center gap-2">
+            <Settings size={11} className="text-[var(--text-muted)]" />
+            <span className="text-[10px] font-black text-[var(--text-main)] uppercase tracking-tight">
+              Inspector Options
+            </span>
+          </div>
+          <div className="bg-[var(--bg-stage)] p-3 rounded-2xl border border-[var(--border-subtle)] space-y-2">
+            <div className="text-[7px] font-black uppercase tracking-widest text-[var(--text-muted)] leading-none mb-1">
+              Layer Management Drawer
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[9.5px] font-bold text-[var(--text-main)]">
+                Show Sub-layers Button
+              </span>
+              <Switch
+                checked={showSubLayers}
+                onChange={(checked) => actions.setStateSignal(LayerDrawerAPI.signals.showSubLayers, checked)}
+              />
+            </div>
+          </div>
+        </div>
       </div>
     </PopupPanel>
   );

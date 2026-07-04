@@ -28,7 +28,8 @@ export const WORKSPACE_GEOMETRY = {
     SIDEBAR_WIDTH: 320,
     DRAWER_BAR_WIDTH: 40,
     HEADER_HEIGHT: 48,
-    TOOL_MENU_WIDTH: 48,
+    /** 固定模式下 ToolMenu 侧边栏宽度（px）。调整此值可改变图钉固定后的栏宽。 */
+    TOOL_MENU_WIDTH: 44,
 };
 
 // [REFACTOR-Step2] `getWorkspaceLayout()` (and its `offsets` field) was the static
@@ -108,13 +109,16 @@ export const getWorkspaceStyles = (
         },
 
         // --- Tool Menu ---
+        // [宽度控制] 固定模式通过 width + maxWidth 双重锁定宽度为 TOOL_MENU_WIDTH；
+        // 去除了固定模式的 transition-all 防止从浮动模式切换时宽度动画溢出。
         toolMenu: {
             className: isToolMenuPinned
-                ? `relative pointer-events-auto transition-all duration-300 h-full shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-panel)]/40 backdrop-blur-3xl shadow-[4px_0_24px_rgba(0,0,0,0.05)]`
+                ? `relative pointer-events-auto h-full shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-panel)]/40 backdrop-blur-3xl shadow-[4px_0_24px_rgba(0,0,0,0.05)]`
                 : `absolute pointer-events-auto transition-all duration-300 left-[11px] top-2`,
             style: {
                 zIndex: EDITOR_Z_INDEX.UI.POPOVER + 5,
                 width: isToolMenuPinned ? `${WORKSPACE_GEOMETRY.TOOL_MENU_WIDTH}px` : undefined,
+                maxWidth: isToolMenuPinned ? `${WORKSPACE_GEOMETRY.TOOL_MENU_WIDTH}px` : undefined,
             }
         },
 

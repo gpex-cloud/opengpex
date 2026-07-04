@@ -49,6 +49,16 @@ export const IMAGE_INFO_COMMANDS = {
             return;
          }
 
+         // Guard: abort if no visible layers exist (would produce a blank transparent image)
+         const hasVisibleLayers = activeFrame.layers.order.some(id => {
+            const layer = activeFrame.layers.byId[id];
+            return !layer.parentId && layer.visible !== false;
+         });
+         if (!hasVisibleLayers) {
+            ctx.actions.setInteraction({ hud: { message: 'All layers are hidden — nothing to export.', type: 'error' } });
+            return;
+         }
+
          // Resolve the export shape: for irregular selections (lasso/wand),
          // convert polygon to LocalShape{type:'path'} with bounds-relative pathData.
          const cropBox = isClipMode && box ? clipBoxToExportShape(box) : undefined;
@@ -59,6 +69,14 @@ export const IMAGE_INFO_COMMANDS = {
          const { w: exportW, h: exportH } = calcFinalDims(baseW, baseH, config);
 
          try {
+            console.debug('[ExportCmd] Starting export: format=%s, clip=%s, dims=%dx%d, visibleLayers=%d',
+               config.format, isClipMode ? 'yes' : 'no', exportW, exportH,
+               activeFrame.layers.order.filter(id => {
+                  const l = activeFrame.layers.byId[id];
+                  return !l.parentId && l.visible !== false;
+               }).length
+            );
+
             let blob = await FormatConverter.export(ctx, {
                format: config.format,
                quality: config.quality,

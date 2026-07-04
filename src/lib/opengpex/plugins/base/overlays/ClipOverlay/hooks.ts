@@ -80,7 +80,11 @@ export function useClipOverlayCommands() {
     }
   }, [state.interaction.selectionErrorPulse]);
 
-  // Unmount cleanup: discard any in-flight peel
+  // Unmount cleanup: discard any in-flight peel.
+  // [noundo] discardExchange is called via `.noundo()` because this cleanup
+  // runs inside the peel interaction transaction — the undo boundary is already
+  // owned by `peelToExchange`. Creating a checkpoint here would produce a
+  // spurious undo step. See peel.ts for architecture notes.
   const actionsRef = useRef(actions);
   useLayoutEffect(() => {
     actionsRef.current = actions;
@@ -90,7 +94,7 @@ export function useClipOverlayCommands() {
     return () => {
       const actions = actionsRef.current;
       queueMicrotask(() => {
-        actions.adv.layer.peel.discardExchange.execute();
+        actions.adv.layer.peel.discardExchange.execute.noundo();
       });
     };
   }, []);

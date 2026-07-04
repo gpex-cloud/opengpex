@@ -214,7 +214,21 @@ export function useEditorStore() {
 
   // --- 4. Semantic Action Definition (Semantic Actions) ---
   const actions: EditorActions = useMemo(() => {
-    const executeCommand = <P = unknown, R = unknown>(id: string, payload?: P): R => {
+    /**
+     * executeCommand: Central command dispatcher.
+     *
+     * @param id       - Registered command ID (e.g. 'adv.layer.merge.host')
+     * @param payload  - Business payload forwarded to command.execute()
+     * @param options  - Runtime dispatch options:
+     *   • noundo: When true, suppresses the pre-execution SIGNAL_COMMIT even if
+     *     the command declares `undoable: true`. This allows callers inside an
+     *     interaction transaction (e.g. peel commit/cancel) to invoke a normally-
+     *     undoable command without creating an additional undo checkpoint.
+     *     The command's static `undoable` declaration remains the *default*
+     *     behaviour; `noundo` is a per-call override controlled by the caller
+     *     who owns the broader transaction context.
+     */
+    const executeCommand = <P = unknown, R = unknown>(id: string, payload?: P, options?: { noundo?: boolean }): R => {
       const currentStore = stateRef.current;
       const context = contextValueRef.current;
       if (!context) return undefined as R;
@@ -268,7 +282,7 @@ export function useEditorStore() {
       // 2. Default execution logic
       const command = context.plugins.getCommand(id);
       if (command) {
-        if (command.undoable && currentStore.activeFrameId) {
+        if (command.undoable && !options?.noundo && currentStore.activeFrameId) {
           dispatch({ type: 'SIGNAL_COMMIT', payload: { frameId: currentStore.activeFrameId } });
         }
 
@@ -473,9 +487,21 @@ export function useEditorStore() {
 
     // Helper: Create advanced command rich reference object (AdvCommandRef)
     // Both name and shortcutLabel are dynamically obtained from the plugins service, avoiding hardcoded redundancy
+    //
+    // Each advRef exposes two execution paths:
+    //   • execute(...)        — normal dispatch, respects the command's `undoable` declaration
+    //   • execute.noundo(...) — suppresses SIGNAL_COMMIT for this call, even if command is undoable.
+    //                           Use inside interaction transactions (e.g. peel commit/cancel) where
+    //                           the outer gesture already owns the undo boundary.
     /* eslint-disable react-hooks/refs */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     function advRef(cmdId: string, executor: (...args: any[]) => any) {
+      // Attach .noundo() as a property on the execute function itself.
+      // This gives callers a fluent API: `cmd.execute.noundo(payload)`
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const execute: any = (...args: unknown[]) => executor(...args);
+      execute.noundo = (...args: unknown[]) => executeCommand(cmdId, args[0], { noundo: true });
+
       return {
         id: cmdId,
         get name() {
@@ -486,7 +512,7 @@ export function useEditorStore() {
           const ctx = contextValueRef.current;
           return ctx ? ctx.plugins.getShortcutLabel(cmdId, true) : '';
         },
-        execute: executor,
+        execute,
       };
     }
 

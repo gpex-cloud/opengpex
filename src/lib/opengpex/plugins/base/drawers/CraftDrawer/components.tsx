@@ -21,6 +21,7 @@
 
 import React from "react";
 import { Type, Paintbrush, Eraser, Undo2, Settings } from "lucide-react";
+import { motion } from "framer-motion";
 import { useEditorServices } from "@opengpex/editor/core/context";
 import { SettingsPanelAPI } from "../../panels/SettingsPanel/protocols";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
@@ -254,7 +255,10 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
-      <div className="flex justify-between items-center shrink-0">
+      <motion.div
+        layout="position"
+        className="flex justify-between items-center shrink-0"
+      >
         <div className="flex items-center gap-2">
           <CraftDrawerIcon size={12} className="text-indigo-600 dark:text-indigo-400" />
           <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
@@ -271,14 +275,25 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
             <Settings size={12} />
           </button>
         </div>
-      </div>
+      </motion.div>
 
-      {showTextPanel && <TextPanel />}
+      {showTextPanel && (
+        <motion.div layout="position" className="flex flex-col">
+          <TextPanel />
+        </motion.div>
+      )}
 
-      {showBrushPanel && <BrushPanel />}
+      {showBrushPanel && (
+        <motion.div layout="position" className="flex flex-col">
+          <BrushPanel />
+        </motion.div>
+      )}
 
       {showPlaceholder && (
-        <div className="flex flex-col bg-[var(--bg-stage)] p-4 rounded-xl border border-[var(--border-subtle)] items-center justify-center py-8 text-center gap-2">
+        <motion.div
+          layout="position"
+          className="flex flex-col bg-[var(--bg-stage)] p-4 rounded-xl border border-[var(--border-subtle)] items-center justify-center py-8 text-center gap-2"
+        >
           <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest">
             No Tool Active
           </span>
@@ -301,7 +316,7 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
             </kbd>{" "}
             for Restore.
           </span>
-        </div>
+        </motion.div>
       )}
     </div>
   );

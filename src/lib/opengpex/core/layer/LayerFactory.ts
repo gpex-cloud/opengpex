@@ -140,6 +140,7 @@ export const LayerFactory = {
       visible: false,
       interactive: false,
       vectorMasks: [],
+      bitmapMasks: [],
       visibleShape: { type: 'rect', rect: { x: 0, y: 0, w: 0, h: 0 }, hardEdge: false, __brand: 'local' } as LocalShape,
     };
   },

@@ -371,7 +371,8 @@ export const FrameCreateCommands = {
           flip: { h: false, v: false },
           adjustments: { brightness: 100, contrast: 100, saturation: 100, hueRotate: 0, blur: 0 },
           visibleShape: asLocalShape(contentBounds), // Re-decoded original bounds
-          vectorMasks: [],              // 💡 Completely clear masks!
+          vectorMasks: [],              // 💡 Completely clear vector masks!
+          bitmapMasks: [],              // 💡 Completely clear bitmap masks! (eraser/drill/clip masks)
         };
 
         // 💡 6. Use LayerFactory to regenerate the cleanest triplet layers, automatically discarding all other redundant layers

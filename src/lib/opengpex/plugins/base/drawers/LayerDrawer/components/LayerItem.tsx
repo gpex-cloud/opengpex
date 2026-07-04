@@ -33,6 +33,7 @@ import {
 import {
   useEditorState,
   useEditorServices,
+  usePluginSignals,
 } from "@opengpex/editor/core/context";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import EditableLabel from "@opengpex/editor/widgets/EditableLabel";
@@ -42,6 +43,7 @@ import { VectorMask, BitmapMask } from "@opengpex/editor/core/types";
 import { SubLayerItem } from "./SubLayerItem";
 import { MaskItem } from "./MaskItem";
 import { LayerMenu } from "./LayerMenu";
+import type { LayerDrawerSignalsMap } from "../commands.d";
 
 interface LayerItemProps {
   layerId: string;
@@ -84,8 +86,11 @@ export const LayerItem = React.memo(
     const isActive =
       layer.id === activeLayer?.id || activeLayer?.parentId === layer.id;
     const childLayers = getChildLayers(layer.id);
+    const { showSubLayersSignal } = usePluginSignals<LayerDrawerSignalsMap>();
+    const showSubLayers = showSubLayersSignal?.value ?? false;
+    const hasSubLayers = childLayers.length > 0 && showSubLayers;
     // Only show sub-layers dot if there are non-internal (exchange/frag) child layers
-    const hasSubLayers = childLayers.some(cl => cl.role !== 'exchange' && cl.role !== 'frag');
+    const hasVisibleSubLayersDot = childLayers.some(cl => cl.role !== 'exchange' && cl.role !== 'frag') && showSubLayers;
     const hasMasks = !!(
       (layer.vectorMasks && layer.vectorMasks.length > 0) ||
       (layer.bitmapMasks && layer.bitmapMasks.length > 0)
@@ -113,7 +118,8 @@ export const LayerItem = React.memo(
         dragControls={dragControls}
         id={layer.id}
       >
-        <div
+        <motion.div
+          layout="position"
           className={`group/layer relative flex items-center h-[36px] cursor-pointer transition-opacity ${isScrolling ? "opacity-90" : "opacity-100"}`}
           onClick={() => actions.setActiveLayer(activeFrameId, layer.id)}
           onMouseEnter={() => {
@@ -228,9 +234,9 @@ export const LayerItem = React.memo(
                 {/* Indicator dots: amber = has user sub-layers, teal = has masks.
                     Only shown when the layer has collapsed content underneath.
                     exchange/frag sub-layers (internal clip system) are excluded. */}
-                {(hasSubLayers || hasMasks) && (
+                {(hasVisibleSubLayersDot || hasMasks) && (
                   <div className="flex gap-0.5 shrink-0 opacity-40">
-                    {hasSubLayers && (
+                    {hasVisibleSubLayersDot && (
                       <div className="w-1 h-1 rounded-full bg-amber-400" />
                     )}
                     {hasMasks && (
@@ -314,7 +320,7 @@ export const LayerItem = React.memo(
               />
             </div>
           </div>
-        </div>
+        </motion.div>
 
         <AnimatePresence>
           {isSubLayersExpanded && hasSubLayers && (

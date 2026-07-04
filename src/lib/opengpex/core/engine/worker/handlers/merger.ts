@@ -159,7 +159,10 @@ export async function mergeLayersWithShape(
   // 1. Apply shape clipping (clipping under zoom context, then reset transformation to retain clipping area)
   offCtx2d.scale(targetDpr, targetDpr);
   const path = shapeToPath2D(shape);
-  offCtx2d.clip(path);
+  // Path-type shapes (polygon-derived, e.g. inverted selections with outer+inner rings)
+  // require 'evenodd' fill rule to correctly produce holes. Simple shapes (rect/circle)
+  // are single-path and work with either rule, so 'evenodd' is universally safe.
+  offCtx2d.clip(path, shape.type === 'path' ? 'evenodd' : 'nonzero');
   offCtx2d.setTransform(1, 0, 0, 1, 0, 0);
 
   // 2. Stacked drawing

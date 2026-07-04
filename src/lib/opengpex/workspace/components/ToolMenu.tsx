@@ -233,6 +233,9 @@ export default function ToolMenu() {
               <div className="flex flex-col items-start leading-tight gap-1 text-left animate-in fade-in slide-in-from-left-2 duration-300">
                 <span className="text-[10px] font-black text-amber-600 tracking-[0.2em]">
                   OpenGPEX
+                  <span className="ml-1.5 text-[9px] font-semibold text-[var(--text-muted)] tracking-normal">
+                    v{process.env.NEXT_PUBLIC_CORE_VERSION}
+                  </span>
                 </span>
                 <a
                   href="https://github.com/gpex-cloud/opengpex"
@@ -273,7 +276,8 @@ export default function ToolMenu() {
           <div className={styles.divider.className} />
 
           {/* 2. Editor Settings submenu (renders TOOL_SETTINGS slot internally) */}
-          <div className="flex flex-col gap-0.5 px-2">
+          {/* [内边距] 固定模式 px-1 更紧凑，浮动模式 px-2 正常间距 */}
+          <div className={`flex flex-col gap-0.5 ${isToolMenuPinned ? 'px-1' : 'px-2'}`}>
             <NativeMenuItem
               data={{
                 label: "Help & Tooling",
@@ -288,7 +292,7 @@ export default function ToolMenu() {
           <div className={styles.divider.className} />
 
           {/* ✅ 4. Appearance toggle */}
-          <div className="flex flex-col gap-0.5 px-2">
+          <div className={`flex flex-col gap-0.5 ${isToolMenuPinned ? 'px-1' : 'px-2'}`}>
             <NativeMenuItem
               data={{
                 label: "Switch Appearance",

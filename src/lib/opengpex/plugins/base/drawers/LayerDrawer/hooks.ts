@@ -42,6 +42,8 @@ export const useLayerCommands = () => {
         visibilityCmd,
         lockCmd,
         renameCmd,
+        addBlankLayerCmd,
+        duplicateLayerCmd,
         syncOverlayCmd,
         syncMaskCmd
     } = usePluginCommands<LayerDrawerCommandsMap>();
@@ -53,6 +55,8 @@ export const useLayerCommands = () => {
         visibilityCmd,
         lockCmd,
         renameCmd,
+        addBlankLayerCmd,
+        duplicateLayerCmd,
         syncOverlayCmd,
         syncMaskCmd,
 
@@ -87,7 +91,7 @@ export const useLayerCommands = () => {
             return activeFrame.layers.order.map(id => activeFrame.layers.byId[id]).filter(l => l.parentId === parentId);
         }
 
-    }), [actions, activeFrame, reorderCmd, removeCmd, visibilityCmd, lockCmd, renameCmd, syncOverlayCmd, syncMaskCmd]);
+    }), [actions, activeFrame, reorderCmd, removeCmd, visibilityCmd, lockCmd, renameCmd, addBlankLayerCmd, duplicateLayerCmd, syncOverlayCmd, syncMaskCmd]);
 };
 
 // ─── useMaskEdit ───────────────────────────────────────────────────────────────

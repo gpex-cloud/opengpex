@@ -26,6 +26,8 @@ export const CMD_REORDER = 'cmd.reorder';
 export const CMD_VISIBILITY = 'cmd.visibility';
 export const CMD_LOCK = 'cmd.lock';
 export const CMD_RENAME = 'cmd.rename';
+export const CMD_ADD_BLANK_LAYER = 'cmd.add_blank_layer';
+export const CMD_DUPLICATE_LAYER = 'cmd.duplicate_layer';
 export const CMD_SYNC_TO_OVERLAY = 'cmd.sync.overlay';
 export const CMD_MASK_SYNC_TO_OVERLAY = 'cmd.sync.mask';
 
@@ -36,6 +38,9 @@ export const MASK_EDITING_KEY = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.signal.mask_editi
 
 /** Signal key for mask focus highlight overlay toggle */
 export const MASK_FOCUS_KEY = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.signal.mask_focus`;
+
+/** Signal key for showing sub-layers collapse/expand button */
+export const SHOW_SUB_LAYERS_KEY = 'signal.show_sub_layers';
 
 /**
  * MaskEditingSignal: Indicates which bitmap mask is currently being edited.
@@ -58,5 +63,6 @@ export const LayerDrawerAPI = {
   signals: {
     maskEditing: MASK_EDITING_KEY,
     maskFocus: MASK_FOCUS_KEY,
+    showSubLayers: SHOW_SUB_LAYERS_KEY,
   },
 } as const;

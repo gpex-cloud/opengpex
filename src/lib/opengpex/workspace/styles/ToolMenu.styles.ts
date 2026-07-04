@@ -26,12 +26,14 @@ import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 export const getToolMenuStyles = (isCollapsed: boolean, isPinned: boolean = false) => {
     return {
         // Main shell (floating mode vs pinned mode)
+        // [宽度控制] 固定模式: w-full + max-w-full 填满父容器（由 TOOL_MENU_WIDTH 决定）；
+        //            浮动模式: 展开 280px / 收起 34px，带 transition-all 动画。
         container: {
             className: `
-                relative flex flex-col transition-all duration-300 overflow-visible
+                relative flex flex-col overflow-visible
                 ${isPinned
-                    ? 'w-full h-full rounded-none border-none shadow-none bg-transparent'
-                    : `bg-[var(--bg-panel)]/40 backdrop-blur-3xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] rounded-xl
+                    ? 'w-full max-w-full h-full rounded-none border-none shadow-none bg-transparent'
+                    : `transition-all duration-300 bg-[var(--bg-panel)]/40 backdrop-blur-3xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] rounded-xl
                        ${!isCollapsed ? 'w-[280px] h-auto rounded-2xl' : 'w-[34px] h-[34px]'}`
                 }
             `
@@ -52,8 +54,9 @@ export const getToolMenuStyles = (isCollapsed: boolean, isPinned: boolean = fals
             `
         },
         // ✨ Globally unified high-precision divider
+        // [内边距] 固定模式 mx-1 紧凑 / 浮动模式 mx-2 正常
         divider: {
-            className: "h-px self-stretch bg-[var(--border-subtle)] mx-2 my-0.5 shrink-0"
+            className: `h-px self-stretch bg-[var(--border-subtle)] ${isPinned ? 'mx-1' : 'mx-2'} my-0.5 shrink-0`
         },
         // ✨ Pure menu sub-panel container
         subMenuPanel: {
@@ -113,7 +116,7 @@ export const getToolMenuStyles = (isCollapsed: boolean, isPinned: boolean = fals
         },
         topLevelPluginSlotWrapper: {
             className: `
-                flex flex-col px-2 gap-0
+                flex flex-col ${isPinned ? 'px-1' : 'px-2'} gap-0
                 
                 /* 1. Basic typography and gap erasing */
                 [&_div:not(.slot-divider)]:!flex [&_div:not(.slot-divider)]:!flex-col [&_div:not(.slot-divider)]:!w-full [&_div:not(.slot-divider)]:!items-stretch [&_div:not(.slot-divider)]:!gap-0 [&_div:not(.slot-divider)]:!p-0 [&_div:not(.slot-divider)]:!m-0
