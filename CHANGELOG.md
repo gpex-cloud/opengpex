@@ -4,6 +4,15 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.20
+
+- Refactor global history into independent, per-frame undo/redo stacks (`state.history.byFrameId`) to isolate history state and prevent viewport jumps
+- Implement continuous stamp copying with 0ms temporary layer (`role: 'frag'`) optimistic updates and offscreen Web Worker compositing
+- Add Web Worker-driven selection operations (inversion, alpha-channel extraction, and polygon offset) with dedicated Option Bar controls
+- Implement dual-path marching ants (black base path + animated white/red foreground path) to guarantee selection visibility against any background
+
+---
+
 ## v1.0.0-beta.19
 
 - Add DPI / resolution system: per-frame DPI, EXIF extraction on import, DPI preset dropdown with print-size display and resample toggle in Image Info panel

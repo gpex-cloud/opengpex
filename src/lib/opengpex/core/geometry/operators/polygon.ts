@@ -18,7 +18,7 @@
  */
 
 import {
-  Point2D, Rect,
+  Point2D,
   Layer, Frame,
   LocalPoint, WorldPoint,
   LocalPolygon, WorldPolygon,
@@ -243,8 +243,8 @@ export function simplifyRing(ring: Point2D[], epsilon: number): Point2D[] {
   closed.push(ring[0]);
   const simplified = simplifyOpen(closed, epsilon);
   if (simplified.length > 1 &&
-      simplified[0].x === simplified[simplified.length - 1].x &&
-      simplified[0].y === simplified[simplified.length - 1].y) {
+    simplified[0].x === simplified[simplified.length - 1].x &&
+    simplified[0].y === simplified[simplified.length - 1].y) {
     simplified.pop();
   }
   return simplified;
