@@ -82,19 +82,6 @@
   display: none !important;
 }
 
-/* ==========================================================================
-   Marching Ants - Flowing dashed outline for selections (Generic)
-   ========================================================================== */
-@keyframes marching-ants-flow {
-  to {
-    stroke-dashoffset: -12;
-  }
-}
-
-.marching-ants {
-  stroke-dasharray: 6, 6;
-  animation: marching-ants-flow 0.5s linear infinite;
-}
 
 /* ==========================================================================
    Popover bubble — kill native UA chrome

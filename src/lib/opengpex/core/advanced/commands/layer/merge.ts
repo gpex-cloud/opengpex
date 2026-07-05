@@ -242,11 +242,15 @@ export const LayerMergeCommands = {
             .resetWithBounds(unionW, unionH, unionCx, unionCy);
         });
 
-        // After rasterization, the layer becomes a pure bitmap, and specific text/color data and bitmapMasks (already baked into the bitmap) need to be cleared
+        // After rasterization, the layer becomes a pure bitmap — all non-destructive
+        // effects (masks, adjustments) are now baked into the pixel data and must be
+        // cleared to prevent double-application during rendering.
         actions.updateLayer(activeFrame.id, layer.id, {
           type: 'image',
           textData: undefined,
           bitmapMasks: [],
+          vectorMasks: [],
+          adjustments: undefined,
         });
 
       } catch (err) {

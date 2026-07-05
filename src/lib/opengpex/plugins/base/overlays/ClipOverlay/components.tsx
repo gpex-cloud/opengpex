@@ -32,22 +32,33 @@ import {
 import { lassoPreviewPathRef } from "./interactions";
 import { PixelGridOverlayAPI } from "../PixelGridOverlay/protocols";
 
+/* ─── Inline keyframes for marching ants (plugin-internal, no global CSS) ─── */
+const CLIP_ANTS_STYLE = `
+@keyframes clip-ants-flow {
+  to { stroke-dashoffset: -12; }
+}
+`;
+
 /**
  * ClipOverlayMain: UI layer for the cropping / selection tool.
  *
- * Architecture (2026-07-03 unified renderer):
+ * Architecture (2026-07-05 dual-path high-contrast):
  *
- *   - Single marching-ants <g>+<path>: renders ALL selection types (rect,
- *     ellipse, polygon, inverted) via `useSelectionAntsSync`. The unified
- *     selector reads the active slot and produces SVG path `d` regardless
- *     of data type. Fill switches dynamically (none for shapes, semi-
- *     transparent for polygons).
+ *   - Dual-path marching ants <g> + 2×<path>: industry-standard Photoshop/
+ *     GIMP technique — a black dashed background path (offset by half-period)
+ *     paired with a white/red foreground dashed path. This ensures selection
+ *     edges are clearly visible against ANY background (light checkerboard,
+ *     dark images, white image edges). Renders ALL selection types (rect,
+ *     ellipse, polygon, inverted) via `useSelectionAntsSync`.
  *
  *   - Lasso preview <path> (screen-space): live trail during pointer drag.
  *     Updated imperatively by `createLassoHandler` via `lassoPreviewPathRef`.
  *
  *   - Regular box (CSS div): handles, dim label, rule-of-thirds guides.
  *     Only active when tool is regular (rect/ellipse) or Re-Canvas.
+ *
+ *   - Plugin-internal `<style>`: keyframes for the marching animation are
+ *     defined inside this component (no global CSS dependency).
  */
 export function ClipOverlayMain() {
   const {
@@ -89,10 +100,11 @@ export function ClipOverlayMain() {
 
   // ─── Fast-track hooks ────────────────────────────────────────────────────
 
-  // Unified marching ants (single <g> + <path>)
+  // Unified marching ants (dual-path: black base + white/red foreground)
   const groupRef = useRef<SVGGElement>(null);
+  const pathBgRef = useRef<SVGPathElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
-  useSelectionAntsSync(groupRef, pathRef, antsActive, isReCanvas, cropTool);
+  useSelectionAntsSync(groupRef, pathBgRef, pathRef, antsActive, isReCanvas, cropTool);
 
   // CSS box for drag handles + guides (regular tools only)
   const { guidesRef } = useRegularBoxSync(
@@ -126,18 +138,26 @@ export function ClipOverlayMain() {
       className="absolute inset-0 pointer-events-none"
       style={{ cursor, zIndex: EDITOR_Z_INDEX.STAGE.SYSTEM_TOOLS }}
     >
+      {/* Plugin-internal keyframes for marching ants animation */}
+      <style dangerouslySetInnerHTML={{ __html: CLIP_ANTS_STYLE }} />
+
       {/* SVG layer: marching ants + lasso preview */}
       <div className="absolute inset-0 pointer-events-none overflow-visible">
         <svg className="absolute inset-0 w-full h-full overflow-visible">
-          {/* Unified selection ants (white / red for Re-Canvas) */}
-          <g
-            ref={groupRef}
-            style={{
-              filter: isReCanvas
-                ? "drop-shadow(0 0 1px rgba(0,0,0,0.5))"
-                : "drop-shadow(0 0 1px rgba(0,0,0,0.5)) drop-shadow(0 0 1px rgba(255,255,255,0.3))",
-            }}
-          >
+          {/* Dual-path marching ants: black base fills white gaps for max contrast.
+              This is the Photoshop/GIMP industry standard technique — ensures
+              selection edges are visible against ANY background color. */}
+          <g ref={groupRef}>
+            {/* Base layer: solid black/dark-red line (always visible, provides contrast) */}
+            <path
+              ref={pathBgRef}
+              fill="none"
+              fillRule="evenodd"
+              stroke={isReCanvas ? "#7f1d1d" : "black"}
+              strokeWidth="1"
+              vectorEffect="non-scaling-stroke"
+            />
+            {/* Foreground layer: animated white/red dashes marching over the solid base */}
             <path
               ref={pathRef}
               fill="none"
@@ -145,8 +165,10 @@ export function ClipOverlayMain() {
               stroke={isReCanvas ? "#ef4444" : "white"}
               strokeWidth="1"
               vectorEffect="non-scaling-stroke"
-              strokeDasharray="6,6"
-              className="marching-ants"
+              style={{
+                strokeDasharray: '6, 6',
+                animation: 'clip-ants-flow 0.5s linear infinite',
+              }}
             />
           </g>
 
@@ -157,10 +179,12 @@ export function ClipOverlayMain() {
             fillRule="evenodd"
             stroke="#f0e6ff"
             strokeWidth="1"
-            strokeDasharray="4,4"
             vectorEffect="non-scaling-stroke"
             pointerEvents="none"
-            className="marching-ants"
+            style={{
+              strokeDasharray: '4, 4',
+              animation: 'clip-ants-flow 0.4s linear infinite',
+            }}
           />
         </svg>
       </div>
@@ -192,7 +216,7 @@ export function ClipOverlayMain() {
           ].map((p) => (
             <div
               key={p.h}
-              className={`absolute w-6 h-6 transition-all group/handle ${p.c}`}
+              className={`absolute w-4 h-4 transition-all group/handle ${p.c}`}
               style={{
                 cursor: p.cursor,
                 transform: `translate(${p.h.includes("w") ? "-30%" : "-70%"}, ${p.h.includes("n") ? "-30%" : "-70%"})`,
@@ -203,34 +227,44 @@ export function ClipOverlayMain() {
               data-handle={p.h}
             >
               <div
-                className={`absolute w-full h-[3px] transition-opacity duration-200 opacity-0 group-hover/handle:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"} ${p.h.includes("n") ? "top-0" : "bottom-0"}`}
+                className={`absolute w-full h-[2px] transition-opacity duration-200 opacity-0 group-hover/handle:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"} ${p.h.includes("n") ? "top-0" : "bottom-0"}`}
               />
               <div
-                className={`absolute w-[3px] h-full transition-opacity duration-200 opacity-0 group-hover/handle:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"} ${p.h.includes("w") ? "left-0" : "right-0"}`}
+                className={`absolute w-[2px] h-full transition-opacity duration-200 opacity-0 group-hover/handle:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"} ${p.h.includes("w") ? "left-0" : "right-0"}`}
               />
             </div>
           ))}
 
+          {/* Edge handles: hit area straddles the selection edge (30% outside, 70% inside)
+              matching corner handle offset. Visual line at outer edge = ~5px from ants. */}
           <div
-            className={`absolute top-1/2 -left-px w-1 h-8 shadow-sm cursor-ew-resize transition-all opacity-0 hover:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`}
-            style={{ transform: "translate(-50%, -50%)" }}
+            className="absolute top-1/2 left-0 w-4 h-14 cursor-ew-resize group/edge"
+            style={{ transform: "translate(-30%, -50%)", zIndex: 10 }}
             data-handle="w"
-          />
+          >
+            <div className={`absolute left-0 top-1/2 w-[2px] h-12 -translate-y-1/2 shadow-sm transition-opacity duration-200 opacity-0 group-hover/edge:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`} />
+          </div>
           <div
-            className={`absolute top-1/2 -right-px w-1 h-8 shadow-sm cursor-ew-resize transition-all opacity-0 hover:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`}
-            style={{ transform: "translate(50%, -50%)" }}
+            className="absolute top-1/2 right-0 w-4 h-14 cursor-ew-resize group/edge"
+            style={{ transform: "translate(30%, -50%)", zIndex: 10 }}
             data-handle="e"
-          />
+          >
+            <div className={`absolute right-0 top-1/2 w-[2px] h-12 -translate-y-1/2 shadow-sm transition-opacity duration-200 opacity-0 group-hover/edge:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`} />
+          </div>
           <div
-            className={`absolute left-1/2 -top-px w-8 h-1 shadow-sm cursor-ns-resize transition-all opacity-0 hover:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`}
-            style={{ transform: "translate(-50%, -50%)" }}
+            className="absolute left-1/2 top-0 w-14 h-4 cursor-ns-resize group/edge"
+            style={{ transform: "translate(-50%, -30%)", zIndex: 10 }}
             data-handle="n"
-          />
+          >
+            <div className={`absolute top-0 left-1/2 w-12 h-[2px] -translate-x-1/2 shadow-sm transition-opacity duration-200 opacity-0 group-hover/edge:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`} />
+          </div>
           <div
-            className={`absolute left-1/2 -bottom-px w-8 h-1 shadow-sm cursor-ns-resize transition-all opacity-0 hover:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`}
-            style={{ transform: "translate(-50%, 50%)" }}
+            className="absolute left-1/2 bottom-0 w-14 h-4 cursor-ns-resize group/edge"
+            style={{ transform: "translate(-50%, 30%)", zIndex: 10 }}
             data-handle="s"
-          />
+          >
+            <div className={`absolute bottom-0 left-1/2 w-12 h-[2px] -translate-x-1/2 shadow-sm transition-opacity duration-200 opacity-0 group-hover/edge:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`} />
+          </div>
 
           {/* Rule of Thirds Grid */}
           <div

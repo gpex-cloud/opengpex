@@ -5,125 +5,157 @@
 <h1 align="center">OpenGPEX</h1>
 
 <p align="center">
-  <strong>Industrial-grade, high-performance Graphics and Photo Editor.</strong><br/>
-  Non-destructive editing · Tiled rendering · Plugin extensible · Runs entirely in the browser.
+  <strong>Industrial-grade, browser-native Graphics & Photo Editor</strong><br/>
+  Non-destructive editing · Tiled rendering · Plugin extensible · No install needed
 </p>
 
+<!-- ═══════════ Badges ═══════════ -->
 <p align="center">
-  ⚠️ <strong>Project Status: Beta</strong> — Core editing features are functional and developer-tested, but the project has not yet undergone broad user testing. Some advanced capabilities may be unstable. Issues and PRs are welcome!
+  <img src="https://img.shields.io/badge/version-1.0.0--beta.19-blue?style=flat-square" alt="Version" />
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green?style=flat-square" alt="License" /></a>
+  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs Welcome" />
+  <img src="https://img.shields.io/badge/platform-Web%20(modern%20browsers)-orange?style=flat-square" alt="Platform" />
+  <img src="https://img.shields.io/badge/Next.js-16-black?style=flat-square&logo=next.js" alt="Next.js" />
+  <img src="https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react" alt="React" />
 </p>
 
+<!-- ═══════════ CTA ═══════════ -->
 <p align="center">
-  <a href="#quick-start">Quick Start</a> ·
-  <a href="https://gpex.cloud">Launch App</a> ·
-  <a href="https://gpex.cloud/docs">Documentation</a> ·
-  <a href="#plugin-system">Plugins</a>
+  <a href="#-quick-start">Quick Start</a>&nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="https://gpex.cloud/docs">Docs</a>&nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="#-plugin-system">Plugins</a>&nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="./CHANGELOG.md">Changelog</a>
 </p>
 
 ---
 
-## What is OpenGPEX?
+<!-- ═══════════ Hero ═══════════ -->
+<p align="center">
+  <a href="https://gpex.cloud">
+    <img src=".github/screenshot.png" width="720" alt="OpenGPEX — Industrial-grade browser-native image editor" />
+  </a>
+</p>
 
-OpenGPEX is an open-source graphics and photo editor built to tackle high-resolution images and complex multi-layer workflows entirely in the browser. Its architecture is designed from the ground up for scalability — with a tiled rendering pipeline, non-destructive editing core, and plugin-driven extensibility already in place. Think of it as a professional desktop editor's philosophy, delivered as a web application.
+<p align="center"><em>👆 Try it live at <a href="https://gpex.cloud">gpex.cloud</a> — Drag an image → edit with layers, masks & AI tools → export. All in the browser.</em></p>
 
-### Key Features
-
-| Feature                    | Description                                                                                                   |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| 🚀 **Tiled Rendering**     | Chunked image processing with Mipmap pyramids + Web Worker synthesis via OffscreenCanvas. No more OOM errors. |
-| ⚡ **60FPS Interactions**  | Dual-track state: high-frequency operations (pan/zoom) bypass React VDOM entirely.                            |
-| 🕰️ **TimeTravel Undo**     | Incremental undo via Immer JSON Patches — near-zero memory overhead per history step.                         |
-| 🛡️ **Non-Destructive CAS** | Original pixels are immutably stored (SHA-256 Content-Addressable Storage). Edits are pure math.              |
-| 🧩 **Plugin System**       | Metadata-driven registry with overlays, drawers, options, and backstage slots.                                |
-| ☁️ **Cloud Ready**         | Optional cloud sync via [GPEX Cloud](https://gpex.cloud) — save, load, share across devices.                  |
+> [!NOTE]
+> **Beta** — Core editing is stable and developer-tested. Some advanced features are being polished. [Issues](https://github.com/gpex-cloud/opengpex/issues) and PRs are welcome!
 
 ---
 
-## Quick Start
+## ✨ Why OpenGPEX?
+
+| Feature | Description |
+|---------|-------------|
+| 🚀 **Tiled Rendering** | Chunked image processing with Mipmap pyramids + Web Worker synthesis. Handles 100MP+ images — no OOM. |
+| ⚡ **60 FPS Interactions** | Dual-track state: pan/zoom/brush bypass React VDOM entirely via volatile refs. |
+| 🕰️ **TimeTravel Undo** | Incremental undo via Immer JSON Patches — near-zero memory overhead per step. |
+| 🛡️ **Non-Destructive CAS** | Original pixels immutably stored (SHA-256 Content-Addressable). Edits are pure math. |
+| 🧩 **Plugin System** | Metadata-driven registry: overlays, drawers, options, backstage. Hot-load community ZIPs at runtime. |
+| 🤖 **AI Built-in** | Background removal (RMBG 1.4 / InSPyReNet), magic wand — all client-side ONNX. |
+| ☁️ **Cloud Sync** | Optional [GPEX Cloud](https://gpex.cloud) — save, load, share across devices. |
+| 🖼️ **Format Support** | PSD · PNG · JPEG · WebP · AVIF · SVG · RAW (CR2/NEF/ARW) · HEIC |
+
+---
+
+## 🌐 Try It Now
+
+> **No setup required** — Open **[gpex.cloud](https://gpex.cloud)** in your browser and start editing immediately.  
+> Cloud version includes auto-save, cross-device sync, and always up-to-date features.
+
+---
+
+## 🚀 Quick Start
 
 ```bash
-# Clone the repo
-git clone https://github.com/gpex-cloud/opengpex.git
-cd opengpex
-
-# Install dependencies
-pnpm install
-
-# Start dev server
-pnpm dev
+git clone https://github.com/gpex-cloud/opengpex.git && cd opengpex && pnpm install && pnpm dev
 ```
 
-Open **http://localhost:3030** — drag an image in to start editing.
+Open **http://localhost:3030** — drag an image in to start editing.  
+Or skip setup entirely: **[gpex.cloud](https://gpex.cloud)** (online version).
 
-### Build for Production
+<details>
+<summary>Production build</summary>
 
 ```bash
-pnpm build
-pnpm start
+pnpm build && pnpm start
 ```
+</details>
 
 ---
 
-## Tech Stack
+## 🧩 Plugin System
 
-- **Framework:** Next.js 16 · React 19
-- **State:** Immer + custom store with fast-track mutable refs
-- **Styling:** Tailwind CSS v4
-- **Rendering:** OffscreenCanvas + Web Workers + WASM (AVIF)
-- **Animation:** Framer Motion · GSAP
-
----
-
-## Plugin System
-
-OpenGPEX is built around an extensible plugin architecture. Every tool, panel, and overlay is a plugin.
+Everything in OpenGPEX is a plugin — tools, panels, overlays, and effects.
 
 ```
 plugins/
-├── base/         # Official plugins (shipped with OpenGPEX)
-├── community/    # Community-contributed plugins
-└── user/         # Local development sandbox
+├── base/         # Official plugins (shipped with core)
+├── community/    # Community-contributed
+└── user/         # Your local dev sandbox
 ```
 
-Third-party plugins can be installed at runtime by uploading ZIP packages through the Plugin Hub. See the [Plugin Development Guide](https://gpex.cloud/docs/plugin-development) to get started.
+Install plugins at runtime via ZIP upload through the Plugin Hub. Build your own with the [Plugin Development Guide](https://gpex.cloud/docs/plugin-overview).
 
 ---
 
-## Documentation
+## 🛠️ Tech Stack
 
-Full documentation including architecture guides, plugin development tutorials, and API references is available at:
-
-**📖 [gpex.cloud/docs](https://gpex.cloud/docs)**
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 16 · React 19 |
+| State | Immer + custom store with fast-track volatile refs |
+| Styling | Tailwind CSS v4 |
+| Rendering | OffscreenCanvas + Web Workers + WASM (AVIF/RAW) |
+| AI/ML | ONNX Runtime (client-side inference) |
+| Animation | Framer Motion · GSAP |
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
-Contributions are welcome! Please open an issue to discuss your idea before submitting a PR.
+Contributions are welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
+
+```bash
+# Fork → Clone → Branch → Code → Lint → PR
+pnpm lint   # Run before committing
+```
 
 ---
 
-## Third-party Models
+## 📄 Third-party Models
 
-The AI background removal feature downloads pre-trained models at runtime from HuggingFace. These models are **not bundled** with this project and are subject to their own licenses.
+AI features download pre-trained models at runtime from HuggingFace (not bundled):
 
 | Model | Source | License |
 |-------|--------|---------|
 | RMBG 1.4 | [briaai/RMBG-1.4](https://huggingface.co/briaai/RMBG-1.4) | BRIA RMBG-1.4 (non-commercial) |
 | InSPyReNet Ultra | [OS-Software/InSPyReNet-SwinB-Plus-Ultra-ONNX](https://huggingface.co/OS-Software/InSPyReNet-SwinB-Plus-Ultra-ONNX) | MIT |
 
-Users may also add custom HuggingFace models. Please verify the license of any model you use.
+---
+
+## 📦 Third-party Libraries
+
+The following pre-compiled WASM/JS libraries are bundled in `public/ext/` for client-side format processing:
+
+| Library | Purpose | Source | License |
+|---------|---------|--------|---------|
+| LibRaw-Wasm | RAW image decoding (CR2/NEF/ARW) | [ybouane/LibRaw-Wasm](https://github.com/ybouane/LibRaw-Wasm) | ISC |
+| resvg-js | SVG rendering & rasterization | [thx/resvg-js](https://github.com/thx/resvg-js) | MPL-2.0 |
+| jSquash (AVIF) | AVIF image encoding | [jamsinclair/jSquash](https://github.com/jamsinclair/jSquash) | Apache-2.0 |
+| ghostpdl-wasm | PostScript/PDF processing | [okathira-dev/ghostpdl-wasm](https://github.com/okathira-dev/ghostpdl-wasm) | AGPL-3.0 |
+| heic-to | HEIC/HEIF format conversion | [hoppergee/heic-to](https://github.com/hoppergee/heic-to) | GPL-3.0 |
 
 ---
 
-## Plugin Licensing
+## ⚖️ License
 
-OpenGPEX is licensed under GPL-3.0-only. However, third-party plugins loaded dynamically at runtime are considered independent works and may use any license chosen by their authors. Plugins shipped directly in the source tree are covered by the same GPL-3.0 license.
+**GPL-3.0-only** — see [LICENSE](./LICENSE).
+
+Third-party plugins loaded dynamically at runtime are independent works and may use any license. Plugins in the source tree are covered by GPL-3.0.
 
 ---
 
-## License
-
-Copyright (C) 2026 The OpenGPEX Authors
-
-This program is free software: you can redistribute it and/or modify it under the terms of the [GNU General Public License v3.0](./LICENSE) as published by the Free Software Foundation.
+<p align="center">
+  <sub>If OpenGPEX helps you, consider giving it a ⭐ — it keeps the project going!</sub>
+</p>

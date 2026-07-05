@@ -22,7 +22,6 @@
 import { EditorContextValue, EditorCommand, asLocalRect, asLocalShape, Frame, LocalRect, LocalShape, LocalPolygon, EditorActions, Point2D } from '@opengpex/editor/core/types';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS } from '@opengpex/editor/core/helpers/presets';
-import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
 import { clipComputeClient } from './workers/client';
 import * as P from './protocols';
 import type { CropTool } from './protocols';
@@ -649,33 +648,40 @@ export const CLIP_OPTIONS_COMMANDS = {
       const layer = ctx.activeLayer;
       if (!layer || layer.type !== 'image') return;
 
-      // ─── Get layer pixel data ──────────────────────────────────────────
+      // ─── Get effective alpha via Worker pipeline (handles all masks + adjustments) ─
+      // Uses the same mergeLayersWithShape pipeline as Rasterize Layer, but the
+      // resulting bitmap is only used to extract alpha for polygon tracing — it is
+      // NOT persisted to the frame/layer state.
       let imageData: ImageData;
       try {
-        let img = imageCache.get(layer.src);
-        if (!img) {
-          img = await new Promise<HTMLImageElement>((resolve, reject) => {
-            const el = new Image();
-            el.crossOrigin = 'anonymous';
-            el.onload = () => resolve(el);
-            el.onerror = reject;
-            el.src = layer.src;
-          });
+        const worldShape = ctx.geometry.shape.unitedShapeOfLayers([layer]);
+        if (!worldShape) {
+          ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
+          return;
         }
-        const w = layer.bounding.w;
-        const h = layer.bounding.h;
-        let canvas: OffscreenCanvas | HTMLCanvasElement;
-        let ctxCanvas: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null;
-        if (typeof OffscreenCanvas !== 'undefined') {
-          canvas = new OffscreenCanvas(w, h);
-          ctxCanvas = canvas.getContext('2d');
-        } else {
-          canvas = document.createElement('canvas');
-          canvas.width = w;
-          canvas.height = h;
-          ctxCanvas = canvas.getContext('2d');
+
+        // Composite the layer (source + VectorMasks + BitmapMasks + adjustments)
+        // at 1x DPR — we only need the alpha channel for contour tracing.
+        const assetResult = await ctx.pixels.worker.asAsset(
+          ctx.pixels.worker.mergeLayersWithShape([layer], worldShape, { targetDpr: 1 })
+        );
+        if (!assetResult) {
+          ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
+          return;
         }
-        if (!ctxCanvas) return;
+
+        // Decode the composited bitmap and read its alpha channel
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const el = new Image();
+          el.crossOrigin = 'anonymous';
+          el.onload = () => resolve(el);
+          el.onerror = reject;
+          el.src = assetResult.url;
+        });
+        const w = Math.round(worldShape.rect.w);
+        const h = Math.round(worldShape.rect.h);
+        const canvas = new OffscreenCanvas(w, h);
+        const ctxCanvas = canvas.getContext('2d')!;
         ctxCanvas.drawImage(img, 0, 0, w, h);
         imageData = ctxCanvas.getImageData(0, 0, w, h);
       } catch (err) {

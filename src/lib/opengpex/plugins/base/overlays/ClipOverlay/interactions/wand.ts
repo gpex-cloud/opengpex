@@ -146,11 +146,12 @@ export const createWandHandler = (): InteractionHandler => {
       if (!makeCropToolGuard('wand')(e)) return false;
       const me = e.nativeEvent as MouseEvent;
       if (me.button === 2) return false;
+      const target = me.target as HTMLElement;
+      if (target.closest('button, a, input, [data-role="ui"], [contenteditable]')) return false;
 
-      const frame = e.activeFrame;
-      return e.geometry.space.isPointInRect(e.point.canvas, {
-        x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h,
-      });
+      // Accept clicks outside canvas — onEnd will clear selection for
+      // outside-canvas clicks (unified single-click dismiss behavior).
+      return true;
     },
 
     onStart: () => {
@@ -162,8 +163,13 @@ export const createWandHandler = (): InteractionHandler => {
     },
 
     onEnd: async (e) => {
-      // Double-click to clear wand selection.
-      if ((e.nativeEvent as MouseEvent).detail === 2) {
+      // Single-click outside canvas = clear selection (Photoshop behavior).
+      // Unified with clipbox/lasso: clicking outside the canvas dismisses.
+      const frame = e.activeFrame;
+      const isOutsideCanvas = !e.geometry.space.isPointInRect(e.point.canvas, {
+        x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h,
+      });
+      if (isOutsideCanvas) {
         discardPending = true;
         e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
         return;

@@ -160,8 +160,12 @@ export class BgRemovalClient {
       opts?.signal?.addEventListener('abort', onAbort);
 
       const message: BgRemovalRequest = { ...req, reqId };
-      // Transfer the ArrayBuffer (zero-copy)
-      worker.postMessage(message, [req.imageData.data]);
+      // Transfer the ArrayBuffer (zero-copy) if imageData is present
+      if (req.imageData) {
+        worker.postMessage(message, [req.imageData.data]);
+      } else {
+        worker.postMessage(message);
+      }
     });
   }
 

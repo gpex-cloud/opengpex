@@ -127,7 +127,7 @@ async function deleteModelCache(modelId: string): Promise<boolean> {
 
 export function BgRemovalDrawerContent() {
   const { actions } = useEditorServices();
-  const { removeBgCmd, abortCmd, openSettingsCmd } = usePluginCommands<BgRemovalCommandsMap>();
+  const { removeBgCmd, downloadModelCmd, abortCmd, openSettingsCmd } = usePluginCommands<BgRemovalCommandsMap>();
   const { statusSignal } = usePluginSignals<BgRemovalSignalsMap>();
   const status = useBgRemovalStatus();
   const [config, setConfig] = usePluginSelfConfig<BgRemovalConfig>();
@@ -186,12 +186,15 @@ export function BgRemovalDrawerContent() {
   useEffect(() => {
     const prev = prevStageRef.current;
     prevStageRef.current = status.stage;
-    // Only re-check cache when transitioning INTO done (inference just completed)
+    // Only re-check cache when transitioning INTO done (inference/download just completed)
     if (status.stage === 'done' && prev !== 'done') {
       const check = async () => {
         if (!activeModel?.modelId) return;
+        // Defer to microtask to avoid synchronous setState inside useEffect body
+        await Promise.resolve();
+        setModelCacheStatus(prevMap => ({ ...prevMap, [activeModel.modelId]: true }));
         const cached = await isModelCached(activeModel.modelId);
-        setModelCacheStatus(prev => ({ ...prev, [activeModel.modelId]: cached }));
+        setModelCacheStatus(prevMap => ({ ...prevMap, [activeModel.modelId]: cached }));
       };
       check();
     }
@@ -233,10 +236,8 @@ export function BgRemovalDrawerContent() {
   }, [openSettingsCmd]);
 
   const handleDownloadModel = useCallback(() => {
-    // Trigger the remove bg command which will download the model if needed
-    // (the inference pipeline handles downloading automatically)
-    removeBgCmd?.execute();
-  }, [removeBgCmd]);
+    downloadModelCmd?.execute();
+  }, [downloadModelCmd]);
 
   const activeModelId = activeModel?.modelId;
   const activeModelName = activeModel?.name;
@@ -481,6 +482,7 @@ export function BgRemovalDrawerContent() {
             shape="pill"
             className="w-full"
             onClick={handleRemoveBg}
+            disabled={!isActiveModelCached}
           >
             Remove Background
           </FancyButton>

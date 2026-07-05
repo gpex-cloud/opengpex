@@ -51,6 +51,8 @@ interface ResizeExportControlsProps {
   /** Frame's committed DPI (used as fallback when config.dpi is 0) */
   frameDpi: number;
   isClipMode: boolean;
+  /** Whether an active selection exists (clip box is non-null) */
+  hasSelection?: boolean;
   applyResizeCmd?: CommandInstance;
   downloadCmd?: CommandInstance;
   exif?: ExifData;
@@ -63,6 +65,7 @@ export function ResizeExportControls({
   baseH,
   frameDpi,
   isClipMode,
+  hasSelection,
   applyResizeCmd,
   downloadCmd,
   exif,
@@ -402,7 +405,7 @@ export function ResizeExportControls({
             />
             <FancyButton
               onClick={onDownload}
-              disabled={isProcessing}
+              disabled={isProcessing || (isClipMode && !hasSelection)}
               loading={isProcessing}
               variant={isClipMode ? "amber" : "green"}
               size="xs"

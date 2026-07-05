@@ -504,12 +504,14 @@ function SidebarItem({
                   >
                     {side === "left" ? (
                       <ChevronRight
-                        size={12}
+                        size={14}
+                        strokeWidth={2.5}
                         className="text-[var(--text-main)] hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
                       />
                     ) : (
                       <ChevronLeft
-                        size={12}
+                        size={14}
+                        strokeWidth={2.5}
                         className="text-[var(--text-main)] hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
                       />
                     )}
@@ -534,12 +536,14 @@ function SidebarItem({
                   >
                     {side === "left" ? (
                       <ChevronLeft
-                        size={12}
+                        size={14}
+                        strokeWidth={2.5}
                         className="text-[var(--text-main)] hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
                       />
                     ) : (
                       <ChevronRight
-                        size={12}
+                        size={14}
+                        strokeWidth={2.5}
                         className="text-[var(--text-main)] hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
                       />
                     )}

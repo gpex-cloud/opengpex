@@ -38,6 +38,7 @@ import {
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import EditableLabel from "@opengpex/editor/widgets/EditableLabel";
 import ImageAsset from "@opengpex/editor/widgets/ImageAsset";
+import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import { useLayerCommands } from "../hooks";
 import { VectorMask, BitmapMask } from "@opengpex/editor/core/types";
 import { SubLayerItem } from "./SubLayerItem";
@@ -217,20 +218,29 @@ export const LayerItem = React.memo(
                 #{index + 1}
               </span>
               <div className="flex items-center gap-1 truncate">
-                <EditableLabel
-                  value={layer.name}
-                  doubleClick={true}
-                  onCommit={(v) =>
-                    renameCmd?.execute({
-                      frameId: activeFrameId,
-                      layerId: layer.id,
-                      name: v,
-                    })
-                  }
-                  className={`text-[11px] font-bold truncate transition-colors leading-tight tracking-tight
+                <Tooltip
+                  content={layer.name}
+                  position="top"
+                  align="center"
+                  uppercase={false}
+                  showOnHover={layer.name.length > 14}
+                >
+                  <EditableLabel
+                    value={layer.name}
+                    doubleClick={true}
+                    maxDisplayLength={14}
+                    onCommit={(v) =>
+                      renameCmd?.execute({
+                        frameId: activeFrameId,
+                        layerId: layer.id,
+                        name: v,
+                      })
+                    }
+                    className={`text-[11px] font-bold truncate transition-colors leading-tight tracking-tight
  ${isActive ? "text-[var(--text-main)]" : "text-[var(--text-muted)] group-hover/layer:text-[var(--text-main)]"}
 `}
-                />
+                  />
+                </Tooltip>
                 {/* Indicator dots: amber = has user sub-layers, teal = has masks.
                     Only shown when the layer has collapsed content underneath.
                     exchange/frag sub-layers (internal clip system) are excluded. */}

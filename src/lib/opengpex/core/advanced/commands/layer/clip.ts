@@ -312,9 +312,12 @@ export const LayerClipCommands = {
         });
       }
 
-      // Clear the applied selection slot (unified: both regular and irregular)
-      const clipToolId = activeFrame.latestClipTool || 'rect';
-      actions.setClipBox(activeFrame.id, clipToolId, null);
+      // NOTE: Selection is intentionally preserved after applying mask.
+      // The user may want to apply the same selection to other layers,
+      // continue refining, or use it for further operations. This matches
+      // the `drill` command's behavior and the Photoshop convention where
+      // masks are non-destructive to selections. Users can explicitly clear
+      // via "Clear Selection" (double-click / resetBox command) if desired.
     },
   } as EditorCommand<{ layerId?: string; feather?: number } | undefined, Promise<void>>,
 

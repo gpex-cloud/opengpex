@@ -60,14 +60,11 @@ export const createClipBoxHandler = (): InteractionHandler => {
 
       if (target.closest('button, a, [data-role="ui"]')) return null;
 
-      const frame = e.activeFrame;
-      const isInsideCanvas = e.geometry.space.isPointInRect(e.point.canvas, {
-        x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h
-      });
-
-      if (isInsideCanvas) return 'potential_create';
-
-      return null;
+      // Accept clicks both inside AND outside canvas for creating selections.
+      // Outside-canvas clicks allow the user to start a selection from the
+      // canvas edge (Photoshop Marquee behavior). The TransformHandler will
+      // clamp the starting anchor to the nearest canvas edge.
+      return 'potential_create';
     },
 
     getInitialState: (e) => {
@@ -135,8 +132,35 @@ export const createClipBoxHandler = (): InteractionHandler => {
     },
 
     onEnd: (e, tx, startCanvas) => {
-      // Handle Double Click to clear selection (Photoshop-style).
+      // ── Gesture dispatch (extensible) ──
+      // Priority order: more specific gestures checked first.
+
+      // Double-click = select entire canvas (Photoshop "Ctrl+A" equivalent).
+      // Sets the clip box to exactly match the canvas dimensions.
       if (InteractionMath.isDoubleClick(e, startCanvas)) {
+        const frame = e.activeFrame;
+        const isReCanvas = e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas) || false;
+        const fullCanvasRect = asLocalRect({ x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h });
+
+        if (isReCanvas) {
+          const currentShape = frame.canvasCropBox;
+          tx.update({ canvasCropBox: { ...currentShape, rect: fullCanvasRect } }, 'frame');
+        } else {
+          const latestTool = (frame.latestClipTool as CropTool) || 'rect';
+          const activeTool = latestTool === 'ellipse' ? 'ellipse' : 'rect';
+          const shapeType = latestTool === 'ellipse' ? 'circle' : 'rect';
+          const currentShape = getRegularClipShape(frame);
+          tx.update({ clipBoxes: { ...frame.clipBoxes, [activeTool]: { ...currentShape, type: shapeType, rect: fullCanvasRect } } }, 'frame');
+        }
+
+        tx.commit();
+        hasPeeled = false;
+        return;
+      }
+
+      // Single static click (no drag) = clear selection (Photoshop Marquee behavior).
+      // Works identically inside and outside canvas.
+      if (InteractionMath.isStaticClick(e, startCanvas)) {
         e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
       }
 

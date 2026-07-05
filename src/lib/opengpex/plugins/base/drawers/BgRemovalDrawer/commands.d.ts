@@ -14,6 +14,7 @@ import type { BgRemovalStatus } from './protocols';
 export interface BgRemovalCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   removeBgCmd: CommandInstance;
+  downloadModelCmd: CommandInstance;
   abortCmd: CommandInstance;
   openSettingsCmd: CommandInstance;
 }

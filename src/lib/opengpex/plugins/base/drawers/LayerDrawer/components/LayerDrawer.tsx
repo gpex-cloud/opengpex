@@ -20,7 +20,7 @@
 "use client";
 
 import React, { useRef, useMemo } from "react";
-import { Layers, Eye, ScanEye, Plus } from "lucide-react";
+import { Layers, Eye, ScanEye, CirclePlus } from "lucide-react";
 import { Reorder } from "framer-motion";
 import { useEditorState } from "@opengpex/editor/core/context";
 import { Layer, Frame } from "@opengpex/editor/core/types";
@@ -79,6 +79,17 @@ function LayerComponentInner({ activeFrame }: { activeFrame: Frame }) {
               ({hostLayers.length})
             </span>
           </div>
+          <ActionButton
+            onClick={(e) => {
+              e.stopPropagation();
+              addBlankLayerCmd?.execute();
+            }}
+            icon={<CirclePlus size={12} />}
+            tooltip="New Layer"
+            variant="glass"
+            size="sm"
+            className="text-[var(--text-muted)] hover:text-emerald-500"
+          />
         </div>
         <div className="flex items-center">
           <ActionButton
@@ -124,17 +135,6 @@ function LayerComponentInner({ activeFrame }: { activeFrame: Frame }) {
             variant="glass"
             size="sm"
             className="text-[var(--text-muted)] hover:text-teal-500"
-          />
-          <ActionButton
-            onClick={(e) => {
-              e.stopPropagation();
-              addBlankLayerCmd?.execute();
-            }}
-            icon={<Plus size={12} />}
-            tooltip="New Layer"
-            variant="glass"
-            size="sm"
-            className="text-[var(--text-muted)] hover:text-emerald-500"
           />
         </div>
       </div>

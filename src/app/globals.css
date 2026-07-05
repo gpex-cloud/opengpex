@@ -37,17 +37,39 @@ body {
 
 /* ==========================================================================
    DrawerBar Busy Icon Animation
-   Colorful pulsing glow effect for plugins with running async tasks.
+   Gentle neon diagonal sweep for plugins with running async tasks.
+   A soft gradient light band sweeps from one corner to the opposite corner,
+   creating a calm, non-fatiguing indication of background activity.
    ========================================================================== */
 
-@keyframes drawer-busy-glow {
-  0%   { filter: drop-shadow(0 0 4px rgba(99, 102, 241, 0.9));  color: rgb(129, 140, 248); }
-  25%  { filter: drop-shadow(0 0 6px rgba(168, 85, 247, 0.9));  color: rgb(192, 132, 252); }
-  50%  { filter: drop-shadow(0 0 6px rgba(236, 72, 153, 0.9));  color: rgb(244, 114, 182); }
-  75%  { filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.9));  color: rgb(103, 232, 249); }
-  100% { filter: drop-shadow(0 0 4px rgba(99, 102, 241, 0.9));  color: rgb(129, 140, 248); }
+@keyframes drawer-neon-sweep {
+  0%   { background-position: 200% 200%; }
+  100% { background-position: -100% -100%; }
 }
 
 .drawer-icon-busy {
-  animation: drawer-busy-glow 2s ease-in-out infinite;
+  position: relative;
+  color: rgba(129, 140, 248, 0.85);
+  filter: drop-shadow(0 0 2px rgba(99, 102, 241, 0.25));
+  overflow: visible;
+}
+
+.drawer-icon-busy::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 12px;
+  background: linear-gradient(
+    135deg,
+    transparent 0%,
+    transparent 30%,
+    rgba(99, 102, 241, 0.25) 38%,
+    rgba(139, 92, 246, 0.35) 50%,
+    rgba(34, 211, 238, 0.25) 62%,
+    transparent 70%,
+    transparent 100%
+  );
+  background-size: 250% 250%;
+  animation: drawer-neon-sweep 3.5s linear infinite;
+  pointer-events: none;
 }

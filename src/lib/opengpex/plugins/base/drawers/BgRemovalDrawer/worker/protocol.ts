@@ -39,6 +39,13 @@ export interface BgRemovalRequest {
   reqId: number;
 
   /**
+   * Action type:
+   *   - 'remove' (default): Run complete background removal (download/load + inference)
+   *   - 'download': Only download/load the model to cache, do not run inference
+   */
+  action?: 'remove' | 'download';
+
+  /**
    * HuggingFace model repository ID to use for inference.
    * e.g. "briaai/RMBG-1.4", "schirrmacher/birefnet-general"
    */
@@ -48,7 +55,7 @@ export interface BgRemovalRequest {
    * Layer raster pixels (RGBA8). Buffer is detached on postMessage
    * — caller MUST NOT touch it after sending.
    */
-  imageData: {
+  imageData?: {
     data: ArrayBuffer;
     width: number;
     height: number;
@@ -58,7 +65,7 @@ export interface BgRemovalRequest {
    * Context snapshot for result validation — the main thread uses these
    * to verify the target Frame/Layer still exists when writing results.
    */
-  context: {
+  context?: {
     frameId: string;
     layerId: string;
   };
@@ -83,11 +90,13 @@ export interface BgRemovalProgress {
 export interface BgRemovalResult {
   type: 'result';
   reqId: number;
+  /** Action type echoed back */
+  action?: 'remove' | 'download';
   /** Context echoed back for validation */
-  context: {
+  context?: {
     frameId: string;
     layerId: string;
-  };
+  } | null;
   /**
    * Contour rings in layer-local coordinates:
    *   rings[0]   — outer boundary (CW)

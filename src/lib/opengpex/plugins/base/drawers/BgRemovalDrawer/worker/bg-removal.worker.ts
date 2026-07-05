@@ -274,7 +274,7 @@ function getSessionOutputNames(model: any): string[] {
 // ─── Main Inference Pipeline ─────────────────────────────────────────────────
 
 async function runInference(req: BgRemovalRequest): Promise<void> {
-  const { reqId, modelId, imageData, context } = req;
+  const { reqId, modelId, imageData, context, action = 'remove' } = req;
   const totalStart = performance.now();
 
   try {
@@ -368,6 +368,25 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
       _cachedDevice = device;
     }
 
+    // If the action is just to download/load the model, we finish here.
+    if (action === 'download') {
+      const totalMs = performance.now() - totalStart;
+      self.postMessage({
+        type: 'result',
+        reqId,
+        action: 'download',
+        context: null,
+        rings: [],
+        debug: {
+          deviceUsed: device,
+          inferenceMs: 0,
+          postProcessMs: 0,
+          totalMs,
+        },
+      } satisfies BgRemovalResult);
+      return;
+    }
+
     // 4. Prepare input — create RawImage from RGBA buffer
     self.postMessage({
       type: 'progress',
@@ -377,6 +396,9 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
       progress: 0.1,
     } satisfies BgRemovalProgress);
 
+    if (!imageData) {
+      throw new Error('Image data is required for background removal');
+    }
     const { width, height, data } = imageData;
     const inputImage = new RawImage(new Uint8ClampedArray(data), width, height, 4);
 

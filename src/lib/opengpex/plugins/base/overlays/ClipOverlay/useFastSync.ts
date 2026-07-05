@@ -125,22 +125,29 @@ export function useRegularBoxSync(
 /**
  * UNIFIED marching ants renderer for all selection types.
  *
- * Replaces the old dual-channel architecture (useRegularCropSync ants +
- * useIrregularSelectionSync). A single SVG <g> + <path> renders:
+ * Architecture (2026-07-05 dual-path high-contrast):
+ *
+ * Uses a dual-path technique (industry standard from Photoshop/GIMP/Krita):
+ *   - `pathBgRef`: black dashes offset by half-period (fills foreground gaps)
+ *   - `pathRef`: white/red dashes (standard phase)
+ *
+ * Both paths share the same SVG `d` attribute. The phase offset ensures that
+ * at every point along the selection border, either a black or white segment
+ * is visible — providing maximum contrast against ANY background color
+ * (light checkerboard, dark images, white edges, etc.).
+ *
+ * Renders ALL selection types:
  *   - Rect selections (4 points)
  *   - Ellipse selections (smooth arc)
  *   - Polygon selections (lasso / wand / inverted)
  *   - Re-Canvas (red rect, always a shape)
- *
- * The selector resolves data from the slot based on `cropTool` and converts
- * to SVG path `d` at the fast-track level (60fps). No React re-render needed
- * to switch between shape/polygon rendering.
  *
  * Fill is dynamically switched: `fill="none"` for shapes, semi-transparent
  * evenodd fill for polygons (helps visualize inside/outside of complex paths).
  */
 export function useSelectionAntsSync(
   groupRef: React.RefObject<SVGGElement | null>,
+  pathBgRef: React.RefObject<SVGPathElement | null>,
   pathRef: React.RefObject<SVGPathElement | null>,
   isActive: boolean,
   isReCanvas: boolean,
@@ -161,19 +168,28 @@ export function useSelectionAntsSync(
     space: 'local'
   });
 
-  // Marching ants path d — unified selector handles both types
+  // Shared selector for both paths (bg + fg share the same geometry)
+  const antsSelector = (_v: unknown, f: { clipBoxes: Record<string, unknown>; canvasCropBox: LocalShape }): LocalShape | string | null => {
+    if (isReCanvas) return f.canvasCropBox;
+    const entry = f.clipBoxes[cropTool] as LocalShape | LocalPolygon | undefined;
+    if (!entry) return null;
+    if (isPolygon(entry)) {
+      return geometry.polygon.polygonToSvgPathD(entry);
+    }
+    // LocalShape — the hook internally generates rect/ellipse path
+    const shape = entry as LocalShape;
+    return (shape.rect.w > 0) ? shape : null;
+  };
+
+  // Background path (black, offset phase) — fills the foreground gaps
+  useFastMarchingAntsSync(pathBgRef, isActive, {
+    selector: antsSelector,
+    resetKey: cropTool,
+  });
+
+  // Foreground path (white/red, standard phase)
   useFastMarchingAntsSync(pathRef, isActive, {
-    selector: (_v, f) => {
-      if (isReCanvas) return f.canvasCropBox;
-      const entry = f.clipBoxes[cropTool];
-      if (!entry) return null;
-      if (isPolygon(entry)) {
-        return geometry.polygon.polygonToSvgPathD(entry as LocalPolygon);
-      }
-      // LocalShape — the hook internally generates rect/ellipse path
-      const shape = entry as LocalShape;
-      return (shape.rect.w > 0) ? shape : null;
-    },
+    selector: antsSelector,
     resetKey: cropTool,
   });
 
@@ -201,13 +217,14 @@ export function useSelectionAntsSync(
     groupRef.current.style.visibility = hasData ? '' : 'hidden';
   });
 
-  // Cleanup on deactivation: hide group, clear path
+  // Cleanup on deactivation: hide group, clear both paths
   useEffect(() => {
     if (isActive) {
       if (groupRef.current) groupRef.current.style.display = '';
     } else {
       if (groupRef.current) groupRef.current.style.display = 'none';
+      if (pathBgRef.current) pathBgRef.current.setAttribute('d', '');
       if (pathRef.current) pathRef.current.setAttribute('d', '');
     }
-  }, [isActive, groupRef, pathRef]);
+  }, [isActive, groupRef, pathBgRef, pathRef]);
 }

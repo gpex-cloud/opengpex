@@ -95,11 +95,20 @@ function clearPreview() {
  *   onEnd       (≥3 points) → compute bounds → asLocalPolygon → write clip slot
  *               always clear preview + reset trail
  */
+/**
+ * Snap-to-start threshold in screen pixels.
+ * Uses the same dynamic-threshold concept from core/geometry/operators/snapping.ts:
+ *   screenThreshold / cameraScale → constant visual radius regardless of zoom.
+ */
+const SNAP_TO_START_SCREEN_PX = 10;
+
 export const createLassoHandler = (): InteractionHandler => {
   let trail: LocalPoint[] = [];
   let active = false;
   // Cached AA state for the current gesture — read once at onStart.
   let gestureAA = true;
+  // Whether the current pointer is snapped to start (within threshold).
+  let snappedToStart = false;
 
   return {
     id: 'clip-lasso',
@@ -113,10 +122,10 @@ export const createLassoHandler = (): InteractionHandler => {
       const target = me.target as HTMLElement;
       if (target.closest('button, a, input, [data-role="ui"], [contenteditable]')) return false;
 
-      const frame = e.activeFrame;
-      return e.geometry.space.isPointInRect(e.point.canvas, {
-        x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h,
-      });
+      // Accept clicks outside canvas — onStart will clamp to canvas edge.
+      // This allows starting a lasso selection from the canvas border
+      // (Photoshop-style edge-aligned selection workflow).
+      return true;
     },
 
     onStart: (e) => {
@@ -146,6 +155,28 @@ export const createLassoHandler = (): InteractionHandler => {
         clampedX = snapped.x;
         clampedY = snapped.y;
       }
+
+      // ── Snap-to-start: dynamic threshold (constant screen px regardless of zoom) ──
+      // Mirrors the pattern from core/geometry/operators/snapping.ts:
+      //   dynamicThreshold = screenThreshold / cameraScale
+      const start = trail[0];
+      if (trail.length >= 8 && start) {
+        const startScreen = e.geometry.space.localToScreen(start.x, start.y, e.activeFrame);
+        const curScreen = e.geometry.space.localToScreen(clampedX, clampedY, e.activeFrame);
+        const screenDist = Math.hypot(curScreen.x - startScreen.x, curScreen.y - startScreen.y);
+
+        if (screenDist < SNAP_TO_START_SCREEN_PX) {
+          // Snap: don't append the wobbly point, just show closed preview
+          snappedToStart = true;
+          if (lassoPreviewPathRef.current) {
+            lassoPreviewPathRef.current.setAttribute('d', buildScreenPathD(trail, e) + ' Z');
+          }
+          return;
+        }
+      }
+
+      // Not snapped — reset flag and append normally
+      snappedToStart = false;
       const p = asLocalPoint({ x: clampedX, y: clampedY });
       trail.push(p);
       if (lassoPreviewPathRef.current) {
@@ -161,12 +192,33 @@ export const createLassoHandler = (): InteractionHandler => {
       try {
         if (!active) return;
 
-        // Double-click to clear lasso selection.
+        // Static click (no meaningful drag) = clear selection (Photoshop behavior).
+        // Unified with clipbox: single click dismisses, no double-click needed.
         if (trail.length < 3) {
-          if ((e.nativeEvent as MouseEvent).detail === 2) {
-            e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
-          }
+          e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
           return;
+        }
+
+        // ── Snap-to-start spike trim ──
+        // If the user released while snapped to start, trim trailing points
+        // that wandered into the snap radius. This removes the V-shaped spike
+        // that forms when the cursor oscillates near the start point.
+        if (snappedToStart && trail.length > 3) {
+          const start = trail[0];
+          // Use canvas-local distance with a generous radius (dynamic threshold
+          // converted to local space). We trim from the end while points are
+          // within 2× the snap threshold in local coords.
+          const cameraScale = e.activeFrame.camera?.k || 1;
+          const localThreshold = (SNAP_TO_START_SCREEN_PX * 2) / cameraScale;
+          while (trail.length > 3) {
+            const last = trail[trail.length - 1];
+            const dist = Math.hypot(last.x - start.x, last.y - start.y);
+            if (dist < localThreshold) {
+              trail.pop();
+            } else {
+              break;
+            }
+          }
         }
 
         const ring = trail.slice();
@@ -183,10 +235,11 @@ export const createLassoHandler = (): InteractionHandler => {
         committed = true;
 
       } finally {
-        lassoTrace('onEnd  ', 'trail=', trail.length, 'committed=', committed);
+        lassoTrace('onEnd  ', 'trail=', trail.length, 'committed=', committed, 'snapped=', snappedToStart);
         trail = [];
         active = false;
         gestureAA = true;
+        snappedToStart = false;
         clearPreview();
       }
     },

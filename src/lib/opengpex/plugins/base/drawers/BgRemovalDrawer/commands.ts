@@ -312,6 +312,133 @@ export const BG_REMOVAL_COMMANDS = {
   } as EditorCommand<void, Promise<void>>,
 
   /**
+   * downloadModel — Pre-download the active model to the local cache.
+   */
+  downloadModel: {
+    id: P.CMD_DOWNLOAD_MODEL,
+    name: 'Download AI Model',
+    execute: async (ctx: EditorContextValue) => {
+      const modelId = getActiveModelId(ctx);
+
+      // Mark plugin as busy (triggers DrawerBar icon animation)
+      ctx.scoped!.setBusy(true);
+
+      // Initialize status — start with 'loading' since model load happens first.
+      setStatus(ctx, {
+        stage: 'loading',
+        device: null,
+        downloadProgress: 0,
+        downloadedBytes: 0,
+        totalBytes: 0,
+        speedBps: 0,
+        etaSeconds: 0,
+        processingProgress: 0,
+        errorMessage: null,
+        context: null,
+        elapsedMs: 0,
+      });
+
+      // Create AbortController for this request
+      activeAbortController = new AbortController();
+      const { signal } = activeAbortController;
+
+      // Speed estimator for download progress
+      const speedEstimator = new SpeedEstimator();
+      const start = performance.now();
+
+      // Progress handler
+      const onProgress = (progress: BgRemovalProgress) => {
+        switch (progress.stage) {
+          case 'detecting-device':
+            if (progress.device) {
+              setStatus(ctx, { device: progress.device });
+            }
+            break;
+          case 'loading':
+            setStatus(ctx, { stage: 'loading' });
+            break;
+          case 'downloading':
+            if (progress.loaded != null && progress.total != null) {
+              speedEstimator.update(progress.loaded, progress.total);
+              const dlProgress = progress.total > 0 ? progress.loaded / progress.total : 0;
+              setStatus(ctx, {
+                stage: 'downloading',
+                downloadProgress: dlProgress,
+                downloadedBytes: progress.loaded,
+                totalBytes: progress.total,
+                speedBps: speedEstimator.bytesPerSecond,
+                etaSeconds: speedEstimator.etaSeconds,
+              });
+            }
+            break;
+        }
+      };
+
+      try {
+        // Run download (no timeout — model download can take several minutes)
+        await bgRemovalClient.run(
+          {
+            action: 'download',
+            modelId,
+          },
+          { timeoutMs: 0, onProgress, signal }
+        );
+
+        const elapsedMs = performance.now() - start;
+
+        // Update status to done
+        setStatus(ctx, {
+          stage: 'done',
+          processingProgress: 0,
+          context: null,
+          elapsedMs,
+        });
+
+        // Notify user
+        const pluginUid = `${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}`;
+        const config = ctx.state.pluginConfig[pluginUid] as unknown as BgRemovalConfig | undefined;
+        const models = config?.models || P.BUILTIN_MODELS;
+        const activeModel = models.find(m => m.modelId === modelId) || models[0];
+        ctx.actions.setInteraction({
+          hud: {
+            message: `✨ Model downloaded successfully: ${activeModel?.name || modelId}`,
+            type: 'success',
+          },
+        });
+
+        // Auto-reset to idle after a brief display period
+        setTimeout(() => {
+          const current = ctx.scoped!.getSignal<BgRemovalStatus>(P.SIGNAL_STATUS, P.INITIAL_STATUS);
+          // Only reset if still in 'done' state
+          if (current?.stage === 'done') {
+            setStatus(ctx, { ...P.INITIAL_STATUS });
+          }
+        }, DONE_DISPLAY_MS);
+
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+
+        if (msg.includes('Aborted')) {
+          setStatus(ctx, { stage: 'idle', errorMessage: null, context: null });
+        } else {
+          setStatus(ctx, { stage: 'error', errorMessage: msg, context: null });
+          ctx.actions.setInteraction({
+            hud: {
+              message: msg.includes('timed out')
+                ? 'Model download timed out — please try again'
+                : 'Model download failed — see error details in panel',
+              type: 'error',
+            },
+          });
+        }
+      } finally {
+        activeAbortController = null;
+        ctx.scoped!.setBusy(false);
+      }
+    },
+  } as EditorCommand<void, Promise<void>>,
+
+  /**
    * abort — Cancel an in-progress download or inference.
    *
    * Aborts the AbortController (causing the run() promise to reject with AbortError)

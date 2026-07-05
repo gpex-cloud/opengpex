@@ -136,6 +136,7 @@ export function ImageInfoComponent() {
         baseH={baseH}
         frameDpi={activeFrame.dpi || 72}
         isClipMode={isClipMode}
+        hasSelection={!!box}
         applyResizeCmd={applyResizeCmd}
         downloadCmd={downloadCmd}
         exif={exif}

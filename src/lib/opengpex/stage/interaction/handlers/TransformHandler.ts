@@ -75,7 +75,6 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
   let startState: LocalRect = { x: 0, y: 0, w: 0, h: 0 } as LocalRect;
   let startAnchor = { x: 0, y: 0 };
   let startCanvas = { x: 0, y: 0 };
-  let maxPush = { x: 0, y: 0 };
   let tx: InteractionTransaction | null = null;
   
   const opState = { lastThrottleTime: 0 };
@@ -96,7 +95,6 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
     onStart: (e) => {
       startState = { ...config.getInitialState(e) };
       startCanvas = { x: e.point.canvas.x, y: e.point.canvas.y };
-      maxPush = { x: 0, y: 0 };
       
       let ax = startState.x;
       let ay = startState.y;
@@ -110,6 +108,19 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
         ax = e.point.canvas.x;
         ay = e.point.canvas.y;
       }
+
+      // For potential_create: clamp the ANCHOR to canvas bounds so that
+      // clicks outside the canvas start the selection at the nearest edge
+      // (Photoshop Marquee behavior). startCanvas stays at the raw click
+      // position so delta calculation remains correct (dx=0 for static clicks,
+      // avoiding phantom threshold triggers).
+      if (type === 'potential_create') {
+        const canvasDim = e.activeFrame.canvas;
+        const clamped = e.geometry.space.clampPointToRect({ x: ax, y: ay }, canvasDim);
+        ax = clamped.x;
+        ay = clamped.y;
+      }
+
       startAnchor = { x: ax, y: ay };
 
       // Initialize Transaction
@@ -164,8 +175,13 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
         const initialHandleX = (isResizeHandle && type.includes('w')) ? startState.x : ((isResizeHandle && type.includes('e')) ? startState.x + startState.w : startAnchor.x);
         const initialHandleY = (isResizeHandle && type.includes('n')) ? startState.y : ((isResizeHandle && type.includes('s')) ? startState.y + startState.h : startAnchor.y);
 
-        const curX = initialHandleX + dx;
-        const curY = initialHandleY + dy;
+        // For single-axis edge handles, lock the perpendicular axis to prevent
+        // the box from flipping when the user accidentally drags perpendicular
+        // to the edge's normal direction (e.g., dragging left-edge up/down).
+        const isHorizontalEdge = type === 'e' || type === 'w';
+        const isVerticalEdge = type === 'n' || type === 's';
+        const curX = initialHandleX + (isVerticalEdge ? 0 : dx);
+        const curY = initialHandleY + (isHorizontalEdge ? 0 : dy);
         const resizeType = type === 'create' ? 'se' : type;
 
         const isShiftPressed = (e.nativeEvent as MouseEvent).shiftKey;
@@ -182,7 +198,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
             aspect: effectiveAspect,
             resizeType,
             canvasDim: e.activeFrame.canvas,
-            maxPush
+            maxPush: { x: 0, y: 0 }
           });
         } else {
           // Clamped bounding box scaling

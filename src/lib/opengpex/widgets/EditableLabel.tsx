@@ -29,6 +29,7 @@ interface EditableLabelProps {
   className?: string;
   type?: 'text' | 'number';
   doubleClick?: boolean;
+  maxDisplayLength?: number;
 }
 
 export default function EditableLabel({ 
@@ -37,7 +38,8 @@ export default function EditableLabel({
   suffix = '', 
   onCommit, 
   className = '',
-  doubleClick = false
+  doubleClick = false,
+  maxDisplayLength
 }: EditableLabelProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [tempValue, setTempValue] = useState(value);
@@ -108,7 +110,7 @@ export default function EditableLabel({
       {...triggerProps}
     >
       {prefix && <span className="opacity-40 text-[9px] font-black uppercase tracking-widest group-hover/editable:text-indigo-400 transition-colors">{prefix}</span>}
-      <span className="font-bold">{value}</span>
+      <span className="font-bold">{maxDisplayLength && value.length > maxDisplayLength ? value.slice(0, maxDisplayLength - 3) + '...' : value}</span>
       {suffix && <span className="opacity-40 text-[9px] font-black uppercase tracking-widest group-hover/editable:text-indigo-400 transition-colors">{suffix}</span>}
     </div>
   );

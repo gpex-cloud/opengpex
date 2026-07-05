@@ -27,9 +27,15 @@ import type { SnapFilterOptions } from '@opengpex/editor/core/geometry/operators
  */
 export const InteractionMath = {
   /**
-   * calculateElasticRect: Elastic Boundary Scaling Operator
-   * Encapsulates advanced logic for maintaining visual selection continuity 
-   * by "pushing" the opposite edge when the mouse exceeds canvas boundaries.
+   * calculateClampedRect: Standard clamped resize (Photoshop-style).
+   *
+   * The cursor is clamped to canvas bounds and the anchor stays fixed.
+   * No "elastic push" — the opposite edge never moves unless the user
+   * explicitly drags it. This matches the universal mental model of
+   * anchor-based resize in Photoshop, GIMP, Affinity, and Krita.
+   *
+   * @deprecated The `maxPush` parameter is retained for interface
+   * compatibility but ignored. It will be removed in a future cleanup.
    */
   calculateElasticRect(
     e: InteractionEvent, 
@@ -44,42 +50,23 @@ export const InteractionMath = {
       maxPush: { x: number; y: number };
     }
   ): LocalRect {
-    const { curX, curY, startAnchor, startBox, aspect, resizeType, canvasDim, maxPush } = params;
+    const { curX, curY, startAnchor, aspect, resizeType, canvasDim } = params;
     const g = e.geometry;
 
-    // 1. Get boundary constraint point and raw push vector (dx/dy)
-    const { x: fX, y: fY, dx, dy } = g.space.clampPointToRect({ x: curX, y: curY }, canvasDim);
+    // 1. Clamp cursor to canvas bounds (anchor stays fixed)
+    const { x: clampedX, y: clampedY } = g.space.clampPointToRect({ x: curX, y: curY }, canvasDim);
 
-    // 2. Update historical maximum push (ensures elastic smoothness on pull-back)
-    if (Math.abs(dx) > Math.abs(maxPush.x)) maxPush.x = dx;
-    if (Math.abs(dy) > Math.abs(maxPush.y)) maxPush.y = dy;
-
-    let ep = { x: maxPush.x * 2, y: maxPush.y * 2 };
-
-    // 3. Proportional push balance: If aspect ratio is locked, balance the push vector
-    if (aspect) {
-      // Determine logical direction based on handle type (e.g., 'se' is +x, +y)
-      const dir = { 
-        x: resizeType.includes('w') ? -1 : 1, 
-        y: resizeType.includes('n') ? -1 : 1 
-      };
-      const balanced = g.space.balanceVectorByAspect({ x: maxPush.x, y: maxPush.y }, aspect, dir);
-      ep = { x: balanced.x * 2, y: balanced.y * 2 };
-    }
-
-    // 4. Generate dynamic anchor and execute core scaling algorithm
-    const dynAnchor = g.space.clampPointToRect({ x: startAnchor.x - ep.x, y: startAnchor.y - ep.y }, canvasDim);
-    
-    const next = g.asLocalRect(g.space.calculateResizedRect(
-      asWorldPoint({ x: fX, y: fY }), 
-      asWorldPoint(dynAnchor), 
-      aspect, 
-      resizeType, 
-      startBox
+    // 2. Standard resize: fixed anchor + clamped cursor → rect
+    const rawRect = g.asLocalRect(g.space.calculateResizedRect(
+      asWorldPoint({ x: clampedX, y: clampedY }),
+      asWorldPoint(startAnchor),
+      aspect,
+      resizeType,
+      params.startBox
     ));
 
-    // 5. Apply final physical boundary constraints
-    return g.space.clampRectWithAspect(next, canvasDim, asWorldPoint(dynAnchor), aspect) as LocalRect;
+    // 3. Final boundary clamp: ensure rect stays within canvas, respecting aspect
+    return g.space.clampRectWithAspect(rawRect, canvasDim, asWorldPoint(startAnchor), aspect) as LocalRect;
   },
 
   /**

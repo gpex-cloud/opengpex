@@ -33,6 +33,7 @@ export const PLUGIN_AUTHOR = 'opengpex';
 
 /* Command IDs */
 export const CMD_REMOVE_BG = 'cmd.remove_bg';
+export const CMD_DOWNLOAD_MODEL = 'cmd.download_model';
 export const CMD_ABORT = 'cmd.abort';
 export const CMD_OPEN_SETTINGS = 'cmd.open_settings';
 
