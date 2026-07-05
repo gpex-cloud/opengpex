@@ -84,7 +84,7 @@ export function ImageInfoComponent() {
   const targetLayer = targetLayerId
     ? activeFrame.layers.byId[targetLayerId]
     : undefined;
-  const layerDim = targetLayer?.bounding || { w: 0, h: 0 };
+  const layerDim = targetLayer?.visibleShape?.rect || targetLayer?.bounding || { w: 0, h: 0 };
   const isHighRes = layerDim.w * layerDim.h > baseW * baseH * 1.2;
   const isUpScaled = layerDim.w * layerDim.h < baseW * baseH * 0.8;
 

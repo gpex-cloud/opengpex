@@ -710,7 +710,20 @@ export const CLIP_OPTIONS_COMMANDS = {
         }
 
         // ─── Build polygon and coordinate-transform ────────────────────
-        const layerPoly = ctx.geometry.point2d.point2dToLocalPolygon(response.rings as Point2D[][], true);
+        // The alpha worker output is in "composite space" (0-based pixel coords
+        // of the mergeLayersWithShape output). When the layer's visibleShape.rect
+        // has non-zero x/y (deriveLogical layers sharing a parent src, or trunk
+        // imports with transparent borders), composite space ≠ layer-local space.
+        // We must offset by visibleShape.rect.(x,y) to convert to true layer-local
+        // coordinates before projecting to frame-local.
+        const vx = layer.visibleShape?.rect.x || 0;
+        const vy = layer.visibleShape?.rect.y || 0;
+        const adjustedRings = (vx === 0 && vy === 0)
+          ? response.rings as Point2D[][]
+          : (response.rings as Point2D[][]).map(ring =>
+              ring.map(p => ({ x: p.x + vx, y: p.y + vy }))
+            );
+        const layerPoly = ctx.geometry.point2d.point2dToLocalPolygon(adjustedRings, true);
         const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(layerPoly, layer, frame);
 
         // ─── Write to current tool's slot (don't switch tool) ──────────
