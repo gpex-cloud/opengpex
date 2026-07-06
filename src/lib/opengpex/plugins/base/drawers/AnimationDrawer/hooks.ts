@@ -22,6 +22,7 @@
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorState, useEditorServices, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import { Frame, Layer } from '@opengpex/editor/core/types';
+import { GifHandler } from '@opengpex/editor/core/files/handlers/gif';
 import type { AnimationCommandsMap } from './commands.d';
 import type { AnimationConfig } from './protocols';
 
@@ -102,6 +103,7 @@ export interface AnimationPlayerActions {
    nextFrame: () => void;
    gotoFrame: (index: number) => void;
    toggleLoop: () => void;
+   recalculateFps: () => void;
 }
 
 export function useAnimationPlayer(): {
@@ -123,9 +125,10 @@ export function useAnimationPlayer(): {
    const sequenceRef = useRef<AnimationSequence | null>(null);
    const configRef = useRef<AnimationConfig>(selfConfig);
    const warmedRef = useRef(false); // Texture cache pre-warm flag
+   const animationLoopRef = useRef<((ts: number) => void) | null>(null);
 
-   // Keep config ref up to date
-   configRef.current = selfConfig;
+   // Keep config ref up to date (via effect to avoid ref access during render)
+   useEffect(() => { configRef.current = selfConfig; });
 
    // Detect animation sequence
    const sequence = useMemo(() => {
@@ -134,7 +137,8 @@ export function useAnimationPlayer(): {
       return sequences.length > 0 ? sequences[0] : null;
    }, [activeFrame]);
 
-   sequenceRef.current = sequence;
+   // Keep sequence ref up to date (via effect to avoid ref access during render)
+   useEffect(() => { sequenceRef.current = sequence; });
 
    // Reset playback state when sequence changes (e.g., user switches to another frame and back)
    useEffect(() => {
@@ -144,6 +148,7 @@ export function useAnimationPlayer(): {
          rafRef.current = null;
       }
       playingRef.current = false;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional state reset on sequence change
       setIsPlaying(false);
       warmedRef.current = false; // Reset pre-warm cache for new sequence
 
@@ -153,7 +158,19 @@ export function useAnimationPlayer(): {
          setCurrentIndex(visibleIdx);
          currentIndexRef.current = visibleIdx;
       }
+
+   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on sequenceId only, not sequence object
    }, [sequence?.sequenceId]);
+
+   // Reactive FPS calculation: recalculates when sequence layers change
+   // (e.g., user deletes frames, or switches to a different GIF)
+   useEffect(() => {
+      if (!sequence || sequence.totalFrames === 0) return;
+      const delays = sequence.layers.map(l => (l.metadata?.gifFrameDelay as number) || 100);
+      const fps = GifHandler.calculateFps(delays);
+      setSelfConfig({ frameRateOverride: fps });
+   // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on sequenceId + totalFrames, not full objects
+   }, [sequence?.sequenceId, sequence?.totalFrames]);
 
    // Cleanup on unmount
    useEffect(() => {
@@ -237,8 +254,11 @@ export function useAnimationPlayer(): {
          lastFrameTimeRef.current = timestamp;
       }
 
-      rafRef.current = requestAnimationFrame(animationLoop);
+      rafRef.current = requestAnimationFrame((ts) => animationLoopRef.current?.(ts));
    }, [showFrame, getFrameDelay]);
+
+   // Keep animationLoop ref up to date for all consumers that need latest version
+   useEffect(() => { animationLoopRef.current = animationLoop; });
 
    /**
     * Pre-warm: Set ALL sequence layers visible simultaneously in a single batch
@@ -307,12 +327,12 @@ export function useAnimationPlayer(): {
 
             // Begin real playback
             lastFrameTimeRef.current = performance.now();
-            rafRef.current = requestAnimationFrame(animationLoop);
+            rafRef.current = requestAnimationFrame(animationLoopRef.current!);
          }
       };
 
       rafRef.current = requestAnimationFrame(waitForRender);
-   }, [activeFrame, actions, showFrame, animationLoop]);
+   }, [activeFrame, actions, showFrame]);
 
    const play = useCallback(() => {
       if (!sequence) return;
@@ -325,9 +345,9 @@ export function useAnimationPlayer(): {
       } else {
          // Already warmed: start immediately
          lastFrameTimeRef.current = performance.now();
-         rafRef.current = requestAnimationFrame(animationLoop);
+         rafRef.current = requestAnimationFrame(animationLoopRef.current!);
       }
-   }, [sequence, animationLoop, warmAndPlay]);
+   }, [sequence, warmAndPlay]);
 
    const pause = useCallback(() => {
       playingRef.current = false;
@@ -368,6 +388,13 @@ export function useAnimationPlayer(): {
       setSelfConfig({ loop: !selfConfig?.loop });
    }, [selfConfig, setSelfConfig]);
 
+   const recalculateFps = useCallback(() => {
+      if (!sequence || sequence.totalFrames === 0) return;
+      const delays = sequence.layers.map(l => (l.metadata?.gifFrameDelay as number) || 100);
+      const fps = GifHandler.calculateFps(delays);
+      setSelfConfig({ frameRateOverride: fps });
+   }, [sequence, setSelfConfig]);
+
    const totalFrames = sequence?.totalFrames || 0;
    const progress = totalFrames > 1 ? (currentIndex / (totalFrames - 1)) * 100 : 0;
 
@@ -381,7 +408,7 @@ export function useAnimationPlayer(): {
          totalFrames,
          progress,
       },
-      actions: { play, pause, stop, prevFrame, nextFrame, gotoFrame, toggleLoop },
+      actions: { play, pause, stop, prevFrame, nextFrame, gotoFrame, toggleLoop, recalculateFps },
    };
 }
 

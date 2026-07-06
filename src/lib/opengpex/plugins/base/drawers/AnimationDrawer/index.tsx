@@ -60,7 +60,7 @@ export const plugin: EditorPlugin = {
    initialConfig: {
       format: "gif",
       loop: false, // Default: play once, no loop
-      frameRateOverride: 10, // GIF typical: 10fps (100ms/frame)
+      frameRateOverride: 0, // 0 = Auto: use per-frame gifFrameDelay from metadata (preserves original timing)
    },
 
    // --- 4. Auto-Reveal ---

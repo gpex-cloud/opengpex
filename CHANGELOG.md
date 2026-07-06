@@ -16,6 +16,11 @@ All notable changes to OpenGPEX are documented in this file.
 - Support interactive decimation and frame sampling when importing large animated GIFs to prevent memory exhaustion
 - Group and display imported GIF frame sequences as a collapsible sequence folder in the Layers Drawer panel
 - Update the postinstall script to build and bundle `gifuct-js` and `gifenc` into the public directory via esbuild
+- Add dedicated GIF Revert Path in the `Revert to Original` command to re-decode the original GIF from the asset store and rebuild all layers in-place
+- Implement reactive FPS calculation in `AnimationDrawer` with a manual recalculate button to dynamically update framerate based on active sequence layer delays
+- Fix GIF frame delay decoding scale mismatch in `GifHandler` to prevent incorrect playback speeds
+- Resolve React state update warnings and stale closure bugs in the `useAnimationPlayer` hook
+- Fix lint issues and clean up unused variables across core files and components
 
 ---
 

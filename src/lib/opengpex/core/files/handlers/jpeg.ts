@@ -249,7 +249,7 @@ export class JpegHandler implements ImageFormatHandler {
 // Private Utilities
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function findLensInParsed(parsed: Record<string, unknown>): string | undefined {
+function _findLensInParsed(parsed: Record<string, unknown>): string | undefined {
   for (const [key, val] of Object.entries(parsed)) {
     if (key.toLowerCase().includes('lens') && typeof val === 'string') {
       return val;
@@ -339,7 +339,7 @@ function injectJpegIcc(jpegBytes: Uint8Array, iccBytes: Uint8Array): Uint8Array 
   }
 
   // Find insertion position (after SOI and any existing APP0/APP1 markers)
-  const insertPos = findJpegIccInsertPosition(jpegBytes);
+  const _insertPos = findJpegIccInsertPosition(jpegBytes);
 
   // Remove any existing APP2 ICC_PROFILE markers first
   const cleanedJpeg = removeExistingIccMarkers(jpegBytes);

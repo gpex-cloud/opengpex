@@ -219,6 +219,23 @@ export class GifHandler implements ImageFormatHandler {
     return new Blob([output.buffer as ArrayBuffer], { type: 'image/gif' });
   }
 
+  // ─── Frame Rate Calculation ──────────────────────────────────────────────
+
+  /**
+   * Calculate the effective FPS from an array of frame delays (in ms).
+   * Handles variable delays by computing the average.
+   * @param delays - Array of per-frame delays in milliseconds
+   * @returns Rounded FPS value, clamped to [1, 60]
+   */
+  static calculateFps(delays: number[]): number {
+    if (!delays || delays.length === 0) return 10; // Default 10fps
+    const totalDelay = delays.reduce((sum, d) => sum + (d || 100), 0);
+    const avgDelay = totalDelay / delays.length;
+    if (avgDelay <= 0) return 10;
+    const fps = Math.round(1000 / avgDelay);
+    return Math.max(1, Math.min(60, fps));
+  }
+
   // ─── Metadata Extraction ─────────────────────────────────────────────────
 
   async extractMetadata(file: File): Promise<ImageMetadata> {
@@ -291,7 +308,10 @@ function decodeGifFrames(bytes: Uint8Array, gifuctJs: GifuctJsGlobals): {
 
     const frameData = new Uint8Array(canvas.length);
     frameData.set(canvas);
-    const delay = Math.max((frame.delay || 10) * 10, 20);
+    // gifuct-js decompressFrames already converts GCE delay to ms:
+    // (gce.delay || 10) * 10. So frame.delay is already in ms.
+    // Minimum 20ms (browsers cap at ~10ms for GIF rendering anyway).
+    const delay = Math.max(frame.delay || 100, 20);
     frames.push({ data: frameData, delay, index: i });
 
     switch (disposalType) {

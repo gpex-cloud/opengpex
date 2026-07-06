@@ -151,7 +151,7 @@ class FallbackHandler implements ImageFormatHandler {
 
   async encode(
     source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
-    options: EncodeOptions,
+    _options: EncodeOptions,
   ): Promise<Blob> {
     // Fallback: encode as PNG
     const canvas = source instanceof ImageBitmap

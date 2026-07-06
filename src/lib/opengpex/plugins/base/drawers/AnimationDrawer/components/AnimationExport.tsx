@@ -20,8 +20,9 @@
 "use client";
 
 import React, { useState } from "react";
-import { Download } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
 import FancyButton from "@opengpex/editor/widgets/FancyButton";
+import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import type { CommandInstance } from "@opengpex/editor/core/types";
 import type { AnimationConfig } from "../protocols";
 import type { AnimationSequence } from "../hooks";
@@ -31,6 +32,7 @@ interface AnimationExportProps {
    updateConfig: (cfg: Partial<AnimationConfig>) => void;
    exportAnimationCmd?: CommandInstance;
    sequence: AnimationSequence | null;
+   onRecalculateFps?: () => void;
 }
 
 /**
@@ -43,6 +45,7 @@ export const AnimationExport = React.memo(function AnimationExport({
    updateConfig,
    exportAnimationCmd,
    sequence,
+   onRecalculateFps,
 }: AnimationExportProps) {
    const [isProcessing, setIsProcessing] = useState(false);
 
@@ -82,18 +85,28 @@ export const AnimationExport = React.memo(function AnimationExport({
             </span>
             <input
                type="range"
-               min="0"
+               min="1"
                max="30"
                value={config.frameRateOverride}
                onChange={(e) => updateConfig({ frameRateOverride: parseInt(e.target.value) })}
                onMouseUp={(e) => e.currentTarget.blur()}
                onTouchEnd={(e) => e.currentTarget.blur()}
-               style={{ accentColor: config.frameRateOverride > 0 ? '#10b981' : '#666666' }}
+               style={{ accentColor: '#10b981' }}
                className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border border-[var(--border-subtle)] shadow-inner"
             />
-            <span className="text-[10px] font-black w-12 text-right tabular-nums text-[var(--text-muted)]">
-               {config.frameRateOverride > 0 ? `${config.frameRateOverride}` : 'Auto'}
+            <span className="text-[10px] font-black w-6 text-right tabular-nums text-[var(--text-muted)]">
+               {config.frameRateOverride}
             </span>
+            {onRecalculateFps && (
+               <ActionButton
+                  onClick={onRecalculateFps}
+                  icon={<RefreshCw size={10} />}
+                  tooltip="Recalculate FPS from frame delays"
+                  variant="glass"
+                  size="sm"
+                  className="text-[var(--text-muted)] hover:text-teal-400 shrink-0"
+               />
+            )}
          </div>
 
          {/* Export button row */}

@@ -121,28 +121,43 @@ export const FrameCreateCommands = {
 
         // Frame count safety threshold — ask user if frames exceed limit
         if (totalFrames > GIF_DEFAULT_LIMIT) {
-          const limitOptions = [
-            { id: '10', label: '10 frames', description: `Sample every ${Math.ceil(totalFrames / 10)} frames` },
-            { id: '20', label: '20 frames', description: `Sample every ${Math.ceil(totalFrames / 20)} frames` },
-            { id: '30', label: '30 frames', description: `Sample every ${Math.ceil(totalFrames / 30)} frames` },
-            { id: '60', label: '60 frames', description: `Sample every ${Math.ceil(totalFrames / 60)} frames` },
-            { id: '100', label: '100 frames', description: `Sample every ${Math.ceil(totalFrames / 100)} frames` },
-            { id: String(totalFrames), label: `All ${totalFrames} frames`, description: 'May use significant memory', primary: true },
-          ].filter(opt => parseInt(opt.id) <= totalFrames);
+          // Generate dynamic decimation options based on actual frame count.
+          // Each option shows the real resulting frame count after sampling.
+          const targetCounts = [10, 20, 30, 60, 100].filter(n => n < totalFrames);
+          const limitOptions = targetCounts.map(target => {
+            const step = Math.ceil(totalFrames / target);
+            // Calculate actual frame count after decimation with this step
+            let actualCount = 0;
+            for (let i = 0; i < totalFrames; i += step) actualCount++;
+            return {
+              id: String(step), // Store step directly as ID for precise control
+              label: `${actualCount} frames`,
+              description: `Keep 1 of every ${step} frames`,
+            };
+          }).filter((opt, idx, arr) => {
+            // Deduplicate: remove options that produce the same actual frame count
+            return idx === 0 || opt.label !== arr[idx - 1].label;
+          });
 
-          const chosenLimit = await actions.askChoice(
+          // Add "All frames" option
+          limitOptions.push({
+            id: '1', // step=1 means keep all
+            label: `All ${totalFrames} frames`,
+            description: 'May use significant memory',
+          });
+
+          const chosenStep = await actions.askChoice(
             `GIF has ${totalFrames} frames`,
             limitOptions,
             `This animated GIF contains ${totalFrames} frames. Importing all frames may use significant memory. Choose a frame limit for decimation (sampled frames will preserve animation timing).`,
           );
 
-          if (!chosenLimit) return ''; // User cancelled
+          if (!chosenStep) return ''; // User cancelled
 
-          const limit = parseInt(chosenLimit, 10) || GIF_DEFAULT_LIMIT;
+          const step = parseInt(chosenStep, 10) || 1;
 
           // Apply interactive decimation with delay sync
-          if (limit < totalFrames) {
-            const step = Math.ceil(totalFrames / limit);
+          if (step > 1) {
             const sampled: typeof framesToImport = [];
             for (let i = 0; i < totalFrames; i += step) {
               const frame = framesToImport[i];
@@ -156,6 +171,9 @@ export const FrameCreateCommands = {
             actions.notifyHUD(`Decimated: ${totalFrames} → ${sampled.length} frames (step=${step})`, 'info');
           }
         }
+
+        // Register the original GIF file as an asset for future revert support
+        const originalGifAssetId = await assets.register(file);
 
         // Generate a unique sequence ID for this GIF logical group
         const gifSequenceId = `gif-seq-${Date.now().toString(36)}-${Math.random().toString(36).substr(2, 6)}`;
@@ -202,7 +220,7 @@ export const FrameCreateCommands = {
 
         // Generate thumbnail from first frame
         const firstAssetUrl = frameAssets[0].assetUrl;
-        const [contentBounds, thumbBlob] = await Promise.all([
+        const [_contentBounds, thumbBlob] = await Promise.all([
           pixels.decode.contentBounds(firstAssetUrl),
           pixels.process.thumbnail(firstAssetUrl, 256),
         ]);
@@ -230,7 +248,7 @@ export const FrameCreateCommands = {
           canvasCropBox: defaultCanvasCropBox,
           assetId: frameAssets[0].assetId,
           thumbnail: { src: thumbAssetUrl, assetId: thumbAssetId },
-          extra: { ...extra, gifSequenceId, gifFrameCount: framesToImport.length },
+          extra: { ...extra, gifSequenceId, gifFrameCount: framesToImport.length, originalGifAssetId },
         });
 
         actions.addFrame(frame, switchFrame);
@@ -449,9 +467,156 @@ export const FrameCreateCommands = {
     name: 'Revert to Original',
     undoable: false,
     execute: async (ctx: EditorContextValue): Promise<void> => {
-      const { geometry, activeFrame, actions, state, assets, pixels } = ctx;
+      const { geometry, activeFrame, actions, state, assets, pixels, files } = ctx;
       if (!activeFrame) return;
 
+      // ═══════════════════════════════════════════════════════════════════════
+      // GIF Revert Path: Re-decode original GIF and rebuild layers in-place
+      // (same frame ID, same list position, cancel-safe)
+      // ═══════════════════════════════════════════════════════════════════════
+      const originalGifAssetId = (activeFrame.extra as Record<string, unknown>)?.originalGifAssetId as string | undefined;
+      if (originalGifAssetId) {
+        try {
+          // 1. Hydrate the original GIF binary from asset store
+          await assets.hydrate(new Set([originalGifAssetId]));
+          const gifEntry = assets.get(originalGifAssetId);
+
+          if (!gifEntry || !gifEntry.blob) {
+            throw new Error('Original GIF asset not found in store');
+          }
+
+          // 2. Reconstruct a File object and re-decode to get all frames
+          const originalName = activeFrame.name + '.gif';
+          const gifFile = new File([gifEntry.blob], originalName, { type: 'image/gif' });
+
+          const decoded = await files.decode(gifFile);
+          if (!decoded.frames || decoded.frames.length <= 1) {
+            throw new Error('Re-decoded GIF has no animation frames');
+          }
+
+          let framesToImport = decoded.frames;
+          const totalFrames = framesToImport.length;
+          const GIF_DEFAULT_LIMIT = 30;
+
+          // 3. Frame count selection dialog (user can cancel → frame stays untouched)
+          if (totalFrames > GIF_DEFAULT_LIMIT) {
+            const targetCounts = [10, 20, 30, 60, 100].filter(n => n < totalFrames);
+            const limitOptions = targetCounts.map(target => {
+              const step = Math.ceil(totalFrames / target);
+              let actualCount = 0;
+              for (let i = 0; i < totalFrames; i += step) actualCount++;
+              return {
+                id: String(step),
+                label: `${actualCount} frames`,
+                description: `Keep 1 of every ${step} frames`,
+              };
+            }).filter((opt, idx, arr) => idx === 0 || opt.label !== arr[idx - 1].label);
+
+            limitOptions.push({
+              id: '1',
+              label: `All ${totalFrames} frames`,
+              description: 'May use significant memory',
+            });
+
+            const chosenStep = await actions.askChoice(
+              `GIF has ${totalFrames} frames`,
+              limitOptions,
+              `This animated GIF contains ${totalFrames} frames. Choose a frame limit for decimation.`,
+            );
+
+            if (!chosenStep) return; // User cancelled — frame stays as-is
+
+            const step = parseInt(chosenStep, 10) || 1;
+            if (step > 1) {
+              const sampled: typeof framesToImport = [];
+              for (let i = 0; i < totalFrames; i += step) {
+                const frame = framesToImport[i];
+                sampled.push({ ...frame, delay: frame.delay * step, index: sampled.length });
+              }
+              framesToImport = sampled;
+            }
+          }
+
+          // 4. Register new frame assets
+          const dimension = decoded.dimensions;
+          const gifSequenceId = `gif-seq-${Date.now().toString(36)}-${Math.random().toString(36).substr(2, 6)}`;
+
+          const frameAssets = await Promise.all(
+            framesToImport.map(async (f) => {
+              const frameFile = new File([f.blob], `frame_${f.index}.png`, { type: 'image/png' });
+              const assetId = await assets.register(frameFile);
+              const assetUrl = assets.getURL(assetId)!;
+              return { assetId, assetUrl, delay: f.delay, index: f.index };
+            })
+          );
+
+          // 5. Build new layer structure
+          const frameLayers: Layer[] = frameAssets.map((fa, i) => {
+            return LayerFactory.getNewLayer({
+              name: `Frame ${i + 1}`,
+              src: fa.assetUrl,
+              assetId: fa.assetId,
+              cx: 0,
+              cy: 0,
+              locked: false,
+              visible: i === 0,
+              bounding: dimension,
+              visibleShape: asLocalShape({ x: 0, y: 0, w: dimension.w, h: dimension.h }),
+              metadata: {
+                format: 'image/gif',
+                size: gifEntry.blob!.size,
+                source: 'local',
+                originalName,
+                gifSequenceId,
+                gifFrameIndex: i,
+                gifFrameDelay: fa.delay,
+                gifTotalFrames: framesToImport.length,
+              },
+            });
+          });
+
+          const expandedLayers = frameLayers.flatMap(l => LayerFactory.expandLayers([l]));
+
+          // 6. Camera + crop box
+          const { insets } = state.ui.theme.config;
+          const newCamera = geometry.camera.getFitCamera(
+            state.ui.viewportDim,
+            dimension,
+            { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
+          );
+
+          // 7. In-place update — same frame ID, same list position
+          actions.updateFrame(activeFrame.id, {
+            canvas: dimension,
+            camera: newCamera,
+            clipBoxes: {},
+            canvasCropBox: asLocalShape({
+              x: dimension.w * 0.25,
+              y: dimension.h * 0.25,
+              w: dimension.w * 0.5,
+              h: dimension.h * 0.5,
+            }),
+            layers: {
+              byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])),
+              order: expandedLayers.map(l => l.id),
+            },
+            activeLayerId: frameLayers[0].id,
+            extra: { ...(activeFrame.extra as Record<string, unknown>), gifSequenceId, gifFrameCount: framesToImport.length, originalGifAssetId },
+          });
+
+          actions.resetHistory();
+          actions.setInteraction({ hud: { message: `GIF reverted: ${framesToImport.length} frames restored.`, type: 'success' } });
+          return;
+        } catch (err) {
+          console.error('[FrameService] GIF revert failed:', err);
+          actions.setInteraction({ hud: { message: 'Failed to revert GIF. See console for details.', type: 'error' } });
+          return;
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // Standard Revert Path (non-GIF single-layer frames)
+      // ═══════════════════════════════════════════════════════════════════════
       const baseLayer = activeFrame.layers.byId[activeFrame.layers.order[0]];
       if (!baseLayer) return;
 
@@ -488,7 +653,6 @@ export const FrameCreateCommands = {
           { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
         );
 
-        // 💡 5. Fully refresh the artboard's canvas size, camera, crop boxes, and all layers
         // 💡 5. Assemble a minimal base layer, completely clear masks (vectorMasks: []), and reset transform and filters
         const cleanBaseLayer = {
           ...baseLayer,
