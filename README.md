@@ -11,7 +11,7 @@
 
 <!-- ═══════════ Badges ═══════════ -->
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0--beta.19-blue?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/version-1.0.0--beta.21-blue?style=flat-square" alt="Version" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green?style=flat-square" alt="License" /></a>
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs Welcome" />
   <img src="https://img.shields.io/badge/platform-Web%20(modern%20browsers)-orange?style=flat-square" alt="Platform" />
@@ -106,7 +106,7 @@ Install plugins at runtime via ZIP upload through the Plugin Hub. Build your own
 | Framework | Next.js 16 · React 19 |
 | State | Immer + custom store with fast-track volatile refs |
 | Styling | Tailwind CSS v4 |
-| Rendering | OffscreenCanvas + Web Workers + WASM (AVIF/RAW) |
+| Rendering | OffscreenCanvas + Web Workers + WASM (AVIF/RAW/TIFF) |
 | AI/ML | ONNX Runtime (client-side inference) |
 | Animation | Framer Motion · GSAP |
 
@@ -138,6 +138,9 @@ AI features download pre-trained models at runtime from HuggingFace (not bundled
 
 The following pre-compiled WASM/JS libraries are bundled in `public/ext/` for client-side format processing:
 
+> [!NOTE]
+> Next.js is configured with Cross-Origin Isolation headers (`COOP`/`COEP`) to enable `SharedArrayBuffer`, allowing multi-threaded WASM processing (e.g. for `wasm-vips`).
+
 | Library | Purpose | Source | License |
 |---------|---------|--------|---------|
 | LibRaw-Wasm | RAW image decoding (CR2/NEF/ARW) | [ybouane/LibRaw-Wasm](https://github.com/ybouane/LibRaw-Wasm) | ISC |
@@ -145,6 +148,7 @@ The following pre-compiled WASM/JS libraries are bundled in `public/ext/` for cl
 | jSquash (AVIF) | AVIF image encoding | [jamsinclair/jSquash](https://github.com/jamsinclair/jSquash) | Apache-2.0 |
 | ghostpdl-wasm | PostScript/PDF processing | [okathira-dev/ghostpdl-wasm](https://github.com/okathira-dev/ghostpdl-wasm) | AGPL-3.0 |
 | heic-to | HEIC/HEIF format conversion | [hoppergee/heic-to](https://github.com/hoppergee/heic-to) | GPL-3.0 |
+| wasm-vips | TIFF image encoding & decoding | [kleisauke/wasm-vips](https://github.com/kleisauke/wasm-vips) | LGPL-3.0 |
 
 ---
 
