@@ -148,7 +148,7 @@ The following pre-compiled WASM/JS libraries are bundled in `public/ext/` for cl
 | jSquash (AVIF) | AVIF image encoding | [jamsinclair/jSquash](https://github.com/jamsinclair/jSquash) | Apache-2.0 |
 | ghostpdl-wasm | PostScript/PDF processing | [okathira-dev/ghostpdl-wasm](https://github.com/okathira-dev/ghostpdl-wasm) | AGPL-3.0 |
 | heic-to | HEIC/HEIF format conversion | [hoppergee/heic-to](https://github.com/hoppergee/heic-to) | GPL-3.0 |
-| wasm-vips | TIFF image encoding & decoding | [kleisauke/wasm-vips](https://github.com/kleisauke/wasm-vips) | LGPL-3.0 |
+| wasm-vips | TIFF image encoding & decoding | [kleisauke/wasm-vips](https://github.com/kleisauke/wasm-vips) | MIT / LGPL-3.0 |
 
 ---
 
