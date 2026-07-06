@@ -58,6 +58,7 @@ import {
   useOverlayRotationSync as useCoreOverlayRotationSync,
 } from "@opengpex/editor/core/motion/hooks/animation";
 import { createPluginService } from "@opengpex/editor/core/plugin";
+import { createFileService } from "@opengpex/editor/core/files";
 import { createFontService } from "@opengpex/editor/core/fonts";
 import { CORE_VERSION } from "@opengpex/editor/core/plugin/version";
 import "../../index.css";
@@ -115,6 +116,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   );
   const storage = useMemo(() => createStateStorage(assets), [assets]);
   const clipboard = useMemo(() => createClipboardService(), []);
+  const files = useMemo(() => createFileService(assets, processor), [assets, processor]);
   const plugins = useMemo(() => createPluginService(), []);
   const fonts = useMemo(() => createFontService(), []);
 
@@ -135,6 +137,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       pixels,
       layers,
       assets,
+      files,
       storage,
       clipboard,
       plugins,
@@ -148,6 +151,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       pixels,
       layers,
       assets,
+      files,
       storage,
       clipboard,
       plugins,

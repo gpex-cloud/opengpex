@@ -22,11 +22,46 @@
 import { useMemo } from 'react';
 import { useEditorState, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import type { ExifData } from '@opengpex/editor/core/types';
+import type { ImageMetadata } from '@opengpex/editor/core/files';
 import type { ImageInfoCommandsMap } from './commands.d';
 import * as P from './protocols';
 
 import { formatBytes } from '@opengpex/editor/core/helpers/file';
 import { calcFinalDims } from './utils';
+
+/**
+ * Adapter: Converts the new unified ImageMetadata into the legacy ExifData
+ * shape expected by the ExifInfoPanel component.
+ */
+function imageMetadataToExif(meta: ImageMetadata | undefined): ExifData | undefined {
+   if (!meta) return undefined;
+   if (!meta.camera && !meta.capture && !meta.dates && !meta.hasIccProfile) return undefined;
+
+   return {
+      Make: meta.camera?.make,
+      Model: meta.camera?.model,
+      LensMake: meta.camera?.lensMake,
+      LensModel: meta.camera?.lensModel,
+      Software: meta.camera?.software,
+      FNumber: meta.capture?.fNumber,
+      ExposureTime: meta.capture?.exposureTime,
+      ISOSpeedRatings: meta.capture?.iso,
+      FocalLength: meta.capture?.focalLength,
+      WhiteBalance: meta.capture?.whiteBalance,
+      DateTimeOriginal: meta.dates?.created,
+      CreateDate: meta.dates?.created,
+      ModifyDate: meta.dates?.modified,
+      XResolution: meta.dpi,
+      YResolution: meta.dpi,
+      ResolutionUnit: 2,
+      ColorSpace: meta.colorSpace === 'srgb' ? 1 : undefined,
+      // ICC Profile info
+      hasIccProfile: meta.hasIccProfile,
+      iccProfileName: meta.raw?.iccProfileName,
+      colorSpaceName: meta.colorSpace,
+   };
+}
 
 /**
  * useImageInfoCommands: Semantic action hook.
@@ -52,11 +87,13 @@ export const useImageInfoCommands = () => {
             isClipMode,
             finalDims: activeFrame ? calcFinalDims(baseW, baseH, selfConfig) : { w: 0, h: 0 },
             fileSize: metadata?.size ? formatBytes(metadata.size) : '---',
-            fileFormat: (metadata?.format || 'image/png').split('/')[1]?.toUpperCase() || 'PNG',
-            fileName: activeFrame?.name || 'Untitled',
+            fileFormat: (((metadata?.imageMetadata as ImageMetadata | undefined)?.internalCodec
+              || metadata?.format || 'image/png').split('/')[1])?.toUpperCase() || 'PNG',
+            fileName: (metadata?.imageMetadata as ImageMetadata | undefined)?.sourceFileName
+              || activeFrame?.name || 'Untitled',
             layerCount: activeFrame?.layers.order.length || 0,
             engineStatuses: state.runtime.engineStatuses || [],
-            exif: metadata?.exif,
+            exif: metadata?.exif || imageMetadataToExif(metadata?.imageMetadata as ImageMetadata | undefined),
          },
          updateConfig: setSelfConfig,
          // Plugin Commands (transparently passed Cmd references)

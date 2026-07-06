@@ -28,10 +28,10 @@ export const FILE_LOADER_COMMANDS = {
     id: P.CMD_IMPORT,
     name: 'Import Files',
     execute: async (ctx: EditorContextValue, files: File[]) => {
-      const { state, actions, pixels } = ctx;
+      const { state, actions, files: fileService } = ctx;
       if (!state.isLoaded) return;
 
-      const imageFiles = files.filter(f => pixels.utils.detectFormat(f) !== 'unknown');
+      const imageFiles = files.filter(f => fileService.detectFormat(f) !== 'unknown');
 
       for (const file of imageFiles) {
         const existingFrame = state.frames.order.map(id => state.frames.byId[id]).find(f => f.name === file.name);

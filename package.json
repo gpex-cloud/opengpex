@@ -1,6 +1,6 @@
 {
   "name": "opengpex",
-  "version": "1.0.0-beta.20",
+  "version": "1.0.0-beta.21",
   "license": "GPL-3.0-only",
   "private": true,
   "scripts": {
@@ -20,7 +20,6 @@
     "@jsquash/avif": "^2.1.1",
     "@okathira/ghostpdl-wasm": "1.1.0",
     "@resvg/resvg-wasm": "^2.6.2",
-    "exifr": "^7.1.3",
     "exifreader": "^4.39.1",
     "fflate": "^0.8.3",
     "framer-motion": "^12.40.0",
@@ -34,7 +33,8 @@
     "piexifjs": "^1.0.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "unzipper": "^0.12.3"
+    "unzipper": "^0.12.3",
+    "wasm-vips": "^0.0.11"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.0",

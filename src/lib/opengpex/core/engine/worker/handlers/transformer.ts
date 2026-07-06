@@ -92,7 +92,7 @@ export async function bakeAssetMasks(hash: string, masks: VectorMask[]): Promise
 }
 
 export async function resampleImage(src: string, targetSize: { w: number; h: number }, options?: { format?: string; quality?: number }): Promise<WorkerResult> {
-  console.log(`[Worker] resampleImage called for ${src}, targetSize:`, targetSize);
+  // console.log(`[Worker] resampleImage called for ${src}, targetSize:`, targetSize);
   
   const response = await fetch(src);
   const blob = await response.blob();

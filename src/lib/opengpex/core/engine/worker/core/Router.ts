@@ -26,7 +26,6 @@ import { PixelUtils } from '../../PixelUtils';
 import * as explorer from '../handlers/explorer';
 import * as transformer from '../handlers/transformer';
 import * as merger from '../handlers/merger';
-import * as transcoder from '../handlers/transcoder';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- Worker message router: payload/result vary per message type */
 export async function handleMessage(type: string, payload: any): Promise<{ result: any, transfer?: Transferable[] }> {
@@ -63,25 +62,6 @@ export async function handleMessage(type: string, payload: any): Promise<{ resul
     case 'RESAMPLE_IMAGE':
       result = await transformer.resampleImage(payload.src, payload.targetSize, payload.options);
       break;
-
-    case 'TRANSCODE_SVG':
-      const transcodedBlob = await transcoder.transcodeSvgToRaster(payload.blob, {
-        width: payload.width,
-        height: payload.height,
-        maxDimension: payload.maxDimension,
-      });
-      result = { blob: transcodedBlob };
-      break;
-
-    case 'TRANSCODE_EPS':
-      const transcodedEpsBlob = await transcoder.transcodeEpsToRaster(payload.blob, {
-        width: payload.width,
-        height: payload.height,
-        dpi: payload.dpi,
-      });
-      result = { blob: transcodedEpsBlob };
-      break;
-
 
     case 'MERGE_LAYERS_WITH_SHAPE':
       result = await merger.mergeLayersWithShape(payload.canvas, payload.shape, payload.layers, payload.options);

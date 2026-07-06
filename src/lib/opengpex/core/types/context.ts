@@ -23,6 +23,7 @@ import { PixelService, AssetService, ClipboardService, StateStorage, LayerServic
 import { EditorState, VolatileState, InteractionSignalValue } from './state';
 import { Frame, Layer } from './models';
 import { FontService } from '@opengpex/editor/core/fonts';
+import type { FileService } from '@opengpex/editor/core/files';
 
 import { PluginService } from './plugins';
 
@@ -35,6 +36,8 @@ export interface EditorServiceContextValue {
   pixels: PixelService;
   layers: LayerService;
   assets: AssetService;
+  /** Unified file format I/O service (decode/encode/metadata) */
+  files: FileService;
   storage: StateStorage;
   clipboard: ClipboardService;
   plugins: PluginService;

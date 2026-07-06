@@ -22,7 +22,7 @@ import {
   LocalRect, Dimensions, ClipDescriptor,
   Shape, LocalShape, LocalPolygon, ShapeType, TileMetadata
 } from './primitives';
-import { EditorData, EngineStatus, SupportedImageFormat } from './state';
+import { EditorData, EngineStatus } from './state';
 
 export interface WorkerResult {
   blob?: Blob;
@@ -93,10 +93,10 @@ export interface WorkerProxy {
   mergeLayersWithShape: (canvasDim: Dimensions, shape: LocalShape, items: LayerItemForWorker[], options?: { format?: string; quality?: number; targetDpr?: number }) => Promise<WorkerResult>;
   /** Ensures asset blob is decoded in Worker cache (used for bitmapMask etc. which are only rendered in main thread) */
   ensureAssetInWorker: (hash: string, blob: Blob) => Promise<void>;
-  /** Transcodes SVG blob to PNG raster via resvg-wasm in Worker */
-  transcodeSvg: (blob: Blob, params?: { width?: number; height?: number; maxDimension?: number }) => Promise<Blob>;
-  /** Transcodes EPS blob to PNG raster via Ghostscript WASM in Worker */
-  transcodeEps: (blob: Blob, params: { width: number; height: number; dpi: number }) => Promise<Blob>;
+  /** Transcodes TIFF blob to PNG raster via wasm-vips in Worker */
+  transcodeTiff: (blob: Blob) => Promise<Blob>;
+  /** Encodes RGBA ImageData to TIFF blob via wasm-vips in Worker */
+  encodeTiff: (imageData: ImageData, options: { compression: string; dpi: number }) => Promise<Blob>;
 }
 
 /**
@@ -113,8 +113,6 @@ export interface PixelService {
   process: {
     thumbnail: (source: HTMLImageElement | string, maxSize?: number) => Promise<Blob>;
     resample: (src: string, options: { targetSize: { w: number; h: number } }) => Promise<Blob>;
-    /** Pre-transcodes non-standard formats (HEIC, SVG, EPS) to engine-compatible raster before asset registration */
-    preTranscode: (file: File, options?: { targetWidth?: number; targetHeight?: number; dpi?: number }) => Promise<File>;
   };
 
   render: {
@@ -141,11 +139,9 @@ export interface PixelService {
 
   utils: {
     getRenderPipeline: (layer: Layer) => ClipDescriptor[];
-    detectFormat: (file: File) => SupportedImageFormat;
     fetchFromUrl: (url: string) => Promise<File>;
     download: (blob: Blob, filename: string) => Promise<void>;
     probeEngines: () => EngineStatus[];
-    getExportFilename: (name: string, w: number, h: number, ext: string) => Promise<string>;
   };
 
   rasterize: {

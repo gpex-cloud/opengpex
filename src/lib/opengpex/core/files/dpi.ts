@@ -24,8 +24,6 @@
  *   physicalSize (inches) = pixels / dpi
  */
 
-import { ExifData } from '../types/models';
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Constants & Presets
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -79,7 +77,7 @@ export function formatPrintSize(w: number, h: number, dpi: number): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Validation & Extraction
+// Validation
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
@@ -91,27 +89,6 @@ export function sanitizeDpi(raw: number | undefined | null): number {
   // Some tools incorrectly write 1 as resolution — treat as missing
   if (raw < 2) return DEFAULT_DPI;
   return Math.round(raw);
-}
-
-/**
- * Extract DPI from EXIF data, handling ResolutionUnit conversion.
- *
- * EXIF ResolutionUnit values:
- *   2 = inches (DPI) — most common
- *   3 = centimeters (DPCM) — need to convert: DPI = DPCM × 2.54
- *   1 = "no absolute unit" — treat as DPI (legacy)
- */
-export function extractDpiFromExif(exif: ExifData | undefined): number {
-  if (!exif?.XResolution) return DEFAULT_DPI;
-
-  let dpi = exif.XResolution;
-
-  // Convert from pixels-per-centimeter to pixels-per-inch if needed
-  if (exif.ResolutionUnit === 3) {
-    dpi = dpi * 2.54;
-  }
-
-  return sanitizeDpi(dpi);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

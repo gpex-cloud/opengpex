@@ -132,42 +132,6 @@ export function createPixelService(
         const result = await service.worker.resampleImage(src, targetSize);
         return result.blob!;
       },
-      async preTranscode(file: File, options?: { targetWidth?: number; targetHeight?: number; dpi?: number }): Promise<File> {
-        const format = PixelUtils.detectFormat(file);
-
-        if (format === 'heic') {
-          const { convertHeicToBlob } = await import('../helpers/heic');
-          const convertedBlob = await convertHeicToBlob(file);
-          return new File([convertedBlob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
-        }
-
-        if (format === 'svg') {
-          const blob = new Blob([await file.arrayBuffer()], { type: 'image/svg+xml' });
-          const pngBlob = await processor.transcodeSvg(blob, {
-            width: options?.targetWidth,
-            height: options?.targetHeight,
-          });
-          return new File([pngBlob], file.name.replace(/\.svg$/i, '.png'), { type: 'image/png' });
-        }
-
-        if (format === 'eps') {
-          const blob = new Blob([await file.arrayBuffer()], { type: 'application/postscript' });
-          const pngBlob = await processor.transcodeEps(blob, {
-            width: options?.targetWidth || 2480,
-            height: options?.targetHeight || 3508,
-            dpi: options?.dpi || 300,
-          });
-          return new File([pngBlob], file.name.replace(/\.eps[f]?$/i, '.png'), { type: 'image/png' });
-        }
-
-        if (format === 'raw') {
-          const { convertRawToBlob } = await import('../helpers/raw');
-          const pngBlob = await convertRawToBlob(file);
-          return new File([pngBlob], file.name.replace(/\.\w+$/i, '.png'), { type: 'image/png' });
-        }
-
-        return file;
-      },
     },
 
     // 3. Scene rendering and synthesis namespace
@@ -423,11 +387,9 @@ export function createPixelService(
     // 5. Utility namespace
     utils: {
       getRenderPipeline: PixelUtils.getRenderPipeline,
-      detectFormat: PixelUtils.detectFormat,
       fetchFromUrl: PixelUtils.fetchFromUrl,
       download: PixelUtils.download,
       probeEngines: PixelUtils.probeEngines,
-      getExportFilename: PixelUtils.getExportFilename,
     },
 
     // 5. Cache management namespace (keep as is)

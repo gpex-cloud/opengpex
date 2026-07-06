@@ -108,29 +108,27 @@ export class WorkerProxy {
   }
 
   /**
-   * Transcodes SVG to PNG raster via resvg-wasm in Worker.
-   * Supports explicit width/height or falls back to maxDimension.
+   * Transcodes TIFF to PNG raster via wasm-vips in Worker.
+   * Handles all TIFF variants: LZW/ZIP/JPEG compression, 16-bit, CMYK, BigTIFF.
    */
-  async transcodeSvg(blob: Blob, params?: { width?: number; height?: number; maxDimension?: number }): Promise<Blob> {
-    const result = await workerBridge.request<{ blob: Blob }>('TRANSCODE_SVG', {
+  async transcodeTiff(blob: Blob): Promise<Blob> {
+    const result = await workerBridge.request<{ blob: Blob }>('TRANSCODE_TIFF', {
       blob,
-      width: params?.width,
-      height: params?.height,
-      maxDimension: params?.maxDimension,
     });
     return result.blob;
   }
 
   /**
-   * Transcodes EPS to PNG raster via Ghostscript WASM in Worker.
-   * Requires explicit width, height, and dpi.
+   * Encodes RGBA ImageData to TIFF blob via wasm-vips in Worker.
+   * Supports none/lzw/zip compression and DPI metadata injection.
    */
-  async transcodeEps(blob: Blob, params: { width: number; height: number; dpi: number }): Promise<Blob> {
-    const result = await workerBridge.request<{ blob: Blob }>('TRANSCODE_EPS', {
-      blob,
-      width: params.width,
-      height: params.height,
-      dpi: params.dpi,
+  async encodeTiff(imageData: ImageData, options: { compression: string; dpi: number }): Promise<Blob> {
+    const result = await workerBridge.request<{ blob: Blob }>('ENCODE_TIFF', {
+      data: imageData.data,
+      width: imageData.width,
+      height: imageData.height,
+      compression: options.compression,
+      dpi: options.dpi,
     });
     return result.blob;
   }

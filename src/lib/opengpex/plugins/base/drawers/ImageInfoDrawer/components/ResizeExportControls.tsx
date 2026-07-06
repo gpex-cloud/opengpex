@@ -34,7 +34,7 @@ import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
 
 import { ExifData, CommandInstance } from "@opengpex/editor/core/types";
-import { formatPrintSize, DPI_PRESETS } from "@opengpex/editor/core/helpers/dpi";
+import { formatPrintSize, DPI_PRESETS } from "@opengpex/editor/core/files";
 import * as P from "../protocols";
 import {
   deriveResizeState,
@@ -128,7 +128,9 @@ export function ResizeExportControls({
           ? "image/jpeg"
           : val === "AVIF"
             ? "image/avif"
-            : "image/webp";
+            : val === "TIFF"
+              ? "image/tiff"
+              : "image/webp";
     updateConfig({ format: format as P.ExportFormat });
   };
 
@@ -283,7 +285,30 @@ export function ResizeExportControls({
       </div>
 
       <div className="border-t border-[var(--border-subtle)] space-y-2.5">
-        {config.format !== "image/png" && (
+        {config.format === "image/tiff" && (
+          <div className="flex items-center gap-2 px-1 mt-3 animate-in fade-in slide-in-from-top-1 duration-300">
+            <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
+              Compress
+            </span>
+            <ActionDropdown
+              onSelect={(val: string) => {
+                updateConfig({ tiffCompression: val as 'none' | 'lzw' | 'zip' });
+              }}
+              className="shrink-0"
+              options={[
+                { label: "None", value: "none", description: "uncompressed" },
+                { label: "LZW", value: "lzw", description: "universal, fast" },
+                { label: "ZIP", value: "zip", description: "smaller, slower" },
+              ]}
+              trigger={
+                <button className="flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-stage)] text-[10px] font-black text-[var(--text-main)] tabular-nums hover:bg-[var(--border-subtle)] transition-colors uppercase">
+                  {config.tiffCompression || "none"} <ChevronDown size={8} className="opacity-40" />
+                </button>
+              }
+            />
+          </div>
+        )}
+        {config.format !== "image/png" && config.format !== "image/tiff" && (
           <div className="flex items-center gap-2 px-1 mt-3 animate-in fade-in slide-in-from-top-1 duration-300">
             <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-8">
               Quality
@@ -388,6 +413,11 @@ export function ResizeExportControls({
                   label: "AVIF",
                   value: "AVIF",
                   description: "small, next-gen",
+                },
+                {
+                  label: "TIFF",
+                  value: "TIFF",
+                  description: "print, lossless",
                 },
               ]}
               trigger={

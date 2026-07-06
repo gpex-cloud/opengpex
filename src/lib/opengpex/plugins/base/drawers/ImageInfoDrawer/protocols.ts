@@ -20,7 +20,7 @@
 export const PLUGIN_ID = 'drawers.image_info';
 export const PLUGIN_AUTHOR = 'opengpex';
 
-export type ExportFormat = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/avif';
+export type ExportFormat = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/avif' | 'image/tiff';
 
 export interface ExportConfig {
     pixels: { w: number; h: number };
@@ -32,6 +32,8 @@ export interface ExportConfig {
     dpi: number;
     /** When true, changing DPI auto-resamples pixels to maintain physical size. */
     resample: boolean;
+    /** TIFF compression method (only used when format is 'image/tiff') */
+    tiffCompression?: 'none' | 'lzw' | 'zip';
 }
 
 /* Constants */

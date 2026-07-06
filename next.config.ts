@@ -40,6 +40,21 @@ if (!fs.existsSync(userRegistryPath)) {
 const nextConfig: NextConfig = {
   reactStrictMode: true,
 
+  // Cross-Origin Isolation headers: enable SharedArrayBuffer for WASM multi-threading
+  // Required by wasm-vips (pthreads) and benefits other heavy WASM workloads.
+  // credentialless mode allows cross-origin resources without CORP headers.
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          { key: "Cross-Origin-Embedder-Policy", value: "credentialless" },
+        ],
+      },
+    ];
+  },
+
   // Prevent Next.js/Turbopack from trying to bundle unzipper and its dynamic requires.
   // @huggingface/transformers + onnxruntime-web are client-only (Web Worker inference)
   // and must not be resolved/bundled server-side.

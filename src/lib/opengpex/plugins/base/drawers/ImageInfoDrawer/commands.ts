@@ -18,10 +18,9 @@
  */
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
+import type { ImageMetadata } from '@opengpex/editor/core/files';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
-import { MetadataHelper } from '@opengpex/editor/core/helpers/metadata';
-import { injectPngDpi } from '@opengpex/editor/core/helpers/dpi';
 import { calcFinalDims, clipBoxToExportShape } from './utils';
 import { FormatConverter } from './services/FormatConverter';
 
@@ -77,40 +76,63 @@ export const IMAGE_INFO_COMMANDS = {
                }).length
             );
 
-            let blob = await FormatConverter.export(ctx, {
-               format: config.format,
-               quality: config.quality,
-               isClipMode: !!(isClipMode && cropBox),
-               cropBox
-            });
-
-            const actualFormat = (blob as Blob).type || config.format;
-            if (actualFormat !== config.format) {
-               console.warn(`[ExportDrawer] Browser fallback: Requested ${config.format} but browser produced ${actualFormat}.`);
-            }
-
-            const extension = actualFormat.split('/')[1] || 'png';
-            const filename = await pixels.utils.getExportFilename(activeFrame.name, exportW, exportH, extension);
-
-            // Inject DPI & EXIF metadata into exported file
-            // Use pending config.dpi if set, otherwise fall back to frame's committed dpi
+            const { files } = ctx;
             const dpi = config.dpi || activeFrame.dpi || 72;
-            const exif = activeFrame.layers.byId[activeFrame.layers.order[0]]?.metadata?.exif;
 
-            if (actualFormat === 'image/jpeg') {
-               // JPEG: inject EXIF (optionally full original EXIF + always DPI)
-               blob = await MetadataHelper.injectToBlob(
-                  blob as Blob,
-                  { engine: 'canvas2d', version: '2.1.0-hybrid', renderMode: 'original', timestamp: Date.now(), isSafeExport: true, viewportScale: 1 },
-                  config.keepExif ? exif : undefined,
-                  dpi
-               );
-            } else if (actualFormat === 'image/png') {
-               // PNG: inject pHYs chunk for DPI
-               blob = await injectPngDpi(blob as Blob, dpi);
+            // Retrieve layer metadata for EXIF passthrough
+            const baseLayer = activeFrame.layers.byId[activeFrame.layers.order[0]];
+            const layerMeta = baseLayer?.metadata?.imageMetadata as ImageMetadata | undefined;
+
+            let blob: Blob;
+
+            if (config.format === 'image/avif') {
+               // AVIF: use dedicated worker path (FormatConverter handles AVIF encoding)
+               blob = await FormatConverter.export(ctx, {
+                  format: config.format,
+                  quality: config.quality,
+                  isClipMode: !!(isClipMode && cropBox),
+                  cropBox
+               });
+            } else if (config.format === 'image/tiff') {
+               // TIFF: render raw bitmap → TiffHandler.encode via files service
+               const bitmap = (isClipMode && cropBox
+                  ? await pixels.render.shapeToBlob(activeFrame, cropBox, { format: 'raw', quality: 1 })
+                  : await pixels.render.frameToBlob(activeFrame, { format: 'raw', quality: 1 })) as ImageBitmap;
+
+               blob = await files.encode(bitmap, config.format, {
+                  quality: 1,
+                  tiffCompression: config.tiffCompression || 'none',
+                  metadata: layerMeta,
+                  exportConfig: {
+                     dpi,
+                     writeSoftwareTag: true,
+                  }
+               } as import('@opengpex/editor/core/files').EncodeOptions & { tiffCompression?: string });
+            } else {
+               // JPEG/PNG/BMP/WebP: render raw bitmap → files.encode (unified metadata injection)
+               const bitmap = (isClipMode && cropBox
+                  ? await pixels.render.shapeToBlob(activeFrame, cropBox, { format: 'raw', quality: 1 })
+                  : await pixels.render.frameToBlob(activeFrame, { format: 'raw', quality: 1 })) as ImageBitmap;
+
+               blob = await files.encode(bitmap, config.format, {
+                  quality: config.quality ? config.quality / 100 : 0.92,
+                  metadata: layerMeta,
+                  exportConfig: {
+                     dpi,
+                     preserveExif: config.keepExif,
+                     writeSoftwareTag: true,
+                  }
+               });
             }
 
-            await pixels.utils.download(blob as Blob, filename);
+            const actualFormat = blob.type || config.format;
+            // Map MIME to extension (tiff needs explicit mapping since split gives 'tiff' correctly,
+            // but blob.type might be empty for TIFF blobs constructed manually)
+            const extensionMap: Record<string, string> = { 'image/tiff': 'tiff', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/avif': 'avif' };
+            const extension = extensionMap[actualFormat] || actualFormat.split('/')[1] || 'png';
+            const filename = files.getExportFilename(activeFrame.name, exportW, exportH, extension);
+
+            await pixels.utils.download(blob, filename);
          } catch (err) {
             console.error('[ExportPanel] Download failed:', err);
          }

@@ -21,9 +21,7 @@
 
 import { EditorCommand, EditorContextValue, Frame, LocalShape, asLocalShape, Layer } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
-import { MetadataHelper } from '@opengpex/editor/core/helpers/metadata';
-import { extractDpiFromExif, DPI_PRESETS } from '@opengpex/editor/core/helpers/dpi';
-import { getVectorIntrinsicSize } from '@opengpex/editor/core/helpers/vector';
+import { DPI_PRESETS, getVectorIntrinsicSize } from '@opengpex/editor/core/files';
 import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
@@ -38,7 +36,7 @@ export const FrameCreateCommands = {
     name: 'Initialize Trunk Frame',
     execute: async (ctx: EditorContextValue, payload: { source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }): Promise<string> => {
       const { source, switchFrame = true, extra } = payload;
-      const { assets, pixels, actions, state, geometry } = ctx;
+      const { assets, pixels, files, actions, state, geometry } = ctx;
       let file: File;
       let sourceType: 'local' | 'url' = 'local';
 
@@ -52,18 +50,15 @@ export const FrameCreateCommands = {
         file = source;
       }
 
-      let safeFile = file;
-      const format = pixels.utils.detectFormat(file);
-
-      // Extract EXIF from original file BEFORE transcoding (RAW/HEIC contain rich EXIF that transcoded PNG won't carry)
-      const exif = await MetadataHelper.extractExif(file);
+      const format = files.detectFormat(file);
       let chosenFrameDpi: number | undefined; // Tracks user-chosen DPI for vector imports
+      let decodeOptions: { dpi?: number; targetWidth?: number; targetHeight?: number } | undefined;
 
+      // For vector formats: ask user for rasterization DPI before decoding
       if (format === 'svg' || format === 'eps') {
-        // Vector format: lightweight main-thread size parsing (no Worker/WASM needed)
         const formatLabel = format.toUpperCase();
         const DEFAULT_DPI = 300;
-        const MAX_RASTER_DIMENSION = 16384; // Safety limit: prevent OOM on extreme sizes
+        const MAX_RASTER_DIMENSION = 16384;
 
         let intrinsicSize: { w: number; h: number };
         try {
@@ -89,7 +84,6 @@ export const FrameCreateCommands = {
         let targetWidth = Math.round(intrinsicSize.w * scale);
         let targetHeight = Math.round(intrinsicSize.h * scale);
 
-        // Clamp to safety maximum to prevent memory exhaustion
         if (targetWidth > MAX_RASTER_DIMENSION || targetHeight > MAX_RASTER_DIMENSION) {
           const clampRatio = MAX_RASTER_DIMENSION / Math.max(targetWidth, targetHeight);
           targetWidth = Math.round(targetWidth * clampRatio);
@@ -97,33 +91,35 @@ export const FrameCreateCommands = {
           actions.notifyHUD(`Output clamped to ${targetWidth}×${targetHeight} px (maximum ${MAX_RASTER_DIMENSION} px per side).`, 'info');
         }
 
-        try {
-          safeFile = await actions.withSignal(
-            'sys.asset.transcoding',
-            () => pixels.process.preTranscode(file, { targetWidth, targetHeight, dpi })
-          );
-        } catch (err) {
-          console.error(`[FrameCreate] ${formatLabel} rasterization failed:`, err);
-          actions.notifyHUD(`${formatLabel} rasterization failed. Try a lower resolution or check the file.`, 'error');
-          return '';
-        }
-      } else if (format === 'heic' || format === 'raw') {
-        safeFile = await actions.withSignal(
-          'sys.asset.transcoding',
-          () => pixels.process.preTranscode(file)
-        );
+        decodeOptions = { targetWidth, targetHeight, dpi };
       }
+
+      // Unified decode: transcoding + metadata extraction in one atomic call
+      let decoded;
+      try {
+        decoded = await actions.withSignal(
+          files.needsTranscoding(file) ? 'sys.asset.transcoding' : '',
+          () => files.decode(file, decodeOptions)
+        );
+      } catch (err) {
+        console.error(`[FrameCreate] File decode failed:`, err);
+        actions.notifyHUD(`Failed to process file. The format may not be supported.`, 'error');
+        return '';
+      }
+
+      const { safeFile, dimensions: decodeDimensions, metadata } = decoded;
 
       // 1. Register original asset
       const assetId = await assets.register(safeFile);
       const assetUrl = assets.getURL(assetId)!;
 
-      // 2. Concurrently execute time-consuming tasks: decode dimensions, decode bounding box, generate thumbnail
-      const [dimension, contentBounds, thumbBlob] = await Promise.all([
-        pixels.decode.dimensions(assetUrl),
+      // 2. Concurrently: decode content bounds + generate thumbnail
+      // (dimensions already known from decode result)
+      const [contentBounds, thumbBlob] = await Promise.all([
         pixels.decode.contentBounds(assetUrl),
         pixels.process.thumbnail(assetUrl, 256)
       ]);
+      const dimension = decodeDimensions;
 
       // 3. Register thumbnail asset
       const thumbAssetId = await assets.register(thumbBlob);
@@ -138,26 +134,28 @@ export const FrameCreateCommands = {
       );
       const defaultCanvasCropBox = asLocalShape({ x: dimension.w * 0.25, y: dimension.h * 0.25, w: dimension.w * 0.5, h: dimension.h * 0.5 });
 
-      // 5. Assemble domain entities
+      // 5. Assemble domain entities (metadata now comes from files.decode)
       const baseLayer = LayerFactory.getNewLayer({
         name: 'Background',
         src: assetUrl,
         assetId,
         cx: 0,
         cy: 0,
-        locked: true, // Background layer is locked by default (like Photoshop)
+        locked: true,
         bounding: dimension,
         visibleShape: asLocalShape(contentBounds),
-        metadata: { format: safeFile.type, size: safeFile.size, source: sourceType, originalName: safeFile.name, exif }
+        metadata: { format: safeFile.type, size: safeFile.size, source: sourceType, originalName: safeFile.name, imageMetadata: metadata }
       });
 
       const expandedLayers = LayerFactory.expandLayers([baseLayer]);
 
+      // Use original file name (not transcoded safeFile name) so HEIC/RAW/SVG keep their original names
+      const frameName = file.name.replace(/\.[^.]+$/, '');
       const frame = LayerFactory.getNewFrame({
         id: `f-${Date.now().toString(36)}-trunk`,
-        name: safeFile.name,
+        name: frameName || safeFile.name,
         canvas: dimension,
-        dpi: chosenFrameDpi || extractDpiFromExif(exif),
+        dpi: chosenFrameDpi || metadata.dpi,
         layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
         activeLayerId: baseLayer.id,
         camera: initialCamera,

@@ -4,6 +4,16 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.21
+
+- Introduce unified `FileService` module to handle image decoding, encoding, and metadata management, replacing legacy format-specific helpers
+- Add native TIFF format support (import/export) via `wasm-vips` client-side Web Worker, including None, LZW, and ZIP compression options
+- Configure Next.js with Cross-Origin Isolation headers (`COOP`/`COEP`) to enable SharedArrayBuffer multi-threading for wasm-vips
+- Refactor the postinstall script `postinstall-exts.mjs` to copy dedicated WASM worker scripts to the public assets directory for resvg, Ghostscript, and wasm-vips
+- Streamline trunk frame creation to decode files and extract metadata (including EXIF and DPI) in a single atomic step using the new file service
+
+---
+
 ## v1.0.0-beta.20
 
 - Refactor global history into independent, per-frame undo/redo stacks (`state.history.byFrameId`) to isolate history state and prevent viewport jumps
