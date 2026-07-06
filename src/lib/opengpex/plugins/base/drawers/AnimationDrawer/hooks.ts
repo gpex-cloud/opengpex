@@ -45,7 +45,7 @@ export interface AnimationSequence {
 export function detectAnimationSequences(frame: Frame): AnimationSequence[] {
    const hostLayers = frame.layers.order
       .map(id => frame.layers.byId[id])
-      .filter((l): l is Layer => !!l && !l.parentId);
+      .filter((l): l is Layer => !!l && !l.hostId);
 
    // Group by gifSequenceId
    const gifGroups = new Map<string, Layer[]>();

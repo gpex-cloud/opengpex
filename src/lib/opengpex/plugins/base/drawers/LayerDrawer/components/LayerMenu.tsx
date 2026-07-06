@@ -30,14 +30,15 @@ import {
   Image as ImageIcon,
   Copy,
 } from "lucide-react";
-import { useEditorState } from "@opengpex/editor/core/context";
-import { useLayerCommands } from "../hooks";
+import { useEditorServices, usePluginCommands } from "@opengpex/editor/core/context";
 import ActionDropdown, {
   ActionOption,
 } from "@opengpex/editor/widgets/ActionDropdown";
+import type { LayerDrawerCommandsMap } from "../commands.d";
 
 interface LayerMenuProps {
   layerId: string;
+  activeFrameId: string;
   hasSubLayers: boolean;
   childLayersLength: number;
   hasMasks: boolean;
@@ -52,6 +53,7 @@ interface LayerMenuProps {
 export const LayerMenu = React.memo(
   ({
     layerId,
+    activeFrameId,
     hasSubLayers,
     childLayersLength,
     hasMasks,
@@ -62,8 +64,8 @@ export const LayerMenu = React.memo(
     isMasksExpanded,
     setIsMasksExpanded,
   }: LayerMenuProps) => {
-    const { activeFrame } = useEditorState();
-    const { removeCmd, duplicateLayerCmd, mergeRasterize } = useLayerCommands();
+    const { actions } = useEditorServices();
+    const { removeCmd, duplicateLayerCmd } = usePluginCommands<LayerDrawerCommandsMap>();
 
     const options: ActionOption[] = [];
 
@@ -123,9 +125,9 @@ export const LayerMenu = React.memo(
       } else if (val === "close-masks") {
         setIsMasksExpanded(false);
       } else if (val === "rasterize") {
-        mergeRasterize.execute({ layerId });
+        actions.adv.layer.merge.rasterize.execute({ layerId });
       } else if (val === "delete") {
-        removeCmd?.execute({ frameId: activeFrame!.id, layerId });
+        removeCmd?.execute({ frameId: activeFrameId, layerId });
       }
     };
 

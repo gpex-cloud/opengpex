@@ -179,9 +179,9 @@ export const LayerFactory = {
 
     layers.forEach(layer => {
       result.push(layer);
-      if (layer.parentId) return;
+      if (layer.hostId) return;
 
-      const hasChildren = layers.some(l => l.parentId === layer.id);
+      const hasChildren = layers.some(l => l.hostId === layer.id);
       if (hasChildren) return;
 
       Object.entries(LAYER_ROLE_CONFIGS).forEach(([role, _config]) => {
@@ -191,7 +191,7 @@ export const LayerFactory = {
           id: `${layer.id}_${role}`,
           name: layer.name,
           role: role as LayerRole,
-          parentId: layer.id,
+          hostId: layer.id,
         });
       });
     });
@@ -204,7 +204,7 @@ export const LayerFactory = {
    */
   sortLayers(layers: Layer[]): Layer[] {
     const hostOrderMap = new Map<string, number>();
-    layers.filter(l => !l.parentId).forEach((l, i) => hostOrderMap.set(l.id, i));
+    layers.filter(l => !l.hostId).forEach((l, i) => hostOrderMap.set(l.id, i));
 
     return [...layers].sort((a, b) => {
       const orderA = a.role ? roleConfigMap[a.role]?.order ?? HOST_LAYER_ORDER : HOST_LAYER_ORDER;
@@ -212,8 +212,8 @@ export const LayerFactory = {
 
       if (orderA !== orderB) return orderA - orderB;
 
-      const hostIdA = a.parentId || a.id;
-      const hostIdB = b.parentId || b.id;
+      const hostIdA = a.hostId || a.id;
+      const hostIdB = b.hostId || b.id;
       return (hostOrderMap.get(hostIdA) ?? 0) - (hostOrderMap.get(hostIdB) ?? 0);
     });
   },
@@ -227,14 +227,14 @@ export const LayerFactory = {
    * getTriplet: Identifies and gets the triplet (Host/Exchange/Frag) the layer belongs to and its dirty state.
    */
   getTriplet(layer: Layer, layers: Layer[]) {
-    const isHost = !layer.parentId || layer.role === 'host';
-    const hostId = isHost ? layer.id : layer.parentId;
+    const isHost = !layer.hostId || layer.role === 'host';
+    const hostId = isHost ? layer.id : layer.hostId;
 
     const host = layers.find(l => l.id === hostId);
     if (!host) return null;
 
-    const exchange = layers.find(l => l.parentId === hostId && l.role === 'exchange');
-    const frag = layers.find(l => l.parentId === hostId && l.role === 'frag');
+    const exchange = layers.find(l => l.hostId === hostId && l.role === 'exchange');
+    const frag = layers.find(l => l.hostId === hostId && l.role === 'frag');
 
     if (!exchange) return null;
 
@@ -267,7 +267,7 @@ export const LayerFactory = {
 
     if (hasGeoUpdate) {
       layers.forEach(l => {
-        if (l.parentId === layerId) {
+        if (l.hostId === layerId) {
           const config = l.role ? roleConfigMap[l.role] : undefined;
           if (config?.follow) {
             const syncPatch: Partial<Layer> = {};
@@ -293,20 +293,20 @@ export const LayerFactory = {
    * Host layer = top-level layer with empty parentId, which is the user-visible logical layer unit.
    */
   getHostLayers(layers: Layer[]): Layer[] {
-    return layers.filter(l => !l.parentId);
+    return layers.filter(l => !l.hostId);
   },
 
   /**
    * collectDescendants: BFS collects root IDs plus all their descendants from a flat parent-child list.
    * Generic utility for both layer and frame tree traversal.
    */
-  collectDescendants(rootIds: string[], items: { id: string; parentId?: string | null }[]): Set<string> {
+  collectDescendants(rootIds: string[], items: { id: string; hostId?: string | null }[]): Set<string> {
     const result = new Set<string>(rootIds);
     let prev: number;
     do {
       prev = result.size;
       for (const item of items) {
-        if (item.parentId && result.has(item.parentId)) result.add(item.id);
+        if (item.hostId && result.has(item.hostId)) result.add(item.id);
       }
     } while (result.size !== prev);
     return result;
@@ -316,7 +316,7 @@ export const LayerFactory = {
    * canLayerBeActivated: Determines if the layer can be activated (selected) by the user.
    */
   canLayerBeActivated(layer: Layer): boolean {
-    if (!layer.parentId) return true;
+    if (!layer.hostId) return true;
     if (layer.role && layer.role in LAYER_ROLE_CONFIGS) return true;
     return false;
   },

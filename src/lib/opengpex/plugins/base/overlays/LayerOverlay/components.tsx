@@ -171,7 +171,7 @@ function LayerOverlayContent() {
     >
       {activeFrame.layers.order
         .map((id) => activeFrame.layers.byId[id])
-        .filter((layer) => layer && !layer.parentId)
+        .filter((layer) => layer && !layer.hostId)
         .map((layer, idx) => (
           <LayerOverlayItem
             key={layer.id}

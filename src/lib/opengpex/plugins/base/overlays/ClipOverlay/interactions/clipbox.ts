@@ -114,7 +114,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
         const activeLayer = frame.activeLayerId ? frame.layers.byId[frame.activeLayerId] : undefined;
         const exchangeLayer = (activeLayer?.role === 'exchange')
           ? activeLayer
-          : frame.layers.order.map(id => frame.layers.byId[id]).find(l => l.role === 'exchange' && l.parentId === frame.activeLayerId);
+          : frame.layers.order.map(id => frame.layers.byId[id]).find(l => l.role === 'exchange' && l.hostId === frame.activeLayerId);
 
         if (exchangeLayer) {
           // Bounding-centered matrix: content center in world = (cx + v.x, cy + v.y),

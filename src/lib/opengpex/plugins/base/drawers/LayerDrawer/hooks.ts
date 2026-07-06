@@ -86,9 +86,9 @@ export const useLayerCommands = () => {
         },
 
         // Helpers
-        getChildLayers: (parentId: string) => {
+        getChildLayers: (hostId: string) => {
             if (!activeFrame) return [];
-            return activeFrame.layers.order.map(id => activeFrame.layers.byId[id]).filter(l => l.parentId === parentId);
+            return activeFrame.layers.order.map(id => activeFrame.layers.byId[id]).filter(l => l.hostId === hostId);
         }
 
     }), [actions, activeFrame, reorderCmd, removeCmd, visibilityCmd, lockCmd, renameCmd, addBlankLayerCmd, duplicateLayerCmd, syncOverlayCmd, syncMaskCmd]);

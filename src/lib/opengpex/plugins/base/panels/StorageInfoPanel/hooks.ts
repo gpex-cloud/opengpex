@@ -190,22 +190,22 @@ export const useStorageMetrics = () => {
           originalName: l.metadata?.originalName,
           format: l.metadata?.format,
           exif: l.metadata?.exif,
-          parentId: l.parentId,
+          hostId: l.hostId,
           role: l.role
         };
 
         allLayerMetrics[l.id] = metric;
 
-        if (l.parentId) {
-          if (!subLayersMap[l.parentId]) subLayersMap[l.parentId] = [];
-          subLayersMap[l.parentId].push(metric);
+        if (l.hostId) {
+          if (!subLayersMap[l.hostId]) subLayersMap[l.hostId] = [];
+          subLayersMap[l.hostId].push(metric);
         }
       });
 
       const layers: P.LayerMetric[] = [];
       f.layers.order.forEach(id => {
         const metric = allLayerMetrics[id];
-        if (metric && !metric.parentId) {
+        if (metric && !metric.hostId) {
           metric.subLayers = subLayersMap[metric.id] || [];
           layers.push(metric);
         }

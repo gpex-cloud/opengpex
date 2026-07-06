@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-/* eslint-disable react/display-name, react-hooks/rules-of-hooks */
+/* eslint-disable react/display-name */
 
 "use client";
 
@@ -31,64 +31,55 @@ import {
   AnimatePresence,
 } from "framer-motion";
 import {
-  useEditorState,
   useEditorServices,
-  usePluginSignals,
+  usePluginCommands,
 } from "@opengpex/editor/core/context";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import EditableLabel from "@opengpex/editor/widgets/EditableLabel";
 import ImageAsset from "@opengpex/editor/widgets/ImageAsset";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
-import { useLayerCommands } from "../hooks";
-import { VectorMask, BitmapMask } from "@opengpex/editor/core/types";
+import { Layer, VectorMask, BitmapMask } from "@opengpex/editor/core/types";
 import { SubLayerItem } from "./SubLayerItem";
 import { MaskItem } from "./MaskItem";
 import { LayerMenu } from "./LayerMenu";
-import type { LayerDrawerSignalsMap } from "../commands.d";
+import type { LayerDrawerCommandsMap } from "../commands.d";
 
 interface LayerItemProps {
   layerId: string;
+  layer: Layer;
   index: number;
   activeFrameId: string;
+  isActive: boolean;
   canDelete: boolean;
   isScrolling?: boolean;
+  childLayers: Layer[];
+  showSubLayers: boolean;
 }
 
 export const LayerItem = React.memo(
   ({
-    layerId,
+    layer,
     index,
     activeFrameId,
+    isActive,
     canDelete,
     isScrolling,
+    childLayers,
+    showSubLayers,
   }: LayerItemProps) => {
-    const { state, activeLayer } = useEditorState();
-
-    // Local subscription
-    const frame = state.frames.byId[activeFrameId];
-    const layer = frame?.layers.byId[layerId];
-
     const { actions } = useEditorServices();
     const {
       visibilityCmd,
       lockCmd,
       renameCmd,
       syncOverlayCmd,
-      getChildLayers,
-    } = useLayerCommands();
+    } = usePluginCommands<LayerDrawerCommandsMap>();
 
     const containerRef = useRef<HTMLDivElement>(null);
     const dragControls = useDragControls();
     const [isMasksExpanded, setIsMasksExpanded] = React.useState(false);
     const [isSubLayersExpanded, setIsSubLayersExpanded] = React.useState(false);
 
-    if (!layer) return null;
-
-    const isActive =
-      layer.id === activeLayer?.id || activeLayer?.parentId === layer.id;
-    const childLayers = getChildLayers(layer.id);
-    const { showSubLayersSignal } = usePluginSignals<LayerDrawerSignalsMap>();
-    const showSubLayers = showSubLayersSignal?.value ?? false;
     const hasSubLayers = childLayers.length > 0 && showSubLayers;
     // Only show sub-layers dot if there are non-internal (exchange/frag) child layers
     const hasVisibleSubLayersDot = childLayers.some(cl => cl.role !== 'exchange' && cl.role !== 'frag') && showSubLayers;
@@ -315,6 +306,7 @@ export const LayerItem = React.memo(
 
               <LayerMenu
                 layerId={layer.id}
+                activeFrameId={activeFrameId}
                 hasSubLayers={hasSubLayers}
                 childLayersLength={childLayers.length}
                 hasMasks={hasMasks}

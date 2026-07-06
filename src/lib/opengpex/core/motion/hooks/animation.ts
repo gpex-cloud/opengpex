@@ -202,7 +202,7 @@ export function useLayerSync(
   }, [layer, animate, resolveVars, volatileRef, ref]);
 
   const compositeKey = useMemo(() => frameId ? LayerUtils.getCompositeKey(frameId, layer.id) : null, [frameId, layer.id]);
-  const parentCompositeKey = useMemo(() => (frameId && layer.parentId) ? LayerUtils.getCompositeKey(frameId, layer.parentId) : null, [frameId, layer.parentId]);
+  const parentCompositeKey = useMemo(() => (frameId && layer.hostId) ? LayerUtils.getCompositeKey(frameId, layer.hostId) : null, [frameId, layer.hostId]);
 
   // 4. Fast track sync: subscribe to Ticker to achieve zero-latency high-frequency interactions
   useTicker(() => {

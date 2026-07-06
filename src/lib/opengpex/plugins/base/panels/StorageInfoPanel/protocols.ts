@@ -80,7 +80,7 @@ export interface LayerMetric {
   originalName?: string;
   format?: string;
   exif?: ExifData;
-  parentId?: string;
+  hostId?: string;
   role?: string;
   subLayers?: LayerMetric[];
 }

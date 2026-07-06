@@ -92,7 +92,7 @@ export const FrameResizeCommands = {
       // const isUniform = Math.abs(scaleX - scaleY) < 0.001;
 
       const patches: Record<string, Partial<Layer>> = {};
-      const hostLayers = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]).filter(l => !l.parentId || l.role === 'host');
+      const hostLayers = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]).filter(l => !l.hostId || l.role === 'host');
 
       for (const layer of hostLayers) {
         try {

@@ -72,7 +72,7 @@ export const LayerPeelCommands = {
           // Both parentId and role ('frag') ensure it is treated as an internal sub-layer and hidden from the Layer List.
           const frags = activeFrame.layers.order
             .map(id => activeFrame.layers.byId[id])
-            .filter(l => l.parentId === host.id && l.role === 'frag');
+            .filter(l => l.hostId === host.id && l.role === 'frag');
 
           const isDuplicate = frags.some(f =>
             Math.abs(f.cx - exchange.cx) < 1 && Math.abs(f.cy - exchange.cy) < 1
@@ -84,7 +84,7 @@ export const LayerPeelCommands = {
               ...exchange,
               id: stampId,
               role: 'frag' as const,
-              parentId: host.id,
+              hostId: host.id,
               interactive: false,
             };
 
@@ -168,7 +168,7 @@ export const LayerPeelCommands = {
       // Find any temporary stamp layers
       const frags = activeFrame.layers.order
         .map(id => activeFrame.layers.byId[id])
-        .filter(l => l.parentId === host.id && l.role === 'frag');
+        .filter(l => l.hostId === host.id && l.role === 'frag');
 
       // Dirty triplet → rollback: remove the hole mask from host, reset
       // exchange (and frag if present). This restores the host to its
@@ -225,7 +225,7 @@ export const LayerPeelCommands = {
         // Find all temporary stamp layers
         const frags = activeFrame.layers.order
           .map(id => activeFrame.layers.byId[id])
-          .filter(l => l.parentId === host.id && l.role === 'frag');
+          .filter(l => l.hostId === host.id && l.role === 'frag');
 
         try {
           // [3] Call PixelService to execute off-screen compositing.

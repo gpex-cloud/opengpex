@@ -248,7 +248,7 @@ export function createLayerService(
         ...layerData,
         vectorMasks: layerData.vectorMasks?.filter(m => !m.reserved) || [],
         name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id]), nameType),
-        parentId: undefined
+        hostId: undefined
       });
 
       const v = intersection.visibleShape.rect;
@@ -435,7 +435,7 @@ export function createLayerService(
         assetId: finalAsset.id,
         vectorMasks: layerData.vectorMasks?.filter(m => !m.reserved) || [],
         name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id]), nameType),
-        parentId: undefined,
+        hostId: undefined,
         visibleShape: asLocalShape({ x: 0, y: 0, w: trimmedRect.w, h: trimmedRect.h }, worldSelection.type),
         bounding: { w: trimmedRect.w, h: trimmedRect.h },
         cx,

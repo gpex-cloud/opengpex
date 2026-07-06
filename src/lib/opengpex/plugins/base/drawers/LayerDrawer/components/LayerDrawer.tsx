@@ -20,30 +20,41 @@
 "use client";
 
 import React, { useRef, useMemo, useState } from "react";
-import { Layers, Eye, ScanEye, CirclePlus, Film, ChevronRight, ChevronDown } from "lucide-react";
+import { Layers, Eye, ScanEye, CirclePlus, ChevronRight, ChevronDown } from "lucide-react";
 import { Reorder } from "framer-motion";
-import { useEditorState } from "@opengpex/editor/core/context";
+import { useEditorState, usePluginSignals } from "@opengpex/editor/core/context";
 import { Layer, Frame } from "@opengpex/editor/core/types";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import { useLayerCommands, useMaskEditMonitor } from "../hooks";
 import { MergeDownIcon, MergeVisibleIcon } from "@opengpex/editor/icons";
 import { LayerItem } from "./LayerItem";
+import type { LayerDrawerSignalsMap } from "../commands.d";
 
 export const LayerComponent = React.memo(function LayerComponent() {
-  const { activeFrame } = useEditorState();
+  const { activeFrame, activeLayer } = useEditorState();
   if (!activeFrame) return null;
-  return <LayerComponentInner activeFrame={activeFrame} />;
+  return <LayerComponentInner activeFrame={activeFrame} activeLayerId={activeLayer?.id} activeLayerHostId={activeLayer?.hostId} />;
 });
 
-function LayerComponentInner({ activeFrame }: { activeFrame: Frame }) {
+interface LayerComponentInnerProps {
+  activeFrame: Frame;
+  activeLayerId?: string;
+  activeLayerHostId?: string;
+}
+
+function LayerComponentInner({ activeFrame, activeLayerId, activeLayerHostId }: LayerComponentInnerProps) {
   const { reorder, mergeDown, mergeVisible, toggleAll, isolateSelection, addBlankLayerCmd } =
     useLayerCommands();
 
   // Monitor mask edit exit conditions (tool switch, mode change, mask deletion)
   useMaskEditMonitor();
 
-  // GIF sequence collapse state (collapsed by default)
-  const [gifCollapsed, setGifCollapsed] = useState<Record<string, boolean>>({});
+  // Read showSubLayers signal once in parent — pass value to children
+  const { showSubLayersSignal } = usePluginSignals<LayerDrawerSignalsMap>();
+  const showSubLayers = showSubLayersSignal?.value ?? false;
+
+  // Generic layer list collapse (expanded by default)
+  const [layersCollapsed, setLayersCollapsed] = useState(false);
 
   const [isScrolling, setIsScrolling] = React.useState(false);
   const scrollTimeout = useRef<NodeJS.Timeout | null>(null);
@@ -60,10 +71,34 @@ function LayerComponentInner({ activeFrame }: { activeFrame: Frame }) {
     () =>
       activeFrame.layers.order
         .map((id) => activeFrame.layers.byId[id])
-        .filter((l) => !l.parentId),
+        .filter((l) => !l.hostId),
     [activeFrame.layers],
   );
   const displayLayers = useMemo(() => [...hostLayers].reverse(), [hostLayers]);
+
+  // Pre-compute host index map for O(1) lookups (avoids O(N²) findIndex in render loop)
+  const hostIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    hostLayers.forEach((l, i) => map.set(l.id, i));
+    return map;
+  }, [hostLayers]);
+
+  // Pre-compute child layers map for all host layers
+  const childLayersMap = useMemo(() => {
+    const map = new Map<string, Layer[]>();
+    const allLayers = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]);
+    for (const layer of allLayers) {
+      if (layer.hostId) {
+        const existing = map.get(layer.hostId);
+        if (existing) {
+          existing.push(layer);
+        } else {
+          map.set(layer.hostId, [layer]);
+        }
+      }
+    }
+    return map;
+  }, [activeFrame.layers]);
 
   const handleReorder = (newDisplayOrder: Layer[]) => {
     reorder([...newDisplayOrder].reverse());
@@ -145,117 +180,85 @@ function LayerComponentInner({ activeFrame }: { activeFrame: Frame }) {
       <div className="flex flex-col gap-0">
         <div
           onScroll={handleScroll}
-          className="flex flex-col min-h-[200px] max-h-[600px] overflow-y-auto px-1 pb-2 custom-scrollbar [mask-image:linear-gradient(to_bottom,transparent,black_8px,black_calc(100%-8px),transparent)]"
+          className="flex flex-col min-h-[200px] max-h-[560px] overflow-y-auto px-1 pb-2 custom-scrollbar [mask-image:linear-gradient(to_bottom,transparent,black_8px,black_calc(100%-8px),transparent)]"
         >
           <div
             className={`pt-2 flex flex-col gap-1 ${isScrolling ? "pointer-events-none" : ""}`}
           >
-            {hostLayers.length > 0 &&
-              hostLayers.length < 5 &&
-              Array.from({ length: 5 - hostLayers.length }).map((_, i) => (
-                <div
-                  key={`placeholder-${i}`}
-                  className="h-[36px] rounded-lg border border-dashed border-[var(--border-subtle)] bg-transparent flex items-center px-2 gap-2 transition-colors shrink-0"
+            {hostLayers.length === 0 ? (
+              <div className="py-12 flex flex-col items-center justify-center border border-dashed border-[var(--border-subtle)] rounded-2xl bg-transparent mb-2">
+                <Layers size={20} className="text-[var(--text-muted)] mb-2" />
+                <p className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.15em]">
+                  Canvas Empty
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Collapse/expand toggle — always at top */}
+                <button
+                  onClick={() => setLayersCollapsed(prev => !prev)}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--bg-stage)]/50 border border-[var(--border-subtle)] hover:bg-[var(--bg-stage)] transition-colors w-full text-left"
                 >
-                  <div className="w-6 h-6 rounded-md border border-dashed border-[var(--border-subtle)] bg-transparent shrink-0 flex items-center justify-center">
-                    <div className="w-1 h-1 rounded-full bg-[var(--border-light)] " />
-                  </div>
-                  <div className="flex-1 h-1.5 w-16 bg-[var(--border-light)] rounded-full" />
-                </div>
-              ))}
+                  {layersCollapsed
+                    ? <ChevronRight size={10} className="text-[var(--text-muted)] shrink-0" />
+                    : <ChevronDown size={10} className="text-[var(--text-muted)] shrink-0" />
+                  }
+                  <Layers size={10} className="text-[var(--text-muted)] shrink-0" />
+                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-wide flex-1">
+                    {layersCollapsed ? "Show all layers" : "Hide all layers"}
+                  </span>
+                  <span className="text-[8px] font-bold text-[var(--text-muted)] tabular-nums">
+                    {hostLayers.length}
+                  </span>
+                </button>
 
-            <Reorder.Group
-              axis="y"
-              values={displayLayers}
-              onReorder={handleReorder}
-              className="flex flex-col gap-1"
-            >
-              {hostLayers.length === 0 ? (
-                <div className="py-12 flex flex-col items-center justify-center border border-dashed border-[var(--border-subtle)] rounded-2xl bg-transparent mb-2">
-                  <Layers size={20} className="text-[var(--text-muted)] mb-2" />
-                  <p className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.15em]">
-                    Canvas Empty
-                  </p>
-                </div>
-              ) : (
-                (() => {
-                  const renderedSeqIds = new Set<string>();
-                  const elements: React.ReactNode[] = [];
-
-                  for (const layer of displayLayers) {
-                    const seqId = layer.metadata?.gifSequenceId as string | undefined;
-
-                    // GIF sequence layer: render group header on first encounter
-                    if (seqId && !renderedSeqIds.has(seqId)) {
-                      renderedSeqIds.add(seqId);
-                      const seqLayers = displayLayers.filter(
-                        l => l.metadata?.gifSequenceId === seqId
-                      );
-                      const isCollapsed = gifCollapsed[seqId] !== false; // collapsed by default
-                      const visibleFrame = seqLayers.find(l => l.visible !== false);
-                      const visibleIdx = visibleFrame
-                        ? (visibleFrame.metadata?.gifFrameIndex as number ?? 0) + 1
-                        : 1;
-
-                      elements.push(
-                        <div key={`gif-group-${seqId}`} className="flex flex-col gap-0.5">
-                          <button
-                            onClick={() => setGifCollapsed(prev => ({ ...prev, [seqId]: !isCollapsed }))}
-                            className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-emerald-500/5 border border-emerald-500/20 hover:bg-emerald-500/10 transition-colors w-full text-left group"
-                          >
-                            {isCollapsed
-                              ? <ChevronRight size={10} className="text-emerald-500 shrink-0" />
-                              : <ChevronDown size={10} className="text-emerald-500 shrink-0" />
-                            }
-                            <Film size={10} className="text-emerald-500 shrink-0" />
-                            <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wide flex-1">
-                              GIF Sequence
-                            </span>
-                            <span className="text-[8px] font-bold text-[var(--text-muted)] tabular-nums">
-                              {visibleIdx}/{seqLayers.length}
-                            </span>
-                          </button>
-                          {!isCollapsed && seqLayers.map(seqLayer => {
-                            const hostIndex = hostLayers.findIndex(l => l.id === seqLayer.id);
-                            return (
-                              <LayerItem
-                                key={seqLayer.id}
-                                layerId={seqLayer.id}
-                                index={hostIndex}
-                                activeFrameId={activeFrame.id}
-                                canDelete={hostLayers.length > 1}
-                                isScrolling={isScrolling}
-                              />
-                            );
-                          })}
+                {/* Layer list + placeholders — only rendered when expanded */}
+                {!layersCollapsed && (
+                  <>
+                    {hostLayers.length < 5 &&
+                      Array.from({ length: 5 - hostLayers.length }).map((_, i) => (
+                        <div
+                          key={`placeholder-${i}`}
+                          className="h-[36px] rounded-lg border border-dashed border-[var(--border-subtle)] bg-transparent flex items-center px-2 gap-2 transition-colors shrink-0"
+                        >
+                          <div className="w-6 h-6 rounded-md border border-dashed border-[var(--border-subtle)] bg-transparent shrink-0 flex items-center justify-center">
+                            <div className="w-1 h-1 rounded-full bg-[var(--border-light)] " />
+                          </div>
+                          <div className="flex-1 h-1.5 w-16 bg-[var(--border-light)] rounded-full" />
                         </div>
-                      );
-                    } else if (seqId) {
-                      // Skip: already rendered as part of group
-                      continue;
-                    } else {
-                      // Normal layer
-                      const hostIndex = hostLayers.findIndex(l => l.id === layer.id);
-                      elements.push(
+                      ))}
+
+                    <Reorder.Group
+                      axis="y"
+                      values={displayLayers}
+                      onReorder={handleReorder}
+                      className="flex flex-col gap-1"
+                    >
+                      {displayLayers.map(layer => (
                         <LayerItem
                           key={layer.id}
                           layerId={layer.id}
-                          index={hostIndex}
+                          layer={layer}
+                          index={hostIndexMap.get(layer.id) ?? 0}
                           activeFrameId={activeFrame.id}
+                          isActive={layer.id === activeLayerId || activeLayerHostId === layer.id}
                           canDelete={hostLayers.length > 1}
                           isScrolling={isScrolling}
+                          childLayers={childLayersMap.get(layer.id) || emptyChildLayers}
+                          showSubLayers={showSubLayers}
                         />
-                      );
-                    }
-                  }
-
-                  return elements;
-                })()
-              )}
-            </Reorder.Group>
+                      ))}
+                    </Reorder.Group>
+                  </>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>
     </div>
   );
 }
+
+// Stable empty array reference to prevent unnecessary React.memo invalidation
+const emptyChildLayers: Layer[] = [];

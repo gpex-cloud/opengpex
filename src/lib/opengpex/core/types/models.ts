@@ -181,7 +181,8 @@ export interface Layer {
   birthCenter?: { cx: number; cy: number }; // Initial birth center (world coordinates)
 
   // Relationship attributes
-  parentId?: string;
+  hostId?: string;    // Triplet binding: exchange/frag → host layer (internal mechanism)
+  groupId?: string;   // Layer group membership: points to a type:'group' layer id (user-facing hierarchy)
   ancestor?: boolean; // Mark whether it is the "ancestor" layer (used as reference for coordinate alignment)
 }
 

@@ -51,8 +51,8 @@ export const plugin: EditorPlugin = {
    // --- 2. UI Entry ---
    icon: <Clapperboard size={20} />,
    slot: "SIDE_BAR",
-   side: "left",
-   order: 1210, // Just after ImageInfoDrawer (1200)
+   side: "right",
+   order: 3300, // Just after ImageInfoDrawer (1200)
    show: "frame-required",
 
    // --- 3. Core Implementation ---

@@ -63,6 +63,6 @@ export const LayerDrawerAPI = {
   signals: {
     maskEditing: MASK_EDITING_KEY,
     maskFocus: MASK_FOCUS_KEY,
-    showSubLayers: SHOW_SUB_LAYERS_KEY,
+    showSubLayers: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SHOW_SUB_LAYERS_KEY}` as const,
   },
 } as const;

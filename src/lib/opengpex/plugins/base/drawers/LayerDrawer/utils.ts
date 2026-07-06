@@ -62,7 +62,7 @@ export function calcFullLayerStack(
     hostLayers.forEach(host => {
         fullLayers.push(host);
         // Find all children belonging to this host (parentId match)
-        const children = allLayers.order.map(id => allLayers.byId[id]).filter(l => l.parentId === host.id);
+        const children = allLayers.order.map(id => allLayers.byId[id]).filter(l => l.hostId === host.id);
         fullLayers.push(...children);
     });
 

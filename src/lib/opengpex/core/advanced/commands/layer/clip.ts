@@ -239,11 +239,11 @@ export const LayerClipCommands = {
         // Calculate insertion index
         let insertIndex: number | undefined = undefined;
         if (activeLayer) {
-          const hostId = activeLayer.parentId || activeLayer.id;
+          const hostId = activeLayer.hostId || activeLayer.id;
           const familyIndices = activeFrame.layers.order
             .map((id, i) => {
               const l = activeFrame.layers.byId[id];
-              return (l.parentId === hostId || l.id === hostId ? i : -1);
+              return (l.hostId === hostId || l.id === hostId ? i : -1);
             })
             .filter(i => i !== -1);
           insertIndex = Math.max(...familyIndices) + 1;

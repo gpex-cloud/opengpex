@@ -119,7 +119,7 @@ export const LayerCmdJCommands = {
               activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), 'Layer'
             );
             // New layers must never inherit lock/interactive state from the source
-            const { id: _id, parentId: _pid, role: _role, locked: _locked, interactive: _inter, ...layerData } = latestLayer;
+            const { id: _id, hostId: _pid, role: _role, locked: _locked, interactive: _inter, ...layerData } = latestLayer;
             const newLayer = ctx.layers.getNewLayer({
               ...layerData, name: newName, vectorMasks: [],
             });
@@ -140,7 +140,7 @@ export const LayerCmdJCommands = {
           const newName = ctx.layers.getNewLayerName(
             activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), `${latestLayer.name} Copy`
           );
-          const newLayer = ctx.layers.getNewLayer({ ...latestLayer, id: undefined, name: newName, parentId: undefined, locked: false, interactive: undefined });
+          const newLayer = ctx.layers.getNewLayer({ ...latestLayer, id: undefined, name: newName, hostId: undefined, locked: false, interactive: undefined });
           ctx.layers.addLayer(activeFrame.id, newLayer);
         }
       } catch (err) {
@@ -194,7 +194,7 @@ export const LayerCmdJCommands = {
             activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), 'Layer'
           );
           // New layers must never inherit lock/interactive state from the source
-          const { id: _id, parentId: _pid, role: _role, locked: _locked, interactive: _inter, ...layerData } = latestLayer;
+          const { id: _id, hostId: _pid, role: _role, locked: _locked, interactive: _inter, ...layerData } = latestLayer;
           const newLayer = ctx.layers.getNewLayer({
             ...layerData, name: newName, vectorMasks: [],
           });

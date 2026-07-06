@@ -51,7 +51,7 @@ export const IMAGE_INFO_COMMANDS = {
          // Guard: abort if no visible layers exist (would produce a blank transparent image)
          const hasVisibleLayers = activeFrame.layers.order.some(id => {
             const layer = activeFrame.layers.byId[id];
-            return !layer.parentId && layer.visible !== false;
+            return !layer.hostId && layer.visible !== false;
          });
          if (!hasVisibleLayers) {
             ctx.actions.setInteraction({ hud: { message: 'All layers are hidden — nothing to export.', type: 'error' } });
@@ -72,7 +72,7 @@ export const IMAGE_INFO_COMMANDS = {
                config.format, isClipMode ? 'yes' : 'no', exportW, exportH,
                activeFrame.layers.order.filter(id => {
                   const l = activeFrame.layers.byId[id];
-                  return !l.parentId && l.visible !== false;
+                  return !l.hostId && l.visible !== false;
                }).length
             );
 

@@ -21,6 +21,9 @@ All notable changes to OpenGPEX are documented in this file.
 - Fix GIF frame delay decoding scale mismatch in `GifHandler` to prevent incorrect playback speeds
 - Resolve React state update warnings and stale closure bugs in the `useAnimationPlayer` hook
 - Fix lint issues and clean up unused variables across core files and components
+- Refactor layer hierarchy terminology by renaming `parentId` to `hostId` across the core engine, commands, and components
+- Optimize Layers Drawer performance by pre-computing child layer mappings to eliminate redundant React hook lookups in `LayerItem`
+- Add a master expand/collapse toggle for all host layers in the Layers Drawer panel
 
 ---
 

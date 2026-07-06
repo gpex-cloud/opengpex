@@ -79,7 +79,7 @@ async function exportAnimatedGif(
    // Collect GIF sequence layers (host layers only — no parentId)
    const hostLayers = activeFrame.layers.order
       .map(id => activeFrame.layers.byId[id])
-      .filter((l): l is Layer => !!l && !l.parentId);
+      .filter((l): l is Layer => !!l && !l.hostId);
 
    const sequenceLayers = hostLayers
       .filter(l => l.metadata?.gifSequenceId)

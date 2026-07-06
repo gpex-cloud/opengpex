@@ -142,13 +142,13 @@ export const LAYER_COMMANDS = {
             if (!targetId) return;
 
             const layer = activeFrame.layers.byId[targetId];
-            if (!layer || layer.parentId) return; // Only allow duplicating host layers
+            if (!layer || layer.hostId) return; // Only allow duplicating host layers
 
             const layersArray = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]);
             const hostLayers = LayerFactory.getHostLayers(layersArray);
             const newName = LayerFactory.getNewLayerName(hostLayers, `${layer.name} Copy`);
 
-            const { id: _id, parentId: _pid, role: _role, ...layerData } = layer;
+            const { id: _id, hostId: _pid, role: _role, ...layerData } = layer;
             const newLayer = LayerFactory.getNewLayer({
                 ...layerData,
                 name: newName,

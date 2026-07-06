@@ -64,7 +64,7 @@ export default function ActionButton({
     >
       {/* 1. Backdrop / Border Effect */}
       {isGlass ? (
-        <div className="absolute inset-0 bg-transparent backdrop-blur-xl ring-1 ring-white/10 dark:ring-white/5 group-hover:ring-indigo-500/30 group-hover:bg-indigo-500/10 transition-all duration-300 rounded-full" />
+        <div className="absolute inset-0 bg-transparent ring-1 ring-white/10 dark:ring-white/5 group-hover:ring-indigo-500/30 group-hover:bg-indigo-500/10 transition-all duration-300 rounded-full" />
       ) : (
         <div className="absolute inset-0 bg-gradient-to-r from-indigo-600/80 to-violet-600/80 transition-opacity group-hover:opacity-100 opacity-80" />
       )}
