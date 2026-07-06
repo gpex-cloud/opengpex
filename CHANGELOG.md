@@ -8,21 +8,9 @@ All notable changes to OpenGPEX are documented in this file.
 
 - Introduce unified `FileService` module to handle image decoding, encoding, and metadata management, replacing legacy format-specific helpers
 - Add native TIFF format support (import/export) via `wasm-vips` client-side Web Worker, including None, LZW, and ZIP compression options
-- Configure Next.js with Cross-Origin Isolation headers (`COOP`/`COEP`) to enable SharedArrayBuffer multi-threading for wasm-vips
-- Refactor the postinstall script `postinstall-exts.mjs` to copy dedicated WASM worker scripts to the public assets directory for resvg, Ghostscript, and wasm-vips
-- Streamline trunk frame creation to decode files and extract metadata (including EXIF and DPI) in a single atomic step using the new file service
 - Add native multi-frame GIF decoding and encoding support via `gifuct-js` and `gifenc` libraries
 - Implement an Animation Drawer plugin (`drawers.animation`) providing animation playback controls, looping, frame rate overrides, and export capabilities (GIF/APNG)
-- Support interactive decimation and frame sampling when importing large animated GIFs to prevent memory exhaustion
-- Group and display imported GIF frame sequences as a collapsible sequence folder in the Layers Drawer panel
-- Update the postinstall script to build and bundle `gifuct-js` and `gifenc` into the public directory via esbuild
 - Add dedicated GIF Revert Path in the `Revert to Original` command to re-decode the original GIF from the asset store and rebuild all layers in-place
-- Implement reactive FPS calculation in `AnimationDrawer` with a manual recalculate button to dynamically update framerate based on active sequence layer delays
-- Fix GIF frame delay decoding scale mismatch in `GifHandler` to prevent incorrect playback speeds
-- Resolve React state update warnings and stale closure bugs in the `useAnimationPlayer` hook
-- Fix lint issues and clean up unused variables across core files and components
-- Refactor layer hierarchy terminology by renaming `parentId` to `hostId` across the core engine, commands, and components
-- Optimize Layers Drawer performance by pre-computing child layer mappings to eliminate redundant React hook lookups in `LayerItem`
 - Add a master expand/collapse toggle for all host layers in the Layers Drawer panel
 
 ---
