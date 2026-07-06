@@ -44,6 +44,8 @@
     "@types/unzipper": "^0.10.11",
     "eslint": "^9.39.4",
     "eslint-config-next": "16.2.6",
+    "gifenc": "^1.0.3",
+    "gifuct-js": "^2.1.2",
     "raw-loader": "^4.0.2",
     "tailwindcss": "^4.3.0",
     "typescript": "^5.9.3"

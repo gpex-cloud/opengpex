@@ -19,8 +19,8 @@
 
 "use client";
 
-import React, { useRef, useMemo } from "react";
-import { Layers, Eye, ScanEye, CirclePlus } from "lucide-react";
+import React, { useRef, useMemo, useState } from "react";
+import { Layers, Eye, ScanEye, CirclePlus, Film, ChevronRight, ChevronDown } from "lucide-react";
 import { Reorder } from "framer-motion";
 import { useEditorState } from "@opengpex/editor/core/context";
 import { Layer, Frame } from "@opengpex/editor/core/types";
@@ -41,6 +41,9 @@ function LayerComponentInner({ activeFrame }: { activeFrame: Frame }) {
 
   // Monitor mask edit exit conditions (tool switch, mode change, mask deletion)
   useMaskEditMonitor();
+
+  // GIF sequence collapse state (collapsed by default)
+  const [gifCollapsed, setGifCollapsed] = useState<Record<string, boolean>>({});
 
   const [isScrolling, setIsScrolling] = React.useState(false);
   const scrollTimeout = useRef<NodeJS.Timeout | null>(null);
@@ -145,7 +148,7 @@ function LayerComponentInner({ activeFrame }: { activeFrame: Frame }) {
           className="flex flex-col min-h-[200px] max-h-[600px] overflow-y-auto px-1 pb-2 custom-scrollbar [mask-image:linear-gradient(to_bottom,transparent,black_8px,black_calc(100%-8px),transparent)]"
         >
           <div
-            className={`mt-0 flex flex-col gap-1 ${isScrolling ? "pointer-events-none" : ""}`}
+            className={`pt-2 flex flex-col gap-1 ${isScrolling ? "pointer-events-none" : ""}`}
           >
             {hostLayers.length > 0 &&
               hostLayers.length < 5 &&
@@ -175,21 +178,79 @@ function LayerComponentInner({ activeFrame }: { activeFrame: Frame }) {
                   </p>
                 </div>
               ) : (
-                displayLayers.map((layer) => {
-                  const hostIndex = hostLayers.findIndex(
-                    (l: Layer) => l.id === layer.id,
-                  );
-                  return (
-                    <LayerItem
-                      key={layer.id}
-                      layerId={layer.id}
-                      index={hostIndex}
-                      activeFrameId={activeFrame.id}
-                      canDelete={hostLayers.length > 1}
-                      isScrolling={isScrolling}
-                    />
-                  );
-                })
+                (() => {
+                  const renderedSeqIds = new Set<string>();
+                  const elements: React.ReactNode[] = [];
+
+                  for (const layer of displayLayers) {
+                    const seqId = layer.metadata?.gifSequenceId as string | undefined;
+
+                    // GIF sequence layer: render group header on first encounter
+                    if (seqId && !renderedSeqIds.has(seqId)) {
+                      renderedSeqIds.add(seqId);
+                      const seqLayers = displayLayers.filter(
+                        l => l.metadata?.gifSequenceId === seqId
+                      );
+                      const isCollapsed = gifCollapsed[seqId] !== false; // collapsed by default
+                      const visibleFrame = seqLayers.find(l => l.visible !== false);
+                      const visibleIdx = visibleFrame
+                        ? (visibleFrame.metadata?.gifFrameIndex as number ?? 0) + 1
+                        : 1;
+
+                      elements.push(
+                        <div key={`gif-group-${seqId}`} className="flex flex-col gap-0.5">
+                          <button
+                            onClick={() => setGifCollapsed(prev => ({ ...prev, [seqId]: !isCollapsed }))}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-emerald-500/5 border border-emerald-500/20 hover:bg-emerald-500/10 transition-colors w-full text-left group"
+                          >
+                            {isCollapsed
+                              ? <ChevronRight size={10} className="text-emerald-500 shrink-0" />
+                              : <ChevronDown size={10} className="text-emerald-500 shrink-0" />
+                            }
+                            <Film size={10} className="text-emerald-500 shrink-0" />
+                            <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wide flex-1">
+                              GIF Sequence
+                            </span>
+                            <span className="text-[8px] font-bold text-[var(--text-muted)] tabular-nums">
+                              {visibleIdx}/{seqLayers.length}
+                            </span>
+                          </button>
+                          {!isCollapsed && seqLayers.map(seqLayer => {
+                            const hostIndex = hostLayers.findIndex(l => l.id === seqLayer.id);
+                            return (
+                              <LayerItem
+                                key={seqLayer.id}
+                                layerId={seqLayer.id}
+                                index={hostIndex}
+                                activeFrameId={activeFrame.id}
+                                canDelete={hostLayers.length > 1}
+                                isScrolling={isScrolling}
+                              />
+                            );
+                          })}
+                        </div>
+                      );
+                    } else if (seqId) {
+                      // Skip: already rendered as part of group
+                      continue;
+                    } else {
+                      // Normal layer
+                      const hostIndex = hostLayers.findIndex(l => l.id === layer.id);
+                      elements.push(
+                        <LayerItem
+                          key={layer.id}
+                          layerId={layer.id}
+                          index={hostIndex}
+                          activeFrameId={activeFrame.id}
+                          canDelete={hostLayers.length > 1}
+                          isScrolling={isScrolling}
+                        />
+                      );
+                    }
+                  }
+
+                  return elements;
+                })()
               )}
             </Reorder.Group>
           </div>

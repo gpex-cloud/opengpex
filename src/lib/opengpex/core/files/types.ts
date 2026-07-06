@@ -199,6 +199,20 @@ export interface DecodeResult {
   dimensions: { w: number; h: number };
   /** Extracted metadata */
   metadata: ImageMetadata;
+
+  /**
+   * Multi-frame extension (GIF / APNG).
+   * Present only when the source contains multiple animation frames.
+   * Each entry is a single decoded frame as PNG blob with timing info.
+   */
+  frames?: Array<{
+    /** Single frame as PNG Blob (browser-displayable) */
+    blob: Blob;
+    /** Frame delay in milliseconds */
+    delay: number;
+    /** Zero-based frame index */
+    index: number;
+  }>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

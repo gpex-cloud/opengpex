@@ -42,6 +42,7 @@ import { TiffHandler } from './handlers/tiff';
 import { RawHandler } from './handlers/raw';
 import { WebpHandler } from './handlers/webp';
 import { VectorHandler, getVectorIntrinsicSize, detectVectorFormat } from './handlers/vector';
+import { GifHandler } from './handlers/gif';
 
 // Re-export vector utilities (used by frame/create command)
 export { getVectorIntrinsicSize, detectVectorFormat };
@@ -207,6 +208,7 @@ export function createFileService(
     new PngHandler(assets),
     new WebpHandler(),
     new BmpHandler(),
+    new GifHandler(),
     new HeicHandler(assets),
     new TiffHandler(assets, workerProxy),
     new RawHandler(assets, workerProxy),

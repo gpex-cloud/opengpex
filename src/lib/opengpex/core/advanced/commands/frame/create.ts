@@ -109,6 +109,139 @@ export const FrameCreateCommands = {
 
       const { safeFile, dimensions: decodeDimensions, metadata } = decoded;
 
+      // ═══════════════════════════════════════════════════════════════════════
+      // GIF Multi-frame Import Path
+      // When decoded.frames is present, create N logically-associated layers
+      // with gifSequenceId metadata for animation playback support.
+      // ═══════════════════════════════════════════════════════════════════════
+      if (decoded.frames && decoded.frames.length > 1) {
+        let framesToImport = decoded.frames;
+        const totalFrames = framesToImport.length;
+        const GIF_DEFAULT_LIMIT = 30;
+
+        // Frame count safety threshold — ask user if frames exceed limit
+        if (totalFrames > GIF_DEFAULT_LIMIT) {
+          const limitOptions = [
+            { id: '10', label: '10 frames', description: `Sample every ${Math.ceil(totalFrames / 10)} frames` },
+            { id: '20', label: '20 frames', description: `Sample every ${Math.ceil(totalFrames / 20)} frames` },
+            { id: '30', label: '30 frames', description: `Sample every ${Math.ceil(totalFrames / 30)} frames` },
+            { id: '60', label: '60 frames', description: `Sample every ${Math.ceil(totalFrames / 60)} frames` },
+            { id: '100', label: '100 frames', description: `Sample every ${Math.ceil(totalFrames / 100)} frames` },
+            { id: String(totalFrames), label: `All ${totalFrames} frames`, description: 'May use significant memory', primary: true },
+          ].filter(opt => parseInt(opt.id) <= totalFrames);
+
+          const chosenLimit = await actions.askChoice(
+            `GIF has ${totalFrames} frames`,
+            limitOptions,
+            `This animated GIF contains ${totalFrames} frames. Importing all frames may use significant memory. Choose a frame limit for decimation (sampled frames will preserve animation timing).`,
+          );
+
+          if (!chosenLimit) return ''; // User cancelled
+
+          const limit = parseInt(chosenLimit, 10) || GIF_DEFAULT_LIMIT;
+
+          // Apply interactive decimation with delay sync
+          if (limit < totalFrames) {
+            const step = Math.ceil(totalFrames / limit);
+            const sampled: typeof framesToImport = [];
+            for (let i = 0; i < totalFrames; i += step) {
+              const frame = framesToImport[i];
+              sampled.push({
+                ...frame,
+                delay: frame.delay * step, // Delay sync: preserve total duration
+                index: sampled.length,
+              });
+            }
+            framesToImport = sampled;
+            actions.notifyHUD(`Decimated: ${totalFrames} → ${sampled.length} frames (step=${step})`, 'info');
+          }
+        }
+
+        // Generate a unique sequence ID for this GIF logical group
+        const gifSequenceId = `gif-seq-${Date.now().toString(36)}-${Math.random().toString(36).substr(2, 6)}`;
+        const dimension = decodeDimensions;
+
+        // Register all frame assets concurrently
+        const frameAssets = await Promise.all(
+          framesToImport.map(async (f) => {
+            const frameFile = new File([f.blob], `frame_${f.index}.png`, { type: 'image/png' });
+            const assetId = await assets.register(frameFile);
+            const assetUrl = assets.getURL(assetId)!;
+            return { assetId, assetUrl, delay: f.delay, index: f.index };
+          })
+        );
+
+        // Create N frame layers with gifSequenceId metadata
+        const frameLayers: Layer[] = frameAssets.map((fa, i) => {
+          return LayerFactory.getNewLayer({
+            name: `Frame ${i + 1}`,
+            src: fa.assetUrl,
+            assetId: fa.assetId,
+            cx: 0,
+            cy: 0,
+            locked: false,
+            visible: i === 0, // Only first frame visible by default
+            bounding: dimension,
+            visibleShape: asLocalShape({ x: 0, y: 0, w: dimension.w, h: dimension.h }),
+            metadata: {
+              format: 'image/gif',
+              size: file.size,
+              source: sourceType,
+              originalName: file.name,
+              imageMetadata: metadata,
+              gifSequenceId,
+              gifFrameIndex: i,
+              gifFrameDelay: fa.delay,
+              gifTotalFrames: framesToImport.length,
+            },
+          });
+        });
+
+        // Expand all layers (triplet structure)
+        const expandedLayers = frameLayers.flatMap(l => LayerFactory.expandLayers([l]));
+
+        // Generate thumbnail from first frame
+        const firstAssetUrl = frameAssets[0].assetUrl;
+        const [contentBounds, thumbBlob] = await Promise.all([
+          pixels.decode.contentBounds(firstAssetUrl),
+          pixels.process.thumbnail(firstAssetUrl, 256),
+        ]);
+        const thumbAssetId = await assets.register(thumbBlob);
+        const thumbAssetUrl = assets.getURL(thumbAssetId)!;
+
+        // Camera + crop box
+        const { insets } = state.ui.theme.config;
+        const initialCamera = geometry.camera.getFitCamera(
+          state.ui.viewportDim,
+          dimension,
+          { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
+        );
+        const defaultCanvasCropBox = asLocalShape({ x: dimension.w * 0.25, y: dimension.h * 0.25, w: dimension.w * 0.5, h: dimension.h * 0.5 });
+
+        const frameName = file.name.replace(/\.[^.]+$/, '');
+        const frame = LayerFactory.getNewFrame({
+          id: `f-${Date.now().toString(36)}-trunk`,
+          name: frameName || file.name,
+          canvas: dimension,
+          dpi: metadata.dpi,
+          layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
+          activeLayerId: frameLayers[0].id,
+          camera: initialCamera,
+          canvasCropBox: defaultCanvasCropBox,
+          assetId: frameAssets[0].assetId,
+          thumbnail: { src: thumbAssetUrl, assetId: thumbAssetId },
+          extra: { ...extra, gifSequenceId, gifFrameCount: framesToImport.length },
+        });
+
+        actions.addFrame(frame, switchFrame);
+        actions.notifyHUD(`Imported GIF: ${framesToImport.length} frames as layer sequence`, 'success');
+        return frame.id;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // Standard Single-layer Import Path (non-animated / single-frame)
+      // ═══════════════════════════════════════════════════════════════════════
+
       // 1. Register original asset
       const assetId = await assets.register(safeFile);
       const assetUrl = assets.getURL(assetId)!;

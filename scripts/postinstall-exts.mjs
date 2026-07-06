@@ -112,3 +112,46 @@ if (existsSync(heicSrc)) {
 } else {
   console.warn(`  ⚠ node_modules/heic-to/dist/heic-to.js not found — skipping`);
 }
+
+// ─── GIF libraries: gifuct-js + gifenc (MIT) ──────────────────────────────────
+// gifuct-js has require() calls to sub-modules → must be bundled via esbuild.
+// gifenc dist is self-contained CJS → also bundle for consistency.
+// Output: public/ext/js/gifuct-js.js  (window.gifuctJs = { parseGIF, decompressFrames })
+//         public/ext/js/gifenc.js     (window.gifenc = { GIFEncoder, quantize, applyPalette, ... })
+
+import { execSync } from 'node:child_process';
+
+const gifuctEntry = resolve(ROOT, 'node_modules/gifuct-js/lib/index.js');
+const gifuctOut = resolve(JS_DEST, 'gifuct-js.js');
+
+if (existsSync(gifuctEntry)) {
+  try {
+    execSync(
+      `npx esbuild "${gifuctEntry}" --bundle --format=iife --global-name=gifuctJs --outfile="${gifuctOut}" --minify --target=es2020`,
+      { cwd: ROOT, stdio: 'pipe' },
+    );
+    console.log(`  ✓ gifuct-js.js (esbuild bundle → IIFE window.gifuctJs)`);
+  } catch (e) {
+    console.warn(`  ⚠ esbuild failed for gifuct-js: ${e.message}`);
+  }
+} else {
+  console.warn(`  ⚠ node_modules/gifuct-js/lib/index.js not found — GIF decode unavailable`);
+}
+
+const gifencEntry = resolve(ROOT, 'node_modules/gifenc/dist/gifenc.esm.js');
+const gifencOut = resolve(JS_DEST, 'gifenc.js');
+
+if (existsSync(gifencEntry)) {
+  try {
+    execSync(
+      `npx esbuild "${gifencEntry}" --bundle --format=iife --global-name=gifenc --outfile="${gifencOut}" --minify --target=es2020`,
+      { cwd: ROOT, stdio: 'pipe' },
+    );
+    console.log(`  ✓ gifenc.js (esbuild bundle → IIFE window.gifenc)`);
+  } catch (e) {
+    console.warn(`  ⚠ esbuild failed for gifenc: ${e.message}`);
+  }
+} else {
+  console.warn(`  ⚠ node_modules/gifenc/dist/gifenc.esm.js not found — GIF encode unavailable`);
+}
+

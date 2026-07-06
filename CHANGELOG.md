@@ -11,6 +11,11 @@ All notable changes to OpenGPEX are documented in this file.
 - Configure Next.js with Cross-Origin Isolation headers (`COOP`/`COEP`) to enable SharedArrayBuffer multi-threading for wasm-vips
 - Refactor the postinstall script `postinstall-exts.mjs` to copy dedicated WASM worker scripts to the public assets directory for resvg, Ghostscript, and wasm-vips
 - Streamline trunk frame creation to decode files and extract metadata (including EXIF and DPI) in a single atomic step using the new file service
+- Add native multi-frame GIF decoding and encoding support via `gifuct-js` and `gifenc` libraries
+- Implement an Animation Drawer plugin (`drawers.animation`) providing animation playback controls, looping, frame rate overrides, and export capabilities (GIF/APNG)
+- Support interactive decimation and frame sampling when importing large animated GIFs to prevent memory exhaustion
+- Group and display imported GIF frame sequences as a collapsible sequence folder in the Layers Drawer panel
+- Update the postinstall script to build and bundle `gifuct-js` and `gifenc` into the public directory via esbuild
 
 ---
 

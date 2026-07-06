@@ -126,11 +126,7 @@ export const IMAGE_INFO_COMMANDS = {
             }
 
             const actualFormat = blob.type || config.format;
-            // Map MIME to extension (tiff needs explicit mapping since split gives 'tiff' correctly,
-            // but blob.type might be empty for TIFF blobs constructed manually)
-            const extensionMap: Record<string, string> = { 'image/tiff': 'tiff', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/avif': 'avif' };
-            const extension = extensionMap[actualFormat] || actualFormat.split('/')[1] || 'png';
-            const filename = files.getExportFilename(activeFrame.name, exportW, exportH, extension);
+            const filename = files.getExportFilename(activeFrame.name, exportW, exportH, actualFormat);
 
             await pixels.utils.download(blob, filename);
          } catch (err) {
@@ -165,4 +161,5 @@ export const IMAGE_INFO_COMMANDS = {
       }
    } as EditorCommand<void, Promise<void>>
 };
+
 
