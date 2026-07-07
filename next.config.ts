@@ -42,14 +42,14 @@ const nextConfig: NextConfig = {
 
   // Cross-Origin Isolation headers: enable SharedArrayBuffer for WASM multi-threading
   // Required by wasm-vips (pthreads) and benefits other heavy WASM workloads.
-  // credentialless mode allows cross-origin resources without CORP headers.
+  // require-corp mode enables cross-origin isolation.
   async headers() {
     return [
       {
         source: "/(.*)",
         headers: [
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
-          { key: "Cross-Origin-Embedder-Policy", value: "credentialless" },
+          { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
         ],
       },
     ];
