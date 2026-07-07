@@ -25,7 +25,7 @@ import { motion } from "framer-motion";
 import { useEditorServices } from "@opengpex/editor/core/context";
 import { SettingsPanelAPI } from "../../panels/SettingsPanel/protocols";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import { TextPanel } from "./panels/text";
 import { BrushPanel } from "./panels/brush";
 import { useCraftDrawer, useCraftTrigger, useCraftButtonGroup } from "./hooks";
@@ -106,17 +106,17 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
             ? <Undo2 size={13} />
             : btn.icon;
           return (
-            <FunctionButton
+            <FancyButton iconOnly shape="rect"
               key={btn.type}
               onClick={() => selectCraft(btn.type)}
               active={isActive}
               title={btn.type === 'eraser' && activeCraft === 'restore' ? 'Restore Mode (Tab)' : btn.label}
-              variant="glass"
+              variant="ghost"
               tooltipPosition="bottom"
               className="w-7 h-7 rounded-lg text-blue-400"
             >
               {displayIcon}
-            </FunctionButton>
+            </FancyButton>
           );
         })}
       </div>

@@ -24,7 +24,7 @@ import { AlignLeft, AlignCenter, AlignRight } from "lucide-react";
 import { ColorPickerPro } from "@opengpex/editor/widgets/ColorPickerPro";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import { FontPicker } from "@opengpex/editor/widgets/FontPicker";
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import { useTextPanel } from "../hooks";
 import { getDynamicTextSizeMax, TEXT_SIZE_MIN, ABSOLUTE_TEXT_SIZE_MAX } from "../protocols";
 import { useEditorState } from "@opengpex/editor/core/context";
@@ -225,17 +225,17 @@ export const TextPanel = React.memo(function TextPanel() {
             </span>
             <div className="flex items-center gap-1">
               {(["left", "center", "right"] as const).map((align) => (
-                <FunctionButton
+                <FancyButton iconOnly shape="rect"
                   key={align}
                   onClick={() => updateTextData({ align })}
                   active={textData?.align === align}
-                  variant="glass"
+                  variant="ghost"
                   className="w-8 h-7 !rounded-lg text-[10px]"
                 >
                   {align === "left" && <AlignLeft size={13} />}
                   {align === "center" && <AlignCenter size={13} />}
                   {align === "right" && <AlignRight size={13} />}
-                </FunctionButton>
+                </FancyButton>
               ))}
             </div>
           </div>
@@ -247,44 +247,44 @@ export const TextPanel = React.memo(function TextPanel() {
             </span>
             <div className="flex items-center gap-1">
               {/* Bold Button */}
-              <FunctionButton
+              <FancyButton iconOnly shape="rect"
                 onClick={() => updateTextData({ fontWeight: textData?.fontWeight === 700 ? 400 : 700 })}
                 active={textData?.fontWeight === 700}
-                variant="glass"
+                variant="ghost"
                 className="w-8 h-7 !rounded-lg text-[10px]"
               >
                 B
-              </FunctionButton>
+              </FancyButton>
 
               {/* Italic Button */}
-              <FunctionButton
+              <FancyButton iconOnly shape="rect"
                 onClick={() => updateTextData({ italic: !textData?.italic })}
                 active={!!textData?.italic}
-                variant="glass"
+                variant="ghost"
                 className="w-8 h-7 !rounded-lg text-[10px] italic font-serif"
               >
                 I
-              </FunctionButton>
+              </FancyButton>
 
               {/* Underline Button */}
-              <FunctionButton
+              <FancyButton iconOnly shape="rect"
                 onClick={() => updateTextData({ underline: !textData?.underline })}
                 active={!!textData?.underline}
-                variant="glass"
+                variant="ghost"
                 className="w-8 h-7 !rounded-lg text-[10px] underline"
               >
                 U
-              </FunctionButton>
+              </FancyButton>
 
               {/* Strikethrough Button */}
-              <FunctionButton
+              <FancyButton iconOnly shape="rect"
                 onClick={() => updateTextData({ strikethrough: !textData?.strikethrough })}
                 active={!!textData?.strikethrough}
-                variant="glass"
+                variant="ghost"
                 className="w-8 h-7 !rounded-lg text-[10px] line-through"
               >
                 S
-              </FunctionButton>
+              </FancyButton>
             </div>
           </div>
         </div>

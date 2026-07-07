@@ -34,7 +34,7 @@ import {
   Move3d,
   LayoutDashboard,
 } from "lucide-react";
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import { PopupPanel } from "@opengpex/editor/widgets/PopupPanel";
 import type { RegisteredSlot } from "@opengpex/editor/workspace/LayoutContext";
 import type { EditorSlot } from "@opengpex/editor/core/types";
@@ -1243,13 +1243,15 @@ export function LayoutInfoSettings() {
 
   return (
     <>
-      <FunctionButton
+      <FancyButton
         title="Editor Layout Blueprint"
         active={isEnabled}
         onClick={() => toggleCmd?.execute()}
+        iconOnly
+        shape="rect"
       >
         <LayoutDashboard size={14} />
-      </FunctionButton>
+      </FancyButton>
     </>
   );
 }

@@ -39,6 +39,10 @@ interface ActionDropdownProps {
   className?: string;
   align?: 'left' | 'right';
   disabled?: boolean;
+  /** Number of columns for the option grid layout. Default is 1 (standard vertical list). */
+  cols?: number;
+  /** Direction to open the menu. 'down' (default) opens below trigger, 'up' opens above trigger. */
+  direction?: 'down' | 'up';
 }
 
 export default function ActionDropdown({
@@ -47,10 +51,12 @@ export default function ActionDropdown({
   onSelect,
   className = '',
   align = 'left',
-  disabled = false
+  disabled = false,
+  cols = 1,
+  direction = 'down'
 }: ActionDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
+  const [coords, setCoords] = useState({ top: 0, bottom: 0, left: 0, width: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -77,8 +83,9 @@ export default function ActionDropdown({
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       setCoords({
-        top: rect.top + window.scrollY,
-        left: rect.left + window.scrollX,
+        top: rect.bottom,
+        bottom: rect.top,
+        left: rect.left,
         width: rect.width
       });
     }
@@ -107,13 +114,15 @@ export default function ActionDropdown({
           <EditorPortal>
             <motion.div
               ref={menuRef}
-              initial={{ opacity: 0, y: 8, scale: 0.95 }}
+              initial={{ opacity: 0, y: direction === 'up' ? -8 : 8, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1, x: align === 'right' ? '-100%' : 0 }}
-              exit={{ opacity: 0, y: 8, scale: 0.95 }}
+              exit={{ opacity: 0, y: direction === 'up' ? -8 : 8, scale: 0.95 }}
               transition={{ type: 'spring', damping: 25, stiffness: 300, x: { duration: 0 } }}
               style={{
                 position: 'fixed',
-                top: coords.top + 8,
+                ...(direction === 'up'
+                  ? { bottom: window.innerHeight - coords.bottom + 8 }
+                  : { top: coords.top + 8 }),
                 left: align === 'right' ? coords.left + coords.width : coords.left,
                 zIndex: 10000,
                 pointerEvents: 'auto'
@@ -125,13 +134,17 @@ export default function ActionDropdown({
                 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] p-1 overflow-hidden
               `}
             >
-              <div className="flex flex-col gap-0.5">
+              <div
+                className={cols > 1 ? 'grid gap-0.5' : 'flex flex-col gap-0.5'}
+                style={cols > 1 ? { gridTemplateColumns: `repeat(${cols}, 1fr)` } : undefined}
+              >
                 {options.map((opt, idx) => {
                   if (opt.divider) {
                     return (
                       <div
                         key={`div-${idx}`}
                         className="my-0.5 border-t border-zinc-200 dark:border-white/10"
+                        style={cols > 1 ? { gridColumn: `span ${cols}` } : undefined}
                       />
                     );
                   }

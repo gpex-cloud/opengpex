@@ -30,6 +30,9 @@ export const CMD_ADD_BLANK_LAYER = 'cmd.add_blank_layer';
 export const CMD_DUPLICATE_LAYER = 'cmd.duplicate_layer';
 export const CMD_SYNC_TO_OVERLAY = 'cmd.sync.overlay';
 export const CMD_MASK_SYNC_TO_OVERLAY = 'cmd.sync.mask';
+export const CMD_SET_BLEND_MODE = 'cmd.set_blend_mode';
+export const CMD_SET_LAYER_OPACITY = 'cmd.set_layer_opacity';
+export const CMD_SET_LAYER_FILL = 'cmd.set_layer_fill';
 
 // ─── Mask Edit Signal ──────────────────────────────────────────────────────────
 

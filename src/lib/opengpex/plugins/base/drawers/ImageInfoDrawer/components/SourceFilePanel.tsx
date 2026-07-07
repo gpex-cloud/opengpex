@@ -21,7 +21,7 @@
 
 import React from "react";
 import { Check, Copy } from "lucide-react";
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 
 interface SourceFilePanelProps {
   fileName: string;
@@ -45,7 +45,7 @@ export function SourceFilePanel({
           <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight">
             Source File
           </span>
-          <FunctionButton
+          <FancyButton shape="rect"
             onClick={() => {
               navigator.clipboard.writeText(fileName).then(() => {
                 setCopied(true);
@@ -63,7 +63,7 @@ export function SourceFilePanel({
                 className="text-[var(--text-muted)] hover transition-colors"
               />
             )}
-          </FunctionButton>
+          </FancyButton>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">

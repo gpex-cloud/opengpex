@@ -32,7 +32,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { useEditorState } from "@opengpex/editor/core/context";
 import { CameraState } from "@opengpex/editor/core/types";
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import { useViewportCommands } from "./hooks";
 import { useFastSync } from "@opengpex/editor/core/motion/hooks/navigation";
 
@@ -262,7 +262,7 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
 
       {/* Action Buttons */}
       <div className="flex items-center">
-        <FunctionButton
+        <FancyButton shape="rect"
           onClick={() => fitCmd.execute()}
           variant="ghost"
           title={`${fitCmd.name} (${fitCmd.shortcutLabel})`}
@@ -270,8 +270,8 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
           className="h-6 w-auto px-2 text-[10px] text-teal-600 dark:text-teal-400"
         >
           FIT
-        </FunctionButton>
-        <FunctionButton
+        </FancyButton>
+        <FancyButton shape="rect"
           onClick={() => actualSizeCmd.execute()}
           variant="ghost"
           title={`${actualSizeCmd.name} (${actualSizeCmd.shortcutLabel})`}
@@ -279,11 +279,11 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
           className="h-6 w-auto px-2 text-[10px] text-teal-600 dark:text-teal-400"
         >
           1:1
-        </FunctionButton>
+        </FancyButton>
       </div>
 
       <div className="flex items-center">
-        <FunctionButton
+        <FancyButton shape="rect" iconOnly
           onClick={() => rotateLeftCmd.execute()}
           variant="ghost"
           title={`${rotateLeftCmd.name} (${rotateLeftCmd.shortcutLabel})`}
@@ -291,8 +291,8 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
           className="w-6 h-6 text-sky-500"
         >
           <RotateCcw size={13} />
-        </FunctionButton>
-        <FunctionButton
+        </FancyButton>
+        <FancyButton shape="rect" iconOnly
           onClick={() => rotateRightCmd.execute()}
           variant="ghost"
           title={`${rotateRightCmd.name} (${rotateRightCmd.shortcutLabel})`}
@@ -300,9 +300,9 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
           className="w-6 h-6 text-sky-500"
         >
           <RotateCw size={13} />
-        </FunctionButton>
+        </FancyButton>
         <div className="w-px h-3 bg-transparent mx-0.5" />
-        <FunctionButton
+        <FancyButton shape="rect" iconOnly
           onClick={() => flipHCmd.execute()}
           variant="ghost"
           title={`${flipHCmd.name} (${flipHCmd.shortcutLabel})`}
@@ -310,8 +310,8 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
           className="w-6 h-6 text-indigo-500"
         >
           <FlipHorizontal2 size={13} />
-        </FunctionButton>
-        <FunctionButton
+        </FancyButton>
+        <FancyButton shape="rect" iconOnly
           onClick={() => flipVCmd.execute()}
           variant="ghost"
           title={`${flipVCmd.name} (${flipVCmd.shortcutLabel})`}
@@ -319,7 +319,7 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
           className="w-6 h-6 text-indigo-500"
         >
           <FlipVertical2 size={13} />
-        </FunctionButton>
+        </FancyButton>
       </div>
     </div>
   );

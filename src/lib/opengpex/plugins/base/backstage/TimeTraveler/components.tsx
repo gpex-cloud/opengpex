@@ -26,7 +26,7 @@ import {
   useEditorServices,
   usePluginCommands,
 } from "@opengpex/editor/core/context";
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import DelayedConfirm from "@opengpex/editor/widgets/DelayedConfirm";
 import { formatBytes } from "@opengpex/editor/core/helpers/file";
 
@@ -43,32 +43,32 @@ export const TimeTravelAction = React.memo(function TimeTravelAction() {
   // Remove all outer div layouts, returning purely an array of functional buttons!
   return (
     <>
-      <FunctionButton
+      <FancyButton iconOnly shape="rect"
         onClick={() => undoCmd?.execute()}
         disabled={!canUndo}
         title={`Undo (${undoCmd?.shortcutLabel || ""})`}
         tooltipPosition="right"
       >
         <Undo2 size={18} />
-      </FunctionButton>
+      </FancyButton>
 
-      <FunctionButton
+      <FancyButton iconOnly shape="rect"
         onClick={() => redoCmd?.execute()}
         disabled={!canRedo}
         title={`Redo (${redoCmd?.shortcutLabel || ""})`}
         tooltipPosition="right"
       >
         <Redo2 size={18} />
-      </FunctionButton>
+      </FancyButton>
 
-      <FunctionButton
+      <FancyButton iconOnly shape="rect"
         onClick={() => revertCmd?.execute()}
         title={`Revert to Original (${revertCmd?.shortcutLabel || ""})`}
         tooltipPosition="right"
         className="text-rose-500 hover:text-rose-600"
       >
         <RotateCcw size={18} />
-      </FunctionButton>
+      </FancyButton>
     </>
   );
 });

@@ -22,7 +22,7 @@
 import { Settings } from "lucide-react";
 import { PopupPanel } from "@opengpex/editor/widgets/PopupPanel";
 import TabbedPluginSlot from "@opengpex/editor/workspace/components/TabbedPluginSlot";
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import { useSettingsPanel } from "./hooks";
 
 /**
@@ -34,18 +34,20 @@ export function SettingsTrigger() {
 
   return (
     <div id="trigger-settings">
-      <FunctionButton
+      <FancyButton
         onClick={() => toggleCmd?.execute()}
         active={isActive}
         title="Editor Settings"
         tooltipPosition="right"
+        iconOnly
+        shape="rect"
         {...({ "data-panel-toggle": "settings" } as Record<string, string>)}
       >
         <Settings
           size={18}
           className={`transition-transform duration-500 ${isActive ? "rotate-90" : ""}`}
         />
-      </FunctionButton>
+      </FancyButton>
     </div>
   );
 }

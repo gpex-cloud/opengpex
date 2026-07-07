@@ -23,7 +23,7 @@ import React, { useRef, useEffect } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { Grid } from 'lucide-react';
-import FunctionButton from '@opengpex/editor/widgets/FunctionButton';
+import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
 import { usePixelGridCommands } from './hooks';
 
 /**
@@ -123,13 +123,15 @@ export function PixelGridToggle() {
   const { isEnabled, toggleCmd } = usePixelGridCommands();
 
   return (
-    <FunctionButton 
+    <FancyButton 
       onClick={() => toggleCmd?.execute()}
       active={isEnabled}
       title={`Toggle Pixel Grid (${toggleCmd?.shortcutLabel || ''})`}
       tooltipPosition="right"
+      iconOnly
+      shape="rect"
     >
       <Grid size={18} />
-    </FunctionButton>
+    </FancyButton>
   );
 }

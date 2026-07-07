@@ -110,7 +110,7 @@ export function useAnimationPlayer(): {
    state: AnimationPlayerState;
    actions: AnimationPlayerActions;
 } {
-   const { activeFrame } = useEditorState();
+   const { activeFrame, state } = useEditorState();
    const { actions } = useEditorServices();
    const [selfConfig, setSelfConfig] = usePluginSelfConfig<AnimationConfig>();
 
@@ -139,6 +139,19 @@ export function useAnimationPlayer(): {
 
    // Keep sequence ref up to date (via effect to avoid ref access during render)
    useEffect(() => { sequenceRef.current = sequence; });
+
+   /* eslint-disable react-hooks/refs */
+   // Synchronously terminate playback if sequenceId changes during render phase (Solution B)
+   const prevSequenceIdRef = useRef<string | null>(null);
+   if (prevSequenceIdRef.current !== sequence?.sequenceId) {
+      prevSequenceIdRef.current = sequence?.sequenceId || null;
+      playingRef.current = false;
+      if (rafRef.current) {
+         cancelAnimationFrame(rafRef.current);
+         rafRef.current = null;
+      }
+   }
+   /* eslint-enable react-hooks/refs */
 
    // Reset playback state when sequence changes (e.g., user switches to another frame and back)
    useEffect(() => {
@@ -357,6 +370,14 @@ export function useAnimationPlayer(): {
          rafRef.current = null;
       }
    }, []);
+
+   // Pause animation when a modal dialog (confirm or choice) is shown (Solution A)
+   const isModalVisible = !!(state.confirm?.isVisible || state.choice?.isVisible);
+   useEffect(() => {
+      if (isModalVisible && playingRef.current) {
+         pause();
+      }
+   }, [isModalVisible, pause]);
 
    const stop = useCallback(() => {
       playingRef.current = false;

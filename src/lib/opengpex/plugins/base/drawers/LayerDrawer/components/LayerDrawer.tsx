@@ -28,6 +28,7 @@ import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import { useLayerCommands, useMaskEditMonitor } from "../hooks";
 import { MergeDownIcon, MergeVisibleIcon } from "@opengpex/editor/icons";
 import { LayerItem } from "./LayerItem";
+import { LayerPropsBar } from "./LayerPropsBar";
 import type { LayerDrawerSignalsMap } from "../commands.d";
 
 export const LayerComponent = React.memo(function LayerComponent() {
@@ -256,6 +257,9 @@ function LayerComponentInner({ activeFrame, activeLayerId, activeLayerHostId }: 
           </div>
         </div>
       </div>
+
+      {/* Layer Properties Bar: Blend Mode + Opacity (below layer list) */}
+      <LayerPropsBar />
     </div>
   );
 }

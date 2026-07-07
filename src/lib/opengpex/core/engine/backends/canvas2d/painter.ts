@@ -254,7 +254,8 @@ export function drawLayerInstance(
     if (matrix) {
       ctx.setTransform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.tx, matrix.ty);
     }
-    ctx.globalAlpha = opacity ?? layer.opacity;
+    ctx.globalAlpha = (opacity ?? layer.opacity) * (layer.fill ?? 1);
+    ctx.globalCompositeOperation = (layer.blendMode || 'source-over') as GlobalCompositeOperation;
     let vx = 0, vy = 0;
     if (layer.visibleShape) {
       vx = layer.visibleShape.rect.x;
@@ -281,7 +282,8 @@ export function drawLayerInstance(
     ctx.imageSmoothingEnabled = false;
     ctx.imageSmoothingQuality = imageSmoothingQuality;
     ctx.filter = getAdjustmentsData(layer.adjustments);
-    ctx.globalAlpha = opacity ?? layer.opacity;
+    ctx.globalAlpha = (opacity ?? layer.opacity) * (layer.fill ?? 1);
+    ctx.globalCompositeOperation = (layer.blendMode || 'source-over') as GlobalCompositeOperation;
 
     // 3. Inject mask clipping sequence (all hard-edge since no feather)
     applyClipSequence(ctx, layer, clipSequence || []);

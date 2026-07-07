@@ -29,7 +29,7 @@ import {
   useOverlayRotationSync,
   useVolatileInteraction,
 } from "@opengpex/editor/core/context";
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import { useLayerOverlayCommands } from "./hooks";
 import { SIGNAL_FORCE_SHOW_TYPES } from "./protocols";
 
@@ -196,13 +196,15 @@ export function LayerOverlayToggle() {
   const { isAlwaysOn, toggleCmd } = useLayerOverlayCommands();
 
   return (
-    <FunctionButton
+    <FancyButton
       onClick={() => toggleCmd?.execute()}
       active={isAlwaysOn}
       title={`Toggle Layer Outlines (${toggleCmd?.shortcutLabel || ""})`}
       tooltipPosition="right"
+      iconOnly
+      shape="rect"
     >
       <Focus size={18} />
-    </FunctionButton>
+    </FancyButton>
   );
 }

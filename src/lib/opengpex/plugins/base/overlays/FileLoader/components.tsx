@@ -31,7 +31,7 @@ import {
   Zap,
 } from "lucide-react";
 import EditorHUD from "@opengpex/editor/widgets/EditorHUD";
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import {
   usePluginCommands,
   useEditorState,
@@ -146,14 +146,15 @@ export function FileLoaderAction() {
 
   return (
     <>
-      <FunctionButton
+      <FancyButton
         onClick={() => pickCmd?.execute()}
         title={`Upload Image (${pickCmd?.shortcutLabel || ""})`}
         tooltipPosition="right"
-        variant="glass"
+        iconOnly
+        shape="rect"
       >
         <ImagePlus size={18} />
-      </FunctionButton>
+      </FancyButton>
     </>
   );
 }

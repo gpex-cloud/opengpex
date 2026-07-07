@@ -42,7 +42,7 @@ import {
   Database,
   Settings,
 } from "lucide-react";
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import Switch from "@opengpex/editor/widgets/Switch";
 import { useEditorState, useEditorServices } from "@opengpex/editor/core/context";
@@ -581,13 +581,15 @@ export const DebugInfoSettings = React.memo(function DebugInfoSettings() {
 
   return (
     <>
-      <FunctionButton
+      <FancyButton
         title="System Debug Info"
         active={isEnabled}
         onClick={() => toggleCmd?.execute()}
+        iconOnly
+        shape="rect"
       >
         <Terminal size={14} />
-      </FunctionButton>
+      </FancyButton>
     </>
   );
 });

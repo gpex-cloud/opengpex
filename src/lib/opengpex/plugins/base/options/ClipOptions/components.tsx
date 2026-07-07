@@ -42,7 +42,7 @@ import {
 } from "@opengpex/editor/core/context";
 import { getRegularClipShape } from "@opengpex/editor/core/helpers/selection";
 
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import Popover from "@opengpex/editor/widgets/Popover";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
@@ -795,7 +795,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
 
       {/* 3. Actions Group */}
       <div className="flex items-center gap-0.5 ml-1.5">
-        <FunctionButton
+        <FancyButton shape="rect" iconOnly
           onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
             branchCreateCmd?.execute({ rect });
@@ -804,10 +804,10 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
           title={`Create Branch (${branchCreateCmd?.shortcutLabel || ""})`}
           variant="ghost"
           tooltipPosition="bottom"
-          className="w-6 h-6"
+          className="w-6 h-6 group"
         >
-          <Split size={13} className="text-emerald-500" />
-        </FunctionButton>
+          <Split size={13} className="text-emerald-300 group-hover:text-emerald-600 dark:text-emerald-400 dark:group-hover:text-emerald-300 transition-colors" />
+        </FancyButton>
 
         {/*
          * Re-Canvas — clickable from both pan and clip mode. The
@@ -898,32 +898,32 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                     updateClipBox(patch);
                   }}
                 />
-                <FunctionButton
+                <FancyButton shape="rect"
                   onClick={() => reCanvasApplyCmd?.execute()}
                   variant="ghost"
                   className="h-6 w-auto px-2 text-[10px] !bg-rose-500 hover:!bg-rose-600 !text-white gap-1 ml-1.5"
                 >
                   <Check size={11} strokeWidth={3} />
                   APPLY
-                </FunctionButton>
+                </FancyButton>
               </div>
             </div>
           }
         >
-          <FunctionButton
+          <FancyButton shape="rect" iconOnly
             onClick={() => reCanvasToggleCmd?.execute()}
             title="Toggle Canvas Resize Mode"
             variant="ghost"
             tooltipPosition="bottom"
-            className="w-6 h-6"
+            className="w-6 h-6 group"
           >
             <ImageUpscale
               size={13}
               className={
-                isReCanvas ? "animate-pulse text-white" : "text-rose-500"
+                isReCanvas ? "animate-pulse text-white" : "text-rose-300 group-hover:text-rose-600 dark:text-rose-400 dark:group-hover:text-rose-300 transition-colors"
               }
             />
-          </FunctionButton>
+          </FancyButton>
         </Popover>
       </div>
     </div>
@@ -1004,7 +1004,7 @@ export const ClipSelectionActions = React.memo(function ClipSelectionActions() {
   const { cutCmd, copyCmd, pasteCmd } = useClipOptionsCommands();
   return (
     <>
-      <FunctionButton
+      <FancyButton shape="rect" iconOnly
         onClick={() => cutCmd.execute()}
         disabled={state.interaction.interactionMode !== "clip"}
         title={`${cutCmd.name} (${cutCmd.shortcutLabel})`}
@@ -1013,8 +1013,8 @@ export const ClipSelectionActions = React.memo(function ClipSelectionActions() {
         className="w-6 h-6"
       >
         <Scissors size={13} />
-      </FunctionButton>
-      <FunctionButton
+      </FancyButton>
+      <FancyButton shape="rect" iconOnly
         onClick={() => copyCmd.execute()}
         disabled={state.interaction.interactionMode !== "clip"}
         title={`${copyCmd.name} (${copyCmd.shortcutLabel})`}
@@ -1023,8 +1023,8 @@ export const ClipSelectionActions = React.memo(function ClipSelectionActions() {
         className="w-6 h-6"
       >
         <CopyIcon size={13} />
-      </FunctionButton>
-      <FunctionButton
+      </FancyButton>
+      <FancyButton shape="rect" iconOnly
         onClick={() => pasteCmd.execute(undefined)}
         disabled={false}
         title={`${pasteCmd.name} (${pasteCmd.shortcutLabel})`}
@@ -1033,7 +1033,7 @@ export const ClipSelectionActions = React.memo(function ClipSelectionActions() {
         className="w-6 h-6"
       >
         <ClipboardPaste size={13} />
-      </FunctionButton>
+      </FancyButton>
     </>
   );
 });

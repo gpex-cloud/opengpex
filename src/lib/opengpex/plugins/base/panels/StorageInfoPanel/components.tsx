@@ -50,7 +50,6 @@ import {
   useEditorState,
   useEditorServices,
 } from "@opengpex/editor/core/context";
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import DelayedConfirm from "@opengpex/editor/widgets/DelayedConfirm";
 import { PopupPanel } from "@opengpex/editor/widgets/PopupPanel";
@@ -1620,13 +1619,13 @@ export function StorageInfoSettings() {
 
   return (
     <>
-      <FunctionButton
+      <FancyButton iconOnly shape="rect"
         title="Storage Visualization"
         active={isEnabled}
         onClick={() => toggleCmd?.execute()}
       >
         <Package size={14} />
-      </FunctionButton>
+      </FancyButton>
     </>
   );
 }

@@ -24,7 +24,7 @@ import { Trash2, HardDrive, RefreshCw, Download, Check, CloudOff, ChevronRight, 
 import { useEditorServices } from "@opengpex/editor/core/context";
 import type { WebFont } from "@opengpex/editor/core/fonts/registry";
 import { isLocalFontAccessSupported, queryLocalFonts, getPersistedLocalFonts, clearPersistedLocalFonts } from "@opengpex/editor/core/fonts/local";
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 
 // ─── Category grouping helpers ──────────────────────────────────────────────────
@@ -368,9 +368,9 @@ export const FontSettings = React.memo(function FontSettings() {
         )}
         <div className="flex gap-2">
           {isLocalFontAccessSupported() && (
-            <FunctionButton
+            <FancyButton shape="rect"
               onClick={hasLocalFonts ? handleRemoveLocalFonts : handleScanLocalFonts}
-              variant="glass"
+              variant="ghost"
               className="flex-1 gap-1.5 text-[10px] h-8"
               disabled={scanning}
             >
@@ -380,11 +380,11 @@ export const FontSettings = React.memo(function FontSettings() {
                 <ScanSearch size={11} />
               )}
               {scanning ? "Scanning…" : hasLocalFonts ? "Remove Local" : "Scan Local"}
-            </FunctionButton>
+            </FancyButton>
           )}
-          <FunctionButton
+          <FancyButton shape="rect"
             onClick={handlePreloadAll}
-            variant="glass"
+            variant="ghost"
             className="flex-1 gap-1.5 text-[10px] h-8"
             disabled={preloading || loadedCount >= totalFonts}
           >
@@ -394,10 +394,10 @@ export const FontSettings = React.memo(function FontSettings() {
               <Download size={11} />
             )}
             {preloading ? "Loading…" : "Preload Online"}
-          </FunctionButton>
-          <FunctionButton
+          </FancyButton>
+          <FancyButton shape="rect"
             onClick={handleClearCache}
-            variant="glass"
+            variant="ghost"
             className="flex-1 gap-1.5 text-[10px] h-8"
             disabled={clearing}
           >
@@ -407,7 +407,7 @@ export const FontSettings = React.memo(function FontSettings() {
               <Trash2 size={11} />
             )}
             Clear Cache
-          </FunctionButton>
+          </FancyButton>
         </div>
       </div>
 

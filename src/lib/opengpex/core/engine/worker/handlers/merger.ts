@@ -61,6 +61,8 @@ export async function mergeLayersToLayer(
       bounding: { w: layer.boundingRect.w, h: layer.boundingRect.h },
       visibleShape: layer.visibleShape,
       opacity: layer.opacity ?? 1,
+      blendMode: layer.blendMode,
+      fill: layer.fill,
       adjustments: layer.adjustments,
       vectorMasks: layer.vectorMasks,
       bitmapMasks: layer.bitmapMasks
@@ -188,6 +190,8 @@ export async function mergeLayersWithShape(
       bounding: { w: layer.boundingRect.w, h: layer.boundingRect.h },
       visibleShape: layer.visibleShape,
       opacity: layer.opacity ?? 1,
+      blendMode: layer.blendMode,
+      fill: layer.fill,
       adjustments: layer.adjustments,
       vectorMasks: layer.vectorMasks,
       bitmapMasks: layer.bitmapMasks

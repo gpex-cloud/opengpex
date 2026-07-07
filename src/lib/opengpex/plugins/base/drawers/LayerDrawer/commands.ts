@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Layer, EditorContextValue, EditorCommand, asLocalShape } from '@opengpex/editor/core/types';
+import { Layer, EditorContextValue, EditorCommand, asLocalShape, LayerBlendMode } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 
 import { syncToCanvasOverlay } from './utils';
@@ -187,5 +187,44 @@ export const LAYER_COMMANDS = {
 
             syncToCanvasOverlay(ctx, frame, worldCenter, shape.rect.w, shape.rect.h);
         }
-    } as EditorCommand<{ frameId?: string; layerId: string; maskId: string }, void>
+    } as EditorCommand<{ frameId?: string; layerId: string; maskId: string }, void>,
+
+    setBlendMode: {
+        id: P.CMD_SET_BLEND_MODE,
+        name: 'Set Blend Mode',
+        undoable: true,
+        execute: (ctx: EditorContextValue, payload: { frameId?: string; layerId?: string; blendMode: LayerBlendMode }) => {
+            const frameId = payload.frameId || ctx.activeFrame?.id;
+            const layerId = payload.layerId || ctx.activeLayer?.id;
+            if (frameId && layerId) {
+                ctx.actions.updateLayer(frameId, layerId, { blendMode: payload.blendMode });
+            }
+        }
+    } as EditorCommand<{ frameId?: string; layerId?: string; blendMode: LayerBlendMode }, void>,
+
+    setLayerOpacity: {
+        id: P.CMD_SET_LAYER_OPACITY,
+        name: 'Set Layer Opacity',
+        undoable: true,
+        execute: (ctx: EditorContextValue, payload: { frameId?: string; layerId?: string; opacity: number }) => {
+            const frameId = payload.frameId || ctx.activeFrame?.id;
+            const layerId = payload.layerId || ctx.activeLayer?.id;
+            if (frameId && layerId) {
+                ctx.actions.updateLayer(frameId, layerId, { opacity: payload.opacity });
+            }
+        }
+    } as EditorCommand<{ frameId?: string; layerId?: string; opacity: number }, void>,
+
+    setLayerFill: {
+        id: P.CMD_SET_LAYER_FILL,
+        name: 'Set Layer Fill',
+        undoable: true,
+        execute: (ctx: EditorContextValue, payload: { frameId?: string; layerId?: string; fill: number }) => {
+            const frameId = payload.frameId || ctx.activeFrame?.id;
+            const layerId = payload.layerId || ctx.activeLayer?.id;
+            if (frameId && layerId) {
+                ctx.actions.updateLayer(frameId, layerId, { fill: payload.fill });
+            }
+        }
+    } as EditorCommand<{ frameId?: string; layerId?: string; fill: number }, void>
 };

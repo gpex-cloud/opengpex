@@ -26,6 +26,15 @@ export type RenderEngine = 'canvas' | 'webgpu';
 export const LAYER_ROLES = ['host', 'frag', 'exchange'] as const;
 export type LayerRole = typeof LAYER_ROLES[number];
 
+/** Layer blend mode — maps directly to CanvasRenderingContext2D.globalCompositeOperation */
+export type LayerBlendMode =
+  | 'source-over'
+  | 'multiply' | 'darken' | 'color-burn'
+  | 'screen' | 'lighten' | 'color-dodge'
+  | 'overlay' | 'soft-light' | 'hard-light'
+  | 'difference' | 'exclusion'
+  | 'hue' | 'saturation' | 'color' | 'luminosity';
+
 export interface NormalizedState<T> {
   byId: Record<string, T>;
   order: string[];
@@ -173,7 +182,10 @@ export interface Layer {
   visible: boolean;
   locked: boolean;
   opacity: number;
-
+  /** Layer blend mode (maps to globalCompositeOperation). Defaults to 'source-over' (Normal) when undefined. */
+  blendMode?: LayerBlendMode;
+  /** Layer fill opacity (0–1). Controls content opacity without affecting layer styles. Defaults to 1. */
+  fill?: number;
 
   // Filters & Adjustments (optional)
   adjustments?: AdjustmentState;

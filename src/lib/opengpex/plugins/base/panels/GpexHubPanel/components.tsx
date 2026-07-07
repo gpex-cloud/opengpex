@@ -36,7 +36,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { PopupPanel } from "@opengpex/editor/widgets/PopupPanel";
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import FancyConfirm from "@opengpex/editor/widgets/FancyConfirm";
 import TabSwitcher from "@opengpex/editor/widgets/TabSwitcher";
 import { useGpexHubConfig } from "./hooks";
@@ -64,7 +64,7 @@ export const GpexHubTrigger = React.memo(function GpexHubTrigger() {
   const { toggle, isOpen } = useGpexHubConfig();
   return (
     <div id="trigger-gpexhub">
-      <FunctionButton
+      <FancyButton shape="rect"
         onClick={toggle}
         active={isOpen}
         title="GPEX-Hub"
@@ -75,7 +75,7 @@ export const GpexHubTrigger = React.memo(function GpexHubTrigger() {
           size={18}
           className={`transition-transform duration-500 ${isOpen ? "scale-110 text-indigo-500" : ""}`}
         />
-      </FunctionButton>
+      </FancyButton>
     </div>
   );
 });
@@ -480,12 +480,11 @@ function InstalledTab() {
         {/* Bottom Action: Upload Button */}
         {!IS_CLOUD_MODE && (
           <div className="pt-4 border-t border-zinc-200/50 dark:border-zinc-800/50 shrink-0 pb-1">
-            <FunctionButton
+            <FancyButton shape="rect"
               onClick={handleDragDropClick}
               disabled={uploading}
               loading={uploading}
-              variant="solid"
-              shape="circle"
+              variant="zinc"
               active={!isDragging && !uploading}
               title="Click to select file or drag ZIP here to install"
               className={`w-full text-xs transition-all duration-200 flex items-center justify-center gap-1.5 select-none
@@ -512,7 +511,7 @@ function InstalledTab() {
                     ? "Uploading..."
                     : "Upload Plugin"}
               </span>
-            </FunctionButton>
+            </FancyButton>
           </div>
         )}
       </div>
@@ -706,19 +705,19 @@ function PluginListRow({
           <div className="flex items-center gap-1.5">
             {/* Delete button: only for uploaded dynamic plugins that are disabled */}
             {!isEnabled && isDynamic && (
-              <FunctionButton
+              <FancyButton shape="rect"
                 onClick={() => onDelete(p)}
                 className="px-2 py-1.5 h-auto rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all duration-200 cursor-pointer shadow-sm bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/20 dark:hover:text-red-400 border border-zinc-200 dark:border-zinc-700/50 hover:border-red-300 dark:hover:border-red-900/30"
                 title="Delete plugin from disk"
               >
                 <Trash2 size={11} />
                 Delete
-              </FunctionButton>
+              </FancyButton>
             )}
-            <FunctionButton
+            <FancyButton shape="rect"
               onClick={() => togglePlugin(p.id, isEnabled)}
               active={!isEnabled}
-              variant={!isEnabled ? "solid" : "glass"}
+              variant={!isEnabled ? "zinc" : "ghost"}
               className={`px-2.5 py-1.5 h-auto rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all duration-200 cursor-pointer shadow-sm
                 ${
                   !isEnabled
@@ -729,7 +728,7 @@ function PluginListRow({
             >
               {!isEnabled ? <Power size={11} /> : <PowerOff size={11} />}
               {!isEnabled ? "Enable" : "Disable"}
-            </FunctionButton>
+            </FancyButton>
           </div>
         ) : (
           <div className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] text-emerald-500 font-bold">

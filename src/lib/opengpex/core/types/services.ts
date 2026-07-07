@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Frame, Layer, AdjustmentState, VectorMask, BitmapMask } from './models';
+import { Frame, Layer, AdjustmentState, VectorMask, BitmapMask, LayerBlendMode } from './models';
 import {
   LocalRect, Dimensions, ClipDescriptor,
   Shape, LocalShape, LocalPolygon, ShapeType, TileMetadata
@@ -36,6 +36,8 @@ export interface LayerItemForWorker {
   boundingRect: Dimensions;
   visibleShape?: LocalShape;
   opacity: number;
+  blendMode?: LayerBlendMode;
+  fill?: number;
   adjustments?: AdjustmentState;
   vectorMasks?: VectorMask[];
   bitmapMasks?: BitmapMask[];

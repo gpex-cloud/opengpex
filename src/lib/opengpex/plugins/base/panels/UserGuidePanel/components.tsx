@@ -22,7 +22,7 @@
 import React, { useState } from "react";
 import { BookOpen } from "lucide-react";
 import { BuiltCommand } from "@opengpex/editor/core/types";
-import FunctionButton from "@opengpex/editor/widgets/FunctionButton";
+import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import { PopupPanel } from "@opengpex/editor/widgets/PopupPanel";
 import TabSwitcher from "@opengpex/editor/widgets/TabSwitcher";
 import { useUserGuide } from "./hooks";
@@ -36,15 +36,17 @@ export function GuideTrigger() {
 
   return (
     <div id="trigger-guide">
-      <FunctionButton
+      <FancyButton
         onClick={() => toggleCmd?.execute()}
         active={isActive}
         title="Interaction Guide"
         tooltipPosition="right"
+        iconOnly
+        shape="rect"
         {...({ "data-panel-toggle": "guide" } as Record<string, string>)}
       >
         <BookOpen size={18} />
-      </FunctionButton>
+      </FancyButton>
     </div>
   );
 }

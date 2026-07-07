@@ -377,6 +377,7 @@ export class Canvas2dEngine implements IRenderer {
     mainCtx.save();
     mainCtx.setTransform(1, 0, 0, 1, 0, 0); // Directly copy 1:1 in physical pixel space
     mainCtx.globalAlpha = options.opacity ?? layer.opacity ?? 1;
+    mainCtx.globalCompositeOperation = (layer.blendMode || 'source-over') as GlobalCompositeOperation;
     mainCtx.drawImage(offscreen, 0, 0, finalW, finalH, screenX, screenY, finalW, finalH);
     mainCtx.restore();
 

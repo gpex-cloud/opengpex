@@ -24,7 +24,7 @@ import { useEditorState, useEditorServices } from '@opengpex/editor/core/context
 import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 import { SmartGuideData } from '@opengpex/editor/core/types';
 import { Magnet } from 'lucide-react';
-import FunctionButton from '@opengpex/editor/widgets/FunctionButton';
+import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
 import { useSmartGuides } from './hooks';
 import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { Motion } from '@opengpex/editor/core/motion';
@@ -135,13 +135,15 @@ export function SmartGuidesToggle() {
   const { isEnabled, toggleCmd } = useSmartGuides();
 
   return (
-    <FunctionButton 
+    <FancyButton 
       onClick={() => toggleCmd?.execute()}
       active={isEnabled}
       title={`Toggle Smart Guides (${toggleCmd?.shortcutLabel || ''})`}
       tooltipPosition="right"
+      iconOnly
+      shape="rect"
     >
       <Magnet size={18} />
-    </FunctionButton>
+    </FancyButton>
   );
 }
