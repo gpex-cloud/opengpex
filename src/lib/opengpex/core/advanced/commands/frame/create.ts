@@ -107,7 +107,7 @@ export const FrameCreateCommands = {
         return '';
       }
 
-      const { safeFile, dimensions: decodeDimensions, metadata } = decoded;
+      const { safeFile, dimensions: decodeDimensions, metadata, rawBlob } = decoded;
 
       // ═══════════════════════════════════════════════════════════════════════
       // GIF Multi-frame Import Path
@@ -260,8 +260,8 @@ export const FrameCreateCommands = {
       // Standard Single-layer Import Path (non-animated / single-frame)
       // ═══════════════════════════════════════════════════════════════════════
 
-      // 1. Register original asset
-      const assetId = await assets.register(safeFile);
+      // 1. Register original asset (Phase 5: pass rawBlob for 16-bit fidelity preservation)
+      const assetId = await assets.register(safeFile, rawBlob ? { rawBlob } : undefined);
       const assetUrl = assets.getURL(assetId)!;
 
       // 2. Concurrently: decode content bounds + generate thumbnail

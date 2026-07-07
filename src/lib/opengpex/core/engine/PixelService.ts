@@ -328,7 +328,7 @@ export function createPixelService(
         ctx.scale(dpr, dpr);
         drawLayerInstance(ctx, layer, null);
         const blob = await canvas.convertToBlob({ type: 'image/png' });
-        const id = await assets.register(blob, dpr);
+        const id = await assets.register(blob, { dprScale: dpr });
         return { id, url: assets.getURL(id)! };
       },
 

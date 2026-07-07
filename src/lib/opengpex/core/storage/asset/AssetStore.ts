@@ -22,6 +22,9 @@ import { AssetDriver } from '@opengpex/editor/core/storage/Driver';
 
 export const ASSET_VERSION = 2; // Current metadata version
 
+/** Key prefix for high-resolution raw source blobs (Phase 5: 16-bit fidelity) */
+const RAW_KEY_PREFIX = 'raw:';
+
 export interface StoredAsset {
   id: string;
   blob: Blob;
@@ -33,6 +36,9 @@ export interface StoredAsset {
 /**
  * AssetStore: Persistent asset store based on Driver (LocalForage)
  * Responsibility: Responsible for physically saving assets to IndexedDB.
+ *
+ * Phase 5 Extension: Supports associated high-resolution raw blobs
+ * stored under `raw:${assetId}` keys for 16-bit fidelity export.
  */
 export class AssetStore {
   /**
@@ -76,10 +82,13 @@ export class AssetStore {
   }
 
   /**
-   * Deletes specified asset
+   * Deletes specified asset AND its associated raw blob (cascade delete).
    */
   async remove(id: string): Promise<void> {
-    await AssetDriver.removeItem(id);
+    await Promise.all([
+      AssetDriver.removeItem(id),
+      AssetDriver.removeItem(`${RAW_KEY_PREFIX}${id}`),
+    ]);
   }
 
   /**
@@ -87,6 +96,34 @@ export class AssetStore {
    */
   async clear(): Promise<void> {
     await AssetDriver.clear();
+  }
+
+  // ─── Phase 5: High-Resolution Raw Source Storage ──────────────────────────
+
+  /**
+   * Stores a high-resolution raw source blob associated with an asset.
+   * Used for 16-bit TIFF/PNG/RAW imports to preserve original precision.
+   * The raw blob is stored in the same IDB but under a `raw:${id}` key.
+   */
+  async setRaw(id: string, rawBlob: Blob): Promise<void> {
+    await AssetDriver.setItem(`${RAW_KEY_PREFIX}${id}`, rawBlob);
+  }
+
+  /**
+   * Retrieves the high-resolution raw source blob for an asset.
+   * Returns null if no raw source exists (8-bit source or pixel-edited asset).
+   */
+  async getRaw(id: string): Promise<Blob | null> {
+    return AssetDriver.getItem<Blob>(`${RAW_KEY_PREFIX}${id}`);
+  }
+
+  /**
+   * Checks whether a high-resolution raw source exists for the given asset.
+   * Used by the export path to determine if 16-bit export is available.
+   */
+  async hasRaw(id: string): Promise<boolean> {
+    const keys = await AssetDriver.keys();
+    return keys.includes(`${RAW_KEY_PREFIX}${id}`);
   }
 }
 

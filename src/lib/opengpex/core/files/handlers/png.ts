@@ -53,7 +53,10 @@ export class PngHandler implements ImageFormatHandler {
 
     const metadata = await this.extractMetadata(file);
 
-    return { safeFile: file, dimensions, metadata };
+    // Phase 5: Preserve raw source for 16-bit fidelity export
+    const rawBlob = metadata.bitDepth > 8 ? file : undefined;
+
+    return { safeFile: file, dimensions, metadata, rawBlob };
   }
 
   // ─── Encode ──────────────────────────────────────────────────────────────

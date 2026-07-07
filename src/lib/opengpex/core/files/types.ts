@@ -213,6 +213,14 @@ export interface DecodeResult {
     /** Zero-based frame index */
     index: number;
   }>;
+
+  /**
+   * Phase 5: High-resolution raw source blob.
+   * Present only when the source file has bitDepth > 8 (16-bit TIFF/PNG/RAW).
+   * Used by AssetService to store the original high-precision data for lossless 16-bit export.
+   * The raw blob is the original file bytes — NOT decoded pixel data.
+   */
+  rawBlob?: Blob;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -74,7 +74,10 @@ export class RawHandler implements ImageFormatHandler {
     const dimensions = { w: img.width, h: img.height };
     img.close();
 
-    return { safeFile, dimensions, metadata };
+    // 4. Phase 5: RAW files are always high bit-depth (12-16 bit) — preserve raw source
+    const rawBlob = metadata.bitDepth > 8 ? file : undefined;
+
+    return { safeFile, dimensions, metadata, rawBlob };
   }
 
   // ─── Encode (not supported) ──────────────────────────────────────────────

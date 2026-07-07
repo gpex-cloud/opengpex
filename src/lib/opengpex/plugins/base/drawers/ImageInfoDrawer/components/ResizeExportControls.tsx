@@ -32,6 +32,7 @@ import FancyButton from "@opengpex/editor/widgets/FancyButton";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
+import FunctionGroup from "@opengpex/editor/widgets/FunctionGroup";
 
 import { ExifData, CommandInstance } from "@opengpex/editor/core/types";
 import { formatPrintSize, DPI_PRESETS } from "@opengpex/editor/core/files";
@@ -56,6 +57,10 @@ interface ResizeExportControlsProps {
   applyResizeCmd?: CommandInstance;
   downloadCmd?: CommandInstance;
   exif?: ExifData;
+  /** Source image bit depth (e.g. 16 for 16-bit TIFF/PNG). Undefined = 8-bit default. */
+  sourceBitDepth?: number;
+  /** Whether only a single visible content layer exists (multi-layer disables 16-bit) */
+  isSingleLayer?: boolean;
 }
 
 export function ResizeExportControls({
@@ -69,6 +74,8 @@ export function ResizeExportControls({
   applyResizeCmd,
   downloadCmd,
   exif,
+  sourceBitDepth,
+  isSingleLayer,
 }: ResizeExportControlsProps) {
   // Effective DPI: pending override in config, or frame's committed value
   const effectiveDpi = config.dpi || frameDpi;
@@ -301,11 +308,60 @@ export function ResizeExportControls({
                 { label: "ZIP", value: "zip", description: "smaller, slower" },
               ]}
               trigger={
-                <button className="flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-stage)] text-[10px] font-black text-[var(--text-main)] tabular-nums hover:bg-[var(--border-subtle)] transition-colors uppercase">
-                  {config.tiffCompression || "none"} <ChevronDown size={8} className="opacity-40" />
-                </button>
+                <FancyButton variant="zinc" subtle={true} size="xs">
+                  {(config.tiffCompression || "none").toUpperCase()} <ChevronDown size={8} className="opacity-50" />
+                </FancyButton>
               }
             />
+            <div className="flex-1" />
+            {sourceBitDepth && sourceBitDepth > 8 && (
+              <FunctionGroup
+                options={[
+                  { label: "8-bit", value: "8", tooltip: !isSingleLayer ? "Multi-layer uses 8-bit" : undefined },
+                  { label: "16-bit", value: "16", tooltip: isSingleLayer ? "TIFF always exports 16-bit" : undefined },
+                ]}
+                value={isSingleLayer ? "16" : "8"}
+                onChange={() => {}}
+                disabled={true}
+                className="w-28 [&_button]:py-0.5"
+              />
+            )}
+          </div>
+        )}
+        {config.format === "image/png" && (
+          <div className="flex items-center gap-2 px-1 mt-3 animate-in fade-in slide-in-from-top-1 duration-300">
+            <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
+              Compress
+            </span>
+            <ActionDropdown
+              onSelect={(val: string) => {
+                updateConfig({ pngCompression: Number(val) as 0 | 6 | 9 });
+              }}
+              className="shrink-0"
+              options={[
+                { label: "None", value: "0", description: "fastest, largest" },
+                { label: "Default", value: "6", description: "balanced" },
+                { label: "Max", value: "9", description: "smallest, slowest" },
+              ]}
+              trigger={
+                <FancyButton variant="zinc" subtle={true} size="xs">
+                  {config.pngCompression === 0 ? "NONE" : config.pngCompression === 9 ? "MAX" : "DEFAULT"} <ChevronDown size={8} className="opacity-50" />
+                </FancyButton>
+              }
+            />
+            <div className="flex-1" />
+            {sourceBitDepth && sourceBitDepth > 8 && (
+              <FunctionGroup
+                options={[
+                  { label: "8-bit", value: "8", tooltip: "Standard (smaller file)" },
+                  { label: "16-bit", value: "16", tooltip: !isSingleLayer ? "16-bit requires single layer" : "Lossless hi-res" },
+                ]}
+                value={(!isSingleLayer || config.exportBitDepth === 8) ? "8" : "16"}
+                onChange={(val) => updateConfig({ exportBitDepth: val === "8" ? 8 : 16 })}
+                disabled={!isSingleLayer}
+                className="w-28 [&_button]:py-0.5"
+              />
+            )}
           </div>
         )}
         {config.format !== "image/png" && config.format !== "image/tiff" && (

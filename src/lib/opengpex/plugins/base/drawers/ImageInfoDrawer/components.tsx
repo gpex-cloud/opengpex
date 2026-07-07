@@ -140,6 +140,16 @@ export function ImageInfoComponent() {
         applyResizeCmd={applyResizeCmd}
         downloadCmd={downloadCmd}
         exif={exif}
+        sourceBitDepth={
+          ((activeFrame.layers.byId[activeFrame.layers.order[0]]?.metadata as Record<string, unknown> | undefined)
+            ?.imageMetadata as { bitDepth?: number } | undefined)?.bitDepth
+        }
+        isSingleLayer={
+          activeFrame.layers.order.filter(id => {
+            const l = activeFrame.layers.byId[id];
+            return !l.hostId && l.visible !== false;
+          }).length === 1
+        }
       />
     </div>
   );

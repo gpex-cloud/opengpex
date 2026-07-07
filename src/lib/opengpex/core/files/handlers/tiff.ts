@@ -81,7 +81,10 @@ export class TiffHandler implements ImageFormatHandler {
     const dimensions = { w: img.width, h: img.height };
     img.close();
 
-    return { safeFile, dimensions, metadata };
+    // 4. Phase 5: Preserve raw source for 16-bit fidelity export
+    const rawBlob = metadata.bitDepth > 8 ? file : undefined;
+
+    return { safeFile, dimensions, metadata, rawBlob };
   }
 
   // ─── Encode ──────────────────────────────────────────────────────────────
@@ -334,6 +337,25 @@ class VipsWorker {
   ): Promise<Uint8Array> {
     return (await this.runFn('encodeTiff', rgbaData, width, height, options)) as Uint8Array;
   }
+
+  /**
+   * Phase 5: Export high-resolution 16-bit TIFF/PNG from raw source bytes.
+   * Keeps the entire pipeline in 16-bit domain without quantizing to 8-bit.
+   */
+  async exportHighRes(
+    rawBytes: Uint8Array,
+    options: {
+      format: 'tiff' | 'png';
+      compression?: string;
+      pngCompression?: number;
+      dpi?: number;
+      crop?: { x: number; y: number; w: number; h: number };
+      resize?: { w: number; h: number };
+      iccProfileBytes?: Uint8Array;
+    },
+  ): Promise<Uint8Array> {
+    return (await this.runFn('exportHighRes', rawBytes, options)) as Uint8Array;
+  }
 }
 
 /** Singleton-ish worker instance (lazily created, reused across calls) */
@@ -434,6 +456,65 @@ async function encodeTiffFromImageData(
   } catch (error) {
     console.error('[TiffHandler] Encode failed:', error);
     throw error;
+  } finally {
+    releaseVipsWorker();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 5: Public API for 16-bit High-Resolution Export
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Options for 16-bit high-resolution export.
+ */
+export interface HighResExportOptions {
+  /** Output format: 'tiff' or 'png' */
+  format: 'tiff' | 'png';
+  /** TIFF compression: 'none'|'lzw'|'zip' (default: 'lzw') */
+  compression?: TiffCompression;
+  /** PNG compression level: 0=none/fastest, 6=default, 9=max/slowest (default: 6) */
+  pngCompression?: number;
+  /** Output DPI (default: 72) */
+  dpi?: number;
+  /** Optional crop rect (in pixel coordinates of the original image) */
+  crop?: { x: number; y: number; w: number; h: number };
+  /** Optional resize dimensions */
+  resize?: { w: number; h: number };
+  /** ICC Profile bytes to embed in output */
+  iccProfileBytes?: Uint8Array;
+}
+
+/**
+ * Exports a 16-bit high-resolution image from raw source bytes.
+ * The entire pipeline runs in 16-bit domain (no quantization to 8-bit).
+ *
+ * This function is the public API used by the export command to produce
+ * lossless 16-bit TIFF/PNG output from preserved raw sources.
+ *
+ * @param rawBlob - The original high-resolution source blob (TIFF/PNG/RAW)
+ * @param options - Export options (format, compression, dpi, crop, resize)
+ * @returns Blob containing the encoded 16-bit output
+ */
+export async function exportHighRes(rawBlob: Blob, options: HighResExportOptions): Promise<Blob> {
+  const instance = getVipsWorker();
+
+  try {
+    const buffer = await rawBlob.arrayBuffer();
+    const rawBytes = new Uint8Array(buffer);
+
+    const outputBytes = await instance.exportHighRes(rawBytes, {
+      format: options.format,
+      compression: options.compression,
+      pngCompression: options.pngCompression,
+      dpi: options.dpi,
+      crop: options.crop,
+      resize: options.resize,
+      iccProfileBytes: options.iccProfileBytes,
+    });
+
+    const mimeType = options.format === 'png' ? 'image/png' : 'image/tiff';
+    return new Blob([outputBytes.buffer as ArrayBuffer], { type: mimeType });
   } finally {
     releaseVipsWorker();
   }

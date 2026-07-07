@@ -34,6 +34,10 @@ export interface ExportConfig {
     resample: boolean;
     /** TIFF compression method (only used when format is 'image/tiff') */
     tiffCompression?: 'none' | 'lzw' | 'zip';
+    /** PNG compression level: 0=none/fastest, 6=default, 9=max/slowest (only used when format is 'image/png') */
+    pngCompression?: 0 | 6 | 9;
+    /** Export bit depth for PNG: 8 or 16 (default: 16 when source is 16-bit) */
+    exportBitDepth?: 8 | 16;
 }
 
 /* Constants */

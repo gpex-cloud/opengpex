@@ -132,10 +132,113 @@ async function encodeTiff(rgbaData, width, height, options) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Phase 5: 16-bit High-Resolution Export
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Export high-resolution 16-bit TIFF/PNG from raw source bytes.
+ *
+ * This function keeps the entire pipeline in 16-bit domain:
+ * - Reads the original file at full precision (no quantization to 8-bit)
+ * - Applies geometric transforms (crop/resize) in 16-bit
+ * - Writes output as 16-bit TIFF or PNG
+ *
+ * @param {Uint8Array} rawBytes - Original file bytes (16-bit TIFF/PNG/RAW)
+ * @param {object} options - Export options
+ * @param {string} options.format - Output format: 'tiff' or 'png'
+ * @param {string} [options.compression] - TIFF compression: 'none'|'lzw'|'zip' (default: 'lzw')
+ * @param {number} [options.dpi] - Output DPI (default: 72)
+ * @param {object} [options.crop] - Optional crop rect: { x, y, w, h }
+ * @param {object} [options.resize] - Optional resize: { w, h }
+ * @param {Uint8Array} [options.iccProfileBytes] - Optional ICC Profile bytes to embed
+ * @returns {Uint8Array} - Encoded 16-bit output bytes
+ */
+async function exportHighRes(rawBytes, options) {
+  const v = await initVips();
+
+  const {
+    format = 'tiff',
+    compression = 'lzw',
+    pngCompression = 6,
+    dpi = 72,
+    crop,
+    resize,
+    iccProfileBytes
+  } = options || {};
+
+  // 1. Load image from raw bytes at full precision (no cast to uchar!)
+  let image = v.Image.newFromBuffer(rawBytes, '', {
+    page: 0,
+    access: 'sequential',
+  });
+
+  // 2. Convert to sRGB color space if needed (preserving bit depth)
+  if (image.interpretation !== 'srgb' && image.interpretation !== 'b-w'
+      && image.interpretation !== 'rgb16') {
+    image = image.colourspace('srgb');
+  }
+
+  // 3. Apply crop if specified (in 16-bit domain)
+  if (crop && crop.x >= 0 && crop.y >= 0 && crop.w > 0 && crop.h > 0) {
+    image = image.extractArea(crop.x, crop.y, crop.w, crop.h);
+  }
+
+  // 4. Apply resize if specified (in 16-bit domain)
+  if (resize && resize.w > 0 && resize.h > 0) {
+    const hscale = resize.w / image.width;
+    const vscale = resize.h / image.height;
+    image = image.resize(hscale, { vscale });
+  }
+
+  // 5. Ensure 16-bit precision for output
+  // If image is already ushort (16-bit), keep it; if float, convert to ushort
+  if (image.format === 'uchar') {
+    // Upscale 8-bit to 16-bit (edge case: shouldn't happen with raw source)
+    image = image.linear(257.0, 0).cast('ushort');
+  } else if (image.format === 'float' || image.format === 'double') {
+    // Float → 16-bit (scale 0..1 → 0..65535)
+    image = image.linear(65535.0, 0).cast('ushort');
+  }
+  // 'ushort' format is already 16-bit — no conversion needed
+
+  // 6. Attach ICC Profile if provided
+  if (iccProfileBytes && iccProfileBytes.length > 0) {
+    try {
+      image.set('icc-profile-data', iccProfileBytes);
+    } catch {
+      // Non-critical: ICC attachment failure
+    }
+  }
+
+  // 7. Write output in requested format
+  let outputBuffer;
+  if (format === 'png') {
+    outputBuffer = image.writeToBuffer('.png', {
+      bitdepth: 16,
+      compression: pngCompression,
+    });
+  } else {
+    // Default: TIFF 16-bit
+    const compressionMap = { 'none': 'none', 'lzw': 'lzw', 'zip': 'deflate' };
+    const vipsCompression = compressionMap[compression] || 'lzw';
+    outputBuffer = image.writeToBuffer('.tiff', {
+      bitdepth: 16,
+      compression: vipsCompression,
+      xres: dpi / 25.4,
+      yres: dpi / 25.4,
+      resunit: 'inch',
+    });
+  }
+
+  image.delete();
+  return new Uint8Array(outputBuffer);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Worker Message Handler
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const handlers = { decodeTiff, encodeTiff };
+const handlers = { decodeTiff, encodeTiff, exportHighRes };
 
 self.onmessage = async ({ data: msg }) => {
   const { id, fn, args } = msg;

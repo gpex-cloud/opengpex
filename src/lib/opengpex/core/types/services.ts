@@ -63,8 +63,8 @@ export interface AssetEntryInfo {
  * Core responsibilities: Blob-to-Hash mapping, IDB storage, ObjectURL management, reference-counting GC.
  */
 export interface AssetService {
-  /** Registers asset: inputs Blob, returns Hash */
-  register: (blob: Blob, dprScale?: number) => Promise<string>;
+  /** Registers asset: inputs Blob, returns Hash. Accepts optional rawBlob for 16-bit fidelity (Phase 5). */
+  register: (blob: Blob, options?: { rawBlob?: Blob; dprScale?: number }) => Promise<string>;
   /** Injects asset: directly stores when hash and metadata are known, avoiding duplicate Worker calculations */
   inject: (hash: string, blob: Blob, tileMeta: TileMetadata) => Promise<string>;
 

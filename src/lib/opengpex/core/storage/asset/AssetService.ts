@@ -87,9 +87,16 @@ export class AssetService {
   }
 
   /**
-   * Registers asset: calculates hash from Blob and stores it in the pool
+   * Registers asset: calculates hash from Blob and stores it in the pool.
+   *
+   * Phase 5 Extension: Accepts an optional `rawBlob` for 16-bit fidelity.
+   * When provided, the raw high-resolution source is stored alongside the
+   * 8-bit display asset under a `raw:${hash}` key in IDB.
    */
-  async register(blob: Blob, dprScale?: number): Promise<string> {
+  async register(blob: Blob, options?: { rawBlob?: Blob; dprScale?: number }): Promise<string> {
+    const dprScale = options?.dprScale;
+    const rawBlob = options?.rawBlob;
+
     const hash = await this.calculateHash(blob);
     this.pendingIds.add(hash);
 
@@ -98,6 +105,12 @@ export class AssetService {
       entry.state = AssetState.READY;
       if (dprScale !== undefined && entry.tileMeta) {
         entry.tileMeta.dprScale = dprScale;
+      }
+      // Store raw blob even if display asset already exists (idempotent)
+      if (rawBlob) {
+        assetStore.setRaw(hash, rawBlob).catch(err => {
+          console.warn('[AssetService] Failed to store raw blob:', err);
+        });
       }
       return hash;
     }
@@ -109,6 +122,12 @@ export class AssetService {
         await assetStore.set(hash, cached.blob, cached.tileMeta);
       }
       this.loadEntry(cached);
+      // Store raw blob association
+      if (rawBlob) {
+        assetStore.setRaw(hash, rawBlob).catch(err => {
+          console.warn('[AssetService] Failed to store raw blob:', err);
+        });
+      }
       return hash;
     }
 
@@ -117,6 +136,13 @@ export class AssetService {
       tileMeta.dprScale = dprScale;
     }
     await assetStore.set(hash, blob, tileMeta);
+
+    // Phase 5: Store raw high-resolution source blob (fire-and-forget for performance)
+    if (rawBlob) {
+      assetStore.setRaw(hash, rawBlob).catch(err => {
+        console.warn('[AssetService] Failed to store raw blob:', err);
+      });
+    }
 
     const url = URL.createObjectURL(blob);
     this.pool.set(hash, {
