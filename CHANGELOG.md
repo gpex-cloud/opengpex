@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.22
+
+- Implement Layer Blend Modes (Multiply, Screen, Overlay, etc.) and Opacity/Fill settings, including integrated UI controls in Layers Drawer and rendering pipeline updates
+- Fix AnimationDrawer loop playback reset race condition by implementing render-phase sequence transitions and auto-pausing on active modal confirm/choice dialogs
+- Implement 16-bit High Fidelity Exporter using WASM Libvips, supporting high-depth TIFF/PNG export from original source bytes, compression options, and export controls
+
+---
+
 ## v1.0.0-beta.21
 
 - Introduce unified `FileService` module to handle image decoding, encoding, and metadata management, replacing legacy format-specific helpers
