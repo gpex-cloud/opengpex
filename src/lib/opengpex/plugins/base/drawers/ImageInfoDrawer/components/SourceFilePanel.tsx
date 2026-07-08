@@ -30,7 +30,7 @@ interface SourceFilePanelProps {
   dpi: number;
 }
 
-export function SourceFilePanel({
+export const SourceFilePanel = React.memo(function SourceFilePanel({
   fileName,
   fileFormat,
   fileSize,
@@ -78,4 +78,4 @@ export function SourceFilePanel({
       </span>
     </div>
   );
-}
+});

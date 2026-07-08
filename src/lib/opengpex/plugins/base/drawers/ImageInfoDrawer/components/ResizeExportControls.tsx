@@ -298,6 +298,7 @@ export function ResizeExportControls({
               Compress
             </span>
             <ActionDropdown
+              direction="up"
               onSelect={(val: string) => {
                 updateConfig({ tiffCompression: val as 'none' | 'lzw' | 'zip' });
               }}
@@ -334,6 +335,7 @@ export function ResizeExportControls({
               Compress
             </span>
             <ActionDropdown
+              direction="up"
               onSelect={(val: string) => {
                 updateConfig({ pngCompression: Number(val) as 0 | 6 | 9 });
               }}
@@ -446,6 +448,7 @@ export function ResizeExportControls({
 
           <div className="flex gap-1 flex-1">
             <ActionDropdown
+              direction="up"
               onSelect={handleFormatSelect}
               disabled={isProcessing}
               className="shrink-0"

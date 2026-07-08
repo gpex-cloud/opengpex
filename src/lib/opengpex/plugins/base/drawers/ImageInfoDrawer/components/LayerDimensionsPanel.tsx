@@ -31,7 +31,7 @@ interface LayerDimensionsPanelProps {
   isUpScaled: boolean;
 }
 
-export function LayerDimensionsPanel({
+export const LayerDimensionsPanel = React.memo(function LayerDimensionsPanel({
   isClipMode,
   baseW,
   baseH,
@@ -62,4 +62,4 @@ export function LayerDimensionsPanel({
       </div>
     </div>
   );
-}
+});

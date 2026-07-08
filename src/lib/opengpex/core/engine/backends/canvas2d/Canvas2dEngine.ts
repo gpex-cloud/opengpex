@@ -160,10 +160,16 @@ export class Canvas2dEngine implements IRenderer {
     }
   }
 
-  /** Determine if offscreen synthesis is needed (always go offscreen when bitmap mask is present) */
+  /** Determine if offscreen synthesis is needed (always go offscreen when bitmap mask is present or non-default blend mode) */
   private needsOffscreenComposite(layer: Layer, options: DrawLayerOptions): boolean {
     if (options.bitmapMaskOverride) return true;
-    return !!(layer.bitmapMasks?.some(m => m.enabled));
+    if (layer.bitmapMasks?.some(m => m.enabled)) return true;
+    // [Blend Isolation] Non-source-over blend modes need offscreen pre-compositing
+    // to prevent tile seam artifacts caused by overlap double-blending.
+    // Tiles are drawn with source-over on the offscreen, then the composite result
+    // is blended once onto the main canvas with the target blend mode.
+    if (layer.blendMode && layer.blendMode !== 'source-over') return true;
+    return false;
   }
 
   /** Inline Path2D cache (replaces deleted AsyncMaskCache.getPath2D) */
@@ -235,6 +241,11 @@ export class Canvas2dEngine implements IRenderer {
     const mainCtx = this.ctx;
 
     // 1. Calculate physical pixel bounding box (Screen Space AABB)
+    // [visibleShape Awareness] For shared-asset layers (e.g. cmdj fragments),
+    // the actual content is at visibleShape.rect offset within the layer-local
+    // coordinate space. We must use visibleShape.rect (not 0,0→bounding) as
+    // the content area to correctly compute screen-space AABB.
+    const contentRect = layer.visibleShape?.rect || { x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h };
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
@@ -242,13 +253,11 @@ export class Canvas2dEngine implements IRenderer {
 
     if (options.matrix) {
       const m = options.matrix;
-      const w = layer.bounding.w;
-      const h = layer.bounding.h;
       const corners = [
-        { x: 0, y: 0 },
-        { x: w, y: 0 },
-        { x: 0, y: h },
-        { x: w, y: h }
+        { x: contentRect.x, y: contentRect.y },
+        { x: contentRect.x + contentRect.w, y: contentRect.y },
+        { x: contentRect.x, y: contentRect.y + contentRect.h },
+        { x: contentRect.x + contentRect.w, y: contentRect.y + contentRect.h }
       ];
       for (const p of corners) {
         const tx = m.a * p.x + m.c * p.y + m.tx;
@@ -263,8 +272,8 @@ export class Canvas2dEngine implements IRenderer {
     if (!options.matrix || minX === Infinity) {
       minX = 0;
       minY = 0;
-      maxX = layer.bounding.w;
-      maxY = layer.bounding.h;
+      maxX = contentRect.w;
+      maxY = contentRect.h;
     }
 
     // 1b. Viewport clipping: intersect layer AABB with the actual viewport (main canvas physical size)
@@ -314,8 +323,11 @@ export class Canvas2dEngine implements IRenderer {
       opacity: 1.0,                  // Do not apply opacity in offscreen; apply it during final composition
       bitmapMaskOverride: undefined  // Prevent recursion
     };
-    // Key: Pass contentLayer (excluding bitmapMasks), so recursive calls do not trigger offscreen composition again and can correctly take the tiling path
-    const contentLayer = { ...layer, bitmapMasks: undefined };
+    // Key: Pass contentLayer (excluding bitmapMasks and blendMode), so recursive calls:
+    // 1. Do not trigger offscreen composition again (no bitmapMasks, no blendMode)
+    // 2. Can correctly take the tiling path
+    // 3. Draw tiles with source-over on the offscreen (blendMode applied only in final composite step 5)
+    const contentLayer = { ...layer, bitmapMasks: undefined, blendMode: undefined };
     this.drawLayerDirect(contentLayer, offscreenOptions, assetService);
     this.ctx = oldCtx;
 
@@ -399,11 +411,8 @@ export class Canvas2dEngine implements IRenderer {
 
     const scale = matrix ? Math.sqrt(matrix.a * matrix.a + matrix.b * matrix.b) : 1;
 
-    // [Bitmap Mask Dispatch] If active durable/preview bitmap mask exists, use offscreen composition path
+    // [Bitmap Mask / Blend Isolation Dispatch] Use offscreen composition path
     if (this.needsOffscreenComposite(layer, options)) {
-      if ((window as unknown as Record<string, unknown>).__SEAM_DEBUG) {
-        console.log(`[SeamDebug:Engine] layer="${layer.name}" → OFFSCREEN path (bitmapMask)`);
-      }
       this.drawLayerOffscreen(layer, options, assetService);
       return;
     }
@@ -448,18 +457,12 @@ export class Canvas2dEngine implements IRenderer {
       );
 
       if (tileCount > 0) {
-        if ((window as unknown as Record<string, unknown>).__SEAM_DEBUG) {
-          console.log(`[SeamDebug:Engine] layer="${layer.name}" → TILES path (${tileCount} tiles), dprScale=${dprScale}, drawRect=`, drawRect);
-        }
         drawLayerInstance(ctx, layer, this.tilePool, {
           matrix, opacity, clipSequence: preparedClips, width: options.width, height: options.height, drawRect, imageSmoothingQuality,
           tileCount, dprScale
         });
       } else if (layer.src) {
         // If tile is not ready, fall back to single image, using assetService.resolve to ensure retrieving the latest valid Object URL
-        if ((window as unknown as Record<string, unknown>).__SEAM_DEBUG) {
-          console.log(`[SeamDebug:Engine] layer="${layer.name}" → TILE FALLBACK (single image, tiles not ready)`);
-        }
         const fallbackSrc = assetService ? assetService.resolve(layer.assetId, layer.src) : layer.src;
         const img = imageCache.getOrFetch(fallbackSrc);
         if (img) {
@@ -472,9 +475,6 @@ export class Canvas2dEngine implements IRenderer {
 
     } else {
       // --- 4B. Single Image Rendering Path (vector mask unified ctx.clip directly, bypassing Worker) ---
-      if ((window as unknown as Record<string, unknown>).__SEAM_DEBUG) {
-        console.log(`[SeamDebug:Engine] layer="${layer.name}" → SINGLE IMAGE path, isTiled=${tileMeta?.isTiled}, assetId=${layer.assetId}`);
-      }
       const currentSrc = assetService ? assetService.resolve(layer.assetId, layer.src) : layer.src;
       const img = imageOverride || (currentSrc ? imageCache.getOrFetch(currentSrc) : null);
 

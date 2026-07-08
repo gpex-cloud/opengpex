@@ -21,14 +21,12 @@
 
 import { useMemo } from 'react';
 import { useEditorState, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
-import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import type { ExifData } from '@opengpex/editor/core/types';
 import type { ImageMetadata } from '@opengpex/editor/core/files';
 import type { ImageInfoCommandsMap } from './commands.d';
 import * as P from './protocols';
 
 import { formatBytes } from '@opengpex/editor/core/helpers/file';
-import { calcFinalDims } from './utils';
 
 /**
  * Adapter: Converts the new unified ImageMetadata into the legacy ExifData
@@ -64,41 +62,82 @@ function imageMetadataToExif(meta: ImageMetadata | undefined): ExifData | undefi
 }
 
 /**
- * useImageInfoCommands: Semantic action hook.
+ * useImageInfoMetadata — Derives **stable** display data from the active frame.
+ *
+ * This data only changes when:
+ * - A different frame becomes active (frame switch / open file)
+ * - The base layer metadata changes (rare, only during import)
+ *
+ * By isolating this from interactionMode / config, we prevent the info panels
+ * from re-rendering during normal editor interactions (pan, hover, tool switch).
  */
-export const useImageInfoCommands = () => {
-   const { state, activeFrame } = useEditorState();
+export function useImageInfoMetadata() {
+   const { activeFrame } = useEditorState();
+
+   return useMemo(() => {
+      if (!activeFrame) {
+         return {
+            activeFrame: null as typeof activeFrame,
+            fileName: 'Untitled',
+            fileFormat: 'PNG',
+            fileSize: '---',
+            exif: undefined as ExifData | undefined,
+            layerCount: 0,
+            frameDpi: 72,
+            sourceBitDepth: undefined as number | undefined,
+            isSingleLayer: false,
+         };
+      }
+
+      const mainLayer = activeFrame.layers.byId[activeFrame.layers.order[0]];
+      const metadata = mainLayer?.metadata;
+      const imageMetadata = metadata?.imageMetadata as ImageMetadata | undefined;
+
+      const visibleContentLayers = activeFrame.layers.order.filter(id => {
+         const l = activeFrame.layers.byId[id];
+         return !l.hostId && l.visible !== false;
+      });
+
+      return {
+         activeFrame,
+         fileName: imageMetadata?.sourceFileName || activeFrame.name || 'Untitled',
+         fileFormat: ((imageMetadata?.internalCodec
+            || metadata?.format || 'image/png').split('/')[1])?.toUpperCase() || 'PNG',
+         fileSize: metadata?.size ? formatBytes(metadata.size) : '---',
+         exif: metadata?.exif || imageMetadataToExif(imageMetadata),
+         layerCount: activeFrame.layers.order.length,
+         frameDpi: activeFrame.dpi || 72,
+         sourceBitDepth: (imageMetadata as { bitDepth?: number } | undefined)?.bitDepth,
+         isSingleLayer: visibleContentLayers.length === 1,
+      };
+   }, [activeFrame]);
+}
+
+/**
+ * useExportConfig — Provides export configuration state and command handles.
+ *
+ * Changes when: user adjusts resize/format/quality settings.
+ * Does NOT change on: viewport pan, layer hover, tool changes.
+ */
+export function useExportConfig() {
    const [selfConfig, setSelfConfig] = usePluginSelfConfig<P.ExportConfig>();
    const { downloadCmd, applyResizeCmd } = usePluginCommands<ImageInfoCommandsMap>();
 
-   return useMemo(() => {
-      const mainLayer = activeFrame ? activeFrame.layers.byId[activeFrame.layers.order[0]] : undefined;
-      const metadata = mainLayer?.metadata;
+   return useMemo(() => ({
+      config: selfConfig,
+      updateConfig: setSelfConfig,
+      downloadCmd,
+      applyResizeCmd,
+   }), [selfConfig, setSelfConfig, downloadCmd, applyResizeCmd]);
+}
 
-      const isClipMode = state.interaction.interactionMode === 'clip';
-      const box = activeFrame ? getClipBox(activeFrame) : null;
-      const baseW = isClipMode && box ? box.spatial.rect.w : (activeFrame?.canvas.w || 0);
-      const baseH = isClipMode && box ? box.spatial.rect.h : (activeFrame?.canvas.h || 0);
-
-      return {
-         state: {
-            config: selfConfig,
-            activeFrame,
-            isClipMode,
-            finalDims: activeFrame ? calcFinalDims(baseW, baseH, selfConfig) : { w: 0, h: 0 },
-            fileSize: metadata?.size ? formatBytes(metadata.size) : '---',
-            fileFormat: (((metadata?.imageMetadata as ImageMetadata | undefined)?.internalCodec
-              || metadata?.format || 'image/png').split('/')[1])?.toUpperCase() || 'PNG',
-            fileName: (metadata?.imageMetadata as ImageMetadata | undefined)?.sourceFileName
-              || activeFrame?.name || 'Untitled',
-            layerCount: activeFrame?.layers.order.length || 0,
-            engineStatuses: state.runtime.engineStatuses || [],
-            exif: metadata?.exif || imageMetadataToExif(metadata?.imageMetadata as ImageMetadata | undefined),
-         },
-         updateConfig: setSelfConfig,
-         // Plugin Commands (transparently passed Cmd references)
-         downloadCmd,
-         applyResizeCmd,
-      };
-   }, [state, selfConfig, activeFrame, setSelfConfig, downloadCmd, applyResizeCmd]);
-};
+/**
+ * useClipMode — Extracts the interaction mode (clip vs normal).
+ *
+ * Isolated as a separate hook because interactionMode changes frequently
+ * (every tool switch) and shouldn't cause exif/metadata panels to re-render.
+ */
+export function useClipMode() {
+   const { state } = useEditorState();
+   return state.interaction.interactionMode === 'clip';
+}

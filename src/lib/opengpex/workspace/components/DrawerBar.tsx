@@ -167,19 +167,26 @@ export default function DrawerBar({
   const handleToggle = (id: string) => {
     const currentIds = ui.activeSidebarIds || [];
 
-    if (currentIds.includes(id)) {
-      actions.updateUI({
-        activeSidebarIds: currentIds.filter((i) => i !== id),
-      });
-    } else {
-      actions.updateUI({
-        activeSidebarIds: [...currentIds, id],
-      });
-    }
+    // [Perf] Wrap in startTransition so React's concurrent scheduler can yield
+    // between rendering the drawer shell and mounting the heavy plugin panel,
+    // preventing Chrome's '[Violation] message handler' warning.
+    React.startTransition(() => {
+      if (currentIds.includes(id)) {
+        actions.updateUI({
+          activeSidebarIds: currentIds.filter((i) => i !== id),
+        });
+      } else {
+        actions.updateUI({
+          activeSidebarIds: [...currentIds, id],
+        });
+      }
+    });
   };
 
   const handleIsolate = (id: string) => {
-    actions.updateUI({ activeSidebarIds: [id] });
+    React.startTransition(() => {
+      actions.updateUI({ activeSidebarIds: [id] });
+    });
   };
 
   const handleCombinedClick = (id: string, e: React.MouseEvent) => {
