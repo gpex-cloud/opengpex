@@ -184,7 +184,7 @@ export async function exportStandard8bit(params: ExportParams): Promise<Blob> {
  * @returns Blob if successful, or null if conditions not met (caller should fallback)
  */
 export async function exportMultiLayer16bit(params: ExportParams): Promise<Blob | null> {
-  const { ctx, activeFrame, config, cropBox, isClipMode, exportW, exportH, dpi } = params;
+  const { ctx, activeFrame, config, cropBox, isClipMode, dpi } = params;
   const { assets } = ctx;
 
   // Format eligibility
