@@ -4,6 +4,15 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.23
+
+- Implement Multi-page TIFF import with options to load pages as separate layers, independent animation frames, or first page only
+- Support JPEG internal compression for TIFF exports with an interactive quality slider and advanced settings (Predictor, Byte Order, BigTIFF, custom Tile sizes)
+- Implement 16-bit multi-layer composite export via wasm-vips Web Worker composite pipeline (with 8-bit fallback upsampling)
+- Implement Canvas2D Blend Isolation: force offscreen pre-compositing for layers with non-default blend modes to prevent tiling seam artifacts
+
+---
+
 ## v1.0.0-beta.22
 
 - Implement Layer Blend Modes (Multiply, Screen, Overlay, etc.) and Opacity/Fill settings, including integrated UI controls in Layers Drawer and rendering pipeline updates
