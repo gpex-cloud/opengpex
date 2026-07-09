@@ -106,9 +106,12 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const geometry = useMemo(() => createGeometryService(), []);
   const assets = useMemo(() => createAssetService(), []);
   const processor = useMemo(() => createWorkerProxy(), []);
+  // FileService is created before PixelService so it can be injected as a dependency
+  // (PixelService.render's Lane C delegates encoding to FileService — see export refactor proposal §4.3).
+  const files = useMemo(() => createFileService(assets, processor), [assets, processor]);
   const pixels = useMemo(
-    () => createPixelService(geometry, assets, processor),
-    [geometry, assets, processor],
+    () => createPixelService(geometry, assets, processor, files),
+    [geometry, assets, processor, files],
   );
   const layers = useMemo(
     () => createLayerService(geometry, pixels, assets, actions, () => state),
@@ -116,7 +119,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   );
   const storage = useMemo(() => createStateStorage(assets), [assets]);
   const clipboard = useMemo(() => createClipboardService(), []);
-  const files = useMemo(() => createFileService(assets, processor), [assets, processor]);
+
   const plugins = useMemo(() => createPluginService(), []);
   const fonts = useMemo(() => createFontService(), []);
 

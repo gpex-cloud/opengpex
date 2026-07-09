@@ -17,11 +17,29 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { IMatrix3x3, Layer, ClipDescriptor, TileData } from '@opengpex/editor/core/types';
-import { getAdjustmentsData } from '@opengpex/editor/core/helpers/filters';
+import { IMatrix3x3, Layer, ClipDescriptor, TileData, AdjustmentState } from '@opengpex/editor/core/types';
 import { shapeToPath2D } from '@opengpex/editor/core/helpers/path2d';
+
 import { shrinkInvertedMask } from '@opengpex/editor/core/helpers/sub-pixel';
 import { TEXT_LAYER_PADDING } from '@opengpex/editor/core/helpers/config';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ISOMORPHISM BOUNDARY (see 20260709_filter_step3_retrospective §2)
+// ---------------------------------------------------------------------------
+// This module is imported by BOTH the main thread (`Canvas2dEngine`) AND the
+// engine worker (`worker/core/EngineProvider`). Therefore it MUST NOT import
+// any main-thread singleton — in particular:
+//   - core/engine/cache/AsyncFilterCache  (holds a WorkerBridge, spawns Worker)
+//   - core/engine/worker/WorkerBridge     (spawns Worker on module init)
+//   - Anything transitively pulling `WorkerBridge` into the graph
+//
+// The advanced-filter dispatch (curves/levels/channelMix) belongs in the
+// main-thread `Canvas2dEngine.executeCommand()` layer, NOT here. `painter.ts`
+// is a pure atomic drawer: it receives a `source` and paints it, nothing more.
+// Any pre-filter pixel work must be resolved by the caller and handed in via
+// `source` already substituted.
+// ═══════════════════════════════════════════════════════════════════════════
+
 
 export interface PainterOptions {
   matrix?: IMatrix3x3 | { a: number; b: number; c: number; d: number; tx: number; ty: number };
@@ -41,7 +59,28 @@ export interface PainterOptions {
  */
 
 /**
+ * Convert `AdjustmentState` into a CSS-filter string consumable by
+ * `CanvasRenderingContext2D.filter` / `OffscreenCanvasRenderingContext2D.filter`.
+ *
+ * Kept private to the Canvas2D backend — advanced grading (curves / levels /
+ * channel mixer) does NOT flow through this helper, it goes through the
+ * `IFilter` runtime instead (see spec §5.1 dispatch logic). Legacy
+ * `AdjustmentDrawer` continues to use this fast path.
+ */
+function getAdjustmentsData(adj?: AdjustmentState): string {
+  if (!adj) return 'none';
+  const parts: string[] = [];
+  if (adj.brightness !== 100) parts.push(`brightness(${adj.brightness}%)`);
+  if (adj.contrast !== 100) parts.push(`contrast(${adj.contrast}%)`);
+  if (adj.saturation !== 100) parts.push(`saturate(${adj.saturation}%)`);
+  if (adj.hueRotate !== 0) parts.push(`hue-rotate(${adj.hueRotate}deg)`);
+  if (adj.blur !== 0) parts.push(`blur(${adj.blur}px)`);
+  return parts.length > 0 ? parts.join(' ') : 'none';
+}
+
+/**
  * Checks whether a clip sequence contains any feathered masks.
+
  * When true, the rendering pipeline must use the offscreen compositing path
  * instead of the simple ctx.clip() path.
  */
@@ -212,6 +251,14 @@ export function drawLayerInstance(
   // Detect if feathered compositing path is needed
   const needsFeather = hasFeatheredClips(clipSequence || []);
 
+  // NOTE: Advanced-filter dispatch (curves/levels/channelMix → AsyncFilterCache)
+  // used to live here in Step 3 of the filter pipeline rollout, but violated
+  // the isomorphism boundary above and coincided with a 10s tab crash. It has
+  // been reverted per docs/opengpex/plans/20260709_filter_step3_retrospective.
+  // The dispatch is being moved up to `Canvas2dEngine.executeCommand` in
+  // Step 4; until then, layers with curves/levels/channelMix render the base
+  // adjustments only (spec §5.1 acknowledges this as the fall-back path).
+
   if (needsFeather) {
     // ═══════════════════════════════════════════════════════════════════════════
     // FEATHERED PATH: Offscreen canvas compositing
@@ -242,20 +289,24 @@ export function drawLayerInstance(
     // Apply only hard clips (feather === 0 clips) — these are already in layer-local coords
     applyClipSequence(offCtx, layer, clipSequence || []);
 
-    // Draw content in layer-local space
     drawLayerContent(offCtx, layer, source, drawRect, dprScale, tileCount);
     offCtx.restore();
 
     // Apply feathered masks via offscreen compositing (layer-local space, dprScale=1)
     applyFeatheredClipComposite(offCtx, layer, clipSequence || [], canvasW, canvasH, 1);
 
-    // Composite offscreen result to main canvas with full viewport matrix
+    // Composite offscreen result to main canvas with full viewport matrix.
+    // The blend-mode is applied HERE (spec §5.1 & §layer_blend_modes_spec §Blend
+    // Isolation): the offscreen already carries the per-pixel filter result,
+    // so blending against the backdrop is the last step and never poisons the
+    // downstream backdrop with un-filtered pixels.
     ctx.save();
     if (matrix) {
       ctx.setTransform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.tx, matrix.ty);
     }
     ctx.globalAlpha = (opacity ?? layer.opacity) * (layer.fill ?? 1);
     ctx.globalCompositeOperation = (layer.blendMode || 'source-over') as GlobalCompositeOperation;
+
     let vx = 0, vy = 0;
     if (layer.visibleShape) {
       vx = layer.visibleShape.rect.x;
@@ -294,6 +345,7 @@ export function drawLayerInstance(
     ctx.restore();
   }
 }
+
 
 /**
  * drawLayerContent: Internal helper that draws the actual layer pixels.

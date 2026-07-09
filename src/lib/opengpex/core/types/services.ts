@@ -23,6 +23,59 @@ import {
   Shape, LocalShape, LocalPolygon, ShapeType, TileMetadata
 } from './primitives';
 import { EditorData, EngineStatus } from './state';
+import type { ImageMetadata } from '../files/types';
+
+/**
+ * RenderToBlobOptions: Unified options for PixelService.render.frameToBlob / shapeToBlob.
+ *
+ * This options bag expresses "what does the user want" (format / bit depth / metadata / quality / exportConfig)
+ * so that the PixelService facade can decide "which backend/encoder to route to" internally.
+ *
+ * Note: There is NO `cropBox` field — cropping is always expressed via the `shape` parameter
+ * of shapeToBlob (frameToBlob is a sugar that supplies a full-canvas rect shape).
+ */
+export interface RenderToBlobOptions {
+  /** MIME type, or the special string 'raw' to receive an ImageBitmap (no encoding). */
+  format?: string;
+  /** JPEG/WebP/AVIF quality 0..1. Default 0.92. */
+  quality?: number;
+  /** Target bit depth. 16 requests the vips-native lane when eligible; 8 forces the standard lane. */
+  exportBitDepth?: 8 | 16;
+  /** Optional metadata (EXIF passthrough, ICC profile) to inject during encoding. */
+  metadata?: ImageMetadata;
+  /** Encoder-side options passed through to files.encode / vips encode. */
+  exportConfig?: {
+    dpi?: number;
+    preserveExif?: boolean;
+    writeSoftwareTag?: boolean;
+    /** TIFF compression algorithm (e.g. 'lzw' / 'none' / 'deflate'). */
+    tiffCompression?: string;
+    /** PNG compression level 0..9. */
+    pngCompression?: number;
+    /** JPEG quality 1..100 (overrides `quality`). */
+    jpegQuality?: number;
+    /** TIFF predictor. */
+    tiffPredictor?: string;
+    /** BigTIFF flag. */
+    tiffBigtiff?: boolean;
+    /** Tiled TIFF flag. */
+    tiffTile?: boolean;
+    tiffTileWidth?: number;
+    tiffTileHeight?: number;
+    /** Resize final output to this dim (post-composite/post-crop). */
+    resize?: { w: number; h: number };
+  };
+  /** Legacy: kept for backwards compatibility with internal callers (AsyncFilterCache etc.). */
+  targetDpr?: number;
+}
+
+/**
+ * Pluggable AVIF encoder — injected by the host into PixelService.
+ * PixelService itself is format-agnostic; the AVIF encoder lives in a plugin (uses its own worker).
+ * TODO: fold AVIF into core FileService as a first-class handler; see §9.1 of export refactor proposal.
+ */
+export type AvifEncoder = (bitmap: ImageBitmap, options: { quality?: number }) => Promise<Blob>;
+
 
 export interface WorkerResult {
   blob?: Blob;
@@ -118,10 +171,30 @@ export interface PixelService {
   };
 
   render: {
-    /** Area flatten: synthesizes layers within specified region into a new image */
-    shapeToBlob: (frame: Frame, shape: LocalShape, options?: { format?: string; quality?: number }) => Promise<Blob | ImageBitmap>;
-    frameToBlob: (frame: Frame, options?: { format?: string; quality?: number }) => Promise<Blob | ImageBitmap>;
+    /**
+     * Area flatten: renders the region of `frame` matching `shape` and encodes it.
+     * When `options.format === 'raw'` returns an ImageBitmap; otherwise returns a Blob.
+     * Internally chooses between the 16-bit vips lane and the 8-bit engine-worker lane.
+     */
+    shapeToBlob: (frame: Frame, shape: LocalShape, options?: RenderToBlobOptions) => Promise<Blob | ImageBitmap>;
+    /**
+     * Sugar over `shapeToBlob(frame, fullRectShapeOfFrame, options)`.
+     * Renders the entire frame's visible canvas region.
+     */
+    frameToBlob: (frame: Frame, options?: RenderToBlobOptions) => Promise<Blob | ImageBitmap>;
+    /**
+     * Registers an external encoder for a MIME type that FileService does not natively support
+     * (e.g. AVIF, which physically lives in a plugin worker).
+     * When lane C encounters a matching `format`, it delegates to the registered encoder.
+     * Returns a disposer.
+     */
+    registerEncoder: (
+      mimeType: string,
+      encoder: (bitmap: ImageBitmap, options: { quality?: number; metadata?: ImageMetadata }) => Promise<Blob>,
+    ) => () => void;
   };
+
+
 
   worker: {
     /** 

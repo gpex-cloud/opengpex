@@ -27,6 +27,11 @@ import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { useOverlayRotationSync } from '@opengpex/editor/core/motion/hooks/animation';
 import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
 import { tileCache } from '@opengpex/editor/core/engine/cache/TileCache';
+// NOTE: `asyncFilterCache` subscription reverted per
+// docs/opengpex/plans/20260709_filter_step3_retrospective §2 (it eagerly
+// spawned the engine worker before any editor page mounted). Step 4 will
+// re-introduce it behind a lazy accessor gated on the /editor route.
+
 
 import { useLayerTweens } from './useLayerTweens';
 import { stageComposer } from './StageComposer';
@@ -64,11 +69,12 @@ export default function CanvasStage() {
   useEffect(() => {
     const unsubTiles = tileCache.subscribe(() => { needsRenderRef.current = true; });
     const unsubImages = imageCache.subscribe(() => { needsRenderRef.current = true; });
-    
+
     return () => {
       unsubTiles();
       unsubImages();
     };
+
   }, []);
 
   // 2. State synchronization: trigger redraw when layer properties (e.g. visible) or artboard state change

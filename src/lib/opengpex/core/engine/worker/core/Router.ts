@@ -26,6 +26,8 @@ import { PixelUtils } from '../../PixelUtils';
 import * as explorer from '../handlers/explorer';
 import * as transformer from '../handlers/transformer';
 import * as merger from '../handlers/merger';
+import { applyFilter as applyFilterHandler } from '../handlers/filter';
+
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- Worker message router: payload/result vary per message type */
 export async function handleMessage(type: string, payload: any): Promise<{ result: any, transfer?: Transferable[] }> {
@@ -70,9 +72,24 @@ export async function handleMessage(type: string, payload: any): Promise<{ resul
       }
       break;
 
+    case 'APPLY_FILTER': {
+      // Filter pipeline (spec §5.2). `payload.source` is an owned
+      // ImageBitmap transferred from the main thread.
+      const filterOut = await applyFilterHandler({
+        source: payload.source,
+        filters: payload.filters,
+        key: payload.key,
+      });
+      result = filterOut;
+      // Return the resulting bitmap zero-copy back to the main thread.
+      transfer.push(filterOut.bitmap);
+      break;
+    }
+
     case 'FORGET_ASSET':
       workerCache.forget(payload as string);
       break;
+
 
     case 'INITIALIZE_WORKER':
       workerCache.initialize(payload);

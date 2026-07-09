@@ -13,7 +13,10 @@
     "build:release": "pnpm sync-plugins -- --release && pnpm scan-plugins && pnpm lint && next build",
     "start": "next start --port 3030",
     "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "postinstall": "node scripts/postinstall-exts.mjs && pnpm sync-plugins && pnpm scan-plugins"
+
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
@@ -42,12 +45,14 @@
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
     "@types/unzipper": "^0.10.11",
+    "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^9.39.4",
     "eslint-config-next": "16.2.6",
     "gifenc": "^1.0.3",
     "gifuct-js": "^2.1.2",
     "raw-loader": "^4.0.2",
     "tailwindcss": "^4.3.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
   }
 }

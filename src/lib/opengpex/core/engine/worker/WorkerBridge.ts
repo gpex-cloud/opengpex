@@ -89,4 +89,5 @@ export class WorkerBridge {
 }
 
 
+
 export const workerBridge = WorkerBridge.getInstance();

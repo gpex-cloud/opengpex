@@ -20,10 +20,18 @@
 import { imageCache } from './cache/ImageCache';
 import { tileCache } from './cache/TileCache';
 import {
-  Layer, PixelService, GeometryService, AssetService, WorkerProxy, Shape, LocalShape, LocalPolygon, Frame, WorkerResult
+  Layer, PixelService, GeometryService, AssetService, WorkerProxy, Shape, LocalShape, LocalPolygon, Frame, WorkerResult,
+  RenderToBlobOptions,
 } from '@opengpex/editor/core/types';
+import type { FileService, ImageMetadata, EncodeOptions } from '@opengpex/editor/core/files';
 import { LayerFactory } from '@opengpex/editor/core/layer';
+import { assetStore } from '@opengpex/editor/core/storage/asset/AssetStore';
+import { exportHighRes, compositeMultiLayer16bit } from '@opengpex/editor/core/files/handlers/tiff';
+import { mapBlendMode } from '@opengpex/editor/core/files/blendModeMap';
 import { PixelUtils } from './PixelUtils';
+import { detectLane as detectLaneFn, type Lane } from './laneDetection';
+
+
 
 const pendingLoads = new Map<string, Promise<HTMLImageElement>>();
 
@@ -34,8 +42,182 @@ const pendingLoads = new Map<string, Promise<HTMLImageElement>>();
 export function createPixelService(
   geometry: GeometryService,
   assets: AssetService,
-  processor: WorkerProxy
+  processor: WorkerProxy,
+  files: FileService,
 ): PixelService {
+  // ─── External encoders registry (e.g. AVIF, which lives in a plugin worker) ───
+  const externalEncoders = new Map<
+    string,
+    (bitmap: ImageBitmap, options: { quality?: number; metadata?: ImageMetadata }) => Promise<Blob>
+  >();
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // Lane dispatch helpers
+  //   Lane A/B/C see docs/opengpex/20260710_rendering_and_export_pipeline_overview.md §3.2
+  //   detectLane itself lives in ./laneDetection.ts (pure, unit-tested).
+  // ═════════════════════════════════════════════════════════════════════════════
+
+  function isShapeFullFrame(shape: LocalShape, frame: Frame): boolean {
+    if (shape.type !== 'rect') return false;
+    const r = shape.rect;
+    // Full-frame shape: rect covers entire canvas
+    return Math.abs(r.w - frame.canvas.w) < 0.5
+        && Math.abs(r.h - frame.canvas.h) < 0.5;
+  }
+
+  function rectOfShape(shape: LocalShape): { x: number; y: number; w: number; h: number } | undefined {
+    if (shape.type !== 'rect') return undefined;
+    return {
+      x: Math.round(shape.rect.x),
+      y: Math.round(shape.rect.y),
+      w: Math.round(shape.rect.w),
+      h: Math.round(shape.rect.h),
+    };
+  }
+
+  const detectLane = (frame: Frame, shape: LocalShape, opts: RenderToBlobOptions) =>
+    detectLaneFn(frame, shape, opts, id => assetStore.hasRaw(id));
+
+
+  /**
+   * Runs a specific lane and returns Blob or ImageBitmap.
+   * Each lane consumes the `shape` parameter, though in different ways:
+   *   • Lane A/B: shape is rect → rectOfShape(shape) forwarded as vips crop opt (or undefined for full-frame)
+   *   • Lane C:   shape is any type → forwarded to engine worker's mergeLayersWithShape (canvas clip supports arbitrary shape)
+   */
+  async function runLane(
+    lane: Lane,
+    frame: Frame,
+    shape: LocalShape,
+    targetLayers: Layer[],
+    opts: RenderToBlobOptions,
+  ): Promise<Blob | ImageBitmap> {
+    const dpi = opts.exportConfig?.dpi ?? frame.dpi ?? 72;
+    const isFullFrame = isShapeFullFrame(shape, frame);
+    const crop = isFullFrame ? undefined : rectOfShape(shape);
+
+    // ─── Lane A: 16-bit single-layer direct (vips) ────────────────────────────
+    if (lane === 'lane-a') {
+      const layer = targetLayers.find(l => !!l.assetId);
+      if (!layer?.assetId) throw new Error('[PixelService.render] Lane A precondition failed: no layer with assetId');
+      const rawBlob = await assetStore.getRaw(layer.assetId);
+      if (!rawBlob) throw new Error('[PixelService.render] Lane A precondition failed: rawBlob missing');
+
+      return exportHighRes(rawBlob, {
+        format: opts.format === 'image/png' ? 'png' : 'tiff',
+        compression: (opts.exportConfig?.tiffCompression || 'none') as never,
+        pngCompression: opts.exportConfig?.pngCompression ?? 6,
+        dpi,
+        crop,
+        resize: opts.exportConfig?.resize,
+      });
+
+    }
+
+    // ─── Lane B: 16-bit multi-layer composite (vips) ──────────────────────────
+    if (lane === 'lane-b') {
+      const visibleIds = frame.layers.order.filter(id => {
+        const l = frame.layers.byId[id];
+        return !l.hostId && l.visible !== false;
+      });
+
+      const descriptors: Array<{
+        bytes: Uint8Array; x: number; y: number; blendMode: string; opacity: number; is8bit: boolean;
+      }> = [];
+
+      for (const id of visibleIds) {
+        const layer = frame.layers.byId[id];
+        if (!layer.assetId) continue;
+        const rawBlob = await assetStore.getRaw(layer.assetId);
+        let bytes: Uint8Array;
+        let is8bit: boolean;
+        if (rawBlob) {
+          bytes = new Uint8Array(await rawBlob.arrayBuffer());
+          is8bit = false;
+        } else {
+          const entry = assets.get(layer.assetId);
+          if (!entry?.blob) continue;
+          bytes = new Uint8Array(await entry.blob.arrayBuffer());
+          is8bit = true;
+        }
+        let x = layer.cx ?? 0;
+        let y = layer.cy ?? 0;
+        if (crop) {
+          x -= crop.x;
+          y -= crop.y;
+        }
+        descriptors.push({
+          bytes, x, y,
+          blendMode: mapBlendMode(layer.blendMode),
+          opacity: (layer.opacity ?? 1) * (layer.fill ?? 1),
+          is8bit,
+        });
+      }
+
+      if (descriptors.length === 0) {
+        // Precondition failed, degrade to lane C
+        return runLane('lane-c', frame, shape, targetLayers, opts);
+      }
+
+      const canvasW = crop ? crop.w : frame.canvas.w;
+      const canvasH = crop ? crop.h : frame.canvas.h;
+
+      return compositeMultiLayer16bit(descriptors, canvasW, canvasH, {
+        format: opts.format === 'image/png' ? 'png' : 'tiff',
+        compression: opts.exportConfig?.tiffCompression || 'lzw',
+        dpi,
+        jpegQuality: opts.exportConfig?.jpegQuality,
+        bigtiff: opts.exportConfig?.tiffBigtiff,
+        tile: opts.exportConfig?.tiffTile,
+        tileWidth: opts.exportConfig?.tiffTileWidth,
+        tileHeight: opts.exportConfig?.tiffTileHeight,
+      });
+    }
+
+    // ─── Lane C: 8-bit standard (engine worker + files.encode / external encoder) ──
+    // 1. Composite to ImageBitmap via engine worker (shape passed through — supports arbitrary shape)
+    const worldShape = geometry.shape.localToWorldShape(shape, frame);
+    const compositeResult = await service.worker.mergeLayersWithShape(
+      targetLayers, worldShape,
+      { format: 'raw', targetDpr: opts.targetDpr ?? 1 },
+    );
+    const bitmap = compositeResult.bitmap!;
+
+    // 2. Encoding decision
+    if (opts.format === 'raw' || !opts.format) return bitmap;
+
+    // 2a. External encoder (e.g. AVIF plugin)
+    const externalEncoder = externalEncoders.get(opts.format);
+    if (externalEncoder) {
+      return externalEncoder(bitmap, {
+        quality: opts.quality,
+        metadata: opts.metadata,
+      });
+    }
+
+    // 2b. FileService (unified encoder for PNG/JPEG/WebP/BMP/TIFF-8)
+    const encodeOpts: EncodeOptions & Record<string, unknown> = {
+      quality: opts.quality ?? 0.92,
+      metadata: opts.metadata,
+      exportConfig: {
+        dpi,
+        preserveExif: opts.exportConfig?.preserveExif,
+        writeSoftwareTag: opts.exportConfig?.writeSoftwareTag ?? true,
+      },
+      // TIFF-specific pass-through
+      tiffCompression: opts.exportConfig?.tiffCompression,
+      jpegQuality: opts.exportConfig?.jpegQuality,
+      tiffPredictor: opts.exportConfig?.tiffPredictor,
+      tiffBigtiff: opts.exportConfig?.tiffBigtiff,
+      tiffTile: opts.exportConfig?.tiffTile,
+      tiffTileWidth: opts.exportConfig?.tiffTileWidth,
+      tiffTileHeight: opts.exportConfig?.tiffTileHeight,
+    };
+
+    return files.encode(bitmap, opts.format, encodeOpts);
+  }
+
+
 
   const service: PixelService = {
     // 1. Resource loading and decoding namespace
@@ -134,49 +316,76 @@ export function createPixelService(
       },
     },
 
-    // 3. Scene rendering and synthesis namespace
+    // 3. Scene rendering and synthesis namespace — see docs/opengpex/plans/20260710_export_pipeline_refactor_proposal.md
     render: {
-      async shapeToBlob(frame: Frame, shape: LocalShape, options: { format?: string; quality?: number } = {}) {
-        // Filter: host layers only + exclude hidden layers
+      /**
+       * shapeToBlob — THE unified entry point for rendering-to-blob.
+       *
+       * Cropping is always expressed via the `shape` parameter (there is NO cropBox in options).
+       * Internally dispatches between:
+       *   • Lane A: 16-bit single-layer direct (vips one-shot decode+encode)
+       *   • Lane B: 16-bit multi-layer composite (vips composite+encode)
+       *   • Lane C: 8-bit standard (engine worker + files.encode / external encoder)
+       *
+       * See §4.3 of docs/opengpex/plans/20260710_export_pipeline_refactor_proposal.md.
+       */
+      async shapeToBlob(frame: Frame, shape: LocalShape, options: RenderToBlobOptions = {}) {
+        // ── 1. Capability downgrade: non-rect shape cannot use 16-bit vips (only rect crop supported)
+        let effectiveOpts = options;
+        if (shape.type !== 'rect' && options.exportBitDepth === 16) {
+          console.debug('[PixelService.render] Downgrading to 8-bit: shape.type=%s (vips only supports rect crop)', shape.type);
+          effectiveOpts = { ...options, exportBitDepth: 8 };
+        }
+
+        // ── 2. Layer filtering (host layers + visible only)
         const allHostLayers = LayerFactory.getHostLayers(frame.layers.order.map(id => frame.layers.byId[id]));
         const targetLayers = allHostLayers.filter(l => l.visible !== false);
 
         if (targetLayers.length === 0) {
-          console.warn('[PixelService.shapeToBlob] No visible layers to export. All %d host layers are hidden.', allHostLayers.length);
+          console.warn('[PixelService.render] No visible layers to export. All %d host layers are hidden.', allHostLayers.length);
         } else if (targetLayers.length < allHostLayers.length) {
-          console.debug('[PixelService.shapeToBlob] Export: %d/%d layers visible (filtered %d hidden)',
+          console.debug('[PixelService.render] Export: %d/%d layers visible (filtered %d hidden)',
             targetLayers.length, allHostLayers.length, allHostLayers.length - targetLayers.length);
         }
 
-        const worldShape = geometry.shape.localToWorldShape(shape, frame);
+        // ── 3. Lane dispatch
+        const lane = await detectLane(frame, shape, effectiveOpts);
+        console.debug('[PixelService.render] lane=%s format=%s bitDepth=%s layers=%d',
+          lane, effectiveOpts.format, effectiveOpts.exportBitDepth ?? 'default', targetLayers.length);
 
-        const result = await service.worker.mergeLayersWithShape(targetLayers, worldShape, { targetDpr: 1, ...options });
-        if (options.format === 'raw') return result.bitmap!;
-        return result.blob!;
+        return runLane(lane, frame, shape, targetLayers, effectiveOpts);
       },
-      async frameToBlob(frame: Frame, options: { format?: string; quality?: number } = {}) {
-        // Filter: host layers only + exclude hidden layers
-        const allHostLayers = LayerFactory.getHostLayers(frame.layers.order.map(id => frame.layers.byId[id]));
-        const targetLayers = allHostLayers.filter(l => l.visible !== false);
 
-        if (targetLayers.length === 0) {
-          console.warn('[PixelService.frameToBlob] No visible layers to export. All %d host layers are hidden.', allHostLayers.length);
-        } else if (targetLayers.length < allHostLayers.length) {
-          console.debug('[PixelService.frameToBlob] Export: %d/%d layers visible (filtered %d hidden)',
-            targetLayers.length, allHostLayers.length, allHostLayers.length - targetLayers.length);
-        }
-
+      /**
+       * frameToBlob — sugar over shapeToBlob(frame, fullShapeOf(frame), options).
+       * The full-frame shape is a rect covering the entire canvas.
+       */
+      async frameToBlob(frame: Frame, options: RenderToBlobOptions = {}) {
+        // Full-frame shape in FRAME LOCAL space — top-left origin at (0,0).
+        // localToWorldShape (called inside Lane C) will translate to world coords by
+        // subtracting canvas/2, yielding {-w/2, -h/2, w, h} in world space, which is
+        // exactly what mergeLayersWithShape expects.
+        // Note: we must NOT preset world coords here; that would double-translate.
         const fullShape = {
+          __brand: 'local' as const,
           type: 'rect' as const,
-          rect: { x: -frame.canvas.w / 2, y: -frame.canvas.h / 2, w: frame.canvas.w, h: frame.canvas.h },
-          hardEdge: false
-        } as Shape;
+          rect: geometry.asLocalRect({
+            x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h,
+          }),
+          hardEdge: false,
+        } as unknown as LocalShape;
+        return service.render.shapeToBlob(frame, fullShape, options);
+      },
 
-        const result = await service.worker.mergeLayersWithShape(targetLayers, fullShape, { targetDpr: 1, ...options });
-        if (options.format === 'raw') return result.bitmap!;
-        return result.blob!;
-      }
+
+
+
+      registerEncoder(mimeType, encoder) {
+        externalEncoders.set(mimeType, encoder);
+        return () => { externalEncoders.delete(mimeType); };
+      },
     },
+
 
     // 3. Worker-side offscreen calculation namespace
     worker: {

@@ -77,6 +77,53 @@ export interface AdjustmentState {
   blur: number;       // 0-20, default 0
 }
 
+// ─────────────────────────────────────────────────────────────
+// Advanced color-grading state (see filter pipeline spec §4.6)
+// ─────────────────────────────────────────────────────────────
+//
+// These are declarative, serializable per-layer states written by
+// `ColorGradingDrawer` and consumed by the IFilter runtime. They must
+// remain plain-JSON (no functions, no DOM refs) so they can travel
+// through `WorkerBridge.postMessage` unchanged.
+//
+// Applying these adjustments does NOT change `Layer.assetId`, which
+// keeps the 16-bit fidelity export channel intact (spec §10.1).
+
+/** A single curve is a list of control points [input, output] in 0..1 range. */
+export type CurvePoints = Array<[number, number]>;
+
+export interface CurvesState {
+  /** Master luminance curve. */
+  rgb?: CurvePoints;
+  red?: CurvePoints;
+  green?: CurvePoints;
+  blue?: CurvePoints;
+}
+
+export interface LevelsState {
+  /** 0–255, default 0. */
+  inputBlack: number;
+  /** 0–255, default 255. */
+  inputWhite: number;
+  /** 0.1–10, 1.0 = linear. */
+  gamma: number;
+  /** 0–255, default 0. */
+  outputBlack: number;
+  /** 0–255, default 255. */
+  outputWhite: number;
+}
+
+export interface ChannelMixState {
+  /** [fromR, fromG, fromB] → outputR (default [1, 0, 0]). */
+  red: [number, number, number];
+  /** [fromR, fromG, fromB] → outputG (default [0, 1, 0]). */
+  green: [number, number, number];
+  /** [fromR, fromG, fromB] → outputB (default [0, 0, 1]). */
+  blue: [number, number, number];
+  /** Optional constant offset per output channel (default [0, 0, 0]). */
+  constant?: [number, number, number];
+}
+
 export interface VectorMask {
   id: string;
   shape: LocalShape;          // Shape descriptor (local coordinate system)
@@ -189,7 +236,23 @@ export interface Layer {
 
   // Filters & Adjustments (optional)
   adjustments?: AdjustmentState;
+  /**
+   * Declarative RGB / per-channel tone curves written by `ColorGradingDrawer`.
+   * Consumed by IFilter (spec §4.6, §10.1). Does not change `assetId`.
+   */
+  curves?: CurvesState;
+  /**
+   * Declarative levels adjustment (histogram black/white/gamma remap).
+   * Consumed by IFilter (spec §4.6, §10.1). Does not change `assetId`.
+   */
+  levels?: LevelsState;
+  /**
+   * Declarative RGB channel-mixer matrix.
+   * Consumed by IFilter (spec §4.6, §10.1). Does not change `assetId`.
+   */
+  channelMix?: ChannelMixState;
   interactive?: boolean; // Whether involved in collision detection (Hit-Testing)
+
   birthCenter?: { cx: number; cy: number }; // Initial birth center (world coordinates)
 
   // Relationship attributes
