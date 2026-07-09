@@ -17,15 +17,31 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+/**
+ * FRAME_CREATE_COMMANDS — Thin dispatch shell.
+ *
+ * This module is the entry point for frame (artboard) creation + lifecycle commands.
+ * Heavy import logic is delegated to focused strategy modules:
+ *
+ *   strategies/vectorRaster.ts  → SVG/EPS DPI selection + unified decode
+ *   strategies/singleImage.ts   → Standard single-layer frame creation
+ *   strategies/multiSubImage.ts → Multi-page TIFF / animated GIF import
+ *
+ * Revert is in its own file: revert.ts (independent command, not proxied here).
+ */
+
 'use client';
 
-import { EditorCommand, EditorContextValue, Frame, LocalShape, asLocalShape, Layer } from '@opengpex/editor/core/types';
+import { EditorCommand, EditorContextValue, Frame, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
-import { DPI_PRESETS, getVectorIntrinsicSize } from '@opengpex/editor/core/files';
 import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
-
 import * as P from '@opengpex/editor/core/advanced/protocols';
+
+// Strategy imports
+import { decodeWithVectorDialog } from './strategies/vectorRaster';
+import { importSingleImage } from './strategies/singleImage';
+import { importMultiSubImage } from './strategies/multiSubImage';
 
 /**
  * FRAME_CREATE_COMMANDS: Handles artboard (Frame) creation, branching, and lifecycle management.
@@ -36,289 +52,23 @@ export const FrameCreateCommands = {
     name: 'Initialize Trunk Frame',
     execute: async (ctx: EditorContextValue, payload: { source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }): Promise<string> => {
       const { source, switchFrame = true, extra } = payload;
-      const { assets, pixels, files, actions, state, geometry } = ctx;
-      let file: File;
-      let sourceType: 'local' | 'url' = 'local';
 
-      if (typeof source === 'string') {
-        sourceType = 'url';
-        file = await actions.withSignal(
-          'sys.asset.downloading',
-          () => pixels.utils.fetchFromUrl(source)
-        );
-      } else {
-        file = source;
+      // 1. Decode with optional vector DPI dialog
+      const result = await decodeWithVectorDialog(ctx, source);
+      if (!result) return ''; // User cancelled or decode failed
+
+      const { decoded, file, sourceType, chosenFrameDpi } = result;
+      const importCtx = { ctx, file, decoded, sourceType, switchFrame, chosenFrameDpi, extra };
+
+      // 2. Route: multi-sub-image or single image
+      if (decoded.subImages.length > 1) {
+        const multiResult = await importMultiSubImage(importCtx);
+        if (multiResult !== null) return multiResult; // Handled (or cancelled with '')
+        // null = fall through to single image (TIFF "First Page Only" mode)
       }
 
-      const format = files.detectFormat(file);
-      let chosenFrameDpi: number | undefined; // Tracks user-chosen DPI for vector imports
-      let decodeOptions: { dpi?: number; targetWidth?: number; targetHeight?: number } | undefined;
-
-      // For vector formats: ask user for rasterization DPI before decoding
-      if (format === 'svg' || format === 'eps') {
-        const formatLabel = format.toUpperCase();
-        const DEFAULT_DPI = 300;
-        const MAX_RASTER_DIMENSION = 16384;
-
-        let intrinsicSize: { w: number; h: number };
-        try {
-          intrinsicSize = await getVectorIntrinsicSize(file);
-        } catch (err) {
-          console.error(`[FrameCreate] Failed to parse ${formatLabel} intrinsic size:`, err);
-          actions.notifyHUD(`Failed to parse ${formatLabel} file dimensions. The file may be corrupted.`, 'error');
-          return '';
-        }
-
-        const allOptions = DPI_PRESETS.map(p => ({
-          id: String(p.value),
-          label: `${p.value} DPI`,
-          description: `${p.label} · ${Math.round(intrinsicSize.w * p.value / 72)}×${Math.round(intrinsicSize.h * p.value / 72)} px`,
-          primary: p.value === DEFAULT_DPI,
-        }));
-        const vectorHelpText = `OpenGPEX is a raster (pixel) image editor and does not support native vector editing for ${formatLabel} files. The file will be rasterized at the selected resolution for pixel-level editing.`;
-        const chosenDpi = await actions.askChoice(`${formatLabel} Rasterize Resolution`, allOptions, vectorHelpText);
-        if (!chosenDpi) return '';  // User cancelled — silently abort without creating frame
-        const dpi = parseInt(chosenDpi, 10) || DEFAULT_DPI;
-        chosenFrameDpi = dpi;
-        const scale = dpi / 72;
-        let targetWidth = Math.round(intrinsicSize.w * scale);
-        let targetHeight = Math.round(intrinsicSize.h * scale);
-
-        if (targetWidth > MAX_RASTER_DIMENSION || targetHeight > MAX_RASTER_DIMENSION) {
-          const clampRatio = MAX_RASTER_DIMENSION / Math.max(targetWidth, targetHeight);
-          targetWidth = Math.round(targetWidth * clampRatio);
-          targetHeight = Math.round(targetHeight * clampRatio);
-          actions.notifyHUD(`Output clamped to ${targetWidth}×${targetHeight} px (maximum ${MAX_RASTER_DIMENSION} px per side).`, 'info');
-        }
-
-        decodeOptions = { targetWidth, targetHeight, dpi };
-      }
-
-      // Unified decode: transcoding + metadata extraction in one atomic call
-      let decoded;
-      try {
-        decoded = await actions.withSignal(
-          files.needsTranscoding(file) ? 'sys.asset.transcoding' : '',
-          () => files.decode(file, decodeOptions)
-        );
-      } catch (err) {
-        console.error(`[FrameCreate] File decode failed:`, err);
-        actions.notifyHUD(`Failed to process file. The format may not be supported.`, 'error');
-        return '';
-      }
-
-      const { safeFile, dimensions: decodeDimensions, metadata, rawBlob } = decoded;
-
-      // ═══════════════════════════════════════════════════════════════════════
-      // GIF Multi-frame Import Path
-      // When decoded.frames is present, create N logically-associated layers
-      // with gifSequenceId metadata for animation playback support.
-      // ═══════════════════════════════════════════════════════════════════════
-      if (decoded.frames && decoded.frames.length > 1) {
-        let framesToImport = decoded.frames;
-        const totalFrames = framesToImport.length;
-        const GIF_DEFAULT_LIMIT = 30;
-
-        // Frame count safety threshold — ask user if frames exceed limit
-        if (totalFrames > GIF_DEFAULT_LIMIT) {
-          // Generate dynamic decimation options based on actual frame count.
-          // Each option shows the real resulting frame count after sampling.
-          const targetCounts = [10, 20, 30, 60, 100].filter(n => n < totalFrames);
-          const limitOptions = targetCounts.map(target => {
-            const step = Math.ceil(totalFrames / target);
-            // Calculate actual frame count after decimation with this step
-            let actualCount = 0;
-            for (let i = 0; i < totalFrames; i += step) actualCount++;
-            return {
-              id: String(step), // Store step directly as ID for precise control
-              label: `${actualCount} frames`,
-              description: `Keep 1 of every ${step} frames`,
-            };
-          }).filter((opt, idx, arr) => {
-            // Deduplicate: remove options that produce the same actual frame count
-            return idx === 0 || opt.label !== arr[idx - 1].label;
-          });
-
-          // Add "All frames" option
-          limitOptions.push({
-            id: '1', // step=1 means keep all
-            label: `All ${totalFrames} frames`,
-            description: 'May use significant memory',
-          });
-
-          const chosenStep = await actions.askChoice(
-            `GIF has ${totalFrames} frames`,
-            limitOptions,
-            `This animated GIF contains ${totalFrames} frames. Importing all frames may use significant memory. Choose a frame limit for decimation (sampled frames will preserve animation timing).`,
-          );
-
-          if (!chosenStep) return ''; // User cancelled
-
-          const step = parseInt(chosenStep, 10) || 1;
-
-          // Apply interactive decimation with delay sync
-          if (step > 1) {
-            const sampled: typeof framesToImport = [];
-            for (let i = 0; i < totalFrames; i += step) {
-              const frame = framesToImport[i];
-              sampled.push({
-                ...frame,
-                delay: frame.delay * step, // Delay sync: preserve total duration
-                index: sampled.length,
-              });
-            }
-            framesToImport = sampled;
-            actions.notifyHUD(`Decimated: ${totalFrames} → ${sampled.length} frames (step=${step})`, 'info');
-          }
-        }
-
-        // Register the original GIF file as an asset for future revert support
-        const originalGifAssetId = await assets.register(file);
-
-        // Generate a unique sequence ID for this GIF logical group
-        const gifSequenceId = `gif-seq-${Date.now().toString(36)}-${Math.random().toString(36).substr(2, 6)}`;
-        const dimension = decodeDimensions;
-
-        // Register all frame assets concurrently
-        const frameAssets = await Promise.all(
-          framesToImport.map(async (f) => {
-            const frameFile = new File([f.blob], `frame_${f.index}.png`, { type: 'image/png' });
-            const assetId = await assets.register(frameFile);
-            const assetUrl = assets.getURL(assetId)!;
-            return { assetId, assetUrl, delay: f.delay, index: f.index };
-          })
-        );
-
-        // Create N frame layers with gifSequenceId metadata
-        const frameLayers: Layer[] = frameAssets.map((fa, i) => {
-          return LayerFactory.getNewLayer({
-            name: `Frame ${i + 1}`,
-            src: fa.assetUrl,
-            assetId: fa.assetId,
-            cx: 0,
-            cy: 0,
-            locked: false,
-            visible: i === 0, // Only first frame visible by default
-            bounding: dimension,
-            visibleShape: asLocalShape({ x: 0, y: 0, w: dimension.w, h: dimension.h }),
-            metadata: {
-              format: 'image/gif',
-              size: file.size,
-              source: sourceType,
-              originalName: file.name,
-              imageMetadata: metadata,
-              gifSequenceId,
-              gifFrameIndex: i,
-              gifFrameDelay: fa.delay,
-              gifTotalFrames: framesToImport.length,
-            },
-          });
-        });
-
-        // Expand all layers (triplet structure)
-        const expandedLayers = frameLayers.flatMap(l => LayerFactory.expandLayers([l]));
-
-        // Generate thumbnail from first frame
-        const firstAssetUrl = frameAssets[0].assetUrl;
-        const [_contentBounds, thumbBlob] = await Promise.all([
-          pixels.decode.contentBounds(firstAssetUrl),
-          pixels.process.thumbnail(firstAssetUrl, 256),
-        ]);
-        const thumbAssetId = await assets.register(thumbBlob);
-        const thumbAssetUrl = assets.getURL(thumbAssetId)!;
-
-        // Camera + crop box
-        const { insets } = state.ui.theme.config;
-        const initialCamera = geometry.camera.getFitCamera(
-          state.ui.viewportDim,
-          dimension,
-          { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
-        );
-        const defaultCanvasCropBox = asLocalShape({ x: dimension.w * 0.25, y: dimension.h * 0.25, w: dimension.w * 0.5, h: dimension.h * 0.5 });
-
-        const frameName = file.name.replace(/\.[^.]+$/, '');
-        const frame = LayerFactory.getNewFrame({
-          id: `f-${Date.now().toString(36)}-trunk`,
-          name: frameName || file.name,
-          canvas: dimension,
-          dpi: metadata.dpi,
-          layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
-          activeLayerId: frameLayers[0].id,
-          camera: initialCamera,
-          canvasCropBox: defaultCanvasCropBox,
-          assetId: frameAssets[0].assetId,
-          thumbnail: { src: thumbAssetUrl, assetId: thumbAssetId },
-          extra: { ...extra, gifSequenceId, gifFrameCount: framesToImport.length, originalGifAssetId },
-        });
-
-        actions.addFrame(frame, switchFrame);
-        actions.notifyHUD(`Imported GIF: ${framesToImport.length} frames as layer sequence`, 'success');
-        return frame.id;
-      }
-
-      // ═══════════════════════════════════════════════════════════════════════
-      // Standard Single-layer Import Path (non-animated / single-frame)
-      // ═══════════════════════════════════════════════════════════════════════
-
-      // 1. Register original asset (Phase 5: pass rawBlob for 16-bit fidelity preservation)
-      const assetId = await assets.register(safeFile, rawBlob ? { rawBlob } : undefined);
-      const assetUrl = assets.getURL(assetId)!;
-
-      // 2. Concurrently: decode content bounds + generate thumbnail
-      // (dimensions already known from decode result)
-      const [contentBounds, thumbBlob] = await Promise.all([
-        pixels.decode.contentBounds(assetUrl),
-        pixels.process.thumbnail(assetUrl, 256)
-      ]);
-      const dimension = decodeDimensions;
-
-      // 3. Register thumbnail asset
-      const thumbAssetId = await assets.register(thumbBlob);
-      const thumbAssetUrl = assets.getURL(thumbAssetId)!;
-
-      // 4. Construct initial environment and camera calculation
-      const { insets } = state.ui.theme.config;
-      const initialCamera = geometry.camera.getFitCamera(
-        state.ui.viewportDim,
-        dimension,
-        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
-      );
-      const defaultCanvasCropBox = asLocalShape({ x: dimension.w * 0.25, y: dimension.h * 0.25, w: dimension.w * 0.5, h: dimension.h * 0.5 });
-
-      // 5. Assemble domain entities (metadata now comes from files.decode)
-      const baseLayer = LayerFactory.getNewLayer({
-        name: 'Background',
-        src: assetUrl,
-        assetId,
-        cx: 0,
-        cy: 0,
-        locked: true,
-        bounding: dimension,
-        visibleShape: asLocalShape(contentBounds),
-        metadata: { format: safeFile.type, size: safeFile.size, source: sourceType, originalName: safeFile.name, imageMetadata: metadata }
-      });
-
-      const expandedLayers = LayerFactory.expandLayers([baseLayer]);
-
-      // Use original file name (not transcoded safeFile name) so HEIC/RAW/SVG keep their original names
-      const frameName = file.name.replace(/\.[^.]+$/, '');
-      const frame = LayerFactory.getNewFrame({
-        id: `f-${Date.now().toString(36)}-trunk`,
-        name: frameName || safeFile.name,
-        canvas: dimension,
-        dpi: chosenFrameDpi || metadata.dpi,
-        layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
-        activeLayerId: baseLayer.id,
-        camera: initialCamera,
-        canvasCropBox: defaultCanvasCropBox,
-        assetId,
-        thumbnail: { src: thumbAssetUrl, assetId: thumbAssetId },
-        extra
-      });
-
-      actions.addFrame(frame, switchFrame);
-      return frame.id;
-    }
+      return importSingleImage(importCtx);
+    },
   } as EditorCommand<{ source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }, Promise<string>>,
 
   branch: {
@@ -330,8 +80,6 @@ export const FrameCreateCommands = {
       if (!activeFrame) return;
 
       // Resolve the active selection from `frame.latestClipTool`.
-      // For non-rectangular selections, the branch preserves the selection
-      // shape — pixels outside the selection are transparent in the PNG.
       const box = getClipBox(activeFrame);
       if (!box) {
         actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
@@ -341,14 +89,6 @@ export const FrameCreateCommands = {
 
       try {
         // Convert the selection to a LocalShape for shapeToBlob.
-        //
-        // For polygon selections: we must produce pathData with coordinates
-        // RELATIVE to the bounding rect origin, because `mergeLayersWithShape`
-        // internally zeros the rect to {0,0,w,h} and shifts layer matrices by
-        // (-rect.x, -rect.y). If pathData uses absolute frame-local coords
-        // (as `polygonToShape` does), the clip path would be misaligned with
-        // the rendered layers. Subtracting poly.rect.x/y from each point
-        // ensures the clip aligns with the shifted layer content.
         let branchShape: LocalShape;
         if (!box.regular) {
           const poly = box.spatial;
@@ -378,7 +118,7 @@ export const FrameCreateCommands = {
         const highResBlob = await pixels.render.shapeToBlob(
           activeFrame,
           branchShape,
-          { format: 'image/png', quality: 1.0 }
+          { format: 'image/png', quality: 1.0 },
         );
 
         const highResId = await ctx.assets.register(highResBlob as Blob);
@@ -390,7 +130,7 @@ export const FrameCreateCommands = {
 
         const canvasDim = {
           w: Math.round(cropRect.w),
-          h: Math.round(cropRect.h)
+          h: Math.round(cropRect.h),
         };
 
         const { insets } = state.ui.theme.config;
@@ -398,7 +138,7 @@ export const FrameCreateCommands = {
         const initialCamera = geometry.camera.getFitCamera(
           state.ui.viewportDim,
           canvasDim,
-          { maxScale: 1, padding: VIEWPORT_FIT_PADDING, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
+          { maxScale: 1, padding: VIEWPORT_FIT_PADDING, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right },
         );
 
         const siblings = state.frames.order.map(id => state.frames.byId[id]).filter(f => f.parentId === activeFrame.id);
@@ -414,15 +154,15 @@ export const FrameCreateCommands = {
         const rootName = activeFrame.name.split('__')[0];
         const fullName = `${rootName}__${seqNum}`;
 
-        // 3. Construct branch artboard (using Domain Factory)
+        // Construct branch artboard (using Domain Factory)
         const baseLayer = ctx.layers.getNewLayer({
           name: 'Branch Base',
           src: highResUrl,
           assetId: highResId,
-          locked: true, // Branch base layer is locked by default
+          locked: true,
           bounding: canvasDim,
           visibleShape: asLocalShape({ x: 0, y: 0, ...canvasDim }),
-          ancestor: true
+          ancestor: true,
         });
 
         const expandedLayers = ctx.layers.expandLayers([baseLayer]);
@@ -440,7 +180,7 @@ export const FrameCreateCommands = {
             x: canvasDim.w * 0.25,
             y: canvasDim.h * 0.25,
             w: canvasDim.w * 0.5,
-            h: canvasDim.h * 0.5
+            h: canvasDim.h * 0.5,
           }),
           assetId: highResId,
           thumbnail: {
@@ -452,258 +192,19 @@ export const FrameCreateCommands = {
         ctx.layers.addFrame(branch, false);
 
         window.dispatchEvent(new CustomEvent('editor:branch-thumbnail-ready', {
-          detail: { thumbnailUrl, frameId: branch.id }
+          detail: { thumbnailUrl, frameId: branch.id },
         }));
 
         return thumbnailUrl;
       } catch (err) {
         console.error('[FrameService] Failed to create branch:', err);
       }
-    }
+    },
   } as EditorCommand<void, Promise<string | undefined>>,
 
-  revert: {
-    id: P.ADV_FRAME_REVERT,
-    name: 'Revert to Original',
-    undoable: false,
-    execute: async (ctx: EditorContextValue): Promise<void> => {
-      const { geometry, activeFrame, actions, state, assets, pixels, files } = ctx;
-      if (!activeFrame) return;
-
-      // ═══════════════════════════════════════════════════════════════════════
-      // GIF Revert Path: Re-decode original GIF and rebuild layers in-place
-      // (same frame ID, same list position, cancel-safe)
-      // ═══════════════════════════════════════════════════════════════════════
-      const originalGifAssetId = (activeFrame.extra as Record<string, unknown>)?.originalGifAssetId as string | undefined;
-      if (originalGifAssetId) {
-        try {
-          // 1. Hydrate the original GIF binary from asset store
-          await assets.hydrate(new Set([originalGifAssetId]));
-          const gifEntry = assets.get(originalGifAssetId);
-
-          if (!gifEntry || !gifEntry.blob) {
-            throw new Error('Original GIF asset not found in store');
-          }
-
-          // 2. Reconstruct a File object and re-decode to get all frames
-          const originalName = activeFrame.name + '.gif';
-          const gifFile = new File([gifEntry.blob], originalName, { type: 'image/gif' });
-
-          const decoded = await files.decode(gifFile);
-          if (!decoded.frames || decoded.frames.length <= 1) {
-            throw new Error('Re-decoded GIF has no animation frames');
-          }
-
-          let framesToImport = decoded.frames;
-          const totalFrames = framesToImport.length;
-          const GIF_DEFAULT_LIMIT = 30;
-
-          // 3. Frame count selection dialog (user can cancel → frame stays untouched)
-          if (totalFrames > GIF_DEFAULT_LIMIT) {
-            const targetCounts = [10, 20, 30, 60, 100].filter(n => n < totalFrames);
-            const limitOptions = targetCounts.map(target => {
-              const step = Math.ceil(totalFrames / target);
-              let actualCount = 0;
-              for (let i = 0; i < totalFrames; i += step) actualCount++;
-              return {
-                id: String(step),
-                label: `${actualCount} frames`,
-                description: `Keep 1 of every ${step} frames`,
-              };
-            }).filter((opt, idx, arr) => idx === 0 || opt.label !== arr[idx - 1].label);
-
-            limitOptions.push({
-              id: '1',
-              label: `All ${totalFrames} frames`,
-              description: 'May use significant memory',
-            });
-
-            const chosenStep = await actions.askChoice(
-              `GIF has ${totalFrames} frames`,
-              limitOptions,
-              `This animated GIF contains ${totalFrames} frames. Choose a frame limit for decimation.`,
-            );
-
-            if (!chosenStep) return; // User cancelled — frame stays as-is
-
-            const step = parseInt(chosenStep, 10) || 1;
-            if (step > 1) {
-              const sampled: typeof framesToImport = [];
-              for (let i = 0; i < totalFrames; i += step) {
-                const frame = framesToImport[i];
-                sampled.push({ ...frame, delay: frame.delay * step, index: sampled.length });
-              }
-              framesToImport = sampled;
-            }
-          }
-
-          // 4. Register new frame assets
-          const dimension = decoded.dimensions;
-          const gifSequenceId = `gif-seq-${Date.now().toString(36)}-${Math.random().toString(36).substr(2, 6)}`;
-
-          const frameAssets = await Promise.all(
-            framesToImport.map(async (f) => {
-              const frameFile = new File([f.blob], `frame_${f.index}.png`, { type: 'image/png' });
-              const assetId = await assets.register(frameFile);
-              const assetUrl = assets.getURL(assetId)!;
-              return { assetId, assetUrl, delay: f.delay, index: f.index };
-            })
-          );
-
-          // 5. Build new layer structure
-          const frameLayers: Layer[] = frameAssets.map((fa, i) => {
-            return LayerFactory.getNewLayer({
-              name: `Frame ${i + 1}`,
-              src: fa.assetUrl,
-              assetId: fa.assetId,
-              cx: 0,
-              cy: 0,
-              locked: false,
-              visible: i === 0,
-              bounding: dimension,
-              visibleShape: asLocalShape({ x: 0, y: 0, w: dimension.w, h: dimension.h }),
-              metadata: {
-                format: 'image/gif',
-                size: gifEntry.blob!.size,
-                source: 'local',
-                originalName,
-                gifSequenceId,
-                gifFrameIndex: i,
-                gifFrameDelay: fa.delay,
-                gifTotalFrames: framesToImport.length,
-              },
-            });
-          });
-
-          const expandedLayers = frameLayers.flatMap(l => LayerFactory.expandLayers([l]));
-
-          // 6. Camera + crop box
-          const { insets } = state.ui.theme.config;
-          const newCamera = geometry.camera.getFitCamera(
-            state.ui.viewportDim,
-            dimension,
-            { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
-          );
-
-          // 7. In-place update — same frame ID, same list position
-          actions.updateFrame(activeFrame.id, {
-            canvas: dimension,
-            camera: newCamera,
-            clipBoxes: {},
-            canvasCropBox: asLocalShape({
-              x: dimension.w * 0.25,
-              y: dimension.h * 0.25,
-              w: dimension.w * 0.5,
-              h: dimension.h * 0.5,
-            }),
-            layers: {
-              byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])),
-              order: expandedLayers.map(l => l.id),
-            },
-            activeLayerId: frameLayers[0].id,
-            extra: { ...(activeFrame.extra as Record<string, unknown>), gifSequenceId, gifFrameCount: framesToImport.length, originalGifAssetId },
-          });
-
-          actions.resetHistory();
-          actions.setInteraction({ hud: { message: `GIF reverted: ${framesToImport.length} frames restored.`, type: 'success' } });
-          return;
-        } catch (err) {
-          console.error('[FrameService] GIF revert failed:', err);
-          actions.setInteraction({ hud: { message: 'Failed to revert GIF. See console for details.', type: 'error' } });
-          return;
-        }
-      }
-
-      // ═══════════════════════════════════════════════════════════════════════
-      // Standard Revert Path (non-GIF single-layer frames)
-      // ═══════════════════════════════════════════════════════════════════════
-      const baseLayer = activeFrame.layers.byId[activeFrame.layers.order[0]];
-      if (!baseLayer) return;
-
-      const originalAssetId = activeFrame.assetId || baseLayer.assetId;
-      if (!originalAssetId) {
-        actions.setInteraction({ hud: { message: 'Original asset ID missing.', type: 'error' } });
-        return;
-      }
-
-      try {
-        // 💡 1. Physical layer hydration: ensure the original physical asset is loaded and hydrated into memory
-        await assets.hydrate(new Set([originalAssetId]));
-        const assetEntry = assets.get(originalAssetId);
-
-        if (!assetEntry || !assetEntry.blob) {
-          throw new Error('Original physical asset blob not found in store');
-        }
-
-        // 💡 2. Generate a fresh ObjectURL binding to ensure absolute availability
-        const liveSrc = assets.resolve(originalAssetId) || URL.createObjectURL(assetEntry.blob);
-
-        // 💡 3. Re-decode dimensions and bounds from the original physical Blob to achieve a true physical "refresh"
-        const [dimension, contentBounds] = await Promise.all([
-          pixels.decode.dimensions(liveSrc),
-          pixels.decode.contentBounds(liveSrc)
-        ]);
-
-        const { insets } = state.ui.theme.config;
-
-        // 💡 4. Re-calculate the camera position fitting the viewport
-        const newCamera = geometry.camera.getFitCamera(
-          state.ui.viewportDim,
-          dimension,
-          { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
-        );
-
-        // 💡 5. Assemble a minimal base layer, completely clear masks (vectorMasks: []), and reset transform and filters
-        const cleanBaseLayer = {
-          ...baseLayer,
-          assetId: originalAssetId, // Restore to original physical asset ID
-          src: liveSrc,           // Refresh to the latest physical Object URL
-          bounding: dimension,    // Refresh to the re-decoded original dimensions
-          cx: 0,
-          cy: 0,
-          scale: 1,
-          rotation: 0,
-          flip: { h: false, v: false },
-          adjustments: { brightness: 100, contrast: 100, saturation: 100, hueRotate: 0, blur: 0 },
-          visibleShape: asLocalShape(contentBounds), // Re-decoded original bounds
-          vectorMasks: [],              // 💡 Completely clear vector masks!
-          bitmapMasks: [],              // 💡 Completely clear bitmap masks! (eraser/drill/clip masks)
-        };
-
-        // 💡 6. Use LayerFactory to regenerate the cleanest triplet layers, automatically discarding all other redundant layers
-        const refreshedLayers = LayerFactory.expandLayers([cleanBaseLayer]);
-
-        const nextOrder = refreshedLayers.map(l => l.id);
-        const nextById: Record<string, Layer> = {};
-        refreshedLayers.forEach(l => (nextById[l.id] = l));
-
-        // 💡 7. Fully refresh artboard's canvas dimensions, camera, crop boxes, and layer data
-        actions.updateFrame(activeFrame.id, {
-          canvas: dimension,
-          camera: newCamera,
-          clipBoxes: {},
-          canvasCropBox: asLocalShape({
-            x: dimension.w * 0.25,
-            y: dimension.h * 0.25,
-            w: dimension.w * 0.5,
-            h: dimension.h * 0.5
-          }),
-          layers: { byId: nextById, order: nextOrder },
-          activeLayerId: refreshedLayers[0]?.id
-        });
-
-        // Clear undo/redo history — the old entries reference stale state
-        // (deleted layers, old transforms, etc.) that no longer exists after
-        // a full revert. Keeping them would cause data corruption on undo.
-        actions.resetHistory();
-
-        actions.setInteraction({ hud: { message: 'Frame reloaded and reverted to original.', type: 'success' } });
-      } catch (err) {
-        console.error('[FrameService] True revert reload failed:', err);
-        actions.setInteraction({ hud: { message: 'Failed to reload original source.', type: 'error' } });
-      }
-    }
-  } as EditorCommand<void, Promise<void>>,
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Lifecycle Commands: export / import / remove
+  // ═══════════════════════════════════════════════════════════════════════════
 
   export: {
     id: P.ADV_FRAME_EXPORT,
@@ -711,7 +212,7 @@ export const FrameCreateCommands = {
     execute: async (ctx: EditorContextValue, frame: Frame): Promise<{ state: unknown; assets: Record<string, Blob> }> => {
       const { storage } = ctx;
       return storage.export(frame);
-    }
+    },
   } as EditorCommand<Frame, Promise<{ state: unknown; assets: Record<string, Blob> }>>,
 
   import: {
@@ -742,7 +243,7 @@ export const FrameCreateCommands = {
         actions.addFrame(frame, switchFrame);
       }
       return frame;
-    }
+    },
   } as EditorCommand<{ state: unknown; assetBlobs: Record<string, Blob>; replaceId?: string; switchFrame?: boolean }, Promise<Frame>>,
 
   remove: {
@@ -760,18 +261,16 @@ export const FrameCreateCommands = {
         `Delete "${frame.name}"?`,
         "This action is permanent and cannot be undone. All associated history and assets will be purged.",
         'danger',
-        'rect'
+        'rect',
       );
 
       if (confirmed) {
-        ctx.layers.removeFrame(targetId);
-        // 💡 Architectural optimization: No need to synchronously call sync here.
-        // Because actions.removeFrame asynchronously dispatches the REMOVE_FRAME action,
-        // and at this time ctx.state still contains the frame that has not yet been deleted. We have wired this logic to the global
-        // enhanced dispatcher interceptor (scheduleAssetSync). 2 seconds after REMOVE_FRAME occurs,
-        // it will automatically trigger the most precise physical garbage collection (GC) with force=true once the new state stabilizes.
-        actions.setInteraction({ hud: { message: 'Creation deleted permanently.', type: 'success' } });
+        requestAnimationFrame(() => {
+          ctx.layers.removeFrame(targetId);
+          actions.setInteraction({ hud: { message: 'Creation deleted permanently.', type: 'success' } });
+        });
       }
-    }
-  } as EditorCommand<string, Promise<void>>
+
+    },
+  } as EditorCommand<string, Promise<void>>,
 };

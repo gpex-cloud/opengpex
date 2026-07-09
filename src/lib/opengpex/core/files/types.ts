@@ -191,36 +191,70 @@ export interface ExportMetadataConfig {
   author?: { name?: string; copyright?: string };
 }
 
+/**
+ * A single sub-image within a decoded file.
+ *
+ * Unified representation for:
+ * - Single-page images (JPEG/PNG/WebP/BMP/HEIC/RAW/TIFF single)
+ * - Multi-page TIFF pages
+ * - Animated GIF/APNG frames
+ */
+export interface SubImage {
+  /** 8-bit display-ready blob (PNG/JPEG for Canvas2D/WebGPU texture upload) */
+  displayBlob: Blob;
+
+  /** Pixel dimensions of this sub-image */
+  width: number;
+  height: number;
+
+  /** Zero-based index within the source file */
+  index: number;
+
+  /**
+   * Frame delay in milliseconds.
+   * Present ONLY for animated formats (GIF, APNG, WebP animation).
+   * Undefined for static multi-page formats (TIFF pages, PDF pages).
+   */
+  delay?: number;
+
+  /**
+   * Per-sub-image bit depth (if different from metadata.bitDepth).
+   * Typically undefined — inherited from top-level metadata.
+   */
+  bitDepth?: number;
+}
+
 /** Decode result returned by handlers */
 export interface DecodeResult {
-  /** Transcoded file safe for browser display (e.g., HEIC→JPEG, RAW→PNG) */
-  safeFile: File;
-  /** Decoded pixel dimensions */
+  /** Decoded pixel dimensions (canvas size: first/largest page) */
   dimensions: { w: number; h: number };
-  /** Extracted metadata */
+  /** Extracted metadata (format-agnostic semantic layer) */
   metadata: ImageMetadata;
 
   /**
-   * Multi-frame extension (GIF / APNG).
-   * Present only when the source contains multiple animation frames.
-   * Each entry is a single decoded frame as PNG blob with timing info.
+   * Sub-images: always present, length ≥ 1.
+   *
+   * - Single-page file → length = 1
+   * - Multi-page TIFF → length = N pages
+   * - Animated GIF/APNG → length = N frames
+   *
+   * Consumers iterate this array uniformly.
    */
-  frames?: Array<{
-    /** Single frame as PNG Blob (browser-displayable) */
-    blob: Blob;
-    /** Frame delay in milliseconds */
-    delay: number;
-    /** Zero-based frame index */
-    index: number;
-  }>;
+  subImages: SubImage[];
 
   /**
-   * Phase 5: High-resolution raw source blob.
-   * Present only when the source file has bitDepth > 8 (16-bit TIFF/PNG/RAW).
-   * Used by AssetService to store the original high-precision data for lossless 16-bit export.
-   * The raw blob is the original file bytes — NOT decoded pixel data.
+   * Original source blob for high-fidelity operations.
+   *
+   * Present when:
+   * - Source bit depth > 8 (16-bit TIFF/PNG/RAW) → enables lossless 16-bit export
+   * - Source is multi-page → worker extracts pages by index on demand
+   *
+   * NOT present for standard 8-bit single-page files (JPEG/PNG/WebP) since
+   * the displayBlob IS the final representation.
+   *
+   * Design: ONE shared source blob (not N per-page copies) — memory efficient.
    */
-  rawBlob?: Blob;
+  sourceBlob?: Blob;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

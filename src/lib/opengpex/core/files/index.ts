@@ -132,7 +132,6 @@ class FallbackHandler implements ImageFormatHandler {
     const dimensions = { w: img.width, h: img.height };
     img.close();
     return {
-      safeFile: file,
       dimensions,
       metadata: {
         version: 1,
@@ -146,6 +145,7 @@ class FallbackHandler implements ImageFormatHandler {
         hasAlpha: false,
         hasIccProfile: false,
       },
+      subImages: [{ displayBlob: file, width: dimensions.w, height: dimensions.h, index: 0 }],
     };
   }
 

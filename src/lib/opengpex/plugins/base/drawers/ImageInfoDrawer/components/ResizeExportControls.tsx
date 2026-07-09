@@ -33,6 +33,7 @@ import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import FunctionGroup from "@opengpex/editor/widgets/FunctionGroup";
+import Switch from "@opengpex/editor/widgets/Switch";
 
 import { ExifData, CommandInstance } from "@opengpex/editor/core/types";
 import { formatPrintSize, DPI_PRESETS } from "@opengpex/editor/core/files";
@@ -59,7 +60,7 @@ interface ResizeExportControlsProps {
   exif?: ExifData;
   /** Source image bit depth (e.g. 16 for 16-bit TIFF/PNG). Undefined = 8-bit default. */
   sourceBitDepth?: number;
-  /** Whether only a single visible content layer exists (multi-layer disables 16-bit) */
+  /** Whether only a single visible content layer exists (affects 16-bit tooltip: raw passthrough vs composite) */
   isSingleLayer?: boolean;
 }
 
@@ -293,40 +294,142 @@ export function ResizeExportControls({
 
       <div className="border-t border-[var(--border-subtle)] space-y-2.5">
         {config.format === "image/tiff" && (
-          <div className="flex items-center gap-2 px-1 mt-3 animate-in fade-in slide-in-from-top-1 duration-300">
-            <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
-              Compress
-            </span>
-            <ActionDropdown
-              direction="up"
-              onSelect={(val: string) => {
-                updateConfig({ tiffCompression: val as 'none' | 'lzw' | 'zip' });
-              }}
-              className="shrink-0"
-              options={[
-                { label: "None", value: "none", description: "uncompressed" },
-                { label: "LZW", value: "lzw", description: "universal, fast" },
-                { label: "ZIP", value: "zip", description: "smaller, slower" },
-              ]}
-              trigger={
-                <FancyButton variant="zinc" subtle={true} size="xs">
-                  {(config.tiffCompression || "none").toUpperCase()} <ChevronDown size={8} className="opacity-50" />
-                </FancyButton>
-              }
-            />
-            <div className="flex-1" />
-            {sourceBitDepth && sourceBitDepth > 8 && (
-              <FunctionGroup
+          <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-300">
+            <div className="flex items-center gap-2 px-1 mt-3">
+              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
+                Compress
+              </span>
+              <ActionDropdown
+                direction="up"
+                onSelect={(val: string) => {
+                  updateConfig({ tiffCompression: val as 'none' | 'lzw' | 'zip' | 'jpeg' });
+                }}
+                className="shrink-0"
                 options={[
-                  { label: "8-bit", value: "8", tooltip: !isSingleLayer ? "Multi-layer uses 8-bit" : undefined },
-                  { label: "16-bit", value: "16", tooltip: isSingleLayer ? "TIFF always exports 16-bit" : undefined },
+                  { label: "None", value: "none", description: "uncompressed" },
+                  { label: "LZW", value: "lzw", description: "universal, fast" },
+                  { label: "ZIP", value: "zip", description: "smaller, slower" },
+                  { label: "JPEG", value: "jpeg", description: "lossy, smallest" },
                 ]}
-                value={isSingleLayer ? "16" : "8"}
-                onChange={() => {}}
-                disabled={true}
-                className="w-28 [&_button]:py-0.5"
+                trigger={
+                  <FancyButton variant="zinc" subtle={true} size="xs">
+                    {(config.tiffCompression || "none").toUpperCase()} <ChevronDown size={8} className="opacity-50" />
+                  </FancyButton>
+                }
               />
+              <div className="flex-1" />
+              {sourceBitDepth && sourceBitDepth > 8 && (
+                <FunctionGroup
+                  options={[
+                    { label: "8-bit", value: "8", tooltip: "Standard 8-bit export" },
+                    { label: "16-bit", value: "16", tooltip: isSingleLayer ? "Lossless from raw source" : "16-bit composite export" },
+                  ]}
+                  value={config.exportBitDepth === 8 ? "8" : "16"}
+                  onChange={(val) => updateConfig({ exportBitDepth: val === "8" ? 8 : 16 })}
+                  className="w-28 [&_button]:py-0.5"
+                />
+              )}
+            </div>
+            {config.tiffCompression === "jpeg" && (
+              <div className="flex items-center gap-2 px-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
+                  Quality
+                </span>
+                <input
+                  type="range"
+                  min="1"
+                  max="100"
+                  value={config.jpegQuality ?? 85}
+                  onChange={(e) => updateConfig({ jpegQuality: parseInt(e.target.value) })}
+                  onMouseUp={(e) => e.currentTarget.blur()}
+                  onTouchEnd={(e) => e.currentTarget.blur()}
+                  style={{ accentColor: "#6366f1" }}
+                  className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
+                />
+                <span className="text-[10px] font-black w-8 text-right tabular-nums text-indigo-600 dark:text-indigo-400">
+                  {config.jpegQuality ?? 85}%
+                </span>
+              </div>
             )}
+            {/* Advanced TIFF Options (collapsible) */}
+            <details className="group px-1 mt-1">
+              <summary className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-widest cursor-pointer select-none hover:text-[var(--text-main)] transition-colors list-none flex items-center gap-1">
+                <ChevronDown size={8} className="opacity-50 transition-transform group-open:rotate-180" />
+                Advanced
+              </summary>
+              <div className="mt-2 space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                {/* Predictor (LZW/ZIP only) */}
+                {(config.tiffCompression === "lzw" || config.tiffCompression === "zip") && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
+                      Predict
+                    </span>
+                    <ActionDropdown
+                      direction="up"
+                      onSelect={(val: string) => updateConfig({ tiffPredictor: val as 'none' | 'horizontal' | 'float' })}
+                      className="shrink-0"
+                      options={[
+                        { label: "None", value: "none", description: "no prediction" },
+                        { label: "Horizontal", value: "horizontal", description: "best for photos" },
+                        { label: "Float", value: "float", description: "floating-point data" },
+                      ]}
+                      trigger={
+                        <FancyButton variant="zinc" subtle={true} size="xs">
+                          {(config.tiffPredictor || "none").charAt(0).toUpperCase() + (config.tiffPredictor || "none").slice(1)} <ChevronDown size={8} className="opacity-50" />
+                        </FancyButton>
+                      }
+                    />
+                  </div>
+                )}
+                {/* Byte Order (vips always outputs native little-endian; option reserved for future backends) */}
+                <div className="flex items-center gap-2 opacity-50" title="Byte order is fixed to Intel (little-endian) by the current encoding backend">
+                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
+                    Byte
+                  </span>
+                  <FunctionGroup
+                    options={[
+                      { label: "Intel", value: "lsb", tooltip: "Little-endian (PC) — current backend only supports this" },
+                      { label: "Motorola", value: "msb", tooltip: "Big-endian (Mac) — not supported by current backend" },
+                    ]}
+                    value="lsb"
+                    onChange={() => {}}
+                    disabled
+                    className="w-32 [&_button]:py-0.5 pointer-events-none"
+                  />
+                </div>
+                {/* BigTIFF */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
+                    BigTIFF
+                  </span>
+                  <Switch
+                    checked={!!config.tiffBigtiff}
+                    onChange={(val) => updateConfig({ tiffBigtiff: val })}
+                    activeColor="bg-emerald-500"
+                    size="compact"
+                  />
+                  <span className="text-[9px] text-[var(--text-muted)]">
+                    {config.tiffBigtiff ? ">4GB support" : "Standard"}
+                  </span>
+                </div>
+                {/* Tile Layout (disabled when JPEG forces it) */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
+                    Tile
+                  </span>
+                  <Switch
+                    checked={!!(config.tiffTile || config.tiffCompression === "jpeg")}
+                    onChange={(val) => updateConfig({ tiffTile: val })}
+                    activeColor="bg-emerald-500"
+                    size="compact"
+                    disabled={config.tiffCompression === "jpeg"}
+                  />
+                  <span className="text-[9px] text-[var(--text-muted)]">
+                    {config.tiffCompression === "jpeg" ? "Required for JPEG" : (config.tiffTile ? `${config.tiffTileWidth || 256}×${config.tiffTileHeight || 256}` : "Strip-based")}
+                  </span>
+                </div>
+              </div>
+            </details>
           </div>
         )}
         {config.format === "image/png" && (
@@ -356,11 +459,10 @@ export function ResizeExportControls({
               <FunctionGroup
                 options={[
                   { label: "8-bit", value: "8", tooltip: "Standard (smaller file)" },
-                  { label: "16-bit", value: "16", tooltip: !isSingleLayer ? "16-bit requires single layer" : "Lossless hi-res" },
+                  { label: "16-bit", value: "16", tooltip: isSingleLayer ? "Lossless from raw source" : "16-bit composite export" },
                 ]}
-                value={(!isSingleLayer || config.exportBitDepth === 8) ? "8" : "16"}
+                value={config.exportBitDepth === 8 ? "8" : "16"}
                 onChange={(val) => updateConfig({ exportBitDepth: val === "8" ? 8 : 16 })}
-                disabled={!isSingleLayer}
                 className="w-28 [&_button]:py-0.5"
               />
             )}
@@ -419,14 +521,12 @@ export function ResizeExportControls({
             <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
               Keep EXIF Data
             </span>
-            <button
-              onClick={() => updateConfig({ keepExif: !config.keepExif })}
-              className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${config.keepExif ? "bg-emerald-500" : "bg-[var(--border-subtle)] "}`}
-            >
-              <span
-                className={`inline-block h-3 w-3 transform rounded-full bg-[var(--bg-panel)] transition-transform ${config.keepExif ? "translate-x-3.5" : "translate-x-0.5"}`}
-              />
-            </button>
+            <Switch
+              checked={!!config.keepExif}
+              onChange={(val) => updateConfig({ keepExif: val })}
+              activeColor="bg-emerald-500"
+              size="compact"
+            />
           </div>
         )}
 

@@ -56,7 +56,7 @@ export class PngHandler implements ImageFormatHandler {
     // Phase 5: Preserve raw source for 16-bit fidelity export
     const rawBlob = metadata.bitDepth > 8 ? file : undefined;
 
-    return { safeFile: file, dimensions, metadata, rawBlob };
+    return { dimensions, metadata, subImages: [{ displayBlob: file, width: dimensions.w, height: dimensions.h, index: 0 }], sourceBlob: rawBlob };
   }
 
   // ─── Encode ──────────────────────────────────────────────────────────────

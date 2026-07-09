@@ -22,7 +22,7 @@ import type { ImageMetadata } from '@opengpex/editor/core/files';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
 import { calcFinalDims, clipBoxToExportShape } from './utils';
-import { exportSingleLayer16bit, exportStandard8bit } from './services/ExportStrategies';
+import { exportSingleLayer16bit, exportMultiLayer16bit, exportStandard8bit } from './services/ExportStrategies';
 
 import * as P from './protocols';
 
@@ -88,10 +88,17 @@ export const IMAGE_INFO_COMMANDS = {
             // ─── 3. Route to Strategy ────────────────────────────────────────
             let blob: Blob | null = null;
 
-            // Try 16-bit high-res path first (returns null if not eligible)
+            // Try 16-bit single-layer high-res path first (returns null if not eligible)
             blob = await exportSingleLayer16bit({
                ctx, activeFrame, config, cropBox, isClipMode, exportW, exportH, dpi, layerMeta,
             });
+
+            // Try multi-layer 16-bit composite path (returns null if not eligible)
+            if (!blob) {
+               blob = await exportMultiLayer16bit({
+                  ctx, activeFrame, config, cropBox, isClipMode, exportW, exportH, dpi, layerMeta,
+               });
+            }
 
             // Fallback to standard 8-bit export
             if (!blob) {

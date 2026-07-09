@@ -92,6 +92,10 @@ export class Canvas2dEngine implements IRenderer {
   flush(assetService?: AssetService): void {
     if (!this.ctx) return;
 
+    const _flushT0 = performance.now();
+    let _layerCount = 0;
+    const _offscreenCount = 0;
+
     for (const cmd of this.commandQueue) {
       if (cmd.type === 'layer') {
         // [Font Loading] Check font readiness for text layers before rendering
@@ -112,11 +116,17 @@ export class Canvas2dEngine implements IRenderer {
             // Continue rendering this frame with CSS fallback font (FOUT strategy)
           }
         }
+        _layerCount++;
         this.drawLayerDirect(cmd.layer, cmd.options, assetService);
       }
     }
 
     this.commandQueue = [];
+
+    const _flushDuration = performance.now() - _flushT0;
+    if (_flushDuration > 16) {
+      console.warn(`[Canvas2dEngine.flush] ⚠️ took ${_flushDuration.toFixed(1)}ms | layers=${_layerCount} offscreen=${_offscreenCount}`);
+    }
 
     // [Artboard Boundary Clip] Restore context state if artboard clip was applied in beginFrame
     if (this.artboardClipActive) {
@@ -238,6 +248,7 @@ export class Canvas2dEngine implements IRenderer {
     assetService: AssetService | undefined
   ): void {
     if (!this.ctx) return;
+    const _offT0 = performance.now();
     const mainCtx = this.ctx;
 
     // 1. Calculate physical pixel bounding box (Screen Space AABB)
@@ -395,6 +406,14 @@ export class Canvas2dEngine implements IRenderer {
 
     // 6. Return offscreen canvas
     this.releaseOffscreen(offscreen);
+
+    const _offDuration = performance.now() - _offT0;
+    if (_offDuration > 8) {
+      const reason = (layer.bitmapMasks?.some(m => m.enabled)) ? 'bitmapMask' : (layer.blendMode || 'blend');
+      console.debug(
+        `[Canvas2dEngine.offscreen] layer="${layer.name}" reason=${reason} size=${finalW}x${finalH} took ${_offDuration.toFixed(1)}ms`
+      );
+    }
   }
 
   /**

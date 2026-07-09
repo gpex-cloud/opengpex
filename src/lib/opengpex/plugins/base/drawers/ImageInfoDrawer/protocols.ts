@@ -33,11 +33,27 @@ export interface ExportConfig {
     /** When true, changing DPI auto-resamples pixels to maintain physical size. */
     resample: boolean;
     /** TIFF compression method (only used when format is 'image/tiff') */
-    tiffCompression?: 'none' | 'lzw' | 'zip';
+    tiffCompression?: 'none' | 'lzw' | 'zip' | 'jpeg';
+    /** JPEG quality for TIFF JPEG compression (1-100, default: 85). Only used when tiffCompression='jpeg'. */
+    jpegQuality?: number;
     /** PNG compression level: 0=none/fastest, 6=default, 9=max/slowest (only used when format is 'image/png') */
     pngCompression?: 0 | 6 | 9;
     /** Export bit depth for PNG: 8 or 16 (default: 16 when source is 16-bit) */
     exportBitDepth?: 8 | 16;
+
+    // ─── Advanced TIFF Options ──────────────────────────────────────────
+    /** Predictor for LZW/ZIP compression (default: 'horizontal'). Ignored for none/jpeg. */
+    tiffPredictor?: 'none' | 'horizontal' | 'float';
+    /** Byte order: 'lsb' = little-endian (Intel), 'msb' = big-endian (Motorola). Default: 'lsb'. */
+    tiffByteOrder?: 'lsb' | 'msb';
+    /** Enable BigTIFF format (supports files >4GB). Default: false. */
+    tiffBigtiff?: boolean;
+    /** Enable tile-based layout. Default: false (strip-based). JPEG compression forces tiles on. */
+    tiffTile?: boolean;
+    /** Tile width in pixels (default: 256). Only used when tiffTile=true. */
+    tiffTileWidth?: number;
+    /** Tile height in pixels (default: 256). Only used when tiffTile=true. */
+    tiffTileHeight?: number;
 }
 
 /* Constants */

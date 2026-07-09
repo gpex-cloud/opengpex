@@ -136,32 +136,25 @@ export class GifHandler implements ImageFormatHandler {
 
     // Single-frame GIF → return as-is
     if (frameCount <= 1) {
-      return { safeFile: file, dimensions, metadata };
+      return { dimensions, metadata, subImages: [{ displayBlob: file, width: dimensions.w, height: dimensions.h, index: 0 }] };
     }
 
     // Multi-frame GIF → decode via gifuct-js
     const gifuctJs = await ensureGifuctJs();
     const { width, height, frames: rawFrames } = decodeGifFrames(bytes, gifuctJs);
 
-    // Convert each RGBA frame to PNG Blob
-    const frames = await Promise.all(
+    // Convert each RGBA frame to PNG Blob → SubImage with delay
+    const subImages = await Promise.all(
       rawFrames.map(async (frame) => {
         const blob = await rgbaToBlob(frame.data, width, height);
-        return { blob, delay: frame.delay, index: frame.index };
+        return { displayBlob: blob, width, height, index: frame.index, delay: frame.delay };
       }),
     );
 
-    const firstFrameFile = new File(
-      [frames[0].blob],
-      file.name.replace(/\.gif$/i, '_frame0.png'),
-      { type: 'image/png' },
-    );
-
     return {
-      safeFile: firstFrameFile,
       dimensions: { w: width, h: height },
       metadata,
-      frames,
+      subImages,
     };
   }
 

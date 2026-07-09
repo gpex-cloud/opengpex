@@ -60,7 +60,7 @@ export class HeicHandler implements ImageFormatHandler {
     const dimensions = { w: img.width, h: img.height };
     img.close();
 
-    return { safeFile, dimensions, metadata };
+    return { dimensions, metadata, subImages: [{ displayBlob: safeFile, width: dimensions.w, height: dimensions.h, index: 0 }] };
   }
 
   // ─── Encode (not supported) ──────────────────────────────────────────────

@@ -101,6 +101,7 @@ export default function CanvasStage() {
     if (!canvas || !f || !cam) return;
 
     const isInteracting = v.activeState.interacting;
+    const _frameT0 = performance.now();
 
     // Update snapshot
     lastFrameRef.current = f;
@@ -134,6 +135,7 @@ export default function CanvasStage() {
       (engine as { attach: (ctx: CanvasRenderingContext2D) => void }).attach(ctx);
     }
 
+    const _renderT0 = performance.now();
     stageComposer.render(engine, f, cam, state.ui.viewportDim, geometry, assets, {
       isInteracting,
       getAnimatedRotation,
@@ -153,6 +155,11 @@ export default function CanvasStage() {
       },
       theme,
     });
+    const _frameDuration = performance.now() - _frameT0;
+    if (_frameDuration > 16) {
+      const _renderDuration = performance.now() - _renderT0;
+      console.warn(`[CanvasStage.rAF] ⚠️ total=${_frameDuration.toFixed(1)}ms render=${_renderDuration.toFixed(1)}ms layers=${f.layers.order.length} interacting=${isInteracting}`);
+    }
   });
 
   if (!activeFrame) return null;

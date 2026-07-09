@@ -80,9 +80,9 @@ export class VectorHandler implements ImageFormatHandler {
     );
 
     return {
-      safeFile,
       dimensions: { w: targetW, h: targetH },
       metadata,
+      subImages: [{ displayBlob: safeFile, width: targetW, height: targetH, index: 0 }],
     };
   }
 

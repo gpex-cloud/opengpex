@@ -51,7 +51,7 @@ export class JpegHandler implements ImageFormatHandler {
 
     const metadata = await this.extractMetadata(file);
 
-    return { safeFile: file, dimensions, metadata };
+    return { dimensions, metadata, subImages: [{ displayBlob: file, width: dimensions.w, height: dimensions.h, index: 0 }] };
   }
 
   // ─── Encode ──────────────────────────────────────────────────────────────
