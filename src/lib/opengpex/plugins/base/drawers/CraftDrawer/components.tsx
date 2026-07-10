@@ -26,11 +26,13 @@ import { useEditorServices } from "@opengpex/editor/core/context";
 import { SettingsPanelAPI } from "../../panels/SettingsPanel/protocols";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
+import ActionGroup, { type ActionGroupItem } from "@opengpex/editor/widgets/ActionGroup";
 import { TextPanel } from "./panels/text";
 import { BrushPanel } from "./panels/brush";
 import { useCraftDrawer, useCraftTrigger, useCraftButtonGroup } from "./hooks";
 import { CraftDrawerIcon } from "./icon";
 import type { CraftType } from "./protocols";
+
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -127,97 +129,59 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
 // ─── CraftPanelButtonGroup ─────────────────────────────────────────────────────
 
 /**
- * CraftPanelButtonGroup: Button group [T] [B] [E] at the header of CraftDrawer panel
+ * CraftPanelButtonGroup: Button group [T] [B] [E] at the header of CraftDrawer panel.
  *
- * Replaces the original badge label, acting as both a mode indicator and a panel switcher.
- * Buttons have three visual states:
- * - accent highlight: activeCraft is explicitly equal to this button type (tool actively activated)
- * - soft background: activeCraft is null but layer type infers that this panel should be displayed (passive inference status)
- * - default gray: unrelated
+ * Thin adapter over the generic `ActionGroup` widget. Two domain concerns
+ * this wrapper handles that ActionGroup doesn't need to know about:
  *
- * Click logic includes the "go home" rule (see useCraftButtonGroup hook).
+ *   1. `getButtonState` — mapping (activeCraft, layer type) to the tri-state
+ *      `active | inferred | default` shape ActionGroup expects. `restore`
+ *      counts as `active` on the eraser button (Tab toggles the sub-mode).
+ *   2. Dynamic icon — when eraser is in `restore` sub-mode, its icon flips
+ *      to Undo2 to hint "next click undoes the mask erase". We compute this
+ *      per render and pass the resulting node in as the item's `icon`, so
+ *      ActionGroup stays a pure presentational widget with no knowledge of
+ *      Craft-specific state.
+ *   3. Dynamic label — same eraser/restore sub-mode swap: the tooltip
+ *      changes from "Eraser Tool (E)" to "Restore Mode (Tab)".
+ *
+ * State model is strictly two-state (`active` vs default). Note that `restore`
+ * is a sub-mode of eraser (Tab toggles between them), so when `activeCraft`
+ * is `'restore'` the Eraser button still reads as active. Earlier drafts
+ * had a third "inferred" state (dot indicator) that lit up when the layer
+ * type matched a tool but no tool was active — that hint was removed along
+ * with ColorGradingDrawer's equivalent, because users found the dot noisy
+ * and never asked for it. If you need to bring it back for one drawer,
+ * add it opt-in on the widget rather than resurrecting a shared tri-state
+ * default.
  */
 const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
-  const {
-    activeCraft,
-    activeLayerIsText,
-    activeLayerIsPaint,
-    handleButtonClick,
-  } = useCraftButtonGroup();
+  const { activeCraft, handleButtonClick } = useCraftButtonGroup();
 
-  /**
-   * Calculates visual state of each button
-   */
-  const getButtonState = (
-    type: CraftType,
-  ): "active" | "inferred" | "default" => {
-    // Explicitly activated tool -> accent highlight
-    // restore is a sub-mode of eraser (Tab toggles between them), so eraser stays "active"
-    if (activeCraft === type) return "active";
-    if (type === "eraser" && activeCraft === "restore") return "active";
-    // eraser shares brush's panel, so brush button does not need special status when eraser is active
-    // Inference state: judged by layer type when no tool is active
-    if (activeCraft === null) {
-      if (type === "text" && activeLayerIsText) return "inferred";
-      if (type === "brush" && activeLayerIsPaint) return "inferred";
-    }
-    return "default";
-  };
+  // Assemble items per render. Cheap (3 entries) and the icon/label swap
+  // for eraser-in-restore-mode is a pure function of activeCraft, so any
+  // memoization would just move the branch elsewhere without saving work.
+  const items: ActionGroupItem<CraftType>[] = CRAFT_BUTTONS.map((btn) => {
+    const isRestoreOnEraser =
+      btn.type === "eraser" && activeCraft === "restore";
+    const active =
+      activeCraft === btn.type ||
+      (btn.type === "eraser" && activeCraft === "restore");
+    return {
+      key: btn.type,
+      // Dynamic icon: swap Eraser → Undo2 when we're in restore sub-mode.
+      // ActionGroup takes any ReactNode, so we build the node here.
+      icon: isRestoreOnEraser ? <Undo2 size={10} /> : btn.iconSmall,
+      // Dynamic label: mirror the icon swap so the tooltip stays truthful.
+      label: isRestoreOnEraser ? "Restore Mode (Tab)" : btn.label,
+      active,
+    };
+  });
 
-  return (
-    <div className="flex items-center h-5 rounded-md overflow-hidden border border-[var(--border-subtle)]">
-      {CRAFT_BUTTONS.map((btn, index) => {
-        const state = getButtonState(btn.type);
-        // Dynamic icon: show Undo2 when eraser button is in restore sub-mode
-        const displayIconSmall = (btn.type === 'eraser' && activeCraft === 'restore')
-          ? <Undo2 size={10} />
-          : btn.iconSmall;
-        return (
-          <React.Fragment key={btn.type}>
-            {index > 0 && (
-              <div className="w-[1px] h-2.5 bg-zinc-300/50 dark:bg-white/10 shrink-0" />
-            )}
-            <button
-              onClick={() => handleButtonClick(btn.type)}
-              className={`relative flex items-center justify-center w-6 h-full transition-all outline-none select-none focus:outline-none focus:ring-0 focus-visible:outline-none
-                ${
-                  state === "active"
-                    ? "text-[var(--accent)] craft-btn-active"
-                    : state === "inferred"
-                      ? "text-[var(--text-main)]"
-                      : "hover:bg-[var(--bg-stage)] text-[var(--text-muted)] hover:text-[var(--text-main)]"
-                }`}
-              style={
-                state === "active"
-                  ? {
-                      background:
-                        "color-mix(in srgb, currentColor 12%, var(--bg-panel))",
-                      boxShadow:
-                        "0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent) inset",
-                      WebkitTapHighlightColor: "transparent",
-                    }
-                  : state === "inferred"
-                    ? {
-                        background:
-                          "color-mix(in srgb, currentColor 8%, var(--bg-panel))",
-                        boxShadow:
-                          "0 0 0 1px color-mix(in srgb, currentColor 20%, transparent) inset",
-                        WebkitTapHighlightColor: "transparent",
-                      }
-                    : {
-                        WebkitTapHighlightColor: "transparent",
-                      }
-              }
-              title={btn.type === 'eraser' && activeCraft === 'restore' ? 'Restore Mode (Tab)' : btn.label}
-            >
-              {displayIconSmall}
-            </button>
-          </React.Fragment>
-        );
-      })}
-    </div>
-  );
+  return <ActionGroup items={items} onSelect={handleButtonClick} />;
 });
+
+
 
 // ─── CraftDrawerComponent ──────────────────────────────────────────────────────
 

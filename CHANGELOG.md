@@ -6,10 +6,12 @@ All notable changes to OpenGPEX are documented in this file.
 
 ## v1.0.0-beta.23
 
-- Implement Multi-page TIFF import with options to load pages as separate layers, independent animation frames, or first page only
-- Support JPEG internal compression for TIFF exports with an interactive quality slider and advanced settings (Predictor, Byte Order, BigTIFF, custom Tile sizes)
-- Implement 16-bit multi-layer composite export via wasm-vips Web Worker composite pipeline (with 8-bit fallback upsampling)
-- Implement Canvas2D Blend Isolation: force offscreen pre-compositing for layers with non-default blend modes to prevent tiling seam artifacts
+- Introduce the new **Color Grading** drawer that unifies Basic (Brightness / Contrast / Saturation / Hue / Blur), Curves, Levels, and Channel Mixer under a single entry, replacing the standalone Adjustment drawer and shrinking the sidebar from 7 to 6 icons
+- Deliver real-time preview for Curves, Levels, and Channel Mixer — the canvas now updates smoothly as you drag any slider, without flashing back to the original image between ticks
+- Support multi-page TIFF import with options to load pages as separate layers, independent animation frames, or first page only
+- Add JPEG-in-TIFF compression on export with an interactive quality slider and advanced settings (Predictor, Byte Order, BigTIFF, custom tile sizes)
+- Enable 16-bit multi-layer composite export end-to-end, with automatic 8-bit fallback when unsupported
+- Prevent tiling seam artifacts for layers using non-default blend modes by isolating them into an offscreen composition pass
 
 ---
 

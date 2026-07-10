@@ -104,6 +104,8 @@ function fromAdjustments(adj: AdjustmentState | undefined): FilterDescriptor[] {
 // ────────────────────────────────────────────────────────────
 
 function isIdentityCurve(pts: readonly [number, number][] | undefined): boolean {
+
+
   if (!pts || pts.length === 0) return true;
   if (pts.length !== 2) return false;
   const [a, b] = pts;

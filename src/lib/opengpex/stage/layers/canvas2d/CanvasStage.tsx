@@ -27,10 +27,14 @@ import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { useOverlayRotationSync } from '@opengpex/editor/core/motion/hooks/animation';
 import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
 import { tileCache } from '@opengpex/editor/core/engine/cache/TileCache';
-// NOTE: `asyncFilterCache` subscription reverted per
-// docs/opengpex/plans/20260709_filter_step3_retrospective §2 (it eagerly
-// spawned the engine worker before any editor page mounted). Step 4 will
-// re-introduce it behind a lazy accessor gated on the /editor route.
+import { asyncFilterCache } from '@opengpex/editor/core/engine/cache/AsyncFilterCache';
+// [Filter Pipeline §3.5 hard invariant] AsyncFilterCache is imported ONLY from
+// main-thread modules (this file + Canvas2dEngine.ts). painter.ts and any
+// worker/** module MUST NOT import it — that would drag WorkerBridge (which
+// spins up new Worker(...) at module top-level) into the engine worker's own
+// module graph, causing Turbopack to fan out ~30 helper `turbopack-worker-*`
+// VMs and crash the landing page (see 2026-07-09 retrospective in spec §3.5.2).
+
 
 
 import { useLayerTweens } from './useLayerTweens';
@@ -69,13 +73,20 @@ export default function CanvasStage() {
   useEffect(() => {
     const unsubTiles = tileCache.subscribe(() => { needsRenderRef.current = true; });
     const unsubImages = imageCache.subscribe(() => { needsRenderRef.current = true; });
+    // [Filter Pipeline §5.2 / Step 3] Redraw when a filtered bitmap lands.
+    // Canvas2dEngine.drawLayerDirect schedules async APPLY_FILTER jobs on
+    // cache miss and degrades to the raw source for the current frame.
+    // Subscribing here ensures the next frame picks up the filtered result.
+    const unsubFilters = asyncFilterCache.subscribe(() => { needsRenderRef.current = true; });
 
     return () => {
       unsubTiles();
       unsubImages();
+      unsubFilters();
     };
 
   }, []);
+
 
   // 2. State synchronization: trigger redraw when layer properties (e.g. visible) or artboard state change
   useLayoutEffect(() => {

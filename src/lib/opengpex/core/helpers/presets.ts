@@ -195,8 +195,13 @@ export const FILTER_PRESETS = [
   {
     id: 'cold',
     label: 'Cold',
-    values: { brightness: 100, contrast: 105, saturation: 95, hueRotate: 200, blur: 0 }
+    // [Hue signed range] Basic panel now models Hue as bidirectional
+    // [-180, 180] (see basic.tsx §SLIDERS). 200° folds to -160° via
+    // hue-rotate's modulo-360 semantics — same visual result, but now
+    // the slider thumb lands inside its declared range.
+    values: { brightness: 100, contrast: 105, saturation: 95, hueRotate: -160, blur: 0 }
   },
+
   {
     id: 'vintage',
     label: 'Vintage',

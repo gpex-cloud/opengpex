@@ -22,11 +22,14 @@ import { FontService } from '@opengpex/editor/core/fonts';
 import { MAX_SAFE_EXPORT_PIXELS } from '@opengpex/editor/core/helpers/config';
 import { imageCache } from '../../cache/ImageCache';
 import { tileCache } from '../../cache/TileCache';
+import { asyncFilterCache } from '../../cache/AsyncFilterCache';
+import { hasAdvancedFilters } from '../../filters/normalizeDescriptors';
 import { drawLayerInstance } from './painter';
 import { IRenderer, RenderCommand, DrawLayerOptions } from '../../protocol/IRenderer';
 import { shrinkInvertedMask } from '@opengpex/editor/core/helpers/sub-pixel';
 import { shapeToPath2D } from '@opengpex/editor/core/helpers/path2d';
 import { PixelUtils } from '../../PixelUtils';
+
 
 /**
  * Canvas2dEngine: Real atomic graphics engine
@@ -179,8 +182,19 @@ export class Canvas2dEngine implements IRenderer {
     // Tiles are drawn with source-over on the offscreen, then the composite result
     // is blended once onto the main canvas with the target blend mode.
     if (layer.blendMode && layer.blendMode !== 'source-over') return true;
+    // [Blur Isolation] Neighborhood-kernel adjustments (blur) suffer from the
+    // same tile-seam artifact as non-source-over blend modes: on the tiled
+    // rendering path, painter.ts loops `ctx.drawImage(tile.bitmap, ...)` per
+    // tile with `ctx.filter = "blur(Npx)"` active, and each drawImage call
+    // convolves ONLY within that tile's bitmap — cross-tile neighbor samples
+    // are clipped away, producing visible grid seams. Route blur through the
+    // offscreen composite path so the kernel is applied once against a fully
+    // stitched offscreen image. See filter_pipeline spec §3.2 `classifyFilter`
+    // (blur is `neighborhood`) and §5.4 (tile boundary caveat).
+    if ((layer.adjustments?.blur ?? 0) > 0) return true;
     return false;
   }
+
 
   /** Inline Path2D cache (replaces deleted AsyncMaskCache.getPath2D) */
   private pathCache = new Map<string, Path2D>();
@@ -334,13 +348,27 @@ export class Canvas2dEngine implements IRenderer {
       opacity: 1.0,                  // Do not apply opacity in offscreen; apply it during final composition
       bitmapMaskOverride: undefined  // Prevent recursion
     };
-    // Key: Pass contentLayer (excluding bitmapMasks and blendMode), so recursive calls:
-    // 1. Do not trigger offscreen composition again (no bitmapMasks, no blendMode)
+    // Key: Pass contentLayer (excluding bitmapMasks / blendMode / blur), so recursive calls:
+    // 1. Do not trigger offscreen composition again (no bitmapMasks, no blendMode, no blur)
     // 2. Can correctly take the tiling path
-    // 3. Draw tiles with source-over on the offscreen (blendMode applied only in final composite step 5)
-    const contentLayer = { ...layer, bitmapMasks: undefined, blendMode: undefined };
+    // 3. Draw tiles with source-over on the offscreen (blendMode & blur applied only in final composite step 5)
+    //
+    // [Blur Isolation] Strip `adjustments.blur` here so the recursive tile draw
+    // does NOT apply blur per-tile via painter's `ctx.filter` fast path (which
+    // would re-introduce the very tile seams we're trying to eliminate). The
+    // remaining point-kernel adjustments (brightness / contrast / saturation /
+    // hueRotate) stay put — they're per-pixel and tile-safe. See §needsOffscreenComposite.
+    const contentLayer: Layer = {
+      ...layer,
+      bitmapMasks: undefined,
+      blendMode: undefined,
+      adjustments: layer.adjustments
+        ? { ...layer.adjustments, blur: 0 }
+        : undefined,
+    };
     this.drawLayerDirect(contentLayer, offscreenOptions, assetService);
     this.ctx = oldCtx;
+
 
     // 4. Apply bitmap masks one by one on offscreen canvas (drawn with destination-in / destination-out under offscreenMatrix transformation)
     const activeBitmapMasks = [...(layer.bitmapMasks?.filter(m => m.enabled) || [])];
@@ -401,25 +429,113 @@ export class Canvas2dEngine implements IRenderer {
     mainCtx.setTransform(1, 0, 0, 1, 0, 0); // Directly copy 1:1 in physical pixel space
     mainCtx.globalAlpha = options.opacity ?? layer.opacity ?? 1;
     mainCtx.globalCompositeOperation = (layer.blendMode || 'source-over') as GlobalCompositeOperation;
+    // [Blur Isolation] Apply the neighborhood blur kernel HERE, exactly once,
+    // against the fully stitched offscreen bitmap. This is the seam-free
+    // counterpart to the per-tile ctx.filter fast path used in painter.ts.
+    // Logical blur radius (in layer-local px) is scaled up by the on-screen
+    // matrix scale factor so that the visual blur strength stays consistent
+    // whether the layer is zoomed in or out. matrix.a already carries the
+    // uniform scale under the engine's non-rotational transforms; if a shear
+    // is present we fall back to |a| which matches painter.ts's convention.
+    const blurLogical = layer.adjustments?.blur ?? 0;
+    if (blurLogical > 0) {
+      const blurScale = options.matrix ? Math.abs(options.matrix.a) : 1;
+      mainCtx.filter = `blur(${blurLogical * blurScale}px)`;
+    }
     mainCtx.drawImage(offscreen, 0, 0, finalW, finalH, screenX, screenY, finalW, finalH);
-    mainCtx.restore();
+    mainCtx.restore(); // save/restore also clears mainCtx.filter — no leak.
 
     // 6. Return offscreen canvas
     this.releaseOffscreen(offscreen);
 
     const _offDuration = performance.now() - _offT0;
     if (_offDuration > 8) {
-      const reason = (layer.bitmapMasks?.some(m => m.enabled)) ? 'bitmapMask' : (layer.blendMode || 'blend');
+      const reason = (layer.bitmapMasks?.some(m => m.enabled))
+        ? 'bitmapMask'
+        : (layer.blendMode && layer.blendMode !== 'source-over')
+          ? layer.blendMode
+          : (layer.adjustments?.blur ?? 0) > 0
+            ? 'blur'
+            : 'blend';
       console.debug(
         `[Canvas2dEngine.offscreen] layer="${layer.name}" reason=${reason} size=${finalW}x${finalH} took ${_offDuration.toFixed(1)}ms`
       );
     }
+
+  }
+
+  /**
+   * [Filter Pipeline §5.1 / §3.5] Resolve the "effective" image source and layer
+   * clone for a given layer, transparently dispatching to AsyncFilterCache
+   * when curves / levels / channelMix are declared.
+   *
+   * Design constraints (spec §3.5 hard invariant):
+   * - This method lives in Canvas2dEngine (pure main-thread module). painter.ts
+   *   MUST NOT import AsyncFilterCache — it is a shared leaf between main
+   *   thread and the engine worker's EngineProvider, and reaching into worker
+   *   RPC from there causes Turbopack to explode the worker module graph
+   *   (see spec §3.5.2, the 2026-07-09 landing-page crash retrospective).
+   *
+   * Behavior:
+   * - No advanced filters, or `img` is not an ImageBitmap, or we're exporting
+   *   → return `img` and `layer` untouched (painter.ts's `ctx.filter` fast path
+   *     still applies basic adjustments).
+   * - Advanced filters + cache HIT → return the pre-filtered ImageBitmap AND a
+   *   cloned layer with `adjustments` stripped, because AsyncFilterCache /
+   *   Canvas2dFilter already folded adjustments into the filtered bitmap.
+   *   Leaving `adjustments` on would double-apply via painter's ctx.filter.
+   * - Advanced filters + cache MISS → schedule the async worker job and this
+   *   frame degrades to the raw `img` with ctx.filter basic adjustments.
+   *   `asyncFilterCache.subscribe(...)` in CanvasStage will trigger a redraw
+   *   once the worker returns, and the next frame will hit the cache.
+   */
+  private resolveFilteredSource<T>(
+    layer: Layer,
+    img: T,
+    isExporting: boolean | undefined,
+  ): { img: T; layer: Layer } {
+    // Cheap early-outs first — hot path stays branch-free for the 99% case
+    // where a layer has no advanced filters declared.
+    if (isExporting) return { img, layer };
+    if (!hasAdvancedFilters(layer)) return { img, layer };
+    // AsyncFilterCache accepts anything `createImageBitmap` can consume
+    // (HTMLImageElement, ImageBitmap, OffscreenCanvas, …). The `imageCache`
+    // hands us `HTMLImageElement` for the single-image path, so a strict
+    // `img instanceof ImageBitmap` guard here would slam the door on the
+    // most common source type and silently make curves/levels/mixer no-op —
+    // exactly the "advanced filters don't affect the canvas" bug. Instead,
+    // we only reject obviously-unsupported values.
+    if (!img || typeof img !== 'object') return { img, layer };
+
+    const filtered = asyncFilterCache.get(layer);
+    if (filtered) {
+      return {
+        img: filtered as unknown as T,
+        layer: { ...layer, adjustments: undefined },
+      };
+    }
+
+    // Cache miss: fire-and-forget schedule the worker job, then serve the
+    // "stale-while-revalidate" bitmap from the previous successful recipe
+    // to avoid flashing the raw source between slider ticks. First-ever
+    // filter on a given assetId will still show the raw source for a single
+    // frame (unavoidable — nothing to fall back to yet).
+    asyncFilterCache.schedule(layer, img as unknown as CanvasImageSource);
+    const stale = asyncFilterCache.getStale(layer);
+    if (stale) {
+      return {
+        img: stale as unknown as T,
+        layer: { ...layer, adjustments: undefined },
+      };
+    }
+    return { img, layer };
   }
 
   /**
    * IRenderer interface method: draw layer directly (no queue)
    */
   drawLayerDirect(layer: Layer, options: DrawLayerOptions, assetService?: AssetService): void {
+
     if (!this.ctx) return;
     const ctx = this.ctx;
     const {
@@ -455,7 +571,19 @@ export class Canvas2dEngine implements IRenderer {
     // [Core Dispatch Logic]
     const hasBitmap = !!(layer.bitmapMasks && layer.bitmapMasks.some(m => m.enabled));
     const isTooLarge = (layer.bounding.w * layer.bounding.h) > MAX_SAFE_EXPORT_PIXELS;
-    const shouldUseTiles = tileMeta?.isTiled && (!isExporting || isTooLarge) && !imageOverride && !hasBitmap;
+    // [Filter Pipeline §5.1] Layers with advanced filters (curves / levels /
+    // channelMix) MUST route through the single-image path so that
+    // `resolveFilteredSource` can dispatch to AsyncFilterCache and eventually
+    // paint the worker-produced filtered ImageBitmap. The tiled fast path
+    // draws raw tile bitmaps and has no filter hook — it would silently swallow
+    // the effect (only Basic adjustments would appear via `ctx.filter`). This
+    // is why users reported "Basic works, but Curves/Levels/Mixer don't":
+    // most bitmap layers have `tileMeta.isTiled=true`, so they took the tile
+    // path and bypassed the filter dispatch entirely. Forcing the single-image
+    // path only when advanced filters are declared keeps the tile fast-path
+    // hot for the 99% no-filter case.
+    const hasAdvanced = !isExporting && hasAdvancedFilters(layer);
+    const shouldUseTiles = tileMeta?.isTiled && (!isExporting || isTooLarge) && !imageOverride && !hasBitmap && !hasAdvanced;
 
     if (shouldUseTiles) {
       // --- 4A. Tile Rendering Path (Tiling) ---
@@ -483,9 +611,11 @@ export class Canvas2dEngine implements IRenderer {
       } else if (layer.src) {
         // If tile is not ready, fall back to single image, using assetService.resolve to ensure retrieving the latest valid Object URL
         const fallbackSrc = assetService ? assetService.resolve(layer.assetId, layer.src) : layer.src;
-        const img = imageCache.getOrFetch(fallbackSrc);
-        if (img) {
-          drawLayerInstance(ctx, layer, img, {
+        const rawImg = imageCache.getOrFetch(fallbackSrc);
+        if (rawImg) {
+          // [Filter Pipeline §5.1] Dispatch to AsyncFilterCache when advanced filters declared.
+          const { img: effImg, layer: effLayer } = this.resolveFilteredSource(layer, rawImg, isExporting);
+          drawLayerInstance(ctx, effLayer, effImg, {
             matrix, opacity, clipSequence: preparedClips, width: options.width, height: options.height, drawRect, imageSmoothingQuality,
             dprScale
           });
@@ -495,19 +625,25 @@ export class Canvas2dEngine implements IRenderer {
     } else {
       // --- 4B. Single Image Rendering Path (vector mask unified ctx.clip directly, bypassing Worker) ---
       const currentSrc = assetService ? assetService.resolve(layer.assetId, layer.src) : layer.src;
-      const img = imageOverride || (currentSrc ? imageCache.getOrFetch(currentSrc) : null);
+      const rawImg = imageOverride || (currentSrc ? imageCache.getOrFetch(currentSrc) : null);
 
-      if (img) {
+      if (rawImg) {
         const preparedClips = clipSequence?.map(clip => ({
           ...clip,
           __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale))
         }));
-        drawLayerInstance(ctx, layer, img, {
+        // [Filter Pipeline §5.1] Dispatch to AsyncFilterCache when advanced filters declared.
+        // - Cache HIT  → effImg = filtered ImageBitmap; effLayer has adjustments cleared.
+        // - Cache MISS → effImg = rawImg; worker job scheduled; next frame will hit.
+        // - Non-ImageBitmap sources (HTMLImageElement etc.) fall through untouched.
+        const { img: effImg, layer: effLayer } = this.resolveFilteredSource(layer, rawImg, isExporting);
+        drawLayerInstance(ctx, effLayer, effImg, {
           matrix, opacity, clipSequence: preparedClips, width: options.width, height: options.height, drawRect, imageSmoothingQuality,
           dprScale
         });
       }
     }
+
   }
 }
 

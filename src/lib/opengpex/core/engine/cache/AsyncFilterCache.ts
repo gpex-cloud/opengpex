@@ -57,6 +57,19 @@ class AsyncFilterCache {
   private usageOrder: string[] = [];
   /** Redraw subscribers (Painter, WebGL upgrader, snapshot exporter, …). */
   private listeners: Set<() => void> = new Set();
+  /**
+   * Most-recent cache key per assetId, used to serve a "stale but
+   * plausible" bitmap while the actual worker job for a newer recipe is
+   * still in flight. This eliminates the "flash the original raw image
+   * for one frame every time the slider moves" flicker (spec §5.2 UX):
+   * dragging a slider from X → Y produces a barrage of cache MISSES,
+   * one per tick, and without this fallback each miss frame paints the
+   * raw un-filtered source. With the fallback, we paint the previous
+   * successful filter result until the new one lands — visually the
+   * user sees "old filtered → new filtered" instead of "raw → filtered".
+   */
+  private lastKeyByAsset: Map<string, string> = new Map();
+
 
   /**
    * Filtered layer bitmaps are large (a full 4K RGBA is ~64 MB) so we
@@ -120,6 +133,32 @@ class AsyncFilterCache {
   }
 
   /**
+   * "Stale-while-revalidate" lookup: return the most recent filtered
+   * bitmap known for this layer's `assetId`, regardless of whether the
+   * recipe matches the current layer state. Painter uses this on cache
+   * MISS to avoid flashing the raw source for the frames between the
+   * miss and the worker's response. Returns `null` when we've never
+   * successfully filtered this asset yet — in that case the caller
+   * legitimately has to paint the raw source (one-time flash).
+   */
+  public getStale(
+    layer: Pick<Layer, 'assetId' | 'adjustments' | 'curves' | 'levels' | 'channelMix'>,
+  ): ImageBitmap | null {
+    if (!layer.assetId) return null;
+    // Only serve stale results when the caller is actually asking for a
+    // non-identity filter. If the layer has NO active filters we must
+    // return null so painter falls back to the raw source (else we'd
+    // "stick" the last filtered bitmap forever after a Reset).
+    if (normalizeFilterDescriptors(layer).length === 0) return null;
+    const lastKey = this.lastKeyByAsset.get(layer.assetId);
+    if (!lastKey) return null;
+    const bmp = this.cache.get(lastKey);
+    if (!bmp) return null;
+    this.touch(lastKey);
+    return bmp;
+  }
+
+  /**
    * Schedule an async filter job. Returns `true` when the job was
    * enqueued (or was already pending), `false` when it was a duplicate
    * request for an already-cached entry.
@@ -133,7 +172,7 @@ class AsyncFilterCache {
 
   public schedule(
     layer: Pick<Layer, 'assetId' | 'adjustments' | 'curves' | 'levels' | 'channelMix'>,
-    source: ImageBitmap,
+    source: CanvasImageSource,
   ): boolean {
     const filters = normalizeFilterDescriptors(layer);
     if (filters.length === 0) return false;
@@ -157,6 +196,11 @@ class AsyncFilterCache {
       bmp.close();
       this.cache.delete(key);
       this.usageOrder = this.usageOrder.filter((k) => k !== key);
+      // Sweep any lastKeyByAsset pointer that pointed at this key so
+      // `getStale()` doesn't return a hollow reference.
+      for (const [asset, lastKey] of this.lastKeyByAsset) {
+        if (lastKey === key) this.lastKeyByAsset.delete(asset);
+      }
     }
   }
 
@@ -170,6 +214,7 @@ class AsyncFilterCache {
     for (const key of Array.from(this.cache.keys())) {
       if (key.includes(needle)) this.forget(key);
     }
+    this.lastKeyByAsset.delete(assetId);
   }
 
   /** Wipe every cached bitmap (session teardown / hot-reload). */
@@ -178,6 +223,7 @@ class AsyncFilterCache {
     this.cache.clear();
     this.pending.clear();
     this.usageOrder = [];
+    this.lastKeyByAsset.clear();
   }
 
   // ────────────────────────────────────────────────────────────
@@ -198,10 +244,16 @@ class AsyncFilterCache {
   // Internals
   // ────────────────────────────────────────────────────────────
 
-  private dispatch(key: string, source: ImageBitmap, filters: FilterDescriptor[]): void {
+  private dispatch(key: string, source: CanvasImageSource, filters: FilterDescriptor[]): void {
     // Clone the source before transferring: the transfer would neuter
     // the caller's bitmap and its legacy render path still needs it
     // for the "loading — degraded overlay" phase (spec §5.1).
+    //
+    // Accepts CanvasImageSource (HTMLImageElement | ImageBitmap | ...) because
+    // `Canvas2dEngine` primarily hands us `HTMLImageElement` from `imageCache`
+    // for the single-image render path. `createImageBitmap` accepts either and
+    // yields an owned, transferable `ImageBitmap` — so this call site handles
+    // the source-type ambiguity in one spot.
     //
     // NOTE (Step 3 retrospective): the previous `workerBridge.applyFilter`
     // convenience wrapper was removed to keep WorkerBridge minimal. We now
@@ -238,6 +290,19 @@ class AsyncFilterCache {
     }
     this.cache.set(key, bitmap);
     this.usageOrder.push(key);
+    // Update the "most recent successful recipe" pointer for this asset
+    // so `getStale()` can serve as a bridge across in-flight filter jobs.
+    // Keys are stable-stringified JSON: pull the assetId literal out
+    // without paying for a full JSON.parse.
+    const m = /"assetId":("[^"]*"|null)/.exec(key);
+    if (m) {
+      try {
+        const parsed = JSON.parse(m[1]);
+        if (typeof parsed === 'string') this.lastKeyByAsset.set(parsed, key);
+      } catch {
+        /* ignore malformed key */
+      }
+    }
     this.notify();
   }
 
