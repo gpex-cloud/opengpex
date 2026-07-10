@@ -77,7 +77,6 @@ import React, {
   useEffect,
   useMemo,
   useRef,
-  useState,
 } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { generateLevelsLUT } from "@opengpex/editor/core/engine/filters/lut";
@@ -85,6 +84,7 @@ import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { LevelsState } from "@opengpex/editor/core/types/models";
 import type { ColorGradingDrawerCommandsMap } from "../commands.d";
 import { DEFAULT_LEVELS_STATE } from "../protocols";
+import { NumberField } from "../components";
 import {
   useColorGradingDrawer,
   useFilterGesture,
@@ -329,87 +329,6 @@ function TriangleHandle({
       <path d={path} fill={fill} stroke={strokeLight} strokeWidth={1} className="dark:hidden" />
       <path d={path} fill={fill} stroke={strokeDark} strokeWidth={1} className="hidden dark:block" />
     </g>
-  );
-}
-
-// ─── Number Field ──────────────────────────────────────────────────────────────
-
-/**
- * Compact numeric input that:
- * - accepts free typing (doesn't force reformat mid-keystroke),
- * - commits on blur / Enter,
- * - clamps to the provided range and rounds to the given precision.
- *
- * Every commit walks through a mini gesture (`onCommit`) so undo history
- * records exactly one step per successful edit. This matches the drag
- * ergonomics — a user can't tell whether they tweaked shadows by dragging
- * the triangle or by typing "10", both cost the same undo slot.
- */
-function LevelsNumberField({
-  label,
-  value,
-  min,
-  max,
-  step,
-  precision,
-  onCommit,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  precision: number;
-  onCommit: (v: number) => void;
-}) {
-  const [draft, setDraft] = useState(value.toFixed(precision));
-  const lastValueRef = useRef(value);
-  // Sync external changes into the visible text unless the user is mid-typing.
-  useEffect(() => {
-    if (lastValueRef.current !== value) {
-      setDraft(value.toFixed(precision));
-      lastValueRef.current = value;
-    }
-  }, [value, precision]);
-
-  const commit = useCallback(() => {
-    const parsed = Number.parseFloat(draft);
-    if (Number.isFinite(parsed)) {
-      const clamped = clamp(parsed, min, max);
-      // Round to step grid so gamma edits like "1.03" don't drift to
-      // 1.0300000000000004 in the layer state.
-      const stepped = step > 0 ? Math.round(clamped / step) * step : clamped;
-      onCommit(Number(stepped.toFixed(precision)));
-      setDraft(stepped.toFixed(precision));
-      lastValueRef.current = stepped;
-    } else {
-      // Reset to last-known-good so the field never displays NaN.
-      setDraft(value.toFixed(precision));
-    }
-  }, [draft, min, max, step, precision, onCommit, value]);
-
-  return (
-    <div className="flex flex-col items-center gap-0.5 flex-1 min-w-0">
-      <span className="text-[8px] font-black tracking-widest uppercase text-[var(--text-muted)]">
-        {label}
-      </span>
-      <input
-        type="text"
-        inputMode="decimal"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            (e.target as HTMLInputElement).blur();
-          } else if (e.key === "Escape") {
-            setDraft(value.toFixed(precision));
-            (e.target as HTMLInputElement).blur();
-          }
-        }}
-        className="w-full text-center text-[10px] font-mono rounded-sm bg-transparent border border-zinc-200 dark:border-white/10 px-1 py-0.5 focus:outline-none focus:border-[var(--accent-primary,#60a5fa)]"
-      />
-    </div>
   );
 }
 
@@ -854,10 +773,14 @@ export function LevelsPanel() {
         </svg>
       </div>
 
-      {/* Numeric readouts for input row. */}
+      {/* Numeric readouts for input row. Uses the shared `NumberField`
+          (see `../components.tsx`); each commit is one mini-gesture, matching
+          drag ergonomics — a user can't tell whether they tweaked shadows by
+          dragging the triangle or typing "10", both cost the same undo slot. */}
       <div className="flex items-stretch gap-1">
-        <LevelsNumberField
+        <NumberField
           label="Black"
+          ariaLabel="Input blackpoint value"
           value={levels.inputBlack}
           min={0}
           max={254}
@@ -871,8 +794,9 @@ export function LevelsPanel() {
             )
           }
         />
-        <LevelsNumberField
+        <NumberField
           label="Gamma"
+          ariaLabel="Gamma value"
           value={levels.gamma}
           min={0.1}
           max={10}
@@ -880,8 +804,9 @@ export function LevelsPanel() {
           precision={2}
           onCommit={(v) => commitAtomic(() => patchLevels({ gamma: v }))}
         />
-        <LevelsNumberField
+        <NumberField
           label="White"
+          ariaLabel="Input whitepoint value"
           value={levels.inputWhite}
           min={1}
           max={255}
@@ -959,8 +884,9 @@ export function LevelsPanel() {
       {/* Numeric readouts for output row. */}
 
       <div className="flex items-stretch gap-1">
-        <LevelsNumberField
+        <NumberField
           label="Out Black"
+          ariaLabel="Output blackpoint value"
           value={levels.outputBlack}
           min={0}
           max={255}
@@ -968,8 +894,9 @@ export function LevelsPanel() {
           precision={0}
           onCommit={(v) => commitAtomic(() => patchLevels({ outputBlack: Math.round(v) }))}
         />
-        <LevelsNumberField
+        <NumberField
           label="Out White"
+          ariaLabel="Output whitepoint value"
           value={levels.outputWhite}
           min={0}
           max={255}

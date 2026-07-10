@@ -84,6 +84,7 @@ import {
   CHANNEL_MIX_PRESET_ORDER,
 } from "../protocols";
 import type { ChannelMixOutput, ChannelMixPresetId } from "../protocols";
+import { NumberField } from "../components";
 import { useColorGradingDrawer, useFilterGesture } from "../hooks";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -219,89 +220,6 @@ function isMonochrome(mix: ChannelMixState): boolean {
   return (
     Math.abs(c[0] - c[1]) < PRESET_MATCH_EPS &&
     Math.abs(c[1] - c[2]) < PRESET_MATCH_EPS
-  );
-}
-
-// ─── NumberField (Photoshop-style typed input) ────────────────────────────────
-
-/**
- * Same numeric-input pattern that ships in levels.tsx (`LevelsNumberField`):
- * - free typing (no forced reformat mid-keystroke)
- * - commit on blur / Enter / abort on Esc
- * - clamp to [min, max] + snap to `step` + fixed precision
- *
- * We locally re-declare instead of importing from `../levels.tsx` so this
- * panel doesn't reach across into a sibling's file surface. The identical
- * pattern is a candidate for extraction to `components.tsx` in Step 8; we
- * defer that until at least three panels want it (curves.tsx currently
- * doesn't need one).
- */
-function NumberField({
-  value,
-  min,
-  max,
-  step,
-  precision,
-  disabled,
-  onCommit,
-  ariaLabel,
-}: {
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  precision: number;
-  disabled?: boolean;
-  onCommit: (v: number) => void;
-  ariaLabel: string;
-}) {
-  const [draft, setDraft] = useState(value.toFixed(precision));
-  const lastValueRef = useRef(value);
-  useEffect(() => {
-    if (lastValueRef.current !== value) {
-      setDraft(value.toFixed(precision));
-      lastValueRef.current = value;
-    }
-  }, [value, precision]);
-
-  const commit = useCallback(() => {
-    const parsed = Number.parseFloat(draft);
-    if (Number.isFinite(parsed)) {
-      const clamped = clamp(parsed, min, max);
-      const stepped = step > 0 ? Math.round(clamped / step) * step : clamped;
-      const final = Number(stepped.toFixed(precision));
-      onCommit(final);
-      setDraft(final.toFixed(precision));
-      lastValueRef.current = final;
-    } else {
-      // Reset to last-known-good so the field never displays NaN.
-      setDraft(value.toFixed(precision));
-    }
-  }, [draft, min, max, step, precision, onCommit, value]);
-
-  return (
-    <input
-      type="text"
-      inputMode="decimal"
-      value={draft}
-      disabled={disabled}
-      aria-label={ariaLabel}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          (e.target as HTMLInputElement).blur();
-        } else if (e.key === "Escape") {
-          setDraft(value.toFixed(precision));
-          (e.target as HTMLInputElement).blur();
-        }
-      }}
-      className={`w-12 text-center text-[10px] font-mono rounded-sm bg-transparent border px-1 py-0.5 focus:outline-none ${
-        disabled
-          ? "border-transparent text-[var(--text-muted)] cursor-not-allowed"
-          : "border-zinc-200 dark:border-white/10 focus:border-[var(--accent-primary,#60a5fa)]"
-      }`}
-    />
   );
 }
 

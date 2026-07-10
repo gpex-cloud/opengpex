@@ -28,6 +28,7 @@ import {
   usePluginSelfConfig,
 } from '@opengpex/editor/core/context';
 import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
+import { asyncFilterCache } from '@opengpex/editor/core/engine/cache/AsyncFilterCache';
 import type { ColorGradingDrawerCommandsMap, ColorGradingDrawerSignalsMap } from './commands.d';
 import type { ActiveGradingTool, GradingTool, ColorGradingDrawerConfig } from './protocols';
 import { DEFAULT_GRADING_TOOL } from './protocols';
@@ -141,6 +142,12 @@ export function useFilterGesture(
   const begin = useCallback(() => {
     if (draggingRef.current) return;
     draggingRef.current = true;
+    // Dual-Track preview (spec §5.3): tell the AsyncFilterCache to stop
+    // scheduling worker jobs — painter will paint from `getStale()` for
+    // the duration of the drag so we don't drown the worker in per-tick
+    // recipes. See `AsyncFilterCache.setDragging` for the schedule-side
+    // suppression logic.
+    asyncFilterCache.setDragging(true);
     beginCommand?.execute?.();
   }, [beginCommand]);
 
@@ -148,9 +155,26 @@ export function useFilterGesture(
     // No-op unless we're actively in a gesture; keeps double-firing safe.
     if (!draggingRef.current) return;
     draggingRef.current = false;
+    // Re-enable full-res scheduling. AsyncFilterCache internally notifies
+    // subscribers so the next paint pass schedules exactly one Worker
+    // job for the final settled recipe (§5.3 commit).
+    asyncFilterCache.setDragging(false);
   }, []);
 
   const isDragging = useCallback(() => draggingRef.current, []);
+
+  // Belt-and-suspenders cleanup: if the panel unmounts mid-drag (tab
+  // switch, drawer close), we must reset the global cache flag so the
+  // NEXT gesture starts from a known good state. Without this the
+  // schedule() guard could stick to `true` forever.
+  useEffect(() => {
+    return () => {
+      if (draggingRef.current) {
+        draggingRef.current = false;
+        asyncFilterCache.setDragging(false);
+      }
+    };
+  }, []);
 
   return useMemo(
     () => ({ begin, end, isDragging }),

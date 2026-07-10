@@ -19,7 +19,7 @@
 
 "use client";
 
-import React from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Sliders, LineChart, BarChart3, SlidersHorizontal, RotateCcw as ResetIcon } from "lucide-react";
 import { useEditorServices } from "@opengpex/editor/core/context";
@@ -199,3 +199,150 @@ export const ColorGradingDrawerComponent = React.memo(function ColorGradingDrawe
     </div>
   );
 });
+
+
+// ─── NumberField (Photoshop-style typed input) ────────────────────────────────
+
+/**
+ * NumberField — shared numeric input for grading sub-panels.
+ *
+ * Step 8 housekeeping: `LevelsPanel` and `ChannelMixerPanel` used to ship
+ * near-identical local copies (`LevelsNumberField` + panel-local `NumberField`).
+ * They diverged only cosmetically — Levels wraps the input under a tiny
+ * uppercase label; Mixer places it beside a slider without its own label.
+ * This module reconciles both by making `label` optional: when provided,
+ * we render the vertical `[label] / [input]` cell used by Levels; when
+ * omitted, we render just the input (Mixer's use-case).
+ *
+ * Behavior contract (unchanged from the two originals):
+ *   - Free typing — the input string is preserved verbatim while focused,
+ *     never coerced mid-keystroke. This matches Photoshop's numeric fields
+ *     where you can safely type "1.03" without the "0" fighting reformatting.
+ *   - Commit on blur or Enter — parses, clamps to `[min, max]`, snaps to
+ *     `step`, formats to `precision` decimals, and calls `onCommit(final)`.
+ *   - Escape cancels — restores the last committed value.
+ *   - Invalid input (NaN) restores the last committed value; the field
+ *     never displays NaN.
+ *
+ * `onCommit` is the sole undo-boundary hook: callers wrap it in a mini
+ * gesture (begin → dispatch → end) so **every successful commit is exactly
+ * one undo step**, matching the drag ergonomics. Do NOT bypass this by
+ * mutating layer state directly from the field.
+ */
+export interface NumberFieldProps {
+  /** Current committed value. */
+  value: number;
+  /** Inclusive lower bound. */
+  min: number;
+  /** Inclusive upper bound. */
+  max: number;
+  /**
+   * Snap grid. `0` disables snapping (rare — most panels want a positive
+   * step to keep patch values on a stable grid so `1.03` doesn't drift to
+   * `1.0300000000000004` after enough round-trips).
+   */
+  step: number;
+  /** Digits after the decimal point in the formatted display. */
+  precision: number;
+  /** Called once per successful commit; must be undo-boundary safe. */
+  onCommit: (v: number) => void;
+  /**
+   * Accessible name. Required — screen readers must never see a nameless
+   * numeric input; `panelId + fieldKind` (e.g. `"levels-input-black"`) is
+   * the recommended pattern.
+   */
+  ariaLabel: string;
+  /**
+   * Optional small uppercase label rendered above the input (Levels style).
+   * Omit for the "input-only" Mixer style.
+   */
+  label?: string;
+  /**
+   * Disabled state — currently only used by Mixer's Constant field when
+   * monochrome mode consolidates the constant across all outputs.
+   */
+  disabled?: boolean;
+}
+
+export function NumberField({
+  value,
+  min,
+  max,
+  step,
+  precision,
+  disabled,
+  onCommit,
+  ariaLabel,
+  label,
+}: NumberFieldProps) {
+  const [draft, setDraft] = useState(value.toFixed(precision));
+  const lastValueRef = useRef(value);
+
+  // Sync external changes into the visible text unless the user is mid-typing.
+  // We compare against `lastValueRef.current` (not `draft`) so the sync fires
+  // on Reset / Preset apply / another panel writing the same field.
+  useEffect(() => {
+    if (lastValueRef.current !== value) {
+      setDraft(value.toFixed(precision));
+      lastValueRef.current = value;
+    }
+  }, [value, precision]);
+
+  const commit = useCallback(() => {
+    const parsed = Number.parseFloat(draft);
+    if (Number.isFinite(parsed)) {
+      const clamped = Math.min(Math.max(parsed, min), max);
+      const stepped = step > 0 ? Math.round(clamped / step) * step : clamped;
+      const final = Number(stepped.toFixed(precision));
+      onCommit(final);
+      setDraft(final.toFixed(precision));
+      lastValueRef.current = final;
+    } else {
+      setDraft(value.toFixed(precision));
+    }
+  }, [draft, min, max, step, precision, onCommit, value]);
+
+  // Field styling forks by container mode:
+  //   - `label` present: fill parent width, sit under a small uppercase caption
+  //   - no label:        fixed w-12 (Mixer's numeric column alignment)
+  const inputClass = label
+    ? "w-full text-center text-[10px] font-mono rounded-sm bg-transparent border border-zinc-200 dark:border-white/10 px-1 py-0.5 focus:outline-none focus:border-[var(--accent-primary,#60a5fa)]"
+    : `w-12 text-center text-[10px] font-mono rounded-sm bg-transparent border px-1 py-0.5 focus:outline-none ${
+        disabled
+          ? "border-transparent text-[var(--text-muted)] cursor-not-allowed"
+          : "border-zinc-200 dark:border-white/10 focus:border-[var(--accent-primary,#60a5fa)]"
+      }`;
+
+  const input = (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          (e.target as HTMLInputElement).blur();
+        } else if (e.key === "Escape") {
+          setDraft(value.toFixed(precision));
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      className={inputClass}
+    />
+  );
+
+  if (label) {
+    return (
+      <div className="flex flex-col items-center gap-0.5 flex-1 min-w-0">
+        <span className="text-[8px] font-black tracking-widest uppercase text-[var(--text-muted)]">
+          {label}
+        </span>
+        {input}
+      </div>
+    );
+  }
+  return input;
+}

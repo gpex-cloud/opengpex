@@ -478,6 +478,12 @@ export function createPixelService(
             blendMode: layer.blendMode,
             fill: layer.fill,
             adjustments: layer.adjustments,
+            // Advanced tone-adjustment state — forwarded so merger.ts can
+            // bake curves/levels/channelMix into the source ImageBitmap
+            // before the paint loop (filter_pipeline_spec §5.1b.4).
+            curves: layer.curves,
+            levels: layer.levels,
+            channelMix: layer.channelMix,
             vectorMasks: layer.vectorMasks,
             bitmapMasks: layer.bitmapMasks,
             matrix: {
@@ -529,6 +535,10 @@ export function createPixelService(
             blendMode: layer.blendMode,
             fill: layer.fill,
             adjustments: layer.adjustments,
+            // Advanced tone-adjustment state — see mergeLayersToLayer above.
+            curves: layer.curves,
+            levels: layer.levels,
+            channelMix: layer.channelMix,
             vectorMasks: layer.vectorMasks,
             bitmapMasks: layer.bitmapMasks,
             matrix: {

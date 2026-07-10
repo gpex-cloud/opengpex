@@ -72,11 +72,59 @@ class AsyncFilterCache {
 
 
   /**
-   * Filtered layer bitmaps are large (a full 4K RGBA is ~64 MB) so we
-   * keep this cap intentionally small. UI wiring can `clearLayer(id)`
-   * when a layer is deleted to release memory earlier.
+   * LRU capacity (spec §5.5 recommends 8–16; we pick 12 as the middle).
+   *
+   * Rationale for the low cap:
+   *   - Each entry is a filtered ImageBitmap the size of the layer's source.
+   *     A 4K RGBA is ~64 MB, so 12 entries can hold ~768 MB of pixel data.
+   *     In practice the tab's overall footprint is well under that because
+   *     (a) most projects have far fewer than 12 filter-active layers, and
+   *     (b) same-layer entries share GPU memory when only the recipe
+   *     changed (browser-native copy-on-write in most drivers).
+   *   - Step 8 tightening (2026-07-10): previously 32, which was fine for
+   *     8-bit editing but ballooned to worst-case ~2 GB on 4K workflows.
+   *     Empirically 12 covers "3 layers × ~4 in-flight recipes as the user
+   *     scrubs sliders + `getStale()` bridge" comfortably; anything larger
+   *     is dead weight because the LRU tail is never touched again in a
+   *     typical editing session.
+   *
+   * UI wiring can call `clearAsset(id)` on layer delete / asset swap to
+   * release memory earlier without waiting for LRU pressure.
    */
-  private readonly MAX_ENTRIES = 32;
+  private readonly MAX_ENTRIES = 12;
+
+  /**
+   * "Dual-Track preview" observational flag (spec §5.3, partial).
+   *
+   * ⚠  Step 8 shipped **only the observation side** of §5.3 — the
+   * accompanying main-thread LUT thumbnail preview (the actual "Track A"
+   * that would replace the worker output during a drag) was deferred to
+   * the TileFilterCache era (see
+   * `docs/opengpex/plans/20260710_tile_filter_cache_design.md`) because
+   * introducing a CPU LUT preview path touches painter's purity contract
+   * (rendering overview §8.3 / §9.1) — non-trivial scope for a Step 8
+   * milestone.
+   *
+   * A short-lived Step 8 variant of this flag ALSO gated `schedule()`
+   * (drop worker jobs during drag → paint from `getStale()`), on the
+   * theory that big-image job pile-up was worse than "frozen preview
+   * for the duration of the drag". Field feedback disagreed sharply:
+   * for the common case (≤ 4K single-layer edits) the worker completes
+   * per-tick jobs comfortably and users VALUE the live feedback more
+   * than they hate the small latency. The gate has been removed; the
+   * flag is retained as pure observability so future consumers (LUT
+   * preview overlay, WebGPU jump path, TileFilterCache) can query the
+   * same signal via `useFilterGesture` without inventing a second one.
+   *
+   * On truly huge images (8K / 16K) `schedule()` will still let jobs
+   * pile up during drag — that's the case TileFilterCache (阶段 B)
+   * exists to fix by moving from "1 worker job per whole image per
+   * tick" to "N worker jobs per visible tile per tick", each ≤ 5ms.
+   * Until then, big-image editors can commit + release between adjust-
+   * ments; the pipeline stays responsive enough to remain usable.
+   */
+  private dragging = false;
+
 
   private constructor() {}
 
@@ -183,9 +231,45 @@ class AsyncFilterCache {
     if (this.cache.has(key)) return false;
     if (this.pending.has(key)) return true;
 
+    // NOTE: earlier Step 8 draft gated dispatch on `this.dragging` so no
+    // worker jobs would be scheduled during drag. That produced a frozen
+    // preview (user reported 2026-07-10) which is a UX regression vs. the
+    // pre-Step-8 baseline where every slider tick was fed to the worker.
+    // Live feedback wins for ≤ 4K workflows; on huge images the pile-up
+    // is what TileFilterCache (阶段 B) targets. See the docblock on
+    // `dragging` above for the full history.
     this.pending.add(key);
     this.dispatch(key, source, filters);
     return true;
+
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // Drag coordination (spec §5.3 Dual-Track preview)
+  // ────────────────────────────────────────────────────────────
+
+  /**
+   * Toggle the drag-suppression flag from `useFilterGesture.begin/end`.
+   *
+   * Transition rules:
+   *   - `false → true`  (drag-start): no effect on cache state; just
+   *     flips the schedule guard. Any in-flight jobs finish normally.
+   *   - `true  → false` (drag-end):   notify subscribers so the render
+   *     loop re-runs; the next frame's `schedule()` call sees dragging=
+   *     false and enqueues one Worker job for the settled recipe.
+   *
+   * Idempotent — repeated `true`/`true` or `false`/`false` calls are
+   * no-ops so the two panels + a fast-clicking user can't corrupt state.
+   */
+  public setDragging(value: boolean): void {
+    if (this.dragging === value) return;
+    this.dragging = value;
+    if (!value) this.notify();
+  }
+
+  /** Test hook — do NOT rely on this in product code. */
+  public isDragging(): boolean {
+    return this.dragging;
   }
 
   /**

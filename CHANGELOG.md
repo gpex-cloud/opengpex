@@ -7,6 +7,8 @@ All notable changes to OpenGPEX are documented in this file.
 ## v1.0.0-beta.24
 
 - Unify every main-thread source-bitmap consumer (Canvas2dEngine, filter cache, brush/clip/wand tools, Color Grading histogram, BG-removal) on a single `SourceBitmapCache` that stores decoded `ImageBitmap`s once per URL — eliminates redundant `HTMLImageElement` decodes, halves peak memory during heavy edits, and cuts filter-cache miss latency by skipping the legacy image→bitmap conversion hop
+- Bound Color-Grading memory to at most 12 filtered bitmaps in the async cache (down from 32) with prompt `ImageBitmap.close()` on eviction, avoiding worst-case ~2 GB retention on multi-layer 4K workflows
+- Extract the shared numeric-input widget used by the Levels and Channel Mixer panels into a single `NumberField` component (min/max/step/precision/onCommit) so both panels share a consistent commit-based Undo checkpoint model
 
 ---
 

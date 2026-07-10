@@ -17,7 +17,17 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Frame, Layer, AdjustmentState, VectorMask, BitmapMask, LayerBlendMode } from './models';
+import {
+  Frame,
+  Layer,
+  AdjustmentState,
+  CurvesState,
+  LevelsState,
+  ChannelMixState,
+  VectorMask,
+  BitmapMask,
+  LayerBlendMode,
+} from './models';
 import {
   LocalRect, Dimensions, ClipDescriptor,
   Shape, LocalShape, LocalPolygon, ShapeType, TileMetadata
@@ -92,6 +102,24 @@ export interface LayerItemForWorker {
   blendMode?: LayerBlendMode;
   fill?: number;
   adjustments?: AdjustmentState;
+  /**
+   * Advanced tone-adjustment state (filter_pipeline_spec §5.1b.4).
+   *
+   * These three fields are forwarded to `worker/handlers/merger.ts`, where
+   * the layer loop bakes them into the source ImageBitmap via
+   * `Canvas2dFilter.apply(source, normalizeFilterDescriptors(...))` BEFORE
+   * `EngineProvider.drawLayerInstance` runs. This is the ONE integration
+   * point that gives PNG / JPG / AVIF / TIFF-8 / BMP / WebP filter-baked
+   * output "for free" (spec §5.1b.5 responsibility table). Any missing
+   * field on the exported layer produces an unfiltered output — every
+   * producer site MUST copy these when it builds a `LayerItemForWorker`.
+   *
+   * Kept as optional plain JSON (not `Pick<Layer, ...>`) so producers
+   * don't have to import the full Layer union just to satisfy the type.
+   */
+  curves?: CurvesState;
+  levels?: LevelsState;
+  channelMix?: ChannelMixState;
   vectorMasks?: VectorMask[];
   bitmapMasks?: BitmapMask[];
   matrix: {
