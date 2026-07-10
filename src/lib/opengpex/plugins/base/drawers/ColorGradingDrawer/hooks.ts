@@ -27,7 +27,7 @@ import {
   usePluginSignals,
   usePluginSelfConfig,
 } from '@opengpex/editor/core/context';
-import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
+import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
 import type { ColorGradingDrawerCommandsMap, ColorGradingDrawerSignalsMap } from './commands.d';
 import type { ActiveGradingTool, GradingTool, ColorGradingDrawerConfig } from './protocols';
 import { DEFAULT_GRADING_TOOL } from './protocols';
@@ -199,9 +199,9 @@ const HISTOGRAM_MAX_EDGE = 256;
  * Uses an offscreen `HTMLCanvasElement` and `getImageData` — the ONLY
  * getImageData in the plugin, matched to spec §3.5 UI-side sampling.
  */
-function computeLuminanceHistogram(img: HTMLImageElement): Uint32Array | null {
-  const w = img.naturalWidth || img.width;
-  const h = img.naturalHeight || img.height;
+function computeLuminanceHistogram(img: ImageBitmap): Uint32Array | null {
+  const w = img.width;
+  const h = img.height;
   if (!w || !h) return null;
 
   // Downsample so the pixel loop is bounded regardless of source resolution.
@@ -338,27 +338,27 @@ export function useLayerHistogram(): LayerHistogram {
     // We schedule the actual sampling in an idle callback so the panel's
     // first paint lands before we ever touch getImageData (which forces
     // the browser to synchronously decode + rasterize the source bitmap).
+    // SourceBitmapCache exposes a subscription API; we hook into it so
+    // the histogram lands the moment the shared ImageBitmap is decoded
+    // (no polling, no double-fetch). If the bitmap is already cached
+    // we hit the fast path synchronously.
+    let unsubSbc: (() => void) | null = null;
     const run = () => {
       if (cancelled) return;
-      const img = imageCache.getOrFetch(resolvedSrc);
-      if (!img) {
-        // Image not yet decoded — retry once it lands. `getOrFetch` will
-        // populate the cache; we poll via a short micro-timer rather than
-        // subscribing (imageCache doesn't expose an event API).
-        setTimeout(run, 60);
-        return;
-      }
-      if (!img.complete) {
-        // Element is still loading. Bind a one-shot handler.
-        const onLoad = () => {
-          img.removeEventListener('load', onLoad);
+      const bmp = sourceBitmapCache.getOrFetch(resolvedSrc);
+      if (!bmp) {
+        // Not yet decoded — wait for the cache's notify() to fire.
+        if (unsubSbc) return;
+        unsubSbc = sourceBitmapCache.subscribe(() => {
           if (cancelled) return;
+          const now = sourceBitmapCache.get(resolvedSrc);
+          if (!now) return;
+          if (unsubSbc) { unsubSbc(); unsubSbc = null; }
           run();
-        };
-        img.addEventListener('load', onLoad);
+        });
         return;
       }
-      const hist = computeLuminanceHistogram(img);
+      const hist = computeLuminanceHistogram(bmp);
       if (cancelled) return;
       if (hist) {
         rememberHistogram(cacheKey, hist);
@@ -383,6 +383,7 @@ export function useLayerHistogram(): LayerHistogram {
 
     return () => {
       cancelled = true;
+      if (unsubSbc) { unsubSbc(); unsubSbc = null; }
       type CIC = (id: number) => void;
       const cic = (window as unknown as { cancelIdleCallback?: CIC }).cancelIdleCallback;
       if (ric && cic) cic(handle);

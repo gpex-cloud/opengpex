@@ -286,7 +286,7 @@ export function createLayerService(
             id = await assets.register(newBlob);
             url = assets.getURL(id)!;
 
-            await pixels.decode.htmlImage(url);
+            await pixels.decode.bitmap(url);
           }
 
           const updatedVisibleShape = layer.visibleShape ? {
@@ -340,7 +340,7 @@ export function createLayerService(
             finalId = await assets.register(newBlob);
             finalUrl = assets.getURL(finalId)!;
 
-            await pixels.decode.htmlImage(finalUrl);
+            await pixels.decode.bitmap(finalUrl);
           }
 
           const newCx = (aabb.x + aabb.w / 2) * scaleX;

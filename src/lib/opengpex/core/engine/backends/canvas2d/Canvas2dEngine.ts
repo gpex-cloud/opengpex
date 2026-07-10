@@ -20,7 +20,7 @@
 import { Layer, AssetService, Shape, LocalShape, TileData, asLocalRect } from '@opengpex/editor/core/types';
 import { FontService } from '@opengpex/editor/core/fonts';
 import { MAX_SAFE_EXPORT_PIXELS } from '@opengpex/editor/core/helpers/config';
-import { imageCache } from '../../cache/ImageCache';
+import { sourceBitmapCache } from '../../cache/SourceBitmapCache';
 import { tileCache } from '../../cache/TileCache';
 import { asyncFilterCache } from '../../cache/AsyncFilterCache';
 import { hasAdvancedFilters } from '../../filters/normalizeDescriptors';
@@ -396,7 +396,7 @@ export class Canvas2dEngine implements IRenderer {
         // Check for fast-track override
         const maskSource = (options.bitmapMaskOverride?.maskId === bm.id)
           ? options.bitmapMaskOverride.source
-          : imageCache.getOrFetch(bm.src);
+          : sourceBitmapCache.getOrFetch(bm.src);
 
         if (!maskSource) continue;
 
@@ -498,14 +498,12 @@ export class Canvas2dEngine implements IRenderer {
     // where a layer has no advanced filters declared.
     if (isExporting) return { img, layer };
     if (!hasAdvancedFilters(layer)) return { img, layer };
-    // AsyncFilterCache accepts anything `createImageBitmap` can consume
-    // (HTMLImageElement, ImageBitmap, OffscreenCanvas, …). The `imageCache`
-    // hands us `HTMLImageElement` for the single-image path, so a strict
-    // `img instanceof ImageBitmap` guard here would slam the door on the
-    // most common source type and silently make curves/levels/mixer no-op —
-    // exactly the "advanced filters don't affect the canvas" bug. Instead,
-    // we only reject obviously-unsupported values.
-    if (!img || typeof img !== 'object') return { img, layer };
+    // AsyncFilterCache now consumes ImageBitmap exclusively — every source
+    // arrives here via SourceBitmapCache which decodes to ImageBitmap once
+    // per URL. If for some reason `img` isn't a bitmap (SSR / edge case),
+    // just bail out cleanly and let painter's basic `ctx.filter` path do
+    // its best-effort thing.
+    if (!(img instanceof ImageBitmap)) return { img, layer };
 
     const filtered = asyncFilterCache.get(layer);
     if (filtered) {
@@ -515,12 +513,11 @@ export class Canvas2dEngine implements IRenderer {
       };
     }
 
-    // Cache miss: fire-and-forget schedule the worker job, then serve the
-    // "stale-while-revalidate" bitmap from the previous successful recipe
-    // to avoid flashing the raw source between slider ticks. First-ever
-    // filter on a given assetId will still show the raw source for a single
-    // frame (unavoidable — nothing to fall back to yet).
-    asyncFilterCache.schedule(layer, img as unknown as CanvasImageSource);
+    // Cache miss: schedule an async worker job (fire-and-forget). The
+    // schedule() call clones the bitmap internally via acquireOwned-
+    // equivalent semantics, so this frame's `img` stays valid for the
+    // fallback path below.
+    asyncFilterCache.schedule(layer, img);
     const stale = asyncFilterCache.getStale(layer);
     if (stale) {
       return {
@@ -611,7 +608,7 @@ export class Canvas2dEngine implements IRenderer {
       } else if (layer.src) {
         // If tile is not ready, fall back to single image, using assetService.resolve to ensure retrieving the latest valid Object URL
         const fallbackSrc = assetService ? assetService.resolve(layer.assetId, layer.src) : layer.src;
-        const rawImg = imageCache.getOrFetch(fallbackSrc);
+        const rawImg = sourceBitmapCache.getOrFetch(fallbackSrc);
         if (rawImg) {
           // [Filter Pipeline §5.1] Dispatch to AsyncFilterCache when advanced filters declared.
           const { img: effImg, layer: effLayer } = this.resolveFilteredSource(layer, rawImg, isExporting);
@@ -625,7 +622,7 @@ export class Canvas2dEngine implements IRenderer {
     } else {
       // --- 4B. Single Image Rendering Path (vector mask unified ctx.clip directly, bypassing Worker) ---
       const currentSrc = assetService ? assetService.resolve(layer.assetId, layer.src) : layer.src;
-      const rawImg = imageOverride || (currentSrc ? imageCache.getOrFetch(currentSrc) : null);
+      const rawImg = imageOverride || (currentSrc ? sourceBitmapCache.getOrFetch(currentSrc) : null);
 
       if (rawImg) {
         const preparedClips = clipSequence?.map(clip => ({

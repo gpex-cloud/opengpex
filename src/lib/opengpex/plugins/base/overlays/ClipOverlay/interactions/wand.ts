@@ -27,7 +27,7 @@ import {
 } from '@opengpex/editor/core/types';
 import { computePolygonBounds } from '@opengpex/editor/core/geometry/operators/polygon';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
-import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
+import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
 import { magicWandClient } from '../wand/client';
 import { ClipOptionsAPI } from '../../../options/ClipOptions/protocols';
 import { makeCropToolGuard } from './guard';
@@ -79,18 +79,36 @@ function isWandableLayer(layer: Layer): boolean {
 
 /**
  * Decode the layer's source URL into a Uint8ClampedArray of layer-local pixels.
- * Reuses the editor's global `imageCache` for synchronous hits on hot path.
+ * Reuses the editor's global `sourceBitmapCache` for synchronous hits on hot path.
  */
 async function getLayerImageData(layer: Layer): Promise<ImageData> {
-  let img = imageCache.get(layer.src);
+  let img: ImageBitmap | undefined = sourceBitmapCache.get(layer.src);
   if (!img) {
-    imageCache.getOrFetch(layer.src);
-    img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image();
-      el.crossOrigin = 'anonymous';
-      el.onload = () => resolve(el);
-      el.onerror = (ev) => reject(new Error(`Failed to load layer image: ${typeof ev === 'string' ? ev : 'image error'}`));
-      el.src = layer.src;
+    // Kick the shared loader and wait for it via the cache's subscription
+    // channel — a plain `createImageBitmap(await fetch(...))` would work
+    // too, but going through the cache means every consumer gets the
+    // decoded bitmap for free (no double-decode).
+    sourceBitmapCache.getOrFetch(layer.src);
+    img = await new Promise<ImageBitmap>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        unsub();
+        reject(new Error(`Failed to load layer image: ${layer.src} (timeout)`));
+      }, 15_000);
+      const unsub = sourceBitmapCache.subscribe(() => {
+        const bmp = sourceBitmapCache.get(layer.src);
+        if (bmp) {
+          clearTimeout(timeout);
+          unsub();
+          resolve(bmp);
+        }
+      });
+      // Cover the race where the fetch resolved before we subscribed.
+      const bmp = sourceBitmapCache.get(layer.src);
+      if (bmp) {
+        clearTimeout(timeout);
+        unsub();
+        resolve(bmp);
+      }
     });
   }
 

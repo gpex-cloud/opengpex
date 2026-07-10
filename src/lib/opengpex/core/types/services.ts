@@ -160,13 +160,23 @@ export interface WorkerProxy {
  */
 export interface PixelService {
   decode: {
-    htmlImage: (src: string) => Promise<HTMLImageElement>;
+    /**
+     * Decode `src` into the shared main-thread `ImageBitmap` cache
+     * and return it. Callers must NOT close the returned bitmap; it
+     * is owned by SourceBitmapCache and shared across every consumer
+     * (Canvas2dEngine, BrushOverlay, ClipTool wand, ColorGrading
+     * histogram, BgRemoval, …).
+     *
+     * If you need a Worker-transferable clone, use
+     * `sourceBitmapCache.acquireOwned(src)` instead.
+     */
+    bitmap: (src: string) => Promise<ImageBitmap>;
     dimensions: (src: string, assetId?: string) => Promise<Dimensions>;
     contentBounds: (src: string, assetId?: string) => Promise<LocalRect>;
   };
 
   process: {
-    thumbnail: (source: HTMLImageElement | string, maxSize?: number) => Promise<Blob>;
+    thumbnail: (src: string, maxSize?: number) => Promise<Blob>;
     resample: (src: string, options: { targetSize: { w: number; h: number } }) => Promise<Blob>;
   };
 

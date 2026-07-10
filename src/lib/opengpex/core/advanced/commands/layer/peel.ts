@@ -242,7 +242,7 @@ export const LayerPeelCommands = {
 
           // [4] Force pre-decoding
           try {
-            await pixels.decode.htmlImage(assetResult.url);
+            await pixels.decode.bitmap(assetResult.url);
           } catch (e) {
             console.warn('[Commit] Preload failed:', e);
           }

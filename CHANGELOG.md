@@ -4,6 +4,12 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.24
+
+- Unify every main-thread source-bitmap consumer (Canvas2dEngine, filter cache, brush/clip/wand tools, Color Grading histogram, BG-removal) on a single `SourceBitmapCache` that stores decoded `ImageBitmap`s once per URL — eliminates redundant `HTMLImageElement` decodes, halves peak memory during heavy edits, and cuts filter-cache miss latency by skipping the legacy image→bitmap conversion hop
+
+---
+
 ## v1.0.0-beta.23
 
 - Introduce the new **Color Grading** drawer that unifies Basic (Brightness / Contrast / Saturation / Hue / Blur), Curves, Levels, and Channel Mixer under a single entry, replacing the standalone Adjustment drawer and shrinking the sidebar from 7 to 6 icons

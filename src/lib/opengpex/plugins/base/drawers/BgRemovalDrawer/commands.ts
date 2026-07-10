@@ -21,7 +21,7 @@
 
 import { EditorContextValue, EditorCommand, asLocalPoint, asLocalPolygon, asLocalRect } from '@opengpex/editor/core/types';
 import { computePolygonBounds } from '@opengpex/editor/core/geometry/operators/polygon';
-import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
+import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
 import { SettingsPanelAPI } from '../../panels/SettingsPanel/protocols';
 import { bgRemovalClient } from './worker/client';
 import { SpeedEstimator } from './hooks';
@@ -120,18 +120,23 @@ export const BG_REMOVAL_COMMANDS = {
         return;
       }
 
-      // Get ImageData from the global image cache
+      // Get ImageData from the global source-bitmap cache (SBC).
+      // The bitmap is expected to be already resident because the layer
+      // is currently rendered on screen; if not, we surface the same
+      // "not loaded yet" HUD the legacy imageCache path used to show.
       let imageData: ImageData;
       try {
-        const cachedImage = imageCache.get(imageSource);
-        if (!cachedImage) {
+        const cachedBitmap = sourceBitmapCache.get(imageSource);
+        if (!cachedBitmap) {
+          // Kick a load so the bitmap is available on retry.
+          sourceBitmapCache.getOrFetch(imageSource);
           actions.setInteraction({ hud: { message: 'Image not loaded yet', type: 'error' } });
           return;
         }
         // Draw to OffscreenCanvas to get ImageData
-        const canvas = new OffscreenCanvas(cachedImage.width, cachedImage.height);
+        const canvas = new OffscreenCanvas(cachedBitmap.width, cachedBitmap.height);
         const ctx2d = canvas.getContext('2d')!;
-        ctx2d.drawImage(cachedImage, 0, 0);
+        ctx2d.drawImage(cachedBitmap, 0, 0);
         imageData = ctx2d.getImageData(0, 0, canvas.width, canvas.height);
       } catch (_err) {
         actions.setInteraction({ hud: { message: 'Failed to read image data', type: 'error' } });

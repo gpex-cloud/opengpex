@@ -25,7 +25,7 @@ import { LayerDrawerAPI, type MaskEditingSignal } from '../../drawers/LayerDrawe
 import { BRUSH_OVERLAY_SIGNAL_IS_STROKING, DEFAULT_BRUSH_SIZE, _CMD_BAKE_UID } from './protocols';
 import { StrokeSmoother, Point2D } from './smoothing';
 import { stampBrush, stampAlongPath } from './hardness';
-import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
+import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
 import { PixelUtils } from '@opengpex/editor/core/engine/PixelUtils';
 
 /** Shared signal key */
@@ -254,9 +254,9 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
             maskCtx.fillStyle = '#FFFFFF';
             maskCtx.fillRect(0, 0, maskW, maskH);
           } else if (activeMask.src) {
-            const img = imageCache.getOrFetch(activeMask.src);
-            if (img) {
-              maskCtx.drawImage(img, 0, 0, maskW, maskH);
+            const bmp = sourceBitmapCache.getOrFetch(activeMask.src);
+            if (bmp) {
+              maskCtx.drawImage(bmp, 0, 0, maskW, maskH);
             } else {
               loadImageBitmap(activeMask.src).then(bitmap => {
                 if (strokeBuffer && strokeBuffer.maskId === maskId && strokeBuffer.maskCtx) {
@@ -527,16 +527,21 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
             const blob = await finalCanvas.convertToBlob({ type: 'image/png' });
             const asset = await e.actions.adv.system.assets.register.execute(blob);
 
-            await new Promise<void>((resolve) => {
-              const img = new Image();
-              img.crossOrigin = 'anonymous';
-              img.onload = () => {
-                imageCache.set(asset.url, img);
-                resolve();
-              };
-              img.onerror = () => resolve();
-              img.src = asset.url;
-            });
+            // Pre-populate SBC from the blob we just produced — this
+            // eliminates the "flash the previous asset for one frame"
+            // artifact when the freshly baked layer first renders. The
+            // decode is essentially free because the blob is already in
+            // memory (no network round-trip).
+            //
+            // See docs/opengpex/20260710_rendering_and_export_pipeline_overview.md
+            // §4.5.3 for the pre-refactor `<img>+onload` version of this
+            // dance; the new single-line form is the SBC canonical bake path.
+            try {
+              const bmp = await createImageBitmap(blob);
+              sourceBitmapCache.set(asset.url, bmp);
+            } catch (e) {
+              console.warn('[BrushOverlay] SBC prewarm failed:', e);
+            }
 
             // Calculate cx/cy: convert from canvas-local crop rect center to world center offset
             // Canvas-local center of the crop region:
@@ -587,16 +592,15 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
             const blob = await maskCanvas.convertToBlob({ type: 'image/png' });
             const asset = await e.actions.adv.system.assets.register.execute(blob);
 
-            await new Promise<void>((resolve) => {
-              const img = new Image();
-              img.crossOrigin = 'anonymous';
-              img.onload = () => {
-                imageCache.set(asset.url, img);
-                resolve();
-              };
-              img.onerror = () => resolve();
-              img.src = asset.url;
-            });
+            // Pre-populate SBC from the blob we just produced. See the
+            // matching comment in the paint-bake branch above for the
+            // rationale.
+            try {
+              const bmp = await createImageBitmap(blob);
+              sourceBitmapCache.set(asset.url, bmp);
+            } catch (e) {
+              console.warn('[BrushOverlay] SBC prewarm (mask) failed:', e);
+            }
 
             // Use the maskId captured in onStart (from the first enabled bitmap mask)
             const existingMask = currentStroke.maskId

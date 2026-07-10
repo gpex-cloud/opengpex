@@ -25,7 +25,7 @@ import { FontService } from '@opengpex/editor/core/fonts';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { useOverlayRotationSync } from '@opengpex/editor/core/motion/hooks/animation';
-import { imageCache } from '@opengpex/editor/core/engine/cache/ImageCache';
+import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
 import { tileCache } from '@opengpex/editor/core/engine/cache/TileCache';
 import { asyncFilterCache } from '@opengpex/editor/core/engine/cache/AsyncFilterCache';
 // [Filter Pipeline §3.5 hard invariant] AsyncFilterCache is imported ONLY from
@@ -72,7 +72,13 @@ export default function CanvasStage() {
   // 1. Subscribe to cache changes; mark redraw needed once slices or full images load
   useEffect(() => {
     const unsubTiles = tileCache.subscribe(() => { needsRenderRef.current = true; });
-    const unsubImages = imageCache.subscribe(() => { needsRenderRef.current = true; });
+    // [SourceBitmapCache refactor 2026-07-10] Redraws are now triggered when a
+    // shared ImageBitmap lands (fetch → blob → createImageBitmap completes).
+    // The consumer set (Canvas2dEngine, BrushOverlay, ClipTool wand, …) is
+    // exactly the same as before; only the storage type changed from
+    // HTMLImageElement to ImageBitmap. See
+    // docs/opengpex/plans/20260710_source_bitmap_cache_refactor_plan.md.
+    const unsubImages = sourceBitmapCache.subscribe(() => { needsRenderRef.current = true; });
     // [Filter Pipeline §5.2 / Step 3] Redraw when a filtered bitmap lands.
     // Canvas2dEngine.drawLayerDirect schedules async APPLY_FILTER jobs on
     // cache miss and degrades to the raw source for the current frame.

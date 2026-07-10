@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { imageCache } from './cache/ImageCache';
+import { sourceBitmapCache } from './cache/SourceBitmapCache';
 import { tileCache } from './cache/TileCache';
 import {
   Layer, PixelService, GeometryService, AssetService, WorkerProxy, Shape, LocalShape, LocalPolygon, Frame, WorkerResult,
@@ -33,7 +33,6 @@ import { detectLane as detectLaneFn, type Lane } from './laneDetection';
 
 
 
-const pendingLoads = new Map<string, Promise<HTMLImageElement>>();
 
 /**
  * PixelService: Pixel facade service (structured refactored version)
@@ -221,36 +220,62 @@ export function createPixelService(
 
   const service: PixelService = {
     // 1. Resource loading and decoding namespace
+    //    (Cache lives in SourceBitmapCache — see
+    //     docs/opengpex/plans/20260710_source_bitmap_cache_refactor_plan.md)
     decode: {
-      async htmlImage(src: string): Promise<HTMLImageElement> {
-        const cached = imageCache.get(src);
+      /**
+       * Decode `src` to a shared `ImageBitmap` (cached, per-URL, one
+       * decode ever). Returns the cached bitmap on repeat calls.
+       *
+       * Do NOT close the returned bitmap — it is owned by the cache
+       * and shared across the entire main thread. Use
+       * `sourceBitmapCache.acquireOwned(src)` if you need a
+       * transferable clone.
+       */
+      async bitmap(src: string): Promise<ImageBitmap> {
+        const cached = sourceBitmapCache.get(src);
         if (cached) return cached;
 
-        const pending = pendingLoads.get(src);
-        if (pending) return pending;
-
-        const promise = new Promise<HTMLImageElement>((resolve, reject) => {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.onload = () => {
-            imageCache.set(src, img);
-            pendingLoads.delete(src);
-            resolve(img);
-          };
-          img.onerror = reject;
-          img.src = src;
+        // Kick the async loader and poll until the cache is populated.
+        // getOrFetch is the same primitive `CanvasStage` and every
+        // other consumer relies on; matching its wait strategy keeps
+        // the "cache is the source of truth" invariant intact.
+        sourceBitmapCache.getOrFetch(src);
+        return await new Promise<ImageBitmap>((resolve, reject) => {
+          let settled = false;
+          const timeout = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            unsubscribe();
+            reject(new Error(`[PixelService.decode.bitmap] timed out loading ${src}`));
+          }, 30_000);
+          const unsubscribe = sourceBitmapCache.subscribe(() => {
+            const now = sourceBitmapCache.get(src);
+            if (!now || settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            unsubscribe();
+            resolve(now);
+          });
+          // Cover the "loaded between get() and subscribe()" race —
+          // getOrFetch above may have completed synchronously if the
+          // fetch already resolved (e.g. warm HTTP cache).
+          const now = sourceBitmapCache.get(src);
+          if (now && !settled) {
+            settled = true;
+            clearTimeout(timeout);
+            unsubscribe();
+            resolve(now);
+          }
         });
-
-        pendingLoads.set(src, promise);
-        return promise;
       },
       async dimensions(src: string, assetId?: string) {
         if (assetId) {
           const meta = assets.get(assetId)?.tileMeta;
           if (meta) return { w: meta.width, h: meta.height };
         }
-        const img = await this.htmlImage(src);
-        return { w: img.naturalWidth, h: img.naturalHeight };
+        const bmp = await this.bitmap(src);
+        return { w: bmp.width, h: bmp.height };
       },
       async contentBounds(src: string, assetId?: string) {
         if (assetId) {
@@ -258,21 +283,30 @@ export function createPixelService(
           if (meta?.contentBounds) return geometry.asLocalRect(meta.contentBounds);
         }
 
-        const img = await this.htmlImage(src);
-        const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext('2d', { alpha: true });
-        if (!ctx) return geometry.asLocalRect({ x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight });
+        const bmp = await this.bitmap(src);
+        // Draw onto an OffscreenCanvas to sample pixel data — mirrors
+        // the exact flow used by ClipTool wand and ColorGrading
+        // histogram, so failure modes stay consistent.
+        const canvas = typeof OffscreenCanvas !== 'undefined'
+          ? new OffscreenCanvas(bmp.width, bmp.height)
+          : (() => {
+              const c = document.createElement('canvas');
+              c.width = bmp.width;
+              c.height = bmp.height;
+              return c;
+            })();
+        const ctx = (canvas as OffscreenCanvas).getContext('2d', { alpha: true }) as
+          | OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null;
+        if (!ctx) return geometry.asLocalRect({ x: 0, y: 0, w: bmp.width, h: bmp.height });
 
-        ctx.drawImage(img, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(bmp, 0, 0);
+        const imageData = ctx.getImageData(0, 0, bmp.width, bmp.height);
         const data = imageData.data;
 
-        let minX = canvas.width, minY = canvas.height, maxX = -1, maxY = -1;
-        for (let y = 0; y < canvas.height; y++) {
-          for (let x = 0; x < canvas.width; x++) {
-            if (data[(y * canvas.width + x) * 4 + 3] > 0) {
+        let minX = bmp.width, minY = bmp.height, maxX = -1, maxY = -1;
+        for (let y = 0; y < bmp.height; y++) {
+          for (let x = 0; x < bmp.width; x++) {
+            if (data[(y * bmp.width + x) * 4 + 3] > 0) {
               if (x < minX) minX = x;
               if (x > maxX) maxX = x;
               if (y < minY) minY = y;
@@ -282,7 +316,7 @@ export function createPixelService(
         }
 
         const rect = maxX === -1
-          ? { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight }
+          ? { x: 0, y: 0, w: bmp.width, h: bmp.height }
           : { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
 
         return geometry.asLocalRect(rect);
@@ -291,17 +325,20 @@ export function createPixelService(
 
     // 2. Image processing namespace
     process: {
-      async thumbnail(source: HTMLImageElement | string, maxSize = 256) {
-        const img = typeof source === 'string' ? await service.decode.htmlImage(source) : source;
-        const dim = { w: img.naturalWidth, h: img.naturalHeight };
-
-        const ratio = dim.w / dim.h;
+      /**
+       * Produces a small WebP thumbnail blob for `src`. Delegates the
+       * pixel resample to the engine worker (async, off the main
+       * thread). We only need the source dimensions here, which the
+       * shared SBC cache gives us for free.
+       */
+      async thumbnail(src: string, maxSize = 256) {
+        const bmp = await service.decode.bitmap(src);
+        const ratio = bmp.width / bmp.height;
         const targetDim = ratio > 1
           ? { w: Math.round(maxSize), h: Math.round(maxSize / ratio) }
           : { w: Math.round(maxSize * ratio), h: Math.round(maxSize) };
 
-        // Delegate to Worker for offscreen thumbnail rendering
-        const result = await service.worker.resampleImage(img.src, targetDim, {
+        const result = await service.worker.resampleImage(src, targetDim, {
           format: 'image/webp',
           quality: 0.9
         });
@@ -406,7 +443,7 @@ export function createPixelService(
         await Promise.all(allWrappedItems.map(async item => {
           const layer = ('layer' in item) ? item.layer : (item as Layer);
           const resolvedSrc = assets.resolve(layer.assetId, layer.src);
-          if (resolvedSrc) await service.decode.htmlImage(resolvedSrc);
+          if (resolvedSrc) await service.decode.bitmap(resolvedSrc);
           if (layer.assetId) {
             const asset = assets.get(layer.assetId);
             if (asset?.blob) {
@@ -460,7 +497,7 @@ export function createPixelService(
 
         await Promise.all(layers.map(async layer => {
           const resolvedSrc = assets.resolve(layer.assetId, layer.src);
-          return resolvedSrc ? await service.decode.htmlImage(resolvedSrc) : null;
+          return resolvedSrc ? await service.decode.bitmap(resolvedSrc) : null;
         }));
 
         // Ensure all bitmapMask assets are decoded into Worker cache
@@ -605,10 +642,10 @@ export function createPixelService(
       probeEngines: PixelUtils.probeEngines,
     },
 
-    // 5. Cache management namespace (keep as is)
+    // 5. Cache management namespace
     cache: {
       clear: () => {
-        imageCache.clear();
+        sourceBitmapCache.clear();
         tileCache.clear();
       }
     }

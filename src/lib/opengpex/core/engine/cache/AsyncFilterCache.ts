@@ -163,16 +163,18 @@ class AsyncFilterCache {
    * enqueued (or was already pending), `false` when it was a duplicate
    * request for an already-cached entry.
    *
-   * Painter should call this on cache-miss with the layer's source
-   * `ImageBitmap`. The cache internally clones the bitmap via
-   * `createImageBitmap` before transferring it to the worker, so the
-   * caller's local `source` reference stays valid for the fallback
-   * (legacy) render path.
+   * `source` MUST be an `ImageBitmap` — after the SourceBitmapCache
+   * refactor (docs/opengpex/plans/20260710_source_bitmap_cache_refactor_plan.md)
+   * every main-thread pixel source is an ImageBitmap. We clone it
+   * internally via `createImageBitmap` (browser-native, near-zero cost
+   * — it's really a GPU-side refcount, NOT a re-decode) before
+   * transferring the clone to the worker, so `source` stays valid for
+   * the caller's fallback render path.
    */
 
   public schedule(
     layer: Pick<Layer, 'assetId' | 'adjustments' | 'curves' | 'levels' | 'channelMix'>,
-    source: CanvasImageSource,
+    source: ImageBitmap,
   ): boolean {
     const filters = normalizeFilterDescriptors(layer);
     if (filters.length === 0) return false;
@@ -244,16 +246,15 @@ class AsyncFilterCache {
   // Internals
   // ────────────────────────────────────────────────────────────
 
-  private dispatch(key: string, source: CanvasImageSource, filters: FilterDescriptor[]): void {
-    // Clone the source before transferring: the transfer would neuter
-    // the caller's bitmap and its legacy render path still needs it
-    // for the "loading — degraded overlay" phase (spec §5.1).
-    //
-    // Accepts CanvasImageSource (HTMLImageElement | ImageBitmap | ...) because
-    // `Canvas2dEngine` primarily hands us `HTMLImageElement` from `imageCache`
-    // for the single-image render path. `createImageBitmap` accepts either and
-    // yields an owned, transferable `ImageBitmap` — so this call site handles
-    // the source-type ambiguity in one spot.
+  private dispatch(key: string, source: ImageBitmap, filters: FilterDescriptor[]): void {
+    // Clone the source before transferring to the worker: the transfer
+    // would neuter the caller's bitmap and painter's fallback render
+    // path still needs it for the "loading — degraded overlay" phase
+    // (filter_pipeline_spec §5.1). `createImageBitmap(bmp)` on an
+    // existing ImageBitmap is a GPU-side refcount (near-zero cost),
+    // NOT a full re-decode. This is the same primitive used by
+    // `sourceBitmapCache.acquireOwned()` — see
+    // docs/opengpex/plans/20260710_source_bitmap_cache_refactor_plan.md §4.
     //
     // NOTE (Step 3 retrospective): the previous `workerBridge.applyFilter`
     // convenience wrapper was removed to keep WorkerBridge minimal. We now
