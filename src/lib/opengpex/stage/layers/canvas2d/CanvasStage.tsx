@@ -84,6 +84,8 @@ export default function CanvasStage() {
     // cache miss and degrades to the raw source for the current frame.
     // Subscribing here ensures the next frame picks up the filtered result.
     const unsubFilters = asyncFilterCache.subscribe(() => { needsRenderRef.current = true; });
+    // [Filter Fast-Track §2.3] TileFilterCache removed — tiles now show raw
+    // during interaction and AsyncFilterCache handles post-interaction filter.
 
     return () => {
       unsubTiles();

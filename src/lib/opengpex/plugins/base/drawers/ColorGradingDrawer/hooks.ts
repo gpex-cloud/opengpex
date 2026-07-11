@@ -29,6 +29,7 @@ import {
 } from '@opengpex/editor/core/context';
 import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
 import { asyncFilterCache } from '@opengpex/editor/core/engine/cache/AsyncFilterCache';
+// [Filter Fast-Track §2.3] TileFilterCache removed — see 20260711_filter_fast_track_extension.md
 import type { ColorGradingDrawerCommandsMap, ColorGradingDrawerSignalsMap } from './commands.d';
 import type { ActiveGradingTool, GradingTool, ColorGradingDrawerConfig } from './protocols';
 import { DEFAULT_GRADING_TOOL } from './protocols';
@@ -148,6 +149,7 @@ export function useFilterGesture(
     // recipes. See `AsyncFilterCache.setDragging` for the schedule-side
     // suppression logic.
     asyncFilterCache.setDragging(true);
+    // [Filter Fast-Track §2.3] TileFilterCache removed.
     beginCommand?.execute?.();
   }, [beginCommand]);
 
@@ -159,6 +161,7 @@ export function useFilterGesture(
     // subscribers so the next paint pass schedules exactly one Worker
     // job for the final settled recipe (§5.3 commit).
     asyncFilterCache.setDragging(false);
+    // [Filter Fast-Track §2.3] TileFilterCache removed.
   }, []);
 
   const isDragging = useCallback(() => draggingRef.current, []);
@@ -172,6 +175,7 @@ export function useFilterGesture(
       if (draggingRef.current) {
         draggingRef.current = false;
         asyncFilterCache.setDragging(false);
+        // [Filter Fast-Track §2.3] TileFilterCache removed.
       }
     };
   }, []);

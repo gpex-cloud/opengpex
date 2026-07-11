@@ -116,7 +116,7 @@ function lutFormatFor(bitDepth: 8 | 16 | 32): LUTFormat {
  * runtime folds curves + levels + brightness/contrast into these three LUTs
  * so the inner pixel loop only performs a handful of array lookups.
  */
-interface PerChannelLUTs {
+export interface PerChannelLUTs {
   rgb: LUTOutput | null;
   red: LUTOutput;
   green: LUTOutput;
@@ -157,7 +157,7 @@ function identityLUT(entries: LUTEntries, format: LUTFormat): LUTOutput {
  * or
  *   r = Math.round(lut.red[srcR] / lutMax * 255)   (mixed precision).
  */
-function buildFusedLUTs(
+export function buildFusedLUTs(
   filters: FilterDescriptor[],
   entries: LUTEntries,
   format: LUTFormat,
@@ -256,7 +256,7 @@ function buildFusedLUTs(
 // Pixel pass: RGBA Uint8 LUT (8-bit path)
 // ────────────────────────────────────────────────────────────
 
-function applyLUTsRGBA8(
+export function applyLUTsRGBA8(
   data: Uint8ClampedArray,
   luts: PerChannelLUTs,
 ): void {
@@ -374,7 +374,7 @@ function multiplyMatrix3(a: number[], b: number[]): number[] {
  * into ONE 3×3 matrix and ONE constant offset for the pixel loop. Returns
  * `null` if all matrix ops collapse to identity (no work to do).
  */
-function buildFusedColorMatrix(
+export function buildFusedColorMatrix(
   filters: FilterDescriptor[],
 ): { matrix: number[]; constant: [number, number, number] } | null {
   let m: number[] = [1, 0, 0, 0, 1, 0, 0, 0, 1];
@@ -417,7 +417,7 @@ function buildFusedColorMatrix(
   return { matrix: m, constant: offset };
 }
 
-function applyMatrixRGBA8(
+export function applyMatrixRGBA8(
   data: Uint8ClampedArray,
   matrix: number[],
   constant: [number, number, number],

@@ -19,12 +19,13 @@
 
 import { Layer, AssetService, Shape, LocalShape, TileData, asLocalRect } from '@opengpex/editor/core/types';
 import { FontService } from '@opengpex/editor/core/fonts';
-import { MAX_SAFE_EXPORT_PIXELS } from '@opengpex/editor/core/helpers/config';
+import { MAX_SAFE_EXPORT_PIXELS, MAX_REALTIME_FILTER_PIXELS } from '@opengpex/editor/core/helpers/config';
 import { sourceBitmapCache } from '../../cache/SourceBitmapCache';
 import { tileCache } from '../../cache/TileCache';
 import { asyncFilterCache } from '../../cache/AsyncFilterCache';
-import { hasAdvancedFilters } from '../../filters/normalizeDescriptors';
+import { hasAdvancedFilters, normalizeFilterDescriptors } from '../../filters/normalizeDescriptors';
 import { drawLayerInstance } from './painter';
+import { buildFusedLUTs, applyLUTsRGBA8, buildFusedColorMatrix, applyMatrixRGBA8 } from './Canvas2dFilter';
 import { IRenderer, RenderCommand, DrawLayerOptions } from '../../protocol/IRenderer';
 import { shrinkInvertedMask } from '@opengpex/editor/core/helpers/sub-pixel';
 import { shapeToPath2D } from '@opengpex/editor/core/helpers/path2d';
@@ -42,6 +43,13 @@ export class Canvas2dEngine implements IRenderer {
   private tilePool: TileData[] = []; // [Optimization] Zero-allocation object pool for tile jobs
   private offscreenPool: OffscreenCanvas[] = []; // [Optimization] OffscreenCanvas pool for bitmap mask compositing
   private artboardClipActive = false; // Whether artboard boundary clip is currently applied
+
+  // [Filter Fast-Track §Q1/Q3 Fix] Canvas reuse & bridge cache
+  // Reusable temp canvas for Track A LUT processing (avoids per-frame allocation)
+  private filterTempCanvas: OffscreenCanvas | null = null;
+  // Bridge cache: last Track A result per assetId, used to prevent flash on mouseUp
+  // (keeps the last synchronous LUT frame visible until worker returns full-res result)
+  private lastInteractionResult: Map<string, OffscreenCanvas> = new Map();
 
   // [Font Loading] Dynamic font service integration
   private fontService?: FontService;
@@ -493,6 +501,7 @@ export class Canvas2dEngine implements IRenderer {
     layer: Layer,
     img: T,
     isExporting: boolean | undefined,
+    isInteracting: boolean | undefined,
   ): { img: T; layer: Layer } {
     // Cheap early-outs first — hot path stays branch-free for the 99% case
     // where a layer has no advanced filters declared.
@@ -505,8 +514,94 @@ export class Canvas2dEngine implements IRenderer {
     // its best-effort thing.
     if (!(img instanceof ImageBitmap)) return { img, layer };
 
+    const filters = normalizeFilterDescriptors(layer);
+    if (filters.length === 0) return { img, layer };
+
+    // --- Interaction Fast-Track Path (main-thread synchronous LUT/matrix preview) ---
+    if (isInteracting) {
+      const origW = img.width;
+      const origH = img.height;
+      const pixels = origW * origH;
+      const needsDownsample = pixels > MAX_REALTIME_FILTER_PIXELS;
+
+      let targetW = origW;
+      let targetH = origH;
+      if (needsDownsample) {
+        const scale = Math.sqrt(MAX_REALTIME_FILTER_PIXELS / pixels);
+        targetW = Math.round(origW * scale);
+        targetH = Math.round(origH * scale);
+      }
+
+      // [Canvas Reuse] Reuse a persistent temp canvas to avoid per-frame allocation.
+      // Resize only when current canvas is too small.
+      if (!this.filterTempCanvas || this.filterTempCanvas.width < targetW || this.filterTempCanvas.height < targetH) {
+        this.filterTempCanvas = new OffscreenCanvas(targetW, targetH);
+      }
+      const tempCanvas = this.filterTempCanvas;
+
+      const tempCtx = tempCanvas.getContext('2d') as OffscreenCanvasRenderingContext2D | null;
+      if (tempCtx) {
+        tempCtx.clearRect(0, 0, targetW, targetH);
+        tempCtx.drawImage(img, 0, 0, targetW, targetH);
+        try {
+          const imgData = tempCtx.getImageData(0, 0, targetW, targetH);
+          
+          // Apply collapsed LUT filters (curves, levels, brightness, contrast)
+          const luts = buildFusedLUTs(filters, 256, 'u8');
+          if (luts) {
+            applyLUTsRGBA8(imgData.data, luts);
+          }
+
+          // Apply color matrix filters (saturation, hueRotate, channelMix)
+          const mtx = buildFusedColorMatrix(filters);
+          if (mtx) {
+            applyMatrixRGBA8(imgData.data, mtx.matrix, mtx.constant);
+          }
+
+          tempCtx.putImageData(imgData, 0, 0);
+
+          // [Q1 Fix] When downsampled, upscale the LUT result back to original
+          // dimensions so that downstream painter's source-rect math (which
+          // assumes full-res coordinates) works correctly. The browser-native
+          // bilinear stretch is ~1ms (GPU-accelerated drawImage).
+          let resultCanvas: OffscreenCanvas;
+          if (needsDownsample) {
+            resultCanvas = new OffscreenCanvas(origW, origH);
+            const resultCtx = resultCanvas.getContext('2d')!;
+            resultCtx.drawImage(tempCanvas, 0, 0, targetW, targetH, 0, 0, origW, origH);
+          } else {
+            // No downsample: clone into a dedicated result canvas (we can't
+            // return the shared filterTempCanvas directly as it may be reused
+            // next frame before painter finishes with it).
+            resultCanvas = new OffscreenCanvas(origW, origH);
+            const resultCtx = resultCanvas.getContext('2d')!;
+            resultCtx.drawImage(tempCanvas, 0, 0, targetW, targetH, 0, 0, origW, origH);
+          }
+
+          // [Q3 Fix] Cache this result for bridge use after mouseUp.
+          // When isInteracting flips to false, if worker hasn't returned yet
+          // we serve this cached frame instead of flashing to raw/stale.
+          if (layer.assetId) {
+            this.lastInteractionResult.set(layer.assetId, resultCanvas);
+          }
+
+          return {
+            img: resultCanvas as unknown as T,
+            layer: { ...layer, adjustments: undefined },
+          };
+        } catch (err) {
+          console.warn('[Canvas2dEngine] Synchronous filter apply failed:', err);
+        }
+      }
+    }
+
+    // --- Standard Path (Non-interacting or fallback: AsyncFilterCache via Worker) ---
     const filtered = asyncFilterCache.get(layer);
     if (filtered) {
+      // Worker returned full-res result — clear the bridge cache (no longer needed)
+      if (layer.assetId) {
+        this.lastInteractionResult.delete(layer.assetId);
+      }
       return {
         img: filtered as unknown as T,
         layer: { ...layer, adjustments: undefined },
@@ -518,6 +613,20 @@ export class Canvas2dEngine implements IRenderer {
     // equivalent semantics, so this frame's `img` stays valid for the
     // fallback path below.
     asyncFilterCache.schedule(layer, img);
+
+    // [Q3 Fix] Bridge: prefer the last Track A synchronous result over
+    // stale/raw. This eliminates the "flash to unfiltered" on mouseUp —
+    // the user sees "last LUT frame → worker full-res" with no gap.
+    if (layer.assetId) {
+      const bridge = this.lastInteractionResult.get(layer.assetId);
+      if (bridge) {
+        return {
+          img: bridge as unknown as T,
+          layer: { ...layer, adjustments: undefined },
+        };
+      }
+    }
+
     const stale = asyncFilterCache.getStale(layer);
     if (stale) {
       return {
@@ -580,7 +689,9 @@ export class Canvas2dEngine implements IRenderer {
     // path only when advanced filters are declared keeps the tile fast-path
     // hot for the 99% no-filter case.
     const hasAdvanced = !isExporting && hasAdvancedFilters(layer);
+    const isInteracting = !!(options.isInteracting || asyncFilterCache.isDragging());
     const shouldUseTiles = tileMeta?.isTiled && (!isExporting || isTooLarge) && !imageOverride && !hasBitmap && !hasAdvanced;
+    
 
     if (shouldUseTiles) {
       // --- 4A. Tile Rendering Path (Tiling) ---
@@ -611,7 +722,7 @@ export class Canvas2dEngine implements IRenderer {
         const rawImg = sourceBitmapCache.getOrFetch(fallbackSrc);
         if (rawImg) {
           // [Filter Pipeline §5.1] Dispatch to AsyncFilterCache when advanced filters declared.
-          const { img: effImg, layer: effLayer } = this.resolveFilteredSource(layer, rawImg, isExporting);
+          const { img: effImg, layer: effLayer } = this.resolveFilteredSource(layer, rawImg, isExporting, isInteracting);
           drawLayerInstance(ctx, effLayer, effImg, {
             matrix, opacity, clipSequence: preparedClips, width: options.width, height: options.height, drawRect, imageSmoothingQuality,
             dprScale
@@ -633,7 +744,7 @@ export class Canvas2dEngine implements IRenderer {
         // - Cache HIT  → effImg = filtered ImageBitmap; effLayer has adjustments cleared.
         // - Cache MISS → effImg = rawImg; worker job scheduled; next frame will hit.
         // - Non-ImageBitmap sources (HTMLImageElement etc.) fall through untouched.
-        const { img: effImg, layer: effLayer } = this.resolveFilteredSource(layer, rawImg, isExporting);
+        const { img: effImg, layer: effLayer } = this.resolveFilteredSource(layer, rawImg, isExporting, isInteracting);
         drawLayerInstance(ctx, effLayer, effImg, {
           matrix, opacity, clipSequence: preparedClips, width: options.width, height: options.height, drawRect, imageSmoothingQuality,
           dprScale

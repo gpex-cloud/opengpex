@@ -31,6 +31,14 @@ export interface DrawLayerOptions {
   imageSmoothingQuality?: 'low' | 'high';
   isExporting?: boolean;
   imageOverride?: CanvasImageSource;
+  /**
+   * [Filter Fast-Track §2.1] True while user is dragging a slider/control.
+   * During interaction, the engine bypasses AsyncFilterCache's Worker RPC
+   * for small images (pixels ≤ MAX_REALTIME_FILTER_PIXELS) and shows the
+   * unfiltered source for large images to maintain 60fps responsiveness.
+   * @see 20260711_filter_fast_track_extension.md
+   */
+  isInteracting?: boolean;
 }
 
 export interface RenderLayerCommand {

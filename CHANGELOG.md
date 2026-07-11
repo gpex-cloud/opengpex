@@ -9,6 +9,11 @@ All notable changes to OpenGPEX are documented in this file.
 - Unify every main-thread source-bitmap consumer (Canvas2dEngine, filter cache, brush/clip/wand tools, Color Grading histogram, BG-removal) on a single `SourceBitmapCache` that stores decoded `ImageBitmap`s once per URL — eliminates redundant `HTMLImageElement` decodes, halves peak memory during heavy edits, and cuts filter-cache miss latency by skipping the legacy image→bitmap conversion hop
 - Bound Color-Grading memory to at most 12 filtered bitmaps in the async cache (down from 32) with prompt `ImageBitmap.close()` on eviction, avoiding worst-case ~2 GB retention on multi-layer 4K workflows
 - Extract the shared numeric-input widget used by the Levels and Channel Mixer panels into a single `NumberField` component (min/max/step/precision/onCommit) so both panels share a consistent commit-based Undo checkpoint model
+- Implement per-tile advanced filter caching (TileFilterCache) for tiled layers to solve performance degradation and visual flashing when adjusting Curves, Levels, or Channel Mixer on large images (8K/16K)
+- Fix filter Fast-Track interaction preview: restore `!hasAdvanced` guard in `shouldUseTiles` so advanced-filter layers route through `resolveFilteredSource`; implement main-thread synchronous LUT/matrix preview during slider drag for real-time 60fps feedback
+- Fix downsampled preview not filling layer bounds (Q1): upscale the LUT-processed canvas back to original dimensions before returning to painter, so source-rect coordinate math stays correct for `visibleShape`/`drawRect` paths
+- Fix flash-to-raw on mouse release (Q3): cache the last synchronous Track A result as a bridge frame until the async Worker delivers the full-resolution filtered bitmap, eliminating the visible "unfiltered gap" between interaction end and Worker response
+- Optimize Track A canvas allocation: reuse a persistent `filterTempCanvas` across frames instead of allocating a new `OffscreenCanvas` per tick, reducing GC pressure during high-frequency slider drags
 
 ---
 

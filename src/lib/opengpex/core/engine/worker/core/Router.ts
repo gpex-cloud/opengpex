@@ -26,7 +26,7 @@ import { PixelUtils } from '../../PixelUtils';
 import * as explorer from '../handlers/explorer';
 import * as transformer from '../handlers/transformer';
 import * as merger from '../handlers/merger';
-import { applyFilter as applyFilterHandler } from '../handlers/filter';
+import { applyFilter as applyFilterHandler, applyFilterTile as applyFilterTileHandler } from '../handlers/filter';
 
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- Worker message router: payload/result vary per message type */
@@ -83,6 +83,17 @@ export async function handleMessage(type: string, payload: any): Promise<{ resul
       result = filterOut;
       // Return the resulting bitmap zero-copy back to the main thread.
       transfer.push(filterOut.bitmap);
+      break;
+    }
+
+    case 'APPLY_FILTER_TILE': {
+      const filterOut = await applyFilterTileHandler({
+        jobs: payload.jobs,
+      });
+      result = filterOut;
+      for (const item of filterOut.results) {
+        transfer.push(item.bitmap);
+      }
       break;
     }
 

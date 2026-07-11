@@ -169,6 +169,10 @@ export class StageComposer {
             clipSequence: clipSequence || [],
             imageOverride: options.getImageOverride?.(latestLayer.id),
             bitmapMaskOverride: options.getBitmapMaskOverride?.(latestLayer.id),
+            // [Filter Fast-Track §2.1] Pass interaction state to engine for
+            // filter dispatch decisions (small images → main-thread LUT,
+            // large images → show unfiltered source during drag).
+            isInteracting,
           }
         });
       } catch (err) {

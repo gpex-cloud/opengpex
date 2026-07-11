@@ -98,3 +98,42 @@ export async function applyFilter(payload: ApplyFilterPayload): Promise<ApplyFil
   }
   return { bitmap: result, key };
 }
+
+export interface ApplyFilterTilePayload {
+  jobs: Array<{
+    key: string;
+    bitmap: ImageBitmap;
+    filters: FilterDescriptor[];
+  }>;
+}
+
+export interface ApplyFilterTileResult {
+  results: Array<{
+    key: string;
+    bitmap: ImageBitmap;
+  }>;
+}
+
+export async function applyFilterTile(payload: ApplyFilterTilePayload): Promise<ApplyFilterTileResult> {
+  const { jobs } = payload;
+  const runtime = await getFilter();
+
+  const results = await Promise.all(
+    jobs.map(async (job) => {
+      if (!job.filters || job.filters.length === 0) {
+        const passthrough = await createImageBitmap(job.bitmap);
+        return { key: job.key, bitmap: passthrough };
+      }
+
+      const result = await runtime.apply(job.bitmap, job.filters);
+      if (!(result instanceof ImageBitmap)) {
+        throw new Error(
+          `[worker/handlers/filter] expected ImageBitmap result, got ${typeof result}`,
+        );
+      }
+      return { key: job.key, bitmap: result };
+    }),
+  );
+
+  return { results };
+}

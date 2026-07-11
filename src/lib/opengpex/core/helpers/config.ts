@@ -43,6 +43,18 @@ export const HOST_LAYER_ORDER = 10;
 export const MAX_SAFE_EXPORT_PIXELS = 144_000_000;
 
 /**
+ * Realtime filter threshold: 1M pixels (approx. 1000×1000).
+ * 
+ * During interaction (slider drag), images below this threshold use main-thread
+ * LUT rendering for instant feedback. Larger images show original source during
+ * drag and apply full-res filter on mouseUp via Worker.
+ * 
+ * Rationale: Main-thread LUT ≈ 10ms/megapixel; 60fps frame budget = 16ms.
+ * @see 20260711_filter_fast_track_extension.md §2.2
+ */
+export const MAX_REALTIME_FILTER_PIXELS = 1_000_000;
+
+/**
  * Layer auxiliary role configuration (Composite Entity Architecture)
  * Uses dictionary to drive behavior, avoiding hardcoding
  */

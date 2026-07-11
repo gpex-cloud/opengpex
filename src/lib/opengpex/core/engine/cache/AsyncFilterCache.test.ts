@@ -94,7 +94,6 @@ vi.mock('@opengpex/editor/core/engine/worker/WorkerBridge', () => ({
 }));
 
 // After all mocks/polyfills, we can import the module under test.
-// eslint-disable-next-line import/first
 import { asyncFilterCache } from './AsyncFilterCache';
 
 /**
