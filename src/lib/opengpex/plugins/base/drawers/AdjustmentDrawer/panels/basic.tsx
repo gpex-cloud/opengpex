@@ -47,6 +47,7 @@
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { AdjustmentState } from "@opengpex/editor/core/types/models";
+import FancySlider from "@opengpex/editor/widgets/FancySlider";
 import type { AdjustmentDrawerCommandsMap } from "../commands.d";
 import { DEFAULT_ADJUSTMENTS_STATE } from "../protocols";
 import { useAdjustmentDrawer, useFilterGesture } from "../hooks";
@@ -230,35 +231,17 @@ function AdjustmentSliderRow({
           {spec.unit}
         </span>
       </div>
-      <input
-        type="range"
+      <FancySlider
+        value={value}
         min={spec.min}
         max={spec.max}
         step={spec.step}
-        value={value}
-        aria-label={spec.label}
-        onPointerDown={onDragStart}
-        onPointerUp={onDragEnd}
-        onPointerCancel={onDragEnd}
-        // Fallback for browsers where mousedown/mouseup don't lead pointerdown
-        // (rare, but the original AdjustmentDrawer relied on onMouseDown so we
-        // keep that + the pointer events for safety).
-        onMouseDown={onDragStart}
-        onMouseUp={onDragEnd}
-        onChange={(e) => {
-          const raw = Number.parseFloat(e.target.value);
-          if (Number.isFinite(raw)) onDragChange(raw);
-        }}
-        // Passing the gradient via CSS var lets ONE global stylesheet
-        // (see <style jsx global> at the bottom of BasicPanel) style all
-        // five rows without per-row style tags. `accentColor` is still
-        // set so the Firefox `range-thumb-fallback` (very old versions)
-        // has a sensible tint.
-        style={{
-          ["--track-bg" as string]: trackBg,
-          accentColor: accentForValue(spec.key, value),
-        }}
-        className="opengpex-basic-slider w-full appearance-none cursor-ew-resize bg-transparent"
+        ariaLabel={spec.label}
+        trackGradient={trackBg}
+        accentColor={accentForValue(spec.key, value)}
+        onDragStart={onDragStart}
+        onChange={onDragChange}
+        onDragEnd={onDragEnd}
       />
     </div>
   );
@@ -362,112 +345,6 @@ export function BasicPanel() {
         ))}
       </div>
 
-      {/*
-        [Photoshop-style range styling]
-        We hide the native track/thumb and repaint them ourselves so each
-        slider can carry a semantic gradient background (see SliderSpec
-        `trackGradient`). Layout on Chromium/WebKit vs. Firefox is handled
-        by the vendor-prefixed pseudo-elements — CSS has no way to unify
-        them, so this block is intentionally duplicated across `-webkit-*`
-        and `-moz-*` groups. Both branches keep track height, thumb size,
-        and thumb offset in sync via the `--thumb-size` custom property so
-        we only tweak numbers in one place.
-
-        `global` scope is required because native pseudo-elements
-        (`::-webkit-slider-thumb`, `::-moz-range-thumb`) cannot be
-        targeted by styled-jsx's scoped selectors.
-
-        The thumb is drawn as a downward-pointing triangle using the
-        classic CSS "0-size box + colored borders" trick, matching the
-        Photoshop Hue/Saturation dialog chevron in the reference image.
-      */}
-      <style jsx global>{`
-        /*
-          Thumb geometry: 12px x 10px box, painted white, clipped to an
-          upward-pointing chevron via clip-path polygon(50% 0%, 100% 100%,
-          0% 100%). Tip at top-center, base along the bottom edge.
-
-          Why clip-path (not the classic border-triangle hack):
-            1. Works uniformly in ::-webkit-slider-thumb AND ::-moz-range-thumb.
-            2. The thumb keeps a real width/height, so WebKit's built-in
-               "center thumb on track" math does what we want without a
-               fudge-factor margin.
-            3. background-color drives the fill, so :focus/:hover recoloring
-               is a one-line change.
-        */
-
-        .opengpex-basic-slider {
-          --thumb-w: 12px;
-          --thumb-h: 10px;
-          --track-height: 8px;
-          /* Reserve enough height for track + thumb below track. WebKit
-             centers thumb on track, so half of the thumb hangs below —
-             the row must be tall enough to contain that. */
-          height: calc(var(--track-height) + var(--thumb-h) + 2px);
-          padding: 0;
-          margin: 0;
-          background: transparent;
-          outline: none;
-        }
-
-        /* ── WebKit / Blink ─────────────────────────────────── */
-        .opengpex-basic-slider::-webkit-slider-runnable-track {
-          height: var(--track-height);
-          border-radius: 2px;
-          background: var(--track-bg);
-          border: 1px solid var(--border-subtle);
-          box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
-        }
-        .opengpex-basic-slider::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          appearance: none;
-          width: var(--thumb-w);
-          height: var(--thumb-h);
-          /* Shift thumb DOWN so its top tip sits just below the track's
-             bottom edge. WebKit centers thumb at track midline; we want
-             the tip (top of thumb box) at (track_y + track_h + 1px), so:
-                 margin-top = (track_h + 1) - (track_h/2 - thumb_h/2)
-                            = track_h/2 + thumb_h/2 + 1 */
-          margin-top: calc(var(--track-height) / 2 + 1px);
-          background: var(--text-main);
-          border: none;
-          /* Chevron pointing UP: apex at (50% 0), base along the bottom. */
-          clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
-          cursor: ew-resize;
-          filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.55));
-        }
-        .opengpex-basic-slider:hover::-webkit-slider-thumb,
-        .opengpex-basic-slider:focus-visible::-webkit-slider-thumb {
-          background: #10b981; /* emerald-500 focus/hover accent */
-        }
-
-        /* ── Firefox ────────────────────────────────────────── */
-        .opengpex-basic-slider::-moz-range-track {
-          height: var(--track-height);
-          border-radius: 2px;
-          background: var(--track-bg);
-          border: 1px solid var(--border-subtle);
-          box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
-        }
-        .opengpex-basic-slider::-moz-range-thumb {
-          width: var(--thumb-w);
-          height: var(--thumb-h);
-          background: var(--text-main);
-          border: none;
-          clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
-          cursor: ew-resize;
-          filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.55));
-        }
-        .opengpex-basic-slider:hover::-moz-range-thumb,
-        .opengpex-basic-slider:focus-visible::-moz-range-thumb {
-          background: #10b981;
-        }
-        /* Firefox paints a "progress" fill by default — we don't want that
-           since the track already carries a meaningful gradient. */
-        .opengpex-basic-slider::-moz-range-progress {
-          background: transparent;
-        }
-      `}</style>
 
     </div>
   );

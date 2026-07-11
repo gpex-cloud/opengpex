@@ -90,6 +90,7 @@ import {
   useFilterGesture,
   useLayerHistogram,
 } from "../hooks";
+import { thumbSvgPath } from "@opengpex/editor/widgets/FancySlider";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -302,32 +303,28 @@ function TriangleHandle({
   role: string;
   ariaLabel: string;
 }) {
-  // Triangle: apex at the top of the track pointing up, wide base 6 units wide.
-  // The apex touches y=0 (the track's top edge) so the handle "hangs" from
-  // the top; this mirrors Photoshop's convention for the input track.
-  const half = 5;
-  const apexY = 0;
-  const baseY = vbH * 0.75;
-  const path = `M ${cx} ${apexY} L ${cx - half} ${baseY} L ${cx + half} ${baseY} Z`;
+  const halfW = 5;
+  const bodyBottomY = vbH * 0.78;
+  const path = thumbSvgPath(cx, vbH, halfW);
+
   return (
     <g
       className="cursor-ew-resize touch-none"
       onPointerDown={onPointerDown}
       role={role}
       aria-label={ariaLabel}
-      // Larger invisible hit area so the ~10px triangle is easy to grab.
       style={{ pointerEvents: "auto" }}
     >
       <rect
-        x={cx - half - 2}
-        y={apexY - 2}
-        width={half * 2 + 4}
-        height={baseY + 4}
+        x={cx - halfW - 2}
+        y={-2}
+        width={halfW * 2 + 4}
+        height={bodyBottomY + 4}
         fill="transparent"
       />
-      {/* Two paths for theme-aware stroke — same idiom used in curves.tsx. */}
-      <path d={path} fill={fill} stroke={strokeLight} strokeWidth={1} className="dark:hidden" />
-      <path d={path} fill={fill} stroke={strokeDark} strokeWidth={1} className="hidden dark:block" />
+      {/* Two paths for theme-aware stroke */}
+      <path d={path} fill={fill} stroke={strokeLight} strokeWidth={0.8} className="dark:hidden" />
+      <path d={path} fill={fill} stroke={strokeDark} strokeWidth={0.8} className="hidden dark:block" />
     </g>
   );
 }

@@ -6,15 +6,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ## v1.0.0-beta.24
 
-- Unify every main-thread source-bitmap consumer (Canvas2dEngine, filter cache, brush/clip/wand tools, Color Grading histogram, BG-removal) on a single `SourceBitmapCache` that stores decoded `ImageBitmap`s once per URL — eliminates redundant `HTMLImageElement` decodes, halves peak memory during heavy edits, and cuts filter-cache miss latency by skipping the legacy image→bitmap conversion hop
-- Bound Color-Grading memory to at most 12 filtered bitmaps in the async cache (down from 32) with prompt `ImageBitmap.close()` on eviction, avoiding worst-case ~2 GB retention on multi-layer 4K workflows
-- Extract the shared numeric-input widget used by the Levels and Channel Mixer panels into a single `NumberField` component (min/max/step/precision/onCommit) so both panels share a consistent commit-based Undo checkpoint model
-- Implement per-tile advanced filter caching (TileFilterCache) for tiled layers to solve performance degradation and visual flashing when adjusting Curves, Levels, or Channel Mixer on large images (8K/16K)
-- Fix filter Fast-Track interaction preview: restore `!hasAdvanced` guard in `shouldUseTiles` so advanced-filter layers route through `resolveFilteredSource`; implement main-thread synchronous LUT/matrix preview during slider drag for real-time 60fps feedback
-- Fix downsampled preview not filling layer bounds (Q1): upscale the LUT-processed canvas back to original dimensions before returning to painter, so source-rect coordinate math stays correct for `visibleShape`/`drawRect` paths
-- Fix flash-to-raw on mouse release (Q3): cache the last synchronous Track A result as a bridge frame until the async Worker delivers the full-resolution filtered bitmap, eliminating the visible "unfiltered gap" between interaction end and Worker response
-- Optimize Track A canvas allocation: reuse a persistent `filterTempCanvas` across frames instead of allocating a new `OffscreenCanvas` per tick, reducing GC pressure during high-frequency slider drags
-- Rename `ColorGradingDrawer` to `AdjustmentDrawer` across the entire codebase (directory, types, exports, plugin ID, docs) to align with industry-standard Photoshop terminology where Curves, Levels, and Channel Mixer are all categorized under "Adjustments"
+- Unified source-bitmap cache across the editor, halving peak memory usage during heavy edits
+- Bounded filter cache memory to prevent excessive retention on multi-layer 4K workflows
+- Extracted shared `NumberField` component for consistent numeric input across panels
+- Per-tile filter caching for large images (8K/16K) to eliminate flashing during adjustments
+- Fixed Curves/Levels/Mixer having no visible effect during slider interaction (Fast-Track preview)
+- Fixed preview artifacts: blank frame on mouse release, incorrect bounds on downsampled layers
+- Renamed Color Grading drawer to Adjustment drawer (Photoshop-standard terminology)
+- Added reusable `FancySlider` widget with custom house-shaped thumb shared across panels
 
 ---
 
