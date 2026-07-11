@@ -25,7 +25,7 @@
  * Companion to `ActionButton` (which is a single standalone action). Where
  * ActionButton is used for one-shot commands (Reset, Save, Import), ActionGroup
  * is the drawer-header "sub-panel switcher" pattern used across the editor
- * (e.g. ColorGradingDrawer's Basic/Curves/Levels/Mixer picker, CraftDrawer's
+ * (e.g. AdjustmentDrawer's Basic/Curves/Levels/Mixer picker, CraftDrawer's
  * Text/Brush/Eraser picker). Extracted here so we have ONE place to enforce
  * the visual conventions:
  *

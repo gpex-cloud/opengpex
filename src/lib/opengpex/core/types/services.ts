@@ -192,7 +192,7 @@ export interface PixelService {
      * Decode `src` into the shared main-thread `ImageBitmap` cache
      * and return it. Callers must NOT close the returned bitmap; it
      * is owned by SourceBitmapCache and shared across every consumer
-     * (Canvas2dEngine, BrushOverlay, ClipTool wand, ColorGrading
+     * (Canvas2dEngine, BrushOverlay, ClipTool wand, Adjustment
      * histogram, BgRemoval, …).
      *
      * If you need a Worker-transferable clone, use

@@ -67,10 +67,10 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { generateCurveLUT } from "@opengpex/editor/core/engine/filters/lut";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { CurvePoints, CurvesState } from "@opengpex/editor/core/types/models";
-import type { ColorGradingDrawerCommandsMap } from "../commands.d";
+import type { AdjustmentDrawerCommandsMap } from "../commands.d";
 import type { CurveChannel } from "../protocols";
 import { IDENTITY_CURVE_POINTS } from "../protocols";
-import { useColorGradingDrawer, useFilterGesture } from "../hooks";
+import { useAdjustmentDrawer, useFilterGesture } from "../hooks";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -249,8 +249,8 @@ export function CurvesPanel() {
     updateChannelCurveCmd,
     addCurvePointCmd,
     removeCurvePointCmd,
-  } = usePluginCommands<ColorGradingDrawerCommandsMap>();
-  const { activeLayer } = useColorGradingDrawer();
+  } = usePluginCommands<AdjustmentDrawerCommandsMap>();
+  const { activeLayer } = useAdjustmentDrawer();
   const gesture = useFilterGesture(beginCurvesEditCmd);
 
   /**

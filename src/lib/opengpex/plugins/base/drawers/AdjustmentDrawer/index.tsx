@@ -18,13 +18,13 @@
  */
 
 import { EditorPlugin } from "@opengpex/editor/core/types";
-import { ColorGradingDrawerComponent } from "./components";
-import { COLOR_GRADING_COMMANDS } from "./commands";
-import { ColorGradingDrawerIcon } from "./icon";
+import { AdjustmentDrawerComponent } from "./components";
+import { ADJUSTMENT_COMMANDS } from "./commands";
+import { AdjustmentDrawerIcon } from "./icon";
 import * as P from "./protocols";
 
 /**
- * ColorGradingDrawer Plugin: Unified color-grading panel (Curves / Levels / Channel Mixer)
+ * AdjustmentDrawer Plugin: Unified adjustment panel (Curves / Levels / Channel Mixer)
  *
  * Sidebar Drawer with mutually-exclusive sub-panels selected via a header
  * icon-button group — matches CraftDrawer's icon-switch pattern.
@@ -36,7 +36,7 @@ import * as P from "./protocols";
  *   looks). The old AdjustmentDrawer slot (3200) is now retired — its
  *   sliders live inside this drawer's Basic panel.
 
- * - `show: 'frame-required'` because color grading is a per-layer operation
+ * - `show: 'frame-required'` because adjustment is a per-layer operation
  *   and the layer store is meaningless without a document loaded (avoids
  *   flashing an empty panel on the landing page — spec §3.5.5 memory
  *   constraint).
@@ -47,14 +47,14 @@ export const plugin: EditorPlugin = {
   // --- 1. Identity ---
   manifest: {
     id: P.PLUGIN_ID,
-    displayName: "Color Grading",
+    displayName: "Adjustment",
     // Bumped to 1.1.0 on the Step 7.5 AdjustmentDrawer merge — no API break
-    // for consumers of `ColorGradingDrawerAPI`, but the plugin now exposes an
+    // for consumers of `AdjustmentDrawerAPI`, but the plugin now exposes an
     // additional 'basic' tool + `beginAdjustmentsEdit / updateAdjustments`
     // commands, so semver-minor is the right tick.
     version: "1.1.0",
     description:
-      "Basic adjustments, Curves, Levels and Channel Mixer — unified per-layer color grading.",
+      "Basic adjustments, Curves, Levels and Channel Mixer — unified per-layer adjustment.",
 
     author: P.PLUGIN_AUTHOR,
     category: "drawers",
@@ -65,16 +65,16 @@ export const plugin: EditorPlugin = {
   },
 
   // --- 2. UI Entry ---
-  icon: <ColorGradingDrawerIcon />,
+  icon: <AdjustmentDrawerIcon />,
   slot: "SIDE_BAR",
   show: "frame-required",
   order: 3150,
 
   // --- 3. Core Implementation ---
-  component: ColorGradingDrawerComponent,
+  component: AdjustmentDrawerComponent,
 
   // --- 4. Commands ---
-  commands: Object.values(COLOR_GRADING_COMMANDS),
+  commands: Object.values(ADJUSTMENT_COMMANDS),
 
   // --- 5. Signals ---
   //
@@ -93,7 +93,7 @@ export const plugin: EditorPlugin = {
   signals: [
     {
       id: P.SIGNAL_ACTIVE_GRADING_TOOL,
-      name: "Active Color-Grading Tool",
+      name: "Active Adjustment Tool",
       defaultValue: P.DEFAULT_GRADING_TOOL,
       scope: "public",
     },

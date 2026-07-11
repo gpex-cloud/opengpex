@@ -23,15 +23,15 @@
  * BasicPanel — brightness / contrast / saturation / hueRotate / blur.
  *
  * Step 7.5 (spec §六 Step 7.5): migrates the AdjustmentDrawer UI into
- * ColorGradingDrawer as its fourth sub-panel. Visual style is a faithful
+ * AdjustmentDrawer as its fourth sub-panel. Visual style is a faithful
  * port of the original AdjustmentDrawer content (native `<input type="range">`
  * with dynamic accent color: gray at identity, emerald above, amber below),
  * minus the panel-level "Adjustments" header + Reset button — those live at
- * the ColorGradingDrawer header now (one drawer = one reset UI).
+ * the AdjustmentDrawer header now (one drawer = one reset UI).
  *
  * Data flow & undo coalescing mirror the sibling panels (spec §5.6):
  *
- * - `useColorGradingDrawer().activeLayer` reads the layer.
+ * - `useAdjustmentDrawer().activeLayer` reads the layer.
  * - `useFilterGesture(beginAdjustmentsEditCmd)` bookends each drag with a
  *   single undoable checkpoint at pointerdown and closes it at pointerup, so
  *   one continuous slider drag collapses into exactly one Undo step.
@@ -47,9 +47,9 @@
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { AdjustmentState } from "@opengpex/editor/core/types/models";
-import type { ColorGradingDrawerCommandsMap } from "../commands.d";
+import type { AdjustmentDrawerCommandsMap } from "../commands.d";
 import { DEFAULT_ADJUSTMENTS_STATE } from "../protocols";
-import { useColorGradingDrawer, useFilterGesture } from "../hooks";
+import { useAdjustmentDrawer, useFilterGesture } from "../hooks";
 
 // ─── Slider descriptors ────────────────────────────────────────────────────────
 
@@ -287,8 +287,8 @@ function readAdjustments(
 
 export function BasicPanel() {
   const { beginAdjustmentsEditCmd, updateAdjustmentsCmd } =
-    usePluginCommands<ColorGradingDrawerCommandsMap>();
-  const { activeLayer } = useColorGradingDrawer();
+    usePluginCommands<AdjustmentDrawerCommandsMap>();
+  const { activeLayer } = useAdjustmentDrawer();
   const gesture = useFilterGesture(beginAdjustmentsEditCmd);
 
   const adjustments = useMemo(

@@ -18,7 +18,7 @@
  */
 
 /**
- * Collect the various per-layer color-grading state slots (adjustments,
+ * Collect the various per-layer adjustment state slots (adjustments,
  * curves, levels, channelMix) into the flat, ordered `FilterDescriptor[]`
  * that both `AsyncFilterCache` (for cache-key hashing) and
  * `Canvas2dFilter` (for pixel execution) consume.

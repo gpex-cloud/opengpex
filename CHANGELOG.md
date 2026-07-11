@@ -14,6 +14,7 @@ All notable changes to OpenGPEX are documented in this file.
 - Fix downsampled preview not filling layer bounds (Q1): upscale the LUT-processed canvas back to original dimensions before returning to painter, so source-rect coordinate math stays correct for `visibleShape`/`drawRect` paths
 - Fix flash-to-raw on mouse release (Q3): cache the last synchronous Track A result as a bridge frame until the async Worker delivers the full-resolution filtered bitmap, eliminating the visible "unfiltered gap" between interaction end and Worker response
 - Optimize Track A canvas allocation: reuse a persistent `filterTempCanvas` across frames instead of allocating a new `OffscreenCanvas` per tick, reducing GC pressure during high-frequency slider drags
+- Rename `ColorGradingDrawer` to `AdjustmentDrawer` across the entire codebase (directory, types, exports, plugin ID, docs) to align with industry-standard Photoshop terminology where Curves, Levels, and Channel Mixer are all categorized under "Adjustments"
 
 ---
 

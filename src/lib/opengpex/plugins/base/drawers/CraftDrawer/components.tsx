@@ -150,7 +150,7 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
  * is `'restore'` the Eraser button still reads as active. Earlier drafts
  * had a third "inferred" state (dot indicator) that lit up when the layer
  * type matched a tool but no tool was active — that hint was removed along
- * with ColorGradingDrawer's equivalent, because users found the dot noisy
+ * with AdjustmentDrawer's equivalent, because users found the dot noisy
  * and never asked for it. If you need to bring it back for one drawer,
  * add it opt-in on the widget rather than resurrecting a shared tri-state
  * default.

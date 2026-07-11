@@ -82,11 +82,11 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { generateLevelsLUT } from "@opengpex/editor/core/engine/filters/lut";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { LevelsState } from "@opengpex/editor/core/types/models";
-import type { ColorGradingDrawerCommandsMap } from "../commands.d";
+import type { AdjustmentDrawerCommandsMap } from "../commands.d";
 import { DEFAULT_LEVELS_STATE } from "../protocols";
 import { NumberField } from "../components";
 import {
-  useColorGradingDrawer,
+  useAdjustmentDrawer,
   useFilterGesture,
   useLayerHistogram,
 } from "../hooks";
@@ -339,8 +339,8 @@ export function LevelsPanel() {
     beginLevelsEditCmd,
     updateLevelsCmd,
     autoLevelsCmd,
-  } = usePluginCommands<ColorGradingDrawerCommandsMap>();
-  const { activeLayer } = useColorGradingDrawer();
+  } = usePluginCommands<AdjustmentDrawerCommandsMap>();
+  const { activeLayer } = useAdjustmentDrawer();
   const { luminance: histogram, loading: histLoading } = useLayerHistogram();
   const gesture = useFilterGesture(beginLevelsEditCmd);
 

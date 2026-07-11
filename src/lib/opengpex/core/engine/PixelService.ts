@@ -285,7 +285,7 @@ export function createPixelService(
 
         const bmp = await this.bitmap(src);
         // Draw onto an OffscreenCanvas to sample pixel data — mirrors
-        // the exact flow used by ClipTool wand and ColorGrading
+        // the exact flow used by ClipTool wand and Adjustment
         // histogram, so failure modes stay consistent.
         const canvas = typeof OffscreenCanvas !== 'undefined'
           ? new OffscreenCanvas(bmp.width, bmp.height)

@@ -30,15 +30,15 @@ import {
 import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
 import { asyncFilterCache } from '@opengpex/editor/core/engine/cache/AsyncFilterCache';
 // [Filter Fast-Track §2.3] TileFilterCache removed — see 20260711_filter_fast_track_extension.md
-import type { ColorGradingDrawerCommandsMap, ColorGradingDrawerSignalsMap } from './commands.d';
-import type { ActiveGradingTool, GradingTool, ColorGradingDrawerConfig } from './protocols';
+import type { AdjustmentDrawerCommandsMap, AdjustmentDrawerSignalsMap } from './commands.d';
+import type { ActiveGradingTool, GradingTool, AdjustmentDrawerConfig } from './protocols';
 import { DEFAULT_GRADING_TOOL } from './protocols';
 
 
-// ─── useColorGradingDrawer ─────────────────────────────────────────────────────
+// ─── useAdjustmentDrawer ─────────────────────────────────────────────────────
 
 /**
- * useColorGradingDrawer — semantic hook for the drawer's main body.
+ * useAdjustmentDrawer — semantic hook for the drawer's main body.
  *
  * Returns the currently active grading tool + a few convenience flags derived
  * from the active layer's grading state. The panel body uses these to decide
@@ -50,12 +50,12 @@ import { DEFAULT_GRADING_TOOL } from './protocols';
  *   3. `DEFAULT_GRADING_TOOL` (`'curves'` — matches Photoshop's Curves default)
  *
  * This mirrors CraftDrawer's `useCraftDrawer` pattern while adapting to the
- * fact that ColorGradingDrawer always has SOME tool selected (unlike
+ * fact that AdjustmentDrawer always has SOME tool selected (unlike
  * CraftDrawer whose `activeCraft` can legitimately be `null`).
  */
-export function useColorGradingDrawer() {
-  const { activeGradingToolSignal } = usePluginSignals<ColorGradingDrawerSignalsMap>();
-  const [selfConfig] = usePluginSelfConfig<ColorGradingDrawerConfig>();
+export function useAdjustmentDrawer() {
+  const { activeGradingToolSignal } = usePluginSignals<AdjustmentDrawerSignalsMap>();
+  const [selfConfig] = usePluginSelfConfig<AdjustmentDrawerConfig>();
   const { activeLayer } = useEditorState();
 
   const activeTool: ActiveGradingTool =
@@ -83,8 +83,8 @@ export function useColorGradingDrawer() {
  * indicator, add it opt-in rather than resurrecting the old pattern.
  */
 export function useGradingToolSwitch() {
-  const { setGradingToolCmd } = usePluginCommands<ColorGradingDrawerCommandsMap>();
-  const { activeTool } = useColorGradingDrawer();
+  const { setGradingToolCmd } = usePluginCommands<AdjustmentDrawerCommandsMap>();
+  const { activeTool } = useAdjustmentDrawer();
 
   const selectTool = useCallback(
     (tool: GradingTool) => {

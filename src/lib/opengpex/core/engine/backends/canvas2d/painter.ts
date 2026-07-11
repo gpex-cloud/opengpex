@@ -65,7 +65,7 @@ export interface PainterOptions {
  * Kept private to the Canvas2D backend — advanced grading (curves / levels /
  * channel mixer) does NOT flow through this helper, it goes through the
  * `IFilter` runtime instead (see spec §5.1 dispatch logic). The Basic panel
- * of `ColorGradingDrawer` (formerly `AdjustmentDrawer` before Step 7.5)
+ * of `AdjustmentDrawer` (formerly `AdjustmentDrawer` before Step 7.5)
  * continues to use this fast path.
 
  */

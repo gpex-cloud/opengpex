@@ -18,10 +18,10 @@
  */
 
 /**
- * ColorGradingDrawer Plugin Protocols
+ * AdjustmentDrawer Plugin Protocols
  *
- * Defines constants and type contracts for the unified color-grading panel.
- * ColorGradingDrawer is a single sidebar Drawer that switches internally between
+ * Defines constants and type contracts for the unified adjustment panel.
+ * AdjustmentDrawer is a single sidebar Drawer that switches internally between
  * three sub-panels (Curves / Levels / Channel Mixer) via an icon-button group at
  * the panel header — mirroring the visual pattern used by CraftDrawer.
  *
@@ -31,7 +31,7 @@
  * - §4.2 mutually-exclusive panels — the icon group at the top-right selects one
  *   of `curves | levels | mixer` and the corresponding body renders.
  * - §4.3 NO keyboard shortcuts on the switch — this differentiates it from
- *   CraftDrawer (T/B/E shortcuts) because color grading is a mouse-heavy
+ *   CraftDrawer (T/B/E shortcuts) because adjustment is a mouse-heavy
  *   workflow and stealing single-letter keys pollutes the global shortcut map.
  * - §4.4 AdjustmentDrawer stays a separate plugin for now; a future Step 7.5
  *   will migrate its basic sliders in as a fourth 'basic' tab.
@@ -96,7 +96,7 @@ export type AdjustmentsPatch = Partial<AdjustmentState>;
 
 
 
-export const PLUGIN_ID = 'drawers.color_grading_drawer';
+export const PLUGIN_ID = 'drawers.adjustment_drawer';
 export const PLUGIN_AUTHOR = 'opengpex';
 
 // ─── Signal IDs ────────────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ export const CMD_UPDATE_ADJUSTMENTS = 'cmd.update_adjustments';
 
 
 /**
- * Which sub-panel is currently visible in the ColorGradingDrawer body.
+ * Which sub-panel is currently visible in the AdjustmentDrawer body.
  *
  * Step 7.5 extended the union with `'basic'` — the merged AdjustmentDrawer
  * (brightness / contrast / saturation / hueRotate / blur sliders). It is
@@ -280,7 +280,7 @@ export const DEFAULT_GRADING_TOOL: GradingTool = 'basic';
  * their preferred workspace (Photoshop / Lightroom convention). Actual grading
  * state lives on the Layer (`layer.curves / .levels / .channelMix`), NOT here.
  */
-export interface ColorGradingDrawerConfig {
+export interface AdjustmentDrawerConfig {
   /** Remembered sub-panel across sessions (persisted via `pluginConfig`). */
   lastTool?: GradingTool;
 }
@@ -288,14 +288,14 @@ export interface ColorGradingDrawerConfig {
 // ─── Cross-Plugin Typed Facade ─────────────────────────────────────────────────
 
 /**
- * ColorGradingDrawerAPI: Structured facade for external plugins.
+ * AdjustmentDrawerAPI: Structured facade for external plugins.
  *
  * Usage:
- *   import { ColorGradingDrawerAPI } from '../../drawers/ColorGradingDrawer/protocols';
- *   state.interaction.signals[ColorGradingDrawerAPI.signals.activeTool];
- *   actions.executeCommand(ColorGradingDrawerAPI.commands.resetAll.uid);
+ *   import { AdjustmentDrawerAPI } from '../../drawers/AdjustmentDrawer/protocols';
+ *   state.interaction.signals[AdjustmentDrawerAPI.signals.activeTool];
+ *   actions.executeCommand(AdjustmentDrawerAPI.commands.resetAll.uid);
  */
-export const ColorGradingDrawerAPI = {
+export const AdjustmentDrawerAPI = {
   signals: {
     /** Currently active grading sub-panel. */
     activeTool: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_ACTIVE_GRADING_TOOL}` as const,

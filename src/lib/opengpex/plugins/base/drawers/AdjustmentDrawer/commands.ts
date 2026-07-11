@@ -24,7 +24,7 @@ import type { CurvePoints, CurvesState, LevelsState, ChannelMixState, Adjustment
 import * as P from './protocols';
 import type {
   GradingTool,
-  ColorGradingDrawerConfig,
+  AdjustmentDrawerConfig,
   CurveChannel,
   LevelsPatch,
   ChannelMixPatch,
@@ -40,7 +40,7 @@ import type {
 
 /**
  * Persists the active grading tool both to the shared signal (so other plugins
- * can observe it via `ColorGradingDrawerAPI.signals.activeTool`) and to
+ * can observe it via `AdjustmentDrawerAPI.signals.activeTool`) and to
  * `pluginConfig` so the choice survives across editor sessions.
  *
  * We intentionally keep this a signal (not just pluginConfig) because switching
@@ -49,7 +49,7 @@ import type {
  */
 function setActiveTool(ctx: EditorContextValue, tool: GradingTool) {
   ctx.scoped!.setSignal(P.SIGNAL_ACTIVE_GRADING_TOOL, tool);
-  const cfg = ctx.scoped!.selfConfig as ColorGradingDrawerConfig | undefined;
+  const cfg = ctx.scoped!.selfConfig as AdjustmentDrawerConfig | undefined;
   if (cfg?.lastTool !== tool) {
     ctx.scoped!.setSelfConfig({ lastTool: tool });
   }
@@ -102,7 +102,7 @@ function insertPointSorted(
 // ─── Commands ──────────────────────────────────────────────────────────────────
 
 /**
- * COLOR_GRADING_COMMANDS: Command definitions for the ColorGradingDrawer.
+ * ADJUSTMENT_COMMANDS: Command definitions for the AdjustmentDrawer.
  *
  * Curves editing follows the gesture-based Undo coalescing pattern from spec
  * §5.6 (mirrors `AdjustmentDrawer`): `beginCurvesEdit` is the ONLY undoable
@@ -114,10 +114,10 @@ function insertPointSorted(
  * the corresponding `beginLevelsEdit` / `beginChannelMixEdit` following the
  * same shape.
  */
-export const COLOR_GRADING_COMMANDS = {
+export const ADJUSTMENT_COMMANDS = {
   setTool: {
     id: P.CMD_SET_GRADING_TOOL,
-    name: 'Switch Color Grading Tool',
+    name: 'Switch Adjustment Tool',
     execute: (ctx: EditorContextValue, payload: { tool: GradingTool }) => {
       setActiveTool(ctx, payload.tool);
     },
@@ -125,7 +125,7 @@ export const COLOR_GRADING_COMMANDS = {
 
   resetAll: {
     id: P.CMD_RESET_ALL_GRADING,
-    name: 'Reset All Color Grading',
+    name: 'Reset All Adjustment',
     undoable: true,
     execute: (ctx: EditorContextValue) => {
       const { activeFrame, activeLayer, actions } = ctx;
@@ -134,7 +134,7 @@ export const COLOR_GRADING_COMMANDS = {
       // returns false and the layer short-circuits back to the ctx.filter
       // fast path (spec §5.1 / §3.5).
       // Step 7.5: `adjustments` is now managed by the Basic panel inside this
-      // same drawer, so "Reset All Color Grading" also wipes it. Previously
+      // same drawer, so "Reset All Adjustment" also wipes it. Previously
       // AdjustmentDrawer owned its own reset path; merging into a single
       // reset preserves the mental model "one panel = one reset button".
       actions.updateLayer(activeFrame.id, activeLayer.id, {

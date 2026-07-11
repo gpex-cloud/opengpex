@@ -76,7 +76,7 @@ import React, {
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { ChannelMixState } from "@opengpex/editor/core/types/models";
-import type { ColorGradingDrawerCommandsMap } from "../commands.d";
+import type { AdjustmentDrawerCommandsMap } from "../commands.d";
 import {
   DEFAULT_CHANNEL_MIX_STATE,
   CHANNEL_MIX_PRESETS,
@@ -85,7 +85,7 @@ import {
 } from "../protocols";
 import type { ChannelMixOutput, ChannelMixPresetId } from "../protocols";
 import { NumberField } from "../components";
-import { useColorGradingDrawer, useFilterGesture } from "../hooks";
+import { useAdjustmentDrawer, useFilterGesture } from "../hooks";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -378,8 +378,8 @@ export function ChannelMixerPanel() {
     beginChannelMixEditCmd,
     updateChannelMixCmd,
     applyChannelMixPresetCmd,
-  } = usePluginCommands<ColorGradingDrawerCommandsMap>();
-  const { activeLayer } = useColorGradingDrawer();
+  } = usePluginCommands<AdjustmentDrawerCommandsMap>();
+  const { activeLayer } = useAdjustmentDrawer();
   const gesture = useFilterGesture(beginChannelMixEditCmd);
 
   // Which output row the user selected to edit (R by default, matches Photoshop).

@@ -23,16 +23,17 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Sliders, LineChart, BarChart3, SlidersHorizontal, RotateCcw as ResetIcon } from "lucide-react";
 import { useEditorServices } from "@opengpex/editor/core/context";
-import ActionButton from "@opengpex/editor/widgets/ActionButton";
+import SplitButton from "@opengpex/editor/widgets/SplitButton";
+import { type ActionOption } from "@opengpex/editor/widgets/ActionDropdown";
 import ActionGroup, { type ActionGroupItem } from "@opengpex/editor/widgets/ActionGroup";
 import { BasicPanel } from "./panels/basic";
 import { CurvesPanel } from "./panels/curves";
 import { LevelsPanel } from "./panels/levels";
 import { ChannelMixerPanel } from "./panels/mixer";
 
-import { useColorGradingDrawer, useGradingToolSwitch } from "./hooks";
-import { ColorGradingDrawerIcon } from "./icon";
-import { ColorGradingDrawerAPI } from "./protocols";
+import { useAdjustmentDrawer, useGradingToolSwitch } from "./hooks";
+import { AdjustmentDrawerIcon } from "./icon";
+import { AdjustmentDrawerAPI } from "./protocols";
 import type { GradingTool } from "./protocols";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -95,7 +96,7 @@ const GRADING_BUTTONS: {
  *
  * We keep this local wrapper (rather than inlining `ActionGroup` at the
  * call site) because it memoizes independently of
- * `ColorGradingDrawerComponent`, saving re-renders when only `activeLayer`
+ * `AdjustmentDrawerComponent`, saving re-renders when only `activeLayer`
  * changes but `activeTool` doesn't.
  */
 const GradingPanelButtonGroup = React.memo(function GradingPanelButtonGroup() {
@@ -116,15 +117,15 @@ const GradingPanelButtonGroup = React.memo(function GradingPanelButtonGroup() {
 });
 
 
-// ─── ColorGradingDrawerComponent ───────────────────────────────────────────────
+// ─── AdjustmentDrawerComponent ───────────────────────────────────────────────
 
 /**
- * ColorGradingDrawerComponent — sidebar drawer body.
+ * AdjustmentDrawerComponent — sidebar drawer body.
  *
  * Layout mirrors CraftDrawerComponent so the two drawers feel like siblings:
  *
  *   ┌────────────────────────────────────────────────────┐
- *   │ 🎨 Color Grading      [📈][📊][🎛️]   [↺]           │ ← header
+ *   │ 🎨 Adjustment      [📈][📊][🎛️]   [↺]           │ ← header
  *   ├────────────────────────────────────────────────────┤
  *   │ (active sub-panel content — Curves/Levels/Mixer)   │
  *   └────────────────────────────────────────────────────┘
@@ -134,16 +135,23 @@ const GradingPanelButtonGroup = React.memo(function GradingPanelButtonGroup() {
  * For Step 4 it invokes `resetActivePanel` — resetting only the visible
  * sub-panel's layer state, which is the more conservative default.
  */
-export const ColorGradingDrawerComponent = React.memo(function ColorGradingDrawerComponent() {
-  const { activeTool, activeLayer } = useColorGradingDrawer();
+export const AdjustmentDrawerComponent = React.memo(function AdjustmentDrawerComponent() {
+  const { activeTool, activeLayer } = useAdjustmentDrawer();
   const { actions } = useEditorServices();
 
-  const handleReset = React.useCallback(() => {
-    // Fire cross-plugin command via UID; keeps the plugin decoupled from its
-    // own internal command dispatch machinery (same pattern used by
-    // LayerDrawer → CraftDrawer's deactivate).
-    actions.executeCommand(ColorGradingDrawerAPI.commands.resetActivePanel.uid);
+  const handleResetPanel = React.useCallback(() => {
+    actions.executeCommand(AdjustmentDrawerAPI.commands.resetActivePanel.uid);
   }, [actions]);
+
+  const handleResetAllSelect = React.useCallback((value: string) => {
+    if (value === 'reset-all') {
+      actions.executeCommand(AdjustmentDrawerAPI.commands.resetAll.uid);
+    }
+  }, [actions]);
+
+  const resetAllOptions: ActionOption[] = React.useMemo(() => [
+    { label: 'Reset All', value: 'reset-all', icon: <ResetIcon size={10} />, variant: 'danger' },
+  ], []);
 
   const isDisabled = !activeLayer;
 
@@ -154,23 +162,20 @@ export const ColorGradingDrawerComponent = React.memo(function ColorGradingDrawe
         className="flex justify-between items-center shrink-0"
       >
         <div className="flex items-center gap-2">
-          <ColorGradingDrawerIcon size={12} className="text-indigo-600 dark:text-indigo-400" />
+          <AdjustmentDrawerIcon size={12} className="text-indigo-600 dark:text-indigo-400" />
           <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
-            Color Grading
+            Adjustment
           </span>
         </div>
         <div className="flex items-center gap-1.5">
           <GradingPanelButtonGroup />
-          <ActionButton
-            onClick={(e) => {
-              e.stopPropagation();
-              handleReset();
-            }}
+          <SplitButton
             icon={<ResetIcon size={12} />}
             tooltip={`Reset ${activeTool.charAt(0).toUpperCase() + activeTool.slice(1)}`}
-            variant="glass"
-            size="sm"
-            className="text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
+            onClick={handleResetPanel}
+            dropdownOptions={resetAllOptions}
+            onDropdownSelect={handleResetAllSelect}
+            dropdownAlign="right"
           />
         </div>
       </motion.div>
@@ -184,7 +189,7 @@ export const ColorGradingDrawerComponent = React.memo(function ColorGradingDrawe
             No Layer Selected
           </span>
           <span className="text-[9px] text-[var(--text-muted)] tracking-tight">
-            Select a layer to apply color-grading adjustments.
+            Select a layer to apply adjustments.
           </span>
         </motion.div>
       ) : (

@@ -1,5 +1,5 @@
 /**
- * ColorGradingDrawer/commands.d.ts — Auto-generated type declarations
+ * AdjustmentDrawer/commands.d.ts — Auto-generated type declarations
  *
  * Provides compile-time type safety for usePluginCommands<T>() and usePluginSignals<T>().
  * Generated from commands.ts and index signal declarations.
@@ -10,8 +10,8 @@
 import type { CommandInstance, InteractionSignalValue } from '@opengpex/editor/core/types';
 import type { GradingTool, CurveChannel, LevelsPatch, ChannelMixPatch, ChannelMixPresetId, AdjustmentsPatch } from './protocols';
 
-/** Type map for usePluginCommands<ColorGradingDrawerCommandsMap>() */
-export interface ColorGradingDrawerCommandsMap {
+/** Type map for usePluginCommands<AdjustmentDrawerCommandsMap>() */
+export interface AdjustmentDrawerCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   setGradingToolCmd: CommandInstance<{ tool: GradingTool }>;
   resetAllGradingCmd: CommandInstance;
@@ -30,8 +30,8 @@ export interface ColorGradingDrawerCommandsMap {
   updateAdjustmentsCmd: CommandInstance<{ patch: AdjustmentsPatch }>;
 }
 
-/** Type map for usePluginSignals<ColorGradingDrawerSignalsMap>() */
-export interface ColorGradingDrawerSignalsMap {
+/** Type map for usePluginSignals<AdjustmentDrawerSignalsMap>() */
+export interface AdjustmentDrawerSignalsMap {
   [key: string]: { value: InteractionSignalValue; set: (val: InteractionSignalValue) => void };
   activeGradingToolSignal: {
     value: unknown;

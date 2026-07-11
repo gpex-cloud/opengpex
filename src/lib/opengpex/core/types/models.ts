@@ -78,11 +78,11 @@ export interface AdjustmentState {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Advanced color-grading state (see filter pipeline spec §4.6)
+// Advanced adjustment state (see filter pipeline spec §4.6)
 // ─────────────────────────────────────────────────────────────
 //
 // These are declarative, serializable per-layer states written by
-// `ColorGradingDrawer` and consumed by the IFilter runtime. They must
+// `AdjustmentDrawer` and consumed by the IFilter runtime. They must
 // remain plain-JSON (no functions, no DOM refs) so they can travel
 // through `WorkerBridge.postMessage` unchanged.
 //
@@ -237,7 +237,7 @@ export interface Layer {
   // Filters & Adjustments (optional)
   adjustments?: AdjustmentState;
   /**
-   * Declarative RGB / per-channel tone curves written by `ColorGradingDrawer`.
+   * Declarative RGB / per-channel tone curves written by `AdjustmentDrawer`.
    * Consumed by IFilter (spec §4.6, §10.1). Does not change `assetId`.
    */
   curves?: CurvesState;

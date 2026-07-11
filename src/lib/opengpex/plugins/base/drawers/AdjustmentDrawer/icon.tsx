@@ -20,7 +20,7 @@
 "use client";
 
 /**
- * ColorGradingDrawerIcon — composite icon representing "curves + levels" tools.
+ * AdjustmentDrawerIcon — composite icon representing "curves + levels" tools.
  *
  * Visual concept (mirrors CraftDrawerIcon's split-quadrant grammar so the
  * sidebar reads as "a family of icon-switch drawers"):
@@ -41,7 +41,7 @@
  *     as the identifying motif)
  *   - line-caps: round on everything, matching CraftDrawerIcon
  */
-export function ColorGradingDrawerIcon({
+export function AdjustmentDrawerIcon({
   size = 20,
   className,
 }: { size?: number; className?: string } = {}) {
