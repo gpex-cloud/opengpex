@@ -123,10 +123,6 @@ export interface FancySliderProps {
   className?: string;
 }
 
-// A module-level flag to ensure we only inject the global style once
-// across multiple FancySlider instances in the same render tree.
-let styleInjected = false;
-
 export default function FancySlider({
   value,
   min,
@@ -142,11 +138,6 @@ export default function FancySlider({
   className = '',
 }: FancySliderProps) {
   const trackBg = trackGradient ?? 'linear-gradient(90deg, var(--bg-stage), var(--bg-stage))';
-
-  // Track whether this instance is responsible for the <style> tag.
-  // In practice styled-jsx handles deduplication, but this is belt-and-suspenders.
-  const needsStyle = !styleInjected;
-  if (needsStyle) styleInjected = true;
 
   return (
     <>
