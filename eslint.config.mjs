@@ -29,6 +29,23 @@ const eslintConfig = defineConfig([
       }],
     },
   },
+  // ─── Service boundary enforcement ───────────────────────────────────────────
+  // Plugins and commands must NOT directly import from internal operator modules.
+  // They should access functionality via injected services (GeometryService, etc.)
+  // See: docs/opengpex/plans/20260712_service_compliance_checklist.md
+  {
+    files: ["src/lib/opengpex/plugins/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        patterns: [
+          {
+            group: ["@opengpex/editor/core/geometry/operators/*"],
+            message: "Plugins must not import internal geometry operators directly. Use the GeometryService via context or InteractionEvent instead (e.g. geometry.transform.*, e.geometry.space.*).",
+          },
+        ],
+      }],
+    },
+  },
 ]);
 
 export default eslintConfig;

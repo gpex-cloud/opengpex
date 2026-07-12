@@ -26,10 +26,9 @@ import {
   asLocalRect,
   asLocalPolygon,
 } from '@opengpex/editor/core/types';
-import { computePolygonBounds, computeRingArea } from '@opengpex/editor/core/geometry/operators/polygon';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
-import { ClipOptionsAPI } from '../../../options/ClipOptions/protocols';
-import { makeCropToolGuard } from './guard';
+import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
+import { makeCropToolGuard } from '../guard';
 
 /**
  * lassoPreviewPathRef
@@ -225,11 +224,11 @@ export const createLassoHandler = (): InteractionHandler => {
 
         // Area validation: discard micro-drags.
         const MIN_LASSO_AREA = 8;
-        if (computeRingArea(ring) < MIN_LASSO_AREA) {
+        if (e.geometry.polygon.computeRingArea(ring) < MIN_LASSO_AREA) {
           return;
         }
 
-        const bounds = computePolygonBounds([ring]);
+        const bounds = e.geometry.polygon.computePolygonBounds([ring]);
         const polygon = asLocalPolygon([ring], asLocalRect(bounds), gestureAA);
         e.actions.setClipBox(e.activeFrame.id, 'lasso', polygon);
         committed = true;

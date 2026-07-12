@@ -25,18 +25,20 @@ import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import {
   ClipOptionsAPI,
   CropTool,
-} from '../../../options/ClipOptions/protocols';
+} from '../../../../options/ClipOptions/protocols';
 import { InteractionMath } from '@opengpex/editor/stage/interaction/Math';
 import { createTransformHandler } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
-import { makeCropToolGuard } from './guard';
+import { makeCropToolGuard } from '../guard';
 
 /**
  * ClipBoxHandler: Core interaction handler for clip tool.
- * Handles crop box: Resize, Move, Create, and Peel.
+ * Handles crop box: Resize and Create.
+ *
+ * Move and Peel are handled by the unified `createSelectionMoveHandler` which
+ * operates on any selection type (rect/ellipse/polygon). This handler only
+ * retains resize handles and new-selection creation.
  */
 export const createClipBoxHandler = (): InteractionHandler => {
-  let hasPeeled = false;
-
   return createTransformHandler({
     id: 'clip-box',
     priority: 100,
@@ -51,10 +53,9 @@ export const createClipBoxHandler = (): InteractionHandler => {
       const handleElement = target.closest('[data-handle]') as HTMLElement;
       if (handleElement) {
         const handle = handleElement.dataset.handle || 'move';
-        // Meta+drag crop box -> enter peel mode (peel fragments)
-        if (handle === 'move' && (e.nativeEvent as MouseEvent).metaKey) {
-          return 'peel';
-        }
+        // Move and peel are now handled by createSelectionMoveHandler.
+        // Only claim resize handles here.
+        if (handle === 'move') return null;
         return handle;
       }
 
@@ -70,7 +71,6 @@ export const createClipBoxHandler = (): InteractionHandler => {
     getInitialState: (e) => {
       const isReCanvas = e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas) || false;
       const currentShape = isReCanvas ? e.activeFrame.canvasCropBox : getRegularClipShape(e.activeFrame);
-      hasPeeled = false;
       return currentShape?.rect || asLocalRect({ x: 0, y: 0, w: 0, h: 0 });
     },
 
@@ -83,20 +83,10 @@ export const createClipBoxHandler = (): InteractionHandler => {
       };
     },
 
-    onUpdate: (e, newRect, tx, { dx, dy, type }) => {
+    onUpdate: (e, newRect, tx, { dx: _dx, dy: _dy, type: _type }) => {
       const frame = e.activeFrame;
       const isReCanvas = e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas) || false;
       const currentShape = isReCanvas ? frame.canvasCropBox : getRegularClipShape(frame);
-
-      if (type === 'peel' && (e.nativeEvent as MouseEvent).metaKey) {
-        if (!hasPeeled) {
-          if (Math.sqrt(dx * dx + dy * dy) > 5) {
-            hasPeeled = true;
-            setTimeout(() => e.actions.adv.layer.peel.peelToExchange.execute({ isCopy: (e.nativeEvent as MouseEvent).altKey }), 0);
-          }
-          return;
-        }
-      }
 
       if (isReCanvas) {
         tx.update({ canvasCropBox: { ...currentShape, rect: newRect } }, 'frame');
@@ -117,16 +107,14 @@ export const createClipBoxHandler = (): InteractionHandler => {
           : frame.layers.order.map(id => frame.layers.byId[id]).find(l => l.role === 'exchange' && l.hostId === frame.activeLayerId);
 
         if (exchangeLayer) {
-          // Bounding-centered matrix: content center in world = (cx + v.x, cy + v.y),
-          // so to place the fragment's visual center at the clip box center we subtract
-          // the visibleShape offset from the desired world position.
+          // Convert clip box center from frame-local to world coordinates
+          const worldCenter = e.geometry.space.localToWorld(newRect.x + newRect.w / 2, newRect.y + newRect.h / 2, frame);
+          // Account for layer orientation (rotation/flip) when computing anchor.
           const vr = exchangeLayer.visibleShape?.rect;
           const vox = vr?.x ?? 0;
           const voy = vr?.y ?? 0;
-          tx.update({
-            cx: newRect.x + newRect.w / 2 - frame.canvas.w / 2 - vox,
-            cy: newRect.y + newRect.h / 2 - frame.canvas.h / 2 - voy
-          }, 'layer', exchangeLayer.id);
+          const pose = e.geometry.transform.computeFragmentCenter(worldCenter, { x: vox, y: voy }, exchangeLayer.rotation, exchangeLayer.flip);
+          tx.update({ cx: pose.x, cy: pose.y }, 'layer', exchangeLayer.id);
         }
       }
     },
@@ -154,7 +142,6 @@ export const createClipBoxHandler = (): InteractionHandler => {
         }
 
         tx.commit();
-        hasPeeled = false;
         return;
       }
 
@@ -165,7 +152,6 @@ export const createClipBoxHandler = (): InteractionHandler => {
       }
 
       tx.commit();
-      hasPeeled = false;
     }
   });
 };

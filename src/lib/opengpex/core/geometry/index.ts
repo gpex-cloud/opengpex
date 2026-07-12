@@ -40,7 +40,7 @@ import {
 import {
   computePolygonBounds, localToWorldPolygon, worldToLocalPolygon,
   frameLocalToLayerLocal as polyFrameToLayer, layerLocalToFrameLocal as polyLayerToFrame, polygonToSvgPathD,
-  isPointInPolygon, computeRingArea, simplifyOpen, simplifyRing
+  isPointInPolygon, computeRingArea, simplifyOpen, simplifyRing, translatePolygon
 } from './operators/polygon';
 import {
   shapeToPoint2D, point2dToLocalShape, point2dToLocalPolygon,
@@ -51,6 +51,7 @@ import {
   decomposeMatrix,
   getLayerWorldMatrix,
   getLayerLocalMatrix,
+  computeFragmentCenter,
   transformFrame
 } from './operators/transform';
 import {
@@ -119,6 +120,7 @@ export function createGeometryService(): GeometryService {
       },
       decomposeMatrix: (matrix: IMatrix3x3, refRotation?: number) => decomposeMatrix(matrix, refRotation),
       transformFrame: (frame: Frame, operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v') => transformFrame(frame, operation),
+      computeFragmentCenter: (worldCenter: Point2D, visibleOffset: Point2D, rotation: number, flip: { h: boolean; v: boolean }) => computeFragmentCenter(worldCenter, visibleOffset, rotation, flip),
     },
     camera: {
       getFitCamera: (viewport: Dimensions, content: Dimensions, options?: CameraCenterOptions) => getFitCamera(viewport, content, options),
@@ -158,6 +160,7 @@ export function createGeometryService(): GeometryService {
       computeRingArea: (ring: Point2D[]) => computeRingArea(ring),
       simplifyOpen: (points: Point2D[], epsilon: number) => simplifyOpen(points, epsilon),
       simplifyRing: (ring: Point2D[], epsilon: number) => simplifyRing(ring, epsilon),
+      translatePolygon: (poly: LocalPolygon, dx: number, dy: number) => translatePolygon(poly, dx, dy),
     },
     point2d: {
       shapeToPoint2D: (shape: LocalShape) => shapeToPoint2D(shape),

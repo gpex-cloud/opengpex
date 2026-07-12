@@ -66,6 +66,35 @@ function getOrientationMatrix(rotation: number, flip?: { h: boolean, v: boolean 
 }
 
 /**
+ * Compute the correct (cx, cy) world-space anchor for a fragment layer whose
+ * visible content starts at `visibleOffset` within its bounding box.
+ *
+ * Background:
+ *   WorldMatrix = Translate(cx, cy) × Orientation(rotation, flip) × Translate(-bw/2, -bh/2)
+ *   When bounding = visibleShape size, the content center in world space becomes:
+ *     worldCenter = (cx, cy) + Orientation × (vx, vy)
+ *   Solving for (cx, cy):
+ *     (cx, cy) = worldCenter − Orientation × (vx, vy)
+ *
+ * The previous simplified formula (cx = center.x - vx) only works when
+ * Orientation is identity (no rotation, no flip). This function handles
+ * the general case correctly.
+ */
+export function computeFragmentCenter(
+  worldCenter: { x: number; y: number },
+  visibleOffset: { x: number; y: number },
+  rotation: number,
+  flip: { h: boolean; v: boolean }
+): { x: number; y: number } {
+  const O = getOrientationMatrix(rotation, flip);
+  const rotatedOffset = O.apply(visibleOffset);
+  return {
+    x: worldCenter.x - rotatedOffset.x,
+    y: worldCenter.y - rotatedOffset.y,
+  };
+}
+
+/**
  * [External] Fuses all geometric elements: center position, viewport shape (visibleShape), rotation, flip, scaling, etc.
  */
 export function getLayerWorldMatrix(layer: Layer, override?: LayerPoseOverride): Matrix3x3 {

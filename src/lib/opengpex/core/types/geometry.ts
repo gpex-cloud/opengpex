@@ -157,6 +157,8 @@ export interface GeometryService {
     decomposeMatrix: (matrix: IMatrix3x3, refRotation?: number) => DecomposedMatrix;
     /** Executes artboard-level geometry transformation (rotate/flip) */
     transformFrame: (frame: Frame, operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v') => Frame;
+    /** Computes correct (cx, cy) world anchor for a fragment layer accounting for orientation */
+    computeFragmentCenter: (worldCenter: Point2D, visibleOffset: Point2D, rotation: number, flip: { h: boolean; v: boolean }) => Point2D;
   };
 
   /** Camera service */
@@ -252,6 +254,11 @@ export interface GeometryService {
      * an open polyline, simplifies, then removes the trailing duplicate.
      */
     simplifyRing: (ring: Point2D[], epsilon: number) => Point2D[];
+    /**
+     * Translates all rings in a LocalPolygon by (dx, dy). Returns a new polygon
+     * with offset points and bounding rect. Used by the selection-move handler.
+     */
+    translatePolygon: (poly: LocalPolygon, dx: number, dy: number) => LocalPolygon;
 
   };
 

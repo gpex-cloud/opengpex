@@ -21,12 +21,14 @@
  * ClipOverlay Interaction Handlers — Barrel Export
  *
  * Each handler is in its own module for maintainability:
- *   - guard.ts    — shared `makeCropToolGuard` strategy dispatch helper
- *   - clipbox.ts  — rect/ellipse crop box handler (resize, move, create, peel)
- *   - lasso.ts    — free-form polygon selection handler
- *   - wand.ts     — magic wand flood-fill selection handler
+ *   - guard.ts              — shared `makeCropToolGuard` strategy dispatch helper
+ *   - move.ts              — unified move + peel for ALL selection types (tool-agnostic)
+ *   - tools/regular.ts      — rect/ellipse crop box handler (resize, create)
+ *   - tools/lasso.ts        — free-form polygon selection handler (create)
+ *   - tools/wand.ts         — magic wand flood-fill selection handler (create)
  */
 
-export { createClipBoxHandler } from './clipbox';
-export { createLassoHandler, lassoPreviewPathRef } from './lasso';
-export { createWandHandler } from './wand';
+export { createSelectionMoveHandler } from './move';
+export { createClipBoxHandler } from './tools/regular';
+export { createLassoHandler, lassoPreviewPathRef } from './tools/lasso';
+export { createWandHandler } from './tools/wand';

@@ -91,7 +91,7 @@ export const getWorkspaceStyles = (
         topBarOuter: {
             className: `absolute top-0 left-[var(--v-offset-fixed-left)] right-[var(--v-offset-fixed-right)] border-transparent pointer-events-none flex items-center justify-center transition-all duration-500`,
             style: {
-                zIndex: EDITOR_Z_INDEX.UI.WORKSPACE_BASE + 5,
+                zIndex: EDITOR_Z_INDEX.UI.OVERLAY + 5,
                 height: `${WORKSPACE_GEOMETRY.HEADER_HEIGHT}px`
             }
         },

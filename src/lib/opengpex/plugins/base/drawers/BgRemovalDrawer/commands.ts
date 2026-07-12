@@ -20,7 +20,6 @@
 'use client';
 
 import { EditorContextValue, EditorCommand, asLocalPoint, asLocalPolygon, asLocalRect } from '@opengpex/editor/core/types';
-import { computePolygonBounds } from '@opengpex/editor/core/geometry/operators/polygon';
 import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
 import { SettingsPanelAPI } from '../../panels/SettingsPanel/protocols';
 import { bgRemovalClient } from './worker/client';
@@ -248,7 +247,7 @@ export const BG_REMOVAL_COMMANDS = {
         // Write the polygon selection to clipBoxes['bg-removal']
         // Map raw {x,y} to branded LocalPoint, compute bounds, wrap as LocalPolygon
         const localRings = result.rings.map(ring => ring.map(p => asLocalPoint({ x: p.x, y: p.y })));
-        const bounds = asLocalRect(computePolygonBounds(localRings));
+        const bounds = asLocalRect(ctx.geometry.polygon.computePolygonBounds(localRings));
         const polygon = asLocalPolygon(localRings, bounds, true);
         actions.setClipBox(frameId, 'wand', polygon);
 

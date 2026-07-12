@@ -122,9 +122,20 @@ export function useClipOverlayCommands() {
 
 /**
  * useClipCursor: Sets per-tool custom cursor when clip mode is active.
+ *
+ * For irregular tools (lasso/wand), dynamically switches between the tool's
+ * default cursor and 'move' cursor when the pointer hovers inside an existing
+ * polygon selection. This gives the user visual feedback that they can drag
+ * to move (or Meta+drag to peel) the selection.
  */
 export function useClipCursor(isClipActive: boolean, cropTool: CropTool) {
-  const { actions } = useEditorServices();
+  const { actions, geometry } = useEditorServices();
+  const { activeFrame } = useEditorState();
+
+  // Ref to keep latest frame accessible in the pointermove closure without
+  // re-registering the listener on every frame change.
+  const frameRef = useRef(activeFrame);
+  useLayoutEffect(() => { frameRef.current = activeFrame; });
 
   useEffect(() => {
     if (isClipActive) {
@@ -134,6 +145,59 @@ export function useClipCursor(isClipActive: boolean, cropTool: CropTool) {
       actions.fast.setCursor(null);
     }
   }, [isClipActive, cropTool, actions]);
+
+  // ─── Polygon hover cursor for irregular tools ──────────────────────────
+  useEffect(() => {
+    const strategy = CROP_TOOL_STRATEGIES[cropTool];
+    if (!isClipActive || strategy.family !== 'irregular') return;
+
+    const toolCursor = strategy.cursor;
+    let currentCursor = toolCursor;
+
+    const onPointerMove = (ev: PointerEvent) => {
+      const frame = frameRef.current;
+      if (!frame) return;
+
+      // Get polygon from clipBoxes
+      const poly = frame.clipBoxes?.[cropTool] as LocalPolygon | undefined;
+      if (!poly || !poly.rings || poly.rings.length === 0) {
+        if (currentCursor !== toolCursor) {
+          currentCursor = toolCursor;
+          actions.fast.setCursor(toolCursor);
+        }
+        return;
+      }
+
+      // Project pointer position to canvas-local coordinates
+      const container = document.querySelector('.editor-viewport-container');
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const vx = ev.clientX - rect.left;
+      const vy = ev.clientY - rect.top;
+
+      const currentCam = actions.fast.latestCamera(frame.id);
+      const worldPt = geometry.space.screenToWorld(vx, vy, frame, currentCam);
+      const canvasPt = geometry.space.worldToLocal(worldPt.x, worldPt.y, frame);
+
+      // Point-in-polygon hit test
+      const inside = geometry.polygon.isPointInPolygon(canvasPt, poly.rings);
+      const desired = inside ? 'move' : toolCursor;
+
+      if (desired !== currentCursor) {
+        currentCursor = desired;
+        actions.fast.setCursor(desired);
+      }
+    };
+
+    document.addEventListener('pointermove', onPointerMove, { passive: true });
+    return () => {
+      document.removeEventListener('pointermove', onPointerMove);
+      // Restore tool cursor on cleanup
+      if (currentCursor !== toolCursor) {
+        actions.fast.setCursor(toolCursor);
+      }
+    };
+  }, [isClipActive, cropTool, actions, geometry]);
 
   useEffect(() => {
     return () => {

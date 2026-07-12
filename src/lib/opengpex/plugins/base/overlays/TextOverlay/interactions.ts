@@ -17,8 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionHandler, Layer, Frame, LocalRect, WorldPoint, asLocalShape, asWorldRect } from '@opengpex/editor/core/types';
-import { pickLayersAt } from '@opengpex/editor/core/geometry/operators/space';
+import { InteractionHandler, GeometryService, Layer, Frame, LocalRect, asLocalShape, asWorldRect } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import { createTransformHandler } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
@@ -38,13 +37,12 @@ const CMD_EDIT_START_UID = _CMD_EDIT_START_UID;
 /**
  * Finds hit layer of type 'text' using core geometry hit-testing.
  * Uses pickLayersAt (supports visibleShape, rotation, interactive flag) filtered to text layers.
- * Accepts canvas-local point and converts to world coordinates internally.
+ * Accepts canvas-local point and converts to world coordinates via geometry service.
  */
-function findTextLayerAtPoint(frame: Frame, point: { x: number; y: number }): Layer | null {
-  // Convert canvas-local point to world coordinates (origin at canvas center)
-  const worldPoint = { x: point.x - frame.canvas.w / 2, y: point.y - frame.canvas.h / 2 } as WorldPoint;
-  const hits = pickLayersAt(worldPoint, frame.layers);
-  return hits.find(l => l.type === 'text') || null;
+function findTextLayerAtPoint(geometry: GeometryService, frame: Frame, point: { x: number; y: number }): Layer | null {
+  const worldPoint = geometry.space.localToWorld(point.x, point.y, frame);
+  const hits = geometry.space.pickLayersAt(worldPoint, frame.layers);
+  return hits.find((l: Layer) => l.type === 'text') || null;
 }
 
 // ─── TextMoveHandler ───────────────────────────────────────────────────────────
@@ -91,7 +89,7 @@ export const createTextMoveHandler = (): InteractionHandler => {
       }
 
       // Case 2: Pre-editing state -> find text layer via hit detection
-      const hitLayer = findTextLayerAtPoint(e.activeFrame, e.point.canvas);
+      const hitLayer = findTextLayerAtPoint(e.geometry, e.activeFrame, e.point.canvas);
       if (hitLayer) {
         targetLayerId = hitLayer.id;
         return true;
@@ -276,7 +274,7 @@ export const createTextPlaceHandler = (): InteractionHandler => {
       const frame = e.activeFrame;
 
       // Check if clicking an existing text layer -> wake up editing
-      const hitTextLayer = findTextLayerAtPoint(frame, e.point.canvas);
+      const hitTextLayer = findTextLayerAtPoint(e.geometry, frame, e.point.canvas);
       if (hitTextLayer) {
         // Enter editing state via command system (automatically establish undo baseline)
         e.actions.executeCommand(CMD_EDIT_START_UID, {

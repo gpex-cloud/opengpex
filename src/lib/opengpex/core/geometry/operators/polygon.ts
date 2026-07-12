@@ -121,6 +121,32 @@ export function layerLocalToFrameLocal(poly: LocalPolygon, layer: Layer, frame: 
   return worldToLocalPolygon(world, frame);
 }
 
+// ─────────────────────────── Polygon Translation ───────────────────────────────
+
+/**
+ * translatePolygon: Translate all rings in a LocalPolygon by (dx, dy).
+ *
+ * Returns a new LocalPolygon with:
+ *   - Every point in every ring offset by (dx, dy)
+ *   - Bounding rect translated by (dx, dy) (width/height unchanged)
+ *   - antiAliased flag preserved
+ *
+ * Used by the unified selection-move handler to reposition any polygon
+ * selection (lasso / wand / AI matting) without recreating it.
+ */
+export function translatePolygon(poly: LocalPolygon, dx: number, dy: number): LocalPolygon {
+  const newRings = poly.rings.map(ring =>
+    ring.map(p => asLocalPoint({ x: p.x + dx, y: p.y + dy }))
+  );
+  const newRect = asLocalRect({
+    x: poly.rect.x + dx,
+    y: poly.rect.y + dy,
+    w: poly.rect.w,
+    h: poly.rect.h,
+  });
+  return asLocalPolygon(newRings, newRect, poly.antiAliased);
+}
+
 // ─────────────────────────── Polygon Utility Algorithms ────────────────────────
 
 /**

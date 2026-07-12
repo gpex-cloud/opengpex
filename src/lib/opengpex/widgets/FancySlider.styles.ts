@@ -40,12 +40,23 @@ export const SLIDER_THUMB_CSS = /* css */ `
     --thumb-w: 12px;
     --thumb-h: 18px;
     --track-height: 8px;
-    --thumb-fill: var(--text-main);
+    --thumb-fill: #52525b;
+    --thumb-grip: rgba(255, 255, 255, 0.65);
+    --thumb-shadow: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.18));
+    --thumb-shadow-hover: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.22)) brightness(1.2);
+    --track-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.10);
     height: calc(var(--track-height) + var(--thumb-h) + 2px);
     padding: 0;
     margin: 0;
     background: transparent;
     outline: none;
+  }
+  .dark .opengpex-basic-slider {
+    --thumb-fill: var(--text-main);
+    --thumb-grip: rgba(0, 0, 0, 0.35);
+    --thumb-shadow: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+    --thumb-shadow-hover: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45)) brightness(1.3);
+    --track-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
   }
 
   /* ── WebKit / Blink ─────────────────────────────────── */
@@ -54,7 +65,7 @@ export const SLIDER_THUMB_CSS = /* css */ `
     border-radius: 2px;
     background: var(--track-bg);
     border: 1px solid var(--border-subtle);
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+    box-shadow: var(--track-shadow);
   }
   .opengpex-basic-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
@@ -64,13 +75,19 @@ export const SLIDER_THUMB_CSS = /* css */ `
     margin-top: calc(var(--track-height) / 2 + 1px);
     border: none;
     cursor: ew-resize;
-    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+    filter: var(--thumb-shadow);
     clip-path: ${CLIP_PATH};
-    background: var(--thumb-fill);
+    background:
+      linear-gradient(to bottom,
+        transparent 53%, var(--thumb-grip) 53%, var(--thumb-grip) 59%,
+        transparent 59%, transparent 65%, var(--thumb-grip) 65%, var(--thumb-grip) 71%,
+        transparent 71%)
+      no-repeat center / 60% 100%,
+      var(--thumb-fill);
   }
   .opengpex-basic-slider:hover::-webkit-slider-thumb,
   .opengpex-basic-slider:focus-visible::-webkit-slider-thumb {
-    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45)) brightness(1.3);
+    filter: var(--thumb-shadow-hover);
   }
 
   /* ── Firefox ────────────────────────────────────────── */
@@ -79,20 +96,26 @@ export const SLIDER_THUMB_CSS = /* css */ `
     border-radius: 2px;
     background: var(--track-bg);
     border: 1px solid var(--border-subtle);
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+    box-shadow: var(--track-shadow);
   }
   .opengpex-basic-slider::-moz-range-thumb {
     width: var(--thumb-w);
     height: var(--thumb-h);
     border: none;
     cursor: ew-resize;
-    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+    filter: var(--thumb-shadow);
     clip-path: ${CLIP_PATH};
-    background: var(--thumb-fill);
+    background:
+      linear-gradient(to bottom,
+        transparent 53%, var(--thumb-grip) 53%, var(--thumb-grip) 59%,
+        transparent 59%, transparent 65%, var(--thumb-grip) 65%, var(--thumb-grip) 71%,
+        transparent 71%)
+      no-repeat center / 60% 100%,
+      var(--thumb-fill);
   }
   .opengpex-basic-slider:hover::-moz-range-thumb,
   .opengpex-basic-slider:focus-visible::-moz-range-thumb {
-    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45)) brightness(1.3);
+    filter: var(--thumb-shadow-hover);
   }
   /* Firefox paints a "progress" fill by default — suppress it. */
   .opengpex-basic-slider::-moz-range-progress {

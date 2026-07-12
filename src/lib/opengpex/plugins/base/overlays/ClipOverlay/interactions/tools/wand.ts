@@ -25,12 +25,11 @@ import {
   asLocalRect,
   asLocalPolygon,
 } from '@opengpex/editor/core/types';
-import { computePolygonBounds } from '@opengpex/editor/core/geometry/operators/polygon';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
-import { magicWandClient } from '../wand/client';
-import { ClipOptionsAPI } from '../../../options/ClipOptions/protocols';
-import { makeCropToolGuard } from './guard';
+import { magicWandClient } from '../../workers/client';
+import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
+import { makeCropToolGuard } from '../guard';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -270,7 +269,7 @@ export const createWandHandler = (): InteractionHandler => {
         const wandAA = clipBox?.spatial.antiAliased ?? true;
 
         const layerRings = resp.rings.map(ring => ring.map(p => asLocalPoint({ x: p.x, y: p.y })));
-        const layerBounds = asLocalRect(computePolygonBounds(layerRings));
+        const layerBounds = asLocalRect(e.geometry.polygon.computePolygonBounds(layerRings));
         const layerPoly = asLocalPolygon(layerRings, layerBounds, wandAA);
         const framePoly = e.geometry.polygon.layerLocalToFrameLocal(
           layerPoly, layer, e.activeFrame

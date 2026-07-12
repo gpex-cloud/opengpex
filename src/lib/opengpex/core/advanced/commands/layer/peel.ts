@@ -103,11 +103,12 @@ export const LayerPeelCommands = {
         // ─── First peel: exchange is empty → standard peel from host ───
         const latestLayer = actions.fast.latestLayer(activeFrame.id, host.id) || host;
 
-        // Resolve the clip shape from `frame.latestClipTool`. Peel only
-        // fires via Meta+drag on the clip box (createClipBoxHandler), so the
-        // active tool's slot in clipBoxes is guaranteed non-empty at this point.
+        // Resolve the clip shape from `frame.latestClipTool`. Peel fires via
+        // Meta+drag on the unified createSelectionMoveHandler, so the active
+        // tool's slot in clipBoxes is guaranteed non-empty at this point.
+        // Supports both regular (LocalShape) and irregular (LocalPolygon) selections.
         const box = getClipBox(activeFrame);
-        const clipShape = box?.regular ? box.spatial : null;
+        const clipShape = box ? box.spatial : null;
         if (!clipShape) return; // defensive — should never happen during a real peel
         const result = ctx.layers.fragmentToExistLayer(activeFrame, latestLayer, exchange, clipShape);
         if (!result) return;
