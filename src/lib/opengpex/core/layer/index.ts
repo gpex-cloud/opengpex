@@ -392,7 +392,13 @@ export function createLayerService(
         visibleShape: { ...intersection.visibleShape },
         interactive: true,
         opacity: 1,
-        visible: true
+        visible: true,
+        // Propagate non-destructive adjustment state so the fragment renders
+        // identically to the source layer (fix: peel losing adjustments).
+        adjustments: sourceLayer.adjustments,
+        curves: sourceLayer.curves,
+        levels: sourceLayer.levels,
+        channelMix: sourceLayer.channelMix,
       };
 
       return { updatedLayer, localShape };

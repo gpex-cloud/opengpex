@@ -6,14 +6,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ## v1.0.0-beta.25
 
+- Fix peel interaction losing layer adjustment effects on fragments and double-applying on merge
 - Add edge snapping for resize handles — dragged edges snap to canvas/layer boundaries, with scope toggle in SmartGuides settings
 - Show real-time move-delta label (Δ x, y) when dragging clip selections
 - Refactor clip selection move to support smart guide alignment and pixel-accurate snapping
 - Fix peel stamp (CMD+Alt drag) losing host pixels on repeated stamp operations
 - Fix clear selection discarding peeled pixels instead of merging them back
-- Unify clip tool naming from legacy "Crop" to "Clip" across the codebase
 - Refactor ClipOverlay interactions into modular tool subdirectories (regular, lasso, wand)
-- Fix FancySlider light mode appearance with softer thumb color and grip lines
 - Fix OptionBar z-index occlusion by DrawerBar
 
 ---

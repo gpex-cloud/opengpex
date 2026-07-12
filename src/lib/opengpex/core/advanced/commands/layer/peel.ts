@@ -215,13 +215,27 @@ export const LayerPeelCommands = {
         try {
           // [3] Call PixelService to execute off-screen compositing.
           // Merges host (base), all stamped frags, and the final exchange layer in sequence.
+          //
+          // 💡 Strip adjustment state from ALL layers before merge so the Worker
+          // composites raw bitmaps only. The host retains its adjustment properties
+          // in the store — the renderer will apply them once at display time.
+          // This prevents double-application of adjustments (once by Worker bake,
+          // once by Canvas2dEngine filter pass).
+          const stripAdj = (l: typeof host) => ({
+            ...l,
+            adjustments: undefined,
+            curves: undefined,
+            levels: undefined,
+            channelMix: undefined,
+          });
+
           const mergeItems = [
-            ...frags.map(f => ({ layer: f, relative: true })),
-            { layer: exchange, relative: true }
+            ...frags.map(f => ({ layer: stripAdj(f), relative: true })),
+            { layer: stripAdj(exchange), relative: true }
           ];
 
           const assetResult = await pixels.worker.asAsset(
-            pixels.worker.mergeLayersToLayer(host, mergeItems)
+            pixels.worker.mergeLayersToLayer(stripAdj(host), mergeItems)
           );
           if (!assetResult) throw new Error('Asset registration failed');
 
@@ -234,7 +248,10 @@ export const LayerPeelCommands = {
 
           // [5] Start transaction update (commit all changes atomically)
           layers.updateLayer(activeFrame.id, (tx) => {
-            // Update host: set asset + clean up hole masks
+            // Update host: set merged asset + clean up hole masks.
+            // Adjustment state is intentionally PRESERVED — the Worker merged
+            // raw bitmaps without baking adjustments, so the renderer will
+            // apply the host's adjustments exactly once at display time.
             tx.edit(host.id)
               .setAsset(assetResult)
               .removeMask('mask-peel-hole');
