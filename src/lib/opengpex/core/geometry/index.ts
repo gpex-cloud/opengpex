@@ -46,7 +46,7 @@ import {
   shapeToPoint2D, point2dToLocalShape, point2dToLocalPolygon,
   invertRings, isBoundingRing, computePolygonBounds as computePolygonBoundsP2D
 } from './operators/point2d';
-import { snapRect, snapToPixel, snapRectToPixel } from './operators/snapping';
+import { snapRect, snapEdge, snapToPixel, snapRectToPixel } from './operators/snapping';
 import {
   decomposeMatrix,
   getLayerWorldMatrix,
@@ -133,6 +133,7 @@ export function createGeometryService(): GeometryService {
       snapToPixel: <T extends Rect | Point2D>(r: T, strategy?: 'round' | 'floor' | 'ceil') => snapToPixel(r as Rect & Point2D, strategy) as T,
       snapPoint: (pos: Point2D) => snapToPixel(pos),
       snapRect: (rect: Rect, frame: Frame, options?: { clamp?: boolean; threshold?: number; excludeLayerId?: string; snapToCanvas?: boolean; snapToBirth?: boolean; snapToLayers?: boolean; excludeLayerTypes?: string[]; ignoreLockedLayers?: boolean; ignoreSmallLayers?: boolean; smallLayerThreshold?: number; maxSnapTargets?: number }) => snapRect(rect, frame, options),
+      snapEdge: (rect: Rect, handle: string, frame: Frame, options?: { threshold?: number; snapToCanvas?: boolean; snapToLayers?: boolean; maxSnapTargets?: number }) => snapEdge(rect, handle, frame, options),
       snapRectToPixel: (
         targetRect: WorldRect,
         canvasDim: Dimensions,

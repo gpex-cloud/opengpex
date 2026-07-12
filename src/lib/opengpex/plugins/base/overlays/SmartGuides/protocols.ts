@@ -52,6 +52,14 @@ export interface SmartGuidesConfig {
   smallLayerThreshold: number;
   /** Maximum number of layers participating in snap calculation */
   maxSnapTargets: number;
+
+  // ─── Edge Snap Scope ───
+  /**
+   * Controls when edge snapping (snapEdge) is active during resize operations.
+   * - 'recanvas': Only snap edges during Re-Canvas resize (default)
+   * - 'all': Snap edges for all selection resize operations
+   */
+  edgeSnapScope: 'recanvas' | 'all';
 }
 
 /**

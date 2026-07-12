@@ -55,7 +55,7 @@ export const plugin: EditorPlugin = {
       scope: "public",
     },
     {
-      id: P.SIGNAL_CROP_FEATHER,
+      id: P.SIGNAL_CLIP_FEATHER,
       name: "Feather Radius (px)",
       defaultValue: 0,
       scope: "public",

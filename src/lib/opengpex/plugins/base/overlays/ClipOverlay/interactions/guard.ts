@@ -20,13 +20,13 @@
 import { InteractionEvent } from '@opengpex/editor/core/types';
 import {
   ClipOptionsAPI,
-  CROP_TOOL_STRATEGIES,
-  CropTool,
-  CropToolStrategy,
+  CLIP_TOOL_STRATEGIES,
+  ClipTool,
+  ClipToolStrategy,
 } from '../../../options/ClipOptions/protocols';
 
 /**
- * makeCropToolGuard — Strategy-driven handler dispatch helper.
+ * makeClipToolGuard — Strategy-driven handler dispatch helper.
  *
  * Returns `true` exactly when the editor is in clip mode AND the active
  * cropTool's `handlerKind` matches `targetKind`. Each handler uses one such
@@ -34,9 +34,9 @@ import {
  *   1. all "is this my pointer event?" branching consults the same Strategy
  *      table (Single Source of Truth in `protocols.ts`);
  *   2. adding a new clip tool requires zero changes here — only adding a row
- *      to `CROP_TOOL_STRATEGIES` plus (optionally) a new handler factory.
+ *      to `CLIP_TOOL_STRATEGIES` plus (optionally) a new handler factory.
  */
-export function makeCropToolGuard(targetKind: CropToolStrategy['handlerKind']) {
+export function makeClipToolGuard(targetKind: ClipToolStrategy['handlerKind']) {
   return (e: InteractionEvent): boolean => {
     // ─── Mode admission ────────────────────────────────────────────────
     // Re-Canvas operates as a *fully orthogonal* modal on top of pan
@@ -55,8 +55,8 @@ export function makeCropToolGuard(targetKind: CropToolStrategy['handlerKind']) {
     // clipbox handler to dispatch — so synthesize `'rect'` as the active
     // tool here. This mirrors the synthesis done in `ClipOverlay/hooks.ts`
     // for the rendering side.
-    const rawTool = (e.activeFrame?.latestClipTool as CropTool) || 'rect';
-    const effectiveTool: CropTool = inReCanvas ? 'rect' : rawTool;
-    return CROP_TOOL_STRATEGIES[effectiveTool].handlerKind === targetKind;
+    const rawTool = (e.activeFrame?.latestClipTool as ClipTool) || 'rect';
+    const effectiveTool: ClipTool = inReCanvas ? 'rect' : rawTool;
+    return CLIP_TOOL_STRATEGIES[effectiveTool].handlerKind === targetKind;
   };
 }

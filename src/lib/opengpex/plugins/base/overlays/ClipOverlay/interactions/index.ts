@@ -21,7 +21,7 @@
  * ClipOverlay Interaction Handlers — Barrel Export
  *
  * Each handler is in its own module for maintainability:
- *   - guard.ts              — shared `makeCropToolGuard` strategy dispatch helper
+ *   - guard.ts              — shared `makeClipToolGuard` strategy dispatch helper
  *   - move.ts              — unified move + peel for ALL selection types (tool-agnostic)
  *   - tools/regular.ts      — rect/ellipse crop box handler (resize, create)
  *   - tools/lasso.ts        — free-form polygon selection handler (create)

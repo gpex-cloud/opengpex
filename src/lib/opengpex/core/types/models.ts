@@ -300,7 +300,7 @@ export interface Frame {
   /**
    * Per-frame active clip tool. Persisted with the frame so switching frames
    * restores the tool the user last used on that specific frame.
-   * Default: 'rect'. Updated by `setCropTool`.
+   * Default: 'rect'. Updated by `setClipTool`.
    */
   latestClipTool: string; // 'rect' | 'ellipse' | 'lasso' | 'wand'
 

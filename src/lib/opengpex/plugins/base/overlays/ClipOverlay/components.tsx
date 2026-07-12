@@ -28,6 +28,7 @@ import {
   useCropDimSync,
   useRegularBoxSync,
   useSelectionAntsSync,
+  useMoveDeltaSync,
 } from "./useFastSync";
 import { lassoPreviewPathRef } from "./interactions";
 import { PixelGridOverlayAPI } from "../PixelGridOverlay/protocols";
@@ -116,6 +117,9 @@ export function ClipOverlayMain() {
 
   // Dimension label
   const { dimLabelRef } = useCropDimSync(boxActive, isReCanvas);
+
+  // Move-delta label (shows "Δ dx, dy" during selection drag)
+  const { deltaContainerRef } = useMoveDeltaSync(isOverlayActive, cropTool);
 
   // ─── Lasso preview path ref callback ─────────────────────────────────────
   const previewPathRef = useRef<SVGPathElement | null>(null);
@@ -296,8 +300,24 @@ export function ClipOverlayMain() {
             </span>
             <span className="text-[11px] font-bold text-white/40 ml-0.5">px</span>
           </div>
+
         </div>
       )}
+
+      {/* Move-delta label: independently positioned via useFastAnchorSync.
+          Works for ALL selection types (regular + irregular). */}
+      <div
+        ref={deltaContainerRef}
+        className="absolute top-0 left-0 bg-zinc-900/90 backdrop-blur-md border border-white/10 rounded flex items-center shadow-2xl pointer-events-none whitespace-nowrap"
+        style={{
+          padding: "1px 5px",
+          gap: "2px",
+          display: 'none',
+        }}
+      >
+        <span className="text-[11px] font-black text-emerald-400 tabular-nums tracking-tighter" />
+        <span className="text-[11px] font-bold text-white/40 ml-0.5">px</span>
+      </div>
     </div>
   );
 }

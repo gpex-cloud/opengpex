@@ -434,7 +434,7 @@ export function useEditorStore() {
         //   • HMR re-evaluating the plugin module
         //   • Any conditional unmount+remount of the host component (e.g.
         //     ClipOptions briefly unmounting due to a parent re-render around
-        //     re-canvas toggle) would slam SIGNAL_CROP_TOOL back to 'rect',
+        //     re-canvas toggle) would slam SIGNAL_CLIP_TOOL back to 'rect',
         //     even though the user had just selected ellipse / lasso / wand.
         //
         // The user-visible symptom that motivated this fix: select ellipse →

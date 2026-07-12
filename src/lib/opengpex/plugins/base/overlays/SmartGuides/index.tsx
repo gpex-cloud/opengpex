@@ -54,7 +54,8 @@ export const plugin: EditorPlugin = {
     ignoreLockedLayers: true,
     ignoreSmallLayers: true,
     smallLayerThreshold: 400,
-    maxSnapTargets: 8
+    maxSnapTargets: 8,
+    edgeSnapScope: 'recanvas'
   },
   commands: Object.values(SMART_GUIDES_COMMANDS),
   contributions: [

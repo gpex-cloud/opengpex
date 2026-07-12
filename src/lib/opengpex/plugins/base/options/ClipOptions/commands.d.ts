@@ -8,7 +8,7 @@
  */
 
 import type { CommandInstance, InteractionSignalValue } from '@opengpex/editor/core/types';
-import type { CropTool } from './protocols';
+import type { ClipTool } from './protocols';
 
 /** Type map for usePluginCommands<ClipCommandsMap>() */
 export interface ClipCommandsMap {
@@ -25,7 +25,7 @@ export interface ClipCommandsMap {
   branchCreateCmd: CommandInstance<{ rect: DOMRect }>;
   boxResetCmd: CommandInstance;
   antiAliasToggleCmd: CommandInstance;
-  cropToolSetCmd: CommandInstance<{ tool: CropTool }>;
+  cropToolSetCmd: CommandInstance<{ tool: ClipTool }>;
   drillSelectionCmd: CommandInstance;
   layerViaCopyCmd: CommandInstance;
   layerViaCutCmd: CommandInstance;
@@ -41,7 +41,7 @@ export interface ClipSignalsMap {
     value: boolean;
     set: (val: boolean) => void;
   };
-  cropFeatherValueSignal: {
+  clipFeatherValueSignal: {
     value: number;
     set: (val: number) => void;
   };

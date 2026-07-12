@@ -266,6 +266,115 @@ function getSnappedPosition(
 }
 
 /**
+ * Edge-level snapping for resize operations.
+ *
+ * Unlike `snapRect` which snaps the whole rect by center/edges (for move),
+ * `snapEdge` only snaps the **actively dragged edge(s)** to nearby target
+ * edges. This is essential for resize handles where the user expects:
+ *   - Dragging the right handle → right edge snaps to canvas right / layer edges
+ *   - Dragging the SE corner → both right and bottom edges snap independently
+ *
+ * Returns an adjusted rect (with the active edge(s) snapped) + smart guide data.
+ */
+export function snapEdge(
+  rect: Rect,
+  handle: string,
+  frame: Frame,
+  options: { threshold?: number } & SnapFilterOptions = {}
+): { rect: Rect, smartguides: SmartGuideData | null } {
+  const cameraScale = frame.camera?.k || 1;
+  const threshold = (options.threshold ?? 15) / cameraScale;
+
+  // Determine which edges are active based on handle
+  const snapX = handle.includes('e') ? 'right' : handle.includes('w') ? 'left' : null;
+  const snapY = handle.includes('s') ? 'bottom' : handle.includes('n') ? 'top' : null;
+
+  // Build target edge positions in canvas-local coordinates
+  const { w: cw, h: ch } = frame.canvas;
+  const targetXs: number[] = [];
+  const targetYs: number[] = [];
+
+  // Canvas edges
+  if (options.snapToCanvas !== false) {
+    targetXs.push(0, cw / 2, cw);
+    targetYs.push(0, ch / 2, ch);
+  }
+
+  // Layer edges
+  if (options.snapToLayers !== false) {
+    const layerTargets = frame.layers.order
+      .map(id => frame.layers.byId[id])
+      .filter(l => l.visible && l.role === 'host' && !l.locked)
+      .slice(0, options.maxSnapTargets || 8);
+
+    for (const l of layerTargets) {
+      const vr = l.visibleShape?.rect || { x: 0, y: 0, w: l.bounding.w, h: l.bounding.h };
+      // Convert layer bounding to canvas-local coords
+      const lx = l.cx + cw / 2 + vr.x - vr.w / 2;
+      const ly = l.cy + ch / 2 + vr.y - vr.h / 2;
+      targetXs.push(lx, lx + vr.w / 2, lx + vr.w);
+      targetYs.push(ly, ly + vr.h / 2, ly + vr.h);
+    }
+  }
+
+  const guides: SmartGuideData = {};
+  let newRect = { ...rect };
+
+  // Snap X edge
+  if (snapX) {
+    const activeEdgeX = snapX === 'right' ? rect.x + rect.w : rect.x;
+    let bestDiff = threshold;
+    let bestTarget: number | undefined;
+
+    for (const tx of targetXs) {
+      const diff = Math.abs(activeEdgeX - tx);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestTarget = tx;
+      }
+    }
+
+    if (bestTarget !== undefined) {
+      if (snapX === 'right') {
+        newRect = { ...newRect, w: bestTarget - newRect.x };
+      } else {
+        const oldRight = newRect.x + newRect.w;
+        newRect = { ...newRect, x: bestTarget, w: oldRight - bestTarget };
+      }
+      guides.x = bestTarget - cw / 2; // Convert to world-space for guide rendering
+    }
+  }
+
+  // Snap Y edge
+  if (snapY) {
+    const activeEdgeY = snapY === 'bottom' ? rect.y + rect.h : rect.y;
+    let bestDiff = threshold;
+    let bestTarget: number | undefined;
+
+    for (const ty of targetYs) {
+      const diff = Math.abs(activeEdgeY - ty);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestTarget = ty;
+      }
+    }
+
+    if (bestTarget !== undefined) {
+      if (snapY === 'bottom') {
+        newRect = { ...newRect, h: bestTarget - newRect.y };
+      } else {
+        const oldBottom = newRect.y + newRect.h;
+        newRect = { ...newRect, y: bestTarget, h: oldBottom - bestTarget };
+      }
+      guides.y = bestTarget - ch / 2; // Convert to world-space for guide rendering
+    }
+  }
+
+  const smartguides = Object.keys(guides).length ? guides : null;
+  return { rect: newRect, smartguides };
+}
+
+/**
  * Snap a rectangle under the world coordinate system to the canvas local physical pixel grid (Snap world rectangle boundaries to canvas physical pixel grid)
  */
 export function snapRectToPixel(

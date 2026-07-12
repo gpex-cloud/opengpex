@@ -19,9 +19,10 @@
 
 import { useEffect, useRef } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
-import { useFastSync, useFastRectSync, useFastSvgGroupSync, useFastMarchingAntsSync } from '@opengpex/editor/core/motion/hooks/navigation';
+import { useFastSync, useFastRectSync, useFastSvgGroupSync, useFastMarchingAntsSync, useFastAnchorSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { LocalShape, LocalPolygon, asLocalShape, isPolygon } from '@opengpex/editor/core/types';
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+import { ClipTool } from '../../options/ClipOptions/protocols';
 
 const EMPTY_SHAPE: LocalShape = asLocalShape({ x: 0, y: 0, w: 0, h: 0 });
 
@@ -227,4 +228,77 @@ export function useSelectionAntsSync(
       if (pathRef.current) pathRef.current.setAttribute('d', '');
     }
   }, [isActive, groupRef, pathBgRef, pathRef]);
+}
+
+// ─── useMoveDeltaSync ──────────────────────────────────────────────────────────
+
+/**
+ * Fast-track hook for the move-delta label (e.g. "Δ 42, −18 px").
+ *
+ * Same pattern as `useCropDimSync`: on each Ticker frame, reads the current
+ * clip box position from the merged frame data and computes the difference
+ * from the drag-start position (stored in volatile transient by the move handler).
+ *
+ * Visible only during an active drag; hidden otherwise (transient is null → label hidden).
+ */
+export function useMoveDeltaSync(isActive: boolean, cropTool: ClipTool) {
+  const deltaContainerRef = useRef<HTMLDivElement>(null);
+  const { volatileRef } = useEditorServices();
+
+  // ─── Position: anchor to selection's bottom-left corner (local space) ───
+  useFastAnchorSync(deltaContainerRef, isActive, {
+    selector: (_v, f) => {
+      // Only position when a drag is active (transient has start data)
+      const start = volatileRef.current.transient['clipMoveStart'] as { x: number; y: number } | undefined;
+      if (!start) return null;
+
+      const entry = f.clipBoxes[cropTool];
+      if (!entry) return null;
+
+      const rect = isPolygon(entry)
+        ? (entry as LocalPolygon).rect
+        : (entry as LocalShape).rect;
+
+      // Anchor at bottom-left of the selection bounding rect
+      return { x: rect.x, y: rect.y + rect.h };
+    },
+    offset: { x: 0, y: 24 }, // below dimension label (6px for dim + ~18px gap)
+    space: 'local',
+  });
+
+  // ─── Content: compute and display dx/dy text + visibility ───
+  useFastSync(deltaContainerRef, isActive, (_v, f) => {
+    const el = deltaContainerRef.current;
+    if (!el) return;
+
+    const start = volatileRef.current.transient['clipMoveStart'] as { x: number; y: number } | undefined;
+    if (!start) {
+      el.style.display = 'none';
+      return;
+    }
+
+    const entry = f.clipBoxes[cropTool];
+    if (!entry) {
+      el.style.display = 'none';
+      return;
+    }
+
+    const currentRect = isPolygon(entry)
+      ? (entry as LocalPolygon).rect
+      : (entry as LocalShape).rect;
+
+    const dx = Math.round(currentRect.x - start.x);
+    const dy = Math.round(currentRect.y - start.y);
+
+    if (dx === 0 && dy === 0) {
+      el.style.display = 'none';
+      return;
+    }
+
+    const span = el.firstElementChild as HTMLSpanElement;
+    if (span) span.textContent = `Δ ${dx}, ${dy}`;
+    el.style.display = '';
+  });
+
+  return { deltaContainerRef };
 }

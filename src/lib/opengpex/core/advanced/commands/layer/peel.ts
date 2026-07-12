@@ -44,29 +44,13 @@ export const LayerPeelCommands = {
 
         const { host, exchange } = triplet.group;
 
-        // ─── "Stamp" mode: exchange already has data → optimistic update ───
-        // Photoshop-style instant feedback: synchronously remove the hole mask
-        // so the host appears whole again. The exchange layer stays in place and
-        // the rendering pipeline naturally composites host + exchange — giving
-        // the same visual as a baked merge, but with zero async overhead.
-        // The real pixel merge is deferred to commit (Space/Enter via mergeExchange).
+        // ─── "Stamp" mode: exchange already has data → copy fragment ───
+        // When CMD+Alt dragging an already-peeled fragment, leave a stamp (frag)
+        // at the current exchange position and keep the exchange active for
+        // continued dragging. The hole mask is PRESERVED — the host pixels were
+        // already cut out during the initial peel and the stamp is a copy placed
+        // at a potentially different location.
         if (triplet.dirty) {
-          const currentMasks = host.vectorMasks || [];
-          const newMasks = currentMasks.filter(m => !m.id.includes('mask-peel-hole'));
-
-          // Fast-track override: ensures the painter sees the mask removal
-          // immediately during the active drag interaction. Without this, the
-          // painter reads from the stale stateRef (not the Zustand store) while
-          // the interaction's volatile state is active, making the store-only
-          // update invisible until after drag ends.
-          actions.fast.override(activeFrame.id, host.id, { vectorMasks: newMasks });
-
-          // Also update the store for non-rendering consumers (getTriplet reads,
-          // mergeExchange at commit time, undo snapshots, etc.).
-          layers.updateLayer(activeFrame.id, (tx) => {
-            tx.edit(host.id).removeMask('mask-peel-hole');
-          });
-
           // ─── Create a temporary stamp (frag) layer at the current position ───
           // This ensures the stamp is visually left at the drag-start location instantly (0ms).
           // Both parentId and role ('frag') ensure it is treated as an internal sub-layer and hidden from the Layer List.

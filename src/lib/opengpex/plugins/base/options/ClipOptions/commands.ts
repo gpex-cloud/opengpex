@@ -24,7 +24,7 @@ import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/s
 import { CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS } from '@opengpex/editor/core/helpers/presets';
 import { clipComputeClient } from './workers/client';
 import * as P from './protocols';
-import type { CropTool } from './protocols';
+import type { ClipTool } from './protocols';
 
 
 /**
@@ -92,28 +92,28 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
 
 /**
  * Cycle the active crop tool by `step` (+1 forward, -1 backward) within
- * the declaration order of `CROP_TOOL_STRATEGIES`. Shared by
+ * the declaration order of `CLIP_TOOL_STRATEGIES`. Shared by
  * `cycleToolForward` (Tab) and `cycleToolBackward` (Shift+Tab) so the
  * dispatch path, undo semantics and signal-read freshness stay in one place.
  *
- * We delegate the actual write to `setCropTool` (via the ClipOptions
+ * We delegate the actual write to `setClipTool` (via the ClipOptions
  * instance UID) rather than calling `scoped.setSignal` directly, because
- * `setCropTool` carries the strategy projection (e.g. patching
+ * `setClipTool` carries the strategy projection (e.g. patching
  * `imageCropBox.type` to 'circle' when switching to ellipse) plus the
  * pluginConfig persistence (so cross-session restoration survives).
  *
- * Reading `SIGNAL_CROP_TOOL` directly (rather than caching a local copy)
+ * Reading `SIGNAL_CLIP_TOOL` directly (rather than caching a local copy)
  * means we always pick up the *latest* tool regardless of who last set it
  * (toolbar click, popover, or this very command in a previous beat).
  */
-function cycleCropTool(ctx: EditorContextValue, step: 1 | -1): void {
-  const order = Object.keys(P.CROP_TOOL_STRATEGIES) as CropTool[];
-  const current = (ctx.activeFrame?.latestClipTool as CropTool | undefined) ?? order[0];
+function cycleClipTool(ctx: EditorContextValue, step: 1 | -1): void {
+  const order = Object.keys(P.CLIP_TOOL_STRATEGIES) as ClipTool[];
+  const current = (ctx.activeFrame?.latestClipTool as ClipTool | undefined) ?? order[0];
   const idx = order.indexOf(current);
   // `(idx + step + len) % len` keeps the modulo non-negative even for step=-1.
   const next = order[(idx + step + order.length) % order.length];
   ctx.actions.executeCommand(
-    `${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}.${P.CMD_SET_CROP_TOOL}`,
+    `${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}.${P.CMD_SET_CLIP_TOOL}`,
     { tool: next }
   );
 }
@@ -173,7 +173,7 @@ export const CLIP_OPTIONS_COMMANDS = {
     execute: (ctx: EditorContextValue) => {
       if (ctx.state.interaction.interactionMode !== 'clip') return;
       if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
-      cycleCropTool(ctx, +1);
+      cycleClipTool(ctx, +1);
     },
     shortcut: { key: 'Tab' }
   } as EditorCommand<void, void>,
@@ -191,7 +191,7 @@ export const CLIP_OPTIONS_COMMANDS = {
     execute: (ctx: EditorContextValue) => {
       if (ctx.state.interaction.interactionMode !== 'clip') return;
       if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
-      cycleCropTool(ctx, -1);
+      cycleClipTool(ctx, -1);
     },
     shortcut: { key: 'Tab', shift: true }
   } as EditorCommand<void, void>,
@@ -283,7 +283,7 @@ export const CLIP_OPTIONS_COMMANDS = {
    * a rectangular footprint). The ClipOverlay mounts whenever Re-Canvas
    * is on (see `components.tsx::isOverlayActive`) regardless of
    * interactionMode, and the clipbox InteractionHandler admits pointer
-   * events whenever Re-Canvas is on (see `interactions.ts::makeCropToolGuard`).
+   * events whenever Re-Canvas is on (see `interactions.ts::makeClipToolGuard`).
    *
    * Deactivation never changes mode, mirroring activation — this leaves
    * the user wherever they were (pan, clip, etc.) before opening
@@ -409,21 +409,36 @@ export const CLIP_OPTIONS_COMMANDS = {
      * Uses `getClipBox` to resolve the active slot, then writes `null` to
      * clear it. This is the "Clear Selection" entry point referenced in the
      * clip tool guide §7.2 roadmap.
+     *
+     * BUG FIX (2026-07-13): If there's an active peel (exchange layer), we
+     * must commit/merge it before clearing. Otherwise the exchange layer
+     * remains dangling and the peeled pixels are lost.
      */
-    execute: (ctx: EditorContextValue) => {
+    execute: async (ctx: EditorContextValue) => {
       const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
       if (isReCanvas) return; // Re-Canvas crop box must always exist
 
       const frame = ctx.activeFrame;
       if (!frame) return;
 
-      const tool = (frame.latestClipTool as CropTool) || 'rect';
+      const tool = (frame.latestClipTool as ClipTool) || 'rect';
       const clipBox = getClipBox(frame);
       if (!clipBox) return; // already empty — nothing to clear
 
+      // If an exchange layer exists (from peel), merge it into host first.
+      // This mirrors the Enter (commitPeel) behaviour: bake before discard.
+      const activeLayer = frame.activeLayerId ? frame.layers.byId[frame.activeLayerId] : undefined;
+      const exchangeLayer = (activeLayer?.role === 'exchange')
+        ? activeLayer
+        : frame.layers.order.map(id => frame.layers.byId[id]).find(l => l.role === 'exchange' && l.hostId === frame.activeLayerId);
+
+      if (exchangeLayer) {
+        await ctx.actions.adv.layer.merge.mergeHost.execute.noundo();
+      }
+
       ctx.actions.setClipBox(frame.id, tool, null);
     }
-  } as EditorCommand<void, void>,
+  } as EditorCommand<void, Promise<void>>,
 
   toggleAntiAlias: {
     id: P.CMD_TOGGLE_ANTI_ALIAS,
@@ -455,8 +470,8 @@ export const CLIP_OPTIONS_COMMANDS = {
       if (ctx.state.interaction.interactionMode !== 'clip') return;
       const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
       if (isReCanvas) return; // canvas-resize is a frozen rectangle
-      const tool = (ctx.activeFrame?.latestClipTool as CropTool | undefined) ?? 'rect';
-      if (!P.CROP_TOOL_STRATEGIES[tool]?.supportsAntiAlias) return;
+      const tool = (ctx.activeFrame?.latestClipTool as ClipTool | undefined) ?? 'rect';
+      if (!P.CLIP_TOOL_STRATEGIES[tool]?.supportsAntiAlias) return;
 
       // ─── Unified path via getClipBox ─────────────────────────────────
       // getClipBox resolves the correct slot by latestClipTool and returns
@@ -482,7 +497,7 @@ export const CLIP_OPTIONS_COMMANDS = {
 
 
   /**
-   * setCropTool — strategy-driven tool switch.
+   * setClipTool — strategy-driven tool switch.
    *
    * Side-effect matrix (by `family`):
    *   - regular → regular   : `projectShape()` patches imageCropBox.type.
@@ -505,11 +520,11 @@ export const CLIP_OPTIONS_COMMANDS = {
    * undo should only affect meaningful document mutations (selections, masks,
    * pixel edits), not ephemeral tool-palette navigation.
    */
-  setCropTool: {
-    id: P.CMD_SET_CROP_TOOL,
+  setClipTool: {
+    id: P.CMD_SET_CLIP_TOOL,
     name: 'Set Crop Tool',
     undoable: false,
-    execute: (ctx: EditorContextValue, payload: { tool: CropTool }) => {
+    execute: (ctx: EditorContextValue, payload: { tool: ClipTool }) => {
       const { activeFrame, actions, scoped } = ctx;
       if (!activeFrame || !payload?.tool) return;
 
@@ -518,7 +533,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       // Write to frame model (per-frame, persistent, participates in undo).
       actions.updateFrame(activeFrame.id, { latestClipTool: tool });
 
-      const strategy = P.CROP_TOOL_STRATEGIES[tool];
+      const strategy = P.CLIP_TOOL_STRATEGIES[tool];
 
       // Regular projection: patch `shape.type` on the active crop box.
       // `projectShape` is `undefined` for irregular tools — branch skipped.
@@ -572,7 +587,7 @@ export const CLIP_OPTIONS_COMMANDS = {
         }
       }
     }
-  } as EditorCommand<{ tool: CropTool }, void>,
+  } as EditorCommand<{ tool: ClipTool }, void>,
 
   /**
    * CMD_DRILL_SELECTION — Plugin-level wrapper around `adv.layer.clip.drill`.
@@ -588,7 +603,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       { key: 'Delete' }
     ],
     execute: (ctx: EditorContextValue) => {
-      const feather = (ctx.scoped?.getSignal(P.SIGNAL_CROP_FEATHER) as number) || 0;
+      const feather = (ctx.scoped?.getSignal(P.SIGNAL_CLIP_FEATHER) as number) || 0;
       ctx.actions.adv.layer.clip.drill.execute({ feather });
     }
   } as EditorCommand<void, void>,
@@ -603,7 +618,7 @@ export const CLIP_OPTIONS_COMMANDS = {
     name: 'Layer via Copy',
     shortcut: { key: 'j', meta: true },
     execute: (ctx: EditorContextValue) => {
-      const feather = (ctx.scoped?.getSignal(P.SIGNAL_CROP_FEATHER) as number) || 0;
+      const feather = (ctx.scoped?.getSignal(P.SIGNAL_CLIP_FEATHER) as number) || 0;
       ctx.actions.adv.layer.cmdj.copy.execute({ feather });
     }
   } as EditorCommand<void, void>,
@@ -618,7 +633,7 @@ export const CLIP_OPTIONS_COMMANDS = {
     name: 'Layer via Cut',
     shortcut: { key: 'j', meta: true, shift: true },
     execute: (ctx: EditorContextValue) => {
-      const feather = (ctx.scoped?.getSignal(P.SIGNAL_CROP_FEATHER) as number) || 0;
+      const feather = (ctx.scoped?.getSignal(P.SIGNAL_CLIP_FEATHER) as number) || 0;
       ctx.actions.adv.layer.cmdj.cut.execute({ feather });
     }
   } as EditorCommand<void, void>,
@@ -727,7 +742,7 @@ export const CLIP_OPTIONS_COMMANDS = {
         const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(layerPoly, layer, frame);
 
         // ─── Write to current tool's slot (don't switch tool) ──────────
-        const tool = (frame.latestClipTool as P.CropTool) || 'rect';
+        const tool = (frame.latestClipTool as P.ClipTool) || 'rect';
         ctx.actions.setClipBox(frame.id, tool, framePoly);
 
         if (response.debug) {
@@ -770,7 +785,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       const clipBox = getClipBox(frame);
       if (!clipBox) return; // no selection to invert
 
-      const tool = (frame.latestClipTool as CropTool) || 'rect';
+      const tool = (frame.latestClipTool as ClipTool) || 'rect';
       const { w: canvasW, h: canvasH } = frame.canvas;
       const antiAliased = clipBox.spatial.antiAliased ?? true;
 
@@ -821,7 +836,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       const { distance } = payload;
       if (distance === 0) return;
 
-      const tool = (frame.latestClipTool as CropTool) || 'rect';
+      const tool = (frame.latestClipTool as ClipTool) || 'rect';
       const { w: canvasW, h: canvasH } = frame.canvas;
       const antiAliased = clipBox.spatial.antiAliased ?? true;
 
@@ -873,8 +888,8 @@ export const CLIP_INTERCEPTORS = {
       return true;
     }
 
-    // ─── Why we DO NOT mutate SIGNAL_CROP_TOOL on Re-Canvas entry ──────────
-    // Earlier revisions force-set SIGNAL_CROP_TOOL to 'rect' here whenever
+    // ─── Why we DO NOT mutate SIGNAL_CLIP_TOOL on Re-Canvas entry ──────────
+    // Earlier revisions force-set SIGNAL_CLIP_TOOL to 'rect' here whenever
     // the user entered Re-Canvas with an irregular tool (lasso / wand)
     // selected, on the theory that "canvas-resize is rectangular-only".
     // That mutation was destructive: there was no symmetric restore on
@@ -887,8 +902,8 @@ export const CLIP_INTERCEPTORS = {
     //
     // The "rect-only during Re-Canvas" semantic is already enforced
     // *non-destructively* by the synthesis layer:
-    //   • ClipOverlay/hooks.ts → `effectiveTool: CropTool = isReCanvas ? 'rect' : rawTool`
-    //   • interactions.ts::makeCropToolGuard → same synthesis on the dispatch path
+    //   • ClipOverlay/hooks.ts → `effectiveTool: ClipTool = isReCanvas ? 'rect' : rawTool`
+    //   • interactions.ts::makeClipToolGuard → same synthesis on the dispatch path
     // so during Re-Canvas the canvas rect is draggable and the ellipse /
     // lasso / wand handlers are filtered out, all without touching the
     // user's actual tool selection. When Re-Canvas closes, the original

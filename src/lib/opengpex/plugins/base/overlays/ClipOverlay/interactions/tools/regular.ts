@@ -24,11 +24,11 @@ import {
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import {
   ClipOptionsAPI,
-  CropTool,
+  ClipTool,
 } from '../../../../options/ClipOptions/protocols';
 import { InteractionMath } from '@opengpex/editor/stage/interaction/Math';
 import { createTransformHandler } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
-import { makeCropToolGuard } from '../guard';
+import { makeClipToolGuard } from '../guard';
 
 /**
  * ClipBoxHandler: Core interaction handler for clip tool.
@@ -46,16 +46,21 @@ export const createClipBoxHandler = (): InteractionHandler => {
     test: (e) => {
       // Strategy-driven guard: only fires when the active tool declares
       // `handlerKind: 'clipbox'` (rect / ellipse rows).
-      if (!makeCropToolGuard('clipbox')(e)) return null;
+      if (!makeClipToolGuard('clipbox')(e)) return null;
 
       const target = e.nativeEvent.target as HTMLElement;
 
       const handleElement = target.closest('[data-handle]') as HTMLElement;
       if (handleElement) {
         const handle = handleElement.dataset.handle || 'move';
-        // Move and peel are now handled by createSelectionMoveHandler.
-        // Only claim resize handles here.
-        if (handle === 'move') return null;
+        // Move and peel for clip selections are handled by createSelectionMoveHandler.
+        // Exception: Re-Canvas move stays here since it's a purely rectangular,
+        // no-peel operation with different constraints (no clamp, aspect ratio).
+        if (handle === 'move') {
+          const isReCanvas = !!e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas);
+          if (!isReCanvas) return null;
+          return 'move';
+        }
         return handle;
       }
 
@@ -93,7 +98,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
       } else {
         // Determine the active tool slot from the per-frame field, NOT from
         // the existing shape's type.
-        const latestTool = (frame.latestClipTool as CropTool) || 'rect';
+        const latestTool = (frame.latestClipTool as ClipTool) || 'rect';
         const activeTool = latestTool === 'ellipse' ? 'ellipse' : 'rect';
         const shapeType = latestTool === 'ellipse' ? 'circle' : 'rect';
         tx.update({ clipBoxes: { ...frame.clipBoxes, [activeTool]: { ...currentShape, type: shapeType, rect: newRect } } }, 'frame');
@@ -134,7 +139,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
           const currentShape = frame.canvasCropBox;
           tx.update({ canvasCropBox: { ...currentShape, rect: fullCanvasRect } }, 'frame');
         } else {
-          const latestTool = (frame.latestClipTool as CropTool) || 'rect';
+          const latestTool = (frame.latestClipTool as ClipTool) || 'rect';
           const activeTool = latestTool === 'ellipse' ? 'ellipse' : 'rect';
           const shapeType = latestTool === 'ellipse' ? 'circle' : 'rect';
           const currentShape = getRegularClipShape(frame);

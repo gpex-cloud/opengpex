@@ -179,6 +179,8 @@ export interface GeometryService {
   snapping: {
     /** Rect alignment snapping */
     snapRect: (rect: Rect, frame: Frame, options?: { clamp?: boolean, threshold?: number, excludeLayerId?: string, snapToCanvas?: boolean, snapToBirth?: boolean, snapToLayers?: boolean, excludeLayerTypes?: string[], ignoreLockedLayers?: boolean, ignoreSmallLayers?: boolean, smallLayerThreshold?: number, maxSnapTargets?: number }) => { x: number, y: number, smartguides: SmartGuideData | null };
+    /** Edge-level snapping for resize operations */
+    snapEdge: (rect: Rect, handle: string, frame: Frame, options?: { threshold?: number, snapToCanvas?: boolean, snapToLayers?: boolean, maxSnapTargets?: number }) => { rect: Rect, smartguides: SmartGuideData | null };
     /** Physical pixel snapping */
     snapToPixel: <T extends Rect | Point2D>(r: T, strategy?: 'round' | 'floor' | 'ceil') => T;
     /** Grid snapping */

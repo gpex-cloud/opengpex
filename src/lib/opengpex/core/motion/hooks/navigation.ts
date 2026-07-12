@@ -130,6 +130,56 @@ export function useFastRectSync<T extends Element>(
 }
 
 /**
+ * useFastAnchorSync: Lightweight point-anchored element synchronizer.
+ *
+ * Positions an element at a single canvas-local (or world) point projected to
+ * screen coordinates. Unlike `useFastRectSync` which sets left/top/width/height
+ * for a full rect, this hook only sets `transform: translate(x, y)` — ideal for
+ * floating labels, tooltips, or any UI that needs to track a point on canvas
+ * without occupying a rect-sized area.
+ *
+ * Applicable to: move-delta labels, coordinate readouts, polygon vertex handles.
+ * Auto-handling: fast/slow track merging, space projection, pixel snapping.
+ *
+ * @example
+ * useFastAnchorSync(labelRef, isActive, {
+ *   selector: (_v, f) => ({ x: clipBox.x, y: clipBox.y + clipBox.h }),
+ *   offset: { x: 0, y: 6 },  // 6px below anchor in screen space
+ *   space: 'local',
+ * });
+ */
+export function useFastAnchorSync<T extends Element>(
+  ref: React.RefObject<T | null>,
+  isActive: boolean,
+  options: {
+    selector: (v: VolatileState, frame: Frame, cam: CameraState) => { x: number; y: number } | null;
+    space?: 'local' | 'world';
+    /** Additional offset in screen pixels applied after projection */
+    offset?: { x: number; y: number };
+  }
+) {
+  const { geometry } = useEditorServices();
+  const { selector, space = 'local', offset } = options;
+
+  useFastSync(ref, isActive, (v, f, cam) => {
+    const point = selector(v, f, cam);
+    if (!point || !ref.current) return;
+
+    const screenPt = space === 'local'
+      ? geometry.space.localToScreen(point.x, point.y, f, cam)
+      : geometry.space.worldToScreen(point.x, point.y, f, cam);
+
+    const sx = Math.round(screenPt.x + (offset?.x ?? 0));
+    const sy = Math.round(screenPt.y + (offset?.y ?? 0));
+
+    Motion.set(ref.current, {
+      transform: `translate(${sx}px, ${sy}px)`,
+      overwrite: true,
+    });
+  });
+}
+
+/**
  * useFastMatrixSync: Standard layer/transform synchronizer
  * Applicable to: layer outlines, deformation control points, etc.
  * Auto-handling: matrix decomposition, reverse rotation, dimension synchronization.

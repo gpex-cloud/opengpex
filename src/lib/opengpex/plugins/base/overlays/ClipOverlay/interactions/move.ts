@@ -27,10 +27,10 @@ import {
 } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { InteractionMath } from '@opengpex/editor/stage/interaction/Math';
-import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
+import { createTransformHandler } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import {
   ClipOptionsAPI,
-  CropTool,
+  ClipTool,
 } from '../../../options/ClipOptions/protocols';
 
 /**
@@ -43,24 +43,29 @@ import {
  *   - **Peel (剥离)**: Meta+drag inside selection → fragment the image layer and
  *     move the fragment (delegating to `peelToExchange`)
  *
- * Architecture benefit: move/peel logic is written ONCE. New tool types only need
- * a creation handler; move and peel are automatically inherited.
+ * Architecture: wraps `createTransformHandler` to inherit its built-in capabilities:
+ *   - `InteractionMath.snapAndSync()` → smart guide alignment
+ *   - Canvas clamp
+ *   - Physical pixel alignment
+ *   - Proper transaction lifecycle
+ *
+ * For polygon selections, the TransformHandler operates on the polygon's bounding
+ * rect. The actual polygon vertices are translated by the rect's position delta
+ * in `onUpdate`.
  *
  * Priority: 130 (higher than clipbox=100, lasso/wand=110) so that clicking inside
  * an existing selection is intercepted here BEFORE the creation handlers can fire.
  * Clicks OUTSIDE the selection fall through to the tool's creation handler.
  */
 export const createSelectionMoveHandler = (): InteractionHandler => {
-  let type = '';
-  let startCanvas = { x: 0, y: 0 };
-  let startRect: LocalRect | null = null;
-  let startPolygon: LocalPolygon | null = null;
+  // ─── Closure state ─────────────────────────────────────────────────────────
   let isRegular = false;
-  let activeTool: CropTool = 'rect';
-  let tx: InteractionTransaction | null = null;
+  let activeTool: ClipTool = 'rect';
+  let startPolygon: LocalPolygon | null = null;
+  let initialRect: LocalRect = asLocalRect({ x: 0, y: 0, w: 0, h: 0 });
   let hasPeeled = false;
 
-  return {
+  return createTransformHandler({
     id: 'clip-selection-move',
     priority: 130,
 
@@ -69,73 +74,83 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       const inClip = e.state.interaction.interactionMode === 'clip';
       const inReCanvas = !!e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas);
       // Re-Canvas has its own move logic in clipbox handler (always rect).
-      // This unified handler only serves clip-mode selections.
-      if (!inClip || inReCanvas) return false;
+      if (!inClip || inReCanvas) return null;
 
       // ─── Existing selection check ─────────────────────────────────────
       const box = getClipBox(e.activeFrame);
-      if (!box) return false;
+      if (!box) return null;
 
       const me = e.nativeEvent as MouseEvent;
-      if (me.button === 2) return false;
+      if (me.button === 2) return null;
 
       // Skip UI elements
       const target = me.target as HTMLElement;
-      if (target.closest('button, a, input, [data-role="ui"], [contenteditable]')) return false;
+      if (target.closest('button, a, input, [data-role="ui"], [contenteditable]')) return null;
 
       // ─── Hit-test: is click inside the existing selection? ─────────────
       if (box.regular) {
-        // For regular shapes: accept clicks on the [data-handle="move"] element
-        // (the CSS crop-box div). This maintains backward compatibility with the
-        // existing DOM-based hit area.
         const handleElement = target.closest('[data-handle]') as HTMLElement;
-        if (!handleElement) return false;
+        if (!handleElement) return null;
         const handle = handleElement.dataset.handle || '';
-        if (handle !== 'move') return false;
+        if (handle !== 'move') return null;
       } else {
-        // For polygons: use geometric point-in-polygon test (no DOM element exists)
         const poly = box.spatial as LocalPolygon;
         const inside = e.geometry.polygon.isPointInPolygon(e.point.canvas, poly.rings);
-        if (!inside) return false;
+        if (!inside) return null;
       }
 
       // ─── Determine operation type ────────────────────────────────────
+      const activeLayer = e.activeFrame.activeLayerId
+        ? e.activeFrame.layers.byId[e.activeFrame.activeLayerId]
+        : undefined;
+      const isExchangeActive = activeLayer?.role === 'exchange';
+
       if (me.metaKey) {
-        type = 'peel';
-      } else {
-        type = 'move';
+        if (isExchangeActive) {
+          return me.altKey ? 'peel' : 'move';
+        } else {
+          return 'peel';
+        }
       }
-      return true;
+      return 'move';
     },
 
-    onStart: (e: InteractionEvent) => {
-      startCanvas = { x: e.point.canvas.x, y: e.point.canvas.y };
-      hasPeeled = false;
-
+    getInitialState: (e: InteractionEvent) => {
       const box = getClipBox(e.activeFrame);
-      if (!box) return;
+      hasPeeled = false;
+      activeTool = (e.activeFrame.latestClipTool as ClipTool) || 'rect';
+
+      if (!box) {
+        isRegular = true;
+        startPolygon = null;
+        initialRect = asLocalRect({ x: 0, y: 0, w: 0, h: 0 });
+        return initialRect;
+      }
 
       isRegular = box.regular;
-      activeTool = (e.activeFrame.latestClipTool as CropTool) || 'rect';
 
       if (box.regular) {
-        startRect = { ...box.spatial.rect };
         startPolygon = null;
+        initialRect = { ...box.spatial.rect };
       } else {
         startPolygon = box.spatial as LocalPolygon;
-        startRect = { ...startPolygon.rect };
+        initialRect = { ...startPolygon.rect };
       }
 
-      tx = new InteractionTransaction(e);
-      tx.begin();
+      // Store drag start position for the move-delta label
+      e.actions.fast.setTransient('clipMoveStart', { x: initialRect.x, y: initialRect.y });
+
+      return initialRect;
     },
 
-    onMove: (e: InteractionEvent) => {
-      if (!tx) return;
-      const { dx, dy } = InteractionMath.getCanvasDelta(e, startCanvas);
+    getConstraints: () => ({
+      clamp: true,  // Strict canvas bounds clamping for all selection moves
+    }),
+
+    onUpdate: (e: InteractionEvent, newRect: LocalRect, tx, { dx, dy, type }) => {
       const frame = e.activeFrame;
 
-      // ─── Peel mode: trigger peel on threshold, then translate exchange ─
+      // ─── Peel mode: trigger peel on threshold ─────────────────────────
       if (type === 'peel' && (e.nativeEvent as MouseEvent).metaKey) {
         if (!hasPeeled) {
           if (Math.sqrt(dx * dx + dy * dy) > 5) {
@@ -144,21 +159,16 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
               isCopy: (e.nativeEvent as MouseEvent).altKey
             }), 0);
           }
-          return;
+          return; // Don't move until peel is triggered
         }
       }
 
-      // ─── Move: translate selection ────────────────────────────────────
-      if (isRegular && startRect) {
-        // Translate the rect
-        const newRect = asLocalRect({
-          x: Math.round(startRect.x + dx),
-          y: Math.round(startRect.y + dy),
-          w: startRect.w,
-          h: startRect.h,
-        });
+      // ─── Move: update selection position ──────────────────────────────
+      // `newRect` is already snapped + clamped by TransformHandler's internal
+      // call to InteractionMath.snapAndSync(). Smart guides are written to
+      // transient automatically.
 
-        // Get the current shape to preserve type/antiAliased
+      if (isRegular) {
         const currentShape = frame.clipBoxes[activeTool] as LocalShape;
         tx.update({
           clipBoxes: {
@@ -166,9 +176,11 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
             [activeTool]: { ...currentShape, rect: newRect }
           }
         }, 'frame');
-      } else if (!isRegular && startPolygon) {
-        // Translate the polygon
-        const newPoly = e.geometry.polygon.translatePolygon(startPolygon, dx, dy);
+      } else if (startPolygon) {
+        // Polygon: compute position delta from initial bounding rect
+        const polyDx = newRect.x - initialRect.x;
+        const polyDy = newRect.y - initialRect.y;
+        const newPoly = e.geometry.polygon.translatePolygon(startPolygon, polyDx, polyDy);
         tx.update({
           clipBoxes: {
             ...frame.clipBoxes,
@@ -177,7 +189,7 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
         }, 'frame');
       }
 
-      // ─── Sync exchange layer position (shared logic) ──────────────────
+      // ─── Sync exchange layer position ─────────────────────────────────
       if (frame.activeLayerId) {
         const activeLayer = frame.layers.byId[frame.activeLayerId];
         const exchangeLayer = (activeLayer?.role === 'exchange')
@@ -187,49 +199,40 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
               .find(l => l.role === 'exchange' && l.hostId === frame.activeLayerId);
 
         if (exchangeLayer) {
-          // Compute new selection center in world coordinates
-          const rect = isRegular && startRect
-            ? asLocalRect({ x: Math.round(startRect.x + dx), y: Math.round(startRect.y + dy), w: startRect.w, h: startRect.h })
-            : (startPolygon ? asLocalRect({ x: startPolygon.rect.x + dx, y: startPolygon.rect.y + dy, w: startPolygon.rect.w, h: startPolygon.rect.h }) : null);
-
-          if (rect) {
-            const worldCenter = e.geometry.space.localToWorld(
-              rect.x + rect.w / 2,
-              rect.y + rect.h / 2,
-              frame
-            );
-            const vr = exchangeLayer.visibleShape?.rect;
-            const vox = vr?.x ?? 0;
-            const voy = vr?.y ?? 0;
-            const pose = e.geometry.transform.computeFragmentCenter(
-              worldCenter,
-              { x: vox, y: voy },
-              exchangeLayer.rotation,
-              exchangeLayer.flip
-            );
-            tx.update({ cx: pose.x, cy: pose.y }, 'layer', exchangeLayer.id);
-          }
+          const worldCenter = e.geometry.space.localToWorld(
+            newRect.x + newRect.w / 2,
+            newRect.y + newRect.h / 2,
+            frame
+          );
+          const vr = exchangeLayer.visibleShape?.rect;
+          const vox = vr?.x ?? 0;
+          const voy = vr?.y ?? 0;
+          const pose = e.geometry.transform.computeFragmentCenter(
+            worldCenter,
+            { x: vox, y: voy },
+            exchangeLayer.rotation,
+            exchangeLayer.flip
+          );
+          tx.update({ cx: pose.x, cy: pose.y }, 'layer', exchangeLayer.id);
         }
       }
     },
 
-    onEnd: (e: InteractionEvent) => {
-      if (!tx) return;
-
+    onEnd: (e: InteractionEvent, tx, startCanvas) => {
       // Static click (no drag) = clear selection (Photoshop behavior)
       if (InteractionMath.isStaticClick(e, startCanvas)) {
         // Don't clear on Meta-click (that's an aborted peel attempt)
-        if (type !== 'peel') {
+        const me = e.nativeEvent as MouseEvent;
+        if (!me.metaKey) {
           e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
         }
       }
 
+      // Clear move-delta transient (hides the delta label)
+      e.actions.fast.setTransient('clipMoveStart', null);
+
       tx.commit();
-      tx = null;
-      type = '';
-      startRect = null;
-      startPolygon = null;
       hasPeeled = false;
-    },
-  };
+    }
+  });
 };

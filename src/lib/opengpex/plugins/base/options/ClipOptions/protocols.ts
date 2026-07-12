@@ -41,14 +41,14 @@ export const CMD_TOGGLE_MODE = 'cmd.toggle_mode';
  * (rect → ellipse → lasso → wand → rect …). Only active when
  * `interactionMode === 'clip'`; no-op in any other mode.
  */
-export const CMD_CYCLE_TOOL_FORWARD = 'cmd.crop_tool.cycle_forward';
+export const CMD_CYCLE_TOOL_FORWARD = 'cmd.clip_tool.cycle_forward';
 
 /**
  * Shift+Tab — reverse cycle through clip tools while already in clip
  * mode (rect ← ellipse ← lasso ← wand ← rect …). Only active when
  * `interactionMode === 'clip'`; no-op in any other mode.
  */
-export const CMD_CYCLE_TOOL_BACKWARD = 'cmd.crop_tool.cycle_backward';
+export const CMD_CYCLE_TOOL_BACKWARD = 'cmd.clip_tool.cycle_backward';
 
 /**
  * Escape — leave clip mode. Atomically clears the Re-Canvas signal if set,
@@ -72,7 +72,7 @@ export const CMD_RESET_ASPECT = 'cmd.reset_aspect';
 export const CMD_BRANCH = 'cmd.branch.create';
 export const CMD_RESET_BOX = 'cmd.box.reset';
 export const CMD_TOGGLE_ANTI_ALIAS = 'cmd.anti_alias.toggle';
-export const CMD_SET_CROP_TOOL = 'cmd.crop_tool.set';
+export const CMD_SET_CLIP_TOOL = 'cmd.clip_tool.set';
 
 /**
  * Plugin-level wrapper around `adv.layer.clip.drill`.
@@ -121,19 +121,19 @@ export const CMD_OFFSET_SELECTION = 'cmd.offset_selection';
 export const SIGNAL_RE_CANVAS = 'signal.re_canvas.active';
 
 /** Feather radius (px) for Apply Mask / Drill */
-export const SIGNAL_CROP_FEATHER = 'signal.crop_feather.value';
+export const SIGNAL_CLIP_FEATHER = 'signal.clip_feather.value';
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
 /**
- * CropTool: Active crop / selection tool.
+ * ClipTool: Active crop / selection tool.
  *
  * - 'rect' / 'ellipse'  → regular shapes (amber UI accent).
  * - 'lasso' / 'wand'    → irregular polygon selections (purple UI accent).
  *
  * All tools write to the unified `clipBoxes[toolId]` record via
- * `actions.setClipBox(frameId, toolId, data)`. The CropTool↔Shape.type
- * mapping is one-way (CropTool → Shape.type), driven by `setCropTool`'s
+ * `actions.setClipBox(frameId, toolId, data)`. The ClipTool↔Shape.type
+ * mapping is one-way (ClipTool → Shape.type), driven by `setClipTool`'s
  * `projectShape` at tool-switch time.
  *
  * Anti-aliasing is **orthogonal** to tool identity — driven by the standalone
@@ -142,12 +142,12 @@ export const SIGNAL_CROP_FEATHER = 'signal.crop_feather.value';
  * AA to ON (true). The strategy table declares which tools expose this
  * control via `supportsAntiAlias`.
  */
-export type CropTool = 'rect' | 'ellipse' | 'lasso' | 'wand';
+export type ClipTool = 'rect' | 'ellipse' | 'lasso' | 'wand';
 
-export type CropFamily = 'regular' | 'irregular';
+export type ClipFamily = 'regular' | 'irregular';
 
-export interface CropToolStrategy {
-  readonly id: CropTool;
+export interface ClipToolStrategy {
+  readonly id: ClipTool;
   readonly label: string;
   readonly icon: LucideIcon;
   readonly accent: 'amber' | 'purple';
@@ -157,10 +157,10 @@ export interface CropToolStrategy {
    *   - `regular`:   LocalShape (rect/circle with axis-aligned bounding rect)
    *   - `irregular`: LocalPolygon (multi-ring point set)
    */
-  readonly family: CropFamily;
+  readonly family: ClipFamily;
 
   /**
-   * Handler dispatch hint — consumed by `makeCropToolGuard(handlerKind)` in
+   * Handler dispatch hint — consumed by `makeClipToolGuard(handlerKind)` in
    * ClipOverlay/interactions.ts. External call-sites should use
    * `getClipBox().regular` for data-level branching.
    */
@@ -168,7 +168,7 @@ export interface CropToolStrategy {
 
   /**
    * Shape projection on tool-switch — only meaningful for `regular` tools.
-   * When defined, `setCropTool` patches `clipBoxes[newSlot].type` to the
+   * When defined, `setClipTool` patches `clipBoxes[newSlot].type` to the
    * returned value. `undefined` for irregular tools → no projection.
    */
   readonly projectShape?: () => { type: 'rect' | 'circle'; antiAliased?: boolean };
@@ -197,10 +197,10 @@ export interface CropToolStrategy {
 // Single Source of Truth for all clip tool properties. Adding a new tool:
 //   1. Add one row here.
 //   2. (optional) Add a handler factory in ClipOverlay/interactions.ts whose
-//      `test()` uses `makeCropToolGuard('<your-handlerKind>')`.
+//      `test()` uses `makeClipToolGuard('<your-handlerKind>')`.
 //   3. Nothing else — all derived code reads from this table.
 
-export const CROP_TOOL_STRATEGIES: Record<CropTool, CropToolStrategy> = {
+export const CLIP_TOOL_STRATEGIES: Record<ClipTool, ClipToolStrategy> = {
   'rect':    { id: 'rect',    label: 'Rect',    icon: Square, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'rect'   }), forbiddenInReCanvas: false, supportsAntiAlias: false, cursor: CLIP_RECT_CURSOR    },
   'ellipse': { id: 'ellipse', label: 'Ellipse', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'circle' }), forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_CURSOR },
   'lasso':   { id: 'lasso',   label: 'Lasso',   icon: Lasso,  accent: 'purple', family: 'irregular', handlerKind: 'lasso',                                              forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_LASSO_CURSOR   },
@@ -209,8 +209,8 @@ export const CROP_TOOL_STRATEGIES: Record<CropTool, CropToolStrategy> = {
 
 // ─── Derived Helpers ────────────────────────────────────────────────────────────
 
-export const isRegularTool   = (t: CropTool): boolean => CROP_TOOL_STRATEGIES[t]?.family === 'regular';
-export const isIrregularTool = (t: CropTool): boolean => CROP_TOOL_STRATEGIES[t]?.family === 'irregular';
+export const isRegularTool   = (t: ClipTool): boolean => CLIP_TOOL_STRATEGIES[t]?.family === 'regular';
+export const isIrregularTool = (t: ClipTool): boolean => CLIP_TOOL_STRATEGIES[t]?.family === 'irregular';
 
 // ─── Cross-Plugin Typed Facade ──────────────────────────────────────────────────
 
@@ -227,7 +227,7 @@ export const ClipOptionsAPI = {
     /** Canvas Re-Size active status */
     reCanvas: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_RE_CANVAS}` as const,
     /** Feather radius (px) for Apply Mask / Drill */
-    cropFeather: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_CROP_FEATHER}` as const,
+    clipFeather: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_CLIP_FEATHER}` as const,
   },
   commands: {
     /** Clear the active selection (double-click reset) */
@@ -235,7 +235,7 @@ export const ClipOptionsAPI = {
     /** Enter / Cycle Clip Tool */
     toggleMode: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_TOGGLE_MODE}` } as { uid: string; _payload: void },
     /** Set crop tool */
-    setCropTool: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CROP_TOOL}` } as { uid: string; _payload: { tool: CropTool } },
+    setClipTool: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CLIP_TOOL}` } as { uid: string; _payload: { tool: ClipTool } },
   },
   /** pluginConfig storage key */
   configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,

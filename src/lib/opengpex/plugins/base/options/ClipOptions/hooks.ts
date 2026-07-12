@@ -25,8 +25,8 @@ import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals,
 import { asLocalRect, asLocalShape, ShapeType, LocalShape } from '@opengpex/editor/core/types';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { getActiveTarget } from './commands';
-import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn, CROP_TOOL_STRATEGIES } from './protocols';
-import type { CropTool } from './protocols';
+import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn, CLIP_TOOL_STRATEGIES } from './protocols';
+import type { ClipTool } from './protocols';
 import type { ClipCommandsMap, ClipSignalsMap } from './commands.d';
 
 /**
@@ -48,13 +48,13 @@ export const useClipOptionsCommands = () => {
     antiAliasToggleCmd,
     branchCreateCmd,
     boxResetCmd,
-    cropToolSetCmd, // ← derived from CMD_SET_CROP_TOOL = 'cmd.crop_tool.set'
+    cropToolSetCmd, // ← derived from CMD_SET_CLIP_TOOL = 'cmd.clip_tool.set'
     invertSelectionCmd, // ← derived from CMD_INVERT_SELECTION = 'cmd.invert_selection'
     selectFromAlphaCmd, // ← derived from CMD_SELECT_FROM_ALPHA = 'cmd.select_from_alpha'
     offsetSelectionCmd, // ← derived from CMD_OFFSET_SELECTION = 'cmd.offset_selection'
   } = usePluginCommands<ClipCommandsMap>();
 
-  const { reCanvasActiveSignal, cropFeatherValueSignal } = usePluginSignals<ClipSignalsMap>();
+  const { reCanvasActiveSignal, clipFeatherValueSignal } = usePluginSignals<ClipSignalsMap>();
 
   // ─── Feather persistence (Path B: signal for real-time, config for persistence) ──
   // Read persisted feather from pluginConfig on mount and hydrate the signal.
@@ -62,21 +62,21 @@ export const useClipOptionsCommands = () => {
   const [selfConfig, setSelfConfig] = usePluginSelfConfig<{ feather?: number }>();
   const hydratedRef = useRef(false);
   useEffect(() => {
-    if (!hydratedRef.current && cropFeatherValueSignal && selfConfig.feather != null) {
-      cropFeatherValueSignal.set(selfConfig.feather);
+    if (!hydratedRef.current && clipFeatherValueSignal && selfConfig.feather != null) {
+      clipFeatherValueSignal.set(selfConfig.feather);
       hydratedRef.current = true;
     }
-  }, [cropFeatherValueSignal, selfConfig.feather]);
+  }, [clipFeatherValueSignal, selfConfig.feather]);
 
   return useMemo(() => {
     const isReCanvas = !!reCanvasActiveSignal?.value;
 
     // Active crop tool — read directly from the per-frame field.
-    // Safety: if the stored value doesn't exist in CROP_TOOL_STRATEGIES (e.g.
+    // Safety: if the stored value doesn't exist in CLIP_TOOL_STRATEGIES (e.g.
     // stale data from a removed tool), fall back to 'rect'.
-    const rawCropTool = (activeFrame?.latestClipTool as CropTool | undefined) ?? 'rect';
-    const cropTool: CropTool = CROP_TOOL_STRATEGIES[rawCropTool] ? rawCropTool : 'rect';
-    // Pre-PR-6-2: derive from CROP_TOOL_STRATEGIES via the helper functions
+    const rawClipTool = (activeFrame?.latestClipTool as ClipTool | undefined) ?? 'rect';
+    const cropTool: ClipTool = CLIP_TOOL_STRATEGIES[rawClipTool] ? rawClipTool : 'rect';
+    // Pre-PR-6-2: derive from CLIP_TOOL_STRATEGIES via the helper functions
     // exported from protocols.ts. This eliminates the previous duplicate
     // truth source (literal `cropTool === 'rect' || ...`) and makes the
     // tool family completely table-driven.
@@ -95,7 +95,7 @@ export const useClipOptionsCommands = () => {
     // Whether the active tool's projected shape *has* a meaningful AA mode.
     // Drives the AA button's `disabled` state so the button is greyed-out for
     // rect (always pixel-aligned).
-    const supportsAntiAlias = CROP_TOOL_STRATEGIES[cropTool].supportsAntiAlias;
+    const supportsAntiAlias = CLIP_TOOL_STRATEGIES[cropTool].supportsAntiAlias;
     // All tools default to AA ON (true) when no explicit value is set.
     const isAntiAliased = clipBox?.spatial.antiAliased ?? true;
 
@@ -168,15 +168,15 @@ export const useClipOptionsCommands = () => {
 
       // Feather signal (read/write) — consumed by Apply Mask button and Feather Popover.
       // Signal drives real-time UI; `persistFeather` writes to pluginConfig for IndexedDB survival.
-      featherValue: (cropFeatherValueSignal?.value as number) || 0,
-      setFeatherValue: (val: number) => cropFeatherValueSignal?.set(val),
+      featherValue: (clipFeatherValueSignal?.value as number) || 0,
+      setFeatherValue: (val: number) => clipFeatherValueSignal?.set(val),
       persistFeather: (val: number) => setSelfConfig({ feather: val }),
     };
   }, [
     actions,
     activeFrame,
     reCanvasActiveSignal,
-    cropFeatherValueSignal,
+    clipFeatherValueSignal,
     setSelfConfig,
     toggleModeCmd,
     exitClipModeCmd,

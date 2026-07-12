@@ -118,7 +118,21 @@ export function SmartGuidesSettings() {
         />
       </div>
 
-      {/* ─── Section 3: Advanced ─── */}
+      {/* ─── Section 3: Edge Snap ─── */}
+      <div className="flex flex-col gap-3">
+        <h5 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-1.5 pl-1">
+          <SlidersHorizontal size={11} /> Edge Snap (Resize)
+        </h5>
+
+        <SwitchRow
+          label="Snap edges for all selections"
+          description="When off, edge snap only works for Re-Canvas resize"
+          checked={config.edgeSnapScope === 'all'}
+          onChange={() => setConfig({ edgeSnapScope: config.edgeSnapScope === 'all' ? 'recanvas' : 'all' })}
+        />
+      </div>
+
+      {/* ─── Section 4: Advanced ─── */}
       <div className="flex flex-col gap-3">
         <h5 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-1.5 pl-1">
           <SlidersHorizontal size={11} /> Advanced

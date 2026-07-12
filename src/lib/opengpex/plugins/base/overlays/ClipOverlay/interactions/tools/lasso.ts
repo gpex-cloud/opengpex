@@ -28,7 +28,7 @@ import {
 } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
-import { makeCropToolGuard } from '../guard';
+import { makeClipToolGuard } from '../guard';
 
 /**
  * lassoPreviewPathRef
@@ -114,7 +114,7 @@ export const createLassoHandler = (): InteractionHandler => {
     priority: 110,
 
     test: (e) => {
-      if (!makeCropToolGuard('lasso')(e)) return false;
+      if (!makeClipToolGuard('lasso')(e)) return false;
 
       const me = e.nativeEvent as MouseEvent;
       if (me.button === 2) return false;

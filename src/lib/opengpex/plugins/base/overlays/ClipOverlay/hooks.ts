@@ -24,8 +24,8 @@ import { asLocalShape, LocalShape, LocalPolygon } from '@opengpex/editor/core/ty
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import {
   ClipOptionsAPI,
-  CROP_TOOL_STRATEGIES,
-  CropTool,
+  CLIP_TOOL_STRATEGIES,
+  ClipTool,
 } from '../../options/ClipOptions/protocols';
 
 /**
@@ -44,11 +44,11 @@ export function useClipOverlayCommands() {
   const isClipActive = state.interaction.interactionMode === 'clip';
 
   // Active crop / selection tool — read from per-frame field.
-  const rawTool = (activeFrame?.latestClipTool as CropTool) || 'rect';
+  const rawTool = (activeFrame?.latestClipTool as ClipTool) || 'rect';
 
   // Re-Canvas pins tool to 'rect' (canvas resize is always rectangular).
-  const cropTool: CropTool = isReCanvas ? 'rect' : (CROP_TOOL_STRATEGIES[rawTool] ? rawTool : 'rect');
-  const family = CROP_TOOL_STRATEGIES[cropTool].family;
+  const cropTool: ClipTool = isReCanvas ? 'rect' : (CLIP_TOOL_STRATEGIES[rawTool] ? rawTool : 'rect');
+  const family = CLIP_TOOL_STRATEGIES[cropTool].family;
   const isRegularTool = family === 'regular';
   const isIrregularTool = family === 'irregular';
 
@@ -128,7 +128,7 @@ export function useClipOverlayCommands() {
  * polygon selection. This gives the user visual feedback that they can drag
  * to move (or Meta+drag to peel) the selection.
  */
-export function useClipCursor(isClipActive: boolean, cropTool: CropTool) {
+export function useClipCursor(isClipActive: boolean, cropTool: ClipTool) {
   const { actions, geometry } = useEditorServices();
   const { activeFrame } = useEditorState();
 
@@ -139,7 +139,7 @@ export function useClipCursor(isClipActive: boolean, cropTool: CropTool) {
 
   useEffect(() => {
     if (isClipActive) {
-      const toolCursor = CROP_TOOL_STRATEGIES[cropTool].cursor;
+      const toolCursor = CLIP_TOOL_STRATEGIES[cropTool].cursor;
       actions.fast.setCursor(toolCursor);
     } else {
       actions.fast.setCursor(null);
@@ -148,7 +148,7 @@ export function useClipCursor(isClipActive: boolean, cropTool: CropTool) {
 
   // ─── Polygon hover cursor for irregular tools ──────────────────────────
   useEffect(() => {
-    const strategy = CROP_TOOL_STRATEGIES[cropTool];
+    const strategy = CLIP_TOOL_STRATEGIES[cropTool];
     if (!isClipActive || strategy.family !== 'irregular') return;
 
     const toolCursor = strategy.cursor;
