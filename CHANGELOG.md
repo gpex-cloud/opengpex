@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.26
+
+- Refactor BgRemovalDrawer into a new AIToolsDrawer providing AI-powered segmentation tools under a unified panel
+- Update AIBridgeDrawer components and settings panel integration for the new AIToolsDrawer architecture
+- Update SourceBitmapCache references and StorageInfoPanel import paths to reflect the drawer rename
+
+---
+
 ## v1.0.0-beta.25
 
 - Fix peel interaction losing layer adjustment effects on fragments and double-applying on merge
