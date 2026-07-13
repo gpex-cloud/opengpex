@@ -464,7 +464,7 @@ export const AI_BRIDGE_COMMANDS = {
     name: 'Open AI Settings',
     execute: (ctx: EditorContextValue) => {
       // Cross-plugin call: uses fully qualified signal storage keys exported by SettingsPanel
-      ctx.actions.setStateSignal(SettingsPanelAPI.signals.tab, 'API Keys');
+      ctx.actions.setStateSignal(SettingsPanelAPI.signals.tab, 'AI Bridge Keys');
       ctx.actions.setStateSignal(SettingsPanelAPI.signals.open, true);
     },
   } as EditorCommand<void, void>,

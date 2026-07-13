@@ -508,7 +508,7 @@ export const BG_REMOVAL_COMMANDS = {
     id: P.CMD_OPEN_SETTINGS,
     name: 'Open BG Removal Settings',
     execute: (ctx: EditorContextValue) => {
-      ctx.actions.setStateSignal(SettingsPanelAPI.signals.tab, 'BG Remover');
+      ctx.actions.setStateSignal(SettingsPanelAPI.signals.tab, 'AI Tools');
       ctx.actions.setStateSignal(SettingsPanelAPI.signals.open, true);
     },
   } as EditorCommand<void, void>,

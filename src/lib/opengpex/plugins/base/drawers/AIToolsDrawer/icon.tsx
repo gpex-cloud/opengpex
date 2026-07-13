@@ -20,6 +20,49 @@
 "use client";
 
 /**
+ * AIToolsIcon: Drawer sidebar icon showing stacked "AI" / "tools" text.
+ *
+ * Used as the DrawerBar sidebar button icon for the multi-tool AI Tools drawer.
+ */
+export function AIToolsIcon({ size = 24, className }: { size?: number; className?: string } = {}) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden="true"
+    >
+      {/* "AI" — top-left, large bold */}
+      <text
+        x="1"
+        y="12"
+        fontSize="12"
+        fontWeight="900"
+        fill="currentColor"
+        fontFamily="system-ui, -apple-system, sans-serif"
+      >
+        AI
+      </text>
+      {/* "Tools" — bottom-left, smaller */}
+      <text
+        x="1"
+        y="22"
+        fontSize="8.5"
+        fontWeight="800"
+        fill="currentColor"
+        fontFamily="system-ui, -apple-system, sans-serif"
+        opacity="0.7"
+      >
+        Tools
+      </text>
+    </svg>
+  );
+}
+
+/**
  * BgRemovalIcon: Custom "BG" text icon with horizontal strikethrough.
  *
  * Visual:

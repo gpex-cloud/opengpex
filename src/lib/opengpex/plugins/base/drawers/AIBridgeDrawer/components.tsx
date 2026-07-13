@@ -34,6 +34,7 @@ import {
   Shuffle,
   Clock,
 } from "lucide-react";
+import { motion } from "framer-motion";
 import FancyButton from "@opengpex/editor/widgets/FancyButton";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
@@ -107,58 +108,54 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
     }
   };
 
-  // ─── Setup Screen ────────────────────────────────────────────────────────────
+  // ─── Setup Screen (rendered inline below header) ──────────────────────────────
 
-  if (needsSetup && drawerTab === "generate") {
-    return (
-      <div className="flex flex-col gap-2 px-2 pt-1 pb-1 h-full">
-        <div className="flex flex-col items-center justify-center h-full p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-center">
-          <AlertTriangle size={24} className="text-rose-500 mb-2 opacity-80" />
-          <p className="text-[10px] font-bold text-[var(--text-main)] mb-1">
-            API Key Missing
-          </p>
-          <p className="text-[9px] text-[var(--text-muted)] mb-2 px-2 leading-relaxed">
-            Configure your AI endpoint and key in Settings to start generating
-            images.
-          </p>
-          <p className="text-[9px] font-bold text-[var(--text-muted)] mb-4 px-2 leading-relaxed">
-            🔒 Your API key is stored only in your browser&apos;s local storage
-            and never sent to our servers.
-          </p>
-          <FancyButton
-            onClick={() => openSettingsCmd?.execute()}
-            variant="blue"
-            size="xs"
-            className="w-full focus:outline-none"
-          >
-            <Settings size={12} className="mr-1" /> Go to Settings
-          </FancyButton>
+  const setupContent = needsSetup && drawerTab === "generate" && (
+    <div className="flex flex-col items-center justify-center p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-center shrink-0">
+      <AlertTriangle size={24} className="text-rose-500 mb-2 opacity-80" />
+      <p className="text-[10px] font-bold text-[var(--text-main)] mb-1">
+        API Key Missing
+      </p>
+      <p className="text-[9px] text-[var(--text-muted)] mb-2 px-2 leading-relaxed">
+        Configure your AI endpoint and key in Settings to start generating
+        images.
+      </p>
+      <p className="text-[9px] font-bold text-[var(--text-muted)] mb-4 px-2 leading-relaxed">
+        🔒 Your API key is stored only in your browser&apos;s local storage
+        and never sent to our servers.
+      </p>
+      <FancyButton
+        onClick={() => openSettingsCmd?.execute()}
+        variant="blue"
+        size="xs"
+        className="w-full focus:outline-none"
+      >
+        <Settings size={12} className="mr-1" /> Go to Settings
+      </FancyButton>
 
-          <div className="mt-4 pt-4 border-t border-rose-500/20 w-full flex flex-col items-center gap-2">
-            <span className="text-[8px] text-[var(--text-muted)] uppercase tracking-widest font-black">
-              Or generate a placeholder
-            </span>
-            <button
-              onClick={() => updateConfig({ isMockMode: true })}
-              className="text-[9px] font-bold text-rose-500 hover:text-rose-400 transition-colors focus:outline-none"
-            >
-              Enable Developer Mock Mode
-            </button>
-          </div>
-        </div>
+      <div className="mt-4 pt-4 border-t border-rose-500/20 w-full flex flex-col items-center gap-2">
+        <span className="text-[8px] text-[var(--text-muted)] uppercase tracking-widest font-black">
+          Or generate a placeholder
+        </span>
+        <button
+          onClick={() => updateConfig({ isMockMode: true })}
+          className="text-[9px] font-bold text-rose-500 hover:text-rose-400 transition-colors focus:outline-none"
+        >
+          Enable Developer Mock Mode
+        </button>
       </div>
-    );
-  }
+    </div>
+  );
 
   // ─── Main Drawer ─────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
+    <div className="flex flex-col gap-2 px-2 pt-1 pb-1 overflow-hidden">
       {/* Header (always visible) */}
-      <div className="flex justify-between items-center shrink-0">
+      <motion.div layout="position" className="flex justify-between items-center shrink-0">
         <div className="flex items-center gap-2">
           <span className="font-black text-[12px] uppercase leading-none text-indigo-600 dark:text-indigo-400 px-[1px]">
-            AI
+            AI$
           </span>
           {config.isMockMode || config.providers.length <= 1 ? (
             <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
@@ -194,7 +191,10 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
           size="sm"
           variant="glass"
         />
-      </div>
+      </motion.div>
+
+      {/* Setup Screen (key missing) - shown below header so user can still switch providers */}
+      {setupContent}
 
       {/* History View */}
       {drawerTab === "history" && (
@@ -218,7 +218,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
       )}
 
       {/* Generate Content */}
-      {drawerTab === "generate" && (
+      {drawerTab === "generate" && !needsSetup && (
         <>
           <div className="space-y-2">
             {/* Mode Tabs */}

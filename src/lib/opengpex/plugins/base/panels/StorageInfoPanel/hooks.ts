@@ -419,7 +419,7 @@ export async function purgeModelCacheStorage(): Promise<void> {
       }
     }
     // Dispose the BgRemoval worker to release in-memory model instances
-    const { bgRemovalClient } = await import('../../drawers/BgRemovalDrawer/worker/client');
+    const { bgRemovalClient } = await import('../../drawers/AIToolsDrawer/worker/client');
     bgRemovalClient.dispose();
   } catch (err) {
     console.warn('[StorageInfo] Failed to purge model cache:', err);

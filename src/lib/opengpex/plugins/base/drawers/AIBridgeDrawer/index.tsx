@@ -77,7 +77,7 @@ export const plugin: EditorPlugin = {
   contributions: [
     {
       slot: "SETTINGS_CONFIG_PANEL",
-      group: "API Keys",
+      group: "AI Bridge Keys",
       component: AIBridgeSettings,
       title: "Universal AI",
       icon: <Key size={12} />,

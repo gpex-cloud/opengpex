@@ -20,9 +20,9 @@
 import { EditorPlugin } from "@opengpex/editor/core/types";
 import { Cpu } from "lucide-react";
 import { BgRemovalDrawerContent } from "./components";
-import { BgRemovalModelSettings } from "./panels/settings";
+import { AIToolsSettings } from "./panels/settings";
 import { BG_REMOVAL_COMMANDS } from "./commands";
-import { BgRemovalIcon } from "./icon";
+import { AIToolsIcon } from "./icon";
 
 import * as P from "./protocols";
 
@@ -46,7 +46,7 @@ export const plugin: EditorPlugin = {
   // --- 1. Identity ---
   manifest: {
     id: P.PLUGIN_ID,
-    displayName: "AI Background Removal",
+    displayName: "AI Tools",
     version: "2.0.0",
     description:
       "One-click AI background removal with multiple model support (RMBG, BiRefNet, InSPyReNet). Runs entirely in-browser via WebGPU/WASM — no server needed.",
@@ -59,7 +59,7 @@ export const plugin: EditorPlugin = {
   },
 
   // --- 2. UI Entry ---
-  icon: <BgRemovalIcon />,
+  icon: <AIToolsIcon />,
   slot: "SIDE_BAR",
   show: 'frame-required',
 
@@ -88,9 +88,9 @@ export const plugin: EditorPlugin = {
   contributions: [
     {
       slot: "SETTINGS_CONFIG_PANEL",
-      group: "BG Remover",
-      component: BgRemovalModelSettings,
-      title: "BG Removal Models",
+      group: "AI Tools",
+      component: AIToolsSettings,
+      title: "AI Tools Models",
       icon: <Cpu size={12} />,
       order: 310,
     },

@@ -102,7 +102,7 @@ export function AIBridgeSettings() {
           </button>
         </div>
 
-        <div className="flex flex-col gap-3 max-h-[350px] overflow-y-auto pr-1">
+        <div className="flex flex-col gap-3 overflow-y-auto pr-1">
           {config.providers.map((provider) => {
             const isActive = config.activeProviderId === provider.id;
             const warning = urlWarnings[provider.id];

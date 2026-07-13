@@ -22,11 +22,19 @@
  *
  * The busy/generating animation is now handled generically by DrawerBar via
  * the PluginService.isBusy() mechanism — no per-plugin animation code needed.
+ *
+ * Features a dollar-sign badge at the bottom-right corner to indicate
+ * this is a paid/API-key-based service.
  */
 export function AIBridgeIcon() {
   return (
-    <span className="font-black text-[14px] uppercase leading-none px-[2px]">
-      AI
+    <span className="relative inline-flex items-baseline justify-center font-black leading-none translate-y-[2px]">
+      <span className="text-[22px]">A</span>
+      <span className="text-[20px]">i</span>
+      {/* Dollar badge - small overlay at bottom-right, slightly overlapping */}
+      <span className="absolute -top-[3px] -right-[4px] flex items-center justify-center w-[12px] h-[12px] rounded-full bg-emerald-600 text-white text-[12px] font-black leading-none shadow-sm border border-emerald-700/50">
+        $
+      </span>
     </span>
   );
 }

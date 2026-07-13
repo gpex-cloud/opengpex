@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePluginSelfConfig } from "@opengpex/editor/core/context";
 import { Cpu, Plus, Trash2, Lock, Download, CheckCircle2, Loader2 } from "lucide-react";
-import { BgRemovalConfig, BgModelEntry, BUILTIN_MODELS } from "../protocols";
+import { BgRemovalConfig, BgModelEntry, BUILTIN_MODELS } from "../../protocols";
 
 // ─── Cache Helpers ───────────────────────────────────────────────────────────
 

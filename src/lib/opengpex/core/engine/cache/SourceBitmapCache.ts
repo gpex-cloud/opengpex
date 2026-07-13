@@ -25,7 +25,7 @@
  *   • Canvas2dEngine.drawLayerDirect          (drawImage / tile fallback / bitmap mask)
  *   • Canvas2dEngine.resolveFilteredSource    (feeds AsyncFilterCache — see §4 of the plan)
  *   • PixelService.decode.{bitmap,dimensions,contentBounds}
- *   • BrushOverlay / ClipOverlay wand / AdjustmentDrawer histogram / BgRemovalDrawer
+ *   • BrushOverlay / ClipOverlay wand / AdjustmentDrawer histogram / AIToolsDrawer
  *   • CanvasStage.subscribe → render loop redraw trigger
  *
  * Storage type is `ImageBitmap` because it is:
