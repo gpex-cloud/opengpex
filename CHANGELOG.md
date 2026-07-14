@@ -6,9 +6,10 @@ All notable changes to OpenGPEX are documented in this file.
 
 ## v1.0.0-beta.26
 
-- Refactor BgRemovalDrawer into a new AIToolsDrawer providing AI-powered segmentation tools under a unified panel
-- Update AIBridgeDrawer components and settings panel integration for the new AIToolsDrawer architecture
-- Update SourceBitmapCache references and StorageInfoPanel import paths to reflect the drawer rename
+- Add AI Segmentation (SAM) clip tool with point/box prompts, dedicated Web Worker, and unified model download & cache service layer
+- Improve selection move-delta label: directional arrows (→←↑↓) with absolute values, visible throughout drag
+- Enhance FileLoader overlay UI and refactor widget system (remove legacy components)
+- Extend gen-plugin-types auto-generation to cover all plugin command declarations
 
 ---
 
