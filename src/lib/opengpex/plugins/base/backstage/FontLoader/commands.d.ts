@@ -1,5 +1,5 @@
 /**
- * SettingsPanel/commands.d.ts — Auto-generated type declarations
+ * FontLoader/commands.d.ts — Auto-generated type declarations
  *
  * Provides compile-time type safety for usePluginCommands<T>() and usePluginSignals<T>().
  * Generated from commands.ts and index signal declarations.
@@ -9,21 +9,17 @@
 
 import type { CommandInstance, InteractionSignalValue } from '@opengpex/editor/core/types';
 
-/** Type map for usePluginCommands<SettingsPanelCommandsMap>() */
-export interface SettingsPanelCommandsMap {
+/** Type map for usePluginCommands<FontLoaderCommandsMap>() */
+export interface FontLoaderCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
-  toggleCmd: CommandInstance;
+  loadFontCmd: CommandInstance<{ family: string }, Promise<boolean>>;
 }
 
-/** Type map for usePluginSignals<SettingsPanelSignalsMap>() */
-export interface SettingsPanelSignalsMap {
+/** Type map for usePluginSignals<FontLoaderSignalsMap>() */
+export interface FontLoaderSignalsMap {
   [key: string]: { value: InteractionSignalValue; set: (val: InteractionSignalValue) => void };
-  openSignal: {
+  loadingSignal: {
     value: boolean;
     set: (val: boolean) => void;
-  };
-  tabSignal: {
-    value: unknown;
-    set: (val: unknown) => void;
   };
 }

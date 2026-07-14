@@ -61,6 +61,7 @@ import { createPluginService } from "@opengpex/editor/core/plugin";
 import { createFileService } from "@opengpex/editor/core/files";
 import { createFontService } from "@opengpex/editor/core/fonts";
 import { CORE_VERSION } from "@opengpex/editor/core/plugin/version";
+import { RESTORE_TIMEOUT_MS } from "@opengpex/editor/core/helpers/presets";
 import "../../index.css";
 
 export * from "@opengpex/editor/core/state/useVolatileState";
@@ -175,10 +176,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const sysCommandsRegistered = useRef(false);
   useEffect(() => {
     async function init() {
-      // Timeout guard: Prevents permanent hang if IndexedDB connection is stale
-      // (e.g., page restored from bfcache, multi-tab lock, or storage corruption)
-      const RESTORE_TIMEOUT_MS = 2500;
       let savedState: Awaited<ReturnType<typeof storage.restore>> = null;
+      let restoreFailed = false;
 
       try {
         savedState = await Promise.race([
@@ -196,12 +195,18 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           err,
         );
         savedState = null;
+        restoreFailed = true;
       }
 
       if (savedState) {
         dispatch({ type: "HYDRATE", payload: savedState });
       } else {
         dispatch({ type: "SET_LOADED", payload: true });
+        // If restore failed (timeout/error), set a state signal so the UI can show
+        // retry/restart options and auto-save is blocked from overwriting IndexedDB data.
+        if (restoreFailed) {
+          actions.setStateSignal("core.restoreTimedOut", true);
+        }
       }
 
       isHydrated.current = true;
@@ -225,11 +230,15 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       }
     }
     init();
-  }, [dispatch, isHydrated, contextValueRef, storage, fonts]);
+  }, [dispatch, actions, isHydrated, contextValueRef, storage, fonts]);
 
   // 4.2 Auto-save debouncing (Auto-Save)
+  // SAFETY: If restoreTimedOut signal is set, do NOT auto-save the empty state —
+  // this prevents overwriting the user's actual data still in IndexedDB.
+  // The signal is cleared only by explicit user action ("Start Fresh" button on LandingPage).
   useEffect(() => {
     if (!state.isLoaded || !isHydrated.current) return;
+    if (state.getStateSignal("core.restoreTimedOut", false)) return;
     const timer = setTimeout(() => storage.save(state), 200);
     return () => clearTimeout(timer);
   }, [state, isHydrated, storage]);
@@ -243,6 +252,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     const handleGlobalPaste = (e: ClipboardEvent) => {
       const ctx = contextValueRef.current;
       if (!ctx) return;
+      // Block paste when restore timed out — user must explicitly choose retry/restart
+      if (ctx.state.getStateSignal("core.restoreTimedOut", false)) return;
       // Allow paste even without activeFrame — the paste command handles
       // creating a new frame from clipboard when no frame is open.
       ctx.actions.adv.layer.clip.paste.execute({ e });

@@ -17,31 +17,34 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-"use client";
+'use client';
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { usePluginSelfConfig } from "@opengpex/editor/core/context";
-import { Plus, Trash2, Lock, Download, CheckCircle2, Loader2 } from "lucide-react";
-import { useDownloadTask, isModelCached, deleteModelCache, ModelDownloadSection } from "../../services";
-import { BgRemoverConfig, BgModelEntry, BUILTIN_MODELS } from "../../protocols";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePluginSelfConfig } from '@opengpex/editor/core/context';
+import { Plus, Trash2, Lock, Download, CheckCircle2, Loader2 } from 'lucide-react';
+import { useDownloadTask, isModelCached, deleteModelCache, ModelDownloadSection } from '../../services';
+import type { BgRemoverConfig } from '../../protocols';
+import type { SegConfig, SegModelEntry } from '../../protocols';
+import { BUILTIN_SEG_MODELS, DEFAULT_SEG_CONFIG } from '../../protocols';
 
 /**
- * BgRemoverModelSettings — Model list for background removal.
+ * SegmentationModelSettings — Model list for segmentation.
  *
  * Uses the download singleton so downloads survive panel unmount.
  */
-export function BgRemoverModelSettings() {
-  const [config, setConfig] = usePluginSelfConfig<BgRemoverConfig>();
+export function SegmentationModelSettings() {
+  const [config, setConfig] = usePluginSelfConfig<BgRemoverConfig & { seg?: SegConfig }>();
+  const segConfig = config.seg ?? DEFAULT_SEG_CONFIG;
   const [cacheStatus, setCacheStatus] = useState<Record<string, boolean>>({});
   const [busyModels, setBusyModels] = useState<Record<string, boolean>>({});
 
-  // Ensure built-in models are always present (migration safety)
-  const models = useMemo(() => ensureBuiltins(config.models), [config.models]);
+  // Ensure built-in models are always present
+  const models = useMemo(() => ensureBuiltins(segConfig.models), [segConfig.models]);
 
   // Download singleton — survives unmount, shared with main panel
   const { task, isDownloading, start: startDownload, cancel: cancelDownload } = useDownloadTask();
 
-  // Check cache status for all models on mount and when models change
+  // Check cache status for all models on mount
   useEffect(() => {
     let cancelled = false;
     const checkAll = async () => {
@@ -81,9 +84,9 @@ export function BgRemoverModelSettings() {
   const handleDownload = useCallback((modelId: string) => {
     setBusyModels(prev => ({ ...prev, [modelId]: true }));
     startDownload(modelId, [
-      { filename: 'onnx/model.onnx' },
-      { filename: 'config.json' },
-      { filename: 'preprocessor_config.json' },
+      { filename: 'encoder.with_runtime_opt.ort' },
+      { filename: 'encoder.onnx' },
+      { filename: 'decoder.onnx' },
     ]);
   }, [startDownload]);
 
@@ -101,33 +104,34 @@ export function BgRemoverModelSettings() {
     setBusyModels(prev => ({ ...prev, [modelId]: false }));
   }, []);
 
-  const updateModel = (id: string, patch: Partial<BgModelEntry>) => {
+  const updateModel = (id: string, patch: Partial<SegModelEntry>) => {
     const nextModels = models.map((m) =>
       m.id === id ? { ...m, ...patch } : m,
     );
-    setConfig({ models: nextModels });
+    setConfig({ ...config, seg: { ...segConfig, models: nextModels } });
   };
 
   const addModel = () => {
-    const newId = `custom-${Date.now()}`;
-    const newModel: BgModelEntry = {
+    const newId = `custom-seg-${Date.now()}`;
+    const newModel: SegModelEntry = {
       id: newId,
-      name: "Custom Model",
-      modelId: "",
-      size: "Unknown",
-      description: "User-added custom model",
+      name: 'Custom SAM Model',
+      modelId: '',
+      size: 'Unknown',
+      description: 'User-added custom segmentation model',
       builtin: false,
+      type: 'interactive',
     };
-    setConfig({ models: [...models, newModel] });
+    setConfig({ ...config, seg: { ...segConfig, models: [...models, newModel] } });
   };
 
   const removeModel = (id: string) => {
     const nextModels = models.filter((m) => m.id !== id);
-    let nextActiveId = config.activeModelId;
+    let nextActiveId = segConfig.activeModelId;
     if (nextActiveId === id && nextModels.length > 0) {
       nextActiveId = nextModels[0].id;
     }
-    setConfig({ models: nextModels, activeModelId: nextActiveId });
+    setConfig({ ...config, seg: { ...segConfig, models: nextModels, activeModelId: nextActiveId } });
   };
 
   return (
@@ -254,9 +258,9 @@ export function BgRemoverModelSettings() {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function ensureBuiltins(models: BgModelEntry[]): BgModelEntry[] {
+function ensureBuiltins(models: SegModelEntry[]): SegModelEntry[] {
   const result = [...models];
-  for (const builtin of BUILTIN_MODELS) {
+  for (const builtin of BUILTIN_SEG_MODELS) {
     if (!result.find((m) => m.id === builtin.id)) {
       result.unshift(builtin);
     }

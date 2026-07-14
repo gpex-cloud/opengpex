@@ -23,7 +23,7 @@ import { useMemo } from 'react';
 import { useEditorState, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import type { ExifData } from '@opengpex/editor/core/types';
 import type { ImageMetadata } from '@opengpex/editor/core/files';
-import type { ImageInfoCommandsMap } from './commands.d';
+import type { ImageInfoDrawerCommandsMap } from './commands.d';
 import * as P from './protocols';
 
 import { formatBytes } from '@opengpex/editor/core/helpers/file';
@@ -121,7 +121,7 @@ export function useImageInfoMetadata() {
  */
 export function useExportConfig() {
    const [selfConfig, setSelfConfig] = usePluginSelfConfig<P.ExportConfig>();
-   const { downloadCmd, applyResizeCmd } = usePluginCommands<ImageInfoCommandsMap>();
+   const { downloadCmd, applyResizeCmd } = usePluginCommands<ImageInfoDrawerCommandsMap>();
 
    return useMemo(() => ({
       config: selfConfig,

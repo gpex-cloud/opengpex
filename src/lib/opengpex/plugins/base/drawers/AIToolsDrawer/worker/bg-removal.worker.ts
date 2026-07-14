@@ -18,7 +18,7 @@
  */
 
 /**
- * BgRemoval Worker — AI Background Removal Inference Engine
+ * BgRemover Worker — AI Background Removal Inference Engine
  *
  * This Web Worker runs ONNX-based image segmentation models entirely in the
  * browser. It handles:
@@ -34,7 +34,7 @@
  * Per spec §2.4: Worker communication uses Transferable buffers (zero-copy).
  */
 
-import type { BgRemovalRequest, BgRemovalProgress, BgRemovalResult, BgRemovalError } from './protocol';
+import type { BgRemoverRequest, BgRemoverProgress, BgRemoverResult, BgRemoverError } from './protocol';
 
 // ─── Model Configuration ─────────────────────────────────────────────────────
 
@@ -273,7 +273,7 @@ function getSessionOutputNames(model: any): string[] {
 
 // ─── Main Inference Pipeline ─────────────────────────────────────────────────
 
-async function runInference(req: BgRemovalRequest): Promise<void> {
+async function runInference(req: BgRemoverRequest): Promise<void> {
   const { reqId, modelId, imageData, context, action = 'remove' } = req;
   const totalStart = performance.now();
 
@@ -283,7 +283,7 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
       type: 'progress',
       reqId,
       stage: 'detecting-device',
-    } satisfies BgRemovalProgress);
+    } satisfies BgRemoverProgress);
 
     const device = await detectDevice();
 
@@ -292,7 +292,7 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
       reqId,
       stage: 'detecting-device',
       device,
-    } satisfies BgRemovalProgress);
+    } satisfies BgRemoverProgress);
 
     // 2. Load transformers.js from CDN (bypasses Turbopack bundling)
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -323,7 +323,7 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
         reqId,
         stage: 'loading',
         device,
-      } satisfies BgRemovalProgress);
+      } satisfies BgRemoverProgress);
 
       // Only report 'downloading' if model is NOT in cache.
       // When cached, from_pretrained reads from Cache Storage (fast, no network).
@@ -358,7 +358,7 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
                 file: progress.file,
                 loaded,
                 total,
-              } satisfies BgRemovalProgress);
+              } satisfies BgRemoverProgress);
             }
           }
         },
@@ -383,7 +383,7 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
           postProcessMs: 0,
           totalMs,
         },
-      } satisfies BgRemovalResult);
+      } satisfies BgRemoverResult);
       return;
     }
 
@@ -394,7 +394,7 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
       stage: 'processing',
       device,
       progress: 0.1,
-    } satisfies BgRemovalProgress);
+    } satisfies BgRemoverProgress);
 
     if (!imageData) {
       throw new Error('Image data is required for background removal');
@@ -409,7 +409,7 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
       stage: 'processing',
       device,
       progress: 0.2,
-    } satisfies BgRemovalProgress);
+    } satisfies BgRemoverProgress);
 
     const { pixel_values } = await cachedProcessor(inputImage);
 
@@ -420,7 +420,7 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
       stage: 'processing',
       device,
       progress: 0.3,
-    } satisfies BgRemovalProgress);
+    } satisfies BgRemoverProgress);
 
     const inferenceStart = performance.now();
 
@@ -443,10 +443,10 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
       for (const name of inputNames) {
         modelInput[name] = pixel_values;
       }
-      console.log(`[BgRemoval] Using introspected input name(s): [${inputNames.join(', ')}]`);
+      console.log(`[BgRemover] Using introspected input name(s): [${inputNames.join(', ')}]`);
     } else {
       // Fallback: broadcast to all known names (legacy behavior)
-      console.warn(`[BgRemoval] Could not introspect session inputNames, using broadcast fallback`);
+      console.warn(`[BgRemover] Could not introspect session inputNames, using broadcast fallback`);
       modelInput = {
         input: pixel_values,
         input_image: pixel_values,
@@ -463,7 +463,7 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
       stage: 'processing',
       device,
       progress: 0.7,
-    } satisfies BgRemovalProgress);
+    } satisfies BgRemoverProgress);
 
     // 7. Post-process: extract mask tensor → binary mask → contour
     const postStart = performance.now();
@@ -479,7 +479,7 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
       for (const name of outputNames) {
         if (modelOutput[name]?.dims) {
           rawOutput = modelOutput[name];
-          console.log(`[BgRemoval] Using introspected output name: "${name}"`);
+          console.log(`[BgRemover] Using introspected output name: "${name}"`);
           break;
         }
       }
@@ -514,7 +514,7 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
     }
     const isLogits = minVal < -0.5 || maxVal > 1.5; // Logits have values outside [0,1]
 
-    console.log(`[BgRemoval] model=${modelId} output dims=${JSON.stringify(dims)}, range=[${minVal.toFixed(3)}, ${maxVal.toFixed(3)}], isLogits=${isLogits}`);
+    console.log(`[BgRemover] model=${modelId} output dims=${JSON.stringify(dims)}, range=[${minVal.toFixed(3)}, ${maxVal.toFixed(3)}], isLogits=${isLogits}`);
 
     // Apply threshold: for logits, threshold at 0 (sigmoid(0)=0.5); for probabilities, threshold at 0.5
     const threshold = isLogits ? 0 : 0.5;
@@ -527,7 +527,7 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
       if (isFg) fgCount++;
     }
 
-    console.log(`[BgRemoval] mask: ${fgCount}/${modelPixels} foreground pixels (${(fgCount/modelPixels*100).toFixed(1)}%)`);
+    console.log(`[BgRemover] mask: ${fgCount}/${modelPixels} foreground pixels (${(fgCount/modelPixels*100).toFixed(1)}%)`);
 
     // Resize binary mask from model resolution to original image dimensions
     // using nearest-neighbor interpolation
@@ -552,7 +552,7 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
       stage: 'processing',
       device,
       progress: 0.85,
-    } satisfies BgRemovalProgress);
+    } satisfies BgRemoverProgress);
 
     // 8. Trace contour
     const rawContour = traceContour(binaryMask, width, height);
@@ -566,7 +566,7 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
     const totalMs = performance.now() - totalStart;
 
     // 10. Send result
-    const result: BgRemovalResult = {
+    const result: BgRemoverResult = {
       type: 'result',
       reqId,
       context,
@@ -597,14 +597,14 @@ async function runInference(req: BgRemovalRequest): Promise<void> {
       type: 'error',
       reqId,
       error: errorMsg,
-    } satisfies BgRemovalError);
+    } satisfies BgRemoverError);
   }
 }
 
 // ─── Message Handler ─────────────────────────────────────────────────────────
 
 if (typeof self !== 'undefined' && typeof self.addEventListener === 'function') {
-  self.addEventListener('message', (ev: MessageEvent<BgRemovalRequest>) => {
+  self.addEventListener('message', (ev: MessageEvent<BgRemoverRequest>) => {
     runInference(ev.data);
   });
 }

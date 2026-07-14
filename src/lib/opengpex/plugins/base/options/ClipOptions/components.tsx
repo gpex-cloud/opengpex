@@ -49,7 +49,7 @@ import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import { InvertIcon, AlphaIcon } from "@opengpex/editor/icons";
 import { useClipOptionsCommands } from "./hooks";
 import { CLIP_TOOL_STRATEGIES, type ClipToolStrategy } from "./protocols";
-import type { ClipSignalsMap } from "./commands.d";
+import type { ClipOptionsSignalsMap } from "./commands.d";
 
 const ASPECT_RATIOS = [
   { label: "FREE", value: undefined },
@@ -77,7 +77,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
     branchCreateCmd,
     updateClipBox,
     closeReCanvas,
-    cropToolSetCmd,
+    clipToolSetCmd,
     applyMaskCmd,
     antiAliasToggleCmd,
     invertSelectionCmd,
@@ -94,7 +94,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
     persistFeather,
   } = useClipOptionsCommands();
 
-  const { reCanvasActiveSignal } = usePluginSignals<ClipSignalsMap>();
+  const { reCanvasActiveSignal } = usePluginSignals<ClipOptionsSignalsMap>();
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isFeatherOpen, setIsFeatherOpen] = useState(false);
@@ -311,7 +311,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                       >
                         <button
                           onClick={() =>
-                            cropToolSetCmd?.execute({ tool: s.id })
+                            clipToolSetCmd?.execute({ tool: s.id })
                           }
                           className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-colors whitespace-nowrap
                             ${
@@ -941,7 +941,7 @@ function AspectGrid({
   onSelect: (val: number | undefined) => void;
 }) {
   const { activeFrame } = useEditorState();
-  const { reCanvasActiveSignal } = usePluginSignals<ClipSignalsMap>();
+  const { reCanvasActiveSignal } = usePluginSignals<ClipOptionsSignalsMap>();
   const isReCanvas = !!reCanvasActiveSignal.value;
   const cropBox = isReCanvas
     ? activeFrame?.canvasCropBox

@@ -26,7 +26,7 @@ import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
 import { getReferenceFontSize } from './protocols';
 import type { ActiveCraft, CraftType, CraftDrawerConfig, PendingTextData } from './protocols';
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
-import type { CraftCommandsMap, CraftSignalsMap } from './commands.d';
+import type { CraftDrawerCommandsMap, CraftDrawerSignalsMap } from './commands.d';
 
 // ─── useCraftDrawer ────────────────────────────────────────────────────────────
 
@@ -39,7 +39,7 @@ import type { CraftCommandsMap, CraftSignalsMap } from './commands.d';
  * - activeCraft=null infers panel by selected layer type (text -> TextPanel, paint -> BrushPanel)
  */
 export function useCraftDrawer() {
-  const { activeCraftSignal } = usePluginSignals<CraftSignalsMap>();
+  const { activeCraftSignal } = usePluginSignals<CraftDrawerSignalsMap>();
   const { activeLayer } = useEditorState();
 
   const activeCraft = (activeCraftSignal?.value ?? null) as ActiveCraft;
@@ -57,8 +57,8 @@ export function useCraftDrawer() {
  * Encapsulates states and commands required for tool button group.
  */
 export function useCraftTrigger() {
-  const { setCraftCmd } = usePluginCommands<CraftCommandsMap>();
-  const { activeCraftSignal } = usePluginSignals<CraftSignalsMap>();
+  const { setCraftCmd } = usePluginCommands<CraftDrawerCommandsMap>();
+  const { activeCraftSignal } = usePluginSignals<CraftDrawerSignalsMap>();
 
   const activeCraft = (activeCraftSignal?.value ?? null) as ActiveCraft;
 
@@ -87,8 +87,8 @@ export function useCraftTrigger() {
  *    - otherwise -> switch to new craft
  */
 export function useCraftButtonGroup() {
-  const { setCraftCmd, deactivateCraftCmd } = usePluginCommands<CraftCommandsMap>();
-  const { activeCraftSignal } = usePluginSignals<CraftSignalsMap>();
+  const { setCraftCmd, deactivateCraftCmd } = usePluginCommands<CraftDrawerCommandsMap>();
+  const { activeCraftSignal } = usePluginSignals<CraftDrawerSignalsMap>();
   const { activeLayer } = useEditorState();
 
   // Local control switch: true uses scheme 1 (go home logic), false uses scheme 2 (switch tool directly)
@@ -394,7 +394,7 @@ export function useTextPanel() {
  * Parameters are stored in pluginConfig['opengpex.drawers.craft_drawer'].
  */
 export function useBrushPanel() {
-  const { activeCraftSignal } = usePluginSignals<CraftSignalsMap>();
+  const { activeCraftSignal } = usePluginSignals<CraftDrawerSignalsMap>();
   const { actions } = useEditorServices();
   const [selfConfig, setSelfConfig] = usePluginSelfConfig<CraftDrawerConfig>();
 

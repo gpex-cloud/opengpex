@@ -32,3 +32,4 @@ export { createSelectionMoveHandler } from './move';
 export { createClipBoxHandler } from './tools/regular';
 export { createLassoHandler, lassoPreviewPathRef } from './tools/lasso';
 export { createWandHandler } from './tools/wand';
+export { createSamHandler } from './tools/sam';

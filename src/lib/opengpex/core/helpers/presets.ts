@@ -57,6 +57,18 @@ export const BACKDROP_GRID_CONFIG = {
 
 
 /** -----------------------------------------------------------------*/
+/** State Restore / Persistence Settings ----------------------------*/
+
+/**
+ * Maximum time (ms) to wait for IndexedDB state restore on page load.
+ * If exceeded, the editor loads an empty workspace and shows Recovery Mode.
+ * Uses a generous timeout because IndexedDB can be slow after CPU-intensive
+ * operations (AI inference, large model downloads filling Cache Storage).
+ */
+export const RESTORE_TIMEOUT_MS = 8000;
+
+
+/** -----------------------------------------------------------------*/
 /** Clip / Selection Tool Settings ----------------------------------*/
 /** -----------------------------------------------------------------*/
 

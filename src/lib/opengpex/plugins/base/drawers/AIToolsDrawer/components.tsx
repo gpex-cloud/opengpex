@@ -19,28 +19,52 @@
 
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Settings, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { usePluginCommands } from '@opengpex/editor/core/context';
+import { useEditorState, useEditorServices, usePluginCommands } from '@opengpex/editor/core/context';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
+import { initBusySync } from './services';
 import { AIToolsIcon } from './icon';
 import { BgRemoverPanel } from './panels/bgremover';
-import type { BgRemovalCommandsMap } from './commands.d';
+import { SegmentationPanel } from './panels/segmentation';
+import type { AIToolsDrawerCommandsMap } from './commands.d';
+import { AIToolsDrawerAPI } from './protocols';
 
 // ─── Tool definitions ────────────────────────────────────────────────────────
 
-type AITool = 'bg-removal';
+type AITool = 'bg-removal' | 'segmentation';
 
 const AI_TOOLS: { value: AITool; label: string; description: string }[] = [
-  { value: 'bg-removal', label: 'Background Remover', description: 'Remove image backgrounds using AI' },
+  { value: 'bg-removal', label: 'BG Remover', description: 'Remove image backgrounds using AI' },
+  { value: 'segmentation', label: 'Segmentation', description: 'Click to select objects using SAM' },
 ];
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-export function BgRemovalDrawerContent() {
-  const { openSettingsCmd } = usePluginCommands<BgRemovalCommandsMap>();
-  const [activeTool, setActiveTool] = useState<AITool>('bg-removal');
+
+export function BgRemoverDrawerContent() {
+  const { openSettingsCmd } = usePluginCommands<AIToolsDrawerCommandsMap>();
+  const { state, activeFrame } = useEditorState();
+  const { actions, plugins } = useEditorServices();
+  const [userSelectedTool, setUserSelectedTool] = useState<AITool>('bg-removal');
+
+  // One-time: give the download singleton a reference to PluginService
+  // so it can auto-sync busy state even after this component unmounts.
+  useEffect(() => {
+    initBusySync(plugins, AIToolsDrawerAPI.configKey);
+  }, [plugins]);
+
+  // When SAM clip tool is active, force Segmentation panel (results appear there).
+  // User must switch away from SAM to access BG Remover.
+  const isClipSam = state.interaction.interactionMode === 'clip' && activeFrame?.latestClipTool === 'sam';
+  const activeTool: AITool = isClipSam ? 'segmentation' : userSelectedTool;
+
+  // Sync active tab to a state signal so autoReveal.when() can read it
+  useEffect(() => {
+    actions.setStateSignal(AIToolsDrawerAPI.signals.activeTab, activeTool);
+  }, [activeTool, actions]);
+
 
   const handleOpenSettings = useCallback(() => {
     openSettingsCmd?.execute();
@@ -59,16 +83,19 @@ export function BgRemovalDrawerContent() {
               value: t.value,
               label: t.label,
             }))}
-            onSelect={(val) => setActiveTool(val as AITool)}
+            disabled={isClipSam}
+            onSelect={(val) => setUserSelectedTool(val as AITool)}
             trigger={(isOpen) => (
-              <div className="flex items-center gap-1 group cursor-pointer">
-                <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-main)] group-hover transition-colors">
+              <div className={`flex items-center gap-1 group ${isClipSam ? 'cursor-default' : 'cursor-pointer'}`} title={isClipSam ? 'Locked to Segmentation while SAM tool is active' : undefined}>
+                <span className={`text-[10px] font-black uppercase tracking-[0.15em] transition-colors ${isClipSam ? 'text-indigo-500 dark:text-indigo-400' : 'text-[var(--text-main)] group-hover'}`}>
                   {activeToolMeta.label}
                 </span>
-                <ChevronDown
-                  size={10}
-                  className={`text-[var(--text-muted)] transition-transform duration-200 group-hover ${isOpen ? 'rotate-180' : ''}`}
-                />
+                {!isClipSam && (
+                  <ChevronDown
+                    size={10}
+                    className={`text-[var(--text-muted)] transition-transform duration-200 group-hover ${isOpen ? 'rotate-180' : ''}`}
+                  />
+                )}
               </div>
             )}
           />
@@ -84,6 +111,7 @@ export function BgRemovalDrawerContent() {
 
       {/* ─── Active Tool Panel ──────────────────────────────────── */}
       {activeTool === 'bg-removal' && <BgRemoverPanel />}
+      {activeTool === 'segmentation' && <SegmentationPanel />}
     </div>
   );
 }

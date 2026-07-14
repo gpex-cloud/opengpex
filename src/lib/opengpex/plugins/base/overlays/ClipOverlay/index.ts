@@ -19,7 +19,7 @@
 
 import { EditorPlugin } from '@opengpex/editor/core/types';
 import { ClipOverlayMain } from './components';
-import { createSelectionMoveHandler, createClipBoxHandler, createLassoHandler, createWandHandler } from './interactions';
+import { createSelectionMoveHandler, createClipBoxHandler, createLassoHandler, createWandHandler, createSamHandler } from './interactions';
 import * as P from './protocols';
 
 /**
@@ -51,7 +51,8 @@ export const plugin: EditorPlugin = {
     createSelectionMoveHandler(),
     createClipBoxHandler(),
     createLassoHandler(),
-    createWandHandler()
+    createWandHandler(),
+    createSamHandler()
   ],
   commands: [],
 };

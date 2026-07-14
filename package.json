@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "gen-plugin-types": "node scripts/gen-plugin-types.mjs",
+    "gen-plugin-types:all": "node scripts/gen-plugin-types.mjs --all",
     "scan-plugins": "node scripts/scan-plugins.mjs",
     "sync-plugins": "node scripts/sync-plugins.mjs",
     "pack-plugin": "node scripts/pack-plugin.mjs",

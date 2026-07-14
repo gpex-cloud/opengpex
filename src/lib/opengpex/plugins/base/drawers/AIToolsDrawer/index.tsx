@@ -19,15 +19,15 @@
 
 import { EditorPlugin } from "@opengpex/editor/core/types";
 import { Cpu } from "lucide-react";
-import { BgRemovalDrawerContent } from "./components";
+import { BgRemoverDrawerContent } from "./components";
 import { AIToolsSettings } from "./panels/settings";
-import { BG_REMOVAL_COMMANDS } from "./commands";
+import { BG_REMOVAL_COMMANDS, SEG_COMMANDS } from "./commands";
 import { AIToolsIcon } from "./icon";
 
 import * as P from "./protocols";
 
 /**
- * BgRemovalDrawer Plugin — AI Background Removal
+ * BgRemoverDrawer Plugin — AI Background Removal
  *
  * Provides one-click AI-powered background removal via in-browser inference.
  * Supports multiple models: RMBG 1.4, BiRefNet General, InSPyReNet Ultra,
@@ -66,13 +66,28 @@ export const plugin: EditorPlugin = {
   order: 2200, // Between Adjustment (80) and AIBridge (90)
 
   // --- 3. Core Implementation ---
-  component: BgRemovalDrawerContent,
+  component: BgRemoverDrawerContent,
 
-  // --- 4. Initial Config ---
+  // --- 4. Auto-Reveal ---
+  autoReveal: {
+    when: (state) => {
+      // Reveal when in clip mode with SAM tool active.
+      // Uses sticky mode (collapseWhenFalse: false) — drawer auto-opens
+      // but never auto-closes. Manual close is handled in components.tsx
+      // to avoid false-edge bugs when the user switches tabs.
+      if (state.interaction.interactionMode !== 'clip') return false;
+      const frame = state.activeFrameId ? state.frames.byId[state.activeFrameId] : null;
+      return frame?.latestClipTool === 'sam';
+    },
+    collapseWhenFalse: false,
+    priority: 150,
+  },
+
+  // --- 5. Initial Config ---
   initialConfig: P.DEFAULT_BG_REMOVAL_CONFIG,
 
   // --- 5. Commands ---
-  commands: Object.values(BG_REMOVAL_COMMANDS),
+  commands: [...Object.values(BG_REMOVAL_COMMANDS), ...Object.values(SEG_COMMANDS)],
 
   // --- 6. Signals ---
   signals: [
@@ -80,6 +95,12 @@ export const plugin: EditorPlugin = {
       id: P.SIGNAL_STATUS,
       name: "BG Removal Status",
       defaultValue: P.INITIAL_STATUS,
+      scope: "public",
+    },
+    {
+      id: P.SIGNAL_SEG_STATUS,
+      name: "Segmentation Status",
+      defaultValue: P.INITIAL_SEG_STATUS,
       scope: "public",
     },
   ],

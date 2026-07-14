@@ -29,8 +29,8 @@
 export function AIBridgeIcon() {
   return (
     <span className="relative inline-flex items-baseline justify-center font-black leading-none translate-y-[2px]">
-      <span className="text-[22px]">A</span>
-      <span className="text-[20px]">i</span>
+      <span className="text-[20px]">A</span>
+      <span className="text-[18px]">i</span>
       {/* Dollar badge - small overlay at bottom-right, slightly overlapping */}
       <span className="absolute -top-[3px] -right-[4px] flex items-center justify-center w-[12px] h-[12px] rounded-full bg-emerald-600 text-white text-[12px] font-black leading-none shadow-sm border border-emerald-700/50">
         $

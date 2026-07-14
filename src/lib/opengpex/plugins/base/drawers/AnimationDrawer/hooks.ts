@@ -23,7 +23,7 @@ import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorState, useEditorServices, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import { Frame, Layer } from '@opengpex/editor/core/types';
 import { GifHandler } from '@opengpex/editor/core/files/handlers/gif';
-import type { AnimationCommandsMap } from './commands.d';
+import type { AnimationDrawerCommandsMap } from './commands.d';
 import type { AnimationConfig } from './protocols';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -439,7 +439,7 @@ export function useAnimationPlayer(): {
 
 export function useAnimationExport() {
    const [selfConfig, setSelfConfig] = usePluginSelfConfig<AnimationConfig>();
-   const { exportAnimationCmd } = usePluginCommands<AnimationCommandsMap>();
+   const { exportAnimationCmd } = usePluginCommands<AnimationDrawerCommandsMap>();
 
    return useMemo(() => ({
       config: selfConfig,

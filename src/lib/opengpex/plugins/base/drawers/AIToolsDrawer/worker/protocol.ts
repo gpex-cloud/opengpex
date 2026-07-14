@@ -18,7 +18,7 @@
  */
 
 /**
- * BgRemoval Worker Protocol
+ * BgRemover Worker Protocol
  *
  * Wire-level types for the request / response / progress messages exchanged
  * between the main thread (`client.ts`) and the bg-removal worker
@@ -34,7 +34,7 @@
  */
 
 /** Main thread → Worker */
-export interface BgRemovalRequest {
+export interface BgRemoverRequest {
   /** Correlation id (echoed back in all responses/progress). */
   reqId: number;
 
@@ -72,7 +72,7 @@ export interface BgRemovalRequest {
 }
 
 /** Worker → Main thread: Progress update (sent multiple times) */
-export interface BgRemovalProgress {
+export interface BgRemoverProgress {
   type: 'progress';
   reqId: number;
   stage: 'detecting-device' | 'loading' | 'downloading' | 'processing';
@@ -87,7 +87,7 @@ export interface BgRemovalProgress {
 }
 
 /** Worker → Main thread: Final result */
-export interface BgRemovalResult {
+export interface BgRemoverResult {
   type: 'result';
   reqId: number;
   /** Action type echoed back */
@@ -114,11 +114,11 @@ export interface BgRemovalResult {
 }
 
 /** Worker → Main thread: Error */
-export interface BgRemovalError {
+export interface BgRemoverError {
   type: 'error';
   reqId: number;
   error: string;
 }
 
 /** Union of all Worker → Main thread messages */
-export type BgRemovalResponse = BgRemovalProgress | BgRemovalResult | BgRemovalError;
+export type BgRemoverResponse = BgRemoverProgress | BgRemoverResult | BgRemoverError;

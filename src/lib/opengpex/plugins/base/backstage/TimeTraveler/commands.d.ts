@@ -1,5 +1,5 @@
 /**
- * ImageInfoDrawer/commands.d.ts — Auto-generated type declarations
+ * TimeTraveler/commands.d.ts — Auto-generated type declarations
  *
  * Provides compile-time type safety for usePluginCommands<T>().
  * Generated from commands.ts command declarations.
@@ -9,9 +9,11 @@
 
 import type { CommandInstance } from '@opengpex/editor/core/types';
 
-/** Type map for usePluginCommands<ImageInfoDrawerCommandsMap>() */
-export interface ImageInfoDrawerCommandsMap {
+/** Type map for usePluginCommands<TimeTravelerCommandsMap>() */
+export interface TimeTravelerCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
-  downloadCmd: CommandInstance<void, Promise<void>>;
-  applyResizeCmd: CommandInstance<void, Promise<void>>;
+  undoCmd: CommandInstance;
+  redoCmd: CommandInstance;
+  revertCmd: CommandInstance<void, Promise<void>>;
+  purgeCmd: CommandInstance;
 }

@@ -30,6 +30,8 @@ export interface ActionOption {
   icon?: React.ReactNode;
   variant?: 'default' | 'danger' | 'success';
   divider?: boolean;
+  /** Show a checkmark on the right side of the option. */
+  checked?: boolean;
 }
 
 interface ActionDropdownProps {
@@ -172,11 +174,18 @@ export default function ActionDropdown({
                         {opt.icon && <span className="opacity-70 flex items-center justify-center scale-90">{opt.icon}</span>}
                         <span>{opt.label}</span>
                       </div>
-                      {opt.description && (
-                        <span className="text-[7.5px] font-bold opacity-40 tabular-nums">
-                          {opt.description}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {opt.description && (
+                          <span className="text-[7.5px] font-bold opacity-40 tabular-nums">
+                            {opt.description}
+                          </span>
+                        )}
+                        {opt.checked && (
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500 shrink-0">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        )}
+                      </div>
                     </button>
                   );
                 })}

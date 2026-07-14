@@ -9,8 +9,8 @@
 
 import type { CommandInstance } from '@opengpex/editor/core/types';
 
-/** Type map for usePluginCommands<ColorCommandsMap>() */
-export interface ColorCommandsMap {
+/** Type map for usePluginCommands<ColorOptionsCommandsMap>() */
+export interface ColorOptionsCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   fillAsLayerCmd: CommandInstance<{ fillColor: string }>;
   sampleColorCmd: CommandInstance;

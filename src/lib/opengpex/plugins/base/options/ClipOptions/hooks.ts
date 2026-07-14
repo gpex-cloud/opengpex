@@ -27,7 +27,7 @@ import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/s
 import { getActiveTarget } from './commands';
 import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn, CLIP_TOOL_STRATEGIES } from './protocols';
 import type { ClipTool } from './protocols';
-import type { ClipCommandsMap, ClipSignalsMap } from './commands.d';
+import type { ClipOptionsCommandsMap, ClipOptionsSignalsMap } from './commands.d';
 
 /**
  * useClipOptionsCommands: Command Discovery Hook.
@@ -48,13 +48,13 @@ export const useClipOptionsCommands = () => {
     antiAliasToggleCmd,
     branchCreateCmd,
     boxResetCmd,
-    cropToolSetCmd, // ← derived from CMD_SET_CLIP_TOOL = 'cmd.clip_tool.set'
+    clipToolSetCmd, // ← derived from CMD_SET_CLIP_TOOL = 'cmd.clip_tool.set'
     invertSelectionCmd, // ← derived from CMD_INVERT_SELECTION = 'cmd.invert_selection'
     selectFromAlphaCmd, // ← derived from CMD_SELECT_FROM_ALPHA = 'cmd.select_from_alpha'
     offsetSelectionCmd, // ← derived from CMD_OFFSET_SELECTION = 'cmd.offset_selection'
-  } = usePluginCommands<ClipCommandsMap>();
+  } = usePluginCommands<ClipOptionsCommandsMap>();
 
-  const { reCanvasActiveSignal, clipFeatherValueSignal } = usePluginSignals<ClipSignalsMap>();
+  const { reCanvasActiveSignal, clipFeatherValueSignal } = usePluginSignals<ClipOptionsSignalsMap>();
 
   // ─── Feather persistence (Path B: signal for real-time, config for persistence) ──
   // Read persisted feather from pluginConfig on mount and hydrate the signal.
@@ -111,7 +111,7 @@ export const useClipOptionsCommands = () => {
       antiAliasToggleCmd,
       branchCreateCmd,
       boxResetCmd,
-      cropToolSetCmd,
+      clipToolSetCmd,
       invertSelectionCmd,
       selectFromAlphaCmd,
       offsetSelectionCmd,
@@ -187,7 +187,7 @@ export const useClipOptionsCommands = () => {
     antiAliasToggleCmd,
     branchCreateCmd,
     boxResetCmd,
-    cropToolSetCmd,
+    clipToolSetCmd,
     invertSelectionCmd,
     selectFromAlphaCmd,
     offsetSelectionCmd,

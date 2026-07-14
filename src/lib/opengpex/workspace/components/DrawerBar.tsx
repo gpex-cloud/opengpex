@@ -577,14 +577,18 @@ function DrawerItem({
 }) {
   return (
     <div
-      className={`${styles.drawerBarItem.className} ${active ? styles.drawerBarItemActive.className : "hover:bg-indigo-500 hover:text-white hover:border-indigo-500/50 hover:shadow-[0_0_12px_rgba(99,102,241,0.4)]"} group`}
+      className={`${styles.drawerBarItem.className} ${active ? styles.drawerBarItemActive.className : "hover:bg-indigo-500 hover:text-white hover:border-indigo-500/50 hover:shadow-[0_0_12px_rgba(99,102,241,0.4)]"} group relative`}
       onClick={onClick}
     >
       <div
-        className={`transition-all duration-300 group-hover:scale-110 ${active ? "scale-110" : ""} ${busy ? "drawer-icon-busy" : ""}`}
+        className={`transition-all duration-300 group-hover:scale-110 ${active ? "scale-110" : ""}`}
       >
         {icon}
       </div>
+      {/* Default busy indicator: red pulsing dot (top-right corner) */}
+      {busy && (
+        <span className="absolute top-0 right-0 w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shadow-[0_0_6px_rgba(239,68,68,0.6)]" />
+      )}
       {active && (
         <div
           className={`absolute bg-indigo-500 ${

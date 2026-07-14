@@ -118,6 +118,12 @@ export const CLIP_LASSO_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://w
 export const CLIP_WAND_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M15 22l6-6' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3Cpath d='M15 22l6-6' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M19 14v-1M20 15h1M17 15h-1M19 17v1' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M19 14v-1M20 15h1M17 15h-1M19 17v1' stroke='black' stroke-width='0.8' stroke-linecap='round'/%3E%3C/svg%3E") 8 8, crosshair`;
 
 /**
+ * CLIP_SAM_CURSOR: Crosshair + AI brain/network badge (small neural-net icon)
+ * Hotspot: (8, 8)
+ */
+export const CLIP_SAM_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Ccircle cx='18' cy='15' r='1.5' stroke='white' stroke-width='2'/%3E%3Ccircle cx='18' cy='15' r='1.5' stroke='black' stroke-width='0.8'/%3E%3Ccircle cx='15' cy='19' r='1.5' stroke='white' stroke-width='2'/%3E%3Ccircle cx='15' cy='19' r='1.5' stroke='black' stroke-width='0.8'/%3E%3Ccircle cx='21' cy='19' r='1.5' stroke='white' stroke-width='2'/%3E%3Ccircle cx='21' cy='19' r='1.5' stroke='black' stroke-width='0.8'/%3E%3Cpath d='M18 16.5v1M16.2 18.3l-0.5 0.4M19.8 18.3l0.5 0.4' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M18 16.5v1M16.2 18.3l-0.5 0.4M19.8 18.3l0.5 0.4' stroke='black' stroke-width='0.8' stroke-linecap='round'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+/**
  * InvertIcon: Square with a single diagonal from bottom-left to top-right.
  * Left half (below the diagonal) is filled black/currentColor.
  * Represents "invert selection" — two contrasting halves.

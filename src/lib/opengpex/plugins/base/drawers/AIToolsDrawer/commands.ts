@@ -22,10 +22,11 @@
 import { EditorContextValue, EditorCommand, asLocalPoint, asLocalPolygon, asLocalRect } from '@opengpex/editor/core/types';
 import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
 import { SettingsPanelAPI } from '../../panels/SettingsPanel/protocols';
-import { bgRemovalClient } from './worker/client';
+import { bgRemoverClient } from './worker/client';
+import { segClient } from './worker/seg-client';
 import { SpeedEstimator } from './hooks';
-import type { BgRemovalProgress } from './worker/protocol';
-import type { BgRemovalStatus, BgRemovalConfig } from './protocols';
+import type { BgRemoverProgress } from './worker/protocol';
+import type { BgRemoverStatus, BgRemoverConfig, SegEncodePayload, SegEncodeResult, SegDecodePayload, SegDecodeResult, SegConfig } from './protocols';
 import * as P from './protocols';
 
 /** Auto-reset delay: how long to show "done" state before resetting to idle (ms) */
@@ -33,16 +34,16 @@ const DONE_DISPLAY_MS = 3000;
 
 /**
  * Module-level AbortController for the current in-flight inference request.
- * Set before calling bgRemovalClient.run(), cleared on completion/abort.
+ * Set before calling bgRemoverClient.run(), cleared on completion/abort.
  * Allows the abort command to cancel a long-running download or inference.
  */
 let activeAbortController: AbortController | null = null;
 
 /**
- * Helper: Update the BgRemoval status signal.
+ * Helper: Update the BgRemover status signal.
  */
-function setStatus(ctx: EditorContextValue, patch: Partial<BgRemovalStatus>): void {
-  const current = (ctx.scoped!.getSignal<BgRemovalStatus>(P.SIGNAL_STATUS, P.INITIAL_STATUS)) ?? P.INITIAL_STATUS;
+function setStatus(ctx: EditorContextValue, patch: Partial<BgRemoverStatus>): void {
+  const current = (ctx.scoped!.getSignal<BgRemoverStatus>(P.SIGNAL_STATUS, P.INITIAL_STATUS)) ?? P.INITIAL_STATUS;
   ctx.scoped!.setSignal(P.SIGNAL_STATUS, { ...current, ...patch });
 }
 
@@ -57,7 +58,7 @@ function setStatus(ctx: EditorContextValue, patch: Partial<BgRemovalStatus>): vo
  */
 function getActiveModelId(ctx: EditorContextValue): string {
   const pluginUid = `${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}`;
-  const config = ctx.state.pluginConfig[pluginUid] as unknown as BgRemovalConfig | undefined;
+  const config = ctx.state.pluginConfig[pluginUid] as unknown as BgRemoverConfig | undefined;
   if (!config) return P.BUILTIN_MODELS[0].modelId;
 
   const activeId = config.activeModelId;
@@ -172,7 +173,7 @@ export const BG_REMOVAL_COMMANDS = {
       // Progress handler — directly maps Worker stages to UI status.
       // No debounce needed: Worker correctly distinguishes 'loading' (cache read)
       // from 'downloading' (genuine network fetch).
-      const onProgress = (progress: BgRemovalProgress) => {
+      const onProgress = (progress: BgRemoverProgress) => {
         switch (progress.stage) {
           case 'detecting-device':
             if (progress.device) {
@@ -207,7 +208,7 @@ export const BG_REMOVAL_COMMANDS = {
 
       try {
         // Run inference (no timeout — model download can take several minutes)
-        const result = await bgRemovalClient.run(
+        const result = await bgRemoverClient.run(
           {
             modelId,
             imageData: {
@@ -275,7 +276,7 @@ export const BG_REMOVAL_COMMANDS = {
 
         // Auto-reset to idle after a brief display period
         setTimeout(() => {
-          const current = ctx.scoped!.getSignal<BgRemovalStatus>(P.SIGNAL_STATUS, P.INITIAL_STATUS);
+          const current = ctx.scoped!.getSignal<BgRemoverStatus>(P.SIGNAL_STATUS, P.INITIAL_STATUS);
           // Only reset if still in 'done' state (avoid clobbering a new inference)
           if (current?.stage === 'done') {
             setStatus(ctx, { ...P.INITIAL_STATUS });
@@ -284,7 +285,7 @@ export const BG_REMOVAL_COMMANDS = {
 
         // Log performance
         if (result.debug) {
-          console.log(`[BgRemoval] ${result.debug.deviceUsed} | inference: ${result.debug.inferenceMs.toFixed(0)}ms | post: ${result.debug.postProcessMs.toFixed(0)}ms | total: ${result.debug.totalMs.toFixed(0)}ms`);
+          console.log(`[BgRemover] ${result.debug.deviceUsed} | inference: ${result.debug.inferenceMs.toFixed(0)}ms | post: ${result.debug.postProcessMs.toFixed(0)}ms | total: ${result.debug.totalMs.toFixed(0)}ms`);
         }
 
       } catch (err) {
@@ -351,7 +352,7 @@ export const BG_REMOVAL_COMMANDS = {
       const start = performance.now();
 
       // Progress handler
-      const onProgress = (progress: BgRemovalProgress) => {
+      const onProgress = (progress: BgRemoverProgress) => {
         switch (progress.stage) {
           case 'detecting-device':
             if (progress.device) {
@@ -380,7 +381,7 @@ export const BG_REMOVAL_COMMANDS = {
 
       try {
         // Run download (no timeout — model download can take several minutes)
-        await bgRemovalClient.run(
+        await bgRemoverClient.run(
           {
             action: 'download',
             modelId,
@@ -400,7 +401,7 @@ export const BG_REMOVAL_COMMANDS = {
 
         // Notify user
         const pluginUid = `${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}`;
-        const config = ctx.state.pluginConfig[pluginUid] as unknown as BgRemovalConfig | undefined;
+        const config = ctx.state.pluginConfig[pluginUid] as unknown as BgRemoverConfig | undefined;
         const models = config?.models || P.BUILTIN_MODELS;
         const activeModel = models.find(m => m.modelId === modelId) || models[0];
         ctx.actions.setInteraction({
@@ -412,7 +413,7 @@ export const BG_REMOVAL_COMMANDS = {
 
         // Auto-reset to idle after a brief display period
         setTimeout(() => {
-          const current = ctx.scoped!.getSignal<BgRemovalStatus>(P.SIGNAL_STATUS, P.INITIAL_STATUS);
+          const current = ctx.scoped!.getSignal<BgRemoverStatus>(P.SIGNAL_STATUS, P.INITIAL_STATUS);
           // Only reset if still in 'done' state
           if (current?.stage === 'done') {
             setStatus(ctx, { ...P.INITIAL_STATUS });
@@ -468,7 +469,7 @@ export const BG_REMOVAL_COMMANDS = {
       }
 
       // Terminate the worker to actually stop the download/inference
-      bgRemovalClient.dispose();
+      bgRemoverClient.dispose();
 
       // Reset status to idle
       setStatus(ctx, { ...P.INITIAL_STATUS });
@@ -512,4 +513,407 @@ export const BG_REMOVAL_COMMANDS = {
       ctx.actions.setStateSignal(SettingsPanelAPI.signals.open, true);
     },
   } as EditorCommand<void, void>,
+};
+
+// ─── Segmentation Commands ──────────────────────────────────────────────────────
+//
+// These commands wrap the segClient (SAM Worker) and expose encode/decode as
+// cross-plugin callable async commands via the AIToolsDrawerAPI facade.
+// They own the Worker interaction and embedding cache state so that external
+// consumers (e.g. ClipOverlay/sam.ts) only depend on protocols.ts types.
+
+/**
+ * Track which asset currently has a warm embedding in the Worker.
+ * Avoids redundant re-encode when clicking the same layer multiple times.
+ */
+let currentEmbeddingAssetId: string | null = null;
+
+/**
+ * Helper: Get the active segmentation model ID from plugin config.
+ */
+function getActiveSegModelId(ctx: EditorContextValue): string {
+  const pluginUid = `${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}`;
+  const config = ctx.state.pluginConfig[pluginUid] as unknown as P.AIToolsConfig | undefined;
+  const segConfig = config?.seg as SegConfig | undefined;
+  if (!segConfig) return P.BUILTIN_SEG_MODELS[0].modelId;
+
+  const activeId = segConfig.activeModelId;
+  const fromConfig = segConfig.models?.find(m => m.id === activeId);
+  if (fromConfig) return fromConfig.modelId;
+
+  const fromBuiltins = P.BUILTIN_SEG_MODELS.find(m => m.id === activeId);
+  if (fromBuiltins) return fromBuiltins.modelId;
+
+  return P.BUILTIN_SEG_MODELS[0].modelId;
+}
+
+/**
+ * Helper: Update the Segmentation status signal.
+ */
+function setSegStatus(ctx: EditorContextValue, patch: Partial<P.SegStatus>): void {
+  const current = (ctx.scoped!.getSignal<P.SegStatus>(P.SIGNAL_SEG_STATUS, P.INITIAL_SEG_STATUS)) ?? P.INITIAL_SEG_STATUS;
+  ctx.scoped!.setSignal(P.SIGNAL_SEG_STATUS, { ...current, ...patch });
+}
+
+/**
+ * Translate opaque ONNX/WASM errors into user-friendly messages.
+ * The ONNX runtime sometimes throws raw numeric error codes (WASM addresses)
+ * or cryptic internal messages that are meaningless to end users.
+ */
+function humanizeSegError(raw: string): string {
+  // Strip "Segmentation worker error: " prefix if present (from seg-client.ts)
+  const stripped = raw.replace(/^Segmentation worker error:\s*/i, '').trim();
+
+  // Pure numeric (WASM address / ORT error code) — ONNX runtime crash
+  if (/^\d+$/.test(stripped)) {
+    return 'Segmentation model failed to initialize. Try deleting and re-downloading the model, or switch to a different model.';
+  }
+  // Common ORT/WebGPU failures
+  if (raw.includes('Could not find') || raw.includes('no such file') || raw.includes('404')) {
+    return 'Segmentation model not found. Please download the model first.';
+  }
+  if (raw.includes('out of memory') || raw.includes('OOM')) {
+    return 'Out of memory. Try a smaller model or close other tabs.';
+  }
+  if (raw.includes('network') || raw.includes('fetch')) {
+    return 'Network error while loading model. Check your internet connection.';
+  }
+  if (raw.includes('worker crashed')) {
+    return 'Segmentation engine crashed. Please try again.';
+  }
+  // Default: return the raw message
+  return raw;
+}
+
+export const SEG_COMMANDS = {
+  /**
+   * segEncode — Encode a layer image into SAM embedding.
+   *
+   * Manages the embedding cache: if the requested assetId already has a warm
+   * embedding, skips re-encoding. On success, the Worker retains the embedding
+   * in memory for instant subsequent decode calls.
+   *
+   * Returns: SegEncodeResult { success, error? }
+   */
+  segEncode: {
+    id: P.CMD_SEG_ENCODE,
+    name: 'SAM Encode Image',
+    execute: async (ctx: EditorContextValue, payload: SegEncodePayload): Promise<SegEncodeResult> => {
+      const { imageData, context } = payload;
+      const modelId = getActiveSegModelId(ctx);
+
+      // Check if embedding is already warm for this asset
+      if (currentEmbeddingAssetId === context.assetId) {
+        return { success: true };
+      }
+
+      // Update status to encoding
+      setSegStatus(ctx, {
+        stage: 'encoding',
+        encodeProgress: 0,
+        errorMessage: null,
+        embeddingAssetId: null,
+        embeddingReady: false,
+      });
+
+      try {
+        await segClient.run({
+          action: 'encode',
+          modelId,
+          imageData: {
+            data: imageData.data,
+            width: imageData.width,
+            height: imageData.height,
+          },
+          context,
+        }, {
+          timeoutMs: 0, // No timeout for first-time model download + encode
+          onProgress: (p) => {
+            if (p.stage === 'downloading') {
+              setSegStatus(ctx, {
+                stage: 'downloading',
+                downloadProgress: (p.loaded && p.total) ? p.loaded / p.total : 0,
+                downloadedBytes: p.loaded ?? 0,
+                totalBytes: p.total ?? 0,
+                downloadFile: p.file ?? null,
+              });
+              if (p.device) setSegStatus(ctx, { device: p.device });
+            } else if (p.stage === 'detecting-device' && p.device) {
+              setSegStatus(ctx, { device: p.device });
+            } else if (p.stage === 'encoding') {
+              setSegStatus(ctx, {
+                stage: 'encoding',
+                encodeProgress: p.progress ?? 0,
+              });
+            }
+          },
+        });
+
+        // Mark embedding as ready
+        currentEmbeddingAssetId = context.assetId;
+        setSegStatus(ctx, {
+          stage: 'ready',
+          embeddingReady: true,
+          embeddingAssetId: context.assetId,
+          encodeProgress: 1,
+        });
+
+        return { success: true };
+      } catch (err) {
+        const raw = err instanceof Error ? err.message : String(err);
+        const msg = humanizeSegError(raw);
+        currentEmbeddingAssetId = null;
+        setSegStatus(ctx, {
+          stage: 'error',
+          errorMessage: msg,
+          embeddingReady: false,
+          embeddingAssetId: null,
+        });
+        return { success: false, error: msg };
+      }
+    },
+  } as EditorCommand<SegEncodePayload, Promise<SegEncodeResult>>,
+
+  /**
+   * segDecode — Decode prompts against the cached embedding.
+   *
+   * Requires a prior successful encode for the same assetId.
+   * Returns up to 3 candidate masks sorted by confidence score.
+   *
+   * Returns: SegDecodeResult { success, masks?, debug?, error? }
+   */
+  segDecode: {
+    id: P.CMD_SEG_DECODE,
+    name: 'SAM Decode Prompts',
+    execute: async (ctx: EditorContextValue, payload: SegDecodePayload): Promise<SegDecodeResult> => {
+      const { prompts, context } = payload;
+      const modelId = getActiveSegModelId(ctx);
+
+      // Guard: embedding must be ready for the requested asset
+      if (currentEmbeddingAssetId !== context.assetId) {
+        return {
+          success: false,
+          error: `No embedding cached for asset "${context.assetId}". Call segEncode first.`,
+        };
+      }
+
+      // Update status to decoding
+      setSegStatus(ctx, { stage: 'decoding' });
+
+      try {
+        const result = await segClient.run({
+          action: 'decode',
+          modelId,
+          prompts,
+          context,
+        });
+
+        // Update status back to ready
+        setSegStatus(ctx, {
+          stage: 'ready',
+          candidates: result.masks ?? [],
+          lastDecodeMs: result.debug?.decodeMs ?? 0,
+          elapsedMs: result.debug?.totalMs ?? 0,
+        });
+
+        return {
+          success: true,
+          masks: result.masks,
+          debug: result.debug,
+        };
+      } catch (err) {
+        const raw = err instanceof Error ? err.message : String(err);
+        const msg = humanizeSegError(raw);
+        setSegStatus(ctx, { stage: 'error', errorMessage: msg });
+        return { success: false, error: msg };
+      }
+    },
+  } as EditorCommand<SegDecodePayload, Promise<SegDecodeResult>>,
+
+  /**
+   * segAll — Segment All Objects.
+   *
+   * Full pipeline: extracts active layer's pixels → ensures embedding is cached
+   * → runs segment-all (8×8 grid + NMS) on the Worker → stores results as
+   * candidates in the seg status signal. Enters clip+SAM mode with the best
+   * segment written to clipBox.
+   */
+  segAll: {
+    id: P.CMD_SEG_ALL,
+    name: 'Auto Segment',
+    execute: async (ctx: EditorContextValue): Promise<void> => {
+      const { activeFrame, activeLayer, actions } = ctx;
+
+      // Guard: require active frame + image layer
+      if (!activeFrame || !activeLayer) {
+        actions.setInteraction({ hud: { message: 'No active image layer', type: 'error' } });
+        return;
+      }
+      if (activeLayer.type !== 'image') {
+        actions.setInteraction({ hud: { message: 'Segment All only works on image layers', type: 'error' } });
+        return;
+      }
+
+      const frameId = activeFrame.id;
+      const layerId = activeLayer.id;
+      const assetId = activeLayer.src ?? `layer_${layerId}`;
+      const modelId = getActiveSegModelId(ctx);
+
+      // Extract image data from the global source-bitmap cache
+      let imageData: ImageData;
+      try {
+        const cachedBitmap = sourceBitmapCache.get(activeLayer.src!);
+        if (!cachedBitmap) {
+          sourceBitmapCache.getOrFetch(activeLayer.src!);
+          actions.setInteraction({ hud: { message: 'Image not loaded yet — please try again', type: 'error' } });
+          return;
+        }
+        const canvas = new OffscreenCanvas(cachedBitmap.width, cachedBitmap.height);
+        const ctx2d = canvas.getContext('2d')!;
+        ctx2d.drawImage(cachedBitmap, 0, 0);
+        imageData = ctx2d.getImageData(0, 0, canvas.width, canvas.height);
+      } catch {
+        actions.setInteraction({ hud: { message: 'Failed to read image data', type: 'error' } });
+        return;
+      }
+
+      // Mark busy
+      ctx.scoped!.setBusy(true);
+
+      // Step 1: Ensure embedding is encoded
+      setSegStatus(ctx, {
+        stage: 'encoding',
+        encodeProgress: 0,
+        errorMessage: null,
+        embeddingReady: false,
+      });
+
+      try {
+        // Encode (skips if already warm for this asset)
+        if (currentEmbeddingAssetId !== assetId) {
+          await segClient.run({
+            action: 'encode',
+            modelId,
+            imageData: {
+              data: imageData.data.buffer,
+              width: imageData.width,
+              height: imageData.height,
+            },
+            context: { frameId, layerId, assetId },
+          }, {
+            timeoutMs: 0,
+            onProgress: (p) => {
+              if (p.stage === 'downloading') {
+                setSegStatus(ctx, {
+                  stage: 'downloading',
+                  downloadProgress: (p.loaded && p.total) ? p.loaded / p.total : 0,
+                  downloadedBytes: p.loaded ?? 0,
+                  totalBytes: p.total ?? 0,
+                  downloadFile: p.file ?? null,
+                });
+                if (p.device) setSegStatus(ctx, { device: p.device });
+              } else if (p.stage === 'detecting-device' && p.device) {
+                setSegStatus(ctx, { device: p.device });
+              } else if (p.stage === 'encoding') {
+                setSegStatus(ctx, { stage: 'encoding', encodeProgress: p.progress ?? 0 });
+              }
+            },
+          });
+          currentEmbeddingAssetId = assetId;
+        }
+
+        // Step 2: Run segment-all on the worker
+        setSegStatus(ctx, { stage: 'decoding', embeddingReady: true, embeddingAssetId: assetId });
+
+        const result = await segClient.run({
+          action: 'segment-all',
+          modelId,
+          context: { frameId, layerId, assetId },
+        }, {
+          timeoutMs: 0,
+          onProgress: (p) => {
+            if (p.stage === 'decoding') {
+              setSegStatus(ctx, { stage: 'decoding' });
+            }
+          },
+        });
+
+        // Step 3: Process results
+        const segments = result.segments ?? [];
+        if (segments.length === 0) {
+          setSegStatus(ctx, { ...P.INITIAL_SEG_STATUS, embeddingReady: true, embeddingAssetId: assetId });
+          actions.setInteraction({ hud: { message: 'No objects detected in this image', type: 'info' } });
+          ctx.scoped!.setBusy(false);
+          return;
+        }
+
+        // Convert segments to candidates format (reuse the candidates UI)
+        const candidates = segments.map(s => ({ rings: s.rings, score: s.score }));
+
+        // Project ALL candidate polygons to frame-local coordinates.
+        // This allows the panel's handleSelectCandidate to switch clip boxes.
+        const framePolygons: Array<ReturnType<typeof asLocalPolygon>> = [];
+        for (const candidate of candidates) {
+          const layerRings = candidate.rings.map(ring =>
+            ring.map(p => asLocalPoint({ x: p.x, y: p.y }))
+          );
+          const layerBounds = asLocalRect(ctx.geometry.polygon.computePolygonBounds(layerRings));
+          const layerPoly = asLocalPolygon(layerRings, layerBounds, true);
+          const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(
+            layerPoly, activeLayer!, activeFrame!
+          );
+          framePolygons.push(framePoly);
+        }
+
+        // Store in signal with candidateFramePolygons + samFrameId
+        // (same shape as sam.ts click handler writes, so panel switching works)
+        setSegStatus(ctx, {
+          stage: 'ready',
+          candidates,
+          activeCandidateIdx: 0,
+          embeddingReady: true,
+          embeddingAssetId: assetId,
+          lastDecodeMs: result.debug?.totalMs ?? 0,
+          elapsedMs: result.debug?.totalMs ?? 0,
+        });
+        // Write candidateFramePolygons via global signal (same path as sam.ts)
+        const segStatusSignalKey = `${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}.${P.SIGNAL_SEG_STATUS}`;
+        actions.setStateSignal(segStatusSignalKey, {
+          stage: 'ready',
+          embeddingReady: true,
+          candidates,
+          candidateFramePolygons: framePolygons,
+          samFrameId: frameId,
+          activeCandidateIdx: 0,
+          lastDecodeMs: result.debug?.totalMs ?? 0,
+          elapsedMs: result.debug?.totalMs ?? 0,
+        });
+
+        // Enter clip+SAM mode and write the best segment to clipBox
+        if (ctx.state.interaction.interactionMode !== 'clip') {
+          actions.setInteraction({ interactionMode: 'clip' });
+        }
+        actions.updateFrame(frameId, { latestClipTool: 'sam' });
+
+        // Write first candidate frame polygon to clipBox
+        if (framePolygons.length > 0) {
+          actions.setClipBox(frameId, 'sam', framePolygons[0]);
+        }
+
+        actions.setInteraction({
+          hud: { message: `✨ Found ${segments.length} object${segments.length > 1 ? 's' : ''} — click candidates in panel to switch`, type: 'success' },
+        });
+
+        console.log(`[SegAll] ${segments.length} objects detected in ${result.debug?.totalMs?.toFixed(0) ?? '?'}ms (${result.debug?.deviceUsed ?? 'unknown'})`);
+
+      } catch (err) {
+        const raw = err instanceof Error ? err.message : String(err);
+        const msg = humanizeSegError(raw);
+        setSegStatus(ctx, { stage: 'error', errorMessage: msg });
+        actions.setInteraction({ hud: { message: 'Segment All failed — see error in panel', type: 'error' } });
+      } finally {
+        ctx.scoped!.setBusy(false);
+      }
+    },
+  } as EditorCommand<void, Promise<void>>,
 };

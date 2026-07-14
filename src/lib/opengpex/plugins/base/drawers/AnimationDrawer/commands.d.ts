@@ -9,8 +9,8 @@
 
 import type { CommandInstance } from '@opengpex/editor/core/types';
 
-/** Type map for usePluginCommands<AnimationCommandsMap>() */
-export interface AnimationCommandsMap {
+/** Type map for usePluginCommands<AnimationDrawerCommandsMap>() */
+export interface AnimationDrawerCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   exportAnimationCmd: CommandInstance<void, Promise<void>>;
 }

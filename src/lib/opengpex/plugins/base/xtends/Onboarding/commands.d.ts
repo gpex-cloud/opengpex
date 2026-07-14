@@ -1,5 +1,5 @@
 /**
- * ImageInfoDrawer/commands.d.ts — Auto-generated type declarations
+ * Onboarding/commands.d.ts — Auto-generated type declarations
  *
  * Provides compile-time type safety for usePluginCommands<T>().
  * Generated from commands.ts command declarations.
@@ -9,9 +9,10 @@
 
 import type { CommandInstance } from '@opengpex/editor/core/types';
 
-/** Type map for usePluginCommands<ImageInfoDrawerCommandsMap>() */
-export interface ImageInfoDrawerCommandsMap {
+/** Type map for usePluginCommands<OnboardingCommandsMap>() */
+export interface OnboardingCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
-  downloadCmd: CommandInstance<void, Promise<void>>;
-  applyResizeCmd: CommandInstance<void, Promise<void>>;
+  dismissSpotlightCmd: CommandInstance;
+  dismissTipsCmd: CommandInstance;
+  resetOnboardingCmd: CommandInstance;
 }

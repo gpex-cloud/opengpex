@@ -8,8 +8,8 @@
  */
 
 import type { CommandInstance, Frame } from '@opengpex/editor/core/types';
-import type { SaveToCloudPayload, OpenFromCloudPayload } from './commands';
 import type { SaveResult } from './protocols';
+import type { SaveToCloudPayload, OpenFromCloudPayload } from './commands';
 
 /** Type map for usePluginCommands<CloudMenuCommandsMap>() */
 export interface CloudMenuCommandsMap {

@@ -20,9 +20,8 @@
 "use client";
 
 /**
- * AIToolsIcon: Drawer sidebar icon showing stacked "AI" / "tools" text.
- *
- * Used as the DrawerBar sidebar button icon for the multi-tool AI Tools drawer.
+ * AIToolsIcon: Pure static drawer sidebar icon showing stacked "AI" / "tools" text.
+ * No logic — busy state is managed by the download singleton via initBusySync().
  */
 export function AIToolsIcon({ size = 24, className }: { size?: number; className?: string } = {}) {
   return (
@@ -63,7 +62,7 @@ export function AIToolsIcon({ size = 24, className }: { size?: number; className
 }
 
 /**
- * BgRemovalIcon: Custom "BG" text icon with horizontal strikethrough.
+ * BgRemoverIcon: Custom "BG" text icon with horizontal strikethrough.
  *
  * Visual:
  *   ┌─────┐
@@ -73,7 +72,7 @@ export function AIToolsIcon({ size = 24, className }: { size?: number; className
  * Uses inline SVG for full control over text positioning and line rendering.
  * The horizontal line uses `stroke-linecap: round` for polished endpoints.
  */
-export function BgRemovalIcon({ size = 20, className }: { size?: number; className?: string } = {}) {
+export function BgRemoverIcon({ size = 20, className }: { size?: number; className?: string } = {}) {
   return (
     <svg
       width={size}

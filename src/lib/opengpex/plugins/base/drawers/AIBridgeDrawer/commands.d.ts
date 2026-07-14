@@ -10,10 +10,10 @@
 import type { CommandInstance } from '@opengpex/editor/core/types';
 import type { AIModelInfo } from './protocols';
 
-/** Type map for usePluginCommands<AIBridgeCommandsMap>() */
-export interface AIBridgeCommandsMap {
+/** Type map for usePluginCommands<AIBridgeDrawerCommandsMap>() */
+export interface AIBridgeDrawerCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   generateCmd: CommandInstance<void, Promise<{ success: boolean; seed?: number; error?: string }>>;
-  openSettingsCmd: CommandInstance;
   fetchModelsCmd: CommandInstance<void, Promise<{ success: boolean; models?: AIModelInfo[]; error?: string }>>;
+  openSettingsCmd: CommandInstance;
 }

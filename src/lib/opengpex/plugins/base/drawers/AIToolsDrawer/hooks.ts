@@ -19,17 +19,20 @@
 
 "use client";
 
-import { useCallback, useRef } from "react";
-import { useEditorState, usePluginSignals } from "@opengpex/editor/core/context";
-import type { BgRemovalStatus } from "./protocols";
-import { INITIAL_STATUS } from "./protocols";
-import type { BgRemovalSignalsMap } from "./commands.d";
+import { usePluginSignals } from "@opengpex/editor/core/context";
+import type { BgRemoverStatus, SegStatus } from "./protocols";
+import { INITIAL_STATUS, INITIAL_SEG_STATUS } from "./protocols";
+import type { AIToolsDrawerSignalsMap } from "./commands.d";
+
+// ─── SpeedEstimator ──────────────────────────────────────────────────────────
 
 /**
  * SpeedEstimator — Sliding-window speed calculation for download progress.
  *
  * Keeps only the last 3 seconds of samples to compute a smooth, responsive
  * speed estimate. Provides both bytes/second and ETA calculation.
+ *
+ * Used by commands.ts for the inference download progress callback.
  */
 export class SpeedEstimator {
   private samples: { time: number; bytes: number }[] = [];
@@ -66,97 +69,30 @@ export class SpeedEstimator {
   }
 }
 
-// ─── useBgRemovalStatus ──────────────────────────────────────────────────────
+// ─── useBgRemoverStatus ──────────────────────────────────────────────────────
 
 /**
- * useBgRemovalStatus: Read the current BgRemoval status from signals.
+ * useBgRemoverStatus: Read the current BgRemover status from signals.
  *
  * Returns the live status object (stage, device, progress, etc.) which
  * drives the Drawer UI state machine.
  */
-export function useBgRemovalStatus(): BgRemovalStatus {
-  const { statusSignal } = usePluginSignals<BgRemovalSignalsMap>();
-  const status = statusSignal?.value as BgRemovalStatus | undefined;
+export function useBgRemoverStatus(): BgRemoverStatus {
+  const { statusSignal } = usePluginSignals<AIToolsDrawerSignalsMap>();
+  const status = statusSignal?.value as BgRemoverStatus | undefined;
   return status ?? INITIAL_STATUS;
 }
 
-// ─── useBgRemovalActions ─────────────────────────────────────────────────────
+// ─── useSegStatus ────────────────────────────────────────────────────────────
 
 /**
- * useBgRemovalActions: Provides status update helpers for the BgRemoval workflow.
+ * useSegStatus: Read the current Segmentation status from signals.
  *
- * Returns callbacks to update the status signal, incorporating the SpeedEstimator
- * for download progress calculations.
+ * Returns the live SegStatus object (stage, device, candidates, etc.) which
+ * drives the SegmentationPanel UI.
  */
-export function useBgRemovalActions() {
-  const { statusSignal } = usePluginSignals<BgRemovalSignalsMap>();
-  const speedEstimator = useRef(new SpeedEstimator());
-
-  const updateStatus = useCallback(
-    (patch: Partial<BgRemovalStatus>) => {
-      const current = (statusSignal?.value as BgRemovalStatus | undefined) ?? INITIAL_STATUS;
-      statusSignal?.set({ ...current, ...patch });
-    },
-    [statusSignal]
-  );
-
-  const updateDownloadProgress = useCallback(
-    (loaded: number, total: number) => {
-      speedEstimator.current.update(loaded, total);
-      const progress = total > 0 ? loaded / total : 0;
-      updateStatus({
-        stage: "downloading",
-        downloadProgress: progress,
-        downloadedBytes: loaded,
-        totalBytes: total,
-        speedBps: speedEstimator.current.bytesPerSecond,
-        etaSeconds: speedEstimator.current.etaSeconds,
-      });
-    },
-    [updateStatus]
-  );
-
-  const resetSpeed = useCallback(() => {
-    speedEstimator.current.reset();
-  }, []);
-
-  return { updateStatus, updateDownloadProgress, resetSpeed };
-}
-
-// ─── useCanRemoveBg ──────────────────────────────────────────────────────────
-
-/**
- * useCanRemoveBg: Determines if the "Remove Background" button should be enabled.
- *
- * Conditions for enabling:
- *   - An active frame exists
- *   - An active layer exists and is of type 'image'
- *   - No removal is currently in progress
- */
-export function useCanRemoveBg(): { canRemove: boolean; reason: string | null } {
-  const { activeFrame, activeLayer } = useEditorState();
-  const status = useBgRemovalStatus();
-
-  if (!activeFrame) {
-    return { canRemove: false, reason: "No active canvas" };
-  }
-
-  if (!activeLayer) {
-    return { canRemove: false, reason: "No active layer" };
-  }
-
-  if (activeLayer.type !== "image") {
-    return { canRemove: false, reason: "Only image layers supported" };
-  }
-
-  if (status.stage === "loading" || status.stage === "downloading" || status.stage === "processing") {
-    return { canRemove: false, reason: "Processing in progress..." };
-  }
-
-  // Check if WebGPU or WASM is available (basic check)
-  if (typeof Worker === "undefined") {
-    return { canRemove: false, reason: "Web Worker not supported" };
-  }
-
-  return { canRemove: true, reason: null };
+export function useSegStatus(): SegStatus {
+  const { segStatusSignal } = usePluginSignals<AIToolsDrawerSignalsMap & { segStatusSignal: { value: unknown; set: (v: unknown) => void } }>();
+  const status = segStatusSignal?.value as SegStatus | undefined;
+  return status ?? INITIAL_SEG_STATUS;
 }

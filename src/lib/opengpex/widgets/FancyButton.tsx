@@ -40,7 +40,10 @@ interface FancyButtonProps {
   disabled?: boolean;
   loading?: boolean;
   children?: React.ReactNode;
+  /** Tooltip content shown on hover. Does NOT affect button layout. Alias: `tooltip`. */
   title?: React.ReactNode;
+  /** Alias for `title`. Tooltip content shown on hover. */
+  tooltip?: React.ReactNode;
   className?: string;
   active?: boolean;
   variant?: FancyButtonVariant;
@@ -216,6 +219,7 @@ export function FancyButton({
   loading = false,
   children,
   title,
+  tooltip,
   className = "",
   active = false,
   variant = "ghost",
@@ -227,6 +231,9 @@ export function FancyButton({
   tooltipPosition = "top",
   ...props
 }: FancyButtonProps & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  // tooltip and title are aliases — tooltip takes precedence if both provided
+  const resolvedTooltip = tooltip ?? title;
+
   const getVariantStyles = () => {
     const theme = VARIANT_THEMES[variant];
     if (!theme) return "";
@@ -237,7 +244,7 @@ export function FancyButton({
   const roundedClass = shape === "pill" ? "rounded-full" : "rounded-xl";
   const sizeClass = iconOnly ? ICON_ONLY_SIZES[size] : STANDARD_SIZES[size];
 
-  const titleStr = typeof title === "string" ? title : "";
+  const titleStr = typeof resolvedTooltip === "string" ? resolvedTooltip : "";
   const match = titleStr.match(/^(.*?)\s*\((.*?)\)$/);
   const label = match ? match[1] : titleStr;
   const shortcut = match ? match[2] : undefined;
@@ -293,14 +300,14 @@ export function FancyButton({
     </button>
   );
 
-  if (title) {
+  if (resolvedTooltip) {
     return (
       <Tooltip
-        content={title}
+        content={resolvedTooltip}
         align={tooltipAlign}
         position={tooltipPosition}
         display="inline-flex"
-        containerClassName="flex justify-center w-full"
+        containerClassName={className}
       >
         {buttonContent}
       </Tooltip>

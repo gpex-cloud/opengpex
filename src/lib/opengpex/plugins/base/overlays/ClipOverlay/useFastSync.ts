@@ -290,13 +290,13 @@ export function useMoveDeltaSync(isActive: boolean, cropTool: ClipTool) {
     const dx = Math.round(currentRect.x - start.x);
     const dy = Math.round(currentRect.y - start.y);
 
-    if (dx === 0 && dy === 0) {
-      el.style.display = 'none';
-      return;
-    }
+    // Format with directional arrows + absolute values (no negatives)
+    // When displacement is 0, show "→ 0  ↓ 0" to indicate drag is active
+    const hArrow = dx >= 0 ? '→' : '←';
+    const vArrow = dy >= 0 ? '↓' : '↑';
 
     const span = el.firstElementChild as HTMLSpanElement;
-    if (span) span.textContent = `Δ ${dx}, ${dy}`;
+    if (span) span.textContent = `${hArrow} ${Math.abs(dx)}  ${vArrow} ${Math.abs(dy)}`;
     el.style.display = '';
   });
 

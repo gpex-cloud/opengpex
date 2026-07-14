@@ -18,12 +18,13 @@
  */
 
 import type { LucideIcon } from 'lucide-react';
-import { Square, Circle, Lasso, Wand2 } from 'lucide-react';
+import { Square, Circle, Lasso, Wand2, Shapes } from 'lucide-react';
 import {
   CLIP_RECT_CURSOR,
   CLIP_ELLIPSE_CURSOR,
   CLIP_LASSO_CURSOR,
   CLIP_WAND_CURSOR,
+  CLIP_SAM_CURSOR,
 } from '@opengpex/editor/icons';
 
 // ─── Plugin Identity ────────────────────────────────────────────────────────────
@@ -142,7 +143,7 @@ export const SIGNAL_CLIP_FEATHER = 'signal.clip_feather.value';
  * AA to ON (true). The strategy table declares which tools expose this
  * control via `supportsAntiAlias`.
  */
-export type ClipTool = 'rect' | 'ellipse' | 'lasso' | 'wand';
+export type ClipTool = 'rect' | 'ellipse' | 'lasso' | 'wand' | 'sam';
 
 export type ClipFamily = 'regular' | 'irregular';
 
@@ -164,7 +165,7 @@ export interface ClipToolStrategy {
    * ClipOverlay/interactions.ts. External call-sites should use
    * `getClipBox().regular` for data-level branching.
    */
-  readonly handlerKind: 'clipbox' | 'lasso' | 'wand';
+  readonly handlerKind: 'clipbox' | 'lasso' | 'wand' | 'sam';
 
   /**
    * Shape projection on tool-switch — only meaningful for `regular` tools.
@@ -205,6 +206,7 @@ export const CLIP_TOOL_STRATEGIES: Record<ClipTool, ClipToolStrategy> = {
   'ellipse': { id: 'ellipse', label: 'Ellipse', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'circle' }), forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_CURSOR },
   'lasso':   { id: 'lasso',   label: 'Lasso',   icon: Lasso,  accent: 'purple', family: 'irregular', handlerKind: 'lasso',                                              forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_LASSO_CURSOR   },
   'wand':    { id: 'wand',    label: 'Wand',    icon: Wand2,  accent: 'purple', family: 'irregular', handlerKind: 'wand',                                               forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_WAND_CURSOR    },
+  'sam':     { id: 'sam',     label: 'SAM',     icon: Shapes,   accent: 'purple', family: 'irregular', handlerKind: 'sam',                                                forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_SAM_CURSOR     },
 };
 
 // ─── Derived Helpers ────────────────────────────────────────────────────────────

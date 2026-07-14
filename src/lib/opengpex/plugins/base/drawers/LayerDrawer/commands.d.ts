@@ -7,7 +7,7 @@
  * DO NOT EDIT MANUALLY — run `pnpm gen-plugin-types` to regenerate.
  */
 
-import type { CommandInstance, InteractionSignalValue } from '@opengpex/editor/core/types';
+import type { CommandInstance, InteractionSignalValue, Layer, LayerBlendMode } from '@opengpex/editor/core/types';
 
 /** Type map for usePluginCommands<LayerDrawerCommandsMap>() */
 export interface LayerDrawerCommandsMap {
@@ -21,6 +21,9 @@ export interface LayerDrawerCommandsMap {
   addBlankLayerCmd: CommandInstance;
   duplicateLayerCmd: CommandInstance<{ layerId?: string } | undefined>;
   syncMaskCmd: CommandInstance<{ frameId?: string; layerId: string; maskId: string }>;
+  setBlendModeCmd: CommandInstance<{ frameId?: string; layerId?: string; blendMode: LayerBlendMode }>;
+  setLayerOpacityCmd: CommandInstance<{ frameId?: string; layerId?: string; opacity: number }>;
+  setLayerFillCmd: CommandInstance<{ frameId?: string; layerId?: string; fill: number }>;
 }
 
 /** Type map for usePluginSignals<LayerDrawerSignalsMap>() */

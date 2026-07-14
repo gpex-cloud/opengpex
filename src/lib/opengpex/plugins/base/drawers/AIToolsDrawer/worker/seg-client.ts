@@ -17,28 +17,25 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import type { BgRemoverRequest, BgRemoverResponse, BgRemoverResult, BgRemoverProgress } from './protocol';
+import type { SegRequest, SegResponse, SegResult, SegProgress } from './seg-protocol';
 
 /**
- * BgRemoverClient — Singleton wrapper around the BgRemover Worker.
+ * SegmentationClient — Singleton wrapper around the Segmentation Worker.
  *
- * Mode B Persistent Singleton (per spec §2.5):
- *   - Lazy: Worker constructed on first `run()` — no cold-start cost for users
- *     who never use background removal.
- *   - Pipeline cached: The Worker holds the loaded model across invocations;
- *     subsequent calls skip the ~70MB model load entirely.
- *   - 30-second hard timeout (accounting for first-time model download).
- *   - Stale-response defense via monotonic `reqId`.
- *   - Progress callback: multi-message flow (download + inference progress).
- *   - Dispose: terminates Worker to release GPU/WASM memory. Next `run()` will
- *     lazy-recreate.
+ * Mode B Persistent Singleton (consistent with BgRemoverClient):
+ *   - Lazy: Worker constructed on first `run()`.
+ *   - Sessions cached: Encoder/Decoder ONNX sessions persist across calls.
+ *   - Embedding cached: Image embedding stays in Worker memory for instant decode.
+ *   - reqId monotonic for stale-response defense.
+ *   - Progress callback: multi-message flow.
+ *   - Dispose: terminates Worker. Next `run()` lazy-recreates.
  *
- * Differences from MagicWandClient:
- *   - Multi-message progress (not just single response)
- *   - Longer timeout (30s vs 5s)
- *   - Speed estimation for download progress
+ * Key differences from BgRemoverClient:
+ *   - Supports multiple action types (download/encode/decode/segment-all)
+ *   - Decode is very fast (~10ms) — uses shorter default timeout
+ *   - Encode timeout is longer (~60s for first-time model download + encoding)
  */
-export class BgRemoverClient {
+export class SegmentationClient {
   private worker: Worker | null = null;
   private currentReqId = 0;
 
@@ -49,30 +46,41 @@ export class BgRemoverClient {
       throw new Error('Web Worker is not available in this environment');
     }
     this.worker = new Worker(
-      new URL('./bg-removal.worker.ts', import.meta.url),
+      new URL('./segmentation.worker.ts', import.meta.url),
       { type: 'module' }
     );
     return this.worker;
   }
 
   /**
-   * Submit a background removal request.
+   * Submit a segmentation request.
    *
-   * @param req - The image data and context (without reqId, auto-assigned)
+   * @param req - Request payload (without reqId, auto-assigned)
    * @param opts.signal - AbortSignal for cancellation
-   * @param opts.timeoutMs - Hard timeout (default 30s for first-time model download)
-   * @param opts.onProgress - Called multiple times with download/inference progress
-   * @returns Promise resolving with the final BgRemoverResult
+   * @param opts.timeoutMs - Hard timeout (default varies by action)
+   * @param opts.onProgress - Called with download/encode/decode progress
+   * @returns Promise resolving with the final SegResult
    */
   run(
-    req: Omit<BgRemoverRequest, 'reqId'>,
+    req: Omit<SegRequest, 'reqId'>,
     opts?: {
       signal?: AbortSignal;
       timeoutMs?: number;
-      onProgress?: (progress: BgRemoverProgress) => void;
+      onProgress?: (progress: SegProgress) => void;
     },
-  ): Promise<BgRemoverResult> {
-    const timeoutMs = opts?.timeoutMs ?? 30_000;
+  ): Promise<SegResult> {
+    // Default timeouts by action type:
+    //   download: 0 (no timeout — user-controlled via network)
+    //   encode: 60s (first-time may include download + encoding)
+    //   decode: 10s (should be ~10ms normally)
+    //   segment-all: 120s (full grid scan)
+    const defaultTimeout: Record<string, number> = {
+      'download': 0,
+      'encode': 60_000,
+      'decode': 10_000,
+      'segment-all': 120_000,
+    };
+    const timeoutMs = opts?.timeoutMs ?? defaultTimeout[req.action] ?? 30_000;
     const reqId = ++this.currentReqId;
 
     let worker: Worker;
@@ -82,7 +90,7 @@ export class BgRemoverClient {
       return Promise.reject(err);
     }
 
-    return new Promise<BgRemoverResult>((resolve, reject) => {
+    return new Promise<SegResult>((resolve, reject) => {
       const cleanup = () => {
         if (timer !== null) clearTimeout(timer);
         worker.removeEventListener('message', onMessage);
@@ -90,9 +98,8 @@ export class BgRemoverClient {
         opts?.signal?.removeEventListener('abort', onAbort);
       };
 
-      const onMessage = (ev: MessageEvent<BgRemoverResponse>) => {
+      const onMessage = (ev: MessageEvent<SegResponse>) => {
         const msg = ev.data;
-        // Stale-response guard
         if (msg?.reqId !== reqId) return;
 
         switch (msg.type) {
@@ -105,32 +112,22 @@ export class BgRemoverClient {
             break;
           case 'error':
             cleanup();
-            // Detect WebGPU/ORT runtime errors — these corrupt the ONNX Runtime's
-            // internal WebGPU backend state, making ALL subsequent WebGPU inference
-            // fail (even for different models that would otherwise work fine).
-            // For these errors, dispose the worker to get a completely fresh ORT
-            // environment on the next request. This allows other models (e.g. RMBG)
-            // to still use WebGPU successfully after BiRefNet fails.
-            //
-            // For non-WebGPU errors (e.g., tensor shape mismatch, post-processing
-            // errors), keep the worker alive — the internal cache invalidation is
-            // sufficient and avoids unnecessary model re-downloads.
+            // Detect WebGPU/ORT runtime errors that corrupt internal state
             {
               const errMsg = (msg.error ?? '').toLowerCase();
               const isWebGpuOrtError = (
                 errMsg.includes('ortrun') ||
                 errMsg.includes('webgpu') ||
                 errMsg.includes('storage_buffer') ||
-                errMsg.includes('shaderhelper') ||
                 errMsg.includes('device lost') ||
                 errMsg.includes('gpudevice')
               );
               if (isWebGpuOrtError) {
-                console.warn('[BgRemoverClient] WebGPU ORT error detected — disposing worker for clean restart');
+                console.warn('[SegClient] WebGPU ORT error — disposing worker for clean restart');
                 this.dispose();
               }
             }
-            reject(new Error(`BgRemover worker error: ${msg.error}`));
+            reject(new Error(`Segmentation worker error: ${msg.error}`));
             break;
         }
       };
@@ -138,7 +135,7 @@ export class BgRemoverClient {
       const onError = (ev: ErrorEvent) => {
         cleanup();
         this.dispose();
-        reject(new Error(`BgRemover worker crashed: ${ev.message ?? 'unknown error'}`));
+        reject(new Error(`Segmentation worker crashed: ${ev.message ?? 'unknown error'}`));
       };
 
       const onAbort = () => {
@@ -146,12 +143,12 @@ export class BgRemoverClient {
         reject(new DOMException('Aborted', 'AbortError'));
       };
 
-      // timeoutMs <= 0 means "no timeout" (model download can take minutes)
+      // timeoutMs <= 0 means "no timeout" (download can take minutes)
       const timer = timeoutMs > 0
         ? setTimeout(() => {
             cleanup();
             this.dispose();
-            reject(new Error(`BgRemover timed out after ${timeoutMs}ms`));
+            reject(new Error(`Segmentation timed out after ${timeoutMs}ms (action: ${req.action})`));
           }, timeoutMs)
         : null;
 
@@ -159,8 +156,8 @@ export class BgRemoverClient {
       worker.addEventListener('error', onError);
       opts?.signal?.addEventListener('abort', onAbort);
 
-      const message: BgRemoverRequest = { ...req, reqId };
-      // Transfer the ArrayBuffer (zero-copy) if imageData is present
+      const message: SegRequest = { ...req, reqId };
+      // Transfer ArrayBuffer (zero-copy) if imageData present
       if (req.imageData) {
         worker.postMessage(message, [req.imageData.data]);
       } else {
@@ -179,7 +176,7 @@ export class BgRemoverClient {
 }
 
 /**
- * Module-level singleton — one BgRemover worker per editor session.
- * The model stays warm in GPU/WASM memory for instant subsequent invocations.
+ * Module-level singleton — one Segmentation worker per editor session.
+ * Encoder embedding and decoder sessions stay warm for instant decode.
  */
-export const bgRemoverClient = new BgRemoverClient();
+export const segClient = new SegmentationClient();
