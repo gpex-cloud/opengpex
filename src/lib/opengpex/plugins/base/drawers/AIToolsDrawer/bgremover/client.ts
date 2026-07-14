@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import type { BgRemoverRequest, BgRemoverResponse, BgRemoverResult, BgRemoverProgress } from './protocol';
+import type { BgRemoverRequest, BgRemoverResponse, BgRemoverResult, BgRemoverProgress } from './worker.types';
 
 /**
  * BgRemoverClient — Singleton wrapper around the BgRemover Worker.
@@ -49,7 +49,7 @@ export class BgRemoverClient {
       throw new Error('Web Worker is not available in this environment');
     }
     this.worker = new Worker(
-      new URL('./bg-removal.worker.ts', import.meta.url),
+      new URL('./worker.ts', import.meta.url),
       { type: 'module' }
     );
     return this.worker;

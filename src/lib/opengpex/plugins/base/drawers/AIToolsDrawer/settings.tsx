@@ -27,31 +27,42 @@
  */
 
 import { useMemo, useState } from "react";
-import { Cpu, Shapes, Info, Loader2 } from "lucide-react";
+import { Cpu, Shapes, ArrowUpRight, Info, Loader2 } from "lucide-react";
 import { usePluginSelfConfig } from "@opengpex/editor/core/context";
-import { useDownloadTask } from "../../services";
-import type { BgRemoverConfig, SegConfig } from "../../protocols";
-import { BUILTIN_MODELS, BUILTIN_SEG_MODELS, DEFAULT_SEG_CONFIG } from "../../protocols";
-import { BgRemoverModelSettings } from "./bgremover";
-import { SegmentationModelSettings } from "./segmentation";
+import { useDownloadTask } from "./shared";
+import type { BgRemoverConfig, SegConfig, UpscaleConfig } from "./protocols";
+import { BUILTIN_MODELS, BUILTIN_SEG_MODELS, DEFAULT_SEG_CONFIG, BUILTIN_UPSCALE_MODELS } from "./protocols";
+import { BgRemoverModelSettings } from "./bgremover/settings";
+import { UpscalerModelSettings } from "./upscaler/settings";
+import { SegmentationModelSettings } from "./segmentation/settings";
 
-type SettingsTab = "bg-removal" | "segmentation";
+type SettingsTab = "upscaler" | "bg-removal" | "segmentation";
 
 const TABS: { value: SettingsTab; label: string; icon: typeof Cpu }[] = [
-  { value: "bg-removal", label: "BG Removal", icon: Cpu },
+  { value: "upscaler", label: "Upscaler", icon: ArrowUpRight },
+  { value: "bg-removal", label: "BG Remover", icon: Cpu },
   { value: "segmentation", label: "Segmentation", icon: Shapes },
 ];
 
+/** Map the drawer's activeTool (persisted in config) to a settings tab */
+function toolToTab(activeTool: string | undefined): SettingsTab {
+  if (activeTool === 'upscaler') return 'upscaler';
+  if (activeTool === 'segmentation') return 'segmentation';
+  if (activeTool === 'bg-removal') return 'bg-removal';
+  return 'upscaler'; // default
+}
+
 export function AIToolsSettings() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>("bg-removal");
+  const [config] = usePluginSelfConfig<BgRemoverConfig & { seg?: SegConfig; activeTool?: string }>();
+  // Initialize to the currently active tool panel so settings opens to the matching tab
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => toolToTab(config?.activeTool));
   const { task, isDownloading } = useDownloadTask();
-  const [config] = usePluginSelfConfig<BgRemoverConfig & { seg?: SegConfig }>();
 
   // Determine which tab the current download belongs to
   const downloadingTab = useMemo<SettingsTab | null>(() => {
     if (!isDownloading || !task) return null;
     const downloadModelId = task.modelId;
-    // Check if it's a BG removal model
+    // Check if it's a BG remover model
     const bgModelIds = new Set((config.models ?? BUILTIN_MODELS).map(m => m.modelId));
     if (bgModelIds.has(downloadModelId)) return "bg-removal";
     // Check if it's a segmentation model
@@ -61,6 +72,18 @@ export function AIToolsSettings() {
     return null;
   }, [isDownloading, task, config]);
 
+  // Detect which tabs have custom (non-builtin) models
+  const customModelTabs = useMemo<Set<SettingsTab>>(() => {
+    const tabs = new Set<SettingsTab>();
+    const bgModels = config.models ?? BUILTIN_MODELS;
+    if (bgModels.some(m => !m.builtin)) tabs.add("bg-removal");
+    const upModels = (config as unknown as { upscale?: UpscaleConfig })?.upscale?.models ?? BUILTIN_UPSCALE_MODELS;
+    if (upModels.some(m => !m.builtin)) tabs.add("upscaler");
+    const segModels = (config.seg ?? DEFAULT_SEG_CONFIG).models ?? BUILTIN_SEG_MODELS;
+    if (segModels.some(m => !m.builtin)) tabs.add("segmentation");
+    return tabs;
+  }, [config]);
+
   return (
     <div className="flex flex-col gap-4">
       {/* ─── Segment Control (Pill Toggle) ────────────────────── */}
@@ -68,11 +91,12 @@ export function AIToolsSettings() {
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.value;
+          const hasCustom = customModelTabs.has(tab.value);
           return (
             <button
               key={tab.value}
               onClick={() => setActiveTab(tab.value)}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all duration-150 ${
+              className={`flex-1 relative flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all duration-150 ${
                 isActive
                   ? "bg-[var(--bg-panel)] text-[var(--text-main)] shadow-sm"
                   : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
@@ -83,6 +107,12 @@ export function AIToolsSettings() {
               {downloadingTab === tab.value && (
                 <Loader2 size={9} className="animate-spin text-[var(--text-secondary)]" />
               )}
+              {hasCustom && (
+                <span
+                  className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-amber-400"
+                  title="Has custom models"
+                />
+              )}
             </button>
           );
         })}
@@ -90,6 +120,7 @@ export function AIToolsSettings() {
 
       {/* ─── Tab Content ──────────────────────────────────────── */}
       {activeTab === "bg-removal" && <BgRemoverModelSettings />}
+      {activeTab === "upscaler" && <UpscalerModelSettings />}
       {activeTab === "segmentation" && <SegmentationModelSettings />}
 
       {/* ─── Info Callout ─────────────────────────────────────── */}

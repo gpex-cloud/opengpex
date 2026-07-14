@@ -37,8 +37,8 @@ export function AIToolsIcon({ size = 24, className }: { size?: number; className
       {/* "AI" — top-left, large bold */}
       <text
         x="1"
-        y="12"
-        fontSize="12"
+        y="13"
+        fontSize="14"
         fontWeight="900"
         fill="currentColor"
         fontFamily="system-ui, -apple-system, sans-serif"

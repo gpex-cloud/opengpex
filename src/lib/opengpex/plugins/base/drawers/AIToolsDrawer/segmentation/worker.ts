@@ -39,7 +39,7 @@
  *   - Embedding cached in Worker memory (keyed by assetId, max 3)
  */
 
-import type { SegRequest, SegProgress, SegResult, SegError, SegPrompt } from './seg-protocol';
+import type { SegRequest, SegProgress, SegResult, SegError, SegPrompt } from './worker.types';
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 

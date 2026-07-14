@@ -39,7 +39,7 @@ function formatSpeed(bps: number): string {
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
-export interface ModelDownloadSectionProps {
+export interface ModelDownloaderProps {
   /** 0-1 progress value */
   progress: number;
   /** Bytes downloaded */
@@ -57,7 +57,7 @@ export interface ModelDownloadSectionProps {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 /**
- * ModelDownloadSection — Compact inline download progress for drawer panels.
+ * ModelDownloader — Compact inline download progress for drawer panels.
  *
  * Shows:
  *   - Spinner + "Downloading..." label
@@ -65,16 +65,16 @@ export interface ModelDownloadSectionProps {
  *   - Progress bar
  *   - Stats: loaded/total (filename) + speed
  *
- * Used by both SegmentationPanel and BgRemoverPanel for consistent UX.
+ * Used by all AI tool panels (BG Remover, Upscaler, Segmentation) for consistent UX.
  */
-export const ModelDownloadSection = React.memo(function ModelDownloadSection({
+export const ModelDownloader = React.memo(function ModelDownloader({
   progress,
   loadedBytes,
   totalBytes,
   speedBps,
   currentFile,
   onCancel,
-}: ModelDownloadSectionProps) {
+}: ModelDownloaderProps) {
   const percent = Math.min(100, Math.max(0, Math.round(progress * 100)));
 
   return (
@@ -92,10 +92,10 @@ export const ModelDownloadSection = React.memo(function ModelDownloadSection({
           {onCancel && (
             <button
               onClick={onCancel}
-              className="p-0.5 rounded hover:bg-white/10 text-[var(--text-muted)] hover:text-rose-400 transition-colors"
+              className="p-1.5 -m-1 rounded hover:bg-white/10 text-[var(--text-muted)] hover:text-rose-400 transition-colors"
               title="Cancel download"
             >
-              <X size={10} />
+              <X size={11} />
             </button>
           )}
         </div>
@@ -109,16 +109,24 @@ export const ModelDownloadSection = React.memo(function ModelDownloadSection({
         />
       </div>
 
-      {/* Stats: size + speed */}
+      {/* Stats line 1: size progress (left) + speed (right) */}
       {totalBytes > 0 && (
         <div className="flex justify-between text-[9px] text-[var(--text-muted)]">
-          <span>
-            {formatBytes(loadedBytes)} / {formatBytes(totalBytes)}
-            {currentFile ? ` (${currentFile})` : ''}
-          </span>
+          <span>{formatBytes(loadedBytes)} / {formatBytes(totalBytes)}</span>
           {speedBps > 0 && <span>{formatSpeed(speedBps)}</span>}
+        </div>
+      )}
+      {/* Stats line 2: current filename */}
+      {currentFile && (
+        <div className="text-[8px] text-[var(--text-muted)] font-mono truncate opacity-70">
+          {currentFile}
         </div>
       )}
     </div>
   );
 });
+
+/** @deprecated Use ModelDownloader instead */
+export const ModelDownloadSection = ModelDownloader;
+/** @deprecated Use ModelDownloaderProps instead */
+export type ModelDownloadSectionProps = ModelDownloaderProps;

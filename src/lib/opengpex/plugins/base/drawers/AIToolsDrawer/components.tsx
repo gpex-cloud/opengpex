@@ -22,20 +22,23 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Settings, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { useEditorState, useEditorServices, usePluginCommands } from '@opengpex/editor/core/context';
+import { useEditorState, useEditorServices, usePluginCommands, usePluginSelfConfig } from '@opengpex/editor/core/context';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
-import { initBusySync } from './services';
+import { initBusySync } from './shared';
 import { AIToolsIcon } from './icon';
-import { BgRemoverPanel } from './panels/bgremover';
-import { SegmentationPanel } from './panels/segmentation';
+import { BgRemoverPanel } from './bgremover/panel';
+import { UpscalerPanel } from './upscaler/panel';
+import { SegmentationPanel } from './segmentation/panel';
 import type { AIToolsDrawerCommandsMap } from './commands.d';
+import type { AIToolsConfig } from './protocols';
 import { AIToolsDrawerAPI } from './protocols';
 
 // ─── Tool definitions ────────────────────────────────────────────────────────
 
-type AITool = 'bg-removal' | 'segmentation';
+type AITool = 'upscaler' | 'bg-removal' | 'segmentation';
 
 const AI_TOOLS: { value: AITool; label: string; description: string }[] = [
+  { value: 'upscaler', label: 'Upscaler', description: 'Enhance image resolution with AI' },
   { value: 'bg-removal', label: 'BG Remover', description: 'Remove image backgrounds using AI' },
   { value: 'segmentation', label: 'Segmentation', description: 'Click to select objects using SAM' },
 ];
@@ -47,7 +50,17 @@ export function BgRemoverDrawerContent() {
   const { openSettingsCmd } = usePluginCommands<AIToolsDrawerCommandsMap>();
   const { state, activeFrame } = useEditorState();
   const { actions, plugins } = useEditorServices();
-  const [userSelectedTool, setUserSelectedTool] = useState<AITool>('bg-removal');
+  const [config, setConfig] = usePluginSelfConfig<AIToolsConfig>();
+
+  // Persist active tool selection in config so it survives page refresh
+  const savedTool = (config?.activeTool as AITool) || 'upscaler';
+  const [userSelectedTool, setUserSelectedTool] = useState<AITool>(savedTool);
+
+  const handleToolSelect = useCallback((val: string) => {
+    const tool = val as AITool;
+    setUserSelectedTool(tool);
+    setConfig({ activeTool: tool });
+  }, [setConfig]);
 
   // One-time: give the download singleton a reference to PluginService
   // so it can auto-sync busy state even after this component unmounts.
@@ -84,7 +97,7 @@ export function BgRemoverDrawerContent() {
               label: t.label,
             }))}
             disabled={isClipSam}
-            onSelect={(val) => setUserSelectedTool(val as AITool)}
+            onSelect={handleToolSelect}
             trigger={(isOpen) => (
               <div className={`flex items-center gap-1 group ${isClipSam ? 'cursor-default' : 'cursor-pointer'}`} title={isClipSam ? 'Locked to Segmentation while SAM tool is active' : undefined}>
                 <span className={`text-[10px] font-black uppercase tracking-[0.15em] transition-colors ${isClipSam ? 'text-indigo-500 dark:text-indigo-400' : 'text-[var(--text-main)] group-hover'}`}>
@@ -111,6 +124,7 @@ export function BgRemoverDrawerContent() {
 
       {/* ─── Active Tool Panel ──────────────────────────────────── */}
       {activeTool === 'bg-removal' && <BgRemoverPanel />}
+      {activeTool === 'upscaler' && <UpscalerPanel />}
       {activeTool === 'segmentation' && <SegmentationPanel />}
     </div>
   );

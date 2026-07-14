@@ -41,6 +41,7 @@ export const ADV_FRAME_BRANCH = 'adv.frame.branch';
 export const ADV_FRAME_RESIZE_CANVAS = 'adv.frame.resize_canvas';
 export const ADV_FRAME_REVERT = 'adv.frame.revert';
 export const ADV_FRAME_RESAMPLE = 'adv.frame.resample';
+export const ADV_FRAME_REPLACE = 'adv.frame.replace';
 export const ADV_FRAME_REMOVE = 'adv.frame.remove';
 export const ADV_FRAME_TRUNK = 'adv.frame.trunk';
 export const ADV_FRAME_EXPORT = 'adv.frame.export';

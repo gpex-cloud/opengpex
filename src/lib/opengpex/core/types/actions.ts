@@ -146,6 +146,7 @@ export interface EditorActions {
       resize: {
         resizeCanvas: AdvCommandRef;
         resample: AdvCommandRef<{ targetDim: Dimensions; dpi?: number }, Promise<void>>;
+        replace: AdvCommandRef<{ source: File; dpi?: number }, Promise<void>>;
       };
     };
     layer: {

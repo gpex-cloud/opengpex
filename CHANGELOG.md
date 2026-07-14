@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.27
+
+- Decompose monolithic AIToolsDrawer into feature-based sub-modules with per-feature panel, commands, protocols, hooks, settings, worker, and client
+- Extract shared model infrastructure (ModelCard, ModelSettingsShell, ModelDownloader, download utilities, useModelManager)
+
+---
+
 ## v1.0.0-beta.26
 
 - Add AI Segmentation (SAM) clip tool with point/box prompts, dedicated Web Worker, and unified model download & cache service layer

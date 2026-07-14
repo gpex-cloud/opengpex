@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import type { SegRequest, SegResponse, SegResult, SegProgress } from './seg-protocol';
+import type { SegRequest, SegResponse, SegResult, SegProgress } from './worker.types';
 
 /**
  * SegmentationClient — Singleton wrapper around the Segmentation Worker.
@@ -46,7 +46,7 @@ export class SegmentationClient {
       throw new Error('Web Worker is not available in this environment');
     }
     this.worker = new Worker(
-      new URL('./segmentation.worker.ts', import.meta.url),
+      new URL('./worker.ts', import.meta.url),
       { type: 'module' }
     );
     return this.worker;

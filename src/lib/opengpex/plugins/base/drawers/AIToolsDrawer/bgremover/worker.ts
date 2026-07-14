@@ -34,7 +34,7 @@
  * Per spec §2.4: Worker communication uses Transferable buffers (zero-copy).
  */
 
-import type { BgRemoverRequest, BgRemoverProgress, BgRemoverResult, BgRemoverError } from './protocol';
+import type { BgRemoverRequest, BgRemoverProgress, BgRemoverResult, BgRemoverError } from './worker.types';
 
 // ─── Model Configuration ─────────────────────────────────────────────────────
 
@@ -68,7 +68,12 @@ async function isModelInCacheStorage(modelId: string): Promise<boolean> {
   try {
     const names = await caches.keys();
     for (const name of names) {
-      if (name.includes('transformers') || name.includes('huggingface') || name.includes('onnx')) {
+      if (
+        name === 'opengpex-ai-models' ||
+        name.includes('transformers') ||
+        name.includes('huggingface') ||
+        name.includes('onnx')
+      ) {
         const cache = await caches.open(name);
         const keys = await cache.keys();
         const hasModel = keys.some(req =>
@@ -273,8 +278,23 @@ function getSessionOutputNames(model: any): string[] {
 
 // ─── Main Inference Pipeline ─────────────────────────────────────────────────
 
+/**
+ * Derive the transformers.js `dtype` option from the ONNX filename.
+ * This ensures from_pretrained loads the exact file variant we downloaded.
+ */
+function deriveDtype(onnxFile?: string): string {
+  if (!onnxFile) return 'fp32'; // safe default — model.onnx (fp32) exists in most repos
+  const lower = onnxFile.toLowerCase();
+  if (lower.includes('fp16')) return 'fp16';
+  if (lower.includes('quantized') || lower.includes('q8') || lower.includes('int8')) return 'q8';
+  if (lower.includes('q4') || lower.includes('int4')) return 'q4';
+  if (lower.includes('uint8')) return 'uint8';
+  // Default: plain "model.onnx" → fp32
+  return 'fp32';
+}
+
 async function runInference(req: BgRemoverRequest): Promise<void> {
-  const { reqId, modelId, imageData, context, action = 'remove' } = req;
+  const { reqId, modelId, onnxFile, imageData, context, action = 'remove' } = req;
   const totalStart = performance.now();
 
   try {
@@ -303,6 +323,14 @@ async function runInference(req: BgRemoverRequest): Promise<void> {
     // Suppress "Unknown model class" warning
     env.logLevel = 'error';
 
+    // IMPORTANT: Tell transformers.js to use our shared cache bucket.
+    // By default, the library creates its own cache (named from env.cacheDir).
+    // We override it so from_pretrained() reads/writes the same Cache Storage
+    // as our shared download service ('opengpex-ai-models'). This means:
+    //   - After downloading via the "Download" button, inference starts instantly
+    //   - No duplicate copies across different cache buckets
+    env.cacheDir = 'opengpex-ai-models';
+
     // 3. Load or reuse model + processor
     //    Since workers are disposed on model switch, this block runs on every
     //    fresh worker. The pipeline is cached within the same worker for
@@ -315,7 +343,9 @@ async function runInference(req: BgRemoverRequest): Promise<void> {
       // Pre-check: is model already in Cache Storage?
       // transformers.js fires status='download' even for cache reads (fetch API),
       // so we check upfront to determine if 'downloading' should be reported.
+      console.log(`[BgRemover] Checking cache for model: ${modelId}`);
       const modelAlreadyCached = await isModelInCacheStorage(modelId);
+      console.log(`[BgRemover] Model cached: ${modelAlreadyCached}, env.cacheDir: ${env.cacheDir}`);
 
       // Report 'loading' stage — model is being loaded into memory.
       self.postMessage({
@@ -330,40 +360,89 @@ async function runInference(req: BgRemoverRequest): Promise<void> {
       let hasRealDownload = false;
 
       // Load processor (lightweight, usually cached)
+      console.log(`[BgRemover] Loading processor for: ${modelId}...`);
+      const procStart = performance.now();
       cachedProcessor = await AutoProcessor.from_pretrained(modelId);
+      console.log(`[BgRemover] Processor loaded in ${(performance.now() - procStart).toFixed(0)}ms`);
 
       // Load model with progress tracking.
       // If model is already in Cache Storage, suppress all 'downloading' reports
       // (transformers.js fires 'download' status even for cache reads via fetch API).
-      cachedModel = await AutoModel.from_pretrained(modelId, {
-        device,
-        progress_callback: (progress: { status: string; file?: string; loaded?: number; total?: number; progress?: number }) => {
-          // Skip all download reporting if model was pre-checked as cached
-          if (modelAlreadyCached) return;
+      const progressCallback = (progress: { status: string; file?: string; loaded?: number; total?: number; progress?: number }) => {
+        // Skip all download reporting if model was pre-checked as cached
+        if (modelAlreadyCached) return;
 
-          // 'download' status = transformers.js initiated a fetch
-          if (progress.status === 'download') {
-            hasRealDownload = true;
+        // 'download' status = transformers.js initiated a fetch
+        if (progress.status === 'download') {
+          hasRealDownload = true;
+        }
+
+        if (hasRealDownload && (progress.status === 'progress' || progress.status === 'download')) {
+          const loaded = progress.loaded ?? 0;
+          const total = progress.total ?? 0;
+          if (total > 0) {
+            self.postMessage({
+              type: 'progress',
+              reqId,
+              stage: 'downloading',
+              device,
+              file: progress.file,
+              loaded,
+              total,
+            } satisfies BgRemoverProgress);
           }
+        }
+      };
 
-          if (hasRealDownload && (progress.status === 'progress' || progress.status === 'download')) {
-            const loaded = progress.loaded ?? 0;
-            const total = progress.total ?? 0;
-            if (total > 0) {
-              self.postMessage({
-                type: 'progress',
-                reqId,
-                stage: 'downloading',
-                device,
-                file: progress.file,
-                loaded,
-                total,
-              } satisfies BgRemoverProgress);
-            }
-          }
-        },
-      });
+      // Try loading with detected device. WebGPU session creation can hang
+      // indefinitely for some models (e.g. fp16 ONNX on certain GPUs that
+      // don't fully support fp16 shader operations).
+      // Use a timeout and fall back to WASM if WebGPU hangs.
+      const MODEL_LOAD_TIMEOUT_MS = 15_000; // 15s — enough for normal WebGPU shader compilation
+      let actualDevice = device;
 
+      // Derive dtype from onnxFile to match the exact file variant downloaded.
+      // Without this, the library uses heuristics that may request a non-existent file.
+      const dtype = deriveDtype(onnxFile);
+      console.log(`[BgRemover] onnxFile="${onnxFile}" → dtype="${dtype}"`);
+
+      const loadModel = (targetDevice: 'webgpu' | 'wasm') =>
+        AutoModel.from_pretrained(modelId, {
+          device: targetDevice,
+          dtype,
+          progress_callback: progressCallback,
+        });
+
+      console.log(`[BgRemover] Loading model: ${modelId} on device: ${device}...`);
+      const modelStart = performance.now();
+
+      if (device === 'webgpu') {
+        // Race WebGPU load against a timeout
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('WebGPU_TIMEOUT')), MODEL_LOAD_TIMEOUT_MS)
+        );
+        try {
+          cachedModel = await Promise.race([loadModel('webgpu'), timeoutPromise]);
+        } catch (gpuErr) {
+          const msg = gpuErr instanceof Error ? gpuErr.message : String(gpuErr);
+          console.warn(`[BgRemover] WebGPU model load failed (${msg}), falling back to WASM...`);
+          actualDevice = 'wasm';
+          cachedModel = await loadModel('wasm');
+        }
+      } else {
+        cachedModel = await loadModel('wasm');
+      }
+
+      console.log(`[BgRemover] Model loaded in ${(performance.now() - modelStart).toFixed(0)}ms (device: ${actualDevice})`);
+      // Update device for UI reporting
+      if (actualDevice !== device) {
+        self.postMessage({
+          type: 'progress',
+          reqId,
+          stage: 'detecting-device',
+          device: actualDevice,
+        } satisfies BgRemoverProgress);
+      }
       cachedModelId = modelId;
       _cachedDevice = device;
     }

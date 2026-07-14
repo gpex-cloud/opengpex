@@ -52,6 +52,16 @@ export interface BgRemoverRequest {
   modelId: string;
 
   /**
+   * ONNX filename within the HuggingFace repo (e.g. "onnx/model_fp16.onnx").
+   * Used to determine the correct `dtype` for from_pretrained():
+   *   - "model_fp16.onnx" → dtype 'fp16'
+   *   - "model.onnx"      → dtype 'fp32'
+   *   - "model_quantized.onnx" → dtype 'q8'
+   * Falls back to 'fp32' if not specified or unrecognized.
+   */
+  onnxFile?: string;
+
+  /**
    * Layer raster pixels (RGBA8). Buffer is detached on postMessage
    * — caller MUST NOT touch it after sending.
    */

@@ -20,6 +20,9 @@ export interface AIToolsDrawerCommandsMap {
   segEncodeCmd: CommandInstance<SegEncodePayload, Promise<SegEncodeResult>>;
   segDecodeCmd: CommandInstance<SegDecodePayload, Promise<SegDecodeResult>>;
   segAllCmd: CommandInstance<void, Promise<void>>;
+  upscaleCmd: CommandInstance<void, Promise<void>>;
+  upscaleDownloadCmd: CommandInstance<void, Promise<void>>;
+  upscaleAbortCmd: CommandInstance;
 }
 
 /** Type map for usePluginSignals<AIToolsDrawerSignalsMap>() */
@@ -30,6 +33,10 @@ export interface AIToolsDrawerSignalsMap {
     set: (val: unknown) => void;
   };
   segStatusSignal: {
+    value: unknown;
+    set: (val: unknown) => void;
+  };
+  upscaleStatusSignal: {
     value: unknown;
     set: (val: unknown) => void;
   };

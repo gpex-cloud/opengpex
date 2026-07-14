@@ -546,6 +546,7 @@ export function useEditorStore() {
           resize: {
             resizeCanvas: advRef(P.ADV_FRAME_RESIZE_CANVAS, () => executeCommand(P.ADV_FRAME_RESIZE_CANVAS)),
             resample: advRef(P.ADV_FRAME_RESAMPLE, (payload: { targetDim: Dimensions; dpi?: number }) => executeCommand<{ targetDim: Dimensions; dpi?: number }, Promise<void>>(P.ADV_FRAME_RESAMPLE, payload)),
+            replace: advRef(P.ADV_FRAME_REPLACE, (payload: { source: File; dpi?: number }) => executeCommand<{ source: File; dpi?: number }, Promise<void>>(P.ADV_FRAME_REPLACE, payload)),
           },
         },
         layer: {

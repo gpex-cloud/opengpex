@@ -20,8 +20,10 @@
 import { EditorPlugin } from "@opengpex/editor/core/types";
 import { Cpu } from "lucide-react";
 import { BgRemoverDrawerContent } from "./components";
-import { AIToolsSettings } from "./panels/settings";
-import { BG_REMOVAL_COMMANDS, SEG_COMMANDS } from "./commands";
+import { AIToolsSettings } from "./settings";
+import { BG_REMOVAL_COMMANDS } from "./bgremover/commands";
+import { SEG_COMMANDS } from "./segmentation/commands";
+import { UPSCALE_COMMANDS } from "./upscaler/commands";
 import { AIToolsIcon } from "./icon";
 
 import * as P from "./protocols";
@@ -87,13 +89,13 @@ export const plugin: EditorPlugin = {
   initialConfig: P.DEFAULT_BG_REMOVAL_CONFIG,
 
   // --- 5. Commands ---
-  commands: [...Object.values(BG_REMOVAL_COMMANDS), ...Object.values(SEG_COMMANDS)],
+  commands: [...Object.values(BG_REMOVAL_COMMANDS), ...Object.values(SEG_COMMANDS), ...Object.values(UPSCALE_COMMANDS)],
 
   // --- 6. Signals ---
   signals: [
     {
       id: P.SIGNAL_STATUS,
-      name: "BG Removal Status",
+      name: "BG Remover Status",
       defaultValue: P.INITIAL_STATUS,
       scope: "public",
     },
@@ -101,6 +103,12 @@ export const plugin: EditorPlugin = {
       id: P.SIGNAL_SEG_STATUS,
       name: "Segmentation Status",
       defaultValue: P.INITIAL_SEG_STATUS,
+      scope: "public",
+    },
+    {
+      id: P.SIGNAL_UPSCALE_STATUS,
+      name: "Upscaler Status",
+      defaultValue: P.INITIAL_UPSCALE_STATUS,
       scope: "public",
     },
   ],

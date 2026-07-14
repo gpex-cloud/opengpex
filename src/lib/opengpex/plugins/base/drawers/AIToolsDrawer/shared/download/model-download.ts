@@ -96,7 +96,7 @@ export interface DownloadOptions {
 
 // ─── Speed Estimator ─────────────────────────────────────────────────────────
 
-class SpeedEstimator {
+export class SpeedEstimator {
   private samples: { time: number; bytes: number }[] = [];
   private _totalBytes = 0;
   private _currentBytes = 0;

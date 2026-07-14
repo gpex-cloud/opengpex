@@ -127,4 +127,108 @@ export const FrameResizeCommands = {
       });
     }
   } as EditorCommand<{ targetDim: { w: number, h: number }; dpi?: number }, Promise<void>>,
+
+  /**
+   * replace — Replace the active frame's primary image layer with externally-provided
+   * pixel data (e.g. AI upscale output). Other layers are scaled proportionally.
+   *
+   * Unlike `resample` which re-interpolates existing pixels, `replace` accepts
+   * a new source File containing pre-computed pixel data.
+   *
+   * Semantics:
+   *   - Finds the primary image layer (first host layer with `type === 'image'`)
+   *   - Replaces its `src` with the new file (registered as asset)
+   *   - Updates canvas dimensions from the new image
+   *   - Scales non-primary layers proportionally to fit new canvas
+   *   - Preserves undo history
+   */
+  replace: {
+    id: P.ADV_FRAME_REPLACE,
+    name: 'Replace Frame Content',
+    undoable: true,
+    execute: async (ctx: EditorContextValue, payload: { source: File; dpi?: number }): Promise<void> => {
+      const { activeFrame, state, actions, geometry, layers, assets } = ctx;
+      if (!activeFrame) return;
+
+      const { source, dpi } = payload;
+
+      // 1. Decode the source file to get dimensions
+      const bitmap = await createImageBitmap(source);
+      const newW = bitmap.width;
+      const newH = bitmap.height;
+      bitmap.close();
+
+      const oldW = activeFrame.canvas.w;
+      const oldH = activeFrame.canvas.h;
+      const scaleX = newW / oldW;
+      const scaleY = newH / oldH;
+
+      // 2. Register the source as an asset (creates blob URL + cache entry)
+      const assetId = await assets.register(source);
+      const assetUrl = assets.getURL(assetId)!;
+
+      // 3. Find primary image layer (first host image layer)
+      const primaryLayer = activeFrame.layers.order
+        .map(id => activeFrame.layers.byId[id])
+        .find(l => l.type === 'image' && (!l.hostId || l.role === 'host'));
+
+      if (!primaryLayer) {
+        console.error('[FrameReplace] No primary image layer found');
+        return;
+      }
+
+      // 4. Scale non-primary layers proportionally
+      const patches: Record<string, Partial<Layer>> = {};
+      const otherHostLayers = activeFrame.layers.order
+        .map(id => activeFrame.layers.byId[id])
+        .filter(l => l.id !== primaryLayer.id && (!l.hostId || l.role === 'host'));
+
+      for (const layer of otherHostLayers) {
+        try {
+          const result = await ctx.layers.resampleLayerPhysical(layer, scaleX, scaleY);
+          if (result) {
+            patches[layer.id] = result.patch;
+          }
+        } catch (err) {
+          console.error('[FrameReplace] Resample failed for layer:', layer.id, err);
+        }
+      }
+
+      // 5. Patch primary layer: new src + reset transform to fill new canvas
+      patches[primaryLayer.id] = {
+        src: assetUrl,
+        assetId,
+        bounding: { w: newW, h: newH },
+        visibleShape: asLocalShape({ x: 0, y: 0, w: newW, h: newH }),
+        cx: 0,
+        cy: 0,
+        rotation: 0,
+        scale: 1,
+      };
+
+      // 6. Update frame canvas + camera
+      const targetDim = { w: newW, h: newH };
+      const { insets } = state.ui.theme.config;
+      const newCamera = geometry.camera.getFitCamera(
+        state.ui.viewportDim,
+        targetDim,
+        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
+      );
+
+      actions.updateFrame(activeFrame.id, {
+        canvas: targetDim,
+        camera: newCamera,
+        clipBoxes: {},
+        canvasCropBox: asLocalShape({ x: newW * 0.25, y: newH * 0.25, w: newW * 0.5, h: newH * 0.5 }),
+        ...(dpi ? { dpi } : {})
+      });
+
+      // 7. Apply layer patches
+      layers.updateLayer(activeFrame.id, tx => {
+        for (const [id, patch] of Object.entries(patches)) {
+          tx.edit(id).patch(patch);
+        }
+      });
+    }
+  } as EditorCommand<{ source: File; dpi?: number }, Promise<void>>,
 };

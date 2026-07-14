@@ -19,13 +19,13 @@
 
 'use client';
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback } from 'react';
 import { Download, Trash2, Loader2, ChevronDown, CheckCircle2, RefreshCw, Zap } from 'lucide-react';
 import { useEditorServices, useEditorState, usePluginCommands, usePluginSelfConfig, usePluginSignals } from '@opengpex/editor/core/context';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
-import { useSegStatus } from '../hooks';
-import { useModelManager, ModelDownloadSection } from '../services';
+import { useSegStatus } from './hooks';
+import { useModelManager, ModelDownloader } from '../shared';
 import type { SegModelEntry } from '../protocols';
 import type { AIToolsDrawerCommandsMap, AIToolsDrawerSignalsMap } from '../commands.d';
 import * as P from '../protocols';
@@ -38,9 +38,13 @@ function formatMs(ms: number): string {
 }
 
 function ensureBuiltins(models: SegModelEntry[]): SegModelEntry[] {
-  const builtinIds = new Set(P.BUILTIN_SEG_MODELS.map(m => m.id));
-  const userModels = models.filter(m => !m.builtin || builtinIds.has(m.id));
-  const result = [...userModels];
+  const builtinMap = new Map(P.BUILTIN_SEG_MODELS.map(b => [b.id, b]));
+  const result = models
+    .filter(m => !m.builtin || builtinMap.has(m.id))
+    .map(m => {
+      const latest = builtinMap.get(m.id);
+      return latest ? { ...latest } : m;
+    });
   for (const builtin of P.BUILTIN_SEG_MODELS) {
     if (!result.find(m => m.id === builtin.id)) {
       result.unshift(builtin);
@@ -63,16 +67,12 @@ export function SegmentationPanel() {
   const models = ensureBuiltins(segConfig.models || []);
   const activeModel = models.find(m => m.id === segConfig.activeModelId) || models[0];
 
-  const isEncoding = status.stage === 'encoding';
+  const isEncoding = status.stage === 'encoding' || status.stage === 'downloading';
   const isDecoding = status.stage === 'decoding';
   const isError = status.stage === 'error';
 
   // ─── Model Manager (download + cache + lifecycle) ────────────────────────
-  const files = useMemo(() => [
-    { filename: 'encoder.with_runtime_opt.ort' },
-    { filename: 'encoder.onnx' },
-    { filename: 'decoder.onnx' },
-  ], []);
+  const files = P.getSegModelFiles(activeModel);
 
   const mgr = useModelManager({
     modelId: activeModel?.modelId,
@@ -130,7 +130,7 @@ export function SegmentationPanel() {
   return (
     <div className="flex flex-col gap-1.5">
       {/* ─── Model Selection ────────────────────────────────────── */}
-      <div className="rounded-lg border border-white/[0.04] bg-white/[0.02] px-2.5 py-2 space-y-1.5">
+      <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-stage)] px-2.5 py-2 space-y-1.5">
         <div className="flex flex-col gap-1">
           <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
             Model
@@ -142,7 +142,7 @@ export function SegmentationPanel() {
               onSelect={handleModelChange}
               disabled={isBusy}
               trigger={(isOpen) => (
-                <div className="flex items-center justify-between gap-1 w-full px-2 py-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-panel)] cursor-pointer hover:border-[var(--text-secondary)] transition-all">
+                <div className="flex items-center justify-between gap-1 w-full px-2 py-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] cursor-pointer hover:border-[var(--border-light)] transition-all">
                   <span className="text-[10px] text-[var(--text-main)] truncate">
                     {activeModel?.name}
                   </span>
@@ -160,7 +160,7 @@ export function SegmentationPanel() {
                 actions.setInteraction({ hud: { message: 'Model list refreshed', type: 'success' } });
               }}
               disabled={isBusy}
-              className="p-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:bg-white/5 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors disabled:opacity-50"
+              className="p-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:bg-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors disabled:opacity-50"
               title="Refresh model list"
             >
               <RefreshCw size={10} />
@@ -169,20 +169,20 @@ export function SegmentationPanel() {
         </div>
 
         {/* Model info */}
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[9px] text-[var(--text-muted)]">{activeModel?.size}</span>
-          <span className="text-[9px] text-[var(--text-muted)] italic">{activeModel?.description}</span>
+        <div className="flex flex-col gap-0.5 pt-0.5">
+          <span className="text-[10px] font-semibold text-[var(--text-main)]">{activeModel?.size}</span>
+          <span className="text-[10px] text-[var(--text-muted)] italic">{activeModel?.description}</span>
         </div>
 
         {/* Cache status */}
         {!mgr.checkingCache && (
           <div className="flex items-center gap-1">
             {mgr.isCached ? (
-              <span className="text-[8px] text-emerald-400 flex items-center gap-0.5">
-                <CheckCircle2 size={8} /> Cached locally
+              <span className="text-[9px] text-emerald-400 flex items-center gap-0.5">
+                <CheckCircle2 size={9} /> Cached locally
               </span>
             ) : (
-              <span className="text-[8px] text-[var(--text-muted)] italic">
+              <span className="text-[9px] text-[var(--text-muted)] italic">
                 Not downloaded yet
               </span>
             )}
@@ -219,7 +219,7 @@ export function SegmentationPanel() {
 
       {/* ─── Download Progress ──────────────────────────────────── */}
       {mgr.isDownloading && (
-        <ModelDownloadSection
+        <ModelDownloader
           progress={mgr.downloadState.overallTotal > 0 ? mgr.downloadState.overallLoaded / mgr.downloadState.overallTotal : 0}
           loadedBytes={mgr.downloadState.overallLoaded}
           totalBytes={mgr.downloadState.overallTotal}
@@ -231,17 +231,17 @@ export function SegmentationPanel() {
 
       {/* ─── Encoding/Decoding Progress ────────────────────────── */}
       {(isEncoding || isDecoding) && (
-        <div className="rounded-lg border border-white/[0.04] bg-white/[0.02] px-2.5 py-2 space-y-1.5">
+        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-stage)] px-2.5 py-2 space-y-1.5">
           <div className="flex justify-between items-center">
             <span className="text-[10px] text-[var(--text-muted)] font-medium flex items-center gap-1">
               <Loader2 size={10} className="animate-spin" />
-              {isEncoding ? 'Analyzing image...' : 'Generating mask...'}
+              {isDecoding ? 'Generating mask...' : status.stage === 'downloading' ? 'Loading model...' : 'Analyzing image...'}
             </span>
-            <span className="text-[10px] text-[var(--text-secondary)]">
-              {isEncoding ? `${(status.encodeProgress * 100).toFixed(0)}%` : ''}
+            <span className="text-[10px] text-[var(--text-muted)]">
+              {isEncoding && status.stage !== 'downloading' ? `${(status.encodeProgress * 100).toFixed(0)}%` : ''}
             </span>
           </div>
-          <div className="h-1 rounded-full bg-white/5 overflow-hidden">
+          <div className="h-1 rounded-full bg-[var(--bg-panel)] overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-300 bg-purple-500/80"
               style={{ width: `${(isEncoding ? status.encodeProgress * 100 : 50).toFixed(0)}%` }}
@@ -252,7 +252,7 @@ export function SegmentationPanel() {
 
       {/* ─── Error Display ─────────────────────────────────────── */}
       {isError && status.errorMessage && (
-        <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-2.5 py-2">
+        <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 px-2.5 py-2">
           <p className="text-[10px] text-rose-400 select-text break-words">
             <span className="font-semibold">Error:</span> {status.errorMessage as string}
           </p>
@@ -267,7 +267,7 @@ export function SegmentationPanel() {
 
       {/* ─── Results List ──────────────────────────────────────── */}
       {status.candidates.length > 0 && (
-        <div className="rounded-lg border border-white/[0.04] bg-white/[0.02] px-2.5 py-2 space-y-1.5">
+        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-stage)] px-2.5 py-2 space-y-1.5">
           <div className="flex justify-between items-center">
             <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
               Results
@@ -286,14 +286,14 @@ export function SegmentationPanel() {
                 <button
                   key={idx}
                   onClick={() => handleSelectCandidate(idx)}
-                  className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-all ${
+                  className={`flex items-center gap-2 px-2 py-1.5 rounded-xl text-left transition-all ${
                     isActive
                       ? 'bg-purple-600/15 ring-1 ring-purple-500/30'
-                      : 'bg-white/[0.02] hover:bg-white/5'
+                      : 'bg-[var(--bg-panel)] hover:bg-[var(--border-subtle)]'
                   }`}
                 >
                   <span className={`w-2 h-2 rounded-full shrink-0 ${
-                    isActive ? 'bg-purple-400' : 'bg-white/20'
+                    isActive ? 'bg-purple-400' : 'bg-[var(--border-light)]'
                   }`} />
                   <span className="text-[10px] font-medium text-[var(--text-main)]">
                     Mask {idx + 1}
