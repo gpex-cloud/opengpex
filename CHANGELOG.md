@@ -4,6 +4,16 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.28
+
+- Add **ComfyUI Bridge** drawer — connect to ComfyUI, manage and run workflows with real-time progress, browse generation history
+- Fix exported images missing text and solid-color fill layers
+- Support color-fill into irregular selections (lasso, wand)
+- New shared widgets: FancyGroup, ComfyNumberInput, StatusBanner
+- Refresh AI drawer icons and simplify AIBridgeDrawer UI
+
+---
+
 ## v1.0.0-beta.27
 
 - Decompose monolithic AIToolsDrawer into feature-based sub-modules with per-feature panel, commands, protocols, hooks, settings, worker, and client
