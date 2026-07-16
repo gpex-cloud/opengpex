@@ -151,7 +151,7 @@ export interface ClipToolStrategy {
   readonly id: ClipTool;
   readonly label: string;
   readonly icon: LucideIcon;
-  readonly accent: 'amber' | 'purple';
+  readonly accent: 'amber' | 'purple' | 'cyan';
 
   /**
    * Semantic category — purely describes the geometry kind this tool produces:
@@ -206,7 +206,7 @@ export const CLIP_TOOL_STRATEGIES: Record<ClipTool, ClipToolStrategy> = {
   'ellipse': { id: 'ellipse', label: 'Ellipse', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'circle' }), forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_CURSOR },
   'lasso':   { id: 'lasso',   label: 'Lasso',   icon: Lasso,  accent: 'purple', family: 'irregular', handlerKind: 'lasso',                                              forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_LASSO_CURSOR   },
   'wand':    { id: 'wand',    label: 'Wand',    icon: Wand2,  accent: 'purple', family: 'irregular', handlerKind: 'wand',                                               forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_WAND_CURSOR    },
-  'sam':     { id: 'sam',     label: 'SAM',     icon: Shapes,   accent: 'purple', family: 'irregular', handlerKind: 'sam',                                                forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_SAM_CURSOR     },
+  'sam':     { id: 'sam',     label: 'SAM',     icon: Shapes,   accent: 'cyan',   family: 'irregular', handlerKind: 'sam',                                                forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_SAM_CURSOR     },
 };
 
 // ─── Derived Helpers ────────────────────────────────────────────────────────────

@@ -18,23 +18,64 @@
  */
 
 /**
- * AIBridgeIcon: Static sidebar icon.
+ * AIBridgeIcon: Modern sidebar icon — bold "AI" text + sparkle (top-right) + link chain (bottom-right).
  *
  * The busy/generating animation is now handled generically by DrawerBar via
  * the PluginService.isBusy() mechanism — no per-plugin animation code needed.
  *
- * Features a dollar-sign badge at the bottom-right corner to indicate
- * this is a paid/API-key-based service.
+ * Design:
+ * • Bold "AI" text (left) — immediate recognition.
+ * • 4-pointed sparkle star (top-right) — modern AI indicator.
+ * • Link/chain icon (bottom-right) — echoes "Bridge" name, indicates connection to external API.
+ *
+ * Visual layout (24×24 viewBox):
+ *   ┌────────────────────────┐
+ *   │               ✦        │  sparkle (top-right)
+ *   │  ██   ██              │
+ *   │  █ █   █              │  Bold "AI" (left)
+ *   │  ███   █              │
+ *   │  █ █   █              │
+ *   │  █ █  ███    🔗       │  Link/chain (bottom-right)
+ *   └────────────────────────┘
  */
-export function AIBridgeIcon() {
+export function AIBridgeIcon({ size = 24, className }: { size?: number; className?: string } = {}) {
   return (
-    <span className="relative inline-flex items-baseline justify-center font-black leading-none translate-y-[2px]">
-      <span className="text-[20px]">A</span>
-      <span className="text-[18px]">i</span>
-      {/* Dollar badge - small overlay at bottom-right, slightly overlapping */}
-      <span className="absolute -top-[3px] -right-[4px] flex items-center justify-center w-[12px] h-[12px] rounded-full bg-emerald-600 text-white text-[12px] font-black leading-none shadow-sm border border-emerald-700/50">
-        $
-      </span>
-    </span>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden="true"
+    >
+      {/* 1. "AI" Text — Shifted upward (y changed from 18 to 15) */}
+      <text
+        x="0"
+        y="15"
+        fontSize="14"
+        fontWeight="900"
+        fill="currentColor"
+        fontFamily="system-ui, -apple-system, sans-serif"
+        letterSpacing="-0.5"
+      >
+        AI
+      </text>
+
+      {/* 2. Chain Link Group — Translated downward and rotated 90 degrees */}
+      <g
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        fill="none"
+        opacity="0.75"
+        transform="translate(0, 1.5) rotate(90, 18, 16.5)"
+      >
+        {/* Upper Link */}
+        <rect x="15" y="12" width="3.5" height="6" rx="1.75" transform="rotate(-45, 16.75, 15)" />
+        {/* Lower Link */}
+        <rect x="17.5" y="16" width="3.5" height="6" rx="1.75" transform="rotate(-45, 19.25, 19)" />
+      </g>
+    </svg>
   );
 }

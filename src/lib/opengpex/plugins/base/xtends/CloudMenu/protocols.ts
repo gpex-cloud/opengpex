@@ -27,6 +27,9 @@ export const CMD_DELETE_FROM_CLOUD = 'cmd.delete_from_cloud';
 /** Default cloud API endpoint */
 export const DEFAULT_CLOUD_URL = process.env.NEXT_PUBLIC_GPEX_CLOUD_URL || 'https://gpex.cloud';
 
+/** Cloud documentation URL */
+export const DOCUMENTATION_URL = `${DEFAULT_CLOUD_URL}/docs`;
+
 /** Plugin config shape */
 export interface CloudMenuConfig {
   cloudUrl: string;

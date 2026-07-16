@@ -20,7 +20,7 @@
 import { EditorPlugin } from "@opengpex/editor/core/types";
 import { AdjustmentDrawerComponent } from "./components";
 import { ADJUSTMENT_COMMANDS } from "./commands";
-import { AdjustmentDrawerIcon } from "./icon";
+import { ChartSpline } from "lucide-react";
 import * as P from "./protocols";
 
 /**
@@ -65,7 +65,7 @@ export const plugin: EditorPlugin = {
   },
 
   // --- 2. UI Entry ---
-  icon: <AdjustmentDrawerIcon />,
+  icon: <ChartSpline size={20} />,
   slot: "SIDE_BAR",
   show: "frame-required",
   order: 3150,

@@ -36,6 +36,8 @@ interface FunctionGroupProps<T> {
   onChange: (val: T) => void;
   disabled?: boolean;
   className?: string; // Additional wrapper classes
+  /** Size variant: 'sm' for compact drawers, 'md' (default) for standard use */
+  size?: 'sm' | 'md';
 }
 
 export default function FunctionGroup<T extends string>({
@@ -44,9 +46,19 @@ export default function FunctionGroup<T extends string>({
   onChange,
   disabled,
   className = '',
+  size = 'md',
 }: FunctionGroupProps<T>) {
+  const isSm = size === 'sm';
+
+  // Size-dependent classes
+  const containerRadius = isSm ? 'rounded-lg' : 'rounded-xl';
+  const buttonPadding = isSm ? 'py-1' : 'py-2';
+  const buttonRadius = isSm ? 'rounded-md' : 'rounded-lg';
+  const fontSize = isSm ? 'text-[9px] font-black uppercase tracking-wider' : 'text-[10px] font-bold';
+  const gap = isSm ? 'gap-1' : 'gap-2';
+
   return (
-    <div className={`flex p-0.5 bg-zinc-100/80 dark:bg-black/20 rounded-xl border border-zinc-200 dark:border-white/5 ${className} shadow-inner`}>
+    <div className={`flex p-0.5 bg-zinc-100/80 dark:bg-black/20 ${containerRadius} border border-zinc-200 dark:border-white/5 ${className} shadow-inner`}>
       {options.map((opt) => {
         const isActive = opt.value === value;
         const button = (
@@ -55,8 +67,8 @@ export default function FunctionGroup<T extends string>({
             onClick={() => onChange(opt.value)}
             disabled={disabled}
             className={`
-              w-full flex items-center justify-center gap-2 py-2 rounded-lg 
-              text-[10px] font-bold transition-all outline-none 
+              w-full flex items-center justify-center ${gap} ${buttonPadding} ${buttonRadius} 
+              ${fontSize} transition-all outline-none 
               disabled:opacity-50 
               ${isActive 
                 ? (['crop'].includes(opt.value as string) 

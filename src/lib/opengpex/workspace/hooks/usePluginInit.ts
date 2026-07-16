@@ -172,7 +172,7 @@ export function usePluginInit(actions: EditorActions) {
                     gpex['@opengpex/editor/core/types'] = await import('@opengpex/editor/core/types');
                     gpex['@opengpex/editor/widgets/ActionButton'] = await import('@opengpex/editor/widgets/ActionButton');
                     gpex['@opengpex/editor/widgets/FancyButton'] = await import('@opengpex/editor/widgets/FancyButton');
-                    gpex['@opengpex/editor/widgets/ColorPicker'] = await import('@opengpex/editor/widgets/ColorPicker');
+                    gpex['@opengpex/editor/widgets/ColorPickerPro'] = await import('@opengpex/editor/widgets/ColorPickerPro');
                     gpex['@opengpex/editor/widgets/Switch'] = await import('@opengpex/editor/widgets/Switch');
                 }
 

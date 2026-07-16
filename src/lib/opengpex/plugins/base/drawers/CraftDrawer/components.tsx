@@ -25,7 +25,7 @@ import { motion } from "framer-motion";
 import { useEditorServices } from "@opengpex/editor/core/context";
 import { SettingsPanelAPI } from "../../panels/SettingsPanel/protocols";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
-import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
+import FancyGroup, { type FancyGroupItem } from "@opengpex/editor/widgets/FancyGroup";
 import ActionGroup, { type ActionGroupItem } from "@opengpex/editor/widgets/ActionGroup";
 import { TextPanel } from "./panels/text";
 import { BrushPanel } from "./panels/brush";
@@ -67,9 +67,10 @@ const CRAFT_BUTTONS: {
 /**
  * CraftTriggerButtons: Tool trigger button group injected into ColorOptions CRAFT_SLOT
  *
- * Renders three buttons: [📝 Text] [🖌️ Brush] [🧹 Eraser].
+ * Renders three buttons: [📝 Text] [🖌️ Brush] [🧹 Eraser] using FancyGroup.
  * Button click calls setCraft command to toggle tool. Click again to deactivate (toggle behavior).
- * Active status buttons have accent color highlight + pulse animation.
+ * Active status buttons have accent color highlight. A contextual Tooltip shows usage hints
+ * when a tool is active.
  */
 export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
   const { activeCraft, selectCraft } = useCraftTrigger();
@@ -82,6 +83,22 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
         : activeCraft === "eraser" || activeCraft === "restore"
           ? "Erase / Restore mask pixels\nTab to toggle eraser ↔ restore\nCmd/Ctrl+click to create new mask\nEsc to exit"
           : null;
+
+  // Build FancyGroup items with dynamic icon/tooltip for eraser restore sub-mode
+  const groupItems: FancyGroupItem[] = CRAFT_BUTTONS.map((btn) => {
+    const isActive = activeCraft === btn.type || (btn.type === 'eraser' && activeCraft === 'restore');
+    const isRestoreOnEraser = btn.type === 'eraser' && activeCraft === 'restore';
+    const displayIcon = isRestoreOnEraser ? <Undo2 size={13} /> : btn.icon;
+    const tooltipText = isRestoreOnEraser ? "Restore Mode (Tab)" : btn.label;
+
+    return {
+      key: btn.type,
+      icon: displayIcon,
+      tooltip: tooltipText,
+      onClick: () => selectCraft(btn.type),
+      active: isActive,
+    };
+  });
 
   return (
     <Tooltip
@@ -100,28 +117,11 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
       display="inline-flex"
       className="!whitespace-normal text-left"
     >
-      <div className="flex items-center gap-1">
-        {CRAFT_BUTTONS.map((btn) => {
-          const isActive = activeCraft === btn.type || (btn.type === 'eraser' && activeCraft === 'restore');
-          // Dynamic icon: show Undo2 when eraser button is in restore sub-mode
-          const displayIcon = (btn.type === 'eraser' && activeCraft === 'restore')
-            ? <Undo2 size={13} />
-            : btn.icon;
-          return (
-            <FancyButton iconOnly shape="rect"
-              key={btn.type}
-              onClick={() => selectCraft(btn.type)}
-              active={isActive}
-              title={btn.type === 'eraser' && activeCraft === 'restore' ? 'Restore Mode (Tab)' : btn.label}
-              variant="ghost"
-              tooltipPosition="bottom"
-              className="w-7 h-7 rounded-lg text-blue-400"
-            >
-              {displayIcon}
-            </FancyButton>
-          );
-        })}
-      </div>
+      <FancyGroup
+        size="xs"
+        items={groupItems}
+        highlighted={activeCraft != null}
+      />
     </Tooltip>
   );
 });

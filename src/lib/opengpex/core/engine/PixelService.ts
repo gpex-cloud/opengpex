@@ -115,17 +115,11 @@ export function createPixelService(
 
     // ─── Lane B: 16-bit multi-layer composite (vips) ──────────────────────────
     if (lane === 'lane-b') {
-      const visibleIds = frame.layers.order.filter(id => {
-        const l = frame.layers.byId[id];
-        return !l.hostId && l.visible !== false;
-      });
-
       const descriptors: Array<{
         bytes: Uint8Array; x: number; y: number; blendMode: string; opacity: number; is8bit: boolean;
       }> = [];
 
-      for (const id of visibleIds) {
-        const layer = frame.layers.byId[id];
+      for (const layer of targetLayers) {
         if (!layer.assetId) continue;
         const rawBlob = await assetStore.getRaw(layer.assetId);
         let bytes: Uint8Array;
@@ -376,14 +370,26 @@ export function createPixelService(
 
         // ── 2. Layer filtering (host layers + visible only)
         const allHostLayers = LayerFactory.getHostLayers(frame.layers.order.map(id => frame.layers.byId[id]));
-        const targetLayers = allHostLayers.filter(l => l.visible !== false);
+        const filteredLayers = allHostLayers.filter(l => l.visible !== false);
 
-        if (targetLayers.length === 0) {
+        if (filteredLayers.length === 0) {
           console.warn('[PixelService.render] No visible layers to export. All %d host layers are hidden.', allHostLayers.length);
-        } else if (targetLayers.length < allHostLayers.length) {
+        } else if (filteredLayers.length < allHostLayers.length) {
           console.debug('[PixelService.render] Export: %d/%d layers visible (filtered %d hidden)',
-            targetLayers.length, allHostLayers.length, allHostLayers.length - targetLayers.length);
+            filteredLayers.length, allHostLayers.length, allHostLayers.length - filteredLayers.length);
         }
+
+        // ── 2.5 Pre-rasterize text/color layers to ensure export has valid bitmaps
+        // Without this step, layers with type 'color' or 'text' (which use placeholder
+        // assets like 'asset-transparent-pixel') would be silently skipped by the
+        // worker merger, producing exports with missing fill/text content.
+        const targetLayers = await Promise.all(filteredLayers.map(async (layer) => {
+          if (layer.type === 'text' || layer.type === 'color' || layer.assetId === 'asset-transparent-pixel') {
+            const asset = await service.rasterize.layer(layer);
+            return { ...layer, src: asset.url, assetId: asset.id };
+          }
+          return layer;
+        }));
 
         // ── 3. Lane dispatch
         const lane = await detectLane(frame, shape, effectiveOpts);

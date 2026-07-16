@@ -537,7 +537,7 @@ export function useEditorStore() {
         frame: {
           create: {
             trunk: advRef(P.ADV_FRAME_TRUNK, (payload: { source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }) => executeCommand<unknown, Promise<string>>(P.ADV_FRAME_TRUNK, payload)),
-            branch: advRef(P.ADV_FRAME_BRANCH, () => executeCommand<void, Promise<string | null>>(P.ADV_FRAME_BRANCH)),
+            branch: advRef(P.ADV_FRAME_BRANCH, (payload?: { source?: File; extra?: Record<string, unknown> }) => executeCommand<{ source?: File; extra?: Record<string, unknown> } | undefined, Promise<string | null>>(P.ADV_FRAME_BRANCH, payload)),
             revert: advRef(P.ADV_FRAME_REVERT, () => executeCommand(P.ADV_FRAME_REVERT)),
             remove: advRef(P.ADV_FRAME_REMOVE, (id?: string) => executeCommand(P.ADV_FRAME_REMOVE, id)),
             export: advRef(P.ADV_FRAME_EXPORT, (frame: Frame) => executeCommand<Frame, Promise<{ state: unknown; assets: Record<string, Blob> }>>(P.ADV_FRAME_EXPORT, frame)),

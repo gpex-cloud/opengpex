@@ -31,6 +31,7 @@ import {
   CloudOff,
   RefreshCw,
   ExternalLink,
+  BookMarked,
 } from "lucide-react";
 import { GpexCloudProvider, gpexStorage } from "@opengpex/editor/core/cloud";
 import { PremiumCloudIcon } from "@opengpex/editor/icons";
@@ -38,7 +39,7 @@ import { useCloudMenu, type SyncStatus, type LastSaveResult } from "./hooks";
 import { CloudBrowser } from "./CloudBrowser";
 import FancyConfirm from "@opengpex/editor/widgets/FancyConfirm";
 import EditorPortal from "@opengpex/editor/widgets/Portal";
-import { DEFAULT_CLOUD_URL, type SavePhase } from "./protocols";
+import { DEFAULT_CLOUD_URL, DOCUMENTATION_URL, type SavePhase } from "./protocols";
 import { API_AUTH_SSO_CODE } from "../../../../core/cloud/protocol";
 // IMPORTANT: Must use relative path to ensure importing the exact same in-memory token-store instance
 // as other auth files. Do NOT replace with alias path (like @opengpex/editor/...) to prevent bundle duplication.
@@ -547,29 +548,38 @@ function CloudMenuInner() {
             </>
           ) : (
             <div className="p-3 flex flex-col items-center text-center gap-3">
-              <p className="text-[10px] leading-relaxed text-[var(--text-muted)] font-medium">
+              <p className="text-[11px] leading-relaxed text-[var(--text-muted)] font-medium">
                 Create a free account to get{" "}
                 <strong className="text-[var(--text-main)]">100 MB</strong>{" "}
                 cloud storage for syncing your creations across devices.
               </p>
               <button
-                className="w-full h-8 flex items-center justify-center gap-1.5 rounded-lg text-[10px] font-bold bg-gradient-to-r from-[#00F2FE] to-[#4FACFE] text-zinc-950 hover:brightness-110 active:scale-[0.98] transition-all cursor-pointer shadow-md shadow-[#00F2FE]/10 border-0 outline-none"
+                className="w-full h-8 flex items-center justify-center gap-1.5 rounded-lg text-[12px] font-bold bg-gradient-to-r from-[#00F2FE] to-[#4FACFE] text-zinc-950 hover:brightness-110 active:scale-[0.98] transition-all cursor-pointer shadow-md shadow-[#00F2FE]/10 border-0 outline-none"
                 onClick={() => {
                   setIsOpen(false);
                   openLogin();
                 }}
               >
-                <LogIn size={12} />
+                <LogIn size={14} />
                 <span>Sign In / Up</span>
               </button>
+              <a
+                href={DOCUMENTATION_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full h-8 flex items-center justify-center gap-1.5 rounded-lg text-[12px] font-bold border border-[var(--border-subtle)] hover:border-[var(--border-light)] bg-[var(--bg-stage)] hover:bg-[var(--bg-header)] text-[var(--text-main)] transition-all cursor-pointer no-underline"
+              >
+                <BookMarked size={14} />
+                <span>Documentation</span>
+              </a>
               <a
                 href={DEFAULT_CLOUD_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full h-8 flex items-center justify-center gap-1.5 rounded-lg text-[10px] font-bold border border-[var(--border-subtle)] hover:border-[var(--border-light)] bg-[var(--bg-stage)] hover:bg-[var(--bg-header)] text-[var(--text-main)] transition-all cursor-pointer no-underline"
+                className="w-full h-8 flex items-center justify-center gap-1.5 rounded-lg text-[12px] font-bold border border-[var(--border-subtle)] hover:border-[var(--border-light)] bg-[var(--bg-stage)] hover:bg-[var(--bg-header)] text-[var(--text-main)] transition-all cursor-pointer no-underline"
               >
-                <ExternalLink size={12} />
-                <span>Go to GPEX-Cloud</span>
+                <ExternalLink size={14} />
+                <span>To GPEX-Cloud</span>
               </a>
             </div>
           )}

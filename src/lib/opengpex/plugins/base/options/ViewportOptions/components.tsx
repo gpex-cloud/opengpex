@@ -169,7 +169,7 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
           <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tighter opacity-70">
             Zoom
           </span>
-          <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 tabular-nums min-w-[32px] text-center">
+          <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 tabular-nums min-w-[32px] text-center">
             {Math.round(displayK * 100)}%
           </span>
           <ChevronUp
@@ -267,7 +267,7 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
           variant="ghost"
           title={`${fitCmd.name} (${fitCmd.shortcutLabel})`}
           tooltipPosition="bottom"
-          className="h-6 w-auto px-2 text-[10px] text-teal-600 dark:text-teal-400"
+          className="h-6 w-auto px-1 text-[10px] text-emerald-600 dark:text-emerald-400"
         >
           FIT
         </FancyButton>
@@ -276,7 +276,7 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
           variant="ghost"
           title={`${actualSizeCmd.name} (${actualSizeCmd.shortcutLabel})`}
           tooltipPosition="bottom"
-          className="h-6 w-auto px-2 text-[10px] text-teal-600 dark:text-teal-400"
+          className="h-6 w-auto px-1 text-[10px] text-emerald-600 dark:text-emerald-400"
         >
           1:1
         </FancyButton>

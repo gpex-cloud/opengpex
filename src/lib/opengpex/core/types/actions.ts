@@ -137,7 +137,7 @@ export interface EditorActions {
     frame: {
       create: {
         trunk: AdvCommandRef<{ source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }, Promise<string>>;
-        branch: AdvCommandRef<void, Promise<string | null>>;
+        branch: AdvCommandRef<{ source?: File; extra?: Record<string, unknown> } | void, Promise<string | null>>;
         revert: AdvCommandRef;
         remove: AdvCommandRef<string | undefined>;
         export: AdvCommandRef<Frame, Promise<{ state: unknown; assets: Record<string, Blob> }>>;

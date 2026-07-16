@@ -20,8 +20,23 @@
 "use client";
 
 /**
- * AIToolsIcon: Pure static drawer sidebar icon showing stacked "AI" / "tools" text.
- * No logic — busy state is managed by the download singleton via initBusySync().
+ * AIToolsIcon: Drawer sidebar icon — bold "AI" text + wrench graphic.
+ *
+ * Design:
+ * • Bold "AI" text (upper-left) — immediate recognition.
+ * • Wrench icon (lower-right, tilted -40°) — universal "tools" metaphor,
+ *   replaces the previous tiny unreadable "Tools" text (8.5px).
+ * • The wrench consists of a rounded handle bar + open-end jaw head.
+ *
+ * Visual layout (24×24 viewBox):
+ *   ┌────────────────────────┐
+ *   │  ██   ██              │
+ *   │  █ █   █              │  Bold "AI" (upper-left)
+ *   │  ███   █              │
+ *   │  █ █   █     🔧      │
+ *   │  █ █  ███   /        │  Wrench (lower-right, tilted)
+ *   │            /          │
+ *   └────────────────────────┘
  */
 export function AIToolsIcon({ size = 24, className }: { size?: number; className?: string } = {}) {
   return (
@@ -34,29 +49,26 @@ export function AIToolsIcon({ size = 24, className }: { size?: number; className
       className={className}
       aria-hidden="true"
     >
-      {/* "AI" — top-left, large bold */}
+      {/* Bold "AI" — upper-left, prominent */}
       <text
         x="1"
         y="13"
-        fontSize="14"
+        fontSize="13"
         fontWeight="900"
         fill="currentColor"
         fontFamily="system-ui, -apple-system, sans-serif"
+        letterSpacing="-0.5"
       >
         AI
       </text>
-      {/* "Tools" — bottom-left, smaller */}
-      <text
-        x="1"
-        y="22"
-        fontSize="8.5"
-        fontWeight="800"
-        fill="currentColor"
-        fontFamily="system-ui, -apple-system, sans-serif"
-        opacity="0.7"
-      >
-        Tools
-      </text>
+
+      {/* Wrench — lower-right area, tilted -40° for dynamic feel */}
+      <g transform="translate(15, 19) rotate(-40)" fill="currentColor">
+        {/* Handle: rounded bar */}
+        <rect x="-7" y="-1.2" width="8.5" height="2.4" rx="1.2" />
+        {/* Head with open jaw (U-shape opening on the right) */}
+        <path d="M1.5 -2.6 L5.2 -2.6 L5.2 -0.7 L3.8 -0.7 L3.8 0.7 L5.2 0.7 L5.2 2.6 L1.5 2.6 Z" />
+      </g>
     </svg>
   );
 }

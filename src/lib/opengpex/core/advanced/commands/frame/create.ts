@@ -75,11 +75,97 @@ export const FrameCreateCommands = {
     id: P.ADV_FRAME_BRANCH,
     name: 'Create Branch',
     undoable: true,
-    execute: async (ctx: EditorContextValue): Promise<string | undefined> => {
+    execute: async (ctx: EditorContextValue, payload?: { source?: File; extra?: Record<string, unknown> }): Promise<string | undefined> => {
       const { activeFrame, actions, state, geometry, pixels } = ctx;
       if (!activeFrame) return;
 
-      // Resolve the active selection from `frame.latestClipTool`.
+      // ─── Path A: Create branch from external File source ────────────────
+      if (payload?.source) {
+        try {
+          const result = await decodeWithVectorDialog(ctx, payload.source);
+          if (!result) return; // User cancelled or decode failed
+
+          const { decoded } = result;
+          const displayBlob = decoded.subImages[0].displayBlob;
+          const dimension = decoded.dimensions;
+
+          // Register asset
+          const highResId = await ctx.assets.register(displayBlob);
+          const highResUrl = ctx.assets.getURL(highResId)!;
+
+          // Generate thumbnail
+          const thumbBlob = await pixels.process.thumbnail(highResUrl, 256);
+          const thumbId = await ctx.assets.register(thumbBlob);
+          const thumbnailUrl = ctx.assets.getURL(thumbId)!;
+
+          const canvasDim = { w: dimension.w, h: dimension.h };
+          const { insets } = state.ui.theme.config;
+
+          const initialCamera = geometry.camera.getFitCamera(
+            state.ui.viewportDim,
+            canvasDim,
+            { maxScale: 1, padding: VIEWPORT_FIT_PADDING, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right },
+          );
+
+          const siblings = state.frames.order.map(id => state.frames.byId[id]).filter(f => f.parentId === activeFrame.id);
+          const nextIdx = siblings.length + 1;
+
+          let seqNum = '';
+          if (!activeFrame.parentId) {
+            seqNum = `Branch#${nextIdx}`;
+          } else {
+            seqNum = `${activeFrame.seqNum || 'Branch#?'}.${nextIdx}`;
+          }
+
+          const rootName = activeFrame.name.split('__')[0];
+          const fullName = `${rootName}__${seqNum}`;
+
+          const baseLayer = ctx.layers.getNewLayer({
+            name: 'Branch Base',
+            src: highResUrl,
+            assetId: highResId,
+            locked: true,
+            bounding: canvasDim,
+            visibleShape: asLocalShape({ x: 0, y: 0, ...canvasDim }),
+            ancestor: true,
+          });
+
+          const expandedLayers = ctx.layers.expandLayers([baseLayer]);
+
+          const branch = ctx.layers.getNewFrame({
+            id: `f-${Date.now().toString(36)}-branch`,
+            parentId: activeFrame.id,
+            name: fullName,
+            seqNum: seqNum,
+            canvas: canvasDim,
+            layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
+            activeLayerId: baseLayer.id,
+            camera: initialCamera,
+            canvasCropBox: asLocalShape({
+              x: canvasDim.w * 0.25,
+              y: canvasDim.h * 0.25,
+              w: canvasDim.w * 0.5,
+              h: canvasDim.h * 0.5,
+            }),
+            assetId: highResId,
+            thumbnail: { src: thumbnailUrl, assetId: thumbId },
+            extra: payload.extra,
+          });
+
+          ctx.layers.addFrame(branch, false);
+
+          window.dispatchEvent(new CustomEvent('editor:branch-thumbnail-ready', {
+            detail: { thumbnailUrl, frameId: branch.id },
+          }));
+
+          return branch.id;
+        } catch (err) {
+          console.error('[FrameService] Failed to create branch from file:', err);
+          return;
+        }
+      }
+
+      // ─── Path B: Create branch from active selection (clip box) ─────────
       const box = getClipBox(activeFrame);
       if (!box) {
         actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
@@ -200,7 +286,7 @@ export const FrameCreateCommands = {
         console.error('[FrameService] Failed to create branch:', err);
       }
     },
-  } as EditorCommand<void, Promise<string | undefined>>,
+  } as EditorCommand<{ source?: File; extra?: Record<string, unknown> } | void, Promise<string | undefined>>,
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Lifecycle Commands: export / import / remove

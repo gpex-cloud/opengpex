@@ -25,6 +25,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ColorPickerPro } from "@opengpex/editor/widgets/ColorPickerPro";
 import { ColorSampler } from "@opengpex/editor/widgets/ColorSampler";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
+import FancyGroup, { type FancyGroupItem } from "@opengpex/editor/widgets/FancyGroup";
 import PluginSlot from "@opengpex/editor/workspace/components/PluginSlot";
 import { useColorOptions } from "./hooks";
 import { COLOR_OPTIONS_CRAFT_SLOT } from "./protocols";
@@ -91,71 +92,67 @@ export const ColorOptionsComponent = React.memo(
 
         {/* Group 2: Actions */}
         <div className="relative flex items-center" ref={containerRef}>
-          <div
-            className={`relative flex items-center h-7 rounded-xl transition-all border shadow-sm
-          ${
-            isDropdownOpen
-              ? "bg-[var(--bg-panel)] border-amber-500/50 shadow-lg"
-              : "bg-[var(--bg-panel)] border-[var(--border-subtle)] hover:border-[var(--border-light)]"
-          }
-        `}
-          >
-            {typeof window !== "undefined" && "EyeDropper" in window && (
-              <>
-                <Tooltip content="Sample Color" position="bottom" display="inline-flex">
-                  <button
-                    onClick={sampleColor}
-                    className="flex items-center justify-center w-8 h-full rounded-l-xl transition-all hover:bg-[var(--bg-stage)] outline-none group"
-                  >
+          <FancyGroup
+            size="xs"
+            highlighted={isDropdownOpen || isSampling}
+            items={(() => {
+              const groupItems: FancyGroupItem[] = [];
+
+              // Conditionally add sample button when EyeDropper API is available
+              if (typeof window !== "undefined" && "EyeDropper" in window) {
+                groupItems.push({
+                  key: "sample",
+                  tooltip: "Sample Color",
+                  onClick: sampleColor,
+                  icon: (
                     <Pipette
                       size={13}
                       className="text-[var(--text-muted)] group-hover:text-amber-500 transition-colors"
                     />
-                  </button>
-                </Tooltip>
-                <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20 shrink-0" />
-              </>
-            )}
+                  ),
+                });
+              }
 
-            <Tooltip content="Pick Color" position="bottom" display="inline-flex">
-              <button
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className={`flex items-center justify-center w-8 h-full transition-colors outline-none hover:bg-[var(--bg-stage)] 
-                ${!(typeof window !== "undefined" && "EyeDropper" in window) ? "rounded-l-xl" : ""}
-              `}
-              >
-                <div
-                  className="w-4 h-4 rounded shadow-inner ring-1 ring-black/10 dark:ring-white/10 transition-transform active:scale-90"
-                  style={{ backgroundColor: currentColor }}
-                />
-              </button>
-            </Tooltip>
+              // Color swatch / pick color button
+              groupItems.push({
+                key: "pick",
+                tooltip: "Pick Color",
+                onClick: () => setIsDropdownOpen(!isDropdownOpen),
+                icon: (
+                  <div
+                    className="w-4 h-4 rounded shadow-inner ring-1 ring-black/10 dark:ring-white/10 transition-transform active:scale-90"
+                    style={{ backgroundColor: currentColor }}
+                  />
+                ),
+              });
 
-            <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20 shrink-0" />
+              // Fill button with color glow
+              groupItems.push({
+                key: "fill",
+                tooltip: `${fillAsLayerCmd?.name || "Fill"} (${fillAsLayerCmd?.shortcutLabel || ""})`,
+                onClick: () => fillAsLayerCmd?.execute({ fillColor: currentColor }),
+                icon: (
+                  <>
+                    {/* Subtle color glow background */}
+                    <div
+                      className="absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity rounded-r-xl"
+                      style={{ backgroundColor: currentColor }}
+                    />
+                    <PaintBucket
+                      size={13}
+                      className="transition-all transform group-active:scale-95"
+                      style={{
+                        color: currentColor,
+                        filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.1))",
+                      }}
+                    />
+                  </>
+                ),
+              });
 
-            <Tooltip content={`${fillAsLayerCmd?.name || "Fill"} (${fillAsLayerCmd?.shortcutLabel || ""})`} position="bottom" display="inline-flex">
-              <button
-                onClick={() =>
-                  fillAsLayerCmd?.execute({ fillColor: currentColor })
-                }
-                className="flex items-center justify-center w-8 h-full rounded-r-xl transition-all hover:bg-[var(--bg-stage)] outline-none group relative"
-              >
-                {/* Subtle color glow background */}
-                <div
-                  className="absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity rounded-r-xl"
-                  style={{ backgroundColor: currentColor }}
-                />
-                <PaintBucket
-                  size={13}
-                  className="transition-all transform group-active:scale-95"
-                  style={{
-                    color: currentColor,
-                    filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.1))",
-                  }}
-                />
-              </button>
-            </Tooltip>
-          </div>
+              return groupItems;
+            })()}
+          />
 
           {/* Floating Dropdown Picker */}
           <AnimatePresence>

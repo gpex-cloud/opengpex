@@ -19,8 +19,8 @@
 
 'use client';
 
-import { EditorCommand, EditorContextValue, asLocalShape } from '@opengpex/editor/core/types';
-import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+import { EditorCommand, EditorContextValue, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
+import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
 import * as P from './protocols';
 
@@ -38,32 +38,72 @@ export const COLOR_OPTIONS_COMMANDS = {
 
       const { fillColor } = payload;
       const isClipMode = state.interaction.interactionMode === 'clip';
-      let w, h, box_cx, box_cy;
+      let w: number, h: number, box_cx: number, box_cy: number;
+      let visibleShape: LocalShape;
 
       if (isClipMode) {
-        const clipEntry = getRegularClipShape(activeFrame);
-        if (!clipEntry || clipEntry.rect.w <= 0 || clipEntry.rect.h <= 0) {
+        const box = getClipBox(activeFrame);
+        if (!box) {
           actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
           return;
         }
-        const box = clipEntry.rect;
-        w = box.w;
-        h = box.h;
-        box_cx = box.x + w / 2;
-        box_cy = box.y + h / 2;
+
+        if (box.regular) {
+          // ═══ Regular selection (rect/ellipse) ═══
+          const shape = box.spatial;
+          if (shape.rect.w <= 0 || shape.rect.h <= 0) {
+            actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
+            return;
+          }
+          w = shape.rect.w;
+          h = shape.rect.h;
+          box_cx = shape.rect.x + w / 2;
+          box_cy = shape.rect.y + h / 2;
+          visibleShape = asLocalShape({ x: 0, y: 0, w, h }, shape.type, shape.antiAliased !== false);
+        } else {
+          // ═══ Irregular selection (lasso/wand polygon) ═══
+          const poly = box.spatial;
+          const bounds = poly.rect;
+          if (bounds.w <= 0 || bounds.h <= 0) {
+            actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
+            return;
+          }
+          w = bounds.w;
+          h = bounds.h;
+          box_cx = bounds.x + w / 2;
+          box_cy = bounds.y + h / 2;
+
+          // Build path data in layer-local coordinates (offset by -bounds origin)
+          const parts: string[] = [];
+          for (const ring of poly.rings) {
+            if (ring.length < 2) continue;
+            const segs: string[] = [];
+            for (let i = 0; i < ring.length; i++) {
+              const p = ring[i];
+              segs.push(`${i === 0 ? 'M' : 'L'} ${p.x - bounds.x} ${p.y - bounds.y}`);
+            }
+            segs.push('Z');
+            parts.push(segs.join(' '));
+          }
+
+          visibleShape = {
+            type: 'path',
+            rect: { x: 0, y: 0, w, h },
+            antiAliased: poly.antiAliased !== false,
+            pathData: parts.join(' '),
+            __brand: 'local',
+          } as LocalShape;
+        }
       } else {
         w = activeFrame.canvas.w;
         h = activeFrame.canvas.h;
         box_cx = activeFrame.canvas.w / 2;
         box_cy = activeFrame.canvas.h / 2;
+        visibleShape = asLocalShape({ x: 0, y: 0, w, h }, 'rect', true);
       }
 
       const cx = box_cx - activeFrame.canvas.w / 2;
       const cy = box_cy - activeFrame.canvas.h / 2;
-
-      const clipEntry2 = getRegularClipShape(activeFrame);
-      const cropType = isClipMode && clipEntry2 ? clipEntry2.type : 'rect';
-      const cropAntiAliased = isClipMode && clipEntry2 ? (clipEntry2.antiAliased !== false) : true;
 
       const newLayer = layers.getNewLayer({
         name: 'Fill Layer',
@@ -72,7 +112,7 @@ export const COLOR_OPTIONS_COMMANDS = {
         cy,
         locked: true,
         bounding: { w, h },
-        visibleShape: asLocalShape({ x: 0, y: 0, w, h }, cropType, cropAntiAliased),
+        visibleShape,
         metadata: { fillColor }
       });
 

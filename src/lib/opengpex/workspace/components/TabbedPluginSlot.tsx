@@ -19,7 +19,7 @@
 
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef, useEffect, useCallback } from "react";
 import {
   useEditorState,
   useEditorServices,
@@ -197,6 +197,37 @@ export default function TabbedPluginSlot({
     plugins,
   ]);
 
+  // ─── Scroll state for tab bar overflow ─────────────────────────────────────
+  const tabBarRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const checkScroll = useCallback(() => {
+    const el = tabBarRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 2);
+    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 2);
+  }, []);
+
+  useEffect(() => {
+    checkScroll();
+    const el = tabBarRef.current;
+    if (!el) return;
+    el.addEventListener('scroll', checkScroll);
+    const ro = new ResizeObserver(checkScroll);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', checkScroll);
+      ro.disconnect();
+    };
+  }, [checkScroll, tabs.length]);
+
+  const scrollTabs = useCallback((direction: 'left' | 'right') => {
+    const el = tabBarRef.current;
+    if (!el) return;
+    el.scrollBy({ left: direction === 'left' ? -120 : 120, behavior: 'smooth' });
+  }, []);
+
   if (tabs.length === 0) return null;
 
   // Ensure valid tab (supports matching by ID or title)
@@ -207,37 +238,66 @@ export default function TabbedPluginSlot({
   if (!activeTab) activeTab = tabs[0];
 
   const defaultHeader = (
-    <div className="flex items-center gap-1 p-1 bg-[var(--bg-stage)] rounded-xl mb-4">
-      {tabs.map((tab) => {
-        const isActive = activeTab && activeTab.id === tab.id;
-        return (
-          <button
-            key={tab.id}
-            onClick={() => {
-              setInternalActiveTabId(tab.id);
-              onTabChange?.(tab.id);
-            }}
-            className={`
- relative flex-1 flex items-center justify-center gap-2 py-2 rounded-lg transition-all duration-300
+    <div className="relative flex items-center mb-4">
+      {/* Left scroll arrow */}
+      {canScrollLeft && (
+        <button
+          onClick={() => scrollTabs('left')}
+          className="absolute left-0 z-10 w-6 h-full flex items-center justify-center bg-gradient-to-r from-[var(--bg-panel)] to-transparent text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
+          aria-label="Scroll tabs left"
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M7 1L3 5L7 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+      )}
+
+      {/* Tab buttons (scrollable) */}
+      <div
+        ref={tabBarRef}
+        className="flex items-center gap-1 p-1 bg-[var(--bg-stage)] rounded-xl overflow-x-auto scrollbar-none"
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+      >
+        {tabs.map((tab) => {
+          const isActive = activeTab && activeTab.id === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => {
+                setInternalActiveTabId(tab.id);
+                onTabChange?.(tab.id);
+              }}
+              className={`
+ relative flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg transition-all duration-300 whitespace-nowrap shrink-0
  ${
    isActive
      ? "text-indigo-600 dark:text-indigo-400"
      : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
  }
 `}
-          >
-            {isActive && (
-              <div className="absolute inset-0 bg-[var(--bg-panel)] rounded-lg shadow-sm border border-[var(--border-subtle)] animate-in fade-in zoom-in-95 duration-200" />
-            )}
-            <span className="relative z-10 flex items-center gap-2">
-              {tab.icon && <span className="scale-90">{tab.icon}</span>}
-              <span className="text-[10px] font-black uppercase tracking-tight">
-                {tab.title}
+            >
+              {isActive && (
+                <div className="absolute inset-0 bg-[var(--bg-panel)] rounded-lg shadow-sm border border-[var(--border-subtle)] animate-in fade-in zoom-in-95 duration-200" />
+              )}
+              <span className="relative z-10 flex items-center gap-2">
+                {tab.icon && <span className="scale-90">{tab.icon}</span>}
+                <span className="text-[10px] font-black uppercase tracking-tight">
+                  {tab.title}
+                </span>
               </span>
-            </span>
-          </button>
-        );
-      })}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Right scroll arrow */}
+      {canScrollRight && (
+        <button
+          onClick={() => scrollTabs('right')}
+          className="absolute right-0 z-10 w-6 h-full flex items-center justify-center bg-gradient-to-l from-[var(--bg-panel)] to-transparent text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
+          aria-label="Scroll tabs right"
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 1L7 5L3 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+      )}
     </div>
   );
 

@@ -42,7 +42,7 @@ export function AiGenerationPanel({ extra }: AiGenerationPanelProps) {
   const aiSize = extra.ai_size ? String(extra.ai_size) : null;
   const aiSeed = extra.ai_seed !== undefined ? String(extra.ai_seed) : null;
   const aiDurationMs = extra.ai_duration_ms !== undefined ? String(extra.ai_duration_ms) : null;
-  const aiPrompt = String(extra.ai_prompt || "");
+  const aiPrompt = String(extra.ai_positive_prompt || "");
   const aiNegativePrompt = extra.ai_negative_prompt
     ? String(extra.ai_negative_prompt)
     : null;

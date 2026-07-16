@@ -22,7 +22,7 @@
 import React, { useState } from "react";
 import {
   Settings,
-  Dice5,
+  Dices,
   Image as ImageIcon,
   AlertTriangle,
   Trash,
@@ -35,10 +35,13 @@ import {
   Clock,
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { AIBridgeIcon } from './icon';
 import FancyButton from "@opengpex/editor/widgets/FancyButton";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
 import FunctionGroup from "@opengpex/editor/widgets/FunctionGroup";
+import ComfyNumberInput from "@opengpex/editor/widgets/ComfyNumberInput";
+import StatusBanner from "@opengpex/editor/widgets/StatusBanner";
 import { useAIBridgeState } from "./hooks";
 import { usePluginSelfBusy } from "@opengpex/editor/core/context";
 import { AIBridgeConfig, AIMode, AI_MODE_META } from "./protocols";
@@ -154,9 +157,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
       {/* Header (always visible) */}
       <motion.div layout="position" className="flex justify-between items-center shrink-0">
         <div className="flex items-center gap-2">
-          <span className="font-black text-[12px] uppercase leading-none text-indigo-600 dark:text-indigo-400 px-[1px]">
-            AI$
-          </span>
+          <AIBridgeIcon className="text-indigo-600 dark:text-indigo-400" />
           {config.isMockMode || config.providers.length <= 1 ? (
             <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
               {config.isMockMode
@@ -231,6 +232,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
               value={mode}
               onChange={setMode}
               disabled={config.isMockMode}
+              size="sm"
             />
             {/* Mock Mode Exit */}
             {config.isMockMode && (
@@ -285,7 +287,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                       value={activeProvider?.model ?? ""}
                       onChange={(e) => setModel(e.target.value)}
                       placeholder="e.g. gpt-image-1"
-                      className="flex-1 w-full bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-md px-2 py-1 text-[9px] text-[var(--text-main)] focus:outline-none focus:border-blue-500"
+                      className="flex-1 w-full h-[26px] bg-[var(--bg-stage)] border border-[var(--border-subtle)] rounded-lg px-2 text-[10px] font-black text-[var(--text-main)] tabular-nums focus:outline-none focus:border-blue-500/50"
                     />
                   )}
                 </div>
@@ -309,45 +311,29 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
 
             {/* Fetch Model Error */}
             {fetchModelError && (
-              <div className="px-2 py-1.5 bg-rose-500/10 border border-rose-500/20 rounded-lg">
-                <p className="text-[8px] text-rose-500 font-bold">
-                  {fetchModelError}
-                </p>
-              </div>
+              <StatusBanner
+                variant="rose"
+                icon={<AlertTriangle size={14} />}
+                title={fetchModelError}
+              />
             )}
 
             {/* No Image Models Detected Notice */}
             {isModelFilterFallback && cachedModels.length > 0 && (
-              <div className="px-2 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                <p className="text-[8px] text-amber-600 font-bold">
-                  No image models detected. Showing all available models.
-                </p>
-              </div>
+              <StatusBanner
+                variant="amber"
+                icon={<AlertTriangle size={14} />}
+                title="No image models detected. Showing all available models."
+              />
             )}
 
             {/* Source Image Notice (for Edit/Variations) */}
             {needsSourceImage && (
-              <div
-                className={`flex items-center gap-2 px-2.5 py-2 rounded-xl border ${
-                  hasActiveLayer
-                    ? "bg-emerald-500/5 border-emerald-500/20"
-                    : "bg-amber-500/10 border-amber-500/20"
-                }`}
-              >
-                <Layers
-                  size={12}
-                  className={
-                    hasActiveLayer ? "text-emerald-500" : "text-amber-500"
-                  }
-                />
-                <span
-                  className={`text-[9px] font-bold ${hasActiveLayer ? "text-emerald-600" : "text-amber-600"}`}
-                >
-                  {hasActiveLayer
-                    ? "Using active layer as source image"
-                    : "Select an image layer first"}
-                </span>
-              </div>
+              <StatusBanner
+                variant={hasActiveLayer ? "emerald" : "amber"}
+                icon={<Layers size={14} />}
+                title={hasActiveLayer ? "Using active layer as source image" : "Select an image layer first"}
+              />
             )}
 
             {/* Prompt Area (shown for Generate and Edit modes) */}
@@ -443,32 +429,26 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
 
               {/* Seed (only for generate mode) */}
               {mode === "generate" && (
-                <div className="flex items-center justify-between">
-                  <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight w-10">
-                    Seed
-                  </span>
-                  <div className="flex items-center flex-1 gap-1">
-                    <input
-                      type="number"
+                <div className="flex items-center gap-1">
+                  <div className="flex-1">
+                    <ComfyNumberInput
+                      label="Seed"
                       value={config.seed}
-                      onChange={(e) =>
-                        updateConfig({ seed: parseInt(e.target.value) || -1 })
-                      }
-                      placeholder="-1 (Random)"
-                      className="flex-1 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-md px-2 py-1 text-[10px] text-[var(--text-main)] focus:outline-none focus:border-blue-500"
+                      onChange={(v) => updateConfig({ seed: v })}
+                      decimals={0}
                     />
-                    <button
-                      onClick={() =>
-                        updateConfig({
-                          seed: Math.floor(Math.random() * 1000000000),
-                        })
-                      }
-                      title="Randomize Seed"
-                      className="p-1.5 text-[var(--text-muted)] hover:text-blue-400 transition-colors focus:outline-none"
-                    >
-                      <Dice5 size={12} />
-                    </button>
                   </div>
+                  <button
+                    onClick={() =>
+                      updateConfig({
+                        seed: Math.floor(Math.random() * 1000000000),
+                      })
+                    }
+                    title="Randomize Seed"
+                    className="flex items-center justify-center w-[26px] h-[26px] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-stage)] text-[var(--text-muted)] hover:text-blue-400 hover:border-blue-500/30 transition-colors shrink-0 focus:outline-none"
+                  >
+                    <Dices size={10} />
+                  </button>
                 </div>
               )}
 

@@ -346,7 +346,7 @@ export const AI_BRIDGE_COMMANDS = {
           ai_generation: true,
           ai_provider: config.isMockMode ? 'Mock Mode' : activeProvider.name,
           ai_mode: mode,
-          ai_prompt: config.prompt,
+          ai_positive_prompt: config.prompt,
           ai_negative_prompt: config.negativePrompt,
           ai_seed: actualSeed,
           ai_size: size,

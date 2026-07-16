@@ -171,6 +171,11 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
       borderOpenClass: "border-purple-500/50",
       activeBg: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
     },
+    cyan: {
+      textClass: "text-cyan-500 dark:text-cyan-400",
+      borderOpenClass: "border-cyan-500/50",
+      activeBg: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
+    },
   } as const;
   const toolVisual = ACCENT_CLASSES[activeStrategy.accent];
 
@@ -214,7 +219,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
       {/* 2. Aspect Ratio 2-Segment Split Button */}
       <div className="relative flex items-center">
         <div
-          className={`relative flex items-center h-7 rounded-xl overflow-hidden transition-all border shadow-sm
+          className={`relative flex items-stretch h-6 rounded-full overflow-hidden transition-all border shadow-sm
           ${
             isDropdownOpen && !isPanMode
               ? `bg-[var(--bg-panel)] ${toolVisual.borderOpenClass} shadow-lg`
@@ -296,7 +301,9 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                   const popActiveBg =
                     s.accent === "purple"
                       ? "bg-purple-500/15 text-purple-700 dark:bg-purple-400/25 dark:text-purple-200 ring-1 ring-purple-500/30 dark:ring-purple-300/30"
-                      : "bg-amber-500/15 text-amber-700 dark:bg-amber-400/25 dark:text-amber-200 ring-1 ring-amber-500/30 dark:ring-amber-300/30";
+                      : s.accent === "cyan"
+                        ? "bg-cyan-500/15 text-cyan-700 dark:bg-cyan-400/25 dark:text-cyan-200 ring-1 ring-cyan-500/30 dark:ring-cyan-300/30"
+                        : "bg-amber-500/15 text-amber-700 dark:bg-amber-400/25 dark:text-amber-200 ring-1 ring-amber-500/30 dark:ring-amber-300/30";
                   const showDivider =
                     idx > 0 && arr[idx - 1].family !== s.family;
                   return (
@@ -381,24 +388,31 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
               <button
                 onClick={() => toggleModeCmd?.execute()}
                 disabled={isReCanvas}
-                className={`flex items-center justify-center w-8 h-7 transition-colors group outline-none select-none
+                className={`flex items-center justify-center w-9 h-full transition-colors group outline-none select-none
                   ${isReCanvas ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
                 `}
               >
-                {isPanMode ? (
-                  <Hand size={13} className="text-[var(--text-muted)]" />
-                ) : (
-                  <ToolIcon
-                    size={13}
-                    className={toolVisual.textClass}
-                    {...dashedIconProps}
+                <span className="flex items-center gap-0.5">
+                  {isPanMode ? (
+                    <Hand size={13} className="text-[var(--text-muted)]" />
+                  ) : (
+                    <ToolIcon
+                      size={13}
+                      className={toolVisual.textClass}
+                      {...dashedIconProps}
+                    />
+                  )}
+                  <ChevronDown
+                    size={8}
+                    strokeWidth={2.5}
+                    className="text-[var(--text-muted)] opacity-60 group-hover:opacity-100 transition-opacity"
                   />
-                )}
+                </span>
               </button>
             </Tooltip>
           </Popover>
 
-          <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20" />
+          <div className="w-[1px] h-2.5 self-center bg-zinc-300 dark:bg-white/20" />
 
           {/*
            * Segment 2: Aspect Ratio Selector — disabled on irregular tools (§3.2.4).
@@ -430,7 +444,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
             >
               <button
                 onClick={handleDropdownClick}
-                className={`flex items-center gap-1.5 px-2 h-7 transition-colors outline-none select-none
+                className={`flex items-center gap-1.5 px-2 h-full transition-colors outline-none select-none
                   ${
                     isPanMode || isIrregularTool
                       ? disabledClasses
@@ -450,7 +464,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
             </Tooltip>
           </Popover>
 
-          <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20" />
+          <div className="w-[1px] h-2.5 self-center bg-zinc-300 dark:bg-white/20" />
 
           {/*
            * Segment 3: AA toggle. Orthogonal to tool identity — reads
@@ -473,7 +487,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                 <button
                   onClick={() => antiAliasToggleCmd?.execute()}
                   disabled={aaDisabled}
-                  className={`flex items-center justify-center w-7 h-7 transition-colors outline-none select-none
+                  className={`flex items-center justify-center w-7 h-full transition-colors outline-none select-none
                     ${aaDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
                   `}
                 >
@@ -510,15 +524,13 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                 <button
                   onClick={() => invertSelectionCmd?.execute()}
                   disabled={invertDisabled}
-                  className={`flex items-center justify-center w-7 h-7 transition-colors outline-none select-none
+                  className={`flex items-center justify-center w-7 h-full transition-colors outline-none select-none
                     ${invertDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
                   `}
                 >
                   <InvertIcon
                     size={13}
-                    className={
-                      isIrregularTool ? "text-purple-500" : "text-amber-500"
-                    }
+                    className={toolVisual.textClass}
                   />
                 </button>
               </Tooltip>
@@ -540,15 +552,13 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                 <button
                   onClick={() => selectFromAlphaCmd?.execute()}
                   disabled={alphaDisabled}
-                  className={`flex items-center justify-center w-7 h-7 transition-colors outline-none select-none
+                  className={`flex items-center justify-center w-7 h-full transition-colors outline-none select-none
                     ${alphaDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
                   `}
                 >
                   <AlphaIcon
                     size={13}
-                    className={
-                      isIrregularTool ? "text-purple-500" : "text-amber-500"
-                    }
+                    className={toolVisual.textClass}
                   />
                 </button>
               </Tooltip>
@@ -615,9 +625,11 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                           setOffsetValue(0);
                         }}
                         className={`h-6 px-3 text-[10px] font-black rounded-full transition-colors
-                          ${isIrregularTool
-                            ? "bg-purple-500 hover:bg-purple-600 text-white"
-                            : "bg-amber-500 hover:bg-amber-600 text-white"
+                          ${activeStrategy.accent === "cyan"
+                            ? "bg-cyan-500 hover:bg-cyan-600 text-white"
+                            : activeStrategy.accent === "purple"
+                              ? "bg-purple-500 hover:bg-purple-600 text-white"
+                              : "bg-amber-500 hover:bg-amber-600 text-white"
                           }`}
                       >
                         APPLY
@@ -634,15 +646,13 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                   <button
                     onClick={() => setIsOffsetOpen((prev) => !prev)}
                     disabled={offsetDisabled}
-                    className={`flex items-center justify-center w-7 h-7 transition-colors outline-none select-none
+                    className={`flex items-center justify-center w-7 h-full transition-colors outline-none select-none
                       ${offsetDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
                     `}
                   >
                     <Expand
                       size={13}
-                      className={
-                        isIrregularTool ? "text-purple-500" : "text-amber-500"
-                      }
+                      className={toolVisual.textClass}
                     />
                   </button>
                 </Tooltip>
@@ -650,7 +660,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
             );
           })()}
 
-          <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20" />
+          <div className="w-[1px] h-2.5 self-center bg-zinc-300 dark:bg-white/20" />
 
           {/*
            * Segment 4: Feather — Independent selection modifier (parallel to AA).
@@ -704,9 +714,11 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                       onPointerUp={(e) => { persistFeather(Number((e.currentTarget as HTMLInputElement).value)); (e.currentTarget as HTMLInputElement).blur(); }}
                       onKeyDown={(e) => { if (e.key === ' ') { e.preventDefault(); e.currentTarget.blur(); } }}
                       className={`w-[140px] h-1 appearance-none rounded-full bg-zinc-200 dark:bg-zinc-700 cursor-pointer
-                        ${isIrregularTool
-                          ? "accent-purple-500 [&::-webkit-slider-thumb]:bg-purple-500 [&::-moz-range-thumb]:bg-purple-500"
-                          : "accent-amber-500 [&::-webkit-slider-thumb]:bg-amber-500 [&::-moz-range-thumb]:bg-amber-500"}
+                        ${activeStrategy.accent === "cyan"
+                          ? "accent-cyan-500 [&::-webkit-slider-thumb]:bg-cyan-500 [&::-moz-range-thumb]:bg-cyan-500"
+                          : activeStrategy.accent === "purple"
+                            ? "accent-purple-500 [&::-webkit-slider-thumb]:bg-purple-500 [&::-moz-range-thumb]:bg-purple-500"
+                            : "accent-amber-500 [&::-webkit-slider-thumb]:bg-amber-500 [&::-moz-range-thumb]:bg-amber-500"}
                         [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-sm
                         [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0`}
                     />
@@ -728,7 +740,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                   <button
                     onClick={() => setIsFeatherOpen((prev) => !prev)}
                     disabled={featherDisabled}
-                    className={`flex items-center gap-1 px-1.5 h-7 transition-colors outline-none select-none
+                    className={`flex items-center gap-1 px-1.5 h-full transition-colors outline-none select-none
                       ${featherDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
                     `}
                   >
@@ -755,7 +767,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
             );
           })()}
 
-          <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20" />
+          <div className="w-[1px] h-2.5 self-center bg-zinc-300 dark:bg-white/20" />
 
           {/*
            * Segment 5: Apply Mask — Pure action button, no sub-state.
@@ -773,15 +785,13 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                 <button
                   onClick={() => applyMaskCmd?.execute({ feather: featherValue })}
                   disabled={maskDisabled}
-                  className={`flex items-center justify-center w-7 h-7 transition-colors outline-none select-none
+                  className={`flex items-center justify-center w-7 h-full transition-colors outline-none select-none
                     ${maskDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
                   `}
                 >
                   <ScissorsLineDashed
                     size={13}
-                    className={
-                      isIrregularTool ? "text-purple-500" : "text-amber-500"
-                    }
+                    className={toolVisual.textClass}
                   />
                 </button>
               </Tooltip>
