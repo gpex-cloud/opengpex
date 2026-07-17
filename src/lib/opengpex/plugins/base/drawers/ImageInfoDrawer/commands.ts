@@ -74,7 +74,7 @@ export const IMAGE_INFO_COMMANDS = {
          ensureAvifEncoderRegistered(pixels);
 
          // ─── 3. Common Parameter Computation ───────────────────────────────
-         const cropShape: LocalShape | undefined = isClipMode && box ? clipBoxToExportShape(box) : undefined;
+         const cropShape: LocalShape | undefined = isClipMode && box ? clipBoxToExportShape(box, ctx.geometry.polygon.polygonToSvgPathD) : undefined;
          const baseW = cropShape ? cropShape.rect.w : activeFrame.canvas.w;
          const baseH = cropShape ? cropShape.rect.h : activeFrame.canvas.h;
          const { w: exportW, h: exportH } = calcFinalDims(baseW, baseH, config);

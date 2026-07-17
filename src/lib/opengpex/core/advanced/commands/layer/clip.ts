@@ -121,7 +121,8 @@ export const LayerClipCommands = {
 
             ctx.layers.updateLayer(activeFrame.id, tx => {
               tx.edit(activeLayer.id)
-                .applyMask(result.localShape, true);
+                .applyMask(result.localShape, true)
+                .patch({ metadata: { ...activeLayer.metadata, clipTool: activeFrame.latestClipTool } });
             });
 
           } else {
@@ -147,7 +148,7 @@ export const LayerClipCommands = {
     name: 'Paste',
     undoable: true,
     execute: async (ctx: EditorContextValue, payload?: ClipboardLayerMetadata | { e?: ClipboardEvent }): Promise<void> => {
-      const { activeFrame, activeLayer, geometry, clipboard, state, actions } = ctx;
+      const { activeFrame, activeLayer, clipboard, actions } = ctx;
 
       try {
         // ═══ Step 1: Read clipboard content first (before any frame check) ═══
@@ -209,21 +210,6 @@ export const LayerClipCommands = {
           // New layers must never inherit lock/interactive state from the source
           const { id: _oldId, locked: _locked, interactive: _inter, ...layerWithoutId } = meta.layer;
           const smartName = ctx.layers.getNewLayerName(activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), 'Layer');
-
-          const vDim = state.ui.viewportDim;
-          const worldCenter = geometry.space.screenToWorld(vDim.w / 2, vDim.h / 2, activeFrame);
-
-          console.debug(
-            '[ClipCommands:paste] Internal paste positioning debug:',
-            `\n  meta.layer cx/cy: (${meta.layer.cx}, ${meta.layer.cy})`,
-            `\n  meta.layer bounding: ${meta.layer.bounding?.w}×${meta.layer.bounding?.h}`,
-            `\n  meta.layer visibleShape: ${JSON.stringify(meta.layer.visibleShape?.rect)}`,
-            `\n  viewport dim: ${vDim.w}×${vDim.h}`,
-            `\n  worldCenter: (${worldCenter.x.toFixed(1)}, ${worldCenter.y.toFixed(1)})`,
-            `\n  activeFrame.canvas: ${activeFrame.canvas.w}×${activeFrame.canvas.h}`,
-            `\n  activeFrame.camera: (${activeFrame.camera.x.toFixed(1)}, ${activeFrame.camera.y.toFixed(1)}, k=${activeFrame.camera.k.toFixed(3)})`,
-            `\n  → using original cx/cy (in-place paste)`
-          );
 
           newLayer = ctx.layers.getNewLayer({
             ...layerWithoutId,

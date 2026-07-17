@@ -27,7 +27,7 @@ export async function GET() {
   try {
     // Use dynamically configured plugin directory, adapting to SaaS deployment with local relative directory fallback
     const baseDir = PERSISTENT_PLUGINS_DIR;
-    const pluginsDir = path.isAbsolute(baseDir) ? baseDir : path.join(process.cwd(), baseDir);
+    const pluginsDir = path.isAbsolute(baseDir) ? baseDir : path.join(/*turbopackIgnore: true*/ process.cwd(), baseDir);
 
     // Ensure directory exists so we don't crash if no plugins are installed
     await fs.mkdir(pluginsDir, { recursive: true });

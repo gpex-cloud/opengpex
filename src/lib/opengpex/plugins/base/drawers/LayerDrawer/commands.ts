@@ -20,7 +20,7 @@
 import { Layer, EditorContextValue, EditorCommand, asLocalShape, LayerBlendMode } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 
-import { syncToCanvasOverlay } from './utils';
+import { commitRefocusToOverlay, RefocusTarget } from './utils';
 
 import * as P from './protocols';
 
@@ -95,10 +95,41 @@ export const LAYER_COMMANDS = {
             const layer = frame?.layers.byId[payload.layerId];
             if (!frame || !layer) return;
 
-            const rect = layer.visibleShape?.rect || { x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h };
-            const worldCenter = { x: layer.cx, y: layer.cy };
+            const shape = layer.visibleShape;
+            const rect = shape?.rect || { x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h };
+            const shapeType = shape?.type || 'rect';
 
-            syncToCanvasOverlay(ctx, frame, worldCenter, rect.w, rect.h);
+            // Resolve the RefocusTarget based on shape type
+            let target: RefocusTarget;
+
+            if (shapeType === 'path' && shape?.pathData) {
+                // Irregular shape: decompose pathData → polygon → project to frame space
+                const rings = ctx.geometry.point2d.shapeToPoint2D(shape);
+                if (rings.length === 0) return;
+
+                const localPoly = ctx.geometry.point2d.point2dToLocalPolygon(rings, shape.antiAliased !== false);
+                const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(localPoly, layer, frame);
+
+                // Use the recorded source clip tool if available, otherwise default to 'lasso'
+                const sourceClipTool = (layer.metadata?.clipTool as string) || 'lasso';
+                const clipToolId = (sourceClipTool === 'wand' || sourceClipTool === 'sam') ? sourceClipTool : 'lasso';
+
+                target = { regular: false, clipToolId, polygon: framePoly };
+            } else {
+                // Regular shape (rect / circle): project center through world matrix
+                const M = ctx.geometry.transform.getLayerWorldMatrix(layer);
+                const localCenter = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+                const worldCenter = M.apply(localCenter);
+
+                const clipToolId = shapeType === 'circle' ? 'ellipse' as const : 'rect' as const;
+                const canvasX = worldCenter.x + frame.canvas.w / 2 - rect.w / 2;
+                const canvasY = worldCenter.y + frame.canvas.h / 2 - rect.h / 2;
+
+                target = { regular: true, clipToolId, shapeType, canvasX, canvasY, w: rect.w, h: rect.h };
+            }
+
+            // Unified commit
+            commitRefocusToOverlay(ctx, frame, target);
         }
     } as EditorCommand<{ frameId?: string; layerId: string }, void>,
 
@@ -185,7 +216,30 @@ export const LAYER_COMMANDS = {
             };
             const worldCenter = M.apply(maskLocalCenter);
 
-            syncToCanvasOverlay(ctx, frame, worldCenter, shape.rect.w, shape.rect.h);
+            // Resolve target based on mask shape type
+            let target: RefocusTarget;
+
+            if (shape.type === 'path' && shape.pathData) {
+                const rings = ctx.geometry.point2d.shapeToPoint2D(shape);
+                if (rings.length === 0) return;
+
+                const localPoly = ctx.geometry.point2d.point2dToLocalPolygon(rings, shape.antiAliased !== false);
+                const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(localPoly, latestLayer, frame);
+
+                // Read source clip tool from parent layer metadata
+                const sourceClipTool = (layer.metadata?.clipTool as string) || 'lasso';
+                const clipToolId = (sourceClipTool === 'wand' || sourceClipTool === 'sam') ? sourceClipTool : 'lasso';
+
+                target = { regular: false, clipToolId, polygon: framePoly };
+            } else {
+                const clipToolId = shape.type === 'circle' ? 'ellipse' as const : 'rect' as const;
+                const canvasX = worldCenter.x + frame.canvas.w / 2 - shape.rect.w / 2;
+                const canvasY = worldCenter.y + frame.canvas.h / 2 - shape.rect.h / 2;
+
+                target = { regular: true, clipToolId, shapeType: shape.type, canvasX, canvasY, w: shape.rect.w, h: shape.rect.h };
+            }
+
+            commitRefocusToOverlay(ctx, frame, target);
         }
     } as EditorCommand<{ frameId?: string; layerId: string; maskId: string }, void>,
 

@@ -19,10 +19,10 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import { PERSISTENT_PLUGINS_DIR } from '@opengpex/editor/core/helpers/config';
 
 // Static source-level plugin directory (for fallback resource reading during local development)
-const STATIC_USER_PLUGINS_DIR = path.join(process.cwd(), 'src/lib/opengpex/plugins/user');
+// NOTE: Using inline literal path (not imported variable) so Turbopack can statically scope NFT tracing to this subfolder
+const STATIC_USER_PLUGINS_DIR = path.join(process.cwd(), 'src', 'lib', 'opengpex', 'plugins', 'user');
 
 export async function GET(req: Request, { params }: { params: Promise<{ paths: string[] }> }) {
   try {
@@ -37,8 +37,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ paths: s
     const pluginId = pathsList[0];
     const subPath = pathsList.slice(1).join('/'); // e.g. "dist/index.js" or "dist/index.css"
 
-    const baseDir = PERSISTENT_PLUGINS_DIR;
-    const pluginsDir = path.isAbsolute(baseDir) ? baseDir : path.join(process.cwd(), baseDir);
+    // NOTE: Using inline literal path segments (not imported variable) so Turbopack can statically scope NFT tracing
+    const pluginsDir = path.join(process.cwd(), 'data', 'plugins', 'user');
     const dynamicFilePath = path.join(pluginsDir, pluginId, subPath);
 
     // [Strongest Path Defense] Physical boundary review, preventing path traversal via proxy requests to read sensitive files

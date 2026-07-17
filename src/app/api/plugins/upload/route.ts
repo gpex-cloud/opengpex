@@ -36,7 +36,7 @@ export async function POST(req: Request) {
   try {
     // 2. Retrieve the securely configured physical directory for persistent plugins (supports local zero-config relative path fallback)
     const baseDir = PERSISTENT_PLUGINS_DIR;
-    const pluginsDir = path.isAbsolute(baseDir) ? baseDir : path.join(process.cwd(), baseDir);
+    const pluginsDir = path.isAbsolute(baseDir) ? baseDir : path.join(/*turbopackIgnore: true*/ process.cwd(), baseDir);
 
     // Ensure the physical folder exists
     await fs.mkdir(pluginsDir, { recursive: true });
@@ -95,7 +95,7 @@ export async function POST(req: Request) {
     let conflictingStaticUid: string | null = null;
     if (pluginId) {
       try {
-        const registryPath = path.join(process.cwd(), 'src/lib/opengpex/plugins/registry-user.ts');
+        const registryPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'src/lib/opengpex/plugins/registry-user.ts');
 
         // Extract all registered uids from static registry
         const staticUids: string[] = [];

@@ -10,6 +10,29 @@
  * 2. Eliminates the need for tedious server-side path mappings.
  * 3. Treats all `.wasm` files simply as static assets.
  * =============================================================
+ * * 【Turbopack NFT (Node File Tracing) Rules】
+ * During a Turbopack build, all filesystem operations in Server-side routes
+ * (fs.readFile, path.join, path.resolve, etc.) are statically analysed.
+ * Turbopack automatically traces files that may be accessed and bundles them
+ * into the deployment artifact. If the traced scope is too broad (e.g. the
+ * entire project root), it produces "Encountered unexpected file in NFT list"
+ * warnings.
+ *
+ * 【Core Rule】When using path.join(process.cwd(), ...) in an API Route:
+ *   ✅ Correct: use literal path segments so Turbopack can statically scope tracing
+ *      path.join(process.cwd(), 'data', 'plugins', 'user')
+ *   ❌ Wrong: use imported variables or concatenated strings — Turbopack cannot
+ *      statically infer the scope
+ *      path.join(process.cwd(), SOME_IMPORTED_VARIABLE)
+ *      path.join(process.cwd(), 'data/plugins/' + folder)
+ *
+ * 【Fallback】If a literal path is not feasible, add an ignore comment before process.cwd():
+ *      path.join(/​*turbopackIgnore: true*​/ process.cwd(), dynamicVar)
+ *   Note: turbopackIgnore only suppresses tracing for path.join/resolve itself;
+ *   it may not fully suppress tracing for subsequent fs.readFile(dynamicPath) calls.
+ *   The most reliable approach is still to ensure the first path segment is a
+ *   static literal string.
+ * =============================================================
  */
 
 import type { NextConfig } from "next";

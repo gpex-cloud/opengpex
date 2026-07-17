@@ -4,6 +4,15 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.29
+
+- Improve "Refocus Selection" in Layers Drawer to correctly restore irregular selections (lasso, wand, SAM) and switch back to the original clip tool
+- Fix irregular selections (lasso, wand) not respecting the anti-alias setting when used for color fill or export crop
+- Fix "Select from Alpha" not switching the active clip tool to wand after producing a polygon selection
+- Fix Turbopack build warnings caused by over-broad Node File Tracing in plugin API routes
+
+---
+
 ## v1.0.0-beta.28
 
 - Add **ComfyUI Bridge** drawer — connect to ComfyUI, manage and run workflows with real-time progress, browse generation history

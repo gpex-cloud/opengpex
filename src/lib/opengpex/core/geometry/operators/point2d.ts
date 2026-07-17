@@ -42,6 +42,7 @@ import {
  * shapeToPoint2D: Decompose a LocalShape into plain Point2D rings.
  * - rect → single 4-point ring (CW)
  * - circle/ellipse → single 64-point approximation ring (CW)
+ * - path → parse pathData (M/L/Z SVG commands) back into multi-ring Point2D[][]
  */
 export function shapeToPoint2D(shape: LocalShape): Point2D[][] {
   const { x, y, w, h } = shape.rect;
@@ -56,7 +57,54 @@ export function shapeToPoint2D(shape: LocalShape): Point2D[][] {
     }
     return [ring];
   }
+  if (shape.type === 'path' && shape.pathData) {
+    return parsePathDataToRings(shape.pathData);
+  }
+  // Default: rect (4-point CW ring)
   return [[{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }]];
+}
+
+/**
+ * parsePathDataToRings: Parse simple SVG path data (M/L/Z commands with absolute
+ * coordinates) back into Point2D rings. This is the inverse of `polygonToShape`
+ * which generates paths using `M x y`, `L x y`, `Z` only.
+ *
+ * Returns empty array if the path is empty or uses unsupported commands.
+ */
+export function parsePathDataToRings(pathData: string): Point2D[][] {
+  const rings: Point2D[][] = [];
+  let currentRing: Point2D[] = [];
+
+  // Tokenize: split on M/L/Z commands while keeping the command letter
+  const tokens = pathData.match(/[MLZ][^MLZ]*/gi);
+  if (!tokens) return rings;
+
+  for (const token of tokens) {
+    const cmd = token[0].toUpperCase();
+    if (cmd === 'M' || cmd === 'L') {
+      const coords = token.slice(1).trim().split(/[\s,]+/).map(Number);
+      if (coords.length >= 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+        if (cmd === 'M' && currentRing.length > 0) {
+          // New sub-path: close the previous ring
+          rings.push(currentRing);
+          currentRing = [];
+        }
+        currentRing.push({ x: coords[0], y: coords[1] });
+      }
+    } else if (cmd === 'Z') {
+      if (currentRing.length > 0) {
+        rings.push(currentRing);
+        currentRing = [];
+      }
+    }
+  }
+
+  // Flush any remaining ring without a closing Z
+  if (currentRing.length > 0) {
+    rings.push(currentRing);
+  }
+
+  return rings;
 }
 
 /**

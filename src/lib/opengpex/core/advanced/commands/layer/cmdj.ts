@@ -127,6 +127,10 @@ export const LayerCmdJCommands = {
             // "everything except that shape" we use inverted=true (pixel-perfect boundary).
             // Normal case: reveal only the shape area → inverted=false.
             newLayer.vectorMasks = [ctx.layers.getNewVectorMask(localShape, invertedRegular, feather)];
+            // Record source clip tool so refocus can restore the correct tool slot
+            if (activeFrame.latestClipTool) {
+              newLayer.metadata = { ...newLayer.metadata, clipTool: activeFrame.latestClipTool };
+            }
             ctx.layers.addLayer(activeFrame.id, newLayer);
           } else {
             // Non-feathered, non-invertedRegular: geometric fragment crop.
@@ -179,7 +183,9 @@ export const LayerCmdJCommands = {
         // (= "show only that shape" = hide everything else). This gives pixel-
         // perfect boundary alignment.
         ctx.layers.updateLayer(activeFrame.id, (tx) => {
-          tx.edit(activeLayer.id).applyMask(localShape, !invertedRegular, feather);
+          tx.edit(activeLayer.id)
+            .applyMask(localShape, !invertedRegular, feather)
+            .patch({ metadata: { ...latestLayer.metadata, clipTool: activeFrame.latestClipTool } });
         });
 
         if (feather > 0 || invertedRegular) {
@@ -202,6 +208,10 @@ export const LayerCmdJCommands = {
           // Normal: inverted=false (show the polygon area).
           // invertedRegular: inverted=true (hide the rect = show everything else).
           newLayer.vectorMasks = [ctx.layers.getNewVectorMask(localShape, invertedRegular, feather)];
+          // Record source clip tool so refocus can restore the correct tool slot
+          if (activeFrame.latestClipTool) {
+            newLayer.metadata = { ...newLayer.metadata, clipTool: activeFrame.latestClipTool };
+          }
           ctx.layers.addLayer(activeFrame.id, newLayer);
         } else {
           // Non-feathered, non-invertedRegular: geometric fragment crop.

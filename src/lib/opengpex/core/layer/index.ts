@@ -261,6 +261,11 @@ export function createLayerService(
       newLayer.cy = pose.y;
       newLayer.birthCenter = { cx: newLayer.cx, cy: newLayer.cy }; // 💡 Record birth center to trigger the golden return guide line when dragging fragments
 
+      // Record the source clip tool so refocus can restore the correct tool slot
+      if (frame.latestClipTool) {
+        newLayer.metadata = { ...newLayer.metadata, clipTool: frame.latestClipTool };
+      }
+
       return { newLayer, localShape };
     },
 

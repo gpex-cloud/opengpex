@@ -19,33 +19,53 @@
 
 'use client';
 
-import { Layer, Frame, EditorContextValue, asLocalShape, NormalizedState } from '@opengpex/editor/core/types';
+import { Layer, Frame, EditorContextValue, asLocalShape, LocalPolygon, NormalizedState, ShapeType } from '@opengpex/editor/core/types';
 
 /**
- * Executes a spatial projection to sync a world coordinate (center) 
- * and dimension to the canvas overlay crop box.
+ * Resolved refocus target: either a regular shape (rect/ellipse) or an irregular polygon.
  */
-export function syncToCanvasOverlay(
+export type RefocusTarget =
+    | { regular: true; clipToolId: 'rect' | 'ellipse'; shapeType: ShapeType; canvasX: number; canvasY: number; w: number; h: number }
+    | { regular: false; clipToolId: string; polygon: LocalPolygon };
+
+/**
+ * Commits a resolved RefocusTarget to the frame state:
+ *   1. Switches latestClipTool
+ *   2. Clears conflicting slots (for regular shapes)
+ *   3. Writes the clip box data
+ *   4. Enters clip mode
+ *
+ * This is the unified "write to overlay" exit point for all refocus paths
+ * (rect, ellipse, lasso, wand, sam).
+ */
+export function commitRefocusToOverlay(
     ctx: EditorContextValue,
     frame: Frame,
-    worldCenter: { x: number, y: number },
-    scaledW: number,
-    scaledH: number
+    target: RefocusTarget
 ) {
-    // 1. Calculate top-left coordinates in Canvas Space
-    // World Space Origin (0,0) is center of Canvas.
-    const canvasX = worldCenter.x + frame.canvas.w / 2 - scaledW / 2;
-    const canvasY = worldCenter.y + frame.canvas.h / 2 - scaledH / 2;
+    // 1. Switch active clip tool
+    ctx.actions.updateFrame(frame.id, { latestClipTool: target.clipToolId });
 
-    // 2. Apply state updates
-    ctx.actions.setClipBox(frame.id, 'rect', asLocalShape({
-        x: canvasX,
-        y: canvasY,
-        w: scaledW,
-        h: scaledH
-    }));
+    if (target.regular) {
+        // 2a. Clear the opposite regular slot to prevent stale rendering
+        const oppositeSlot = target.clipToolId === 'ellipse' ? 'rect' : 'ellipse';
+        if (frame.clipBoxes[oppositeSlot]) {
+            ctx.actions.setClipBox(frame.id, oppositeSlot, null);
+        }
 
-    // Close pan mode to focus on the crop box
+        // 3a. Write regular shape
+        ctx.actions.setClipBox(frame.id, target.clipToolId, asLocalShape({
+            x: target.canvasX,
+            y: target.canvasY,
+            w: target.w,
+            h: target.h
+        }, target.shapeType));
+    } else {
+        // 3b. Write irregular polygon
+        ctx.actions.setClipBox(frame.id, target.clipToolId, target.polygon);
+    }
+
+    // 4. Enter clip mode
     ctx.actions.setInteraction({ interactionMode: 'clip' });
 }
 

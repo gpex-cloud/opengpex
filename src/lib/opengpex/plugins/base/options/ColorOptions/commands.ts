@@ -33,7 +33,7 @@ export const COLOR_OPTIONS_COMMANDS = {
     name: 'Fill as New Layer',
     undoable: true,
     execute: (ctx: EditorContextValue, payload: { fillColor: string }) => {
-      const { state, actions, layers, activeFrame } = ctx;
+      const { state, actions, layers, activeFrame, geometry } = ctx;
       if (!activeFrame) return;
 
       const { fillColor } = payload;
@@ -73,24 +73,16 @@ export const COLOR_OPTIONS_COMMANDS = {
           box_cx = bounds.x + w / 2;
           box_cy = bounds.y + h / 2;
 
-          // Build path data in layer-local coordinates (offset by -bounds origin)
-          const parts: string[] = [];
-          for (const ring of poly.rings) {
-            if (ring.length < 2) continue;
-            const segs: string[] = [];
-            for (let i = 0; i < ring.length; i++) {
-              const p = ring[i];
-              segs.push(`${i === 0 ? 'M' : 'L'} ${p.x - bounds.x} ${p.y - bounds.y}`);
-            }
-            segs.push('Z');
-            parts.push(segs.join(' '));
-          }
+          // Build path data in layer-local coordinates (offset by -bounds origin).
+          // Uses polygonToSvgPathD which automatically routes to Bresenham stair-stepped
+          // path when antiAliased === false, ensuring the fill respects the AA setting.
+          const pathData = geometry.polygon.polygonToSvgPathD(poly);
 
           visibleShape = {
             type: 'path',
             rect: { x: 0, y: 0, w, h },
             antiAliased: poly.antiAliased !== false,
-            pathData: parts.join(' '),
+            pathData,
             __brand: 'local',
           } as LocalShape;
         }

@@ -741,9 +741,12 @@ export const CLIP_OPTIONS_COMMANDS = {
         const layerPoly = ctx.geometry.point2d.point2dToLocalPolygon(adjustedRings, true);
         const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(layerPoly, layer, frame);
 
-        // ─── Write to current tool's slot (don't switch tool) ──────────
-        const tool = (frame.latestClipTool as P.ClipTool) || 'rect';
-        ctx.actions.setClipBox(frame.id, tool, framePoly);
+        // ─── Write to wand slot and switch tool to wand ──────────────
+        // Select-from-Alpha produces a polygon selection semantically equivalent
+        // to a magic wand result — switch clipTool so the overlay and subsequent
+        // operations (AA toggle, offset, invert) target the correct irregular slot.
+        ctx.actions.updateFrame(frame.id, { latestClipTool: 'wand' });
+        ctx.actions.setClipBox(frame.id, 'wand', framePoly);
 
         if (response.debug) {
           console.debug('[SelectFromAlpha]', response.debug);

@@ -19,7 +19,7 @@
 
 'use client';
 
-import type { LocalShape, LocalSpatial } from '@opengpex/editor/core/types';
+import type { LocalShape, LocalSpatial, LocalPolygon } from '@opengpex/editor/core/types';
 import * as P from './protocols';
 
 /**
@@ -31,24 +31,40 @@ import * as P from './protocols';
  *   with pathData in bounds-relative coordinates. This is required because
  *   `mergeLayersWithShape` internally zeros the rect to {0,0,w,h} and shifts
  *   layer matrices by (-rect.x, -rect.y).
+ *
+ * @param polygonToPathD  Optional path generator (from geometry.polygon.polygonToSvgPathD).
+ *   When provided, routes to Bresenham stair-stepped path for antiAliased=false polygons.
+ *   When omitted, falls back to smooth M/L/Z (legacy behaviour).
  */
-export function clipBoxToExportShape(box: LocalSpatial): LocalShape {
+export function clipBoxToExportShape(
+  box: LocalSpatial,
+  polygonToPathD?: (poly: LocalPolygon) => string
+): LocalShape {
   if (box.regular) {
     return box.spatial;
   }
 
-  // Irregular polygon → LocalShape{type:'path'} with bounds-relative coordinates
+  // Irregular polygon → LocalShape{type:'path'} with bounds-relative coordinates.
+  // When polygonToPathD is provided (geometry service), it routes to Bresenham
+  // stair-stepped path when antiAliased === false, ensuring export respects AA.
   const poly = box.spatial;
-  const parts: string[] = [];
-  for (const ring of poly.rings) {
-    if (ring.length < 2) continue;
-    const segs: string[] = [];
-    for (let i = 0; i < ring.length; i++) {
-      const p = ring[i];
-      segs.push(`${i === 0 ? 'M' : 'L'} ${p.x - poly.rect.x} ${p.y - poly.rect.y}`);
+  let pathData: string;
+  if (polygonToPathD) {
+    pathData = polygonToPathD(poly);
+  } else {
+    // Fallback: simple M/L/Z (smooth, does not respect AA=false)
+    const parts: string[] = [];
+    for (const ring of poly.rings) {
+      if (ring.length < 2) continue;
+      const segs: string[] = [];
+      for (let i = 0; i < ring.length; i++) {
+        const p = ring[i];
+        segs.push(`${i === 0 ? 'M' : 'L'} ${p.x - poly.rect.x} ${p.y - poly.rect.y}`);
+      }
+      segs.push('Z');
+      parts.push(segs.join(' '));
     }
-    segs.push('Z');
-    parts.push(segs.join(' '));
+    pathData = parts.join(' ');
   }
 
   return {
@@ -56,7 +72,7 @@ export function clipBoxToExportShape(box: LocalSpatial): LocalShape {
     rect: poly.rect,
     hardEdge: false,
     antiAliased: poly.antiAliased !== false,
-    pathData: parts.join(' '),
+    pathData,
     __brand: 'local',
   } as LocalShape;
 }

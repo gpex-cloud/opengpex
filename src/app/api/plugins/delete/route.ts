@@ -52,7 +52,7 @@ export async function POST(req: Request) {
 
     // Resolve persistent plugins directory
     const baseDir = PERSISTENT_PLUGINS_DIR;
-    const pluginsDir = path.isAbsolute(baseDir) ? baseDir : path.join(process.cwd(), baseDir);
+    const pluginsDir = path.isAbsolute(baseDir) ? baseDir : path.join(/*turbopackIgnore: true*/ process.cwd(), baseDir);
     const pluginDir = path.join(pluginsDir, pluginId);
 
     // Verify path safety

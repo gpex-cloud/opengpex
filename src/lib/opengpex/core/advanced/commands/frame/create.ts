@@ -33,6 +33,7 @@
 'use client';
 
 import { EditorCommand, EditorContextValue, Frame, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
+import { polygonToSvgPathD } from '@opengpex/editor/core/geometry/operators/polygon';
 
 import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
@@ -177,24 +178,16 @@ export const FrameCreateCommands = {
         // Convert the selection to a LocalShape for shapeToBlob.
         let branchShape: LocalShape;
         if (!box.regular) {
+          // Uses polygonToSvgPathD which routes to Bresenham stair-stepped path
+          // when antiAliased === false, ensuring branch respects the AA setting.
           const poly = box.spatial;
-          const parts: string[] = [];
-          for (const ring of poly.rings) {
-            if (ring.length < 2) continue;
-            const segs: string[] = [];
-            for (let i = 0; i < ring.length; i++) {
-              const p = ring[i];
-              segs.push(`${i === 0 ? 'M' : 'L'} ${p.x - poly.rect.x} ${p.y - poly.rect.y}`);
-            }
-            segs.push('Z');
-            parts.push(segs.join(' '));
-          }
+          const pathData = polygonToSvgPathD(poly);
           branchShape = {
             type: 'path',
             rect: poly.rect,
             hardEdge: false,
             antiAliased: poly.antiAliased !== false,
-            pathData: parts.join(' '),
+            pathData,
             __brand: 'local',
           } as LocalShape;
         } else {
