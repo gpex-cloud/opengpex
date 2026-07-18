@@ -328,7 +328,8 @@ export function ComfyBridgeSettings() {
   }, []);
 
   // ─── Tab State ─────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'environments' | 'workflows'>('environments');
+  // Default to 'workflows' — users modify workflows far more often than environments
+  const [activeTab, setActiveTab] = useState<'environments' | 'workflows'>('workflows');
 
   // ─── Render ────────────────────────────────────────────────────────────────
 

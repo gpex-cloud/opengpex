@@ -176,11 +176,14 @@ export interface AutoRevealRule {
   when: (state: EditorState) => boolean;
 
   /**
-   * When true, the drawer auto-collapses when `when()` transitions from true → false.
-   * Default: false (drawer stays open until user manually closes it).
-   * This is intentionally separate from `when` so each behavior can be toggled independently.
+   * Behavior when `when()` transitions from true → false.
+   *
+   * - `'sticky'` (default): Do nothing — drawer stays open until user manually closes it.
+   * - `'restore'`: Restore the drawer's open state from before activation.
+   *   If it was closed before, close it again; if it was open, leave it open.
+   * - `'collapse'`: Always collapse the drawer when the condition becomes false.
    */
-  collapseWhenFalse?: boolean;
+  collapseWhenFalse?: 'sticky' | 'restore' | 'collapse';
 
   /**
    * Priority: higher value = higher precedence when multiple drawers reveal simultaneously.

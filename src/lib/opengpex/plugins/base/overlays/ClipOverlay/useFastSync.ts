@@ -20,7 +20,7 @@
 import { useEffect, useRef } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync, useFastRectSync, useFastSvgGroupSync, useFastMarchingAntsSync, useFastAnchorSync } from '@opengpex/editor/core/motion/hooks/navigation';
-import { LocalShape, LocalPolygon, asLocalShape, isPolygon } from '@opengpex/editor/core/types';
+import { LocalShape, LocalPolygon, asLocalShape } from '@opengpex/editor/core/types';
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { ClipTool } from '../../options/ClipOptions/protocols';
 
@@ -28,14 +28,18 @@ const EMPTY_SHAPE: LocalShape = asLocalShape({ x: 0, y: 0, w: 0, h: 0 });
 
 /**
  * Resolve the regular clip shape for the CSS box (handles + dim label).
- * Returns EMPTY_SHAPE when the slot is empty or contains a polygon.
+ * Returns EMPTY_SHAPE when the slot is empty.
  */
 function resolveRegularClip(
   f: { clipBoxes: Record<string, unknown>; canvasCropBox: LocalShape },
   isReCanvas: boolean
 ): LocalShape {
   if (isReCanvas) return f.canvasCropBox;
-  return getRegularClipShape(f as { clipBoxes: Record<string, LocalShape | LocalPolygon> }) || EMPTY_SHAPE;
+  const poly = getRegularClipShape(f as { clipBoxes: Record<string, LocalPolygon> });
+  if (!poly) return EMPTY_SHAPE;
+  // Convert LocalPolygon to LocalShape for CSS box positioning
+  const { rect, antiAliased } = poly;
+  return { type: 'rect', rect, hardEdge: false, antiAliased, __brand: 'local' } as LocalShape;
 }
 
 // ─── useCropDimSync ────────────────────────────────────────────────────────────
@@ -82,7 +86,7 @@ export function useRegularBoxSync(
     space: 'local'
   });
 
-  // Visibility gate: hide when shape is empty (0×0 or polygon in slot)
+  // Visibility gate: hide when shape is empty (0×0)
   useFastSync(ref, isActive, (_v, f) => {
     const shape = resolveRegularClip(f, isReCanvas);
     const rect = shape.rect;
@@ -160,11 +164,9 @@ export function useSelectionAntsSync(
   useFastSvgGroupSync(groupRef, isActive, {
     selector: (_v, f) => {
       if (isReCanvas) return f.canvasCropBox.rect;
-      const entry = f.clipBoxes[cropTool];
+      const entry = f.clipBoxes[cropTool] as LocalPolygon | undefined;
       if (!entry) return null;
-      if (isPolygon(entry)) return (entry as LocalPolygon).rect;
-      const shape = entry as LocalShape;
-      return (shape.rect.w > 0) ? shape.rect : null;
+      return entry.rect.w > 0 ? entry.rect : null;
     },
     space: 'local'
   });
@@ -172,14 +174,9 @@ export function useSelectionAntsSync(
   // Shared selector for both paths (bg + fg share the same geometry)
   const antsSelector = (_v: unknown, f: { clipBoxes: Record<string, unknown>; canvasCropBox: LocalShape }): LocalShape | string | null => {
     if (isReCanvas) return f.canvasCropBox;
-    const entry = f.clipBoxes[cropTool] as LocalShape | LocalPolygon | undefined;
+    const entry = f.clipBoxes[cropTool] as LocalPolygon | undefined;
     if (!entry) return null;
-    if (isPolygon(entry)) {
-      return geometry.polygon.polygonToSvgPathD(entry);
-    }
-    // LocalShape — the hook internally generates rect/ellipse path
-    const shape = entry as LocalShape;
-    return (shape.rect.w > 0) ? shape : null;
+    return geometry.polygon.polygonToSvgPathD(entry);
   };
 
   // Background path (black, offset phase) — fills the foreground gaps
@@ -194,16 +191,18 @@ export function useSelectionAntsSync(
     resetKey: cropTool,
   });
 
-  // Dynamic fill: transparent fill for polygons (evenodd), none for shapes
+  // Dynamic fill: semi-transparent evenodd fill for irregular polygons (lasso/wand),
+  // none for rect/ellipse (4-point or 64-point polygon — visually clean without fill).
   useFastSync(pathRef, isActive, (_v, f) => {
     if (!pathRef.current) return;
     if (isReCanvas) {
       pathRef.current.setAttribute('fill', 'none');
       return;
     }
-    const entry = f.clipBoxes[cropTool];
-    const isPoly = entry && isPolygon(entry);
-    pathRef.current.setAttribute('fill', isPoly ? 'rgba(240, 230, 255, 0.12)' : 'none');
+    const entry = f.clipBoxes[cropTool] as LocalPolygon | undefined;
+    // Irregular polygon: rings.length > 1 or ring has many points (lasso/wand/AI)
+    const isIrregular = entry && entry.rings.length > 0 && entry.rings[0].length > 64;
+    pathRef.current.setAttribute('fill', isIrregular ? 'rgba(240, 230, 255, 0.12)' : 'none');
   });
 
   // Group visibility: hidden when no data
@@ -213,8 +212,8 @@ export function useSelectionAntsSync(
       groupRef.current.style.visibility = '';
       return;
     }
-    const entry = f.clipBoxes[cropTool];
-    const hasData = !!entry && (isPolygon(entry) || (entry as LocalShape).rect.w > 0);
+    const entry = f.clipBoxes[cropTool] as LocalPolygon | undefined;
+    const hasData = !!entry && entry.rect.w > 0;
     groupRef.current.style.visibility = hasData ? '' : 'hidden';
   });
 
@@ -252,15 +251,11 @@ export function useMoveDeltaSync(isActive: boolean, cropTool: ClipTool) {
       const start = volatileRef.current.transient['clipMoveStart'] as { x: number; y: number } | undefined;
       if (!start) return null;
 
-      const entry = f.clipBoxes[cropTool];
+      const entry = f.clipBoxes[cropTool] as LocalPolygon | undefined;
       if (!entry) return null;
 
-      const rect = isPolygon(entry)
-        ? (entry as LocalPolygon).rect
-        : (entry as LocalShape).rect;
-
       // Anchor at bottom-left of the selection bounding rect
-      return { x: rect.x, y: rect.y + rect.h };
+      return { x: entry.rect.x, y: entry.rect.y + entry.rect.h };
     },
     offset: { x: 0, y: 24 }, // below dimension label (6px for dim + ~18px gap)
     space: 'local',
@@ -277,18 +272,14 @@ export function useMoveDeltaSync(isActive: boolean, cropTool: ClipTool) {
       return;
     }
 
-    const entry = f.clipBoxes[cropTool];
+    const entry = f.clipBoxes[cropTool] as LocalPolygon | undefined;
     if (!entry) {
       el.style.display = 'none';
       return;
     }
 
-    const currentRect = isPolygon(entry)
-      ? (entry as LocalPolygon).rect
-      : (entry as LocalShape).rect;
-
-    const dx = Math.round(currentRect.x - start.x);
-    const dy = Math.round(currentRect.y - start.y);
+    const dx = Math.round(entry.rect.x - start.x);
+    const dy = Math.round(entry.rect.y - start.y);
 
     // Format with directional arrows + absolute values (no negatives)
     // When displacement is 0, show "→ 0  ↓ 0" to indicate drag is active

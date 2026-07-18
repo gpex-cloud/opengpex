@@ -21,6 +21,7 @@
 
 import { EditorCommand, EditorContextValue, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 
 import * as P from './protocols';
 
@@ -33,7 +34,7 @@ export const COLOR_OPTIONS_COMMANDS = {
     name: 'Fill as New Layer',
     undoable: true,
     execute: (ctx: EditorContextValue, payload: { fillColor: string }) => {
-      const { state, actions, layers, activeFrame, geometry } = ctx;
+      const { state, actions, layers, activeFrame } = ctx;
       if (!activeFrame) return;
 
       const { fillColor } = payload;
@@ -48,22 +49,9 @@ export const COLOR_OPTIONS_COMMANDS = {
           return;
         }
 
-        if (box.regular) {
-          // ═══ Regular selection (rect/ellipse) ═══
-          const shape = box.spatial;
-          if (shape.rect.w <= 0 || shape.rect.h <= 0) {
-            actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
-            return;
-          }
-          w = shape.rect.w;
-          h = shape.rect.h;
-          box_cx = shape.rect.x + w / 2;
-          box_cy = shape.rect.y + h / 2;
-          visibleShape = asLocalShape({ x: 0, y: 0, w, h }, shape.type, shape.antiAliased !== false);
-        } else {
-          // ═══ Irregular selection (lasso/wand polygon) ═══
-          const poly = box.spatial;
-          const bounds = poly.rect;
+        {
+          // ═══ All selections are now LocalPolygon ═══
+          const bounds = box.rect;
           if (bounds.w <= 0 || bounds.h <= 0) {
             actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
             return;
@@ -73,18 +61,40 @@ export const COLOR_OPTIONS_COMMANDS = {
           box_cx = bounds.x + w / 2;
           box_cy = bounds.y + h / 2;
 
-          // Build path data in layer-local coordinates (offset by -bounds origin).
-          // Uses polygonToSvgPathD which automatically routes to Bresenham stair-stepped
-          // path when antiAliased === false, ensuring the fill respects the AA setting.
-          const pathData = geometry.polygon.polygonToSvgPathD(poly);
-
-          visibleShape = {
-            type: 'path',
-            rect: { x: 0, y: 0, w, h },
-            antiAliased: poly.antiAliased !== false,
-            pathData,
-            __brand: 'local',
-          } as LocalShape;
+          // Serialize the polygon to a LocalShape for the layer model.
+          // polygonToShape uses absolute coordinates (suitable for Path2D),
+          // recognizes rect/circle shapes, and preserves the antiAliased flag
+          // so shapeToPath2D can apply Bresenham stair-stepping at render time.
+          // The resulting shape's rect is in frame-local space (absolute coords),
+          // but the layer is positioned at (cx, cy) relative to canvas center,
+          // so we must offset the shape rect to layer-local space (origin at 0,0).
+          const frameShape = polygonToShape(box);
+          if (frameShape.type === 'rect') {
+            visibleShape = {
+              ...frameShape,
+              rect: { x: 0, y: 0, w, h },
+            } as LocalShape;
+          } else if (frameShape.type === 'circle') {
+            visibleShape = {
+              ...frameShape,
+              rect: { x: 0, y: 0, w, h },
+            } as LocalShape;
+          } else {
+            // type:'path' — pathData uses absolute frame-local coords.
+            // Offset to layer-local by subtracting bounds origin.
+            const ox = bounds.x;
+            const oy = bounds.y;
+            const offsetPathData = (frameShape.pathData || '').replace(
+              /([ML])\s+([\d.eE+-]+)\s+([\d.eE+-]+)/g,
+              (_m: string, cmd: string, x: string, y: string) =>
+                `${cmd} ${parseFloat(x) - ox} ${parseFloat(y) - oy}`
+            );
+            visibleShape = {
+              ...frameShape,
+              rect: { x: 0, y: 0, w, h },
+              pathData: offsetPathData,
+            } as LocalShape;
+          }
         }
       } else {
         w = activeFrame.canvas.w;

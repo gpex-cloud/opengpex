@@ -77,8 +77,8 @@ export function ImageInfoComponent() {
 
   // Compute clip/canvas dimensions (single source of truth)
   const box = getClipBox(activeFrame);
-  const baseW = isClipMode && box ? box.spatial.rect.w : activeFrame.canvas.w;
-  const baseH = isClipMode && box ? box.spatial.rect.h : activeFrame.canvas.h;
+  const baseW = isClipMode && box ? box.rect.w : activeFrame.canvas.w;
+  const baseH = isClipMode && box ? box.rect.h : activeFrame.canvas.h;
 
   // Layer dimension for the hovered or active layer
   const targetLayerId = hoveredLayerId || activeFrame.activeLayerId;

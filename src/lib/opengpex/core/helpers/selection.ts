@@ -17,63 +17,49 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import type { Frame, LocalShape, LocalPolygon, LocalSpatial } from '@opengpex/editor/core/types';
-import { isPolygon } from '@opengpex/editor/core/types';
+import type { Frame, LocalPolygon } from '@opengpex/editor/core/types';
 
 /**
  * getRegularClipShape — convenience wrapper over `getClipBox` that returns
- * the active selection ONLY when it is a regular (rect/ellipse) LocalShape.
+ * the active selection ONLY when it is a regular (rect/ellipse) LocalPolygon
+ * (i.e. a 4-point or 64-point polygon produced by the rect/ellipse tool).
  *
  * Delegates entirely to `getClipBox(frame)` which reads `frame.latestClipTool`
  * as the single source of truth. No more blind-scanning of slot arrays.
  *
- * Returns `undefined` when no valid regular clip shape is active (either the
- * active tool is irregular, or the slot is empty/zero-sized).
+ * Returns `undefined` when no valid clip polygon is active (slot is empty).
  */
-export function getRegularClipShape(frame: { latestClipTool?: string; clipBoxes: Record<string, LocalShape | LocalPolygon> }): LocalShape | undefined {
-  const box = getClipBox(frame as Frame);
-  return box?.regular ? box.spatial : undefined;
+export function getRegularClipShape(frame: { latestClipTool?: string; clipBoxes: Record<string, LocalPolygon> }): LocalPolygon | undefined {
+  return getClipBox(frame as Frame) ?? undefined;
 }
 
 /**
  * getClipBox — unified selection resolver for clip commands.
  *
  * Reads `frame.latestClipTool` to determine which slot in `frame.clipBoxes`
- * holds the active selection, wraps the result in a `LocalSpatial`
- * discriminated union so callers can branch on `result.regular` without
- * needing to import `isPolygon`.
+ * holds the active selection and returns the `LocalPolygon` directly.
  *
- * Returns `null` when no valid selection exists (empty/zero-size for
- * LocalShape, or missing slot), which signals callers to take the
- * "no selection" branch.
+ * All tool types (rect, ellipse, lasso, wand) now store a `LocalPolygon`.
+ * Consumers that need a `LocalShape` for the rendering pipeline should call
+ * `polygonToShape(box)` from `@opengpex/editor/core/helpers/path2d`.
+ *
+ * Returns `null` when no valid selection exists (missing slot).
  *
  * @example
  * ```ts
  * const box = getClipBox(frame);
  * if (!box) return; // no active selection
- * if (box.regular) {
- *   // box.spatial is narrowed to LocalShape
- *   applyRectCrop(box.spatial.rect);
- * } else {
- *   // box.spatial is narrowed to LocalPolygon
- *   applyPolygonMask(box.spatial.rings);
- * }
+ * // box is LocalPolygon — use rings for mask, or polygonToShape for rendering
+ * applyPolygonMask(box.rings);
  * ```
  */
-export function getClipBox(frame: Frame): LocalSpatial | null {
+export function getClipBox(frame: Frame): LocalPolygon | null {
   const clipToolId = frame.latestClipTool || 'rect';
 
   // Guard: legacy imported data may not have clipBoxes at all.
   const entry = frame.clipBoxes?.[clipToolId] ?? null;
   if (!entry) return null;
 
-  if (!isPolygon(entry)) {
-    // Guard: legacy entries may be missing the rect field.
-    if (!entry.rect) return null;
-    // LocalShape — validate non-zero dimensions
-    if (entry.rect.w <= 0 || entry.rect.h <= 0) return null;
-    return { regular: true, spatial: entry };
-  }
   // LocalPolygon — trust that it has valid points
-  return { regular: false, spatial: entry };
+  return entry;
 }

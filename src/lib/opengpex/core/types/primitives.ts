@@ -271,23 +271,4 @@ export function isPolygon(sel: Shape | Polygon): sel is Polygon {
   return Array.isArray((sel as Polygon).rings);
 }
 
-/**
- * LocalSpatial — discriminated union wrapping a clip selection.
- *
- * `regular: true`  → `spatial` is a `LocalShape` (rect / ellipse family).
- * `regular: false` → `spatial` is a `LocalPolygon` (lasso / wand family).
- *
- * This enables TypeScript narrowing at call sites:
- * ```ts
- * const box = getClipBox(frame);
- * if (box?.regular) {
- *   // box.spatial is narrowed to LocalShape
- * } else if (box) {
- *   // box.spatial is narrowed to LocalPolygon
- * }
- * ```
- */
-export type LocalSpatial =
-  | { regular: true;  spatial: LocalShape }
-  | { regular: false; spatial: LocalPolygon };
 

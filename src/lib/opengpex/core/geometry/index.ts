@@ -44,7 +44,8 @@ import {
 } from './operators/polygon';
 import {
   shapeToPoint2D, point2dToLocalShape, point2dToLocalPolygon,
-  invertRings, isBoundingRing, computePolygonBounds as computePolygonBoundsP2D
+  invertRings, isBoundingRing, computePolygonBounds as computePolygonBoundsP2D,
+  rectToLocalPolygon, ellipseToLocalPolygon
 } from './operators/point2d';
 import { snapRect, snapEdge, snapToPixel, snapRectToPixel } from './operators/snapping';
 import {
@@ -170,6 +171,8 @@ export function createGeometryService(): GeometryService {
       invertRings: (rings: Point2D[][], boundingW: number, boundingH: number) => invertRings(rings, boundingW, boundingH),
       isBoundingRing: (ring: readonly Point2D[], boundingW: number, boundingH: number) => isBoundingRing(ring, boundingW, boundingH),
       computePolygonBounds: (rings: Point2D[][]) => computePolygonBoundsP2D(rings),
+      regularShapeToLocalPolygon: (tool: 'rect' | 'ellipse', rect: import('@opengpex/editor/core/types').LocalRect, antiAliased?: boolean) =>
+        tool === 'ellipse' ? ellipseToLocalPolygon(rect, antiAliased) : rectToLocalPolygon(rect, antiAliased),
     },
     getScale: (frame: Frame, camera?: CameraState) => (camera || frame.camera).k,
     asWorldRect: (r: Rect) => asWorldRect(r),

@@ -21,19 +21,19 @@
 
 import { Clapperboard } from "lucide-react";
 
-import { useAnimationPlayer, useAnimationExport } from "./hooks";
+import { useAnimatedImagesPlayer, useAnimatedImagesExport } from "./hooks";
 import { PlayerBar } from "./components/PlayerBar";
-import { AnimationExport } from "./components/AnimationExport";
+import { ImagesExport } from "./components/ImagesExport";
 
 /**
- * AnimationComponent: Main plugin component for animation playback and export.
+ * AnimatedImagesComponent: Main plugin component for animated image playback and export.
  *
  * Automatically detects GIF/APNG animation sequences in the active frame.
  * Provides playback controls and animated format export capabilities.
  */
-export function AnimationComponent() {
-   const player = useAnimationPlayer();
-   const exportCtl = useAnimationExport();
+export function AnimatedImagesComponent() {
+   const player = useAnimatedImagesPlayer();
+   const exportCtl = useAnimatedImagesExport();
 
    const { sequence } = player.state;
 
@@ -44,7 +44,7 @@ export function AnimationComponent() {
             <div className="flex items-center gap-2">
                <Clapperboard size={12} className="text-indigo-600 dark:text-indigo-400" />
                <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
-                  Animation
+                  Animated Images
                </span>
                {sequence && (
                   <span className="ml-1 text-[8px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded shadow-sm border border-emerald-500/20 uppercase">
@@ -58,10 +58,10 @@ export function AnimationComponent() {
          {sequence ? (
             <>
                <PlayerBar state={player.state} actions={player.actions} />
-               <AnimationExport
+               <ImagesExport
                   config={exportCtl.config}
                   updateConfig={exportCtl.updateConfig}
-                  exportAnimationCmd={exportCtl.exportAnimationCmd}
+                  exportCmd={exportCtl.exportAnimatedImageCmd}
                   sequence={sequence}
                   onRecalculateFps={player.actions.recalculateFps}
                />

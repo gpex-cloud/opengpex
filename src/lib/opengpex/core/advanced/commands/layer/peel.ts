@@ -92,9 +92,8 @@ export const LayerPeelCommands = {
         // tool's slot in clipBoxes is guaranteed non-empty at this point.
         // Supports both regular (LocalShape) and irregular (LocalPolygon) selections.
         const box = getClipBox(activeFrame);
-        const clipShape = box ? box.spatial : null;
-        if (!clipShape) return; // defensive — should never happen during a real peel
-        const result = ctx.layers.fragmentToExistLayer(activeFrame, latestLayer, exchange, clipShape);
+        if (!box) return; // defensive — should never happen during a real peel
+        const result = ctx.layers.fragmentToExistLayer(activeFrame, latestLayer, exchange, box);
         if (!result) return;
 
         const timestamp = Date.now();

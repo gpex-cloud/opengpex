@@ -21,6 +21,7 @@
 
 import { EditorContextValue, EditorCommand, ClipboardLayerMetadata, LocalShape, asLocalRect } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 // Removed direct dependency on storage singleton, using ctx injection instead
@@ -271,17 +272,18 @@ export const LayerClipCommands = {
       // Read feather radius from payload (0 = no feather)
       const feather = payload?.feather ?? 0;
 
-      if (box.regular) {
+      // All selections are now LocalPolygon. Use polygonToShape for vector mask path.
+      const localShape: LocalShape = polygonToShape(box);
+      if (localShape.type !== 'path') {
         // ═══ Regular selection (rect/ellipse) → Vector Mask ═══
         // Lightweight, geometrically precise, scalable without quality loss.
-        const localShape: LocalShape = box.spatial;
         layers.updateLayer(activeFrame.id, tx => {
           tx.edit(targetLayer.id).applyMask(localShape, false, feather);
         });
       } else {
         // ═══ Irregular selection (lasso/wand/AI) → Bitmap Mask ═══
         // Complex edges benefit from pixel-level representation; enables future brush refinement.
-        const layerPoly = geometry.polygon.frameLocalToLayerLocal(box.spatial, activeFrame, targetLayer);
+        const layerPoly = geometry.polygon.frameLocalToLayerLocal(box, activeFrame, targetLayer);
 
         const maskAsset = await pixels.rasterize.mask(layerPoly, targetLayer.bounding, feather);
         if (!maskAsset) {
@@ -350,9 +352,10 @@ export const LayerClipCommands = {
         // Punch hole using destination-out composite
         maskCtx.globalCompositeOperation = 'destination-out';
 
-        if (!box.regular) {
+        const drillShape = polygonToShape(box);
+        if (drillShape.type === 'path') {
           // Irregular selection → polygon path
-          const layerPoly = geometry.polygon.frameLocalToLayerLocal(box.spatial, activeFrame, latestLayer);
+          const layerPoly = geometry.polygon.frameLocalToLayerLocal(box, activeFrame, latestLayer);
           const path = new Path2D();
           for (const ring of layerPoly.rings) {
             if (ring && ring.length > 0) {
@@ -380,7 +383,7 @@ export const LayerClipCommands = {
           }
         } else {
           // Regular selection → rect/ellipse shape
-          const localShape = geometry.shape.frameLocalToLayerLocal(box.spatial, activeFrame, latestLayer);
+          const localShape = geometry.shape.frameLocalToLayerLocal(drillShape, activeFrame, latestLayer);
           const { x, y, w: sw, h: sh } = localShape.rect;
 
           if (feather > 0) {

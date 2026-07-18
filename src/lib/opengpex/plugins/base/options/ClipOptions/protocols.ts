@@ -133,9 +133,9 @@ export const SIGNAL_CLIP_FEATHER = 'signal.clip_feather.value';
  * - 'lasso' / 'wand'    → irregular polygon selections (purple UI accent).
  *
  * All tools write to the unified `clipBoxes[toolId]` record via
- * `actions.setClipBox(frameId, toolId, data)`. The ClipTool↔Shape.type
- * mapping is one-way (ClipTool → Shape.type), driven by `setClipTool`'s
- * `projectShape` at tool-switch time.
+ * `actions.setClipBox(frameId, toolId, data)`. When switching between
+ * regular tools (rect ↔ ellipse), `setClipTool` rebuilds the polygon
+ * for the new slot using the previous slot's bounding rect.
  *
  * Anti-aliasing is **orthogonal** to tool identity — driven by the standalone
  * `AA` button (command `CMD_TOGGLE_ANTI_ALIAS`) which toggles the
@@ -168,13 +168,6 @@ export interface ClipToolStrategy {
   readonly handlerKind: 'clipbox' | 'lasso' | 'wand' | 'sam';
 
   /**
-   * Shape projection on tool-switch — only meaningful for `regular` tools.
-   * When defined, `setClipTool` patches `clipBoxes[newSlot].type` to the
-   * returned value. `undefined` for irregular tools → no projection.
-   */
-  readonly projectShape?: () => { type: 'rect' | 'circle'; antiAliased?: boolean };
-
-  /**
    * Re-Canvas mutex — `true` means this tool cannot operate while Re-Canvas
    * is active (canvas resizing only makes sense on a rectangular footprint).
    */
@@ -202,8 +195,8 @@ export interface ClipToolStrategy {
 //   3. Nothing else — all derived code reads from this table.
 
 export const CLIP_TOOL_STRATEGIES: Record<ClipTool, ClipToolStrategy> = {
-  'rect':    { id: 'rect',    label: 'Rect',    icon: Square, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'rect'   }), forbiddenInReCanvas: false, supportsAntiAlias: false, cursor: CLIP_RECT_CURSOR    },
-  'ellipse': { id: 'ellipse', label: 'Ellipse', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', projectShape: () => ({ type: 'circle' }), forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_CURSOR },
+  'rect':    { id: 'rect',    label: 'Rect',    icon: Square, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', forbiddenInReCanvas: false, supportsAntiAlias: false, cursor: CLIP_RECT_CURSOR    },
+  'ellipse': { id: 'ellipse', label: 'Ellipse', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_CURSOR },
   'lasso':   { id: 'lasso',   label: 'Lasso',   icon: Lasso,  accent: 'purple', family: 'irregular', handlerKind: 'lasso',                                              forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_LASSO_CURSOR   },
   'wand':    { id: 'wand',    label: 'Wand',    icon: Wand2,  accent: 'purple', family: 'irregular', handlerKind: 'wand',                                               forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_WAND_CURSOR    },
   'sam':     { id: 'sam',     label: 'SAM',     icon: Shapes,   accent: 'cyan',   family: 'irregular', handlerKind: 'sam',                                                forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_SAM_CURSOR     },

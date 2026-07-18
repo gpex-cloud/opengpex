@@ -288,5 +288,11 @@ export interface GeometryService {
     isBoundingRing: (ring: readonly Point2D[], boundingW: number, boundingH: number) => boolean;
     /** Computes axis-aligned bounding box of a multi-ring point set (no brand). */
     computePolygonBounds: (rings: Point2D[][]) => Rect;
+    /**
+     * Converts a LocalRect into a LocalPolygon for the given regular clip tool shape.
+     * Dispatches to the rect (4-point) or ellipse (64-point) polygon builder based on `tool`.
+     * Eliminates the repeated `tool === 'ellipse' ? ... : ...` pattern at call sites.
+     */
+    regularShapeToLocalPolygon: (tool: 'rect' | 'ellipse', rect: LocalRect, antiAliased?: boolean) => LocalPolygon;
   };
 }

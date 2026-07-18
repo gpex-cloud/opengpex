@@ -23,14 +23,14 @@ import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorState, useEditorServices, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import { Frame, Layer } from '@opengpex/editor/core/types';
 import { GifHandler } from '@opengpex/editor/core/files/handlers/gif';
-import type { AnimationDrawerCommandsMap } from './commands.d';
-import type { AnimationConfig } from './protocols';
+import type { AnimatedImagesDrawerCommandsMap } from './commands.d';
+import type { AnimatedImagesConfig } from './protocols';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Animation Sequence Detection (format-agnostic)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export interface AnimationSequence {
+export interface AnimatedImageSequence {
    type: 'gif' | 'apng' | 'webp-anim';
    sequenceId: string;
    layers: Layer[];
@@ -42,7 +42,7 @@ export interface AnimationSequence {
  * Detect animation sequences in a frame by scanning layer metadata.
  * Supports multiple sequence types for future extensibility.
  */
-export function detectAnimationSequences(frame: Frame): AnimationSequence[] {
+export function detectAnimatedImageSequences(frame: Frame): AnimatedImageSequence[] {
    const hostLayers = frame.layers.order
       .map(id => frame.layers.byId[id])
       .filter((l): l is Layer => !!l && !l.hostId);
@@ -57,7 +57,7 @@ export function detectAnimationSequences(frame: Frame): AnimationSequence[] {
       }
    }
 
-   const sequences: AnimationSequence[] = [];
+   const sequences: AnimatedImageSequence[] = [];
    for (const [sequenceId, layers] of gifGroups) {
       if (layers.length <= 1) continue;
       const sorted = layers.sort(
@@ -82,11 +82,11 @@ export function detectAnimationSequences(frame: Frame): AnimationSequence[] {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// useAnimationPlayer: Smooth rAF-based playback with FPS override support
+// useAnimatedImagesPlayer: Smooth rAF-based playback with FPS override support
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export interface AnimationPlayerState {
-   sequence: AnimationSequence | null;
+export interface AnimatedImagesPlayerState {
+   sequence: AnimatedImageSequence | null;
    currentIndex: number;
    isPlaying: boolean;
    isWarming: boolean; // Pre-warm phase (loading spinner)
@@ -95,7 +95,7 @@ export interface AnimationPlayerState {
    progress: number; // 0-100
 }
 
-export interface AnimationPlayerActions {
+export interface AnimatedImagesPlayerActions {
    play: () => void;
    pause: () => void;
    stop: () => void;
@@ -106,13 +106,13 @@ export interface AnimationPlayerActions {
    recalculateFps: () => void;
 }
 
-export function useAnimationPlayer(): {
-   state: AnimationPlayerState;
-   actions: AnimationPlayerActions;
+export function useAnimatedImagesPlayer(): {
+   state: AnimatedImagesPlayerState;
+   actions: AnimatedImagesPlayerActions;
 } {
    const { activeFrame, state } = useEditorState();
    const { actions } = useEditorServices();
-   const [selfConfig, setSelfConfig] = usePluginSelfConfig<AnimationConfig>();
+   const [selfConfig, setSelfConfig] = usePluginSelfConfig<AnimatedImagesConfig>();
 
    const [isPlaying, setIsPlaying] = useState(false);
    const [isWarming, setIsWarming] = useState(false);
@@ -122,8 +122,8 @@ export function useAnimationPlayer(): {
    const rafRef = useRef<number | null>(null);
    const lastFrameTimeRef = useRef(0);
    const currentIndexRef = useRef(0);
-   const sequenceRef = useRef<AnimationSequence | null>(null);
-   const configRef = useRef<AnimationConfig>(selfConfig);
+   const sequenceRef = useRef<AnimatedImageSequence | null>(null);
+   const configRef = useRef<AnimatedImagesConfig>(selfConfig);
    const warmedRef = useRef(false); // Texture cache pre-warm flag
    const animationLoopRef = useRef<((ts: number) => void) | null>(null);
 
@@ -133,7 +133,7 @@ export function useAnimationPlayer(): {
    // Detect animation sequence
    const sequence = useMemo(() => {
       if (!activeFrame) return null;
-      const sequences = detectAnimationSequences(activeFrame);
+      const sequences = detectAnimatedImageSequences(activeFrame);
       return sequences.length > 0 ? sequences[0] : null;
    }, [activeFrame]);
 
@@ -434,16 +434,16 @@ export function useAnimationPlayer(): {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// useAnimationExport: Export control hook
+// useAnimatedImagesExport: Export control hook
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export function useAnimationExport() {
-   const [selfConfig, setSelfConfig] = usePluginSelfConfig<AnimationConfig>();
-   const { exportAnimationCmd } = usePluginCommands<AnimationDrawerCommandsMap>();
+export function useAnimatedImagesExport() {
+   const [selfConfig, setSelfConfig] = usePluginSelfConfig<AnimatedImagesConfig>();
+   const { exportAnimatedImageCmd } = usePluginCommands<AnimatedImagesDrawerCommandsMap>();
 
    return useMemo(() => ({
       config: selfConfig,
       updateConfig: setSelfConfig,
-      exportAnimationCmd,
-   }), [selfConfig, setSelfConfig, exportAnimationCmd]);
+      exportAnimatedImageCmd,
+   }), [selfConfig, setSelfConfig, exportAnimatedImageCmd]);
 }

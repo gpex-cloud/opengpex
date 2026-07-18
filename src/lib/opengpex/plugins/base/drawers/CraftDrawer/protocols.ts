@@ -24,7 +24,7 @@
  * CraftDrawer is a unified sidebar panel for text/brush/eraser tools.
  */
 
-export const PLUGIN_ID = 'drawers.craft_drawer';
+export const PLUGIN_ID = 'drawers.craft_tools';
 export const PLUGIN_AUTHOR = 'opengpex';
 
 // ─── Signal IDs ────────────────────────────────────────────────────────────────

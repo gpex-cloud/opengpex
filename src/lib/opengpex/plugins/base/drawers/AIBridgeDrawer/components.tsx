@@ -116,14 +116,14 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
   const setupContent = needsSetup && drawerTab === "generate" && (
     <div className="flex flex-col items-center justify-center p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-center shrink-0">
       <AlertTriangle size={24} className="text-rose-500 mb-2 opacity-80" />
-      <p className="text-[10px] font-bold text-[var(--text-main)] mb-1">
+      <p className="text-[11px] font-bold text-[var(--text-main)] mb-1">
         API Key Missing
       </p>
-      <p className="text-[9px] text-[var(--text-muted)] mb-2 px-2 leading-relaxed">
+      <p className="text-[10px] text-[var(--text-muted)] mb-2 px-2 leading-relaxed">
         Configure your AI endpoint and key in Settings to start generating
         images.
       </p>
-      <p className="text-[9px] font-bold text-[var(--text-muted)] mb-4 px-2 leading-relaxed">
+      <p className="text-[10px] font-bold text-[var(--text-muted)] mb-4 px-2 leading-relaxed">
         🔒 Your API key is stored only in your browser&apos;s local storage
         and never sent to our servers.
       </p>

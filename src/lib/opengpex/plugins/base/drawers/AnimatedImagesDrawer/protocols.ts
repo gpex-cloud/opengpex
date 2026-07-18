@@ -17,11 +17,11 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-export const PLUGIN_ID = 'drawers.animation';
+export const PLUGIN_ID = 'drawers.animated_images';
 export const PLUGIN_AUTHOR = 'opengpex';
 
 /* Command IDs */
-export const CMD_EXPORT_ANIMATION = 'cmd.export_animation';
+export const CMD_EXPORT_ANIMATED_IMAGE = 'cmd.export.animated_image';
 export const CMD_PLAY = 'cmd.play';
 export const CMD_PAUSE = 'cmd.pause';
 export const CMD_STOP = 'cmd.stop';
@@ -32,14 +32,14 @@ export const SIGNAL_IS_PLAYING = 'signal.is_playing';
 export const SIGNAL_CURRENT_FRAME = 'signal.current_frame';
 
 /* Cross-plugin reference UIDs (exported for external consumers) */
-export const ANIMATION_CMD_EXPORT = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_EXPORT_ANIMATION}`;
+export const ANIMATED_IMAGES_CMD_EXPORT = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_EXPORT_ANIMATED_IMAGE}`;
 
-/* Animation format types */
-export type AnimationFormat = 'gif' | 'apng';
+/* Animated image format types */
+export type AnimatedImageFormat = 'gif' | 'apng';
 
 /* Plugin self-config interface */
-export interface AnimationConfig {
-    format: AnimationFormat;
+export interface AnimatedImagesConfig {
+    format: AnimatedImageFormat;
     loop: boolean;              // true = loop playback, false = play once and stop
     frameRateOverride: number;  // 0 = use original per-frame delay
 }

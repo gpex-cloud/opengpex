@@ -73,7 +73,7 @@ export interface EditorActions {
    * @param value       The selection to store (LocalShape for rect/ellipse,
    *                    LocalPolygon for lasso/wand), or `null` to clear the slot.
    */
-  setClipBox: (frameId: string, clipToolId: string, value: LocalShape | LocalPolygon | null) => void;
+  setClipBox: (frameId: string, clipToolId: string, value: LocalPolygon | null) => void;
   setCanvasCropBox: (frameId: string, cropBox: LocalShape) => void;
 
   setImageAspect: (frameId: string, aspect: number | undefined) => void;

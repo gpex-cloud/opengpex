@@ -1,5 +1,5 @@
 /**
- * AnimationDrawer/commands.d.ts — Auto-generated type declarations
+ * AnimatedImagesDrawer/commands.d.ts — Auto-generated type declarations
  *
  * Provides compile-time type safety for usePluginCommands<T>().
  * Generated from commands.ts command declarations.
@@ -9,8 +9,8 @@
 
 import type { CommandInstance } from '@opengpex/editor/core/types';
 
-/** Type map for usePluginCommands<AnimationDrawerCommandsMap>() */
-export interface AnimationDrawerCommandsMap {
+/** Type map for usePluginCommands<AnimatedImagesDrawerCommandsMap>() */
+export interface AnimatedImagesDrawerCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
-  exportAnimationCmd: CommandInstance<void, Promise<void>>;
+  exportAnimatedImageCmd: CommandInstance<void, Promise<void>>;
 }

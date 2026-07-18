@@ -24,29 +24,29 @@ import { Download, RefreshCw } from "lucide-react";
 import FancyButton from "@opengpex/editor/widgets/FancyButton";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import type { CommandInstance } from "@opengpex/editor/core/types";
-import type { AnimationConfig } from "../protocols";
-import type { AnimationSequence } from "../hooks";
+import type { AnimatedImagesConfig } from "../protocols";
+import type { AnimatedImageSequence } from "../hooks";
 
-interface AnimationExportProps {
-   config: AnimationConfig;
-   updateConfig: (cfg: Partial<AnimationConfig>) => void;
-   exportAnimationCmd?: CommandInstance;
-   sequence: AnimationSequence | null;
+interface ImagesExportProps {
+   config: AnimatedImagesConfig;
+   updateConfig: (cfg: Partial<AnimatedImagesConfig>) => void;
+   exportCmd?: CommandInstance;
+   sequence: AnimatedImageSequence | null;
    onRecalculateFps?: () => void;
 }
 
 /**
- * AnimationExport: Export panel for animated sequences.
+ * ImagesExport: Export panel for animated sequences.
  *
  * Provides format selection, loop count, and frame rate override controls.
  */
-export const AnimationExport = React.memo(function AnimationExport({
+export const ImagesExport = React.memo(function ImagesExport({
    config,
    updateConfig,
-   exportAnimationCmd,
+   exportCmd,
    sequence,
    onRecalculateFps,
-}: AnimationExportProps) {
+}: ImagesExportProps) {
    const [isProcessing, setIsProcessing] = useState(false);
 
    if (!sequence) return null;
@@ -54,7 +54,7 @@ export const AnimationExport = React.memo(function AnimationExport({
    const handleExport = async () => {
       setIsProcessing(true);
       try {
-         await exportAnimationCmd?.execute();
+         await exportCmd?.execute();
       } finally {
          setIsProcessing(false);
       }
@@ -68,11 +68,11 @@ export const AnimationExport = React.memo(function AnimationExport({
    return (
       <div className="mt-2 pt-2 border-t border-[var(--border-subtle)] space-y-2.5">
          <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-widest block">
-            Export Animation
+            Export
          </span>
 
          {/* Info row */}
-         <div className="flex items-center gap-3 text-[9px] text-[var(--text-muted)]">
+         <div className="flex items-center gap-3 text-[10px] text-[var(--text-muted)]">
             <span className="tabular-nums">{sequence.totalFrames} frames</span>
             <span className="tabular-nums">{totalDurationSec}s</span>
             <span className="tabular-nums">~{avgFps} fps</span>

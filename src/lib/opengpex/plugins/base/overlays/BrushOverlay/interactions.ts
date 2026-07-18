@@ -21,7 +21,7 @@ import { InteractionHandler, InteractionEvent, Layer, Frame, asLocalRect, asLoca
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
-import { LayerDrawerAPI, type MaskEditingSignal } from '../../drawers/LayerDrawer/protocols';
+import { LayersDrawerAPI, type MaskEditingSignal } from '../../drawers/LayersDrawer/protocols';
 import { BRUSH_OVERLAY_SIGNAL_IS_STROKING, DEFAULT_BRUSH_SIZE, _CMD_BAKE_UID } from './protocols';
 import { StrokeSmoother, Point2D } from './smoothing';
 import { stampBrush, stampAlongPath } from './hardness';
@@ -222,7 +222,7 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
         //   1. Check maskEditing signal (from LayerDrawerAPI)
         //   2. Fallback to topmost (last in array) enabled mask
         //   3. Or force create new mask (Eraser + Cmd)
-        const maskEditing = e.state.interaction.signals[LayerDrawerAPI.signals.maskEditing] as MaskEditingSignal;
+        const maskEditing = e.state.interaction.signals[LayersDrawerAPI.signals.maskEditing] as MaskEditingSignal;
         const hasFocusedMask = maskEditing && maskEditing.layerId === targetLayer.id;
 
         const enabledMasks = targetLayer.bitmapMasks?.filter(m => m.enabled) ?? [];

@@ -19,62 +19,21 @@
 
 'use client';
 
-import type { LocalShape, LocalSpatial, LocalPolygon } from '@opengpex/editor/core/types';
+import type { LocalShape, LocalPolygon } from '@opengpex/editor/core/types';
+import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import * as P from './protocols';
 
 /**
- * clipBoxToExportShape — converts the unified `LocalSpatial` (from `getClipBox`)
+ * clipBoxToExportShape — converts a `LocalPolygon` (from `getClipBox`)
  * into a `LocalShape` suitable for `pixels.render.shapeToBlob`.
  *
- * - Regular selections (rect/ellipse): returns the shape as-is.
- * - Irregular selections (lasso/wand polygon): creates a `LocalShape{type:'path'}`
- *   with pathData in bounds-relative coordinates. This is required because
- *   `mergeLayersWithShape` internally zeros the rect to {0,0,w,h} and shifts
- *   layer matrices by (-rect.x, -rect.y).
- *
- * @param polygonToPathD  Optional path generator (from geometry.polygon.polygonToSvgPathD).
- *   When provided, routes to Bresenham stair-stepped path for antiAliased=false polygons.
- *   When omitted, falls back to smooth M/L/Z (legacy behaviour).
+ * Delegates to `polygonToShape` which handles shape recognition (rect/circle/path)
+ * and AA routing (smooth vs Bresenham stair-stepped at render time).
  */
 export function clipBoxToExportShape(
-  box: LocalSpatial,
-  polygonToPathD?: (poly: LocalPolygon) => string
+  box: LocalPolygon,
 ): LocalShape {
-  if (box.regular) {
-    return box.spatial;
-  }
-
-  // Irregular polygon → LocalShape{type:'path'} with bounds-relative coordinates.
-  // When polygonToPathD is provided (geometry service), it routes to Bresenham
-  // stair-stepped path when antiAliased === false, ensuring export respects AA.
-  const poly = box.spatial;
-  let pathData: string;
-  if (polygonToPathD) {
-    pathData = polygonToPathD(poly);
-  } else {
-    // Fallback: simple M/L/Z (smooth, does not respect AA=false)
-    const parts: string[] = [];
-    for (const ring of poly.rings) {
-      if (ring.length < 2) continue;
-      const segs: string[] = [];
-      for (let i = 0; i < ring.length; i++) {
-        const p = ring[i];
-        segs.push(`${i === 0 ? 'M' : 'L'} ${p.x - poly.rect.x} ${p.y - poly.rect.y}`);
-      }
-      segs.push('Z');
-      parts.push(segs.join(' '));
-    }
-    pathData = parts.join(' ');
-  }
-
-  return {
-    type: 'path',
-    rect: poly.rect,
-    hardEdge: false,
-    antiAliased: poly.antiAliased !== false,
-    pathData,
-    __brand: 'local',
-  } as LocalShape;
+  return polygonToShape(box);
 }
 
 /**

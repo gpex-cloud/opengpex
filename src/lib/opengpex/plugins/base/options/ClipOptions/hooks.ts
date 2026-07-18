@@ -22,8 +22,8 @@
 
 import { useMemo, useEffect, useRef } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals, usePluginSelfConfig } from '@opengpex/editor/core/context';
-import { asLocalRect, asLocalShape, ShapeType, LocalShape } from '@opengpex/editor/core/types';
-import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+import { asLocalRect, ShapeType, LocalShape } from '@opengpex/editor/core/types';
+import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { getActiveTarget } from './commands';
 import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn, CLIP_TOOL_STRATEGIES } from './protocols';
 import type { ClipTool } from './protocols';
@@ -88,7 +88,7 @@ export const useClipOptionsCommands = () => {
     // returns `{ regular, spatial }` or null. All downstream derivations
     // (hasIrregularBox, hasAnySelection, isAntiAliased) branch on this.
     const clipBox = activeFrame ? getClipBox(activeFrame) : null;
-    const hasIrregularBox = isIrregularTool && clipBox !== null && !clipBox.regular;
+    const hasIrregularBox = isIrregularTool && clipBox !== null;
     const hasAnySelection = clipBox !== null;
 
     // ─── Anti-alias derivations (2026/06/23 redesign) ──────────────────────
@@ -97,7 +97,7 @@ export const useClipOptionsCommands = () => {
     // rect (always pixel-aligned).
     const supportsAntiAlias = CLIP_TOOL_STRATEGIES[cropTool].supportsAntiAlias;
     // All tools default to AA ON (true) when no explicit value is set.
-    const isAntiAliased = clipBox?.spatial.antiAliased ?? true;
+    const isAntiAliased = clipBox?.antiAliased ?? true;
 
 
     return {
@@ -157,11 +157,11 @@ export const useClipOptionsCommands = () => {
           if (antiAliased !== undefined) patch.antiAliased = antiAliased;
           actions.setCanvasCropBox(activeFrame.id, patch);
         } else {
-          const currentClip = getRegularClipShape(activeFrame) || asLocalShape({ x: 0, y: 0, w: 0, h: 0 });
-          const patch: LocalShape = { ...currentClip, type };
-          if (antiAliased !== undefined) patch.antiAliased = antiAliased;
+          // setShapeType is a legacy path — new code uses clipToolSetCmd.
+          // For now, just switch the tool; the actual polygon will be written
+          // by the tool interaction on next draw.
           const toolId = type === 'circle' ? 'ellipse' : 'rect';
-          actions.setClipBox(activeFrame.id, toolId, patch);
+          actions.setClipBox(activeFrame.id, toolId, null);
         }
       },
       closeReCanvas: () => reCanvasActiveSignal?.set(false),

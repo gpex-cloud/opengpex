@@ -20,8 +20,8 @@
 "use client";
 
 import { EditorPlugin } from "@opengpex/editor/core/types";
-import { LayerComponent } from "./components/LayerDrawer";
-import { LAYER_COMMANDS } from "./commands";
+import { LayersComponent } from "./components";
+import { LAYERS_COMMANDS } from "./commands";
 import { Layers } from "lucide-react";
 
 import * as P from "./protocols";
@@ -53,7 +53,7 @@ export const plugin: EditorPlugin = {
   show: "frame-required",
 
   // --- 3. Core Implementation ---
-  component: LayerComponent,
+  component: LayersComponent,
   initialConfig: {
     preferredWidth: 320,
   },
@@ -70,7 +70,7 @@ export const plugin: EditorPlugin = {
   },
 
   // --- 5. Capabilities ---
-  commands: Object.values(LAYER_COMMANDS),
+  commands: Object.values(LAYERS_COMMANDS),
 
   // --- 6. Signals ---
   signals: [

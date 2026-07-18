@@ -31,7 +31,7 @@
  */
 
 import {
-  Point2D, Rect, LocalPoint,
+  Point2D, Rect, LocalPoint, LocalRect,
   LocalShape, LocalPolygon,
   asLocalRect, asLocalShape, asLocalPolygon,
 } from '@opengpex/editor/core/types';
@@ -234,4 +234,58 @@ export function invertRings(rings: Point2D[][], boundingW: number, boundingH: nu
     }
     return [boundingRing, ...rings];
   }
+}
+
+// ─────────────────────────── Shape → LocalPolygon Constructors ─────────────────
+
+/**
+ * rectToLocalPolygon: Convert a LocalRect into a 4-point axis-aligned LocalPolygon.
+ *
+ * Produces a clockwise ring: TL → TR → BR → BL.
+ * This is the canonical representation for rect selections in the unified
+ * `Frame.clipBoxes: Record<string, LocalPolygon>` architecture (Phase 1 of
+ * selection_layer_unification_spec).
+ *
+ * @param rect        The bounding rectangle in local (canvas) coordinates.
+ * @param antiAliased Whether the selection edge should be anti-aliased (default true).
+ */
+export function rectToLocalPolygon(rect: LocalRect, antiAliased: boolean = true): LocalPolygon {
+  const { x, y, w, h } = rect;
+  const ring: LocalPoint[] = [
+    { x, y } as LocalPoint,
+    { x: x + w, y } as LocalPoint,
+    { x: x + w, y: y + h } as LocalPoint,
+    { x, y: y + h } as LocalPoint,
+  ];
+  return asLocalPolygon([ring], asLocalRect({ x, y, w, h }), antiAliased);
+}
+
+/**
+ * ellipseToLocalPolygon: Convert a LocalRect bounding box into a 64-point ellipse LocalPolygon.
+ *
+ * Samples 64 points uniformly around the ellipse (clockwise, starting at angle 0).
+ * This is the canonical representation for ellipse selections in the unified
+ * `Frame.clipBoxes: Record<string, LocalPolygon>` architecture (Phase 1 of
+ * selection_layer_unification_spec).
+ *
+ * The 64-point count matches `shapeToPoint2D` (circle branch) and `point2dToLocalShape`
+ * (ellipse recognition heuristic), ensuring round-trip fidelity:
+ *   ellipseToLocalPolygon → point2dToLocalShape → type:'circle' ✓
+ *
+ * @param rect        The bounding rectangle of the ellipse in local (canvas) coordinates.
+ * @param antiAliased Whether the selection edge should be anti-aliased (default true).
+ */
+export function ellipseToLocalPolygon(rect: LocalRect, antiAliased: boolean = true): LocalPolygon {
+  const { x, y, w, h } = rect;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const rx = w / 2;
+  const ry = h / 2;
+  const N = 64;
+  const ring: LocalPoint[] = [];
+  for (let i = 0; i < N; i++) {
+    const angle = (2 * Math.PI * i) / N;
+    ring.push({ x: cx + rx * Math.cos(angle), y: cy + ry * Math.sin(angle) } as LocalPoint);
+  }
+  return asLocalPolygon([ring], asLocalRect({ x, y, w, h }), antiAliased);
 }

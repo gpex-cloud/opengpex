@@ -34,7 +34,7 @@ import { useEditorServices, usePluginCommands } from "@opengpex/editor/core/cont
 import ActionDropdown, {
   ActionOption,
 } from "@opengpex/editor/widgets/ActionDropdown";
-import type { LayerDrawerCommandsMap } from "../commands.d";
+import type { LayersDrawerCommandsMap } from "../commands.d";
 
 interface LayerMenuProps {
   layerId: string;
@@ -65,7 +65,7 @@ export const LayerMenu = React.memo(
     setIsMasksExpanded,
   }: LayerMenuProps) => {
     const { actions } = useEditorServices();
-    const { removeCmd, duplicateLayerCmd } = usePluginCommands<LayerDrawerCommandsMap>();
+    const { removeCmd, duplicateLayerCmd } = usePluginCommands<LayersDrawerCommandsMap>();
 
     const options: ActionOption[] = [];
 

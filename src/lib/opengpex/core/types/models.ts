@@ -21,6 +21,8 @@
  * Model Types: Editor core business model definitions
  */
 import { Dimensions, LocalShape, LocalRect, LocalPolygon } from './primitives';
+// LocalShape is used by VectorMask, canvasCropBox, etc.
+// LocalPolygon is used by clipBoxes (unified selection type after selection_layer_unification).
 
 export type RenderEngine = 'canvas' | 'webgpu';
 export const LAYER_ROLES = ['host', 'frag', 'exchange'] as const;
@@ -285,15 +287,16 @@ export interface Frame {
    * tool's selection. The canvas only shows the selection belonging to the
    * *currently active* tool (read via `latestClipTool`).
    *
-   * Value is either a `LocalShape` (for rect/ellipse tools — participates in
-   * the rendering pipeline crop) or a `LocalPolygon` (for lasso/wand tools —
-   * consumed by marching-ants preview and `toLayerMask`).
+   * Value is a `LocalPolygon` for all tool types (rect/ellipse/lasso/wand).
+   * rect/ellipse tools write a 4-point or 64-point LocalPolygon via
+   * `rectToLocalPolygon` / `ellipseToLocalPolygon`. Consumers call
+   * `polygonToShape` to convert back to a LocalShape when needed.
    *
    * Missing key means "no selection produced by that tool yet".
    *
-   * See `docs/opengpex/phase2_irregular_unified_clip_spec.md` §3.
+   * See `docs/opengpex/plans/20260717_selection_layer_unification_spec.md` §3.
    */
-  clipBoxes: Record<string, LocalShape | LocalPolygon>;
+  clipBoxes: Record<string, LocalPolygon>;
   /** Re-Canvas dedicated crop box — orthogonal to tool-based selections. */
   canvasCropBox: LocalShape;
 

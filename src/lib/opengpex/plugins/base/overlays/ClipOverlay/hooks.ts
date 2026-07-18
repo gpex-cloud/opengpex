@@ -20,7 +20,8 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { Motion } from '@opengpex/editor/core/motion';
-import { asLocalShape, LocalShape, LocalPolygon } from '@opengpex/editor/core/types';
+import { asLocalShape, LocalPolygon } from '@opengpex/editor/core/types';
+import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import {
   ClipOptionsAPI,
@@ -53,13 +54,13 @@ export function useClipOverlayCommands() {
   const isIrregularTool = family === 'irregular';
 
   const { clipBoxes, canvasCropBox, canvas: canvasDim } = activeFrame || {
-    clipBoxes: {} as Record<string, LocalShape | LocalPolygon>,
+    clipBoxes: {} as Record<string, LocalPolygon>,
     canvasCropBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
     canvas: { w: 0, h: 0 }
   };
 
-  const imageCropBox = getRegularClipShape({ clipBoxes: clipBoxes as Record<string, LocalShape | LocalPolygon> });
-  const cropShape = isReCanvas ? canvasCropBox : (imageCropBox || asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
+  const imageCropBox = getRegularClipShape({ clipBoxes });
+  const cropShape = isReCanvas ? canvasCropBox : (imageCropBox ? polygonToShape(imageCropBox) : asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
   const cropBox = cropShape.rect;
   const cropType = cropShape.type;
 

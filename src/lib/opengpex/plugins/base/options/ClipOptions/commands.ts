@@ -21,6 +21,7 @@
 
 import { EditorContextValue, EditorCommand, asLocalRect, asLocalShape, Frame, LocalRect, LocalShape, LocalPolygon, EditorActions, Point2D } from '@opengpex/editor/core/types';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import { CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS } from '@opengpex/editor/core/helpers/presets';
 import { clipComputeClient } from './workers/client';
 import * as P from './protocols';
@@ -60,9 +61,10 @@ export function exitClipMode(ctx: EditorContextValue): void {
 export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: EditorActions }, isReCanvas: boolean) {
   const { activeFrame, actions } = ctx;
   if (!activeFrame) return null;
+  const regularPoly = isReCanvas ? null : getRegularClipShape(activeFrame);
   const shape: LocalShape = isReCanvas
     ? activeFrame.canvasCropBox
-    : (getRegularClipShape(activeFrame) || asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
+    : (regularPoly ? polygonToShape(regularPoly) : asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
 
   return {
     isReCanvas,
@@ -78,7 +80,9 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
         actions.setCanvasCropBox(activeFrame.id, { ...shape, ...patch } as LocalShape);
       } else {
         const toolId = shape.type === 'circle' ? 'ellipse' : 'rect';
-        actions.setClipBox(activeFrame.id, toolId, { ...shape, ...patch } as LocalShape);
+        // clipBoxes now stores LocalPolygon — convert the patched LocalShape to polygon
+        const patched = { ...shape, ...patch } as LocalShape;
+        actions.setClipBox(activeFrame.id, toolId, patched as unknown as LocalPolygon);
       }
     },
     clampRect: (box: LocalRect) => {
@@ -482,14 +486,18 @@ export const CLIP_OPTIONS_COMMANDS = {
       const clipBox = getClipBox(frame);
       if (!clipBox) return;
 
-      const currentAA = clipBox.spatial.antiAliased ?? true;
-      if (clipBox.regular) {
-        // Regular (ellipse): route through getActiveTarget for proper write
-        const target = getActiveTarget(ctx, isReCanvas);
-        if (target) target.updateShape({ antiAliased: !currentAA });
+      const currentAA = clipBox.antiAliased ?? true;
+      const newAA = !currentAA;
+
+      // For regular tools (rect/ellipse): rebuild the polygon with the new AA flag
+      // so that rings are regenerated correctly (not just patching metadata).
+      // For irregular tools (lasso/wand): patch antiAliased directly on the polygon.
+      if (tool === 'rect' || tool === 'ellipse') {
+        const newPoly = ctx.geometry.point2d.regularShapeToLocalPolygon(tool, clipBox.rect, newAA);
+        ctx.actions.setClipBox(frame.id, tool, newPoly);
       } else {
-        // Irregular (lasso / wand): patch polygon directly
-        const newPoly = { ...clipBox.spatial, antiAliased: !currentAA };
+        // Irregular (lasso / wand): patch antiAliased directly
+        const newPoly = { ...clipBox, antiAliased: newAA };
         ctx.actions.setClipBox(frame.id, tool, newPoly);
       }
     }
@@ -533,26 +541,26 @@ export const CLIP_OPTIONS_COMMANDS = {
       // Write to frame model (per-frame, persistent, participates in undo).
       actions.updateFrame(activeFrame.id, { latestClipTool: tool });
 
-      const strategy = P.CLIP_TOOL_STRATEGIES[tool];
-
-      // Regular projection: patch `shape.type` on the active crop box.
-      // `projectShape` is `undefined` for irregular tools — branch skipped.
-      // Spread order: `target` first inherits `antiAliased`, then `projection`
-      // overrides `type` (and `antiAliased` only if a tool explicitly pins it).
-      const projection = strategy.projectShape?.();
-      if (projection) {
+      // Regular tools (rect / ellipse): rebuild the polygon for the new slot
+      // and clear the old slot. Irregular tools (lasso / wand / sam) each own
+      // their own independent slot — no cross-slot work needed on switch.
+      if (tool === 'rect' || tool === 'ellipse') {
+        const newSlot = tool;
+        const oldSlot = tool === 'ellipse' ? 'rect' : 'ellipse';
         const isReCanvas = !!scoped?.getSignal(P.SIGNAL_RE_CANVAS);
-        if (isReCanvas) {
-          actions.setCanvasCropBox(activeFrame.id, { ...activeFrame.canvasCropBox, ...projection });
-        } else {
-          const newSlot = projection.type === 'circle' ? 'ellipse' : 'rect';
-          const oldSlot = newSlot === 'ellipse' ? 'rect' : 'ellipse';
 
+        if (isReCanvas) {
+          // Re-Canvas is always rect-shaped; just coerce the type field.
+          actions.setCanvasCropBox(activeFrame.id, {
+            ...activeFrame.canvasCropBox,
+            type: tool === 'ellipse' ? 'circle' : 'rect',
+          });
+        } else {
           if (CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS) {
             // Inherit mode: copy bounds from the previous regular slot into the
-            // new slot with the projected shape type. The user sees the same
-            // area but a different shape — good for "try ellipse on the same
-            // region" workflows.
+            // new slot with the correct shape type. The user sees the same area
+            // but a different shape — good for "try ellipse on the same region"
+            // workflows.
             //
             // IMPORTANT: Do NOT use `getRegularClipShape(activeFrame)` here.
             // `activeFrame` is the pre-update snapshot — `latestClipTool` is
@@ -562,17 +570,26 @@ export const CLIP_OPTIONS_COMMANDS = {
             // the fallback overwrites the user's rect/ellipse with an empty
             // 0×0 shape — destroying the selection they expect to see on
             // return. Reading clipBoxes directly avoids this trap.
-            const sourceClip = (activeFrame.clipBoxes[oldSlot] as LocalShape | undefined)
-                             ?? (activeFrame.clipBoxes[newSlot] as LocalShape | undefined)
-                             ?? asLocalShape({ x: 0, y: 0, w: 0, h: 0 });
-            actions.setClipBox(activeFrame.id, newSlot, { ...sourceClip, ...projection } as LocalShape);
+            const sourceClip = (activeFrame.clipBoxes[oldSlot] as LocalPolygon | undefined)
+                             ?? (activeFrame.clipBoxes[newSlot] as LocalPolygon | undefined);
+            if (sourceClip) {
+              // Regenerate the polygon with the correct rings for the new shape type.
+              // Simply patching `type` on the old polygon would keep the old rings
+              // (e.g. 4-point rect rings when switching to ellipse), causing the
+              // marching ants to still render a rectangle. We must rebuild from the
+              // bounding rect so the rings match the new shape type.
+              const antiAliased = sourceClip.antiAliased ?? true;
+              const newPoly = ctx.geometry.point2d.regularShapeToLocalPolygon(tool, sourceClip.rect, antiAliased);
+              actions.setClipBox(activeFrame.id, newSlot, newPoly);
+            }
           } else {
-            // Independent mode (Photoshop-style): new tool starts clean. Only
-            // project the shape type; don't copy bounds from the old tool.
-            // The user must draw a fresh selection.
-            const existing = activeFrame.clipBoxes[newSlot];
+            // Independent mode (Photoshop-style): new tool starts clean.
+            // Only rebuild the polygon if the target slot already has data.
+            const existing = activeFrame.clipBoxes[newSlot] as LocalPolygon | undefined;
             if (existing) {
-              actions.setClipBox(activeFrame.id, newSlot, { ...existing, ...projection } as LocalShape);
+              const antiAliased = existing.antiAliased ?? true;
+              const newPoly = ctx.geometry.point2d.regularShapeToLocalPolygon(tool, existing.rect, antiAliased);
+              actions.setClipBox(activeFrame.id, newSlot, newPoly);
             }
           }
 
@@ -790,14 +807,16 @@ export const CLIP_OPTIONS_COMMANDS = {
 
       const tool = (frame.latestClipTool as ClipTool) || 'rect';
       const { w: canvasW, h: canvasH } = frame.canvas;
-      const antiAliased = clipBox.spatial.antiAliased ?? true;
+      const antiAliased = clipBox.antiAliased ?? true;
+      const localShape = polygonToShape(clipBox);
+      const isRegular = localShape.type !== 'path';
 
       const { point2d: geo } = ctx.geometry;
 
       // 1. Unbox: container → Point2D[][]
-      const rings: Point2D[][] = clipBox.regular
-        ? geo.shapeToPoint2D(clipBox.spatial as LocalShape)
-        : (clipBox.spatial as LocalPolygon).rings as unknown as Point2D[][];
+      const rings: Point2D[][] = isRegular
+        ? geo.shapeToPoint2D(localShape)
+        : clipBox.rings as unknown as Point2D[][];
 
       // 2. Core transform: pure inversion logic
       const result = geo.invertRings(rings, canvasW, canvasH);
@@ -806,7 +825,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       if (result === null) {
         ctx.actions.setClipBox(frame.id, tool, null);
       } else {
-        const container = geo.point2dToLocalShape(result, antiAliased) ?? geo.point2dToLocalPolygon(result, antiAliased);
+        const container = geo.point2dToLocalPolygon(result, antiAliased);
         ctx.actions.setClipBox(frame.id, tool, container);
       }
     }
@@ -841,17 +860,19 @@ export const CLIP_OPTIONS_COMMANDS = {
 
       const tool = (frame.latestClipTool as ClipTool) || 'rect';
       const { w: canvasW, h: canvasH } = frame.canvas;
-      const antiAliased = clipBox.spatial.antiAliased ?? true;
+      const antiAliased = clipBox.antiAliased ?? true;
+      const localShape = polygonToShape(clipBox);
+      const isRegular = localShape.type !== 'path';
 
       const { point2d: geo } = ctx.geometry;
 
       // 1. Unbox: container → Point2D[][]
-      const rings: Point2D[][] = clipBox.regular
-        ? geo.shapeToPoint2D(clipBox.spatial as LocalShape)
-        : (clipBox.spatial as LocalPolygon).rings as unknown as Point2D[][];
+      const rings: Point2D[][] = isRegular
+        ? geo.shapeToPoint2D(localShape)
+        : clipBox.rings as unknown as Point2D[][];
 
       // 2. Delegate to offset worker
-      const algorithm = clipBox.regular ? 'vertex-normal' : 'morphological';
+      const algorithm = isRegular ? 'vertex-normal' : 'morphological';
       const response = await clipComputeClient.runOffset({
         type: 'offset',
         rings,
@@ -866,8 +887,7 @@ export const CLIP_OPTIONS_COMMANDS = {
         // Contraction eliminated the selection
         ctx.actions.setClipBox(frame.id, tool, null);
       } else {
-        const container = geo.point2dToLocalShape(response.rings as Point2D[][], antiAliased)
-          ?? geo.point2dToLocalPolygon(response.rings as Point2D[][], antiAliased);
+        const container = geo.point2dToLocalPolygon(response.rings as Point2D[][], antiAliased);
         ctx.actions.setClipBox(frame.id, tool, container);
       }
     }

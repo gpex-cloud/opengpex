@@ -45,8 +45,7 @@ const AI_TOOLS: { value: AITool; label: string; description: string }[] = [
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-
-export function BgRemoverDrawerContent() {
+export function AIToolsDrawerContent() {
   const { openSettingsCmd } = usePluginCommands<AIToolsDrawerCommandsMap>();
   const { state, activeFrame } = useEditorState();
   const { actions, plugins } = useEditorServices();
@@ -129,3 +128,9 @@ export function BgRemoverDrawerContent() {
     </div>
   );
 }
+
+/**
+ * @deprecated Use AIToolsDrawerContent instead.
+ * Kept for backward compatibility — will be removed in a future release.
+ */
+export const BgRemoverDrawerContent = AIToolsDrawerContent;

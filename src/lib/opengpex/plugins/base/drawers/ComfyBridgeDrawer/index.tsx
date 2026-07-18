@@ -29,7 +29,7 @@ export const plugin: EditorPlugin = {
   // --- 1. Identity ---
   manifest: {
     id: P.PLUGIN_ID,
-    displayName: 'ComfyUI Bridge',
+    displayName: 'Comfy Bridge',
     version: '1.0.0',
     description:
       'Connect to your local ComfyUI instance for advanced AI image generation and processing.',
@@ -44,7 +44,7 @@ export const plugin: EditorPlugin = {
   // --- 2. UI Entry ---
   icon: <ComfyBridgeIcon />,
   slot: 'SIDE_BAR',
-  order: 2150,
+  order: 2200,
   // show: 'frame-required',
 
   // --- 3. Core Implementation ---
@@ -60,9 +60,9 @@ export const plugin: EditorPlugin = {
   contributions: [
     {
       slot: 'SETTINGS_CONFIG_PANEL',
-      group: 'ComfyUI Bridge',
+      group: 'Comfy Bridge',
       component: ComfyBridgeSettings,
-      title: 'ComfyUI',
+      title: 'Connect to ComfyUI Services',
       icon: <Link size={12} />,
       order: 330,
     },

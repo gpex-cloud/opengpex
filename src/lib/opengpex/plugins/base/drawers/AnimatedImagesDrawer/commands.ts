@@ -23,18 +23,18 @@ import { GifHandler } from '@opengpex/editor/core/files/handlers/gif';
 import * as P from './protocols';
 
 /**
- * ANIMATION_COMMANDS: Declarative command configurations for animation plugin.
+ * ANIMATED_IMAGES_COMMANDS: Declarative command configurations for animated images plugin.
  */
-export const ANIMATION_COMMANDS = {
+export const ANIMATED_IMAGES_COMMANDS = {
    exportAnimation: {
-      id: P.CMD_EXPORT_ANIMATION,
+      id: P.CMD_EXPORT_ANIMATED_IMAGE,
       name: 'Export Animation',
       execute: async (ctx: EditorContextValue) => {
          const { activeFrame, pixels } = ctx;
          const { selfConfig } = ctx.scoped || {};
          if (!activeFrame) return;
 
-         const config = selfConfig as P.AnimationConfig;
+         const config = selfConfig as P.AnimatedImagesConfig;
 
          try {
             const blob = await exportAnimatedGif(ctx, activeFrame, pixels, config);
@@ -49,7 +49,7 @@ export const ANIMATION_COMMANDS = {
 
             await pixels.utils.download(blob, filename);
          } catch (err) {
-            console.error('[AnimationDrawer] Export failed:', err);
+            console.error('[AnimatedImagesDrawer] Export failed:', err);
             ctx.actions.setInteraction({
                hud: { message: 'Animation export failed. See console for details.', type: 'error' },
             });
@@ -72,7 +72,7 @@ async function exportAnimatedGif(
    ctx: EditorContextValue,
    activeFrame: Frame,
    pixels: EditorContextValue['pixels'],
-   config: P.AnimationConfig,
+   config: P.AnimatedImagesConfig,
 ): Promise<Blob> {
    const gifHandler = new GifHandler();
 

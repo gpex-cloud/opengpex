@@ -31,7 +31,7 @@
  */
 
 import ExifReader from 'exifreader';
-import type { AssetService, WorkerProxy } from '@opengpex/editor/core/types';
+import type { AssetService, WorkerProxy, AdjustmentState } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   ImageMetadata,
@@ -406,7 +406,15 @@ class VipsWorker {
    * Phase 6: Multi-layer 16-bit composite export via vips.
    */
   async composite16bit(params: {
-    layers: Array<{ bytes: Uint8Array; x: number; y: number; blendMode: string; opacity: number; is8bit: boolean }>;
+    layers: Array<{
+      bytes: Uint8Array;
+      x: number;
+      y: number;
+      blendMode: string;
+      opacity: number;
+      is8bit: boolean;
+      adjustments?: AdjustmentState;
+    }>;
     canvasWidth: number;
     canvasHeight: number;
     outputOptions: {
@@ -437,6 +445,7 @@ class VipsWorker {
       crop?: { x: number; y: number; w: number; h: number };
       resize?: { w: number; h: number };
       iccProfileBytes?: Uint8Array;
+      adjustments?: AdjustmentState;
     },
   ): Promise<Uint8Array> {
     return (await this.runFn('exportHighRes', rawBytes, options)) as Uint8Array;
@@ -630,6 +639,12 @@ export interface HighResExportOptions {
   resize?: { w: number; h: number };
   /** ICC Profile bytes to embed in output */
   iccProfileBytes?: Uint8Array;
+  /**
+   * Optional adjustments to apply in 16-bit domain before encoding.
+   * Uses AdjustmentState from models.ts — same type as Layer.adjustments.
+   * Applied by vips natively — full 16-bit precision, no quantization.
+   */
+  adjustments?: AdjustmentState;
 }
 
 /**
@@ -658,6 +673,7 @@ export async function exportHighRes(rawBlob: Blob, options: HighResExportOptions
       crop: options.crop,
       resize: options.resize,
       iccProfileBytes: options.iccProfileBytes,
+      adjustments: options.adjustments,
     });
 
     const mimeType = options.format === 'png' ? 'image/png' : 'image/tiff';
@@ -685,6 +701,12 @@ export interface CompositeLayerDescriptor {
   opacity: number;
   /** Whether this is an 8-bit source (will be upsampled to 16-bit) */
   is8bit: boolean;
+  /**
+   * Optional adjustments to apply in 16-bit domain before compositing.
+   * Uses AdjustmentState from models.ts — same type as Layer.adjustments.
+   * Applied by vips natively — full 16-bit precision, no quantization.
+   */
+  adjustments?: AdjustmentState;
 }
 
 /** Options for multi-layer 16-bit composite export */

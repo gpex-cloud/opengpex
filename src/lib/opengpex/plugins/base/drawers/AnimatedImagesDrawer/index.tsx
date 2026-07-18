@@ -20,8 +20,8 @@
 "use client";
 
 import { EditorPlugin } from "@opengpex/editor/core/types";
-import { AnimationComponent } from "./components";
-import { ANIMATION_COMMANDS } from "./commands";
+import { AnimatedImagesComponent } from "./components";
+import { ANIMATED_IMAGES_COMMANDS } from "./commands";
 
 import { Clapperboard } from "lucide-react";
 
@@ -37,7 +37,7 @@ export const plugin: EditorPlugin = {
    // --- 1. Identity ---
    manifest: {
       id: P.PLUGIN_ID,
-      displayName: "Animation",
+      displayName: "Animated Images",
       version: "1.0.0",
       description: "Playback controls and export for animated image sequences (GIF, APNG).",
       category: "drawers",
@@ -56,7 +56,7 @@ export const plugin: EditorPlugin = {
    show: "frame-required",
 
    // --- 3. Core Implementation ---
-   component: AnimationComponent,
+   component: AnimatedImagesComponent,
    initialConfig: {
       format: "gif",
       loop: false, // Default: play once, no loop
@@ -79,7 +79,7 @@ export const plugin: EditorPlugin = {
    },
 
    // --- 5. Capabilities ---
-   commands: Object.values(ANIMATION_COMMANDS),
+   commands: Object.values(ANIMATED_IMAGES_COMMANDS),
 };
 
 export default plugin;

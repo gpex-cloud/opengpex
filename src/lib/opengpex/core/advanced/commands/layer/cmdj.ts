@@ -19,7 +19,7 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, LocalShape, LocalSpatial, Frame, Layer } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, LocalShape, LocalPolygon, Frame, Layer } from '@opengpex/editor/core/types';
 import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
@@ -56,32 +56,29 @@ interface ResolvedShape {
  *   achieving the same visual result with pixel-perfect boundaries.
  */
 function resolveLocalShape(
-  box: LocalSpatial,
+  box: LocalPolygon,
   activeFrame: Frame,
   targetLayer: Layer,
   geometry: EditorContextValue['geometry']
 ): ResolvedShape {
-  if (!box.regular) {
-    const layerPoly = geometry.polygon.frameLocalToLayerLocal(box.spatial, activeFrame, targetLayer);
+  const layerPoly = geometry.polygon.frameLocalToLayerLocal(box, activeFrame, targetLayer);
 
-    // Detect "inverted regular" pattern: [canvasBoundary, regularShape]
-    if (layerPoly.rings.length === 2) {
-      const outerRing = layerPoly.rings[0];
-      const innerRing = layerPoly.rings[1];
-      const layerW = targetLayer.bounding.w;
-      const layerH = targetLayer.bounding.h;
+  // Detect "inverted regular" pattern: [canvasBoundary, regularShape]
+  if (layerPoly.rings.length === 2) {
+    const outerRing = layerPoly.rings[0];
+    const innerRing = layerPoly.rings[1];
+    const layerW = targetLayer.bounding.w;
+    const layerH = targetLayer.bounding.h;
 
-      if (isBoundingRing(outerRing, layerW, layerH)) {
-        const innerShape = point2dToLocalShape([innerRing], box.spatial.antiAliased ?? true);
-        if (innerShape) {
-          return { shape: innerShape, invertedRegular: true };
-        }
+    if (isBoundingRing(outerRing, layerW, layerH)) {
+      const innerShape = point2dToLocalShape([innerRing], box.antiAliased ?? true);
+      if (innerShape) {
+        return { shape: innerShape, invertedRegular: true };
       }
     }
-
-    return { shape: polygonToShape(layerPoly), invertedRegular: false };
   }
-  return { shape: geometry.shape.frameLocalToLayerLocal(box.spatial, activeFrame, targetLayer), invertedRegular: false };
+
+  return { shape: polygonToShape(layerPoly), invertedRegular: false };
 }
 
 /**

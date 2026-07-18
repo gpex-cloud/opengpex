@@ -294,7 +294,7 @@ export const createSamHandler = (): InteractionHandler => {
         // 5. Project ALL candidate masks to frame-local polygons.
         //    Store them in the signal so the panel can switch between them.
         const clipBox = getClipBox(e.activeFrame);
-        const samAA = clipBox?.spatial.antiAliased ?? true;
+        const samAA = clipBox?.antiAliased ?? true;
 
         const framePolygons: Array<ReturnType<typeof asLocalPolygon>> = [];
         for (const mask of decResult.masks) {

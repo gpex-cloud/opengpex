@@ -32,7 +32,7 @@
 
 // ─── Plugin Identity ─────────────────────────────────────────────────────────
 
-export const PLUGIN_ID = 'drawers.bg_removal';
+export const PLUGIN_ID = 'drawers.ai_tools';
 export const PLUGIN_AUTHOR = 'opengpex';
 
 // ─── Re-export: BgRemover ────────────────────────────────────────────────────

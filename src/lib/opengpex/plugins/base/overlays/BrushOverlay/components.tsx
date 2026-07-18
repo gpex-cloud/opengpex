@@ -25,7 +25,7 @@ import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { VolatileState, Frame, CameraState } from '@opengpex/editor/core/types';
 import { useBrushOverlayState, useBrushCursorTracking, useBrushParams, useBrushColor } from './hooks';
 import { getStrokeBuffer, getStrokeVersion } from './interactions';
-import { MASK_EDITING_KEY, MASK_FOCUS_KEY, type MaskEditingSignal } from '../../drawers/LayerDrawer/protocols';
+import { MASK_EDITING_KEY, MASK_FOCUS_KEY, type MaskEditingSignal } from '../../drawers/LayersDrawer/protocols';
 
 // ─── BrushOverlayMain ──────────────────────────────────────────────────────────
 

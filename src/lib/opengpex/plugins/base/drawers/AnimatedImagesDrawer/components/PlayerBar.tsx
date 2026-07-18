@@ -22,11 +22,11 @@
 import React from "react";
 import { Play, Pause, Square, SkipBack, SkipForward, Repeat } from "lucide-react";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
-import type { AnimationPlayerState, AnimationPlayerActions } from "../hooks";
+import type { AnimatedImagesPlayerState, AnimatedImagesPlayerActions } from "../hooks";
 
-interface PlayerBarProps {
-   state: AnimationPlayerState;
-   actions: AnimationPlayerActions;
+interface AnimatedImagesPlayerBarProps {
+   state: AnimatedImagesPlayerState;
+   actions: AnimatedImagesPlayerActions;
 }
 
 /**
@@ -35,7 +35,7 @@ interface PlayerBarProps {
  * Renders Play/Pause/Stop/Prev/Next buttons with progress bar.
  * Format-agnostic — works with any animation sequence type.
  */
-export const PlayerBar = React.memo(function PlayerBar({ state, actions }: PlayerBarProps) {
+export const PlayerBar = React.memo(function PlayerBar({ state, actions }: AnimatedImagesPlayerBarProps) {
    const { currentIndex, isPlaying, loopEnabled, totalFrames, progress, sequence } = state;
 
    if (!sequence) return null;

@@ -42,7 +42,7 @@ import { Layer, VectorMask, BitmapMask } from "@opengpex/editor/core/types";
 import { SubLayerItem } from "./SubLayerItem";
 import { MaskItem } from "./MaskItem";
 import { LayerMenu } from "./LayerMenu";
-import type { LayerDrawerCommandsMap } from "../commands.d";
+import type { LayersDrawerCommandsMap } from "../commands.d";
 
 interface LayerItemProps {
   layerId: string;
@@ -73,7 +73,7 @@ export const LayerItem = React.memo(
       lockCmd,
       renameCmd,
       syncOverlayCmd,
-    } = usePluginCommands<LayerDrawerCommandsMap>();
+    } = usePluginCommands<LayersDrawerCommandsMap>();
 
     const containerRef = useRef<HTMLDivElement>(null);
     const dragControls = useDragControls();

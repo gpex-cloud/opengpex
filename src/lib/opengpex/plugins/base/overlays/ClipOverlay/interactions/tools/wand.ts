@@ -266,7 +266,7 @@ export const createWandHandler = (): InteractionHandler => {
 
         // 5. Project layer-local rings → frame-local.
         const clipBox = getClipBox(e.activeFrame);
-        const wandAA = clipBox?.spatial.antiAliased ?? true;
+        const wandAA = clipBox?.antiAliased ?? true;
 
         const layerRings = resp.rings.map(ring => ring.map(p => asLocalPoint({ x: p.x, y: p.y })));
         const layerBounds = asLocalRect(e.geometry.polygon.computePolygonBounds(layerRings));

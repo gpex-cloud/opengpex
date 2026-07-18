@@ -130,7 +130,7 @@ export const createLassoHandler = (): InteractionHandler => {
     onStart: (e) => {
       active = true;
       const clipBox = getClipBox(e.activeFrame);
-      gestureAA = clipBox?.spatial.antiAliased ?? true;
+      gestureAA = clipBox?.antiAliased ?? true;
 
       let { x: clampedX, y: clampedY } = e.geometry.space.clampPointToRect(e.point.canvas, e.activeFrame.canvas);
       if (!gestureAA) {

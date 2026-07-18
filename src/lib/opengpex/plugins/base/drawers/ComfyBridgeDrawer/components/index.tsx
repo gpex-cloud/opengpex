@@ -20,7 +20,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Settings, ChevronDown, Wifi, WifiOff, FileJson, RotateCcw, Sparkles, Clock, Image as ImageIcon } from 'lucide-react';
+import { Settings, ChevronDown, Wifi, WifiOff, FileJson, RotateCcw, Sparkles, Clock, Image as ImageIcon, AlertTriangle } from 'lucide-react';
 import StatusBanner from '@opengpex/editor/widgets/StatusBanner';
 import { motion } from 'framer-motion';
 import FancyButton from '@opengpex/editor/widgets/FancyButton';
@@ -131,6 +131,16 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
 
   // Check if history has records
   const hasHistory = totalHistoryCount > 0;
+
+  // Determine if setup is needed:
+  // - No server URL configured (env URL is empty or default placeholder)
+  // - No workflows imported yet
+  const hasServerUrl = Boolean(activeEnv?.url && activeEnv.url.trim() !== '');
+  const hasWorkflows = workflows.length > 0;
+  // needsSetup is true when either server or workflow is missing (only in workflow tab)
+  const needsSetup = drawerTab === 'workflow' && (!hasServerUrl || !hasWorkflows);
+  // Distinguish the two setup scenarios for richer messaging
+  const needsServer = !hasServerUrl;
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1 overflow-hidden">
@@ -255,8 +265,38 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
         </>
       )}
 
+      {/* ─── Setup Screen (no server URL or no workflows) ────────── */}
+      {needsSetup && (
+        <div className="flex flex-col items-center justify-center p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-center shrink-0">
+          <AlertTriangle size={24} className="text-rose-500 mb-2 opacity-80" />
+          <p className="text-[11px] font-bold text-[var(--text-main)] mb-1">
+            {needsServer ? 'ComfyUI Server Not Configured' : 'No Workflows Imported'}
+          </p>
+          <p className="text-[10px] text-[var(--text-muted)] mb-2 px-2 leading-relaxed">
+            {needsServer
+              ? 'Configure your ComfyUI server URL in Settings to start generating images.'
+              : 'Import a ComfyUI workflow JSON in Settings to start generating images.'}
+          </p>
+          <p className="text-[10px] font-bold text-[var(--text-muted)] mb-4 px-2 leading-relaxed">
+            {needsServer
+              ? <>🖥️ Start ComfyUI locally with <code className="bg-rose-500/10 px-1 rounded text-[9px]">--enable-cors-header</code>, then add the server URL in Settings.</>
+              : <>📂 In ComfyUI, use <strong>&quot;Save (API Format)&quot;</strong> to export a workflow, then import it in Settings.</>
+            }
+          </p>
+          <FancyButton
+            onClick={() => openSettingsCmd?.execute()}
+            variant="blue"
+            size="xs"
+            className="w-full focus:outline-none"
+          >
+            <Settings size={12} className="mr-1" />
+            {needsServer ? 'Configure Server' : 'Import Workflow'}
+          </FancyButton>
+        </div>
+      )}
+
       {/* ─── Workflow Content (main tab) ──────────────────────────── */}
-      {drawerTab === 'workflow' && (
+      {drawerTab === 'workflow' && !needsSetup && (
         <>
           {/* ComfyUI-generated Frame Warning */}
           {isComfyGenerated && connectionStatus !== 'unhealthy' && (

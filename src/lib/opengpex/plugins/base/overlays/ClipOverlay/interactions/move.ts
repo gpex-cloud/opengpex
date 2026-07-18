@@ -22,10 +22,10 @@ import {
   InteractionEvent,
   LocalRect,
   LocalPolygon,
-  LocalShape,
   asLocalRect,
 } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import { InteractionMath } from '@opengpex/editor/stage/interaction/Math';
 import { createTransformHandler } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import {
@@ -88,14 +88,16 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       if (target.closest('button, a, input, [data-role="ui"], [contenteditable]')) return null;
 
       // ─── Hit-test: is click inside the existing selection? ─────────────
-      if (box.regular) {
+      const boxShape = polygonToShape(box);
+      if (boxShape.type !== 'path') {
+        // Regular (rect/ellipse): require clicking the move handle
         const handleElement = target.closest('[data-handle]') as HTMLElement;
         if (!handleElement) return null;
         const handle = handleElement.dataset.handle || '';
         if (handle !== 'move') return null;
       } else {
-        const poly = box.spatial as LocalPolygon;
-        const inside = e.geometry.polygon.isPointInPolygon(e.point.canvas, poly.rings);
+        // Irregular polygon: hit-test against polygon rings
+        const inside = e.geometry.polygon.isPointInPolygon(e.point.canvas, box.rings);
         if (!inside) return null;
       }
 
@@ -127,13 +129,14 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
         return initialRect;
       }
 
-      isRegular = box.regular;
+      const boxShape2 = polygonToShape(box);
+      isRegular = boxShape2.type !== 'path';
 
-      if (box.regular) {
+      if (isRegular) {
         startPolygon = null;
-        initialRect = { ...box.spatial.rect };
+        initialRect = { ...box.rect };
       } else {
-        startPolygon = box.spatial as LocalPolygon;
+        startPolygon = box;
         initialRect = { ...startPolygon.rect };
       }
 
@@ -169,11 +172,11 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       // transient automatically.
 
       if (isRegular) {
-        const currentShape = frame.clipBoxes[activeTool] as LocalShape;
+        const currentPoly = frame.clipBoxes[activeTool] as LocalPolygon;
         tx.update({
           clipBoxes: {
             ...frame.clipBoxes,
-            [activeTool]: { ...currentShape, rect: newRect }
+            [activeTool]: { ...currentPoly, rect: newRect }
           }
         }, 'frame');
       } else if (startPolygon) {

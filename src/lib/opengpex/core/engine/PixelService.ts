@@ -102,6 +102,16 @@ export function createPixelService(
       const rawBlob = await assetStore.getRaw(layer.assetId);
       if (!rawBlob) throw new Error('[PixelService.render] Lane A precondition failed: rawBlob missing');
 
+      // Build adjustments from the single visible layer (same pattern as Lane B)
+      const adj = layer.adjustments;
+      const vipsAdj = adj ? {
+        brightness: adj.brightness,
+        contrast: adj.contrast,
+        saturation: adj.saturation,
+        hueRotate: adj.hueRotate,
+        blur: adj.blur,
+      } : undefined;
+
       return exportHighRes(rawBlob, {
         format: opts.format === 'image/png' ? 'png' : 'tiff',
         compression: (opts.exportConfig?.tiffCompression || 'none') as never,
@@ -109,6 +119,7 @@ export function createPixelService(
         dpi,
         crop,
         resize: opts.exportConfig?.resize,
+        adjustments: vipsAdj,
       });
 
     }
@@ -117,6 +128,7 @@ export function createPixelService(
     if (lane === 'lane-b') {
       const descriptors: Array<{
         bytes: Uint8Array; x: number; y: number; blendMode: string; opacity: number; is8bit: boolean;
+        adjustments?: import('@opengpex/editor/core/types').AdjustmentState;
       }> = [];
 
       for (const layer of targetLayers) {
@@ -139,11 +151,21 @@ export function createPixelService(
           x -= crop.x;
           y -= crop.y;
         }
+        // Build VipsAdjustments from layer.adjustments (only pass non-default values)
+        const adj = layer.adjustments;
+        const vipsAdj = adj ? {
+          brightness: adj.brightness,
+          contrast: adj.contrast,
+          saturation: adj.saturation,
+          hueRotate: adj.hueRotate,
+          blur: adj.blur,
+        } : undefined;
         descriptors.push({
           bytes, x, y,
           blendMode: mapBlendMode(layer.blendMode),
           opacity: (layer.opacity ?? 1) * (layer.fill ?? 1),
           is8bit,
+          adjustments: vipsAdj,
         });
       }
 
@@ -350,6 +372,28 @@ export function createPixelService(
     // 3. Scene rendering and synthesis namespace — see docs/opengpex/plans/20260710_export_pipeline_refactor_proposal.md
     render: {
       /**
+       * preRasterizeLayers — Pre-rasterize layers that cannot be composited directly by the Worker.
+       *
+       * Layers with type 'text', 'color', or using the 'asset-transparent-pixel' placeholder
+       * have no real bitmap asset. This method rasterizes them to real PNG assets so the Worker
+       * merger can composite them correctly.
+       *
+       * DPR semantics (Phase 4):
+       *   - merge.ts passes dpr = window.devicePixelRatio (result stays in editor, needs retina scale)
+       *   - shapeToBlob passes dpr = 1 (export output is physical pixels, no retina scale needed)
+       *
+       * This is the single public entry point for pre-rasterization.
+       * Both merge.ts and shapeToBlob delegate here instead of duplicating the logic.
+       */
+      async preRasterizeLayers(layers: Layer[], opts?: { dpr?: number }): Promise<Layer[]> {
+        return Promise.all(layers.map(async (layer) => {
+          if (!LayerFactory.needsPreRasterize(layer)) return layer;
+          const asset = await service.rasterize.layer(layer, opts);
+          return { ...layer, src: asset.url, assetId: asset.id };
+        }));
+      },
+
+      /**
        * shapeToBlob — THE unified entry point for rendering-to-blob.
        *
        * Cropping is always expressed via the `shape` parameter (there is NO cropBox in options).
@@ -379,17 +423,10 @@ export function createPixelService(
             filteredLayers.length, allHostLayers.length, allHostLayers.length - filteredLayers.length);
         }
 
-        // ── 2.5 Pre-rasterize text/color layers to ensure export has valid bitmaps
-        // Without this step, layers with type 'color' or 'text' (which use placeholder
-        // assets like 'asset-transparent-pixel') would be silently skipped by the
-        // worker merger, producing exports with missing fill/text content.
-        const targetLayers = await Promise.all(filteredLayers.map(async (layer) => {
-          if (layer.type === 'text' || layer.type === 'color' || layer.assetId === 'asset-transparent-pixel') {
-            const asset = await service.rasterize.layer(layer);
-            return { ...layer, src: asset.url, assetId: asset.id };
-          }
-          return layer;
-        }));
+        // ── 2.5 Pre-rasterize text/color layers to ensure export has valid bitmaps.
+        // Delegates to preRasterizeLayers (single source of truth via LayerFactory.needsPreRasterize).
+        // Export uses dpr=1: output is physical pixels, no retina scale needed.
+        const targetLayers = await service.render.preRasterizeLayers(filteredLayers, { dpr: 1 });
 
         // ── 3. Lane dispatch
         const lane = await detectLane(frame, shape, effectiveOpts);
@@ -483,6 +520,11 @@ export function createPixelService(
             opacity: layer.opacity ?? 1,
             blendMode: layer.blendMode,
             fill: layer.fill,
+            // Phase 3: forward type and metadata so Worker can dispatch color layers
+            // directly via fillRect without needing a pre-rasterized bitmap.
+            // vector/paint types are not handled by the Worker merger; treat as 'image'.
+            type: (layer.type === 'color' || layer.type === 'text' ? layer.type : 'image') as 'image' | 'color' | 'text',
+            metadata: layer.metadata,
             adjustments: layer.adjustments,
             // Advanced tone-adjustment state — forwarded so merger.ts can
             // bake curves/levels/channelMix into the source ImageBitmap
@@ -507,9 +549,19 @@ export function createPixelService(
       mergeLayersWithShape: async (layers: Layer[], shape: Shape, options?: { format?: string; quality?: number; targetDpr?: number }) => {
         const canvasDim = { w: shape.rect.w, h: shape.rect.h };
 
+        // Ensure all layer assets are decoded in Worker cache before merging.
+        // The Worker's LRU may have evicted bitmaps+blobs for infrequently-used
+        // assets; re-sending the blob guarantees the merger fallback can re-decode.
+        // This mirrors the same pattern used in mergeLayersToLayer (Phase 2 fix).
         await Promise.all(layers.map(async layer => {
           const resolvedSrc = assets.resolve(layer.assetId, layer.src);
-          return resolvedSrc ? await service.decode.bitmap(resolvedSrc) : null;
+          if (resolvedSrc) await service.decode.bitmap(resolvedSrc);
+          if (layer.assetId) {
+            const asset = assets.get(layer.assetId);
+            if (asset?.blob) {
+              await processor.ensureAssetInWorker(layer.assetId, asset.blob);
+            }
+          }
         }));
 
         // Ensure all bitmapMask assets are decoded into Worker cache
@@ -540,6 +592,11 @@ export function createPixelService(
             opacity: layer.opacity ?? 1,
             blendMode: layer.blendMode,
             fill: layer.fill,
+            // Phase 3: forward type and metadata so Worker can dispatch color layers
+            // directly via fillRect without needing a pre-rasterized bitmap.
+            // vector/paint types are not handled by the Worker merger; treat as 'image'.
+            type: (layer.type === 'color' || layer.type === 'text' ? layer.type : 'image') as 'image' | 'color' | 'text',
+            metadata: layer.metadata,
             adjustments: layer.adjustments,
             // Advanced tone-adjustment state — see mergeLayersToLayer above.
             curves: layer.curves,
@@ -580,9 +637,13 @@ export function createPixelService(
 
     // 4. Rasterization namespace
     rasterize: {
-      async layer(layer) {
+      async layer(layer, opts?: { dpr?: number }) {
         const { drawLayerInstance } = await import('./backends/canvas2d/painter');
-        const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
+        // Phase 4: accept optional dpr to unify DPR semantics.
+        //   - merge.ts passes window.devicePixelRatio (result stays in editor, needs retina scale)
+        //   - shapeToBlob passes 1 (export output is physical pixels, no retina scale needed)
+        //   - default: window.devicePixelRatio (backward-compatible)
+        const dpr = opts?.dpr ?? ((typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
         const w = layer.bounding.w || 1;
         const h = layer.bounding.h || 1;
         const canvas = new OffscreenCanvas(Math.ceil(w * dpr), Math.ceil(h * dpr));

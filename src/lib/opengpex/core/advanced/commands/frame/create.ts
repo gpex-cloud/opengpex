@@ -33,7 +33,7 @@
 'use client';
 
 import { EditorCommand, EditorContextValue, Frame, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
-import { polygonToSvgPathD } from '@opengpex/editor/core/geometry/operators/polygon';
+import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 
 import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
@@ -172,27 +172,15 @@ export const FrameCreateCommands = {
         actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
         return;
       }
-      const cropRect = box.spatial.rect;
+      const cropRect = box.rect;
 
       try {
-        // Convert the selection to a LocalShape for shapeToBlob.
-        let branchShape: LocalShape;
-        if (!box.regular) {
-          // Uses polygonToSvgPathD which routes to Bresenham stair-stepped path
-          // when antiAliased === false, ensuring branch respects the AA setting.
-          const poly = box.spatial;
-          const pathData = polygonToSvgPathD(poly);
-          branchShape = {
-            type: 'path',
-            rect: poly.rect,
-            hardEdge: false,
-            antiAliased: poly.antiAliased !== false,
-            pathData,
-            __brand: 'local',
-          } as LocalShape;
-        } else {
-          branchShape = box.spatial;
-        }
+        // Convert the LocalPolygon selection to a LocalShape for shapeToBlob.
+        // polygonToShape is the canonical serialization entry point: it recognizes
+        // rect/circle shapes, writes smooth M/L/Z pathData, and preserves the
+        // antiAliased flag so shapeToPath2D can apply Bresenham stair-stepping
+        // at render time — ensuring branch respects the AA setting.
+        const branchShape: LocalShape = polygonToShape(box);
 
         const highResBlob = await pixels.render.shapeToBlob(
           activeFrame,

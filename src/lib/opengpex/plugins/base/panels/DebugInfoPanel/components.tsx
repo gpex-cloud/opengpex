@@ -46,7 +46,7 @@ import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import Switch from "@opengpex/editor/widgets/Switch";
 import { useEditorState, useEditorServices } from "@opengpex/editor/core/context";
-import { LayerDrawerAPI } from "../../drawers/LayerDrawer/protocols";
+import { LayersDrawerAPI } from "../../drawers/LayersDrawer/protocols";
 import { useDebugInfo } from "./hooks";
 import type { PerfMetrics, MemoryMetrics, DebugMetrics, AppResourceMetrics } from "./hooks";
 import { PopupPanel } from "@opengpex/editor/widgets/PopupPanel";
@@ -124,7 +124,7 @@ const DebugInfoPanel = React.memo(function DebugInfoPanel({
   const { state } = useEditorState();
   const { actions } = useEditorServices();
 
-  const showSubLayers = state.getStateSignal(LayerDrawerAPI.signals.showSubLayers) ?? false;
+  const showSubLayers = state.getStateSignal(LayersDrawerAPI.signals.showSubLayers) ?? false;
 
   return (
     <PopupPanel
@@ -561,7 +561,7 @@ const DebugInfoPanel = React.memo(function DebugInfoPanel({
               </span>
               <Switch
                 checked={showSubLayers}
-                onChange={(checked) => actions.setStateSignal(LayerDrawerAPI.signals.showSubLayers, checked)}
+                onChange={(checked) => actions.setStateSignal(LayersDrawerAPI.signals.showSubLayers, checked)}
               />
             </div>
           </div>

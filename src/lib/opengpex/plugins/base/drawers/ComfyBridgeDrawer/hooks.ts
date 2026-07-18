@@ -19,7 +19,7 @@
 
 'use client';
 
-import { useMemo, useState, useCallback, useSyncExternalStore } from 'react';
+import { useMemo, useState, useCallback, useEffect, useSyncExternalStore } from 'react';
 import { usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import { useEditorState } from '@opengpex/editor/core/context';
 import { ComfyBridgeConfig, ComfyEnvironment, ConnectionStatus, ExecutionRecord, INITIAL_EXECUTION_STATE, DEFAULT_COMFY_CONFIG } from './protocols';
@@ -63,7 +63,31 @@ export function useComfyBridgeState() {
 
   // Derive active workflow
   const workflows = useMemo(() => config.workflows || [], [config.workflows]);
-  const activeWorkflow = workflows.find(w => w.id === config.activeWorkflowId) || null;
+
+  // Auto-select workflow logic:
+  // 1. If activeWorkflowId points to an existing workflow → keep it (last selected)
+  // 2. If only 1 workflow exists → auto-select it
+  // 3. If multiple workflows exist but no valid selection → select the first one
+  const resolvedActiveWorkflowId = useMemo(() => {
+    if (workflows.length === 0) return null;
+    const currentId = config.activeWorkflowId;
+    // Check if current selection is still valid
+    if (currentId && workflows.some(w => w.id === currentId)) {
+      return currentId;
+    }
+    // Fall back to first workflow
+    return workflows[0].id;
+  }, [workflows, config.activeWorkflowId]);
+
+  // Sync resolved ID back to config if it differs (e.g. after adding first workflow)
+  // Use useEffect to avoid calling setSelfConfig during render
+  useEffect(() => {
+    if (resolvedActiveWorkflowId !== null && resolvedActiveWorkflowId !== config.activeWorkflowId) {
+      setSelfConfig({ activeWorkflowId: resolvedActiveWorkflowId });
+    }
+  }, [resolvedActiveWorkflowId, config.activeWorkflowId, setSelfConfig]);
+
+  const activeWorkflow = workflows.find(w => w.id === resolvedActiveWorkflowId) || null;
 
   // Test connection handler — returns success boolean for callers that need it.
   // Only sets 'checking' if not already unhealthy (to avoid banner flash).

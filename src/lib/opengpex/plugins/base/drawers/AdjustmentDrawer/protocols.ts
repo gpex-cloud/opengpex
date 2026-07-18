@@ -96,7 +96,7 @@ export type AdjustmentsPatch = Partial<AdjustmentState>;
 
 
 
-export const PLUGIN_ID = 'drawers.adjustment_drawer';
+export const PLUGIN_ID = 'drawers.adjustments';
 export const PLUGIN_AUTHOR = 'opengpex';
 
 // ─── Signal IDs ────────────────────────────────────────────────────────────────

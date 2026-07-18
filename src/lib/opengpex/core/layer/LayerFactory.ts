@@ -297,6 +297,39 @@ export const LayerFactory = {
   },
 
   /**
+   * needsPreRasterize: Determines whether a layer requires pre-rasterization before
+   * being sent to the Worker for compositing.
+   *
+   * Returns true for:
+   *   - text layers: visual content is drawn by the real-time text renderer; the bitmap
+   *     asset may be a transparent-pixel placeholder. Worker has no font rendering capability.
+   *   - layers using 'asset-transparent-pixel': explicit placeholder sentinel (includes color
+   *     layers whose assetId defaults to this sentinel).
+   *   - layers with no assetId at all: no bitmap to composite.
+   *
+   * Returns false for:
+   *   - color layers (type === 'color'): Phase 3 — Worker merger handles color layers natively
+   *     via fillRect, no pre-rasterized bitmap needed. Color layers always have
+   *     assetId === 'asset-transparent-pixel', so they are already excluded above.
+   *     This comment is kept for clarity.
+   *
+   * This is the single source of truth for pre-rasterization decisions.
+   * Both merge.ts and PixelService.render.preRasterizeLayers delegate here.
+   */
+  needsPreRasterize(layer: Layer): boolean {
+    // text layers: Worker has no font rendering capability, must pre-rasterize on main thread
+    if (layer.type === 'text') return true;
+    // transparent-pixel sentinel: no real bitmap, needs rasterization to produce empty bitmap
+    if (layer.assetId === 'asset-transparent-pixel') return true;
+    // no assetId at all: no bitmap source
+    if (!layer.assetId) return true;
+    // color layers (type === 'color'): Worker merger handles via fillRect natively (Phase 3).
+    // color layers have assetId === 'asset-transparent-pixel' and are already caught above,
+    // but we explicitly return false here for semantic clarity.
+    return false;
+  },
+
+  /**
    * collectDescendants: BFS collects root IDs plus all their descendants from a flat parent-child list.
    * Generic utility for both layer and frame tree traversal.
    */

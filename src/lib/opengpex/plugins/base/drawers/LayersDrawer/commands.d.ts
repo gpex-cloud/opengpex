@@ -1,5 +1,5 @@
 /**
- * LayerDrawer/commands.d.ts — Auto-generated type declarations
+ * LayersDrawer/commands.d.ts — Auto-generated type declarations
  *
  * Provides compile-time type safety for usePluginCommands<T>() and usePluginSignals<T>().
  * Generated from commands.ts and index signal declarations.
@@ -9,8 +9,8 @@
 
 import type { CommandInstance, InteractionSignalValue, Layer, LayerBlendMode } from '@opengpex/editor/core/types';
 
-/** Type map for usePluginCommands<LayerDrawerCommandsMap>() */
-export interface LayerDrawerCommandsMap {
+/** Type map for usePluginCommands<LayersDrawerCommandsMap>() */
+export interface LayersDrawerCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   reorderCmd: CommandInstance<{ frameId: string; layers: Layer[] }>;
   removeCmd: CommandInstance<{ frameId?: string; layerId?: string }>;
@@ -26,8 +26,8 @@ export interface LayerDrawerCommandsMap {
   setLayerFillCmd: CommandInstance<{ frameId?: string; layerId?: string; fill: number }>;
 }
 
-/** Type map for usePluginSignals<LayerDrawerSignalsMap>() */
-export interface LayerDrawerSignalsMap {
+/** Type map for usePluginSignals<LayersDrawerSignalsMap>() */
+export interface LayersDrawerSignalsMap {
   [key: string]: { value: InteractionSignalValue; set: (val: InteractionSignalValue) => void };
   showSubLayersSignal: {
     value: boolean;

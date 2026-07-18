@@ -20,27 +20,28 @@
 import React, { useRef, useEffect } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
 import { Frame, EditorData, EditorActions } from '@opengpex/editor/core/types';
-import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
 import { useLayout } from '@opengpex/editor/workspace/LayoutContext';
 
 /**
- * useCameraInit: Viewport camera auto-centering & layout-change reaction.
+ * useCameraInit: Viewport camera layout-change reaction.
  *
- * Two distinct behaviors keyed off the current frame and `safeRect`:
+ * Handles one behavior:
  *
- *  A. **Auto-fit (zoom + pan)** — fired only when:
- *       - the hook mounts for the first time, OR
- *       - the active frame.id has changed (cross-frame switch).
- *     In both cases the user has no expectation of preserving zoom, so we
- *     compute a fresh `getFitCamera` to center the canvas inside the safeRect.
+ *  **Pan-only compensation** — fired when the same frame stays active
+ *  but `safeRect` shifts (drawer panel opened/closed, ToolMenu pin toggled,
+ *  window resized, etc.). Re-fitting at that moment would discard the
+ *  user's manual zoom/pan — terrible UX when editing pixel-level details
+ *  at high zoom. Instead we translate the camera by `Δcenter(safeRect)` so
+ *  that whatever world point sat at the center of the OLD safeRect remains
+ *  at the center of the NEW safeRect; zoom is preserved exactly.
  *
- *  B. **Pan-only compensation** — fired when the same frame stays active
- *     but `safeRect` shifts (drawer panel opened/closed, ToolMenu pin toggled,
- *     window resized, etc.). Re-fitting at that moment would discard the
- *     user's manual zoom/pan — terrible UX when editing pixel-level details
- *     at high zoom. Instead we translate the camera by `Δcenter(safeRect)` so
- *     that whatever world point sat at the center of the OLD safeRect remains
- *     at the center of the NEW safeRect; zoom is preserved exactly.
+ * NOTE: Auto-fit on first mount has been intentionally removed.
+ * All frame creation paths (singleImage, multiSubImage, create, branch, etc.)
+ * already compute and store the correct initial camera via getFitCamera before
+ * calling addFrame. On page refresh, the camera is restored from IndexedDB via
+ * HYDRATE. There is no scenario where the Viewport mounts with an
+ * uninitialized camera, so re-fitting on mount only discards the user's
+ * previously saved zoom/pan state.
  *
  * The math: in the camera matrix
  *     Screen = Translate(cam.x, cam.y) · Scale(cam.k) · Translate(W/2, H/2)
@@ -49,7 +50,7 @@ import { useLayout } from '@opengpex/editor/workspace/LayoutContext';
  * entire image on screen by exactly that amount — which is precisely what
  * "keep the focal point centered in the new safe area" requires.
  *
- * Both branches gate on `status === 'STABLE'` to avoid acting on transient
+ * Gates on `status === 'STABLE'` to avoid acting on transient
  * intermediate measurements during MEASURING.
  */
 export function useCameraInit(
@@ -59,10 +60,13 @@ export function useCameraInit(
   actions: EditorActions
 ) {
   const { geometry } = useEditorServices();
-  const { status } = useLayout();
+  const { safeRect, status } = useLayout();
 
-  // Tracks the frame.id we last "centered" on (auto-fit). Null = never yet.
-  const initializedFrameIdRef = useRef<string | null>(null);
+  // Tracks the safeRect center we last observed, for pan-only compensation.
+  // Null = not yet initialized (first STABLE render for this frame).
+  const lastSafeCenterRef = useRef<{ cx: number; cy: number } | null>(null);
+  // Tracks the frame.id we last observed, to reset center tracking on frame switch.
+  const lastFrameIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (status !== 'STABLE') return;
@@ -71,48 +75,54 @@ export function useCameraInit(
     const containerRect = containerRef.current.getBoundingClientRect();
     if (containerRect.width === 0 || containerRect.height === 0) return;
 
-    const isFirstMount = initializedFrameIdRef.current === null;
-    const isFrameSwitched = !isFirstMount && initializedFrameIdRef.current !== frame.id;
+    const newCx = safeRect.x + safeRect.w / 2;
+    const newCy = safeRect.y + safeRect.h / 2;
 
-    // Nothing to do.
-    if (!isFirstMount && !isFrameSwitched) return;
+    const isFrameSwitched = lastFrameIdRef.current !== null && lastFrameIdRef.current !== frame.id;
 
-    // ── Branch A: Auto-fit ──────────────────────────────────────────────
-    // Use only the fixed insets (DrawerBar icon columns) for canvas
-    // positioning. The varied portion (expanded panel width) is intentionally
-    // excluded so the canvas stays stable when panels open/close.
-    const { insets } = state.ui.theme.config;
-    // Guard: legacy saved data may use flat insets.left/right instead of insets.fixed.{left,right}.
-    const legacyInsets = insets as unknown as Record<string, unknown>;
-    const fixedLeft = insets.fixed?.left ?? Number(legacyInsets.left ?? 0);
-    const fixedRight = insets.fixed?.right ?? Number(legacyInsets.right ?? 0);
+    // On frame switch or first stable render for this frame: just record the
+    // current safeRect center without touching the camera. The camera is already
+    // correct (set by the frame creation command or restored from storage).
+    if (lastSafeCenterRef.current === null || isFrameSwitched) {
+      lastSafeCenterRef.current = { cx: newCx, cy: newCy };
+      lastFrameIdRef.current = frame.id;
+      return;
+    }
 
-    const finalCamera = geometry.camera.getFitCamera(
-      { w: containerRect.width, h: containerRect.height },
-      frame.canvas,
-      {
-        padding: VIEWPORT_FIT_PADDING,
-        maxScale: 1,
-        offsetLeft: fixedLeft,
-        offsetTop: insets.top ?? 0,
-        offsetRight: fixedRight,
-        offsetBottom: insets.bottom ?? 0,
-      },
-    );
+    // ── Pan-only compensation ──────────────────────────────────────────────
+    // safeRect shifted (panel opened/closed, window resized, etc.) while the
+    // same frame is active. Translate camera by Δcenter so the focal point
+    // stays visually centered in the new safe area.
+    const { cx: oldCx, cy: oldCy } = lastSafeCenterRef.current;
+    const dcx = newCx - oldCx;
+    const dcy = newCy - oldCy;
 
-    actions.updateCamera(frame.id, finalCamera);
+    if (Math.abs(dcx) < 0.5 && Math.abs(dcy) < 0.5) {
+      // No meaningful shift — skip to avoid spurious dispatches.
+      return;
+    }
 
-    // Always remember where we are now so the *next* layout change can
-    // compute its own delta correctly.
-    initializedFrameIdRef.current = frame.id;
+    const currentCam = frame.camera;
+    actions.updateCamera(frame.id, {
+      x: currentCam.x + dcx,
+      y: currentCam.y + dcy,
+      k: currentCam.k,
+    });
+
+    // Update reference for the next layout change.
+    lastSafeCenterRef.current = { cx: newCx, cy: newCy };
+    lastFrameIdRef.current = frame.id;
   }, [
     frame.id,
     frame.layers.order.length,
-    frame.canvas,
+    frame.camera,
+    safeRect.x,
+    safeRect.y,
+    safeRect.w,
+    safeRect.h,
     status,
     state.ui.viewportDim.w,
     state.ui.viewportDim.h,
-    state.ui.theme.config,
     actions,
     containerRef,
     geometry.camera,

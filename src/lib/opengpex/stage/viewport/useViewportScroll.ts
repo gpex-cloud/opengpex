@@ -22,6 +22,7 @@
 import { useRef, useCallback, useEffect } from 'react';
 import { Frame, CameraState, EditorActions, GeometryService, asViewportPoint } from '@opengpex/editor/core/types';
 import { CameraTransaction } from '@opengpex/editor/stage/interaction/CameraTransaction';
+import { VIEWPORT_CAMERA_COMMIT_DEBOUNCE_MS } from '@opengpex/editor/core/helpers/presets';
 
 /**
  * useViewportScroll: Dedicated viewport scroll/zoom logic pipeline
@@ -102,7 +103,7 @@ export function useViewportScroll(
 
     commitTimerRef.current = setTimeout(() => {
       forceCommit();
-    }, 500);
+    }, VIEWPORT_CAMERA_COMMIT_DEBOUNCE_MS);
 
   }, [containerRef, forceCommit]);
 

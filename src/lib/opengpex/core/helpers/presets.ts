@@ -60,6 +60,19 @@ export const BACKDROP_GRID_CONFIG = {
 /** State Restore / Persistence Settings ----------------------------*/
 
 /**
+ * Debounce delay (ms) for committing the camera fast-track to Redux after
+ * the user stops any wheel-driven viewport interaction (pan, zoom, or both).
+ *
+ * Lower values reduce the time window in which a page refresh can lose the
+ * user's latest camera position. The commit itself is cheap
+ * (one Redux dispatch) and does not affect rendering performance,
+ * which runs entirely on the fast-track at 60fps.
+ *
+ * Total persistence latency = VIEWPORT_CAMERA_COMMIT_DEBOUNCE_MS + auto-save debounce (200ms).
+ */
+export const VIEWPORT_CAMERA_COMMIT_DEBOUNCE_MS = 200;
+
+/**
  * Maximum time (ms) to wait for IndexedDB state restore on page load.
  * If exceeded, the editor loads an empty workspace and shows Recovery Mode.
  * Uses a generous timeout because IndexedDB can be slow after CPU-intensive

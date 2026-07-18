@@ -22,7 +22,7 @@
 import { useMemo, useEffect, useRef, useCallback } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands } from '@opengpex/editor/core/context';
 import { Layer } from '@opengpex/editor/core/types';
-import type { LayerDrawerCommandsMap } from './commands.d';
+import type { LayersDrawerCommandsMap } from './commands.d';
 import { calcFullLayerStack } from './utils';
 import { MASK_EDITING_KEY, type MaskEditingSignal } from './protocols';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
@@ -46,7 +46,7 @@ export const useLayerCommands = () => {
         duplicateLayerCmd,
         syncOverlayCmd,
         syncMaskCmd
-    } = usePluginCommands<LayerDrawerCommandsMap>();
+    } = usePluginCommands<LayersDrawerCommandsMap>();
 
     return useMemo(() => ({
         // Plugin Commands (transparently passed Cmd references)

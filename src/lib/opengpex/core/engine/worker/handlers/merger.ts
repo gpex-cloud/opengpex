@@ -100,6 +100,37 @@ export async function mergeLayersToLayer(
   const offCtx2d = offscreen.getContext('2d')!;
 
   for (const layer of layers) {
+    // Phase 3: color layers render via fillRect — no bitmap needed.
+    // Skip the bitmap lookup entirely and go straight to drawing.
+    if (layer.type === 'color') {
+      const effLayer = layer;
+      const dummyLayer: Partial<Layer> = {
+        type: 'color',
+        bounding: { w: effLayer.boundingRect.w, h: effLayer.boundingRect.h },
+        visibleShape: effLayer.visibleShape,
+        opacity: effLayer.opacity ?? 1,
+        blendMode: effLayer.blendMode,
+        fill: effLayer.fill,
+        adjustments: effLayer.adjustments,
+        metadata: effLayer.metadata,
+      };
+      const scaledMatrix = {
+        a: effLayer.matrix.a * targetDpr,
+        b: effLayer.matrix.b * targetDpr,
+        c: effLayer.matrix.c * targetDpr,
+        d: effLayer.matrix.d * targetDpr,
+        tx: effLayer.matrix.tx * targetDpr,
+        ty: effLayer.matrix.ty * targetDpr
+      };
+      EngineProvider.drawLayerInstance(offCtx2d, dummyLayer as Layer, null, {
+        matrix: scaledMatrix,
+        width: effLayer.boundingRect.w,
+        height: effLayer.boundingRect.h,
+        dprScale: effLayer.dprScale
+      });
+      continue;
+    }
+
     const bitmaps = workerCache.getBitmaps(layer.hash);
     if (!bitmaps || !bitmaps[0]) {
       // Attempt automatic restoration
@@ -127,7 +158,7 @@ export async function mergeLayersToLayer(
     const effLayer = bakedRuntime?.strippedLayer ?? layer;
 
     const dummyLayer: Partial<Layer> = {
-      type: 'image',
+      type: effLayer.type || 'image',
       bounding: { w: effLayer.boundingRect.w, h: effLayer.boundingRect.h },
       visibleShape: effLayer.visibleShape,
       opacity: effLayer.opacity ?? 1,
@@ -244,6 +275,37 @@ export async function mergeLayersWithShape(
 
   // 2. Stacked drawing
   for (const layer of layers) {
+    // Phase 3: color layers render via fillRect — no bitmap needed.
+    // Skip the bitmap lookup entirely and go straight to drawing.
+    if (layer.type === 'color') {
+      const effLayer = layer;
+      const dummyLayer: Partial<Layer> = {
+        type: 'color',
+        bounding: { w: effLayer.boundingRect.w, h: effLayer.boundingRect.h },
+        visibleShape: effLayer.visibleShape,
+        opacity: effLayer.opacity ?? 1,
+        blendMode: effLayer.blendMode,
+        fill: effLayer.fill,
+        adjustments: effLayer.adjustments,
+        metadata: effLayer.metadata,
+      };
+      const scaledMatrix = {
+        a: effLayer.matrix.a * targetDpr,
+        b: effLayer.matrix.b * targetDpr,
+        c: effLayer.matrix.c * targetDpr,
+        d: effLayer.matrix.d * targetDpr,
+        tx: effLayer.matrix.tx * targetDpr,
+        ty: effLayer.matrix.ty * targetDpr
+      };
+      EngineProvider.drawLayerInstance(offCtx2d, dummyLayer as Layer, null, {
+        matrix: scaledMatrix,
+        width: effLayer.boundingRect.w,
+        height: effLayer.boundingRect.h,
+        dprScale: effLayer.dprScale
+      });
+      continue;
+    }
+
     const bitmaps = workerCache.getBitmaps(layer.hash);
     if (!bitmaps || !bitmaps[0]) {
       const blob = workerCache.blobCache.get(layer.hash);
@@ -269,7 +331,7 @@ export async function mergeLayersWithShape(
     const effLayer = bakedRuntime?.strippedLayer ?? layer;
 
     const dummyLayer: Partial<Layer> = {
-      type: 'image',
+      type: effLayer.type || 'image',
       bounding: { w: effLayer.boundingRect.w, h: effLayer.boundingRect.h },
       visibleShape: effLayer.visibleShape,
       opacity: effLayer.opacity ?? 1,

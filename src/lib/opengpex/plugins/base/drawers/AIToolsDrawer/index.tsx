@@ -19,7 +19,7 @@
 
 import { EditorPlugin } from "@opengpex/editor/core/types";
 import { Cpu } from "lucide-react";
-import { BgRemoverDrawerContent } from "./components";
+import { AIToolsDrawerContent } from "./components";
 import { AIToolsSettings } from "./settings";
 import { BG_REMOVAL_COMMANDS } from "./bgremover/commands";
 import { SEG_COMMANDS } from "./segmentation/commands";
@@ -65,10 +65,10 @@ export const plugin: EditorPlugin = {
   slot: "SIDE_BAR",
   show: 'frame-required',
 
-  order: 2200, // Between Adjustment (80) and AIBridge (90)
+  order: 2300, // Between Adjustment (80) and AIBridge (90)
 
   // --- 3. Core Implementation ---
-  component: BgRemoverDrawerContent,
+  component: AIToolsDrawerContent,
 
   // --- 4. Auto-Reveal ---
   autoReveal: {
@@ -81,7 +81,7 @@ export const plugin: EditorPlugin = {
       const frame = state.activeFrameId ? state.frames.byId[state.activeFrameId] : null;
       return frame?.latestClipTool === 'sam';
     },
-    collapseWhenFalse: false,
+    collapseWhenFalse: 'restore',
     priority: 150,
   },
 
@@ -119,7 +119,7 @@ export const plugin: EditorPlugin = {
       slot: "SETTINGS_CONFIG_PANEL",
       group: "AI Tools",
       component: AIToolsSettings,
-      title: "AI Tools Models",
+      title: "Various AI Models and Tools",
       icon: <Cpu size={12} />,
       order: 310,
     },

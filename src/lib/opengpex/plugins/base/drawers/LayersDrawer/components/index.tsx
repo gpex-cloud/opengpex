@@ -29,9 +29,9 @@ import { useLayerCommands, useMaskEditMonitor } from "../hooks";
 import { MergeDownIcon, MergeVisibleIcon } from "@opengpex/editor/icons";
 import { LayerItem } from "./LayerItem";
 import { LayerPropsBar } from "./LayerPropsBar";
-import type { LayerDrawerSignalsMap } from "../commands.d";
+import type { LayersDrawerSignalsMap } from "../commands.d";
 
-export const LayerComponent = React.memo(function LayerComponent() {
+export const LayersComponent = React.memo(function LayersComponent() {
   const { activeFrame, activeLayer } = useEditorState();
   if (!activeFrame) return null;
   return <LayerComponentInner activeFrame={activeFrame} activeLayerId={activeLayer?.id} activeLayerHostId={activeLayer?.hostId} />;
@@ -51,7 +51,7 @@ function LayerComponentInner({ activeFrame, activeLayerId, activeLayerHostId }: 
   useMaskEditMonitor();
 
   // Read showSubLayers signal once in parent — pass value to children
-  const { showSubLayersSignal } = usePluginSignals<LayerDrawerSignalsMap>();
+  const { showSubLayersSignal } = usePluginSignals<LayersDrawerSignalsMap>();
   const showSubLayers = showSubLayersSignal?.value ?? false;
 
   // Generic layer list collapse (expanded by default)

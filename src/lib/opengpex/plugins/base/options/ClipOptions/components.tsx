@@ -41,6 +41,7 @@ import {
   usePluginSignals,
 } from "@opengpex/editor/core/context";
 import { getRegularClipShape } from "@opengpex/editor/core/helpers/selection";
+import { polygonToShape } from "@opengpex/editor/core/helpers/path2d";
 
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
@@ -953,11 +954,8 @@ function AspectGrid({
   const { activeFrame } = useEditorState();
   const { reCanvasActiveSignal } = usePluginSignals<ClipOptionsSignalsMap>();
   const isReCanvas = !!reCanvasActiveSignal.value;
-  const cropBox = isReCanvas
-    ? activeFrame?.canvasCropBox
-    : activeFrame
-      ? getRegularClipShape(activeFrame)
-      : undefined;
+  const clipPoly = (!isReCanvas && activeFrame) ? getRegularClipShape(activeFrame) : undefined;
+  const cropBox = isReCanvas ? activeFrame?.canvasCropBox : (clipPoly ? polygonToShape(clipPoly) : undefined);
   const isEllipse = cropBox?.type === "circle";
   const isDashed = isEllipse && cropBox?.antiAliased === false;
 

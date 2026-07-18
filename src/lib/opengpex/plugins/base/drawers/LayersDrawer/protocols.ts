@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-export const PLUGIN_ID = 'drawers.layer';
+export const PLUGIN_ID = 'drawers.layers';
 export const PLUGIN_AUTHOR = 'opengpex';
 
 /* Command IDs */
@@ -62,7 +62,7 @@ export type MaskFocusSignal = boolean;
 /**
  * LayerDrawerAPI: Cross-plugin typed facade for external consumers.
  */
-export const LayerDrawerAPI = {
+export const LayersDrawerAPI = {
   signals: {
     maskEditing: MASK_EDITING_KEY,
     maskFocus: MASK_FOCUS_KEY,

@@ -27,17 +27,21 @@ import type { EditorState, EditorActions, BuiltPlugin } from '@opengpex/editor/c
  *
  * Design principles:
  * 1. Edge-triggered: only acts on condition transitions, not steady state.
- * 2. Two modes determined by `collapseWhenFalse`:
- *    - Contextual (collapseWhenFalse: true): Drawer follows condition lifecycle.
- *      Opens on false→true, closes on true→false. Always.
- *    - Sticky (collapseWhenFalse: false): Drawer auto-opens on false→true,
+ * 2. Three modes determined by `collapseWhenFalse`:
+ *    - 'sticky' (default/undefined): Drawer auto-opens on false→true,
  *      but never auto-closes. User controls closing.
+ *    - 'restore': Drawer auto-opens on false→true. On true→false, restores
+ *      the pre-activation open state: closes if it was closed before,
+ *      leaves open if it was already open.
+ *    - 'collapse': Drawer follows condition lifecycle.
+ *      Opens on false→true, always closes on true→false.
  * 3. First-render immunity: On mount, conditions are seeded without triggering edges.
  *    This prevents persisted state from causing spurious opens on page refresh.
  *
  * Performance:
  * - useMemo computes conditions from minimal state slices (not the full state object).
  * - useEffect only fires when the memo result reference changes.
+ * - activeSidebarIds is read via ref to avoid snapshot overwrites in 'restore' mode.
  * - Single updateUI call per batch.
  */
 export function useDrawerReveal(
@@ -48,6 +52,16 @@ export function useDrawerReveal(
   const prevConditions = useRef<Record<string, boolean>>({});
   /** 首次渲染时建立基线，之后才开始边沿检测 */
   const isInitialized = useRef(false);
+  /** For 'restore' mode plugins: snapshot of whether drawer was open before activation */
+  const preActivationOpen = useRef<Record<string, boolean>>({});
+
+  // Keep a ref to activeSidebarIds so we can read the latest value without
+  // adding it to the conditionResults memo (which would cause snapshot overwrites).
+  // Updated via useEffect (not during render) to satisfy react-hooks/refs.
+  const activeSidebarIdsRef = useRef(state.ui.activeSidebarIds);
+  useEffect(() => {
+    activeSidebarIdsRef.current = state.ui.activeSidebarIds;
+  });
 
   // Compute all condition results — only re-evaluates when relevant state slices change
   const conditionResults = useMemo(() => {
@@ -79,7 +93,7 @@ export function useDrawerReveal(
       return;
     }
 
-    const currentIds = state.ui.activeSidebarIds || [];
+    const currentIds = activeSidebarIdsRef.current || [];
     let nextIds = [...currentIds];
     let changed = false;
 
@@ -89,14 +103,32 @@ export function useDrawerReveal(
       const isActive = currentIds.includes(plugin.uid);
       const rule = plugin.autoReveal!;
 
-      if (shouldShow && !wasShowing && !isActive) {
-        // Edge false→true, drawer not open → open it
-        nextIds.push(plugin.uid);
-        changed = true;
-      } else if (!shouldShow && wasShowing && isActive && rule.collapseWhenFalse) {
-        // Edge true→false, drawer open, contextual mode → close it
-        nextIds = nextIds.filter(id => id !== plugin.uid);
-        changed = true;
+      if (shouldShow && !wasShowing) {
+        // Edge false→true: open drawer if not already open
+        if (!isActive) {
+          nextIds.push(plugin.uid);
+          changed = true;
+        }
+        // 'restore' mode: snapshot pre-activation open state
+        if (rule.collapseWhenFalse === 'restore') {
+          preActivationOpen.current[plugin.uid] = isActive;
+        }
+      } else if (!shouldShow && wasShowing) {
+        // Edge true→false
+        if (rule.collapseWhenFalse === 'collapse' && isActive) {
+          // Always collapse
+          nextIds = nextIds.filter(id => id !== plugin.uid);
+          changed = true;
+        } else if (rule.collapseWhenFalse === 'restore') {
+          // Restore pre-activation state
+          const wasOpenBefore = preActivationOpen.current[plugin.uid] ?? true;
+          if (!wasOpenBefore && isActive) {
+            nextIds = nextIds.filter(id => id !== plugin.uid);
+            changed = true;
+          }
+          delete preActivationOpen.current[plugin.uid];
+        }
+        // 'sticky' (default/undefined): do nothing
       }
 
       prevConditions.current[plugin.uid] = shouldShow;

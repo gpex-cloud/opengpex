@@ -23,27 +23,12 @@ import { EditorContextValue, EditorCommand, Layer } from '@opengpex/editor/core/
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**
- * Determines whether a layer needs to be pre-rasterized:
- * - The visual content of a text layer is drawn by the real-time text renderer, and the bitmap may be a transparent pixel placeholder.
- * - The visual content of a color layer is a solid color fill, with no actual bitmap asset.
- * - Any layer using asset-transparent-pixel as a placeholder.
- */
-function needsPreRasterize(layer: Layer): boolean {
-  return layer.type === 'text' || layer.type === 'color' || layer.assetId === 'asset-transparent-pixel';
-}
-
-/**
- * Rasterizes layers that need pre-rasterization and returns the updated layer array.
- * Ensures each layer has a valid bitmap asset before being sent to the Worker.
+ * preRasterizeLayers: Delegates to pixels.render.preRasterizeLayers.
+ * Passes dpr = window.devicePixelRatio so merged results stay retina-sharp in the editor.
  */
 async function preRasterizeLayers(layers: Layer[], pixels: EditorContextValue['pixels']): Promise<Layer[]> {
-  return Promise.all(layers.map(async (layer) => {
-    if (needsPreRasterize(layer)) {
-      const asset = await pixels.rasterize.layer(layer);
-      return { ...layer, src: asset.url, assetId: asset.id };
-    }
-    return layer;
-  }));
+  const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
+  return pixels.render.preRasterizeLayers(layers, { dpr });
 }
 
 /**

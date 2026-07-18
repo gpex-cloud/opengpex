@@ -19,10 +19,11 @@
 
 'use client';
 
-import { Layer, Frame, EditorContextValue, asLocalShape, LocalPolygon, NormalizedState, ShapeType } from '@opengpex/editor/core/types';
+import { Layer, Frame, EditorContextValue, asLocalPolygon, asLocalRect, asLocalPoint, LocalPolygon, NormalizedState, ShapeType } from '@opengpex/editor/core/types';
 
 /**
  * Resolved refocus target: either a regular shape (rect/ellipse) or an irregular polygon.
+ * All clip boxes are now stored as LocalPolygon — regular shapes are converted via asLocalPolygon.
  */
 export type RefocusTarget =
     | { regular: true; clipToolId: 'rect' | 'ellipse'; shapeType: ShapeType; canvasX: number; canvasY: number; w: number; h: number }
@@ -32,7 +33,7 @@ export type RefocusTarget =
  * Commits a resolved RefocusTarget to the frame state:
  *   1. Switches latestClipTool
  *   2. Clears conflicting slots (for regular shapes)
- *   3. Writes the clip box data
+ *   3. Writes the clip box data (always as LocalPolygon)
  *   4. Enters clip mode
  *
  * This is the unified "write to overlay" exit point for all refocus paths
@@ -53,13 +54,16 @@ export function commitRefocusToOverlay(
             ctx.actions.setClipBox(frame.id, oppositeSlot, null);
         }
 
-        // 3a. Write regular shape
-        ctx.actions.setClipBox(frame.id, target.clipToolId, asLocalShape({
-            x: target.canvasX,
-            y: target.canvasY,
-            w: target.w,
-            h: target.h
-        }, target.shapeType));
+        // 3a. Write regular shape as LocalPolygon (rect = 4 corners, ellipse = 4 corners)
+        const rect = asLocalRect({ x: target.canvasX, y: target.canvasY, w: target.w, h: target.h });
+        const { x, y, w, h } = rect;
+        const ring = [
+            asLocalPoint({ x, y }),
+            asLocalPoint({ x: x + w, y }),
+            asLocalPoint({ x: x + w, y: y + h }),
+            asLocalPoint({ x, y: y + h }),
+        ];
+        ctx.actions.setClipBox(frame.id, target.clipToolId, asLocalPolygon([ring], rect, true));
     } else {
         // 3b. Write irregular polygon
         ctx.actions.setClipBox(frame.id, target.clipToolId, target.polygon);

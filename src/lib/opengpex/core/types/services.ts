@@ -101,6 +101,18 @@ export interface LayerItemForWorker {
   opacity: number;
   blendMode?: LayerBlendMode;
   fill?: number;
+  /**
+   * Layer type — forwarded from `Layer.type` so the Worker merger can
+   * dispatch non-bitmap layers (color → fillRect) without a bitmap.
+   * Defaults to `'image'` when absent (backward-compatible).
+   * Phase 3: color layers skip bitmap lookup entirely; text still pre-rasterized.
+   */
+  type?: 'image' | 'color' | 'text';
+  /**
+   * Layer metadata — forwarded from `Layer.metadata` so the Worker merger
+   * can access `fillColor` for color layers without a bitmap.
+   */
+  metadata?: { fillColor?: string; [key: string]: unknown };
   adjustments?: AdjustmentState;
   /**
    * Advanced tone-adjustment state (filter_pipeline_spec §5.1b.4).
@@ -210,6 +222,18 @@ export interface PixelService {
 
   render: {
     /**
+     * Pre-rasterize layers that cannot be composited directly by the Worker
+     * (text, color, asset-transparent-pixel, no-assetId layers).
+     *
+     * DPR semantics:
+     *   - merge.ts passes dpr = window.devicePixelRatio (result stays in editor)
+     *   - shapeToBlob passes dpr = 1 (export output is physical pixels)
+     *
+     * Single source of truth for pre-rasterization decisions (delegates to
+     * LayerFactory.needsPreRasterize). Both merge.ts and shapeToBlob use this.
+     */
+    preRasterizeLayers: (layers: Layer[], opts?: { dpr?: number }) => Promise<Layer[]>;
+    /**
      * Area flatten: renders the region of `frame` matching `shape` and encodes it.
      * When `options.format === 'raw'` returns an ImageBitmap; otherwise returns a Blob.
      * Internally chooses between the 16-bit vips lane and the 8-bit engine-worker lane.
@@ -258,8 +282,9 @@ export interface PixelService {
   };
 
   rasterize: {
-    /** Rasterizes any layer to bitmap Asset (text -> fillText, color -> fillRect, image -> flatten masks/adjustments) */
-    layer: (layer: Layer) => Promise<{ id: string; url: string }>;
+    /** Rasterizes any layer to bitmap Asset (text -> fillText, color -> fillRect, image -> flatten masks/adjustments).
+     *  Accepts optional opts.dpr to control output resolution (Phase 4 DPR unification). */
+    layer: (layer: Layer, opts?: { dpr?: number }) => Promise<{ id: string; url: string }>;
     /** Rasterizes a polygon selection into a grayscale mask PNG asset (white=visible, black=hidden) */
     mask: (polygon: LocalPolygon, bounds: { w: number; h: number }, feather?: number) => Promise<{ id: string; url: string } | null>;
   };

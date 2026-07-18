@@ -81,7 +81,7 @@ export const plugin: EditorPlugin = {
     // Expand when any craft tool is activated (user clicked a trigger button or pressed T/B/E)
     when: (state) => state.interaction.signals[P.CraftDrawerAPI.signals.activeCraft] != null,
     // Auto-collapse when craft tool is deactivated (user pressed V or mode changed externally)
-    collapseWhenFalse: true,
+    collapseWhenFalse: 'restore',
     priority: 200,
   },
 

@@ -18,7 +18,7 @@
  */
 
 import { Matrix3x3, GeometryOp } from '../matrix';
-import { Layer, Frame, IMatrix3x3, asLocalRect, asLocalPoint, asLocalPolygon, LocalPolygon, LocalShape, LayerPoseOverride, isPolygon } from '@opengpex/editor/core/types';
+import { Layer, Frame, IMatrix3x3, asLocalRect, asLocalPoint, asLocalPolygon, LocalPolygon, LayerPoseOverride } from '@opengpex/editor/core/types';
 import { computePolygonBounds } from './polygon';
 
 /**
@@ -261,20 +261,13 @@ export function transformFrame(
 
   const nextCanvasCropBox = Matrix3x3.transformRect(frame.canvasCropBox.rect, frame.canvas, operation);
 
-  // Transform clipBoxes — each slot is either a LocalShape (rect/ellipse) or
-  // a LocalPolygon (lasso/wand). Both must follow the same D4 symmetry
-  // operation so the selection stays aligned with pixels after rotation/flip.
-  const nextClipBoxes: Record<string, LocalShape | LocalPolygon> = {};
+  // Transform clipBoxes — all slots are LocalPolygon (unified selection type).
+  // Apply the same D4 symmetry operation so the selection stays aligned with
+  // pixels after rotation/flip.
+  const nextClipBoxes: Record<string, LocalPolygon> = {};
   for (const [toolId, entry] of Object.entries(frame.clipBoxes)) {
     if (!entry) continue;
-    if (isPolygon(entry)) {
-      // LocalPolygon
-      nextClipBoxes[toolId] = transformPolygon(entry as LocalPolygon, frame.canvas, operation);
-    } else {
-      // LocalShape — transform rect, keep shape metadata
-      const transformed = Matrix3x3.transformRect((entry as LocalShape).rect, frame.canvas, operation);
-      nextClipBoxes[toolId] = { ...(entry as LocalShape), rect: asLocalRect(transformed) };
-    }
+    nextClipBoxes[toolId] = transformPolygon(entry, frame.canvas, operation);
   }
 
   return {

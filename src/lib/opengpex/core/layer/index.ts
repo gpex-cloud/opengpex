@@ -236,9 +236,7 @@ export function createLayerService(
     fragmentToLayerLogical: (frame, layer, nameType) => {
       const box = getClipBox(frame);
       if (!box) return null;
-      const localShape = !box.regular
-        ? polygonToShape(geometry.polygon.frameLocalToLayerLocal(box.spatial, frame, layer))
-        : geometry.shape.frameLocalToLayerLocal(box.spatial, frame, layer);
+      const localShape = polygonToShape(geometry.polygon.frameLocalToLayerLocal(box, frame, layer));
       const intersection = geometry.shape.intersectWithLayer(localShape, layer);
 
       if (!intersection) return null;
@@ -412,14 +410,12 @@ export function createLayerService(
     fragmentToLayerPhysical: async (frame, layer, nameType) => {
       const box = getClipBox(frame);
       if (!box) return null;
-      const localShape = !box.regular
-        ? polygonToShape(geometry.polygon.frameLocalToLayerLocal(box.spatial, frame, layer))
-        : geometry.shape.frameLocalToLayerLocal(box.spatial, frame, layer);
+      const localShape = polygonToShape(geometry.polygon.frameLocalToLayerLocal(box, frame, layer));
       const intersection = geometry.shape.intersectWithLayer(localShape, layer);
       if (!intersection) return null;
 
       // For pixel rasterization, convert selection to world-space shape
-      const frameLocalShape = !box.regular ? polygonToShape(box.spatial) : box.spatial;
+      const frameLocalShape = polygonToShape(box);
       const worldSelection = geometry.shape.localToWorldShape(frameLocalShape, frame);
       const targetW = Math.round(worldSelection.rect.w);
       const targetH = Math.round(worldSelection.rect.h);

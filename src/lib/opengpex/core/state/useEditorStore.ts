@@ -23,13 +23,11 @@ import {
   BuiltPlugin, EditorShortcut, BuiltCommand, Dimensions, NormalizedState,
   EditorActions, EditorContextValue, GlobalHistoryState, EngineStatus, LocalShape,
   InteractionSignalValue, ClipboardLayerMetadata, BitmapMask, LocalPolygon,
-  isPolygon
 } from '@opengpex/editor/core/types';
 import { LayerUtils } from '@opengpex/editor/core/layer/LayerUtils';
 import { initialState, editorReducer } from './reducer';
 import { useVolatileState } from './useVolatileState';
 import * as P from '@opengpex/editor/core/advanced/protocols';
-import { snapCropBoxToPixels } from '@opengpex/editor/core/helpers/sub-pixel';
 
 /**
  * useEditorStore: Core state and action integration Hook
@@ -142,71 +140,11 @@ export function useEditorStore() {
       }
     }
 
-    // D. [Unified Architecture Snapping Gateway] 
-    // Standardize subpixel physical alignment for clip boxes (LocalShape only, not polygon)
-    // at the dispatch entry. Completely resolves subpixel deviation issues between
-    // "logical cropping" and "physical cropping" caused by actions like Reset, manual
-    // settings, aspect ratio locking, etc.
-    let alignedAction = action;
-    if (action.type === 'SET_CLIP_BOX') {
-      const { value } = action.payload;
-      // Only snap LocalShape values (rect/ellipse); polygons pass through unmodified.
-      if (value && !isPolygon(value)) {
-        alignedAction = {
-          ...action,
-          payload: { ...action.payload, value: snapCropBoxToPixels(value) }
-        };
-      }
-    } else if (action.type === 'UPDATE_FRAME') {
-      const { patch } = action.payload;
-      if (patch?.clipBoxes) {
-        // Snap all non-polygon entries in the clipBoxes patch
-        const snappedBoxes = { ...patch.clipBoxes };
-        let mutated = false;
-        for (const [key, val] of Object.entries(snappedBoxes)) {
-          if (val && !isPolygon(val)) {
-            snappedBoxes[key] = snapCropBoxToPixels(val);
-            mutated = true;
-          }
-        }
-        if (mutated) {
-          alignedAction = {
-            ...action,
-            payload: { ...action.payload, patch: { ...patch, clipBoxes: snappedBoxes } }
-          };
-        }
-      }
-    } else if (action.type === 'BATCH_UPDATE_FRAME') {
-      const { patches } = action.payload;
-      if (patches) {
-        const alignedPatches = { ...patches };
-        let mutated = false;
-        for (const [fId, p] of Object.entries(alignedPatches)) {
-          if (p?.clipBoxes) {
-            const snappedBoxes = { ...p.clipBoxes };
-            let boxMutated = false;
-            for (const [key, val] of Object.entries(snappedBoxes)) {
-              if (val && !isPolygon(val)) {
-                snappedBoxes[key] = snapCropBoxToPixels(val);
-                boxMutated = true;
-              }
-            }
-            if (boxMutated) {
-              alignedPatches[fId] = { ...p, clipBoxes: snappedBoxes };
-              mutated = true;
-            }
-          }
-        }
-        if (mutated) {
-          alignedAction = {
-            ...action,
-            payload: { ...action.payload, patches: alignedPatches }
-          };
-        }
-      }
-    }
-
-    dispatch(alignedAction);
+    // D. [Unified Architecture Snapping Gateway]
+    // clipBoxes are now always LocalPolygon — no snapping needed for SET_CLIP_BOX.
+    // canvasCropBox (LocalShape) snapping is handled at the SET_CANVAS_CROP_BOX level
+    // if needed in the future. For now, pass all actions through unmodified.
+    dispatch(action);
   }, [scheduleAssetSync, ASSET_CRITICAL_ACTIONS, mutateVolatile]);
 
   const confirmResolverRef = useRef<((val: boolean) => void) | null>(null);
@@ -342,7 +280,7 @@ export function useEditorStore() {
           : frames;
         enhancedDispatch({ type: 'SET_FRAMES', payload });
       },
-      setClipBox: (frameId: string, toolId: string, value: LocalShape | LocalPolygon | null) =>
+      setClipBox: (frameId: string, toolId: string, value: LocalPolygon | null) =>
         enhancedDispatch({ type: 'SET_CLIP_BOX', payload: { frameId, toolId, value } }),
       setCanvasCropBox: (frameId: string, cropBox: LocalShape) => enhancedDispatch({ type: 'SET_CANVAS_CROP_BOX', payload: { frameId, cropBox } }),
 

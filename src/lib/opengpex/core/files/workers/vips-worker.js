@@ -281,13 +281,112 @@ async function tiffDecodePage(bytes, page) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
+ * Apply layer adjustments (brightness/contrast/saturation/hueRotate/blur) to a vips image
+ * in full 16-bit precision. All operations stay in ushort domain.
+ *
+ * @param {object} v - wasm-vips instance
+ * @param {object} img - vips Image (must be ushort RGBA)
+ * @param {object|undefined} adj - adjustments descriptor
+ * @returns {object} - adjusted vips Image (ushort RGBA)
+ */
+function applyAdjustments16bit(v, img, adj) {
+  if (!adj) return img;
+
+  const hasAlpha = img.hasAlpha();
+  const nRgbBands = hasAlpha ? img.bands - 1 : img.bands;
+
+  // 1. Brightness: linear scale on RGB bands only
+  //    brightness=100 → scale=1.0 (no change), brightness=200 → scale=2.0, brightness=0 → black
+  if (adj.brightness !== undefined && adj.brightness !== 100) {
+    const scale = adj.brightness / 100.0;
+    const rgb = img.extractBand(0, { n: nRgbBands });
+    const scaledRgb = rgb.linear(scale, 0).cast('ushort');
+    if (hasAlpha) {
+      const alpha = img.extractBand(nRgbBands);
+      img = scaledRgb.bandjoin(alpha);
+    } else {
+      img = scaledRgb;
+    }
+  }
+
+  // 2. Contrast: linear scale around 16-bit midpoint (32768)
+  //    contrast=100 → scale=1.0 (no change), contrast=200 → scale=2.0
+  //    f(x) = scale * (x - 32768) + 32768 = scale*x + 32768*(1-scale)
+  if (adj.contrast !== undefined && adj.contrast !== 100) {
+    const scale = adj.contrast / 100.0;
+    const offset = 32768 * (1 - scale);
+    const rgb = img.extractBand(0, { n: nRgbBands });
+    const scaledRgb = rgb.linear(scale, offset).cast('ushort');
+    if (hasAlpha) {
+      const alpha = img.extractBand(nRgbBands);
+      img = scaledRgb.bandjoin(alpha);
+    } else {
+      img = scaledRgb;
+    }
+  }
+
+  // 3. Saturation + hueRotate: convert to LCh, adjust C and H, convert back
+  //    LCh: L=lightness, C=chroma (saturation), H=hue (degrees 0-360)
+  if ((adj.saturation !== undefined && adj.saturation !== 100) ||
+      (adj.hueRotate !== undefined && adj.hueRotate !== 0)) {
+    // Ensure sRGB interpretation before colourspace conversion
+    let workImg = img;
+    if (workImg.interpretation !== 'srgb') {
+      workImg = workImg.colourspace('srgb');
+    }
+    // Convert to LCh (perceptual uniform, hue-preserving)
+    const lch = workImg.colourspace('lch');
+    const L = lch.extractBand(0);
+    let C = lch.extractBand(1);
+    let H = lch.extractBand(2);
+
+    if (adj.saturation !== undefined && adj.saturation !== 100) {
+      C = C.linear(adj.saturation / 100.0, 0);
+    }
+    if (adj.hueRotate !== undefined && adj.hueRotate !== 0) {
+      // Add rotation; vips remainder() wraps to [0, 360)
+      H = H.linear(1, adj.hueRotate).remainder(360);
+    }
+
+    // Reconstruct LCh and convert back to sRGB ushort
+    const adjustedLch = L.bandjoin([C, H]);
+    const adjustedRgb = adjustedLch.colourspace('srgb');
+
+    if (hasAlpha) {
+      const alpha = img.extractBand(nRgbBands);
+      img = adjustedRgb.bandjoin(alpha).cast('ushort');
+    } else {
+      img = adjustedRgb.cast('ushort');
+    }
+  }
+
+  // 4. Blur: Gaussian blur on RGB bands (sigma derived from blur value)
+  //    blur=0 → no blur, blur=100 → sigma=10 (strong blur)
+  if (adj.blur !== undefined && adj.blur > 0) {
+    const sigma = adj.blur * 0.1; // linear mapping: blur=10 → sigma=1px
+    const rgb = img.extractBand(0, { n: nRgbBands });
+    const blurredRgb = rgb.gaussblur(sigma).cast('ushort');
+    if (hasAlpha) {
+      const alpha = img.extractBand(nRgbBands);
+      img = blurredRgb.bandjoin(alpha);
+    } else {
+      img = blurredRgb;
+    }
+  }
+
+  return img;
+}
+
+/**
  * Composite multiple layers into a single 16-bit TIFF/PNG output using vips.
  *
  * Each layer is provided as raw file bytes (TIFF/PNG/RAW for 16-bit, or 8-bit PNG display).
  * Layers without raw source are upsampled from 8-bit to 16-bit (value * 257).
+ * Optional per-layer adjustments (brightness/contrast/saturation/hueRotate/blur) are applied
+ * in full 16-bit precision before compositing.
  *
  * @param {object} params
- * @param {Array<{bytes: Uint8Array, x: number, y: number, blendMode: string, opacity: number, is8bit: boolean}>} params.layers
+ * @param {Array<{bytes: Uint8Array, x: number, y: number, blendMode: string, opacity: number, is8bit: boolean, adjustments?: object}>} params.layers
  * @param {number} params.canvasWidth
  * @param {number} params.canvasHeight
  * @param {object} params.outputOptions - { format, compression, dpi, jpegQuality, bigtiff, tile, tileWidth, tileHeight }
@@ -354,6 +453,9 @@ async function composite16bit(params) {
         alpha = alpha.linear(layer.opacity, 0);
         img = rgb.bandjoin(alpha);
       }
+
+      // Apply per-layer adjustments in full 16-bit precision (brightness/contrast/saturation/hueRotate/blur)
+      img = applyAdjustments16bit(v, img, layer.adjustments);
 
       overlayImages.push(img);
       blendModes.push(v.BlendMode[layer.blendMode] ?? v.BlendMode.over);
@@ -448,7 +550,8 @@ async function exportHighRes(rawBytes, options) {
     dpi = 72,
     crop,
     resize,
-    iccProfileBytes
+    iccProfileBytes,
+    adjustments,
   } = options || {};
 
   // 1. Load image from raw bytes at full precision (no cast to uchar!)
@@ -473,6 +576,19 @@ async function exportHighRes(rawBytes, options) {
     const hscale = resize.w / image.width;
     const vscale = resize.h / image.height;
     image = image.resize(hscale, { vscale });
+  }
+
+  // 4.5. Apply adjustments in 16-bit domain (same helper as composite16bit)
+  if (adjustments) {
+    // Ensure ushort before applying adjustments
+    if (image.format !== 'ushort') {
+      if (image.format === 'uchar') {
+        image = image.linear(257.0, 0).cast('ushort');
+      } else {
+        image = image.cast('ushort');
+      }
+    }
+    image = applyAdjustments16bit(v, image, adjustments);
   }
 
   // 5. Ensure 16-bit precision for output

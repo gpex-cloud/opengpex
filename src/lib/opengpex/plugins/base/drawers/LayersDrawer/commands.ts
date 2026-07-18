@@ -27,7 +27,7 @@ import * as P from './protocols';
 /**
  * LAYER_COMMANDS: Declarative command configurations.
  */
-export const LAYER_COMMANDS = {
+export const LAYERS_COMMANDS = {
     reorder: {
         id: P.CMD_REORDER,
         name: 'Reorder Layers',

@@ -47,7 +47,7 @@ export const plugin: EditorPlugin = {
   // --- 1. Identity ---
   manifest: {
     id: P.PLUGIN_ID,
-    displayName: "Adjustment",
+    displayName: "Adjustments",
     // Bumped to 1.1.0 on the Step 7.5 AdjustmentDrawer merge — no API break
     // for consumers of `AdjustmentDrawerAPI`, but the plugin now exposes an
     // additional 'basic' tool + `beginAdjustmentsEdit / updateAdjustments`
