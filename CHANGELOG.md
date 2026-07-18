@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.30
+
+- Unify clip selection internal representation — all tool types (rect/ellipse/lasso/wand) now use a single polygon format, enabling consistent shape recognition and anti-alias routing across the entire pipeline
+- Improve layer merge and export: color layers render natively without pre-rasterization; layer adjustments are now applied in 16-bit precision during high-res export
+- Drawer auto-reveal: add `'restore'` mode — drawers that were closed before auto-reveal will close again when the trigger condition clears
+
+---
+
 ## v1.0.0-beta.29
 
 - Improve "Refocus Selection" in Layers Drawer to correctly restore irregular selections (lasso, wand, SAM) and switch back to the original clip tool
