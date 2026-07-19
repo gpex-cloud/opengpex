@@ -45,6 +45,10 @@ interface ActionDropdownProps {
   cols?: number;
   /** Direction to open the menu. 'down' (default) opens below trigger, 'up' opens above trigger. */
   direction?: 'down' | 'up';
+  /** Max number of visible items before scrolling. Default is unlimited. */
+  maxVisibleItems?: number;
+  /** Whether the menu width should match the trigger width. Default is false. */
+  matchTriggerWidth?: boolean;
 }
 
 export default function ActionDropdown({
@@ -55,7 +59,9 @@ export default function ActionDropdown({
   align = 'left',
   disabled = false,
   cols = 1,
-  direction = 'down'
+  direction = 'down',
+  maxVisibleItems,
+  matchTriggerWidth = false,
 }: ActionDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, bottom: 0, left: 0, width: 0 });
@@ -126,6 +132,7 @@ export default function ActionDropdown({
                   ? { bottom: window.innerHeight - coords.bottom + 8 }
                   : { top: coords.top + 8 }),
                 left: align === 'right' ? coords.left + coords.width : coords.left,
+                ...(matchTriggerWidth ? { width: coords.width } : {}),
                 zIndex: 10000,
                 pointerEvents: 'auto'
               }}
@@ -133,12 +140,17 @@ export default function ActionDropdown({
                 min-w-[130px] 
                 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl
                 border border-zinc-200 dark:border-white/10 
-                rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] p-1 overflow-hidden
+                rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] p-1
               `}
             >
               <div
                 className={cols > 1 ? 'grid gap-0.5' : 'flex flex-col gap-0.5'}
-                style={cols > 1 ? { gridTemplateColumns: `repeat(${cols}, 1fr)` } : undefined}
+                style={{
+                  ...(cols > 1 ? { gridTemplateColumns: `repeat(${cols}, 1fr)` } : {}),
+                  ...(maxVisibleItems
+                    ? { maxHeight: `${maxVisibleItems * 32}px`, overflowY: 'auto' }
+                    : {}),
+                }}
               >
                 {options.map((opt, idx) => {
                   if (opt.divider) {

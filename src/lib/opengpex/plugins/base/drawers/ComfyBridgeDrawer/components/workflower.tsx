@@ -19,14 +19,26 @@
 
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { ChevronDown, Layers, Frame, FileJson, Trash, Dices } from 'lucide-react';
 import StatusBanner from '@opengpex/editor/widgets/StatusBanner';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import ComfyNumberInput from '@opengpex/editor/widgets/ComfyNumberInput';
 import FunctionGroup from '@opengpex/editor/widgets/FunctionGroup';
 import Tooltip from '@opengpex/editor/widgets/Tooltip';
-import type { ExposedParam, TextConfig, NumberConfig, PromptConfig, UserWorkflow, InputSource } from '../protocols';
+import type { ExposedParam, TextConfig, NumberConfig, PromptConfig, ComboConfig, UserWorkflow, InputSource } from '../protocols';
+
+// ─── Object Info Types ─────────────────────────────────────────────────────────
+
+/** Raw /object_info entry for a single node input */
+type ObjectInfoInputDef = [string | string[], Record<string, unknown>?];
+
+interface ObjectInfoNode {
+  input?: {
+    required?: Record<string, ObjectInfoInputDef>;
+    optional?: Record<string, ObjectInfoInputDef>;
+  };
+}
 
 // ─── Workflow Selector ─────────────────────────────────────────────────────────
 
@@ -129,31 +141,34 @@ function SortedParams({ params, paramValues, randomSeedPaths, onParamChange, onT
 
   return (
     <div className="flex flex-col gap-2">
-      {sorted.map(param => (
-        <ExposedParamControl
-          key={param.path}
-          param={param}
-          value={paramValues[param.path]}
-          isRandomSeed={randomSeedPaths.includes(param.path)}
-          onChange={(val) => onParamChange(param.path, val)}
-          onToggleRandom={(isRandom) => onToggleRandomSeed(param.path, isRandom)}
-        />
-      ))}
+      {sorted.map(param => {
+        const paramPath = `${param.nodeId}.${param.paramName}`;
+        return (
+          <ExposedParamControl
+            key={paramPath}
+            param={param}
+            value={paramValues[paramPath]}
+            isRandomSeed={randomSeedPaths.includes(paramPath)}
+            onChange={(val) => onParamChange(paramPath, val)}
+            onToggleRandom={(isRandom) => onToggleRandomSeed(paramPath, isRandom)}
+          />
+        );
+      })}
     </div>
   );
 }
 
 // ─── Exposed Parameter Control ─────────────────────────────────────────────────
 
-/** Helper: detect if a param path represents a seed value */
+/** Helper: detect if a param represents a seed value */
 function isSeedParam(param: ExposedParam): boolean {
   if (param.type !== 'number') return false;
-  const inputName = param.path.split('.').pop()?.toLowerCase() || '';
+  const inputName = param.paramName.toLowerCase();
   return inputName === 'seed' || inputName.includes('seed');
 }
 
 function ExposedParamControl({ param, value, isRandomSeed, onChange, onToggleRandom }: { param: ExposedParam; value: unknown; isRandomSeed: boolean; onChange: (val: unknown) => void; onToggleRandom: (isRandom: boolean) => void }) {
-  const displayLabel = param.label.split('.').pop() || param.label;
+  const displayLabel = param.paramName;
 
   // Prompt textarea (AIBridgeDrawer style)
   if (param.type === 'prompt') {
@@ -227,13 +242,88 @@ function ExposedParamControl({ param, value, isRandomSeed, onChange, onToggleRan
     );
   }
 
+  // Combo dropdown (select with options, fallback to text when options empty)
+  if (param.type === 'combo') {
+    const cfg = param.config as ComboConfig;
+    const strVal = typeof value === 'string' ? value : cfg.default;
+
+    // Fallback to text input when options not yet synced
+    if (cfg.options.length === 0) {
+      return (
+        <div className="flex items-center gap-1.5 w-full">
+          <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0 truncate" title={`${param.nodeClass}.${param.paramName}`}>
+            {displayLabel}
+          </span>
+          <input
+            type="text"
+            value={strVal}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={`Enter ${param.paramName}`}
+            className="flex-1 h-[26px] bg-[var(--bg-stage)] border border-[var(--border-subtle)] rounded-lg px-2 text-[10px] font-black text-[var(--text-main)] tabular-nums focus:outline-none focus:border-emerald-500/50"
+          />
+        </div>
+      );
+    }
+
+    const comboOptions = cfg.options.map(opt => ({
+      value: opt,
+      label: opt,
+      checked: opt === strVal,
+    }));
+
+    return (
+      <div className="flex items-center gap-1.5 w-full">
+        <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0 truncate" title={`${param.nodeClass}.${param.paramName}`}>
+          {displayLabel}
+        </span>
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <ActionDropdown
+            className="w-full"
+            options={comboOptions}
+            onSelect={(val) => onChange(val)}
+            matchTriggerWidth
+            maxVisibleItems={15}
+            trigger={(isOpen) => (
+              <div className="flex items-center justify-between w-full h-[26px] bg-[var(--bg-stage)] border border-[var(--border-subtle)] rounded-lg px-2 cursor-pointer hover:border-emerald-500/30 transition-colors">
+                <span className="text-[10px] font-black text-[var(--text-main)] truncate flex-1 min-w-0">
+                  {strVal}
+                </span>
+                <ChevronDown
+                  size={10}
+                  className={`text-[var(--text-muted)] transition-transform duration-200 shrink-0 ml-1 ${isOpen ? 'rotate-180' : ''}`}
+                />
+              </div>
+            )}
+          />
+        </div>
+      </div>
+    );
+  }
+
   // Text input (full-width)
   if (param.type === 'text') {
     const cfg = param.config as TextConfig;
     const strVal = typeof value === 'string' ? value : cfg.default;
+
+    if (cfg.multiline) {
+      return (
+        <div className="flex flex-col bg-[var(--bg-stage)] p-2 rounded-xl border border-[var(--border-subtle)] focus-within:border-emerald-500/50 transition-colors">
+          <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight mb-1.5 px-1">
+            {displayLabel}
+          </span>
+          <textarea
+            value={strVal}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={cfg.placeholder || ''}
+            className="w-full h-24 bg-transparent border-none text-[11px] text-[var(--text-main)] resize-none focus:outline-none placeholder:text-[var(--text-muted)] leading-relaxed px-1"
+          />
+        </div>
+      );
+    }
+
     return (
       <div className="flex items-center gap-1.5 w-full">
-        <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0 truncate" title={param.label}>
+        <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0 truncate" title={`${param.nodeClass}.${param.paramName}`}>
           {displayLabel}
         </span>
         <input

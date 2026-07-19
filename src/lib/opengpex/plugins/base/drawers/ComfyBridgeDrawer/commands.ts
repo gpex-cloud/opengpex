@@ -234,7 +234,8 @@ export const COMFY_BRIDGE_COMMANDS = {
         let seed: number | undefined;
 
         for (const ep of customWorkflow.exposedParams) {
-          const val = effectiveParamValues[ep.path];
+          const epPath = `${ep.nodeId}.${ep.paramName}`;
+          const val = effectiveParamValues[epPath];
           if (ep.type === 'prompt') {
             const sentiment = (ep.config as { sentiment?: string }).sentiment;
             if (sentiment === 'negative') {
@@ -243,7 +244,7 @@ export const COMFY_BRIDGE_COMMANDS = {
               positivePrompt = (val as string) ?? (ep.config as { default?: string }).default;
             }
           } else if (ep.type === 'number') {
-            const inputName = ep.path.split('.').pop()?.toLowerCase() || '';
+            const inputName = ep.paramName.toLowerCase();
             if (inputName === 'seed' || inputName.includes('seed')) {
               seed = (val as number) ?? (ep.config as { default?: number }).default;
             }
@@ -284,13 +285,13 @@ export const COMFY_BRIDGE_COMMANDS = {
         setExecPhase('downloading');
 
         // Fetch result from history (poll with retries — ComfyUI may need time to write)
-        console.log('[ComfyBridge] Fetching history for promptId:', promptId);
+        // console.log('[ComfyBridge] Fetching history for promptId:', promptId);
         let history = null;
         for (let attempt = 1; attempt <= 5; attempt++) {
           // Wait before each attempt (increasing delay: 500, 1000, 1500, 2000, 2500ms)
           await new Promise(r => setTimeout(r, attempt * 500));
           history = await client.getHistory(promptId);
-          console.log(`[ComfyBridge] History attempt ${attempt}:`, JSON.stringify(history)?.slice(0, 300));
+          // console.log(`[ComfyBridge] History attempt ${attempt}:`, JSON.stringify(history)?.slice(0, 300));
           if (history && history.outputs && Object.keys(history.outputs).length > 0) {
             break; // Got valid history with outputs
           }
@@ -447,7 +448,7 @@ export const COMFY_BRIDGE_COMMANDS = {
     id: P.CMD_OPEN_SETTINGS,
     name: 'Open ComfyUI Settings',
     execute: (ctx: EditorContextValue) => {
-      ctx.actions.setStateSignal(SettingsPanelAPI.signals.tab, 'ComfyUI Bridge');
+      ctx.actions.setStateSignal(SettingsPanelAPI.signals.tab, 'Comfy Bridge');
       ctx.actions.setStateSignal(SettingsPanelAPI.signals.open, true);
     },
   } as EditorCommand<void, void>,

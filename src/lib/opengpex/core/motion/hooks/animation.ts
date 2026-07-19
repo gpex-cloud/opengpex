@@ -244,6 +244,8 @@ export function useViewportSync(
 
   // 2. Execute discrete geometric sync protocol (GSAP alignment)
   useLayoutEffect(() => {
+    const isInteracting = volatileRef.current.activeState.interacting;
+
     Motion.syncViewportGeometry({
       stage: stageRef.current,
       artboard: artboardRef.current,
@@ -263,7 +265,7 @@ export function useViewportSync(
         h: lastCanvasRef.current.h
       },
       interaction: {
-        isInteracting: volatileRef.current.activeState.interacting,
+        isInteracting,
         rotationChanged: geometryChanged,
         isRotationSwap,
         delta

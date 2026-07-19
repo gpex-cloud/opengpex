@@ -181,7 +181,7 @@ function LayerComponentInner({ activeFrame, activeLayerId, activeLayerHostId }: 
       <div className="flex flex-col gap-0">
         <div
           onScroll={handleScroll}
-          className="flex flex-col min-h-[200px] max-h-[560px] overflow-y-auto px-1 pb-2 custom-scrollbar [mask-image:linear-gradient(to_bottom,transparent,black_8px,black_calc(100%-8px),transparent)]"
+          className="flex flex-col min-h-[200px] max-h-[396px] overflow-y-auto px-1 pb-2 custom-scrollbar [mask-image:linear-gradient(to_bottom,transparent,black_8px,black_calc(100%-8px),transparent)]"
         >
           <div
             className={`pt-2 flex flex-col gap-1 ${isScrolling ? "pointer-events-none" : ""}`}

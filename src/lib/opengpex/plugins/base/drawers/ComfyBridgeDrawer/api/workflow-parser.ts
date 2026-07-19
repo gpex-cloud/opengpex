@@ -26,7 +26,7 @@
  * - Numeric / text inputs suitable for parameter exposure
  */
 
-import type { UserWorkflow, ExposedParam, WorkflowMode } from '../protocols';
+import type { UserWorkflow, ExposedParam, WorkflowMode, TextConfig, NumberConfig, PromptConfig, ComboConfig } from '../protocols';
 
 // ─── Types for ComfyUI API-format workflow ─────────────────────────────────────
 
@@ -51,22 +51,12 @@ export interface ParseResult {
   inputNodeId: string | null;
   outputNodeId: string | null;
   /** Candidate parameters that can be exposed to UI */
-  candidateParams: CandidateParam[];
+  candidateParams: ExposedParam[];
   nodeCount: number;
 }
 
-export interface CandidateParam {
-  /** node_id.input_name format */
-  path: string;
-  /** Auto-generated label: "NodeTitle.InputName" or "#id ClassName.InputName" */
-  label: string;
-  /** Detected value type */
-  valueType: 'number' | 'string' | 'boolean';
-  /** Current default value */
-  currentValue: unknown;
-  /** Node class_type for context */
-  nodeClass: string;
-}
+/** @deprecated Use ExposedParam directly */
+export type CandidateParam = ExposedParam;
 
 // ─── Main Parser ───────────────────────────────────────────────────────────────
 
@@ -112,7 +102,7 @@ export function parseWorkflowJson(json: unknown): ParseResult {
   }
 
   // Extract candidate parameters
-  const candidateParams: CandidateParam[] = [];
+  const candidateParams: ExposedParam[] = [];
 
   for (const id of nodeIds) {
     const node = workflow[id];
@@ -123,6 +113,7 @@ export function parseWorkflowJson(json: unknown): ParseResult {
       continue;
     }
 
+    // Node display title from _meta.title (fallback to class_type)
     const nodeTitle = node._meta?.title || node.class_type;
 
     for (const [inputName, value] of Object.entries(node.inputs)) {
@@ -130,31 +121,23 @@ export function parseWorkflowJson(json: unknown): ParseResult {
       if (Array.isArray(value)) continue;
 
       // Only expose scalar values
-      if (typeof value === 'number') {
-        candidateParams.push({
-          path: `${id}.${inputName}`,
-          label: `${nodeTitle}.${inputName}`,
-          valueType: 'number',
-          currentValue: value,
-          nodeClass: node.class_type,
-        });
-      } else if (typeof value === 'string') {
-        candidateParams.push({
-          path: `${id}.${inputName}`,
-          label: `${nodeTitle}.${inputName}`,
-          valueType: 'string',
-          currentValue: value,
-          nodeClass: node.class_type,
-        });
-      } else if (typeof value === 'boolean') {
-        candidateParams.push({
-          path: `${id}.${inputName}`,
-          label: `${nodeTitle}.${inputName}`,
-          valueType: 'boolean',
-          currentValue: value,
-          nodeClass: node.class_type,
-        });
-      }
+      let valueType: 'number' | 'string' | 'boolean' | null = null;
+      if (typeof value === 'number') valueType = 'number';
+      else if (typeof value === 'string') valueType = 'string';
+      else if (typeof value === 'boolean') valueType = 'boolean';
+      if (!valueType) continue;
+
+      const paramValue = String(value);
+      const inferredType = inferParamTypeFromRaw(inputName, nodeTitle, valueType, paramValue);
+
+      candidateParams.push({
+        nodeId: id,
+        nodeClass: node.class_type,
+        nodeTitle,
+        paramName: inputName,
+        paramValue,
+        ...inferredType,
+      });
     }
   }
 
@@ -222,60 +205,64 @@ function getParamDecimals(inputName: string, value: number): number {
 // ─── Param Type Inference ──────────────────────────────────────────────────────
 
 /**
- * Infers UI control type for a candidate parameter.
+ * Infers UI control type and config from raw input data.
+ * Returns only the `type` and `config` fields to be spread into an ExposedParam.
  *
  * Logic:
- * - If input_name or node label contains "prompt" → prompt textarea
- *   - Sub-check: if contains "negative" → negative sentiment; otherwise → positive
+ * - If input_name contains "prompt" OR nodeTitle contains "prompt" → prompt textarea
+ *   - Negative detection: paramName or nodeTitle contains "negative"
+ *   - Positive detection: paramName or nodeTitle contains "positive"
  * - If valueType is 'number' → number input (with decimals from known definitions)
  * - Otherwise (string, boolean) → text input
  */
-function inferParamType(candidate: CandidateParam): ExposedParam | null {
-  const inputName = candidate.path.split('.').pop()?.toLowerCase() || '';
-  const labelLower = candidate.label.toLowerCase();
+function inferParamTypeFromRaw(
+  inputName: string,
+  nodeTitle: string,
+  valueType: 'number' | 'string' | 'boolean',
+  paramValue: string,
+): { type: ExposedParam['type']; config: ExposedParam['config'] } {
+  const nameLower = inputName.toLowerCase();
+  const titleLower = nodeTitle.toLowerCase();
+  // Detect prompt: either paramName or nodeTitle contains "prompt"
+  const isPrompt = nameLower.includes('prompt') || titleLower.includes('prompt');
 
-  // Prompt detection: if input name or label contains "prompt"
-  const isPrompt = inputName.includes('prompt') || labelLower.includes('prompt');
-
-  if (isPrompt && candidate.valueType === 'string') {
-    // Check if negative or positive
-    const isNegative = inputName.includes('negative') || labelLower.includes('negative');
+  if (isPrompt && valueType === 'string') {
+    // Negative: paramName or nodeTitle contains "negative"
+    const isNegative = nameLower.includes('negative') || titleLower.includes('negative');
+    // Positive: paramName or nodeTitle contains "positive"
+    const isPositive = nameLower.includes('positive') || titleLower.includes('positive');
+    const sentiment: PromptConfig['sentiment'] = isNegative ? 'negative' : (isPositive ? 'positive' : 'positive');
     return {
-      path: candidate.path,
-      label: candidate.label,
       type: 'prompt',
       config: {
-        default: candidate.currentValue as string,
+        default: paramValue,
         placeholder: isNegative ? 'Negative prompt...' : 'Describe what you want...',
-        sentiment: isNegative ? 'negative' : 'positive',
-      },
+        sentiment,
+      } satisfies PromptConfig,
     };
   }
 
-  if (candidate.valueType === 'number') {
-    const val = candidate.currentValue as number;
-    const decimals = getParamDecimals(inputName, val);
+  if (valueType === 'number') {
+    const val = parseFloat(paramValue);
+    const decimals = getParamDecimals(nameLower, isNaN(val) ? 0 : val);
     return {
-      path: candidate.path,
-      label: candidate.label,
       type: 'number',
       config: {
-        default: val,
-        placeholder: String(val),
+        default: isNaN(val) ? 0 : val,
         decimals,
-      },
+      } satisfies NumberConfig,
     };
   }
 
   // String, boolean, or anything else → text input
+  // Note: combo types cannot be detected from workflow JSON alone (values look like strings).
+  // They will be upgraded to ComboConfig after /object_info sync.
   return {
-    path: candidate.path,
-    label: candidate.label,
     type: 'text',
     config: {
-      default: String(candidate.currentValue ?? ''),
+      default: paramValue,
       placeholder: `Enter ${inputName}`,
-    },
+    } satisfies TextConfig,
   };
 }
 
@@ -287,16 +274,14 @@ export function createUserWorkflow(
   description: string,
   template: Record<string, unknown>,
   parseResult: ParseResult,
-  selectedParams: string[], // paths that user chose to expose
+  selectedParams: string[], // nodeId.paramName keys that user chose to expose
 ): UserWorkflow {
   const exposedParams: ExposedParam[] = [];
 
-  for (const path of selectedParams) {
-    const candidate = parseResult.candidateParams.find(p => p.path === path);
+  for (const key of selectedParams) {
+    const candidate = parseResult.candidateParams.find(p => `${p.nodeId}.${p.paramName}` === key);
     if (!candidate) continue;
-
-    const param = inferParamType(candidate);
-    if (param) exposedParams.push(param);
+    exposedParams.push(candidate);
   }
 
   // Detect workflow mode: if has LoadImage input node → img2img, else → txt2img

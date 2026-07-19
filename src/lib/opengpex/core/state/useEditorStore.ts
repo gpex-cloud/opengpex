@@ -568,8 +568,15 @@ export function useEditorStore() {
           const v = volatileRef.current;
           const frame = stateRef.current.frames.byId[id];
           if (!frame) return { x: 0, y: 0, k: 1 };
+          // [Fix] Do not gate on interacting flag.
+          // fast.commit() sets interacting=false synchronously but dispatches UPDATE_FRAME via rAF.
+          // In the window between commit and rAF execution, interacting=false but frame.camera is
+          // still the old Redux value. If a new session starts in this window, latestCamera would
+          // return the stale frame.camera as the baseline, causing the new session's camera
+          // calculations to start from the wrong position — producing the visible "snap-back".
+          // Fix: always prefer buffered.camera if it exists, regardless of interacting state.
           const bufferedCamera = v.buffered.frames[id]?.camera;
-          return (v.activeState.interacting && bufferedCamera) ? bufferedCamera : frame.camera;
+          return bufferedCamera ?? frame.camera;
         },
         isInteracting: () => volatileRef.current.activeState.interacting,
         getTransient: (key: string) => volatileRef.current.transient[key],

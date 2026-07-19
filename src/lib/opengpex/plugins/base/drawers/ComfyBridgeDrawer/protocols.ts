@@ -96,26 +96,39 @@ export const INITIAL_EXECUTION_STATE: ExecutionState = {
 // ─── User Workflow Types ───────────────────────────────────────────────────────
 
 export interface ExposedParam {
-  /** Workflow node_id + input_name path, e.g. "3.denoise_strength" */
-  path: string;
-  /** UI display label */
-  label: string;
-  /** Parameter type: text input, number input, or prompt textarea */
-  type: 'text' | 'number' | 'prompt';
+  /** Node ID in the workflow, e.g. "37" */
+  nodeId: string;
+  /** Node class_type, e.g. "UNETLoader" */
+  nodeClass: string;
+  /** Node display title from _meta.title, e.g. "CLIP Text Encode (Positive)" */
+  nodeTitle: string;
+  /** Input field name within the node, e.g. "unet_name" or "weight_dtype" */
+  paramName: string;
+  /** Current value as string (serialized from the workflow template default) */
+  paramValue: string;
+  /** Parameter type: text input, number input, prompt textarea, or combo dropdown */
+  type: 'text' | 'number' | 'prompt' | 'combo';
   /** Type-specific config */
-  config: TextConfig | NumberConfig | PromptConfig;
+  config: TextConfig | NumberConfig | PromptConfig | ComboConfig;
 }
 
 export interface TextConfig {
   default: string;
   placeholder?: string;
+  /** Whether to render as multiline textarea (filled in after /object_info sync) */
+  multiline?: boolean;
 }
 
 export interface NumberConfig {
   default: number;
-  placeholder?: string;
   /** Number of decimal places (0=integer, 1=tenths, 2=hundredths). Controls step and display. */
   decimals: number;
+  /** Minimum value (filled in after /object_info sync) */
+  min?: number;
+  /** Maximum value (filled in after /object_info sync) */
+  max?: number;
+  /** Step size (filled in after /object_info sync) */
+  step?: number;
 }
 
 export interface PromptConfig {
@@ -123,6 +136,12 @@ export interface PromptConfig {
   placeholder?: string;
   /** positive or negative prompt (affects label color) */
   sentiment: 'positive' | 'negative';
+}
+
+export interface ComboConfig {
+  default: string;
+  /** Available options (empty until /object_info sync; fallback to text input when empty) */
+  options: string[];
 }
 
 /** Workflow mode: img2img requires input image, txt2img generates from scratch */

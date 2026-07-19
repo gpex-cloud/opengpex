@@ -29,6 +29,21 @@ export interface EditorReconcileSubset {
  * Compares source and target objects, and modifies the draft in-place as much as possible to maintain reference consistency, avoiding unnecessary Immer Patches.
  */
 function reconcileDeep(draftVal: unknown, sourceVal: unknown): unknown {
+  // [Perf] Structural sharing fast-path: if both sides share the same reference,
+  // the subtree is guaranteed to be identical (Immer preserves references for
+  // unmodified nodes). Skip the entire recursive traversal immediately.
+  //
+  // Why this is safe: every Redux action that modifies state goes through Immer's
+  // `produce`, which only creates new object references for nodes that actually
+  // changed. Unchanged siblings keep their original reference. So when
+  // `reconcileFrameState` is called with (checkpoint, currentFrame), any layer
+  // or nested object that was not touched between the two SIGNAL_COMMITs will
+  // have identical references on both sides — and we can skip them in O(1).
+  //
+  // Worst case (all references changed): degrades gracefully to the original
+  // full traversal, no correctness impact.
+  if (draftVal === sourceVal) return draftVal;
+
   // 1. If either is a primitive type, directly return the source data value (Immer will determine if it actually changed)
   if (typeof sourceVal !== 'object' || sourceVal === null || typeof draftVal !== 'object' || draftVal === null) {
     return sourceVal;

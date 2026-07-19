@@ -401,8 +401,6 @@ export function createPixelService(
        *   • Lane A: 16-bit single-layer direct (vips one-shot decode+encode)
        *   • Lane B: 16-bit multi-layer composite (vips composite+encode)
        *   • Lane C: 8-bit standard (engine worker + files.encode / external encoder)
-       *
-       * See §4.3 of docs/opengpex/plans/20260710_export_pipeline_refactor_proposal.md.
        */
       async shapeToBlob(frame: Frame, shape: LocalShape, options: RenderToBlobOptions = {}) {
         // ── 1. Capability downgrade: non-rect shape cannot use 16-bit vips (only rect crop supported)
@@ -456,8 +454,6 @@ export function createPixelService(
         } as unknown as LocalShape;
         return service.render.shapeToBlob(frame, fullShape, options);
       },
-
-
 
 
       registerEncoder(mimeType, encoder) {

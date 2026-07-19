@@ -23,8 +23,10 @@ import { useMemo, useState, useCallback, useEffect, useSyncExternalStore } from 
 import { usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import { useEditorState } from '@opengpex/editor/core/context';
 import { ComfyBridgeConfig, ComfyEnvironment, ConnectionStatus, ExecutionRecord, INITIAL_EXECUTION_STATE, DEFAULT_COMFY_CONFIG } from './protocols';
+import type { ExposedParam, NumberConfig, PromptConfig, TextConfig, ComboConfig } from './protocols';
 import { subscribeExecState, getExecStateSnapshot, cancelExecution } from './commands';
 import type { ComfyBridgeDrawerCommandsMap } from './commands.d';
+import { ComfyClient } from './api/client';
 
 /**
  * useComfyBridgeState: Semantic state hook for ComfyBridge drawer.
@@ -88,6 +90,99 @@ export function useComfyBridgeState() {
   }, [resolvedActiveWorkflowId, config.activeWorkflowId, setSelfConfig]);
 
   const activeWorkflow = workflows.find(w => w.id === resolvedActiveWorkflowId) || null;
+
+  // ─── Sync Object Info Handler ──────────────────────────────────────────────
+
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  /** Sync exposed param types/configs from ComfyUI /object_info for the active workflow */
+  const handleSyncObjectInfo = useCallback(async (): Promise<void> => {
+    if (!activeWorkflow) return;
+
+    const envs = config.environments || [];
+    const env: ComfyEnvironment | undefined = envs.find(e => e.id === config.activeEnvironmentId) || envs[0];
+    if (!env?.url) {
+      setSyncError('No ComfyUI environment configured');
+      return;
+    }
+
+    setIsSyncing(true);
+    setSyncError(null);
+
+    try {
+      const client = new ComfyClient(env.url, env.connectionMode || 'auto');
+      type ObjectInfoInputDef = [string | string[], Record<string, unknown>?];
+      interface ObjectInfoNode { input?: { required?: Record<string, ObjectInfoInputDef>; optional?: Record<string, ObjectInfoInputDef> } }
+      const objectInfo = await client.getObjectInfo() as Record<string, ObjectInfoNode>;
+
+      const updatedParams: ExposedParam[] = activeWorkflow.exposedParams.map(param => {
+        const nodeInfo = objectInfo[param.nodeClass];
+        if (!nodeInfo?.input) return param;
+
+        const inputDef: ObjectInfoInputDef | undefined =
+          nodeInfo.input.required?.[param.paramName] ||
+          nodeInfo.input.optional?.[param.paramName];
+
+        if (!inputDef) return param;
+
+        const [typeDef, opts] = inputDef;
+        const options = opts || {};
+
+        if (Array.isArray(typeDef)) {
+          const comboOptions = typeDef.filter((v): v is string => typeof v === 'string');
+          return { ...param, type: 'combo' as const, config: { default: param.paramValue, options: comboOptions } satisfies ComboConfig };
+        }
+
+        const typeStr = typeDef as string;
+
+        if (typeStr === 'FLOAT') {
+          const min = typeof options.min === 'number' ? options.min : undefined;
+          const max = typeof options.max === 'number' ? options.max : undefined;
+          const step = typeof options.step === 'number' ? options.step : undefined;
+          const decimals = step != null && step > 0
+            ? Math.max(0, -Math.floor(Math.log10(step)))
+            : (param.type === 'number' ? (param.config as NumberConfig).decimals : 2);
+          const defaultVal = typeof options.default === 'number' ? options.default : parseFloat(param.paramValue);
+          return { ...param, type: 'number' as const, config: { default: isNaN(defaultVal) ? 0 : defaultVal, decimals, min, max, step } satisfies NumberConfig };
+        }
+
+        if (typeStr === 'INT') {
+          const min = typeof options.min === 'number' ? options.min : undefined;
+          const max = typeof options.max === 'number' ? options.max : undefined;
+          const defaultVal = typeof options.default === 'number' ? options.default : parseInt(param.paramValue, 10);
+          return { ...param, type: 'number' as const, config: { default: isNaN(defaultVal) ? 0 : defaultVal, decimals: 0, min, max } satisfies NumberConfig };
+        }
+
+        if (typeStr === 'STRING') {
+          const multiline = options.multiline === true;
+          const nameLower = param.paramName.toLowerCase();
+          const titleLower = param.nodeTitle.toLowerCase();
+          const isPrompt = nameLower.includes('prompt') || titleLower.includes('prompt');
+          if (isPrompt) {
+            const isNegative = nameLower.includes('negative') || titleLower.includes('negative');
+            const sentiment: PromptConfig['sentiment'] = isNegative ? 'negative' : 'positive';
+            return { ...param, type: 'prompt' as const, config: { default: param.paramValue, placeholder: isNegative ? 'Negative prompt...' : 'Describe what you want...', sentiment } satisfies PromptConfig };
+          }
+          return { ...param, type: 'text' as const, config: { default: param.paramValue, multiline } satisfies TextConfig };
+        }
+
+        return param;
+      });
+
+      const updatedWorkflows = (config.workflows || []).map(wf =>
+        wf.id === activeWorkflow.id ? { ...wf, exposedParams: updatedParams } : wf
+      );
+      setSelfConfig({ workflows: updatedWorkflows });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSyncError(msg);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [activeWorkflow, config, setSelfConfig]);
+
+  // ─── Test Connection Handler ───────────────────────────────────────────────
 
   // Test connection handler — returns success boolean for callers that need it.
   // Only sets 'checking' if not already unhealthy (to avoid banner flash).
@@ -205,6 +300,9 @@ export function useComfyBridgeState() {
       setActiveEnvironment: (envId: string) => setSelfConfig({ activeEnvironmentId: envId }),
       setActiveWorkflow: (wfId: string | null) => setSelfConfig({ activeWorkflowId: wfId }),
       testConnection: handleTestConnection,
+      syncObjectInfo: handleSyncObjectInfo,
+      isSyncing,
+      syncError,
       cancelExecution,
       reuseParams,
       exportHistory,
@@ -216,5 +314,5 @@ export function useComfyBridgeState() {
       testConnectionCmd,
       openSettingsCmd,
     };
-  }, [config, setSelfConfig, activeLayer, activeFrame, connectionStatus, isTesting, execState, environments, activeEnv, workflows, activeWorkflow, isComfyGenerated, runWorkflowCmd, testConnectionCmd, openSettingsCmd, handleTestConnection, reuseParams, exportHistory, clearHistory, deleteRecord]);
+  }, [config, setSelfConfig, activeLayer, activeFrame, connectionStatus, isTesting, isSyncing, syncError, execState, environments, activeEnv, workflows, activeWorkflow, isComfyGenerated, runWorkflowCmd, testConnectionCmd, openSettingsCmd, handleTestConnection, handleSyncObjectInfo, reuseParams, exportHistory, clearHistory, deleteRecord]);
 }

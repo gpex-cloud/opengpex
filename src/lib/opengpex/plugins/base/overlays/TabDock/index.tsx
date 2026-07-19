@@ -50,7 +50,8 @@ export const plugin: EditorPlugin = {
     orientation: 'horizontal',
     snap: 'BC',
     showProps: true,
-    indentBranches: true
+    indentBranches: true,
+    showMetricsHud: true,
   },
   contributions: [
     {

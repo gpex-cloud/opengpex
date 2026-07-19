@@ -20,7 +20,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Settings, ChevronDown, Wifi, WifiOff, FileJson, RotateCcw, Sparkles, Clock, Image as ImageIcon, AlertTriangle } from 'lucide-react';
+import { Settings, ChevronDown, Wifi, WifiOff, FileJson, RotateCcw, Sparkles, Clock, Image as ImageIcon, AlertTriangle, RefreshCw } from 'lucide-react';
 import StatusBanner from '@opengpex/editor/widgets/StatusBanner';
 import { motion } from 'framer-motion';
 import FancyButton from '@opengpex/editor/widgets/FancyButton';
@@ -60,6 +60,8 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
     canRun,
     connectionStatus,
     isTesting,
+    isSyncing,
+    syncError,
     execState,
     isComfyGenerated,
     executionHistory,
@@ -68,6 +70,7 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
     setActiveEnvironment,
     setActiveWorkflow,
     testConnection,
+    syncObjectInfo,
     cancelExecution,
     reuseParams,
     exportHistory,
@@ -109,7 +112,7 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
         workflowParamValues: { ...paramValues, [path]: randomSeed },
       });
     } else {
-      const param = activeWorkflow?.exposedParams.find(p => p.path === path);
+      const param = activeWorkflow?.exposedParams.find(p => `${p.nodeId}.${p.paramName}` === path);
       const defaultVal = param?.config?.default ?? 0;
       updateConfig({
         randomSeedPaths: randomSeedPaths.filter(p => p !== path),
@@ -123,8 +126,9 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
     if (!activeWorkflow) return;
     const resetValues = { ...paramValues };
     for (const p of activeWorkflow.exposedParams) {
-      if (randomSeedPaths.includes(p.path)) continue;
-      resetValues[p.path] = p.config.default;
+      const pPath = `${p.nodeId}.${p.paramName}`;
+      if (randomSeedPaths.includes(pPath)) continue;
+      resetValues[pPath] = p.config.default;
     }
     updateConfig({ workflowParamValues: resetValues });
   };
@@ -195,6 +199,16 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
               className="flex items-center justify-center w-6 h-6 rounded-lg text-[var(--text-muted)] hover:bg-[var(--border-subtle)] transition-colors focus:outline-none disabled:opacity-30"
             >
               <RotateCcw size={11} />
+            </button>
+          </Tooltip>
+          {/* Sync Object Info */}
+          <Tooltip content="Sync param types from /object_info" position="bottom">
+            <button
+              onClick={() => syncObjectInfo()}
+              disabled={isSyncing || !activeWorkflow}
+              className="flex items-center justify-center w-6 h-6 rounded-lg text-[var(--text-muted)] hover:text-emerald-500 hover:bg-emerald-500/10 transition-colors focus:outline-none disabled:opacity-30"
+            >
+              <RefreshCw size={11} className={isSyncing ? 'animate-spin' : ''} />
             </button>
           </Tooltip>
           {/* Test Connection */}

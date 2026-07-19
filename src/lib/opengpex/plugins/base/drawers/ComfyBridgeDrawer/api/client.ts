@@ -289,6 +289,15 @@ export class ComfyClient {
     return Object.keys(data).sort();
   }
 
+  /** GET /object_info — Get full node metadata (for param type/config sync) */
+  async getObjectInfo(): Promise<Record<string, unknown>> {
+    const res = await this.apiFetch('object_info');
+    if (!res.ok) {
+      throw new Error(`Failed to fetch object_info: HTTP ${res.status}`);
+    }
+    return res.json() as Promise<Record<string, unknown>>;
+  }
+
   /** POST /upload/image — Upload image to ComfyUI input directory */
   async uploadImage(blob: Blob, filename: string): Promise<string> {
     const form = new FormData();

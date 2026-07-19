@@ -19,16 +19,16 @@
 
 "use client";
 
-import React, { useRef } from "react";
+import React, { useRef, useState, useEffect, useMemo } from "react";
 import {
   Grip,
   Layers,
   X,
-  Rows2,
-  Columns2,
-  Maximize2,
-  Indent,
   Settings,
+  Activity,
+  Globe,
+  MapPin,
+  MemoryStick,
 } from "lucide-react";
 import {
   motion,
@@ -36,18 +36,174 @@ import {
   useDragControls,
   Reorder,
 } from "framer-motion";
-import Switch from "@opengpex/editor/widgets/Switch";
 import ImageAsset from "@opengpex/editor/widgets/ImageAsset";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import PluginSlot from "@opengpex/editor/workspace/components/PluginSlot";
 import type { Frame } from "@opengpex/editor/core/types";
-import { useEditorServices } from "@opengpex/editor/core/context";
-import { useTabDock } from "./hooks";
+import { useEditorServices, useEditorState } from "@opengpex/editor/core/context";
+import { useTabDock } from "../hooks";
 
-// 1. Create Context to share state, preventing animation conflicts from multiple instances
-const TabDockContext = React.createContext<ReturnType<
-  typeof useTabDock
-> | null>(null);
+// ─── DockMetricsHUD: FPS + World + Local coords ───────────────────────────────
+
+interface DockMetrics {
+  fps: number;
+  world: { x: number; y: number };
+  local: { x: number; y: number };
+  mem: string | null; // e.g. "128 MB", null if unavailable
+}
+
+function formatMB(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+}
+
+function useDockMetrics(): DockMetrics {
+  const { activeFrame } = useEditorState();
+  const { actions, geometry } = useEditorServices();
+
+  const [fps, setFps] = useState(0);
+  const fpsRef = useRef({ frames: 0, lastTime: 0 });
+
+  // RAF-driven FPS counter
+  useEffect(() => {
+    fpsRef.current = { frames: 0, lastTime: performance.now() };
+    let rafId: number;
+    const tick = () => {
+      const now = performance.now();
+      fpsRef.current.frames++;
+      const elapsed = now - fpsRef.current.lastTime;
+      if (elapsed >= 1000) {
+        setFps(Math.round((fpsRef.current.frames * 1000) / elapsed));
+        fpsRef.current = { frames: 0, lastTime: now };
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, []);
+
+  // Mouse position tracking
+  const mouseRef = useRef({ vx: 0, vy: 0 });
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      const container = document.querySelector('.editor-viewport-container');
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      mouseRef.current = {
+        vx: Math.round(e.clientX - rect.left),
+        vy: Math.round(e.clientY - rect.top),
+      };
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
+
+  // ~15Hz tick for coordinate updates
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let rafId: number;
+    let lastUpdate = 0;
+    const loop = () => {
+      const now = performance.now();
+      if (now - lastUpdate >= 66) {
+        lastUpdate = now;
+        setTick(t => t + 1);
+      }
+      rafId = requestAnimationFrame(loop);
+    };
+    rafId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafId);
+  }, []);
+
+  // Memory (2s interval, Chrome only)
+  const [mem, setMem] = useState<string | null>(null);
+  useEffect(() => {
+    const collect = () => {
+      const perf = performance as Performance & {
+        memory?: { usedJSHeapSize: number };
+      };
+      setMem(perf.memory ? formatMB(perf.memory.usedJSHeapSize) : null);
+    };
+    collect();
+    const timer = setInterval(collect, 2000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const coords = useMemo(() => {
+    void tick;
+    if (!activeFrame) return { world: { x: 0, y: 0 }, local: { x: 0, y: 0 } };
+    const cam = actions.fast.latestCamera(activeFrame.id);
+    const { vx, vy } = mouseRef.current;
+    const world = geometry.space.screenToWorld(vx, vy, activeFrame, cam);
+    const local = geometry.space.screenToLocal(vx, vy, activeFrame, cam);
+    return { world, local };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick, activeFrame, actions.fast, geometry]);
+
+  return { fps, world: coords.world, local: coords.local, mem };
+}
+
+function fpsColor(fps: number): string {
+  if (fps >= 50) return "text-emerald-500";
+  if (fps >= 30) return "text-amber-500";
+  return "text-rose-500";
+}
+
+/**
+ * DockMetricsHUD: Compact FPS + World + Local coords display for TabDock.
+ */
+function DockMetricsHUD() {
+  const { fps, world, local, mem } = useDockMetrics();
+
+  return (
+    <div className="flex flex-col gap-1 font-mono select-none">
+      {/* FPS */}
+      <div className="flex items-center gap-1">
+        <Activity size={8} className={`shrink-0 ${fpsColor(fps)}`} />
+        <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-7">FPS</span>
+        <span className={`text-[9px] font-black tabular-nums leading-none ${fpsColor(fps)}`}>
+          {fps}
+        </span>
+      </div>
+
+      {/* Memory */}
+      {mem !== null && (
+        <div className="flex items-center gap-1">
+          <MemoryStick size={8} className="text-violet-400 shrink-0" />
+          <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-7">Mem</span>
+          <span className="text-[9px] font-bold text-[var(--text-main)] tabular-nums leading-none">
+            {mem}
+          </span>
+        </div>
+      )}
+
+      {/* World coords */}
+      <div className="flex items-center gap-1">
+        <Globe size={8} className="text-amber-400 shrink-0" />
+        <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-7">World</span>
+        <span className="text-[9px] font-bold text-[var(--text-main)] tabular-nums leading-none inline-flex gap-0.5">
+          <span className="inline-block w-[3ch] text-right">{Math.round(world.x)}</span>
+          <span className="text-[var(--text-muted)]">,</span>
+          <span className="inline-block w-[3ch] text-right">{Math.round(world.y)}</span>
+        </span>
+      </div>
+
+      {/* Local coords */}
+      <div className="flex items-center gap-1">
+        <MapPin size={8} className="text-cyan-400 shrink-0" />
+        <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-7">Local</span>
+        <span className="text-[9px] font-bold text-[var(--text-main)] tabular-nums leading-none inline-flex gap-0.5">
+          <span className="inline-block w-[3ch] text-right">{Math.round(local.x)}</span>
+          <span className="text-[var(--text-muted)]">,</span>
+          <span className="inline-block w-[3ch] text-right">{Math.round(local.y)}</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Context ──────────────────────────────────────────────────────────────────
+
+const TabDockContext = React.createContext<ReturnType<typeof useTabDock> | null>(null);
 
 function useTabDockContext() {
   const context = React.useContext(TabDockContext);
@@ -55,6 +211,8 @@ function useTabDockContext() {
     throw new Error("TabDock components must be used within TabDockProvider");
   return context;
 }
+
+// ─── BranchMenu ───────────────────────────────────────────────────────────────
 
 function BranchMenu({
   branches,
@@ -190,7 +348,7 @@ function BranchMenu({
         </div>
       </div>
 
-      {/* 2. Bridge layer: aligned with icon width (w-12), only responds to events at connection */}
+      {/* 2. Bridge layer */}
       <div
         className={`absolute pointer-events-auto
  ${
@@ -204,9 +362,8 @@ function BranchMenu({
   );
 }
 
-/**
- * FrameThumbnail: Individual frame thumbnail item
- */
+// ─── FrameThumbnail ───────────────────────────────────────────────────────────
+
 function FrameThumbnail({
   frame,
   isActive,
@@ -334,9 +491,8 @@ function FrameThumbnail({
   );
 }
 
-/**
- * DockGlobalActions: Global actions area (with slots)
- */
+// ─── DockGlobalActions ────────────────────────────────────────────────────────
+
 function DockGlobalActions() {
   const { state, openSettings } = useTabDockContext();
   const isHorizontal = state.config.orientation === "horizontal";
@@ -348,12 +504,10 @@ function DockGlobalActions() {
  ${state.showFull ? "opacity-100 scale-100" : "opacity-0 scale-95 overflow-hidden"} 
  ${isHorizontal ? (state.showFull ? "w-auto" : "w-0") : state.showFull ? "h-auto" : "h-0"}`}
     >
-      {/* Core slot: allows other plugins (like export plugin) to contribute buttons here */}
       <PluginSlot
         name="DOCK_ACTIONS"
         className={`flex gap-2 ${isHorizontal ? "flex-row" : "flex-col"}`}
       />
-
       <ActionButton
         onClick={() => openSettings()}
         icon={<Settings size={14} />}
@@ -364,6 +518,8 @@ function DockGlobalActions() {
     </div>
   );
 }
+
+// ─── TabDockComponent ─────────────────────────────────────────────────────────
 
 /**
  * TabDockComponent: Final assembled component
@@ -377,6 +533,7 @@ export function TabDockComponent() {
   const isHorizontal = state.config.orientation === "horizontal";
   const isBottom = state.config.snap?.startsWith("B") ?? true;
   const isRight = state.config.snap?.endsWith("R") ?? false;
+  const showMetrics = state.config.showMetricsHud ?? true;
 
   return (
     <TabDockContext.Provider value={dock}>
@@ -420,7 +577,6 @@ export function TabDockComponent() {
             type: "spring",
             stiffness: 400,
             damping: 30,
-            // Key fix: disable animation on position property to prevent "flying in"
             x: { duration: 0 },
             y: { duration: 0 },
             left: { duration: 0 },
@@ -465,6 +621,22 @@ export function TabDockComponent() {
             ))}
           </Reorder.Group>
 
+          {/* Metrics HUD: only shown when enabled in config */}
+          {showMetrics && (
+            <>
+              <div
+                className={`bg-[var(--bg-stage)] transition-opacity ${state.showFull ? "opacity-100" : "opacity-0"} ${isHorizontal ? "w-[1px] h-6 mx-1" : "w-6 h-[1px] my-1"}`}
+              />
+              <div
+                className={`transition-all duration-500
+                  ${state.showFull ? "opacity-100 scale-100" : "opacity-0 scale-95 overflow-hidden"}
+                  ${isHorizontal ? (state.showFull ? "w-auto" : "w-0") : state.showFull ? "h-auto" : "h-0"}`}
+              >
+                <DockMetricsHUD />
+              </div>
+            </>
+          )}
+
           <div
             className={`bg-[var(--bg-stage)] transition-opacity ${state.showFull ? "opacity-100" : "opacity-0"} ${isHorizontal ? "w-[1px] h-6 mx-1" : "w-6 h-[1px] my-1"}`}
           />
@@ -472,193 +644,5 @@ export function TabDockComponent() {
         </motion.div>
       </AnimatePresence>
     </TabDockContext.Provider>
-  );
-}
-
-/**
- * TabDockSettings: Configuration item component contributed to settings panel
- */
-export function TabDockSettings() {
-  const { state, updateConfig } = useTabDock();
-  const { config } = state;
-
-  // Feature toggles to easily toggle read-only behavior for settings
-  const IS_LAYOUT_READ_ONLY = true;
-  const IS_GRID_RESTRICTED_READ_ONLY = true; // when true, grid items other than BL, BC, BR are read-only
-
-  return (
-    <div className="flex flex-col gap-3">
-      <h5 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest pl-1">
-        Tab Dock Layout
-      </h5>
-
-      {/* 1. Orientation Toggle */}
-      <div className="flex bg-[var(--bg-stage)] rounded-xl p-1 gap-1">
-        {[
-          { id: "horizontal", icon: <Rows2 size={13} />, label: "Horizontal" },
-          { id: "vertical", icon: <Columns2 size={13} />, label: "Vertical" },
-        ].map((item) => {
-          const isActive = (config.orientation || "horizontal") === item.id;
-          return (
-            <button
-              key={item.id}
-              disabled={IS_LAYOUT_READ_ONLY}
-              onClick={() => {
-                if (IS_LAYOUT_READ_ONLY) return;
-                updateConfig({
-                  orientation: item.id as "horizontal" | "vertical",
-                });
-              }}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg transition-all ${
-                isActive
-                  ? IS_LAYOUT_READ_ONLY
-                    ? "bg-[var(--bg-panel)]/60 text-indigo-500/60 shadow-none"
-                    : "bg-[var(--bg-panel)] text-indigo-500 shadow-sm"
-                  : IS_LAYOUT_READ_ONLY
-                    ? "text-[var(--text-muted)]/50"
-                    : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
-              } ${IS_LAYOUT_READ_ONLY ? "cursor-not-allowed opacity-50" : ""}`}
-            >
-              {item.icon}{" "}
-              <span className="text-[10px] font-black uppercase tracking-tight">
-                {item.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* 2. Always Expand Switch */}
-      <button
-        onClick={() => updateConfig({ showProps: !config.showProps })}
-        className="flex items-center justify-between w-full p-2.5 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] group"
-      >
-        <div className="flex items-center gap-3">
-          <div
-            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${config.showProps ? "bg-emerald-500/10 text-emerald-500" : "bg-[var(--bg-stage)] text-[var(--text-muted)]"}`}
-          >
-            <Maximize2 size={13} />
-          </div>
-          <span className="text-[10px] font-black text-[var(--text-main)] uppercase tracking-tight">
-            Always Expand
-          </span>
-        </div>
-        <Switch
-          checked={config.showProps || false}
-          onChange={(v) => updateConfig({ showProps: v })}
-          activeColor="bg-emerald-500"
-        />
-      </button>
-
-      {/* 3. Branch Indentation Toggle */}
-      <button
-        onClick={() => updateConfig({ indentBranches: !config.indentBranches })}
-        className="flex items-center justify-between w-full p-2.5 rounded-xl bg-[var(--bg-stage)] hover transition-all border border-[var(--border-subtle)] group"
-      >
-        <div className="flex items-center gap-3">
-          <div
-            className={`w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center transition-colors ${config.indentBranches ? "bg-indigo-500/10 text-indigo-600 " : "bg-[var(--bg-stage)] text-[var(--text-muted)]"}`}
-          >
-            <Indent size={14} />
-          </div>
-          <div className="flex flex-col items-start leading-tight text-left">
-            <span className="text-[10px] font-black text-[var(--text-main)] uppercase tracking-tight">
-              Branch Indentation
-            </span>
-            <span className="text-[8px] text-[var(--text-muted)] font-bold uppercase">
-              Show hierarchy levels
-            </span>
-          </div>
-        </div>
-        <Switch
-          checked={config.indentBranches || false}
-          onChange={(v) => updateConfig({ indentBranches: v })}
-          activeColor="bg-indigo-500"
-        />
-      </button>
-
-      {/* 4. Dock Alignment (Miniature Grid) */}
-      <div className="flex items-start justify-between p-2.5 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] transition-colors hover group">
-        <div className="flex flex-col pl-1 pt-1 text-left leading-tight">
-          <span className="text-[10px] font-black text-[var(--text-main)] uppercase tracking-tight">
-            Dock Alignment
-          </span>
-          <span className="text-[8px] text-[var(--text-muted)] font-bold uppercase">
-            {config.snap === "TC"
-              ? "Top Center"
-              : (config.snap || "BC") === "BC"
-                ? "Bottom Center"
-                : config.snap === "TL"
-                  ? "Top Left"
-                  : config.snap === "TR"
-                    ? "Top Right"
-                    : config.snap === "BL"
-                      ? "Bottom Left"
-                      : config.snap === "BR"
-                        ? "Bottom Right"
-                        : config.snap}
-          </span>
-        </div>
-
-        <div className="w-16 aspect-square p-1 flex items-center justify-center">
-          <div className="grid grid-cols-3 grid-rows-3 gap-1.5 w-full h-full">
-            {(
-              ["TL", "TC", "TR", "ML", "MC", "MR", "BL", "BC", "BR"] as const
-            ).map((snap) => {
-              const isHorizontal =
-                (config.orientation || "horizontal") === "horizontal";
-              const isInactive =
-                snap === "MC" ||
-                (isHorizontal
-                  ? snap === "ML" || snap === "MR"
-                  : snap === "TC" || snap === "BC");
-
-              const isSnapReadOnly =
-                IS_GRID_RESTRICTED_READ_ONLY &&
-                !["BL", "BC", "BR"].includes(snap);
-
-              return isInactive ? (
-                <div
-                  key={snap}
-                  className="flex items-center justify-center pointer-events-none opacity-10"
-                >
-                  <div className="w-0.5 h-0.5 rounded-full bg-[var(--text-muted)]" />
-                </div>
-              ) : (
-                <button
-                  key={snap}
-                  disabled={isSnapReadOnly}
-                  onClick={() => {
-                    if (isSnapReadOnly) return;
-                    updateConfig({ snap, position: undefined });
-                  }}
-                  className={`group/snap relative rounded-md transition-all flex items-center justify-center ${
-                    (config.snap || "BC") === snap
-                      ? isSnapReadOnly
-                        ? "bg-indigo-500/40 shadow-none"
-                        : "bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]"
-                      : `bg-[var(--bg-panel)]/50 ${isSnapReadOnly ? "" : "hover:bg-[var(--border-subtle)]"}`
-                  } ${isSnapReadOnly ? "cursor-not-allowed opacity-40" : ""}`}
-                >
-                  <div
-                    className={`w-1 h-1 rounded-full transition-all duration-300 ${
-                      (config.snap || "BC") === snap
-                        ? isSnapReadOnly
-                          ? "bg-[var(--text-main)]/50"
-                          : "bg-[var(--text-main)]"
-                        : `bg-[var(--text-muted)] opacity-50 ${
-                            isSnapReadOnly
-                              ? ""
-                              : "group-hover/snap:bg-[var(--text-main)] group-hover/snap:opacity-100"
-                          }`
-                    }`}
-                  />
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }

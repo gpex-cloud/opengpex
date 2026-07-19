@@ -17,31 +17,5 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-'use client';
-
-/**
- * TabDock Plugin Protocols
- */
-export const PLUGIN_ID = 'overlays.tab_dock';
-export const PLUGIN_AUTHOR = 'opengpex';
-
-/**
- * Custom Config Interface
- */
-export interface TabDockConfig {
-  orientation: 'horizontal' | 'vertical';
-  snap: string; // TL, TC, TR, ML, MC, MR, BL, BC, BR
-  showProps: boolean;
-  indentBranches: boolean;
-  showMetricsHud: boolean;
-  position?: { x: number; y: number };
-}
-
-/**
- * Command IDs
- */
-export const CMD_UPDATE_CONFIG = 'cmd.config.update';
-export const CMD_NEXT_FRAME = 'cmd.nav.next';
-export const CMD_PREV_FRAME = 'cmd.nav.prev';
-export const CMD_OPEN_SETTINGS = 'cmd.open_settings';
-
+export { TabDockComponent } from "./TabDock";
+export { TabDockSettings } from "./settings";
