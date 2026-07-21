@@ -4,6 +4,16 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.31
+
+- Unified composite pipeline: eliminate redundant decode round-trips during render and export
+- ComfyUI Bridge: active-layer input now includes transforms, masks, and adjustments
+- ComfyUI Bridge: sync workflow parameters directly from a live ComfyUI instance — types, ranges, and dropdown options are now auto-detected
+- ComfyUI Bridge: settings panel split into dedicated Environments and Workflows tabs
+- Tab Dock: Metrics HUD can now be toggled on/off in settings
+
+---
+
 ## v1.0.0-beta.30
 
 - Unify clip selection internal representation — all tool types (rect/ellipse/lasso/wand) now use a single polygon format, enabling consistent shape recognition and anti-alias routing across the entire pipeline
