@@ -84,13 +84,24 @@ export function createPixelService(
    *   • Lane A/B: shape is rect → rectOfShape(shape) forwarded as vips crop opt (or undefined for full-frame)
    *   • Lane C:   shape is any type → forwarded to engine worker's mergeLayersWithShape (canvas clip supports arbitrary shape)
    */
+  /**
+   * runLane — internal rendering dispatch.
+   *
+   * Returns a full WorkerResult so callers can access hash/tileMeta when needed
+   * (e.g. shapeToAsset). shapeToBlob extracts only blob/bitmap from the result.
+   *
+   * Lane C: WorkerResult is produced by the engine worker and carries hash + tileMeta
+   *   at zero extra cost (the worker already computed them during composite).
+   * Lane A/B: vips returns a raw Blob; we wrap it into a WorkerResult with blob only.
+   *   hash and tileMeta are absent — callers that need them must call assets.register().
+   */
   async function runLane(
     lane: Lane,
     frame: Frame,
     shape: LocalShape,
     targetLayers: Layer[],
     opts: RenderToBlobOptions,
-  ): Promise<Blob | ImageBitmap> {
+  ): Promise<WorkerResult> {
     const dpi = opts.exportConfig?.dpi ?? frame.dpi ?? 72;
     const isFullFrame = isShapeFullFrame(shape, frame);
     const crop = isFullFrame ? undefined : rectOfShape(shape);
@@ -112,7 +123,7 @@ export function createPixelService(
         blur: adj.blur,
       } : undefined;
 
-      return exportHighRes(rawBlob, {
+      const blob = await exportHighRes(rawBlob, {
         format: opts.format === 'image/png' ? 'png' : 'tiff',
         compression: (opts.exportConfig?.tiffCompression || 'none') as never,
         pngCompression: opts.exportConfig?.pngCompression ?? 6,
@@ -121,7 +132,11 @@ export function createPixelService(
         resize: opts.exportConfig?.resize,
         adjustments: vipsAdj,
       });
-
+      // Lane A: vips does not produce tileMeta — send blob to engine worker for decode.
+      // hash is omitted: Worker computes it via HASH_ASSET, avoiding main-thread SHA-256.
+      // cache=false: export result is a one-shot blob, no need to pollute Worker LRU.
+      // This produces a full WorkerResult (blob + hash + tileMeta) consistent with Lane C.
+      return processor.computeBlobMetadata(blob);
     }
 
     // ─── Lane B: 16-bit multi-layer composite (vips) ──────────────────────────
@@ -177,7 +192,7 @@ export function createPixelService(
       const canvasW = crop ? crop.w : frame.canvas.w;
       const canvasH = crop ? crop.h : frame.canvas.h;
 
-      return compositeMultiLayer16bit(descriptors, canvasW, canvasH, {
+      const blob = await compositeMultiLayer16bit(descriptors, canvasW, canvasH, {
         format: opts.format === 'image/png' ? 'png' : 'tiff',
         compression: opts.exportConfig?.tiffCompression || 'lzw',
         dpi,
@@ -187,6 +202,11 @@ export function createPixelService(
         tileWidth: opts.exportConfig?.tiffTileWidth,
         tileHeight: opts.exportConfig?.tiffTileHeight,
       });
+      // Lane B: vips does not produce tileMeta — send blob to engine worker for decode.
+      // hash is omitted: Worker computes it via HASH_ASSET, avoiding main-thread SHA-256.
+      // cache=false: export result is a one-shot blob, no need to pollute Worker LRU.
+      // This produces a full WorkerResult (blob + hash + tileMeta) consistent with Lane C.
+      return processor.computeBlobMetadata(blob);
     }
 
     // ─── Lane C: 8-bit standard (engine worker + files.encode / external encoder) ──
@@ -199,15 +219,18 @@ export function createPixelService(
     const bitmap = compositeResult.bitmap!;
 
     // 2. Encoding decision
-    if (opts.format === 'raw' || !opts.format) return bitmap;
+    // Lane C: raw format — return bitmap directly, carrying full WorkerResult (hash + tileMeta intact).
+    if (opts.format === 'raw' || !opts.format) return compositeResult;
 
     // 2a. External encoder (e.g. AVIF plugin)
     const externalEncoder = externalEncoders.get(opts.format);
     if (externalEncoder) {
-      return externalEncoder(bitmap, {
+      const blob = await externalEncoder(bitmap, {
         quality: opts.quality,
         metadata: opts.metadata,
       });
+      // External encoder produces a Blob but no tileMeta; carry hash from compositeResult if available.
+      return { blob, hash: compositeResult.hash, tileMeta: compositeResult.tileMeta };
     }
 
     // 2b. FileService (unified encoder for PNG/JPEG/WebP/BMP/TIFF-8)
@@ -229,7 +252,9 @@ export function createPixelService(
       tiffTileHeight: opts.exportConfig?.tiffTileHeight,
     };
 
-    return files.encode(bitmap, opts.format, encodeOpts);
+    const blob = await files.encode(bitmap, opts.format, encodeOpts);
+    // Lane C: carry hash + tileMeta from the composite step so shapeToAsset can inject without re-decoding.
+    return { blob, hash: compositeResult.hash, tileMeta: compositeResult.tileMeta };
   }
 
 
@@ -394,15 +419,19 @@ export function createPixelService(
       },
 
       /**
-       * shapeToBlob — THE unified entry point for rendering-to-blob.
+       * flatten — low-level render method returning the full WorkerResult (blob/bitmap + hash + tileMeta).
        *
-       * Cropping is always expressed via the `shape` parameter (there is NO cropBox in options).
-       * Internally dispatches between:
-       *   • Lane A: 16-bit single-layer direct (vips one-shot decode+encode)
-       *   • Lane B: 16-bit multi-layer composite (vips composite+encode)
-       *   • Lane C: 8-bit standard (engine worker + files.encode / external encoder)
+       * Executes the complete pipeline (layer filtering → pre-rasterize → Lane detection → runLane)
+       * but does NOT truncate the result. Callers can use hash + tileMeta to inject into AssetService
+       * via pixels.worker.asAsset(), avoiding a redundant Worker decode round-trip.
+       *
+       * shapeToBlob is a thin wrapper over this method for backward compatibility.
+       *
+       * Use cases:
+       *   - shapeToAsset: render then inject asset directly (pixels.worker.asAsset), skip redundant decode
+       *   - merge.*: 16-bit precision merge, obtain hash/tileMeta for asset injection
        */
-      async shapeToBlob(frame: Frame, shape: LocalShape, options: RenderToBlobOptions = {}) {
+      async flatten(frame: Frame, shape: LocalShape, options: RenderToBlobOptions = {}): Promise<WorkerResult> {
         // ── 1. Capability downgrade: non-rect shape cannot use 16-bit vips (only rect crop supported)
         let effectiveOpts = options;
         if (shape.type !== 'rect' && options.exportBitDepth === 16) {
@@ -410,9 +439,13 @@ export function createPixelService(
           effectiveOpts = { ...options, exportBitDepth: 8 };
         }
 
-        // ── 2. Layer filtering (host layers + visible only)
+        // ── 2. Layer filtering: visible=false is always excluded (highest priority).
+        //    If layerIds is set, additionally restrict to only those ids.
         const allHostLayers = LayerFactory.getHostLayers(frame.layers.order.map(id => frame.layers.byId[id]));
-        const filteredLayers = allHostLayers.filter(l => l.visible !== false);
+        const allowSet = effectiveOpts.layerIds ? new Set(effectiveOpts.layerIds) : null;
+        const filteredLayers = allowSet
+          ? allHostLayers.filter(l => l.visible !== false && allowSet.has(l.id))
+          : allHostLayers.filter(l => l.visible !== false);
 
         if (filteredLayers.length === 0) {
           console.warn('[PixelService.render] No visible layers to export. All %d host layers are hidden.', allHostLayers.length);
@@ -431,7 +464,24 @@ export function createPixelService(
         console.debug('[PixelService.render] lane=%s format=%s bitDepth=%s layers=%d',
           lane, effectiveOpts.format, effectiveOpts.exportBitDepth ?? 'default', targetLayers.length);
 
+        // Return full WorkerResult — do NOT truncate (callers that only need blob/bitmap use shapeToBlob).
         return runLane(lane, frame, shape, targetLayers, effectiveOpts);
+      },
+
+      /**
+       * shapeToBlob — thin wrapper over renderShape.
+       *
+       * Cropping is always expressed via the `shape` parameter (there is NO cropBox in options).
+       * Internally dispatches between:
+       *   • Lane A: 16-bit single-layer direct (vips one-shot decode+encode)
+       *   • Lane B: 16-bit multi-layer composite (vips composite+encode)
+       *   • Lane C: 8-bit standard (engine worker + files.encode / external encoder)
+       *
+       * Use renderShape directly when hash/tileMeta are needed (e.g. shapeToAsset, merge.*).
+       */
+      async shapeToBlob(frame: Frame, shape: LocalShape, options: RenderToBlobOptions = {}) {
+        const result = await service.render.flatten(frame, shape, options);
+        return result.blob ?? result.bitmap!;
       },
 
       /**
@@ -455,6 +505,36 @@ export function createPixelService(
         return service.render.shapeToBlob(frame, fullShape, options);
       },
 
+
+      /**
+       * flattenLayers — renders the given layers cropped to their bounding union.
+       *
+       * Bounding rect calculation ported from merge.ts (geometry.shape.unitedShapeOfLayers +
+       * geometry.space.getRectCenter) — do NOT rewrite to avoid introducing new bugs.
+       */
+      async flattenLayers(layers: Layer[], frame: Frame, options: RenderToBlobOptions = {}) {
+        // ── Ported from merge.ts: bounding union calculation (verified logic) ──
+        const worldShape = geometry.shape.unitedShapeOfLayers(layers);
+        if (!worldShape) throw new Error('[PixelService.render.flattenLayers] Could not calculate bounding union');
+
+        const unionW = worldShape.rect.w;
+        const unionH = worldShape.rect.h;
+        const { x: unionCx, y: unionCy } = geometry.space.getRectCenter(worldShape.rect);
+        // ── End ported section ──
+
+        // Convert world shape to local shape for shapeToBlob
+        // (shapeToBlob's Lane C will call localToWorldShape internally to convert back)
+        const localShape = geometry.shape.worldToLocalShape(worldShape, frame);
+
+        // Only render the specified layers (bypass visible check — caller decides)
+        const layerIds = layers.map(l => l.id);
+        const workerResult = await service.render.flatten(frame, localShape, {
+          ...options,
+          layerIds,
+        });
+
+        return { ...workerResult, cx: unionCx, cy: unionCy, w: unionW, h: unionH };
+      },
 
       registerEncoder(mimeType, encoder) {
         externalEncoders.set(mimeType, encoder);
@@ -486,7 +566,7 @@ export function createPixelService(
           if (layer.assetId) {
             const asset = assets.get(layer.assetId);
             if (asset?.blob) {
-              await processor.ensureAssetInWorker(layer.assetId, asset.blob);
+              await processor.ensureAssetInWorker(asset.blob, { hash: layer.assetId });
             }
           }
         }));
@@ -555,7 +635,7 @@ export function createPixelService(
           if (layer.assetId) {
             const asset = assets.get(layer.assetId);
             if (asset?.blob) {
-              await processor.ensureAssetInWorker(layer.assetId, asset.blob);
+              await processor.ensureAssetInWorker(asset.blob, { hash: layer.assetId });
             }
           }
         }));
@@ -567,7 +647,7 @@ export function createPixelService(
               if (bm.enabled && bm.assetId) {
                 const maskAsset = assets.get(bm.assetId);
                 if (maskAsset?.blob) {
-                  await processor.ensureAssetInWorker(bm.assetId, maskAsset.blob);
+                  await processor.ensureAssetInWorker(maskAsset.blob, { hash: bm.assetId });
                 }
               }
             }

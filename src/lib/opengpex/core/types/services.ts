@@ -77,6 +77,17 @@ export interface RenderToBlobOptions {
   };
   /** Legacy: kept for backwards compatibility with internal callers (AsyncFilterCache etc.). */
   targetDpr?: number;
+  /**
+   * When set, only layers whose id is in this array are rendered; all others are excluded.
+   * Ignores the `visible` flag of the specified layers — they are always rendered.
+   *
+   * ⚠️ Soft constraint: Prefer `pixels.render.flattenLayers()` over passing `layerIds` directly
+   * to `frameToBlob` / `shapeToBlob`. `layerIds` is primarily an internal implementation detail
+   * used by `flattenLayers`. Direct use is only appropriate when canvas-size output is explicitly needed.
+   *
+   * If omitted, all visible layers are rendered (default behavior, unchanged).
+   */
+  layerIds?: string[];
 }
 
 /**
@@ -186,8 +197,20 @@ export interface WorkerProxy {
   resampleImage: (src: string, targetSize: { w: number; h: number }, options?: { format?: string; quality?: number }) => Promise<WorkerResult>;
   /** Shape clip: clips multiple layers to specified shape and synthesizes new image */
   mergeLayersWithShape: (canvasDim: Dimensions, shape: LocalShape, items: LayerItemForWorker[], options?: { format?: string; quality?: number; targetDpr?: number }) => Promise<WorkerResult>;
-  /** Ensures asset blob is decoded in Worker cache (used for bitmapMask etc. which are only rendered in main thread) */
-  ensureAssetInWorker: (hash: string, blob: Blob) => Promise<void>;
+  /**
+   * Ensures asset blob is decoded in Worker cache and returns a WorkerResult (blob + hash + tileMeta).
+   * options.hash: used directly as Worker cache key when provided; otherwise Worker computes it via HASH_ASSET.
+   * Always stores the decoded bitmap mipmap in Worker LRU (for render-path assets).
+   * For one-shot export blobs that should NOT enter LRU, use `computeBlobMetadata` instead.
+   * Callers that only need the side-effect (cache warm-up) can ignore the return value.
+   */
+  ensureAssetInWorker: (blob: Blob, options?: { hash?: string }) => Promise<WorkerResult>;
+  /**
+   * Computes hash + TileMetadata for a one-shot blob WITHOUT storing anything in Worker LRU.
+   * Use for Lane A/B vips export output — the blob is returned to the caller directly and
+   * never rendered again, so LRU storage would only waste Worker memory.
+   */
+  computeBlobMetadata: (blob: Blob) => Promise<WorkerResult>;
   /** Transcodes TIFF blob to PNG raster via wasm-vips in Worker */
   transcodeTiff: (blob: Blob) => Promise<Blob>;
   /** Encodes RGBA ImageData to TIFF blob via wasm-vips in Worker */
@@ -234,9 +257,25 @@ export interface PixelService {
      */
     preRasterizeLayers: (layers: Layer[], opts?: { dpr?: number }) => Promise<Layer[]>;
     /**
+     * flatten — low-level render method that returns the full WorkerResult (blob/bitmap + hash + tileMeta).
+     *
+     * Executes the same pipeline as shapeToBlob (layer filtering → pre-rasterize → Lane detection → runLane)
+     * but does NOT truncate the result. Callers can use hash + tileMeta to inject into AssetService via
+     * pixels.worker.asAsset(), avoiding a redundant Worker decode round-trip.
+     *
+     * shapeToBlob is a thin wrapper over this method (extracts blob/bitmap only) for backward compatibility.
+     *
+     * Use cases:
+     *   - shapeToAsset: render then inject asset directly (pixels.worker.asAsset), skip redundant decode
+     *   - merge.*: 16-bit precision merge, obtain hash/tileMeta for asset injection
+     */
+    flatten: (frame: Frame, shape: LocalShape, options?: RenderToBlobOptions) => Promise<WorkerResult>;
+    /**
      * Area flatten: renders the region of `frame` matching `shape` and encodes it.
      * When `options.format === 'raw'` returns an ImageBitmap; otherwise returns a Blob.
      * Internally chooses between the 16-bit vips lane and the 8-bit engine-worker lane.
+     *
+     * Thin wrapper over renderShape — use renderShape directly when hash/tileMeta are needed.
      */
     shapeToBlob: (frame: Frame, shape: LocalShape, options?: RenderToBlobOptions) => Promise<Blob | ImageBitmap>;
     /**
@@ -244,6 +283,26 @@ export interface PixelService {
      * Renders the entire frame's visible canvas region.
      */
     frameToBlob: (frame: Frame, options?: RenderToBlobOptions) => Promise<Blob | ImageBitmap>;
+    /**
+     * Renders the given layers to a Blob, cropped to their bounding union (minimum enclosing rect).
+     * Returns the blob together with the bounding rect's center (cx, cy) and size (w, h),
+     * so callers can position the result back onto the canvas.
+     *
+     * Internally calls shapeToBlob with the computed bounding shape and layerIds filter.
+     * Supports Lane A/B/C (including 16-bit via vips).
+     *
+     * ⚠️ Bounding rect calculation is ported from merge.ts (geometry.shape.unitedShapeOfLayers +
+     * geometry.space.getRectCenter) — do NOT rewrite this logic to avoid introducing new bugs.
+     *
+     * Use cases:
+     *   - ComfyUI img2img: send a single layer's content (not the full canvas)
+     *   - Layer merge: composite layers to a new asset (see merge.* commands)
+     */
+    flattenLayers: (
+      layers: Layer[],
+      frame: Frame,
+      options?: RenderToBlobOptions,
+    ) => Promise<WorkerResult & { cx: number; cy: number; w: number; h: number }>;
     /**
      * Registers an external encoder for a MIME type that FileService does not natively support
      * (e.g. AVIF, which physically lives in a plugin worker).

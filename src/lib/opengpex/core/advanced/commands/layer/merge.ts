@@ -194,7 +194,7 @@ export const LayerMergeCommands = {
     name: 'Rasterize Layer',
     undoable: true,
     execute: async (ctx: EditorContextValue, payload?: { layerId?: string }): Promise<void> => {
-      const { activeFrame, pixels, layers, actions, geometry } = ctx;
+      const { activeFrame, pixels, layers, actions } = ctx;
       if (!activeFrame) return;
 
       const layerId = payload?.layerId || ctx.activeLayer?.id;
@@ -204,20 +204,16 @@ export const LayerMergeCommands = {
       if (!layer) return;
 
       try {
-        const worldShape = geometry.shape.unitedShapeOfLayers([layer]);
-        if (!worldShape) throw new Error('Could not calculate bounding shape');
-
-        const unionW = worldShape.rect.w;
-        const unionH = worldShape.rect.h;
-        const { x: unionCx, y: unionCy } = geometry.space.getRectCenter(worldShape.rect);
-
-        // Pre-rasterize text/color layers to ensure the Worker has valid bitmaps to composite
-        const [rasterizedLayer] = await preRasterizeLayers([layer], pixels);
-
         const targetDpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
-        const assetResult = await pixels.worker.asAsset(
-          pixels.worker.mergeLayersWithShape([rasterizedLayer], worldShape, { targetDpr })
-        );
+
+        const result = await pixels.render.flattenLayers([layer], activeFrame, {
+          format: 'image/png',
+          exportBitDepth: 16,
+          targetDpr,
+        });
+
+        const { cx: unionCx, cy: unionCy, w: unionW, h: unionH } = result;
+        const assetResult = await pixels.worker.asAsset(Promise.resolve(result));
 
         if (!assetResult) throw new Error('Rasterize failed');
 

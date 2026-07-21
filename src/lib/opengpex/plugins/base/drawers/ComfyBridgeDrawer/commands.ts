@@ -117,13 +117,12 @@ async function getInputImageBlob(ctx: EditorContextValue, inputSource: InputSour
     return result as Blob;
   }
 
-  // Default: active-layer — fetch the single selected layer's raw asset
-  const { activeLayer, assets } = ctx;
-  if (!activeLayer) return null;
-  const url = assets.getURL(activeLayer.assetId);
-  if (!url) return null;
-  const res = await fetch(url);
-  return res.blob();
+  // Default: active-layer — render the layer via flattenLayers (includes transforms/masks/adjustments)
+  // Output size = layer bounding union (not full canvas), position info returned for result re-placement
+  const { activeLayer, activeFrame, pixels } = ctx;
+  if (!activeLayer || !activeFrame) return null;
+  const result = await pixels.render.flattenLayers([activeLayer], activeFrame, { format: 'image/png' });
+  return (result.blob ?? result.bitmap!) as Blob;
 }
 
 // ─── Helper: Append execution record to history ────────────────────────────────

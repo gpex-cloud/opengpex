@@ -100,11 +100,40 @@ export class WorkerProxy {
   }
 
   /**
-   * Ensures asset blob is decoded in Worker cache
-   * Used to preload assets like bitmapMask during merging (which are normally only rendered on the main thread)
+   * Ensures asset blob is decoded in Worker cache and returns a WorkerResult (blob + hash + tileMeta).
+   *
+   * When `hash` is provided (e.g. layer.assetId is already known), it is used directly as the Worker
+   * cache key — no extra hash computation needed.
+   * When `hash` is omitted (e.g. Lane A/B vips output has no pre-existing hash), the Worker computes
+   * it via HASH_ASSET before decoding, and the resolved hash is returned in the WorkerResult.
+   *
+   * Callers that only need the side-effect (cache warm-up) can ignore the return value.
+   * Callers that need hash + tileMeta (e.g. shapeToAsset) can use the WorkerResult directly
+   * to call assets.inject without a redundant decode.
    */
-  async ensureAssetInWorker(hash: string, blob: Blob): Promise<void> {
-    await workerBridge.request('DECODE_AND_TILE', { hash, blob });
+  async ensureAssetInWorker(blob: Blob, options?: { hash?: string }): Promise<import('@opengpex/editor/core/types').WorkerResult> {
+    const resolvedHash = options?.hash ?? await workerBridge.request<string>('HASH_ASSET', blob);
+    const tileMeta = await workerBridge.request<import('@opengpex/editor/core/types').TileMetadata>(
+      'DECODE_AND_TILE', { hash: resolvedHash, blob }
+    );
+    return { blob, hash: resolvedHash, tileMeta };
+  }
+
+  /**
+   * Computes hash + TileMetadata for a one-shot blob WITHOUT storing anything in Worker LRU.
+   *
+   * Use this for Lane A/B vips export output where the resulting blob will be returned to
+   * the caller directly and never rendered again. Avoids polluting the Worker LRU with
+   * large export bitmaps that have no render-path reuse.
+   *
+   * Contrast with `ensureAssetInWorker` which always stores the decoded bitmap in LRU
+   * (intended for render-path assets that will be composited repeatedly).
+   */
+  async computeBlobMetadata(blob: Blob): Promise<import('@opengpex/editor/core/types').WorkerResult> {
+    const { hash, tileMeta } = await workerBridge.request<{ hash: string; tileMeta: import('@opengpex/editor/core/types').TileMetadata }>(
+      'COMPUTE_BLOB_METADATA', { blob }
+    );
+    return { blob, hash, tileMeta };
   }
 
   /**

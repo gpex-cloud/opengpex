@@ -25,6 +25,12 @@ import { TileMetadata } from '@opengpex/editor/core/types';
 import { workerCache } from '../core/WorkerCache';
 import { PixelUtils } from '../../PixelUtils';
 
+/**
+ * Decodes a blob and returns TileMetadata, storing the bitmap mipmap in Worker LRU.
+ *
+ * @param id   - Cache key (asset hash). Used as LRU key for bitmap mipmap storage.
+ * @param blob - Source image blob to decode.
+ */
 export async function decodeAndGetMetadata(id: string, blob: Blob): Promise<TileMetadata> {
   // 1. Backup Blob
   if (!workerCache.blobCache.has(id)) {
@@ -72,6 +78,32 @@ export async function decodeAndGetMetadata(id: string, blob: Blob): Promise<Tile
 
   workerCache.pendingDecodes.set(id, promise);
   return promise;
+}
+
+/**
+ * Computes hash + TileMetadata for a blob WITHOUT storing anything in Worker LRU.
+ * Use this for one-shot blobs (e.g. Lane A/B vips export output) where the bitmap
+ * will never be rendered again and should not pollute the LRU cache.
+ *
+ * The source bitmap is closed immediately after metadata extraction.
+ */
+export async function computeBlobMetadata(blob: Blob): Promise<{ hash: string; tileMeta: TileMetadata }> {
+  const hash = await PixelUtils.calculateHash(blob);
+  const sourceBitmap = await createImageBitmap(blob);
+  const { width, height } = sourceBitmap;
+  const contentBounds = await PixelUtils.calculateContentBounds(sourceBitmap);
+  // Free GPU memory immediately — no LRU storage.
+  sourceBitmap.close();
+
+  const tileSize = 256;
+  const cols = Math.ceil(width / tileSize);
+  const rows = Math.ceil(height / tileSize);
+  const isTiled = width > 512 || height > 512;
+
+  return {
+    hash,
+    tileMeta: { width, height, tileSize, cols, rows, levels: 1, contentBounds, isTiled },
+  };
 }
 
 export async function getTile(id: string, level: number, x: number, y: number): Promise<ImageBitmap> {

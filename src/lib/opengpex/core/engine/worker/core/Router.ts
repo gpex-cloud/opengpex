@@ -43,6 +43,11 @@ export async function handleMessage(type: string, payload: any): Promise<{ resul
       result = await explorer.decodeAndGetMetadata(payload.hash, payload.blob);
       break;
 
+    case 'COMPUTE_BLOB_METADATA':
+      // One-shot metadata computation for Lane A/B export blobs — no LRU side effects.
+      result = await explorer.computeBlobMetadata(payload.blob);
+      break;
+
     case 'GET_TILE':
       const bitmap = await explorer.getTile(payload.hash, payload.level, payload.x, payload.y);
       result = bitmap;
