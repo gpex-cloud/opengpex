@@ -37,7 +37,6 @@ import { useEditorState, useEditorServices, usePluginSelfConfig, usePluginComman
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
 import { useModelManager, ModelDownloader } from '../shared';
-import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
 import { upscaleClient } from './client';
 import type { AIToolsConfig, UpscaleConfig, UpscaleModelEntry } from '../protocols';
 import type { AIToolsDrawerCommandsMap, AIToolsDrawerSignalsMap } from '../commands.d';
@@ -65,7 +64,7 @@ function ensureBuiltins(models: UpscaleModelEntry[]): UpscaleModelEntry[] {
 
 export function UpscalerPanel() {
   const { activeLayer } = useEditorState();
-  const { actions } = useEditorServices();
+  const { actions, pixels } = useEditorServices();
   const { upscaleCmd, upscaleAbortCmd } = usePluginCommands<AIToolsDrawerCommandsMap>();
   const { upscaleStatusSignal } = usePluginSignals<AIToolsDrawerSignalsMap>();
   const [config, setConfig] = usePluginSelfConfig<AIToolsConfig>();
@@ -102,12 +101,12 @@ export function UpscalerPanel() {
   const dimensions = useMemo(() => {
     if (!activeLayer || activeLayer.type !== 'image') return null;
     // Prefer bitmap dimensions (exact), fall back to layer.bounding (always available)
-    const bitmap = activeLayer.src ? sourceBitmapCache.get(activeLayer.src) : null;
+    const bitmap = activeLayer.src ? pixels.image.ensureBitmap(activeLayer.src) : undefined;
     const w = bitmap?.width ?? activeLayer.bounding?.w ?? 0;
     const h = bitmap?.height ?? activeLayer.bounding?.h ?? 0;
     if (w === 0 || h === 0) return null;
     return { w, h, outW: w * targetScale, outH: h * targetScale };
-  }, [activeLayer, targetScale]);
+  }, [activeLayer, targetScale, pixels.image]);
 
   // ─── Handlers ──────────────────────────────────────────────────────────────
 

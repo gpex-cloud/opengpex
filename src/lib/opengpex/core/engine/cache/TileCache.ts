@@ -17,43 +17,35 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { workerBridge } from '@opengpex/editor/core/engine/worker/WorkerBridge';
-
 /**
- * TileCache: Tiled cache manager
- * Specially designed for Canvas rendering engines, supporting asynchronous tile retrieval and hit management.
- * 
+ * TileCache — Tiled bitmap cache for the Engine V2 rendering pipeline.
+ *
+ * Adapted from v1 TileCache with the following changes:
+ * - Uses Engine V2's WorkerBridge (via injected fetcher) instead of v1 workerBridge global.
+ * - Maintains the same reactive subscription model for zero-idle-CPU rendering.
+ * - LRU eviction prevents memory overflow (MAX_TILES = 500).
+ *
  * [Performance Optimization: Reactive Redraw]
- * Introduced subscribe/notify mechanism. This is key to solving "high fan noise due to large images":
- * The rendering engine no longer uses a 60fps busy loop, but subscribes to this cache. Only when a new tile completes loading,
- * a frame redraw is triggered, reducing CPU/GPU usage to 0 in static states.
- * 
- * Introduced LRU (Least Recently Used) eviction policy to prevent memory overflow.
+ * The rendering engine subscribes to this cache. Only when a new tile completes
+ * loading does it trigger a frame redraw, reducing CPU/GPU usage to 0 in static states.
  */
+
+/** Tile fetch function — injected by the consumer (decouples from WorkerBridge). */
+export type TileFetcher = (hash: string, level: number, x: number, y: number) => Promise<ImageBitmap>;
+
 class TileCache {
   private static instance: TileCache;
   private cache: Map<string, ImageBitmap> = new Map();
   private pending: Set<string> = new Set();
   private listeners: Set<() => void> = new Set();
-  private usageOrder: string[] = []; // Tracks usage order for LRU
-  private retryCount: Map<string, number> = new Map(); // Tracks failure count
-  private MAX_TILES = 500;           // Maximum tile cache size
+  private usageOrder: string[] = [];
+  private retryCount: Map<string, number> = new Map();
+  private readonly MAX_TILES = 500;
 
-  private constructor() { }
+  /** Injected tile fetcher. Must be set before first `get()` call. */
+  private fetcher: TileFetcher | null = null;
 
-  /**
-   * Subscribe to cache changes (used to trigger UI redraws)
-   */
-  public subscribe(callback: () => void) {
-    this.listeners.add(callback);
-    return () => {
-      this.listeners.delete(callback);
-    };
-  }
-
-  private notify() {
-    this.listeners.forEach(cb => cb());
-  }
+  private constructor() {}
 
   static getInstance(): TileCache {
     if (!TileCache.instance) {
@@ -63,9 +55,31 @@ class TileCache {
   }
 
   /**
+   * Inject the tile fetch function (called once during initialization).
+   * Decouples TileCache from WorkerBridge to maintain single-directional dependency.
+   */
+  public setFetcher(fetcher: TileFetcher): void {
+    this.fetcher = fetcher;
+  }
+
+  /**
+   * Subscribe to cache changes (used to trigger UI redraws).
+   */
+  public subscribe(callback: () => void): () => void {
+    this.listeners.add(callback);
+    return () => {
+      this.listeners.delete(callback);
+    };
+  }
+
+  private notify(): void {
+    this.listeners.forEach((cb) => cb());
+  }
+
+  /**
    * Gets tile. If absent, triggers asynchronous loading and returns undefined.
    */
-  get(hash: string, level: number, x: number, y: number): ImageBitmap | undefined {
+  public get(hash: string, level: number, x: number, y: number): ImageBitmap | undefined {
     const key = `${hash}-${level}-${x}-${y}`;
 
     if (this.cache.has(key)) {
@@ -75,11 +89,15 @@ class TileCache {
 
     if (!this.pending.has(key)) {
       const count = this.retryCount.get(key) || 0;
-      if (count >= 3) return undefined; // Exceeded retry limit, abort
+      if (count >= 3) return undefined;
+
+      if (!this.fetcher) {
+        console.warn('[TileCache] No fetcher injected — cannot load tile');
+        return undefined;
+      }
 
       this.pending.add(key);
-
-      workerBridge.request<ImageBitmap>('GET_TILE', { hash, level, x, y })
+      this.fetcher(hash, level, x, y)
         .then((bitmap: ImageBitmap) => {
           this.addToCache(key, bitmap);
           this.pending.delete(key);
@@ -88,7 +106,6 @@ class TileCache {
         .catch(() => {
           this.pending.delete(key);
           this.retryCount.set(key, count + 1);
-          // Delay redraw to try again in next loop (if limit not exceeded)
           setTimeout(() => this.notify(), 1000);
         });
     }
@@ -96,7 +113,7 @@ class TileCache {
     return undefined;
   }
 
-  private updateUsage(key: string) {
+  private updateUsage(key: string): void {
     const index = this.usageOrder.indexOf(key);
     if (index > -1) {
       this.usageOrder.splice(index, 1);
@@ -104,7 +121,7 @@ class TileCache {
     this.usageOrder.push(key);
   }
 
-  private addToCache(key: string, bitmap: ImageBitmap) {
+  private addToCache(key: string, bitmap: ImageBitmap): void {
     if (this.cache.size >= this.MAX_TILES) {
       const oldestKey = this.usageOrder.shift();
       if (oldestKey) {
@@ -120,26 +137,30 @@ class TileCache {
   }
 
   /**
-   * Clears all cache of specified asset (for GC)
+   * Clears all cached tiles for a given asset hash.
    */
-  clearAsset(hash: string) {
+  public clearAsset(hash: string): void {
     for (const key of this.cache.keys()) {
       if (key.startsWith(hash)) {
         const bitmap = this.cache.get(key);
         bitmap?.close();
         this.cache.delete(key);
-        this.usageOrder = this.usageOrder.filter(k => k !== key);
+        this.usageOrder = this.usageOrder.filter((k) => k !== key);
       }
     }
   }
 
-  clear() {
+  /**
+   * Wipe all cached tiles.
+   */
+  public clear(): void {
     for (const bitmap of this.cache.values()) {
       bitmap.close();
     }
     this.cache.clear();
     this.pending.clear();
     this.usageOrder = [];
+    this.retryCount.clear();
   }
 }
 

@@ -25,6 +25,7 @@ import { GeometryService, WorldPoint, LocalPoint, ViewportPoint } from './geomet
 import { Frame } from './models';
 import type { EditorActions } from './actions';
 import type { EditorContextValue } from './context';
+import type { PixelService, AssetService } from './services';
 
 export interface EditorShortcut {
   id: string;
@@ -90,6 +91,8 @@ export interface InteractionEvent {
   };
   keys: { shift: boolean; alt: boolean; meta: boolean };
   geometry: GeometryService;
+  pixels: PixelService;
+  assets: AssetService;
   actions: EditorActions;
   state: EditorState;
   activeFrame: Frame;

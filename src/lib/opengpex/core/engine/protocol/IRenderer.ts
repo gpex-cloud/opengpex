@@ -17,26 +17,32 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Layer, IMatrix3x3, ClipDescriptor, Dimensions, Rect } from '@opengpex/editor/core/types';
-import { AssetService } from '@opengpex/editor/core/types';
+/**
+ * IRenderer — Abstract rendering backend interface for Engine V2.
+ *
+ * Adapted from v1 `engine/protocol/IRenderer.ts`.
+ * Maintains the same contract but decoupled from v1 import paths.
+ */
+
+import type { Layer, Dimensions, Rect, ClipDescriptor } from '@opengpex/editor/core/types';
+import type { AssetService } from '@opengpex/editor/core/types';
+import type { MatrixData } from './descriptors';
 
 export interface DrawLayerOptions {
-  matrix?: IMatrix3x3 | { a: number; b: number; c: number; d: number; tx: number; ty: number };
+  matrix?: MatrixData;
   opacity?: number;
   drawRect?: Rect;
   clipSequence?: ClipDescriptor[];
-  bitmapMaskOverride?: { maskId: string; source: CanvasImageSource };     // New: fast-track override
+  bitmapMaskOverride?: { maskId: string; source: CanvasImageSource };
   width?: number;
   height?: number;
   imageSmoothingQuality?: 'low' | 'high';
   isExporting?: boolean;
   imageOverride?: CanvasImageSource;
   /**
-   * [Filter Fast-Track §2.1] True while user is dragging a slider/control.
+   * [Filter Fast-Track] True while user is dragging a slider/control.
    * During interaction, the engine bypasses AsyncFilterCache's Worker RPC
-   * for small images (pixels ≤ MAX_REALTIME_FILTER_PIXELS) and shows the
-   * unfiltered source for large images to maintain 60fps responsiveness.
-   * @see 20260711_filter_fast_track_extension.md
+   * for small images and shows unfiltered source for large images to maintain 60fps.
    */
   isInteracting?: boolean;
 }
@@ -50,34 +56,31 @@ export interface RenderLayerCommand {
 export type RenderCommand = RenderLayerCommand;
 
 /**
- * Abstract rendering backend interface (WASM-Ready)
+ * Abstract rendering backend interface (WASM-Ready).
  * Does not depend on any specific DOM or CanvasRenderingContext2D API.
  */
 export interface IRenderer {
-  /** 
+  /**
    * Initializes frame drawing, clears canvas.
    * @param dim - The logical frame dimensions (for internal tracking)
    * @param artboardClip - Optional clip rect (in physical pixel space) that
-   *   restricts all subsequent rendering to the artboard boundary. When
-   *   provided, pixels outside this rect are never drawn — this ensures
-   *   layers that extend beyond the canvas are visually hidden without
-   *   destructively modifying their data.
+   *   restricts all subsequent rendering to the artboard boundary.
    */
   beginFrame(dim: Dimensions, artboardClip?: Rect): void;
 
-  /** 
-   * Pushes instruction to rendering queue (Display List mode)
-   * This enables cross-boundary (JS <-> WASM) communication to be batched, avoiding frequent bridge calls.
+  /**
+   * Pushes instruction to rendering queue (Display List mode).
+   * Enables cross-boundary batching to avoid frequent bridge calls.
    */
   pushCommand(cmd: RenderCommand): void;
 
-  /** 
-   * Immediately executes all commands in the queue 
+  /**
+   * Immediately executes all commands in the queue.
    */
   flush(assetService?: AssetService): void;
 
   /**
-   * (Legacy compatibility) Directly draws single layer, bypassing command queue
+   * (Legacy compatibility) Directly draws single layer, bypassing command queue.
    */
   drawLayerDirect(layer: Layer, options: DrawLayerOptions, assetService?: AssetService): void;
 }

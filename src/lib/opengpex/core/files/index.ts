@@ -21,11 +21,11 @@
  * Unified File Service — factory and public exports.
  *
  * Creates a FileService instance with all format handlers registered.
- * Dependencies: AssetService + WorkerProxy (infrastructure peers).
- * Does NOT depend on PixelService (see architecture doc §2.3).
+ * Dependencies: AssetService + PixelService (for fileIO namespace — TIFF/RAW Worker ops).
+ * Phase 7.2: FileService depends on PixelService.fileIO (vips unified Worker).
  */
 
-import type { AssetService, WorkerProxy } from '@opengpex/editor/core/types';
+import type { AssetService, PixelService } from '@opengpex/editor/core/types';
 import type {
   FileService,
   ImageFormatHandler,
@@ -196,11 +196,11 @@ export function bitmapToCanvas(bitmap: ImageBitmap): OffscreenCanvas {
  * Creates a unified FileService instance.
  *
  * @param assets - AssetService for registering ICC/EXIF blobs
- * @param workerProxy - WorkerProxy for heavy transcoding (SVG/EPS/RAW)
+ * @param pixels - PixelService (provides fileIO namespace for TIFF/RAW Worker operations)
  */
 export function createFileService(
   assets: AssetService,
-  workerProxy: WorkerProxy,
+  pixels: PixelService,
 ): FileService {
   // Instantiate all format handlers
   const handlers: ImageFormatHandler[] = [
@@ -210,8 +210,8 @@ export function createFileService(
     new BmpHandler(),
     new GifHandler(),
     new HeicHandler(assets),
-    new TiffHandler(assets, workerProxy),
-    new RawHandler(assets, workerProxy),
+    new TiffHandler(assets, pixels),
+    new RawHandler(assets),
     new VectorHandler(),
   ];
 

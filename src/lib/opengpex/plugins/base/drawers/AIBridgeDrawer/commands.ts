@@ -239,14 +239,11 @@ async function extractImageFromResponse(res: Response): Promise<Blob> {
 
 async function getActiveLayerBlob(ctx: EditorContextValue): Promise<Blob | null> {
   const { activeLayer, assets } = ctx;
-  if (!activeLayer) return null;
+  if (!activeLayer || !activeLayer.assetId) return null;
 
-  // Gets asset URL corresponding to layer via AssetService
-  const url = assets.getURL(activeLayer.assetId);
-  if (!url) return null;
-
-  const res = await fetch(url);
-  return res.blob();
+  // Direct memory read from AssetService pool — no fetch/network overhead
+  const entry = assets.get(activeLayer.assetId);
+  return entry?.blob ?? null;
 }
 
 // ─── Helper: Append generation record to history ───────────────────────────────

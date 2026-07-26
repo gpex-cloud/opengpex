@@ -44,6 +44,8 @@ export const INITIAL_VOLATILE: VolatileState = {
     smartguides: null,
     selectionErrorPulse: 0,
   },
+  // [P2 Perf] Buffer version counter for snapshot cache invalidation
+  _bufferVersion: 0,
 };
 
 /**

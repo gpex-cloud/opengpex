@@ -35,15 +35,22 @@ export interface MatrixRect extends IMatrix3x3 {
 /**
  * useFastSync: Basic synchronization pipeline
  * Listens to the Ticker and executes user-defined sync callbacks in every frame.
+ *
+ * @param options.throttleHz - When set, throttles execution to ~N Hz during interaction.
+ *   Omit for critical-path subscribers that must run every frame (e.g. CanvasStage, Backdrop).
+ *   Only applies when `v.activeState.interacting === true`; non-interacting ticks always execute.
  */
 export function useFastSync<T extends Element>(
   ref: React.RefObject<T | null>,
   isActive: boolean,
-  syncFn: (v: VolatileState, frame: Frame, cam: CameraState) => void
+  syncFn: (v: VolatileState, frame: Frame, cam: CameraState) => void,
+  options?: { throttleHz?: number }
 ) {
   const { volatileRef } = useEditorServices();
   const { state } = useEditorState();
   const frame = state.activeFrameId ? state.frames.byId[state.activeFrameId] : undefined;
+  const lastExecTimeRef = useRef(0);
+  const throttleInterval = options?.throttleHz ? (1000 / options.throttleHz) : 0;
 
   const onTick = useCallback(() => {
     if (!ref.current || !frame || !isActive) return;
@@ -52,33 +59,57 @@ export function useFastSync<T extends Element>(
     // [Performance Optimization] To ensure rotation, animation and other program-triggered changes can render in real time, no longer intercept Ticker
     // if (!force && !v.activeState.interacting) return;
 
-    // --- Internal Merge Logic ---
-    const frameDraft = v.buffered.frames[frame.id];
-
-    // 1. Merge artboards (slow-track baseline + fast-track increment)
-    // [Critical Fix] Do not use isInteracting as the sole guard.
-    // isInteracting is synchronously set to false after commit, but React State updates asynchronously.
-    // If we skip merging now, it will flash back to the old frame data (tearing).
-    // Correct approach: as long as there are drafts in the buffer, continue to merge until React consumes them.
-    let latestFrame = frame;
-    const hasLayerDrafts = Object.keys(v.buffered.layers).length > 0;
-    if (frameDraft || hasLayerDrafts) {
-      latestFrame = { ...frame, ...frameDraft };
-      // Deep stitching: merge fast-track layer increments into the layers array
-      if (hasLayerDrafts) {
-        const nextById: Record<string, Layer> = {};
-        for (const id of frame.layers.order) {
-          nextById[id] = LayerUtils.mergeLayerDraft(frame.layers.byId[id], v.buffered.layers[LayerUtils.getCompositeKey(frame.id, id)]);
-        }
-        latestFrame.layers = { byId: nextById, order: frame.layers.order };
+    // [P0 Throttle] Time-based throttling for non-critical subscribers during interaction
+    if (throttleInterval > 0 && v.activeState.interacting) {
+      const now = performance.now();
+      if (now - lastExecTimeRef.current < throttleInterval) {
+        return; // Skip this tick — not enough time elapsed
       }
+      lastExecTimeRef.current = now;
     }
 
-    // 2. Merge camera (fast-track first: use draft as long as it exists)
-    const latestCam = frameDraft?.camera ? frameDraft.camera : frame.camera;
+    // --- [P2 Perf] Snapshot Cache ---
+    // The merge logic (Object.keys, spread, layer merge loop) is identical for all subscribers
+    // in the same tick. Compute once, cache on volatile state, share across all subscribers.
+    const snapshot = v._snapshot;
+    let latestFrame: Frame;
+    let latestCam: CameraState;
+
+    if (snapshot && snapshot.version === v._bufferVersion && snapshot.sourceFrame === frame) {
+      // Cache hit: another subscriber already computed the merge this tick
+      latestFrame = snapshot.frame;
+      latestCam = snapshot.cam;
+    } else {
+      // Cache miss: first subscriber this tick — compute merge
+      const frameDraft = v.buffered.frames[frame.id];
+
+      // [Critical Fix] Do not use isInteracting as the sole guard.
+      // isInteracting is synchronously set to false after commit, but React State updates asynchronously.
+      // If we skip merging now, it will flash back to the old frame data (tearing).
+      // Correct approach: as long as there are drafts in the buffer, continue to merge until React consumes them.
+      latestFrame = frame;
+      const hasLayerDrafts = Object.keys(v.buffered.layers).length > 0;
+      if (frameDraft || hasLayerDrafts) {
+        latestFrame = { ...frame, ...frameDraft };
+        // Deep stitching: merge fast-track layer increments into the layers array
+        if (hasLayerDrafts) {
+          const nextById: Record<string, Layer> = {};
+          for (const id of frame.layers.order) {
+            nextById[id] = LayerUtils.mergeLayerDraft(frame.layers.byId[id], v.buffered.layers[LayerUtils.getCompositeKey(frame.id, id)]);
+          }
+          latestFrame.layers = { byId: nextById, order: frame.layers.order };
+        }
+      }
+
+      // Merge camera (fast-track first: use draft as long as it exists)
+      latestCam = frameDraft?.camera ? frameDraft.camera : frame.camera;
+
+      // Store snapshot for subsequent subscribers in this tick
+      v._snapshot = { version: v._bufferVersion, sourceFrame: frame, frame: latestFrame, cam: latestCam };
+    }
 
     syncFn(v, latestFrame, latestCam);
-  }, [ref, frame, isActive, syncFn, volatileRef]);
+  }, [ref, frame, isActive, syncFn, volatileRef, throttleInterval]);
 
   useLayoutEffect(() => {
     if (isActive) onTick();
@@ -191,10 +222,12 @@ export function useFastMatrixSync<T extends Element, L extends Element = Element
     selector: (v: VolatileState, frame: Frame, cam: CameraState) => MatrixRect | null;
     // Allow user to pass an optional "labelRef" to automatically handle counter-scale
     labelRef?: React.RefObject<L | null>;
+    /** Throttle to ~N Hz during interaction. Omit for full-rate execution. */
+    throttleHz?: number;
   }
 ) {
   const { geometry } = useEditorServices();
-  const { selector, labelRef } = options;
+  const { selector, labelRef, throttleHz } = options;
 
   useFastSync(ref, isActive, (v, f, cam) => {
     const matrix = selector(v, f, cam);
@@ -226,7 +259,7 @@ export function useFastMatrixSync<T extends Element, L extends Element = Element
         overwrite: true
       });
     }
-  });
+  }, throttleHz ? { throttleHz } : undefined);
 }
 
 /**

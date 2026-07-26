@@ -17,6 +17,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+import type { CompositeRequest, CompositeResult, ResampleResult } from '../engine/types';
+
 import {
   Frame,
   Layer,
@@ -29,20 +31,16 @@ import {
   LayerBlendMode,
 } from './models';
 import {
-  LocalRect, Dimensions, ClipDescriptor,
-  Shape, LocalShape, LocalPolygon, ShapeType, TileMetadata
+  LocalRect, Dimensions, Shape, LocalShape, LocalPolygon, TileMetadata
 } from './primitives';
-import { EditorData, EngineStatus } from './state';
+import { EditorData } from './state';
 import type { ImageMetadata } from '../files/types';
 
 /**
- * RenderToBlobOptions: Unified options for PixelService.render.frameToBlob / shapeToBlob.
+ * RenderToBlobOptions: Unified options for composite-to-blob export operations.
  *
  * This options bag expresses "what does the user want" (format / bit depth / metadata / quality / exportConfig)
  * so that the PixelService facade can decide "which backend/encoder to route to" internally.
- *
- * Note: There is NO `cropBox` field — cropping is always expressed via the `shape` parameter
- * of shapeToBlob (frameToBlob is a sugar that supplies a full-canvas rect shape).
  */
 export interface RenderToBlobOptions {
   /** MIME type, or the special string 'raw' to receive an ImageBitmap (no encoding). */
@@ -80,10 +78,6 @@ export interface RenderToBlobOptions {
   /**
    * When set, only layers whose id is in this array are rendered; all others are excluded.
    * Ignores the `visible` flag of the specified layers — they are always rendered.
-   *
-   * ⚠️ Soft constraint: Prefer `pixels.render.flattenLayers()` over passing `layerIds` directly
-   * to `frameToBlob` / `shapeToBlob`. `layerIds` is primarily an internal implementation detail
-   * used by `flattenLayers`. Direct use is only appropriate when canvas-size output is explicitly needed.
    *
    * If omitted, all visible layers are rendered (default behavior, unchanged).
    */
@@ -152,6 +146,17 @@ export interface LayerItemForWorker {
 }
 
 /**
+ * AssetRef: Lightweight reference to a registered asset.
+ * Returned by `assets.register()` and `PixelResult.toAsset()`.
+ * Contains just enough info for callers to use the asset (set on layer, build visibleShape, etc.).
+ */
+export interface AssetRef {
+  id: string;
+  url: string;
+  dimensions: { w: number; h: number };
+}
+
+/**
  * AssetEntryInfo: Public view of asset entry (excluding internal lifecycle states)
  */
 export interface AssetEntryInfo {
@@ -167,8 +172,8 @@ export interface AssetEntryInfo {
  * Core responsibilities: Blob-to-Hash mapping, IDB storage, ObjectURL management, reference-counting GC.
  */
 export interface AssetService {
-  /** Registers asset: inputs Blob, returns Hash. Accepts optional rawBlob for 16-bit fidelity (Phase 5). */
-  register: (blob: Blob, options?: { rawBlob?: Blob; dprScale?: number }) => Promise<string>;
+  /** Registers asset: inputs Blob, returns AssetRef. Accepts optional rawBlob for 16-bit fidelity (Phase 5). */
+  register: (blob: Blob, options?: { rawBlob?: Blob; dprScale?: number }) => Promise<AssetRef>;
   /** Injects asset: directly stores when hash and metadata are known, avoiding duplicate Worker calculations */
   inject: (hash: string, blob: Blob, tileMeta: TileMetadata) => Promise<string>;
 
@@ -180,6 +185,8 @@ export interface AssetService {
   hydrate: (activeIds?: Set<string>) => Promise<void>;
   clear: () => void;
   getPool: () => Record<string, AssetEntryInfo>;
+  /** Phase 7.1: Wire lifecycle callbacks (engine layer subscribes to asset events) */
+  setCallbacks: (callbacks: { onRegistered?: (hash: string, blob: Blob) => void; onReleased?: (hash: string) => void }) => void;
 }
 
 /**
@@ -189,8 +196,6 @@ export interface AssetService {
 export interface WorkerProxy {
   /** Flatten merge: synthesizes multiple layers into a new image */
   mergeLayersToLayer: (canvasDim: Dimensions, items: LayerItemForWorker[], options?: { targetDpr?: number }) => Promise<WorkerResult>;
-  /** Clone clip: clips region from specified asset */
-  cloneRegion: (assetId: string, rect: LocalRect, shape?: ShapeType) => Promise<WorkerResult>;
   /** Bake mask: applies logical mask to physical pixels */
   bakeMasks: (assetId: string, masks: VectorMask[]) => Promise<WorkerResult>;
   /** Resample: adjusts image size in background */
@@ -222,91 +227,122 @@ export interface WorkerProxy {
  * Exposure of inspection (Eyes) and processing (Hands) capabilities.
  */
 export interface PixelService {
-  decode: {
+  /**
+   * Image namespace: decode, analyze, and cache bitmap assets.
+   * Consolidates the former `decode`, `process.thumbnail`, and `cache.clear` into one cohesive surface.
+   */
+  image: {
     /**
-     * Decode `src` into the shared main-thread `ImageBitmap` cache
-     * and return it. Callers must NOT close the returned bitmap; it
-     * is owned by SourceBitmapCache and shared across every consumer
-     * (Canvas2dEngine, BrushOverlay, ClipTool wand, Adjustment
-     * histogram, BgRemoval, …).
+     * Asynchronously load (decode) `src` into the shared main-thread
+     * `ImageBitmap` cache and return it. Guaranteed to resolve with a
+     * valid bitmap (or reject on decode failure).
      *
-     * If you need a Worker-transferable clone, use
-     * `sourceBitmapCache.acquireOwned(src)` instead.
+     * Flow: cache hit → return | in-flight dedup → share | miss → Worker DECODE job → cache → return.
+     *
+     * Callers must NOT close the returned bitmap; it is owned by
+     * SourceBitmapCache and shared across every consumer (Canvas2dEngine,
+     * BrushOverlay, ClipTool wand, Adjustment histogram, BgRemoval, …).
      */
-    bitmap: (src: string) => Promise<ImageBitmap>;
-    dimensions: (src: string, assetId?: string) => Promise<Dimensions>;
-    contentBounds: (src: string, assetId?: string) => Promise<LocalRect>;
-  };
+    loadBitmap: (src: string) => Promise<ImageBitmap>;
 
-  process: {
-    thumbnail: (src: string, maxSize?: number) => Promise<Blob>;
-    resample: (src: string, options: { targetSize: { w: number; h: number } }) => Promise<Blob>;
+    /**
+     * Pre-warm the bitmap cache from a Blob you already hold in memory.
+     * Decodes via the browser's internal thread pool (NOT Worker round-trip).
+     *
+     * Typical use: after bake/composite produces a new Blob, call this so
+     * the next render frame hits cache immediately (no flash/flicker).
+     */
+    cacheBitmap: (src: string, blob: Blob) => Promise<void>;
+
+    /**
+     * Synchronous cache probe + background fetch trigger.
+     *
+     * - Cache hit → returns the `ImageBitmap` immediately (zero cost).
+     * - Cache miss → returns `undefined` AND fires a background decode
+     *   (fire-and-forget). Next call will likely hit cache.
+     *
+     * Use on gesture hot-paths (BrushOverlay mask init, render loop)
+     * where `await` is not acceptable. Caller should degrade gracefully
+     * when `undefined` is returned.
+     */
+    ensureBitmap: (src: string) => ImageBitmap | undefined;
+
+    /**
+     * Calculate the non-transparent content bounding box of an image.
+     * If assetId with tileMeta.contentBounds is available, returns immediately
+     * from metadata. Otherwise decodes and scans pixels.
+     */
+    contentBounds: (src: string, assetId?: string) => Promise<LocalRect>;
+
+    /**
+     * Extract raw RGBA pixel data via Worker (zero main-thread blocking).
+     */
+    imageData: (src: string, rect?: { x: number; y: number; w: number; h: number }) => Promise<ImageData>;
+
+    /**
+     * Resample (resize) an image to the given target dimensions.
+     * Delegates to the Worker for high-quality bicubic downsampling.
+     *
+     * Accepts either `targetSize` (exact dimensions) or `maxSize` (scale longest edge,
+     * maintain aspect ratio). When `maxSize` is provided, `targetSize` is ignored.
+     */
+    resample: (src: string, options: { targetSize?: { w: number; h: number }; maxSize?: number }) => Promise<ResampleResult>;
+
+    /**
+     * Clear all bitmap caches (SourceBitmapCache).
+     */
+    clearCache: () => void;
   };
 
   render: {
     /**
-     * Pre-rasterize layers that cannot be composited directly by the Worker
-     * (text, color, asset-transparent-pixel, no-assetId layers).
+     * compositeFrame — Composite a frame's visible layers within a given region.
      *
-     * DPR semantics:
-     *   - merge.ts passes dpr = window.devicePixelRatio (result stays in editor)
-     *   - shapeToBlob passes dpr = 1 (export output is physical pixels)
+     * This is the standard entry point for "render the frame (or a sub-region of it)
+     * as a flattened composite". Extracts visible layers from the frame, composites
+     * them within the given ROI (defaults to full canvas if omitted).
      *
-     * Single source of truth for pre-rasterization decisions (delegates to
-     * LayerFactory.needsPreRasterize). Both merge.ts and shapeToBlob use this.
+     * @param frame   - Target frame (provides layer graph + canvas size).
+     * @param roi     - Region of interest (LocalShape). Defaults to the full canvas if omitted.
+     * @param options - { precision?: 8 | 16, dpr?: number }
+     * @returns CompositeResult — consume via toAsset() / toBlob() etc. GC handles cleanup.
      */
-    preRasterizeLayers: (layers: Layer[], opts?: { dpr?: number }) => Promise<Layer[]>;
+    compositeFrame: (frame: Frame, roi?: LocalShape, options?: { precision?: 8 | 16; dpr?: number }) => Promise<CompositeResult>;
     /**
-     * flatten — low-level render method that returns the full WorkerResult (blob/bitmap + hash + tileMeta).
+     * compositeLayers — Computes the union bounding shape of the given layers,
+     * composites them via the unified pipeline at the specified frame bit depth,
+     * and returns the CompositeResult along with the computed union geometry.
      *
-     * Executes the same pipeline as shapeToBlob (layer filtering → pre-rasterize → Lane detection → runLane)
-     * but does NOT truncate the result. Callers can use hash + tileMeta to inject into AssetService via
-     * pixels.worker.asAsset(), avoiding a redundant Worker decode round-trip.
+     * When `roi` is provided, it is used as the composite region directly
+     * (the effective output is the intersection of layer pixels and roi).
+     * When omitted, the union bounding of all layers is used as the roi.
      *
-     * shapeToBlob is a thin wrapper over this method (extracts blob/bitmap only) for backward compatibility.
-     *
-     * Use cases:
-     *   - shapeToAsset: render then inject asset directly (pixels.worker.asAsset), skip redundant decode
-     *   - merge.*: 16-bit precision merge, obtain hash/tileMeta for asset injection
+     * Callers consume the result via `result.toAsset()`, `result.toBlob()`, etc.
+     * GC handles cleanup — no explicit dispose needed.
      */
-    flatten: (frame: Frame, shape: LocalShape, options?: RenderToBlobOptions) => Promise<WorkerResult>;
+    compositeLayers: (layers: Layer[], frame: Frame, roi?: Shape) => Promise<{
+      result: CompositeResult;
+      bounds: { w: number; h: number; cx: number; cy: number };
+    }>;
     /**
-     * Area flatten: renders the region of `frame` matching `shape` and encodes it.
-     * When `options.format === 'raw'` returns an ImageBitmap; otherwise returns a Blob.
-     * Internally chooses between the 16-bit vips lane and the 8-bit engine-worker lane.
+     * compositeResizedLayers — Composites the given layers at their natural bounds,
+     * then outputs at the specified `outputSize` (single Worker round-trip).
      *
-     * Thin wrapper over renderShape — use renderShape directly when hash/tileMeta are needed.
+     * Use this when you need to bake + scale in one step (e.g. non-uniform resample).
+     * Unlike `compositeLayers`, this method does NOT accept an roi parameter —
+     * it always uses the union bounding of all layers as the composite region.
      */
-    shapeToBlob: (frame: Frame, shape: LocalShape, options?: RenderToBlobOptions) => Promise<Blob | ImageBitmap>;
-    /**
-     * Sugar over `shapeToBlob(frame, fullRectShapeOfFrame, options)`.
-     * Renders the entire frame's visible canvas region.
-     */
-    frameToBlob: (frame: Frame, options?: RenderToBlobOptions) => Promise<Blob | ImageBitmap>;
-    /**
-     * Renders the given layers to a Blob, cropped to their bounding union (minimum enclosing rect).
-     * Returns the blob together with the bounding rect's center (cx, cy) and size (w, h),
-     * so callers can position the result back onto the canvas.
-     *
-     * Internally calls shapeToBlob with the computed bounding shape and layerIds filter.
-     * Supports Lane A/B/C (including 16-bit via vips).
-     *
-     * ⚠️ Bounding rect calculation is ported from merge.ts (geometry.shape.unitedShapeOfLayers +
-     * geometry.space.getRectCenter) — do NOT rewrite this logic to avoid introducing new bugs.
-     *
-     * Use cases:
-     *   - ComfyUI img2img: send a single layer's content (not the full canvas)
-     *   - Layer merge: composite layers to a new asset (see merge.* commands)
-     */
-    flattenLayers: (
+    compositeResizedLayers: (
       layers: Layer[],
       frame: Frame,
-      options?: RenderToBlobOptions,
-    ) => Promise<WorkerResult & { cx: number; cy: number; w: number; h: number }>;
+      outputSize: { w: number; h: number },
+    ) => Promise<{
+      result: CompositeResult;
+    }>;
     /**
      * Registers an external encoder for a MIME type that FileService does not natively support
      * (e.g. AVIF, which physically lives in a plugin worker).
-     * When lane C encounters a matching `format`, it delegates to the registered encoder.
+     * When the composite pipeline encounters a matching `format`, it delegates to the registered encoder.
      * Returns a disposer.
      */
     registerEncoder: (
@@ -315,29 +351,9 @@ export interface PixelService {
     ) => () => void;
   };
 
-
-
-  worker: {
-    /** 
-     * Incremental merge: overlays layers from items list sequentially on top of target layer.
-     * Target layer automatically participates in synthesis as background base map.
-     */
-    mergeLayersToLayer: (target: Layer, items: (Layer | { layer: Layer; relative?: boolean })[], options?: { targetDpr?: number }) => Promise<WorkerResult>;
-    cloneRegion: (assetId: string, rect: LocalRect, shape?: ShapeType) => Promise<WorkerResult>;
-    bakeMasks: (assetId: string, masks: VectorMask[]) => Promise<WorkerResult>;
-    /** Resample: adjusts image size in background */
-    resampleImage: (src: string, targetSize: { w: number; h: number }, options?: { format?: string; quality?: number }) => Promise<WorkerResult>;
-    /** Shape clip: clips multiple layers to specified shape and synthesizes new image */
-    mergeLayersWithShape: (layers: Layer[], shape: Shape, options?: { format?: string; quality?: number; targetDpr?: number }) => Promise<WorkerResult>;
-    /** Wraps Worker raw result and registers as asset */
-    asAsset: (promise: Promise<WorkerResult>) => Promise<{ id: string, url: string }>;
-  };
-
   utils: {
-    getRenderPipeline: (layer: Layer) => ClipDescriptor[];
     fetchFromUrl: (url: string) => Promise<File>;
     download: (blob: Blob, filename: string) => Promise<void>;
-    probeEngines: () => EngineStatus[];
   };
 
   rasterize: {
@@ -348,9 +364,44 @@ export interface PixelService {
     mask: (polygon: LocalPolygon, bounds: { w: number; h: number }, feather?: number) => Promise<{ id: string; url: string } | null>;
   };
 
-  cache: {
-    clear: () => void;
+
+  /**
+   * File I/O operations delegated to the unified vips Worker.
+   * Replaces tiff.ts self-managed VipsWorker (Phase 7.2 vips unification).
+   */
+  fileIO: {
+    decodeTiff: (bytes: Uint8Array) => Promise<{ width: number; height: number; data: Uint8Array }>;
+    encodeTiff: (rgbaData: Uint8Array, width: number, height: number, options: Record<string, unknown>) => Promise<Uint8Array>;
+    getPageCount: (bytes: Uint8Array) => Promise<{ pages: number; pageWidth: number; pageHeight: number }>;
+    decodePage: (bytes: Uint8Array, page: number) => Promise<{ width: number; height: number; data: Uint8Array }>;
+    composite16bit: (params: {
+      layers: Array<{
+        bytes: Uint8Array;
+        x: number;
+        y: number;
+        blendMode: string;
+        opacity: number;
+        is8bit: boolean;
+        adjustments?: Record<string, unknown>;
+      }>;
+      canvasWidth: number;
+      canvasHeight: number;
+      options: Record<string, unknown>;
+    }) => Promise<Uint8Array>;
+    exportHighRes: (rawBytes: Uint8Array, options: Record<string, unknown>) => Promise<Uint8Array>;
   };
+
+  /**
+   * Unified composite pipeline entry point.
+   *
+   * Replaces the old lane-detection logic (render.flatten / shapeToBlob / flattenLayers / worker.mergeLayersWithShape).
+   * Callers describe "what to compose" via a CompositeRequest; the pipeline internally resolves
+   * strategies, selects the best backend (8-bit Canvas2D / 16-bit vips / future WebGPU),
+   * and returns a lazy CompositeResult.
+   *
+   * @see docs/opengpex/plans/20260721_unified_composite_pipeline_design.md §14 Step 7
+   */
+  composite: (request: CompositeRequest) => Promise<CompositeResult>;
 }
 
 /**

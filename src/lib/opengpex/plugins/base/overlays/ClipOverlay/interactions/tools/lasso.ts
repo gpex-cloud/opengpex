@@ -133,11 +133,13 @@ export const createLassoHandler = (): InteractionHandler => {
       gestureAA = clipBox?.antiAliased ?? true;
 
       let { x: clampedX, y: clampedY } = e.geometry.space.clampPointToRect(e.point.canvas, e.activeFrame.canvas);
-      if (!gestureAA) {
-        const snapped = e.geometry.snapping.snapToPixel({ x: clampedX, y: clampedY });
-        clampedX = snapped.x;
-        clampedY = snapped.y;
-      }
+      // Always snap to pixel grid — ensures integer coordinates regardless of AA mode.
+      // This aligns lasso behavior with rect/wand (always pixel-aligned vertices),
+      // fixes floating-point dimensions in LayerDimensionsPanel, and guarantees
+      // correct stair-stepping when AA is toggled off after drawing.
+      const snappedStart = e.geometry.snapping.snapToPixel({ x: clampedX, y: clampedY });
+      clampedX = snappedStart.x;
+      clampedY = snappedStart.y;
       trail = [asLocalPoint({ x: clampedX, y: clampedY })];
       if (lassoPreviewPathRef.current) {
         const sp = e.geometry.space.localToScreen(clampedX, clampedY, e.activeFrame);
@@ -149,11 +151,9 @@ export const createLassoHandler = (): InteractionHandler => {
     onMove: (e) => {
       if (!active) return;
       let { x: clampedX, y: clampedY } = e.geometry.space.clampPointToRect(e.point.canvas, e.activeFrame.canvas);
-      if (!gestureAA) {
-        const snapped = e.geometry.snapping.snapToPixel({ x: clampedX, y: clampedY });
-        clampedX = snapped.x;
-        clampedY = snapped.y;
-      }
+      const snappedMove = e.geometry.snapping.snapToPixel({ x: clampedX, y: clampedY });
+      clampedX = snappedMove.x;
+      clampedY = snappedMove.y;
 
       // ── Snap-to-start: dynamic threshold (constant screen px regardless of zoom) ──
       // Mirrors the pattern from core/geometry/operators/snapping.ts:

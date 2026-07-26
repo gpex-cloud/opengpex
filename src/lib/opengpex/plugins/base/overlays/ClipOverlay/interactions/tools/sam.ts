@@ -26,7 +26,6 @@ import {
   asLocalPolygon,
 } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
-import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
 import {
   AIToolsDrawerAPI,
@@ -64,60 +63,6 @@ function isSamableLayer(layer: Layer): boolean {
   return layer.type === 'image';
 }
 
-/**
- * Decode layer source into RGBA pixel buffer for embedding.
- */
-async function getLayerImageData(layer: Layer): Promise<ImageData> {
-  let img: ImageBitmap | undefined = sourceBitmapCache.get(layer.src);
-  if (!img) {
-    sourceBitmapCache.getOrFetch(layer.src);
-    img = await new Promise<ImageBitmap>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        unsub();
-        reject(new Error(`Failed to load layer image: ${layer.src} (timeout)`));
-      }, 15_000);
-      const unsub = sourceBitmapCache.subscribe(() => {
-        const bmp = sourceBitmapCache.get(layer.src);
-        if (bmp) {
-          clearTimeout(timeout);
-          unsub();
-          resolve(bmp);
-        }
-      });
-      const bmp = sourceBitmapCache.get(layer.src);
-      if (bmp) {
-        clearTimeout(timeout);
-        unsub();
-        resolve(bmp);
-      }
-    });
-  }
-
-  const w = layer.bounding.w | 0;
-  const h = layer.bounding.h | 0;
-  if (w <= 0 || h <= 0) {
-    throw new Error(`Layer has zero intrinsic dimensions (${w}×${h})`);
-  }
-
-  let imageData: ImageData;
-  if (typeof OffscreenCanvas !== 'undefined') {
-    const off = new OffscreenCanvas(w, h);
-    const ctx = off.getContext('2d');
-    if (!ctx) throw new Error('Failed to acquire 2D context (OffscreenCanvas)');
-    ctx.drawImage(img, 0, 0, w, h);
-    imageData = ctx.getImageData(0, 0, w, h);
-  } else {
-    const cv = document.createElement('canvas');
-    cv.width = w;
-    cv.height = h;
-    const ctx = cv.getContext('2d');
-    if (!ctx) throw new Error('Failed to acquire 2D context (HTMLCanvas)');
-    ctx.drawImage(img, 0, 0, w, h);
-    imageData = ctx.getImageData(0, 0, w, h);
-  }
-
-  return imageData;
-}
 
 // ─── Handler ───────────────────────────────────────────────────────────────────
 
@@ -195,10 +140,10 @@ export const createSamHandler = (): InteractionHandler => {
         }
 
         // 2. Ensure embedding is ready via AIToolsDrawer command.
-        const assetId = layer.src; // Use src URL as unique asset key
+        const assetId = layer.assetId; // content hash — canonical asset identity
         let imageData: ImageData;
         try {
-          imageData = await getLayerImageData(layer);
+          imageData = await e.pixels.image.imageData(layer.assetId!);
         } catch (_err) {
           e.actions.setInteraction({ selectionErrorPulse: Date.now() });
           return;
@@ -299,8 +244,9 @@ export const createSamHandler = (): InteractionHandler => {
         const framePolygons: Array<ReturnType<typeof asLocalPolygon>> = [];
         for (const mask of decResult.masks) {
           if (mask.rings.length === 0) continue;
+          // Round ONNX decoder output to integer pixel grid (matches wand/lasso behavior).
           const layerRings = mask.rings.map(ring =>
-            ring.map(p => asLocalPoint({ x: p.x, y: p.y }))
+            ring.map(p => asLocalPoint({ x: Math.round(p.x), y: Math.round(p.y) }))
           );
           const layerBounds = asLocalRect(e.geometry.polygon.computePolygonBounds(layerRings));
           const layerPoly = asLocalPolygon(layerRings, layerBounds, samAA);

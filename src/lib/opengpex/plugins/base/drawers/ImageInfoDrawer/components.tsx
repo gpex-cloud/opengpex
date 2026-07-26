@@ -80,12 +80,15 @@ export function ImageInfoComponent() {
   const baseW = isClipMode && box ? box.rect.w : activeFrame.canvas.w;
   const baseH = isClipMode && box ? box.rect.h : activeFrame.canvas.h;
 
-  // Layer dimension for the hovered or active layer
-  const targetLayerId = hoveredLayerId || activeFrame.activeLayerId;
-  const targetLayer = targetLayerId ? activeFrame.layers.byId[targetLayerId] : undefined;
-  const layerDim = targetLayer?.visibleShape?.rect || targetLayer?.bounding || { w: 0, h: 0 };
-  const isHighRes = layerDim.w * layerDim.h > baseW * baseH * 1.2;
-  const isUpScaled = layerDim.w * layerDim.h < baseW * baseH * 0.8;
+   // Layer dimension for the hovered or active layer
+    const targetLayerId = hoveredLayerId || activeFrame.activeLayerId;
+    const targetLayer = targetLayerId ? activeFrame.layers.byId[targetLayerId] : undefined;
+    const layerDim = targetLayer?.visibleShape?.rect || targetLayer?.bounding || { w: 0, h: 0 };
+    const isHighRes = layerDim.w * layerDim.h > baseW * baseH * 1.2;
+    const isUpScaled = layerDim.w * layerDim.h < baseW * baseH * 0.8;
+
+    // Bit depth info for display badges
+    const layerBitDepth = (targetLayer?.metadata?.imageMetadata as { bitDepth?: number } | undefined)?.bitDepth;
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
@@ -121,6 +124,8 @@ export function ImageInfoComponent() {
           layerDim={layerDim}
           isHighRes={isHighRes}
           isUpScaled={isUpScaled}
+          frameBitDepth={activeFrame.bitDepth}
+          layerBitDepth={layerBitDepth}
         />
 
         <ExifInfoPanel exif={meta.exif} />

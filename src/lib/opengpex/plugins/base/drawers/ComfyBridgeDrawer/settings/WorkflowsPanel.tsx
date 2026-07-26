@@ -19,7 +19,7 @@
 
 'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useMemo } from 'react';
 import {
   Trash2, AlertCircle,
   Upload, Clipboard, Download, Loader2,
@@ -36,8 +36,8 @@ interface WorkflowsPanelProps {
 }
 
 export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
-  const environments = config.environments || [];
-  const workflows = config.workflows || [];
+  const environments = useMemo(() => config.environments || [], [config.environments]);
+  const workflows = useMemo(() => config.workflows || [], [config.workflows]);
 
   const [importMode, setImportMode] = useState<'idle' | 'paste' | 'configure'>('idle');
   const [importJson, setImportJson] = useState('');

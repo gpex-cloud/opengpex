@@ -21,7 +21,7 @@ import { useReducer, useMemo, useRef, useCallback, useEffect } from 'react';
 import {
   EditorData, EditorState, EditorAction, Layer, Frame, CameraState, UIConfig,
   BuiltPlugin, EditorShortcut, BuiltCommand, Dimensions, NormalizedState,
-  EditorActions, EditorContextValue, GlobalHistoryState, EngineStatus, LocalShape,
+  EditorActions, EditorContextValue, GlobalHistoryState, LocalShape,
   InteractionSignalValue, ClipboardLayerMetadata, BitmapMask, LocalPolygon,
 } from '@opengpex/editor/core/types';
 import { LayerUtils } from '@opengpex/editor/core/layer/LayerUtils';
@@ -475,7 +475,10 @@ export function useEditorStore() {
         frame: {
           create: {
             trunk: advRef(P.ADV_FRAME_TRUNK, (payload: { source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }) => executeCommand<unknown, Promise<string>>(P.ADV_FRAME_TRUNK, payload)),
-            branch: advRef(P.ADV_FRAME_BRANCH, (payload?: { source?: File; extra?: Record<string, unknown> }) => executeCommand<{ source?: File; extra?: Record<string, unknown> } | undefined, Promise<string | null>>(P.ADV_FRAME_BRANCH, payload)),
+            branch: {
+              fromFile: advRef(P.ADV_FRAME_BRANCH_FILE, (payload: { source: File; extra?: Record<string, unknown> }) => executeCommand<{ source: File; extra?: Record<string, unknown> }, Promise<string | undefined>>(P.ADV_FRAME_BRANCH_FILE, payload)),
+              fromSelection: advRef(P.ADV_FRAME_BRANCH_CROP, () => executeCommand<void, Promise<string | undefined>>(P.ADV_FRAME_BRANCH_CROP)),
+            },
             revert: advRef(P.ADV_FRAME_REVERT, () => executeCommand(P.ADV_FRAME_REVERT)),
             remove: advRef(P.ADV_FRAME_REMOVE, (id?: string) => executeCommand(P.ADV_FRAME_REMOVE, id)),
             export: advRef(P.ADV_FRAME_EXPORT, (frame: Frame) => executeCommand<Frame, Promise<{ state: unknown; assets: Record<string, Blob> }>>(P.ADV_FRAME_EXPORT, frame)),
@@ -538,9 +541,6 @@ export function useEditorStore() {
             register: advRef(P.ADV_ASSET_REGISTER, (blob: Blob) => executeCommand<Blob, Promise<{ id: string; url: string }>>(P.ADV_ASSET_REGISTER, blob)),
             sync: advRef(P.ADV_ASSET_SYNC, (payload?: { force?: boolean }) => executeCommand(P.ADV_ASSET_SYNC, payload)),
           },
-          engines: {
-            probe: advRef(P.ADV_SYSTEM_PROBE_ENGINES, () => executeCommand(P.ADV_SYSTEM_PROBE_ENGINES)),
-          },
         },
       }
     };
@@ -586,8 +586,10 @@ export function useEditorStore() {
             if (type === 'layer') {
               const compositeKey = LayerUtils.getCompositeKey(frameId, id);
               v.buffered.layers[compositeKey] = { ...v.buffered.layers[compositeKey], ...props };
+              v._bufferVersion++; // [P2 Perf] Invalidate snapshot cache
             } else if (type === 'frame') {
               v.buffered.frames[id] = { ...v.buffered.frames[id], ...props };
+              v._bufferVersion++; // [P2 Perf] Invalidate snapshot cache
             } else {
               v.buffered.project = { ...v.buffered.project, ...props };
             }
@@ -718,7 +720,6 @@ export function useEditorStore() {
           return h.future.length > 0;
         },
       },
-      setEngineStatus: (statuses: EngineStatus[]) => enhancedDispatch({ type: 'SET_ENGINE_STATUS', payload: statuses }),
       clearAllData: () => { resetVolatile(); enhancedDispatch({ type: 'CLEAR_ALL_DATA' }); },
       mutateVolatile,
       updateVolatile,

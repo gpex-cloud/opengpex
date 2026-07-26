@@ -416,9 +416,7 @@ export const LayerClipCommands = {
 
         // Export drilled mask as PNG and register in asset service
         const blob = await maskCanvas.convertToBlob({ type: 'image/png' });
-        const assetId = await assets.register(blob);
-        const url = assets.getURL(assetId);
-        if (!url) return;
+        const { id: assetId, url } = await assets.register(blob);
 
         // Update existing drilled mask or create new one
         if (drilledMask) {

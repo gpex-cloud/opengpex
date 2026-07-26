@@ -25,9 +25,7 @@ import { FontService } from '@opengpex/editor/core/fonts';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { useOverlayRotationSync } from '@opengpex/editor/core/motion/hooks/animation';
-import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
-import { tileCache } from '@opengpex/editor/core/engine/cache/TileCache';
-import { asyncFilterCache } from '@opengpex/editor/core/engine/cache/AsyncFilterCache';
+import { sourceBitmapCache, tileCache, filterCache, getEngine } from '@opengpex/editor/core/engine/renderer';
 // [Filter Pipeline §3.5 hard invariant] AsyncFilterCache is imported ONLY from
 // main-thread modules (this file + Canvas2dEngine.ts). painter.ts and any
 // worker/** module MUST NOT import it — that would drag WorkerBridge (which
@@ -39,7 +37,6 @@ import { asyncFilterCache } from '@opengpex/editor/core/engine/cache/AsyncFilter
 
 import { useLayerTweens } from './useLayerTweens';
 import { stageComposer } from './StageComposer';
-import { engine } from '@opengpex/editor/core/engine';
 
 /**
  * CanvasStage: Industrial-grade high-performance rendering engine (60FPS+ smooth optimized version)
@@ -59,15 +56,17 @@ export default function CanvasStage() {
    * renderLoop: Core synchronized rendering logic
    */
   const needsRenderRef = useRef(true); // Default to first render
+  const _renderCountRef = useRef(0); // Cold-start counter for perf warning suppression
 
   // [Font Loading] Inject FontService into engine with redraw callback
+  const engine = getEngine();
   useEffect(() => {
     if ('setFontService' in engine) {
       (engine as { setFontService: (fonts: FontService, cb: () => void) => void }).setFontService(fonts, () => {
         needsRenderRef.current = true;
       });
     }
-  }, [fonts]);
+  }, [fonts, engine]);
 
   // 1. Subscribe to cache changes; mark redraw needed once slices or full images load
   useEffect(() => {
@@ -83,7 +82,7 @@ export default function CanvasStage() {
     // Canvas2dEngine.drawLayerDirect schedules async APPLY_FILTER jobs on
     // cache miss and degrades to the raw source for the current frame.
     // Subscribing here ensures the next frame picks up the filtered result.
-    const unsubFilters = asyncFilterCache.subscribe(() => { needsRenderRef.current = true; });
+    const unsubFilters = filterCache.subscribe(() => { needsRenderRef.current = true; });
     // [Filter Fast-Track §2.3] TileFilterCache removed — tiles now show raw
     // during interaction and AsyncFilterCache handles post-interaction filter.
 
@@ -181,7 +180,8 @@ export default function CanvasStage() {
       theme,
     });
     const _frameDuration = performance.now() - _frameT0;
-    if (_frameDuration > 16) {
+    _renderCountRef.current++;
+    if (_frameDuration > 16 && _renderCountRef.current > 3) {
       const _renderDuration = performance.now() - _renderT0;
       console.warn(`[CanvasStage.rAF] ⚠️ total=${_frameDuration.toFixed(1)}ms render=${_renderDuration.toFixed(1)}ms layers=${f.layers.order.length} interacting=${isInteracting}`);
     }

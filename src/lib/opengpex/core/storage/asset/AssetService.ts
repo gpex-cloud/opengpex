@@ -17,8 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { workerBridge } from '@opengpex/editor/core/engine/worker/WorkerBridge';
-import { TileMetadata } from '@opengpex/editor/core/types';
+import { TileMetadata, AssetRef } from '@opengpex/editor/core/types';
 import { assetStore, ASSET_VERSION } from './AssetStore';
 import { resourceTracker } from '@opengpex/editor/core/advanced/ResourceTracker';
 
@@ -46,20 +45,49 @@ export interface AssetEntry {
 }
 
 /**
+ * Lifecycle callbacks for decoupling AssetService from engine/worker layer.
+ * Injected at construction time by EditorContext — AssetService itself has
+ * zero knowledge of Worker, ImageDispatcher, or any engine internals.
+ */
+export interface AssetServiceCallbacks {
+  onRegistered?: (hash: string, blob: Blob) => void;
+  onReleased?: (hash: string) => void;
+}
+
+/**
  * AssetService: Physical asset management service
  * Core responsibilities: Blob-to-Hash mapping, IDB storage, ObjectURL management, reference-counting GC.
+ *
+ * Phase 7.1: Zero Worker dependency — all Worker communication is handled via
+ * event callbacks injected from EditorContext. AssetService does not import any
+ * engine/worker modules.
  */
 export class AssetService {
   private pool: Map<string, AssetEntry> = new Map();
   private pendingIds: Set<string> = new Set(); // Grace period for new assets
-  private isWorkerInitialized = false;
   private activeSessions = 0; // Atomic session counter (used to suspend GC)
   private memoryClass: 'low' | 'mid' | 'high' = 'mid';
   private prewarmTimeout: ReturnType<typeof setTimeout> | null = null;
+  private callbacks: AssetServiceCallbacks;
 
-  constructor() {
-    this.setupWorker();
+  constructor(callbacks: AssetServiceCallbacks = {}) {
+    this.callbacks = callbacks;
+    this.detectMemoryClass();
     this.registerTransparentPixel();
+  }
+
+  /**
+   * Update lifecycle callbacks after construction (e.g. when bridge becomes available).
+   */
+  setCallbacks(callbacks: AssetServiceCallbacks): void {
+    this.callbacks = callbacks;
+  }
+
+  private detectMemoryClass(): void {
+    if (typeof window === 'undefined') return;
+    const mem = ('deviceMemory' in navigator ? (navigator as unknown as { deviceMemory: number }).deviceMemory : 4);
+    if (mem <= 2) this.memoryClass = 'low';
+    else if (mem >= 8) this.memoryClass = 'high';
   }
 
   private registerTransparentPixel() {
@@ -74,16 +102,37 @@ export class AssetService {
     });
   }
 
-  private setupWorker() {
-    if (typeof window === 'undefined' || this.isWorkerInitialized) return;
-    const mem = ('deviceMemory' in navigator ? (navigator as unknown as { deviceMemory: number }).deviceMemory : 4);
-    let memoryClass: 'low' | 'mid' | 'high' = 'mid';
-    if (mem <= 2) memoryClass = 'low';
-    else if (mem >= 8) memoryClass = 'high';
+  /**
+   * Compute SHA-256 hash of a Blob using native Web Crypto API.
+   * `crypto.subtle.digest` is implemented in native code and executes
+   * asynchronously without blocking the main thread.
+   */
+  private async calculateHash(blob: Blob): Promise<string> {
+    const buffer = await blob.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+    const hashArray = new Uint8Array(hashBuffer);
+    return Array.from(hashArray).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
 
-    this.memoryClass = memoryClass;
-    workerBridge.request('INITIALIZE_WORKER', { memoryClass }).catch(() => { });
-    this.isWorkerInitialized = true;
+  /**
+   * Compute TileMetadata from a Blob on the main thread.
+   * `createImageBitmap` is async and executed by the browser's internal thread pool.
+   */
+  private async computeTileMeta(blob: Blob): Promise<TileMetadata> {
+    const bitmap = await createImageBitmap(blob);
+    const { width, height } = bitmap;
+    bitmap.close();
+
+    const tileSize = 256;
+    return {
+      width,
+      height,
+      tileSize,
+      cols: Math.ceil(width / tileSize),
+      rows: Math.ceil(height / tileSize),
+      levels: Math.ceil(Math.log2(Math.max(width, height) / tileSize)) + 1,
+      isTiled: width > 512 || height > 512,
+    };
   }
 
   /**
@@ -93,7 +142,7 @@ export class AssetService {
    * When provided, the raw high-resolution source is stored alongside the
    * 8-bit display asset under a `raw:${hash}` key in IDB.
    */
-  async register(blob: Blob, options?: { rawBlob?: Blob; dprScale?: number }): Promise<string> {
+  async register(blob: Blob, options?: { rawBlob?: Blob; dprScale?: number }): Promise<AssetRef> {
     const dprScale = options?.dprScale;
     const rawBlob = options?.rawBlob;
 
@@ -112,7 +161,10 @@ export class AssetService {
           console.warn('[AssetService] Failed to store raw blob:', err);
         });
       }
-      return hash;
+      const dim = entry.tileMeta
+        ? { w: entry.tileMeta.width, h: entry.tileMeta.height }
+        : { w: 0, h: 0 };
+      return { id: hash, url: entry.url, dimensions: dim };
     }
 
     const cached = await assetStore.get(hash);
@@ -128,10 +180,14 @@ export class AssetService {
           console.warn('[AssetService] Failed to store raw blob:', err);
         });
       }
-      return hash;
+      const loadedEntry = this.pool.get(hash)!;
+      const dim = loadedEntry.tileMeta
+        ? { w: loadedEntry.tileMeta.width, h: loadedEntry.tileMeta.height }
+        : { w: 0, h: 0 };
+      return { id: hash, url: loadedEntry.url, dimensions: dim };
     }
 
-    const tileMeta = await workerBridge.request<TileMetadata>('DECODE_AND_TILE', { hash, blob });
+    const tileMeta = await this.computeTileMeta(blob);
     if (dprScale !== undefined) {
       tileMeta.dprScale = dprScale;
     }
@@ -156,11 +212,14 @@ export class AssetService {
     });
     resourceTracker.track(`asset:${hash}`, 'image_decoded', blob.size, `Image ${hash.slice(0, 8)}`);
 
-    return hash;
+    // Notify engine layer (ImageDispatcher subscribes to warm Worker cache)
+    this.callbacks.onRegistered?.(hash, blob);
+
+    return { id: hash, url, dimensions: { w: tileMeta.width, h: tileMeta.height } };
   }
 
   /**
-   * Injects asset: bypasses hash and metadata calculation, registers directly (result provided by WorkerProxy)
+   * Injects asset: bypasses hash and metadata calculation, registers directly (result provided by PixelResult)
    */
   async inject(hash: string, blob: Blob, tileMeta: TileMetadata): Promise<string> {
     this.pendingIds.add(hash);
@@ -179,7 +238,8 @@ export class AssetService {
     });
     resourceTracker.track(`asset:${hash}`, 'image_decoded', blob.size, `Injected ${hash.slice(0, 8)}`);
 
-    workerBridge.request('DECODE_AND_TILE', { hash, blob }).catch(() => { });
+    // Notify engine layer
+    this.callbacks.onRegistered?.(hash, blob);
     return hash;
   }
 
@@ -229,11 +289,8 @@ export class AssetService {
     });
     resourceTracker.track(`asset:${item.id}`, 'image_decoded', item.blob.size, `Hydrated ${item.id.slice(0, 8)}`);
 
-    workerBridge.request('DECODE_AND_TILE', { hash: item.id, blob: item.blob }).catch(() => { });
-  }
-
-  private async calculateHash(blob: Blob): Promise<string> {
-    return workerBridge.request<string>('HASH_ASSET', blob);
+    // Notify engine layer to warm Worker cache
+    this.callbacks.onRegistered?.(item.id, item.blob);
   }
 
   /**
@@ -260,7 +317,7 @@ export class AssetService {
 
       // Elastic warmup: L3 decoding is disabled for low-end devices
       if (this.memoryClass !== 'low') {
-        workerBridge.request('DECODE_AND_TILE', { hash: item.id, blob: item.blob }).catch(() => { });
+        this.callbacks.onRegistered?.(item.id, item.blob);
       }
     }
   }
@@ -339,7 +396,8 @@ export class AssetService {
       URL.revokeObjectURL(asset.url);
       this.pool.delete(id);
       resourceTracker.release(`asset:${id}`);
-      workerBridge.request('FORGET_ASSET', id).catch(() => { });
+      // Notify engine layer to evict Worker cache
+      this.callbacks.onReleased?.(id);
       // 💡 Completely erased at the physical layer: prevents orphaned/zombie Blobs in IndexedDB from causing storage bloat
       assetStore.remove(id).catch(err => {
         console.error(`[AssetService] Failed to remove physical asset ${id} from store:`, err);
@@ -394,4 +452,4 @@ export class AssetService {
   }
 }
 
-export const createAssetService = () => new AssetService();
+export const createAssetService = (callbacks?: AssetServiceCallbacks) => new AssetService(callbacks);

@@ -21,8 +21,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useEditorState, useEditorServices, usePluginConfig } from '@opengpex/editor/core/context';
-import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
-import { VolatileState, Frame, CameraState } from '@opengpex/editor/core/types';
+import { useBrushCursorFastSync } from './useFastSync';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
 import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
@@ -130,55 +129,9 @@ export function useBrushCursorTracking(
   const pointerRef = useRef({ x: 0, y: 0 });
   const rafIdRef = useRef<number>(0);
   const isVisibleRef = useRef(false);
-  const lastCameraKRef = useRef<number>(1);
 
-  // ─── Fast track: camera.k real-time synchronization of cursor size ───────────────────────────────────────
-  useFastSync(cursorRef, isActive, (_v: VolatileState, _f: Frame, cam: CameraState) => {
-    const el = cursorRef.current;
-    if (!el) return;
-
-    const cameraK = cam.k;
-    if (Math.abs(cameraK - lastCameraKRef.current) < 0.001) return; // Skip if no change
-    lastCameraKRef.current = cameraK;
-
-    // Calculate new screen diameter
-    const screenDiameter = Math.max(brushSize * cameraK, 4);
-    const halfSize = screenDiameter / 2;
-
-    // Update margin (align cursor center with pointer position)
-    el.style.marginLeft = `-${halfSize}px`;
-    el.style.marginTop = `-${halfSize}px`;
-
-    // Update dimensions of all child elements
-    const children = el.children;
-    // Outer ring
-    if (children[0]) {
-      (children[0] as HTMLElement).style.width = `${screenDiameter}px`;
-      (children[0] as HTMLElement).style.height = `${screenDiameter}px`;
-    }
-    // Inner ring
-    if (children[1]) {
-      (children[1] as HTMLElement).style.width = `${screenDiameter - 2}px`;
-      (children[1] as HTMLElement).style.height = `${screenDiameter - 2}px`;
-    }
-    // Color fill (if present)
-    if (children[2] && (children[2] as HTMLElement).classList.contains('rounded-full')) {
-      (children[2] as HTMLElement).style.width = `${screenDiameter - 4}px`;
-      (children[2] as HTMLElement).style.height = `${screenDiameter - 4}px`;
-      (children[2] as HTMLElement).style.display = screenDiameter > 6 ? '' : 'none';
-    }
-    // Crosshair (last two)
-    const crossV = el.querySelector('[data-cross="v"]') as HTMLElement;
-    const crossH = el.querySelector('[data-cross="h"]') as HTMLElement;
-    if (crossV) {
-      crossV.style.left = `${halfSize - 0.5}px`;
-      crossV.style.top = `${halfSize - 3}px`;
-    }
-    if (crossH) {
-      crossH.style.left = `${halfSize - 3}px`;
-      crossH.style.top = `${halfSize - 0.5}px`;
-    }
-  });
+  // ─── Fast track: camera.k real-time synchronization of cursor size (extracted to useFastSync.ts)
+  useBrushCursorFastSync(cursorRef, isActive, brushSize);
 
   // ─── Pointer position tracking ─────────────────────────────────────────────────────────
   useEffect(() => {

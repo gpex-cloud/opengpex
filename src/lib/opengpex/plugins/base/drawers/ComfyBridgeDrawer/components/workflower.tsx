@@ -19,7 +19,7 @@
 
 'use client';
 
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo } from 'react';
 import { ChevronDown, Layers, Frame, FileJson, Trash, Dices } from 'lucide-react';
 import StatusBanner from '@opengpex/editor/widgets/StatusBanner';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
@@ -31,14 +31,14 @@ import type { ExposedParam, TextConfig, NumberConfig, PromptConfig, ComboConfig,
 // ─── Object Info Types ─────────────────────────────────────────────────────────
 
 /** Raw /object_info entry for a single node input */
-type ObjectInfoInputDef = [string | string[], Record<string, unknown>?];
+// type ObjectInfoInputDef = [string | string[], Record<string, unknown>?];
 
-interface ObjectInfoNode {
-  input?: {
-    required?: Record<string, ObjectInfoInputDef>;
-    optional?: Record<string, ObjectInfoInputDef>;
-  };
-}
+// interface ObjectInfoNode {
+//   input?: {
+//     required?: Record<string, ObjectInfoInputDef>;
+//     optional?: Record<string, ObjectInfoInputDef>;
+//   };
+// }
 
 // ─── Workflow Selector ─────────────────────────────────────────────────────────
 

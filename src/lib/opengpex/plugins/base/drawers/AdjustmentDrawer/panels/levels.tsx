@@ -79,7 +79,7 @@ import React, {
   useRef,
 } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { generateLevelsLUT } from "@opengpex/editor/core/engine/filters/lut";
+import { generateLevelsLUT } from "@opengpex/editor/core/engine/filters";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { LevelsState } from "@opengpex/editor/core/types/models";
 import type { AdjustmentDrawerCommandsMap } from "../commands.d";

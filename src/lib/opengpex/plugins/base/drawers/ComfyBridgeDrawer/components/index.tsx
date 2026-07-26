@@ -61,7 +61,6 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
     connectionStatus,
     isTesting,
     isSyncing,
-    syncError,
     execState,
     isComfyGenerated,
     executionHistory,

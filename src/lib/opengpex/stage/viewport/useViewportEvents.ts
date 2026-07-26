@@ -72,11 +72,13 @@ export function useViewportEvents(
         meta: e.metaKey || e.ctrlKey,
       },
       geometry,
+      pixels: services.pixels,
+      assets: services.assets,
       actions,
       state,
       activeFrame: frame,
     };
-  }, [containerRef, frame, geometry, actions, state]);
+  }, [containerRef, frame, geometry, services.pixels, services.assets, actions, state]);
 
   const lastEventRef = useRef<React.MouseEvent | MouseEvent | null>(null);
 

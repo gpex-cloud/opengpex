@@ -212,13 +212,13 @@ export const LayerPeelCommands = {
           .filter(l => l.hostId === host.id && l.role === 'frag');
 
         try {
-          // [3] Call PixelService to execute off-screen compositing.
-          // Merges host (base), all stamped frags, and the final exchange layer in sequence.
+          // [3] Composite via unified pipeline (compositeLayers).
+          // Merges host (base), all stamped frags, and the final exchange layer.
           //
-          // 💡 Strip adjustment state from ALL layers before merge so the Worker
+          // 💡 Strip adjustment state from ALL layers before merge so the pipeline
           // composites raw bitmaps only. The host retains its adjustment properties
           // in the store — the renderer will apply them once at display time.
-          // This prevents double-application of adjustments (once by Worker bake,
+          // This prevents double-application of adjustments (once by pipeline bake,
           // once by Canvas2dEngine filter pass).
           const stripAdj = (l: typeof host) => ({
             ...l,
@@ -228,31 +228,20 @@ export const LayerPeelCommands = {
             channelMix: undefined,
           });
 
-          const mergeItems = [
-            ...frags.map(f => ({ layer: stripAdj(f), relative: true })),
-            { layer: stripAdj(exchange), relative: true }
-          ];
+          // Participants in z-order: host (bottom) → frags (stamps) → exchange (top)
+          const participants = [stripAdj(host), ...frags.map(stripAdj), stripAdj(exchange)];
 
-          const assetResult = await pixels.worker.asAsset(
-            pixels.worker.mergeLayersToLayer(stripAdj(host), mergeItems)
-          );
-          if (!assetResult) throw new Error('Asset registration failed');
+          const { result } = await pixels.render.compositeLayers(participants, activeFrame);
+          const { id: assetId, url: assetUrl } = await result.toAsset();
 
-          // [4] Force pre-decoding
-          try {
-            await pixels.decode.bitmap(assetResult.url);
-          } catch (e) {
-            console.warn('[Commit] Preload failed:', e);
-          }
-
-          // [5] Start transaction update (commit all changes atomically)
+          // [4] Start transaction update (commit all changes atomically)
           layers.updateLayer(activeFrame.id, (tx) => {
             // Update host: set merged asset + clean up hole masks.
-            // Adjustment state is intentionally PRESERVED — the Worker merged
+            // Adjustment state is intentionally PRESERVED — the pipeline merged
             // raw bitmaps without baking adjustments, so the renderer will
             // apply the host's adjustments exactly once at display time.
             tx.edit(host.id)
-              .setAsset(assetResult)
+              .setAsset({ id: assetId, url: assetUrl })
               .removeMask('mask-peel-hole');
 
             // Reset helper layers

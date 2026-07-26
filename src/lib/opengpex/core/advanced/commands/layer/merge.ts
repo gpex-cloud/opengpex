@@ -22,18 +22,48 @@
 import { EditorContextValue, EditorCommand, Layer } from '@opengpex/editor/core/types';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
+// ─── Shared composite helper ────────────────────────────────────────────────
 /**
- * preRasterizeLayers: Delegates to pixels.render.preRasterizeLayers.
- * Passes dpr = window.devicePixelRatio so merged results stay retina-sharp in the editor.
+ * compositeLayersToAsset — Delegates to `pixels.render.compositeLayers()` to
+ * compute the union shape and composite, then injects the result as an asset.
+ * Returns the asset reference and the computed union geometry.
  */
-async function preRasterizeLayers(layers: Layer[], pixels: EditorContextValue['pixels']): Promise<Layer[]> {
-  const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
-  return pixels.render.preRasterizeLayers(layers, { dpr });
+async function compositeLayersToAsset(
+  layers: Layer[],
+  ctx: Pick<EditorContextValue, 'pixels' | 'assets' | 'activeFrame'>,
+) {
+  const { pixels, activeFrame } = ctx;
+  if (!activeFrame) throw new Error('No active frame');
+
+  const { result, bounds } = await pixels.render.compositeLayers(layers, activeFrame);
+
+  const asset = await result.toAsset();
+  if (!asset.id) throw new Error('Composite failed');
+
+  // Ensure bitmap is decoded into SourceBitmapCache before state update.
+  // toAsset() triggers warmFromBlob via onRegistered but fire-and-forget;
+  // await here guarantees the next render frame won't cache-miss and flicker.
+  const blob = await result.toBlob();
+  await pixels.image.cacheBitmap(asset.url, blob);
+
+  return { asset, bounds };
 }
 
 /**
  * LayerMergeCommands: Advanced layer merge commands.
- * Handles merging layers down and merging visible layers.
+ *
+ * Step 8 migration: All merge/rasterize operations now use the unified
+ * `pixels.composite()` pipeline instead of the old scattered APIs:
+ *   - pixels.worker.mergeLayersWithShape → pixels.composite()
+ *   - pixels.render.flattenLayers → pixels.composite()
+ *   - preRasterizeLayers → handled internally by pipeline's IStrategyResolver
+ *
+ * The pipeline internally resolves layer strategies (text/color/bitmap/raw),
+ * selects the best backend (Canvas2D 8-bit / HighDepth 16-bit), and produces
+ * a CompositeResult. Asset injection uses result.toAsset() which delegates
+ * to the injected assetInjector wired by PixelService.
+ *
+ * @see docs/opengpex/plans/20260721_unified_composite_pipeline_design.md §14 Step 8
  */
 export const LayerMergeCommands = {
   mergeDown: {
@@ -41,7 +71,7 @@ export const LayerMergeCommands = {
     name: 'Merge Layer Down',
     undoable: true,
     execute: async (ctx: EditorContextValue): Promise<void> => {
-      const { activeFrame, activeLayer, pixels, layers, actions, geometry } = ctx;
+      const { activeFrame, activeLayer, layers, actions } = ctx;
       if (!activeFrame || !activeLayer) return;
 
       const hostLayers = layers.getHostLayers(activeFrame.layers.order.map(id => activeFrame.layers.byId[id]));
@@ -56,31 +86,14 @@ export const LayerMergeCommands = {
 
 
       try {
-        const worldShape = geometry.shape.unitedShapeOfLayers([targetLayer, activeLayer]);
-        if (!worldShape) throw new Error('Could not calculate bounding union');
-
-        const unionW = worldShape.rect.w;
-        const unionH = worldShape.rect.h;
-        const { x: unionCx, y: unionCy } = geometry.space.getRectCenter(worldShape.rect);
-
-        // Pre-rasterize text/color layers to ensure the Worker has valid bitmaps to composite
-        const rasterizedLayers = await preRasterizeLayers([targetLayer, activeLayer], pixels);
-
-        const targetDpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
-        const assetResult = await pixels.worker.asAsset(
-          pixels.worker.mergeLayersWithShape(
-            rasterizedLayers,
-            worldShape,
-            { targetDpr }
-          )
+        const { asset: assetResult, bounds } = await compositeLayersToAsset(
+          [targetLayer, activeLayer], ctx,
         );
-
-        if (!assetResult) throw new Error('Composite merge failed');
 
         layers.updateLayer(activeFrame.id, (tx) => {
           tx.edit(targetLayer.id)
             .setAsset(assetResult)
-            .resetWithBounds(unionW, unionH, unionCx, unionCy);
+            .resetWithBounds(bounds.w, bounds.h, bounds.cx, bounds.cy);
         });
 
         // Type inference after merging:
@@ -116,7 +129,7 @@ export const LayerMergeCommands = {
     name: 'Merge Visible Layers',
     undoable: true,
     execute: async (ctx: EditorContextValue): Promise<void> => {
-      const { activeFrame, pixels, layers, actions, geometry } = ctx;
+      const { activeFrame, layers, actions } = ctx;
       if (!activeFrame) return;
 
       const hostLayers = layers.getHostLayers(activeFrame.layers.order.map(id => activeFrame.layers.byId[id]));
@@ -131,31 +144,14 @@ export const LayerMergeCommands = {
       const items = visibleLayers.slice(1);
 
       try {
-        const worldShape = geometry.shape.unitedShapeOfLayers(visibleLayers);
-        if (!worldShape) throw new Error('Could not calculate bounding union');
-
-        const unionW = worldShape.rect.w;
-        const unionH = worldShape.rect.h;
-        const { x: unionCx, y: unionCy } = geometry.space.getRectCenter(worldShape.rect);
-
-        // Pre-rasterize text/color layers to ensure the Worker has valid bitmaps to composite
-        const rasterizedLayers = await preRasterizeLayers(visibleLayers, pixels);
-
-        const targetDpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
-        const assetResult = await pixels.worker.asAsset(
-          pixels.worker.mergeLayersWithShape(
-            rasterizedLayers,
-            worldShape,
-            { targetDpr }
-          )
+        const { asset: assetResult, bounds } = await compositeLayersToAsset(
+          visibleLayers, ctx,
         );
-
-        if (!assetResult) throw new Error('Composite merge failed');
 
         layers.updateLayer(activeFrame.id, (tx) => {
           tx.edit(targetLayer.id)
             .setAsset(assetResult)
-            .resetWithBounds(unionW, unionH, unionCx, unionCy);
+            .resetWithBounds(bounds.w, bounds.h, bounds.cx, bounds.cy);
         });
 
         // Type inference after merging (consistent with mergeDown):
@@ -194,7 +190,7 @@ export const LayerMergeCommands = {
     name: 'Rasterize Layer',
     undoable: true,
     execute: async (ctx: EditorContextValue, payload?: { layerId?: string }): Promise<void> => {
-      const { activeFrame, pixels, layers, actions } = ctx;
+      const { activeFrame, layers, actions } = ctx;
       if (!activeFrame) return;
 
       const layerId = payload?.layerId || ctx.activeLayer?.id;
@@ -204,23 +200,14 @@ export const LayerMergeCommands = {
       if (!layer) return;
 
       try {
-        const targetDpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
-
-        const result = await pixels.render.flattenLayers([layer], activeFrame, {
-          format: 'image/png',
-          exportBitDepth: 16,
-          targetDpr,
-        });
-
-        const { cx: unionCx, cy: unionCy, w: unionW, h: unionH } = result;
-        const assetResult = await pixels.worker.asAsset(Promise.resolve(result));
-
-        if (!assetResult) throw new Error('Rasterize failed');
+        const { asset: assetResult, bounds } = await compositeLayersToAsset(
+          [layer], ctx,
+        );
 
         layers.updateLayer(activeFrame.id, (tx) => {
           tx.edit(layer.id)
             .setAsset(assetResult)
-            .resetWithBounds(unionW, unionH, unionCx, unionCy);
+            .resetWithBounds(bounds.w, bounds.h, bounds.cx, bounds.cy);
         });
 
         // After rasterization, the layer becomes a pure bitmap — all non-destructive

@@ -19,7 +19,7 @@
 
 import { Frame, Layer, CameraState, NormalizedState, BitmapMask } from './models';
 import { Dimensions, LocalShape, LocalRect, LocalPolygon } from './primitives';
-import { VolatileState, InteractionState, UIConfig, EngineStatus, GlobalHistoryState, InteractionSignalValue } from './state';
+import { VolatileState, InteractionState, UIConfig, GlobalHistoryState, InteractionSignalValue } from './state';
 import { BuiltCommand, EditorShortcut, BuiltPlugin } from './plugins';
 import { ClipboardLayerMetadata } from './services';
 
@@ -86,7 +86,6 @@ export interface EditorActions {
   toggleStateSignal: (key: string) => void;
   withSignal: <T>(key: string, task: () => Promise<T>) => Promise<T>;
   notifyHUD: (message: string, type?: 'info' | 'success' | 'error') => void;
-  setEngineStatus: (statuses: EngineStatus[]) => void;
 
   executeCommand: <P = unknown, R = unknown>(id: string, payload?: P) => R;
 
@@ -137,7 +136,10 @@ export interface EditorActions {
     frame: {
       create: {
         trunk: AdvCommandRef<{ source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }, Promise<string>>;
-        branch: AdvCommandRef<{ source?: File; extra?: Record<string, unknown> } | void, Promise<string | null>>;
+        branch: {
+          fromFile: AdvCommandRef<{ source: File; extra?: Record<string, unknown> }, Promise<string | undefined>>;
+          fromSelection: AdvCommandRef<void, Promise<string | undefined>>;
+        };
         revert: AdvCommandRef;
         remove: AdvCommandRef<string | undefined>;
         export: AdvCommandRef<Frame, Promise<{ state: unknown; assets: Record<string, Blob> }>>;
@@ -193,9 +195,6 @@ export interface EditorActions {
       assets: {
         register: AdvCommandRef<Blob, Promise<{ id: string; url: string }>>;
         sync: AdvCommandRef<{ force?: boolean } | undefined>;
-      };
-      engines: {
-        probe: AdvCommandRef;
       };
     };
 

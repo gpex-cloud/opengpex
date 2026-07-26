@@ -37,7 +37,8 @@ export const ADV_VIEWPORT_RESET = 'adv.viewport.reset_transform';
 
 
 // 2. Frame & Creation Management (Frame/Creation)
-export const ADV_FRAME_BRANCH = 'adv.frame.branch';
+export const ADV_FRAME_BRANCH_FILE = 'adv.frame.branch.file';
+export const ADV_FRAME_BRANCH_CROP = 'adv.frame.branch.crop';
 export const ADV_FRAME_RESIZE_CANVAS = 'adv.frame.resize_canvas';
 export const ADV_FRAME_REVERT = 'adv.frame.revert';
 export const ADV_FRAME_RESAMPLE = 'adv.frame.resample';
@@ -80,10 +81,7 @@ export const ADV_LAYER_BITMAP_MASK_REMOVE = 'adv.layer.bitmapMask.remove';
 export const ADV_LAYER_BITMAP_MASK_TOGGLE = 'adv.layer.bitmapMask.toggle';
 export const ADV_LAYER_BITMAP_MASK_CLEAR = 'adv.layer.bitmapMask.clear_all';
 
-// 5. Runtime & System Probing
-export const ADV_SYSTEM_PROBE_ENGINES = 'adv.system.probe_engines';
-
-// 6. Irregular Selection (lasso / wand / AI matting → polygon → bitmap mask)
+// 5. Irregular Selection (lasso / wand / AI matting → polygon → bitmap mask)
 //
 // Note (Pre-PR-6-2): there is intentionally NO `set` / `clear` adv command
 // here. Producers (lasso / wand handlers, AI matting pipelines) write the

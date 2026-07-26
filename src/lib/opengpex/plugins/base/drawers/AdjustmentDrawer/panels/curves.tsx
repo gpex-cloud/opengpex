@@ -64,7 +64,7 @@ import React, {
   useState,
 } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { generateCurveLUT } from "@opengpex/editor/core/engine/filters/lut";
+import { generateCurveLUT } from "@opengpex/editor/core/engine/filters";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { CurvePoints, CurvesState } from "@opengpex/editor/core/types/models";
 import type { AdjustmentDrawerCommandsMap } from "../commands.d";

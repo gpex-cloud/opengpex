@@ -105,8 +105,7 @@ export const FrameRevertCommand = {
 
         const frameAssets = await Promise.all(
           framesToImport.map(async (f) => {
-            const assetId = await assets.register(f.displayBlob);
-            const assetUrl = assets.getURL(assetId)!;
+            const { id: assetId, url: assetUrl } = await assets.register(f.displayBlob);
             return { assetId, assetUrl, delay: f.delay || 100, index: f.index };
           }),
         );
@@ -199,11 +198,9 @@ export const FrameRevertCommand = {
       // 2. Generate a fresh ObjectURL binding
       const liveSrc = assets.resolve(originalAssetId) || URL.createObjectURL(assetEntry.blob);
 
-      // 3. Re-decode dimensions and bounds from the original physical Blob
-      const [dimension, contentBounds] = await Promise.all([
-        pixels.decode.dimensions(liveSrc),
-        pixels.decode.contentBounds(liveSrc),
-      ]);
+      // 3. Read dimensions from tileMeta (already in memory after hydrate); compute content bounds
+      const dimension = { w: assetEntry.tileMeta!.width, h: assetEntry.tileMeta!.height };
+      const contentBounds = await pixels.image.contentBounds(liveSrc, originalAssetId);
 
       const { insets } = state.ui.theme.config;
 

@@ -24,7 +24,7 @@
  */
 
 import ExifReader from 'exifreader';
-import type { AssetService, WorkerProxy } from '@opengpex/editor/core/types';
+import type { AssetService } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   ImageMetadata,
@@ -50,7 +50,6 @@ export class RawHandler implements ImageFormatHandler {
 
   constructor(
     private assets: AssetService,
-    private workerProxy: WorkerProxy,
   ) {}
 
   // ─── Decode ──────────────────────────────────────────────────────────────

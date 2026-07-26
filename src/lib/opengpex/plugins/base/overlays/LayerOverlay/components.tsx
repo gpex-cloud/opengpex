@@ -62,7 +62,16 @@ export function LayerOverlayItem({
   const isVisible = showAlways || forceShow || (isActive && isHoveringActive) || isHovered;
 
   // Use viewport-unified sync hook: Optimized for Screen Space (Ticker + Matrix)
-  useLayerOverlaySync(ref, labelRef, layer, true);
+  // [P3 Perf] Only register ticker when overlay is visible — eliminates N×120Hz
+  // useless matrix computations when overlay is hidden. The useLayoutEffect inside
+  // useFastSync guarantees correct positioning on the first visible frame.
+  //
+  // [Perf] The hook also handles:
+  //   - Interaction hide: instantly sets opacity:0 during pan/zoom (bypasses CSS transition)
+  //   - Canvas-sized hide: hides layers whose dimensions match the canvas exactly
+  //   - Internal 30Hz throttle: matrix computation is self-throttled, but interaction
+  //     detection runs every frame for zero-delay response.
+  useLayerOverlaySync(ref, labelRef, layer, isVisible);
 
   useEffect(() => {
     prevVisibleRef.current = isVisible;

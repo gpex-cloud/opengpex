@@ -19,7 +19,7 @@
 
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   Plus, Trash2, CheckCircle2, Link, Wifi,
   ChevronDown, ChevronRight,
@@ -35,7 +35,7 @@ interface EnvironmentsPanelProps {
 }
 
 export function EnvironmentsPanel({ config, setConfig }: EnvironmentsPanelProps) {
-  const environments = config.environments || [];
+  const environments = useMemo(() => config.environments || [], [config.environments]);
 
   const [healthResults, setHealthResults] = useState<Record<string, { status: 'ok' | 'error'; info?: string; time?: number; nodeCount?: number }>>({});
   const [installedNodes, setInstalledNodes] = useState<Record<string, string[]>>({});

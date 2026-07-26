@@ -4,6 +4,18 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.32
+
+- Redesign pixel engine: replace single monolithic service with a modular facade + dispatcher architecture for better maintainability and performance
+- New dedicated worker handlers for compositing, decoding, resampling, tiling, high-depth processing, and file I/O
+- Separate on-screen (interactive) and off-screen (export) rendering paths
+- Rewrite Pixel Grid overlay from CSS gradients to Canvas2D — reduces per-frame cost from ~16ms to ~0.3ms with idle dirty-checking
+- Overhaul overlay performance: tiered ticker scheduling, shared state snapshot caching, and inactive subscriber sleeping — sustains 120fps with 30+ active overlays
+- Refactor brush tool internals into a stroke module with session-based paint and mask modes
+- Refactor frame import pipeline into cleaner importer modules
+
+---
+
 ## v1.0.0-beta.31
 
 - Unified composite pipeline: eliminate redundant decode round-trips during render and export

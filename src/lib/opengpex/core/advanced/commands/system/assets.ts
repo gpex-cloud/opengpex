@@ -32,13 +32,8 @@ export const SystemAssetCommands = {
     execute: async (ctx: EditorContextValue, blob: Blob): Promise<{ id: string; url: string }> => {
       const { assets } = ctx;
 
-      // 1. Call asset service for physical registration (based on SHA-256 hash)
-      const id = await assets.register(blob);
-
-      // 2. Get real-time ObjectURL
-      const url = assets.getURL(id)!;
-
-      return { id, url };
+      // Physical registration (based on SHA-256 hash) — returns {id, url} directly
+      return await assets.register(blob);
     }
   } as EditorCommand<Blob, Promise<{ id: string; url: string }>>,
 

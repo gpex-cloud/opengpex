@@ -24,6 +24,7 @@ import {
 import { getLayerWorldMatrix } from './transform';
 import { getLayerLocalAABB, getRectIntersection, getLayerBoundingBox, getMultiRectUnion } from './space';
 import { snapToPixel } from './snapping';
+import { parsePathDataToRings } from './point2d';
 
 /**
  * frameLocalToLayerLocal: Projects selection shape under artboard space (Frame) to layer (Layer) local space
@@ -63,28 +64,78 @@ export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleSh
 
 
 /**
+ * translatePathData — Translate (and optionally scale) all absolute coordinates
+ * in an SVG path string.
+ *
+ * Reuses `parsePathDataToRings` (the canonical M/L/Z parser from `point2d.ts`)
+ * and rebuilds pathData following the same `M x y L x y ... Z` format as `polygonToShape`.
+ *
+ * For the Frame path (pure translation): scaleX = scaleY = 1.
+ * For the Layer path (affine): applies scale then translate to each (x, y) pair.
+ *
+ * Formula per point: newX = x * scaleX + dx, newY = y * scaleY + dy.
+ */
+function translatePathData(pathData: string, dx: number, dy: number, scaleX = 1, scaleY = 1): string {
+  const rings = parsePathDataToRings(pathData);
+  if (!rings.length) return pathData;
+
+  const parts: string[] = [];
+  for (const ring of rings) {
+    if (ring.length < 2) continue;
+    const segs: string[] = [];
+    for (let i = 0; i < ring.length; i++) {
+      const pt = ring[i];
+      const nx = pt.x * scaleX + dx;
+      const ny = pt.y * scaleY + dy;
+      segs.push(`${i === 0 ? 'M' : 'L'} ${nx} ${ny}`);
+    }
+    segs.push('Z');
+    parts.push(segs.join(' '));
+  }
+  return parts.join(' ');
+}
+
+/**
  * Project shape from local to world space
  */
 export function localToWorldShape(shape: Shape, source: Layer | Frame): WorldShape {
   if ('__brand' in shape && shape.__brand === 'world') return shape as WorldShape;
 
   let worldRect;
+  let worldPathData: string | undefined = (shape as { pathData?: string }).pathData;
+
   if ('type' in source && (source.type === 'image' || source.type === 'text' || source.type === 'vector' || source.type === 'color')) {
     const wm = getLayerWorldMatrix(source as Layer);
     const x = (shape.rect.x * wm.a) + (shape.rect.y * wm.c) + wm.tx;
     const y = (shape.rect.x * wm.b) + (shape.rect.y * wm.d) + wm.ty;
     worldRect = asWorldRect({ x, y, w: shape.rect.w * wm.a, h: shape.rect.h * wm.d });
+
+    // For path shapes, transform pathData coordinates using the layer's world matrix
+    if (shape.type === 'path' && worldPathData) {
+      worldPathData = translatePathData(worldPathData, wm.tx, wm.ty, wm.a, wm.d);
+    }
   } else {
     const f = source as Frame;
+    const dx = -f.canvas.w / 2;
+    const dy = -f.canvas.h / 2;
     worldRect = asWorldRect({
-      x: shape.rect.x - f.canvas.w / 2,
-      y: shape.rect.y - f.canvas.h / 2,
+      x: shape.rect.x + dx,
+      y: shape.rect.y + dy,
       w: shape.rect.w,
       h: shape.rect.h
     });
+
+    // For path shapes, translate pathData coordinates by the same offset
+    if (shape.type === 'path' && worldPathData) {
+      worldPathData = translatePathData(worldPathData, dx, dy);
+    }
   }
 
-  return { ...shape, rect: worldRect, __brand: 'world' } as WorldShape;
+  const result = { ...shape, rect: worldRect, __brand: 'world' } as WorldShape;
+  if (worldPathData !== undefined) {
+    (result as unknown as { pathData: string }).pathData = worldPathData;
+  }
+  return result;
 }
 
 /**
@@ -92,20 +143,39 @@ export function localToWorldShape(shape: Shape, source: Layer | Frame): WorldSha
  */
 export function worldToLocalShape(shape: WorldShape, target: Layer | Frame): LocalShape {
   let localRect;
+  let localPathData: string | undefined = (shape as { pathData?: string }).pathData;
+
   if ('type' in target && (target.type === 'image' || target.type === 'text' || target.type === 'vector' || target.type === 'color')) {
     const wm = getLayerWorldMatrix(target as Layer);
     localRect = getLayerLocalAABB(target as Layer, shape.rect, wm);
+
+    // For path shapes, apply inverse scale + translate to pathData coordinates.
+    // Inverse of (x * scaleX + tx, y * scaleY + ty) = ((x - tx) / scaleX, (y - ty) / scaleY)
+    if (shape.type === 'path' && localPathData && wm.a !== 0 && wm.d !== 0) {
+      localPathData = translatePathData(localPathData, -wm.tx / wm.a, -wm.ty / wm.d, 1 / wm.a, 1 / wm.d);
+    }
   } else {
     const f = target as Frame;
+    const dx = f.canvas.w / 2;
+    const dy = f.canvas.h / 2;
     localRect = asLocalRect({
-      x: shape.rect.x + f.canvas.w / 2,
-      y: shape.rect.y + f.canvas.h / 2,
+      x: shape.rect.x + dx,
+      y: shape.rect.y + dy,
       w: shape.rect.w,
       h: shape.rect.h
     });
+
+    // For path shapes, translate pathData coordinates back to frame-local
+    if (shape.type === 'path' && localPathData) {
+      localPathData = translatePathData(localPathData, dx, dy);
+    }
   }
 
-  return { ...shape, rect: localRect, __brand: 'local' } as LocalShape;
+  const result = { ...shape, rect: localRect, __brand: 'local' } as LocalShape;
+  if (localPathData !== undefined) {
+    (result as unknown as { pathData: string }).pathData = localPathData;
+  }
+  return result;
 }
 
 /**

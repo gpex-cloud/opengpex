@@ -52,7 +52,7 @@ export interface LayerService {
   fragmentToLayerPhysical: (frame: Frame, layer: Layer, nameType: string) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
   fragmentToLayerLogical: (frame: Frame, layer: Layer, nameType: string) => { newLayer: Layer, localShape: LocalShape } | null;
   /** Physically resamples layer: adjusts pixel resolution and proportionally scales visible areas and masks */
-  resampleLayerPhysical: (layer: Layer, scaleX: number, scaleY: number) => Promise<{ newUrl: string, newAssetId: string, patch: Partial<Layer> } | null>;
+  resampleLayerPhysical: (layer: Layer, scaleX: number, scaleY: number, frame: Frame) => Promise<{ newUrl: string, newAssetId: string, patch: Partial<Layer> } | null>;
   /** Applies a fragment to an existing layer (e.g. Exchange layer) */
   fragmentToExistLayer: (frame: Frame, sourceLayer: Layer, targetLayer: Layer, selection: LocalShape | LocalPolygon) => { updatedLayer: Layer, localShape: LocalShape } | null;
   /** Creates a layer from an external image Blob (handles asset registration and position calculation) */

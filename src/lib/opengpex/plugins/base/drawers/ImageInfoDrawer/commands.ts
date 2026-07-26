@@ -17,8 +17,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { EditorContextValue, EditorCommand, LocalShape } from '@opengpex/editor/core/types';
-import type { ImageMetadata } from '@opengpex/editor/core/files';
+import { EditorContextValue, EditorCommand, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
+import type { ImageMetadata, EncodeOptions } from '@opengpex/editor/core/files';
 import type { RenderToBlobOptions } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
@@ -46,7 +46,7 @@ export const IMAGE_INFO_COMMANDS = {
       id: P.CMD_DOWNLOAD,
       name: 'Download Creation',
       execute: async (ctx: EditorContextValue) => {
-         const { activeFrame, state, pixels, files } = ctx;
+         const { activeFrame, state, pixels, files, geometry } = ctx;
          const { selfConfig } = ctx.scoped || {};
          if (!activeFrame) return;
 
@@ -112,13 +112,41 @@ export const IMAGE_INFO_COMMANDS = {
             console.debug('[ExportCmd] Starting export: format=%s, clip=%s, dims=%dx%d',
                config.format, cropShape ? 'yes' : 'no', exportW, exportH);
 
-            // ─── 5. Single unified call — PixelService picks the lane internally ─
-            let blob: Blob;
-            if (cropShape) {
-               blob = await pixels.render.shapeToBlob(activeFrame, cropShape, opts) as Blob;
-            } else {
-               blob = await pixels.render.frameToBlob(activeFrame, opts) as Blob;
-            }
+         // ─── 5. Unified composite pipeline (Step 9) ─────────────────────────
+         // Composition and encoding are now orthogonal:
+         //   pixels.composite() → CompositeResult → result.toBlob(format, encodeOpts)
+         const allLayers = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]);
+         const visibleLayers = allLayers.filter(l => !l.hostId && l.visible !== false);
+
+         const localRoi = cropShape
+            ? cropShape
+            : asLocalShape({ x: 0, y: 0, w: activeFrame.canvas.w, h: activeFrame.canvas.h });
+
+         // Convert local-space ROI to world-space for the compositor.
+         // pixels.composite() sends the ROI directly to the Worker which uses
+         // translateToRoi(worldMatrix, roi.rect) — expecting world coordinates.
+         const worldRoi = geometry.shape.localToWorldShape(localRoi, activeFrame);
+
+         const precision = opts.exportBitDepth === 16 ? 16 : 8;
+
+         const result = await pixels.composite({
+            layers: visibleLayers,
+            roi: worldRoi,
+            precision,
+            dpr: 1, // Export output is physical pixels (no retina scale)
+         });
+
+            // Encode the composite result to the target format.
+            // All formats (PNG/JPEG/WebP/TIFF/AVIF) are handled by result.toBlob().
+            // - 8-bit backends: OffscreenCanvas.convertToBlob (AVIF supported natively since Chrome 120)
+            // - 16-bit backends: vips encode (TIFF) or downgrade to 8-bit (other formats)
+            const encodeOpts: EncodeOptions = {
+               quality: opts.quality,
+               metadata: opts.metadata,
+               exportConfig: opts.exportConfig as EncodeOptions['exportConfig'],
+            };
+
+            const blob = await result.toBlob(config.format, encodeOpts);
 
             // ─── 6. Post-composite resize fallback (Lane C 8-bit path) ─────────
             // If the lane returned a full-size blob but user requested resize,

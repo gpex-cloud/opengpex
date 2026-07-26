@@ -96,7 +96,7 @@ export const FrameResizeCommands = {
 
       for (const layer of hostLayers) {
         try {
-          const result = await ctx.layers.resampleLayerPhysical(layer, scaleX, scaleY);
+          const result = await ctx.layers.resampleLayerPhysical(layer, scaleX, scaleY, activeFrame);
           if (result) {
             patches[layer.id] = result.patch;
           }
@@ -164,8 +164,7 @@ export const FrameResizeCommands = {
       const scaleY = newH / oldH;
 
       // 2. Register the source as an asset (creates blob URL + cache entry)
-      const assetId = await assets.register(source);
-      const assetUrl = assets.getURL(assetId)!;
+      const { id: assetId, url: assetUrl } = await assets.register(source);
 
       // 3. Find primary image layer (first host image layer)
       const primaryLayer = activeFrame.layers.order
@@ -185,7 +184,7 @@ export const FrameResizeCommands = {
 
       for (const layer of otherHostLayers) {
         try {
-          const result = await ctx.layers.resampleLayerPhysical(layer, scaleX, scaleY);
+          const result = await ctx.layers.resampleLayerPhysical(layer, scaleX, scaleY, activeFrame);
           if (result) {
             patches[layer.id] = result.patch;
           }

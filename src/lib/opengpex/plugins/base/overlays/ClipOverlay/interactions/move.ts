@@ -59,7 +59,6 @@ import {
  */
 export const createSelectionMoveHandler = (): InteractionHandler => {
   // ─── Closure state ─────────────────────────────────────────────────────────
-  let isRegular = false;
   let activeTool: ClipTool = 'rect';
   let startPolygon: LocalPolygon | null = null;
   let initialRect: LocalRect = asLocalRect({ x: 0, y: 0, w: 0, h: 0 });
@@ -123,22 +122,18 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       activeTool = (e.activeFrame.latestClipTool as ClipTool) || 'rect';
 
       if (!box) {
-        isRegular = true;
         startPolygon = null;
         initialRect = asLocalRect({ x: 0, y: 0, w: 0, h: 0 });
         return initialRect;
       }
 
-      const boxShape2 = polygonToShape(box);
-      isRegular = boxShape2.type !== 'path';
-
-      if (isRegular) {
-        startPolygon = null;
-        initialRect = { ...box.rect };
-      } else {
-        startPolygon = box;
-        initialRect = { ...startPolygon.rect };
-      }
+      // Always capture startPolygon for both regular and irregular selections.
+      // Regular selections need rings translated alongside rect so that
+      // polygonToSvgPathD (which outputs bounds-relative coordinates) produces
+      // correct marching-ants path data, and downstream cut/copy operations
+      // reference the moved position rather than the original.
+      startPolygon = box;
+      initialRect = { ...box.rect };
 
       // Store drag start position for the move-delta label
       e.actions.fast.setTransient('clipMoveStart', { x: initialRect.x, y: initialRect.y });
@@ -170,17 +165,14 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       // `newRect` is already snapped + clamped by TransformHandler's internal
       // call to InteractionMath.snapAndSync(). Smart guides are written to
       // transient automatically.
+      //
+      // Both regular and irregular selections translate the full polygon
+      // (rings + rect) from the captured startPolygon. This keeps rings in
+      // sync with rect so that:
+      //   1. polygonToSvgPathD (bounds-relative) renders ants at the moved position
+      //   2. Downstream cut/copy operations use the correct moved coordinates
 
-      if (isRegular) {
-        const currentPoly = frame.clipBoxes[activeTool] as LocalPolygon;
-        tx.update({
-          clipBoxes: {
-            ...frame.clipBoxes,
-            [activeTool]: { ...currentPoly, rect: newRect }
-          }
-        }, 'frame');
-      } else if (startPolygon) {
-        // Polygon: compute position delta from initial bounding rect
+      if (startPolygon) {
         const polyDx = newRect.x - initialRect.x;
         const polyDy = newRect.y - initialRect.y;
         const newPoly = e.geometry.polygon.translatePolygon(startPolygon, polyDx, polyDy);

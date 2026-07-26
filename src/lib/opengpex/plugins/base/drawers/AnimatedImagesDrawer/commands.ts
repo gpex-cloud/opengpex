@@ -87,7 +87,9 @@ async function exportAnimatedGif(
 
    // If no multi-frame sequence found, export single frame
    if (sequenceLayers.length <= 1) {
-      const bitmap = await pixels.render.frameToBlob(activeFrame, { format: 'raw', quality: 1 }) as ImageBitmap;
+      const result = await pixels.render.compositeFrame(activeFrame);
+      const blob = await result.toBlob('image/png');
+      const bitmap = await createImageBitmap(blob);
       return gifHandler.encode(bitmap, {});
    }
 

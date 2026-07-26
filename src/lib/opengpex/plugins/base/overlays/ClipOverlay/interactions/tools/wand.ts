@@ -26,7 +26,6 @@ import {
   asLocalPolygon,
 } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
-import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
 import { magicWandClient } from '../../workers/client';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
 import { makeClipToolGuard } from '../guard';
@@ -76,66 +75,6 @@ function isWandableLayer(layer: Layer): boolean {
   return layer.type === 'image';
 }
 
-/**
- * Decode the layer's source URL into a Uint8ClampedArray of layer-local pixels.
- * Reuses the editor's global `sourceBitmapCache` for synchronous hits on hot path.
- */
-async function getLayerImageData(layer: Layer): Promise<ImageData> {
-  let img: ImageBitmap | undefined = sourceBitmapCache.get(layer.src);
-  if (!img) {
-    // Kick the shared loader and wait for it via the cache's subscription
-    // channel — a plain `createImageBitmap(await fetch(...))` would work
-    // too, but going through the cache means every consumer gets the
-    // decoded bitmap for free (no double-decode).
-    sourceBitmapCache.getOrFetch(layer.src);
-    img = await new Promise<ImageBitmap>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        unsub();
-        reject(new Error(`Failed to load layer image: ${layer.src} (timeout)`));
-      }, 15_000);
-      const unsub = sourceBitmapCache.subscribe(() => {
-        const bmp = sourceBitmapCache.get(layer.src);
-        if (bmp) {
-          clearTimeout(timeout);
-          unsub();
-          resolve(bmp);
-        }
-      });
-      // Cover the race where the fetch resolved before we subscribed.
-      const bmp = sourceBitmapCache.get(layer.src);
-      if (bmp) {
-        clearTimeout(timeout);
-        unsub();
-        resolve(bmp);
-      }
-    });
-  }
-
-  const w = layer.bounding.w | 0;
-  const h = layer.bounding.h | 0;
-  if (w <= 0 || h <= 0) {
-    throw new Error(`Layer has zero intrinsic dimensions (${w}×${h})`);
-  }
-
-  let imageData: ImageData;
-  if (typeof OffscreenCanvas !== 'undefined') {
-    const off = new OffscreenCanvas(w, h);
-    const ctx = off.getContext('2d');
-    if (!ctx) throw new Error('Failed to acquire 2D context (OffscreenCanvas)');
-    ctx.drawImage(img, 0, 0, w, h);
-    imageData = ctx.getImageData(0, 0, w, h);
-  } else {
-    const cv = document.createElement('canvas');
-    cv.width = w;
-    cv.height = h;
-    const ctx = cv.getContext('2d');
-    if (!ctx) throw new Error('Failed to acquire 2D context (HTMLCanvas)');
-    ctx.drawImage(img, 0, 0, w, h);
-    imageData = ctx.getImageData(0, 0, w, h);
-  }
-
-  return imageData;
-}
 
 // ─── Handler ───────────────────────────────────────────────────────────────────
 
@@ -208,10 +147,10 @@ export const createWandHandler = (): InteractionHandler => {
           return;
         }
 
-        // 2. Read layer-local ImageData.
+        // 2. Read layer-local ImageData (by content hash — WorkerCache key).
         let imageData: ImageData;
         try {
-          imageData = await getLayerImageData(layer);
+          imageData = await e.pixels.image.imageData(layer.assetId!);
         } catch (err) {
           console.error('[Wand] Failed to read layer image data:', err);
           e.actions.setInteraction({ selectionErrorPulse: Date.now() });

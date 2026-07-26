@@ -50,7 +50,6 @@ export const MAX_SAFE_EXPORT_PIXELS = 144_000_000;
  * drag and apply full-res filter on mouseUp via Worker.
  * 
  * Rationale: Main-thread LUT ≈ 10ms/megapixel; 60fps frame budget = 16ms.
- * @see 20260711_filter_fast_track_extension.md §2.2
  */
 export const MAX_REALTIME_FILTER_PIXELS = 1_000_000;
 

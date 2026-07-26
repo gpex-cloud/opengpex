@@ -76,12 +76,6 @@ export interface UIConfig {
 
 export type SupportedImageFormat = 'jpeg' | 'png' | 'gif' | 'webp' | 'heic' | 'avif' | 'svg' | 'eps' | 'bmp' | 'raw' | 'unknown';
 
-export interface EngineStatus {
-  id: string;
-  name: string;
-  status: 'ready' | 'loading' | 'error' | 'unimplemented';
-  version?: string;
-}
 
 export interface EditorData {
   frames: NormalizedState<Frame>;
@@ -94,9 +88,6 @@ export interface EditorData {
   choice: { isVisible: boolean; title: string; options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>; helpText?: string } | null;
   interaction: InteractionState;
   history: GlobalHistoryState;
-  runtime: {
-    engineStatuses: EngineStatus[];
-  };
 }
 
 export interface EditorState extends EditorData {
@@ -155,7 +146,6 @@ export type EditorAction =
   | { type: 'SHOW_CHOICE'; payload: { title: string; options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>; helpText?: string } }
   | { type: 'HIDE_CHOICE' }
   | { type: 'UPDATE_VIEW_SIZE'; payload: { w: number; h: number } }
-  | { type: 'SET_ENGINE_STATUS'; payload: EngineStatus[] }
   | { type: 'SET_INTERACTION'; payload: Partial<InteractionState> }
   | { type: 'TOGGLE_INTERACTION_SIGNAL'; payload: string }
   | { type: 'CLEAR_ALL_DATA' }
@@ -210,6 +200,29 @@ export interface VolatileState {
 
   /** High-frequency interaction transient store (fast-track, not reactive) */
   interaction: VolatileInteraction;
+
+  /**
+   * @internal [P2 Perf] Buffer write version counter.
+   * Incremented on every `fast.override` write to buffered.layers or buffered.frames.
+   * Used by useFastSync snapshot cache to detect staleness without Object.keys().
+   */
+  _bufferVersion: number;
+
+  /**
+   * @internal [P2 Perf] Per-tick merged frame snapshot cache.
+   * Computed once by the first useFastSync subscriber in each tick,
+   * shared by all subsequent subscribers in the same tick.
+   */
+  _snapshot?: {
+    /** Buffer version when this snapshot was computed */
+    version: number;
+    /** Source frame reference (React state) — invalidates on state update */
+    sourceFrame: Frame;
+    /** Merged frame result */
+    frame: Frame;
+    /** Merged camera result */
+    cam: CameraState;
+  };
 }
 export interface VolatileStateHandle {
   volatileRef: React.RefObject<VolatileState>;

@@ -17,8 +17,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import React, { Suspense } from "react";
-import GPEX from "@opengpex/editor/workspace";
+import React from "react";
+import EditorClient from "./EditorClient";
 
 export const metadata = {
   title: "OpenGPEX - A Open-Source Graphics & Photo Editor",
@@ -28,13 +28,7 @@ export const metadata = {
 export default function RootEditorPage() {
   return (
     <div className="fixed inset-0 bg-zinc-50 dark:bg-zinc-950 overflow-hidden">
-      <Suspense
-        fallback={
-          <div className="flex h-full w-full bg-zinc-50 dark:bg-zinc-950" />
-        }
-      >
-        <GPEX />
-      </Suspense>
+      <EditorClient />
     </div>
   );
 }

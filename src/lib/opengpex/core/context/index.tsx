@@ -48,8 +48,7 @@ import { createStateStorage } from "@opengpex/editor/core/storage/state/StateSto
 
 import { useEditorStore } from "@opengpex/editor/core/state/useEditorStore";
 import { createGeometryService } from "@opengpex/editor/core/geometry";
-import { createPixelService } from "@opengpex/editor/core/engine";
-import { createWorkerProxy } from "@opengpex/editor/core/engine/WorkerProxy";
+import { createPixelFacade, WorkerBridge } from "@opengpex/editor/core/engine";
 import { createLayerService } from "@opengpex/editor/core/layer";
 import { createClipboardService } from "@opengpex/editor/core/clipboard/ClipboardService";
 import {
@@ -106,14 +105,18 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   // 2. Initialization of pure static singleton services (does not re-render with any state, unique within the lifecycle)
   const geometry = useMemo(() => createGeometryService(), []);
   const assets = useMemo(() => createAssetService(), []);
-  const processor = useMemo(() => createWorkerProxy(), []);
-  // FileService is created before PixelService so it can be injected as a dependency
-  // (PixelService.render's Lane C delegates encoding to FileService — see export refactor proposal §4.3).
-  const files = useMemo(() => createFileService(assets, processor), [assets, processor]);
-  const pixels = useMemo(
-    () => createPixelService(geometry, assets, processor, files),
-    [geometry, assets, processor, files],
+  // WorkerBridge for engine pixel pipeline (main↔worker transport)
+  const bridge = useMemo(
+    () => new WorkerBridge(new Worker(new URL('../engine/worker/entry.worker.ts', import.meta.url), { type: 'module' })),
+    [],
   );
+  // v2 PixelFacade — replaces createPixelService (Phase 6 engine integration)
+  const pixels = useMemo(
+    () => createPixelFacade({ geometry, assets, bridge }),
+    [geometry, assets, bridge],
+  );
+  // FileService depends on PixelService.fileIO for TIFF/RAW Worker operations (Phase 7.2 vips unification)
+  const files = useMemo(() => createFileService(assets, pixels), [assets, pixels]);
   const layers = useMemo(
     () => createLayerService(geometry, pixels, assets, actions, () => state),
     [geometry, pixels, assets, actions, state],
@@ -172,6 +175,10 @@ export function EditorProvider({ children }: { children: ReactNode }) {
 
   // 4. Environment-side side effects (Environment Side Effects)
 
+  // 4.0 AssetService ↔ Engine cache wiring is now fully internal to createPixelFacade.
+  // PixelFacade calls assets.setCallbacks() during construction (synchronous, no race window).
+  // See: core/engine/facade/PixelFacade.ts §"Wire AssetService lifecycle"
+
   // 4.1 Core bootstrapping and persistent recovery (Bootstrap & Hydration)
   const sysCommandsRegistered = useRef(false);
   useEffect(() => {
@@ -224,8 +231,6 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           if (!ctx) return;
 
           registerAdvancedCommands(ctx.actions);
-          const statuses = ctx.pixels.utils.probeEngines();
-          ctx.actions.setEngineStatus(statuses);
         });
       }
     }
@@ -265,9 +270,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     return () => {
       document.removeEventListener("wheel", handleGlobalWheel);
       document.removeEventListener("paste", handleGlobalPaste);
-      pixels.cache.clear();
+      pixels.image.clearCache();
     };
-  }, [pixels.cache, contextValueRef]);
+  }, [pixels.image, contextValueRef]);
 
   return (
     <EditorServiceContext.Provider value={serviceContextValue}>

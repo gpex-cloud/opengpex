@@ -24,7 +24,7 @@
  * CMD_TEST_CONNECTION: Tests ComfyUI connectivity via /system_stats.
  */
 
-import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, asLocalShape } from '@opengpex/editor/core/types';
 import { SettingsPanelAPI } from '../../panels/SettingsPanel/protocols';
 import { ComfyBridgeConfig, ExecutionRecord } from './protocols';
 import { ComfyClient } from './api/client';
@@ -108,21 +108,30 @@ export async function cancelExecution(): Promise<void> {
 import type { InputSource } from './protocols';
 
 async function getInputImageBlob(ctx: EditorContextValue, inputSource: InputSource): Promise<Blob | null> {
+  const { activeFrame, pixels, geometry } = ctx;
+  if (!activeFrame) return null;
+
   if (inputSource === 'merged-frame') {
     // Composite all visible layers of the active frame (non-destructive)
-    const { activeFrame, pixels } = ctx;
-    if (!activeFrame) return null;
-    const result = await pixels.render.frameToBlob(activeFrame, { format: 'image/png' });
-    // frameToBlob returns Blob | ImageBitmap; for 'image/png' format it's always a Blob
-    return result as Blob;
+    const result = await pixels.render.compositeFrame(activeFrame);
+    const blob = await result.toBlob('image/png');
+    return blob;
   }
 
-  // Default: active-layer — render the layer via flattenLayers (includes transforms/masks/adjustments)
-  // Output size = layer bounding union (not full canvas), position info returned for result re-placement
-  const { activeLayer, activeFrame, pixels } = ctx;
-  if (!activeLayer || !activeFrame) return null;
-  const result = await pixels.render.flattenLayers([activeLayer], activeFrame, { format: 'image/png' });
-  return (result.blob ?? result.bitmap!) as Blob;
+  // Default: active-layer — composite single layer (includes transforms/masks/adjustments)
+  const { activeLayer } = ctx;
+  if (!activeLayer) return null;
+
+  const localRoi = asLocalShape({ x: 0, y: 0, w: activeFrame.canvas.w, h: activeFrame.canvas.h });
+  const worldRoi = geometry.shape.localToWorldShape(localRoi, activeFrame);
+  const result = await pixels.composite({
+    layers: [activeLayer],
+    roi: worldRoi,
+    precision: 8,
+    dpr: 1,
+  });
+  const blob = await result.toBlob('image/png');
+  return blob;
 }
 
 // ─── Helper: Append execution record to history ────────────────────────────────
@@ -355,7 +364,7 @@ export const COMFY_BRIDGE_COMMANDS = {
             const file = new File([blob], `comfy_${Date.now()}_${i}.png`, { type: 'image/png' });
 
             // Create branch frame (parentId = trunk via activeFrame since we did switchFrame: true)
-            await actions.adv.frame.create.branch.execute({
+            await actions.adv.frame.create.branch.fromFile.execute({
               source: file,
               extra: { ...extraMeta, ai_output_index: i, ai_output_total: allOutputs.length },
             });

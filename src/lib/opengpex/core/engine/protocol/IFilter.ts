@@ -18,21 +18,14 @@
  */
 
 /**
- * IFilter — Pixel-level filter processing protocol.
+ * IFilter — Pixel-level filter processing protocol for Engine V2.
  *
- * This module defines the declarative filter descriptors and the abstract
- * runtime interface used by the OpenGPEX filter pipeline (see spec
- * `docs/opengpex/plans/20260604_filter_pipeline_architecture_spec.md`).
- *
- * Design rules:
- * 1. **Declarative & Serializable** — every field must be JSON-safe so a
- *    descriptor can be transferred across Web Workers via postMessage.
- * 2. **Backend-agnostic** — this file contains ONLY protocol types. Concrete
- *    implementations (Canvas2dFilter / WebglFilter / WebgpuFilter) live under
- *    `core/engine/backends/*` and are wired via `FilterFactory`.
- * 3. **assetId-safe** — applying an IFilter never mutates the source asset
- *    identity, which keeps the 16-bit fidelity export channel intact
- *    (see spec §10).
+ * Adapted from v1 `engine/filters/IFilter.ts`.
+ * Contains:
+ * - FilterDescriptor union type
+ * - IFilter interface
+ * - HighResPixelBuffer type
+ * - classifyFilter() classification helper
  */
 
 // ────────────────────────────────────────────────────────────
@@ -133,7 +126,7 @@ export interface ChannelMixFilter {
 
 export interface CustomFilter {
   type: 'custom';
-  /** Registered id in the Worker-side CustomFilterRegistry (§5.7) */
+  /** Registered id in the Worker-side CustomFilterRegistry */
   id: string;
   /** Serializable, primitive-only parameter bag */
   params: Record<string, number | string | boolean>;
@@ -161,19 +154,16 @@ export type FilterType = FilterDescriptor['type'];
 // ────────────────────────────────────────────────────────────
 
 /**
- * Filter kind — decides tile-rendering strategy (§5.4):
+ * Filter kind — decides tile-rendering strategy:
  * - `point`         : each output pixel depends only on the same input pixel;
  *                     tile-parallel is safe.
  * - `neighborhood`  : output depends on surrounding pixels (blur / sharpen …).
- *                     Must run on the full layer buffer OR use padding, else
- *                     tile seams appear at boundaries.
+ *                     Must run on the full layer buffer OR use padding.
  */
 export type FilterKind = 'point' | 'neighborhood';
 
 /**
- * Classify a filter descriptor. Custom filters default to `point` — plugins
- * that provide neighborhood-style custom filters must declare their kind on
- * the Worker-side registry (§5.7).
+ * Classify a filter descriptor. Custom filters default to `point`.
  */
 export function classifyFilter(desc: FilterDescriptor): FilterKind {
   switch (desc.type) {
@@ -188,19 +178,16 @@ export function classifyFilter(desc: FilterDescriptor): FilterKind {
  * Convenience helper — does this descriptor list contain any neighborhood op?
  */
 export function hasNeighborhoodFilter(filters: FilterDescriptor[]): boolean {
-  return filters.some(f => classifyFilter(f) === 'neighborhood');
+  return filters.some((f) => classifyFilter(f) === 'neighborhood');
 }
 
 // ────────────────────────────────────────────────────────────
-// High-resolution pixel buffer (16-bit / 32-bit path, spec §10)
+// High-resolution pixel buffer (16-bit / 32-bit path)
 // ────────────────────────────────────────────────────────────
 
 /**
  * Explicit pixel buffer for the 16-bit fidelity export path.
- *
- * Distinct from `ImageBitmap` because we need bit-exact control over the
- * source samples — vips-worker decodes into this shape and the filter
- * pipeline reads/writes it in-place before vips re-encodes.
+ * Distinct from ImageBitmap because we need bit-exact control.
  */
 export interface HighResPixelBuffer {
   data: Uint16Array | Float32Array;
@@ -211,7 +198,7 @@ export interface HighResPixelBuffer {
   bitDepth: 16 | 32;
 }
 
-/** A source frame for `IFilter.apply()` — either 8-bit or high-precision. */
+/** A source frame for IFilter.apply() — either 8-bit or high-precision. */
 export type FilterInput = ImageBitmap | HighResPixelBuffer;
 
 export interface FilterApplyOptions {
@@ -229,18 +216,17 @@ export interface FilterApplyOptions {
  * IFilter — abstract pixel-level filter runtime.
  *
  * Implementations:
- * - `Canvas2dFilter`  — ImageData loops in a Web Worker (Step 2, this spec)
- * - `WebglFilter`     — GLSL fragment-shader pass (§8.3, future)
- * - `WebgpuFilter`    — WebGPU compute shaders (§8.5, future)
+ * - `Canvas2dFilter`  — ImageData loops in a Web Worker
+ * - `WebglFilter`     — GLSL fragment-shader pass (future)
+ * - `WebgpuFilter`    — WebGPU compute shaders (future)
  */
 export interface IFilter {
   /**
    * Apply a chain of filter descriptors to a source frame in order.
    *
-   * Precision rules (§10.4):
-   * - `ImageBitmap` in  → returns `ImageBitmap` (8-bit preview path).
-   * - `HighResPixelBuffer` in → returns `HighResPixelBuffer` (16/32-bit
-   *   export path). Callers can request downcast by passing `options.bitDepth`.
+   * Precision rules:
+   * - ImageBitmap in → returns ImageBitmap (8-bit preview path).
+   * - HighResPixelBuffer in → returns HighResPixelBuffer (16/32-bit export path).
    */
   apply(
     source: FilterInput,

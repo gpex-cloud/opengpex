@@ -22,12 +22,10 @@
 import React, { useEffect } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
-import { SmartGuideData } from '@opengpex/editor/core/types';
 import { Magnet } from 'lucide-react';
 import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
 import { useSmartGuides } from './hooks';
-import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
-import { Motion } from '@opengpex/editor/core/motion';
+import { useSmartGuidesFastSync } from './useFastSync';
 
 /**
  * SmartGuides Component: Renders geometric alignment helper lines on the stage (Fast-Path version).
@@ -35,7 +33,7 @@ import { Motion } from '@opengpex/editor/core/motion';
 export function SmartGuides() {
   const { isEnabled } = useSmartGuides();
   const { state } = useEditorState();
-  const { actions, geometry } = useEditorServices();
+  const { actions } = useEditorServices();
   const { isSnapping } = state.interaction;
   
   const xRef = React.useRef<HTMLDivElement>(null);
@@ -49,65 +47,8 @@ export function SmartGuides() {
     }
   }, [isEnabled, isSnapping, actions]);
 
-  const COLORS = {
-    normal: '#ff00ff', // Fuchsia: Normal alignment
-    birth: '#ffcc00'   // Gold: Alignment with initial spawn point
-  };
-
-  // Core synchronization logic: Project world coordinates to screen space every frame
-  useFastSync(xRef, !!isEnabled, (v, f, cam) => {
-    if (!xRef.current || !yRef.current) return;
-
-    // Get transient guide data directly from volatile state
-    const smartguides = v.transient.smartguides as SmartGuideData | undefined;
-
-    if (!smartguides || !v.activeState.interacting) {
-      Motion.set([xRef.current, yRef.current], { 
-        opacity: 0, 
-        display: 'none',
-        overwrite: true 
-      });
-      return;
-    }
-
-    const { x, y, isBirthX, isBirthY } = smartguides;
-
-    // 1. Process vertical guide (X)
-    if (typeof x === 'number') {
-      const screenX = geometry.space.worldToScreen(x, 0, f, cam).x;
-      const snappedX = geometry.snapping.snapPoint({ x: screenX, y: 0 }).x;
-      
-      Motion.set(xRef.current, {
-        display: 'block',
-        opacity: 1,
-        left: snappedX,
-        backgroundColor: isBirthX ? COLORS.birth : COLORS.normal,
-        boxShadow: `0 0 4px ${isBirthX ? 'rgba(255,204,0,0.5)' : 'rgba(255,0,255,0.3)'}`,
-        transition: 'none', // Force disable transition to prevent color flickering
-        overwrite: true
-      });
-    } else {
-      Motion.set(xRef.current, { opacity: 0, display: 'none' });
-    }
-
-    // 2. Process horizontal guide (Y)
-    if (typeof y === 'number') {
-      const screenY = geometry.space.worldToScreen(0, y, f, cam).y;
-      const snappedY = geometry.snapping.snapPoint({ x: 0, y: screenY }).y;
-      
-      Motion.set(yRef.current, {
-        display: 'block',
-        opacity: 1,
-        top: snappedY,
-        backgroundColor: isBirthY ? COLORS.birth : COLORS.normal,
-        boxShadow: `0 0 4px ${isBirthY ? 'rgba(255,204,0,0.5)' : 'rgba(255,0,255,0.3)'}`,
-        transition: 'none',
-        overwrite: true
-      });
-    } else {
-      Motion.set(yRef.current, { opacity: 0, display: 'none' });
-    }
-  });
+  // Core synchronization logic (extracted to useFastSync.ts)
+  useSmartGuidesFastSync(xRef, yRef, !!isEnabled);
 
   return (
     <div className="absolute inset-0 pointer-events-none" style={{ zIndex: EDITOR_Z_INDEX.UI.OVERLAY }}>

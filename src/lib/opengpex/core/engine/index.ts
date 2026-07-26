@@ -18,24 +18,25 @@
  */
 
 /**
- * Rendering Engine Architecture:
- * 
- * 1. Interface abstraction:
- *    Export concrete implementation (currently canvas2dEngine) via 'engine' alias.
- *    This allows callers (e.g. StageRenderer, PixelService) to program only against the generic engine interface.
- *    If upgrading to WebGL/WebGPU or connecting a WASM driver in the future, just modify the export source here without changing business logic.
- * 
- * 2. Dependency decoupling:
- *    The engine layer remains pure JS implementation and is strictly forbidden from depending on React Context.
- *    All external dependencies (e.g. AssetService, GeometryService) are injected via method parameters,
- *    ensuring the engine is capable of running independently in non-UI environments like WebWorker and Node.js.
+ * engine/ — Barrel export module (Facade layer).
+ *
+ * Public surface (Tier 1 — Context/Service construction):
+ *   - createPixelFacade (factory for PixelService)
+ *   - WorkerBridge (transport layer for main↔worker communication)
+ *
+ * Other public sub-paths:
+ *   - engine/renderer  → Onscreen rendering subsystem (Stage layer)
+ *   - engine/filters   → Pure filter algorithms + pixel utils (Plugin layer)
+ *   - engine/types     → Type-only exports (core/types layer)
+ *
+ * Internal modules (dispatchers, results, caches, worker handlers) are NOT
+ * re-exported here; consumers should use the appropriate sub-path barrel
+ * or interact through the PixelService facade.
  */
 
-export { createPixelService } from './PixelService';
-export { createWorkerProxy } from './WorkerProxy';
-export { EngineFactory } from './EngineFactory';
+// ── Facade ──
+export { createPixelFacade } from './facade/PixelFacade';
+export type { PixelFacadeDeps } from './facade/PixelFacade';
 
-// Frontend display engine statically locked by global config
-import { STAGE_RENDER_ENGINE } from '../helpers/config';
-import { EngineFactory } from './EngineFactory';
-export const engine = EngineFactory.create(STAGE_RENDER_ENGINE);
+// ── Bridge (needed by EditorContext to construct) ──
+export { WorkerBridge } from './dispatch/bridge/WorkerBridge';

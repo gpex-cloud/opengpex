@@ -18,29 +18,29 @@
  */
 
 /**
- * SourceBitmapCache — the SINGLE main-thread cache for decoded asset
- * bitmaps. Replaces the legacy `imageCache` (HTMLImageElement) and
- * unifies the type across every consumer:
+ * SourceBitmapCache — the SINGLE main-thread cache for decoded asset bitmaps.
  *
- *   • Canvas2dEngine.drawLayerDirect          (drawImage / tile fallback / bitmap mask)
- *   • Canvas2dEngine.resolveFilteredSource    (feeds AsyncFilterCache — see §4 of the plan)
- *   • PixelService.decode.{bitmap,dimensions,contentBounds}
- *   • BrushOverlay / ClipOverlay wand / AdjustmentDrawer histogram / AIToolsDrawer
+ * Engine V2 version — reused from v1 with identical API.
+ * This is the main-thread "truth source" for all decoded ImageBitmaps:
+ *
+ *   • Canvas2dEngine.drawLayerDirect (drawImage / tile fallback / bitmap mask)
+ *   • FilterFastTrack preview
+ *   • PixelFacade.decode.{bitmap, dimensions, contentBounds}
+ *   • Plugin overlays (Brush, Clip wand, Adjustment histogram, AITools)
  *   • CanvasStage.subscribe → render loop redraw trigger
  *
  * Storage type is `ImageBitmap` because it is:
- *   - accepted directly by `ctx.drawImage(...)`
+ *   - accepted directly by ctx.drawImage(...)
  *   - transferable to Web Workers with zero copy
- *   - decoded only once per URL — no double-representation with HTMLImageElement
+ *   - decoded only once per URL
  *
- * See `docs/opengpex/plans/20260710_source_bitmap_cache_refactor_plan.md`
- * for background & rationale.
+ * Invariant (architecture doc §六.5): SourceBitmapCache is the main-thread
+ * ONLY bitmap truth source.
  */
 
 /**
- * Guard for non-browser (SSR / Node test) environments where the
- * ImageBitmap APIs are absent. Consumers all expect "undefined = not
- * yet available", so we simply short-circuit reads and swallow writes.
+ * Guard for non-browser (SSR / Node test) environments where
+ * ImageBitmap APIs are absent.
  */
 const isBitmapCapable =
   typeof globalThis !== 'undefined' &&
@@ -62,8 +62,7 @@ class SourceBitmapCache {
   }
 
   // ────────────────────────────────────────────────────────────
-  // Subscription — mirror of the legacy ImageCache contract so
-  // CanvasStage's redraw signal wiring is a one-liner grep-replace.
+  // Subscription
   // ────────────────────────────────────────────────────────────
 
   public subscribe(callback: () => void): () => void {
@@ -81,22 +80,16 @@ class SourceBitmapCache {
   // Read API
   // ────────────────────────────────────────────────────────────
 
-  /** Sync lookup — returns the cached bitmap or `undefined`. */
+  /** Sync lookup — returns the cached bitmap or undefined. */
   public get(src: string): ImageBitmap | undefined {
     return this.cache.get(src);
   }
 
   /**
-   * Sync-return + async-load contract identical to legacy
-   * `imageCache.getOrFetch`:
-   *   - Cached → return immediately (sync).
-   *   - Missing → kick off `fetch → blob → createImageBitmap`;
-   *              subscribers are notified when the bitmap lands;
-   *              return `undefined` for this call.
-   *
-   * Loading errors are logged and swallowed so a broken URL cannot
-   * poison the render loop (the caller will keep receiving `undefined`
-   * and can decide how to react — same behaviour as the legacy cache).
+   * Sync-return + async-load contract:
+   *   - Cached → return immediately.
+   *   - Missing → kick off fetch → blob → createImageBitmap;
+   *     subscribers notified when bitmap lands; returns undefined.
    */
   public getOrFetch(src: string): ImageBitmap | undefined {
     const hit = this.cache.get(src);
@@ -112,14 +105,8 @@ class SourceBitmapCache {
   // ────────────────────────────────────────────────────────────
 
   /**
-   * Directly install a bitmap (e.g. produced by BrushOverlay bake or
-   * a Worker result). Overwrites any previous entry for `src` and
-   * closes the previous bitmap to release GPU memory.
-   *
-   * If a `getOrFetch(src)` load is in flight, its result will be
-   * discarded (see race-guard in `startLoad`) so the caller-provided
-   * bitmap wins — this matches the legacy `imageCache.set()` semantics
-   * used by BrushOverlay bake.
+   * Directly install a bitmap (e.g. produced by Worker result or overlay bake).
+   * Overwrites any previous entry and closes the old bitmap.
    */
   public set(src: string, bitmap: ImageBitmap): void {
     const prev = this.cache.get(src);
@@ -127,21 +114,26 @@ class SourceBitmapCache {
       try { prev.close(); } catch { /* ignore */ }
     }
     this.cache.set(src, bitmap);
-    // Any in-flight loader will detect its promise is no longer the
-    // authoritative pending entry (because we set `.cache` directly)
-    // and close its bitmap on completion.
     this.notify();
   }
 
   /**
-   * Return a caller-owned clone of the cached bitmap suitable for
-   * `postMessage(msg, [ownedBitmap])` transfer. Under the hood this
-   * is `createImageBitmap(cachedBitmap)` — the browser implements it
-   * as a GPU-side refcount, NOT a full re-decode, so the CPU cost is
-   * near-zero even for 4K sources.
-   *
-   * Returns `null` when the bitmap is not (yet) cached or when the
-   * runtime lacks `createImageBitmap` (SSR / Node tests).
+   * Warm cache from a Blob (e.g. after Worker produces a result blob).
+   * Decodes the blob into an ImageBitmap and stores it.
+   */
+  public async warmFromBlob(src: string, blob: Blob): Promise<void> {
+    if (!isBitmapCapable) return;
+    try {
+      const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+      this.set(src, bitmap);
+    } catch (err) {
+      console.warn('[SourceBitmapCache] warmFromBlob failed for', src, err);
+    }
+  }
+
+  /**
+   * Return a caller-owned clone suitable for postMessage transfer.
+   * Near-zero cost (GPU-side refcount, NOT full re-decode).
    */
   public async acquireOwned(src: string): Promise<ImageBitmap | null> {
     const hit = this.cache.get(src);
@@ -159,7 +151,7 @@ class SourceBitmapCache {
   // Eviction
   // ────────────────────────────────────────────────────────────
 
-  public remove(src: string): void {
+  public delete(src: string): void {
     const prev = this.cache.get(src);
     if (prev) {
       try { prev.close(); } catch { /* ignore */ }
@@ -182,18 +174,6 @@ class SourceBitmapCache {
   // Internals
   // ────────────────────────────────────────────────────────────
 
-  /**
-   * Kick off a `fetch → blob → createImageBitmap` job for `src`.
-   * The resulting promise is registered in `this.pending` under the
-   * same key so concurrent `getOrFetch(src)` calls deduplicate onto
-   * it. On success we notify subscribers so the render loop picks up
-   * the freshly-decoded bitmap on the next frame.
-   *
-   * Race guard: if `set()` runs while the fetch is in flight, our
-   * `pending` entry is cleared out from under us; on completion we
-   * detect that we're no longer the authoritative loader and close
-   * our bitmap instead of clobbering the caller-installed one.
-   */
   private startLoad(src: string): void {
     const promise = (async (): Promise<ImageBitmap> => {
       const response = await fetch(src, { credentials: 'omit' });
@@ -205,7 +185,6 @@ class SourceBitmapCache {
 
     promise.then(
       (bmp) => {
-        // Only commit if we're still the authoritative loader.
         if (this.pending.get(src) !== promise) {
           try { bmp.close(); } catch { /* ignore */ }
           return;

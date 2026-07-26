@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { GeometryService, PixelService, AssetService, LayerService, LayerUpdateTx, LayerEditor, asLocalShape, asLocalRect, asWorldShape, EditorActions, EditorData, Layer, VectorMask, BitmapMask, isPolygon } from '@opengpex/editor/core/types';
+import { GeometryService, PixelService, AssetService, LayerService, LayerUpdateTx, LayerEditor, asLocalShape, asLocalRect, EditorActions, EditorData, Layer, VectorMask, BitmapMask, isPolygon } from '@opengpex/editor/core/types';
 import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { LayerFactory } from './LayerFactory';
@@ -170,7 +170,6 @@ export function createLayerService(
     },
 
 
-
     addLayer: (frameId, layer, index) => {
       const expanded = LayerFactory.expandLayers([layer]);
       actions.addLayers(frameId, expanded, index);
@@ -233,6 +232,7 @@ export function createLayerService(
 
       return LayerFactory.getTriplet(layer, frame.layers.order.map(id => frame.layers.byId[id]));
     },
+    
     fragmentToLayerLogical: (frame, layer, nameType) => {
       const box = getClipBox(frame);
       if (!box) return null;
@@ -267,102 +267,119 @@ export function createLayerService(
       return { newLayer, localShape };
     },
 
-    resampleLayerPhysical: async (layer, scaleX, scaleY) => {
+    fragmentToLayerPhysical: async (frame, layer, nameType) => {
+      const box = getClipBox(frame);
+      if (!box) return null;
+      const localShape = polygonToShape(geometry.polygon.frameLocalToLayerLocal(box, frame, layer));
+      const intersection = geometry.shape.intersectWithLayer(localShape, layer);
+      if (!intersection) return null;
+
+      // For pixel rasterization, use frame-local shape as composite ROI
+      const frameLocalShape = polygonToShape(box);
+      const worldSelection = geometry.shape.localToWorldShape(frameLocalShape, frame);
+
+      // ── Composite + trim in memory (no intermediate asset registration) ────
+      const { result: fragResult } = await pixels.render.compositeLayers([layer], frame, frameLocalShape);
+      const trimResult = await fragResult.trimmed();
+      if (!trimResult) return null; // Entirely transparent — no content in selection
+
+      const { result: trimmedResult, offset } = trimResult;
+      const trimW = trimmedResult.bounds.w;
+      const trimH = trimmedResult.bounds.h;
+      const { id: assetId, url: assetUrl } = await trimmedResult.toAsset();
+      const cx = worldSelection.rect.x + (offset.x + trimW / 2);
+      const cy = worldSelection.rect.y + (offset.y + trimH / 2);
+
+      const { id: _, ...layerData } = layer;
+      const newLayer = LayerFactory.getNewLayer({
+        ...layerData,
+        src: assetUrl,
+        assetId: assetId,
+        vectorMasks: layerData.vectorMasks?.filter(m => !m.reserved) || [],
+        name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id]), nameType),
+        hostId: undefined,
+        visibleShape: asLocalShape({ x: 0, y: 0, w: trimW, h: trimH }, worldSelection.type),
+        bounding: { w: trimW, h: trimH },
+        cx,
+        cy,
+        birthCenter: { cx, cy }, // 💡 Record birth center to trigger the golden return guide line when dragging fragments
+        scale: 1,
+        rotation: 0,
+        flip: { h: false, v: false },
+        adjustments: { brightness: 100, contrast: 100, saturation: 100, hueRotate: 0, blur: 0 }
+      });
+
+      return {
+        newLayer,
+        localShape,
+        url: assetUrl
+      };
+    },
+    
+    resampleLayerPhysical: async (layer, scaleX, scaleY, frame) => {
       try {
+        const hasContent = layer.src && layer.src !== LayerFactory.TRANSPARENT_PIXEL;
         const isUniform = Math.abs(scaleX - scaleY) < 0.001;
 
         if (isUniform) {
-          const totalScaleX = scaleX;
-          const totalScaleY = scaleY;
-          const targetW = Math.max(1, Math.round(layer.bounding.w * totalScaleX));
-          const targetH = Math.max(1, Math.round(layer.bounding.h * totalScaleY));
+          // ── Uniform scale: resample source directly, preserve masks/visibleShape ──
+          const targetW = Math.max(1, Math.round(layer.bounding.w * scaleX));
+          const targetH = Math.max(1, Math.round(layer.bounding.h * scaleY));
 
-          let url = layer.src;
           let id = layer.assetId;
+          let url = layer.src;
 
-          if (layer.src && layer.src !== LayerFactory.TRANSPARENT_PIXEL) {
-            const dim = await pixels.decode.dimensions(layer.src);
-            const targetSrcW = Math.max(1, Math.round(dim.w * totalScaleX));
-            const targetSrcH = Math.max(1, Math.round(dim.h * totalScaleY));
-
-            const newBlob = await pixels.process.resample(layer.src, { targetSize: { w: targetSrcW, h: targetSrcH } });
-            id = await assets.register(newBlob);
-            url = assets.getURL(id)!;
-
-            await pixels.decode.bitmap(url);
+          if (hasContent) {
+            // Source pixel dims === layer.bounding (invariant maintained by prior resamples)
+            const result = await pixels.image.resample(layer.src, {
+              targetSize: { w: targetW, h: targetH },
+            });
+            ({ id, url } = await result.toAsset());
           }
 
-          const updatedVisibleShape = layer.visibleShape ? {
-            ...layer.visibleShape,
-            rect: asLocalRect({
-              x: layer.visibleShape.rect.x * totalScaleX,
-              y: layer.visibleShape.rect.y * totalScaleY,
-              w: layer.visibleShape.rect.w * totalScaleX,
-              h: layer.visibleShape.rect.h * totalScaleY
-            })
-          } : undefined;
-
-          const updatedMasks = layer.vectorMasks?.map((mask: VectorMask) => ({
-            ...mask,
-            shape: {
-              ...mask.shape,
-              rect: asLocalRect({
-                x: mask.shape.rect.x * totalScaleX,
-                y: mask.shape.rect.y * totalScaleY,
-                w: mask.shape.rect.w * totalScaleX,
-                h: mask.shape.rect.h * totalScaleY
-              })
-            }
-          }));
+          const scaleRect = (r: { x: number; y: number; w: number; h: number }) =>
+            asLocalRect({ x: r.x * scaleX, y: r.y * scaleY, w: r.w * scaleX, h: r.h * scaleY });
 
           const patch: Partial<Layer> = {
-            src: url,
-            assetId: id,
+            src: url, assetId: id,
             cx: layer.cx * scaleX,
             cy: layer.cy * scaleY,
             bounding: { w: targetW, h: targetH },
             scale: 1,
-            ...(updatedVisibleShape && { visibleShape: updatedVisibleShape }),
-            ...(updatedMasks && { vectorMasks: updatedMasks })
+            ...(layer.visibleShape && { visibleShape: { ...layer.visibleShape, rect: scaleRect(layer.visibleShape.rect) } }),
+            ...(layer.vectorMasks && {
+              vectorMasks: layer.vectorMasks.map((m: VectorMask) => ({
+                ...m, shape: { ...m.shape, rect: scaleRect(m.shape.rect) },
+              })),
+            }),
           };
 
           return { newUrl: url, newAssetId: id || '', patch };
         } else {
+          // ── Non-uniform scale: bake (flatten) then resample, reset orientation ──
           const aabb = geometry.space.getLayerBoundingBox(layer);
-
-          let finalUrl = layer.src;
-          let finalId = layer.assetId;
           const targetW = Math.max(1, Math.round(aabb.w * scaleX));
           const targetH = Math.max(1, Math.round(aabb.h * scaleY));
 
-          if (layer.src && layer.src !== LayerFactory.TRANSPARENT_PIXEL) {
-            const bakedBlobResult = await pixels.worker.mergeLayersWithShape([layer], asWorldShape(aabb, 'rect'));
-            const bakedAsset = await pixels.worker.asAsset(Promise.resolve(bakedBlobResult));
+          let id = layer.assetId;
+          let url = layer.src;
 
-            const newBlob = await pixels.process.resample(bakedAsset.url, { targetSize: { w: targetW, h: targetH } });
-            finalId = await assets.register(newBlob);
-            finalUrl = assets.getURL(finalId)!;
-
-            await pixels.decode.bitmap(finalUrl);
+          if (hasContent) {
+            const { result } = await pixels.render.compositeResizedLayers([layer], frame, { w: targetW, h: targetH });
+            ({ id, url } = await result.toAsset());
           }
 
-          const newCx = (aabb.x + aabb.w / 2) * scaleX;
-          const newCy = (aabb.y + aabb.h / 2) * scaleY;
-
           const patch: Partial<Layer> = {
-            src: finalUrl,
-            assetId: finalId,
-            cx: newCx,
-            cy: newCy,
+            src: url, assetId: id,
+            cx: (aabb.x + aabb.w / 2) * scaleX,
+            cy: (aabb.y + aabb.h / 2) * scaleY,
             bounding: { w: targetW, h: targetH },
-            scale: 1,
-            rotation: 0,
-            flip: { h: false, v: false },
+            scale: 1, rotation: 0, flip: { h: false, v: false },
             visibleShape: asLocalShape({ x: 0, y: 0, w: targetW, h: targetH }),
-            vectorMasks: []
+            vectorMasks: [],
           };
 
-          return { newUrl: finalUrl, newAssetId: finalId || '', patch };
+          return { newUrl: url, newAssetId: id || '', patch };
         }
       } catch (err) {
         console.error('[LayerService] Resample physical failed for layer:', layer.id, err);
@@ -407,64 +424,8 @@ export function createLayerService(
       return { updatedLayer, localShape };
     },
 
-    fragmentToLayerPhysical: async (frame, layer, nameType) => {
-      const box = getClipBox(frame);
-      if (!box) return null;
-      const localShape = polygonToShape(geometry.polygon.frameLocalToLayerLocal(box, frame, layer));
-      const intersection = geometry.shape.intersectWithLayer(localShape, layer);
-      if (!intersection) return null;
-
-      // For pixel rasterization, convert selection to world-space shape
-      const frameLocalShape = polygonToShape(box);
-      const worldSelection = geometry.shape.localToWorldShape(frameLocalShape, frame);
-      const targetW = Math.round(worldSelection.rect.w);
-      const targetH = Math.round(worldSelection.rect.h);
-
-      const assetResult = await pixels.worker.asAsset(
-        pixels.worker.mergeLayersWithShape([layer], worldSelection)
-      );
-
-      const trimmedRect = await pixels.decode.contentBounds(assetResult.url);
-
-      if (trimmedRect.w <= 0 || trimmedRect.h <= 0) return null;
-
-      const isFull = trimmedRect.x === 0 && trimmedRect.y === 0 && trimmedRect.w === targetW && trimmedRect.h === targetH;
-      const finalAsset = isFull
-        ? { id: assetResult.id, url: assetResult.url }
-        : await pixels.worker.asAsset(pixels.worker.cloneRegion(assetResult.id, trimmedRect));
-
-      const cx = worldSelection.rect.x + (trimmedRect.x + trimmedRect.w / 2);
-      const cy = worldSelection.rect.y + (trimmedRect.y + trimmedRect.h / 2);
-
-      const { id: _, ...layerData } = layer;
-      const newLayer = LayerFactory.getNewLayer({
-        ...layerData,
-        src: finalAsset.url,
-        assetId: finalAsset.id,
-        vectorMasks: layerData.vectorMasks?.filter(m => !m.reserved) || [],
-        name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id]), nameType),
-        hostId: undefined,
-        visibleShape: asLocalShape({ x: 0, y: 0, w: trimmedRect.w, h: trimmedRect.h }, worldSelection.type),
-        bounding: { w: trimmedRect.w, h: trimmedRect.h },
-        cx,
-        cy,
-        birthCenter: { cx, cy }, // 💡 Record birth center to trigger the golden return guide line when dragging fragments
-        scale: 1,
-        rotation: 0,
-        flip: { h: false, v: false },
-        adjustments: { brightness: 100, contrast: 100, saturation: 100, hueRotate: 0, blur: 0 }
-      });
-
-      return {
-        newLayer,
-        localShape,
-        url: finalAsset.url
-      };
-    },
     createLayerFromBlob: async (blob, frame, screenPoint) => {
-      const assetId = await assets.register(blob);
-      const url = assets.getURL(assetId)!;
-      const dim = await pixels.decode.dimensions(url);
+      const { id: assetId, url, dimensions: dim } = await assets.register(blob);
 
       // layer.cx/cy uses the world coordinate system (origin at canvas center), directly using the screenToWorld result
       let cx, cy;

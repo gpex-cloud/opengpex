@@ -20,7 +20,6 @@
 'use client';
 
 import { EditorContextValue, EditorCommand, asLocalPoint, asLocalPolygon, asLocalRect } from '@opengpex/editor/core/types';
-import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
 import { SettingsPanelAPI } from '../../../panels/SettingsPanel/protocols';
 import { bgRemoverClient } from './client';
 import { SpeedEstimator } from '../shared';
@@ -115,17 +114,8 @@ export const BG_REMOVAL_COMMANDS = {
 
       let imageData: ImageData;
       try {
-        const cachedBitmap = sourceBitmapCache.get(imageSource);
-        if (!cachedBitmap) {
-          sourceBitmapCache.getOrFetch(imageSource);
-          actions.setInteraction({ hud: { message: 'Image not loaded yet', type: 'error' } });
-          return;
-        }
-        const canvas = new OffscreenCanvas(cachedBitmap.width, cachedBitmap.height);
-        const ctx2d = canvas.getContext('2d')!;
-        ctx2d.drawImage(cachedBitmap, 0, 0);
-        imageData = ctx2d.getImageData(0, 0, canvas.width, canvas.height);
-      } catch (_err) {
+        imageData = await ctx.pixels.image.imageData(activeLayer.assetId!);
+      } catch {
         actions.setInteraction({ hud: { message: 'Failed to read image data', type: 'error' } });
         return;
       }

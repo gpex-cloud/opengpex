@@ -18,8 +18,7 @@
  */
 
 import { Frame, CameraState, Dimensions, GeometryService, AssetService, Layer } from '@opengpex/editor/core/types';
-import { PixelUtils } from '@opengpex/editor/core/engine/PixelUtils';
-import { IRenderer } from '@opengpex/editor/core/engine/protocol/IRenderer';
+import { PixelUtils, type IRenderer } from '@opengpex/editor/core/engine/renderer';
 
 interface RenderOptions {
   isInteracting: boolean;

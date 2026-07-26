@@ -26,7 +26,7 @@
  * - Numeric / text inputs suitable for parameter exposure
  */
 
-import type { UserWorkflow, ExposedParam, WorkflowMode, TextConfig, NumberConfig, PromptConfig, ComboConfig } from '../protocols';
+import type { UserWorkflow, ExposedParam, WorkflowMode, TextConfig, NumberConfig, PromptConfig } from '../protocols';
 
 // ─── Types for ComfyUI API-format workflow ─────────────────────────────────────
 

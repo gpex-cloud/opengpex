@@ -67,7 +67,7 @@ function useDockMetrics(): DockMetrics {
   useEffect(() => {
     fpsRef.current = { frames: 0, lastTime: performance.now() };
     let rafId: number;
-    const tick = () => {
+    const fpsTick = () => {
       const now = performance.now();
       fpsRef.current.frames++;
       const elapsed = now - fpsRef.current.lastTime;
@@ -75,43 +75,49 @@ function useDockMetrics(): DockMetrics {
         setFps(Math.round((fpsRef.current.frames * 1000) / elapsed));
         fpsRef.current = { frames: 0, lastTime: now };
       }
-      rafId = requestAnimationFrame(tick);
+      rafId = requestAnimationFrame(fpsTick);
     };
-    rafId = requestAnimationFrame(tick);
+    rafId = requestAnimationFrame(fpsTick);
     return () => cancelAnimationFrame(rafId);
   }, []);
 
-  // Mouse position tracking
-  const mouseRef = useRef({ vx: 0, vy: 0 });
+  // Mouse position tracking (use state so coordinate reads don't access refs during render)
+  const [mousePos, setMousePos] = useState({ vx: 0, vy: 0 });
   useEffect(() => {
+    let latestVx = 0;
+    let latestVy = 0;
+    let dirty = false;
+
     const handleMouseMove = (e: MouseEvent) => {
       const container = document.querySelector('.editor-viewport-container');
       if (!container) return;
       const rect = container.getBoundingClientRect();
-      mouseRef.current = {
-        vx: Math.round(e.clientX - rect.left),
-        vy: Math.round(e.clientY - rect.top),
-      };
+      latestVx = Math.round(e.clientX - rect.left);
+      latestVy = Math.round(e.clientY - rect.top);
+      dirty = true;
     };
     window.addEventListener('mousemove', handleMouseMove);
-    return () => window.removeEventListener('mousemove', handleMouseMove);
-  }, []);
 
-  // ~15Hz tick for coordinate updates
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
+    // ~15Hz tick for coordinate updates
     let rafId: number;
     let lastUpdate = 0;
     const loop = () => {
       const now = performance.now();
       if (now - lastUpdate >= 66) {
         lastUpdate = now;
-        setTick(t => t + 1);
+        if (dirty) {
+          dirty = false;
+          setMousePos({ vx: latestVx, vy: latestVy });
+        }
       }
       rafId = requestAnimationFrame(loop);
     };
     rafId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(rafId);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      cancelAnimationFrame(rafId);
+    };
   }, []);
 
   // Memory (2s interval, Chrome only)
@@ -129,15 +135,13 @@ function useDockMetrics(): DockMetrics {
   }, []);
 
   const coords = useMemo(() => {
-    void tick;
     if (!activeFrame) return { world: { x: 0, y: 0 }, local: { x: 0, y: 0 } };
     const cam = actions.fast.latestCamera(activeFrame.id);
-    const { vx, vy } = mouseRef.current;
+    const { vx, vy } = mousePos;
     const world = geometry.space.screenToWorld(vx, vy, activeFrame, cam);
     const local = geometry.space.screenToLocal(vx, vy, activeFrame, cam);
     return { world, local };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tick, activeFrame, actions.fast, geometry]);
+  }, [mousePos, activeFrame, actions.fast, geometry]);
 
   return { fps, world: coords.world, local: coords.local, mem };
 }
@@ -170,7 +174,7 @@ function DockMetricsHUD() {
         <div className="flex items-center gap-1">
           <MemoryStick size={8} className="text-violet-400 shrink-0" />
           <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-7">Mem</span>
-          <span className="text-[9px] font-bold text-[var(--text-main)] tabular-nums leading-none">
+          <span className="text-[9px] font-bold text-[var(--text-muted)] tabular-nums leading-none">
             {mem}
           </span>
         </div>
@@ -180,7 +184,7 @@ function DockMetricsHUD() {
       <div className="flex items-center gap-1">
         <Globe size={8} className="text-amber-400 shrink-0" />
         <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-7">World</span>
-        <span className="text-[9px] font-bold text-[var(--text-main)] tabular-nums leading-none inline-flex gap-0.5">
+        <span className="text-[9px] font-bold text-[var(--text-muted)] tabular-nums leading-none inline-flex gap-0.5">
           <span className="inline-block w-[3ch] text-right">{Math.round(world.x)}</span>
           <span className="text-[var(--text-muted)]">,</span>
           <span className="inline-block w-[3ch] text-right">{Math.round(world.y)}</span>
@@ -191,7 +195,7 @@ function DockMetricsHUD() {
       <div className="flex items-center gap-1">
         <MapPin size={8} className="text-cyan-400 shrink-0" />
         <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-7">Local</span>
-        <span className="text-[9px] font-bold text-[var(--text-main)] tabular-nums leading-none inline-flex gap-0.5">
+        <span className="text-[9px] font-bold text-[var(--text-muted)] tabular-nums leading-none inline-flex gap-0.5">
           <span className="inline-block w-[3ch] text-right">{Math.round(local.x)}</span>
           <span className="text-[var(--text-muted)]">,</span>
           <span className="inline-block w-[3ch] text-right">{Math.round(local.y)}</span>

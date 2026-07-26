@@ -18,122 +18,41 @@
  */
 
 /**
- * Worker-side filter handler (spec §5.2).
+ * FilterHandler — Worker-side handler for FILTER jobs.
  *
- * Responsibility:
- *   Instantiate an `IFilter` runtime (currently Canvas2dFilter) on demand
- *   inside the engine worker, execute the pixel work, and hand the
- *   resulting `ImageBitmap` back to the main thread via
- *   `Transferable` semantics.
+ * Phase 6.9 refactor:
+ * - Source bitmap is now received directly via transfer (ImageBitmap in job.source)
+ *   instead of resolving from WorkerCache by hash.
+ * - The backend closes the transferred source after processing.
+ * - Result bitmap is transferred back to the main thread zero-copy.
  *
- * This handler is intentionally the *only* worker-side code that touches
- * `FilterFactory` — the rest of the worker never imports the filter
- * backends directly, which keeps their (potentially heavy) dependency
- * graph out of unrelated hot paths (merger, transformer, etc.).
+ * Architecture:
+ *   router → FilterHandler → Canvas2dFilterBackend → shared/filter2d
  */
 
-import type { FilterDescriptor, IFilter } from '@opengpex/editor/core/engine/protocol/IFilter';
-import { FilterFactory } from '@opengpex/editor/core/engine/FilterFactory';
+import type { FilterJob } from '../../protocol/jobs';
+import type { RouterResult } from '../router';
+import { Canvas2dFilterBackend } from '../../rendering/offscreen/Canvas2dFilterBackend';
 
-export interface ApplyFilterPayload {
-  /** Owned bitmap (transferred from the main thread). */
-  source: ImageBitmap;
-  /** Fully normalized descriptor list (see `normalizeFilterDescriptors`). */
-  filters: FilterDescriptor[];
+// ─── FilterHandler ───
+
+export class FilterHandler {
+  private canvas2dBackend = new Canvas2dFilterBackend();
+
   /**
-   * Optional cache key echoed back to the main thread for bookkeeping.
-   * We do NOT read it here — the main-thread `AsyncFilterCache` owns the
-   * mapping between key and result.
+   * Handle a FILTER job.
+   *
+   * The job carries an owned ImageBitmap (transferred from main thread).
+   * The backend processes it and returns a new filtered bitmap for transfer back.
    */
-  key?: string;
-}
+  async handle(job: FilterJob): Promise<RouterResult> {
+    const { source, descriptors, key } = job;
 
-export interface ApplyFilterResult {
-  bitmap: ImageBitmap;
-  key?: string;
-}
+    const result = await this.canvas2dBackend.apply(source, descriptors, key);
 
-// Lazy singleton — the first APPLY_FILTER call pays the module-load
-// cost; subsequent calls hit the warm instance.
-let cachedFilter: IFilter | null = null;
-
-async function getFilter(): Promise<IFilter> {
-  if (!cachedFilter) {
-    cachedFilter = await FilterFactory.create('canvas2d');
+    return {
+      result: { bitmap: result.bitmap, key: result.key },
+      transfer: [result.bitmap],
+    };
   }
-  return cachedFilter;
-}
-
-/**
- * Handle an `APPLY_FILTER` message.
- *
- * Contract:
- *   - `source` ownership is CONSUMED (the ImageBitmap belongs to the
- *     Worker after `postMessage(..., [source])`).
- *   - The returned `bitmap` MUST be listed as transferable by the caller
- *     so the ownership handoff back to the main thread is zero-copy.
- *   - If no filters are active, we still allocate a new bitmap identical
- *     to the source: this simplifies the AsyncFilterCache invariant that
- *     every cache entry is an owned bitmap the cache can dispose.
- */
-export async function applyFilter(payload: ApplyFilterPayload): Promise<ApplyFilterResult> {
-  const { source, filters, key } = payload;
-  const runtime = await getFilter();
-
-  // Empty filter chain — clone via `createImageBitmap` so we hand back an
-  // independent bitmap the cache can dispose without racing the source.
-  if (!filters || filters.length === 0) {
-    const passthrough = await createImageBitmap(source);
-    return { bitmap: passthrough, key };
-  }
-
-  const result = await runtime.apply(source, filters);
-  // Canvas2dFilter's ImageBitmap-path always returns an `ImageBitmap` —
-  // the HighRes path only fires when the input is `HighResPixelBuffer`,
-  // which this handler never receives.
-  if (!(result instanceof ImageBitmap)) {
-    throw new Error(
-      `[worker/handlers/filter] expected ImageBitmap result, got ${typeof result}`,
-    );
-  }
-  return { bitmap: result, key };
-}
-
-export interface ApplyFilterTilePayload {
-  jobs: Array<{
-    key: string;
-    bitmap: ImageBitmap;
-    filters: FilterDescriptor[];
-  }>;
-}
-
-export interface ApplyFilterTileResult {
-  results: Array<{
-    key: string;
-    bitmap: ImageBitmap;
-  }>;
-}
-
-export async function applyFilterTile(payload: ApplyFilterTilePayload): Promise<ApplyFilterTileResult> {
-  const { jobs } = payload;
-  const runtime = await getFilter();
-
-  const results = await Promise.all(
-    jobs.map(async (job) => {
-      if (!job.filters || job.filters.length === 0) {
-        const passthrough = await createImageBitmap(job.bitmap);
-        return { key: job.key, bitmap: passthrough };
-      }
-
-      const result = await runtime.apply(job.bitmap, job.filters);
-      if (!(result instanceof ImageBitmap)) {
-        throw new Error(
-          `[worker/handlers/filter] expected ImageBitmap result, got ${typeof result}`,
-        );
-      }
-      return { key: job.key, bitmap: result };
-    }),
-  );
-
-  return { results };
 }

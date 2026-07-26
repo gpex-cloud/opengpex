@@ -43,6 +43,7 @@ export function useTextEditorFastSync(
   // (React state may be stale between batched updates, so we maintain our own source of truth)
   const lastStateRef = useRef<{ w: number; h: number; cx: number; cy: number } | null>(null);
 
+  // [P0 Perf] Throttle to ~30Hz during interaction — text box positioning
   useFastSync(containerRef, isActive, (v: VolatileState, f: Frame, cam: CameraState) => {
     const el = containerRef.current;
     if (!el) return;
@@ -78,7 +79,7 @@ export function useTextEditorFastSync(
         editorEl.style.height = `${layer.bounding.h}px`;
       }
     }
-  });
+  }, { throttleHz: 30 });
 
   /**
    * notifyBoundingChange: When editor content size changes, synchronize writing to fast track buffer.

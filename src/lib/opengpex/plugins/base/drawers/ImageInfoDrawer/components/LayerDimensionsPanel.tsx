@@ -29,6 +29,8 @@ interface LayerDimensionsPanelProps {
   layerDim: { w: number; h: number };
   isHighRes: boolean;
   isUpScaled: boolean;
+  frameBitDepth: 8 | 16 | 32;
+  layerBitDepth?: number;
 }
 
 export const LayerDimensionsPanel = React.memo(function LayerDimensionsPanel({
@@ -39,21 +41,35 @@ export const LayerDimensionsPanel = React.memo(function LayerDimensionsPanel({
   layerDim,
   isHighRes,
   isUpScaled,
+  frameBitDepth,
+  layerBitDepth,
 }: LayerDimensionsPanelProps) {
   return (
     <div className="grid grid-cols-2 gap-2">
       <div className="flex flex-col bg-[var(--bg-stage)] p-2.5 rounded-xl border border-[var(--border-subtle)] ">
-        <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight mb-1">
-          {isClipMode ? "Selection" : "Canvas"}
-        </span>
+        <div className="flex justify-between items-center mb-1">
+          <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight">
+            {isClipMode ? "Selection" : "Canvas"}
+          </span>
+          <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
+            {frameBitDepth}-bit
+          </span>
+        </div>
         <span className="text-[10px] font-bold text-[var(--text-main)] tabular-nums uppercase">
           {baseW} × {baseH}
         </span>
       </div>
       <div className="flex flex-col bg-[var(--bg-stage)] p-2.5 rounded-xl border border-[var(--border-subtle)] ">
-        <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight mb-1">
-          {hoveredLayerId ? "Hovered Layer" : "Active Layer"}
-        </span>
+        <div className="flex justify-between items-center mb-1">
+          <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight">
+            {hoveredLayerId ? "Hovered Layer" : "Active Layer"}
+          </span>
+          {layerBitDepth != null && (
+            <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
+              {layerBitDepth}-bit
+            </span>
+          )}
+        </div>
         <span
           className={`text-[10px] font-bold tabular-nums uppercase ${isHighRes ? "text-emerald-500" : isUpScaled ? "text-rose-500" : "text-[var(--text-main)]"}`}
         >

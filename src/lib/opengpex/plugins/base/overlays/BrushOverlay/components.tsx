@@ -21,10 +21,8 @@
 
 import React, { useRef, useEffect } from 'react';
 import { useEditorState } from '@opengpex/editor/core/context';
-import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
-import { VolatileState, Frame, CameraState } from '@opengpex/editor/core/types';
 import { useBrushOverlayState, useBrushCursorTracking, useBrushParams, useBrushColor } from './hooks';
-import { getStrokeBuffer, getStrokeVersion } from './interactions';
+import { useStrokePreviewFastSync, useMaskFocusOverlayFastSync } from './useFastSync';
 import { MASK_EDITING_KEY, MASK_FOCUS_KEY, type MaskEditingSignal } from '../../drawers/LayersDrawer/protocols';
 
 // ─── BrushOverlayMain ──────────────────────────────────────────────────────────
@@ -246,11 +244,6 @@ const BrushCursor = React.memo(function BrushCursor({ isEraser, activeCraft }: B
 const StrokePreview = React.memo(function StrokePreview() {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const lastVersionRef = useRef<number>(0);
-  const lastCamRef = useRef<{ x: number; y: number; k: number } | null>(null);
-  const isCleanRef = useRef<boolean>(true);
-  const lastWidthRef = useRef<number>(0);
-  const lastHeightRef = useRef<number>(0);
   const { activeFrame } = useEditorState();
   const { activeCraft } = useBrushOverlayState();
 
@@ -259,60 +252,8 @@ const StrokePreview = React.memo(function StrokePreview() {
   const canvasW = activeFrame?.camera ? activeFrame.canvas.w : 0;
   const canvasH = activeFrame?.camera ? activeFrame.canvas.h : 0;
 
-  // useFastSync: follows camera per frame + detects stroke buffer update
-  useFastSync(containerRef, true, (_v: VolatileState, f: Frame, cam: CameraState) => {
-    const el = containerRef.current;
-    const cvs = canvasRef.current;
-    if (!el || !cvs) return;
-
-    if (cvs.width !== lastWidthRef.current || cvs.height !== lastHeightRef.current) {
-      lastWidthRef.current = cvs.width;
-      lastHeightRef.current = cvs.height;
-      isCleanRef.current = true;
-    }
-
-    // Positioning: canvas top-left corner (0,0) screen position
-    const camChanged = !lastCamRef.current ||
-      lastCamRef.current.x !== cam.x ||
-      lastCamRef.current.y !== cam.y ||
-      lastCamRef.current.k !== cam.k;
-
-    if (camChanged) {
-      lastCamRef.current = { x: cam.x, y: cam.y, k: cam.k };
-      const screenX = cam.x;
-      const screenY = cam.y;
-      el.style.transform = `translate(${screenX}px, ${screenY}px) scale(${cam.k})`;
-    }
-
-    // Detect strokeVersion changes -> redraw preview
-    const currentVersion = getStrokeVersion();
-    const versionChanged = currentVersion !== lastVersionRef.current;
-    if (versionChanged) {
-      lastVersionRef.current = currentVersion;
-    }
-
-    const strokeCanvas = getStrokeBuffer();
-    const hasStroke = strokeCanvas && !isMaskTool;
-
-    if (versionChanged) {
-      const ctx = cvs.getContext('2d');
-      if (ctx) {
-        ctx.clearRect(0, 0, cvs.width, cvs.height);
-        if (hasStroke) {
-          ctx.drawImage(strokeCanvas, 0, 0);
-          isCleanRef.current = false;
-        } else {
-          isCleanRef.current = true;
-        }
-      }
-    } else if (!hasStroke && !isCleanRef.current && cvs.width > 0) {
-      const ctx = cvs.getContext('2d');
-      if (ctx) {
-        ctx.clearRect(0, 0, cvs.width, cvs.height);
-        isCleanRef.current = true;
-      }
-    }
-  });
+  // Camera follow + stroke buffer dirty detection (extracted to useFastSync.ts)
+  useStrokePreviewFastSync(containerRef, canvasRef, isMaskTool);
 
   if (!activeFrame || !canvasW || !canvasH) return null;
 
@@ -403,12 +344,8 @@ const MaskFocusOverlay = React.memo(function MaskFocusOverlay() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mask?.src, maskFocus, maskEditing?.layerId, maskEditing?.maskId, layer?.cx, layer?.cy, layer?.bounding?.w, layer?.bounding?.h, canvasW, canvasH]);
 
-  // Follow camera positioning (same as StrokePreview)
-  useFastSync(containerRef, true, (_v: VolatileState, _f: Frame, cam: CameraState) => {
-    const el = containerRef.current;
-    if (!el) return;
-    el.style.transform = `translate(${cam.x}px, ${cam.y}px) scale(${cam.k})`;
-  });
+  // Follow camera positioning (extracted to useFastSync.ts)
+  useMaskFocusOverlayFastSync(containerRef);
 
   // Don't render if no mask editing or focus disabled
   if (!maskEditing || !maskFocus || !activeFrame || !layer || !mask || !canvasW || !canvasH) return null;

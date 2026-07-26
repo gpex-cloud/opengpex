@@ -67,9 +67,6 @@ export const initialState: EditorData = {
   history: {
     byFrameId: {}
   },
-  runtime: {
-    engineStatuses: []
-  }
 };
 
 
@@ -803,14 +800,6 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
     case 'UPDATE_UI':
       return { ...state, ui: { ...state.ui, ...action.payload } };
 
-    case 'SET_ENGINE_STATUS':
-      return {
-        ...state,
-        runtime: {
-          ...state.runtime,
-          engineStatuses: action.payload
-        }
-      };
 
     // ─── Generic Frame/History Operations ─────────────────────────────────
     // Used by plugins (e.g. CloudMenu) via standard dispatch.

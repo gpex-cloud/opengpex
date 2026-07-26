@@ -16,12 +16,13 @@
  *           CMYK (basic conversion), BigTIFF, multi-page (first page only).
  *
  * Responsibilities:
- * - Decode: TIFF → PNG via wasm-vips Worker + IFD metadata extraction
- * - Encode: ImageData → TIFF via wasm-vips Worker (LZW/ZIP/none compression + DPI injection)
+ * - Decode: TIFF → PNG via engine Worker (FILE_IO job) + IFD metadata extraction
+ * - Encode: ImageData → TIFF via engine Worker (FILE_IO job)
  * - Metadata: Main-thread IFD tag parsing for fast DPI/colorspace/compression info
  *
- * Thread model:
- * - Decode/Encode run heavy computation in a dedicated Worker (wasm-vips WASM ~3-5MB, loaded lazily)
+ * Thread model (Phase 7.2 — vips unification):
+ * - All vips operations flow through the unified engine Worker via PixelService.fileIO
+ * - vips WASM loads once (shared singleton in Worker with VipsBackend composite)
  * - IFD metadata extraction runs on main thread (lightweight header-only parse, <10ms)
  *
  * Library: wasm-vips (libvips compiled to WebAssembly)
@@ -31,7 +32,7 @@
  */
 
 import ExifReader from 'exifreader';
-import type { AssetService, WorkerProxy, AdjustmentState } from '@opengpex/editor/core/types';
+import type { AssetService, PixelService, AdjustmentState } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   ImageMetadata,
@@ -72,7 +73,7 @@ export class TiffHandler implements ImageFormatHandler {
 
   constructor(
     private assets: AssetService,
-    private workerProxy: WorkerProxy,
+    private pixels: PixelService,
   ) {}
 
   // ─── Decode ──────────────────────────────────────────────────────────────
@@ -82,8 +83,8 @@ export class TiffHandler implements ImageFormatHandler {
     const metadata = await this.extractMetadata(file);
     metadata.internalCodec = 'image/png';
 
-    // 2. Decode TIFF → PNG via wasm-vips Worker (first page)
-    const pngBlob = await convertTiffToBlob(file);
+    // 2. Decode TIFF → PNG via engine Worker (FILE_IO job, first page)
+    const pngBlob = await this.convertTiffToBlob(file);
     const safeFile = new File(
       [pngBlob],
       file.name.replace(/\.(tiff?|tif)$/i, '.png'),
@@ -100,10 +101,10 @@ export class TiffHandler implements ImageFormatHandler {
     let sourceBlob: Blob | undefined;
 
     try {
-      const pageInfo = await getPageCount(file);
+      const pageInfo = await this.getPageCount(file);
       if (pageInfo.pages > 1) {
         // Multi-page: decode all pages → subImages
-        const allPages = await decodeAllPages(file, pageInfo.pages);
+        const allPages = await this.decodeAllPages(file, pageInfo.pages);
         subImages = allPages.map(p => ({
           displayBlob: p.blob,
           width: p.width,
@@ -151,8 +152,8 @@ export class TiffHandler implements ImageFormatHandler {
       iccProfileBytes = b64ToIcc(options.metadata.raw.iccProfileData);
     }
 
-    // Encode via wasm-vips Worker (pass all advanced options)
-    const tiffBlob = await encodeTiffFromImageData(imageData, {
+    // Encode via engine Worker (FILE_IO job)
+    const tiffBlob = await this.encodeTiffFromImageData(imageData, {
       compression,
       dpi,
       width: canvas.width,
@@ -291,91 +292,58 @@ export class TiffHandler implements ImageFormatHandler {
 
     return base;
   }
-}
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// TIFF → PNG Conversion (wasm-vips Worker)
-// ═══════════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Private: TIFF → PNG Conversion (via engine Worker FILE_IO)
+  // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Thin wrapper around our pre-copied vips-worker.js.
- * Communicates via postMessage and serializes calls in order.
- *
- * The worker script loads wasm-vips WASM module (~3-5MB) on first use,
- * then provides decode/encode operations via message passing.
- */
-class VipsWorker {
-  private worker: Worker;
-  private pending: Map<number, { resolve: (val: unknown) => void; reject: (err: Error) => void }>;
-  private nextId: number = 0;
-  private tail: Promise<unknown> = Promise.resolve();
-  private disposed: boolean = false;
+  /**
+   * Converts a TIFF file to a PNG Blob via engine Worker.
+   *
+   * Supports all TIFF variants that libvips handles:
+   * - RGB/RGBA 8-bit/16-bit (any compression)
+   * - CMYK → sRGB conversion (ICC-accurate when profile is embedded)
+   * - BigTIFF, multi-page (first page only)
+   */
+  private async convertTiffToBlob(file: File): Promise<Blob> {
+    try {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
 
-  constructor() {
-    this.worker = new Worker('/ext/wasm/vips/vips-worker.js');
-    this.pending = new Map();
-    this.worker.onmessage = ({ data: e }) => {
-      const t = this.pending.get(e?.id);
-      if (t) {
-        this.pending.delete(e.id);
-        if (e?.error) {
-          t.reject(new Error(e.error));
-        } else {
-          t.resolve(e?.out);
-        }
+      // Decode TIFF → RGBA via engine Worker
+      const { width, height, data } = await this.pixels.fileIO.decodeTiff(bytes);
+
+      if (!data || width <= 0 || height <= 0) {
+        throw new Error('Failed to decode TIFF image: no image data returned');
       }
-    };
-  }
 
-  dispose() {
-    this.disposed = true;
-    this.worker.terminate();
-    for (const { reject } of this.pending.values()) {
-      reject(new Error('VipsWorker disposed'));
+      // Convert RGBA pixels to PNG via OffscreenCanvas
+      const rgbaData = new Uint8ClampedArray(width * height * 4);
+      rgbaData.set(new Uint8Array(data.buffer, data.byteOffset, width * height * 4));
+      const canvas = new OffscreenCanvas(width, height);
+      const ctx = canvas.getContext('2d')!;
+      const imgData = new ImageData(rgbaData, width, height);
+      ctx.putImageData(imgData, 0, 0);
+
+      const blob = await canvas.convertToBlob({ type: 'image/png' });
+      return blob;
+    } catch (error) {
+      console.error('[TiffHandler] Decode failed:', error);
+      throw error;
     }
-    this.pending.clear();
   }
 
-  private runFn(fn: string, ...args: unknown[]): Promise<unknown> {
-    const n = () => new Promise<unknown>((resolve, reject) => {
-      if (this.disposed) {
-        reject(new Error('VipsWorker disposed'));
-        return;
-      }
-      const id = this.nextId++;
-      this.pending.set(id, { resolve, reject });
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Private: Encode ImageData → TIFF (via engine Worker FILE_IO)
+  // ═══════════════════════════════════════════════════════════════════════════
 
-      // NOTE: We intentionally do NOT use transferables for args.
-      // File.arrayBuffer() may return cached/shared ArrayBuffers, and transferring
-      // detaches them. When the same file is read multiple times (e.g., decodeTiff
-      // then tiffPageCount), the second call would get a detached buffer.
-      // Structured clone (default postMessage behavior) copies the data safely.
-      this.worker.postMessage({ id, fn, args });
-    });
-
-    const a = this.tail.then(n, n);
-    this.tail = a.then(() => {}, () => {});
-    return a;
-  }
-
-  /**
-   * Decode TIFF bytes → RGBA pixel data
-   * Returns: { width, height, data: Uint8Array (RGBA) }
-   */
-  async decodeTiff(bytes: Uint8Array): Promise<{ width: number; height: number; data: Uint8Array }> {
-    return (await this.runFn('decodeTiff', bytes)) as { width: number; height: number; data: Uint8Array };
-  }
-
-  /**
-   * Encode RGBA pixel data → TIFF bytes
-   */
-  async encodeTiff(
-    rgbaData: Uint8Array,
-    width: number,
-    height: number,
+  private async encodeTiffFromImageData(
+    imageData: ImageData,
     options: {
-      compression: string;
+      compression: TiffCompression;
       dpi: number;
+      width: number;
+      height: number;
       iccProfileBytes?: Uint8Array;
       jpegQuality?: number;
       predictor?: string;
@@ -384,223 +352,53 @@ class VipsWorker {
       tileWidth?: number;
       tileHeight?: number;
     },
-  ): Promise<Uint8Array> {
-    return (await this.runFn('encodeTiff', rgbaData, width, height, options)) as Uint8Array;
-  }
+  ): Promise<Blob> {
+    try {
+      const rgbaData = new Uint8Array(imageData.data.buffer);
 
-  /**
-   * Phase 6: Get page count of a multi-page TIFF.
-   */
-  async tiffPageCount(bytes: Uint8Array): Promise<{ pages: number; pageWidth: number; pageHeight: number }> {
-    return (await this.runFn('tiffPageCount', bytes)) as { pages: number; pageWidth: number; pageHeight: number };
-  }
+      const tiffBytes = await this.pixels.fileIO.encodeTiff(
+        rgbaData,
+        options.width,
+        options.height,
+        {
+          compression: options.compression,
+          dpi: options.dpi,
+          iccProfileBytes: options.iccProfileBytes,
+          jpegQuality: options.jpegQuality,
+          predictor: options.predictor,
+          bigtiff: options.bigtiff,
+          tile: options.tile,
+          tileWidth: options.tileWidth,
+          tileHeight: options.tileHeight,
+        },
+      );
 
-  /**
-   * Phase 6: Decode a specific page of a multi-page TIFF.
-   */
-  async tiffDecodePage(bytes: Uint8Array, page: number): Promise<{ width: number; height: number; data: Uint8Array }> {
-    return (await this.runFn('tiffDecodePage', bytes, page)) as { width: number; height: number; data: Uint8Array };
-  }
-
-  /**
-   * Phase 6: Multi-layer 16-bit composite export via vips.
-   */
-  async composite16bit(params: {
-    layers: Array<{
-      bytes: Uint8Array;
-      x: number;
-      y: number;
-      blendMode: string;
-      opacity: number;
-      is8bit: boolean;
-      adjustments?: AdjustmentState;
-    }>;
-    canvasWidth: number;
-    canvasHeight: number;
-    outputOptions: {
-      format: 'tiff' | 'png';
-      compression?: string;
-      dpi?: number;
-      jpegQuality?: number;
-      bigtiff?: boolean;
-      tile?: boolean;
-      tileWidth?: number;
-      tileHeight?: number;
-    };
-  }): Promise<Uint8Array> {
-    return (await this.runFn('composite16bit', params)) as Uint8Array;
-  }
-
-  /**
-   * Phase 5: Export high-resolution 16-bit TIFF/PNG from raw source bytes.
-   * Keeps the entire pipeline in 16-bit domain without quantizing to 8-bit.
-   */
-  async exportHighRes(
-    rawBytes: Uint8Array,
-    options: {
-      format: 'tiff' | 'png';
-      compression?: string;
-      pngCompression?: number;
-      dpi?: number;
-      crop?: { x: number; y: number; w: number; h: number };
-      resize?: { w: number; h: number };
-      iccProfileBytes?: Uint8Array;
-      adjustments?: AdjustmentState;
-    },
-  ): Promise<Uint8Array> {
-    return (await this.runFn('exportHighRes', rawBytes, options)) as Uint8Array;
-  }
-}
-
-/** Singleton-ish worker instance (lazily created, reused across calls) */
-let vipsInstance: VipsWorker | null = null;
-let vipsRefCount = 0;
-
-function getVipsWorker(): VipsWorker {
-  if (!vipsInstance) {
-    vipsInstance = new VipsWorker();
-  }
-  vipsRefCount++;
-  return vipsInstance;
-}
-
-function releaseVipsWorker(): void {
-  vipsRefCount--;
-  // Keep worker alive for reuse; dispose after idle timeout
-  if (vipsRefCount <= 0) {
-    setTimeout(() => {
-      if (vipsRefCount <= 0 && vipsInstance) {
-        vipsInstance.dispose();
-        vipsInstance = null;
-      }
-    }, 30_000); // 30s idle timeout
-  }
-}
-
-/**
- * Converts a TIFF file to a PNG Blob via wasm-vips Worker.
- *
- * Supports all TIFF variants that libvips handles:
- * - RGB/RGBA 8-bit/16-bit (any compression)
- * - CMYK → sRGB conversion (ICC-accurate when profile is embedded)
- * - BigTIFF, multi-page (first page only)
- */
-export async function convertTiffToBlob(file: File): Promise<Blob> {
-  const instance = getVipsWorker();
-
-  try {
-    const buffer = await file.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-
-    // Decode TIFF → RGBA via wasm-vips
-    const result = await instance.decodeTiff(bytes);
-    const { width, height, data } = result;
-
-    if (!data || width <= 0 || height <= 0) {
-      throw new Error('Failed to decode TIFF image: no image data returned');
+      const blob = new Blob([tiffBytes.buffer as ArrayBuffer], { type: 'image/tiff' });
+      console.log(`[TiffHandler] Encode complete: ${options.width}×${options.height}, compression=${options.compression}, dpi=${options.dpi}`);
+      return blob;
+    } catch (error) {
+      console.error('[TiffHandler] Encode failed:', error);
+      throw error;
     }
-
-    // Convert RGBA pixels to PNG via OffscreenCanvas
-    const rgbaData = new Uint8ClampedArray(width * height * 4);
-    rgbaData.set(new Uint8Array(data.buffer, data.byteOffset, width * height * 4));
-    const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext('2d')!;
-    const imgData = new ImageData(rgbaData, width, height);
-    ctx.putImageData(imgData, 0, 0);
-
-    const blob = await canvas.convertToBlob({ type: 'image/png' });
-    // console.log(`[TiffHandler] Decode complete: ${width}×${height}`);
-    return blob;
-  } catch (error) {
-    console.error('[TiffHandler] Decode failed:', error);
-    throw error;
-  } finally {
-    releaseVipsWorker();
   }
-}
 
-/**
- * Encodes ImageData to a TIFF Blob via wasm-vips Worker.
- */
-async function encodeTiffFromImageData(
-  imageData: ImageData,
-  options: {
-    compression: TiffCompression;
-    dpi: number;
-    width: number;
-    height: number;
-    iccProfileBytes?: Uint8Array;
-    jpegQuality?: number;
-    predictor?: string;
-    bigtiff?: boolean;
-    tile?: boolean;
-    tileWidth?: number;
-    tileHeight?: number;
-  },
-): Promise<Blob> {
-  const instance = getVipsWorker();
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Private: Multi-page TIFF helpers
+  // ═══════════════════════════════════════════════════════════════════════════
 
-  try {
-    const rgbaData = new Uint8Array(imageData.data.buffer);
-
-    const tiffBytes = await instance.encodeTiff(
-      rgbaData,
-      options.width,
-      options.height,
-      {
-        compression: options.compression,
-        dpi: options.dpi,
-        iccProfileBytes: options.iccProfileBytes,
-        jpegQuality: options.jpegQuality,
-        predictor: options.predictor,
-        bigtiff: options.bigtiff,
-        tile: options.tile,
-        tileWidth: options.tileWidth,
-        tileHeight: options.tileHeight,
-      },
-    );
-
-    const blob = new Blob([tiffBytes.buffer as ArrayBuffer], { type: 'image/tiff' });
-    console.log(`[TiffHandler] Encode complete: ${options.width}×${options.height}, compression=${options.compression}, dpi=${options.dpi}`);
-    return blob;
-  } catch (error) {
-    console.error('[TiffHandler] Encode failed:', error);
-    throw error;
-  } finally {
-    releaseVipsWorker();
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Phase 6: Multi-page TIFF helpers
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Get page count of a multi-page TIFF file.
- */
-export async function getPageCount(file: File): Promise<{ pages: number; pageWidth: number; pageHeight: number }> {
-  const instance = getVipsWorker();
-  try {
+  private async getPageCount(file: File): Promise<{ pages: number; pageWidth: number; pageHeight: number }> {
     const buffer = await file.arrayBuffer();
     const bytes = new Uint8Array(buffer);
-    return await instance.tiffPageCount(bytes);
-  } finally {
-    releaseVipsWorker();
+    return this.pixels.fileIO.getPageCount(bytes);
   }
-}
 
-/**
- * Decode all pages of a multi-page TIFF → array of PNG blobs.
- */
-async function decodeAllPages(file: File, pageCount: number): Promise<Array<{ blob: Blob; width: number; height: number; index: number }>> {
-  const instance = getVipsWorker();
-  try {
+  private async decodeAllPages(file: File, pageCount: number): Promise<Array<{ blob: Blob; width: number; height: number; index: number }>> {
     const buffer = await file.arrayBuffer();
     const bytes = new Uint8Array(buffer);
     const results: Array<{ blob: Blob; width: number; height: number; index: number }> = [];
 
     for (let i = 0; i < pageCount; i++) {
-      const { width, height, data } = await instance.tiffDecodePage(bytes, i);
+      const { width, height, data } = await this.pixels.fileIO.decodePage(bytes, i);
       // Convert RGBA to PNG blob via OffscreenCanvas
       const rgbaData = new Uint8ClampedArray(width * height * 4);
       rgbaData.set(new Uint8Array(data.buffer, data.byteOffset, width * height * 4));
@@ -612,13 +410,11 @@ async function decodeAllPages(file: File, pageCount: number): Promise<Array<{ bl
     }
 
     return results;
-  } finally {
-    releaseVipsWorker();
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Phase 5: Public API for 16-bit High-Resolution Export
+// Public API for 16-bit High-Resolution Export
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
@@ -654,37 +450,32 @@ export interface HighResExportOptions {
  * This function is the public API used by the export command to produce
  * lossless 16-bit TIFF/PNG output from preserved raw sources.
  *
+ * @param pixels - PixelService instance (provides fileIO namespace)
  * @param rawBlob - The original high-resolution source blob (TIFF/PNG/RAW)
  * @param options - Export options (format, compression, dpi, crop, resize)
  * @returns Blob containing the encoded 16-bit output
  */
-export async function exportHighRes(rawBlob: Blob, options: HighResExportOptions): Promise<Blob> {
-  const instance = getVipsWorker();
+export async function exportHighRes(pixels: PixelService, rawBlob: Blob, options: HighResExportOptions): Promise<Blob> {
+  const buffer = await rawBlob.arrayBuffer();
+  const rawBytes = new Uint8Array(buffer);
 
-  try {
-    const buffer = await rawBlob.arrayBuffer();
-    const rawBytes = new Uint8Array(buffer);
+  const outputBytes = await pixels.fileIO.exportHighRes(rawBytes, {
+    format: options.format,
+    compression: options.compression,
+    pngCompression: options.pngCompression,
+    dpi: options.dpi,
+    crop: options.crop,
+    resize: options.resize,
+    iccProfileBytes: options.iccProfileBytes,
+    adjustments: options.adjustments,
+  });
 
-    const outputBytes = await instance.exportHighRes(rawBytes, {
-      format: options.format,
-      compression: options.compression,
-      pngCompression: options.pngCompression,
-      dpi: options.dpi,
-      crop: options.crop,
-      resize: options.resize,
-      iccProfileBytes: options.iccProfileBytes,
-      adjustments: options.adjustments,
-    });
-
-    const mimeType = options.format === 'png' ? 'image/png' : 'image/tiff';
-    return new Blob([outputBytes.buffer as ArrayBuffer], { type: mimeType });
-  } finally {
-    releaseVipsWorker();
-  }
+  const mimeType = options.format === 'png' ? 'image/png' : 'image/tiff';
+  return new Blob([outputBytes.buffer as ArrayBuffer], { type: mimeType });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Phase 6: Public API for Multi-layer 16-bit Composite Export
+// Public API for Multi-layer 16-bit Composite Export
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /** Layer descriptor for multi-layer composite export */
@@ -735,6 +526,7 @@ export interface CompositeExportOptions {
  * as raw file bytes with position, blend mode, and opacity information.
  * Layers without 16-bit raw source are upsampled from 8-bit (value * 257).
  *
+ * @param pixels - PixelService instance (provides fileIO namespace)
  * @param layers - Array of layer descriptors (bottom to top order)
  * @param canvasWidth - Output canvas width
  * @param canvasHeight - Output canvas height
@@ -742,35 +534,38 @@ export interface CompositeExportOptions {
  * @returns Blob containing the composited output
  */
 export async function compositeMultiLayer16bit(
+  pixels: PixelService,
   layers: CompositeLayerDescriptor[],
   canvasWidth: number,
   canvasHeight: number,
   options: CompositeExportOptions,
 ): Promise<Blob> {
-  const instance = getVipsWorker();
+  const outputBytes = await pixels.fileIO.composite16bit({
+    layers: layers.map(l => ({
+      bytes: l.bytes,
+      x: l.x,
+      y: l.y,
+      blendMode: l.blendMode,
+      opacity: l.opacity,
+      is8bit: l.is8bit,
+      adjustments: l.adjustments as Record<string, unknown> | undefined,
+    })),
+    canvasWidth,
+    canvasHeight,
+    options: {
+      format: options.format,
+      compression: options.compression,
+      dpi: options.dpi,
+      jpegQuality: options.jpegQuality,
+      bigtiff: options.bigtiff,
+      tile: options.tile,
+      tileWidth: options.tileWidth,
+      tileHeight: options.tileHeight,
+    },
+  });
 
-  try {
-    const outputBytes = await instance.composite16bit({
-      layers,
-      canvasWidth,
-      canvasHeight,
-      outputOptions: {
-        format: options.format,
-        compression: options.compression,
-        dpi: options.dpi,
-        jpegQuality: options.jpegQuality,
-        bigtiff: options.bigtiff,
-        tile: options.tile,
-        tileWidth: options.tileWidth,
-        tileHeight: options.tileHeight,
-      },
-    });
-
-    const mimeType = options.format === 'png' ? 'image/png' : 'image/tiff';
-    return new Blob([outputBytes.buffer as ArrayBuffer], { type: mimeType });
-  } finally {
-    releaseVipsWorker();
-  }
+  const mimeType = options.format === 'png' ? 'image/png' : 'image/tiff';
+  return new Blob([outputBytes.buffer as ArrayBuffer], { type: mimeType });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -783,4 +578,3 @@ function bitmapToOffscreen(bitmap: ImageBitmap): OffscreenCanvas {
   ctx.drawImage(bitmap, 0, 0);
   return canvas;
 }
-

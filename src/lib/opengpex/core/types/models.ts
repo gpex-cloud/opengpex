@@ -272,6 +272,24 @@ export interface Frame {
   canvas: Dimensions;
   /** Document resolution in dots per inch. Default 72 (screen). */
   dpi: number;
+  /**
+   * Document bit depth — determines the working precision for all composition
+   * operations on this frame. Set at creation time by detecting the source
+   * image's actual bit depth. Immutable after creation (changing mode is a
+   * future feature).
+   *
+   * - `8`: Standard (PNG/JPEG/WebP) — Uint8 per channel
+   * - `16`: High fidelity (16-bit TIFF/PNG) — Uint16 per channel
+   * - `32`: HDR/EXR (future) — Float32 per channel
+   *
+   * When `CompositeRequest.precision = 'auto'`, the pipeline reads this value
+   * to determine which compositor backend to use. Lower-precision layers
+   * (e.g. 8-bit image in a 16-bit frame) are automatically promoted to the
+   * frame's bitDepth during composition — source data storage is unaffected.
+   *
+   * @default 8
+   */
+  bitDepth: 8 | 16 | 32;
   camera: CameraState;
 
   layers: NormalizedState<Layer>;

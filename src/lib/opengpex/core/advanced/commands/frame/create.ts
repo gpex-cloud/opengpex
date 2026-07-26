@@ -21,11 +21,16 @@
  * FRAME_CREATE_COMMANDS — Thin dispatch shell.
  *
  * This module is the entry point for frame (artboard) creation + lifecycle commands.
- * Heavy import logic is delegated to focused strategy modules:
+ * The import flow is decomposed into focused strategy modules:
  *
- *   strategies/vectorRaster.ts  → SVG/EPS DPI selection + unified decode
- *   strategies/singleImage.ts   → Standard single-layer frame creation
- *   strategies/multiSubImage.ts → Multi-page TIFF / animated GIF import
+ *   importers/index.ts   → resolveAndDecode entry point + barrel exports
+ *   importers/vector.ts  → SVG/EPS DPI selection dialog (vector-specific)
+ *   importers/single.ts  → Standard single-layer frame creation
+ *   importers/multi.ts   → Multi-page TIFF / animated GIF import
+ *
+ * Branch commands:
+ *   branchFromFile       → Create branch from external File (reuses importSingleImage)
+ *   branchFromSelection  → Create branch from active selection (composite pipeline)
  *
  * Revert is in its own file: revert.ts (independent command, not proxied here).
  */
@@ -40,9 +45,28 @@ import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 // Strategy imports
-import { decodeWithVectorDialog } from './strategies/vectorRaster';
-import { importSingleImage } from './strategies/singleImage';
-import { importMultiSubImage } from './strategies/multiSubImage';
+import { resolveAndDecode, importSingleImage, importMultiSubImage } from './importers';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Shared helper: compute branch naming (seqNum + fullName)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function computeBranchNaming(state: EditorContextValue['state'], activeFrame: Frame): { seqNum: string; fullName: string } {
+  const siblings = state.frames.order.map(id => state.frames.byId[id]).filter(f => f.parentId === activeFrame.id);
+  const nextIdx = siblings.length + 1;
+
+  let seqNum = '';
+  if (!activeFrame.parentId) {
+    seqNum = `Branch#${nextIdx}`;
+  } else {
+    seqNum = `${activeFrame.seqNum || 'Branch#?'}.${nextIdx}`;
+  }
+
+  const rootName = activeFrame.name.split('__')[0];
+  const fullName = `${rootName}__${seqNum}`;
+
+  return { seqNum, fullName };
+}
 
 /**
  * FRAME_CREATE_COMMANDS: Handles artboard (Frame) creation, branching, and lifecycle management.
@@ -54,119 +78,82 @@ export const FrameCreateCommands = {
     execute: async (ctx: EditorContextValue, payload: { source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }): Promise<string> => {
       const { source, switchFrame = true, extra } = payload;
 
-      // 1. Decode with optional vector DPI dialog
-      const result = await decodeWithVectorDialog(ctx, source);
+      // 1. Resolve + vector dialog + decode (single entry point)
+      const result = await resolveAndDecode(ctx, source);
       if (!result) return ''; // User cancelled or decode failed
 
-      const { decoded, file, sourceType, chosenFrameDpi } = result;
-      const importCtx = { ctx, file, decoded, sourceType, switchFrame, chosenFrameDpi, extra };
+      const { decoded, file, sourceType, chosenDpi } = result;
+      const opts = { switchFrame, dpi: chosenDpi, extra };
 
       // 2. Route: multi-sub-image or single image
       if (decoded.subImages.length > 1) {
-        const multiResult = await importMultiSubImage(importCtx);
+        const multiResult = await importMultiSubImage(ctx, decoded, file, sourceType, opts);
         if (multiResult !== null) return multiResult; // Handled (or cancelled with '')
         // null = fall through to single image (TIFF "First Page Only" mode)
       }
 
-      return importSingleImage(importCtx);
+      return importSingleImage(ctx, decoded, file, sourceType, opts);
     },
   } as EditorCommand<{ source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }, Promise<string>>,
 
-  branch: {
-    id: P.ADV_FRAME_BRANCH,
-    name: 'Create Branch',
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Branch Commands: fromFile + fromSelection
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  branchFromFile: {
+    id: P.ADV_FRAME_BRANCH_FILE,
+    name: 'Create Branch from File',
     undoable: true,
-    execute: async (ctx: EditorContextValue, payload?: { source?: File; extra?: Record<string, unknown> }): Promise<string | undefined> => {
+    execute: async (ctx: EditorContextValue, payload: { source: File; extra?: Record<string, unknown> }): Promise<string | undefined> => {
+      const { activeFrame, state } = ctx;
+      if (!activeFrame) return;
+
+      const { source, extra } = payload;
+
+      try {
+        // Resolve + decode (reuses the shared pipeline)
+        const result = await resolveAndDecode(ctx, source);
+        if (!result) return; // User cancelled or decode failed
+
+        // Compute branch naming
+        const { seqNum, fullName } = computeBranchNaming(state, activeFrame);
+
+        const { decoded, file, sourceType, chosenDpi } = result;
+
+        // Reuse importSingleImage with branch options
+        const frameId = await importSingleImage(ctx, decoded, file, sourceType, {
+          switchFrame: false,
+          dpi: chosenDpi,
+          extra,
+          parentId: activeFrame.id,
+          seqNum,
+          nameOverride: fullName,
+        });
+
+        // Emit thumbnail-ready event for UI animation
+        const createdFrame = state.frames.byId[frameId];
+        if (createdFrame?.thumbnail?.src) {
+          window.dispatchEvent(new CustomEvent('editor:branch-thumbnail-ready', {
+            detail: { thumbnailUrl: createdFrame.thumbnail.src, frameId },
+          }));
+        }
+
+        return frameId;
+      } catch (err) {
+        console.error('[FrameService] Failed to create branch from file:', err);
+        return;
+      }
+    },
+  } as EditorCommand<{ source: File; extra?: Record<string, unknown> }, Promise<string | undefined>>,
+
+  branchFromSelection: {
+    id: P.ADV_FRAME_BRANCH_CROP,
+    name: 'Create Branch from Selection',
+    undoable: true,
+    execute: async (ctx: EditorContextValue): Promise<string | undefined> => {
       const { activeFrame, actions, state, geometry, pixels } = ctx;
       if (!activeFrame) return;
 
-      // ─── Path A: Create branch from external File source ────────────────
-      if (payload?.source) {
-        try {
-          const result = await decodeWithVectorDialog(ctx, payload.source);
-          if (!result) return; // User cancelled or decode failed
-
-          const { decoded } = result;
-          const displayBlob = decoded.subImages[0].displayBlob;
-          const dimension = decoded.dimensions;
-
-          // Register asset
-          const highResId = await ctx.assets.register(displayBlob);
-          const highResUrl = ctx.assets.getURL(highResId)!;
-
-          // Generate thumbnail
-          const thumbBlob = await pixels.process.thumbnail(highResUrl, 256);
-          const thumbId = await ctx.assets.register(thumbBlob);
-          const thumbnailUrl = ctx.assets.getURL(thumbId)!;
-
-          const canvasDim = { w: dimension.w, h: dimension.h };
-          const { insets } = state.ui.theme.config;
-
-          const initialCamera = geometry.camera.getFitCamera(
-            state.ui.viewportDim,
-            canvasDim,
-            { maxScale: 1, padding: VIEWPORT_FIT_PADDING, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right },
-          );
-
-          const siblings = state.frames.order.map(id => state.frames.byId[id]).filter(f => f.parentId === activeFrame.id);
-          const nextIdx = siblings.length + 1;
-
-          let seqNum = '';
-          if (!activeFrame.parentId) {
-            seqNum = `Branch#${nextIdx}`;
-          } else {
-            seqNum = `${activeFrame.seqNum || 'Branch#?'}.${nextIdx}`;
-          }
-
-          const rootName = activeFrame.name.split('__')[0];
-          const fullName = `${rootName}__${seqNum}`;
-
-          const baseLayer = ctx.layers.getNewLayer({
-            name: 'Branch Base',
-            src: highResUrl,
-            assetId: highResId,
-            locked: true,
-            bounding: canvasDim,
-            visibleShape: asLocalShape({ x: 0, y: 0, ...canvasDim }),
-            ancestor: true,
-          });
-
-          const expandedLayers = ctx.layers.expandLayers([baseLayer]);
-
-          const branch = ctx.layers.getNewFrame({
-            id: `f-${Date.now().toString(36)}-branch`,
-            parentId: activeFrame.id,
-            name: fullName,
-            seqNum: seqNum,
-            canvas: canvasDim,
-            layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
-            activeLayerId: baseLayer.id,
-            camera: initialCamera,
-            canvasCropBox: asLocalShape({
-              x: canvasDim.w * 0.25,
-              y: canvasDim.h * 0.25,
-              w: canvasDim.w * 0.5,
-              h: canvasDim.h * 0.5,
-            }),
-            assetId: highResId,
-            thumbnail: { src: thumbnailUrl, assetId: thumbId },
-            extra: payload.extra,
-          });
-
-          ctx.layers.addFrame(branch, false);
-
-          window.dispatchEvent(new CustomEvent('editor:branch-thumbnail-ready', {
-            detail: { thumbnailUrl, frameId: branch.id },
-          }));
-
-          return branch.id;
-        } catch (err) {
-          console.error('[FrameService] Failed to create branch from file:', err);
-          return;
-        }
-      }
-
-      // ─── Path B: Create branch from active selection (clip box) ─────────
       const box = getClipBox(activeFrame);
       if (!box) {
         actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
@@ -175,25 +162,20 @@ export const FrameCreateCommands = {
       const cropRect = box.rect;
 
       try {
-        // Convert the LocalPolygon selection to a LocalShape for shapeToBlob.
+        // Convert the LocalPolygon selection to a LocalShape for the composite ROI.
         // polygonToShape is the canonical serialization entry point: it recognizes
         // rect/circle shapes, writes smooth M/L/Z pathData, and preserves the
         // antiAliased flag so shapeToPath2D can apply Bresenham stair-stepping
         // at render time — ensuring branch respects the AA setting.
         const branchShape: LocalShape = polygonToShape(box);
 
-        const highResBlob = await pixels.render.shapeToBlob(
-          activeFrame,
-          branchShape,
-          { format: 'image/png', quality: 1.0 },
-        );
+        // ── Composite via compositeFrame (selection as ROI) ─────────────────────
+        const branchResult = await pixels.render.compositeFrame(activeFrame, branchShape);
 
-        const highResId = await ctx.assets.register(highResBlob as Blob);
-        const highResUrl = ctx.assets.getURL(highResId)!;
+        const { id: highResId, url: highResUrl } = await branchResult.toAsset();
 
-        const thumbBlob = await pixels.process.thumbnail(highResUrl, 256);
-        const thumbId = await ctx.assets.register(thumbBlob);
-        const thumbnailUrl = ctx.assets.getURL(thumbId)!;
+        const thumbBlob = await (await pixels.image.resample(highResUrl, { maxSize: 256 })).toBlob('image/webp');
+        const { id: thumbId, url: thumbnailUrl } = await ctx.assets.register(thumbBlob);
 
         const canvasDim = {
           w: Math.round(cropRect.w),
@@ -208,18 +190,8 @@ export const FrameCreateCommands = {
           { maxScale: 1, padding: VIEWPORT_FIT_PADDING, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right },
         );
 
-        const siblings = state.frames.order.map(id => state.frames.byId[id]).filter(f => f.parentId === activeFrame.id);
-        const nextIdx = siblings.length + 1;
-
-        let seqNum = '';
-        if (!activeFrame.parentId) {
-          seqNum = `Branch#${nextIdx}`;
-        } else {
-          seqNum = `${activeFrame.seqNum || 'Branch#?'}.${nextIdx}`;
-        }
-
-        const rootName = activeFrame.name.split('__')[0];
-        const fullName = `${rootName}__${seqNum}`;
+        // Compute branch naming
+        const { seqNum, fullName } = computeBranchNaming(state, activeFrame);
 
         // Construct branch artboard (using Domain Factory)
         const baseLayer = ctx.layers.getNewLayer({
@@ -264,10 +236,10 @@ export const FrameCreateCommands = {
 
         return thumbnailUrl;
       } catch (err) {
-        console.error('[FrameService] Failed to create branch:', err);
+        console.error('[FrameService] Failed to create branch from selection:', err);
       }
     },
-  } as EditorCommand<{ source?: File; extra?: Record<string, unknown> } | void, Promise<string | undefined>>,
+  } as EditorCommand<void, Promise<string | undefined>>,
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Lifecycle Commands: export / import / remove

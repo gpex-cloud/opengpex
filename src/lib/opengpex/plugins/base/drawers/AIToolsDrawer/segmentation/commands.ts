@@ -20,7 +20,6 @@
 'use client';
 
 import { EditorContextValue, EditorCommand, asLocalPoint, asLocalPolygon, asLocalRect } from '@opengpex/editor/core/types';
-import { sourceBitmapCache } from '@opengpex/editor/core/engine/cache/SourceBitmapCache';
 import { segClient } from './client';
 import { PLUGIN_AUTHOR, PLUGIN_ID } from '../protocols';
 import type { AIToolsConfig } from '../protocols';
@@ -246,21 +245,12 @@ export const SEG_COMMANDS = {
 
       const frameId = activeFrame.id;
       const layerId = activeLayer.id;
-      const assetId = activeLayer.src ?? `layer_${layerId}`;
+      const assetId = activeLayer.assetId ?? `layer_${layerId}`;
       const modelId = getActiveSegModelId(ctx);
 
       let imageData: ImageData;
       try {
-        const cachedBitmap = sourceBitmapCache.get(activeLayer.src!);
-        if (!cachedBitmap) {
-          sourceBitmapCache.getOrFetch(activeLayer.src!);
-          actions.setInteraction({ hud: { message: 'Image not loaded yet — please try again', type: 'error' } });
-          return;
-        }
-        const canvas = new OffscreenCanvas(cachedBitmap.width, cachedBitmap.height);
-        const ctx2d = canvas.getContext('2d')!;
-        ctx2d.drawImage(cachedBitmap, 0, 0);
-        imageData = ctx2d.getImageData(0, 0, canvas.width, canvas.height);
+        imageData = await ctx.pixels.image.imageData(activeLayer.assetId!);
       } catch {
         actions.setInteraction({ hud: { message: 'Failed to read image data', type: 'error' } });
         return;
@@ -338,8 +328,9 @@ export const SEG_COMMANDS = {
 
         const framePolygons: Array<ReturnType<typeof asLocalPolygon>> = [];
         for (const candidate of candidates) {
+          // Round SAM decoder output to integer pixel grid (consistent with sam.ts / wand).
           const layerRings = candidate.rings.map(ring =>
-            ring.map(p => asLocalPoint({ x: p.x, y: p.y }))
+            ring.map(p => asLocalPoint({ x: Math.round(p.x), y: Math.round(p.y) }))
           );
           const layerBounds = asLocalRect(ctx.geometry.polygon.computePolygonBounds(layerRings));
           const layerPoly = asLocalPolygon(layerRings, layerBounds, true);

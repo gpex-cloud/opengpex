@@ -389,7 +389,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       if (!activeFrame) return;
 
       const trunkId = activeFrame.parentId || activeFrame.id;
-      const thumbnailUrl = await actions.adv.frame.create.branch.execute();
+      const thumbnailUrl = await actions.adv.frame.create.branch.fromSelection.execute();
 
       if (thumbnailUrl && payload?.rect) {
         window.dispatchEvent(new CustomEvent('editor:branch-fly', {
@@ -680,10 +680,10 @@ export const CLIP_OPTIONS_COMMANDS = {
       const layer = ctx.activeLayer;
       if (!layer || layer.type !== 'image') return;
 
-      // ─── Get effective alpha via Worker pipeline (handles all masks + adjustments) ─
-      // Uses the same mergeLayersWithShape pipeline as Rasterize Layer, but the
-      // resulting bitmap is only used to extract alpha for polygon tracing — it is
-      // NOT persisted to the frame/layer state.
+      // ─── Get effective alpha via unified composite pipeline (Step 10) ──────
+      // Composite the layer (source + VectorMasks + BitmapMasks + adjustments)
+      // and extract ImageData directly — only the alpha channel is needed for
+      // polygon contour tracing. NOT persisted to the frame/layer state.
       let imageData: ImageData;
       try {
         const worldShape = ctx.geometry.shape.unitedShapeOfLayers([layer]);
@@ -692,30 +692,16 @@ export const CLIP_OPTIONS_COMMANDS = {
           return;
         }
 
-        // Composite the layer (source + VectorMasks + BitmapMasks + adjustments)
-        // at 1x DPR — we only need the alpha channel for contour tracing.
-        const assetResult = await ctx.pixels.worker.asAsset(
-          ctx.pixels.worker.mergeLayersWithShape([layer], worldShape, { targetDpr: 1 })
-        );
-        if (!assetResult) {
-          ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
-          return;
-        }
-
-        // Decode the composited bitmap and read its alpha channel
-        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const el = new Image();
-          el.crossOrigin = 'anonymous';
-          el.onload = () => resolve(el);
-          el.onerror = reject;
-          el.src = assetResult.url;
+        // Composite at 1x DPR — we only need the alpha channel for contour tracing.
+        const compositeResult = await ctx.pixels.composite({
+          layers: [layer],
+          roi: worldShape,
+          precision: 8,
+          dpr: 1,
         });
-        const w = Math.round(worldShape.rect.w);
-        const h = Math.round(worldShape.rect.h);
-        const canvas = new OffscreenCanvas(w, h);
-        const ctxCanvas = canvas.getContext('2d')!;
-        ctxCanvas.drawImage(img, 0, 0, w, h);
-        imageData = ctxCanvas.getImageData(0, 0, w, h);
+
+        // Direct path: toImageData() avoids the asset → Image → canvas → getImageData cycle
+        imageData = await compositeResult.toImageData();
       } catch (err) {
         console.error('[SelectFromAlpha] Failed to read layer image data:', err);
         ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
