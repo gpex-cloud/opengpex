@@ -13,6 +13,7 @@ All notable changes to OpenGPEX are documented in this file.
 - Overhaul overlay performance: tiered ticker scheduling, shared state snapshot caching, and inactive subscriber sleeping — sustains 120fps with 30+ active overlays
 - Refactor brush tool internals into a stroke module with session-based paint and mask modes
 - Refactor frame import pipeline into cleaner importer modules
+- Add idle power management: automatically throttle animation ticker to 4fps after 2 seconds of inactivity, and fully sleep it when the browser tab is hidden — eliminates CPU heating when idle at high zoom
 
 ---
 
