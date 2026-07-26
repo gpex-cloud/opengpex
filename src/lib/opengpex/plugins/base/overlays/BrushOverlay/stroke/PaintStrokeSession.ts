@@ -131,9 +131,9 @@ export class PaintStrokeSession implements StrokeSession {
     const targetLayerInfo = this.findOrCreatePaintLayer(frame);
     if (!targetLayerInfo) return null;
 
-    // Zero-copy: steal canvas buffer as ImageBitmap (sync, ~0ms)
-    // After this call, this.canvas becomes blank — ownership transfers to strokeBitmap
-    const strokeBitmap = this.canvas.transferToImageBitmap();
+    // Create bitmap copy (keeps preview canvas intact so overlay continues
+    // showing the stroke until bake completes — prevents flash on mouse release)
+    const strokeBitmap = await createImageBitmap(this.canvas);
 
     const request: PaintBakeRequest = {
       type: 'paint',
