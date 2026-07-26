@@ -58,6 +58,10 @@ export interface GpexManifest {
   canvasHeight: number;
   layerCount: number;
   assetCount: number;
+  /** Document bit depth (8 / 16 / 32). Defaults to 8 when absent (backward-compatible). */
+  bitDepth?: 8 | 16 | 32;
+  /** Document resolution in dots per inch. Defaults to 72 when absent (backward-compatible). */
+  dpi?: number;
   editorVersion: string;
 }
 

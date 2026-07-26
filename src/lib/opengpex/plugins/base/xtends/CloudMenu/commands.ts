@@ -90,6 +90,8 @@ export const CLOUD_MENU_COMMANDS = {
           canvasHeight: frame.canvas?.h || 0,
           layerCount: LayerFactory.getHostLayers(frame.layers.order.map(id => frame.layers.byId[id])).length,
           assetCount: Object.keys(exported.assets).length,
+          bitDepth: frame.bitDepth ?? 8,
+          dpi: frame.dpi ?? 72,
           editorVersion: P.APP_VERSION,
         };
 
