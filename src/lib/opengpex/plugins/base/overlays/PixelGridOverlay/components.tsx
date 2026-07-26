@@ -142,9 +142,17 @@ export function PixelGridOverlayContainer() {
     const shouldShow = isEnabled && scale >= zoomThreshold;
 
     // --- Visibility toggle (write to DOM only when state changes) ---
+    // Use visibility:hidden (not just opacity:0) to fully remove the canvas from
+    // the browser's composite tree, eliminating per-vsync GPU texture blending cost.
     if (shouldShow !== lastShowRef.current) {
       lastShowRef.current = shouldShow;
-      canvas.style.opacity = shouldShow ? '1' : '0';
+      if (shouldShow) {
+        canvas.style.visibility = 'visible';
+        canvas.style.opacity = '1';
+      } else {
+        canvas.style.opacity = '0';
+        canvas.style.visibility = 'hidden';
+      }
 
       // When hiding, clear previously drawn content to release GPU texture memory
       if (!shouldShow && ctxRef.current && lastDrawRectRef.current) {

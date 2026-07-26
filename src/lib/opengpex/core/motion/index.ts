@@ -200,3 +200,67 @@ export const Motion = {
    */
   ticker: gsap.ticker,
 };
+
+// ─── Idle Power Management ─────────────────────────────────────────────────────
+//
+// Problem: GSAP ticker runs at display refresh rate (120Hz on ProMotion) even when
+// the viewport is completely static. 20-30 useFastSync subscribers × 120 calls/sec
+// = sustained CPU activity that prevents the chip from entering low-power states.
+//
+// Solution: Two-tier power saving:
+//   1. Page hidden (tab in background) → full sleep (ticker.sleep/wake)
+//   2. Foreground idle (no input for IDLE_TIMEOUT_MS) → throttle to IDLE_FPS
+//      Any user input instantly restores full refresh rate.
+//
+// This keeps cache-driven redraws working (max 250ms delay when idle) while
+// dropping CPU from ~6-12% to near zero during static editing pauses.
+// ────────────────────────────────────────────────────────────────────────────────
+
+if (typeof document !== 'undefined') {
+  const IDLE_FPS = 4;
+  const FULL_FPS = 120;
+  const IDLE_TIMEOUT_MS = 2000;
+
+  let _idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let _isIdle = false;
+
+  /** Restore full ticker rate and restart idle timer */
+  function wakeFromIdle() {
+    if (_isIdle) {
+      _isIdle = false;
+      gsap.ticker.fps(FULL_FPS);
+    }
+    // Reset idle countdown
+    if (_idleTimer !== null) clearTimeout(_idleTimer);
+    _idleTimer = setTimeout(enterIdle, IDLE_TIMEOUT_MS);
+  }
+
+  /** Drop ticker to low-power rate */
+  function enterIdle() {
+    _isIdle = true;
+    gsap.ticker.fps(IDLE_FPS);
+  }
+
+  // --- Tier 1: Page Visibility (full sleep when tab hidden) ---
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      // Clear idle timer — no need to throttle when fully asleep
+      if (_idleTimer !== null) { clearTimeout(_idleTimer); _idleTimer = null; }
+      gsap.ticker.sleep();
+    } else {
+      gsap.ticker.wake();
+      wakeFromIdle(); // Restore full rate and start idle timer
+    }
+  });
+
+  // --- Tier 2: Input-driven idle detection ---
+  // These events fire BEFORE rAF in the event loop, so fps is restored
+  // before the next animation frame executes.
+  const INPUT_EVENTS = ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown', 'keyup', 'touchstart', 'touchmove'] as const;
+  for (const evt of INPUT_EVENTS) {
+    document.addEventListener(evt, wakeFromIdle, { passive: true, capture: true });
+  }
+
+  // Start initial idle timer
+  wakeFromIdle();
+}
