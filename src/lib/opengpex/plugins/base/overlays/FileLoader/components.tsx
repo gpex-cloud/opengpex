@@ -26,12 +26,15 @@ import {
   Upload,
   Sparkles,
   Layers,
-  Paintbrush,
   Scissors,
   Zap,
   RefreshCw,
   Trash2,
   AlertTriangle,
+  Wand2,
+  SlidersHorizontal,
+  FileImage,
+  Cpu,
 } from "lucide-react";
 import EditorHUD from "@opengpex/editor/widgets/EditorHUD";
 import DelayedConfirm from "@opengpex/editor/widgets/DelayedConfirm";
@@ -42,6 +45,7 @@ import {
   useEditorServices,
 } from "@opengpex/editor/core/context";
 import type { FileLoaderCommandsMap } from './commands.d';
+import { GITHUB_REPO_URL } from "@opengpex/editor/core/helpers/config";
 
 /**
  * FileLoaderComponent: Flagship global drag-and-drop service component (main component)
@@ -186,10 +190,13 @@ const modKey = isMac ? "⌘" : "Ctrl";
 
 /** Feature pill data */
 const FEATURES = [
-  { icon: Zap, label: "60fps", color: "text-amber-400" },
-  { icon: Layers, label: "Layers", color: "text-indigo-400" },
-  { icon: Paintbrush, label: "Brush", color: "text-pink-400" },
-  { icon: Scissors, label: "Clip", color: "text-emerald-400" },
+  { icon: Zap, label: "120fps", color: "text-amber-400" },
+  { icon: Layers, label: "Layers & Blend", color: "text-indigo-400" },
+  { icon: Wand2, label: "AI Tools", color: "text-purple-400" },
+  { icon: SlidersHorizontal, label: "Filters", color: "text-pink-400" },
+  { icon: Scissors, label: "Clip & Select", color: "text-emerald-400" },
+  { icon: FileImage, label: "RAW/TIFF/16-bit", color: "text-sky-400" },
+  { icon: Cpu, label: "ComfyUI Bridge", color: "text-orange-400" },
   { icon: Sparkles, label: "Plugins", color: "text-cyan-400" },
 ];
 
@@ -348,10 +355,11 @@ export function FileLoaderLandingAction() {
             </div>
           </div>
           {/* Shortcut badge */}
-          <div className="flex-shrink-0 hidden sm:flex items-center gap-1">
+          <div className="flex-shrink-0 hidden sm:flex items-center gap-0.5">
             <kbd className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-[var(--bg-stage)] dark:bg-white/[0.06] text-[var(--text-muted)] border border-[var(--border-subtle)]">
               {modKey}
             </kbd>
+            <span className="text-[9px] text-[var(--text-muted)]">+</span>
             <kbd className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-[var(--bg-stage)] dark:bg-white/[0.06] text-[var(--text-muted)] border border-[var(--border-subtle)]">
               O
             </kbd>
@@ -403,8 +411,18 @@ export function FileLoaderLandingAction() {
               Paste from Clipboard
             </div>
             <div className="text-[10px] text-[var(--text-muted)]/60 mt-0.5">
-              {modKey}+V to paste an image directly from clipboard
+              Paste an image directly from clipboard
             </div>
+          </div>
+          {/* Shortcut badge */}
+          <div className="flex-shrink-0 hidden sm:flex items-center gap-0.5">
+            <kbd className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-[var(--bg-stage)] dark:bg-white/[0.06] text-[var(--text-muted)] border border-[var(--border-subtle)]">
+              {modKey}
+            </kbd>
+            <span className="text-[9px] text-[var(--text-muted)]">+</span>
+            <kbd className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-[var(--bg-stage)] dark:bg-white/[0.06] text-[var(--text-muted)] border border-[var(--border-subtle)]">
+              V
+            </kbd>
           </div>
         </div>
       </div>
@@ -429,9 +447,14 @@ export function FileLoaderLandingAction() {
 
       {/* ─── Version tag ─── */}
       <div className="pt-2">
-        <span className="text-[9px] font-mono text-[var(--text-muted)]/40 tracking-wider">
-          v1.0 · Open Source · GPL-3.0
-        </span>
+        <a
+          href={GITHUB_REPO_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[9px] font-mono text-[var(--text-muted)] tracking-wider hover:text-indigo-400 transition-colors"
+        >
+          v{process.env.NEXT_PUBLIC_CORE_VERSION || "1.0"} · Open Source · GPL-3.0 · GitHub ↗
+        </a>
       </div>
 
       {/* ─── Animation keyframes ─── */}

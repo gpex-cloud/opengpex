@@ -89,3 +89,6 @@ export const TEXT_LAYER_PADDING = { x: 4, y: 2 } as const;
 
 /** Physical directory for persisted plugins (supports local adaptive relative path fallback), kept as a pure string, excluding Node's native path module to prevent browser-side compile crashes */
 export const PERSISTENT_PLUGINS_DIR = 'data/plugins/user';
+
+/** GitHub repository URL — single source of truth for all in-app links */
+export const GITHUB_REPO_URL = 'https://github.com/gpex-cloud/opengpex';

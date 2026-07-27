@@ -29,7 +29,8 @@ export function ComfyBridgeIcon({ size = 18, className }: { size?: number; class
       height={size}
       className={className}
       aria-hidden="true"
-      style={{ display: 'block' }}
+      draggable={false}
+      style={{ display: 'block', pointerEvents: 'none' }}
     />
   );
 }

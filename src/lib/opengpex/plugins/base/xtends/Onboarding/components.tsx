@@ -117,13 +117,6 @@ function computeBubblePosition(
   }
 }
 
-/** Arrow CSS classes for each position */
-const ARROW_CLASSES: Record<SpotlightPosition, string> = {
-  left: "absolute top-4 -right-[7px] w-3.5 h-3.5 rotate-45 bg-[var(--bg-panel)] border-r border-t border-[var(--border-subtle)]",
-  right: "absolute top-4 -left-[7px] w-3.5 h-3.5 rotate-45 bg-[var(--bg-panel)] border-l border-b border-[var(--border-subtle)]",
-  top: "absolute -bottom-[7px] left-1/2 -translate-x-1/2 w-3.5 h-3.5 rotate-45 bg-[var(--bg-panel)] border-r border-b border-[var(--border-subtle)]",
-  bottom: "absolute -top-[7px] left-1/2 -translate-x-1/2 w-3.5 h-3.5 rotate-45 bg-[var(--bg-panel)] border-l border-t border-[var(--border-subtle)]",
-};
 
 /**
  * Check if any drawer panel is currently expanded (DOM-based detection).
@@ -217,15 +210,12 @@ function SpotlightBubble({
       <div className="relative">
         {/* Card body */}
         <div className="relative bg-[var(--bg-panel)]/95 backdrop-blur-xl border border-[var(--border-subtle)] rounded-2xl px-4 py-3.5 shadow-xl shadow-black/20 max-w-[280px]">
-          {/* Arrow */}
-          <div className={ARROW_CLASSES[spotlight.position]} />
-
           {/* Header row: icon + close */}
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-1.5">
               <Sparkles size={13} className="text-indigo-400" />
-              <span className="text-[10px] font-semibold text-indigo-400 uppercase tracking-wider">
-                AI Bridge
+              <span className="text-[10px] font-semibold text-indigo-400 tracking-wider">
+                Using AI to Get Started
               </span>
             </div>
             <button

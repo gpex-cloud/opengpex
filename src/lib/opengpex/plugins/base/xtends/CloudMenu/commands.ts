@@ -40,6 +40,12 @@ export function saveSyncRecord(frameId: string, record: P.SyncRecord): void {
   } catch { /* noop */ }
 }
 
+export function clearSyncRecord(frameId: string): void {
+  try {
+    localStorage.removeItem(P.SYNC_STORAGE_PREFIX + frameId);
+  } catch { /* noop */ }
+}
+
 export function hasUnsavedChanges(frameId: string, historyPastLength: number): boolean {
   const record = loadSyncRecord(frameId);
   if (!record) return false;

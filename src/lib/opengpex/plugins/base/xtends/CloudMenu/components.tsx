@@ -409,7 +409,7 @@ function CloudMenuInner() {
     <>
       <div
         ref={containerRef}
-        className="relative flex flex-col w-[255px] bg-[var(--bg-panel)]/90 backdrop-blur-3xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] rounded-2xl overflow-hidden"
+        className="relative flex flex-col w-[235px] bg-[var(--bg-panel)]/90 backdrop-blur-3xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] rounded-2xl overflow-hidden"
       >
         {/* --- Header Row --- */}
         <div className="flex items-center w-full h-[48px] shrink-0 justify-start px-3 gap-3">
@@ -443,7 +443,7 @@ function CloudMenuInner() {
                 <div className={styles.infoWidget.storageContainer}>
                   <div className={styles.infoWidget.storageHeader}>
                     <span className={styles.infoWidget.storageLabel}>
-                      Cloud Storage
+                      Storage
                     </span>
                     <span className={styles.infoWidget.storageValue}>
                       {quota
@@ -470,15 +470,36 @@ function CloudMenuInner() {
                 {/* Divider */}
                 <div className="h-px w-full bg-[var(--border-subtle)]" />
 
-                {/* Current File Status Section */}
+                {/* Current File Section */}
                 <div className="flex items-center justify-between">
                   <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest">
                     Current File
                   </span>
-                  <SyncStatusIndicator
-                    syncStatus={syncStatus}
-                    lastSaveResult={lastSaveResult}
-                  />
+                  <button
+                    onClick={handleSaveToCloud}
+                    disabled={isSaving || syncStatus === "SYNCED"}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-md border transition-all outline-none ${
+                      syncStatus === "SYNCED"
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 cursor-default"
+                        : syncStatus === "LOCAL_AHEAD"
+                          ? "border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 cursor-pointer"
+                          : "border-[var(--border-subtle)] hover:border-[var(--text-muted)]/50 bg-[var(--bg-panel)] hover:bg-[var(--bg-panel)]/70 text-[var(--text-muted)] cursor-pointer"
+                    } disabled:cursor-not-allowed`}
+                    title={syncStatus === "SYNCED" ? "Already synced" : isSaving ? "Syncing..." : "Sync to Cloud"}
+                  >
+                    {isSaving ? (
+                      <Loader2 size={9} className="animate-spin" />
+                    ) : savePhase === "ERROR" ? (
+                      <AlertCircle size={9} />
+                    ) : syncStatus === "LOCAL_AHEAD" ? (
+                      <RefreshCw size={9} />
+                    ) : syncStatus === "SYNCED" ? null : (
+                      <Upload size={9} />
+                    )}
+                    <span className="text-[8px] font-bold whitespace-nowrap">
+                      {isSaving ? "Syncing…" : syncStatus === "SYNCED" ? `Synced v${lastSaveResult?.version ?? ""}` : syncStatus === "LOCAL_AHEAD" ? "Sync" : syncStatus === "NEVER_SAVED" ? "Upload" : "Offline"}
+                    </span>
+                  </button>
                 </div>
               </div>
 
@@ -486,29 +507,6 @@ function CloudMenuInner() {
 
               {/* Cloud Actions (bottom) */}
               <div className="flex flex-col gap-0.5">
-                <button
-                  className={styles.menuItem.button}
-                  onClick={handleSaveToCloud}
-                  disabled={isSaving}
-                >
-                  <div className={styles.menuItem.icon}>
-                    <SaveButtonIcon
-                      isSaving={isSaving}
-                      syncStatus={syncStatus}
-                    />
-                  </div>
-                  <span className={styles.menuItem.label}>
-                    <SaveButtonLabel isSaving={isSaving} />
-                  </span>
-                  <div className={styles.menuItem.badge}>
-                    <SavePhaseIcon phase={savePhase} />
-                    <SavePhaseLabel
-                      phase={savePhase}
-                      lastSaveResult={lastSaveResult}
-                    />
-                  </div>
-                </button>
-
                 <button
                   className={styles.menuItem.button}
                   onClick={handleOpenBrowser}
@@ -519,6 +517,20 @@ function CloudMenuInner() {
                   <span className={styles.menuItem.label}>Cloud Gallery</span>
                 </button>
 
+                <a
+                  href={DOCUMENTATION_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={styles.menuItem.button + " no-underline"}
+                >
+                  <div className={styles.menuItem.icon}>
+                    <BookMarked size={14} />
+                  </div>
+                  <span className={styles.menuItem.label}>
+                    Documentation
+                  </span>
+                </a>
+                
                 <button
                   className={styles.menuItem.button}
                   onClick={handleGoToCloud}
@@ -527,9 +539,11 @@ function CloudMenuInner() {
                     <ExternalLink size={14} />
                   </div>
                   <span className={styles.menuItem.label}>
-                    Go to GPEX Cloud
+                    To GPEX-Cloud
                   </span>
                 </button>
+
+
 
                 <div className={styles.divider.className} />
 
@@ -549,7 +563,7 @@ function CloudMenuInner() {
           ) : (
             <div className="p-3 flex flex-col items-center text-center gap-3">
               <p className="text-[11px] leading-relaxed text-[var(--text-muted)] font-medium">
-                Create a free account to get{" "}
+                Create a account to get{" "}
                 <strong className="text-[var(--text-main)]">100 MB</strong>{" "}
                 cloud storage for syncing your creations across devices.
               </p>

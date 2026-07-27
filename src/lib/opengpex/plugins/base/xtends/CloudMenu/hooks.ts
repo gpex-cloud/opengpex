@@ -22,11 +22,11 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { useGpexCloud } from '@opengpex/editor/core/cloud';
+import { useGpexCloud, gpexStorage } from '@opengpex/editor/core/cloud';
 import type { GpexManifest } from '@opengpex/editor/core/helpers/gpex-format';
 import { useEditorState, usePluginCommands } from '@opengpex/editor/core/context';
 import type { CloudMenuCommandsMap } from './commands.d';
-import { hasUnsavedChanges, saveSyncRecord, loadSyncRecord } from './commands';
+import { hasUnsavedChanges, saveSyncRecord, loadSyncRecord, clearSyncRecord } from './commands';
 import type { SavePhase } from './protocols';
 import type { Frame } from '@opengpex/editor/core/types';
 
@@ -91,6 +91,10 @@ export const useCloudMenu = () => {
   const [showBrowser, setShowBrowser] = useState(false);
   const [conflictState, setConflictState] = useState<ConflictState | null>(null);
 
+  // Trigger for re-computing syncStatus when localStorage changes (save/delete/clear)
+  const [syncTick, setSyncTick] = useState(0);
+  const bumpSyncTick = useCallback(() => setSyncTick(t => t + 1), []);
+
   // ─── Sync Status (History-based Dirty Detection) ────────────────
   // Use active frame's history.past.length as the dirty-check signal source.
   // Only true user edit operations (SIGNAL_COMMIT) will change history.past.length,
@@ -106,9 +110,11 @@ export const useCloudMenu = () => {
     if (!record) return 'NEVER_SAVED';
 
     return hasUnsavedChanges(activeFrame.id, activeHistoryPastLength) ? 'LOCAL_AHEAD' : 'SYNCED';
-  }, [activeFrame, isSignedIn, activeHistoryPastLength]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFrame, isSignedIn, activeHistoryPastLength, syncTick]);
 
-  // Populate lastSaveResult from localStorage when frame changes
+  // Populate lastSaveResult from localStorage when frame changes,
+  // and validate that the cloud file still exists (handles remote deletion / stale records).
   useEffect(() => {
     if (!activeFrame) return;
     const record = loadSyncRecord(activeFrame.id);
@@ -120,12 +126,28 @@ export const useCloudMenu = () => {
         savedAt: record.savedAt,
       });
     }
+
+    // Validate: check if cloud still has a file with this frameLocalId.
+    // If the file was deleted remotely, clear the stale sync record.
+    if (record && isSignedIn) {
+      gpexStorage.list().then((files) => {
+        const exists = files.some(f => f.fileLocalId === activeFrame.id);
+        if (!exists) {
+          clearSyncRecord(activeFrame.id);
+          setLastSaveResult(null);
+          bumpSyncTick();
+        }
+      }).catch(() => { /* network error — keep existing record */ });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFrame?.id]);
+  }, [activeFrame?.id, isSignedIn]);
 
   // ─── Save to Cloud ──────────────────────────────────────────────
   const handleSaveToCloud = useCallback(async () => {
     if (!activeFrame || savePhase === 'PACKING' || savePhase === 'UPLOADING') return;
+
+    // Prevent unnecessary save when already synced (no local changes since last save)
+    if (!hasUnsavedChanges(activeFrame.id, state.history.byFrameId[activeFrame.id]?.past?.length ?? 0) && loadSyncRecord(activeFrame.id)) return;
 
     try {
       const result = await saveToCloudCmd.execute({
@@ -148,6 +170,8 @@ export const useCloudMenu = () => {
         savedAt: new Date().toISOString(),
       });
 
+      bumpSyncTick(); // Force syncStatus re-computation
+
       // Auto-reset phase after a short delay
       setTimeout(() => setSavePhase('IDLE'), 2500);
     } catch (err) {
@@ -155,7 +179,7 @@ export const useCloudMenu = () => {
       setSavePhase('ERROR');
       setTimeout(() => setSavePhase('IDLE'), 3000);
     }
-  }, [activeFrame, savePhase, saveToCloudCmd, state.history]);
+  }, [activeFrame, savePhase, saveToCloudCmd, state.history, bumpSyncTick]);
 
   // ─── Cloud Gallery ────────────────────────────────────────────
   const handleOpenBrowser = useCallback(() => {
@@ -213,7 +237,22 @@ export const useCloudMenu = () => {
   // ─── Delete file ────────────────────────────────────────────────
   const handleDeleteFile = useCallback(async (fileId: string) => {
     await deleteFromCloudCmd.execute({ fileId });
-  }, [deleteFromCloudCmd]);
+
+    // If the deleted cloud file corresponds to the active frame, clear its sync record
+    // so the UI correctly shows "NEVER_SAVED" instead of stale "SYNCED".
+    // The cloud fileId is derived from frameLocalId (stored in manifest), so we check
+    // all sync records. For simplicity, scan all frames for a matching record.
+    if (activeFrame) {
+      // The cloud uses frameLocalId as the dedup key, so if active frame was synced
+      // to this cloud file, clear its record.
+      const record = loadSyncRecord(activeFrame.id);
+      if (record) {
+        clearSyncRecord(activeFrame.id);
+        setLastSaveResult(null);
+        bumpSyncTick(); // Force syncStatus re-computation
+      }
+    }
+  }, [deleteFromCloudCmd, activeFrame, bumpSyncTick]);
 
   // ─── Return ────────────────────────────────────────────────────
 

@@ -38,6 +38,7 @@ import { useTheme } from "@opengpex/components/theme/ThemeContext";
 import { getToolMenuStyles } from "../styles//ToolMenu.styles";
 import PluginSlot from "./PluginSlot";
 import Tooltip from "../../widgets/Tooltip";
+import { GITHUB_REPO_URL } from "@opengpex/editor/core/helpers/config";
 
 // --- 1. Define infinitely recursive menu item data structure ---
 interface MenuItemData {
@@ -238,12 +239,12 @@ export default function ToolMenu() {
                   </span>
                 </span>
                 <a
-                  href="https://github.com/gpex-cloud/opengpex"
+                  href={GITHUB_REPO_URL}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[9px] font-bold text-[var(--text-muted)] hover:text-amber-500 transition-colors"
                 >
-                  github.com/gpex-cloud/opengpex
+                  {GITHUB_REPO_URL.replace("https://", "")}
                 </a>
               </div>
             )}

@@ -58,13 +58,13 @@ export interface SpotlightDef {
 /** All defined spotlight hints */
 export const SPOTLIGHTS: SpotlightDef[] = [
   {
-    id: "ai-bridge-intro",
+    id: "ai-creation-intro",
     target: '[data-drawer-bar="right"]',
     targetChild: ".cursor-pointer",
     position: "left",
     trigger: "no-frame",
     messages: [
-      "Generate images using your own AI service — just add an API key to get started. Results are imported automatically, ready to edit.",
+      "No image yet? Click here to create one with AI. Use AI Bridge to connect a cloud API, or ComfyUI Bridge to run your local workflows. Either way, the generated image opens directly on the canvas — ready for you to edit, enhance, and export.",
     ],
     priority: 10,
   },
@@ -88,7 +88,7 @@ export interface TipDef {
 }
 
 export const EVERYDAY_TIPS: TipDef[] = [
-  { id: "tip-ai", text: "Use AI Bridge (top-right ✨) to generate images with text prompts" },
+  { id: "tip-ai", text: "Use AI Bridge or Comfy Bridge (top-right ✨) to generate images with text prompts" },
   { id: "tip-undo", text: "Press Ctrl+Z / ⌘Z to undo, Ctrl+Shift+Z / ⌘⇧Z to redo" },
   { id: "tip-layers", text: "Open the Layers panel on the left to manage layer order and visibility" },
   { id: "tip-clip-space", text: "Press Space to enter Clip mode and crop your image quickly" },
