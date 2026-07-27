@@ -34,6 +34,13 @@ export const CMD_SET_BLEND_MODE = 'cmd.set_blend_mode';
 export const CMD_SET_LAYER_OPACITY = 'cmd.set_layer_opacity';
 export const CMD_SET_LAYER_FILL = 'cmd.set_layer_fill';
 
+/**
+ * Numeric shortcut (1-0) to quickly set active layer opacity in 10% increments.
+ * 1=10%, 2=20%, ..., 9=90%, 0=100%. Matches Photoshop's number-key behaviour.
+ * Only fires when not in clip mode (clip mode may use numbers for tool switching).
+ */
+export const CMD_OPACITY_SHORTCUT = 'cmd.opacity_shortcut';
+
 // ─── Mask Edit Signal ──────────────────────────────────────────────────────────
 
 /** Signal key for mask editing target (stored in interaction.signals) */

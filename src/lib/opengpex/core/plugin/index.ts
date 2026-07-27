@@ -18,7 +18,7 @@
  */
 
 import { BuiltPlugin, BuiltCommand, EditorShortcut, PluginService, BuiltSignal } from '../types/plugins';
-import { formatShortcut } from './utils';
+import { formatShortcut, isMac } from './utils';
 
 export function createPluginService(): PluginService {
   const plugins = new Map<string, BuiltPlugin>();
@@ -197,7 +197,19 @@ export function createPluginService(): PluginService {
 
       const configs = command.shortcuts || (command.shortcut ? [command.shortcut] : []);
 
-      return configs.map(sc => formatShortcut(sc.key, {
+      // Filter by current platform: on Mac show only meta-based shortcuts,
+      // on Windows/Linux show only ctrl-based shortcuts.
+      // Platform-agnostic shortcuts (no meta and no ctrl) are always shown.
+      const filtered = configs.filter(sc => {
+        const hasMeta = !!sc.meta;
+        const hasCtrl = !!sc.ctrl;
+        // Platform-agnostic (e.g. Space, Tab, Escape, Backspace)
+        if (!hasMeta && !hasCtrl) return true;
+        // Platform-specific: show only the one matching current OS
+        return isMac ? hasMeta : hasCtrl;
+      });
+
+      return filtered.map(sc => formatShortcut(sc.key, {
         ctrl: sc.ctrl,
         shift: sc.shift,
         alt: sc.alt,

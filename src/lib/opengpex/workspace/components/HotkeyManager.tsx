@@ -59,9 +59,11 @@ export default function HotkeyManager() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // 1. Avoid input fields (Avoid triggering when typing in inputs)
+      // Exception: range inputs (sliders) are not text-entry — hotkeys must
+      // still fire after dragging opacity/fill/feather sliders.
       const target = e.target as HTMLElement;
       if (
-        target.tagName === "INPUT" ||
+        (target.tagName === "INPUT" && (target as HTMLInputElement).type !== "range") ||
         target.tagName === "TEXTAREA" ||
         target.isContentEditable
       ) {

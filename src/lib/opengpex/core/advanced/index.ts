@@ -91,7 +91,7 @@ export function registerAdvancedCommands(ctx: EditorContextValue['actions']) {
           name: command.name,
           category: 'General',
           ...sc,
-          action: () => ctx.executeCommand(command.id),
+          action: () => ctx.executeCommand(command.id, { _shortcutKey: sc.key }),
           description: command.name
         });
       });

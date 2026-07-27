@@ -47,7 +47,7 @@ export const TIMETRAVEL_COMMANDS = {
   undo: {
     id: P.CMD_UNDO,
     name: 'Time Travel Undo',
-    shortcut: { key: 'z', meta: true },
+    shortcuts: [{ key: 'z', meta: true }, { key: 'z', ctrl: true }],
     execute: (ctx: EditorContextValue) => {
       ctx.actions.history.undo();
     }
@@ -57,7 +57,9 @@ export const TIMETRAVEL_COMMANDS = {
     name: 'Time Travel Redo',
     shortcuts: [
       { key: 'z', meta: true, shift: true },
-      { key: 'y', meta: true }
+      { key: 'z', ctrl: true, shift: true },
+      { key: 'y', meta: true },
+      { key: 'y', ctrl: true }
     ],
     execute: (ctx: EditorContextValue) => {
       ctx.actions.history.redo();
@@ -67,7 +69,7 @@ export const TIMETRAVEL_COMMANDS = {
     id: P.CMD_REVERT,
     name: 'Revert to Original',
     undoable: false,
-    shortcut: { key: 'r', meta: true, shift: true },
+    shortcuts: [{ key: 'r', meta: true, shift: true }, { key: 'r', ctrl: true, shift: true }],
     execute: async (ctx: EditorContextValue): Promise<void> => {
       // 💡 Protective guard: directly intercept shortcut keys/clicks under no artboard or LandingPage status, without popping up dialogs!
       if (!ctx.activeFrame) return;

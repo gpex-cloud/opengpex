@@ -137,9 +137,20 @@ function getSnappedPosition(
   }
 
   // Birth position (configurable)
+  // Note: birthCenter stores bounding center (cx/cy) at creation. We must convert it
+  // to the visible content center so it matches the w_pos coordinate system.
   if (filterOptions.snapToBirth !== false && activeLayer?.birthCenter) {
+    const birthRect = activeLayer.visibleShape?.rect || { x: 0, y: 0, w: activeLayer.bounding.w, h: activeLayer.bounding.h };
+    const birthWm = getLayerWorldMatrix(activeLayer, {
+      cx: activeLayer.birthCenter.cx,
+      cy: activeLayer.birthCenter.cy
+    });
+    const birthVisibleCenter = birthWm.apply({
+      x: birthRect.x + birthRect.w / 2,
+      y: birthRect.y + birthRect.h / 2
+    });
     snappables.push({
-      matrix: Matrix3x3.translate(activeLayer.birthCenter.cx, activeLayer.birthCenter.cy),
+      matrix: Matrix3x3.translate(birthVisibleCenter.x, birthVisibleCenter.y),
       size: { w: 0, h: 0 } as Dimensions,
       type: 'birth' as const
     });
@@ -226,7 +237,7 @@ function getSnappedPosition(
         if (evalDiff < bestDiffX) {
           bestDiffX = evalDiff;
           bestNextX = s.matrix.apply({ x: tx - dx, y: lp.y }).x;
-          bestGuideX = s.matrix.apply({ x: tx, y: 0 }).x;
+          bestGuideX = s.matrix.apply({ x: tx, y: lp.y }).x;
           bestIsBirthX = s.type === 'birth';
         }
       }
@@ -242,7 +253,7 @@ function getSnappedPosition(
         if (evalDiff < bestDiffY) {
           bestDiffY = evalDiff;
           bestNextY = s.matrix.apply({ x: lp.x, y: ty - dy }).y;
-          bestGuideY = s.matrix.apply({ x: 0, y: ty }).y;
+          bestGuideY = s.matrix.apply({ x: lp.x, y: ty }).y;
           bestIsBirthY = s.type === 'birth';
         }
       }
@@ -309,11 +320,20 @@ export function snapEdge(
 
     for (const l of layerTargets) {
       const vr = l.visibleShape?.rect || { x: 0, y: 0, w: l.bounding.w, h: l.bounding.h };
-      // Convert layer bounding to canvas-local coords
-      const lx = l.cx + cw / 2 + vr.x - vr.w / 2;
-      const ly = l.cy + ch / 2 + vr.y - vr.h / 2;
-      targetXs.push(lx, lx + vr.w / 2, lx + vr.w);
-      targetYs.push(ly, ly + vr.h / 2, ly + vr.h);
+      // Use full world matrix to compute visible area AABB (handles rotation correctly)
+      const wm = getLayerWorldMatrix(l);
+      const corners = [
+        wm.apply({ x: vr.x, y: vr.y }),
+        wm.apply({ x: vr.x + vr.w, y: vr.y }),
+        wm.apply({ x: vr.x, y: vr.y + vr.h }),
+        wm.apply({ x: vr.x + vr.w, y: vr.y + vr.h }),
+      ];
+      const minX = Math.min(corners[0].x, corners[1].x, corners[2].x, corners[3].x) + cw / 2;
+      const maxX = Math.max(corners[0].x, corners[1].x, corners[2].x, corners[3].x) + cw / 2;
+      const minY = Math.min(corners[0].y, corners[1].y, corners[2].y, corners[3].y) + ch / 2;
+      const maxY = Math.max(corners[0].y, corners[1].y, corners[2].y, corners[3].y) + ch / 2;
+      targetXs.push(minX, (minX + maxX) / 2, maxX);
+      targetYs.push(minY, (minY + maxY) / 2, maxY);
     }
   }
 

@@ -55,6 +55,24 @@ function setActiveTool(ctx: EditorContextValue, tool: GradingTool) {
   }
 }
 
+/**
+ * Open the AdjustmentDrawer (ensure it's in activeSidebarIds) and switch to
+ * the specified grading tool sub-panel. Used by keyboard shortcut commands.
+ */
+function openDrawerWithTool(ctx: EditorContextValue, tool: GradingTool) {
+  if (!ctx.activeFrame) return;
+
+  // 1. Ensure drawer is open
+  const pluginUid = `${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}`;
+  const currentIds = ctx.state.ui.activeSidebarIds || [];
+  if (!currentIds.includes(pluginUid)) {
+    ctx.actions.updateUI({ activeSidebarIds: [...currentIds, pluginUid] });
+  }
+
+  // 2. Switch to the target tool panel
+  setActiveTool(ctx, tool);
+}
+
 // ─── Curves helpers ────────────────────────────────────────────────────────────
 
 /**
@@ -122,6 +140,42 @@ export const ADJUSTMENT_COMMANDS = {
       setActiveTool(ctx, payload.tool);
     },
   } as EditorCommand<{ tool: GradingTool }, void>,
+
+  openBasic: {
+    id: P.CMD_OPEN_BASIC,
+    name: 'Open Basic Adjustments',
+    shortcuts: [{ key: 'u', meta: true }, { key: 'u', ctrl: true }],
+    execute: (ctx: EditorContextValue) => {
+      openDrawerWithTool(ctx, 'basic');
+    },
+  } as EditorCommand<void, void>,
+
+  openCurves: {
+    id: P.CMD_OPEN_CURVES,
+    name: 'Open Curves',
+    shortcuts: [{ key: 'm', meta: true }, { key: 'm', ctrl: true }],
+    execute: (ctx: EditorContextValue) => {
+      openDrawerWithTool(ctx, 'curves');
+    },
+  } as EditorCommand<void, void>,
+
+  openLevels: {
+    id: P.CMD_OPEN_LEVELS,
+    name: 'Open Levels',
+    shortcuts: [{ key: 'l', meta: true }, { key: 'l', ctrl: true }],
+    execute: (ctx: EditorContextValue) => {
+      openDrawerWithTool(ctx, 'levels');
+    },
+  } as EditorCommand<void, void>,
+
+  openMixer: {
+    id: P.CMD_OPEN_MIXER,
+    name: 'Open Channel Mixer',
+    shortcuts: [{ key: 'm', meta: true, shift: true }, { key: 'm', ctrl: true, shift: true }],
+    execute: (ctx: EditorContextValue) => {
+      openDrawerWithTool(ctx, 'mixer');
+    },
+  } as EditorCommand<void, void>,
 
   resetAll: {
     id: P.CMD_RESET_ALL_GRADING,

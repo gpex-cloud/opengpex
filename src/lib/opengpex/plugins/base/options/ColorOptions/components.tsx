@@ -107,7 +107,7 @@ export const ColorOptionsComponent = React.memo(
                   icon: (
                     <Pipette
                       size={13}
-                      className="text-[var(--text-muted)] group-hover:text-amber-500 transition-colors"
+                      className="text-zinc-800 dark:text-zinc-200 group-hover:text-amber-500 transition-colors"
                     />
                   ),
                 });
@@ -120,7 +120,7 @@ export const ColorOptionsComponent = React.memo(
                 onClick: () => setIsDropdownOpen(!isDropdownOpen),
                 icon: (
                   <div
-                    className="w-4 h-4 rounded shadow-inner ring-1 ring-black/10 dark:ring-white/10 transition-transform active:scale-90"
+                    className="w-4 h-4 rounded shadow-inner ring-1 ring-zinc-800 dark:ring-zinc-200 transition-transform active:scale-90"
                     style={{ backgroundColor: currentColor }}
                   />
                 ),
@@ -140,9 +140,8 @@ export const ColorOptionsComponent = React.memo(
                     />
                     <PaintBucket
                       size={13}
-                      className="transition-all transform group-active:scale-95"
+                      className="text-zinc-800 dark:text-zinc-200 transition-all transform group-active:scale-95"
                       style={{
-                        color: currentColor,
                         filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.1))",
                       }}
                     />

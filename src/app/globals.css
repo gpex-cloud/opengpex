@@ -35,3 +35,10 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Remove focus outline on range sliders — prevents distracting blue ring
+   after dragging opacity/fill/feather sliders. Hotkeys still fire normally
+   because HotkeyManager excludes range inputs from its input guard. */
+input[type="range"]:focus {
+  outline: none;
+}
+

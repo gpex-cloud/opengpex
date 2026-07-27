@@ -112,7 +112,7 @@ export const CRAFT_COMMANDS = {
     execute: (ctx: EditorContextValue) => {
       adjustCraftSize(ctx, 1);
     },
-    shortcuts: [{ key: ']', shift: true }, { key: '}', shift: true }],
+    shortcuts: [{ key: ']' }],
   } as EditorCommand<void, void>,
 
   brushSizeDown: {
@@ -121,7 +121,7 @@ export const CRAFT_COMMANDS = {
     execute: (ctx: EditorContextValue) => {
       adjustCraftSize(ctx, -1);
     },
-    shortcuts: [{ key: '[', shift: true }, { key: '{', shift: true }],
+    shortcuts: [{ key: '[' }],
   } as EditorCommand<void, void>,
 
 

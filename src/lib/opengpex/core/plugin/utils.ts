@@ -23,7 +23,7 @@
  * OS adaptive: displays ⌘/⇧ symbols on Mac and Ctrl/Shift text on Windows.
  */
 
-const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+export const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
 
 export interface Modifiers {
   ctrl?: boolean;

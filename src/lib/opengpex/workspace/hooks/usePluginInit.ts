@@ -134,7 +134,7 @@ export function usePluginInit(actions: EditorActions) {
                                 name: cmd.name,
                                 category: sanitizedPlugin.manifest?.category || 'General',
                                 ...sc,
-                                action: () => actions.executeCommand(cmd.uid),
+                                action: () => actions.executeCommand(cmd.uid, { _shortcutKey: sc.key }),
                                 description: cmd.name
                             });
                         });

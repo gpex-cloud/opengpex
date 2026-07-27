@@ -122,6 +122,18 @@ export const CMD_RESET_ALL_GRADING = 'cmd.reset_all_grading';
 /** Reset only the currently-visible sub-panel's state on the active layer. */
 export const CMD_RESET_ACTIVE_PANEL = 'cmd.reset_active_panel';
 
+/** Open drawer and switch to Basic panel (Cmd+U / Ctrl+U). */
+export const CMD_OPEN_BASIC = 'cmd.open_basic';
+
+/** Open drawer and switch to Curves panel (Cmd+M / Ctrl+M). */
+export const CMD_OPEN_CURVES = 'cmd.open_curves';
+
+/** Open drawer and switch to Levels panel (Cmd+L / Ctrl+L). */
+export const CMD_OPEN_LEVELS = 'cmd.open_levels';
+
+/** Open drawer and switch to Channel Mixer panel (Cmd+Shift+M / Ctrl+Shift+M). */
+export const CMD_OPEN_MIXER = 'cmd.open_mixer';
+
 // ─── Curves commands (Step 5) ──────────────────────────────────────────────────
 //
 // `beginCurvesEdit` is the Undo checkpoint (undoable command with empty body,

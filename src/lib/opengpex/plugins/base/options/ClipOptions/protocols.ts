@@ -117,6 +117,18 @@ export const CMD_SELECT_FROM_ALPHA = 'cmd.select_from_alpha';
  */
 export const CMD_OFFSET_SELECTION = 'cmd.offset_selection';
 
+/**
+ * Cmd+A / Ctrl+A — Select All. Creates a full-canvas rectangular selection
+ * (matching Photoshop's Cmd+A). Enters clip mode if not already active.
+ */
+export const CMD_SELECT_ALL = 'cmd.select_all';
+
+/**
+ * Cmd+D / Ctrl+D — Deselect. Clears the current selection and exits clip mode
+ * (matching Photoshop's Cmd+D).
+ */
+export const CMD_DESELECT = 'cmd.deselect';
+
 // ─── Signal IDs ─────────────────────────────────────────────────────────────────
 
 export const SIGNAL_RE_CANVAS = 'signal.re_canvas.active';

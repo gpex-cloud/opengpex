@@ -41,11 +41,12 @@ import type { GradingTool } from "./protocols";
 /**
  * Header button definitions.
  *
- * Order deliberately puts Basic first, then matches Photoshop's Adjustments
- * panel row for the advanced trio: Curves → Levels → Channel Mixer. Basic
- * fronts the list because Step 7.5 promoted it to the default tool (Photoshop
- * / Lightroom convention — entry-level users see brightness/contrast/
- * saturation first). Professional users can go straight to Curves/Levels/
+ * Order deliberately puts Basic first, then Levels → Curves → Channel Mixer.
+ * Basic fronts the list because Step 7.5 promoted it to the default tool
+ * (Photoshop / Lightroom convention — entry-level users see brightness/
+ * contrast / saturation first). Levels precedes Curves because it's a
+ * simpler operation (range clamp + gamma) suitable for intermediate users;
+ * Curves is the most flexible (arbitrary tone mapping) and sits before
  * Mixer for pixel-precise tonal work.
  *
  * No shortcut label is shown (spec §4.3): we intentionally do NOT register
@@ -67,14 +68,14 @@ const GRADING_BUTTONS: {
     label: "Basic",
   },
   {
-    tool: "curves",
-    iconSmall: <LineChart size={10} />,
-    label: "Curves",
-  },
-  {
     tool: "levels",
     iconSmall: <BarChart3 size={10} />,
     label: "Levels",
+  },
+  {
+    tool: "curves",
+    iconSmall: <LineChart size={10} />,
+    label: "Curves",
   },
   {
     tool: "mixer",

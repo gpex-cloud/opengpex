@@ -280,5 +280,39 @@ export const LAYERS_COMMANDS = {
                 ctx.actions.updateLayer(frameId, layerId, { fill: payload.fill });
             }
         }
-    } as EditorCommand<{ frameId?: string; layerId?: string; fill: number }, void>
+    } as EditorCommand<{ frameId?: string; layerId?: string; fill: number }, void>,
+
+    /**
+     * CMD_OPACITY_SHORTCUT — Number keys 1-0 set layer opacity in 10% steps.
+     *
+     * Photoshop convention: 1=10%, 2=20%, ..., 9=90%, 0=100%.
+     * Guard: no-op in clip mode (reserved for future tool switching).
+     *
+     * Implementation: a single command with 10 shortcut bindings. The HotkeyManager
+     * passes the matched shortcut's key through to the command payload via
+     * `_shortcutKey`. We map the key character to the opacity percentage.
+     */
+    opacityShortcut: {
+        id: P.CMD_OPACITY_SHORTCUT,
+        name: 'Set Opacity via Number Key',
+        undoable: true,
+        shortcuts: [
+            { key: '1' }, { key: '2' }, { key: '3' }, { key: '4' }, { key: '5' },
+            { key: '6' }, { key: '7' }, { key: '8' }, { key: '9' }, { key: '0' }
+        ],
+        execute: (ctx: EditorContextValue, payload: { _shortcutKey?: string }) => {
+            const frameId = ctx.activeFrame?.id;
+            const layerId = ctx.activeLayer?.id;
+            if (!frameId || !layerId) return;
+
+            // Map key to opacity: '1'→0.1, '2'→0.2, ..., '9'→0.9, '0'→1.0
+            const key = payload?._shortcutKey;
+            if (!key) return;
+            const digit = parseInt(key, 10);
+            if (isNaN(digit)) return;
+            const opacity = digit === 0 ? 1 : digit * 0.1;
+
+            ctx.actions.updateLayer(frameId, layerId, { opacity });
+        }
+    } as EditorCommand<{ _shortcutKey?: string }, void>
 };

@@ -397,7 +397,6 @@ export const CLIP_OPTIONS_COMMANDS = {
         }));
       }
     },
-    shortcut: { key: 's', meta: true, shift: true }
   } as EditorCommand<{ rect: DOMRect }, Promise<void>>,
 
   resetBox: {
@@ -633,7 +632,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   layerViaCopy: {
     id: P.CMD_LAYER_VIA_COPY,
     name: 'Layer via Copy',
-    shortcut: { key: 'j', meta: true },
+    shortcuts: [{ key: 'j', meta: true }, { key: 'j', ctrl: true }],
     execute: (ctx: EditorContextValue) => {
       const feather = (ctx.scoped?.getSignal(P.SIGNAL_CLIP_FEATHER) as number) || 0;
       ctx.actions.adv.layer.cmdj.copy.execute({ feather });
@@ -648,7 +647,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   layerViaCut: {
     id: P.CMD_LAYER_VIA_CUT,
     name: 'Layer via Cut',
-    shortcut: { key: 'j', meta: true, shift: true },
+    shortcuts: [{ key: 'j', meta: true, shift: true }, { key: 'j', ctrl: true, shift: true }],
     execute: (ctx: EditorContextValue) => {
       const feather = (ctx.scoped?.getSignal(P.SIGNAL_CLIP_FEATHER) as number) || 0;
       ctx.actions.adv.layer.cmdj.cut.execute({ feather });
@@ -666,7 +665,7 @@ export const CLIP_OPTIONS_COMMANDS = {
     id: P.CMD_SELECT_FROM_ALPHA,
     name: 'Select from Alpha',
     undoable: true,
-    shortcut: { key: 'a', meta: true, shift: true },
+    shortcuts: [{ key: 'a', meta: true, shift: true }, { key: 'a', ctrl: true, shift: true }],
     execute: async (ctx: EditorContextValue) => {
       // ─── Guards ────────────────────────────────────────────────────────
       if (ctx.state.interaction.interactionMode !== 'clip') return;
@@ -778,7 +777,7 @@ export const CLIP_OPTIONS_COMMANDS = {
     id: P.CMD_INVERT_SELECTION,
     name: 'Invert Selection',
     undoable: true,
-    shortcut: { key: 'i', meta: true, shift: true },
+    shortcuts: [{ key: 'i', meta: true, shift: true }, { key: 'i', ctrl: true, shift: true }],
     execute: (ctx: EditorContextValue) => {
       // ─── Guards ────────────────────────────────────────────────────────
       if (ctx.state.interaction.interactionMode !== 'clip') return;
@@ -877,7 +876,88 @@ export const CLIP_OPTIONS_COMMANDS = {
         ctx.actions.setClipBox(frame.id, tool, container);
       }
     }
-  } as EditorCommand<{ distance: number }, Promise<void>>
+  } as EditorCommand<{ distance: number }, Promise<void>>,
+
+  /**
+   * CMD_SELECT_ALL — Select All (Cmd+A / Ctrl+A).
+   *
+   * Creates a full-canvas selection matching the current regular tool shape
+   * (rect or ellipse). Only active when already in clip mode with a regular
+   * tool (rect/ellipse) selected. Does NOT switch tools or enter clip mode.
+   *
+   * Re-Canvas guard: no-op when active (canvas resize owns the rect).
+   */
+  selectAll: {
+    id: P.CMD_SELECT_ALL,
+    name: 'Select All',
+    undoable: true,
+    shortcuts: [{ key: 'a', meta: true }, { key: 'a', ctrl: true }],
+    execute: (ctx: EditorContextValue) => {
+      // Only active in clip mode
+      if (ctx.state.interaction.interactionMode !== 'clip') return;
+      const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
+      if (isReCanvas) return;
+
+      const frame = ctx.activeFrame;
+      if (!frame) return;
+
+      // Only works with regular tools (rect / ellipse)
+      const tool = (frame.latestClipTool as ClipTool) || 'rect';
+      if (tool !== 'rect' && tool !== 'ellipse') return;
+
+      const { w, h } = frame.canvas;
+      // Build a full-canvas polygon matching the current tool shape
+      const fullCanvasPoly = ctx.geometry.point2d.regularShapeToLocalPolygon(tool, asLocalRect({ x: 0, y: 0, w, h }), tool === 'ellipse');
+
+      // Write to the current tool's slot (no tool switch)
+      ctx.actions.setClipBox(frame.id, tool, fullCanvasPoly);
+    }
+  } as EditorCommand<void, void>,
+
+  /**
+   * CMD_DESELECT — Deselect / Clear Selection (Cmd+D / Ctrl+D).
+   *
+   * Clears the active tool's selection without exiting clip mode.
+   * Equivalent to a single-click reset (same as `resetBox`).
+   * Only active when in clip mode with rect/ellipse tool.
+   *
+   * If a peel exchange layer exists, merges it before clearing.
+   */
+  deselect: {
+    id: P.CMD_DESELECT,
+    name: 'Deselect',
+    undoable: true,
+    shortcuts: [{ key: 'd', meta: true }, { key: 'd', ctrl: true }],
+    execute: async (ctx: EditorContextValue) => {
+      // Only active in clip mode
+      if (ctx.state.interaction.interactionMode !== 'clip') return;
+      const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
+      if (isReCanvas) return;
+
+      const frame = ctx.activeFrame;
+      if (!frame) return;
+
+      // Only works with regular tools (rect / ellipse)
+      const tool = (frame.latestClipTool as ClipTool) || 'rect';
+      if (tool !== 'rect' && tool !== 'ellipse') return;
+
+      const clipBox = getClipBox(frame);
+      if (!clipBox) return; // already empty — nothing to clear
+
+      // If an exchange layer exists (from peel), merge it first
+      const activeLayer = frame.activeLayerId ? frame.layers.byId[frame.activeLayerId] : undefined;
+      const exchangeLayer = (activeLayer?.role === 'exchange')
+        ? activeLayer
+        : frame.layers.order.map(id => frame.layers.byId[id]).find(l => l.role === 'exchange' && l.hostId === frame.activeLayerId);
+
+      if (exchangeLayer) {
+        await ctx.actions.adv.layer.merge.mergeHost.execute.noundo();
+      }
+
+      // Clear the active tool's slot (stay in clip mode)
+      ctx.actions.setClipBox(frame.id, tool, null);
+    }
+  } as EditorCommand<void, Promise<void>>
 
 };
 

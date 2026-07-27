@@ -33,11 +33,15 @@ export const COLOR_OPTIONS_COMMANDS = {
     id: P.CMD_FILL_AS_LAYER,
     name: 'Fill as New Layer',
     undoable: true,
-    execute: (ctx: EditorContextValue, payload: { fillColor: string }) => {
+    shortcuts: [{ key: 'Backspace', alt: true }, { key: 'Delete', alt: true }],
+    execute: (ctx: EditorContextValue, payload?: { fillColor: string }) => {
       const { state, actions, layers, activeFrame } = ctx;
       if (!activeFrame) return;
 
-      const { fillColor } = payload;
+      // When invoked via keyboard shortcut, payload is undefined — read from plugin config
+      const fillColor = payload?.fillColor
+        || (state.pluginConfig[`${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}`] as { pendingColor?: string } | undefined)?.pendingColor
+        || '#EAB308';
       const isClipMode = state.interaction.interactionMode === 'clip';
       let w: number, h: number, box_cx: number, box_cy: number;
       let visibleShape: LocalShape;
