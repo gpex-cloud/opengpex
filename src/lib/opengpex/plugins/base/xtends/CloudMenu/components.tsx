@@ -48,7 +48,7 @@ import { getRefreshToken } from "../../../../core/cloud/auth/token-store";
 
 // ─── Sync Status Indicator ───────────────────────────────────────────────────
 
-const SyncStatusIndicator = ({
+const _SyncStatusIndicator = ({
   syncStatus,
   lastSaveResult,
 }: {
@@ -119,7 +119,7 @@ const PremiumCloud = ({
 
 // ─── Save Phase Indicators ───────────────────────────────────────────────────
 
-const SavePhaseIcon = ({ phase }: { phase: SavePhase }) => {
+const _SavePhaseIcon = ({ phase }: { phase: SavePhase }) => {
   switch (phase) {
     case "PACKING":
     case "UPLOADING":
@@ -133,7 +133,7 @@ const SavePhaseIcon = ({ phase }: { phase: SavePhase }) => {
   }
 };
 
-const SavePhaseLabel = ({
+const _SavePhaseLabel = ({
   phase,
   lastSaveResult,
 }: {
@@ -173,14 +173,14 @@ const SavePhaseLabel = ({
 
 // ─── Save Button Label ───────────────────────────────────────────────────────
 
-const SaveButtonLabel = ({ isSaving }: { isSaving: boolean }) => {
+const _SaveButtonLabel = ({ isSaving }: { isSaving: boolean }) => {
   if (isSaving) return "Syncing…";
   return "Sync to Cloud";
 };
 
 // ─── Save Button Icon ────────────────────────────────────────────────────────
 
-const SaveButtonIcon = ({
+const _SaveButtonIcon = ({
   isSaving,
   syncStatus,
 }: {

@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.33
+
+- Landing page: refreshed feature badges, dynamic version, GitHub link, and clearer shortcut display
+- Cloud login: dual-channel OAuth relay for SharedArrayBuffer environments
+- Simplified viewport camera init and improved cloud sync state tracking
+
+---
+
 ## v1.0.0-beta.32
 
 - Redesign pixel engine: replace single monolithic service with a modular facade + dispatcher architecture for better maintainability and performance
