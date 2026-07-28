@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.35
+
+- Channel View: view individual R/G/B/A channels as grayscale, or any two-channel combination in color
+- New Channels panel in the Layers drawer with per-channel toggle buttons
+- Refactor LayersDrawer: extract LayersPanel for cleaner code organization
+
+---
+
 ## v1.0.0-beta.34
 
 - ICC color management: accurate import conversion for non-sRGB profiles (Adobe RGB, ProPhoto, Display P3) and lossless profile round-trip across all formats (JPEG, PNG, WebP, AVIF, HEIC)
