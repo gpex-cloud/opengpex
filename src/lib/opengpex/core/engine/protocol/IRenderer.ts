@@ -27,6 +27,7 @@
 import type { Layer, Dimensions, Rect, ClipDescriptor } from '@opengpex/editor/core/types';
 import type { AssetService } from '@opengpex/editor/core/types';
 import type { MatrixData } from './descriptors';
+import type { DisplayTransformConfig } from './DisplayTransform';
 
 export interface DrawLayerOptions {
   matrix?: MatrixData;
@@ -65,8 +66,11 @@ export interface IRenderer {
    * @param dim - The logical frame dimensions (for internal tracking)
    * @param artboardClip - Optional clip rect (in physical pixel space) that
    *   restricts all subsequent rendering to the artboard boundary.
+   * @param displayConfig - Optional display transform configuration.
+   *   When channelMask !== 'rgb', the engine redirects layer drawing to an
+   *   intermediate buffer for post-composite channel filtering.
    */
-  beginFrame(dim: Dimensions, artboardClip?: Rect): void;
+  beginFrame(dim: Dimensions, artboardClip?: Rect, displayConfig?: DisplayTransformConfig): void;
 
   /**
    * Pushes instruction to rendering queue (Display List mode).
@@ -78,6 +82,19 @@ export interface IRenderer {
    * Immediately executes all commands in the queue.
    */
   flush(assetService?: AssetService): void;
+
+  /**
+   * Post-composite display transform — final pipeline stage.
+   * Called after flush() completes all layer drawing.
+   *
+   * When display transform is active (channelMask !== 'rgb'), blits the
+   * intermediate buffer to the screen canvas with GPU-accelerated channel
+   * filtering. When inactive, this is a no-op with zero overhead.
+   *
+   * Does NOT use Worker: channel remapping is an ultra-lightweight point
+   * operation; Worker communication overhead exceeds computation cost.
+   */
+  endFrame(): void;
 
   /**
    * (Legacy compatibility) Directly draws single layer, bypassing command queue.

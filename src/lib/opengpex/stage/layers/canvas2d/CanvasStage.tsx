@@ -26,6 +26,7 @@ import { useEditorState, useEditorServices } from '@opengpex/editor/core/context
 import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { useOverlayRotationSync } from '@opengpex/editor/core/motion/hooks/animation';
 import { sourceBitmapCache, tileCache, filterCache, getEngine } from '@opengpex/editor/core/engine/renderer';
+import { DISPLAY_CHANNEL_SIGNAL_KEY, type ChannelMask } from '@opengpex/editor/core/engine/protocol/DisplayTransform';
 // [Filter Pipeline §3.5 hard invariant] AsyncFilterCache is imported ONLY from
 // main-thread modules (this file + Canvas2dEngine.ts). painter.ts and any
 // worker/** module MUST NOT import it — that would drag WorkerBridge (which
@@ -52,11 +53,31 @@ export default function CanvasStage() {
   // [Phase 4 Fix] Inject artboard-level CSS rotation sync animation
   useOverlayRotationSync(canvasRef, activeFrame);
 
+  // [Display Transform] Read channel mask signal
+  const channelMask = (state.interaction.signals[DISPLAY_CHANNEL_SIGNAL_KEY] as ChannelMask) || 'rgb';
+
   /**
    * renderLoop: Core synchronized rendering logic
    */
   const needsRenderRef = useRef(true); // Default to first render
   const _renderCountRef = useRef(0); // Cold-start counter for perf warning suppression
+
+  // [Display Transform] Inject SVG filter definitions on mount (one-time)
+  useEffect(() => {
+    ensureChannelFiltersSVG();
+  }, []);
+
+  // [Display Transform] Mark dirty when channel mask changes.
+  // Reset render counter to suppress perf warnings during the 1-2 frames of
+  // GPU pipeline reconfiguration (intermediate canvas allocation + filter warmup).
+  const channelMaskRef = useRef(channelMask);
+  useLayoutEffect(() => {
+    if (channelMaskRef.current !== channelMask) {
+      channelMaskRef.current = channelMask;
+      needsRenderRef.current = true;
+      _renderCountRef.current = 0; // suppress perf warning for warmup frames
+    }
+  }, [channelMask]);
 
   // [Font Loading] Inject FontService into engine with redraw callback
   const engine = getEngine();
@@ -163,6 +184,7 @@ export default function CanvasStage() {
     stageComposer.render(engine, f, cam, state.ui.viewportDim, geometry, assets, {
       isInteracting,
       getAnimatedRotation,
+      displayConfig: channelMask !== 'rgb' ? { channelMask } : undefined,
       getImageOverride: (layerId: string) => {
         const compositeKey = `${f.id}:${layerId}`;
         const draft = v.buffered.layers[compositeKey];
@@ -200,4 +222,61 @@ export default function CanvasStage() {
       }}
     />
   );
+}
+
+// ─── Display Transform: SVG Filter Injection ─────────────────────────────────
+
+const CHANNEL_SVG_ID = '__gpex_channel_filters_svg';
+
+/**
+ * Injects hidden SVG filter definitions into the document for GPU-accelerated
+ * channel isolation via ctx.filter = 'url(#...)'.
+ *
+ * Called once on CanvasStage mount. Idempotent — skips if already injected.
+ *
+ * Single-channel filters (grayscale output):
+ * - Red:   R→RGB, A=opaque  (row-major: 1 0 0 0 0 | 1 0 0 0 0 | 1 0 0 0 0 | 0 0 0 0 1)
+ * - Green: G→RGB, A=opaque
+ * - Blue:  B→RGB, A=opaque
+ *
+ * Multi-channel filters (color output, disabled channels zeroed):
+ * - RG: Keep R and G rows, zero B row
+ * - RB: Keep R and B rows, zero G row
+ * - GB: Keep G and B rows, zero R row
+ */
+function ensureChannelFiltersSVG(): void {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById(CHANNEL_SVG_ID)) return;
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('id', CHANNEL_SVG_ID);
+  svg.setAttribute('style', 'position:absolute;width:0;height:0;overflow:hidden');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.innerHTML = `
+    <!-- Single-channel grayscale filters (preserve original alpha so transparent areas stay transparent) -->
+    <filter id="__gpex_ch_red" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="1 0 0 0 0  1 0 0 0 0  1 0 0 0 0  0 0 0 1 0"/>
+    </filter>
+    <filter id="__gpex_ch_green" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="0 1 0 0 0  0 1 0 0 0  0 1 0 0 0  0 0 0 1 0"/>
+    </filter>
+    <filter id="__gpex_ch_blue" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="0 0 1 0 0  0 0 1 0 0  0 0 1 0 0  0 0 0 1 0"/>
+    </filter>
+    <!-- Alpha channel: force opaque output (A=1) to visualize alpha value as grayscale -->
+    <filter id="__gpex_ch_alpha" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="0 0 0 1 0  0 0 0 1 0  0 0 0 1 0  0 0 0 0 1"/>
+    </filter>
+    <!-- Multi-channel color filters (disabled channels zeroed) -->
+    <filter id="__gpex_ch_rg" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0"/>
+    </filter>
+    <filter id="__gpex_ch_rb" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
+    </filter>
+    <filter id="__gpex_ch_gb" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
+    </filter>
+  `;
+  document.body.appendChild(svg);
 }

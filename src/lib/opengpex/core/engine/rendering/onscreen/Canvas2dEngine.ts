@@ -48,9 +48,32 @@ import { sourceBitmapCache } from '../../cache/SourceBitmapCache';
 import { tileCache } from '../../cache/TileCache';
 import { filterCache } from '../../cache/FilterCache';
 import type { IRenderer, RenderCommand, DrawLayerOptions } from '../../protocol/IRenderer';
+import type { DisplayTransformConfig } from '../../protocol/DisplayTransform';
+import type { ChannelMask } from '../../protocol/DisplayTransform';
 import { drawLayerInstance } from '../shared/painter2d';
 import { FilterFastTrack } from './FilterFastTrack';
 import { PixelUtils } from './PixelUtils';
+
+/**
+ * SVG filter IDs for GPU-accelerated channel isolation.
+ * These reference <filter> elements injected into the document by ensureChannelFiltersSVG().
+ *
+ * Single-channel filters (red/green/blue/alpha) → grayscale output.
+ * Multi-channel filters (rg/rb/gb) → color output with disabled channel zeroed.
+ *
+ * Alpha uses feColorMatrix `values="0 0 0 1 0 ..."` which reads the A component
+ * directly — this works correctly because canvas stores A as un-premultiplied in
+ * the alpha byte (premultiplication only affects R/G/B storage).
+ */
+const CHANNEL_FILTER_MAP: Record<Exclude<ChannelMask, 'rgb'>, string> = {
+  red:   'url(#__gpex_ch_red)',
+  green: 'url(#__gpex_ch_green)',
+  blue:  'url(#__gpex_ch_blue)',
+  alpha: 'url(#__gpex_ch_alpha)',
+  rg:    'url(#__gpex_ch_rg)',
+  rb:    'url(#__gpex_ch_rb)',
+  gb:    'url(#__gpex_ch_gb)',
+};
 
 /**
  * Canvas2dEngine: Real atomic graphics engine for Engine V2.
@@ -68,6 +91,16 @@ export class Canvas2dEngine implements IRenderer {
 
   /** Filter Fast-Track (Track A) — synchronous LUT/matrix preview */
   private filterFastTrack = new FilterFastTrack();
+
+  // ─── Display Transform Pipeline ───
+
+  /** Current frame's display transform config (set in beginFrame, consumed in endFrame) */
+  private displayConfig: DisplayTransformConfig | null = null;
+  /** Screen canvas context — saved when display transform redirects drawing to intermediate */
+  private screenCtx: CanvasRenderingContext2D | null = null;
+  /** Intermediate offscreen canvas for display transform compositing */
+  private dtIntermediate: OffscreenCanvas | null = null;
+  private dtIntermediateCtx: OffscreenCanvasRenderingContext2D | null = null;
 
   // ─── Font Service Integration ───
 
@@ -96,11 +129,26 @@ export class Canvas2dEngine implements IRenderer {
     this.ctx = null;
   }
 
-  beginFrame(dim: Dimensions, artboardClip?: Rect): void {
+  beginFrame(dim: Dimensions, artboardClip?: Rect, displayConfig?: DisplayTransformConfig): void {
     if (!this.ctx) return;
     this.currentDim = dim;
     this.commandQueue = [];
     this.artboardClipActive = false;
+    this.displayConfig = displayConfig || null;
+    this.screenCtx = null;
+
+    const needsTransform = displayConfig && displayConfig.channelMask !== 'rgb';
+
+    if (needsTransform) {
+      // [Display Transform] Redirect drawing to intermediate offscreen canvas.
+      // All layer drawing (pushCommand → flush) will target the intermediate.
+      // endFrame() blits intermediate → screen with channel filter applied.
+      this.screenCtx = this.ctx;
+      const w = this.ctx.canvas.width;
+      const h = this.ctx.canvas.height;
+      this.ensureDTIntermediate(w, h);
+      this.ctx = this.dtIntermediateCtx as unknown as CanvasRenderingContext2D;
+    }
 
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.clearRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
@@ -538,6 +586,55 @@ export class Canvas2dEngine implements IRenderer {
       };
     }
     return { img, layer };
+  }
+
+  // ─── Display Transform: endFrame ───
+
+  /**
+   * Post-composite display transform — final pipeline stage.
+   * Blits the intermediate buffer to screen canvas with channel filter applied.
+   */
+  endFrame(): void {
+    const mask = this.displayConfig?.channelMask || 'rgb';
+
+    // Fast path: no transform active, drawing went directly to screen canvas
+    if (mask === 'rgb' || !this.screenCtx || !this.dtIntermediate) {
+      this.displayConfig = null;
+      return;
+    }
+
+    // Restore artboard clip on the intermediate (if still active after flush)
+    if (this.artboardClipActive) {
+      this.ctx!.restore();
+      this.artboardClipActive = false;
+    }
+
+    // Blit intermediate → screen with channel filter
+    const screen = this.screenCtx;
+    screen.setTransform(1, 0, 0, 1, 0, 0);
+    screen.clearRect(0, 0, screen.canvas.width, screen.canvas.height);
+
+    // All channels (including alpha) use GPU-accelerated SVG feColorMatrix path.
+    // Alpha filter reads the A component directly via matrix row `0 0 0 1 0`.
+    screen.filter = CHANNEL_FILTER_MAP[mask];
+    screen.drawImage(this.dtIntermediate, 0, 0);
+    screen.filter = 'none';
+
+    // Restore ctx pointer to screen
+    this.ctx = this.screenCtx;
+    this.screenCtx = null;
+    this.displayConfig = null;
+  }
+
+  /**
+   * Ensure the display transform intermediate canvas exists and is correctly sized.
+   * GPU-backed (no willReadFrequently) for maximum drawImage + filter performance.
+   */
+  private ensureDTIntermediate(w: number, h: number): void {
+    if (!this.dtIntermediate || this.dtIntermediate.width !== w || this.dtIntermediate.height !== h) {
+      this.dtIntermediate = new OffscreenCanvas(w, h);
+      this.dtIntermediateCtx = this.dtIntermediate.getContext('2d')!;
+    }
   }
 
   // ─── Path2D Cache ───

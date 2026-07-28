@@ -52,6 +52,7 @@ export const MASK_FOCUS_KEY = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.signal.mask_focus`;
 /** Signal key for showing sub-layers collapse/expand button */
 export const SHOW_SUB_LAYERS_KEY = 'signal.show_sub_layers';
 
+
 /**
  * MaskEditingSignal: Indicates which bitmap mask is currently being edited.
  * null = no mask is being edited.

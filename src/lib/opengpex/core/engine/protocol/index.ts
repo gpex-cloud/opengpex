@@ -50,6 +50,13 @@ export type {
 } from './IRenderer';
 
 export type {
+  ChannelMask,
+  ChannelVisibility,
+  DisplayTransformConfig,
+} from './DisplayTransform';
+export { DISPLAY_CHANNEL_SIGNAL_KEY, deriveChannelMask } from './DisplayTransform';
+
+export type {
   FilterDescriptor,
   FilterType,
   FilterKind,

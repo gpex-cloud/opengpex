@@ -19,6 +19,7 @@
 
 import { Frame, CameraState, Dimensions, GeometryService, AssetService, Layer } from '@opengpex/editor/core/types';
 import { PixelUtils, type IRenderer } from '@opengpex/editor/core/engine/renderer';
+import type { DisplayTransformConfig } from '@opengpex/editor/core/engine/protocol/DisplayTransform';
 
 interface RenderOptions {
   isInteracting: boolean;
@@ -27,6 +28,8 @@ interface RenderOptions {
   getImageOverride?: (layerId: string) => CanvasImageSource | undefined;
   getBitmapMaskOverride?: (layerId: string) => { maskId: string; source: CanvasImageSource } | undefined;
   theme?: 'light' | 'dark';
+  /** Display Transform config (channel view, future ICC/soft-proof). */
+  displayConfig?: DisplayTransformConfig;
 }
 
 /**
@@ -83,7 +86,7 @@ export class StageComposer {
       w: f.canvas.w * cam.k * dpr,
       h: f.canvas.h * cam.k * dpr,
     };
-    renderer.beginFrame({ w: f.canvas.w * dpr, h: f.canvas.h * dpr }, artboardClip);
+    renderer.beginFrame({ w: f.canvas.w * dpr, h: f.canvas.h * dpr }, artboardClip, options.displayConfig);
 
     // 4. Push background drawing as a Command (deprecated, handled by CanvasBackdrop instead)
 
@@ -181,6 +184,10 @@ export class StageComposer {
 
     // 6. Execute all pending render commands
     renderer.flush(assets);
+
+    // 7. [Display Transform] Post-composite pipeline stage.
+    // Blits intermediate → screen with channel filter (or no-op for 'rgb').
+    renderer.endFrame();
   }
 }
 
