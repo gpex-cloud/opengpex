@@ -45,6 +45,8 @@ export function useLayerOverlaySync(
   const lastMatrixTimeRef = useRef<number>(0);
   const interactionEndTimeRef = useRef<number>(0);
   const wasInteractingRef = useRef<boolean>(false);
+  /** True only while waiting for post-interaction debounced restore */
+  const pendingRestoreRef = useRef<boolean>(false);
 
   // No throttleHz option — runs every frame so interacting hide is instant
   useFastSync(ref, isActive, (v, f, cam) => {
@@ -54,6 +56,7 @@ export function useLayerOverlaySync(
     // Must also disable CSS transition to prevent 200ms fade-out delay
     if (v.activeState.interacting) {
       wasInteractingRef.current = true;
+      pendingRestoreRef.current = true;
       if (ref.current.style.opacity !== '0') {
         ref.current.style.transition = 'none';
         ref.current.style.opacity = '0';
@@ -64,13 +67,37 @@ export function useLayerOverlaySync(
     // [Debounced Restore] Wait 150ms after interaction ends before showing overlay.
     // This prevents flicker during rapid scroll/pinch bursts and gives the canvas
     // time to settle into its final position.
+    // Only fires when recovering from interaction-hide (pendingRestoreRef), NOT when
+    // hidden by the canvas-sized check — this prevents infinite show/hide cycling.
     if (wasInteractingRef.current) {
       wasInteractingRef.current = false;
       interactionEndTimeRef.current = performance.now();
     }
 
-    if (ref.current.style.opacity === '0') {
+    if (pendingRestoreRef.current && ref.current.style.opacity === '0') {
       if (performance.now() - interactionEndTimeRef.current < 150) return;
+      pendingRestoreRef.current = false;
+      ref.current.style.transition = '';
+      ref.current.style.opacity = '';
+    }
+
+    // [Canvas-sized Hide] Runs every frame (cheap comparison, no throttle needed).
+    // If layer matches canvas dimensions exactly and sits at the origin, the outline
+    // overlaps with the canvas border — no visual value, so hide it.
+    // Placed before the matrix throttle gate to guarantee instant response and
+    // prevent a single visible frame at the old transform position.
+    const latestLayer = f.layers.byId[layer.id] || layer;
+    if (latestLayer.bounding.w === f.canvas.w && latestLayer.bounding.h === f.canvas.h
+        && latestLayer.cx === 0 && latestLayer.cy === 0) {
+      if (ref.current.style.opacity !== '0') {
+        ref.current.style.opacity = '0';
+      }
+      return;
+    }
+
+    // If layer was previously hidden by canvas-sized check but is no longer
+    // canvas-sized (e.g. user resized layer), restore visibility.
+    if (ref.current.style.opacity === '0' && !pendingRestoreRef.current) {
       ref.current.style.transition = '';
       ref.current.style.opacity = '';
     }
@@ -79,19 +106,6 @@ export function useLayerOverlaySync(
     const now = performance.now();
     if (now - lastMatrixTimeRef.current < MATRIX_THROTTLE_MS) return;
     lastMatrixTimeRef.current = now;
-
-    // f.layers is already deep-merged by the underlying useFastSync hook
-    const latestLayer = f.layers.byId[layer.id] || layer;
-
-    // [Canvas-sized Hide] If layer matches canvas dimensions exactly, the outline
-    // overlaps with the canvas border — no visual value, so hide it.
-    if (latestLayer.bounding.w === f.canvas.w && latestLayer.bounding.h === f.canvas.h
-        && latestLayer.cx === 0 && latestLayer.cy === 0) {
-      if (ref.current.style.opacity !== '0') {
-        ref.current.style.opacity = '0';
-      }
-      return;
-    }
 
     // 1. Execute pure geometric operations
     const worldMatrix = geometry.transform.getLayerWorldMatrix(latestLayer);
