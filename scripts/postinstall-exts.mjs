@@ -13,7 +13,7 @@
  *   public/ext/wasm/vips/    ← vips.js + vips.wasm + vips-worker.js
  *   public/ext/wasm/libraw/  ← libraw.wasm + libraw.js + libraw-worker.js
  *   public/ext/wasm/gs/      ← gs.wasm + gs.js + gs-worker.js
- *   public/ext/wasm/avif/    ← avif_enc.wasm
+ *   (avif encoding via vips-heif.wasm in vips/ directory)
  *   public/ext/js/           ← heic-to.js
  *
  * This runs automatically after `pnpm install`.
@@ -28,7 +28,7 @@ const ROOT = resolve(__dirname, '..');
 
 // ─── Ensure subdirectories exist ────────────────────────────────────────────────
 const WASM_BASE = resolve(ROOT, 'public/ext/wasm');
-const SUBDIRS = ['resvg', 'vips', 'libraw', 'gs', 'avif'];
+const SUBDIRS = ['resvg', 'vips', 'libraw', 'gs'];
 for (const sub of SUBDIRS) {
   mkdirSync(resolve(WASM_BASE, sub), { recursive: true });
 }
@@ -39,9 +39,10 @@ const vendorFiles = [
   { src: 'node_modules/@resvg/resvg-wasm/index_bg.wasm', dest: 'resvg/resvg.wasm' },
   { src: 'node_modules/@resvg/resvg-wasm/index.mjs',     dest: 'resvg/index.js' },
 
-  // ── vips ──
-  { src: 'node_modules/wasm-vips/lib/vips.js',   dest: 'vips/vips.js' },
-  { src: 'node_modules/wasm-vips/lib/vips.wasm', dest: 'vips/vips.wasm' },
+  // ── vips (includes vips-heif.wasm for AVIF/HEIC encoding support) ──
+  { src: 'node_modules/wasm-vips/lib/vips.js',        dest: 'vips/vips.js' },
+  { src: 'node_modules/wasm-vips/lib/vips.wasm',      dest: 'vips/vips.wasm' },
+  { src: 'node_modules/wasm-vips/lib/vips-heif.wasm', dest: 'vips/vips-heif.wasm' },
 
   // ── libraw ──
   { src: 'node_modules/libraw-wasm/dist/libraw.wasm', dest: 'libraw/libraw.wasm' },
@@ -52,8 +53,6 @@ const vendorFiles = [
   { src: 'node_modules/@okathira/ghostpdl-wasm/dist/gs.wasm', dest: 'gs/gs.wasm' },
   { src: 'node_modules/@okathira/ghostpdl-wasm/dist/gs.js',   dest: 'gs/gs.js' },
 
-  // ── avif ──
-  { src: 'node_modules/@jsquash/avif/codec/enc/avif_enc.wasm', dest: 'avif/avif_enc.wasm' },
 ];
 
 let copied = 0;

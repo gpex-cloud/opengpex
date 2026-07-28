@@ -41,6 +41,7 @@ import { HeicHandler } from './handlers/heic';
 import { TiffHandler } from './handlers/tiff';
 import { RawHandler } from './handlers/raw';
 import { WebpHandler } from './handlers/webp';
+import { AvifHandler } from './handlers/avif';
 import { VectorHandler, getVectorIntrinsicSize, detectVectorFormat } from './handlers/vector';
 import { GifHandler } from './handlers/gif';
 
@@ -207,6 +208,7 @@ export function createFileService(
     new JpegHandler(pixels),
     new PngHandler(pixels),
     new WebpHandler(pixels),
+    new AvifHandler(pixels),
     new BmpHandler(),
     new GifHandler(),
     new HeicHandler(assets, pixels),

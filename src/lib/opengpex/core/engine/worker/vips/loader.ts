@@ -99,7 +99,7 @@ async function initializeVips(): Promise<VipsInstance> {
   const instance = await workerGlobal.Vips({
     mainScriptUrlOrBlob: '/ext/wasm/vips/vips.js',
     locateFile: (filename: string) => `/ext/wasm/vips/${filename}`,
-    dynamicLibraries: [],
+    dynamicLibraries: ['vips-heif.wasm'],
     print: () => {},    // Suppress stdout
     printErr: () => {}, // Suppress stderr
   });

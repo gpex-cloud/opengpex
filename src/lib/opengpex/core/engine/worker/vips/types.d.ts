@@ -97,6 +97,12 @@ export interface VipsImage {
   colourspace(space: string): VipsImage;
 
   /**
+   * Copy an image, optionally overriding header fields like interpretation.
+   * @param opts - Header fields to override: interpretation, xres, yres, etc.
+   */
+  copy(opts?: { interpretation?: string; xres?: number; yres?: number }): VipsImage;
+
+  /**
    * Transform image from one ICC profile to another using Little CMS.
    * @param outputProfile - Path to target ICC profile file (in emscripten virtual FS)
    * @param opts - Options: inputProfile (built-in name like 'srgb'), intent ('perceptual'|'relative'|'saturation'|'absolute')

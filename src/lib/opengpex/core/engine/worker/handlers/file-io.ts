@@ -67,6 +67,9 @@ export class FileIoHandler {
       case 'srgbToIcc':
         return this.srgbToIcc(vips, job.rgbaData!, job.width!, job.height!, job.iccProfileData!);
 
+      case 'encodeAvif':
+        return this.encodeAvif(vips, job.rgbaData!, job.width!, job.height!, job.options || {});
+
       default:
         throw new Error(`[FileIoHandler] Unknown fn: ${(job as { fn: string }).fn}`);
     }
@@ -541,11 +544,20 @@ export class FileIoHandler {
   private iccToSrgb(
     vips: VipsInstance,
     bytes: Uint8Array,
-  ): { result: { width: number; height: number; data: Uint8Array }; transfer: Transferable[] } {
+  ): { result: { width: number; height: number; data: Uint8Array; iccProfileData?: Uint8Array }; transfer: Transferable[] } {
     console.log(`[ICC 导入] iccToSrgb 开始: 输入 ${bytes.length} bytes`);
     // vips.Image.newFromBuffer automatically reads embedded ICC profiles
     // and uses Little CMS for accurate color space conversion
     const image = vips.Image.newFromBuffer(bytes, '', { access: 'sequential' });
+
+    // Extract raw ICC profile bytes BEFORE conversion (for round-trip export)
+    let iccProfileData: Uint8Array | undefined;
+    try {
+      const iccRaw = image.get('icc-profile-data');
+      if (iccRaw instanceof Uint8Array && iccRaw.length > 0) {
+        iccProfileData = new Uint8Array(iccRaw);
+      }
+    } catch { /* no ICC profile embedded */ }
 
     // Convert to sRGB via Little CMS (handles Adobe RGB, ProPhoto, Display P3, etc.)
     let rgb: VipsImage = image;
@@ -582,8 +594,10 @@ export class FileIoHandler {
     if (img8 !== rgb) img8.delete();
     if (rgba !== img8) rgba.delete();
 
-    console.log(`[ICC 导入] iccToSrgb 完成: ${width}×${height}, 输出 ${data.length} bytes RGBA`);
-    return { result: { width, height, data }, transfer: [data.buffer] };
+    console.log(`[ICC 导入] iccToSrgb 完成: ${width}×${height}, 输出 ${data.length} bytes RGBA, ICC: ${iccProfileData ? iccProfileData.length + ' bytes' : 'none'}`);
+    const transfer: Transferable[] = [data.buffer];
+    if (iccProfileData) transfer.push(iccProfileData.buffer);
+    return { result: { width, height, data, iccProfileData }, transfer };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -640,6 +654,88 @@ export class FileIoHandler {
 
     console.log(`[ICC 导出] srgbToIcc 完成: 输出 ${data.length} bytes RGBA`);
     return { result: { data }, transfer: [data.buffer] };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // encodeAvif — Encode RGBA pixel data → AVIF bytes via vips-heif (libheif + libaom)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Encode RGBA pixels to AVIF format using vips heifsave with AV1 compression.
+   * Requires vips-heif.wasm dynamic library (loaded at vips init time).
+   *
+   * Supports:
+   * - Quality control (0-100, default 60)
+   * - Lossless mode
+   * - ICC Profile embedding
+   * - Alpha channel
+   * - 8-bit and 10/12-bit output (via bitdepth option)
+   */
+  private encodeAvif(
+    vips: VipsInstance,
+    rgbaData: Uint8Array,
+    width: number,
+    height: number,
+    options: Record<string, unknown>,
+  ): { result: Uint8Array; transfer: Transferable[] } {
+    const {
+      quality = 60,
+      lossless = false,
+      effort = 4,
+      iccProfileBytes,
+      bitDepth = 8,
+      dpi = 72,
+    } = options as {
+      quality?: number;
+      lossless?: boolean;
+      effort?: number;
+      iccProfileBytes?: Uint8Array;
+      bitDepth?: number;
+      dpi?: number;
+    };
+
+    // Create image from RGBA pixel data and set sRGB interpretation + DPI
+    // (newFromMemory defaults to 'multiband' and 0 xres/yres which confuses heifsave)
+    // vips xres/yres are in pixels per mm: dpi / 25.4
+    const ppmm = dpi / 25.4;
+    let image: VipsImage = vips.Image.newFromMemory(rgbaData, width, height, 4, 'uchar');
+    image = image.copy({ interpretation: 'srgb', xres: ppmm, yres: ppmm });
+
+    // Attach ICC Profile via FS + iccTransform identity (same profile in=out → no pixel change)
+    // wasm-vips Image objects from newFromMemory don't support .set() for metadata injection,
+    // so we use the FS-based iccTransform to embed the profile header.
+    if (iccProfileBytes && iccProfileBytes.length > 0) {
+      const tmpIccPath = '/tmp/avif_export_icc.icc';
+      try {
+        vips.FS.writeFile(tmpIccPath, iccProfileBytes);
+        // input_profile = path tells vips "treat current pixels as this profile"
+        // outputProfile = same path → identity LUT → pixels unchanged, ICC embedded
+        image = image.iccTransform(tmpIccPath, { input_profile: tmpIccPath });
+      } catch (e) {
+        console.warn('[FileIoHandler.encodeAvif] ICC embed via iccTransform failed:', (e as Error).message);
+      } finally {
+        try { vips.FS.unlink(tmpIccPath); } catch { /* ignore */ }
+      }
+    }
+
+    // Build heif save options (AV1 compression = AVIF)
+    const saveOpts: Record<string, unknown> = {
+      Q: lossless ? 100 : quality,
+      lossless,
+      effort,
+      compression: 'av1',
+    };
+
+    // For 10/12-bit output, upscale to ushort first
+    if (bitDepth > 8) {
+      image = image.linear(257.0, 0).cast('ushort');
+    }
+
+    const avifBuffer = image.writeToBuffer('.heif', saveOpts);
+    image.delete();
+
+    const result = new Uint8Array(avifBuffer);
+    return { result, transfer: [result.buffer] };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

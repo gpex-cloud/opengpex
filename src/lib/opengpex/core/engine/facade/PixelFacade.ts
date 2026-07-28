@@ -250,6 +250,8 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
       iccToSrgb: (bytes: Uint8Array) => fileIo.iccToSrgb(bytes),
       srgbToIcc: (rgbaData: Uint8Array, w: number, h: number, iccProfileData: Uint8Array) =>
         fileIo.srgbToIcc(rgbaData, w, h, iccProfileData),
+      encodeAvif: (rgbaData: Uint8Array, w: number, h: number, options: { quality?: number; lossless?: boolean; effort?: number; iccProfileBytes?: Uint8Array; bitDepth?: number }) =>
+        fileIo.encodeAvif(rgbaData, w, h, options),
     },
 
     // ════════════════════════════════════════════════════════════

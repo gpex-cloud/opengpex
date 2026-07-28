@@ -129,7 +129,7 @@ export interface HistogramJob {
 
 export interface FileIoJob {
   type: 'FILE_IO';
-  fn: 'decodeTiff' | 'encodeTiff' | 'decodePages' | 'decodePage' | 'getPageCount' | 'composite16bit' | 'exportHighRes' | 'iccToSrgb' | 'srgbToIcc';
+  fn: 'decodeTiff' | 'encodeTiff' | 'encodeAvif' | 'decodePages' | 'decodePage' | 'getPageCount' | 'composite16bit' | 'exportHighRes' | 'iccToSrgb' | 'srgbToIcc';
   bytes?: Uint8Array;
   rgbaData?: Uint8Array;
   width?: number;

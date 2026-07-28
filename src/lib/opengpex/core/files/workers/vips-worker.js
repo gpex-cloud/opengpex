@@ -30,8 +30,8 @@ async function initVips() {
   vips = await self.Vips({
     mainScriptUrlOrBlob: '/ext/wasm/vips/vips.js',
     locateFile: (fileName) => `/ext/wasm/vips/${fileName}`,
-    // Do NOT load optional dynamic libraries (vips-jxl.wasm, vips-heif.wasm)
-    dynamicLibraries: [],
+    // Load vips-heif.wasm for AVIF/HEIC encoding support (libheif + libaom)
+    dynamicLibraries: ['vips-heif.wasm'],
     print: () => {},
     printErr: () => {},
   });

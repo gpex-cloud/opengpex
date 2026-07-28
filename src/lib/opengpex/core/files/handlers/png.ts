@@ -54,8 +54,20 @@ export class PngHandler implements ImageFormatHandler {
 
     if (metadata.colorSpace && metadata.colorSpace !== 'srgb' && metadata.colorSpace !== 'grayscale') {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const { width, height, data } = await this.pixels.fileIO.iccToSrgb(bytes);
+      const { width, height, data, iccProfileData } = await this.pixels.fileIO.iccToSrgb(bytes);
       dimensions = { w: width, h: height };
+      // Vips reliably extracts ICC — populate metadata if missed
+      if (iccProfileData && iccProfileData.length > 0) {
+        metadata.hasIccProfile = true;
+        metadata.raw = metadata.raw || {};
+        if (!metadata.raw.iccProfileData) {
+          const { iccToBase64, parseIccProfileName } = await import('../icc');
+          metadata.raw.iccProfileData = iccToBase64(iccProfileData);
+          if (!metadata.raw.iccProfileName) {
+            metadata.raw.iccProfileName = parseIccProfileName(iccProfileData) || 'Embedded';
+          }
+        }
+      }
       const canvas = new OffscreenCanvas(width, height);
       const ctx = canvas.getContext('2d')!;
       const clamped = new Uint8ClampedArray(data.length);

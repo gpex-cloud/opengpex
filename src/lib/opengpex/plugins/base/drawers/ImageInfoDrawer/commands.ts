@@ -23,7 +23,6 @@ import type { RenderToBlobOptions } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
 import { calcFinalDims, clipBoxToExportShape } from './utils';
-import { ensureAvifEncoderRegistered } from './services/avifRegister';
 
 import * as P from './protocols';
 
@@ -69,11 +68,7 @@ export const IMAGE_INFO_COMMANDS = {
             return;
          }
 
-         // ─── 2. Ensure plugin-owned encoders are wired to PixelService ─────
-         // (Idempotent — attaches AVIF encoder on first export.)
-         ensureAvifEncoderRegistered(pixels);
-
-         // ─── 3. Common Parameter Computation ───────────────────────────────
+         // ─── 2. Common Parameter Computation ───────────────────────────────
          const cropShape: LocalShape | undefined = isClipMode && box ? clipBoxToExportShape(box) : undefined;
          const baseW = cropShape ? cropShape.rect.w : activeFrame.canvas.w;
          const baseH = cropShape ? cropShape.rect.h : activeFrame.canvas.h;

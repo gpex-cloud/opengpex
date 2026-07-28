@@ -10,17 +10,24 @@
  */
 
 /**
- * WebP Format Handler.
+ * AVIF Format Handler.
  *
  * Responsibilities:
- * - Decode: browser-native (no transcoding needed), extract EXIF/ICC metadata
- * - Encode: canvas.convertToBlob with quality control
- * - Metadata: ExifReader parsing for EXIF + RIFF chunk parsing for ICC profile
+ * - Decode: browser-native AVIF decoding + EXIF/ICC metadata extraction
+ * - Encode: AVIF compression via unified engine Worker + vips-heif (libheif + libaom)
+ * - Metadata: ExifReader parsing for EXIF + ICC profile extraction from HEIF container
  *
- * Note: exifr does NOT support WebP. We use ExifReader for EXIF and manual
- * RIFF container parsing for ICC profile extraction.
+ * AVIF uses the HEIF/ISOBMFF container format. ExifReader v4+ supports parsing
+ * AVIF files for EXIF, ICC profiles, and XMP metadata.
  *
- * Thread model: ALL operations run on main thread (<100ms for typical files).
+ * Thread model:
+ * - Decode: main thread (browser-native createImageBitmap, <10ms typical)
+ * - Encode: engine Worker via vips heifsave (vips-heif.wasm, ~300ms-2s depending on resolution)
+ * - Metadata: main thread via ExifReader (<50ms)
+ *
+ * ICC color management:
+ * - Import: non-sRGB files are converted to sRGB via vips (Little CMS) for accurate editing
+ * - Export: sRGB → original ICC conversion + ICC profile embedding via vips-heif
  */
 
 import ExifReader from 'exifreader';
@@ -32,13 +39,12 @@ import type {
   DecodeResult,
   EncodeOptions,
 } from '../types';
-import { bitmapToCanvas } from '../index';
-import { iccToBase64, base64ToIcc, parseIccProfileName } from '../icc';
+import { iccToBase64, parseIccProfileName } from '../icc';
 
-export class WebpHandler implements ImageFormatHandler {
-  readonly format = 'webp';
-  readonly mimeTypes = ['image/webp'];
-  readonly extensions = ['webp'];
+export class AvifHandler implements ImageFormatHandler {
+  readonly format = 'avif';
+  readonly mimeTypes = ['image/avif'];
+  readonly extensions = ['avif'];
 
   constructor(private pixels: PixelService) {}
 
@@ -55,24 +61,24 @@ export class WebpHandler implements ImageFormatHandler {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const { width, height, data, iccProfileData } = await this.pixels.fileIO.iccToSrgb(bytes);
       dimensions = { w: width, h: height };
-      // Vips reliably extracts ICC — populate metadata if missed
-      if (iccProfileData && iccProfileData.length > 0) {
-        metadata.hasIccProfile = true;
-        metadata.raw = metadata.raw || {};
-        if (!metadata.raw.iccProfileData) {
-          const { iccToBase64, parseIccProfileName } = await import('../icc');
-          metadata.raw.iccProfileData = iccToBase64(iccProfileData);
-          if (!metadata.raw.iccProfileName) {
-            metadata.raw.iccProfileName = parseIccProfileName(iccProfileData) || 'Embedded';
-          }
-        }
-      }
       const canvas = new OffscreenCanvas(width, height);
       const ctx = canvas.getContext('2d')!;
       const clamped = new Uint8ClampedArray(data.length);
       clamped.set(data);
       ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
       displayBlob = await canvas.convertToBlob({ type: 'image/png' });
+
+      // Vips reliably extracts ICC from AVIF colr box — populate metadata if ExifReader missed it
+      if (iccProfileData && iccProfileData.length > 0) {
+        metadata.hasIccProfile = true;
+        metadata.raw = metadata.raw || {};
+        if (!metadata.raw.iccProfileData) {
+          metadata.raw.iccProfileData = iccToBase64(iccProfileData);
+        }
+        if (!metadata.raw.iccProfileName) {
+          metadata.raw.iccProfileName = parseIccProfileName(iccProfileData) || 'Embedded';
+        }
+      }
     } else {
       // sRGB — browser-native decode is sufficient
       const img = await createImageBitmap(file);
@@ -89,21 +95,43 @@ export class WebpHandler implements ImageFormatHandler {
     source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
     options: EncodeOptions,
   ): Promise<Blob> {
-    const quality = options.quality ?? 0.80;
-    const meta = options.metadata;
-    const config = options.exportConfig;
+    const quality = Math.round((options.quality ?? 0.80) * 100); // vips Q: 0-100
 
-    // WebP: ICC profile embedding is not supported via canvas.convertToBlob().
-    // The browser's WebP encoder produces sRGB-only output. We skip srgbToIcc
-    // conversion intentionally — the sRGB pixel values are already correct
-    // for display and the round-trip is lossless in the sRGB domain.
-    // (Unlike PNG/JPEG where we can inject iCCP/APP2 chunks post-encode.)
-    const canvas: OffscreenCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
+    // Get RGBA pixel data from source
+    const canvas = source instanceof ImageBitmap
+      ? (() => { const c = new OffscreenCanvas(source.width, source.height); c.getContext('2d')!.drawImage(source, 0, 0); return c; })()
+      : source as OffscreenCanvas;
 
-    return canvas.convertToBlob({
-      type: 'image/webp',
-      quality,
-    });
+    const ctx = (canvas as OffscreenCanvas).getContext('2d')!;
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const rgbaData = new Uint8Array(imageData.data.buffer);
+
+    // ICC Profile for embedding (if user requested preserve-ICC)
+    let iccProfileBytes: Uint8Array | undefined;
+    if (options.exportConfig?.embedIcc && options.metadata?.raw?.iccProfileData) {
+      const { base64ToIcc } = await import('../icc');
+      iccProfileBytes = base64ToIcc(options.metadata.raw.iccProfileData);
+
+      // Convert pixel data from sRGB to target ICC color space
+      const colorSpace = options.metadata.colorSpace;
+      if (colorSpace && colorSpace !== 'srgb') {
+        const { data: convertedData } = await this.pixels.fileIO.srgbToIcc(
+          rgbaData, canvas.width, canvas.height, iccProfileBytes,
+        );
+        rgbaData.set(convertedData);
+      }
+    }
+
+    // Encode via engine Worker (FILE_IO encodeAvif → vips heifsave + AV1)
+    const dpi = options.exportConfig?.dpi || options.metadata?.dpi || 72;
+    const avifBytes = await this.pixels.fileIO.encodeAvif(
+      rgbaData,
+      canvas.width,
+      canvas.height,
+      { quality, lossless: false, effort: 4, iccProfileBytes, dpi },
+    );
+
+    return new Blob([avifBytes.buffer as ArrayBuffer], { type: 'image/avif' });
   }
 
   // ─── Metadata Extraction ─────────────────────────────────────────────────
@@ -111,7 +139,7 @@ export class WebpHandler implements ImageFormatHandler {
   async extractMetadata(file: File): Promise<ImageMetadata> {
     const base: ImageMetadata = {
       version: 1,
-      sourceFormat: 'webp',
+      sourceFormat: 'avif',
       sourceFileName: file.name,
       sourceFileSize: file.size,
       dpi: 72,
@@ -125,10 +153,10 @@ export class WebpHandler implements ImageFormatHandler {
     try {
       const fileBuffer = await file.arrayBuffer();
 
-      // 1. Parse EXIF with ExifReader (supports WebP RIFF container)
+      // ExifReader v4+ supports AVIF/HEIF container parsing
       const tags = ExifReader.load(fileBuffer, { expanded: true });
 
-      // DPI
+      // DPI from EXIF
       const xRes = tags.exif?.XResolution?.value;
       if (xRes) {
         const resUnit = tags.exif?.ResolutionUnit?.value;
@@ -186,14 +214,13 @@ export class WebpHandler implements ImageFormatHandler {
         base.gps = { latitude: Number(lat), longitude: Number(lon) };
       }
 
-      // 2. ICC Profile extraction from WebP RIFF ICCP chunk
-      const iccBytes = extractWebpIccChunk(new Uint8Array(fileBuffer));
-      if (iccBytes) {
+      // ICC Profile — ExifReader extracts ICC from AVIF's colr box
+      const iccDesc = tags.icc?.['ICC Description']?.description
+        || tags.icc?.ProfileDescription?.description;
+      if (iccDesc) {
         base.hasIccProfile = true;
         base.raw = base.raw || {};
-        base.raw.iccProfileData = iccToBase64(iccBytes);
-        const profileName = parseIccProfileName(iccBytes);
-        base.raw.iccProfileName = profileName || 'Embedded';
+        base.raw.iccProfileName = String(iccDesc);
 
         // Detect known color spaces from ICC profile name
         const pName = (base.raw.iccProfileName || '').toLowerCase();
@@ -205,60 +232,40 @@ export class WebpHandler implements ImageFormatHandler {
           base.colorSpace = 'prophoto-rgb';
         }
       }
+
+      // Try to get raw ICC profile bytes from ExifReader
+      // ExifReader may expose raw ICC data via icc chunk
+      const iccChunks = tags.icc;
+      if (iccChunks && typeof iccChunks === 'object') {
+        // ExifReader exposes raw ICC bytes in certain parse modes
+        const rawIcc = (iccChunks as Record<string, unknown>).__raw;
+        if (rawIcc instanceof Uint8Array && rawIcc.length > 0) {
+          base.raw = base.raw || {};
+          base.raw.iccProfileData = iccToBase64(rawIcc);
+          if (!base.raw.iccProfileName) {
+            base.raw.iccProfileName = parseIccProfileName(rawIcc) || 'Embedded';
+          }
+        }
+      }
+
+      // Bit depth detection from AVIF pixi box (if ExifReader exposes it)
+      const fileTags = tags.file as Record<string, { value?: unknown }> | undefined;
+      const bitDepth = fileTags?.BitDepth?.value;
+      if (bitDepth && Number(bitDepth) > 8) {
+        base.bitDepth = Number(bitDepth);
+      }
+
+      // Alpha detection
+      // AVIF supports alpha; detect from file properties if available
+      const hasAlpha = fileTags?.NumberOfComponents?.value;
+      if (hasAlpha && Number(hasAlpha) === 4) {
+        base.hasAlpha = true;
+      }
     } catch (err) {
-      console.debug('[WebpHandler] EXIF extraction failed:', (err as Error).message);
+      console.debug('[AvifHandler] Metadata extraction failed:', (err as Error).message);
     }
 
     return base;
   }
-}
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// WebP RIFF Container — ICCP Chunk Extraction
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Extract ICC Profile bytes from WebP RIFF container.
- *
- * WebP extended format (VP8X) structure:
- * ```
- * RIFF [4B size] WEBP
- *   VP8X [4B size] [10B flags+dimensions] (flags bit 5 = ICC present)
- *   ICCP [4B size] [ICC profile bytes]
- *   ...
- * ```
- *
- * @returns Raw ICC profile bytes, or null if not found
- */
-function extractWebpIccChunk(bytes: Uint8Array): Uint8Array | null {
-  // Minimum valid RIFF WebP: "RIFF" + size(4) + "WEBP" = 12 bytes
-  if (bytes.length < 12) return null;
-
-  // Verify RIFF WebP signature
-  const riff = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
-  const webp = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]);
-  if (riff !== 'RIFF' || webp !== 'WEBP') return null;
-
-  // Scan RIFF chunks starting at offset 12
-  let pos = 12;
-  while (pos + 8 <= bytes.length) {
-    const chunkId = String.fromCharCode(bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]);
-    // Chunk size (little-endian 32-bit)
-    const chunkSize = bytes[pos + 4] | (bytes[pos + 5] << 8) | (bytes[pos + 6] << 16) | (bytes[pos + 7] << 24);
-
-    if (chunkId === 'ICCP') {
-      // Found ICC Profile chunk
-      const dataStart = pos + 8;
-      const dataEnd = dataStart + chunkSize;
-      if (dataEnd <= bytes.length && chunkSize > 0) {
-        return bytes.slice(dataStart, dataEnd);
-      }
-      return null;
-    }
-
-    // Move to next chunk (chunks are padded to even byte boundaries)
-    pos += 8 + chunkSize + (chunkSize % 2);
-  }
-
-  return null;
 }

@@ -120,6 +120,21 @@ export class FileIoDispatcher {
    * Uses vips icc_transform (Little CMS) for accurate reverse color space conversion.
    * Used during export to restore original color space when user selects "preserve original".
    */
+  /**
+   * Encode RGBA pixels to AVIF format via vips-heif (libheif + libaom).
+   * Produces a complete AVIF container with embedded ICC profile and metadata support.
+   */
+  async encodeAvif(
+    rgbaData: Uint8Array,
+    width: number,
+    height: number,
+    options: { quality?: number; lossless?: boolean; effort?: number; iccProfileBytes?: Uint8Array; bitDepth?: number },
+  ): Promise<Uint8Array> {
+    return this.bridge.request<Uint8Array>(
+      { type: 'FILE_IO', fn: 'encodeAvif', rgbaData, width, height, options },
+    );
+  }
+
   async srgbToIcc(
     rgbaData: Uint8Array,
     width: number,

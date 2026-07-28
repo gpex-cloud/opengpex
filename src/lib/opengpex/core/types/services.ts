@@ -86,12 +86,6 @@ export interface RenderToBlobOptions {
   layerIds?: string[];
 }
 
-/**
- * Pluggable AVIF encoder — injected by the host into PixelService.
- * PixelService itself is format-agnostic; the AVIF encoder lives in a plugin (uses its own worker).
- * TODO: fold AVIF into core FileService as a first-class handler; see §9.1 of export refactor proposal.
- */
-export type AvifEncoder = (bitmap: ImageBitmap, options: { quality?: number }) => Promise<Blob>;
 
 
 export interface WorkerResult {
@@ -398,10 +392,12 @@ export interface PixelService {
       options: Record<string, unknown>;
     }) => Promise<Uint8Array>;
     exportHighRes: (rawBytes: Uint8Array, options: Record<string, unknown>) => Promise<Uint8Array>;
-    /** Convert image bytes with non-sRGB ICC profile to sRGB RGBA pixel data via vips (Little CMS). */
-    iccToSrgb: (bytes: Uint8Array) => Promise<{ width: number; height: number; data: Uint8Array }>;
+    /** Convert image bytes with non-sRGB ICC profile to sRGB RGBA pixel data via vips (Little CMS). Also returns raw ICC profile bytes for round-trip export. */
+    iccToSrgb: (bytes: Uint8Array) => Promise<{ width: number; height: number; data: Uint8Array; iccProfileData?: Uint8Array }>;
     /** Convert sRGB RGBA pixels back to target ICC color space via vips (Little CMS). Used for export round-trip. */
     srgbToIcc: (rgbaData: Uint8Array, width: number, height: number, iccProfileData: Uint8Array) => Promise<{ data: Uint8Array }>;
+    /** Encode RGBA pixels to AVIF format via vips-heif (libheif + libaom). */
+    encodeAvif: (rgbaData: Uint8Array, width: number, height: number, options: { quality?: number; lossless?: boolean; effort?: number; iccProfileBytes?: Uint8Array; bitDepth?: number; dpi?: number }) => Promise<Uint8Array>;
   };
 
   /**
