@@ -33,7 +33,7 @@ import type {
   EncodeOptions,
 } from '../types';
 import { bitmapToCanvas } from '../index';
-import { iccToBase64, base64ToIcc, parseIccProfileName } from '../icc';
+import { iccToBase64, parseIccProfileName } from '../icc';
 
 export class WebpHandler implements ImageFormatHandler {
   readonly format = 'webp';
@@ -90,8 +90,8 @@ export class WebpHandler implements ImageFormatHandler {
     options: EncodeOptions,
   ): Promise<Blob> {
     const quality = options.quality ?? 0.80;
-    const meta = options.metadata;
-    const config = options.exportConfig;
+    // const meta = options.metadata;
+    // const config = options.exportConfig;
 
     // WebP: ICC profile embedding is not supported via canvas.convertToBlob().
     // The browser's WebP encoder produces sRGB-only output. We skip srgbToIcc
