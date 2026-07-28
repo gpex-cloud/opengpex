@@ -23,7 +23,7 @@
 import ExifReader from 'exifreader';
 // @ts-expect-error - piexifjs lacks official TypeScript declarations
 import * as piexif from 'piexifjs';
-import type { AssetService } from '@opengpex/editor/core/types';
+import type { PixelService } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   ImageMetadata,
@@ -39,19 +39,30 @@ export class JpegHandler implements ImageFormatHandler {
   readonly mimeTypes = ['image/jpeg'];
   readonly extensions = ['jpg', 'jpeg'];
 
-  constructor(private assets: AssetService) {}
+  constructor(private pixels: PixelService) {}
 
   // ─── Decode ──────────────────────────────────────────────────────────────
 
   async decode(file: File, _options?: DecodeOptions): Promise<DecodeResult> {
-    // JPEG is browser-native — no transcoding needed
-    const img = await createImageBitmap(file);
-    const dimensions = { w: img.width, h: img.height };
-    img.close();
-
     const metadata = await this.extractMetadata(file);
 
-    return { dimensions, metadata, subImages: [{ displayBlob: file, width: dimensions.w, height: dimensions.h, index: 0 }] };
+    // If image has non-sRGB ICC profile, convert via vips (Little CMS) for accurate color
+    let displayBlob: Blob = file;
+    let dimensions: { w: number; h: number };
+
+    if (metadata.colorSpace && metadata.colorSpace !== 'srgb') {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const { width, height, data } = await this.pixels.fileIO.iccToSrgb(bytes);
+      dimensions = { w: width, h: height };
+      displayBlob = await rgbaToBlob(data, width, height);
+    } else {
+      // sRGB — browser-native decode is sufficient
+      const img = await createImageBitmap(file);
+      dimensions = { w: img.width, h: img.height };
+      img.close();
+    }
+
+    return { dimensions, metadata, subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }] };
   }
 
   // ─── Encode ──────────────────────────────────────────────────────────────
@@ -61,17 +72,41 @@ export class JpegHandler implements ImageFormatHandler {
     options: EncodeOptions,
   ): Promise<Blob> {
     const quality = options.quality ?? 0.92;
-    const canvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source;
+    const meta = options.metadata;
+    const config = options.exportConfig;
+
+    // If exporting with original non-sRGB ICC profile, convert pixels back
+    let canvas: OffscreenCanvas;
+    if (config?.embedIcc && meta?.raw?.iccProfileData && meta?.colorSpace && meta.colorSpace !== 'srgb') {
+      const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
+      const w = srcCanvas.width;
+      const h = srcCanvas.height;
+      const tmpCanvas = new OffscreenCanvas(w, h);
+      const tmpCtx = tmpCanvas.getContext('2d')!;
+      tmpCtx.drawImage(srcCanvas, 0, 0);
+      const imageData = tmpCtx.getImageData(0, 0, w, h);
+
+      const iccBytes = base64ToIcc(meta.raw.iccProfileData);
+      const { data } = await this.pixels.fileIO.srgbToIcc(
+        new Uint8Array(imageData.data.buffer),
+        w, h, iccBytes,
+      );
+
+      const clamped = new Uint8ClampedArray(data.length);
+      clamped.set(data);
+      tmpCtx.putImageData(new ImageData(clamped, w, h), 0, 0);
+      canvas = tmpCanvas;
+    } else {
+      canvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
+    }
 
     // 1. Get base JPEG blob from browser encoder
-    const baseBlob = await (canvas as OffscreenCanvas).convertToBlob({
+    const baseBlob = await canvas.convertToBlob({
       type: 'image/jpeg',
       quality,
     });
 
     // 2. Inject EXIF metadata (DPI, camera info, software tag)
-    const meta = options.metadata;
-    const config = options.exportConfig;
     if (!meta && !config) return baseBlob;
 
     try {
@@ -293,6 +328,17 @@ function base64ToBlob(base64: string, type: string): Blob {
     uInt8Array[i] = raw.charCodeAt(i);
   }
   return new Blob([uInt8Array], { type });
+}
+
+/** Convert raw RGBA pixel data to a PNG Blob via OffscreenCanvas. */
+async function rgbaToBlob(rgba: Uint8Array, width: number, height: number): Promise<Blob> {
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d')!;
+  const clamped = new Uint8ClampedArray(rgba.length);
+  clamped.set(rgba);
+  const imageData = new ImageData(clamped, width, height);
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.convertToBlob({ type: 'image/png' });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

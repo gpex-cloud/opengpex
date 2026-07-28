@@ -204,12 +204,12 @@ export function createFileService(
 ): FileService {
   // Instantiate all format handlers
   const handlers: ImageFormatHandler[] = [
-    new JpegHandler(assets),
-    new PngHandler(assets),
-    new WebpHandler(),
+    new JpegHandler(pixels),
+    new PngHandler(pixels),
+    new WebpHandler(pixels),
     new BmpHandler(),
     new GifHandler(),
-    new HeicHandler(assets),
+    new HeicHandler(assets, pixels),
     new TiffHandler(assets, pixels),
     new RawHandler(assets),
     new VectorHandler(),

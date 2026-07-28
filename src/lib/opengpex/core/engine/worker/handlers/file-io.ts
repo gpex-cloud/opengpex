@@ -61,6 +61,12 @@ export class FileIoHandler {
       case 'exportHighRes':
         return this.exportHighRes(vips, job.bytes!, job.options || {});
 
+      case 'iccToSrgb':
+        return this.iccToSrgb(vips, job.bytes!);
+
+      case 'srgbToIcc':
+        return this.srgbToIcc(vips, job.rgbaData!, job.width!, job.height!, job.iccProfileData!);
+
       default:
         throw new Error(`[FileIoHandler] Unknown fn: ${(job as { fn: string }).fn}`);
     }
@@ -526,6 +532,114 @@ export class FileIoHandler {
     image.delete();
 
     return { result: outputBytes, transfer: [outputBytes.buffer] };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // iccToSrgb — Convert image with non-sRGB ICC profile to sRGB RGBA (8-bit)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private iccToSrgb(
+    vips: VipsInstance,
+    bytes: Uint8Array,
+  ): { result: { width: number; height: number; data: Uint8Array }; transfer: Transferable[] } {
+    console.log(`[ICC 导入] iccToSrgb 开始: 输入 ${bytes.length} bytes`);
+    // vips.Image.newFromBuffer automatically reads embedded ICC profiles
+    // and uses Little CMS for accurate color space conversion
+    const image = vips.Image.newFromBuffer(bytes, '', { access: 'sequential' });
+
+    // Convert to sRGB via Little CMS (handles Adobe RGB, ProPhoto, Display P3, etc.)
+    let rgb: VipsImage = image;
+    if (image.interpretation !== 'srgb' && image.interpretation !== 'b-w') {
+      rgb = image.colourspace('srgb');
+    }
+
+    // Ensure 8-bit
+    let img8: VipsImage = rgb;
+    if (rgb.format !== 'uchar') {
+      if (rgb.format === 'ushort') {
+        img8 = rgb.linear(1.0 / 257.0, 0).cast('uchar');
+      } else {
+        img8 = rgb.cast('uchar');
+      }
+    }
+
+    // Ensure RGBA (4 bands)
+    let rgba: VipsImage = img8;
+    if (!img8.hasAlpha()) {
+      rgba = img8.bandjoin(255);
+    } else if (img8.bands > 4) {
+      rgba = img8.extractBand(0, { n: 4 });
+    }
+
+    const width = rgba.width;
+    const height = rgba.height;
+    const rawBuffer = rgba.writeToBuffer('.raw');
+    const data = new Uint8Array(rawBuffer);
+
+    // Cleanup
+    image.delete();
+    if (rgb !== image) rgb.delete();
+    if (img8 !== rgb) img8.delete();
+    if (rgba !== img8) rgba.delete();
+
+    console.log(`[ICC 导入] iccToSrgb 完成: ${width}×${height}, 输出 ${data.length} bytes RGBA`);
+    return { result: { width, height, data }, transfer: [data.buffer] };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // srgbToIcc — Convert sRGB RGBA pixels to target ICC color space (8-bit)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private srgbToIcc(
+    vips: VipsInstance,
+    rgbaBytes: Uint8Array,
+    width: number,
+    height: number,
+    iccProfileData: Uint8Array,
+  ): { result: { data: Uint8Array }; transfer: Transferable[] } {
+    console.log(`[ICC 导出] srgbToIcc 开始: ${width}×${height}, ICC profile ${iccProfileData.length} bytes`);
+    // 1. Build vips image from RGBA pixel data (interpret as sRGB)
+    const image = vips.Image.newFromMemory(rgbaBytes, width, height, 4, 'uchar');
+
+    // 2. Write target ICC profile to emscripten virtual FS
+    const tmpPath = '/tmp/target_export.icc';
+    vips.FS.writeFile(tmpPath, iccProfileData);
+
+    // 3. Use icc_transform to convert sRGB → target color space
+    //    inputProfile: 'srgb' tells vips the source is standard sRGB
+    //    intent: 'relative' matches Photoshop default (relative colorimetric)
+    let converted: VipsImage;
+    try {
+      converted = image.iccTransform(tmpPath, {
+        input_profile: 'srgb',
+        intent: 'relative',
+      });
+    } finally {
+      // 4. Clean up virtual FS temp file to avoid memory accumulation
+      try { vips.FS.unlink(tmpPath); } catch { /* ignore */ }
+    }
+
+    // 5. Ensure output is 8-bit RGBA
+    let out: VipsImage = converted;
+    if (converted.format !== 'uchar') {
+      out = converted.cast('uchar');
+    }
+    if (!out.hasAlpha()) {
+      out = out.bandjoin(255);
+    } else if (out.bands > 4) {
+      out = out.extractBand(0, { n: 4 });
+    }
+
+    const rawBuffer = out.writeToBuffer('.raw');
+    const data = new Uint8Array(rawBuffer);
+
+    // Cleanup
+    image.delete();
+    if (converted !== image) converted.delete();
+    if (out !== converted) out.delete();
+
+    console.log(`[ICC 导出] srgbToIcc 完成: 输出 ${data.length} bytes RGBA`);
+    return { result: { data }, transfer: [data.buffer] };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

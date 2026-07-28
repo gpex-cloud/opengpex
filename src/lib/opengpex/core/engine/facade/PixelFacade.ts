@@ -147,6 +147,10 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
       async imageData(src: string, rect?: Rect): Promise<ImageData> {
         return image.imageData(src, rect);
       },
+      /** Compute full-resolution RGB composite histogram via Worker (zero main-thread blocking). */
+      async histogram(assetId: string): Promise<Uint32Array> {
+        return image.histogram(assetId);
+      },
       /** Resample (resize) an image. Accepts targetSize or maxSize. */
       async resample(src: string, options: { targetSize?: { w: number; h: number }; maxSize?: number }) {
         return image.resample(src, options);
@@ -243,6 +247,9 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
       composite16bit: (params) => fileIo.composite16bit(params),
       exportHighRes: (rawBytes: Uint8Array, opts: Record<string, unknown>) =>
         fileIo.exportHighRes(rawBytes, opts),
+      iccToSrgb: (bytes: Uint8Array) => fileIo.iccToSrgb(bytes),
+      srgbToIcc: (rgbaData: Uint8Array, w: number, h: number, iccProfileData: Uint8Array) =>
+        fileIo.srgbToIcc(rgbaData, w, h, iccProfileData),
     },
 
     // ════════════════════════════════════════════════════════════

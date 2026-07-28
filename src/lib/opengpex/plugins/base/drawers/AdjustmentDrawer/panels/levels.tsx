@@ -24,13 +24,14 @@
  *
  * Interaction & data-flow (spec §5 & §6, mirrors CurvesPanel):
  *
- * - The histogram at the top of the panel is a Rec. 601 luminance count
- *   sampled from the active layer's decoded bitmap (see
- *   `useLayerHistogram()`). The stat is lazy: on layer switch we render an
- *   empty grid immediately and swap in the bars a frame or two later once
- *   the (256px-downsampled) sample completes. The bars share the SAME
- *   `x ∈ [0,255]` axis as the input track below them, so users can eyeball
- *   the blackpoint / whitepoint against real image data.
+ * - The histogram at the top of the panel is an RGB composite count
+ *   (sum of per-channel R+G+B histograms, matching Photoshop's Levels "RGB"
+ *   channel) computed from the active layer's full-resolution bitmap in the
+ *   engine Worker (see `useLayerHistogram()`). The stat is lazy: on layer
+ *   switch we render an empty grid immediately and swap in the bars once
+ *   the Worker computation completes. The bars share the SAME `x ∈ [0,255]`
+ *   axis as the input track below them, so users can eyeball the blackpoint /
+ *   whitepoint against real image data.
  *
  * - On top of the histogram we overlay the current levels-LUT curve, which
  *   is computed by the same `generateLevelsLUT` function the worker uses to

@@ -177,6 +177,30 @@ export class ImageDispatcher {
   }
 
   /**
+   * Compute a full-resolution RGB composite histogram via the Worker thread.
+   *
+   * Returns a 256-bin Uint32Array (sum of per-channel R+G+B counts). The
+   * computation runs entirely in the Worker (no main-thread pixel iteration,
+   * no downsampling), producing results that match Photoshop's Levels dialog
+   * "RGB" channel histogram.
+   *
+   * @param hash - Content hash (AssetService ID / WorkerCache key).
+   */
+  async histogram(hash: string): Promise<Uint32Array> {
+    // Ensure the Worker has this asset in its cache.
+    const entry = this.assets.get(hash);
+    if (entry) {
+      await this.ensureAsset(hash, entry.blob);
+    }
+
+    const result = await this.bridge.request<{ histogram: ArrayBuffer }>({
+      type: 'HISTOGRAM',
+      src: hash,
+    });
+    return new Uint32Array(result.histogram);
+  }
+
+  /**
    * Evict an asset from the Worker cache.
    * Called by EditorContext when AssetService releases/revokes an asset.
    */

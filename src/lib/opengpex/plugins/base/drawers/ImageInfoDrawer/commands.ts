@@ -87,26 +87,32 @@ export const IMAGE_INFO_COMMANDS = {
          const needsResize = exportW !== baseW || exportH !== baseH;
 
          // ─── 4. Assemble the unified RenderToBlobOptions ───────────────────
-         const opts: RenderToBlobOptions = {
-            format: config.format,
-            quality: config.quality ? config.quality / 100 : 0.92,
-            exportBitDepth: config.exportBitDepth,
-            metadata: layerMeta,
-            exportConfig: {
-               dpi,
-               preserveExif: config.keepExif,
-               writeSoftwareTag: true,
-               tiffCompression: config.tiffCompression,
-               pngCompression: config.pngCompression,
-               jpegQuality: config.jpegQuality,
-               tiffPredictor: config.tiffPredictor,
-               tiffBigtiff: config.tiffBigtiff,
-               tiffTile: config.tiffTile,
-               tiffTileWidth: config.tiffTileWidth,
-               tiffTileHeight: config.tiffTileHeight,
-               resize: needsResize ? { w: exportW, h: exportH } : undefined,
-            },
-         };
+          // Auto-enable ICC embed when source has non-sRGB ICC profile (preserves color fidelity)
+          const hasNonSrgbIcc = !!(layerMeta?.raw?.iccProfileData && layerMeta.colorSpace && layerMeta.colorSpace !== 'srgb');
+          console.log('[ExportCmd ICC] layerMeta.colorSpace=%s, hasIccData=%s, hasNonSrgbIcc=%s',
+            layerMeta?.colorSpace, !!layerMeta?.raw?.iccProfileData, hasNonSrgbIcc);
+
+          const opts: RenderToBlobOptions = {
+             format: config.format,
+             quality: config.quality ? config.quality / 100 : 0.92,
+             exportBitDepth: config.exportBitDepth,
+             metadata: layerMeta,
+             exportConfig: {
+                dpi,
+                preserveExif: config.keepExif,
+                writeSoftwareTag: true,
+                embedIcc: hasNonSrgbIcc,
+                tiffCompression: config.tiffCompression,
+                pngCompression: config.pngCompression,
+                jpegQuality: config.jpegQuality,
+                tiffPredictor: config.tiffPredictor,
+                tiffBigtiff: config.tiffBigtiff,
+                tiffTile: config.tiffTile,
+                tiffTileWidth: config.tiffTileWidth,
+                tiffTileHeight: config.tiffTileHeight,
+                resize: needsResize ? { w: exportW, h: exportH } : undefined,
+             },
+          };
 
          try {
             console.debug('[ExportCmd] Starting export: format=%s, clip=%s, dims=%dx%d',
@@ -136,17 +142,20 @@ export const IMAGE_INFO_COMMANDS = {
             dpr: 1, // Export output is physical pixels (no retina scale)
          });
 
-            // Encode the composite result to the target format.
-            // All formats (PNG/JPEG/WebP/TIFF/AVIF) are handled by result.toBlob().
-            // - 8-bit backends: OffscreenCanvas.convertToBlob (AVIF supported natively since Chrome 120)
-            // - 16-bit backends: vips encode (TIFF) or downgrade to 8-bit (other formats)
+            // Encode the composite result via FileService handlers.
+            // This ensures metadata injection (DPI, ICC profile, EXIF) is applied correctly.
+            // PixelResult.toBlob() returns raw Worker output without metadata — we need
+            // files.encode() which routes through PngHandler/JpegHandler/etc.
             const encodeOpts: EncodeOptions = {
                quality: opts.quality,
                metadata: opts.metadata,
                exportConfig: opts.exportConfig as EncodeOptions['exportConfig'],
             };
 
-            const blob = await result.toBlob(config.format, encodeOpts);
+            // Get bitmap from composite result, then encode via file handler
+            const bitmap = await createImageBitmap(await result.toBlob());
+            const blob = await files.encode(bitmap, config.format, encodeOpts);
+            bitmap.close();
 
             // ─── 6. Post-composite resize fallback (Lane C 8-bit path) ─────────
             // If the lane returned a full-size blob but user requested resize,

@@ -24,6 +24,7 @@
  */
 
 import ExifReader from 'exifreader';
+import type { PixelService } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   ImageMetadata,
@@ -32,24 +33,42 @@ import type {
   EncodeOptions,
 } from '../types';
 import { bitmapToCanvas } from '../index';
-import { parseIccProfileName } from '../icc';
+import { iccToBase64, base64ToIcc, parseIccProfileName } from '../icc';
 
 export class WebpHandler implements ImageFormatHandler {
   readonly format = 'webp';
   readonly mimeTypes = ['image/webp'];
   readonly extensions = ['webp'];
 
+  constructor(private pixels: PixelService) {}
+
   // ─── Decode ──────────────────────────────────────────────────────────────
 
   async decode(file: File, _options?: DecodeOptions): Promise<DecodeResult> {
-    // WebP is browser-native — no transcoding needed
-    const img = await createImageBitmap(file);
-    const dimensions = { w: img.width, h: img.height };
-    img.close();
-
     const metadata = await this.extractMetadata(file);
 
-    return { dimensions, metadata, subImages: [{ displayBlob: file, width: dimensions.w, height: dimensions.h, index: 0 }] };
+    // If image has non-sRGB ICC profile, convert via vips (Little CMS) for accurate color
+    let displayBlob: Blob = file;
+    let dimensions: { w: number; h: number };
+
+    if (metadata.colorSpace && metadata.colorSpace !== 'srgb') {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const { width, height, data } = await this.pixels.fileIO.iccToSrgb(bytes);
+      dimensions = { w: width, h: height };
+      const canvas = new OffscreenCanvas(width, height);
+      const ctx = canvas.getContext('2d')!;
+      const clamped = new Uint8ClampedArray(data.length);
+      clamped.set(data);
+      ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
+      displayBlob = await canvas.convertToBlob({ type: 'image/png' });
+    } else {
+      // sRGB — browser-native decode is sufficient
+      const img = await createImageBitmap(file);
+      dimensions = { w: img.width, h: img.height };
+      img.close();
+    }
+
+    return { dimensions, metadata, subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }] };
   }
 
   // ─── Encode ──────────────────────────────────────────────────────────────
@@ -59,9 +78,17 @@ export class WebpHandler implements ImageFormatHandler {
     options: EncodeOptions,
   ): Promise<Blob> {
     const quality = options.quality ?? 0.80;
-    const canvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source;
+    const meta = options.metadata;
+    const config = options.exportConfig;
 
-    return (canvas as OffscreenCanvas).convertToBlob({
+    // WebP: ICC profile embedding is not supported via canvas.convertToBlob().
+    // The browser's WebP encoder produces sRGB-only output. We skip srgbToIcc
+    // conversion intentionally — the sRGB pixel values are already correct
+    // for display and the round-trip is lossless in the sRGB domain.
+    // (Unlike PNG/JPEG where we can inject iCCP/APP2 chunks post-encode.)
+    const canvas: OffscreenCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
+
+    return canvas.convertToBlob({
       type: 'image/webp',
       quality,
     });
@@ -152,6 +179,7 @@ export class WebpHandler implements ImageFormatHandler {
       if (iccBytes) {
         base.hasIccProfile = true;
         base.raw = base.raw || {};
+        base.raw.iccProfileData = iccToBase64(iccBytes);
         const profileName = parseIccProfileName(iccBytes);
         base.raw.iccProfileName = profileName || 'Embedded';
 

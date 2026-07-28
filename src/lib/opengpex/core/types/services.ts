@@ -56,6 +56,8 @@ export interface RenderToBlobOptions {
     dpi?: number;
     preserveExif?: boolean;
     writeSoftwareTag?: boolean;
+    /** Embed ICC Profile in output and convert pixels to original color space. */
+    embedIcc?: boolean;
     /** TIFF compression algorithm (e.g. 'lzw' / 'none' / 'deflate'). */
     tiffCompression?: string;
     /** PNG compression level 0..9. */
@@ -280,6 +282,13 @@ export interface PixelService {
     imageData: (src: string, rect?: { x: number; y: number; w: number; h: number }) => Promise<ImageData>;
 
     /**
+     * Compute full-resolution RGB composite histogram via Worker (zero main-thread blocking).
+     * Returns a 256-bin Uint32Array (sum of per-channel R+G+B counts, matching
+     * Photoshop's Levels dialog "RGB" channel histogram).
+     */
+    histogram: (assetId: string) => Promise<Uint32Array>;
+
+    /**
      * Resample (resize) an image to the given target dimensions.
      * Delegates to the Worker for high-quality bicubic downsampling.
      *
@@ -389,6 +398,10 @@ export interface PixelService {
       options: Record<string, unknown>;
     }) => Promise<Uint8Array>;
     exportHighRes: (rawBytes: Uint8Array, options: Record<string, unknown>) => Promise<Uint8Array>;
+    /** Convert image bytes with non-sRGB ICC profile to sRGB RGBA pixel data via vips (Little CMS). */
+    iccToSrgb: (bytes: Uint8Array) => Promise<{ width: number; height: number; data: Uint8Array }>;
+    /** Convert sRGB RGBA pixels back to target ICC color space via vips (Little CMS). Used for export round-trip. */
+    srgbToIcc: (rgbaData: Uint8Array, width: number, height: number, iccProfileData: Uint8Array) => Promise<{ data: Uint8Array }>;
   };
 
   /**

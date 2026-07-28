@@ -113,17 +113,31 @@ export interface GetTileJob {
   y: number;
 }
 
+// ─── HistogramJob ───
+
+/**
+ * Compute full-resolution RGB composite histogram in the Worker thread.
+ * Returns a 256-bin Uint32Array (sum of per-channel R+G+B counts, matching
+ * Photoshop's Levels dialog "RGB" channel histogram).
+ */
+export interface HistogramJob {
+  type: 'HISTOGRAM';
+  src: string;  // content hash (WorkerCache key)
+}
+
 // ─── FileIoJob ───
 
 export interface FileIoJob {
   type: 'FILE_IO';
-  fn: 'decodeTiff' | 'encodeTiff' | 'decodePages' | 'decodePage' | 'getPageCount' | 'composite16bit' | 'exportHighRes';
+  fn: 'decodeTiff' | 'encodeTiff' | 'decodePages' | 'decodePage' | 'getPageCount' | 'composite16bit' | 'exportHighRes' | 'iccToSrgb' | 'srgbToIcc';
   bytes?: Uint8Array;
   rgbaData?: Uint8Array;
   width?: number;
   height?: number;
   page?: number;
   options?: Record<string, unknown>;
+  /** Target ICC Profile binary data (used by srgbToIcc for reverse color conversion). */
+  iccProfileData?: Uint8Array;
   layers?: Array<{
     bytes: Uint8Array;
     x: number;
@@ -149,4 +163,5 @@ export type Job =
   | ForgetJob
   | ExtractPixelsJob
   | GetTileJob
+  | HistogramJob
   | FileIoJob;

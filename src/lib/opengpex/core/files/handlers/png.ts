@@ -22,7 +22,7 @@
  */
 
 import ExifReader from 'exifreader';
-import type { AssetService } from '@opengpex/editor/core/types';
+import type { PixelService } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   ImageMetadata,
@@ -41,22 +41,38 @@ export class PngHandler implements ImageFormatHandler {
   readonly mimeTypes = ['image/png'];
   readonly extensions = ['png'];
 
-  constructor(private assets: AssetService) {}
+  constructor(private pixels: PixelService) {}
 
   // ─── Decode ──────────────────────────────────────────────────────────────
 
   async decode(file: File, _options?: DecodeOptions): Promise<DecodeResult> {
-    // PNG is browser-native — no transcoding needed
-    const img = await createImageBitmap(file);
-    const dimensions = { w: img.width, h: img.height };
-    img.close();
-
     const metadata = await this.extractMetadata(file);
+
+    // If image has non-sRGB ICC profile, convert via vips (Little CMS) for accurate color
+    let displayBlob: Blob = file;
+    let dimensions: { w: number; h: number };
+
+    if (metadata.colorSpace && metadata.colorSpace !== 'srgb' && metadata.colorSpace !== 'grayscale') {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const { width, height, data } = await this.pixels.fileIO.iccToSrgb(bytes);
+      dimensions = { w: width, h: height };
+      const canvas = new OffscreenCanvas(width, height);
+      const ctx = canvas.getContext('2d')!;
+      const clamped = new Uint8ClampedArray(data.length);
+      clamped.set(data);
+      ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
+      displayBlob = await canvas.convertToBlob({ type: 'image/png' });
+    } else {
+      // sRGB — browser-native decode is sufficient
+      const img = await createImageBitmap(file);
+      dimensions = { w: img.width, h: img.height };
+      img.close();
+    }
 
     // Phase 5: Preserve raw source for 16-bit fidelity export
     const rawBlob = metadata.bitDepth > 8 ? file : undefined;
 
-    return { dimensions, metadata, subImages: [{ displayBlob: file, width: dimensions.w, height: dimensions.h, index: 0 }], sourceBlob: rawBlob };
+    return { dimensions, metadata, subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }], sourceBlob: rawBlob };
   }
 
   // ─── Encode ──────────────────────────────────────────────────────────────
@@ -65,13 +81,37 @@ export class PngHandler implements ImageFormatHandler {
     source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
     options: EncodeOptions,
   ): Promise<Blob> {
-    const canvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source;
-
-    // 1. Get base PNG blob from browser encoder
-    const baseBlob = await (canvas as OffscreenCanvas).convertToBlob({ type: 'image/png' });
-
     const meta = options.metadata;
     const config = options.exportConfig;
+    console.log(`[PngHandler.encode] 导出开始: colorSpace=${meta?.colorSpace}, embedIcc=${config?.embedIcc}, hasIccData=${!!meta?.raw?.iccProfileData}`);
+
+    // If exporting with original non-sRGB ICC profile, convert pixels back
+    let canvas: OffscreenCanvas;
+    if (config?.embedIcc && meta?.raw?.iccProfileData && meta?.colorSpace && meta.colorSpace !== 'srgb') {
+      const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
+      const w = srcCanvas.width;
+      const h = srcCanvas.height;
+      const tmpCanvas = new OffscreenCanvas(w, h);
+      const tmpCtx = tmpCanvas.getContext('2d')!;
+      tmpCtx.drawImage(srcCanvas, 0, 0);
+      const imageData = tmpCtx.getImageData(0, 0, w, h);
+
+      const iccBytes = base64ToIcc(meta.raw.iccProfileData);
+      const { data } = await this.pixels.fileIO.srgbToIcc(
+        new Uint8Array(imageData.data.buffer),
+        w, h, iccBytes,
+      );
+
+      const clamped = new Uint8ClampedArray(data.length);
+      clamped.set(data);
+      tmpCtx.putImageData(new ImageData(clamped, w, h), 0, 0);
+      canvas = tmpCanvas;
+    } else {
+      canvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
+    }
+
+    // 1. Get base PNG blob from browser encoder
+    const baseBlob = await canvas.convertToBlob({ type: 'image/png' });
 
     // If no metadata to inject, return as-is
     const dpi = config?.dpi || meta?.dpi;

@@ -22,7 +22,7 @@
  */
 
 import ExifReader from 'exifreader';
-import type { AssetService } from '@opengpex/editor/core/types';
+import type { AssetService, PixelService } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   ImageMetadata,
@@ -38,7 +38,7 @@ export class HeicHandler implements ImageFormatHandler {
   readonly mimeTypes = ['image/heic', 'image/heif'];
   readonly extensions = ['heic', 'heif'];
 
-  constructor(private assets: AssetService) {}
+  constructor(private assets: AssetService, private pixels: PixelService) {}
 
   // ─── Decode ──────────────────────────────────────────────────────────────
 
@@ -55,12 +55,27 @@ export class HeicHandler implements ImageFormatHandler {
       { type: 'image/jpeg' },
     );
 
-    // 3. Get dimensions from transcoded result
-    const img = await createImageBitmap(safeFile);
-    const dimensions = { w: img.width, h: img.height };
-    img.close();
+    // 3. If non-sRGB, convert transcoded JPEG via vips ICC conversion
+    let displayBlob: Blob = safeFile;
+    let dimensions: { w: number; h: number };
 
-    return { dimensions, metadata, subImages: [{ displayBlob: safeFile, width: dimensions.w, height: dimensions.h, index: 0 }] };
+    if (metadata.colorSpace && metadata.colorSpace !== 'srgb') {
+      const bytes = new Uint8Array(await safeFile.arrayBuffer());
+      const { width, height, data } = await this.pixels.fileIO.iccToSrgb(bytes);
+      dimensions = { w: width, h: height };
+      const canvas = new OffscreenCanvas(width, height);
+      const ctx = canvas.getContext('2d')!;
+      const clamped = new Uint8ClampedArray(data.length);
+      clamped.set(data);
+      ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
+      displayBlob = await canvas.convertToBlob({ type: 'image/png' });
+    } else {
+      const img = await createImageBitmap(safeFile);
+      dimensions = { w: img.width, h: img.height };
+      img.close();
+    }
+
+    return { dimensions, metadata, subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }] };
   }
 
   // ─── Encode (not supported) ──────────────────────────────────────────────

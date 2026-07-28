@@ -97,6 +97,13 @@ export interface VipsImage {
   colourspace(space: string): VipsImage;
 
   /**
+   * Transform image from one ICC profile to another using Little CMS.
+   * @param outputProfile - Path to target ICC profile file (in emscripten virtual FS)
+   * @param opts - Options: inputProfile (built-in name like 'srgb'), intent ('perceptual'|'relative'|'saturation'|'absolute')
+   */
+  iccTransform(outputProfile: string, opts?: { input_profile?: string; intent?: string }): VipsImage;
+
+  /**
    * Apply Gaussian blur.
    * @param sigma - Standard deviation of the Gaussian
    */
@@ -200,4 +207,13 @@ export interface VipsInstance {
    * Maps blend mode names to numeric IDs used by vips_composite.
    */
   BlendMode: Record<string, number>;
+
+  /**
+   * Emscripten virtual file system.
+   * Used for writing temporary ICC profiles that vips can reference by path.
+   */
+  FS: {
+    writeFile(path: string, data: Uint8Array): void;
+    unlink(path: string): void;
+  };
 }

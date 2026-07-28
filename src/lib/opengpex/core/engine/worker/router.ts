@@ -41,6 +41,7 @@ import { RasterizeHandler } from './handlers/rasterize';
 import { TileHandler } from './handlers/tile';
 import { FileIoHandler } from './handlers/file-io';
 import { ExtractPixelsHandler } from './handlers/extract-pixels';
+import { HistogramHandler } from './handlers/histogram';
 
 // ─── Handler singletons (instantiated once per Worker lifetime) ───
 
@@ -52,6 +53,7 @@ const rasterizeHandler = new RasterizeHandler();
 const tileHandler = new TileHandler();
 const fileIoHandler = new FileIoHandler();
 const extractPixelsHandler = new ExtractPixelsHandler();
+const histogramHandler = new HistogramHandler();
 
 export interface RouterResult {
   result: unknown;
@@ -94,6 +96,9 @@ export async function router(job: Job): Promise<RouterResult> {
 
     case 'EXTRACT_PIXELS':
       return extractPixelsHandler.handle(job);
+
+    case 'HISTOGRAM':
+      return histogramHandler.handle(job);
 
     default:
       throw new Error(`[router] Unknown job type: ${(job as { type: string }).type}`);

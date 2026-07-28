@@ -103,4 +103,31 @@ export class FileIoDispatcher {
       { type: 'FILE_IO', fn: 'exportHighRes', bytes: rawBytes, options },
     );
   }
+
+  /**
+   * Convert image bytes with non-sRGB ICC profile to sRGB RGBA pixel data.
+   * Uses vips (Little CMS engine) for ICC-accurate color space conversion.
+   * Supports JPEG, PNG, WebP, and any format vips can decode.
+   */
+  async iccToSrgb(bytes: Uint8Array): Promise<{ width: number; height: number; data: Uint8Array }> {
+    return this.bridge.request<{ width: number; height: number; data: Uint8Array }>(
+      { type: 'FILE_IO', fn: 'iccToSrgb', bytes },
+    );
+  }
+
+  /**
+   * Convert sRGB RGBA pixels back to target ICC color space.
+   * Uses vips icc_transform (Little CMS) for accurate reverse color space conversion.
+   * Used during export to restore original color space when user selects "preserve original".
+   */
+  async srgbToIcc(
+    rgbaData: Uint8Array,
+    width: number,
+    height: number,
+    iccProfileData: Uint8Array,
+  ): Promise<{ data: Uint8Array }> {
+    return this.bridge.request<{ data: Uint8Array }>(
+      { type: 'FILE_IO', fn: 'srgbToIcc', rgbaData, width, height, iccProfileData },
+    );
+  }
 }

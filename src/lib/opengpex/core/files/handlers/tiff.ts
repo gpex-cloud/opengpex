@@ -143,13 +143,25 @@ export class TiffHandler implements ImageFormatHandler {
       : source;
 
     const ctx = (canvas as OffscreenCanvas).getContext('2d')!;
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
     // ICC Profile for embedding
     let iccProfileBytes: Uint8Array | undefined;
     if (options.exportConfig?.embedIcc && options.metadata?.raw?.iccProfileData) {
       const { base64ToIcc: b64ToIcc } = await import('../icc');
       iccProfileBytes = b64ToIcc(options.metadata.raw.iccProfileData);
+
+      // Convert pixel data from sRGB to target ICC color space (only if non-sRGB profile)
+      const colorSpace = options.metadata.colorSpace;
+      if (colorSpace && colorSpace !== 'srgb') {
+        const { data: convertedData } = await this.pixels.fileIO.srgbToIcc(
+          new Uint8Array(imageData.data.buffer),
+          canvas.width, canvas.height, iccProfileBytes,
+        );
+        const clamped = new Uint8ClampedArray(convertedData.length);
+        clamped.set(convertedData);
+        imageData = new ImageData(clamped, canvas.width, canvas.height);
+      }
     }
 
     // Encode via engine Worker (FILE_IO job)
