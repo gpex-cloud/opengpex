@@ -4,6 +4,17 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.34
+
+- ICC color management: accurate import conversion for non-sRGB profiles (Adobe RGB, ProPhoto, Display P3) and lossless profile round-trip across all formats (JPEG, PNG, WebP, AVIF, HEIC)
+- AVIF encoding now uses the unified vips engine (vips-heif) — faster, smaller footprint, and supports ICC profile embedding and DPI metadata
+- Histogram in Levels panel now computed at full resolution in a background Worker, matching Photoshop's RGB composite display without blocking the UI
+- Cross-platform keyboard shortcuts (Cmd on Mac, Ctrl on Windows/Linux) for all major actions
+- New hotkeys: Cmd+U/M/L to open adjustment panels, Cmd+A/D for select all/deselect, number keys 1–0 for quick layer opacity, Alt+Backspace for fill as new layer
+- Fix snapping, layer movement, peel/merge, and birth-position guides for rotated/flipped layers
+
+---
+
 ## v1.0.0-beta.33
 
 - Landing page: refreshed feature badges, dynamic version, GitHub link, and clearer shortcut display
