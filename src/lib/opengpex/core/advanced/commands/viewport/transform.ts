@@ -55,7 +55,7 @@ export const ViewportTransformCommands = {
     name: 'Rotate Left',
     undoable: true,
     execute: (ctx: EditorContextValue) => ViewportTransformCommands.rotate.execute(ctx, { direction: 'left' }),
-    shortcuts: [{ key: '[', shift: true }, { key: '{' }]
+    shortcuts: [{ key: '{', shift: true }]
   } as EditorCommand<void, void>,
 
   rotateRight: {
@@ -63,7 +63,7 @@ export const ViewportTransformCommands = {
     name: 'Rotate Right',
     undoable: true,
     execute: (ctx: EditorContextValue) => ViewportTransformCommands.rotate.execute(ctx, { direction: 'right' }),
-    shortcuts: [{ key: ']', shift: true }, { key: '}' }]
+    shortcuts: [{ key: '}', shift: true }]
   } as EditorCommand<void, void>,
 
   flip: {
