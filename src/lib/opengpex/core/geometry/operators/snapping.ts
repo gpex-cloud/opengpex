@@ -18,7 +18,7 @@
  */
 
 import { Matrix3x3 } from '../matrix';
-import { Dimensions, Frame, WorldPoint, Rect, asWorldPoint, Point2D, WorldRect, asLocalRect } from '@opengpex/editor/core/types';
+import { Dimensions, Frame, Layer, WorldPoint, Rect, asWorldPoint, Point2D, WorldRect, asLocalRect } from '@opengpex/editor/core/types';
 import { getLayerWorldMatrix } from './transform';
 import { worldToLocalRect, localToWorldRect } from './space';
 
@@ -103,7 +103,52 @@ export function snapRect(
 }
 
 /**
- * Calculate snapped coordinates
+ * SnapTarget: Represents a snap target in world-space AABB form.
+ * All comparisons happen purely in world space — no coordinate space mixing.
+ */
+interface SnapTarget {
+  /** World-space AABB center */
+  center: Point2D;
+  /** World-space AABB half-size (halfW, halfH) */
+  halfSize: Point2D;
+  /** Type identifier */
+  type: 'canvas' | 'birth' | 'layer';
+}
+
+/**
+ * Compute the world-space axis-aligned bounding box (AABB) for a layer,
+ * using 4-corner projection of the visible rect through the world matrix.
+ */
+function getLayerWorldAABB(layer: Layer): { center: Point2D; halfSize: Point2D } {
+  const rect = layer.visibleShape?.rect || { x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h };
+  const wm = getLayerWorldMatrix(layer);
+
+  // Project 4 corners of the visible rect to world space
+  const corners = [
+    wm.apply({ x: rect.x, y: rect.y }),
+    wm.apply({ x: rect.x + rect.w, y: rect.y }),
+    wm.apply({ x: rect.x, y: rect.y + rect.h }),
+    wm.apply({ x: rect.x + rect.w, y: rect.y + rect.h }),
+  ];
+
+  const xs = corners.map(c => c.x);
+  const ys = corners.map(c => c.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+
+  return {
+    center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 },
+    halfSize: { x: (maxX - minX) / 2, y: (maxY - minY) / 2 }
+  };
+}
+
+/**
+ * Calculate snapped coordinates using pure world-space AABB edge comparison.
+ *
+ * All comparisons happen in world space:
+ * - Moving layer edges = w_pos.x ± targetDim.w/2 (world-space AABB)
+ * - Target layer edges = target world AABB's left/center/right
+ * - Guide coordinates = the matched target edge (world-space constant, independent of moving layer position)
  */
 function getSnappedPosition(
   w_pos: WorldPoint,
@@ -114,26 +159,21 @@ function getSnappedPosition(
   filterOptions: SnapFilterOptions = {}
 ): { x: number, y: number, smartguides: SmartGuideData | null } {
   const cameraScale = frame.camera?.k || 1;
-  // 💡 1. Dynamic alignment threshold: constant screen pixel visual snapping hot zone, ensuring extremely fine pixel-level tuning when zoomed in
+  // 💡 1. Dynamic alignment threshold: constant screen pixel visual snapping hot zone
   const dynamicThreshold = threshold / cameraScale;
-
-  let [nextX, nextY] = [w_pos.x, w_pos.y];
-  const guides: SmartGuideData = {};
-
-  interface SnappableSource {
-    matrix: Matrix3x3;
-    size: Dimensions;
-    type: 'canvas' | 'birth' | 'layer';
-  }
 
   const activeLayer = activeLayerId ? frame.layers.byId[activeLayerId] : null;
 
-  // 💡 2. Build snappables with config-driven filtering
-  const snappables: SnappableSource[] = [];
+  // ── 1. Build snap targets (pure world-space AABB) ──
+  const targets: SnapTarget[] = [];
 
   // Canvas (configurable)
   if (filterOptions.snapToCanvas !== false) {
-    snappables.push({ matrix: Matrix3x3.identity(), size: frame.canvas, type: 'canvas' });
+    targets.push({
+      center: { x: 0, y: 0 },
+      halfSize: { x: frame.canvas.w / 2, y: frame.canvas.h / 2 },
+      type: 'canvas'
+    });
   }
 
   // Birth position (configurable)
@@ -149,10 +189,10 @@ function getSnappedPosition(
       x: birthRect.x + birthRect.w / 2,
       y: birthRect.y + birthRect.h / 2
     });
-    snappables.push({
-      matrix: Matrix3x3.translate(birthVisibleCenter.x, birthVisibleCenter.y),
-      size: { w: 0, h: 0 } as Dimensions,
-      type: 'birth' as const
+    targets.push({
+      center: birthVisibleCenter,
+      halfSize: { x: 0, y: 0 },
+      type: 'birth'
     });
   }
 
@@ -194,21 +234,18 @@ function getSnappedPosition(
       .slice(0, filterOptions.maxSnapTargets || 8);
 
     for (const l of layerTargets) {
-      const rect = l.visibleShape?.rect || { x: 0, y: 0, w: l.bounding.w, h: l.bounding.h };
-      snappables.push({
-        matrix: getLayerWorldMatrix(l).multiply(Matrix3x3.translate(rect.x + rect.w / 2, rect.y + rect.h / 2)),
-        size: { w: rect.w, h: rect.h } as Dimensions,
-        type: 'layer' as const
-      });
+      const aabb = getLayerWorldAABB(l);
+      targets.push({ center: aabb.center, halfSize: aabb.halfSize, type: 'layer' });
     }
   }
 
+  // ── 2. Moving layer edge offsets (world space) ──
   const [dw, dh] = [targetDim.w / 2, targetDim.h / 2];
-  // 💡 Adjust alignment axis order: put center point 0 first, making center alignment hit first under equal deviation
-  const dOX = targetDim.w === 0 ? [0] : [0, -dw, dw];
-  const dOY = targetDim.h === 0 ? [0] : [0, -dh, dh];
+  // Center first so center alignment wins on equal deviation
+  const srcEdgesX = targetDim.w === 0 ? [0] : [0, -dw, dw];
+  const srcEdgesY = targetDim.h === 0 ? [0] : [0, -dh, dh];
 
-  // 💡 3. Optimal snapping deviation alignment: find snapping targets with minimum absolute deviations on X and Y axes separately, avoiding jumpiness caused by abrupt breaks
+  // ── 3. Pure world-space comparison ──
   let bestDiffX = dynamicThreshold;
   let bestNextX: number | undefined = undefined;
   let bestGuideX: number | undefined = undefined;
@@ -219,46 +256,60 @@ function getSnappedPosition(
   let bestGuideY: number | undefined = undefined;
   let bestIsBirthY = false;
 
-  for (const s of snappables) {
-    const invM = s.matrix.inverse();
-    const lp = invM.apply(w_pos);
-    const [sw, sh] = [s.size.w / 2, s.size.h / 2];
-    // 💡 Adjust alignment candidate axis order: put center reference point 0 first
-    const tPX = s.size.w === 0 ? [0] : [0, -sw, sw];
-    const tPY = s.size.h === 0 ? [0] : [0, -sh, sh];
+  for (const t of targets) {
+    // Target edges in world space
+    const tEdgesX = t.halfSize.x === 0
+      ? [t.center.x]
+      : [t.center.x, t.center.x - t.halfSize.x, t.center.x + t.halfSize.x];
+    const tEdgesY = t.halfSize.y === 0
+      ? [t.center.y]
+      : [t.center.y, t.center.y - t.halfSize.y, t.center.y + t.halfSize.y];
 
-    for (const tx of tPX) {
-      for (const dx of dOX) {
-        const diff = Math.abs(lp.x + dx - tx);
-        // 💡 Introduce center axis preference coefficient: if it is center-to-center alignment, give a 0.8 discount to the deviation comparison, ensuring high-stability highlight lines for center alignment
-        const isCenterToCenter = (dx === 0 && tx === 0);
+    // X-axis snapping
+    for (const tEx of tEdgesX) {
+      for (const dx of srcEdgesX) {
+        // Moving layer's edge in world space at current position
+        const srcEdge = w_pos.x + dx;
+        const diff = Math.abs(srcEdge - tEx);
+
+        // 💡 Center-to-center preference: 0.8 discount for center alignment stability
+        const isCenterToCenter = (dx === 0 && tEx === t.center.x);
         const evalDiff = isCenterToCenter ? diff * 0.8 : diff;
 
         if (evalDiff < bestDiffX) {
           bestDiffX = evalDiff;
-          bestNextX = s.matrix.apply({ x: tx - dx, y: lp.y }).x;
-          bestGuideX = s.matrix.apply({ x: tx, y: lp.y }).x;
-          bestIsBirthX = s.type === 'birth';
+          // ★ Snapped moving layer center = target edge - moving layer internal offset
+          bestNextX = tEx - dx;
+          // ★ Guide position = target edge (world-space constant, independent of moving layer)
+          bestGuideX = tEx;
+          bestIsBirthX = t.type === 'birth';
         }
       }
     }
 
-    for (const ty of tPY) {
-      for (const dy of dOY) {
-        const diff = Math.abs(lp.y + dy - ty);
-        // 💡 Similarly, introduce center-to-center alignment preference coefficient for the Y axis
-        const isCenterToCenter = (dy === 0 && ty === 0);
+    // Y-axis snapping
+    for (const tEy of tEdgesY) {
+      for (const dy of srcEdgesY) {
+        const srcEdge = w_pos.y + dy;
+        const diff = Math.abs(srcEdge - tEy);
+
+        // 💡 Center-to-center preference coefficient for Y axis
+        const isCenterToCenter = (dy === 0 && tEy === t.center.y);
         const evalDiff = isCenterToCenter ? diff * 0.8 : diff;
 
         if (evalDiff < bestDiffY) {
           bestDiffY = evalDiff;
-          bestNextY = s.matrix.apply({ x: lp.x, y: ty - dy }).y;
-          bestGuideY = s.matrix.apply({ x: lp.x, y: ty }).y;
-          bestIsBirthY = s.type === 'birth';
+          bestNextY = tEy - dy;
+          bestGuideY = tEy;
+          bestIsBirthY = t.type === 'birth';
         }
       }
     }
   }
+
+  // ── 4. Output ──
+  let nextX = w_pos.x, nextY = w_pos.y;
+  const guides: SmartGuideData = {};
 
   if (bestNextX !== undefined) {
     nextX = bestNextX;
@@ -272,8 +323,7 @@ function getSnappedPosition(
     if (bestIsBirthY) guides.isBirthY = true;
   }
 
-  const result = { x: nextX, y: nextY, smartguides: Object.keys(guides).length ? guides : null };
-  return result;
+  return { x: nextX, y: nextY, smartguides: Object.keys(guides).length ? guides : null };
 }
 
 /**

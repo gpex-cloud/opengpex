@@ -41,10 +41,9 @@ async function compositeLayersToAsset(
   if (!asset.id) throw new Error('Composite failed');
 
   // Ensure bitmap is decoded into SourceBitmapCache before state update.
-  // toAsset() triggers warmFromBlob via onRegistered but fire-and-forget;
-  // await here guarantees the next render frame won't cache-miss and flicker.
-  const blob = await result.toBlob();
-  await pixels.image.cacheBitmap(asset.url, blob);
+  // toAsset().inject() creates an object URL backed by the in-memory blob;
+  // loadBitmap is cache-first and fetches from that URL (no network, instant).
+  await pixels.image.loadBitmap(asset.url);
 
   return { asset, bounds };
 }

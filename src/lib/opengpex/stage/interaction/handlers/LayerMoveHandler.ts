@@ -17,18 +17,27 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionHandler, Layer, asWorldRect } from '@opengpex/editor/core/types';
+import { InteractionHandler, Layer, LayerMovePose } from '@opengpex/editor/core/types';
 import { InteractionMath } from '../Math';
 import { InteractionTransaction } from '../Transaction';
 
 /**
- * LayerMoveHandler: Handles layer movement
+ * LayerMoveHandler: Handles layer movement (rotation-aware refactored version).
+ *
+ * Key design:
+ *   - `computeLayerMovePose` is called once in onStart to pre-compute rotation-dependent
+ *     AABB size and center offset, eliminating per-frame matrix recalculation.
+ *   - onMove uses pose.aabbSize for correct snapping rect construction and
+ *     pose.centerOffset for trivial reverse (no computeFragmentCenter needed).
+ *   - onEnd uses worldToLocal + snapToPixel + localToWorld for pixel alignment.
  */
 export const createLayerMoveHandler = (): InteractionHandler => {
   let startCanvasPoint = { x: 0, y: 0 };
-  let startLayerPos = { x: 0, y: 0 };
+  let startLayerCx = 0;
+  let startLayerCy = 0;
   let targetLayer: Layer | null = null;
   let tx: InteractionTransaction | null = null;
+  let pose: LayerMovePose | null = null;
   const opState = { lastThrottleTime: 0 };
 
   return {
@@ -81,101 +90,95 @@ export const createLayerMoveHandler = (): InteractionHandler => {
       tx.begin();
 
       startCanvasPoint = { x: e.point.canvas.x, y: e.point.canvas.y };
-      startLayerPos = { x: targetLayer.cx, y: targetLayer.cy };
+      startLayerCx = targetLayer.cx;
+      startLayerCy = targetLayer.cy;
+
+      // ★ Core change: compute rotation-aware pose once at drag start
+      pose = e.geometry.transform.computeLayerMovePose(targetLayer);
+
       opState.lastThrottleTime = 0;
     },
     onMove: (e) => {
-      if (!targetLayer || !tx) return;
+      if (!targetLayer || !tx || !pose) return;
 
       const deltaX = e.point.canvas.x - startCanvasPoint.x;
       const deltaY = e.point.canvas.y - startCanvasPoint.y;
 
-      // 💡 1. Extract logical bounding box size of the current visible fragment
-      const rect = targetLayer.visibleShape?.rect || {
-        x: 0,
-        y: 0,
-        w: targetLayer.bounding.w,
-        h: targetLayer.bounding.h
+      // Candidate new cx/cy
+      const candidateCx = startLayerCx + deltaX;
+      const candidateCy = startLayerCy + deltaY;
+
+      // Visible content center = (cx, cy) + centerOffset (world space)
+      const visibleCenterWorld = {
+        x: candidateCx + pose.centerOffset.x,
+        y: candidateCy + pose.centerOffset.y
       };
+
+      // Convert to canvas local coordinates, build correct AABB rect
       const frame = e.activeFrame;
-
-      // 💡 2. Compute visible content center via WorldMatrix (not bounding center)
-      // WorldMatrix.apply({ x: rect.x + rect.w/2, y: rect.y + rect.h/2 }) = visible center world coord
-      const newWorldCx = startLayerPos.x + deltaX;
-      const newWorldCy = startLayerPos.y + deltaY;
-      const wm = e.geometry.transform.getLayerWorldMatrix(targetLayer, { cx: newWorldCx, cy: newWorldCy });
-      const visibleCenter = wm.apply({ x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 });
-      const localCenter = e.geometry.space.worldToLocal(visibleCenter.x, visibleCenter.y, frame);
+      const localCenter = e.geometry.space.worldToLocal(
+        visibleCenterWorld.x, visibleCenterWorld.y, frame
+      );
       const fragmentRect = {
-        x: localCenter.x - rect.w / 2,
-        y: localCenter.y - rect.h / 2,
-        w: rect.w,
-        h: rect.h
+        x: localCenter.x - pose.aabbSize.w / 2,  // ★ Use rotated AABB size
+        y: localCenter.y - pose.aabbSize.h / 2,
+        w: pose.aabbSize.w,
+        h: pose.aabbSize.h
       };
 
+      // Snap
       const snapped = InteractionMath.snapAndSync(e, fragmentRect, opState, {
         excludeLayerId: targetLayer.id
       });
 
-      // 💡 3. Reverse: from snapped visible center, compute correct cx/cy
+      // ★ Simplified reverse: snapped center = snapped visible center (local)
       const snappedCenterLocal = {
-        x: snapped.x + fragmentRect.w / 2,
-        y: snapped.y + fragmentRect.h / 2
+        x: snapped.x + pose.aabbSize.w / 2,
+        y: snapped.y + pose.aabbSize.h / 2
       };
-      const snappedVisibleWorld = e.geometry.space.localToWorld(snappedCenterLocal.x, snappedCenterLocal.y, frame);
-      // General formula: visibleCenter = cx + O × (rect.x + rect.w/2 - bw/2, rect.y + rect.h/2 - bh/2)
-      // Therefore: cx = visibleCenter - O × offset
-      const visibleOffset = {
-        x: rect.x + rect.w / 2 - targetLayer.bounding.w / 2,
-        y: rect.y + rect.h / 2 - targetLayer.bounding.h / 2
-      };
-      const finalWorld = e.geometry.transform.computeFragmentCenter(
-        snappedVisibleWorld,
-        visibleOffset,
-        targetLayer.rotation,
-        targetLayer.flip
+      const snappedCenterWorld = e.geometry.space.localToWorld(
+        snappedCenterLocal.x, snappedCenterLocal.y, frame
       );
 
-      tx.update({ cx: finalWorld.x, cy: finalWorld.y }, 'layer', targetLayer.id);
+      // cx = visible center - centerOffset (subtract constant offset, no matrix inversion needed)
+      const finalCx = snappedCenterWorld.x - pose.centerOffset.x;
+      const finalCy = snappedCenterWorld.y - pose.centerOffset.y;
+
+      tx.update({ cx: finalCx, cy: finalCy }, 'layer', targetLayer.id);
     },
     onEnd: (e) => {
       if (tx) {
-        // 💡 Pixel alignment on release: ensure visible content top-left aligns to canvas physical pixel grid.
-        if (targetLayer) {
+        if (targetLayer && pose) {
           const latest = e.actions.fast.latestLayer(e.activeFrame.id, targetLayer.id);
           if (latest) {
-            const rect = latest.visibleShape?.rect || { x: 0, y: 0, w: latest.bounding.w, h: latest.bounding.h };
-
-            // Use WorldMatrix to compute the visible content's actual world-space position
-            const wm = e.geometry.transform.getLayerWorldMatrix(latest);
-            const visibleTopLeft = wm.apply({ x: rect.x, y: rect.y });
-
-            const alignedRect = e.geometry.snapping.snapRectToPixel(
-              asWorldRect({
-                x: visibleTopLeft.x,
-                y: visibleTopLeft.y,
-                w: rect.w,
-                h: rect.h
-              }),
-              e.activeFrame.canvas
-            );
-
-            // Reverse: from aligned visible center, compute correct cx/cy
-            const alignedVisibleCenter = e.geometry.space.getRectCenter(alignedRect);
-            const visibleOffset = {
-              x: rect.x + rect.w / 2 - latest.bounding.w / 2,
-              y: rect.y + rect.h / 2 - latest.bounding.h / 2
+            // ★ Pixel alignment: align visible AABB top-left edge to canvas pixel grid.
+            // We round the TOP-LEFT corner (not center) to preserve correct positioning
+            // for odd-dimension layers whose center is naturally at .5 (half-pixel).
+            // This matches the pre-refactoring snapRectToPixel approach that naturally
+            // handled odd/even canvas and layer dimensions.
+            const frame = e.activeFrame;
+            const currentVisibleCenter = {
+              x: latest.cx + pose.centerOffset.x,
+              y: latest.cy + pose.centerOffset.y
             };
-            const finalCenter = e.geometry.transform.computeFragmentCenter(
-              alignedVisibleCenter,
-              visibleOffset,
-              latest.rotation,
-              latest.flip
+            // World → Local (get center in canvas-local coords)
+            const local = e.geometry.space.worldToLocal(
+              currentVisibleCenter.x, currentVisibleCenter.y, frame
+            );
+            // Snap AABB top-left to pixel grid, then derive center
+            const halfW = pose.aabbSize.w / 2;
+            const halfH = pose.aabbSize.h / 2;
+            const topLeft = { x: local.x - halfW, y: local.y - halfH };
+            const alignedTopLeft = e.geometry.snapping.snapToPixel(topLeft);
+            const aligned = { x: alignedTopLeft.x + halfW, y: alignedTopLeft.y + halfH };
+            const alignedWorld = e.geometry.space.localToWorld(
+              aligned.x, aligned.y, frame
             );
 
+            // cx = aligned visible center - fixed offset
             tx.update({
-              cx: finalCenter.x,
-              cy: finalCenter.y
+              cx: alignedWorld.x - pose.centerOffset.x,
+              cy: alignedWorld.y - pose.centerOffset.y
             }, 'layer', targetLayer.id);
           }
         }
@@ -183,7 +186,7 @@ export const createLayerMoveHandler = (): InteractionHandler => {
         tx = null;
       }
       targetLayer = null;
+      pose = null;
     }
   };
 };
-

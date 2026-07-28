@@ -45,6 +45,19 @@ export interface DecomposedMatrix {
   scaleY: number;
 }
 
+/**
+ * LayerMovePose: Pre-computed rotation-aware pose information for layer move operations.
+ * Computed once at drag start and reused throughout the move (rotation/flip are constant during move).
+ */
+export interface LayerMovePose {
+  /** World-space fixed offset between visible content center and (cx, cy) = O × visibleOffset */
+  centerOffset: Point2D;
+  /** AABB size after rotation (world-space axis-aligned bounding box dimensions) */
+  aabbSize: Dimensions;
+  /** Original visibleOffset in local space */
+  visibleOffset: Point2D;
+}
+
 /** 
  * SmartGuideData: Smart guide line alignment data
  */
@@ -159,6 +172,8 @@ export interface GeometryService {
     transformFrame: (frame: Frame, operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v') => Frame;
     /** Computes correct (cx, cy) world anchor for a fragment layer accounting for orientation */
     computeFragmentCenter: (worldCenter: Point2D, visibleOffset: Point2D, rotation: number, flip: { h: boolean; v: boolean }) => Point2D;
+    /** Computes rotation-aware pose info (AABB size, center offset) for layer move operations */
+    computeLayerMovePose: (layer: Layer) => LayerMovePose;
   };
 
   /** Camera service */

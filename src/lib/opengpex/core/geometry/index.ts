@@ -53,6 +53,7 @@ import {
   getLayerWorldMatrix,
   getLayerLocalMatrix,
   computeFragmentCenter,
+  computeLayerMovePose,
   transformFrame
 } from './operators/transform';
 import {
@@ -122,6 +123,7 @@ export function createGeometryService(): GeometryService {
       decomposeMatrix: (matrix: IMatrix3x3, refRotation?: number) => decomposeMatrix(matrix, refRotation),
       transformFrame: (frame: Frame, operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v') => transformFrame(frame, operation),
       computeFragmentCenter: (worldCenter: Point2D, visibleOffset: Point2D, rotation: number, flip: { h: boolean; v: boolean }) => computeFragmentCenter(worldCenter, visibleOffset, rotation, flip),
+      computeLayerMovePose: (layer: Layer) => computeLayerMovePose(layer),
     },
     camera: {
       getFitCamera: (viewport: Dimensions, content: Dimensions, options?: CameraCenterOptions) => getFitCamera(viewport, content, options),

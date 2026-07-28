@@ -19,7 +19,7 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, asLocalShape } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
@@ -231,17 +231,32 @@ export const LayerPeelCommands = {
           // Participants in z-order: host (bottom) → frags (stamps) → exchange (top)
           const participants = [stripAdj(host), ...frags.map(stripAdj), stripAdj(exchange)];
 
-          const { result } = await pixels.render.compositeLayers(participants, activeFrame);
+          const { result, bounds } = await pixels.render.compositeLayers(participants, activeFrame);
           const { id: assetId, url: assetUrl } = await result.toAsset();
+
+          // Ensure bitmap is decoded into SourceBitmapCache BEFORE state update.
+          // toAsset().inject() creates an object URL backed by the in-memory blob;
+          // loadBitmap is cache-first and fetches from that URL (no network, instant).
+          await pixels.image.loadBitmap(assetUrl);
 
           // [4] Start transaction update (commit all changes atomically)
           layers.updateLayer(activeFrame.id, (tx) => {
-            // Update host: set merged asset + clean up hole masks.
+            // Update host: set merged asset, reset orientation (rotation/flip/scale
+            // are now baked into the composite bitmap), and clean up hole masks.
             // Adjustment state is intentionally PRESERVED — the pipeline merged
             // raw bitmaps without baking adjustments, so the renderer will
             // apply the host's adjustments exactly once at display time.
             tx.edit(host.id)
               .setAsset({ id: assetId, url: assetUrl })
+              .patch({
+                cx: bounds.cx,
+                cy: bounds.cy,
+                bounding: { w: bounds.w, h: bounds.h },
+                visibleShape: asLocalShape({ x: 0, y: 0, w: bounds.w, h: bounds.h }),
+                scale: 1,
+                rotation: 0,
+                flip: { h: false, v: false },
+              })
               .removeMask('mask-peel-hole');
 
             // Reset helper layers

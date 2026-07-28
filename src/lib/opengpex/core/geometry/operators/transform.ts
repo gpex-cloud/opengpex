@@ -18,7 +18,7 @@
  */
 
 import { Matrix3x3, GeometryOp } from '../matrix';
-import { Layer, Frame, IMatrix3x3, asLocalRect, asLocalPoint, asLocalPolygon, LocalPolygon, LayerPoseOverride } from '@opengpex/editor/core/types';
+import { Layer, Frame, IMatrix3x3, asLocalRect, asLocalPoint, asLocalPolygon, LocalPolygon, LayerPoseOverride, Point2D, Dimensions } from '@opengpex/editor/core/types';
 import { computePolygonBounds } from './polygon';
 
 /**
@@ -246,7 +246,13 @@ export function transformFrame(
     const { rotation, flip } = decomposeMatrix(nextL_orient, l.rotation);
     const nextP = O.apply({ x: l.cx, y: l.cy });
 
-    nextById[id] = { ...l, cx: nextP.x, cy: nextP.y, rotation, flip };
+    // birthCenter records a world-space anchor; when the coordinate system itself
+    // rotates/flips (canvas transform), it must follow the same transformation as cx/cy.
+    const nextBirthCenter = l.birthCenter
+      ? (() => { const bp = O.apply({ x: l.birthCenter.cx, y: l.birthCenter.cy }); return { cx: bp.x, cy: bp.y }; })()
+      : undefined;
+
+    nextById[id] = { ...l, cx: nextP.x, cy: nextP.y, rotation, flip, birthCenter: nextBirthCenter };
   });
 
   const nextW = isRotation ? oldH : oldW;
@@ -278,5 +284,68 @@ export function transformFrame(
     camera: nextCamera,
     clipBoxes: nextClipBoxes,
     canvasCropBox: { ...frame.canvasCropBox, rect: asLocalRect(nextCanvasCropBox) },
+  };
+}
+
+/**
+ * LayerMovePose: Pre-computed rotation-aware pose information for layer move operations.
+ *
+ * Computed once at onStart and reused throughout the drag because rotation/flip
+ * do not change during a move operation.
+ */
+export interface LayerMovePose {
+  /** World-space fixed offset between visible content center and (cx, cy) = O × visibleOffset */
+  centerOffset: Point2D;
+  /** AABB size after rotation (world-space axis-aligned bounding box dimensions) */
+  aabbSize: Dimensions;
+  /** Original visibleOffset in local space (for reference / computeFragmentCenter compatibility) */
+  visibleOffset: Point2D;
+}
+
+/**
+ * Compute rotation-aware pose information for a layer move operation.
+ *
+ * This correctly handles arbitrary rotation/flip by projecting the visible rect's
+ * corners through the orientation matrix to determine the true world-space AABB size.
+ *
+ * The returned values are constant for the entire duration of a move operation
+ * (since rotation does not change during move), so this should be called once in onStart.
+ *
+ * For rotation=0, flip=none: centerOffset={0,0} if visibleShape fills bounding,
+ * and aabbSize={rect.w, rect.h} — identical to pre-refactoring behavior.
+ */
+export function computeLayerMovePose(layer: Layer): LayerMovePose {
+  const rect = layer.visibleShape?.rect || { x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h };
+
+  // Visible content center relative to bounding center (local space offset)
+  const visibleOffset: Point2D = {
+    x: rect.x + rect.w / 2 - layer.bounding.w / 2,
+    y: rect.y + rect.h / 2 - layer.bounding.h / 2
+  };
+
+  // Orientation matrix
+  const O = getOrientationMatrix(layer.rotation, layer.flip);
+
+  // Rotated fixed offset (world space): visibleCenter = (cx, cy) + centerOffset
+  const centerOffset: Point2D = O.apply(visibleOffset);
+
+  // Rotated AABB size: project 4 corners of the visible rect and take min/max
+  const halfW = rect.w / 2;
+  const halfH = rect.h / 2;
+  const corners = [
+    O.apply({ x: -halfW, y: -halfH }),
+    O.apply({ x:  halfW, y: -halfH }),
+    O.apply({ x: -halfW, y:  halfH }),
+    O.apply({ x:  halfW, y:  halfH }),
+  ];
+  const xs = corners.map(c => c.x);
+  const ys = corners.map(c => c.y);
+  const aabbW = Math.max(...xs) - Math.min(...xs);
+  const aabbH = Math.max(...ys) - Math.min(...ys);
+
+  return {
+    centerOffset,
+    aabbSize: { w: aabbW, h: aabbH },
+    visibleOffset
   };
 }
