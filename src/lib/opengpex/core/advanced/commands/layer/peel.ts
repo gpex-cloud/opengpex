@@ -226,6 +226,7 @@ export const LayerPeelCommands = {
             curves: undefined,
             levels: undefined,
             channelMix: undefined,
+            colorBalance: undefined,
           });
 
           // Participants in z-order: host (bottom) → frags (stamps) → exchange (top)

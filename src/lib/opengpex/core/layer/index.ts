@@ -419,6 +419,7 @@ export function createLayerService(
         curves: sourceLayer.curves,
         levels: sourceLayer.levels,
         channelMix: sourceLayer.channelMix,
+        colorBalance: sourceLayer.colorBalance,
       };
 
       return { updatedLayer, localShape };

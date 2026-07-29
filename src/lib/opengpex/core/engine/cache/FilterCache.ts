@@ -36,7 +36,7 @@ import type { FilterDescriptor } from '../protocol/IFilter';
 import type { Layer } from '@opengpex/editor/core/types';
 
 /** Minimal layer shape consumed by FilterCache — matches Layer's filter-relevant fields. */
-export type FilterCacheLayer = Pick<Layer, 'assetId' | 'adjustments' | 'curves' | 'levels' | 'channelMix'>;
+export type FilterCacheLayer = Pick<Layer, 'assetId' | 'adjustments' | 'curves' | 'levels' | 'channelMix' | 'colorBalance'>;
 
 /** Key computation function — injected during initialization. */
 export type FilterKeyFn = (layer: FilterCacheLayer) => string;

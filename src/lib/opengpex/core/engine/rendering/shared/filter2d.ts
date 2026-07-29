@@ -36,6 +36,7 @@
 
 import type {
   ChannelMixFilter,
+  ColorBalanceFilter,
   CurvesFilter,
   CurvesData,
   CurvePoints,
@@ -841,6 +842,272 @@ export function applyMatrixHighRes(
 }
 
 // ────────────────────────────────────────────────────────────
+// Color Balance (Photoshop-compatible — HSL lightness weighted)
+// Algorithm inspired by GIMP 3.2.4's approach but independently
+// implemented with different design choices. See spec:
+// docs/opengpex/03-plugins/20260729_filters_color_balance_spec.md
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Color Balance — Photoshop-compatible implementation.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * DESIGN DECISIONS & LESSONS LEARNED (for future refactoring reference):
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * 1. WEIGHT CURVES: Smooth quadratic (not GIMP's narrow linear ramps)
+ *    ─────────────────────────────────────────────────────────────────
+ *    GIMP 3.2.4 uses linear ramps with a=0.25, b=0.333. These create a
+ *    very narrow transition zone (~12.5% of lightness range) causing visible
+ *    "color patches" at the shadow/midtone boundary. Photoshop uses much
+ *    wider, smoother transitions.
+ *
+ *    Solution: Quadratic curves that overlap extensively:
+ *      Shadow:    (1 - L)²     — peaks at L=0, reaches 0 only at L=1
+ *      Midtone:   4·L·(1-L)   — parabola peaking at L=0.5
+ *      Highlight: L²           — peaks at L=1, reaches 0 only at L=0
+ *
+ * 2. INTENSITY SCALE: 0.25 (not GIMP's 0.7)
+ *    ────────────────────────────────────────
+ *    GIMP's scale=0.7 produces offsets ~3x stronger than Photoshop at the
+ *    same slider value. At slider=±100, maximum offset ≈ ±0.25 (≈64/255
+ *    levels) matches Photoshop's observed behavior.
+ *
+ * 3. PRESERVE LUMINOSITY: Additive Rec.709 correction (NOT HSL, NOT ratio)
+ *    ─────────────────────────────────────────────────────────────────────
+ *    Three approaches were evaluated and two produced visible artifacts:
+ *
+ *    ❌ HSL L-channel replacement (GIMP method):
+ *       HSL L = (max+min)/2 only depends on the max and min channels.
+ *       When the adjusted channel crosses the max/min boundary (e.g., G
+ *       goes from being the max to not being the max), preserveLuminosity
+ *       activates DISCONTINUOUSLY — it either does nothing or applies a
+ *       full correction depending on which side of the boundary you are.
+ *       This creates clearly visible "color patches" at content boundaries.
+ *       GIMP avoids this because it works in 32-bit float with babl's
+ *       optimized HSL conversion that handles boundary cases.
+ *
+ *    ❌ Rec.709 ratio scaling (origLum / newLum):
+ *       When reducing G (magenta shift), G has 71.5% of luminance weight,
+ *       so the ratio grows exponentially in dark pixels (can reach 1.4x+).
+ *       This non-linear amplification creates strong color patches at
+ *       luminance boundaries.
+ *
+ *    ✅ Additive uniform correction (current):
+ *       lumDelta = origLum - newLum; R += delta; G += delta; B += delta
+ *       - Smooth: Rec.709 lum is a linear function of all channels (no
+ *         max/min discontinuity)
+ *       - Linear: additive not multiplicative (no ratio amplification)
+ *       - Exact: since luma coefficients sum to 1.0, adding the same delta
+ *         to all channels exactly restores original luminance
+ *       - Trade-off: slight hue shift (uniform add ≠ hue-preserving), but
+ *         imperceptible at CB_SCALE=0.25
+ *
+ * 4. FUTURE: When Engine V2 Phase 5 (HighDepth) is complete and all filter
+ *    operations run in float32 space, the HSL L-replacement method could be
+ *    reconsidered since the max/min boundary discontinuity becomes negligible
+ *    in continuous float space (no 8-bit quantization to amplify it).
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+
+/** Color balance global attenuation (PS-matched intensity) */
+const CB_SCALE = 0.25;
+const CB_STRENGTH = 1.0 / 100.0; // slider [-100,+100] → [-1,+1]
+
+// ─── HSL utility functions (for color balance) ───
+
+/** HSL Lightness = (max + min) / 2, computed in gamma-encoded space */
+function hslLightness(r: number, g: number, b: number): number {
+  return (Math.max(r, g, b) + Math.min(r, g, b)) * 0.5;
+}
+
+/** Convert RGB [0,1] to HSL. Returns [h, s, l] where h ∈ [0,1). */
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) * 0.5;
+  if (max === min) return [0, 0, l]; // achromatic
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  else if (max === g) h = ((b - r) / d + 2) / 6;
+  else h = ((r - g) / d + 4) / 6;
+  return [h, s, l];
+}
+
+/** Convert HSL to RGB [0,1]. */
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  if (s === 0) return [l, l, l]; // achromatic
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return [
+    hueToChannel(p, q, h + 1 / 3),
+    hueToChannel(p, q, h),
+    hueToChannel(p, q, h - 1 / 3),
+  ];
+}
+
+function hueToChannel(p: number, q: number, t: number): number {
+  if (t < 0) t += 1;
+  if (t > 1) t -= 1;
+  if (t < 1 / 6) return p + (q - p) * 6 * t;
+  if (t < 1 / 2) return q;
+  if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+  return p;
+}
+
+/**
+ * Apply color balance to RGBA8 data in-place.
+ *
+ * Algorithm (per pixel):
+ * 1. Compute HSL Lightness (unified tone region classifier)
+ * 2. Compute shadow / midtone / highlight weights via smooth quadratic curves
+ * 3. Compute per-channel offset = Σ(weight[range] × slider[range][ch])
+ * 4. Add offset to each channel, clamp to [0,1]
+ * 5. If preserveLuminosity: scale RGB uniformly to restore original Rec.709 lum
+ */
+export function applyColorBalanceRGBA8(
+  data: Uint8ClampedArray,
+  shadows: readonly [number, number, number],
+  midtones: readonly [number, number, number],
+  highlights: readonly [number, number, number],
+  preserveLuminosity: boolean,
+): void {
+  const len = data.length;
+
+  // Pre-scale slider values: [-100..+100] → [-1..+1]
+  const sR = shadows[0] * CB_STRENGTH;
+  const sG = shadows[1] * CB_STRENGTH;
+  const sB = shadows[2] * CB_STRENGTH;
+  const mR = midtones[0] * CB_STRENGTH;
+  const mG = midtones[1] * CB_STRENGTH;
+  const mB = midtones[2] * CB_STRENGTH;
+  const hR = highlights[0] * CB_STRENGTH;
+  const hG = highlights[1] * CB_STRENGTH;
+  const hB = highlights[2] * CB_STRENGTH;
+
+  for (let i = 0; i < len; i += 4) {
+    // Normalize to [0, 1]
+    const rn = data[i] / 255;
+    const gn = data[i + 1] / 255;
+    const bn = data[i + 2] / 255;
+
+    // HSL Lightness — unified tone region classifier
+    const L = hslLightness(rn, gn, bn);
+
+    // Smooth quadratic weight curves (wide overlap, no banding)
+    const oneMinusL = 1 - L;
+    const wS = oneMinusL * oneMinusL * CB_SCALE;  // (1-L)² — shadow
+    const wM = 4 * L * oneMinusL * CB_SCALE;      // 4·L·(1-L) — midtone
+    const wH = L * L * CB_SCALE;                   // L² — highlight
+
+    // Additive offsets (in normalized [0,1] space)
+    let nr = clamp01(rn + sR * wS + mR * wM + hR * wH);
+    let ng = clamp01(gn + sG * wS + mG * wM + hG * wH);
+    let nb = clamp01(bn + sB * wS + mB * wM + hB * wH);
+
+    // Preserve luminosity: additive Rec.709 luminance correction.
+    // Computes the luminance delta introduced by the color offset and adds it
+    // back uniformly to all channels. This is:
+    //   - Smooth: no max/min discontinuity (unlike HSL L-replacement)
+    //   - Linear: no ratio amplification (unlike Rec.709 ratio scaling)
+    //   - Exact: since luma weights sum to 1, uniform add restores original lum
+    if (preserveLuminosity) {
+      const origLum = LUMA_R * rn + LUMA_G * gn + LUMA_B * bn;
+      const newLum = LUMA_R * nr + LUMA_G * ng + LUMA_B * nb;
+      const lumDelta = origLum - newLum;
+      nr = clamp01(nr + lumDelta);
+      ng = clamp01(ng + lumDelta);
+      nb = clamp01(nb + lumDelta);
+    }
+
+    data[i] = Math.round(nr * 255);
+    data[i + 1] = Math.round(ng * 255);
+    data[i + 2] = Math.round(nb * 255);
+  }
+}
+
+/**
+ * Apply color balance to a high-res (16-bit / 32-bit) pixel buffer in-place.
+ * Same algorithm as the RGBA8 version.
+ */
+export function applyColorBalanceHighRes(
+  buf: HighResPixelBuffer,
+  shadows: readonly [number, number, number],
+  midtones: readonly [number, number, number],
+  highlights: readonly [number, number, number],
+  preserveLuminosity: boolean,
+): void {
+  const stride = buf.channels;
+  const dst = buf.data;
+  const len = dst.length;
+  const maxVal = bitDepthMax(buf.bitDepth);
+  const isInt = buf.bitDepth === 16;
+
+  const sR = shadows[0] * CB_STRENGTH;
+  const sG = shadows[1] * CB_STRENGTH;
+  const sB = shadows[2] * CB_STRENGTH;
+  const mR = midtones[0] * CB_STRENGTH;
+  const mG = midtones[1] * CB_STRENGTH;
+  const mB = midtones[2] * CB_STRENGTH;
+  const hR = highlights[0] * CB_STRENGTH;
+  const hG = highlights[1] * CB_STRENGTH;
+  const hB = highlights[2] * CB_STRENGTH;
+
+  for (let i = 0; i < len; i += stride) {
+    // Normalize to [0, 1]
+    const rn = isInt ? dst[i] / maxVal : dst[i];
+    const gn = isInt ? dst[i + 1] / maxVal : dst[i + 1];
+    const bn = isInt ? dst[i + 2] / maxVal : dst[i + 2];
+
+    // HSL Lightness
+    const L = hslLightness(rn, gn, bn);
+
+    // Smooth quadratic weight curves (wide overlap, no banding)
+    const oneMinusL = 1 - L;
+    const wS = oneMinusL * oneMinusL * CB_SCALE;
+    const wM = 4 * L * oneMinusL * CB_SCALE;
+    const wH = L * L * CB_SCALE;
+
+    let nr = clamp01(rn + sR * wS + mR * wM + hR * wH);
+    let ng = clamp01(gn + sG * wS + mG * wM + hG * wH);
+    let nb = clamp01(bn + sB * wS + mB * wM + hB * wH);
+
+    // Preserve luminosity: additive Rec.709 luminance correction
+    if (preserveLuminosity) {
+      const origLum = LUMA_R * rn + LUMA_G * gn + LUMA_B * bn;
+      const newLum = LUMA_R * nr + LUMA_G * ng + LUMA_B * nb;
+      const lumDelta = origLum - newLum;
+      nr = clamp01(nr + lumDelta);
+      ng = clamp01(ng + lumDelta);
+      nb = clamp01(nb + lumDelta);
+    }
+
+    if (isInt) {
+      dst[i] = Math.round(nr * maxVal);
+      dst[i + 1] = Math.round(ng * maxVal);
+      dst[i + 2] = Math.round(nb * maxVal);
+    } else {
+      dst[i] = nr;
+      dst[i + 1] = ng;
+      dst[i + 2] = nb;
+    }
+  }
+}
+
+/**
+ * Extract the first colorBalance descriptor from a filter chain.
+ * Returns null if none found.
+ */
+export function extractColorBalance(filters: FilterDescriptor[]): ColorBalanceFilter | null {
+  for (const f of filters) {
+    if (f.type === 'colorBalance') return f as ColorBalanceFilter;
+  }
+  return null;
+}
+
+// ────────────────────────────────────────────────────────────
 // Blur (neighborhood op) — 3-pass box blur ≈ Gaussian
 // ────────────────────────────────────────────────────────────
 
@@ -986,6 +1253,20 @@ export function applyFilterChainRGBA8(
   // Point-ops: fuse into LUT
   const luts = buildFusedLUTs(filters, 256, 'u8');
   if (luts) applyLUTsRGBA8(data, luts);
+
+  // Color balance: luminance-aware per-pixel pass (Plan B)
+  // Must run BEFORE matrix ops because it reads per-pixel luminance which
+  // would be distorted by saturation/hueRotate matrix multiplication.
+  const cb = extractColorBalance(filters);
+  if (cb) {
+    applyColorBalanceRGBA8(
+      data,
+      cb.data.shadows,
+      cb.data.midtones,
+      cb.data.highlights,
+      cb.data.preserveLuminosity,
+    );
+  }
 
   // Matrix ops: fuse into single 3×3 matrix
   const mtx = buildFusedColorMatrix(filters);

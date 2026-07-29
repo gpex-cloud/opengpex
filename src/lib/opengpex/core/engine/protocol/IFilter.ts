@@ -121,6 +121,22 @@ export interface ChannelMixFilter {
 }
 
 // ────────────────────────────────────────────────────────────
+// Color Balance descriptor (Plan B: luminance-aware)
+// ────────────────────────────────────────────────────────────
+
+export interface ColorBalanceData {
+  shadows: [number, number, number];
+  midtones: [number, number, number];
+  highlights: [number, number, number];
+  preserveLuminosity: boolean;
+}
+
+export interface ColorBalanceFilter {
+  type: 'colorBalance';
+  data: ColorBalanceData;
+}
+
+// ────────────────────────────────────────────────────────────
 // Custom / extensible descriptor
 // ────────────────────────────────────────────────────────────
 
@@ -145,6 +161,7 @@ export type FilterDescriptor =
   | CurvesFilter
   | LevelsFilter
   | ChannelMixFilter
+  | ColorBalanceFilter
   | CustomFilter;
 
 export type FilterType = FilterDescriptor['type'];

@@ -38,7 +38,7 @@
 import type { Layer } from '@opengpex/editor/core/types';
 import type { FilterDescriptor } from '../../protocol/IFilter';
 import { MAX_REALTIME_FILTER_PIXELS } from '@opengpex/editor/core/helpers/config';
-import { buildFusedLUTs, applyLUTsRGBA8, buildFusedColorMatrix, applyMatrixRGBA8 } from '../shared/filter2d';
+import { buildFusedLUTs, applyLUTsRGBA8, buildFusedColorMatrix, applyMatrixRGBA8, applyColorBalanceRGBA8 } from '../shared/filter2d';
 import { hasAdvancedFilters, normalizeFilterDescriptors } from '../../protocol/normalizer';
 
 /**
@@ -50,6 +50,7 @@ export interface FilterableLayer {
   curves?: Layer['curves'];
   levels?: Layer['levels'];
   channelMix?: Layer['channelMix'];
+  colorBalance?: Layer['colorBalance'];
 }
 
 /**
@@ -162,6 +163,18 @@ export class FilterFastTrack {
       const mtx = buildFusedColorMatrix(filters);
       if (mtx) {
         applyMatrixRGBA8(imgData.data, mtx.matrix, mtx.constant);
+      }
+
+      // Apply color balance (per-pixel luminance-weighted offset — cannot fuse into LUT/matrix)
+      const cb = filters.find((f): f is Extract<FilterDescriptor, { type: 'colorBalance' }> => f.type === 'colorBalance');
+      if (cb) {
+        applyColorBalanceRGBA8(
+          imgData.data,
+          cb.data.shadows,
+          cb.data.midtones,
+          cb.data.highlights,
+          cb.data.preserveLuminosity,
+        );
       }
 
       tempCtx.putImageData(imgData, 0, 0);

@@ -8,7 +8,7 @@
  */
 
 import type { CommandInstance, InteractionSignalValue } from '@opengpex/editor/core/types';
-import type { GradingTool, CurveChannel, LevelsPatch, ChannelMixPatch, ChannelMixPresetId, AdjustmentsPatch } from './protocols';
+import type { GradingTool, CurveChannel, LevelsPatch, ChannelMixPatch, ChannelMixPresetId, AdjustmentsPatch, ColorBalancePatch } from './protocols';
 
 /** Type map for usePluginCommands<AdjustmentDrawerCommandsMap>() */
 export interface AdjustmentDrawerCommandsMap {
@@ -28,6 +28,8 @@ export interface AdjustmentDrawerCommandsMap {
   applyChannelMixPresetCmd: CommandInstance<{ presetId: ChannelMixPresetId }>;
   beginAdjustmentsEditCmd: CommandInstance;
   updateAdjustmentsCmd: CommandInstance<{ patch: AdjustmentsPatch }>;
+  beginColorBalanceEditCmd: CommandInstance;
+  updateColorBalanceCmd: CommandInstance<{ patch: ColorBalancePatch }>;
 }
 
 /** Type map for usePluginSignals<AdjustmentDrawerSignalsMap>() */

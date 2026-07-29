@@ -34,6 +34,7 @@ import type {
   CurvesState,
   LevelsState,
   ChannelMixState,
+  ColorBalanceState,
   LayerBlendMode,
 } from '@opengpex/editor/core/types';
 
@@ -98,6 +99,7 @@ export interface LayerDescriptor {
   curves: CurvesState | undefined;
   levels: LevelsState | undefined;
   channelMix: ChannelMixState | undefined;
+  colorBalance: ColorBalanceState | undefined;
   /** Worker uses this hash to retrieve bitmap from WorkerCache (extracted from AssetService by buildDescriptor) */
   hash: string;
   worldMatrix: WorldMatrix;

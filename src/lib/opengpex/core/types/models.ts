@@ -126,6 +126,24 @@ export interface ChannelMixState {
   constant?: [number, number, number];
 }
 
+/**
+ * Color Balance per-layer state.
+ * Each tone range has 3 sliders: [cyan-red, magenta-green, yellow-blue]
+ * Range [-100, +100], 0 = no offset (identity).
+ *
+ * Consumed by IFilter (spec §4.6). Does not change `assetId`.
+ */
+export interface ColorBalanceState {
+  /** Shadows region [cyanRed, magentaGreen, yellowBlue] */
+  shadows: [number, number, number];
+  /** Midtones region [cyanRed, magentaGreen, yellowBlue] */
+  midtones: [number, number, number];
+  /** Highlights region [cyanRed, magentaGreen, yellowBlue] */
+  highlights: [number, number, number];
+  /** Preserve luminosity (default: true, matches Photoshop default). */
+  preserveLuminosity: boolean;
+}
+
 export interface VectorMask {
   id: string;
   shape: LocalShape;          // Shape descriptor (local coordinate system)
@@ -253,6 +271,11 @@ export interface Layer {
    * Consumed by IFilter (spec §4.6, §10.1). Does not change `assetId`.
    */
   channelMix?: ChannelMixState;
+  /**
+   * Declarative color balance (shadow/midtone/highlight color offsets).
+   * Consumed by IFilter (Plan B: luminance-aware). Does not change `assetId`.
+   */
+  colorBalance?: ColorBalanceState;
   interactive?: boolean; // Whether involved in collision detection (Hit-Testing)
 
   birthCenter?: { cx: number; cy: number }; // Initial birth center (world coordinates)

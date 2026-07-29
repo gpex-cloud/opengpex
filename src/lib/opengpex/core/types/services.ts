@@ -26,6 +26,7 @@ import {
   CurvesState,
   LevelsState,
   ChannelMixState,
+  ColorBalanceState,
   VectorMask,
   BitmapMask,
   LayerBlendMode,
@@ -133,6 +134,7 @@ export interface LayerItemForWorker {
   curves?: CurvesState;
   levels?: LevelsState;
   channelMix?: ChannelMixState;
+  colorBalance?: ColorBalanceState;
   vectorMasks?: VectorMask[];
   bitmapMasks?: BitmapMask[];
   matrix: {

@@ -225,6 +225,7 @@ export class CompositeDispatcher {
       curves: layer.curves,
       levels: layer.levels,
       channelMix: layer.channelMix,
+      colorBalance: layer.colorBalance,
       worldMatrix,
       dprScale: 1,
     };
@@ -262,6 +263,7 @@ export class CompositeDispatcher {
       curves: layer.curves,
       levels: layer.levels,
       channelMix: layer.channelMix,
+      colorBalance: layer.colorBalance,
       worldMatrix,
       dprScale: asset?.tileMeta?.dprScale ?? 1,
     };

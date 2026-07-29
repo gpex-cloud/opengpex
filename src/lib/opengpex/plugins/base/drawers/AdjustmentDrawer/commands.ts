@@ -20,7 +20,7 @@
 'use client';
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
-import type { CurvePoints, CurvesState, LevelsState, ChannelMixState, AdjustmentState } from '@opengpex/editor/core/types/models';
+import type { CurvePoints, CurvesState, LevelsState, ChannelMixState, ColorBalanceState, AdjustmentState } from '@opengpex/editor/core/types/models';
 import * as P from './protocols';
 import type {
   GradingTool,
@@ -30,6 +30,7 @@ import type {
   ChannelMixPatch,
   ChannelMixPresetId,
   AdjustmentsPatch,
+  ColorBalancePatch,
 } from './protocols';
 
 
@@ -168,6 +169,15 @@ export const ADJUSTMENT_COMMANDS = {
     },
   } as EditorCommand<void, void>,
 
+  openColorBalance: {
+    id: P.CMD_OPEN_COLOR_BALANCE,
+    name: 'Open Color Balance',
+    shortcuts: [{ key: 'b', meta: true }, { key: 'b', ctrl: true }],
+    execute: (ctx: EditorContextValue) => {
+      openDrawerWithTool(ctx, 'colorBalance');
+    },
+  } as EditorCommand<void, void>,
+
   openMixer: {
     id: P.CMD_OPEN_MIXER,
     name: 'Open Channel Mixer',
@@ -196,6 +206,7 @@ export const ADJUSTMENT_COMMANDS = {
         curves: undefined,
         levels: undefined,
         channelMix: undefined,
+        colorBalance: undefined,
       });
     },
   } as EditorCommand<void, void>,
@@ -214,7 +225,7 @@ export const ADJUSTMENT_COMMANDS = {
       // parallel to the existing three panels, and adding a fifth tool
       // later slots in without re-flowing the diff.
       let patch: Partial<Record<
-        'adjustments' | 'curves' | 'levels' | 'channelMix',
+        'adjustments' | 'curves' | 'levels' | 'channelMix' | 'colorBalance',
         undefined
       >>;
       switch (tool) {
@@ -226,6 +237,9 @@ export const ADJUSTMENT_COMMANDS = {
           break;
         case 'levels':
           patch = { levels: undefined };
+          break;
+        case 'colorBalance':
+          patch = { colorBalance: undefined };
           break;
         case 'mixer':
         default:
@@ -498,6 +512,37 @@ export const ADJUSTMENT_COMMANDS = {
       actions.updateLayer(activeFrame.id, activeLayer.id, { adjustments: next });
     },
   } as EditorCommand<{ patch: AdjustmentsPatch }, void>,
+
+  // ─── Color Balance commands (Plan B) ─────────────────────────────────────────
+  //
+  // Same gesture-coalescing shape as Curves / Levels / Channel-Mixer.
+  // `beginColorBalanceEdit` is the undoable checkpoint (empty body — history
+  // plugin snapshots layer state on any undoable dispatch).
+  // `updateColorBalance` deep-merges its partial patch onto the current
+  // `layer.colorBalance` (falling back to the identity state so a fresh
+  // layer's first slider tweak produces a fully-formed `ColorBalanceState`).
+
+  beginColorBalanceEdit: {
+    id: P.CMD_BEGIN_COLOR_BALANCE_EDIT,
+    name: 'Begin Color Balance Edit',
+    undoable: true,
+    execute: () => {},
+  } as EditorCommand<void, void>,
+
+  updateColorBalance: {
+    id: P.CMD_UPDATE_COLOR_BALANCE,
+    name: 'Update Color Balance',
+    execute: (
+      ctx: EditorContextValue,
+      payload: { patch: ColorBalancePatch },
+    ) => {
+      const { activeFrame, activeLayer, actions } = ctx;
+      if (!activeFrame || !activeLayer) return;
+      const current = activeLayer.colorBalance ?? P.DEFAULT_COLOR_BALANCE_STATE;
+      const next: ColorBalanceState = { ...current, ...payload.patch };
+      actions.updateLayer(activeFrame.id, activeLayer.id, { colorBalance: next });
+    },
+  } as EditorCommand<{ patch: ColorBalancePatch }, void>,
 } as const;
 
 

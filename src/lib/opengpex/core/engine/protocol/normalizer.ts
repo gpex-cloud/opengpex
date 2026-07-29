@@ -41,7 +41,7 @@
  *      cache.
  */
 
-import type { AdjustmentState, ChannelMixState, CurvesState, LevelsState, Layer } from '@opengpex/editor/core/types';
+import type { AdjustmentState, ChannelMixState, ColorBalanceState, CurvesState, LevelsState, Layer } from '@opengpex/editor/core/types';
 import type { FilterDescriptor } from './IFilter';
 
 // ────────────────────────────────────────────────────────────
@@ -183,6 +183,29 @@ function fromChannelMix(m: ChannelMixState | undefined): FilterDescriptor[] {
 }
 
 // ────────────────────────────────────────────────────────────
+// Color Balance
+// ────────────────────────────────────────────────────────────
+
+export function isIdentityColorBalance(cb: ColorBalanceState | undefined): boolean {
+  if (!cb) return true;
+  const isZero = (v: readonly [number, number, number]) => v[0] === 0 && v[1] === 0 && v[2] === 0;
+  return isZero(cb.shadows) && isZero(cb.midtones) && isZero(cb.highlights);
+}
+
+function fromColorBalance(cb: ColorBalanceState | undefined): FilterDescriptor[] {
+  if (isIdentityColorBalance(cb)) return [];
+  return [{
+    type: 'colorBalance',
+    data: {
+      shadows: qTriple(cb!.shadows),
+      midtones: qTriple(cb!.midtones),
+      highlights: qTriple(cb!.highlights),
+      preserveLuminosity: cb!.preserveLuminosity,
+    },
+  }];
+}
+
+// ────────────────────────────────────────────────────────────
 // Public entry
 // ────────────────────────────────────────────────────────────
 
@@ -198,7 +221,7 @@ function fromChannelMix(m: ChannelMixState | undefined): FilterDescriptor[] {
  * levels → curves` — this matches the Photoshop pipeline (levels operate
  * on the untouched image, curves are the final tone shape).
  */
-export function normalizeFilterDescriptors(layer: Pick<Layer, 'adjustments' | 'curves' | 'levels' | 'channelMix'>): FilterDescriptor[] {
+export function normalizeFilterDescriptors(layer: Pick<Layer, 'adjustments' | 'curves' | 'levels' | 'channelMix' | 'colorBalance'>): FilterDescriptor[] {
   const adj = fromAdjustments(layer.adjustments);
 
   const brightness = adj.filter(f => f.type === 'brightness');
@@ -212,6 +235,7 @@ export function normalizeFilterDescriptors(layer: Pick<Layer, 'adjustments' | 'c
     ...contrast,
     ...fromLevels(layer.levels),
     ...fromCurves(layer.curves),
+    ...fromColorBalance(layer.colorBalance),
     ...saturation,
     ...hue,
     ...fromChannelMix(layer.channelMix),
@@ -223,7 +247,7 @@ export function normalizeFilterDescriptors(layer: Pick<Layer, 'adjustments' | 'c
  * True when the layer has ANY non-identity descriptor. Cheap gate used by
  * `painter2d.ts` before consulting `AsyncFilterCache`.
  */
-export function hasActiveFilters(layer: Pick<Layer, 'adjustments' | 'curves' | 'levels' | 'channelMix'>): boolean {
+export function hasActiveFilters(layer: Pick<Layer, 'adjustments' | 'curves' | 'levels' | 'channelMix' | 'colorBalance'>): boolean {
   return normalizeFilterDescriptors(layer).length > 0;
 }
 
@@ -232,15 +256,19 @@ export function hasActiveFilters(layer: Pick<Layer, 'adjustments' | 'curves' | '
  * anything that Canvas2D `ctx.filter` cannot render natively. Legacy
  * brightness / contrast / saturation / hueRotate / blur alone stay on the
  * fast CSS-filter path.
+ *
+ * Plan B: colorBalance is ALWAYS advanced (requires independent per-pixel
+ * pass with cross-channel luminance dependency — cannot fold into LUT).
  */
-export function hasAdvancedFilters(layer: Pick<Layer, 'curves' | 'levels' | 'channelMix'>): boolean {
+export function hasAdvancedFilters(layer: Pick<Layer, 'curves' | 'levels' | 'channelMix' | 'colorBalance'>): boolean {
   return (
     !isIdentityCurve(layer.curves?.rgb) ||
     !isIdentityCurve(layer.curves?.red) ||
     !isIdentityCurve(layer.curves?.green) ||
     !isIdentityCurve(layer.curves?.blue) ||
     !isIdentityLevels(layer.levels) ||
-    !isIdentityChannelMix(layer.channelMix)
+    !isIdentityChannelMix(layer.channelMix) ||
+    !isIdentityColorBalance(layer.colorBalance)
   );
 }
 
@@ -288,7 +316,7 @@ export interface FilterCacheKeyOptions {
  *                level so drag-preview & full-res never collide.
  */
 export function computeFilterCacheKey(
-  layer: Pick<Layer, 'assetId' | 'adjustments' | 'curves' | 'levels' | 'channelMix'>,
+  layer: Pick<Layer, 'assetId' | 'adjustments' | 'curves' | 'levels' | 'channelMix' | 'colorBalance'>,
   opts: FilterCacheKeyOptions = {},
 ): string {
   return stableStringify({

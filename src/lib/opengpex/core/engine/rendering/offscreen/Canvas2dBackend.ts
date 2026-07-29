@@ -257,7 +257,7 @@ export class Canvas2dBackend {
    * by CSS filter in painter.ts — only curves/levels/channelMix need baking.
    */
   private hasAdvancedFilters(desc: LayerDescriptor): boolean {
-    return !!(desc.curves || desc.levels || desc.channelMix);
+    return !!(desc.curves || desc.levels || desc.channelMix || desc.colorBalance);
   }
 
   /**
@@ -302,6 +302,7 @@ export class Canvas2dBackend {
       curves: undefined,
       levels: undefined,
       channelMix: undefined,
+      colorBalance: undefined,
     };
 
     return { bitmap, strippedDesc };

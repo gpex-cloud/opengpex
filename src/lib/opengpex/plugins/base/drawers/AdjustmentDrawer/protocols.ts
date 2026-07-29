@@ -41,7 +41,7 @@
  *   pure UI + state writer and does NOT know about the render backend.
  */
 
-import type { CurvePoints, CurvesState, LevelsState, ChannelMixState, AdjustmentState } from '@opengpex/editor/core/types/models';
+import type { CurvePoints, CurvesState, LevelsState, ChannelMixState, ColorBalanceState, AdjustmentState } from '@opengpex/editor/core/types/models';
 
 /**
  * Re-export `CurvePoints` from the domain model so the auto-generated
@@ -59,7 +59,7 @@ import type { CurvePoints, CurvesState, LevelsState, ChannelMixState, Adjustment
  * hueRotate / blur). Panels write it through `updateAdjustments({ patch:
  * AdjustmentsPatch })` on the Basic sub-panel.
  */
-export type { CurvePoints, LevelsState, ChannelMixState, AdjustmentState };
+export type { CurvePoints, LevelsState, ChannelMixState, ColorBalanceState, AdjustmentState };
 
 
 /**
@@ -91,6 +91,12 @@ export type ChannelMixPatch = Partial<ChannelMixState>;
  * without tripping on nested `<>`.
  */
 export type AdjustmentsPatch = Partial<AdjustmentState>;
+
+/**
+ * Partial-shaped patch of `ColorBalanceState` for the `updateColorBalance`
+ * command payload. Same named-alias trick as `LevelsPatch` etc.
+ */
+export type ColorBalancePatch = Partial<ColorBalanceState>;
 
 
 
@@ -130,6 +136,9 @@ export const CMD_OPEN_CURVES = 'cmd.open_curves';
 
 /** Open drawer and switch to Levels panel (Cmd+L / Ctrl+L). */
 export const CMD_OPEN_LEVELS = 'cmd.open_levels';
+
+/** Open drawer and switch to Color Balance panel (Cmd+B / Ctrl+B). */
+export const CMD_OPEN_COLOR_BALANCE = 'cmd.open_color_balance';
 
 /** Open drawer and switch to Channel Mixer panel (Cmd+Shift+M / Ctrl+Shift+M). */
 export const CMD_OPEN_MIXER = 'cmd.open_mixer';
@@ -216,6 +225,19 @@ export const CMD_BEGIN_ADJUSTMENTS_EDIT = 'cmd.begin_adjustments_edit';
 /** Patch `layer.adjustments`. Payload: `{ patch: AdjustmentsPatch }`. Non-undoable. */
 export const CMD_UPDATE_ADJUSTMENTS = 'cmd.update_adjustments';
 
+// ─── Color Balance commands (Plan B) ───────────────────────────────────────────
+//
+// Same shape as Curves / Levels / Channel-Mixer: `beginColorBalanceEdit` is
+// the undoable checkpoint fired by `useFilterGesture()` at the start of a
+// drag; `updateColorBalance` is the non-undoable state writer coalesced
+// across the gesture.
+
+/** Snapshot current layer state before a color-balance-edit gesture starts. */
+export const CMD_BEGIN_COLOR_BALANCE_EDIT = 'cmd.begin_color_balance_edit';
+
+/** Patch `layer.colorBalance`. Payload: `{ patch: ColorBalancePatch }`. Non-undoable. */
+export const CMD_UPDATE_COLOR_BALANCE = 'cmd.update_color_balance';
+
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -235,7 +257,7 @@ export const CMD_UPDATE_ADJUSTMENTS = 'cmd.update_adjustments';
  * those values remain part of the union so persisted preferences continue
  * to round-trip without needing a migration.
  */
-export type GradingTool = 'basic' | 'curves' | 'levels' | 'mixer';
+export type GradingTool = 'basic' | 'curves' | 'levels' | 'mixer' | 'colorBalance';
 
 
 /** Which per-channel curve is being edited inside the Curves panel. */
@@ -386,6 +408,14 @@ export const DEFAULT_ADJUSTMENTS_STATE: AdjustmentState = {
   saturation: 100,
   hueRotate: 0,
   blur: 0,
+};
+
+/** Identity color balance: all three tone regions at zero offset, luminosity preserved. */
+export const DEFAULT_COLOR_BALANCE_STATE: ColorBalanceState = {
+  shadows: [0, 0, 0],
+  midtones: [0, 0, 0],
+  highlights: [0, 0, 0],
+  preserveLuminosity: true,
 };
 
 

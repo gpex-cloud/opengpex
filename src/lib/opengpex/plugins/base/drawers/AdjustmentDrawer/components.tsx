@@ -21,7 +21,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { Sliders, LineChart, BarChart3, SlidersHorizontal, RotateCcw as ResetIcon } from "lucide-react";
+import { ChartSpline, SlidersHorizontal, RotateCcw as ResetIcon } from "lucide-react";
 import { useEditorServices } from "@opengpex/editor/core/context";
 import SplitButton from "@opengpex/editor/widgets/SplitButton";
 import { type ActionOption } from "@opengpex/editor/widgets/ActionDropdown";
@@ -30,9 +30,9 @@ import { BasicPanel } from "./panels/basic";
 import { CurvesPanel } from "./panels/curves";
 import { LevelsPanel } from "./panels/levels";
 import { ChannelMixerPanel } from "./panels/mixer";
+import { ColorBalancePanel } from "./panels/balance";
 
 import { useAdjustmentDrawer, useGradingToolSwitch } from "./hooks";
-import { AdjustmentDrawerIcon } from "./icon";
 import { AdjustmentDrawerAPI } from "./protocols";
 import type { GradingTool } from "./protocols";
 
@@ -53,29 +53,35 @@ import type { GradingTool } from "./protocols";
  * global shortcuts for these tools to avoid polluting the shortcut namespace
  * that CraftDrawer's T/B/E and existing selection tools already occupy.
  */
+/** Shortcut-letter icon — matches Photoshop keyboard shortcuts for each panel. */
+const LetterIcon = ({ letter }: { letter: string }) => (
+  <span className="text-[9px] font-black leading-none select-none">{letter}</span>
+);
+
 const GRADING_BUTTONS: {
   tool: GradingTool;
   iconSmall: React.ReactNode;
   label: string;
 }[] = [
   {
-    // Step 7.5: 'basic' = migrated AdjustmentDrawer sliders (brightness /
-    // contrast / saturation / hueRotate / blur). Icon is lucide `Sliders`
-    // — a stack of horizontal sliders, visually distinct from mixer's
-    // `SlidersHorizontal` (a single row of vertical sliders).
     tool: "basic",
-    iconSmall: <Sliders size={10} />,
+    iconSmall: <LetterIcon letter="U" />,
     label: "Basic",
   },
   {
     tool: "levels",
-    iconSmall: <BarChart3 size={10} />,
+    iconSmall: <LetterIcon letter="L" />,
     label: "Levels",
   },
   {
     tool: "curves",
-    iconSmall: <LineChart size={10} />,
+    iconSmall: <LetterIcon letter="M" />,
     label: "Curves",
+  },
+  {
+    tool: "colorBalance",
+    iconSmall: <LetterIcon letter="B" />,
+    label: "Color Balance",
   },
   {
     tool: "mixer",
@@ -163,9 +169,9 @@ export const AdjustmentDrawerComponent = React.memo(function AdjustmentDrawerCom
         className="flex justify-between items-center shrink-0"
       >
         <div className="flex items-center gap-2">
-          <AdjustmentDrawerIcon size={12} className="text-indigo-600 dark:text-indigo-400" />
+          <ChartSpline size={12} className="text-indigo-600 dark:text-indigo-400" />
           <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
-            Adjustment
+            Adjmt
           </span>
         </div>
         <div className="flex items-center gap-1.5">
@@ -199,6 +205,7 @@ export const AdjustmentDrawerComponent = React.memo(function AdjustmentDrawerCom
           {activeTool === "curves" && <CurvesPanel />}
           {activeTool === "levels" && <LevelsPanel />}
           {activeTool === "mixer" && <ChannelMixerPanel />}
+          {activeTool === "colorBalance" && <ColorBalancePanel />}
         </motion.div>
 
       )}
