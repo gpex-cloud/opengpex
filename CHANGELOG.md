@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.36
+
+- Color Balance: new adjustment panel for shadow/midtone/highlight color shifts with luminosity preservation and smooth tone-region blending (Cmd+B / Ctrl+B)
+- Supports 8-bit and high-resolution (16-bit/32-bit) rendering paths
+- Adjustment drawer panel switcher now shows keyboard-shortcut letters instead of icons
+
+---
+
 ## v1.0.0-beta.35
 
 - Channel View: view individual R/G/B/A channels as grayscale, or any two-channel combination in color
