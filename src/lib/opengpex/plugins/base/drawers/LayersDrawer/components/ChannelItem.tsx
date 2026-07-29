@@ -52,7 +52,6 @@ interface ChannelItemProps {
  * - Click channel name/row: Solo this channel as grayscale
  */
 export const ChannelItem = React.memo(function ChannelItem({
-  channelKey,
   label,
   color,
   gradient,
