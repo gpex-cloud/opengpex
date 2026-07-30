@@ -125,8 +125,12 @@ function extractCommands(commandsPath) {
       continue;
     }
     if (inEntry) {
-      braceDepth += (line.match(/\{/g) || []).length;
-      braceDepth -= (line.match(/\}/g) || []).length;
+      // Strip single-line comments before counting braces — commented-out
+      // code may contain unbalanced braces (e.g. `// { key: '}' }`) that
+      // would corrupt the depth tracker.
+      const strippedLine = line.replace(/\/\/.*$/, '');
+      braceDepth += (strippedLine.match(/\{/g) || []).length;
+      braceDepth -= (strippedLine.match(/\}/g) || []).length;
       if (braceDepth <= 0) {
         // Use balanced extraction for nested generics
         const castIdx = line.indexOf('as EditorCommand');

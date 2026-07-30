@@ -22,7 +22,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ChartSpline, SlidersHorizontal, RotateCcw as ResetIcon } from "lucide-react";
-import { useEditorServices } from "@opengpex/editor/core/context";
+import { usePluginCommands } from "@opengpex/editor/core/context";
+import type { AdjustmentDrawerCommandsMap } from "./commands.d";
 import SplitButton from "@opengpex/editor/widgets/SplitButton";
 import { type ActionOption } from "@opengpex/editor/widgets/ActionDropdown";
 import ActionGroup, { type ActionGroupItem } from "@opengpex/editor/widgets/ActionGroup";
@@ -33,7 +34,6 @@ import { ChannelMixerPanel } from "./panels/mixer";
 import { ColorBalancePanel } from "./panels/balance";
 
 import { useAdjustmentDrawer, useGradingToolSwitch } from "./hooks";
-import { AdjustmentDrawerAPI } from "./protocols";
 import type { GradingTool } from "./protocols";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -144,17 +144,17 @@ const GradingPanelButtonGroup = React.memo(function GradingPanelButtonGroup() {
  */
 export const AdjustmentDrawerComponent = React.memo(function AdjustmentDrawerComponent() {
   const { activeTool, activeLayer } = useAdjustmentDrawer();
-  const { actions } = useEditorServices();
+  const { resetActivePanelCmd, resetAllGradingCmd } = usePluginCommands<AdjustmentDrawerCommandsMap>();
 
   const handleResetPanel = React.useCallback(() => {
-    actions.executeCommand(AdjustmentDrawerAPI.commands.resetActivePanel.uid);
-  }, [actions]);
+    resetActivePanelCmd?.execute();
+  }, [resetActivePanelCmd]);
 
   const handleResetAllSelect = React.useCallback((value: string) => {
     if (value === 'reset-all') {
-      actions.executeCommand(AdjustmentDrawerAPI.commands.resetAll.uid);
+      resetAllGradingCmd?.execute();
     }
-  }, [actions]);
+  }, [resetAllGradingCmd]);
 
   const resetAllOptions: ActionOption[] = React.useMemo(() => [
     { label: 'Reset All', value: 'reset-all', icon: <ResetIcon size={10} />, variant: 'danger' },

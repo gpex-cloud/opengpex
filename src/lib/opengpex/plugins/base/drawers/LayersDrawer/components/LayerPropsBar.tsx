@@ -20,10 +20,10 @@
 "use client";
 
 import React, { useMemo, useCallback, useRef } from "react";
-import { useEditorState, useEditorServices } from "@opengpex/editor/core/context";
+import { useEditorState, useEditorServices, usePluginCommands } from "@opengpex/editor/core/context";
 import type { LayerBlendMode } from "@opengpex/editor/core/types";
 import ActionDropdown, { type ActionOption } from "@opengpex/editor/widgets/ActionDropdown";
-import { CMD_SET_BLEND_MODE, CMD_SET_LAYER_OPACITY, CMD_SET_LAYER_FILL } from "../protocols";
+import type { LayersDrawerCommandsMap } from "../commands.d";
 
 // ─── Blend Mode Configuration ────────────────────────────────────────────────
 
@@ -112,6 +112,7 @@ const DROPDOWN_OPTIONS = buildDropdownOptions();
 export const LayerPropsBar = React.memo(function LayerPropsBar() {
   const { activeFrame, activeLayer } = useEditorState();
   const { actions } = useEditorServices();
+  const { setBlendModeCmd, setLayerOpacityCmd, setLayerFillCmd } = usePluginCommands<LayersDrawerCommandsMap>();
 
   const disabled = !activeFrame || !activeLayer;
   const currentBlendMode: LayerBlendMode = (activeLayer?.blendMode || 'source-over') as LayerBlendMode;
@@ -125,8 +126,8 @@ export const LayerPropsBar = React.memo(function LayerPropsBar() {
   const handleBlendModeSelect = useCallback((value: string) => {
     if (!activeFrame || !activeLayer) return;
     // Execute undoable command — SIGNAL_COMMIT is auto-dispatched before execution
-    actions.executeCommand(CMD_SET_BLEND_MODE, { blendMode: value as LayerBlendMode });
-  }, [activeFrame, activeLayer, actions]);
+    setBlendModeCmd?.execute({ blendMode: value as LayerBlendMode });
+  }, [activeFrame, activeLayer, setBlendModeCmd]);
 
   const blendTrigger = useMemo(() => (
     <div className="flex-1 flex items-center justify-between gap-1 px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:bg-[var(--border-subtle)] transition-colors text-left cursor-pointer">
@@ -149,8 +150,8 @@ export const LayerPropsBar = React.memo(function LayerPropsBar() {
     if (!activeFrame || !activeLayer) return;
     isDraggingRef.current = true;
     // Execute undoable command with current opacity → creates checkpoint (state doesn't actually change)
-    actions.executeCommand(CMD_SET_LAYER_OPACITY, { opacity: activeLayer.opacity ?? 1 });
-  }, [activeFrame, activeLayer, actions]);
+    setLayerOpacityCmd?.execute({ opacity: activeLayer.opacity ?? 1 });
+  }, [activeFrame, activeLayer, setLayerOpacityCmd]);
 
   /** During drag: directly update layer opacity (no additional checkpoints) */
   const handleOpacitySlider = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -168,8 +169,8 @@ export const LayerPropsBar = React.memo(function LayerPropsBar() {
   const handleOpacityInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (!activeFrame || !activeLayer) return;
     const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
-    actions.executeCommand(CMD_SET_LAYER_OPACITY, { opacity: val / 100 });
-  }, [activeFrame, activeLayer, actions]);
+    setLayerOpacityCmd?.execute({ opacity: val / 100 });
+  }, [activeFrame, activeLayer, setLayerOpacityCmd]);
 
   // ─── Fill Slider ────────────────────────────────────────────────────────────
 
@@ -178,8 +179,8 @@ export const LayerPropsBar = React.memo(function LayerPropsBar() {
   const handleFillPointerDown = useCallback(() => {
     if (!activeFrame || !activeLayer) return;
     isFillDraggingRef.current = true;
-    actions.executeCommand(CMD_SET_LAYER_FILL, { fill: activeLayer.fill ?? 1 });
-  }, [activeFrame, activeLayer, actions]);
+    setLayerFillCmd?.execute({ fill: activeLayer.fill ?? 1 });
+  }, [activeFrame, activeLayer, setLayerFillCmd]);
 
   const handleFillSlider = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (!activeFrame || !activeLayer) return;
@@ -194,8 +195,8 @@ export const LayerPropsBar = React.memo(function LayerPropsBar() {
   const handleFillInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (!activeFrame || !activeLayer) return;
     const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
-    actions.executeCommand(CMD_SET_LAYER_FILL, { fill: val / 100 });
-  }, [activeFrame, activeLayer, actions]);
+    setLayerFillCmd?.execute({ fill: val / 100 });
+  }, [activeFrame, activeLayer, setLayerFillCmd]);
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 

@@ -47,6 +47,35 @@ import { useEditorServices } from "@opengpex/editor/core/context";
  *
  * Avoid typing conflicts: block hotkeys when inputting in Input/Textarea.
  */
+/**
+ * Maps a shortcut key character to its physical KeyboardEvent.code.
+ * Used as fallback for macOS where Option/Alt remaps the produced character
+ * (e.g. Option+[ → """) but e.code still reports "BracketLeft".
+ */
+const KEY_TO_CODE: Record<string, string> = {
+  '[': 'BracketLeft',
+  ']': 'BracketRight',
+  '-': 'Minus',
+  '=': 'Equal',
+  ';': 'Semicolon',
+  "'": 'Quote',
+  ',': 'Comma',
+  '.': 'Period',
+  '/': 'Slash',
+  '\\': 'Backslash',
+  '`': 'Backquote',
+};
+
+function keyToCode(key: string): string | undefined {
+  // Direct lookup for symbols
+  if (KEY_TO_CODE[key]) return KEY_TO_CODE[key];
+  // Single letter → KeyA..KeyZ
+  if (/^[a-z]$/i.test(key)) return `Key${key.toUpperCase()}`;
+  // Single digit → Digit0..Digit9
+  if (/^[0-9]$/.test(key)) return `Digit${key}`;
+  return undefined;
+}
+
 export default function HotkeyManager() {
   const { plugins, actions } = useEditorServices();
 
@@ -73,7 +102,16 @@ export default function HotkeyManager() {
       // 2. Match hotkey
       const allShortcuts = plugins.getAllShortcuts();
       const shortcut = allShortcuts.find((s) => {
-        const keyMatch = s.key.toLowerCase() === e.key.toLowerCase();
+        let keyMatch = s.key.toLowerCase() === e.key.toLowerCase();
+
+        // macOS Alt/Option key remaps characters (e.g. Option+[ → """).
+        // Fall back to physical key code matching when alt is required and
+        // the character-based match fails.
+        if (!keyMatch && s.alt && e.altKey) {
+          const expectedCode = keyToCode(s.key);
+          if (expectedCode) keyMatch = e.code === expectedCode;
+        }
+
         const ctrlMatch = (s.ctrl ?? false) === e.ctrlKey;
         const metaMatch = (s.meta ?? false) === e.metaKey;
         const shiftMatch = (s.shift ?? false) === e.shiftKey;

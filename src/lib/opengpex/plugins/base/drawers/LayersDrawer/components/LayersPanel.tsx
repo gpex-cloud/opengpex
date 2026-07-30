@@ -179,7 +179,7 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
               mergeVisible.execute();
             }}
             icon={<MergeVisibleIcon size={12} />}
-            tooltip="Flatten Visible"
+            tooltip="Merge Visible"
             variant="glass"
             size="sm"
             className="text-[var(--text-muted)] hover:text-teal-500"

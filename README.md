@@ -5,13 +5,13 @@
 <h1 align="center">OpenGPEX</h1>
 
 <p align="center">
-  <strong>Industrial-grade, browser-native Graphics & Photo Editor</strong><br/>
-  Non-destructive editing · Tiled rendering · Plugin extensible · No install needed
+  <strong>Open-source, browser-native image editor with integrated AI</strong><br/>
+  No install · No upload · Fully private · AI when you want it
 </p>
 
 <!-- ═══════════ Badges ═══════════ -->
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0--beta.21-blue?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/github/package-json/v/gpex-cloud/opengpex?style=flat-square&label=version&color=blue" alt="Version" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green?style=flat-square" alt="License" /></a>
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs Welcome" />
   <img src="https://img.shields.io/badge/platform-Web%20(modern%20browsers)-orange?style=flat-square" alt="Platform" />
@@ -32,7 +32,7 @@
 <!-- ═══════════ Hero ═══════════ -->
 <p align="center">
   <a href="https://gpex.cloud">
-    <img src=".github/screenshot.png" width="720" alt="OpenGPEX — Industrial-grade browser-native image editor" />
+    <img src=".github/screenshot.png" width="720" alt="OpenGPEX — Open-source browser-native image editor" />
   </a>
 </p>
 
@@ -45,16 +45,20 @@
 
 ## ✨ Why OpenGPEX?
 
+**Professional image editing that runs entirely in your browser — with optional, private AI superpowers.**
+
+OpenGPEX gives you full creative control: use traditional manual tools for precision, or accelerate with AI when you choose. Your images never leave your device unless you explicitly opt in to cloud sync.
+
 | Feature | Description |
 |---------|-------------|
-| 🚀 **Tiled Rendering** | Chunked image processing with Mipmap pyramids + Web Worker synthesis. Handles 100MP+ images — no OOM. |
-| ⚡ **60 FPS Interactions** | Dual-track state: pan/zoom/brush bypass React VDOM entirely via volatile refs. |
-| 🕰️ **TimeTravel Undo** | Incremental undo via Immer JSON Patches — near-zero memory overhead per step. |
-| 🛡️ **Non-Destructive CAS** | Original pixels immutably stored (SHA-256 Content-Addressable). Edits are pure math. |
-| 🧩 **Plugin System** | Metadata-driven registry: overlays, drawers, options, backstage. Hot-load community ZIPs at runtime. |
-| 🤖 **AI Built-in** | Background removal (RMBG 1.4 / InSPyReNet), magic wand — all client-side ONNX. |
-| ☁️ **Cloud Sync** | Optional [GPEX Cloud](https://gpex.cloud) — save, load, share across devices. |
-| 🖼️ **Format Support** | PSD · PNG · JPEG · WebP · AVIF · SVG · RAW (CR2/NEF/ARW) · HEIC |
+| 🖼️ **10+ Formats** | Open anything: PNG · JPEG · WebP · AVIF · TIFF (16-bit) · SVG · EPS · RAW (CR2/NEF/ARW/DNG) · HEIC · GIF (animated) · BMP |
+| 🤖 **AI When You Want It** | Background removal, AI segmentation (SAM 2.1), super-resolution upscale, ComfyUI & LLM integration — all optional, all private, all client-side. |
+| 🛡️ **Non-Destructive** | Your original image is never modified. Edits are pure metadata — always reversible, always lossless. |
+| ⚡ **Smooth & Responsive** | Pan, zoom, and brush at 60 FPS. Handles 100MP+ images without slowing down or running out of memory. |
+| 🕰️ **Smart Undo** | Unlimited undo/redo that never jumps your viewport — you stay exactly where you were working. |
+| ☁️ **Cloud Sync** | Optional [GPEX Cloud](https://gpex.cloud) — save, load, and share across devices. Works fully offline too. |
+| 🧩 **Extensible** | Everything is a plugin. Install community extensions at runtime, or build your own. |
+| 🔒 **Private by Design** | Your images never leave your device. AI runs locally in your browser — zero server-side processing. |
 
 ---
 
@@ -62,6 +66,46 @@
 
 > **No setup required** — Open **[gpex.cloud](https://gpex.cloud)** in your browser and start editing immediately.  
 > Cloud version includes auto-save, cross-device sync, and always up-to-date features.
+
+---
+
+## 🎨 Features at a Glance
+
+### Core Editing
+- **Layers** — Multi-layer compositing with 16 blend modes, opacity, fill, lock, visibility
+- **Brush & Eraser** — Catmull-Rom spline smoothing, adjustable size/opacity/hardness, stamp-based rendering
+- **Non-destructive Eraser** — Eraser paints a mask (not pixels); Tab to Restore hidden content anytime
+- **Text** — Inline contenteditable DOM editing with full IME (CJK) support, 60+ fonts, Google Fonts search, local font access
+- **Transform** — Move, scale (proportional/free), 8-direction handles
+
+### Color & Adjustments (5-tab panel)
+- **Basic** — Brightness, Contrast, Saturation, Hue Rotate, Blur
+- **Curves** — RGB + per-channel cubic spline tonal control
+- **Levels** — Histogram-based with Auto-levels
+- **Channel Mixer** — 3×3 matrix with 7 presets (B&W, Sepia, Cross Process, etc.)
+- **Color Balance** — Shadows/Midtones/Highlights color shifts with preserve-luminosity
+
+### Selection & Clipping
+- **5 tools**: Rectangle, Ellipse, Lasso, Magic Wand, SAM (AI segmentation)
+- **Operations**: Peel (cut to layer), Stamp (copy to layer), Invert, Select from Alpha, Offset (expand/contract)
+- **Feathering** with soft graduated edges
+
+### AI Tools (Optional, Client-side)
+- **Background Removal** — RMBG 1.4 / InSPyReNet Ultra
+- **AI Segmentation** — SAM 2.1 (point prompt + auto-segment)
+- **Super Resolution** — 2× / 4× upscale with AI detail enhancement
+- **ComfyUI Bridge** — Connect to local/remote ComfyUI for inpainting, style transfer, ControlNet, custom workflows
+- **LLM Image Bridge** — OpenAI-compatible API for text-to-image generation, editing, and variations
+
+### Multi-Document & Organization
+- **Creation/Branch model** — Trunk/Branch hierarchy for organizing AI multi-results and derived images
+- **TabDock** — Floating dock with thumbnails, branch badges, and configurable layout
+- **Animated Images** — Multi-frame GIF/APNG import, playback, and re-export
+
+### Export
+- JPEG, PNG, WebP, AVIF, TIFF (8/16/32-bit), GIF (animated), BMP
+- Configurable quality, DPI, dimensions, ICC profile embedding
+- EXIF/metadata preservation
 
 ---
 
@@ -95,6 +139,13 @@ plugins/
 └── user/         # Your local dev sandbox
 ```
 
+Each plugin is a self-contained module with:
+- **`commands`** — Dispatchable actions with optional keyboard shortcuts
+- **`signals`** — Reactive state for cross-plugin communication
+- **`component`** — React UI rendered into named slots
+- **`interactions`** — Gesture handlers with priority-based routing
+- **`contributions`** — Declarative slot/menu contributions
+
 Install plugins at runtime via ZIP upload through the Plugin Hub. Build your own with the [Plugin Development Guide](https://gpex.cloud/docs/plugin-overview).
 
 ---
@@ -104,11 +155,13 @@ Install plugins at runtime via ZIP upload through the Plugin Hub. Build your own
 | Layer | Technology |
 |-------|-----------|
 | Framework | Next.js 16 · React 19 |
-| State | Immer + custom store with fast-track volatile refs |
+| State | Immer + custom store with dual-track (fast/slow) and volatile refs |
 | Styling | Tailwind CSS v4 |
-| Rendering | OffscreenCanvas + Web Workers + WASM (AVIF/RAW/TIFF) |
-| AI/ML | ONNX Runtime (client-side inference) |
+| Rendering | OffscreenCanvas + Web Workers + tiled engine + isomorphic painter |
+| AI/ML | ONNX Runtime WebAssembly (client-side inference) |
+| Formats | wasm-vips · LibRaw-Wasm · resvg-js · gifenc |
 | Animation | Framer Motion · GSAP |
+| Cloud | Cloudflare R2 + D1 + Workers (optional) |
 
 ---
 
@@ -125,12 +178,14 @@ pnpm lint   # Run before committing
 
 ## 📄 Third-party Models
 
-AI features download pre-trained models at runtime from HuggingFace (not bundled):
+AI features download pre-trained models on-demand from HuggingFace (not bundled). Users choose when to download — no forced network usage:
 
-| Model | Source | License |
-|-------|--------|---------|
-| RMBG 1.4 | [briaai/RMBG-1.4](https://huggingface.co/briaai/RMBG-1.4) | BRIA RMBG-1.4 (non-commercial) |
-| InSPyReNet Ultra | [OS-Software/InSPyReNet-SwinB-Plus-Ultra-ONNX](https://huggingface.co/OS-Software/InSPyReNet-SwinB-Plus-Ultra-ONNX) | MIT |
+| Model | Purpose | Source | License |
+|-------|---------|--------|---------|
+| RMBG 1.4 | Background removal | [briaai/RMBG-1.4](https://huggingface.co/briaai/RMBG-1.4) | BRIA RMBG-1.4 (non-commercial) |
+| InSPyReNet Ultra | Background removal (high-quality edges) | [OS-Software/InSPyReNet-SwinB-Plus-Ultra-ONNX](https://huggingface.co/OS-Software/InSPyReNet-SwinB-Plus-Ultra-ONNX) | MIT |
+| SAM 2.1 | AI segmentation (Segment Anything) | [anthropics/sam2.1-hiera-tiny](https://huggingface.co/anthropics/sam2.1-hiera-tiny) | Apache-2.0 |
+| Upscale models | Super-resolution (2×/4×) | Various (ESRGAN-based) | Model-specific |
 
 ---
 
@@ -145,10 +200,10 @@ The following pre-compiled WASM/JS libraries are bundled in `public/ext/` for cl
 |---------|---------|--------|---------|
 | LibRaw-Wasm | RAW image decoding (CR2/NEF/ARW) | [ybouane/LibRaw-Wasm](https://github.com/ybouane/LibRaw-Wasm) | ISC |
 | resvg-js | SVG rendering & rasterization | [thx/resvg-js](https://github.com/thx/resvg-js) | MPL-2.0 |
-| jSquash (AVIF) | AVIF image encoding | [jamsinclair/jSquash](https://github.com/jamsinclair/jSquash) | Apache-2.0 |
 | ghostpdl-wasm | PostScript/PDF processing | [okathira-dev/ghostpdl-wasm](https://github.com/okathira-dev/ghostpdl-wasm) | AGPL-3.0 |
 | heic-to | HEIC/HEIF format conversion | [hoppergee/heic-to](https://github.com/hoppergee/heic-to) | GPL-3.0 |
-| wasm-vips | TIFF image encoding & decoding | [kleisauke/wasm-vips](https://github.com/kleisauke/wasm-vips) | MIT / LGPL-3.0 |
+| wasm-vips | TIFF/AVIF encoding & decoding, CMYK conversion | [kleisauke/wasm-vips](https://github.com/kleisauke/wasm-vips) | MIT / LGPL-3.0 |
+| gifenc | GIF multi-frame encoding | [mattdesl/gifenc](https://github.com/mattdesl/gifenc) | MIT |
 
 ---
 

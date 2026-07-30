@@ -48,10 +48,9 @@ export const plugin: EditorPlugin = {
   manifest: {
     id: P.PLUGIN_ID,
     displayName: "Adjustments",
-    // Bumped to 1.1.0 on the Step 7.5 AdjustmentDrawer merge — no API break
-    // for consumers of `AdjustmentDrawerAPI`, but the plugin now exposes an
-    // additional 'basic' tool + `beginAdjustmentsEdit / updateAdjustments`
-    // commands, so semver-minor is the right tick.
+    // Bumped to 1.1.0 on the Step 7.5 AdjustmentDrawer merge — the plugin
+    // now exposes an additional 'basic' tool + `beginAdjustmentsEdit /
+    // updateAdjustments` commands, so semver-minor is the right tick.
     version: "1.1.0",
     description:
       "Basic adjustments, Curves, Levels and Channel Mixer — unified per-layer adjustment.",

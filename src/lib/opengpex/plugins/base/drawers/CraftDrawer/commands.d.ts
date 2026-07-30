@@ -18,7 +18,12 @@ export interface CraftDrawerCommandsMap {
   setCraftBrushCmd: CommandInstance;
   setCraftEraserCmd: CommandInstance;
   deactivateCraftCmd: CommandInstance;
+  brushSizeUpCmd: CommandInstance;
   brushSizeDownCmd: CommandInstance;
+  brushOpacityUpCmd: CommandInstance;
+  brushOpacityDownCmd: CommandInstance;
+  brushHardnessUpCmd: CommandInstance;
+  brushHardnessDownCmd: CommandInstance;
 }
 
 /** Type map for usePluginSignals<CraftDrawerSignalsMap>() */

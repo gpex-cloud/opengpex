@@ -132,10 +132,8 @@ export const CRAFT_COMMANDS = {
     execute: (ctx: EditorContextValue) => {
       adjustBrushOpacity(ctx, 10);
     },
-    // shortcuts: [
-    //   { key: ']', shift: true, meta: true },
-    //   { key: '}', shift: true, meta: true }
-    // ]
+    // Alt+] increases brush opacity ±10%
+    shortcuts: [{ key: ']', alt: true }]
   } as EditorCommand<void, void>,
 
   brushOpacityDown: {
@@ -144,10 +142,8 @@ export const CRAFT_COMMANDS = {
     execute: (ctx: EditorContextValue) => {
       adjustBrushOpacity(ctx, -10);
     },
-    // shortcuts: [
-    //   { key: '[', shift: true, meta: true },
-    //   { key: '{', shift: true, meta: true }
-    // ]
+    // Alt+[ decreases brush opacity ±10%
+    shortcuts: [{ key: '[', alt: true }]
   } as EditorCommand<void, void>,
 
   brushHardnessUp: {
@@ -156,9 +152,8 @@ export const CRAFT_COMMANDS = {
     execute: (ctx: EditorContextValue) => {
       adjustBrushHardness(ctx, 10);
     },
-    // shortcuts: [
-    //   { key: ']', alt: true, meta: true }
-    // ]
+    // Photoshop convention: Shift+] (}) increases brush hardness
+    shortcuts: [{ key: '}', shift: true }]
   } as EditorCommand<void, void>,
 
   brushHardnessDown: {
@@ -167,9 +162,8 @@ export const CRAFT_COMMANDS = {
     execute: (ctx: EditorContextValue) => {
       adjustBrushHardness(ctx, -10);
     },
-    // shortcuts: [
-    //   { key: '[', alt: true, meta: true }
-    // ]
+    // Photoshop convention: Shift+[ ({) decreases brush hardness
+    shortcuts: [{ key: '{', shift: true }]
   } as EditorCommand<void, void>,
 };
 

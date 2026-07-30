@@ -41,8 +41,8 @@ import type {
 
 /**
  * Persists the active grading tool both to the shared signal (so other plugins
- * can observe it via `AdjustmentDrawerAPI.signals.activeTool`) and to
- * `pluginConfig` so the choice survives across editor sessions.
+ * can observe it via `usePluginSignals`) and to `pluginConfig` so the choice
+ * survives across editor sessions.
  *
  * We intentionally keep this a signal (not just pluginConfig) because switching
  * panels should trigger UI re-renders synchronously — pluginConfig by itself

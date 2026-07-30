@@ -319,38 +319,6 @@ export interface AdjustmentDrawerConfig {
   lastTool?: GradingTool;
 }
 
-// ─── Cross-Plugin Typed Facade ─────────────────────────────────────────────────
-
-/**
- * AdjustmentDrawerAPI: Structured facade for external plugins.
- *
- * Usage:
- *   import { AdjustmentDrawerAPI } from '../../drawers/AdjustmentDrawer/protocols';
- *   state.interaction.signals[AdjustmentDrawerAPI.signals.activeTool];
- *   actions.executeCommand(AdjustmentDrawerAPI.commands.resetAll.uid);
- */
-export const AdjustmentDrawerAPI = {
-  signals: {
-    /** Currently active grading sub-panel. */
-    activeTool: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_ACTIVE_GRADING_TOOL}` as const,
-  },
-  commands: {
-    /** Switch active sub-panel. Payload: `{ tool: GradingTool }`. */
-    setTool: {
-      uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_GRADING_TOOL}`,
-    } as { uid: string; _payload: { tool: GradingTool } },
-    /** Reset all grading state on active layer. */
-    resetAll: {
-      uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_RESET_ALL_GRADING}`,
-    } as { uid: string; _payload: void },
-    /** Reset current sub-panel only. */
-    resetActivePanel: {
-      uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_RESET_ACTIVE_PANEL}`,
-    } as { uid: string; _payload: void },
-  },
-  /** pluginConfig storage key. */
-  configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
-} as const;
 
 // ─── Default Grading States ────────────────────────────────────────────────────
 //

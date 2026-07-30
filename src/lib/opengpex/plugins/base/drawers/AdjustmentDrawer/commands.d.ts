@@ -14,6 +14,11 @@ import type { GradingTool, CurveChannel, LevelsPatch, ChannelMixPatch, ChannelMi
 export interface AdjustmentDrawerCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   setGradingToolCmd: CommandInstance<{ tool: GradingTool }>;
+  openBasicCmd: CommandInstance;
+  openCurvesCmd: CommandInstance;
+  openLevelsCmd: CommandInstance;
+  openColorBalanceCmd: CommandInstance;
+  openMixerCmd: CommandInstance;
   resetAllGradingCmd: CommandInstance;
   resetActivePanelCmd: CommandInstance;
   beginCurvesEditCmd: CommandInstance;

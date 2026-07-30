@@ -55,7 +55,9 @@ export const ViewportTransformCommands = {
     name: 'Rotate Left',
     undoable: true,
     execute: (ctx: EditorContextValue) => ViewportTransformCommands.rotate.execute(ctx, { direction: 'left' }),
-    shortcuts: [{ key: '{', shift: true }]
+    // shortcuts: [{ key: '{', shift: true }]
+    // ↑ Dormant: Shift+[ ({) reassigned to brush hardness (Photoshop convention).
+    //   Canvas rotation should use R-tool + drag in the future.
   } as EditorCommand<void, void>,
 
   rotateRight: {
@@ -63,7 +65,9 @@ export const ViewportTransformCommands = {
     name: 'Rotate Right',
     undoable: true,
     execute: (ctx: EditorContextValue) => ViewportTransformCommands.rotate.execute(ctx, { direction: 'right' }),
-    shortcuts: [{ key: '}', shift: true }]
+    // shortcuts: [{ key: '}', shift: true }]
+    // ↑ Dormant: Shift+] (}) reassigned to brush hardness (Photoshop convention).
+    //   Canvas rotation should use R-tool + drag in the future.
   } as EditorCommand<void, void>,
 
   flip: {

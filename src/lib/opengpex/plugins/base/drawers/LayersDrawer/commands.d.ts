@@ -24,6 +24,7 @@ export interface LayersDrawerCommandsMap {
   setBlendModeCmd: CommandInstance<{ frameId?: string; layerId?: string; blendMode: LayerBlendMode }>;
   setLayerOpacityCmd: CommandInstance<{ frameId?: string; layerId?: string; opacity: number }>;
   setLayerFillCmd: CommandInstance<{ frameId?: string; layerId?: string; fill: number }>;
+  opacityShortcutCmd: CommandInstance<{ _shortcutKey?: string }>;
 }
 
 /** Type map for usePluginSignals<LayersDrawerSignalsMap>() */

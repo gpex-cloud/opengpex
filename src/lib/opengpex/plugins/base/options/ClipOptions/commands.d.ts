@@ -32,6 +32,8 @@ export interface ClipOptionsCommandsMap {
   selectFromAlphaCmd: CommandInstance<void, Promise<void>>;
   invertSelectionCmd: CommandInstance;
   offsetSelectionCmd: CommandInstance<{ distance: number }, Promise<void>>;
+  selectAllCmd: CommandInstance;
+  deselectCmd: CommandInstance<void, Promise<void>>;
 }
 
 /** Type map for usePluginSignals<ClipOptionsSignalsMap>() */
