@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.37
+
+- Rework brush-related keyboard shortcuts and fix Alt/Option key issues on macOS
+- Fix code-gen script parsing issue with commented-out lines
+
+---
+
 ## v1.0.0-beta.36
 
 - Color Balance: new adjustment panel for shadow/midtone/highlight color shifts with luminosity preservation and smooth tone-region blending (Cmd+B / Ctrl+B)
