@@ -94,6 +94,7 @@ export const ViewportTransformCommands = {
   flipH: {
     id: P.ADV_VIEWPORT_FLIP_H,
     name: 'Flip Horizontal',
+    category: 'View',
     undoable: true,
     execute: (ctx: EditorContextValue) => ViewportTransformCommands.flip.execute(ctx, { direction: 'horizontal' }),
     shortcuts: [{ key: 'h', shift: true }]
@@ -102,6 +103,7 @@ export const ViewportTransformCommands = {
   flipV: {
     id: P.ADV_VIEWPORT_FLIP_V,
     name: 'Flip Vertical',
+    category: 'View',
     undoable: true,
     execute: (ctx: EditorContextValue) => ViewportTransformCommands.flip.execute(ctx, { direction: 'vertical' }),
     shortcuts: [{ key: 'v', shift: true }]
@@ -110,6 +112,7 @@ export const ViewportTransformCommands = {
   reset: {
     id: P.ADV_VIEWPORT_RESET,
     name: 'Reset Transform',
+    category: 'View',
     undoable: true,
     execute: (ctx: EditorContextValue): void => {
       const { activeFrame, actions } = ctx;

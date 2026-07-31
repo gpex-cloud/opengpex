@@ -27,6 +27,7 @@ export const LAYER_OVERLAY_COMMANDS = {
   toggleAlways: {
     id: P.CMD_TOGGLE,
     name: 'Toggle Layer Outlines',
+    category: 'View',
     execute: (ctx: EditorContextValue) => {
       const { selfConfig, setSelfConfig } = ctx.scoped || {};
       const current = (selfConfig as P.LayerOverlayConfig)?.showAlways ?? false;

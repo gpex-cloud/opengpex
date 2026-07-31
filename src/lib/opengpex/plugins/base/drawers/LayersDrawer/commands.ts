@@ -295,6 +295,7 @@ export const LAYERS_COMMANDS = {
     opacityShortcut: {
         id: P.CMD_OPACITY_SHORTCUT,
         name: 'Set Opacity via Number Key',
+        category: 'Layers',
         undoable: true,
         shortcuts: [
             { key: '1' }, { key: '2' }, { key: '3' }, { key: '4' }, { key: '5' },

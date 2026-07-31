@@ -53,6 +53,7 @@ export const FILE_LOADER_COMMANDS = {
   pick: {
     id: P.CMD_PICK,
     name: 'Open File Picker',
+    category: 'File',
     shortcuts: [{ key: 'o', meta: true }],
     execute: () => {
       window.dispatchEvent(new CustomEvent('editor:trigger-file-picker'));

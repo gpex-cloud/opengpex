@@ -145,6 +145,7 @@ export const ADJUSTMENT_COMMANDS = {
   openBasic: {
     id: P.CMD_OPEN_BASIC,
     name: 'Open Basic Adjustments',
+    category: 'Color Grading',
     shortcuts: [{ key: 'u', meta: true }, { key: 'u', ctrl: true }],
     execute: (ctx: EditorContextValue) => {
       openDrawerWithTool(ctx, 'basic');
@@ -154,6 +155,7 @@ export const ADJUSTMENT_COMMANDS = {
   openCurves: {
     id: P.CMD_OPEN_CURVES,
     name: 'Open Curves',
+    category: 'Color Grading',
     shortcuts: [{ key: 'm', meta: true }, { key: 'm', ctrl: true }],
     execute: (ctx: EditorContextValue) => {
       openDrawerWithTool(ctx, 'curves');
@@ -163,6 +165,7 @@ export const ADJUSTMENT_COMMANDS = {
   openLevels: {
     id: P.CMD_OPEN_LEVELS,
     name: 'Open Levels',
+    category: 'Color Grading',
     shortcuts: [{ key: 'l', meta: true }, { key: 'l', ctrl: true }],
     execute: (ctx: EditorContextValue) => {
       openDrawerWithTool(ctx, 'levels');
@@ -172,6 +175,7 @@ export const ADJUSTMENT_COMMANDS = {
   openColorBalance: {
     id: P.CMD_OPEN_COLOR_BALANCE,
     name: 'Open Color Balance',
+    category: 'Color Grading',
     shortcuts: [{ key: 'b', meta: true }, { key: 'b', ctrl: true }],
     execute: (ctx: EditorContextValue) => {
       openDrawerWithTool(ctx, 'colorBalance');
@@ -181,6 +185,7 @@ export const ADJUSTMENT_COMMANDS = {
   openMixer: {
     id: P.CMD_OPEN_MIXER,
     name: 'Open Channel Mixer',
+    category: 'Color Grading',
     shortcuts: [{ key: 'm', meta: true, shift: true }, { key: 'm', ctrl: true, shift: true }],
     execute: (ctx: EditorContextValue) => {
       openDrawerWithTool(ctx, 'mixer');

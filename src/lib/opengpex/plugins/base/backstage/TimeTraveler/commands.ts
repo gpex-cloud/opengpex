@@ -47,6 +47,7 @@ export const TIMETRAVEL_COMMANDS = {
   undo: {
     id: P.CMD_UNDO,
     name: 'Time Travel Undo',
+    category: 'History',
     shortcuts: [{ key: 'z', meta: true }, { key: 'z', ctrl: true }],
     execute: (ctx: EditorContextValue) => {
       ctx.actions.history.undo();
@@ -55,6 +56,7 @@ export const TIMETRAVEL_COMMANDS = {
   redo: {
     id: P.CMD_REDO,
     name: 'Time Travel Redo',
+    category: 'History',
     shortcuts: [
       { key: 'z', meta: true, shift: true },
       { key: 'z', ctrl: true, shift: true },
@@ -68,6 +70,7 @@ export const TIMETRAVEL_COMMANDS = {
   revert: {
     id: P.CMD_REVERT,
     name: 'Revert to Original',
+    category: 'History',
     undoable: false,
     shortcuts: [{ key: 'r', meta: true, shift: true }, { key: 'r', ctrl: true, shift: true }],
     execute: async (ctx: EditorContextValue): Promise<void> => {

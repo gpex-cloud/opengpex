@@ -144,6 +144,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   toggleMode: {
     id: P.CMD_TOGGLE_MODE,
     name: 'Toggle Clip Mode',
+    category: 'Selection',
     execute: async (ctx: EditorContextValue) => {
       // Re-Canvas is a fully *orthogonal* modal — Space must not leak into it.
       if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
@@ -174,6 +175,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   cycleToolForward: {
     id: P.CMD_CYCLE_TOOL_FORWARD,
     name: 'Cycle Clip Tool (Forward)',
+    category: 'Selection',
     execute: (ctx: EditorContextValue) => {
       if (ctx.state.interaction.interactionMode !== 'clip') return;
       if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
@@ -192,6 +194,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   cycleToolBackward: {
     id: P.CMD_CYCLE_TOOL_BACKWARD,
     name: 'Cycle Clip Tool (Backward)',
+    category: 'Selection',
     execute: (ctx: EditorContextValue) => {
       if (ctx.state.interaction.interactionMode !== 'clip') return;
       if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
@@ -222,6 +225,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   exitClip: {
     id: P.CMD_EXIT_CLIP_MODE,
     name: 'Exit Clip / Re-Canvas',
+    category: 'Selection',
     execute: (ctx: EditorContextValue) => {
       if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) {
         ctx.scoped.setSignal(P.SIGNAL_RE_CANVAS, false);
@@ -253,6 +257,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   commitPeel: {
     id: P.CMD_COMMIT_PEEL,
     name: 'Commit Peel & Exit Clip',
+    category: 'Selection',
     execute: async (ctx: EditorContextValue) => {
       if (ctx.state.interaction.interactionMode !== 'clip') return;
 
@@ -446,6 +451,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   toggleAntiAlias: {
     id: P.CMD_TOGGLE_ANTI_ALIAS,
     name: 'Toggle Anti-Alias',
+    category: 'Selection',
     undoable: true,
     // ─── Shortcut: double-tap `A` ──────────────────────────────────────────
     // Why double-tap rather than single?
@@ -614,6 +620,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   drillSelection: {
     id: P.CMD_DRILL_SELECTION,
     name: 'Delete Selection (Feathered)',
+    category: 'Selection',
     shortcuts: [
       { key: 'Backspace' },
       { key: 'Delete' }
@@ -632,6 +639,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   layerViaCopy: {
     id: P.CMD_LAYER_VIA_COPY,
     name: 'Layer via Copy',
+    category: 'Selection',
     shortcuts: [{ key: 'j', meta: true }, { key: 'j', ctrl: true }],
     execute: (ctx: EditorContextValue) => {
       const feather = (ctx.scoped?.getSignal(P.SIGNAL_CLIP_FEATHER) as number) || 0;
@@ -647,6 +655,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   layerViaCut: {
     id: P.CMD_LAYER_VIA_CUT,
     name: 'Layer via Cut',
+    category: 'Selection',
     shortcuts: [{ key: 'j', meta: true, shift: true }, { key: 'j', ctrl: true, shift: true }],
     execute: (ctx: EditorContextValue) => {
       const feather = (ctx.scoped?.getSignal(P.SIGNAL_CLIP_FEATHER) as number) || 0;
@@ -664,6 +673,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   selectFromAlpha: {
     id: P.CMD_SELECT_FROM_ALPHA,
     name: 'Select from Alpha',
+    category: 'Selection',
     undoable: true,
     shortcuts: [{ key: 'a', meta: true, shift: true }, { key: 'a', ctrl: true, shift: true }],
     execute: async (ctx: EditorContextValue) => {
@@ -776,6 +786,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   invertSelection: {
     id: P.CMD_INVERT_SELECTION,
     name: 'Invert Selection',
+    category: 'Selection',
     undoable: true,
     shortcuts: [{ key: 'i', meta: true, shift: true }, { key: 'i', ctrl: true, shift: true }],
     execute: (ctx: EditorContextValue) => {
@@ -890,6 +901,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   selectAll: {
     id: P.CMD_SELECT_ALL,
     name: 'Select All',
+    category: 'Selection',
     undoable: true,
     shortcuts: [{ key: 'a', meta: true }, { key: 'a', ctrl: true }],
     execute: (ctx: EditorContextValue) => {
@@ -926,6 +938,7 @@ export const CLIP_OPTIONS_COMMANDS = {
   deselect: {
     id: P.CMD_DESELECT,
     name: 'Deselect',
+    category: 'Selection',
     undoable: true,
     shortcuts: [{ key: 'd', meta: true }, { key: 'd', ctrl: true }],
     execute: async (ctx: EditorContextValue) => {

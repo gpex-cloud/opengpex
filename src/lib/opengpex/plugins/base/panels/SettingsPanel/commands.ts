@@ -27,9 +27,11 @@ export const SETTINGS_COMMANDS = {
   toggle: {
     id: P.CMD_TOGGLE,
     name: 'Toggle Settings Panel',
+    category: 'View',
     execute: (ctx: EditorContextValue) => {
       const { toggleSignal } = ctx.scoped || {};
       toggleSignal?.(P.SIGNAL_OPEN);
     },
+    shortcuts: [{ key: ',', meta: true }, { key: ',', ctrl: true }]
   } as EditorCommand<void, void>,
 };

@@ -68,6 +68,7 @@ export const LayerClipCommands = {
   copy: {
     id: P.ADV_LAYER_CLIP_COPY,
     name: 'Copy',
+    category: 'Clipboard',
     execute: (ctx: EditorContextValue): Promise<void> => {
       const { assets } = ctx;
       return assets.withSession(async () => {
@@ -101,6 +102,7 @@ export const LayerClipCommands = {
   cut: {
     id: P.ADV_LAYER_CLIP_CUT,
     name: 'Cut',
+    category: 'Clipboard',
     undoable: true,
     execute: (ctx: EditorContextValue): Promise<void> => {
       const { assets } = ctx;

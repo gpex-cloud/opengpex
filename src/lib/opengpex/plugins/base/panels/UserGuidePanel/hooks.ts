@@ -53,24 +53,28 @@ export const useUserGuide = () => {
     const allPlugins = plugins.getAllPlugins();
     const groups: Record<string, GroupedCategory> = {};
 
+    // Collect all commands with shortcuts from all plugins, grouped by cmd.category
     allPlugins.forEach(p => {
       const cmdsWithShortcuts = p.commands?.filter(c => c.shortcut || c.shortcuts) || [];
       if (cmdsWithShortcuts.length === 0) return;
 
-      const rawCat = p.manifest?.category || 'General';
-      const catName = rawCat.charAt(0).toUpperCase() + rawCat.slice(1).toLowerCase();
-
-      if (!groups[catName]) {
-        groups[catName] = { category: catName, commands: [] };
-      }
       cmdsWithShortcuts.forEach(c => {
+        const catName = c.category || 'Others';
+        if (!groups[catName]) {
+          groups[catName] = { category: catName, commands: [] };
+        }
         if (!groups[catName].commands.some(x => x.uid === c.uid)) {
           groups[catName].commands.push(c);
         }
       });
     });
 
-    return Object.values(groups).sort((a, b) => a.category.localeCompare(b.category));
+    // Sort groups: 'Others' always last, rest alphabetically
+    return Object.values(groups).sort((a, b) => {
+      if (a.category === 'Others') return 1;
+      if (b.category === 'Others') return -1;
+      return a.category.localeCompare(b.category);
+    });
   }, [plugins, allCommandsSnapshot]);
 
   const advancedTabsData = useMemo(() => {
@@ -86,22 +90,21 @@ export const useUserGuide = () => {
     const groups: Record<string, GroupedCategory> = {};
 
     advancedCommands.forEach(c => {
-      const parts = c.uid.split('.');
-      let xxx = parts[0] === 'adv' || parts[0] === 'cmd' ? parts[1] : parts[0];
-      if (xxx === 'layer_panel') {
-        xxx = 'layer';
+      const catName = c.category || 'Others';
+      if (!groups[catName]) {
+        groups[catName] = { category: catName, commands: [] };
       }
-      const category = xxx ? (xxx.charAt(0).toUpperCase() + xxx.slice(1)) : 'General';
-
-      if (!groups[category]) {
-        groups[category] = { category, commands: [] };
-      }
-      if (!groups[category].commands.some(x => x.uid === c.uid)) {
-        groups[category].commands.push(c);
+      if (!groups[catName].commands.some(x => x.uid === c.uid)) {
+        groups[catName].commands.push(c);
       }
     });
 
-    return Object.values(groups).sort((a, b) => a.category.localeCompare(b.category));
+    // Sort groups: 'Others' always last, rest alphabetically
+    return Object.values(groups).sort((a, b) => {
+      if (a.category === 'Others') return 1;
+      if (b.category === 'Others') return -1;
+      return a.category.localeCompare(b.category);
+    });
   }, [plugins, allCommandsSnapshot]);
 
   return {

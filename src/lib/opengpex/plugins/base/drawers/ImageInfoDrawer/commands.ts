@@ -44,6 +44,7 @@ export const IMAGE_INFO_COMMANDS = {
    download: {
       id: P.CMD_DOWNLOAD,
       name: 'Download Creation',
+      category: 'File',
       execute: async (ctx: EditorContextValue) => {
          const { activeFrame, state, pixels, files, geometry } = ctx;
          const { selfConfig } = ctx.scoped || {};
@@ -171,7 +172,7 @@ export const IMAGE_INFO_COMMANDS = {
             console.error('[ExportPanel] Download failed:', err);
          }
       },
-      shortcuts: [{ key: 's', ctrl: true, shift: true }, { key: 'e', ctrl: true }]
+      shortcuts: [{ key: 's', meta: true, shift: true }, { key: 's', ctrl: true, shift: true }]
    } as EditorCommand<void, Promise<void>>,
 
    applyResize: {

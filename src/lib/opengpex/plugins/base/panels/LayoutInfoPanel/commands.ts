@@ -29,6 +29,7 @@ export const LAYOUT_COMMANDS = {
   toggle: {
     id: P.CMD_TOGGLE,
     name: 'Toggle Layout Inspector',
+    category: 'Debug',
     execute: (ctx: EditorContextValue) => {
       const { selfConfig, setSelfConfig } = ctx.scoped || {};
       const config = (selfConfig as P.LayoutConfig) || { enabled: false };

@@ -28,6 +28,7 @@ export const SMART_GUIDES_COMMANDS = {
   toggle: {
     id: P.CMD_TOGGLE,
     name: 'Toggle Smart Guides',
+    category: 'View',
     execute: (ctx: EditorContextValue) => {
       const { selfConfig, setSelfConfig } = ctx.scoped || {};
       const current = (selfConfig as P.SmartGuidesConfig)?.enabled ?? true;
@@ -39,10 +40,11 @@ export const SMART_GUIDES_COMMANDS = {
   openSettings: {
     id: P.CMD_OPEN_SETTINGS,
     name: 'Smart Guides Settings',
+    category: 'View',
     execute: (ctx: EditorContextValue) => {
       // Open settings panel and navigate to the Guides tab
       ctx.actions.setStateSignal(SettingsPanelAPI.signals.open, true);
-      ctx.actions.setStateSignal(SettingsPanelAPI.signals.tab, 'Guides');
+      ctx.actions.setStateSignal(SettingsPanelAPI.signals.tab, 'Smart Guides');
     },
     shortcut: { key: ';', meta: true }
   } as EditorCommand<void, void>

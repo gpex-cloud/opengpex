@@ -71,6 +71,7 @@ export const CRAFT_COMMANDS = {
   setCraftText: {
     id: P.CMD_SET_CRAFT_TEXT,
     name: 'Text Tool',
+    category: 'Drawing',
     execute: (ctx: EditorContextValue) => {
       activateCraft(ctx, 'text');
     },
@@ -80,6 +81,7 @@ export const CRAFT_COMMANDS = {
   setCraftBrush: {
     id: P.CMD_SET_CRAFT_BRUSH,
     name: 'Brush Tool',
+    category: 'Drawing',
     execute: (ctx: EditorContextValue) => {
       activateCraft(ctx, 'brush');
     },
@@ -89,6 +91,7 @@ export const CRAFT_COMMANDS = {
   setCraftEraser: {
     id: P.CMD_SET_CRAFT_ERASER,
     name: 'Eraser Tool',
+    category: 'Drawing',
     execute: (ctx: EditorContextValue) => {
       activateCraft(ctx, 'eraser');
     },
@@ -98,6 +101,7 @@ export const CRAFT_COMMANDS = {
   deactivateCraft: {
     id: P.CMD_DEACTIVATE_CRAFT,
     name: 'Deactivate Craft Tool',
+    category: 'Drawing',
     execute: (ctx: EditorContextValue) => {
       deactivate(ctx);
     },
@@ -109,6 +113,7 @@ export const CRAFT_COMMANDS = {
   brushSizeUp: {
     id: P.CMD_BRUSH_SIZE_UP,
     name: 'Increase Brush Size',
+    category: 'Drawing',
     execute: (ctx: EditorContextValue) => {
       adjustCraftSize(ctx, 1);
     },
@@ -118,6 +123,7 @@ export const CRAFT_COMMANDS = {
   brushSizeDown: {
     id: P.CMD_BRUSH_SIZE_DOWN,
     name: 'Decrease Brush Size',
+    category: 'Drawing',
     execute: (ctx: EditorContextValue) => {
       adjustCraftSize(ctx, -1);
     },
@@ -129,6 +135,7 @@ export const CRAFT_COMMANDS = {
   brushOpacityUp: {
     id: P.CMD_BRUSH_OPACITY_UP,
     name: 'Increase Brush Opacity',
+    category: 'Drawing',
     execute: (ctx: EditorContextValue) => {
       adjustBrushOpacity(ctx, 10);
     },
@@ -139,6 +146,7 @@ export const CRAFT_COMMANDS = {
   brushOpacityDown: {
     id: P.CMD_BRUSH_OPACITY_DOWN,
     name: 'Decrease Brush Opacity',
+    category: 'Drawing',
     execute: (ctx: EditorContextValue) => {
       adjustBrushOpacity(ctx, -10);
     },
@@ -149,6 +157,7 @@ export const CRAFT_COMMANDS = {
   brushHardnessUp: {
     id: P.CMD_BRUSH_HARDNESS_UP,
     name: 'Increase Brush Hardness',
+    category: 'Drawing',
     execute: (ctx: EditorContextValue) => {
       adjustBrushHardness(ctx, 10);
     },
@@ -159,6 +168,7 @@ export const CRAFT_COMMANDS = {
   brushHardnessDown: {
     id: P.CMD_BRUSH_HARDNESS_DOWN,
     name: 'Decrease Brush Hardness',
+    category: 'Drawing',
     execute: (ctx: EditorContextValue) => {
       adjustBrushHardness(ctx, -10);
     },

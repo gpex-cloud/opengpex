@@ -37,6 +37,7 @@ export const TAB_DOCK_COMMANDS = {
   nextFrame: {
     id: P.CMD_NEXT_FRAME,
     name: 'Next Creation',
+    category: 'View',
     execute: (ctx: EditorContextValue) => {
       const { state, actions } = ctx;
       const { frames, activeFrameId } = state;
@@ -51,6 +52,7 @@ export const TAB_DOCK_COMMANDS = {
   prevFrame: {
     id: P.CMD_PREV_FRAME,
     name: 'Previous Creation',
+    category: 'View',
     execute: (ctx: EditorContextValue) => {
       const { state, actions } = ctx;
       const { frames, activeFrameId } = state;

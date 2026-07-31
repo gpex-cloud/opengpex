@@ -27,6 +27,7 @@ export const DEBUG_COMMANDS = {
   toggle: {
     id: P.CMD_TOGGLE,
     name: 'Toggle Debug Info',
+    category: 'Debug',
     execute: (ctx: EditorContextValue) => {
       const { selfConfig, setSelfConfig } = ctx.scoped || {};
       const current = (selfConfig as P.DebugConfig)?.enabled ?? false;

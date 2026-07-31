@@ -32,6 +32,7 @@ export const COLOR_OPTIONS_COMMANDS = {
   fillAsLayer: {
     id: P.CMD_FILL_AS_LAYER,
     name: 'Fill as New Layer',
+    category: 'Color',
     undoable: true,
     shortcuts: [{ key: 'Backspace', alt: true }, { key: 'Delete', alt: true }],
     execute: (ctx: EditorContextValue, payload?: { fillColor: string }) => {
@@ -137,6 +138,7 @@ export const COLOR_OPTIONS_COMMANDS = {
   sampleColor: {
     id: P.CMD_SAMPLE_COLOR,
     name: 'Sample Color',
+    category: 'Color',
     undoable: false,
     shortcut: { key: 'i' },
     execute: () => {

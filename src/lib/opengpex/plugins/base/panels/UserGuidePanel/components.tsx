@@ -28,6 +28,24 @@ import TabSwitcher from "@opengpex/editor/widgets/TabSwitcher";
 import { useUserGuide } from "./hooks";
 
 /**
+ * Condense an array of shortcut labels for display. Collapses consecutive
+ * single-character digit keys (e.g. ["1","2",...,"0"]) into a range "1 – 0".
+ * For non-digit sequences with > 3 labels, shows first 2 + count indicator.
+ */
+function condenseLabels(labels: string[]): string[] {
+  if (labels.length <= 3) return labels;
+
+  // Detect all-single-digit labels (the opacity shortcut pattern)
+  const allSingleDigits = labels.every(l => /^\d$/.test(l));
+  if (allSingleDigits) {
+    return [`${labels[0]} – ${labels[labels.length - 1]}`];
+  }
+
+  // Generic fallback: show first 2 + count
+  return [...labels.slice(0, 2), `+${labels.length - 2}`];
+}
+
+/**
  * GuideTrigger: Mounted to TOOL_SETTINGS
  * Gets toggleCmd command handler via useUserGuide, eliminating hard-coded command strings.
  */
@@ -114,7 +132,7 @@ export function GuidePanel() {
                         {cmd.name}
                       </span>
                       <div className="flex items-center gap-1.5">
-                        {getShortcutLabels(cmd.uid).map(
+                        {condenseLabels(getShortcutLabels(cmd.uid)).map(
                           (label: string, idx: number, arr: string[]) => (
                             <React.Fragment key={`${cmd.uid}-key-${idx}`}>
                               <span className="bg-[var(--bg-stage)] px-2 py-0.5 rounded border border-[var(--border-subtle)] text-[var(--text-main)] font-bold text-[9px] tabular-nums shadow-sm">

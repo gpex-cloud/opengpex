@@ -30,6 +30,7 @@ export const ViewportTranslateCommands = {
   fit: {
     id: P.ADV_VIEWPORT_FIT,
     name: 'Fit Visible',
+    category: 'View',
     execute: (ctx: EditorContextValue): void => {
       const { geometry, activeFrame, state, actions, volatileRef } = ctx;
       if (!activeFrame) return;
@@ -62,6 +63,7 @@ export const ViewportTranslateCommands = {
   actualSize: {
     id: P.ADV_VIEWPORT_ACTUAL,
     name: 'Actual Size',
+    category: 'View',
     execute: (ctx: EditorContextValue): void => {
       const { geometry, activeFrame, state, actions, volatileRef } = ctx;
       if (!activeFrame) return;

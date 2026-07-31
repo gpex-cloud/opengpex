@@ -125,6 +125,12 @@ export type PluginShowPolicy = 'always-show' | 'frame-required';
 export interface EditorCommand<P = never, R = unknown> {
   id: string;
   name: string;
+  /**
+   * Workflow category for grouping in the User Guide panel.
+   * Examples: 'History', 'Selection', 'Drawing', 'Color', 'Layers', 'View', 'File'.
+   * Commands without a category are placed in the 'Others' group.
+   */
+  category?: string;
   undoable?: boolean;
   execute: (ctx: EditorContextValue, payload: P) => R;
   shortcut?: Omit<EditorShortcut, 'id' | 'name' | 'category' | 'action' | 'description'>;

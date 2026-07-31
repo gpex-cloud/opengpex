@@ -27,6 +27,7 @@ export const PIXEL_GRID_COMMANDS = {
   toggleGrid: {
     id: P.CMD_TOGGLE,
     name: 'Toggle Pixel Grid',
+    category: 'View',
     execute: (ctx: EditorContextValue) => {
       const { selfConfig, setSelfConfig } = ctx.scoped || {};
       const current = (selfConfig as P.PixelGridConfig)?.enabled ?? true;
