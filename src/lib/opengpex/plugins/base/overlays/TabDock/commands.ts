@@ -41,12 +41,14 @@ export const TAB_DOCK_COMMANDS = {
     execute: (ctx: EditorContextValue) => {
       const { state, actions } = ctx;
       const { frames, activeFrameId } = state;
-      if (frames.order.length <= 1) return;
-      const currentIndex = frames.order.indexOf(activeFrameId || '');
-      const nextIndex = (currentIndex + 1) % frames.order.length;
-      actions.switchFrame(frames.order[nextIndex]);
+      // Only navigate among trunk frames (those without parentId)
+      const trunkOrder = frames.order.filter(id => !frames.byId[id]?.parentId);
+      if (trunkOrder.length <= 1) return;
+      const currentIndex = trunkOrder.indexOf(activeFrameId || '');
+      const nextIndex = (currentIndex + 1) % trunkOrder.length;
+      actions.switchFrame(trunkOrder[nextIndex]);
     },
-    shortcuts: [{ key: 'Tab', ctrl: true }, { key: 'ArrowRight', alt: true }]
+    shortcuts: [{ key: 'ArrowRight', alt: true }]
   } as EditorCommand<void, void>,
 
   prevFrame: {
@@ -56,12 +58,14 @@ export const TAB_DOCK_COMMANDS = {
     execute: (ctx: EditorContextValue) => {
       const { state, actions } = ctx;
       const { frames, activeFrameId } = state;
-      if (frames.order.length <= 1) return;
-      const currentIndex = frames.order.indexOf(activeFrameId || '');
-      const prevIndex = (currentIndex - 1 + frames.order.length) % frames.order.length;
-      actions.switchFrame(frames.order[prevIndex]);
+      // Only navigate among trunk frames (those without parentId)
+      const trunkOrder = frames.order.filter(id => !frames.byId[id]?.parentId);
+      if (trunkOrder.length <= 1) return;
+      const currentIndex = trunkOrder.indexOf(activeFrameId || '');
+      const prevIndex = (currentIndex - 1 + trunkOrder.length) % trunkOrder.length;
+      actions.switchFrame(trunkOrder[prevIndex]);
     },
-    shortcuts: [{ key: 'Tab', ctrl: true, shift: true }, { key: 'ArrowLeft', alt: true }]
+    shortcuts: [{ key: 'ArrowLeft', alt: true }]
   } as EditorCommand<void, void>,
 
   openSettings: {

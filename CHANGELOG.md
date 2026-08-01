@@ -6,6 +6,8 @@ All notable changes to OpenGPEX are documented in this file.
 
 ## v1.0.0-beta.38
 
+- Zoom slider overhaul: piecewise scale mapping with center-pivot zoom, clickable tick marks (.25–32x) with snap-to-tick, larger hit areas
+- TabDock frame navigation (Alt+←/→): restrict to trunk frames only, skip branch frames
 - Unified filter pipeline: all adjustments now go through a single rendering path (no more legacy/advanced split)
 - Improved brightness and contrast curves (midtone-weighted quadratic + tanh S-curve, preserves blacks and whites)
 - Filter rendering performance: cache results during pan/zoom to avoid redundant recomputation
