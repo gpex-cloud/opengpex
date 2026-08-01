@@ -4,6 +4,17 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.38
+
+- Unified filter pipeline: all adjustments now go through a single rendering path (no more legacy/advanced split)
+- Improved brightness and contrast curves (midtone-weighted quadratic + tanh S-curve, preserves blacks and whites)
+- Filter rendering performance: cache results during pan/zoom to avoid redundant recomputation
+- Viewport zoom range expanded to 10%–12800% with centralized constants
+- Fix LAN access: auto-detect local IPs for dev server cross-origin allowlist
+- Fix image loading crash on HTTP LAN by adding MurmurHash3-128 fallback hash
+
+---
+
 ## v1.0.0-beta.37
 
 - Rework brush-related keyboard shortcuts and fix Alt/Option key issues on macOS
