@@ -40,6 +40,43 @@ import { useLayerTweens } from './useLayerTweens';
 import { stageComposer } from './StageComposer';
 
 /**
+ * Determine the optimal Canvas 2D colorSpace for the current environment.
+ *
+ * The Canvas `colorSpace` parameter answers: "What color space are the pixel
+ * values I'm drawing into this canvas encoded in?"
+ *
+ * ── Current behavior (pre-Phase C) ──
+ * The internal pipeline converts ALL imported images to sRGB (via iccToSrgb).
+ * Therefore canvas pixels are always sRGB-encoded. We only use 'display-p3'
+ * when the display hardware natively supports P3, because:
+ *   • On P3 hardware (e.g. Apple displays): the browser can composite the
+ *     canvas directly to P3 screen with minimal overhead.
+ *   • On sRGB hardware (e.g. most Windows laptops with Intel Iris):
+ *     'display-p3' forces FP16 textures (2× bandwidth) and an unnecessary
+ *     P3→sRGB conversion on every frame — devastating for integrated GPUs.
+ *     See: docs/opengpex/plans/20260801_intel_iris_canvas_perf_analysis.md
+ *
+ * ── Future evolution (Phase C: Wide Gamut support) ──
+ * When the pipeline supports native P3/AdobeRGB working spaces (Frame.colorSpace),
+ * this function should evolve to consider the document's actual color space:
+ *
+ *   function getCanvasColorSpace(frame: Frame): PredefinedColorSpace {
+ *     // Document is P3 AND display supports P3 → P3 canvas (zero-conversion path)
+ *     if (frame.colorSpace === 'display-p3' && displaySupportsP3()) return 'display-p3';
+ *     // Otherwise → sRGB canvas (ColorEngine converts to sRGB before drawing)
+ *     return 'srgb';
+ *   }
+ *
+ * See: docs/opengpex/plans/20260729_color_management_architecture_evolution.md Phase C
+ */
+function getCanvasColorSpace(): PredefinedColorSpace {
+  // P3 wide gamut display detected — safe to use P3 canvas (native, zero-cost)
+  if (window.matchMedia?.('(color-gamut: p3)')?.matches) return 'display-p3';
+  // Default: sRGB canvas — maximum compatibility and performance
+  return 'srgb';
+}
+
+/**
  * CanvasStage: Industrial-grade high-performance rendering engine (60FPS+ smooth optimized version)
  */
 export default function CanvasStage() {
@@ -173,7 +210,7 @@ export default function CanvasStage() {
     // 4. Execute scheduled rendering
     const ctx = canvas.getContext('2d', {
       alpha: true,
-      colorSpace: 'display-p3' as PredefinedColorSpace
+      colorSpace: getCanvasColorSpace(),
     }) as CanvasRenderingContext2D;
 
     if ('attach' in engine) {

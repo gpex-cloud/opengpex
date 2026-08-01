@@ -20,6 +20,7 @@
 import { TileMetadata, AssetRef } from '@opengpex/editor/core/types';
 import { assetStore, ASSET_VERSION } from './AssetStore';
 import { resourceTracker } from '@opengpex/editor/core/advanced/ResourceTracker';
+import { calculateContentHash } from '@opengpex/editor/core/helpers/hash';
 
 /**
  * AssetState: Asset state machine
@@ -103,15 +104,11 @@ export class AssetService {
   }
 
   /**
-   * Compute SHA-256 hash of a Blob using native Web Crypto API.
-   * `crypto.subtle.digest` is implemented in native code and executes
-   * asynchronously without blocking the main thread.
+   * Compute content hash of a Blob for asset deduplication.
+   * Delegates to the shared helper: SHA-256 (secure context) or MurmurHash3-128 (HTTP LAN fallback).
    */
-  private async calculateHash(blob: Blob): Promise<string> {
-    const buffer = await blob.arrayBuffer();
-    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-    const hashArray = new Uint8Array(hashBuffer);
-    return Array.from(hashArray).map(b => b.toString(16).padStart(2, '0')).join('');
+  private calculateHash(blob: Blob): Promise<string> {
+    return calculateContentHash(blob);
   }
 
   /**

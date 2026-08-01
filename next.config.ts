@@ -39,6 +39,32 @@ import type { NextConfig } from "next";
 import fs from "fs";
 import path from "path";
 
+/**
+ * Dynamically detect all local network IPs so any LAN device can access the dev server.
+ * Only called in development mode. Wrapped in try-catch so production builds
+ * (e.g. Cloudflare Workers / edge environments without Node `os` module) never fail.
+ */
+function getLocalNetworkIPs(): string[] {
+  if (process.env.NODE_ENV !== "development") return [];
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const os = require("os");
+    const interfaces = os.networkInterfaces();
+    const ips: string[] = [];
+    for (const iface of Object.values(interfaces) as (object[] | undefined)[]) {
+      if (!iface) continue;
+      for (const info of iface as { internal: boolean; family: string; address: string }[]) {
+        if (!info.internal && info.family === "IPv4") {
+          ips.push(info.address);
+        }
+      }
+    }
+    return ips;
+  } catch {
+    return [];
+  }
+}
+
 // Read package.json version and inject as CORE_VERSION to client (determined at build time, auto-synced on release)
 const pkg = JSON.parse(fs.readFileSync(path.resolve(/*turbopackIgnore: true*/ process.cwd(), "package.json"), "utf-8"));
 
@@ -62,6 +88,10 @@ if (!fs.existsSync(userRegistryPath)) {
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+
+  // Allow LAN devices to access the dev server (HMR/webpack-hmr cross-origin)
+  // Dynamically detects this machine's LAN IPs at startup — no manual updates needed
+  allowedDevOrigins: getLocalNetworkIPs(),
 
   // Cross-Origin Isolation headers: enable SharedArrayBuffer for WASM multi-threading
   // Required by wasm-vips (pthreads) and benefits other heavy WASM workloads.
