@@ -244,23 +244,27 @@ export function normalizeFilterDescriptors(layer: Pick<Layer, 'adjustments' | 'c
 }
 
 /**
- * True when the layer has ANY non-identity descriptor. Cheap gate used by
- * `painter2d.ts` before consulting `AsyncFilterCache`.
- */
-export function hasActiveFilters(layer: Pick<Layer, 'adjustments' | 'curves' | 'levels' | 'channelMix' | 'colorBalance'>): boolean {
-  return normalizeFilterDescriptors(layer).length > 0;
-}
-
-/**
- * True when the layer has ANY "advanced" (non-legacy) descriptor — i.e.
- * anything that Canvas2D `ctx.filter` cannot render natively. Legacy
- * brightness / contrast / saturation / hueRotate / blur alone stay on the
- * fast CSS-filter path.
+ * True when the layer has ANY non-identity filter descriptor.
+ * Gate used by Canvas2dEngine before entering resolveFilteredSource().
+ * Replaces the former hasAdvancedFilters() which only checked curves/levels/channelMix/colorBalance.
  *
- * Plan B: colorBalance is ALWAYS advanced (requires independent per-pixel
- * pass with cross-channel luminance dependency — cannot fold into LUT).
+ * NOTE: blur is handled by the offscreen composite path, not the filter pipeline.
+ * It does NOT count as a "filter" for this gate — a blur-only layer should not
+ * be forced into the FilterFastTrack downsampling path.
  */
-export function hasAdvancedFilters(layer: Pick<Layer, 'curves' | 'levels' | 'channelMix' | 'colorBalance'>): boolean {
+export function hasFilters(
+  layer: Pick<Layer, 'adjustments' | 'curves' | 'levels' | 'channelMix' | 'colorBalance'>
+): boolean {
+  // Quick bail: check adjustments first (cheapest check)
+  const adj = layer.adjustments;
+  if (adj) {
+    if (adj.brightness !== undefined && adj.brightness !== 100) return true;
+    if (adj.contrast !== undefined && adj.contrast !== 100) return true;
+    if (adj.saturation !== undefined && adj.saturation !== 100) return true;
+    if (adj.hueRotate !== undefined && adj.hueRotate !== 0) return true;
+    // NOTE: blur is handled by offscreen composite path, not the filter pipeline.
+  }
+  // Advanced checks
   return (
     !isIdentityCurve(layer.curves?.rgb) ||
     !isIdentityCurve(layer.curves?.red) ||

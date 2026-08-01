@@ -276,9 +276,9 @@ export class Canvas2dEngine implements IRenderer {
     // [Core Dispatch Logic]
     const hasBitmap = !!(layer.bitmapMasks && layer.bitmapMasks.some(m => m.enabled));
     const isTooLarge = (layer.bounding.w * layer.bounding.h) > MAX_SAFE_EXPORT_PIXELS;
-    const hasAdvanced = !isExporting && this.filterFastTrack.hasAdvanced(layer);
+    const hasFiltersPipeline = !isExporting && this.filterFastTrack.hasFilters(layer);
     const isInteracting = !!(options.isInteracting || filterCache.isDragging());
-    const shouldUseTiles = tileMeta?.isTiled && (!isExporting || isTooLarge) && !imageOverride && !hasBitmap && !hasAdvanced;
+    const shouldUseTiles = tileMeta?.isTiled && (!isExporting || isTooLarge) && !imageOverride && !hasBitmap && !hasFiltersPipeline;
 
     if (shouldUseTiles) {
       // --- Tile Rendering Path ---
@@ -535,11 +535,17 @@ export class Canvas2dEngine implements IRenderer {
     isInteracting: boolean | undefined,
   ): { img: T; layer: Layer } {
     if (isExporting) return { img, layer };
-    if (!this.filterFastTrack.hasAdvanced(layer)) return { img, layer };
+    if (!this.filterFastTrack.hasFilters(layer)) return { img, layer };
     if (!(img instanceof ImageBitmap)) return { img, layer };
 
     const filters = this.filterFastTrack.normalize(layer);
     if (filters.length === 0) return { img, layer };
+
+    // Build the "stripped" layer: all filter adjustments baked into pixels,
+    // but blur is preserved (handled separately by offscreen composite path).
+    const strippedAdjustments = layer.adjustments?.blur
+      ? { brightness: 100 as const, contrast: 100 as const, saturation: 100 as const, hueRotate: 0 as const, blur: layer.adjustments.blur }
+      : undefined;
 
     // --- Interaction Fast-Track Path (Track A: synchronous LUT/matrix preview) ---
     if (isInteracting) {
@@ -547,7 +553,7 @@ export class Canvas2dEngine implements IRenderer {
       if (resultCanvas) {
         return {
           img: resultCanvas as unknown as T,
-          layer: { ...layer, adjustments: undefined },
+          layer: { ...layer, adjustments: strippedAdjustments },
         };
       }
     }
@@ -560,7 +566,7 @@ export class Canvas2dEngine implements IRenderer {
       }
       return {
         img: filtered as unknown as T,
-        layer: { ...layer, adjustments: undefined },
+        layer: { ...layer, adjustments: strippedAdjustments },
       };
     }
 
@@ -573,7 +579,7 @@ export class Canvas2dEngine implements IRenderer {
       if (bridge) {
         return {
           img: bridge as unknown as T,
-          layer: { ...layer, adjustments: undefined },
+          layer: { ...layer, adjustments: strippedAdjustments },
         };
       }
     }
@@ -582,7 +588,7 @@ export class Canvas2dEngine implements IRenderer {
     if (stale) {
       return {
         img: stale as unknown as T,
-        layer: { ...layer, adjustments: undefined },
+        layer: { ...layer, adjustments: strippedAdjustments },
       };
     }
     return { img, layer };

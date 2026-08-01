@@ -20,7 +20,7 @@
 'use client';
 
 import { EditorCommand, EditorContextValue } from '@opengpex/editor/core/types';
-import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
+import { VIEWPORT_FIT_PADDING, VIEWPORT_ZOOM_MIN, VIEWPORT_ZOOM_MAX } from '@opengpex/editor/core/helpers/presets';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**
@@ -113,7 +113,7 @@ export const ViewportTranslateCommands = {
       const { w: vw, h: vh } = state.ui.viewportDim;
       const { insets } = state.ui.theme.config;
 
-      const boundedK = Math.max(0.01, Math.min(10, k));
+      const boundedK = Math.max(VIEWPORT_ZOOM_MIN, Math.min(VIEWPORT_ZOOM_MAX, k));
 
       const centerX = (vw + insets.fixed.left - insets.fixed.right) / 2;
       const centerY = (vh + insets.top - insets.bottom) / 2;

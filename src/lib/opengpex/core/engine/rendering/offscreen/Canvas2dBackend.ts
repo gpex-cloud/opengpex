@@ -41,7 +41,7 @@ import { workerCache } from '../../worker/cache/WorkerCache';
 import { canvasToBlob, calculateHash, buildTileMeta } from '../../utils/pixel-utils';
 import { shapeToPath2D } from '@opengpex/editor/core/helpers/path2d';
 import { shrinkInvertedMask } from '@opengpex/editor/core/helpers/sub-pixel';
-import { normalizeFilterDescriptors } from '../../protocol/normalizer';
+import { normalizeFilterDescriptors, hasFilters } from '../../protocol/normalizer';
 import { applyFilterChainRGBA8 } from '../shared/filter2d';
 
 export class Canvas2dBackend {
@@ -142,7 +142,7 @@ export class Canvas2dBackend {
     let effectiveDesc = desc;
     let ownedBitmap: ImageBitmap | null = null;
 
-    if (source && this.hasAdvancedFilters(desc)) {
+    if (source && this.hasFiltersForBaking(desc)) {
       const baked = await this.bakeFilters(source, desc);
       if (baked) {
         source = baked.bitmap;
@@ -252,12 +252,13 @@ export class Canvas2dBackend {
   }
 
   /**
-   * Check whether a descriptor has advanced filters that need pixel-level baking.
-   * Basic adjustments (brightness/contrast/saturate/hue-rotate/blur) are handled
-   * by CSS filter in painter.ts — only curves/levels/channelMix need baking.
+   * Check whether a descriptor has ANY non-identity filter that needs pixel-level baking.
+   * All adjustments (brightness/contrast/saturation/hueRotate) plus advanced filters
+   * (curves/levels/channelMix/colorBalance) are now baked via the unified LUT/Matrix pipeline.
+   * Only blur is excluded (handled separately by the offscreen composite path).
    */
-  private hasAdvancedFilters(desc: LayerDescriptor): boolean {
-    return !!(desc.curves || desc.levels || desc.channelMix || desc.colorBalance);
+  private hasFiltersForBaking(desc: LayerDescriptor): boolean {
+    return hasFilters(desc as Parameters<typeof hasFilters>[0]);
   }
 
   /**
@@ -299,6 +300,9 @@ export class Canvas2dBackend {
 
     const strippedDesc: LayerDescriptor = {
       ...desc,
+      adjustments: desc.adjustments?.blur
+        ? { brightness: 100, contrast: 100, saturation: 100, hueRotate: 0, blur: desc.adjustments.blur }
+        : undefined,
       curves: undefined,
       levels: undefined,
       channelMix: undefined,

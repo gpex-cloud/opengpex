@@ -19,6 +19,7 @@
 
 import { Matrix3x3 } from '../matrix';
 import { CameraState, Dimensions, ViewportPoint, Point2D, WorldRect, asWorldRect } from '@opengpex/editor/core/types';
+import { VIEWPORT_ZOOM_MIN, VIEWPORT_ZOOM_MAX } from '@opengpex/editor/core/helpers/presets';
 
 export interface CameraCenterOptions {
   padding?: number;
@@ -98,7 +99,7 @@ export function projectZoom(
   current: CameraState,
   zoomDelta: number,
   anchor: ViewportPoint,
-  limits: { min: number; max: number } = { min: 0.05, max: 20 }
+  limits: { min: number; max: number } = { min: VIEWPORT_ZOOM_MIN, max: VIEWPORT_ZOOM_MAX }
 ): CameraState {
   const { x: curX, y: curY, k: curK } = current;
   const ratio = 1 + zoomDelta;

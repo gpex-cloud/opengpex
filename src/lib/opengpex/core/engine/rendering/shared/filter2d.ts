@@ -362,28 +362,100 @@ export function generateLevelsLUT(
 }
 
 // ────────────────────────────────────────────────────────────
-// Brightness / Contrast (combined LUT)
+// Brightness (non-legacy midtone-weighted quadratic curve)
 // ────────────────────────────────────────────────────────────
 
 /**
- * Build a LUT combining brightness and contrast (both expressed on a 0..200
- * scale where 100 = identity — same convention as `AdjustmentState`).
+ * Build a brightness LUT using midtone-weighted quadratic curve.
+ *
+ * Unlike the legacy linear model (y = x * b), this curve lifts midtones
+ * preferentially while protecting shadows and highlights from clipping:
+ *   y = x + t × 4 × x × (1 - x)
+ * where t = (brightness - 100) / 100, range [-1, +1].
+ *
+ * At t=0 (identity), y=x. At t=+1 (max bright), midtones lift by +1.0
+ * while endpoints stay pinned (x=0→0, x=1→1). Negative t darkens midtones.
+ *
+ * Curve properties:
+ * - x=0 → y=0 (black preserved)
+ * - x=1 → y=1 (white preserved)
+ * - Midtones shift proportionally to t × 4 × x × (1-x)
+ *   which peaks at x=0.5 with magnitude t
  */
-export function generateBrightnessContrastLUT(
+export function generateBrightnessLUT(
   brightness: number = 100,
+  entries: LUTEntries = 256,
+  format?: LUTFormat,
+): LUTOutput {
+  const fmt = format ?? defaultFormatFor(entries);
+  const t = (clamp(brightness, 0, 200) - 100) / 100; // [-1, +1]
+  const lut = allocLUT(entries, fmt);
+  const maxIn = entries - 1;
+  for (let i = 0; i < entries; i++) {
+    const x = i / maxIn;
+    const y = clamp01(x + t * 4 * x * (1 - x));
+    writeLUT(lut, i, y, entries, fmt);
+  }
+  return lut;
+}
+
+// ────────────────────────────────────────────────────────────
+// Contrast (non-legacy tanh S-curve)
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Build a contrast LUT using a tanh-based S-curve.
+ *
+ * At c=0 (identity): y=x.
+ * At c>0: S-curve steepens around midpoint=0.5, expanding midtone range
+ * while compressing (not clipping) shadows and highlights.
+ * At c<0: inverse — compresses toward midpoint (reduces contrast).
+ *
+ * The tanh function is normalized so that (0→0, 1→1) always holds,
+ * unlike the legacy linear model which clips aggressively.
+ *
+ * Curve properties:
+ * - f(0)=0, f(1)=1 always (endpoints never move)
+ * - f(0.5)=0.5 always (midpoint is fixed)
+ * - Positive contrast: S-curve steepens, midtone slope > 1
+ * - Negative contrast: compression toward midpoint, all slopes < 1
+ */
+export function generateContrastLUT(
   contrast: number = 100,
   entries: LUTEntries = 256,
   format?: LUTFormat,
 ): LUTOutput {
   const fmt = format ?? defaultFormatFor(entries);
-  const b = clamp(brightness, 0, 200) / 100;
-  const c = clamp(contrast, 0, 200) / 100;
+  const c = (clamp(contrast, 0, 200) - 100) / 100; // [-1, +1]
   const lut = allocLUT(entries, fmt);
   const maxIn = entries - 1;
-  for (let i = 0; i < entries; i++) {
-    const x = i / maxIn;
-    const y = clamp01((x * b - 0.5) * c + 0.5);
-    writeLUT(lut, i, y, entries, fmt);
+
+  if (Math.abs(c) < 0.001) {
+    // Identity fast path
+    for (let i = 0; i < entries; i++) {
+      writeLUT(lut, i, i / maxIn, entries, fmt);
+    }
+    return lut;
+  }
+
+  if (c > 0) {
+    // S-curve: steepness grows with contrast
+    // factor maps [0, 1] → [1, 5] for visually appropriate range
+    const factor = 1 + c * 4;
+    const normDenom = Math.tanh(factor * 0.5);
+    for (let i = 0; i < entries; i++) {
+      const x = i / maxIn;
+      const y = 0.5 + 0.5 * Math.tanh(factor * (x - 0.5)) / normDenom;
+      writeLUT(lut, i, clamp01(y), entries, fmt);
+    }
+  } else {
+    // Reducing contrast: linear compression toward midpoint
+    const strength = 1 + c; // [0, 1] where 0 = flat gray, 1 = identity
+    for (let i = 0; i < entries; i++) {
+      const x = i / maxIn;
+      const y = 0.5 + (x - 0.5) * strength;
+      writeLUT(lut, i, clamp01(y), entries, fmt);
+    }
   }
   return lut;
 }
@@ -562,11 +634,16 @@ export function buildFusedLUTs(
 
   for (const f of filters) {
     switch (f.type) {
-      case 'brightness':
+      case 'brightness': {
+        const lut = generateBrightnessLUT(f.value, entries, format);
+        red = composeInto(red, lut);
+        green = composeInto(green, lut);
+        blue = composeInto(blue, lut);
+        touched = true;
+        break;
+      }
       case 'contrast': {
-        const brightness = f.type === 'brightness' ? f.value : 100;
-        const contrast = f.type === 'contrast' ? f.value : 100;
-        const lut = generateBrightnessContrastLUT(brightness, contrast, entries, format);
+        const lut = generateContrastLUT(f.value, entries, format);
         red = composeInto(red, lut);
         green = composeInto(green, lut);
         blue = composeInto(blue, lut);

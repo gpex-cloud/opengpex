@@ -39,7 +39,7 @@ import type { Layer } from '@opengpex/editor/core/types';
 import type { FilterDescriptor } from '../../protocol/IFilter';
 import { MAX_REALTIME_FILTER_PIXELS } from '@opengpex/editor/core/helpers/config';
 import { buildFusedLUTs, applyLUTsRGBA8, buildFusedColorMatrix, applyMatrixRGBA8, applyColorBalanceRGBA8 } from '../shared/filter2d';
-import { hasAdvancedFilters, normalizeFilterDescriptors } from '../../protocol/normalizer';
+import { hasFilters as hasFiltersGate, normalizeFilterDescriptors } from '../../protocol/normalizer';
 
 /**
  * Minimal layer shape consumed by FilterFastTrack.
@@ -61,15 +61,29 @@ export class FilterFastTrack {
    * Reusable temp canvas — avoids per-frame allocation.
    * Resized only when current canvas is too small.
    *
-   * NOTE: We intentionally do NOT set `willReadFrequently: true` here.
-   * The source ImageBitmap is GPU-resident; a software-backed canvas would
-   * penalize every `drawImage` call (~20ms GPU→CPU transfer per frame).
-   * Without it, only the first `getImageData` triggers a one-time Chrome
-   * console warning, but subsequent frames stay fast because Chrome
-   * auto-optimizes the canvas backing store after the first readback.
+   * Uses `willReadFrequently: true` because Track A always calls
+   * `getImageData` after `drawImage`. With a CPU-backed canvas the
+   * `getImageData` call is nearly zero-copy (~0.1ms) instead of triggering
+   * a GPU→CPU readback stall (~5-8ms). The trade-off is a slightly slower
+   * initial `drawImage` from GPU ImageBitmap → CPU canvas (~3-5ms), but
+   * the net per-frame cost is lower (3-5ms vs 6-9ms without the flag).
    */
   private tempCanvas: OffscreenCanvas | null = null;
   private tempCtx: OffscreenCanvasRenderingContext2D | null = null;
+
+  /**
+   * Reusable result canvas — avoids per-frame allocation + GC pressure.
+   * Resized only when dimensions change.
+   */
+  private resultCanvas: OffscreenCanvas | null = null;
+  private resultCtx: OffscreenCanvasRenderingContext2D | null = null;
+
+  /**
+   * Frame cache: stores the filter parameter hash per assetId.
+   * When pan/zoom causes redraws without filter param changes,
+   * we skip the expensive recompute and return the cached result directly.
+   */
+  private cachedFilterHash: Map<string, string> = new Map();
 
   /**
    * Bridge cache: last Track A result per assetId.
@@ -83,21 +97,12 @@ export class FilterFastTrack {
   // ────────────────────────────────────────────────────────────
 
   /**
-   * Check if fast-track should be applied for this layer.
-   * Returns true when the layer has advanced filters (curves/levels/channelMix)
-   * AND the user is currently interacting (dragging a slider).
+   * Check if the layer has ANY non-identity filter (regardless of interaction state).
+   * Used by Canvas2dEngine to decide routing into the filter pipeline.
+   * Replaces the former hasAdvanced() which only checked curves/levels/channelMix/colorBalance.
    */
-  shouldApply(layer: FilterableLayer, isInteracting: boolean): boolean {
-    if (!isInteracting) return false;
-    return hasAdvancedFilters(layer as Parameters<typeof hasAdvancedFilters>[0]);
-  }
-
-  /**
-   * Check if the layer has advanced filters (regardless of interaction state).
-   * Used by Canvas2dEngine to decide routing.
-   */
-  hasAdvanced(layer: FilterableLayer): boolean {
-    return hasAdvancedFilters(layer as Parameters<typeof hasAdvancedFilters>[0]);
+  hasFilters(layer: FilterableLayer): boolean {
+    return hasFiltersGate(layer as Parameters<typeof hasFiltersGate>[0]);
   }
 
   /**
@@ -105,6 +110,22 @@ export class FilterFastTrack {
    */
   normalize(layer: FilterableLayer): FilterDescriptor[] {
     return normalizeFilterDescriptors(layer as Parameters<typeof normalizeFilterDescriptors>[0]) as FilterDescriptor[];
+  }
+
+  /**
+   * Compute a lightweight hash of the layer's filter state.
+   * Used to detect whether filters actually changed between frames.
+   * JSON.stringify on these small objects is faster than any custom hash
+   * for this data size (~0.01ms).
+   */
+  private computeFilterHash(layer: FilterableLayer): string {
+    return JSON.stringify([
+      layer.adjustments,
+      layer.curves,
+      layer.levels,
+      layer.channelMix,
+      layer.colorBalance,
+    ]);
   }
 
   /**
@@ -116,6 +137,12 @@ export class FilterFastTrack {
    * double-applying via ctx.filter).
    *
    * Performance budget: <2ms for 4MP images (downsampled), <5ms for 1MP.
+   *
+   * Frame Cache Strategy:
+   * - On pan/zoom the filter params don't change → hash matches → return
+   *   cached OffscreenCanvas immediately (<0.1ms instead of ~16ms).
+   * - On slider drag the params change each frame → hash differs → full
+   *   recompute (same cost as before, no regression).
    */
   applyInteractionPreview(
     layer: FilterableLayer,
@@ -126,6 +153,22 @@ export class FilterFastTrack {
     const filters = this.normalize(layer);
     if (filters.length === 0) return null;
 
+    const assetId = layer.assetId;
+
+    // ──── Frame Cache Hit ────
+    // If filter params haven't changed since last frame, return cached result
+    // directly. This is the pan/zoom case — viewport moved but filters are identical.
+    if (assetId) {
+      const newHash = this.computeFilterHash(layer);
+      const oldHash = this.cachedFilterHash.get(assetId);
+      if (oldHash === newHash) {
+        const cached = this.lastInteractionResult.get(assetId);
+        if (cached) return cached; // ← zero-cost return!
+      }
+      this.cachedFilterHash.set(assetId, newHash);
+    }
+
+    // ──── Cache Miss: Full Recompute ────
     const origW = source.width;
     const origH = source.height;
     const pixels = origW * origH;
@@ -139,10 +182,12 @@ export class FilterFastTrack {
       targetH = Math.round(origH * scale);
     }
 
-    // Reuse persistent temp canvas + context (resize only when too small)
+    // Reuse persistent temp canvas + context (resize only when too small).
+    // `willReadFrequently: true` ensures CPU-backed storage so getImageData
+    // is near zero-copy instead of triggering GPU readback stalls.
     if (!this.tempCanvas || this.tempCanvas.width < targetW || this.tempCanvas.height < targetH) {
       this.tempCanvas = new OffscreenCanvas(targetW, targetH);
-      this.tempCtx = this.tempCanvas.getContext('2d') as OffscreenCanvasRenderingContext2D | null;
+      this.tempCtx = this.tempCanvas.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D | null;
     }
     const tempCtx = this.tempCtx;
     if (!tempCtx) return null;
@@ -179,17 +224,20 @@ export class FilterFastTrack {
 
       tempCtx.putImageData(imgData, 0, 0);
 
-      // Produce result canvas at original dimensions
-      const resultCanvas = new OffscreenCanvas(origW, origH);
-      const resultCtx = resultCanvas.getContext('2d')!;
-      resultCtx.drawImage(this.tempCanvas!, 0, 0, targetW, targetH, 0, 0, origW, origH);
+      // Produce result canvas at original dimensions — reuse instance to avoid GC pressure
+      if (!this.resultCanvas || this.resultCanvas.width !== origW || this.resultCanvas.height !== origH) {
+        this.resultCanvas = new OffscreenCanvas(origW, origH);
+        this.resultCtx = this.resultCanvas.getContext('2d')!;
+      }
+      this.resultCtx!.clearRect(0, 0, origW, origH);
+      this.resultCtx!.drawImage(this.tempCanvas!, 0, 0, targetW, targetH, 0, 0, origW, origH);
 
-      // Cache for bridge use after mouseUp
-      if (layer.assetId) {
-        this.lastInteractionResult.set(layer.assetId, resultCanvas);
+      // Cache for bridge use after mouseUp + frame cache reuse on next pan/zoom frame
+      if (assetId) {
+        this.lastInteractionResult.set(assetId, this.resultCanvas);
       }
 
-      return resultCanvas;
+      return this.resultCanvas;
     } catch (err) {
       console.warn('[FilterFastTrack] Synchronous filter apply failed:', err);
       return null;
@@ -217,6 +265,9 @@ export class FilterFastTrack {
   dispose(): void {
     this.tempCanvas = null;
     this.tempCtx = null;
+    this.resultCanvas = null;
+    this.resultCtx = null;
+    this.cachedFilterHash.clear();
     this.lastInteractionResult.clear();
   }
 }

@@ -44,6 +44,12 @@
  */
 export const VIEWPORT_FIT_PADDING = 40;
 
+/** Minimum viewport zoom scale (10% = 0.10). */
+export const VIEWPORT_ZOOM_MIN = 0.10;
+
+/** Maximum viewport zoom scale (12800% = 128). */
+export const VIEWPORT_ZOOM_MAX = 128;
+
 
 /**
  * Checkerboard background configuration

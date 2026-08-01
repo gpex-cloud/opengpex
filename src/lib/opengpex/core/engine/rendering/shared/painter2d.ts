@@ -87,26 +87,6 @@ export interface DrawOptions {
   dprScale?: number;
 }
 
-// ─── Adjustment CSS Filter (Basic fast path) ───
-
-/**
- * Convert `AdjustmentState` into a CSS-filter string consumable by
- * `CanvasRenderingContext2D.filter` / `OffscreenCanvasRenderingContext2D.filter`.
- *
- * Only the "basic" adjustments (brightness/contrast/saturate/hue-rotate/blur)
- * flow through this helper. Advanced grading (curves/levels/channelMix)
- * goes through the IFilter runtime (FilterFastTrack or Worker).
- */
-function getAdjustmentsData(adj?: AdjustmentState): string {
-  if (!adj) return 'none';
-  const parts: string[] = [];
-  if (adj.brightness !== 100) parts.push(`brightness(${adj.brightness}%)`);
-  if (adj.contrast !== 100) parts.push(`contrast(${adj.contrast}%)`);
-  if (adj.saturation !== 100) parts.push(`saturate(${adj.saturation}%)`);
-  if (adj.hueRotate !== 0) parts.push(`hue-rotate(${adj.hueRotate}deg)`);
-  if (adj.blur !== 0) parts.push(`blur(${adj.blur}px)`);
-  return parts.length > 0 ? parts.join(' ') : 'none';
-}
 
 // ─── Clip Utilities ───
 
@@ -275,7 +255,6 @@ export function drawLayerInstance(
     }
     offCtx.imageSmoothingEnabled = false;
     offCtx.imageSmoothingQuality = imageSmoothingQuality;
-    offCtx.filter = getAdjustmentsData(layer.adjustments);
 
     applyClipSequence(offCtx, layer, clipSequence || []);
     drawLayerContent(offCtx, layer, source, drawRect, dprScale, tileCount);
@@ -310,7 +289,6 @@ export function drawLayerInstance(
 
     ctx.imageSmoothingEnabled = false;
     ctx.imageSmoothingQuality = imageSmoothingQuality;
-    ctx.filter = getAdjustmentsData(layer.adjustments);
     ctx.globalAlpha = (opacity ?? layer.opacity) * (layer.fill ?? 1);
     ctx.globalCompositeOperation = (layer.blendMode || 'source-over') as GlobalCompositeOperation;
 
