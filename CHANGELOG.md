@@ -4,6 +4,17 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.39
+
+- Wide gamut color support: Display P3 and Adobe RGB images now keep their full colors on import
+- Linear-light compositing: layer blending and Gaussian blur produce more natural results on bright areas
+- Fast export: unedited single-layer images export instantly without re-encoding
+- Smart canvas color space: automatically uses P3 when both image and display support it
+- Each document now tracks its working color space
+- Centralized color pipeline replacing scattered per-format logic
+
+---
+
 ## v1.0.0-beta.38
 
 - Zoom slider overhaul: piecewise scale mapping with center-pivot zoom, clickable tick marks (.25–32x) with snap-to-tick, larger hit areas
