@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 globalThis.ImageBitmap = class ImageBitmap {};
 
 import { BmpHandler } from './bmp';
+import type { ImageMetadata } from '../types';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Mock Dependencies
@@ -187,7 +188,7 @@ describe('BmpHandler.encode', () => {
     const canvas = createFakeCanvas(w, h, pixels);
 
     await handler.encode(canvas, {
-      metadata: { colorSpace: 'display-p3' } as any,
+      metadata: { colorSpace: 'display-p3' } as unknown as ImageMetadata,
       exportConfig: { frameColorSpace: 'display-p3' },
     });
 
@@ -272,7 +273,7 @@ describe('BmpHandler.encode', () => {
     const expectedPpm = Math.round(metaDpi / 0.0254);
 
     const blob = await handler.encode(canvas, {
-      metadata: { dpi: metaDpi } as any,
+      metadata: { dpi: metaDpi } as unknown as ImageMetadata,
       exportConfig: {},
     });
     const bmp = await parseBmpHeader(blob);

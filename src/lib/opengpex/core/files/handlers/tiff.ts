@@ -693,13 +693,3 @@ export async function compositeMultiLayer16bit(
   return new Blob([outputBytes.buffer as ArrayBuffer], { type: mimeType });
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Utility: ImageBitmap → OffscreenCanvas
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function bitmapToOffscreen(bitmap: ImageBitmap): OffscreenCanvas {
-  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(bitmap, 0, 0);
-  return canvas;
-}

@@ -26,7 +26,7 @@
 
 import type { LayerDescriptor } from './descriptors';
 import type { FilterDescriptor } from './IFilter';
-import type { Shape, TRC, WorkingColorSpace } from '@opengpex/editor/core/types';
+import type { Shape, TRC } from '@opengpex/editor/core/types';
 
 // ─── CompositeJob ───
 
