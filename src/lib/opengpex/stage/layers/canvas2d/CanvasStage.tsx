@@ -21,6 +21,8 @@
 
 import React, { useRef, useEffect, useLayoutEffect } from 'react';
 import { Frame, CameraState } from '@opengpex/editor/core/types';
+import { convertImageDataColorSpace, displaySupportsP3 } from '@opengpex/editor/core/color/matrices';
+import { resolveDisplayColorSpace } from '@opengpex/editor/core/color/ColorPipeline';
 import { FontService } from '@opengpex/editor/core/fonts';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
@@ -39,42 +41,6 @@ import { DISPLAY_CHANNEL_SIGNAL_KEY, type ChannelMask } from '@opengpex/editor/c
 import { useLayerTweens } from './useLayerTweens';
 import { stageComposer } from './StageComposer';
 
-/**
- * Determine the optimal Canvas 2D colorSpace for the current environment.
- *
- * The Canvas `colorSpace` parameter answers: "What color space are the pixel
- * values I'm drawing into this canvas encoded in?"
- *
- * ── Current behavior (pre-Phase C) ──
- * The internal pipeline converts ALL imported images to sRGB (via iccToSrgb).
- * Therefore canvas pixels are always sRGB-encoded. We only use 'display-p3'
- * when the display hardware natively supports P3, because:
- *   • On P3 hardware (e.g. Apple displays): the browser can composite the
- *     canvas directly to P3 screen with minimal overhead.
- *   • On sRGB hardware (e.g. most Windows laptops with Intel Iris):
- *     'display-p3' forces FP16 textures (2× bandwidth) and an unnecessary
- *     P3→sRGB conversion on every frame — devastating for integrated GPUs.
- *     See: docs/opengpex/plans/20260801_intel_iris_canvas_perf_analysis.md
- *
- * ── Future evolution (Phase C: Wide Gamut support) ──
- * When the pipeline supports native P3/AdobeRGB working spaces (Frame.colorSpace),
- * this function should evolve to consider the document's actual color space:
- *
- *   function getCanvasColorSpace(frame: Frame): PredefinedColorSpace {
- *     // Document is P3 AND display supports P3 → P3 canvas (zero-conversion path)
- *     if (frame.colorSpace === 'display-p3' && displaySupportsP3()) return 'display-p3';
- *     // Otherwise → sRGB canvas (ColorEngine converts to sRGB before drawing)
- *     return 'srgb';
- *   }
- *
- * See: docs/opengpex/plans/20260729_color_management_architecture_evolution.md Phase C
- */
-function getCanvasColorSpace(): PredefinedColorSpace {
-  // P3 wide gamut display detected — safe to use P3 canvas (native, zero-cost)
-  if (window.matchMedia?.('(color-gamut: p3)')?.matches) return 'display-p3';
-  // Default: sRGB canvas — maximum compatibility and performance
-  return 'srgb';
-}
 
 /**
  * CanvasStage: Industrial-grade high-performance rendering engine (60FPS+ smooth optimized version)
@@ -207,10 +173,11 @@ export default function CanvasStage() {
     // [Phase 4] Gets currently active theme (supports System / Dark / Light)
     const theme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
 
-    // 4. Execute scheduled rendering
+    // 4. Execute scheduled rendering (Phase C: resolve display colorSpace via strategy matrix)
+    const canvasColorSpace = resolveDisplayColorSpace(f.colorSpace, displaySupportsP3());
     const ctx = canvas.getContext('2d', {
       alpha: true,
-      colorSpace: getCanvasColorSpace(),
+      colorSpace: canvasColorSpace,
     }) as CanvasRenderingContext2D;
 
     if ('attach' in engine) {
@@ -238,6 +205,25 @@ export default function CanvasStage() {
       },
       theme,
     });
+
+    // ── Phase C (C5): Display-time color space conversion ──
+    // When Frame.colorSpace is P3 (or AdobeRGB) but canvas is sRGB
+    // (display doesn't support P3), apply CPU matrix conversion on the
+    // composited output to ensure accurate color rendering.
+    if (f.colorSpace !== 'srgb' && canvasColorSpace === 'srgb') {
+      const cw = canvas.width;
+      const ch = canvas.height;
+      if (cw > 0 && ch > 0) {
+        const imageData = ctx.getImageData(0, 0, cw, ch);
+        convertImageDataColorSpace(imageData.data, f.colorSpace, 'srgb');
+        ctx.putImageData(imageData, 0, 0);
+        console.debug(
+          '[ColorMgmt] Display: %s→sRGB matrix applied (frame=%s, canvas=%s)',
+          f.colorSpace, f.colorSpace, canvasColorSpace,
+        );
+      }
+    }
+
     const _frameDuration = performance.now() - _frameT0;
     _renderCountRef.current++;
     if (_frameDuration > 16 && _renderCountRef.current > 3) {

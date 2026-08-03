@@ -20,7 +20,7 @@
 export const PLUGIN_ID = 'drawers.image_info';
 export const PLUGIN_AUTHOR = 'opengpex';
 
-export type ExportFormat = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/avif' | 'image/tiff';
+export type ExportFormat = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/avif' | 'image/tiff' | 'image/bmp';
 
 export interface ExportConfig {
     pixels: { w: number; h: number };
@@ -40,6 +40,15 @@ export interface ExportConfig {
     pngCompression?: 0 | 6 | 9;
     /** Export bit depth for PNG: 8 or 16 (default: 16 when source is 16-bit) */
     exportBitDepth?: 8 | 16;
+
+    /**
+     * User's explicit ICC embed override.
+     * - undefined: use strategy default (shouldEmbedIcc without override)
+     * - true: user explicitly wants ICC embedded
+     * - false: user explicitly doesn't want ICC embedded
+     * Only meaningful when FORMAT_COLOR_STRATEGY[exportFormat].supportsIccEmbed === true.
+     */
+    embedIccOverride?: boolean;
 
     // ─── Advanced TIFF Options ──────────────────────────────────────────
     /** Predictor for LZW/ZIP compression (default: 'horizontal'). Ignored for none/jpeg. */

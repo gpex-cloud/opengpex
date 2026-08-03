@@ -141,6 +141,7 @@ export function ImageInfoComponent() {
           baseW={baseW}
           baseH={baseH}
           frameDpi={meta.frameDpi}
+          frameColorSpace={activeFrame.colorSpace}
           isClipMode={isClipMode}
           hasSelection={!!box}
           applyResizeCmd={applyResizeCmd}

@@ -35,8 +35,9 @@ import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import FunctionGroup from "@opengpex/editor/widgets/FunctionGroup";
 import Switch from "@opengpex/editor/widgets/Switch";
 
-import { ExifData, CommandInstance } from "@opengpex/editor/core/types";
-import { formatPrintSize, DPI_PRESETS } from "@opengpex/editor/core/files";
+import { ExifData, CommandInstance, WorkingColorSpace } from "@opengpex/editor/core/types";
+import { formatPrintSize, DPI_PRESETS, SourceFormat } from "@opengpex/editor/core/files";
+import { shouldEmbedIcc, getFormatColorStrategy } from "@opengpex/editor/core/color/ColorPipeline";
 import * as P from "../protocols";
 import {
   deriveResizeState,
@@ -52,6 +53,8 @@ interface ResizeExportControlsProps {
   baseH: number;
   /** Frame's committed DPI (used as fallback when config.dpi is 0) */
   frameDpi: number;
+  /** Frame's working color space (used for ICC embed strategy decision) */
+  frameColorSpace: WorkingColorSpace;
   isClipMode: boolean;
   /** Whether an active selection exists (clip box is non-null) */
   hasSelection?: boolean;
@@ -70,6 +73,7 @@ export function ResizeExportControls({
   baseW,
   baseH,
   frameDpi,
+  frameColorSpace,
   isClipMode,
   hasSelection,
   applyResizeCmd,
@@ -138,7 +142,9 @@ export function ResizeExportControls({
             ? "image/avif"
             : val === "TIFF"
               ? "image/tiff"
-              : "image/webp";
+              : val === "BMP"
+                ? "image/bmp"
+                : "image/webp";
     updateConfig({ format: format as P.ExportFormat });
   };
 
@@ -468,7 +474,7 @@ export function ResizeExportControls({
             )}
           </div>
         )}
-        {config.format !== "image/png" && config.format !== "image/tiff" && (
+        {config.format !== "image/png" && config.format !== "image/tiff" && config.format !== "image/bmp" && (
           <div className="flex items-center gap-2 px-1 mt-3 animate-in fade-in slide-in-from-top-1 duration-300">
             <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-8">
               Quality
@@ -530,6 +536,36 @@ export function ResizeExportControls({
           </div>
         )}
 
+        {/* ICC Embed checkbox — visible only when format supports ICC embedding */}
+        {(() => {
+          const mimeToFmt: Record<string, SourceFormat> = {
+            'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp',
+            'image/avif': 'avif', 'image/tiff': 'tiff',
+          };
+          const exportFmt = mimeToFmt[config.format] || 'unknown';
+          const formatStrategy = getFormatColorStrategy(exportFmt);
+          if (!formatStrategy.supportsIccEmbed) return null;
+
+          // Effective ICC embed state: user override takes precedence, else strategy default
+          const effectiveEmbedIcc = shouldEmbedIcc(exportFmt, frameColorSpace, config.embedIccOverride);
+
+          return (
+            <div className="flex justify-between items-center pt-1.5 pb-1 px-1 animate-in fade-in slide-in-from-top-1 duration-300">
+              <Tooltip content="Embed ICC color profile in the exported file for accurate color reproduction across applications">
+                <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest cursor-help">
+                  Embed Color Profile
+                </span>
+              </Tooltip>
+              <Switch
+                checked={effectiveEmbedIcc}
+                onChange={(val) => updateConfig({ embedIccOverride: val })}
+                activeColor="bg-indigo-500"
+                size="compact"
+              />
+            </div>
+          );
+        })()}
+
         <div className="flex gap-2 pt-2">
           <FancyButton
             onClick={() => applyResizeCmd?.execute()}
@@ -556,27 +592,32 @@ export function ResizeExportControls({
                 {
                   label: "PNG",
                   value: "PNG",
-                  description: "large, lossless",
+                  description: "lossless, transparency",
                 },
                 {
                   label: "JPG",
                   value: "JPG",
-                  description: "standard, lossy",
-                },
-                {
-                  label: "WEBP",
-                  value: "WEBP",
-                  description: "small, modern",
-                },
-                {
-                  label: "AVIF",
-                  value: "AVIF",
-                  description: "small, next-gen",
+                  description: "universal, lossy",
                 },
                 {
                   label: "TIFF",
                   value: "TIFF",
-                  description: "print, lossless",
+                  description: "professional, print",
+                },
+                {
+                  label: "WEBP",
+                  value: "WEBP",
+                  description: "modern web, small",
+                },
+                {
+                  label: "AVIF",
+                  value: "AVIF",
+                  description: "next-gen, smallest",
+                },
+                {
+                  label: "BMP",
+                  value: "BMP",
+                  description: "legacy, uncompressed",
                 },
               ]}
               trigger={

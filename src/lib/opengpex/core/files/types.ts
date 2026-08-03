@@ -189,6 +189,38 @@ export interface ExportMetadataConfig {
   writeSoftwareTag?: boolean;
   /** Override author/copyright for this export */
   author?: { name?: string; copyright?: string };
+
+  /**
+   * Frame's working color space at export time.
+   *
+   * Passed from the compositor/command layer (= activeFrame.colorSpace).
+   * Used by handlers to query `getExportStrategy(frameColorSpace)` for
+   * correct canvas colorSpace and pixel conversion decisions.
+   *
+   * When undefined, handlers derive from metadata via IMPORT_PIPELINE lookup.
+   */
+  frameColorSpace?: 'srgb' | 'display-p3' | 'adobe-rgb' | 'prophoto-rgb';
+
+  /** Target resize dimensions (if post-composite resize is needed) */
+  resize?: { w: number; h: number };
+
+  // ─── Format-specific options (passed through to handlers) ───
+  /** TIFF compression method */
+  tiffCompression?: string;
+  /** PNG compression level (0-9) */
+  pngCompression?: number;
+  /** JPEG quality for TIFF JPEG compression (1-100) */
+  jpegQuality?: number;
+  /** TIFF predictor */
+  tiffPredictor?: string;
+  /** BigTIFF format */
+  tiffBigtiff?: boolean;
+  /** Tile layout */
+  tiffTile?: boolean;
+  /** Tile width */
+  tiffTileWidth?: number;
+  /** Tile height */
+  tiffTileHeight?: number;
 }
 
 /**

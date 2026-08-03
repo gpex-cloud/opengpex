@@ -213,7 +213,9 @@ export function createLayerService(
     removeFrame: (frameId: string) => {
       const state = getState();
       const allFrames = state.frames.order.map(id => state.frames.byId[id]);
-      const idsToRemove = LayerFactory.collectDescendants([frameId], allFrames);
+      // Map Frame.parentId → hostId so collectDescendants can traverse the trunk→branch tree
+      const asHostItems = allFrames.map(f => ({ id: f.id, hostId: f.parentId ?? null }));
+      const idsToRemove = LayerFactory.collectDescendants([frameId], asHostItems);
 
       // Focus migration: pick first surviving frame
       let nextActiveFrameId: string | null = state.activeFrameId ?? null;

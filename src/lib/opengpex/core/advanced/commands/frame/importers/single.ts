@@ -19,9 +19,10 @@
 
 'use client';
 
-import { asLocalShape, EditorContextValue } from '@opengpex/editor/core/types';
+import { asLocalShape, EditorContextValue, WorkingColorSpace } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
+import { resolveColorSpaceForFormat, getImportStrategy } from '@opengpex/editor/core/color/ColorPipeline';
 import type { DecodeResult } from '@opengpex/editor/core/files/types';
 import type { ImportOptions } from './_types';
 
@@ -93,6 +94,20 @@ export async function importSingleImage(
   // Detect bit depth from source image metadata (immutable after creation)
   const detectedBitDepth: 8 | 16 | 32 = metadata.bitDepth >= 32 ? 32 : metadata.bitDepth > 8 ? 16 : 8;
 
+  // ── Strategy-based Frame.colorSpace assignment ──
+  // Uses centralized color pipeline strategy to determine the frame's working
+  // color space based on the detected source color space.
+  // The format handlers have already performed the appropriate pixel conversion
+  // (none / matrix / icc-engine) matching this strategy.
+  const detectedCS = resolveColorSpaceForFormat(metadata.sourceFormat, metadata.colorSpace);
+  const strategy = getImportStrategy(detectedCS);
+  const detectedColorSpace: WorkingColorSpace = strategy.frameColorSpace;
+
+  console.debug(
+    '[ColorMgmt] Import: source=%s detected=%s → Frame.colorSpace=%s (conversion=%s)',
+    file.name, metadata.colorSpace, detectedColorSpace, strategy.conversion,
+  );
+
   const frame = LayerFactory.getNewFrame({
     id: `f-${Date.now().toString(36)}-${parentId ? 'branch' : 'trunk'}`,
     parentId,
@@ -101,6 +116,8 @@ export async function importSingleImage(
     canvas: dimension,
     dpi: chosenFrameDpi || metadata.dpi,
     bitDepth: detectedBitDepth,
+    colorSpace: detectedColorSpace,
+    trc: 'srgb-trc',
     layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
     activeLayerId: baseLayer.id,
     camera: initialCamera,

@@ -59,6 +59,8 @@ export interface RenderToBlobOptions {
     writeSoftwareTag?: boolean;
     /** Embed ICC Profile in output and convert pixels to original color space. */
     embedIcc?: boolean;
+    /** Frame's working color space at export time (for color pipeline export strategy). */
+    frameColorSpace?: 'srgb' | 'display-p3' | 'adobe-rgb' | 'prophoto-rgb';
     /** TIFF compression algorithm (e.g. 'lzw' / 'none' / 'deflate'). */
     tiffCompression?: string;
     /** PNG compression level 0..9. */
@@ -375,7 +377,7 @@ export interface PixelService {
    * Replaces tiff.ts self-managed VipsWorker (Phase 7.2 vips unification).
    */
   fileIO: {
-    decodeTiff: (bytes: Uint8Array) => Promise<{ width: number; height: number; data: Uint8Array }>;
+    decodeTiff: (bytes: Uint8Array, options?: { preserveColorSpace?: boolean }) => Promise<{ width: number; height: number; data: Uint8Array }>;
     encodeTiff: (rgbaData: Uint8Array, width: number, height: number, options: Record<string, unknown>) => Promise<Uint8Array>;
     getPageCount: (bytes: Uint8Array) => Promise<{ pages: number; pageWidth: number; pageHeight: number }>;
     decodePage: (bytes: Uint8Array, page: number) => Promise<{ width: number; height: number; data: Uint8Array }>;

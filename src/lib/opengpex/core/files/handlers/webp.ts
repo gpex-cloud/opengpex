@@ -24,7 +24,7 @@
  */
 
 import ExifReader from 'exifreader';
-import type { PixelService } from '@opengpex/editor/core/types';
+import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   ImageMetadata,
@@ -33,7 +33,10 @@ import type {
   EncodeOptions,
 } from '../types';
 import { bitmapToCanvas } from '../index';
-import { iccToBase64, parseIccProfileName } from '../icc';
+import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
+import { iccToBase64, base64ToIcc, parseIccProfileName } from '../icc';
+import { resolveColorSpaceForFormat, getImportStrategy, getExportStrategy, shouldRetainSourceBlob, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
+import { injectWebPIcc, stripWebPIcc } from './webpIcc';
 
 export class WebpHandler implements ImageFormatHandler {
   readonly format = 'webp';
@@ -47,40 +50,84 @@ export class WebpHandler implements ImageFormatHandler {
   async decode(file: File, _options?: DecodeOptions): Promise<DecodeResult> {
     const metadata = await this.extractMetadata(file);
 
-    // If image has non-sRGB ICC profile, convert via vips (Little CMS) for accurate color
+    // ── Strategy-based color pipeline routing ──
+    const detectedCS = resolveColorSpaceForFormat('webp', metadata.colorSpace);
+    const strategy = getImportStrategy(detectedCS);
+
     let displayBlob: Blob = file;
     let dimensions: { w: number; h: number };
 
-    if (metadata.colorSpace && metadata.colorSpace !== 'srgb') {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const { width, height, data, iccProfileData } = await this.pixels.fileIO.iccToSrgb(bytes);
-      dimensions = { w: width, h: height };
-      // Vips reliably extracts ICC — populate metadata if missed
-      if (iccProfileData && iccProfileData.length > 0) {
-        metadata.hasIccProfile = true;
-        metadata.raw = metadata.raw || {};
-        if (!metadata.raw.iccProfileData) {
-          const { iccToBase64, parseIccProfileName } = await import('../icc');
-          metadata.raw.iccProfileData = iccToBase64(iccProfileData);
-          if (!metadata.raw.iccProfileName) {
-            metadata.raw.iccProfileName = parseIccProfileName(iccProfileData) || 'Embedded';
+    switch (strategy.conversion) {
+      case 'none': {
+        // Zero conversion: browser-native decode is sufficient (sRGB, P3)
+        const img = await createImageBitmap(file);
+        dimensions = { w: img.width, h: img.height };
+        img.close();
+        console.debug('[ColorMgmt] WebP decode: %s conversion=none, detectedCS=%s, frameCS=%s',
+          file.name, detectedCS, strategy.frameColorSpace);
+        break;
+      }
+
+      case 'matrix': {
+        // 3×3 matrix conversion (e.g. AdobeRGB→P3)
+        const img = await createImageBitmap(file, { colorSpaceConversion: 'none' });
+        const w = img.width;
+        const h = img.height;
+        dimensions = { w, h };
+
+        const tmpCanvas = bitmapToCanvas(img);
+        img.close();
+        const tmpCtx = tmpCanvas.getContext('2d')!;
+        const imageData = tmpCtx.getImageData(0, 0, w, h);
+
+        convertImageDataColorSpace(imageData.data, detectedCS as WorkingColorSpace, strategy.frameColorSpace);
+
+        const outCS: PredefinedColorSpace = strategy.frameColorSpace === 'display-p3' ? 'display-p3' : 'srgb';
+        const outCanvas = new OffscreenCanvas(w, h);
+        const outCtx = outCanvas.getContext('2d', { colorSpace: outCS })!;
+        const outImageData = new ImageData(imageData.data, w, h, { colorSpace: outCS });
+        outCtx.putImageData(outImageData, 0, 0);
+        displayBlob = await outCanvas.convertToBlob({ type: 'image/png' });
+
+        console.debug('[ColorMgmt] WebP decode: %s matrix %s→%s',
+          file.name, detectedCS, strategy.frameColorSpace);
+        break;
+      }
+
+      case 'icc-engine': {
+        // Full ICC engine conversion (custom ICC profiles, unknown spaces)
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const { width, height, data, iccProfileData } = await this.pixels.fileIO.iccToSrgb(bytes);
+        dimensions = { w: width, h: height };
+
+        if (iccProfileData && iccProfileData.length > 0) {
+          metadata.hasIccProfile = true;
+          metadata.raw = metadata.raw || {};
+          if (!metadata.raw.iccProfileData) {
+            metadata.raw.iccProfileData = iccToBase64(iccProfileData);
+            if (!metadata.raw.iccProfileName) {
+              metadata.raw.iccProfileName = parseIccProfileName(iccProfileData) || 'Embedded';
+            }
           }
         }
+
+        const canvas = new OffscreenCanvas(width, height);
+        const ctx = canvas.getContext('2d')!;
+        const clamped = new Uint8ClampedArray(data.length);
+        clamped.set(data);
+        ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
+        displayBlob = await canvas.convertToBlob({ type: 'image/png' });
+
+        console.debug('[ColorMgmt] WebP decode: %s icc-engine %s→%s',
+          file.name, detectedCS, strategy.frameColorSpace);
+        break;
       }
-      const canvas = new OffscreenCanvas(width, height);
-      const ctx = canvas.getContext('2d')!;
-      const clamped = new Uint8ClampedArray(data.length);
-      clamped.set(data);
-      ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
-      displayBlob = await canvas.convertToBlob({ type: 'image/png' });
-    } else {
-      // sRGB — browser-native decode is sufficient
-      const img = await createImageBitmap(file);
-      dimensions = { w: img.width, h: img.height };
-      img.close();
     }
 
-    return { dimensions, metadata, subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }] };
+    // sourceBlob retention via centralized strategy
+    const sourceBlob = shouldRetainSourceBlob('webp', metadata, strategy.frameColorSpace) ? file : undefined;
+
+    return { dimensions, metadata, subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }], sourceBlob };
   }
 
   // ─── Encode ──────────────────────────────────────────────────────────────
@@ -90,20 +137,111 @@ export class WebpHandler implements ImageFormatHandler {
     options: EncodeOptions,
   ): Promise<Blob> {
     const quality = options.quality ?? 0.80;
-    // const meta = options.metadata;
-    // const config = options.exportConfig;
+    const meta = options.metadata;
+    const config = options.exportConfig;
 
-    // WebP: ICC profile embedding is not supported via canvas.convertToBlob().
-    // The browser's WebP encoder produces sRGB-only output. We skip srgbToIcc
-    // conversion intentionally — the sRGB pixel values are already correct
-    // for display and the round-trip is lossless in the sRGB domain.
-    // (Unlike PNG/JPEG where we can inject iCCP/APP2 chunks post-encode.)
-    const canvas: OffscreenCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
+    // ── Strategy-based export color pipeline ──
+    // Use correct canvas colorSpace to avoid implicit P3→sRGB conversion.
+    // Chrome 111+ can produce P3 WebP when given a display-p3 canvas.
+    const frameCS: WorkingColorSpace = (config?.frameColorSpace as WorkingColorSpace) || 'srgb';
+    const exportStrategy = getExportStrategy(frameCS, 'webp');
+    const embedIcc = config?.embedIcc ?? false;
 
-    return canvas.convertToBlob({
+    // Centralized pixel conversion decision via resolveExportPixelConversion()
+    const pixelConv = resolveExportPixelConversion(
+      frameCS,
+      { colorSpace: meta?.colorSpace, hasIccProfileData: !!meta?.raw?.iccProfileData },
+      embedIcc,
+      'webp',
+    );
+
+    let canvas: OffscreenCanvas;
+
+    if (pixelConv === 'p3-to-srgb') {
+      // Format fallback: P3 frame → sRGB (format doesn't support P3)
+      const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source, 'display-p3') : source as OffscreenCanvas;
+      const w = srcCanvas.width;
+      const h = srcCanvas.height;
+      const tmpCanvas = new OffscreenCanvas(w, h);
+      const tmpCtx = tmpCanvas.getContext('2d', { colorSpace: 'display-p3' })!;
+      tmpCtx.drawImage(srcCanvas, 0, 0);
+      const imageData = tmpCtx.getImageData(0, 0, w, h);
+      convertImageDataColorSpace(imageData.data, 'display-p3', 'srgb');
+      const outCanvas = new OffscreenCanvas(w, h);
+      const outCtx = outCanvas.getContext('2d')!;
+      outCtx.putImageData(new ImageData(imageData.data, w, h), 0, 0);
+      canvas = outCanvas;
+      console.debug('[ColorMgmt] WebP Export: pixelConversion=p3-to-srgb');
+    } else if (pixelConv === 'srgb-to-icc') {
+      // Pixels are sRGB, need to convert to target ICC space before embedding.
+      // This is an atomic operation: srgbToIcc pixel conversion + RIFF ICC injection.
+      const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
+      const w = srcCanvas.width;
+      const h = srcCanvas.height;
+      const tmpCanvas = new OffscreenCanvas(w, h);
+      const tmpCtx = tmpCanvas.getContext('2d')!;
+      tmpCtx.drawImage(srcCanvas, 0, 0);
+      const imageData = tmpCtx.getImageData(0, 0, w, h);
+
+      // Step 1: Convert pixels from sRGB to target ICC space
+      const iccBytes = base64ToIcc(meta!.raw!.iccProfileData!);
+      const { data: convertedData } = await this.pixels.fileIO.srgbToIcc(
+        new Uint8Array(imageData.data.buffer),
+        w, h, iccBytes,
+      );
+
+      // Step 2: Put converted pixels onto canvas and encode to WebP
+      const clamped = new Uint8ClampedArray(convertedData.length);
+      clamped.set(convertedData);
+      const outCanvas = new OffscreenCanvas(w, h);
+      const outCtx = outCanvas.getContext('2d')!;
+      outCtx.putImageData(new ImageData(clamped, w, h), 0, 0);
+      const webpBlob = await outCanvas.convertToBlob({ type: 'image/webp', quality });
+
+      // Step 3: Inject ICC Profile into the WebP RIFF container
+      const webpBytes = new Uint8Array(await webpBlob.arrayBuffer());
+      const finalBytes = injectWebPIcc(webpBytes, iccBytes);
+
+      console.debug('[ColorMgmt] WebP Export: pixelConversion=srgb-to-icc, targetProfile=%s',
+        meta!.raw!.iccProfileName || 'custom');
+      return new Blob([finalBytes.buffer as ArrayBuffer], { type: 'image/webp' });
+    } else {
+      canvas = source instanceof ImageBitmap
+        ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
+        : source as OffscreenCanvas;
+      console.debug('[ColorMgmt] WebP Export: frameCS=%s, encodeColorSpace=%s',
+        frameCS, exportStrategy.encodeColorSpace);
+    }
+
+    const baseBlob = await canvas.convertToBlob({
       type: 'image/webp',
       quality,
     });
+
+    // Embed ICC Profile into WebP RIFF container (when embedIcc=true and source has ICC data).
+    // This handles the case where no pixel conversion is needed (e.g. sRGB source with sRGB ICC)
+    // but the user still wants the ICC Profile embedded for accurate color reproduction.
+    if (embedIcc && meta?.raw?.iccProfileData) {
+      const iccBytes = base64ToIcc(meta.raw.iccProfileData);
+      const webpBytes = new Uint8Array(await baseBlob.arrayBuffer());
+      const finalBytes = injectWebPIcc(webpBytes, iccBytes);
+      console.debug('[ColorMgmt] WebP Export: injecting ICC profile (no pixel conversion), profile=%s',
+        meta.raw.iccProfileName || 'embedded');
+      return new Blob([finalBytes.buffer as ArrayBuffer], { type: 'image/webp' });
+    }
+
+    // Strip browser-injected ICC when user explicitly disables embedding.
+    // Chrome may auto-inject sRGB/P3 ICC profiles via canvas.convertToBlob().
+    if (!embedIcc) {
+      const webpBytes = new Uint8Array(await baseBlob.arrayBuffer());
+      const strippedBytes = stripWebPIcc(webpBytes);
+      if (strippedBytes !== webpBytes) {
+        console.debug('[ColorMgmt] WebP Export: stripped browser-injected ICC (embedIcc=false)');
+        return new Blob([strippedBytes.buffer as ArrayBuffer], { type: 'image/webp' });
+      }
+    }
+
+    return baseBlob;
   }
 
   // ─── Metadata Extraction ─────────────────────────────────────────────────

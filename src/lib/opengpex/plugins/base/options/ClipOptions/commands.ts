@@ -707,6 +707,8 @@ export const CLIP_OPTIONS_COMMANDS = {
           roi: worldShape,
           precision: 8,
           dpr: 1,
+          compositeTRC: frame.trc,
+          compositeColorSpace: frame.colorSpace,
         });
 
         // Direct path: toImageData() avoids the asset → Image → canvas → getImageData cycle

@@ -53,11 +53,13 @@ import type {
   Layer,
   Frame,
   Shape,
+  WorldShape,
   LocalShape,
   LocalPolygon,
   LocalRect,
   Rect,
 } from '@opengpex/editor/core/types';
+import { asWorldShape } from '@opengpex/editor/core/types';
 import type { ImageMetadata } from '@opengpex/editor/core/files';
 
 export interface PixelFacadeDeps {
@@ -166,7 +168,22 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
     // ════════════════════════════════════════════════════════════
     render: {
       async compositeFrame(frame: Frame, roi?: LocalShape, options?: { precision?: 8 | 16; dpr?: number }) {
-        return composite.compositeFrame(frame, roi ? geometry.shape.localToWorldShape(roi, frame) : undefined, options);
+        const layers = frame.layers.order
+          .map(id => frame.layers.byId[id])
+          .filter(l => l.visible);
+
+        const worldRoi: WorldShape = roi
+          ? geometry.shape.localToWorldShape(roi, frame)
+          : asWorldShape({ x: -frame.canvas.w / 2, y: -frame.canvas.h / 2, w: frame.canvas.w, h: frame.canvas.h });
+
+        return composite.composite({
+          layers,
+          roi: worldRoi,
+          precision: options?.precision ?? 8,
+          dpr: options?.dpr ?? 1,
+          compositeTRC: frame.trc,
+          compositeColorSpace: frame.colorSpace,
+        });
       },
       async compositeLayers(layers: Layer[], frame: Frame, roi?: Shape) {
         const effectiveRoi = roi
@@ -183,6 +200,8 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
           roi: effectiveRoi,
           precision: (frame.bitDepth as 8 | 16 | 32) ?? 8,
           dpr: 1,
+          compositeTRC: frame.trc,
+          compositeColorSpace: frame.colorSpace,
         });
 
         return {
@@ -200,6 +219,8 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
           precision: (frame.bitDepth as 8 | 16 | 32) ?? 8,
           dpr: 1,
           outputSize,
+          compositeTRC: frame.trc,
+          compositeColorSpace: frame.colorSpace,
         });
 
         return { result: result as CompositeResult };
@@ -239,7 +260,7 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
     // 7. File I/O namespace (Phase 7.2 — vips unification)
     // ════════════════════════════════════════════════════════════
     fileIO: {
-      decodeTiff: (bytes: Uint8Array) => fileIo.decodeTiff(bytes),
+      decodeTiff: (bytes: Uint8Array, options?: { preserveColorSpace?: boolean }) => fileIo.decodeTiff(bytes, options),
       encodeTiff: (rgbaData: Uint8Array, w: number, h: number, opts: Record<string, unknown>) =>
         fileIo.encodeTiff(rgbaData, w, h, opts),
       getPageCount: (bytes: Uint8Array) => fileIo.getPageCount(bytes),

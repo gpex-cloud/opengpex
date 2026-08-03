@@ -42,14 +42,15 @@ import type { PixelResultData } from '../protocol/results';
 import { CompositeResult } from '../results/CompositeResult';
 import { drawLayerInstance } from '../rendering/shared/painter2d';
 import { canvasToBlob, calculateHash, buildTileMeta } from '../utils/pixel-utils';
+import { getCompositeStrategy } from '@opengpex/editor/core/color/ColorPipeline';
 import type {
   Layer,
-  Frame,
+  TRC,
+  WorkingColorSpace,
   WorldShape,
   AssetService,
   GeometryService,
 } from '@opengpex/editor/core/types';
-import { asWorldShape } from '@opengpex/editor/core/types';
 
 // ─── Request interface ───
 
@@ -61,6 +62,25 @@ export interface CompositeRequest {
   dpr?: number;
   /** When specified, overrides dpr-based output sizing. Worker outputs exactly this size. */
   outputSize?: { w: number; h: number };
+
+  /**
+   * Target TRC for compositing (Phase B — linear-light compositing).
+   * Derived from `Frame.trc` by higher-level APIs.
+   * When not specified, defaults to `'srgb-trc'`.
+   *
+   * ⚠️ Performance-critical mode switch:
+   *   - 'srgb-trc': Hardware-accelerated Canvas 2D compositing (~1ms/frame)
+   *   - 'linear':   Manual per-pixel blending via ImageData (~50-200ms/frame for 4K)
+   * The linear path is intended for offscreen export only, NOT onscreen preview.
+   */
+  compositeTRC?: TRC;
+
+  /**
+   * Color space for compositing (Phase C — wide gamut).
+   * Accepts Frame.colorSpace directly; the Dispatcher normalizes to
+   * Canvas 2D-supported values ('srgb' | 'display-p3') internally.
+   */
+  compositeColorSpace?: string;
 }
 
 // ─── CompositeDispatcher ───
@@ -98,62 +118,14 @@ export class CompositeDispatcher {
       // outputSize takes priority; otherwise fall back to roi * dpr (backward-compatible)
       outputWidth: request.outputSize?.w ?? Math.ceil(request.roi.rect.w * dpr),
       outputHeight: request.outputSize?.h ?? Math.ceil(request.roi.rect.h * dpr),
+      // Phase B: Pass compositeTRC to Worker for linear-light blending
+      compositeTRC: request.compositeTRC,
+      // Phase C: Normalize to Canvas 2D-supported colorSpace via strategy matrix
+      compositeColorSpace: getCompositeStrategy((request.compositeColorSpace ?? 'srgb') as WorkingColorSpace).canvasColorSpace,
     };
 
     const data = await this.bridge.request<PixelResultData>(job);
     return new CompositeResult(data, this.assets);
-  }
-
-  /**
-   * High-level API: composite all visible layers of a frame.
-   *
-   * Commonly used for export workflows.
-   * @param roi — must be in world-space (already converted by PixelFacade).
-   */
-  async compositeFrame(
-    frame: Frame,
-    roi?: WorldShape,
-    opts?: { dpr?: number },
-  ): Promise<CompositeResult> {
-    const layers = frame.layers.order
-      .map(id => frame.layers.byId[id])
-      .filter(l => l.visible);
-
-    // Default ROI: full canvas in world space (origin at center).
-    const resolvedRoi: WorldShape = roi ?? asWorldShape(
-      { x: -frame.canvas.w / 2, y: -frame.canvas.h / 2, w: frame.canvas.w, h: frame.canvas.h },
-    );
-
-    return this.composite({
-      layers,
-      roi: resolvedRoi,
-      precision: 8,
-      dpr: opts?.dpr ?? 1,
-    });
-  }
-
-  /**
-   * High-level API: composite a specified list of layers.
-   *
-   * Commonly used for merge/peel workflows.
-   * @param roi — must be in world-space (already converted by PixelFacade).
-   */
-  async compositeLayers(
-    layers: Layer[],
-    frame: Frame,
-    roi?: WorldShape,
-  ): Promise<CompositeResult> {
-    // Default ROI: full canvas in world space (origin at center).
-    const resolvedRoi: WorldShape = roi ?? asWorldShape(
-      { x: -frame.canvas.w / 2, y: -frame.canvas.h / 2, w: frame.canvas.w, h: frame.canvas.h },
-    );
-
-    return this.composite({
-      layers,
-      roi: resolvedRoi,
-      precision: 8,
-      dpr: 1,
-    });
   }
 
   // ────────────────────────────────────────────────────────────

@@ -26,7 +26,7 @@
 
 import type { LayerDescriptor } from './descriptors';
 import type { FilterDescriptor } from './IFilter';
-import type { Shape } from '@opengpex/editor/core/types';
+import type { Shape, TRC, WorkingColorSpace } from '@opengpex/editor/core/types';
 
 // ─── CompositeJob ───
 
@@ -38,6 +38,41 @@ export interface CompositeJob {
   dpr: number;
   outputWidth: number;
   outputHeight: number;
+
+  /**
+   * Target TRC for compositing — determines the blending path.
+   *
+   * ⚠️ PERFORMANCE-CRITICAL MODE SWITCH:
+   *   - `'srgb-trc'` (default): Hardware-accelerated Canvas 2D globalCompositeOperation.
+   *     Blend modes operate in gamma space. Fast (~1ms/frame for 4K).
+   *   - `'linear'`: Manual per-pixel blending via ImageData + blend2d module.
+   *     Blend modes operate in physically-correct linear-light space
+   *     (matching Photoshop CC+ "Blend Colors Using Gamma 1.0").
+   *     Slow (~50-200ms/frame for 4K). Only used for offscreen export,
+   *     NOT for onscreen preview.
+   *
+   * Derived from Frame.trc. Default frames use 'srgb-trc'; frames with
+   * bitDepth >= 16 may default to 'linear' (set by LayerFactory.getNewFrame).
+   *
+   * @default 'srgb-trc'
+   * @see docs/opengpex/plans/20260729_color_management_architecture_evolution.md §Phase B
+   */
+  compositeTRC?: TRC;
+
+  /**
+   * Color space for the compositing pipeline (Phase C — wide gamut).
+   *
+   * Must match the frame's working color space to prevent implicit browser color
+   * conversions when drawing bitmaps. Only `'srgb'` and `'display-p3'` are supported
+   * by the Canvas 2D API as of 2026.
+   *
+   * Named `compositeColorSpace` (not `canvasColorSpace`) to decouple from the
+   * Canvas 2D implementation detail — for a future WebGPU backend this field
+   * determines the compute shader's pixel encoding, not a canvas context option.
+   *
+   * @default 'srgb'
+   */
+  compositeColorSpace?: 'srgb' | 'display-p3';
 }
 
 // ─── FilterJob ───
@@ -130,6 +165,8 @@ export interface HistogramJob {
 export interface FileIoJob {
   type: 'FILE_IO';
   fn: 'decodeTiff' | 'encodeTiff' | 'encodeAvif' | 'decodePages' | 'decodePage' | 'getPageCount' | 'composite16bit' | 'exportHighRes' | 'iccToSrgb' | 'srgbToIcc';
+  /** Whether to preserve original color space pixels (skip ICC transform). Used by decodeTiff. */
+  preserveColorSpace?: boolean;
   bytes?: Uint8Array;
   rgbaData?: Uint8Array;
   width?: number;

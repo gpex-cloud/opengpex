@@ -24,7 +24,9 @@
  */
 
 import ExifReader from 'exifreader';
-import type { AssetService } from '@opengpex/editor/core/types';
+import type { AssetService, WorkingColorSpace } from '@opengpex/editor/core/types';
+import { resolveColorSpaceForFormat, getImportStrategy, shouldRetainSourceBlob } from '@opengpex/editor/core/color/ColorPipeline';
+import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
 import type {
   ImageFormatHandler,
   ImageMetadata,
@@ -59,24 +61,32 @@ export class RawHandler implements ImageFormatHandler {
     const metadata = await this.extractMetadata(file);
     metadata.internalCodec = 'image/png';
 
-    // 2. Decode RAW → PNG via libraw-wasm (spawns its own internal Worker)
-    // TODO: Migrate to workerProxy.transcodeRaw() when Worker channel is available
-    const pngBlob = await convertRawToBlob(file);
+    // 2. Strategy-based color pipeline routing
+    const detectedCS = resolveColorSpaceForFormat('raw', metadata.colorSpace);
+    const strategy = getImportStrategy(detectedCS);
+
+    // 3. Decode RAW → PNG via libraw-wasm (spawns its own internal Worker)
+    // Strategy-driven: passes conversion info so convertRawToBlob adapts to strategy changes.
+    const pngBlob = await convertRawToBlob(file, {
+      sourceColorSpace: detectedCS as WorkingColorSpace,
+      targetColorSpace: strategy.frameColorSpace,
+      conversion: strategy.conversion,
+    });
     const safeFile = new File(
       [pngBlob],
       file.name.replace(/\.[^.]+$/, '.png'),
       { type: 'image/png' },
     );
 
-    // 3. Get dimensions from transcoded result
+    // 4. Get dimensions from transcoded result
     const img = await createImageBitmap(safeFile);
     const dimensions = { w: img.width, h: img.height };
     img.close();
 
-    // 4. Phase 5: RAW files are always high bit-depth (12-16 bit) — preserve raw source
-    const rawBlob = metadata.bitDepth > 8 ? file : undefined;
+    // 5. Strategy-based sourceBlob retention (RAW: sourceBlobRetention='always')
+    const sourceBlob = shouldRetainSourceBlob('raw', metadata, strategy.frameColorSpace) ? file : undefined;
 
-    return { dimensions, metadata, subImages: [{ displayBlob: safeFile, width: dimensions.w, height: dimensions.h, index: 0 }], sourceBlob: rawBlob };
+    return { dimensions, metadata, subImages: [{ displayBlob: safeFile, width: dimensions.w, height: dimensions.h, index: 0 }], sourceBlob };
   }
 
   // ─── Encode (not supported) ──────────────────────────────────────────────
@@ -98,7 +108,7 @@ export class RawHandler implements ImageFormatHandler {
       sourceFileSize: file.size,
       dpi: 72,
       dpiSource: 'default',
-      colorSpace: 'srgb',
+      colorSpace: 'prophoto-rgb',
       bitDepth: 14, // Most modern RAW sensors are 14-bit
       hasAlpha: false,
       hasIccProfile: false,
@@ -250,12 +260,25 @@ class LibRaw {
 }
 
 /**
+ * Color conversion config for RAW decode, driven by ColorPipeline strategy.
+ * Ensures convertRawToBlob stays in sync with strategy table changes.
+ */
+interface RawColorConfig {
+  sourceColorSpace: WorkingColorSpace;
+  targetColorSpace: WorkingColorSpace;
+  conversion: 'none' | 'matrix' | 'icc-engine';
+}
+
+/**
  * Converts a camera RAW file to a PNG Blob.
  *
  * Supports all LibRaw formats: CR2, CR3, NEF, NRW, ARW, DNG, ORF, RW2, RAF,
  * PEF, SRW, RAW, RWL, 3FR, FFF, IIQ, and more (1200+ cameras).
+ *
+ * @param file - RAW file to decode
+ * @param colorConfig - Strategy-driven color conversion parameters
  */
-export async function convertRawToBlob(file: File): Promise<Blob> {
+export async function convertRawToBlob(file: File, colorConfig: RawColorConfig): Promise<Blob> {
   const instance = new LibRaw();
 
   try {
@@ -263,9 +286,10 @@ export async function convertRawToBlob(file: File): Promise<Blob> {
 
     await instance.open(new Uint8Array(buffer), {
       useCameraWb: true,
-      outputColor: 1,   // sRGB
-      outputBps: 8,     // 8-bit output
-      userQual: 3,      // AHD interpolation
+      outputColor: 5,        // ProPhoto RGB (preserves full sensor gamut)
+      outputBps: 8,          // 8-bit output (libraw internal processing is full-precision)
+      gamm: [2.4, 12.92],   // sRGB TRC encoding (matches convertImageDataColorSpace assumptions)
+      userQual: 3,           // AHD interpolation
     });
 
     const imageData: RawImageData | undefined = await instance.imageData();
@@ -291,13 +315,25 @@ export async function convertRawToBlob(file: File): Promise<Blob> {
       rgbaData.set(new Uint8Array(data.buffer, data.byteOffset, width * height * 4));
     }
 
+    // Strategy-driven color space conversion
+    if (colorConfig.conversion === 'matrix') {
+      convertImageDataColorSpace(rgbaData, colorConfig.sourceColorSpace, colorConfig.targetColorSpace);
+    }
+    // 'none' → skip conversion (future: WebGPU may keep ProPhoto pixels as-is)
+    // 'icc-engine' → not applicable for RAW (libraw outputs known RGB spaces)
+
+    // Write to canvas with correct colorSpace tagging
+    const canvasCS: PredefinedColorSpace = colorConfig.targetColorSpace === 'display-p3' ? 'display-p3' : 'srgb';
     const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext('2d')!;
-    const imgData = new ImageData(rgbaData, width, height);
+    const ctx = canvas.getContext('2d', { colorSpace: canvasCS })!;
+    const imgData = new ImageData(rgbaData, width, height, { colorSpace: canvasCS });
     ctx.putImageData(imgData, 0, 0);
 
     const blob = await canvas.convertToBlob({ type: 'image/png' });
-    // console.log(`[RawHandler] Conversion complete: ${width}×${height}`);
+
+    console.debug('[ColorMgmt] RAW decode: conversion=%s %s→%s',
+      colorConfig.conversion, colorConfig.sourceColorSpace, colorConfig.targetColorSpace);
+
     return blob;
   } catch (error) {
     console.error('[RawHandler] Conversion failed', error);

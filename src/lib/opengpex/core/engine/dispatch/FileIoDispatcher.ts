@@ -37,10 +37,11 @@ export class FileIoDispatcher {
 
   /**
    * Decode TIFF bytes → RGBA pixel data (8-bit output).
+   * @param options.preserveColorSpace - When true, skip ICC transform to retain original pixel encoding.
    */
-  async decodeTiff(bytes: Uint8Array): Promise<{ width: number; height: number; data: Uint8Array }> {
+  async decodeTiff(bytes: Uint8Array, options?: { preserveColorSpace?: boolean }): Promise<{ width: number; height: number; data: Uint8Array }> {
     return this.bridge.request<{ width: number; height: number; data: Uint8Array }>(
-      { type: 'FILE_IO', fn: 'decodeTiff', bytes },
+      { type: 'FILE_IO', fn: 'decodeTiff', bytes, preserveColorSpace: options?.preserveColorSpace },
     );
   }
 

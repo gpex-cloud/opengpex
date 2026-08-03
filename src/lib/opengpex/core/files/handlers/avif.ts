@@ -31,7 +31,7 @@
  */
 
 import ExifReader from 'exifreader';
-import type { PixelService } from '@opengpex/editor/core/types';
+import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   ImageMetadata,
@@ -39,7 +39,10 @@ import type {
   DecodeResult,
   EncodeOptions,
 } from '../types';
+import { bitmapToCanvas } from '../index';
 import { iccToBase64, parseIccProfileName } from '../icc';
+import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
+import { resolveColorSpaceForFormat, getImportStrategy, getExportStrategy, shouldRetainSourceBlob, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
 
 export class AvifHandler implements ImageFormatHandler {
   readonly format = 'avif';
@@ -53,40 +56,85 @@ export class AvifHandler implements ImageFormatHandler {
   async decode(file: File, _options?: DecodeOptions): Promise<DecodeResult> {
     const metadata = await this.extractMetadata(file);
 
-    // If image has non-sRGB ICC profile, convert via vips (Little CMS) for accurate color
+    // ── Strategy-based color pipeline routing ──
+    const detectedCS = resolveColorSpaceForFormat('avif', metadata.colorSpace);
+    const strategy = getImportStrategy(detectedCS);
+
     let displayBlob: Blob = file;
     let dimensions: { w: number; h: number };
 
-    if (metadata.colorSpace && metadata.colorSpace !== 'srgb') {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const { width, height, data, iccProfileData } = await this.pixels.fileIO.iccToSrgb(bytes);
-      dimensions = { w: width, h: height };
-      const canvas = new OffscreenCanvas(width, height);
-      const ctx = canvas.getContext('2d')!;
-      const clamped = new Uint8ClampedArray(data.length);
-      clamped.set(data);
-      ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
-      displayBlob = await canvas.convertToBlob({ type: 'image/png' });
-
-      // Vips reliably extracts ICC from AVIF colr box — populate metadata if ExifReader missed it
-      if (iccProfileData && iccProfileData.length > 0) {
-        metadata.hasIccProfile = true;
-        metadata.raw = metadata.raw || {};
-        if (!metadata.raw.iccProfileData) {
-          metadata.raw.iccProfileData = iccToBase64(iccProfileData);
-        }
-        if (!metadata.raw.iccProfileName) {
-          metadata.raw.iccProfileName = parseIccProfileName(iccProfileData) || 'Embedded';
-        }
+    switch (strategy.conversion) {
+      case 'none': {
+        // Zero conversion: browser-native decode is sufficient (sRGB, P3)
+        const img = await createImageBitmap(file);
+        dimensions = { w: img.width, h: img.height };
+        img.close();
+        console.debug('[ColorMgmt] AVIF decode: %s conversion=none, detectedCS=%s, frameCS=%s',
+          file.name, detectedCS, strategy.frameColorSpace);
+        break;
       }
-    } else {
-      // sRGB — browser-native decode is sufficient
-      const img = await createImageBitmap(file);
-      dimensions = { w: img.width, h: img.height };
-      img.close();
+
+      case 'matrix': {
+        // 3×3 matrix conversion (e.g. AdobeRGB→P3)
+        const img = await createImageBitmap(file, { colorSpaceConversion: 'none' });
+        const w = img.width;
+        const h = img.height;
+        dimensions = { w, h };
+
+        const tmpCanvas = bitmapToCanvas(img);
+        img.close();
+        const tmpCtx = tmpCanvas.getContext('2d')!;
+        const imageData = tmpCtx.getImageData(0, 0, w, h);
+
+        convertImageDataColorSpace(imageData.data, detectedCS as WorkingColorSpace, strategy.frameColorSpace);
+
+        const outCS: PredefinedColorSpace = strategy.frameColorSpace === 'display-p3' ? 'display-p3' : 'srgb';
+        const outCanvas = new OffscreenCanvas(w, h);
+        const outCtx = outCanvas.getContext('2d', { colorSpace: outCS })!;
+        const outImageData = new ImageData(imageData.data, w, h, { colorSpace: outCS });
+        outCtx.putImageData(outImageData, 0, 0);
+        displayBlob = await outCanvas.convertToBlob({ type: 'image/png' });
+
+        console.debug('[ColorMgmt] AVIF decode: %s matrix %s→%s',
+          file.name, detectedCS, strategy.frameColorSpace);
+        break;
+      }
+
+      case 'icc-engine': {
+        // Full ICC engine conversion (custom ICC profiles, unknown spaces)
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const { width, height, data, iccProfileData } = await this.pixels.fileIO.iccToSrgb(bytes);
+        dimensions = { w: width, h: height };
+
+        const canvas = new OffscreenCanvas(width, height);
+        const ctx = canvas.getContext('2d')!;
+        const clamped = new Uint8ClampedArray(data.length);
+        clamped.set(data);
+        ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
+        displayBlob = await canvas.convertToBlob({ type: 'image/png' });
+
+        // Vips reliably extracts ICC from AVIF colr box — populate metadata if ExifReader missed it
+        if (iccProfileData && iccProfileData.length > 0) {
+          metadata.hasIccProfile = true;
+          metadata.raw = metadata.raw || {};
+          if (!metadata.raw.iccProfileData) {
+            metadata.raw.iccProfileData = iccToBase64(iccProfileData);
+          }
+          if (!metadata.raw.iccProfileName) {
+            metadata.raw.iccProfileName = parseIccProfileName(iccProfileData) || 'Embedded';
+          }
+        }
+
+        console.debug('[ColorMgmt] AVIF decode: %s icc-engine %s→%s',
+          file.name, detectedCS, strategy.frameColorSpace);
+        break;
+      }
     }
 
-    return { dimensions, metadata, subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }] };
+    // sourceBlob retention via centralized strategy
+    const sourceBlob = shouldRetainSourceBlob('avif', metadata, strategy.frameColorSpace) ? file : undefined;
+
+    return { dimensions, metadata, subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }], sourceBlob };
   }
 
   // ─── Encode ──────────────────────────────────────────────────────────────
@@ -96,11 +144,46 @@ export class AvifHandler implements ImageFormatHandler {
     options: EncodeOptions,
   ): Promise<Blob> {
     const quality = Math.round((options.quality ?? 0.80) * 100); // vips Q: 0-100
+    const meta = options.metadata;
+    const config = options.exportConfig;
 
-    // Get RGBA pixel data from source
-    const canvas = source instanceof ImageBitmap
-      ? (() => { const c = new OffscreenCanvas(source.width, source.height); c.getContext('2d')!.drawImage(source, 0, 0); return c; })()
-      : source as OffscreenCanvas;
+    // ── Strategy-based export color pipeline ──
+    const frameCS: WorkingColorSpace = (config?.frameColorSpace as WorkingColorSpace) || 'srgb';
+    const exportStrategy = getExportStrategy(frameCS, 'avif');
+    const embedIcc = config?.embedIcc ?? false;
+
+    // Centralized pixel conversion decision via resolveExportPixelConversion()
+    const pixelConv = resolveExportPixelConversion(
+      frameCS,
+      { colorSpace: meta?.colorSpace, hasIccProfileData: !!meta?.raw?.iccProfileData },
+      embedIcc,
+      'avif',
+    );
+
+    // Get RGBA pixel data from source using the strategy's encodeColorSpace
+    // to prevent implicit P3→sRGB conversion when drawing the bitmap.
+    let canvas: OffscreenCanvas | HTMLCanvasElement;
+
+    if (pixelConv === 'p3-to-srgb') {
+      // Format fallback: P3 frame → sRGB (format doesn't support P3)
+      const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source, 'display-p3') : source as OffscreenCanvas;
+      const w = srcCanvas.width;
+      const h = srcCanvas.height;
+      const tmpCanvas = new OffscreenCanvas(w, h);
+      const tmpCtx = tmpCanvas.getContext('2d', { colorSpace: 'display-p3' })!;
+      tmpCtx.drawImage(srcCanvas, 0, 0);
+      const imgData = tmpCtx.getImageData(0, 0, w, h);
+      convertImageDataColorSpace(imgData.data, 'display-p3', 'srgb');
+      const outCanvas = new OffscreenCanvas(w, h);
+      const outCtx = outCanvas.getContext('2d')!;
+      outCtx.putImageData(new ImageData(imgData.data, w, h), 0, 0);
+      canvas = outCanvas;
+      console.debug('[ColorMgmt] AVIF Export: pixelConversion=p3-to-srgb');
+    } else {
+      canvas = source instanceof ImageBitmap
+        ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
+        : source as OffscreenCanvas;
+    }
 
     const ctx = (canvas as OffscreenCanvas).getContext('2d')!;
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -108,22 +191,29 @@ export class AvifHandler implements ImageFormatHandler {
 
     // ICC Profile for embedding (if user requested preserve-ICC)
     let iccProfileBytes: Uint8Array | undefined;
-    if (options.exportConfig?.embedIcc && options.metadata?.raw?.iccProfileData) {
+    if (embedIcc && meta?.raw?.iccProfileData) {
       const { base64ToIcc } = await import('../icc');
-      iccProfileBytes = base64ToIcc(options.metadata.raw.iccProfileData);
+      iccProfileBytes = base64ToIcc(meta.raw.iccProfileData);
 
-      // Convert pixel data from sRGB to target ICC color space
-      const colorSpace = options.metadata.colorSpace;
-      if (colorSpace && colorSpace !== 'srgb') {
+      if (pixelConv === 'srgb-to-icc') {
         const { data: convertedData } = await this.pixels.fileIO.srgbToIcc(
           rgbaData, canvas.width, canvas.height, iccProfileBytes,
         );
         rgbaData.set(convertedData);
+        console.debug('[ColorMgmt] AVIF Export: pixelConversion=srgb-to-icc, targetProfile=%s',
+          meta.raw.iccProfileName || 'custom');
       }
+    } else if (embedIcc && !meta?.raw?.iccProfileData) {
+      // embedIcc requested but no source ICC data (e.g. BMP→AVIF export)
+      // sRGB without ICC is universally correct; future: embed standard sRGB ICC constant
+      console.debug('[ColorMgmt] AVIF Export: embedIcc=true but no source ICC data; frameCS=%s (sRGB assumed)', frameCS);
     }
 
+    console.debug('[ColorMgmt] AVIF Export: frameCS=%s, encodeColorSpace=%s, embedIcc=%s',
+      frameCS, exportStrategy.encodeColorSpace, !!iccProfileBytes);
+
     // Encode via engine Worker (FILE_IO encodeAvif → vips heifsave + AV1)
-    const dpi = options.exportConfig?.dpi || options.metadata?.dpi || 72;
+    const dpi = config?.dpi || meta?.dpi || 72;
     const avifBytes = await this.pixels.fileIO.encodeAvif(
       rgbaData,
       canvas.width,

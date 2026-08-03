@@ -20,6 +20,7 @@
  * Thread model: ALL operations run on main thread.
  */
 
+import type { WorkingColorSpace } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   ImageMetadata,
@@ -28,6 +29,8 @@ import type {
   EncodeOptions,
 } from '../types';
 import { bitmapToCanvas } from '../index';
+import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
+import { getExportStrategy, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
 
 export class BmpHandler implements ImageFormatHandler {
   readonly format = 'bmp';
@@ -53,14 +56,39 @@ export class BmpHandler implements ImageFormatHandler {
     source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
     options: EncodeOptions,
   ): Promise<Blob> {
-    const canvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source;
+    const meta = options.metadata;
+    const config = options.exportConfig;
+
+    // ── Strategy-based export color pipeline ──
+    const frameCS: WorkingColorSpace = (config?.frameColorSpace as WorkingColorSpace) || 'srgb';
+    const exportStrategy = getExportStrategy(frameCS, 'bmp');
+    const pixelConv = resolveExportPixelConversion(
+      frameCS,
+      { colorSpace: meta?.colorSpace, hasIccProfileData: false },
+      false, // BMP never embeds ICC
+      'bmp',
+    );
+
+    // Use encodeColorSpace to create intermediate canvas (prevent implicit browser color conversion)
+    const canvas = source instanceof ImageBitmap
+      ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
+      : source;
     const ctx = (canvas as OffscreenCanvas).getContext('2d')!;
     const w = (canvas as OffscreenCanvas).width;
     const h = (canvas as OffscreenCanvas).height;
     const imageData = ctx.getImageData(0, 0, w, h);
-    const pixels = imageData.data;
 
-    const dpi = options.exportConfig?.dpi || options.metadata?.dpi || 72;
+    // P3→sRGB downgrade (BMP only supports sRGB)
+    if (pixelConv === 'p3-to-srgb') {
+      convertImageDataColorSpace(imageData.data, 'display-p3', 'srgb');
+      console.debug('[ColorMgmt] BMP Export: pixelConversion=p3-to-srgb');
+    } else {
+      console.debug('[ColorMgmt] BMP Export: frameCS=%s, encodeColorSpace=%s, pixelConv=%s',
+        frameCS, exportStrategy.encodeColorSpace, pixelConv);
+    }
+
+    const pixels = imageData.data;
+    const dpi = config?.dpi || meta?.dpi || 72;
     const ppm = Math.round(dpi / 0.0254); // DPI → pixels per meter
 
     // Build 24-bit BMP (no alpha — BMP viewers handle 24-bit better)

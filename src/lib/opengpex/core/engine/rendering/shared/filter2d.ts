@@ -45,7 +45,8 @@ import type {
   LevelsData,
   LevelsFilter,
 } from '../../protocol/IFilter';
-import { classifyFilter } from '../../protocol/IFilter';
+import { classifyFilter, FILTER_COLOR_HINTS } from '../../protocol/IFilter';
+import { convertBufferTRC } from './trc';
 
 // ────────────────────────────────────────────────────────────
 // Types
@@ -1314,11 +1315,22 @@ export function applyFilterChainRGBA8(
   const mtx = buildFusedColorMatrix(filters);
   if (mtx) applyMatrixRGBA8(data, mtx.matrix, mtx.constant);
 
-  // Neighborhood ops
+  // Neighborhood ops (with Phase B TRC negotiation)
   for (const f of filters) {
     if (classifyFilter(f) !== 'neighborhood') continue;
     if (f.type === 'blur') {
-      boxBlurRGBAInPlace(data, width, height, f.value);
+      const hint = FILTER_COLOR_HINTS[f.type];
+      if (hint.mismatchPolicy === 'convert' && hint.preferredTRC === 'linear') {
+        // Phase B: Convert sRGB-TRC → linear before blur, blur in linear, convert back.
+        // This produces physically-correct Gaussian blur (averaging in linear-light space)
+        // instead of the slightly-too-dark results from gamma-space averaging.
+        convertBufferTRC(data, 'srgb-trc', 'linear');
+        boxBlurRGBAInPlace(data, width, height, f.value);
+        convertBufferTRC(data, 'linear', 'srgb-trc');
+      } else {
+        // Legacy path (mismatchPolicy === 'ignore' or 'warn')
+        boxBlurRGBAInPlace(data, width, height, f.value);
+      }
     }
   }
 }

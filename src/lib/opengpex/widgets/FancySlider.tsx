@@ -121,6 +121,8 @@ export interface FancySliderProps {
   disabled?: boolean;
   /** Additional className for the outer wrapper. */
   className?: string;
+  /** When true, applies a slimmer track and smaller thumb. */
+  slim?: boolean;
 }
 
 export default function FancySlider({
@@ -136,6 +138,7 @@ export default function FancySlider({
   onDragEnd,
   disabled = false,
   className = '',
+  slim = false,
 }: FancySliderProps) {
   const trackBg = trackGradient ?? 'linear-gradient(90deg, var(--bg-stage), var(--bg-stage))';
 
@@ -162,7 +165,7 @@ export default function FancySlider({
           ['--track-bg' as string]: trackBg,
           ...(accentColor ? { accentColor } : {}),
         }}
-        className={`opengpex-basic-slider w-full appearance-none cursor-ew-resize bg-transparent ${className}`}
+        className={`opengpex-basic-slider${slim ? ' opengpex-basic-slider--slim' : ''} w-full appearance-none cursor-ew-resize bg-transparent ${className}`}
       />
       {/* Inject global CSS for the custom thumb/track styling. styled-jsx deduplicates. */}
       <style jsx global>{SLIDER_THUMB_CSS}</style>

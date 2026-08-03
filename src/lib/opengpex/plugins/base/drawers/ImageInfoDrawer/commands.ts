@@ -18,7 +18,9 @@
  */
 
 import { EditorContextValue, EditorCommand, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
-import type { ImageMetadata, EncodeOptions } from '@opengpex/editor/core/files';
+import type { ImageMetadata, EncodeOptions, SourceFormat } from '@opengpex/editor/core/files';
+import { canUseFastExport, shouldEmbedIcc } from '@opengpex/editor/core/color/ColorPipeline';
+import { assetStore } from '@opengpex/editor/core/storage/asset/AssetStore';
 import type { RenderToBlobOptions } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
@@ -82,11 +84,18 @@ export const IMAGE_INFO_COMMANDS = {
          // Detect if the caller wants a post-composite resize (target size ≠ source size).
          const needsResize = exportW !== baseW || exportH !== baseH;
 
-         // ─── 4. Assemble the unified RenderToBlobOptions ───────────────────
-          // Auto-enable ICC embed when source has non-sRGB ICC profile (preserves color fidelity)
-          const hasNonSrgbIcc = !!(layerMeta?.raw?.iccProfileData && layerMeta.colorSpace && layerMeta.colorSpace !== 'srgb');
-          console.log('[ExportCmd ICC] layerMeta.colorSpace=%s, hasIccData=%s, hasNonSrgbIcc=%s',
-            layerMeta?.colorSpace, !!layerMeta?.raw?.iccProfileData, hasNonSrgbIcc);
+          // ─── 4. Assemble the unified RenderToBlobOptions ───────────────────
+           // ICC embed decision: strategy-driven via shouldEmbedIcc()
+            // Three-layer: format capability × strategy default × user override
+            const mimeToFormat: Record<string, import('@opengpex/editor/core/files').SourceFormat> = {
+              'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp',
+              'image/avif': 'avif', 'image/tiff': 'tiff', 'image/bmp': 'bmp',
+            };
+            const exportFmt = mimeToFormat[config.format] || 'unknown';
+            const userEmbedIccOverride = config.embedIccOverride; // undefined = use strategy default
+            const embedIcc = shouldEmbedIcc(exportFmt, activeFrame.colorSpace, userEmbedIccOverride);
+            console.log('[ExportCmd ICC] layerMeta.colorSpace=%s, hasIccData=%s, embedIcc=%s, userOverride=%s (strategy-driven)',
+              layerMeta?.colorSpace, !!layerMeta?.raw?.iccProfileData, embedIcc, userEmbedIccOverride);
 
           const opts: RenderToBlobOptions = {
              format: config.format,
@@ -97,7 +106,9 @@ export const IMAGE_INFO_COMMANDS = {
                 dpi,
                 preserveExif: config.keepExif,
                 writeSoftwareTag: true,
-                embedIcc: hasNonSrgbIcc,
+                 embedIcc,
+                // Pass frame's working colorSpace to handler for export strategy routing
+                frameColorSpace: activeFrame.colorSpace,
                 tiffCompression: config.tiffCompression,
                 pngCompression: config.pngCompression,
                 jpegQuality: config.jpegQuality,
@@ -114,11 +125,60 @@ export const IMAGE_INFO_COMMANDS = {
             console.debug('[ExportCmd] Starting export: format=%s, clip=%s, dims=%dx%d',
                config.format, cropShape ? 'yes' : 'no', exportW, exportH);
 
+         // ─── 4.5 Fast-path: canUseFastExport ────────────────────────────────
+         // When the frame is a single unedited layer exported to the same format,
+         // we can skip composite + encode entirely and return the original sourceBlob.
+         // This is the zero-computation lossless round-trip optimization.
+         const allLayers = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]);
+         const visibleLayers = allLayers.filter(l => !l.hostId && l.visible !== false);
+
+         // MIME → SourceFormat mapping for canUseFastExport
+         const mimeToSourceFormat: Record<string, SourceFormat> = {
+            'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp',
+            'image/avif': 'avif', 'image/tiff': 'tiff', 'image/bmp': 'bmp',
+         };
+         const exportSourceFormat = mimeToSourceFormat[config.format] || 'unknown';
+
+         // Determine if export parameters are unchanged from import defaults
+         const isUnchanged = !needsResize
+            && (!config.quality || config.quality === 92)
+            && !config.tiffCompression;
+
+         // ── sourceBlob: retrieve from AssetStore via base layer's assetId ──
+         // The rawBlob was stored at import time via assets.register(displayBlob, { rawBlob })
+         // and persisted in IndexedDB under key `raw:${assetId}`.
+         const baseLayerAssetId = baseLayer?.assetId;
+         const sourceBlob: Blob | null = baseLayerAssetId
+            ? await assetStore.getRaw(baseLayerAssetId)
+            : null;
+
+         // ── isEdited: history-based detection (method 3) ──
+         // Per-frame undo history: past.length === 0 && !checkpoint === never edited.
+         // Same pattern as CloudMenu sync dirty detection.
+         const frameHistory = state.history.byFrameId[activeFrame.id];
+         const isEdited = frameHistory
+            ? (frameHistory.past.length > 0 || !!frameHistory.checkpoint)
+            : false;
+
+         const frameForFastExport = {
+            layerCount: visibleLayers.length,
+            isEdited,
+            sourceBlob,
+            sourceFormat: (layerMeta?.sourceFormat || 'unknown') as SourceFormat,
+         };
+
+         if (canUseFastExport(frameForFastExport, exportSourceFormat, isUnchanged)) {
+            // Fast-path: return sourceBlob directly (skip composite + encode)
+            const blob = frameForFastExport.sourceBlob!;
+            const filename = files.getExportFilename(activeFrame.name, exportW, exportH, blob.type || config.format);
+            await pixels.utils.download(blob, filename);
+            console.debug('[ExportCmd] Fast-path: sourceBlob returned directly (zero compute)');
+            return;
+         }
+
          // ─── 5. Unified composite pipeline (Step 9) ─────────────────────────
          // Composition and encoding are now orthogonal:
          //   pixels.composite() → CompositeResult → result.toBlob(format, encodeOpts)
-         const allLayers = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]);
-         const visibleLayers = allLayers.filter(l => !l.hostId && l.visible !== false);
 
          const localRoi = cropShape
             ? cropShape
@@ -136,6 +196,8 @@ export const IMAGE_INFO_COMMANDS = {
             roi: worldRoi,
             precision,
             dpr: 1, // Export output is physical pixels (no retina scale)
+            // Phase C: Use frame's color space for the compositing pipeline
+            compositeColorSpace: activeFrame.colorSpace,
          });
 
             // Encode the composite result via FileService handlers.

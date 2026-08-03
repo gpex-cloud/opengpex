@@ -32,7 +32,9 @@
  */
 
 import ExifReader from 'exifreader';
-import type { AssetService, PixelService, AdjustmentState } from '@opengpex/editor/core/types';
+import type { AssetService, PixelService, AdjustmentState, WorkingColorSpace } from '@opengpex/editor/core/types';
+import { resolveColorSpaceForFormat, getImportStrategy, getExportStrategy, shouldRetainSourceBlob, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
+import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
 import type {
   ImageFormatHandler,
   ImageMetadata,
@@ -40,7 +42,8 @@ import type {
   DecodeResult,
   EncodeOptions,
 } from '../types';
-// ICC utilities: base64ToIcc is dynamically imported in encode() for export injection
+import { bitmapToCanvas } from '../index';
+import { iccToBase64, parseIccProfileName } from '../icc';
 
 /** TIFF compression method for encoding */
 export type TiffCompression = 'none' | 'lzw' | 'zip' | 'jpeg';
@@ -83,20 +86,89 @@ export class TiffHandler implements ImageFormatHandler {
     const metadata = await this.extractMetadata(file);
     metadata.internalCodec = 'image/png';
 
-    // 2. Decode TIFF → PNG via engine Worker (FILE_IO job, first page)
-    const pngBlob = await this.convertTiffToBlob(file);
-    const safeFile = new File(
-      [pngBlob],
-      file.name.replace(/\.(tiff?|tif)$/i, '.png'),
-      { type: 'image/png' },
-    );
+    // ── Strategy-based color pipeline routing ──────────────────────────────
+    const detectedCS = resolveColorSpaceForFormat('tiff', metadata.colorSpace);
+    const strategy = getImportStrategy(detectedCS);
 
-    // 3. Get dimensions from transcoded result
-    const img = await createImageBitmap(safeFile);
-    const dimensions = { w: img.width, h: img.height };
-    img.close();
+    let displayBlob: Blob;
+    let dimensions: { w: number; h: number };
 
-    // 4. Detect multi-page TIFF and build subImages
+    switch (strategy.conversion) {
+      case 'none': {
+        // sRGB/P3 — decode preserving original pixels (no ICC transform in vips)
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const { width, height, data } = await this.pixels.fileIO.decodeTiff(bytes, { preserveColorSpace: true });
+        dimensions = { w: width, h: height };
+
+        // Create canvas with appropriate colorSpace
+        const canvasCS: PredefinedColorSpace = strategy.frameColorSpace === 'display-p3' ? 'display-p3' : 'srgb';
+        const canvas = new OffscreenCanvas(width, height);
+        const ctx = canvas.getContext('2d', { colorSpace: canvasCS })!;
+        const clamped = new Uint8ClampedArray(width * height * 4);
+        clamped.set(new Uint8Array(data.buffer, data.byteOffset, width * height * 4));
+        ctx.putImageData(new ImageData(clamped, width, height, { colorSpace: canvasCS }), 0, 0);
+        displayBlob = await canvas.convertToBlob({ type: 'image/png' });
+
+        console.debug('[ColorMgmt] TIFF decode: %s conversion=none, detectedCS=%s, frameCS=%s',
+          file.name, detectedCS, strategy.frameColorSpace);
+        break;
+      }
+
+      case 'matrix': {
+        // AdobeRGB/ProPhoto — decode preserving original pixels, then matrix convert to frameCS
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const { width, height, data } = await this.pixels.fileIO.decodeTiff(bytes, { preserveColorSpace: true });
+        dimensions = { w: width, h: height };
+
+        // Matrix conversion: detectedCS → frameColorSpace (e.g. adobe-rgb → display-p3)
+        const clamped = new Uint8ClampedArray(width * height * 4);
+        clamped.set(new Uint8Array(data.buffer, data.byteOffset, width * height * 4));
+        convertImageDataColorSpace(clamped, detectedCS as WorkingColorSpace, strategy.frameColorSpace);
+
+        // Write to target-space canvas
+        const outCS: PredefinedColorSpace = strategy.frameColorSpace === 'display-p3' ? 'display-p3' : 'srgb';
+        const outCanvas = new OffscreenCanvas(width, height);
+        const outCtx = outCanvas.getContext('2d', { colorSpace: outCS })!;
+        outCtx.putImageData(new ImageData(clamped, width, height, { colorSpace: outCS }), 0, 0);
+        displayBlob = await outCanvas.convertToBlob({ type: 'image/png' });
+
+        console.debug('[ColorMgmt] TIFF decode: %s matrix %s→%s',
+          file.name, detectedCS, strategy.frameColorSpace);
+        break;
+      }
+
+      case 'icc-engine': {
+        // CMYK/custom ICC — full ICC engine conversion via vips (Little CMS)
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const { width, height, data, iccProfileData } = await this.pixels.fileIO.iccToSrgb(bytes);
+        dimensions = { w: width, h: height };
+
+        // Populate ICC metadata if extracted (for round-trip export)
+        if (iccProfileData && iccProfileData.length > 0) {
+          metadata.hasIccProfile = true;
+          metadata.raw = metadata.raw || {};
+          if (!metadata.raw.iccProfileData) {
+            metadata.raw.iccProfileData = iccToBase64(iccProfileData);
+            if (!metadata.raw.iccProfileName) {
+              metadata.raw.iccProfileName = parseIccProfileName(iccProfileData) || 'Embedded';
+            }
+          }
+        }
+
+        const canvas = new OffscreenCanvas(width, height);
+        const ctx = canvas.getContext('2d')!;
+        const clamped = new Uint8ClampedArray(width * height * 4);
+        clamped.set(new Uint8Array(data.buffer, data.byteOffset, width * height * 4));
+        ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
+        displayBlob = await canvas.convertToBlob({ type: 'image/png' });
+
+        console.debug('[ColorMgmt] TIFF decode: %s icc-engine %s→srgb',
+          file.name, detectedCS);
+        break;
+      }
+    }
+
+    // ── Multi-page detection & subImage/sourceBlob assembly ───────────────
     let subImages: import('../types').SubImage[];
     let sourceBlob: Blob | undefined;
 
@@ -114,14 +186,14 @@ export class TiffHandler implements ImageFormatHandler {
         // Multi-page TIFF always preserves source for per-page extraction
         sourceBlob = file;
       } else {
-        subImages = [{ displayBlob: pngBlob, width: dimensions.w, height: dimensions.h, index: 0 }];
-        // Preserve source only for 16-bit fidelity
-        sourceBlob = metadata.bitDepth > 8 ? file : undefined;
+        subImages = [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }];
+        // Use unified shouldRetainSourceBlob for sourceBlob retention decision
+        sourceBlob = shouldRetainSourceBlob('tiff', metadata, strategy.frameColorSpace) ? file : undefined;
       }
     } catch (err) {
       console.debug('[TiffHandler] Multi-page detection failed (treating as single page):', (err as Error).message);
-      subImages = [{ displayBlob: pngBlob, width: dimensions.w, height: dimensions.h, index: 0 }];
-      sourceBlob = metadata.bitDepth > 8 ? file : undefined;
+      subImages = [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }];
+      sourceBlob = shouldRetainSourceBlob('tiff', metadata, strategy.frameColorSpace) ? file : undefined;
     }
 
     return { dimensions, metadata, subImages, sourceBlob };
@@ -137,23 +209,55 @@ export class TiffHandler implements ImageFormatHandler {
     const compression = tiffOpts.tiffCompression || 'lzw';
     const dpi = options.exportConfig?.dpi || options.metadata?.dpi || 72;
 
-    // Get ImageData from source
-    const canvas = source instanceof ImageBitmap
-      ? bitmapToOffscreen(source)
-      : source;
+    // ── Strategy-based export color pipeline ──
+    const config = options.exportConfig;
+    const meta = options.metadata;
+    const frameCS: WorkingColorSpace = (config?.frameColorSpace as WorkingColorSpace) || 'srgb';
+    const exportStrategy = getExportStrategy(frameCS, 'tiff');
+    const embedIcc = config?.embedIcc ?? false;
+
+    // Centralized pixel conversion decision via resolveExportPixelConversion()
+    const pixelConv = resolveExportPixelConversion(
+      frameCS,
+      { colorSpace: meta?.colorSpace, hasIccProfileData: !!meta?.raw?.iccProfileData },
+      embedIcc,
+      'tiff',
+    );
+
+    // Get ImageData from source with correct colorSpace for export
+    let canvas: OffscreenCanvas | HTMLCanvasElement;
+
+    if (pixelConv === 'p3-to-srgb') {
+      // Format fallback: P3 frame → sRGB (format doesn't support P3)
+      const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source, 'display-p3') : source as OffscreenCanvas;
+      const w = srcCanvas.width;
+      const h = srcCanvas.height;
+      const tmpCanvas = new OffscreenCanvas(w, h);
+      const tmpCtx = tmpCanvas.getContext('2d', { colorSpace: 'display-p3' })!;
+      tmpCtx.drawImage(srcCanvas, 0, 0);
+      const imgData = tmpCtx.getImageData(0, 0, w, h);
+      convertImageDataColorSpace(imgData.data, 'display-p3', 'srgb');
+      const outCanvas = new OffscreenCanvas(w, h);
+      const outCtx = outCanvas.getContext('2d')!;
+      outCtx.putImageData(new ImageData(imgData.data, w, h), 0, 0);
+      canvas = outCanvas;
+      console.debug('[ColorMgmt] TIFF Export: pixelConversion=p3-to-srgb');
+    } else {
+      canvas = source instanceof ImageBitmap
+        ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
+        : source;
+    }
 
     const ctx = (canvas as OffscreenCanvas).getContext('2d')!;
     let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
     // ICC Profile for embedding
     let iccProfileBytes: Uint8Array | undefined;
-    if (options.exportConfig?.embedIcc && options.metadata?.raw?.iccProfileData) {
+    if (embedIcc && meta?.raw?.iccProfileData) {
       const { base64ToIcc: b64ToIcc } = await import('../icc');
-      iccProfileBytes = b64ToIcc(options.metadata.raw.iccProfileData);
+      iccProfileBytes = b64ToIcc(meta.raw.iccProfileData);
 
-      // Convert pixel data from sRGB to target ICC color space (only if non-sRGB profile)
-      const colorSpace = options.metadata.colorSpace;
-      if (colorSpace && colorSpace !== 'srgb') {
+      if (pixelConv === 'srgb-to-icc') {
         const { data: convertedData } = await this.pixels.fileIO.srgbToIcc(
           new Uint8Array(imageData.data.buffer),
           canvas.width, canvas.height, iccProfileBytes,
@@ -161,7 +265,16 @@ export class TiffHandler implements ImageFormatHandler {
         const clamped = new Uint8ClampedArray(convertedData.length);
         clamped.set(convertedData);
         imageData = new ImageData(clamped, canvas.width, canvas.height);
+        console.debug('[ColorMgmt] TIFF Export: pixelConversion=srgb-to-icc, targetProfile=%s',
+          meta.raw.iccProfileName || 'custom');
+      } else {
+        console.debug('[ColorMgmt] TIFF Export: frameCS=%s, embedIcc=true, no pixel conversion needed',
+          frameCS);
       }
+    } else if (embedIcc && !meta?.raw?.iccProfileData) {
+      // embedIcc requested but no source ICC data (e.g. BMP→TIFF export)
+      // sRGB without ICC is universally correct; future: embed standard sRGB ICC constant
+      console.debug('[ColorMgmt] TIFF Export: embedIcc=true but no source ICC data; frameCS=%s (sRGB assumed)', frameCS);
     }
 
     // Encode via engine Worker (FILE_IO job)

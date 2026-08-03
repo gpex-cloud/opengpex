@@ -41,7 +41,7 @@ export class FileIoHandler {
 
     switch (job.fn) {
       case 'decodeTiff':
-        return this.decodeTiff(vips, job.bytes!);
+        return this.decodeTiff(vips, job.bytes!, job.preserveColorSpace);
 
       case 'encodeTiff':
         return this.encodeTiff(vips, job.rgbaData!, job.width!, job.height!, job.options || {});
@@ -82,12 +82,14 @@ export class FileIoHandler {
   private decodeTiff(
     vips: VipsInstance,
     bytes: Uint8Array,
+    preserveColorSpace?: boolean,
   ): { result: { width: number; height: number; data: Uint8Array }; transfer: Transferable[] } {
     const image = vips.Image.newFromBuffer(bytes, '', { page: 0, access: 'sequential' });
 
     // Convert to sRGB if needed (handles CMYK, Lab, etc.)
+    // When preserveColorSpace=true, skip ICC transform to retain original pixel encoding
     let rgb: VipsImage = image;
-    if (image.interpretation !== 'srgb' && image.interpretation !== 'b-w') {
+    if (!preserveColorSpace && image.interpretation !== 'srgb' && image.interpretation !== 'b-w') {
       rgb = image.colourspace('srgb');
     }
 

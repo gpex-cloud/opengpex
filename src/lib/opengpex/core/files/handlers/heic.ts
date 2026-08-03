@@ -22,7 +22,7 @@
  */
 
 import ExifReader from 'exifreader';
-import type { AssetService, PixelService } from '@opengpex/editor/core/types';
+import type { AssetService, PixelService, WorkingColorSpace } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   ImageMetadata,
@@ -30,7 +30,10 @@ import type {
   DecodeResult,
   EncodeOptions,
 } from '../types';
-// ICC utilities (used for display only — raw bytes not available from exifr for HEIC)
+import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
+import { resolveColorSpaceForFormat, getImportStrategy } from '@opengpex/editor/core/color/ColorPipeline';
+import { iccToBase64, parseIccProfileName } from '../icc';
+import { bitmapToCanvas } from '../index';
 
 export class HeicHandler implements ImageFormatHandler {
   readonly format = 'heic';
@@ -55,38 +58,81 @@ export class HeicHandler implements ImageFormatHandler {
       { type: 'image/jpeg' },
     );
 
-    // 3. If non-sRGB, convert transcoded JPEG via vips ICC conversion
+    // 3. Strategy-based color pipeline routing (applied to transcoded JPEG)
+    const detectedCS = resolveColorSpaceForFormat('heic', metadata.colorSpace);
+    const strategy = getImportStrategy(detectedCS);
+
     let displayBlob: Blob = safeFile;
     let dimensions: { w: number; h: number };
 
-    if (metadata.colorSpace && metadata.colorSpace !== 'srgb') {
-      const bytes = new Uint8Array(await safeFile.arrayBuffer());
-      const { width, height, data, iccProfileData } = await this.pixels.fileIO.iccToSrgb(bytes);
-      dimensions = { w: width, h: height };
-      // Vips reliably extracts ICC — populate metadata if missed
-      if (iccProfileData && iccProfileData.length > 0) {
-        metadata.hasIccProfile = true;
-        metadata.raw = metadata.raw || {};
-        if (!metadata.raw.iccProfileData) {
-          const { iccToBase64, parseIccProfileName } = await import('../icc');
-          metadata.raw.iccProfileData = iccToBase64(iccProfileData);
-          if (!metadata.raw.iccProfileName) {
-            metadata.raw.iccProfileName = parseIccProfileName(iccProfileData) || 'Embedded';
+    switch (strategy.conversion) {
+      case 'none': {
+        // Zero conversion: browser-native decode is sufficient (sRGB, P3 from iPhone)
+        const img = await createImageBitmap(safeFile);
+        dimensions = { w: img.width, h: img.height };
+        img.close();
+        console.debug('[ColorMgmt] HEIC decode: %s conversion=none, detectedCS=%s, frameCS=%s',
+          file.name, detectedCS, strategy.frameColorSpace);
+        break;
+      }
+
+      case 'matrix': {
+        // 3×3 matrix conversion (e.g. AdobeRGB→P3)
+        const img = await createImageBitmap(safeFile, { colorSpaceConversion: 'none' });
+        const w = img.width;
+        const h = img.height;
+        dimensions = { w, h };
+
+        const tmpCanvas = bitmapToCanvas(img);
+        img.close();
+        const tmpCtx = tmpCanvas.getContext('2d')!;
+        const imageData = tmpCtx.getImageData(0, 0, w, h);
+
+        convertImageDataColorSpace(imageData.data, detectedCS as WorkingColorSpace, strategy.frameColorSpace);
+
+        const outCS: PredefinedColorSpace = strategy.frameColorSpace === 'display-p3' ? 'display-p3' : 'srgb';
+        const outCanvas = new OffscreenCanvas(w, h);
+        const outCtx = outCanvas.getContext('2d', { colorSpace: outCS })!;
+        const outImageData = new ImageData(imageData.data, w, h, { colorSpace: outCS });
+        outCtx.putImageData(outImageData, 0, 0);
+        displayBlob = await outCanvas.convertToBlob({ type: 'image/png' });
+
+        console.debug('[ColorMgmt] HEIC decode: %s matrix %s→%s',
+          file.name, detectedCS, strategy.frameColorSpace);
+        break;
+      }
+
+      case 'icc-engine': {
+        // Full ICC engine conversion (custom ICC profiles, unknown spaces)
+        const bytes = new Uint8Array(await safeFile.arrayBuffer());
+        const { width, height, data, iccProfileData } = await this.pixels.fileIO.iccToSrgb(bytes);
+        dimensions = { w: width, h: height };
+
+        if (iccProfileData && iccProfileData.length > 0) {
+          metadata.hasIccProfile = true;
+          metadata.raw = metadata.raw || {};
+          if (!metadata.raw.iccProfileData) {
+            metadata.raw.iccProfileData = iccToBase64(iccProfileData);
+            if (!metadata.raw.iccProfileName) {
+              metadata.raw.iccProfileName = parseIccProfileName(iccProfileData) || 'Embedded';
+            }
           }
         }
+
+        const canvas = new OffscreenCanvas(width, height);
+        const ctx = canvas.getContext('2d')!;
+        const clamped = new Uint8ClampedArray(data.length);
+        clamped.set(data);
+        ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
+        displayBlob = await canvas.convertToBlob({ type: 'image/png' });
+
+        console.debug('[ColorMgmt] HEIC decode: %s icc-engine %s→%s',
+          file.name, detectedCS, strategy.frameColorSpace);
+        break;
       }
-      const canvas = new OffscreenCanvas(width, height);
-      const ctx = canvas.getContext('2d')!;
-      const clamped = new Uint8ClampedArray(data.length);
-      clamped.set(data);
-      ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
-      displayBlob = await canvas.convertToBlob({ type: 'image/png' });
-    } else {
-      const img = await createImageBitmap(safeFile);
-      dimensions = { w: img.width, h: img.height };
-      img.close();
     }
 
+    // HEIC: sourceBlobRetention='never' per strategy table — no sourceBlob returned
     return { dimensions, metadata, subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }] };
   }
 

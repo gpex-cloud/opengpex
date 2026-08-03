@@ -129,6 +129,8 @@ async function getInputImageBlob(ctx: EditorContextValue, inputSource: InputSour
     roi: worldRoi,
     precision: 8,
     dpr: 1,
+    compositeTRC: activeFrame.trc,
+    compositeColorSpace: activeFrame.colorSpace,
   });
   const blob = await result.toBlob('image/png');
   return blob;

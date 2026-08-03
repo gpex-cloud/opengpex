@@ -182,9 +182,9 @@ class FallbackHandler implements ImageFormatHandler {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /** Convert ImageBitmap to OffscreenCanvas for encoding APIs */
-export function bitmapToCanvas(bitmap: ImageBitmap): OffscreenCanvas {
+export function bitmapToCanvas(bitmap: ImageBitmap, colorSpace?: PredefinedColorSpace): OffscreenCanvas {
   const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  const ctx = canvas.getContext('2d')!;
+  const ctx = canvas.getContext('2d', colorSpace ? { colorSpace } : undefined)!;
   ctx.drawImage(bitmap, 0, 0);
   return canvas;
 }

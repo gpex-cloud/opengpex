@@ -25,8 +25,11 @@
  * - FilterDescriptor union type
  * - IFilter interface
  * - HighResPixelBuffer type
+ * - FilterColorHint (Phase A: color-aware foundation)
  * - classifyFilter() classification helper
  */
+
+import type { WorkingColorSpace, TRC } from '@opengpex/editor/core/types';
 
 // ────────────────────────────────────────────────────────────
 // Point-operation descriptors
@@ -213,6 +216,24 @@ export interface HighResPixelBuffer {
   /** 3 (RGB) or 4 (RGBA) */
   channels: 3 | 4;
   bitDepth: 16 | 32;
+
+  // ─── Color metadata (Phase A) ───────────────────────────────────────────
+  /**
+   * Color space of the pixel data in this buffer.
+   * Allows consumers to know what color space the values represent
+   * without relying on external context.
+   *
+   * @default 'srgb' — existing buffers without this field are treated as sRGB.
+   */
+  colorSpace?: WorkingColorSpace;
+
+  /**
+   * Transfer characteristic (gamma encoding) of the pixel values.
+   * Informs the pipeline whether values are perceptually-encoded or linear-light.
+   *
+   * @default 'srgb-trc' — existing buffers without this field are treated as sRGB-TRC encoded.
+   */
+  trc?: TRC;
 }
 
 /** A source frame for IFilter.apply() — either 8-bit or high-precision. */
@@ -259,4 +280,72 @@ export interface IFilter {
 
   /** Release backend-owned resources (GL contexts, cached LUTs, etc.). */
   dispose(): void;
+}
+
+// ────────────────────────────────────────────────────────────
+// Filter Color Hints (Phase A: color-aware foundation)
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Color hint for a filter algorithm — declares the TRC (transfer
+ * characteristic) the algorithm expects or prefers.
+ *
+ * This is a **declarative annotation** — it does NOT change runtime behavior
+ * in Phase A. It serves as documentation and lays the groundwork for Phase B
+ * (linear-light compositing) where the pipeline may auto-convert TRC before
+ * applying a filter.
+ *
+ * @see docs/opengpex/plans/20260729_color_management_architecture_evolution.md §Phase A (A3)
+ */
+export interface FilterColorHint {
+  /**
+   * The TRC this filter algorithm expects/prefers.
+   *
+   * - `'srgb-trc'`: Perceptual operations (color balance, HSL, curves on perceived values)
+   * - `'linear'`:   Physically-correct operations (blend modes, Gaussian blur, resize)
+   * - `'any'`:      Operation is TRC-agnostic (levels, channel swap)
+   */
+  preferredTRC: TRC | 'any';
+
+  /**
+   * Policy when the buffer's TRC doesn't match `preferredTRC`.
+   *
+   * - `'convert'`: Pipeline should auto-convert before applying (correct but slower)
+   * - `'ignore'`:  Apply anyway (current behavior, slight inaccuracy but fast)
+   * - `'warn'`:    Apply but log a developer warning
+   *
+   * Phase A: All filters default to `'ignore'` → zero behavior change.
+   * Phase B: Specific filters (blur) can be upgraded to `'convert'` or `'warn'`.
+   */
+  mismatchPolicy: 'convert' | 'ignore' | 'warn';
+}
+
+/**
+ * Static color hint registry for all built-in filter types.
+ *
+ * Phase A: Most `mismatchPolicy` values are `'ignore'` to ensure zero
+ * runtime behavior change.
+ *
+ * Phase B: Blur upgraded to `'convert'` — pipeline will auto-convert to linear
+ * before blur execution, producing physically-correct Gaussian blur results.
+ */
+export const FILTER_COLOR_HINTS: Record<FilterType, FilterColorHint> = {
+  brightness:   { preferredTRC: 'srgb-trc', mismatchPolicy: 'ignore' },
+  contrast:     { preferredTRC: 'srgb-trc', mismatchPolicy: 'ignore' },
+  saturation:   { preferredTRC: 'srgb-trc', mismatchPolicy: 'ignore' },
+  hueRotate:    { preferredTRC: 'srgb-trc', mismatchPolicy: 'ignore' },
+  blur:         { preferredTRC: 'linear',   mismatchPolicy: 'convert' },
+  curves:       { preferredTRC: 'any',      mismatchPolicy: 'ignore' },
+  levels:       { preferredTRC: 'any',      mismatchPolicy: 'ignore' },
+  channelMix:   { preferredTRC: 'any',      mismatchPolicy: 'ignore' },
+  colorBalance: { preferredTRC: 'srgb-trc', mismatchPolicy: 'ignore' },
+  custom:       { preferredTRC: 'any',      mismatchPolicy: 'ignore' },
+};
+
+/**
+ * Get the color hint for a filter descriptor.
+ * Custom filters always return TRC-agnostic hint.
+ */
+export function getFilterColorHint(desc: FilterDescriptor): FilterColorHint {
+  return FILTER_COLOR_HINTS[desc.type] ?? { preferredTRC: 'any', mismatchPolicy: 'ignore' };
 }

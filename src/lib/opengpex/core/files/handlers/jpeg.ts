@@ -23,7 +23,7 @@
 import ExifReader from 'exifreader';
 // @ts-expect-error - piexifjs lacks official TypeScript declarations
 import * as piexif from 'piexifjs';
-import type { PixelService } from '@opengpex/editor/core/types';
+import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   ImageMetadata,
@@ -33,6 +33,8 @@ import type {
 } from '../types';
 import { bitmapToCanvas } from '../index';
 import { iccToBase64, base64ToIcc, parseIccProfileName } from '../icc';
+import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
+import { resolveColorSpaceForFormat, getImportStrategy, getExportStrategy, shouldRetainSourceBlob, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
 
 export class JpegHandler implements ImageFormatHandler {
   readonly format = 'jpeg';
@@ -46,35 +48,83 @@ export class JpegHandler implements ImageFormatHandler {
   async decode(file: File, _options?: DecodeOptions): Promise<DecodeResult> {
     const metadata = await this.extractMetadata(file);
 
-    // If image has non-sRGB ICC profile, convert via vips (Little CMS) for accurate color
+    // ── Strategy-based color pipeline routing ──
+    const detectedCS = resolveColorSpaceForFormat('jpeg', metadata.colorSpace);
+    const strategy = getImportStrategy(detectedCS);
+
     let displayBlob: Blob = file;
     let dimensions: { w: number; h: number };
 
-    if (metadata.colorSpace && metadata.colorSpace !== 'srgb') {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const { width, height, data, iccProfileData } = await this.pixels.fileIO.iccToSrgb(bytes);
-      dimensions = { w: width, h: height };
-      // Vips reliably extracts ICC — populate metadata if ExifReader/piexif missed raw bytes
-      if (iccProfileData && iccProfileData.length > 0) {
-        metadata.hasIccProfile = true;
-        metadata.raw = metadata.raw || {};
-        if (!metadata.raw.iccProfileData) {
-          const { iccToBase64, parseIccProfileName } = await import('../icc');
-          metadata.raw.iccProfileData = iccToBase64(iccProfileData);
-          if (!metadata.raw.iccProfileName) {
-            metadata.raw.iccProfileName = parseIccProfileName(iccProfileData) || 'Embedded';
+    switch (strategy.conversion) {
+      case 'none': {
+        // Zero conversion: browser-native decode is sufficient (sRGB, P3)
+        const img = await createImageBitmap(file);
+        dimensions = { w: img.width, h: img.height };
+        img.close();
+        console.debug('[ColorMgmt] JPEG decode: %s conversion=none, detectedCS=%s, frameCS=%s',
+          file.name, detectedCS, strategy.frameColorSpace);
+        break;
+      }
+
+      case 'matrix': {
+        // 3×3 matrix conversion (e.g. AdobeRGB→P3)
+        // Must disable browser auto color management to preserve source pixel values
+        const img = await createImageBitmap(file, { colorSpaceConversion: 'none' });
+        const w = img.width;
+        const h = img.height;
+        dimensions = { w, h };
+
+        // Use sRGB canvas to extract raw pixel values (avoids browser implicit conversion)
+        const tmpCanvas = bitmapToCanvas(img);
+        img.close();
+        const tmpCtx = tmpCanvas.getContext('2d')!;
+        const imageData = tmpCtx.getImageData(0, 0, w, h);
+
+        // Matrix conversion: detectedCS → frameColorSpace
+        convertImageDataColorSpace(imageData.data, detectedCS as WorkingColorSpace, strategy.frameColorSpace);
+
+        // Write to target-space canvas with correct color space tagging
+        const outCS: PredefinedColorSpace = strategy.frameColorSpace === 'display-p3' ? 'display-p3' : 'srgb';
+        const outCanvas = new OffscreenCanvas(w, h);
+        const outCtx = outCanvas.getContext('2d', { colorSpace: outCS })!;
+        const outImageData = new ImageData(imageData.data, w, h, { colorSpace: outCS });
+        outCtx.putImageData(outImageData, 0, 0);
+        displayBlob = await outCanvas.convertToBlob({ type: 'image/png' });
+
+        console.debug('[ColorMgmt] JPEG decode: %s matrix %s→%s',
+          file.name, detectedCS, strategy.frameColorSpace);
+        break;
+      }
+
+      case 'icc-engine': {
+        // Full ICC engine conversion (CMYK, custom ICC profiles, unknown spaces)
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const { width, height, data, iccProfileData } = await this.pixels.fileIO.iccToSrgb(bytes);
+        dimensions = { w: width, h: height };
+
+        // Vips reliably extracts ICC — populate metadata if handler missed it
+        if (iccProfileData && iccProfileData.length > 0) {
+          metadata.hasIccProfile = true;
+          metadata.raw = metadata.raw || {};
+          if (!metadata.raw.iccProfileData) {
+            metadata.raw.iccProfileData = iccToBase64(iccProfileData);
+            if (!metadata.raw.iccProfileName) {
+              metadata.raw.iccProfileName = parseIccProfileName(iccProfileData) || 'Embedded';
+            }
           }
         }
+        displayBlob = await rgbaToBlob(data, width, height);
+
+        console.debug('[ColorMgmt] JPEG decode: %s icc-engine %s→%s',
+          file.name, detectedCS, strategy.frameColorSpace);
+        break;
       }
-      displayBlob = await rgbaToBlob(data, width, height);
-    } else {
-      // sRGB — browser-native decode is sufficient
-      const img = await createImageBitmap(file);
-      dimensions = { w: img.width, h: img.height };
-      img.close();
     }
 
-    return { dimensions, metadata, subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }] };
+    // sourceBlob retention via centralized strategy
+    const sourceBlob = shouldRetainSourceBlob('jpeg', metadata, strategy.frameColorSpace) ? file : undefined;
+
+    return { dimensions, metadata, subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }], sourceBlob };
   }
 
   // ─── Encode ──────────────────────────────────────────────────────────────
@@ -87,9 +137,38 @@ export class JpegHandler implements ImageFormatHandler {
     const meta = options.metadata;
     const config = options.exportConfig;
 
-    // If exporting with original non-sRGB ICC profile, convert pixels back
+    // ── Strategy-based export color pipeline ──
+    const frameCS: WorkingColorSpace = (config?.frameColorSpace as WorkingColorSpace) || 'srgb';
+    const exportStrategy = getExportStrategy(frameCS, 'jpeg');
+    const embedIcc = config?.embedIcc ?? false;
+
+    // Centralized pixel conversion decision via resolveExportPixelConversion()
+    const pixelConv = resolveExportPixelConversion(
+      frameCS,
+      { colorSpace: meta?.colorSpace, hasIccProfileData: !!meta?.raw?.iccProfileData },
+      embedIcc,
+      'jpeg',
+    );
+
     let canvas: OffscreenCanvas;
-    if (config?.embedIcc && meta?.raw?.iccProfileData && meta?.colorSpace && meta.colorSpace !== 'srgb') {
+
+    if (pixelConv === 'p3-to-srgb') {
+      // Format fallback: P3 frame → sRGB (format doesn't support P3)
+      const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source, 'display-p3') : source as OffscreenCanvas;
+      const w = srcCanvas.width;
+      const h = srcCanvas.height;
+      const tmpCanvas = new OffscreenCanvas(w, h);
+      const tmpCtx = tmpCanvas.getContext('2d', { colorSpace: 'display-p3' })!;
+      tmpCtx.drawImage(srcCanvas, 0, 0);
+      const imageData = tmpCtx.getImageData(0, 0, w, h);
+      convertImageDataColorSpace(imageData.data, 'display-p3', 'srgb');
+      const outCanvas = new OffscreenCanvas(w, h);
+      const outCtx = outCanvas.getContext('2d')!;
+      outCtx.putImageData(new ImageData(imageData.data, w, h), 0, 0);
+      canvas = outCanvas;
+      console.debug('[ColorMgmt] JPEG Export: pixelConversion=p3-to-srgb');
+    } else if (pixelConv === 'srgb-to-icc') {
+      // Pixels are sRGB, need to convert to target ICC space
       const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
       const w = srcCanvas.width;
       const h = srcCanvas.height;
@@ -98,7 +177,7 @@ export class JpegHandler implements ImageFormatHandler {
       tmpCtx.drawImage(srcCanvas, 0, 0);
       const imageData = tmpCtx.getImageData(0, 0, w, h);
 
-      const iccBytes = base64ToIcc(meta.raw.iccProfileData);
+      const iccBytes = base64ToIcc(meta!.raw!.iccProfileData!);
       const { data } = await this.pixels.fileIO.srgbToIcc(
         new Uint8Array(imageData.data.buffer),
         w, h, iccBytes,
@@ -108,8 +187,15 @@ export class JpegHandler implements ImageFormatHandler {
       clamped.set(data);
       tmpCtx.putImageData(new ImageData(clamped, w, h), 0, 0);
       canvas = tmpCanvas;
+      console.debug('[ColorMgmt] JPEG Export: pixelConversion=srgb-to-icc, targetProfile=%s',
+        meta!.raw!.iccProfileName || 'custom');
     } else {
-      canvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
+      // Strategy-driven: use encodeColorSpace to prevent implicit browser conversion
+      canvas = source instanceof ImageBitmap
+        ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
+        : source as OffscreenCanvas;
+      console.debug('[ColorMgmt] JPEG Export: frameCS=%s, encodeColorSpace=%s, embedIcc=%s',
+        frameCS, exportStrategy.encodeColorSpace, embedIcc);
     }
 
     // 1. Get base JPEG blob from browser encoder
@@ -170,6 +256,11 @@ export class JpegHandler implements ImageFormatHandler {
         const jpegBytes = new Uint8Array(await resultBlob.arrayBuffer());
         const withIcc = injectJpegIcc(jpegBytes, iccBytes);
         resultBlob = new Blob([withIcc.buffer as ArrayBuffer], { type: 'image/jpeg' });
+      } else if (config?.embedIcc && !meta?.raw?.iccProfileData) {
+        // embedIcc requested but no source ICC data (e.g. BMP→JPEG export)
+        // For sRGB: absence of ICC in JPEG is universally interpreted as sRGB — no action needed
+        // For non-sRGB: would need a standard ICC constant (future enhancement)
+        console.debug('[ColorMgmt] JPEG Export: embedIcc=true but no source ICC data; frameCS=%s (sRGB assumed by decoders)', frameCS);
       }
 
       return resultBlob;

@@ -24,6 +24,30 @@ import { Dimensions, LocalShape, LocalRect, LocalPolygon } from './primitives';
 // LocalShape is used by VectorMask, canvasCropBox, etc.
 // LocalPolygon is used by clipBoxes (unified selection type after selection_layer_unification).
 
+// ─────────────────────────────────────────────────────────────
+// Color Management Types (Phase A — Color-Aware Foundation)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Supported working color spaces — built-in RGB spaces that can be
+ * exactly converted via 3×3 linear matrices (no ICC engine required).
+ *
+ * These are the color spaces the internal pixel pipeline can operate in.
+ * For file-level metadata identification (including CMYK, grayscale, unknown),
+ * see `ColorSpaceId` in `core/files/types.ts`.
+ *
+ * @see docs/opengpex/plans/20260729_color_management_architecture_evolution.md §Phase A
+ */
+export type WorkingColorSpace = 'srgb' | 'display-p3' | 'adobe-rgb' | 'prophoto-rgb';
+
+/**
+ * Transfer Characteristic (TRC) — describes the gamma encoding of pixel values.
+ *
+ * - `'srgb-trc'`: Standard sRGB transfer curve (IEC 61966-2-1), ~gamma 2.2 with linear segment.
+ * - `'linear'`: Linear-light encoding (gamma 1.0). Physically correct for compositing/blending.
+ */
+export type TRC = 'srgb-trc' | 'linear';
+
 export type RenderEngine = 'canvas' | 'webgpu';
 export const LAYER_ROLES = ['host', 'frag', 'exchange'] as const;
 export type LayerRole = typeof LAYER_ROLES[number];
@@ -313,6 +337,36 @@ export interface Frame {
    * @default 8
    */
   bitDepth: 8 | 16 | 32;
+
+  /**
+   * Working color space — auto-detected from source image ICC Profile.
+   * Immutable after frame creation (same pattern as `bitDepth`).
+   *
+   * Determined at import time:
+   * - Source has Display P3 profile → colorSpace = 'display-p3'
+   * - Source has Adobe RGB profile → colorSpace = 'adobe-rgb'
+   * - Source has sRGB or no profile → colorSpace = 'srgb' (default)
+   * - Source has other/unknown ICC → convert to sRGB, colorSpace = 'srgb'
+   *
+   * When colorSpace !== 'srgb', the pipeline preserves pixels in their
+   * native color space, avoiding lossy round-trip conversions.
+   *
+   * @default 'srgb'
+   * @see docs/opengpex/plans/20260729_color_management_architecture_evolution.md §Phase A
+   */
+  colorSpace: WorkingColorSpace;
+
+  /**
+   * Transfer characteristic (TRC) of the working pixel buffer.
+   * Describes the gamma encoding applied to stored pixel values.
+   *
+   * - `'srgb-trc'`: Standard sRGB gamma (~2.2 with linear toe). Default for all editing.
+   * - `'linear'`: Linear-light encoding. Used for physically-correct compositing (Phase B).
+   *
+   * @default 'srgb-trc'
+   */
+  trc: TRC;
+
   camera: CameraState;
 
   layers: NormalizedState<Layer>;

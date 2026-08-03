@@ -121,4 +121,11 @@ export const SLIDER_THUMB_CSS = /* css */ `
   .opengpex-basic-slider::-moz-range-progress {
     background: transparent;
   }
+
+  /* ── Slim variant (thinner track, smaller thumb) ─────── */
+  .opengpex-basic-slider--slim {
+    --thumb-w: 8px;
+    --thumb-h: 12px;
+    --track-height: 4px;
+  }
 `;

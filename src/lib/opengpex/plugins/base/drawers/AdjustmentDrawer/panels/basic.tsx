@@ -50,6 +50,7 @@ import type { AdjustmentState } from "@opengpex/editor/core/types/models";
 import FancySlider from "@opengpex/editor/widgets/FancySlider";
 import type { AdjustmentDrawerCommandsMap } from "../commands.d";
 import { DEFAULT_ADJUSTMENTS_STATE } from "../protocols";
+import { NumberField } from "../components";
 import { useAdjustmentDrawer, useFilterGesture } from "../hooks";
 
 // ─── Slider descriptors ────────────────────────────────────────────────────────
@@ -206,12 +207,14 @@ function AdjustmentSliderRow({
   onDragStart,
   onDragChange,
   onDragEnd,
+  onFieldCommit,
 }: {
   spec: SliderSpec;
   value: number;
   onDragStart: () => void;
   onDragChange: (v: number) => void;
   onDragEnd: () => void;
+  onFieldCommit: (v: number) => void;
 }) {
   // Track fallback: neutral stage color when this slider has no semantic
   // gradient (e.g. Blur). Kept opaque so the row height stays visually
@@ -220,29 +223,42 @@ function AdjustmentSliderRow({
     spec.trackGradient ??
     "linear-gradient(90deg, var(--bg-stage), var(--bg-stage))";
 
+  // Derive precision from step: step=1 → 0, step=0.1 → 1, step=0.01 → 2
+  const precision = spec.step < 1 ? Math.ceil(-Math.log10(spec.step)) : 0;
+
   return (
-    <div className="space-y-1 group">
-      <div className="flex justify-between items-baseline">
-        <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight">
-          {spec.label}
-        </span>
-        <span className="text-[10px] font-bold text-[var(--text-main)] tabular-nums px-1.5 py-[1px] rounded border border-[var(--border-subtle)] bg-[var(--bg-stage)] min-w-[38px] text-right">
-          {Math.round(value * 10) / 10}
-          {spec.unit}
-        </span>
+    <div className="space-y-0.5 group">
+      <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight">
+        {spec.label}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <div className="flex-1 min-w-0">
+          <FancySlider
+            value={value}
+            min={spec.min}
+            max={spec.max}
+            step={spec.step}
+            slim
+            ariaLabel={spec.label}
+            trackGradient={trackBg}
+            accentColor={accentForValue(spec.key, value)}
+            onDragStart={onDragStart}
+            onChange={onDragChange}
+            onDragEnd={onDragEnd}
+          />
+        </div>
+        <div className="shrink-0">
+          <NumberField
+            value={value}
+            min={spec.min}
+            max={spec.max}
+            step={spec.step}
+            precision={precision}
+            onCommit={onFieldCommit}
+            ariaLabel={`${spec.label} numeric input`}
+          />
+        </div>
       </div>
-      <FancySlider
-        value={value}
-        min={spec.min}
-        max={spec.max}
-        step={spec.step}
-        ariaLabel={spec.label}
-        trackGradient={trackBg}
-        accentColor={accentForValue(spec.key, value)}
-        onDragStart={onDragStart}
-        onChange={onDragChange}
-        onDragEnd={onDragEnd}
-      />
     </div>
   );
 }
@@ -318,6 +334,18 @@ export function BasicPanel() {
     gesture.end();
   }, [gesture]);
 
+  // Numeric field commit: wraps in a mini gesture (begin → patch → end) so
+  // each typed value is exactly one undo step, matching mixer.tsx pattern.
+  const handleFieldCommit = useCallback(
+    (key: keyof AdjustmentState) => (value: number) => {
+      if (!activeLayer) return;
+      gesture.begin();
+      commitPatch(key, value);
+      gesture.end();
+    },
+    [activeLayer, gesture, commitPatch],
+  );
+
   // Belt-and-suspenders: if the panel unmounts mid-drag (e.g. tab switch to
   // Curves), close the gesture cleanly. Same guardrail the sibling panels use.
   useEffect(() => {
@@ -341,6 +369,7 @@ export function BasicPanel() {
             onDragStart={handleDragStart(spec.key)}
             onDragChange={handleDragChange(spec.key)}
             onDragEnd={handleDragEnd}
+            onFieldCommit={handleFieldCommit(spec.key)}
           />
         ))}
       </div>
