@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.40
+
+- New Mosaic tool: paint over areas to pixelate them, with S/M/L block-size presets (shortcut: M)
+- Improved cursor badge positioning for all brush tools
+
+---
+
 ## v1.0.0-beta.39
 
 - Wide gamut color support: Display P3 and Adobe RGB images now keep their full colors on import
