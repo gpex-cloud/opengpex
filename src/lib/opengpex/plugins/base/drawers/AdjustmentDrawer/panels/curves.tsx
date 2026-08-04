@@ -437,16 +437,16 @@ export function CurvesPanel() {
     // and rely on their own strokes/tints for visual separation.
     <div className="flex flex-col gap-2">
       {/* Compact channel selector.
-          Deliberately NOT the shared FunctionGroup widget because:
-          - FunctionGroup renders a `py-2` button = ~28px tall, which wastes
+          Deliberately NOT the shared FunctionTabs widget because:
+          - FunctionTabs renders a `py-2` button = ~28px tall, which wastes
             vertical space on a narrow drawer where the curve graph already
             competes with the panel switcher above it.
-          - FunctionGroup renders the label with a single foreground color;
+          - FunctionTabs renders the label with a single foreground color;
             we want per-channel tinting (R red, G green, B blue) so the tab
             strip visually maps to the curve line below it.
           So we roll a compact segmented control here — the visual language
           (rounded track + shadow-inner + active pill) is intentionally kept
-          identical to FunctionGroup so it doesn't look like a foreign widget. */}
+          identical to FunctionTabs so it doesn't look like a foreign widget. */}
       <div
         role="tablist"
         aria-label="Curve channel"

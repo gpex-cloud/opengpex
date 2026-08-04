@@ -66,14 +66,7 @@
  *   care — it only writes state; the worker eats the CPU cost.
  */
 
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { ChannelMixState } from "@opengpex/editor/core/types/models";
 import type { AdjustmentDrawerCommandsMap } from "../commands.d";
@@ -84,8 +77,10 @@ import {
   CHANNEL_MIX_PRESET_ORDER,
 } from "../protocols";
 import type { ChannelMixOutput, ChannelMixPresetId } from "../protocols";
-import { NumberField } from "../components";
 import { useAdjustmentDrawer, useFilterGesture } from "../hooks";
+import FancySvgSlider from "@opengpex/editor/widgets/FancySvgSlider";
+import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
+import type { ActionOption } from "@opengpex/editor/widgets/ActionDropdown";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -102,10 +97,6 @@ const COEF_STEP = 0.01;
 /** Numeric-field precision (2 decimals — 3 would be noise past the eye). */
 const COEF_PRECISION = 2;
 
-/** Slider track viewBox — mirrors Levels' track layout (256 wide × 24 tall). */
-const TRACK_VB_W = 256;
-const TRACK_VB_H = 24;
-
 /**
  * Per-output-row visual metadata. Keeps R/G/B tinting consistent with the
  * Curves panel's channel tabs so the visual language across the drawer feels
@@ -118,9 +109,6 @@ const OUTPUT_META: Record<ChannelMixOutput, { label: string; hex: string }> = {
 };
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
-
-const clamp = (v: number, lo: number, hi: number): number =>
-  v < lo ? lo : v > hi ? hi : v;
 
 /**
  * Read the current channel-mix state, falling back to identity defaults so
@@ -138,30 +126,6 @@ function readMix(current: ChannelMixState | undefined): ChannelMixState {
       ? [src.constant[0], src.constant[1], src.constant[2]]
       : [0, 0, 0],
   };
-}
-
-/** Round to the step grid so accumulator drift ("1.0300000000000004") stays out of layer state. */
-function snapToStep(v: number): number {
-  return Number((Math.round(v / COEF_STEP) * COEF_STEP).toFixed(COEF_PRECISION));
-}
-
-/**
- * Convert a horizontal pointer coordinate to a coefficient value in
- * `[COEF_MIN, COEF_MAX]`. Mirrors `pointerToIntensity` in levels.tsx but
- * scales into the coefficient domain instead of the 0..255 intensity domain.
- */
-function pointerToCoef(evt: { clientX: number }, el: Element): number {
-  const rect = el.getBoundingClientRect();
-  if (rect.width === 0) return 0;
-  const frac = (evt.clientX - rect.left) / rect.width;
-  const raw = COEF_MIN + clamp(frac, 0, 1) * (COEF_MAX - COEF_MIN);
-  return snapToStep(clamp(raw, COEF_MIN, COEF_MAX));
-}
-
-/** Map a coefficient in [COEF_MIN, COEF_MAX] to viewBox x in [0, TRACK_VB_W]. */
-function coefToTrackX(v: number): number {
-  const frac = (clamp(v, COEF_MIN, COEF_MAX) - COEF_MIN) / (COEF_MAX - COEF_MIN);
-  return frac * TRACK_VB_W;
 }
 
 /**
@@ -223,155 +187,27 @@ function isMonochrome(mix: ChannelMixState): boolean {
   );
 }
 
-// ─── Slider row (track + thumb + label + numeric field) ───────────────────────
-
 /**
- * One horizontal row of the mixer: label on the left, colored track in the
- * middle with a draggable thumb, numeric field on the right. Kept
- * self-contained so the four rows in the panel body are just data + this
- * component.
- *
- * `trackTintHex` colors the track fill from center → thumb so a "positive
- * weight on Red source" reads as a red bar filling rightward — mirrors
- * Photoshop's slider visuals.
+ * Helper: given the CURRENTLY-selected output channel, return which index in
+ * the `constant` triple that channel's constant offset lives at. The
+ * `constant` layout is `[outputR_bias, outputG_bias, outputB_bias]`, so
+ * output `'red'` → 0, `'green'` → 1, `'blue'` → 2. Extracted to reduce
+ * ternary noise inside `commitPatch`.
  */
-function CoefSlider({
-  label,
-  hex,
-  value,
-  disabled,
-  onDragStart,
-  onDragMove,
-  onDragEnd,
-  onFieldCommit,
-}: {
-  label: string;
-  hex: string;
-  value: number;
-  disabled?: boolean;
-  onDragStart: (evt: ReactPointerEvent<SVGSVGElement>) => void;
-  onDragMove: (evt: ReactPointerEvent<SVGSVGElement>) => void;
-  onDragEnd: (evt: ReactPointerEvent<SVGSVGElement>) => void;
-  onFieldCommit: (v: number) => void;
-}) {
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const thumbX = coefToTrackX(value);
-  const zeroX = coefToTrackX(0);
-  const fillX = Math.min(thumbX, zeroX);
-  const fillW = Math.abs(thumbX - zeroX);
-
-  // Display value: percentage integer (Photoshop convention: "42%").
-  const percent = Math.round(value * 100);
-  const displayPercent = `${percent > 0 ? "+" : ""}${percent}%`;
-
-  return (
-    <div className="flex items-center gap-2">
-      <div className="w-6 shrink-0 flex flex-col items-start">
-        <span
-          className="text-[8px] font-black tracking-widest uppercase"
-          style={{ color: disabled ? "var(--text-muted)" : hex }}
-        >
-          {label}
-        </span>
-        <span className="text-[8px] tracking-tight text-[var(--text-muted)]">
-          {displayPercent}
-        </span>
-      </div>
-      <div className="flex-1 min-w-0">
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 ${TRACK_VB_W} ${TRACK_VB_H}`}
-          preserveAspectRatio="none"
-          overflow="visible"
-          className={`w-full h-5 select-none overflow-visible ${
-            disabled ? "cursor-not-allowed opacity-50" : "touch-none cursor-ew-resize"
-          }`}
-          role="slider"
-          aria-label={`${label} coefficient`}
-          aria-valuemin={COEF_MIN * 100}
-          aria-valuemax={COEF_MAX * 100}
-          aria-valuenow={percent}
-          onPointerDown={disabled ? undefined : onDragStart}
-          onPointerMove={disabled ? undefined : onDragMove}
-          onPointerUp={disabled ? undefined : onDragEnd}
-          onPointerCancel={disabled ? undefined : onDragEnd}
-        >
-          {/* Track baseline. */}
-          <rect
-            x={0}
-            y={TRACK_VB_H * 0.45}
-            width={TRACK_VB_W}
-            height={TRACK_VB_H * 0.1}
-            fill="#71717a"
-            fillOpacity={0.3}
-            rx={1}
-          />
-          {/* Zero-marker: a subtle vertical guide at coef=0 so users can eyeball
-              the +/- boundary without a mental map. */}
-          <line
-            x1={zeroX}
-            y1={TRACK_VB_H * 0.25}
-            x2={zeroX}
-            y2={TRACK_VB_H * 0.75}
-            stroke="#71717a"
-            strokeOpacity={0.7}
-            strokeWidth={0.75}
-          />
-          {/* Filled portion from 0 → thumb (colored). */}
-          <rect
-            x={fillX}
-            y={TRACK_VB_H * 0.45}
-            width={fillW}
-            height={TRACK_VB_H * 0.1}
-            fill={hex}
-            fillOpacity={0.9}
-            rx={1}
-          />
-          {/* Thumb — small circle with theme-aware stroke. */}
-          <circle
-            cx={thumbX}
-            cy={TRACK_VB_H / 2}
-            r={4}
-            fill={hex}
-            stroke="#f9fafb"
-            strokeWidth={1}
-            className="dark:hidden"
-          />
-          <circle
-            cx={thumbX}
-            cy={TRACK_VB_H / 2}
-            r={4}
-            fill={hex}
-            stroke="#111827"
-            strokeWidth={1}
-            className="hidden dark:block"
-          />
-        </svg>
-      </div>
-      <div className="shrink-0">
-        <NumberField
-          value={value}
-          min={COEF_MIN}
-          max={COEF_MAX}
-          step={COEF_STEP}
-          precision={COEF_PRECISION}
-          disabled={disabled}
-          onCommit={onFieldCommit}
-          ariaLabel={`${label} numeric input`}
-        />
-      </div>
-    </div>
-  );
+function outputToConstantIdx(output: ChannelMixOutput): number {
+  return output === "red" ? 0 : output === "green" ? 1 : 2;
 }
 
-// ─── Panel component ──────────────────────────────────────────────────────────
+// ─── Slider target type ────────────────────────────────────────────────────────
 
 /**
- * Which slider a drag is currently attached to. `null` means idle. `'r' | 'g'
- * | 'b'` targets the corresponding coefficient of the currently-selected
- * output row; `'const'` targets the constant offset for the same row.
+ * Which slider a commit targets. `'r' | 'g' | 'b'` targets the corresponding
+ * coefficient of the currently-selected output row; `'const'` targets the
+ * constant offset for the same row.
  */
-type SliderTarget = "r" | "g" | "b" | "const" | null;
+type SliderTarget = "r" | "g" | "b" | "const";
+
+// ─── Panel component ──────────────────────────────────────────────────────────
 
 export function ChannelMixerPanel() {
   const {
@@ -383,10 +219,6 @@ export function ChannelMixerPanel() {
   const gesture = useFilterGesture(beginChannelMixEditCmd);
 
   // Which output row the user selected to edit (R by default, matches Photoshop).
-  // NOTE: when `monochrome` is on we display the "red" row regardless of this
-  // stored selection — see the `output` derivation below. We keep the raw
-  // preference in a separate `outputPref` so that toggling monochrome OFF
-  // restores whichever row the user was previously editing.
   const [outputPref, setOutputPref] = useState<ChannelMixOutput>("red");
 
   const mix = useMemo(() => readMix(activeLayer?.channelMix), [activeLayer?.channelMix]);
@@ -399,45 +231,25 @@ export function ChannelMixerPanel() {
   /**
    * Effective edited output row. In monochrome mode all three rows carry the
    * same coefficients so we deterministically edit "red" regardless of user
-   * preference; the segmented control is grayed-out in that mode so the user
-   * cannot desynchronize this from what the UI shows. We compute this as a
-   * pure derivation instead of a `useEffect + setOutput` because syncing
-   * state from a boolean via effect trips
-   * `react-hooks/set-state-in-effect` and forces an extra render — the
-   * derived value produces the same visual result in one render pass.
+   * preference; the segmented control is grayed-out in that mode.
    */
   const output: ChannelMixOutput = monochrome ? "red" : outputPref;
   const setOutput = setOutputPref;
 
-
-  // ─── Drag pipeline ──────────────────────────────────────────────────────────
-
-  const dragRef = useRef<SliderTarget>(null);
+  // ─── Commit logic ───────────────────────────────────────────────────────────
 
   const commitPatch = useCallback(
-    (
-      target: Exclude<SliderTarget, null>,
-      value: number,
-    ) => {
+    (target: SliderTarget, value: number) => {
       if (!updateChannelMixCmd) return;
-      // Write the whole row triple + constant triple so `updateChannelMix`'s
-      // shallow merge is safe. We snapshot the CURRENT mix (post-any-earlier
-      // frame of the same gesture) rather than reading `layer.channelMix`
-      // directly — this keeps drag-through-monochrome coherent because we
-      // mirror the write into all three rows in one shot.
       const currentRow: [number, number, number] =
         target === "const"
           ? [mix.constant?.[0] ?? 0, mix.constant?.[1] ?? 0, mix.constant?.[2] ?? 0]
           : [...mix[output]] as [number, number, number];
 
-      // Which cell in the row is being edited (0 = R, 1 = G, 2 = B).
-      // For `const`, the "cell" maps by the currently-selected output
-      // channel: editing constant while output=red touches only constant[0].
       const cellIdx = target === "r" ? 0 : target === "g" ? 1 : target === "b" ? 2 : outputToConstantIdx(output);
       currentRow[cellIdx] = value;
 
       if (target === "const") {
-        // Constant patch — depending on monochrome, mirror or not.
         const nextConst: [number, number, number] = [
           mix.constant?.[0] ?? 0,
           mix.constant?.[1] ?? 0,
@@ -456,7 +268,6 @@ export function ChannelMixerPanel() {
 
       // Row-coefficient patch.
       if (monochrome) {
-        // Photoshop: monochrome mirrors the edited row into ALL three outputs.
         updateChannelMixCmd.execute({
           patch: { red: currentRow, green: currentRow, blue: currentRow },
         });
@@ -468,10 +279,8 @@ export function ChannelMixerPanel() {
   );
 
   /**
-   * Wrap a single atomic mutation (number-field commit or the preset click
-   * path that isn't already undoable) in a short gesture so it becomes
-   * exactly one Undo entry. Presets have their own undoable command and
-   * don't use this wrapper.
+   * Wrap a single atomic mutation (number-field commit) in a short gesture so
+   * it becomes exactly one Undo entry.
    */
   const commitAtomic = useCallback(
     (fn: () => void) => {
@@ -482,64 +291,10 @@ export function ChannelMixerPanel() {
     [gesture],
   );
 
-  const beginDrag = useCallback(
-    (target: Exclude<SliderTarget, null>, evt: ReactPointerEvent<SVGSVGElement>) => {
-      if (!activeLayer) return;
-      if (evt.button !== 0) return; // left-click only
-      dragRef.current = target;
-      gesture.begin();
-      evt.currentTarget.setPointerCapture?.(evt.pointerId);
-      // Seed the value from the click position so drag-from-click feels
-      // instant instead of only reacting after the first pointermove.
-      const nextVal = pointerToCoef(evt, evt.currentTarget);
-      commitPatch(target, nextVal);
-    },
-    [activeLayer, gesture, commitPatch],
-  );
-
-  const handleDragMove = useCallback(
-    (target: Exclude<SliderTarget, null>) =>
-      (evt: ReactPointerEvent<SVGSVGElement>) => {
-        if (dragRef.current !== target) return;
-        const nextVal = pointerToCoef(evt, evt.currentTarget);
-        commitPatch(target, nextVal);
-      },
-    [commitPatch],
-  );
-
-  const finishDrag = useCallback(
-    (evt?: ReactPointerEvent<SVGSVGElement>) => {
-      if (!dragRef.current) return;
-      dragRef.current = null;
-      gesture.end();
-      if (evt) {
-        const el = evt.currentTarget as Element & {
-          hasPointerCapture?: (id: number) => boolean;
-          releasePointerCapture?: (id: number) => void;
-        };
-        if (el.hasPointerCapture?.(evt.pointerId)) {
-          el.releasePointerCapture?.(evt.pointerId);
-        }
-      }
-    },
-    [gesture],
-  );
-
-  // Belt-and-suspenders: if unmounted mid-drag, close the gesture.
-  useEffect(() => {
-    return () => {
-      if (dragRef.current) {
-        dragRef.current = null;
-        gesture.end();
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // ─── Numeric commit helpers ────────────────────────────────────────────────
 
   const commitNumeric = useCallback(
-    (target: Exclude<SliderTarget, null>) => (value: number) => {
+    (target: SliderTarget) => (value: number) => {
       commitAtomic(() => commitPatch(target, value));
     },
     [commitAtomic, commitPatch],
@@ -551,8 +306,6 @@ export function ChannelMixerPanel() {
     (nextOn: boolean) => {
       if (!updateChannelMixCmd) return;
       if (nextOn) {
-        // Turning ON: mirror the currently-selected row into all three
-        // outputs. This is one atomic write, so one undo step.
         const src: [number, number, number] = [...mix[output]] as [number, number, number];
         const srcConst: [number, number, number] = [
           mix.constant?.[output === "red" ? 0 : output === "green" ? 1 : 2] ?? 0,
@@ -565,10 +318,6 @@ export function ChannelMixerPanel() {
           }),
         );
       } else {
-        // Turning OFF: reset to identity so the three rows go back to being
-        // independent (Photoshop convention — leaving them all identical
-        // wouldn't feel like "un-monochromed"). Users can still tweak
-        // individual rows from there.
         commitAtomic(() =>
           updateChannelMixCmd.execute({
             patch: {
@@ -601,52 +350,83 @@ export function ChannelMixerPanel() {
       output === "red" ? 0 : output === "green" ? 1 : 2
     ];
 
-  // "Total" = sum of the three source coefficients for the current output.
-  // Photoshop hints that ≠ 100% will shift overall brightness for that
-  // channel — we surface the warning in a soft yellow that doesn't block
-  // editing.
   const rowSum = currentRow[0] + currentRow[1] + currentRow[2];
   const rowSumPercent = Math.round(rowSum * 100);
-  const totalWarn = Math.abs(rowSumPercent - 100) > 1; // 1% tolerance
+  const totalWarn = Math.abs(rowSumPercent - 100) > 1;
 
   const outputMeta = OUTPUT_META[output];
+
+  // ─── Slider row renderer ───────────────────────────────────────────────────
+
+  const renderSliderRow = (
+    target: SliderTarget,
+    label: string,
+    hex: string,
+    value: number,
+    disabled?: boolean,
+  ) => {
+    const percent = Math.round(value * 100);
+    const displayPercent = `${percent > 0 ? "+" : ""}${percent}%`;
+    return (
+      <div key={target} className="flex items-center gap-2">
+        <div className="w-6 shrink-0 flex flex-col items-start">
+          <span
+            className="text-[8px] font-black tracking-widest uppercase"
+            style={{ color: disabled ? "var(--text-muted)" : hex }}
+          >
+            {label}
+          </span>
+          <span className="text-[8px] tracking-tight text-[var(--text-muted)]">
+            {displayPercent}
+          </span>
+        </div>
+        <FancySvgSlider
+          bipolar
+          withInput
+          value={value}
+          min={COEF_MIN}
+          max={COEF_MAX}
+          step={COEF_STEP}
+          accentColor={hex}
+          precision={COEF_PRECISION}
+          disabled={disabled}
+          ariaLabel={`${label} coefficient`}
+          onDragStart={() => gesture.begin()}
+          onChange={(v) => commitPatch(target, v)}
+          onDragEnd={() => gesture.end()}
+          onFieldCommit={commitNumeric(target)}
+        />
+      </div>
+    );
+  };
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col gap-2">
-      {/* Header: "Channel Mixer" label + Preset dropdown.
-          Presets are a single-line <select> to save vertical space; on narrow
-          drawers the dropdown UI is already familiar and doesn't need a
-          custom widget. */}
+      {/* Header: "Channel Mixer" label + Preset dropdown. */}
       <div className="flex items-center justify-between">
         <span className="text-[9px] font-black tracking-widest uppercase text-[var(--text-muted)]">
           Channel Mixer
         </span>
-        <select
-          value={activePreset ?? ""}
-          onChange={(e) => handlePresetChange(e.target.value as ChannelMixPresetId)}
-          title="Apply preset (Photoshop-compatible)"
-          className="text-[9px] font-black tracking-widest uppercase px-2 py-0.5 rounded-md border border-zinc-200 dark:border-white/10 bg-transparent text-[var(--text-main)] hover:bg-zinc-100 dark:hover:bg-white/5 focus:outline-none"
-        >
-          {activePreset === null && (
-            // Placeholder shown when the current matrix doesn't match any
-            // built-in preset — Photoshop calls this "Custom". Setting
-            // value="" keeps the placeholder in sync with the select's
-            // current state without polluting the ID enum.
-            <option value="" disabled>
-              Custom…
-            </option>
-          )}
-          {CHANNEL_MIX_PRESET_ORDER.map((id) => (
-            <option key={id} value={id}>
-              {CHANNEL_MIX_PRESET_LABELS[id]}
-            </option>
-          ))}
-        </select>
+        <ActionDropdown
+          align="right"
+          trigger={
+            <span className="text-[9px] font-black tracking-widest uppercase px-2 py-0.5 rounded-md border border-zinc-200 dark:border-white/10 bg-transparent text-[var(--text-main)] hover:bg-zinc-100 dark:hover:bg-white/5 inline-flex items-center gap-1">
+              {activePreset === null ? "Custom…" : CHANNEL_MIX_PRESET_LABELS[activePreset]}
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="opacity-50"><polyline points="6 9 12 15 18 9"/></svg>
+            </span>
+          }
+          options={CHANNEL_MIX_PRESET_ORDER.map((id): ActionOption => ({
+            label: CHANNEL_MIX_PRESET_LABELS[id],
+            value: id,
+            checked: activePreset === id,
+          }))}
+          onSelect={(val) => handlePresetChange(val as ChannelMixPresetId)}
+        />
       </div>
 
-      {/* Monochrome checkbox — mirrors Photoshop's placement above the sliders. */}
+      {/* Monochrome checkbox */}
       <label className="flex items-center gap-1.5 text-[10px] tracking-tight text-[var(--text-main)] select-none cursor-pointer">
         <input
           type="checkbox"
@@ -657,9 +437,7 @@ export function ChannelMixerPanel() {
         Monochrome
       </label>
 
-      {/* Output-channel segmented control (R / G / B).
-          Gray out when monochrome is on because all three rows are locked
-          together — there's nothing to switch between. */}
+      {/* Output-channel segmented control (R / G / B). */}
       <div
         role="tablist"
         aria-label="Output channel"
@@ -695,53 +473,15 @@ export function ChannelMixerPanel() {
         })}
       </div>
 
-      {/* Four sliders: three source coefficients + one constant. The active
-          output row's tint colors the header label so users always know
-          "I'm editing the ROW colored X". Source-channel labels stay tinted
-          to their own channel (R red, G green, B blue). */}
+      {/* Four sliders: three source coefficients + one constant. */}
       <div className="flex flex-col gap-1.5">
-        <CoefSlider
-          label="R"
-          hex={OUTPUT_META.red.hex}
-          value={currentRow[0]}
-          onDragStart={(e) => beginDrag("r", e)}
-          onDragMove={handleDragMove("r")}
-          onDragEnd={finishDrag}
-          onFieldCommit={commitNumeric("r")}
-        />
-        <CoefSlider
-          label="G"
-          hex={OUTPUT_META.green.hex}
-          value={currentRow[1]}
-          onDragStart={(e) => beginDrag("g", e)}
-          onDragMove={handleDragMove("g")}
-          onDragEnd={finishDrag}
-          onFieldCommit={commitNumeric("g")}
-        />
-        <CoefSlider
-          label="B"
-          hex={OUTPUT_META.blue.hex}
-          value={currentRow[2]}
-          onDragStart={(e) => beginDrag("b", e)}
-          onDragMove={handleDragMove("b")}
-          onDragEnd={finishDrag}
-          onFieldCommit={commitNumeric("b")}
-        />
-        <CoefSlider
-          label="±"
-          // Constant uses neutral gray tint — it's the additive bias, not a
-          // channel-tinted operation.
-          hex="#71717a"
-          value={currentConst}
-          onDragStart={(e) => beginDrag("const", e)}
-          onDragMove={handleDragMove("const")}
-          onDragEnd={finishDrag}
-          onFieldCommit={commitNumeric("const")}
-        />
+        {renderSliderRow("r", "R", OUTPUT_META.red.hex, currentRow[0])}
+        {renderSliderRow("g", "G", OUTPUT_META.green.hex, currentRow[1])}
+        {renderSliderRow("b", "B", OUTPUT_META.blue.hex, currentRow[2])}
+        {renderSliderRow("const", "±", "#71717a", currentConst)}
       </div>
 
-      {/* Total row: sum of the three source coefficients for the currently
-          edited output. Photoshop convention — soft yellow when ≠100%. */}
+      {/* Total row */}
       <div className="flex items-center justify-between text-[9px] tracking-tight mt-0.5">
         <span className="text-[var(--text-muted)]">
           {outputMeta.label} = a·R + b·G + c·B{currentConst !== 0 ? " + Δ" : ""}
@@ -763,15 +503,4 @@ export function ChannelMixerPanel() {
       </div>
     </div>
   );
-}
-
-/**
- * Helper: given the CURRENTLY-selected output channel, return which index in
- * the `constant` triple that channel's constant offset lives at. The
- * `constant` layout is `[outputR_bias, outputG_bias, outputB_bias]`, so
- * output `'red'` → 0, `'green'` → 1, `'blue'` → 2. Extracted to reduce
- * ternary noise inside `commitPatch`.
- */
-function outputToConstantIdx(output: ChannelMixOutput): number {
-  return output === "red" ? 0 : output === "green" ? 1 : 2;
 }

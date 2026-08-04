@@ -91,7 +91,6 @@ import {
   useFilterGesture,
   useLayerHistogram,
 } from "../hooks";
-import { thumbSvgPath } from "@opengpex/editor/widgets/FancySlider";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -123,6 +122,33 @@ type DragTarget =
 
 const clamp = (v: number, lo: number, hi: number): number =>
   v < lo ? lo : v > hi ? hi : v;
+
+/**
+ * Generate an SVG path `d` attribute for the house/pentagon-shaped thumb used
+ * by the triangle handles on the input/output tracks.
+ *
+ * @param cx - Center x position in the SVG coordinate system
+ * @param height - Total height of the thumb in SVG units
+ * @param halfWidth - Half-width of the thumb body (default 5)
+ * @returns SVG path data string
+ */
+function thumbSvgPath(cx: number, height: number, halfWidth = 5): string {
+  const roofApexY = 0;
+  const roofBaseY = height * 0.28;
+  const bodyBottomY = height * 0.78;
+  const cornerR = 1;
+
+  return [
+    `M ${cx} ${roofApexY}`,
+    `L ${cx + halfWidth} ${roofBaseY}`,
+    `L ${cx + halfWidth} ${bodyBottomY - cornerR}`,
+    `Q ${cx + halfWidth} ${bodyBottomY} ${cx + halfWidth - cornerR} ${bodyBottomY}`,
+    `L ${cx - halfWidth + cornerR} ${bodyBottomY}`,
+    `Q ${cx - halfWidth} ${bodyBottomY} ${cx - halfWidth} ${bodyBottomY - cornerR}`,
+    `L ${cx - halfWidth} ${roofBaseY}`,
+    `Z`,
+  ].join(' ');
+}
 
 /**
  * Read the current levels state, falling back to identity defaults. We return

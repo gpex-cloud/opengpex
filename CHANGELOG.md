@@ -12,6 +12,7 @@ All notable changes to OpenGPEX are documented in this file.
 - Smart canvas color space: automatically uses P3 when both image and display support it
 - Each document now tracks its working color space
 - Centralized color pipeline replacing scattered per-format logic
+- New SVG slider widget (`FancySvgSlider`) replacing native range inputs in all adjustment panels; removed legacy `FancySlider`; renamed `FunctionGroup` → `FunctionTabs`
 
 ---
 

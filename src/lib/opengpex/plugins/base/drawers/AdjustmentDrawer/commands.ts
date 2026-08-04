@@ -186,7 +186,7 @@ export const ADJUSTMENT_COMMANDS = {
     id: P.CMD_OPEN_MIXER,
     name: 'Open Channel Mixer',
     category: 'Color Grading',
-    shortcuts: [{ key: 'm', meta: true, shift: true }, { key: 'm', ctrl: true, shift: true }],
+    shortcuts: [{ key: 'x', meta: true, shift: true }, { key: 'x', ctrl: true, shift: true }],
     execute: (ctx: EditorContextValue) => {
       openDrawerWithTool(ctx, 'mixer');
     },

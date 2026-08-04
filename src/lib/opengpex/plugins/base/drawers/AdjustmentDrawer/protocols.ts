@@ -140,7 +140,7 @@ export const CMD_OPEN_LEVELS = 'cmd.open_levels';
 /** Open drawer and switch to Color Balance panel (Cmd+B / Ctrl+B). */
 export const CMD_OPEN_COLOR_BALANCE = 'cmd.open_color_balance';
 
-/** Open drawer and switch to Channel Mixer panel (Cmd+Shift+M / Ctrl+Shift+M). */
+/** Open drawer and switch to Channel Mixer panel (Cmd+Shift+X / Ctrl+Shift+X). */
 export const CMD_OPEN_MIXER = 'cmd.open_mixer';
 
 // ─── Curves commands (Step 5) ──────────────────────────────────────────────────

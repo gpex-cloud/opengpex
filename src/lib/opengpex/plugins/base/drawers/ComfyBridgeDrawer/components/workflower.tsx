@@ -24,7 +24,7 @@ import { ChevronDown, Layers, Frame, FileJson, Trash, Dices } from 'lucide-react
 import StatusBanner from '@opengpex/editor/widgets/StatusBanner';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import ComfyNumberInput from '@opengpex/editor/widgets/ComfyNumberInput';
-import FunctionGroup from '@opengpex/editor/widgets/FunctionGroup';
+import FunctionTabs from '@opengpex/editor/widgets/FunctionTabs';
 import Tooltip from '@opengpex/editor/widgets/Tooltip';
 import type { ExposedParam, TextConfig, NumberConfig, PromptConfig, ComboConfig, UserWorkflow, InputSource } from '../protocols';
 
@@ -351,7 +351,7 @@ export interface InputSourceSelectorProps {
 
 /**
  * Segmented toggle for choosing img2img input: Active Layer vs Merged Frame.
- * Uses FunctionGroup size="sm" for compact styling consistent with the design system.
+ * Uses FunctionTabs size="sm" for compact styling consistent with the design system.
  * Shows a status banner below indicating readiness.
  */
 export function InputSourceSelector({ inputSource, hasActiveLayer, disabled, onChangeSource }: InputSourceSelectorProps) {
@@ -370,7 +370,7 @@ export function InputSourceSelector({ inputSource, hasActiveLayer, disabled, onC
 
   return (
     <div className="flex flex-col gap-1.5">
-      <FunctionGroup
+      <FunctionTabs
         options={options}
         value={inputSource}
         onChange={onChangeSource}

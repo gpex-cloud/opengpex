@@ -32,7 +32,7 @@ import FancyButton from "@opengpex/editor/widgets/FancyButton";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
-import FunctionGroup from "@opengpex/editor/widgets/FunctionGroup";
+import FunctionTabs from "@opengpex/editor/widgets/FunctionTabs";
 import Switch from "@opengpex/editor/widgets/Switch";
 
 import { ExifData, CommandInstance, WorkingColorSpace } from "@opengpex/editor/core/types";
@@ -325,7 +325,7 @@ export function ResizeExportControls({
               />
               <div className="flex-1" />
               {sourceBitDepth && sourceBitDepth > 8 && (
-                <FunctionGroup
+                <FunctionTabs
                   options={[
                     { label: "8-bit", value: "8", tooltip: "Standard 8-bit export" },
                     { label: "16-bit", value: "16", tooltip: isSingleLayer ? "Lossless from raw source" : "16-bit composite export" },
@@ -392,7 +392,7 @@ export function ResizeExportControls({
                   <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
                     Byte
                   </span>
-                  <FunctionGroup
+                  <FunctionTabs
                     options={[
                       { label: "Intel", value: "lsb", tooltip: "Little-endian (PC) — current backend only supports this" },
                       { label: "Motorola", value: "msb", tooltip: "Big-endian (Mac) — not supported by current backend" },
@@ -462,7 +462,7 @@ export function ResizeExportControls({
             />
             <div className="flex-1" />
             {sourceBitDepth && sourceBitDepth > 8 && (
-              <FunctionGroup
+              <FunctionTabs
                 options={[
                   { label: "8-bit", value: "8", tooltip: "Standard (smaller file)" },
                   { label: "16-bit", value: "16", tooltip: isSingleLayer ? "Lossless from raw source" : "16-bit composite export" },

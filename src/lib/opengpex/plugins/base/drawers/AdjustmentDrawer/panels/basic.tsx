@@ -47,10 +47,9 @@
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { AdjustmentState } from "@opengpex/editor/core/types/models";
-import FancySlider from "@opengpex/editor/widgets/FancySlider";
+import FancySvgSlider from "@opengpex/editor/widgets/FancySvgSlider";
 import type { AdjustmentDrawerCommandsMap } from "../commands.d";
 import { DEFAULT_ADJUSTMENTS_STATE } from "../protocols";
-import { NumberField } from "../components";
 import { useAdjustmentDrawer, useFilterGesture } from "../hooks";
 
 // ─── Slider descriptors ────────────────────────────────────────────────────────
@@ -231,34 +230,22 @@ function AdjustmentSliderRow({
       <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight">
         {spec.label}
       </span>
-      <div className="flex items-center gap-1.5">
-        <div className="flex-1 min-w-0">
-          <FancySlider
-            value={value}
-            min={spec.min}
-            max={spec.max}
-            step={spec.step}
-            slim
-            ariaLabel={spec.label}
-            trackGradient={trackBg}
-            accentColor={accentForValue(spec.key, value)}
-            onDragStart={onDragStart}
-            onChange={onDragChange}
-            onDragEnd={onDragEnd}
-          />
-        </div>
-        <div className="shrink-0">
-          <NumberField
-            value={value}
-            min={spec.min}
-            max={spec.max}
-            step={spec.step}
-            precision={precision}
-            onCommit={onFieldCommit}
-            ariaLabel={`${spec.label} numeric input`}
-          />
-        </div>
-      </div>
+      <FancySvgSlider
+        value={value}
+        min={spec.min}
+        max={spec.max}
+        step={spec.step}
+        precision={precision}
+        slim
+        withInput
+        ariaLabel={spec.label}
+        trackGradient={trackBg}
+        accentColor={accentForValue(spec.key, value)}
+        onDragStart={onDragStart}
+        onChange={onDragChange}
+        onDragEnd={onDragEnd}
+        onFieldCommit={onFieldCommit}
+      />
     </div>
   );
 }

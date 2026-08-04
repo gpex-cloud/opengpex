@@ -45,20 +45,13 @@
  *   coalesced writer; `useFilterGesture` orchestrates the pair.
  */
 
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { ColorBalanceState } from "@opengpex/editor/core/types/models";
 import type { AdjustmentDrawerCommandsMap } from "../commands.d";
 import { DEFAULT_COLOR_BALANCE_STATE } from "../protocols";
-import { NumberField } from "../components";
 import { useAdjustmentDrawer, useFilterGesture } from "../hooks";
+import FancySvgSlider from "@opengpex/editor/widgets/FancySvgSlider";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -72,10 +65,6 @@ type BalanceAxis = 0 | 1 | 2;
 const BALANCE_MIN = -100;
 const BALANCE_MAX = 100;
 const BALANCE_STEP = 1;
-
-/** SVG track geometry — same as mixer.tsx for visual consistency. */
-const TRACK_VB_W = 256;
-const TRACK_VB_H = 24;
 
 const TONE_REGIONS: { key: ToneRegion; label: string }[] = [
   { key: "shadows", label: "Shadows" },
@@ -100,9 +89,6 @@ const AXIS_META: {
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 
-const clamp = (v: number, lo: number, hi: number): number =>
-  v < lo ? lo : v > hi ? hi : v;
-
 function readBalance(current: ColorBalanceState | undefined): ColorBalanceState {
   const src = current ?? DEFAULT_COLOR_BALANCE_STATE;
   return {
@@ -111,146 +97,6 @@ function readBalance(current: ColorBalanceState | undefined): ColorBalanceState 
     highlights: [src.highlights[0], src.highlights[1], src.highlights[2]],
     preserveLuminosity: src.preserveLuminosity,
   };
-}
-
-function pointerToBalance(evt: { clientX: number }, el: Element): number {
-  const rect = el.getBoundingClientRect();
-  if (rect.width === 0) return 0;
-  const frac = (evt.clientX - rect.left) / rect.width;
-  const raw = BALANCE_MIN + clamp(frac, 0, 1) * (BALANCE_MAX - BALANCE_MIN);
-  return Math.round(clamp(raw, BALANCE_MIN, BALANCE_MAX));
-}
-
-function balanceToTrackX(v: number): number {
-  const frac =
-    (clamp(v, BALANCE_MIN, BALANCE_MAX) - BALANCE_MIN) /
-    (BALANCE_MAX - BALANCE_MIN);
-  return frac * TRACK_VB_W;
-}
-
-// ─── Bipolar Slider ────────────────────────────────────────────────────────────
-
-function BalanceSlider({
-  axis,
-  value,
-  onDragStart,
-  onDragMove,
-  onDragEnd,
-  onFieldCommit,
-}: {
-  axis: BalanceAxis;
-  value: number;
-  onDragStart: (evt: ReactPointerEvent<SVGSVGElement>) => void;
-  onDragMove: (evt: ReactPointerEvent<SVGSVGElement>) => void;
-  onDragEnd: (evt: ReactPointerEvent<SVGSVGElement>) => void;
-  onFieldCommit: (v: number) => void;
-}) {
-  const meta = AXIS_META[axis];
-  const thumbX = balanceToTrackX(value);
-  const zeroX = balanceToTrackX(0);
-  const fillX = Math.min(thumbX, zeroX);
-  const fillW = Math.abs(thumbX - zeroX);
-  const fillColor = value < 0 ? meta.leftHex : meta.rightHex;
-
-  return (
-    <div className="flex flex-col gap-0.5">
-      {/* Labels: left ↔ right */}
-      <div className="flex items-center justify-between px-0.5">
-        <span
-          className="text-[8px] font-black tracking-widest uppercase"
-          style={{ color: meta.leftHex }}
-        >
-          {meta.leftLabel}
-        </span>
-        <span
-          className="text-[8px] font-black tracking-widest uppercase"
-          style={{ color: meta.rightHex }}
-        >
-          {meta.rightLabel}
-        </span>
-      </div>
-      <div className="flex items-center gap-2">
-        <div className="flex-1 min-w-0">
-          <svg
-            viewBox={`0 0 ${TRACK_VB_W} ${TRACK_VB_H}`}
-            preserveAspectRatio="none"
-            overflow="visible"
-            className="w-full h-5 select-none overflow-visible touch-none cursor-ew-resize"
-            role="slider"
-            aria-label={`${meta.leftLabel}–${meta.rightLabel}`}
-            aria-valuemin={BALANCE_MIN}
-            aria-valuemax={BALANCE_MAX}
-            aria-valuenow={value}
-            onPointerDown={onDragStart}
-            onPointerMove={onDragMove}
-            onPointerUp={onDragEnd}
-            onPointerCancel={onDragEnd}
-          >
-            {/* Track baseline */}
-            <rect
-              x={0}
-              y={TRACK_VB_H * 0.45}
-              width={TRACK_VB_W}
-              height={TRACK_VB_H * 0.1}
-              fill="#71717a"
-              fillOpacity={0.3}
-              rx={1}
-            />
-            {/* Center marker (zero) */}
-            <line
-              x1={zeroX}
-              y1={TRACK_VB_H * 0.2}
-              x2={zeroX}
-              y2={TRACK_VB_H * 0.8}
-              stroke="#71717a"
-              strokeOpacity={0.7}
-              strokeWidth={0.75}
-            />
-            {/* Filled portion from center → thumb */}
-            <rect
-              x={fillX}
-              y={TRACK_VB_H * 0.45}
-              width={fillW}
-              height={TRACK_VB_H * 0.1}
-              fill={fillColor}
-              fillOpacity={0.9}
-              rx={1}
-            />
-            {/* Thumb */}
-            <circle
-              cx={thumbX}
-              cy={TRACK_VB_H / 2}
-              r={4}
-              fill={fillColor}
-              stroke="#f9fafb"
-              strokeWidth={1}
-              className="dark:hidden"
-            />
-            <circle
-              cx={thumbX}
-              cy={TRACK_VB_H / 2}
-              r={4}
-              fill={fillColor}
-              stroke="#111827"
-              strokeWidth={1}
-              className="hidden dark:block"
-            />
-          </svg>
-        </div>
-        <div className="shrink-0">
-          <NumberField
-            value={value}
-            min={BALANCE_MIN}
-            max={BALANCE_MAX}
-            step={BALANCE_STEP}
-            precision={0}
-            onCommit={onFieldCommit}
-            ariaLabel={`${meta.leftLabel}–${meta.rightLabel} offset`}
-          />
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // ─── Panel Component ──────────────────────────────────────────────────────────
@@ -272,9 +118,7 @@ export function ColorBalancePanel() {
 
   const currentTriple = balance[toneRegion];
 
-  // ─── Drag pipeline ────────────────────────────────────────────────────────
-
-  const dragRef = useRef<BalanceAxis | null>(null);
+  // ─── Value commit helpers ──────────────────────────────────────────────────
 
   const commitValue = useCallback(
     (axis: BalanceAxis, value: number) => {
@@ -294,58 +138,6 @@ export function ColorBalancePanel() {
     },
     [gesture],
   );
-
-  const beginDrag = useCallback(
-    (axis: BalanceAxis, evt: ReactPointerEvent<SVGSVGElement>) => {
-      if (!activeLayer) return;
-      if (evt.button !== 0) return;
-      dragRef.current = axis;
-      gesture.begin();
-      evt.currentTarget.setPointerCapture?.(evt.pointerId);
-      const nextVal = pointerToBalance(evt, evt.currentTarget);
-      commitValue(axis, nextVal);
-    },
-    [activeLayer, gesture, commitValue],
-  );
-
-  const handleDragMove = useCallback(
-    (axis: BalanceAxis) =>
-      (evt: ReactPointerEvent<SVGSVGElement>) => {
-        if (dragRef.current !== axis) return;
-        const nextVal = pointerToBalance(evt, evt.currentTarget);
-        commitValue(axis, nextVal);
-      },
-    [commitValue],
-  );
-
-  const finishDrag = useCallback(
-    (evt?: ReactPointerEvent<SVGSVGElement>) => {
-      if (dragRef.current === null) return;
-      dragRef.current = null;
-      gesture.end();
-      if (evt) {
-        const el = evt.currentTarget as Element & {
-          hasPointerCapture?: (id: number) => boolean;
-          releasePointerCapture?: (id: number) => void;
-        };
-        if (el.hasPointerCapture?.(evt.pointerId)) {
-          el.releasePointerCapture?.(evt.pointerId);
-        }
-      }
-    },
-    [gesture],
-  );
-
-  // Cleanup on unmount mid-drag
-  useEffect(() => {
-    return () => {
-      if (dragRef.current !== null) {
-        dragRef.current = null;
-        gesture.end();
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // ─── Numeric commit helpers ─────────────────────────────────────────────────
 
@@ -407,17 +199,42 @@ export function ColorBalancePanel() {
 
       {/* Three bipolar sliders */}
       <div className="flex flex-col gap-1.5">
-        {([0, 1, 2] as BalanceAxis[]).map((axis) => (
-          <BalanceSlider
-            key={axis}
-            axis={axis}
-            value={currentTriple[axis]}
-            onDragStart={(e) => beginDrag(axis, e)}
-            onDragMove={handleDragMove(axis)}
-            onDragEnd={finishDrag}
-            onFieldCommit={commitNumeric(axis)}
-          />
-        ))}
+        {([0, 1, 2] as BalanceAxis[]).map((axis) => {
+          const meta = AXIS_META[axis];
+          return (
+            <div key={axis} className="flex flex-col gap-0.5">
+              {/* Labels: left ↔ right */}
+              <div className="flex items-center justify-between px-0.5">
+                <span
+                  className="text-[8px] font-black tracking-widest uppercase"
+                  style={{ color: meta.leftHex }}
+                >
+                  {meta.leftLabel}
+                </span>
+                <span
+                  className="text-[8px] font-black tracking-widest uppercase"
+                  style={{ color: meta.rightHex }}
+                >
+                  {meta.rightLabel}
+                </span>
+              </div>
+              <FancySvgSlider
+                bipolar={{ negativeColor: meta.leftHex, positiveColor: meta.rightHex }}
+                withInput
+                value={currentTriple[axis]}
+                min={BALANCE_MIN}
+                max={BALANCE_MAX}
+                step={BALANCE_STEP}
+                precision={0}
+                ariaLabel={`${meta.leftLabel}–${meta.rightLabel}`}
+                onDragStart={() => gesture.begin()}
+                onChange={(v) => commitValue(axis, v)}
+                onDragEnd={() => gesture.end()}
+                onFieldCommit={commitNumeric(axis)}
+              />
+            </div>
+          );
+        })}
       </div>
 
       {/* Preserve Luminosity checkbox */}

@@ -30,7 +30,7 @@ interface Option<T> {
   tooltipAlign?: TooltipAlign;
 }
 
-interface FunctionGroupProps<T> {
+interface FunctionTabsProps<T> {
   options: Option<T>[];
   value: T;
   onChange: (val: T) => void;
@@ -40,14 +40,14 @@ interface FunctionGroupProps<T> {
   size?: 'sm' | 'md';
 }
 
-export default function FunctionGroup<T extends string>({
+export default function FunctionTabs<T extends string>({
   options,
   value,
   onChange,
   disabled,
   className = '',
   size = 'md',
-}: FunctionGroupProps<T>) {
+}: FunctionTabsProps<T>) {
   const isSm = size === 'sm';
 
   // Size-dependent classes

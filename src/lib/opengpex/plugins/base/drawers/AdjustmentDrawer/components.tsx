@@ -21,7 +21,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ChartSpline, SlidersHorizontal, RotateCcw as ResetIcon } from "lucide-react";
+import { ChartSpline, RotateCcw as ResetIcon } from "lucide-react";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { AdjustmentDrawerCommandsMap } from "./commands.d";
 import SplitButton from "@opengpex/editor/widgets/SplitButton";
@@ -85,7 +85,7 @@ const GRADING_BUTTONS: {
   },
   {
     tool: "mixer",
-    iconSmall: <SlidersHorizontal size={10} />,
+    iconSmall: <span className="text-[9px] font-black leading-none select-none underline decoration-2 underline-offset-2">X</span>,
     label: "Channel Mixer",
   },
 ];

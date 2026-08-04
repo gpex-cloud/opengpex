@@ -39,7 +39,7 @@ import { AIBridgeIcon } from './icon';
 import FancyButton from "@opengpex/editor/widgets/FancyButton";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
-import FunctionGroup from "@opengpex/editor/widgets/FunctionGroup";
+import FunctionTabs from "@opengpex/editor/widgets/FunctionTabs";
 import ComfyNumberInput from "@opengpex/editor/widgets/ComfyNumberInput";
 import StatusBanner from "@opengpex/editor/widgets/StatusBanner";
 import { useAIBridgeState } from "./hooks";
@@ -223,7 +223,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
         <>
           <div className="space-y-2">
             {/* Mode Tabs */}
-            <FunctionGroup
+            <FunctionTabs
               options={MODE_LIST.map((m) => ({
                 value: m,
                 label: AI_MODE_META[m].label,
