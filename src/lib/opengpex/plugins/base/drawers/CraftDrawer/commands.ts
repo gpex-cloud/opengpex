@@ -98,6 +98,16 @@ export const CRAFT_COMMANDS = {
     shortcut: { key: 'e' },
   } as EditorCommand<void, void>,
 
+  setCraftMosaic: {
+    id: P.CMD_SET_CRAFT_MOSAIC,
+    name: 'Mosaic Tool',
+    category: 'Drawing',
+    execute: (ctx: EditorContextValue) => {
+      activateCraft(ctx, 'mosaic');
+    },
+    shortcut: { key: 'm' },
+  } as EditorCommand<void, void>,
+
   deactivateCraft: {
     id: P.CMD_DEACTIVATE_CRAFT,
     name: 'Deactivate Craft Tool',

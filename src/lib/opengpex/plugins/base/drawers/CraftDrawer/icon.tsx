@@ -20,6 +20,45 @@
 "use client";
 
 /**
+ * MosaicIcon: Custom icon — 2×2 grid with diagonal cells filled.
+ *
+ * Visual concept:
+ *   ┌────┬────┐
+ *   │ ■■ │    │   ← Filled cells create a mosaic/pixelation motif
+ *   ├────┼────┤
+ *   │    │ ■■ │
+ *   └────┴────┘
+ *
+ * Matches lucide icon style (24×24 viewBox, currentColor stroke/fill,
+ * rounded corners, 2px stroke width).
+ */
+export function MosaicIcon({ size = 20, className }: { size?: number; className?: string } = {}) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden="true"
+    >
+      {/* Checkerboard filled cells (solid currentColor, no opacity) */}
+      <rect x="3" y="3" width="9" height="9" rx="1" fill="currentColor" />
+      <rect x="12" y="12" width="9" height="9" rx="1" fill="currentColor" />
+      {/* Outer border (rounded rect) */}
+      <rect
+        x="3" y="3" width="18" height="18" rx="2"
+        stroke="currentColor" strokeWidth="2" fill="none"
+      />
+      {/* Center grid lines */}
+      <line x1="12" y1="3" x2="12" y2="21" stroke="currentColor" strokeWidth="2" />
+      <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
+/**
  * CraftDrawerIcon: Custom icon showing "T" (text) and paintbrush, split by diagonal.
  *
  * Visual concept:

@@ -45,6 +45,8 @@ export const CMD_BRUSH_SIZE_DOWN = 'cmd.brush_size_down';
 
 export const CMD_BRUSH_OPACITY_UP = 'cmd.brush_opacity_up';
 export const CMD_BRUSH_OPACITY_DOWN = 'cmd.brush_opacity_down';
+export const CMD_SET_CRAFT_MOSAIC = 'cmd.set_craft_mosaic';
+
 export const CMD_BRUSH_HARDNESS_UP = 'cmd.brush_hardness_up';
 export const CMD_BRUSH_HARDNESS_DOWN = 'cmd.brush_hardness_down';
 
@@ -73,7 +75,7 @@ export const CraftDrawerAPI = {
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-export type CraftType = 'text' | 'brush' | 'eraser' | 'restore';
+export type CraftType = 'text' | 'brush' | 'eraser' | 'restore' | 'mosaic';
 export type ActiveCraft = CraftType | null;
 
 /** Pending text style preset (persisted across tool activations) */
@@ -95,7 +97,18 @@ export interface CraftDrawerConfig {
   brushHardness: number;
   /** User-configured text style preset for next text layer creation */
   pendingTextData?: PendingTextData;
+  /** Mosaic brush size preset */
+  mosaicSizePreset: 'S' | 'M' | 'L';
 }
+
+// ─── Mosaic Size Presets ───────────────────────────────────────────────────────
+
+/** Preset sizes for mosaic tool (brushDiameter, blockSize) */
+export const MOSAIC_SIZE_PRESETS = {
+  S: { brushDiameter: 20, blockSize: 8 },
+  M: { brushDiameter: 40, blockSize: 16 },
+  L: { brushDiameter: 80, blockSize: 32 },
+} as const;
 
 // ─── Text Size Adaptive Utilities ──────────────────────────────────────────────
 

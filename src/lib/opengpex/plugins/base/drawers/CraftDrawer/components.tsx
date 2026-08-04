@@ -21,6 +21,7 @@
 
 import React from "react";
 import { Type, Paintbrush, Eraser, Undo2, Settings } from "lucide-react";
+import { MosaicIcon } from "./icon";
 import { motion } from "framer-motion";
 import { useEditorServices } from "@opengpex/editor/core/context";
 import { SettingsPanelAPI } from "../../panels/SettingsPanel/protocols";
@@ -29,6 +30,7 @@ import FancyGroup, { type FancyGroupItem } from "@opengpex/editor/widgets/FancyG
 import ActionGroup, { type ActionGroupItem } from "@opengpex/editor/widgets/ActionGroup";
 import { TextPanel } from "./panels/text";
 import { BrushPanel } from "./panels/brush";
+import { MosaicPanel } from "./panels/mosaic";
 import { useCraftDrawer, useCraftTrigger, useCraftButtonGroup } from "./hooks";
 import { CraftDrawerIcon } from "./icon";
 import type { CraftType } from "./protocols";
@@ -42,6 +44,12 @@ const CRAFT_BUTTONS: {
   iconSmall: React.ReactNode;
   label: string;
 }[] = [
+  {
+    type: "mosaic",
+    icon: <MosaicIcon size={13} />,
+    iconSmall: <MosaicIcon size={10} />,
+    label: "Mosaic Tool (M)",
+  },
   {
     type: "text",
     icon: <Type size={13} />,
@@ -82,7 +90,9 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
         ? "Draw on canvas\nEsc to exit"
         : activeCraft === "eraser" || activeCraft === "restore"
           ? "Erase / Restore mask pixels\nTab to toggle eraser ↔ restore\nCmd/Ctrl+click to create new mask\nEsc to exit"
-          : null;
+          : activeCraft === "mosaic"
+            ? "Paint on canvas to pixelate\nEsc to exit"
+            : null;
 
   // Build FancyGroup items with dynamic icon/tooltip for eraser restore sub-mode
   const groupItems: FancyGroupItem[] = CRAFT_BUTTONS.map((btn) => {
@@ -209,13 +219,15 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
   const showTextPanel =
     activeCraft === "text" || (activeCraft === null && activeLayerIsText);
 
+  const showMosaicPanel = activeCraft === "mosaic";
+
   const showBrushPanel =
     activeCraft === "brush" ||
     activeCraft === "eraser" ||
     activeCraft === "restore" ||
     (activeCraft === null && activeLayerIsPaint);
 
-  const showPlaceholder = !showTextPanel && !showBrushPanel;
+  const showPlaceholder = !showTextPanel && !showBrushPanel && !showMosaicPanel;
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
@@ -247,6 +259,12 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
         </motion.div>
       )}
 
+      {showMosaicPanel && (
+        <motion.div layout="position" className="flex flex-col">
+          <MosaicPanel />
+        </motion.div>
+      )}
+
       {showBrushPanel && (
         <motion.div layout="position" className="flex flex-col">
           <BrushPanel />
@@ -274,7 +292,11 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
             <kbd className="px-1.5 py-0.5 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-md text-[8px] font-bold shadow-sm">
               E
             </kbd>{" "}
-            for Eraser, or{" "}
+            for Eraser,{" "}
+            <kbd className="px-1.5 py-0.5 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-md text-[8px] font-bold shadow-sm">
+              M
+            </kbd>{" "}
+            for Mosaic, or{" "}
             <kbd className="px-1.5 py-0.5 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-md text-[8px] font-bold shadow-sm">
               R
             </kbd>{" "}

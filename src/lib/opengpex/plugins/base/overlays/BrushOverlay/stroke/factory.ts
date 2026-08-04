@@ -25,12 +25,14 @@
  */
 
 import type { InteractionEvent, Layer, Frame } from '@opengpex/editor/core/types';
-import { CraftDrawerAPI } from '../../../drawers/CraftDrawer/protocols';
+import { CraftDrawerAPI, MOSAIC_SIZE_PRESETS } from '../../../drawers/CraftDrawer/protocols';
+import type { CraftDrawerConfig } from '../../../drawers/CraftDrawer/protocols';
 import { ColorOptionsAPI } from '../../../options/ColorOptions/protocols';
 import { LayersDrawerAPI, type MaskEditingSignal } from '../../../drawers/LayersDrawer/protocols';
 import { DEFAULT_BRUSH_SIZE } from '../protocols';
 import { PaintStrokeSession } from './PaintStrokeSession';
 import { MaskStrokeSession } from './MaskStrokeSession';
+import { MosaicStrokeSession } from './MosaicStrokeSession';
 import type { StrokeSession, StrokeConfig } from './types';
 
 /** Shared signal keys */
@@ -56,7 +58,9 @@ export function createStrokeSession(e: InteractionEvent): StrokeSession | null {
   // Read brush parameters from pluginConfig
   const config = readBrushConfig(e, frame);
 
-  if (!isMaskEdit) {
+  if (craft === 'mosaic') {
+    return createMosaicSession(e, frame);
+  } else if (!isMaskEdit) {
     return createPaintSession(config, craft, isCmdPressed);
   } else {
     return createMaskSession(e, frame, config, isEraser, isRestore, isCmdPressed);
@@ -180,6 +184,87 @@ function createMaskSession(
     });
   } catch (err) {
     console.warn('[BrushOverlay] OffscreenCanvas creation for mask failed:', err);
+    return null;
+  }
+}
+
+// ─── Mosaic Session Creation ───────────────────────────────────────────────────
+
+function createMosaicSession(
+  e: InteractionEvent,
+  frame: Frame,
+): StrokeSession | null {
+  const activeLayerId = frame.activeLayerId;
+  const activeLayer = activeLayerId ? frame.layers.byId[activeLayerId] : null;
+
+  if (!activeLayer) {
+    e.actions.notifyHUD('Mosaic needs a target layer', 'error');
+    return null;
+  }
+
+  // Find the SOURCE image layer for pixel reading.
+  // Mosaic only READS from the source (never modifies it), so locked layers are valid sources.
+  // Mosaic writes to a paint layer, so lock check applies only to the target paint layer
+  // (handled in MosaicStrokeSession.findOrCreatePaintLayer at end time).
+  let sourceLayer: Layer | null = null;
+
+  if (activeLayer.type === 'image' && activeLayer.src) {
+    // Active layer IS the image → use it directly as source (lock doesn't matter, we only read)
+    sourceLayer = activeLayer;
+  } else if (activeLayer.type === 'paint') {
+    // Active layer is paint (e.g. from a previous mosaic stroke) → find image layer in stack
+    const layerOrder = frame.layers.order;
+    const activeIdx = layerOrder.indexOf(activeLayerId!);
+    // Search below in stack (lower index = below)
+    for (let i = activeIdx - 1; i >= 0; i--) {
+      const layer = frame.layers.byId[layerOrder[i]];
+      if (layer.type === 'image' && layer.visible && layer.src) {
+        sourceLayer = layer;
+        break;
+      }
+    }
+    // If not found below, search above
+    if (!sourceLayer) {
+      for (let i = activeIdx + 1; i < layerOrder.length; i++) {
+        const layer = frame.layers.byId[layerOrder[i]];
+        if (layer.type === 'image' && layer.visible && layer.src) {
+          sourceLayer = layer;
+          break;
+        }
+      }
+    }
+  } else {
+    e.actions.notifyHUD('Mosaic only works on image/paint layers', 'error');
+    return null;
+  }
+
+  if (!sourceLayer) {
+    e.actions.notifyHUD('Mosaic needs an image layer as source', 'error');
+    return null;
+  }
+
+  // Read preset size from CraftDrawer config
+  const craftConfig = e.state.pluginConfig[CraftDrawerAPI.configKey] as unknown as CraftDrawerConfig | undefined;
+  const preset = craftConfig?.mosaicSizePreset ?? 'M';
+  const presetData = MOSAIC_SIZE_PRESETS[preset as keyof typeof MOSAIC_SIZE_PRESETS] ?? MOSAIC_SIZE_PRESETS['M'];
+  const { brushDiameter, blockSize } = presetData;
+
+  // Pre-check: ensure source bitmap is available (must be cached since layer is visible)
+  const sourceBitmap = e.pixels.image.ensureBitmap(sourceLayer.src!);
+  if (!sourceBitmap) {
+    console.warn('[BrushOverlay] Source bitmap not available for mosaic');
+    e.actions.notifyHUD('Image not ready, try again', 'error');
+    return null;
+  }
+
+  try {
+    return new MosaicStrokeSession(
+      { brushDiameter, blockSize, canvasSize: { w: frame.canvas.w, h: frame.canvas.h } },
+      sourceLayer,
+      sourceBitmap,
+    );
+  } catch (err) {
+    console.warn('[BrushOverlay] MosaicStrokeSession creation failed:', err);
     return null;
   }
 }

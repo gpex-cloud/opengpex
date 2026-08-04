@@ -167,5 +167,21 @@ export function useBrushCursorFastSync(
       crossH.style.left = `${halfSize - 3}px`;
       crossH.style.top = `${halfSize - 0.5}px`;
     }
+
+    // Tool identity badge (bottom-right of cursor circle/square)
+    const toolBadge = el.querySelector('[data-badge="tool-id"]') as HTMLElement;
+    if (toolBadge) {
+      const badgeOffset = Math.max(screenDiameter - 1, halfSize + 2);
+      toolBadge.style.left = `${badgeOffset}px`;
+      toolBadge.style.top = `${badgeOffset}px`;
+    }
+
+    // Mode indicator badge (right of tool badge)
+    const modeBadge = el.querySelector('[data-badge="new-layer"]') as HTMLElement;
+    if (modeBadge) {
+      const badgeOffset = Math.max(screenDiameter - 1, halfSize + 2);
+      modeBadge.style.left = `${badgeOffset + 17}px`;
+      modeBadge.style.top = `${badgeOffset + 1}px`;
+    }
   }, { throttleHz: 60 });
 }

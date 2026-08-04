@@ -20,8 +20,10 @@
 'use client';
 
 import React, { useRef, useEffect } from 'react';
-import { useEditorState } from '@opengpex/editor/core/context';
+import { useEditorState, usePluginConfig } from '@opengpex/editor/core/context';
 import { useBrushOverlayState, useBrushCursorTracking, useBrushParams, useBrushColor } from './hooks';
+import { CraftDrawerAPI, MOSAIC_SIZE_PRESETS } from '../../drawers/CraftDrawer/protocols';
+import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
 import { useStrokePreviewFastSync, useMaskFocusOverlayFastSync } from './useFastSync';
 import { MASK_EDITING_KEY, MASK_FOCUS_KEY, type MaskEditingSignal } from '../../drawers/LayersDrawer/protocols';
 
@@ -74,12 +76,22 @@ const BrushCursor = React.memo(function BrushCursor({ isEraser, activeCraft }: B
   const brushColor = useBrushColor();
   const { activeFrame } = useEditorState();
 
+  // Read mosaic preset for cursor sizing when in mosaic mode
+  const [craftConfig] = usePluginConfig<CraftDrawerConfig>(CraftDrawerAPI.configKey);
+  const isMosaic = activeCraft === 'mosaic';
+  const mosaicPreset = craftConfig?.mosaicSizePreset ?? 'M';
+  const mosaicPresetData = MOSAIC_SIZE_PRESETS[mosaicPreset as keyof typeof MOSAIC_SIZE_PRESETS];
+  const mosaicBrushDiameter = mosaicPresetData?.brushDiameter ?? 40;
+
+  // Use mosaic brush diameter when in mosaic mode, otherwise use normal brush size
+  const effectiveBrushSize = isMosaic ? mosaicBrushDiameter : brushSize;
+
   // 60fps mouse position tracking + camera.k real-time sync size + Cmd/Ctrl modifier key listening
-  useBrushCursorTracking(cursorRef, true, brushSize, activeCraft);
+  useBrushCursorTracking(cursorRef, true, effectiveBrushSize, activeCraft);
 
   // Calculate cursor diameter on screen (brushSize * camera zoom ratio)
   const cameraK = activeFrame?.camera.k || 1;
-  const screenDiameter = Math.max(brushSize * cameraK, 4); // minimum 4px visible
+  const screenDiameter = Math.max(effectiveBrushSize * cameraK, 4); // minimum 4px visible
   const halfSize = screenDiameter / 2;
 
   return (
@@ -95,7 +107,7 @@ const BrushCursor = React.memo(function BrushCursor({ isEraser, activeCraft }: B
         marginTop: `-${halfSize}px`,
       }}
     >
-      {/* Outer ring: white stroke */}
+      {/* Outer ring: white stroke (circular for all modes) */}
       <div
         className="absolute rounded-full"
         style={{
@@ -123,8 +135,8 @@ const BrushCursor = React.memo(function BrushCursor({ isEraser, activeCraft }: B
         }}
       />
 
-      {/* Color fill preview (brush mode only, eraser not shown) */}
-      {!isEraser && screenDiameter > 6 && (
+      {/* Color fill preview (brush mode only, eraser/mosaic not shown) */}
+      {!isEraser && !isMosaic && screenDiameter > 6 && (
         <div
           className="absolute rounded-full"
           style={{
@@ -164,7 +176,7 @@ const BrushCursor = React.memo(function BrushCursor({ isEraser, activeCraft }: B
         }}
       />
 
-      {/* Tool identity badge (bottom-right): eraser (shared by eraser & restore) / droplet (brush) */}
+      {/* Tool identity badge (bottom-right): mosaic grid / eraser / droplet (brush) */}
       <svg
         data-badge="tool-id"
         className="absolute pointer-events-none"
@@ -178,7 +190,16 @@ const BrushCursor = React.memo(function BrushCursor({ isEraser, activeCraft }: B
           filter: 'drop-shadow(0 0.5px 1px rgba(0,0,0,0.9))',
         }}
       >
-        {(activeCraft === 'eraser' || activeCraft === 'restore') ? (
+        {isMosaic ? (
+          /* 2×2 checkerboard icon (mosaic) */
+          <>
+            <rect x="3" y="3" width="9" height="9" rx="1" fill="white" />
+            <rect x="12" y="12" width="9" height="9" rx="1" fill="white" />
+            <rect x="3" y="3" width="18" height="18" rx="2" stroke="white" strokeWidth="2.5" fill="none" />
+            <line x1="12" y1="3" x2="12" y2="21" stroke="white" strokeWidth="2" />
+            <line x1="3" y1="12" x2="21" y2="12" stroke="white" strokeWidth="2" />
+          </>
+        ) : (activeCraft === 'eraser' || activeCraft === 'restore') ? (
           /* Eraser icon (matches lucide Eraser) — used for both eraser and restore modes */
           <>
             <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />

@@ -251,9 +251,9 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
           onClick={() => setIsZoomBarOpen((p) => !p)}
           className="flex items-center gap-1 px-1 h-7 rounded-lg hover:bg-[var(--bg-stage)] transition-all cursor-pointer"
         >
-          <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tighter opacity-70">
+          {/* <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tighter opacity-70">
             Zoom
-          </span>
+          </span> */}
           <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 tabular-nums min-w-[32px] text-center">
             {Math.round(displayK * 100)}%
           </span>

@@ -59,7 +59,7 @@ export const createBrushStrokeHandler = (): InteractionHandler => ({
     // Only active in craft mode when activeCraft === 'brush' or 'eraser' or 'restore'
     if (e.state.interaction.interactionMode !== 'craft') return false;
     const craft = e.state.interaction.signals[ACTIVE_CRAFT_KEY];
-    if (craft !== 'brush' && craft !== 'eraser' && craft !== 'restore') return false;
+    if (craft !== 'brush' && craft !== 'eraser' && craft !== 'restore' && craft !== 'mosaic') return false;
 
     // Exclude right click
     const mouseEvent = e.nativeEvent as MouseEvent;
@@ -104,7 +104,10 @@ export const createBrushStrokeHandler = (): InteractionHandler => ({
       } catch (err) {
         console.error('[BrushOverlay] Bake failed:', err);
       } finally {
-        session = null;
+        // Delay clearing session by one frame to give the renderer time to commit
+        // the baked layer. This prevents a one-frame flash where the preview overlay
+        // disappears before the new layer content is rendered on screen.
+        requestAnimationFrame(() => { session = null; });
       }
     })();
   },

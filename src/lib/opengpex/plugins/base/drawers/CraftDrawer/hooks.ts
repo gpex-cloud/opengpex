@@ -23,7 +23,7 @@ import { useCallback, useMemo, useEffect, useRef } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals, usePluginSelfConfig, usePluginConfig } from '@opengpex/editor/core/context';
 import { TextOverlayAPI } from '../../overlays/TextOverlay/protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
-import { getReferenceFontSize } from './protocols';
+import { getReferenceFontSize, MOSAIC_SIZE_PRESETS } from './protocols';
 import type { ActiveCraft, CraftType, CraftDrawerConfig, PendingTextData } from './protocols';
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
 import type { CraftDrawerCommandsMap, CraftDrawerSignalsMap } from './commands.d';
@@ -383,6 +383,30 @@ export function useTextPanel() {
     updateTextColor,
     updateTextColorLive,
   }), [targetLayer, textData, updateTextData, updateTextDataLive, textColor, updateTextColor, updateTextColorLive]);
+}
+
+// ─── useMosaicPanel ────────────────────────────────────────────────────────────
+
+/**
+ * useMosaicPanel: Semantic Hook for MosaicPanel mosaic attribute panel
+ *
+ * Provides ability to read and write mosaic size preset.
+ * Parameters are stored in pluginConfig['opengpex.drawers.craft_tools'].
+ */
+export function useMosaicPanel() {
+  const [selfConfig, setSelfConfig] = usePluginSelfConfig<CraftDrawerConfig>();
+
+  const sizePreset = selfConfig.mosaicSizePreset ?? 'M';
+  const presetValues = MOSAIC_SIZE_PRESETS[sizePreset];
+
+  const setSizePreset = useCallback(
+    (preset: 'S' | 'M' | 'L') => {
+      setSelfConfig({ mosaicSizePreset: preset } as Partial<CraftDrawerConfig>);
+    },
+    [setSelfConfig]
+  );
+
+  return { sizePreset, presetValues, setSizePreset };
 }
 
 // ─── useBrushPanel ─────────────────────────────────────────────────────────────

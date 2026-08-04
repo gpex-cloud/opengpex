@@ -40,7 +40,7 @@ export function useBrushOverlayState() {
   const { actions } = useEditorServices();
 
   const activeCraft = state.interaction.signals[CraftDrawerAPI.signals.activeCraft] as string | null;
-  const isBrushMode = activeCraft === 'brush' || activeCraft === 'eraser' || activeCraft === 'restore';
+  const isBrushMode = activeCraft === 'brush' || activeCraft === 'eraser' || activeCraft === 'restore' || activeCraft === 'mosaic';
 
   // Sets/clears cursorOverride: 'none' to hide system cursor (replaced by DOM circle)
   useEffect(() => {
