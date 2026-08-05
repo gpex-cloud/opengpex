@@ -47,15 +47,6 @@ export const plugin: EditorPlugin = {
   component: SmartGuides,
   initialConfig: {
     enabled: true,
-    snapToCanvas: true,
-    snapToBirth: true,
-    snapToLayers: true,
-    excludeLayerTypes: [],
-    ignoreLockedLayers: true,
-    ignoreSmallLayers: true,
-    smallLayerThreshold: 400,
-    maxSnapTargets: 8,
-    edgeSnapScope: 'recanvas'
   },
   commands: Object.values(SMART_GUIDES_COMMANDS),
   contributions: [

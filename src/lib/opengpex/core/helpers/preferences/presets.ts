@@ -125,3 +125,27 @@ export const RESTORE_TIMEOUT_MS = 8000;
  */
 export const CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS = true;
 
+
+/** -----------------------------------------------------------------*/
+/** Snap / Smart Guides Settings ------------------------------------*/
+/** -----------------------------------------------------------------*/
+
+/** Snap to canvas edges and center lines */
+export const SNAP_TO_CANVAS: boolean = true;
+/** Snap to layer's birth position (initial spawn center) */
+export const SNAP_TO_BIRTH: boolean = true;
+/** Snap to other layers */
+export const SNAP_TO_LAYERS: boolean = true;
+/** Layer types excluded from snapping source */
+export const SNAP_EXCLUDE_LAYER_TYPES: string[] = [];
+/** Ignore locked layers as snap targets */
+export const SNAP_IGNORE_LOCKED_LAYERS: boolean = true;
+/** Ignore layers with screen projection area below threshold */
+export const SNAP_IGNORE_SMALL_LAYERS: boolean = true;
+/** Small layer threshold in screen pixels² (default 400 ≈ 20×20) */
+export const SNAP_SMALL_LAYER_THRESHOLD: number = 400;
+/** Maximum number of layers participating in snap calculation */
+export const SNAP_MAX_TARGETS: number = 50;
+/** Edge snap scope during resize: 'recanvas' | 'all' */
+export const SNAP_EDGE_SCOPE: 'recanvas' | 'all' = 'recanvas';
+

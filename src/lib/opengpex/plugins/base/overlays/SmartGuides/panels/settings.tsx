@@ -23,6 +23,8 @@ import React, { useCallback } from "react";
 import { Magnet, Filter, SlidersHorizontal, Power } from "lucide-react";
 import Switch from "@opengpex/editor/widgets/Switch";
 import { usePluginSelfConfig } from "@opengpex/editor/core/context";
+import { presets } from "@opengpex/editor/core/helpers/preferences";
+import { usePreset } from "@opengpex/editor/core/helpers/preferences/usePreset";
 import { SmartGuidesConfig } from "../protocols";
 
 type ExcludableLayerType = 'text' | 'paint' | 'vector' | 'color';
@@ -30,21 +32,32 @@ type ExcludableLayerType = 'text' | 'paint' | 'vector' | 'color';
 /**
  * SmartGuidesSettings: Settings panel contributed to SETTINGS_CONFIG_PANEL.
  * Allows users to fine-tune which layers participate in smart guide snapping.
+ *
+ * `enabled` stays in pluginConfig (pure plugin UI state).
+ * All snap-related fields use PresetsFactory (core infrastructure).
+ *
+ * @see docs/opengpex/plans/20260805_stage_reverse_dependency_issue.md
  */
 export function SmartGuidesSettings() {
+  // Master toggle stays in pluginConfig (plugin-internal UI state)
   const [config, setConfig] = usePluginSelfConfig<SmartGuidesConfig>();
 
-  const toggle = useCallback((key: keyof SmartGuidesConfig) => {
-    setConfig({ [key]: !config[key] } as Partial<SmartGuidesConfig>);
-  }, [config, setConfig]);
+  // Snap settings via PresetsFactory
+  const snapToCanvas = usePreset('SNAP_TO_CANVAS');
+  const snapToBirth = usePreset('SNAP_TO_BIRTH');
+  const snapToLayers = usePreset('SNAP_TO_LAYERS');
+  const excludeLayerTypes = usePreset('SNAP_EXCLUDE_LAYER_TYPES');
+  const ignoreLockedLayers = usePreset('SNAP_IGNORE_LOCKED_LAYERS');
+  const ignoreSmallLayers = usePreset('SNAP_IGNORE_SMALL_LAYERS');
+  const edgeSnapScope = usePreset('SNAP_EDGE_SCOPE');
 
   const toggleExclude = useCallback((type: ExcludableLayerType) => {
-    const current = config.excludeLayerTypes || [];
+    const current = excludeLayerTypes || [];
     const next = current.includes(type)
       ? current.filter(t => t !== type)
       : [...current, type];
-    setConfig({ excludeLayerTypes: next });
-  }, [config, setConfig]);
+    presets.set('SNAP_EXCLUDE_LAYER_TYPES', next);
+  }, [excludeLayerTypes]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -57,7 +70,7 @@ export function SmartGuidesSettings() {
             <span className="text-[9px] text-[var(--text-muted)]">⌘⇧; to toggle</span>
           </div>
         </div>
-        <Switch checked={config.enabled} onChange={() => toggle('enabled')} />
+        <Switch checked={config.enabled} onChange={() => setConfig({ enabled: !config.enabled })} />
       </div>
 
       {/* ─── Section 1: Snap Targets ─── */}
@@ -69,20 +82,20 @@ export function SmartGuidesSettings() {
         <SwitchRow
           label="Canvas edges & center"
           description="Snap to canvas boundaries and midpoint"
-          checked={config.snapToCanvas}
-          onChange={() => toggle('snapToCanvas')}
+          checked={snapToCanvas}
+          onChange={() => presets.set('SNAP_TO_CANVAS', !snapToCanvas)}
         />
         <SwitchRow
           label="Layer birth position"
           description="Snap to layer's original spawn center"
-          checked={config.snapToBirth}
-          onChange={() => toggle('snapToBirth')}
+          checked={snapToBirth}
+          onChange={() => presets.set('SNAP_TO_BIRTH', !snapToBirth)}
         />
         <SwitchRow
           label="Other layers"
           description="Snap to edges and centers of sibling layers"
-          checked={config.snapToLayers}
-          onChange={() => toggle('snapToLayers')}
+          checked={snapToLayers}
+          onChange={() => presets.set('SNAP_TO_LAYERS', !snapToLayers)}
         />
       </div>
 
@@ -95,25 +108,25 @@ export function SmartGuidesSettings() {
         <SwitchRow
           label="Text layers"
           description="Don't snap to text layers"
-          checked={config.excludeLayerTypes?.includes('text') ?? false}
+          checked={excludeLayerTypes?.includes('text') ?? false}
           onChange={() => toggleExclude('text')}
         />
         <SwitchRow
           label="Paint/Brush layers"
           description="Don't snap to paint layers"
-          checked={config.excludeLayerTypes?.includes('paint') ?? false}
+          checked={excludeLayerTypes?.includes('paint') ?? false}
           onChange={() => toggleExclude('paint')}
         />
         <SwitchRow
           label="Vector layers"
           description="Don't snap to vector shape layers"
-          checked={config.excludeLayerTypes?.includes('vector') ?? false}
+          checked={excludeLayerTypes?.includes('vector') ?? false}
           onChange={() => toggleExclude('vector')}
         />
         <SwitchRow
           label="Color fill layers"
           description="Don't snap to solid color layers"
-          checked={config.excludeLayerTypes?.includes('color') ?? false}
+          checked={excludeLayerTypes?.includes('color') ?? false}
           onChange={() => toggleExclude('color')}
         />
       </div>
@@ -127,8 +140,8 @@ export function SmartGuidesSettings() {
         <SwitchRow
           label="Snap edges for all selections"
           description="When off, edge snap only works for Re-Canvas resize"
-          checked={config.edgeSnapScope === 'all'}
-          onChange={() => setConfig({ edgeSnapScope: config.edgeSnapScope === 'all' ? 'recanvas' : 'all' })}
+          checked={edgeSnapScope === 'all'}
+          onChange={() => presets.set('SNAP_EDGE_SCOPE', edgeSnapScope === 'all' ? 'recanvas' : 'all')}
         />
       </div>
 
@@ -141,16 +154,35 @@ export function SmartGuidesSettings() {
         <SwitchRow
           label="Ignore locked layers"
           description="Locked layers won't attract snapping"
-          checked={config.ignoreLockedLayers}
-          onChange={() => toggle('ignoreLockedLayers')}
+          checked={ignoreLockedLayers}
+          onChange={() => presets.set('SNAP_IGNORE_LOCKED_LAYERS', !ignoreLockedLayers)}
         />
         <SwitchRow
           label="Ignore small fragments"
           description="Skip layers smaller than 20×20 screen px"
-          checked={config.ignoreSmallLayers}
-          onChange={() => toggle('ignoreSmallLayers')}
+          checked={ignoreSmallLayers}
+          onChange={() => presets.set('SNAP_IGNORE_SMALL_LAYERS', !ignoreSmallLayers)}
         />
       </div>
+
+      {/* ─── Reset to Defaults ─── */}
+      <button
+        type="button"
+        onClick={() => {
+          presets.reset('SNAP_TO_CANVAS');
+          presets.reset('SNAP_TO_BIRTH');
+          presets.reset('SNAP_TO_LAYERS');
+          presets.reset('SNAP_EXCLUDE_LAYER_TYPES');
+          presets.reset('SNAP_IGNORE_LOCKED_LAYERS');
+          presets.reset('SNAP_IGNORE_SMALL_LAYERS');
+          presets.reset('SNAP_SMALL_LAYER_THRESHOLD');
+          presets.reset('SNAP_MAX_TARGETS');
+          presets.reset('SNAP_EDGE_SCOPE');
+        }}
+        className="w-full rounded-xl p-2.5 text-[10px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] border border-[var(--border-subtle)] hover:border-amber-500/50 hover:text-amber-500 transition-colors uppercase tracking-wider"
+      >
+        Reset Snap Settings to Defaults
+      </button>
 
       <p className="px-1 text-[8px] text-[var(--text-muted)] font-bold leading-relaxed uppercase tracking-tight italic opacity-60">
         ⌘; to open this panel • ⌘⇧; to toggle guides

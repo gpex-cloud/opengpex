@@ -210,6 +210,18 @@ class TileCache {
   }
 
   /**
+   * Get cache statistics (O(1) reads, safe for low-frequency polling).
+   */
+  public getStats(): { cached: number; empty: number; pending: number; max: number } {
+    return {
+      cached: this.cache.size,
+      empty: this.emptyTiles.size,
+      pending: this.pending.size,
+      max: this.MAX_TILES,
+    };
+  }
+
+  /**
    * Wipe all cached tiles.
    */
   public clear(): void {

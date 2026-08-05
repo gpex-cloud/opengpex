@@ -96,9 +96,9 @@ class PresetsFactory {
 
   /** Restore overrides from persisted storage (call once at startup). */
   hydrate(saved: Partial<PresetValues>): void {
-    // Only hydrate keys that are in the whitelist (guards against stale data)
+    // Only hydrate keys that exist in current defaults (guards against stale/removed keys)
     const filtered: Partial<PresetValues> = {};
-    for (const key of USER_ADJUSTABLE_KEYS) {
+    for (const key of Object.keys(this.defaults)) {
       if (key in saved) {
         (filtered as Record<string, unknown>)[key] = (saved as Record<string, unknown>)[key];
       }

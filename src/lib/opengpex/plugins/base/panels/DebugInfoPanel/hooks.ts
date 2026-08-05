@@ -26,6 +26,7 @@ import { useEditorState, useEditorServices, usePluginSelfConfig, usePluginComman
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { resourceTracker } from '@opengpex/editor/core/advanced/ResourceTracker';
 import type { ResourceSummary } from '@opengpex/editor/core/advanced/ResourceTracker';
+import { tileCache } from '@opengpex/editor/core/engine/cache';
 import type { DebugInfoPanelCommandsMap } from './commands.d';
 import * as P from './protocols';
 import { ClipOptionsAPI } from '../../options/ClipOptions/protocols';
@@ -199,6 +200,47 @@ export const useResourceMetrics = (enabled: boolean): AppResourceMetrics => {
   return res;
 };
 
+// ─── Tile Metrics Types ──────────────────────────────────────────────────────
+
+export interface TileStats {
+  /** Cached tiles currently in LRU (occupy GPU memory) */
+  cached: number;
+  /** Known-empty tiles (sparse, zero memory cost) */
+  empty: number;
+  /** Tiles currently being fetched from Worker */
+  pending: number;
+  /** Maximum LRU capacity */
+  max: number;
+  /** LRU utilization percentage (0–1) */
+  utilization: number;
+}
+
+// ─── useTileMetrics: TileCache stats (2s sampling, O(1) reads) ───────────────
+
+export const useTileMetrics = (enabled: boolean): TileStats => {
+  const [stats, setStats] = useState<TileStats>({
+    cached: 0, empty: 0, pending: 0, max: 512, utilization: 0,
+  });
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const collect = () => {
+      const raw = tileCache.getStats();
+      setStats({
+        ...raw,
+        utilization: raw.max > 0 ? raw.cached / raw.max : 0,
+      });
+    };
+
+    collect();
+    const timer = setInterval(collect, 2000);
+    return () => clearInterval(timer);
+  }, [enabled]);
+
+  return stats;
+};
+
 // ─── useDebugInfo: Main hook ─────────────────────────────────────────────────
 
 export const useDebugInfo = () => {
@@ -216,6 +258,9 @@ export const useDebugInfo = () => {
 
   // App resource metrics (asset pool + ResourceTracker, 2s interval)
   const resources = useResourceMetrics(isEnabled);
+
+  // Tile cache metrics (2s interval, O(1) reads from singleton)
+  const tiles = useTileMetrics(isEnabled);
 
   // RAF-throttled tick for cursor + coordinate data (replaces setInterval 60ms)
   const [tick, setTick] = useState(0);
@@ -330,6 +375,7 @@ export const useDebugInfo = () => {
     perf,
     memory,
     resources,
+    tiles,
     toggleCmd,
     isEnabled
   };

@@ -65,8 +65,8 @@ export function initPresetsStorage(): void {
   // ─── 2. Subscribe: auto-save on every change ───────────────────────────
   presets.subscribe(() => {
     try {
-      const overrides = presets.getAdjustableOverrides();
-      // Only persist if there are actual user-adjustable overrides
+      const overrides = presets.getOverrides();
+      // Only persist if there are actual overrides
       if (Object.keys(overrides).length > 0) {
         localStorage.setItem(STORAGE_KEY_PRESETS_OVERRIDES, JSON.stringify(overrides));
       } else {

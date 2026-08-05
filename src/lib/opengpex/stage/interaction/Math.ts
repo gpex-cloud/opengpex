@@ -19,6 +19,7 @@
 
 import { InteractionEvent, LocalRect, asWorldPoint } from '@opengpex/editor/core/types';
 import type { SnapFilterOptions } from '@opengpex/editor/core/geometry/operators/snapping';
+import { presets } from '@opengpex/editor/core/helpers/preferences';
 
 /**
  * InteractionMath: Interaction Helper Utilities
@@ -96,18 +97,17 @@ export const InteractionMath = {
     const isSnapping = e.state.interaction.isSnapping;
     const frame = e.activeFrame;
 
-    // Read SmartGuides plugin config for fine-grained filtering
-    const sgConfig = e.state.pluginConfig?.['opengpex.overlays.smart_guides'] as Record<string, unknown> | undefined;
-    const filterOptions: SnapFilterOptions = sgConfig ? {
-      snapToCanvas: sgConfig.snapToCanvas as boolean | undefined,
-      snapToBirth: sgConfig.snapToBirth as boolean | undefined,
-      snapToLayers: sgConfig.snapToLayers as boolean | undefined,
-      excludeLayerTypes: sgConfig.excludeLayerTypes as string[] | undefined,
-      ignoreLockedLayers: sgConfig.ignoreLockedLayers as boolean | undefined,
-      ignoreSmallLayers: sgConfig.ignoreSmallLayers as boolean | undefined,
-      smallLayerThreshold: sgConfig.smallLayerThreshold as number | undefined,
-      maxSnapTargets: sgConfig.maxSnapTargets as number | undefined,
-    } : {};
+    // Read snap filter options from PresetsFactory (no plugin dependency)
+    const filterOptions: SnapFilterOptions = {
+      snapToCanvas: presets.get('SNAP_TO_CANVAS'),
+      snapToBirth: presets.get('SNAP_TO_BIRTH'),
+      snapToLayers: presets.get('SNAP_TO_LAYERS'),
+      excludeLayerTypes: presets.get('SNAP_EXCLUDE_LAYER_TYPES'),
+      ignoreLockedLayers: presets.get('SNAP_IGNORE_LOCKED_LAYERS'),
+      ignoreSmallLayers: presets.get('SNAP_IGNORE_SMALL_LAYERS'),
+      smallLayerThreshold: presets.get('SNAP_SMALL_LAYER_THRESHOLD'),
+      maxSnapTargets: presets.get('SNAP_MAX_TARGETS'),
+    };
 
     if (!isSnapping) {
       // If snapping is disabled, clear guides but still respect clamping if requested

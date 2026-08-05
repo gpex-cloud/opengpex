@@ -24,7 +24,7 @@ import { Mouse, Scissors, Move } from 'lucide-react';
 import Switch from '@opengpex/editor/widgets/Switch';
 import { usePreset } from '@opengpex/editor/core/helpers/preferences/usePreset';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
-import { PRESET_MANIFEST, type PresetManifestEntry } from '@opengpex/editor/core/helpers/preferences/whitelist';
+import { PRESET_MANIFEST, USER_ADJUSTABLE_KEYS, type PresetManifestEntry } from '@opengpex/editor/core/helpers/preferences/whitelist';
 
 // ─── Icon Registry ────────────────────────────────────────────────────────────
 // Maps `groupIcon` string in manifest to actual Lucide component.
@@ -230,6 +230,19 @@ export function PreferencesPanel() {
           ))}
         </div>
       ))}
+
+      {/* ─── Reset to Defaults ─── */}
+      <button
+        type="button"
+        onClick={() => {
+          for (const key of USER_ADJUSTABLE_KEYS) {
+            presets.reset(key);
+          }
+        }}
+        className="w-full rounded-xl p-2.5 text-[10px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] border border-[var(--border-subtle)] hover:border-indigo-500/50 hover:text-indigo-500 transition-colors uppercase tracking-wider"
+      >
+        Reset All Preferences to Defaults
+      </button>
 
       <p className="px-1 text-[8px] text-[var(--text-muted)] font-bold leading-relaxed uppercase tracking-tight italic opacity-60">
         Changes take effect immediately and persist across sessions.

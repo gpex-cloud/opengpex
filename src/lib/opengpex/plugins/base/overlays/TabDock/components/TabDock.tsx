@@ -185,9 +185,9 @@ function DockMetricsHUD() {
         <Globe size={8} className="text-amber-400 shrink-0" />
         <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-7">World</span>
         <span className="text-[9px] font-bold text-[var(--text-muted)] tabular-nums leading-none inline-flex gap-0.5">
-          <span className="inline-block w-[3ch] text-right">{Math.round(world.x)}</span>
+          <span className="inline-block min-w-[3ch] text-right">{Math.round(world.x)}</span>
           <span className="text-[var(--text-muted)]">,</span>
-          <span className="inline-block w-[3ch] text-right">{Math.round(world.y)}</span>
+          <span className="inline-block min-w-[3ch] text-right">{Math.round(world.y)}</span>
         </span>
       </div>
 
@@ -196,9 +196,9 @@ function DockMetricsHUD() {
         <MapPin size={8} className="text-cyan-400 shrink-0" />
         <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-7">Local</span>
         <span className="text-[9px] font-bold text-[var(--text-muted)] tabular-nums leading-none inline-flex gap-0.5">
-          <span className="inline-block w-[3ch] text-right">{Math.round(local.x)}</span>
+          <span className="inline-block min-w-[3ch] text-right">{Math.round(local.x)}</span>
           <span className="text-[var(--text-muted)]">,</span>
-          <span className="inline-block w-[3ch] text-right">{Math.round(local.y)}</span>
+          <span className="inline-block min-w-[3ch] text-right">{Math.round(local.y)}</span>
         </span>
       </div>
     </div>

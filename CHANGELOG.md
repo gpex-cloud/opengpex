@@ -12,6 +12,9 @@ All notable changes to OpenGPEX are documented in this file.
 - Fix divider borders not visible in dark mode across drawer panels
 - New Preferences panel in Settings: switch between Legacy and Modern scroll modes; changes apply instantly and persist across sessions
 - User preferences infrastructure with automatic localStorage persistence and declarative manifest for future settings
+- Decouple snap/smart-guide configuration from plugin layer into core PresetsFactory, eliminating reverse dependency from stage to plugins
+- Add "Reset to Defaults" buttons to Preferences and SmartGuides settings panels
+- DebugInfoPanel: add tile cache monitoring metrics
 
 ---
 

@@ -20,6 +20,7 @@
 import { InteractionHandler, InteractionEvent, LocalRect } from '@opengpex/editor/core/types';
 import { InteractionMath } from '../Math';
 import { InteractionTransaction } from '../Transaction';
+import { presets } from '@opengpex/editor/core/helpers/preferences';
 
 export interface TransformHandlerConfig<T> {
   id: string;
@@ -190,9 +191,8 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
           effectiveAspect = (startState.w > 0 && startState.h > 0) ? startState.w / startState.h : 1;
         }
 
-        // Read SmartGuides plugin config for edge snapping
-        const sgConfig = e.state.pluginConfig?.['opengpex.overlays.smart_guides'] as Record<string, unknown> | undefined;
-        const edgeSnapScope = (sgConfig?.edgeSnapScope as string) || 'recanvas';
+        // Read edge snap scope from PresetsFactory (no plugin dependency)
+        const edgeSnapScope = presets.get('SNAP_EDGE_SCOPE');
         const isSnapping = e.state.interaction.isSnapping;
 
         if (constraints.clamp) {
@@ -209,9 +209,9 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
           // Edge snapping for clamped resize (only when edgeSnapScope is 'all')
           if (isSnapping && isResizeHandle && edgeSnapScope === 'all') {
             const snapped = e.geometry.snapping.snapEdge(nextRect, resizeType, e.activeFrame, {
-              snapToCanvas: sgConfig?.snapToCanvas as boolean ?? true,
-              snapToLayers: sgConfig?.snapToLayers as boolean ?? true,
-              maxSnapTargets: sgConfig?.maxSnapTargets as number ?? 8,
+              snapToCanvas: presets.get('SNAP_TO_CANVAS'),
+              snapToLayers: presets.get('SNAP_TO_LAYERS'),
+              maxSnapTargets: presets.get('SNAP_MAX_TARGETS'),
             });
             nextRect = snapped.rect as LocalRect;
             e.actions.fast.setTransient('smartguides', snapped.smartguides);
@@ -232,9 +232,9 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
           // Edge snapping: snap the actively dragged edge(s) to canvas/layer edges
           if (isSnapping && isResizeHandle) {
             const snapped = e.geometry.snapping.snapEdge(nextRect, resizeType, e.activeFrame, {
-              snapToCanvas: sgConfig?.snapToCanvas as boolean ?? true,
-              snapToLayers: sgConfig?.snapToLayers as boolean ?? true,
-              maxSnapTargets: sgConfig?.maxSnapTargets as number ?? 8,
+              snapToCanvas: presets.get('SNAP_TO_CANVAS'),
+              snapToLayers: presets.get('SNAP_TO_LAYERS'),
+              maxSnapTargets: presets.get('SNAP_MAX_TARGETS'),
             });
             nextRect = snapped.rect as LocalRect;
             e.actions.fast.setTransient('smartguides', snapped.smartguides);
