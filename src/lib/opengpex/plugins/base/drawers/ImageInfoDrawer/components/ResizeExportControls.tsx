@@ -158,7 +158,7 @@ export function ResizeExportControls({
   };
 
   return (
-    <div className="mt-2 pt-3 border-t border-[var(--border-subtle)] space-y-3">
+    <div className="mt-2 pt-3 border-t border-[var(--border-subtle)] dark:border-white/10 space-y-3">
       <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-widest mb-2 block">
         Resize & Export
       </span>
@@ -298,7 +298,7 @@ export function ResizeExportControls({
         </div>
       </div>
 
-      <div className="border-t border-[var(--border-subtle)] space-y-2.5">
+      <div className="border-t border-[var(--border-subtle)] dark:border-white/10 space-y-2.5">
         {config.format === "image/tiff" && (
           <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-300">
             <div className="flex items-center gap-2 px-1 mt-3">

@@ -173,7 +173,7 @@ export function ExifInfoPanel({ exif }: ExifInfoPanelProps) {
 
         {/* Expanded Details */}
         {isExifExpanded && (
-          <div className="flex flex-col gap-1.5 p-2 pt-0 border-t border-[var(--border-subtle)] mt-1 pt-2 animate-in fade-in slide-in-from-top-1 duration-200">
+          <div className="flex flex-col gap-1.5 p-2 pt-0 border-t border-[var(--border-subtle)] dark:border-white/10 mt-1 pt-2 animate-in fade-in slide-in-from-top-1 duration-200">
             {detailedItems.map((item, i) => (
               <div
                 key={i}

@@ -151,7 +151,7 @@ export function ImageInfoComponent() {
           isSingleLayer={meta.isSingleLayer}
         />
       ) : (
-        <div className="mt-2 pt-3 border-t border-[var(--border-subtle)] h-[120px]" />
+        <div className="mt-2 pt-3 border-t border-[var(--border-subtle)] dark:border-white/10 h-[120px]" />
       )}
     </div>
   );

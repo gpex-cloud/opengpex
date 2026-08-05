@@ -91,7 +91,7 @@ export function AiGenerationPanel({ extra }: AiGenerationPanelProps) {
 
         {/* Expanded Details */}
         {isAiInfoExpanded && (
-          <div className="flex flex-col gap-1.5 p-2 pt-0 border-t border-[var(--border-subtle)] mt-1 pt-2 animate-in fade-in slide-in-from-top-1 duration-200">
+          <div className="flex flex-col gap-1.5 p-2 pt-0 border-t border-[var(--border-subtle)] dark:border-white/10 mt-1 pt-2 animate-in fade-in slide-in-from-top-1 duration-200">
             {/* Short Metadata Rows */}
             {metaItems.map((item, i) => (
               <div
@@ -111,7 +111,7 @@ export function AiGenerationPanel({ extra }: AiGenerationPanelProps) {
             {textItems.map((item, i) => (
               <div
                 key={`text-${i}`}
-                className="flex flex-col gap-1 mt-1.5 pt-1.5 border-t border-[var(--border-subtle)]"
+                className="flex flex-col gap-1 mt-1.5 pt-1.5 border-t border-[var(--border-subtle)] dark:border-white/10"
               >
                 <div className="flex items-center justify-between">
                   <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-wider">

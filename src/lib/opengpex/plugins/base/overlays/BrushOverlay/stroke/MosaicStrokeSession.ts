@@ -62,6 +62,7 @@ export class MosaicStrokeSession implements StrokeSession {
   private sourceImageData: ImageData;
   private processedBlocks = new Set<string>();
   private _version = 0;
+  private forceNewLayer: boolean;
 
   // Dirty rect tracking
   private dirtyMinX = Infinity;
@@ -72,8 +73,9 @@ export class MosaicStrokeSession implements StrokeSession {
   get previewCanvas(): OffscreenCanvas { return this.canvas; }
   get version(): number { return this._version; }
 
-  constructor(config: MosaicStrokeConfig, sourceLayer: Layer, sourceBitmap: ImageBitmap) {
+  constructor(config: MosaicStrokeConfig, sourceLayer: Layer, sourceBitmap: ImageBitmap, forceNewLayer: boolean = false) {
     this.config = config;
+    this.forceNewLayer = forceNewLayer;
 
     const { w, h } = config.canvasSize;
 
@@ -134,14 +136,14 @@ export class MosaicStrokeSession implements StrokeSession {
    * Finds an existing paint layer to write to, or creates a new one.
    *
    * Strategy:
-   * 1. Active layer is paint type, unlocked, visible → reuse
+   * 1. Active layer is paint type, unlocked, visible → reuse (unless forceNewLayer)
    * 2. Otherwise → create new "Mosaic" paint layer
    */
   private findOrCreatePaintLayer(frame: Frame): { layer: Layer; isNew: boolean } {
     const activeLayerId = frame.activeLayerId;
     const activeLayer = activeLayerId ? frame.layers.byId[activeLayerId] : null;
 
-    if (activeLayer && activeLayer.type === 'paint' && !activeLayer.locked && activeLayer.visible) {
+    if (!this.forceNewLayer && activeLayer && activeLayer.type === 'paint' && !activeLayer.locked && activeLayer.visible) {
       return { layer: activeLayer, isNew: false };
     }
 

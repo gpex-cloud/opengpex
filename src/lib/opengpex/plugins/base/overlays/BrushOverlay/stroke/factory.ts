@@ -59,7 +59,7 @@ export function createStrokeSession(e: InteractionEvent): StrokeSession | null {
   const config = readBrushConfig(e, frame);
 
   if (craft === 'mosaic') {
-    return createMosaicSession(e, frame);
+    return createMosaicSession(e, frame, isCmdPressed);
   } else if (!isMaskEdit) {
     return createPaintSession(config, craft, isCmdPressed);
   } else {
@@ -193,7 +193,9 @@ function createMaskSession(
 function createMosaicSession(
   e: InteractionEvent,
   frame: Frame,
+  isCmdPressed: boolean,
 ): StrokeSession | null {
+  const forceNewLayer = isCmdPressed;
   const activeLayerId = frame.activeLayerId;
   const activeLayer = activeLayerId ? frame.layers.byId[activeLayerId] : null;
 
@@ -262,6 +264,7 @@ function createMosaicSession(
       { brushDiameter, blockSize, canvasSize: { w: frame.canvas.w, h: frame.canvas.h } },
       sourceLayer,
       sourceBitmap,
+      forceNewLayer,
     );
   } catch (err) {
     console.warn('[BrushOverlay] MosaicStrokeSession creation failed:', err);

@@ -70,7 +70,7 @@ export const MosaicPanel = React.memo(function MosaicPanel() {
       </div>
 
       {/* ── Middle: Divider ── */}
-      <div className="border-t border-[var(--border)] my-1" />
+      <div className="border-t border-[var(--border-subtle)] dark:border-white/10 my-1" />
 
       {/* ── Lower: AI Mosaic Tool Coming Soon ── */}
       <div className="flex items-center gap-1.5 px-1 py-1.5 rounded-md bg-[var(--surface-alt)] opacity-60">
