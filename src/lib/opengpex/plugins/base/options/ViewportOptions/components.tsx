@@ -35,7 +35,9 @@ import { CameraState } from "@opengpex/editor/core/types";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import { useViewportCommands } from "./hooks";
 import { useFastSync } from "@opengpex/editor/core/motion/hooks/navigation";
-import { VIEWPORT_ZOOM_MIN, VIEWPORT_ZOOM_MAX } from "@opengpex/editor/core/helpers/presets";
+import { presets } from "@opengpex/editor/core/helpers/preferences";
+const VIEWPORT_ZOOM_MIN = presets.get('VIEWPORT_ZOOM_MIN');
+const VIEWPORT_ZOOM_MAX = presets.get('VIEWPORT_ZOOM_MAX');
 
 /**
  * Piecewise-linear scale mapping for zoom slider.

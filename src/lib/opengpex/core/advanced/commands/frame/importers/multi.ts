@@ -24,7 +24,8 @@
 
 import { asLocalShape, Layer, EditorContextValue } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
-import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
+import { presets } from '@opengpex/editor/core/helpers/preferences';
+const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
 import type { DecodeResult } from '@opengpex/editor/core/files/types';
 import type { ImportOptions } from './_types';
 

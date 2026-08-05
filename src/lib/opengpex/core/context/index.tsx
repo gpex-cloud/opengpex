@@ -60,7 +60,7 @@ import { createPluginService } from "@opengpex/editor/core/plugin";
 import { createFileService } from "@opengpex/editor/core/files";
 import { createFontService } from "@opengpex/editor/core/fonts";
 import { CORE_VERSION } from "@opengpex/editor/core/plugin/version";
-import { RESTORE_TIMEOUT_MS } from "@opengpex/editor/core/helpers/presets";
+import { presets } from "@opengpex/editor/core/helpers/preferences";
 import "../../index.css";
 
 export * from "@opengpex/editor/core/state/useVolatileState";
@@ -190,7 +190,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         savedState = await Promise.race([
           storage.restore(),
           new Promise<null>((_, reject) =>
-            setTimeout(() => reject(new Error("RESTORE_TIMEOUT")), RESTORE_TIMEOUT_MS)
+            setTimeout(() => reject(new Error("RESTORE_TIMEOUT")), presets.get('RESTORE_TIMEOUT_MS'))
           ),
         ]);
       } catch (err) {

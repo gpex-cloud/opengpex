@@ -8,7 +8,10 @@ All notable changes to OpenGPEX are documented in this file.
 
 - Viewport scroll overhaul: fix erratic zoom/pan on Windows mouse wheels, normalize Firefox scroll units, add Shift+scroll for horizontal panning
 - Fix tile flicker: layers no longer flash white blocks while tiles are loading; transparent tile areas are now skipped to save memory
-- Mosaic tool: added XL size preset for larger pixelation blocks
+- Mosaic tool: added XL size preset for larger pixelation blocks; hold Cmd/Ctrl to paint on a new layer
+- Fix divider borders not visible in dark mode across drawer panels
+- New Preferences panel in Settings: switch between Legacy and Modern scroll modes; changes apply instantly and persist across sessions
+- User preferences infrastructure with automatic localStorage persistence and declarative manifest for future settings
 
 ---
 

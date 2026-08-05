@@ -19,7 +19,9 @@
 
 import { Matrix3x3 } from '../matrix';
 import { CameraState, Dimensions, ViewportPoint, Point2D, WorldRect, asWorldRect } from '@opengpex/editor/core/types';
-import { VIEWPORT_ZOOM_MIN, VIEWPORT_ZOOM_MAX } from '@opengpex/editor/core/helpers/presets';
+import { presets } from '@opengpex/editor/core/helpers/preferences';
+const VIEWPORT_ZOOM_MIN = presets.get('VIEWPORT_ZOOM_MIN');
+const VIEWPORT_ZOOM_MAX = presets.get('VIEWPORT_ZOOM_MAX');
 
 export interface CameraCenterOptions {
   padding?: number;

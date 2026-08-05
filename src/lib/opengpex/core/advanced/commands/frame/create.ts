@@ -40,7 +40,8 @@
 import { EditorCommand, EditorContextValue, Frame, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
 import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 
-import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
+import { presets } from '@opengpex/editor/core/helpers/preferences';
+const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 

@@ -22,8 +22,8 @@
 import { useRef, useCallback, useEffect } from 'react';
 import { Frame, CameraState, EditorActions, GeometryService, asViewportPoint } from '@opengpex/editor/core/types';
 import { CameraTransaction } from '@opengpex/editor/stage/interaction/CameraTransaction';
-import { VIEWPORT_CAMERA_COMMIT_DEBOUNCE_MS, VIEWPORT_SCROLL_MODE } from '@opengpex/editor/core/helpers/presets';
-import type { ViewportScrollMode } from '@opengpex/editor/core/helpers/presets';
+import type { ViewportScrollMode } from '@opengpex/editor/core/helpers/preferences/presets';
+import { presets } from '@opengpex/editor/core/helpers/preferences';
 
 /**
  * Determine whether the current wheel event should trigger a zoom operation.
@@ -130,7 +130,7 @@ export function useViewportScroll(
     if (!currentCam) return;
 
     // ─── 3. Operation group routing ───
-    const shouldZoom = resolveZoomIntent(VIEWPORT_SCROLL_MODE, { ctrlKey, metaKey, altKey, shiftKey, isDiscreteMouse });
+    const shouldZoom = resolveZoomIntent(presets.get('VIEWPORT_SCROLL_MODE'), { ctrlKey, metaKey, altKey, shiftKey, isDiscreteMouse });
 
     if (shouldZoom) {
       // ─── Zoom: clamp to prevent single-event jump being too large ───
@@ -163,7 +163,7 @@ export function useViewportScroll(
 
     commitTimerRef.current = setTimeout(() => {
       forceCommit();
-    }, VIEWPORT_CAMERA_COMMIT_DEBOUNCE_MS);
+    }, presets.get('VIEWPORT_CAMERA_COMMIT_DEBOUNCE_MS'));
 
   }, [containerRef, forceCommit]);
 

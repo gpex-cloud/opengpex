@@ -27,7 +27,7 @@
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
 import { SettingsPanelAPI } from '../../panels/SettingsPanel/protocols';
 import { AIBridgeConfig, AIProvider, AIMode, AI_MODE_META, AIModelInfo, GenerationRecord } from './protocols';
-import { IMAGE_MODEL_KEYWORDS } from '@opengpex/editor/core/helpers/presets';
+import { IMAGE_MODEL_KEYWORDS } from '@opengpex/editor/core/helpers/config';
 
 import * as P from './protocols';
 

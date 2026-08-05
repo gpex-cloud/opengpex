@@ -20,7 +20,8 @@
 'use client';
 
 import { asLocalShape, EditorContextValue, EditorCommand, Layer } from '@opengpex/editor/core/types';
-import { VIEWPORT_FIT_PADDING } from '@opengpex/editor/core/helpers/presets';
+import { presets } from '@opengpex/editor/core/helpers/preferences';
+const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**

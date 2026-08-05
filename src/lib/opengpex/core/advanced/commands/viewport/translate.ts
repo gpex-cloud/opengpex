@@ -20,7 +20,10 @@
 'use client';
 
 import { EditorCommand, EditorContextValue } from '@opengpex/editor/core/types';
-import { VIEWPORT_FIT_PADDING, VIEWPORT_ZOOM_MIN, VIEWPORT_ZOOM_MAX } from '@opengpex/editor/core/helpers/presets';
+import { presets } from '@opengpex/editor/core/helpers/preferences';
+const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
+const VIEWPORT_ZOOM_MIN = presets.get('VIEWPORT_ZOOM_MIN');
+const VIEWPORT_ZOOM_MAX = presets.get('VIEWPORT_ZOOM_MAX');
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**

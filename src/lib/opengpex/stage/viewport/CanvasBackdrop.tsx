@@ -21,8 +21,10 @@
 
 import React, { useRef } from "react";
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
-import { BACKDROP_GRID_CONFIG } from "@opengpex/editor/core/helpers/presets";
+import { presets } from "@opengpex/editor/core/helpers/preferences";
 import { GeometryService, Frame } from "@opengpex/editor/core/types";
+
+const BACKDROP_GRID_CONFIG = presets.get('BACKDROP_GRID_CONFIG');
 
 interface CanvasBackdropProps {
   rotation: number;

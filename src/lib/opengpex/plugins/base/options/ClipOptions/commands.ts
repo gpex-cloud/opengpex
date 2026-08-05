@@ -22,7 +22,8 @@
 import { EditorContextValue, EditorCommand, asLocalRect, asLocalShape, Frame, LocalRect, LocalShape, LocalPolygon, EditorActions, Point2D } from '@opengpex/editor/core/types';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
-import { CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS } from '@opengpex/editor/core/helpers/presets';
+import { presets } from '@opengpex/editor/core/helpers/preferences';
+const CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS = presets.get('CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS');
 import { clipComputeClient } from './workers/client';
 import * as P from './protocols';
 import type { ClipTool } from './protocols';
