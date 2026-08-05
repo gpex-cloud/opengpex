@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.41
+
+- Viewport scroll overhaul: fix erratic zoom/pan on Windows mouse wheels, normalize Firefox scroll units, add Shift+scroll for horizontal panning
+- Fix tile flicker: layers no longer flash white blocks while tiles are loading; transparent tile areas are now skipped to save memory
+- Mosaic tool: added XL size preset for larger pixelation blocks
+
+---
+
 ## v1.0.0-beta.40
 
 - New Mosaic tool: paint over areas to pixelate them, with S/M/L block-size presets (shortcut: M)
