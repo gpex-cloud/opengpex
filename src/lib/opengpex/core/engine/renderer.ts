@@ -25,7 +25,6 @@
  * Provides:
  *   - getEngine(): lazy-created IRenderer singleton (no module-load side-effect)
  *   - IRenderer protocol types (for StageComposer typing)
- *   - PixelUtils (tile job computation needed by StageComposer)
  *   - Cache singletons (subscribe/setDragging for render loop coordination)
  *
  * Internal modules (Canvas2dEngine internals, dispatchers, worker) are NOT
@@ -53,9 +52,6 @@ export function getEngine(): IRenderer {
 
 // ── Protocol Types (for StageComposer) ──
 export type { IRenderer, RenderCommand, DrawLayerOptions } from './protocol/IRenderer';
-
-// ── Stage Utilities ──
-export { PixelUtils } from './rendering/onscreen/PixelUtils';
 
 // ── Cache Singletons (render loop subscribe + lifecycle) ──
 export { sourceBitmapCache } from './cache/SourceBitmapCache';

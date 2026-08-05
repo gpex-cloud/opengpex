@@ -21,6 +21,7 @@ import { TileMetadata, AssetRef } from '@opengpex/editor/core/types';
 import { assetStore, ASSET_VERSION } from './AssetStore';
 import { resourceTracker } from '@opengpex/editor/core/advanced/ResourceTracker';
 import { calculateContentHash } from '@opengpex/editor/core/helpers/hash';
+import { buildTileMeta } from '@opengpex/editor/core/helpers/tiling';
 
 /**
  * AssetState: Asset state machine
@@ -119,17 +120,7 @@ export class AssetService {
     const bitmap = await createImageBitmap(blob);
     const { width, height } = bitmap;
     bitmap.close();
-
-    const tileSize = 256;
-    return {
-      width,
-      height,
-      tileSize,
-      cols: Math.ceil(width / tileSize),
-      rows: Math.ceil(height / tileSize),
-      levels: Math.ceil(Math.log2(Math.max(width, height) / tileSize)) + 1,
-      isTiled: width > 512 || height > 512,
-    };
+    return buildTileMeta(width, height);
   }
 
   /**

@@ -22,6 +22,22 @@
 /** -----------------------------------------------------------------*/
 /** Viewport Settings -----------------------------------------------*/
 /** -----------------------------------------------------------------*/
+
+/** Viewport scroll/zoom behavior mode. */
+export type ViewportScrollMode = 'legacy' | 'modern';
+
+/**
+ * Default viewport scroll mode.
+ * - 'legacy': Scroll=Pan, Ctrl/Alt+Scroll=Zoom (Figma/PS style)
+ * - 'modern': Scroll=Zoom, Ctrl+Scroll=Pan (Google Maps/Blender style)
+ *
+ * Currently a static constant; will be promoted to a runtime-switchable
+ * preset via PresetsFactory in a future iteration.
+ *
+ * @see docs/opengpex/plans/20260805_windows_mouse_wheel_fix.md
+ */
+export const VIEWPORT_SCROLL_MODE: ViewportScrollMode = 'legacy';
+
 // [REFACTOR-2026-06-22] `VIEWPORT_FIT_FACTOR` (0.90) was removed:
 // it duplicated the role of `padding` (numeric breathing room) inside
 // `getFitCamera`, causing fit-paths to apply both an 80px padding AND

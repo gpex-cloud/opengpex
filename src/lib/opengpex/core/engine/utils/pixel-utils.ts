@@ -29,7 +29,8 @@
  * - All functions are async where browser APIs require it.
  */
 
-import type { TileMetadata, LocalRect } from '@opengpex/editor/core/types';
+import type { LocalRect, TileMetadata } from '@opengpex/editor/core/types';
+import { buildTileMeta } from '@opengpex/editor/core/helpers/tiling';
 
 /**
  * Compute SHA-256 hash of a Blob.
@@ -54,23 +55,8 @@ export async function canvasToBlob(
   return canvas.convertToBlob({ type, quality });
 }
 
-/**
- * Build TileMetadata from dimensions and DPR scale.
- * Used by Worker handlers after producing output bitmaps.
- */
-export function buildTileMeta(w: number, h: number, dpr: number): TileMetadata {
-  const tileSize = 256;
-  return {
-    width: w,
-    height: h,
-    tileSize,
-    cols: Math.ceil(w / tileSize),
-    rows: Math.ceil(h / tileSize),
-    levels: 1,
-    isTiled: true,
-    dprScale: dpr,
-  };
-}
+// buildTileMeta re-exported from canonical source for backward compatibility
+export { buildTileMeta };
 
 /**
  * Scan visible region of a bitmap (Content Bounds Detection).

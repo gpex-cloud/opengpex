@@ -94,19 +94,34 @@ export default function CanvasStage() {
 
   // 1. Subscribe to cache changes; mark redraw needed once slices or full images load
   useEffect(() => {
-    const unsubTiles = tileCache.subscribe(() => { needsRenderRef.current = true; });
+    const unsubTiles = tileCache.subscribe(() => {
+      needsRenderRef.current = true;
+      if ((window as unknown as Record<string, unknown>).__TILE_FLICKER_DEBUG) {
+        console.log(`[CanvasStage] REDRAW triggered by: TileCache (tile loaded) t=${performance.now().toFixed(1)}`);
+      }
+    });
     // [SourceBitmapCache refactor 2026-07-10] Redraws are now triggered when a
     // shared ImageBitmap lands (fetch → blob → createImageBitmap completes).
     // The consumer set (Canvas2dEngine, BrushOverlay, ClipTool wand, …) is
     // exactly the same as before; only the storage type changed from
     // HTMLImageElement to ImageBitmap. See
     // docs/opengpex/plans/20260710_source_bitmap_cache_refactor_plan.md.
-    const unsubImages = sourceBitmapCache.subscribe(() => { needsRenderRef.current = true; });
+    const unsubImages = sourceBitmapCache.subscribe(() => {
+      needsRenderRef.current = true;
+      if ((window as unknown as Record<string, unknown>).__TILE_FLICKER_DEBUG) {
+        console.log(`[CanvasStage] REDRAW triggered by: SourceBitmapCache t=${performance.now().toFixed(1)}`);
+      }
+    });
     // [Filter Pipeline §5.2 / Step 3] Redraw when a filtered bitmap lands.
     // Canvas2dEngine.drawLayerDirect schedules async APPLY_FILTER jobs on
     // cache miss and degrades to the raw source for the current frame.
     // Subscribing here ensures the next frame picks up the filtered result.
-    const unsubFilters = filterCache.subscribe(() => { needsRenderRef.current = true; });
+    const unsubFilters = filterCache.subscribe(() => {
+      needsRenderRef.current = true;
+      if ((window as unknown as Record<string, unknown>).__TILE_FLICKER_DEBUG) {
+        console.log(`[CanvasStage] REDRAW triggered by: FilterCache t=${performance.now().toFixed(1)}`);
+      }
+    });
     // [Filter Fast-Track §2.3] TileFilterCache removed — tiles now show raw
     // during interaction and AsyncFilterCache handles post-interaction filter.
 
@@ -182,6 +197,15 @@ export default function CanvasStage() {
 
     if ('attach' in engine) {
       (engine as { attach: (ctx: CanvasRenderingContext2D) => void }).attach(ctx);
+    }
+
+    // ─── Diagnostic: frame-level summary ───
+    if ((window as unknown as Record<string, unknown>).__TILE_FLICKER_DEBUG) {
+      const camChanged = cam !== lastCamRef.current;
+      console.log(
+        `[CanvasStage] ▶ FRAME #${_renderCountRef.current} | cam.k=${cam.k.toFixed(4)} cam.x=${cam.x.toFixed(1)} cam.y=${cam.y.toFixed(1)} | ` +
+        `isDirty=${isDirty} camChanged=${camChanged} isInteracting=${isInteracting} layers=${f.layers.order.length}`,
+      );
     }
 
     const _renderT0 = performance.now();

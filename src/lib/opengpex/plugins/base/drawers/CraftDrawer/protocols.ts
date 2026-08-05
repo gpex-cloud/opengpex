@@ -98,7 +98,7 @@ export interface CraftDrawerConfig {
   /** User-configured text style preset for next text layer creation */
   pendingTextData?: PendingTextData;
   /** Mosaic brush size preset */
-  mosaicSizePreset: 'S' | 'M' | 'L';
+  mosaicSizePreset: 'S' | 'M' | 'L' | 'XL';
 }
 
 // ─── Mosaic Size Presets ───────────────────────────────────────────────────────
@@ -108,6 +108,7 @@ export const MOSAIC_SIZE_PRESETS = {
   S: { brushDiameter: 20, blockSize: 8 },
   M: { brushDiameter: 40, blockSize: 16 },
   L: { brushDiameter: 80, blockSize: 32 },
+  XL: { brushDiameter: 160, blockSize: 64 },
 } as const;
 
 // ─── Text Size Adaptive Utilities ──────────────────────────────────────────────

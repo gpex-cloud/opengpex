@@ -36,7 +36,7 @@ import { MOSAIC_SIZE_PRESETS } from "../protocols";
  * Also shows a "Coming Soon" hint for AI Mosaic Tool.
  */
 
-const PRESET_OPTIONS = (['S', 'M', 'L'] as const).map((key) => {
+const PRESET_OPTIONS = (['S', 'M', 'L', 'XL'] as const).map((key) => {
   const data = MOSAIC_SIZE_PRESETS[key];
   return {
     value: key,

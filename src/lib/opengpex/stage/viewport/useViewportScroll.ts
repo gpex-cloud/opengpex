@@ -22,7 +22,39 @@
 import { useRef, useCallback, useEffect } from 'react';
 import { Frame, CameraState, EditorActions, GeometryService, asViewportPoint } from '@opengpex/editor/core/types';
 import { CameraTransaction } from '@opengpex/editor/stage/interaction/CameraTransaction';
-import { VIEWPORT_CAMERA_COMMIT_DEBOUNCE_MS } from '@opengpex/editor/core/helpers/presets';
+import { VIEWPORT_CAMERA_COMMIT_DEBOUNCE_MS, VIEWPORT_SCROLL_MODE } from '@opengpex/editor/core/helpers/presets';
+import type { ViewportScrollMode } from '@opengpex/editor/core/helpers/presets';
+
+/**
+ * Determine whether the current wheel event should trigger a zoom operation.
+ *
+ * Legacy: requires modifier keys (Ctrl/Cmd/Alt) to zoom
+ * Modern: discrete mouse bare scroll defaults to zoom; Ctrl+scroll reverses to pan
+ *         Trackpad behavior is consistent across both modes (pinch=zoom, scroll=pan)
+ */
+function resolveZoomIntent(
+  mode: ViewportScrollMode,
+  ctx: { ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean; isDiscreteMouse: boolean }
+): boolean {
+  const { ctrlKey, metaKey, altKey, shiftKey, isDiscreteMouse } = ctx;
+
+  // Alt/Option + scroll: both modes treat as zoom (PS compatibility)
+  if (altKey) return true;
+
+  // Trackpad pinch (browser auto-sets ctrlKey=true, and not discrete mouse): both modes treat as zoom
+  if ((ctrlKey || metaKey) && !isDiscreteMouse) return true;
+
+  if (mode === 'legacy') {
+    // Legacy: Ctrl/Cmd + discrete mouse scroll = zoom
+    return (ctrlKey || metaKey) && isDiscreteMouse;
+  } else {
+    // Modern: discrete mouse bare scroll = zoom (except Shift, which is reserved for H-pan)
+    //         Ctrl/Cmd + discrete mouse scroll = pan (reversed)
+    if ((ctrlKey || metaKey) && isDiscreteMouse) return false; // Ctrl+scroll = pan
+    if (shiftKey) return false; // Shift+scroll = H-pan
+    return isDiscreteMouse; // bare scroll = zoom
+  }
+}
 
 /**
  * useViewportScroll: Dedicated viewport scroll/zoom logic pipeline
@@ -63,9 +95,22 @@ export function useViewportScroll(
 
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
-    const { deltaX, deltaY, clientX, clientY, ctrlKey, metaKey } = e;
+    let { deltaX, deltaY } = e;
+    const { clientX, clientY, ctrlKey, metaKey, altKey, shiftKey } = e;
     const container = containerRef.current;
     if (!container) return;
+
+    // ─── 1. deltaMode normalization (Firefox line mode → pixel equivalent) ───
+    // deltaMode 1 = line units (Firefox default); convention: 1 line ≈ 16px
+    // deltaMode 2 = page units (rare); approximate as viewport height
+    if (e.deltaMode === 1) { deltaX *= 16; deltaY *= 16; }
+    if (e.deltaMode === 2) { deltaX *= window.innerHeight; deltaY *= window.innerHeight; }
+
+    // ─── 2. Detect discrete mouse wheel vs continuous trackpad ───
+    // Heuristic: Chrome/Edge on Windows sends deltaY = ±100 or ±120 for standard
+    // mouse wheels (integer, large magnitude). Trackpads produce small fractional
+    // values (e.g. ±0.5~5). Threshold 50 safely separates the two populations.
+    const isDiscreteMouse = Math.abs(deltaY) >= 50 && deltaY === Math.round(deltaY);
 
     const currentFrame = frameRef.current;
     const currentActions = actionsRef.current;
@@ -84,15 +129,30 @@ export function useViewportScroll(
     const currentCam = sessionCamRef.current;
     if (!currentCam) return;
 
-    if (ctrlKey || metaKey) {
-      // Zoom logic
+    // ─── 3. Operation group routing ───
+    const shouldZoom = resolveZoomIntent(VIEWPORT_SCROLL_MODE, { ctrlKey, metaKey, altKey, shiftKey, isDiscreteMouse });
+
+    if (shouldZoom) {
+      // ─── Zoom: clamp to prevent single-event jump being too large ───
+      // Without clamping, a Windows mouse wheel (deltaY=100~120) would produce
+      // ratio = 1 + 1.0~1.2, causing 100-120% zoom per notch — unusable.
+      // Clamp at 0.15 (15% per event) aligns with industry standard editors (10-20% per notch).
       const rect = container.getBoundingClientRect();
-      const zoomDelta = -deltaY * 0.01;
+      const rawDelta = -deltaY * 0.01;
+      const zoomDelta = isDiscreteMouse
+        ? Math.sign(rawDelta) * Math.min(Math.abs(rawDelta), 0.15)
+        : rawDelta;
       const anchor = asViewportPoint({ x: clientX - rect.left, y: clientY - rect.top });
       sessionCamRef.current = currentGeometry.camera.projectZoom(currentCam, zoomDelta, anchor);
     } else {
-      // Pan logic
-      sessionCamRef.current = currentGeometry.camera.projectPan(currentCam, { x: -deltaX, y: -deltaY });
+      // ─── Pan ───
+      // Discrete mouse scale 0.3: reduces 100px delta → 30px per notch (≈ 2 text lines),
+      // preventing jarring jumps. Trackpad (continuous) uses 1:1 mapping for natural feel.
+      // Shift+scroll: redirect vertical delta to horizontal axis for H-pan (industry convention).
+      const panScale = isDiscreteMouse ? 0.3 : 1.0;
+      const panX = shiftKey ? -deltaY * panScale : -deltaX * panScale;
+      const panY = shiftKey ? 0 : -deltaY * panScale;
+      sessionCamRef.current = currentGeometry.camera.projectPan(currentCam, { x: panX, y: panY });
     }
 
     // Real-time override fast-track

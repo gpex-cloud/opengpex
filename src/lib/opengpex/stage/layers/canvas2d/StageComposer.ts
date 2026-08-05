@@ -17,9 +17,24 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Frame, CameraState, Dimensions, GeometryService, AssetService, Layer } from '@opengpex/editor/core/types';
-import { PixelUtils, type IRenderer } from '@opengpex/editor/core/engine/renderer';
+import { Frame, CameraState, Dimensions, GeometryService, AssetService, Layer, ClipDescriptor } from '@opengpex/editor/core/types';
+import type { IRenderer } from '@opengpex/editor/core/engine/renderer';
 import type { DisplayTransformConfig } from '@opengpex/editor/core/engine/protocol/DisplayTransform';
+
+/** Converts layer viewport and masks into abstract clipping instructions. */
+function getRenderPipeline(layer: Layer): ClipDescriptor[] {
+  const pipeline: ClipDescriptor[] = [];
+  if (layer.visibleShape) {
+    pipeline.push({ shape: layer.visibleShape, inverted: false });
+  }
+  const activeMasks = layer.vectorMasks?.filter(m => m.enabled);
+  if (activeMasks) {
+    for (const mask of activeMasks) {
+      pipeline.push({ shape: mask.shape, inverted: mask.inverted, feather: mask.feather || 0 });
+    }
+  }
+  return pipeline;
+}
 
 interface RenderOptions {
   isInteracting: boolean;
@@ -114,7 +129,7 @@ export class StageComposer {
         const M_camera = geometry.Matrix.translate(cam.x, cam.y).multiply(geometry.Matrix.scale(cam.k));
         const M_final = M_dpr.multiply(M_camera).multiply(M_layer);
 
-        const clipSequence = PixelUtils.getRenderPipeline(latestLayer);
+        const clipSequence = getRenderPipeline(latestLayer);
 
         // 4d. Calculate pixel-level drawing bounds
         const sourceRect = geometry.space.getLayerLocalAABB(latestLayer, worldViewport);

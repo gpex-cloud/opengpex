@@ -50,9 +50,14 @@ import { filterCache } from '../../cache/FilterCache';
 import type { IRenderer, RenderCommand, DrawLayerOptions } from '../../protocol/IRenderer';
 import type { DisplayTransformConfig } from '../../protocol/DisplayTransform';
 import type { ChannelMask } from '../../protocol/DisplayTransform';
+import { computeTileJobs } from '@opengpex/editor/core/helpers/tiling';
 import { drawLayerInstance } from '../shared/painter2d';
 import { FilterFastTrack } from './FilterFastTrack';
-import { PixelUtils } from './PixelUtils';
+
+// ─── Diagnostic Logging (toggle via: window.__TILE_FLICKER_DEBUG = true) ───
+function _tileDbg(): boolean {
+  return typeof window !== 'undefined' && !!(window as unknown as Record<string, unknown>).__TILE_FLICKER_DEBUG;
+}
 
 /**
  * SVG filter IDs for GPU-accelerated channel isolation.
@@ -287,7 +292,7 @@ export class Canvas2dEngine implements IRenderer {
         __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale)),
       }));
 
-      const tileCount = PixelUtils.computeTileJobs(
+      const { tileCount, missCount } = computeTileJobs(
         layer.assetId!,
         tileMeta!,
         matrix,
@@ -297,18 +302,34 @@ export class Canvas2dEngine implements IRenderer {
         tileCache,
       );
 
-      if (tileCount > 0) {
+      if (tileCount > 0 && missCount === 0) {
+        // ── Perfect path: all tiles ready → pure tile rendering (fastest) ──
+        if (_tileDbg()) {
+          console.log(
+            `[Engine] TILE_PATH layer="${layer.name}" assetId=${layer.assetId?.slice(0, 8)}… | ` +
+            `tileCount=${tileCount} | scale=${scale.toFixed(4)} | ` +
+            `drawRect=${drawRect ? `(${drawRect.x.toFixed(0)},${drawRect.y.toFixed(0)},${drawRect.w.toFixed(0)},${drawRect.h.toFixed(0)})` : 'full'}`,
+          );
+        }
         drawLayerInstance(ctx, layer, this.tilePool, {
           matrix, opacity, clipSequence: preparedClips, width: options.width, height: options.height, drawRect, imageSmoothingQuality,
           tileCount, dprScale,
         });
-      } else if (layer.src) {
-        // Tile not ready — fall back to single image
-        const fallbackSrc = assetService ? assetService.resolve(layer.assetId, layer.src) : layer.src;
-        const rawImg = sourceBitmapCache.getOrFetch(fallbackSrc);
+      } else {
+        // ── Fallback path: tiles not fully ready → use SourceBitmapCache single image ──
+        // Design: the source image is already full-resolution (same data tiles are cut from).
+        // Drawing source + partial tiles on top would double GPU draw calls with zero quality gain.
+        // This ensures no white blocks regardless of cache state (robustness guarantee).
+        if (_tileDbg()) {
+          console.warn(
+            `[Engine] TILE_FALLBACK layer="${layer.name}" assetId=${layer.assetId?.slice(0, 8)}… | ` +
+            `tileCount=${tileCount} missCount=${missCount} → single image fallback | scale=${scale.toFixed(4)}`,
+          );
+        }
+        const fallbackSrc = layer.src ? (assetService ? assetService.resolve(layer.assetId, layer.src) : layer.src) : null;
+        const rawImg = fallbackSrc ? sourceBitmapCache.getOrFetch(fallbackSrc) : null;
         if (rawImg) {
-          const { img: effImg, layer: effLayer } = this.resolveFilteredSource(layer, rawImg, isExporting, isInteracting);
-          drawLayerInstance(ctx, effLayer, effImg, {
+          drawLayerInstance(ctx, layer, rawImg, {
             matrix, opacity, clipSequence: preparedClips, width: options.width, height: options.height, drawRect, imageSmoothingQuality,
             dprScale,
           });
@@ -316,6 +337,13 @@ export class Canvas2dEngine implements IRenderer {
       }
     } else {
       // --- Single Image Rendering Path ---
+      if (_tileDbg() && tileMeta?.isTiled) {
+        // This means isTiled=true but we're NOT using tiles (due to imageOverride, bitmapMask, or filters)
+        console.log(
+          `[Engine] SINGLE_PATH (bypassed tiles) layer="${layer.name}" | ` +
+          `reasons: imageOverride=${!!imageOverride} hasBitmap=${hasBitmap} hasFilters=${hasFiltersPipeline}`,
+        );
+      }
       const currentSrc = assetService ? assetService.resolve(layer.assetId, layer.src) : layer.src;
       const rawImg = imageOverride || (currentSrc ? sourceBitmapCache.getOrFetch(currentSrc) : null);
 

@@ -92,8 +92,9 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
   });
 
   // ── Initialize TileCache fetcher (decouples TileCache from WorkerBridge) ──
+  // [Sparse Tile] Worker returns null for fully-transparent tiles (Phase 3 optimization).
   tileCache.setFetcher((hash, level, x, y) =>
-    bridge.request<ImageBitmap>({ type: 'GET_TILE', hash, level, x, y }),
+    bridge.request<ImageBitmap | null>({ type: 'GET_TILE', hash, level, x, y }),
   );
 
   // ── Wire AssetService lifecycle → Engine cache warming/eviction ──
