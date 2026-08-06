@@ -10,24 +10,23 @@
  */
 
 /**
- * AVIF Format Handler.
+ * AVIF Format Handler — Dual-Engine Architecture.
  *
- * Responsibilities:
- * - Decode: browser-native AVIF decoding + EXIF/ICC metadata extraction
- * - Encode: AVIF compression via unified engine Worker + vips-heif (libheif + libaom)
- * - Metadata: ExifReader parsing for EXIF + ICC profile extraction from HEIF container
+ * Encoding engines:
+ * 1. @jsquash/avif (default) — isolated Worker, ALLOW_MEMORY_GROWTH, no ICC embed
+ * 2. vips-heif (optional) — engine Worker, ICC embed + 10-bit, shares 2GB heap
  *
- * AVIF uses the HEIF/ISOBMFF container format. ExifReader v4+ supports parsing
- * AVIF files for EXIF, ICC profiles, and XMP metadata.
+ * Routing: USE_VIPS_FOR_ICC_AVIF is a hard switch:
+ *   true  → ALL encoding via vips-heif (ICC auto-embedded; sRGB if no source ICC)
+ *   false → ALL encoding via @jsquash/avif (no ICC support)
  *
  * Thread model:
- * - Decode: main thread (browser-native createImageBitmap, <10ms typical)
- * - Encode: engine Worker via vips heifsave (vips-heif.wasm, ~300ms-2s depending on resolution)
- * - Metadata: main thread via ExifReader (<50ms)
+ * - Decode: main thread (browser-native createImageBitmap)
+ * - Encode (@jsquash): static Worker at /ext/wasm/avif/avif-worker.js
+ * - Encode (vips): engine Worker via FileIO.encodeAvif dispatch
+ * - Metadata: main thread via ExifReader
  *
- * ICC color management:
- * - Import: non-sRGB files are converted to sRGB via vips (Little CMS) for accurate editing
- * - Export: sRGB → original ICC conversion + ICC profile embedding via vips-heif
+ * See docs/opengpex/plans/20260806_avif_dual_engine_encode.md
  */
 
 import ExifReader from 'exifreader';
@@ -42,7 +41,19 @@ import type {
 import { bitmapToCanvas } from '../index';
 import { iccToBase64, parseIccProfileName } from '../icc';
 import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
-import { resolveColorSpaceForFormat, getImportStrategy, getExportStrategy, shouldRetainSourceBlob, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
+import {
+  resolveColorSpaceForFormat,
+  getImportStrategy,
+  getExportStrategy,
+  shouldRetainSourceBlob,
+  resolveExportPixelConversion,
+} from '@opengpex/editor/core/color/ColorPipeline';
+
+/**
+ * When true, AVIF exports with embedIcc + ICC data route through vips-heif.
+ * When false (default), ALL encoding uses @jsquash/avif in an isolated Worker.
+ */
+const USE_VIPS_FOR_ICC_AVIF = false;
 
 export class AvifHandler implements ImageFormatHandler {
   readonly format = 'avif';
@@ -56,7 +67,6 @@ export class AvifHandler implements ImageFormatHandler {
   async decode(file: File, _options?: DecodeOptions): Promise<DecodeResult> {
     const metadata = await this.extractMetadata(file);
 
-    // ── Strategy-based color pipeline routing ──
     const detectedCS = resolveColorSpaceForFormat('avif', metadata.colorSpace);
     const strategy = getImportStrategy(detectedCS);
 
@@ -65,7 +75,6 @@ export class AvifHandler implements ImageFormatHandler {
 
     switch (strategy.conversion) {
       case 'none': {
-        // Zero conversion: browser-native decode is sufficient (sRGB, P3)
         const img = await createImageBitmap(file);
         dimensions = { w: img.width, h: img.height };
         img.close();
@@ -75,7 +84,6 @@ export class AvifHandler implements ImageFormatHandler {
       }
 
       case 'matrix': {
-        // 3×3 matrix conversion (e.g. AdobeRGB→P3)
         const img = await createImageBitmap(file, { colorSpaceConversion: 'none' });
         const w = img.width;
         const h = img.height;
@@ -91,8 +99,7 @@ export class AvifHandler implements ImageFormatHandler {
         const outCS: PredefinedColorSpace = strategy.frameColorSpace === 'display-p3' ? 'display-p3' : 'srgb';
         const outCanvas = new OffscreenCanvas(w, h);
         const outCtx = outCanvas.getContext('2d', { colorSpace: outCS })!;
-        const outImageData = new ImageData(imageData.data, w, h, { colorSpace: outCS });
-        outCtx.putImageData(outImageData, 0, 0);
+        outCtx.putImageData(new ImageData(imageData.data, w, h, { colorSpace: outCS }), 0, 0);
         displayBlob = await outCanvas.convertToBlob({ type: 'image/png' });
 
         console.debug('[ColorMgmt] AVIF decode: %s matrix %s→%s',
@@ -101,7 +108,6 @@ export class AvifHandler implements ImageFormatHandler {
       }
 
       case 'icc-engine': {
-        // Full ICC engine conversion (custom ICC profiles, unknown spaces)
         const bytes = new Uint8Array(await file.arrayBuffer());
         const { width, height, data, iccProfileData } = await this.pixels.fileIO.iccToSrgb(bytes);
         dimensions = { w: width, h: height };
@@ -113,7 +119,6 @@ export class AvifHandler implements ImageFormatHandler {
         ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
         displayBlob = await canvas.convertToBlob({ type: 'image/png' });
 
-        // Vips reliably extracts ICC from AVIF colr box — populate metadata if ExifReader missed it
         if (iccProfileData && iccProfileData.length > 0) {
           metadata.hasIccProfile = true;
           metadata.raw = metadata.raw || {};
@@ -131,10 +136,14 @@ export class AvifHandler implements ImageFormatHandler {
       }
     }
 
-    // sourceBlob retention via centralized strategy
     const sourceBlob = shouldRetainSourceBlob('avif', metadata, strategy.frameColorSpace) ? file : undefined;
 
-    return { dimensions, metadata, subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }], sourceBlob };
+    return {
+      dimensions,
+      metadata,
+      subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }],
+      sourceBlob,
+    };
   }
 
   // ─── Encode ──────────────────────────────────────────────────────────────
@@ -143,16 +152,14 @@ export class AvifHandler implements ImageFormatHandler {
     source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
     options: EncodeOptions,
   ): Promise<Blob> {
-    const quality = Math.round((options.quality ?? 0.80) * 100); // vips Q: 0-100
+    const quality = Math.round((options.quality ?? 0.80) * 100);
     const meta = options.metadata;
     const config = options.exportConfig;
 
-    // ── Strategy-based export color pipeline ──
     const frameCS: WorkingColorSpace = (config?.frameColorSpace as WorkingColorSpace) || 'srgb';
     const exportStrategy = getExportStrategy(frameCS, 'avif');
     const embedIcc = config?.embedIcc ?? false;
 
-    // Centralized pixel conversion decision via resolveExportPixelConversion()
     const pixelConv = resolveExportPixelConversion(
       frameCS,
       { colorSpace: meta?.colorSpace, hasIccProfileData: !!meta?.raw?.iccProfileData },
@@ -160,12 +167,10 @@ export class AvifHandler implements ImageFormatHandler {
       'avif',
     );
 
-    // Get RGBA pixel data from source using the strategy's encodeColorSpace
-    // to prevent implicit P3→sRGB conversion when drawing the bitmap.
+    // Pixel extraction with color space handling
     let canvas: OffscreenCanvas | HTMLCanvasElement;
 
     if (pixelConv === 'p3-to-srgb') {
-      // Format fallback: P3 frame → sRGB (format doesn't support P3)
       const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source, 'display-p3') : source as OffscreenCanvas;
       const w = srcCanvas.width;
       const h = srcCanvas.height;
@@ -189,8 +194,9 @@ export class AvifHandler implements ImageFormatHandler {
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const rgbaData = new Uint8Array(imageData.data.buffer);
 
-    // ICC Profile for embedding (if user requested preserve-ICC)
+    // ICC profile preparation
     let iccProfileBytes: Uint8Array | undefined;
+
     if (embedIcc && meta?.raw?.iccProfileData) {
       const { base64ToIcc } = await import('../icc');
       iccProfileBytes = base64ToIcc(meta.raw.iccProfileData);
@@ -200,27 +206,34 @@ export class AvifHandler implements ImageFormatHandler {
           rgbaData, canvas.width, canvas.height, iccProfileBytes,
         );
         rgbaData.set(convertedData);
-        console.debug('[ColorMgmt] AVIF Export: pixelConversion=srgb-to-icc, targetProfile=%s',
+        console.debug('[ColorMgmt] AVIF Export: pixelConversion=srgb-to-icc, profile=%s',
           meta.raw.iccProfileName || 'custom');
       }
     } else if (embedIcc && !meta?.raw?.iccProfileData) {
-      // embedIcc requested but no source ICC data (e.g. BMP→AVIF export)
-      // sRGB without ICC is universally correct; future: embed standard sRGB ICC constant
-      console.debug('[ColorMgmt] AVIF Export: embedIcc=true but no source ICC data; frameCS=%s (sRGB assumed)', frameCS);
+      console.debug('[ColorMgmt] AVIF Export: embedIcc=true but no source ICC data; sRGB assumed');
     }
 
-    console.debug('[ColorMgmt] AVIF Export: frameCS=%s, encodeColorSpace=%s, embedIcc=%s',
-      frameCS, exportStrategy.encodeColorSpace, !!iccProfileBytes);
+    // Engine routing: USE_VIPS_FOR_ICC_AVIF is a hard switch — on = always vips-heif, off = always @jsquash/avif.
+    // When vips is used, it always writes a correct ICC profile into the AVIF colr box:
+    //   - If iccProfileBytes provided → embeds that profile
+    //   - If not → vips auto-writes sRGB profile
+    if (USE_VIPS_FOR_ICC_AVIF) {
+      console.debug('[ColorMgmt] AVIF Export: vips-heif engine, frameCS=%s, hasSourceIcc=%s',
+        frameCS, !!iccProfileBytes);
+      const avifBytes = await this.pixels.fileIO.encodeAvif(rgbaData, canvas.width, canvas.height, {
+        quality, lossless: false, effort: 4,
+        iccProfileBytes: embedIcc ? iccProfileBytes : undefined,
+        bitDepth: meta?.bitDepth, dpi: config?.dpi || meta?.dpi,
+      });
+      return new Blob([avifBytes.buffer as ArrayBuffer], { type: 'image/avif' });
+    }
 
-    // Encode via engine Worker (FILE_IO encodeAvif → vips heifsave + AV1)
-    const dpi = config?.dpi || meta?.dpi || 72;
-    const avifBytes = await this.pixels.fileIO.encodeAvif(
-      rgbaData,
-      canvas.width,
-      canvas.height,
-      { quality, lossless: false, effort: 4, iccProfileBytes, dpi },
-    );
-
+    // @jsquash/avif path — no ICC embedding support
+    if (embedIcc) {
+      console.warn('[AvifHandler] ICC embed not supported (USE_VIPS_FOR_ICC_AVIF=false). Colors preserved, profile omitted.');
+    }
+    console.debug('[ColorMgmt] AVIF Export: @jsquash/avif engine, frameCS=%s', frameCS);
+    const avifBytes = await encodeAvifJsquash(rgbaData, canvas.width, canvas.height, { quality, speed: 6 });
     return new Blob([avifBytes.buffer as ArrayBuffer], { type: 'image/avif' });
   }
 
@@ -242,29 +255,26 @@ export class AvifHandler implements ImageFormatHandler {
 
     try {
       const fileBuffer = await file.arrayBuffer();
-
-      // ExifReader v4+ supports AVIF/HEIF container parsing
       const tags = ExifReader.load(fileBuffer, { expanded: true });
 
-      // DPI from EXIF
+      // DPI
       const xRes = tags.exif?.XResolution?.value;
       if (xRes) {
         const resUnit = tags.exif?.ResolutionUnit?.value;
         let dpi = Array.isArray(xRes) ? xRes[0] / (xRes[1] || 1) : Number(xRes);
-        if (resUnit === 3) dpi = dpi * 2.54; // cm → inches
+        if (resUnit === 3) dpi = dpi * 2.54;
         if (dpi > 1 && dpi < 10000) {
           base.dpi = Math.round(dpi);
           base.dpiSource = 'exif';
         }
       }
 
-      // Camera info
+      // Camera
       const make = tags.exif?.Make?.description;
       const model = tags.exif?.Model?.description;
       if (make || model) {
         base.camera = {
-          make,
-          model,
+          make, model,
           lensMake: tags.exif?.LensMake?.description,
           lensModel: tags.exif?.LensModel?.description,
           software: tags.exif?.Software?.description,
@@ -304,7 +314,7 @@ export class AvifHandler implements ImageFormatHandler {
         base.gps = { latitude: Number(lat), longitude: Number(lon) };
       }
 
-      // ICC Profile — ExifReader extracts ICC from AVIF's colr box
+      // ICC Profile (from AVIF colr box)
       const iccDesc = tags.icc?.['ICC Description']?.description
         || tags.icc?.ProfileDescription?.description;
       if (iccDesc) {
@@ -312,8 +322,7 @@ export class AvifHandler implements ImageFormatHandler {
         base.raw = base.raw || {};
         base.raw.iccProfileName = String(iccDesc);
 
-        // Detect known color spaces from ICC profile name
-        const pName = (base.raw.iccProfileName || '').toLowerCase();
+        const pName = base.raw.iccProfileName.toLowerCase();
         if (pName.includes('adobe') && pName.includes('rgb')) {
           base.colorSpace = 'adobe-rgb';
         } else if (pName.includes('display p3') || pName.includes('p3')) {
@@ -323,11 +332,9 @@ export class AvifHandler implements ImageFormatHandler {
         }
       }
 
-      // Try to get raw ICC profile bytes from ExifReader
-      // ExifReader may expose raw ICC data via icc chunk
+      // Raw ICC profile bytes
       const iccChunks = tags.icc;
       if (iccChunks && typeof iccChunks === 'object') {
-        // ExifReader exposes raw ICC bytes in certain parse modes
         const rawIcc = (iccChunks as Record<string, unknown>).__raw;
         if (rawIcc instanceof Uint8Array && rawIcc.length > 0) {
           base.raw = base.raw || {};
@@ -338,15 +345,14 @@ export class AvifHandler implements ImageFormatHandler {
         }
       }
 
-      // Bit depth detection from AVIF pixi box (if ExifReader exposes it)
+      // Bit depth (AVIF pixi box)
       const fileTags = tags.file as Record<string, { value?: unknown }> | undefined;
       const bitDepth = fileTags?.BitDepth?.value;
       if (bitDepth && Number(bitDepth) > 8) {
         base.bitDepth = Number(bitDepth);
       }
 
-      // Alpha detection
-      // AVIF supports alpha; detect from file properties if available
+      // Alpha
       const hasAlpha = fileTags?.NumberOfComponents?.value;
       if (hasAlpha && Number(hasAlpha) === 4) {
         base.hasAlpha = true;
@@ -357,5 +363,57 @@ export class AvifHandler implements ImageFormatHandler {
 
     return base;
   }
+}
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// @jsquash/avif Worker — Encode RGBA → AVIF off main thread
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _avifWorker: Worker | null = null;
+let _avifReqId = 0;
+
+function getAvifWorker(): Worker {
+  if (!_avifWorker) {
+    _avifWorker = new Worker('/ext/wasm/avif/avif-worker.js', { type: 'module' });
+  }
+  return _avifWorker;
+}
+
+/**
+ * Encode RGBA → AVIF via @jsquash/avif in a dedicated Worker.
+ * Uses ST encoder (avif_enc.js), ALLOW_MEMORY_GROWTH, crash-isolated from vips.
+ */
+async function encodeAvifJsquash(
+  rgbaData: Uint8Array,
+  width: number,
+  height: number,
+  options: { quality?: number; speed?: number },
+): Promise<Uint8Array> {
+  const worker = getAvifWorker();
+  const id = ++_avifReqId;
+
+  return new Promise<Uint8Array>((resolve, reject) => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.data.id !== id) return;
+      worker.removeEventListener('message', onMessage);
+      worker.removeEventListener('error', onError);
+      if (e.data.error) {
+        reject(new Error(e.data.error));
+      } else {
+        resolve(new Uint8Array(e.data.avifBytes));
+      }
+    };
+    const onError = (e: ErrorEvent) => {
+      worker.removeEventListener('message', onMessage);
+      worker.removeEventListener('error', onError);
+      reject(new Error(`[AvifWorker] ${e.message || 'Unknown error'}`));
+    };
+
+    worker.addEventListener('message', onMessage);
+    worker.addEventListener('error', onError);
+
+    const copy = new Uint8Array(rgbaData.byteLength);
+    copy.set(new Uint8Array(rgbaData.buffer, rgbaData.byteOffset, rgbaData.byteLength));
+    worker.postMessage({ id, rgbaData: copy, width, height, options }, [copy.buffer]);
+  });
 }

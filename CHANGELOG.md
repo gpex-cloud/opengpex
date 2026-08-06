@@ -15,6 +15,7 @@ All notable changes to OpenGPEX are documented in this file.
 - Decouple snap/smart-guide configuration from plugin layer into core PresetsFactory, eliminating reverse dependency from stage to plugins
 - Add "Reset to Defaults" buttons to Preferences and SmartGuides settings panels
 - DebugInfoPanel: add tile cache monitoring metrics
+- AVIF export: add dedicated `avif-worker.js` (@jsquash/avif) and `USE_VIPS_FOR_ICC_AVIF` switch to route encoding between isolated Worker (default, crash-safe) and vips-heif (ICC embed)
 
 ---
 

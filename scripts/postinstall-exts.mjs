@@ -13,7 +13,8 @@
  *   public/ext/wasm/vips/    ← vips.js + vips.wasm + vips-worker.js
  *   public/ext/wasm/libraw/  ← libraw.wasm + libraw.js + libraw-worker.js
  *   public/ext/wasm/gs/      ← gs.wasm + gs.js + gs-worker.js
- *   (avif encoding via vips-heif.wasm in vips/ directory)
+ *   public/ext/wasm/avif/    ← avif_enc.wasm + avif_enc.js + avif-worker.js (@jsquash/avif ST)
+ *   (avif encoding via vips-heif.wasm in vips/ directory)  
  *   public/ext/js/           ← heic-to.js
  *
  * This runs automatically after `pnpm install`.
@@ -28,7 +29,7 @@ const ROOT = resolve(__dirname, '..');
 
 // ─── Ensure subdirectories exist ────────────────────────────────────────────────
 const WASM_BASE = resolve(ROOT, 'public/ext/wasm');
-const SUBDIRS = ['resvg', 'vips', 'libraw', 'gs'];
+const SUBDIRS = ['resvg', 'vips', 'libraw', 'gs', 'avif'];
 for (const sub of SUBDIRS) {
   mkdirSync(resolve(WASM_BASE, sub), { recursive: true });
 }
@@ -39,7 +40,7 @@ const vendorFiles = [
   { src: 'node_modules/@resvg/resvg-wasm/index_bg.wasm', dest: 'resvg/resvg.wasm' },
   { src: 'node_modules/@resvg/resvg-wasm/index.mjs',     dest: 'resvg/index.js' },
 
-  // ── vips (includes vips-heif.wasm for AVIF/HEIC encoding support) ──
+  // ── vips ──
   { src: 'node_modules/wasm-vips/lib/vips.js',        dest: 'vips/vips.js' },
   { src: 'node_modules/wasm-vips/lib/vips.wasm',      dest: 'vips/vips.wasm' },
   { src: 'node_modules/wasm-vips/lib/vips-heif.wasm', dest: 'vips/vips-heif.wasm' },
@@ -53,6 +54,9 @@ const vendorFiles = [
   { src: 'node_modules/@okathira/ghostpdl-wasm/dist/gs.wasm', dest: 'gs/gs.wasm' },
   { src: 'node_modules/@okathira/ghostpdl-wasm/dist/gs.js',   dest: 'gs/gs.js' },
 
+  // ── avif (@jsquash/avif encoder — ST mode only, no MT files needed) ──
+  { src: 'node_modules/@jsquash/avif/codec/enc/avif_enc.wasm', dest: 'avif/avif_enc.wasm' },
+  { src: 'node_modules/@jsquash/avif/codec/enc/avif_enc.js',   dest: 'avif/avif_enc.js' },
 ];
 
 let copied = 0;
@@ -75,6 +79,7 @@ const workerFiles = [
   { src: 'resvg-worker.js', dest: 'resvg/resvg-worker.js' },
   { src: 'gs-worker.js',    dest: 'gs/gs-worker.js' },
   { src: 'vips-worker.js',  dest: 'vips/vips-worker.js' },
+  { src: 'avif-worker.js',  dest: 'avif/avif-worker.js' },
 ];
 
 let workersCopied = 0;

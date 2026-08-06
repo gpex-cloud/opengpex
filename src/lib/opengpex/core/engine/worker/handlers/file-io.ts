@@ -158,15 +158,22 @@ export class FileIoHandler {
       tileHeight?: number;
     };
 
-    const image = vips.Image.newFromMemory(rgbaData, width, height, 4, 'uchar');
+    let image: VipsImage = vips.Image.newFromMemory(rgbaData, width, height, 4, 'uchar');
 
     // Attach ICC Profile if provided
+    // wasm-vips doesn't expose .set() on Image — use FS-based iccTransform identity trick.
     if (iccProfileBytes && iccProfileBytes.length > 0) {
+      const tmpIccPath = '/tmp/tiff_export_icc.icc';
       try {
-        image.set('icc-profile-data', iccProfileBytes);
+        vips.FS.writeFile(tmpIccPath, iccProfileBytes);
+        // Identity transform: input_profile = output = same → pixels unchanged, ICC embedded
+        const withIcc = image.iccTransform(tmpIccPath, { input_profile: tmpIccPath });
+        image.delete();
+        image = withIcc;
       } catch (e) {
-        // Non-critical: ICC attachment failure
         console.warn('[FileIoHandler] ICC attachment failed:', (e as Error).message);
+      } finally {
+        try { vips.FS.unlink(tmpIccPath); } catch { /* ignore */ }
       }
     }
 
@@ -508,10 +515,14 @@ export class FileIoHandler {
 
     // 6. Attach ICC Profile if provided
     if (iccProfileBytes && iccProfileBytes.length > 0) {
+      const tmpIccPath = '/tmp/highres_export_icc.icc';
       try {
-        image.set('icc-profile-data', iccProfileBytes);
+        vips.FS.writeFile(tmpIccPath, iccProfileBytes);
+        image = image.iccTransform(tmpIccPath, { input_profile: tmpIccPath });
       } catch {
         // Non-critical: ICC attachment failure
+      } finally {
+        try { vips.FS.unlink(tmpIccPath); } catch { /* ignore */ }
       }
     }
 
