@@ -39,6 +39,128 @@ export function parseTiffByteOrder(bytes: Uint8Array): 'little' | 'big' | null {
 }
 
 /**
+ * Extract raw EXIF bytes from a TIFF file as a standalone TIFF container.
+ *
+ * Finds the ExifSubIFD (tag 0x8769 in IFD0) and serializes it along with all
+ * referenced data into a self-contained TIFF container suitable for re-embedding.
+ *
+ * The output format is: [ByteOrder(2)][Magic42(2)][IFD0Offset=8(4)][IFD0(1 entry: ExifIFDPtr)][ExifSubIFD][data...]
+ *
+ * @param bytes - Complete TIFF file bytes
+ * @returns TIFF container bytes with ExifSubIFD, or null if no EXIF found
+ */
+export function extractTiffExif(bytes: Uint8Array): Uint8Array | null {
+  const header = validateTiffHeader(bytes);
+  if (!header) return null;
+
+  const { isLE, ifd0Offset } = header;
+
+  // Find ExifSubIFD pointer (tag 0x8769) in IFD0
+  const entryCount = readU16(bytes, ifd0Offset, isLE);
+  const entriesStart = ifd0Offset + 2;
+  if (entriesStart + entryCount * 12 + 4 > bytes.length) return null;
+
+  let exifSubIfdOffset = -1;
+  for (let i = 0; i < entryCount; i++) {
+    const entryOffset = entriesStart + i * 12;
+    const tagId = readU16(bytes, entryOffset, isLE);
+    if (tagId === 0x8769) { // ExifIFD pointer
+      exifSubIfdOffset = readU32(bytes, entryOffset + 8, isLE);
+      break;
+    }
+  }
+
+  if (exifSubIfdOffset <= 0 || exifSubIfdOffset + 2 > bytes.length) return null;
+
+  // Parse ExifSubIFD to collect all entries and their data ranges
+  const exifEntryCount = readU16(bytes, exifSubIfdOffset, isLE);
+  if (exifSubIfdOffset + 2 + exifEntryCount * 12 > bytes.length) return null;
+
+  // Collect data ranges referenced by the ExifSubIFD entries
+  interface DataRange { srcOffset: number; size: number }
+  const dataRanges: DataRange[] = [];
+
+  for (let i = 0; i < exifEntryCount; i++) {
+    const entryOffset = exifSubIfdOffset + 2 + i * 12;
+    const type = readU16(bytes, entryOffset + 2, isLE);
+    const count = readU32(bytes, entryOffset + 4, isLE);
+    const typeSize = TYPE_SIZES[type] || 1;
+    const totalSize = typeSize * count;
+
+    if (totalSize > 4) {
+      // Data stored at an offset
+      const dataOffset = readU32(bytes, entryOffset + 8, isLE);
+      if (dataOffset + totalSize <= bytes.length) {
+        dataRanges.push({ srcOffset: dataOffset, size: totalSize });
+      }
+    }
+  }
+
+  // Build output TIFF container:
+  // [Header: 8 bytes] [IFD0: 2 + 1*12 + 4 = 18 bytes] [ExifSubIFD: 2 + N*12 + 4 bytes] [data...]
+  const ifd0Size = 2 + 1 * 12 + 4; // 1 entry (ExifIFDPointer) + next-IFD ptr
+  const exifIfdSize = 2 + exifEntryCount * 12 + 4; // entries + next-IFD ptr
+  const dataStart = 8 + ifd0Size + exifIfdSize;
+
+  // Calculate total data size
+  let totalDataSize = 0;
+  for (const r of dataRanges) totalDataSize += r.size;
+
+  const outputSize = dataStart + totalDataSize;
+  const out = new Uint8Array(outputSize);
+
+  // Write TIFF header
+  if (isLE) { out[0] = 0x49; out[1] = 0x49; }
+  else { out[0] = 0x4D; out[1] = 0x4D; }
+  writeU16(out, 2, 42, isLE);
+  writeU32(out, 4, 8, isLE); // IFD0 at offset 8
+
+  // Write IFD0 (1 entry: ExifIFDPointer)
+  const ifd0Start = 8;
+  const exifIfdStart = ifd0Start + ifd0Size;
+  writeU16(out, ifd0Start, 1, isLE); // 1 entry
+  // Entry: tag=0x8769, type=LONG(4), count=1, value=exifIfdStart
+  writeU16(out, ifd0Start + 2, 0x8769, isLE);
+  writeU16(out, ifd0Start + 4, 4, isLE); // LONG
+  writeU32(out, ifd0Start + 6, 1, isLE); // count=1
+  writeU32(out, ifd0Start + 10, exifIfdStart, isLE); // offset to ExifSubIFD
+  writeU32(out, ifd0Start + 14, 0, isLE); // next IFD = 0 (none)
+
+  // Write ExifSubIFD entries with rebased offsets
+  writeU16(out, exifIfdStart, exifEntryCount, isLE);
+  let currentDataOffset = dataStart;
+
+  for (let i = 0; i < exifEntryCount; i++) {
+    const srcEntry = exifSubIfdOffset + 2 + i * 12;
+    const dstEntry = exifIfdStart + 2 + i * 12;
+
+    // Copy 12-byte entry as-is first
+    out.set(bytes.slice(srcEntry, srcEntry + 12), dstEntry);
+
+    // Check if offset needs rebasing
+    const type = readU16(bytes, srcEntry + 2, isLE);
+    const count = readU32(bytes, srcEntry + 4, isLE);
+    const typeSize = TYPE_SIZES[type] || 1;
+    const totalSize = typeSize * count;
+
+    if (totalSize > 4) {
+      const srcDataOffset = readU32(bytes, srcEntry + 8, isLE);
+      // Find this data range and copy it
+      if (srcDataOffset + totalSize <= bytes.length) {
+        out.set(bytes.slice(srcDataOffset, srcDataOffset + totalSize), currentDataOffset);
+        writeU32(out, dstEntry + 8, currentDataOffset, isLE); // rebase offset
+        currentDataOffset += totalSize;
+      }
+    }
+  }
+
+  // Write next-IFD pointer for ExifSubIFD (0 = none)
+  writeU32(out, exifIfdStart + 2 + exifEntryCount * 12, 0, isLE);
+
+  return out;
+}
+
+/**
  * Validate a TIFF file header (byte order + magic 42 + IFD0 offset).
  * @returns IFD0 offset if valid, or -1 if invalid header.
  */

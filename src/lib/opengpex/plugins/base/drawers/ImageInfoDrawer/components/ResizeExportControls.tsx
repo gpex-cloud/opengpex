@@ -27,6 +27,7 @@ import {
   Check,
   ChevronDown,
   Download,
+  ImageDown,
 } from "lucide-react";
 import FancyButton from "@opengpex/editor/widgets/FancyButton";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
@@ -86,6 +87,7 @@ export function ResizeExportControls({
   // Effective DPI: pending override in config, or frame's committed value
   const effectiveDpi = config.dpi || frameDpi;
   const [isProcessing, setIsProcessing] = React.useState(false);
+  const [collapsed, setCollapsed] = React.useState(false);
 
   const { currentW, currentH, currentPercent } = deriveResizeState(
     baseW,
@@ -160,9 +162,22 @@ export function ResizeExportControls({
 
   return (
     <div className="mt-2 pt-3 border-t border-[var(--border-subtle)] dark:border-white/10 space-y-3">
-      <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-widest mb-2 block">
-        Resize & Export
-      </span>
+      {/* Collapsible Section Header */}
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="flex items-center gap-1.5 w-full pb-1 group cursor-pointer"
+      >
+        <ImageDown size={12} className="text-indigo-600 dark:text-indigo-400" />
+        <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)] flex-1 text-left">
+          Resize & Export
+        </span>
+        <ChevronDown
+          size={12}
+          className={`text-[var(--text-muted)] opacity-50 group-hover:opacity-100 transition-transform duration-200 ${collapsed ? "-rotate-90" : ""}`}
+        />
+      </button>
+
+      {!collapsed && (<>
       {/* Resize Unified Controls */}
       <div className="flex flex-col gap-3">
         {/* Row 1: Pixel Inputs & Tools */}
@@ -358,85 +373,29 @@ export function ResizeExportControls({
                 </span>
               </div>
             )}
-            {/* Advanced TIFF Options (collapsible) */}
-            <details className="group px-1 mt-1">
-              <summary className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-widest cursor-pointer select-none hover:text-[var(--text-main)] transition-colors list-none flex items-center gap-1">
-                <ChevronDown size={8} className="opacity-50 transition-transform group-open:rotate-180" />
-                Advanced
-              </summary>
-              <div className="mt-2 space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
-                {/* Predictor (LZW/ZIP only) */}
-                {(config.tiffCompression === "lzw" || config.tiffCompression === "zip") && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
-                      Predict
-                    </span>
-                    <ActionDropdown
-                      direction="up"
-                      onSelect={(val: string) => updateConfig({ tiffPredictor: val as 'none' | 'horizontal' | 'float' })}
-                      className="shrink-0"
-                      options={[
-                        { label: "None", value: "none", description: "no prediction" },
-                        { label: "Horizontal", value: "horizontal", description: "best for photos" },
-                        { label: "Float", value: "float", description: "floating-point data" },
-                      ]}
-                      trigger={
-                        <FancyButton variant="zinc" subtle={true} size="xs">
-                          {(config.tiffPredictor || "none").charAt(0).toUpperCase() + (config.tiffPredictor || "none").slice(1)} <ChevronDown size={8} className="opacity-50" />
-                        </FancyButton>
-                      }
-                    />
-                  </div>
-                )}
-                {/* Byte Order (vips always outputs native little-endian; option reserved for future backends) */}
-                <div className="flex items-center gap-2 opacity-50" title="Byte order is fixed to Intel (little-endian) by the current encoding backend">
-                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
-                    Byte
-                  </span>
-                  <FunctionTabs
-                    options={[
-                      { label: "Intel", value: "lsb", tooltip: "Little-endian (PC) — current backend only supports this" },
-                      { label: "Motorola", value: "msb", tooltip: "Big-endian (Mac) — not supported by current backend" },
-                    ]}
-                    value="lsb"
-                    onChange={() => {}}
-                    disabled
-                    className="w-32 [&_button]:py-0.5 pointer-events-none"
-                  />
-                </div>
-                {/* BigTIFF */}
-                <div className="flex items-center gap-2">
-                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
-                    BigTIFF
-                  </span>
-                  <Switch
-                    checked={!!config.tiffBigtiff}
-                    onChange={(val) => updateConfig({ tiffBigtiff: val })}
-                    activeColor="bg-emerald-500"
-                    size="compact"
-                  />
-                  <span className="text-[9px] text-[var(--text-muted)]">
-                    {config.tiffBigtiff ? ">4GB support" : "Standard"}
-                  </span>
-                </div>
-                {/* Tile Layout (disabled when JPEG forces it) */}
-                <div className="flex items-center gap-2">
-                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
-                    Tile
-                  </span>
-                  <Switch
-                    checked={!!(config.tiffTile || config.tiffCompression === "jpeg")}
-                    onChange={(val) => updateConfig({ tiffTile: val })}
-                    activeColor="bg-emerald-500"
-                    size="compact"
-                    disabled={config.tiffCompression === "jpeg"}
-                  />
-                  <span className="text-[9px] text-[var(--text-muted)]">
-                    {config.tiffCompression === "jpeg" ? "Required for JPEG" : (config.tiffTile ? `${config.tiffTileWidth || 256}×${config.tiffTileHeight || 256}` : "Strip-based")}
-                  </span>
-                </div>
+            {/* Predictor (LZW/ZIP only) — improves compression 10-30% for photos */}
+            {(config.tiffCompression === "lzw" || config.tiffCompression === "zip") && (
+              <div className="flex items-center gap-2 px-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
+                  Predictor
+                </span>
+                <ActionDropdown
+                  direction="up"
+                  onSelect={(val: string) => updateConfig({ tiffPredictor: val as 'none' | 'horizontal' | 'float' })}
+                  className="shrink-0"
+                  options={[
+                    { label: "None", value: "none", description: "no prediction" },
+                    { label: "Horizontal", value: "horizontal", description: "best for photos" },
+                    { label: "Float", value: "float", description: "floating-point data" },
+                  ]}
+                  trigger={
+                    <FancyButton variant="zinc" subtle={true} size="xs">
+                      {(config.tiffPredictor || "none").charAt(0).toUpperCase() + (config.tiffPredictor || "none").slice(1)} <ChevronDown size={8} className="opacity-50" />
+                    </FancyButton>
+                  }
+                />
               </div>
-            </details>
+            )}
           </div>
         )}
         {config.format === "image/png" && (
@@ -663,6 +622,7 @@ export function ResizeExportControls({
           </div>
         </div>
       </div>
+      </>)}
     </div>
   );
 }

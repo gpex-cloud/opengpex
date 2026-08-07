@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.42.1
+
+- TIFF EXIF round-trip: support extracting and re-embedding EXIF from TIFF sources on export, with automatic byte-order conversion when endianness differs
+- Consolidate metadata type definitions into a single module for cleaner imports
+- Resize & Export panel: add collapsible section header, simplify TIFF advanced options
+
+---
+
 ## v1.0.0-beta.42
 
 - Modular file handlers: each image format (JPEG, PNG, TIFF, AVIF, HEIC, WebP, RAW) is now split into separate encode, decode, and metadata modules for better maintainability

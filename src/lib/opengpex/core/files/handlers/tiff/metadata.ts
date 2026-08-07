@@ -19,7 +19,7 @@
 import ExifReader from 'exifreader';
 import type { ImageMetadata, ColorSpaceId } from '../../metadata';
 import { iccToBase64, parseIccProfileName } from '../../icc';
-import { extractTiffIcc } from '../../tiff-ifd-reader';
+import { extractTiffIcc, extractTiffExif } from '../../tiff-ifd-reader';
 
 /**
  * Extract full V2 metadata from a TIFF file.
@@ -77,8 +77,15 @@ export async function extractTiffMetadata(file: File): Promise<ImageMetadata> {
     const spp = tags.exif?.SamplesPerPixel?.value;
     if (Number(spp) === 4 && meta.colorSpace === 'srgb') meta.hasAlpha = true;
 
+    // ── Raw EXIF extraction (for "Keep EXIF Data" re-embed support) ──
+    const tiffBytes = new Uint8Array(fileBuffer);
+    const exifRaw = extractTiffExif(tiffBytes);
+    if (exifRaw && exifRaw.length > 0) {
+      meta.raw.exif = iccToBase64(exifRaw); // reuse base64 helper
+    }
+
     // ── ICC Profile (direct binary extraction from tag 34675, like JPEG/PNG/HEIC) ──
-    const iccBytes = extractTiffIcc(new Uint8Array(fileBuffer));
+    const iccBytes = extractTiffIcc(tiffBytes);
     if (iccBytes && iccBytes.length > 0) {
       const profileName = parseIccProfileName(iccBytes) || 'Embedded';
       meta.raw.icc = { data: iccToBase64(iccBytes), name: profileName };
