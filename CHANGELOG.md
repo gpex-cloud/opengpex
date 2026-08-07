@@ -4,6 +4,16 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.43
+
+- Fix filter flash when adjusting multiple layers simultaneously
+- Fix exported images appearing rotated or color-shifted in certain viewers
+- Middle-click pan, Ctrl+drag selection, and scroll-zoom fixes for better Windows/cross-platform support
+- Text overflow indicator and improved layer thumbnails in panels
+- Simplified tool-switching in the craft toolbar
+
+---
+
 ## v1.0.0-beta.42.1
 
 - TIFF EXIF round-trip: support extracting and re-embedding EXIF from TIFF sources on export, with automatic byte-order conversion when endianness differs
