@@ -26,134 +26,24 @@
  * - FileService: Public facade interface
  */
 
+import type { ImageMetadata, SourceFormat, DpiSource, ColorSpaceId } from './metadata';
+
+// Re-export metadata types for convenience
+export type { SourceFormat, DpiSource, ColorSpaceId };
+
 // ═══════════════════════════════════════════════════════════════════════════════
-// Metadata Model (Semantic Layer + Raw Layer)
+// Format Capability Queries
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/** Supported source format identifiers */
-export type SourceFormat =
-  | 'jpeg'
-  | 'png'
-  | 'bmp'
-  | 'webp'
-  | 'avif'
-  | 'heic'
-  | 'tiff'
-  | 'raw'
-  | 'svg'
-  | 'eps'
-  | 'gif'
-  | 'unknown';
-
-/** How the DPI value was determined */
-export type DpiSource = 'exif' | 'png-phys' | 'bmp-header' | 'user' | 'default';
-
-/** Semantic color space identifier */
-export type ColorSpaceId =
-  | 'srgb'
-  | 'adobe-rgb'
-  | 'display-p3'
-  | 'prophoto-rgb'
-  | 'cmyk'
-  | 'grayscale'
-  | 'unknown';
+/** Formats that support EXIF metadata embedding on export. */
+const EXIF_CAPABLE_FORMATS = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/tiff', 'image/avif']);
 
 /**
- * Unified image metadata — semantic layer + raw layer.
- *
- * The semantic layer is format-agnostic and UI-consumable.
- * The raw layer preserves format-specific binary data for lossless round-trip.
+ * Whether a given format supports EXIF metadata embedding.
+ * Used by UI to conditionally show "Keep EXIF" toggle.
  */
-export interface ImageMetadata {
-  /** Schema version for state migration */
-  version: 1;
-
-  // ─── Basic Info ──────────────────────────────────────────────────────────
-  sourceFormat: SourceFormat;
-  /** Internal codec after transcoding (e.g. 'image/png'). Undefined if no transcoding needed. */
-  internalCodec?: string;
-  sourceFileName?: string;
-  sourceFileSize?: number;
-
-  // ─── Physical Dimensions & DPI ───────────────────────────────────────────
-  dpi: number;
-  dpiSource: DpiSource;
-
-  // ─── Color Info ──────────────────────────────────────────────────────────
-  colorSpace: ColorSpaceId;
-  bitDepth: number;
-  hasAlpha: boolean;
-  hasIccProfile: boolean;
-
-  // ─── Camera Info ─────────────────────────────────────────────────────────
-  camera?: {
-    make?: string;
-    model?: string;
-    lensMake?: string;
-    lensModel?: string;
-    software?: string;
-  };
-
-  // ─── Capture Parameters ──────────────────────────────────────────────────
-  capture?: {
-    fNumber?: number;
-    exposureTime?: number;
-    iso?: number;
-    focalLength?: number;
-    whiteBalance?: string;
-    flash?: boolean;
-  };
-
-  // ─── Dates ───────────────────────────────────────────────────────────────
-  dates?: {
-    created?: string;   // ISO 8601
-    modified?: string;  // ISO 8601
-  };
-
-  // ─── GPS ─────────────────────────────────────────────────────────────────
-  gps?: {
-    latitude?: number;
-    longitude?: number;
-    altitude?: number;
-  };
-
-  // ─── Author / Copyright ──────────────────────────────────────────────────
-  author?: {
-    name?: string;
-    copyright?: string;
-    description?: string;
-  };
-
-  // ─── AI Generation Info ──────────────────────────────────────────────────
-  ai?: {
-    model?: string;
-    prompt?: string;
-  };
-
-  // ─── Raw Layer (format-specific, for lossless round-trip) ────────────────
-  raw?: RawMetadataRefs;
-}
-
-/**
- * Raw metadata blob references.
- * ICC Profile is stored inline as base64 (typically 2-50KB, max ~100KB).
- * Large binary data (EXIF) is stored via AssetId to avoid inflating state JSON.
- */
-export interface RawMetadataRefs {
-  /** PNG eXIf chunk raw bytes, base64 encoded (for export round-trip) */
-  exifBytes?: string;
-  /** File gamma value (from PNG gAMA chunk, only meaningful without ICC/sRGB) */
-  gamma?: number;
-  /** ICC Profile binary, base64 encoded. Typically 2-50KB. */
-  iccProfileData?: string;
-  /** ICC Profile description name (e.g. "sRGB IEC61966-2.1") */
-  iccProfileName?: string;
-  /** Original EXIF binary for passthrough (stored as asset) */
-  exifBlobAssetId?: string;
-  /** XMP sidecar string (inline, typically <10KB) */
-  xmpString?: string;
-  /** Raw piexif object for JPEG EXIF round-trip (inline JSON, <5KB) */
-  piexifObj?: Record<string, unknown>;
+export function supportsExifEmbed(format: string): boolean {
+  return EXIF_CAPABLE_FORMATS.has(format);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

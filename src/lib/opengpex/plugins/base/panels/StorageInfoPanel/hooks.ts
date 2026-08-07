@@ -189,7 +189,7 @@ export const useStorageMetrics = () => {
           asset,
           originalName: l.metadata?.originalName,
           format: l.metadata?.format,
-          exif: l.metadata?.exif,
+          exif: l.metadata?.imageMetadata as P.LayerMetric['exif'],
           hostId: l.hostId,
           role: l.role
         };

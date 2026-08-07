@@ -10,47 +10,82 @@
  */
 
 /**
- * WebP RIFF ICC Profile Injection Utility.
+ * WebP RIFF container-level operations.
  *
- * Injects ICC Profile data into a WebP file by manipulating its RIFF container.
- * This enables custom ICC Profile embedding for WebP export, which is not
- * possible through the standard canvas.convertToBlob() API.
+ * Pure byte-level operations on the RIFF/WebP container — no semantic parsing.
+ * Handles ICCP (ICC Profile) and EXIF chunk extraction/injection.
+ *
+ * WebP extended format (VP8X) structure:
+ * ```
+ * RIFF [4B size] WEBP
+ *   VP8X [4B size] [10B flags+dimensions] (flags bit 5 = ICC, bit 3 = EXIF)
+ *   ICCP [4B size] [ICC profile bytes]
+ *   ...
+ *   EXIF [4B size] [EXIF bytes (TIFF IFD, possibly with "Exif\0\0" prefix)]
+ * ```
+ *
+ * @module core/files/handlers/webp/riff
+ */
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ICC Profile Operations
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Extract ICC Profile bytes from WebP RIFF container.
+ *
+ * Scans RIFF chunks for the ICCP chunk and returns its data.
+ * @returns Raw ICC profile bytes, or null if not found
+ */
+export function extractWebpIcc(bytes: Uint8Array): Uint8Array | null {
+  if (!isRiffWebP(bytes)) return null;
+
+  // Scan RIFF chunks starting at offset 12
+  let pos = 12;
+  while (pos + 8 <= bytes.length) {
+    const chunkId = getFourCC(bytes, pos);
+    const chunkSize = readUint32LE(bytes, pos + 4);
+
+    if (chunkId === 'ICCP') {
+      const dataStart = pos + 8;
+      const dataEnd = dataStart + chunkSize;
+      if (dataEnd <= bytes.length && chunkSize > 0) {
+        return bytes.slice(dataStart, dataEnd);
+      }
+      return null;
+    }
+
+    // Move to next chunk (chunks are padded to even byte boundaries)
+    pos += 8 + chunkSize + (chunkSize % 2);
+  }
+
+  return null;
+}
+
+/**
+ * Inject ICC Profile into a WebP file via RIFF chunk manipulation.
  *
  * Handles two cases:
  *   1. Simple WebP (VP8/VP8L at offset 12) → upgrade to extended format (VP8X) + insert ICCP chunk
  *   2. Extended WebP (VP8X at offset 12) → insert ICCP chunk + update VP8X flags
- *
- * Pure byte-level operations, no external dependencies.
- *
- * @module core/files/utils/webpIcc
- * @see docs/opengpex/plans/20260803_webp_riff_icc_injection.md
- */
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Public API
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Inject ICC Profile into a WebP file via RIFF chunk manipulation.
  *
  * @param webpBytes    - Original WebP file bytes (from canvas.convertToBlob)
  * @param iccProfile   - ICC Profile binary data to embed
  * @returns New WebP file bytes with ICC Profile injected
  * @throws Error if input is not a valid WebP file
  */
-export function injectWebPIcc(webpBytes: Uint8Array, iccProfile: Uint8Array): Uint8Array {
+export function injectWebpIcc(webpBytes: Uint8Array, iccProfile: Uint8Array): Uint8Array {
   if (!isRiffWebP(webpBytes)) {
     throw new Error('Not a valid WebP file');
   }
 
-  // Detect format: simple (VP8/VP8L at offset 12) or extended (VP8X at offset 12)
   const firstChunkFourCC = getFourCC(webpBytes, 12);
   const isExtended = firstChunkFourCC === 'VP8X';
 
   if (isExtended) {
-    return injectIntoExtended(webpBytes, iccProfile);
+    return injectIccIntoExtended(webpBytes, iccProfile);
   } else {
-    return upgradeToExtended(webpBytes, iccProfile);
+    return upgradeToExtendedWithIcc(webpBytes, iccProfile);
   }
 }
 
@@ -63,19 +98,17 @@ export function injectWebPIcc(webpBytes: Uint8Array, iccProfile: Uint8Array): Ui
  * @param webpBytes - WebP file bytes (possibly with browser-injected ICC)
  * @returns New WebP file bytes without ICCP chunk (or original if no ICCP found)
  */
-export function stripWebPIcc(webpBytes: Uint8Array): Uint8Array {
+export function stripWebpIcc(webpBytes: Uint8Array): Uint8Array {
   if (!isRiffWebP(webpBytes)) {
     throw new Error('Not a valid WebP file');
   }
 
-  // Only extended format (VP8X) can have ICCP chunks
   const firstChunkFourCC = getFourCC(webpBytes, 12);
   if (firstChunkFourCC !== 'VP8X') {
     // Simple format — no ICCP possible, return as-is
     return webpBytes;
   }
 
-  // Scan chunks to find and remove ICCP
   const view = new DataView(webpBytes.buffer, webpBytes.byteOffset, webpBytes.byteLength);
   const vp8xDataSize = view.getUint32(16, true);
   const vp8xChunkTotalSize = 8 + vp8xDataSize + (vp8xDataSize % 2 ? 1 : 0);
@@ -111,6 +144,80 @@ export function stripWebPIcc(webpBytes: Uint8Array): Uint8Array {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// EXIF Operations
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Inject raw EXIF bytes into WebP RIFF container.
+ *
+ * Adds/replaces EXIF chunk and sets VP8X EXIF flag (bit 3).
+ * EXIF chunk is placed after all image data chunks.
+ *
+ * @param webpBytes - Original WebP file bytes
+ * @param exifBytes - Raw EXIF TIFF IFD bytes to embed
+ * @returns New WebP file bytes with EXIF injected
+ * @throws Error if input is not a valid WebP file
+ */
+export function injectWebpExif(webpBytes: Uint8Array, exifBytes: Uint8Array): Uint8Array {
+  if (!isRiffWebP(webpBytes)) {
+    throw new Error('Not a valid WebP file');
+  }
+
+  const firstChunkFourCC = getFourCC(webpBytes, 12);
+  const isExtended = firstChunkFourCC === 'VP8X';
+
+  if (isExtended) {
+    return injectExifIntoExtended(webpBytes, exifBytes);
+  } else {
+    return upgradeToExtendedWithExif(webpBytes, exifBytes);
+  }
+}
+
+/**
+ * Extract raw EXIF bytes from WebP RIFF EXIF chunk.
+ *
+ * WebP EXIF chunk contains TIFF IFD structure.
+ * Some encoders prepend "Exif\0\0" (6 bytes) before the TIFF header — we strip that.
+ * Returns the TIFF IFD bytes (starting with "II" or "MM" byte order marker).
+ *
+ * @returns Raw EXIF TIFF IFD bytes, or null if not found
+ */
+export function extractWebpExif(bytes: Uint8Array): Uint8Array | null {
+  if (!isRiffWebP(bytes)) return null;
+
+  let pos = 12;
+  while (pos + 8 <= bytes.length) {
+    const chunkId = getFourCC(bytes, pos);
+    const chunkSize = readUint32LE(bytes, pos + 4);
+
+    if (chunkId === 'EXIF') {
+      const dataStart = pos + 8;
+      const dataEnd = dataStart + chunkSize;
+      if (dataEnd <= bytes.length && chunkSize > 6) {
+        let exifData = bytes.slice(dataStart, dataEnd);
+        // Strip "Exif\0\0" prefix if present (some encoders include it)
+        if (
+          exifData[0] === 0x45 && // 'E'
+          exifData[1] === 0x78 && // 'x'
+          exifData[2] === 0x69 && // 'i'
+          exifData[3] === 0x66 && // 'f'
+          exifData[4] === 0x00 &&
+          exifData[5] === 0x00
+        ) {
+          exifData = exifData.slice(6);
+        }
+        return exifData.length > 0 ? exifData : null;
+      }
+      return null;
+    }
+
+    pos += 8 + chunkSize + (chunkSize % 2);
+  }
+
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Internal Implementation
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -118,7 +225,7 @@ export function stripWebPIcc(webpBytes: Uint8Array): Uint8Array {
  * Inject ICCP chunk into an existing extended (VP8X) WebP.
  * Sets the ICC flag in VP8X and inserts the ICCP chunk right after VP8X.
  */
-function injectIntoExtended(webpBytes: Uint8Array, iccProfile: Uint8Array): Uint8Array {
+function injectIccIntoExtended(webpBytes: Uint8Array, iccProfile: Uint8Array): Uint8Array {
   const view = new DataView(webpBytes.buffer, webpBytes.byteOffset, webpBytes.byteLength);
 
   // VP8X chunk header is at offset 12, data starts at offset 20
@@ -153,7 +260,7 @@ function injectIntoExtended(webpBytes: Uint8Array, iccProfile: Uint8Array): Uint
  * Creates a VP8X chunk with ICC flag + dimensions, then inserts it and ICCP
  * before the original pixel data.
  */
-function upgradeToExtended(webpBytes: Uint8Array, iccProfile: Uint8Array): Uint8Array {
+function upgradeToExtendedWithIcc(webpBytes: Uint8Array, iccProfile: Uint8Array): Uint8Array {
   // Parse image dimensions from VP8/VP8L header
   const { width, height } = parseWebPDimensions(webpBytes, 12);
 
@@ -161,7 +268,6 @@ function upgradeToExtended(webpBytes: Uint8Array, iccProfile: Uint8Array): Uint8
   const vp8xData = new Uint8Array(10);
   // Byte 0: flags — bit 5 = ICC present (0x20)
   vp8xData[0] = 0x20;
-  // Bytes 1-3: reserved (0)
   // Bytes 4-6: canvas width - 1 (24-bit LE)
   const w1 = width - 1;
   vp8xData[4] = w1 & 0xFF;
@@ -193,13 +299,113 @@ function upgradeToExtended(webpBytes: Uint8Array, iccProfile: Uint8Array): Uint8
   return result;
 }
 
+/**
+ * Inject EXIF chunk into an existing extended (VP8X) WebP.
+ * Strips any existing EXIF chunk, appends the new one at end of file,
+ * and sets VP8X EXIF flag (bit 3).
+ */
+function injectExifIntoExtended(webpBytes: Uint8Array, exifBytes: Uint8Array): Uint8Array {
+  // 1. Strip existing EXIF chunk if any
+  const bytes = stripExifChunk(webpBytes);
+
+  const flagsOffset = 20; // VP8X flags byte
+
+  // 2. Build EXIF chunk and append at end of file
+  const exifChunk = buildChunk('EXIF', exifBytes);
+
+  const result = new Uint8Array(bytes.length + exifChunk.length);
+  result.set(bytes, 0);
+  result.set(exifChunk, bytes.length);
+
+  // 3. Set EXIF flag (bit 3, 0x08) in VP8X flags
+  result[flagsOffset] = result[flagsOffset] | 0x08;
+
+  // 4. Update RIFF file size (offset 4, LE uint32)
+  new DataView(result.buffer).setUint32(4, result.length - 8, true);
+
+  return result;
+}
+
+/**
+ * Upgrade a simple WebP (VP8/VP8L) to extended format (VP8X) with EXIF.
+ * Creates a VP8X chunk with EXIF flag + dimensions, then inserts VP8X before
+ * pixel data and appends EXIF chunk at end.
+ */
+function upgradeToExtendedWithExif(webpBytes: Uint8Array, exifBytes: Uint8Array): Uint8Array {
+  // Parse image dimensions from VP8/VP8L header
+  const { width, height } = parseWebPDimensions(webpBytes, 12);
+
+  // Build VP8X chunk (10 bytes of data)
+  const vp8xData = new Uint8Array(10);
+  // Byte 0: flags — bit 3 = EXIF present (0x08)
+  vp8xData[0] = 0x08;
+  // Bytes 4-6: canvas width - 1 (24-bit LE)
+  const w1 = width - 1;
+  vp8xData[4] = w1 & 0xFF;
+  vp8xData[5] = (w1 >> 8) & 0xFF;
+  vp8xData[6] = (w1 >> 16) & 0xFF;
+  // Bytes 7-9: canvas height - 1 (24-bit LE)
+  const h1 = height - 1;
+  vp8xData[7] = h1 & 0xFF;
+  vp8xData[8] = (h1 >> 8) & 0xFF;
+  vp8xData[9] = (h1 >> 16) & 0xFF;
+
+  const vp8xChunk = buildChunk('VP8X', vp8xData);
+  const exifChunk = buildChunk('EXIF', exifBytes);
+
+  // Original pixel data starts at offset 12 (after RIFF header)
+  const pixelData = webpBytes.subarray(12);
+
+  // Assemble: RIFF header(12) + VP8X + original chunks + EXIF at end
+  const totalLength = 12 + vp8xChunk.length + pixelData.length + exifChunk.length;
+  const result = new Uint8Array(totalLength);
+  result.set(webpBytes.subarray(0, 12), 0); // RIFF + size + WEBP
+  result.set(vp8xChunk, 12);
+  result.set(pixelData, 12 + vp8xChunk.length);
+  result.set(exifChunk, 12 + vp8xChunk.length + pixelData.length);
+
+  // Update RIFF file size (offset 4)
+  new DataView(result.buffer).setUint32(4, result.length - 8, true);
+
+  return result;
+}
+
+/**
+ * Strip existing EXIF chunk from an extended WebP (if present).
+ */
+function stripExifChunk(webpBytes: Uint8Array): Uint8Array {
+  const view = new DataView(webpBytes.buffer, webpBytes.byteOffset, webpBytes.byteLength);
+  const vp8xDataSize = view.getUint32(16, true);
+  const vp8xChunkTotalSize = 8 + vp8xDataSize + (vp8xDataSize % 2 ? 1 : 0);
+  const afterVp8x = 12 + vp8xChunkTotalSize;
+
+  let pos = afterVp8x;
+  while (pos + 8 <= webpBytes.length) {
+    const chunkFourCC = getFourCC(webpBytes, pos);
+    const chunkDataSize = view.getUint32(pos + 4, true);
+    const chunkTotalSize = 8 + chunkDataSize + (chunkDataSize % 2 ? 1 : 0);
+
+    if (chunkFourCC === 'EXIF') {
+      // Remove this chunk
+      const result = new Uint8Array(webpBytes.length - chunkTotalSize);
+      result.set(webpBytes.subarray(0, pos), 0);
+      result.set(webpBytes.subarray(pos + chunkTotalSize), pos);
+      // Update RIFF size
+      new DataView(result.buffer).setUint32(4, result.length - 8, true);
+      return result;
+    }
+
+    pos += chunkTotalSize;
+  }
+
+  return webpBytes;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Utility Functions
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * Validate that bytes start with RIFF...WEBP signature.
- */
+/** Validate that bytes start with RIFF...WEBP signature. */
 function isRiffWebP(bytes: Uint8Array): boolean {
   if (bytes.length < 12) return false;
   return (
@@ -208,13 +414,21 @@ function isRiffWebP(bytes: Uint8Array): boolean {
   );
 }
 
-/**
- * Read a 4-byte ASCII string (FourCC) at the given offset.
- */
+/** Read a 4-byte ASCII string (FourCC) at the given offset. */
 function getFourCC(bytes: Uint8Array, offset: number): string {
   return String.fromCharCode(
     bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3],
   );
+}
+
+/** Read a 4-byte little-endian unsigned integer. */
+function readUint32LE(bytes: Uint8Array, offset: number): number {
+  return (
+    bytes[offset] |
+    (bytes[offset + 1] << 8) |
+    (bytes[offset + 2] << 16) |
+    (bytes[offset + 3] << 24)
+  ) >>> 0;
 }
 
 /**
@@ -224,43 +438,24 @@ function getFourCC(bytes: Uint8Array, offset: number): string {
 function buildChunk(fourcc: string, data: Uint8Array): Uint8Array {
   const padded = data.length % 2 === 1;
   const chunk = new Uint8Array(8 + data.length + (padded ? 1 : 0));
-  // FourCC
   for (let i = 0; i < 4; i++) chunk[i] = fourcc.charCodeAt(i);
-  // Size (LE uint32) — size of data only, not including padding
   new DataView(chunk.buffer).setUint32(4, data.length, true);
-  // Data
   chunk.set(data, 8);
-  // Padding byte (already 0 from Uint8Array initialization)
   return chunk;
 }
 
 /**
  * Parse image dimensions from VP8 or VP8L bitstream header.
- *
- * VP8 (lossy) keyframe:
- *   3 bytes frame tag + 3 bytes start code (9D 01 2A) + 2 bytes width + 2 bytes height
- *
- * VP8L (lossless):
- *   1 byte signature (0x2F) + 4 bytes with width-1 (14 bits) and height-1 (14 bits)
- *
- * @param bytes - Full WebP file bytes
- * @param chunkOffset - Offset where the VP8/VP8L chunk starts (its FourCC position)
  */
 function parseWebPDimensions(bytes: Uint8Array, chunkOffset: number): { width: number; height: number } {
   const fourcc = getFourCC(bytes, chunkOffset);
-  const dataOffset = chunkOffset + 8; // skip FourCC(4) + Size(4)
+  const dataOffset = chunkOffset + 8;
 
   if (fourcc === 'VP8 ') {
-    // VP8 lossy keyframe
-    // Frame tag: 3 bytes, then start code: 0x9D 0x01 0x2A
-    // Width at offset 6 (from data start), Height at offset 8
     const w = (bytes[dataOffset + 6] | (bytes[dataOffset + 7] << 8)) & 0x3FFF;
     const h = (bytes[dataOffset + 8] | (bytes[dataOffset + 9] << 8)) & 0x3FFF;
     return { width: w, height: h };
   } else if (fourcc === 'VP8L') {
-    // VP8L lossless
-    // Byte 0: signature 0x2F
-    // Bytes 1-4: packed bits — width-1 (14 bits) then height-1 (14 bits)
     const b1 = bytes[dataOffset + 1];
     const b2 = bytes[dataOffset + 2];
     const b3 = bytes[dataOffset + 3];
@@ -271,7 +466,6 @@ function parseWebPDimensions(bytes: Uint8Array, chunkOffset: number): { width: n
     return { width, height };
   }
 
-  // Fallback: should not happen for valid WebP
   throw new Error(`Cannot parse dimensions from chunk type: ${fourcc}`);
 }
 

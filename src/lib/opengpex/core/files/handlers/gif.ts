@@ -28,11 +28,11 @@
 
 import type {
   ImageFormatHandler,
-  ImageMetadata,
   DecodeOptions,
   DecodeResult,
   EncodeOptions,
 } from '../types';
+import type { ImageMetadata } from '../metadata';
 import { bitmapToCanvas } from '../index';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -233,16 +233,17 @@ export class GifHandler implements ImageFormatHandler {
 
   async extractMetadata(file: File): Promise<ImageMetadata> {
     return {
-      version: 1,
       sourceFormat: 'gif',
       sourceFileName: file.name,
       sourceFileSize: file.size,
+      width: 0,
+      height: 0,
       dpi: 72,
       dpiSource: 'default',
       colorSpace: 'srgb',
       bitDepth: 8,
       hasAlpha: true,
-      hasIccProfile: false,
+      raw: {},
     };
   }
 }

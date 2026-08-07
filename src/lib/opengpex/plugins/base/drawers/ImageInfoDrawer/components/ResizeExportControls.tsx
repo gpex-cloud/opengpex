@@ -35,8 +35,9 @@ import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import FunctionTabs from "@opengpex/editor/widgets/FunctionTabs";
 import Switch from "@opengpex/editor/widgets/Switch";
 
-import { ExifData, CommandInstance, WorkingColorSpace } from "@opengpex/editor/core/types";
-import { formatPrintSize, DPI_PRESETS, SourceFormat } from "@opengpex/editor/core/files";
+import { CommandInstance, WorkingColorSpace } from "@opengpex/editor/core/types";
+import { formatPrintSize, DPI_PRESETS, SourceFormat, supportsExifEmbed } from "@opengpex/editor/core/files";
+import type { ImageMetadata } from "@opengpex/editor/core/files";
 import { shouldEmbedIcc, getFormatColorStrategy } from "@opengpex/editor/core/color/ColorPipeline";
 import * as P from "../protocols";
 import {
@@ -60,7 +61,7 @@ interface ResizeExportControlsProps {
   hasSelection?: boolean;
   applyResizeCmd?: CommandInstance;
   downloadCmd?: CommandInstance;
-  exif?: ExifData;
+  imageMetadata?: ImageMetadata;
   /** Source image bit depth (e.g. 16 for 16-bit TIFF/PNG). Undefined = 8-bit default. */
   sourceBitDepth?: number;
   /** Whether only a single visible content layer exists (affects 16-bit tooltip: raw passthrough vs composite) */
@@ -78,7 +79,7 @@ export function ResizeExportControls({
   hasSelection,
   applyResizeCmd,
   downloadCmd,
-  exif,
+  imageMetadata,
   sourceBitDepth,
   isSingleLayer,
 }: ResizeExportControlsProps) {
@@ -522,21 +523,7 @@ export function ResizeExportControls({
           </div>
         )}
 
-        {config.format === "image/jpeg" && exif && (
-          <div className="flex justify-between items-center pt-1.5 pb-1 px-1 animate-in fade-in slide-in-from-top-1 duration-300">
-            <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
-              Keep EXIF Data
-            </span>
-            <Switch
-              checked={!!config.keepExif}
-              onChange={(val) => updateConfig({ keepExif: val })}
-              activeColor="bg-emerald-500"
-              size="compact"
-            />
-          </div>
-        )}
-
-        {/* ICC Embed checkbox — visible only when format supports ICC embedding */}
+        {/* Metadata toggles (EXIF + ICC) — grouped with tight spacing */}
         {(() => {
           const mimeToFmt: Record<string, SourceFormat> = {
             'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp',
@@ -544,24 +531,45 @@ export function ResizeExportControls({
           };
           const exportFmt = mimeToFmt[config.format] || 'unknown';
           const formatStrategy = getFormatColorStrategy(exportFmt);
-          if (!formatStrategy.supportsIccEmbed) return null;
+          const showExif = !!(imageMetadata?.raw?.exif && supportsExifEmbed(config.format));
+          const showIcc = formatStrategy.supportsIccEmbed;
 
-          // Effective ICC embed state: user override takes precedence, else strategy default
-          const effectiveEmbedIcc = shouldEmbedIcc(exportFmt, frameColorSpace, config.embedIccOverride);
+          if (!showExif && !showIcc) return null;
+
+          const effectiveEmbedIcc = showIcc
+            ? shouldEmbedIcc(exportFmt, frameColorSpace, config.embedIccOverride)
+            : false;
 
           return (
-            <div className="flex justify-between items-center pt-1.5 pb-1 px-1 animate-in fade-in slide-in-from-top-1 duration-300">
-              <Tooltip content="Embed ICC color profile in the exported file for accurate color reproduction across applications">
-                <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest cursor-help">
-                  Embed Color Profile
-                </span>
-              </Tooltip>
-              <Switch
-                checked={effectiveEmbedIcc}
-                onChange={(val) => updateConfig({ embedIccOverride: val })}
-                activeColor="bg-indigo-500"
-                size="compact"
-              />
+            <div className="space-y-1 pt-1 animate-in fade-in slide-in-from-top-1 duration-300">
+              {showExif && (
+                <div className="flex justify-between items-center px-1">
+                  <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
+                    Keep EXIF Data
+                  </span>
+                  <Switch
+                    checked={!!config.keepExif}
+                    onChange={(val) => updateConfig({ keepExif: val })}
+                    activeColor="bg-emerald-500"
+                    size="compact"
+                  />
+                </div>
+              )}
+              {showIcc && (
+                <div className="flex justify-between items-center px-1">
+                  <Tooltip content="Embed ICC color profile in the exported file for accurate color reproduction across applications">
+                    <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest cursor-help">
+                      Embed ICC Profile
+                    </span>
+                  </Tooltip>
+                  <Switch
+                    checked={effectiveEmbedIcc}
+                    onChange={(val) => updateConfig({ embedIccOverride: val })}
+                    activeColor="bg-indigo-500"
+                    size="compact"
+                  />
+                </div>
+              )}
             </div>
           );
         })()}

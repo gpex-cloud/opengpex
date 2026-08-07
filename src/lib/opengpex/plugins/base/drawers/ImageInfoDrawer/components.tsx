@@ -25,9 +25,8 @@ import { useVolatileInteraction } from "@opengpex/editor/core/context";
 import { getClipBox } from "@opengpex/editor/core/helpers/selection";
 
 import { useImageInfoMetadata, useExportConfig, useClipMode } from "./hooks";
-import { SourceFilePanel } from "./components/SourceFilePanel";
-import { LayerDimensionsPanel } from "./components/LayerDimensionsPanel";
-import { ExifInfoPanel } from "./components/ExifInfoPanel";
+import { FrameInfoPanel } from "./components/FrameInfoPanel";
+import { MetadataPanel } from "./components/MetadataPanel";
 import { AiGenerationPanel } from "./components/AiGenerationPanel";
 import { ResizeExportControls } from "./components/ResizeExportControls";
 
@@ -109,14 +108,11 @@ export function ImageInfoComponent() {
 
       {/* Info Panels — lightweight, render immediately */}
       <div className="space-y-2">
-        <SourceFilePanel
+        <FrameInfoPanel
           fileName={meta.fileName}
           fileFormat={meta.fileFormat}
           fileSize={meta.fileSize}
           dpi={meta.frameDpi}
-        />
-
-        <LayerDimensionsPanel
           isClipMode={isClipMode}
           baseW={baseW}
           baseH={baseH}
@@ -128,7 +124,7 @@ export function ImageInfoComponent() {
           layerBitDepth={layerBitDepth}
         />
 
-        <ExifInfoPanel exif={meta.exif} />
+        <MetadataPanel imageMetadata={meta.imageMetadata} />
 
         <AiGenerationPanel extra={activeFrame.extra} />
       </div>
@@ -146,7 +142,7 @@ export function ImageInfoComponent() {
           hasSelection={!!box}
           applyResizeCmd={applyResizeCmd}
           downloadCmd={downloadCmd}
-          exif={meta.exif}
+          imageMetadata={meta.imageMetadata}
           sourceBitDepth={meta.sourceBitDepth}
           isSingleLayer={meta.isSingleLayer}
         />

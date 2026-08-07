@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.42
+
+- Modular file handlers: each image format (JPEG, PNG, TIFF, AVIF, HEIC, WebP, RAW) is now split into separate encode, decode, and metadata modules for better maintainability
+- Unified metadata model: a two-layer design (semantic + raw) ensures EXIF, ICC, and DPI data survive import→edit→export without loss
+- Native metadata parsing: new ISOBMFF and TIFF IFD readers replace third-party workarounds for reading embedded metadata
+
+---
+
 ## v1.0.0-beta.41
 
 - Viewport scroll overhaul: fix erratic zoom/pan on Windows mouse wheels, normalize Firefox scroll units, add Shift+scroll for horizontal panning

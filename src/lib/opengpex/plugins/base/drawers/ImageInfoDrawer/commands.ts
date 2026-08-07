@@ -94,8 +94,8 @@ export const IMAGE_INFO_COMMANDS = {
             const exportFmt = mimeToFormat[config.format] || 'unknown';
             const userEmbedIccOverride = config.embedIccOverride; // undefined = use strategy default
             const embedIcc = shouldEmbedIcc(exportFmt, activeFrame.colorSpace, userEmbedIccOverride);
-            console.log('[ExportCmd ICC] layerMeta.colorSpace=%s, hasIccData=%s, embedIcc=%s, userOverride=%s (strategy-driven)',
-              layerMeta?.colorSpace, !!layerMeta?.raw?.iccProfileData, embedIcc, userEmbedIccOverride);
+             console.log('[ExportCmd ICC] layerMeta.colorSpace=%s, hasIccData=%s, embedIcc=%s, userOverride=%s (strategy-driven)',
+               layerMeta?.colorSpace, !!layerMeta?.raw?.icc?.data, embedIcc, userEmbedIccOverride);
 
           const opts: RenderToBlobOptions = {
              format: config.format,

@@ -34,6 +34,7 @@ import type {
   EncodeOptions,
   SourceFormat,
 } from './types';
+import type { ImageMetadata } from './metadata';
 import { JpegHandler } from './handlers/jpeg';
 import { PngHandler } from './handlers/png';
 import { BmpHandler } from './handlers/bmp';
@@ -52,8 +53,6 @@ export { getVectorIntrinsicSize, detectVectorFormat };
 export type {
   FileService,
   ImageFormatHandler,
-  ImageMetadata,
-  RawMetadataRefs,
   DecodeOptions,
   DecodeResult,
   EncodeOptions,
@@ -62,6 +61,9 @@ export type {
   DpiSource,
   ColorSpaceId,
 } from './types';
+
+// Re-export V2 metadata types
+export type { ImageMetadata, RawBinaryData } from './metadata';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Format Detection (migrated from PixelUtils.detectFormat)
@@ -132,20 +134,22 @@ class FallbackHandler implements ImageFormatHandler {
     const img = await createImageBitmap(file);
     const dimensions = { w: img.width, h: img.height };
     img.close();
+    const metadata: ImageMetadata = {
+      sourceFormat: 'unknown',
+      sourceFileName: file.name,
+      sourceFileSize: file.size,
+      width: dimensions.w,
+      height: dimensions.h,
+      dpi: 72,
+      dpiSource: 'default',
+      colorSpace: 'srgb',
+      bitDepth: 8,
+      hasAlpha: false,
+      raw: {},
+    };
     return {
       dimensions,
-      metadata: {
-        version: 1,
-        sourceFormat: 'unknown',
-        sourceFileName: file.name,
-        sourceFileSize: file.size,
-        dpi: 72,
-        dpiSource: 'default',
-        colorSpace: 'srgb',
-        bitDepth: 8,
-        hasAlpha: false,
-        hasIccProfile: false,
-      },
+      metadata,
       subImages: [{ displayBlob: file, width: dimensions.w, height: dimensions.h, index: 0 }],
     };
   }
@@ -161,18 +165,19 @@ class FallbackHandler implements ImageFormatHandler {
     return (canvas as OffscreenCanvas).convertToBlob({ type: 'image/png' });
   }
 
-  async extractMetadata(file: File) {
+  async extractMetadata(file: File): Promise<ImageMetadata> {
     return {
-      version: 1 as const,
-      sourceFormat: 'unknown' as const,
+      sourceFormat: 'unknown',
       sourceFileName: file.name,
       sourceFileSize: file.size,
+      width: 0,
+      height: 0,
       dpi: 72,
-      dpiSource: 'default' as const,
-      colorSpace: 'srgb' as const,
+      dpiSource: 'default',
+      colorSpace: 'srgb',
       bitDepth: 8,
       hasAlpha: false,
-      hasIccProfile: false,
+      raw: {},
     };
   }
 }
@@ -293,3 +298,4 @@ export function createFileService(
 
 // Re-export DPI utilities consumed by external modules (plugins / UI components)
 export { DPI_PRESETS, formatPrintSize } from './dpi';
+export { supportsExifEmbed } from './types';

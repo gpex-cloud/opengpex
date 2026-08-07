@@ -34,6 +34,8 @@ import { getVips } from '../vips/loader';
 import type { VipsInstance, VipsImage } from '../vips/types';
 import type { FileIoJob } from '../../protocol/jobs';
 import type { RouterResult } from '../router';
+import { injectTiffExif } from '../../../files/handlers/tiff/exif-inject';
+import { injectAvifExif } from '../../../files/isobmff-writer';
 
 export class FileIoHandler {
   async handle(job: FileIoJob): Promise<RouterResult> {
@@ -210,7 +212,14 @@ export class FileIoHandler {
     const tiffBuffer = image.writeToBuffer('.tiff', saveOpts);
     image.delete();
 
-    const result = new Uint8Array(tiffBuffer);
+    let result: Uint8Array = new Uint8Array(tiffBuffer);
+
+    // Post-encode EXIF injection
+    const exifBytes = options.exifBytes as Uint8Array | undefined;
+    if (exifBytes && exifBytes.length > 0) {
+      result = injectTiffExif(result, exifBytes);
+    }
+
     return { result, transfer: [result.buffer] };
   }
 
@@ -747,7 +756,14 @@ export class FileIoHandler {
     const avifBuffer = image.writeToBuffer('.heif', saveOpts);
     image.delete();
 
-    const result = new Uint8Array(avifBuffer);
+    let result: Uint8Array = new Uint8Array(avifBuffer);
+
+    // Post-encode EXIF injection (only effective when USE_VIPS_FOR_ICC_AVIF=true)
+    const exifBytes = options.exifBytes as Uint8Array | undefined;
+    if (exifBytes && exifBytes.length > 0) {
+      result = injectAvifExif(result, exifBytes);
+    }
+
     return { result, transfer: [result.buffer] };
   }
 

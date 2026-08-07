@@ -23,11 +23,11 @@
 
 import type {
   ImageFormatHandler,
-  ImageMetadata,
   DecodeOptions,
   DecodeResult,
   EncodeOptions,
 } from '../types';
+import type { ImageMetadata } from '../metadata';
 
 export class VectorHandler implements ImageFormatHandler {
   readonly format = 'vector';
@@ -40,9 +40,8 @@ export class VectorHandler implements ImageFormatHandler {
   // ─── Decode ──────────────────────────────────────────────────────────────
 
   async decode(file: File, options?: DecodeOptions): Promise<DecodeResult> {
-    // 0. Mark internal codec (SVG/EPS → PNG rasterization)
+    // 0. Extract metadata
     const metadata = await this.extractMetadata(file);
-    metadata.internalCodec = 'image/png';
 
     // 1. Main thread: fast intrinsic size detection
     const intrinsicSize = await getVectorIntrinsicSize(file);
@@ -101,20 +100,19 @@ export class VectorHandler implements ImageFormatHandler {
     const vectorFormat = detectVectorFormat(file);
     const sourceFormat = vectorFormat === 'eps' ? 'eps' as const : 'svg' as const;
 
-    const base: ImageMetadata = {
-      version: 1,
+    return {
       sourceFormat,
       sourceFileName: file.name,
       sourceFileSize: file.size,
+      width: 0,
+      height: 0,
       dpi: 72, // Vector default (points-based)
       dpiSource: 'default',
       colorSpace: 'srgb',
       bitDepth: 8,
       hasAlpha: true, // SVG/EPS typically support transparency
-      hasIccProfile: false,
+      raw: {},
     };
-
-    return base;
   }
 }
 

@@ -1345,64 +1345,64 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                               )}
 
                             {/* EXIF Data Panel */}
-                            {selectedNode.data.exif && (
+                            {selectedNode.data.exif && (selectedNode.data.exif.camera || selectedNode.data.exif.capture || selectedNode.data.exif.dates) && (
                               <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] dark:border-t-white/[0.06] space-y-1.5">
                                 <div className="text-[8px] font-black uppercase text-[var(--text-muted)] ">
                                   EXIF Meta Profile
                                 </div>
-                                {selectedNode.data.exif.Make && (
+                                {selectedNode.data.exif.camera?.make && (
                                   <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] text-[var(--text-muted)] ">
                                     <span>Camera Make</span>
                                     <span className="text-[var(--text-main)] ">
-                                      {selectedNode.data.exif.Make}
+                                      {selectedNode.data.exif.camera.make}
                                     </span>
                                   </div>
                                 )}
-                                {selectedNode.data.exif.Model && (
+                                {selectedNode.data.exif.camera?.model && (
                                   <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] text-[var(--text-muted)] ">
                                     <span>Camera Model</span>
                                     <span className="text-[var(--text-main)] truncate max-w-[130px]">
-                                      {selectedNode.data.exif.Model}
+                                      {selectedNode.data.exif.camera.model}
                                     </span>
                                   </div>
                                 )}
-                                {selectedNode.data.exif.DateTimeOriginal && (
+                                {selectedNode.data.exif.dates?.created && (
                                   <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] text-[var(--text-muted)] ">
                                     <span>DateTime</span>
                                     <span className="text-[var(--text-main)] truncate max-w-[130px]">
-                                      {selectedNode.data.exif.DateTimeOriginal}
+                                      {selectedNode.data.exif.dates.created}
                                     </span>
                                   </div>
                                 )}
-                                {selectedNode.data.exif.LensModel && (
+                                {selectedNode.data.exif.camera?.lensModel && (
                                   <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] text-[var(--text-muted)] ">
                                     <span>Lens Model</span>
                                     <span className="text-[var(--text-main)] truncate max-w-[130px]">
-                                      {selectedNode.data.exif.LensModel}
+                                      {selectedNode.data.exif.camera.lensModel}
                                     </span>
                                   </div>
                                 )}
-                                {selectedNode.data.exif.ExposureTime && (
+                                {selectedNode.data.exif.capture?.exposureTime && (
                                   <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] text-[var(--text-muted)] ">
                                     <span>Shutter Speed</span>
                                     <span className="text-[var(--text-main)] ">
-                                      {selectedNode.data.exif.ExposureTime}s
+                                      {selectedNode.data.exif.capture.exposureTime}s
                                     </span>
                                   </div>
                                 )}
-                                {selectedNode.data.exif.FNumber && (
+                                {selectedNode.data.exif.capture?.fNumber && (
                                   <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] text-[var(--text-muted)] ">
                                     <span>Aperture Value</span>
                                     <span className="text-[var(--text-main)] ">
-                                      f/{selectedNode.data.exif.FNumber}
+                                      f/{selectedNode.data.exif.capture.fNumber}
                                     </span>
                                   </div>
                                 )}
-                                {selectedNode.data.exif.ISOSpeedRatings && (
+                                {selectedNode.data.exif.capture?.iso && (
                                   <div className="flex justify-between py-0.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] text-[var(--text-muted)] ">
                                     <span>ISO Rating</span>
                                     <span className="text-[var(--text-main)] ">
-                                      {selectedNode.data.exif.ISOSpeedRatings}
+                                      {selectedNode.data.exif.capture.iso}
                                     </span>
                                   </div>
                                 )}

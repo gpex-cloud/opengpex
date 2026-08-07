@@ -23,11 +23,11 @@
 import type { WorkingColorSpace } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
-  ImageMetadata,
   DecodeOptions,
   DecodeResult,
   EncodeOptions,
 } from '../types';
+import type { ImageMetadata } from '../metadata';
 import { bitmapToCanvas } from '../index';
 import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
 import { getExportStrategy, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
@@ -141,17 +141,18 @@ export class BmpHandler implements ImageFormatHandler {
   // ─── Metadata Extraction ─────────────────────────────────────────────────
 
   async extractMetadata(file: File): Promise<ImageMetadata> {
-    const base: ImageMetadata = {
-      version: 1,
+    const meta: ImageMetadata = {
       sourceFormat: 'bmp',
       sourceFileName: file.name,
       sourceFileSize: file.size,
+      width: 0,
+      height: 0,
       dpi: 72,
       dpiSource: 'default',
       colorSpace: 'srgb',
       bitDepth: 24,
       hasAlpha: false,
-      hasIccProfile: false,
+      raw: {},
     };
 
     try {
@@ -161,29 +162,33 @@ export class BmpHandler implements ImageFormatHandler {
       const view = new DataView(buffer);
 
       // Verify BMP signature
-      if (view.getUint8(0) !== 0x42 || view.getUint8(1) !== 0x4D) return base;
+      if (view.getUint8(0) !== 0x42 || view.getUint8(1) !== 0x4D) return meta;
 
       // DIB header size (at offset 14)
       const dibSize = view.getUint32(14, true);
-      if (dibSize < 40) return base; // Only BITMAPINFOHEADER (40+) has DPI
+      if (dibSize < 40) return meta; // Only BITMAPINFOHEADER (40+) has DPI
+
+      // Dimensions
+      meta.width = Math.abs(view.getInt32(18, true));
+      meta.height = Math.abs(view.getInt32(22, true));
 
       // Bits per pixel (at offset 28)
-      base.bitDepth = view.getUint16(28, true);
-      base.hasAlpha = base.bitDepth === 32;
+      meta.bitDepth = view.getUint16(28, true);
+      meta.hasAlpha = meta.bitDepth === 32;
 
       // X resolution in pixels per meter (at offset 38)
       const ppmX = view.getInt32(38, true);
       if (ppmX > 0) {
         const dpi = Math.round(ppmX * 0.0254);
         if (dpi > 1 && dpi < 10000) {
-          base.dpi = dpi;
-          base.dpiSource = 'bmp-header';
+          meta.dpi = dpi;
+          meta.dpiSource = 'bmp-header';
         }
       }
     } catch (err) {
       console.debug('[BmpHandler] Header parsing failed:', (err as Error).message);
     }
 
-    return base;
+    return meta;
   }
 }

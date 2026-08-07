@@ -35,7 +35,7 @@ import {
   LocalRect, Dimensions, Shape, LocalShape, LocalPolygon, TileMetadata
 } from './primitives';
 import { EditorData } from './state';
-import type { ImageMetadata } from '../files/types';
+import type { ImageMetadata } from '../files/metadata';
 
 /**
  * RenderToBlobOptions: Unified options for composite-to-blob export operations.

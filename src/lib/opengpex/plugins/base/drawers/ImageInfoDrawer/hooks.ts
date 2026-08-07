@@ -21,45 +21,11 @@
 
 import { useMemo } from 'react';
 import { useEditorState, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
-import type { ExifData } from '@opengpex/editor/core/types';
 import type { ImageMetadata } from '@opengpex/editor/core/files';
 import type { ImageInfoDrawerCommandsMap } from './commands.d';
 import * as P from './protocols';
 
 import { formatBytes } from '@opengpex/editor/core/helpers/file';
-
-/**
- * Adapter: Converts the new unified ImageMetadata into the legacy ExifData
- * shape expected by the ExifInfoPanel component.
- */
-function imageMetadataToExif(meta: ImageMetadata | undefined): ExifData | undefined {
-   if (!meta) return undefined;
-   if (!meta.camera && !meta.capture && !meta.dates && !meta.hasIccProfile) return undefined;
-
-   return {
-      Make: meta.camera?.make,
-      Model: meta.camera?.model,
-      LensMake: meta.camera?.lensMake,
-      LensModel: meta.camera?.lensModel,
-      Software: meta.camera?.software,
-      FNumber: meta.capture?.fNumber,
-      ExposureTime: meta.capture?.exposureTime,
-      ISOSpeedRatings: meta.capture?.iso,
-      FocalLength: meta.capture?.focalLength,
-      WhiteBalance: meta.capture?.whiteBalance,
-      DateTimeOriginal: meta.dates?.created,
-      CreateDate: meta.dates?.created,
-      ModifyDate: meta.dates?.modified,
-      XResolution: meta.dpi,
-      YResolution: meta.dpi,
-      ResolutionUnit: 2,
-      ColorSpace: meta.colorSpace === 'srgb' ? 1 : undefined,
-      // ICC Profile info
-      hasIccProfile: meta.hasIccProfile,
-      iccProfileName: meta.raw?.iccProfileName,
-      colorSpaceName: meta.colorSpace,
-   };
-}
 
 /**
  * useImageInfoMetadata — Derives **stable** display data from the active frame.
@@ -81,7 +47,7 @@ export function useImageInfoMetadata() {
             fileName: 'Untitled',
             fileFormat: 'PNG',
             fileSize: '---',
-            exif: undefined as ExifData | undefined,
+            imageMetadata: undefined as ImageMetadata | undefined,
             layerCount: 0,
             frameDpi: 72,
             sourceBitDepth: undefined as number | undefined,
@@ -101,13 +67,12 @@ export function useImageInfoMetadata() {
       return {
          activeFrame,
          fileName: imageMetadata?.sourceFileName || activeFrame.name || 'Untitled',
-         fileFormat: ((imageMetadata?.internalCodec
-            || metadata?.format || 'image/png').split('/')[1])?.toUpperCase() || 'PNG',
+          fileFormat: ((metadata?.format || 'image/png').split('/')[1])?.toUpperCase() || 'PNG',
          fileSize: metadata?.size ? formatBytes(metadata.size) : '---',
-         exif: metadata?.exif || imageMetadataToExif(imageMetadata),
+         imageMetadata,
          layerCount: activeFrame.layers.order.length,
          frameDpi: activeFrame.dpi || 72,
-         sourceBitDepth: (imageMetadata as { bitDepth?: number } | undefined)?.bitDepth,
+         sourceBitDepth: imageMetadata?.bitDepth,
          isSingleLayer: visibleContentLayers.length === 1,
       };
    }, [activeFrame]);

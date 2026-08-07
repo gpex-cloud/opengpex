@@ -22,7 +22,7 @@
 import React from "react";
 import { ChevronDown } from "lucide-react";
 
-import { ExifData } from "@opengpex/editor/core/types";
+import type { ImageMetadata } from "@opengpex/editor/core/files";
 
 /** Format colorSpace slug into human-readable label */
 function formatColorSpace(cs: string): string {
@@ -37,14 +37,19 @@ function formatColorSpace(cs: string): string {
   return map[cs] || cs;
 }
 
-interface ExifInfoPanelProps {
-  exif?: ExifData;
+interface MetadataPanelProps {
+  imageMetadata?: ImageMetadata;
 }
 
-export function ExifInfoPanel({ exif }: ExifInfoPanelProps) {
+export function MetadataPanel({ imageMetadata }: MetadataPanelProps) {
   const [isExifExpanded, setIsExifExpanded] = React.useState(false);
 
-  if (!exif) return null;
+  if (!imageMetadata) return null;
+
+  const meta = imageMetadata;
+
+  // Skip rendering if no meaningful EXIF/metadata to display
+  if (!meta.camera && !meta.capture && !meta.dates && !meta.raw?.icc) return null;
 
   const formatDate = (isoStr: string | undefined | null) => {
     if (!isoStr) return null;
@@ -53,19 +58,21 @@ export function ExifInfoPanel({ exif }: ExifInfoPanelProps) {
   };
 
   const mainCamera =
-    exif.Make || exif.Model
-      ? `${exif.Make || ""}${exif.Model ? " " + exif.Model : ""}`.trim()
+    meta.camera?.make || meta.camera?.model
+      ? `${meta.camera.make || ""}${meta.camera.model ? " " + meta.camera.model : ""}`.trim()
       : null;
   const settings = [
-    exif.FNumber ? `ƒ/${parseFloat(exif.FNumber.toFixed(1))}` : null,
-    exif.ExposureTime
-      ? `1/${Math.round(1 / exif.ExposureTime)}s`
+    meta.capture?.fNumber ? `ƒ/${parseFloat(meta.capture.fNumber.toFixed(1))}` : null,
+    meta.capture?.exposureTime
+      ? `1/${Math.round(1 / meta.capture.exposureTime)}s`
       : null,
-    exif.ISOSpeedRatings ? `ISO${exif.ISOSpeedRatings}` : null,
-    exif.FocalLength ? `${parseFloat(exif.FocalLength.toFixed(2))}mm` : null,
+    meta.capture?.iso ? `ISO${meta.capture.iso}` : null,
+    meta.capture?.focalLength ? `${parseFloat(meta.capture.focalLength.toFixed(2))}mm` : null,
   ]
     .filter(Boolean)
     .join(" • ");
+
+  const hasIccProfile = !!meta.raw?.icc;
 
   const detailedItems = [
     // ── Capture ──
@@ -73,68 +80,61 @@ export function ExifInfoPanel({ exif }: ExifInfoPanelProps) {
     {
       label: "Lens",
       value:
-        exif.LensMake || exif.LensModel
-          ? `${exif.LensMake || ""} ${exif.LensModel || ""}`.trim()
-          : exif.LensModel,
+        meta.camera?.lensMake || meta.camera?.lensModel
+          ? `${meta.camera.lensMake || ""} ${meta.camera.lensModel || ""}`.trim()
+          : meta.camera?.lensModel,
     },
     {
       label: "Aperture",
-      value: exif.FNumber ? `ƒ/${parseFloat(exif.FNumber.toFixed(1))}` : null,
+      value: meta.capture?.fNumber ? `ƒ/${parseFloat(meta.capture.fNumber.toFixed(1))}` : null,
     },
     {
       label: "Shutter Speed",
-      value: exif.ExposureTime
-        ? `1/${Math.round(1 / exif.ExposureTime)}s`
+      value: meta.capture?.exposureTime
+        ? `1/${Math.round(1 / meta.capture.exposureTime)}s`
         : null,
     },
     {
       label: "ISO",
-      value: exif.ISOSpeedRatings
-        ? `ISO ${exif.ISOSpeedRatings}`
+      value: meta.capture?.iso
+        ? `ISO ${meta.capture.iso}`
         : null,
     },
     {
       label: "Focal Length",
-      value: exif.FocalLength ? `${parseFloat(exif.FocalLength.toFixed(2))}mm` : null,
+      value: meta.capture?.focalLength ? `${parseFloat(meta.capture.focalLength.toFixed(2))}mm` : null,
     },
-    { label: "White Balance", value: exif.WhiteBalance },
+    { label: "White Balance", value: meta.capture?.whiteBalance },
     // ── Dates ──
     {
       label: "Original Date",
-      value: formatDate(exif.DateTimeOriginal),
-    },
-    {
-      label: "Digitized Date",
-      value: formatDate(exif.DateTimeDigitized),
+      value: formatDate(meta.dates?.created),
     },
     // ── Image Technical ──
     {
       label: "Resolution",
-      value: exif.XResolution
-        ? `${exif.XResolution} ${exif.ResolutionUnit === 2 ? "PPI" : exif.ResolutionUnit === 3 ? "PPCM" : "DPI"}`
+      value: meta.dpi
+        ? `${meta.dpi} PPI`
         : null,
     },
     // ── Color ──
     {
       label: "Color Space",
       value:
-        exif.colorSpaceName && exif.colorSpaceName !== 'srgb' && exif.colorSpaceName !== 'unknown'
-          ? formatColorSpace(exif.colorSpaceName)
-          : exif.ColorSpace === 1
+        meta.colorSpace && meta.colorSpace !== 'srgb' && meta.colorSpace !== 'unknown'
+          ? formatColorSpace(meta.colorSpace)
+          : meta.colorSpace === 'srgb'
             ? "sRGB"
-            : exif.ColorSpace === 65535
-              ? "Uncalibrated"
-              : exif.ColorSpace,
+            : null,
     },
     {
       label: "ICC Profile",
-      value: exif.hasIccProfile
-        ? (exif.iccProfileName || "Embedded")
+      value: hasIccProfile
+        ? (meta.raw.icc!.name || "Embedded")
         : null,
     },
     // ── Meta ──
-    { label: "Exif Version", value: exif.ExifVersion },
-    { label: "Software", value: exif.Software },
+    { label: "Software", value: meta.camera?.software },
   ].filter((item) => !!item.value);
 
   if (detailedItems.length === 0) return null;
@@ -152,7 +152,7 @@ export function ExifInfoPanel({ exif }: ExifInfoPanelProps) {
               <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight">
                 Exif Information
               </span>
-              {exif.hasIccProfile && (
+              {hasIccProfile && (
                 <span className="text-[7px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1 py-0.5 rounded border border-emerald-500/20 uppercase leading-none">
                   ICC
                 </span>

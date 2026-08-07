@@ -66,34 +66,6 @@ export interface NormalizedState<T> {
   order: string[];
 }
 
-export interface ExifData {
-  Make?: string;
-  Model?: string;
-  DateTimeOriginal?: string;
-  FNumber?: number;
-  ExposureTime?: number;
-  ISOSpeedRatings?: number;
-  FocalLength?: number;
-  LensMake?: string;
-  LensModel?: string;
-  Software?: string;
-  ColorSpace?: number;
-  XResolution?: number;
-  YResolution?: number;
-  ResolutionUnit?: number;
-  CreateDate?: string;
-  DateTimeDigitized?: string;
-  ModifyDate?: string;
-  ExifVersion?: string;
-  WhiteBalance?: string;
-  rawPiexifObj?: Record<string, unknown>;
-  /** ICC Profile embedded indicator */
-  hasIccProfile?: boolean;
-  /** ICC Profile description name (e.g. "sRGB IEC61966-2.1", "Adobe RGB (1998)") */
-  iccProfileName?: string;
-  /** Color space string from ImageMetadata (e.g. 'srgb', 'adobe-rgb', 'display-p3') */
-  colorSpaceName?: string;
-}
 
 export interface AdjustmentState {
   brightness: number; // 0-200, default 100
@@ -248,7 +220,6 @@ export interface Layer {
     source?: 'local' | 'url';
     originalName?: string;
     fillColor?: string;
-    exif?: ExifData;
     [key: string]: unknown;
   };
 

@@ -17,7 +17,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Dimensions, CameraState, ExifData } from '@opengpex/editor/core/types';
+import { Dimensions, CameraState } from '@opengpex/editor/core/types';
+import type { ImageMetadata } from '@opengpex/editor/core/files';
 
 /**
  * StorageInfoPanel Plugin Protocols
@@ -79,7 +80,7 @@ export interface LayerMetric {
   asset?: AssetMetric;
   originalName?: string;
   format?: string;
-  exif?: ExifData;
+  exif?: ImageMetadata;
   hostId?: string;
   role?: string;
   subLayers?: LayerMetric[];
