@@ -22,7 +22,11 @@ import { InteractionTransaction } from '../Transaction';
 
 /**
  * ViewportPanHandler: Handles canvas panning (Pan)
- * Supports: right-click drag, pan mode left-click drag, and mouse drag outside canvas in any mode
+ * Supports: middle-click/right-click drag, pan mode left-click drag, and mouse drag outside canvas in any mode
+ *
+ * Note: Button 1 (middle) and button 2 (right) are globally reserved for pan
+ * by InteractionDispatcher — this handler's test() is only reached for left-click (button 0)
+ * during the normal priority traversal. The conditions below serve as fallback safety.
  */
 export const createViewportPanHandler = (): InteractionHandler => {
   let lastMouse = { x: 0, y: 0 };
@@ -34,7 +38,7 @@ export const createViewportPanHandler = (): InteractionHandler => {
     priority: 0, // Lowest priority for basic pan
     test: (e) => {
       const mouseEvent = e.nativeEvent as MouseEvent;
-      const isRightClick = mouseEvent.button === 2;
+      const isPanButton = mouseEvent.button === 1 || mouseEvent.button === 2;
       const isPanMode = e.state.interaction.interactionMode === 'pan';
 
       // In any mode, mouse down outside canvas triggers canvas panning
@@ -43,8 +47,8 @@ export const createViewportPanHandler = (): InteractionHandler => {
         x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h
       });
 
-      // If right-click, or pan mode is active, or mouse is outside canvas
-      return isRightClick || isPanMode || isOutsideCanvas;
+      // If middle/right-click, or pan mode is active, or mouse is outside canvas
+      return isPanButton || isPanMode || isOutsideCanvas;
     },
     onStart: (e) => {
       lastMouse = { x: e.nativeEvent.clientX, y: e.nativeEvent.clientY };

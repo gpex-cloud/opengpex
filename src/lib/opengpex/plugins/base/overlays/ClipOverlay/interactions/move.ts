@@ -80,7 +80,6 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       if (!box) return null;
 
       const me = e.nativeEvent as MouseEvent;
-      if (me.button === 2) return null;
 
       // Skip UI elements
       const target = me.target as HTMLElement;
@@ -106,7 +105,7 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
         : undefined;
       const isExchangeActive = activeLayer?.role === 'exchange';
 
-      if (me.metaKey) {
+      if (me.metaKey || me.ctrlKey) {
         if (isExchangeActive) {
           return me.altKey ? 'peel' : 'move';
         } else {
@@ -149,7 +148,7 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       const frame = e.activeFrame;
 
       // ─── Peel mode: trigger peel on threshold ─────────────────────────
-      if (type === 'peel' && (e.nativeEvent as MouseEvent).metaKey) {
+      if (type === 'peel' && ((e.nativeEvent as MouseEvent).metaKey || (e.nativeEvent as MouseEvent).ctrlKey)) {
         if (!hasPeeled) {
           if (Math.sqrt(dx * dx + dy * dy) > 5) {
             hasPeeled = true;
@@ -218,7 +217,7 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       if (InteractionMath.isStaticClick(e, startCanvas)) {
         // Don't clear on Meta-click (that's an aborted peel attempt)
         const me = e.nativeEvent as MouseEvent;
-        if (!me.metaKey) {
+        if (!me.metaKey && !me.ctrlKey) {
           e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
         }
       }

@@ -567,7 +567,6 @@ export class FileIoHandler {
     vips: VipsInstance,
     bytes: Uint8Array,
   ): { result: { width: number; height: number; data: Uint8Array; iccProfileData?: Uint8Array }; transfer: Transferable[] } {
-    console.log(`[ICC 导入] iccToSrgb 开始: 输入 ${bytes.length} bytes`);
     // vips.Image.newFromBuffer automatically reads embedded ICC profiles
     // and uses Little CMS for accurate color space conversion
     const image = vips.Image.newFromBuffer(bytes, '', { access: 'sequential' });
@@ -616,7 +615,6 @@ export class FileIoHandler {
     if (img8 !== rgb) img8.delete();
     if (rgba !== img8) rgba.delete();
 
-    console.log(`[ICC 导入] iccToSrgb 完成: ${width}×${height}, 输出 ${data.length} bytes RGBA, ICC: ${iccProfileData ? iccProfileData.length + ' bytes' : 'none'}`);
     const transfer: Transferable[] = [data.buffer];
     if (iccProfileData) transfer.push(iccProfileData.buffer);
     return { result: { width, height, data, iccProfileData }, transfer };
@@ -633,7 +631,6 @@ export class FileIoHandler {
     height: number,
     iccProfileData: Uint8Array,
   ): { result: { data: Uint8Array }; transfer: Transferable[] } {
-    console.log(`[ICC 导出] srgbToIcc 开始: ${width}×${height}, ICC profile ${iccProfileData.length} bytes`);
     // 1. Build vips image from RGBA pixel data (interpret as sRGB)
     const image = vips.Image.newFromMemory(rgbaBytes, width, height, 4, 'uchar');
 
@@ -674,7 +671,6 @@ export class FileIoHandler {
     if (converted !== image) converted.delete();
     if (out !== converted) out.delete();
 
-    console.log(`[ICC 导出] srgbToIcc 完成: 输出 ${data.length} bytes RGBA`);
     return { result: { data }, transfer: [data.buffer] };
   }
 

@@ -20,6 +20,7 @@ import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/type
 import type { EncodeOptions } from '../../types';
 import { bitmapToCanvas } from '../../index';
 import { base64ToIcc, getStockIccProfile } from '../../icc';
+import { resetExifOrientation } from '../../tiff-ifd-reader';
 import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
 import { getExportStrategy, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
 import { verifySignature, iterateChunks, concat } from './chunks';
@@ -163,9 +164,13 @@ export async function encodePng(
       chunks.push(buildTextChunk('Software', 'OpenGPEX'));
     }
 
-    // Insert eXIf chunk (raw EXIF passthrough)
+    // Insert eXIf chunk (raw EXIF passthrough with Orientation reset)
     if (config?.preserveExif && meta?.raw?.exif) {
       const exifBytes = base64ToIcc(meta.raw.exif);
+      // Reset Orientation to 1 (Normal) since exported pixels are already correctly
+      // oriented. Source formats like HEIC may store non-trivial orientation in EXIF,
+      // but the composite/transcode pipeline normalizes pixel orientation.
+      resetExifOrientation(exifBytes);
       chunks.push(buildExifChunk(exifBytes));
     }
 

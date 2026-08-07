@@ -19,7 +19,7 @@
 
 "use client";
 
-import React, { useRef, useCallback, useEffect } from "react";
+import React, { useRef, useCallback, useEffect, useState } from "react";
 import { useEditorState, useVolatileInteraction } from "@opengpex/editor/core/context";
 import { TEXT_LAYER_PADDING } from "@opengpex/editor/core/helpers/config";
 import { useTextEditorFastSync } from "./useFastSync";
@@ -76,6 +76,29 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
   // Core editing logic (commit / cancel / input)
   const { layer, textData, handleInput, commitEditing, cancelEditing } =
     useInlineTextEditing(layerId, editorRef, notifyBoundingChange);
+
+  // Overflow detection for fixed-mode text boxes
+  const [isOverflowing, setIsOverflowing] = useState(false);
+
+  const checkOverflow = useCallback(() => {
+    const el = editorRef.current;
+    if (el && textData?.boxMode === 'fixed') {
+      setIsOverflowing(el.scrollHeight > el.clientHeight);
+    } else {
+      setIsOverflowing(false);
+    }
+  }, [textData?.boxMode, editorRef]);
+
+  // Re-check overflow when box dimensions or content changes
+  useEffect(() => {
+    checkOverflow();
+  }, [textData?.boxHeight, textData?.boxWidth, textData?.fontSize, checkOverflow]);
+
+  // Wrap handleInput to also check overflow
+  const handleInputWithOverflow = useCallback(() => {
+    handleInput();
+    checkOverflow();
+  }, [handleInput, checkOverflow]);
 
   // Keyboard handling
   const handleKeyDown = useCallback(
@@ -161,7 +184,7 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
             ref={editorRef}
             contentEditable
             suppressContentEditableWarning
-            onInput={handleInput}
+            onInput={handleInputWithOverflow}
             onKeyDown={handleKeyDown}
             onBlur={handleBlur}
             className="outline-none whitespace-pre-wrap break-words caret-[var(--accent)]"
@@ -198,6 +221,29 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
               }),
             }}
           />
+
+          {/* Overflow indicator: overlays SE handle position, pointer-events-none so handle stays functional */}
+          {isOverflowing && (
+            <div
+              className="absolute flex items-center justify-center pointer-events-none"
+              style={{
+                bottom: `${-7 / camera.k}px`,
+                right: `${-7 / camera.k}px`,
+                width: `${14 / camera.k}px`,
+                height: `${14 / camera.k}px`,
+                borderRadius: '50%',
+                backgroundColor: 'rgba(239, 68, 68, 0.9)',
+                zIndex: 10,
+                fontSize: `${9 / camera.k}px`,
+                fontWeight: 700,
+                color: '#fff',
+                lineHeight: 1,
+                letterSpacing: `${-0.5 / camera.k}px`,
+              }}
+            >
+              ···
+            </div>
+          )}
 
           {/* Resize Handles (always visible during editing, counter-scaled for consistent screen size) */}
           <TextResizeHandles cameraK={camera.k} />

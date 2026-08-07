@@ -553,14 +553,43 @@ export class Canvas2dEngine implements IRenderer {
 
   /**
    * Resolve the "effective" image source for a layer.
-   * Transparently dispatches to FilterFastTrack (Track A) during interaction,
-   * or FilterCache (Track B) for full-res async results.
+   *
+   * Fallback priority chain (highest to lowest quality):
+   *   1. TrackB (filterCache HIT) — full-res Worker result, exact params ✅
+   *   2. TrackA (applyInteractionPreview) — synchronous main-thread LUT/matrix ✅
+   *   3. STALE (filterCache.getStale) — full-res but OLD params ⚠️
+   *   4. RAW (original unfiltered image) — last resort ⚠️
+   *
+   * ═══ BUG FIX: Multi-layer filter flash (2026-08-08) ═══
+   *
+   * Problem: When two+ layers both had adjustments, releasing the slider
+   * caused a 1-frame flash on the transitional frame (isInteracting: true→false).
+   *
+   * Root causes (two issues combined):
+   *   A) FilterFastTrack used a SINGLE shared resultCanvas for ALL layers.
+   *      In the same render frame, Layer B's TrackA computation overwrote
+   *      Layer A's data. On the transition frame, getBridgeResult() for A
+   *      returned B's pixels → wrong colors flash.
+   *      Fix: per-assetId result canvases in FilterFastTrack.resultCanvasMap.
+   *
+   *   B) TrackA was gated by `if (isInteracting)`. On the transition frame,
+   *      isInteracting=false meant TrackA was skipped entirely. The code fell
+   *      through to BRIDGE (downsampled → resolution flash) or STALE (old
+   *      params → color flash).
+   *      Fix: removed the isInteracting gate. TrackA now always runs when
+   *      filterCache misses. Its internal frame-cache (cachedFilterHash per
+   *      assetId) ensures <0.1ms return when params haven't changed, so there
+   *      is no performance regression for non-interacting frames.
+   *
+   * Result: TrackA provides visually-correct output on every frame. The Worker
+   * delivers full-res quality async (TrackB) which seamlessly replaces TrackA
+   * with only a quality improvement (no color/resolution discontinuity).
    */
   private resolveFilteredSource<T>(
     layer: Layer,
     img: T,
     isExporting: boolean | undefined,
-    isInteracting: boolean | undefined,
+    _isInteracting: boolean | undefined,
   ): { img: T; layer: Layer } {
     if (isExporting) return { img, layer };
     if (!this.filterFastTrack.hasFilters(layer)) return { img, layer };
@@ -575,18 +604,8 @@ export class Canvas2dEngine implements IRenderer {
       ? { brightness: 100 as const, contrast: 100 as const, saturation: 100 as const, hueRotate: 0 as const, blur: layer.adjustments.blur }
       : undefined;
 
-    // --- Interaction Fast-Track Path (Track A: synchronous LUT/matrix preview) ---
-    if (isInteracting) {
-      const resultCanvas = this.filterFastTrack.applyInteractionPreview(layer, img);
-      if (resultCanvas) {
-        return {
-          img: resultCanvas as unknown as T,
-          layer: { ...layer, adjustments: strippedAdjustments },
-        };
-      }
-    }
-
     // --- Standard Path (Track B: AsyncFilterCache via Worker) ---
+    // Check Worker cache first — this is the highest quality (full-res, exact params).
     const filtered = filterCache.get(layer);
     if (filtered) {
       if (layer.assetId) {
@@ -598,20 +617,25 @@ export class Canvas2dEngine implements IRenderer {
       };
     }
 
-    // Cache miss: schedule async worker job
-    filterCache.schedule(layer, img);
-
-    // Bridge: prefer last Track A result over stale/raw
-    if (layer.assetId) {
-      const bridge = this.filterFastTrack.getBridgeResult(layer.assetId);
-      if (bridge) {
-        return {
-          img: bridge as unknown as T,
-          layer: { ...layer, adjustments: strippedAdjustments },
-        };
-      }
+    // --- Track A: Synchronous LUT/matrix preview ---
+    // Always try TrackA when filterCache misses (not just during interaction).
+    // This prevents the "transitional frame flash" — on mouseup, params are correct
+    // in the frame-cache so TrackA returns immediately (<0.1ms) with correct appearance.
+    // The Worker will deliver full-res shortly after (quality-only improvement, no flash).
+    const resultCanvas = this.filterFastTrack.applyInteractionPreview(layer, img);
+    if (resultCanvas) {
+      // Schedule Worker for full-res version (fires in background)
+      filterCache.schedule(layer, img);
+      return {
+        img: resultCanvas as unknown as T,
+        layer: { ...layer, adjustments: strippedAdjustments },
+      };
     }
 
+    // TrackA failed — schedule Worker and use fallback
+    filterCache.schedule(layer, img);
+
+    // Fallback: STALE (full-res, old params) or RAW
     const stale = filterCache.getStale(layer);
     if (stale) {
       return {
@@ -619,6 +643,7 @@ export class Canvas2dEngine implements IRenderer {
         layer: { ...layer, adjustments: strippedAdjustments },
       };
     }
+
     return { img, layer };
   }
 

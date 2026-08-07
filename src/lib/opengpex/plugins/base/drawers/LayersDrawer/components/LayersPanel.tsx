@@ -251,6 +251,7 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
                           layer={layer}
                           index={hostIndexMap.get(layer.id) ?? 0}
                           activeFrameId={activeFrame.id}
+                          canvasSize={activeFrame.canvas}
                           isActive={layer.id === activeLayerId || activeLayerHostId === layer.id}
                           canDelete={hostLayers.length > 1}
                           isScrolling={isScrolling}

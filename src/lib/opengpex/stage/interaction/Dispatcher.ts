@@ -37,6 +37,21 @@ export class InteractionDispatcher {
    * Traverses all handlers; the first whose test() returns true wins and handles subsequent events.
    */
   handleStart(e: InteractionEvent): boolean {
+    const button = (e.nativeEvent as MouseEvent).button;
+
+    // ── Global reservation: middle-click (1) and right-click (2) always route
+    //    directly to viewport-pan, bypassing all other handler priority checks.
+    //    This prevents accidental layer-move / tool activation and avoids
+    //    needing per-handler button exclusion scattered across the codebase.
+    if (button === 1 || button === 2) {
+      const panHandler = this.handlers.find(h => h.id === 'viewport-pan');
+      if (panHandler) {
+        this.activeHandler = panHandler;
+        panHandler.onStart?.(e);
+        return true;
+      }
+    }
+
     for (const handler of this.handlers) {
       if (handler.test(e)) {
         this.activeHandler = handler;

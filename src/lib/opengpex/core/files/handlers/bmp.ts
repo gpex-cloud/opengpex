@@ -69,20 +69,33 @@ export class BmpHandler implements ImageFormatHandler {
       'bmp',
     );
 
-    // Use encodeColorSpace to create intermediate canvas (prevent implicit browser color conversion)
-    const canvas = source instanceof ImageBitmap
-      ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
-      : source;
-    const ctx = (canvas as OffscreenCanvas).getContext('2d')!;
-    const w = (canvas as OffscreenCanvas).width;
-    const h = (canvas as OffscreenCanvas).height;
-    const imageData = ctx.getImageData(0, 0, w, h);
+    let imageData: ImageData;
+    let w: number;
+    let h: number;
 
-    // P3→sRGB downgrade (BMP only supports sRGB)
     if (pixelConv === 'p3-to-srgb') {
+      // P3→sRGB downgrade: use P3 intermediate canvas to preserve raw P3 values,
+      // then apply a single manual matrix conversion (avoids double conversion via browser CM).
+      const srcCanvas = source instanceof ImageBitmap
+        ? bitmapToCanvas(source, 'display-p3')
+        : source as OffscreenCanvas;
+      w = srcCanvas.width;
+      h = srcCanvas.height;
+      const tmpCanvas = new OffscreenCanvas(w, h);
+      const tmpCtx = tmpCanvas.getContext('2d', { colorSpace: 'display-p3' })!;
+      tmpCtx.drawImage(srcCanvas, 0, 0);
+      imageData = tmpCtx.getImageData(0, 0, w, h);
       convertImageDataColorSpace(imageData.data, 'display-p3', 'srgb');
       console.debug('[ColorMgmt] BMP Export: pixelConversion=p3-to-srgb');
     } else {
+      // Normal path: use encodeColorSpace to prevent implicit browser color conversion
+      const canvas = source instanceof ImageBitmap
+        ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
+        : source as OffscreenCanvas;
+      const ctx = canvas.getContext('2d')!;
+      w = canvas.width;
+      h = canvas.height;
+      imageData = ctx.getImageData(0, 0, w, h);
       console.debug('[ColorMgmt] BMP Export: frameCS=%s, encodeColorSpace=%s, pixelConv=%s',
         frameCS, exportStrategy.encodeColorSpace, pixelConv);
     }

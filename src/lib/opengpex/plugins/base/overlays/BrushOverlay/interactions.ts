@@ -61,9 +61,7 @@ export const createBrushStrokeHandler = (): InteractionHandler => ({
     const craft = e.state.interaction.signals[ACTIVE_CRAFT_KEY];
     if (craft !== 'brush' && craft !== 'eraser' && craft !== 'restore' && craft !== 'mosaic') return false;
 
-    // Exclude right click
     const mouseEvent = e.nativeEvent as MouseEvent;
-    if (mouseEvent.button === 2) return false;
 
     // Exclude UI element click
     const target = mouseEvent.target as HTMLElement;

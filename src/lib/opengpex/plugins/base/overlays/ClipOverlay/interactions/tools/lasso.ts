@@ -117,7 +117,6 @@ export const createLassoHandler = (): InteractionHandler => {
       if (!makeClipToolGuard('lasso')(e)) return false;
 
       const me = e.nativeEvent as MouseEvent;
-      if (me.button === 2) return false;
       const target = me.target as HTMLElement;
       if (target.closest('button, a, input, [data-role="ui"], [contenteditable]')) return false;
 

@@ -77,56 +77,32 @@ export function useCraftTrigger() {
 /**
  * useCraftButtonGroup: Semantic Hook for ButtonGroup inside CraftDrawer
  *
- * Encapsulates state and click logic of [T] [B] [E] button group inside panel.
+ * Encapsulates state and click logic of [M] [T] [B] [E] button group inside panel.
  *
  * Click rules:
  * 1. Click button of current activeCraft -> toggle off (deactivate)
- * 2. Click any button when no craft active -> activate this craft
- * 3. When another craft is active:
- *    - click button matching layer inference (text button + text layer, brush button + paint layer) -> deactivate ("go home")
- *    - otherwise -> switch to new craft
+ * 2. Otherwise -> activate/switch to target tool
  */
 export function useCraftButtonGroup() {
   const { setCraftCmd, deactivateCraftCmd } = usePluginCommands<CraftDrawerCommandsMap>();
   const { activeCraftSignal } = usePluginSignals<CraftDrawerSignalsMap>();
-  const { activeLayer } = useEditorState();
-
-  // Local control switch: true uses scheme 1 (go home logic), false uses scheme 2 (switch tool directly)
-  const enableHomeBehavior = true;
 
   const activeCraft = (activeCraftSignal?.value ?? null) as ActiveCraft;
-  const activeLayerIsText = activeLayer?.type === 'text';
-  const activeLayerIsPaint = activeLayer?.type === 'paint';
 
   const handleButtonClick = useCallback(
     (buttonType: CraftType) => {
       if (activeCraft === buttonType || (buttonType === 'eraser' && activeCraft === 'restore')) {
-        // Rule 1: Toggle off — current tool -> deactivate (restore is sub-mode of eraser)
+        // Toggle off: clicking active tool → deactivate (restore is sub-mode of eraser)
         deactivateCraftCmd?.execute();
-      } else if (activeCraft === null) {
-        // Rule 2: No tool active -> activate target tool
-        setCraftCmd?.execute({ craft: buttonType });
       } else {
-        // Rule 3: Another tool active -> determine if "go home"
-        const isHomeButton =
-          enableHomeBehavior && (
-            (buttonType === 'text' && activeLayerIsText) ||
-            (buttonType === 'brush' && activeLayerIsPaint)
-          );
-
-        if (isHomeButton) {
-          // "go home": exit current tool, let layer inference take over panel
-          deactivateCraftCmd?.execute();
-        } else {
-          // switch to new tool
-          setCraftCmd?.execute({ craft: buttonType });
-        }
+        // Activate or switch to target tool
+        setCraftCmd?.execute({ craft: buttonType });
       }
     },
-    [activeCraft, activeLayerIsText, activeLayerIsPaint, setCraftCmd, deactivateCraftCmd, enableHomeBehavior]
+    [activeCraft, setCraftCmd, deactivateCraftCmd]
   );
 
-  return { activeCraft, activeLayerIsText, activeLayerIsPaint, handleButtonClick };
+  return { activeCraft, handleButtonClick };
 }
 
 // ─── Default text style constants ──────────────────────────────────────────────

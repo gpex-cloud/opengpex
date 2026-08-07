@@ -20,6 +20,7 @@ import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/type
 import type { EncodeOptions } from '../../types';
 import { bitmapToCanvas } from '../../index';
 import { base64ToIcc, getStockIccProfile } from '../../icc';
+import { resetExifOrientation } from '../../tiff-ifd-reader';
 import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
 import { getExportStrategy, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
 import { injectTiffIfd0Tags, TIFF_TAGS } from './ifd0-inject';
@@ -132,8 +133,9 @@ export async function encodeTiff(
   try {
     const rgbaData = new Uint8Array(imageData.data.buffer);
     // Prepare EXIF bytes for injection (decoded from base64)
+    // Reset Orientation to 1 (Normal) since exported pixels are already correctly oriented.
     const exifBytes = config?.preserveExif && meta?.raw?.exif
-      ? base64ToIcc(meta.raw.exif) : undefined;
+      ? resetExifOrientation(base64ToIcc(meta.raw.exif)) : undefined;
 
     let tiffBytes = await pixels.fileIO.encodeTiff(
       rgbaData,

@@ -38,10 +38,11 @@ import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import EditableLabel from "@opengpex/editor/widgets/EditableLabel";
 import ImageAsset from "@opengpex/editor/widgets/ImageAsset";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
-import { Layer, VectorMask, BitmapMask } from "@opengpex/editor/core/types";
+import { Layer, VectorMask, BitmapMask, Dimensions } from "@opengpex/editor/core/types";
 import { SubLayerItem } from "./SubLayerItem";
 import { MaskItem } from "./MaskItem";
 import { LayerMenu } from "./LayerMenu";
+import { hasLayerAdjustments } from "../utils";
 import type { LayersDrawerCommandsMap } from "../commands.d";
 
 interface LayerItemProps {
@@ -49,6 +50,7 @@ interface LayerItemProps {
   layer: Layer;
   index: number;
   activeFrameId: string;
+  canvasSize: Dimensions;
   isActive: boolean;
   canDelete: boolean;
   isScrolling?: boolean;
@@ -61,6 +63,7 @@ export const LayerItem = React.memo(
     layer,
     index,
     activeFrameId,
+    canvasSize,
     isActive,
     canDelete,
     isScrolling,
@@ -87,6 +90,7 @@ export const LayerItem = React.memo(
       (layer.vectorMasks && layer.vectorMasks.length > 0) ||
       (layer.bitmapMasks && layer.bitmapMasks.length > 0)
     );
+    const hasAdjustments = hasLayerAdjustments(layer);
 
     useEffect(() => {
       if (isActive && containerRef.current) {
@@ -191,6 +195,21 @@ export const LayerItem = React.memo(
                   src={layer.src}
                   className="w-full h-full object-cover select-none pointer-events-none"
                   draggable="false"
+                  style={(() => {
+                    // When layer has a logical crop (visibleShape is a sub-region of source image),
+                    // use object-view-box to display only the cropped portion in the thumbnail.
+                    // canvasSize represents the full source image dimensions.
+                    const vs = layer.visibleShape;
+                    if (!vs || !canvasSize || canvasSize.w === 0 || canvasSize.h === 0) return undefined;
+                    const r = vs.rect;
+                    // Skip if visibleShape covers the entire canvas (no crop needed)
+                    if (r.x === 0 && r.y === 0 && r.w >= canvasSize.w && r.h >= canvasSize.h) return undefined;
+                    const top = (r.y / canvasSize.h * 100).toFixed(1);
+                    const right = ((canvasSize.w - r.x - r.w) / canvasSize.w * 100).toFixed(1);
+                    const bottom = ((canvasSize.h - r.y - r.h) / canvasSize.h * 100).toFixed(1);
+                    const left = (r.x / canvasSize.w * 100).toFixed(1);
+                    return { objectViewBox: `inset(${top}% ${right}% ${bottom}% ${left}%)` } as React.CSSProperties;
+                  })()}
                   fallback={
                     <span className="text-[9px] font-bold text-[var(--text-muted)]">
                       ?
@@ -232,16 +251,19 @@ export const LayerItem = React.memo(
 `}
                   />
                 </Tooltip>
-                {/* Indicator dots: amber = has user sub-layers, teal = has masks.
+                {/* Indicator dots: purple = has user sub-layers, teal = has masks, amber = has adjustments.
                     Only shown when the layer has collapsed content underneath.
                     exchange/frag sub-layers (internal clip system) are excluded. */}
-                {(hasVisibleSubLayersDot || hasMasks) && (
+                {(hasVisibleSubLayersDot || hasMasks || hasAdjustments) && (
                   <div className="flex gap-0.5 shrink-0 opacity-40">
                     {hasVisibleSubLayersDot && (
-                      <div className="w-1 h-1 rounded-full bg-amber-400" />
+                      <div className="w-1 h-1 rounded-full" style={{ backgroundColor: '#c084fc' }} />
                     )}
                     {hasMasks && (
                       <div className="w-1 h-1 rounded-full" style={{ backgroundColor: '#00D5BE' }} />
+                    )}
+                    {hasAdjustments && (
+                      <div className="w-1 h-1 rounded-full bg-amber-400" />
                     )}
                   </div>
                 )}

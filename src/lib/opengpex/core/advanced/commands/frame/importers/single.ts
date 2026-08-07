@@ -104,11 +104,6 @@ export async function importSingleImage(
   const strategy = getImportStrategy(detectedCS);
   const detectedColorSpace: WorkingColorSpace = strategy.frameColorSpace;
 
-  console.debug(
-    '[ColorMgmt] Import: source=%s detected=%s → Frame.colorSpace=%s (conversion=%s)',
-    file.name, metadata.colorSpace, detectedColorSpace, strategy.conversion,
-  );
-
   const frame = LayerFactory.getNewFrame({
     id: `f-${Date.now().toString(36)}-${parentId ? 'branch' : 'trunk'}`,
     parentId,

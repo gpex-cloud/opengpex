@@ -128,6 +128,13 @@ export async function encodeJpeg(
       const jpegWithExif = injectJpegExif(baseJpegBytes, rawExifBytes);
       const withExifBase64 = bytesToDataUrl(jpegWithExif, 'image/jpeg');
       exifObj = piexif.load(withExifBase64);
+
+      // Always reset Orientation to Normal (1) since exported pixels are already
+      // in correct orientation. Source formats like HEIC/JPEG may store non-trivial
+      // orientation in EXIF, but the composite/transcode pipeline normalizes pixels.
+      if (exifObj['0th']) {
+        exifObj['0th'][piexif.ImageIFD.Orientation] = 1;
+      }
     } else {
       exifObj = { '0th': {}, Exif: {}, GPS: {} };
     }

@@ -73,6 +73,58 @@ export function commitRefocusToOverlay(
     ctx.actions.setInteraction({ interactionMode: 'clip' });
 }
 
+// ─── Adjustment indicator ─────────────────────────────────────────────────────
+
+/**
+ * Returns `true` when a layer carries any non-identity adjustment state
+ * (basic sliders, curves, levels, channel mix, or color balance).
+ *
+ * Used by `LayerItem` to render the purple "has adjustments" indicator dot.
+ * Self-contained — intentionally does NOT import from `engine/protocol/normalizer`
+ * to keep LayersDrawer free of render-engine coupling.
+ */
+export function hasLayerAdjustments(layer: Layer): boolean {
+  // Basic adjustments (brightness/contrast/saturation/hueRotate/blur)
+  const adj = layer.adjustments;
+  if (adj) {
+    if (adj.brightness !== 100 || adj.contrast !== 100 || adj.saturation !== 100 ||
+        adj.hueRotate !== 0 || adj.blur !== 0) return true;
+  }
+
+  // Curves — identity is [[0,0],[1,1]] per channel (or undefined)
+  const c = layer.curves;
+  if (c) {
+    const isId = (pts?: Array<[number, number]>) =>
+      !pts || (pts.length === 2 && pts[0][0] === 0 && pts[0][1] === 0 && pts[1][0] === 1 && pts[1][1] === 1);
+    if (!isId(c.rgb) || !isId(c.red) || !isId(c.green) || !isId(c.blue)) return true;
+  }
+
+  // Levels — identity: 0/255/1.0/0/255
+  const l = layer.levels;
+  if (l) {
+    if (l.inputBlack !== 0 || l.inputWhite !== 255 || l.gamma !== 1 ||
+        l.outputBlack !== 0 || l.outputWhite !== 255) return true;
+  }
+
+  // Channel Mix — identity: red=[1,0,0], green=[0,1,0], blue=[0,0,1], constant=[0,0,0]
+  const m = layer.channelMix;
+  if (m) {
+    const eq3 = (v: [number, number, number], a: number, b: number, cc: number) =>
+      v[0] === a && v[1] === b && v[2] === cc;
+    if (!eq3(m.red, 1, 0, 0) || !eq3(m.green, 0, 1, 0) || !eq3(m.blue, 0, 0, 1)) return true;
+    if (m.constant && !eq3(m.constant, 0, 0, 0)) return true;
+  }
+
+  // Color Balance — identity: all zeros
+  const cb = layer.colorBalance;
+  if (cb) {
+    const z3 = (v: [number, number, number]) => v[0] === 0 && v[1] === 0 && v[2] === 0;
+    if (!z3(cb.shadows) || !z3(cb.midtones) || !z3(cb.highlights)) return true;
+  }
+
+  return false;
+}
+
 /**
  * Re-constructs the full flat layer list based on a reordered host list.
  * Maintains child layer positions relative to their parents.

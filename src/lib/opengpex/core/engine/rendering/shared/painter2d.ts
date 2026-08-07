@@ -395,9 +395,9 @@ function drawTextContent(
   const lineH = fontSize * (td.lineHeight || 1.4);
   const boxMode = td.boxMode || 'auto';
 
-  const padX = TEXT_LAYER_PADDING.x + 1;
+  const padX = TEXT_LAYER_PADDING.x;
   const halfLeading = (lineH - fontSize) / 2;
-  const padY = TEXT_LAYER_PADDING.y + halfLeading + 1;
+  const padY = TEXT_LAYER_PADDING.y + halfLeading;
   const maxWidth = boxMode === 'fixed' ? ((td.boxWidth || layer.bounding.w) - padX * 2) : undefined;
   const baseXOffset = td.align === 'center' ? layer.bounding.w / 2 : td.align === 'right' ? layer.bounding.w - padX : padX;
 
@@ -423,12 +423,12 @@ function drawTextContent(
     for (const paragraph of paragraphs) {
       const wrappedLines = wrapTextByChar(ctx, paragraph, maxWidth);
       for (const line of wrappedLines) {
-        if (currentY + lineH > layer.bounding.h - padY) break;
+        if (currentY >= layer.bounding.h) break;
         ctx.fillText(line, baseXOffset, currentY);
         drawDecorations(line, baseXOffset, currentY);
         currentY += lineH;
       }
-      if (currentY + lineH > layer.bounding.h - padY) break;
+      if (currentY >= layer.bounding.h) break;
     }
   } else {
     const lines = (td.content || '').split('\n');

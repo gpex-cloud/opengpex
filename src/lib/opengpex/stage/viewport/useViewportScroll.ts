@@ -45,8 +45,9 @@ function resolveZoomIntent(
   if ((ctrlKey || metaKey) && !isDiscreteMouse) return true;
 
   if (mode === 'legacy') {
-    // Legacy: Ctrl/Cmd + discrete mouse scroll = zoom
-    return (ctrlKey || metaKey) && isDiscreteMouse;
+    // Legacy: only Alt+scroll triggers zoom (PS behavior).
+    // Ctrl/Cmd + discrete mouse scroll does NOT zoom — freed for browser/system use.
+    return false;
   } else {
     // Modern: discrete mouse bare scroll = zoom (except Shift, which is reserved for H-pan)
     //         Ctrl/Cmd + discrete mouse scroll = pan (reversed)

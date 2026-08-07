@@ -26,6 +26,7 @@ import { base64ToIcc, getStockIccProfile } from '../../icc';
 import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
 import { getExportStrategy, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
 import { injectWebpIcc, stripWebpIcc, injectWebpExif } from './riff';
+import { resetExifOrientation } from '../../tiff-ifd-reader';
 
 /**
  * Encode a canvas/bitmap to WebP with ICC injection.
@@ -102,9 +103,9 @@ export async function encodeWebp(
     console.debug('[ColorMgmt] WebP Export: pixelConversion=srgb-to-icc, targetProfile=%s',
       meta!.raw!.icc?.name || 'custom');
     let resultBlob = new Blob([finalBytes.buffer as ArrayBuffer], { type: 'image/webp' });
-    // EXIF injection (post-ICC)
+    // EXIF injection (post-ICC) — reset Orientation since pixels are already corrected
     if (config?.preserveExif && meta?.raw?.exif) {
-      const exifRaw = base64ToIcc(meta.raw.exif);
+      const exifRaw = resetExifOrientation(base64ToIcc(meta.raw.exif));
       const webpBuf = new Uint8Array(await resultBlob.arrayBuffer());
       const withExif = injectWebpExif(webpBuf, exifRaw);
       resultBlob = new Blob([withExif.buffer as ArrayBuffer], { type: 'image/webp' });
@@ -133,9 +134,9 @@ export async function encodeWebp(
     console.debug('[ColorMgmt] WebP Export: injecting ICC profile (no pixel conversion), profile=%s',
       meta.raw.icc?.name || 'embedded');
     let iccResultBlob = new Blob([finalBytes.buffer as ArrayBuffer], { type: 'image/webp' });
-    // EXIF injection (post-ICC embed path)
+    // EXIF injection (post-ICC embed path) — reset Orientation since pixels are already corrected
     if (config?.preserveExif && meta?.raw?.exif) {
-      const exifRaw = base64ToIcc(meta.raw.exif);
+      const exifRaw = resetExifOrientation(base64ToIcc(meta.raw.exif));
       const webpBuf = new Uint8Array(await iccResultBlob.arrayBuffer());
       const withExif = injectWebpExif(webpBuf, exifRaw);
       iccResultBlob = new Blob([withExif.buffer as ArrayBuffer], { type: 'image/webp' });
@@ -150,7 +151,7 @@ export async function encodeWebp(
       console.debug('[ColorMgmt] WebP Export: embedded stock ICC profile for %s', frameCS);
       let iccResultBlob = new Blob([finalBytes.buffer as ArrayBuffer], { type: 'image/webp' });
       if (config?.preserveExif && meta?.raw?.exif) {
-        const exifRaw = base64ToIcc(meta.raw.exif);
+        const exifRaw = resetExifOrientation(base64ToIcc(meta.raw.exif));
         const webpBuf = new Uint8Array(await iccResultBlob.arrayBuffer());
         const withExif = injectWebpExif(webpBuf, exifRaw);
         iccResultBlob = new Blob([withExif.buffer as ArrayBuffer], { type: 'image/webp' });
@@ -175,9 +176,9 @@ export async function encodeWebp(
     resultBlob = baseBlob;
   }
 
-  // EXIF injection (after ICC handling, before return)
+  // EXIF injection (after ICC handling, before return) — reset Orientation since pixels are already corrected
   if (config?.preserveExif && meta?.raw?.exif) {
-    const exifRaw = base64ToIcc(meta.raw.exif);
+    const exifRaw = resetExifOrientation(base64ToIcc(meta.raw.exif));
     const webpBuf = new Uint8Array(await resultBlob.arrayBuffer());
     const withExif = injectWebpExif(webpBuf, exifRaw);
     resultBlob = new Blob([withExif.buffer as ArrayBuffer], { type: 'image/webp' });

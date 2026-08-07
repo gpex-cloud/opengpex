@@ -72,11 +72,15 @@ export class FilterFastTrack {
   private tempCtx: OffscreenCanvasRenderingContext2D | null = null;
 
   /**
-   * Reusable result canvas — avoids per-frame allocation + GC pressure.
-   * Resized only when dimensions change.
+   * Per-asset result canvases — each layer gets its own dedicated canvas to
+   * prevent cross-layer data corruption when multiple layers have filters.
+   *
+   * Bug fix: previously a single shared `resultCanvas` was reused. When two
+   * layers had filters, the second layer's computation overwrote the first's
+   * data. On the transitional frame (isInteracting → false), BRIDGE returned
+   * the shared canvas now containing the wrong layer's pixels → flash.
    */
-  private resultCanvas: OffscreenCanvas | null = null;
-  private resultCtx: OffscreenCanvasRenderingContext2D | null = null;
+  private resultCanvasMap: Map<string, { canvas: OffscreenCanvas; ctx: OffscreenCanvasRenderingContext2D }> = new Map();
 
   /**
    * Frame cache: stores the filter parameter hash per assetId.
@@ -224,20 +228,32 @@ export class FilterFastTrack {
 
       tempCtx.putImageData(imgData, 0, 0);
 
-      // Produce result canvas at original dimensions — reuse instance to avoid GC pressure
-      if (!this.resultCanvas || this.resultCanvas.width !== origW || this.resultCanvas.height !== origH) {
-        this.resultCanvas = new OffscreenCanvas(origW, origH);
-        this.resultCtx = this.resultCanvas.getContext('2d')!;
+      // Produce result canvas at original dimensions.
+      // Per-asset canvases ensure BRIDGE never returns another layer's data.
+      const key = assetId || '__no_asset__';
+      let entry = this.resultCanvasMap.get(key);
+      if (!entry || entry.canvas.width !== origW || entry.canvas.height !== origH) {
+        entry = {
+          canvas: new OffscreenCanvas(origW, origH),
+          ctx: null!,
+        };
+        entry.ctx = entry.canvas.getContext('2d')!;
+        this.resultCanvasMap.set(key, entry);
+        // Bound pool size (evict oldest if > 8 entries)
+        if (this.resultCanvasMap.size > 8) {
+          const firstKey = this.resultCanvasMap.keys().next().value;
+          if (firstKey && firstKey !== key) this.resultCanvasMap.delete(firstKey);
+        }
       }
-      this.resultCtx!.clearRect(0, 0, origW, origH);
-      this.resultCtx!.drawImage(this.tempCanvas!, 0, 0, targetW, targetH, 0, 0, origW, origH);
+      entry.ctx.clearRect(0, 0, origW, origH);
+      entry.ctx.drawImage(this.tempCanvas!, 0, 0, targetW, targetH, 0, 0, origW, origH);
 
       // Cache for bridge use after mouseUp + frame cache reuse on next pan/zoom frame
       if (assetId) {
-        this.lastInteractionResult.set(assetId, this.resultCanvas);
+        this.lastInteractionResult.set(assetId, entry.canvas);
       }
 
-      return this.resultCanvas;
+      return entry.canvas;
     } catch (err) {
       console.warn('[FilterFastTrack] Synchronous filter apply failed:', err);
       return null;
@@ -265,8 +281,7 @@ export class FilterFastTrack {
   dispose(): void {
     this.tempCanvas = null;
     this.tempCtx = null;
-    this.resultCanvas = null;
-    this.resultCtx = null;
+    this.resultCanvasMap.clear();
     this.cachedFilterHash.clear();
     this.lastInteractionResult.clear();
   }

@@ -303,3 +303,57 @@ export function extractTiffIcc(bytes: Uint8Array): Uint8Array | null {
 
   return null;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Orientation Reset
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Reset the EXIF Orientation tag to 1 (Normal) in raw TIFF IFD bytes.
+ *
+ * This is necessary when exporting pixels that have already been orientation-
+ * corrected (e.g. from HEIC transcode or createImageBitmap with EXIF applied).
+ * Without this reset, viewers would double-rotate the image.
+ *
+ * Mutates the input array in-place and also returns it for chaining.
+ * If the Orientation tag is not found, the bytes are returned unmodified.
+ */
+export function resetExifOrientation(bytes: Uint8Array): Uint8Array {
+  const byteOrder = parseTiffByteOrder(bytes);
+  if (!byteOrder) return bytes;
+  const isLE = byteOrder === 'little';
+
+  // Validate TIFF magic
+  if (bytes.length < 8) return bytes;
+  const magic = readU16(bytes, 2, isLE);
+  if (magic !== 0x002A) return bytes;
+
+  const ifdOffset = readU32(bytes, 4, isLE);
+
+  // Search IFD0 for Orientation tag (0x0112)
+  if (ifdOffset > 0 && ifdOffset + 2 <= bytes.length) {
+    const entryCount = readU16(bytes, ifdOffset, isLE);
+    const entriesStart = ifdOffset + 2;
+    if (entriesStart + entryCount * 12 > bytes.length) return bytes;
+
+    for (let i = 0; i < entryCount; i++) {
+      const entryOffset = entriesStart + i * 12;
+      const tagId = readU16(bytes, entryOffset, isLE);
+      if (tagId === 0x0112) { // Orientation
+        // Type is SHORT (3), count is 1, value is at entryOffset + 8
+        // Write 1 (Normal) as a SHORT value
+        if (isLE) {
+          bytes[entryOffset + 8] = 1;
+          bytes[entryOffset + 9] = 0;
+        } else {
+          bytes[entryOffset + 8] = 0;
+          bytes[entryOffset + 9] = 1;
+        }
+        return bytes;
+      }
+    }
+
+  }
+
+  return bytes;
+}

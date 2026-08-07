@@ -44,8 +44,6 @@ export const createLayerMoveHandler = (): InteractionHandler => {
     id: 'layer-move',
     priority: 10,
     test: (e) => {
-      const isRightClick = (e.nativeEvent as MouseEvent).button === 2;
-      if (isRightClick) return false;
 
       // Only pan mode allows layer movement (clip -> operates crop box, craft -> tool interactions)
       if (e.state.interaction.interactionMode !== 'pan') return false;
