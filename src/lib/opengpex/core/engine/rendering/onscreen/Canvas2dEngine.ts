@@ -53,6 +53,10 @@ import type { ChannelMask } from '../../protocol/DisplayTransform';
 import { computeTileJobs } from '@opengpex/editor/core/helpers/tiling';
 import { drawLayerInstance } from '../shared/painter2d';
 import { FilterFastTrack } from './FilterFastTrack';
+import { convertBufferTRC } from '../shared/trc';
+import { blendBuffersLinear } from '../shared/blend2d';
+
+import type { TRC, WorkingColorSpace, LayerBlendMode } from '@opengpex/editor/core/types';
 
 // ─── Diagnostic Logging (toggle via: window.__TILE_FLICKER_DEBUG = true) ───
 function _tileDbg(): boolean {
@@ -106,6 +110,27 @@ export class Canvas2dEngine implements IRenderer {
   /** Intermediate offscreen canvas for display transform compositing */
   private dtIntermediate: OffscreenCanvas | null = null;
   private dtIntermediateCtx: OffscreenCanvasRenderingContext2D | null = null;
+
+  // ─── Frame Color Config ───
+
+  /** Current frame's TRC (transfer characteristic). Set via setFrameConfig() before beginFrame. */
+  private frameTRC: TRC = 'srgb-trc';
+  /** Current frame's working color space. Used for P3 luminance coefficients in HSL blend. */
+  private frameColorSpace: 'srgb' | 'display-p3' = 'srgb';
+
+  /**
+   * Set the current frame's color configuration.
+   * Must be called before beginFrame() each rAF cycle so that the engine
+   * can decide whether to use linear-light blending for blend mode layers.
+   *
+   * @param config.trc - Frame's transfer characteristic ('srgb-trc' or 'linear')
+   * @param config.colorSpace - Frame's working color space (for HSL luminance coefficients)
+   */
+  setFrameConfig(config: { trc: TRC; colorSpace: WorkingColorSpace }): void {
+    this.frameTRC = config.trc;
+    // Map WorkingColorSpace to the subset supported by blend2d.ts
+    this.frameColorSpace = config.colorSpace === 'display-p3' ? 'display-p3' : 'srgb';
+  }
 
   // ─── Font Service Integration ───
 
@@ -258,7 +283,7 @@ export class Canvas2dEngine implements IRenderer {
     const scale = matrix ? Math.sqrt(matrix.a * matrix.a + matrix.b * matrix.b) : 1;
 
     // [Bitmap Mask / Blend Isolation Dispatch] Use offscreen composition path
-    if (this.needsOffscreenComposite(layer, options)) {
+    if (this.needsOffscreenComposite(layer, options, assetService)) {
       this.drawLayerOffscreen(layer, options, assetService);
       return;
     }
@@ -363,12 +388,42 @@ export class Canvas2dEngine implements IRenderer {
 
   // ─── Offscreen Composite Path ───
 
-  /** Determine if offscreen synthesis is needed */
-  private needsOffscreenComposite(layer: Layer, options: DrawLayerOptions): boolean {
+  /**
+   * Determine if offscreen synthesis is needed.
+   *
+   * Phase 4 optimization: For non-tiled layers in gamma-space, blend mode can be
+   * applied directly via globalCompositeOperation without offscreen isolation
+   * (single drawImage has no tile seam issue). Only tiled layers and linear-light
+   * path still require offscreen isolation for blend modes.
+   *
+   * Opacity/fill < 1 also requires offscreen isolation for tiled layers:
+   * globalAlpha is set before the tile loop in painter2d.ts, so tile overlap
+   * regions get drawn twice with reduced alpha → overlap accumulates more opacity
+   * than the center → visible seam lines. Same root cause as blend mode seams (§3.2.1).
+   */
+  private needsOffscreenComposite(layer: Layer, options: DrawLayerOptions, assetService?: AssetService): boolean {
+    // 1. Bitmap mask always needs offscreen
     if (options.bitmapMaskOverride) return true;
     if (layer.bitmapMasks?.some(m => m.enabled)) return true;
-    if (layer.blendMode && layer.blendMode !== 'source-over') return true;
+
+    // 2. Blur always needs offscreen (neighborhood operator can't apply per-tile)
     if ((layer.adjustments?.blur ?? 0) > 0) return true;
+
+    // 3. Blend mode: conditional offscreen
+    if (layer.blendMode && layer.blendMode !== 'source-over') {
+      // Tiled layers need isolation to prevent tile seam artifacts
+      if (this.wouldUseTiles(layer, options, assetService)) return true;
+      // Linear-light path needs offscreen to get ImageData for manual blend
+      if (this.frameTRC === 'linear') return true;
+      // ★ Gamma path + non-tiled layer: no isolation needed (single drawImage is safe)
+      return false;
+    }
+
+    // 4. Opacity/fill < 1 on tiled layers: same seam issue as blend mode
+    // Tile overlap regions get globalAlpha applied twice → double-opacity seam lines
+    const effectiveAlpha = (options.opacity ?? layer.opacity ?? 1) * (layer.fill ?? 1);
+    if (effectiveAlpha < 1 && this.wouldUseTiles(layer, options, assetService)) return true;
+
     return false;
   }
 
@@ -463,6 +518,7 @@ export class Canvas2dEngine implements IRenderer {
       ...layer,
       bitmapMasks: undefined,
       blendMode: undefined,
+      fill: undefined, // Strip fill — applied in final composite to prevent tile seam (§3.2.3)
       adjustments: layer.adjustments
         ? { ...layer.adjustments, blur: 0 }
         : undefined,
@@ -518,18 +574,31 @@ export class Canvas2dEngine implements IRenderer {
     }
 
     // 5. Composite offscreen result to main canvas
-    mainCtx.save();
-    mainCtx.setTransform(1, 0, 0, 1, 0, 0);
-    mainCtx.globalAlpha = options.opacity ?? layer.opacity ?? 1;
-    mainCtx.globalCompositeOperation = (layer.blendMode || 'source-over') as GlobalCompositeOperation;
-
+    const hasBlendMode = !!(layer.blendMode && layer.blendMode !== 'source-over');
     const blurLogical = layer.adjustments?.blur ?? 0;
-    if (blurLogical > 0) {
-      const blurScale = options.matrix ? Math.abs(options.matrix.a) : 1;
-      mainCtx.filter = `blur(${blurLogical * blurScale}px)`;
+
+    // Compute effective alpha for final composite: opacity × fill
+    // Fill was stripped from contentLayer (drawn at full alpha to prevent tile seam §3.2.3),
+    // so we must re-apply it here alongside opacity.
+    const compositeAlpha = (options.opacity ?? layer.opacity ?? 1) * (layer.fill ?? 1);
+
+    if (hasBlendMode && this.frameTRC === 'linear' && blurLogical === 0) {
+      // ★ Linear-light blend path: manual per-pixel blend for WYSIWYG with export
+      this.blendOffscreenLinear(offscreen, layer, mainCtx, screenX, screenY, compositeAlpha);
+    } else {
+      // Gamma-space path: use browser's native globalCompositeOperation
+      mainCtx.save();
+      mainCtx.setTransform(1, 0, 0, 1, 0, 0);
+      mainCtx.globalAlpha = compositeAlpha;
+      mainCtx.globalCompositeOperation = (layer.blendMode || 'source-over') as GlobalCompositeOperation;
+
+      if (blurLogical > 0) {
+        const blurScale = options.matrix ? Math.abs(options.matrix.a) : 1;
+        mainCtx.filter = `blur(${blurLogical * blurScale}px)`;
+      }
+      mainCtx.drawImage(offscreen, 0, 0, finalW, finalH, screenX, screenY, finalW, finalH);
+      mainCtx.restore();
     }
-    mainCtx.drawImage(offscreen, 0, 0, finalW, finalH, screenX, screenY, finalW, finalH);
-    mainCtx.restore();
 
     // 6. Return offscreen canvas
     this.releaseOffscreen(offscreen);
@@ -694,6 +763,88 @@ export class Canvas2dEngine implements IRenderer {
       this.dtIntermediate = new OffscreenCanvas(w, h);
       this.dtIntermediateCtx = this.dtIntermediate.getContext('2d')!;
     }
+  }
+
+  // ─── Linear-Light Blend ───
+
+  /**
+   * Blend the offscreen layer content onto the main canvas using linear-light compositing.
+   *
+   * This provides WYSIWYG parity with the Worker export path (Canvas2dBackend.composeLinear)
+   * for 16-bit documents where Frame.trc === 'linear'.
+   *
+   * Algorithm:
+   * 1. getImageData from both offscreen (source) and main canvas (destination)
+   * 2. Convert both from sRGB-TRC → linear encoding
+   * 3. Execute manual per-pixel blend via blend2d.ts
+   * 4. Convert result from linear → sRGB-TRC
+   * 5. putImageData back to main canvas
+   *
+   * @param offscreen - The offscreen canvas containing the rendered layer content
+   * @param layer - The layer (for blendMode and opacity)
+   * @param mainCtx - The main canvas 2D context
+   * @param destX - X offset in main canvas where the offscreen should be composited
+   * @param destY - Y offset in main canvas where the offscreen should be composited
+   * @param opacityOverride - Optional opacity override from DrawLayerOptions
+   */
+  private blendOffscreenLinear(
+    offscreen: OffscreenCanvas,
+    layer: Layer,
+    mainCtx: CanvasRenderingContext2D,
+    destX: number,
+    destY: number,
+    opacityOverride?: number,
+  ): void {
+    const { width, height } = offscreen;
+    if (width === 0 || height === 0) return;
+
+    const offCtx = offscreen.getContext('2d')!;
+
+    // Get offscreen content (already contains transforms, vector clips, bitmap masks)
+    const srcData = offCtx.getImageData(0, 0, width, height);
+
+    // Get main canvas corresponding region
+    const dstData = mainCtx.getImageData(destX, destY, width, height);
+
+    // sRGB-TRC → linear
+    convertBufferTRC(srcData.data, 'srgb-trc', 'linear');
+    convertBufferTRC(dstData.data, 'srgb-trc', 'linear');
+
+    // Manual per-pixel blend in linear space
+    const blendMode = (layer.blendMode || 'source-over') as LayerBlendMode;
+    const opacity = opacityOverride ?? layer.opacity ?? 1;
+    blendBuffersLinear(dstData.data, srcData.data, blendMode, opacity, this.frameColorSpace);
+
+    // linear → sRGB-TRC
+    convertBufferTRC(dstData.data, 'linear', 'srgb-trc');
+
+    // Write back to main canvas
+    mainCtx.putImageData(dstData, destX, destY);
+  }
+
+  // ─── Tile Detection (Phase 4 optimization) ───
+
+  /**
+   * Determine if a layer would use tile rendering (multiple drawImage calls).
+   * Used by needsOffscreenComposite to decide if blend isolation is required.
+   *
+   * Checks BOTH the actual tileMeta.isTiled flag from asset service (primary)
+   * and the pixel-count heuristic (fallback when assetService is unavailable).
+   * This ensures the prediction matches the actual tile decision in drawLayerDirect.
+   */
+  private wouldUseTiles(layer: Layer, options: DrawLayerOptions, assetService?: AssetService): boolean {
+    if (options.imageOverride) return false;
+    if (layer.bitmapMasks?.some(m => m.enabled)) return false;
+
+    // Primary check: use actual tileMeta from asset service (matches shouldUseTiles in drawLayerDirect)
+    if (assetService && layer.assetId) {
+      const asset = assetService.get(layer.assetId);
+      if (asset?.tileMeta?.isTiled) return true;
+    }
+
+    // Fallback heuristic: pixel count exceeds safe threshold
+    const totalPixels = layer.bounding.w * layer.bounding.h;
+    return totalPixels > MAX_SAFE_EXPORT_PIXELS;
   }
 
   // ─── Path2D Cache ───

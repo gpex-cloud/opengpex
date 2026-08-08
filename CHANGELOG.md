@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.44
+
+- Linear-light blending: canvas preview now matches export for 16-bit and Display P3 documents, including HSL blend modes (hue, saturation, color, luminosity)
+- Fix visible seam lines on tiled layers with blend modes or reduced opacity
+- Layers panel: Blend & Opacity section is now collapsible (collapsed by default)
+
+---
+
 ## v1.0.0-beta.43
 
 - Fix filter flash when adjusting multiple layers simultaneously

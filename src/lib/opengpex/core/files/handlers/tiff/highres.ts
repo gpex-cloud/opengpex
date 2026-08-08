@@ -92,7 +92,7 @@ export interface CompositeLayerDescriptor {
   x: number;
   /** Layer Y position on canvas */
   y: number;
-  /** Vips blend mode string (from blendModeMap.ts) */
+  /** Vips blend mode string (from rendering/shared/blendModes.ts) */
   blendMode: string;
   /** Layer opacity (0-1) */
   opacity: number;

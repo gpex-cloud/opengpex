@@ -199,6 +199,15 @@ export default function CanvasStage() {
       (engine as { attach: (ctx: CanvasRenderingContext2D) => void }).attach(ctx);
     }
 
+    // [Phase 3 — Linear-Light Blend] Set frame color config so engine can
+    // decide whether to use linear-light blending for blend mode layers.
+    if ('setFrameConfig' in engine) {
+      (engine as { setFrameConfig: (config: { trc: string; colorSpace: string }) => void }).setFrameConfig({
+        trc: f.trc,
+        colorSpace: f.colorSpace,
+      });
+    }
+
     // ─── Diagnostic: frame-level summary ───
     if ((window as unknown as Record<string, unknown>).__TILE_FLICKER_DEBUG) {
       const camChanged = cam !== lastCamRef.current;

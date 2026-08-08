@@ -42,13 +42,34 @@
 import type { CompositeJob } from '../../protocol/jobs';
 import type { LayerDescriptor } from '../../protocol/descriptors';
 import type { PixelResultData } from '../../protocol/results';
-import type { Shape } from '@opengpex/editor/core/types';
+import type { Shape, LayerBlendMode } from '@opengpex/editor/core/types';
 import type { VipsInstance, VipsImage } from '../../worker/vips/types';
 import { getVips } from '../../worker/vips/loader';
 import { Canvas2dBackend } from './Canvas2dBackend';
 import { workerCache } from '../../worker/cache/WorkerCache';
 import { calculateHash, buildTileMeta, canvasToBlob } from '../../utils/pixel-utils';
 import { shapeToPath2D } from '@opengpex/editor/core/helpers/path2d';
+import { blendBuffersLinear } from '../shared/blend2d';
+import { isNonSeparableBlendMode } from '../shared/blendModes';
+
+// ─── Vips Blend Mode Mapping ───
+// Maps Canvas 2D globalCompositeOperation → libvips VipsBlendMode enum value.
+// Reference: https://www.libvips.org/API/current/libvips-conversion.html#VipsBlendMode
+
+const VIPS_BLEND_ENUM: Record<string, number> = {
+  'source-over': 0,   // OVER
+  'multiply':    1,
+  'screen':      2,
+  'overlay':     3,
+  'darken':      4,
+  'lighten':     5,
+  'color-dodge': 6,   // colour-dodge
+  'color-burn':  7,   // colour-burn
+  'hard-light':  8,
+  'soft-light':  9,
+  'difference':  10,
+  'exclusion':   11,
+};
 
 // ─── Internal Types ───
 
@@ -60,28 +81,6 @@ interface VipsLayerInput {
   is8bitFallback: boolean;
 }
 
-// ─── Blend Mode Mapping ───
-
-/**
- * CSS/canvas blend mode → vips VipsBlendMode enum.
- * Reference: libvips documentation — `VipsBlendMode` enum values.
- */
-const BLEND_MODE_MAP: Record<string, number> = {
-  'normal': 0,       // VIPS_BLEND_MODE_OVER
-  'multiply': 1,     // VIPS_BLEND_MODE_MULTIPLY
-  'screen': 2,       // VIPS_BLEND_MODE_SCREEN
-  'overlay': 3,      // VIPS_BLEND_MODE_OVERLAY
-  'darken': 4,       // VIPS_BLEND_MODE_DARKEN
-  'lighten': 5,      // VIPS_BLEND_MODE_LIGHTEN
-  'colour-dodge': 6, // VIPS_BLEND_MODE_COLOUR_DODGE
-  'color-dodge': 6,  // alias
-  'colour-burn': 7,  // VIPS_BLEND_MODE_COLOUR_BURN
-  'color-burn': 7,   // alias
-  'hard-light': 8,   // VIPS_BLEND_MODE_HARD_LIGHT
-  'soft-light': 9,   // VIPS_BLEND_MODE_SOFT_LIGHT
-  'difference': 10,  // VIPS_BLEND_MODE_DIFFERENCE
-  'exclusion': 11,   // VIPS_BLEND_MODE_EXCLUSION
-};
 
 export class VipsBackend {
   private canvas2dFallback: Canvas2dBackend;
@@ -116,7 +115,9 @@ export class VipsBackend {
       }
 
       // 2. Composite all layers
-      let composited = this.composeLayers(processedLayers, outputWidth, outputHeight, vips);
+      const blendColorSpace: 'srgb' | 'display-p3' =
+        (job.compositeColorSpace === 'display-p3') ? 'display-p3' : 'srgb';
+      let composited = this.composeLayers(processedLayers, outputWidth, outputHeight, vips, blendColorSpace);
       imagesToCleanup.push(composited);
 
       // 3. Non-rect ROI clip (vips native alpha mask — no precision downgrade)
@@ -263,6 +264,7 @@ export class VipsBackend {
     width: number,
     height: number,
     vips: VipsInstance,
+    colorSpace: 'srgb' | 'display-p3' = 'srgb',
   ): VipsImage {
     // Create transparent float RGBA base: black with alpha=0
     const black = vips.Image.black(width, height);
@@ -270,37 +272,50 @@ export class VipsBackend {
     black.delete();
 
     for (const layer of layers) {
-      let img = layer.image.cast('float');
+      if (isNonSeparableBlendMode(layer.blendMode)) {
+        // ★ HSL layer: degrade to 8-bit → blend2d.ts → restore to float
+        // This is correct (uses verified W3C HSL blend implementation) but with
+        // 8-bit precision loss limited to just the blend calculation step.
+        console.info(
+          `[VipsBackend] HSL blend mode '${layer.blendMode}' uses 8-bit precision ` +
+          `for blend calculation (vips has no native HSL blend). Visual result is correct.`,
+        );
+        const result = this.blendHslLayer(base, layer, width, height, vips, colorSpace);
+        base.delete();
+        base = result;
+      } else {
+        // Normal vips composite path for separable blend modes
+        let img = layer.image.cast('float');
 
-      // Ensure RGBA (add alpha band if missing)
-      if (img.bands === 3) {
-        // Add fully opaque alpha band
-        const opaqueAlpha = img.newFromImage([1.0]);
-        const withAlpha = img.bandjoin(opaqueAlpha);
-        opaqueAlpha.delete();
+        // Ensure RGBA (add alpha band if missing)
+        if (img.bands === 3) {
+          const opaqueAlpha = img.newFromImage([1.0]);
+          const withAlpha = img.bandjoin(opaqueAlpha);
+          opaqueAlpha.delete();
+          img.delete();
+          img = withAlpha;
+        }
+
+        // Apply layer opacity to alpha channel
+        if (layer.opacity < 1.0) {
+          const rgb = img.extractBand(0, { n: 3 });
+          const alpha = img.extractBand(3);
+          const scaledAlpha = alpha.multiply(layer.opacity);
+          alpha.delete();
+          const opacified = rgb.bandjoin(scaledAlpha);
+          rgb.delete();
+          scaledAlpha.delete();
+          img.delete();
+          img = opacified;
+        }
+
+        // Composite using vips blend mode
+        const mode = this.mapBlendMode(layer.blendMode);
+        const newBase = base.composite(img, mode);
+        base.delete();
         img.delete();
-        img = withAlpha;
+        base = newBase;
       }
-
-      // Apply layer opacity to alpha channel
-      if (layer.opacity < 1.0) {
-        const rgb = img.extractBand(0, { n: 3 });
-        const alpha = img.extractBand(3);
-        const scaledAlpha = alpha.multiply(layer.opacity);
-        alpha.delete();
-        const opacified = rgb.bandjoin(scaledAlpha);
-        rgb.delete();
-        scaledAlpha.delete();
-        img.delete();
-        img = opacified;
-      }
-
-      // Composite using vips blend mode
-      const mode = this.mapBlendMode(layer.blendMode);
-      const newBase = base.composite(img, mode);
-      base.delete();
-      img.delete();
-      base = newBase;
     }
 
     return base;
@@ -381,9 +396,76 @@ export class VipsBackend {
 
   /**
    * Map CSS/canvas blend mode string to vips VipsBlendMode enum value.
-   * Falls back to OVER (normal) for unmapped modes.
+   * Falls back to 0 (OVER/normal) for unmapped modes (including HSL modes).
    */
   private mapBlendMode(mode: string): number {
-    return BLEND_MODE_MAP[mode] ?? 0; // Default to VIPS_BLEND_MODE_OVER
+    return VIPS_BLEND_ENUM[mode] ?? 0;
+  }
+
+  // ─── HSL Blend Fallback ────────────────────────────────────────────────────
+
+  /**
+   * Blend a non-separable HSL layer (hue/saturation/color/luminosity) onto the
+   * current base image using blend2d.ts manual pixel-level implementation.
+   *
+   * Strategy:
+   * 1. Convert both base and layer from float [0,1] to 8-bit Uint8ClampedArray
+   * 2. Execute correct HSL blend via blend2d.ts (operates on 8-bit linear buffers)
+   * 3. Convert result back to float [0,1] VipsImage for continued compositing
+   *
+   * Precision note: The 8-bit quantization only affects the blend calculation step.
+   * HSL blend modes are perceptual-space operations where 256 levels provide
+   * sufficient precision for the human visual system's hue/saturation discrimination.
+   *
+   * All operations are synchronous (vips WASM + blend2d pure functions).
+   */
+  private blendHslLayer(
+    base: VipsImage,
+    layer: VipsLayerInput,
+    width: number,
+    height: number,
+    vips: VipsInstance,
+    colorSpace: 'srgb' | 'display-p3' = 'srgb',
+  ): VipsImage {
+    // 1. Base → 8-bit linear buffer (clamp to [0, 255])
+    const baseUint8 = this.vipsToLinearUint8(base, width, height, vips);
+
+    // 2. Layer → 8-bit linear buffer
+    let layerImg = layer.image.cast('float');
+    // Ensure RGBA
+    if (layerImg.bands === 3) {
+      const opaqueAlpha = layerImg.newFromImage([1.0]);
+      const withAlpha = layerImg.bandjoin(opaqueAlpha);
+      opaqueAlpha.delete();
+      layerImg.delete();
+      layerImg = withAlpha;
+    }
+    const layerUint8 = this.vipsToLinearUint8(layerImg, width, height, vips);
+    layerImg.delete();
+
+    // 3. blend2d.ts manual blend (already in linear space)
+    // blendBuffersLinear modifies dst (baseUint8) in-place
+    blendBuffersLinear(baseUint8, layerUint8, layer.blendMode as LayerBlendMode, layer.opacity, colorSpace);
+
+    // 4. Result back to vips float [0, 1]
+    const resultImage = vips.Image.newFromMemory(
+      new Uint8Array(baseUint8.buffer), width, height, 4, 'uchar',
+    );
+    const floatResult = resultImage.cast('float').divide(255.0);
+    resultImage.delete();
+
+    return floatResult;
+  }
+
+  /**
+   * Convert a vips float [0,1] image to a Uint8ClampedArray (8-bit RGBA).
+   * Multiplies by 255 and casts to uchar. Values outside [0,1] are clamped
+   * by Uint8ClampedArray's inherent clamping behavior.
+   */
+  private vipsToLinearUint8(img: VipsImage, _w: number, _h: number, _vips: VipsInstance): Uint8ClampedArray {
+    const uint8Img = img.multiply(255.0).cast('uchar');
+    const buffer = uint8Img.writeToBuffer('.raw');
+    uint8Img.delete();
+    return new Uint8ClampedArray(buffer.buffer);
   }
 }

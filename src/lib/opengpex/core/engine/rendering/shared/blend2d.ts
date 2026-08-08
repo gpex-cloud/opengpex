@@ -118,8 +118,19 @@ function blendExclusion(cb: number, cs: number): number {
 // Operate on RGB triplets.
 // ────────────────────────────────────────────────────────────
 
-function lum(r: number, g: number, b: number): number {
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+/**
+ * Luminance coefficients per color space.
+ * Source: RGB-to-XYZ matrix Y row for each profile.
+ * - sRGB/BT.709: IEC 61966-2-1
+ * - Display P3: ICC Display P3 (D65), CSS Color 4 §10.3
+ */
+export const LUM_COEFFICIENTS: Record<string, [number, number, number]> = {
+  'srgb':       [0.2126, 0.7152, 0.0722],
+  'display-p3': [0.2289, 0.6917, 0.0793],
+};
+
+function lum(r: number, g: number, b: number, lr = 0.2126, lg = 0.7152, lb = 0.0722): number {
+  return lr * r + lg * g + lb * b;
 }
 
 function clipColor(r: number, g: number, b: number): [number, number, number] {
@@ -211,6 +222,7 @@ export function blendBuffersLinear(
   src: Uint8ClampedArray,
   blendMode: LayerBlendMode,
   opacity: number,
+  colorSpace: 'srgb' | 'display-p3' = 'srgb',
 ): void {
   const len = dst.length;
   const op = clamp01(opacity);
@@ -220,7 +232,8 @@ export function blendBuffersLinear(
     blendMode === 'color' || blendMode === 'luminosity';
 
   if (isNonSeparable) {
-    blendBuffersNonSeparable(dst, src, blendMode, op);
+    const [lr, lg, lb] = LUM_COEFFICIENTS[colorSpace] ?? LUM_COEFFICIENTS['srgb'];
+    blendBuffersNonSeparable(dst, src, blendMode, op, lr, lg, lb);
     return;
   }
 
@@ -287,12 +300,19 @@ export function blendBuffersLinear(
 
 /**
  * Non-separable blend modes (hue, saturation, color, luminosity).
+ *
+ * @param lr - Red luminance coefficient (default: BT.709 / sRGB)
+ * @param lg - Green luminance coefficient
+ * @param lb - Blue luminance coefficient
  */
 function blendBuffersNonSeparable(
   dst: Uint8ClampedArray,
   src: Uint8ClampedArray,
   blendMode: LayerBlendMode,
   opacity: number,
+  lr = 0.2126,
+  lg = 0.7152,
+  lb = 0.0722,
 ): void {
   const len = dst.length;
 
@@ -313,22 +333,22 @@ function blendBuffersNonSeparable(
 
     switch (blendMode) {
       case 'hue': {
-        const [r, g, b] = setLum(...setSat(csR, csG, csB, sat(cbR, cbG, cbB)), lum(cbR, cbG, cbB));
+        const [r, g, b] = setLum(...setSat(csR, csG, csB, sat(cbR, cbG, cbB)), lum(cbR, cbG, cbB, lr, lg, lb));
         outR = r; outG = g; outB = b;
         break;
       }
       case 'saturation': {
-        const [r, g, b] = setLum(...setSat(cbR, cbG, cbB, sat(csR, csG, csB)), lum(cbR, cbG, cbB));
+        const [r, g, b] = setLum(...setSat(cbR, cbG, cbB, sat(csR, csG, csB)), lum(cbR, cbG, cbB, lr, lg, lb));
         outR = r; outG = g; outB = b;
         break;
       }
       case 'color': {
-        const [r, g, b] = setLum(csR, csG, csB, lum(cbR, cbG, cbB));
+        const [r, g, b] = setLum(csR, csG, csB, lum(cbR, cbG, cbB, lr, lg, lb));
         outR = r; outG = g; outB = b;
         break;
       }
       case 'luminosity': {
-        const [r, g, b] = setLum(cbR, cbG, cbB, lum(csR, csG, csB));
+        const [r, g, b] = setLum(cbR, cbG, cbB, lum(csR, csG, csB, lr, lg, lb));
         outR = r; outG = g; outB = b;
         break;
       }

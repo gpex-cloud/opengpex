@@ -149,7 +149,8 @@ export class Canvas2dBackend {
       // Manual per-pixel blend in linear space
       const blendMode = desc.blendMode ?? 'source-over';
       const opacity = desc.opacity ?? 1;
-      blendBuffersLinear(dstData, layerPixels, blendMode, opacity);
+      const blendColorSpace: 'srgb' | 'display-p3' = canvasColorSpace === 'display-p3' ? 'display-p3' : 'srgb';
+      blendBuffersLinear(dstData, layerPixels, blendMode, opacity, blendColorSpace);
     }
 
     // Convert accumulated result from linear back to sRGB-TRC for display/export

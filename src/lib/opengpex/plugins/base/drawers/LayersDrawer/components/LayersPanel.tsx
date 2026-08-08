@@ -53,6 +53,9 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
   // Generic layer list collapse (expanded by default)
   const [layersCollapsed, setLayersCollapsed] = useState(false);
 
+  // Blend & Opacity section collapse (collapsed by default)
+  const [blendCollapsed, setBlendCollapsed] = useState(true);
+
   const [isScrolling, setIsScrolling] = React.useState(false);
   const scrollTimeout = useRef<NodeJS.Timeout | null>(null);
 
@@ -193,7 +196,7 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
           className="flex flex-col min-h-[200px] max-h-[396px] overflow-y-auto px-1 pb-2 custom-scrollbar [mask-image:linear-gradient(to_bottom,transparent,black_8px,black_calc(100%-8px),transparent)]"
         >
           <div
-            className={`pt-2 flex flex-col gap-1 ${isScrolling ? "pointer-events-none" : ""}`}
+            className={`pt-1 flex flex-col gap-1 ${isScrolling ? "pointer-events-none" : ""}`}
           >
             {hostLayers.length === 0 ? (
               <div className="py-12 flex flex-col items-center justify-center border border-dashed border-[var(--border-subtle)] rounded-2xl bg-transparent mb-2">
@@ -268,8 +271,25 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
         </div>
       </div>
 
-      {/* Layer Properties Bar: Blend Mode + Opacity (below layer list) */}
-      <LayerPropsBar />
+      {/* ─── Divider ─── */}
+      <div className="h-px bg-[var(--border-subtle)] mx-1 -mt-1" />
+
+      {/* ─── Blend & Opacity Section (collapsible, default collapsed) ─── */}
+      <div className="flex flex-col gap-1.5">
+        <button
+          onClick={() => setBlendCollapsed(prev => !prev)}
+          className="flex items-center gap-1.5 px-1 py-0.5 rounded hover:bg-[var(--bg-stage)]/50 transition-colors w-full text-left"
+        >
+          {blendCollapsed
+            ? <ChevronRight size={10} className="text-[var(--text-muted)] shrink-0" />
+            : <ChevronDown size={10} className="text-[var(--text-muted)] shrink-0" />
+          }
+          <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-wide">
+            Blend & Opacity
+          </span>
+        </button>
+        {!blendCollapsed && <LayerPropsBar />}
+      </div>
     </div>
   );
 }
