@@ -108,7 +108,7 @@ export async function cancelExecution(): Promise<void> {
 import type { InputSource } from './protocols';
 
 async function getInputImageBlob(ctx: EditorContextValue, inputSource: InputSource): Promise<Blob | null> {
-  const { activeFrame, pixels, geometry } = ctx;
+  const { activeFrame, pixels } = ctx;
   if (!activeFrame) return null;
 
   if (inputSource === 'merged-frame') {
@@ -123,15 +123,7 @@ async function getInputImageBlob(ctx: EditorContextValue, inputSource: InputSour
   if (!activeLayer) return null;
 
   const localRoi = asLocalShape({ x: 0, y: 0, w: activeFrame.canvas.w, h: activeFrame.canvas.h });
-  const worldRoi = geometry.shape.localToWorldShape(localRoi, activeFrame);
-  const result = await pixels.composite({
-    layers: [activeLayer],
-    roi: worldRoi,
-    precision: 8,
-    dpr: 1,
-    compositeTRC: activeFrame.trc,
-    compositeColorSpace: activeFrame.colorSpace,
-  });
+  const { result } = await pixels.render.compositeLayers([activeLayer], activeFrame, localRoi, { precision: 8 });
   const blob = await result.toBlob('image/png');
   return blob;
 }

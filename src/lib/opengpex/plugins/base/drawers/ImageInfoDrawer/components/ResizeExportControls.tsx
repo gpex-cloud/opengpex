@@ -89,6 +89,23 @@ export function ResizeExportControls({
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
 
+  // Sync exportBitDepth with 16-bit toggle visibility:
+  // show → default to source bit depth; hide → clear to undefined (= 8-bit default).
+  const show16BitToggle = sourceBitDepth !== undefined && sourceBitDepth > 8;
+  React.useEffect(() => {
+    if (show16BitToggle) {
+      // Toggle just appeared — default to source's native bit depth
+      if (config.exportBitDepth === undefined) {
+        updateConfig({ exportBitDepth: sourceBitDepth as 8 | 16 });
+      }
+    } else {
+      // Toggle hidden — clear stale 16-bit setting
+      if (config.exportBitDepth !== undefined) {
+        updateConfig({ exportBitDepth: undefined });
+      }
+    }
+  }, [show16BitToggle]);
+
   const { currentW, currentH, currentPercent } = deriveResizeState(
     baseW,
     baseH,

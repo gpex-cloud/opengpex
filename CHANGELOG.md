@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.45
+
+- ComfyBridge: unified Refresh button with auto-sync, connection timeout, auto-detect seed params on import, improved server history panel
+- Export: simplified download pipeline with host-layer filtering; 16-bit toggle auto-syncs with source bit depth
+- UI: increased font sizes in ComfyBridge panels for better readability
+
+---
+
 ## v1.0.0-beta.44
 
 - Linear-light blending: canvas preview now matches export for 16-bit and Display P3 documents, including HSL blend modes (hue, saturation, color, luminosity)

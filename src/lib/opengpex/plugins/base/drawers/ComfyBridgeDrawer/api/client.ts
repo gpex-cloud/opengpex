@@ -362,14 +362,26 @@ export class ComfyClient {
   /**
    * GET /history — Get all execution history from ComfyUI server.
    * Returns entries keyed by prompt_id, each containing the full API-format workflow.
+   * Has a 15s timeout to prevent blocking when server is unreachable.
    */
   async getAllHistory(): Promise<Record<string, ComfyHistoryEntry>> {
-    const res = await this.apiFetch('history');
-    if (!res.ok) {
-      throw new Error(`Failed to fetch history: HTTP ${res.status}`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const res = await this.apiFetch('history', { signal: controller.signal });
+      if (!res.ok) {
+        throw new Error(`Failed to fetch history: HTTP ${res.status}`);
+      }
+      const data = await res.json() as Record<string, ComfyHistoryEntry>;
+      return data;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw new Error('Connection timed out (15s)');
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
     }
-    const data = await res.json() as Record<string, ComfyHistoryEntry>;
-    return data;
   }
 
   /** GET /view?filename=...&type=output — Download output image */

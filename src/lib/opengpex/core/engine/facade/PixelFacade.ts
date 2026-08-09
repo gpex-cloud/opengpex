@@ -171,7 +171,7 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
       async compositeFrame(frame: Frame, roi?: LocalShape, options?: { precision?: 8 | 16; dpr?: number }) {
         const layers = frame.layers.order
           .map(id => frame.layers.byId[id])
-          .filter(l => l.visible);
+          .filter(l => !l.hostId && l.visible !== false);
 
         const worldRoi: WorldShape = roi
           ? geometry.shape.localToWorldShape(roi, frame)
@@ -186,7 +186,7 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
           compositeColorSpace: frame.colorSpace,
         });
       },
-      async compositeLayers(layers: Layer[], frame: Frame, roi?: Shape) {
+      async compositeLayers(layers: Layer[], frame: Frame, roi?: Shape, options?: { precision?: 8 | 16; dpr?: number }) {
         const effectiveRoi = roi
           ? geometry.shape.localToWorldShape(roi, frame)
           : geometry.shape.unitedShapeOfLayers(layers);
@@ -199,8 +199,8 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
         const result = await composite.composite({
           layers,
           roi: effectiveRoi,
-          precision: (frame.bitDepth as 8 | 16 | 32) ?? 8,
-          dpr: 1,
+          precision: options?.precision ?? (frame.bitDepth as 8 | 16 | 32) ?? 8,
+          dpr: options?.dpr ?? 1,
           compositeTRC: frame.trc,
           compositeColorSpace: frame.colorSpace,
         });

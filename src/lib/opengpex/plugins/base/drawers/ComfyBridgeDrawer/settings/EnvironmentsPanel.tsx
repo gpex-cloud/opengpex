@@ -258,14 +258,14 @@ export function EnvironmentsPanel({ config, setConfig }: EnvironmentsPanelProps)
 
       {/* Connection Guide */}
       <div className="mt-2 px-2 py-2.5 rounded-lg bg-[var(--bg-panel)] border border-[var(--border-subtle)]">
-        <p className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1.5">
+        <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1.5">
           🔌 Connection Guide
         </p>
-        <div className="text-[9px] text-[var(--text-muted)] leading-relaxed space-y-1.5">
-          <p><strong className="text-[var(--text-main)]">Same machine (localhost):</strong> Works directly. Start ComfyUI with <code className="bg-[var(--bg-stage)] px-1 rounded text-[8px]">--enable-cors-header</code></p>
+        <div className="text-[10px] text-[var(--text-muted)] leading-relaxed space-y-1.5">
+          <p><strong className="text-[var(--text-main)]">Same machine (localhost):</strong> Works directly. Start ComfyUI with <code className="bg-[var(--bg-stage)] px-1 rounded text-[9px]">--enable-cors-header</code></p>
           <p><strong className="text-[var(--text-main)]">LAN machine (192.168.x.x):</strong> If using HTTPS cloud, browser blocks mixed content. Solutions:</p>
           <ul className="list-disc pl-3 space-y-0.5">
-            <li>SSH tunnel: <code className="bg-[var(--bg-stage)] px-1 rounded text-[8px]">ssh -L 8188:comfy-host:8188 user@comfy-host</code> → connect to localhost:8188</li>
+            <li>SSH tunnel: <code className="bg-[var(--bg-stage)] px-1 rounded text-[9px]">ssh -L 8188:comfy-host:8188 user@comfy-host</code> → connect to localhost:8188</li>
             <li>Cloudflare Tunnel / ngrok → gives ComfyUI an HTTPS URL</li>
             <li>Reverse proxy with HTTPS (Caddy/nginx) on ComfyUI machine</li>
           </ul>

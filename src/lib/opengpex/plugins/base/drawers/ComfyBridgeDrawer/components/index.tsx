@@ -200,18 +200,8 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
               <RotateCcw size={11} />
             </button>
           </Tooltip>
-          {/* Sync Object Info */}
-          <Tooltip content="Sync param types from /object_info" position="bottom">
-            <button
-              onClick={() => syncObjectInfo()}
-              disabled={isSyncing || !activeWorkflow}
-              className="flex items-center justify-center w-6 h-6 rounded-lg text-[var(--text-muted)] hover:text-emerald-500 hover:bg-emerald-500/10 transition-colors focus:outline-none disabled:opacity-30"
-            >
-              <RefreshCw size={11} className={isSyncing ? 'animate-spin' : ''} />
-            </button>
-          </Tooltip>
-          {/* Test Connection */}
-          <Tooltip content="Test Connection" position="bottom">
+          {/* Refresh (test connection + sync object_info) */}
+          <Tooltip content="Refresh" position="bottom">
             <button
               onClick={() => testConnection()}
               disabled={isTesting}

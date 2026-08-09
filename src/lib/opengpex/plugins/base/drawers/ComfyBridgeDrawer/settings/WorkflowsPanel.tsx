@@ -137,6 +137,13 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
       Array.from(selectedParams),
     );
 
+    // Auto-detect seed params and add to randomSeedPaths
+    const seedPaths = newWorkflow.exposedParams
+      .filter(p => p.paramName.toLowerCase().includes('seed'))
+      .map(p => `${p.nodeId}.${p.paramName}`);
+    const currentRandomPaths = config.randomSeedPaths || [];
+    const newRandomPaths = [...new Set([...currentRandomPaths, ...seedPaths])];
+
     if (editingWorkflowId) {
       const existing = workflows.find(w => w.id === editingWorkflowId);
       const updatedWorkflow = {
@@ -144,9 +151,9 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
         id: editingWorkflowId,
         createdAt: existing?.createdAt || newWorkflow.createdAt,
       };
-      setConfig({ workflows: workflows.map(w => w.id === editingWorkflowId ? updatedWorkflow : w) });
+      setConfig({ workflows: workflows.map(w => w.id === editingWorkflowId ? updatedWorkflow : w), randomSeedPaths: newRandomPaths });
     } else {
-      setConfig({ workflows: [...workflows, newWorkflow] });
+      setConfig({ workflows: [...workflows, newWorkflow], randomSeedPaths: newRandomPaths });
     }
 
     resetImportState();
@@ -199,7 +206,7 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
 
       const entries = Object.entries(result.value.history);
       if (entries.length === 0) {
-        groups.push({ envId: env.id, envName: env.name, workflows: [], error: 'No execution history' });
+        groups.push({ envId: env.id, envName: env.name, workflows: [], error: 'empty_history' });
         continue;
       }
 
@@ -212,12 +219,6 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
       const deduplicated = deduplicateHistoryWorkflows(summaries);
       totalWorkflows += deduplicated.length;
       groups.push({ envId: env.id, envName: env.name, workflows: deduplicated });
-    }
-
-    if (totalWorkflows === 0) {
-      setServerImportError('No workflows found in any server history. Run a workflow in ComfyUI first.');
-      setServerImportState('idle');
-      return;
     }
 
     setServerWorkflowGroups(groups);
@@ -258,7 +259,7 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
       )}
 
       {workflows.length === 0 && importMode === 'idle' && (
-        <p className="text-[9px] text-[var(--text-muted)] italic px-1">
+        <p className="text-[10px] text-[var(--text-muted)] italic px-1">
           No custom workflows imported yet. Import a ComfyUI workflow JSON to get started.
         </p>
       )}
@@ -268,19 +269,19 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
         <div className="flex flex-wrap gap-2 mt-1">
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1 text-[9px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors uppercase tracking-wider"
+            className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors uppercase tracking-wider"
           >
             <Upload size={10} /> Import JSON
           </button>
           <button
             onClick={() => setImportMode('paste')}
-            className="flex items-center gap-1 text-[9px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors uppercase tracking-wider"
+            className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors uppercase tracking-wider"
           >
             <Clipboard size={10} /> Paste JSON
           </button>
           <button
             onClick={handleImportFromServer}
-            className="flex items-center gap-1 text-[9px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors uppercase tracking-wider"
+            className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors uppercase tracking-wider"
           >
             <Download size={10} /> From Server
           </button>
@@ -298,7 +299,7 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
       {serverImportState === 'fetching' && (
         <div className="flex items-center gap-2 p-3 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)]">
           <Loader2 size={14} className="text-emerald-500 animate-spin" />
-          <span className="text-[9px] font-bold text-[var(--text-muted)]">Fetching workflow history from server...</span>
+          <span className="text-[10px] font-bold text-[var(--text-muted)]">Fetching workflow history from server...</span>
         </div>
       )}
 
@@ -306,83 +307,103 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
       {serverImportError && serverImportState === 'idle' && (
         <div className="flex items-start gap-1.5 p-2 rounded-lg bg-rose-500/5 border border-rose-500/20">
           <AlertCircle size={10} className="text-rose-500 mt-0.5 shrink-0" />
-          <span className="text-[8px] font-bold text-rose-500">{serverImportError}</span>
+          <span className="text-[9px] font-bold text-rose-500">{serverImportError}</span>
         </div>
       )}
 
-      {/* Server Import: Selection Panel */}
+      {/* Server Import: Selection Panel (always shows per-environment status) */}
       {serverImportState === 'selecting' && serverWorkflowGroups.length > 0 && (
-        <div className="flex flex-col gap-2 p-3 rounded-xl bg-[var(--bg-stage)] border border-emerald-500/30">
+        <div className={`flex flex-col gap-2 p-3 rounded-xl bg-[var(--bg-stage)] border ${
+          serverWorkflowGroups.some(g => g.workflows.length > 0) ? 'border-emerald-500/30' : 'border-[var(--border-subtle)]'
+        }`}>
           <div className="flex items-center justify-between">
-            <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">
-              Select Workflow
+            <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">
+              {serverWorkflowGroups.some(g => g.workflows.length > 0) ? 'Select Workflow' : 'Server History'}
             </span>
             <button
               onClick={cancelServerImport}
-              className="text-[9px] font-bold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors uppercase tracking-wider"
+              className="text-[10px] font-bold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors uppercase tracking-wider"
             >
               Cancel
             </button>
           </div>
           <div className="max-h-56 overflow-y-auto flex flex-col gap-2">
-            {serverWorkflowGroups.map((group) => (
-              <div key={group.envId} className="flex flex-col gap-1">
-                {serverWorkflowGroups.length > 1 && (
-                  <div className="flex items-center gap-2 py-1">
-                    <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-widest shrink-0">
-                      {group.envName}
-                    </span>
-                    <div className="flex-1 h-px bg-[var(--border-subtle)]" />
-                    {group.error && (
-                      <span className="text-[8px] text-rose-500 font-bold shrink-0">{group.error}</span>
-                    )}
-                    {!group.error && group.workflows.length > 0 && (
-                      <span className="text-[8px] text-[var(--text-muted)] shrink-0">{group.workflows.length}</span>
-                    )}
-                  </div>
-                )}
-                {group.workflows.map((summary: HistoryWorkflowSummary) => {
-                  const name = generateWorkflowName(summary);
-                  const isSelected = serverSelectedId === summary.promptId;
-                  const hasInput = Object.values(summary.workflow as Record<string, { class_type?: string }>).some(
-                    n => n.class_type === 'LoadImage' || n.class_type === 'LoadImageMask'
-                  );
-                  return (
-                    <button
-                      key={summary.promptId}
-                      onClick={() => {
-                        setServerSelectedId(summary.promptId);
-                        handleServerImportSelect(summary);
-                      }}
-                      className={`flex flex-col gap-0.5 px-2.5 py-2 rounded-lg border text-left transition-all ${
-                        isSelected
-                          ? 'bg-emerald-500/10 border-emerald-500/40'
-                          : 'bg-[var(--bg-panel)] border-[var(--border-subtle)] hover:border-emerald-500/30'
-                      }`}
-                    >
-                      <span className="text-[11px] font-bold text-[var(--text-main)] truncate">
-                        {name}
+            {serverWorkflowGroups.map((group) => {
+              const isEmptyHistory = group.error === 'empty_history';
+              const isConnectionError = group.error && !isEmptyHistory;
+              return (
+                <div key={group.envId} className="flex flex-col gap-1">
+                  {/* Environment header (always show when multiple envs) */}
+                  {serverWorkflowGroups.length > 1 && (
+                    <div className="flex items-center gap-2 py-1">
+                      <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest shrink-0">
+                        {group.envName}
                       </span>
-                      <div className="flex items-center gap-2 text-[9px] text-[var(--text-secondary)] flex-wrap">
-                        <span>{summary.nodeCount} nodes</span>
-                        <span className={`font-bold ${hasInput ? 'text-emerald-500' : 'text-blue-500'}`}>
-                          {hasInput ? 'img2img' : 'txt2img'}
+                      <div className="flex-1 h-px bg-[var(--border-subtle)]" />
+                      {isConnectionError && (
+                        <span className="text-[9px] text-rose-500 font-bold shrink-0">Unreachable</span>
+                      )}
+                      {isEmptyHistory && (
+                        <span className="text-[9px] text-amber-500 font-bold shrink-0">No history</span>
+                      )}
+                      {!group.error && group.workflows.length > 0 && (
+                        <span className="text-[9px] text-[var(--text-muted)] shrink-0">{group.workflows.length}</span>
+                      )}
+                    </div>
+                  )}
+                  {/* Per-environment error/warning messages */}
+                  {isConnectionError && (
+                    <div className="flex items-start gap-1.5 px-2 py-1.5 rounded-lg bg-rose-500/5 border border-rose-500/20">
+                      <AlertCircle size={9} className="text-rose-500 mt-0.5 shrink-0" />
+                      <span className="text-[9px] font-bold text-rose-500">{group.error}</span>
+                    </div>
+                  )}
+                  {isEmptyHistory && (
+                    <div className="flex items-start gap-1.5 px-2 py-1.5 rounded-lg bg-amber-500/5 border border-amber-500/20">
+                      <AlertCircle size={9} className="text-amber-500 mt-0.5 shrink-0" />
+                      <span className="text-[9px] font-bold text-amber-500">
+                        No execution history on this server. Run a workflow in ComfyUI first, then import here.
+                      </span>
+                    </div>
+                  )}
+                  {/* Workflow list */}
+                  {group.workflows.map((summary: HistoryWorkflowSummary) => {
+                    const name = generateWorkflowName(summary);
+                    const isSelected = serverSelectedId === summary.promptId;
+                    const hasInput = Object.values(summary.workflow as Record<string, { class_type?: string }>).some(
+                      n => n.class_type === 'LoadImage' || n.class_type === 'LoadImageMask'
+                    );
+                    return (
+                      <button
+                        key={summary.promptId}
+                        onClick={() => {
+                          setServerSelectedId(summary.promptId);
+                          handleServerImportSelect(summary);
+                        }}
+                        className={`flex flex-col gap-0.5 px-2.5 py-2 rounded-lg border text-left transition-all ${
+                          isSelected
+                            ? 'bg-emerald-500/10 border-emerald-500/40'
+                            : 'bg-[var(--bg-panel)] border-[var(--border-subtle)] hover:border-emerald-500/30'
+                        }`}
+                      >
+                        <span className="text-[12px] font-bold text-[var(--text-main)] truncate">
+                          {name}
                         </span>
-                        {summary.completed && <span className="text-green-500">✓ completed</span>}
-                        {summary.createdAt && <span className="opacity-60">created: {summary.createdAt}</span>}
-                        {summary.clientId && <span className="opacity-50 font-mono truncate max-w-[80px]" title={summary.clientId}>client: {summary.clientId.slice(0, 8)}</span>}
-                      </div>
-                    </button>
-                  );
-                })}
-                {serverWorkflowGroups.length === 1 && group.error && (
-                  <div className="flex items-center gap-1 px-2 py-1">
-                    <AlertCircle size={9} className="text-rose-500 shrink-0" />
-                    <span className="text-[8px] text-rose-500 font-bold">{group.error}</span>
-                  </div>
-                )}
-              </div>
-            ))}
+                        <div className="flex items-center gap-2 text-[10px] text-[var(--text-secondary)] flex-wrap">
+                          <span>{summary.nodeCount} nodes</span>
+                          <span className={`font-bold ${hasInput ? 'text-emerald-500' : 'text-blue-500'}`}>
+                            {hasInput ? 'img2img' : 'txt2img'}
+                          </span>
+                          {summary.completed && <span className="text-green-500">✓ completed</span>}
+                          {summary.createdAt && <span className="opacity-60">created: {summary.createdAt}</span>}
+                          {summary.clientId && <span className="opacity-50 font-mono truncate max-w-[80px]" title={summary.clientId}>client: {summary.clientId.slice(0, 8)}</span>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -390,32 +411,32 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
       {/* Paste Mode */}
       {importMode === 'paste' && (
         <div className="flex flex-col gap-2 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)]">
-          <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
+          <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
             Paste ComfyUI API Format JSON
           </span>
           <textarea
             value={importJson}
             onChange={(e) => setImportJson(e.target.value)}
             placeholder='{"1": {"class_type": "KSampler", "inputs": {...}}, ...}'
-            className="w-full h-24 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg px-2 py-1.5 text-[9px] text-[var(--text-main)] font-mono resize-none focus:outline-none focus:border-emerald-500"
+            className="w-full h-24 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg px-2 py-1.5 text-[10px] text-[var(--text-main)] font-mono resize-none focus:outline-none focus:border-emerald-500"
           />
           {importError && (
             <div className="flex items-start gap-1">
               <AlertCircle size={9} className="text-rose-500 mt-0.5 shrink-0" />
-              <span className="text-[8px] font-bold text-rose-500">{importError}</span>
+              <span className="text-[9px] font-bold text-rose-500">{importError}</span>
             </div>
           )}
           <div className="flex gap-2">
             <button
               onClick={handlePasteImport}
               disabled={!importJson.trim()}
-              className="text-[9px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors uppercase tracking-wider disabled:opacity-40"
+              className="text-[10px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors uppercase tracking-wider disabled:opacity-40"
             >
               Parse & Configure
             </button>
             <button
               onClick={resetImportState}
-              className="text-[9px] font-bold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors uppercase tracking-wider"
+              className="text-[10px] font-bold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors uppercase tracking-wider"
             >
               Cancel
             </button>
@@ -426,12 +447,12 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
       {/* Configure Mode */}
       {importMode === 'configure' && parseResult && (
         <div className="flex flex-col gap-3 p-3 rounded-xl bg-[var(--bg-stage)] border border-emerald-500/30">
-          <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">
+          <span className="text-[11px] font-black text-emerald-500 uppercase tracking-widest">
             {editingWorkflowId ? 'Edit Workflow Configuration' : 'Configure Imported Workflow'}
           </span>
 
           {/* Detected mode & nodes info */}
-          <div className="flex items-center gap-2 text-[9px] text-[var(--text-muted)]">
+          <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
             <span>{parseResult.nodeCount} nodes</span>
             <span>•</span>
             <span className={`inline-flex items-center gap-0.5 font-bold ${parseResult.inputNodeId ? 'text-emerald-500' : 'text-blue-500'}`}>
@@ -458,21 +479,21 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
               value={workflowName}
               onChange={(e) => setWorkflowName(e.target.value)}
               placeholder="Workflow name (required)"
-              className="w-full bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg px-2.5 py-2 text-[11px] text-[var(--text-main)] focus:outline-none focus:border-emerald-500"
+              className="w-full bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg px-2.5 py-2 text-[12px] text-[var(--text-main)] focus:outline-none focus:border-emerald-500"
             />
             <input
               type="text"
               value={workflowDesc}
               onChange={(e) => setWorkflowDesc(e.target.value)}
               placeholder="Description (optional)"
-              className="w-full bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg px-2.5 py-2 text-[11px] text-[var(--text-main)] focus:outline-none focus:border-emerald-500"
+              className="w-full bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg px-2.5 py-2 text-[12px] text-[var(--text-main)] focus:outline-none focus:border-emerald-500"
             />
           </div>
 
           {/* Parameter Selection */}
           {parseResult.candidateParams.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-wider">
+              <span className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-wider">
                 Expose Parameters ({selectedParams.size}/{parseResult.candidateParams.length})
               </span>
               <div className="max-h-40 overflow-y-auto flex flex-col gap-1 pr-1">
@@ -490,10 +511,10 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
                         onChange={() => toggleParam(paramKey)}
                         className="accent-emerald-500"
                       />
-                      <span className="text-[10px] text-[var(--text-main)] flex-1 truncate font-mono">
+                      <span className="text-[11px] text-[var(--text-main)] flex-1 truncate font-mono">
                         {paramLabel}
                       </span>
-                      <span className="text-[9px] text-[var(--text-muted)] shrink-0">
+                      <span className="text-[10px] text-[var(--text-muted)] shrink-0">
                         ({param.type}: {param.paramValue.slice(0, 20)})
                       </span>
                     </label>
@@ -508,13 +529,13 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
             <button
               onClick={handleSaveWorkflow}
               disabled={!workflowName.trim()}
-              className="text-[10px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors uppercase tracking-wider disabled:opacity-40"
+              className="text-[11px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors uppercase tracking-wider disabled:opacity-40"
             >
               ✓ {editingWorkflowId ? 'Update Workflow' : 'Save Workflow'}
             </button>
             <button
               onClick={resetImportState}
-              className="text-[10px] font-bold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors uppercase tracking-wider"
+              className="text-[11px] font-bold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors uppercase tracking-wider"
             >
               Cancel
             </button>
@@ -525,7 +546,7 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
       {/* Import Hints */}
       {importMode === 'idle' && (
         <div className="mt-2 px-1">
-          <p className="text-[9px] text-[var(--text-muted)] italic leading-relaxed opacity-60">
+          <p className="text-[10px] text-[var(--text-muted)] italic leading-relaxed opacity-60">
             ℹ️ Export from ComfyUI: use &quot;Save (API Format)&quot; → upload/paste here.
             System auto-detects LoadImage input and SaveImage/PreviewImage output nodes.
           </p>
@@ -542,10 +563,10 @@ function WorkflowCard({ workflow, onEdit, onRemove }: { workflow: UserWorkflow; 
     <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)]">
       <div className="flex flex-col gap-0.5 flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-[11px] font-bold text-[var(--text-main)] truncate">
+          <span className="text-[12px] font-bold text-[var(--text-main)] truncate">
             {workflow.name}
           </span>
-          <span className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border shrink-0 ${
+          <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border shrink-0 ${
             workflow.mode === 'img2img'
               ? 'text-emerald-600 border-emerald-500/30 bg-emerald-500/10'
               : 'text-blue-600 border-blue-500/30 bg-blue-500/10'
@@ -553,7 +574,7 @@ function WorkflowCard({ workflow, onEdit, onRemove }: { workflow: UserWorkflow; 
             {workflow.mode}
           </span>
         </div>
-        <span className="text-[9px] text-[var(--text-muted)]">
+        <span className="text-[10px] text-[var(--text-muted)]">
           {workflow.exposedParams.length} params •
           {workflow.inputNodeId ? ' has input' : ' no input'} •
           {workflow.outputNodeId ? ' has output' : ' no output'} •

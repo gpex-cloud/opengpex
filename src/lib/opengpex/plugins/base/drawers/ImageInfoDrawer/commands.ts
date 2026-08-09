@@ -48,7 +48,7 @@ export const IMAGE_INFO_COMMANDS = {
       name: 'Download Creation',
       category: 'File',
       execute: async (ctx: EditorContextValue) => {
-         const { activeFrame, state, pixels, files, geometry } = ctx;
+         const { activeFrame, state, pixels, files } = ctx;
          const { selfConfig } = ctx.scoped || {};
          if (!activeFrame) return;
 
@@ -177,28 +177,14 @@ export const IMAGE_INFO_COMMANDS = {
          }
 
          // ─── 5. Unified composite pipeline (Step 9) ─────────────────────────
-         // Composition and encoding are now orthogonal:
-         //   pixels.composite() → CompositeResult → result.toBlob(format, encodeOpts)
-
+         // compositeFrame handles hostId filtering, ROI conversion, TRC and colorSpace.
          const localRoi = cropShape
             ? cropShape
             : asLocalShape({ x: 0, y: 0, w: activeFrame.canvas.w, h: activeFrame.canvas.h });
 
-         // Convert local-space ROI to world-space for the compositor.
-         // pixels.composite() sends the ROI directly to the Worker which uses
-         // translateToRoi(worldMatrix, roi.rect) — expecting world coordinates.
-         const worldRoi = geometry.shape.localToWorldShape(localRoi, activeFrame);
-
          const precision = opts.exportBitDepth === 16 ? 16 : 8;
 
-         const result = await pixels.composite({
-            layers: visibleLayers,
-            roi: worldRoi,
-            precision,
-            dpr: 1, // Export output is physical pixels (no retina scale)
-            // Phase C: Use frame's color space for the compositing pipeline
-            compositeColorSpace: activeFrame.colorSpace,
-         });
+         const result = await pixels.render.compositeFrame(activeFrame, localRoi, { precision });
 
             // Encode the composite result via FileService handlers.
             // This ensures metadata injection (DPI, ICC profile, EXIF) is applied correctly.

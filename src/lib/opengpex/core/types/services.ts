@@ -327,7 +327,7 @@ export interface PixelService {
      * Callers consume the result via `result.toAsset()`, `result.toBlob()`, etc.
      * GC handles cleanup — no explicit dispose needed.
      */
-    compositeLayers: (layers: Layer[], frame: Frame, roi?: Shape) => Promise<{
+    compositeLayers: (layers: Layer[], frame: Frame, roi?: Shape, options?: { precision?: 8 | 16; dpr?: number }) => Promise<{
       result: CompositeResult;
       bounds: { w: number; h: number; cx: number; cy: number };
     }>;
