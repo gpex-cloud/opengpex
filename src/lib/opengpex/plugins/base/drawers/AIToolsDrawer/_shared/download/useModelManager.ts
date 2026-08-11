@@ -22,29 +22,26 @@
 /**
  * useModelManager — High-level hook combining download, cache, and lifecycle.
  *
+ * Redesigned to eliminate flash-of-incorrect-state (FOIS) on mount:
+ *   - `cacheState` starts as 'checking' — UI shows nothing until resolved
+ *   - Once resolved, transitions to 'cached' or 'not-cached' deterministically
+ *   - During inference execution, the panel never re-checks cache state
+ *
  * Now backed by the download singleton, so downloads persist across
  * component mounts/unmounts. All panels (main + settings) share the
  * same download state — progress syncs everywhere, cancel syncs everywhere.
- *
- * Usage:
- * ```tsx
- * const mgr = useModelManager({
- *   modelId: activeModel?.modelId,
- *   modelName: activeModel?.name,
- *   files: [{ filename: 'encoder.onnx' }, { filename: 'decoder.onnx' }],
- *   actions,
- *   onDone: () => { statusSignal?.set(INITIAL); },
- *   onCancelled: () => { statusSignal?.set(INITIAL); },
- *   onError: (msg) => { statusSignal?.set({ stage: 'error', errorMessage: msg }); },
- * });
- * ```
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDownloadTask } from './useDownloadTask';
-import { isModelCached, deleteModelCache } from './model-cache';
+import { areFilesCached, deleteModelCache } from './model-cache';
 import { INITIAL_DOWNLOAD_PROGRESS } from './model-download';
 import type { ModelFile, DownloadProgress } from './model-download';
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+/** Deterministic cache state — no ambiguous boolean combinations */
+export type CacheState = 'checking' | 'cached' | 'not-cached';
 
 export interface ModelManagerOptions {
   /** HuggingFace model ID (e.g. 'SharpAI/sam2-hiera-tiny-onnx') */
@@ -55,18 +52,29 @@ export interface ModelManagerOptions {
   files: ModelFile[];
   /** Editor actions (for HUD messages) */
   actions: { setInteraction: (patch: { hud: { message: string; type: 'info' | 'success' | 'error' } }) => void };
-  /** Called when download completes successfully */
+  /**
+   * AI tool store — when provided, auto-generates onDone/onCancelled/onError:
+   *   - onDone:      store.setState({ task: null })
+   *   - onCancelled: store.reset()
+   *   - onError:     store.setState({ task: null, error: msg })
+   *
+   * Eliminates the need for repetitive callback definitions in each panel.
+   */
+  store?: { setState(patch: { task?: null; error?: string | null }): void; reset(): void };
+  /** Called when download completes successfully (overrides store-derived) */
   onDone?: () => void;
-  /** Called when download is cancelled */
+  /** Called when download is cancelled (overrides store-derived) */
   onCancelled?: () => void;
-  /** Called when download errors */
+  /** Called when download errors (overrides store-derived) */
   onError?: (message: string) => void;
 }
 
 export interface ModelManagerReturn {
-  /** Whether the active model is cached locally */
+  /** Deterministic cache state: 'checking' | 'cached' | 'not-cached' */
+  cacheState: CacheState;
+  /** Convenience: whether the active model is cached locally */
   isCached: boolean;
-  /** Whether cache status is being checked */
+  /** Whether cache status is being checked (alias for cacheState === 'checking') */
   checkingCache: boolean;
   /** Whether a download is actively in progress (for this model) */
   isDownloading: boolean;
@@ -80,17 +88,19 @@ export interface ModelManagerReturn {
   deleteCache: () => Promise<void>;
 }
 
-export function useModelManager(options: ModelManagerOptions): ModelManagerReturn {
-  const { modelId, modelName, files, actions } = options;
+// ─── Hook ────────────────────────────────────────────────────────────────────
 
-  // Keep callbacks in refs so they're always fresh
-  const onDoneRef = useRef(options.onDone);
-  const onCancelledRef = useRef(options.onCancelled);
-  const onErrorRef = useRef(options.onError);
+export function useModelManager(options: ModelManagerOptions): ModelManagerReturn {
+  const { modelId, modelName, files, actions, store } = options;
+
+  // Derive callbacks: explicit callbacks take priority over store-derived ones
+  const onDoneRef = useRef(options.onDone ?? (store ? () => store.setState({ task: null }) : undefined));
+  const onCancelledRef = useRef(options.onCancelled ?? (store ? () => store.reset() : undefined));
+  const onErrorRef = useRef(options.onError ?? (store ? (msg: string) => store.setState({ task: null, error: msg }) : undefined));
   useEffect(() => {
-    onDoneRef.current = options.onDone;
-    onCancelledRef.current = options.onCancelled;
-    onErrorRef.current = options.onError;
+    onDoneRef.current = options.onDone ?? (store ? () => store.setState({ task: null }) : undefined);
+    onCancelledRef.current = options.onCancelled ?? (store ? () => store.reset() : undefined);
+    onErrorRef.current = options.onError ?? (store ? (msg: string) => store.setState({ task: null, error: msg }) : undefined);
   });
 
   // ─── Download (singleton) ─────────────────────────────────────────────────
@@ -103,24 +113,33 @@ export function useModelManager(options: ModelManagerOptions): ModelManagerRetur
     ? task.progress
     : INITIAL_DOWNLOAD_PROGRESS;
 
-  // ─── Cache status ────────────────────────────────────────────────────────
-  const [isCached, setIsCached] = useState(false);
-  const [checkingCache, setCheckingCache] = useState(false);
+  // ─── Cache status (single deterministic state) ────────────────────────────
+  // CRITICAL: Start as 'checking' so we NEVER show "Not downloaded yet"
+  // before the async check completes. This eliminates the flash-of-incorrect-state.
+  const [cacheState, setCacheState] = useState<CacheState>('checking');
+
+  // Stable key derived from filenames — triggers re-check when files change
+  // even if modelId stays the same (e.g. same HF repo, different ONNX variant)
+  const filesKey = files.map(f => f.filename).join('|');
 
   useEffect(() => {
     let cancelled = false;
     const check = async () => {
-      if (!modelId) return;
-      setCheckingCache(true);
-      const cached = await isModelCached(modelId);
+      if (!modelId) {
+        setCacheState('not-cached');
+        return;
+      }
+      setCacheState('checking');
+      const filenames = files.map(f => f.filename);
+      const cached = await areFilesCached(modelId, filenames);
       if (!cancelled) {
-        setIsCached(cached);
-        setCheckingCache(false);
+        setCacheState(cached ? 'cached' : 'not-cached');
       }
     };
     check();
     return () => { cancelled = true; };
-  }, [modelId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelId, filesKey]);
 
   // ─── Lifecycle callbacks on state transitions ────────────────────────────
   const prevStageRef = useRef<string>('idle');
@@ -134,10 +153,8 @@ export function useModelManager(options: ModelManagerOptions): ModelManagerRetur
 
     const handleTransition = async () => {
       if (stage === 'done') {
-        if (modelId) {
-          const cached = await isModelCached(modelId);
-          setIsCached(cached);
-        }
+        // Download completed — model is definitely cached now
+        setCacheState('cached');
         actions.setInteraction({ hud: { message: `Model downloaded: ${modelName ?? 'unknown'}`, type: 'success' } });
         onDoneRef.current?.();
         clear();
@@ -167,9 +184,10 @@ export function useModelManager(options: ModelManagerOptions): ModelManagerRetur
   const deleteCache = useCallback(async () => {
     if (!modelId) return;
     try {
-      const deleted = await deleteModelCache(modelId);
+      const filenames = files.map(f => f.filename);
+      const deleted = await deleteModelCache(modelId, filenames);
       if (deleted) {
-        setIsCached(false);
+        setCacheState('not-cached');
         actions.setInteraction({ hud: { message: `Model cache cleared: ${modelName}`, type: 'success' } });
       } else {
         actions.setInteraction({ hud: { message: 'No cached files found for this model', type: 'info' } });
@@ -177,9 +195,14 @@ export function useModelManager(options: ModelManagerOptions): ModelManagerRetur
     } catch {
       actions.setInteraction({ hud: { message: 'Failed to clear model cache', type: 'error' } });
     }
-  }, [modelId, modelName, actions]);
+  }, [modelId, modelName, files, actions]);
+
+  // ─── Derived convenience values ──────────────────────────────────────────
+  const isCached = cacheState === 'cached';
+  const checkingCache = cacheState === 'checking';
 
   return {
+    cacheState,
     isCached,
     checkingCache,
     isDownloading: !!isDownloading,

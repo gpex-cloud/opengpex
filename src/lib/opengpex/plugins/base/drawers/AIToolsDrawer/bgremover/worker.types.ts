@@ -21,56 +21,21 @@
  * BgRemover Worker Protocol
  *
  * Wire-level types for the request / response / progress messages exchanged
- * between the main thread (`client.ts`) and the bg-removal worker
- * (`bg-removal.worker.ts`).
+ * between the main thread (`client.ts`) and the bg-removal worker (`worker.ts`).
  *
- * Design notes (per 202606026_ai_bg_removal_spec §2.4 & §2.5):
+ * Design notes:
  *   - Mode B (persistent singleton): Worker holds the loaded pipeline across
  *     multiple invocations; model load (~70MB) only happens once.
  *   - Multi-message model: request → N progress messages → 1 final response.
  *   - `reqId` correlation for stale-response defense.
  *   - ImageData buffer transferred as Transferable (zero-copy).
- *   - Dynamic model selection: `modelId` specifies which HuggingFace model to load.
+ *   - All model/backend resolution is done on the main thread (full transparency).
  */
 
+import type { WorkerRequest, WorkerProgress, WorkerError } from '../_shared/inference/types';
+
 /** Main thread → Worker */
-export interface BgRemoverRequest {
-  /** Correlation id (echoed back in all responses/progress). */
-  reqId: number;
-
-  /**
-   * Action type:
-   *   - 'remove' (default): Run complete background removal (download/load + inference)
-   *   - 'download': Only download/load the model to cache, do not run inference
-   */
-  action?: 'remove' | 'download';
-
-  /**
-   * HuggingFace model repository ID to use for inference.
-   * e.g. "briaai/RMBG-1.4", "schirrmacher/birefnet-general"
-   */
-  modelId: string;
-
-  /**
-   * ONNX filename within the HuggingFace repo (e.g. "onnx/model_fp16.onnx").
-   * Used to determine the correct `dtype` for from_pretrained():
-   *   - "model_fp16.onnx" → dtype 'fp16'
-   *   - "model.onnx"      → dtype 'fp32'
-   *   - "model_quantized.onnx" → dtype 'q8'
-   * Falls back to 'fp32' if not specified or unrecognized.
-   */
-  onnxFile?: string;
-
-  /**
-   * Layer raster pixels (RGBA8). Buffer is detached on postMessage
-   * — caller MUST NOT touch it after sending.
-   */
-  imageData?: {
-    data: ArrayBuffer;
-    width: number;
-    height: number;
-  };
-
+export interface BgRemoverRequest extends WorkerRequest {
   /**
    * Context snapshot for result validation — the main thread uses these
    * to verify the target Frame/Layer still exists when writing results.
@@ -82,26 +47,12 @@ export interface BgRemoverRequest {
 }
 
 /** Worker → Main thread: Progress update (sent multiple times) */
-export interface BgRemoverProgress {
-  type: 'progress';
-  reqId: number;
-  stage: 'detecting-device' | 'loading' | 'downloading' | 'processing';
-  /** Device detected (only set after device detection) */
-  device?: 'webgpu' | 'wasm';
-  /** Download progress fields (only during 'downloading') */
-  file?: string;
-  loaded?: number;
-  total?: number;
-  /** Processing progress 0-1 (only during 'processing') */
-  progress?: number;
-}
+export type BgRemoverProgress = WorkerProgress;
 
 /** Worker → Main thread: Final result */
 export interface BgRemoverResult {
   type: 'result';
   reqId: number;
-  /** Action type echoed back */
-  action?: 'remove' | 'download';
   /** Context echoed back for validation */
   context?: {
     frameId: string;
@@ -124,11 +75,7 @@ export interface BgRemoverResult {
 }
 
 /** Worker → Main thread: Error */
-export interface BgRemoverError {
-  type: 'error';
-  reqId: number;
-  error: string;
-}
+export type BgRemoverError = WorkerError;
 
 /** Union of all Worker → Main thread messages */
 export type BgRemoverResponse = BgRemoverProgress | BgRemoverResult | BgRemoverError;

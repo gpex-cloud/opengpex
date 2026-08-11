@@ -19,323 +19,162 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
+import { EditorContextValue } from '@opengpex/editor/core/types';
+import { createToolCommand } from '../_shared/control/createToolCommand';
+import type { ProcessResultOutcome } from '../_shared/control/createToolCommand';
+import { getToolConfig } from '../_shared/useToolConfig';
 import { upscaleClient } from './client';
-import { SpeedEstimator } from '../shared';
+import type { UpscaleRequest, UpscaleResult as UpscaleWorkerResult } from './worker.types';
 import { PLUGIN_AUTHOR, PLUGIN_ID } from '../protocols';
-import type { AIToolsConfig } from '../protocols';
-import type { UpscaleStatus, UpscaleConfig } from './protocols';
+import type { UpscaleConfig, UpscaleModelEntry } from './protocols';
 import {
-  SIGNAL_UPSCALE_STATUS,
-  INITIAL_UPSCALE_STATUS,
   BUILTIN_UPSCALE_MODELS,
   DEFAULT_UPSCALE_CONFIG,
   CMD_UPSCALE,
-  CMD_UPSCALE_DOWNLOAD,
   CMD_UPSCALE_ABORT,
 } from './protocols';
+import { upscaleStore } from './store';
+import type { UpscaleResult } from './store';
 
-// ─── Upscale Commands ────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Auto-reset delay: how long to show "done" state before resetting to idle (ms) */
-const DONE_DISPLAY_MS = 3000;
+const PLUGIN_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}`;
+const MAX_CANVAS_AREA = 268_435_456;
+const MAX_CANVAS_DIM = 32_767;
 
-/** Module-level AbortController for the current upscale operation. */
-let upscaleAbortController: AbortController | null = null;
-
-/**
- * Helper: Get the active upscale model ID from plugin config.
- */
-function getActiveUpscaleModelId(ctx: EditorContextValue): string {
-  const pluginUid = `${PLUGIN_AUTHOR}.${PLUGIN_ID}`;
-  const config = ctx.state.pluginConfig[pluginUid] as unknown as AIToolsConfig | undefined;
-  const upConfig = config?.upscale as UpscaleConfig | undefined;
-  if (!upConfig) return BUILTIN_UPSCALE_MODELS[0].modelId;
-
-  const activeId = upConfig.activeModelId;
-  const fromConfig = upConfig.models?.find(m => m.id === activeId);
-  if (fromConfig) return fromConfig.modelId;
-
-  const fromBuiltins = BUILTIN_UPSCALE_MODELS.find(m => m.id === activeId);
-  if (fromBuiltins) return fromBuiltins.modelId;
-
-  return BUILTIN_UPSCALE_MODELS[0].modelId;
+function getUpscaleConfig(ctx: EditorContextValue): UpscaleConfig {
+  return getToolConfig<UpscaleConfig>(ctx.state.pluginConfig, PLUGIN_UID, 'upscale', DEFAULT_UPSCALE_CONFIG);
 }
 
-/**
- * Helper: Update the Upscale status signal.
- */
-function setUpscaleStatus(ctx: EditorContextValue, patch: Partial<UpscaleStatus>): void {
-  const current = (ctx.scoped!.getSignal<UpscaleStatus>(SIGNAL_UPSCALE_STATUS, INITIAL_UPSCALE_STATUS)) ?? INITIAL_UPSCALE_STATUS;
-  ctx.scoped!.setSignal(SIGNAL_UPSCALE_STATUS, { ...current, ...patch });
-}
+// ─── Tool Commands (via createToolCommand factory) ───────────────────────────
+
+const { runCommand, abortCommand } = createToolCommand<
+  Omit<UpscaleRequest, 'reqId'>,
+  UpscaleWorkerResult,
+  UpscaleResult,
+  UpscaleModelEntry
+>({
+  id: { run: CMD_UPSCALE, abort: CMD_UPSCALE_ABORT },
+  name: { run: 'AI Upscale Layer', abort: 'Cancel Upscale' },
+  store: upscaleStore,
+  client: upscaleClient,
+  configKey: 'upscale',
+  defaultConfig: DEFAULT_UPSCALE_CONFIG,
+  builtins: BUILTIN_UPSCALE_MODELS,
+  toolName: 'AI Upscaler',
+  noResultMessage: 'Upscale produced no output',
+
+  preCheck: (imageData, entry, ctx) => {
+    const upConfig = getUpscaleConfig(ctx);
+    const scale = upConfig.targetScale ?? 4;
+    const expectedOutW = imageData.width * scale;
+    const expectedOutH = imageData.height * scale;
+
+    if (expectedOutW * expectedOutH > MAX_CANVAS_AREA ||
+        expectedOutW > MAX_CANVAS_DIM || expectedOutH > MAX_CANVAS_DIM) {
+      return `Output ${expectedOutW}×${expectedOutH} (${((expectedOutW * expectedOutH) / 1e6).toFixed(0)}M pixels) exceeds browser canvas limit. ` +
+        `Max supported: ~${(MAX_CANVAS_AREA / 1e6).toFixed(0)}M pixels. ` +
+        `Try a smaller image or use ComfyUI Bridge for large upscales.`;
+    }
+
+    // Large image warning (non-blocking)
+    const maxDim = Math.max(imageData.width, imageData.height);
+    if (maxDim > 2048) {
+      ctx.actions.setInteraction({ hud: { message: '⚠️ Large image — upscale may take a while. Consider using ComfyUI for best results.', type: 'info' } });
+    }
+
+    return null;
+  },
+
+  setRequest: (entry, imageData, ctx) => {
+    const upConfig = getUpscaleConfig(ctx);
+    const scale = upConfig.targetScale ?? 4;
+    const tileSize = upConfig.tileSize ?? 128;
+
+    return {
+      modelId: entry.modelId,
+      onnxFile: entry.onnxFile,
+      backend: entry.backend ?? 'ort',
+      device: entry.device ?? 'webgpu',
+      modelScale: entry.scale as 2 | 4,
+      scale,
+      tileSize,
+      imageData: {
+        data: imageData.data.buffer,
+        width: imageData.width,
+        height: imageData.height,
+      },
+    };
+  },
+
+  getResult: async (workerResult, ctx, elapsedMs): Promise<ProcessResultOutcome<UpscaleResult> | null> => {
+    const { actions } = ctx;
+    const frameId = ctx.activeFrame!.id;
+
+    const targetFrame = ctx.state.frames.byId[frameId];
+    if (!targetFrame) {
+      actions.setInteraction({ hud: { message: 'Upscale complete, but target canvas was closed', type: 'info' } });
+      return null;
+    }
+
+    if (!workerResult.imageData) return null;
+
+    const { width: outW, height: outH, data: resultBuffer } = workerResult.imageData;
+    const upConfig = getUpscaleConfig(ctx);
+    const scale = upConfig.targetScale ?? 4;
+    const outputMode = upConfig.outputMode ?? 'new-frame';
+    const dpiMode = upConfig.dpiMode ?? 'increase-resolution';
+
+    const sourceDpi = targetFrame.dpi || 72;
+    const effectiveScale = outW / (targetFrame.canvas?.w || outW);
+    const targetDpi = dpiMode === 'increase-dpi'
+      ? Math.round(sourceDpi * effectiveScale)
+      : sourceDpi;
+
+    // Convert raw pixels to PNG file
+    const outCanvas = new OffscreenCanvas(outW, outH);
+    const outCtx2d = outCanvas.getContext('2d')!;
+    const outImgData = new ImageData(new Uint8ClampedArray(resultBuffer), outW, outH);
+    outCtx2d.putImageData(outImgData, 0, 0);
+    const blob = await outCanvas.convertToBlob({ type: 'image/png' });
+    const frameName = targetFrame.name || 'Untitled';
+    const file = new File([blob], `${frameName}_upscaled_${scale}x.png`, { type: 'image/png' });
+
+    // Create new frame or replace current
+    if (outputMode === 'new-frame') {
+      const newFrameId = await actions.adv.frame.create.trunk.execute({ source: file });
+      if (newFrameId && targetDpi !== 72) {
+        actions.updateFrame(newFrameId, { dpi: targetDpi });
+      }
+    } else {
+      await actions.adv.frame.resize.replace.execute({ source: file, dpi: targetDpi });
+    }
+
+    const dpiInfo = dpiMode === 'increase-dpi' ? ` @ ${targetDpi} DPI` : '';
+
+    if (workerResult.debug) {
+      console.log(`[Upscaler] ${workerResult.debug.deviceUsed} | tiles: ${workerResult.debug.tilesProcessed} | total: ${workerResult.debug.totalMs.toFixed(0)}ms`);
+    }
+
+    return {
+      result: {
+        deviceUsed: workerResult.debug?.deviceUsed ?? 'wasm',
+        inferenceMs: workerResult.debug?.totalMs ?? elapsedMs,
+        totalMs: workerResult.debug?.totalMs ?? elapsedMs,
+        scaleFactor: scale,
+        outputWidth: outW,
+        outputHeight: outH,
+        frameId,
+      },
+      hudMessage: `✨ Upscale complete — ${outW}×${outH}${dpiInfo} (${(elapsedMs / 1000).toFixed(1)}s)`,
+      hudType: 'success',
+    };
+  },
+});
+
+// ─── Exported Commands ───────────────────────────────────────────────────────
 
 export const UPSCALE_COMMANDS = {
-  /**
-   * upscale — Execute AI upscale on the active image layer.
-   */
-  upscale: {
-    id: CMD_UPSCALE,
-    name: 'AI Upscale Layer',
-    execute: async (ctx: EditorContextValue) => {
-      const { activeFrame, activeLayer, actions } = ctx;
-
-      if (!activeFrame || !activeLayer) {
-        actions.setInteraction({ hud: { message: 'No active image layer', type: 'error' } });
-        return;
-      }
-      if (activeLayer.type !== 'image') {
-        actions.setInteraction({ hud: { message: 'AI Upscaler only works on image layers', type: 'error' } });
-        return;
-      }
-
-      const frameId = activeFrame.id;
-      const modelId = getActiveUpscaleModelId(ctx);
-
-      const pluginUid = `${PLUGIN_AUTHOR}.${PLUGIN_ID}`;
-      const config = ctx.state.pluginConfig[pluginUid] as unknown as AIToolsConfig | undefined;
-      const upConfig = config?.upscale ?? DEFAULT_UPSCALE_CONFIG;
-      const scale = upConfig.targetScale ?? 4;
-      const tileSize = upConfig.tileSize ?? 256;
-
-      const imageSource = activeLayer.src;
-      if (!imageSource) {
-        actions.setInteraction({ hud: { message: 'Layer has no image source', type: 'error' } });
-        return;
-      }
-
-      let imageData: ImageData;
-      try {
-        imageData = await ctx.pixels.image.imageData(activeLayer.assetId!);
-      } catch {
-        actions.setInteraction({ hud: { message: 'Failed to read image data', type: 'error' } });
-        return;
-      }
-
-      const maxDim = Math.max(imageData.width, imageData.height);
-      if (maxDim > 2048) {
-        actions.setInteraction({ hud: { message: '⚠️ Large image — upscale may take a while. Consider using ComfyUI for best results.', type: 'info' } });
-      }
-
-      ctx.scoped!.setBusy(true);
-      upscaleAbortController = new AbortController();
-      const { signal } = upscaleAbortController;
-      const speedEstimator = new SpeedEstimator();
-      const start = performance.now();
-
-      setUpscaleStatus(ctx, {
-        stage: 'processing',
-        device: null,
-        downloadProgress: 0,
-        processingProgress: 0,
-        currentTile: 0,
-        totalTiles: 0,
-        errorMessage: null,
-        elapsedMs: 0,
-      });
-
-      try {
-        const result = await upscaleClient.run(
-          {
-            action: 'upscale',
-            modelId,
-            imageData: {
-              data: imageData.data.buffer,
-              width: imageData.width,
-              height: imageData.height,
-            },
-            scale,
-            tileSize,
-          },
-          {
-            timeoutMs: 0,
-            signal,
-            onProgress: (p) => {
-              if (p.stage === 'detecting-device' && p.device) {
-                setUpscaleStatus(ctx, { device: p.device });
-              } else if (p.stage === 'downloading') {
-                if (p.loaded != null && p.total != null) {
-                  speedEstimator.update(p.loaded, p.total);
-                  setUpscaleStatus(ctx, {
-                    stage: 'downloading',
-                    downloadProgress: p.total > 0 ? p.loaded / p.total : 0,
-                    downloadedBytes: p.loaded,
-                    totalBytes: p.total,
-                    speedBps: speedEstimator.bytesPerSecond,
-                    etaSeconds: speedEstimator.etaSeconds,
-                  });
-                }
-              } else if (p.stage === 'processing') {
-                setUpscaleStatus(ctx, {
-                  stage: 'processing',
-                  processingProgress: p.progress ?? 0,
-                  currentTile: p.currentTile ?? 0,
-                  totalTiles: p.totalTiles ?? 0,
-                });
-              }
-            },
-          }
-        );
-
-        const elapsedMs = performance.now() - start;
-
-        const targetFrame = ctx.state.frames.byId[frameId];
-        if (!targetFrame) {
-          actions.setInteraction({ hud: { message: 'Upscale complete, but target canvas was closed', type: 'info' } });
-          setUpscaleStatus(ctx, { ...INITIAL_UPSCALE_STATUS });
-          return;
-        }
-
-        if (result.imageData) {
-          const { width: outW, height: outH, data: resultBuffer } = result.imageData;
-          const outputMode = upConfig.outputMode ?? 'new-frame';
-          const dpiMode = upConfig.dpiMode ?? 'increase-resolution';
-
-          const sourceDpi = targetFrame.dpi || 72;
-          const effectiveScale = outW / (targetFrame.canvas?.w || outW);
-          const targetDpi = dpiMode === 'increase-dpi'
-            ? Math.round(sourceDpi * effectiveScale)
-            : sourceDpi;
-
-          const outCanvas = new OffscreenCanvas(outW, outH);
-          const outCtx2d = outCanvas.getContext('2d')!;
-          const outImgData = new ImageData(new Uint8ClampedArray(resultBuffer), outW, outH);
-          outCtx2d.putImageData(outImgData, 0, 0);
-          const blob = await outCanvas.convertToBlob({ type: 'image/png' });
-          const frameName = targetFrame.name || 'Untitled';
-          const file = new File([blob], `${frameName}_upscaled_${scale}x.png`, { type: 'image/png' });
-
-          if (outputMode === 'new-frame') {
-            const newFrameId = await actions.adv.frame.create.trunk.execute({ source: file });
-            if (newFrameId && targetDpi !== 72) {
-              actions.updateFrame(newFrameId, { dpi: targetDpi });
-            }
-          } else {
-            await actions.adv.frame.resize.replace.execute({ source: file, dpi: targetDpi });
-          }
-
-          const dpiInfo = dpiMode === 'increase-dpi' ? ` @ ${targetDpi} DPI` : '';
-          actions.setInteraction({
-            hud: { message: `✨ Upscale complete — ${outW}×${outH}${dpiInfo} (${(elapsedMs / 1000).toFixed(1)}s)`, type: 'success' },
-          });
-        }
-
-        setUpscaleStatus(ctx, {
-          stage: 'done',
-          processingProgress: 1,
-          elapsedMs,
-        });
-
-        setTimeout(() => {
-          const current = ctx.scoped!.getSignal<UpscaleStatus>(SIGNAL_UPSCALE_STATUS, INITIAL_UPSCALE_STATUS);
-          if (current?.stage === 'done') {
-            setUpscaleStatus(ctx, { ...INITIAL_UPSCALE_STATUS });
-          }
-        }, DONE_DISPLAY_MS);
-
-        if (result.debug) {
-          console.log(`[Upscaler] ${result.debug.deviceUsed} | tiles: ${result.debug.tilesProcessed} | total: ${result.debug.totalMs.toFixed(0)}ms`);
-        }
-
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('Aborted')) {
-          setUpscaleStatus(ctx, { ...INITIAL_UPSCALE_STATUS });
-          actions.setInteraction({ hud: { message: 'Upscale cancelled', type: 'info' } });
-        } else {
-          setUpscaleStatus(ctx, { stage: 'error', errorMessage: msg });
-          actions.setInteraction({ hud: { message: 'Upscale failed — see error in panel', type: 'error' } });
-        }
-      } finally {
-        upscaleAbortController = null;
-        ctx.scoped!.setBusy(false);
-      }
-    },
-  } as EditorCommand<void, Promise<void>>,
-
-  /**
-   * downloadUpscaleModel — Pre-download the active upscale model.
-   */
-  downloadUpscaleModel: {
-    id: CMD_UPSCALE_DOWNLOAD,
-    name: 'Download Upscale Model',
-    execute: async (ctx: EditorContextValue) => {
-      const modelId = getActiveUpscaleModelId(ctx);
-      ctx.scoped!.setBusy(true);
-      upscaleAbortController = new AbortController();
-      const { signal } = upscaleAbortController;
-      const speedEstimator = new SpeedEstimator();
-
-      setUpscaleStatus(ctx, {
-        stage: 'downloading',
-        downloadProgress: 0,
-        errorMessage: null,
-      });
-
-      try {
-        await upscaleClient.run(
-          { action: 'download', modelId },
-          {
-            timeoutMs: 0,
-            signal,
-            onProgress: (p) => {
-              if (p.stage === 'downloading' && p.loaded != null && p.total != null) {
-                speedEstimator.update(p.loaded, p.total);
-                setUpscaleStatus(ctx, {
-                  stage: 'downloading',
-                  downloadProgress: p.total > 0 ? p.loaded / p.total : 0,
-                  downloadedBytes: p.loaded,
-                  totalBytes: p.total,
-                  speedBps: speedEstimator.bytesPerSecond,
-                  etaSeconds: speedEstimator.etaSeconds,
-                });
-              }
-              if (p.stage === 'detecting-device' && p.device) {
-                setUpscaleStatus(ctx, { device: p.device });
-              }
-            },
-          }
-        );
-
-        setUpscaleStatus(ctx, { stage: 'done', downloadProgress: 1 });
-        ctx.actions.setInteraction({ hud: { message: '✨ Upscale model downloaded successfully', type: 'success' } });
-
-        setTimeout(() => {
-          const current = ctx.scoped!.getSignal<UpscaleStatus>(SIGNAL_UPSCALE_STATUS, INITIAL_UPSCALE_STATUS);
-          if (current?.stage === 'done') {
-            setUpscaleStatus(ctx, { ...INITIAL_UPSCALE_STATUS });
-          }
-        }, DONE_DISPLAY_MS);
-
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('Aborted')) {
-          setUpscaleStatus(ctx, { ...INITIAL_UPSCALE_STATUS });
-        } else {
-          setUpscaleStatus(ctx, { stage: 'error', errorMessage: msg });
-          ctx.actions.setInteraction({ hud: { message: 'Model download failed', type: 'error' } });
-        }
-      } finally {
-        upscaleAbortController = null;
-        ctx.scoped!.setBusy(false);
-      }
-    },
-  } as EditorCommand<void, Promise<void>>,
-
-  /**
-   * abortUpscale — Cancel an in-progress upscale operation.
-   */
-  abortUpscale: {
-    id: CMD_UPSCALE_ABORT,
-    name: 'Cancel Upscale',
-    execute: (ctx: EditorContextValue) => {
-      if (upscaleAbortController) {
-        upscaleAbortController.abort();
-        upscaleAbortController = null;
-      }
-      upscaleClient.dispose();
-      setUpscaleStatus(ctx, { ...INITIAL_UPSCALE_STATUS });
-      ctx.actions.setInteraction({ hud: { message: 'Upscale cancelled', type: 'info' } });
-    },
-  } as EditorCommand<void, void>,
+  upscale: runCommand,
+  abortUpscale: abortCommand,
 };

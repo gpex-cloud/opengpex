@@ -444,7 +444,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                   <div className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] flex items-center justify-between">
                     <span>Storage Allocation</span>
                     <span className="font-mono text-[var(--text-main)] font-bold">
-                      {formatBytes(metrics.totalBytes + metrics.stateBytes)}
+                      {formatBytes(metrics.totalBytes + metrics.stateBytes)} / {formatBytes(grandTotal)}
                     </span>
                   </div>
 
@@ -1051,34 +1051,52 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
 
                             {expandedNodes.models && (
                               <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 space-y-1 mt-0.5">
-                                {modelCache.fileCount > 0 ? (
+                                {modelCache.groups.length > 0 ? (
                                   <>
-                                    <div className="flex justify-between items-center py-0.5 px-2 text-[var(--text-muted)]">
-                                      <div className="flex items-center gap-2 min-w-0">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-                                        <span>Total Size</span>
-                                      </div>
-                                      <span className="font-mono text-[8px] text-purple-500 font-bold">
-                                        {formatBytes(modelCache.totalBytes)}
-                                      </span>
-                                    </div>
-                                    {modelCache.files.map((file, idx) => (
-                                      <div
-                                        key={`${file.cacheName}-${idx}`}
-                                        className="flex justify-between items-center py-0.5 px-2 text-[var(--text-muted)]"
-                                        title={file.url}
-                                      >
-                                        <div className="flex items-center gap-2 min-w-0">
-                                          <span className="w-1 h-1 rounded bg-purple-400" />
-                                          <span className="truncate text-[9px] font-mono">
-                                            {file.name}
-                                          </span>
+                                    {modelCache.groups.map((group) => {
+                                      const groupKey = `model:${group.modelId}`;
+                                      const isGroupExpanded = expandedNodes[groupKey] === true;
+                                      return (
+                                        <div key={group.modelId} className="flex flex-col">
+                                          <div
+                                            onClick={() => toggleNode(groupKey)}
+                                            className="flex justify-between items-center py-0.5 px-2 rounded hover cursor-pointer text-[var(--text-muted)]"
+                                          >
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                              {isGroupExpanded ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
+                                              <Package size={9} className="text-purple-400" />
+                                              <span className="truncate text-[9px] font-bold">
+                                                {group.modelId}
+                                              </span>
+                                            </div>
+                                            <span className="font-mono text-[8px] text-purple-500 font-bold flex-shrink-0 ml-2">
+                                              {formatBytes(group.totalBytes)}
+                                            </span>
+                                          </div>
+                                          {isGroupExpanded && (
+                                            <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-2.5 space-y-0.5 mt-0.5">
+                                              {group.files.map((file, idx) => (
+                                                <div
+                                                  key={`${group.modelId}-${idx}`}
+                                                  className="flex justify-between items-center py-0.5 px-1.5 text-[var(--text-muted)]"
+                                                  title={file.url}
+                                                >
+                                                  <div className="flex items-center gap-1.5 min-w-0">
+                                                    <span className="w-1 h-1 rounded bg-purple-300" />
+                                                    <span className="truncate text-[9px] font-mono">
+                                                      {file.name}
+                                                    </span>
+                                                  </div>
+                                                  <span className="font-mono text-[8px] text-[var(--text-muted)] flex-shrink-0 ml-2">
+                                                    {formatBytes(file.size)}
+                                                  </span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
                                         </div>
-                                        <span className="font-mono text-[8px] text-[var(--text-muted)] flex-shrink-0 ml-2">
-                                          {formatBytes(file.size)}
-                                        </span>
-                                      </div>
-                                    ))}
+                                      );
+                                    })}
                                   </>
                                 ) : (
                                   <div className="py-1 px-2 text-[var(--text-muted)] text-[9px] opacity-60">

@@ -104,6 +104,7 @@ export function ResizeExportControls({
         updateConfig({ exportBitDepth: undefined });
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentional: only react to visibility toggle, not to config/updateConfig changes (would cause infinite loop)
   }, [show16BitToggle]);
 
   const { currentW, currentH, currentPercent } = deriveResizeState(

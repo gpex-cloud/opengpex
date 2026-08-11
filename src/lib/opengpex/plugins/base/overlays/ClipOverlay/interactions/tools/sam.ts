@@ -27,14 +27,15 @@ import {
 } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
-import {
-  AIToolsDrawerAPI,
-  type SegPrompt,
-  type SegEncodePayload,
-  type SegEncodeResult,
-  type SegDecodePayload,
-  type SegDecodeResult,
-} from '../../../../drawers/AIToolsDrawer/protocols';
+import { AIToolsDrawerAPI } from '../../../../drawers/AIToolsDrawer/protocols';
+import { segStore } from '../../../../drawers/AIToolsDrawer/segmentation/store';
+import type {
+  SegPrompt,
+  SegEncodePayload,
+  SegEncodeResult,
+  SegDecodePayload,
+  SegDecodeResult,
+} from '../../../../drawers/AIToolsDrawer/segmentation/protocols';
 import { makeClipToolGuard } from '../guard';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -261,21 +262,16 @@ export const createSamHandler = (): InteractionHandler => {
           return;
         }
 
-        // Store frame-projected polygons in the seg status signal for panel switching.
-        // Include all state fields to avoid issues if setStateSignal replaces vs merges.
-        e.actions.setStateSignal(
-          AIToolsDrawerAPI.signals.segStatus,
-          {
-            stage: 'ready',
-            embeddingReady: true,
+        // Store frame-projected polygons in the seg store for panel switching.
+        segStore.setState({
+          lastResult: {
             candidates: decResult.masks,
             candidateFramePolygons: framePolygons,
             samFrameId: e.activeFrame.id,
             activeCandidateIdx: 0,
             lastDecodeMs: decResult.debug?.decodeMs ?? 0,
-            elapsedMs: decResult.debug?.totalMs ?? 0,
           },
-        );
+        });
 
         // 6. Commit best mask to sam clip slot.
         e.actions.setClipBox(e.activeFrame.id, 'sam', framePolygons[0]);

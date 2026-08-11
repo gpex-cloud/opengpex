@@ -25,11 +25,12 @@ export {
   areFilesCached,
   deleteModelCache,
   getModelCacheSize,
+  cleanupPartialModelCache,
 } from './model-cache';
 
 // React hooks
 export { useModelManager } from './useModelManager';
-export type { ModelManagerOptions, ModelManagerReturn } from './useModelManager';
+export type { CacheState, ModelManagerOptions, ModelManagerReturn } from './useModelManager';
 export { useDownloadTask } from './useDownloadTask';
 export type { UseDownloadTaskReturn } from './useDownloadTask';
 
@@ -46,5 +47,3 @@ export {
 export type { DownloadTask, DownloadListener } from './downloader';
 
 // UI component
-export { ModelDownloader, ModelDownloadSection } from './ModelDownloader';
-export type { ModelDownloaderProps, ModelDownloadSectionProps } from './ModelDownloader';

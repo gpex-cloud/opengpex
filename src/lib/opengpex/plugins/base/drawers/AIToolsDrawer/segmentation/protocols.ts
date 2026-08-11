@@ -36,121 +36,60 @@ export const CMD_SEG_DECODE = 'cmd.seg_decode';
 /** Segment All Objects — auto grid prompts + NMS → all objects in image */
 export const CMD_SEG_ALL = 'cmd.seg_all';
 
-// ─── Signal IDs ──────────────────────────────────────────────────────────────
+// ─── Signal IDs (legacy — kept for cross-plugin reference) ───────────────────
 
-export const SIGNAL_SEG_STATUS = 'signal.seg_status';
 /** Active tab within the AITools drawer ('bg-removal' | 'segmentation') */
 export const SIGNAL_ACTIVE_TAB = 'signal.active_tab';
 
-// ─── Status Types ────────────────────────────────────────────────────────────
-
-export type SegStage =
-  | 'idle'
-  | 'downloading'
-  | 'encoding'
-  | 'decoding'
-  | 'ready'       // Embedding cached, awaiting prompts
-  | 'error';
-
-export interface SegStatus {
-  [key: string]: unknown;
-  stage: SegStage;
-  device: 'webgpu' | 'wasm' | null;
-  downloadProgress: number;
-  downloadedBytes: number;
-  totalBytes: number;
-  speedBps: number;
-  etaSeconds: number;
-  downloadFile: string | null;
-  encodeProgress: number;
-  errorMessage: string | null;
-  embeddingReady: boolean;
-  /** Asset ID of the layer with a warm embedding */
-  embeddingAssetId: string | null;
-  /** Last decode results (up to 3 candidates) */
-  candidates: Array<{
-    rings: { x: number; y: number }[][];
-    score: number;
-  }>;
-  /** Index of the currently active candidate in clipBoxes */
-  activeCandidateIdx: number;
-  /** Performance stats from last decode */
-  lastDecodeMs: number;
-  /** Total elapsed ms */
-  elapsedMs: number;
-}
-
-export const INITIAL_SEG_STATUS: SegStatus = {
-  stage: 'idle',
-  device: null,
-  downloadProgress: 0,
-  downloadedBytes: 0,
-  totalBytes: 0,
-  speedBps: 0,
-  etaSeconds: 0,
-  downloadFile: null,
-  encodeProgress: 0,
-  errorMessage: null,
-  embeddingReady: false,
-  embeddingAssetId: null,
-  candidates: [],
-  activeCandidateIdx: 0,
-  lastDecodeMs: 0,
-  elapsedMs: 0,
-};
+import type { ModelEntry, ModelCatalog } from '../_shared/types';
 
 // ─── Model Management ────────────────────────────────────────────────────────
 
-export interface SegModelEntry {
-  id: string;
-  name: string;
-  modelId: string;
-  size: string;
-  description: string;
-  builtin: boolean;
-  default?: boolean;
+/**
+ * SegModelEntry — extends ModelEntry with SAM-specific fields.
+ *
+ * With the transformers.js migration, the model uses AutoModel + AutoProcessor
+ * from a single HuggingFace repo (config.json + ONNX weights managed internally
+ * by transformers.js). The `encoderFile`/`decoderFile` fields are kept for
+ * backwards-compatibility with custom models but are not used by built-in models.
+ */
+export interface SegModelEntry extends ModelEntry {
   type: 'interactive' | 'auto';
   /**
+   * @deprecated Legacy field for raw ORT mode.
    * Encoder filename (ORT-optimized format for onnxruntime-web).
-   * Defaults to "encoder.with_runtime_opt.ort".
-   * Some repos may use "encoder_fp16.ort" or similar variants.
    */
   encoderFile?: string;
   /**
-   * Decoder filename. Defaults to "decoder.onnx".
-   * Some repos may use "decoder_fp16.onnx" or similar variants.
+   * @deprecated Legacy field for raw ORT mode.
+   * Decoder filename.
    */
   decoderFile?: string;
-  /**
-   * Expected total download size in bytes (approximate).
-   * Used for download progress estimation.
-   */
-  expectedBytes?: number;
 }
 
-export const DEFAULT_SEG_ENCODER_FILE = 'encoder.with_runtime_opt.ort';
-export const DEFAULT_SEG_DECODER_FILE = 'decoder.onnx';
+/** @deprecated Legacy constant — transformers.js manages model files internally. */
+export const DEFAULT_SEG_ENCODER_FILE = 'onnx/vision_encoder.onnx';
+/** @deprecated Legacy constant — transformers.js manages model files internally. */
+export const DEFAULT_SEG_DECODER_FILE = 'onnx/prompt_encoder_mask_decoder.onnx';
 
 export const BUILTIN_SEG_MODELS: SegModelEntry[] = [
   {
-    id: 'SharpAI/sam2-hiera-tiny-onnx',
+    id: 'onnx-community/sam2.1-hiera-tiny-ONNX',
     name: 'SAM 2.1 Tiny',
-    modelId: 'SharpAI/sam2-hiera-tiny-onnx',
-    size: '~155 MB',
-    description: 'Recommended — fast interactive segmentation',
+    modelId: 'onnx-community/sam2.1-hiera-tiny-ONNX',
+    size: '~300 MB',
+    description: 'Recommended — fast interactive segmentation (transformers.js)',
     builtin: true,
     default: true,
     type: 'interactive',
-    encoderFile: 'encoder.with_runtime_opt.ort',
-    decoderFile: 'decoder.onnx',
-    expectedBytes: 42_000_000, // ~40 MB total
+    encoderFile: 'onnx/vision_encoder.onnx',
+    decoderFile: 'onnx/prompt_encoder_mask_decoder.onnx',
+    expectedBytes: 155_000_000,
   },
 ];
 
-export interface SegConfig {
-  [key: string]: unknown;
+export interface SegConfig extends ModelCatalog {
   models: SegModelEntry[];
-  activeModelId: string;
 }
 
 export const DEFAULT_SEG_CONFIG: SegConfig = {
@@ -172,23 +111,27 @@ export const SEG_MODEL_FILES = [
 /**
  * Get the download manifest for a segmentation model.
  *
- * Only downloads files actually used at inference:
- *   - encoder (ORT-optimized, e.g. "encoder.with_runtime_opt.ort")
- *   - decoder (e.g. "decoder.onnx")
+ * For transformers.js models (onnx-community/sam2.1-*), returns:
+ *   - config.json + preprocessor_config.json (needed by AutoModel/AutoProcessor)
+ *   - vision_encoder ONNX + data (image encoder weights)
+ *   - prompt_encoder_mask_decoder ONNX + data (decoder weights)
  *
- * NOTE: `encoder.onnx` (raw ONNX) is NOT downloaded — it's for Python/desktop
- * only and may contain ops unsupported by onnxruntime-web.
+ * Files are listed in the order transformers.js will request them.
  */
 export function getSegModelFiles(model: SegModelEntry): { filename: string; expectedBytes?: number }[] {
   const encoderFile = model.encoderFile ?? DEFAULT_SEG_ENCODER_FILE;
   const decoderFile = model.decoderFile ?? DEFAULT_SEG_DECODER_FILE;
-  // Split expected bytes roughly: encoder is ~80% of total, decoder ~20%
   const totalBytes = model.expectedBytes;
-  const encoderBytes = totalBytes ? Math.round(totalBytes * 0.8) : undefined;
-  const decoderBytes = totalBytes ? Math.round(totalBytes * 0.2) : undefined;
+  // For transformers.js compatible models, include config + ONNX + data files
+  const encoderBytes = totalBytes ? Math.round(totalBytes * 0.87) : undefined; // ~134 MB
+  const decoderBytes = totalBytes ? Math.round(totalBytes * 0.13) : undefined; // ~21 MB
   return [
+    { filename: 'config.json' },
+    { filename: 'preprocessor_config.json' },
     { filename: encoderFile, expectedBytes: encoderBytes },
+    { filename: `${encoderFile}_data`, expectedBytes: encoderBytes },
     { filename: decoderFile, expectedBytes: decoderBytes },
+    { filename: `${decoderFile}_data`, expectedBytes: decoderBytes },
   ];
 }
 

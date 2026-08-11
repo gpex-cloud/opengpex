@@ -342,6 +342,16 @@ export interface ModelCacheFileEntry {
   cacheName: string;
 }
 
+/** A group of cached files belonging to the same model (org/repo). */
+export interface ModelCacheGroup {
+  /** HuggingFace model ID (e.g. "onnx-community/sam2.1-hiera-tiny-ONNX") */
+  modelId: string;
+  /** Total bytes for this model's files */
+  totalBytes: number;
+  /** Files within this model */
+  files: ModelCacheFileEntry[];
+}
+
 export interface ModelCacheInfo {
   /** Total size of all cached model files in bytes */
   totalBytes: number;
@@ -351,56 +361,87 @@ export interface ModelCacheInfo {
   cacheNames: string[];
   /** Individual file entries with name, url, size, cacheName */
   files: ModelCacheFileEntry[];
+  /** Files grouped by model ID (org/repo), sorted by group size descending */
+  groups: ModelCacheGroup[];
 }
 
-const EMPTY_MODEL_CACHE: ModelCacheInfo = { totalBytes: 0, fileCount: 0, cacheNames: [], files: [] };
+const EMPTY_MODEL_CACHE: ModelCacheInfo = { totalBytes: 0, fileCount: 0, cacheNames: [], files: [], groups: [] };
 
 /**
  * Measure the total size of AI model files stored in Cache Storage.
- * transformers.js uses the Cache API to persist downloaded ONNX models.
- * Caches are identified by names containing 'transformers', 'huggingface', or 'onnx'.
+ * All AI models are stored under the unified 'opengpex-ai-models' cache bucket.
  */
 async function measureModelCache(): Promise<ModelCacheInfo> {
   try {
     if (typeof caches === 'undefined') return EMPTY_MODEL_CACHE;
+    const CACHE_NAME = 'opengpex-ai-models';
     const names = await caches.keys();
-    const matched: string[] = [];
+    if (!names.includes(CACHE_NAME)) return EMPTY_MODEL_CACHE;
+
     const files: ModelCacheFileEntry[] = [];
     let total = 0;
     let count = 0;
-    for (const name of names) {
-      if (name.includes('transformers') || name.includes('huggingface') || name.includes('onnx')) {
-        matched.push(name);
-        const cache = await caches.open(name);
-        const keys = await cache.keys();
-        for (const req of keys) {
-          const resp = await cache.match(req);
-          if (resp) {
-            let fileSize = 0;
-            // Use Content-Length header first (avoids reading entire body)
-            const cl = resp.headers.get('content-length');
-            if (cl) {
-              fileSize = parseInt(cl, 10);
-            } else {
-              const blob = await resp.blob();
-              fileSize = blob.size;
-            }
-            total += fileSize;
-            count++;
 
-            // Extract a short display name from the URL
-            const url = req.url;
-            const segments = url.split('/');
-            const displayName = segments.slice(-2).join('/'); // e.g. "onnx/model_quantized.onnx"
-
-            files.push({ name: displayName, url, size: fileSize, cacheName: name });
-          }
+    const cache = await caches.open(CACHE_NAME);
+    const keys = await cache.keys();
+    for (const req of keys) {
+      const resp = await cache.match(req);
+      if (resp) {
+        let fileSize = 0;
+        // Use Content-Length header first (avoids reading entire body)
+        const cl = resp.headers.get('content-length');
+        if (cl) {
+          fileSize = parseInt(cl, 10);
+        } else {
+          const blob = await resp.blob();
+          fileSize = blob.size;
         }
+        total += fileSize;
+        count++;
+
+        // Extract model ID and file path from HuggingFace URL pattern:
+        //   https://huggingface.co/{org}/{model}/resolve/main/{filepath}
+        const url = req.url;
+        const resolveIdx = url.indexOf('/resolve/main/');
+        let displayName: string;
+        if (resolveIdx !== -1) {
+          // Extract filepath after /resolve/main/
+          displayName = url.slice(resolveIdx + '/resolve/main/'.length);
+        } else {
+          // Fallback: last 2 segments
+          const segments = url.split('/');
+          displayName = segments.slice(-2).join('/');
+        }
+
+        files.push({ name: displayName, url, size: fileSize, cacheName: CACHE_NAME });
       }
     }
     // Sort files by size descending for better visibility
     files.sort((a, b) => b.size - a.size);
-    return { totalBytes: total, fileCount: count, cacheNames: matched, files };
+
+    // Group files by model ID (extracted from URL)
+    const groupMap = new Map<string, ModelCacheFileEntry[]>();
+    for (const file of files) {
+      const resolveIdx = file.url.indexOf('/resolve/main/');
+      let modelId = 'unknown';
+      if (resolveIdx !== -1) {
+        // URL before /resolve/main/ ends with {org}/{model}
+        const prefix = file.url.slice(0, resolveIdx);
+        const parts = prefix.split('/');
+        modelId = parts.slice(-2).join('/'); // e.g. "onnx-community/sam2.1-hiera-tiny-ONNX"
+      }
+      if (!groupMap.has(modelId)) groupMap.set(modelId, []);
+      groupMap.get(modelId)!.push(file);
+    }
+
+    const groups: ModelCacheGroup[] = [...groupMap.entries()].map(([modelId, gFiles]) => ({
+      modelId,
+      totalBytes: gFiles.reduce((sum, f) => sum + f.size, 0),
+      files: gFiles,
+    }));
+    groups.sort((a, b) => b.totalBytes - a.totalBytes);
+
+    return { totalBytes: total, fileCount: count, cacheNames: [CACHE_NAME], files, groups };
   } catch {
     return EMPTY_MODEL_CACHE;
   }
@@ -412,12 +453,7 @@ async function measureModelCache(): Promise<ModelCacheInfo> {
 export async function purgeModelCacheStorage(): Promise<void> {
   try {
     if (typeof caches === 'undefined') return;
-    const names = await caches.keys();
-    for (const name of names) {
-      if (name.includes('transformers') || name.includes('huggingface') || name.includes('onnx')) {
-        await caches.delete(name);
-      }
-    }
+    await caches.delete('opengpex-ai-models');
     // Dispose the BgRemoval worker to release in-memory model instances
     const { bgRemoverClient } = await import('../../drawers/AIToolsDrawer/bgremover/client');
     bgRemoverClient.dispose();

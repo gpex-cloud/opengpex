@@ -55,21 +55,14 @@ function generateOrbs(count: number) {
     const size = 12 + Math.random() * 25; // 12% - 37%
     const top = 8 + Math.random() * 65; // 8% - 73%
     const left = 5 + Math.random() * 75; // 5% - 80%
-    const duration = 14 + Math.random() * 14; // 14s - 28s
-    const delay = Math.random() * 8; // 0s - 8s
     const opacity = 0.04 + Math.random() * 0.07; // 0.04 - 0.11
-    const opacityDark = opacity * 1.6; // slightly brighter in dark mode
 
     orbs.push({
       color: ORB_PALETTE[colorIdx],
       size: `${size}%`,
       top: `${top}%`,
       left: `${left}%`,
-      duration: `${duration.toFixed(1)}s`,
-      delay: `${delay.toFixed(1)}s`,
       opacity,
-      opacityDark,
-      reverse: Math.random() > 0.5,
     });
   }
   return orbs;
@@ -80,10 +73,14 @@ function generateOrbs(count: number) {
  * Two-column centered layout: left = actions, right = screenshot with smooth edge fading.
  * All decorative elements use radial/linear gradient masks — no hard edges.
  *
- * Performance: orb generation is O(n) one-shot on mount via useMemo.
- * All animations are pure CSS (GPU compositor layer — transform + opacity only).
- * No requestAnimationFrame or JS animation loop.
+ * Performance:
+ * - Orb generation is O(n) one-shot on mount via useMemo.
+ * - ALL decorative elements are static (no infinite CSS animations).
+ * - Only a single one-shot fadeInScale animation for the hero image.
+ * - Zero continuous GPU compositing cost — page can stay open indefinitely
+ *   without affecting other tabs or heating up the machine.
  */
+
 export const LandingPage = () => {
   // Generate randomized orbs once per component mount
   const orbs = useMemo(() => generateOrbs(6), []);
@@ -108,11 +105,11 @@ export const LandingPage = () => {
       }}
     />
 
-    {/* ─── Randomized Background Orbs (regenerated each mount) ─── */}
+    {/* ─── Randomized Background Orbs (static — no animation needed for ambience) ─── */}
     {orbs.map((orb, i) => (
       <div
         key={i}
-        className="absolute rounded-full pointer-events-none"
+        className="absolute rounded-full pointer-events-none will-change-[opacity]"
         style={{
           top: orb.top,
           left: orb.left,
@@ -120,7 +117,6 @@ export const LandingPage = () => {
           height: orb.size,
           opacity: orb.opacity,
           background: `radial-gradient(circle, ${orb.color} 0%, transparent 55%)`,
-          animation: `drift ${orb.duration} ease-in-out ${orb.delay} infinite ${orb.reverse ? "reverse" : "normal"}`,
         }}
       />
     ))}
@@ -162,13 +158,13 @@ export const LandingPage = () => {
           Only rendered if a valid image source was detected (avoids 404). */}
       {heroSrc && (
         <div className="hidden dark:lg:block flex-1 max-w-[640px] relative -mt-12 animate-[fadeInScale_1s_ease-out_0.3s_both]">
-          {/* Ambient glow behind (syncs with image) */}
+          {/* Ambient glow behind (static — no animation, just soft backdrop) */}
           <div
-            className="absolute inset-[-20%] -z-10 animate-[breathe_6s_ease-in-out_infinite]"
+            className="absolute inset-[-20%] -z-10"
             style={{
               background:
                 "radial-gradient(ellipse 50% 45% at 50% 50%, #a78bfa 0%, transparent 65%)",
-              opacity: 0.15,
+              opacity: 0.18,
               filter: "blur(40px)",
             }}
           />
@@ -196,9 +192,9 @@ export const LandingPage = () => {
       )}
     </div>
 
-    {/* ─── Fluid blob accents (single-color, soft) ─── */}
+    {/* ─── Fluid blob accents (static blurred shapes — zero animation cost) ─── */}
     <div
-      className="absolute top-[12%] right-[12%] w-[160px] h-[160px] opacity-[0.06] dark:opacity-[0.10] animate-[morph_15s_ease-in-out_infinite] pointer-events-none hidden lg:block"
+      className="absolute top-[12%] right-[12%] w-[160px] h-[160px] opacity-[0.06] dark:opacity-[0.10] pointer-events-none hidden lg:block"
       style={{
         background: "#c4b5fd",
         borderRadius: "30% 70% 70% 30% / 30% 30% 70% 70%",
@@ -206,7 +202,7 @@ export const LandingPage = () => {
       }}
     />
     <div
-      className="absolute bottom-[20%] right-[20%] w-[100px] h-[100px] opacity-[0.05] dark:opacity-[0.08] animate-[morph_12s_ease-in-out_infinite_reverse] pointer-events-none hidden lg:block"
+      className="absolute bottom-[20%] right-[20%] w-[100px] h-[100px] opacity-[0.05] dark:opacity-[0.08] pointer-events-none hidden lg:block"
       style={{
         background: "#7dd3fc",
         borderRadius: "60% 40% 30% 70% / 60% 30% 70% 40%",
@@ -214,27 +210,8 @@ export const LandingPage = () => {
       }}
     />
 
-    {/* ─── CSS Keyframes (injected once) ─── */}
+    {/* ─── CSS Keyframes (only one-shot fadeInScale remains) ─── */}
     <style>{`
-      @keyframes drift {
-        0%, 100% { transform: translate(0, 0) scale(1); }
-        33% { transform: translate(15px, -20px) scale(1.05); }
-        66% { transform: translate(-10px, 15px) scale(0.95); }
-      }
-      @keyframes morph {
-        0%, 100% { border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%; transform: rotate(0deg) scale(1); }
-        25% { border-radius: 58% 42% 35% 65% / 62% 48% 52% 38%; transform: rotate(5deg) scale(1.05); }
-        50% { border-radius: 50% 50% 60% 40% / 45% 55% 45% 55%; transform: rotate(-3deg) scale(0.98); }
-        75% { border-radius: 40% 60% 45% 55% / 55% 35% 65% 45%; transform: rotate(3deg) scale(1.02); }
-      }
-      @keyframes float {
-        0%, 100% { transform: translateY(0px); }
-        50% { transform: translateY(-12px); }
-      }
-      @keyframes breathe {
-        0%, 100% { transform: scale(1); opacity: 0.15; }
-        50% { transform: scale(1.08); opacity: 0.22; }
-      }
       @keyframes fadeInScale {
         from { opacity: 0; transform: scale(0.92); }
         to { opacity: 1; transform: scale(1); }

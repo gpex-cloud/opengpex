@@ -20,7 +20,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Settings, ChevronDown, Wifi, WifiOff, FileJson, RotateCcw, Sparkles, Clock, Image as ImageIcon, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Settings, ChevronDown, Wifi, WifiOff, FileJson, RotateCcw, Sparkles, Clock, Image as ImageIcon, AlertTriangle } from 'lucide-react';
 import StatusBanner from '@opengpex/editor/widgets/StatusBanner';
 import { motion } from 'framer-motion';
 import FancyButton from '@opengpex/editor/widgets/FancyButton';
@@ -60,7 +60,6 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
     canRun,
     connectionStatus,
     isTesting,
-    isSyncing,
     execState,
     isComfyGenerated,
     executionHistory,
@@ -69,7 +68,6 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
     setActiveEnvironment,
     setActiveWorkflow,
     testConnection,
-    syncObjectInfo,
     cancelExecution,
     reuseParams,
     exportHistory,

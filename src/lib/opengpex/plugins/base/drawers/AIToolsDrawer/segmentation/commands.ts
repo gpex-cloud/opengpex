@@ -21,17 +21,16 @@
 
 import { EditorContextValue, EditorCommand, asLocalPoint, asLocalPolygon, asLocalRect } from '@opengpex/editor/core/types';
 import { segClient } from './client';
-import { PLUGIN_AUTHOR, PLUGIN_ID } from '../protocols';
-import type { AIToolsConfig } from '../protocols';
-import type { SegEncodePayload, SegEncodeResult, SegDecodePayload, SegDecodeResult, SegConfig, SegStatus } from './protocols';
+import { getActiveModelEntry } from '../_shared/useToolConfig';
+import type { SegEncodePayload, SegEncodeResult, SegDecodePayload, SegDecodeResult, SegModelEntry } from './protocols';
 import {
-  SIGNAL_SEG_STATUS,
-  INITIAL_SEG_STATUS,
   BUILTIN_SEG_MODELS,
+  DEFAULT_SEG_CONFIG,
   CMD_SEG_ENCODE,
   CMD_SEG_DECODE,
   CMD_SEG_ALL,
 } from './protocols';
+import { segStore } from './store';
 
 // ─── Segmentation Commands ──────────────────────────────────────────────────────
 //
@@ -43,34 +42,45 @@ import {
 /**
  * Track which asset currently has a warm embedding in the Worker.
  * Avoids redundant re-encode when clicking the same layer multiple times.
+ *
+ * Reset when the Worker is disposed (e.g. due to WebGPU ORT error auto-dispose)
+ * to prevent using stale embedding references against a fresh Worker.
  */
 let currentEmbeddingAssetId: string | null = null;
 
 /**
- * Helper: Get the active segmentation model ID from plugin config.
+ * Module-level AbortController for in-flight segmentation operations.
+ * Supports cancellation of encode and segment-all operations.
  */
-function getActiveSegModelId(ctx: EditorContextValue): string {
-  const pluginUid = `${PLUGIN_AUTHOR}.${PLUGIN_ID}`;
-  const config = ctx.state.pluginConfig[pluginUid] as unknown as AIToolsConfig | undefined;
-  const segConfig = config?.seg as SegConfig | undefined;
-  if (!segConfig) return BUILTIN_SEG_MODELS[0].modelId;
+let segAbortController: AbortController | null = null;
 
-  const activeId = segConfig.activeModelId;
-  const fromConfig = segConfig.models?.find(m => m.id === activeId);
-  if (fromConfig) return fromConfig.modelId;
-
-  const fromBuiltins = BUILTIN_SEG_MODELS.find(m => m.id === activeId);
-  if (fromBuiltins) return fromBuiltins.modelId;
-
-  return BUILTIN_SEG_MODELS[0].modelId;
+/**
+ * Reset embedding tracking. Called when the Worker is disposed to prevent
+ * stale embedding references.
+ */
+export function resetEmbeddingCache(): void {
+  currentEmbeddingAssetId = null;
 }
 
 /**
- * Helper: Update the Segmentation status signal.
+ * Abort any in-flight segmentation operation.
+ * Safe to call even if no operation is in progress (no-op).
  */
-function setSegStatus(ctx: EditorContextValue, patch: Partial<SegStatus>): void {
-  const current = (ctx.scoped!.getSignal<SegStatus>(SIGNAL_SEG_STATUS, INITIAL_SEG_STATUS)) ?? INITIAL_SEG_STATUS;
-  ctx.scoped!.setSignal(SIGNAL_SEG_STATUS, { ...current, ...patch });
+export function abortSegmentation(): void {
+  if (segAbortController) {
+    segAbortController.abort();
+    segAbortController = null;
+  }
+  segStore.reset();
+}
+
+/**
+ * Helper: Get the active segmentation model ID from plugin config.
+ * Uses the shared getActiveModelEntry utility.
+ */
+function getActiveSegModelId(ctx: EditorContextValue): string {
+  const entry = getActiveModelEntry<SegModelEntry>(ctx, 'seg', DEFAULT_SEG_CONFIG, BUILTIN_SEG_MODELS);
+  return entry.modelId;
 }
 
 /**
@@ -112,12 +122,10 @@ export const SEG_COMMANDS = {
         return { success: true };
       }
 
-      setSegStatus(ctx, {
-        stage: 'encoding',
-        encodeProgress: 0,
-        errorMessage: null,
-        embeddingAssetId: null,
-        embeddingReady: false,
+      // Start — synchronous write to store
+      segStore.setState({
+        task: { message: 'Loading model...', progress: 0, device: null },
+        error: null,
       });
 
       try {
@@ -134,44 +142,46 @@ export const SEG_COMMANDS = {
           timeoutMs: 0,
           onProgress: (p) => {
             if (p.stage === 'downloading') {
-              setSegStatus(ctx, {
-                stage: 'downloading',
-                downloadProgress: (p.loaded && p.total) ? p.loaded / p.total : 0,
-                downloadedBytes: p.loaded ?? 0,
-                totalBytes: p.total ?? 0,
-                downloadFile: p.file ?? null,
+              const dlProgress = (p.loaded && p.total) ? p.loaded / p.total : 0;
+              // Only show "Downloading..." with download details when actually fetching
+              // from network (total > 0 implies real network transfer).
+              // Otherwise stay with "Loading model..." (loading from cache).
+              const isRealDownload = p.total != null && p.total > 0;
+              segStore.setState({
+                task: {
+                  message: isRealDownload ? 'Downloading...' : 'Loading model...',
+                  progress: dlProgress,
+                  device: p.device ?? null,
+                  download: isRealDownload ? {
+                    loaded: p.loaded!,
+                    total: p.total!,
+                    speedBps: 0,
+                  } : undefined,
+                },
               });
-              if (p.device) setSegStatus(ctx, { device: p.device });
             } else if (p.stage === 'detecting-device' && p.device) {
-              setSegStatus(ctx, { device: p.device });
+              segStore.setState({
+                task: { message: 'Loading model...', progress: 0, device: p.device },
+              });
             } else if (p.stage === 'encoding') {
-              setSegStatus(ctx, {
-                stage: 'encoding',
-                encodeProgress: p.progress ?? 0,
+              segStore.setState({
+                task: { message: 'Analyzing image...', progress: p.progress ?? 0, device: null },
               });
             }
           },
         });
 
         currentEmbeddingAssetId = context.assetId;
-        setSegStatus(ctx, {
-          stage: 'ready',
-          embeddingReady: true,
-          embeddingAssetId: context.assetId,
-          encodeProgress: 1,
-        });
+
+        // Encoding done — clear task (embedding is ready for decode)
+        segStore.setState({ task: null });
 
         return { success: true };
       } catch (err) {
         const raw = err instanceof Error ? err.message : String(err);
         const msg = humanizeSegError(raw);
         currentEmbeddingAssetId = null;
-        setSegStatus(ctx, {
-          stage: 'error',
-          errorMessage: msg,
-          embeddingReady: false,
-          embeddingAssetId: null,
-        });
+        segStore.setState({ task: null, error: msg });
         return { success: false, error: msg };
       }
     },
@@ -194,7 +204,10 @@ export const SEG_COMMANDS = {
         };
       }
 
-      setSegStatus(ctx, { stage: 'decoding' });
+      // Start decoding — synchronous write to store
+      segStore.setState({
+        task: { message: 'Generating mask...', progress: 0, device: null },
+      });
 
       try {
         const result = await segClient.run({
@@ -204,12 +217,8 @@ export const SEG_COMMANDS = {
           context,
         });
 
-        setSegStatus(ctx, {
-          stage: 'ready',
-          candidates: result.masks ?? [],
-          lastDecodeMs: result.debug?.decodeMs ?? 0,
-          elapsedMs: result.debug?.totalMs ?? 0,
-        });
+        // Done — clear task, result will be set by caller (sam.ts) with frame projections
+        segStore.setState({ task: null });
 
         return {
           success: true,
@@ -219,7 +228,7 @@ export const SEG_COMMANDS = {
       } catch (err) {
         const raw = err instanceof Error ? err.message : String(err);
         const msg = humanizeSegError(raw);
-        setSegStatus(ctx, { stage: 'error', errorMessage: msg });
+        segStore.setState({ task: null, error: msg });
         return { success: false, error: msg };
       }
     },
@@ -256,13 +265,10 @@ export const SEG_COMMANDS = {
         return;
       }
 
-      ctx.scoped!.setBusy(true);
-
-      setSegStatus(ctx, {
-        stage: 'encoding',
-        encodeProgress: 0,
-        errorMessage: null,
-        embeddingReady: false,
+      // Start — synchronous write to store
+      segStore.setState({
+        task: { message: 'Loading model...', progress: 0, device: null },
+        error: null,
       });
 
       try {
@@ -281,18 +287,28 @@ export const SEG_COMMANDS = {
             timeoutMs: 0,
             onProgress: (p) => {
               if (p.stage === 'downloading') {
-                setSegStatus(ctx, {
-                  stage: 'downloading',
-                  downloadProgress: (p.loaded && p.total) ? p.loaded / p.total : 0,
-                  downloadedBytes: p.loaded ?? 0,
-                  totalBytes: p.total ?? 0,
-                  downloadFile: p.file ?? null,
+                const dlProgress = (p.loaded && p.total) ? p.loaded / p.total : 0;
+                const isRealDownload = p.total != null && p.total > 0;
+                segStore.setState({
+                  task: {
+                    message: isRealDownload ? 'Downloading...' : 'Loading model...',
+                    progress: dlProgress,
+                    device: p.device ?? null,
+                    download: isRealDownload ? {
+                      loaded: p.loaded!,
+                      total: p.total!,
+                      speedBps: 0,
+                    } : undefined,
+                  },
                 });
-                if (p.device) setSegStatus(ctx, { device: p.device });
               } else if (p.stage === 'detecting-device' && p.device) {
-                setSegStatus(ctx, { device: p.device });
+                segStore.setState({
+                  task: { message: 'Loading model...', progress: 0, device: p.device },
+                });
               } else if (p.stage === 'encoding') {
-                setSegStatus(ctx, { stage: 'encoding', encodeProgress: p.progress ?? 0 });
+                segStore.setState({
+                  task: { message: 'Analyzing image...', progress: p.progress ?? 0, device: null },
+                });
               }
             },
           });
@@ -300,7 +316,9 @@ export const SEG_COMMANDS = {
         }
 
         // Run segment-all on the worker
-        setSegStatus(ctx, { stage: 'decoding', embeddingReady: true, embeddingAssetId: assetId });
+        segStore.setState({
+          task: { message: 'Segmenting all objects...', progress: 0, device: null },
+        });
 
         const result = await segClient.run({
           action: 'segment-all',
@@ -310,7 +328,9 @@ export const SEG_COMMANDS = {
           timeoutMs: 0,
           onProgress: (p) => {
             if (p.stage === 'decoding') {
-              setSegStatus(ctx, { stage: 'decoding' });
+              segStore.setState({
+                task: { message: 'Generating masks...', progress: 0, device: null },
+              });
             }
           },
         });
@@ -318,9 +338,8 @@ export const SEG_COMMANDS = {
         // Process results
         const segments = result.segments ?? [];
         if (segments.length === 0) {
-          setSegStatus(ctx, { ...INITIAL_SEG_STATUS, embeddingReady: true, embeddingAssetId: assetId });
+          segStore.setState({ task: null, lastResult: null });
           actions.setInteraction({ hud: { message: 'No objects detected in this image', type: 'info' } });
-          ctx.scoped!.setBusy(false);
           return;
         }
 
@@ -340,26 +359,16 @@ export const SEG_COMMANDS = {
           framePolygons.push(framePoly);
         }
 
-        setSegStatus(ctx, {
-          stage: 'ready',
-          candidates,
-          activeCandidateIdx: 0,
-          embeddingReady: true,
-          embeddingAssetId: assetId,
-          lastDecodeMs: result.debug?.totalMs ?? 0,
-          elapsedMs: result.debug?.totalMs ?? 0,
-        });
-
-        const segStatusSignalKey = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_SEG_STATUS}`;
-        actions.setStateSignal(segStatusSignalKey, {
-          stage: 'ready',
-          embeddingReady: true,
-          candidates,
-          candidateFramePolygons: framePolygons,
-          samFrameId: frameId,
-          activeCandidateIdx: 0,
-          lastDecodeMs: result.debug?.totalMs ?? 0,
-          elapsedMs: result.debug?.totalMs ?? 0,
+        // Done — write result to store
+        segStore.setState({
+          task: null,
+          lastResult: {
+            candidates,
+            activeCandidateIdx: 0,
+            lastDecodeMs: result.debug?.totalMs ?? 0,
+            samFrameId: frameId,
+            candidateFramePolygons: framePolygons,
+          },
         });
 
         if (ctx.state.interaction.interactionMode !== 'clip') {
@@ -380,10 +389,8 @@ export const SEG_COMMANDS = {
       } catch (err) {
         const raw = err instanceof Error ? err.message : String(err);
         const msg = humanizeSegError(raw);
-        setSegStatus(ctx, { stage: 'error', errorMessage: msg });
+        segStore.setState({ task: null, error: msg });
         actions.setInteraction({ hud: { message: 'Segment All failed — see error in panel', type: 'error' } });
-      } finally {
-        ctx.scoped!.setBusy(false);
       }
     },
   } as EditorCommand<void, Promise<void>>,

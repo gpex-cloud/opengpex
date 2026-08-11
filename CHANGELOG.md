@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.46
+
+- AI Tools: new Inpaint Eraser tool for removing unwanted objects from images; added Transformers.js as an alternative inference engine for better compatibility; reorganized shared modules (download, inference, UI) to reduce duplication
+- Perf: marching ants path simplification (Douglas–Peucker reduces complex selections from 5k–50k to ≤1200 vertices before SVG rendering, with reference-equality caching) and idle ticker skip (`useFastSync` subscribers skip execution when not interacting and buffer unchanged, eliminating continuous 60fps CPU overhead)
+- Storage: improved storage usage display
+
+---
+
 ## v1.0.0-beta.45
 
 - ComfyBridge: unified Refresh button with auto-sync, connection timeout, auto-detect seed params on import, improved server history panel

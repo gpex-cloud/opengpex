@@ -157,7 +157,7 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
     }
 
     resetImportState();
-  }, [parseResult, parsedTemplate, workflowName, workflowDesc, selectedParams, workflows, setConfig, editingWorkflowId, resetImportState]);
+  }, [parseResult, parsedTemplate, workflowName, workflowDesc, selectedParams, workflows, setConfig, editingWorkflowId, resetImportState, config.randomSeedPaths]);
 
   const removeWorkflow = useCallback((id: string) => {
     setConfig({ workflows: workflows.filter(w => w.id !== id) });
@@ -193,7 +193,6 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
     );
 
     const groups: typeof serverWorkflowGroups = [];
-    let totalWorkflows = 0;
 
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
@@ -217,7 +216,6 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
       }
 
       const deduplicated = deduplicateHistoryWorkflows(summaries);
-      totalWorkflows += deduplicated.length;
       groups.push({ envId: env.id, envName: env.name, workflows: deduplicated });
     }
 

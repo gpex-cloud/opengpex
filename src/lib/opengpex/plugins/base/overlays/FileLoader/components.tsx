@@ -31,10 +31,13 @@ import {
   RefreshCw,
   Trash2,
   AlertTriangle,
-  Wand2,
   SlidersHorizontal,
   FileImage,
   Cpu,
+  Eraser,
+  Expand,
+  Target,
+  ImageMinus,
 } from "lucide-react";
 import EditorHUD from "@opengpex/editor/widgets/EditorHUD";
 import DelayedConfirm from "@opengpex/editor/widgets/DelayedConfirm";
@@ -192,7 +195,10 @@ const modKey = isMac ? "⌘" : "Ctrl";
 const FEATURES = [
   { icon: Zap, label: "120fps", color: "text-amber-400" },
   { icon: Layers, label: "Layers & Blend", color: "text-indigo-400" },
-  { icon: Wand2, label: "AI Tools", color: "text-purple-400" },
+  { icon: ImageMinus, label: "AI BG Remove", color: "text-purple-400" },
+  { icon: Expand, label: "AI Upscale", color: "text-violet-400" },
+  { icon: Target, label: "AI Segment", color: "text-fuchsia-400" },
+  { icon: Eraser, label: "AI Erase", color: "text-rose-400" },
   { icon: SlidersHorizontal, label: "Filters", color: "text-pink-400" },
   { icon: Scissors, label: "Clip & Select", color: "text-emerald-400" },
   { icon: FileImage, label: "RAW/TIFF/16-bit", color: "text-sky-400" },
