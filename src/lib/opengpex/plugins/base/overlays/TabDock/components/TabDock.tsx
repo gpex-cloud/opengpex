@@ -269,7 +269,7 @@ function BranchMenu({
             Branches
           </span>
         </div>
-        <div className="flex flex-col gap-1 max-h-[300px] overflow-y-auto px-1 pr-2 pb-1.5 custom-scrollbar">
+        <div className="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto px-1 pr-2 pt-1 pb-1.5 custom-scrollbar">
           {branches.map(({ frame: snapFrame, depth }) => {
             const firstLayerId = snapFrame.layers.order[0];
             const firstLayer = firstLayerId
@@ -301,7 +301,7 @@ function BranchMenu({
                 )}
                 <button
                   onClick={() => switchFrame(snapFrame.id)}
-                  className={`flex items-center gap-2 p-1.5 pr-8 rounded-xl transition-all w-full relative
+                  className={`flex items-center gap-2 p-1 pr-8 rounded-xl transition-all w-full relative
                   ${isBranchActive ? "bg-orange-500/10 ring-1 ring-orange-600/30 dark:ring-orange-500/30" : "hover"}
                   `}
                 >

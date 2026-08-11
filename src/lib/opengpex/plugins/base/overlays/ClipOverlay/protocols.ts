@@ -19,3 +19,15 @@
 
 export const PLUGIN_ID = 'overlays.clip_overlay';
 export const PLUGIN_AUTHOR = 'opengpex';
+
+// ─── Marching Ants Performance Tuning ────────────────────────────────────────
+
+/** CSS animation duration (seconds) for marching ants stroke-dashoffset. */
+export const MARCHING_ANTS_DURATION_S = 1;
+
+/**
+ * Max total vertices for the marching ants SVG path.
+ * Polygons exceeding this are Douglas–Peucker simplified to this budget.
+ * Lower = less GPU rasterization cost per frame.
+ */
+export const MARCHING_ANTS_MAX_VERTICES = 600;

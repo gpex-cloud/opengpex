@@ -56,8 +56,6 @@ export function useFastSync<T extends Element>(
     if (!ref.current || !frame || !isActive) return;
 
     const v = volatileRef.current;
-    // [Performance Optimization] To ensure rotation, animation and other program-triggered changes can render in real time, no longer intercept Ticker
-    // if (!force && !v.activeState.interacting) return;
 
     // [P0 Throttle] Time-based throttling for non-critical subscribers during interaction
     if (throttleInterval > 0 && v.activeState.interacting) {

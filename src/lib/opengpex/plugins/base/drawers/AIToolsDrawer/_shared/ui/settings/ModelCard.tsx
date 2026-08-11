@@ -28,12 +28,12 @@
  *   - Model ID (editable for custom, display + HuggingFace link for builtin)
  *   - Metadata row (size, description, extra info)
  *   - Cache status + Download/Delete actions
- *   - Inline download progress (ModelDownloader)
+ *   - Inline download progress (DownloadPanel)
  *   - Remove button for custom models
  */
 
 import { Lock, Trash2, Download, CheckCircle2, Loader2, ExternalLink } from "lucide-react";
-import { ModelDownloader } from "./download/ModelDownloader";
+import { DownloadPanel } from "../DownloadPanel";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -194,7 +194,7 @@ export function ModelCard({
 
       {/* ─── Download Progress (inline) ─────────── */}
       {downloadProgress && (
-        <ModelDownloader
+        <DownloadPanel
           progress={downloadProgress.progress}
           loadedBytes={downloadProgress.loadedBytes}
           totalBytes={downloadProgress.totalBytes}

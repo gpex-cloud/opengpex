@@ -18,61 +18,72 @@
  */
 
 /**
- * Segmentation Worker — SAM 2 ONNX Runtime Web Inference Engine
+ * Segmentation Worker — SAM 2 via transformers.js
  *
- * This Web Worker runs SAM 2 (Segment Anything Model 2) using ONNX Runtime Web
- * directly (NOT through transformers.js pipeline). The SharpAI/sam2-hiera-*-onnx
- * repos from samexporter provide:
- *   - encoder.onnx: Image encoder (image → embedding)
- *   - decoder.onnx: Mask decoder (embedding + prompts → masks)
+ * Uses TransformersSession (auto-model mode) to manage:
+ *   - transformers.js CDN loading
+ *   - WebGPU → WASM device detection & fallback
+ *   - AutoModel + AutoProcessor lifecycle
  *
- * Architecture:
- *   1. WebGPU / WASM execution provider detection
- *   2. Model download from HuggingFace CDN (with cache)
- *   3. Image Encoder: RGBA image → 1024×1024 normalized → embedding tensor
- *   4. Mask Decoder: embedding + point/box prompts → binary mask → polygon rings
- *   5. Auto mode: grid prompts + NMS → multiple object polygons
- *
- * Two-stage design:
- *   - Encoder is heavy (~500ms WebGPU) but only runs once per image
- *   - Decoder is light (~10-30ms) and runs on every click/box interaction
- *   - Embedding cached in Worker memory (keyed by assetId, max 3)
+ * Worker responsibilities (not delegated to TransformersSession):
+ *   1. Action dispatch: encode / decode / segment-all
+ *   2. Embedding cache: Map (max 3, keyed by assetId)
+ *   3. Mask → polygon post-processing: traceContour + simplifyRDP
+ *   4. Segment-all: grid prompts + NMS
+ *   5. Progress reporting to commands.ts
  */
 
 import type { SegRequest, SegProgress, SegResult, SegError, SegPrompt } from './worker.types';
+import { TransformersSession } from '../_shared/inference/tfm-session';
 
-// ─── Configuration ───────────────────────────────────────────────────────────
+// ─── Local Type Interfaces (for CDN-loaded transformers.js module) ───────────
 
-const HF_BASE = 'https://huggingface.co';
-const IMAGE_SIZE = 1024;   // SAM 2 input size
-const MASK_SIZE = 256;     // SAM 2 mask output size
+/** Structural type for transformers.js Tensor. */
+interface TensorLike {
+  data: Float32Array;
+  dims: number[];
+  tolist(): unknown;
+}
 
-// ONNX Runtime Web CDN
-const ORT_CDN = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/';
+/** Structural type for transformers.js RawImage constructor. */
+interface RawImageConstructor {
+  new (data: Uint8ClampedArray, width: number, height: number, channels: number): unknown;
+}
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+/** Structural type for transformers.js Tensor constructor. */
+interface TensorConstructor {
+  new (type: string, data: Float32Array | BigInt64Array | number[], dims: number[]): unknown;
+}
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type OrtModule = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type InferenceSession = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type OrtTensor = any;
+/** Minimal transformers module surface used by this worker. */
+interface TransformersModuleLike {
+  RawImage: RawImageConstructor;
+  Tensor: TensorConstructor;
+}
 
-// ─── Session Cache ───────────────────────────────────────────────────────────
+/** Processor callable — preprocesses a RawImage for model input. */
+interface ProcessorCallable {
+  (image: unknown): Promise<Record<string, unknown>>;
+}
 
-let ort: OrtModule = null;
-let encoderSession: InferenceSession = null;
-let decoderSession: InferenceSession = null;
+/** SAM 2 model — supports get_image_embeddings and decode forward. */
+interface Sam2ModelLike {
+  get_image_embeddings(inputs: Record<string, unknown>): Promise<Record<string, unknown>>;
+  (inputs: Record<string, unknown>): Promise<{
+    pred_masks: TensorLike;
+    iou_scores: TensorLike;
+  }>;
+}
+
+// ─── Session & State ─────────────────────────────────────────────────────────
+
+const session = new TransformersSession();
 let cachedModelId: string | null = null;
-let cachedDevice: 'webgpu' | 'wasm' | null = null;
 
 // ─── Embedding Cache ─────────────────────────────────────────────────────────
 
 interface EmbeddingEntry {
-  imageEmbed: OrtTensor;          // image_embed: Float32[1, 256, 64, 64]
-  highResFeats0: OrtTensor;       // high_res_feats_0: Float32[1, 32, 256, 256]
-  highResFeats1: OrtTensor;       // high_res_feats_1: Float32[1, 64, 128, 128]
+  embeddings: Record<string, unknown>;  // opaque tensor dict from get_image_embeddings
   width: number;
   height: number;
 }
@@ -80,142 +91,26 @@ interface EmbeddingEntry {
 const embeddingCache = new Map<string, EmbeddingEntry>();
 const MAX_CACHED_EMBEDDINGS = 3;
 
-// ─── ORT Loading ─────────────────────────────────────────────────────────────
+// ─── Model Loading ───────────────────────────────────────────────────────────
 
-async function loadOrt(): Promise<OrtModule> {
-  if (ort) return ort;
-  // Import ONNX Runtime Web
-  ort = await import(/* webpackIgnore: true */ `${ORT_CDN}ort.all.mjs`);
-  // Configure WASM paths
-  ort.env.wasm.wasmPaths = ORT_CDN;
-  return ort;
-}
-
-// ─── Device Detection ────────────────────────────────────────────────────────
-
-async function detectDevice(): Promise<'webgpu' | 'wasm'> {
-  if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const adapter = await (navigator as any).gpu.requestAdapter();
-      if (adapter) return 'webgpu';
-    } catch {
-      // WebGPU not available
-    }
-  }
-  return 'wasm';
-}
-
-// ─── Model Download & Session Creation ───────────────────────────────────────
-
-/**
- * Download an ONNX model file from HuggingFace with caching.
- * Uses Cache API for persistent storage.
- */
-async function loadModelFile(
+async function ensureModel(
   modelId: string,
-  filename: string,
-): Promise<ArrayBuffer> {
-  const url = `${HF_BASE}/${modelId}/resolve/main/${filename}`;
-
-  // Check unified cache first (written by the download service on main thread)
-  const unifiedCache = await caches.open('opengpex-ai-models');
-  const unifiedHit = await unifiedCache.match(url);
-  if (unifiedHit) {
-    return unifiedHit.arrayBuffer();
-  }
-
-  // Fall back to legacy cache name (backward compat with older downloads)
-  const legacyCache = await caches.open('opengpex-seg-models');
-  const legacyHit = await legacyCache.match(url);
-  if (legacyHit) {
-    return legacyHit.arrayBuffer();
-  }
-
-  // No fallback fetch — model must be pre-downloaded via the download service
-  throw new Error(
-    `Model file not cached: ${filename} (${modelId}). Please download the model first.`
-  );
-}
-
-/**
- * Load encoder and decoder ONNX sessions.
- *
- * Strategy: Try WebGPU first (faster), gracefully fall back to WASM if
- * session creation fails. ONNX Runtime Web's `['webgpu', 'wasm']` fallback
- * list does NOT work reliably — WebGPU session creation can throw opaque
- * numeric WASM errors instead of triggering the next provider. We handle
- * this explicitly with a try/catch retry.
- */
-async function loadModel(
-  modelId: string,
-  reqId: number,
   report: (p: Partial<SegProgress>) => void,
 ): Promise<void> {
-  if (encoderSession && decoderSession && cachedModelId === modelId) return;
+  if (cachedModelId === modelId && session.getModel()) return;
 
-  await loadOrt();
-
-  // Detect device
   report({ stage: 'detecting-device' });
-  const device = await detectDevice();
-  report({ stage: 'detecting-device', device });
 
-  // Load model files from cache.
-  // The .ort format (pre-optimized) is used for BOTH WebGPU and WASM —
-  // the raw encoder.onnx is for Python/desktop only and may contain ops
-  // unsupported by onnxruntime-web.
-  report({ stage: 'downloading', file: 'encoder.with_runtime_opt.ort' });
-  const encoderBuffer = await loadModelFile(modelId, 'encoder.with_runtime_opt.ort');
+  await session.load({
+    backend: 'transformers',
+    modelId,
+    transformersMode: 'auto-model',
+    onDownloadProgress: (loaded, total, file) => {
+      report({ stage: 'downloading', loaded, total, file });
+    },
+  });
 
-  report({ stage: 'downloading', file: 'decoder.onnx' });
-  const decoderBuffer = await loadModelFile(modelId, 'decoder.onnx');
-
-  // Create sessions — try WebGPU first, fall back to WASM.
-  // The .ort format requires graphOptimizationLevel: 'disabled' (already optimized).
-  report({ stage: 'detecting-device', progress: 0.5 });
-
-  let actualDevice: 'webgpu' | 'wasm' = 'wasm';
-
-  if (device === 'webgpu') {
-    try {
-      encoderSession = await ort.InferenceSession.create(encoderBuffer.slice(0), {
-        executionProviders: ['webgpu'],
-        graphOptimizationLevel: 'disabled',
-      });
-      decoderSession = await ort.InferenceSession.create(decoderBuffer.slice(0), {
-        executionProviders: ['webgpu'],
-      });
-      actualDevice = 'webgpu';
-    } catch {
-      // WebGPU failed — fall through to WASM
-      encoderSession = null;
-      decoderSession = null;
-    }
-  }
-
-  // WASM fallback (or primary if no WebGPU)
-  if (!encoderSession || !decoderSession) {
-    try {
-      encoderSession = await ort.InferenceSession.create(encoderBuffer.slice(0), {
-        executionProviders: ['wasm'],
-        graphOptimizationLevel: 'disabled',
-      });
-      decoderSession = await ort.InferenceSession.create(decoderBuffer.slice(0), {
-        executionProviders: ['wasm'],
-      });
-      actualDevice = 'wasm';
-    } catch (err) {
-      throw new Error(
-        `Failed to create ONNX session. ` +
-        `Error: ${err instanceof Error ? err.message : String(err)}. ` +
-        `Try deleting and re-downloading the model.`
-      );
-    }
-  }
-
-  cachedDevice = actualDevice;
-  report({ stage: 'detecting-device', device: actualDevice });
+  report({ stage: 'detecting-device', device: session.device as 'webgpu' | 'wasm' });
 
   // Invalidate embeddings on model change
   if (cachedModelId !== modelId) {
@@ -224,45 +119,18 @@ async function loadModel(
   cachedModelId = modelId;
 }
 
-// ─── Image Preprocessing ─────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/**
- * Preprocess RGBA ImageData for SAM 2 encoder:
- * 1. Resize to 1024×1024 (bilinear)
- * 2. Convert to RGB float32 normalized [0, 1] in CHW format
- * Returns Float32Array [1, 3, 1024, 1024]
- */
-function preprocessImage(
-  rgba: Uint8ClampedArray,
-  width: number,
-  height: number,
-): Float32Array {
-  // Step 1: Resize to IMAGE_SIZE × IMAGE_SIZE (simple bilinear)
-  const resized = new Float32Array(3 * IMAGE_SIZE * IMAGE_SIZE);
+function getModel(): Sam2ModelLike {
+  return session.getModel() as Sam2ModelLike;
+}
 
-  const scaleX = width / IMAGE_SIZE;
-  const scaleY = height / IMAGE_SIZE;
+function getProcessor(): ProcessorCallable {
+  return session.getProcessor() as ProcessorCallable;
+}
 
-  for (let y = 0; y < IMAGE_SIZE; y++) {
-    for (let x = 0; x < IMAGE_SIZE; x++) {
-      // Source coordinates
-      const srcX = Math.min(x * scaleX, width - 1);
-      const srcY = Math.min(y * scaleY, height - 1);
-
-      // Simple nearest-neighbor for speed (bilinear is overkill for 1024px)
-      const sx = Math.round(srcX);
-      const sy = Math.round(srcY);
-      const srcIdx = (sy * width + sx) * 4;
-
-      // SAM 2 expects RGB normalized to [0, 1]
-      const dstIdx = y * IMAGE_SIZE + x;
-      resized[0 * IMAGE_SIZE * IMAGE_SIZE + dstIdx] = rgba[srcIdx + 0] / 255.0;  // R
-      resized[1 * IMAGE_SIZE * IMAGE_SIZE + dstIdx] = rgba[srcIdx + 1] / 255.0;  // G
-      resized[2 * IMAGE_SIZE * IMAGE_SIZE + dstIdx] = rgba[srcIdx + 2] / 255.0;  // B
-    }
-  }
-
-  return resized;
+function getTransformers(): TransformersModuleLike {
+  return session.getTransformers() as TransformersModuleLike;
 }
 
 // ─── Image Encoding ──────────────────────────────────────────────────────────
@@ -270,57 +138,31 @@ function preprocessImage(
 async function encodeImage(
   imageData: { data: ArrayBuffer; width: number; height: number },
   assetId: string,
-  reqId: number,
   report: (p: Partial<SegProgress>) => void,
 ): Promise<void> {
   if (embeddingCache.has(assetId)) return;
 
   report({ stage: 'encoding', progress: 0 });
 
-  // Preprocess
+  const tfm = getTransformers();
+  const processor = getProcessor();
+  const model = getModel();
+
+  // Create RawImage from RGBA buffer
   const rgba = new Uint8ClampedArray(imageData.data);
-  const inputData = preprocessImage(rgba, imageData.width, imageData.height);
+  const image = new tfm.RawImage(rgba, imageData.width, imageData.height, 4);
 
   report({ stage: 'encoding', progress: 0.2 });
 
-  // Create input tensor [1, 3, 1024, 1024]
-  const inputTensor = new ort.Tensor('float32', inputData, [1, 3, IMAGE_SIZE, IMAGE_SIZE]);
-
-  // Run encoder
-  const feeds: Record<string, OrtTensor> = {};
-  const encoderInputNames = encoderSession.inputNames as string[];
-  feeds[encoderInputNames[0]] = inputTensor;
+  // Preprocess via SAM processor
+  const inputs = await processor(image);
 
   report({ stage: 'encoding', progress: 0.4 });
 
-  const encoderOutput = await encoderSession.run(feeds);
+  // Run encoder → get image embeddings
+  const embeddings = await model.get_image_embeddings(inputs);
 
   report({ stage: 'encoding', progress: 1.0 });
-
-  // Cache ALL encoder outputs (SAM2 produces 3):
-  //   image_embed: Float32[1, 256, 64, 64]
-  //   high_res_feats_0: Float32[1, 32, 256, 256]
-  //   high_res_feats_1: Float32[1, 64, 128, 128]
-  const outputNames = encoderSession.outputNames as string[];
-  let imageEmbed: OrtTensor = null;
-  let highResFeats0: OrtTensor = null;
-  let highResFeats1: OrtTensor = null;
-
-  for (const name of outputNames) {
-    const lower = name.toLowerCase();
-    if (lower.includes('image_embed') || lower === 'image_embed') {
-      imageEmbed = encoderOutput[name];
-    } else if (lower.includes('high_res_feats_0') || lower === 'high_res_feats_0') {
-      highResFeats0 = encoderOutput[name];
-    } else if (lower.includes('high_res_feats_1') || lower === 'high_res_feats_1') {
-      highResFeats1 = encoderOutput[name];
-    }
-  }
-
-  // Fallback: positional (index 0=image_embed, 1=high_res_feats_0, 2=high_res_feats_1)
-  if (!imageEmbed) imageEmbed = encoderOutput[outputNames[0]];
-  if (!highResFeats0 && outputNames.length > 1) highResFeats0 = encoderOutput[outputNames[1]];
-  if (!highResFeats1 && outputNames.length > 2) highResFeats1 = encoderOutput[outputNames[2]];
 
   // Evict oldest if at capacity
   if (embeddingCache.size >= MAX_CACHED_EMBEDDINGS) {
@@ -329,9 +171,7 @@ async function encodeImage(
   }
 
   embeddingCache.set(assetId, {
-    imageEmbed,
-    highResFeats0,
-    highResFeats1,
+    embeddings,
     width: imageData.width,
     height: imageData.height,
   });
@@ -339,10 +179,6 @@ async function encodeImage(
 
 // ─── Mask Decoding ───────────────────────────────────────────────────────────
 
-/**
- * Run SAM 2 decoder with given prompts against a cached embedding.
- * Returns up to 4 candidate masks sorted by score (descending).
- */
 async function decodeMask(
   assetId: string,
   prompts: SegPrompt[],
@@ -355,149 +191,101 @@ async function decodeMask(
 
   report({ stage: 'decoding', progress: 0 });
 
-  // Build point coordinates and labels in 1024×1024 space.
-  // SAM2 decoder expects point_coords: Float32[1, N, 2] and point_labels: Float32[1, N]
-  // with a padding point [0, 0] label=-1 appended (per official usage).
-  const scaleX = IMAGE_SIZE / entry.width;
-  const scaleY = IMAGE_SIZE / entry.height;
+  const tfm = getTransformers();
+  const model = getModel();
+
+  // ⚠️ SAM 2.1 ONNX coordinate convention:
+  // The decoder expects input_points in the model's internal coordinate space
+  // (1024×1024), NOT the original image resolution. Prompts arrive in
+  // image-local pixel coordinates → must scale to [0, 1024].
+  const MODEL_SIZE = 1024;
+  const scaleX = MODEL_SIZE / entry.width;
+  const scaleY = MODEL_SIZE / entry.height;
 
   const coords: number[] = [];
-  const labels: number[] = [];
+  const labels: bigint[] = [];
 
   for (const prompt of prompts) {
     if (prompt.type === 'point') {
       coords.push(prompt.x * scaleX, prompt.y * scaleY);
-      labels.push(prompt.label);
+      labels.push(BigInt(prompt.label));
     } else if (prompt.type === 'box') {
       // Box prompt: top-left with label 2, bottom-right with label 3
       coords.push(prompt.x1 * scaleX, prompt.y1 * scaleY);
-      labels.push(2);
+      labels.push(BigInt(2));
       coords.push(prompt.x2 * scaleX, prompt.y2 * scaleY);
-      labels.push(3);
+      labels.push(BigInt(3));
     }
   }
 
-  // Append padding point [0, 0] with label -1 (required by SAM2 decoder)
-  coords.push(0, 0);
-  labels.push(-1);
-
   const numPoints = coords.length / 2;
 
-  // Build decoder feed tensors
-  const pointCoordsTensor = new ort.Tensor(
+  // Build input tensors for decode.
+  // ⚠️ SAM 2.1 ONNX tensor rank requirements (different from SAM 1 / other SAM2 formats):
+  //   input_points: rank 4 → [batch=1, num_labels=1, num_points, 2]
+  //   input_labels: rank 3 → [batch=1, num_labels=1, num_points]
+  // Using rank 3/2 causes "Invalid rank for input" ORT error.
+  const inputPoints = new tfm.Tensor(
     'float32',
     Float32Array.from(coords),
-    [1, numPoints, 2]
+    [1, 1, numPoints, 2],
   );
-  const pointLabelsTensor = new ort.Tensor(
-    'float32',
-    Float32Array.from(labels),
-    [1, numPoints]
-  );
-  // No prior mask input
-  const maskInput = new ort.Tensor(
-    'float32',
-    new Float32Array(1 * 1 * MASK_SIZE * MASK_SIZE),
-    [1, 1, MASK_SIZE, MASK_SIZE]
-  );
-  const hasMaskInput = new ort.Tensor(
-    'float32',
-    Float32Array.from([0.0]),
-    [1]
+  const inputLabels = new tfm.Tensor(
+    'int64',
+    BigInt64Array.from(labels),
+    [1, 1, numPoints],
   );
 
   report({ stage: 'decoding', progress: 0.3 });
 
-  // Build feeds — map to decoder input names by semantic matching.
-  // SAM2 decoder inputs: image_embed, high_res_feats_0, high_res_feats_1,
-  //                      point_coords, point_labels, mask_input, has_mask_input
-  const decoderInputNames = decoderSession.inputNames as string[];
-  const feeds: Record<string, OrtTensor> = {};
-
-  for (const name of decoderInputNames) {
-    const lower = name.toLowerCase();
-    if (lower === 'image_embed' || lower.includes('image_embed')) {
-      feeds[name] = entry.imageEmbed;
-    } else if (lower === 'high_res_feats_0' || lower.includes('high_res_feats_0')) {
-      feeds[name] = entry.highResFeats0;
-    } else if (lower === 'high_res_feats_1' || lower.includes('high_res_feats_1')) {
-      feeds[name] = entry.highResFeats1;
-    } else if (lower.includes('point_coord') || lower.includes('input_point')) {
-      feeds[name] = pointCoordsTensor;
-    } else if (lower.includes('point_label') || lower.includes('input_label')) {
-      feeds[name] = pointLabelsTensor;
-    } else if (lower.includes('has_mask')) {
-      // Must check 'has_mask' BEFORE 'mask_input' because
-      // 'has_mask_input'.includes('mask_input') === true
-      feeds[name] = hasMaskInput;
-    } else if (lower === 'mask_input' || lower.includes('mask_input')) {
-      feeds[name] = maskInput;
-    }
-  }
-
-  // Fallback: positional mapping if not all matched
-  if (Object.keys(feeds).length < decoderInputNames.length) {
-    const expectedFeeds = [
-      entry.imageEmbed, entry.highResFeats0, entry.highResFeats1,
-      pointCoordsTensor, pointLabelsTensor, maskInput, hasMaskInput,
-    ];
-    for (let i = 0; i < decoderInputNames.length && i < expectedFeeds.length; i++) {
-      if (!feeds[decoderInputNames[i]]) {
-        feeds[decoderInputNames[i]] = expectedFeeds[i];
-      }
-    }
-  }
-
-  // Run decoder
-  const decoderOutput = await decoderSession.run(feeds);
+  // Run decoder — call model with embeddings + prompts
+  const outputs = await model({
+    ...entry.embeddings,
+    input_points: inputPoints,
+    input_labels: inputLabels,
+  }) as Record<string, unknown>;
 
   report({ stage: 'decoding', progress: 0.7 });
 
-  // Extract masks and scores
-  const decoderOutputNames = decoderSession.outputNames as string[];
+  // Extract masks — handle multiple possible output key names
+  const masksOutput = (outputs.pred_masks ?? outputs.masks ?? outputs.low_res_masks) as TensorLike | undefined;
+  const scoresOutput = (outputs.iou_scores ?? outputs.iou_predictions ?? outputs.scores) as TensorLike | undefined;
 
-  let masksData: Float32Array | null = null;
-  let masksDims: number[] = [];
-  let scoresData: Float32Array | null = null;
-
-  for (const name of decoderOutputNames) {
-    const tensor = decoderOutput[name];
-    const lower = name.toLowerCase();
-    if (lower.includes('mask') && !lower.includes('low_res') && !lower.includes('iou')) {
-      masksData = tensor.data as Float32Array;
-      masksDims = tensor.dims as number[];
-    } else if (lower.includes('iou') || lower.includes('score') || lower.includes('prediction')) {
-      scoresData = tensor.data as Float32Array;
-    }
+  if (!masksOutput || !masksOutput.dims) {
+    throw new Error(`SAM2 decode did not return masks. Output keys: ${Object.keys(outputs).join(', ')}`);
   }
 
-  // Fallback: first output = masks, second = scores (if not matched by name)
-  if (!masksData && decoderOutputNames.length >= 1) {
-    const first = decoderOutput[decoderOutputNames[0]];
-    masksData = first.data as Float32Array;
-    masksDims = first.dims as number[];
-  }
-  if (!scoresData && decoderOutputNames.length >= 2) {
-    scoresData = decoderOutput[decoderOutputNames[1]].data as Float32Array;
-  }
+  const masksData = masksOutput.data instanceof Float32Array
+    ? masksOutput.data
+    : new Float32Array(masksOutput.data as ArrayLike<number>);
+  const masksDims = masksOutput.dims;
+  const scoresData = scoresOutput?.data instanceof Float32Array
+    ? scoresOutput.data
+    : scoresOutput ? new Float32Array(scoresOutput.data as ArrayLike<number>) : null;
 
-  if (!masksData || masksDims.length < 3) {
-    throw new Error('Decoder did not return mask tensor');
-  }
-
-  // Parse mask dimensions: typically [1, K, H, W] or [K, H, W]
+  // Parse mask dimensions.
+  // ⚠️ SAM 2.1 ONNX (onnx-community/sam2.1-hiera-tiny-ONNX) outputs 5D masks:
+  //   [batch=1, num_labels=1, num_masks=3, H=256, W=256]
+  // This differs from typical SAM implementations which output 4D [1, N, H, W].
+  // We handle all known formats defensively:
   let numMasks: number;
   let maskH: number;
   let maskW: number;
-
-  if (masksDims.length === 4) {
+  if (masksDims.length === 5) {
+    // [1, 1, 3, 256, 256] — SAM 2.1 ONNX output
+    numMasks = masksDims[2];
+    maskH = masksDims[3];
+    maskW = masksDims[4];
+  } else if (masksDims.length === 4) {
     numMasks = masksDims[1];
     maskH = masksDims[2];
     maskW = masksDims[3];
-  } else {
+  } else if (masksDims.length === 3) {
     numMasks = masksDims[0];
     maskH = masksDims[1];
     maskW = masksDims[2];
+  } else {
+    throw new Error(`Unexpected mask dims: [${masksDims.join(', ')}]`);
   }
 
   // Convert each mask to polygon
@@ -514,8 +302,13 @@ async function decodeMask(
     }
   }
 
-  // Sort by score descending
-  results.sort((a, b) => b.score - a.score);
+  // Sort by mask area (largest first) — more useful for interactive selection
+  // than score-based sorting, since SAM2 often assigns similar scores.
+  results.sort((a, b) => {
+    const areaA = computeRingsArea(a.rings);
+    const areaB = computeRingsArea(b.rings);
+    return areaB - areaA;
+  });
 
   report({ stage: 'decoding', progress: 1.0 });
   return results;
@@ -615,6 +408,25 @@ function perpDist(
   return Math.abs(ddy * p.x - ddx * p.y + b.x * a.y - b.y * a.x) / Math.sqrt(lenSq);
 }
 
+/**
+ * Compute the area of polygon rings using the Shoelace formula.
+ * Used for sorting mask candidates by size (largest first).
+ */
+function computeRingsArea(rings: { x: number; y: number }[][]): number {
+  let totalArea = 0;
+  for (const ring of rings) {
+    if (ring.length < 3) continue;
+    let area = 0;
+    for (let i = 0; i < ring.length; i++) {
+      const j = (i + 1) % ring.length;
+      area += ring[i].x * ring[j].y;
+      area -= ring[j].x * ring[i].y;
+    }
+    totalArea += Math.abs(area) / 2;
+  }
+  return totalArea;
+}
+
 function maskToPolygonRings(
   maskData: Float32Array,
   maskW: number,
@@ -623,11 +435,9 @@ function maskToPolygonRings(
   origH: number,
   simplifyEpsilon: number = 1.5,
 ): { x: number; y: number }[][] {
-  // 1. Trace contour on thresholded mask (> 0.0)
   const rawContour = traceContour(maskData, maskW, maskH);
   if (rawContour.length < 3) return [];
 
-  // 2. Scale from mask coordinates to original image coordinates
   const scaleX = origW / maskW;
   const scaleY = origH / maskH;
   const scaled = rawContour.map(p => ({
@@ -635,7 +445,6 @@ function maskToPolygonRings(
     y: p.y * scaleY,
   }));
 
-  // 3. Simplify
   const simplified = simplifyRDP(scaled, simplifyEpsilon);
   if (simplified.length < 3) return [];
 
@@ -698,7 +507,7 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
       type: 'progress',
       reqId,
       stage: 'detecting-device',
-      device: cachedDevice ?? undefined,
+      device: (session.device === 'cpu' ? 'wasm' : session.device) as 'webgpu' | 'wasm' | undefined,
       ...partial,
     } as SegProgress);
   };
@@ -709,14 +518,14 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
     switch (action) {
       // ─── Download ──────────────────────────────────────────────────
       case 'download': {
-        await loadModel(modelId, reqId, report);
+        await ensureModel(modelId, report);
         post({
           type: 'result',
           reqId,
           action: 'download',
           context: req.context ?? null,
           debug: {
-            deviceUsed: cachedDevice!,
+            deviceUsed: session.device === 'cpu' ? 'wasm' : session.device,
             totalMs: performance.now() - t0,
           },
         });
@@ -730,8 +539,8 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
         }
         const assetId = req.context?.assetId ?? `anon_${reqId}`;
 
-        await loadModel(modelId, reqId, report);
-        await encodeImage(req.imageData, assetId, reqId, report);
+        await ensureModel(modelId, report);
+        await encodeImage(req.imageData, assetId, report);
 
         post({
           type: 'result',
@@ -740,7 +549,7 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
           embeddingReady: true,
           context: req.context ?? null,
           debug: {
-            deviceUsed: cachedDevice!,
+            deviceUsed: session.device === 'cpu' ? 'wasm' : session.device,
             encodeMs: performance.now() - t0,
             totalMs: performance.now() - t0,
           },
@@ -758,7 +567,7 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
           throw new Error('No embedding available. Run "encode" first.');
         }
 
-        await loadModel(modelId, reqId, report);
+        await ensureModel(modelId, report);
 
         const tDecode = performance.now();
         const masks = await decodeMask(decodeAssetId, req.prompts, report);
@@ -773,7 +582,7 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
           masks,
           context: req.context ?? null,
           debug: {
-            deviceUsed: cachedDevice!,
+            deviceUsed: session.device === 'cpu' ? 'wasm' : session.device,
             decodeMs,
             postProcessMs: 0,
             totalMs: performance.now() - t0,
@@ -790,7 +599,7 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
         }
 
         const entry = embeddingCache.get(segAssetId)!;
-        await loadModel(modelId, reqId, report);
+        await ensureModel(modelId, report);
 
         report({ stage: 'decoding', progress: 0 });
 
@@ -820,8 +629,10 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
               () => {},
             );
 
-            if (masks.length > 0 && masks[0].score > 0.7) {
-              const best = masks[0];
+            // In segment-all, pick by highest score (not area) as quality filter
+            const bestByScore = masks.reduce((a, b) => b.score > a.score ? b : a, masks[0]);
+            if (masks.length > 0 && bestByScore.score > 0.7) {
+              const best = bestByScore;
               let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
               for (const ring of best.rings) {
                 for (const p of ring) {
@@ -845,6 +656,13 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
 
         const filtered = nmsSegments(allSegments, 0.8);
 
+        // Sort final segments by area (largest first)
+        filtered.sort((a, b) => {
+          const areaA = computeRingsArea(a.rings);
+          const areaB = computeRingsArea(b.rings);
+          return areaB - areaA;
+        });
+
         report({ stage: 'post-processing', progress: 1.0 });
 
         post({
@@ -854,7 +672,7 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
           segments: filtered,
           context: req.context ?? null,
           debug: {
-            deviceUsed: cachedDevice!,
+            deviceUsed: session.device === 'cpu' ? 'wasm' : session.device,
             totalMs: performance.now() - t0,
           },
         });

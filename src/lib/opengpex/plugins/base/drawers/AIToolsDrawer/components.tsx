@@ -24,23 +24,28 @@ import { Settings, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSelfConfig } from '@opengpex/editor/core/context';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
-import { initBusySync } from './shared';
+import { initBusySync } from './_shared';
+import { bgRemoverStore } from './bgremover/store';
+import { segStore } from './segmentation/store';
+import { upscaleStore } from './upscaler/store';
+import { inpaintEraserStore } from './inpaint/eraser/store';
 import { AIToolsIcon } from './icon';
 import { BgRemoverPanel } from './bgremover/panel';
 import { UpscalerPanel } from './upscaler/panel';
 import { SegmentationPanel } from './segmentation/panel';
+import { InpaintEraserPanel } from './inpaint/eraser/panel';
 import type { AIToolsDrawerCommandsMap } from './commands.d';
-import type { AIToolsConfig } from './protocols';
 import { AIToolsDrawerAPI } from './protocols';
 
 // ─── Tool definitions ────────────────────────────────────────────────────────
 
-type AITool = 'upscaler' | 'bg-removal' | 'segmentation';
+type AITool = 'upscaler' | 'bg-removal' | 'segmentation' | 'inpaint-eraser';
 
 const AI_TOOLS: { value: AITool; label: string; description: string }[] = [
   { value: 'upscaler', label: 'Upscaler', description: 'Enhance image resolution with AI' },
   { value: 'bg-removal', label: 'BG Remover', description: 'Remove image backgrounds using AI' },
   { value: 'segmentation', label: 'Segmentation', description: 'Click to select objects using SAM' },
+  { value: 'inpaint-eraser', label: 'Smart Eraser', description: 'Remove objects and fill with AI' },
 ];
 
 // ─── Main Component ──────────────────────────────────────────────────────────
@@ -49,7 +54,7 @@ export function AIToolsDrawerContent() {
   const { openSettingsCmd } = usePluginCommands<AIToolsDrawerCommandsMap>();
   const { state, activeFrame } = useEditorState();
   const { actions, plugins } = useEditorServices();
-  const [config, setConfig] = usePluginSelfConfig<AIToolsConfig>();
+  const [config, setConfig] = usePluginSelfConfig<Record<string, unknown>>();
 
   // Persist active tool selection in config so it survives page refresh
   const savedTool = (config?.activeTool as AITool) || 'upscaler';
@@ -63,8 +68,32 @@ export function AIToolsDrawerContent() {
 
   // One-time: give the download singleton a reference to PluginService
   // so it can auto-sync busy state even after this component unmounts.
+  // Use a unified busy sync that OR-combines all stores + download state.
   useEffect(() => {
-    initBusySync(plugins, AIToolsDrawerAPI.configKey);
+    const uid = AIToolsDrawerAPI.configKey;
+    initBusySync(plugins, uid);
+
+    // Unified busy sync: busy = any store has a task OR download is active
+    const syncBusy = () => {
+      const isBusy =
+        bgRemoverStore.getState().task !== null ||
+        segStore.getState().task !== null ||
+        upscaleStore.getState().task !== null ||
+        inpaintEraserStore.getState().task !== null;
+      plugins.setBusy(uid, isBusy);
+    };
+
+    const unsubs = [
+      bgRemoverStore.subscribe(syncBusy),
+      segStore.subscribe(syncBusy),
+      upscaleStore.subscribe(syncBusy),
+      inpaintEraserStore.subscribe(syncBusy),
+    ];
+
+    // Initial sync
+    syncBusy();
+
+    return () => { unsubs.forEach(fn => fn()); };
   }, [plugins]);
 
   // When SAM clip tool is active, force Segmentation panel (results appear there).
@@ -125,6 +154,7 @@ export function AIToolsDrawerContent() {
       {activeTool === 'bg-removal' && <BgRemoverPanel />}
       {activeTool === 'upscaler' && <UpscalerPanel />}
       {activeTool === 'segmentation' && <SegmentationPanel />}
+      {activeTool === 'inpaint-eraser' && <InpaintEraserPanel />}
     </div>
   );
 }

@@ -60,8 +60,8 @@ export const VIEWPORT_SCROLL_MODE: ViewportScrollMode = 'legacy';
  */
 export const VIEWPORT_FIT_PADDING = 40;
 
-/** Minimum viewport zoom scale (10% = 0.10). */
-export const VIEWPORT_ZOOM_MIN = 0.10;
+/** Minimum viewport zoom scale (1% = 0.01). */
+export const VIEWPORT_ZOOM_MIN = 0.01;
 
 /** Maximum viewport zoom scale (12800% = 128). */
 export const VIEWPORT_ZOOM_MAX = 128;

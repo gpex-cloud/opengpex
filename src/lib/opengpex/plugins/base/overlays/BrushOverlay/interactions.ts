@@ -102,10 +102,21 @@ export const createBrushStrokeHandler = (): InteractionHandler => ({
       } catch (err) {
         console.error('[BrushOverlay] Bake failed:', err);
       } finally {
-        // Delay clearing session by one frame to give the renderer time to commit
-        // the baked layer. This prevents a one-frame flash where the preview overlay
-        // disappears before the new layer content is rendered on screen.
-        requestAnimationFrame(() => { session = null; });
+        // Clear session synchronously after bake completes.
+        //
+        // Anti-flash guarantee: executeBake() pre-warms the bitmap cache via
+        // cacheBitmap() and commits state via CMD_BAKE (synchronous dispatch)
+        // BEFORE we reach here. On the next rAF tick the rendering engine
+        // already has both the bitmap and the updated layer state, so the
+        // baked content renders in the same frame that the preview overlay
+        // disappears — no flash.
+        //
+        // History: beta.43 used requestAnimationFrame(() => session = null)
+        // which introduced a race condition killing mosaic sessions on rapid
+        // successive strokes. The cacheBitmap pre-warm (added in the same era)
+        // made the rAF delay redundant — removing it eliminates the race
+        // entirely without reintroducing flash.
+        session = null;
       }
     })();
   },

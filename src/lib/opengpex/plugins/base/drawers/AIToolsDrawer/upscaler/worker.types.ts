@@ -20,38 +20,35 @@
 /**
  * Upscale Worker Message Protocol
  *
- * Defines the message types exchanged between the main thread and the
- * upscale Web Worker. Uses the same reqId-based request/response pattern
- * as the BgRemoval and Segmentation workers.
+ * Wire-level types for the request / response / progress messages exchanged
+ * between the main thread (`client.ts`) and the upscale worker (`worker.ts`).
+ *
+ * Design notes:
+ *   - Extends shared WorkerRequest/WorkerProgress/WorkerError base types
+ *   - All model/backend resolution is done on the main thread (full transparency)
+ *   - Worker only receives fully resolved parameters and executes
  */
+
+import type { WorkerRequest, WorkerProgress, WorkerError } from '../_shared/inference/types';
 
 // ─── Main → Worker ───────────────────────────────────────────────────────────
 
-export interface UpscaleRequest {
-  reqId: number;
-  action: 'upscale' | 'download';
-  modelId: string;
-  /** Input image RGBA buffer (Transferable — zero-copy to Worker). */
-  imageData?: { data: ArrayBuffer; width: number; height: number };
-  /** Target scale factor. */
+export interface UpscaleRequest extends WorkerRequest {
+  /**
+   * Native output scale of the model (2 or 4).
+   * 2x models output [1,3,H*2,W*2], 4x models output [1,3,H*4,W*4].
+   * @default 4
+   */
+  modelScale?: 2 | 4;
+  /** Target scale factor (may differ from modelScale — triggers post-processing). */
   scale?: 2 | 4;
-  /** Tile size in pixels (default 256). */
+  /** Tile size in pixels (default 128). */
   tileSize?: number;
 }
 
 // ─── Worker → Main ───────────────────────────────────────────────────────────
 
-export interface UpscaleProgress {
-  type: 'progress';
-  reqId: number;
-  stage: 'detecting-device' | 'loading' | 'downloading' | 'processing';
-  device?: 'webgpu' | 'wasm';
-  /** Model download progress bytes loaded. */
-  loaded?: number;
-  /** Model download total bytes. */
-  total?: number;
-  /** Overall processing progress (0-1), valid during 'processing' stage. */
-  progress?: number;
+export interface UpscaleProgress extends WorkerProgress {
   /** Current tile being processed (1-based). */
   currentTile?: number;
   /** Total number of tiles. */
@@ -61,7 +58,6 @@ export interface UpscaleProgress {
 export interface UpscaleResult {
   type: 'result';
   reqId: number;
-  action: 'upscale' | 'download';
   /** Output RGBA buffer (scaled size) — Transferable. */
   imageData?: { data: ArrayBuffer; width: number; height: number };
   debug?: {
@@ -71,10 +67,7 @@ export interface UpscaleResult {
   };
 }
 
-export interface UpscaleError {
-  type: 'error';
-  reqId: number;
-  error: string;
-}
+/** Worker → Main thread: Error */
+export type UpscaleError = WorkerError;
 
 export type UpscaleResponse = UpscaleProgress | UpscaleResult | UpscaleError;

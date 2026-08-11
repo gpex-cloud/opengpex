@@ -32,6 +32,7 @@ import {
 } from "./useFastSync";
 import { lassoPreviewPathRef } from "./interactions";
 import { PixelGridOverlayAPI } from "../PixelGridOverlay/protocols";
+import { MARCHING_ANTS_DURATION_S } from "./protocols";
 
 /* ─── Inline keyframes for marching ants (plugin-internal, no global CSS) ─── */
 const CLIP_ANTS_STYLE = `
@@ -171,7 +172,7 @@ export function ClipOverlayMain() {
               vectorEffect="non-scaling-stroke"
               style={{
                 strokeDasharray: '6, 6',
-                animation: 'clip-ants-flow 0.5s linear infinite',
+                animation: `clip-ants-flow ${MARCHING_ANTS_DURATION_S}s linear infinite`,
               }}
             />
           </g>

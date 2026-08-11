@@ -39,7 +39,7 @@ function formatSpeed(bps: number): string {
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
-export interface ModelDownloaderProps {
+export interface DownloadPanelProps {
   /** 0-1 progress value */
   progress: number;
   /** Bytes downloaded */
@@ -57,7 +57,7 @@ export interface ModelDownloaderProps {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 /**
- * ModelDownloader — Compact inline download progress for drawer panels.
+ * DownloadPanel — Compact inline download progress for drawer panels.
  *
  * Shows:
  *   - Spinner + "Downloading..." label
@@ -67,14 +67,14 @@ export interface ModelDownloaderProps {
  *
  * Used by all AI tool panels (BG Remover, Upscaler, Segmentation) for consistent UX.
  */
-export const ModelDownloader = React.memo(function ModelDownloader({
+export const DownloadPanel = React.memo(function DownloadPanel({
   progress,
   loadedBytes,
   totalBytes,
   speedBps,
   currentFile,
   onCancel,
-}: ModelDownloaderProps) {
+}: DownloadPanelProps) {
   const percent = Math.min(100, Math.max(0, Math.round(progress * 100)));
 
   return (
@@ -126,7 +126,3 @@ export const ModelDownloader = React.memo(function ModelDownloader({
   );
 });
 
-/** @deprecated Use ModelDownloader instead */
-export const ModelDownloadSection = ModelDownloader;
-/** @deprecated Use ModelDownloaderProps instead */
-export type ModelDownloadSectionProps = ModelDownloaderProps;

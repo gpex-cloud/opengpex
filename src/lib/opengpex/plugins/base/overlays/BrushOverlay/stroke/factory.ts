@@ -210,17 +210,19 @@ function createMosaicSession(
   // (handled in MosaicStrokeSession.findOrCreatePaintLayer at end time).
   let sourceLayer: Layer | null = null;
 
-  if (activeLayer.type === 'image' && activeLayer.src) {
-    // Active layer IS the image → use it directly as source (lock doesn't matter, we only read)
+  if (activeLayer.type === 'image' && activeLayer.src && !activeLayer.hostId) {
+    // Active layer IS the image host → use it directly as source (lock doesn't matter, we only read)
     sourceLayer = activeLayer;
-  } else if (activeLayer.type === 'paint') {
-    // Active layer is paint (e.g. from a previous mosaic stroke) → find image layer in stack
+  } else if (activeLayer.type === 'paint' || activeLayer.type === 'image') {
+    // Active layer is paint (e.g. from a previous mosaic stroke) or a non-host image layer
+    // → find the nearest HOST image layer in the stack
     const layerOrder = frame.layers.order;
     const activeIdx = layerOrder.indexOf(activeLayerId!);
     // Search below in stack (lower index = below)
     for (let i = activeIdx - 1; i >= 0; i--) {
       const layer = frame.layers.byId[layerOrder[i]];
-      if (layer.type === 'image' && layer.visible && layer.src) {
+      // Only match HOST image layers (skip role/child layers created by expandLayers)
+      if (layer.type === 'image' && layer.visible && layer.src && !layer.hostId) {
         sourceLayer = layer;
         break;
       }
@@ -229,7 +231,7 @@ function createMosaicSession(
     if (!sourceLayer) {
       for (let i = activeIdx + 1; i < layerOrder.length; i++) {
         const layer = frame.layers.byId[layerOrder[i]];
-        if (layer.type === 'image' && layer.visible && layer.src) {
+        if (layer.type === 'image' && layer.visible && layer.src && !layer.hostId) {
           sourceLayer = layer;
           break;
         }

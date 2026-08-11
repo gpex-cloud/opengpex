@@ -23,119 +23,46 @@
  * Domain-level types, constants and configuration for the AI upscaler feature.
  * These are consumed by the panel, commands, hooks, and settings UI.
  *
+ * Runtime state is managed by `./store.ts` (module-level store).
  * Worker wire-level types live in `./worker.types.ts`.
  */
 
 // ─── Command IDs ─────────────────────────────────────────────────────────────
 
 export const CMD_UPSCALE = 'cmd.upscale';
-export const CMD_UPSCALE_DOWNLOAD = 'cmd.upscale_download';
 export const CMD_UPSCALE_ABORT = 'cmd.upscale_abort';
 
-// ─── Signal IDs ──────────────────────────────────────────────────────────────
-
-export const SIGNAL_UPSCALE_STATUS = 'signal.upscale_status';
-
-// ─── Status Types ────────────────────────────────────────────────────────────
-
-export type UpscaleStage =
-  | 'idle'
-  | 'downloading'
-  | 'processing'
-  | 'done'
-  | 'error';
-
-export interface UpscaleStatus {
-  [key: string]: unknown;
-  stage: UpscaleStage;
-  device: 'webgpu' | 'wasm' | null;
-  downloadProgress: number;
-  downloadedBytes: number;
-  totalBytes: number;
-  speedBps: number;
-  etaSeconds: number;
-  processingProgress: number;
-  currentTile: number;
-  totalTiles: number;
-  errorMessage: string | null;
-  elapsedMs: number;
-}
-
-export const INITIAL_UPSCALE_STATUS: UpscaleStatus = {
-  stage: 'idle',
-  device: null,
-  downloadProgress: 0,
-  downloadedBytes: 0,
-  totalBytes: 0,
-  speedBps: 0,
-  etaSeconds: 0,
-  processingProgress: 0,
-  currentTile: 0,
-  totalTiles: 0,
-  errorMessage: null,
-  elapsedMs: 0,
-};
+import type { ModelEntry, ModelCatalog } from '../_shared/types';
 
 // ─── Model Management ────────────────────────────────────────────────────────
 
-export interface UpscaleModelEntry {
-  id: string;
-  name: string;
-  modelId: string;
-  /**
-   * ONNX filename within the HuggingFace repo.
-   * Most upscaler repos do NOT use "model.onnx" — each has its own naming.
-   * Examples: "4x-UltraSharpV2_fp32_op17.onnx", "realesrgan-x4plus-anime.onnx"
-   * Falls back to "model.onnx" if not specified.
-   */
-  onnxFile?: string;
-  size: string;
+/**
+ * Upscaler model entry — extends ModelEntry with scale factor.
+ */
+export interface UpscaleModelEntry extends ModelEntry {
+  /** Native output scale factor of the model (2 or 4). */
   scale: number;
-  description: string;
-  builtin: boolean;
-  default?: boolean;
 }
 
 export const BUILTIN_UPSCALE_MODELS: UpscaleModelEntry[] = [
   {
-    id: '4x-ultrasharp-v2',
-    name: '4× UltraSharp V2',
-    modelId: 'Kim2091/UltraSharpV2',
-    onnxFile: '4x-UltraSharpV2_fp32_op17.onnx',
-    size: '~52 MB',
-    scale: 4,
-    description: 'Gold standard — best quality for photos & general use',
-    builtin: true,
-    default: true,
-  },
-  {
-    id: '4x-clearreality-v1',
-    name: '4× ClearReality V1',
-    modelId: 'Kim2091/ClearRealityV1',
-    onnxFile: 'ONNX/fp32/4x-ClearRealityV1-fp32-opset17.onnx',
-    size: '~1.7 MB',
-    scale: 4,
-    description: 'Ultra-compact — instant download, great for quick previews',
-    builtin: true,
-  },
-  {
-    id: 'RealESRGAN_x4plus_anime_6B',
-    name: '4× Real-ESRGAN Anime',
-    modelId: 'deepghs/imgutils-models',
-    onnxFile: 'real_esrgan/RealESRGAN_x4plus_anime_6B.onnx',
-    size: '~18 MB',
-    scale: 4,
-    description: 'Optimized for anime, illustrations & flat-color art',
-    builtin: true,
-  },
-  {
-    id: '2x-AnimeSharpV4',
-    name: '2× AnimeSharp V4',
+    id: '2x-AnimeSharpV4-fast',
+    name: '2× AnimeSharp V4 Fast',
     modelId: 'Kim2091/2x-AnimeSharpV4',
-    onnxFile: '2x-AnimeSharpV4_RCAN_fp16_op17.onnx',
-    size: '~31 MB',
+    onnxFile: '2x-AnimeSharpV4_Fast_RCAN_PU_fp16_opset17.onnx',
+    size: '~30 MB',
     scale: 2,
-    description: 'High-detail 2× upscale for anime & illustration',
+    description: 'Fast 2× anime upscale — PixelUnshuffle variant, smaller & faster',
+    builtin: true,
+  },
+  {
+    id: 'real-esrgan-x4',
+    name: '4× Real-ESRGAN General',
+    modelId: 'SceneWorks/real-esrgan-onnx',
+    onnxFile: 'real_esrgan_x4.onnx',
+    size: '~65 MB',
+    scale: 4,
+    description: 'Real-ESRGAN x4 — general purpose photo & illustration upscaler',
     builtin: true,
   },
 ];
@@ -149,10 +76,8 @@ export const BUILTIN_UPSCALE_MODELS: UpscaleModelEntry[] = [
  */
 export type UpscaleDpiMode = 'increase-resolution' | 'increase-dpi';
 
-export interface UpscaleConfig {
-  [key: string]: unknown;
+export interface UpscaleConfig extends ModelCatalog {
   models: UpscaleModelEntry[];
-  activeModelId: string;
   tileSize: number;
   /** Output mode: 'new-frame' creates a new frame, 'replace' replaces current frame via frame.resize.replace */
   outputMode: 'new-frame' | 'replace';
@@ -164,24 +89,9 @@ export interface UpscaleConfig {
 export const DEFAULT_UPSCALE_CONFIG: UpscaleConfig = {
   models: [...BUILTIN_UPSCALE_MODELS],
   activeModelId: BUILTIN_UPSCALE_MODELS[0].id,
-  tileSize: 256,
+  tileSize: 128,  // 128×4=512px output tile — optimal for WebGPU stability
   outputMode: 'new-frame',
   targetScale: 4,
   dpiMode: 'increase-resolution',
 };
 
-// ─── Model Files (download manifest) ─────────────────────────────────────────
-
-/**
- * Default ONNX filename used when `UpscaleModelEntry.onnxFile` is not specified.
- * Most real-world repos use custom filenames, so this is merely a fallback.
- */
-export const DEFAULT_UPSCALE_ONNX_FILE = 'model.onnx';
-
-/**
- * Build the download file list for a given upscaler model.
- * Upscaler repos are pure-ONNX (no config.json / preprocessor_config.json needed).
- */
-export function getUpscaleModelFiles(model: UpscaleModelEntry): { filename: string }[] {
-  return [{ filename: model.onnxFile ?? DEFAULT_UPSCALE_ONNX_FILE }];
-}

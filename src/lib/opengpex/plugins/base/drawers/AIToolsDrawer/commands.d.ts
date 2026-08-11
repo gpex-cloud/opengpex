@@ -8,36 +8,24 @@
  */
 
 import type { CommandInstance, InteractionSignalValue } from '@opengpex/editor/core/types';
-import type { SegEncodePayload, SegEncodeResult, SegDecodePayload, SegDecodeResult } from './protocols';
+import type { SegEncodePayload, SegEncodeResult, SegDecodePayload, SegDecodeResult } from './segmentation/protocols';
 
 /** Type map for usePluginCommands<AIToolsDrawerCommandsMap>() */
 export interface AIToolsDrawerCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   removeBgCmd: CommandInstance<void, Promise<void>>;
-  downloadModelCmd: CommandInstance<void, Promise<void>>;
   abortCmd: CommandInstance<void, Promise<void>>;
   openSettingsCmd: CommandInstance;
   segEncodeCmd: CommandInstance<SegEncodePayload, Promise<SegEncodeResult>>;
   segDecodeCmd: CommandInstance<SegDecodePayload, Promise<SegDecodeResult>>;
   segAllCmd: CommandInstance<void, Promise<void>>;
   upscaleCmd: CommandInstance<void, Promise<void>>;
-  upscaleDownloadCmd: CommandInstance<void, Promise<void>>;
   upscaleAbortCmd: CommandInstance;
+  inpaintEraserCmd: CommandInstance<void, Promise<void>>;
+  inpaintEraserAbortCmd: CommandInstance;
 }
 
 /** Type map for usePluginSignals<AIToolsDrawerSignalsMap>() */
 export interface AIToolsDrawerSignalsMap {
   [key: string]: { value: InteractionSignalValue; set: (val: InteractionSignalValue) => void };
-  statusSignal: {
-    value: unknown;
-    set: (val: unknown) => void;
-  };
-  segStatusSignal: {
-    value: unknown;
-    set: (val: unknown) => void;
-  };
-  upscaleStatusSignal: {
-    value: unknown;
-    set: (val: unknown) => void;
-  };
 }

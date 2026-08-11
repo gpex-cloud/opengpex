@@ -20,11 +20,70 @@
 import { useEffect, useRef } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync, useFastRectSync, useFastSvgGroupSync, useFastMarchingAntsSync, useFastAnchorSync } from '@opengpex/editor/core/motion/hooks/navigation';
-import { LocalShape, LocalPolygon, asLocalShape } from '@opengpex/editor/core/types';
+import { LocalShape, LocalPolygon, LocalPoint, asLocalShape, asLocalPolygon, asLocalRect, Point2D } from '@opengpex/editor/core/types';
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { ClipTool } from '../../options/ClipOptions/protocols';
+import { MARCHING_ANTS_MAX_VERTICES } from './protocols';
 
 const EMPTY_SHAPE: LocalShape = asLocalShape({ x: 0, y: 0, w: 0, h: 0 });
+
+// ─── Marching Ants Path Simplification ─────────────────────────────────────────
+
+/**
+ * Cached simplified polygon for marching ants display.
+ * Avoids re-running Douglas–Peucker on every tick when data hasn't changed.
+ */
+interface AntsSimplifyCache {
+  /** Source polygon identity (reference equality check) */
+  sourceRings: Point2D[][];
+  /** Simplified SVG path `d` string */
+  simplifiedD: string;
+}
+
+/**
+ * simplifyPolygonForAnts: Reduces polygon vertex count for marching ants display.
+ *
+ * Strategy:
+ *   - If total vertex count ≤ ANTS_VERTEX_THRESHOLD, use the polygon as-is.
+ *   - Otherwise, apply Douglas–Peucker with adaptive epsilon based on polygon
+ *     bounding rect size. Iteratively doubles epsilon until total vertices
+ *     fall below ANTS_MAX_VERTICES.
+ *
+ * The simplified polygon is ONLY used for SVG overlay display — the source data
+ * in clipBoxes is never mutated, so cut/copy/mask operations remain pixel-precise.
+ */
+function simplifyPolygonForAnts(
+  poly: LocalPolygon,
+  simplifyRingFn: (ring: Point2D[], epsilon: number) => Point2D[]
+): LocalPolygon {
+  // Count total vertices
+  let totalVerts = 0;
+  for (const ring of poly.rings) totalVerts += ring.length;
+
+  // Below threshold: no simplification needed
+  if (totalVerts <= MARCHING_ANTS_MAX_VERTICES) return poly;
+
+  // Adaptive epsilon: start at 0.5% of the longer bounding dimension.
+  // This is perceptually invisible at screen scale but eliminates redundant
+  // micro-vertices from marching-squares / contour tracing outputs.
+  const maxDim = Math.max(poly.rect.w, poly.rect.h);
+  let epsilon = maxDim * 0.005;
+
+  let simplified: Point2D[][] = poly.rings;
+  let count = totalVerts;
+
+  // Iterative reduction: double epsilon until within budget
+  for (let attempt = 0; attempt < 6 && count > MARCHING_ANTS_MAX_VERTICES; attempt++) {
+    simplified = poly.rings.map(ring => simplifyRingFn(ring, epsilon));
+    count = 0;
+    for (const ring of simplified) count += ring.length;
+    epsilon *= 2;
+  }
+
+  // Safe cast: simplifyRing preserves the original LocalPoint objects (Douglas–Peucker
+  // only drops vertices, never creates new ones), so the output is still LocalPoint[].
+  return asLocalPolygon(simplified as unknown as LocalPoint[][], asLocalRect(poly.rect), poly.antiAliased);
+}
 
 /**
  * Resolve the regular clip shape for the CSS box (handles + dim label).
@@ -160,6 +219,12 @@ export function useSelectionAntsSync(
 ) {
   const { geometry } = useEditorServices();
 
+  // ─── [Perf A] Simplification cache ───────────────────────────────────────
+  // Caches the simplified SVG path string keyed by source polygon rings reference.
+  // Since polygon data is immutable (new reference = new data), reference equality
+  // is a reliable and O(1) cache invalidation strategy.
+  const antsCacheRef = useRef<AntsSimplifyCache | null>(null);
+
   // SVG group positioning (at bounding rect origin, frame-local space)
   useFastSvgGroupSync(groupRef, isActive, {
     selector: (_v, f) => {
@@ -171,12 +236,27 @@ export function useSelectionAntsSync(
     space: 'local'
   });
 
-  // Shared selector for both paths (bg + fg share the same geometry)
+  // Shared selector for both paths (bg + fg share the same geometry).
+  // [Perf A] Applies Douglas–Peucker simplification for complex polygons and
+  // caches the result — avoids re-computing on every tick.
   const antsSelector = (_v: unknown, f: { clipBoxes: Record<string, unknown>; canvasCropBox: LocalShape }): LocalShape | string | null => {
     if (isReCanvas) return f.canvasCropBox;
     const entry = f.clipBoxes[cropTool] as LocalPolygon | undefined;
     if (!entry) return null;
-    return geometry.polygon.polygonToSvgPathD(entry);
+
+    // Cache hit: same polygon rings reference → return cached SVG path string
+    const cache = antsCacheRef.current;
+    if (cache && cache.sourceRings === entry.rings) {
+      return cache.simplifiedD;
+    }
+
+    // Cache miss: simplify if needed, then generate SVG path
+    const simplified = simplifyPolygonForAnts(entry, geometry.polygon.simplifyRing);
+    const d = geometry.polygon.polygonToSvgPathD(simplified);
+
+    // Store in cache
+    antsCacheRef.current = { sourceRings: entry.rings, simplifiedD: d };
+    return d;
   };
 
   // Background path (black, offset phase) — fills the foreground gaps

@@ -24,25 +24,30 @@ import { AIToolsSettings } from "./settings";
 import { BG_REMOVAL_COMMANDS } from "./bgremover/commands";
 import { SEG_COMMANDS } from "./segmentation/commands";
 import { UPSCALE_COMMANDS } from "./upscaler/commands";
+import { INPAINT_ERASER_COMMANDS } from "./inpaint/eraser/commands";
 import { AIToolsIcon } from "./icon";
 
 import * as P from "./protocols";
+import { DEFAULT_BG_REMOVAL_CONFIG } from './bgremover/protocols';
+import { DEFAULT_UPSCALE_CONFIG } from './upscaler/protocols';
+import { DEFAULT_SEG_CONFIG } from './segmentation/protocols';
+import { DEFAULT_INPAINT_ERASER_CONFIG } from './inpaint/eraser/protocols';
 
 /**
- * BgRemoverDrawer Plugin — AI Background Removal
+ * AIToolsDrawer Plugin — Unified AI Inference Tools
  *
- * Provides one-click AI-powered background removal via in-browser inference.
- * Supports multiple models: RMBG 1.4, BiRefNet General, InSPyReNet Ultra,
- * plus user-added custom models from HuggingFace.
+ * Provides multiple AI tools running entirely client-side (WebGPU → WASM fallback):
+ *   - Background Removal (RMBG, InSPyReNet)
+ *   - Image Upscaling (Real-ESRGAN, AnimeSharp)
+ *   - SAM Segmentation (SAM 2.1 Tiny)
+ *   - Smart Eraser / Inpainting (LaMa)
  *
- * Runs entirely client-side (WebGPU → WASM fallback).
- *
- * Architecture (per 202606026_ai_bg_removal_spec):
- *   - Drawer plugin in SIDE_BAR slot (order 85 — between AdjustmentDrawer and AIBridge)
- *   - Worker-based inference pipeline (persistent singleton, Mode B)
- *   - Result written as LocalPolygon to clipBoxes['wand']
- *   - Marching-ants preview via existing ClipOverlay infrastructure
- *   - Apply: user applies mask via ClipOptions "Apply Mask" button (adv.layer.clip.toMask)
+ * Architecture:
+ *   - Drawer plugin in SIDE_BAR slot (order 2300)
+ *   - Worker-based inference pipeline (persistent singletons, Mode B)
+ *   - Cross-tool GPU mutex prevents WebGPU contention
+ *   - Each tool has: store → client → worker → protocols
+ *   - Shared infrastructure: createAIToolStore, createWorkerClient, runInferenceCommand
  */
 export const plugin: EditorPlugin = {
   // --- 1. Identity ---
@@ -65,7 +70,7 @@ export const plugin: EditorPlugin = {
   slot: "SIDE_BAR",
   show: 'frame-required',
 
-  order: 2300, // Between Adjustment (80) and AIBridge (90)
+  order: 2300,
 
   // --- 3. Core Implementation ---
   component: AIToolsDrawerContent,
@@ -86,34 +91,23 @@ export const plugin: EditorPlugin = {
   },
 
   // --- 5. Initial Config ---
-  initialConfig: P.DEFAULT_BG_REMOVAL_CONFIG,
+  initialConfig: {
+    // Namespaced sub-keys for each tool (consistent with useToolConfig reads)
+    bgremover: DEFAULT_BG_REMOVAL_CONFIG,
+    upscale: DEFAULT_UPSCALE_CONFIG,
+    seg: DEFAULT_SEG_CONFIG,
+    inpaintEraser: DEFAULT_INPAINT_ERASER_CONFIG,
+    // Persisted UI state
+    activeTool: 'upscaler',
+  },
 
-  // --- 5. Commands ---
-  commands: [...Object.values(BG_REMOVAL_COMMANDS), ...Object.values(SEG_COMMANDS), ...Object.values(UPSCALE_COMMANDS)],
+  // --- 6. Commands ---
+  commands: [...Object.values(BG_REMOVAL_COMMANDS), ...Object.values(SEG_COMMANDS), ...Object.values(UPSCALE_COMMANDS), ...Object.values(INPAINT_ERASER_COMMANDS)],
 
-  // --- 6. Signals ---
-  signals: [
-    {
-      id: P.SIGNAL_STATUS,
-      name: "BG Remover Status",
-      defaultValue: P.INITIAL_STATUS,
-      scope: "public",
-    },
-    {
-      id: P.SIGNAL_SEG_STATUS,
-      name: "Segmentation Status",
-      defaultValue: P.INITIAL_SEG_STATUS,
-      scope: "public",
-    },
-    {
-      id: P.SIGNAL_UPSCALE_STATUS,
-      name: "Upscaler Status",
-      defaultValue: P.INITIAL_UPSCALE_STATUS,
-      scope: "public",
-    },
-  ],
+  // --- 7. Signals ---
+  signals: [],
 
-  // --- 7. Contributions ---
+  // --- 8. Contributions ---
   contributions: [
     {
       slot: "SETTINGS_CONFIG_PANEL",

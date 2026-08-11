@@ -413,7 +413,26 @@ export function usePluginCommands<
 }
 
 /**
- * usePluginSignals: Gets all available signals in the current plug-in scope (automatically derives shorthand camelCase names and links namespace key-value pairs)
+ * usePluginSignals: Gets all available signals in the current plug-in scope.
+ *
+ * Automatically derives shorthand camelCase names (e.g. "signal.status" →
+ * statusSignal) and links namespace key-value pairs.
+ *
+ * Design: The returned signalMap is structurally stable (only rebuilt when
+ * the plugin scope changes — i.e. plugin registration/unregistration, which
+ * is extremely rare at runtime). Each signal controller's `.value` getter
+ * reads from a `stateRef` that always holds the latest editor state, avoiding
+ * the stale-read problem that occurs when useMemo captures an old `state`
+ * snapshot in its closure.
+ *
+ * Why useRef instead of useMemo([state]):
+ *   - Prevents "flash of default value" when a command dispatches
+ *     SET_INTERACTION (updating state.interaction.signals) but the React
+ *     render hasn't committed yet — the getter reads the latest state via ref.
+ *   - Eliminates unnecessary signalMap rebuilds on every state change
+ *     (previously useMemo's `state` dep caused re-creation every render).
+ *   - The signalMap reference stays stable, preventing cascading re-renders
+ *     in consuming components.
  */
 export function usePluginSignals<
   T extends Record<
@@ -434,6 +453,17 @@ export function usePluginSignals<
   const { state } = useEditorState();
   const { actions } = useEditorServices();
 
+  // Always hold the latest state in a ref so that signal getters
+  // never read stale values from a previous render's closure.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  // Also keep actions ref stable for the setter closures.
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
+
+  // SignalMap is only rebuilt when `scope` changes (plugin register/unregister).
+  // Individual signal values are read lazily via the getter → stateRef pattern.
   return useMemo(() => {
     if (!scope || !scope.signals) return {} as T;
 
@@ -471,10 +501,13 @@ export function usePluginSignals<
 
       const controller = {
         get value() {
-          return state.getStateSignal(fullId, sig.defaultValue);
+          // Read from stateRef to always get the latest committed state,
+          // even if this getter is accessed before React re-renders with
+          // the updated state object.
+          return stateRef.current.getStateSignal(fullId, sig.defaultValue);
         },
         set: (val: InteractionSignalValue) => {
-          actions.setStateSignal(fullId, val);
+          actionsRef.current.setStateSignal(fullId, val);
         },
       };
 
@@ -483,7 +516,7 @@ export function usePluginSignals<
     });
 
     return signalMap as unknown as T;
-  }, [scope, state, actions]);
+  }, [scope]);
 }
 
 export function usePluginList(): BuiltPlugin[] {

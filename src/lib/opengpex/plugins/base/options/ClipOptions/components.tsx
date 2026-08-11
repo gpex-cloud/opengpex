@@ -38,12 +38,14 @@ import {
 } from "lucide-react";
 import {
   useEditorState,
+  useEditorServices,
   usePluginSignals,
 } from "@opengpex/editor/core/context";
 import { getRegularClipShape } from "@opengpex/editor/core/helpers/selection";
 import { polygonToShape } from "@opengpex/editor/core/helpers/path2d";
 
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
+import FancyGroup from "@opengpex/editor/widgets/FancyGroup";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import Popover from "@opengpex/editor/widgets/Popover";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
@@ -69,6 +71,7 @@ const ASPECT_RATIOS = [
  */
 export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
   const { state, activeFrame } = useEditorState();
+  const { actions } = useEditorServices();
   const {
     toggleModeCmd,
     exitClipModeCmd,
@@ -804,22 +807,8 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
 
       {/* <div className="w-[1px] h-3 bg-zinc-300 dark:bg-white/20 mx-1" /> */}
 
-      {/* 3. Actions Group */}
-      <div className="flex items-center gap-0.5 ml-1.5">
-        <FancyButton shape="rect" iconOnly
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            branchCreateCmd?.execute({ rect });
-          }}
-          disabled={isPanMode || isReCanvas}
-          title={`Create Branch (${branchCreateCmd?.shortcutLabel || ""})`}
-          variant="ghost"
-          tooltipPosition="bottom"
-          className="w-6 h-6 group"
-        >
-          <Split size={13} className="text-emerald-300 group-hover:text-emerald-600 dark:text-emerald-400 dark:group-hover:text-emerald-300 transition-colors" />
-        </FancyButton>
-
+      {/* 3. Actions Group — Branch + Resize in a FancyGroup */}
+      <div className="flex items-center ml-1.5">
         {/*
          * Re-Canvas — clickable from both pan and clip mode. The
          * `toggleReCanvas` command auto-promotes pan → clip when activating
@@ -921,20 +910,43 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
             </div>
           }
         >
-          <FancyButton shape="rect" iconOnly
-            onClick={() => reCanvasToggleCmd?.execute()}
-            title="Toggle Canvas Resize Mode"
-            variant="ghost"
-            tooltipPosition="bottom"
-            className="w-6 h-6 group"
-          >
-            <ImageUpscale
-              size={13}
-              className={
-                isReCanvas ? "animate-pulse text-white" : "text-rose-300 group-hover:text-rose-600 dark:text-rose-400 dark:group-hover:text-rose-300 transition-colors"
-              }
-            />
-          </FancyButton>
+          <FancyGroup
+            size="xs"
+            highlighted={isReCanvas}
+            items={[
+              {
+                key: "branch",
+                tooltip: branchCreateCmd?.shortcutLabel ? `Create Branch (${branchCreateCmd.shortcutLabel})` : "Create Branch",
+                onClick: (e) => {
+                  if (isPanMode || isReCanvas) {
+                    actions.notifyHUD(
+                      isPanMode ? "Enter Clip mode first to create a branch" : "Exit Re-Canvas before creating a branch",
+                      "info",
+                    );
+                    return;
+                  }
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  branchCreateCmd?.execute({ rect });
+                },
+                icon: (
+                  <Split size={13} className="text-emerald-500 group-hover:text-emerald-600 dark:text-emerald-400 dark:group-hover:text-emerald-300 transition-colors" />
+                ),
+              },
+              {
+                key: "resize",
+                tooltip: "Resize Canvas",
+                onClick: () => reCanvasToggleCmd?.execute(),
+                icon: (
+                  <ImageUpscale
+                    size={13}
+                    className={
+                      isReCanvas ? "animate-pulse text-white" : "text-rose-500 group-hover:text-rose-600 dark:text-rose-400 dark:group-hover:text-rose-300 transition-colors"
+                    }
+                  />
+                ),
+              },
+            ]}
+          />
         </Popover>
       </div>
     </div>

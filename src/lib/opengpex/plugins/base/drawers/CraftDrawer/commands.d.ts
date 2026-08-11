@@ -23,8 +23,6 @@ export interface CraftDrawerCommandsMap {
   brushSizeDownCmd: CommandInstance;
   brushOpacityUpCmd: CommandInstance;
   brushOpacityDownCmd: CommandInstance;
-  brushHardnessUpCmd: CommandInstance;
-  brushHardnessDownCmd: CommandInstance;
 }
 
 /** Type map for usePluginSignals<CraftDrawerSignalsMap>() */

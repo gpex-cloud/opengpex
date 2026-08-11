@@ -23,25 +23,33 @@
  * AIToolsSettings — Unified settings panel for all AI tools.
  *
  * Uses a pill-style segment control to switch between tool categories.
- * Each tool contributes its own settings section as a tab panel.
+ * Each tool's settings are rendered inline via the declarative <ModelSettings> component.
  */
 
 import { useMemo, useState } from "react";
-import { Cpu, Shapes, ArrowUpRight, Info, Loader2 } from "lucide-react";
+import { Cpu, Shapes, ArrowUpRight, Eraser, Info, Loader2 } from "lucide-react";
 import { usePluginSelfConfig } from "@opengpex/editor/core/context";
-import { useDownloadTask } from "./shared";
-import type { BgRemoverConfig, SegConfig, UpscaleConfig } from "./protocols";
-import { BUILTIN_MODELS, BUILTIN_SEG_MODELS, DEFAULT_SEG_CONFIG, BUILTIN_UPSCALE_MODELS } from "./protocols";
-import { BgRemoverModelSettings } from "./bgremover/settings";
-import { UpscalerModelSettings } from "./upscaler/settings";
-import { SegmentationModelSettings } from "./segmentation/settings";
+import { useDownloadTask } from "./_shared";
+import { ModelSettings } from "./_shared/ui/settings/ModelSettings";
+import type { SegConfig } from "./segmentation/protocols";
+import type { UpscaleConfig } from "./upscaler/protocols";
+import type { InpaintEraserConfig } from "./inpaint/eraser/protocols";
+import type { ModelEntry, ModelCatalog } from "./_shared/types";
+import type { SegModelEntry } from "./segmentation/protocols";
+import type { UpscaleModelEntry } from "./upscaler/protocols";
+import type { InpaintEraserModelEntry } from "./inpaint/eraser/protocols";
+import { BUILTIN_MODELS, DEFAULT_BG_REMOVAL_CONFIG } from "./bgremover/protocols";
+import { BUILTIN_SEG_MODELS, DEFAULT_SEG_CONFIG, DEFAULT_SEG_ENCODER_FILE, DEFAULT_SEG_DECODER_FILE, getSegModelFiles } from "./segmentation/protocols";
+import { BUILTIN_UPSCALE_MODELS, DEFAULT_UPSCALE_CONFIG } from "./upscaler/protocols";
+import { BUILTIN_ERASER_MODELS, DEFAULT_INPAINT_ERASER_CONFIG } from "./inpaint/eraser/protocols";
 
-type SettingsTab = "upscaler" | "bg-removal" | "segmentation";
+type SettingsTab = "upscaler" | "bg-removal" | "segmentation" | "inpaint-eraser";
 
 const TABS: { value: SettingsTab; label: string; icon: typeof Cpu }[] = [
   { value: "upscaler", label: "Upscaler", icon: ArrowUpRight },
   { value: "bg-removal", label: "BG Remover", icon: Cpu },
   { value: "segmentation", label: "Segmentation", icon: Shapes },
+  { value: "inpaint-eraser", label: "Smart Eraser", icon: Eraser },
 ];
 
 /** Map the drawer's activeTool (persisted in config) to a settings tab */
@@ -49,38 +57,41 @@ function toolToTab(activeTool: string | undefined): SettingsTab {
   if (activeTool === 'upscaler') return 'upscaler';
   if (activeTool === 'segmentation') return 'segmentation';
   if (activeTool === 'bg-removal') return 'bg-removal';
-  return 'upscaler'; // default
+  if (activeTool === 'inpaint-eraser') return 'inpaint-eraser';
+  return 'upscaler';
 }
 
 export function AIToolsSettings() {
-  const [config] = usePluginSelfConfig<BgRemoverConfig & { seg?: SegConfig; activeTool?: string }>();
-  // Initialize to the currently active tool panel so settings opens to the matching tab
-  const [activeTab, setActiveTab] = useState<SettingsTab>(() => toolToTab(config?.activeTool));
+  const [config] = usePluginSelfConfig<Record<string, unknown>>();
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => toolToTab(config?.activeTool as string | undefined));
   const { task, isDownloading } = useDownloadTask();
 
   // Determine which tab the current download belongs to
   const downloadingTab = useMemo<SettingsTab | null>(() => {
     if (!isDownloading || !task) return null;
     const downloadModelId = task.modelId;
-    // Check if it's a BG remover model
-    const bgModelIds = new Set((config.models ?? BUILTIN_MODELS).map(m => m.modelId));
-    if (bgModelIds.has(downloadModelId)) return "bg-removal";
-    // Check if it's a segmentation model
-    const segModels = (config.seg ?? DEFAULT_SEG_CONFIG).models ?? BUILTIN_SEG_MODELS;
-    const segModelIds = new Set(segModels.map(m => m.modelId));
-    if (segModelIds.has(downloadModelId)) return "segmentation";
+    const bgModels = (config?.bgremover as ModelCatalog | undefined)?.models ?? BUILTIN_MODELS;
+    if (bgModels.some(m => m.modelId === downloadModelId)) return "bg-removal";
+    const upModels = (config?.upscale as UpscaleConfig | undefined)?.models ?? BUILTIN_UPSCALE_MODELS;
+    if (upModels.some(m => m.modelId === downloadModelId)) return "upscaler";
+    const segModels = (config?.seg as SegConfig | undefined)?.models ?? BUILTIN_SEG_MODELS;
+    if (segModels.some(m => m.modelId === downloadModelId)) return "segmentation";
+    const eraserModels = (config?.inpaintEraser as InpaintEraserConfig | undefined)?.models ?? BUILTIN_ERASER_MODELS;
+    if (eraserModels.some(m => m.modelId === downloadModelId)) return "inpaint-eraser";
     return null;
   }, [isDownloading, task, config]);
 
   // Detect which tabs have custom (non-builtin) models
   const customModelTabs = useMemo<Set<SettingsTab>>(() => {
     const tabs = new Set<SettingsTab>();
-    const bgModels = config.models ?? BUILTIN_MODELS;
+    const bgModels = (config?.bgremover as ModelCatalog | undefined)?.models ?? BUILTIN_MODELS;
     if (bgModels.some(m => !m.builtin)) tabs.add("bg-removal");
-    const upModels = (config as unknown as { upscale?: UpscaleConfig })?.upscale?.models ?? BUILTIN_UPSCALE_MODELS;
+    const upModels = (config?.upscale as UpscaleConfig | undefined)?.models ?? BUILTIN_UPSCALE_MODELS;
     if (upModels.some(m => !m.builtin)) tabs.add("upscaler");
-    const segModels = (config.seg ?? DEFAULT_SEG_CONFIG).models ?? BUILTIN_SEG_MODELS;
+    const segModels = (config?.seg as SegConfig | undefined)?.models ?? BUILTIN_SEG_MODELS;
     if (segModels.some(m => !m.builtin)) tabs.add("segmentation");
+    const eraserModels = (config?.inpaintEraser as InpaintEraserConfig | undefined)?.models ?? BUILTIN_ERASER_MODELS;
+    if (eraserModels.some(m => !m.builtin)) tabs.add("inpaint-eraser");
     return tabs;
   }, [config]);
 
@@ -118,10 +129,90 @@ export function AIToolsSettings() {
         })}
       </div>
 
-      {/* ─── Tab Content ──────────────────────────────────────── */}
-      {activeTab === "bg-removal" && <BgRemoverModelSettings />}
-      {activeTab === "upscaler" && <UpscalerModelSettings />}
-      {activeTab === "segmentation" && <SegmentationModelSettings />}
+      {/* ─── Tab Content (declarative ModelSettings) ───────────── */}
+      {activeTab === "bg-removal" && (
+        <ModelSettings<ModelEntry>
+          configKey="bgremover"
+          defaultConfig={DEFAULT_BG_REMOVAL_CONFIG}
+          builtins={BUILTIN_MODELS}
+          defaultNewModel={() => ({
+            id: `custom-${Date.now()}`,
+            name: 'Custom Model',
+            modelId: '',
+            size: 'Unknown',
+            description: 'User-added custom model',
+            builtin: false,
+          })}
+          getFiles={(m) => [{ filename: m.onnxFile ?? 'onnx/model.onnx', expectedBytes: m.expectedBytes }]}
+          fileFields={[{ key: 'onnxFile', label: 'ONNX', placeholder: 'onnx/model.onnx' }]}
+          customModelHint="Repo must contain preprocessor_config.json + config.json"
+        />
+      )}
+
+      {activeTab === "upscaler" && (
+        <ModelSettings<UpscaleModelEntry>
+          configKey="upscale"
+          defaultConfig={DEFAULT_UPSCALE_CONFIG}
+          builtins={BUILTIN_UPSCALE_MODELS}
+          defaultNewModel={() => ({
+            id: `custom-${Date.now()}`,
+            name: 'Custom Upscale Model',
+            modelId: '',
+            size: 'Unknown',
+            scale: 4,
+            description: 'User-added custom upscale model',
+            builtin: false,
+          })}
+          getFiles={(m) => [{ filename: m.onnxFile ?? 'model.onnx' }]}
+          getBadge={(m) => `${m.scale}×`}
+          fileFields={[{ key: 'onnxFile', label: 'ONNX', placeholder: 'model.onnx' }]}
+        />
+      )}
+
+      {activeTab === "segmentation" && (
+        <ModelSettings<SegModelEntry>
+          configKey="seg"
+          defaultConfig={DEFAULT_SEG_CONFIG}
+          builtins={BUILTIN_SEG_MODELS}
+          defaultNewModel={() => ({
+            id: `custom-seg-${Date.now()}`,
+            name: 'Custom SAM Model',
+            modelId: '',
+            size: 'Unknown',
+            description: 'User-added custom segmentation model',
+            builtin: false,
+            type: 'interactive' as const,
+          })}
+          getFiles={(m) => getSegModelFiles(m)}
+          getBadge={(m) => m.type === 'auto' ? 'Auto' : 'Interactive'}
+          fileFields={[
+            { key: 'encoderFile', label: 'Encoder', placeholder: DEFAULT_SEG_ENCODER_FILE },
+            { key: 'decoderFile', label: 'Decoder', placeholder: DEFAULT_SEG_DECODER_FILE },
+          ]}
+        />
+      )}
+
+      {activeTab === "inpaint-eraser" && (
+        <ModelSettings<InpaintEraserModelEntry>
+          configKey="inpaintEraser"
+          defaultConfig={DEFAULT_INPAINT_ERASER_CONFIG}
+          builtins={BUILTIN_ERASER_MODELS}
+          defaultNewModel={() => ({
+            id: `custom-${Date.now()}`,
+            name: 'Custom Inpaint Model',
+            modelId: '',
+            size: 'Unknown',
+            description: 'User-added custom inpainting model',
+            builtin: false,
+            inputSize: 512,
+          })}
+          getFiles={(m) => [{ filename: m.onnxFile ?? 'lama_fp32.onnx', expectedBytes: m.expectedBytes }]}
+          fileFields={[
+            { key: 'onnxFile', label: 'ONNX', placeholder: 'lama_fp32.onnx', suffix: (m) => `${m.inputSize}×${m.inputSize}` },
+          ]}
+          customModelHint="Model must accept [1, 3, H, W] image + [1, 1, H, W] mask inputs"
+        />
+      )}
 
       {/* ─── Info Callout ─────────────────────────────────────── */}
       <div className="flex gap-2 items-start px-2.5 py-2 rounded-lg bg-[var(--bg-stage)] border border-[var(--border-subtle)]">

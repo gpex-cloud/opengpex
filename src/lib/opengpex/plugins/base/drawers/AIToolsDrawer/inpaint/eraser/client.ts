@@ -17,21 +17,21 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-"use client";
-
-import { usePluginSignals } from "@opengpex/editor/core/context";
-import type { BgRemoverStatus } from "./protocols";
-import { INITIAL_STATUS } from "./protocols";
-import type { AIToolsDrawerSignalsMap } from "../commands.d";
+import { createWorkerClient } from '../../_shared/control/createWorkerClient';
+import type { InpaintEraserRequest, InpaintEraserResult, InpaintEraserProgress } from './worker.types';
 
 /**
- * useBgRemoverStatus: Read the current BgRemover status from signals.
+ * Inpaint Eraser Worker Client — singleton via createWorkerClient factory.
  *
- * Returns the live status object (stage, device, progress, etc.) which
- * drives the Drawer UI state machine.
+ * Mode B Persistent Singleton:
+ *   - Lazy: Worker constructed on first `run()`.
+ *   - Model session cached across calls.
+ *   - No default timeout (inpainting can be slow on large masks).
  */
-export function useBgRemoverStatus(): BgRemoverStatus {
-  const { statusSignal } = usePluginSignals<AIToolsDrawerSignalsMap>();
-  const status = statusSignal?.value as BgRemoverStatus | undefined;
-  return status ?? INITIAL_STATUS;
-}
+export const inpaintEraserClient = createWorkerClient<InpaintEraserRequest, InpaintEraserResult, InpaintEraserProgress>(
+  () => new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' }),
+  {
+    toolName: 'Inpaint eraser',
+    defaultTimeoutMs: 0,
+  },
+);
