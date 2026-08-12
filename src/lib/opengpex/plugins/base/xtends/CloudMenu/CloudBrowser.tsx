@@ -24,12 +24,12 @@ import { Trash2, FolderOpen, FileImage, Loader2, Cloud, LayoutGrid, List, Layers
 import { PopupPanel } from '@opengpex/editor/widgets/PopupPanel';
 import FancyConfirm from '@opengpex/editor/widgets/FancyConfirm';
 import EditorPortal from '@opengpex/editor/widgets/Portal';
-import { gpexStorage, type GpexFileItem } from '@opengpex/editor/core/cloud';
+import { gpexStorage, type GpexFileItem, type GpexFileProgress } from '@opengpex/editor/core/cloud';
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
 interface CloudBrowserProps {
-  onSelect: (fileId: string) => Promise<void>;
+  onSelect: (file: GpexFileItem, onProgress?: GpexFileProgress) => Promise<void>;
   onDelete: (fileId: string) => Promise<void>;
   onClose: () => void;
 }
@@ -194,6 +194,7 @@ function CardItem({
   isDeleting,
   isOpening,
   isSharing,
+  downloadProgress,
 }: {
   file: GpexFileItem;
   onSelect: () => void;
@@ -202,6 +203,7 @@ function CardItem({
   isDeleting: boolean;
   isOpening: boolean;
   isSharing: boolean;
+  downloadProgress: number;
 }) {
   const dims = formatDimensions(file.manifest?.canvasWidth, file.manifest?.canvasHeight);
   const layers = file.manifest?.layerCount;
@@ -243,6 +245,16 @@ function CardItem({
           {formatDate(file.updatedAt)}
         </div>
       </div>
+
+      {/* Download Progress Bar */}
+      {isOpening && downloadProgress > 0 && (
+        <div className="h-0.5 bg-[var(--border-subtle)]">
+          <div
+            className="h-full bg-indigo-500 transition-[width] duration-150 ease-out"
+            style={{ width: `${downloadProgress}%` }}
+          />
+        </div>
+      )}
 
       {/* Bottom Action Bar */}
       <div className="px-2 py-1.5 border-t border-[var(--border-subtle)]/30 bg-[var(--bg-stage)]/40 flex items-center justify-end gap-1 shrink-0">
@@ -408,6 +420,7 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
+  const [progress, setProgress] = useState<number>(0); // 0~100
   const [sharingId, setSharingId] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
@@ -446,14 +459,18 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
     return () => { cancelled = true; };
   }, []);
 
-  const handleOpen = useCallback(async (fileId: string) => {
-    setOpeningId(fileId);
+  const handleOpen = useCallback(async (file: GpexFileItem) => {
+    setOpeningId(file.fileId);
+    setProgress(0);
     try {
-      await onSelect(fileId);
+      await onSelect(file, (loaded, total) => {
+        setProgress(Math.round((loaded / total) * 100));
+      });
     } catch (err) {
       console.error('[CloudBrowser] Open failed:', err);
     } finally {
       setOpeningId(null);
+      setProgress(0);
     }
   }, [onSelect]);
 
@@ -550,12 +567,13 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
                     <CardItem
                       key={file.fileId}
                       file={file}
-                      onSelect={() => handleOpen(file.fileId)}
+                      onSelect={() => handleOpen(file)}
                       onDelete={() => requestDelete(file.fileId)}
                       onShare={() => handleShare(file.fileId)}
                       isDeleting={deletingId === file.fileId}
                       isOpening={openingId === file.fileId}
                       isSharing={sharingId === file.fileId}
+                      downloadProgress={openingId === file.fileId ? progress : 0}
                     />
                   ))}
                 </div>
@@ -575,7 +593,7 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
                     <ListItem
                       key={file.fileId}
                       file={file}
-                      onSelect={() => handleOpen(file.fileId)}
+                      onSelect={() => handleOpen(file)}
                       onDelete={() => requestDelete(file.fileId)}
                       isDeleting={deletingId === file.fileId}
                       isOpening={openingId === file.fileId}

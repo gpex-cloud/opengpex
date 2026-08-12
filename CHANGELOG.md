@@ -4,6 +4,12 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.47
+
+- Cloud Gallery: add download progress display when opening files
+
+---
+
 ## v1.0.0-beta.46
 
 - AI Tools: new Inpaint Eraser tool for removing unwanted objects from images; added Transformers.js as an alternative inference engine for better compatibility; reorganized shared modules (download, inference, UI) to reduce duplication

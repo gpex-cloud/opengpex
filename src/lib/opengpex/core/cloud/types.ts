@@ -65,6 +65,9 @@ export interface GpexShareResult {
   createdAt: string;
 }
 
+/** Callback for tracking file transfer progress (download/upload) */
+export type GpexFileProgress = (loaded: number, total: number) => void;
+
 export interface GpexCloudProviderProps {
   /** Override the default API endpoint (defaults to https://gpex.cloud) */
   apiBaseUrl?: string;

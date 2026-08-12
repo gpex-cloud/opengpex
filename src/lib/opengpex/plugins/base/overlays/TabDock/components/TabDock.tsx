@@ -537,7 +537,7 @@ export function TabDockComponent() {
   const isHorizontal = state.config.orientation === "horizontal";
   const isBottom = state.config.snap?.startsWith("B") ?? true;
   const isRight = state.config.snap?.endsWith("R") ?? false;
-  const showMetrics = state.config.showMetricsHud ?? true;
+  const showMetrics = state.config.showMetricsHud ?? false;
 
   return (
     <TabDockContext.Provider value={dock}>

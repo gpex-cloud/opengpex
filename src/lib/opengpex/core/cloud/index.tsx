@@ -92,4 +92,5 @@ export type {
   GpexFileSaveResult,
   GpexShareResult,
   GpexCloudProviderProps,
+  GpexFileProgress,
 } from "./types";

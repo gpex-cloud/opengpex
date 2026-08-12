@@ -22,9 +22,9 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { useGpexCloud, gpexStorage } from '@opengpex/editor/core/cloud';
+import { useGpexCloud, gpexStorage, type GpexFileItem, type GpexFileProgress } from '@opengpex/editor/core/cloud';
 import type { GpexManifest } from '@opengpex/editor/core/helpers/gpex-format';
-import { useEditorState, usePluginCommands } from '@opengpex/editor/core/context';
+import { useEditorState, useEditorServices, usePluginCommands } from '@opengpex/editor/core/context';
 import type { CloudMenuCommandsMap } from './commands.d';
 import { hasUnsavedChanges, saveSyncRecord, loadSyncRecord, clearSyncRecord } from './commands';
 import type { SavePhase } from './protocols';
@@ -59,6 +59,7 @@ export const useCloudMenu = () => {
   const { user, isSignedIn, openLogin, signOut } = useGpexCloud();
   const { state, activeFrame } = useEditorState();
   const { saveToCloudCmd, openFromCloudCmd, deleteFromCloudCmd } = usePluginCommands<CloudMenuCommandsMap>();
+  const { actions } = useEditorServices();
 
   // ─── Menu toggle state ──────────────────────────────────────────
   const [isOpen, setIsOpen] = useState(false);
@@ -191,10 +192,14 @@ export const useCloudMenu = () => {
     setShowBrowser(false);
   }, []);
 
-  const handleSelectFile = useCallback(async (fileId: string) => {
+  const handleSelectFile = useCallback(async (file: GpexFileItem, onProgress?: GpexFileProgress) => {
     try {
       const result = await openFromCloudCmd.execute({
-        fileId,
+        fileId: file.fileId,
+        fileLocalId: file.fileLocalId,
+        fileManifest: file.manifest,
+        fileSize: file.fileSize,
+        onProgress,
         onConflict: (existingFrame: Frame, manifest: GpexManifest) => {
           // Return a promise that resolves when user makes a decision
           return new Promise<'overwrite' | 'cancel'>((resolve) => {
@@ -213,6 +218,10 @@ export const useCloudMenu = () => {
           savedAt: new Date().toISOString(),
           savedHistoryLength: 0,
         });
+
+        // Notify user
+        const name = file.manifest?.frameName || 'File';
+        actions.notifyHUD(`☁️ Opened "${name}" from cloud`);
       }
     } catch (err) {
       console.error('[CloudSync] Open failed:', err);

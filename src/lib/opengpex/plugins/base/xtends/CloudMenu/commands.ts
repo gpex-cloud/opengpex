@@ -20,7 +20,7 @@
 import { EditorContextValue, EditorCommand, Frame, AssetService } from '@opengpex/editor/core/types';
 import * as P from './protocols';
 import { packGpex, unpackGpex, type GpexManifest } from '@opengpex/editor/core/helpers/gpex-format';
-import { gpexStorage } from '@opengpex/editor/core/cloud';
+import { gpexStorage, type GpexFileProgress } from '@opengpex/editor/core/cloud';
 import { zipSync, unzipSync } from 'fflate';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 
@@ -61,7 +61,14 @@ export interface SaveToCloudPayload {
 
 export interface OpenFromCloudPayload {
   fileId: string;
+  /** Pre-fetched from GpexFileItem — enables conflict check before download */
+  fileLocalId?: string;
+  /** Pre-fetched manifest from GpexFileItem — used for pre-download conflict dialog */
+  fileManifest?: GpexManifest;
+  /** Expected file size in bytes (from GpexFileItem.fileSize) — used for progress when Content-Length header is unavailable */
+  fileSize?: number;
   onConflict: (existingFrame: Frame, manifest: GpexManifest) => Promise<'overwrite' | 'cancel'>;
+  onProgress?: GpexFileProgress;
 }
 
 // ─── Commands Registry ───────────────────────────────────────────────────────
@@ -126,22 +133,34 @@ export const CLOUD_MENU_COMMANDS = {
     name: 'Cloud Gallery',
     execute: async (ctx: EditorContextValue, payload: OpenFromCloudPayload): Promise<Frame | null> => {
       const { actions, state } = ctx;
-      const { fileId, onConflict } = payload;
+      const { fileId, fileLocalId, fileManifest, fileSize, onConflict, onProgress } = payload;
 
-      // 1. Download
-      const buffer = await gpexStorage.download(fileId);
+      // 1. Pre-download conflict check (using metadata from file list, no download needed)
+      if (fileLocalId && fileManifest) {
+        const existingFrame = state.frames.byId[fileLocalId];
+        if (existingFrame) {
+          const decision = await onConflict(existingFrame, fileManifest);
+          if (decision === 'cancel') return null; // User cancelled — skip download entirely
+        }
+      }
 
-      // 2. Unpack .gpex container
+      // 2. Download (with optional progress reporting, using fileSize as fallback for Content-Length)
+      const buffer = await gpexStorage.download(fileId, onProgress, fileSize);
+
+      // 3. Unpack .gpex container
       const { manifest, payload: zipPayload } = unpackGpex(buffer);
 
-      // 3. Unzip to extract state + asset blobs
+      // 4. Unzip to extract state + asset blobs
       const { state: frameState, assetBlobs } = unpackPayload(zipPayload);
 
-      // 4. Conflict detection
+      // 5. Post-download conflict detection (fallback if pre-check was skipped)
       const existingFrame = state.frames.byId[manifest.frameLocalId];
       if (existingFrame) {
-        const decision = await onConflict(existingFrame, manifest);
-        if (decision === 'cancel') return null;
+        // If pre-check already confirmed overwrite, skip re-asking
+        if (!fileLocalId || !fileManifest) {
+          const decision = await onConflict(existingFrame, manifest);
+          if (decision === 'cancel') return null;
+        }
 
         // Overwrite path: import command handles resetHistory + replaceFrame
         return actions.adv.frame.create.import.execute({
@@ -151,7 +170,7 @@ export const CLOUD_MENU_COMMANDS = {
         });
       }
 
-      // 5. No conflict: import as new frame
+      // 6. No conflict: import as new frame
       return actions.adv.frame.create.import.execute({
         state: frameState,
         assetBlobs,

@@ -262,6 +262,8 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
     onEnd: (e) => {
       if (!tx) return;
 
+      (e as InteractionEvent & { _transformType?: string })._transformType = type;
+
       if (config.onEnd) {
         config.onEnd(e, tx, startCanvas);
       } else {

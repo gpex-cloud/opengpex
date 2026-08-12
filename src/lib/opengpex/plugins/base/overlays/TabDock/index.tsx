@@ -51,7 +51,7 @@ export const plugin: EditorPlugin = {
     snap: 'BC',
     showProps: true,
     indentBranches: true,
-    showMetricsHud: true,
+    showMetricsHud: false,
   },
   contributions: [
     {

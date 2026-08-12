@@ -32,7 +32,7 @@
 
 import { authFetch } from "./auth";
 import { API_FILES_SAVE, API_FILES_LIST, API_FILES_BY_ID, API_FILES_SHARE, API_QUOTA } from "./protocol";
-import type { GpexFileItem, GpexFileSaveResult, GpexQuota, GpexShareResult } from "./types";
+import type { GpexFileItem, GpexFileSaveResult, GpexQuota, GpexShareResult, GpexFileProgress } from "./types";
 
 /**
  * Save a .gpex file to GPEX Cloud.
@@ -83,11 +83,14 @@ export async function list(): Promise<GpexFileItem[]> {
 
 /**
  * Download a .gpex file from GPEX Cloud.
+ * Supports optional progress reporting via ReadableStream.
  *
  * @param fileId - The cloud file ID
+ * @param onProgress - Optional callback reporting (loaded, total) bytes
+ * @param expectedSize - Optional expected file size (from GpexFileItem.fileSize), used as fallback when Content-Length header is unavailable
  * @returns ArrayBuffer of the .gpex file content
  */
-export async function download(fileId: string): Promise<ArrayBuffer> {
+export async function download(fileId: string, onProgress?: GpexFileProgress, expectedSize?: number): Promise<ArrayBuffer> {
   const res = await authFetch(`${API_FILES_BY_ID}/${fileId}`, {
     method: "GET",
   });
@@ -96,7 +99,34 @@ export async function download(fileId: string): Promise<ArrayBuffer> {
     throw new Error("Download failed");
   }
 
-  return res.arrayBuffer();
+  // Use Content-Length if available, otherwise fall back to expectedSize (from file list metadata)
+  const contentLength = Number(res.headers.get("Content-Length") || 0);
+  const total = contentLength || expectedSize || 0;
+  if (!onProgress || !total || !res.body) {
+    return res.arrayBuffer();
+  }
+
+  // Stream-based progress tracking
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let loaded = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.length;
+    onProgress(loaded, total);
+  }
+
+  // Merge chunks into single ArrayBuffer
+  const result = new Uint8Array(loaded);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return result.buffer;
 }
 
 /**

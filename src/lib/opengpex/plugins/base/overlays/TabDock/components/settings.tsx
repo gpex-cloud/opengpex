@@ -147,7 +147,7 @@ export function TabDockSettings() {
           </div>
         </div>
         <Switch
-          checked={config.showMetricsHud ?? true}
+          checked={config.showMetricsHud ?? false}
           onChange={(v) => updateConfig({ showMetricsHud: v })}
           activeColor="bg-amber-500"
         />

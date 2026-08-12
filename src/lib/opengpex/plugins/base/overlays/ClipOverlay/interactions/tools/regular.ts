@@ -19,6 +19,7 @@
 
 import {
   InteractionHandler,
+  InteractionEvent,
   asLocalRect,
 } from '@opengpex/editor/core/types';
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
@@ -128,36 +129,43 @@ export const createClipBoxHandler = (): InteractionHandler => {
     },
 
     onEnd: (e, tx, startCanvas) => {
-      // ── Gesture dispatch (extensible) ──
-      // Priority order: more specific gestures checked first.
+      // ── Gesture dispatch ──
+      // Only creation-type interactions (clicks on empty canvas area) support
+      // double-click (select all) and static-click (clear selection) gestures.
+      // Resize handle interactions (type = 'n'/'s'/'e'/'w'/'nw'/'ne'/'sw'/'se')
+      // should NEVER trigger these gestures — even a tiny handle drag that
+      // stays under the threshold is still a valid (albeit small) resize, not
+      // a "click to clear" intent.
+      const _type = (e as InteractionEvent & { _transformType?: string })._transformType;
+      const isCreationGesture = !_type || _type === 'potential_create' || _type === 'create';
 
-      // Double-click = select entire canvas (Photoshop "Ctrl+A" equivalent).
-      // Sets the clip box to exactly match the canvas dimensions.
-      if (InteractionMath.isDoubleClick(e, startCanvas)) {
-        const frame = e.activeFrame;
-        const isReCanvas = e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas) || false;
-        const fullCanvasRect = asLocalRect({ x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h });
+      if (isCreationGesture) {
+        // Double-click on empty area = select entire canvas (Photoshop "Ctrl+A" equivalent).
+        if (InteractionMath.isDoubleClick(e, startCanvas)) {
+          const frame = e.activeFrame;
+          const isReCanvas = e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas) || false;
+          const fullCanvasRect = asLocalRect({ x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h });
 
-        if (isReCanvas) {
-          const currentShape = frame.canvasCropBox;
-          tx.update({ canvasCropBox: { ...currentShape, rect: fullCanvasRect } }, 'frame');
-        } else {
-          const latestTool = (frame.latestClipTool as ClipTool) || 'rect';
-          const activeTool = latestTool === 'ellipse' ? 'ellipse' : 'rect';
-          const currentShape = getRegularClipShape(frame);
-          const antiAliased = currentShape?.antiAliased ?? true;
-          const newPoly = e.geometry.point2d.regularShapeToLocalPolygon(latestTool === 'ellipse' ? 'ellipse' : 'rect', fullCanvasRect, antiAliased);
-          tx.update({ clipBoxes: { ...frame.clipBoxes, [activeTool]: newPoly } }, 'frame');
+          if (isReCanvas) {
+            const currentShape = frame.canvasCropBox;
+            tx.update({ canvasCropBox: { ...currentShape, rect: fullCanvasRect } }, 'frame');
+          } else {
+            const latestTool = (frame.latestClipTool as ClipTool) || 'rect';
+            const activeTool = latestTool === 'ellipse' ? 'ellipse' : 'rect';
+            const currentShape = getRegularClipShape(frame);
+            const antiAliased = currentShape?.antiAliased ?? true;
+            const newPoly = e.geometry.point2d.regularShapeToLocalPolygon(latestTool === 'ellipse' ? 'ellipse' : 'rect', fullCanvasRect, antiAliased);
+            tx.update({ clipBoxes: { ...frame.clipBoxes, [activeTool]: newPoly } }, 'frame');
+          }
+
+          tx.commit();
+          return;
         }
 
-        tx.commit();
-        return;
-      }
-
-      // Single static click (no drag) = clear selection (Photoshop Marquee behavior).
-      // Works identically inside and outside canvas.
-      if (InteractionMath.isStaticClick(e, startCanvas)) {
-        e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
+        // Single static click (no drag) on empty area = clear selection (Photoshop Marquee behavior).
+        if (InteractionMath.isStaticClick(e, startCanvas)) {
+          e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
+        }
       }
 
       tx.commit();
