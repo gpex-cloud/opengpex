@@ -270,7 +270,7 @@ export default function CanvasStage() {
   return (
     <canvas 
       ref={canvasRef}
-      className="absolute top-0 left-0 bg-transparent transition-opacity duration-300"
+      className="absolute top-0 left-0 bg-transparent"
       style={{
         width: state.ui.viewportDim?.w || activeFrame.canvas.w,
         height: state.ui.viewportDim?.h || activeFrame.canvas.h,

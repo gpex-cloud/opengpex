@@ -111,9 +111,9 @@ export const plugin: EditorPlugin = {
   contributions: [
     {
       slot: "SETTINGS_CONFIG_PANEL",
-      group: "AI Tools",
+      group: "ai-tools",
       component: AIToolsSettings,
-      title: "Various AI Models and Tools",
+      title: "AI Tools",
       icon: <Cpu size={12} />,
       order: 310,
     },

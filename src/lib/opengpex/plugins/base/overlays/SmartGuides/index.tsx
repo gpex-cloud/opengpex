@@ -57,7 +57,7 @@ export const plugin: EditorPlugin = {
     },
     {
       slot: 'SETTINGS_CONFIG_PANEL',
-      group: 'Smart Guides',
+      group: 'smart-guides',
       component: SmartGuidesSettings,
       title: 'Smart Guides',
       icon: <Magnet size={12} />,

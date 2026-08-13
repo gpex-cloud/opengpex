@@ -78,13 +78,13 @@ export const createBrushStrokeHandler = (): InteractionHandler => ({
     session = createStrokeSession(e);
     if (!session) return;
 
-    session.begin(e.point.canvas, (e.nativeEvent as PointerEvent).pressure || 0.5);
+    session.begin(e.point.canvas, e.pointer.pressure || 0.5);
     e.actions.setStateSignal(IS_STROKING_KEY, true);
   },
 
   onMove: (e) => {
     if (!session) return;
-    session.move(e.point.canvas, (e.nativeEvent as PointerEvent).pressure || 0.5, e);
+    session.move(e.point.canvas, e.pointer.pressure || 0.5, e);
   },
 
   onEnd: (e) => {

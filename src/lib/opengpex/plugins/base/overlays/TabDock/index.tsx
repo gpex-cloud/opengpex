@@ -56,6 +56,7 @@ export const plugin: EditorPlugin = {
   contributions: [
     {
       slot: 'SETTINGS_CONFIG_PANEL',
+      group: 'viewport',
       component: TabDockSettings,
       title: 'Viewport',
       icon: <Monitor size={12} />,

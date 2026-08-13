@@ -48,8 +48,7 @@ const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
 export function createStrokeSession(e: InteractionEvent): StrokeSession | null {
   const frame = e.activeFrame;
   const craft = e.state.interaction.signals[ACTIVE_CRAFT_KEY] as string;
-  const pointerEvent = e.nativeEvent as PointerEvent;
-  const isCmdPressed = pointerEvent.metaKey || pointerEvent.ctrlKey;
+  const isCmdPressed = e.keys.meta;
 
   const isEraser = craft === 'eraser';
   const isRestore = craft === 'restore';

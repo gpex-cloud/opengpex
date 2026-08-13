@@ -62,9 +62,9 @@ export const plugin: EditorPlugin = {
   contributions: [
     {
       slot: "SETTINGS_CONFIG_PANEL",
-      group: "Onboarding",
+      group: "onboarding",
       component: OnboardingSettings,
-      title: "Guidance",
+      title: "Onboarding",
       icon: <Lightbulb size={12} />,
       order: 200,
     },

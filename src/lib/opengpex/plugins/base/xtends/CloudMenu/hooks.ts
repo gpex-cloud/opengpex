@@ -226,7 +226,7 @@ export const useCloudMenu = () => {
     } catch (err) {
       console.error('[CloudSync] Open failed:', err);
     }
-  }, [openFromCloudCmd]);
+  }, [openFromCloudCmd, actions]);
 
   // ─── Conflict resolution ────────────────────────────────────────
   const handleConfirmOverwrite = useCallback(() => {

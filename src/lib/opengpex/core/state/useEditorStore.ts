@@ -67,11 +67,18 @@ export function useEditorStore() {
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ASSET_CRITICAL_ACTIONS = useMemo<Set<EditorAction['type']>>(() => new Set([
     'ADD_LAYER', 'REMOVE_LAYERS', 'REMOVE_FRAME', 'CLEAR_ALL_DATA',
-    'SIGNAL_COMMIT', 'HYDRATE', 'SET_HISTORY'
+    'HISTORY_UNDO', 'HISTORY_REDO', 'HYDRATE', 'SET_HISTORY'
     /**
      * [Critical Architecture Warning] Do not add persistent storage operations to this set!
      * Reason: After GC (Garbage Collection) execution completes, state synchronization may be triggered.
      * If a synchronous action is included in this set, it will trigger an infinite loop: GC -> sync -> scheduleSync -> GC.
+     *
+     * [Perf Optimization 2026-08-13] Removed SIGNAL_COMMIT from this set.
+     * SIGNAL_COMMIT fires on EVERY undoable command (including pure geometry ops like move/resize/rotate).
+     * These geometry-only operations never change asset references, so triggering GC was wasteful.
+     * Actual asset-changing operations are already covered by ADD_LAYER, REMOVE_LAYERS, UPDATE_LAYER
+     * (with assetId/src check), HISTORY_UNDO/REDO, HYDRATE, and SET_HISTORY.
+     * See: docs/opengpex/07-perf/gc_optimization_research.md
      */
   ]), []);
 

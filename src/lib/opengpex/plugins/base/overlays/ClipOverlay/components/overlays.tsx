@@ -23,16 +23,17 @@ import {
   useEditorState,
 } from "@opengpex/editor/core/context";
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
-import { useClipOverlayCommands, useClipCursor } from "./hooks";
+import { useClipOverlayCommands, useClipCursor } from "../hooks";
 import {
   useCropDimSync,
   useRegularBoxSync,
   useSelectionAntsSync,
   useMoveDeltaSync,
-} from "./useFastSync";
-import { lassoPreviewPathRef } from "./interactions";
-import { PixelGridOverlayAPI } from "../PixelGridOverlay/protocols";
-import { MARCHING_ANTS_DURATION_S } from "./protocols";
+} from "../useFastSync";
+import { lassoPreviewPathRef } from "../interactions";
+import { PixelGridOverlayAPI } from "../../PixelGridOverlay/protocols";
+import { MARCHING_ANTS_DURATION_S, ClipOverlayAPI } from "../protocols";
+import type { ClipOverlayConfig } from "../protocols";
 
 /* ─── Inline keyframes for marching ants (plugin-internal, no global CSS) ─── */
 const CLIP_ANTS_STYLE = `
@@ -83,6 +84,9 @@ export function ClipOverlayMain() {
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useOverlayRotationSync(overlayRef, activeFrame);
+
+  const clipConfig = state.pluginConfig[ClipOverlayAPI.configKey] as Partial<ClipOverlayConfig> | undefined;
+  const marchingAntsAnimated = clipConfig?.marchingAntsAnimated ?? false;
 
   const gridConfig = state.pluginConfig[PixelGridOverlayAPI.configKey] as
     | { enabled?: boolean; zoomThreshold?: number }
@@ -162,7 +166,7 @@ export function ClipOverlayMain() {
               strokeWidth="1"
               vectorEffect="non-scaling-stroke"
             />
-            {/* Foreground layer: animated white/red dashes marching over the solid base */}
+            {/* Foreground layer: dashes (animated or static based on MARCHING_ANTS_ANIMATED) */}
             <path
               ref={pathRef}
               fill="none"
@@ -172,7 +176,9 @@ export function ClipOverlayMain() {
               vectorEffect="non-scaling-stroke"
               style={{
                 strokeDasharray: '6, 6',
-                animation: `clip-ants-flow ${MARCHING_ANTS_DURATION_S}s linear infinite`,
+                ...(marchingAntsAnimated
+                  ? { animation: `clip-ants-flow ${MARCHING_ANTS_DURATION_S}s linear infinite` }
+                  : {}),
               }}
             />
           </g>
@@ -188,7 +194,9 @@ export function ClipOverlayMain() {
             pointerEvents="none"
             style={{
               strokeDasharray: '4, 4',
-              animation: 'clip-ants-flow 0.4s linear infinite',
+              ...(marchingAntsAnimated
+                ? { animation: 'clip-ants-flow 0.4s linear infinite' }
+                : {}),
             }}
           />
         </svg>

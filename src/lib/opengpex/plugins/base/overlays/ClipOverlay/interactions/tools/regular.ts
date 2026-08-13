@@ -19,7 +19,6 @@
 
 import {
   InteractionHandler,
-  InteractionEvent,
   asLocalRect,
 } from '@opengpex/editor/core/types';
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
@@ -27,8 +26,7 @@ import {
   ClipOptionsAPI,
   ClipTool,
 } from '../../../../options/ClipOptions/protocols';
-import { InteractionMath } from '@opengpex/editor/stage/interaction/Math';
-import { createTransformHandler } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
+import { createTransformHandler, TransformIntent, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import { makeClipToolGuard } from '../guard';
 
 /**
@@ -44,7 +42,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
     id: 'clip-box',
     priority: 100,
 
-    test: (e) => {
+    test: (e): TransformIntent | null => {
       // Strategy-driven guard: only fires when the active tool declares
       // `handlerKind: 'clipbox'` (rect / ellipse rows).
       if (!makeClipToolGuard('clipbox')(e)) return null;
@@ -60,9 +58,9 @@ export const createClipBoxHandler = (): InteractionHandler => {
         if (handle === 'move') {
           const isReCanvas = !!e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas);
           if (!isReCanvas) return null;
-          return 'move';
+          return { category: 'move' };
         }
-        return handle;
+        return { category: 'resize', handle: handle as ResizeHandle };
       }
 
       if (target.closest('button, a, [data-role="ui"]')) return null;
@@ -71,7 +69,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
       // Outside-canvas clicks allow the user to start a selection from the
       // canvas edge (Photoshop Marquee behavior). The TransformHandler will
       // clamp the starting anchor to the nearest canvas edge.
-      return 'potential_create';
+      return { category: 'create' };
     },
 
     getInitialState: (e) => {
@@ -89,7 +87,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
       };
     },
 
-    onUpdate: (e, newRect, tx, { dx: _dx, dy: _dy, type: _type }) => {
+    onUpdate: (e, newRect, tx, _context) => {
       const frame = e.activeFrame;
       const isReCanvas = e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas) || false;
       const currentShape = isReCanvas ? frame.canvasCropBox : getRegularClipShape(frame);
@@ -128,20 +126,15 @@ export const createClipBoxHandler = (): InteractionHandler => {
       }
     },
 
-    onEnd: (e, tx, startCanvas) => {
-      // ── Gesture dispatch ──
-      // Only creation-type interactions (clicks on empty canvas area) support
-      // double-click (select all) and static-click (clear selection) gestures.
-      // Resize handle interactions (type = 'n'/'s'/'e'/'w'/'nw'/'ne'/'sw'/'se')
-      // should NEVER trigger these gestures — even a tiny handle drag that
-      // stays under the threshold is still a valid (albeit small) resize, not
-      // a "click to clear" intent.
-      const _type = (e as InteractionEvent & { _transformType?: string })._transformType;
-      const isCreationGesture = !_type || _type === 'potential_create' || _type === 'create';
-
-      if (isCreationGesture) {
-        // Double-click on empty area = select entire canvas (Photoshop "Ctrl+A" equivalent).
-        if (InteractionMath.isDoubleClick(e, startCanvas)) {
+    // ── Declarative Gesture Rules ──
+    // Only creation-type interactions support double-click (select all) and
+    // static-click (clear selection). Resize handle interactions should NEVER
+    // trigger these gestures — the intent.category check ensures this.
+    gestures: [
+      {
+        name: 'double-click-select-all',
+        match: (ctx) => ctx.isDoubleClick && ctx.intent.category === 'create',
+        action: (e, tx) => {
           const frame = e.activeFrame;
           const isReCanvas = e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas) || false;
           const fullCanvasRect = asLocalRect({ x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h });
@@ -157,18 +150,17 @@ export const createClipBoxHandler = (): InteractionHandler => {
             const newPoly = e.geometry.point2d.regularShapeToLocalPolygon(latestTool === 'ellipse' ? 'ellipse' : 'rect', fullCanvasRect, antiAliased);
             tx.update({ clipBoxes: { ...frame.clipBoxes, [activeTool]: newPoly } }, 'frame');
           }
-
-          tx.commit();
-          return;
         }
-
-        // Single static click (no drag) on empty area = clear selection (Photoshop Marquee behavior).
-        if (InteractionMath.isStaticClick(e, startCanvas)) {
+      },
+      {
+        name: 'static-click-clear',
+        match: (ctx) => ctx.isStatic && ctx.intent.category === 'create',
+        action: (e) => {
           e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
         }
       }
+    ],
 
-      tx.commit();
-    }
+    // No onEnd needed — autoCommit handles resize/move completion.
   });
 };

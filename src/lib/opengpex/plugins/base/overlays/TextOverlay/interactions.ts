@@ -20,7 +20,7 @@
 import { InteractionHandler, GeometryService, Layer, Frame, LocalRect, asLocalShape, asWorldRect } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
-import { createTransformHandler } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
+import { createTransformHandler, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import { CraftDrawerAPI, getReferenceFontSize } from '../../drawers/CraftDrawer/protocols';
 import type { PendingTextData } from '../../drawers/CraftDrawer/protocols';
 import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, _CMD_PLACE_UID, _CMD_EDIT_START_UID } from './protocols';
@@ -178,7 +178,7 @@ export const createTextResizeHandler = (): InteractionHandler => {
       // Exclude 'move' (clicks inside text box are handled by contenteditable)
       if (!handleType || handleType === 'move') return null;
 
-      return handleType; // 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w'
+      return { category: 'resize', handle: handleType as ResizeHandle };
     },
 
     getInitialState: (e) => {
@@ -233,9 +233,7 @@ export const createTextResizeHandler = (): InteractionHandler => {
       }, 'layer', editingId);
     },
 
-    onEnd: (_e, tx) => {
-      tx.commit();
-    },
+    // No onEnd needed — autoCommit handles resize completion.
   });
 };
 

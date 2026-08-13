@@ -26,6 +26,7 @@ import {
   asLocalPolygon,
 } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import { createAsyncHandler } from '../../../../../../stage/interaction/handlers/AsyncHandler';
 import { magicWandClient } from '../../workers/client';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
 import { makeClipToolGuard } from '../guard';
@@ -91,10 +92,7 @@ function isWandableLayer(layer: Layer): boolean {
  *   6. Wrap as `LocalPolygon` and write clip slot.
  */
 export const createWandHandler = (): InteractionHandler => {
-  let busy = false;
-  let discardPending = false;
-
-  return {
+  return createAsyncHandler({
     id: 'clip-wand',
     priority: 110,
 
@@ -104,20 +102,16 @@ export const createWandHandler = (): InteractionHandler => {
       const target = me.target as HTMLElement;
       if (target.closest('button, a, input, [data-role="ui"], [contenteditable]')) return false;
 
-      // Accept clicks outside canvas — onEnd will clear selection for
+      // Accept clicks outside canvas — execute will clear selection for
       // outside-canvas clicks (unified single-click dismiss behavior).
       return true;
     },
 
-    onStart: () => {
-      // No-op: wand commits on pointerup.
+    onBusy: (e) => {
+      e.actions.setInteraction({ selectionErrorPulse: Date.now() });
     },
 
-    onMove: () => {
-      // No-op: wand doesn't drag.
-    },
-
-    onEnd: async (e) => {
+    execute: async (e, ctx) => {
       // Single-click outside canvas = clear selection (Photoshop behavior).
       // Unified with clipbox/lasso: clicking outside the canvas dismisses.
       const frame = e.activeFrame;
@@ -125,104 +119,84 @@ export const createWandHandler = (): InteractionHandler => {
         x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h,
       });
       if (isOutsideCanvas) {
-        discardPending = true;
         e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
         return;
       }
 
-      if (busy) {
+      // 1. Pick target layer.
+      const layer = pickWandTargetLayer(e);
+      if (!layer || !isWandableLayer(layer)) {
         e.actions.setInteraction({ selectionErrorPulse: Date.now() });
         return;
       }
-      busy = true;
-      discardPending = false;
 
+      // 2. Read layer-local ImageData (by content hash — WorkerCache key).
+      let imageData: ImageData;
       try {
-        // 1. Pick target layer.
-        const layer = pickWandTargetLayer(e);
-        if (!layer || !isWandableLayer(layer)) {
-          console.warn('[Wand] No wandable raster layer at click point');
-          e.actions.setInteraction({ selectionErrorPulse: Date.now() });
-          return;
-        }
-
-        // 2. Read layer-local ImageData (by content hash — WorkerCache key).
-        let imageData: ImageData;
-        try {
-          imageData = await e.pixels.image.imageData(layer.assetId!);
-        } catch (err) {
-          console.error('[Wand] Failed to read layer image data:', err);
-          e.actions.setInteraction({ selectionErrorPulse: Date.now() });
-          return;
-        }
-
-        // 3. Project click world-point → layer-local integer pixel.
-        const layerWM = e.geometry.transform.getLayerWorldMatrix(layer);
-        const layerInv = layerWM.inverse();
-        const layerPt = layerInv.apply({ x: e.point.world.x, y: e.point.world.y });
-        const seed = { x: Math.floor(layerPt.x), y: Math.floor(layerPt.y) };
-        if (
-          seed.x < 0 || seed.y < 0 ||
-          seed.x >= imageData.width || seed.y >= imageData.height
-        ) {
-          console.warn('[Wand] Click maps outside layer bounds', { seed, layer: layer.id });
-          e.actions.setInteraction({ selectionErrorPulse: Date.now() });
-          return;
-        }
-
-        // 4. Run worker.
-        const scale = e.geometry.getScale(e.activeFrame);
-        const simplifyEpsilon = Math.max(WAND_SIMPLIFY_FLOOR, WAND_SIMPLIFY_COEF / scale);
-
-        let resp;
-        try {
-          resp = await magicWandClient.run({
-            imageData: {
-              data: imageData.data.buffer,
-              width: imageData.width,
-              height: imageData.height,
-            },
-            seed,
-            tolerance: WAND_TOLERANCE_DEFAULT,
-            simplifyEpsilon,
-            contiguous: true,
-          }, { timeoutMs: WAND_TIMEOUT_MS });
-        } catch (err) {
-          console.error('[Wand] Worker invocation failed:', err);
-          e.actions.setInteraction({ selectionErrorPulse: Date.now() });
-          return;
-        }
-
-        if (!resp.rings.length) {
-          console.warn('[Wand] Worker returned empty selection');
-          e.actions.setInteraction({ selectionErrorPulse: Date.now() });
-          return;
-        }
-
-        // If double-click occurred while worker was running, discard result.
-        if (discardPending) return;
-
-        // 5. Project layer-local rings → frame-local.
-        const clipBox = getClipBox(e.activeFrame);
-        const wandAA = clipBox?.antiAliased ?? true;
-
-        const layerRings = resp.rings.map(ring => ring.map(p => asLocalPoint({ x: p.x, y: p.y })));
-        const layerBounds = asLocalRect(e.geometry.polygon.computePolygonBounds(layerRings));
-        const layerPoly = asLocalPolygon(layerRings, layerBounds, wandAA);
-        const framePoly = e.geometry.polygon.layerLocalToFrameLocal(
-          layerPoly, layer, e.activeFrame
-        );
-
-        // 6. Commit to wand slot.
-        e.actions.setClipBox(e.activeFrame.id, 'wand', framePoly);
-
-        if (resp.debug) {
-          console.info('[Wand] selected',
-            { layer: layer.id, seed, ...resp.debug, rings: resp.rings.length });
-        }
-      } finally {
-        busy = false;
+        imageData = await e.pixels.image.imageData(layer.assetId!);
+      } catch (err) {
+        console.error('[Wand] Failed to read layer image data:', err);
+        e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+        return;
       }
+
+      // 3. Project click world-point → layer-local integer pixel.
+      const layerWM = e.geometry.transform.getLayerWorldMatrix(layer);
+      const layerInv = layerWM.inverse();
+      const layerPt = layerInv.apply({ x: e.point.world.x, y: e.point.world.y });
+      const seed = { x: Math.floor(layerPt.x), y: Math.floor(layerPt.y) };
+      if (
+        seed.x < 0 || seed.y < 0 ||
+        seed.x >= imageData.width || seed.y >= imageData.height
+      ) {
+        e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+        return;
+      }
+
+      // 4. Run worker.
+      const scale = e.geometry.getScale(e.activeFrame);
+      const simplifyEpsilon = Math.max(WAND_SIMPLIFY_FLOOR, WAND_SIMPLIFY_COEF / scale);
+
+      let resp;
+      try {
+        resp = await magicWandClient.run({
+          imageData: {
+            data: imageData.data.buffer,
+            width: imageData.width,
+            height: imageData.height,
+          },
+          seed,
+          tolerance: WAND_TOLERANCE_DEFAULT,
+          simplifyEpsilon,
+          contiguous: true,
+        }, { timeoutMs: WAND_TIMEOUT_MS });
+      } catch (err) {
+        console.error('[Wand] Worker invocation failed:', err);
+        e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+        return;
+      }
+
+      if (!resp.rings.length) {
+        e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+        return;
+      }
+
+      // If cancelled while worker was running, discard result.
+      if (ctx.isDiscarded()) return;
+
+      // 5. Project layer-local rings → frame-local.
+      const clipBox = getClipBox(e.activeFrame);
+      const wandAA = clipBox?.antiAliased ?? true;
+
+      const layerRings = resp.rings.map(ring => ring.map(p => asLocalPoint({ x: p.x, y: p.y })));
+      const layerBounds = asLocalRect(e.geometry.polygon.computePolygonBounds(layerRings));
+      const layerPoly = asLocalPolygon(layerRings, layerBounds, wandAA);
+      const framePoly = e.geometry.polygon.layerLocalToFrameLocal(
+        layerPoly, layer, e.activeFrame
+      );
+
+      // 6. Commit to wand slot.
+      e.actions.setClipBox(e.activeFrame.id, 'wand', framePoly);
     },
-  };
+  });
 };

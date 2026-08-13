@@ -18,7 +18,7 @@
  */
 
 import { EditorPlugin } from '@opengpex/editor/core/types';
-import { ClipOverlayMain } from './components';
+import { ClipOverlayMain, ClipOverlaySettings } from './components';
 import { createSelectionMoveHandler, createClipBoxHandler, createLassoHandler, createWandHandler, createSamHandler } from './interactions';
 import * as P from './protocols';
 
@@ -45,7 +45,8 @@ export const plugin: EditorPlugin = {
   slot: 'STAGE_OVERLAY',
   component: ClipOverlayMain,
   initialConfig: {
-    maskOpacity: 0.15
+    maskOpacity: 0.15,
+    marchingAntsAnimated: false,
   },
   interactions: [
     createSelectionMoveHandler(),
@@ -53,6 +54,15 @@ export const plugin: EditorPlugin = {
     createLassoHandler(),
     createWandHandler(),
     createSamHandler()
+  ],
+  contributions: [
+    {
+      slot: 'SETTINGS_CONFIG_PANEL',
+      group: 'viewport',
+      component: ClipOverlaySettings,
+      title: 'Selection',
+      order: 200
+    }
   ],
   commands: [],
 };

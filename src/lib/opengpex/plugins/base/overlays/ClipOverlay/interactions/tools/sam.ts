@@ -26,6 +26,7 @@ import {
   asLocalPolygon,
 } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import { createAsyncHandler } from '../../../../../../stage/interaction/handlers/AsyncHandler';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
 import { AIToolsDrawerAPI } from '../../../../drawers/AIToolsDrawer/protocols';
 import { segStore } from '../../../../drawers/AIToolsDrawer/segmentation/store';
@@ -83,11 +84,9 @@ function isSamableLayer(layer: Layer): boolean {
  * remain independently deployable plugins.
  */
 export const createSamHandler = (): InteractionHandler => {
-  let busy = false;
-  let discardPending = false;
   let startWorld: { x: number; y: number } | null = null;
 
-  return {
+  return createAsyncHandler({
     id: 'clip-sam',
     priority: 110,
 
@@ -103,11 +102,15 @@ export const createSamHandler = (): InteractionHandler => {
       startWorld = { x: e.point.world.x, y: e.point.world.y };
     },
 
-    onMove: () => {
-      // Future: render box preview overlay during drag.
+    onBusy: (e) => {
+      e.actions.setInteraction({ selectionErrorPulse: Date.now() });
     },
 
-    onEnd: async (e) => {
+    onCancel: () => {
+      startWorld = null;
+    },
+
+    execute: async (e, ctx) => {
       const endWorld = { x: e.point.world.x, y: e.point.world.y };
 
       // Single-click outside canvas = clear selection.
@@ -116,19 +119,10 @@ export const createSamHandler = (): InteractionHandler => {
         x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h,
       });
       if (isOutsideCanvas) {
-        discardPending = true;
         e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
         startWorld = null;
         return;
       }
-
-      if (busy) {
-        e.actions.setInteraction({ selectionErrorPulse: Date.now() });
-        startWorld = null;
-        return;
-      }
-      busy = true;
-      discardPending = false;
 
       try {
         // 1. Pick target layer.
@@ -174,7 +168,7 @@ export const createSamHandler = (): InteractionHandler => {
           return;
         }
 
-        if (discardPending) return;
+        if (ctx.isDiscarded()) return;
 
         // 3. Build prompt: point or box.
         const layerWM = e.geometry.transform.getLayerWorldMatrix(layer);
@@ -234,7 +228,7 @@ export const createSamHandler = (): InteractionHandler => {
           return;
         }
 
-        if (discardPending) return;
+        if (ctx.isDiscarded()) return;
 
         // 5. Project ALL candidate masks to frame-local polygons.
         //    Store them in the signal so the panel can switch between them.
@@ -284,9 +278,8 @@ export const createSamHandler = (): InteractionHandler => {
           });
         }
       } finally {
-        busy = false;
         startWorld = null;
       }
     },
-  };
+  });
 };

@@ -118,7 +118,7 @@ export default function PluginSlot({
               <React.Suspense fallback={fallback || null}>
                 <PluginContext.Provider value={item.plugin}>
                   {name === "OPTION_BAR" ? (
-                    <div className="h-[34px] px-3.5 flex items-center bg-[var(--bg-panel)]/80 backdrop-blur-md border border-[var(--border-subtle)] first:rounded-l-full last:rounded-r-full shadow-lg">
+                    <div className="h-[34px] px-3.5 flex items-center bg-[var(--bg-panel)]/80 backdrop-blur-xl border border-[var(--border-subtle)] first:rounded-l-full last:rounded-r-full shadow-lg">
                       <item.Component />
                     </div>
                   ) : (

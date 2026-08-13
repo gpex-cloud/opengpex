@@ -70,7 +70,7 @@ function ViewportInner({ frame }: ViewportInnerProps) {
   }, []);
 
   // 1. Interaction Handlers
-  const { handleMouseDown, handleMouseMove, handleMouseUp, handleMouseLeave } =
+  const { handlePointerDown, handlePointerMove, handlePointerUp, handlePointerLeave } =
     useViewportEvents(containerRef, frame);
 
   // 2. Initial auto-centering logic (driven by LayoutContext)
@@ -91,10 +91,10 @@ function ViewportInner({ frame }: ViewportInnerProps) {
   return (
     <div
       ref={containerRef}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseLeave}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerLeave}
       onContextMenu={(e) => e.preventDefault()}
       className={`editor-viewport-container relative w-full h-full overflow-hidden select-none outline-none ${cursorClass}`}
       style={{ touchAction: "none", cursor: cursorOverride || undefined }}
@@ -109,7 +109,7 @@ function ViewportInner({ frame }: ViewportInnerProps) {
 
       <div
         ref={stageRef}
-        className="absolute top-0 left-0 will-change-transform origin-top-left"
+        className="absolute top-0 left-0 will-change-transform origin-top-left pointer-events-none"
         style={!isGroomed ? { opacity: 0 } : {}}
       >
         <div

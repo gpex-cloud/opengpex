@@ -33,7 +33,7 @@ export const getToolMenuStyles = (isCollapsed: boolean, isPinned: boolean = fals
                 relative flex flex-col overflow-visible
                 ${isPinned
                     ? 'w-full max-w-full h-full rounded-none border-none shadow-none bg-transparent'
-                    : `transition-all duration-300 bg-[var(--bg-panel)]/40 backdrop-blur-3xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] rounded-xl
+                    : `transition-all duration-300 bg-[var(--bg-panel)]/80 backdrop-blur-xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] rounded-xl
                        ${!isCollapsed ? 'w-[280px] h-auto rounded-2xl' : 'w-[34px] h-[34px]'}`
                 }
             `
@@ -62,7 +62,7 @@ export const getToolMenuStyles = (isCollapsed: boolean, isPinned: boolean = fals
         subMenuPanel: {
             className: `
                 absolute left-full top-0 ml-2 w-[240px] flex flex-col gap-0.5 py-2
-                bg-[var(--bg-panel)]/90 backdrop-blur-3xl border border-[var(--border-subtle)]
+                bg-[var(--bg-panel)]/85 backdrop-blur-xl border border-[var(--border-subtle)]
                 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.2)]
                 animate-in fade-in slide-in-from-left-2 duration-200
             `,

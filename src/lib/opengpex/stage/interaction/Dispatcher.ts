@@ -26,6 +26,7 @@ import { InteractionHandler, InteractionEvent } from '@opengpex/editor/core/type
 export class InteractionDispatcher {
   private activeHandler: InteractionHandler | null = null;
   private handlers: InteractionHandler[] = [];
+  private lastEvent: InteractionEvent | null = null;
 
   constructor(handlers: InteractionHandler[]) {
     // Sorted from high to low priority, ensuring overlapping areas are handled by high-priority handlers
@@ -37,6 +38,7 @@ export class InteractionDispatcher {
    * Traverses all handlers; the first whose test() returns true wins and handles subsequent events.
    */
   handleStart(e: InteractionEvent): boolean {
+    this.lastEvent = e;
     const button = (e.nativeEvent as MouseEvent).button;
 
     // ── Global reservation: middle-click (1) and right-click (2) always route
@@ -68,6 +70,7 @@ export class InteractionDispatcher {
    */
   handleMove(e: InteractionEvent): boolean {
     if (this.activeHandler) {
+      this.lastEvent = e;
       this.activeHandler.onMove?.(e);
       return true;
     }
@@ -81,9 +84,25 @@ export class InteractionDispatcher {
     if (this.activeHandler) {
       const res = this.activeHandler.onEnd?.(e);
       this.activeHandler = null;
+      this.lastEvent = null;
       return res;
     }
     return false;
+  }
+
+  /**
+   * cancelAll: Cancel the active interaction gesture.
+   * Calls the active handler's onCancel (if implemented) and clears the active session.
+   * Used when user presses Esc or other external cancellation triggers.
+   */
+  cancelAll(): void {
+    if (!this.activeHandler) return;
+
+    if (this.lastEvent) {
+      this.activeHandler.onCancel?.(this.lastEvent);
+    }
+    this.activeHandler = null;
+    this.lastEvent = null;
   }
 
   /**

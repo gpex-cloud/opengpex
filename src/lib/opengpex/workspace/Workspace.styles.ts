@@ -113,7 +113,7 @@ export const getWorkspaceStyles = (
         // 去除了固定模式的 transition-all 防止从浮动模式切换时宽度动画溢出。
         toolMenu: {
             className: isToolMenuPinned
-                ? `relative pointer-events-auto h-full shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-panel)]/40 backdrop-blur-3xl shadow-[4px_0_24px_rgba(0,0,0,0.05)]`
+                ? `relative pointer-events-auto h-full shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-panel)]/80 backdrop-blur-xl shadow-[4px_0_24px_rgba(0,0,0,0.05)]`
                 : `absolute pointer-events-auto transition-all duration-300 left-[11px] top-2`,
             style: {
                 zIndex: EDITOR_Z_INDEX.UI.POPOVER + 5,
@@ -139,11 +139,11 @@ export const getWorkspaceStyles = (
         },
 
         drawerBarHeaderItem: {
-            className: `flex items-center justify-center transition-all duration-300 outline-none focus:outline-none focus:ring-0 select-none w-[34px] h-[34px] rounded-xl bg-[var(--bg-panel)]/40 backdrop-blur-3xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] hover:bg-[var(--bg-panel)]/60 active:scale-95 pointer-events-auto cursor-pointer`
+            className: `flex items-center justify-center transition-all duration-300 outline-none focus:outline-none focus:ring-0 select-none w-[34px] h-[34px] rounded-xl bg-[var(--bg-panel)]/70 backdrop-blur-xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] hover:bg-[var(--bg-panel)]/90 active:scale-95 pointer-events-auto cursor-pointer`
         },
 
         drawerBarItem: {
-            className: `relative flex items-center justify-center transition-all duration-300 cursor-pointer active:scale-95 [&_svg]:!w-5 [&_svg]:!h-5 w-[34px] h-[34px] rounded-xl bg-[var(--bg-panel)]/80 backdrop-blur-3xl border border-[var(--border-subtle)] shadow-xl pointer-events-auto`
+            className: `relative flex items-center justify-center transition-all duration-300 cursor-pointer active:scale-95 [&_svg]:!w-5 [&_svg]:!h-5 w-[34px] h-[34px] rounded-xl bg-[var(--bg-panel)]/80 backdrop-blur-xl border border-[var(--border-subtle)] shadow-xl pointer-events-auto`
         },
 
         drawerBarItemActive: {
@@ -151,18 +151,18 @@ export const getWorkspaceStyles = (
         },
 
         drawerBarFooterItem: {
-            className: `flex items-center justify-center transition-all duration-300 outline-none focus:outline-none focus:ring-0 select-none w-[34px] h-[34px] rounded-xl bg-[var(--bg-panel)]/40 backdrop-blur-3xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] hover:bg-[var(--bg-panel)]/60 active:scale-95 pointer-events-auto cursor-pointer`
+            className: `flex items-center justify-center transition-all duration-300 outline-none focus:outline-none focus:ring-0 select-none w-[34px] h-[34px] rounded-xl bg-[var(--bg-panel)]/70 backdrop-blur-xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] hover:bg-[var(--bg-panel)]/90 active:scale-95 pointer-events-auto cursor-pointer`
         },
 
         // Sidebar Container
         sidebar: {
-            className: `shrink-0 h-full flex flex-col transition-all duration-700 animate-in slide-in-from-right absolute right-0 top-0 bottom-0 bg-[var(--bg-panel)]/40 backdrop-blur-lg backdrop-saturate-200 rounded-none border-l border-[var(--border-subtle)] shadow-[-8px_0_32px_0_rgba(0,0,0,0.12)] z-[100]`,
+            className: `shrink-0 h-full flex flex-col transition-all duration-700 animate-in slide-in-from-right absolute right-0 top-0 bottom-0 bg-[var(--bg-panel)]/80 backdrop-blur-xl rounded-none border-l border-[var(--border-subtle)] shadow-[-8px_0_32px_0_rgba(0,0,0,0.12)] z-[100]`,
             style: { width: `${SIDEBAR_WIDTH}px` }
         },
 
         // Floating Panel Mode
         sidebarFloating: {
-            className: `relative w-[320px] h-auto max-h-[calc(100vh-120px)] overflow-hidden bg-[var(--bg-panel)]/90 backdrop-blur-3xl backdrop-saturate-200 shadow-2xl z-[900] rounded-[20px] border border-[var(--border-subtle)]`,
+            className: `relative w-[320px] h-auto max-h-[calc(100vh-120px)] overflow-hidden bg-[var(--bg-panel)]/85 backdrop-blur-xl shadow-2xl z-[900] rounded-[20px] border border-[var(--border-subtle)]`,
             style: {}
         },
 

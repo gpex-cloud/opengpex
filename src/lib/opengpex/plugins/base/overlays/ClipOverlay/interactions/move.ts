@@ -26,8 +26,7 @@ import {
 } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
-import { InteractionMath } from '@opengpex/editor/stage/interaction/Math';
-import { createTransformHandler } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
+import { createTransformHandler, TransformIntent } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import {
   ClipOptionsAPI,
   ClipTool,
@@ -68,7 +67,7 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
     id: 'clip-selection-move',
     priority: 130,
 
-    test: (e: InteractionEvent) => {
+    test: (e: InteractionEvent): TransformIntent | null => {
       // ─── Mode admission ───────────────────────────────────────────────
       const inClip = e.state.interaction.interactionMode === 'clip';
       const inReCanvas = !!e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas);
@@ -107,12 +106,12 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
 
       if (me.metaKey || me.ctrlKey) {
         if (isExchangeActive) {
-          return me.altKey ? 'peel' : 'move';
+          return me.altKey ? { category: 'custom', sub: 'peel' } : { category: 'move' };
         } else {
-          return 'peel';
+          return { category: 'custom', sub: 'peel' };
         }
       }
-      return 'move';
+      return { category: 'move' };
     },
 
     getInitialState: (e: InteractionEvent) => {
@@ -127,10 +126,6 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       }
 
       // Always capture startPolygon for both regular and irregular selections.
-      // Regular selections need rings translated alongside rect so that
-      // polygonToSvgPathD (which outputs bounds-relative coordinates) produces
-      // correct marching-ants path data, and downstream cut/copy operations
-      // reference the moved position rather than the original.
       startPolygon = box;
       initialRect = { ...box.rect };
 
@@ -144,13 +139,13 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       clamp: true,  // Strict canvas bounds clamping for all selection moves
     }),
 
-    onUpdate: (e: InteractionEvent, newRect: LocalRect, tx, { dx, dy, type }) => {
+    onUpdate: (e: InteractionEvent, newRect: LocalRect, tx, context) => {
       const frame = e.activeFrame;
 
       // ─── Peel mode: trigger peel on threshold ─────────────────────────
-      if (type === 'peel' && ((e.nativeEvent as MouseEvent).metaKey || (e.nativeEvent as MouseEvent).ctrlKey)) {
+      if (context.intent.sub === 'peel' && ((e.nativeEvent as MouseEvent).metaKey || (e.nativeEvent as MouseEvent).ctrlKey)) {
         if (!hasPeeled) {
-          if (Math.sqrt(dx * dx + dy * dy) > 5) {
+          if (Math.sqrt(context.dx * context.dx + context.dy * context.dy) > 5) {
             hasPeeled = true;
             setTimeout(() => e.actions.adv.layer.peel.peelToExchange.execute({
               isCopy: (e.nativeEvent as MouseEvent).altKey
@@ -161,16 +156,6 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       }
 
       // ─── Move: update selection position ──────────────────────────────
-      // `newRect` is already snapped + clamped by TransformHandler's internal
-      // call to InteractionMath.snapAndSync(). Smart guides are written to
-      // transient automatically.
-      //
-      // Both regular and irregular selections translate the full polygon
-      // (rings + rect) from the captured startPolygon. This keeps rings in
-      // sync with rect so that:
-      //   1. polygonToSvgPathD (bounds-relative) renders ants at the moved position
-      //   2. Downstream cut/copy operations use the correct moved coordinates
-
       if (startPolygon) {
         const polyDx = newRect.x - initialRect.x;
         const polyDy = newRect.y - initialRect.y;
@@ -212,20 +197,24 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       }
     },
 
-    onEnd: (e: InteractionEvent, tx, startCanvas) => {
-      // Static click (no drag) = clear selection (Photoshop behavior)
-      if (InteractionMath.isStaticClick(e, startCanvas)) {
-        // Don't clear on Meta-click (that's an aborted peel attempt)
-        const me = e.nativeEvent as MouseEvent;
-        if (!me.metaKey && !me.ctrlKey) {
+    // ── Declarative Gesture Rules ──
+    gestures: [
+      {
+        name: 'static-click-clear-non-meta',
+        match: (ctx) => ctx.isStatic
+                     && ctx.intent.category === 'move'
+                     && !ctx.endModifiers.meta
+                     && !ctx.endModifiers.ctrl,
+        action: (e) => {
           e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
         }
       }
+    ],
 
+    // onEnd: cleanup only (gesture detection moved to gestures[] above)
+    onEnd: (e, _tx, _ctx) => {
       // Clear move-delta transient (hides the delta label)
       e.actions.fast.setTransient('clipMoveStart', null);
-
-      tx.commit();
       hasPeeled = false;
     }
   });

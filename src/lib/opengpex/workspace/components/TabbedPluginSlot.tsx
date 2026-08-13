@@ -51,20 +51,20 @@ export interface TabbedPluginSlotProps {
 // Flattened intermediate data item structure
 interface FlattenedItem {
   id: string;
+  group: string; // Group ID (e.g. 'viewport', 'preferences')
   Component: React.ComponentType;
-  title: string;
+  title: string; // Display title / i18n translation key
   icon?: React.ReactNode;
   order: number;
-  group?: string; // New: supported group field
   plugin: BuiltPlugin;
 }
 
 // Grouped Tab structure
 interface TabGroup {
-  id: string; // Group name if group exists, otherwise unique component ID
-  title: string; // Title displayed on the Tab Bar
+  id: string; // Group ID used for matching and active state
+  title: string; // Display title on the Tab Bar
   icon?: React.ReactNode;
-  order: number; // Minimum order of all components in the group, used to sort the entire Tab
+  order: number; // Minimum order of components in group
   components: {
     id: string;
     Component: React.ComponentType;
@@ -73,6 +73,27 @@ interface TabGroup {
   }[];
 }
 
+/**
+ * TabbedPluginSlot - A tabbed UI slot renderer for plugin contributions.
+ *
+ * Architecture & Design Principles:
+ *
+ * 1. Role Separation between `group` (Group ID) and `title` (Display Label):
+ *    - `group` (string): Invariant, language-neutral identifier used for tab grouping,
+ *      state matching (`activeTabId`), and persistence (e.g. 'viewport', 'preferences', 'ai-tools').
+ *      It MUST be a stable ASCII key and never changes across i18n locales.
+ *    - `title` (string): Human-readable UI display label or i18n translation key (e.g. 'Viewport',
+ *      'Preferences', 'AI Tools').
+ *
+ * 2. Cross-Plugin Tab Merging:
+ *    - Contributions sharing the same `group` ID (e.g. TabDock and ClipOverlay both setting `group: 'viewport'`)
+ *      are automatically merged into the SAME tab container on the UI.
+ *
+ * 3. Display Title & Icon Precedence:
+ *    - For merged tabs, the tab display title and icon are derived from the contribution with the highest
+ *      priority (smallest `order` value). If the highest-priority item provides no icon, it falls back to
+ *      the next highest-priority contribution that provides one.
+ */
 export default function TabbedPluginSlot({
   name,
   className = "",
@@ -112,18 +133,18 @@ export default function TabbedPluginSlot({
       if (!plugins.isPluginVisible(p, { hasActiveFrame: !!activeFrame }))
         return;
 
-      // Core mounted component (supports title / group / icon metadata)
+      // Core mounted component
       if (p.slot === name) {
         flatItems.push({
           id: p.uid,
-          Component: p.component,
+          group: p.group || p.uid,
           title:
             (p as unknown as { title?: string }).title ||
             p.manifest.displayName ||
             defaultTitle,
+          Component: p.component,
           icon: p.icon,
           order: p.order || 0,
-          group: p.group, // Supports core component defining a group
           plugin: p,
         });
       }
@@ -133,43 +154,43 @@ export default function TabbedPluginSlot({
         if (contrib.slot === name) {
           flatItems.push({
             id: `${p.uid}-contrib-${index}`,
+            group: contrib.group || p.group || p.uid,
+            title: contrib.title || (p as unknown as { title?: string }).title || p.manifest.displayName || defaultTitle,
             Component: contrib.component,
-            title: contrib.title || defaultTitle,
             icon: contrib.icon,
             order: contrib.order ?? (p.order || 0),
-            group: contrib.group, // Supports contributions defining a group
             plugin: p,
           });
         }
       });
     });
 
-    // 2. Execute grouping logic (group priority)
+    // 2. Execute grouping logic (using group as invariant ID key, title as UI display text)
     const groupMap = new Map<string, TabGroup>();
 
     flatItems.forEach((item) => {
-      // Determines which key this item belongs to: uses group if configured, otherwise its own unique ID to be independent
-      const targetKey = item.group || item.id;
+      const targetKey = item.group;
 
       if (!groupMap.has(targetKey)) {
         groupMap.set(targetKey, {
           id: targetKey,
-          // For explicit grouping, Tab title uses group name; for independent Tab, uses its own title
-          title: item.group ? item.group : item.title,
-          icon: item.icon, // Record the first encountered icon
-          order: item.order, // Initial order
+          title: item.title,
+          icon: item.icon,
+          order: item.order,
           components: [],
         });
       }
 
       const currentGroup = groupMap.get(targetKey)!;
 
-      // Update minimum order within the group (for overall Tab sorting)
+      // Prefer title and order of the highest-priority component (smallest order)
       if (item.order < currentGroup.order) {
         currentGroup.order = item.order;
-      }
-      // If group had no icon before but subsequent components do, complement it
-      if (!currentGroup.icon && item.icon) {
+        currentGroup.title = item.title;
+        if (item.icon) {
+          currentGroup.icon = item.icon;
+        }
+      } else if (!currentGroup.icon && item.icon) {
         currentGroup.icon = item.icon;
       }
 

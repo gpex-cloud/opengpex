@@ -72,10 +72,10 @@ export interface EditorShortcut {
 export interface UIContribution {
   slot: EditorSlot;
   component: React.ComponentType<Record<string, unknown>>;
+  group?: string; // Stable group identifier (e.g. 'viewport', 'preferences') used for tab grouping and i18n
+  title?: string; // Display title / i18n translation key
   order?: number;
-  title?: string;
   icon?: React.ReactNode;
-  group?: string; // Core plugins can define a group to tell TabbedSlot which category to put them in
 }
 
 export interface CommandInterceptor {
@@ -90,6 +90,29 @@ export interface InteractionEvent {
     canvas: LocalPoint;
   };
   keys: { shift: boolean; alt: boolean; meta: boolean };
+  /**
+   * Pointer device metadata extracted from the native PointerEvent.
+   * Provides type-safe access to pressure, tilt, and device type without
+   * needing unsafe `as PointerEvent` casts in handler code.
+   *
+   * For mouse input: pressure is 0.5 when button pressed, 0 otherwise.
+   * For pen/stylus: pressure reflects actual pen pressure (0–1).
+   * For touch: pressure is typically 1 (binary).
+   */
+  pointer: {
+    /** Pointer ID (stable within a single gesture, unique across concurrent pointers) */
+    id: number;
+    /** Normalized pressure (0–1). Mouse: 0.5 when pressed. Pen: actual pressure. */
+    pressure: number;
+    /** Tilt angle in X axis (-90 to 90 degrees). 0 for mouse. */
+    tiltX: number;
+    /** Tilt angle in Y axis (-90 to 90 degrees). 0 for mouse. */
+    tiltY: number;
+    /** Rotation of the pointer (0–359 degrees). 0 for mouse. */
+    twist: number;
+    /** Input device type */
+    pointerType: 'mouse' | 'pen' | 'touch';
+  };
   geometry: GeometryService;
   pixels: PixelService;
   assets: AssetService;
@@ -168,6 +191,12 @@ export interface InteractionHandler {
   onStart: (e: InteractionEvent) => void;
   onMove: (e: InteractionEvent) => void;
   onEnd: (e: InteractionEvent) => unknown;
+  /**
+   * Called when the interaction is cancelled externally (e.g., user presses Esc).
+   * The handler should abort any in-progress transaction and clean up state.
+   * Optional: handlers that don't implement this will simply have their active session cleared.
+   */
+  onCancel?: (e: InteractionEvent) => void;
 }
 
 /**

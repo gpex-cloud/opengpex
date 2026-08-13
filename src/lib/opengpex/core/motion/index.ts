@@ -256,10 +256,24 @@ if (typeof document !== 'undefined') {
   // --- Tier 2: Input-driven idle detection ---
   // These events fire BEFORE rAF in the event loop, so fps is restored
   // before the next animation frame executes.
-  const INPUT_EVENTS = ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown', 'keyup', 'touchstart', 'touchmove'] as const;
+  //
+  // IMPORTANT: `pointermove` is intentionally excluded from the unconditional
+  // wake list. Bare mouse movement (no button held) should NOT wake the ticker
+  // to full rate — it causes 50-60% GPU usage because 120fps rAF keeps
+  // Chrome's compositor running at full refresh rate even though nothing visual
+  // changes (see 2026-08-13 investigation).
+  //
+  // Instead, pointermove only wakes when a button is held (e.buttons > 0),
+  // meaning an actual drag/pan/zoom interaction is in progress.
+  const INPUT_EVENTS = ['pointerdown', 'pointerup', 'wheel', 'keydown', 'keyup', 'touchstart', 'touchmove'] as const;
   for (const evt of INPUT_EVENTS) {
     document.addEventListener(evt, wakeFromIdle, { passive: true, capture: true });
   }
+
+  // Pointer move: only wake during active drag (button held)
+  document.addEventListener('pointermove', (e: PointerEvent) => {
+    if (e.buttons > 0) wakeFromIdle();
+  }, { passive: true, capture: true });
 
   // Start initial idle timer
   wakeFromIdle();

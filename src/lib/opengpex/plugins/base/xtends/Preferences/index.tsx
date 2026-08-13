@@ -56,6 +56,7 @@ export const plugin: EditorPlugin = {
   contributions: [
     {
       slot: 'SETTINGS_CONFIG_PANEL',
+      group: 'preferences',
       component: PreferencesPanel,
       title: 'Preferences',
       icon: <SlidersHorizontal size={12} />,

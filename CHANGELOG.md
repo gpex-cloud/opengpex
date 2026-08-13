@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.48
+
+- Interaction: redesigned transform gesture system with structured intents and declarative rules; added async handler for click-to-compute tools; pointer metadata (pressure, tilt, device type) now available in events; transaction state machine with lifecycle guards; Esc key gesture cancellation
+- Perf: idle ticker no longer wakes on bare mouse movement, reducing GPU usage when hovering
+- UI: improved tab grouping with stable identifiers for i18n
+
+---
+
 ## v1.0.0-beta.47
 
 - Cloud Gallery: add download progress display when opening files

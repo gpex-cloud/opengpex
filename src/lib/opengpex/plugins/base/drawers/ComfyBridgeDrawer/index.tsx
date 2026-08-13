@@ -60,9 +60,9 @@ export const plugin: EditorPlugin = {
   contributions: [
     {
       slot: 'SETTINGS_CONFIG_PANEL',
-      group: 'Comfy Bridge',
+      group: 'comfy-bridge',
       component: ComfyBridgeSettings,
-      title: 'Connect to ComfyUI Services',
+      title: 'Comfy Bridge',
       icon: <Link size={12} />,
       order: 330,
     },
