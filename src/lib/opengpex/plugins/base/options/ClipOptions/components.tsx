@@ -940,7 +940,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                   <ImageUpscale
                     size={13}
                     className={
-                      isReCanvas ? "animate-pulse text-white" : "text-rose-500 group-hover:text-rose-600 dark:text-rose-400 dark:group-hover:text-rose-300 transition-colors"
+                      isReCanvas ? "text-white" : "text-rose-500 group-hover:text-rose-600 dark:text-rose-400 dark:group-hover:text-rose-300 transition-colors"
                     }
                   />
                 ),

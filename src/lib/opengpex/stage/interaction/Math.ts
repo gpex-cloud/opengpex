@@ -21,6 +21,9 @@ import { InteractionEvent, LocalRect, asWorldPoint } from '@opengpex/editor/core
 import type { SnapFilterOptions } from '@opengpex/editor/core/geometry/operators/snapping';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 
+/** Resolved at call time from PresetsFactory (allows runtime override via Settings UI). */
+const getStaticThreshold = () => presets.get('STATIC_CLICK_THRESHOLD');
+
 /**
  * InteractionMath: Interaction Helper Utilities
  * Unified handling of mathematical transformations and side-effect synchronization 
@@ -162,16 +165,20 @@ export const InteractionMath = {
 
   /**
    * isStaticClick: Determine if the interaction is a static click (no significant movement).
+   *
+   * Default threshold sourced from `STATIC_CLICK_THRESHOLD` preset (2px).
+   * Callers may override for specific use cases.
    */
-  isStaticClick(e: InteractionEvent, startCanvas: { x: number; y: number }, threshold = 5): boolean {
+  isStaticClick(e: InteractionEvent, startCanvas: { x: number; y: number }, threshold?: number): boolean {
+    const t = threshold ?? getStaticThreshold();
     const { dx, dy } = InteractionMath.getCanvasDelta(e, startCanvas);
-    return Math.sqrt(dx * dx + dy * dy) < threshold;
+    return Math.sqrt(dx * dx + dy * dy) < t;
   },
 
   /**
    * isDoubleClick: Determine if the interaction is a double click.
    */
-  isDoubleClick(e: InteractionEvent, startCanvas: { x: number; y: number }, threshold = 5): boolean {
+  isDoubleClick(e: InteractionEvent, startCanvas: { x: number; y: number }, threshold?: number): boolean {
     return InteractionMath.isStaticClick(e, startCanvas, threshold) && 
            (e.nativeEvent as MouseEvent).detail === 2;
   },

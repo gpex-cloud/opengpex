@@ -220,33 +220,38 @@ export function ClipOverlayMain() {
             </div>
           )}
 
-          {/* Resize Handles */}
+          {/* Resize Handles (corners) — always visible for ellipse, hover for rect */}
           {[
             { h: "nw", c: "top-0 left-0", cursor: "nwse-resize" },
             { h: "ne", c: "top-0 right-0", cursor: "nesw-resize" },
             { h: "sw", c: "bottom-0 left-0", cursor: "nesw-resize" },
             { h: "se", c: "bottom-0 right-0", cursor: "nwse-resize" },
-          ].map((p) => (
-            <div
-              key={p.h}
-              className={`absolute w-4 h-4 transition-all group/handle ${p.c}`}
-              style={{
-                cursor: p.cursor,
-                transform: `translate(${p.h.includes("w") ? "-30%" : "-70%"}, ${p.h.includes("n") ? "-30%" : "-70%"})`,
-                left: p.h.includes("e") ? "100%" : "0%",
-                top: p.h.includes("s") ? "100%" : "0%",
-                zIndex: 10,
-              }}
-              data-handle={p.h}
-            >
+          ].map((p) => {
+            const isEllipse = cropTool === "ellipse";
+            return (
               <div
-                className={`absolute w-full h-[2px] transition-opacity duration-200 opacity-0 group-hover/handle:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"} ${p.h.includes("n") ? "top-0" : "bottom-0"}`}
-              />
-              <div
-                className={`absolute w-[2px] h-full transition-opacity duration-200 opacity-0 group-hover/handle:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"} ${p.h.includes("w") ? "left-0" : "right-0"}`}
-              />
-            </div>
-          ))}
+                key={p.h}
+                className={`absolute w-4 h-4 transition-all group/handle ${p.c}`}
+                style={{
+                  cursor: p.cursor,
+                  transform: `translate(${p.h.includes("w") ? "-30%" : "-70%"}, ${p.h.includes("n") ? "-30%" : "-70%"})`,
+                  left: p.h.includes("e") ? "100%" : "0%",
+                  top: p.h.includes("s") ? "100%" : "0%",
+                  zIndex: 10,
+                }}
+                data-handle={p.h}
+              >
+                <div
+                  className={`absolute w-full h-[2px] transition-opacity duration-200 ${isEllipse ? "" : "opacity-0 group-hover/handle:opacity-100"} ${isReCanvas ? "bg-red-500" : "bg-white"} ${p.h.includes("n") ? "top-0" : "bottom-0"}`}
+                  style={isEllipse ? { opacity: 1 } : undefined}
+                />
+                <div
+                  className={`absolute w-[2px] h-full transition-opacity duration-200 ${isEllipse ? "" : "opacity-0 group-hover/handle:opacity-100"} ${isReCanvas ? "bg-red-500" : "bg-white"} ${p.h.includes("w") ? "left-0" : "right-0"}`}
+                  style={isEllipse ? { opacity: 1 } : undefined}
+                />
+              </div>
+            );
+          })}
 
           {/* Edge handles: hit area straddles the selection edge (30% outside, 70% inside)
               matching corner handle offset. Visual line at outer edge = ~5px from ants. */}

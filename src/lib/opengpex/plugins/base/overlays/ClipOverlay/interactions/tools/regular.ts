@@ -154,7 +154,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
       },
       {
         name: 'static-click-clear',
-        match: (ctx) => ctx.isStatic && ctx.intent.category === 'create',
+        match: (ctx) => !ctx.hasMoved && ctx.intent.category === 'create',
         action: (e) => {
           e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
         }

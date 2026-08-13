@@ -19,14 +19,13 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, asLocalRect, asLocalShape, Frame, LocalRect, LocalShape, LocalPolygon, EditorActions, Point2D } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, asLocalRect, asLocalShape, Frame, LocalRect, LocalShape, LocalPolygon, EditorActions, GeometryService, Point2D } from '@opengpex/editor/core/types';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
-import { presets } from '@opengpex/editor/core/helpers/preferences';
-const CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS = presets.get('CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS');
 import { clipComputeClient } from './workers/client';
 import * as P from './protocols';
 import type { ClipTool } from './protocols';
+const { CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS } = P;
 
 
 /**
@@ -59,8 +58,8 @@ export function exitClipMode(ctx: EditorContextValue): void {
 /**
  * Helper: Unifies the retrieval and updating of the active crop target (Image vs Canvas).
  */
-export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: EditorActions }, isReCanvas: boolean) {
-  const { activeFrame, actions } = ctx;
+export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: EditorActions; geometry: GeometryService }, isReCanvas: boolean) {
+  const { activeFrame, actions, geometry } = ctx;
   if (!activeFrame) return null;
   const regularPoly = isReCanvas ? null : getRegularClipShape(activeFrame);
   const shape: LocalShape = isReCanvas
@@ -80,10 +79,11 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
       if (isReCanvas) {
         actions.setCanvasCropBox(activeFrame.id, { ...shape, ...patch } as LocalShape);
       } else {
-        const toolId = shape.type === 'circle' ? 'ellipse' : 'rect';
-        // clipBoxes now stores LocalPolygon — convert the patched LocalShape to polygon
+        const toolId: 'rect' | 'ellipse' = shape.type === 'circle' ? 'ellipse' : 'rect';
+        // clipBoxes stores LocalPolygon — properly convert the patched rect to polygon with rings
         const patched = { ...shape, ...patch } as LocalShape;
-        actions.setClipBox(activeFrame.id, toolId, patched as unknown as LocalPolygon);
+        const poly = geometry.point2d.regularShapeToLocalPolygon(toolId, patched.rect, patched.antiAliased);
+        actions.setClipBox(activeFrame.id, toolId, poly);
       }
     },
     clampRect: (box: LocalRect) => {
@@ -599,14 +599,10 @@ export const CLIP_OPTIONS_COMMANDS = {
             }
           }
 
-          // Always clear the old regular slot so `getRegularClipShape` (which
-          // returns the first non-empty REGULAR_CLIP_SLOTS entry) doesn't keep
-          // returning the stale slot. Without this, switching rect→ellipse
-          // leaves clipBoxes['rect'] populated and the overlay keeps rendering
-          // the old rectangular selection instead of the new elliptical one.
-          if (activeFrame.clipBoxes[oldSlot]) {
-            actions.setClipBox(activeFrame.id, oldSlot, null);
-          }
+          // NOTE: Old slot is intentionally NOT cleared. `getRegularClipShape`
+          // resolves via `frame.latestClipTool`, so inactive slots are never
+          // read. Keeping data allows round-trip (rect→ellipse→rect preserves
+          // the original rect selection), matching lasso/wand behaviour.
         }
       }
     }

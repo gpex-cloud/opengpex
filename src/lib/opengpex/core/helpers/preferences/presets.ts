@@ -104,27 +104,30 @@ export const RESTORE_TIMEOUT_MS = 8000;
 
 
 /** -----------------------------------------------------------------*/
-/** Clip / Selection Tool Settings ----------------------------------*/
+/** Interaction Settings --------------------------------------------*/
 /** -----------------------------------------------------------------*/
 
 /**
- * Whether switching between regular clip tools (rect ↔ ellipse) inherits
- * the bounding box from the previous tool.
+ * Static click threshold (canvas-space pixels).
  *
- * - `true`  (default): rect→ellipse copies the rect's bounds into the
- *   ellipse slot (same area, different shape). Good for "crop mode" UX
- *   where the user adjusts a persistent region and wants to preview
- *   different shapes without redrawing.
+ * Below this distance, a pointer-down→up sequence is treated as a "click"
+ * rather than a "drag". Affects all TransformHandler-based interactions
+ * (layer move/resize, selection move, Re-Canvas resize, etc.).
  *
- * - `false`: each tool maintains its own independent slot. Switching
- *   tools starts from an empty selection (Photoshop-style marquee
- *   behavior). The user must draw a fresh selection after switching.
+ * Industry reference:
+ *   - Photoshop: ~0px (any movement = drag)
+ *   - Figma: ~2px
+ *   - Chrome drag API: 4px (Windows) / 10px (macOS)
  *
- * Future: wire this into Preferences UI so users can choose their
- * preferred workflow.
+ * Note: Selection CREATION is not affected by this threshold because the
+ * creation handler's `onUpdate` fires on every pointermove (producing a
+ * live-updating rect). The threshold only determines whether the result is
+ * COMMITTED (drag) or DISCARDED (click) at pointer-up. For create-type
+ * handlers, even a 1px drag produces a committed selection because their
+ * gesture rules don't discard on static — they only use `isStatic` for
+ * "click to deselect" behavior on EXISTING selections.
  */
-export const CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS = true;
-
+export const STATIC_CLICK_THRESHOLD: number = 2;
 
 /** -----------------------------------------------------------------*/
 /** Snap / Smart Guides Settings ------------------------------------*/

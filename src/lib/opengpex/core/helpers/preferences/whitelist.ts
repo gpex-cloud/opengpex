@@ -95,16 +95,6 @@ export const PRESET_MANIFEST: PresetManifestEntry[] = [
   // ─── Future examples (uncomment when ready to expose) ────────────────────
   //
   // {
-  //   key: 'CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS',
-  //   group: 'Selection',
-  //   groupIcon: 'Scissors',
-  //   label: 'Inherit Bounds on Tool Switch',
-  //   description: 'When switching between Rect/Ellipse, inherit the current selection bounds.',
-  //   control: 'switch',
-  //   order: 0,
-  // },
-  //
-  // {
   //   key: 'VIEWPORT_FIT_PADDING',
   //   group: 'Navigation',
   //   groupIcon: 'Mouse',

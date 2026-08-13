@@ -20,6 +20,7 @@
 'use client';
 
 import { asLocalShape, EditorContextValue, EditorCommand, Layer } from '@opengpex/editor/core/types';
+import { getDefaultCanvasCropBox } from '@opengpex/editor/core/helpers/selection';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
 import * as P from '@opengpex/editor/core/advanced/protocols';
@@ -66,12 +67,7 @@ export const FrameResizeCommands = {
         layers: { byId: nextById, order: layers.order },
         camera: newCamera,
         clipBoxes: {},
-        canvasCropBox: asLocalShape({
-          x: newCanvas.w * 0.25,
-          y: newCanvas.h * 0.25,
-          w: newCanvas.w * 0.5,
-          h: newCanvas.h * 0.5
-        })
+        canvasCropBox: getDefaultCanvasCropBox(newCanvas)
       });
     }
   } as EditorCommand<void, void>,
@@ -117,7 +113,7 @@ export const FrameResizeCommands = {
         canvas: targetDim,
         camera: newCamera,
         clipBoxes: {},
-        canvasCropBox: asLocalShape({ x: targetDim.w * 0.25, y: targetDim.h * 0.25, w: targetDim.w * 0.5, h: targetDim.h * 0.5 }),
+        canvasCropBox: getDefaultCanvasCropBox(targetDim),
         ...(dpi ? { dpi } : {})
       });
 
@@ -219,7 +215,7 @@ export const FrameResizeCommands = {
         canvas: targetDim,
         camera: newCamera,
         clipBoxes: {},
-        canvasCropBox: asLocalShape({ x: newW * 0.25, y: newH * 0.25, w: newW * 0.5, h: newH * 0.5 }),
+        canvasCropBox: getDefaultCanvasCropBox({ w: newW, h: newH }),
         ...(dpi ? { dpi } : {})
       });
 

@@ -62,6 +62,7 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
   let startPolygon: LocalPolygon | null = null;
   let initialRect: LocalRect = asLocalRect({ x: 0, y: 0, w: 0, h: 0 });
   let hasPeeled = false;
+  let labelActivated = false; // UI-only: tracks whether clipMoveStart transient has been set
 
   return createTransformHandler({
     id: 'clip-selection-move',
@@ -117,6 +118,7 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
     getInitialState: (e: InteractionEvent) => {
       const box = getClipBox(e.activeFrame);
       hasPeeled = false;
+      labelActivated = false;
       activeTool = (e.activeFrame.latestClipTool as ClipTool) || 'rect';
 
       if (!box) {
@@ -129,8 +131,8 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       startPolygon = box;
       initialRect = { ...box.rect };
 
-      // Store drag start position for the move-delta label
-      e.actions.fast.setTransient('clipMoveStart', { x: initialRect.x, y: initialRect.y });
+      // NOTE: clipMoveStart is deferred to onUpdate (≥1px threshold) to avoid
+      // flashing the delta label on micro-movements / static clicks.
 
       return initialRect;
     },
@@ -141,6 +143,16 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
 
     onUpdate: (e: InteractionEvent, newRect: LocalRect, tx, context) => {
       const frame = e.activeFrame;
+
+      // ─── Delta label: show only after ≥1px real displacement ──────────
+      if (!labelActivated) {
+        const dx = Math.abs(newRect.x - initialRect.x);
+        const dy = Math.abs(newRect.y - initialRect.y);
+        if (dx >= 1 || dy >= 1) {
+          labelActivated = true;
+          e.actions.fast.setTransient('clipMoveStart', { x: initialRect.x, y: initialRect.y });
+        }
+      }
 
       // ─── Peel mode: trigger peel on threshold ─────────────────────────
       if (context.intent.sub === 'peel' && ((e.nativeEvent as MouseEvent).metaKey || (e.nativeEvent as MouseEvent).ctrlKey)) {
@@ -197,25 +209,23 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       }
     },
 
-    // ── Declarative Gesture Rules ──
-    gestures: [
-      {
-        name: 'static-click-clear-non-meta',
-        match: (ctx) => ctx.isStatic
-                     && ctx.intent.category === 'move'
-                     && !ctx.endModifiers.meta
-                     && !ctx.endModifiers.ctrl,
-        action: (e) => {
-          e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
-        }
-      }
-    ],
+    // ── Gesture rules (pre-end interceptors) ──
+    gestures: [{
+      name: 'static-click-clear',
+      match: (ctx) => !ctx.hasMoved
+                   && ctx.intent.category === 'move'
+                   && !ctx.endModifiers.meta
+                   && !ctx.endModifiers.ctrl,
+      action: (e) => {
+        // Static click inside selection → clear selection (Photoshop behavior)
+        e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
+      },
+    }],
 
-    // onEnd: cleanup only (gesture detection moved to gestures[] above)
-    onEnd: (e, _tx, _ctx) => {
-      // Clear move-delta transient (hides the delta label)
+    // onEnd ALWAYS executes (framework guarantee). Used for resource cleanup only.
+    onEnd: (e) => {
       e.actions.fast.setTransient('clipMoveStart', null);
       hasPeeled = false;
-    }
+    },
   });
 };

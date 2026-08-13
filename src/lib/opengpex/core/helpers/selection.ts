@@ -17,7 +17,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import type { Frame, LocalPolygon } from '@opengpex/editor/core/types';
+import type { Frame, LocalPolygon, LocalShape, Dimensions } from '@opengpex/editor/core/types';
+import { asLocalShape } from '@opengpex/editor/core/types';
 
 /**
  * getRegularClipShape — convenience wrapper over `getClipBox` that returns
@@ -62,4 +63,71 @@ export function getClipBox(frame: Frame): LocalPolygon | null {
 
   // LocalPolygon — trust that it has valid points
   return entry;
+}
+
+// ─── Re-Canvas Default CropBox ──────────────────────────────────────────────────
+
+/**
+ * Re-Canvas default scale factor relative to canvas dimensions.
+ * 1.1 = 110% of canvas (extends 10% beyond one or more edges).
+ */
+const RE_CANVAS_DEFAULT_SCALE = 1.1;
+
+/**
+ * Alignment anchor for the default Re-Canvas crop box.
+ *
+ * Determines where the original canvas sits within the enlarged crop box:
+ *   - `tl` — top-left: expansion goes right and down
+ *   - `tr` — top-right: expansion goes left and down
+ *   - `bl` — bottom-left: expansion goes right and up (DEFAULT)
+ *   - `br` — bottom-right: expansion goes left and up
+ *   - `ct` — center: expansion is equal on all sides
+ */
+export type CropBoxAnchor = 'tl' | 'tr' | 'bl' | 'br' | 'ct';
+
+/**
+ * getDefaultCanvasCropBox — computes the default Re-Canvas crop box for a
+ * given canvas dimension.
+ *
+ * The crop box is sized to `RE_CANVAS_DEFAULT_SCALE` (currently 1.1×) of the
+ * canvas dimensions, giving the user immediate room to expand the canvas
+ * outward without first resizing the selection.
+ *
+ * @param dim - Canvas dimensions `{ w, h }`
+ * @param anchor - Alignment anchor (default: `'bl'` — bottom-left)
+ * @returns A `LocalShape` representing the default Re-Canvas crop box.
+ */
+export function getDefaultCanvasCropBox(dim: Dimensions, anchor: CropBoxAnchor = 'bl'): LocalShape {
+  const scale = RE_CANVAS_DEFAULT_SCALE;
+  const newW = dim.w * scale;
+  const newH = dim.h * scale;
+
+  let x: number;
+  let y: number;
+
+  switch (anchor) {
+    case 'tl': // original canvas top-left = crop box top-left
+      x = 0;
+      y = 0;
+      break;
+    case 'tr': // original canvas top-right = crop box top-right
+      x = dim.w - newW;
+      y = 0;
+      break;
+    case 'bl': // original canvas bottom-left = crop box bottom-left
+      x = 0;
+      y = dim.h - newH;
+      break;
+    case 'br': // original canvas bottom-right = crop box bottom-right
+      x = dim.w - newW;
+      y = dim.h - newH;
+      break;
+    case 'ct': // centered
+    default:
+      x = (dim.w - newW) / 2;
+      y = (dim.h - newH) / 2;
+      break;
+  }
+
+  return asLocalShape({ x, y, w: newW, h: newH });
 }

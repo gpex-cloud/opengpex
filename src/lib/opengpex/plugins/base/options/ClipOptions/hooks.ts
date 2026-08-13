@@ -36,7 +36,7 @@ import type { ClipOptionsCommandsMap, ClipOptionsSignalsMap } from './commands.d
  */
 export const useClipOptionsCommands = () => {
   const { activeFrame, activeLayer } = useEditorState();
-  const { actions } = useEditorServices();
+  const { actions, geometry } = useEditorServices();
 
   const {
     toggleModeCmd,
@@ -138,7 +138,7 @@ export const useClipOptionsCommands = () => {
 
       // Helpers (plain functions — non-command logic)
       updateClipBox: (payload: { x?: number; y?: number; w?: number; h?: number }) => {
-        const target = getActiveTarget({ activeFrame, actions }, isReCanvas);
+        const target = getActiveTarget({ activeFrame, actions, geometry }, isReCanvas);
         if (!target) return;
         const nextBox = asLocalRect({ ...target.box, ...payload });
         const finalBox = target.clampRect(nextBox);
@@ -174,6 +174,7 @@ export const useClipOptionsCommands = () => {
     };
   }, [
     actions,
+    geometry,
     activeFrame,
     reCanvasActiveSignal,
     clipFeatherValueSignal,

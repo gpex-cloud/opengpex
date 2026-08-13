@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.49
+
+- Interaction: **fixed critical mis-detection** where micro-movements during click were misread as drag — click threshold tightened for precise control; move-delta indicator no longer flashes on trivial movements
+- Selection: Re-Canvas now starts at 110% of the canvas size for easier expansion; ellipse handles always visible; tool switching preserves previous selection for quick round-trip editing
+
+---
+
 ## v1.0.0-beta.48
 
 - Interaction: redesigned transform gesture system with structured intents and declarative rules; added async handler for click-to-compute tools; pointer metadata (pressure, tilt, device type) now available in events; transaction state machine with lifecycle guards; Esc key gesture cancellation

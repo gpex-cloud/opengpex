@@ -20,6 +20,7 @@
 'use client';
 
 import { EditorCommand, EditorContextValue, asLocalShape, Layer } from '@opengpex/editor/core/types';
+import { getDefaultCanvasCropBox } from '@opengpex/editor/core/helpers/selection';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
@@ -151,12 +152,7 @@ export const FrameRevertCommand = {
           canvas: dimension,
           camera: newCamera,
           clipBoxes: {},
-          canvasCropBox: asLocalShape({
-            x: dimension.w * 0.25,
-            y: dimension.h * 0.25,
-            w: dimension.w * 0.5,
-            h: dimension.h * 0.5,
-          }),
+          canvasCropBox: getDefaultCanvasCropBox(dimension),
           layers: {
             byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])),
             order: expandedLayers.map(l => l.id),
@@ -245,12 +241,7 @@ export const FrameRevertCommand = {
         canvas: dimension,
         camera: newCamera,
         clipBoxes: {},
-        canvasCropBox: asLocalShape({
-          x: dimension.w * 0.25,
-          y: dimension.h * 0.25,
-          w: dimension.w * 0.5,
-          h: dimension.h * 0.5,
-        }),
+        canvasCropBox: getDefaultCanvasCropBox(dimension),
         layers: { byId: nextById, order: nextOrder },
         activeLayerId: refreshedLayers[0]?.id,
       });

@@ -118,10 +118,13 @@
   box-shadow: none !important;
 }
 
-/* Themed text-selection inside the bubble — soft accent that works on
-   both light (`--bg-panel: #fff`) and dark (`#2b2b2b`) backgrounds. */
+/* Themed text-selection inside the bubble — visible accent that works on
+   both light (`--bg-panel: #fff`) and dark (`#2b2b2b`) backgrounds.
+   Opacity raised to 0.45 (from 0.25) and text forced white so the
+   highlight remains legible against dark input backgrounds (e.g.
+   ComboInput's `dark:bg-zinc-950`). */
 .popover-bubble ::selection {
-  background-color: rgba(99, 102, 241, 0.25); /* indigo-500/25 */
-  color: inherit;
+  background-color: rgba(99, 102, 241, 0.45); /* indigo-500/45 */
+  color: #fff;
 }
 

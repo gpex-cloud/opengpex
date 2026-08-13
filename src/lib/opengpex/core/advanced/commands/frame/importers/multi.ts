@@ -23,6 +23,7 @@
 'use client';
 
 import { asLocalShape, Layer, EditorContextValue } from '@opengpex/editor/core/types';
+import { getDefaultCanvasCropBox } from '@opengpex/editor/core/helpers/selection';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
@@ -138,7 +139,7 @@ async function importMultiPageTiff(
     layers: { byId: Object.fromEntries(expandedPageLayers.map(l => [l.id, l])), order: expandedPageLayers.map(l => l.id) },
     activeLayerId: pageLayers[0].id,
     camera: tiffCamera,
-    canvasCropBox: asLocalShape({ x: dimension.w * 0.25, y: dimension.h * 0.25, w: dimension.w * 0.5, h: dimension.h * 0.5 }),
+    canvasCropBox: getDefaultCanvasCropBox(dimension),
     assetId: pageAssets[0].assetId,
   });
 
@@ -263,7 +264,7 @@ async function importAnimatedGif(
     dimension,
     { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right },
   );
-  const defaultCanvasCropBox = asLocalShape({ x: dimension.w * 0.25, y: dimension.h * 0.25, w: dimension.w * 0.5, h: dimension.h * 0.5 });
+  const defaultCanvasCropBox = getDefaultCanvasCropBox(dimension);
 
   const frameName = file.name.replace(/\.[^.]+$/, '');
   const frame = LayerFactory.getNewFrame({

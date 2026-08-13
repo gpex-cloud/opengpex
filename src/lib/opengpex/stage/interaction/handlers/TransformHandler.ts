@@ -75,6 +75,12 @@ export interface TransformEndContext extends TransformContext {
   isStatic: boolean;
   /** Framework pre-computed: is this a double-click (isStatic && detail===2)? */
   isDoubleClick: boolean;
+  /** Framework pre-computed: did onUpdate produce ≥1px integer displacement? (deterministic) */
+  hasMoved: boolean;
+  /** Whether a gesture rule matched and executed before onEnd */
+  gestureMatched: boolean;
+  /** Name of the matched gesture rule (for debug), or null if none matched */
+  matchedGesture: string | null;
   /** Modifier snapshot at gesture end */
   endModifiers: ModifierState;
   /** Total displacement (canvas space) */
@@ -139,8 +145,8 @@ export interface TransformHandlerConfig<T = LocalRect> {
   ) => void;
 
   /**
-   * Called when the interaction finishes (only if no gesture rule matched).
-   * Can be async.
+   * Called when the interaction finishes. ALWAYS executes regardless of gesture matching.
+   * Check `context.gestureMatched` to branch if needed. Can be async.
    */
   onEnd?: (e: InteractionEvent, tx: InteractionTransaction, context: TransformEndContext) => void | Promise<void>;
 
@@ -201,6 +207,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
   let startCanvas = { x: 0, y: 0 };
   let tx: InteractionTransaction | null = null;
   let thresholdCrossed = false; // For 'create' category: has the drag threshold been crossed?
+  let _hasMoved = false; // Tracks whether onUpdate produced ≥1px integer displacement
 
   const opState = { lastThrottleTime: 0 };
 
@@ -233,6 +240,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
       // For 'create' category, start with threshold gate
       thresholdCrossed = intent.category !== 'create';
 
+      _hasMoved = false;
       startState = { ...config.getInitialState(e, intent) };
       startCanvas = { x: e.point.canvas.x, y: e.point.canvas.y };
 
@@ -395,6 +403,13 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
       }
 
       config.onUpdate(e, nextRect, tx, { ...currentContext, dx, dy });
+
+      // Track hasMoved: set once onUpdate produces ≥1px integer displacement
+      if (!_hasMoved) {
+        const adx = Math.abs(nextRect.x - startState.x);
+        const ady = Math.abs(nextRect.y - startState.y);
+        if (adx >= 1 || ady >= 1) _hasMoved = true;
+      }
     },
 
     onEnd: async (e) => {
@@ -410,14 +425,16 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
         ...currentContext,
         isStatic,
         isDoubleClick,
+        hasMoved: _hasMoved,
+        gestureMatched: false,
+        matchedGesture: null,
         endModifiers,
         totalDelta: { x: dx, y: dy },
         duration: Date.now() - currentContext.startTime,
       };
 
       try {
-        // 1. Gesture matching (in declaration order, first wins)
-        let gestureHandled = false;
+        // 1. Gesture matching (pre-end interceptors, in declaration order, first wins)
         if (config.gestures) {
           for (const rule of config.gestures) {
             if (rule.match(endContext)) {
@@ -426,17 +443,17 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
               } else {
                 await rule.action(e, tx, endContext);
               }
-              gestureHandled = true;
+              endContext.gestureMatched = true;
+              endContext.matchedGesture = rule.name;
               break;
             }
           }
         }
 
-        // 2. If no gesture matched, call onEnd
-        if (!gestureHandled) {
-          if (config.onEnd) {
-            await config.onEnd(e, tx, endContext);
-          }
+        // 2. onEnd ALWAYS executes (lifecycle symmetry: onStart↔onEnd)
+        // Consumers can check ctx.gestureMatched to branch if needed.
+        if (config.onEnd) {
+          await config.onEnd(e, tx, endContext);
         }
       } finally {
         // 3. Generation check: if a new gesture started during async, don't commit stale tx

@@ -42,7 +42,7 @@ import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
-import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import { getClipBox, getDefaultCanvasCropBox } from '@opengpex/editor/core/helpers/selection';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 // Strategy imports
@@ -216,12 +216,7 @@ export const FrameCreateCommands = {
           layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
           activeLayerId: baseLayer.id,
           camera: initialCamera,
-          canvasCropBox: asLocalShape({
-            x: canvasDim.w * 0.25,
-            y: canvasDim.h * 0.25,
-            w: canvasDim.w * 0.5,
-            h: canvasDim.h * 0.5,
-          }),
+          canvasCropBox: getDefaultCanvasCropBox(canvasDim),
           assetId: highResId,
           thumbnail: {
             src: thumbnailUrl,

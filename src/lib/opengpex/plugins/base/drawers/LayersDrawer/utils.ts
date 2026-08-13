@@ -48,11 +48,8 @@ export function commitRefocusToOverlay(
     ctx.actions.updateFrame(frame.id, { latestClipTool: target.clipToolId });
 
     if (target.regular) {
-        // 2a. Clear the opposite regular slot to prevent stale rendering
-        const oppositeSlot = target.clipToolId === 'ellipse' ? 'rect' : 'ellipse';
-        if (frame.clipBoxes[oppositeSlot]) {
-            ctx.actions.setClipBox(frame.id, oppositeSlot, null);
-        }
+        // NOTE: Opposite regular slot is NOT cleared. `getRegularClipShape`
+        // resolves via `frame.latestClipTool`, so inactive slots are harmless.
 
         // 3a. Write regular shape as LocalPolygon (rect = 4 corners, ellipse = 4 corners)
         const rect = asLocalRect({ x: target.canvasX, y: target.canvasY, w: target.w, h: target.h });
