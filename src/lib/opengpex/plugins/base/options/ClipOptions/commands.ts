@@ -788,7 +788,7 @@ export const CLIP_OPTIONS_COMMANDS = {
     category: 'Selection',
     undoable: true,
     shortcuts: [{ key: 'i', meta: true, shift: true }, { key: 'i', ctrl: true, shift: true }],
-    execute: (ctx: EditorContextValue) => {
+    execute: async (ctx: EditorContextValue) => {
       // ─── Guards ────────────────────────────────────────────────────────
       if (ctx.state.interaction.interactionMode !== 'clip') return;
       const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
@@ -813,14 +813,19 @@ export const CLIP_OPTIONS_COMMANDS = {
         ? geo.shapeToPoint2D(localShape)
         : clipBox.rings as unknown as Point2D[][];
 
-      // 2. Core transform: pure inversion logic
-      const result = geo.invertRings(rings, canvasW, canvasH);
+      // 2. Compute boolean difference via Worker (canvas rect - selection)
+      const response = await clipComputeClient.runInvert({
+        type: 'invert',
+        rings,
+        canvasW,
+        canvasH,
+      });
 
       // 3. Rebox: Point2D[][] → best container, then write
-      if (result === null) {
+      if (response.rings === null) {
         ctx.actions.setClipBox(frame.id, tool, null);
       } else {
-        const container = geo.point2dToLocalPolygon(result, antiAliased);
+        const container = geo.point2dToLocalPolygon(response.rings as Point2D[][], antiAliased);
         ctx.actions.setClipBox(frame.id, tool, container);
       }
     }

@@ -37,16 +37,15 @@
 
 'use client';
 
-import { EditorCommand, EditorContextValue, Frame, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
+import { EditorCommand, EditorContextValue, Frame, LocalShape } from '@opengpex/editor/core/types';
 import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 
-import { presets } from '@opengpex/editor/core/helpers/preferences';
-const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
-import { getClipBox, getDefaultCanvasCropBox } from '@opengpex/editor/core/helpers/selection';
+import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import * as P from '@opengpex/editor/core/advanced/protocols';
+import type { DecodeResult, ImageMetadata } from '@opengpex/editor/core/files/types';
 
 // Strategy imports
-import { resolveAndDecode, importSingleImage, importMultiSubImage } from './importers';
+import { addNewFrame, importSingleImage } from './importers';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Shared helper: compute branch naming (seqNum + fullName)
@@ -78,22 +77,7 @@ export const FrameCreateCommands = {
     name: 'Initialize Trunk Frame',
     execute: async (ctx: EditorContextValue, payload: { source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }): Promise<string> => {
       const { source, switchFrame = true, extra } = payload;
-
-      // 1. Resolve + vector dialog + decode (single entry point)
-      const result = await resolveAndDecode(ctx, source);
-      if (!result) return ''; // User cancelled or decode failed
-
-      const { decoded, file, sourceType, chosenDpi } = result;
-      const opts = { switchFrame, dpi: chosenDpi, extra };
-
-      // 2. Route: multi-sub-image or single image
-      if (decoded.subImages.length > 1) {
-        const multiResult = await importMultiSubImage(ctx, decoded, file, sourceType, opts);
-        if (multiResult !== null) return multiResult; // Handled (or cancelled with '')
-        // null = fall through to single image (TIFF "First Page Only" mode)
-      }
-
-      return importSingleImage(ctx, decoded, file, sourceType, opts);
+      return addNewFrame(ctx, source, { switchFrame, extra });
     },
   } as EditorCommand<{ source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }, Promise<string>>,
 
@@ -112,34 +96,17 @@ export const FrameCreateCommands = {
       const { source, extra } = payload;
 
       try {
-        // Resolve + decode (reuses the shared pipeline)
-        const result = await resolveAndDecode(ctx, source);
-        if (!result) return; // User cancelled or decode failed
-
-        // Compute branch naming
         const { seqNum, fullName } = computeBranchNaming(state, activeFrame);
 
-        const { decoded, file, sourceType, chosenDpi } = result;
-
-        // Reuse importSingleImage with branch options
-        const frameId = await importSingleImage(ctx, decoded, file, sourceType, {
+        const frameId = await addNewFrame(ctx, source, {
           switchFrame: false,
-          dpi: chosenDpi,
           extra,
           parentId: activeFrame.id,
           seqNum,
           nameOverride: fullName,
         });
 
-        // Emit thumbnail-ready event for UI animation
-        const createdFrame = state.frames.byId[frameId];
-        if (createdFrame?.thumbnail?.src) {
-          window.dispatchEvent(new CustomEvent('editor:branch-thumbnail-ready', {
-            detail: { thumbnailUrl: createdFrame.thumbnail.src, frameId },
-          }));
-        }
-
-        return frameId;
+        return frameId || undefined;
       } catch (err) {
         console.error('[FrameService] Failed to create branch from file:', err);
         return;
@@ -147,12 +114,27 @@ export const FrameCreateCommands = {
     },
   } as EditorCommand<{ source: File; extra?: Record<string, unknown> }, Promise<string | undefined>>,
 
+  /**
+   * branchFromSelection — Create a branch frame from the active selection.
+   *
+   * Design: Routes through `importSingleImage` (same path as trunk/branchFromFile)
+   * to ensure complete metadata inheritance. This guarantees:
+   *   - raw.icc profile is preserved (MetadataPanel shows ICC badge)
+   *   - camera/capture/dates EXIF fields are inherited
+   *   - Color pipeline (colorSpace/trc/bitDepth) is correctly resolved via strategy
+   *   - Layer metadata structure is identical to file-imported frames
+   *
+   * The key difference from file-based import is the "source" — instead of a decoded
+   * file, we composite the active frame's visible layers within the selection ROI,
+   * then wrap the result as a synthetic DecodeResult with metadata inherited from
+   * the parent frame's base layer.
+   */
   branchFromSelection: {
     id: P.ADV_FRAME_BRANCH_CROP,
     name: 'Create Branch from Selection',
     undoable: true,
     execute: async (ctx: EditorContextValue): Promise<string | undefined> => {
-      const { activeFrame, actions, state, geometry, pixels } = ctx;
+      const { activeFrame, actions, state, pixels } = ctx;
       if (!activeFrame) return;
 
       const box = getClipBox(activeFrame);
@@ -163,72 +145,62 @@ export const FrameCreateCommands = {
       const cropRect = box.rect;
 
       try {
-        // Convert the LocalPolygon selection to a LocalShape for the composite ROI.
-        // polygonToShape is the canonical serialization entry point: it recognizes
-        // rect/circle shapes, writes smooth M/L/Z pathData, and preserves the
-        // antiAliased flag so shapeToPath2D can apply Bresenham stair-stepping
-        // at render time — ensuring branch respects the AA setting.
+        // ── Step 1: Composite the selection region ───────────────────────────────
         const branchShape: LocalShape = polygonToShape(box);
-
-        // ── Composite via compositeFrame (selection as ROI) ─────────────────────
         const branchResult = await pixels.render.compositeFrame(activeFrame, branchShape);
+        const highResBlob = await branchResult.toBlob();
 
-        const { id: highResId, url: highResUrl } = await branchResult.toAsset();
-
-        const thumbBlob = await (await pixels.image.resample(highResUrl, { maxSize: 256 })).toBlob('image/webp');
-        const { id: thumbId, url: thumbnailUrl } = await ctx.assets.register(thumbBlob);
+        // ── Step 2: Construct synthetic DecodeResult with inherited metadata ─────
+        // Spread parent's imageMetadata to inherit raw.icc / camera / capture / dates,
+        // then override composite-specific fields (format, dimensions, bitDepth).
+        // importSingleImage will use this metadata for:
+        //   - Layer.metadata.imageMetadata (drives MetadataPanel display)
+        //   - Color pipeline strategy resolution (colorSpace → Frame.colorSpace)
+        //   - DPI / bitDepth detection
+        const parentMainLayer = activeFrame.layers.byId[activeFrame.layers.order[0]];
+        const parentImageMetadata = parentMainLayer?.metadata?.imageMetadata as ImageMetadata | undefined;
 
         const canvasDim = {
           w: Math.round(cropRect.w),
           h: Math.round(cropRect.h),
         };
 
-        const { insets } = state.ui.theme.config;
-
-        const initialCamera = geometry.camera.getFitCamera(
-          state.ui.viewportDim,
-          canvasDim,
-          { maxScale: 1, padding: VIEWPORT_FIT_PADDING, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right },
-        );
-
-        // Compute branch naming
-        const { seqNum, fullName } = computeBranchNaming(state, activeFrame);
-
-        // Construct branch artboard (using Domain Factory)
-        const baseLayer = ctx.layers.getNewLayer({
-          name: 'Branch Base',
-          src: highResUrl,
-          assetId: highResId,
-          locked: true,
-          bounding: canvasDim,
-          visibleShape: asLocalShape({ x: 0, y: 0, ...canvasDim }),
-          ancestor: true,
-        });
-
-        const expandedLayers = ctx.layers.expandLayers([baseLayer]);
-
-        const branch = ctx.layers.getNewFrame({
-          id: `f-${Date.now().toString(36)}-branch`,
-          parentId: activeFrame.id,
-          name: fullName,
-          seqNum: seqNum,
-          canvas: canvasDim,
-          layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
-          activeLayerId: baseLayer.id,
-          camera: initialCamera,
-          canvasCropBox: getDefaultCanvasCropBox(canvasDim),
-          assetId: highResId,
-          thumbnail: {
-            src: thumbnailUrl,
-            assetId: thumbId,
+        const syntheticDecodeResult: DecodeResult = {
+          dimensions: canvasDim,
+          metadata: {
+            ...(parentImageMetadata || {} as ImageMetadata),
+            sourceFormat: 'png',
+            sourceFileName: undefined,
+            sourceFileSize: highResBlob.size,
+            width: canvasDim.w,
+            height: canvasDim.h,
+            dpi: activeFrame.dpi || parentImageMetadata?.dpi || 72,
+            dpiSource: parentImageMetadata?.dpiSource || 'default',
+            colorSpace: (activeFrame.colorSpace || 'srgb') as ImageMetadata['colorSpace'],
+            bitDepth: 8, // composite output is always 8-bit (Canvas2D limitation)
+            hasAlpha: true,
           },
+          subImages: [{ displayBlob: highResBlob, width: canvasDim.w, height: canvasDim.h, index: 0 }],
+          sourceBlob: undefined, // No 16-bit source (composite is 8-bit; see WebGPU roadmap)
+        };
+
+        const { seqNum, fullName } = computeBranchNaming(state, activeFrame);
+        const syntheticFile = new File([highResBlob], `${fullName}.png`, { type: 'image/png' });
+
+        // ── Step 3: Delegate to importSingleImage (unified frame creation) ───────
+        const { frameId, thumbnailUrl } = await importSingleImage(ctx, syntheticDecodeResult, syntheticFile, 'local', {
+          switchFrame: false,
+          parentId: activeFrame.id,
+          seqNum,
+          nameOverride: fullName,
         });
 
-        ctx.layers.addFrame(branch, false);
-
-        window.dispatchEvent(new CustomEvent('editor:branch-thumbnail-ready', {
-          detail: { thumbnailUrl, frameId: branch.id },
-        }));
+        // ── Step 4: Emit thumbnail-ready event for fly-in animation ──────────────
+        if (thumbnailUrl) {
+          window.dispatchEvent(new CustomEvent('editor:branch-thumbnail-ready', {
+            detail: { thumbnailUrl, frameId },
+          }));
+        }
 
         return thumbnailUrl;
       } catch (err) {

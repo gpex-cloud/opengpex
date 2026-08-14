@@ -15,6 +15,7 @@
  * Manages the lifecycle and communication for:
  *   - alpha.worker.ts  (Select from Alpha)
  *   - offset.worker.ts (Selection expand/contract)
+ *   - invert.worker.ts (Selection invert via polygon boolean difference)
  *
  * This client is owned by ClipOptions and does NOT import from ClipOverlay,
  * maintaining proper plugin decoupling.
@@ -23,6 +24,7 @@
 import type {
   AlphaRequest, AlphaResponse,
   OffsetRequest, OffsetResponse,
+  InvertRequest, InvertResponse,
 } from './protocol';
 
 let nextReqId = 1;
@@ -30,6 +32,7 @@ let nextReqId = 1;
 class ClipComputeClient {
   private alphaWorker: Worker | null = null;
   private offsetWorker: Worker | null = null;
+  private invertWorker: Worker | null = null;
 
   // ─── Alpha Worker ───────────────────────────────────────────────────────────
 
@@ -101,12 +104,50 @@ class ClipComputeClient {
     });
   }
 
+  // ─── Invert Worker ──────────────────────────────────────────────────────────
+
+  private getInvertWorker(): Worker {
+    if (this.invertWorker) return this.invertWorker;
+    // NOTE: Classic worker (no `type: 'module'`) because invert.worker.ts
+    // uses importScripts() to load polygon-clipping.js at runtime.
+    // importScripts is not available in module workers.
+    this.invertWorker = new Worker(
+      new URL('./invert.worker.ts', import.meta.url),
+    );
+    return this.invertWorker;
+  }
+
+  /**
+   * Inverts a selection using polygon boolean difference (canvas - selection).
+   * Produces clean geometry without the "日"-shape artifact of simple ring prepend.
+   */
+  runInvert(
+    params: Omit<InvertRequest, 'reqId'>
+  ): Promise<InvertResponse> {
+    const reqId = nextReqId++;
+    const worker = this.getInvertWorker();
+
+    return new Promise<InvertResponse>((resolve) => {
+      const handler = (ev: MessageEvent<InvertResponse>) => {
+        if (ev.data.reqId === reqId) {
+          worker.removeEventListener('message', handler);
+          resolve(ev.data);
+        }
+      };
+      worker.addEventListener('message', handler);
+
+      const msg: InvertRequest = { ...params, reqId };
+      worker.postMessage(msg);
+    });
+  }
+
   // ─── Lifecycle ──────────────────────────────────────────────────────────────
 
   /** Terminate all workers. Idempotent. */
   dispose(): void {
     if (this.alphaWorker) { this.alphaWorker.terminate(); this.alphaWorker = null; }
     if (this.offsetWorker) { this.offsetWorker.terminate(); this.offsetWorker = null; }
+    if (this.invertWorker) { this.invertWorker.terminate(); this.invertWorker = null; }
   }
 }
 

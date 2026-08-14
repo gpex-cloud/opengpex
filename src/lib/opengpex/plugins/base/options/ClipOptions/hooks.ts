@@ -140,7 +140,46 @@ export const useClipOptionsCommands = () => {
       updateClipBox: (payload: { x?: number; y?: number; w?: number; h?: number }) => {
         const target = getActiveTarget({ activeFrame, actions, geometry }, isReCanvas);
         if (!target) return;
-        const nextBox = asLocalRect({ ...target.box, ...payload });
+
+        // Smart anchor for Re-Canvas: when changing w/h via numeric input, infer
+        // which edge is pinned to the canvas boundary and expand from the opposite side.
+        // Rule: if exactly one edge aligns with the canvas edge, anchor that edge;
+        // otherwise (both or neither aligned) expand symmetrically from center.
+        const adjustedPayload = { ...payload };
+        if (isReCanvas && activeFrame) {
+          const { x: bx, y: by, w: bw, h: bh } = target.box;
+          const { w: cw, h: ch } = activeFrame.canvas;
+
+          if (payload.w !== undefined && payload.w !== bw) {
+            const leftAligned = bx === 0;
+            const rightAligned = bx + bw === cw;
+            if (leftAligned && !rightAligned) {
+              // Anchor left edge — keep x (default behavior)
+            } else if (rightAligned && !leftAligned) {
+              // Anchor right edge — adjust x so right edge stays at cw
+              adjustedPayload.x = cw - payload.w;
+            } else {
+              // Both or neither aligned — expand symmetrically from center
+              adjustedPayload.x = Math.round(bx + (bw - payload.w) / 2);
+            }
+          }
+
+          if (payload.h !== undefined && payload.h !== bh) {
+            const topAligned = by === 0;
+            const bottomAligned = by + bh === ch;
+            if (topAligned && !bottomAligned) {
+              // Anchor top edge — keep y (default behavior)
+            } else if (bottomAligned && !topAligned) {
+              // Anchor bottom edge — adjust y so bottom edge stays at ch
+              adjustedPayload.y = ch - payload.h;
+            } else {
+              // Both or neither aligned — expand symmetrically from center
+              adjustedPayload.y = Math.round(by + (bh - payload.h) / 2);
+            }
+          }
+        }
+
+        const nextBox = asLocalRect({ ...target.box, ...adjustedPayload });
         const finalBox = target.clampRect(nextBox);
         target.updateShape({ rect: finalBox });
       },

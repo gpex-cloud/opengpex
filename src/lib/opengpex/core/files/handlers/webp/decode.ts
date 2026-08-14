@@ -48,8 +48,6 @@ export async function decodeWebp(
       const img = await createImageBitmap(file);
       dimensions = { w: img.width, h: img.height };
       img.close();
-      console.debug('[ColorMgmt] WebP decode: %s conversion=none, detectedCS=%s, frameCS=%s',
-        file.name, detectedCS, strategy.frameColorSpace);
       break;
     }
 
@@ -73,9 +71,6 @@ export async function decodeWebp(
       const outImageData = new ImageData(imageData.data, w, h, { colorSpace: outCS });
       outCtx.putImageData(outImageData, 0, 0);
       displayBlob = await outCanvas.convertToBlob({ type: 'image/png' });
-
-      console.debug('[ColorMgmt] WebP decode: %s matrix %s→%s',
-        file.name, detectedCS, strategy.frameColorSpace);
       break;
     }
 
@@ -100,9 +95,6 @@ export async function decodeWebp(
       clamped.set(data);
       ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
       displayBlob = await canvas.convertToBlob({ type: 'image/png' });
-
-      console.debug('[ColorMgmt] WebP decode: %s icc-engine %s→%s',
-        file.name, detectedCS, strategy.frameColorSpace);
       break;
     }
   }

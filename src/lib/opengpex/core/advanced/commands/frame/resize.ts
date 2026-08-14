@@ -34,7 +34,7 @@ export const FrameResizeCommands = {
     name: 'Resize Canvas',
     undoable: true,
     execute: (ctx: EditorContextValue): void => {
-      const { geometry, activeFrame, actions, state } = ctx;
+      const { activeFrame, actions } = ctx;
       if (!activeFrame) return;
 
       const { canvasCropBox: cropShape, canvas: oldCanvas, layers } = activeFrame;
@@ -48,24 +48,19 @@ export const FrameResizeCommands = {
         h: Math.round(cropBox.h)
       };
 
+      // Defensive snap: ensure layer cx/cy align to half-pixel grid after shift.
+      // Even-dimension layers → integer; odd-dimension layers → x.5 (center between pixels).
+      const snapHalf = (v: number) => Math.round(v * 2) / 2;
+
       const nextById: Record<string, Layer> = {};
       layers.order.forEach(id => {
         const layer = layers.byId[id];
-        nextById[id] = { ...layer, cx: layer.cx - shiftX, cy: layer.cy - shiftY };
+        nextById[id] = { ...layer, cx: snapHalf(layer.cx - shiftX), cy: snapHalf(layer.cy - shiftY) };
       });
-
-      const { insets } = state.ui.theme.config;
-
-      const newCamera = geometry.camera.getFitCamera(
-        state.ui.viewportDim,
-        newCanvas,
-        { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right }
-      );
 
       actions.updateFrame(activeFrame.id, {
         canvas: newCanvas,
         layers: { byId: nextById, order: layers.order },
-        camera: newCamera,
         clipBoxes: {},
         canvasCropBox: getDefaultCanvasCropBox(newCanvas)
       });

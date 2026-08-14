@@ -99,8 +99,10 @@ export type CropBoxAnchor = 'tl' | 'tr' | 'bl' | 'br' | 'ct';
  */
 export function getDefaultCanvasCropBox(dim: Dimensions, anchor: CropBoxAnchor = 'bl'): LocalShape {
   const scale = RE_CANVAS_DEFAULT_SCALE;
-  const newW = dim.w * scale;
-  const newH = dim.h * scale;
+  // Pixel editor invariant: crop box must have integer dimensions and position.
+  // scale (1.1) applied to arbitrary canvas sizes can produce non-integers.
+  const newW = Math.round(dim.w * scale);
+  const newH = Math.round(dim.h * scale);
 
   let x: number;
   let y: number;
@@ -124,8 +126,8 @@ export function getDefaultCanvasCropBox(dim: Dimensions, anchor: CropBoxAnchor =
       break;
     case 'ct': // centered
     default:
-      x = (dim.w - newW) / 2;
-      y = (dim.h - newH) / 2;
+      x = Math.round((dim.w - newW) / 2);
+      y = Math.round((dim.h - newH) / 2);
       break;
   }
 

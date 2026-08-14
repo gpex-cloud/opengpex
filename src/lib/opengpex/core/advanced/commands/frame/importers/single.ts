@@ -44,7 +44,7 @@ export async function importSingleImage(
   file: File,
   sourceType: 'local' | 'url',
   opts: ImportOptions,
-): Promise<string> {
+): Promise<{ frameId: string; thumbnailUrl: string }> {
   const { assets, pixels, actions, state, geometry } = ctx;
   const { switchFrame, dpi: chosenFrameDpi, extra, parentId, seqNum, nameOverride } = opts;
   const { dimensions: decodeDimensions, metadata, sourceBlob, subImages } = decoded;
@@ -125,5 +125,5 @@ export async function importSingleImage(
   });
 
   actions.addFrame(frame, switchFrame);
-  return frame.id;
+  return { frameId: frame.id, thumbnailUrl: thumbAssetUrl };
 }

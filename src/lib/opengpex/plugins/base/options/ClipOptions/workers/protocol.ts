@@ -71,3 +71,26 @@ export interface OffsetResponse {
   debug?: { ms: number };
   error?: string;
 }
+
+// ─────────────────────────── Invert Worker Protocol ─────────────────────────────
+
+/** Main thread → invert.worker */
+export interface InvertRequest {
+  reqId: number;
+  type: 'invert';
+  /** Input polygon rings (Point2D[][]) */
+  rings: { x: number; y: number }[][];
+  /** Canvas width */
+  canvasW: number;
+  /** Canvas height */
+  canvasH: number;
+}
+
+/** invert.worker → Main thread */
+export interface InvertResponse {
+  reqId: number;
+  /** Inverted rings (polygon-clipping boolean difference), or null if result is empty */
+  rings: { x: number; y: number }[][] | null;
+  debug?: { ms: number };
+  error?: string;
+}

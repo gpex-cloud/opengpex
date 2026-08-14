@@ -4,6 +4,15 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.50
+
+- Selection: added **Invert Selection** using polygon boolean ops for clean geometry; fixed magic wand expand/contract missing edge pixels
+- Re-Canvas: smart edge anchoring — numeric resize pins the aligned edge and expands from the opposite side; pixel grid rounding always applied
+- Viewport: **fix canvas edge sub-pixel artifacts** — pixel-snap artboard clip & backdrop to eliminate ghost lines during pan/zoom
+- Pixel Grid: fix ghost line residuals during panning (clearRect margin expansion)
+
+---
+
 ## v1.0.0-beta.49
 
 - Interaction: **fixed critical mis-detection** where micro-movements during click were misread as drag — click threshold tightened for precise control; move-delta indicator no longer flashes on trivial movements

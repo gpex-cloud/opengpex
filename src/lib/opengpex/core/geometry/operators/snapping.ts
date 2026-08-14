@@ -18,7 +18,7 @@
  */
 
 import { Matrix3x3 } from '../matrix';
-import { Dimensions, Frame, Layer, WorldPoint, Rect, asWorldPoint, Point2D, WorldRect, asLocalRect } from '@opengpex/editor/core/types';
+import { CameraState, Dimensions, Frame, Layer, WorldPoint, Rect, asWorldPoint, Point2D, WorldRect, asLocalRect } from '@opengpex/editor/core/types';
 import { getLayerWorldMatrix } from './transform';
 import { worldToLocalRect, localToWorldRect } from './space';
 
@@ -467,4 +467,82 @@ export function snapRectToPixel(
 
   // 3. Project the aligned local space rectangle back to the world coordinate system
   return localToWorldRect(localRectAligned, canvasDim);
+}
+
+// ─── Canvas Viewport Pixel-Snap ──────────────────────────────────────────────
+
+/**
+ * Result of pixel-snap computation for canvas viewport boundaries.
+ * Provides both physical pixel coordinates (for Canvas 2D operations)
+ * and CSS pixel coordinates (for SVG/DOM positioning).
+ */
+export interface SnappedCanvasRect {
+  /** Physical pixel coordinates (for artboardClip, Canvas ctx operations) */
+  physical: { x: number; y: number; w: number; h: number };
+  /** CSS pixel coordinates (for SVG polygon, DOM element positioning) */
+  css: { x: number; y: number; w: number; h: number };
+  /** Adjusted per-axis render scale factors (physical pixels per canvas pixel, includes DPR) */
+  renderScale: { x: number; y: number };
+}
+
+/**
+ * Computes pixel-snapped canvas boundary coordinates for viewport rendering.
+ *
+ * When the viewport zoom factor (cam.k) is a non-integer value, the canvas
+ * boundary in screen space lands at fractional pixel positions. This causes:
+ *   1. Anti-aliased clip edges (ctx.clip with sub-pixel rect) → ghost lines during pan
+ *   2. SVG polygon edges at sub-pixel positions → backdrop/content misalignment
+ *   3. Visible 1px checkerboard bleed at canvas boundaries
+ *
+ * This function snaps both the origin (top-left) and the far edge (bottom-right)
+ * of the canvas to the nearest integer physical pixel, ensuring:
+ *   - ctx.clip() boundary is at integer pixels → no anti-aliased semi-transparent edge
+ *   - SVG polygon boundary aligns with canvas clip → no checkerboard bleed
+ *   - Fill layers / images fill exactly to the integer boundary → no transparent gaps
+ *
+ * The render scale is adjusted by a tiny amount (typically < 0.01%) to accommodate
+ * the rounding. This is visually imperceptible.
+ *
+ * @param cam - Current camera state (position + zoom)
+ * @param canvas - Canvas logical dimensions (width × height in canvas pixels)
+ * @param dpr - Device pixel ratio (window.devicePixelRatio)
+ *
+ * @see docs/opengpex/plans/20260815_canvas_edge_subpixel_artifact_fix.md
+ */
+export function snapCanvasRect(
+  cam: CameraState,
+  canvas: Dimensions,
+  dpr: number,
+): SnappedCanvasRect {
+  // Snap origin and far edge independently to nearest integer physical pixel
+  const rawX = cam.x * dpr;
+  const rawY = cam.y * dpr;
+  const rawRight = (cam.x + canvas.w * cam.k) * dpr;
+  const rawBottom = (cam.y + canvas.h * cam.k) * dpr;
+
+  const snapX = Math.round(rawX);
+  const snapY = Math.round(rawY);
+  const snapRight = Math.round(rawRight);
+  const snapBottom = Math.round(rawBottom);
+
+  const snapW = snapRight - snapX;
+  const snapH = snapBottom - snapY;
+
+  // Derive CSS coordinates (may be x.5 for odd physical pixels at dpr=2, which is fine —
+  // the browser will rasterize SVG at physical pixel boundaries correctly)
+  const cssX = snapX / dpr;
+  const cssY = snapY / dpr;
+  const cssW = snapW / dpr;
+  const cssH = snapH / dpr;
+
+  // Compute adjusted render scale so that canvas-local coordinates map to
+  // snapped physical pixel dimensions exactly.
+  const renderScaleX = canvas.w > 0 ? snapW / canvas.w : dpr;
+  const renderScaleY = canvas.h > 0 ? snapH / canvas.h : dpr;
+
+  return {
+    physical: { x: snapX, y: snapY, w: snapW, h: snapH },
+    css: { x: cssX, y: cssY, w: cssW, h: cssH },
+    renderScale: { x: renderScaleX, y: renderScaleY },
+  };
 }

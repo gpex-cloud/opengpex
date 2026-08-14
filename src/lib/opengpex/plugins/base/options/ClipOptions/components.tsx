@@ -866,7 +866,8 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                   value={Math.round(cropRect.w)}
                   type="number"
                   className="w-[64px]"
-                  onChange={(val) => {
+                  onChange={() => {}}
+                  onCommit={(val) => {
                     const parsedVal = Math.max(1, Number(val));
                     const patch: { w?: number; h?: number } = {
                       w: parsedVal,
@@ -885,7 +886,8 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                   value={Math.round(cropRect.h)}
                   type="number"
                   className="w-[64px]"
-                  onChange={(val) => {
+                  onChange={() => {}}
+                  onCommit={(val) => {
                     const parsedVal = Math.max(1, Number(val));
                     const patch: { w?: number; h?: number } = {
                       h: parsedVal,

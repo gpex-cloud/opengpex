@@ -34,7 +34,7 @@ export function usePixelGridCommands() {
   const isEnabled = selfConfig?.enabled ?? true;
   const isHardEdge = selfConfig?.hardEdge ?? false;
   const zoomThreshold = selfConfig?.zoomThreshold ?? 8;
-  const gridColor = selfConfig?.color ?? 'rgba(255, 255, 255, 0.3)';
+  const gridColor = selfConfig?.color ?? 'rgba(0, 0, 0, 0.25)';
 
   return useMemo(() => ({
     isEnabled,

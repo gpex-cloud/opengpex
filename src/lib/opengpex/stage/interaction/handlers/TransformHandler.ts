@@ -310,7 +310,10 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
 
         if (constraints.alignToLayerId) {
           nextRect = InteractionMath.alignToPhysicalPixels(e, nextRect, constraints.alignToLayerId);
-        } else if (constraints.clamp) {
+        } else {
+          // Pixel editor invariant: all rect outputs must align to integer pixel grid,
+          // regardless of whether canvas clamping is active (e.g. Re-Canvas needs
+          // clamp=false to exceed canvas bounds, but still requires integer coordinates).
           nextRect = {
             ...nextRect,
             x: Math.round(nextRect.x),
@@ -391,7 +394,10 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
 
         if (constraints.alignToLayerId) {
           nextRect = InteractionMath.alignToPhysicalPixels(e, nextRect, constraints.alignToLayerId);
-        } else if (constraints.clamp) {
+        } else {
+          // Pixel editor invariant: all rect outputs must align to integer pixel grid,
+          // regardless of whether canvas clamping is active (e.g. Re-Canvas needs
+          // clamp=false to exceed canvas bounds, but still requires integer coordinates).
           nextRect = {
             ...nextRect,
             x: Math.round(nextRect.x),

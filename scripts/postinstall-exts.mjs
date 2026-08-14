@@ -159,3 +159,21 @@ if (existsSync(gifencEntry)) {
   console.warn(`  ⚠ node_modules/gifenc/dist/gifenc.esm.js not found — GIF encode unavailable`);
 }
 
+// ─── polygon-clipping (MIT) ────────────────────────────────────────────────────
+const pcEntry = resolve(ROOT, 'node_modules/polygon-clipping/dist/polygon-clipping.esm.js');
+const pcOut = resolve(JS_DEST, 'polygon-clipping.js');
+
+if (existsSync(pcEntry)) {
+  try {
+    execSync(
+      `npx esbuild "${pcEntry}" --bundle --format=iife --global-name=polygonClipping --outfile="${pcOut}" --minify --target=es2020`,
+      { cwd: ROOT, stdio: 'pipe' },
+    );
+    console.log(`  ✓ polygon-clipping.js (esbuild bundle → IIFE self.polygonClipping)`);
+  } catch (e) {
+    console.warn(`  ⚠ esbuild failed for polygon-clipping: ${e.message}`);
+  }
+} else {
+  console.warn(`  ⚠ node_modules/polygon-clipping/dist/polygon-clipping.esm.js not found — polygon boolean ops unavailable`);
+}
+

@@ -20,6 +20,7 @@
 import { Frame, CameraState, Dimensions, GeometryService, AssetService, Layer, ClipDescriptor } from '@opengpex/editor/core/types';
 import type { IRenderer } from '@opengpex/editor/core/engine/renderer';
 import type { DisplayTransformConfig } from '@opengpex/editor/core/engine/protocol/DisplayTransform';
+import { snapCanvasRect } from '@opengpex/editor/core/geometry/operators/snapping';
 
 /** Converts layer viewport and masks into abstract clipping instructions. */
 function getRenderPipeline(layer: Layer): ClipDescriptor[] {
@@ -88,19 +89,15 @@ export class StageComposer {
     const worldViewport = geometry.camera.getViewportWorldRect(viewportDim, cam, f.canvas, viewportPadding);
 
     const dpr = window.devicePixelRatio || 1;
-    const M_dpr = geometry.Matrix.scale(dpr);
 
     // 3. Start a new frame, reset and clear canvas
-    // [Artboard Boundary Clip] Calculate the canvas boundary in physical pixel
-    // (screen) space. This rect is passed to beginFrame so the renderer clips
-    // all layer drawing to the artboard area — content that extends beyond the
-    // canvas is visually hidden without destructively modifying the layer data.
-    const artboardClip = {
-      x: cam.x * dpr,
-      y: cam.y * dpr,
-      w: f.canvas.w * cam.k * dpr,
-      h: f.canvas.h * cam.k * dpr,
-    };
+    // [Pixel-Snap] Quantize canvas boundary to integer physical pixels.
+    // This eliminates anti-aliased clip edges that cause ghost lines during pan
+    // and 1px checkerboard bleed during zoom. See:
+    // docs/opengpex/plans/20260815_canvas_edge_subpixel_artifact_fix.md
+    const snap = snapCanvasRect(cam, f.canvas, dpr);
+    const artboardClip = snap.physical;
+
     renderer.beginFrame({ w: f.canvas.w * dpr, h: f.canvas.h * dpr }, artboardClip, options.displayConfig);
 
     // 4. Push background drawing as a Command (deprecated, handled by CanvasBackdrop instead)
@@ -125,9 +122,13 @@ export class StageComposer {
         // 4c. Calculate transform matrix and rendering path
         const M_layer = geometry.transform.getLayerLocalMatrix(latestLayer, f);
 
-        // [Phase 3] Calculate final screen matrix: DPR * CameraMatrix * LayerMatrix
-        const M_camera = geometry.Matrix.translate(cam.x, cam.y).multiply(geometry.Matrix.scale(cam.k));
-        const M_final = M_dpr.multiply(M_camera).multiply(M_layer);
+        // [Pixel-Snap Phase 3] Final screen matrix using snapped render scale.
+        // Instead of DPR * translate(cam.x, cam.y) * scale(cam.k), we use
+        // translate(snapX, snapY) * scale(renderScale) which maps canvas-local
+        // coordinates directly to integer-aligned physical pixel boundaries.
+        const M_camera = geometry.Matrix.translate(snap.physical.x, snap.physical.y)
+          .multiply(geometry.Matrix.scale(snap.renderScale.x, snap.renderScale.y));
+        const M_final = M_camera.multiply(M_layer);
 
         const clipSequence = getRenderPipeline(latestLayer);
 

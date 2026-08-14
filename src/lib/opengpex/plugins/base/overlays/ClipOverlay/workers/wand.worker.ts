@@ -173,46 +173,56 @@ function floodFill(
 
 /**
  * Perform 3x3 Morphological Dilation on the mask.
- * For boundary pixels, we leave them as 0 to ensure safety (no array out-of-bounds).
+ * Handles boundary pixels by treating out-of-bounds as 0 (clamped access).
  */
 function dilate3x3(src: Uint8Array, dst: Uint8Array, w: number, h: number): void {
-  for (let y = 1; y < h - 1; y++) {
+  for (let y = 0; y < h; y++) {
     const row = y * w;
-    const prevRow = row - w;
-    const nextRow = row + w;
-    for (let x = 1; x < w - 1; x++) {
+    for (let x = 0; x < w; x++) {
       const idx = row + x;
-      if (
-        src[idx] !== 0 ||
-        src[idx - 1] !== 0 || src[idx + 1] !== 0 ||
-        src[prevRow + x] !== 0 || src[prevRow + x - 1] !== 0 || src[prevRow + x + 1] !== 0 ||
-        src[nextRow + x] !== 0 || src[nextRow + x - 1] !== 0 || src[nextRow + x + 1] !== 0
-      ) {
-        dst[idx] = 1;
+      // Check 3x3 neighborhood with bounds clamping (out-of-bounds = 0)
+      let found = false;
+      for (let dy = -1; dy <= 1 && !found; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= h) continue;
+        const nrow = ny * w;
+        for (let dx = -1; dx <= 1 && !found; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= w) continue;
+          if (src[nrow + nx] !== 0) found = true;
+        }
       }
+      if (found) dst[idx] = 1;
     }
   }
 }
 
 /**
  * Perform 3x3 Morphological Erosion on the mask.
- * For boundary pixels, we leave them as 0 to ensure safety (no array out-of-bounds).
+ * Handles boundary pixels by treating out-of-bounds as 0 (which means
+ * boundary pixels with neighbors outside the image will NOT survive erosion,
+ * unless we treat OOB as 1). For selection purposes, we treat OOB as 1
+ * so that edge-touching selections are preserved.
  */
 function erode3x3(src: Uint8Array, dst: Uint8Array, w: number, h: number): void {
-  for (let y = 1; y < h - 1; y++) {
+  for (let y = 0; y < h; y++) {
     const row = y * w;
-    const prevRow = row - w;
-    const nextRow = row + w;
-    for (let x = 1; x < w - 1; x++) {
+    for (let x = 0; x < w; x++) {
       const idx = row + x;
-      if (
-        src[idx] !== 0 &&
-        src[idx - 1] !== 0 && src[idx + 1] !== 0 &&
-        src[prevRow + x] !== 0 && src[prevRow + x - 1] !== 0 && src[prevRow + x + 1] !== 0 &&
-        src[nextRow + x] !== 0 && src[nextRow + x - 1] !== 0 && src[nextRow + x + 1] !== 0
-      ) {
-        dst[idx] = 1;
+      // Check 3x3 neighborhood: all must be 1 to survive.
+      // Out-of-bounds treated as 1 (extend) so edge selections aren't eroded.
+      let allSet = true;
+      for (let dy = -1; dy <= 1 && allSet; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= h) continue; // OOB treated as 1 (skip check)
+        const nrow = ny * w;
+        for (let dx = -1; dx <= 1 && allSet; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= w) continue; // OOB treated as 1 (skip check)
+          if (src[nrow + nx] === 0) allSet = false;
+        }
       }
+      if (allSet) dst[idx] = 1;
     }
   }
 }
@@ -550,22 +560,6 @@ function simplifyRing(ring: { x: number; y: number }[], epsilon: number): { x: n
   return simplified;
 }
 
-/**
- * Apply Chaikin's corner cutting algorithm (1 iteration) to smooth out 90-degree jagged edges.
- */
-function chaikinSmooth(ring: { x: number; y: number }[]): { x: number; y: number }[] {
-  if (ring.length < 3) return ring;
-  const out: { x: number; y: number }[] = [];
-  const n = ring.length;
-  for (let i = 0; i < n; i++) {
-    const curr = ring[i];
-    const next = ring[(i + 1) % n];
-    out.push({ x: 0.75 * curr.x + 0.25 * next.x, y: 0.75 * curr.y + 0.25 * next.y });
-    out.push({ x: 0.25 * curr.x + 0.75 * next.x, y: 0.25 * curr.y + 0.75 * next.y });
-  }
-  return out;
-}
-
 // ────────────────────────── Pipeline glue / main entry ─────────────────────────
 
 function runWand(req: WandRequest): WandResponse {
@@ -624,9 +618,9 @@ function runWand(req: WandRequest): WandResponse {
     return { reqId: req.reqId, rings: [] };
   }
 
-  // Phase 3: Chaikin smoothing + Douglas-Peucker simplification
-  const smoothed = significantRings.map(r => chaikinSmooth(r));
-  const simplified = smoothed
+  // Phase 3: Douglas-Peucker simplification (no Chaikin smoothing — preserves
+  // pixel-aligned integer coordinates from traceBoundary)
+  const simplified = significantRings
     .map(r => simplifyRing(r, req.simplifyEpsilon))
     .filter(r => r.length >= 3);
 

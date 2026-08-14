@@ -69,7 +69,6 @@ export async function encodeWebp(
     const outCtx = outCanvas.getContext('2d')!;
     outCtx.putImageData(new ImageData(imageData.data, w, h), 0, 0);
     canvas = outCanvas;
-    console.debug('[ColorMgmt] WebP Export: pixelConversion=p3-to-srgb');
   } else if (pixelConv === 'srgb-to-icc') {
     // Pixels are sRGB, need to convert to target ICC space before embedding.
     // Atomic operation: srgbToIcc pixel conversion + RIFF ICC injection.
@@ -100,8 +99,6 @@ export async function encodeWebp(
     const webpBytes = new Uint8Array(await webpBlob.arrayBuffer());
     const finalBytes = injectWebpIcc(webpBytes, iccBytes);
 
-    console.debug('[ColorMgmt] WebP Export: pixelConversion=srgb-to-icc, targetProfile=%s',
-      meta!.raw!.icc?.name || 'custom');
     let resultBlob = new Blob([finalBytes.buffer as ArrayBuffer], { type: 'image/webp' });
     // EXIF injection (post-ICC) — reset Orientation since pixels are already corrected
     if (config?.preserveExif && meta?.raw?.exif) {
@@ -115,8 +112,6 @@ export async function encodeWebp(
     canvas = source instanceof ImageBitmap
       ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
       : source as OffscreenCanvas;
-    console.debug('[ColorMgmt] WebP Export: frameCS=%s, encodeColorSpace=%s',
-      frameCS, exportStrategy.encodeColorSpace);
   }
 
   const baseBlob = await canvas.convertToBlob({
@@ -131,8 +126,6 @@ export async function encodeWebp(
     const iccBytes = base64ToIcc(meta.raw.icc?.data);
     const webpBytes = new Uint8Array(await baseBlob.arrayBuffer());
     const finalBytes = injectWebpIcc(webpBytes, iccBytes);
-    console.debug('[ColorMgmt] WebP Export: injecting ICC profile (no pixel conversion), profile=%s',
-      meta.raw.icc?.name || 'embedded');
     let iccResultBlob = new Blob([finalBytes.buffer as ArrayBuffer], { type: 'image/webp' });
     // EXIF injection (post-ICC embed path) — reset Orientation since pixels are already corrected
     if (config?.preserveExif && meta?.raw?.exif) {
@@ -148,7 +141,6 @@ export async function encodeWebp(
     if (stockProfile) {
       const webpBytes = new Uint8Array(await baseBlob.arrayBuffer());
       const finalBytes = injectWebpIcc(webpBytes, stockProfile.bytes);
-      console.debug('[ColorMgmt] WebP Export: embedded stock ICC profile for %s', frameCS);
       let iccResultBlob = new Blob([finalBytes.buffer as ArrayBuffer], { type: 'image/webp' });
       if (config?.preserveExif && meta?.raw?.exif) {
         const exifRaw = resetExifOrientation(base64ToIcc(meta.raw.exif));
@@ -167,7 +159,6 @@ export async function encodeWebp(
     const webpBytes = new Uint8Array(await baseBlob.arrayBuffer());
     const strippedBytes = stripWebpIcc(webpBytes);
     if (strippedBytes !== webpBytes) {
-      console.debug('[ColorMgmt] WebP Export: stripped browser-injected ICC (embedIcc=false)');
       resultBlob = new Blob([strippedBytes.buffer as ArrayBuffer], { type: 'image/webp' });
     } else {
       resultBlob = baseBlob;

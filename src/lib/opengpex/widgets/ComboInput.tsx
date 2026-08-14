@@ -36,6 +36,13 @@ interface ComboInputProps<T extends string | number> {
   inputStyle?: React.CSSProperties;
   /** Whether to render dropdown via Portal (default: true). Set to false to keep dropdown in-container. */
   byPortal?: boolean;
+  /**
+   * Commit-on-blur mode: when provided, typing only updates internal local state.
+   * The value is committed (onCommit called) only on Enter, blur, or Tab — matching
+   * Photoshop/Figma numeric input behavior. Escape reverts to the original value.
+   * `onChange` is still called live for callers that need it; pass a no-op if unused.
+   */
+  onCommit?: (val: T) => void;
 }
 
 /**
@@ -53,11 +60,20 @@ export default function ComboInput<T extends string | number>({
   readOnly = false,
   inputStyle,
   byPortal = true,
+  onCommit,
 }: ComboInputProps<T>) {
   const [isOpen, setIsOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // ─── Commit-on-blur mode: internal local state ─────────────────────────
+  // When `onCommit` is provided, the input uses local draft state during editing.
+  // The external value is only updated on Enter / blur / Tab (commit gestures).
+  const isCommitMode = !!onCommit;
+  const [draft, setDraft] = useState(String(value ?? ''));
+  const [isFocused, setIsFocused] = useState(false);
+
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -122,24 +138,46 @@ export default function ComboInput<T extends string | number>({
       
       <input 
         type="text" 
-        value={value || ''}
+        value={isCommitMode ? (isFocused ? draft : String(value ?? '')) : (value || '')}
         readOnly={readOnly}
         onClick={handleInputClick}
         inputMode={type === 'number' ? 'numeric' : 'text'}
+        onFocus={() => { if (isCommitMode) { setIsFocused(true); setDraft(String(value ?? '')); } }}
+        onBlur={() => {
+          if (isCommitMode) {
+            setIsFocused(false);
+            // Commit on blur: parse and submit the draft value
+            const parsed = type === 'number' ? (parseInt(draft.replace(/\D/g, '')) || 0) : draft;
+            if (parsed !== value) onCommit!(parsed as T);
+            else setDraft(String(value ?? ''));
+          }
+        }}
         onChange={(e) => {
           if (readOnly) return;
-          if (type === 'number') {
-            const val = parseInt(e.target.value.replace(/\D/g, '')) || 0;
-            onChange(val as T);
+          if (isCommitMode) {
+            // Commit mode: only update local draft, do NOT call onChange
+            setDraft(type === 'number' ? e.target.value.replace(/[^\d]/g, '') : e.target.value);
           } else {
-            onChange(e.target.value as T);
+            if (type === 'number') {
+              const val = parseInt(e.target.value.replace(/\D/g, '')) || 0;
+              onChange(val as T);
+            } else {
+              onChange(e.target.value as T);
+            }
           }
         }}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') setIsOpen(false);
+          if (e.key === 'Escape') {
+            setIsOpen(false);
+            if (isCommitMode) {
+              // Revert draft to external value on Escape
+              setDraft(String(value ?? ''));
+              e.currentTarget.blur();
+            }
+          }
           if (e.key === 'Enter') {
             setIsOpen(false);
-            e.currentTarget.blur();
+            e.currentTarget.blur(); // triggers onBlur → commit
           }
         }}
         className={`bg-transparent ${label ? 'text-right' : 'text-center pl-1'} text-[10px] w-full outline-none font-bold tabular-nums text-zinc-900 dark:text-zinc-200 placeholder-zinc-400 dark:placeholder-zinc-700 ${readOnly ? 'cursor-pointer' : ''}`}

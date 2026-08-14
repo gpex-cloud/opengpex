@@ -178,11 +178,15 @@ export function PixelGridOverlayContainer() {
     const ctx = ctxRef.current;
     if (!ctx) return;
 
-    // --- Clear only the previously drawn sub-region (not the full canvas) ---
-    // This is cheaper than clearRect(0, 0, fullWidth, fullHeight)
+    // --- Clear the previously drawn sub-region ---
+    // Expand by 2px on each side to account for:
+    //   - Math.round(x) + 0.5 offset placing line centers at fractional positions
+    //   - ctx.lineWidth = 1 extending 0.5px beyond path coordinates
+    // Without this expansion, edge pixels from previous frames accumulate during
+    // panning, creating visible residual vertical/horizontal lines (ghost lines).
     if (lastDrawRectRef.current) {
       const r = lastDrawRectRef.current;
-      ctx.clearRect(r.x, r.y, r.w, r.h);
+      ctx.clearRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
     }
 
     // --- Compute visible grid region ---

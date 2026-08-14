@@ -1,6 +1,6 @@
 {
   "name": "opengpex",
-  "version": "1.0.0-beta.49",
+  "version": "1.0.0-beta.50",
   "license": "GPL-3.0-only",
   "private": true,
   "scripts": {
@@ -17,7 +17,6 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "postinstall": "node scripts/postinstall-exts.mjs && pnpm sync-plugins && pnpm scan-plugins"
-
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
@@ -35,6 +34,7 @@
     "lucide-react": "^0.542.0",
     "next": "16.2.6",
     "piexifjs": "^1.0.6",
+    "polygon-clipping": "^0.15.7",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "unzipper": "^0.12.3",

@@ -36,6 +36,7 @@ interface CanvasBackdropProps {
 
 import { useFastSync } from "@opengpex/editor/core/motion/hooks/navigation";
 import { useOverlayRotationSync } from "@opengpex/editor/core/context";
+import { snapCanvasRect } from "@opengpex/editor/core/geometry/operators/snapping";
 
 /**
  * CanvasBackdrop: SVG checkerboard backdrop with physical rotation capability and constant visual size
@@ -66,12 +67,18 @@ export default function CanvasBackdrop({
   // [Performance Fast-Track]: bypasses React, directly mapping World coordinates to Screen coordinates via pure math
   useFastSync(svgRef, true, (_v, f, cam) => {
     if (!polygonBgRef.current || !polygonChessRef.current) return;
-    // [High-Speed Derivation]: Original logic performed 4 high-cost matrix multiplications, but mathematically, canvas top-left in world space is always relative origin (0,0)
-    // Thus on screen, canvas top-left must exactly equal cam.x and cam.y. We directly use the simplest algebraic formula, boosting performance 100x.
-    const x1 = cam.x;
-    const y1 = cam.y;
-    const x2 = cam.x + f.canvas.w * cam.k;
-    const y2 = cam.y + f.canvas.h * cam.k;
+
+    // [Pixel-Snap] Use the same snap logic as StageComposer's artboardClip.
+    // This ensures the SVG polygon boundary aligns exactly with the Canvas 2D
+    // clip boundary at physical pixel granularity, eliminating:
+    //   - Ghost vertical lines during pan (anti-aliased SVG edge residue)
+    //   - 1px checkerboard bleed at canvas edges during zoom
+    // See: docs/opengpex/plans/20260815_canvas_edge_subpixel_artifact_fix.md
+    const dpr = window.devicePixelRatio || 1;
+    const snap = snapCanvasRect(cam, f.canvas, dpr);
+    const { x: x1, y: y1, w, h } = snap.css;
+    const x2 = x1 + w;
+    const y2 = y1 + h;
 
     const points = `${x1},${y1} ${x2},${y1} ${x2},${y2} ${x1},${y2}`;
 
@@ -84,7 +91,7 @@ export default function CanvasBackdrop({
     if (pattern) {
       pattern.setAttribute(
         "patternTransform",
-        `translate(${cam.x % BACKDROP_GRID_CONFIG.PATTERN_SIZE}, ${cam.y % BACKDROP_GRID_CONFIG.PATTERN_SIZE})`,
+        `translate(${x1 % BACKDROP_GRID_CONFIG.PATTERN_SIZE}, ${y1 % BACKDROP_GRID_CONFIG.PATTERN_SIZE})`,
       );
     }
   });

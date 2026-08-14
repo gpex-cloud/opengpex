@@ -93,6 +93,48 @@ export async function resolveAndDecode(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// addNewFrame — Unified "File → Frame" pipeline
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import type { ImportOptions } from './_types';
+import { importSingleImage } from './single';
+import { importMultiSubImage } from './multi';
+
+/**
+ * addNewFrame — The single entry point for "File/URL → new Frame in store".
+ *
+ * Encapsulates: resolveAndDecode + multi-page routing + importSingleImage.
+ * Both trunk and branchFromFile delegate to this function, differing only in opts.
+ *
+ * @param ctx - Editor context
+ * @param source - File object or URL string
+ * @param opts - Import options (switchFrame, parentId, seqNum, nameOverride, extra, dpi)
+ * @returns Frame ID of the created frame, or empty string if user cancelled / decode failed.
+ */
+export async function addNewFrame(
+  ctx: EditorContextValue,
+  source: File | string,
+  opts: ImportOptions,
+): Promise<string> {
+  // 1. Resolve + vector dialog + decode
+  const result = await resolveAndDecode(ctx, source);
+  if (!result) return '';
+
+  const { decoded, file, sourceType, chosenDpi } = result;
+  const finalOpts: ImportOptions = { ...opts, dpi: opts.dpi ?? chosenDpi };
+
+  // 2. Route: multi-sub-image or single image
+  if (decoded.subImages.length > 1) {
+    const multiResult = await importMultiSubImage(ctx, decoded, file, sourceType, finalOpts);
+    if (multiResult !== null) return multiResult;
+    // null = fall through to single image (TIFF "First Page Only" mode)
+  }
+
+  const { frameId } = await importSingleImage(ctx, decoded, file, sourceType, finalOpts);
+  return frameId;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Re-exports
 // ═══════════════════════════════════════════════════════════════════════════════
 

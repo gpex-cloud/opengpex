@@ -225,6 +225,33 @@ function simplifyRing(ring: { x: number; y: number }[], epsilon: number): { x: n
   return simplified;
 }
 
+// ──────────────────────────── Phase 4: Boundary Clamping ───────────────────────
+
+/**
+ * Clamp ring vertices to image bounds.
+ *
+ * After Chaikin smoothing + Douglas-Peucker simplification, vertices near the
+ * image boundary (within ~1.5px) may have been pulled inward due to corner
+ * rounding and segment collapsing. This snaps them back to the image edge,
+ * matching the wand.worker.ts approach of handling boundary pixels by treating
+ * out-of-bounds as 0.
+ *
+ * Snap threshold: 1.5px — covers the maximum inward shift from Chaikin (0.25×segment)
+ * on 1px marching-squares segments plus DP epsilon.
+ */
+const BOUNDARY_SNAP_THRESHOLD = 1.5;
+
+function clampToBounds(
+  ring: { x: number; y: number }[],
+  width: number,
+  height: number,
+): { x: number; y: number }[] {
+  return ring.map(p => ({
+    x: p.x < BOUNDARY_SNAP_THRESHOLD ? 0 : p.x > width - BOUNDARY_SNAP_THRESHOLD ? width : p.x,
+    y: p.y < BOUNDARY_SNAP_THRESHOLD ? 0 : p.y > height - BOUNDARY_SNAP_THRESHOLD ? height : p.y,
+  }));
+}
+
 // ──────────────────────────── Pipeline Entry Point ──────────────────────────────
 
 const MIN_RING_AREA = 8;
@@ -261,7 +288,8 @@ function handleAlpha(req: AlphaRequest): AlphaResponse {
   const simplified = significantRings
     .map(r => chaikinSmooth(r))
     .map(r => simplifyRing(r, req.simplifyEpsilon))
-    .filter(r => r.length >= 3);
+    .filter(r => r.length >= 3)
+    .map(r => clampToBounds(r, width, height));
 
   const t1 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
