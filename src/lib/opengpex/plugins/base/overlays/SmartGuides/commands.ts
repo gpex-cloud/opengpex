@@ -19,6 +19,7 @@
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
 import { SettingsPanelAPI } from '../../panels/SettingsPanel/protocols';
+import { presets } from '@opengpex/editor/core/helpers/preferences';
 import * as P from './protocols';
 
 /**
@@ -29,10 +30,9 @@ export const SMART_GUIDES_COMMANDS = {
     id: P.CMD_TOGGLE,
     name: 'Toggle Smart Guides',
     category: 'View',
-    execute: (ctx: EditorContextValue) => {
-      const { selfConfig, setSelfConfig } = ctx.scoped || {};
-      const current = (selfConfig as P.SmartGuidesConfig)?.enabled ?? true;
-      setSelfConfig?.({ enabled: !current });
+    execute: (_ctx: EditorContextValue) => {
+      const current = presets.get('SNAP_ENABLED');
+      presets.set('SNAP_ENABLED', !current);
     },
     shortcut: { key: ';', meta: true, shift: true }
   } as EditorCommand<void, void>,

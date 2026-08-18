@@ -28,3 +28,9 @@ export const PLUGIN_AUTHOR = 'opengpex';
  */
 export const CMD_IMPORT = 'cmd.import';
 export const CMD_PICK = 'cmd.pick';
+
+/**
+ * Signals (re-exported from core for local convenience)
+ */
+export { SIGNAL_IMPORTING } from '@opengpex/editor/core/advanced/commands/frame/importers';
+export type { ImportingSignalValue } from '@opengpex/editor/core/advanced/commands/frame/importers';

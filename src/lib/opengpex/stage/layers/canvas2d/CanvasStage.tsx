@@ -144,12 +144,41 @@ export default function CanvasStage() {
 
   // [Performance Optimization] Integrates with unified sync pipeline, ensuring Canvas pixel drawing and Gizmo borders are absolutely atomically synchronized geometrically
   useFastSync(canvasRef, true, (v, f, cam) => {
-    const isDirty = needsRenderRef.current;
+    const canvas = canvasRef.current;
+    if (!canvas || !f || !cam) return;
+
+    // [Phase 3] Physical viewport synchronization and Retina high-DPI adaptation
+    // [Critical Fix] CSS dimensions and buffer dimensions MUST update atomically
+    // in the same rAF tick — and BEFORE the skip-render gate below.
+    // Previously, CSS was set via React state (immediate on re-render) while
+    // buffer resized here in rAF — causing 1-frame stretch on window resize
+    // because CSS size changes before buffer catches up.
+    // This block must run unconditionally so viewport resizes are never delayed.
+    const { w, h } = state.ui.viewportDim;
+    const dpr = window.devicePixelRatio || 1;
+    let bufferResized = false;
+    
+    if (w > 0 && h > 0) {
+      // Sync CSS display size (imperative, bypasses React for atomic timing)
+      if (canvas.style.width !== `${w}px`) canvas.style.width = `${w}px`;
+      if (canvas.style.height !== `${h}px`) canvas.style.height = `${h}px`;
+
+      // Sync buffer pixel dimensions (HiDPI)
+      const targetW = Math.floor(w * dpr);
+      const targetH = Math.floor(h * dpr);
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+        bufferResized = true; // Buffer resize clears canvas — must repaint
+      }
+    }
+
+    const isDirty = needsRenderRef.current || bufferResized;
     
     // [Smart Admission Determination]
     // If all of the following conditions are met, the screen is considered static, skip render:
     // 1. Core geometric states (f, cam) are completely consistent with previous frame
-    // 2. No manually marked dirty redraws (isDirty)
+    // 2. No manually marked dirty redraws (isDirty) and no buffer resize
     // 3. And not currently animating (isAnimating)
     if (
       !isDirty && 
@@ -160,9 +189,6 @@ export default function CanvasStage() {
       return;
     }
 
-    const canvas = canvasRef.current;
-    if (!canvas || !f || !cam) return;
-
     const isInteracting = v.activeState.interacting;
     const _frameT0 = performance.now();
 
@@ -172,18 +198,6 @@ export default function CanvasStage() {
 
     // Clear dirty marks
     needsRenderRef.current = false;
-
-    // [Phase 3] Physical viewport synchronization and Retina high-DPI adaptation
-    const { w, h } = state.ui.viewportDim;
-    const dpr = window.devicePixelRatio || 1;
-    
-    // Only update if viewport dimensions are valid
-    if (w > 0 && h > 0) {
-      if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
-        canvas.width = Math.floor(w * dpr);
-        canvas.height = Math.floor(h * dpr);
-      }
-    }
 
     // [Phase 4] Gets currently active theme (supports System / Dark / Light)
     const theme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
@@ -267,15 +281,14 @@ export default function CanvasStage() {
 
   if (!activeFrame) return null;
 
+  // [Critical Fix] CSS dimensions are now managed imperatively inside useFastSync
+  // to ensure atomic sync with buffer resize. React-controlled style.width/height
+  // was the source of the 1-frame stretch bug on window resize.
   return (
     <canvas 
       ref={canvasRef}
       className="absolute top-0 left-0 bg-transparent"
-      style={{
-        width: state.ui.viewportDim?.w || activeFrame.canvas.w,
-        height: state.ui.viewportDim?.h || activeFrame.canvas.h,
-        display: 'block'
-      }}
+      style={{ display: 'block' }}
     />
   );
 }

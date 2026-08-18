@@ -25,6 +25,19 @@ export interface DecodeOutput {
   chosenDpi?: number;
 }
 
+// ─── Importing Signal (shared between core importer + FileLoader UI) ─────────
+
+/** Signal key for the unified importing progress indicator. */
+export const SIGNAL_IMPORTING = 'sys.asset.importing';
+
+/** Shape of the importing signal value stored in state.interaction.signals. */
+export interface ImportingSignalValue {
+  current: number;  // 1-based index of current file
+  total: number;    // total number of files in the batch
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /** Options common to single-image and multi-sub-image import strategies. */
 export interface ImportOptions {
   /** Whether to switch viewport to the newly created frame */

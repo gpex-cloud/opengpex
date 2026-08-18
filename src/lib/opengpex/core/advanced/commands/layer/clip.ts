@@ -51,7 +51,8 @@ async function copyCropBoxToClipboard(
 
   // 3. Composite clipboard write: external software reads physicalResult.url (Blob), internal Paste command reads Metadata.layer (Logical Layer)
   await ctx.clipboard.writeByUrl(physicalResult.url, {
-    layer: logicalResult ? logicalResult.newLayer : physicalResult.newLayer
+    layer: logicalResult ? logicalResult.newLayer : physicalResult.newLayer,
+    sourceFrameId: activeFrame.id,
   });
 
   return {
@@ -88,7 +89,8 @@ export const LayerClipCommands = {
           } else {
             // Without selection: copy the entire layer
             await ctx.clipboard.writeByUrl(activeLayer.src, {
-              layer: activeLayer
+              layer: activeLayer,
+              sourceFrameId: activeFrame.id,
             });
           }
         } catch (err) {
@@ -131,7 +133,8 @@ export const LayerClipCommands = {
           } else {
             // Without selection: cut the entire layer (clear content, keep layer)
             await ctx.clipboard.writeByUrl(activeLayer.src, {
-              layer: activeLayer
+              layer: activeLayer,
+              sourceFrameId: activeFrame.id,
             });
 
             ctx.layers.updateLayer(activeFrame.id, tx => {
@@ -154,7 +157,7 @@ export const LayerClipCommands = {
       const { activeFrame, activeLayer, clipboard, actions } = ctx;
 
       try {
-        // ═══ Step 1: Read clipboard content first (before any frame check) ═══
+        // ═══ Step 1: Read clipboard → always returns { metadata?, blob? } ═══
         let meta: ClipboardLayerMetadata | undefined = (payload && 'assetId' in payload) ? payload : undefined;
         const event = (payload && 'e' in payload) ? payload.e : undefined;
         let blob: Blob | undefined = undefined;
@@ -165,10 +168,10 @@ export const LayerClipCommands = {
           blob = res?.blob;
         }
 
-        // Nothing useful in clipboard — abort
+        // {无, 无} → abort
         if (!meta && !blob) return;
 
-        // ═══ Step 2: No active frame — create a new frame from clipboard image ═══
+        // ═══ Step 2: No active frame → create new frame from blob ═══
         if (!activeFrame) {
           if (blob) {
             const file = new File(
@@ -177,21 +180,48 @@ export const LayerClipCommands = {
               { type: blob.type || 'image/png' }
             );
             await actions.adv.frame.create.trunk.execute({ source: file });
-          } else if (meta?.layer?.src) {
-            // Internal clipboard with no active frame (edge case)
-            await actions.adv.frame.create.trunk.execute({ source: meta.layer.src });
           }
           return;
         }
 
-        // ═══ Step 3: Active frame exists + external image → ask user choice ═══
-        if (!meta?.layer && blob) {
+        // ═══ Step 3: Determine same-frame vs cross-frame/external ═══
+        const isSameFrame = !!(meta?.layer && meta.sourceFrameId === activeFrame.id);
+
+        if (isSameFrame) {
+          // ── Same-frame paste → logical path (paste in place) ──
+          const { id: _oldId, locked: _locked, interactive: _inter, ...layerWithoutId } = meta!.layer!;
+          const smartName = ctx.layers.getNewLayerName(
+            activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), 'Layer'
+          );
+
+          const newLayer = ctx.layers.getNewLayer({
+            ...layerWithoutId,
+            name: smartName
+          });
+
+          // Calculate insertion index (above current layer's family)
+          let insertIndex: number | undefined = undefined;
+          if (activeLayer) {
+            const hostId = activeLayer.hostId || activeLayer.id;
+            const familyIndices = activeFrame.layers.order
+              .map((id, i) => {
+                const l = activeFrame.layers.byId[id];
+                return (l.hostId === hostId || l.id === hostId ? i : -1);
+              })
+              .filter(i => i !== -1);
+            insertIndex = Math.max(...familyIndices) + 1;
+          }
+
+          ctx.layers.addLayer(activeFrame.id, newLayer, insertIndex);
+
+        } else if (blob) {
+          // ── Cross-frame or external paste → physical path (blob) ──
           const choice = await actions.askChoice("Paste Image", [
             { id: 'layer', label: 'New Layer', description: 'Add to current creation as a new layer', icon: 'Layers', iconGradient: 'from-indigo-500 to-purple-600' },
             { id: 'frame', label: 'New Frame', description: 'Start a brand-new independent creation', icon: 'PlusSquare', iconGradient: 'from-amber-500 to-orange-600' },
           ]);
 
-          if (choice === null) return; // User cancelled (X button or Escape)
+          if (choice === null) return; // User cancelled
 
           if (choice === 'frame') {
             const file = new File(
@@ -200,45 +230,27 @@ export const LayerClipCommands = {
               { type: blob.type || 'image/png' }
             );
             await actions.adv.frame.create.trunk.execute({ source: file });
-            return;
+          } else {
+            // choice === 'layer' → physical layer via createLayerFromBlob
+            const newLayer = await ctx.layers.createLayerFromBlob(blob, activeFrame);
+
+            // Calculate insertion index
+            let insertIndex: number | undefined = undefined;
+            if (activeLayer) {
+              const hostId = activeLayer.hostId || activeLayer.id;
+              const familyIndices = activeFrame.layers.order
+                .map((id, i) => {
+                  const l = activeFrame.layers.byId[id];
+                  return (l.hostId === hostId || l.id === hostId ? i : -1);
+                })
+                .filter(i => i !== -1);
+              insertIndex = Math.max(...familyIndices) + 1;
+            }
+
+            ctx.layers.addLayer(activeFrame.id, newLayer, insertIndex);
           }
-          // choice === 'layer' → fall through to "add as layer" logic below
         }
-
-        // ═══ Step 4: Add as layer (existing behavior) ═══
-        let newLayer;
-
-        if (meta?.layer) {
-          // Internal Paste (contains full layer object)
-          // New layers must never inherit lock/interactive state from the source
-          const { id: _oldId, locked: _locked, interactive: _inter, ...layerWithoutId } = meta.layer;
-          const smartName = ctx.layers.getNewLayerName(activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), 'Layer');
-
-          newLayer = ctx.layers.getNewLayer({
-            ...layerWithoutId,
-            name: smartName
-          });
-        } else if (blob) {
-          // External Image Paste (Blob)
-          newLayer = await ctx.layers.createLayerFromBlob(blob, activeFrame);
-        } else {
-          return;
-        }
-
-        // Calculate insertion index
-        let insertIndex: number | undefined = undefined;
-        if (activeLayer) {
-          const hostId = activeLayer.hostId || activeLayer.id;
-          const familyIndices = activeFrame.layers.order
-            .map((id, i) => {
-              const l = activeFrame.layers.byId[id];
-              return (l.hostId === hostId || l.id === hostId ? i : -1);
-            })
-            .filter(i => i !== -1);
-          insertIndex = Math.max(...familyIndices) + 1;
-        }
-
-        ctx.layers.addLayer(activeFrame.id, newLayer, insertIndex);
+        // else: meta exists but no blob and not same-frame — nothing to do
       } catch (err) {
         console.error('[ClipCommands] Paste operation failed:', err);
       }

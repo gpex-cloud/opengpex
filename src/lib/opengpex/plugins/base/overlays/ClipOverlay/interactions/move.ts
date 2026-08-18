@@ -24,13 +24,16 @@ import {
   LocalPolygon,
   asLocalRect,
 } from '@opengpex/editor/core/types';
-import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import { createTransformHandler, TransformIntent } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import {
   ClipOptionsAPI,
   ClipTool,
 } from '../../../options/ClipOptions/protocols';
+
+/** Edge hit threshold — must match the value in regular.ts */
+const EDGE_HIT_THRESHOLD_PX = 6;
 
 /**
  * createSelectionMoveHandler — Unified selection move + peel handler.
@@ -93,6 +96,41 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
         if (!handleElement) return null;
         const handle = handleElement.dataset.handle || '';
         if (handle !== 'move') return null;
+
+        // ─── Edge exclusion: if pointer is near a selection edge, yield to
+        // the clip-box handler's edge resize detection (priority 100).
+        const clipShape = getRegularClipShape(e.activeFrame);
+        const rect = clipShape?.rect;
+        if (rect && rect.w > 0 && rect.h > 0) {
+          const k = e.activeFrame.camera.k;
+          const T = EDGE_HIT_THRESHOLD_PX / k;
+          const px = e.point.canvas.x;
+          const py = e.point.canvas.y;
+
+          const latestTool = (e.activeFrame.latestClipTool as ClipTool) || 'rect';
+          const isEllipse = latestTool === 'ellipse';
+
+          if (isEllipse) {
+            const cx = rect.x + rect.w / 2;
+            const cy = rect.y + rect.h / 2;
+            const rx = rect.w / 2;
+            const ry = rect.h / 2;
+            const nx = (px - cx) / rx;
+            const ny = (py - cy) / ry;
+            const r = Math.sqrt(nx * nx + ny * ny);
+            const avgRadius = (rx + ry) / 2;
+            if (Math.abs(r - 1) * avgRadius <= T) return null;
+          } else {
+            const dTop = Math.abs(py - rect.y);
+            const dBottom = Math.abs(py - (rect.y + rect.h));
+            const dLeft = Math.abs(px - rect.x);
+            const dRight = Math.abs(px - (rect.x + rect.w));
+            const inHRange = px >= rect.x - T && px <= rect.x + rect.w + T;
+            const inVRange = py >= rect.y - T && py <= rect.y + rect.h + T;
+            if ((dTop <= T && inHRange) || (dBottom <= T && inHRange) ||
+                (dLeft <= T && inVRange) || (dRight <= T && inVRange)) return null;
+          }
+        }
       } else {
         // Irregular polygon: hit-test against polygon rings
         const inside = e.geometry.polygon.isPointInPolygon(e.point.canvas, box.rings);

@@ -22,10 +22,8 @@
 import React, { useCallback } from "react";
 import { Magnet, Filter, SlidersHorizontal, Power } from "lucide-react";
 import Switch from "@opengpex/editor/widgets/Switch";
-import { usePluginSelfConfig } from "@opengpex/editor/core/context";
 import { presets } from "@opengpex/editor/core/helpers/preferences";
 import { usePreset } from "@opengpex/editor/core/helpers/preferences/usePreset";
-import { SmartGuidesConfig } from "../protocols";
 
 type ExcludableLayerType = 'text' | 'paint' | 'vector' | 'color';
 
@@ -33,14 +31,11 @@ type ExcludableLayerType = 'text' | 'paint' | 'vector' | 'color';
  * SmartGuidesSettings: Settings panel contributed to SETTINGS_CONFIG_PANEL.
  * Allows users to fine-tune which layers participate in smart guide snapping.
  *
- * `enabled` stays in pluginConfig (pure plugin UI state).
- * All snap-related fields use PresetsFactory (core infrastructure).
- *
- * @see docs/opengpex/plans/20260805_stage_reverse_dependency_issue.md
+ * All settings (including the master toggle) use PresetsFactory (core infrastructure).
  */
 export function SmartGuidesSettings() {
-  // Master toggle stays in pluginConfig (plugin-internal UI state)
-  const [config, setConfig] = usePluginSelfConfig<SmartGuidesConfig>();
+  // Master toggle via PresetsFactory (synchronous, no race condition)
+  const snapEnabled = usePreset('SNAP_ENABLED');
 
   // Snap settings via PresetsFactory
   const snapToCanvas = usePreset('SNAP_TO_CANVAS');
@@ -64,13 +59,13 @@ export function SmartGuidesSettings() {
       {/* ─── Master Toggle ─── */}
       <div className="flex items-center justify-between rounded-xl p-3 bg-[var(--bg-stage)] border border-amber-500/50">
         <div className="flex items-center gap-2">
-          <Power size={14} className={config.enabled ? "text-amber-500" : "text-[var(--text-muted)]"} />
+          <Power size={14} className={snapEnabled ? "text-amber-500" : "text-[var(--text-muted)]"} />
           <div className="flex flex-col gap-0.5">
             <span className="text-[11px] font-bold text-[var(--text-main)]">Smart Guides Toggler</span>
             <span className="text-[9px] text-[var(--text-muted)]">⌘⇧; to toggle</span>
           </div>
         </div>
-        <Switch checked={config.enabled} onChange={() => setConfig({ enabled: !config.enabled })} />
+        <Switch checked={snapEnabled} onChange={() => presets.set('SNAP_ENABLED', !snapEnabled)} />
       </div>
 
       {/* ─── Section 1: Snap Targets ─── */}
@@ -169,6 +164,7 @@ export function SmartGuidesSettings() {
       <button
         type="button"
         onClick={() => {
+          presets.reset('SNAP_ENABLED');
           presets.reset('SNAP_TO_CANVAS');
           presets.reset('SNAP_TO_BIRTH');
           presets.reset('SNAP_TO_LAYERS');

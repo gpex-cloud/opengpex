@@ -20,8 +20,8 @@
 'use client';
 
 import { useMemo } from 'react';
-import { usePluginSelfConfig, usePluginCommands, useEditorState } from '@opengpex/editor/core/context';
-import * as P from './protocols';
+import { usePluginCommands, useEditorState } from '@opengpex/editor/core/context';
+import { usePreset } from '@opengpex/editor/core/helpers/preferences/usePreset';
 import type { SmartGuidesCommandsMap } from './commands.d';
 
 /**
@@ -29,12 +29,11 @@ import type { SmartGuidesCommandsMap } from './commands.d';
  */
 export const useSmartGuides = () => {
   const { state, activeFrame } = useEditorState();
-  const [selfConfig] = usePluginSelfConfig<P.SmartGuidesConfig>();
+  const isEnabled = usePreset('SNAP_ENABLED');
   const { toggleCmd } = usePluginCommands<SmartGuidesCommandsMap>();
 
   return useMemo(() => {
     const { smartguides } = state.interaction;
-    const isEnabled = selfConfig?.enabled ?? true;
 
     const data = (!isEnabled || !smartguides || !activeFrame)
       ? { isVisible: false, isEnabled }
@@ -44,5 +43,5 @@ export const useSmartGuides = () => {
       ...data,
       toggleCmd,
     };
-  }, [state.interaction, selfConfig, activeFrame, toggleCmd]);
+  }, [state.interaction, isEnabled, activeFrame, toggleCmd]);
 };

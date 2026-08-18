@@ -243,6 +243,17 @@ export function createLayerService(
 
       if (!intersection) return null;
 
+      // Guard: path∩path case — when the layer has a non-rect visibleShape AND the selection
+      // is also a path (irregular), intersectWithLayer cannot compute the true geometric
+      // intersection (would need polygon-clipping). The result only carries the selection's
+      // path, losing the layer's constraint. Fall back to physical (composite + trim).
+      //
+      // NOTE: rect∩path is now handled correctly by Sutherland-Hodgman clipping in
+      // intersectWithLayer, which produces a properly clipped pathData. No fallback needed.
+      if (layer.visibleShape && layer.visibleShape.type !== 'rect' && localShape.type !== 'rect') {
+        return null;
+      }
+
       const { id: _oldId, ...layerData } = layer;
       const newLayer = LayerFactory.getNewLayer({
         ...layerData,
@@ -260,6 +271,10 @@ export function createLayerService(
       newLayer.cx = pose.x;
       newLayer.cy = pose.y;
       newLayer.birthCenter = { cx: newLayer.cx, cy: newLayer.cy }; // 💡 Record birth center to trigger the golden return guide line when dragging fragments
+
+      // Mark as logical (non-physical) layer: src references the original image,
+      // visibleShape provides the clip mask. Default is true (physical pixels).
+      newLayer.metadata = { ...newLayer.metadata, physicalPixels: false };
 
       // Record the source clip tool so refocus can restore the correct tool slot
       if (frame.latestClipTool) {

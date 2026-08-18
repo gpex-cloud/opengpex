@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, type RefObject } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { Motion } from '@opengpex/editor/core/motion';
 import { asLocalShape, LocalPolygon } from '@opengpex/editor/core/types';
@@ -129,14 +129,25 @@ export function useClipOverlayCommands() {
  * polygon selection. This gives the user visual feedback that they can drag
  * to move (or Meta+drag to peel) the selection.
  */
-export function useClipCursor(isClipActive: boolean, cropTool: ClipTool) {
+export function useClipCursor(
+  isClipActive: boolean,
+  cropTool: ClipTool,
+  boxRef?: RefObject<HTMLElement | null>,
+  isReCanvas?: boolean
+) {
   const { actions, geometry } = useEditorServices();
-  const { activeFrame } = useEditorState();
+  const { state, activeFrame } = useEditorState();
 
   // Ref to keep latest frame accessible in the pointermove closure without
   // re-registering the listener on every frame change.
   const frameRef = useRef(activeFrame);
   useLayoutEffect(() => { frameRef.current = activeFrame; });
+
+  // Track interaction state in a ref so edge-proximity cursor doesn't flicker
+  // during active resize drags (the box moves while dragging, causing the
+  // distance-to-edge calculation to oscillate).
+  const isInteractingRef = useRef(false);
+  useLayoutEffect(() => { isInteractingRef.current = !!state.interaction.isInteracting; });
 
   useEffect(() => {
     if (isClipActive) {
@@ -199,6 +210,135 @@ export function useClipCursor(isClipActive: boolean, cropTool: ClipTool) {
       }
     };
   }, [isClipActive, cropTool, actions, geometry]);
+
+  // ─── Edge proximity cursor for regular tools + Re-Canvas ───────────────
+  // Dynamically switches cursor to ns-resize / ew-resize when the pointer
+  // hovers near a selection edge. This provides visual feedback that the
+  // edge is draggable (edge hit detection without fixed-position handles).
+  // Also fires in Re-Canvas mode (which is always rectangular).
+  useEffect(() => {
+    const strategy = CLIP_TOOL_STRATEGIES[cropTool];
+    // Activate when: (clip mode + regular tool) OR Re-Canvas mode
+    const isActive = (isClipActive && strategy.family === 'regular') || !!isReCanvas;
+    if (!isActive) return;
+
+    const EDGE_THRESHOLD_PX = 6; // screen pixels
+    // Re-Canvas uses plain 'crosshair' (no tool subscript indicator) because
+    // it's a canvas-resize modal, not a selection tool. The subscript would
+    // misleadingly suggest the rect selection tool is active.
+    const toolCursor = isReCanvas ? 'crosshair' : strategy.cursor;
+    let currentCursor = toolCursor;
+
+    // Restore tool cursor on effect (re-)setup. This is critical when the
+    // effect re-runs due to isReCanvas toggling: cleanup sets cursor to null,
+    // but the tool-cursor useEffect (deps=[isClipActive, cropTool]) won't
+    // re-fire if those deps didn't change. We must actively restore here.
+    actions.fast.setCursor(toolCursor);
+
+    const onPointerMove = (ev: PointerEvent) => {
+      // Skip cursor updates during active interaction (resize/move/create drag).
+      // The box dimensions change while dragging, causing distance-to-edge to
+      // oscillate → cursor flickers between resize/tool cursors.
+      if (isInteractingRef.current) return;
+
+      const frame = frameRef.current;
+      if (!frame) return;
+
+      // Get the bounding rect: Re-Canvas reads canvasCropBox, regular reads clipBoxes
+      const selRect = isReCanvas
+        ? frame.canvasCropBox?.rect
+        : getRegularClipShape(frame)?.rect;
+
+      if (!selRect || selRect.w <= 0 || selRect.h <= 0) {
+        if (currentCursor !== toolCursor) {
+          currentCursor = toolCursor;
+          actions.fast.setCursor(toolCursor);
+        }
+        return;
+      }
+
+      // Project pointer position to canvas-local coordinates
+      const container = document.querySelector('.editor-viewport-container');
+      if (!container) return;
+      const domRect = container.getBoundingClientRect();
+      const vx = ev.clientX - domRect.left;
+      const vy = ev.clientY - domRect.top;
+
+      const currentCam = actions.fast.latestCamera(frame.id);
+      const worldPt = geometry.space.screenToWorld(vx, vy, frame, currentCam);
+      const canvasPt = geometry.space.worldToLocal(worldPt.x, worldPt.y, frame);
+
+      // Convert threshold from screen pixels to canvas-local pixels
+      const k = currentCam?.k ?? frame.camera.k;
+      const T = EDGE_THRESHOLD_PX / k;
+
+      const px = canvasPt.x;
+      const py = canvasPt.y;
+
+      const isEllipse = cropTool === 'ellipse';
+
+      // Determine desired cursor
+      let desired = toolCursor;
+
+      if (isEllipse) {
+        // ─── Ellipse: distance to ellipse arc ─────────────────────────
+        const cx = selRect.x + selRect.w / 2;
+        const cy = selRect.y + selRect.h / 2;
+        const rx = selRect.w / 2;
+        const ry = selRect.h / 2;
+
+        const nx = (px - cx) / rx;
+        const ny = (py - cy) / ry;
+        const r = Math.sqrt(nx * nx + ny * ny);
+        const avgRadius = (rx + ry) / 2;
+        const distToEllipse = Math.abs(r - 1) * avgRadius;
+
+        if (distToEllipse <= T) {
+          // Quadrant-based direction: |cos| > |sin| → horizontal, else vertical
+          const dist = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy)) || 1;
+          const cosA = Math.abs((px - cx) / dist);
+          const sinA = Math.abs((py - cy) / dist);
+          desired = cosA > sinA ? 'ew-resize' : 'ns-resize';
+        }
+      } else {
+        // ─── Rectangle: distance to bounding rect edges ───────────────
+        const dTop = Math.abs(py - selRect.y);
+        const dBottom = Math.abs(py - (selRect.y + selRect.h));
+        const dLeft = Math.abs(px - selRect.x);
+        const dRight = Math.abs(px - (selRect.x + selRect.w));
+
+        const inHRange = px >= selRect.x - T && px <= selRect.x + selRect.w + T;
+        const inVRange = py >= selRect.y - T && py <= selRect.y + selRect.h + T;
+
+        if (dTop <= T && inHRange) desired = 'ns-resize';
+        else if (dBottom <= T && inHRange) desired = 'ns-resize';
+        else if (dLeft <= T && inVRange) desired = 'ew-resize';
+        else if (dRight <= T && inVRange) desired = 'ew-resize';
+      }
+
+      if (desired !== currentCursor) {
+        currentCursor = desired;
+        actions.fast.setCursor(desired);
+        // Override box div's cursor to match edge cursor (the box has static
+        // `cursor-move` which otherwise wins over the viewport-level cursor).
+        if (boxRef?.current) {
+          boxRef.current.style.cursor = desired === toolCursor ? 'move' : desired;
+        }
+      }
+    };
+
+    const boxEl = boxRef?.current;
+    document.addEventListener('pointermove', onPointerMove, { passive: true });
+    return () => {
+      document.removeEventListener('pointermove', onPointerMove);
+      // Reset to null — let the mode-level cursor (pan=grab, clip=crosshair)
+      // be re-applied by the first useEffect when dependencies change.
+      actions.fast.setCursor(null);
+      if (boxEl) {
+        boxEl.style.cursor = '';
+      }
+    };
+  }, [isClipActive, isReCanvas, cropTool, actions, geometry, boxRef]);
 
   useEffect(() => {
     return () => {

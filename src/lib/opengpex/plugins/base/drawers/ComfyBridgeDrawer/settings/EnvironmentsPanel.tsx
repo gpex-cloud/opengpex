@@ -22,12 +22,108 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   Plus, Trash2, CheckCircle2, Link, Wifi,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, Copy, Check,
 } from 'lucide-react';
 import FancyButton from '@opengpex/editor/widgets/FancyButton';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import { ComfyBridgeConfig, ComfyEnvironment, ConnectionMode } from '../protocols';
 import { ComfyClient } from '../api/client';
+
+// ─── Copy Button for code snippets ─────────────────────────────────────────────
+
+function CopyCmd({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [text]);
+  return (
+    <button
+      onClick={handleCopy}
+      className="inline-flex items-center gap-0.5 ml-1 p-0.5 rounded hover:bg-[var(--bg-stage)] text-[var(--text-muted)] hover:text-emerald-500 transition-colors"
+      title="Copy to clipboard"
+    >
+      {copied ? <Check size={10} className="text-emerald-500" /> : <Copy size={10} />}
+    </button>
+  );
+}
+
+// ─── Connection Guide ──────────────────────────────────────────────────────────
+
+function ConnectionGuide() {
+  const [expanded, setExpanded] = useState(false);
+  const CMDS = {
+    startComfy: 'python main.py --enable-manager --listen 0.0.0.0 --enable-cors-header',
+    macForward: 'socat TCP-LISTEN:8188,fork,reuseaddr TCP:192.168.x.x:8188',
+    winForward: 'netsh interface portproxy add v4tov4 listenport=8188 listenaddress=127.0.0.1 connectport=8188 connectaddress=192.168.x.x',
+  };
+
+  return (
+    <div className="mt-2 rounded-lg bg-[var(--bg-panel)] border border-[var(--border-subtle)]">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-2.5 py-2.5 text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider hover:text-[var(--text-main)] transition-colors"
+      >
+        <span>🔌 Connection Guide</span>
+        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+      </button>
+      {expanded && <div className="px-2.5 pb-3 text-[11px] text-[var(--text-muted)] leading-relaxed space-y-3">
+
+        {/* Prerequisite */}
+        <div className="space-y-1.5">
+          <p className="text-[11px]">
+            <strong className="text-[var(--text-main)]">① Start ComfyUI</strong> with these flags:
+          </p>
+          <div className="flex items-center gap-1 bg-[var(--bg-stage)] rounded-md px-2 py-1.5">
+            <code className="text-[10px] font-mono text-[var(--text-main)] flex-1 break-all">{CMDS.startComfy}</code>
+            <CopyCmd text={CMDS.startComfy} />
+          </div>
+        </div>
+
+        {/* Scenario A: Same machine */}
+        <div className="space-y-1">
+          <p className="text-[11px]">
+            <strong className="text-[var(--text-main)]">② Same machine (localhost)</strong>
+          </p>
+          <p className="text-[10px] opacity-80">Fill in <code className="bg-[var(--bg-stage)] px-1 rounded">http://localhost:8188</code> above. Done — no extra setup needed.</p>
+        </div>
+
+        {/* Scenario B: LAN */}
+        <div className="space-y-1.5">
+          <p className="text-[11px]">
+            <strong className="text-[var(--text-main)]">② LAN machine (192.168.x.x)</strong>
+          </p>
+          <p className="text-[10px] opacity-80">HTTPS pages cannot reach HTTP LAN addresses (browser security). Forward the remote port to your localhost, then use <code className="bg-[var(--bg-stage)] px-1 rounded">http://localhost:8188</code>:</p>
+
+          <p className="text-[10px] font-bold text-[var(--text-main)] mt-1">macOS <span className="font-normal text-[var(--text-muted)]">(brew install socat)</span></p>
+          <div className="flex items-center gap-1 bg-[var(--bg-stage)] rounded-md px-2 py-1.5">
+            <code className="text-[10px] font-mono text-[var(--text-main)] flex-1 break-all">{CMDS.macForward}</code>
+            <CopyCmd text={CMDS.macForward} />
+          </div>
+
+          <p className="text-[10px] font-bold text-[var(--text-main)] mt-1">Windows <span className="font-normal text-[var(--text-muted)]">(PowerShell as admin)</span></p>
+          <div className="flex items-center gap-1 bg-[var(--bg-stage)] rounded-md px-2 py-1.5">
+            <code className="text-[10px] font-mono text-[var(--text-main)] flex-1 break-all">{CMDS.winForward}</code>
+            <CopyCmd text={CMDS.winForward} />
+          </div>
+        </div>
+
+        {/* Scenario C: Public domain */}
+        <div className="space-y-1">
+          <p className="text-[11px]">
+            <strong className="text-[var(--text-main)]">② Public domain (HTTPS)</strong>
+          </p>
+          <p className="text-[10px] opacity-80">If your ComfyUI has a public HTTPS URL (e.g. via Cloudflare Tunnel, ngrok, or your own reverse proxy), just enter it directly — no port forwarding needed. Example: <code className="bg-[var(--bg-stage)] px-1 rounded">https://comfy.yourdomain.com</code></p>
+        </div>
+
+      </div>}
+    </div>
+  );
+}
+
+// ─── Main Panel ────────────────────────────────────────────────────────────────
 
 interface EnvironmentsPanelProps {
   config: ComfyBridgeConfig;
@@ -257,21 +353,7 @@ export function EnvironmentsPanel({ config, setConfig }: EnvironmentsPanelProps)
       </div>
 
       {/* Connection Guide */}
-      <div className="mt-2 px-2 py-2.5 rounded-lg bg-[var(--bg-panel)] border border-[var(--border-subtle)]">
-        <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1.5">
-          🔌 Connection Guide
-        </p>
-        <div className="text-[10px] text-[var(--text-muted)] leading-relaxed space-y-1.5">
-          <p><strong className="text-[var(--text-main)]">Same machine (localhost):</strong> Works directly. Start ComfyUI with <code className="bg-[var(--bg-stage)] px-1 rounded text-[9px]">--enable-cors-header</code></p>
-          <p><strong className="text-[var(--text-main)]">LAN machine (192.168.x.x):</strong> If using HTTPS cloud, browser blocks mixed content. Solutions:</p>
-          <ul className="list-disc pl-3 space-y-0.5">
-            <li>SSH tunnel: <code className="bg-[var(--bg-stage)] px-1 rounded text-[9px]">ssh -L 8188:comfy-host:8188 user@comfy-host</code> → connect to localhost:8188</li>
-            <li>Cloudflare Tunnel / ngrok → gives ComfyUI an HTTPS URL</li>
-            <li>Reverse proxy with HTTPS (Caddy/nginx) on ComfyUI machine</li>
-          </ul>
-          <p><strong className="text-[var(--text-main)]">WebSocket:</strong> Always connects directly (not affected by CORS/mixed-content)</p>
-        </div>
-      </div>
+      <ConnectionGuide />
     </div>
   );
 }

@@ -136,7 +136,9 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
     ? activeFrame.layers.byId[activeFrame.layers.order[0]]
     : undefined;
   const targetRotation = baseLayer?.rotation || 0;
-  const isFlipped = !!(baseLayer?.flip.h || baseLayer?.flip.v);
+  const flipH = baseLayer?.flip.h || false;
+  const flipV = baseLayer?.flip.v || false;
+  const isFlipped = flipH || flipV;
 
   const [visualRotation, setVisualRotation] = useState(targetRotation);
   const lastTargetRef = useRef(targetRotation);
@@ -215,16 +217,21 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
           onClick={() => resetTransformCmd.execute()}
           title={`${resetTransformCmd.name} (${resetTransformCmd.shortcutLabel})`}
         >
-          <Monitor
-            size={12}
-            className={`transition-colors duration-300 ${
-              isFlipped
-                ? "text-rose-500"
-                : targetRotation % 360 !== 0
-                  ? "text-amber-500"
-                  : "text-[var(--text-muted)]"
-            }`}
-          />
+          <motion.div
+            animate={{ scaleX: flipH ? -1 : 1, scaleY: flipV ? -1 : 1 }}
+            transition={{ type: "spring", stiffness: 380, damping: 24 }}
+          >
+            <Monitor
+              size={12}
+              className={`transition-colors duration-300 ${
+                isFlipped
+                  ? "text-rose-500"
+                  : targetRotation % 360 !== 0
+                    ? "text-amber-500"
+                    : "text-[var(--text-muted)]"
+              }`}
+            />
+          </motion.div>
         </motion.div>
         <span className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-widest hidden sm:inline">
           View

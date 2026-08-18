@@ -45,9 +45,6 @@ export const plugin: EditorPlugin = {
   slot: 'VIEWPORT_OVERLAY',
   show: 'frame-required',
   component: SmartGuides,
-  initialConfig: {
-    enabled: true,
-  },
   commands: Object.values(SMART_GUIDES_COMMANDS),
   contributions: [
     {

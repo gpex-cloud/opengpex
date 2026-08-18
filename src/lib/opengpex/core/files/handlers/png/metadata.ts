@@ -12,8 +12,14 @@
 /**
  * PNG metadata extraction — fills ImageMetadata by iterating chunks.
  *
- * Traverses PNG chunks in order, dispatching to readers, and populates
- * the V2 metadata structure. Does NOT decompress IDAT (no pixel decode).
+ * Strategy:
+ * 1. ExifReader full-file parse — extracts Orientation from any source
+ *    (eXIf chunk, XMP in iTXt, etc.). Some PNGs (e.g. Gemini-generated)
+ *    store Orientation only in XMP, not in a standard eXIf chunk.
+ * 2. Chunk iteration — reads IHDR, pHYs, iCCP, eXIf, tEXt, iTXt, tIME, gAMA
+ *    for dimensions, DPI, ICC, raw EXIF bytes, and other metadata.
+ *
+ * Does NOT decompress IDAT (no pixel decode).
  */
 
 import ExifReader from 'exifreader';
@@ -24,7 +30,8 @@ import { iccToBase64, parseIccProfileName } from '../../icc';
 
 /**
  * Extract full V2 metadata from a PNG file.
- * Streaming chunk parser — reads headers only, no IDAT decompression.
+ * Uses ExifReader for orientation (covers XMP/eXIf/other sources),
+ * then iterates chunks for remaining metadata fields.
  */
 export async function extractPngMetadata(file: File): Promise<ImageMetadata> {
   const buffer = await file.arrayBuffer();
@@ -45,6 +52,11 @@ export async function extractPngMetadata(file: File): Promise<ImageMetadata> {
   };
 
   if (!verifySignature(bytes)) return meta;
+
+  // ── ExifReader full-file parse: extract orientation from XMP/eXIf/etc. ──
+  // Must run before chunk iteration because some PNGs lack an eXIf chunk
+  // and store Orientation exclusively in XMP (iTXt). ExifReader handles both.
+  extractOrientationFromFile(buffer, meta);
 
   for (const chunk of iterateChunks(bytes)) {
     switch (chunk.type) {
@@ -188,7 +200,8 @@ function parseExifToSemantic(exifBytes: Uint8Array, meta: ImageMetadata): void {
     const fNum = tags.exif?.FNumber?.value;
     const expTime = tags.exif?.ExposureTime?.value;
     const iso = tags.exif?.ISOSpeedRatings?.value;
-    if (fNum || expTime || iso) {
+    const orientationVal = tags.exif?.Orientation?.value;
+    if (fNum || expTime || iso || orientationVal) {
       meta.capture = {
         fNumber: fNum ? (Array.isArray(fNum) ? fNum[0] / (fNum[1] || 1) : Number(fNum)) : undefined,
         exposureTime: expTime ? (Array.isArray(expTime) ? expTime[0] / (expTime[1] || 1) : Number(expTime)) : undefined,
@@ -198,8 +211,8 @@ function parseExifToSemantic(exifBytes: Uint8Array, meta: ImageMetadata): void {
               ? tags.exif.FocalLength.value[0] / (tags.exif.FocalLength.value[1] || 1)
               : Number(tags.exif.FocalLength.value))
           : undefined,
-        orientation: tags.exif?.Orientation?.value
-          ? Number(tags.exif.Orientation.value)
+        orientation: orientationVal
+          ? Number(orientationVal)
           : undefined,
       };
     }
@@ -230,7 +243,40 @@ function parseExifToSemantic(exifBytes: Uint8Array, meta: ImageMetadata): void {
     if (lat != null && lon != null) {
       meta.gps = { latitude: Number(lat), longitude: Number(lon) };
     }
+  } catch (err) {
+    console.debug('[PNG parseExif] ExifReader failed: %o', err);
+  }
+}
+
+/**
+ * Use ExifReader to parse the entire PNG file buffer for orientation.
+ * ExifReader can extract Orientation from XMP (iTXt), eXIf, or other sources.
+ * Called unconditionally — sets orientation on meta.capture if found.
+ */
+function extractOrientationFromFile(buffer: ArrayBuffer, meta: ImageMetadata): void {
+  try {
+    const tags = ExifReader.load(buffer, { expanded: true });
+
+    // Try EXIF Orientation first
+    let orientVal: unknown = tags.exif?.Orientation?.value;
+
+    // Fallback to XMP tiff:Orientation
+    if (!orientVal && (tags as Record<string, unknown>).xmp) {
+      const xmp = (tags as Record<string, Record<string, { value?: unknown; description?: string }>>).xmp;
+      const xmpOrientation = xmp['Orientation'] || xmp['tiff:Orientation'];
+      if (xmpOrientation) {
+        orientVal = xmpOrientation.value ?? xmpOrientation.description;
+      }
+    }
+
+    if (orientVal) {
+      const orientNum = Number(orientVal);
+      if (orientNum >= 1 && orientNum <= 8) {
+        meta.capture = meta.capture || {};
+        meta.capture.orientation = orientNum;
+      }
+    }
   } catch {
-    // EXIF parsing failed — non-critical, semantic fields remain empty
+    // ExifReader parse failed — non-critical, orientation remains unset
   }
 }

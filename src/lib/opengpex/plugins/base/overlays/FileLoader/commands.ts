@@ -32,20 +32,37 @@ export const FILE_LOADER_COMMANDS = {
       if (!state.isLoaded) return;
 
       const imageFiles = files.filter(f => fileService.detectFormat(f) !== 'unknown');
+      if (imageFiles.length === 0) return;
 
-      for (const file of imageFiles) {
-        const existingFrame = state.frames.order.map(id => state.frames.byId[id]).find(f => f.name === file.name);
-        if (existingFrame) {
-          const confirmed = await actions.askConfirm(
-            "Creation Exists",
-            `A creation named "${file.name}" already exists. Do you want to overwrite it?`
-          );
-          if (!confirmed) continue;
-          ctx.layers.removeFrame(existingFrame.id);
+      try {
+        for (let i = 0; i < imageFiles.length; i++) {
+          const file = imageFiles[i];
+
+          // Set importing progress (HUD always shows "Loading…" or "Loading 2/5…")
+          actions.setStateSignal(P.SIGNAL_IMPORTING, { current: i + 1, total: imageFiles.length });
+
+          // Match by frame.source (original filename with extension, set at import time)
+          const existingFrame = state.frames.order.map(id => state.frames.byId[id]).find(f => f.source === file.name);
+          if (existingFrame) {
+            const choice = await actions.askChoice("Creation Exists", [
+              { id: 'overwrite', label: 'Overwrite', description: 'Replace the existing creation', primary: true },
+              { id: 'new', label: 'New Import', description: 'Keep both as separate creations' },
+              { id: 'cancel', label: 'Never Mind', description: 'Skip this file' },
+            ], `A creation from "${file.name}" already exists.`);
+
+            if (!choice || choice === 'cancel') continue; // Cancel → skip this file
+            if (choice === 'overwrite') {
+              ctx.layers.removeFrame(existingFrame.id);
+            }
+            // 'new' → fall through to import as a new frame
+          }
+
+          // Standardized Frame Trunk Initialization Facade
+          await actions.adv.frame.create.trunk.execute({ source: file });
         }
-
-        // Standardized Frame Trunk Initialization Facade
-        await actions.adv.frame.create.trunk.execute({ source: file });
+      } finally {
+        // Always clear the signal, even on error
+        actions.setStateSignal(P.SIGNAL_IMPORTING, null);
       }
     }
   } as EditorCommand<File[]>,

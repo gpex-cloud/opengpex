@@ -4,6 +4,17 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.51
+
+- Import: batch progress indicator ("Loading 2/5…"), smarter duplicate handling (overwrite/keep both/skip), and separate GIF/TIFF pipelines for better reliability
+- Re-Canvas: new interactive edge-resize mode — drag canvas edges directly to crop or expand
+- Viewport: fixed a 1-frame stretch glitch when resizing the window
+- PNG: orientation now reads correctly from AI-generated images (e.g. Gemini) that store it in XMP
+- Layers: live displacement label shown while dragging a layer (e.g. "→ 42 ↓ 18")
+- Smart Guides: toggle state saved to preferences (persists across sessions)
+
+---
+
 ## v1.0.0-beta.50
 
 - Selection: added **Invert Selection** using polygon boolean ops for clean geometry; fixed magic wand expand/contract missing edge pixels

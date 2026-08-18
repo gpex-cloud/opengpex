@@ -30,6 +30,14 @@ import { InteractionTransaction } from '../Transaction';
  *   - onMove uses pose.aabbSize for correct snapping rect construction and
  *     pose.centerOffset for trivial reverse (no computeFragmentCenter needed).
  *   - onEnd uses worldToLocal + snapToPixel + localToWorld for pixel alignment.
+ *
+ * [Architecture Note] This handler is a candidate for migration to the LayerOverlay
+ * plugin (`plugins/base/overlays/LayerOverlay/interactions/`), registered via the
+ * plugin's `interactions` array — mirroring how ClipOverlay owns its move handler.
+ * Rationale: LayerMoveHandler is a concrete business behavior (not a framework
+ * factory like TransformHandler/AsyncHandler, nor a system fallback like
+ * ViewportPanHandler), and its visual counterpart (outline + delta label) already
+ * lives in LayerOverlay. Currently kept here for stability; relocate when ready.
  */
 export const createLayerMoveHandler = (): InteractionHandler => {
   let startCanvasPoint = { x: 0, y: 0 };

@@ -47,7 +47,6 @@ export type InteractionMode = 'pan' | 'clip' | 'craft' | (string & {});
 
 export interface InteractionState {
   isInteracting: boolean;
-  isSnapping: boolean;
   hoveredLayerId?: string | null;
   isHoveringActiveLayer?: boolean;
   interactionMode: InteractionMode;

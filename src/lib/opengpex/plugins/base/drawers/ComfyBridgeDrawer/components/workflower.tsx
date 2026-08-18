@@ -19,8 +19,8 @@
 
 'use client';
 
-import React, { useMemo } from 'react';
-import { ChevronDown, Layers, Frame, FileJson, Trash, Dices } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { ChevronDown, ChevronRight, Layers, Frame, FileJson, Trash, Dices } from 'lucide-react';
 import StatusBanner from '@opengpex/editor/widgets/StatusBanner';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import ComfyNumberInput from '@opengpex/editor/widgets/ComfyNumberInput';
@@ -83,8 +83,8 @@ export function WorkflowSelector({ workflows, activeWorkflow, paramValues, rando
               {activeWorkflow && (
                 <span className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border shrink-0 ${
                   activeWorkflow.mode === 'img2img'
-                    ? 'text-emerald-600 border-emerald-500/30 bg-emerald-500/10'
-                    : 'text-blue-600 border-blue-500/30 bg-blue-500/10'
+                    ? 'text-cyan-600 border-cyan-500/30 bg-cyan-500/10'
+                    : 'text-amber-600 border-amber-500/30 bg-amber-500/10'
                 }`}>
                   {activeWorkflow.mode}
                 </span>
@@ -158,6 +158,56 @@ function SortedParams({ params, paramValues, randomSeedPaths, onParamChange, onT
   );
 }
 
+// ─── Collapsible Prompt ────────────────────────────────────────────────────────
+
+function CollapsiblePrompt({ param, value, onChange }: { param: ExposedParam; value: unknown; onChange: (val: unknown) => void }) {
+  const cfg = param.config as PromptConfig;
+  const strVal = typeof value === 'string' ? value : cfg.default;
+  const isNeg = cfg.sentiment === 'negative';
+  // Negative prompts default collapsed, positive default expanded
+  const [collapsed, setCollapsed] = useState(isNeg);
+
+  const label = param.nodeTitle || (isNeg ? 'Negative Prompt' : 'Positive Prompt');
+  const preview = strVal.length > 60 ? strVal.slice(0, 60) + '…' : strVal;
+
+  return (
+    <div className="flex flex-col bg-[var(--bg-stage)] rounded-xl border border-[var(--border-subtle)] focus-within:border-emerald-500/50 transition-colors">
+      {/* Clickable header */}
+      <button
+        type="button"
+        onClick={() => setCollapsed(!collapsed)}
+        className="flex items-center gap-1.5 px-2.5 py-2 w-full text-left"
+      >
+        {collapsed ? <ChevronRight size={10} className="text-[var(--text-muted)] shrink-0" /> : <ChevronDown size={10} className="text-[var(--text-muted)] shrink-0" />}
+        <span className={`text-[8px] font-black uppercase tracking-tight ${isNeg ? 'text-rose-500/80' : 'text-emerald-500/80'}`}>
+          {label}
+        </span>
+        {collapsed && strVal.length > 0 && (
+          <span className="text-[9px] text-[var(--text-muted)] truncate flex-1 ml-1 opacity-60">
+            {preview}
+          </span>
+        )}
+        {!collapsed && strVal.length > 0 && (
+          <span className="ml-auto shrink-0" onClick={(e) => { e.stopPropagation(); onChange(''); }}>
+            <Trash size={10} className="text-[var(--text-muted)] hover:text-rose-500 transition-colors" />
+          </span>
+        )}
+      </button>
+      {/* Textarea (shown when expanded) */}
+      {!collapsed && (
+        <div className="px-2 pb-2">
+          <textarea
+            value={strVal}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={cfg.placeholder || 'Describe what you want...'}
+            className={`w-full bg-transparent border-none text-[11px] text-[var(--text-main)] resize-none focus:outline-none placeholder:text-[var(--text-muted)] leading-relaxed px-1 ${isNeg ? 'h-[136px]' : 'h-48'}`}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Exposed Parameter Control ─────────────────────────────────────────────────
 
 /** Helper: detect if a param represents a seed value */
@@ -170,35 +220,9 @@ function isSeedParam(param: ExposedParam): boolean {
 function ExposedParamControl({ param, value, isRandomSeed, onChange, onToggleRandom }: { param: ExposedParam; value: unknown; isRandomSeed: boolean; onChange: (val: unknown) => void; onToggleRandom: (isRandom: boolean) => void }) {
   const displayLabel = param.paramName;
 
-  // Prompt textarea (AIBridgeDrawer style)
+  // Prompt textarea (AIBridgeDrawer style) with collapsible chevron
   if (param.type === 'prompt') {
-    const cfg = param.config as PromptConfig;
-    const strVal = typeof value === 'string' ? value : cfg.default;
-    const isNeg = cfg.sentiment === 'negative';
-    return (
-      <div className="flex flex-col bg-[var(--bg-stage)] p-2 rounded-xl border border-[var(--border-subtle)] focus-within:border-emerald-500/50 transition-colors">
-        <div className="flex items-center justify-between mb-1.5 px-1">
-          <span className={`text-[8px] font-black uppercase tracking-tight ${isNeg ? 'text-rose-500/80' : 'text-[var(--text-muted)]'}`}>
-            {isNeg ? 'Negative Prompt' : displayLabel}
-          </span>
-          {strVal.length > 0 && (
-            <button
-              onClick={() => onChange('')}
-              className="text-[var(--text-muted)] hover:text-rose-500 transition-colors p-0.5 focus:outline-none"
-              title="Clear text"
-            >
-              <Trash size={10} />
-            </button>
-          )}
-        </div>
-        <textarea
-          value={strVal}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={cfg.placeholder || 'Describe what you want...'}
-          className="w-full h-48 bg-transparent border-none text-[11px] text-[var(--text-main)] resize-none focus:outline-none placeholder:text-[var(--text-muted)] leading-relaxed px-1"
-        />
-      </div>
-    );
+    return <CollapsiblePrompt param={param} value={value} onChange={onChange} />;
   }
 
   // Number input (ComfyNumberInput with +/- buttons)

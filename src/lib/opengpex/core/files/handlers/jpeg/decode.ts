@@ -49,8 +49,7 @@ export async function decodeJpeg(
       const img = await createImageBitmap(file);
       dimensions = { w: img.width, h: img.height };
       img.close();
-      console.debug('[ColorMgmt] JPEG decode: %s conversion=none, detectedCS=%s, frameCS=%s',
-        file.name, detectedCS, strategy.frameColorSpace);
+      // console.debug('[ColorMgmt] JPEG decode: %s conversion=none, detectedCS=%s, frameCS=%s', file.name, detectedCS, strategy.frameColorSpace);
       break;
     }
 
@@ -79,8 +78,7 @@ export async function decodeJpeg(
       outCtx.putImageData(outImageData, 0, 0);
       displayBlob = await outCanvas.convertToBlob({ type: 'image/png' });
 
-      console.debug('[ColorMgmt] JPEG decode: %s matrix %s→%s',
-        file.name, detectedCS, strategy.frameColorSpace);
+      // console.debug('[ColorMgmt] JPEG decode: %s matrix %s→%s', file.name, detectedCS, strategy.frameColorSpace);
       break;
     }
 
@@ -101,8 +99,7 @@ export async function decodeJpeg(
       }
       displayBlob = await rgbaToBlob(data, width, height);
 
-      console.debug('[ColorMgmt] JPEG decode: %s icc-engine %s→%s',
-        file.name, detectedCS, strategy.frameColorSpace);
+      // console.debug('[ColorMgmt] JPEG decode: %s icc-engine %s→%s', file.name, detectedCS, strategy.frameColorSpace);
       break;
     }
   }

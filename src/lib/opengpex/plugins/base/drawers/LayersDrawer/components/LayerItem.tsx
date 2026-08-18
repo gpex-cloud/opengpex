@@ -139,7 +139,7 @@ export const LayerItem = React.memo(
           >
             {isActive && (
               <div
-                className={`absolute left-0 top-2 bottom-2 w-0.5 bg-emerald-500 rounded-r-full shadow-[0_0_8px_rgba(16,185,129,0.4)] transition-all duration-300 ${isScrolling ? "opacity-50" : "opacity-100"}`}
+                className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-r-full transition-all duration-300 ${layer.metadata?.physicalPixels === false ? "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.4)]" : "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]"} ${isScrolling ? "opacity-50" : "opacity-100"}`}
               />
             )}
           </div>

@@ -26,22 +26,7 @@ export const PLUGIN_ID = 'overlays.smart_guides';
 export const PLUGIN_AUTHOR = 'opengpex';
 
 /**
- * Custom Config Interface
- *
- * Snap-related settings (snapToCanvas, snapToBirth, snapToLayers, excludeLayerTypes,
- * ignoreLockedLayers, ignoreSmallLayers, smallLayerThreshold, maxSnapTargets,
- * edgeSnapScope) have been migrated to PresetsFactory (core/helpers/preferences/presets.ts).
- * This config now only holds plugin-specific UI state.
- *
- * @see docs/opengpex/plans/20260805_stage_reverse_dependency_issue.md
- */
-export interface SmartGuidesConfig {
-  enabled: boolean;
-}
-
-/**
  * Command IDs
  */
 export const CMD_TOGGLE = 'cmd.toggle';
 export const CMD_OPEN_SETTINGS = 'cmd.open_settings';
-

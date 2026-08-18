@@ -60,7 +60,6 @@ export const initialState: EditorData = {
     smartguides: null,
     interactionMode: 'pan',
     isInteracting: false,
-    isSnapping: true,
     signals: {},
     cursorOverride: null,
   },

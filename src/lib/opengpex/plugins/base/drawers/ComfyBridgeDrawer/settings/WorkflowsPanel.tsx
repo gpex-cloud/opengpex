@@ -389,7 +389,7 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
                         </span>
                         <div className="flex items-center gap-2 text-[10px] text-[var(--text-secondary)] flex-wrap">
                           <span>{summary.nodeCount} nodes</span>
-                          <span className={`font-bold ${hasInput ? 'text-emerald-500' : 'text-blue-500'}`}>
+                          <span className={`font-bold ${hasInput ? 'text-cyan-500' : 'text-amber-500'}`}>
                             {hasInput ? 'img2img' : 'txt2img'}
                           </span>
                           {summary.completed && <span className="text-green-500">✓ completed</span>}
@@ -453,7 +453,7 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
           <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
             <span>{parseResult.nodeCount} nodes</span>
             <span>•</span>
-            <span className={`inline-flex items-center gap-0.5 font-bold ${parseResult.inputNodeId ? 'text-emerald-500' : 'text-blue-500'}`}>
+            <span className={`inline-flex items-center gap-0.5 font-bold ${parseResult.inputNodeId ? 'text-cyan-500' : 'text-amber-500'}`}>
               {parseResult.inputNodeId ? (
                 <><ImageIcon size={9} aria-hidden="true" /> img2img</>
               ) : (
@@ -544,7 +544,7 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
       {/* Import Hints */}
       {importMode === 'idle' && (
         <div className="mt-2 px-1">
-          <p className="text-[10px] text-[var(--text-muted)] italic leading-relaxed opacity-60">
+          <p className="text-[11px] text-[var(--text-secondary)] italic leading-relaxed opacity-80">
             ℹ️ Export from ComfyUI: use &quot;Save (API Format)&quot; → upload/paste here.
             System auto-detects LoadImage input and SaveImage/PreviewImage output nodes.
           </p>
@@ -566,8 +566,8 @@ function WorkflowCard({ workflow, onEdit, onRemove }: { workflow: UserWorkflow; 
           </span>
           <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border shrink-0 ${
             workflow.mode === 'img2img'
-              ? 'text-emerald-600 border-emerald-500/30 bg-emerald-500/10'
-              : 'text-blue-600 border-blue-500/30 bg-blue-500/10'
+              ? 'text-cyan-600 border-cyan-500/30 bg-cyan-500/10'
+              : 'text-amber-600 border-amber-500/30 bg-amber-500/10'
           }`}>
             {workflow.mode}
           </span>

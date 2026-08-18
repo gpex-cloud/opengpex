@@ -45,7 +45,7 @@ import * as P from '@opengpex/editor/core/advanced/protocols';
 import type { DecodeResult, ImageMetadata } from '@opengpex/editor/core/files/types';
 
 // Strategy imports
-import { addNewFrame, importSingleImage } from './importers';
+import { addFrameFromFile, addFrameFromDecoded } from './importers';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Shared helper: compute branch naming (seqNum + fullName)
@@ -77,7 +77,7 @@ export const FrameCreateCommands = {
     name: 'Initialize Trunk Frame',
     execute: async (ctx: EditorContextValue, payload: { source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }): Promise<string> => {
       const { source, switchFrame = true, extra } = payload;
-      return addNewFrame(ctx, source, { switchFrame, extra });
+      return addFrameFromFile(ctx, source, { switchFrame, extra });
     },
   } as EditorCommand<{ source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }, Promise<string>>,
 
@@ -98,7 +98,7 @@ export const FrameCreateCommands = {
       try {
         const { seqNum, fullName } = computeBranchNaming(state, activeFrame);
 
-        const frameId = await addNewFrame(ctx, source, {
+        const frameId = await addFrameFromFile(ctx, source, {
           switchFrame: false,
           extra,
           parentId: activeFrame.id,
@@ -157,8 +157,10 @@ export const FrameCreateCommands = {
         //   - Layer.metadata.imageMetadata (drives MetadataPanel display)
         //   - Color pipeline strategy resolution (colorSpace → Frame.colorSpace)
         //   - DPI / bitDepth detection
-        const parentMainLayer = activeFrame.layers.byId[activeFrame.layers.order[0]];
-        const parentImageMetadata = parentMainLayer?.metadata?.imageMetadata as ImageMetadata | undefined;
+        // Find source layer by isSource flag (stable across reorder/deletion), fallback to order[0]
+        const parentSourceLayer = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]).find(l => l.isSource)
+          || activeFrame.layers.byId[activeFrame.layers.order[0]];
+        const parentImageMetadata = parentSourceLayer?.metadata?.imageMetadata as ImageMetadata | undefined;
 
         const canvasDim = {
           w: Math.round(cropRect.w),
@@ -187,8 +189,8 @@ export const FrameCreateCommands = {
         const { seqNum, fullName } = computeBranchNaming(state, activeFrame);
         const syntheticFile = new File([highResBlob], `${fullName}.png`, { type: 'image/png' });
 
-        // ── Step 3: Delegate to importSingleImage (unified frame creation) ───────
-        const { frameId, thumbnailUrl } = await importSingleImage(ctx, syntheticDecodeResult, syntheticFile, 'local', {
+        // ── Step 3: Delegate to addFrameFromDecoded (unified frame creation) ─────
+        const { frameId, thumbnailUrl } = await addFrameFromDecoded(ctx, syntheticDecodeResult, syntheticFile, {
           switchFrame: false,
           parentId: activeFrame.id,
           seqNum,

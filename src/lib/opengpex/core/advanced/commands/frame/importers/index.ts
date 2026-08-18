@@ -31,7 +31,8 @@ import type { DecodeResult } from '@opengpex/editor/core/files/types';
 import type { DecodeOutput } from './_types';
 import { isVectorFormat, promptVectorDpi } from './vector';
 
-export type { DecodeOutput, ImportOptions } from './_types';
+export type { DecodeOutput, ImportOptions, ImportingSignalValue } from './_types';
+export { SIGNAL_IMPORTING } from './_types';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // resolveAndDecode — Canonical entry point
@@ -53,10 +54,7 @@ export async function resolveAndDecode(
 
   if (typeof source === 'string') {
     sourceType = 'url';
-    file = await ctx.actions.withSignal(
-      'sys.asset.downloading',
-      () => ctx.pixels.utils.fetchFromUrl(source),
-    );
+    file = await ctx.pixels.utils.fetchFromUrl(source);
   } else {
     file = source;
   }
@@ -79,10 +77,7 @@ export async function resolveAndDecode(
   const { actions, files } = ctx;
   let decoded: DecodeResult;
   try {
-    decoded = await actions.withSignal(
-      files.needsTranscoding(file) ? 'sys.asset.transcoding' : '',
-      () => files.decode(file, decodeOptions),
-    );
+    decoded = await files.decode(file, decodeOptions);
   } catch (err) {
     console.error(`[FrameCreate] File decode failed:`, err);
     actions.notifyHUD(`Failed to process file. The format may not be supported.`, 'error');
@@ -93,15 +88,16 @@ export async function resolveAndDecode(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// addNewFrame — Unified "File → Frame" pipeline
+// addFrameFromFile — Unified "File → Frame" pipeline
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { ImportOptions } from './_types';
-import { importSingleImage } from './single';
-import { importMultiSubImage } from './multi';
+import { importSingleImage, buildFrameContent } from './single';
+import { importAnimatedGif } from './multi-gif';
+import { importMultiPageTiff } from './multi-tiff';
 
 /**
- * addNewFrame — The single entry point for "File/URL → new Frame in store".
+ * addFrameFromFile — The single entry point for "File/URL → new Frame in store".
  *
  * Encapsulates: resolveAndDecode + multi-page routing + importSingleImage.
  * Both trunk and branchFromFile delegate to this function, differing only in opts.
@@ -111,7 +107,7 @@ import { importMultiSubImage } from './multi';
  * @param opts - Import options (switchFrame, parentId, seqNum, nameOverride, extra, dpi)
  * @returns Frame ID of the created frame, or empty string if user cancelled / decode failed.
  */
-export async function addNewFrame(
+export async function addFrameFromFile(
   ctx: EditorContextValue,
   source: File | string,
   opts: ImportOptions,
@@ -123,9 +119,16 @@ export async function addNewFrame(
   const { decoded, file, sourceType, chosenDpi } = result;
   const finalOpts: ImportOptions = { ...opts, dpi: opts.dpi ?? chosenDpi };
 
-  // 2. Route: multi-sub-image or single image
+  // 2. Route: multi-sub-image (GIF / TIFF) or single image
   if (decoded.subImages.length > 1) {
-    const multiResult = await importMultiSubImage(ctx, decoded, file, sourceType, finalOpts);
+    let multiResult: string | null;
+    if (decoded.subImages[0].delay != null) {
+      // Animated GIF/APNG
+      multiResult = await importAnimatedGif(ctx, decoded, file, sourceType, finalOpts);
+    } else {
+      // Multi-page TIFF
+      multiResult = await importMultiPageTiff(ctx, decoded, file, finalOpts);
+    }
     if (multiResult !== null) return multiResult;
     // null = fall through to single image (TIFF "First Page Only" mode)
   }
@@ -135,8 +138,154 @@ export async function addNewFrame(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Re-exports
+// addFrameFromDecoded — Create a new frame from pre-decoded data
+// (used by branchFromSelection which already has decoded content)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export { importSingleImage } from './single';
-export { importMultiSubImage } from './multi';
+/**
+ * addFrameFromDecoded — Creates a new frame from an already-decoded result.
+ *
+ * Unlike `addFrameFromFile` which starts from a File/URL (and runs resolveAndDecode),
+ * this function accepts a pre-built DecodeResult. Used by branchFromSelection
+ * which composites the selection region and wraps it as a synthetic DecodeResult.
+ *
+ * @param ctx - Editor context
+ * @param decoded - Pre-built DecodeResult (e.g. from composite)
+ * @param file - Synthetic File object (for naming/metadata)
+ * @param opts - Import options (switchFrame, parentId, seqNum, nameOverride, extra)
+ * @returns { frameId, thumbnailUrl }
+ */
+export async function addFrameFromDecoded(
+  ctx: EditorContextValue,
+  decoded: import('@opengpex/editor/core/files/types').DecodeResult,
+  file: File,
+  opts: ImportOptions,
+): Promise<{ frameId: string; thumbnailUrl: string }> {
+  return importSingleImage(ctx, decoded, file, 'local', opts);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// revertFrame — In-place rebuild from original blob (counterpart to addFrameFromFile)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * revertFrame — Rebuilds a frame's content from its original asset blob.
+ *
+ * Counterpart to `addFrameFromFile`:
+ * - addFrameFromFile: File/URL → decode → buildFrameContent → addFrame (new frame)
+ * - revertFrame: frame.assetId → hydrate → decode → buildFrameContent → updateFrame (in-place)
+ *
+ * @param ctx - Editor context
+ * @param frameId - ID of the frame to revert (must have frame.assetId)
+ * @returns true if reverted successfully, false otherwise
+ */
+export async function revertFrame(ctx: EditorContextValue, frameId: string): Promise<boolean> {
+  const { assets, actions, state, files } = ctx;
+  const frame = state.frames.byId[frameId];
+  if (!frame) return false;
+
+  const originalAssetId = frame.assetId;
+  if (!originalAssetId) {
+    actions.setInteraction({ hud: { message: 'Original asset ID missing — cannot revert.', type: 'error' } });
+    return false;
+  }
+
+  try {
+    // 1. Hydrate the original asset blob from IndexedDB
+    await assets.hydrate(new Set([originalAssetId]));
+    const assetEntry = assets.get(originalAssetId);
+    if (!assetEntry || !assetEntry.blob) {
+      throw new Error('Original physical asset blob not found in store');
+    }
+
+    // 2. Reconstruct File from blob
+    const originalFileName = frame.source || frame.name || 'image.png';
+    const originalFile = new File([assetEntry.blob], originalFileName, { type: assetEntry.blob.type });
+
+    // 3. Full decode + rebuild via shared buildFrameContent
+    const decoded = await files.decode(originalFile);
+    const content = await buildFrameContent(ctx, decoded, originalFile, 'local');
+
+    // 4. Update frame in-place (preserves frame ID and list position)
+    actions.updateFrame(frameId, {
+      canvas: content.canvas,
+      camera: content.camera,
+      clipBoxes: {},
+      canvasCropBox: content.canvasCropBox,
+      layers: content.layers,
+      activeLayerId: content.activeLayerId,
+    });
+
+    // 5. Clear undo/redo history
+    actions.resetHistory();
+    actions.setInteraction({ hud: { message: 'Reverted to original — all edits discarded.', type: 'success' } });
+    return true;
+  } catch (err) {
+    console.error('[FrameService] Standard revert failed:', err);
+    actions.setInteraction({ hud: { message: 'Failed to revert. Original asset may be missing.', type: 'error' } });
+    return false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// revertGifFrame — In-place GIF rebuild (uses shared buildGifFrameContent)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import { buildGifFrameContent } from './multi-gif';
+
+/**
+ * revertGifFrame — Re-decodes original GIF and rebuilds frame layers in-place.
+ *
+ * Uses the same `buildGifFrameContent` as GIF import — unified frame count dialog,
+ * decimation logic, and layer construction. Only the final step differs:
+ * import → addFrame, revert → updateFrame.
+ */
+export async function revertGifFrame(ctx: EditorContextValue, frameId: string): Promise<boolean> {
+  const { assets, actions, state, files } = ctx;
+  const frame = state.frames.byId[frameId];
+  if (!frame) return false;
+
+  const originalGifAssetId = (frame.extra as Record<string, unknown>)?.originalGifAssetId as string | undefined;
+  if (!originalGifAssetId) return false;
+
+  try {
+    // 1. Hydrate the original GIF binary from asset store
+    await assets.hydrate(new Set([originalGifAssetId]));
+    const gifEntry = assets.get(originalGifAssetId);
+    if (!gifEntry || !gifEntry.blob) {
+      throw new Error('Original GIF asset not found in store');
+    }
+
+    // 2. Reconstruct File and decode
+    const originalName = frame.source || frame.name + '.gif';
+    const gifFile = new File([gifEntry.blob], originalName, { type: 'image/gif' });
+    const decoded = await files.decode(gifFile);
+
+    if (!decoded.subImages || decoded.subImages.length <= 1 || decoded.subImages[0].delay == null) {
+      throw new Error('Re-decoded GIF has no animation frames');
+    }
+
+    // 3. Build GIF content (shared with import — includes frame count dialog)
+    const content = await buildGifFrameContent(ctx, decoded, gifFile, 'local');
+    if (!content) return false; // User cancelled
+
+    // 4. Update frame in-place
+    actions.updateFrame(frameId, {
+      canvas: content.canvas,
+      camera: content.camera,
+      clipBoxes: {},
+      canvasCropBox: content.canvasCropBox,
+      layers: content.layers,
+      activeLayerId: content.activeLayerId,
+      extra: { ...(frame.extra as Record<string, unknown>), gifSequenceId: content.gifSequenceId, gifFrameCount: content.gifFrameCount, originalGifAssetId },
+    });
+
+    actions.resetHistory();
+    actions.setInteraction({ hud: { message: `GIF reverted: ${content.gifFrameCount} frames restored.`, type: 'success' } });
+    return true;
+  } catch (err) {
+    console.error('[FrameService] GIF revert failed:', err);
+    actions.setInteraction({ hud: { message: 'Failed to revert GIF. See console for details.', type: 'error' } });
+    return false;
+  }
+}

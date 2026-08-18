@@ -19,8 +19,7 @@
 
 'use client';
 
-import React, { useEffect } from 'react';
-import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
+import React from 'react';
 import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 import { Magnet } from 'lucide-react';
 import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
@@ -32,20 +31,9 @@ import { useSmartGuidesFastSync } from './useFastSync';
  */
 export function SmartGuides() {
   const { isEnabled } = useSmartGuides();
-  const { state } = useEditorState();
-  const { actions } = useEditorServices();
-  const { isSnapping } = state.interaction;
   
   const xRef = React.useRef<HTMLDivElement>(null);
   const yRef = React.useRef<HTMLDivElement>(null);
-
-  // Core decoupling logic: Synchronize plugin configuration to core interaction state
-  useEffect(() => {
-    const nextEnabled = !!isEnabled;
-    if (isSnapping !== nextEnabled) {
-      actions.setInteraction({ isSnapping: nextEnabled });
-    }
-  }, [isEnabled, isSnapping, actions]);
 
   // Core synchronization logic (extracted to useFastSync.ts)
   useSmartGuidesFastSync(xRef, yRef, !!isEnabled);

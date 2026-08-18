@@ -55,9 +55,11 @@ export function useImageInfoMetadata() {
          };
       }
 
-      const mainLayer = activeFrame.layers.byId[activeFrame.layers.order[0]];
-      const metadata = mainLayer?.metadata;
-      const imageMetadata = metadata?.imageMetadata as ImageMetadata | undefined;
+       // Find source layer by isSource flag (stable across reorder/deletion), fallback to order[0]
+       const sourceLayer = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]).find(l => l.isSource)
+         || activeFrame.layers.byId[activeFrame.layers.order[0]];
+       const metadata = sourceLayer?.metadata;
+       const imageMetadata = metadata?.imageMetadata as ImageMetadata | undefined;
 
       const visibleContentLayers = activeFrame.layers.order.filter(id => {
          const l = activeFrame.layers.byId[id];

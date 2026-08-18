@@ -18,8 +18,8 @@
  */
 
 import { useRef } from 'react';
-import { useEditorServices } from '@opengpex/editor/core/context';
-import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
+import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
+import { useFastSync, useFastAnchorSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { Motion } from '@opengpex/editor/core/motion';
 import { Layer } from '@opengpex/editor/core/types';
 
@@ -142,4 +142,104 @@ export function useLayerOverlaySync(
   });
 
   return { sync: () => { } };
+}
+
+// ─── useLayerMoveDeltaSync ─────────────────────────────────────────────────────
+
+/**
+ * Fast-track hook for the layer-move delta label (e.g. "→ 42  ↓ 18").
+ *
+ * Fully self-contained in the plugin — does NOT require any transient from core handlers.
+ *
+ * Key insight: During a drag, the React state (committed) does NOT change (the
+ * InteractionTransaction hasn't committed yet). The `useFastSync` callback receives
+ * `f` = merged frame (committed + buffered), which reflects the LIVE position.
+ * We capture the committed frame via `useEditorState()` (stable during drag) and
+ * compare it with the merged `f` to derive the displacement.
+ *
+ * Detection: `v.buffered.layers[id].cx !== undefined` means a layer move is active.
+ * When the interaction ends (buffer cleared), the delta becomes 0 → label hides.
+ */
+export function useLayerMoveDeltaSync(isActive: boolean) {
+  const deltaRef = useRef<HTMLDivElement>(null);
+  const { geometry } = useEditorServices();
+  // Committed frame (React state): stable during drag, updates only on commit
+  const { activeFrame: committedFrame } = useEditorState();
+
+  // ─── Position: anchor to the active layer's bottom-left (screen space) ───
+  useFastAnchorSync(deltaRef, isActive, {
+    selector: (v, f) => {
+      const activeLayerId = f.activeLayerId;
+      if (!activeLayerId) return null;
+
+      // Buffer uses composite key: "frameId:layerId"
+      const compositeKey = `${f.id}:${activeLayerId}`;
+      const buffered = v.buffered.layers[compositeKey];
+      if (!buffered || buffered.cx === undefined) return null;
+
+      // f = merged frame (live position during drag)
+      const liveLayer = f.layers.byId[activeLayerId];
+      if (!liveLayer) return null;
+
+      // Use the layer's visible AABB bottom-left corner in local space
+      const pose = geometry.transform.computeLayerMovePose(liveLayer);
+      const visibleCenter = { x: liveLayer.cx + pose.centerOffset.x, y: liveLayer.cy + pose.centerOffset.y };
+      const local = geometry.space.worldToLocal(visibleCenter.x, visibleCenter.y, f);
+      return { x: local.x - pose.aabbSize.w / 2, y: local.y + pose.aabbSize.h / 2 };
+    },
+    offset: { x: 0, y: 8 },
+    space: 'local',
+  });
+
+  // ─── Content: compute and display dx/dy text + visibility ───
+  useFastSync(deltaRef, isActive, (v, f) => {
+    const el = deltaRef.current;
+    if (!el) return;
+
+    const activeLayerId = f.activeLayerId;
+    if (!activeLayerId) {
+      el.style.display = 'none';
+      return;
+    }
+
+    // Buffer uses composite key: "frameId:layerId"
+    const compositeKey = `${f.id}:${activeLayerId}`;
+    const buffered = v.buffered.layers[compositeKey];
+    if (!buffered || buffered.cx === undefined) {
+      el.style.display = 'none';
+      return;
+    }
+
+    // committedFrame = React state (unchanged during drag)
+    const committedLayer = committedFrame?.layers.byId[activeLayerId];
+    if (!committedLayer) {
+      el.style.display = 'none';
+      return;
+    }
+
+    // f = merged frame → f.layers.byId[id].cx = live position
+    const liveLayer = f.layers.byId[activeLayerId];
+    if (!liveLayer) {
+      el.style.display = 'none';
+      return;
+    }
+
+    const dx = Math.round(liveLayer.cx - committedLayer.cx);
+    const dy = Math.round(liveLayer.cy - committedLayer.cy);
+
+    // Hide if no meaningful displacement (avoids flashing on static clicks)
+    if (dx === 0 && dy === 0) {
+      el.style.display = 'none';
+      return;
+    }
+
+    const hArrow = dx >= 0 ? '→' : '←';
+    const vArrow = dy >= 0 ? '↓' : '↑';
+
+    const span = el.firstElementChild as HTMLSpanElement;
+    if (span) span.textContent = `${hArrow} ${Math.abs(dx)}  ${vArrow} ${Math.abs(dy)}`;
+    el.style.display = '';
+  });
+
+  return { deltaRef };
 }

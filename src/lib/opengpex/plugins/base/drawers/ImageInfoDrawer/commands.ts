@@ -78,8 +78,10 @@ export const IMAGE_INFO_COMMANDS = {
          const { w: exportW, h: exportH } = calcFinalDims(baseW, baseH, config);
 
          const dpi = config.dpi || activeFrame.dpi || 72;
-         const baseLayer = activeFrame.layers.byId[activeFrame.layers.order[0]];
-         const layerMeta = baseLayer?.metadata?.imageMetadata as ImageMetadata | undefined;
+         // Find source layer by isSource flag (stable across reorder/deletion), fallback to order[0]
+         const sourceLayer = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]).find(l => l.isSource)
+           || activeFrame.layers.byId[activeFrame.layers.order[0]];
+         const layerMeta = sourceLayer?.metadata?.imageMetadata as ImageMetadata | undefined;
 
          // Detect if the caller wants a post-composite resize (target size ≠ source size).
          const needsResize = exportW !== baseW || exportH !== baseH;
@@ -147,7 +149,7 @@ export const IMAGE_INFO_COMMANDS = {
          // ── sourceBlob: retrieve from AssetStore via base layer's assetId ──
          // The rawBlob was stored at import time via assets.register(displayBlob, { rawBlob })
          // and persisted in IndexedDB under key `raw:${assetId}`.
-         const baseLayerAssetId = baseLayer?.assetId;
+         const baseLayerAssetId = sourceLayer?.assetId;
          const sourceBlob: Blob | null = baseLayerAssetId
             ? await assetStore.getRaw(baseLayerAssetId)
             : null;

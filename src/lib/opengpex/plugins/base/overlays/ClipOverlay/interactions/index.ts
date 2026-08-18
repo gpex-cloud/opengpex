@@ -24,11 +24,13 @@
  *   - guard.ts              — shared `makeClipToolGuard` strategy dispatch helper
  *   - move.ts              — unified move + peel for ALL selection types (tool-agnostic)
  *   - tools/regular.ts      — rect/ellipse crop box handler (resize, create)
+ *   - tools/recanvas.ts     — dedicated Re-Canvas handler (move, resize, create)
  *   - tools/lasso.ts        — free-form polygon selection handler (create)
  *   - tools/wand.ts         — magic wand flood-fill selection handler (create)
  */
 
 export { createSelectionMoveHandler } from './move';
+export { createReCanvasHandler } from './tools/recanvas';
 export { createClipBoxHandler } from './tools/regular';
 export { createLassoHandler, lassoPreviewPathRef } from './tools/lasso';
 export { createWandHandler } from './tools/wand';

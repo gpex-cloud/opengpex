@@ -78,7 +78,7 @@ export function ClipOverlayMain() {
     isIrregularTool,
   } = useClipOverlayCommands();
 
-  useClipCursor(isClipActive, cropTool);
+  useClipCursor(isClipActive, cropTool, boxRef, isReCanvas);
 
   const { state } = useEditorState();
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -252,37 +252,6 @@ export function ClipOverlayMain() {
               </div>
             );
           })}
-
-          {/* Edge handles: hit area straddles the selection edge (30% outside, 70% inside)
-              matching corner handle offset. Visual line at outer edge = ~5px from ants. */}
-          <div
-            className="absolute top-1/2 left-0 w-4 h-14 cursor-ew-resize group/edge"
-            style={{ transform: "translate(-30%, -50%)", zIndex: 10 }}
-            data-handle="w"
-          >
-            <div className={`absolute left-0 top-1/2 w-[2px] h-12 -translate-y-1/2 shadow-sm transition-opacity duration-200 opacity-0 group-hover/edge:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`} />
-          </div>
-          <div
-            className="absolute top-1/2 right-0 w-4 h-14 cursor-ew-resize group/edge"
-            style={{ transform: "translate(30%, -50%)", zIndex: 10 }}
-            data-handle="e"
-          >
-            <div className={`absolute right-0 top-1/2 w-[2px] h-12 -translate-y-1/2 shadow-sm transition-opacity duration-200 opacity-0 group-hover/edge:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`} />
-          </div>
-          <div
-            className="absolute left-1/2 top-0 w-14 h-4 cursor-ns-resize group/edge"
-            style={{ transform: "translate(-50%, -30%)", zIndex: 10 }}
-            data-handle="n"
-          >
-            <div className={`absolute top-0 left-1/2 w-12 h-[2px] -translate-x-1/2 shadow-sm transition-opacity duration-200 opacity-0 group-hover/edge:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`} />
-          </div>
-          <div
-            className="absolute left-1/2 bottom-0 w-14 h-4 cursor-ns-resize group/edge"
-            style={{ transform: "translate(-50%, 30%)", zIndex: 10 }}
-            data-handle="s"
-          >
-            <div className={`absolute bottom-0 left-1/2 w-12 h-[2px] -translate-x-1/2 shadow-sm transition-opacity duration-200 opacity-0 group-hover/edge:opacity-100 ${isReCanvas ? "bg-red-500" : "bg-white"}`} />
-          </div>
 
           {/* Rule of Thirds Grid */}
           <div

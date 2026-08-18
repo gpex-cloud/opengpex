@@ -48,7 +48,19 @@ import {
   useEditorServices,
 } from "@opengpex/editor/core/context";
 import type { FileLoaderCommandsMap } from './commands.d';
+import type { ImportingSignalValue } from './protocols';
+import { SIGNAL_IMPORTING } from './protocols';
 import { GITHUB_REPO_URL } from "@opengpex/editor/core/helpers/config";
+
+// ─── HUD Title/Subtitle Helpers ─────────────────────────────────────────────
+
+/** Compute the HUD title based on importing signal progress. */
+function getImportingTitle(signal: ImportingSignalValue | null): string {
+  if (!signal) return '';
+  const { current, total } = signal;
+  const progress = total > 1 ? ` ${current}/${total}` : '';
+  return `Loading${progress}…`;
+}
 
 /**
  * FileLoaderComponent: Flagship global drag-and-drop service component (main component)
@@ -58,8 +70,10 @@ export function FileLoaderComponent() {
   const [isOver, setIsOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { state } = useEditorState();
-  const isTranscoding = !!state.interaction.signals["sys.asset.transcoding"];
-  const isDownloading = !!state.interaction.signals["sys.asset.downloading"];
+
+  // Unified importing signal (replaces separate transcoding/downloading booleans)
+  const importingSignal = state.interaction.signals[SIGNAL_IMPORTING] as unknown as ImportingSignalValue | null;
+  const isImporting = !!importingSignal;
 
   // Track restoreTimedOut signal in a ref so it's accessible inside event listeners.
   // Must sync via useEffect (not during render) per react-hooks/refs rule.
@@ -137,13 +151,9 @@ export function FileLoaderComponent() {
           }
         />
         <EditorHUD
-          isVisible={isTranscoding || isDownloading}
-          title={isTranscoding ? "Converting…" : "Downloading…"}
-          subtitle={
-            isTranscoding
-              ? "Transcoding file for engine"
-              : "Fetching remote asset"
-          }
+          isVisible={isImporting}
+          title={getImportingTitle(importingSignal)}
+          subtitle="Preparing image for workspace"
           icon={
             <div className="w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center shadow-lg shadow-amber-500/40">
               <Loader2

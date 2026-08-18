@@ -449,6 +449,8 @@ export interface ClipboardLayerMetadata {
   originalCy?: number;
   /** Direct carriage of complete layer object on internal paste */
   layer?: Layer;
+  /** Frame ID where the copy originated — used to detect cross-frame paste */
+  sourceFrameId?: string;
 }
 
 /**

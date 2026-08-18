@@ -97,7 +97,7 @@ export const InteractionMath = {
     state: { lastThrottleTime: number },
     options: { clamp?: boolean; throttleMs?: number; excludeLayerId?: string } = {}
   ): LocalRect {
-    const isSnapping = e.state.interaction.isSnapping;
+    const isSnapping = presets.get('SNAP_ENABLED');
     const frame = e.activeFrame;
 
     // Read snap filter options from PresetsFactory (no plugin dependency)

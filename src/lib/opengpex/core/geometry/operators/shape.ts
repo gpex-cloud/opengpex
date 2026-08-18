@@ -25,6 +25,7 @@ import { getLayerWorldMatrix } from './transform';
 import { getLayerLocalAABB, getRectIntersection, getLayerBoundingBox, getMultiRectUnion } from './space';
 import { snapToPixel } from './snapping';
 import { parsePathDataToRings } from './point2d';
+import { intersectPathWithRect } from '../sut-hod';
 
 /**
  * frameLocalToLayerLocal: Projects selection shape under artboard space (Frame) to layer (Layer) local space
@@ -56,7 +57,40 @@ export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleSh
   const M_orig = getLayerWorldMatrix(layer);
   const vCenter = M_orig.apply({ x: s.x + s.w / 2, y: s.y + s.h / 2 });
 
-  const visibleShape = { ...shape, rect: s } as LocalShape;
+  // Determine effective visibleShape via true geometric intersection.
+  //
+  // Case 1: rect selection + path/circle layer → clip the layer's path by the selection rect
+  //   Uses Sutherland-Hodgman to compute the exact intersection polygon.
+  //   This produces a new pathData that the tile renderer can correctly clip.
+  //
+  // Case 2: path selection + rect layer → the selection path IS the constraint
+  //   (rect is "all pixels valid", so path ∩ rect = path when path is within rect)
+  //
+  // Case 3: path selection + path layer → cannot compute with S-H alone (needs polygon-clipping)
+  //   Falls through to use the selection shape; caller detects loss and falls back to physical.
+  const layerShape = layer.visibleShape!;
+
+  let visibleShape: LocalShape;
+  if (layerShape.type !== 'rect' && shape.type === 'rect' && (layerShape as { pathData?: string }).pathData) {
+    // Rect selection + path layer: clip layer's pathData by the intersection rect
+    const clipped = intersectPathWithRect((layerShape as { pathData?: string }).pathData!, s);
+    if (clipped) {
+      visibleShape = {
+        type: 'path',
+        rect: clipped.rect,
+        hardEdge: layerShape.hardEdge,
+        antiAliased: (layerShape as { antiAliased?: boolean }).antiAliased,
+        pathData: clipped.pathData,
+        __brand: 'local',
+      } as unknown as LocalShape;
+    } else {
+      // Entire path is outside the selection rect — no visible content
+      return null;
+    }
+  } else {
+    // Path/circle selection on rect layer, or both rects → use selection shape
+    visibleShape = { ...shape, rect: s } as LocalShape;
+  }
 
   return { visibleShape, center: { x: vCenter.x, y: vCenter.y } as Point2D };
 }

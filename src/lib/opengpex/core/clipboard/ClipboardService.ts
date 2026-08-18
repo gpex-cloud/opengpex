@@ -88,15 +88,19 @@ export const createClipboardService = (): ClipboardService => {
         const clipboardItems = await navigator.clipboard.read();
 
         for (const item of clipboardItems) {
-          // 2.1 Check internal metadata (highest priority)
+          // 2.1 Check internal metadata — always also read the image blob alongside
           if (item.types.includes(CLIPBOARD_MIME_METADATA)) {
-            const blob = await item.getType(CLIPBOARD_MIME_METADATA);
-            const text = await blob.text();
-            console.debug('[ClipboardService] Read metadata from Async Clipboard API');
-            return { metadata: JSON.parse(text) as ClipboardLayerMetadata };
+            const metaBlob = await item.getType(CLIPBOARD_MIME_METADATA);
+            const text = await metaBlob.text();
+            const metadata = JSON.parse(text) as ClipboardLayerMetadata;
+            // Also read physical blob (used for cross-frame paste physical path)
+            const imageType = item.types.find(t => t.startsWith('image/'));
+            const blob = imageType ? await item.getType(imageType) : undefined;
+            console.debug('[ClipboardService] Read metadata + blob from Async Clipboard API');
+            return { metadata, blob };
           }
 
-          // 2.2 Check image (external paste)
+          // 2.2 Check image (external paste — no internal metadata)
           const imageType = item.types.find(t => t.startsWith('image/'));
           if (imageType) {
             const blob = await item.getType(imageType);

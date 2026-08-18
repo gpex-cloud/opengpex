@@ -275,6 +275,9 @@ export interface Layer {
 
   birthCenter?: { cx: number; cy: number }; // Initial birth center (world coordinates)
 
+  /** Marks the original source layer imported from the file (carries imageMetadata/ICC). */
+  isSource?: boolean;
+
   // Relationship attributes
   hostId?: string;    // Triplet binding: exchange/frag → host layer (internal mechanism)
   groupId?: string;   // Layer group membership: points to a type:'group' layer id (user-facing hierarchy)
@@ -284,6 +287,8 @@ export interface Layer {
 export interface Frame {
   id: string;
   name: string;
+  /** Original source filename (with extension) used to create this frame. */
+  source?: string;
   seqNum?: string;
   parentId?: string;
 

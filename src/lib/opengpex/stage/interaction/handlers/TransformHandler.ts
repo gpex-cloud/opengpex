@@ -121,6 +121,13 @@ export interface TransformHandlerConfig<T = LocalRect> {
   priority?: number;
 
   /**
+   * Whether to clamp the anchor point to canvas bounds for 'create' category.
+   * Default: true (Photoshop Marquee behavior — outside-canvas clicks snap to nearest edge).
+   * Set to false for Re-Canvas, which needs to allow anchors beyond canvas bounds.
+   */
+  clampAnchor?: boolean;
+
+  /**
    * Determine if the interaction should be handled and return structured intent.
    * Return null to skip this handler.
    */
@@ -258,7 +265,8 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
       }
 
       // For create: clamp the ANCHOR to canvas bounds (Photoshop Marquee behavior)
-      if (intent.category === 'create') {
+      // Skip clamping when clampAnchor is explicitly set to false (e.g. Re-Canvas).
+      if (intent.category === 'create' && config.clampAnchor !== false) {
         const canvasDim = e.activeFrame.canvas;
         const clamped = e.geometry.space.clampPointToRect({ x: ax, y: ay }, canvasDim);
         ax = clamped.x;
@@ -343,7 +351,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
 
         // Read edge snap scope from PresetsFactory
         const edgeSnapScope = presets.get('SNAP_EDGE_SCOPE');
-        const isSnapping = e.state.interaction.isSnapping;
+        const isSnapping = presets.get('SNAP_ENABLED');
 
         if (constraints.clamp) {
           nextRect = InteractionMath.calculateElasticRect(e, {

@@ -152,3 +152,6 @@ export const SNAP_MAX_TARGETS: number = 50;
 /** Edge snap scope during resize: 'recanvas' | 'all' */
 export const SNAP_EDGE_SCOPE: 'recanvas' | 'all' = 'recanvas';
 
+/** Master toggle: enable/disable snapping & smart guides globally */
+export const SNAP_ENABLED: boolean = true;
+
