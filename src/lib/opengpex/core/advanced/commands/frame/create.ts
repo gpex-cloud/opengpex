@@ -151,16 +151,13 @@ export const FrameCreateCommands = {
         const highResBlob = await branchResult.toBlob();
 
         // ── Step 2: Construct synthetic DecodeResult with inherited metadata ─────
-        // Spread parent's imageMetadata to inherit raw.icc / camera / capture / dates,
+        // Read parent's frame-level metadata to inherit raw.icc / camera / capture / dates,
         // then override composite-specific fields (format, dimensions, bitDepth).
         // importSingleImage will use this metadata for:
-        //   - Layer.metadata.imageMetadata (drives MetadataPanel display)
+        //   - Frame.metadata (drives MetadataPanel display)
         //   - Color pipeline strategy resolution (colorSpace → Frame.colorSpace)
         //   - DPI / bitDepth detection
-        // Find source layer by isSource flag (stable across reorder/deletion), fallback to order[0]
-        const parentSourceLayer = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]).find(l => l.isSource)
-          || activeFrame.layers.byId[activeFrame.layers.order[0]];
-        const parentImageMetadata = parentSourceLayer?.metadata?.imageMetadata as ImageMetadata | undefined;
+        const parentImageMetadata = activeFrame.metadata;
 
         const canvasDim = {
           w: Math.round(cropRect.w),
@@ -238,7 +235,9 @@ export const FrameCreateCommands = {
 
       // 1. Inject all assets into AssetService
       for (const [, blob] of Object.entries(assetBlobs)) {
-        await assets.register(blob);
+        const bmp = await createImageBitmap(blob);
+        await assets.register(blob, { w: bmp.width, h: bmp.height });
+        bmp.close();
       }
 
       // 2. Hydrate/restore artboard

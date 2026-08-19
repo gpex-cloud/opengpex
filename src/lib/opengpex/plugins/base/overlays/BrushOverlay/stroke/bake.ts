@@ -147,7 +147,7 @@ async function executePaintBake(request: PaintBakeRequest, e: InteractionEvent):
 
   // Encode to WebP lossless (3-4x faster than PNG, pixel-perfect, smaller file size)
   const blob = await finalCanvas.convertToBlob({ type: 'image/webp', quality: 1.0 });
-  const asset = await e.assets.register(blob);
+  const asset = await e.assets.register(blob, { w: cropW, h: cropH });
 
   // Pre-warm the decode cache so the freshly baked layer renders
   // immediately without a one-frame flash of the previous asset.
@@ -184,7 +184,7 @@ async function executeMaskBake(request: MaskBakeRequest, e: InteractionEvent): P
 
   try {
     // Register mask blob as asset
-    const asset = await e.assets.register(blob);
+    const asset = await e.assets.register(blob, { w: maskBounds.w, h: maskBounds.h });
 
     // Pre-warm the decode cache for the baked mask asset
     await e.pixels.image.cacheBitmap(asset.url, blob);

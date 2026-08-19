@@ -28,6 +28,8 @@
 
 import type { EditorContextValue } from '@opengpex/editor/core/types';
 import type { DecodeResult } from '@opengpex/editor/core/files/types';
+import { detectFormat } from '@opengpex/editor/core/files';
+import { assetStore } from '@opengpex/editor/core/storage/asset/AssetStore';
 import type { DecodeOutput } from './_types';
 import { isVectorFormat, promptVectorDpi } from './vector';
 
@@ -60,7 +62,7 @@ export async function resolveAndDecode(
   }
 
   // 2. Detect format
-  const format = ctx.files.detectFormat(file);
+  const format = detectFormat(file);
 
   // 3. Vector DPI dialog (SVG/EPS only)
   let decodeOptions: { dpi?: number; targetWidth?: number; targetHeight?: number } | undefined;
@@ -133,7 +135,7 @@ export async function addFrameFromFile(
     // null = fall through to single image (TIFF "First Page Only" mode)
   }
 
-  const { frameId } = await importSingleImage(ctx, decoded, file, sourceType, finalOpts);
+  const { frameId } = await importSingleImage(ctx, decoded, file, finalOpts);
   return frameId;
 }
 
@@ -161,7 +163,7 @@ export async function addFrameFromDecoded(
   file: File,
   opts: ImportOptions,
 ): Promise<{ frameId: string; thumbnailUrl: string }> {
-  return importSingleImage(ctx, decoded, file, 'local', opts);
+  return importSingleImage(ctx, decoded, file, opts);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -192,19 +194,31 @@ export async function revertFrame(ctx: EditorContextValue, frameId: string): Pro
 
   try {
     // 1. Hydrate the original asset blob from IndexedDB
-    await assets.hydrate(new Set([originalAssetId]));
-    const assetEntry = assets.get(originalAssetId);
-    if (!assetEntry || !assetEntry.blob) {
-      throw new Error('Original physical asset blob not found in store');
+    // Try raw source first (16-bit TIFF/PNG stored via storeRaw under `raw:${id}`),
+    // then fall back to regular asset (8-bit files where the display blob IS the original).
+    let originalBlob: Blob | null = null;
+    const rawBlob = await assetStore.getRaw(originalAssetId);
+    if (rawBlob) {
+      originalBlob = rawBlob;
+      console.debug('[Revert] Found raw source blob for assetId=%s, size=%d', originalAssetId, rawBlob.size);
+    } else {
+      await assets.hydrate(new Set([originalAssetId]));
+      const assetEntry = assets.get(originalAssetId);
+      originalBlob = assetEntry?.blob ?? null;
+      console.debug('[Revert] getRaw returned null for assetId=%s; hydrate fallback: entry=%s, blob=%s',
+        originalAssetId, !!assetEntry, !!originalBlob);
+    }
+    if (!originalBlob) {
+      throw new Error(`Original physical asset blob not found in store (assetId=${originalAssetId})`);
     }
 
     // 2. Reconstruct File from blob
     const originalFileName = frame.source || frame.name || 'image.png';
-    const originalFile = new File([assetEntry.blob], originalFileName, { type: assetEntry.blob.type });
+    const originalFile = new File([originalBlob], originalFileName, { type: originalBlob.type });
 
     // 3. Full decode + rebuild via shared buildFrameContent
     const decoded = await files.decode(originalFile);
-    const content = await buildFrameContent(ctx, decoded, originalFile, 'local');
+    const content = await buildFrameContent(ctx, decoded);
 
     // 4. Update frame in-place (preserves frame ID and list position)
     actions.updateFrame(frameId, {
@@ -214,6 +228,7 @@ export async function revertFrame(ctx: EditorContextValue, frameId: string): Pro
       canvasCropBox: content.canvasCropBox,
       layers: content.layers,
       activeLayerId: content.activeLayerId,
+      metadata: content.metadata,
     });
 
     // 5. Clear undo/redo history
@@ -245,7 +260,7 @@ export async function revertGifFrame(ctx: EditorContextValue, frameId: string): 
   const frame = state.frames.byId[frameId];
   if (!frame) return false;
 
-  const originalGifAssetId = (frame.extra as Record<string, unknown>)?.originalGifAssetId as string | undefined;
+  const originalGifAssetId = frame.assetId;
   if (!originalGifAssetId) return false;
 
   try {
@@ -266,7 +281,7 @@ export async function revertGifFrame(ctx: EditorContextValue, frameId: string): 
     }
 
     // 3. Build GIF content (shared with import — includes frame count dialog)
-    const content = await buildGifFrameContent(ctx, decoded, gifFile, 'local');
+    const content = await buildGifFrameContent(ctx, decoded);
     if (!content) return false; // User cancelled
 
     // 4. Update frame in-place
@@ -277,7 +292,8 @@ export async function revertGifFrame(ctx: EditorContextValue, frameId: string): 
       canvasCropBox: content.canvasCropBox,
       layers: content.layers,
       activeLayerId: content.activeLayerId,
-      extra: { ...(frame.extra as Record<string, unknown>), gifSequenceId: content.gifSequenceId, gifFrameCount: content.gifFrameCount, originalGifAssetId },
+      extra: { ...(frame.extra as Record<string, unknown>), gifSequenceId: content.gifSequenceId, gifFrameCount: content.gifFrameCount },
+      metadata: content.metadata,
     });
 
     actions.resetHistory();

@@ -89,7 +89,6 @@ export async function encodeTiff(
     const outCtx = outCanvas.getContext('2d')!;
     outCtx.putImageData(new ImageData(imgData.data, w, h), 0, 0);
     canvas = outCanvas;
-    console.debug('[ColorMgmt] TIFF Export: pixelConversion=p3-to-srgb');
   } else {
     canvas = source instanceof ImageBitmap
       ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
@@ -113,19 +112,12 @@ export async function encodeTiff(
       const clamped = new Uint8ClampedArray(convertedData.length);
       clamped.set(convertedData);
       imageData = new ImageData(clamped, canvas.width, canvas.height);
-      console.debug('[ColorMgmt] TIFF Export: pixelConversion=srgb-to-icc, targetProfile=%s',
-        meta.raw.icc?.name || 'custom');
-    } else {
-      console.debug('[ColorMgmt] TIFF Export: frameCS=%s, embedIcc=true, no pixel conversion needed', frameCS);
     }
   } else if (embedIcc && !meta?.raw?.icc?.data) {
     // Source has no ICC data but user requested embedding → use stock profile for frame CS
     const stockProfile = getStockIccProfile(frameCS);
     if (stockProfile) {
       iccProfileBytes = stockProfile.bytes;
-      console.debug('[ColorMgmt] TIFF Export: embedIcc=true, using stock profile: %s', stockProfile.name);
-    } else {
-      console.debug('[ColorMgmt] TIFF Export: embedIcc=true but no stock profile for frameCS=%s', frameCS);
     }
   }
 

@@ -23,7 +23,6 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Database,
   HardDrive,
-  Layers,
   History,
   Trash2,
   ShieldCheck,
@@ -34,14 +33,7 @@ import {
   ChevronDown,
   Folder,
   FolderOpen,
-  FileCode,
-  Monitor,
-  Check,
   Cpu,
-  Eye,
-  EyeOff,
-  Lock,
-  Unlock,
   AlertCircle,
   Package,
   Brain,
@@ -61,17 +53,12 @@ import {
   copyAssetUsages,
 } from "./hooks";
 import * as Prot from "./protocols";
-
-/**
- * Format bytes to readable string
- */
-const formatBytes = (bytes: number) => {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-};
+import { formatBytes } from "./components/shared";
+import { FrameSectionHUD, FrameTreeNodes } from "./components/FrameSection";
+import { AssetSectionHUD, AssetTreeNode } from "./components/AssetSection";
+import { HistoryTreeNode } from "./components/HistorySection";
+import { ShardSection } from "./components/ShardSection";
+import { ModelCacheTreeNode } from "./components/ModelCacheSection";
 
 /**
  * StorageInfoComponent (Outer Controller):
@@ -96,6 +83,7 @@ export function StorageInfoComponent() {
     const activeIds = new Set<string>();
     metrics.frames.forEach((f) => {
       if (f.thumbnail?.id) activeIds.add(f.thumbnail.id);
+      if (f.sourceAsset?.id) activeIds.add(f.sourceAsset.id);
       f.layers.forEach((l) => {
         if (l.asset?.id) activeIds.add(l.asset.id);
         l.subLayers?.forEach((sub) => {
@@ -326,105 +314,12 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
 
               {/* Dynamic Topology Explorer */}
               <div className="flex-1 overflow-y-auto pr-1 space-y-4 scrollbar-hide py-2">
-                {/* Active Frames Section */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 pl-1 opacity-50">
-                    <HardDrive size={10} />
-                    <span className="text-[9px] font-black uppercase tracking-widest">
-                      Active Workspace
-                    </span>
-                  </div>
-
-                  {metrics.frames.map((frame) => (
-                    <div
-                      key={frame.id}
-                      className="bg-[var(--bg-stage)] rounded-xl border border-[var(--border-subtle)] dark:border-white/[0.08] overflow-hidden"
-                    >
-                      {/* Frame Header */}
-                      <div className="bg-[var(--bg-stage)] px-3 py-1.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] flex items-center justify-between">
-                        <div
-                          className="flex items-center gap-1.5 min-w-0 cursor-pointer"
-                          onClick={() => handleSelectFrame(frame.id)}
-                        >
-                          <span className="text-[8px] font-black text-indigo-600 uppercase px-1 rounded bg-indigo-500/10 ">
-                            Frame
-                          </span>
-                          <span className="text-[9px] font-bold text-[var(--text-main)] truncate">
-                            {frame.name}
-                          </span>
-                        </div>
-                        <span className="text-[8px] font-mono opacity-40">
-                          #{frame.id.slice(0, 4)}
-                        </span>
-                      </div>
-
-                      {/* Layers in this frame */}
-                      <div className="p-2 space-y-1">
-                        {frame.thumbnail && (
-                          <div className="flex items-center justify-between text-[9px] p-1 rounded hover transition-colors">
-                            <span className="text-[var(--text-muted)] flex items-center gap-1">
-                              🖼️ Thumbnail
-                            </span>
-                            <span className="font-mono opacity-65">
-                              {formatBytes(frame.thumbnail.size)}
-                            </span>
-                          </div>
-                        )}
-                        {frame.layers.map((layer) =>
-                          layer.asset ? (
-                            <div
-                              key={layer.id}
-                              className="flex items-center justify-between text-[9px] p-1 rounded hover cursor-pointer transition-colors"
-                              onClick={() =>
-                                handleSelectLayer(frame.id, layer.id)
-                              }
-                              title="Click to select layer"
-                            >
-                              <span className="text-[var(--text-main)] truncate max-w-[140px] flex items-center gap-1">
-                                📁 {layer.name}
-                              </span>
-                              <span className="font-mono text-indigo-650 ">
-                                {formatBytes(layer.asset.size)}
-                              </span>
-                            </div>
-                          ) : null,
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Compact Orphans Section */}
-                {metrics.detached.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 pl-1 text-rose-500 opacity-80">
-                      <Trash2 size={10} />
-                      <span className="text-[9px] font-black uppercase tracking-widest">
-                        Detached Trash ({metrics.detached.length})
-                      </span>
-                    </div>
-                    <div className="bg-rose-500/5 rounded-xl border border-rose-500/20 p-2 text-[9px] space-y-1">
-                      {metrics.detached.slice(0, 3).map((asset) => (
-                        <div
-                          key={asset.id}
-                          className="flex justify-between items-center text-rose-500 opacity-80"
-                        >
-                          <span className="truncate max-w-[150px] font-mono">
-                            {asset.id.slice(0, 12)}
-                          </span>
-                          <span className="font-mono">
-                            {formatBytes(asset.size)}
-                          </span>
-                        </div>
-                      ))}
-                      {metrics.detached.length > 3 && (
-                        <div className="text-[8px] opacity-60 text-center pt-1 text-rose-500">
-                          + {metrics.detached.length - 3} more orphans
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
+                <FrameSectionHUD
+                  frames={metrics.frames}
+                  handleSelectFrame={handleSelectFrame}
+                  handleSelectLayer={handleSelectLayer}
+                />
+                <AssetSectionHUD detached={metrics.detached} />
               </div>
 
               {/* Footer */}
@@ -538,39 +433,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                 </div>
 
                 {/* Shard & Database Metrics */}
-                <div className="space-y-3 bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] p-4 rounded-2xl">
-                  <div className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] flex items-center justify-between">
-                    <span>IndexedDB Shard Index</span>
-                    <span className="font-mono text-[9px] text-[var(--text-muted)] ">
-                      {metrics.shards.length} Shards
-                    </span>
-                  </div>
-
-                  <div className="space-y-1.5 text-[9px] font-mono">
-                    {metrics.shards.map((shard) => (
-                      <div
-                        key={shard.key}
-                        className="flex justify-between items-center py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] last:border-0 text-[var(--text-muted)] "
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`w-1 h-1 rounded ${
-                              shard.type === "project_meta"
-                                ? "bg-indigo-500"
-                                : shard.type === "frame"
-                                  ? "bg-emerald-500"
-                                  : "bg-amber-500"
-                            }`}
-                          />
-                          <span>{shard.key}</span>
-                        </div>
-                        <span className="text-[var(--text-muted)] font-bold">
-                          {formatBytes(shard.sizeBytes)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <ShardSection shards={metrics.shards} />
 
                 {/* Performance Indicators */}
                 <div className="space-y-3">
@@ -713,399 +576,36 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
 
                       {expandedNodes.project && (
                         <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 mt-0.5 space-y-1">
-                          {/* Frame Nodes */}
-                          {metrics.frames.map((frame) => {
-                            const frameKey = `frame:${frame.id}`;
-                            const isFrameExpanded =
-                              expandedNodes[frameKey] === true;
-
-                            return (
-                              <div key={frame.id} className="flex flex-col">
-                                <div
-                                  onClick={() => toggleNode(frameKey)}
-                                  className={`flex items-center justify-between py-1 px-2 rounded-lg hover cursor-pointer transition-colors ${selectedNode?.id === frame.id ? "bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 text-indigo-650 " : "text-[var(--text-muted)]"}`}
-                                >
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    {isFrameExpanded ? (
-                                      <ChevronDown
-                                        size={11}
-                                        className="text-[var(--text-muted)]"
-                                      />
-                                    ) : (
-                                      <ChevronRight
-                                        size={11}
-                                        className="text-[var(--text-muted)]"
-                                      />
-                                    )}
-                                    <Monitor
-                                      size={11}
-                                      className="text-emerald-500 "
-                                    />
-                                    <span className="font-bold truncate">
-                                      {frame.name}
-                                    </span>
-                                  </div>
-
-                                  <div className="flex items-center gap-2 flex-shrink-0">
-                                    <span className="text-[8px] font-normal text-[var(--text-muted)] ">
-                                      {frame.canvas.w}x{frame.canvas.h}px
-                                    </span>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleSelectFrame(frame.id);
-                                        setSelectedNode({
-                                          type: "frame",
-                                          id: frame.id,
-                                          data: frame,
-                                        });
-                                      }}
-                                      className="p-0.5 rounded bg-[var(--bg-stage)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-stage)] "
-                                      title="Activate frame in workspace"
-                                    >
-                                      <Check size={8} />
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {/* Expanded Frame items */}
-                                {isFrameExpanded && (
-                                  <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3 mt-0.5 space-y-1">
-                                    {/* Frame Thumbnail Item */}
-                                    {frame.thumbnail && (
-                                      <div
-                                        onClick={() =>
-                                          setSelectedNode({
-                                            type: "asset",
-                                            id: frame.thumbnail!.id,
-                                            data: frame.thumbnail,
-                                          })
-                                        }
-                                        onMouseEnter={() =>
-                                          setHoveredAsset(frame.thumbnail || null)
-                                        }
-                                        onMouseLeave={() =>
-                                          setHoveredAsset(null)
-                                        }
-                                        className="flex items-center justify-between py-0.5 px-2 rounded hover cursor-pointer text-[var(--text-muted)] "
-                                      >
-                                        <div className="flex items-center gap-2 min-w-0">
-                                          <FileCode
-                                            size={10}
-                                            className="text-[var(--text-muted)] "
-                                          />
-                                          <span className="truncate">
-                                            thumbnail.raw
-                                          </span>
-                                        </div>
-                                        <span className="text-[8px] opacity-60">
-                                          {formatBytes(frame.thumbnail.size)}
-                                        </span>
-                                      </div>
-                                    )}
-
-                                    {/* Frame Layers collection */}
-                                    <div className="flex flex-col">
-                                      <div
-                                        onClick={() =>
-                                          toggleNode(`${frameKey}:layers`)
-                                        }
-                                        className="flex items-center gap-1.5 py-0.5 px-2 text-[var(--text-muted)] cursor-pointer"
-                                      >
-                                        {expandedNodes[`${frameKey}:layers`] !==
-                                        false ? (
-                                          <ChevronDown size={10} />
-                                        ) : (
-                                          <ChevronRight size={10} />
-                                        )}
-                                        <Layers size={10} />
-                                        <span>
-                                          layers ({frame.layers.length})
-                                        </span>
-                                      </div>
-
-                                      {expandedNodes[`${frameKey}:layers`] !==
-                                        false && (
-                                        <div className="pl-3 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 space-y-0.5">
-                                          {frame.layers.map((layer) => {
-                                            return (
-                                              <div
-                                                key={layer.id}
-                                                onClick={() =>
-                                                  setSelectedNode({
-                                                    type: "layer",
-                                                    id: layer.id,
-                                                    data: {
-                                                      ...layer,
-                                                      frameId: frame.id,
-                                                    },
-                                                  })
-                                                }
-                                                className={`flex items-center justify-between py-0.5 px-2 rounded hover cursor-pointer transition-colors ${selectedNode?.id === layer.id ? "bg-indigo-500/10 text-indigo-500 font-bold" : "text-[var(--text-muted)]"}`}
-                                                onMouseEnter={() =>
-                                                  layer.asset &&
-                                                  setHoveredAsset(layer.asset)
-                                                }
-                                                onMouseLeave={() =>
-                                                  setHoveredAsset(null)
-                                                }
-                                              >
-                                                <div className="flex items-center gap-1.5 min-w-0">
-                                                  <span className="text-[var(--text-muted)] ">
-                                                    •
-                                                  </span>
-                                                  <span className="truncate">
-                                                    {layer.name}
-                                                  </span>
-                                                </div>
-                                                <div className="flex items-center gap-2 flex-shrink-0">
-                                                  <div className="flex items-center gap-1">
-                                                    {layer.visible ? (
-                                                      <Eye
-                                                        size={9}
-                                                        className="text-[var(--text-muted)] "
-                                                      />
-                                                    ) : (
-                                                      <EyeOff
-                                                        size={9}
-                                                        className="text-rose-500"
-                                                      />
-                                                    )}
-                                                    {layer.locked ? (
-                                                      <Lock
-                                                        size={9}
-                                                        className="text-[var(--text-muted)] "
-                                                      />
-                                                    ) : (
-                                                      <Unlock
-                                                        size={9}
-                                                        className="text-[var(--text-muted)] "
-                                                      />
-                                                    )}
-                                                  </div>
-                                                  <button
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      handleSelectLayer(
-                                                        frame.id,
-                                                        layer.id,
-                                                      );
-                                                      setSelectedNode({
-                                                        type: "layer",
-                                                        id: layer.id,
-                                                        data: {
-                                                          ...layer,
-                                                          frameId: frame.id,
-                                                        },
-                                                      });
-                                                    }}
-                                                    className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-stage)] "
-                                                    title="Select layer on canvas"
-                                                  >
-                                                    <Check size={8} />
-                                                  </button>
-                                                </div>
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-
-                          {/* 2. History Backlog Folder Node */}
-                          <div className="flex flex-col">
-                            <div
-                              onClick={() => toggleNode("history")}
-                              className="flex items-center gap-2 py-1 px-2 rounded-lg hover cursor-pointer text-[var(--text-main)] font-bold transition-colors"
-                            >
-                              {expandedNodes.history ? (
-                                <ChevronDown
-                                  size={11}
-                                  className="text-[var(--text-muted)]"
-                                />
-                              ) : (
-                                <ChevronRight
-                                  size={11}
-                                  className="text-[var(--text-muted)]"
-                                />
-                              )}
-                              <History size={11} className="text-amber-500 " />
-                              <span>
-                                history-backlog ({metrics.history.length}{" "}
-                                snapshots)
-                              </span>
-                            </div>
-
-                            {expandedNodes.history && (
-                              <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 space-y-1 mt-0.5">
-                                {metrics.history.map((moment) => (
-                                  <div
-                                    key={moment.id}
-                                    onClick={() =>
-                                      setSelectedNode({
-                                        type: "history",
-                                        id: moment.id,
-                                        data: moment,
-                                      })
-                                    }
-                                    className={`flex justify-between items-center py-0.5 px-2 rounded hover cursor-pointer ${selectedNode?.id === moment.id ? "bg-amber-500/10 text-amber-500 font-bold" : "text-[var(--text-muted)]"}`}
-                                  >
-                                    <div className="flex items-center gap-2 min-w-0">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                      <span className="truncate">
-                                        {moment.label}
-                                      </span>
-                                    </div>
-                                    <span className="font-mono text-[8px] text-[var(--text-muted)] ">
-                                      {formatBytes(moment.exclusiveSize)}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* 3. Detached Orphans Folder Node */}
-                          <div className="flex flex-col">
-                            <div
-                              onClick={() => toggleNode("detached")}
-                              className="flex items-center gap-2 py-1 px-2 rounded-lg hover cursor-pointer text-[var(--text-main)] font-bold transition-colors"
-                            >
-                              {expandedNodes.detached ? (
-                                <ChevronDown
-                                  size={11}
-                                  className="text-[var(--text-muted)]"
-                                />
-                              ) : (
-                                <ChevronRight
-                                  size={11}
-                                  className="text-[var(--text-muted)]"
-                                />
-                              )}
-                              <Trash2 size={11} className="text-rose-500 " />
-                              <span>
-                                global-detached-cache ({metrics.detached.length}
-                                {""}
-                                orphans)
-                              </span>
-                            </div>
-
-                            {expandedNodes.detached && (
-                              <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 space-y-1 mt-0.5">
-                                {metrics.detached.map((asset) => (
-                                  <div
-                                    key={asset.id}
-                                    onClick={() =>
-                                      setSelectedNode({
-                                        type: "asset",
-                                        id: asset.id,
-                                        data: asset,
-                                      })
-                                    }
-                                    onMouseEnter={() => setHoveredAsset(asset)}
-                                    onMouseLeave={() => setHoveredAsset(null)}
-                                    className={`flex justify-between items-center py-0.5 px-2 rounded hover cursor-pointer ${selectedNode?.id === asset.id ? "bg-rose-500/10 text-rose-500 font-bold" : "text-[var(--text-muted)]"}`}
-                                  >
-                                    <div className="flex items-center gap-2 min-w-0">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                                      <span className="truncate font-mono">
-                                        {asset.id.slice(0, 14)}
-                                      </span>
-                                    </div>
-                                    <span className="font-mono text-[8px] text-[var(--text-muted)] ">
-                                      {formatBytes(asset.size)}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* 4. Downloaded Models (Cache Storage) Folder Node */}
-                          <div className="flex flex-col">
-                            <div
-                              onClick={() => toggleNode("models")}
-                              className="flex items-center gap-2 py-1 px-2 rounded-lg hover cursor-pointer text-[var(--text-main)] font-bold transition-colors"
-                            >
-                              {expandedNodes.models ? (
-                                <ChevronDown
-                                  size={11}
-                                  className="text-[var(--text-muted)]"
-                                />
-                              ) : (
-                                <ChevronRight
-                                  size={11}
-                                  className="text-[var(--text-muted)]"
-                                />
-                              )}
-                              <Brain size={11} className="text-purple-500 " />
-                              <span>
-                                downloaded-models ({modelCache.fileCount} files)
-                              </span>
-                            </div>
-
-                            {expandedNodes.models && (
-                              <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 space-y-1 mt-0.5">
-                                {modelCache.groups.length > 0 ? (
-                                  <>
-                                    {modelCache.groups.map((group) => {
-                                      const groupKey = `model:${group.modelId}`;
-                                      const isGroupExpanded = expandedNodes[groupKey] === true;
-                                      return (
-                                        <div key={group.modelId} className="flex flex-col">
-                                          <div
-                                            onClick={() => toggleNode(groupKey)}
-                                            className="flex justify-between items-center py-0.5 px-2 rounded hover cursor-pointer text-[var(--text-muted)]"
-                                          >
-                                            <div className="flex items-center gap-1.5 min-w-0">
-                                              {isGroupExpanded ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
-                                              <Package size={9} className="text-purple-400" />
-                                              <span className="truncate text-[9px] font-bold">
-                                                {group.modelId}
-                                              </span>
-                                            </div>
-                                            <span className="font-mono text-[8px] text-purple-500 font-bold flex-shrink-0 ml-2">
-                                              {formatBytes(group.totalBytes)}
-                                            </span>
-                                          </div>
-                                          {isGroupExpanded && (
-                                            <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-2.5 space-y-0.5 mt-0.5">
-                                              {group.files.map((file, idx) => (
-                                                <div
-                                                  key={`${group.modelId}-${idx}`}
-                                                  className="flex justify-between items-center py-0.5 px-1.5 text-[var(--text-muted)]"
-                                                  title={file.url}
-                                                >
-                                                  <div className="flex items-center gap-1.5 min-w-0">
-                                                    <span className="w-1 h-1 rounded bg-purple-300" />
-                                                    <span className="truncate text-[9px] font-mono">
-                                                      {file.name}
-                                                    </span>
-                                                  </div>
-                                                  <span className="font-mono text-[8px] text-[var(--text-muted)] flex-shrink-0 ml-2">
-                                                    {formatBytes(file.size)}
-                                                  </span>
-                                                </div>
-                                              ))}
-                                            </div>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
-                                  </>
-                                ) : (
-                                  <div className="py-1 px-2 text-[var(--text-muted)] text-[9px] opacity-60">
-                                    No models downloaded yet
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
+                          <FrameTreeNodes
+                            frames={metrics.frames}
+                            expandedNodes={expandedNodes}
+                            selectedNodeId={selectedNode?.id || null}
+                            toggleNode={toggleNode}
+                            handleSelectFrame={handleSelectFrame}
+                            handleSelectLayer={handleSelectLayer}
+                            setSelectedNode={setSelectedNode}
+                            setHoveredAsset={setHoveredAsset}
+                          />
+                          <HistoryTreeNode
+                            history={metrics.history}
+                            expandedNodes={expandedNodes}
+                            selectedNodeId={selectedNode?.id || null}
+                            toggleNode={toggleNode}
+                            setSelectedNode={setSelectedNode}
+                          />
+                          <AssetTreeNode
+                            detached={metrics.detached}
+                            expandedNodes={expandedNodes}
+                            selectedNodeId={selectedNode?.id || null}
+                            toggleNode={toggleNode}
+                            setSelectedNode={setSelectedNode}
+                            setHoveredAsset={setHoveredAsset}
+                          />
+                          <ModelCacheTreeNode
+                            modelCache={modelCache}
+                            expandedNodes={expandedNodes}
+                            toggleNode={toggleNode}
+                          />
                         </div>
                       )}
                     </div>

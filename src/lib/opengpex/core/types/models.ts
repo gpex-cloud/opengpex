@@ -21,6 +21,7 @@
  * Model Types: Editor core business model definitions
  */
 import { Dimensions, LocalShape, LocalRect, LocalPolygon } from './primitives';
+import type { ImageMetadata } from '../files/types';
 // LocalShape is used by VectorMask, canvasCropBox, etc.
 // LocalPolygon is used by clipBoxes (unified selection type after selection_layer_unification).
 
@@ -215,10 +216,6 @@ export interface Layer {
   role?: LayerRole;
   textData?: TextLayerData;
   metadata?: {
-    format?: string;
-    size?: number;
-    source?: 'local' | 'url';
-    originalName?: string;
     fillColor?: string;
     [key: string]: unknown;
   };
@@ -274,9 +271,6 @@ export interface Layer {
   interactive?: boolean; // Whether involved in collision detection (Hit-Testing)
 
   birthCenter?: { cx: number; cy: number }; // Initial birth center (world coordinates)
-
-  /** Marks the original source layer imported from the file (carries imageMetadata/ICC). */
-  isSource?: boolean;
 
   // Relationship attributes
   hostId?: string;    // Triplet binding: exchange/frag → host layer (internal mechanism)
@@ -383,13 +377,26 @@ export interface Frame {
 
   // Other metadata
   rotation: number;
-  assetId?: string; // Associated main asset ID
+  /**
+   * Original imported source file's asset ID (SHA-256 hash).
+   * Used for revert (re-decode) and fast-export (lossless round-trip).
+   *
+   * For 8-bit imports: equals baseLayer.assetId (display = source, same file).
+   * For 16-bit imports: points to the original high-res file (registered with skipTiling),
+   *   which differs from baseLayer.assetId (8-bit display blob).
+   * For animated GIF: points to the original .gif file.
+   */
+  assetId?: string;
   thumbnail?: {
     src: string;
     assetId?: string;
   } | null;
   history?: HistoryState;
   extra?: Record<string, unknown>;
+
+  /** Document-level image metadata (EXIF, ICC, source info). Persists regardless of layer changes. */
+  metadata?: ImageMetadata;
+
 }
 
 export interface Asset {

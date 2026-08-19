@@ -193,7 +193,6 @@ export interface EditorActions {
     };
     system: {
       assets: {
-        register: AdvCommandRef<Blob, Promise<{ id: string; url: string }>>;
         sync: AdvCommandRef<{ force?: boolean } | undefined>;
       };
     };

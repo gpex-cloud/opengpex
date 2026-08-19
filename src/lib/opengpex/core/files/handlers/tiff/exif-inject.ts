@@ -103,8 +103,6 @@ export function injectTiffExif(tiffBytes: Uint8Array, exifIfdBytes: Uint8Array):
   if (exifIsLE !== outIsLE) {
     processedExif = new Uint8Array(exifIfdBytes); // clone before modifying
     byteSwapExifContainer(processedExif, exifIsLE);
-    console.debug('[injectTiffExif] Converted EXIF byte order: %s → %s',
-      exifIsLE ? 'LE' : 'BE', outIsLE ? 'LE' : 'BE');
   } else {
     processedExif = exifIfdBytes;
   }

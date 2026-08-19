@@ -129,8 +129,8 @@ export async function extractWebpMetadata(file: File): Promise<ImageMetadata> {
     const imgHeight = tags.exif?.ImageLength?.value ?? tags.exif?.PixelYDimension?.value;
     if (imgWidth) meta.width = Array.isArray(imgWidth) ? Number(imgWidth[0]) : Number(imgWidth);
     if (imgHeight) meta.height = Array.isArray(imgHeight) ? Number(imgHeight[0]) : Number(imgHeight);
-  } catch (err) {
-    console.debug('[WebpHandler] ExifReader parsing failed:', (err as Error).message);
+  } catch {
+    // ExifReader parsing failed — non-critical
   }
 
   // ── Raw EXIF bytes (TIFF IFD from RIFF EXIF chunk) ──

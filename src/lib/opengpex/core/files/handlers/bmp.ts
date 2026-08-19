@@ -86,7 +86,6 @@ export class BmpHandler implements ImageFormatHandler {
       tmpCtx.drawImage(srcCanvas, 0, 0);
       imageData = tmpCtx.getImageData(0, 0, w, h);
       convertImageDataColorSpace(imageData.data, 'display-p3', 'srgb');
-      console.debug('[ColorMgmt] BMP Export: pixelConversion=p3-to-srgb');
     } else {
       // Normal path: use encodeColorSpace to prevent implicit browser color conversion
       const canvas = source instanceof ImageBitmap
@@ -96,8 +95,6 @@ export class BmpHandler implements ImageFormatHandler {
       w = canvas.width;
       h = canvas.height;
       imageData = ctx.getImageData(0, 0, w, h);
-      console.debug('[ColorMgmt] BMP Export: frameCS=%s, encodeColorSpace=%s, pixelConv=%s',
-        frameCS, exportStrategy.encodeColorSpace, pixelConv);
     }
 
     const pixels = imageData.data;
@@ -198,8 +195,8 @@ export class BmpHandler implements ImageFormatHandler {
           meta.dpiSource = 'bmp-header';
         }
       }
-    } catch (err) {
-      console.debug('[BmpHandler] Header parsing failed:', (err as Error).message);
+    } catch {
+      // Header parsing failed — non-critical
     }
 
     return meta;

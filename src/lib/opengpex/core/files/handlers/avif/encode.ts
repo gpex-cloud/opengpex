@@ -92,7 +92,6 @@ export async function encodeAvif(
     const outCtx = outCanvas.getContext('2d')!;
     outCtx.putImageData(new ImageData(imgData.data, w, h), 0, 0);
     canvas = outCanvas;
-    console.debug('[ColorMgmt] AVIF Export: pixelConversion=p3-to-srgb');
   } else {
     canvas = source instanceof ImageBitmap
       ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
@@ -114,11 +113,9 @@ export async function encodeAvif(
         rgbaData, canvas.width, canvas.height, iccProfileBytes,
       );
       rgbaData.set(convertedData);
-      console.debug('[ColorMgmt] AVIF Export: pixelConversion=srgb-to-icc, profile=%s',
-        meta.raw.icc?.name || 'custom');
     }
   } else if (embedIcc && !meta?.raw?.icc?.data) {
-    console.debug('[ColorMgmt] AVIF Export: embedIcc=true but no source ICC data; sRGB assumed');
+    // embedIcc=true but no source ICC data; sRGB assumed
   }
 
   // Engine routing — size-aware dual-engine dispatch
@@ -126,8 +123,6 @@ export async function encodeAvif(
   const useVips = USE_VIPS_FOR_ICC_AVIF && totalPixels <= VIPS_HEIF_MAX_PIXELS;
 
   if (useVips) {
-    console.debug('[ColorMgmt] AVIF Export: vips-heif engine, frameCS=%s, hasSourceIcc=%s, pixels=%d',
-      frameCS, !!iccProfileBytes, totalPixels);
     const avifBytes = await pixels.fileIO.encodeAvif(rgbaData, canvas.width, canvas.height, {
       quality, lossless: false, effort: 4,
       iccProfileBytes: embedIcc ? iccProfileBytes : undefined,
@@ -146,7 +141,6 @@ export async function encodeAvif(
   } else if (embedIcc) {
     console.warn('[AvifHandler] ICC embed not supported (USE_VIPS_FOR_ICC_AVIF=false). Colors preserved, profile omitted.');
   }
-  console.debug('[ColorMgmt] AVIF Export: @jsquash/avif engine, frameCS=%s, pixels=%d', frameCS, totalPixels);
   const avifBytes = await encodeAvifJsquash(rgbaData, canvas.width, canvas.height, { quality, speed: 6 });
   return new Blob([avifBytes.buffer as ArrayBuffer], { type: 'image/avif' });
 }

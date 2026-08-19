@@ -21,6 +21,7 @@
 'use client';
 
 import { asLocalShape, EditorContextValue, WorkingColorSpace, Layer, NormalizedState, CameraState, LocalShape } from '@opengpex/editor/core/types';
+import type { ImageMetadata } from '@opengpex/editor/core/files/types';
 import { getDefaultCanvasCropBox } from '@opengpex/editor/core/helpers/selection';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
@@ -41,11 +42,13 @@ export interface FrameContent {
   canvas: Dimensions;
   camera: CameraState;
   canvasCropBox: LocalShape;
+  /** Frame-level asset ID: source blob if available, otherwise display blob. Used for fast-export/revert. */
   assetId: string;
   thumbnail: { src: string; assetId: string };
   dpi: number;
   bitDepth: 8 | 16 | 32;
   colorSpace: WorkingColorSpace;
+  metadata?: ImageMetadata;
 }
 
 /**
@@ -57,16 +60,12 @@ export interface FrameContent {
  *
  * @param ctx - Editor context (for asset registration, pixel ops, geometry)
  * @param decoded - Decoded image result from FileService
- * @param file - Original source file (for name/metadata)
- * @param sourceType - How the file was obtained ('local' | 'url')
  * @param chosenDpi - Optional DPI override (from vector dialog or import options)
  * @returns FrameContent — all data needed to create/update a frame
  */
 export async function buildFrameContent(
   ctx: EditorContextValue,
   decoded: DecodeResult,
-  file: File,
-  sourceType: 'local' | 'url',
   chosenDpi?: number,
 ): Promise<FrameContent> {
   const { assets, pixels, state, geometry } = ctx;
@@ -74,18 +73,23 @@ export async function buildFrameContent(
 
   const displayBlob = subImages[0].displayBlob;
 
-  // 1. Register original asset (pass sourceBlob for 16-bit fidelity preservation)
-  const { id: assetId, url: assetUrl } = await assets.register(displayBlob, sourceBlob ? { rawBlob: sourceBlob } : undefined);
+  // 1. Register display asset
+  const { id: assetId, url: assetUrl } = await assets.register(displayBlob, decodeDimensions);
+
+  // 1b. Store source blob for lossless re-export (16-bit fidelity)
+  const sourceAssetId = await assets.storeRaw(sourceBlob);
 
   // 2. Concurrently: decode content bounds + generate thumbnail
-  const [contentBounds, thumbBlob] = await Promise.all([
+  const [contentBounds, thumbResult] = await Promise.all([
     pixels.image.contentBounds(assetUrl),
-    (await pixels.image.resample(assetUrl, { maxSize: 256 })).toBlob('image/webp'),
+    pixels.image.resample(assetUrl, { maxSize: 256 }),
   ]);
+  const thumbBlob = await thumbResult.toBlob('image/webp');
   const dimension = decodeDimensions;
 
-  // 3. Register thumbnail asset
-  const { id: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob);
+  // 3. Register thumbnail asset (dimensions from resample output)
+  const thumbDim = thumbResult.dimensions;
+  const { id: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, thumbDim);
 
   // 4. Camera calculation
   const { insets } = state.ui.theme.config;
@@ -97,8 +101,6 @@ export async function buildFrameContent(
   const canvasCropBox = getDefaultCanvasCropBox(dimension);
 
   // 5. Assemble base layer
-  const blobType = displayBlob instanceof File ? displayBlob.type : (displayBlob.type || 'image/png');
-  const blobSize = displayBlob.size;
   const baseLayer = LayerFactory.getNewLayer({
     name: 'Background',
     src: assetUrl,
@@ -106,10 +108,8 @@ export async function buildFrameContent(
     cx: 0,
     cy: 0,
     locked: true,
-    isSource: true,
     bounding: dimension,
     visibleShape: asLocalShape(contentBounds),
-    metadata: { format: blobType, size: blobSize, source: sourceType, originalName: file.name, imageMetadata: metadata },
   });
 
   const expandedLayers = LayerFactory.expandLayers([baseLayer]);
@@ -126,11 +126,12 @@ export async function buildFrameContent(
     canvas: dimension,
     camera,
     canvasCropBox,
-    assetId,
+    assetId: sourceAssetId || assetId,
     thumbnail: { src: thumbAssetUrl, assetId: thumbAssetId },
     dpi: chosenDpi || metadata.dpi,
     bitDepth: detectedBitDepth,
     colorSpace,
+    metadata,
   };
 }
 
@@ -143,8 +144,7 @@ export async function buildFrameContent(
  *
  * @param ctx - Editor context
  * @param decoded - Decoded image result from FileService
- * @param file - Original source file (for name/metadata)
- * @param sourceType - How the file was obtained ('local' | 'url')
+ * @param file - Original source file (for frame naming)
  * @param opts - Import options (switchFrame, dpi, extra)
  * @returns Frame ID of the created frame.
  */
@@ -152,14 +152,13 @@ export async function importSingleImage(
   ctx: EditorContextValue,
   decoded: DecodeResult,
   file: File,
-  sourceType: 'local' | 'url',
   opts: ImportOptions,
 ): Promise<{ frameId: string; thumbnailUrl: string }> {
   const { actions } = ctx;
   const { switchFrame, dpi: chosenFrameDpi, extra, parentId, seqNum, nameOverride } = opts;
 
   // Build all frame content (layers, camera, metadata)
-  const content = await buildFrameContent(ctx, decoded, file, sourceType, chosenFrameDpi);
+  const content = await buildFrameContent(ctx, decoded, chosenFrameDpi);
 
   // Derive frame name
   const frameName = file.name.replace(/\.[^.]+$/, '');
@@ -183,6 +182,7 @@ export async function importSingleImage(
     assetId: content.assetId,
     thumbnail: content.thumbnail,
     extra,
+    metadata: content.metadata,
   });
 
   actions.addFrame(frame, switchFrame);

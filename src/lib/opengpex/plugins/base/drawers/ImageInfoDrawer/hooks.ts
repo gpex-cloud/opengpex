@@ -38,7 +38,7 @@ import { formatBytes } from '@opengpex/editor/core/helpers/file';
  * from re-rendering during normal editor interactions (pan, hover, tool switch).
  */
 export function useImageInfoMetadata() {
-   const { activeFrame } = useEditorState();
+   const { activeFrame, state } = useEditorState();
 
    return useMemo(() => {
       if (!activeFrame) {
@@ -55,11 +55,8 @@ export function useImageInfoMetadata() {
          };
       }
 
-       // Find source layer by isSource flag (stable across reorder/deletion), fallback to order[0]
-       const sourceLayer = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]).find(l => l.isSource)
-         || activeFrame.layers.byId[activeFrame.layers.order[0]];
-       const metadata = sourceLayer?.metadata;
-       const imageMetadata = metadata?.imageMetadata as ImageMetadata | undefined;
+       // Read document-level metadata from frame (migrated from layer.metadata.imageMetadata)
+       const imageMetadata = activeFrame.metadata;
 
       const visibleContentLayers = activeFrame.layers.order.filter(id => {
          const l = activeFrame.layers.byId[id];
@@ -69,8 +66,8 @@ export function useImageInfoMetadata() {
       return {
          activeFrame,
          fileName: imageMetadata?.sourceFileName || activeFrame.name || 'Untitled',
-          fileFormat: ((metadata?.format || 'image/png').split('/')[1])?.toUpperCase() || 'PNG',
-         fileSize: metadata?.size ? formatBytes(metadata.size) : '---',
+         fileFormat: imageMetadata?.sourceFormat?.toUpperCase() || 'PNG',
+         fileSize: imageMetadata?.sourceFileSize ? formatBytes(imageMetadata.sourceFileSize) : '---',
          imageMetadata,
          layerCount: activeFrame.layers.order.length,
          frameDpi: activeFrame.dpi || 72,

@@ -18,12 +18,12 @@
  */
 
 /**
- * WorkerCache — Worker-side bitmap and raw buffer cache for Engine V2.
+ * WorkerCache — Worker-side bitmap and blob cache for Engine V2.
  *
  * Adapted from v1 `worker/core/WorkerCache.ts` with the following changes:
  * - Simplified API to match the Phase 0 design spec:
  *   • getBitmap(hash): single full-resolution bitmap (not pyramid).
- *   • getRawBuffer(hash): raw ArrayBuffer for high-precision paths.
+ *   • getBlob(hash): get the display blob for a given hash.
  *   • ingest(hash, blob): decode blob → ImageBitmap, store both.
  *   • evict(hash): release resources for a single asset.
  *   • clear(): release all resources.
@@ -31,6 +31,9 @@
  *
  * Invariant (architecture doc §六.6): Worker is self-sufficient — it resolves
  * bitmaps from WorkerCache and NEVER requests pixels from the main thread.
+ *
+ * Design (beta 52): rawBufferCache removed — IDB is the source of truth for
+ * source blobs. Worker only holds display data (bitmap + blob) for compositing.
  */
 
 class WorkerCache {
@@ -38,7 +41,6 @@ class WorkerCache {
 
   private blobCache: Map<string, Blob> = new Map();
   private bitmapCache: Map<string, ImageBitmap> = new Map();
-  private rawBufferCache: Map<string, ArrayBuffer> = new Map();
   private usageOrder: string[] = [];
 
   private MAX_ASSETS = 15;
@@ -93,17 +95,11 @@ class WorkerCache {
   }
 
   /**
-   * Get a raw ArrayBuffer for the given hash (for high-precision pipeline).
+   * Get the display blob for a given hash.
+   * Used by VipsBackend to obtain blob data for vips decoding.
    */
-  public getRawBuffer(hash: string): ArrayBuffer | undefined {
-    return this.rawBufferCache.get(hash);
-  }
-
-  /**
-   * Store a raw buffer (e.g. from vips decode for 16/32-bit data).
-   */
-  public setRawBuffer(hash: string, buffer: ArrayBuffer): void {
-    this.rawBufferCache.set(hash, buffer);
+  public getBlob(hash: string): Blob | undefined {
+    return this.blobCache.get(hash);
   }
 
   /**
@@ -116,7 +112,6 @@ class WorkerCache {
       this.bitmapCache.delete(hash);
     }
     this.blobCache.delete(hash);
-    this.rawBufferCache.delete(hash);
     const idx = this.usageOrder.indexOf(hash);
     if (idx !== -1) this.usageOrder.splice(idx, 1);
   }
@@ -130,7 +125,6 @@ class WorkerCache {
     }
     this.bitmapCache.clear();
     this.blobCache.clear();
-    this.rawBufferCache.clear();
     this.usageOrder = [];
   }
 
@@ -154,7 +148,6 @@ class WorkerCache {
         if (bitmap) bitmap.close();
         this.bitmapCache.delete(oldest);
         this.blobCache.delete(oldest);
-        this.rawBufferCache.delete(oldest);
       }
     }
   }

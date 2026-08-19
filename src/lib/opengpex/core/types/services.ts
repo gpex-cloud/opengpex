@@ -172,8 +172,10 @@ export interface AssetEntryInfo {
  * Core responsibilities: Blob-to-Hash mapping, IDB storage, ObjectURL management, reference-counting GC.
  */
 export interface AssetService {
-  /** Registers asset: inputs Blob, returns AssetRef. Accepts optional rawBlob for 16-bit fidelity (Phase 5). */
-  register: (blob: Blob, options?: { rawBlob?: Blob; dprScale?: number }) => Promise<AssetRef>;
+  /** Registers asset: inputs Blob + dimensions, returns AssetRef. Always triggers rendering cache pre-warm. */
+  register: (blob: Blob, dimensions: { w: number; h: number }, options?: { dprScale?: number }) => Promise<AssetRef>;
+  /** Stores a raw source blob, returns its content hash. Returns undefined if rawBlob is null/undefined. */
+  storeRaw: (rawBlob: Blob | undefined | null) => Promise<string | undefined>;
   /** Injects asset: directly stores when hash and metadata are known, avoiding duplicate Worker calculations */
   inject: (hash: string, blob: Blob, tileMeta: TileMetadata) => Promise<string>;
 
@@ -381,21 +383,6 @@ export interface PixelService {
     encodeTiff: (rgbaData: Uint8Array, width: number, height: number, options: Record<string, unknown>) => Promise<Uint8Array>;
     getPageCount: (bytes: Uint8Array) => Promise<{ pages: number; pageWidth: number; pageHeight: number }>;
     decodePage: (bytes: Uint8Array, page: number) => Promise<{ width: number; height: number; data: Uint8Array }>;
-    composite16bit: (params: {
-      layers: Array<{
-        bytes: Uint8Array;
-        x: number;
-        y: number;
-        blendMode: string;
-        opacity: number;
-        is8bit: boolean;
-        adjustments?: Record<string, unknown>;
-      }>;
-      canvasWidth: number;
-      canvasHeight: number;
-      options: Record<string, unknown>;
-    }) => Promise<Uint8Array>;
-    exportHighRes: (rawBytes: Uint8Array, options: Record<string, unknown>) => Promise<Uint8Array>;
     /** Convert image bytes with non-sRGB ICC profile to sRGB RGBA pixel data via vips (Little CMS). Also returns raw ICC profile bytes for round-trip export. */
     iccToSrgb: (bytes: Uint8Array) => Promise<{ width: number; height: number; data: Uint8Array; iccProfileData?: Uint8Array }>;
     /** Convert sRGB RGBA pixels back to target ICC color space via vips (Little CMS). Used for export round-trip. */

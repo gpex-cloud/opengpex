@@ -243,8 +243,8 @@ function parseExifToSemantic(exifBytes: Uint8Array, meta: ImageMetadata): void {
     if (lat != null && lon != null) {
       meta.gps = { latitude: Number(lat), longitude: Number(lon) };
     }
-  } catch (err) {
-    console.debug('[PNG parseExif] ExifReader failed: %o', err);
+  } catch {
+    // ExifReader failed — non-critical
   }
 }
 

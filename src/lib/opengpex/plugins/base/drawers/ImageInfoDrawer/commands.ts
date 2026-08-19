@@ -18,10 +18,9 @@
  */
 
 import { EditorContextValue, EditorCommand, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
-import type { ImageMetadata, EncodeOptions, SourceFormat } from '@opengpex/editor/core/files';
-import { canUseFastExport, shouldEmbedIcc } from '@opengpex/editor/core/color/ColorPipeline';
-import { assetStore } from '@opengpex/editor/core/storage/asset/AssetStore';
-import type { RenderToBlobOptions } from '@opengpex/editor/core/types';
+import type { EncodeOptions } from '@opengpex/editor/core/files';
+import { mimeToFormat } from '@opengpex/editor/core/files';
+import { shouldEmbedIcc } from '@opengpex/editor/core/color/ColorPipeline';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
 import { calcFinalDims, clipBoxToExportShape } from './utils';
@@ -31,16 +30,10 @@ import * as P from './protocols';
 /**
  * IMAGE_INFO_COMMANDS: Declarative command configurations.
  *
- * ── Refactor note (2026-07-10) ─────────────────────────────────────────────
- * Since PixelService.render was upgraded to a fully unified facade
- * (see docs/opengpex/plans/20260710_export_pipeline_refactor_proposal.md),
- * this command no longer needs multi-strategy dispatch. It:
- *   1) resolves selection → shape (or full-frame),
- *   2) assembles RenderToBlobOptions (format / quality / metadata / dpi / bit-depth),
- *   3) calls a single method: `pixels.render.shapeToBlob(frame, shape, opts)`.
- *
- * All lane routing (16-bit vips / 8-bit engine-worker / AVIF plugin worker) is
- * decided internally by PixelService.render.
+ * ── Refactor note (2026-08-19 Unified Composite-8bit) ────────────────────────
+ * Export logic always uses compositeFrame(frame, roi, { precision: 8 }) + encode.
+ * The old resolveExportStrategy three-path routing (fast-export / fast-re-encode /
+ * composite-8bit) has been removed. WebGPU will restore 16-bit support natively.
  */
 export const IMAGE_INFO_COMMANDS = {
    download: {
@@ -48,15 +41,15 @@ export const IMAGE_INFO_COMMANDS = {
       name: 'Download Creation',
       category: 'File',
       execute: async (ctx: EditorContextValue) => {
-         const { activeFrame, state, pixels, files } = ctx;
+         const { activeFrame, pixels, files } = ctx;
          const { selfConfig } = ctx.scoped || {};
          if (!activeFrame) return;
 
          const config = selfConfig as P.ExportConfig;
-         const isClipMode = state.interaction.interactionMode === 'clip';
+         const isClipMode = ctx.state.interaction.interactionMode === 'clip';
          const box = getClipBox(activeFrame);
 
-         // ─── 1. Common Validation ──────────────────────────────────────────
+         // ═══ 1. Validation ═══════════════════════════════════════════════════
          if (isClipMode && !box) {
             ctx.actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
             return;
@@ -71,153 +64,61 @@ export const IMAGE_INFO_COMMANDS = {
             return;
          }
 
-         // ─── 2. Common Parameter Computation ───────────────────────────────
+         // ═══ 2. Compute export dimensions ═══════════════════════════════════
          const cropShape: LocalShape | undefined = isClipMode && box ? clipBoxToExportShape(box) : undefined;
          const baseW = cropShape ? cropShape.rect.w : activeFrame.canvas.w;
          const baseH = cropShape ? cropShape.rect.h : activeFrame.canvas.h;
          const { w: exportW, h: exportH } = calcFinalDims(baseW, baseH, config);
 
          const dpi = config.dpi || activeFrame.dpi || 72;
-         // Find source layer by isSource flag (stable across reorder/deletion), fallback to order[0]
-         const sourceLayer = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]).find(l => l.isSource)
-           || activeFrame.layers.byId[activeFrame.layers.order[0]];
-         const layerMeta = sourceLayer?.metadata?.imageMetadata as ImageMetadata | undefined;
-
-         // Detect if the caller wants a post-composite resize (target size ≠ source size).
+         const layerMeta = activeFrame.metadata;
          const needsResize = exportW !== baseW || exportH !== baseH;
 
-          // ─── 4. Assemble the unified RenderToBlobOptions ───────────────────
-           // ICC embed decision: strategy-driven via shouldEmbedIcc()
-            // Three-layer: format capability × strategy default × user override
-            const mimeToFormat: Record<string, import('@opengpex/editor/core/files').SourceFormat> = {
-              'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp',
-              'image/avif': 'avif', 'image/tiff': 'tiff', 'image/bmp': 'bmp',
-            };
-            const exportFmt = mimeToFormat[config.format] || 'unknown';
-            const userEmbedIccOverride = config.embedIccOverride; // undefined = use strategy default
-            const embedIcc = shouldEmbedIcc(exportFmt, activeFrame.colorSpace, userEmbedIccOverride);
-             console.log('[ExportCmd ICC] layerMeta.colorSpace=%s, hasIccData=%s, embedIcc=%s, userOverride=%s (strategy-driven)',
-               layerMeta?.colorSpace, !!layerMeta?.raw?.icc?.data, embedIcc, userEmbedIccOverride);
+         const exportFormat = mimeToFormat[config.format] ?? 'unknown';
 
-          const opts: RenderToBlobOptions = {
-             format: config.format,
-             quality: config.quality ? config.quality / 100 : 0.92,
-             exportBitDepth: config.exportBitDepth,
-             metadata: layerMeta,
-             exportConfig: {
-                dpi,
-                preserveExif: config.keepExif,
-                writeSoftwareTag: true,
-                 embedIcc,
-                // Pass frame's working colorSpace to handler for export strategy routing
-                frameColorSpace: activeFrame.colorSpace,
-                tiffCompression: config.tiffCompression,
-                pngCompression: config.pngCompression,
-                jpegQuality: config.jpegQuality,
-                tiffPredictor: config.tiffPredictor,
-                tiffBigtiff: config.tiffBigtiff,
-                tiffTile: config.tiffTile,
-                tiffTileWidth: config.tiffTileWidth,
-                tiffTileHeight: config.tiffTileHeight,
-                resize: needsResize ? { w: exportW, h: exportH } : undefined,
-             },
-          };
+         // ICC embed decision
+         const userEmbedIccOverride = config.embedIccOverride;
+         const embedIcc = shouldEmbedIcc(exportFormat, activeFrame.colorSpace, userEmbedIccOverride);
 
+         // ═══ 3. Always composite-8bit ═══════════════════════════════════════
          try {
-            console.debug('[ExportCmd] Starting export: format=%s, clip=%s, dims=%dx%d',
-               config.format, cropShape ? 'yes' : 'no', exportW, exportH);
+            const localRoi = cropShape
+               ? cropShape
+               : asLocalShape({ x: 0, y: 0, w: activeFrame.canvas.w, h: activeFrame.canvas.h });
 
-         // ─── 4.5 Fast-path: canUseFastExport ────────────────────────────────
-         // When the frame is a single unedited layer exported to the same format,
-         // we can skip composite + encode entirely and return the original sourceBlob.
-         // This is the zero-computation lossless round-trip optimization.
-         const allLayers = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]);
-         const visibleLayers = allLayers.filter(l => !l.hostId && l.visible !== false);
-
-         // MIME → SourceFormat mapping for canUseFastExport
-         const mimeToSourceFormat: Record<string, SourceFormat> = {
-            'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp',
-            'image/avif': 'avif', 'image/tiff': 'tiff', 'image/bmp': 'bmp',
-         };
-         const exportSourceFormat = mimeToSourceFormat[config.format] || 'unknown';
-
-         // Determine if export parameters are unchanged from import defaults
-         const isUnchanged = !needsResize
-            && (!config.quality || config.quality === 92)
-            && !config.tiffCompression;
-
-         // ── sourceBlob: retrieve from AssetStore via base layer's assetId ──
-         // The rawBlob was stored at import time via assets.register(displayBlob, { rawBlob })
-         // and persisted in IndexedDB under key `raw:${assetId}`.
-         const baseLayerAssetId = sourceLayer?.assetId;
-         const sourceBlob: Blob | null = baseLayerAssetId
-            ? await assetStore.getRaw(baseLayerAssetId)
-            : null;
-
-         // ── isEdited: history-based detection (method 3) ──
-         // Per-frame undo history: past.length === 0 && !checkpoint === never edited.
-         // Same pattern as CloudMenu sync dirty detection.
-         const frameHistory = state.history.byFrameId[activeFrame.id];
-         const isEdited = frameHistory
-            ? (frameHistory.past.length > 0 || !!frameHistory.checkpoint)
-            : false;
-
-         const frameForFastExport = {
-            layerCount: visibleLayers.length,
-            isEdited,
-            sourceBlob,
-            sourceFormat: (layerMeta?.sourceFormat || 'unknown') as SourceFormat,
-         };
-
-         if (canUseFastExport(frameForFastExport, exportSourceFormat, isUnchanged)) {
-            // Fast-path: return sourceBlob directly (skip composite + encode)
-            const blob = frameForFastExport.sourceBlob!;
-            const filename = files.getExportFilename(activeFrame.name, exportW, exportH, blob.type || config.format);
-            await pixels.utils.download(blob, filename);
-            console.debug('[ExportCmd] Fast-path: sourceBlob returned directly (zero compute)');
-            return;
-         }
-
-         // ─── 5. Unified composite pipeline (Step 9) ─────────────────────────
-         // compositeFrame handles hostId filtering, ROI conversion, TRC and colorSpace.
-         const localRoi = cropShape
-            ? cropShape
-            : asLocalShape({ x: 0, y: 0, w: activeFrame.canvas.w, h: activeFrame.canvas.h });
-
-         const precision = opts.exportBitDepth === 16 ? 16 : 8;
-
-         const result = await pixels.render.compositeFrame(activeFrame, localRoi, { precision });
+            const result = await pixels.render.compositeFrame(activeFrame, localRoi, { precision: 8 });
 
             // Encode the composite result via FileService handlers.
-            // This ensures metadata injection (DPI, ICC profile, EXIF) is applied correctly.
-            // PixelResult.toBlob() returns raw Worker output without metadata — we need
-            // files.encode() which routes through PngHandler/JpegHandler/etc.
             const encodeOpts: EncodeOptions = {
-               quality: opts.quality,
-               metadata: opts.metadata,
-               exportConfig: opts.exportConfig as EncodeOptions['exportConfig'],
+               quality: config.quality ? config.quality / 100 : 0.92,
+               metadata: layerMeta,
+               exportConfig: {
+                  dpi,
+                  preserveExif: config.keepExif,
+                  writeSoftwareTag: true,
+                  embedIcc,
+                  frameColorSpace: activeFrame.colorSpace,
+                  tiffCompression: config.tiffCompression,
+                  pngCompression: config.pngCompression,
+                  jpegQuality: config.jpegQuality,
+                  tiffPredictor: config.tiffPredictor,
+                  tiffBigtiff: config.tiffBigtiff,
+                  tiffTile: config.tiffTile,
+                  tiffTileWidth: config.tiffTileWidth,
+                  tiffTileHeight: config.tiffTileHeight,
+                  resize: needsResize ? { w: exportW, h: exportH } : undefined,
+               },
             };
 
-            // Get bitmap from composite result, then encode via file handler
             const bitmap = await createImageBitmap(await result.toBlob());
             const blob = await files.encode(bitmap, config.format, encodeOpts);
             bitmap.close();
 
-            // ─── 6. Post-composite resize fallback (Lane C 8-bit path) ─────────
-            // If the lane returned a full-size blob but user requested resize,
-            // and the resize was NOT already handled inside vips (16-bit lanes),
-            // apply it here via FileService as a safety net.
-            // TODO: fold resize into files.encode chain so this branch dies.
-            if (needsResize && blob.type !== 'image/tiff') {
-               // For now keep as-is — the 8-bit lane does not resize post-composite;
-               // the panel handles resize separately via applyResize command.
-               // The user's chosen `resize` in opts is respected by 16-bit lanes only.
-            }
-
-            // ─── 7. Common Download Trigger ────────────────────────────────────
+            // ═══ 4. Download ═════════════════════════════════════════════════
             const actualFormat = blob.type || config.format;
             const filename = files.getExportFilename(activeFrame.name, exportW, exportH, actualFormat);
             await pixels.utils.download(blob, filename);
+            // console.debug('[ExportCmd] Composite-8bit: encode completed, format=%s, dims=%dx%d', actualFormat, exportW, exportH);
          } catch (err) {
             console.error('[ExportPanel] Download failed:', err);
          }

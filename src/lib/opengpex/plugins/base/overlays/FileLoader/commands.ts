@@ -18,6 +18,7 @@
  */
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
+import { detectFormat } from '@opengpex/editor/core/files';
 import * as P from './protocols';
 
 /**
@@ -31,7 +32,7 @@ export const FILE_LOADER_COMMANDS = {
       const { state, actions, files: fileService } = ctx;
       if (!state.isLoaded) return;
 
-      const imageFiles = files.filter(f => fileService.detectFormat(f) !== 'unknown');
+      const imageFiles = files.filter(f => detectFormat(f) !== 'unknown');
       if (imageFiles.length === 0) return;
 
       try {

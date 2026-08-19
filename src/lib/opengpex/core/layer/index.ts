@@ -443,7 +443,10 @@ export function createLayerService(
     },
 
     createLayerFromBlob: async (blob, frame, screenPoint) => {
-      const { id: assetId, url, dimensions: dim } = await assets.register(blob);
+      const bmp = await createImageBitmap(blob);
+      const dim = { w: bmp.width, h: bmp.height };
+      bmp.close();
+      const { id: assetId, url } = await assets.register(blob, dim);
 
       // layer.cx/cy uses the world coordinate system (origin at canvas center), directly using the screenToWorld result
       let cx, cy;

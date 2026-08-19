@@ -73,7 +73,6 @@ export async function encodeJpeg(
     const outCtx = outCanvas.getContext('2d')!;
     outCtx.putImageData(new ImageData(imageData.data, w, h), 0, 0);
     canvas = outCanvas;
-    console.debug('[ColorMgmt] JPEG Export: pixelConversion=p3-to-srgb');
   } else if (pixelConv === 'srgb-to-icc') {
     // Pixels are sRGB, need to convert to target ICC space
     const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
@@ -94,15 +93,11 @@ export async function encodeJpeg(
     clamped.set(data);
     tmpCtx.putImageData(new ImageData(clamped, w, h), 0, 0);
     canvas = tmpCanvas;
-    console.debug('[ColorMgmt] JPEG Export: pixelConversion=srgb-to-icc, targetProfile=%s',
-      meta!.raw!.icc?.name || 'custom');
   } else {
     // Strategy-driven: use encodeColorSpace to prevent implicit browser conversion
     canvas = source instanceof ImageBitmap
       ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
       : source as OffscreenCanvas;
-    console.debug('[ColorMgmt] JPEG Export: frameCS=%s, encodeColorSpace=%s, embedIcc=%s',
-      frameCS, exportStrategy.encodeColorSpace, embedIcc);
   }
 
   // 1. Get base JPEG blob from browser encoder
@@ -183,7 +178,6 @@ export async function encodeJpeg(
         const jpegBytes = new Uint8Array(await resultBlob.arrayBuffer());
         const withIcc = injectJpegIcc(jpegBytes, stockProfile.bytes);
         resultBlob = new Blob([withIcc.buffer as ArrayBuffer], { type: 'image/jpeg' });
-        console.debug('[ColorMgmt] JPEG Export: embedded stock ICC profile for %s', frameCS);
       }
     }
 

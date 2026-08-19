@@ -26,7 +26,6 @@ import { getClipBox } from "@opengpex/editor/core/helpers/selection";
 
 import { useImageInfoMetadata, useExportConfig, useClipMode } from "./hooks";
 import { FrameInfoPanel } from "./components/FrameInfoPanel";
-import { MetadataPanel } from "./components/MetadataPanel";
 import { AiGenerationPanel } from "./components/AiGenerationPanel";
 import { ResizeExportControls } from "./components/ResizeExportControls";
 
@@ -86,8 +85,8 @@ export function ImageInfoComponent() {
     const isHighRes = layerDim.w * layerDim.h > baseW * baseH * 1.2;
     const isUpScaled = layerDim.w * layerDim.h < baseW * baseH * 0.8;
 
-    // Bit depth info for display badges
-    const layerBitDepth = (targetLayer?.metadata?.imageMetadata as { bitDepth?: number } | undefined)?.bitDepth;
+    // Bit depth info for display badges (read from frame-level metadata)
+    const layerBitDepth = activeFrame.metadata?.bitDepth;
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
@@ -122,9 +121,8 @@ export function ImageInfoComponent() {
           isUpScaled={isUpScaled}
           frameBitDepth={activeFrame.bitDepth}
           layerBitDepth={layerBitDepth}
+          imageMetadata={meta.imageMetadata}
         />
-
-        <MetadataPanel imageMetadata={meta.imageMetadata} />
 
         <AiGenerationPanel extra={activeFrame.extra} />
       </div>

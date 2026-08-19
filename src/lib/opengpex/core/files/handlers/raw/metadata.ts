@@ -128,8 +128,8 @@ export async function extractRawMetadata(file: File): Promise<ImageMetadata> {
         }
       }
     }
-  } catch (err) {
-    console.debug('[RawHandler] EXIF extraction failed:', (err as Error).message);
+  } catch {
+    // EXIF extraction failed — non-critical
   }
 
   return meta;

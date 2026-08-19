@@ -18,7 +18,6 @@
  */
 
 import { Dimensions, CameraState } from '@opengpex/editor/core/types';
-import type { ImageMetadata } from '@opengpex/editor/core/files';
 
 /**
  * StorageInfoPanel Plugin Protocols
@@ -78,9 +77,6 @@ export interface LayerMetric {
   opacity: number;
   bounding: Dimensions;
   asset?: AssetMetric;
-  originalName?: string;
-  format?: string;
-  exif?: ImageMetadata;
   hostId?: string;
   role?: string;
   subLayers?: LayerMetric[];
@@ -96,8 +92,15 @@ export interface FrameMetric {
   camera: CameraState;
   rotation: number;
   thumbnail?: AssetMetric;
+  sourceAsset?: AssetMetric;
   layers: LayerMetric[];
   historyCount: number;
+  // Frame-level document information
+  dpi: number;
+  bitDepth: 8 | 16 | 32;
+  colorSpace: string;
+  sourceFileName?: string;
+  sourceFormat?: string;
 }
 
 /**

@@ -181,16 +181,51 @@ export const FORMAT_COLOR_STRATEGY: Record<SourceFormat, FormatColorStrategy> = 
 
 // ─── Format Strategy Query Functions ───
 
+/**
+ * Look up color capabilities for a file format.
+ *
+ * Problem solved: different formats have vastly different color handling capabilities
+ * (PNG can embed ICC, BMP cannot; TIFF supports 16-bit, GIF doesn't).
+ * Callers query this table instead of hardcoding format-specific if/else branches.
+ *
+ * @example
+ * // Export panel deciding whether to show "Embed ICC Profile" toggle:
+ * const strategy = getFormatColorStrategy('png');
+ * if (strategy.supportsIccEmbed) showIccToggle();  // PNG → show
+ *
+ * const strategy2 = getFormatColorStrategy('bmp');
+ * if (strategy2.supportsIccEmbed) showIccToggle();  // BMP → hidden (false)
+ */
 export function getFormatColorStrategy(format: SourceFormat): FormatColorStrategy {
   return FORMAT_COLOR_STRATEGY[format] ?? FORMAT_COLOR_STRATEGY['unknown'];
 }
 
 /**
- * Resolve the final ColorSpaceId based on format strategy.
+ * Determine the final ColorSpaceId for a file, merging detected metadata with format defaults.
+ *
+ * Problem solved: decoders attempt to parse ICC profiles from files to identify color space,
+ * but this may fail (file has no ICC data, or the format itself doesn't support color metadata).
+ * This function provides a unified "use detection if available, otherwise fall back to a safe
+ * format-level default" merge logic, so handlers don't need their own fallback branches.
+ *
+ * @example
+ * // Opening a PNG with Display P3 ICC profile — detection succeeded:
+ * resolveColorSpaceForFormat('png', 'display-p3')
+ * // → 'display-p3' (detected value used directly)
+ *
+ * @example
+ * // Opening a PNG without any ICC data — detection returned undefined:
+ * resolveColorSpaceForFormat('png', undefined)
+ * // → 'srgb' (format supports metadata but nothing found; fallback to possibleColorSpaces[0])
+ *
+ * @example
+ * // Opening a BMP — format doesn't read color metadata at all (readColorMetadata=false):
+ * resolveColorSpaceForFormat('bmp', undefined)
+ * // → 'srgb' (skips detection entirely, returns format's hard-coded default)
  *
  * @param format - The file's SourceFormat
- * @param detectedCS - The colorSpace detected by handler.extractMetadata() (may be undefined)
- * @returns The final determined ColorSpaceId
+ * @param detectedCS - The colorSpace detected by handler.extractMetadata() (may be undefined if parsing failed or was skipped)
+ * @returns The final determined ColorSpaceId to use for the frame
  */
 export function resolveColorSpaceForFormat(
   format: SourceFormat,
@@ -208,6 +243,21 @@ export function resolveColorSpaceForFormat(
 /**
  * Determine whether to retain sourceBlob.
  * Called at end of handler.decode(), replaces manual per-handler checks.
+ *
+ * @example
+ * // In tiff/decode.ts — 16-bit TIFF retains source for lossless export:
+ * shouldRetainSourceBlob('tiff', { bitDepth: 16, colorSpace: 'srgb' }, 'srgb')
+ * // → true (on-fidelity-loss: bitDepth > 8)
+ *
+ * @example
+ * // In png/decode.ts — 8-bit sRGB PNG has no fidelity loss:
+ * shouldRetainSourceBlob('png', { bitDepth: 8, colorSpace: 'srgb' }, 'srgb')
+ * // → false (on-fidelity-loss: neither condition met)
+ *
+ * @example
+ * // RAW files always retain:
+ * shouldRetainSourceBlob('raw', { bitDepth: 14 }, 'display-p3')
+ * // → true (strategy is 'always')
  *
  * @param format         - The file's SourceFormat
  * @param metadata       - Parsed metadata (bitDepth, colorSpace)
@@ -393,6 +443,21 @@ export const WORKING_PIPELINE: Record<ActiveWorkingColorSpace, WorkingPipelineEn
 
 // ─── Query Functions ───
 
+/**
+ * Query the import pipeline strategy for a detected color space.
+ *
+ * @example
+ * // In jpeg/decode.ts — AdobeRGB JPEG detected via ICC:
+ * const strategy = getImportStrategy('adobe-rgb');
+ * // → { frameColorSpace: 'display-p3', conversion: 'matrix' }
+ * // Handler applies: AdobeRGB→P3 matrix conversion, sets frame.colorSpace='display-p3'
+ *
+ * @example
+ * // CMYK source — needs full ICC engine conversion:
+ * const strategy = getImportStrategy('cmyk');
+ * // → { frameColorSpace: 'srgb', conversion: 'icc-engine' }
+ * // Handler calls: vips iccToSrgb(), sets frame.colorSpace='srgb'
+ */
 export function getImportStrategy(cs: ColorSpaceId): ImportStrategy {
   return IMPORT_PIPELINE[cs] ?? IMPORT_PIPELINE['unknown'];
 }
@@ -406,6 +471,15 @@ function toActive(frameCS: WorkingColorSpace): ActiveWorkingColorSpace {
   return (frameCS === 'display-p3') ? 'display-p3' : 'srgb';
 }
 
+/**
+ * Query composite strategy for a frame's working color space.
+ *
+ * @example
+ * // In CompositeDispatcher.ts — creating composite canvas:
+ * const strategy = getCompositeStrategy('display-p3');
+ * // → { canvasColorSpace: 'display-p3', needsMatrixConversion: false }
+ * // Dispatcher creates: new OffscreenCanvas() with colorSpace='display-p3'
+ */
 export function getCompositeStrategy(frameCS: WorkingColorSpace): CompositeStrategy {
   return WORKING_PIPELINE[toActive(frameCS)].composite;
 }
@@ -414,6 +488,20 @@ export function getDisplayStrategy(frameCS: WorkingColorSpace): DisplayStrategy 
   return WORKING_PIPELINE[toActive(frameCS)].display;
 }
 
+/**
+ * Query export encoding strategy. Handles format-based color space fallback.
+ *
+ * @example
+ * // P3 frame → export as PNG (format supports P3):
+ * getExportStrategy('display-p3', 'png')
+ * // → { encodeColorSpace: 'display-p3', embedIccByDefault: true }
+ *
+ * @example
+ * // P3 frame → export as BMP (format doesn't support P3, auto-fallback):
+ * getExportStrategy('display-p3', 'bmp')
+ * // → { encodeColorSpace: 'srgb', embedIccByDefault: false }
+ * // Triggers 'p3-to-srgb' pixel conversion in resolveExportPixelConversion()
+ */
 export function getExportStrategy(
   frameCS: WorkingColorSpace,
   targetFormat?: SourceFormat,
@@ -446,6 +534,16 @@ export function getExportStrategy(
 /**
  * Resolve 'auto-p3' in display strategy to a concrete PredefinedColorSpace.
  * Called at runtime (depends on displaySupportsP3() hardware detection).
+ *
+ * @example
+ * // In CanvasStage.tsx — P3 frame on a P3-capable display:
+ * resolveDisplayColorSpace('display-p3', true)
+ * // → 'display-p3' (auto-p3 resolves to display-p3)
+ *
+ * @example
+ * // P3 frame on a sRGB-only display:
+ * resolveDisplayColorSpace('display-p3', false)
+ * // → 'srgb' (auto-p3 falls back; needs CPU P3→sRGB matrix clamp)
  */
 export function resolveDisplayColorSpace(
   frameCS: WorkingColorSpace,
@@ -458,47 +556,6 @@ export function resolveDisplayColorSpace(
   return strategy.canvasColorSpace as PredefinedColorSpace;
 }
 
-// ─── sourceBlob Fast Export (general optimization, decoupled from color pipeline) ───
-
-/**
- * Determine if sourceBlob can be returned directly (skipping re-encode).
- * This is the export logic's general fast-path, independent of color space strategy.
- *
- * Conditions:
- *   1. Export params unchanged (isUnchanged = true)
- *      — Caller (ImageInfoDrawer command layer) is responsible for comparing current
- *        export config against defaults:
- *        isUnchanged = !needsResize && !userChangedQuality && !userChangedCompression && ...
- *      — Separation of concerns: command layer has full UI state, best suited to determine
- *        "did the user change anything"
- *   2. Single layer (only one source layer)
- *   3. Unedited (no filters, crops, layer blending, etc.)
- *   4. sourceBlob exists and is valid
- *   5. Export format === source file format (PNG→PNG, TIFF→TIFF...)
- *
- * When conditions are met, directly return sourceBlob bytes (perfectly lossless round-trip).
- * When not met, take normal encode path (use Frame's P3/sRGB pixels to re-encode).
- *
- * Design note:
- *   Why use isUnchanged boolean flag instead of passing full exportConfig?
- *   - Different formats have different sensitivity to "param changes" (PNG lossless → quality irrelevant; JPEG lossy → quality relevant)
- *   - This format-awareness knowledge belongs to UI/command layer, not this low-level strategy function
- *   - A boolean keeps this function minimal, all complex logic stays in caller
- */
-export function canUseFastExport(frame: {
-  layerCount: number;
-  isEdited: boolean;
-  sourceBlob: Blob | null;
-  sourceFormat: SourceFormat;
-}, exportFormat: SourceFormat, isUnchanged: boolean): boolean {
-  return (
-    isUnchanged &&
-    frame.layerCount === 1 &&
-    !frame.isEdited &&
-    frame.sourceBlob !== null &&
-    exportFormat === frame.sourceFormat
-  );
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ICC Embed Decision
@@ -511,6 +568,21 @@ export function canUseFastExport(frame: {
  *   1. Format capability (supportsIccEmbed) — hard constraint
  *   2. Strategy default (embedIccByDefault) — based on working color space
  *   3. User override — takes precedence when provided
+ *
+ * @example
+ * // P3 frame → PNG (supports ICC, strategy default=true, no user override):
+ * shouldEmbedIcc('png', 'display-p3', undefined)
+ * // → true (Layer 2: embedIccByDefault=true)
+ *
+ * @example
+ * // sRGB frame → BMP (format doesn't support ICC):
+ * shouldEmbedIcc('bmp', 'srgb', true)
+ * // → false (Layer 1: hard constraint, BMP cannot embed ICC)
+ *
+ * @example
+ * // User explicitly disables ICC embed:
+ * shouldEmbedIcc('png', 'display-p3', false)
+ * // → false (Layer 3: user override takes precedence)
  *
  * @param exportFormat    - Target export format
  * @param frameColorSpace - Frame's working color space
@@ -561,6 +633,21 @@ export type ExportPixelConversion = 'none' | 'srgb-to-icc' | 'p3-to-srgb';
  *   - Whether embedding ICC is requested
  *   - Whether source has non-sRGB custom ICC profile data
  *   - Whether the target format supports the frame's color space
+ *
+ * @example
+ * // P3 frame → export as BMP (BMP doesn't support P3):
+ * resolveExportPixelConversion('display-p3', { hasIccProfileData: false }, false, 'bmp')
+ * // → 'p3-to-srgb' (format fallback: must clamp P3→sRGB before encoding)
+ *
+ * @example
+ * // sRGB frame with custom ICC profile (e.g. Japan Color 2001) → export with ICC embed:
+ * resolveExportPixelConversion('srgb', { colorSpace: 'unknown', hasIccProfileData: true }, true)
+ * // → 'srgb-to-icc' (restore original ICC encoding via vips srgbToIcc before embed)
+ *
+ * @example
+ * // Normal case: P3 frame → export as PNG (PNG supports P3):
+ * resolveExportPixelConversion('display-p3', { hasIccProfileData: true }, true, 'png')
+ * // → 'none' (no conversion needed, P3 pixels written directly)
  *
  * @param frameCS       - Frame's working color space
  * @param sourceMeta    - Source file metadata (colorSpace + ICC profile availability)

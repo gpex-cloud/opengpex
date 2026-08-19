@@ -164,7 +164,7 @@ export class StateStorage {
       Hydrating.extractAllIds(state.history, activeIds, visited);
     }
 
-    // 2. Clean up physical assets in asset service
+    // 2. Clean up physical assets in asset service (pool-based display assets + orphaned raw blobs)
     this.assets.sweep(activeIds, force);
 
     if (typeof process !== 'undefined' && process.env.NODE_ENV === 'development') {

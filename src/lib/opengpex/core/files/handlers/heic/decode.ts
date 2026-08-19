@@ -58,8 +58,6 @@ export async function decodeHeic(
       const img = await createImageBitmap(safeFile);
       dimensions = { w: img.width, h: img.height };
       img.close();
-      console.debug('[ColorMgmt] HEIC decode: %s conversion=none, detectedCS=%s, frameCS=%s',
-        file.name, detectedCS, strategy.frameColorSpace);
       break;
     }
 
@@ -83,9 +81,6 @@ export async function decodeHeic(
       const outImageData = new ImageData(imageData.data, w, h, { colorSpace: outCS });
       outCtx.putImageData(outImageData, 0, 0);
       displayBlob = await outCanvas.convertToBlob({ type: 'image/png' });
-
-      console.debug('[ColorMgmt] HEIC decode: %s matrix %s→%s',
-        file.name, detectedCS, strategy.frameColorSpace);
       break;
     }
 
@@ -110,9 +105,6 @@ export async function decodeHeic(
       clamped.set(data);
       ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
       displayBlob = await canvas.convertToBlob({ type: 'image/png' });
-
-      console.debug('[ColorMgmt] HEIC decode: %s icc-engine %s→%s',
-        file.name, detectedCS, strategy.frameColorSpace);
       break;
     }
   }

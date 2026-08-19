@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.52
+
+- Export: unified to a single 8-bit composite pipeline, removed 16-bit paths (prep for WebGPU)
+- Storage: removed in-memory rawBuffer cache — source files now stored directly in IndexedDB
+- Storage Panel: added detailed storage info panel showing asset pool, frame metrics, history, and model cache usage
+
+---
+
 ## v1.0.0-beta.51
 
 - Import: batch progress indicator ("Loading 2/5…"), smarter duplicate handling (overwrite/keep both/skip), and separate GIF/TIFF pipelines for better reliability

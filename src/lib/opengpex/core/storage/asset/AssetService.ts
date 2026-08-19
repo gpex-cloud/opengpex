@@ -113,26 +113,22 @@ export class AssetService {
   }
 
   /**
-   * Compute TileMetadata from a Blob on the main thread.
-   * `createImageBitmap` is async and executed by the browser's internal thread pool.
-   */
-  private async computeTileMeta(blob: Blob): Promise<TileMetadata> {
-    const bitmap = await createImageBitmap(blob);
-    const { width, height } = bitmap;
-    bitmap.close();
-    return buildTileMeta(width, height);
-  }
-
-  /**
    * Registers asset: calculates hash from Blob and stores it in the pool.
    *
-   * Phase 5 Extension: Accepts an optional `rawBlob` for 16-bit fidelity.
-   * When provided, the raw high-resolution source is stored alongside the
-   * 8-bit display asset under a `raw:${hash}` key in IDB.
+   * @param blob - The binary data to register.
+   * @param dimensions - Width and height of the asset. Required — callers must
+   *   provide dimensions from their own decode context (e.g. DecodeResult,
+   *   canvas size, resample output). AssetService no longer performs any
+   *   image decoding internally.
+   * @param options - Optional settings:
+   *   - `dprScale`: Physical-to-logical pixel ratio for HiDPI assets.
    */
-  async register(blob: Blob, options?: { rawBlob?: Blob; dprScale?: number }): Promise<AssetRef> {
+  async register(
+    blob: Blob,
+    dimensions: { w: number; h: number },
+    options?: { dprScale?: number },
+  ): Promise<AssetRef> {
     const dprScale = options?.dprScale;
-    const rawBlob = options?.rawBlob;
 
     const hash = await this.calculateHash(blob);
     this.pendingIds.add(hash);
@@ -142,12 +138,6 @@ export class AssetService {
       entry.state = AssetState.READY;
       if (dprScale !== undefined && entry.tileMeta) {
         entry.tileMeta.dprScale = dprScale;
-      }
-      // Store raw blob even if display asset already exists (idempotent)
-      if (rawBlob) {
-        assetStore.setRaw(hash, rawBlob).catch(err => {
-          console.warn('[AssetService] Failed to store raw blob:', err);
-        });
       }
       const dim = entry.tileMeta
         ? { w: entry.tileMeta.width, h: entry.tileMeta.height }
@@ -162,12 +152,6 @@ export class AssetService {
         await assetStore.set(hash, cached.blob, cached.tileMeta);
       }
       this.loadEntry(cached);
-      // Store raw blob association
-      if (rawBlob) {
-        assetStore.setRaw(hash, rawBlob).catch(err => {
-          console.warn('[AssetService] Failed to store raw blob:', err);
-        });
-      }
       const loadedEntry = this.pool.get(hash)!;
       const dim = loadedEntry.tileMeta
         ? { w: loadedEntry.tileMeta.width, h: loadedEntry.tileMeta.height }
@@ -175,18 +159,11 @@ export class AssetService {
       return { id: hash, url: loadedEntry.url, dimensions: dim };
     }
 
-    const tileMeta = await this.computeTileMeta(blob);
+    const tileMeta = buildTileMeta(dimensions.w, dimensions.h);
     if (dprScale !== undefined) {
       tileMeta.dprScale = dprScale;
     }
     await assetStore.set(hash, blob, tileMeta);
-
-    // Phase 5: Store raw high-resolution source blob (fire-and-forget for performance)
-    if (rawBlob) {
-      assetStore.setRaw(hash, rawBlob).catch(err => {
-        console.warn('[AssetService] Failed to store raw blob:', err);
-      });
-    }
 
     const url = URL.createObjectURL(blob);
     this.pool.set(hash, {
@@ -204,6 +181,23 @@ export class AssetService {
     this.callbacks.onRegistered?.(hash, blob);
 
     return { id: hash, url, dimensions: { w: tileMeta.width, h: tileMeta.height } };
+  }
+
+  /**
+   * Stores a raw source blob and returns its content hash as an independent ID.
+   * Used for 16-bit TIFF/RAW imports and original GIF files — preserves
+   * original data for lossless re-export. Stored under `raw:${hash}` key
+   * in IDB, completely separate from any display asset's StoredAsset record.
+   *
+   * The returned hash is stored as `frame.assetId` — the frame owns the
+   * reference to the source file. Lifecycle: source blob survives layer
+   * deletion; only frame deletion triggers GC cleanup.
+   */
+  async storeRaw(rawBlob: Blob | undefined | null): Promise<string | undefined> {
+    if (!rawBlob) return undefined;
+    const hash = await this.calculateHash(rawBlob);
+    await assetStore.setRaw(hash, rawBlob);
+    return hash;
   }
 
   /**
@@ -277,7 +271,7 @@ export class AssetService {
     });
     resourceTracker.track(`asset:${item.id}`, 'image_decoded', item.blob.size, `Hydrated ${item.id.slice(0, 8)}`);
 
-    // Notify engine layer to warm Worker cache
+    // Display asset: notify engine layer to warm Worker cache
     this.callbacks.onRegistered?.(item.id, item.blob);
   }
 
@@ -386,7 +380,8 @@ export class AssetService {
       resourceTracker.release(`asset:${id}`);
       // Notify engine layer to evict Worker cache
       this.callbacks.onReleased?.(id);
-      // 💡 Completely erased at the physical layer: prevents orphaned/zombie Blobs in IndexedDB from causing storage bloat
+      // Erase display asset from IDB. Raw blobs (raw:${hash}) are cleaned
+      // separately by the raw orphan sweep at the end of sweep().
       assetStore.remove(id).catch(err => {
         console.error(`[AssetService] Failed to remove physical asset ${id} from store:`, err);
       });
@@ -423,6 +418,24 @@ export class AssetService {
       }
     }
     toRevoke.forEach(id => this.revoke(id));
+
+    // Clean up orphaned raw blobs in IDB (not tracked by pool).
+    // Raw blobs are stored under `raw:${hash}` keys. When a frame is deleted,
+    // its frame.assetId (the raw hash) disappears from activeIdsInState.
+    assetStore.keys().then(allKeys => {
+      for (const key of allKeys) {
+        if (key.startsWith('raw:')) {
+          const rawId = key.slice(4);
+          if (!activeIdsInState.has(rawId)) {
+            assetStore.removeRaw(rawId).catch(err => {
+              console.error(`[AssetService] Failed to remove orphaned raw blob ${rawId}:`, err);
+            });
+          }
+        }
+      }
+    }).catch(err => {
+      console.error('[AssetService] Raw blob GC scan failed:', err);
+    });
   }
 
   async clear() {

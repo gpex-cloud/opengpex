@@ -174,9 +174,6 @@ export async function convertRawToBlob(file: File, colorConfig: RawColorConfig):
 
     const blob = await canvas.convertToBlob({ type: 'image/png' });
 
-    console.debug('[ColorMgmt] RAW decode: conversion=%s %s→%s',
-      colorConfig.conversion, colorConfig.sourceColorSpace, colorConfig.targetColorSpace);
-
     return blob;
   } catch (error) {
     console.error('[RawHandler] Conversion failed', error);

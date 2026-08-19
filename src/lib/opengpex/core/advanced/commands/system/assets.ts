@@ -23,20 +23,12 @@ import { EditorCommand, EditorContextValue } from '@opengpex/editor/core/types';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**
- * SYSTEM_ASSET_COMMANDS: Responsible for registration, conversion, and synchronous orchestration of physical assets.
+ * SYSTEM_ASSET_COMMANDS: Responsible for conversion, synchronous orchestration of physical assets.
+ *
+ * NOTE (beta 52): `register` command removed — dead code with no external callers.
+ * AssetService.register is called directly by importers/commands with required dimensions.
  */
 export const SystemAssetCommands = {
-  register: {
-    id: P.ADV_ASSET_REGISTER,
-    name: 'Register Asset',
-    execute: async (ctx: EditorContextValue, blob: Blob): Promise<{ id: string; url: string }> => {
-      const { assets } = ctx;
-
-      // Physical registration (based on SHA-256 hash) — returns {id, url} directly
-      return await assets.register(blob);
-    }
-  } as EditorCommand<Blob, Promise<{ id: string; url: string }>>,
-
   sync: {
     id: P.ADV_ASSET_SYNC,
     name: 'Synchronize Assets (GC)',

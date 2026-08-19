@@ -18,42 +18,29 @@
  */
 
 /**
- * CompositorHandler — Worker-side routing layer for composite jobs.
+ * CompositorHandler — Worker-side handler for composite jobs.
  *
- * Receives a CompositeJob from the router and dispatches to the appropriate
- * backend based on `precision`:
- * - precision 8     → Canvas2dBackend (Phase 3)
- * - precision 16/32 → HighDepthHandler → VipsBackend (Phase 5)
+ * Receives a CompositeJob from the router and dispatches to Canvas2dBackend.
+ * All composite operations run at 8-bit precision via Canvas2dBackend.
  *
- * This class exists as a thin routing layer so that backend selection
- * is transparent to the router and dispatch layers.
+ * WebGPU upgrade path: replace Canvas2dBackend → WebGpuBackend (single swap).
  */
 
 import type { CompositeJob } from '../../protocol/jobs';
 import type { PixelResultData } from '../../protocol/results';
 import { Canvas2dBackend } from '../../rendering/offscreen/Canvas2dBackend';
-import { HighDepthHandler } from './highdepth';
 
 export class CompositorHandler {
   private canvas2dBackend: Canvas2dBackend;
-  private highdepthHandler: HighDepthHandler;
 
   constructor() {
     this.canvas2dBackend = new Canvas2dBackend();
-    this.highdepthHandler = new HighDepthHandler();
   }
 
   /**
-   * Handle a CompositeJob — route to the appropriate backend based on precision.
-   *
-   * Routing logic (architecture doc §四):
-   * - precision >= 16 → VipsBackend (float compositing, TIFF output)
-   * - precision  8    → Canvas2dBackend (8-bit compositing, PNG output)
+   * Handle a CompositeJob — always routes to Canvas2dBackend (8-bit).
    */
   async handle(job: CompositeJob): Promise<{ result: PixelResultData; transfer?: Transferable[] }> {
-    if (job.precision >= 16) {
-      return this.highdepthHandler.handle(job);
-    }
     const result = await this.canvas2dBackend.compose(job);
     return { result };
   }

@@ -63,5 +63,3 @@ export class TiffHandler implements ImageFormatHandler {
 
 // Re-export public types and functions
 export type { TiffCompression, TiffEncodeOptions } from './encode';
-export type { HighResExportOptions, CompositeLayerDescriptor, CompositeExportOptions } from './highres';
-export { exportHighRes, compositeMultiLayer16bit } from './highres';

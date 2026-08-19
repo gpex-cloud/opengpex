@@ -21,6 +21,7 @@
 'use client';
 
 import { asLocalShape, Layer, EditorContextValue, NormalizedState, CameraState, LocalShape, Dimensions } from '@opengpex/editor/core/types';
+import type { ImageMetadata } from '@opengpex/editor/core/files/types';
 import { getDefaultCanvasCropBox } from '@opengpex/editor/core/helpers/selection';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
@@ -41,6 +42,7 @@ export interface GifFrameContent {
   canvasCropBox: LocalShape;
   gifSequenceId: string;
   gifFrameCount: number;
+  metadata?: ImageMetadata;
 }
 
 /**
@@ -53,8 +55,6 @@ export interface GifFrameContent {
 export async function buildGifFrameContent(
   ctx: EditorContextValue,
   decoded: DecodeResult,
-  file: File,
-  sourceType: 'local' | 'url',
 ): Promise<GifFrameContent | null> {
   const { assets, actions, state, geometry } = ctx;
   const { dimensions: decodeDimensions, metadata, subImages } = decoded;
@@ -99,7 +99,7 @@ export async function buildGifFrameContent(
 
   const frameAssets = await Promise.all(
     framesToImport.map(async (f) => {
-      const { id: assetId, url: assetUrl } = await assets.register(f.displayBlob);
+      const { id: assetId, url: assetUrl } = await assets.register(f.displayBlob, dimension);
       return { assetId, assetUrl, delay: f.delay || 100, index: f.index };
     }),
   );
@@ -111,12 +111,10 @@ export async function buildGifFrameContent(
     cx: 0, cy: 0,
     locked: false,
     visible: i === 0,
-    isSource: i === 0,
     bounding: dimension,
     visibleShape: asLocalShape({ x: 0, y: 0, w: dimension.w, h: dimension.h }),
     metadata: {
-      format: 'image/gif', size: file.size, source: sourceType, originalName: file.name,
-      imageMetadata: metadata, gifSequenceId,
+      gifSequenceId,
       gifFrameIndex: i, gifFrameDelay: fa.delay, gifTotalFrames: framesToImport.length,
     },
   }));
@@ -138,6 +136,7 @@ export async function buildGifFrameContent(
     canvasCropBox: getDefaultCanvasCropBox(dimension),
     gifSequenceId,
     gifFrameCount: framesToImport.length,
+    metadata,
   };
 }
 
@@ -149,27 +148,28 @@ export async function importAnimatedGif(
   ctx: EditorContextValue,
   decoded: DecodeResult,
   file: File,
-  sourceType: 'local' | 'url',
+  _sourceType: 'local' | 'url',
   opts: ImportOptions,
 ): Promise<string> {
   const { assets, pixels, actions } = ctx;
   const { switchFrame, extra } = opts;
 
   // 1. Build GIF content (includes frame count dialog)
-  const content = await buildGifFrameContent(ctx, decoded, file, sourceType);
+  const content = await buildGifFrameContent(ctx, decoded);
   if (!content) return ''; // User cancelled
 
-  // 2. Register original GIF file as asset (for future revert)
-  const { id: originalGifAssetId } = await assets.register(file);
+  // 2. Store original GIF file as raw source (for future revert)
+  const originalGifAssetId = await assets.storeRaw(file);
 
   // 3. Generate thumbnail
   const firstLayerId = content.layers.order[0];
   const firstLayer = content.layers.byId[firstLayerId];
-  const [_contentBounds, thumbBlob] = await Promise.all([
+  const [_contentBounds, thumbResult] = await Promise.all([
     pixels.image.contentBounds(firstLayer.src),
-    (await pixels.image.resample(firstLayer.src, { maxSize: 256 })).toBlob('image/webp'),
+    pixels.image.resample(firstLayer.src, { maxSize: 256 }),
   ]);
-  const { id: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob);
+  const thumbBlob = await thumbResult.toBlob('image/webp');
+  const { id: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, thumbResult.dimensions);
 
   // 4. Assemble and add frame
   const frameName = file.name.replace(/\.[^.]+$/, '');
@@ -183,9 +183,10 @@ export async function importAnimatedGif(
     activeLayerId: content.activeLayerId,
     camera: content.camera,
     canvasCropBox: content.canvasCropBox,
-    assetId: content.layers.byId[content.layers.order[0]]?.assetId,
+    assetId: originalGifAssetId,
     thumbnail: { src: thumbAssetUrl, assetId: thumbAssetId },
-    extra: { ...extra, gifSequenceId: content.gifSequenceId, gifFrameCount: content.gifFrameCount, originalGifAssetId },
+    extra: { ...extra, gifSequenceId: content.gifSequenceId, gifFrameCount: content.gifFrameCount },
+    metadata: content.metadata,
   });
 
   actions.addFrame(frame, switchFrame);

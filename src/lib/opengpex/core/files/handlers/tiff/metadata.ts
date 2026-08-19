@@ -156,8 +156,8 @@ export async function extractTiffMetadata(file: File): Promise<ImageMetadata> {
     if (artist || copyright) {
       meta.author = { name: artist, copyright };
     }
-  } catch (err) {
-    console.debug('[TiffHandler] IFD metadata extraction failed:', (err as Error).message);
+  } catch {
+    // IFD metadata extraction failed — non-critical
   }
 
   return meta;

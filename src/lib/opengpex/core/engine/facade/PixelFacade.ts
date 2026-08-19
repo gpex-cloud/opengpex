@@ -97,9 +97,20 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
     bridge.request<ImageBitmap | null>({ type: 'GET_TILE', hash, level, x, y }),
   );
 
-  // ── Wire AssetService lifecycle → Engine cache warming/eviction ──
-  // Previously done in EditorContext useEffect; internalized here since
-  // PixelFacade already receives `assets` as a dep (no extra coupling).
+  // ── Wire AssetService lifecycle → Rendering cache warming/eviction ──
+  //
+  // AssetService handles registration + IDB persistence + pool lifecycle.
+  // It knows nothing about rendering caches. These callbacks bridge the gap:
+  //
+  // onRegistered: Pre-warm BOTH rendering caches so the asset renders immediately
+  //   without a flash/decode delay on first frame:
+  //   1. Worker-side: ensureAsset → ENSURE_ASSET job → workerCache.ingest (bitmapCache + blobCache)
+  //   2. Main-thread: sourceBitmapCache.warmFromBlob → decode blob → ImageBitmap cache
+  //
+  // onReleased: Evict from Worker cache when AssetService revokes the asset (GC).
+  //
+  // Note: source assets (noCache) never trigger onRegistered — they are stored
+  // in IDB for lossless re-export only, never displayed or rendered.
   assets.setCallbacks({
     onRegistered: (hash, blob) => {
       image.ensureAsset(hash, blob).catch(() => { /* non-fatal */ });
@@ -199,7 +210,7 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
         const result = await composite.composite({
           layers,
           roi: effectiveRoi,
-          precision: options?.precision ?? (frame.bitDepth as 8 | 16 | 32) ?? 8,
+          precision: 8,
           dpr: options?.dpr ?? 1,
           compositeTRC: frame.trc,
           compositeColorSpace: frame.colorSpace,
@@ -217,7 +228,7 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
         const result = await composite.composite({
           layers,
           roi: effectiveRoi,
-          precision: (frame.bitDepth as 8 | 16 | 32) ?? 8,
+          precision: 8,
           dpr: 1,
           outputSize,
           compositeTRC: frame.trc,
@@ -266,9 +277,6 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
         fileIo.encodeTiff(rgbaData, w, h, opts),
       getPageCount: (bytes: Uint8Array) => fileIo.getPageCount(bytes),
       decodePage: (bytes: Uint8Array, page: number) => fileIo.decodePage(bytes, page),
-      composite16bit: (params) => fileIo.composite16bit(params),
-      exportHighRes: (rawBytes: Uint8Array, opts: Record<string, unknown>) =>
-        fileIo.exportHighRes(rawBytes, opts),
       iccToSrgb: (bytes: Uint8Array) => fileIo.iccToSrgb(bytes),
       srgbToIcc: (rgbaData: Uint8Array, w: number, h: number, iccProfileData: Uint8Array) =>
         fileIo.srgbToIcc(rgbaData, w, h, iccProfileData),

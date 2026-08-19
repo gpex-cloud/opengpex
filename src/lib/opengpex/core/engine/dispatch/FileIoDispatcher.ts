@@ -78,34 +78,6 @@ export class FileIoDispatcher {
   }
 
   /**
-   * Multi-layer 16-bit composite export via vips.
-   */
-  async composite16bit(params: {
-    layers: FileIoJob['layers'];
-    canvasWidth: number;
-    canvasHeight: number;
-    options: Record<string, unknown>;
-  }): Promise<Uint8Array> {
-    return this.bridge.request<Uint8Array>({
-      type: 'FILE_IO',
-      fn: 'composite16bit',
-      layers: params.layers,
-      canvasWidth: params.canvasWidth,
-      canvasHeight: params.canvasHeight,
-      options: params.options,
-    });
-  }
-
-  /**
-   * High-resolution 16-bit export from raw source bytes.
-   */
-  async exportHighRes(rawBytes: Uint8Array, options: Record<string, unknown>): Promise<Uint8Array> {
-    return this.bridge.request<Uint8Array>(
-      { type: 'FILE_IO', fn: 'exportHighRes', bytes: rawBytes, options },
-    );
-  }
-
-  /**
    * Convert image bytes with non-sRGB ICC profile to sRGB RGBA pixel data.
    * Uses vips (Little CMS engine) for ICC-accurate color space conversion.
    * Supports JPEG, PNG, WebP, and any format vips can decode.

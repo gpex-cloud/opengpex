@@ -545,7 +545,6 @@ export function useEditorStore() {
         },
         system: {
           assets: {
-            register: advRef(P.ADV_ASSET_REGISTER, (blob: Blob) => executeCommand<Blob, Promise<{ id: string; url: string }>>(P.ADV_ASSET_REGISTER, blob)),
             sync: advRef(P.ADV_ASSET_SYNC, (payload?: { force?: boolean }) => executeCommand(P.ADV_ASSET_SYNC, payload)),
           },
         },

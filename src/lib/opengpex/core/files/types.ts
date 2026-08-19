@@ -408,11 +408,6 @@ export interface FileService {
   getExportFilename(baseName: string, w: number, h: number, mimeType: string): string;
 
   /**
-   * Detect format from a File object (by MIME type + extension).
-   */
-  detectFormat(file: File): SourceFormat;
-
-  /**
    * Whether a file requires heavy transcoding (WASM/Worker decode).
    * Used by the command layer to decide whether to show a "Converting…" indicator.
    * Delegates to the matched handler's `needsTranscoding` flag.

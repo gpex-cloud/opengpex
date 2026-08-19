@@ -22,7 +22,7 @@ import { AssetDriver } from '@opengpex/editor/core/storage/Driver';
 
 export const ASSET_VERSION = 2; // Current metadata version
 
-/** Key prefix for high-resolution raw source blobs (Phase 5: 16-bit fidelity) */
+/** Key prefix for high-resolution raw source blobs (16-bit fidelity) */
 const RAW_KEY_PREFIX = 'raw:';
 
 export interface StoredAsset {
@@ -37,21 +37,29 @@ export interface StoredAsset {
  * AssetStore: Persistent asset store based on Driver (LocalForage)
  * Responsibility: Responsible for physically saving assets to IndexedDB.
  *
- * Phase 5 Extension: Supports associated high-resolution raw blobs
- * stored under `raw:${assetId}` keys for 16-bit fidelity export.
+ * Supports associated high-resolution raw blobs stored under `raw:${assetId}`
+ * keys for 16-bit fidelity export (lossless round-trip).
  */
 export class AssetStore {
+  /**
+   * Returns all keys in the asset store (for GC raw orphan scanning).
+   */
+  async keys(): Promise<string[]> {
+    return AssetDriver.keys();
+  }
+
+  /**
+   * Clears all assets
+   */
+  async clear(): Promise<void> {
+    await AssetDriver.clear();
+  }
+
   /**
    * Saves asset
    */
   async set(id: string, blob: Blob, tileMeta: TileMetadata): Promise<void> {
-    const data: StoredAsset = { 
-      id, 
-      blob, 
-      tileMeta, 
-      timestamp: Date.now(),
-      version: ASSET_VERSION 
-    };
+    const data: StoredAsset = { id, blob, tileMeta, timestamp: Date.now(), version: ASSET_VERSION };
     await AssetDriver.setItem(id, data);
   }
 
@@ -82,27 +90,18 @@ export class AssetStore {
   }
 
   /**
-   * Deletes specified asset AND its associated raw blob (cascade delete).
+   * Deletes specified display asset from physical storage.
    */
   async remove(id: string): Promise<void> {
-    await Promise.all([
-      AssetDriver.removeItem(id),
-      AssetDriver.removeItem(`${RAW_KEY_PREFIX}${id}`),
-    ]);
+    await AssetDriver.removeItem(id);
   }
 
-  /**
-   * Clears all assets
-   */
-  async clear(): Promise<void> {
-    await AssetDriver.clear();
-  }
-
-  // ─── Phase 5: High-Resolution Raw Source Storage ──────────────────────────
+  // ─── Raw Source Storage ─────────────────────────────────────────────────
 
   /**
    * Stores a high-resolution raw source blob associated with an asset.
-   * Used for 16-bit TIFF/PNG/RAW imports to preserve original precision.
+   * Used for 16-bit TIFF/PNG/RAW imports and original GIF files to preserve
+   * original data for lossless re-export.
    * The raw blob is stored in the same IDB but under a `raw:${id}` key.
    */
   async setRaw(id: string, rawBlob: Blob): Promise<void> {
@@ -124,6 +123,14 @@ export class AssetStore {
   async hasRaw(id: string): Promise<boolean> {
     const keys = await AssetDriver.keys();
     return keys.includes(`${RAW_KEY_PREFIX}${id}`);
+  }
+
+  /**
+   * Deletes a raw source blob by its hash.
+   * Called by GC sweep when raw:${hash} is no longer referenced by any frame.
+   */
+  async removeRaw(id: string): Promise<void> {
+    await AssetDriver.removeItem(`${RAW_KEY_PREFIX}${id}`);
   }
 }
 

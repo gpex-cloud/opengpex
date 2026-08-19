@@ -136,8 +136,8 @@ export async function extractHeicMetadata(file: File): Promise<ImageMetadata> {
         meta.colorSpace = nclxToColorSpace(nclx);
       }
     }
-  } catch (err) {
-    console.debug('[HeicHandler] EXIF extraction failed:', (err as Error).message);
+  } catch {
+    // EXIF extraction failed — non-critical
   }
 
   return meta;

@@ -148,8 +148,8 @@ export async function extractAvifMetadata(file: File): Promise<ImageMetadata> {
     if (hasAlpha && Number(hasAlpha) === 4) {
       meta.hasAlpha = true;
     }
-  } catch (err) {
-    console.debug('[AvifHandler] Metadata extraction failed:', (err as Error).message);
+  } catch {
+    // Metadata extraction failed — non-critical
   }
 
   return meta;

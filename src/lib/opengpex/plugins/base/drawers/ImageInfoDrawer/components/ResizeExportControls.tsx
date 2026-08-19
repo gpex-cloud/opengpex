@@ -37,7 +37,7 @@ import FunctionTabs from "@opengpex/editor/widgets/FunctionTabs";
 import Switch from "@opengpex/editor/widgets/Switch";
 
 import { CommandInstance, WorkingColorSpace } from "@opengpex/editor/core/types";
-import { formatPrintSize, DPI_PRESETS, SourceFormat, supportsExifEmbed } from "@opengpex/editor/core/files";
+import { formatPrintSize, DPI_PRESETS, supportsExifEmbed, mimeToFormat, formatToMime } from "@opengpex/editor/core/files";
 import type { ImageMetadata } from "@opengpex/editor/core/files";
 import { shouldEmbedIcc, getFormatColorStrategy } from "@opengpex/editor/core/color/ColorPipeline";
 import * as P from "../protocols";
@@ -89,23 +89,37 @@ export function ResizeExportControls({
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
 
-  // Sync exportBitDepth with 16-bit toggle visibility:
-  // show → default to source bit depth; hide → clear to undefined (= 8-bit default).
-  const show16BitToggle = sourceBitDepth !== undefined && sourceBitDepth > 8;
-  React.useEffect(() => {
-    if (show16BitToggle) {
-      // Toggle just appeared — default to source's native bit depth
-      if (config.exportBitDepth === undefined) {
-        updateConfig({ exportBitDepth: sourceBitDepth as 8 | 16 });
-      }
-    } else {
-      // Toggle hidden — clear stale 16-bit setting
-      if (config.exportBitDepth !== undefined) {
-        updateConfig({ exportBitDepth: undefined });
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentional: only react to visibility toggle, not to config/updateConfig changes (would cause infinite loop)
-  }, [show16BitToggle]);
+  // TODO: WebGPU 上线后重新启用 16-bit export UI
+  // ─── canExport16bit: unified 16-bit availability decision (Phase D) ───
+  // const export16bitStatus = React.useMemo(() => {
+  //   if (!sourceBitDepth || sourceBitDepth <= 8) {
+  //     return { allowed: false, reason: 'Source file is 8-bit' } as const;
+  //   }
+  //   if (isModified) {
+  //     return { allowed: false, reason: 'Modified frames export at 8-bit only' } as const;
+  //   }
+  //   return { allowed: true, reason: '' } as const;
+  // }, [sourceBitDepth, isModified]);
+  //
+  // const canExport16bit = export16bitStatus.allowed;
+  // const bitDepthDisabledReason = export16bitStatus.reason;
+  //
+  // const show16BitToggle = sourceBitDepth !== undefined && sourceBitDepth > 8;
+  // React.useEffect(() => {
+  //   if (show16BitToggle && canExport16bit) {
+  //     if (config.exportBitDepth === undefined) {
+  //       updateConfig({ exportBitDepth: sourceBitDepth as 8 | 16 });
+  //     }
+  //   } else if (show16BitToggle && !canExport16bit) {
+  //     if (config.exportBitDepth !== undefined && config.exportBitDepth !== 8) {
+  //       updateConfig({ exportBitDepth: 8 });
+  //     }
+  //   } else {
+  //     if (config.exportBitDepth !== undefined) {
+  //       updateConfig({ exportBitDepth: undefined });
+  //     }
+  //   }
+  // }, [show16BitToggle, canExport16bit]);
 
   const { currentW, currentH, currentPercent } = deriveResizeState(
     baseW,
@@ -154,18 +168,8 @@ export function ResizeExportControls({
   };
 
   const handleFormatSelect = async (val: string) => {
-    const format =
-      val === "PNG"
-        ? "image/png"
-        : val === "JPG"
-          ? "image/jpeg"
-          : val === "AVIF"
-            ? "image/avif"
-            : val === "TIFF"
-              ? "image/tiff"
-              : val === "BMP"
-                ? "image/bmp"
-                : "image/webp";
+    const key = val === "JPG" ? "jpeg" : val.toLowerCase();
+    const format = formatToMime[key] || "image/png";
     updateConfig({ format: format as P.ExportFormat });
   };
 
@@ -358,17 +362,25 @@ export function ResizeExportControls({
                 }
               />
               <div className="flex-1" />
+              {/* TODO: WebGPU 上线后重新启用 16-bit FunctionTabs
               {sourceBitDepth && sourceBitDepth > 8 && (
-                <FunctionTabs
-                  options={[
-                    { label: "8-bit", value: "8", tooltip: "Standard 8-bit export" },
-                    { label: "16-bit", value: "16", tooltip: isSingleLayer ? "Lossless from raw source" : "16-bit composite export" },
-                  ]}
-                  value={config.exportBitDepth === 8 ? "8" : "16"}
-                  onChange={(val) => updateConfig({ exportBitDepth: val === "8" ? 8 : 16 })}
-                  className="w-28 [&_button]:py-0.5"
-                />
+                <Tooltip content={!canExport16bit ? bitDepthDisabledReason : ''}>
+                  <FunctionTabs
+                    options={[
+                      { label: "8-bit", value: "8", tooltip: "Standard 8-bit export" },
+                      { label: "16-bit", value: "16", tooltip: canExport16bit ? (isSingleLayer ? "Lossless from raw source" : "16-bit composite export") : bitDepthDisabledReason },
+                    ]}
+                    value={!canExport16bit ? "8" : (config.exportBitDepth === 8 ? "8" : "16")}
+                    onChange={(val) => {
+                      if (!canExport16bit && val === "16") return;
+                      updateConfig({ exportBitDepth: val === "8" ? 8 : 16 });
+                    }}
+                    disabled={!canExport16bit}
+                    className={`w-28 [&_button]:py-0.5 ${!canExport16bit ? 'opacity-50 pointer-events-none' : ''}`}
+                  />
+                </Tooltip>
               )}
+              */}
             </div>
             {config.tiffCompression === "jpeg" && (
               <div className="flex items-center gap-2 px-1 animate-in fade-in slide-in-from-top-1 duration-200">
@@ -439,17 +451,25 @@ export function ResizeExportControls({
               }
             />
             <div className="flex-1" />
+            {/* TODO: WebGPU 上线后重新启用 16-bit FunctionTabs
             {sourceBitDepth && sourceBitDepth > 8 && (
-              <FunctionTabs
-                options={[
-                  { label: "8-bit", value: "8", tooltip: "Standard (smaller file)" },
-                  { label: "16-bit", value: "16", tooltip: isSingleLayer ? "Lossless from raw source" : "16-bit composite export" },
-                ]}
-                value={config.exportBitDepth === 8 ? "8" : "16"}
-                onChange={(val) => updateConfig({ exportBitDepth: val === "8" ? 8 : 16 })}
-                className="w-28 [&_button]:py-0.5"
-              />
+              <Tooltip content={!canExport16bit ? bitDepthDisabledReason : ''}>
+                <FunctionTabs
+                  options={[
+                    { label: "8-bit", value: "8", tooltip: "Standard (smaller file)" },
+                    { label: "16-bit", value: "16", tooltip: canExport16bit ? (isSingleLayer ? "Lossless from raw source" : "16-bit composite export") : bitDepthDisabledReason },
+                  ]}
+                  value={!canExport16bit ? "8" : (config.exportBitDepth === 8 ? "8" : "16")}
+                  onChange={(val) => {
+                    if (!canExport16bit && val === "16") return;
+                    updateConfig({ exportBitDepth: val === "8" ? 8 : 16 });
+                  }}
+                  disabled={!canExport16bit}
+                  className={`w-28 [&_button]:py-0.5 ${!canExport16bit ? 'opacity-50 pointer-events-none' : ''}`}
+                />
+              </Tooltip>
             )}
+            */}
           </div>
         )}
         {config.format !== "image/png" && config.format !== "image/tiff" && config.format !== "image/bmp" && (
@@ -502,11 +522,7 @@ export function ResizeExportControls({
 
         {/* Metadata toggles (EXIF + ICC) — grouped with tight spacing */}
         {(() => {
-          const mimeToFmt: Record<string, SourceFormat> = {
-            'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp',
-            'image/avif': 'avif', 'image/tiff': 'tiff',
-          };
-          const exportFmt = mimeToFmt[config.format] || 'unknown';
+          const exportFmt = mimeToFormat[config.format] ?? 'unknown';
           const formatStrategy = getFormatColorStrategy(exportFmt);
           const showExif = !!(imageMetadata?.raw?.exif && supportsExifEmbed(config.format));
           const showIcc = formatStrategy.supportsIccEmbed;

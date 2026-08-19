@@ -56,9 +56,6 @@ export async function decodeTiff(
       clamped.set(new Uint8Array(data.buffer, data.byteOffset, width * height * 4));
       ctx.putImageData(new ImageData(clamped, width, height, { colorSpace: canvasCS }), 0, 0);
       displayBlob = await canvas.convertToBlob({ type: 'image/png' });
-
-      console.debug('[ColorMgmt] TIFF decode: %s conversion=none, detectedCS=%s, frameCS=%s',
-        file.name, detectedCS, strategy.frameColorSpace);
       break;
     }
 
@@ -77,9 +74,6 @@ export async function decodeTiff(
       const outCtx = outCanvas.getContext('2d', { colorSpace: outCS })!;
       outCtx.putImageData(new ImageData(clamped, width, height, { colorSpace: outCS }), 0, 0);
       displayBlob = await outCanvas.convertToBlob({ type: 'image/png' });
-
-      console.debug('[ColorMgmt] TIFF decode: %s matrix %s→%s',
-        file.name, detectedCS, strategy.frameColorSpace);
       break;
     }
 
@@ -104,8 +98,6 @@ export async function decodeTiff(
       clamped.set(new Uint8Array(data.buffer, data.byteOffset, width * height * 4));
       ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
       displayBlob = await canvas.convertToBlob({ type: 'image/png' });
-
-      console.debug('[ColorMgmt] TIFF decode: %s icc-engine %s→srgb', file.name, detectedCS);
       break;
     }
   }
@@ -129,8 +121,7 @@ export async function decodeTiff(
       subImages = [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }];
       sourceBlob = shouldRetainSourceBlob('tiff', metadata, strategy.frameColorSpace) ? file : undefined;
     }
-  } catch (err) {
-    console.debug('[TiffHandler] Multi-page detection failed (treating as single page):', (err as Error).message);
+  } catch {
     subImages = [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }];
     sourceBlob = shouldRetainSourceBlob('tiff', metadata, strategy.frameColorSpace) ? file : undefined;
   }

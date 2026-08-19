@@ -164,7 +164,7 @@ export interface HistogramJob {
 
 export interface FileIoJob {
   type: 'FILE_IO';
-  fn: 'decodeTiff' | 'encodeTiff' | 'encodeAvif' | 'decodePages' | 'decodePage' | 'getPageCount' | 'composite16bit' | 'exportHighRes' | 'iccToSrgb' | 'srgbToIcc';
+  fn: 'decodeTiff' | 'encodeTiff' | 'encodeAvif' | 'decodePages' | 'decodePage' | 'getPageCount' | 'iccToSrgb' | 'srgbToIcc';
   /** Whether to preserve original color space pixels (skip ICC transform). Used by decodeTiff. */
   preserveColorSpace?: boolean;
   bytes?: Uint8Array;

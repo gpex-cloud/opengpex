@@ -32,7 +32,6 @@ import type {
   DecodeOptions,
   DecodeResult,
   EncodeOptions,
-  SourceFormat,
 } from './types';
 import type { ImageMetadata } from './metadata';
 import { JpegHandler } from './handlers/jpeg';
@@ -45,6 +44,7 @@ import { WebpHandler } from './handlers/webp';
 import { AvifHandler } from './handlers/avif';
 import { VectorHandler, getVectorIntrinsicSize, detectVectorFormat } from './handlers/vector';
 import { GifHandler } from './handlers/gif';
+import { mimeToExt } from './mime';
 
 // Re-export vector utilities (used by frame/create command)
 export { getVectorIntrinsicSize, detectVectorFormat };
@@ -65,60 +65,6 @@ export type {
 // Re-export V2 metadata types
 export type { ImageMetadata, RawBinaryData } from './metadata';
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Format Detection (migrated from PixelUtils.detectFormat)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/** Camera RAW file extensions supported by libraw-wasm */
-const RAW_EXTENSIONS = new Set([
-  'cr2', 'cr3', 'nef', 'nrw', 'arw', 'srf', 'sr2',
-  'dng', 'orf', 'rw2', 'raf', 'pef', 'srw',
-  'raw', 'rwl', '3fr', 'fff', 'iiq',
-]);
-
-/** Camera RAW MIME types */
-const RAW_MIME_TYPES = new Set([
-  'image/x-dcraw', 'image/x-adobe-dng',
-  'image/x-canon-cr2', 'image/x-nikon-nef', 'image/x-sony-arw',
-]);
-
-/**
- * Detects the source format of a file from MIME type and extension.
- */
-function detectFormat(file: File): SourceFormat {
-  const type = file.type.toLowerCase();
-  const name = file.name.toLowerCase();
-  const ext = name.split('.').pop() || '';
-
-  if (type === 'image/jpeg' || ext === 'jpg' || ext === 'jpeg') return 'jpeg';
-  if (type === 'image/png' || ext === 'png') return 'png';
-  if (type === 'image/webp' || ext === 'webp') return 'webp';
-  if (type === 'image/avif' || ext === 'avif') return 'avif';
-  if (type === 'image/heic' || type === 'image/heif' || ext === 'heic' || ext === 'heif') return 'heic';
-  if (type === 'image/svg+xml' || ext === 'svg') return 'svg';
-  if (type === 'application/postscript' || type === 'application/eps' || type === 'image/x-eps' || ext === 'eps' || ext === 'epsf') return 'eps';
-  if (type === 'image/gif' || ext === 'gif') return 'gif';
-  if (type === 'image/bmp' || type === 'image/x-ms-bmp' || ext === 'bmp') return 'bmp';
-  if (type === 'image/tiff' || ext === 'tiff' || ext === 'tif') return 'tiff';
-  if (RAW_EXTENSIONS.has(ext) || RAW_MIME_TYPES.has(type)) return 'raw';
-
-  return 'unknown';
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// MIME → Extension mapping
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const MIME_TO_EXT: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/avif': 'avif',
-  'image/bmp': 'bmp',
-  'image/gif': 'gif',
-  'image/tiff': 'tiff',
-  'image/svg+xml': 'svg',
-};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Fallback Handler (for unknown/unsupported formats)
@@ -281,11 +227,9 @@ export function createFileService(
     },
 
     getExportFilename(baseName: string, w: number, h: number, mimeType: string): string {
-      const ext = MIME_TO_EXT[mimeType] || mimeType.split('/')[1] || 'png';
+      const ext = mimeToExt[mimeType] || mimeType.split('/')[1] || 'png';
       return `${baseName}-${w}x${h}.${ext}`;
     },
-
-    detectFormat,
 
     needsTranscoding(file: File): boolean {
       const handler = getHandler(file);
@@ -295,6 +239,9 @@ export function createFileService(
 
   return service;
 }
+
+// Re-export MIME utilities (stateless helpers used without FileService access)
+export { mimeToFormat, formatToMime, detectFormat } from './mime';
 
 // Re-export DPI utilities consumed by external modules (plugins / UI components)
 export { DPI_PRESETS, formatPrintSize } from './dpi';

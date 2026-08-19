@@ -40,7 +40,7 @@
 import type { Layer, AssetService, Shape, LocalShape, TileData, Rect, Dimensions } from '@opengpex/editor/core/types';
 import { asLocalRect } from '@opengpex/editor/core/types';
 import type { FontService } from '@opengpex/editor/core/fonts';
-import { MAX_SAFE_EXPORT_PIXELS } from '@opengpex/editor/core/helpers/config';
+import { MAX_SAFE_EXPORT_PIXELS, PERF_MON } from '@opengpex/editor/core/helpers/config';
 import { shapeToPath2D } from '@opengpex/editor/core/helpers/path2d';
 import { shrinkInvertedMask } from '@opengpex/editor/core/helpers/sub-pixel';
 
@@ -57,11 +57,6 @@ import { convertBufferTRC } from '../shared/trc';
 import { blendBuffersLinear } from '../shared/blend2d';
 
 import type { TRC, WorkingColorSpace, LayerBlendMode } from '@opengpex/editor/core/types';
-
-// ─── Diagnostic Logging (toggle via: window.__TILE_FLICKER_DEBUG = true) ───
-function _tileDbg(): boolean {
-  return typeof window !== 'undefined' && !!(window as unknown as Record<string, unknown>).__TILE_FLICKER_DEBUG;
-}
 
 /**
  * SVG filter IDs for GPU-accelerated channel isolation.
@@ -200,8 +195,9 @@ export class Canvas2dEngine implements IRenderer {
   flush(assetService?: AssetService): void {
     if (!this.ctx) return;
 
-    const _flushT0 = performance.now();
+    let _flushT0 = 0;
     let _layerCount = 0;
+    if (PERF_MON) { _flushT0 = performance.now(); }
 
     for (const cmd of this.commandQueue) {
       if (cmd.type === 'layer') {
@@ -220,17 +216,19 @@ export class Canvas2dEngine implements IRenderer {
             }
           }
         }
-        _layerCount++;
+        if (PERF_MON) { _layerCount++; }
         this.drawLayerDirect(cmd.layer, cmd.options, assetService);
       }
     }
 
     this.commandQueue = [];
 
-    const _flushDuration = performance.now() - _flushT0;
-    this._flushCount++;
-    if (_flushDuration > 16 && this._flushCount > 3) {
-      console.warn(`[Canvas2dEngine.flush] ⚠️ took ${_flushDuration.toFixed(1)}ms | layers=${_layerCount}`);
+    if (PERF_MON) {
+      const _flushDuration = performance.now() - _flushT0;
+      this._flushCount++;
+      if (_flushDuration > 16 && this._flushCount > 3) {
+        console.warn(`[Canvas2dEngine.flush] ⚠️ took ${_flushDuration.toFixed(1)}ms | layers=${_layerCount}`);
+      }
     }
 
     // Restore artboard clip
@@ -329,13 +327,6 @@ export class Canvas2dEngine implements IRenderer {
 
       if (tileCount > 0 && missCount === 0) {
         // ── Perfect path: all tiles ready → pure tile rendering (fastest) ──
-        if (_tileDbg()) {
-          console.log(
-            `[Engine] TILE_PATH layer="${layer.name}" assetId=${layer.assetId?.slice(0, 8)}… | ` +
-            `tileCount=${tileCount} | scale=${scale.toFixed(4)} | ` +
-            `drawRect=${drawRect ? `(${drawRect.x.toFixed(0)},${drawRect.y.toFixed(0)},${drawRect.w.toFixed(0)},${drawRect.h.toFixed(0)})` : 'full'}`,
-          );
-        }
         drawLayerInstance(ctx, layer, this.tilePool, {
           matrix, opacity, clipSequence: preparedClips, width: options.width, height: options.height, drawRect, imageSmoothingQuality,
           tileCount, dprScale,
@@ -345,12 +336,6 @@ export class Canvas2dEngine implements IRenderer {
         // Design: the source image is already full-resolution (same data tiles are cut from).
         // Drawing source + partial tiles on top would double GPU draw calls with zero quality gain.
         // This ensures no white blocks regardless of cache state (robustness guarantee).
-        if (_tileDbg()) {
-          console.warn(
-            `[Engine] TILE_FALLBACK layer="${layer.name}" assetId=${layer.assetId?.slice(0, 8)}… | ` +
-            `tileCount=${tileCount} missCount=${missCount} → single image fallback | scale=${scale.toFixed(4)}`,
-          );
-        }
         const fallbackSrc = layer.src ? (assetService ? assetService.resolve(layer.assetId, layer.src) : layer.src) : null;
         const rawImg = fallbackSrc ? sourceBitmapCache.getOrFetch(fallbackSrc) : null;
         if (rawImg) {
@@ -362,13 +347,6 @@ export class Canvas2dEngine implements IRenderer {
       }
     } else {
       // --- Single Image Rendering Path ---
-      if (_tileDbg() && tileMeta?.isTiled) {
-        // This means isTiled=true but we're NOT using tiles (due to imageOverride, bitmapMask, or filters)
-        console.log(
-          `[Engine] SINGLE_PATH (bypassed tiles) layer="${layer.name}" | ` +
-          `reasons: imageOverride=${!!imageOverride} hasBitmap=${hasBitmap} hasFilters=${hasFiltersPipeline}`,
-        );
-      }
       const currentSrc = assetService ? assetService.resolve(layer.assetId, layer.src) : layer.src;
       const rawImg = imageOverride || (currentSrc ? sourceBitmapCache.getOrFetch(currentSrc) : null);
 

@@ -62,7 +62,7 @@ export async function importMultiPageTiff(
 
   const pageAssets = await Promise.all(
     subImages.map(async (p) => {
-      const { id: assetId, url: assetUrl } = await assets.register(p.displayBlob);
+      const { id: assetId, url: assetUrl } = await assets.register(p.displayBlob, { w: p.width, h: p.height });
       return { assetId, assetUrl, width: p.width, height: p.height, index: p.index };
     }),
   );
@@ -78,15 +78,8 @@ export async function importMultiPageTiff(
       locked: false,
       visible: i === 0,
       opacity: 1,
-      isSource: i === 0,
       bounding: pageDim,
       visibleShape: asLocalShape({ x: 0, y: 0, w: pageDim.w, h: pageDim.h }),
-      metadata: {
-        imageMetadata: {
-          ...metadata,
-          sourceFileName: `${file.name} (page ${i + 1})`,
-        },
-      },
     });
   });
 
@@ -113,6 +106,7 @@ export async function importMultiPageTiff(
     camera: tiffCamera,
     canvasCropBox: getDefaultCanvasCropBox(dimension),
     assetId: pageAssets[0].assetId,
+    metadata,
   });
 
   actions.addFrame(tiffFrame, switchFrame);

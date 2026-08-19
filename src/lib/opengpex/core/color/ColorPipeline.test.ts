@@ -19,7 +19,7 @@
  * - Query functions return correct values
  * - resolveColorSpaceForFormat logic
  * - resolveDisplayColorSpace runtime resolution
- * - canUseFastExport conditions
+ * - shouldEmbedIcc conditions
  */
 
 import { describe, it, expect } from 'vitest';
@@ -35,7 +35,6 @@ import {
   getDisplayStrategy,
   getExportStrategy,
   resolveDisplayColorSpace,
-  canUseFastExport,
   shouldEmbedIcc,
   resolveExportPixelConversion,
 } from './ColorPipeline';
@@ -342,56 +341,6 @@ describe('resolveDisplayColorSpace', () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// canUseFastExport
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('canUseFastExport', () => {
-  const makeFrame = (overrides?: Partial<{
-    layerCount: number;
-    isEdited: boolean;
-    sourceBlob: Blob | null;
-    sourceFormat: SourceFormat;
-  }>) => ({
-    layerCount: 1,
-    isEdited: false,
-    sourceBlob: new Blob(['test']) as Blob | null,
-    sourceFormat: 'png' as SourceFormat,
-    ...overrides,
-  });
-
-  it('returns true when all conditions met', () => {
-    expect(canUseFastExport(makeFrame(), 'png', true)).toBe(true);
-  });
-
-  it('returns false when isUnchanged is false', () => {
-    expect(canUseFastExport(makeFrame(), 'png', false)).toBe(false);
-  });
-
-  it('returns false when multi-layer', () => {
-    expect(canUseFastExport(makeFrame({ layerCount: 2 }), 'png', true)).toBe(false);
-  });
-
-  it('returns false when edited', () => {
-    expect(canUseFastExport(makeFrame({ isEdited: true }), 'png', true)).toBe(false);
-  });
-
-  it('returns false when sourceBlob is null', () => {
-    expect(canUseFastExport(makeFrame({ sourceBlob: null }), 'png', true)).toBe(false);
-  });
-
-  it('returns false when export format differs from source', () => {
-    expect(canUseFastExport(makeFrame({ sourceFormat: 'png' }), 'jpeg', true)).toBe(false);
-  });
-
-  it('returns true for JPEG→JPEG fast-path', () => {
-    expect(canUseFastExport(makeFrame({ sourceFormat: 'jpeg' }), 'jpeg', true)).toBe(true);
-  });
-
-  it('returns true for TIFF→TIFF fast-path', () => {
-    expect(canUseFastExport(makeFrame({ sourceFormat: 'tiff' }), 'tiff', true)).toBe(true);
-  });
-});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // shouldEmbedIcc

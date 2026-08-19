@@ -156,7 +156,7 @@ export const FrameResizeCommands = {
       const scaleY = newH / oldH;
 
       // 2. Register the source as an asset (creates blob URL + cache entry)
-      const { id: assetId, url: assetUrl } = await assets.register(source);
+      const { id: assetId, url: assetUrl } = await assets.register(source, { w: newW, h: newH });
 
       // 3. Find primary image layer (first host image layer)
       const primaryLayer = activeFrame.layers.order

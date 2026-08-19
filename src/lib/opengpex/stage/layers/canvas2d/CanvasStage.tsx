@@ -24,6 +24,7 @@ import { Frame, CameraState } from '@opengpex/editor/core/types';
 import { convertImageDataColorSpace, displaySupportsP3 } from '@opengpex/editor/core/color/matrices';
 import { resolveDisplayColorSpace } from '@opengpex/editor/core/color/ColorPipeline';
 import { FontService } from '@opengpex/editor/core/fonts';
+import { PERF_MON } from '@opengpex/editor/core/helpers/config';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { useOverlayRotationSync } from '@opengpex/editor/core/motion/hooks/animation';
@@ -96,9 +97,6 @@ export default function CanvasStage() {
   useEffect(() => {
     const unsubTiles = tileCache.subscribe(() => {
       needsRenderRef.current = true;
-      if ((window as unknown as Record<string, unknown>).__TILE_FLICKER_DEBUG) {
-        console.log(`[CanvasStage] REDRAW triggered by: TileCache (tile loaded) t=${performance.now().toFixed(1)}`);
-      }
     });
     // [SourceBitmapCache refactor 2026-07-10] Redraws are now triggered when a
     // shared ImageBitmap lands (fetch → blob → createImageBitmap completes).
@@ -108,9 +106,6 @@ export default function CanvasStage() {
     // docs/opengpex/plans/20260710_source_bitmap_cache_refactor_plan.md.
     const unsubImages = sourceBitmapCache.subscribe(() => {
       needsRenderRef.current = true;
-      if ((window as unknown as Record<string, unknown>).__TILE_FLICKER_DEBUG) {
-        console.log(`[CanvasStage] REDRAW triggered by: SourceBitmapCache t=${performance.now().toFixed(1)}`);
-      }
     });
     // [Filter Pipeline §5.2 / Step 3] Redraw when a filtered bitmap lands.
     // Canvas2dEngine.drawLayerDirect schedules async APPLY_FILTER jobs on
@@ -118,9 +113,6 @@ export default function CanvasStage() {
     // Subscribing here ensures the next frame picks up the filtered result.
     const unsubFilters = filterCache.subscribe(() => {
       needsRenderRef.current = true;
-      if ((window as unknown as Record<string, unknown>).__TILE_FLICKER_DEBUG) {
-        console.log(`[CanvasStage] REDRAW triggered by: FilterCache t=${performance.now().toFixed(1)}`);
-      }
     });
     // [Filter Fast-Track §2.3] TileFilterCache removed — tiles now show raw
     // during interaction and AsyncFilterCache handles post-interaction filter.
@@ -190,7 +182,8 @@ export default function CanvasStage() {
     }
 
     const isInteracting = v.activeState.interacting;
-    const _frameT0 = performance.now();
+    let _frameT0 = 0;
+    if (PERF_MON) { _frameT0 = performance.now(); }
 
     // Update snapshot
     lastFrameRef.current = f;
@@ -222,16 +215,8 @@ export default function CanvasStage() {
       });
     }
 
-    // ─── Diagnostic: frame-level summary ───
-    if ((window as unknown as Record<string, unknown>).__TILE_FLICKER_DEBUG) {
-      const camChanged = cam !== lastCamRef.current;
-      console.log(
-        `[CanvasStage] ▶ FRAME #${_renderCountRef.current} | cam.k=${cam.k.toFixed(4)} cam.x=${cam.x.toFixed(1)} cam.y=${cam.y.toFixed(1)} | ` +
-        `isDirty=${isDirty} camChanged=${camChanged} isInteracting=${isInteracting} layers=${f.layers.order.length}`,
-      );
-    }
-
-    const _renderT0 = performance.now();
+    let _renderT0 = 0;
+    if (PERF_MON) { _renderT0 = performance.now(); }
     stageComposer.render(engine, f, cam, state.ui.viewportDim, geometry, assets, {
       isInteracting,
       getAnimatedRotation,
@@ -271,11 +256,13 @@ export default function CanvasStage() {
       }
     }
 
-    const _frameDuration = performance.now() - _frameT0;
-    _renderCountRef.current++;
-    if (_frameDuration > 16 && _renderCountRef.current > 3) {
-      const _renderDuration = performance.now() - _renderT0;
-      console.warn(`[CanvasStage.rAF] ⚠️ total=${_frameDuration.toFixed(1)}ms render=${_renderDuration.toFixed(1)}ms layers=${f.layers.order.length} interacting=${isInteracting}`);
+    if (PERF_MON) {
+      const _frameDuration = performance.now() - _frameT0;
+      _renderCountRef.current++;
+      if (_frameDuration > 16 && _renderCountRef.current > 3) {
+        const _renderDuration = performance.now() - _renderT0;
+        console.warn(`[CanvasStage.rAF] ⚠️ total=${_frameDuration.toFixed(1)}ms render=${_renderDuration.toFixed(1)}ms layers=${f.layers.order.length} interacting=${isInteracting}`);
+      }
     }
   });
 

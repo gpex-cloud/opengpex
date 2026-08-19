@@ -67,7 +67,7 @@ export async function encodePng(
     const outCtx = outCanvas.getContext('2d')!;
     outCtx.putImageData(new ImageData(imageData.data, w, h), 0, 0);
     canvas = outCanvas;
-    console.debug('[ColorMgmt] PNG Export: pixelConversion=p3-to-srgb');
+    // console.debug('[ColorMgmt] PNG Export: pixelConversion=p3-to-srgb');
   } else if (pixelConv === 'srgb-to-icc') {
     // Pixels are sRGB, need to convert to target ICC space before embedding
     const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
@@ -88,15 +88,13 @@ export async function encodePng(
     clamped.set(data);
     tmpCtx.putImageData(new ImageData(clamped, w, h), 0, 0);
     canvas = tmpCanvas;
-    console.debug('[ColorMgmt] PNG Export: pixelConversion=srgb-to-icc, targetProfile=%s',
-      meta!.raw!.icc?.name || 'custom');
+    // console.debug('[ColorMgmt] PNG Export: pixelConversion=srgb-to-icc, targetProfile=%s', meta!.raw!.icc?.name || 'custom');
   } else {
     // Strategy-driven: use encodeColorSpace to prevent implicit browser conversion
     canvas = source instanceof ImageBitmap
       ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
       : source as OffscreenCanvas;
-    console.debug('[ColorMgmt] PNG Export: frameCS=%s, encodeColorSpace=%s, embedIcc=%s',
-      frameCS, exportStrategy.encodeColorSpace, embedIcc);
+    // console.debug('[ColorMgmt] PNG Export: frameCS=%s, encodeColorSpace=%s, embedIcc=%s', frameCS, exportStrategy.encodeColorSpace, embedIcc);
   }
 
   // 1. Get base PNG blob from browser encoder
@@ -142,7 +140,7 @@ export async function encodePng(
       const stockProfile = getStockIccProfile(frameCS);
       if (stockProfile) {
         chunks.push(await buildIccpChunk(stockProfile.bytes, stockProfile.name));
-        console.debug('[ColorMgmt] PNG Export: embedded stock ICC profile for %s', frameCS);
+        // console.debug('[ColorMgmt] PNG Export: embedded stock ICC profile for %s', frameCS);
       } else {
         chunks.push(buildSrgbChunk());
       }
