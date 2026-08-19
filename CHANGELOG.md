@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.53
+
+- Brush & Mosaic: fixed race condition on rapid strokes and eliminated flash artifact during bake
+- Eraser: fixed not working on text layers
+
+---
+
 ## v1.0.0-beta.52
 
 - Export: unified to a single 8-bit composite pipeline, removed 16-bit paths (prep for WebGPU)

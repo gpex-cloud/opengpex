@@ -136,14 +136,19 @@ export class MosaicStrokeSession implements StrokeSession {
    * Finds an existing paint layer to write to, or creates a new one.
    *
    * Strategy:
-   * 1. Active layer is paint type, unlocked, visible → reuse (unless forceNewLayer)
+   * 1. Active layer is paint type, unlocked, visible, AND has no bitmap masks → reuse
    * 2. Otherwise → create new "Mosaic" paint layer
+   *
+   * Note: layers with bitmapMasks are NOT reused because the mask would clip
+   * newly painted content (the mask was applied to previous layer state and
+   * doesn't account for the new stroke).
    */
   private findOrCreatePaintLayer(frame: Frame): { layer: Layer; isNew: boolean } {
     const activeLayerId = frame.activeLayerId;
     const activeLayer = activeLayerId ? frame.layers.byId[activeLayerId] : null;
 
-    if (!this.forceNewLayer && activeLayer && activeLayer.type === 'paint' && !activeLayer.locked && activeLayer.visible) {
+    const hasMasks = activeLayer?.bitmapMasks && activeLayer.bitmapMasks.length > 0;
+    if (!this.forceNewLayer && !hasMasks && activeLayer && activeLayer.type === 'paint' && !activeLayer.locked && activeLayer.visible) {
       return { layer: activeLayer, isNew: false };
     }
 

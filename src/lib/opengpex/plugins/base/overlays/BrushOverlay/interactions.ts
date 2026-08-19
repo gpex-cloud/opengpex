@@ -43,6 +43,22 @@ const IS_STROKING_KEY = BRUSH_OVERLAY_SIGNAL_IS_STROKING;
 /** Single module-level mutable state: the active stroke session */
 let session: StrokeSession | null = null;
 
+/**
+ * Tracks in-flight bake operation.
+ * When non-null, a previous stroke's async bake (encode → register → state update)
+ * is still in progress. New strokes must wait to avoid reading stale React state
+ * (e.g. layer.bitmapMasks not yet reflecting the previous bake's mask addition).
+ */
+let pendingBake: Promise<void> | null = null;
+
+/**
+ * Holds the preview canvas reference during async bake.
+ * This ensures StrokePreview continues to render the stroke buffer while the bake
+ * is in progress (anti-flash: paint/mosaic sessions need this because they rely on
+ * getStrokeBuffer() for live preview, unlike mask sessions which use fast.override).
+ */
+let previewHold: OffscreenCanvas | null = null;
+
 // ─── createBrushStrokeHandler ──────────────────────────────────────────────────
 
 /**
@@ -60,6 +76,11 @@ export const createBrushStrokeHandler = (): InteractionHandler => ({
     if (e.state.interaction.interactionMode !== 'craft') return false;
     const craft = e.state.interaction.signals[ACTIVE_CRAFT_KEY];
     if (craft !== 'brush' && craft !== 'eraser' && craft !== 'restore' && craft !== 'mosaic') return false;
+
+    // Block new strokes while a previous bake is in-flight.
+    // This prevents the race condition where a new mask stroke reads stale
+    // React state (bitmapMasks=[]) before the previous bake has committed.
+    if (pendingBake) return false;
 
     const mouseEvent = e.nativeEvent as MouseEvent;
 
@@ -93,7 +114,12 @@ export const createBrushStrokeHandler = (): InteractionHandler => ({
     e.actions.setStateSignal(IS_STROKING_KEY, false);
     const current = session;
 
-    return (async () => {
+    // Hold preview canvas during bake for anti-flash (paint/mosaic sessions).
+    // Mask sessions use fast.override for preview so this is a no-op 1x1 canvas.
+    previewHold = current.previewCanvas;
+    session = null;
+
+    const bakePromise = (async () => {
       try {
         const request = await current.end(e.activeFrame);
         if (request) {
@@ -102,23 +128,14 @@ export const createBrushStrokeHandler = (): InteractionHandler => ({
       } catch (err) {
         console.error('[BrushOverlay] Bake failed:', err);
       } finally {
-        // Clear session synchronously after bake completes.
-        //
-        // Anti-flash guarantee: executeBake() pre-warms the bitmap cache via
-        // cacheBitmap() and commits state via CMD_BAKE (synchronous dispatch)
-        // BEFORE we reach here. On the next rAF tick the rendering engine
-        // already has both the bitmap and the updated layer state, so the
-        // baked content renders in the same frame that the preview overlay
-        // disappears — no flash.
-        //
-        // History: beta.43 used requestAnimationFrame(() => session = null)
-        // which introduced a race condition killing mosaic sessions on rapid
-        // successive strokes. The cacheBitmap pre-warm (added in the same era)
-        // made the rAF delay redundant — removing it eliminates the race
-        // entirely without reintroducing flash.
-        session = null;
+        // Clear the pending lock and preview hold so the next stroke can proceed.
+        pendingBake = null;
+        previewHold = null;
       }
     })();
+
+    pendingBake = bakePromise;
+    return bakePromise;
   },
 });
 
@@ -127,10 +144,11 @@ export const createBrushStrokeHandler = (): InteractionHandler => ({
 /**
  * Gets currently active stroke buffer (for StrokePreview component reading).
  *
- * Returns the session's preview canvas, or null if no active stroke.
+ * Returns the session's preview canvas during active stroke, or the held preview
+ * canvas during async bake (anti-flash), or null if idle.
  */
 export function getStrokeBuffer(): OffscreenCanvas | null {
-  return session?.previewCanvas ?? null;
+  return session?.previewCanvas ?? previewHold ?? null;
 }
 
 /**

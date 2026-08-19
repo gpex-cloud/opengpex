@@ -22,6 +22,7 @@ import { assetStore, ASSET_VERSION } from './AssetStore';
 import { resourceTracker } from '@opengpex/editor/core/advanced/ResourceTracker';
 import { calculateContentHash } from '@opengpex/editor/core/helpers/hash';
 import { buildTileMeta } from '@opengpex/editor/core/helpers/tiling';
+import { PERF_MON } from '@opengpex/editor/core/helpers/config';
 
 /**
  * AssetState: Asset state machine
@@ -252,7 +253,7 @@ export class AssetService {
       }
     }
 
-    if (count > 0 && (typeof process !== 'undefined' && process.env.NODE_ENV === 'development')) {
+    if (PERF_MON && count > 0) {
       console.debug(`[Assets] Hydrated ${count} active assets in ${Date.now() - start}ms`);
     }
   }

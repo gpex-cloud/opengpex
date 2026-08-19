@@ -118,6 +118,7 @@ function createMaskSession(
         : (enabledMasks.length > 0 ? enabledMasks[enabledMasks.length - 1] : undefined));
   const maskId = activeMask?.id || (hasFocusedMask ? maskEditing.maskId : `mask-${Date.now()}`);
 
+
   // Compute local-space transform
   const localMatrix = e.geometry.transform.getLayerLocalMatrix(targetLayer, frame);
   const localMatrixInverse = localMatrix.inverse();
@@ -212,9 +213,9 @@ function createMosaicSession(
   if (activeLayer.type === 'image' && activeLayer.src && !activeLayer.hostId) {
     // Active layer IS the image host → use it directly as source (lock doesn't matter, we only read)
     sourceLayer = activeLayer;
-  } else if (activeLayer.type === 'paint' || activeLayer.type === 'image') {
-    // Active layer is paint (e.g. from a previous mosaic stroke) or a non-host image layer
-    // → find the nearest HOST image layer in the stack
+  } else if (activeLayer.type === 'paint' || activeLayer.type === 'image' || activeLayer.type === 'text') {
+    // Active layer is paint/text (or non-host image layer)
+    // → find the nearest HOST image layer in the stack as pixel source
     const layerOrder = frame.layers.order;
     const activeIdx = layerOrder.indexOf(activeLayerId!);
     // Search below in stack (lower index = below)
@@ -294,21 +295,31 @@ function readBrushConfig(e: InteractionEvent, frame: Frame): StrokeConfig {
 /**
  * Finds the target layer for eraser/mask editing.
  *
- * Eraser can operate on any layer with content (image or paint type).
+ * Eraser uses non-destructive bitmap masks, so it can operate on any layer
+ * with a valid bounding box (image, paint, or text).
  * Strategy:
- * 1. Current active layer has bitmap content (non-empty src) -> erase directly
- * 2. No valid target -> return null
+ * 1. Current active layer has visual content → use as mask target
+ * 2. No valid target → return null
  */
 export function findEraserTarget(frame: Frame): { layer: Layer; isNew: boolean } | null {
   const activeLayerId = frame.activeLayerId;
   const activeLayer = activeLayerId ? frame.layers.byId[activeLayerId] : null;
 
+  if (!activeLayer || activeLayer.locked || !activeLayer.visible) return null;
+
+  // Image/paint layers: require src (has pixel content)
   if (
-    activeLayer &&
     (activeLayer.type === 'image' || activeLayer.type === 'paint') &&
-    activeLayer.src &&
-    !activeLayer.locked &&
-    activeLayer.visible
+    activeLayer.src
+  ) {
+    return { layer: activeLayer, isNew: false };
+  }
+
+  // Text layers: require valid bounding (has rendered content)
+  if (
+    activeLayer.type === 'text' &&
+    activeLayer.bounding.w > 0 &&
+    activeLayer.bounding.h > 0
   ) {
     return { layer: activeLayer, isNew: false };
   }

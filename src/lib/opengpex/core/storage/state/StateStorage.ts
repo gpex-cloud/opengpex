@@ -21,6 +21,7 @@ import { AssetService } from '@opengpex/editor/core/storage/asset/AssetService';
 import { Hydrating } from './Hydrating';
 import { ShardedStateDriver, StateDriver } from '@opengpex/editor/core/storage/Driver';
 import { EditorData, Frame, GlobalHistoryState, UIConfig } from '@opengpex/editor/core/types';
+import { PERF_MON } from '@opengpex/editor/core/helpers/config';
 
 /** Sharded structure of persistent project metadata */
 interface ProjectMeta {
@@ -167,7 +168,7 @@ export class StateStorage {
     // 2. Clean up physical assets in asset service (pool-based display assets + orphaned raw blobs)
     this.assets.sweep(activeIds, force);
 
-    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'development') {
+    if (PERF_MON) {
       console.log('[StateStorage] GC complete. Active assets:', activeIds.size, 'Force GC:', force);
     }
   }

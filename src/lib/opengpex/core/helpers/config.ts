@@ -44,8 +44,10 @@ export const HOST_LAYER_ORDER = 10;
  * When enabled, CanvasStage and Canvas2dEngine emit console.warn diagnostics
  * whenever a frame or flush exceeds the 16 ms budget. Disabling this avoids
  * performance.now() calls and counter increments on every frame.
+ *
+ * Controlled via .env: NEXT_PUBLIC_GPEX_PERF_MON=true to enable.
  */
-export const PERF_MON = true;
+export const PERF_MON = process.env.NEXT_PUBLIC_GPEX_PERF_MON === 'true';
 
 /** Industrial-grade rendering safety threshold: 144MP (approx. 12000x12000). Exceeding this value forces tiled rendering to prevent OOM */
 export const MAX_SAFE_EXPORT_PIXELS = 144_000_000;
