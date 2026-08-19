@@ -22,7 +22,7 @@
  */
 import { Dimensions, LocalShape, LocalRect, LocalPolygon } from './primitives';
 import type { ImageMetadata } from '../files/types';
-// LocalShape is used by VectorMask, canvasCropBox, etc.
+// LocalShape is used by VectorMask, canvasClipBox, etc.
 // LocalPolygon is used by clipBoxes (unified selection type after selection_layer_unification).
 
 // ─────────────────────────────────────────────────────────────
@@ -362,8 +362,8 @@ export interface Frame {
    * See `docs/opengpex/plans/20260717_selection_layer_unification_spec.md` §3.
    */
   clipBoxes: Record<string, LocalPolygon>;
-  /** Re-Canvas dedicated crop box — orthogonal to tool-based selections. */
-  canvasCropBox: LocalShape;
+  /** Re-Canvas dedicated clip box — orthogonal to tool-based selections. */
+  canvasClipBox: LocalShape;
 
   /**
    * Per-frame active clip tool. Persisted with the frame so switching frames

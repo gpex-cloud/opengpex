@@ -22,7 +22,7 @@
 
 import { asLocalShape, EditorContextValue, WorkingColorSpace, Layer, NormalizedState, CameraState, LocalShape } from '@opengpex/editor/core/types';
 import type { ImageMetadata } from '@opengpex/editor/core/files/types';
-import { getDefaultCanvasCropBox } from '@opengpex/editor/core/helpers/selection';
+import { getDefaultCanvasClipBox } from '@opengpex/editor/core/helpers/selection';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
@@ -41,7 +41,7 @@ export interface FrameContent {
   activeLayerId: string;
   canvas: Dimensions;
   camera: CameraState;
-  canvasCropBox: LocalShape;
+  canvasClipBox: LocalShape;
   /** Frame-level asset ID: source blob if available, otherwise display blob. Used for fast-export/revert. */
   assetId: string;
   thumbnail: { src: string; assetId: string };
@@ -74,7 +74,7 @@ export async function buildFrameContent(
   const displayBlob = subImages[0].displayBlob;
 
   // 1. Register display asset
-  const { id: assetId, url: assetUrl } = await assets.register(displayBlob, decodeDimensions);
+  const { assetId, url: assetUrl } = await assets.register(displayBlob, decodeDimensions);
 
   // 1b. Store source blob for lossless re-export (16-bit fidelity)
   const sourceAssetId = await assets.storeRaw(sourceBlob);
@@ -89,7 +89,7 @@ export async function buildFrameContent(
 
   // 3. Register thumbnail asset (dimensions from resample output)
   const thumbDim = thumbResult.dimensions;
-  const { id: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, thumbDim);
+  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, thumbDim);
 
   // 4. Camera calculation
   const { insets } = state.ui.theme.config;
@@ -98,7 +98,7 @@ export async function buildFrameContent(
     dimension,
     { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right },
   );
-  const canvasCropBox = getDefaultCanvasCropBox(dimension);
+  const canvasClipBox = getDefaultCanvasClipBox(dimension);
 
   // 5. Assemble base layer
   const baseLayer = LayerFactory.getNewLayer({
@@ -125,7 +125,7 @@ export async function buildFrameContent(
     activeLayerId: baseLayer.id,
     canvas: dimension,
     camera,
-    canvasCropBox,
+    canvasClipBox,
     assetId: sourceAssetId || assetId,
     thumbnail: { src: thumbAssetUrl, assetId: thumbAssetId },
     dpi: chosenDpi || metadata.dpi,
@@ -178,7 +178,7 @@ export async function importSingleImage(
     layers: content.layers,
     activeLayerId: content.activeLayerId,
     camera: content.camera,
-    canvasCropBox: content.canvasCropBox,
+    canvasClipBox: content.canvasClipBox,
     assetId: content.assetId,
     thumbnail: content.thumbnail,
     extra,

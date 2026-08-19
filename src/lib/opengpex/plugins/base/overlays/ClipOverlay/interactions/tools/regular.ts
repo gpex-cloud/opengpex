@@ -38,7 +38,7 @@ const EDGE_HIT_THRESHOLD_PX = 6;
 
 /**
  * ClipBoxHandler: Core interaction handler for clip tool.
- * Handles crop box: Resize and Create.
+ * Handles clip box: Resize and Create.
  *
  * Move and Peel are handled by the unified `createSelectionMoveHandler` which
  * operates on any selection type (rect/ellipse/polygon). This handler only

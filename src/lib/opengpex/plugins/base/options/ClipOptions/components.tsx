@@ -88,7 +88,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
     selectFromAlphaCmd,
     offsetSelectionCmd,
     isImageLayer,
-    cropTool,
+    clipTool,
     isIrregularTool,
     hasAnySelection,
     supportsAntiAlias,
@@ -136,10 +136,10 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
   if (!activeFrame) return null;
 
   const isReCanvas = !!reCanvasActiveSignal.value;
-  const cropShape = isReCanvas
-    ? activeFrame.canvasCropBox
-    : getRegularClipShape(activeFrame) || activeFrame.canvasCropBox;
-  const cropRect = cropShape.rect;
+  const clipShape = isReCanvas
+    ? activeFrame.canvasClipBox
+    : getRegularClipShape(activeFrame) || activeFrame.canvasClipBox;
+  const clipRect = clipShape.rect;
   const activeAspect = isReCanvas
     ? activeFrame.canvasAspect
     : activeFrame.imageAspect;
@@ -158,7 +158,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
   // local `TOOL_VISUAL` table that used to mirror those rows was removed —
   // adding a new tool no longer requires touching this file.
   const activeStrategy =
-    CLIP_TOOL_STRATEGIES[cropTool] ?? CLIP_TOOL_STRATEGIES.rect;
+    CLIP_TOOL_STRATEGIES[clipTool] ?? CLIP_TOOL_STRATEGIES.rect;
   const ToolIcon = activeStrategy.icon;
   // Map abstract `accent` palette to Tailwind utility strings. We deliberately
   // keep this thin map at the call-site (rather than embedding Tailwind class
@@ -295,7 +295,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                   Object.values(CLIP_TOOL_STRATEGIES) as ClipToolStrategy[]
                 ).map((s, idx, arr) => {
                   const Icon = s.icon;
-                  const active = cropTool === s.id;
+                  const active = clipTool === s.id;
                   // Popover-local active palette — works on both light
                   // (`--bg-panel: #ffffff`) and dark (`#2b2b2b`) bubble
                   // backgrounds. Tailwind JIT requires class strings to be
@@ -863,7 +863,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
               <div className="flex items-center gap-1.5">
                 <ComboInput
                   label="W"
-                  value={Math.round(cropRect.w)}
+                  value={Math.round(clipRect.w)}
                   type="number"
                   className="w-[64px]"
                   onChange={() => {}}
@@ -883,7 +883,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                 <span className="text-zinc-500 text-[10px]">×</span>
                 <ComboInput
                   label="H"
-                  value={Math.round(cropRect.h)}
+                  value={Math.round(clipRect.h)}
                   type="number"
                   className="w-[64px]"
                   onChange={() => {}}
@@ -969,9 +969,9 @@ function AspectGrid({
   const { reCanvasActiveSignal } = usePluginSignals<ClipOptionsSignalsMap>();
   const isReCanvas = !!reCanvasActiveSignal.value;
   const clipPoly = (!isReCanvas && activeFrame) ? getRegularClipShape(activeFrame) : undefined;
-  const cropBox = isReCanvas ? activeFrame?.canvasCropBox : (clipPoly ? polygonToShape(clipPoly) : undefined);
-  const isEllipse = cropBox?.type === "circle";
-  const isDashed = isEllipse && cropBox?.antiAliased === false;
+  const clipBox = isReCanvas ? activeFrame?.canvasClipBox : (clipPoly ? polygonToShape(clipPoly) : undefined);
+  const isEllipse = clipBox?.type === "circle";
+  const isDashed = isEllipse && clipBox?.antiAliased === false;
 
   return (
     <div className="grid grid-cols-2 gap-1 mb-1.5">

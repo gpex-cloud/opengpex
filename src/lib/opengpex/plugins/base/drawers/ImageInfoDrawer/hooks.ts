@@ -38,7 +38,7 @@ import { formatBytes } from '@opengpex/editor/core/helpers/file';
  * from re-rendering during normal editor interactions (pan, hover, tool switch).
  */
 export function useImageInfoMetadata() {
-   const { activeFrame, state } = useEditorState();
+   const { activeFrame } = useEditorState();
 
    return useMemo(() => {
       if (!activeFrame) {

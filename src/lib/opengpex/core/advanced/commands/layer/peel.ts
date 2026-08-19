@@ -233,7 +233,7 @@ export const LayerPeelCommands = {
           const participants = [stripAdj(host), ...frags.map(stripAdj), stripAdj(exchange)];
 
           const { result, bounds } = await pixels.render.compositeLayers(participants, activeFrame);
-          const { id: assetId, url: assetUrl } = await result.toAsset();
+          const { assetId, url: assetUrl } = await result.toAsset();
 
           // Ensure bitmap is decoded into SourceBitmapCache BEFORE state update.
           // toAsset().inject() creates an object URL backed by the in-memory blob;
@@ -248,7 +248,7 @@ export const LayerPeelCommands = {
             // raw bitmaps without baking adjustments, so the renderer will
             // apply the host's adjustments exactly once at display time.
             tx.edit(host.id)
-              .setAsset({ id: assetId, url: assetUrl })
+              .setAsset({ assetId, url: assetUrl })
               .patch({
                 cx: bounds.cx,
                 cy: bounds.cy,

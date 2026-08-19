@@ -66,19 +66,19 @@ const CLIP_ANTS_STYLE = `
 export function ClipOverlayMain() {
   const {
     activeFrame,
-    cropBox,
+    clipBox,
     isReCanvas,
     isClipActive,
     dragType,
     showError,
     boxRef,
-    cropType,
-    cropTool,
+    clipType,
+    clipTool,
     isRegularTool,
     isIrregularTool,
   } = useClipOverlayCommands();
 
-  useClipCursor(isClipActive, cropTool, boxRef, isReCanvas);
+  useClipCursor(isClipActive, clipTool, boxRef, isReCanvas);
 
   const { state } = useEditorState();
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -110,7 +110,7 @@ export function ClipOverlayMain() {
   const groupRef = useRef<SVGGElement>(null);
   const pathBgRef = useRef<SVGPathElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
-  useSelectionAntsSync(groupRef, pathBgRef, pathRef, antsActive, isReCanvas, cropTool);
+  useSelectionAntsSync(groupRef, pathBgRef, pathRef, antsActive, isReCanvas, clipTool);
 
   // CSS box for drag handles + guides (regular tools only)
   const { guidesRef } = useRegularBoxSync(
@@ -124,7 +124,7 @@ export function ClipOverlayMain() {
   const { dimLabelRef } = useCropDimSync(boxActive, isReCanvas);
 
   // Move-delta label (shows "Δ dx, dy" during selection drag)
-  const { deltaContainerRef } = useMoveDeltaSync(isOverlayActive, cropTool);
+  const { deltaContainerRef } = useMoveDeltaSync(isOverlayActive, clipTool);
 
   // ─── Lasso preview path ref callback ─────────────────────────────────────
   const previewPathRef = useRef<SVGPathElement | null>(null);
@@ -208,7 +208,7 @@ export function ClipOverlayMain() {
         <div
           ref={boxRef}
           className="absolute pointer-events-auto cursor-move transition-[border-radius] duration-300"
-          style={{ borderRadius: cropType === "circle" ? "50%" : "0%" }}
+          style={{ borderRadius: clipType === "circle" ? "50%" : "0%" }}
           data-handle="move"
         >
           {showError && (
@@ -227,7 +227,7 @@ export function ClipOverlayMain() {
             { h: "sw", c: "bottom-0 left-0", cursor: "nesw-resize" },
             { h: "se", c: "bottom-0 right-0", cursor: "nwse-resize" },
           ].map((p) => {
-            const isEllipse = cropTool === "ellipse";
+            const isEllipse = clipTool === "ellipse";
             return (
               <div
                 key={p.h}
@@ -257,7 +257,7 @@ export function ClipOverlayMain() {
           <div
             ref={guidesRef}
             className="absolute inset-0 opacity-20 pointer-events-none overflow-hidden"
-            style={{ borderRadius: cropType === "circle" ? "50%" : "0%" }}
+            style={{ borderRadius: clipType === "circle" ? "50%" : "0%" }}
           >
             <div className="absolute top-1/3 left-0 w-full h-px bg-white" />
             <div className="absolute top-2/3 left-0 w-full h-px bg-white" />
@@ -279,7 +279,7 @@ export function ClipOverlayMain() {
               ref={dimLabelRef}
               className="text-[11px] font-black text-white tabular-nums tracking-tighter"
             >
-              {Math.round(cropBox.w)} × {Math.round(cropBox.h)}
+              {Math.round(clipBox.w)} × {Math.round(clipBox.h)}
             </span>
             <span className="text-[11px] font-bold text-white/40 ml-0.5">px</span>
           </div>

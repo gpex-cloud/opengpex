@@ -139,10 +139,10 @@ export const FrameCreateCommands = {
 
       const box = getClipBox(activeFrame);
       if (!box) {
-        actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
+        actions.setInteraction({ hud: { message: 'No active selection — draw a clip box first.', type: 'error' } });
         return;
       }
-      const cropRect = box.rect;
+      const clipRect = box.rect;
 
       try {
         // ── Step 1: Composite the selection region ───────────────────────────────
@@ -160,8 +160,8 @@ export const FrameCreateCommands = {
         const parentImageMetadata = activeFrame.metadata;
 
         const canvasDim = {
-          w: Math.round(cropRect.w),
-          h: Math.round(cropRect.h),
+          w: Math.round(clipRect.w),
+          h: Math.round(clipRect.h),
         };
 
         const syntheticDecodeResult: DecodeResult = {

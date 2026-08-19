@@ -126,6 +126,7 @@ export const useAssetPool = (isEnabled: boolean, refreshKey: number) => {
     };
 
     return { pool, usagesMap, tagsMap, activeAssetIds, buildAssetMetric };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- poolSignature and refreshKey are intentional invalidation triggers
   }, [isEnabled, structuralSignature, poolSignature, refreshKey, assets, state.frames.order, state.frames.byId]);
 
   return { assetPoolResult: result, structuralSignature };

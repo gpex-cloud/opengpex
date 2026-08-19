@@ -76,7 +76,6 @@ export const createClipboardService = (): ClipboardService => {
             const item = items[i];
             if (item.type === CLIPBOARD_MIME_METADATA) {
               const text = await new Promise<string>((resolve) => item.getAsString(resolve));
-              console.debug('[ClipboardService] Read metadata from DataTransfer (sync path)');
               return { metadata: JSON.parse(text) as ClipboardLayerMetadata };
             }
           }
@@ -96,7 +95,6 @@ export const createClipboardService = (): ClipboardService => {
             // Also read physical blob (used for cross-frame paste physical path)
             const imageType = item.types.find(t => t.startsWith('image/'));
             const blob = imageType ? await item.getType(imageType) : undefined;
-            console.debug('[ClipboardService] Read metadata + blob from Async Clipboard API');
             return { metadata, blob };
           }
 

@@ -22,7 +22,7 @@
 
 import { asLocalShape, Layer, EditorContextValue, NormalizedState, CameraState, LocalShape, Dimensions } from '@opengpex/editor/core/types';
 import type { ImageMetadata } from '@opengpex/editor/core/files/types';
-import { getDefaultCanvasCropBox } from '@opengpex/editor/core/helpers/selection';
+import { getDefaultCanvasClipBox } from '@opengpex/editor/core/helpers/selection';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
@@ -39,7 +39,7 @@ export interface GifFrameContent {
   activeLayerId: string;
   canvas: Dimensions;
   camera: CameraState;
-  canvasCropBox: LocalShape;
+  canvasClipBox: LocalShape;
   gifSequenceId: string;
   gifFrameCount: number;
   metadata?: ImageMetadata;
@@ -99,7 +99,7 @@ export async function buildGifFrameContent(
 
   const frameAssets = await Promise.all(
     framesToImport.map(async (f) => {
-      const { id: assetId, url: assetUrl } = await assets.register(f.displayBlob, dimension);
+      const { assetId, url: assetUrl } = await assets.register(f.displayBlob, dimension);
       return { assetId, assetUrl, delay: f.delay || 100, index: f.index };
     }),
   );
@@ -133,7 +133,7 @@ export async function buildGifFrameContent(
     activeLayerId: frameLayers[0].id,
     canvas: dimension,
     camera,
-    canvasCropBox: getDefaultCanvasCropBox(dimension),
+    canvasClipBox: getDefaultCanvasClipBox(dimension),
     gifSequenceId,
     gifFrameCount: framesToImport.length,
     metadata,
@@ -169,7 +169,7 @@ export async function importAnimatedGif(
     pixels.image.resample(firstLayer.src, { maxSize: 256 }),
   ]);
   const thumbBlob = await thumbResult.toBlob('image/webp');
-  const { id: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, thumbResult.dimensions);
+  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, thumbResult.dimensions);
 
   // 4. Assemble and add frame
   const frameName = file.name.replace(/\.[^.]+$/, '');
@@ -182,7 +182,7 @@ export async function importAnimatedGif(
     layers: content.layers,
     activeLayerId: content.activeLayerId,
     camera: content.camera,
-    canvasCropBox: content.canvasCropBox,
+    canvasClipBox: content.canvasClipBox,
     assetId: originalGifAssetId,
     thumbnail: { src: thumbAssetUrl, assetId: thumbAssetId },
     extra: { ...extra, gifSequenceId: content.gifSequenceId, gifFrameCount: content.gifFrameCount },

@@ -74,7 +74,7 @@ export interface EditorActions {
    *                    LocalPolygon for lasso/wand), or `null` to clear the slot.
    */
   setClipBox: (frameId: string, clipToolId: string, value: LocalPolygon | null) => void;
-  setCanvasCropBox: (frameId: string, cropBox: LocalShape) => void;
+  setCanvasClipBox: (frameId: string, clipBox: LocalShape) => void;
 
   setImageAspect: (frameId: string, aspect: number | undefined) => void;
   setCanvasAspect: (frameId: string, aspect: number | undefined) => void;

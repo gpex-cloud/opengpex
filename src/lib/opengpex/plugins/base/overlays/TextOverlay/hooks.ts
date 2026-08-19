@@ -384,7 +384,7 @@ export function useInlineTextEditing(
 
     try {
       const asset = await pixels.rasterize.layer(updatedLayer);
-      actions.updateLayer(activeFrame.id, layerId, { assetId: asset.id, src: asset.url });
+      actions.updateLayer(activeFrame.id, layerId, { assetId: asset.assetId, src: asset.url });
     } catch (err) {
       console.warn('[TextOverlay] Rasterize failed:', err);
     }

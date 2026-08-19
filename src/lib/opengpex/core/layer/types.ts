@@ -88,7 +88,7 @@ export interface LayerUpdateTx {
  */
 export interface LayerEditor {
   /** Sets asset information */
-  setAsset: (asset: { id: string, url: string }) => LayerEditor;
+  setAsset: (asset: { assetId: string, url: string }) => LayerEditor;
   /** Sets geometric properties */
   // setPose: (pose: Partial<{ cx: number, cy: number, scale: number, rotation: number, flip: { h: boolean, v: boolean } }>) => LayerEditor;
   /** Sets shape and visible area (supports rect/circle/path) */

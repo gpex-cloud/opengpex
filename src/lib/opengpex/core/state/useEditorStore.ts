@@ -149,7 +149,7 @@ export function useEditorStore() {
 
     // D. [Unified Architecture Snapping Gateway]
     // clipBoxes are now always LocalPolygon — no snapping needed for SET_CLIP_BOX.
-    // canvasCropBox (LocalShape) snapping is handled at the SET_CANVAS_CROP_BOX level
+    // canvasClipBox (LocalShape) snapping is handled at the SET_CANVAS_CLIP_BOX level
     // if needed in the future. For now, pass all actions through unmodified.
     dispatch(action);
   }, [scheduleAssetSync, ASSET_CRITICAL_ACTIONS, mutateVolatile]);
@@ -289,7 +289,7 @@ export function useEditorStore() {
       },
       setClipBox: (frameId: string, toolId: string, value: LocalPolygon | null) =>
         enhancedDispatch({ type: 'SET_CLIP_BOX', payload: { frameId, toolId, value } }),
-      setCanvasCropBox: (frameId: string, cropBox: LocalShape) => enhancedDispatch({ type: 'SET_CANVAS_CROP_BOX', payload: { frameId, cropBox } }),
+      setCanvasClipBox: (frameId: string, clipBox: LocalShape) => enhancedDispatch({ type: 'SET_CANVAS_CLIP_BOX', payload: { frameId, clipBox } }),
 
       setImageAspect: (frameId: string, aspect: number | undefined) => enhancedDispatch({ type: 'SET_IMAGE_ASPECT', payload: { frameId, aspect } }),
       setCanvasAspect: (frameId: string, aspect: number | undefined) => enhancedDispatch({ type: 'SET_CANVAS_ASPECT', payload: { frameId, aspect } }),

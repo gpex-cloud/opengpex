@@ -33,7 +33,6 @@ import FancyButton from "@opengpex/editor/widgets/FancyButton";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
-import FunctionTabs from "@opengpex/editor/widgets/FunctionTabs";
 import Switch from "@opengpex/editor/widgets/Switch";
 
 import { CommandInstance, WorkingColorSpace } from "@opengpex/editor/core/types";
@@ -81,8 +80,6 @@ export function ResizeExportControls({
   applyResizeCmd,
   downloadCmd,
   imageMetadata,
-  sourceBitDepth,
-  isSingleLayer,
 }: ResizeExportControlsProps) {
   // Effective DPI: pending override in config, or frame's committed value
   const effectiveDpi = config.dpi || frameDpi;

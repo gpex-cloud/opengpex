@@ -58,7 +58,7 @@ export const createReCanvasHandler = (): InteractionHandler => {
       const target = e.nativeEvent.target as HTMLElement;
       if (target.closest('button, a, [data-role="ui"]')) return null;
 
-      const rect = e.activeFrame.canvasCropBox?.rect;
+      const rect = e.activeFrame.canvasClipBox?.rect;
       if (!rect || rect.w <= 0 || rect.h <= 0) return null;
 
       // ─── Corner handles (from DOM data-handle) ────────────────────────
@@ -101,7 +101,7 @@ export const createReCanvasHandler = (): InteractionHandler => {
     },
 
     getInitialState: (e) => {
-      return e.activeFrame.canvasCropBox?.rect || asLocalRect({ x: 0, y: 0, w: 0, h: 0 });
+      return e.activeFrame.canvasClipBox?.rect || asLocalRect({ x: 0, y: 0, w: 0, h: 0 });
     },
 
     getConstraints: (e) => ({
@@ -111,8 +111,8 @@ export const createReCanvasHandler = (): InteractionHandler => {
 
     onUpdate: (e, newRect, tx) => {
       const frame = e.activeFrame;
-      const currentShape = frame.canvasCropBox;
-      tx.update({ canvasCropBox: { ...currentShape, rect: newRect } }, 'frame');
+      const currentShape = frame.canvasClipBox;
+      tx.update({ canvasClipBox: { ...currentShape, rect: newRect } }, 'frame');
       // No exchange layer sync needed for Re-Canvas
     },
 
@@ -124,11 +124,11 @@ export const createReCanvasHandler = (): InteractionHandler => {
         action: (e, tx) => {
           const frame = e.activeFrame;
           const fullCanvasRect = asLocalRect({ x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h });
-          tx.update({ canvasCropBox: { ...frame.canvasCropBox, rect: fullCanvasRect } }, 'frame');
+          tx.update({ canvasClipBox: { ...frame.canvasClipBox, rect: fullCanvasRect } }, 'frame');
         }
       },
       // NOTE: No 'static-click-clear' for Re-Canvas — static click inside is a no-op.
-      // Re-Canvas always has a canvasCropBox (it represents the physical canvas bounds).
+      // Re-Canvas always has a canvasClipBox (it represents the physical canvas bounds).
     ],
   });
 };

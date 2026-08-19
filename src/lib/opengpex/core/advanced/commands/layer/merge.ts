@@ -38,7 +38,7 @@ async function compositeLayersToAsset(
   const { result, bounds } = await pixels.render.compositeLayers(layers, activeFrame);
 
   const asset = await result.toAsset();
-  if (!asset.id) throw new Error('Composite failed');
+  if (!asset.assetId) throw new Error('Composite failed');
 
   // Ensure bitmap is decoded into SourceBitmapCache before state update.
   // toAsset().inject() creates an object URL backed by the in-memory blob;

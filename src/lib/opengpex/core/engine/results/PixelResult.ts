@@ -22,12 +22,12 @@
  *
  * All pixel operations (composite/resample/filter/rasterize) produce
  * a PixelResult. The consuming code uses:
- *   - `toAsset()` → register in AssetService, get id + url + dimensions
+ *   - `toAsset()` → register in AssetService, get assetId + url + dimensions
  *   - `toBlob()`  → get the raw output blob
  *   - `toImageData()` → get pixel data for CPU inspection
  *
  * Design points:
- * - `toAsset()` returns AssetRef { id, url, dimensions },
+ * - `toAsset()` returns AssetRef { assetId, url, dimensions },
  *   eliminating the v1 multi-step pattern.
  * - Cache warming is triggered automatically through AssetService hooks.
  * - Subclasses (CompositeResult, FilterResult, etc.) can add domain-specific
@@ -70,15 +70,15 @@ export abstract class PixelResult {
    * Register as asset (one-step):
    * 1. Inject into AssetService
    * 2. Trigger SourceBitmapCache warmFromBlob (via cache warming hook)
-   * 3. Return AssetRef { id, url, dimensions }
+   * 3. Return AssetRef { assetId, url, dimensions }
    *
    * Callers no longer need manual register + getURL + decode.loadBitmap + decode.dimensions.
    */
   async toAsset(): Promise<AssetRef> {
-    const id = await this.assets.inject(this.data.hash, this.data.blob, this.data.tileMeta);
-    const url = this.assets.getURL(id) ?? '';
+    const assetId = await this.assets.inject(this.data.hash, this.data.blob, this.data.tileMeta);
+    const url = this.assets.getURL(assetId) ?? '';
     return {
-      id,
+      assetId,
       url,
       dimensions: { w: this.data.tileMeta.width, h: this.data.tileMeta.height },
     };

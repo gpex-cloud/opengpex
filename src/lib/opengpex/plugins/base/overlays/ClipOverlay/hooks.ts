@@ -31,7 +31,7 @@ import {
 
 /**
  * useClipOverlayCommands: Encapsulates UI helper logic and command proxies
- * for the cropping overlay.
+ * for the clipping overlay.
  */
 export function useClipOverlayCommands() {
   const { state, activeFrame } = useEditorState();
@@ -44,25 +44,25 @@ export function useClipOverlayCommands() {
   const isReCanvas = state.getStateSignal(ClipOptionsAPI.signals.reCanvas);
   const isClipActive = state.interaction.interactionMode === 'clip';
 
-  // Active crop / selection tool — read from per-frame field.
+  // Active clip / selection tool — read from per-frame field.
   const rawTool = (activeFrame?.latestClipTool as ClipTool) || 'rect';
 
   // Re-Canvas pins tool to 'rect' (canvas resize is always rectangular).
-  const cropTool: ClipTool = isReCanvas ? 'rect' : (CLIP_TOOL_STRATEGIES[rawTool] ? rawTool : 'rect');
-  const family = CLIP_TOOL_STRATEGIES[cropTool].family;
+  const clipTool: ClipTool = isReCanvas ? 'rect' : (CLIP_TOOL_STRATEGIES[rawTool] ? rawTool : 'rect');
+  const family = CLIP_TOOL_STRATEGIES[clipTool].family;
   const isRegularTool = family === 'regular';
   const isIrregularTool = family === 'irregular';
 
-  const { clipBoxes, canvasCropBox, canvas: canvasDim } = activeFrame || {
+  const { clipBoxes, canvasClipBox, canvas: canvasDim } = activeFrame || {
     clipBoxes: {} as Record<string, LocalPolygon>,
-    canvasCropBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
+    canvasClipBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
     canvas: { w: 0, h: 0 }
   };
 
-  const imageCropBox = getRegularClipShape({ clipBoxes });
-  const cropShape = isReCanvas ? canvasCropBox : (imageCropBox ? polygonToShape(imageCropBox) : asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
-  const cropBox = cropShape.rect;
-  const cropType = cropShape.type;
+  const imageClipBox = getRegularClipShape({ clipBoxes });
+  const clipShape = isReCanvas ? canvasClipBox : (imageClipBox ? polygonToShape(imageClipBox) : asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
+  const clipBox = clipShape.rect;
+  const clipType = clipShape.type;
 
   // Error pulse animation
   const lastPulse = useRef(state.interaction.selectionErrorPulse);
@@ -102,14 +102,14 @@ export function useClipOverlayCommands() {
 
   return {
     activeFrame,
-    cropBox,
-    cropType,
-    imageCropBox: imageCropBox || asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
-    canvasCropBox,
+    clipBox,
+    clipType,
+    imageClipBox: imageClipBox || asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
+    canvasClipBox,
     canvasDim,
     isReCanvas,
     isClipActive,
-    cropTool,
+    clipTool,
     isRegularTool,
     isIrregularTool,
     dragType: state.interaction.isInteracting ? 'move' : '',
@@ -131,7 +131,7 @@ export function useClipOverlayCommands() {
  */
 export function useClipCursor(
   isClipActive: boolean,
-  cropTool: ClipTool,
+  clipTool: ClipTool,
   boxRef?: RefObject<HTMLElement | null>,
   isReCanvas?: boolean
 ) {
@@ -151,16 +151,16 @@ export function useClipCursor(
 
   useEffect(() => {
     if (isClipActive) {
-      const toolCursor = CLIP_TOOL_STRATEGIES[cropTool].cursor;
+      const toolCursor = CLIP_TOOL_STRATEGIES[clipTool].cursor;
       actions.fast.setCursor(toolCursor);
     } else {
       actions.fast.setCursor(null);
     }
-  }, [isClipActive, cropTool, actions]);
+  }, [isClipActive, clipTool, actions]);
 
   // ─── Polygon hover cursor for irregular tools ──────────────────────────
   useEffect(() => {
-    const strategy = CLIP_TOOL_STRATEGIES[cropTool];
+    const strategy = CLIP_TOOL_STRATEGIES[clipTool];
     if (!isClipActive || strategy.family !== 'irregular') return;
 
     const toolCursor = strategy.cursor;
@@ -171,7 +171,7 @@ export function useClipCursor(
       if (!frame) return;
 
       // Get polygon from clipBoxes
-      const poly = frame.clipBoxes?.[cropTool] as LocalPolygon | undefined;
+      const poly = frame.clipBoxes?.[clipTool] as LocalPolygon | undefined;
       if (!poly || !poly.rings || poly.rings.length === 0) {
         if (currentCursor !== toolCursor) {
           currentCursor = toolCursor;
@@ -209,7 +209,7 @@ export function useClipCursor(
         actions.fast.setCursor(toolCursor);
       }
     };
-  }, [isClipActive, cropTool, actions, geometry]);
+  }, [isClipActive, clipTool, actions, geometry]);
 
   // ─── Edge proximity cursor for regular tools + Re-Canvas ───────────────
   // Dynamically switches cursor to ns-resize / ew-resize when the pointer
@@ -217,7 +217,7 @@ export function useClipCursor(
   // edge is draggable (edge hit detection without fixed-position handles).
   // Also fires in Re-Canvas mode (which is always rectangular).
   useEffect(() => {
-    const strategy = CLIP_TOOL_STRATEGIES[cropTool];
+    const strategy = CLIP_TOOL_STRATEGIES[clipTool];
     // Activate when: (clip mode + regular tool) OR Re-Canvas mode
     const isActive = (isClipActive && strategy.family === 'regular') || !!isReCanvas;
     if (!isActive) return;
@@ -231,7 +231,7 @@ export function useClipCursor(
 
     // Restore tool cursor on effect (re-)setup. This is critical when the
     // effect re-runs due to isReCanvas toggling: cleanup sets cursor to null,
-    // but the tool-cursor useEffect (deps=[isClipActive, cropTool]) won't
+    // but the tool-cursor useEffect (deps=[isClipActive, clipTool]) won't
     // re-fire if those deps didn't change. We must actively restore here.
     actions.fast.setCursor(toolCursor);
 
@@ -244,9 +244,9 @@ export function useClipCursor(
       const frame = frameRef.current;
       if (!frame) return;
 
-      // Get the bounding rect: Re-Canvas reads canvasCropBox, regular reads clipBoxes
+      // Get the bounding rect: Re-Canvas reads canvasClipBox, regular reads clipBoxes
       const selRect = isReCanvas
-        ? frame.canvasCropBox?.rect
+        ? frame.canvasClipBox?.rect
         : getRegularClipShape(frame)?.rect;
 
       if (!selRect || selRect.w <= 0 || selRect.h <= 0) {
@@ -275,7 +275,7 @@ export function useClipCursor(
       const px = canvasPt.x;
       const py = canvasPt.y;
 
-      const isEllipse = cropTool === 'ellipse';
+      const isEllipse = clipTool === 'ellipse';
 
       // Determine desired cursor
       let desired = toolCursor;
@@ -338,7 +338,7 @@ export function useClipCursor(
         boxEl.style.cursor = '';
       }
     };
-  }, [isClipActive, isReCanvas, cropTool, actions, geometry, boxRef]);
+  }, [isClipActive, isReCanvas, clipTool, actions, geometry, boxRef]);
 
   useEffect(() => {
     return () => {

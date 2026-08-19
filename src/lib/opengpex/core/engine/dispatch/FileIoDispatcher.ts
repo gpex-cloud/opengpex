@@ -30,7 +30,6 @@
  */
 
 import type { WorkerBridge } from './bridge/WorkerBridge';
-import type { FileIoJob } from '../protocol/jobs';
 
 export class FileIoDispatcher {
   constructor(private bridge: WorkerBridge) {}

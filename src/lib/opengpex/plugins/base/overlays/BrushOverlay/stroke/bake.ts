@@ -161,7 +161,7 @@ async function executePaintBake(request: PaintBakeRequest, e: InteractionEvent):
 
   const completeLayer: Layer = {
     ...targetLayer,
-    assetId: asset.id,
+    assetId: asset.assetId,
     src: asset.url,
     bounding: { w: cropW, h: cropH },
     visibleShape: asLocalShape({ x: 0, y: 0, w: cropW, h: cropH }),
@@ -197,7 +197,7 @@ async function executeMaskBake(request: MaskBakeRequest, e: InteractionEvent): P
         maskId: existingMaskId,
         patch: {
           src: asset.url,
-          assetId: asset.id,
+          assetId: asset.assetId,
         },
       });
     } else {
@@ -205,7 +205,7 @@ async function executeMaskBake(request: MaskBakeRequest, e: InteractionEvent): P
         frameId: frame.id,
         layerId: targetLayerId,
         src: asset.url,
-        assetId: asset.id,
+        assetId: asset.assetId,
         bounds: asLocalRect({ x: 0, y: 0, w: maskBounds.w, h: maskBounds.h }),
       });
     }

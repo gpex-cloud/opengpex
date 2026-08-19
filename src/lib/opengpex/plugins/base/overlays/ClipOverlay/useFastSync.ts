@@ -90,10 +90,10 @@ function simplifyPolygonForAnts(
  * Returns EMPTY_SHAPE when the slot is empty.
  */
 function resolveRegularClip(
-  f: { clipBoxes: Record<string, unknown>; canvasCropBox: LocalShape },
+  f: { clipBoxes: Record<string, unknown>; canvasClipBox: LocalShape },
   isReCanvas: boolean
 ): LocalShape {
-  if (isReCanvas) return f.canvasCropBox;
+  if (isReCanvas) return f.canvasClipBox;
   const poly = getRegularClipShape(f as { clipBoxes: Record<string, LocalPolygon> });
   if (!poly) return EMPTY_SHAPE;
   // Convert LocalPolygon to LocalShape for CSS box positioning
@@ -215,7 +215,7 @@ export function useSelectionAntsSync(
   pathRef: React.RefObject<SVGPathElement | null>,
   isActive: boolean,
   isReCanvas: boolean,
-  cropTool: string
+  clipTool: string
 ) {
   const { geometry } = useEditorServices();
 
@@ -228,8 +228,8 @@ export function useSelectionAntsSync(
   // SVG group positioning (at bounding rect origin, frame-local space)
   useFastSvgGroupSync(groupRef, isActive, {
     selector: (_v, f) => {
-      if (isReCanvas) return f.canvasCropBox.rect;
-      const entry = f.clipBoxes[cropTool] as LocalPolygon | undefined;
+      if (isReCanvas) return f.canvasClipBox.rect;
+      const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
       if (!entry) return null;
       return entry.rect.w > 0 ? entry.rect : null;
     },
@@ -239,9 +239,9 @@ export function useSelectionAntsSync(
   // Shared selector for both paths (bg + fg share the same geometry).
   // [Perf A] Applies Douglas–Peucker simplification for complex polygons and
   // caches the result — avoids re-computing on every tick.
-  const antsSelector = (_v: unknown, f: { clipBoxes: Record<string, unknown>; canvasCropBox: LocalShape }): LocalShape | string | null => {
-    if (isReCanvas) return f.canvasCropBox;
-    const entry = f.clipBoxes[cropTool] as LocalPolygon | undefined;
+  const antsSelector = (_v: unknown, f: { clipBoxes: Record<string, unknown>; canvasClipBox: LocalShape }): LocalShape | string | null => {
+    if (isReCanvas) return f.canvasClipBox;
+    const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
     if (!entry) return null;
 
     // Cache hit: same polygon rings reference → return cached SVG path string
@@ -262,13 +262,13 @@ export function useSelectionAntsSync(
   // Background path (black, offset phase) — fills the foreground gaps
   useFastMarchingAntsSync(pathBgRef, isActive, {
     selector: antsSelector,
-    resetKey: cropTool,
+    resetKey: clipTool,
   });
 
   // Foreground path (white/red, standard phase)
   useFastMarchingAntsSync(pathRef, isActive, {
     selector: antsSelector,
-    resetKey: cropTool,
+    resetKey: clipTool,
   });
 
   // Dynamic fill: semi-transparent evenodd fill for irregular polygons (lasso/wand),
@@ -279,7 +279,7 @@ export function useSelectionAntsSync(
       pathRef.current.setAttribute('fill', 'none');
       return;
     }
-    const entry = f.clipBoxes[cropTool] as LocalPolygon | undefined;
+    const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
     // Irregular polygon: rings.length > 1 or ring has many points (lasso/wand/AI)
     const isIrregular = entry && entry.rings.length > 0 && entry.rings[0].length > 64;
     pathRef.current.setAttribute('fill', isIrregular ? 'rgba(240, 230, 255, 0.12)' : 'none');
@@ -292,7 +292,7 @@ export function useSelectionAntsSync(
       groupRef.current.style.visibility = '';
       return;
     }
-    const entry = f.clipBoxes[cropTool] as LocalPolygon | undefined;
+    const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
     const hasData = !!entry && entry.rect.w > 0;
     groupRef.current.style.visibility = hasData ? '' : 'hidden';
   });
@@ -320,7 +320,7 @@ export function useSelectionAntsSync(
  *
  * Visible only during an active drag; hidden otherwise (transient is null → label hidden).
  */
-export function useMoveDeltaSync(isActive: boolean, cropTool: ClipTool) {
+export function useMoveDeltaSync(isActive: boolean, clipTool: ClipTool) {
   const deltaContainerRef = useRef<HTMLDivElement>(null);
   const { volatileRef } = useEditorServices();
 
@@ -331,7 +331,7 @@ export function useMoveDeltaSync(isActive: boolean, cropTool: ClipTool) {
       const start = volatileRef.current.transient['clipMoveStart'] as { x: number; y: number } | undefined;
       if (!start) return null;
 
-      const entry = f.clipBoxes[cropTool] as LocalPolygon | undefined;
+      const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
       if (!entry) return null;
 
       // Anchor at bottom-left of the selection bounding rect
@@ -352,7 +352,7 @@ export function useMoveDeltaSync(isActive: boolean, cropTool: ClipTool) {
       return;
     }
 
-    const entry = f.clipBoxes[cropTool] as LocalPolygon | undefined;
+    const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
     if (!entry) {
       el.style.display = 'none';
       return;

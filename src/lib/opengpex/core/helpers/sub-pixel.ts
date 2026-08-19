@@ -64,11 +64,11 @@ export function shrinkInvertedMask<T extends Shape>(shape: T, inverted: boolean,
 }
 
 /**
- * snapCropBoxToPixels: Selection crop box pixel-level grid alignment snapper (Pixel Gridding Snapper)
+ * snapClipBoxToPixels: Selection crop box pixel-level grid alignment snapper (Pixel Gridding Snapper)
  * Employs a "coordinate pair dual-end rounding" algorithm, perfectly preventing size drift and physical stretch errors of aspect ratios caused by independent rounding.
  * Exported as a shared pure function, supporting geometric grid alignment under both the main thread and WebWorker environments.
  */
-export function snapCropBoxToPixels<T extends { rect: LocalRect }>(cropBox: T): T {
+export function snapClipBoxToPixels<T extends { rect: LocalRect }>(cropBox: T): T {
   const { rect } = cropBox;
   if (!rect) return cropBox;
 

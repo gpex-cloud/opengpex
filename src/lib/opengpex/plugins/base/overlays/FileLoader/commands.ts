@@ -29,7 +29,7 @@ export const FILE_LOADER_COMMANDS = {
     id: P.CMD_IMPORT,
     name: 'Import Files',
     execute: async (ctx: EditorContextValue, files: File[]) => {
-      const { state, actions, files: fileService } = ctx;
+      const { state, actions } = ctx;
       if (!state.isLoaded) return;
 
       const imageFiles = files.filter(f => detectFormat(f) !== 'unknown');

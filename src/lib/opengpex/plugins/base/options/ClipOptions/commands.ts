@@ -63,7 +63,7 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
   if (!activeFrame) return null;
   const regularPoly = isReCanvas ? null : getRegularClipShape(activeFrame);
   const shape: LocalShape = isReCanvas
-    ? activeFrame.canvasCropBox
+    ? activeFrame.canvasClipBox
     : (regularPoly ? polygonToShape(regularPoly) : asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
 
   return {
@@ -77,7 +77,7 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
     },
     updateShape: (patch: Partial<LocalShape>) => {
       if (isReCanvas) {
-        actions.setCanvasCropBox(activeFrame.id, { ...shape, ...patch } as LocalShape);
+        actions.setCanvasClipBox(activeFrame.id, { ...shape, ...patch } as LocalShape);
       } else {
         const toolId: 'rect' | 'ellipse' = shape.type === 'circle' ? 'ellipse' : 'rect';
         // clipBoxes stores LocalPolygon — properly convert the patched rect to polygon with rings
@@ -285,11 +285,11 @@ export const CLIP_OPTIONS_COMMANDS = {
    *      (visible by the side-bar toggle flipping), which they didn't ask
    *      for;
    *   2) once in that hybrid state, Space (cycle tool) would project
-   *      lasso / wand / circle shapes onto `canvasCropBox`, flipping the
+   *      lasso / wand / circle shapes onto `canvasClipBox`, flipping the
    *      rose-tinted rect into a circle — also unexpected.
    *
    * Now: activating Re-Canvas only writes the `SIGNAL_RE_CANVAS` signal +
-   * coerces `canvasCropBox.type` to 'rect' (resizing only makes sense on
+   * coerces `canvasClipBox.type` to 'rect' (resizing only makes sense on
    * a rectangular footprint). The ClipOverlay mounts whenever Re-Canvas
    * is on (see `components.tsx::isOverlayActive`) regardless of
    * interactionMode, and the clipbox InteractionHandler admits pointer
@@ -307,8 +307,8 @@ export const CLIP_OPTIONS_COMMANDS = {
       const isActivating = !ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS);
 
       if (isActivating && ctx.activeFrame) {
-        ctx.actions.setCanvasCropBox(ctx.activeFrame.id, {
-          ...ctx.activeFrame.canvasCropBox,
+        ctx.actions.setCanvasClipBox(ctx.activeFrame.id, {
+          ...ctx.activeFrame.canvasClipBox,
           type: 'rect'
         });
       }
@@ -557,8 +557,8 @@ export const CLIP_OPTIONS_COMMANDS = {
 
         if (isReCanvas) {
           // Re-Canvas is always rect-shaped; just coerce the type field.
-          actions.setCanvasCropBox(activeFrame.id, {
-            ...activeFrame.canvasCropBox,
+          actions.setCanvasClipBox(activeFrame.id, {
+            ...activeFrame.canvasClipBox,
             type: tool === 'ellipse' ? 'circle' : 'rect',
           });
         } else {

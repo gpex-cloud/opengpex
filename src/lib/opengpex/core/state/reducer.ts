@@ -316,8 +316,8 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
       };
     }
 
-    case 'SET_CANVAS_CROP_BOX': {
-      const { frameId, cropBox } = action.payload;
+    case 'SET_CANVAS_CLIP_BOX': {
+      const { frameId, clipBox } = action.payload;
       const frame = state.frames.byId[frameId];
       if (!frame) return state;
       return {
@@ -326,7 +326,7 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
           ...state.frames,
           byId: {
             ...state.frames.byId,
-            [frameId]: { ...frame, canvasCropBox: cropBox }
+            [frameId]: { ...frame, canvasClipBox: clipBox }
           }
         }
       };

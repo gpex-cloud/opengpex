@@ -20,7 +20,7 @@
 'use client';
 
 import { asLocalShape, EditorContextValue, EditorCommand, Layer } from '@opengpex/editor/core/types';
-import { getDefaultCanvasCropBox } from '@opengpex/editor/core/helpers/selection';
+import { getDefaultCanvasClipBox } from '@opengpex/editor/core/helpers/selection';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
 import * as P from '@opengpex/editor/core/advanced/protocols';
@@ -37,15 +37,15 @@ export const FrameResizeCommands = {
       const { activeFrame, actions } = ctx;
       if (!activeFrame) return;
 
-      const { canvasCropBox: cropShape, canvas: oldCanvas, layers } = activeFrame;
-      const cropBox = cropShape.rect;
+      const { canvasClipBox: clipShape, canvas: oldCanvas, layers } = activeFrame;
+      const clipBox = clipShape.rect;
 
-      const shiftX = (cropBox.x + cropBox.w / 2) - oldCanvas.w / 2;
-      const shiftY = (cropBox.y + cropBox.h / 2) - oldCanvas.h / 2;
+      const shiftX = (clipBox.x + clipBox.w / 2) - oldCanvas.w / 2;
+      const shiftY = (clipBox.y + clipBox.h / 2) - oldCanvas.h / 2;
 
       const newCanvas = {
-        w: Math.round(cropBox.w),
-        h: Math.round(cropBox.h)
+        w: Math.round(clipBox.w),
+        h: Math.round(clipBox.h)
       };
 
       // Defensive snap: ensure layer cx/cy align to half-pixel grid after shift.
@@ -62,7 +62,7 @@ export const FrameResizeCommands = {
         canvas: newCanvas,
         layers: { byId: nextById, order: layers.order },
         clipBoxes: {},
-        canvasCropBox: getDefaultCanvasCropBox(newCanvas)
+        canvasClipBox: getDefaultCanvasClipBox(newCanvas)
       });
     }
   } as EditorCommand<void, void>,
@@ -108,7 +108,7 @@ export const FrameResizeCommands = {
         canvas: targetDim,
         camera: newCamera,
         clipBoxes: {},
-        canvasCropBox: getDefaultCanvasCropBox(targetDim),
+        canvasClipBox: getDefaultCanvasClipBox(targetDim),
         ...(dpi ? { dpi } : {})
       });
 
@@ -156,7 +156,7 @@ export const FrameResizeCommands = {
       const scaleY = newH / oldH;
 
       // 2. Register the source as an asset (creates blob URL + cache entry)
-      const { id: assetId, url: assetUrl } = await assets.register(source, { w: newW, h: newH });
+      const { assetId, url: assetUrl } = await assets.register(source, { w: newW, h: newH });
 
       // 3. Find primary image layer (first host image layer)
       const primaryLayer = activeFrame.layers.order
@@ -210,7 +210,7 @@ export const FrameResizeCommands = {
         canvas: targetDim,
         camera: newCamera,
         clipBoxes: {},
-        canvasCropBox: getDefaultCanvasCropBox({ w: newW, h: newH }),
+        canvasClipBox: getDefaultCanvasClipBox({ w: newW, h: newH }),
         ...(dpi ? { dpi } : {})
       });
 

@@ -75,13 +75,13 @@ export const useClipOptionsCommands = () => {
     // Safety: if the stored value doesn't exist in CLIP_TOOL_STRATEGIES (e.g.
     // stale data from a removed tool), fall back to 'rect'.
     const rawClipTool = (activeFrame?.latestClipTool as ClipTool | undefined) ?? 'rect';
-    const cropTool: ClipTool = CLIP_TOOL_STRATEGIES[rawClipTool] ? rawClipTool : 'rect';
+    const clipTool: ClipTool = CLIP_TOOL_STRATEGIES[rawClipTool] ? rawClipTool : 'rect';
     // Pre-PR-6-2: derive from CLIP_TOOL_STRATEGIES via the helper functions
     // exported from protocols.ts. This eliminates the previous duplicate
-    // truth source (literal `cropTool === 'rect' || ...`) and makes the
+    // truth source (literal `clipTool === 'rect' || ...`) and makes the
     // tool family completely table-driven.
-    const isRegularTool = isRegularToolFn(cropTool);
-    const isIrregularTool = isIrregularToolFn(cropTool);
+    const isRegularTool = isRegularToolFn(clipTool);
+    const isIrregularTool = isIrregularToolFn(clipTool);
 
     // ─── Unified clip box read (Single Source of Truth) ────────────────────
     // `getClipBox` resolves the correct slot by `frame.latestClipTool` and
@@ -95,7 +95,7 @@ export const useClipOptionsCommands = () => {
     // Whether the active tool's projected shape *has* a meaningful AA mode.
     // Drives the AA button's `disabled` state so the button is greyed-out for
     // rect (always pixel-aligned).
-    const supportsAntiAlias = CLIP_TOOL_STRATEGIES[cropTool].supportsAntiAlias;
+    const supportsAntiAlias = CLIP_TOOL_STRATEGIES[clipTool].supportsAntiAlias;
     // All tools default to AA ON (true) when no explicit value is set.
     const isAntiAliased = clipBox?.antiAliased ?? true;
 
@@ -127,7 +127,7 @@ export const useClipOptionsCommands = () => {
       applyMaskCmd: actions.adv.layer.clip.toMask,
 
       // Tool / state derived helpers
-      cropTool,
+      clipTool,
       isRegularTool,
       isIrregularTool,
       hasIrregularBox,
@@ -186,15 +186,15 @@ export const useClipOptionsCommands = () => {
       /**
        * setShapeType — preserved for backward compatibility (internal callers still
        * use it via the legacy shape dropdown path). New code should call
-       * `cropToolSetCmd.execute({ tool })` instead, which is the unified entry
+       * `clipToolSetCmd.execute({ tool })` instead, which is the unified entry
        * for tool switching (covers regular + irregular branches per §3.2.3).
        */
       setShapeType: (type: ShapeType, antiAliased?: boolean) => {
         if (!activeFrame) return;
         if (isReCanvas) {
-          const patch: LocalShape = { ...activeFrame.canvasCropBox, type };
+          const patch: LocalShape = { ...activeFrame.canvasClipBox, type };
           if (antiAliased !== undefined) patch.antiAliased = antiAliased;
-          actions.setCanvasCropBox(activeFrame.id, patch);
+          actions.setCanvasClipBox(activeFrame.id, patch);
         } else {
           // setShapeType is a legacy path — new code uses clipToolSetCmd.
           // For now, just switch the tool; the actual polygon will be written

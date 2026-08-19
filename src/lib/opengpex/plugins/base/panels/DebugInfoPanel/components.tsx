@@ -170,7 +170,7 @@ const DebugInfoPanel = React.memo(function DebugInfoPanel({
     activeLayer: false,
     cursorTracking: false,
     canvasViewport: true,
-    cropRegion: true,
+    clipRegion: true,
     inspectorOptions: false,
   });
   const toggle = (key: keyof typeof sections) => setSections(s => ({ ...s, [key]: !s[key] }));
@@ -434,21 +434,21 @@ const DebugInfoPanel = React.memo(function DebugInfoPanel({
           </div>
         </CollapsibleSection>
 
-        {/* ─── 5. Crop Physics (Conditional) ──────────────────────────── */}
-        {metrics.interactionMode === "clip" && metrics.crop.physical.w > 0 && (
+        {/* ─── 5. Clip Physics (Conditional) ──────────────────────────── */}
+        {metrics.interactionMode === "clip" && metrics.clip.physical.w > 0 && (
           <CollapsibleSection
             icon={<Sparkles size={11} className="text-indigo-400" />}
-            title="Crop Region"
-            isOpen={sections.cropRegion}
-            onToggle={() => toggle('cropRegion')}
+            title="Clip Region"
+            isOpen={sections.clipRegion}
+            onToggle={() => toggle('clipRegion')}
             borderTop
           >
             <div className="bg-indigo-500/5 p-2.5 rounded-xl border border-indigo-500/15">
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[9px] font-mono">
-                <div className="font-bold text-indigo-600 tabular-nums">X: {Math.round(metrics.crop.physical.x)}</div>
-                <div className="font-bold text-indigo-600 tabular-nums">Y: {Math.round(metrics.crop.physical.y)}</div>
-                <div className="font-bold text-indigo-600 tabular-nums">W: {Math.round(metrics.crop.physical.w)} px</div>
-                <div className="font-bold text-indigo-600 tabular-nums">H: {Math.round(metrics.crop.physical.h)} px</div>
+                <div className="font-bold text-indigo-600 tabular-nums">X: {Math.round(metrics.clip.physical.x)}</div>
+                <div className="font-bold text-indigo-600 tabular-nums">Y: {Math.round(metrics.clip.physical.y)}</div>
+                <div className="font-bold text-indigo-600 tabular-nums">W: {Math.round(metrics.clip.physical.w)} px</div>
+                <div className="font-bold text-indigo-600 tabular-nums">H: {Math.round(metrics.clip.physical.h)} px</div>
               </div>
             </div>
           </CollapsibleSection>

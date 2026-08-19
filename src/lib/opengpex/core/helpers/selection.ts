@@ -65,7 +65,7 @@ export function getClipBox(frame: Frame): LocalPolygon | null {
   return entry;
 }
 
-// ─── Re-Canvas Default CropBox ──────────────────────────────────────────────────
+// ─── Re-Canvas Default ClipBox ──────────────────────────────────────────────────
 
 /**
  * Re-Canvas default scale factor relative to canvas dimensions.
@@ -74,32 +74,32 @@ export function getClipBox(frame: Frame): LocalPolygon | null {
 const RE_CANVAS_DEFAULT_SCALE = 1.1;
 
 /**
- * Alignment anchor for the default Re-Canvas crop box.
+ * Alignment anchor for the default Re-Canvas clip box.
  *
- * Determines where the original canvas sits within the enlarged crop box:
+ * Determines where the original canvas sits within the enlarged clip box:
  *   - `tl` — top-left: expansion goes right and down
  *   - `tr` — top-right: expansion goes left and down
  *   - `bl` — bottom-left: expansion goes right and up (DEFAULT)
  *   - `br` — bottom-right: expansion goes left and up
  *   - `ct` — center: expansion is equal on all sides
  */
-export type CropBoxAnchor = 'tl' | 'tr' | 'bl' | 'br' | 'ct';
+export type ClipBoxAnchor = 'tl' | 'tr' | 'bl' | 'br' | 'ct';
 
 /**
- * getDefaultCanvasCropBox — computes the default Re-Canvas crop box for a
+ * getDefaultCanvasClipBox — computes the default Re-Canvas clip box for a
  * given canvas dimension.
  *
- * The crop box is sized to `RE_CANVAS_DEFAULT_SCALE` (currently 1.1×) of the
+ * The clip box is sized to `RE_CANVAS_DEFAULT_SCALE` (currently 1.1×) of the
  * canvas dimensions, giving the user immediate room to expand the canvas
  * outward without first resizing the selection.
  *
  * @param dim - Canvas dimensions `{ w, h }`
  * @param anchor - Alignment anchor (default: `'bl'` — bottom-left)
- * @returns A `LocalShape` representing the default Re-Canvas crop box.
+ * @returns A `LocalShape` representing the default Re-Canvas clip box.
  */
-export function getDefaultCanvasCropBox(dim: Dimensions, anchor: CropBoxAnchor = 'bl'): LocalShape {
+export function getDefaultCanvasClipBox(dim: Dimensions, anchor: ClipBoxAnchor = 'bl'): LocalShape {
   const scale = RE_CANVAS_DEFAULT_SCALE;
-  // Pixel editor invariant: crop box must have integer dimensions and position.
+  // Pixel editor invariant: clip box must have integer dimensions and position.
   // scale (1.1) applied to arbitrary canvas sizes can produce non-integers.
   const newW = Math.round(dim.w * scale);
   const newH = Math.round(dim.h * scale);
@@ -108,19 +108,19 @@ export function getDefaultCanvasCropBox(dim: Dimensions, anchor: CropBoxAnchor =
   let y: number;
 
   switch (anchor) {
-    case 'tl': // original canvas top-left = crop box top-left
+    case 'tl': // original canvas top-left = clip box top-left
       x = 0;
       y = 0;
       break;
-    case 'tr': // original canvas top-right = crop box top-right
+    case 'tr': // original canvas top-right = clip box top-right
       x = dim.w - newW;
       y = 0;
       break;
-    case 'bl': // original canvas bottom-left = crop box bottom-left
+    case 'bl': // original canvas bottom-left = clip box bottom-left
       x = 0;
       y = dim.h - newH;
       break;
-    case 'br': // original canvas bottom-right = crop box bottom-right
+    case 'br': // original canvas bottom-right = clip box bottom-right
       x = dim.w - newW;
       y = dim.h - newH;
       break;

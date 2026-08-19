@@ -112,15 +112,15 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
   // Note: source assets (noCache) never trigger onRegistered — they are stored
   // in IDB for lossless re-export only, never displayed or rendered.
   assets.setCallbacks({
-    onRegistered: (hash, blob) => {
-      image.ensureAsset(hash, blob).catch(() => { /* non-fatal */ });
-      const url = assets.getURL(hash);
+    onRegistered: (assetId, blob) => {
+      image.ensureAsset(assetId, blob).catch(() => { /* non-fatal */ });
+      const url = assets.getURL(assetId);
       if (url) {
         sourceBitmapCache.warmFromBlob(url, blob).catch(() => { /* non-fatal */ });
       }
     },
-    onReleased: (hash) => {
-      image.evict(hash).catch(() => { /* non-fatal */ });
+    onReleased: (assetId) => {
+      image.evict(assetId).catch(() => { /* non-fatal */ });
     },
   });
 
@@ -249,14 +249,14 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
     rasterize: {
       async layer(layer: Layer, opts?: { dpr?: number }) {
         const result = await rasterize.layer(layer, opts);
-        const { id, url } = await result.toAsset();
-        return { id, url };
+        const { assetId, url } = await result.toAsset();
+        return { assetId, url };
       },
       async mask(polygon: LocalPolygon, bounds: { w: number; h: number }, feather = 0) {
         const result = await rasterize.mask(polygon, bounds, feather);
         if (!result) return null;
-        const { id, url } = await result.toAsset();
-        return { id, url };
+        const { assetId, url } = await result.toAsset();
+        return { assetId, url };
       },
     },
 

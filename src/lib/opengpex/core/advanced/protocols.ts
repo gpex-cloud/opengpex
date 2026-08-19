@@ -87,7 +87,7 @@ export const ADV_LAYER_BITMAP_MASK_CLEAR = 'adv.layer.bitmapMask.clear_all';
 // here. Producers (lasso / wand handlers, AI matting pipelines) write the
 // frame's `irregularCropBox` directly via `actions.setIrregularCropBox`,
 // matching the rect/ellipse pattern of writing `imageCropBox` /
-// `canvasCropBox` directly. The only adv command in this group is
+// `canvasClipBox` directly. The only adv command in this group is
 // `toLayerMask`, which is an irreducible 3-step transaction (project +
 // bake + addBitmapMask + clear) that needs the executeCommand atom.
 export const ADV_LAYER_CLIP_TO_MASK = 'adv.layer.clip.toMask';

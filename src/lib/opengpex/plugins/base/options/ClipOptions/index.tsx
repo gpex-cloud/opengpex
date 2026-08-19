@@ -25,7 +25,7 @@ import * as P from "./protocols";
 import { Maximize } from "lucide-react";
 
 /**
- * ClipOptions Plugin: Provides cropping, canvas adjustments, and WebP export features.
+ * ClipOptions Plugin: Provides clipping, canvas adjustments, and WebP export features.
  */
 export const plugin: EditorPlugin = {
   manifest: {
@@ -33,7 +33,7 @@ export const plugin: EditorPlugin = {
     displayName: "Clip Options",
     version: "1.0.0",
     description:
-      "Provides precise image cropping, canvas resizing, and standard export features.",
+      "Provides precise image clipping, canvas resizing, and standard export features.",
     category: "options",
     author: P.PLUGIN_AUTHOR,
     requirements: {

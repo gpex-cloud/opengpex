@@ -12,7 +12,6 @@
 'use client';
 
 import { useMemo, useState, useCallback } from 'react';
-import { useEditorServices } from '@opengpex/editor/core/context';
 import { useStorageConfig } from './useStorageConfig';
 import { useAssetPool } from './useAssetPool';
 import { useFrameMetrics } from './useFrameMetrics';
@@ -25,7 +24,6 @@ import * as P from '../protocols';
  * This is the main entry point replacing the original monolithic hook.
  */
 export const useStorageMetrics = () => {
-  const { assets } = useEditorServices();
   const { isEnabled } = useStorageConfig();
 
   // Manual refresh mechanism
@@ -74,7 +72,7 @@ export const useStorageMetrics = () => {
       history,
       detached
     };
-  }, [isEnabled, assetPoolResult, frames, history, shards, stateBytes, assets]);
+  }, [isEnabled, assetPoolResult, frames, history, shards, stateBytes]);
 
   return { summary, refresh, isRefreshing };
 };

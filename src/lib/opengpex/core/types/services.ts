@@ -151,7 +151,7 @@ export interface LayerItemForWorker {
  * Contains just enough info for callers to use the asset (set on layer, build visibleShape, etc.).
  */
 export interface AssetRef {
-  id: string;
+  assetId: string;
   url: string;
   dimensions: { w: number; h: number };
 }
@@ -177,10 +177,10 @@ export interface AssetService {
   /** Stores a raw source blob, returns its content hash. Returns undefined if rawBlob is null/undefined. */
   storeRaw: (rawBlob: Blob | undefined | null) => Promise<string | undefined>;
   /** Injects asset: directly stores when hash and metadata are known, avoiding duplicate Worker calculations */
-  inject: (hash: string, blob: Blob, tileMeta: TileMetadata) => Promise<string>;
+  inject: (assetId: string, blob: Blob, tileMeta: TileMetadata) => Promise<string>;
 
-  get: (id: string) => AssetEntryInfo | undefined;
-  getURL: (id: string) => string | undefined;
+  get: (assetId: string) => AssetEntryInfo | undefined;
+  getURL: (assetId: string) => string | undefined;
   resolve: (assetId?: string, fallbackSrc?: string) => string;
   withSession: <T>(task: () => Promise<T>) => Promise<T>;
   sweep: (activeIds: Set<string>, force?: boolean) => void;
@@ -188,7 +188,7 @@ export interface AssetService {
   clear: () => void;
   getPool: () => Record<string, AssetEntryInfo>;
   /** Phase 7.1: Wire lifecycle callbacks (engine layer subscribes to asset events) */
-  setCallbacks: (callbacks: { onRegistered?: (hash: string, blob: Blob) => void; onReleased?: (hash: string) => void }) => void;
+  setCallbacks: (callbacks: { onRegistered?: (assetId: string, blob: Blob) => void; onReleased?: (assetId: string) => void }) => void;
 }
 
 /**
@@ -368,9 +368,9 @@ export interface PixelService {
   rasterize: {
     /** Rasterizes any layer to bitmap Asset (text -> fillText, color -> fillRect, image -> flatten masks/adjustments).
      *  Accepts optional opts.dpr to control output resolution (Phase 4 DPR unification). */
-    layer: (layer: Layer, opts?: { dpr?: number }) => Promise<{ id: string; url: string }>;
+    layer: (layer: Layer, opts?: { dpr?: number }) => Promise<{ assetId: string; url: string }>;
     /** Rasterizes a polygon selection into a grayscale mask PNG asset (white=visible, black=hidden) */
-    mask: (polygon: LocalPolygon, bounds: { w: number; h: number }, feather?: number) => Promise<{ id: string; url: string } | null>;
+    mask: (polygon: LocalPolygon, bounds: { w: number; h: number }, feather?: number) => Promise<{ assetId: string; url: string } | null>;
   };
 
 

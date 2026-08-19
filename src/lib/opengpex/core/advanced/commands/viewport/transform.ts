@@ -43,7 +43,7 @@ export const ViewportTransformCommands = {
       actions.updateFrame(activeFrame.id, {
         ...nextFramePatch,
         clipBoxes: nextFramePatch.clipBoxes,
-        canvasCropBox: nextFramePatch.canvasCropBox,
+        canvasClipBox: nextFramePatch.canvasClipBox,
         imageAspect: activeFrame.imageAspect ? 1 / activeFrame.imageAspect : undefined,
         canvasAspect: activeFrame.canvasAspect ? 1 / activeFrame.canvasAspect : undefined
       });
@@ -86,7 +86,7 @@ export const ViewportTransformCommands = {
       actions.updateFrame(activeFrame.id, {
         ...nextFramePatch,
         clipBoxes: nextFramePatch.clipBoxes,
-        canvasCropBox: nextFramePatch.canvasCropBox,
+        canvasClipBox: nextFramePatch.canvasClipBox,
       });
     }
   } as EditorCommand<{ direction: 'horizontal' | 'vertical' }, void>,
@@ -149,7 +149,7 @@ export const ViewportTransformCommands = {
         rotation: 0,
         layers: nextFrame.layers,
         clipBoxes: nextFrame.clipBoxes,
-        canvasCropBox: nextFrame.canvasCropBox,
+        canvasClipBox: nextFrame.canvasClipBox,
         camera: nextFrame.camera
       });
     },

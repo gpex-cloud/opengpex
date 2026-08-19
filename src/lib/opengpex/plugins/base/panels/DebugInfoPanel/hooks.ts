@@ -65,7 +65,7 @@ export interface DebugMetrics {
     world: { x: number; y: number };
     physical: { x: number; y: number };
   };
-  crop: {
+  clip: {
     physical: { x: number; y: number; w: number; h: number };
   };
   camera: { x: number; y: number };
@@ -347,8 +347,8 @@ export const useDebugInfo = () => {
 
     // Clip core metrics
     const isReCanvas = state.getStateSignal(ClipOptionsAPI.signals.reCanvas);
-    const cropShape = isReCanvas ? activeFrame.canvasCropBox : getRegularClipShape(activeFrame);
-    const cropBox = cropShape?.rect || { x: 0, y: 0, w: 0, h: 0 };
+    const clipShape = isReCanvas ? activeFrame.canvasClipBox : getRegularClipShape(activeFrame);
+    const clipBox = clipShape?.rect || { x: 0, y: 0, w: 0, h: 0 };
 
     return {
       activeLayer: activeLayerMetrics,
@@ -356,8 +356,8 @@ export const useDebugInfo = () => {
         world: mouseW,
         physical: mouseP,
       },
-      crop: {
-        physical: cropBox,
+      clip: {
+        physical: clipBox,
       },
       camera: cam,
       canvas: {

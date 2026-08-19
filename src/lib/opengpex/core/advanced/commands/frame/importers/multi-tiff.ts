@@ -19,7 +19,7 @@
 'use client';
 
 import { asLocalShape, Layer, EditorContextValue } from '@opengpex/editor/core/types';
-import { getDefaultCanvasCropBox } from '@opengpex/editor/core/helpers/selection';
+import { getDefaultCanvasClipBox } from '@opengpex/editor/core/helpers/selection';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
@@ -62,7 +62,7 @@ export async function importMultiPageTiff(
 
   const pageAssets = await Promise.all(
     subImages.map(async (p) => {
-      const { id: assetId, url: assetUrl } = await assets.register(p.displayBlob, { w: p.width, h: p.height });
+      const { assetId, url: assetUrl } = await assets.register(p.displayBlob, { w: p.width, h: p.height });
       return { assetId, assetUrl, width: p.width, height: p.height, index: p.index };
     }),
   );
@@ -104,7 +104,7 @@ export async function importMultiPageTiff(
     layers: { byId: Object.fromEntries(expandedPageLayers.map(l => [l.id, l])), order: expandedPageLayers.map(l => l.id) },
     activeLayerId: pageLayers[0].id,
     camera: tiffCamera,
-    canvasCropBox: getDefaultCanvasCropBox(dimension),
+    canvasClipBox: getDefaultCanvasClipBox(dimension),
     assetId: pageAssets[0].assetId,
     metadata,
   });

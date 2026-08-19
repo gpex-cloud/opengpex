@@ -265,7 +265,7 @@ export function transformFrame(
     nextCamera.y += (oldH - nextH) / 2 * frame.camera.k;
   }
 
-  const nextCanvasCropBox = Matrix3x3.transformRect(frame.canvasCropBox.rect, frame.canvas, operation);
+  const nextCanvasCropBox = Matrix3x3.transformRect(frame.canvasClipBox.rect, frame.canvas, operation);
 
   // Transform clipBoxes — all slots are LocalPolygon (unified selection type).
   // Apply the same D4 symmetry operation so the selection stays aligned with
@@ -283,7 +283,7 @@ export function transformFrame(
     layers: { byId: nextById, order: frame.layers.order },
     camera: nextCamera,
     clipBoxes: nextClipBoxes,
-    canvasCropBox: { ...frame.canvasCropBox, rect: asLocalRect(nextCanvasCropBox) },
+    canvasClipBox: { ...frame.canvasClipBox, rect: asLocalRect(nextCanvasCropBox) },
   };
 }
 

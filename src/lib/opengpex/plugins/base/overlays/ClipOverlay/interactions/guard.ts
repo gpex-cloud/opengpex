@@ -29,7 +29,7 @@ import {
  * makeClipToolGuard — Strategy-driven handler dispatch helper.
  *
  * Returns `true` exactly when the editor is in clip mode AND the active
- * cropTool's `handlerKind` matches `targetKind`. Each handler uses one such
+ * clipTool's `handlerKind` matches `targetKind`. Each handler uses one such
  * guard at the head of its `test()` so that:
  *   1. all "is this my pointer event?" branching consults the same Strategy
  *      table (Single Source of Truth in `protocols.ts`);

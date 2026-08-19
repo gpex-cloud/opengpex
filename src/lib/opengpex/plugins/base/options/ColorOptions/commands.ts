@@ -50,7 +50,7 @@ export const COLOR_OPTIONS_COMMANDS = {
       if (isClipMode) {
         const box = getClipBox(activeFrame);
         if (!box) {
-          actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
+          actions.setInteraction({ hud: { message: 'No active selection — draw a clip box first.', type: 'error' } });
           return;
         }
 
@@ -58,7 +58,7 @@ export const COLOR_OPTIONS_COMMANDS = {
           // ═══ All selections are now LocalPolygon ═══
           const bounds = box.rect;
           if (bounds.w <= 0 || bounds.h <= 0) {
-            actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
+            actions.setInteraction({ hud: { message: 'No active selection — draw a clip box first.', type: 'error' } });
             return;
           }
           w = bounds.w;

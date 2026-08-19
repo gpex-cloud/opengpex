@@ -308,7 +308,7 @@ export const LayerClipCommands = {
         layers.updateLayer(activeFrame.id, tx => {
           tx.edit(targetLayer.id).applyBitmapMask(
             maskAsset.url,
-            maskAsset.id,
+            maskAsset.assetId,
             asLocalRect({ x: 0, y: 0, w: targetLayer.bounding.w, h: targetLayer.bounding.h })
           );
         });
@@ -430,7 +430,7 @@ export const LayerClipCommands = {
 
         // Export drilled mask as PNG and register in asset service
         const blob = await maskCanvas.convertToBlob({ type: 'image/png' });
-        const { id: assetId, url } = await assets.register(blob, { w, h });
+        const { assetId, url } = await assets.register(blob, { w, h });
         
         // Update existing drilled mask or create new one
         if (drilledMask) {

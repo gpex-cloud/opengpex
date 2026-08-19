@@ -59,7 +59,7 @@ export function createLayerService(
 
           const editor: LayerEditor = {
             setAsset: (asset) => {
-              patches[layerId] = { ...patches[layerId], src: asset.url, assetId: asset.id };
+              patches[layerId] = { ...patches[layerId], src: asset.url, assetId: asset.assetId };
               return editor;
             },
             setShape: (shape) => {
@@ -303,7 +303,7 @@ export function createLayerService(
       const { result: trimmedResult, offset } = trimResult;
       const trimW = trimmedResult.bounds.w;
       const trimH = trimmedResult.bounds.h;
-      const { id: assetId, url: assetUrl } = await trimmedResult.toAsset();
+      const { assetId, url: assetUrl } = await trimmedResult.toAsset();
       const cx = worldSelection.rect.x + (offset.x + trimW / 2);
       const cy = worldSelection.rect.y + (offset.y + trimH / 2);
 
@@ -343,7 +343,7 @@ export function createLayerService(
           const targetW = Math.max(1, Math.round(layer.bounding.w * scaleX));
           const targetH = Math.max(1, Math.round(layer.bounding.h * scaleY));
 
-          let id = layer.assetId;
+          let assetId = layer.assetId;
           let url = layer.src;
 
           if (hasContent) {
@@ -351,14 +351,14 @@ export function createLayerService(
             const result = await pixels.image.resample(layer.src, {
               targetSize: { w: targetW, h: targetH },
             });
-            ({ id, url } = await result.toAsset());
+            ({ assetId, url } = await result.toAsset());
           }
 
           const scaleRect = (r: { x: number; y: number; w: number; h: number }) =>
             asLocalRect({ x: r.x * scaleX, y: r.y * scaleY, w: r.w * scaleX, h: r.h * scaleY });
 
           const patch: Partial<Layer> = {
-            src: url, assetId: id,
+            src: url, assetId,
             cx: layer.cx * scaleX,
             cy: layer.cy * scaleY,
             bounding: { w: targetW, h: targetH },
@@ -371,23 +371,23 @@ export function createLayerService(
             }),
           };
 
-          return { newUrl: url, newAssetId: id || '', patch };
+          return { newUrl: url, newAssetId: assetId || '', patch };
         } else {
           // ── Non-uniform scale: bake (flatten) then resample, reset orientation ──
           const aabb = geometry.space.getLayerBoundingBox(layer);
           const targetW = Math.max(1, Math.round(aabb.w * scaleX));
           const targetH = Math.max(1, Math.round(aabb.h * scaleY));
 
-          let id = layer.assetId;
+          let assetId = layer.assetId;
           let url = layer.src;
 
           if (hasContent) {
             const { result } = await pixels.render.compositeResizedLayers([layer], frame, { w: targetW, h: targetH });
-            ({ id, url } = await result.toAsset());
+            ({ assetId, url } = await result.toAsset());
           }
 
           const patch: Partial<Layer> = {
-            src: url, assetId: id,
+            src: url, assetId,
             cx: (aabb.x + aabb.w / 2) * scaleX,
             cy: (aabb.y + aabb.h / 2) * scaleY,
             bounding: { w: targetW, h: targetH },
@@ -396,7 +396,7 @@ export function createLayerService(
             vectorMasks: [],
           };
 
-          return { newUrl: url, newAssetId: id || '', patch };
+          return { newUrl: url, newAssetId: assetId || '', patch };
         }
       } catch (err) {
         console.error('[LayerService] Resample physical failed for layer:', layer.id, err);
@@ -446,7 +446,7 @@ export function createLayerService(
       const bmp = await createImageBitmap(blob);
       const dim = { w: bmp.width, h: bmp.height };
       bmp.close();
-      const { id: assetId, url } = await assets.register(blob, dim);
+      const { assetId, url } = await assets.register(blob, dim);
 
       // layer.cx/cy uses the world coordinate system (origin at canvas center), directly using the screenToWorld result
       let cx, cy;

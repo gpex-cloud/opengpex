@@ -53,8 +53,8 @@ export interface AssetEntry {
  * zero knowledge of Worker, ImageDispatcher, or any engine internals.
  */
 export interface AssetServiceCallbacks {
-  onRegistered?: (hash: string, blob: Blob) => void;
-  onReleased?: (hash: string) => void;
+  onRegistered?: (assetId: string, blob: Blob) => void;
+  onReleased?: (assetId: string) => void;
 }
 
 /**
@@ -143,7 +143,7 @@ export class AssetService {
       const dim = entry.tileMeta
         ? { w: entry.tileMeta.width, h: entry.tileMeta.height }
         : { w: 0, h: 0 };
-      return { id: hash, url: entry.url, dimensions: dim };
+      return { assetId: hash, url: entry.url, dimensions: dim };
     }
 
     const cached = await assetStore.get(hash);
@@ -157,7 +157,7 @@ export class AssetService {
       const dim = loadedEntry.tileMeta
         ? { w: loadedEntry.tileMeta.width, h: loadedEntry.tileMeta.height }
         : { w: 0, h: 0 };
-      return { id: hash, url: loadedEntry.url, dimensions: dim };
+      return { assetId: hash, url: loadedEntry.url, dimensions: dim };
     }
 
     const tileMeta = buildTileMeta(dimensions.w, dimensions.h);
@@ -181,7 +181,7 @@ export class AssetService {
     // Notify engine layer (ImageDispatcher subscribes to warm Worker cache)
     this.callbacks.onRegistered?.(hash, blob);
 
-    return { id: hash, url, dimensions: { w: tileMeta.width, h: tileMeta.height } };
+    return { assetId: hash, url, dimensions: { w: tileMeta.width, h: tileMeta.height } };
   }
 
   /**
@@ -204,14 +204,14 @@ export class AssetService {
   /**
    * Injects asset: bypasses hash and metadata calculation, registers directly (result provided by PixelResult)
    */
-  async inject(hash: string, blob: Blob, tileMeta: TileMetadata): Promise<string> {
-    this.pendingIds.add(hash);
-    if (this.pool.has(hash)) return hash;
+  async inject(assetId: string, blob: Blob, tileMeta: TileMetadata): Promise<string> {
+    this.pendingIds.add(assetId);
+    if (this.pool.has(assetId)) return assetId;
 
-    await assetStore.set(hash, blob, tileMeta);
+    await assetStore.set(assetId, blob, tileMeta);
     const url = URL.createObjectURL(blob);
-    this.pool.set(hash, {
-      id: hash,
+    this.pool.set(assetId, {
+      id: assetId,
       blob,
       url,
       tileMeta,
@@ -219,11 +219,11 @@ export class AssetService {
       owners: new Set(),
       lastUsedAt: Date.now()
     });
-    resourceTracker.track(`asset:${hash}`, 'image_decoded', blob.size, `Injected ${hash.slice(0, 8)}`);
+    resourceTracker.track(`asset:${assetId}`, 'image_decoded', blob.size, `Injected ${assetId.slice(0, 8)}`);
 
     // Notify engine layer
-    this.callbacks.onRegistered?.(hash, blob);
-    return hash;
+    this.callbacks.onRegistered?.(assetId, blob);
+    return assetId;
   }
 
   /**
@@ -279,14 +279,14 @@ export class AssetService {
   /**
    * Warms up a single asset (L1-L3 pipeline)
    */
-  async prewarm(id: string) {
-    if (this.pool.has(id)) return;
-    const hasPhysical = await assetStore.has(id);
+  async prewarm(assetId: string) {
+    if (this.pool.has(assetId)) return;
+    const hasPhysical = await assetStore.has(assetId);
     if (!hasPhysical) return;
 
-    const item = await assetStore.get(id);
+    const item = await assetStore.get(assetId);
     if (item && item.version === ASSET_VERSION) {
-      if (this.pool.has(id)) return; // Double check
+      if (this.pool.has(assetId)) return; // Double check
       const url = URL.createObjectURL(item.blob);
       this.pool.set(item.id, {
         id: item.id,
@@ -347,8 +347,8 @@ export class AssetService {
     return fallbackSrc || '';
   }
 
-  acquire(id: string, ownerId: string) {
-    const asset = this.pool.get(id);
+  acquire(assetId: string, ownerId: string) {
+    const asset = this.pool.get(assetId);
     if (asset) {
       asset.owners.add(ownerId);
       asset.state = AssetState.READY;
@@ -356,8 +356,8 @@ export class AssetService {
     }
   }
 
-  release(id: string, ownerId: string) {
-    const asset = this.pool.get(id);
+  release(assetId: string, ownerId: string) {
+    const asset = this.pool.get(assetId);
     if (asset) {
       asset.owners.delete(ownerId);
       asset.lastUsedAt = Date.now();
@@ -365,12 +365,12 @@ export class AssetService {
     }
   }
 
-  get(id: string): AssetEntry | undefined {
-    return this.pool.get(id);
+  get(assetId: string): AssetEntry | undefined {
+    return this.pool.get(assetId);
   }
 
-  getURL(id: string): string | undefined {
-    return this.pool.get(id)?.url;
+  getURL(assetId: string): string | undefined {
+    return this.pool.get(assetId)?.url;
   }
 
   private revoke(id: string) {

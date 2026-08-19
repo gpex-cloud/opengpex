@@ -131,7 +131,7 @@ const { runCommand, abortCommand } = createToolCommand<
     const blob = await patchCanvas.convertToBlob({ type: 'image/png' });
 
     // Register as Asset
-    const { id: assetId, url } = await ctx.assets.register(blob, { w: patchW, h: patchH });
+    const { assetId, url } = await ctx.assets.register(blob, { w: patchW, h: patchH });
 
     // Calculate world coordinates (cx, cy) for patch center
     const canvasW = targetFrame.canvas.w;

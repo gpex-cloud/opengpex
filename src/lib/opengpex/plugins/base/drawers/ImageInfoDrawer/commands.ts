@@ -51,7 +51,7 @@ export const IMAGE_INFO_COMMANDS = {
 
          // ═══ 1. Validation ═══════════════════════════════════════════════════
          if (isClipMode && !box) {
-            ctx.actions.setInteraction({ hud: { message: 'No active selection — draw a crop box first.', type: 'error' } });
+            ctx.actions.setInteraction({ hud: { message: 'No active selection — draw a clip box first.', type: 'error' } });
             return;
          }
 
@@ -65,9 +65,9 @@ export const IMAGE_INFO_COMMANDS = {
          }
 
          // ═══ 2. Compute export dimensions ═══════════════════════════════════
-         const cropShape: LocalShape | undefined = isClipMode && box ? clipBoxToExportShape(box) : undefined;
-         const baseW = cropShape ? cropShape.rect.w : activeFrame.canvas.w;
-         const baseH = cropShape ? cropShape.rect.h : activeFrame.canvas.h;
+         const clipShape: LocalShape | undefined = isClipMode && box ? clipBoxToExportShape(box) : undefined;
+         const baseW = clipShape ? clipShape.rect.w : activeFrame.canvas.w;
+         const baseH = clipShape ? clipShape.rect.h : activeFrame.canvas.h;
          const { w: exportW, h: exportH } = calcFinalDims(baseW, baseH, config);
 
          const dpi = config.dpi || activeFrame.dpi || 72;
@@ -82,8 +82,8 @@ export const IMAGE_INFO_COMMANDS = {
 
          // ═══ 3. Always composite-8bit ═══════════════════════════════════════
          try {
-            const localRoi = cropShape
-               ? cropShape
+            const localRoi = clipShape
+               ? clipShape
                : asLocalShape({ x: 0, y: 0, w: activeFrame.canvas.w, h: activeFrame.canvas.h });
 
             const result = await pixels.render.compositeFrame(activeFrame, localRoi, { precision: 8 });

@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.54
+
+- Code Quality: unified asset ID naming across all public APIs (`assetId` everywhere, no more `id`/`hash` inconsistency)
+- Code Quality: renamed all internal `crop*` identifiers to `clip*` for consistent naming with the Clip tool system
+
+---
+
 ## v1.0.0-beta.53
 
 - Brush & Mosaic: fixed race condition on rapid strokes and eliminated flash artifact during bake
