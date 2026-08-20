@@ -4,6 +4,12 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.55.1
+
+- AI Tools: fixed upscaler commands not responding due to inconsistent naming
+
+---
+
 ## v1.0.0-beta.55
 
 - AI Tools: unified model cache with local export/import — all AI models share a single managed storage layer; cached models can be saved as zip and re-imported on another device without re-downloading

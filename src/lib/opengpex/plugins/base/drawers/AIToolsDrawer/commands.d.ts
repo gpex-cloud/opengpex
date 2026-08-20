@@ -19,8 +19,8 @@ export interface AIToolsDrawerCommandsMap {
   segEncodeCmd: CommandInstance<SegEncodePayload, Promise<SegEncodeResult>>;
   segDecodeCmd: CommandInstance<SegDecodePayload, Promise<SegDecodeResult>>;
   segAllCmd: CommandInstance<void, Promise<void>>;
-  upscaleCmd: CommandInstance<void, Promise<void>>;
-  upscaleAbortCmd: CommandInstance;
+  upscalerCmd: CommandInstance<void, Promise<void>>;
+  upscalerAbortCmd: CommandInstance;
   inpaintEraserCmd: CommandInstance<void, Promise<void>>;
   inpaintEraserAbortCmd: CommandInstance;
 }

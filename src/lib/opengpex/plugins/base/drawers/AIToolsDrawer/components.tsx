@@ -158,9 +158,3 @@ export function AIToolsDrawerContent() {
     </div>
   );
 }
-
-/**
- * @deprecated Use AIToolsDrawerContent instead.
- * Kept for backward compatibility — will be removed in a future release.
- */
-export const BgRemoverDrawerContent = AIToolsDrawerContent;

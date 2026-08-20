@@ -175,7 +175,7 @@ const { runCommand, abortCommand } = createToolCommand<
 
 // ─── Exported Commands ───────────────────────────────────────────────────────
 
-export const UPSCALE_COMMANDS = {
-  upscale: runCommand,
-  abortUpscale: abortCommand,
+export const UPSCALER_COMMANDS = {
+  upscaler: runCommand,
+  abortUpscaler: abortCommand,
 };

@@ -23,7 +23,7 @@ import { AIToolsDrawerContent } from "./components";
 import { AIToolsSettings } from "./settings";
 import { BG_REMOVAL_COMMANDS } from "./bgremover/commands";
 import { SEG_COMMANDS } from "./segmentation/commands";
-import { UPSCALE_COMMANDS } from "./upscaler/commands";
+import { UPSCALER_COMMANDS } from "./upscaler/commands";
 import { INPAINT_ERASER_COMMANDS } from "./inpaint/eraser/commands";
 import { AIToolsIcon } from "./icon";
 
@@ -102,7 +102,7 @@ export const plugin: EditorPlugin = {
   },
 
   // --- 6. Commands ---
-  commands: [...Object.values(BG_REMOVAL_COMMANDS), ...Object.values(SEG_COMMANDS), ...Object.values(UPSCALE_COMMANDS), ...Object.values(INPAINT_ERASER_COMMANDS)],
+  commands: [...Object.values(BG_REMOVAL_COMMANDS), ...Object.values(SEG_COMMANDS), ...Object.values(UPSCALER_COMMANDS), ...Object.values(INPAINT_ERASER_COMMANDS)],
 
   // --- 7. Signals ---
   signals: [],

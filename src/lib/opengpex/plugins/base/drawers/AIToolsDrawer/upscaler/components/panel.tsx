@@ -45,7 +45,7 @@ import type { ModelEntry } from '../../_shared/types';
 export function UpscalerPanel() {
   const { activeLayer } = useEditorState();
   const { actions, pixels } = useEditorServices();
-  const { upscaleCmd, upscaleAbortCmd } = usePluginCommands<AIToolsDrawerCommandsMap>();
+  const { upscalerCmd, upscalerAbortCmd } = usePluginCommands<AIToolsDrawerCommandsMap>();
 
   const { config, setConfig, mgr, task, lastResult, error, isBusy } = useAIToolPanel<UpscaleConfig, UpscaleResult>({
     configKey: MODEL_TYPE_KEY,
@@ -189,7 +189,7 @@ export function UpscalerPanel() {
         <InferencePanel
           message={task.message}
           progress={task.progress > 0 ? task.progress : null}
-          onCancel={() => upscaleAbortCmd?.execute()}
+          onCancel={() => upscalerAbortCmd?.execute()}
         />
       )}
 
@@ -210,7 +210,7 @@ export function UpscalerPanel() {
           size="sm"
           shape="pill"
           className="w-full"
-          onClick={() => upscaleCmd?.execute()}
+          onClick={() => upscalerCmd?.execute()}
           disabled={!mgr.isCached || isBusy || noLayer}
         >
           Upscale {targetScale}× Current Layer
