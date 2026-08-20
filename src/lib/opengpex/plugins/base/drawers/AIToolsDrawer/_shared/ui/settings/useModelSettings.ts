@@ -38,10 +38,10 @@
  * Then render `<ModelSettingsShell>` with the returned `settings` object.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ModelEntry, ModelCatalog } from '../../types';
 import type { ModelFile } from '../../download/model-download';
-import { isModelCached, deleteModelCache } from '../../download/model-cache';
+import { isModelCached, deleteModelCache, exportModelAsZip, importModelFromZip } from '../../download/model-cache';
 import { useDownloadTask } from '../../download/useDownloadTask';
 import { updateModelList } from '../../utils';
 import { useToolConfig } from '../../useToolConfig';
@@ -51,6 +51,8 @@ import { useToolConfig } from '../../useToolConfig';
 export interface UseModelSettingsOptions<TModel extends ModelEntry> {
   /** Config namespace key (e.g. 'bgremover', 'seg', 'upscale', 'inpaintEraser'). */
   configKey: string;
+  /** Human-readable tool category name for export filename (e.g. "BG Remover", "Upscaler"). Spaces → hyphens. */
+  toolDisplayName?: string;
   /** Default config for this tool (used when config key doesn't exist yet). */
   defaultConfig: ModelCatalog;
   /** Built-in models defined in code (used for sync). */
@@ -84,6 +86,10 @@ export interface UseModelSettingsReturn<TModel extends ModelEntry> {
   handleCancelDownload: () => void;
   /** Delete cached model files. */
   handleDeleteCache: (modelId: string) => Promise<void>;
+  /** Export a cached model as zip file download. */
+  handleExport: (modelId: string) => Promise<void>;
+  /** Import a model from a local zip file. */
+  handleImport: (modelId: string, file: File) => Promise<void>;
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
@@ -91,7 +97,7 @@ export interface UseModelSettingsReturn<TModel extends ModelEntry> {
 export function useModelSettings<TModel extends ModelEntry>(
   options: UseModelSettingsOptions<TModel>,
 ): UseModelSettingsReturn<TModel> {
-  const { configKey, defaultConfig, builtins, defaultNewModel, getFiles } = options;
+  const { configKey, toolDisplayName, defaultConfig, builtins, defaultNewModel, getFiles } = options;
 
   // ─── Config (namespaced access via useToolConfig) ──────────────────────
   const [config, setConfig] = useToolConfig<ModelCatalog>(configKey, defaultConfig);
@@ -180,6 +186,50 @@ export function useModelSettings<TModel extends ModelEntry>(
     setBusyModels(prev => ({ ...prev, [modelId]: false }));
   }, []);
 
+  // ─── Export / Import ───────────────────────────────────────────────────
+  const getFilesRef = useRef(getFiles);
+  useEffect(() => { getFilesRef.current = getFiles; });
+
+  const handleExport = useCallback(async (modelId: string) => {
+    const model = models.find(m => m.modelId === modelId);
+    if (!model) return;
+    try {
+      const files = getFilesRef.current(model);
+      const blob = await exportModelAsZip(modelId, model.name, files);
+      if (!blob) return;
+      // Trigger browser download — filename: {modelName}.{categorySlug}.gpex.zip
+      const safeName = model.name.replace(/[^a-zA-Z0-9._-]/g, '-');
+      const categorySlug = (toolDisplayName ?? configKey).replace(/\s+/g, '-');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${safeName}.${categorySlug}.gpex.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      // Silently fail — HUD is only available in ModelPanel context
+    }
+  }, [models, configKey, toolDisplayName]);
+
+  const handleImport = useCallback(async (modelId: string, file: File) => {
+    const model = models.find(m => m.modelId === modelId);
+    if (!model) return;
+    setBusyModels(prev => ({ ...prev, [modelId]: true }));
+    try {
+      const files = getFilesRef.current(model);
+      const result = await importModelFromZip(modelId, files, file);
+      if (result.success) {
+        setCacheStatus(prev => ({ ...prev, [modelId]: true }));
+      }
+    } catch {
+      // Silently fail
+    } finally {
+      setBusyModels(prev => ({ ...prev, [modelId]: false }));
+    }
+  }, [models]);
+
   return {
     models,
     updateModel,
@@ -192,5 +242,7 @@ export function useModelSettings<TModel extends ModelEntry>(
     handleDownload,
     handleCancelDownload,
     handleDeleteCache,
+    handleExport,
+    handleImport,
   };
 }

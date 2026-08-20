@@ -22,7 +22,6 @@ import { Key } from "lucide-react";
 import { AIGenerationDrawer } from "./components";
 import { AIBridgeSettings } from "./panels/settings";
 import { AI_BRIDGE_COMMANDS } from "./commands";
-import { onInit, onDestroy } from "./lifecycle";
 import { AIBridgeIcon } from "./icon";
 
 import * as P from "./protocols";
@@ -69,11 +68,7 @@ export const plugin: EditorPlugin = {
   // --- 5. Commands ---
   commands: Object.values(AI_BRIDGE_COMMANDS),
 
-  // --- 6. Lifecycle ---
-  onInit,
-  onDestroy,
-
-  // --- 7. Contributions ---
+  // --- 6. Contributions ---
   contributions: [
     {
       slot: "SETTINGS_CONFIG_PANEL",

@@ -122,6 +122,18 @@ export function usePluginInit(actions: EditorActions) {
             try {
                 actions.registerPlugin(sanitizedPlugin);
 
+                // Invoke plugin lifecycle onInit hook (if defined and plugin is enabled)
+                // Note: Full EditorContextValue is not available at registration time.
+                // We provide a partial ctx with actions. Plugins that need full ctx
+                // (e.g. scoped config) should guard with optional chaining.
+                if (isEnabled && rawPlugin.onInit) {
+                    try {
+                        rawPlugin.onInit({ actions } as never);
+                    } catch (err) {
+                        console.warn(`[PluginInit] onInit failed for plugin "${uid}":`, err);
+                    }
+                }
+
                 // Register commands and associate shortcuts only if enabled
                 if (isEnabled) {
                     sanitizedPlugin.commands?.forEach((cmd: BuiltCommand) => {

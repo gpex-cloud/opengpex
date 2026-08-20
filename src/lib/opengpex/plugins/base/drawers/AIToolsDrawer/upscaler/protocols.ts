@@ -27,10 +27,17 @@
  * Worker wire-level types live in `./worker.types.ts`.
  */
 
+// ─── Tool Identity ───────────────────────────────────────────────────────────
+
+/** Config sub-key used for persisted plugin config (e.g. `config.upscaler`). */
+export const MODEL_TYPE_KEY = 'upscaler' as const;
+/** Human-readable display name for this tool category. */
+export const MODEL_TYPE_NAME = 'Upscaler';
+
 // ─── Command IDs ─────────────────────────────────────────────────────────────
 
-export const CMD_UPSCALE = 'cmd.upscale';
-export const CMD_UPSCALE_ABORT = 'cmd.upscale_abort';
+export const CMD_UPSCALE = 'cmd.upscaler';
+export const CMD_UPSCALE_ABORT = 'cmd.upscaler_abort';
 
 import type { ModelEntry, ModelCatalog } from '../_shared/types';
 
@@ -47,17 +54,17 @@ export interface UpscaleModelEntry extends ModelEntry {
 export const BUILTIN_UPSCALE_MODELS: UpscaleModelEntry[] = [
   {
     id: '2x-AnimeSharpV4-fast',
-    name: '2× AnimeSharp V4 Fast',
+    name: '2x AnimeSharp V4 Fast',
     modelId: 'Kim2091/2x-AnimeSharpV4',
     onnxFile: '2x-AnimeSharpV4_Fast_RCAN_PU_fp16_opset17.onnx',
     size: '~30 MB',
     scale: 2,
-    description: 'Fast 2× anime upscale — PixelUnshuffle variant, smaller & faster',
+    description: 'Fast 2x anime upscale — PixelUnshuffle variant, smaller & faster',
     builtin: true,
   },
   {
     id: 'real-esrgan-x4',
-    name: '4× Real-ESRGAN General',
+    name: '4x Real-ESRGAN General',
     modelId: 'SceneWorks/real-esrgan-onnx',
     onnxFile: 'real_esrgan_x4.onnx',
     size: '~65 MB',

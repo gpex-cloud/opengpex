@@ -27,6 +27,13 @@
  * Worker wire-level types live in `./worker.types.ts`.
  */
 
+// ─── Tool Identity ───────────────────────────────────────────────────────────
+
+/** Config sub-key used for persisted plugin config (e.g. `config.bgremover`). */
+export const MODEL_TYPE_KEY = 'bgremover' as const;
+/** Human-readable display name for this tool category. */
+export const MODEL_TYPE_NAME = 'BG Remover';
+
 // ─── Command IDs ─────────────────────────────────────────────────────────────
 
 export const CMD_REMOVE_BG = 'cmd.remove_bg';
@@ -69,7 +76,7 @@ export const BUILTIN_MODELS: ModelEntry[] = [
   },
 ];
 
-export const DEFAULT_BG_REMOVAL_CONFIG: BgRemoverConfig = {
+export const DEFAULT_BG_REMOVAL_CONFIG: ModelCatalog = {
   models: [...BUILTIN_MODELS],
   activeModelId: BUILTIN_MODELS[0].id,
 };

@@ -25,7 +25,7 @@
  * Each AI tool stores its config under a sub-key of the shared plugin config:
  *   pluginConfig["opengpex.drawers.ai_tools"] = {
  *     bgremover: { models, activeModelId },
- *     upscale: { models, activeModelId, tileSize, ... },
+ *     upscaler: { models, activeModelId, tileSize, ... },
  *     seg: { models, activeModelId },
  *     inpaintEraser: { models, activeModelId, ... },
  *   }
@@ -45,7 +45,7 @@ import { usePluginSelfConfig } from '@opengpex/editor/core/context';
 /**
  * Read and write a namespaced sub-key of the plugin config.
  *
- * @param key - The config sub-key (e.g. 'seg', 'upscale', 'bgremover', 'inpaintEraser')
+ * @param key - The config sub-key (e.g. 'seg', 'upscaler', 'bgremover', 'inpaintEraser')
  * @param defaultConfig - Default config if the key doesn't exist yet
  * @returns [toolConfig, setToolConfig] tuple (like useState)
  */
@@ -70,7 +70,7 @@ export function useToolConfig<T>(
  *
  * @param pluginConfig - ctx.state.pluginConfig
  * @param pluginUid - The plugin UID (e.g. "opengpex.drawers.ai_tools")
- * @param key - The config sub-key (e.g. 'seg', 'upscale')
+ * @param key - The config sub-key (e.g. 'seg', 'upscaler')
  * @param defaultConfig - Default config if the key doesn't exist yet
  */
 export function getToolConfig<T>(
@@ -103,7 +103,7 @@ const _PLUGIN_UID = 'opengpex.drawers.ai_tools';
  * This function extracts that common logic into a single reusable utility.
  *
  * @param ctx - Editor context (provides pluginConfig)
- * @param configKey - Config sub-key (e.g. 'bgremover', 'upscale', 'seg', 'inpaintEraser')
+ * @param configKey - Config sub-key (e.g. 'bgremover', 'upscaler', 'seg', 'inpaintEraser')
  * @param defaultConfig - Default config for this tool
  * @param builtins - Built-in model list (for fallback)
  * @returns The resolved active model entry
@@ -111,7 +111,7 @@ const _PLUGIN_UID = 'opengpex.drawers.ai_tools';
  * @example
  * ```ts
  * const model = getActiveModelEntry<UpscaleModelEntry>(
- *   ctx, 'upscale', DEFAULT_UPSCALE_CONFIG, BUILTIN_UPSCALE_MODELS
+ *   ctx, 'upscaler', DEFAULT_UPSCALE_CONFIG, BUILTIN_UPSCALE_MODELS
  * );
  * ```
  */

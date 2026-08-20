@@ -144,7 +144,7 @@ export default function ActionDropdown({
               `}
             >
               <div
-                className={cols > 1 ? 'grid gap-0.5' : 'flex flex-col gap-0.5'}
+                className={`${cols > 1 ? 'grid gap-0.5' : 'flex flex-col gap-0.5'}${maxVisibleItems ? ' custom-scrollbar' : ''}`}
                 style={{
                   ...(cols > 1 ? { gridTemplateColumns: `repeat(${cols}, 1fr)` } : {}),
                   ...(maxVisibleItems

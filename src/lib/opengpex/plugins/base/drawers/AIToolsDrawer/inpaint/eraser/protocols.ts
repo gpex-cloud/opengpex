@@ -27,6 +27,13 @@
  * Runtime state is managed by `./store.ts` (no signal-based status types here).
  */
 
+// ─── Tool Identity ───────────────────────────────────────────────────────────
+
+/** Config sub-key used for persisted plugin config (e.g. `config.inpaintEraser`). */
+export const MODEL_TYPE_KEY = 'inpaintEraser' as const;
+/** Human-readable display name for this tool category. */
+export const MODEL_TYPE_NAME = 'Smart Eraser';
+
 // ─── Command IDs ─────────────────────────────────────────────────────────────
 
 export const CMD_INPAINT_ERASER = 'cmd.inpaint_eraser';

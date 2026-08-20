@@ -56,8 +56,10 @@ import type { ModelFile } from './download/model-download';
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface UseAIToolPanelOptions<TConfig extends ModelCatalog> {
-  /** Config sub-key (e.g. 'bgremover', 'upscale', 'seg', 'inpaintEraser') */
+  /** Config sub-key (e.g. 'bgremover', 'upscaler', 'seg', 'inpaintEraser') */
   configKey: string;
+  /** Human-readable tool name for export filename (e.g. "Upscaler", "BG Remover"). Falls back to configKey. */
+  toolDisplayName?: string;
   /** Default config for this tool */
   defaultConfig: TConfig;
   /** Built-in model definitions */
@@ -102,7 +104,7 @@ const defaultGetFiles = (model: ModelEntry): ModelFile[] => [
 export function useAIToolPanel<TConfig extends ModelCatalog, TResult = unknown>(
   options: UseAIToolPanelOptions<TConfig>,
 ): UseAIToolPanelReturn<TConfig, TResult> {
-  const { configKey, defaultConfig, builtins, store, actions, getFiles = defaultGetFiles } = options;
+  const { configKey, toolDisplayName, defaultConfig, builtins, store, actions, getFiles = defaultGetFiles } = options;
 
   // ─── Config ────────────────────────────────────────────────────────────────
   const [config, setConfig] = useToolConfig<TConfig>(configKey, defaultConfig);
@@ -123,6 +125,7 @@ export function useAIToolPanel<TConfig extends ModelCatalog, TResult = unknown>(
   const mgr = useModelManager({
     modelId: activeModel?.modelId,
     modelName: activeModel?.name,
+    toolId: toolDisplayName ?? configKey,
     files,
     actions,
     store,

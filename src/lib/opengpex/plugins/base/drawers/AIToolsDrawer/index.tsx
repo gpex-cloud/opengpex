@@ -28,10 +28,10 @@ import { INPAINT_ERASER_COMMANDS } from "./inpaint/eraser/commands";
 import { AIToolsIcon } from "./icon";
 
 import * as P from "./protocols";
-import { DEFAULT_BG_REMOVAL_CONFIG } from './bgremover/protocols';
-import { DEFAULT_UPSCALE_CONFIG } from './upscaler/protocols';
-import { DEFAULT_SEG_CONFIG } from './segmentation/protocols';
-import { DEFAULT_INPAINT_ERASER_CONFIG } from './inpaint/eraser/protocols';
+import { MODEL_TYPE_KEY as BGREMOVER_KEY, DEFAULT_BG_REMOVAL_CONFIG } from './bgremover/protocols';
+import { MODEL_TYPE_KEY as UPSCALER_KEY, DEFAULT_UPSCALE_CONFIG } from './upscaler/protocols';
+import { MODEL_TYPE_KEY as SEG_KEY, DEFAULT_SEG_CONFIG } from './segmentation/protocols';
+import { MODEL_TYPE_KEY as ERASER_KEY, DEFAULT_INPAINT_ERASER_CONFIG } from './inpaint/eraser/protocols';
 
 /**
  * AIToolsDrawer Plugin — Unified AI Inference Tools
@@ -93,12 +93,12 @@ export const plugin: EditorPlugin = {
   // --- 5. Initial Config ---
   initialConfig: {
     // Namespaced sub-keys for each tool (consistent with useToolConfig reads)
-    bgremover: DEFAULT_BG_REMOVAL_CONFIG,
-    upscale: DEFAULT_UPSCALE_CONFIG,
-    seg: DEFAULT_SEG_CONFIG,
-    inpaintEraser: DEFAULT_INPAINT_ERASER_CONFIG,
+    [BGREMOVER_KEY]: DEFAULT_BG_REMOVAL_CONFIG,
+    [UPSCALER_KEY]: DEFAULT_UPSCALE_CONFIG,
+    [SEG_KEY]: DEFAULT_SEG_CONFIG,
+    [ERASER_KEY]: DEFAULT_INPAINT_ERASER_CONFIG,
     // Persisted UI state
-    activeTool: 'upscaler',
+    activeTool: UPSCALER_KEY,
   },
 
   // --- 6. Commands ---

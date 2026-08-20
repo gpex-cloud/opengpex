@@ -21,6 +21,7 @@
 
 import React from 'react';
 import { Loader2, X } from 'lucide-react';
+import Tooltip from '@opengpex/editor/widgets/Tooltip';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -40,6 +41,8 @@ function formatSpeed(bps: number): string {
 // ─── Props ───────────────────────────────────────────────────────────────────
 
 export interface DownloadPanelProps {
+  /** Header label. Default: "Downloading..." */
+  label?: string;
   /** 0-1 progress value */
   progress: number;
   /** Bytes downloaded */
@@ -68,6 +71,7 @@ export interface DownloadPanelProps {
  * Used by all AI tool panels (BG Remover, Upscaler, Segmentation) for consistent UX.
  */
 export const DownloadPanel = React.memo(function DownloadPanel({
+  label,
   progress,
   loadedBytes,
   totalBytes,
@@ -83,20 +87,21 @@ export const DownloadPanel = React.memo(function DownloadPanel({
       <div className="flex justify-between items-center">
         <span className="text-[10px] text-[var(--text-muted)] font-medium flex items-center gap-1">
           <Loader2 size={10} className="animate-spin" />
-          Downloading...
+          {label ?? 'Downloading...'}
         </span>
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-[var(--text-secondary)]">
             {percent}%
           </span>
           {onCancel && (
-            <button
-              onClick={onCancel}
-              className="p-1.5 -m-1 rounded hover:bg-white/10 text-[var(--text-muted)] hover:text-rose-400 transition-colors"
-              title="Cancel download"
-            >
-              <X size={11} />
-            </button>
+            <Tooltip content="Cancel download" position="bottom" align="end">
+              <button
+                onClick={onCancel}
+                className="p-1.5 -m-1 rounded hover:bg-white/10 text-[var(--text-muted)] hover:text-rose-400 transition-colors"
+              >
+                <X size={11} />
+              </button>
+            </Tooltip>
           )}
         </div>
       </div>

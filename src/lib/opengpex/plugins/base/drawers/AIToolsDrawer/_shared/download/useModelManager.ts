@@ -34,7 +34,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDownloadTask } from './useDownloadTask';
-import { areFilesCached, deleteModelCache } from './model-cache';
+import { areFilesCached, deleteModelCache, exportModelAsZip, importModelFromZip } from './model-cache';
 import { INITIAL_DOWNLOAD_PROGRESS } from './model-download';
 import type { ModelFile, DownloadProgress } from './model-download';
 
@@ -48,6 +48,8 @@ export interface ModelManagerOptions {
   modelId: string | undefined;
   /** Human-readable model name (for HUD messages) */
   modelName: string | undefined;
+  /** Tool/module identifier for export filename (e.g. 'bgremover', 'upscale', 'seg') */
+  toolId?: string;
   /** Files to download */
   files: ModelFile[];
   /** Editor actions (for HUD messages) */
@@ -69,6 +71,16 @@ export interface ModelManagerOptions {
   onError?: (message: string) => void;
 }
 
+/** Progress state for import operations */
+export interface ImportProgress {
+  /** Current file being processed (1-based) */
+  current: number;
+  /** Total number of files */
+  total: number;
+  /** Name of the file currently being written */
+  currentFile: string;
+}
+
 export interface ModelManagerReturn {
   /** Deterministic cache state: 'checking' | 'cached' | 'not-cached' */
   cacheState: CacheState;
@@ -86,12 +98,20 @@ export interface ModelManagerReturn {
   cancelDownload: () => void;
   /** Delete cached model files */
   deleteCache: () => Promise<void>;
+  /** Export cached model as zip file download */
+  exportModel: () => Promise<void>;
+  /** Import model from local zip file */
+  importModel: (file: File) => Promise<void>;
+  /** Whether an import is in progress */
+  isImporting: boolean;
+  /** Import progress state (null when not importing) */
+  importProgress: ImportProgress | null;
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export function useModelManager(options: ModelManagerOptions): ModelManagerReturn {
-  const { modelId, modelName, files, actions, store } = options;
+  const { modelId, modelName, toolId, files, actions, store } = options;
 
   // Derive callbacks: explicit callbacks take priority over store-derived ones
   const onDoneRef = useRef(options.onDone ?? (store ? () => store.setState({ task: null }) : undefined));
@@ -197,6 +217,62 @@ export function useModelManager(options: ModelManagerOptions): ModelManagerRetur
     }
   }, [modelId, modelName, files, actions]);
 
+  // ─── Export / Import ──────────────────────────────────────────────────────
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+
+  const exportModel = useCallback(async () => {
+    if (!modelId || !modelName) return;
+    try {
+      const blob = await exportModelAsZip(modelId, modelName, files);
+      if (!blob) {
+        actions.setInteraction({ hud: { message: 'Model not fully cached — cannot export', type: 'error' } });
+        return;
+      }
+      // Trigger browser download — filename: {modelName}.{categorySlug}.gpex.zip
+      const safeName = modelName.replace(/[^a-zA-Z0-9._-]/g, '-');
+      const toolSuffix = toolId ? `.${toolId.replace(/\s+/g, '-')}` : '';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${safeName}${toolSuffix}.gpex.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      actions.setInteraction({ hud: { message: `Model exported: ${modelName}`, type: 'success' } });
+    } catch {
+      actions.setInteraction({ hud: { message: 'Failed to export model', type: 'error' } });
+    }
+  }, [modelId, modelName, toolId, files, actions]);
+
+  const importModel = useCallback(async (file: File) => {
+    if (!modelId) return;
+    setIsImporting(true);
+    setImportProgress({ current: 0, total: files.length, currentFile: '' });
+    try {
+      const result = await importModelFromZip(
+        modelId,
+        files,
+        file,
+        (current, total, currentFile) => {
+          setImportProgress({ current, total, currentFile });
+        },
+      );
+      if (result.success) {
+        setCacheState('cached');
+        actions.setInteraction({ hud: { message: `Model imported: ${modelName ?? 'unknown'}`, type: 'success' } });
+      } else {
+        actions.setInteraction({ hud: { message: result.error ?? 'Import failed', type: 'error' } });
+      }
+    } catch {
+      actions.setInteraction({ hud: { message: 'Failed to import model', type: 'error' } });
+    } finally {
+      setIsImporting(false);
+      setImportProgress(null);
+    }
+  }, [modelId, modelName, files, actions]);
+
   // ─── Derived convenience values ──────────────────────────────────────────
   const isCached = cacheState === 'cached';
   const checkingCache = cacheState === 'checking';
@@ -210,5 +286,9 @@ export function useModelManager(options: ModelManagerOptions): ModelManagerRetur
     startDownload,
     cancelDownload,
     deleteCache,
+    exportModel,
+    importModel,
+    isImporting,
+    importProgress,
   };
 }

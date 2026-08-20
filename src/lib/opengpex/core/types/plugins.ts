@@ -261,8 +261,34 @@ export interface EditorPlugin {
   /** Declarative auto-reveal rule for SIDE_BAR plugins */
   autoReveal?: AutoRevealRule;
 
-  // Lifecycle
+  // --- 5. Lifecycle Hooks ---
+  /**
+   * Called once after plugin registration during app startup.
+   *
+   * ⚠️ **Partial Context Warning**: `onInit` is invoked at registration time,
+   * before the full EditorContext is mounted. The `ctx` parameter only contains:
+   *
+   * | Field          | Available | Notes                                        |
+   * |----------------|-----------|----------------------------------------------|
+   * | `ctx.actions`  | ✅ Yes    | EditorActions (registerCommand, etc.)         |
+   * | `ctx.state`    | ❌ No     | EditorState is not yet hydrated               |
+   * | `ctx.scoped`   | ❌ No     | Scoped plugin config requires full context    |
+   * | `ctx.plugins`  | ❌ No     | PluginService ref not yet injected            |
+   * | `ctx.assets`   | ❌ No     | AssetService not yet available                |
+   *
+   * **Best practices:**
+   * - Use `onInit` only for side-effect-free bootstrapping (e.g. hydrating
+   *   from localStorage, registering global listeners, preflight checks).
+   * - Do NOT rely on `ctx.scoped`, `ctx.state`, or other runtime-dependent fields.
+   * - For logic that requires full context, use component-level `useEffect` instead.
+   */
   onInit?: (ctx: EditorContextValue) => void;
+  /**
+   * Called when the plugin is unregistered / unmounted.
+   * Use for cleanup (event listener removal, timer cancellation, etc.).
+   *
+   * Note: Same partial context limitation applies as `onInit`.
+   */
   onDestroy?: (ctx: EditorContextValue) => void;
 }
 

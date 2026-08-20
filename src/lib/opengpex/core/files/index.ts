@@ -49,6 +49,9 @@ import { mimeToExt } from './mime';
 // Re-export vector utilities (used by frame/create command)
 export { getVectorIntrinsicSize, detectVectorFormat };
 
+// Re-export metadata display helpers
+export { hasDisplayableMetadata, isComfyUiWorkflow } from './utils';
+
 // Re-export all public types
 export type {
   FileService,

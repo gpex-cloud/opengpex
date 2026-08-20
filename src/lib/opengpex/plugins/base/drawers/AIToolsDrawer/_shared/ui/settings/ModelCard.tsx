@@ -32,7 +32,8 @@
  *   - Remove button for custom models
  */
 
-import { Lock, Trash2, Download, CheckCircle2, Loader2, ExternalLink } from "lucide-react";
+import { Lock, Trash2, Download, Loader2, ExternalLink, HardDriveDownload, HardDriveUpload } from "lucide-react";
+import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import { DownloadPanel } from "../DownloadPanel";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -71,6 +72,10 @@ export interface ModelCardProps {
   onDelete: () => void;
   onRemove?: () => void;
   onCancelDownload?: () => void;
+  /** Export model to local zip file (shown when cached) */
+  onExport?: () => void;
+  /** Import model from local zip file (shown when not cached) */
+  onImport?: () => void;
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -87,19 +92,21 @@ export function ModelCard({
   onDelete,
   onRemove,
   onCancelDownload,
+  onExport,
+  onImport,
 }: ModelCardProps) {
   const hfUrl = model.modelId ? `https://huggingface.co/${model.modelId}` : null;
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg p-2.5 border bg-[var(--bg-stage)] border-[var(--border-subtle)]">
-      {/* Row 1: Name + actions */}
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-2 rounded-lg px-2.5 py-2 border bg-[var(--bg-stage)] border-[var(--border-subtle)]">
+      {/* Row 1: Name + cached badge + actions */}
+      <div className="flex items-center gap-1.5 pb-1 border-b border-[var(--border-subtle)]">
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
           {model.builtin && (
-            <Lock size={9} className="text-[var(--text-muted)] shrink-0" />
+            <Lock size={10} className="text-[var(--text-muted)] shrink-0" />
           )}
           {model.builtin ? (
-            <span className="text-[11px] font-semibold text-[var(--text-main)] truncate">
+            <span className="text-xs font-semibold text-[var(--text-main)] truncate">
               {model.name}
             </span>
           ) : (
@@ -107,40 +114,41 @@ export function ModelCard({
               type="text"
               value={model.name}
               onChange={(e) => onNameChange?.(e.target.value)}
-              className="bg-transparent border-none text-[11px] font-semibold text-[var(--text-main)] focus:outline-none flex-1 min-w-0 focus:ring-1 focus:ring-[var(--border-subtle)] rounded px-1 -ml-1"
+              className="bg-transparent border-none text-xs font-semibold text-[var(--text-main)] focus:outline-none flex-1 min-w-0 focus:ring-1 focus:ring-[var(--border-subtle)] rounded px-1 -ml-1"
             />
           )}
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
-          {/* HuggingFace link */}
-          {hfUrl && (
-            <a
-              href={hfUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors p-0.5"
-              title={`View on HuggingFace: ${model.modelId}`}
-            >
-              <ExternalLink size={10} />
-            </a>
-          )}
-          {/* Remove button (custom models only) */}
-          {!model.builtin && onRemove && (
-            <button
-              onClick={onRemove}
-              className="text-[var(--text-muted)] hover:text-rose-500 transition-colors p-0.5"
-              title="Remove model"
-            >
-              <Trash2 size={11} />
-            </button>
+          {isCached && (
+            <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-400/10 border border-emerald-400/30 px-1.5 py-0.5 rounded-full">
+              Cached
+            </span>
           )}
         </div>
+        {hfUrl && (
+          <a
+            href={hfUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={model.modelId}
+            className="text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors shrink-0"
+          >
+            <ExternalLink size={11} />
+          </a>
+        )}
+        {!model.builtin && onRemove && (
+          <button
+            onClick={onRemove}
+            title="Remove model"
+            className="text-[var(--text-muted)] hover:text-rose-500 transition-colors shrink-0"
+          >
+            <Trash2 size={11} />
+          </button>
+        )}
       </div>
 
-      {/* Row 2: Model ID */}
-      <div className="flex flex-col gap-0.5">
+      {/* Row 2: Model ID + Cache actions */}
+      <div className="flex items-center gap-2">
         {model.builtin ? (
-          <span className="text-[10px] text-[var(--text-secondary)] font-mono truncate">
+          <span className="text-[11px] text-[var(--text-secondary)] font-mono truncate flex-1 min-w-0">
             {model.modelId}
           </span>
         ) : (
@@ -149,48 +157,67 @@ export function ModelCard({
             value={model.modelId}
             onChange={(e) => onModelIdChange?.(e.target.value)}
             placeholder="owner/model-name"
-            className="w-full bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-md px-2 py-1 text-[10px] text-[var(--text-main)] font-mono focus:outline-none focus:border-[var(--text-secondary)] transition-colors placeholder:text-[var(--text-muted)]"
+            className="flex-1 min-w-0 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-md px-2 py-1 text-[11px] text-[var(--text-main)] font-mono focus:outline-none focus:border-[var(--text-secondary)] transition-colors placeholder:text-[var(--text-muted)]"
           />
         )}
-      </div>
-
-      {/* Row 3: Meta + Cache actions */}
-      <div className="flex items-center justify-between">
-        <span className="text-[9px] text-[var(--text-muted)]">
-          {model.size}
-          {model.badge ? ` · ${model.badge}` : ''}
-          {model.description ? ` · ${model.description}` : ''}
-        </span>
         {model.modelId && (
-          <div className="flex items-center gap-1.5">
-            {isCached ? (
-              <>
-                <span className="text-emerald-400 flex items-center gap-0.5 text-[9px]">
-                  <CheckCircle2 size={9} /> Cached
-                </span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Tooltip content="Download model" position="bottom" align="end">
+              <button
+                onClick={onDownload}
+                disabled={isBusy || isAnyDownloading || isCached}
+                className="flex items-center gap-0.5 px-1.5 py-1 -my-0.5 rounded text-[10px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-main)] hover:bg-white/5 disabled:opacity-40 transition-colors"
+              >
+                {isBusy && !isCached ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
+                <span>Download</span>
+              </button>
+            </Tooltip>
+            {onImport && (
+              <Tooltip content="Import model from local file" position="bottom" align="end">
+                <button
+                  onClick={onImport}
+                  disabled={isBusy || isAnyDownloading || isCached}
+                  className="flex items-center gap-0.5 px-1.5 py-1 -my-0.5 rounded text-[10px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-main)] hover:bg-white/5 disabled:opacity-40 transition-colors"
+                >
+                  <HardDriveUpload size={10} />
+                  <span>Use Local</span>
+                </button>
+              </Tooltip>
+            )}
+            {isCached && onExport && (
+              <Tooltip content="Export model to local file" position="bottom" align="end">
+                <button
+                  onClick={onExport}
+                  disabled={isBusy}
+                  className="flex items-center gap-0.5 px-1.5 py-1 -my-0.5 rounded text-[10px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-main)] hover:bg-white/5 disabled:opacity-40 transition-colors"
+                >
+                  <HardDriveDownload size={10} />
+                  <span>Export</span>
+                </button>
+              </Tooltip>
+            )}
+            {isCached && (
+              <Tooltip content="Delete cached files" position="bottom" align="end">
                 <button
                   onClick={onDelete}
                   disabled={isBusy}
-                  className="px-1.5 py-1 -my-0.5 rounded text-[9px] font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 disabled:opacity-40 transition-colors"
-                  title="Delete cached model files"
+                  className="flex items-center gap-0.5 px-1.5 py-1 -my-0.5 rounded text-[10px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-main)] hover:bg-white/5 disabled:opacity-40 transition-colors"
                 >
-                  {isBusy ? <Loader2 size={9} className="animate-spin" /> : "Delete"}
+                  {isBusy ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
+                  <span>Delete</span>
                 </button>
-              </>
-            ) : (
-              <button
-                onClick={onDownload}
-                disabled={isBusy || isAnyDownloading}
-                className="flex items-center gap-0.5 px-1.5 py-1 -my-0.5 rounded text-[9px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-main)] hover:bg-white/5 disabled:opacity-40 transition-colors"
-                title="Download model"
-              >
-                {isBusy ? <Loader2 size={9} className="animate-spin" /> : <Download size={9} />}
-                <span>Download</span>
-              </button>
+              </Tooltip>
             )}
           </div>
         )}
       </div>
+
+      {/* Row 3: Meta info */}
+      <span className="text-[10px] text-[var(--text-muted)]">
+        {model.size}
+        {model.badge ? ` · ${model.badge}` : ''}
+        {model.description ? ` · ${model.description}` : ''}
+      </span>
 
       {/* ─── Download Progress (inline) ─────────── */}
       {downloadProgress && (

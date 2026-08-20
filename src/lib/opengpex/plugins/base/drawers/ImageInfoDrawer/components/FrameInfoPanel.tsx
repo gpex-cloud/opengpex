@@ -24,6 +24,7 @@ import { Check, ChevronDown, Copy } from "lucide-react";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 
 import type { ImageMetadata } from "@opengpex/editor/core/files";
+import { hasDisplayableMetadata, isComfyUiWorkflow } from "@opengpex/editor/core/files";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -97,10 +98,9 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
   // ── Metadata computation ──
   const meta = imageMetadata;
 
-  const hasNoteworthyColorSpace = !!meta?.colorSpace && meta.colorSpace !== 'srgb' && meta.colorSpace !== 'unknown';
   const hasHighBitDepth = (meta?.bitDepth ?? 8) > 8;
-  const hasPhotographicMeta = !!(meta?.camera || meta?.capture || meta?.dates || meta?.raw?.icc);
-  const showMetadata = !!(meta && (hasPhotographicMeta || hasNoteworthyColorSpace || hasHighBitDepth));
+  const showMetadata = hasDisplayableMetadata(meta);
+  const comfyWorkflowJson = isComfyUiWorkflow(meta);
 
   const hasIccProfile = !!meta?.raw?.icc;
 
@@ -165,6 +165,7 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
       value: hasIccProfile ? (meta!.raw.icc!.name || "Embedded") : null,
     },
     { label: "Software", value: meta?.camera?.software },
+    ...(comfyWorkflowJson ? [{ label: "Produced by", value: "__comfyui__" }] : []),
   ].filter((item) => !!item.value) : [];
 
   return (
@@ -228,6 +229,11 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
                       ICC
                     </span>
                   )}
+                  {hasHighBitDepth && (
+                    <span className="text-[7px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1 py-0.5 rounded border border-emerald-500/20 uppercase leading-none">
+                      {meta!.bitDepth}-bit
+                    </span>
+                  )}
                 </div>
                 <span className="text-[10px] font-black text-[var(--text-main)] truncate">
                   {settings || "No exposure data"}
@@ -245,20 +251,39 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
                 {detailedItems.map((item, i) => (
                   <div
                     key={i}
-                    className="flex justify-between items-baseline gap-2"
+                    className="flex justify-between items-center gap-2"
                   >
                     <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-wider shrink-0">
                       {item.label}
                     </span>
-                    <span className="text-[9px] font-semibold text-[var(--text-main)] text-right break-words">
-                      {String(item.value)}
-                    </span>
+                    {item.value === "__comfyui__" ? (
+                      <span className="text-[9px] font-semibold text-[var(--text-main)]">
+                        ComfyUI / <button
+                          onClick={() => {
+                            const blob = new Blob([comfyWorkflowJson!], { type: 'application/json' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${fileName.replace(/\.[^.]+$/, '')}_workflow.json`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }}
+                          className="underline underline-offset-2 hover:opacity-70 transition-opacity"
+                          title="Download ComfyUI workflow JSON"
+                        >Get JSON</button>
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-semibold text-[var(--text-main)] text-right break-words">
+                        {String(item.value)}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
             )}
           </>
         )}
+
       </div>
 
       {/* Canvas / Layer Dimensions Grid */}
@@ -268,9 +293,11 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
             <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight">
               {isClipMode ? "Selection" : "Canvas"}
             </span>
-            <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
-              {frameBitDepth}-bit
-            </span>
+            {frameBitDepth > 8 && (
+              <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
+                {frameBitDepth}-bit
+              </span>
+            )}
           </div>
           <span className="text-[10px] font-bold text-[var(--text-main)] tabular-nums uppercase">
             {baseW} × {baseH}
@@ -281,7 +308,7 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
             <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight">
               {hoveredLayerId ? "Hovered Layer" : "Active Layer"}
             </span>
-            {layerBitDepth != null && (
+            {layerBitDepth != null && layerBitDepth > 8 && (
               <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
                 {layerBitDepth}-bit
               </span>

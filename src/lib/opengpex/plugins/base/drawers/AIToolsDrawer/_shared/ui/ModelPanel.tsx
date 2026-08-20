@@ -45,9 +45,10 @@
  * @see docs/opengpex/02-conventions/plugin_signal_stale_read_convention.md
  */
 
-import React, { useCallback } from 'react';
-import { Download, Trash2, ChevronDown, CheckCircle2, RefreshCw } from 'lucide-react';
+import React, { useCallback, useRef } from 'react';
+import { Download, Trash2, ChevronDown, CheckCircle2, RefreshCw, HardDriveDownload, HardDriveUpload } from 'lucide-react';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
+import Tooltip from '@opengpex/editor/widgets/Tooltip';
 import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
 import { DownloadPanel } from './DownloadPanel';
 import { updateModelList } from '../utils';
@@ -89,12 +90,16 @@ export interface ModelPanelProps {
   /** Store reset function — called after model switch to clear stale results */
   resetStore: () => void;
   /**
-   * Optional callback invoked AFTER the standard model-change logic completes.
+   * Optional callback invoked during model-change.
    * Use for tool-specific side effects:
    *   - bgremover: clear clipBox from last result
    *   - upscaler: sync targetScale based on new model's scale property
+   *
+   * If extra config fields need to be persisted atomically with the model switch,
+   * return a partial config object — it will be merged into the same setConfig call
+   * (avoids stale-closure overwrites from a separate setConfig).
    */
-  afterModelChange?: (newActiveId: string, models: ModelEntry[]) => void;
+  afterModelChange?: (newActiveId: string, models: ModelEntry[]) => Record<string, unknown> | void;
 }
 
 /**
@@ -118,10 +123,11 @@ export function ModelPanel({
   // ─── handleModelChange (standard flow + optional after-hook) ─────────────
   const handleModelChange = useCallback((newActiveId: string) => {
     const ensuredModels = updateModelList((config.models ?? []) as ModelEntry[], builtins);
-    setConfig({ models: ensuredModels, activeModelId: newActiveId });
+    // Let afterModelChange return extra config patches to merge atomically
+    const extraPatch = afterModelChange?.(newActiveId, ensuredModels);
+    setConfig({ models: ensuredModels, activeModelId: newActiveId, ...extraPatch });
     client?.dispose();
     resetStore();
-    afterModelChange?.(newActiveId, ensuredModels);
   }, [config.models, builtins, setConfig, client, resetStore, afterModelChange]);
 
   // ─── handleRefresh (identical across all tools) ─────────────────────────
@@ -133,6 +139,20 @@ export function ModelPanel({
     setConfig({ models: synced, activeModelId: validActiveId });
     actions.setInteraction({ hud: { message: 'Model list refreshed', type: 'success' } });
   }, [config.models, config.activeModelId, builtins, setConfig, actions]);
+
+  // ─── Import file input ref ────────────────────────────────────────────────
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const handleImportClick = useCallback(() => {
+    importInputRef.current?.click();
+  }, []);
+  const handleImportFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      mgr.importModel(file);
+    }
+    // Reset input so the same file can be re-selected
+    e.target.value = '';
+  }, [mgr]);
 
   return (
     <>
@@ -157,14 +177,26 @@ export function ModelPanel({
                 </div>
               )}
             />
-            <button
-              onClick={handleRefresh}
-              disabled={isBusy}
-              className="p-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:bg-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors disabled:opacity-50"
-              title="Refresh model list (remove stale entries)"
-            >
-              <RefreshCw size={10} />
-            </button>
+            <Tooltip content="Refresh model list" position="bottom" align="end">
+              <button
+                onClick={handleRefresh}
+                disabled={isBusy}
+                className="p-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:bg-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors disabled:opacity-50"
+              >
+                <RefreshCw size={10} />
+              </button>
+            </Tooltip>
+            {mgr.cacheState === 'cached' && (
+              <Tooltip content="Export model to local file" position="bottom" align="end">
+                <button
+                  onClick={mgr.exportModel}
+                  disabled={isBusy}
+                  className="p-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:bg-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors disabled:opacity-50"
+                >
+                  <HardDriveDownload size={10} />
+                </button>
+              </Tooltip>
+            )}
           </div>
         </div>
 
@@ -199,7 +231,7 @@ export function ModelPanel({
             shape="rect"
             className="flex-1"
             onClick={mgr.startDownload}
-            disabled={isBusy || mgr.cacheState !== 'not-cached'}
+            disabled={isBusy || mgr.cacheState === 'cached'}
           >
             <Download size={10} />
             <span className="text-[9px]">Download</span>
@@ -209,14 +241,36 @@ export function ModelPanel({
             size="xs"
             shape="rect"
             className="flex-1"
-            onClick={mgr.deleteCache}
-            disabled={isBusy || mgr.cacheState !== 'cached'}
+            onClick={handleImportClick}
+            disabled={isBusy || mgr.isImporting || mgr.cacheState === 'cached'}
           >
-            <Trash2 size={10} />
-            <span className="text-[9px]">Delete</span>
+            <HardDriveUpload size={10} />
+            <span className="text-[9px]">Use Local</span>
           </FancyButton>
+          {mgr.cacheState === 'cached' && (
+            <Tooltip content="Delete cached model" position="bottom" align="end">
+              <FancyButton
+                variant="ghost"
+                size="xs"
+                shape="rect"
+                onClick={mgr.deleteCache}
+                disabled={isBusy}
+              >
+                <Trash2 size={10} />
+              </FancyButton>
+            </Tooltip>
+          )}
         </div>
       </div>
+
+      {/* Hidden file input for import */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".zip"
+        className="hidden"
+        onChange={handleImportFile}
+      />
 
       {/* ─── Download Progress (explicit pre-download) ──────────── */}
       {mgr.isDownloading && (
@@ -227,6 +281,18 @@ export function ModelPanel({
           speedBps={mgr.downloadState.speedBps}
           currentFile={mgr.downloadState.currentFile}
           onCancel={mgr.cancelDownload}
+        />
+      )}
+
+      {/* ─── Import Progress ─────────────────────────────────────── */}
+      {mgr.isImporting && mgr.importProgress && (
+        <DownloadPanel
+          label="Importing..."
+          progress={mgr.importProgress.total > 0 ? mgr.importProgress.current / mgr.importProgress.total : 0}
+          loadedBytes={0}
+          totalBytes={0}
+          speedBps={0}
+          currentFile={mgr.importProgress.currentFile}
         />
       )}
     </>

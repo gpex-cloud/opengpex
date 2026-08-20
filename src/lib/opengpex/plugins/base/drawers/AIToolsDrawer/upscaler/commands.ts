@@ -28,6 +28,7 @@ import type { UpscaleRequest, UpscaleResult as UpscaleWorkerResult } from './wor
 import { PLUGIN_AUTHOR, PLUGIN_ID } from '../protocols';
 import type { UpscaleConfig, UpscaleModelEntry } from './protocols';
 import {
+  MODEL_TYPE_KEY,
   BUILTIN_UPSCALE_MODELS,
   DEFAULT_UPSCALE_CONFIG,
   CMD_UPSCALE,
@@ -43,7 +44,7 @@ const MAX_CANVAS_AREA = 268_435_456;
 const MAX_CANVAS_DIM = 32_767;
 
 function getUpscaleConfig(ctx: EditorContextValue): UpscaleConfig {
-  return getToolConfig<UpscaleConfig>(ctx.state.pluginConfig, PLUGIN_UID, 'upscale', DEFAULT_UPSCALE_CONFIG);
+  return getToolConfig<UpscaleConfig>(ctx.state.pluginConfig, PLUGIN_UID, MODEL_TYPE_KEY, DEFAULT_UPSCALE_CONFIG);
 }
 
 // ─── Tool Commands (via createToolCommand factory) ───────────────────────────
@@ -58,7 +59,7 @@ const { runCommand, abortCommand } = createToolCommand<
   name: { run: 'AI Upscale Layer', abort: 'Cancel Upscale' },
   store: upscaleStore,
   client: upscaleClient,
-  configKey: 'upscale',
+  configKey: MODEL_TYPE_KEY,
   defaultConfig: DEFAULT_UPSCALE_CONFIG,
   builtins: BUILTIN_UPSCALE_MODELS,
   toolName: 'AI Upscaler',

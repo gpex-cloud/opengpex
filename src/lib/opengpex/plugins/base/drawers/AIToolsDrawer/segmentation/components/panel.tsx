@@ -23,14 +23,14 @@ import React, { useCallback } from 'react';
 import { Zap } from 'lucide-react';
 import { useEditorServices, useEditorState, usePluginCommands } from '@opengpex/editor/core/context';
 import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
-import { segStore } from './store';
-import type { SegResult } from './store';
-import { ModelPanel, InferencePanel, ErrorPanel, ResultPanel } from '../_shared';
-import { formatMs } from '../_shared/utils';
-import { useAIToolPanel } from '../_shared/useToolPanel';
-import type { SegConfig } from './protocols';
-import { BUILTIN_SEG_MODELS, DEFAULT_SEG_CONFIG, getSegModelFiles } from './protocols';
-import type { AIToolsDrawerCommandsMap } from '../commands.d';
+import { segStore } from '../store';
+import type { SegResult } from '../store';
+import { ModelPanel, InferencePanel, ErrorPanel, ResultPanel } from '../../_shared';
+import { formatMs } from '../../_shared/utils';
+import { useAIToolPanel } from '../../_shared/useToolPanel';
+import type { SegConfig } from '../protocols';
+import { MODEL_TYPE_KEY, MODEL_TYPE_NAME, BUILTIN_SEG_MODELS, DEFAULT_SEG_CONFIG, getSegModelFiles } from '../protocols';
+import type { AIToolsDrawerCommandsMap } from '../../commands.d';
 
 // ─── SegmentationPanel ───────────────────────────────────────────────────────
 
@@ -40,12 +40,13 @@ export function SegmentationPanel() {
   const { segAllCmd } = usePluginCommands<AIToolsDrawerCommandsMap>();
 
   const { config, setConfig, mgr, task, lastResult, error, isBusy } = useAIToolPanel<SegConfig, SegResult>({
-    configKey: 'seg',
+    configKey: MODEL_TYPE_KEY,
+    toolDisplayName: MODEL_TYPE_NAME,
     defaultConfig: DEFAULT_SEG_CONFIG,
     builtins: BUILTIN_SEG_MODELS,
     store: segStore,
     actions,
-    getFiles: getSegModelFiles as (m: import('../_shared/types').ModelEntry) => import('../_shared/download/model-download').ModelFile[],
+    getFiles: getSegModelFiles as (m: import('../../_shared/types').ModelEntry) => import('../../_shared/download/model-download').ModelFile[],
   });
 
   // ─── Handlers ──────────────────────────────────────────────────────────────

@@ -25,6 +25,7 @@ import { useVolatileInteraction } from "@opengpex/editor/core/context";
 import { getClipBox } from "@opengpex/editor/core/helpers/selection";
 
 import { useImageInfoMetadata, useExportConfig, useClipMode } from "./hooks";
+import { isComfyUiWorkflow } from "@opengpex/editor/core/files";
 import { FrameInfoPanel } from "./components/FrameInfoPanel";
 import { AiGenerationPanel } from "./components/AiGenerationPanel";
 import { ResizeExportControls } from "./components/ResizeExportControls";
@@ -97,8 +98,8 @@ export function ImageInfoComponent() {
           <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
             Informations
           </span>
-          {!!activeFrame.extra?.ai_generation && (
-            <span className="ml-1 text-[8px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded shadow-sm border border-indigo-500/20 uppercase flex items-center gap-1">
+          {(!!activeFrame.extra?.ai_generation || isComfyUiWorkflow(meta.imageMetadata)) && (
+            <span className="ml-1 text-[8px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded shadow-sm border border-amber-500/20 uppercase flex items-center gap-1">
               AI Generated
             </span>
           )}

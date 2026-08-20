@@ -166,6 +166,14 @@ export interface RawBinaryData {
 
   /** PNG gAMA gamma value (only meaningful for PNG, effective without ICC/sRGB) */
   gamma?: number;
+
+  /**
+   * Raw PNG tEXt/iTXt key-value entries.
+   * Preserves non-standard text chunks (e.g. ComfyUI "prompt" workflow JSON,
+   * SD WebUI "parameters") for round-trip and AI provenance detection.
+   * Only populated for PNG sources.
+   */
+  pngText?: Record<string, string>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

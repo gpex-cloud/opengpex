@@ -52,6 +52,8 @@ export const plugin: EditorPlugin = {
   },
 
   slot: "BR",
+  show: "frame-required",
+  
   component: StorageInfoComponent,
 
   initialConfig: {

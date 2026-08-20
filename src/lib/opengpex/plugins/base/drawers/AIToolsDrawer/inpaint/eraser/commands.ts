@@ -27,6 +27,7 @@ import { inpaintEraserClient } from './client';
 import type { InpaintEraserRequest, InpaintEraserResult as InpaintEraserWorkerResult } from './worker.types';
 import type { InpaintEraserModelEntry } from './protocols';
 import {
+  MODEL_TYPE_KEY,
   BUILTIN_ERASER_MODELS,
   DEFAULT_INPAINT_ERASER_CONFIG,
   CMD_INPAINT_ERASER,
@@ -56,7 +57,7 @@ const { runCommand, abortCommand } = createToolCommand<
   name: { run: 'AI Smart Erase', abort: 'Cancel Smart Erase' },
   store: inpaintEraserStore,
   client: inpaintEraserClient,
-  configKey: 'inpaintEraser',
+  configKey: MODEL_TYPE_KEY,
   defaultConfig: DEFAULT_INPAINT_ERASER_CONFIG,
   builtins: BUILTIN_ERASER_MODELS,
   toolName: 'Smart Eraser',

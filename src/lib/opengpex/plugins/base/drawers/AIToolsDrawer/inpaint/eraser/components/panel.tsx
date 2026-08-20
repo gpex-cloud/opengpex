@@ -28,15 +28,15 @@ import { Info, Sparkles } from 'lucide-react';
 import { useEditorState, useEditorServices, usePluginCommands } from '@opengpex/editor/core/context';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
-import { inpaintEraserStore } from './store';
-import type { InpaintEraserResult } from './store';
-import { ModelPanel, InferencePanel, ErrorPanel, ResultPanel } from '../../_shared';
-import { formatMs } from '../../_shared/utils';
-import { useAIToolPanel } from '../../_shared/useToolPanel';
-import { inpaintEraserClient } from './client';
-import type { InpaintEraserConfig } from './protocols';
-import { BUILTIN_ERASER_MODELS, DEFAULT_INPAINT_ERASER_CONFIG } from './protocols';
-import type { AIToolsDrawerCommandsMap } from '../../commands.d';
+import { inpaintEraserStore } from '../store';
+import type { InpaintEraserResult } from '../store';
+import { ModelPanel, InferencePanel, ErrorPanel, ResultPanel } from '../../../_shared';
+import { formatMs } from '../../../_shared/utils';
+import { useAIToolPanel } from '../../../_shared/useToolPanel';
+import { inpaintEraserClient } from '../client';
+import type { InpaintEraserConfig } from '../protocols';
+import { MODEL_TYPE_KEY, MODEL_TYPE_NAME, BUILTIN_ERASER_MODELS, DEFAULT_INPAINT_ERASER_CONFIG } from '../protocols';
+import type { AIToolsDrawerCommandsMap } from '../../../commands.d';
 
 // ─── InpaintEraserPanel ──────────────────────────────────────────────────────
 
@@ -46,7 +46,8 @@ export function InpaintEraserPanel() {
   const { inpaintEraserCmd, inpaintEraserAbortCmd } = usePluginCommands<AIToolsDrawerCommandsMap>();
 
   const { config, setConfig, mgr, task, lastResult, error, isBusy } = useAIToolPanel<InpaintEraserConfig, InpaintEraserResult>({
-    configKey: 'inpaintEraser',
+    configKey: MODEL_TYPE_KEY,
+    toolDisplayName: MODEL_TYPE_NAME,
     defaultConfig: DEFAULT_INPAINT_ERASER_CONFIG,
     builtins: BUILTIN_ERASER_MODELS,
     store: inpaintEraserStore,

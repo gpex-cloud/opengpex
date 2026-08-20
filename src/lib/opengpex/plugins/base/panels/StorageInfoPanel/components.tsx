@@ -333,7 +333,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
             /* DASHBOARD MODE */
             <div className="flex-1 min-h-0 flex font-sans text-[var(--text-main)] select-none">
               {/* Left Column - Analytics Dashboard */}
-              <div className="w-[380px] border-r border-[var(--border-subtle)] dark:border-r-white/[0.06] p-6 flex flex-col gap-6 overflow-y-auto bg-[var(--bg-stage)] ">
+              <div className="w-[380px] border-r border-[var(--border-subtle)] dark:border-r-white/[0.06] p-6 flex flex-col gap-6 overflow-y-auto bg-[var(--bg-stage)] custom-scrollbar">
                 {/* Classification Segment Bar */}
                 <div className="space-y-3">
                   <div className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] flex items-center justify-between">
@@ -613,7 +613,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                 </div>
 
                 {/* Details Inspector Pane (Right Part of Tree Explorer) */}
-                <div className="w-[300px] border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] p-6 flex flex-col gap-5 overflow-y-auto bg-[var(--bg-stage)] relative select-none">
+                <div className="w-[300px] border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] p-6 flex flex-col gap-5 overflow-y-auto bg-[var(--bg-stage)] custom-scrollbar relative select-none">
                   {selectedNode ? (
                     <>
                       {/* Header */}

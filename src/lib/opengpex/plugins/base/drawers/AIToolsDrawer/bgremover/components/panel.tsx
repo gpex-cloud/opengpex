@@ -23,15 +23,15 @@ import React, { useCallback } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { useEditorServices, useEditorState, usePluginCommands } from '@opengpex/editor/core/context';
 import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
-import { bgRemoverStore } from './store';
-import { ModelPanel, InferencePanel, ErrorPanel, ResultPanel } from '../_shared';
-import { formatMs } from '../_shared/utils';
-import { useAIToolPanel } from '../_shared/useToolPanel';
-import { bgRemoverClient } from './client';
-import type { ModelCatalog } from '../_shared/types';
-import type { AIToolsDrawerCommandsMap } from '../commands.d';
-import type { BgRemoverResult } from './store';
-import { BUILTIN_MODELS } from './protocols';
+import { bgRemoverStore } from '../store';
+import { ModelPanel, InferencePanel, ErrorPanel, ResultPanel } from '../../_shared';
+import { formatMs } from '../../_shared/utils';
+import { useAIToolPanel } from '../../_shared/useToolPanel';
+import { bgRemoverClient } from '../client';
+import type { ModelCatalog } from '../../_shared/types';
+import type { AIToolsDrawerCommandsMap } from '../../commands.d';
+import type { BgRemoverResult } from '../store';
+import { MODEL_TYPE_KEY, MODEL_TYPE_NAME, BUILTIN_MODELS } from '../protocols';
 
 
 // ─── BgRemover Panel ─────────────────────────────────────────────────────────
@@ -42,7 +42,8 @@ export function BgRemoverPanel() {
   const { removeBgCmd, abortCmd } = usePluginCommands<AIToolsDrawerCommandsMap>();
 
   const { config, setConfig, mgr, task, lastResult, error, isBusy } = useAIToolPanel<ModelCatalog, BgRemoverResult>({
-    configKey: 'bgremover',
+    configKey: MODEL_TYPE_KEY,
+    toolDisplayName: MODEL_TYPE_NAME,
     defaultConfig: { models: BUILTIN_MODELS, activeModelId: BUILTIN_MODELS[0].id },
     builtins: BUILTIN_MODELS,
     store: bgRemoverStore,

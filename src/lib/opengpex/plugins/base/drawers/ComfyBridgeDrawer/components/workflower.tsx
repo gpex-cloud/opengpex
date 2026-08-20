@@ -19,11 +19,12 @@
 
 'use client';
 
-import React, { useState, useMemo } from 'react';
-import { ChevronDown, ChevronRight, Layers, Frame, FileJson, Trash, Dices } from 'lucide-react';
+import React, { useMemo } from 'react';
+import { ChevronDown, Layers, Frame, FileJson, Dices } from 'lucide-react';
 import StatusBanner from '@opengpex/editor/widgets/StatusBanner';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import ComfyNumberInput from '@opengpex/editor/widgets/ComfyNumberInput';
+import FancyTextArea from '@opengpex/editor/widgets/FancyTextArea';
 import FunctionTabs from '@opengpex/editor/widgets/FunctionTabs';
 import Tooltip from '@opengpex/editor/widgets/Tooltip';
 import type { ExposedParam, TextConfig, NumberConfig, PromptConfig, ComboConfig, UserWorkflow, InputSource } from '../protocols';
@@ -158,55 +159,6 @@ function SortedParams({ params, paramValues, randomSeedPaths, onParamChange, onT
   );
 }
 
-// ─── Collapsible Prompt ────────────────────────────────────────────────────────
-
-function CollapsiblePrompt({ param, value, onChange }: { param: ExposedParam; value: unknown; onChange: (val: unknown) => void }) {
-  const cfg = param.config as PromptConfig;
-  const strVal = typeof value === 'string' ? value : cfg.default;
-  const isNeg = cfg.sentiment === 'negative';
-  // Negative prompts default collapsed, positive default expanded
-  const [collapsed, setCollapsed] = useState(isNeg);
-
-  const label = param.nodeTitle || (isNeg ? 'Negative Prompt' : 'Positive Prompt');
-  const preview = strVal.length > 60 ? strVal.slice(0, 60) + '…' : strVal;
-
-  return (
-    <div className="flex flex-col bg-[var(--bg-stage)] rounded-xl border border-[var(--border-subtle)] focus-within:border-emerald-500/50 transition-colors">
-      {/* Clickable header */}
-      <button
-        type="button"
-        onClick={() => setCollapsed(!collapsed)}
-        className="flex items-center gap-1.5 px-2.5 py-2 w-full text-left"
-      >
-        {collapsed ? <ChevronRight size={10} className="text-[var(--text-muted)] shrink-0" /> : <ChevronDown size={10} className="text-[var(--text-muted)] shrink-0" />}
-        <span className={`text-[8px] font-black uppercase tracking-tight ${isNeg ? 'text-rose-500/80' : 'text-emerald-500/80'}`}>
-          {label}
-        </span>
-        {collapsed && strVal.length > 0 && (
-          <span className="text-[9px] text-[var(--text-muted)] truncate flex-1 ml-1 opacity-60">
-            {preview}
-          </span>
-        )}
-        {!collapsed && strVal.length > 0 && (
-          <span className="ml-auto shrink-0" onClick={(e) => { e.stopPropagation(); onChange(''); }}>
-            <Trash size={10} className="text-[var(--text-muted)] hover:text-rose-500 transition-colors" />
-          </span>
-        )}
-      </button>
-      {/* Textarea (shown when expanded) */}
-      {!collapsed && (
-        <div className="px-2 pb-2">
-          <textarea
-            value={strVal}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={cfg.placeholder || 'Describe what you want...'}
-            className={`w-full bg-transparent border-none text-[11px] text-[var(--text-main)] resize-none focus:outline-none placeholder:text-[var(--text-muted)] leading-relaxed px-1 ${isNeg ? 'h-[136px]' : 'h-48'}`}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── Exposed Parameter Control ─────────────────────────────────────────────────
 
@@ -220,9 +172,25 @@ function isSeedParam(param: ExposedParam): boolean {
 function ExposedParamControl({ param, value, isRandomSeed, onChange, onToggleRandom }: { param: ExposedParam; value: unknown; isRandomSeed: boolean; onChange: (val: unknown) => void; onToggleRandom: (isRandom: boolean) => void }) {
   const displayLabel = param.paramName;
 
-  // Prompt textarea (AIBridgeDrawer style) with collapsible chevron
+  // Prompt textarea with collapsible behavior
   if (param.type === 'prompt') {
-    return <CollapsiblePrompt param={param} value={value} onChange={onChange} />;
+    const cfg = param.config as PromptConfig;
+    const strVal = typeof value === 'string' ? value : cfg.default;
+    const isNeg = cfg.sentiment === 'negative';
+    const promptLabel = param.nodeTitle || (isNeg ? 'Negative Prompt' : 'Positive Prompt');
+
+    return (
+      <FancyTextArea
+        value={strVal}
+        onChange={(v) => onChange(v)}
+        label={promptLabel}
+        labelClassName={isNeg ? '!text-rose-500/80' : '!text-emerald-500/80'}
+        placeholder={cfg.placeholder || 'Describe what you want...'}
+        height={isNeg ? 'h-[136px]' : 'h-48'}
+        actions={{ collapsible: true, copy: true, delete: true }}
+        defaultCollapsed={isNeg}
+      />
+    );
   }
 
   // Number input (ComfyNumberInput with +/- buttons)
@@ -331,17 +299,13 @@ function ExposedParamControl({ param, value, isRandomSeed, onChange, onToggleRan
 
     if (cfg.multiline) {
       return (
-        <div className="flex flex-col bg-[var(--bg-stage)] p-2 rounded-xl border border-[var(--border-subtle)] focus-within:border-emerald-500/50 transition-colors">
-          <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight mb-1.5 px-1">
-            {displayLabel}
-          </span>
-          <textarea
-            value={strVal}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={cfg.placeholder || ''}
-            className="w-full h-24 bg-transparent border-none text-[11px] text-[var(--text-main)] resize-none focus:outline-none placeholder:text-[var(--text-muted)] leading-relaxed px-1"
-          />
-        </div>
+        <FancyTextArea
+          value={strVal}
+          onChange={(v) => onChange(v)}
+          label={displayLabel}
+          placeholder={cfg.placeholder || ''}
+          height="h-24"
+        />
       );
     }
 
@@ -368,7 +332,8 @@ function ExposedParamControl({ param, value, isRandomSeed, onChange, onToggleRan
 
 export interface InputSourceSelectorProps {
   inputSource: InputSource;
-  hasActiveLayer: boolean;
+  /** Whether a frame currently exists (needed for both sources) */
+  hasFrame: boolean;
   disabled?: boolean;
   onChangeSource: (src: InputSource) => void;
 }
@@ -377,20 +342,28 @@ export interface InputSourceSelectorProps {
  * Segmented toggle for choosing img2img input: Active Layer vs Merged Frame.
  * Uses FunctionTabs size="sm" for compact styling consistent with the design system.
  * Shows a status banner below indicating readiness.
+ *
+ * Status rules:
+ * - No frame open → amber "Open a frame first" (regardless of source)
+ * - merged-frame + frame exists → emerald "Using merged frame as input"
+ * - active-layer + frame exists → emerald "Using active layer as input"
+ *   (having a frame guarantees an active layer in the editor)
  */
-export function InputSourceSelector({ inputSource, hasActiveLayer, disabled, onChangeSource }: InputSourceSelectorProps) {
+export function InputSourceSelector({ inputSource, hasFrame, disabled, onChangeSource }: InputSourceSelectorProps) {
   const options = [
     { value: 'active-layer' as InputSource, label: 'Layer', icon: <Layers size={10} /> },
     { value: 'merged-frame' as InputSource, label: 'Frame', icon: <Frame size={10} /> },
   ];
 
-  // Status logic
-  const isReady = inputSource === 'merged-frame' || hasActiveLayer;
-  const statusTitle = inputSource === 'merged-frame'
-    ? 'Using merged frame as input'
-    : hasActiveLayer
-      ? 'Using active layer as input'
-      : 'Select an image layer first';
+  // Status logic — frame existence is the primary gate.
+  // Note: When a frame exists, an active layer is always guaranteed by the editor,
+  // so we don't need a separate hasActiveLayer check here.
+  const isReady = hasFrame;
+  const statusTitle = !hasFrame
+    ? 'Open a frame first'
+    : inputSource === 'merged-frame'
+      ? 'Using merged frame as input'
+      : 'Using active layer as input';
 
   return (
     <div className="flex flex-col gap-1.5">

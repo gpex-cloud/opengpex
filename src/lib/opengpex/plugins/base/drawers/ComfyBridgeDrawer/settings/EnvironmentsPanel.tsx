@@ -118,6 +118,20 @@ function ConnectionGuide() {
           <p className="text-[10px] opacity-80">If your ComfyUI has a public HTTPS URL (e.g. via Cloudflare Tunnel, ngrok, or your own reverse proxy), just enter it directly — no port forwarding needed. Example: <code className="bg-[var(--bg-stage)] px-1 rounded">https://comfy.yourdomain.com</code></p>
         </div>
 
+        {/* Browser Permission Notice */}
+        <div className="space-y-1.5 border-t border-[var(--border-subtle)] pt-3">
+          <p className="text-[11px]">
+            <strong className="text-[var(--text-main)]">⚠️ Browser Permission Prompt</strong>
+          </p>
+          <p className="text-[10px] opacity-80">When you first click <strong>Check Health</strong>, your browser (Chrome / Edge) may ask: <em>&quot;Allow this site to access other apps and services on your device?&quot;</em> — click <strong>Allow</strong>. This is required because the browser needs your permission to connect from this web page to your local ComfyUI service.</p>
+          <p className="text-[10px] opacity-80 mt-1"><strong className="text-[var(--text-main)]">Accidentally clicked Block?</strong> You can reset it:</p>
+          <ul className="text-[10px] opacity-80 list-disc pl-4 space-y-0.5">
+            <li>Click the <strong>🔒 lock icon</strong> (or tune icon) in the address bar → find <em>&quot;Access to private network&quot;</em> or <em>&quot;Access to local network resources&quot;</em> → set to <strong>Allow</strong></li>
+            <li>Or go to <code className="bg-[var(--bg-stage)] px-1 rounded">chrome://settings/content/siteDetails?site=YOUR_SITE_URL</code> → find the <em>&quot;Private network access&quot;</em> / <em>&quot;Local network access&quot;</em> permission → change to <strong>Allow</strong></li>
+            <li>Then refresh the page and try Check Health again</li>
+          </ul>
+        </div>
+
       </div>}
     </div>
   );

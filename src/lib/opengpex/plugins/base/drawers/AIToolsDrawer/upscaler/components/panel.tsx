@@ -29,16 +29,16 @@ import Switch from '@opengpex/editor/widgets/Switch';
 import Tooltip from '@opengpex/editor/widgets/Tooltip';
 import { useEditorState, useEditorServices, usePluginCommands } from '@opengpex/editor/core/context';
 import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
-import { upscaleStore } from './store';
-import type { UpscaleResult } from './store';
-import { ModelPanel, InferencePanel, ErrorPanel, ResultPanel } from '../_shared';
-import { formatMs } from '../_shared/utils';
-import { useAIToolPanel } from '../_shared/useToolPanel';
-import { upscaleClient } from './client';
-import type { UpscaleConfig, UpscaleModelEntry, UpscaleDpiMode } from './protocols';
-import { BUILTIN_UPSCALE_MODELS, DEFAULT_UPSCALE_CONFIG } from './protocols';
-import type { AIToolsDrawerCommandsMap } from '../commands.d';
-import type { ModelEntry } from '../_shared/types';
+import { upscaleStore } from '../store';
+import type { UpscaleResult } from '../store';
+import { ModelPanel, InferencePanel, ErrorPanel, ResultPanel } from '../../_shared';
+import { formatMs } from '../../_shared/utils';
+import { useAIToolPanel } from '../../_shared/useToolPanel';
+import { upscaleClient } from '../client';
+import type { UpscaleConfig, UpscaleModelEntry, UpscaleDpiMode } from '../protocols';
+import { MODEL_TYPE_KEY, MODEL_TYPE_NAME, BUILTIN_UPSCALE_MODELS, DEFAULT_UPSCALE_CONFIG } from '../protocols';
+import type { AIToolsDrawerCommandsMap } from '../../commands.d';
+import type { ModelEntry } from '../../_shared/types';
 
 // ─── UpscalerPanel ───────────────────────────────────────────────────────────
 
@@ -48,7 +48,8 @@ export function UpscalerPanel() {
   const { upscaleCmd, upscaleAbortCmd } = usePluginCommands<AIToolsDrawerCommandsMap>();
 
   const { config, setConfig, mgr, task, lastResult, error, isBusy } = useAIToolPanel<UpscaleConfig, UpscaleResult>({
-    configKey: 'upscale',
+    configKey: MODEL_TYPE_KEY,
+    toolDisplayName: MODEL_TYPE_NAME,
     defaultConfig: DEFAULT_UPSCALE_CONFIG,
     builtins: BUILTIN_UPSCALE_MODELS,
     store: upscaleStore,
@@ -74,8 +75,9 @@ export function UpscalerPanel() {
   const afterModelChange = useCallback((newActiveId: string, ensuredModels: ModelEntry[]) => {
     const newModel = ensuredModels.find(m => m.id === newActiveId) as UpscaleModelEntry | undefined;
     const newScale = (newModel?.scale === 2 ? 2 : 4) as 2 | 4;
-    setConfig({ targetScale: newScale });
-  }, [setConfig]);
+    // Return patch to be merged atomically with the model switch (avoids stale-closure overwrite)
+    return { targetScale: newScale };
+  }, []);
 
   const handleScaleChange = useCallback((scale: 2 | 4) => {
     setConfig({ targetScale: scale });

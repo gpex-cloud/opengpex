@@ -32,7 +32,7 @@
  * @example
  * ```tsx
  * <ModelSettings<UpscaleModelEntry>
- *   configKey="upscale"
+ *   configKey="upscaler"
  *   defaultConfig={DEFAULT_UPSCALE_CONFIG}
  *   builtins={BUILTIN_UPSCALE_MODELS}
  *   defaultNewModel={() => ({ ... })}
@@ -43,6 +43,7 @@
  * ```
  */
 
+import { useCallback, useRef } from 'react';
 import { Plus } from 'lucide-react';
 import { ModelCard } from './ModelCard';
 import { useModelSettings } from './useModelSettings';
@@ -96,6 +97,7 @@ export function ModelSettings<T extends ModelEntry>(props: ModelSettingsProps<T>
 
   const settings = useModelSettings<T>({
     configKey,
+    toolDisplayName: props.toolDisplayName,
     defaultConfig,
     builtins,
     defaultNewModel,
@@ -114,10 +116,39 @@ export function ModelSettings<T extends ModelEntry>(props: ModelSettingsProps<T>
     handleDownload,
     handleCancelDownload,
     handleDeleteCache,
+    handleExport,
+    handleImport,
   } = settings;
+
+  // ─── Import file input handling ─────────────────────────────────────────
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const importModelIdRef = useRef<string>('');
+
+  const handleImportClick = useCallback((modelId: string) => {
+    importModelIdRef.current = modelId;
+    importInputRef.current?.click();
+  }, []);
+
+  const handleImportFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && importModelIdRef.current) {
+      handleImport(importModelIdRef.current, file);
+    }
+    // Reset input so the same file can be re-selected
+    e.target.value = '';
+  }, [handleImport]);
 
   return (
     <div className="flex flex-col gap-3">
+      {/* Hidden file input for import */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".zip"
+        className="hidden"
+        onChange={handleImportFile}
+      />
+
       {/* ─── Toolbar: Add custom model ─────────────────────────── */}
       <div className="flex items-center justify-end">
         <button
@@ -156,6 +187,8 @@ export function ModelSettings<T extends ModelEntry>(props: ModelSettingsProps<T>
                 onDelete={() => handleDeleteCache(model.modelId)}
                 onRemove={!model.builtin ? () => removeModel(model.id) : undefined}
                 onCancelDownload={handleCancelDownload}
+                onExport={() => handleExport(model.modelId)}
+                onImport={() => handleImportClick(model.modelId)}
               />
               {/* ─── File Fields Footer ──────────────────────────── */}
               {hasFileFields && (
@@ -189,7 +222,7 @@ export function ModelSettings<T extends ModelEntry>(props: ModelSettingsProps<T>
               )}
               {/* ─── Custom Model Hint ────────────────────────────── */}
               {!model.builtin && customModelHint && (
-                <span className="block text-[9px] text-[var(--text-muted)] italic mt-1 px-2.5">
+                <span className="block text-[10px] text-[var(--text-muted)] italic mt-1 px-2.5">
                   ⚠️ {customModelHint}
                 </span>
               )}

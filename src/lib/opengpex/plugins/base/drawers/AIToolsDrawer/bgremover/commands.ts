@@ -27,6 +27,7 @@ import { bgRemoverClient } from './client';
 import type { BgRemoverRequest, BgRemoverResult as BgRemoverWorkerResult } from './worker.types';
 import type { ModelEntry } from './protocols';
 import {
+  MODEL_TYPE_KEY,
   BUILTIN_MODELS,
   DEFAULT_BG_REMOVAL_CONFIG,
   CMD_REMOVE_BG,
@@ -48,7 +49,7 @@ const { runCommand, abortCommand } = createToolCommand<
   name: { run: 'AI Remove Background', abort: 'Cancel Background Removal' },
   store: bgRemoverStore,
   client: bgRemoverClient,
-  configKey: 'bgremover',
+  configKey: MODEL_TYPE_KEY,
   defaultConfig: DEFAULT_BG_REMOVAL_CONFIG,
   builtins: BUILTIN_MODELS,
   toolName: 'Background removal',

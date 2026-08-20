@@ -27,6 +27,13 @@
  * Worker wire-level types live in `./worker.types.ts`.
  */
 
+// ─── Tool Identity ───────────────────────────────────────────────────────────
+
+/** Config sub-key used for persisted plugin config (e.g. `config.seg`). */
+export const MODEL_TYPE_KEY = 'seg' as const;
+/** Human-readable display name for this tool category. */
+export const MODEL_TYPE_NAME = 'Segmentation';
+
 // ─── Command IDs ─────────────────────────────────────────────────────────────
 
 /** Segmentation encode command — encodes a layer image into SAM embedding */

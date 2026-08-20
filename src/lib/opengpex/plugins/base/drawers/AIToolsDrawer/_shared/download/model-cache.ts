@@ -28,10 +28,14 @@
  *   - deleteModelCache: Remove a model's cached files
  *   - getModelCacheSize: Get approximate cached size for a model
  *   - getCacheUrl: Get the canonical cache URL for a model file
+ *   - exportModelAsZip: Export cached model files as a zip Blob
+ *   - importModelFromZip: Import model files from a zip Blob into Cache Storage
  *
  * Both the download service and the worker runtime use the same
  * URL scheme, ensuring cache hits are consistent.
  */
+
+import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
 
 /** Single cache namespace for all AI model files */
 export const CACHE_NAME = 'opengpex-ai-models';
@@ -184,5 +188,167 @@ export async function getModelCacheSize(modelId: string): Promise<number> {
     return totalSize;
   } catch {
     return 0;
+  }
+}
+
+// ─── Export / Import ─────────────────────────────────────────────────────────
+
+/** Manifest format embedded in exported zip packages */
+export interface ModelManifest {
+  format: 'opengpex-model-v1';
+  modelId: string;
+  modelName: string;
+  files: { filename: string; size: number }[];
+  exportedAt: string;
+}
+
+/** Progress callback for import operations */
+export interface ImportProgressCallback {
+  (current: number, total: number, currentFile: string): void;
+}
+
+/**
+ * Export cached model files as a zip Blob.
+ * Returns null if model is not fully cached.
+ *
+ * The zip contains:
+ *   - manifest.json (metadata + file list)
+ *   - All model files listed in the `files` parameter
+ *
+ * @param modelId - HuggingFace model ID (e.g. "briaai/RMBG-1.4")
+ * @param modelName - Human-readable model name (for manifest)
+ * @param files - List of files to export (same as download config)
+ */
+export async function exportModelAsZip(
+  modelId: string,
+  modelName: string,
+  files: { filename: string }[],
+): Promise<Blob | null> {
+  const cache = await caches.open(CACHE_NAME);
+
+  // Collect file data from cache
+  const zipData: Record<string, Uint8Array> = {};
+  const manifestFiles: { filename: string; size: number }[] = [];
+
+  for (const file of files) {
+    const url = getCacheUrl(modelId, file.filename);
+    const response = await cache.match(url);
+    if (!response) {
+      // Model not fully cached — cannot export
+      return null;
+    }
+    const buffer = await response.arrayBuffer();
+    zipData[file.filename] = new Uint8Array(buffer);
+    manifestFiles.push({ filename: file.filename, size: buffer.byteLength });
+  }
+
+  // Create manifest
+  const manifest: ModelManifest = {
+    format: 'opengpex-model-v1',
+    modelId,
+    modelName,
+    files: manifestFiles,
+    exportedAt: new Date().toISOString(),
+  };
+
+  // Add manifest to zip data
+  zipData['manifest.json'] = strToU8(JSON.stringify(manifest, null, 2));
+
+  // Create zip synchronously (fflate zipSync)
+  const zipped = zipSync(zipData, { level: 0 }); // level 0 = store only (model files are already compressed)
+
+  return new Blob([zipped], { type: 'application/zip' });
+}
+
+/**
+ * Import model files from a zip Blob into Cache Storage.
+ * Validates manifest and file integrity before writing.
+ *
+ * @param expectedModelId - The modelId that should match the zip manifest
+ * @param expectedFiles - The files expected for this model (from config)
+ * @param zipBlob - The zip file selected by the user
+ * @param onProgress - Optional progress callback (current, total, currentFile)
+ * @returns Success/failure result with optional error message
+ */
+export async function importModelFromZip(
+  expectedModelId: string,
+  expectedFiles: { filename: string }[],
+  zipBlob: Blob,
+  onProgress?: ImportProgressCallback,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Read zip into memory
+    const zipBuffer = await zipBlob.arrayBuffer();
+    const unzipped = unzipSync(new Uint8Array(zipBuffer));
+
+    // Parse manifest
+    const manifestData = unzipped['manifest.json'];
+    if (!manifestData) {
+      return { success: false, error: 'Not a valid OpenGPEX model package (manifest.json missing)' };
+    }
+
+    let manifest: ModelManifest;
+    try {
+      manifest = JSON.parse(strFromU8(manifestData));
+    } catch {
+      return { success: false, error: 'Invalid manifest.json format' };
+    }
+
+    // Validate format
+    if (manifest.format !== 'opengpex-model-v1') {
+      return { success: false, error: `Unsupported package format: ${manifest.format}` };
+    }
+
+    // Validate modelId
+    if (manifest.modelId !== expectedModelId) {
+      return {
+        success: false,
+        error: `This package is for model "${manifest.modelId}", but current model is "${expectedModelId}"`,
+      };
+    }
+
+    // Validate that all expected files are present in the zip
+    const expectedFilenames = expectedFiles.map(f => f.filename);
+    const missingFiles = expectedFilenames.filter(f => !unzipped[f]);
+    if (missingFiles.length > 0) {
+      return { success: false, error: `Package is missing files: ${missingFiles.join(', ')}` };
+    }
+
+    // Validate file sizes (must not be 0)
+    for (const filename of expectedFilenames) {
+      if (unzipped[filename].byteLength === 0) {
+        return { success: false, error: `File "${filename}" is empty (0 bytes)` };
+      }
+    }
+
+    // Write files to Cache Storage
+    const cache = await caches.open(CACHE_NAME);
+    const total = expectedFilenames.length;
+
+    for (let i = 0; i < expectedFilenames.length; i++) {
+      const filename = expectedFilenames[i];
+      onProgress?.(i + 1, total, filename);
+
+      const fileData = unzipped[filename];
+      const url = getCacheUrl(expectedModelId, filename);
+      await cache.put(
+        url,
+        new Response(fileData.buffer, {
+          headers: {
+            'content-type': 'application/octet-stream',
+            'content-length': String(fileData.byteLength),
+          },
+        }),
+      );
+    }
+
+    return { success: true };
+  } catch (err) {
+    // Handle invalid zip format
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('invalid') || message.includes('Invalid')) {
+      return { success: false, error: 'Invalid file format — not a valid zip file' };
+    }
+    return { success: false, error: `Import failed: ${message}` };
   }
 }

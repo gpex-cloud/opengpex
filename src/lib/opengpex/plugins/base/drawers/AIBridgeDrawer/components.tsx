@@ -211,7 +211,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
             >
               <Clock size={11} />
               <span className="uppercase font-bold tracking-wider">
-                Close History
+                Close
               </span>
             </FancyButton>
           </div>

@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.55
+
+- AI Tools: unified model cache with local export/import — all AI models share a single managed storage layer; cached models can be saved as zip and re-imported on another device without re-downloading
+- Image Info: cleaner display for AI generation metadata and frame details
+
+---
+
 ## v1.0.0-beta.54
 
 - Code Quality: unified asset ID naming across all public APIs (`assetId` everywhere, no more `id`/`hash` inconsistency)

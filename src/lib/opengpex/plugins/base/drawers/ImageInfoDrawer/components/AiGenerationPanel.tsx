@@ -20,7 +20,8 @@
 "use client";
 
 import React from "react";
-import { ChevronDown, Check, Copy } from "lucide-react";
+import { ChevronDown } from "lucide-react";
+import FancyTextArea from "@opengpex/editor/widgets/FancyTextArea";
 
 interface AiGenerationPanelProps {
   extra?: Record<string, unknown>;
@@ -28,7 +29,6 @@ interface AiGenerationPanelProps {
 
 export function AiGenerationPanel({ extra }: AiGenerationPanelProps) {
   const [isAiInfoExpanded, setIsAiInfoExpanded] = React.useState(false);
-  const [copiedField, setCopiedField] = React.useState<string | null>(null);
 
   if (!extra?.ai_generation) return null;
 
@@ -61,9 +61,6 @@ export function AiGenerationPanel({ extra }: AiGenerationPanelProps) {
     { label: "Negative Prompt", value: aiNegativePrompt },
   ].filter((item) => !!item.value);
 
-  // Summary line: model + mode
-  const summaryLine = [aiModel, aiMode].filter(Boolean).join(" • ");
-
   return (
     <div>
       <div className="flex flex-col bg-[var(--bg-stage)] rounded-xl border border-[var(--border-subtle)] overflow-hidden transition-all duration-300">
@@ -73,14 +70,18 @@ export function AiGenerationPanel({ extra }: AiGenerationPanelProps) {
           className="w-full flex items-center justify-between p-2 hover:bg-[var(--bg-stage)] transition-colors text-left select-none"
         >
           <div className="flex flex-col pr-2 overflow-hidden">
-            <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight mb-1">
-              AI Generation Data
-            </span>
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight">
+                AI-Gen Metadata
+              </span>
+              {aiModeRaw && (
+                <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase shrink-0">
+                  {aiModeRaw}
+                </span>
+              )}
+            </div>
             <span className="text-[10px] font-black text-[var(--text-main)] truncate">
-              {summaryLine || aiProvider}
-            </span>
-            <span className="text-[8px] font-bold text-[var(--text-muted)] truncate mt-0.5">
-              {aiProvider}
+              <span className="text-[var(--text-muted)] font-bold">from </span>{aiProvider}
             </span>
           </div>
           <ChevronDown
@@ -107,43 +108,19 @@ export function AiGenerationPanel({ extra }: AiGenerationPanelProps) {
               </div>
             ))}
 
-            {/* Long Text Metadata (Prompts) */}
+            {/* Long Text Metadata (Prompts) — readonly with copy button */}
             {textItems.map((item, i) => (
-              <div
+              <FancyTextArea
                 key={`text-${i}`}
-                className="flex flex-col gap-1 mt-1.5 pt-1.5 border-t border-[var(--border-subtle)] dark:border-white/10"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
-                    {item.label}
-                  </span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navigator.clipboard
-                        .writeText(String(item.value))
-                        .then(() => {
-                          setCopiedField(item.label);
-                          setTimeout(() => setCopiedField(null), 2000);
-                        });
-                    }}
-                    className="p-0.5 rounded transition-opacity focus:outline-none focus:ring-0"
-                    title="Copy to clipboard"
-                  >
-                    {copiedField === item.label ? (
-                      <Check size={10} className="text-emerald-500" />
-                    ) : (
-                      <Copy
-                        size={10}
-                        className="text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
-                      />
-                    )}
-                  </button>
-                </div>
-                <p className="text-[9px] font-semibold text-[var(--text-main)] leading-relaxed break-words whitespace-pre-wrap max-h-[80px] overflow-y-auto">
-                  {String(item.value)}
-                </p>
-              </div>
+                value={String(item.value)}
+                readonly
+                label={item.label}
+                // labelClassName={item.label === "Negative Prompt" ? "!text-rose-500/80" : "!text-emerald-500/80"}
+                actions={{ copy: true }}
+                height="h-[80px]"
+                slim
+                className="border-0 rounded-none bg-transparent"
+              />
             ))}
           </div>
         )}

@@ -173,6 +173,10 @@ function applyTextToMeta(key: string, value: string, meta: ImageMetadata): void 
   } else if (key === 'Software') {
     meta.camera = meta.camera || {};
     meta.camera.software = value;
+  } else if (key === 'prompt' || key === 'parameters' || key === 'workflow') {
+    // Preserve AI-related tEXt chunks (ComfyUI "prompt"/"workflow", SD WebUI "parameters")
+    meta.raw.pngText = meta.raw.pngText || {};
+    meta.raw.pngText[key] = value;
   }
 }
 

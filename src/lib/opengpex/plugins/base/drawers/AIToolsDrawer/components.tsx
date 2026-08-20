@@ -30,10 +30,10 @@ import { segStore } from './segmentation/store';
 import { upscaleStore } from './upscaler/store';
 import { inpaintEraserStore } from './inpaint/eraser/store';
 import { AIToolsIcon } from './icon';
-import { BgRemoverPanel } from './bgremover/panel';
-import { UpscalerPanel } from './upscaler/panel';
-import { SegmentationPanel } from './segmentation/panel';
-import { InpaintEraserPanel } from './inpaint/eraser/panel';
+import { BgRemoverPanel } from './bgremover/components/panel';
+import { UpscalerPanel } from './upscaler/components/panel';
+import { SegmentationPanel } from './segmentation/components/panel';
+import { InpaintEraserPanel } from './inpaint/eraser/components/panel';
 import type { AIToolsDrawerCommandsMap } from './commands.d';
 import { AIToolsDrawerAPI } from './protocols';
 
