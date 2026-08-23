@@ -58,7 +58,6 @@ export async function convertHeicToBlob(file: File): Promise<Blob> {
   });
 
   if (!blob) throw new Error('HEIC conversion returned null');
-  console.log('[HeicHandler] Conversion complete');
   return blob;
 }
 

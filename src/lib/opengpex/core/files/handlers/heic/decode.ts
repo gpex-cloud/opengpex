@@ -109,10 +109,11 @@ export async function decodeHeic(
     }
   }
 
-  // HEIC: sourceBlobRetention='never' per strategy table — no sourceBlob returned
+  // HEIC: sourceBlob retained for revert (original HEIC needed for metadata re-extraction)
   return {
     dimensions,
     metadata,
     subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }],
+    sourceBlob: file,
   };
 }

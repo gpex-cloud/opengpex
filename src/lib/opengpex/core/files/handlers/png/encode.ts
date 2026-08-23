@@ -36,7 +36,6 @@ export async function encodePng(
 ): Promise<Blob> {
   const meta = options.metadata;
   const config = options.exportConfig;
-  console.log(`[PngHandler.encode] encode start: colorSpace=${meta?.colorSpace}, embedIcc=${config?.embedIcc}, hasIccData=${!!meta?.raw?.icc?.data}`);
 
   // ── Strategy-based export color pipeline ──
   const frameCS: WorkingColorSpace = (config?.frameColorSpace as WorkingColorSpace) || 'srgb';

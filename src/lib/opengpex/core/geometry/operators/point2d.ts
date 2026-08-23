@@ -289,3 +289,42 @@ export function ellipseToLocalPolygon(rect: LocalRect, antiAliased: boolean = tr
   }
   return asLocalPolygon([ring], asLocalRect({ x, y, w, h }), antiAliased);
 }
+
+/**
+ * ellipseToPolygon: Fixed 360-point path-based ellipse polygon.
+ *
+ * Unlike `ellipseToLocalPolygon` (fixed 64 points, round-trips to type:'circle'),
+ * this produces a 360-point polygon that feeds into `polygonToShape` → `type:'path'`
+ * and uses the path rendering pipeline for pixel-perfect fragment/hole complementarity.
+ *
+ * Used by the Ellipse 2 (Path) selection tool to avoid the "clipped ellipse
+ * deformation" problem that occurs when a circle-typed selection is intersected
+ * with a layer.
+ *
+ * Why 360 is sufficient for any canvas size (even 8K):
+ *   - Chord error = L²/(8·r_min), where L = arc_length/360, r_min = min(rx,ry)²/max(rx,ry)
+ *   - For a 4000×5000 ellipse: chord_error ≈ 39²/(8×1600) ≈ 0.12px — sub-pixel
+ *   - For an 8K full-canvas ellipse: chord_error still < 0.5px
+ *   - Undo storage: 360 × 16B = 5.7 KB/step (negligible)
+ *   - Never triggers MARCHING_ANTS simplification (360 << budget)
+ *   - Never recognized as circle by `point2dToLocalShape` (which checks for 64 points)
+ *
+ * @param rect        The bounding rectangle of the ellipse in local (canvas) coordinates.
+ * @param antiAliased Whether the selection edge should be anti-aliased.
+ */
+export function ellipseToPolygon(rect: LocalRect, antiAliased: boolean = true): LocalPolygon {
+  const { x, y, w, h } = rect;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const rx = w / 2;
+  const ry = h / 2;
+  const N = 360;
+
+  const ring: LocalPoint[] = [];
+  for (let i = 0; i < N; i++) {
+    const theta = (2 * Math.PI * i) / N;
+    ring.push({ x: cx + rx * Math.cos(theta), y: cy + ry * Math.sin(theta) } as LocalPoint);
+  }
+
+  return asLocalPolygon([ring], asLocalRect({ x, y, w, h }), antiAliased);
+}

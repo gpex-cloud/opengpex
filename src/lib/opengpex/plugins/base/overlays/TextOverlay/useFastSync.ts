@@ -22,7 +22,7 @@ import { useEditorServices, useEditorState } from '@opengpex/editor/core/context
 import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
 import { Motion } from '@opengpex/editor/core/motion';
 import { Frame, CameraState, VolatileState, asLocalShape } from '@opengpex/editor/core/types';
-import { LayerUtils } from '@opengpex/editor/core/layer/LayerUtils';
+import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 
 /**
  * useTextEditorFastSync: Text editor fast track synchronizer

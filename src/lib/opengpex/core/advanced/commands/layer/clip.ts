@@ -27,37 +27,58 @@ import * as P from '@opengpex/editor/core/advanced/protocols';
 // Removed direct dependency on storage singleton, using ctx injection instead
 
 /**
+ * DRILL_USE_VECTOR_MASK: Toggle between VectorMask and BitmapMask for drill operations.
+ *
+ * - `true`  (recommended): Drill adds an inverted VectorMask per operation. Avoids
+ *   offscreen rendering → eliminates AA seam when subsequent lasso cut crosses the
+ *   layer. Each drill = one VectorMask entry (lightweight, undo-friendly).
+ *
+ * - `false` (legacy): Drill accumulates into a single BitmapMask PNG. Forces the
+ *   layer through the offscreen rendering path, which can cause visible AA seams
+ *   at lasso/path selection boundaries during subsequent copy/cut operations.
+ */
+const DRILL_USE_VECTOR_MASK = true;
+
+/**
  * Extract common logic of Cut and Copy: generate physical fragment and write to clipboard.
  * Caller must pass an already-resolved non-null `selection`.
+ *
+ * @param mode - 'copy' (default) or 'cut'. When 'cut', the returned result includes
+ *   `sourceHole` so callers can punch a hole in the source layer.
  */
 async function copyCropBoxToClipboard(
   ctx: EditorContextValue,
-  nameType: 'Layer'
+  nameType: 'Layer',
+  mode: 'copy' | 'cut' = 'copy'
 ) {
   const { activeFrame, activeLayer, actions } = ctx;
   if (!activeFrame || !activeLayer) return null;
 
   const latestLayer = actions.fast.latestLayer(activeFrame.id, activeLayer.id) || activeLayer;
 
-  // 1. Generate Physical Track: bake PNG Blob, primarily for external applications (e.g., WeChat, Word) to paste
+  // 1. Physical blob: always needed for external clipboard (WeChat, Word, etc.)
   const physicalResult = await ctx.layers.fragmentToLayerPhysical(activeFrame, latestLayer, nameType);
   if (!physicalResult) {
     actions.setInteraction({ selectionErrorPulse: Date.now() });
     return null;
   }
 
-  // 2. Generate Logical Track: generate a lossless layer object referencing the original image plus a visibleShape mask, specifically for internal system pasting
-  const logicalResult = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, nameType);
+  // 2. Preferred layer via unified strategy: lossless logical layer when possible,
+  //    falls back to physical. Also provides sourceHole for correct cut hole.
+  const preferredResult = await ctx.layers.fragmentToLayer(activeFrame, latestLayer, nameType, { mode });
 
-  // 3. Composite clipboard write: external software reads physicalResult.url (Blob), internal Paste command reads Metadata.layer (Logical Layer)
+  // 3. Composite clipboard write: external software reads physicalResult.url (Blob),
+  //    internal Paste command reads Metadata.layer (preferred strategy result)
   await ctx.clipboard.writeByUrl(physicalResult.url, {
-    layer: logicalResult ? logicalResult.newLayer : physicalResult.newLayer,
+    layer: preferredResult ? preferredResult.newLayer : physicalResult.newLayer,
     sourceFrameId: activeFrame.id,
   });
 
   return {
     ...physicalResult,
-    newLayer: logicalResult ? logicalResult.newLayer : physicalResult.newLayer
+    newLayer: preferredResult ? preferredResult.newLayer : physicalResult.newLayer,
+    invertedRegular: preferredResult?.invertedRegular ?? false,
+    sourceHole: preferredResult?.sourceHole,
   };
 }
 
@@ -98,7 +119,7 @@ export const LayerClipCommands = {
         }
       });
     },
-    shortcut: { key: 'c', meta: true }
+    shortcuts: [{ key: 'c', meta: true }, { key: 'c', ctrl: true }]
   } as EditorCommand<void, Promise<void>>,
 
   cut: {
@@ -121,14 +142,23 @@ export const LayerClipCommands = {
           const box = getClipBox(activeFrame);
 
           if (box) {
-            const result = await copyCropBoxToClipboard(ctx, 'Layer');
+            const result = await copyCropBoxToClipboard(ctx, 'Layer', 'cut');
             if (!result) return;
 
-            ctx.layers.updateLayer(activeFrame.id, tx => {
-              tx.edit(activeLayer.id)
-                .applyMask(result.localShape, true)
-                .patch({ metadata: { ...activeLayer.metadata, clipTool: activeFrame.latestClipTool } });
-            });
+            // Punch hole using pre-computed sourceHole descriptor from fragmentToLayer
+            if (result.sourceHole?.mask) {
+              ctx.layers.updateLayer(activeFrame.id, tx => {
+                const editor = tx.edit(activeLayer.id)
+                  .applyMask(
+                    result.sourceHole!.mask!.shape,
+                    result.sourceHole!.mask!.inverted,
+                    result.sourceHole!.mask!.feather
+                  );
+                if (result.sourceHole!.metadata) {
+                  editor.patch({ metadata: { ...activeLayer.metadata, ...result.sourceHole!.metadata } });
+                }
+              });
+            }
 
           } else {
             // Without selection: cut the entire layer (clear content, keep layer)
@@ -146,7 +176,7 @@ export const LayerClipCommands = {
         }
       });
     },
-    shortcut: { key: 'x', meta: true }
+    shortcuts: [{ key: 'x', meta: true }, { key: 'x', ctrl: true }]
   } as EditorCommand<void, Promise<void>>,
 
   paste: {
@@ -339,119 +369,132 @@ export const LayerClipCommands = {
         if (!box) return;
 
         const feather = payload?.feather ?? 0;
-        const w = Math.ceil(latestLayer.bounding.w);
-        const h = Math.ceil(latestLayer.bounding.h);
-        if (w <= 0 || h <= 0) return;
 
-        // ═══ Merged Drilled BitmapMask: find or create ═══
-        const existingMasks = latestLayer.bitmapMasks || [];
-        const drilledMask = existingMasks.find(m => m.tag === 'drilled');
+        if (DRILL_USE_VECTOR_MASK) {
+          // ═══ VectorMask path: add inverted VectorMask (no offscreen, no seam) ═══
+          const drillShape = polygonToShape(box);
+          const localShape = drillShape.type === 'path'
+            ? polygonToShape(geometry.polygon.frameLocalToLayerLocal(box, activeFrame, latestLayer))
+            : geometry.shape.frameLocalToLayerLocal(drillShape, activeFrame, latestLayer);
 
-        // Create OffscreenCanvas for mask composition
-        const maskCanvas = new OffscreenCanvas(w, h);
-        const maskCtx = maskCanvas.getContext('2d')!;
-
-        if (drilledMask) {
-          // Load existing drilled mask image
-          const response = await fetch(drilledMask.src);
-          const blob = await response.blob();
-          const img = await createImageBitmap(blob);
-          maskCtx.drawImage(img, 0, 0, w, h);
+          ctx.layers.updateLayer(activeFrame.id, tx => {
+            tx.edit(latestLayer.id).applyMask(localShape, true, feather);
+          });
         } else {
-          // Start with full white (alpha=255 everywhere = all visible)
-          maskCtx.fillStyle = '#ffffff';
-          maskCtx.fillRect(0, 0, w, h);
-        }
+          // ═══ BitmapMask path: merged drilled raster mask (legacy) ═══
+          const w = Math.ceil(latestLayer.bounding.w);
+          const h = Math.ceil(latestLayer.bounding.h);
+          if (w <= 0 || h <= 0) return;
 
-        // Punch hole using destination-out composite
-        maskCtx.globalCompositeOperation = 'destination-out';
+          const existingMasks = latestLayer.bitmapMasks || [];
+          const drilledMask = existingMasks.find(m => m.tag === 'drilled');
 
-        const drillShape = polygonToShape(box);
-        if (drillShape.type === 'path') {
-          // Irregular selection → polygon path
-          const layerPoly = geometry.polygon.frameLocalToLayerLocal(box, activeFrame, latestLayer);
-          const path = new Path2D();
-          for (const ring of layerPoly.rings) {
-            if (ring && ring.length > 0) {
-              path.moveTo(ring[0].x, ring[0].y);
-              for (let i = 1; i < ring.length; i++) {
-                path.lineTo(ring[i].x, ring[i].y);
+          // Create OffscreenCanvas for mask composition
+          const maskCanvas = new OffscreenCanvas(w, h);
+          const maskCtx = maskCanvas.getContext('2d')!;
+
+          if (drilledMask) {
+            // Load existing drilled mask image
+            const response = await fetch(drilledMask.src);
+            const blob = await response.blob();
+            const img = await createImageBitmap(blob);
+            maskCtx.drawImage(img, 0, 0, w, h);
+          } else {
+            // Start with full white (alpha=255 everywhere = all visible)
+            maskCtx.fillStyle = '#ffffff';
+            maskCtx.fillRect(0, 0, w, h);
+          }
+
+          // Punch hole using destination-out composite
+          maskCtx.globalCompositeOperation = 'destination-out';
+
+          const drillShape = polygonToShape(box);
+          if (drillShape.type === 'path') {
+            // Irregular selection → polygon path
+            const layerPoly = geometry.polygon.frameLocalToLayerLocal(box, activeFrame, latestLayer);
+            const path = new Path2D();
+            for (const ring of layerPoly.rings) {
+              if (ring && ring.length > 0) {
+                path.moveTo(ring[0].x, ring[0].y);
+                for (let i = 1; i < ring.length; i++) {
+                  path.lineTo(ring[i].x, ring[i].y);
+                }
+                path.closePath();
               }
-              path.closePath();
             }
-          }
 
-          if (feather > 0) {
-            const holeCanvas = new OffscreenCanvas(w, h);
-            const holeCtx = holeCanvas.getContext('2d')!;
-            holeCtx.fillStyle = '#ffffff';
-            holeCtx.fill(path, 'evenodd');
-            const blurCanvas = new OffscreenCanvas(w, h);
-            const blurCtx = blurCanvas.getContext('2d')!;
-            blurCtx.filter = `blur(${feather}px)`;
-            blurCtx.drawImage(holeCanvas, 0, 0);
-            maskCtx.drawImage(blurCanvas, 0, 0);
-          } else {
-            maskCtx.fillStyle = '#ffffff';
-            maskCtx.fill(path, 'evenodd');
-          }
-        } else {
-          // Regular selection → rect/ellipse shape
-          const localShape = geometry.shape.frameLocalToLayerLocal(drillShape, activeFrame, latestLayer);
-          const { x, y, w: sw, h: sh } = localShape.rect;
-
-          if (feather > 0) {
-            const holeCanvas = new OffscreenCanvas(w, h);
-            const holeCtx = holeCanvas.getContext('2d')!;
-            holeCtx.fillStyle = '#ffffff';
-            if (localShape.type === 'circle') {
-              holeCtx.beginPath();
-              holeCtx.ellipse(x + sw / 2, y + sh / 2, sw / 2, sh / 2, 0, 0, Math.PI * 2);
-              holeCtx.fill();
+            if (feather > 0) {
+              const holeCanvas = new OffscreenCanvas(w, h);
+              const holeCtx = holeCanvas.getContext('2d')!;
+              holeCtx.fillStyle = '#ffffff';
+              holeCtx.fill(path, 'evenodd');
+              const blurCanvas = new OffscreenCanvas(w, h);
+              const blurCtx = blurCanvas.getContext('2d')!;
+              blurCtx.filter = `blur(${feather}px)`;
+              blurCtx.drawImage(holeCanvas, 0, 0);
+              maskCtx.drawImage(blurCanvas, 0, 0);
             } else {
-              holeCtx.fillRect(x, y, sw, sh);
+              maskCtx.fillStyle = '#ffffff';
+              maskCtx.fill(path, 'evenodd');
             }
-            const blurCanvas = new OffscreenCanvas(w, h);
-            const blurCtx = blurCanvas.getContext('2d')!;
-            blurCtx.filter = `blur(${feather}px)`;
-            blurCtx.drawImage(holeCanvas, 0, 0);
-            maskCtx.drawImage(blurCanvas, 0, 0);
           } else {
-            maskCtx.fillStyle = '#ffffff';
-            if (localShape.type === 'circle') {
-              maskCtx.beginPath();
-              maskCtx.ellipse(x + sw / 2, y + sh / 2, sw / 2, sh / 2, 0, 0, Math.PI * 2);
-              maskCtx.fill();
+            // Regular selection → rect/ellipse shape
+            const localShape = geometry.shape.frameLocalToLayerLocal(drillShape, activeFrame, latestLayer);
+            const { x, y, w: sw, h: sh } = localShape.rect;
+
+            if (feather > 0) {
+              const holeCanvas = new OffscreenCanvas(w, h);
+              const holeCtx = holeCanvas.getContext('2d')!;
+              holeCtx.fillStyle = '#ffffff';
+              if (localShape.type === 'circle') {
+                holeCtx.beginPath();
+                holeCtx.ellipse(x + sw / 2, y + sh / 2, sw / 2, sh / 2, 0, 0, Math.PI * 2);
+                holeCtx.fill();
+              } else {
+                holeCtx.fillRect(x, y, sw, sh);
+              }
+              const blurCanvas = new OffscreenCanvas(w, h);
+              const blurCtx = blurCanvas.getContext('2d')!;
+              blurCtx.filter = `blur(${feather}px)`;
+              blurCtx.drawImage(holeCanvas, 0, 0);
+              maskCtx.drawImage(blurCanvas, 0, 0);
             } else {
-              maskCtx.fillRect(x, y, sw, sh);
+              maskCtx.fillStyle = '#ffffff';
+              if (localShape.type === 'circle') {
+                maskCtx.beginPath();
+                maskCtx.ellipse(x + sw / 2, y + sh / 2, sw / 2, sh / 2, 0, 0, Math.PI * 2);
+                maskCtx.fill();
+              } else {
+                maskCtx.fillRect(x, y, sw, sh);
+              }
             }
           }
-        }
 
-        // Export drilled mask as PNG and register in asset service
-        const blob = await maskCanvas.convertToBlob({ type: 'image/png' });
-        const { assetId, url } = await assets.register(blob, { w, h });
-        
-        // Update existing drilled mask or create new one
-        if (drilledMask) {
-          ctx.layers.updateLayer(activeFrame.id, tx => {
-            tx.edit(latestLayer.id).updateBitmapMask(drilledMask.id, { src: url, assetId });
-          });
-        } else {
-          // Create new BitmapMask with tag='drilled'
-          const newMask = {
-            id: `bmask-drilled-${Date.now()}`,
-            src: url,
-            assetId,
-            bounds: asLocalRect({ x: 0, y: 0, w, h }),
-            inverted: false,
-            enabled: true,
-            feather: 0,
-            tag: 'drilled',
-          };
-          ctx.layers.updateLayer(activeFrame.id, tx => {
-            tx.edit(latestLayer.id).patch({ bitmapMasks: [newMask, ...existingMasks] });
-          });
+          // Export drilled mask as PNG and register in asset service
+          const blob = await maskCanvas.convertToBlob({ type: 'image/png' });
+          const { assetId, url } = await assets.register(blob, { w, h });
+
+          // Update existing drilled mask or create new one
+          if (drilledMask) {
+            ctx.layers.updateLayer(activeFrame.id, tx => {
+              tx.edit(latestLayer.id).updateBitmapMask(drilledMask.id, { src: url, assetId });
+            });
+          } else {
+            // Create new BitmapMask with tag='drilled'
+            const newMask = {
+              id: `bmask-drilled-${Date.now()}`,
+              src: url,
+              assetId,
+              bounds: asLocalRect({ x: 0, y: 0, w, h }),
+              inverted: false,
+              enabled: true,
+              feather: 0,
+              tag: 'drilled',
+            };
+            ctx.layers.updateLayer(activeFrame.id, tx => {
+              tx.edit(latestLayer.id).patch({ bitmapMasks: [newMask, ...existingMasks] });
+            });
+          }
         }
 
         // NOTE: Selection is intentionally preserved after drill.

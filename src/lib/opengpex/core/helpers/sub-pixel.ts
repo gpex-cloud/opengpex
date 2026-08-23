@@ -34,9 +34,14 @@ import { LocalRect, Shape } from '@opengpex/editor/core/types';
  *
  * We clamp the logical shrink to at most 25% of the shape's smaller dimension to prevent self-inversion for tiny shapes.
  *
+ * [Boundary-Aware Shrink]:
+ * When `layerBounds` is provided, edges that coincide with (or are within 1px of) the layer boundary
+ * are NOT shrunk. There is no AA seam at the layer boundary (no image content beyond it), so shrinking
+ * those edges would only create a visible 1-pixel gap when the user drills along the image edge.
+ *
  * Shared pure function supporting geometric operations under both the main thread and the WebWorker background compositing thread.
  */
-export function shrinkInvertedMask<T extends Shape>(shape: T, inverted: boolean, scale = 1): T {
+export function shrinkInvertedMask<T extends Shape>(shape: T, inverted: boolean, scale = 1, layerBounds?: { w: number; h: number }): T {
   // If in hard-edge (non-anti-aliasing) mode, absolutely immune to any subpixel level position offsets!
   // Otherwise it will break the integer pixel alignment of hard edges, causing anti-aliasing to reappear.
   if (shape.antiAliased === false) {
@@ -49,14 +54,27 @@ export function shrinkInvertedMask<T extends Shape>(shape: T, inverted: boolean,
     const maxShrink = 0.25 * Math.min(shape.rect.w, shape.rect.h);
     const shrinkLogical = Math.min(0.75 / scale, maxShrink);
 
+    // Boundary-aware: skip shrink on edges touching the layer boundary (within 1px tolerance).
+    // At boundary edges, there's no image content beyond → no AA seam can exist → shrink is harmful.
+    const EDGE_TOLERANCE = 1;
+    const touchLeft = layerBounds ? shape.rect.x < EDGE_TOLERANCE : false;
+    const touchTop = layerBounds ? shape.rect.y < EDGE_TOLERANCE : false;
+    const touchRight = layerBounds ? (shape.rect.x + shape.rect.w) > (layerBounds.w - EDGE_TOLERANCE) : false;
+    const touchBottom = layerBounds ? (shape.rect.y + shape.rect.h) > (layerBounds.h - EDGE_TOLERANCE) : false;
+
+    const shrinkLeft = touchLeft ? 0 : shrinkLogical;
+    const shrinkTop = touchTop ? 0 : shrinkLogical;
+    const shrinkRight = touchRight ? 0 : shrinkLogical;
+    const shrinkBottom = touchBottom ? 0 : shrinkLogical;
+
     return {
       ...shape,
       rect: {
         ...shape.rect,
-        x: shape.rect.x + shrinkLogical,
-        y: shape.rect.y + shrinkLogical,
-        w: Math.max(0.1, shape.rect.w - 2 * shrinkLogical),
-        h: Math.max(0.1, shape.rect.h - 2 * shrinkLogical)
+        x: shape.rect.x + shrinkLeft,
+        y: shape.rect.y + shrinkTop,
+        w: Math.max(0.1, shape.rect.w - shrinkLeft - shrinkRight),
+        h: Math.max(0.1, shape.rect.h - shrinkTop - shrinkBottom)
       } as typeof shape.rect
     };
   }

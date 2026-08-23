@@ -19,73 +19,16 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, LocalShape, LocalPolygon, Frame, Layer } from '@opengpex/editor/core/types';
-import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
-import * as P from '@opengpex/editor/core/advanced/protocols';
+import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
-import { isBoundingRing, point2dToLocalShape } from '@opengpex/editor/core/geometry/operators/point2d';
-
-/**
- * Resolve result: contains the layer-local shape and an inversion hint.
- *
- * When `invertedRegular` is true, the original polygon was an "inverted regular"
- * (canvas boundary outer ring + single recognizable rect/ellipse inner ring).
- * In this case, `shape` is the extracted inner regular shape (type:'rect' or 'circle'),
- * and the caller should FLIP its inversion semantics to maintain pixel-perfect boundary
- * alignment with other rect/ellipse masks.
- */
-interface ResolvedShape {
-  shape: LocalShape;
-  invertedRegular: boolean;
-}
-
-/**
- * Resolve the selection box into a LocalShape in the target layer's local coordinates.
- *
- * Special handling for "inverted regular" polygons:
- *   When a rect/ellipse is inverted (Cmd+Shift+I), it becomes a polygon with
- *   [canvasBoundaryRing, originalShapeRing]. If we naively convert this to a
- *   `type:'path'` shape, the path renderer applies anti-aliasing at the inner
- *   ring boundary — causing visible seams against the original pixel-perfect
- *   rect/ellipse mask from a prior cut/copy.
- *
- *   Detection: 2-ring polygon where ring[0] ≈ canvas boundary and ring[1] is
- *   recognizable as a rect (4 axis-aligned points) or ellipse (64-point fit).
- *   When detected, we extract the inner ring as a proper LocalShape and signal
- *   `invertedRegular: true` so callers can flip their mask inversion flag —
- *   achieving the same visual result with pixel-perfect boundaries.
- */
-function resolveLocalShape(
-  box: LocalPolygon,
-  activeFrame: Frame,
-  targetLayer: Layer,
-  geometry: EditorContextValue['geometry']
-): ResolvedShape {
-  const layerPoly = geometry.polygon.frameLocalToLayerLocal(box, activeFrame, targetLayer);
-
-  // Detect "inverted regular" pattern: [canvasBoundary, regularShape]
-  if (layerPoly.rings.length === 2) {
-    const outerRing = layerPoly.rings[0];
-    const innerRing = layerPoly.rings[1];
-    const layerW = targetLayer.bounding.w;
-    const layerH = targetLayer.bounding.h;
-
-    if (isBoundingRing(outerRing, layerW, layerH)) {
-      const innerShape = point2dToLocalShape([innerRing], box.antiAliased ?? true);
-      if (innerShape) {
-        return { shape: innerShape, invertedRegular: true };
-      }
-    }
-  }
-
-  return { shape: polygonToShape(layerPoly), invertedRegular: false };
-}
+import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**
  * CMD+J commands: Create new layers by copying or cutting selections.
  *
- * feather === 0: uses fragmentToLayerLogical (geometric crop, zero overhead).
- * feather > 0: duplicates the full layer + VectorMask (no hard edges).
+ * Uses the unified `fragmentToLayer` entry point which resolves the optimal
+ * strategy (vectorMask / logical / physical) based on selection type, layer
+ * geometry, feather, and AA settings.
  */
 export const LayerCmdJCommands = {
   copyToLayer: {
@@ -93,7 +36,7 @@ export const LayerCmdJCommands = {
     name: 'Copy to Layer',
     undoable: true,
     execute: async (ctx: EditorContextValue, payload?: { feather?: number }): Promise<void> => {
-      const { activeFrame, activeLayer, state, geometry } = ctx;
+      const { activeFrame, activeLayer, state } = ctx;
       const isClipMode = state.interaction.interactionMode === 'clip';
 
       if (!activeFrame || !activeLayer || !isClipMode || activeLayer.type !== 'image') {
@@ -107,35 +50,13 @@ export const LayerCmdJCommands = {
         const feather = payload?.feather ?? 0;
 
         if (box) {
-          const { shape: localShape, invertedRegular } = resolveLocalShape(box, activeFrame, latestLayer, geometry);
-
-          if (feather > 0 || invertedRegular) {
-            // Feathered OR invertedRegular: duplicate full layer + VectorMask.
-            // (see cutToLayer comment for invertedRegular rationale)
-            const newName = ctx.layers.getNewLayerName(
-              activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), 'Layer'
-            );
-            // New layers must never inherit lock/interactive state from the source
-            const { id: _id, hostId: _pid, role: _role, locked: _locked, interactive: _inter, ...layerData } = latestLayer;
-            const newLayer = ctx.layers.getNewLayer({
-              ...layerData, name: newName, vectorMasks: [],
-            });
-            // If invertedRegular, the shape is the inner rect/ellipse — to reveal
-            // "everything except that shape" we use inverted=true (pixel-perfect boundary).
-            // Normal case: reveal only the shape area → inverted=false.
-            newLayer.vectorMasks = [ctx.layers.getNewVectorMask(localShape, invertedRegular, feather)];
-            // Record source clip tool so refocus can restore the correct tool slot
-            if (activeFrame.latestClipTool) {
-              newLayer.metadata = { ...newLayer.metadata, clipTool: activeFrame.latestClipTool };
-            }
-            ctx.layers.addLayer(activeFrame.id, newLayer);
-          } else {
-            // Non-feathered, non-invertedRegular: geometric fragment crop.
-            const result = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, 'Layer');
-            if (!result) { ctx.actions.setInteraction({ selectionErrorPulse: Date.now() }); return; }
-            result.newLayer.locked = false; // New layers must never inherit lock state
-            ctx.layers.addLayer(activeFrame.id, result.newLayer);
+          const result = await ctx.layers.fragmentToLayer(activeFrame, latestLayer, 'Layer', { feather });
+          if (!result) {
+            ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
+            return;
           }
+          result.newLayer.locked = false; // New layers must never inherit lock state
+          ctx.layers.addLayer(activeFrame.id, result.newLayer);
         } else {
           // No selection: copy entire layer
           const newName = ctx.layers.getNewLayerName(
@@ -155,7 +76,7 @@ export const LayerCmdJCommands = {
     name: 'Cut to Layer',
     undoable: true,
     execute: async (ctx: EditorContextValue, payload?: { feather?: number }): Promise<void> => {
-      const { activeFrame, activeLayer, actions, state, geometry } = ctx;
+      const { activeFrame, activeLayer, actions, state } = ctx;
       const isClipMode = state.interaction.interactionMode === 'clip';
       if (!activeFrame || !activeLayer || !isClipMode || activeLayer.type !== 'image') {
         actions.setInteraction({ selectionErrorPulse: Date.now() });
@@ -171,52 +92,32 @@ export const LayerCmdJCommands = {
         }
 
         const feather = payload?.feather ?? 0;
-        const { shape: localShape, invertedRegular } = resolveLocalShape(box, activeFrame, latestLayer, geometry);
 
-        // Punch a hole in the original layer (inverted mask).
-        // Normal: applyMask(shape, inverted=true) = "hide the selection area".
-        // invertedRegular: shape is the inner rect/ellipse. To hide "everything
-        // except that shape" (= the inverted selection area), we use inverted=false
-        // (= "show only that shape" = hide everything else). This gives pixel-
-        // perfect boundary alignment.
-        ctx.layers.updateLayer(activeFrame.id, (tx) => {
-          tx.edit(activeLayer.id)
-            .applyMask(localShape, !invertedRegular, feather)
-            .patch({ metadata: { ...latestLayer.metadata, clipTool: activeFrame.latestClipTool } });
-        });
-
-        if (feather > 0 || invertedRegular) {
-          // Feathered OR invertedRegular: duplicate full layer + VectorMask.
-          //
-          // invertedRegular uses this path even at feather=0 because
-          // fragmentToLayerLogical would produce a path-type visibleShape with
-          // anti-aliased boundaries, causing seams against the pixel-perfect rect
-          // mask on the source layer. Using a proper VectorMask (rect + inverted)
-          // ensures both source and fragment share the same pixel-perfect boundary.
-          const newName = ctx.layers.getNewLayerName(
-            activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), 'Layer'
-          );
-          // New layers must never inherit lock/interactive state from the source
-          const { id: _id, hostId: _pid, role: _role, locked: _locked, interactive: _inter, ...layerData } = latestLayer;
-          const newLayer = ctx.layers.getNewLayer({
-            ...layerData, name: newName, vectorMasks: [],
-          });
-          // For the new layer: show the selection area.
-          // Normal: inverted=false (show the polygon area).
-          // invertedRegular: inverted=true (hide the rect = show everything else).
-          newLayer.vectorMasks = [ctx.layers.getNewVectorMask(localShape, invertedRegular, feather)];
-          // Record source clip tool so refocus can restore the correct tool slot
-          if (activeFrame.latestClipTool) {
-            newLayer.metadata = { ...newLayer.metadata, clipTool: activeFrame.latestClipTool };
-          }
-          ctx.layers.addLayer(activeFrame.id, newLayer);
-        } else {
-          // Non-feathered, non-invertedRegular: geometric fragment crop.
-          const result = ctx.layers.fragmentToLayerLogical(activeFrame, latestLayer, 'Layer');
-          if (!result) { actions.setInteraction({ selectionErrorPulse: Date.now() }); return; }
-          result.newLayer.locked = false; // New layers must never inherit lock state
-          ctx.layers.addLayer(activeFrame.id, result.newLayer);
+        // Create fragment via unified strategy resolver (mode:'cut' generates sourceHole)
+        const result = await ctx.layers.fragmentToLayer(activeFrame, latestLayer, 'Layer', { feather, mode: 'cut' });
+        if (!result) {
+          actions.setInteraction({ selectionErrorPulse: Date.now() });
+          return;
         }
+
+        // Punch a hole in the source layer using the pre-computed sourceHole descriptor.
+        if (result.sourceHole?.mask) {
+          ctx.layers.updateLayer(activeFrame.id, (tx) => {
+            const editor = tx.edit(activeLayer.id)
+              .applyMask(
+                result.sourceHole!.mask!.shape,
+                result.sourceHole!.mask!.inverted,
+                result.sourceHole!.mask!.feather
+              );
+            if (result.sourceHole!.metadata) {
+              editor.patch({ metadata: { ...latestLayer.metadata, ...result.sourceHole!.metadata } });
+            }
+          });
+        }
+
+        // Add the fragment layer
+        result.newLayer.locked = false; // New layers must never inherit lock state
+        ctx.layers.addLayer(activeFrame.id, result.newLayer);
       } catch (err) {
         console.error('[ClipCommands] Layer via Cut failed:', err);
       }

@@ -227,7 +227,7 @@ export function ClipOverlayMain() {
             { h: "sw", c: "bottom-0 left-0", cursor: "nesw-resize" },
             { h: "se", c: "bottom-0 right-0", cursor: "nwse-resize" },
           ].map((p) => {
-            const isEllipse = clipTool === "ellipse";
+            const isEllipse = clipTool === "ellipse" || clipTool === "pathellipse";
             return (
               <div
                 key={p.h}

@@ -94,13 +94,17 @@ export const LayerMenu = React.memo(
       });
     }
 
-    if (canDelete) {
+    // Rasterize — available whenever the layer has masks or non-physical content
+    // (independent of canDelete; single-layer with masks should be rasterize-able)
+    if (hasMasks) {
       options.push({
         label: "Rasterize",
         value: "rasterize",
         icon: <ImageIcon size={12} />,
       });
+    }
 
+    if (canDelete) {
       options.push({
         divider: true,
       });

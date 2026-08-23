@@ -112,8 +112,10 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
  * (toolbar click, popover, or this very command in a previous beat).
  */
 function cycleClipTool(ctx: EditorContextValue, step: 1 | -1): void {
-  const order = Object.keys(P.CLIP_TOOL_STRATEGIES) as ClipTool[];
-  const current = (ctx.activeFrame?.latestClipTool as ClipTool | undefined) ?? order[0];
+  const order = (Object.keys(P.CLIP_TOOL_STRATEGIES) as ClipTool[]).filter(t => P.CLIP_TOOL_STRATEGIES[t].enabled !== false);
+  const raw = (ctx.activeFrame?.latestClipTool as ClipTool | undefined) ?? order[0];
+  // Fallback: if the frame still has 'ellipse' from legacy data, map it to 'pathellipse'
+  const current = raw === 'ellipse' ? 'pathellipse' : raw;
   const idx = order.indexOf(current);
   // `(idx + step + len) % len` keeps the modulo non-negative even for step=-1.
   const next = order[(idx + step + order.length) % order.length];

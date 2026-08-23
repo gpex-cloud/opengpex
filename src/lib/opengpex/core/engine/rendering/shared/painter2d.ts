@@ -127,7 +127,7 @@ export function applyClipSequence(
     if ((clip.feather || 0) > 0) continue;
 
     if (clip.inverted) {
-      const path = clip.__compiledPath2D || shapeToPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale));
+      const path = clip.__compiledPath2D || shapeToPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale, layer.bounding));
       const invertedPath = new Path2D();
       let vx = 0, vy = 0;
       if (layer.visibleShape) {
@@ -138,7 +138,7 @@ export function applyClipSequence(
       invertedPath.addPath(path);
       ctx.clip(invertedPath, 'evenodd');
     } else {
-      const path = clip.__compiledPath2D || shapeToPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale));
+      const path = clip.__compiledPath2D || shapeToPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale, layer.bounding));
       ctx.clip(path, clip.shape.type === 'path' ? 'evenodd' : 'nonzero');
     }
   }
@@ -185,7 +185,7 @@ export function applyFeatheredClipComposite(
 
     maskCtx.translate(blurPad - vx, blurPad - vy);
 
-    const path = clip.__compiledPath2D || shapeToPath2D(shrinkInvertedMask(clip.shape, clip.inverted));
+    const path = clip.__compiledPath2D || shapeToPath2D(shrinkInvertedMask(clip.shape, clip.inverted, 1, layer.bounding));
 
     if (clip.inverted) {
       const invertedPath = new Path2D();

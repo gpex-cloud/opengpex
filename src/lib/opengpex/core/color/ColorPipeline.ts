@@ -124,7 +124,7 @@ export const FORMAT_COLOR_STRATEGY: Record<SourceFormat, FormatColorStrategy> = 
     readColorMetadata: true,
     supportsIccEmbed: false,  // HEIC is decode-only, no export path
     possibleColorSpaces: ['srgb', 'display-p3'],
-    sourceBlobRetention: 'never',  // HEIC has no export path, sourceBlob has no consumer (canUseFastExport won't match)
+    sourceBlobRetention: 'always',  // No export path, but revert needs original HEIC for metadata re-extraction
   },
 
   'tiff': {

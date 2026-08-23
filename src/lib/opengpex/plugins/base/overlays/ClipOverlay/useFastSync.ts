@@ -32,10 +32,27 @@ const EMPTY_SHAPE: LocalShape = asLocalShape({ x: 0, y: 0, w: 0, h: 0 });
 /**
  * Cached simplified polygon for marching ants display.
  * Avoids re-running Douglas–Peucker on every tick when data hasn't changed.
+ *
+ * Cache invalidation keys:
+ *   - `sourceRings` (reference equality): Detects when the polygon geometry changes.
+ *     For regular tools (rect/ellipse), `regularShapeToLocalPolygon` always creates
+ *     a new array → new reference → cache invalidates naturally.
+ *     For irregular tools (lasso/wand), rings are the original user-drawn/algorithm-
+ *     generated point set — they never change because AA only affects rendering style,
+ *     not the underlying geometry. toggleAntiAlias patches only the `antiAliased` flag
+ *     via shallow spread (`{ ...clipBox, antiAliased }`), preserving the same rings ref.
+ *
+ *   - `antiAliased` (value equality): Detects when the rendering style changes.
+ *     The same rings produce different SVG paths depending on AA (smooth M/L/Z vs
+ *     Bresenham staired H/V steps). Without this key, toggling AA on an irregular
+ *     polygon would return stale cached path — the ants wouldn't visually update
+ *     until the tool is switched and switched back (which clears the cache).
  */
 interface AntsSimplifyCache {
   /** Source polygon identity (reference equality check) */
   sourceRings: Point2D[][];
+  /** AA state at time of caching (path changes between smooth/staired) */
+  antiAliased: boolean;
   /** Simplified SVG path `d` string */
   simplifiedD: string;
 }
@@ -244,9 +261,10 @@ export function useSelectionAntsSync(
     const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
     if (!entry) return null;
 
-    // Cache hit: same polygon rings reference → return cached SVG path string
+    // Cache hit: same polygon rings reference AND same AA state → return cached SVG path string
     const cache = antsCacheRef.current;
-    if (cache && cache.sourceRings === entry.rings) {
+    const entryAA = entry.antiAliased !== false;
+    if (cache && cache.sourceRings === entry.rings && cache.antiAliased === entryAA) {
       return cache.simplifiedD;
     }
 
@@ -254,8 +272,8 @@ export function useSelectionAntsSync(
     const simplified = simplifyPolygonForAnts(entry, geometry.polygon.simplifyRing);
     const d = geometry.polygon.polygonToSvgPathD(simplified);
 
-    // Store in cache
-    antsCacheRef.current = { sourceRings: entry.rings, simplifiedD: d };
+    // Store in cache (include AA state for invalidation on toggle)
+    antsCacheRef.current = { sourceRings: entry.rings, antiAliased: entryAA, simplifiedD: d };
     return d;
   };
 
@@ -282,7 +300,7 @@ export function useSelectionAntsSync(
     const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
     // Irregular polygon: rings.length > 1 or ring has many points (lasso/wand/AI)
     const isIrregular = entry && entry.rings.length > 0 && entry.rings[0].length > 64;
-    pathRef.current.setAttribute('fill', isIrregular ? 'rgba(240, 230, 255, 0.12)' : 'none');
+    pathRef.current.setAttribute('fill', isIrregular ? 'rgba(240, 230, 255, 0.06)' : 'none');
   });
 
   // Group visibility: hidden when no data

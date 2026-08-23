@@ -19,6 +19,7 @@
 
 import { Frame, Layer, VectorMask, BitmapMask } from '@opengpex/editor/core/types/models';
 import { LocalShape, LocalPolygon, LocalRect, Dimensions } from '@opengpex/editor/core/types/primitives';
+import type { FragmentStrategy, FragmentResult } from './services/fragment';
 
 /**
  * LayerService: Layer domain model service (Domain: Layer)
@@ -49,8 +50,10 @@ export interface LayerService {
   getNewFrame: (patch: Partial<Frame>) => Frame;
   getNewLayerName: (layers: Array<{ name: string }>, baseName: string) => string;
   sortLayers: (layers: Layer[]) => Layer[];
+  /** Unified fragment entry point — resolves strategy and executes the optimal path */
+  fragmentToLayer: (frame: Frame, layer: Layer, nameType: string, options?: { feather?: number; mode?: 'copy' | 'cut' }) => Promise<FragmentResult | null>;
+  /** Physical fragment: always produces a baked PNG blob (needed for clipboard external paste) */
   fragmentToLayerPhysical: (frame: Frame, layer: Layer, nameType: string) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
-  fragmentToLayerLogical: (frame: Frame, layer: Layer, nameType: string) => { newLayer: Layer, localShape: LocalShape } | null;
   /** Physically resamples layer: adjusts pixel resolution and proportionally scales visible areas and masks */
   resampleLayerPhysical: (layer: Layer, scaleX: number, scaleY: number, frame: Frame) => Promise<{ newUrl: string, newAssetId: string, patch: Partial<Layer> } | null>;
   /** Applies a fragment to an existing layer (e.g. Exchange layer) */

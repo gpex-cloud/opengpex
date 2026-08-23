@@ -289,7 +289,7 @@ export class Canvas2dEngine implements IRenderer {
     if (layer.type === 'color') {
       const preparedClips = clipSequence?.map(clip => ({
         ...clip,
-        __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale)),
+        __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale, layer.bounding)),
       }));
       drawLayerInstance(ctx, layer, null, {
         matrix, opacity, clipSequence: preparedClips, width: options.width, height: options.height, drawRect, imageSmoothingQuality,
@@ -312,7 +312,7 @@ export class Canvas2dEngine implements IRenderer {
       // --- Tile Rendering Path ---
       const preparedClips = clipSequence?.map(clip => ({
         ...clip,
-        __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale)),
+        __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale, layer.bounding)),
       }));
 
       const { tileCount, missCount } = computeTileJobs(
@@ -353,7 +353,7 @@ export class Canvas2dEngine implements IRenderer {
       if (rawImg) {
         const preparedClips = clipSequence?.map(clip => ({
           ...clip,
-          __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale)),
+          __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale, layer.bounding)),
         }));
         const { img: effImg, layer: effLayer } = this.resolveFilteredSource(layer, rawImg, isExporting, isInteracting);
         drawLayerInstance(ctx, effLayer, effImg, {
@@ -581,19 +581,19 @@ export class Canvas2dEngine implements IRenderer {
     // 6. Return offscreen canvas
     this.releaseOffscreen(offscreen);
 
-    const _offDuration = performance.now() - _offT0;
-    if (_offDuration > 8) {
-      const reason = (layer.bitmapMasks?.some(bm => bm.enabled))
-        ? 'bitmapMask'
-        : (layer.blendMode && layer.blendMode !== 'source-over')
-          ? layer.blendMode
-          : (layer.adjustments?.blur ?? 0) > 0
-            ? 'blur'
-            : 'blend';
-      console.debug(
-        `[Canvas2dEngine.offscreen] layer="${layer.name}" reason=${reason} size=${finalW}x${finalH} took ${_offDuration.toFixed(1)}ms`,
-      );
-    }
+    // const _offDuration = performance.now() - _offT0;
+    // if (_offDuration > 8) {
+    //   const reason = (layer.bitmapMasks?.some(bm => bm.enabled))
+    //     ? 'bitmapMask'
+    //     : (layer.blendMode && layer.blendMode !== 'source-over')
+    //       ? layer.blendMode
+    //       : (layer.adjustments?.blur ?? 0) > 0
+    //         ? 'blur'
+    //         : 'blend';
+    //   console.debug(
+    //     `[Canvas2dEngine.offscreen] layer="${layer.name}" reason=${reason} size=${finalW}x${finalH} took ${_offDuration.toFixed(1)}ms`,
+    //   );
+    // }
   }
 
   // ─── Filter Resolution ───

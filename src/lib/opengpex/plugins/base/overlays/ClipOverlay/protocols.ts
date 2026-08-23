@@ -70,12 +70,12 @@ export const MARCHING_ANTS_ANIMATED = false;
  * With animation disabled (static), vertices only affect initial paint cost.
  *
  * Visual impact: More vertices = smoother/more accurate selection outline.
- * 400 is a good balance; complex selections (wand/lasso) may benefit from
- * higher values (800-1200) for accuracy, at the cost of GPU during animation.
+ * The Ellipse 2 tool uses a fixed 360-point polygon (never exceeds this budget).
+ * This limit primarily constrains complex lasso/wand selections.
  *
  * Recommended ranges:
  *   - 200-400: Fast, suitable for simple rect/ellipse selections
  *   - 400-800: Balanced, good for most use cases
  *   - 800-1500: High fidelity, for complex polygon/wand selections
  */
-export const MARCHING_ANTS_MAX_VERTICES = 600;
+export const MARCHING_ANTS_MAX_VERTICES = 3600;

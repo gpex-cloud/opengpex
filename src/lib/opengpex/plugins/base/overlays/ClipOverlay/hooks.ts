@@ -28,6 +28,7 @@ import {
   CLIP_TOOL_STRATEGIES,
   ClipTool,
 } from '../../options/ClipOptions/protocols';
+import { CLIP_PATHELLIPSE_CURSOR } from '@opengpex/editor/icons';
 
 /**
  * useClipOverlayCommands: Encapsulates UI helper logic and command proxies
@@ -149,14 +150,21 @@ export function useClipCursor(
   const isInteractingRef = useRef(false);
   useLayoutEffect(() => { isInteractingRef.current = !!state.interaction.isInteracting; });
 
+  // Read AA state for dynamic cursor switching (ellipse/pathellipse: dashed cursor when AA off)
+  const clipBox_AA = (activeFrame?.clipBoxes?.[clipTool] as LocalPolygon | undefined)?.antiAliased ?? true;
+
   useEffect(() => {
     if (isClipActive) {
-      const toolCursor = CLIP_TOOL_STRATEGIES[clipTool].cursor;
+      // For ellipse-family tools: switch to dashed cursor when AA is off
+      const isEllipseFamily = clipTool === 'ellipse' || clipTool === 'pathellipse';
+      const toolCursor = isEllipseFamily && !clipBox_AA
+        ? CLIP_PATHELLIPSE_CURSOR
+        : CLIP_TOOL_STRATEGIES[clipTool].cursor;
       actions.fast.setCursor(toolCursor);
     } else {
       actions.fast.setCursor(null);
     }
-  }, [isClipActive, clipTool, actions]);
+  }, [isClipActive, clipTool, clipBox_AA, actions]);
 
   // ─── Polygon hover cursor for irregular tools ──────────────────────────
   useEffect(() => {
@@ -275,7 +283,7 @@ export function useClipCursor(
       const px = canvasPt.x;
       const py = canvasPt.y;
 
-      const isEllipse = clipTool === 'ellipse';
+      const isEllipse = clipTool === 'ellipse' || clipTool === 'pathellipse';
 
       // Determine desired cursor
       let desired = toolCursor;

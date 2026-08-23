@@ -21,7 +21,7 @@ import { useEffect, useCallback, useRef } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
 import { Motion, MotionVars } from '@opengpex/editor/core/motion';
 import { VolatileState, VolatileStateHandle, CameraState } from '@opengpex/editor/core/types';
-import { LayerUtils } from '@opengpex/editor/core/layer/LayerUtils';
+import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 
 /**
  * Fast-track initial state

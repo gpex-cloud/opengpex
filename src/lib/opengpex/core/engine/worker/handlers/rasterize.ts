@@ -147,20 +147,20 @@ export class RasterizeHandler {
     const canvas = new OffscreenCanvas(width, height);
     const ctx = canvas.getContext('2d')!;
 
-    // Build clip sequence from vector masks
-    const clipSequence: ClipDescriptor[] = masks.map(m => ({
-      shape: m.shape,
-      inverted: m.inverted,
-      feather: m.feather || 0,
-      __compiledPath2D: shapeToPath2D(shrinkInvertedMask(m.shape, m.inverted)),
-    })) as ClipDescriptor[];
-
     // Build minimal layer for painter
     const layerLike = {
       type: 'image' as const,
       bounding: { w: width, h: height },
       opacity: 1,
     };
+
+    // Build clip sequence from vector masks
+    const clipSequence: ClipDescriptor[] = masks.map(m => ({
+      shape: m.shape,
+      inverted: m.inverted,
+      feather: m.feather || 0,
+      __compiledPath2D: shapeToPath2D(shrinkInvertedMask(m.shape, m.inverted, 1, layerLike.bounding)),
+    })) as ClipDescriptor[];
 
     drawLayerInstance(ctx, layerLike, source, { clipSequence });
 

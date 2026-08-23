@@ -196,15 +196,19 @@ describe('shouldRetainSourceBlob — on-fidelity-loss', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// HEIC: sourceBlobRetention = 'never' (no export path)
+// HEIC: sourceBlobRetention = 'always' (revert needs original HEIC for metadata)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('shouldRetainSourceBlob — HEIC (never, no export path)', () => {
-  it('never retains for HEIC even with P3 colorSpace', () => {
-    expect(shouldRetainSourceBlob('heic', { bitDepth: 8, colorSpace: 'display-p3' }, 'display-p3')).toBe(false);
+describe('shouldRetainSourceBlob — HEIC (always, revert needs original)', () => {
+  it('always retains for HEIC with P3 colorSpace', () => {
+    expect(shouldRetainSourceBlob('heic', { bitDepth: 8, colorSpace: 'display-p3' }, 'display-p3')).toBe(true);
   });
 
-  it('never retains for HEIC even with high bit depth', () => {
-    expect(shouldRetainSourceBlob('heic', { bitDepth: 10, colorSpace: 'display-p3' }, 'display-p3')).toBe(false);
+  it('always retains for HEIC with high bit depth', () => {
+    expect(shouldRetainSourceBlob('heic', { bitDepth: 10, colorSpace: 'display-p3' }, 'display-p3')).toBe(true);
+  });
+
+  it('always retains for HEIC regardless of metadata', () => {
+    expect(shouldRetainSourceBlob('heic', {}, 'srgb')).toBe(true);
   });
 });

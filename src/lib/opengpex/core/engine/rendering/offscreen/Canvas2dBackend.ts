@@ -486,7 +486,7 @@ export class Canvas2dBackend {
       shape: m.shape,
       inverted: m.inverted,
       feather: m.feather || 0,
-      __compiledPath2D: shapeToPath2D(shrinkInvertedMask(m.shape, m.inverted)),
+      __compiledPath2D: shapeToPath2D(shrinkInvertedMask(m.shape, m.inverted, 1, desc.bounding)),
     })) as ClipDescriptor[];
   }
 

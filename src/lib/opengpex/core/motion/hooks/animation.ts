@@ -22,7 +22,7 @@
 import { useLayoutEffect, useCallback, useState, useRef, useMemo } from 'react';
 import { Frame, Layer, VolatileState } from '@opengpex/editor/core/types';
 import { Motion } from '../index';
-import { LayerUtils } from '@opengpex/editor/core/layer/LayerUtils';
+import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
 
 /**

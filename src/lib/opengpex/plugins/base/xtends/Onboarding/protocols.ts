@@ -88,11 +88,13 @@ export interface TipDef {
 }
 
 export const EVERYDAY_TIPS: TipDef[] = [
-  { id: "tip-ai", text: "Use AI Bridge or Comfy Bridge (top-right ✨) to generate images with text prompts" },
-  { id: "tip-undo", text: "Press Ctrl+Z / ⌘Z to undo, Ctrl+Shift+Z / ⌘⇧Z to redo" },
-  { id: "tip-layers", text: "Open the Layers panel on the left to manage layer order and visibility" },
+  { id: "tip-pan", text: "Middle-click drag (mouse) or two-finger drag (trackpad) to pan the canvas" },
   { id: "tip-clip-space", text: "Press Space to enter Clip mode and crop your image quickly" },
+  { id: "tip-undo", text: "Press Ctrl+Z / ⌘Z to undo, Ctrl+Shift+Z / ⌘⇧Z to redo" },
   { id: "tip-fit", text: "Press Ctrl+1 / ⌘1 to fit the image to your viewport" },
+  { id: "tip-ai", text: "Use AI Bridge or Comfy Bridge (top-right ✨) to generate images with text prompts" },
+  { id: "tip-layers", text: "Open the Layers panel on the left to manage layer order and visibility" },
+  { id: "tip-legacy-mode", text: "Prefer scroll-to-pan? Enable Legacy Mode in Preferences → Navigation to switch mouse behavior" },
   { id: "tip-drag-sidebar", text: "Drag sidebar icons to reorder them, or move them between sides" },
 ];
 

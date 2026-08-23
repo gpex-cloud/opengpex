@@ -24,7 +24,7 @@ import {
   EditorActions, EditorContextValue, GlobalHistoryState, LocalShape,
   InteractionSignalValue, ClipboardLayerMetadata, BitmapMask, LocalPolygon,
 } from '@opengpex/editor/core/types';
-import { LayerUtils } from '@opengpex/editor/core/layer/LayerUtils';
+import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import { initialState, editorReducer } from './reducer';
 import { useVolatileState } from './useVolatileState';
 import * as P from '@opengpex/editor/core/advanced/protocols';

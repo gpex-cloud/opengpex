@@ -55,7 +55,6 @@ export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleSh
 
   const s = snapToPixel(intersection) as Rect;
   const M_orig = getLayerWorldMatrix(layer);
-  const vCenter = M_orig.apply({ x: s.x + s.w / 2, y: s.y + s.h / 2 });
 
   // Determine effective visibleShape via true geometric intersection.
   //
@@ -91,6 +90,8 @@ export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleSh
     // Path/circle selection on rect layer, or both rects → use selection shape
     visibleShape = { ...shape, rect: s } as LocalShape;
   }
+
+  const vCenter = M_orig.apply({ x: s.x + s.w / 2, y: s.y + s.h / 2 });
 
   return { visibleShape, center: { x: vCenter.x, y: vCenter.y } as Point2D };
 }

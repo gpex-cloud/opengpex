@@ -108,7 +108,7 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
           const py = e.point.canvas.y;
 
           const latestTool = (e.activeFrame.latestClipTool as ClipTool) || 'rect';
-          const isEllipse = latestTool === 'ellipse';
+          const isEllipse = latestTool === 'ellipse' || latestTool === 'pathellipse';
 
           if (isEllipse) {
             const cx = rect.x + rect.w / 2;
@@ -195,7 +195,7 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       // ─── Peel mode: trigger peel on threshold ─────────────────────────
       if (context.intent.sub === 'peel' && ((e.nativeEvent as MouseEvent).metaKey || (e.nativeEvent as MouseEvent).ctrlKey)) {
         if (!hasPeeled) {
-          if (Math.sqrt(context.dx * context.dx + context.dy * context.dy) > 5) {
+          if (Math.sqrt(context.dx * context.dx + context.dy * context.dy) >= 1) {
             hasPeeled = true;
             setTimeout(() => e.actions.adv.layer.peel.peelToExchange.execute({
               isCopy: (e.nativeEvent as MouseEvent).altKey

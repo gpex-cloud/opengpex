@@ -200,13 +200,10 @@ export async function revertFrame(ctx: EditorContextValue, frameId: string): Pro
     const rawBlob = await assetStore.getRaw(originalAssetId);
     if (rawBlob) {
       originalBlob = rawBlob;
-      console.debug('[Revert] Found raw source blob for assetId=%s, size=%d', originalAssetId, rawBlob.size);
     } else {
       await assets.hydrate(new Set([originalAssetId]));
       const assetEntry = assets.get(originalAssetId);
       originalBlob = assetEntry?.blob ?? null;
-      console.debug('[Revert] getRaw returned null for assetId=%s; hydrate fallback: entry=%s, blob=%s',
-        originalAssetId, !!assetEntry, !!originalBlob);
     }
     if (!originalBlob) {
       throw new Error(`Original physical asset blob not found in store (assetId=${originalAssetId})`);

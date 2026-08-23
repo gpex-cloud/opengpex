@@ -292,7 +292,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                  * lighter foreground (`-300`) just for the popover items.
                  */}
                 {(
-                  Object.values(CLIP_TOOL_STRATEGIES) as ClipToolStrategy[]
+                  (Object.values(CLIP_TOOL_STRATEGIES) as ClipToolStrategy[]).filter(s => s.enabled !== false)
                 ).map((s, idx, arr) => {
                   const Icon = s.icon;
                   const active = clipTool === s.id;

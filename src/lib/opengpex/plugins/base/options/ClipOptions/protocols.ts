@@ -18,10 +18,11 @@
  */
 
 import type { LucideIcon } from 'lucide-react';
-import { Square, Circle, Lasso, Wand2, Shapes } from 'lucide-react';
+import { Square, Circle, CircleDashed, Lasso, Wand2, Shapes } from 'lucide-react';
 import {
   CLIP_RECT_CURSOR,
   CLIP_ELLIPSE_CURSOR,
+  CLIP_PATHELLIPSE_CURSOR,
   CLIP_LASSO_CURSOR,
   CLIP_WAND_CURSOR,
   CLIP_SAM_CURSOR,
@@ -155,7 +156,7 @@ export const SIGNAL_CLIP_FEATHER = 'signal.clip_feather.value';
  * AA to ON (true). The strategy table declares which tools expose this
  * control via `supportsAntiAlias`.
  */
-export type ClipTool = 'rect' | 'ellipse' | 'lasso' | 'wand' | 'sam';
+export type ClipTool = 'rect' | 'ellipse' | 'pathellipse' | 'lasso' | 'wand' | 'sam';
 
 export type ClipFamily = 'regular' | 'irregular';
 
@@ -177,7 +178,7 @@ export interface ClipToolStrategy {
    * ClipOverlay/interactions.ts. External call-sites should use
    * `getClipBox().regular` for data-level branching.
    */
-  readonly handlerKind: 'clipbox' | 'lasso' | 'wand' | 'sam';
+  readonly handlerKind: 'clipbox' | 'pathellipse' | 'lasso' | 'wand' | 'sam';
 
   /**
    * Re-Canvas mutex — `true` means this tool cannot operate while Re-Canvas
@@ -196,6 +197,14 @@ export interface ClipToolStrategy {
    * `cursorOverride` when this tool is active in clip mode.
    */
   readonly cursor: string;
+
+  /**
+   * Whether this tool is enabled (visible in UI and reachable via Tab cycling).
+   * Set to `false` to hide from the toolbar and keyboard cycle without removing
+   * from the type system (preserves compatibility with legacy frame data).
+   * Defaults to `true` when omitted.
+   */
+  readonly enabled?: boolean;
 }
 
 // ─── Strategy Table ─────────────────────────────────────────────────────────────
@@ -207,11 +216,12 @@ export interface ClipToolStrategy {
 //   3. Nothing else — all derived code reads from this table.
 
 export const CLIP_TOOL_STRATEGIES: Record<ClipTool, ClipToolStrategy> = {
-  'rect':    { id: 'rect',    label: 'Rect',    icon: Square, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', forbiddenInReCanvas: false, supportsAntiAlias: false, cursor: CLIP_RECT_CURSOR    },
-  'ellipse': { id: 'ellipse', label: 'Ellipse', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox', forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_CURSOR },
-  'lasso':   { id: 'lasso',   label: 'Lasso',   icon: Lasso,  accent: 'purple', family: 'irregular', handlerKind: 'lasso',                                              forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_LASSO_CURSOR   },
-  'wand':    { id: 'wand',    label: 'Wand',    icon: Wand2,  accent: 'purple', family: 'irregular', handlerKind: 'wand',                                               forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_WAND_CURSOR    },
-  'sam':     { id: 'sam',     label: 'SAM',     icon: Shapes,   accent: 'cyan',   family: 'irregular', handlerKind: 'sam',                                                forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_SAM_CURSOR     },
+  'rect':        { id: 'rect',        label: 'Rect',           icon: Square, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox',     forbiddenInReCanvas: false, supportsAntiAlias: false, cursor: CLIP_RECT_CURSOR     },
+  'ellipse':     { id: 'ellipse',     label: 'Ellipse',        icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox',     forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_CURSOR, enabled: false },
+  'pathellipse': { id: 'pathellipse', label: 'Ellipse (Path)', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'pathellipse', forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_CURSOR  },
+  'lasso':       { id: 'lasso',       label: 'Lasso',          icon: Lasso,  accent: 'purple', family: 'irregular', handlerKind: 'lasso',       forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_LASSO_CURSOR    },
+  'wand':        { id: 'wand',        label: 'Wand',           icon: Wand2,  accent: 'purple', family: 'irregular', handlerKind: 'wand',        forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_WAND_CURSOR     },
+  'sam':         { id: 'sam',         label: 'SAM',            icon: Shapes, accent: 'cyan',   family: 'irregular', handlerKind: 'sam',         forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_SAM_CURSOR      },
 };
 
 // ─── Clip Tool Behavior Settings ────────────────────────────────────────────────

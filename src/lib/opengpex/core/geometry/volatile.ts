@@ -18,7 +18,7 @@
  */
 
 import { Layer, VolatileState, Dimensions, LayerPoseOverride } from '@opengpex/editor/core/types';
-import { LayerUtils } from '@opengpex/editor/core/layer/LayerUtils';
+import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import { Matrix3x3 } from './matrix';
 import { getLayerWorldMatrix, getLayerLocalMatrix } from './operators/transform';
 

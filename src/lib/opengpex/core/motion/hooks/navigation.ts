@@ -19,7 +19,7 @@
 
 import React, { useLayoutEffect, useCallback, useRef } from 'react';
 import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
-import { LayerUtils } from '@opengpex/editor/core/layer/LayerUtils';
+import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import { VolatileState, Frame, CameraState, Rect, IMatrix3x3, LocalRect, WorldRect, LocalShape, Layer } from '@opengpex/editor/core/types';
 import { useTicker } from './animation';
 import { Motion } from '../index';

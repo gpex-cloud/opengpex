@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.56
+
+- Clip Tool: unified cut/copy logic — lossless when possible, seamless fallback to physical
+- Clip Tool: cut holes now use vector masks, eliminating visible edge seams on subsequent operations
+- Clip Tool: added path-based ellipse selection for accurate ellipse clips without shape distortion
+
+---
+
 ## v1.0.0-beta.55.1
 
 - AI Tools: fixed upscaler commands not responding due to inconsistent naming
