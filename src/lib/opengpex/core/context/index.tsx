@@ -701,7 +701,6 @@ export function useOverlayRotationSync(
  * const cursor = useVolatileInteraction('cursorOverride');
  * ```
  *
- * @see docs/opengpex/20260630_interaction_state_volatile_migration_spec.md
  */
 export function useVolatileInteraction<K extends keyof VolatileInteraction>(
   key: K,

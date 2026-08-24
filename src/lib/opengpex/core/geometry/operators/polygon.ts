@@ -21,7 +21,7 @@ import {
   Point2D,
   Layer, Frame,
   LocalPoint, WorldPoint,
-  LocalPolygon, WorldPolygon,
+  LocalRect, LocalPolygon, WorldPolygon,
   asLocalPoint, asWorldPoint,
   asLocalRect, asWorldRect,
   asLocalPolygon, asWorldPolygon,
@@ -412,6 +412,38 @@ function bresenhamSteps(
       segs.push(`V ${cy}`);
     }
   }
+}
+
+// ─────────────────────────── Ellipse Path Polygon ──────────────────────────────
+
+/**
+ * ellipsePathToLocalPolygon: 360-point path-based ellipse polygon.
+ *
+ * Unlike `ellipseToLocalPolygon` (fixed 64 points, round-trips to type:'circle'),
+ * this produces a 360-point polygon that feeds into `polygonToShape` → `type:'path'`
+ * and uses the path rendering pipeline for pixel-perfect fragment/hole complementarity.
+ *
+ * Used by the PathEllipse selection tool to avoid the "clipped ellipse deformation"
+ * problem that occurs when a circle-typed selection is intersected with a layer
+ * (circle shapes have no pathData, preventing path ∩ path geometric intersection).
+ *
+ * 360 points never trigger the 64-point circle recognition in `point2dToLocalShape`.
+ */
+export function ellipsePathToLocalPolygon(rect: LocalRect, antiAliased: boolean = true): LocalPolygon {
+  const { x, y, w, h } = rect;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const rx = w / 2;
+  const ry = h / 2;
+  const N = 360;
+
+  const ring: LocalPoint[] = [];
+  for (let i = 0; i < N; i++) {
+    const theta = (2 * Math.PI * i) / N;
+    ring.push({ x: cx + rx * Math.cos(theta), y: cy + ry * Math.sin(theta) } as LocalPoint);
+  }
+
+  return asLocalPolygon([ring], asLocalRect({ x, y, w, h }), antiAliased);
 }
 
 // Re-export point2d functions for backward compatibility (consumers may still

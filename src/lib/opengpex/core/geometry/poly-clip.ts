@@ -106,6 +106,38 @@ function multiPolygonToPathData(result: MultiPolygon): { pathData: string; rect:
 }
 
 /**
+ * Compute the geometric union of N ring sets.
+ *
+ * Each ring set is a Point2D[][] (as produced by `shapeToPoint2D`).
+ * polygon-clipping.union() natively supports multi-polygon input.
+ *
+ * @param ringSets - One or more ring sets (each Point2D[][]) to union together
+ * @returns Combined pathData and tight bounding rect, or null if result is empty
+ */
+export function unionRings(...ringSets: Pt[][][]): { pathData: string; rect: Rect } | null {
+  if (ringSets.length === 0) return null;
+
+  const multiPolygons = ringSets
+    .filter(rs => rs.length > 0)
+    .map(rs => ringsToMultiPolygon(rs));
+
+  if (multiPolygons.length === 0) return null;
+
+  let result: MultiPolygon;
+  try {
+    // polygon-clipping.union accepts variadic multi-polygons
+    result = (polygonClipping.union as (...args: MultiPolygon[]) => MultiPolygon)(...multiPolygons);
+  } catch {
+    // polygon-clipping can throw on degenerate inputs
+    return null;
+  }
+
+  if (!result || result.length === 0) return null;
+
+  return multiPolygonToPathData(result);
+}
+
+/**
  * Compute the geometric intersection of two paths (both defined by pathData strings).
  *
  * @param pathDataA - SVG-like M/L/Z path string (e.g. layer's visibleShape pathData)

@@ -34,7 +34,6 @@
  * compositing. Onscreen preview continues to use the browser's native gamma blend.
  *
  * @module core/engine/rendering/shared/blend2d
- * @see docs/opengpex/plans/20260729_color_management_architecture_evolution.md §Phase B (B2)
  */
 
 import type { LayerBlendMode } from '@opengpex/editor/core/types';

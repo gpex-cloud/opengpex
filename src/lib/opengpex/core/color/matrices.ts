@@ -47,7 +47,6 @@
  * - Bruce Lindbloom's chromatic adaptation math
  *
  * @module core/color/matrices
- * @see docs/opengpex/plans/20260729_color_management_architecture_evolution.md §Phase C (C1)
  */
 
 import type { WorkingColorSpace } from '@opengpex/editor/core/types';

@@ -295,7 +295,6 @@ export interface IFilter {
  * (linear-light compositing) where the pipeline may auto-convert TRC before
  * applying a filter.
  *
- * @see docs/opengpex/plans/20260729_color_management_architecture_evolution.md §Phase A (A3)
  */
 export interface FilterColorHint {
   /**

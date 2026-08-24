@@ -23,7 +23,7 @@
  */
 
 import ExifReader from 'exifreader';
-import type { ImageMetadata, ColorSpaceId } from '../../metadata';
+import type { ImageMetadata, ColorSpaceId } from '../../types';
 import { iterateChunks, verifySignature } from './chunks';
 import { readIHDR, readpHYs, readiCCP, readeXIf, readtEXt, readiTXt, readtIME, readgAMA } from './readers';
 import { iccToBase64, parseIccProfileName } from '../../icc';

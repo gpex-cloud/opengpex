@@ -56,6 +56,12 @@ interface LayerItemProps {
   isScrolling?: boolean;
   childLayers: Layer[];
   showSubLayers: boolean;
+  /** Whether this layer is marked in the multi-selection system */
+  isMarked?: boolean;
+  /** Callback to toggle marking state for this layer */
+  onToggleMarking?: (layerId: string) => void;
+  /** Semantic color for the marked badge — mapped to CSS internally */
+  markedColor?: 'green' | 'amber' | 'red';
 }
 
 export const LayerItem = React.memo(
@@ -69,6 +75,9 @@ export const LayerItem = React.memo(
     isScrolling,
     childLayers,
     showSubLayers,
+    isMarked,
+    onToggleMarking,
+    markedColor = 'red',
   }: LayerItemProps) => {
     const { actions } = useEditorServices();
     const {
@@ -221,8 +230,15 @@ export const LayerItem = React.memo(
 
             <div className="flex-1 min-w-0 flex items-center gap-1.5">
               <span
-                className={`shrink-0 text-[9px] font-black italic transition-colors select-none tracking-tighter opacity-50
- ${isActive ? "text-[var(--text-main)]" : "text-[var(--text-muted)] group-hover/layer:text-[var(--text-main)]"}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleMarking?.(layer.id);
+                }}
+                className={`shrink-0 text-[9px] font-black italic transition-colors select-none tracking-tighter cursor-pointer hover:opacity-100
+ ${isMarked
+   ? `${markedColor === 'green' ? 'text-emerald-400' : markedColor === 'amber' ? 'text-amber-400' : 'text-rose-400'} opacity-100`
+   : `opacity-50 ${isActive ? "text-[var(--text-main)]" : "text-[var(--text-muted)] group-hover/layer:text-[var(--text-main)]"}`
+ }
 `}
               >
                 #{index + 1}

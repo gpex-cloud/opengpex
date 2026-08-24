@@ -18,7 +18,7 @@
 
 import type { WorkingColorSpace } from '@opengpex/editor/core/types';
 import type { DecodeOptions, DecodeResult } from '../../types';
-import type { ImageMetadata } from '../../metadata';
+import type { ImageMetadata } from '../../types';
 import { resolveColorSpaceForFormat, getImportStrategy, shouldRetainSourceBlob } from '@opengpex/editor/core/color/ColorPipeline';
 import { extractRawMetadata } from './metadata';
 import { convertRawToBlob } from './libraw';

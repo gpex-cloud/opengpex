@@ -62,6 +62,7 @@ export const ADV_LAYER_MERGE_DOWN = 'adv.layer.merge.down';
 export const ADV_LAYER_MERGE_VISIBLE = 'adv.layer.merge.visible';
 export const ADV_LAYER_MERGE_RASTERIZE = 'adv.layer.merge.rasterize';
 export const ADV_LAYER_MERGE_BACK = 'adv.layer.merge.back';
+export const ADV_LAYER_UNION_MERGE = 'adv.layer.union.merge';
 
 // 4. Clip & Selection Operations
 export const ADV_LAYER_CLIP_CUT = 'adv.layer.clip.cut';

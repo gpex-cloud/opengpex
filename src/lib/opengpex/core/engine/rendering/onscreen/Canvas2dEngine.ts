@@ -37,12 +37,12 @@
  * - Advanced filters routed through FilterFastTrack (Track A) or FilterCache (Track B).
  */
 
-import type { Layer, AssetService, Shape, LocalShape, TileData, Rect, Dimensions } from '@opengpex/editor/core/types';
+import type { Layer, AssetService, Shape, LocalShape, TileData, Rect, Dimensions, ClipDescriptor } from '@opengpex/editor/core/types';
 import { asLocalRect } from '@opengpex/editor/core/types';
 import type { FontService } from '@opengpex/editor/core/fonts';
 import { MAX_SAFE_EXPORT_PIXELS, PERF_MON } from '@opengpex/editor/core/helpers/config';
 import { shapeToPath2D } from '@opengpex/editor/core/helpers/path2d';
-import { shrinkInvertedMask } from '@opengpex/editor/core/helpers/sub-pixel';
+import { shrinkInvertedMask, expandFragmentClip, isExpandableFragmentClip } from '@opengpex/editor/core/helpers/sub-pixel';
 
 import { sourceBitmapCache } from '../../cache/SourceBitmapCache';
 import { tileCache } from '../../cache/TileCache';
@@ -287,10 +287,7 @@ export class Canvas2dEngine implements IRenderer {
     }
 
     if (layer.type === 'color') {
-      const preparedClips = clipSequence?.map(clip => ({
-        ...clip,
-        __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale, layer.bounding)),
-      }));
+      const preparedClips = this.prepareClipSequence(clipSequence, layer, scale);
       drawLayerInstance(ctx, layer, null, {
         matrix, opacity, clipSequence: preparedClips, width: options.width, height: options.height, drawRect, imageSmoothingQuality,
       });
@@ -310,10 +307,7 @@ export class Canvas2dEngine implements IRenderer {
 
     if (shouldUseTiles) {
       // --- Tile Rendering Path ---
-      const preparedClips = clipSequence?.map(clip => ({
-        ...clip,
-        __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale, layer.bounding)),
-      }));
+      const preparedClips = this.prepareClipSequence(clipSequence, layer, scale);
 
       const { tileCount, missCount } = computeTileJobs(
         layer.assetId!,
@@ -351,10 +345,7 @@ export class Canvas2dEngine implements IRenderer {
       const rawImg = imageOverride || (currentSrc ? sourceBitmapCache.getOrFetch(currentSrc) : null);
 
       if (rawImg) {
-        const preparedClips = clipSequence?.map(clip => ({
-          ...clip,
-          __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale, layer.bounding)),
-        }));
+        const preparedClips = this.prepareClipSequence(clipSequence, layer, scale);
         const { img: effImg, layer: effLayer } = this.resolveFilteredSource(layer, rawImg, isExporting, isInteracting);
         drawLayerInstance(ctx, effLayer, effImg, {
           matrix, opacity, clipSequence: preparedClips, width: options.width, height: options.height, drawRect, imageSmoothingQuality,
@@ -823,6 +814,43 @@ export class Canvas2dEngine implements IRenderer {
     // Fallback heuristic: pixel count exceeds safe threshold
     const totalPixels = layer.bounding.w * layer.bounding.h;
     return totalPixels > MAX_SAFE_EXPORT_PIXELS;
+  }
+
+  // ─── Clip Preparation (Phase 2 seam prevention) ───
+
+  /**
+   * Prepare clip descriptors with pre-compiled Path2D objects.
+   *
+   * For cut fragments (layer.metadata.assocMaskId), the visibleShape clip is
+   * expanded outward by 0.75/scale to prevent anti-aliasing seams between
+   * adjacent fragments sharing a visibleShape boundary.
+   *
+   * This is the PRIMARY fix for Phase 2: the visibleShape enters the clipSequence
+   * via getRenderPipeline() in StageComposer, and applyClipSequence() applies it
+   * BEFORE drawLayerContent(). Without expansion here, the original (tighter) clip
+   * constrains the canvas before any expansion in drawLayerContent could take effect.
+   */
+  private prepareClipSequence(
+    clipSequence: ClipDescriptor[] | undefined,
+    layer: Layer,
+    scale: number,
+  ): ClipDescriptor[] | undefined {
+    return clipSequence?.map(clip => {
+      // Phase 2: Expand visibleShape clip for cut fragments (seam prevention).
+      if (isExpandableFragmentClip(clip.shape, clip.inverted, layer.visibleShape, layer.metadata?.assocMaskId)) {
+        const pathData = (clip.shape as Shape & { pathData: string }).pathData;
+        const expandedPathData = expandFragmentClip(pathData, scale);
+        const expandedShape = { ...clip.shape, pathData: expandedPathData } as Shape;
+        return {
+          ...clip,
+          __compiledPath2D: this.getCachedPath2D(expandedShape),
+        };
+      }
+      return {
+        ...clip,
+        __compiledPath2D: this.getCachedPath2D(shrinkInvertedMask(clip.shape, clip.inverted, scale, layer.bounding)),
+      };
+    });
   }
 
   // ─── Path2D Cache ───

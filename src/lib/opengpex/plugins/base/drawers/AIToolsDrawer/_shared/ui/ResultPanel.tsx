@@ -31,7 +31,6 @@
  * This ensures visual framework consistency (border, title, Clear button position)
  * while allowing full flexibility for tool-specific result displays.
  *
- * @see docs/opengpex/plans/20260810_progress_panel_spec.md
  */
 
 import React from 'react';

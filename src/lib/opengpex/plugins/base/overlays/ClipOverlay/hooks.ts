@@ -28,7 +28,7 @@ import {
   CLIP_TOOL_STRATEGIES,
   ClipTool,
 } from '../../options/ClipOptions/protocols';
-import { CLIP_PATHELLIPSE_CURSOR } from '@opengpex/editor/icons';
+import { CLIP_ELLIPSE_AA_OFF_CURSOR } from '@opengpex/editor/icons';
 
 /**
  * useClipOverlayCommands: Encapsulates UI helper logic and command proxies
@@ -158,7 +158,7 @@ export function useClipCursor(
       // For ellipse-family tools: switch to dashed cursor when AA is off
       const isEllipseFamily = clipTool === 'ellipse' || clipTool === 'pathellipse';
       const toolCursor = isEllipseFamily && !clipBox_AA
-        ? CLIP_PATHELLIPSE_CURSOR
+        ? CLIP_ELLIPSE_AA_OFF_CURSOR
         : CLIP_TOOL_STRATEGIES[clipTool].cursor;
       actions.fast.setCursor(toolCursor);
     } else {

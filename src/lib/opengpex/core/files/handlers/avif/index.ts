@@ -29,7 +29,7 @@ import type {
   DecodeResult,
   EncodeOptions,
 } from '../../types';
-import type { ImageMetadata } from '../../metadata';
+import type { ImageMetadata } from '../../types';
 import { decodeAvif } from './decode';
 import { encodeAvif } from './encode';
 import { extractAvifMetadata } from './metadata';

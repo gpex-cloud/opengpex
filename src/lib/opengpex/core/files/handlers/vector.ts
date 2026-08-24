@@ -27,7 +27,7 @@ import type {
   DecodeResult,
   EncodeOptions,
 } from '../types';
-import type { ImageMetadata } from '../metadata';
+import type { ImageMetadata } from '../types';
 
 export class VectorHandler implements ImageFormatHandler {
   readonly format = 'vector';

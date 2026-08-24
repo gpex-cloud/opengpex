@@ -161,7 +161,6 @@ export type EditorAction =
  * Lives in the fast-track (volatileRef), NOT in the Reducer state.
  * Does not trigger React re-renders when mutated.
  * 
- * @see docs/opengpex/20260630_interaction_state_volatile_migration_spec.md
  */
 export interface VolatileInteraction {
   /** Currently hovered layer ID (null = no hover) */

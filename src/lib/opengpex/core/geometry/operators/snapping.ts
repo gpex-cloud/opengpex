@@ -507,7 +507,6 @@ export interface SnappedCanvasRect {
  * @param canvas - Canvas logical dimensions (width × height in canvas pixels)
  * @param dpr - Device pixel ratio (window.devicePixelRatio)
  *
- * @see docs/opengpex/plans/20260815_canvas_edge_subpixel_artifact_fix.md
  */
 export function snapCanvasRect(
   cam: CameraState,

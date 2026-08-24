@@ -129,7 +129,6 @@ export class Canvas2dBackend {
    * Performance: ~2ms TRC conversion + ~4ms blend per 4K layer (acceptable for offscreen export).
    * Onscreen preview (Canvas2dEngine) continues to use the native gamma-space path.
    *
-   * @see docs/opengpex/plans/20260729_color_management_architecture_evolution.md §Phase B
    */
   private async composeLinear(job: CompositeJob): Promise<PixelResultData> {
     const { layers, roi, dpr, outputWidth, outputHeight } = job;

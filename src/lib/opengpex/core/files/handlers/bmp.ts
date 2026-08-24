@@ -27,7 +27,7 @@ import type {
   DecodeResult,
   EncodeOptions,
 } from '../types';
-import type { ImageMetadata } from '../metadata';
+import type { ImageMetadata } from '../types';
 import { bitmapToCanvas } from '../index';
 import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
 import { getExportStrategy, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';

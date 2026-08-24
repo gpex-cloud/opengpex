@@ -20,7 +20,7 @@
  *
  * Modeled after `isobmff-reader.ts` which serves HEIC/AVIF handlers.
  *
- * @module core/files/tiff-ifd
+ * @module core/files/metadata/tiff-ifd-reader
  */
 
 // ═══════════════════════════════════════════════════════════════════════════════

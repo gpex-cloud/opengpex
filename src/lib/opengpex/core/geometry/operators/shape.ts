@@ -77,9 +77,20 @@ export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleSh
     // Case 1: Rect selection + path layer — Sutherland-Hodgman (polygon ∩ rect)
     const clipped = intersectPathWithRect(layerPathData, s);
     if (clipped) {
+      // Snap the polygon's tight bbox to enclosing integer pixel grid.
+      // The pathData provides exact sub-pixel clipping; but the rect must be
+      // pixel-aligned so that bounding/cx/cy computations downstream produce
+      // integer-aligned positions (avoiding sub-pixel seams between fragments).
+      const cr = clipped.rect;
+      const snappedRect = {
+        x: Math.floor(cr.x),
+        y: Math.floor(cr.y),
+        w: Math.ceil(cr.x + cr.w) - Math.floor(cr.x),
+        h: Math.ceil(cr.y + cr.h) - Math.floor(cr.y),
+      };
       visibleShape = {
         type: 'path',
-        rect: clipped.rect,
+        rect: snappedRect,
         hardEdge: layerShape.hardEdge,
         antiAliased: (layerShape as { antiAliased?: boolean }).antiAliased,
         pathData: clipped.pathData,
@@ -93,9 +104,20 @@ export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleSh
     // Case 3: Path selection + path layer — polygon-clipping (polygon ∩ polygon)
     const clipped = intersectPathWithPath(layerPathData, selectionPathData);
     if (clipped) {
+      // Snap the polygon intersection's tight bbox to enclosing integer pixel grid.
+      // Without this, nested lasso cuts (path ∩ path) produce non-integer bounding
+      // and cx/cy, causing sub-pixel misalignment seams when fragments are snapped
+      // back to their birth position via smart guides.
+      const cr = clipped.rect;
+      const snappedRect = {
+        x: Math.floor(cr.x),
+        y: Math.floor(cr.y),
+        w: Math.ceil(cr.x + cr.w) - Math.floor(cr.x),
+        h: Math.ceil(cr.y + cr.h) - Math.floor(cr.y),
+      };
       visibleShape = {
         type: 'path',
-        rect: clipped.rect,
+        rect: snappedRect,
         hardEdge: shape.hardEdge,
         antiAliased: (shape as { antiAliased?: boolean }).antiAliased,
         pathData: clipped.pathData,

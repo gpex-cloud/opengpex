@@ -179,7 +179,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
       // P7: write a proper LocalPolygon (with rings) so downstream consumers
       // (polygonToShape, localToWorldPolygon, etc.) never see rings=undefined.
       const antiAliased = currentShape?.antiAliased ?? true;
-      const newPoly = e.geometry.point2d.regularShapeToLocalPolygon(latestTool === 'ellipse' ? 'ellipse' : 'rect', newRect, antiAliased);
+      const newPoly = e.geometry.polygon.regularShapeToLocalPolygon(latestTool === 'ellipse' ? 'ellipse' : 'rect', newRect, antiAliased);
       tx.update({ clipBoxes: { ...frame.clipBoxes, [activeTool]: newPoly } }, 'frame');
 
       // Sync exchange layer if needed
@@ -218,7 +218,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
           const activeTool = latestTool === 'ellipse' ? 'ellipse' : 'rect';
           const currentShape = getRegularClipShape(frame);
           const antiAliased = currentShape?.antiAliased ?? true;
-          const newPoly = e.geometry.point2d.regularShapeToLocalPolygon(latestTool === 'ellipse' ? 'ellipse' : 'rect', fullCanvasRect, antiAliased);
+          const newPoly = e.geometry.polygon.regularShapeToLocalPolygon(latestTool === 'ellipse' ? 'ellipse' : 'rect', fullCanvasRect, antiAliased);
           tx.update({ clipBoxes: { ...frame.clipBoxes, [activeTool]: newPoly } }, 'frame');
         }
       },

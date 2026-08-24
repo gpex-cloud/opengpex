@@ -20,7 +20,7 @@ import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/type
 import type { EncodeOptions } from '../../types';
 import { bitmapToCanvas } from '../../index';
 import { base64ToIcc, getStockIccProfile } from '../../icc';
-import { resetExifOrientation } from '../../tiff-ifd-reader';
+import { resetExifOrientation } from '../../metadata/tiff-ifd-reader';
 import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
 import { getExportStrategy, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
 import { verifySignature, iterateChunks, concat } from './chunks';

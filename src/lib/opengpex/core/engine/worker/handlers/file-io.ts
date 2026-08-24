@@ -35,7 +35,7 @@ import type { VipsInstance, VipsImage } from '../vips/types';
 import type { FileIoJob } from '../../protocol/jobs';
 import type { RouterResult } from '../router';
 import { injectTiffExif } from '../../../files/handlers/tiff/exif-inject';
-import { injectAvifExif } from '../../../files/isobmff-writer';
+import { injectAvifExif } from '../../../files/metadata/isobmff-writer';
 
 export class FileIoHandler {
   async handle(job: FileIoJob): Promise<RouterResult> {

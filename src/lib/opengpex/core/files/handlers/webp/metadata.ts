@@ -19,7 +19,7 @@
  */
 
 import ExifReader from 'exifreader';
-import type { ImageMetadata, ColorSpaceId } from '../../metadata';
+import type { ImageMetadata, ColorSpaceId } from '../../types';
 import { iccToBase64, parseIccProfileName } from '../../icc';
 import { extractWebpIcc, extractWebpExif } from './riff';
 

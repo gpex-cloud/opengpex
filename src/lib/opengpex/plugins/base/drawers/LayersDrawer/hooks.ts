@@ -19,11 +19,12 @@
 
 'use client';
 
-import { useMemo, useEffect, useRef, useCallback } from 'react';
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands } from '@opengpex/editor/core/context';
-import { Layer } from '@opengpex/editor/core/types';
+import { Layer, Frame } from '@opengpex/editor/core/types';
+import { ADV_LAYER_UNION_MERGE } from '@opengpex/editor/core/advanced/protocols';
 import type { LayersDrawerCommandsMap } from './commands.d';
-import { calcFullLayerStack } from './utils';
+import { calcFullLayerStack, computeUnionStatus, type UnionStatus } from './utils';
 import { MASK_EDITING_KEY, type MaskEditingSignal } from './protocols';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 
@@ -223,4 +224,57 @@ export function useMaskEditMonitor() {
             actions.setStateSignal(MASK_EDITING_KEY, null);
         }
     }, [maskEditing, interactionMode, activeCraft, activeFrame, actions]);
+}
+
+// ─── useUnionMerge ─────────────────────────────────────────────────────────────
+
+/**
+ * useUnionMerge: Union merge multi-selection state and logic.
+ *
+ * Encapsulates:
+ * - Selection state (which layers are marked for union)
+ * - Status computation (green/amber/red via computeUnionStatus)
+ * - Derived values (canUnionMerge, color class)
+ * - Action handler (execute union merge command)
+ */
+export function useUnionMerge(activeFrame: Frame) {
+    const { actions } = useEditorServices();
+
+    const [unionSelection, setUnionSelection] = useState<string[]>([]);
+
+    // Toggle union mark — sort by layer order index (lowest index first) on insertion
+    const toggleUnionMark = useCallback((layerId: string) => {
+        setUnionSelection(prev => {
+            if (prev.includes(layerId)) {
+                return prev.filter(id => id !== layerId);
+            }
+            const next = [...prev, layerId];
+            const order = activeFrame.layers.order;
+            next.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+            return next;
+        });
+    }, [activeFrame.layers.order]);
+
+    // Compute union status for smart color indicator (spec §14.1)
+    const unionStatus: UnionStatus = useMemo(
+        () => computeUnionStatus(unionSelection, activeFrame),
+        [unionSelection, activeFrame]
+    );
+
+    // Button is only enabled when status is green or amber (mergeable).
+    const canUnionMerge = unionStatus !== 'red';
+
+    const handleUnionMerge = useCallback(() => {
+        if (!canUnionMerge) return;
+        actions.executeCommand(ADV_LAYER_UNION_MERGE, { layerIds: unionSelection });
+        setUnionSelection([]);
+    }, [unionSelection, canUnionMerge, actions]);
+
+    return {
+        unionSelection,
+        unionStatus,
+        canUnionMerge,
+        toggleUnionMark,
+        handleUnionMerge,
+    };
 }

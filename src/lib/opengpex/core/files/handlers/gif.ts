@@ -32,7 +32,7 @@ import type {
   DecodeResult,
   EncodeOptions,
 } from '../types';
-import type { ImageMetadata } from '../metadata';
+import type { ImageMetadata } from '../types';
 import { bitmapToCanvas } from '../index';
 
 // ═══════════════════════════════════════════════════════════════════════════════

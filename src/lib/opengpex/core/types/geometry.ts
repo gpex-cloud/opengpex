@@ -276,6 +276,14 @@ export interface GeometryService {
      * with offset points and bounding rect. Used by the selection-move handler.
      */
     translatePolygon: (poly: LocalPolygon, dx: number, dy: number) => LocalPolygon;
+    /**
+     * Generates a high-density polygon for a regular shape (rect or ellipse).
+     * Rect produces 4 corners; ellipse produces 360-point adaptive polygon.
+     * Returns a branded LocalPolygon ready for clipBox storage.
+     */
+    regularShapeToLocalPolygon: (tool: 'rect' | 'ellipse', rect: LocalRect, antiAliased?: boolean) => LocalPolygon;
+    /** 360-point path-based ellipse polygon (stays on type:'path' pipeline, never recognized as circle) */
+    ellipsePathToLocalPolygon: (rect: LocalRect, antiAliased?: boolean) => LocalPolygon;
 
   };
 
@@ -303,11 +311,5 @@ export interface GeometryService {
     isBoundingRing: (ring: readonly Point2D[], boundingW: number, boundingH: number) => boolean;
     /** Computes axis-aligned bounding box of a multi-ring point set (no brand). */
     computePolygonBounds: (rings: Point2D[][]) => Rect;
-    /**
-     * Converts a LocalRect into a LocalPolygon for the given regular clip tool shape.
-     * Dispatches to the rect (4-point) or ellipse (64-point) polygon builder based on `tool`.
-     * Eliminates the repeated `tool === 'ellipse' ? ... : ...` pattern at call sites.
-     */
-    regularShapeToLocalPolygon: (tool: 'rect' | 'ellipse', rect: LocalRect, antiAliased?: boolean) => LocalPolygon;
   };
 }

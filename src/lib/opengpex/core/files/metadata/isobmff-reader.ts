@@ -24,10 +24,10 @@
  *   - full-box adds 4B version(1)+flags(3) after type
  * ```
  *
- * @module core/files/isobmff
+ * @module core/files/metadata/isobmff-reader
  */
 
-import type { ColorSpaceId } from './metadata';
+import type { ColorSpaceId } from '../types';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Public Types

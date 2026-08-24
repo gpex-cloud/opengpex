@@ -29,7 +29,7 @@ import type {
   DecodeResult,
   EncodeOptions,
 } from '../../types';
-import type { ImageMetadata } from '../../metadata';
+import type { ImageMetadata } from '../../types';
 import { decodeTiff } from './decode';
 import { encodeTiff } from './encode';
 import { extractTiffMetadata } from './metadata';

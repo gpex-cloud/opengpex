@@ -25,7 +25,7 @@ import type {
   DecodeResult,
   EncodeOptions,
 } from '../../types';
-import type { ImageMetadata } from '../../metadata';
+import type { ImageMetadata } from '../../types';
 import { decodeWebp } from './decode';
 import { encodeWebp } from './encode';
 import { extractWebpMetadata } from './metadata';

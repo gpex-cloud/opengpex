@@ -35,7 +35,6 @@
  *   - workerUrl: `new URL('./worker.ts', import.meta.url)` (bundler-resolved)
  *   - config: toolName, defaultTimeoutMs, autoDisposeOnWebGpuError
  *
- * @see docs/opengpex/plans/20260811_ai_tools_bgremover_refactoring_summary.md
  */
 
 // ─── Type Constraints ────────────────────────────────────────────────────────

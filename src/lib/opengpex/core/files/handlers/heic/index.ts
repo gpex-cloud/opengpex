@@ -28,7 +28,7 @@ import type {
   DecodeResult,
   EncodeOptions,
 } from '../../types';
-import type { ImageMetadata } from '../../metadata';
+import type { ImageMetadata } from '../../types';
 import { decodeHeic } from './decode';
 import { extractHeicMetadata } from './metadata';
 

@@ -25,7 +25,7 @@
  * @module core/files/handlers/tiff/ifd0-inject
  */
 
-import { readU16, readU32, writeU16, writeU32 } from '../../tiff-ifd-reader';
+import { readU16, readU32, writeU16, writeU32 } from '../../metadata/tiff-ifd-reader';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Public API

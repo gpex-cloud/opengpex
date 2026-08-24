@@ -22,7 +22,6 @@ import {
   asLocalRect,
 } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
-import { ellipseToPolygon } from '@opengpex/editor/core/geometry/operators/point2d';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
 import { createTransformHandler, TransformIntent, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import { makeClipToolGuard } from '../guard';
@@ -118,8 +117,10 @@ export const createPathEllipseHandler = (): InteractionHandler => {
       const currentBox = getClipBox(frame);
       const antiAliased = currentBox?.antiAliased ?? true;
 
-      // Generate adaptive-density polygon (stays on path pipeline)
-      const newPoly = ellipseToPolygon(newRect, antiAliased);
+      // Use 360-point ellipsePathToLocalPolygon to stay on type:'path' pipeline.
+      // The 64-point regularShapeToLocalPolygon('ellipse') is recognized as type:'circle'
+      // by point2dToLocalShape, which breaks path ∩ path intersection in nested cuts.
+      const newPoly = e.geometry.polygon.ellipsePathToLocalPolygon(newRect, antiAliased);
       tx.update({ clipBoxes: { ...frame.clipBoxes, ['pathellipse']: newPoly } }, 'frame');
     },
 
@@ -132,7 +133,7 @@ export const createPathEllipseHandler = (): InteractionHandler => {
           const fullCanvasRect = asLocalRect({ x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h });
           const currentBox = getClipBox(frame);
           const antiAliased = currentBox?.antiAliased ?? true;
-          const newPoly = ellipseToPolygon(fullCanvasRect, antiAliased);
+          const newPoly = e.geometry.polygon.ellipsePathToLocalPolygon(fullCanvasRect, antiAliased);
           tx.update({ clipBoxes: { ...frame.clipBoxes, ['pathellipse']: newPoly } }, 'frame');
         }
       },

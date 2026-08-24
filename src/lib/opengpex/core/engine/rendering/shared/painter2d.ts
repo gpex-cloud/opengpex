@@ -55,7 +55,7 @@ export interface LayerLike {
   blendMode?: string;
   fill?: number;
   adjustments?: AdjustmentState;
-  metadata?: { fillColor?: string };
+  metadata?: { fillColor?: string; assocMaskId?: string; [key: string]: unknown };
   textData?: {
     content?: string;
     color?: string;
@@ -314,27 +314,19 @@ function drawLayerContent(
   tileCount: number | undefined,
 ): void {
   if (layer.type === 'color') {
+    // visibleShape clip is already applied by applyClipSequence (with expansion for fragments).
     ctx.fillStyle = layer.metadata?.fillColor || '#000000';
-    let clipped = false;
-    if (layer.visibleShape && layer.visibleShape.type !== 'rect') {
-      ctx.save();
-      clipped = true;
-      const path = shapeToPath2D(layer.visibleShape);
-      ctx.clip(path, layer.visibleShape.type === 'path' ? 'evenodd' : 'nonzero');
-    }
     if (layer.visibleShape) {
       const v = layer.visibleShape.rect;
       ctx.fillRect(v.x, v.y, v.w, v.h);
     } else {
       ctx.fillRect(0, 0, layer.bounding.w, layer.bounding.h);
     }
-    if (clipped) {
-      ctx.restore();
-    }
   } else if (layer.type === 'text' && layer.textData) {
     drawTextContent(ctx, layer, layer.textData);
   } else if (Array.isArray(source)) {
-    // TileData tile drawing branch
+    // TileData tile drawing branch.
+    // visibleShape clip is already applied by applyClipSequence (with expansion for fragments).
     const count = tileCount ?? source.length;
     for (let i = 0; i < count; i++) {
       const tile = source[i];
@@ -353,25 +345,13 @@ function drawLayerContent(
         drawRect.x, drawRect.y, drawRect.w, drawRect.h,
       );
     } else if (layer.visibleShape) {
+      // visibleShape clip is already applied by applyClipSequence (with expansion for fragments).
       const v = layer.visibleShape.rect;
-
-      let clipped = false;
-      if (layer.visibleShape.type !== 'rect') {
-        ctx.save();
-        clipped = true;
-        const path = shapeToPath2D(layer.visibleShape);
-        ctx.clip(path, layer.visibleShape.type === 'path' ? 'evenodd' : 'nonzero');
-      }
-
       ctx.drawImage(
         source,
         v.x * s, v.y * s, v.w * s, v.h * s,
         v.x, v.y, v.w, v.h,
       );
-
-      if (clipped) {
-        ctx.restore();
-      }
     } else {
       ctx.drawImage(source, 0, 0, layer.bounding.w, layer.bounding.h);
     }

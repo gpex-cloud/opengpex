@@ -4,6 +4,15 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.58
+
+- Clip Tool: added union merge — select multiple cut fragments and combine them into a single layer with full vector precision, no rasterization
+- Clip Tool: adjusted union merge rules to allow parent-child fragment merging
+- Clip Tool: improved geometry operations for polygon union and intersection
+- Rendering: fixed sub-pixel seams between nested cut fragments at non-integer zoom levels (path-type visibleShape expansion)
+
+---
+
 ## v1.0.0-beta.57
 
 - Clip Tool: cut operations are now fully reversible — merge back restores the original layer with zero quality loss, even across multi-level recursive cuts

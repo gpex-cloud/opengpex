@@ -23,6 +23,7 @@ import { FrameRevertCommands } from './commands/frame/revert';
 import { FrameResizeCommands } from './commands/frame/resize';
 import { LayerToggleCommands } from './commands/layer/toggle';
 import { LayerMergeCommands } from './commands/layer/merge';
+import { LayerUnionCommands } from './commands/layer/union';
 import { LayerClipCommands } from './commands/layer/clip';
 import { LayerCmdJCommands } from './commands/layer/cmdj';
 import { LayerPeelCommands } from './commands/layer/peel';
@@ -45,6 +46,7 @@ export * from './commands/frame/revert';
 export * from './commands/frame/resize';
 export * from './commands/layer/toggle';
 export * from './commands/layer/merge';
+export * from './commands/layer/union';
 export * from './commands/layer/clip';
 export * from './commands/layer/cmdj';
 export * from './commands/layer/peel';
@@ -64,6 +66,7 @@ export function registerAdvancedCommands(ctx: EditorContextValue['actions']) {
     FrameResizeCommands,
     LayerToggleCommands,
     LayerMergeCommands,
+    LayerUnionCommands,
     LayerClipCommands,
     LayerCmdJCommands,
     LayerPeelCommands,

@@ -62,7 +62,6 @@ async function compositeLayersToAsset(
  * a CompositeResult. Asset injection uses result.toAsset() which delegates
  * to the injected assetInjector wired by PixelService.
  *
- * @see docs/opengpex/plans/20260721_unified_composite_pipeline_design.md §14 Step 8
  */
 export const LayerMergeCommands = {
   mergeDown: {
@@ -171,9 +170,13 @@ export const LayerMergeCommands = {
           bitmapMasks: [],
         });
 
-        items.forEach(item => {
-          layers.removeLayers(activeFrame.id, item.id);
-        });
+        // [Critical] Must batch-remove all items in a single call. React's useReducer
+        // dispatch is async — getState() returns the same stale snapshot throughout a
+        // command execution. If we remove items one-by-one, each removeLayers' cut-link
+        // cleanup hook reads the same stale vectorMasks and the last write wins, leaving
+        // residual hole masks on the source layer. The batch call's internal maskRemovalMap
+        // correctly collects all masks and filters them in one operation.
+        layers.removeLayers(activeFrame.id, items.map(item => item.id));
 
         layers.activate(activeFrame.id, targetLayer.id);
 
@@ -258,77 +261,92 @@ export const LayerMergeCommands = {
       const allLayers = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]);
 
       /**
-       * Core recursive algorithm — merges a single cut fragment back to its source layer.
+       * Two-phase merge-back algorithm to avoid stale-state issues.
        *
-       * Execution order (leaf-first / depth-first):
-       *   1. Collect all layers that were cut FROM this fragment (downstream children)
-       *   2. Recursively merge each downstream child first (ensures leaves are processed before parents)
-       *   3. Remove THIS fragment's corresponding hole mask from its source layer (restores source visibility)
-       *   4. Delete THIS fragment layer (and its triplet sub-layers)
+       * React's useReducer dispatch is async — getState() returns the same snapshot
+       * throughout a single command execution. If we interleave reads and writes
+       * (as the old per-iteration approach did), later reads see stale vectorMasks
+       * and produce incorrect filtered results that overwrite earlier correct writes.
+       *
+       * Phase 1 (Collection): Recursively walks the fragment tree using the stale
+       * snapshot (safe — tree structure is read-only). Collects:
+       *   - All fragment IDs to delete
+       *   - Per-source-layer: set of mask IDs to remove
+       *
+       * Phase 2 (Execution): Applies all mutations in batch:
+       *   - Single updateLayer per source (filters ALL collected masks at once)
+       *   - Single removeLayers for all collected fragments
        *
        * Example: A → B → D  (A cut to B, B cut to D)
-       *   mergeBackRecursive('B') →
-       *     finds D as downstream of B →
-       *     mergeBackRecursive('D') → removes mask-hole-D from B, deletes D
-       *     then removes mask-hole-B from A, deletes B
+       *   collectMergeBack('B') →
+       *     finds D as downstream of B → collectMergeBack('D')
+       *     collects: fragmentsToRemove=[D, B], maskRemovals={B: [mask-hole-D], A: [mask-hole-B]}
+       *   Execute: remove masks from B and A, then delete [D, B]
        *   Result: only A remains, fully restored.
        */
-      function mergeBackRecursive(fragLayerId: string): void {
+
+      // ── Phase 1: Collection ──
+      const fragmentsToRemove: string[] = [];
+      const maskRemovalMap = new Map<string, Set<string>>(); // sourceLayerId → maskIds to remove
+
+      function collectMergeBack(fragLayerId: string): void {
         const fragLayer = activeFrame!.layers.byId[fragLayerId];
         if (!fragLayer) return;
 
-        // Step 1: Find downstream cut fragments — layers whose sourceLayerId points to
-        // this fragment AND have an assocMaskId (confirming cut relationship, not just copy)
+        // Find downstream cut fragments (depth-first: process children before parent)
         const downstreamFragments = allLayers.filter(l =>
-          l.metadata?.sourceLayerId === fragLayerId && l.metadata?.assocMaskId
+          !l.hostId && l.metadata?.sourceLayerId === fragLayerId && l.metadata?.assocMaskId
         );
-
-        // Step 2: Recursively merge downstream first (depth-first traversal ensures
-        // leaf nodes are resolved before their parents, preventing dangling references)
         for (const downstream of downstreamFragments) {
-          mergeBackRecursive(downstream.id);
+          collectMergeBack(downstream.id);
         }
 
-        // Step 3: Read this fragment's cut-link pointers
+        // Read this fragment's cut-link pointers
         const sourceId = fragLayer.metadata?.sourceLayerId as string | undefined;
         const maskId = fragLayer.metadata?.assocMaskId as string | undefined;
-
-        // Guard: skip if not a valid cut fragment (e.g. copy-derived or orphan)
         if (!sourceId || !maskId) return;
 
+        // Record fragment to delete (regardless of whether source still exists)
+        fragmentsToRemove.push(fragLayerId);
+
+        // Record mask to remove from source (skip if source was already deleted)
         const srcLayer = activeFrame!.layers.byId[sourceId];
-        // Guard: source layer was deleted — fragment is orphaned, just remove it
         if (!srcLayer) return;
-
-        // Step 4a: Remove the hole mask from the source layer's vectorMasks array.
-        // This restores the source layer's visibility in the region that was cut away.
-        const updatedMasks = (srcLayer.vectorMasks || []).filter(m => m.id !== maskId);
-        actions.updateLayer(activeFrame!.id, sourceId, { vectorMasks: updatedMasks });
-
-        // Step 4b: Delete the fragment layer itself (removeLayers also handles triplet cleanup
-        // and auto-removes any remaining hole masks via the cut-link cleanup hook in index.ts)
-        layers.removeLayers(activeFrame!.id, fragLayerId);
+        if (!maskRemovalMap.has(sourceId)) maskRemovalMap.set(sourceId, new Set());
+        maskRemovalMap.get(sourceId)!.add(maskId);
       }
 
       try {
-        // ── Role detection: determine whether the target layer is a fragment or a source ──
+        // ── Role detection ──
         const isCutFragment = !!(layer.metadata?.sourceLayerId && layer.metadata?.assocMaskId);
         const hasHoleMasks = !!(layer.vectorMasks?.some(m => m.assocLayerId));
 
         if (isCutFragment) {
-          // Fragment path: this layer was cut from a source → merge itself back
-          // (downstream fragments are automatically handled by the recursive algorithm)
-          mergeBackRecursive(layerId);
+          collectMergeBack(layerId);
         } else if (hasHoleMasks) {
-          // Source path: this layer has hole masks → find all direct cut fragments and merge them back
           const directFragments = allLayers.filter(l =>
-            l.metadata?.sourceLayerId === layerId && l.metadata?.assocMaskId
+            !l.hostId && l.metadata?.sourceLayerId === layerId && l.metadata?.assocMaskId
           );
           for (const frag of directFragments) {
-            mergeBackRecursive(frag.id);
+            collectMergeBack(frag.id);
           }
         }
-        // else: no-op — normal layer without any cut-link relationships
+        // else: no-op
+
+        if (fragmentsToRemove.length === 0) return;
+
+        // ── Phase 2: Batch execution ──
+        // Remove all collected masks from each source layer (single write per source)
+        for (const [sourceId, maskIds] of maskRemovalMap) {
+          const srcLayer = activeFrame.layers.byId[sourceId];
+          if (!srcLayer) continue;
+          const updatedMasks = (srcLayer.vectorMasks || []).filter(m => !maskIds.has(m.id));
+          actions.updateLayer(activeFrame.id, sourceId, { vectorMasks: updatedMasks });
+        }
+
+        // Delete all fragments in one batch (removeLayers handles triplet sub-layers internally)
+        layers.removeLayers(activeFrame.id, fragmentsToRemove);
+
       } catch (err) {
         console.error('[MergeBack] Failed:', err);
         actions.setInteraction({ hud: { message: 'Merge Back failed.', type: 'error' } });

@@ -55,7 +55,6 @@ export interface CompositeJob {
    * bitDepth >= 16 may default to 'linear' (set by LayerFactory.getNewFrame).
    *
    * @default 'srgb-trc'
-   * @see docs/opengpex/plans/20260729_color_management_architecture_evolution.md §Phase B
    */
   compositeTRC?: TRC;
 

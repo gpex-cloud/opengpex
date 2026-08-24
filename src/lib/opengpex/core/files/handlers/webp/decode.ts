@@ -18,7 +18,7 @@
 
 import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/types';
 import type { DecodeOptions, DecodeResult } from '../../types';
-import type { ImageMetadata } from '../../metadata';
+import type { ImageMetadata } from '../../types';
 import { bitmapToCanvas } from '../../index';
 import { iccToBase64, parseIccProfileName } from '../../icc';
 import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';

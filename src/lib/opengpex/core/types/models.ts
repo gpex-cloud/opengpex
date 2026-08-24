@@ -37,7 +37,6 @@ import type { ImageMetadata } from '../files/types';
  * For file-level metadata identification (including CMYK, grayscale, unknown),
  * see `ColorSpaceId` in `core/files/types.ts`.
  *
- * @see docs/opengpex/plans/20260729_color_management_architecture_evolution.md §Phase A
  */
 export type WorkingColorSpace = 'srgb' | 'display-p3' | 'adobe-rgb' | 'prophoto-rgb';
 
@@ -329,7 +328,6 @@ export interface Frame {
    * native color space, avoiding lossy round-trip conversions.
    *
    * @default 'srgb'
-   * @see docs/opengpex/plans/20260729_color_management_architecture_evolution.md §Phase A
    */
   colorSpace: WorkingColorSpace;
 

@@ -279,6 +279,7 @@ export const useCloudMenu = () => {
     signOut,
 
     // Cloud operations
+    hasActiveFrame: !!activeFrame,
     savePhase,
     syncStatus,
     lastSaveResult,

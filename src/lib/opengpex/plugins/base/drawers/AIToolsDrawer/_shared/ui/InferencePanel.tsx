@@ -32,7 +32,6 @@
  *   - 'default': Purple progress bar with spinner (in-progress)
  *   - 'success': Green progress bar with checkmark (complete)
  *
- * @see docs/opengpex/plans/20260810_progress_panel_spec.md
  */
 
 import React from 'react';

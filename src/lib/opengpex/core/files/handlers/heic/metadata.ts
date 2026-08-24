@@ -20,9 +20,9 @@
  */
 
 import ExifReader from 'exifreader';
-import type { ImageMetadata, ColorSpaceId } from '../../metadata';
+import type { ImageMetadata, ColorSpaceId } from '../../types';
 import { iccToBase64, parseIccProfileName } from '../../icc';
-import { extractIsobmffIcc, extractIsobmffNclx, extractIsobmffExif, nclxToColorSpace } from '../../isobmff-reader';
+import { extractIsobmffIcc, extractIsobmffNclx, extractIsobmffExif, nclxToColorSpace } from '../../metadata/isobmff-reader';
 
 /**
  * Extract full V2 metadata from a HEIC file.

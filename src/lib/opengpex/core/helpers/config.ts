@@ -49,6 +49,15 @@ export const HOST_LAYER_ORDER = 10;
  */
 export const PERF_MON = process.env.NEXT_PUBLIC_GPEX_PERF_MON === 'true';
 
+/**
+ * Sub-pixel seam prevention debug switches.
+ * Toggle these to isolate which mechanism is contributing to seam reduction.
+ *   - SEAM_SHRINK_HOLE: Controls hole mask inward shrink (shrinkInvertedMask)
+ *   - SEAM_EXPAND_FRAGMENT: Controls fragment visibleShape outward expansion (Phase 2)
+ */
+export const SEAM_SHRINK_HOLE = true;
+export const SEAM_EXPAND_FRAGMENT = true;
+
 /** Industrial-grade rendering safety threshold: 144MP (approx. 12000x12000). Exceeding this value forces tiled rendering to prevent OOM */
 export const MAX_SAFE_EXPORT_PIXELS = 144_000_000;
 

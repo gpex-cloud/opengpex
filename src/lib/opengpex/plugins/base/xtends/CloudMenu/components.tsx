@@ -268,6 +268,7 @@ function CloudMenuInner() {
     openLogin,
     signOut,
     // Cloud operations
+    hasActiveFrame,
     savePhase,
     syncStatus,
     lastSaveResult,
@@ -467,40 +468,42 @@ function CloudMenuInner() {
                   )}
                 </div>
 
-                {/* Divider */}
-                <div className="h-px w-full bg-[var(--border-subtle)]" />
-
-                {/* Current File Section */}
-                <div className="flex items-center justify-between">
-                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest">
-                    Current File
-                  </span>
-                  <button
-                    onClick={handleSaveToCloud}
-                    disabled={isSaving || syncStatus === "SYNCED"}
-                    className={`flex items-center gap-1 px-2 py-1 rounded-md border transition-all outline-none ${
-                      syncStatus === "SYNCED"
-                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 cursor-default"
-                        : syncStatus === "LOCAL_AHEAD"
-                          ? "border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 cursor-pointer"
-                          : "border-[var(--border-subtle)] hover:border-[var(--text-muted)]/50 bg-[var(--bg-panel)] hover:bg-[var(--bg-panel)]/70 text-[var(--text-muted)] cursor-pointer"
-                    } disabled:cursor-not-allowed`}
-                    title={syncStatus === "SYNCED" ? "Already synced" : isSaving ? "Syncing..." : "Sync to Cloud"}
-                  >
-                    {isSaving ? (
-                      <Loader2 size={9} className="animate-spin" />
-                    ) : savePhase === "ERROR" ? (
-                      <AlertCircle size={9} />
-                    ) : syncStatus === "LOCAL_AHEAD" ? (
-                      <RefreshCw size={9} />
-                    ) : syncStatus === "SYNCED" ? null : (
-                      <Upload size={9} />
-                    )}
-                    <span className="text-[8px] font-bold whitespace-nowrap">
-                      {isSaving ? "Syncing…" : syncStatus === "SYNCED" ? `Synced v${lastSaveResult?.version ?? ""}` : syncStatus === "LOCAL_AHEAD" ? "Sync" : syncStatus === "NEVER_SAVED" ? "Upload" : "Offline"}
-                    </span>
-                  </button>
-                </div>
+                {/* Current File Section — only shown when a frame is active */}
+                {hasActiveFrame && (
+                  <>
+                    <div className="h-px w-full bg-[var(--border-subtle)]" />
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest">
+                        Current File
+                      </span>
+                      <button
+                        onClick={handleSaveToCloud}
+                        disabled={isSaving || syncStatus === "SYNCED"}
+                        className={`flex items-center gap-1 px-2 py-1 rounded-md border transition-all outline-none ${
+                          syncStatus === "SYNCED"
+                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 cursor-default"
+                            : syncStatus === "LOCAL_AHEAD"
+                              ? "border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 cursor-pointer"
+                              : "border-[var(--border-subtle)] hover:border-[var(--text-muted)]/50 bg-[var(--bg-panel)] hover:bg-[var(--bg-panel)]/70 text-[var(--text-muted)] cursor-pointer"
+                        } disabled:cursor-not-allowed`}
+                        title={syncStatus === "SYNCED" ? "Already synced" : isSaving ? "Syncing..." : "Sync to Cloud"}
+                      >
+                        {isSaving ? (
+                          <Loader2 size={9} className="animate-spin" />
+                        ) : savePhase === "ERROR" ? (
+                          <AlertCircle size={9} />
+                        ) : syncStatus === "LOCAL_AHEAD" ? (
+                          <RefreshCw size={9} />
+                        ) : syncStatus === "SYNCED" ? null : (
+                          <Upload size={9} />
+                        )}
+                        <span className="text-[8px] font-bold whitespace-nowrap">
+                          {isSaving ? "Syncing…" : syncStatus === "SYNCED" ? `Synced v${lastSaveResult?.version ?? ""}` : syncStatus === "LOCAL_AHEAD" ? "Sync" : syncStatus === "NEVER_SAVED" ? "Upload" : "Offline"}
+                        </span>
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className={styles.divider.className} />

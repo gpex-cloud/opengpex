@@ -26,7 +26,7 @@ import { base64ToIcc, getStockIccProfile } from '../../icc';
 import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
 import { getExportStrategy, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
 import { injectWebpIcc, stripWebpIcc, injectWebpExif } from './riff';
-import { resetExifOrientation } from '../../tiff-ifd-reader';
+import { resetExifOrientation } from '../../metadata/tiff-ifd-reader';
 
 /**
  * Encode a canvas/bitmap to WebP with ICC injection.

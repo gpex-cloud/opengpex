@@ -26,7 +26,6 @@
  *   - Error message with red styling
  *   - Dismiss button
  *
- * @see docs/opengpex/plans/20260810_progress_panel_spec.md
  */
 
 import React from 'react';

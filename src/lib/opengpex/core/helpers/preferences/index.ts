@@ -41,7 +41,6 @@ type Listener = <K extends PresetKeys>(key: K, value: PresetValues[K]) => void;
  * - Overrides layer on top of static defaults from `presets.ts`.
  * - Listeners are notified synchronously on `set`/`reset`.
  *
- * @see docs/opengpex/plans/20260805_windows_mouse_wheel_fix.md §PresetsFactory
  */
 class PresetsFactory {
   private defaults: PresetValues;

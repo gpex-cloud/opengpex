@@ -200,19 +200,26 @@ export function createLayerService(
       const idsToRemove = LayerFactory.collectDescendants(targetIds, allLayers);
 
       // ── Cut-link cleanup: when deleting a cut fragment, auto-remove its hole mask from the source layer ──
+      // Collect all mask IDs to remove per source layer first (avoid stale-snapshot overwrites
+      // when multiple fragments / triplet sub-layers target the same source).
+      const maskRemovalMap = new Map<string, Set<string>>();
       for (const removeId of idsToRemove) {
         const layer = frame.layers.byId[removeId];
-        if (!layer) continue;
+        if (!layer || layer.hostId) continue; // Only host layers trigger cleanup (skip exchange/frag triplet sub-layers)
         const sourceLayerId = layer.metadata?.sourceLayerId as string | undefined;
         const assocMaskId = layer.metadata?.assocMaskId as string | undefined;
         if (sourceLayerId && assocMaskId && !idsToRemove.has(sourceLayerId)) {
-          // Source layer survives — remove the corresponding hole mask
-          const sourceLayer = frame.layers.byId[sourceLayerId];
-          if (sourceLayer?.vectorMasks) {
-            const updatedMasks = sourceLayer.vectorMasks.filter(m => m.id !== assocMaskId);
-            if (updatedMasks.length !== sourceLayer.vectorMasks.length) {
-              actions.updateLayer(frameId, sourceLayerId, { vectorMasks: updatedMasks });
-            }
+          if (!maskRemovalMap.has(sourceLayerId)) maskRemovalMap.set(sourceLayerId, new Set());
+          maskRemovalMap.get(sourceLayerId)!.add(assocMaskId);
+        }
+      }
+      // Apply collected removals in a single updateLayer per source (no stale-read issues)
+      for (const [sourceLayerId, maskIds] of maskRemovalMap) {
+        const sourceLayer = frame.layers.byId[sourceLayerId];
+        if (sourceLayer?.vectorMasks) {
+          const updatedMasks = sourceLayer.vectorMasks.filter(m => !maskIds.has(m.id));
+          if (updatedMasks.length !== sourceLayer.vectorMasks.length) {
+            actions.updateLayer(frameId, sourceLayerId, { vectorMasks: updatedMasks });
           }
         }
       }

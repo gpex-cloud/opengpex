@@ -20,6 +20,7 @@
 'use client';
 
 import { Layer, Frame, EditorContextValue, asLocalPolygon, asLocalRect, asLocalPoint, LocalPolygon, NormalizedState, ShapeType } from '@opengpex/editor/core/types';
+import { findUpstreamAssetId, findDownstreamFragments } from '@opengpex/editor/core/layer/factory';
 
 /**
  * Resolved refocus target: either a regular shape (rect/ellipse) or an irregular polygon.
@@ -121,6 +122,72 @@ export function hasLayerAdjustments(layer: Layer): boolean {
 
   return false;
 }
+
+// ─── Union merge status ───────────────────────────────────────────────────────
+
+export type UnionStatus = 'green' | 'amber' | 'red';
+
+/**
+ * computeUnionStatus — Evaluate the compatibility of selected layers for union merge.
+ *
+ * Returns:
+ *   'green' — Perfect merge (same assetId, rotation/flip, all image, no downstream, consistent props, no displacement)
+ *   'amber' — Mergeable with compromise (props differ or fragments displaced from birth position)
+ *   'red'   — Cannot merge (different assetId, rotation/flip mismatch, non-image, has downstream, mixed cut+copy, or <2 selected)
+ *
+ */
+export function computeUnionStatus(selection: string[], frame: Frame): UnionStatus {
+  if (selection.length < 2) return 'red';
+
+  const layers = selection
+    .map(id => frame.layers.byId[id])
+    .filter(Boolean) as Layer[];
+
+  if (layers.length < 2) return 'red';
+
+  // All must be image type
+  if (layers.some(l => l.type !== 'image')) return 'red';
+
+  // Resolve root assetIds — all must match
+  const assetIds = layers.map(l => findUpstreamAssetId(l.id, frame));
+  if (assetIds.some(id => !id)) return 'red';
+  if (new Set(assetIds).size > 1) return 'red';
+
+  // Rotation/flip must be consistent
+  const base = layers[0];
+  if (layers.some(l => l.rotation !== base.rotation)) return 'red';
+  if (layers.some(l => l.flip.h !== base.flip.h || l.flip.v !== base.flip.v)) return 'red';
+
+  // Downstream fragments check: all downstream of selected layers must also be in selection.
+  // If a selected layer has unselected downstream, merging would orphan those fragments.
+  const allLayers = frame.layers.order.map(id => frame.layers.byId[id]);
+  const selectionSet = new Set(selection);
+  for (const layer of layers) {
+    const downstream = findDownstreamFragments(layer.id, allLayers);
+    if (downstream.some(d => !selectionSet.has(d.id))) return 'red';
+  }
+
+  // Mixed cut+copy is disallowed (Scheme B from spec §6.4):
+  // Some have assocMaskId (cut) and others don't (copy) → hole mask semantics would be inconsistent.
+  const hasCut = layers.some(l => l.metadata?.assocMaskId);
+  const hasCopy = layers.some(l => l.metadata?.sourceLayerId && !l.metadata?.assocMaskId);
+  if (hasCut && hasCopy) return 'red';
+
+  // If we reach here, merge is possible. Check for property consistency + position → green vs amber.
+  const propsMatch =
+    layers.every(l => l.opacity === base.opacity) &&
+    layers.every(l => l.blendMode === base.blendMode) &&
+    layers.every(l => JSON.stringify(l.adjustments) === JSON.stringify(base.adjustments));
+
+  // Check if any fragment has been moved from its birth position
+  const anyMoved = layers.some(l =>
+    l.birthCenter && (l.cx !== l.birthCenter.cx || l.cy !== l.birthCenter.cy)
+  );
+
+  return (propsMatch && !anyMoved) ? 'green' : 'amber';
+}
+
+// ─── Layer stack reordering ───────────────────────────────────────────────────
 
 /**
  * Re-constructs the full flat layer list based on a reordered host list.

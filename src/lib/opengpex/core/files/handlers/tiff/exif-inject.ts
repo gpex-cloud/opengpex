@@ -30,7 +30,7 @@
  * @module core/files/handlers/tiff/exif-inject
  */
 
-import { parseTiffByteOrder, readU16, readU32, writeU16, writeU32, TYPE_SIZES } from '../../tiff-ifd-reader';
+import { parseTiffByteOrder, readU16, readU32, writeU16, writeU32, TYPE_SIZES } from '../../metadata/tiff-ifd-reader';
 
 /** Tag ID for EXIF SubIFD pointer in IFD0 */
 const EXIF_IFD_POINTER_TAG = 0x8769;

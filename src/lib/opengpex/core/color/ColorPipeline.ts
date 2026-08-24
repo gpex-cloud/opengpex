@@ -36,7 +36,6 @@
  *   Flow: File → Format Strategy (resolve colorSpace) → ColorSpace Strategy (pipeline behavior)
  *
  * @module core/color/ColorPipeline
- * @see docs/opengpex/plans/20260802_color_pipeline_strategy_matrix.md
  */
 
 import type { SourceFormat, ColorSpaceId } from '@opengpex/editor/core/files';

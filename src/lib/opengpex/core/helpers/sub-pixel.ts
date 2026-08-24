@@ -17,7 +17,9 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { LocalRect, Shape } from '@opengpex/editor/core/types';
+import { LocalRect, Shape, Point2D } from '@opengpex/editor/core/types';
+import { parsePathDataToRings } from '@opengpex/editor/core/geometry/operators/point2d';
+import { SEAM_SHRINK_HOLE, SEAM_EXPAND_FRAGMENT } from './config';
 
 /**
  * shrinkInvertedMask: Physical anti-aliasing seam prevention mask shrinker (Subpixel Mask Seam Prevention)
@@ -48,7 +50,10 @@ export function shrinkInvertedMask<T extends Shape>(shape: T, inverted: boolean,
     return shape;
   }
 
-  if (inverted && (shape.type === 'rect' || shape.type === 'circle')) {
+  if (!inverted) return shape;
+  if (!SEAM_SHRINK_HOLE) return shape;
+
+  if (shape.type === 'rect' || shape.type === 'circle') {
     // 0.75 physical pixels, mapped to logical space.
     // Clamp to at most 25% of the shape's smaller dimension to prevent self-intersection/disappearance.
     const maxShrink = 0.25 * Math.min(shape.rect.w, shape.rect.h);
@@ -78,6 +83,21 @@ export function shrinkInvertedMask<T extends Shape>(shape: T, inverted: boolean,
       } as typeof shape.rect
     };
   }
+
+  if (shape.type === 'path' && (shape as unknown as { pathData?: string }).pathData) {
+    // Path-type hole mask: shrink via vertex-normal inset on each ring.
+    // Same dynamic shrink logic: 0.75 physical pixels mapped to logical space.
+    const maxShrink = 0.25 * Math.min(shape.rect.w, shape.rect.h);
+    const shrinkLogical = Math.min(0.75 / scale, maxShrink);
+
+    const pathData = (shape as unknown as { pathData: string }).pathData;
+    const shrunkPathData = shrinkPathData(pathData, shrinkLogical, layerBounds);
+    return {
+      ...shape,
+      pathData: shrunkPathData,
+    } as unknown as T;
+  }
+
   return shape;
 }
 
@@ -109,4 +129,198 @@ export function snapClipBoxToPixels<T extends { rect: LocalRect }>(cropBox: T): 
       h: Math.max(1, y2 - y1),
     },
   };
+}
+
+// ─────────────────────────── Path Inset Helpers ────────────────────────────────
+
+/**
+ * shrinkPathData: Shrinks a pathData string inward by `amount` logical pixels
+ * using vertex-normal inset on each ring.
+ *
+ * Boundary-aware: vertices within 1px of `layerBounds` edges are not shrunk
+ * (no AA seam exists at the layer boundary).
+ */
+function shrinkPathData(pathData: string, amount: number, layerBounds?: { w: number; h: number }): string {
+  const rings = parsePathDataToRings(pathData);
+  if (!rings.length) return pathData;
+
+  const shrunkRings = rings.map(ring => {
+    if (ring.length < 3) return ring;
+    // Determine winding direction via signed area (Shoelace formula).
+    // Positive area = CW = outer ring → shrink inward (positive offset)
+    // Negative area = CCW = inner ring → shrink outward (negative offset)
+    const area = signedArea(ring);
+    const direction = area >= 0 ? 1 : -1;
+    return insetRing(ring, amount * direction, layerBounds);
+  });
+
+  return ringsToPathData(shrunkRings);
+}
+
+/**
+ * insetRing: Move each vertex of a ring inward by `offset` using vertex-normal averaging.
+ *
+ * For positive offset: vertices move in the direction of the inward normal (CW winding).
+ * For negative offset: vertices move outward (used for CCW inner rings).
+ *
+ * Boundary-aware: if `layerBounds` is provided, vertices within 1px of any boundary
+ * edge are left unchanged (no seam exists there).
+ */
+export function insetRing(ring: Point2D[], offset: number, layerBounds?: { w: number; h: number }): Point2D[] {
+  const n = ring.length;
+  const result: Point2D[] = [];
+  const EDGE_TOLERANCE = 1;
+
+  for (let i = 0; i < n; i++) {
+    const curr = ring[i];
+
+    // Boundary check: if this vertex touches layer edge, don't shrink it
+    if (layerBounds) {
+      const nearBoundary =
+        curr.x < EDGE_TOLERANCE ||
+        curr.y < EDGE_TOLERANCE ||
+        curr.x > layerBounds.w - EDGE_TOLERANCE ||
+        curr.y > layerBounds.h - EDGE_TOLERANCE;
+      if (nearBoundary) {
+        result.push(curr);
+        continue;
+      }
+    }
+
+    const prev = ring[(i - 1 + n) % n];
+    const next = ring[(i + 1) % n];
+
+    // Edge vectors
+    const e1x = curr.x - prev.x;
+    const e1y = curr.y - prev.y;
+    const e2x = next.x - curr.x;
+    const e2y = next.y - curr.y;
+
+    // Edge lengths
+    const len1 = Math.hypot(e1x, e1y) || 1;
+    const len2 = Math.hypot(e2x, e2y) || 1;
+
+    // Inward normals (perpendicular, pointing left of travel direction for CW winding)
+    const n1x = e1y / len1;
+    const n1y = -e1x / len1;
+    const n2x = e2y / len2;
+    const n2y = -e2x / len2;
+
+    // Average normal
+    const avgx = n1x + n2x;
+    const avgy = n1y + n2y;
+    const avgLen = Math.hypot(avgx, avgy) || 1;
+    const normx = avgx / avgLen;
+    const normy = avgy / avgLen;
+
+    // Miter factor: compensates for angle between edges so offset is uniform
+    const dot = normx * n1x + normy * n1y;
+    const miter = Math.min(Math.abs(1 / (dot || 1)), 4); // cap at 4x to prevent spikes
+
+    result.push({
+      x: curr.x + normx * offset * miter,
+      y: curr.y + normy * offset * miter,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * ringsToPathData: Serialize Point2D rings back to SVG M/L/Z pathData string.
+ */
+function ringsToPathData(rings: Point2D[][]): string {
+  const parts: string[] = [];
+  for (const ring of rings) {
+    if (ring.length < 2) continue;
+    const segs: string[] = [];
+    for (let i = 0; i < ring.length; i++) {
+      const p = ring[i];
+      segs.push(`${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`);
+    }
+    segs.push('Z');
+    parts.push(segs.join(' '));
+  }
+  return parts.join(' ');
+}
+
+/**
+ * signedArea: Compute the signed area of a polygon ring (Shoelace formula).
+ * Positive = clockwise, Negative = counter-clockwise.
+ */
+function signedArea(ring: Point2D[]): number {
+  let area = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    area += (ring[j].x + ring[i].x) * (ring[j].y - ring[i].y);
+  }
+  return area / 2;
+}
+
+// ─────────────────────────── Fragment Clip Expansion (Phase 2) ──────────────────
+
+/**
+ * isExpandableFragmentClip: Determines whether a clip descriptor is an expandable
+ * fragment visibleShape clip (Phase 2 seam prevention).
+ *
+ * Returns true when ALL of the following hold:
+ *   1. clipInverted === false
+ *   2. assocMaskId exists (layer is a cut fragment)
+ *   3. clipShape === layerVisibleShape (reference equality)
+ *   4. clipShape.type === 'path'
+ *   5. clipShape.pathData exists
+ *   6. clipShape.antiAliased !== false
+ *
+ * ── Condition necessity analysis ──
+ *
+ * 🔴 MUST KEEP (removing causes visible artifacts):
+ *   #3 — Without this, vectorMask clips would also be expanded, distorting
+ *         user-drawn mask edges by 0.75px.
+ *   #6 — In hard-edge mode, expansion introduces fractional coordinates that
+ *         re-introduce the anti-aliasing it was designed to avoid.
+ *
+ * 🟡 RECOMMENDED (removing is safe but wasteful or reduces clarity):
+ *   #2 — Non-fragment layers don't have the shared-boundary seam problem.
+ *         Expanding them is harmless (overdraw is clipped by drawImage bounds)
+ *         but wastes ~0.01ms/layer on pointless shrinkPathData computation.
+ *   #4 — rect/circle clips don't have pathData, so #5 would catch them anyway.
+ *         Kept for early exit and semantic clarity.
+ *   #5 — Defensive. In practice type='path' shapes always have pathData.
+ *         expandFragmentClip also has its own `if (!pathData)` guard.
+ *
+ * 🟢 REMOVABLE (zero runtime impact in current architecture):
+ *   #1 — In prepareClipSequence, the code structure guarantees only non-inverted
+ *         clips reach this check. Kept for function-level self-documentation.
+ */
+export function isExpandableFragmentClip(
+  clipShape: Shape,
+  clipInverted: boolean,
+  layerVisibleShape: Shape | undefined,
+  assocMaskId: string | undefined,
+): boolean {
+  if (clipInverted) return false;
+  if (!assocMaskId) return false;
+  if (clipShape !== layerVisibleShape) return false;
+  if (clipShape.type !== 'path') return false;
+  if (!(clipShape as unknown as { pathData?: string }).pathData) return false;
+  if (clipShape.antiAliased === false) return false;
+  return true;
+}
+
+/**
+ * expandFragmentClip: Expands a fragment's visibleShape pathData outward by 0.75/scale.
+ *
+ * Used at RENDER TIME ONLY (viewport painter) to create a slight overdraw that
+ * covers the anti-aliasing seam between adjacent fragments sharing a visibleShape boundary.
+ *
+ * Controlled by `SEAM_EXPAND_FRAGMENT` config flag.
+ *
+ * @param pathData  The fragment's visibleShape.pathData
+ * @param scale     Current rendering scale (camera.k * dpr)
+ * @returns Expanded pathData string (or original if disabled/invalid)
+ */
+export function expandFragmentClip(pathData: string, scale: number): string {
+  if (!SEAM_EXPAND_FRAGMENT) return pathData;
+  if (!pathData) return pathData;
+  const amount = -(0.75 / scale);
+  return shrinkPathData(pathData, amount);
 }

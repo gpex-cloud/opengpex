@@ -35,7 +35,7 @@ import {
   LocalRect, Dimensions, Shape, LocalShape, LocalPolygon, TileMetadata
 } from './primitives';
 import { EditorData } from './state';
-import type { ImageMetadata } from '../files/metadata';
+import type { ImageMetadata } from '../files/types';
 
 /**
  * RenderToBlobOptions: Unified options for composite-to-blob export operations.
@@ -399,7 +399,6 @@ export interface PixelService {
    * strategies, selects the best backend (8-bit Canvas2D / 16-bit vips / future WebGPU),
    * and returns a lazy CompositeResult.
    *
-   * @see docs/opengpex/plans/20260721_unified_composite_pipeline_design.md §14 Step 7
    */
   composite: (request: CompositeRequest) => Promise<CompositeResult>;
 }

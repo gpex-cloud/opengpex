@@ -34,7 +34,6 @@ export type ViewportScrollMode = 'legacy' | 'modern';
  * Currently a static constant; will be promoted to a runtime-switchable
  * preset via PresetsFactory in a future iteration.
  *
- * @see docs/opengpex/plans/20260805_windows_mouse_wheel_fix.md
  */
 export const VIEWPORT_SCROLL_MODE: ViewportScrollMode = 'legacy';
 

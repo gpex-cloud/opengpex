@@ -19,9 +19,9 @@
  */
 
 import ExifReader from 'exifreader';
-import type { ImageMetadata } from '../../metadata';
+import type { ImageMetadata } from '../../types';
 import { iccToBase64, parseIccProfileName } from '../../icc';
-import { extractTiffIcc } from '../../tiff-ifd-reader';
+import { extractTiffIcc } from '../../metadata/tiff-ifd-reader';
 
 /**
  * Extract full V2 metadata from a Camera RAW file.

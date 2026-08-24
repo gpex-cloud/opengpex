@@ -30,7 +30,7 @@ import {
   asWorldRect, asLocalRect, asWorldPoint, asViewportRect,
   GeometryService, Frame, Layer, WorldRect, IMatrix3x3, LayerPoseOverride,
   CameraState, Rect, Point2D, Dimensions, WorldPoint,
-  ViewportPoint, CameraCenterOptions, WorldShape, LocalShape, Shape, NormalizedState,
+  ViewportPoint, CameraCenterOptions, WorldShape, LocalShape, LocalRect, Shape, NormalizedState,
   LocalPolygon, WorldPolygon
 } from '@opengpex/editor/core/types';
 import {
@@ -40,7 +40,8 @@ import {
 import {
   computePolygonBounds, localToWorldPolygon, worldToLocalPolygon,
   frameLocalToLayerLocal as polyFrameToLayer, layerLocalToFrameLocal as polyLayerToFrame, polygonToSvgPathD,
-  isPointInPolygon, computeRingArea, simplifyOpen, simplifyRing, translatePolygon
+  isPointInPolygon, computeRingArea, simplifyOpen, simplifyRing, translatePolygon,
+  ellipsePathToLocalPolygon
 } from './operators/polygon';
 import {
   shapeToPoint2D, point2dToLocalShape, point2dToLocalPolygon,
@@ -165,6 +166,9 @@ export function createGeometryService(): GeometryService {
       simplifyOpen: (points: Point2D[], epsilon: number) => simplifyOpen(points, epsilon),
       simplifyRing: (ring: Point2D[], epsilon: number) => simplifyRing(ring, epsilon),
       translatePolygon: (poly: LocalPolygon, dx: number, dy: number) => translatePolygon(poly, dx, dy),
+      regularShapeToLocalPolygon: (tool: 'rect' | 'ellipse', rect: LocalRect, antiAliased?: boolean) =>
+        tool === 'ellipse' ? ellipseToLocalPolygon(rect, antiAliased) : rectToLocalPolygon(rect, antiAliased),
+      ellipsePathToLocalPolygon: (rect: LocalRect, antiAliased?: boolean) => ellipsePathToLocalPolygon(rect, antiAliased),
     },
     point2d: {
       shapeToPoint2D: (shape: LocalShape) => shapeToPoint2D(shape),
@@ -173,8 +177,6 @@ export function createGeometryService(): GeometryService {
       invertRings: (rings: Point2D[][], boundingW: number, boundingH: number) => invertRings(rings, boundingW, boundingH),
       isBoundingRing: (ring: readonly Point2D[], boundingW: number, boundingH: number) => isBoundingRing(ring, boundingW, boundingH),
       computePolygonBounds: (rings: Point2D[][]) => computePolygonBoundsP2D(rings),
-      regularShapeToLocalPolygon: (tool: 'rect' | 'ellipse', rect: import('@opengpex/editor/core/types').LocalRect, antiAliased?: boolean) =>
-        tool === 'ellipse' ? ellipseToLocalPolygon(rect, antiAliased) : rectToLocalPolygon(rect, antiAliased),
     },
     getScale: (frame: Frame, camera?: CameraState) => (camera || frame.camera).k,
     asWorldRect: (r: Rect) => asWorldRect(r),

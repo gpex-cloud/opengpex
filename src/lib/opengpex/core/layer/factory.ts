@@ -217,6 +217,7 @@ export const LayerFactory = {
           name: layer.name,
           role: role as LayerRole,
           hostId: layer.id,
+          metadata: undefined, // Sub-layers must NOT inherit host metadata (sourceLayerId, assocMaskId, etc.)
         });
       });
     });
@@ -380,3 +381,58 @@ export const LayerFactory = {
   },
 
 };
+
+// =================================================================================
+// Cut-Link Traversal Utilities
+// =================================================================================
+//
+// Pure functions for traversing the Cut-Link lineage tree (upward and downward).
+// Co-located with LayerFactory since both deal with layer structure & metadata.
+
+/**
+ * findDownstreamFragments: Find all layers that were cut FROM a given layer.
+ *
+ * A downstream fragment is a layer whose `metadata.sourceLayerId` equals
+ * the given layerId AND has an `assocMaskId` (confirming cut relationship,
+ * not just a copy).
+ *
+ * @param layerId - The source layer to search downstream from
+ * @param allLayers - All layers in the frame (flat array)
+ * @returns Array of downstream cut fragment layers
+ */
+export function findDownstreamFragments(layerId: string, allLayers: Layer[]): Layer[] {
+  return allLayers.filter(l =>
+    !l.hostId && // Only host layers are real fragments (skip exchange/frag triplet sub-layers)
+    l.metadata?.sourceLayerId === layerId && l.metadata?.assocMaskId
+  );
+}
+
+/**
+ * findUpstreamAssetId: Trace upward through the Cut-Link chain to find the
+ * original source assetId.
+ *
+ * Walks `metadata.sourceLayerId` links until it finds a layer with an `assetId`,
+ * or reaches a dead end. Includes cycle detection.
+ *
+ * @param layerId - Starting layer id
+ * @param frame - The frame containing all layers
+ * @returns The root assetId, or null if not resolvable
+ */
+export function findUpstreamAssetId(layerId: string, frame: Frame): string | null {
+  let current = frame.layers.byId[layerId];
+  const visited = new Set<string>();
+
+  while (current) {
+    if (visited.has(current.id)) return null; // cycle protection
+    visited.add(current.id);
+
+    // If current layer has an assetId, that's our root
+    if (current.assetId) return current.assetId;
+
+    // Walk up via sourceLayerId
+    const parentId = current.metadata?.sourceLayerId as string | undefined;
+    if (!parentId) return null;
+    current = frame.layers.byId[parentId];
+  }
+  return null;
+}

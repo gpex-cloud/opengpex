@@ -17,9 +17,9 @@
  */
 
 import ExifReader from 'exifreader';
-import type { ImageMetadata, ColorSpaceId } from '../../metadata';
+import type { ImageMetadata, ColorSpaceId } from '../../types';
 import { iccToBase64, parseIccProfileName } from '../../icc';
-import { extractTiffIcc, extractTiffExif } from '../../tiff-ifd-reader';
+import { extractTiffIcc, extractTiffExif } from '../../metadata/tiff-ifd-reader';
 
 /**
  * Extract full V2 metadata from a TIFF file.

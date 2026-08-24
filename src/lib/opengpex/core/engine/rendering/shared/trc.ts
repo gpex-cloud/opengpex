@@ -36,7 +36,6 @@
  * - ICC.1:2004 (ICC Profile specification)
  *
  * @module core/engine/rendering/shared/trc
- * @see docs/opengpex/plans/20260729_color_management_architecture_evolution.md §Phase A (A4)
  */
 
 import type { TRC } from '@opengpex/editor/core/types';

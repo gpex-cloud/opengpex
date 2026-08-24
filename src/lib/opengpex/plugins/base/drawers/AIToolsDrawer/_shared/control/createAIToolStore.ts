@@ -31,7 +31,6 @@
  *   - Auto-derived busy state for Plugin Service (red dot indicator)
  *   - SSR-safe (pure memory, no side effects on import)
  *
- * @see docs/opengpex/plans/20260810_create_ai_tool_store_spec.md
  */
 
 // ─── Types ───────────────────────────────────────────────────────────────────

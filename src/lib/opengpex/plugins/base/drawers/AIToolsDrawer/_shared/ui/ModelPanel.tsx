@@ -41,8 +41,6 @@
  *   - 'cached'   → "✓ Cached locally"
  *   - 'not-cached' → "Not downloaded yet"
  *
- * @see docs/opengpex/plans/20260809_shared_model_panel_spec.md
- * @see docs/opengpex/02-conventions/plugin_signal_stale_read_convention.md
  */
 
 import React, { useCallback, useRef } from 'react';

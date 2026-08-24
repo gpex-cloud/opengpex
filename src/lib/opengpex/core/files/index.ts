@@ -29,11 +29,11 @@ import type { AssetService, PixelService } from '@opengpex/editor/core/types';
 import type {
   FileService,
   ImageFormatHandler,
+  ImageMetadata,
   DecodeOptions,
   DecodeResult,
   EncodeOptions,
 } from './types';
-import type { ImageMetadata } from './metadata';
 import { JpegHandler } from './handlers/jpeg';
 import { PngHandler } from './handlers/png';
 import { BmpHandler } from './handlers/bmp';
@@ -66,7 +66,7 @@ export type {
 } from './types';
 
 // Re-export V2 metadata types
-export type { ImageMetadata, RawBinaryData } from './metadata';
+export type { ImageMetadata, RawBinaryData } from './types';
 
 
 // ═══════════════════════════════════════════════════════════════════════════════

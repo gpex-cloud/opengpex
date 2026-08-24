@@ -20,7 +20,7 @@
  *   - Item data in `iloc` pointing to: [4-byte offset to TIFF header] + EXIF TIFF IFD bytes
  *   - The 4-byte prefix is typically 0x00000000 (offset = 0, meaning TIFF header immediately follows)
  *
- * @module core/files/isobmff-writer
+ * @module core/files/metadata/isobmff-writer
  */
 
 /**

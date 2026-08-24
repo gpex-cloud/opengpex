@@ -30,7 +30,7 @@ import type {
   DecodeResult,
   EncodeOptions,
 } from '../../types';
-import type { ImageMetadata } from '../../metadata';
+import type { ImageMetadata } from '../../types';
 import { decodeRaw } from './decode';
 import { extractRawMetadata } from './metadata';
 

@@ -82,7 +82,7 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
         const toolId: 'rect' | 'ellipse' = shape.type === 'circle' ? 'ellipse' : 'rect';
         // clipBoxes stores LocalPolygon — properly convert the patched rect to polygon with rings
         const patched = { ...shape, ...patch } as LocalShape;
-        const poly = geometry.point2d.regularShapeToLocalPolygon(toolId, patched.rect, patched.antiAliased);
+        const poly = geometry.polygon.regularShapeToLocalPolygon(toolId, patched.rect, patched.antiAliased);
         actions.setClipBox(activeFrame.id, toolId, poly);
       }
     },
@@ -501,7 +501,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       // so that rings are regenerated correctly (not just patching metadata).
       // For irregular tools (lasso/wand): patch antiAliased directly on the polygon.
       if (tool === 'rect' || tool === 'ellipse') {
-        const newPoly = ctx.geometry.point2d.regularShapeToLocalPolygon(tool, clipBox.rect, newAA);
+        const newPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, clipBox.rect, newAA);
         ctx.actions.setClipBox(frame.id, tool, newPoly);
       } else {
         // Irregular (lasso / wand): patch antiAliased directly
@@ -587,7 +587,7 @@ export const CLIP_OPTIONS_COMMANDS = {
               // marching ants to still render a rectangle. We must rebuild from the
               // bounding rect so the rings match the new shape type.
               const antiAliased = sourceClip.antiAliased ?? true;
-              const newPoly = ctx.geometry.point2d.regularShapeToLocalPolygon(tool, sourceClip.rect, antiAliased);
+              const newPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, sourceClip.rect, antiAliased);
               actions.setClipBox(activeFrame.id, newSlot, newPoly);
             }
           } else {
@@ -596,7 +596,7 @@ export const CLIP_OPTIONS_COMMANDS = {
             const existing = activeFrame.clipBoxes[newSlot] as LocalPolygon | undefined;
             if (existing) {
               const antiAliased = existing.antiAliased ?? true;
-              const newPoly = ctx.geometry.point2d.regularShapeToLocalPolygon(tool, existing.rect, antiAliased);
+              const newPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, existing.rect, antiAliased);
               actions.setClipBox(activeFrame.id, newSlot, newPoly);
             }
           }
@@ -925,7 +925,7 @@ export const CLIP_OPTIONS_COMMANDS = {
 
       const { w, h } = frame.canvas;
       // Build a full-canvas polygon matching the current tool shape
-      const fullCanvasPoly = ctx.geometry.point2d.regularShapeToLocalPolygon(tool, asLocalRect({ x: 0, y: 0, w, h }), tool === 'ellipse');
+      const fullCanvasPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, asLocalRect({ x: 0, y: 0, w, h }), tool === 'ellipse');
 
       // Write to the current tool's slot (no tool switch)
       ctx.actions.setClipBox(frame.id, tool, fullCanvasPoly);

@@ -25,7 +25,7 @@ import type {
   DecodeResult,
   EncodeOptions,
 } from '../../types';
-import type { ImageMetadata } from '../../metadata';
+import type { ImageMetadata } from '../../types';
 import { decodeJpeg } from './decode';
 import { encodeJpeg } from './encode';
 import { extractJpegMetadata } from './metadata';

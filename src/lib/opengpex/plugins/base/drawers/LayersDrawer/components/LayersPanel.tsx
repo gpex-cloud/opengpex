@@ -20,14 +20,14 @@
 "use client";
 
 import React, { useRef, useMemo, useState } from "react";
-import { Layers, Eye, ScanEye, CirclePlus, ChevronRight, ChevronDown } from "lucide-react";
+import { Layers, Eye, ScanEye, CirclePlus, ChevronRight, ChevronDown, Merge } from "lucide-react";
 import { Reorder, motion } from "framer-motion";
 import { usePluginSignals } from "@opengpex/editor/core/context";
 import { Layer, Frame } from "@opengpex/editor/core/types";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
-import { useLayerCommands, useMaskEditMonitor } from "../hooks";
-import { MergeDownIcon, MergeVisibleIcon } from "@opengpex/editor/icons";
+import { useLayerCommands, useMaskEditMonitor, useUnionMerge } from "../hooks";
+import { MergeVisibleIcon } from "@opengpex/editor/icons";
 import { LayerItem } from "./LayerItem";
 import { LayerPropsBar } from "./LayerPropsBar";
 import type { LayersDrawerSignalsMap } from "../commands.d";
@@ -40,11 +40,17 @@ interface LayersPanelProps {
 }
 
 export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onViewSwitch }: LayersPanelProps) {
-  const { reorder, mergeDown, mergeVisible, toggleAll, isolateSelection, addBlankLayerCmd } =
+  const { reorder, mergeVisible, toggleAll, isolateSelection, addBlankLayerCmd } =
     useLayerCommands();
 
   // Monitor mask edit exit conditions (tool switch, mode change, mask deletion)
   useMaskEditMonitor();
+
+  // ─── Union merge multi-selection (encapsulated in hook) ───────────────────────
+  const {
+    unionSelection, unionStatus, canUnionMerge,
+    toggleUnionMark, handleUnionMerge,
+  } = useUnionMerge(activeFrame);
 
   // Read showSubLayers signal once in parent — pass value to children
   const { showSubLayersSignal } = usePluginSignals<LayersDrawerSignalsMap>();
@@ -168,6 +174,25 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
           <ActionButton
             onClick={(e) => {
               e.stopPropagation();
+              handleUnionMerge();
+            }}
+            icon={<Merge size={12} className="rotate-180" />}
+            tooltip={canUnionMerge ? `Union Merge (${unionSelection.length})` : "Union Merge"}
+            variant="glass"
+            size="sm"
+            disabled={!canUnionMerge}
+            className={canUnionMerge
+              ? unionStatus === 'green'
+                ? "text-emerald-400 hover:text-emerald-300"
+                : unionStatus === 'amber'
+                  ? "text-amber-400 hover:text-amber-300"
+                  : "text-rose-400 hover:text-rose-300"
+              : "text-[var(--text-muted)] opacity-40 cursor-not-allowed"
+            }
+          />
+          <ActionButton
+            onClick={(e) => {
+              e.stopPropagation();
               mergeVisible.execute();
             }}
             icon={<MergeVisibleIcon size={12} />}
@@ -249,6 +274,9 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
                           isScrolling={isScrolling}
                           childLayers={childLayersMap.get(layer.id) || emptyChildLayers}
                           showSubLayers={showSubLayers}
+                          isMarked={unionSelection.includes(layer.id)}
+                          onToggleMarking={toggleUnionMark}
+                          markedColor={unionStatus}
                         />
                       ))}
                     </Reorder.Group>
