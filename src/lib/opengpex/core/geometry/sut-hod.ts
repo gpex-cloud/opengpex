@@ -29,7 +29,7 @@
  *   Time complexity: O(n) per ring where n = number of vertices.
  *
  * Limitations:
- *   - Only supports polygon ∩ convex (rect). For polygon ∩ polygon, use polygon-clipping.
+ *   - Only supports polygon ∩ convex (rect). For polygon ∩ polygon, see poly-clip.ts.
  *   - Assumes simple (non-self-intersecting) input polygons.
  */
 

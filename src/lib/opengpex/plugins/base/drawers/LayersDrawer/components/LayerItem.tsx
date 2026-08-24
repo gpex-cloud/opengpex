@@ -341,6 +341,8 @@ export const LayerItem = React.memo(
                 setIsSubLayersExpanded={setIsSubLayersExpanded}
                 isMasksExpanded={isMasksExpanded}
                 setIsMasksExpanded={setIsMasksExpanded}
+                canMergeBack={Boolean(layer.metadata?.sourceLayerId && layer.metadata?.assocMaskId)}
+                canMergeBackAll={Boolean(layer.vectorMasks?.some(m => m.assocLayerId))}
               />
             </div>
           </div>

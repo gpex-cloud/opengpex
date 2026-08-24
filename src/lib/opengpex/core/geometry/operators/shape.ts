@@ -26,6 +26,7 @@ import { getLayerLocalAABB, getRectIntersection, getLayerBoundingBox, getMultiRe
 import { snapToPixel } from './snapping';
 import { parsePathDataToRings } from './point2d';
 import { intersectPathWithRect } from '../sut-hod';
+import { intersectPathWithPath } from '../poly-clip';
 
 /**
  * frameLocalToLayerLocal: Projects selection shape under artboard space (Frame) to layer (Layer) local space
@@ -65,14 +66,16 @@ export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleSh
   // Case 2: path selection + rect layer → the selection path IS the constraint
   //   (rect is "all pixels valid", so path ∩ rect = path when path is within rect)
   //
-  // Case 3: path selection + path layer → cannot compute with S-H alone (needs polygon-clipping)
-  //   Falls through to use the selection shape; caller detects loss and falls back to physical.
+  // Case 3: path selection + path layer → polygon-clipping (Martinez-Rueda-Feito)
+  //   Computes the exact geometric intersection of two arbitrary polygons.
   const layerShape = layer.visibleShape!;
+  const layerPathData = (layerShape as { pathData?: string }).pathData;
+  const selectionPathData = (shape as { pathData?: string }).pathData;
 
   let visibleShape: LocalShape;
-  if (layerShape.type !== 'rect' && shape.type === 'rect' && (layerShape as { pathData?: string }).pathData) {
-    // Rect selection + path layer: clip layer's pathData by the intersection rect
-    const clipped = intersectPathWithRect((layerShape as { pathData?: string }).pathData!, s);
+  if (layerShape.type !== 'rect' && shape.type === 'rect' && layerPathData) {
+    // Case 1: Rect selection + path layer — Sutherland-Hodgman (polygon ∩ rect)
+    const clipped = intersectPathWithRect(layerPathData, s);
     if (clipped) {
       visibleShape = {
         type: 'path',
@@ -86,12 +89,31 @@ export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleSh
       // Entire path is outside the selection rect — no visible content
       return null;
     }
+  } else if (shape.type === 'path' && layerShape.type === 'path' && selectionPathData && layerPathData) {
+    // Case 3: Path selection + path layer — polygon-clipping (polygon ∩ polygon)
+    const clipped = intersectPathWithPath(layerPathData, selectionPathData);
+    if (clipped) {
+      visibleShape = {
+        type: 'path',
+        rect: clipped.rect,
+        hardEdge: shape.hardEdge,
+        antiAliased: (shape as { antiAliased?: boolean }).antiAliased,
+        pathData: clipped.pathData,
+        __brand: 'local',
+      } as unknown as LocalShape;
+    } else {
+      // No geometric intersection between the two paths
+      return null;
+    }
   } else {
-    // Path/circle selection on rect layer, or both rects → use selection shape
+    // Case 2: Path/circle selection on rect layer, or both rects → use selection shape
     visibleShape = { ...shape, rect: s } as LocalShape;
   }
 
-  const vCenter = M_orig.apply({ x: s.x + s.w / 2, y: s.y + s.h / 2 });
+  // Compute world center from the actual visibleShape.rect (not from `s`),
+  // because for Cases 1 & 3 the polygon intersection's tight bbox differs from `s`.
+  const vr = visibleShape.rect;
+  const vCenter = M_orig.apply({ x: vr.x + vr.w / 2, y: vr.y + vr.h / 2 });
 
   return { visibleShape, center: { x: vCenter.x, y: vCenter.y } as Point2D };
 }

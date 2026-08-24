@@ -73,9 +73,9 @@ export function createLayerService(
               patches[layerId].vectorMasks = newMasks;
               return editor;
             },
-            applyMask: (shape, inverted = false, feather = 0) => {
+            applyMask: (shape, options?) => {
               const currentMasks = patches[layerId].vectorMasks || [];
-              const newMask = LayerFactory.getNewVectorMask(shape, inverted, feather);
+              const newMask = LayerFactory.getNewVectorMask(shape, options);
               patches[layerId].vectorMasks = [...currentMasks, newMask];
               return editor;
             },
@@ -102,7 +102,7 @@ export function createLayerService(
 
               const fullMask = LayerFactory.getNewVectorMask(
                 asLocalShape({ x: 0, y: 0, w: currentLayer.bounding.w, h: currentLayer.bounding.h }, 'rect'),
-                true
+                { inverted: true }
               );
 
               patches[layerId].vectorMasks = [...(patches[layerId].vectorMasks || []), fullMask];
@@ -199,6 +199,24 @@ export function createLayerService(
       const allLayers = frame.layers.order.map(id => frame.layers.byId[id]);
       const idsToRemove = LayerFactory.collectDescendants(targetIds, allLayers);
 
+      // ── Cut-link cleanup: when deleting a cut fragment, auto-remove its hole mask from the source layer ──
+      for (const removeId of idsToRemove) {
+        const layer = frame.layers.byId[removeId];
+        if (!layer) continue;
+        const sourceLayerId = layer.metadata?.sourceLayerId as string | undefined;
+        const assocMaskId = layer.metadata?.assocMaskId as string | undefined;
+        if (sourceLayerId && assocMaskId && !idsToRemove.has(sourceLayerId)) {
+          // Source layer survives — remove the corresponding hole mask
+          const sourceLayer = frame.layers.byId[sourceLayerId];
+          if (sourceLayer?.vectorMasks) {
+            const updatedMasks = sourceLayer.vectorMasks.filter(m => m.id !== assocMaskId);
+            if (updatedMasks.length !== sourceLayer.vectorMasks.length) {
+              actions.updateLayer(frameId, sourceLayerId, { vectorMasks: updatedMasks });
+            }
+          }
+        }
+      }
+
       // Focus migration: pick nearest host layer if active is being removed
       let nextActiveId: string | null = frame.activeLayerId ?? null;
       if (!nextActiveId || idsToRemove.has(nextActiveId)) {
@@ -237,8 +255,8 @@ export function createLayerService(
     },
 
     // ── Fragment operations (delegated to fragment.ts) ──────────────────────────
-    fragmentToLayer: fragmentOps.fragmentToLayer,
-    fragmentToLayerPhysical: fragmentOps.fragmentToLayerPhysical,
+    fragmentToNewLayer: fragmentOps.fragmentToNewLayer,
+    fragmentToNewLayerPhysical: fragmentOps.fragmentToNewLayerPhysical,
     fragmentToExistLayer: fragmentOps.fragmentToExistLayer,
 
     // ── Resample operations (delegated to resample.ts) ──────────────────────────

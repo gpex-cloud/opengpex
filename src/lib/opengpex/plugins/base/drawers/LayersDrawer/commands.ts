@@ -180,8 +180,19 @@ export const LAYERS_COMMANDS = {
             const newName = LayerFactory.getNewLayerName(hostLayers, `${layer.name} Copy`);
 
             const { id: _id, hostId: _pid, role: _role, ...layerData } = layer;
+
+            // Strip assocMaskId from metadata: a duplicate is not the same cut fragment
+            // (the hole mask on the source only corresponds to the original layer).
+            // Keep sourceLayerId for lineage tracking (degrades to copy semantics).
+            let metadata = layerData.metadata;
+            if (metadata?.assocMaskId) {
+                const { assocMaskId: _, ...restMeta } = metadata;
+                metadata = restMeta;
+            }
+
             const newLayer = LayerFactory.getNewLayer({
                 ...layerData,
+                metadata,
                 name: newName,
                 locked: false, // Duplicated layer is always unlocked
             });

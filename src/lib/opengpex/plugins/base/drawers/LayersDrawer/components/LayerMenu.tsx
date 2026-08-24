@@ -27,10 +27,12 @@ import {
   VenetianMask,
   Trash2,
   MoreVertical,
-  Image as ImageIcon,
   Copy,
+  Undo2,
+  Layers,
 } from "lucide-react";
 import { useEditorServices, usePluginCommands } from "@opengpex/editor/core/context";
+import { ADV_LAYER_MERGE_BACK } from "@opengpex/editor/core/advanced/protocols";
 import ActionDropdown, {
   ActionOption,
 } from "@opengpex/editor/widgets/ActionDropdown";
@@ -48,6 +50,10 @@ interface LayerMenuProps {
   setIsSubLayersExpanded: (v: boolean) => void;
   isMasksExpanded: boolean;
   setIsMasksExpanded: (v: boolean) => void;
+  /** Whether this layer can be merged back to its source (is a cut fragment with sourceLayerId + assocMaskId) */
+  canMergeBack?: boolean;
+  /** Whether this layer has fragments that can be merged back (has hole masks with assocLayerId) */
+  canMergeBackAll?: boolean;
 }
 
 export const LayerMenu = React.memo(
@@ -63,6 +69,8 @@ export const LayerMenu = React.memo(
     setIsSubLayersExpanded,
     isMasksExpanded,
     setIsMasksExpanded,
+    canMergeBack,
+    canMergeBackAll,
   }: LayerMenuProps) => {
     const { actions } = useEditorServices();
     const { removeCmd, duplicateLayerCmd } = usePluginCommands<LayersDrawerCommandsMap>();
@@ -94,21 +102,26 @@ export const LayerMenu = React.memo(
       });
     }
 
-    // Rasterize — available whenever the layer has masks or non-physical content
-    // (independent of canDelete; single-layer with masks should be rasterize-able)
-    if (hasMasks) {
+    // ── Cut-link merge options ──
+    // Merge Back — available for cut fragment layers
+    if (canMergeBack) {
       options.push({
-        label: "Rasterize",
-        value: "rasterize",
-        icon: <ImageIcon size={12} />,
+        label: "Merge Back",
+        value: "merge-back",
+        icon: <Undo2 size={12} />,
+      });
+    }
+
+    // Merge Fragments — available for source layers with hole masks
+    if (canMergeBackAll) {
+      options.push({
+        label: "Merge Fragments",
+        value: "merge-all-fragments",
+        icon: <Layers size={12} />,
       });
     }
 
     if (canDelete) {
-      options.push({
-        divider: true,
-      });
-
       options.push({
         label: "Delete Layer",
         value: "delete",
@@ -128,8 +141,10 @@ export const LayerMenu = React.memo(
         setIsMasksExpanded(true);
       } else if (val === "close-masks") {
         setIsMasksExpanded(false);
-      } else if (val === "rasterize") {
-        actions.adv.layer.merge.rasterize.execute({ layerId });
+      } else if (val === "merge-back" || val === "merge-all-fragments") {
+        // Both actions dispatch the same unified mergeBack command —
+        // the command auto-detects fragment vs source role based on layer metadata.
+        actions.executeCommand(ADV_LAYER_MERGE_BACK, { layerId });
       } else if (val === "delete") {
         removeCmd?.execute({ frameId: activeFrameId, layerId });
       }

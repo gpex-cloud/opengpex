@@ -19,7 +19,7 @@
 
 import { Frame, Layer, VectorMask, BitmapMask } from '@opengpex/editor/core/types/models';
 import { LocalShape, LocalPolygon, LocalRect, Dimensions } from '@opengpex/editor/core/types/primitives';
-import type { FragmentStrategy, FragmentResult } from './services/fragment';
+import type { FragmentResult } from './services/fragment';
 
 /**
  * LayerService: Layer domain model service (Domain: Layer)
@@ -48,12 +48,12 @@ export interface LayerService {
   getHostLayers: (layers: Layer[]) => Layer[];
   getNewLayer: (patch: Partial<Layer>) => Layer;
   getNewFrame: (patch: Partial<Frame>) => Frame;
-  getNewLayerName: (layers: Array<{ name: string }>, baseName: string) => string;
+  getNewLayerName: (layers: Array<{ name: string }>, baseName?: string) => string;
   sortLayers: (layers: Layer[]) => Layer[];
-  /** Unified fragment entry point — resolves strategy and executes the optimal path */
-  fragmentToLayer: (frame: Frame, layer: Layer, nameType: string, options?: { feather?: number; mode?: 'copy' | 'cut' }) => Promise<FragmentResult | null>;
+  /** Unified fragment entry point — logical first, vectorMask fallback */
+  fragmentToNewLayer: (frame: Frame, layer: Layer, options?: { feather?: number; mode?: 'copy' | 'cut' }) => Promise<FragmentResult | null>;
   /** Physical fragment: always produces a baked PNG blob (needed for clipboard external paste) */
-  fragmentToLayerPhysical: (frame: Frame, layer: Layer, nameType: string) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
+  fragmentToNewLayerPhysical: (frame: Frame, layer: Layer) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
   /** Physically resamples layer: adjusts pixel resolution and proportionally scales visible areas and masks */
   resampleLayerPhysical: (layer: Layer, scaleX: number, scaleY: number, frame: Frame) => Promise<{ newUrl: string, newAssetId: string, patch: Partial<Layer> } | null>;
   /** Applies a fragment to an existing layer (e.g. Exchange layer) */
@@ -61,7 +61,7 @@ export interface LayerService {
   /** Creates a layer from an external image Blob (handles asset registration and position calculation) */
   createLayerFromBlob: (blob: Blob, frame: Frame, screenPoint?: { x: number, y: number }) => Promise<Layer>;
   getBlank: () => Partial<Layer>;
-  getNewVectorMask: (shape: LocalShape, inverted?: boolean, feather?: number) => VectorMask;
+  getNewVectorMask: (shape: LocalShape, options?: { maskId?: string; assocLayerId?: string; inverted?: boolean; feather?: number }) => VectorMask;
   getNewBitmapMask: (src: string, assetId: string, bounds: LocalRect) => BitmapMask;
 }
 
@@ -99,7 +99,7 @@ export interface LayerEditor {
   /** Removes masks (supports pattern matching) */
   removeMask: (pattern: string) => LayerEditor;
   /** Adds a mask */
-  applyMask: (shape: LocalShape, inverted?: boolean, feather?: number) => LayerEditor;
+  applyMask: (shape: LocalShape, options?: { maskId?: string; assocLayerId?: string; inverted?: boolean; feather?: number }) => LayerEditor;
   /** General patch (for quickly setting other attributes) */
   patch: (data: Partial<Layer>) => LayerEditor;
   /** Resets the layer to the system default blank state */

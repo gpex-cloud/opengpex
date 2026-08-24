@@ -148,6 +148,9 @@ export interface VectorMask {
   feather: number;                 // Feather radius (px)
   enabled: boolean;                // Whether enabled
   reserved?: boolean;              // Whether reserved (prevents inversion/disabling/deletion)
+
+  /** Associated fragment layer id — this hole mask corresponds to a cut fragment layer. */
+  assocLayerId?: string;
 }
 
 
@@ -217,6 +220,10 @@ export interface Layer {
   textData?: TextLayerData;
   metadata?: {
     fillColor?: string;
+    /** This layer was derived from which source layer (both copy and cut set this). */
+    sourceLayerId?: string;
+    /** The hole mask id on the source layer that corresponds to this cut fragment (only cut fragments have this). */
+    assocMaskId?: string;
     [key: string]: unknown;
   };
 

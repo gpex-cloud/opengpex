@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.57
+
+- Clip Tool: cut operations are now fully reversible — merge back restores the original layer with zero quality loss, even across multi-level recursive cuts
+- Clip Tool: all selection × layer shape combinations (including path-on-path) now resolve with precise geometry, eliminating fallback to pixel rasterization
+
+---
+
 ## v1.0.0-beta.56
 
 - Clip Tool: unified cut/copy logic — lossless when possible, seamless fallback to physical

@@ -120,15 +120,24 @@ export const LayerFactory = {
 
   /**
    * getNewVectorMask: Creates a standardized vector mask object.
+   * @param shape - Mask shape descriptor (local coordinate system)
+   * @param options.maskId - Custom deterministic mask id (e.g. `mask-hole-${layerId}`)
+   * @param options.assocLayerId - Associated fragment layer id for cut-link tracking
+   * @param options.inverted - Whether to invert the mask (default false)
+   * @param options.feather - Feather radius in px (default 0)
    */
-  getNewVectorMask(shape: LocalShape, inverted = false, feather = 0): VectorMask {
-    return {
-      id: `mask-${shape.type}-${Date.now()}`,
+  getNewVectorMask(shape: LocalShape, options?: { maskId?: string; assocLayerId?: string; inverted?: boolean; feather?: number }): VectorMask {
+    const mask: VectorMask = {
+      id: options?.maskId || `mask-${shape.type}-${Date.now()}`,
       shape: { ...shape } as LocalShape,
-      inverted,
-      feather,
+      inverted: options?.inverted ?? false,
+      feather: options?.feather ?? 0,
       enabled: true
     };
+    if (options?.assocLayerId) {
+      mask.assocLayerId = options.assocLayerId;
+    }
+    return mask;
   },
 
   /**
@@ -164,7 +173,7 @@ export const LayerFactory = {
   /**
    * getNewLayerName: Smart naming engine, automatically handling increment logic like "Copy 2".
    */
-  getNewLayerName(layers: Array<{ name: string }>, baseName: string): string {
+  getNewLayerName(layers: Array<{ name: string }>, baseName: string = 'Layer'): string {
     const existingNames = layers.map(l => l.name);
     if (!existingNames.includes(baseName)) return baseName;
 

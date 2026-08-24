@@ -31,44 +31,23 @@ import { LayerFactory } from '../factory';
 // Types
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export type FragmentStrategy = 'logical' | 'physical' | 'vectorMask';
-
-/** Describes how to punch a hole in the source layer during cut operations. */
-export interface SourceHoleDescriptor {
-  /** VectorMask approach: shape + inversion + feather (logical/vectorMask strategies) */
-  mask?: { shape: LocalShape; inverted: boolean; feather: number };
-  /** Metadata to patch onto the source layer (e.g. clipTool tracking) */
-  metadata?: Record<string, unknown>;
-}
-
 /**
  * FragmentResult: Unified result from all fragment operations.
  *
  * Provides enough information for callers to:
  * - Add the fragment layer (newLayer)
- * - Punch a hole in the source layer for cut operations (sourceHole)
+ * - Punch a hole in the source layer for cut operations (holeMask)
  */
 export interface FragmentResult {
   newLayer: Layer;
   localShape: LocalShape;
   invertedRegular: boolean;
-  strategy: FragmentStrategy;
-  /** Asset URL (only present for physical strategy) */
-  url?: string;
-  /** Hole descriptor for cut mode — callers apply this to the source layer */
-  sourceHole?: SourceHoleDescriptor;
-}
-
-/**
- * ResolvedShape: Result of resolving a clip box polygon into a layer-local shape.
- */
-interface ResolvedShape {
-  shape: LocalShape;
-  invertedRegular: boolean;
+  /** Pre-computed hole mask for cut mode — callers apply this to the source layer */
+  holeMask?: { shape: LocalShape; inverted: boolean; feather: number; maskId: string; assocLayerId: string };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Strategy Resolution
+// Shape Resolution
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
@@ -92,7 +71,7 @@ export function resolveLocalShape(
   frame: Frame,
   layer: Layer,
   geometry: GeometryService
-): ResolvedShape {
+): { shape: LocalShape; invertedRegular: boolean } {
   const layerPoly = geometry.polygon.frameLocalToLayerLocal(box, frame, layer);
 
   // Detect "inverted regular" pattern: [canvasBoundary, regularShape]
@@ -113,33 +92,6 @@ export function resolveLocalShape(
   return { shape: polygonToShape(layerPoly), invertedRegular: false };
 }
 
-/**
- * resolveFragmentStrategy: Determines which fragment execution path to use.
- *
- * Priority rules:
- *   1. feather > 0 || invertedRegular       → vectorMask
- *   2. non-rect selection ∩ non-rect layer  → physical
- *   3. everything else                      → logical
- */
-export function resolveFragmentStrategy(
-  feather: number,
-  invertedRegular: boolean,
-  localShape: LocalShape,
-  layer: Layer
-): FragmentStrategy {
-  // 1. feather / invertedRegular → always vectorMask
-  if (feather > 0 || invertedRegular) return 'vectorMask';
-
-  // 2. non-rect selection ∩ non-rect layer (includes circle∩path) → physical (unsolvable geometrically)
-  const layerVisType = layer.visibleShape?.type;
-  if (layerVisType && layerVisType !== 'rect' && localShape.type !== 'rect') {
-    return 'physical';
-  }
-
-  // 3. everything else → logical (rect∩rect, rect∩path, circle∩rect, path∩rect)
-  return 'logical';
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Fragment Operations Factory
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -153,104 +105,122 @@ export function createFragmentOperations(
   pixels: PixelService
 ) {
 
-  // ─── fragmentByVectorMask ────────────────────────────────────────────────────
+  // ─── fragmentToNewLayer (Unified Entry Point) ────────────────────────────────
   /**
-   * VectorMask path: Duplicates the full layer and applies a VectorMask.
-   * Used for feathered selections and invertedRegular cases where geometric
-   * fragmentation would introduce anti-aliasing seams.
-   */
-  function fragmentByVectorMask(
-    frame: Frame,
-    layer: Layer,
-    nameType: string,
-    localShape: LocalShape,
-    invertedRegular: boolean,
-    feather: number
-  ): FragmentResult {
-    const layersArray = frame.layers.order.map(id => frame.layers.byId[id]);
-    const newName = LayerFactory.getNewLayerName(layersArray, nameType);
-
-    // New layers must never inherit lock/interactive/structural state from the source
-    const { id: _id, hostId: _pid, role: _role, locked: _locked, interactive: _inter, ...layerData } = layer;
-    const newLayer = LayerFactory.getNewLayer({
-      ...layerData,
-      name: newName,
-      vectorMasks: [],
-    });
-
-    // If invertedRegular, the shape is the inner rect/ellipse — to reveal
-    // "everything except that shape" we use inverted=true (pixel-perfect boundary).
-    // Normal case: reveal only the shape area → inverted=false.
-    newLayer.vectorMasks = [LayerFactory.getNewVectorMask(localShape, invertedRegular, feather)];
-
-    // Record source clip tool so refocus can restore the correct tool slot
-    if (frame.latestClipTool) {
-      newLayer.metadata = { ...newLayer.metadata, clipTool: frame.latestClipTool };
-    }
-
-    return { newLayer, localShape, invertedRegular, strategy: 'vectorMask' };
-  }
-
-  // ─── fragmentByLogical ───────────────────────────────────────────────────────
-  /**
-   * Logical path: Geometric crop — creates a new layer that references the same
-   * source image with a narrowed visibleShape. Zero overhead, lossless.
+   * fragmentToNewLayer: Unified entry point for all fragment operations.
    *
-   * NOTE: This function is only called when resolveFragmentStrategy returns 'logical'.
-   * The strategy resolver already filters out path∩path and circle-clipped+AA-off cases,
-   * so no fallback guards are needed here.
+   * Simple two-path routing:
+   *   1. Try logical (geometric crop) — zero overhead, lossless, precise bounding.
+   *   2. Fallback to vectorMask — for feather, invertedRegular, or when logical
+   *      cannot produce a result (e.g. selection entirely outside layer bounds).
+   *
+   * Callers use this for both Copy and Cut:
+   * - Copy: just add result.newLayer
+   * - Cut: add result.newLayer + punch hole using result.sourceHole
    */
-  function fragmentByLogical(
+  async function fragmentToNewLayer(
     frame: Frame,
     layer: Layer,
-    nameType: string
-  ): { newLayer: Layer; localShape: LocalShape } | null {
+    options?: { feather?: number; mode?: 'copy' | 'cut' }
+  ): Promise<FragmentResult | null> {
     const box = getClipBox(frame);
     if (!box) return null;
-    const localShape = polygonToShape(geometry.polygon.frameLocalToLayerLocal(box, frame, layer));
-    const intersection = geometry.shape.intersectWithLayer(localShape, layer);
 
-    if (!intersection) return null;
+    const feather = options?.feather ?? 0;
+    const { shape: localShape, invertedRegular } = resolveLocalShape(box, frame, layer, geometry);
 
-    const { id: _oldId, ...layerData } = layer;
-    const newLayer = LayerFactory.getNewLayer({
-      ...layerData,
-      vectorMasks: layerData.vectorMasks?.filter(m => !m.reserved) || [],
-      name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id]), nameType),
-      hostId: undefined
-    });
+    let newLayer: Layer;
 
-    const v = intersection.visibleShape.rect;
-    newLayer.bounding = { w: v.w, h: v.h };
-    newLayer.visibleShape = { ...intersection.visibleShape };
-    // Correctly compute (cx, cy) accounting for layer orientation (rotation/flip).
-    const pose = geometry.transform.computeFragmentCenter(intersection.center, { x: v.x, y: v.y }, layer.rotation, layer.flip);
-    newLayer.cx = pose.x;
-    newLayer.cy = pose.y;
-    newLayer.birthCenter = { cx: newLayer.cx, cy: newLayer.cy };
+    // ── Path decision: logical first, vectorMask fallback ──────────────────────
+    // Logical is only viable when feather=0, not invertedRegular, and the
+    // geometry service can compute a valid intersection.
+    const intersection = (feather === 0 && !invertedRegular)
+      ? geometry.shape.intersectWithLayer(localShape, layer)
+      : null;
 
-    // Mark as logical (non-physical) layer: src references the original image,
-    // visibleShape provides the clip mask.
-    newLayer.metadata = { ...newLayer.metadata, physicalPixels: false };
+    if (intersection) {
+      // ═══ Logical path: geometric crop — same source image, narrowed visibleShape ═══
+      const { id: _oldId, ...layerData } = layer;
+      newLayer = LayerFactory.getNewLayer({
+        ...layerData,
+        vectorMasks: layerData.vectorMasks?.filter(m => !m.reserved) || [],
+        name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id])),
+        hostId: undefined
+      });
 
-    // Record the source clip tool so refocus can restore the correct tool slot
-    if (frame.latestClipTool) {
-      newLayer.metadata = { ...newLayer.metadata, clipTool: frame.latestClipTool };
+      const v = intersection.visibleShape.rect;
+      newLayer.bounding = { w: v.w, h: v.h };
+      newLayer.visibleShape = { ...intersection.visibleShape };
+      const pose = geometry.transform.computeFragmentCenter(intersection.center, { x: v.x, y: v.y }, layer.rotation, layer.flip);
+      newLayer.cx = pose.x;
+      newLayer.cy = pose.y;
+      newLayer.birthCenter = { cx: newLayer.cx, cy: newLayer.cy };
+      newLayer.metadata = { ...newLayer.metadata, physicalPixels: false };
+
+      if (frame.latestClipTool) {
+        newLayer.metadata = { ...newLayer.metadata, clipTool: frame.latestClipTool };
+      }
+
+    } else {
+      // ═══ VectorMask path: full layer + mask for visibility control ═══
+      const { id: _id, hostId: _pid, role: _role, locked: _locked, interactive: _inter, ...layerData } = layer;
+      newLayer = LayerFactory.getNewLayer({
+        ...layerData,
+        name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id])),
+        vectorMasks: [],
+      });
+
+      // invertedRegular → inverted=true → "show everything except shape" (pixel-perfect)
+      // normal → inverted=false → "show only the shape area"
+      newLayer.vectorMasks = [LayerFactory.getNewVectorMask(localShape, { inverted: invertedRegular, feather })];
+
+      if (frame.latestClipTool) {
+        newLayer.metadata = { ...newLayer.metadata, clipTool: frame.latestClipTool };
+      }
+
     }
 
-    return { newLayer, localShape };
+    const baseResult: FragmentResult = { newLayer, localShape, invertedRegular };
+
+    // ═══ Cut mode: generate hole mask descriptor + bidirectional pointers ═══
+    if (options?.mode === 'cut') {
+      const maskId = `mask-hole-${newLayer.id}`;
+
+      baseResult.holeMask = {
+        shape: localShape,
+        inverted: !invertedRegular,
+        feather,
+        maskId,
+        assocLayerId: newLayer.id,
+      };
+
+      newLayer.metadata = {
+        ...newLayer.metadata,
+        sourceLayerId: layer.id,
+        assocMaskId: maskId,
+      };
+    }
+
+    // ═══ Copy mode (or any non-cut): write sourceLayerId for lineage tracking ═══
+    if (options?.mode === 'copy' || !options?.mode) {
+      newLayer.metadata = {
+        ...newLayer.metadata,
+        sourceLayerId: layer.id,
+      };
+    }
+
+    return baseResult;
   }
 
-  // ─── fragmentByPhysical ──────────────────────────────────────────────────────
+  // ─── fragmentToNewLayerPhysical ──────────────────────────────────────────────
   /**
    * Physical path: Composites the layer content within the selection, trims
    * transparent pixels, and registers the result as a new asset.
-   * Used when geometric intersection is impossible or imprecise.
+   * Used exclusively for clipboard export (always needs a real PNG blob).
    */
-  async function fragmentByPhysical(
+  async function fragmentToNewLayerPhysical(
     frame: Frame,
-    layer: Layer,
-    nameType: string
+    layer: Layer
   ): Promise<{ newLayer: Layer; localShape: LocalShape; url: string } | null> {
     const box = getClipBox(frame);
     if (!box) return null;
@@ -280,7 +250,7 @@ export function createFragmentOperations(
       src: assetUrl,
       assetId: assetId,
       vectorMasks: layerData.vectorMasks?.filter(m => !m.reserved) || [],
-      name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id]), nameType),
+      name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id])),
       hostId: undefined,
       visibleShape: asLocalShape({ x: 0, y: 0, w: trimW, h: trimH }),
       bounding: { w: trimW, h: trimH },
@@ -311,11 +281,9 @@ export function createFragmentOperations(
       ? polygonToShape(geometry.polygon.frameLocalToLayerLocal(selection, frame, sourceLayer))
       : geometry.shape.frameLocalToLayerLocal(selection, frame, sourceLayer);
     const intersection = geometry.shape.intersectWithLayer(localShape, sourceLayer);
-
     if (!intersection) return null;
 
     const v = intersection.visibleShape.rect;
-    // Correctly compute (cx, cy) accounting for source layer orientation (rotation/flip).
     const pose = geometry.transform.computeFragmentCenter(intersection.center, { x: v.x, y: v.y }, sourceLayer.rotation, sourceLayer.flip);
 
     const updatedLayer = {
@@ -332,8 +300,6 @@ export function createFragmentOperations(
       interactive: true,
       opacity: 1,
       visible: true,
-      // Propagate non-destructive adjustment state so the fragment renders
-      // identically to the source layer.
       adjustments: sourceLayer.adjustments,
       curves: sourceLayer.curves,
       levels: sourceLayer.levels,
@@ -344,92 +310,13 @@ export function createFragmentOperations(
     return { updatedLayer, localShape };
   }
 
-  // ─── fragmentToLayer (Unified Entry Point) ───────────────────────────────────
-  /**
-   * fragmentToLayer: Unified entry point for all fragment operations.
-   *
-   * Resolves the active selection, determines the optimal fragment strategy
-   * (vectorMask / logical / physical), executes it, and returns a unified result.
-   *
-   * Callers use this for both Copy and Cut:
-   * - Copy: just add result.newLayer
-   * - Cut: add result.newLayer + punch hole using result.localShape/invertedRegular
-   */
-  async function fragmentToLayer(
-    frame: Frame,
-    layer: Layer,
-    nameType: string,
-    options?: { feather?: number; mode?: 'copy' | 'cut' }
-  ): Promise<FragmentResult | null> {
-    const box = getClipBox(frame);
-    if (!box) return null;
-
-    const feather = options?.feather ?? 0;
-    const { shape: localShape, invertedRegular } = resolveLocalShape(box, frame, layer, geometry);
-
-    const strategy = resolveFragmentStrategy(feather, invertedRegular, localShape, layer);
-
-    let baseResult: FragmentResult | null = null;
-
-    switch (strategy) {
-      case 'vectorMask':
-        baseResult = fragmentByVectorMask(frame, layer, nameType, localShape, invertedRegular, feather);
-        break;
-
-      case 'logical': {
-        const result = fragmentByLogical(frame, layer, nameType);
-        if (result) {
-          baseResult = { ...result, invertedRegular, strategy: 'logical' };
-        } else {
-          // Safety fallback: if logical unexpectedly returns null (edge case not caught
-          // by strategy prediction), fall through to physical.
-          const physResult = await fragmentByPhysical(frame, layer, nameType);
-          if (!physResult) return null;
-          baseResult = { ...physResult, invertedRegular, strategy: 'physical' };
-        }
-        break;
-      }
-
-      case 'physical': {
-        const result = await fragmentByPhysical(frame, layer, nameType);
-        if (!result) return null;
-        baseResult = { ...result, invertedRegular, strategy: 'physical' };
-        break;
-      }
-    }
-
-    if (!baseResult) return null;
-
-    // ═══ Cut mode: generate sourceHole descriptor ═══
-    if (options?.mode === 'cut') {
-      // invertedRegular=true → the shape is the inner rect/ellipse.
-      //   To hide "everything except that shape" we use inverted=false
-      //   (= "show only that shape" = hide everything else).
-      // invertedRegular=false → normal: inverted=true = "hide the selection area".
-      const maskInverted = !baseResult.invertedRegular;
-
-      baseResult.sourceHole = {
-        mask: {
-          shape: baseResult.localShape,
-          inverted: maskInverted,
-          feather,
-        },
-        metadata: frame.latestClipTool
-          ? { clipTool: frame.latestClipTool }
-          : undefined,
-      };
-    }
-
-    return baseResult;
-  }
-
   // ─── Public API ──────────────────────────────────────────────────────────────
 
   return {
     /** Unified entry point for all fragment operations */
-    fragmentToLayer,
+    fragmentToNewLayer,
     /** Physical fragment: always produces a baked PNG blob (needed for clipboard) */
-    fragmentToLayerPhysical: fragmentByPhysical,
+    fragmentToNewLayerPhysical,
     /** Fragment to existing layer (peel exchange) */
     fragmentToExistLayer,
   };

@@ -48,7 +48,6 @@ const DRILL_USE_VECTOR_MASK = true;
  */
 async function copyCropBoxToClipboard(
   ctx: EditorContextValue,
-  nameType: 'Layer',
   mode: 'copy' | 'cut' = 'copy'
 ) {
   const { activeFrame, activeLayer, actions } = ctx;
@@ -57,7 +56,7 @@ async function copyCropBoxToClipboard(
   const latestLayer = actions.fast.latestLayer(activeFrame.id, activeLayer.id) || activeLayer;
 
   // 1. Physical blob: always needed for external clipboard (WeChat, Word, etc.)
-  const physicalResult = await ctx.layers.fragmentToLayerPhysical(activeFrame, latestLayer, nameType);
+  const physicalResult = await ctx.layers.fragmentToNewLayerPhysical(activeFrame, latestLayer);
   if (!physicalResult) {
     actions.setInteraction({ selectionErrorPulse: Date.now() });
     return null;
@@ -65,7 +64,7 @@ async function copyCropBoxToClipboard(
 
   // 2. Preferred layer via unified strategy: lossless logical layer when possible,
   //    falls back to physical. Also provides sourceHole for correct cut hole.
-  const preferredResult = await ctx.layers.fragmentToLayer(activeFrame, latestLayer, nameType, { mode });
+  const preferredResult = await ctx.layers.fragmentToNewLayer(activeFrame, latestLayer, { mode });
 
   // 3. Composite clipboard write: external software reads physicalResult.url (Blob),
   //    internal Paste command reads Metadata.layer (preferred strategy result)
@@ -78,7 +77,7 @@ async function copyCropBoxToClipboard(
     ...physicalResult,
     newLayer: preferredResult ? preferredResult.newLayer : physicalResult.newLayer,
     invertedRegular: preferredResult?.invertedRegular ?? false,
-    sourceHole: preferredResult?.sourceHole,
+    holeMask: preferredResult?.holeMask,
   };
 }
 
@@ -106,7 +105,7 @@ export const LayerClipCommands = {
           const box = getClipBox(activeFrame);
 
           if (box) {
-            await copyCropBoxToClipboard(ctx, 'Layer');
+            await copyCropBoxToClipboard(ctx);
           } else {
             // Without selection: copy the entire layer
             await ctx.clipboard.writeByUrl(activeLayer.src, {
@@ -142,21 +141,15 @@ export const LayerClipCommands = {
           const box = getClipBox(activeFrame);
 
           if (box) {
-            const result = await copyCropBoxToClipboard(ctx, 'Layer', 'cut');
+            const result = await copyCropBoxToClipboard(ctx, 'cut');
             if (!result) return;
 
-            // Punch hole using pre-computed sourceHole descriptor from fragmentToLayer
-            if (result.sourceHole?.mask) {
+            // Punch hole using pre-computed holeMask descriptor
+            if (result.holeMask) {
+              const { shape, inverted, assocLayerId, feather: maskFeather, maskId } = result.holeMask;
               ctx.layers.updateLayer(activeFrame.id, tx => {
-                const editor = tx.edit(activeLayer.id)
-                  .applyMask(
-                    result.sourceHole!.mask!.shape,
-                    result.sourceHole!.mask!.inverted,
-                    result.sourceHole!.mask!.feather
-                  );
-                if (result.sourceHole!.metadata) {
-                  editor.patch({ metadata: { ...activeLayer.metadata, ...result.sourceHole!.metadata } });
-                }
+                tx.edit(activeLayer.id)
+                  .applyMask(shape, { maskId, assocLayerId, inverted, feather: maskFeather });
               });
             }
 
@@ -221,7 +214,7 @@ export const LayerClipCommands = {
           // ── Same-frame paste → logical path (paste in place) ──
           const { id: _oldId, locked: _locked, interactive: _inter, ...layerWithoutId } = meta!.layer!;
           const smartName = ctx.layers.getNewLayerName(
-            activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), 'Layer'
+            activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), `${meta!.layer!.name} Copy`
           );
 
           const newLayer = ctx.layers.getNewLayer({
@@ -322,7 +315,7 @@ export const LayerClipCommands = {
         // ═══ Regular selection (rect/ellipse) → Vector Mask ═══
         // Lightweight, geometrically precise, scalable without quality loss.
         layers.updateLayer(activeFrame.id, tx => {
-          tx.edit(targetLayer.id).applyMask(localShape, false, feather);
+          tx.edit(targetLayer.id).applyMask(localShape, { feather });
         });
       } else {
         // ═══ Irregular selection (lasso/wand/AI) → Bitmap Mask ═══
@@ -378,7 +371,7 @@ export const LayerClipCommands = {
             : geometry.shape.frameLocalToLayerLocal(drillShape, activeFrame, latestLayer);
 
           ctx.layers.updateLayer(activeFrame.id, tx => {
-            tx.edit(latestLayer.id).applyMask(localShape, true, feather);
+            tx.edit(latestLayer.id).applyMask(localShape, { inverted: true, feather });
           });
         } else {
           // ═══ BitmapMask path: merged drilled raster mask (legacy) ═══

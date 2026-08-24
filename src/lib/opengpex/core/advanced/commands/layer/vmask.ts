@@ -112,6 +112,18 @@ export const LayerMaskCommands = {
       
       console.log(`[MaskCommands] Removing mask ${payload.maskId} from layer ${payload.layerId}`);
       actions.updateLayer(frame.id, layer.id, { vectorMasks: nextMasks });
+
+      // ── Cut-link degradation: if the removed mask has assocLayerId,
+      //    clear the fragment layer's assocMaskId (degrades cut → copy) ──
+      if (mask.assocLayerId) {
+        const fragLayer = frame.layers.byId[mask.assocLayerId];
+        if (fragLayer && fragLayer.metadata?.assocMaskId === payload.maskId) {
+          const { assocMaskId: _, ...restMeta } = fragLayer.metadata || {};
+          actions.updateLayer(frame.id, mask.assocLayerId, {
+            metadata: { ...restMeta },
+          });
+        }
+      }
     }
   } as EditorCommand<{ frameId?: string, layerId: string, maskId: string }, void>,
 

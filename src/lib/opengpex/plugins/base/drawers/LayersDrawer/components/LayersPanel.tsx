@@ -168,17 +168,6 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
           <ActionButton
             onClick={(e) => {
               e.stopPropagation();
-              mergeDown.execute();
-            }}
-            icon={<MergeDownIcon size={12} />}
-            tooltip="Merge Down"
-            variant="glass"
-            size="sm"
-            className="text-[var(--text-muted)] hover:text-teal-500"
-          />
-          <ActionButton
-            onClick={(e) => {
-              e.stopPropagation();
               mergeVisible.execute();
             }}
             icon={<MergeVisibleIcon size={12} />}
