@@ -128,9 +128,44 @@ export const createBrushStrokeHandler = (): InteractionHandler => ({
       } catch (err) {
         console.error('[BrushOverlay] Bake failed:', err);
       } finally {
-        // Clear the pending lock and preview hold so the next stroke can proceed.
+        // Clear the pending lock so the next stroke can proceed.
         pendingBake = null;
-        previewHold = null;
+
+        // ── Workaround: defer previewHold cleanup by one rAF frame ──
+        //
+        // Problem:
+        //   executeCommand(CMD_BAKE) updates React state synchronously,
+        //   but Canvas2dEngine consumes the new state on the NEXT rAF tick.
+        //   If we clear previewHold immediately, StrokePreview clears its
+        //   canvas in the same tick — before Canvas2dEngine has rendered
+        //   the baked layer. Result: one frame where neither preview nor
+        //   baked content is visible → visible flash on mouseUp.
+        //
+        // Why this is a workaround (not a structural fix):
+        //   The correct approach is an "onFrameCommitted" callback from the
+        //   rendering scheduler (Motion ticker / CanvasStage), so preview
+        //   cleanup is triggered by the engine confirming "I have rendered
+        //   the baked content", rather than by a timing assumption.
+        //
+        //   However, introducing that callback requires cross-layer plumbing
+        //   (interactions → Motion ticker → IRenderer) that doesn't yet exist.
+        //   A natural opportunity to add it is the WebGPU migration, which will
+        //   restructure the render loop around explicit command-buffer fences
+        //   where frame-completion signals are a built-in primitive.
+        //
+        // Why this workaround is safe:
+        //   - rAF fires after the browser has completed its rendering
+        //     opportunity, so Canvas2dEngine's flush() has already executed.
+        //   - cacheBitmap() pre-warms the decode cache before CMD_BAKE,
+        //     so the engine's next flush() has the bitmap immediately.
+        //   - Identity guard prevents a stale rAF callback from clobbering
+        //     a newer stroke's previewHold (fast successive strokes).
+        //   - Extra 1 frame (~8ms@120Hz) of preview overlap is invisible
+        //     since preview pixels are identical to baked pixels.
+        const myHold = previewHold;
+        requestAnimationFrame(() => {
+          if (previewHold === myHold) previewHold = null;
+        });
       }
     })();
 

@@ -190,6 +190,22 @@ function createMaskSession(
 
 // ─── Mosaic Session Creation ───────────────────────────────────────────────────
 
+/**
+ * Creates a MosaicStrokeSession using compositeFrame as pixel source.
+ *
+ * Source pixel strategy — "What You See Is What Gets Pixelated":
+ *   Instead of reading pixels from a single source layer, we composite ALL
+ *   visible layers via compositeFrame(). This correctly handles:
+ *   - Fragment layers (cut/copy) with shared bitmaps and visibleShape offsets
+ *   - Paint strokes overlaid on images
+ *   - Text layers, adjustment effects, masks, blend modes, etc.
+ *
+ *   The composite is async (~5-15ms). MosaicStrokeSession buffers early
+ *   pointer events and replays them once the composite resolves.
+ *
+ * Guard: we still require at least one visible image/paint layer exists
+ *   so that mosaic on a blank canvas / pure text doesn't silently do nothing.
+ */
 function createMosaicSession(
   e: InteractionEvent,
   frame: Frame,
@@ -204,46 +220,13 @@ function createMosaicSession(
     return null;
   }
 
-  // Find the SOURCE image layer for pixel reading.
-  // Mosaic only READS from the source (never modifies it), so locked layers are valid sources.
-  // Mosaic writes to a paint layer, so lock check applies only to the target paint layer
-  // (handled in MosaicStrokeSession.findOrCreatePaintLayer at end time).
-  let sourceLayer: Layer | null = null;
-
-  if (activeLayer.type === 'image' && activeLayer.src && !activeLayer.hostId) {
-    // Active layer IS the image host → use it directly as source (lock doesn't matter, we only read)
-    sourceLayer = activeLayer;
-  } else if (activeLayer.type === 'paint' || activeLayer.type === 'image' || activeLayer.type === 'text') {
-    // Active layer is paint/text (or non-host image layer)
-    // → find the nearest HOST image layer in the stack as pixel source
-    const layerOrder = frame.layers.order;
-    const activeIdx = layerOrder.indexOf(activeLayerId!);
-    // Search below in stack (lower index = below)
-    for (let i = activeIdx - 1; i >= 0; i--) {
-      const layer = frame.layers.byId[layerOrder[i]];
-      // Only match HOST image layers (skip role/child layers created by expandLayers)
-      if (layer.type === 'image' && layer.visible && layer.src && !layer.hostId) {
-        sourceLayer = layer;
-        break;
-      }
-    }
-    // If not found below, search above
-    if (!sourceLayer) {
-      for (let i = activeIdx + 1; i < layerOrder.length; i++) {
-        const layer = frame.layers.byId[layerOrder[i]];
-        if (layer.type === 'image' && layer.visible && layer.src && !layer.hostId) {
-          sourceLayer = layer;
-          break;
-        }
-      }
-    }
-  } else {
-    e.actions.notifyHUD('Mosaic only works on image/paint layers', 'error');
-    return null;
-  }
-
-  if (!sourceLayer) {
-    e.actions.notifyHUD('Mosaic needs an image layer as source', 'error');
+  // Guard: mosaic is only meaningful when pixel content exists somewhere in the stack
+  const hasPixelContent = frame.layers.order.some(id => {
+    const l = frame.layers.byId[id];
+    return l.visible && !l.hostId && (l.type === 'image' || l.type === 'paint') && l.src;
+  });
+  if (!hasPixelContent) {
+    e.actions.notifyHUD('Mosaic needs visible image/paint content', 'error');
     return null;
   }
 
@@ -253,19 +236,36 @@ function createMosaicSession(
   const presetData = MOSAIC_SIZE_PRESETS[preset as keyof typeof MOSAIC_SIZE_PRESETS] ?? MOSAIC_SIZE_PRESETS['M'];
   const { brushDiameter, blockSize } = presetData;
 
-  // Pre-check: ensure source bitmap is available (must be cached since layer is visible)
-  const sourceBitmap = e.pixels.image.ensureBitmap(sourceLayer.src!);
-  if (!sourceBitmap) {
-    console.warn('[BrushOverlay] Source bitmap not available for mosaic');
-    e.actions.notifyHUD('Image not ready, try again', 'error');
-    return null;
-  }
+  // ── Adaptive downsample for large canvases ──
+  // Mosaic computes block-average colors, so full-resolution pixel data is wasteful.
+  // We downsample the composite so the longest edge stays within TARGET_DIM pixels.
+  // This reduces:
+  //   - compositeFrame render time (GPU draws fewer pixels)
+  //   - toImageData transfer size (fewer bytes GPU→CPU)
+  //   - ImageData memory footprint (RGBA × downsampled area)
+  //
+  // | Canvas       | blockSize=8 | sampleScale | ImageData memory |
+  // |-------------|-------------|-------------|-----------------|
+  // | 2000×1500   | 8           | 1.0         | ~12MB           |
+  // | 4K (3840²)  | 8           | 0.53        | ~16MB (vs 56MB) |
+  // | 8K (7680²)  | 8           | 0.27        | ~16MB (vs 225MB)|
+  const TARGET_DIM = 2048;
+  const maxDim = Math.max(frame.canvas.w, frame.canvas.h);
+  const rawScale = TARGET_DIM / maxDim;
+  // Floor: blockSize * sampleScale ≥ 2  (minimum for meaningful block average)
+  const floorScale = 2 / blockSize;
+  const sampleScale = Math.min(1, Math.max(floorScale, rawScale));
+
+  // Composite all visible layers into (possibly downsampled) ImageData.
+  // dpr < 1 tells the engine to render at reduced resolution.
+  // This is async — MosaicStrokeSession handles deferred init internally.
+  const compositePromise = e.pixels.render.compositeFrame(frame, undefined, { dpr: sampleScale })
+    .then(result => result.toImageData());
 
   try {
     return new MosaicStrokeSession(
-      { brushDiameter, blockSize, canvasSize: { w: frame.canvas.w, h: frame.canvas.h } },
-      sourceLayer,
-      sourceBitmap,
+      { brushDiameter, blockSize, canvasSize: { w: frame.canvas.w, h: frame.canvas.h }, sampleScale },
+      compositePromise,
       forceNewLayer,
     );
   } catch (err) {

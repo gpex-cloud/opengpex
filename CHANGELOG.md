@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.59
+
+- Mosaic Brush: pixelates the full visible canvas instead of a single layer, with adaptive downsampling for large canvases
+- Brush: fixed a brief flash/flicker that could appear between finishing a stroke and the result being rendered
+
+---
+
 ## v1.0.0-beta.58
 
 - Clip Tool: added union merge — select multiple cut fragments and combine them into a single layer with full vector precision, no rasterization
