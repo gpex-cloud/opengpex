@@ -182,6 +182,15 @@ export function computeTileJobs(
   let _emptyCount = 0;
   const _missList: string[] = [];
 
+  // [Perf] Early-exit budget: once missCount exceeds this threshold, the caller
+  // will use the single-image fallback anyway (missCount > 0). Continuing to
+  // iterate only triggers more tileCache.get() calls that each schedule an async
+  // Worker fetch. By breaking early, we avoid flooding the Worker with ~100+
+  // fetch messages in a single frame (~7ms overhead). Remaining tiles are fetched
+  // incrementally: each tile completion triggers notifyCoalesced → needsRender →
+  // next computeTileJobs call kicks the next batch.
+  const EARLY_EXIT_MISS_BUDGET = 8;
+
   for (let y = startRow; y <= endRow; y++) {
     for (let x = startCol; x <= endCol; x++) {
       const result = tileSource.get(layerAssetId, level, x, y);
@@ -213,8 +222,13 @@ export function computeTileJobs(
       } else {
         _missCount++;
         if (_missList.length < 8) _missList.push(`(${x},${y})`);
+        // [Perf] Stop kicking new fetches once we've exceeded the budget.
+        // The fallback path is guaranteed (missCount > 0); remaining tiles
+        // will be requested on subsequent frames as loaded tiles trigger re-renders.
+        if (_missCount >= EARLY_EXIT_MISS_BUDGET) break;
       }
     }
+    if (_missCount >= EARLY_EXIT_MISS_BUDGET) break;
   }
 
   // ─── Diagnostic: tile job summary per layer ───

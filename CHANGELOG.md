@@ -4,6 +4,12 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.60.1
+
+- Rendering: faster initial display and tile loading for large images
+
+---
+
 ## v1.0.0-beta.60
 
 - Brush / Mosaic: paint bake offloaded to a dedicated Worker — eliminates frame drops on large canvases
