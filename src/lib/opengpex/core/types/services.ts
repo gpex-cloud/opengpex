@@ -173,7 +173,7 @@ export interface AssetEntryInfo {
  */
 export interface AssetService {
   /** Registers asset: inputs Blob + dimensions, returns AssetRef. Always triggers rendering cache pre-warm. */
-  register: (blob: Blob, dimensions: { w: number; h: number }, options?: { dprScale?: number }) => Promise<AssetRef>;
+  register: (blob: Blob, dimensions: { w: number; h: number }, options?: { dprScale?: number; precomputedHash?: string }) => Promise<AssetRef>;
   /** Stores a raw source blob, returns its content hash. Returns undefined if rawBlob is null/undefined. */
   storeRaw: (rawBlob: Blob | undefined | null) => Promise<string | undefined>;
   /** Injects asset: directly stores when hash and metadata are known, avoiding duplicate Worker calculations */
@@ -301,6 +301,20 @@ export interface PixelService {
      * Clear all bitmap caches (SourceBitmapCache).
      */
     clearCache: () => void;
+
+    /**
+     * Return a caller-owned clone of a cached bitmap, safe for postMessage transfer.
+     * Near-zero cost (GPU-side refcount, NOT full re-decode).
+     * Returns null if the src is not in cache.
+     */
+    acquireOwned: (src: string) => Promise<ImageBitmap | null>;
+
+    /**
+     * Write a pre-decoded ImageBitmap directly into the cache.
+     * Use when caller already holds a decoded bitmap (e.g. from Worker transfer).
+     * Skips the blob→decode round-trip that cacheBitmap() performs.
+     */
+    writeBitmap: (src: string, bitmap: ImageBitmap) => void;
   };
 
   render: {

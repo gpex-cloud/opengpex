@@ -127,11 +127,11 @@ export class AssetService {
   async register(
     blob: Blob,
     dimensions: { w: number; h: number },
-    options?: { dprScale?: number },
+    options?: { dprScale?: number; precomputedHash?: string },
   ): Promise<AssetRef> {
     const dprScale = options?.dprScale;
 
-    const hash = await this.calculateHash(blob);
+    const hash = options?.precomputedHash ?? await this.calculateHash(blob);
     this.pendingIds.add(hash);
 
     if (this.pool.has(hash)) {

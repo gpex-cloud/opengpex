@@ -89,6 +89,26 @@ class TileCache {
   }
 
   /**
+   * Coalesced notify — schedules a single notification via rAF.
+   * Multiple tile completions within the same animation frame collapse into
+   * one subscriber callback, preventing a re-render storm when many tiles
+   * land in quick succession (e.g. after paint bake registers a new tiled asset).
+   *
+   * Why rAF and not queueMicrotask: tile GET_TILE responses arrive in separate
+   * event-loop ticks (5-15ms apart), so microtask coalescing has no effect.
+   * rAF coalesces all tiles landing within one frame (~8.3ms @120Hz).
+   */
+  private pendingNotify = false;
+  private notifyCoalesced(): void {
+    if (this.pendingNotify) return;
+    this.pendingNotify = true;
+    requestAnimationFrame(() => {
+      this.pendingNotify = false;
+      this.notify();
+    });
+  }
+
+  /**
    * Gets tile. Returns:
    * - ImageBitmap — tile has content, ready to draw.
    * - TILE_EMPTY — tile is known to be fully transparent (skip drawing, not a miss).
@@ -186,7 +206,8 @@ class TileCache {
 
     this.cache.set(key, bitmap);
     this.usageOrder.push(key);
-    this.notify();
+    // Use coalesced notify to avoid per-tile re-render storm (see notifyCoalesced doc).
+    this.notifyCoalesced();
   }
 
   /**

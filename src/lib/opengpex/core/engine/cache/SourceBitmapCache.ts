@@ -120,11 +120,23 @@ class SourceBitmapCache {
   /**
    * Warm cache from a Blob (e.g. after Worker produces a result blob).
    * Decodes the blob into an ImageBitmap and stores it.
+   *
+   * Skips decode when the cache already holds a bitmap for `src`.
+   * This prevents a redundant decode + notify cycle when writeBitmap()
+   * has already injected a pre-decoded bitmap (paint bake pipeline).
    */
   public async warmFromBlob(src: string, blob: Blob): Promise<void> {
     if (!isBitmapCapable) return;
+    // Fast exit: another path (e.g. writeBitmap) already populated the cache.
+    if (this.cache.has(src)) return;
     try {
       const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+      // Re-check after async gap — writeBitmap may have populated the entry
+      // while createImageBitmap was in progress.
+      if (this.cache.has(src)) {
+        bitmap.close();
+        return;
+      }
       this.set(src, bitmap);
     } catch (err) {
       console.warn('[SourceBitmapCache] warmFromBlob failed for', src, err);

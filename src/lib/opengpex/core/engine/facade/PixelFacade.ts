@@ -173,6 +173,14 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
       clearCache() {
         sourceBitmapCache.clear();
       },
+      /** Return a caller-owned clone suitable for postMessage transfer (GPU refcount, near-zero cost). */
+      async acquireOwned(src: string): Promise<ImageBitmap | null> {
+        return sourceBitmapCache.acquireOwned(src);
+      },
+      /** Write a pre-decoded ImageBitmap directly into the cache (skip blob→decode). */
+      writeBitmap(src: string, bitmap: ImageBitmap): void {
+        sourceBitmapCache.set(src, bitmap);
+      },
     },
 
     // ════════════════════════════════════════════════════════════

@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.60
+
+- Brush / Mosaic: paint bake offloaded to a dedicated Worker — eliminates frame drops on large canvases
+- Rendering: tile cache notifications coalesced per animation frame, reducing unnecessary redraws during progressive tile loading
+
+---
+
 ## v1.0.0-beta.59
 
 - Mosaic Brush: pixelates the full visible canvas instead of a single layer, with adaptive downsampling for large canvases
