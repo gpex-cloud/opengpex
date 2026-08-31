@@ -35,6 +35,8 @@ interface DelayedConfirmProps {
   variant?: 'linear' | 'circular';
   strokeWidth?: number;
   ringColor?: string;
+  /** Progress bar color class. Defaults to 'bg-white/30 dark:bg-white/20' for universal contrast. */
+  progressColor?: string;
 }
 
 export default function DelayedConfirm({
@@ -46,7 +48,8 @@ export default function DelayedConfirm({
   className = "",
   variant = 'linear',
   strokeWidth = 2,
-  ringColor = "text-indigo-500"
+  ringColor = "text-indigo-500",
+  progressColor = "bg-white/30 dark:bg-white/20"
 }: DelayedConfirmProps) {
   const [stage, setStage] = useState<'idle' | 'confirming'>('idle');
   const [progress, setProgress] = useState(0);
@@ -100,7 +103,7 @@ export default function DelayedConfirm({
             className={`absolute inset-0 z-[15] transition-opacity duration-300 pointer-events-none ${stage === 'confirming' ? confirmClassName : 'opacity-0'}`}
           />
           <div 
-            className={`absolute inset-0 bg-indigo-500/20 dark:bg-indigo-400/10 origin-left pointer-events-none z-[20] transition-opacity duration-300 ${stage === 'confirming' ? 'opacity-100' : 'opacity-0'}`}
+            className={`absolute inset-0 ${progressColor} origin-left pointer-events-none z-[20] transition-opacity duration-300 ${stage === 'confirming' ? 'opacity-100' : 'opacity-0'}`}
             style={{ 
               transform: `scaleX(${progress / 100})`,
               transitionProperty: progress === 0 ? 'none' : 'transform',

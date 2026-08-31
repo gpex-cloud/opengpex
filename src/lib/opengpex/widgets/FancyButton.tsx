@@ -27,6 +27,7 @@ export type FancyButtonVariant =
   | "green"
   | "blue"
   | "indigo"
+  | "cyan"
   | "amber"
   | "zinc"
   | "gray"
@@ -79,6 +80,13 @@ const VARIANT_THEMES: Record<
     subtle:
       "bg-amber-600/10 text-amber-500 border border-amber-500/20 hover:bg-amber-600 hover:text-white hover:border-amber-500 shadow-sm",
     active: "bg-amber-700 text-white border-amber-600 shadow-inner",
+  },
+  cyan: {
+    solid:
+      "bg-cyan-600 text-white hover:bg-cyan-500 border border-cyan-500/20 shadow-sm",
+    subtle:
+      "bg-cyan-600/10 text-cyan-500 border border-cyan-500/20 hover:bg-cyan-600 hover:text-white hover:border-cyan-500 shadow-sm",
+    active: "bg-cyan-700 text-white border-cyan-600 shadow-inner",
   },
   red: {
     solid:

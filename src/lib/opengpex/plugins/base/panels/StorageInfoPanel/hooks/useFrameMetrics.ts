@@ -54,7 +54,7 @@ export const useFrameMetrics = (
           type: l.type,
           visible: l.visible !== false,
           locked: l.locked === true,
-          opacity: l.opacity ?? 100,
+          opacity: l.opacity ?? 1,
           bounding: l.bounding,
           asset,
           hostId: l.hostId,

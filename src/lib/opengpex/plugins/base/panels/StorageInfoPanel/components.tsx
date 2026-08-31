@@ -22,7 +22,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Database,
-  HardDrive,
   History,
   Trash2,
   ShieldCheck,
@@ -79,31 +78,16 @@ export function StorageInfoComponent() {
   }, [state]);
 
   const triggerGC = useCallback(() => {
-    if (!metrics) return;
-    const activeIds = new Set<string>();
-    metrics.frames.forEach((f) => {
-      if (f.thumbnail?.id) activeIds.add(f.thumbnail.id);
-      if (f.sourceAsset?.id) activeIds.add(f.sourceAsset.id);
-      f.layers.forEach((l) => {
-        if (l.asset?.id) activeIds.add(l.asset.id);
-        l.subLayers?.forEach((sub) => {
-          if (sub.asset?.id) activeIds.add(sub.asset.id);
-        });
-      });
-    });
-    assets.sweep(activeIds, true);
+    storage.gc(stateRef.current, true);
     refresh();
-  }, [metrics, assets, refresh]);
+  }, [storage, refresh]);
 
   const clearHistory = useCallback(() => {
     actions.history.purge();
+    // Immediately reclaim orphaned assets that were only referenced by history
+    storage.gc(stateRef.current, true);
     refresh();
-  }, [actions.history, refresh]);
-
-  const forceSave = useCallback(() => {
-    storage.save(stateRef.current);
-    refresh();
-  }, [storage, refresh]);
+  }, [actions.history, storage, refresh]);
 
   const purgeAll = useCallback(async () => {
     // Clear AI model cache from Cache Storage
@@ -137,7 +121,6 @@ export function StorageInfoComponent() {
       refresh={refresh}
       triggerGC={triggerGC}
       clearHistory={clearHistory}
-      forceSave={forceSave}
       purgeAll={purgeAll}
       handleSelectLayer={handleSelectLayer}
       handleSelectFrame={handleSelectFrame}
@@ -152,7 +135,6 @@ interface InnerPanelProps {
   refresh: () => void;
   triggerGC: () => void;
   clearHistory: () => void;
-  forceSave: () => void;
   purgeAll: () => Promise<void>;
   handleSelectLayer: (frameId: string, layerId: string) => void;
   handleSelectFrame: (frameId: string) => void;
@@ -171,7 +153,6 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
   refresh,
   triggerGC,
   clearHistory,
-  forceSave,
   purgeAll,
   handleSelectLayer,
   handleSelectFrame,
@@ -480,16 +461,6 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                       <Trash2 size={10} />
                       Force GC
                     </FancyButton>
-                    <FancyButton
-                      onClick={forceSave}
-                      variant="zinc"
-                      shape="pill"
-                      size="xs"
-                      subtle
-                    >
-                      <HardDrive size={10} />
-                      Save Shards
-                    </FancyButton>
                   </div>
 
                   {/* Data Purging */}
@@ -510,25 +481,26 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                         </FancyButton>
                       </DelayedConfirm>
 
-                      <FancyButton
-                        onClick={clearHistory}
-                        variant="amber"
-                        shape="pill"
-                        size="xs"
-                        subtle
+                      <DelayedConfirm
+                        onConfirm={clearHistory}
+                        delayTime={2000}
+                        confirmClassName="bg-amber-500/20"
+                        ringColor="text-amber-500"
                       >
-                        <History size={10} />
-                        History
-                      </FancyButton>
+                        <FancyButton variant="amber" shape="pill" size="xs" subtle>
+                          <History size={10} />
+                          History
+                        </FancyButton>
+                      </DelayedConfirm>
 
                       {modelCache.totalBytes > 0 && (
                         <DelayedConfirm
                           onConfirm={purgeDownloadedModels}
                           delayTime={2000}
-                          confirmClassName="bg-purple-500/20"
-                          ringColor="text-purple-500"
+                          confirmClassName="bg-cyan-500/20"
+                          ringColor="text-cyan-500"
                         >
-                          <FancyButton variant="indigo" shape="pill" size="xs" subtle>
+                          <FancyButton variant="cyan" shape="pill" size="xs" subtle>
                             <Brain size={10} />
                             AI Models
                           </FancyButton>
@@ -724,7 +696,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                                 OPACITY
                               </span>
                               <span className="text-[var(--text-main)] ">
-                                {selectedNode.data.opacity} %
+                                {Math.round(selectedNode.data.opacity * 100)} %
                               </span>
                             </div>
                             <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
