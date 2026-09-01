@@ -106,11 +106,24 @@ export const IMAGE_INFO_COMMANDS = {
                   tiffTile: config.tiffTile,
                   tiffTileWidth: config.tiffTileWidth,
                   tiffTileHeight: config.tiffTileHeight,
-                  resize: needsResize ? { w: exportW, h: exportH } : undefined,
                },
             };
 
-            const bitmap = await createImageBitmap(await result.toBlob());
+            let bitmap = await createImageBitmap(await result.toBlob());
+
+            // ─── Post-composite resize ──────────────────────────────────────
+            // compositeFrame always outputs at the ROI's native pixel size.
+            // When the user has set different export dimensions via the Resize
+            // controls, we scale the composite bitmap here before encoding so
+            // the final file actually reflects the requested size.
+            if (needsResize) {
+               const resizeCanvas = new OffscreenCanvas(exportW, exportH);
+               const resizeCtx = resizeCanvas.getContext('2d')!;
+               resizeCtx.drawImage(bitmap, 0, 0, exportW, exportH);
+               bitmap.close();
+               bitmap = await createImageBitmap(resizeCanvas);
+            }
+
             const blob = await files.encode(bitmap, config.format, encodeOpts);
             bitmap.close();
 

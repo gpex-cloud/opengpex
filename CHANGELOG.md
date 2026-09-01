@@ -4,6 +4,12 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.60.3
+
+- Export: fixed resized images saving at original dimensions instead of the requested size
+
+---
+
 ## v1.0.0-beta.60.2
 
 - Storage Panel: fixed opacity display, GC safety, history purge UX; removed "Save Shards"; restyled AI Models purge to cyan
