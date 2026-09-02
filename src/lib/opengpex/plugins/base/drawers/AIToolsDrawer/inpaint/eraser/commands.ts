@@ -23,9 +23,10 @@ import { asLocalShape } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { createToolCommand } from '../../_shared/control/createToolCommand';
 import type { ProcessResultOutcome } from '../../_shared/control/createToolCommand';
+import { getToolConfig } from '../../_shared/useToolConfig';
 import { inpaintEraserClient } from './client';
 import type { InpaintEraserRequest, InpaintEraserResult as InpaintEraserWorkerResult } from './worker.types';
-import type { InpaintEraserModelEntry } from './protocols';
+import type { InpaintEraserModelEntry, InpaintEraserConfig } from './protocols';
 import {
   MODEL_TYPE_KEY,
   BUILTIN_ERASER_MODELS,
@@ -33,10 +34,17 @@ import {
   CMD_INPAINT_ERASER,
   CMD_INPAINT_ERASER_ABORT,
 } from './protocols';
+import { PLUGIN_AUTHOR, PLUGIN_ID } from '../../protocols';
 import { inpaintEraserStore } from './store';
 import type { InpaintEraserResult } from './store';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const PLUGIN_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}`;
+
+function getInpaintConfig(ctx: { state: { pluginConfig: Record<string, unknown> } }): InpaintEraserConfig {
+  return getToolConfig<InpaintEraserConfig>(ctx.state.pluginConfig, PLUGIN_UID, MODEL_TYPE_KEY, DEFAULT_INPAINT_ERASER_CONFIG);
+}
 
 /**
  * Convert LocalPolygon rings (LocalPoint[][]) to number[][][] for Worker.
@@ -134,26 +142,57 @@ const { runCommand, abortCommand } = createToolCommand<
     // Register as Asset
     const { assetId, url } = await ctx.assets.register(blob, { w: patchW, h: patchH });
 
-    // Calculate world coordinates (cx, cy) for patch center
-    const canvasW = targetFrame.canvas.w;
-    const canvasH = targetFrame.canvas.h;
-    const cx = offsetX + patchW / 2 - canvasW / 2;
-    const cy = offsetY + patchH / 2 - canvasH / 2;
+    // Read output mode from config
+    const inpaintConfig = getInpaintConfig(ctx);
+    const outputMode = inpaintConfig.outputMode ?? 'new-layer';
 
-    // Create a new patch Layer
-    const layersArray = targetFrame.layers.order.map(id => targetFrame.layers.byId[id]);
-    const newLayer = ctx.layers.getNewLayer({
-      name: ctx.layers.getNewLayerName(layersArray, 'Erased'),
-      src: url,
-      assetId,
-      cx,
-      cy,
-      bounding: { w: patchW, h: patchH },
-      visibleShape: asLocalShape({ x: 0, y: 0, w: patchW, h: patchH }),
-    });
+    if (outputMode === 'replace') {
+      // ── Replace mode: composite patch onto source layer in-place ──────────
+      // Draw the original layer pixels, then overlay the patch at the correct offset.
+      const srcW = targetLayer.bounding.w;
+      const srcH = targetLayer.bounding.h;
+      const compositeCanvas = new OffscreenCanvas(srcW, srcH);
+      const cctx = compositeCanvas.getContext('2d')!;
 
-    // Insert above source layer
-    ctx.layers.addLayer(frameId, newLayer);
+      // Draw source layer image
+      const srcBitmap = await fetch(targetLayer.src).then(r => r.blob()).then(b => createImageBitmap(b));
+      cctx.drawImage(srcBitmap, 0, 0);
+      srcBitmap.close();
+
+      // Overlay patch at the correct layer-local offset
+      const patchBitmap = await createImageBitmap(new ImageData(new Uint8ClampedArray(patchData), patchW, patchH));
+      cctx.drawImage(patchBitmap, offsetX, offsetY);
+      patchBitmap.close();
+
+      // Convert composited result to a new asset
+      const compositeBlob = await compositeCanvas.convertToBlob({ type: 'image/png' });
+      const compositeAsset = await ctx.assets.register(compositeBlob, { w: srcW, h: srcH });
+
+      // Update source layer in-place
+      actions.updateLayer(frameId, layerId, { src: compositeAsset.url, assetId: compositeAsset.assetId });
+    } else {
+      // ── New Layer mode (default): create patch layer above source ────────
+      // Calculate world coordinates (cx, cy) for patch center
+      const canvasW = targetFrame.canvas.w;
+      const canvasH = targetFrame.canvas.h;
+      const cx = offsetX + patchW / 2 - canvasW / 2;
+      const cy = offsetY + patchH / 2 - canvasH / 2;
+
+      // Create a new patch Layer
+      const layersArray = targetFrame.layers.order.map(id => targetFrame.layers.byId[id]);
+      const newLayer = ctx.layers.getNewLayer({
+        name: ctx.layers.getNewLayerName(layersArray, 'Erased'),
+        src: url,
+        assetId,
+        cx,
+        cy,
+        bounding: { w: patchW, h: patchH },
+        visibleShape: asLocalShape({ x: 0, y: 0, w: patchW, h: patchH }),
+      });
+
+      // Insert above source layer
+      ctx.layers.addLayer(frameId, newLayer);
+    }
 
     if (workerResult.debug) {
       console.log(`[InpaintEraser] ${workerResult.debug.deviceUsed} | inference: ${workerResult.debug.inferenceMs.toFixed(0)}ms | total: ${workerResult.debug.totalMs.toFixed(0)}ms`);
@@ -168,7 +207,9 @@ const { runCommand, abortCommand } = createToolCommand<
         outputHeight: patchH,
         frameId,
       },
-      hudMessage: `✨ Smart Erase complete — patch layer created (${(elapsedMs / 1000).toFixed(1)}s)`,
+      hudMessage: outputMode === 'replace'
+        ? `✨ Smart Erase complete — layer updated in place (${(elapsedMs / 1000).toFixed(1)}s)`
+        : `✨ Smart Erase complete — patch layer created (${(elapsedMs / 1000).toFixed(1)}s)`,
       hudType: 'success',
     };
   },

@@ -40,7 +40,6 @@ import { drawLayerInstance } from '../shared/painter2d';
 import { workerCache } from '../../worker/cache/WorkerCache';
 import { canvasToBlob, calculateHash, buildTileMeta } from '../../utils/pixel-utils';
 import { shapeToPath2D } from '@opengpex/editor/core/helpers/path2d';
-import { shrinkInvertedMask } from '@opengpex/editor/core/helpers/sub-pixel';
 import { normalizeFilterDescriptors, hasFilters } from '../../protocol/normalizer';
 import { applyFilterChainRGBA8 } from '../shared/filter2d';
 import { convertBufferTRC } from '../shared/trc';
@@ -477,16 +476,52 @@ export class Canvas2dBackend {
 
   /**
    * Build ClipDescriptor[] from vector masks in the descriptor.
+   *
+   * NOTE: No `shrinkInvertedMask` here. That helper is a **viewport-only** seam
+   * prevention trick — it shifts inverted clips inward by 0.75/scale physical
+   * pixels so the fragment layer covers the AA border at non-100% zoom levels.
+   *
+   * In the offline compositing path (mergeVisible / mergeDown / rasterize / export),
+   * the result is permanently baked into pixel data. Shrinking would:
+   *   1. Push integer-coordinate rect clips to non-integer → introduce Canvas2D AA
+   *      on edges that were originally pixel-perfect.
+   *   2. Shift curve clips (ellipse/path) inward with no paired fragment expansion
+   *      to compensate → visible gap between hole and fragment after merge.
+   *   3. Bake the AA artifact permanently into the merged asset.
+   *
+   * At 1:1 compositing scale there is no sub-pixel zoom seam to prevent, so the
+   * original shape coordinates are used as-is.
    */
   private buildClipSequence(desc: LayerDescriptor): ClipDescriptor[] | undefined {
-    if (!desc.vectorMasks || desc.vectorMasks.length === 0) return undefined;
+    const pipeline: ClipDescriptor[] = [];
 
-    return desc.vectorMasks.map(m => ({
-      shape: m.shape,
-      inverted: m.inverted,
-      feather: m.feather || 0,
-      __compiledPath2D: shapeToPath2D(shrinkInvertedMask(m.shape, m.inverted, 1, desc.bounding)),
-    })) as ClipDescriptor[];
+    // ── visibleShape clip (mirrors StageComposer.getRenderPipeline) ───────────
+    // When visibleShape is non-rect (circle/path), drawLayerContent's drawImage
+    // only reads .rect (bounding box), so the irregular outline must be enforced
+    // via an explicit clip. For plain rect visibleShape, the drawImage source
+    // rectangle already achieves the same effect — no clip needed.
+    if (desc.visibleShape && desc.visibleShape.type !== 'rect') {
+      pipeline.push({
+        shape: desc.visibleShape,
+        inverted: false,
+        feather: 0,
+        __compiledPath2D: shapeToPath2D(desc.visibleShape),
+      } as ClipDescriptor);
+    }
+
+    // ── vectorMask clips ─────────────────────────────────────────────────────
+    if (desc.vectorMasks) {
+      for (const m of desc.vectorMasks) {
+        pipeline.push({
+          shape: m.shape,
+          inverted: m.inverted,
+          feather: m.feather || 0,
+          __compiledPath2D: shapeToPath2D(m.shape),
+        } as ClipDescriptor);
+      }
+    }
+
+    return pipeline.length > 0 ? pipeline : undefined;
   }
 
   /**

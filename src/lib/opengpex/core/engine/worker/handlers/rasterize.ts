@@ -38,7 +38,6 @@ import { drawLayerInstance } from '../../rendering/shared/painter2d';
 import { workerCache } from '../cache/WorkerCache';
 import { canvasToBlob, calculateHash, buildTileMeta } from '../../utils/pixel-utils';
 import { shapeToPath2D } from '@opengpex/editor/core/helpers/path2d';
-import { shrinkInvertedMask } from '@opengpex/editor/core/helpers/sub-pixel';
 
 /** Payload shape for 'mask' sub-type */
 interface RasterizeMaskPayload {
@@ -155,11 +154,15 @@ export class RasterizeHandler {
     };
 
     // Build clip sequence from vector masks
+    //
+    // NOTE: No `shrinkInvertedMask` here — same rationale as Canvas2dBackend.buildClipSequence.
+    // Rasterize permanently bakes pixels; shrinking inverted masks at scale=1 would introduce
+    // Canvas2D AA on originally-pixel-perfect integer boundaries.
     const clipSequence: ClipDescriptor[] = masks.map(m => ({
       shape: m.shape,
       inverted: m.inverted,
       feather: m.feather || 0,
-      __compiledPath2D: shapeToPath2D(shrinkInvertedMask(m.shape, m.inverted, 1, layerLike.bounding)),
+      __compiledPath2D: shapeToPath2D(m.shape),
     })) as ClipDescriptor[];
 
     drawLayerInstance(ctx, layerLike, source, { clipSequence });

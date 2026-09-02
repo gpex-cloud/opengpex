@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0-beta.61
+
+- AI Tools: Segmentation and Smart Eraser now work together — select an object with SAM, then erase it in one click; added "Replace" output mode to Smart Eraser
+- Export: fixed edge artifacts on layers with non-rectangular clips when merging or exporting
+
+---
+
 ## v1.0.0-beta.60.3
 
 - Export: fixed resized images saving at original dimensions instead of the requested size

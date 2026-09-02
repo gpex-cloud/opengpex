@@ -23,7 +23,7 @@
  * InpaintEraserPanel — AI Smart Eraser panel within AIToolsDrawer.
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { Info, Sparkles } from 'lucide-react';
 import { useEditorState, useEditorServices, usePluginCommands } from '@opengpex/editor/core/context';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
@@ -34,7 +34,7 @@ import { ModelPanel, InferencePanel, ErrorPanel, ResultPanel } from '../../../_s
 import { formatMs } from '../../../_shared/utils';
 import { useAIToolPanel } from '../../../_shared/useToolPanel';
 import { inpaintEraserClient } from '../client';
-import type { InpaintEraserConfig } from '../protocols';
+import type { InpaintEraserConfig, InpaintOutputMode } from '../protocols';
 import { MODEL_TYPE_KEY, MODEL_TYPE_NAME, BUILTIN_ERASER_MODELS, DEFAULT_INPAINT_ERASER_CONFIG } from '../protocols';
 import type { AIToolsDrawerCommandsMap } from '../../../commands.d';
 
@@ -61,6 +61,12 @@ export function InpaintEraserPanel() {
     const clipBox = getClipBox(activeFrame);
     return clipBox !== null && clipBox.rings && clipBox.rings.length > 0;
   }, [activeFrame, state.interaction.interactionMode]);
+
+  const outputMode: InpaintOutputMode = config.outputMode ?? 'new-layer';
+
+  const handleOutputModeChange = useCallback((mode: InpaintOutputMode) => {
+    setConfig({ outputMode: mode });
+  }, [setConfig]);
 
   const noLayer = !activeLayer || activeLayer.type !== 'image';
 
@@ -98,6 +104,18 @@ export function InpaintEraserPanel() {
       )}
 
       {error && <ErrorPanel message={error} onDismiss={() => inpaintEraserStore.setState({ error: null })} />}
+
+      <div className="space-y-1">
+        <span className="text-[10px] text-[var(--text-main)]">Output</span>
+        <div className="flex gap-1.5">
+          <FancyButton variant="ghost" size="xs" shape="rect" className={`flex-1 ${outputMode === 'new-layer' ? 'ring-1 ring-indigo-500/60' : ''}`} onClick={() => handleOutputModeChange('new-layer')} disabled={isBusy}>
+            <span className="text-[9px]">New Layer</span>
+          </FancyButton>
+          <FancyButton variant="ghost" size="xs" shape="rect" className={`flex-1 ${outputMode === 'replace' ? 'ring-1 ring-indigo-500/60' : ''}`} onClick={() => handleOutputModeChange('replace')} disabled={isBusy}>
+            <span className="text-[9px]">Replace</span>
+          </FancyButton>
+        </div>
+      </div>
 
       <div className="pt-0.5">
         <FancyButton
