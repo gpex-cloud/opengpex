@@ -4,6 +4,12 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.0.0
+
+First stable release.
+
+---
+
 ## v1.0.0-beta.61
 
 - AI Tools: Segmentation and Smart Eraser now work together — select an object with SAM, then erase it in one click; added "Replace" output mode to Smart Eraser
