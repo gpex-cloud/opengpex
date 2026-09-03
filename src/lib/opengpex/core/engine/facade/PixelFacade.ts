@@ -55,7 +55,6 @@ import type {
   Shape,
   WorldShape,
   LocalShape,
-  LocalPolygon,
   LocalRect,
   Rect,
 } from '@opengpex/editor/core/types';
@@ -257,12 +256,6 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
     rasterize: {
       async layer(layer: Layer, opts?: { dpr?: number }) {
         const result = await rasterize.layer(layer, opts);
-        const { assetId, url } = await result.toAsset();
-        return { assetId, url };
-      },
-      async mask(polygon: LocalPolygon, bounds: { w: number; h: number }, feather = 0) {
-        const result = await rasterize.mask(polygon, bounds, feather);
-        if (!result) return null;
         const { assetId, url } = await result.toAsset();
         return { assetId, url };
       },

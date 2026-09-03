@@ -22,12 +22,10 @@
  *
  * Responsibilities:
  * 1. Text layer rasterization (text → bitmap via Worker or main-thread fallback)
- * 2. Polygon mask rasterization (polygon → alpha channel bitmap)
  *
  * RasterizeDispatcher's boundary:
  *   - Only handles "pure rendering" without effect stacking
  *   - Text/color/vector → bitmap (no masks, no adjustments, no blend)
- *   - Polygon → alpha mask (no layer context)
  *
  * For "layer flattening" (with masks/adjustments/blend), use CompositeDispatcher.
  *
@@ -39,7 +37,7 @@ import { RasterizeResult } from '../results/RasterizeResult';
 import { drawLayerInstance } from '../rendering/shared/painter2d';
 import { canvasToBlob, calculateHash, buildTileMeta } from '../utils/pixel-utils';
 import type { PixelResultData } from '../protocol/results';
-import type { AssetService, Layer, LocalPolygon } from '@opengpex/editor/core/types';
+import type { AssetService, Layer } from '@opengpex/editor/core/types';
 
 export class RasterizeDispatcher {
   constructor(
@@ -78,76 +76,6 @@ export class RasterizeDispatcher {
       tileMeta,
       depth: 8,
       bounds: { x: 0, y: 0, w: Math.ceil(w * dpr), h: Math.ceil(h * dpr) },
-    };
-
-    return new RasterizeResult(data, this.assets);
-  }
-
-  /**
-   * Rasterize a polygon selection into an alpha-channel mask PNG.
-   *
-   * Alpha=255 (opaque) = visible area, Alpha=0 (transparent) = hidden area.
-   * The rendering engine uses `destination-in` compositing which operates on alpha,
-   * so the mask must encode visibility in the alpha channel.
-   *
-   * Supports feathering via Gaussian blur on the mask edges.
-   *
-   * @param polygon - LocalPolygon describing the selection
-   * @param bounds  - Output dimensions
-   * @param feather - Gaussian blur radius for soft edges (default 0)
-   * @returns RasterizeResult with the mask blob, or null if bounds invalid
-   */
-  async mask(
-    polygon: LocalPolygon,
-    bounds: { w: number; h: number },
-    feather = 0,
-  ): Promise<RasterizeResult | null> {
-    const w = Math.ceil(bounds.w);
-    const h = Math.ceil(bounds.h);
-    if (w <= 0 || h <= 0) return null;
-
-    const canvas = new OffscreenCanvas(w, h);
-    const ctx = canvas.getContext('2d')!;
-
-    // Canvas starts fully transparent (alpha=0 = hidden)
-    // Draw selection polygon as opaque white (alpha=255 = visible)
-    ctx.fillStyle = '#ffffff';
-    const path = new Path2D();
-
-    const rings = polygon.rings;
-    for (let r = 0; r < rings.length; r++) {
-      const ring = rings[r];
-      if (ring && ring.length > 0) {
-        path.moveTo(ring[0].x, ring[0].y);
-        for (let i = 1; i < ring.length; i++) {
-          path.lineTo(ring[i].x, ring[i].y);
-        }
-        path.closePath();
-      }
-    }
-
-    ctx.fill(path, 'evenodd');
-
-    // Apply feather via Gaussian blur (if requested)
-    if (feather > 0) {
-      const blurCanvas = new OffscreenCanvas(w, h);
-      const blurCtx = blurCanvas.getContext('2d')!;
-      blurCtx.filter = `blur(${feather}px)`;
-      blurCtx.drawImage(canvas, 0, 0);
-      ctx.clearRect(0, 0, w, h);
-      ctx.drawImage(blurCanvas, 0, 0);
-    }
-
-    const blob = await canvasToBlob(canvas);
-    const hash = await calculateHash(blob);
-    const tileMeta = buildTileMeta(w, h, 1);
-
-    const data: PixelResultData = {
-      blob,
-      hash,
-      tileMeta,
-      depth: 8,
-      bounds: { x: 0, y: 0, w, h },
     };
 
     return new RasterizeResult(data, this.assets);

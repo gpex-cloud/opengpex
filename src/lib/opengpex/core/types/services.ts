@@ -32,7 +32,7 @@ import {
   LayerBlendMode,
 } from './models';
 import {
-  LocalRect, Dimensions, Shape, LocalShape, LocalPolygon, TileMetadata
+  LocalRect, Dimensions, Shape, LocalShape, TileMetadata
 } from './primitives';
 import { EditorData } from './state';
 import type { ImageMetadata } from '../files/types';
@@ -383,8 +383,6 @@ export interface PixelService {
     /** Rasterizes any layer to bitmap Asset (text -> fillText, color -> fillRect, image -> flatten masks/adjustments).
      *  Accepts optional opts.dpr to control output resolution (Phase 4 DPR unification). */
     layer: (layer: Layer, opts?: { dpr?: number }) => Promise<{ assetId: string; url: string }>;
-    /** Rasterizes a polygon selection into a grayscale mask PNG asset (white=visible, black=hidden) */
-    mask: (polygon: LocalPolygon, bounds: { w: number; h: number }, feather?: number) => Promise<{ assetId: string; url: string } | null>;
   };
 
 

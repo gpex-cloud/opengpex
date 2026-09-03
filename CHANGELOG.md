@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.1.3
+
+- Masks: "Apply as Mask" now creates vector masks instead of bitmap masks — lighter, sharper, and correctly aligned on rotated or flipped layers
+- Internal: removed unused legacy bitmap-mask code from Delete Selection
+
+---
+
 ## v1.1.2
 
 - Cut & Copy: improved how pieces are cut from areas that already had pieces removed — no more overlaps, duplicated content, or gaps when adding or deleting pieces

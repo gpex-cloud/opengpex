@@ -19,25 +19,12 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, ClipboardLayerMetadata, LocalShape, asLocalRect } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, ClipboardLayerMetadata } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { polygonToShape } from '@opengpex/editor/core/geometry/operators/polygon';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 // Removed direct dependency on storage singleton, using ctx injection instead
-
-/**
- * DRILL_USE_VECTOR_MASK: Toggle between VectorMask and BitmapMask for drill operations.
- *
- * - `true`  (recommended): Drill adds an inverted VectorMask per operation. Avoids
- *   offscreen rendering → eliminates AA seam when subsequent lasso cut crosses the
- *   layer. Each drill = one VectorMask entry (lightweight, undo-friendly).
- *
- * - `false` (legacy): Drill accumulates into a single BitmapMask PNG. Forces the
- *   layer through the offscreen rendering path, which can cause visible AA seams
- *   at lasso/path selection boundaries during subsequent copy/cut operations.
- */
-const DRILL_USE_VECTOR_MASK = true;
 
 /**
  * Extract common logic of Cut and Copy: generate physical fragment and write to clipboard.
@@ -267,7 +254,7 @@ export const LayerClipCommands = {
     name: 'Apply as Layer Mask',
     undoable: true,
     execute: async (ctx: EditorContextValue, payload?: { layerId?: string; feather?: number }): Promise<void> => {
-      const { activeFrame, activeLayer, actions, geometry, layers, pixels } = ctx;
+      const { activeFrame, activeLayer, actions, geometry, layers } = ctx;
       if (!activeFrame) return;
 
       const box = getClipBox(activeFrame);
@@ -291,33 +278,35 @@ export const LayerClipCommands = {
       // Read feather radius from payload (0 = no feather)
       const feather = payload?.feather ?? 0;
 
-      // All selections are now LocalPolygon. Use polygonToShape for vector mask path.
-      const localShape: LocalShape = polygonToShape(box);
-      if (localShape.type !== 'path') {
-        // ═══ Regular selection (rect/ellipse) → Vector Mask ═══
-        // Lightweight, geometrically precise, scalable without quality loss.
-        layers.updateLayer(activeFrame.id, tx => {
-          tx.edit(targetLayer.id).applyMask(localShape, { feather });
-        });
-      } else {
-        // ═══ Irregular selection (lasso/wand/AI) → Bitmap Mask ═══
-        // Complex edges benefit from pixel-level representation; enables future brush refinement.
-        const layerPoly = geometry.polygon.frameLocalToLayerLocal(box, activeFrame, targetLayer);
+      // ═══ Unified VectorMask path (regular + irregular) ═══
+      // Project the selection to the target layer's local space *first* so the
+      // mask geometry is expressed in the same coordinate system as the layer's
+      // visibleShape. This fixes a latent misalignment for posed layers
+      // (rotated/flipped/off-center): the previous regular-branch fed a
+      // frame-local shape straight to applyMask, which only happened to align
+      // for trunk layers (cx=cy=0, no rotation/flip). Mirrors the drill path.
+      const layerPoly = geometry.polygon.frameLocalToLayerLocal(box, activeFrame, targetLayer);
+      const localShape = polygonToShape(layerPoly);
 
-        const maskAsset = await pixels.rasterize.mask(layerPoly, targetLayer.bounding, feather);
-        if (!maskAsset) {
-          actions.setInteraction({ selectionErrorPulse: Date.now() });
-          return;
-        }
-
-        layers.updateLayer(activeFrame.id, tx => {
-          tx.edit(targetLayer.id).applyBitmapMask(
-            maskAsset.url,
-            maskAsset.assetId,
-            asLocalRect({ x: 0, y: 0, w: targetLayer.bounding.w, h: targetLayer.bounding.h })
-          );
-        });
+      // Area guard (replaces the old `!maskAsset` guard from the bitmap path):
+      // a degenerate selection (single click, collinear points) yields an
+      // empty/near-zero path. Applying it would silently append an invalid mask
+      // (layer vanishes or no-ops) with no user feedback. Early-out with the
+      // same red pulse the removed bitmap branch used. Also covers the empty
+      // rect/ellipse case the regular branch previously ignored.
+      if (localShape.rect.w <= 0 || localShape.rect.h <= 0) {
+        actions.setInteraction({ selectionErrorPulse: Date.now() });
+        return;
       }
+
+      // polygonToShape recognizes 4-point rects / ellipse approximations as
+      // rect/circle shapes, everything else as a path shape (absolute pathData,
+      // multi-ring evenodd supported). All variants become a VectorMask via
+      // applyMask → getNewVectorMask, appended to vectorMasks. No BitmapMask is
+      // produced here anymore.
+      layers.updateLayer(activeFrame.id, tx => {
+        tx.edit(targetLayer.id).applyMask(localShape, { feather });
+      });
 
       // NOTE: Selection is intentionally preserved after applying mask.
       // The user may want to apply the same selection to other layers,
@@ -333,7 +322,7 @@ export const LayerClipCommands = {
     name: 'Delete Selection',
     undoable: true,
     execute: async (ctx: EditorContextValue, payload?: { feather?: number }): Promise<void> => {
-      const { activeFrame, activeLayer, actions, geometry, assets } = ctx;
+      const { activeFrame, activeLayer, actions, geometry } = ctx;
       const isClipActive = ctx.state.interaction.interactionMode === 'clip';
       if (!activeFrame || !activeLayer || !isClipActive) return;
 
@@ -345,132 +334,17 @@ export const LayerClipCommands = {
 
         const feather = payload?.feather ?? 0;
 
-        if (DRILL_USE_VECTOR_MASK) {
-          // ═══ VectorMask path: add inverted VectorMask (no offscreen, no seam) ═══
-          const drillShape = polygonToShape(box);
-          const localShape = drillShape.type === 'path'
-            ? polygonToShape(geometry.polygon.frameLocalToLayerLocal(box, activeFrame, latestLayer))
-            : geometry.shape.frameLocalToLayerLocal(drillShape, activeFrame, latestLayer);
+        // ═══ VectorMask path: add inverted VectorMask (no offscreen, no seam) ═══
+        // Irregular (path) selections project through the polygon path so multi-ring
+        // geometry survives; regular (rect/circle) selections project via shape space.
+        const drillShape = polygonToShape(box);
+        const localShape = drillShape.type === 'path'
+          ? polygonToShape(geometry.polygon.frameLocalToLayerLocal(box, activeFrame, latestLayer))
+          : geometry.shape.frameLocalToLayerLocal(drillShape, activeFrame, latestLayer);
 
-          ctx.layers.updateLayer(activeFrame.id, tx => {
-            tx.edit(latestLayer.id).applyMask(localShape, { inverted: true, feather });
-          });
-        } else {
-          // ═══ BitmapMask path: merged drilled raster mask (legacy) ═══
-          const w = Math.ceil(latestLayer.bounding.w);
-          const h = Math.ceil(latestLayer.bounding.h);
-          if (w <= 0 || h <= 0) return;
-
-          const existingMasks = latestLayer.bitmapMasks || [];
-          const drilledMask = existingMasks.find(m => m.tag === 'drilled');
-
-          // Create OffscreenCanvas for mask composition
-          const maskCanvas = new OffscreenCanvas(w, h);
-          const maskCtx = maskCanvas.getContext('2d')!;
-
-          if (drilledMask) {
-            // Load existing drilled mask image
-            const response = await fetch(drilledMask.src);
-            const blob = await response.blob();
-            const img = await createImageBitmap(blob);
-            maskCtx.drawImage(img, 0, 0, w, h);
-          } else {
-            // Start with full white (alpha=255 everywhere = all visible)
-            maskCtx.fillStyle = '#ffffff';
-            maskCtx.fillRect(0, 0, w, h);
-          }
-
-          // Punch hole using destination-out composite
-          maskCtx.globalCompositeOperation = 'destination-out';
-
-          const drillShape = polygonToShape(box);
-          if (drillShape.type === 'path') {
-            // Irregular selection → polygon path
-            const layerPoly = geometry.polygon.frameLocalToLayerLocal(box, activeFrame, latestLayer);
-            const path = new Path2D();
-            for (const ring of layerPoly.rings) {
-              if (ring && ring.length > 0) {
-                path.moveTo(ring[0].x, ring[0].y);
-                for (let i = 1; i < ring.length; i++) {
-                  path.lineTo(ring[i].x, ring[i].y);
-                }
-                path.closePath();
-              }
-            }
-
-            if (feather > 0) {
-              const holeCanvas = new OffscreenCanvas(w, h);
-              const holeCtx = holeCanvas.getContext('2d')!;
-              holeCtx.fillStyle = '#ffffff';
-              holeCtx.fill(path, 'evenodd');
-              const blurCanvas = new OffscreenCanvas(w, h);
-              const blurCtx = blurCanvas.getContext('2d')!;
-              blurCtx.filter = `blur(${feather}px)`;
-              blurCtx.drawImage(holeCanvas, 0, 0);
-              maskCtx.drawImage(blurCanvas, 0, 0);
-            } else {
-              maskCtx.fillStyle = '#ffffff';
-              maskCtx.fill(path, 'evenodd');
-            }
-          } else {
-            // Regular selection → rect/ellipse shape
-            const localShape = geometry.shape.frameLocalToLayerLocal(drillShape, activeFrame, latestLayer);
-            const { x, y, w: sw, h: sh } = localShape.rect;
-
-            if (feather > 0) {
-              const holeCanvas = new OffscreenCanvas(w, h);
-              const holeCtx = holeCanvas.getContext('2d')!;
-              holeCtx.fillStyle = '#ffffff';
-              if (localShape.type === 'circle') {
-                holeCtx.beginPath();
-                holeCtx.ellipse(x + sw / 2, y + sh / 2, sw / 2, sh / 2, 0, 0, Math.PI * 2);
-                holeCtx.fill();
-              } else {
-                holeCtx.fillRect(x, y, sw, sh);
-              }
-              const blurCanvas = new OffscreenCanvas(w, h);
-              const blurCtx = blurCanvas.getContext('2d')!;
-              blurCtx.filter = `blur(${feather}px)`;
-              blurCtx.drawImage(holeCanvas, 0, 0);
-              maskCtx.drawImage(blurCanvas, 0, 0);
-            } else {
-              maskCtx.fillStyle = '#ffffff';
-              if (localShape.type === 'circle') {
-                maskCtx.beginPath();
-                maskCtx.ellipse(x + sw / 2, y + sh / 2, sw / 2, sh / 2, 0, 0, Math.PI * 2);
-                maskCtx.fill();
-              } else {
-                maskCtx.fillRect(x, y, sw, sh);
-              }
-            }
-          }
-
-          // Export drilled mask as PNG and register in asset service
-          const blob = await maskCanvas.convertToBlob({ type: 'image/png' });
-          const { assetId, url } = await assets.register(blob, { w, h });
-
-          // Update existing drilled mask or create new one
-          if (drilledMask) {
-            ctx.layers.updateLayer(activeFrame.id, tx => {
-              tx.edit(latestLayer.id).updateBitmapMask(drilledMask.id, { src: url, assetId });
-            });
-          } else {
-            // Create new BitmapMask with tag='drilled'
-            const newMask = {
-              id: `bmask-drilled-${Date.now()}`,
-              src: url,
-              assetId,
-              bounds: asLocalRect({ x: 0, y: 0, w, h }),
-              inverted: false,
-              enabled: true,
-              feather: 0,
-              tag: 'drilled',
-            };
-            ctx.layers.updateLayer(activeFrame.id, tx => {
-              tx.edit(latestLayer.id).patch({ bitmapMasks: [newMask, ...existingMasks] });
-            });
-          }
-        }
+        ctx.layers.updateLayer(activeFrame.id, tx => {
+          tx.edit(latestLayer.id).applyMask(localShape, { inverted: true, feather });
+        });
 
         // NOTE: Selection is intentionally preserved after drill.
         // Unlike toMask (which is a "finalize" operation), drill is an
