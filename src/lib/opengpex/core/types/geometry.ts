@@ -284,6 +284,16 @@ export interface GeometryService {
     regularShapeToLocalPolygon: (tool: 'rect' | 'ellipse', rect: LocalRect, antiAliased?: boolean) => LocalPolygon;
     /** 360-point path-based ellipse polygon (stays on type:'path' pipeline, never recognized as circle) */
     ellipsePathToLocalPolygon: (rect: LocalRect, antiAliased?: boolean) => LocalPolygon;
+    /**
+     * Serializes a Polygon into an equivalent Shape descriptor (the lossy, one-way
+     * Polygon → Shape entry point). Recognizes 4-point rects and 64-point ellipses
+     * as native rect/circle types; all other rings become type:'path' with smooth
+     * M/L/Z pathData. Overloaded: LocalPolygon → LocalShape, WorldPolygon → WorldShape.
+     */
+    polygonToShape: {
+      (poly: LocalPolygon): LocalShape;
+      (poly: WorldPolygon): WorldShape;
+    };
 
   };
 

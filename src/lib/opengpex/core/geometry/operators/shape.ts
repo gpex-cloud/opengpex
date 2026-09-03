@@ -24,9 +24,9 @@ import {
 import { getLayerWorldMatrix } from './transform';
 import { getLayerLocalAABB, getRectIntersection, getLayerBoundingBox, getMultiRectUnion } from './space';
 import { snapToPixel } from './snapping';
-import { parsePathDataToRings } from './point2d';
+import { parsePathDataToRings, shapeToPoint2D, ringsToPathData } from './point2d';
 import { intersectPathWithRect } from '../sut-hod';
-import { intersectPathWithPath } from '../poly-clip';
+import { intersectPathWithPath, differencePathWithPath } from '../poly-clip';
 
 /**
  * frameLocalToLayerLocal: Projects selection shape under artboard space (Frame) to layer (Layer) local space
@@ -45,11 +45,127 @@ export function layerLocalToFrameLocal(shape: Shape, layer: Layer, frame: Frame)
 }
 
 /**
+ * MASK_AWARE_INTERSECTION — emergency rollback master switch (§5.4).
+ *
+ *  true  : mask-aware logical intersection (default, correct behavior). The layer's
+ *          effective visible shape folds in all enabled vectorMasks before intersecting
+ *          with the selection.
+ *  false : legacy behavior (intersect only with `layer.visibleShape`, ignoring masks).
+ *
+ * Read ONLY inside `intersectWithLayer` — never exposed as a function parameter or
+ * routed through the GeometryService interface.
+ */
+const MASK_AWARE_INTERSECTION = true;
+
+/**
+ * shapeToPathData — Obtain the pathData for any LocalShape. Path shapes return
+ * their pathData directly; rect/circle shapes are first decomposed into rings
+ * (via `shapeToPoint2D`) and serialized (via `ringsToPathData`), so they can
+ * participate in boolean ops.
+ */
+function shapeToPathData(shape: LocalShape): string {
+  const pd = (shape as { pathData?: string }).pathData;
+  if (shape.type === 'path' && pd) return pd;
+  return ringsToPathData(shapeToPoint2D(shape));
+}
+
+/**
+ * getEffectiveVisibleShape: Fold a layer's enabled vectorMasks into its
+ * visibleShape, producing the geometry that is actually visible right now.
+ *
+ * - inverted=false (clip mask) → intersect (∩)
+ * - inverted=true  (hole mask) → subtract (−, difference)
+ *
+ * Degradation (returns the untouched `visibleShape` with `degraded:true`) when
+ * the geometry cannot be represented as a crisp polygon:
+ *   - any enabled bitmapMask exists (raster, not geometrizable)
+ *   - any enabled vectorMask has feather>0 (soft edge, not geometrizable)
+ * Disabled masks (enabled=false) are always skipped.
+ *
+ * Empty result (e.g. base fully carved away by holes) → returns a degenerate
+ * empty path shape so `intersectWithLayer` yields null downstream.
+ */
+export function getEffectiveVisibleShape(
+  layer: Layer
+): { shape: LocalShape; degraded: boolean } {
+  const base = layer.visibleShape!;
+  const vMasks = (layer.vectorMasks ?? []).filter(m => m.enabled);
+  const bMasks = (layer.bitmapMasks ?? []).filter(m => m.enabled);
+
+  // Non-geometrizable capabilities → degrade to the raw visibleShape.
+  if (bMasks.length > 0) return { shape: base, degraded: true };          // raster mask
+  if (vMasks.some(m => m.feather > 0)) return { shape: base, degraded: true }; // soft edge
+  if (vMasks.length === 0) return { shape: base, degraded: false };       // zero-regression fast path
+
+  // Fold masks into an evolving pathData:
+  //   base → pathData; for each mask: intersect (inverted:false) / difference (inverted:true)
+  let currentPathData = shapeToPathData(base);
+  let currentRect: Rect = base.rect;
+
+  for (const mask of vMasks) {
+    const maskPathData = shapeToPathData(mask.shape);
+    const res = mask.inverted
+      ? differencePathWithPath(currentPathData, maskPathData)  // hole mask → subtract
+      : intersectPathWithPath(currentPathData, maskPathData);  // clip mask → intersect
+
+    if (!res) {
+      // Empty result (fully carved away or no overlap) → degenerate empty shape.
+      return {
+        shape: {
+          type: 'path',
+          rect: asLocalRect({ x: 0, y: 0, w: 0, h: 0 }),
+          hardEdge: base.hardEdge,
+          antiAliased: (base as { antiAliased?: boolean }).antiAliased,
+          pathData: '',
+          __brand: 'local',
+        } as unknown as LocalShape,
+        degraded: false,
+      };
+    }
+
+    currentPathData = res.pathData;
+    currentRect = res.rect;
+  }
+
+  // Snap the folded tight bbox to the enclosing integer pixel grid,
+  // matching the existing snap convention (L84-90 / L112-117 below).
+  const snappedRect = {
+    x: Math.floor(currentRect.x),
+    y: Math.floor(currentRect.y),
+    w: Math.ceil(currentRect.x + currentRect.w) - Math.floor(currentRect.x),
+    h: Math.ceil(currentRect.y + currentRect.h) - Math.floor(currentRect.y),
+  };
+
+  return {
+    shape: {
+      type: 'path',
+      rect: asLocalRect(snappedRect),
+      hardEdge: base.hardEdge,
+      antiAliased: (base as { antiAliased?: boolean }).antiAliased,
+      pathData: currentPathData,
+      __brand: 'local',
+    } as unknown as LocalShape,
+    degraded: false,
+  };
+}
+
+/**
  * intersectWithLayer: Calculates the intersection of the selection shape with the layer's visible area, returning the intersection shape and center world coordinates
  * (i.e. original LayerService.deriveLogical, now moved to the geometry engine with swapped parameter order)
  */
 export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleShape: LocalShape, center: Point2D } | null {
-  const parentVisibleRect = layer.visibleShape!.rect;
+  // Mask-aware effective visible shape (§4.3 / §5.1). The flag lets us fall back
+  // to the legacy "raw visibleShape" behavior in an emergency (§5.4).
+  const eff = MASK_AWARE_INTERSECTION
+    ? getEffectiveVisibleShape(layer)
+    : { shape: layer.visibleShape!, degraded: false };
+
+  // §5.2: degraded (feather/bitmap mask) → return null so callers fall back to
+  // the vectorMask render path (fragmentToNewLayer's else branch).
+  if (eff.degraded) return null;
+
+  const layerShape = eff.shape;
+  const parentVisibleRect = layerShape.rect;
   const intersection = getRectIntersection(shape.rect, parentVisibleRect);
 
   if (!intersection) return null;
@@ -68,7 +184,6 @@ export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleSh
   //
   // Case 3: path selection + path layer → polygon-clipping (Martinez-Rueda-Feito)
   //   Computes the exact geometric intersection of two arbitrary polygons.
-  const layerShape = layer.visibleShape!;
   const layerPathData = (layerShape as { pathData?: string }).pathData;
   const selectionPathData = (shape as { pathData?: string }).pathData;
 

@@ -21,7 +21,6 @@
 
 import { EditorContextValue, EditorCommand, asLocalRect, asLocalShape, Frame, LocalRect, LocalShape, LocalPolygon, EditorActions, GeometryService, Point2D } from '@opengpex/editor/core/types';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
-import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import { clipComputeClient } from './workers/client';
 import * as P from './protocols';
 import type { ClipTool } from './protocols';
@@ -64,7 +63,7 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
   const regularPoly = isReCanvas ? null : getRegularClipShape(activeFrame);
   const shape: LocalShape = isReCanvas
     ? activeFrame.canvasClipBox
-    : (regularPoly ? polygonToShape(regularPoly) : asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
+    : (regularPoly ? geometry.polygon.polygonToShape(regularPoly) : asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
 
   return {
     isReCanvas,
@@ -805,7 +804,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       const tool = (frame.latestClipTool as ClipTool) || 'rect';
       const { w: canvasW, h: canvasH } = frame.canvas;
       const antiAliased = clipBox.antiAliased ?? true;
-      const localShape = polygonToShape(clipBox);
+      const localShape = ctx.geometry.polygon.polygonToShape(clipBox);
       const isRegular = localShape.type !== 'path';
 
       const { point2d: geo } = ctx.geometry;
@@ -863,7 +862,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       const tool = (frame.latestClipTool as ClipTool) || 'rect';
       const { w: canvasW, h: canvasH } = frame.canvas;
       const antiAliased = clipBox.antiAliased ?? true;
-      const localShape = polygonToShape(clipBox);
+      const localShape = ctx.geometry.polygon.polygonToShape(clipBox);
       const isRegular = localShape.type !== 'path';
 
       const { point2d: geo } = ctx.geometry;

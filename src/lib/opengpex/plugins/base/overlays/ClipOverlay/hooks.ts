@@ -21,7 +21,6 @@ import { useState, useRef, useEffect, useLayoutEffect, type RefObject } from 're
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { Motion } from '@opengpex/editor/core/motion';
 import { asLocalShape, LocalPolygon } from '@opengpex/editor/core/types';
-import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import {
   ClipOptionsAPI,
@@ -36,7 +35,7 @@ import { CLIP_ELLIPSE_AA_OFF_CURSOR } from '@opengpex/editor/icons';
  */
 export function useClipOverlayCommands() {
   const { state, activeFrame } = useEditorState();
-  const { actions } = useEditorServices();
+  const { actions, geometry } = useEditorServices();
   const resetBox = () => actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
 
   const boxRef = useRef<HTMLDivElement>(null);
@@ -61,7 +60,7 @@ export function useClipOverlayCommands() {
   };
 
   const imageClipBox = getRegularClipShape({ clipBoxes });
-  const clipShape = isReCanvas ? canvasClipBox : (imageClipBox ? polygonToShape(imageClipBox) : asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
+  const clipShape = isReCanvas ? canvasClipBox : (imageClipBox ? geometry.polygon.polygonToShape(imageClipBox) : asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
   const clipBox = clipShape.rect;
   const clipType = clipShape.type;
 

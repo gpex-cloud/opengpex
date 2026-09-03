@@ -21,7 +21,6 @@
 
 import { EditorCommand, EditorContextValue, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
-import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 
 import * as P from './protocols';
 
@@ -73,7 +72,7 @@ export const COLOR_OPTIONS_COMMANDS = {
           // The resulting shape's rect is in frame-local space (absolute coords),
           // but the layer is positioned at (cx, cy) relative to canvas center,
           // so we must offset the shape rect to layer-local space (origin at 0,0).
-          const frameShape = polygonToShape(box);
+          const frameShape = ctx.geometry.polygon.polygonToShape(box);
           if (frameShape.type === 'rect') {
             visibleShape = {
               ...frameShape,

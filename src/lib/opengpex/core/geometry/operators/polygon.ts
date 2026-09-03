@@ -22,12 +22,14 @@ import {
   Layer, Frame,
   LocalPoint, WorldPoint,
   LocalRect, LocalPolygon, WorldPolygon,
+  LocalShape, WorldShape,
   asLocalPoint, asWorldPoint,
   asLocalRect, asWorldRect,
   asLocalPolygon, asWorldPolygon,
 } from '@opengpex/editor/core/types';
 import { getLayerWorldMatrix } from './transform';
-import { computePolygonBounds } from './point2d';
+import { computePolygonBounds, point2dToLocalShape, ringsToPathData } from './point2d';
+import { bresenhamSteps } from '../bresenham';
 
 /**
  * Detects whether a source/target is a Layer (image/text/vector/color) vs a Frame.
@@ -322,6 +324,68 @@ export function polygonToSvgPathD(poly: LocalPolygon): string {
 }
 
 /**
+ * polygonToShape: Convert a Polygon into an equivalent Shape descriptor.
+ * This bridges the polygon type system into the vectorMask / clip pipeline.
+ *
+ * (Moved here from `helpers/path2d.ts` — it is a pure Polygon → Shape transform
+ * with no DOM/Canvas dependency, so it belongs in the geometry engine alongside
+ * `polygonToSvgPathD`.)
+ *
+ * Unlike `polygonToSvgPathD` (which outputs bounds-relative coordinates for SVG
+ * overlay use), this function generates ABSOLUTE coordinates suitable for direct
+ * Path2D consumption via `shapeToPath2D` → `new Path2D(pathData)`.
+ *
+ * Shape recognition (P5 — selection_layer_unification_spec §3.2):
+ *   - 4-point axis-aligned ring → `type:'rect'` (preserves rendering precision)
+ *   - 64-point ellipse approximation ring → `type:'circle'` (preserves rendering precision)
+ *   - All other polygons → `type:'path'` with smooth M/L/Z pathData
+ *
+ * AA routing: pathData is ALWAYS written as smooth M/L/Z. The `antiAliased` flag is
+ * preserved on the output shape so that `shapeToPath2D` can apply Bresenham stair-stepping
+ * at render time (P6). This ensures `polygonToShape` is a pure serialization step with
+ * no rendering-time decisions baked in.
+ *
+ * Overloaded: LocalPolygon → LocalShape, WorldPolygon → WorldShape.
+ */
+export function polygonToShape(poly: LocalPolygon): LocalShape;
+export function polygonToShape(poly: WorldPolygon): WorldShape;
+export function polygonToShape(poly: LocalPolygon | WorldPolygon): LocalShape | WorldShape {
+  const antiAliased = poly.antiAliased !== false;
+
+  // ── P5: Shape recognition ──────────────────────────────────────────────────
+  // Only attempt recognition for single-ring polygons (multi-ring = complex shape).
+  // `point2dToLocalShape` is typed for LocalPolygon rings (LocalPoint[][]) but the
+  // underlying algorithm only uses x/y coordinates, so casting is safe here.
+  if (poly.rings.length === 1) {
+    const recognized = point2dToLocalShape(
+      poly.rings as unknown as { x: number; y: number }[][],
+      antiAliased
+    );
+    if (recognized) {
+      // Preserve brand from the source polygon.
+      return { ...recognized, __brand: poly.__brand } as LocalShape | WorldShape;
+    }
+  }
+
+  // ── Irregular polygon: serialize to smooth M/L/Z pathData ─────────────────
+  // pathData is ALWAYS smooth (no pre-baked stair-stepping). AA routing happens
+  // at render time in `shapeToPath2D` (P6). Reuses the canonical `ringsToPathData`
+  // serializer (drops degenerate <3-point rings).
+  const pathD = poly.rings.length
+    ? ringsToPathData(poly.rings as unknown as Point2D[][])
+    : '';
+
+  return {
+    type: 'path' as const,
+    rect: poly.rect,
+    hardEdge: false,
+    antiAliased,
+    pathData: pathD,
+    __brand: poly.__brand,
+  } as LocalShape | WorldShape;
+}
+
+/**
  * polygonToStairedPathD: Bresenham stair-stepped path for No-AA polygons.
  *
  * Converts every segment between consecutive integer-coordinate vertices into
@@ -377,41 +441,6 @@ function polygonToStairedPathD(poly: LocalPolygon): string {
   }
 
   return parts.join(' ');
-}
-
-/**
- * Bresenham integer line: emits H/V steps from (x0,y0) to (x1,y1).
- * Does NOT emit the starting point (assumes cursor is already there).
- * Uses the classic octant-agnostic Bresenham with H-priority steps
- * (horizontal steps are emitted first when both axes advance).
- */
-function bresenhamSteps(
-  x0: number, y0: number,
-  x1: number, y1: number,
-  segs: string[]
-): void {
-  const dx = Math.abs(x1 - x0);
-  const dy = Math.abs(y1 - y0);
-  const sx = x0 < x1 ? 1 : -1;
-  const sy = y0 < y1 ? 1 : -1;
-  let err = dx - dy;
-
-  let cx = x0;
-  let cy = y0;
-
-  while (cx !== x1 || cy !== y1) {
-    const e2 = 2 * err;
-    if (e2 > -dy) {
-      err -= dy;
-      cx += sx;
-      segs.push(`H ${cx}`);
-    }
-    if (e2 < dx) {
-      err += dx;
-      cy += sy;
-      segs.push(`V ${cy}`);
-    }
-  }
 }
 
 // ─────────────────────────── Ellipse Path Polygon ──────────────────────────────

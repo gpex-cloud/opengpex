@@ -42,7 +42,7 @@ export function getRegularClipShape(frame: { latestClipTool?: string; clipBoxes:
  *
  * All tool types (rect, ellipse, lasso, wand) now store a `LocalPolygon`.
  * Consumers that need a `LocalShape` for the rendering pipeline should call
- * `polygonToShape(box)` from `@opengpex/editor/core/helpers/path2d`.
+ * `polygonToShape(box)` from `@opengpex/editor/core/geometry/operators/polygon`.
  *
  * Returns `null` when no valid selection exists (missing slot).
  *

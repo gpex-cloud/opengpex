@@ -28,7 +28,8 @@
  * Time complexity: O((n + k) log n) where n = total vertices, k = intersections.
  *
  * Public API:
- *   intersectPathWithPath(pathDataA, pathDataB) → { pathData, rect } | null
+ *   intersectPathWithPath(pathDataA, pathDataB)  → { pathData, rect } | null
+ *   differencePathWithPath(pathDataA, pathDataB) → { pathData, rect } | null
  */
 
 import type { Rect } from '@opengpex/editor/core/types';
@@ -165,6 +166,48 @@ export function intersectPathWithPath(
   }
 
   if (!result || result.length === 0) return null;
+
+  return multiPolygonToPathData(result);
+}
+
+/**
+ * Compute A − B (subtract path B from path A) using polygon-clipping.difference.
+ *
+ * Used to punch hole masks (inverted vectorMasks) out of a layer's effective
+ * visible shape. The result may be a multi-ring polygon with holes; the shared
+ * `multiPolygonToPathData` serializer already emits multi-ring pathData that the
+ * tile renderer clips with even-odd fill.
+ *
+ * @param pathDataA - SVG-like M/L/Z path string (the minuend, e.g. current effective shape)
+ * @param pathDataB - SVG-like M/L/Z path string (the subtrahend, e.g. hole mask shape)
+ * @returns New pathData representing A − B and its tight bounding rect, or null if
+ *          the result is empty (A fully covered by B).
+ */
+export function differencePathWithPath(
+  pathDataA: string,
+  pathDataB: string
+): { pathData: string; rect: Rect } | null {
+  const ringsA = parsePathDataToRings(pathDataA);
+  const ringsB = parsePathDataToRings(pathDataB);
+
+  if (!ringsA.length) return null;
+  if (!ringsB.length) {
+    // Nothing to subtract — return A unchanged (normalized through the same serializer)
+    return multiPolygonToPathData(ringsToMultiPolygon(ringsA));
+  }
+
+  const multiPolyA = ringsToMultiPolygon(ringsA);
+  const multiPolyB = ringsToMultiPolygon(ringsB);
+
+  let result: MultiPolygon;
+  try {
+    result = polygonClipping.difference(multiPolyA, multiPolyB) as MultiPolygon;
+  } catch {
+    // polygon-clipping can throw on degenerate inputs (e.g. collinear edges)
+    return null;
+  }
+
+  if (!result || result.length === 0) return null; // A fully covered by B → empty
 
   return multiPolygonToPathData(result);
 }

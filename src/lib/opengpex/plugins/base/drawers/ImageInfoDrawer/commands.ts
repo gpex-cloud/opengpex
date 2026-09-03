@@ -23,7 +23,7 @@ import { mimeToFormat } from '@opengpex/editor/core/files';
 import { shouldEmbedIcc } from '@opengpex/editor/core/color/ColorPipeline';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
-import { calcFinalDims, clipBoxToExportShape } from './utils';
+import { calcFinalDims } from './utils';
 
 import * as P from './protocols';
 
@@ -41,7 +41,7 @@ export const IMAGE_INFO_COMMANDS = {
       name: 'Download Creation',
       category: 'File',
       execute: async (ctx: EditorContextValue) => {
-         const { activeFrame, pixels, files } = ctx;
+         const { activeFrame, pixels, files, geometry } = ctx;
          const { selfConfig } = ctx.scoped || {};
          if (!activeFrame) return;
 
@@ -65,7 +65,7 @@ export const IMAGE_INFO_COMMANDS = {
          }
 
          // ═══ 2. Compute export dimensions ═══════════════════════════════════
-         const clipShape: LocalShape | undefined = isClipMode && box ? clipBoxToExportShape(box) : undefined;
+         const clipShape: LocalShape | undefined = isClipMode && box ? geometry.polygon.polygonToShape(box) : undefined;
          const baseW = clipShape ? clipShape.rect.w : activeFrame.canvas.w;
          const baseH = clipShape ? clipShape.rect.h : activeFrame.canvas.h;
          const { w: exportW, h: exportH } = calcFinalDims(baseW, baseH, config);

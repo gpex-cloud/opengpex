@@ -19,22 +19,7 @@
 
 'use client';
 
-import type { LocalShape, LocalPolygon } from '@opengpex/editor/core/types';
-import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import * as P from './protocols';
-
-/**
- * clipBoxToExportShape — converts a `LocalPolygon` (from `getClipBox`)
- * into a `LocalShape` suitable for `pixels.render.shapeToBlob`.
- *
- * Delegates to `polygonToShape` which handles shape recognition (rect/circle/path)
- * and AA routing (smooth vs Bresenham stair-stepped at render time).
- */
-export function clipBoxToExportShape(
-  box: LocalPolygon,
-): LocalShape {
-  return polygonToShape(box);
-}
 
 /**
  * Calculates the final physical dimensions for export or canvas resizing

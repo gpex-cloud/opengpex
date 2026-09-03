@@ -25,7 +25,6 @@ import {
   asLocalRect,
 } from '@opengpex/editor/core/types';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
-import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
 import { createTransformHandler, TransformIntent } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import {
   ClipOptionsAPI,
@@ -89,7 +88,7 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       if (target.closest('button, a, input, [data-role="ui"], [contenteditable]')) return null;
 
       // ─── Hit-test: is click inside the existing selection? ─────────────
-      const boxShape = polygonToShape(box);
+      const boxShape = e.geometry.polygon.polygonToShape(box);
       if (boxShape.type !== 'path') {
         // Regular (rect/ellipse): require clicking the move handle
         const handleElement = target.closest('[data-handle]') as HTMLElement;

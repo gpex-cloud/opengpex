@@ -21,7 +21,7 @@
 
 import { EditorContextValue, EditorCommand, ClipboardLayerMetadata, LocalShape, asLocalRect } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
-import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
+import { polygonToShape } from '@opengpex/editor/core/geometry/operators/polygon';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 // Removed direct dependency on storage singleton, using ctx injection instead

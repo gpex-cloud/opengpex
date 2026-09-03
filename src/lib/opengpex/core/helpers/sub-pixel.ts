@@ -18,7 +18,7 @@
  */
 
 import { LocalRect, Shape, Point2D } from '@opengpex/editor/core/types';
-import { parsePathDataToRings } from '@opengpex/editor/core/geometry/operators/point2d';
+import { parsePathDataToRings, ringsToPathData } from '@opengpex/editor/core/geometry/operators/point2d';
 import { SEAM_SHRINK_HOLE, SEAM_EXPAND_FRAGMENT } from './config';
 
 /**
@@ -224,24 +224,6 @@ export function insetRing(ring: Point2D[], offset: number, layerBounds?: { w: nu
   }
 
   return result;
-}
-
-/**
- * ringsToPathData: Serialize Point2D rings back to SVG M/L/Z pathData string.
- */
-function ringsToPathData(rings: Point2D[][]): string {
-  const parts: string[] = [];
-  for (const ring of rings) {
-    if (ring.length < 2) continue;
-    const segs: string[] = [];
-    for (let i = 0; i < ring.length; i++) {
-      const p = ring[i];
-      segs.push(`${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`);
-    }
-    segs.push('Z');
-    parts.push(segs.join(' '));
-  }
-  return parts.join(' ');
 }
 
 /**

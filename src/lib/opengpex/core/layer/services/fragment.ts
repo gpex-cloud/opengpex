@@ -22,7 +22,7 @@ import {
   Frame, Layer, LocalShape, LocalPolygon,
   asLocalShape, isPolygon
 } from '@opengpex/editor/core/types';
-import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
+import { polygonToShape } from '@opengpex/editor/core/geometry/operators/polygon';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { isBoundingRing, point2dToLocalShape } from '@opengpex/editor/core/geometry/operators/point2d';
 import { LayerFactory } from '../factory';
@@ -191,8 +191,24 @@ export function createFragmentOperations(
     if (options?.mode === 'cut') {
       const maskId = `mask-hole-${newLayer.id}`;
 
+      // §5.3: the hole punched into the source layer MUST be the *real* geometry
+      // the fragment actually took — i.e. `newLayer.visibleShape` (= true
+      // intersection, mask-aware), NOT the raw selection `localShape`.
+      //
+      // When the logical path succeeded (`intersection` is non-null), the fragment's
+      // visibleShape is the true intersection of the selection with the source's
+      // effective visible shape (selection ∩ (A − prior holes)). Using this as the
+      // hole guarantees the hole and the fragment are strictly complementary, so
+      // deleting the fragment (heal) precisely reverses this cut — no punch-through /
+      // no leftover void. When the logical path degraded to a vectorMask fallback
+      // (`intersection` is null), there is no geometric intersection to use, so the
+      // hole falls back to the raw selection `localShape` (legacy behavior).
+      const holeShape: LocalShape = intersection
+        ? { ...newLayer.visibleShape! }
+        : localShape;
+
       baseResult.holeMask = {
-        shape: localShape,
+        shape: holeShape,
         inverted: !invertedRegular,
         feather,
         maskId,

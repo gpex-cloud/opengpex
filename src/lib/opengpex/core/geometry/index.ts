@@ -41,7 +41,7 @@ import {
   computePolygonBounds, localToWorldPolygon, worldToLocalPolygon,
   frameLocalToLayerLocal as polyFrameToLayer, layerLocalToFrameLocal as polyLayerToFrame, polygonToSvgPathD,
   isPointInPolygon, computeRingArea, simplifyOpen, simplifyRing, translatePolygon,
-  ellipsePathToLocalPolygon
+  ellipsePathToLocalPolygon, polygonToShape
 } from './operators/polygon';
 import {
   shapeToPoint2D, point2dToLocalShape, point2dToLocalPolygon,
@@ -169,6 +169,7 @@ export function createGeometryService(): GeometryService {
       regularShapeToLocalPolygon: (tool: 'rect' | 'ellipse', rect: LocalRect, antiAliased?: boolean) =>
         tool === 'ellipse' ? ellipseToLocalPolygon(rect, antiAliased) : rectToLocalPolygon(rect, antiAliased),
       ellipsePathToLocalPolygon: (rect: LocalRect, antiAliased?: boolean) => ellipsePathToLocalPolygon(rect, antiAliased),
+      polygonToShape: ((poly: LocalPolygon | WorldPolygon) => polygonToShape(poly as LocalPolygon)) as GeometryService['polygon']['polygonToShape'],
     },
     point2d: {
       shapeToPoint2D: (shape: LocalShape) => shapeToPoint2D(shape),

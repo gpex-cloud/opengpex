@@ -4,6 +4,12 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.1.2
+
+- Cut & Copy: improved how pieces are cut from areas that already had pieces removed — no more overlaps, duplicated content, or gaps when adding or deleting pieces
+
+---
+
 ## v1.1.1
 
 - Eraser: fixed erasing on a cut-out (lasso) fragment wiping out the whole fragment instead of just the brushed area

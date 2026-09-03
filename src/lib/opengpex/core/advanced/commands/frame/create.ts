@@ -38,7 +38,7 @@
 'use client';
 
 import { EditorCommand, EditorContextValue, Frame, LocalShape } from '@opengpex/editor/core/types';
-import { polygonToShape } from '@opengpex/editor/core/helpers/path2d';
+import { polygonToShape } from '@opengpex/editor/core/geometry/operators/polygon';
 
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import * as P from '@opengpex/editor/core/advanced/protocols';
