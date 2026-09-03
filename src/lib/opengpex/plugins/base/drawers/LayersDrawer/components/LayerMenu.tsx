@@ -30,6 +30,8 @@ import {
   Copy,
   Undo2,
   Layers,
+  FolderInput,
+  FolderOutput,
 } from "lucide-react";
 import { useEditorServices, usePluginCommands } from "@opengpex/editor/core/context";
 import { ADV_LAYER_MERGE_BACK } from "@opengpex/editor/core/advanced/protocols";
@@ -54,6 +56,12 @@ interface LayerMenuProps {
   canMergeBack?: boolean;
   /** Whether this layer has fragments that can be merged back (has hole masks with assocLayerId) */
   canMergeBackAll?: boolean;
+  /** Available group layers this layer can be moved into (empty if none or already in a group) */
+  availableGroups?: Array<{ id: string; name: string }>;
+  /** If this layer is in a group, its current groupId */
+  currentGroupId?: string;
+  /** Name of the group this layer currently belongs to */
+  currentGroupName?: string;
 }
 
 export const LayerMenu = React.memo(
@@ -71,9 +79,12 @@ export const LayerMenu = React.memo(
     setIsMasksExpanded,
     canMergeBack,
     canMergeBackAll,
+    availableGroups,
+    currentGroupId,
+    currentGroupName,
   }: LayerMenuProps) => {
     const { actions } = useEditorServices();
-    const { removeCmd, duplicateLayerCmd } = usePluginCommands<LayersDrawerCommandsMap>();
+    const { removeCmd, duplicateLayerCmd, moveToGroupCmd, moveOutOfGroupCmd } = usePluginCommands<LayersDrawerCommandsMap>();
 
     const options: ActionOption[] = [];
 
@@ -121,6 +132,29 @@ export const LayerMenu = React.memo(
       });
     }
 
+    // ── Group move options ──
+    // Move out of group — available when layer is in a group
+    if (currentGroupId) {
+      options.push({
+        label: `Move Out '${currentGroupName || "Group"}'`,
+        value: "move-out-of-group",
+        icon: <FolderOutput size={12} />,
+      });
+    }
+
+    // Move to group — sub-menu with available groups
+    if (availableGroups && availableGroups.length > 0) {
+      options.push({
+        label: "Move In",
+        icon: <FolderInput size={12} />,
+        children: availableGroups.map(g => ({
+          label: g.name,
+          value: `move-to-group:${g.id}`,
+          icon: <FolderInput size={12} />,
+        })),
+      });
+    }
+
     if (canDelete) {
       options.push({
         label: "Delete Layer",
@@ -147,6 +181,11 @@ export const LayerMenu = React.memo(
         actions.executeCommand(ADV_LAYER_MERGE_BACK, { layerId });
       } else if (val === "delete") {
         removeCmd?.execute({ frameId: activeFrameId, layerId });
+      } else if (val === "move-out-of-group") {
+        moveOutOfGroupCmd?.execute({ layerIds: [layerId] });
+      } else if (val.startsWith("move-to-group:")) {
+        const groupId = val.replace("move-to-group:", "");
+        moveToGroupCmd?.execute({ layerIds: [layerId], groupId });
       }
     };
 

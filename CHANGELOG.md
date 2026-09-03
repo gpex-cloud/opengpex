@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.1.0
+
+- Layers: added layer groups — organize your layers into folders you can collapse, expand, and rearrange
+- Layers: fixed duplicated layers sometimes carrying over masks from the original
+
+---
+
 ## v1.0.0
 
 First stable release.

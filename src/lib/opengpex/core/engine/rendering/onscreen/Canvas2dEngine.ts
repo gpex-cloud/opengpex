@@ -201,6 +201,9 @@ export class Canvas2dEngine implements IRenderer {
 
     for (const cmd of this.commandQueue) {
       if (cmd.type === 'layer') {
+        // Group layers have no pixel data — defensive skip (normally filtered upstream by StageComposer)
+        if (cmd.layer.type === 'group') continue;
+
         // [Font Loading] Check font readiness for text layers
         if (cmd.layer.type === 'text' && cmd.layer.textData && this.fontService) {
           const family = cmd.layer.textData.fontFamily;

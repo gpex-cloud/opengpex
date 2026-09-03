@@ -190,7 +190,7 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
       async compositeFrame(frame: Frame, roi?: LocalShape, options?: { precision?: 8 | 16; dpr?: number }) {
         const layers = frame.layers.order
           .map(id => frame.layers.byId[id])
-          .filter(l => !l.hostId && l.visible !== false);
+          .filter(l => !l.hostId && l.visible !== false && l.type !== 'group');
 
         const worldRoi: WorldShape = roi
           ? geometry.shape.localToWorldShape(roi, frame)

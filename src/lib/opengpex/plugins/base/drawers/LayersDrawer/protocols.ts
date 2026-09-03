@@ -34,6 +34,13 @@ export const CMD_SET_BLEND_MODE = 'cmd.set_blend_mode';
 export const CMD_SET_LAYER_OPACITY = 'cmd.set_layer_opacity';
 export const CMD_SET_LAYER_FILL = 'cmd.set_layer_fill';
 
+// Layer Group commands (Phase 1)
+export const CMD_CREATE_GROUP = 'cmd.create_group';
+export const CMD_UNGROUP_LAYERS = 'cmd.ungroup_layers';
+export const CMD_TOGGLE_GROUP_COLLAPSE = 'cmd.toggle_group_collapse';
+export const CMD_MOVE_TO_GROUP = 'cmd.move_to_group';
+export const CMD_MOVE_OUT_OF_GROUP = 'cmd.move_out_of_group';
+
 /**
  * Numeric shortcut (1-0) to quickly set active layer opacity in 10% increments.
  * 1=10%, 2=20%, ..., 9=90%, 0=100%. Matches Photoshop's number-key behaviour.

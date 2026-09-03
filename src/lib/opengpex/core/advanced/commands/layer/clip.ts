@@ -217,24 +217,14 @@ export const LayerClipCommands = {
             activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), `${meta!.layer!.name} Copy`
           );
 
+          const targetGroupId = activeLayer?.type === 'group' ? activeLayer.id : activeLayer?.groupId;
           const newLayer = ctx.layers.getNewLayer({
             ...layerWithoutId,
+            groupId: targetGroupId,
             name: smartName
           });
 
-          // Calculate insertion index (above current layer's family)
-          let insertIndex: number | undefined = undefined;
-          if (activeLayer) {
-            const hostId = activeLayer.hostId || activeLayer.id;
-            const familyIndices = activeFrame.layers.order
-              .map((id, i) => {
-                const l = activeFrame.layers.byId[id];
-                return (l.hostId === hostId || l.id === hostId ? i : -1);
-              })
-              .filter(i => i !== -1);
-            insertIndex = Math.max(...familyIndices) + 1;
-          }
-
+          const insertIndex = ctx.layers.getInsertIndexAbove(activeFrame, activeLayer?.id);
           ctx.layers.addLayer(activeFrame.id, newLayer, insertIndex);
 
         } else if (blob) {
@@ -256,20 +246,12 @@ export const LayerClipCommands = {
           } else {
             // choice === 'layer' → physical layer via createLayerFromBlob
             const newLayer = await ctx.layers.createLayerFromBlob(blob, activeFrame);
-
-            // Calculate insertion index
-            let insertIndex: number | undefined = undefined;
-            if (activeLayer) {
-              const hostId = activeLayer.hostId || activeLayer.id;
-              const familyIndices = activeFrame.layers.order
-                .map((id, i) => {
-                  const l = activeFrame.layers.byId[id];
-                  return (l.hostId === hostId || l.id === hostId ? i : -1);
-                })
-                .filter(i => i !== -1);
-              insertIndex = Math.max(...familyIndices) + 1;
+            const targetGroupId = activeLayer?.type === 'group' ? activeLayer.id : activeLayer?.groupId;
+            if (targetGroupId) {
+              newLayer.groupId = targetGroupId;
             }
 
+            const insertIndex = ctx.layers.getInsertIndexAbove(activeFrame, activeLayer?.id);
             ctx.layers.addLayer(activeFrame.id, newLayer, insertIndex);
           }
         }

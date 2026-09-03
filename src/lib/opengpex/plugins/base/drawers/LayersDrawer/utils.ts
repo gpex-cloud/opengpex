@@ -192,6 +192,7 @@ export function computeUnionStatus(selection: string[], frame: Frame): UnionStat
 /**
  * Re-constructs the full flat layer list based on a reordered host list.
  * Maintains child layer positions relative to their parents.
+ * Group members (layers with groupId) are kept adjacent after their group head.
  */
 export function calcFullLayerStack(
     hostLayers: Layer[],

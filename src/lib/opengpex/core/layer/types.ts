@@ -63,6 +63,8 @@ export interface LayerService {
   getBlank: () => Partial<Layer>;
   getNewVectorMask: (shape: LocalShape, options?: { maskId?: string; assocLayerId?: string; inverted?: boolean; feather?: number }) => VectorMask;
   getNewBitmapMask: (src: string, assetId: string, bounds: LocalRect) => BitmapMask;
+  cleanInheritedMasks: <T extends VectorMask | BitmapMask>(masks?: T[]) => T[];
+  getInsertIndexAbove: (frame: Frame, targetLayerId?: string | null) => number | undefined;
 }
 
 /**

@@ -32,6 +32,8 @@ export interface ActionOption {
   divider?: boolean;
   /** Show a checkmark on the right side of the option. */
   checked?: boolean;
+  /** Sub-menu options — renders a nested fly-out on hover. */
+  children?: ActionOption[];
 }
 
 interface ActionDropdownProps {
@@ -162,6 +164,16 @@ export default function ActionDropdown({
                       />
                     );
                   }
+                  // ── Sub-menu option ──
+                  if (opt.children && opt.children.length > 0) {
+                    return (
+                      <SubMenuOption
+                        key={opt.value ?? `sub-${idx}`}
+                        option={opt}
+                        onSelect={(val) => { onSelect(val); setIsOpen(false); }}
+                      />
+                    );
+                  }
                   return (
                     <button
                       key={opt.value}
@@ -209,3 +221,81 @@ export default function ActionDropdown({
     </div>
   );
 }
+
+// ─── SubMenuOption (internal) ─────────────────────────────────────────────────
+
+function SubMenuOption({ option, onSelect }: { option: ActionOption; onSelect: (val: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleEnter = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setOpen(true);
+  };
+  const handleLeave = () => {
+    timerRef.current = setTimeout(() => setOpen(false), 120);
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative"
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
+    >
+      <button
+        className="flex items-center justify-between gap-3 w-full px-2 py-1.5 rounded-lg
+          text-[9px] font-black uppercase tracking-tight text-left
+          transition-all cursor-pointer
+          text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-100"
+      >
+        <div className="flex items-center gap-2">
+          {option.icon && <span className="opacity-70 flex items-center justify-center scale-90">{option.icon}</span>}
+          <span>{option.label}</span>
+        </div>
+        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="opacity-40 shrink-0">
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, x: -4 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -4 }}
+            transition={{ duration: 0.1 }}
+            className="absolute left-full top-0 ml-1 min-w-[120px]
+              bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl
+              border border-zinc-200 dark:border-white/10
+              rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] p-1
+              flex flex-col gap-0.5 z-[10001]"
+          >
+            {option.children!.map(child => (
+              <button
+                key={child.value}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (child.value) onSelect(child.value);
+                }}
+                className={`
+                  flex items-center gap-2 w-full px-2 py-1.5 rounded-lg
+                  text-[9px] font-black uppercase tracking-tight text-left
+                  transition-all active:scale-[0.98] cursor-pointer
+                  ${child.variant === 'danger'
+                    ? 'text-rose-500 hover:bg-rose-500/10'
+                    : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-100'
+                  }
+                `}
+              >
+                {child.icon && <span className="opacity-70 flex items-center justify-center scale-90">{child.icon}</span>}
+                <span className="truncate">{child.label}</span>
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+

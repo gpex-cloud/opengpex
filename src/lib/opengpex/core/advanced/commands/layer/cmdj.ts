@@ -56,15 +56,28 @@ export const LayerCmdJCommands = {
             return;
           }
           result.newLayer.locked = false;
-          ctx.layers.addLayer(activeFrame.id, result.newLayer);
+          const insertAt = ctx.layers.getInsertIndexAbove(activeFrame, latestLayer.id);
+          ctx.layers.addLayer(activeFrame.id, result.newLayer, insertAt);
         } else {
           // No selection: duplicate entire layer
           const newName = ctx.layers.getNewLayerName(
             activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), `${latestLayer.name} Copy`
           );
           const { id: _, hostId: _h, role: _r, locked: _l, interactive: _i, ...layerData } = latestLayer;
-          const newLayer = ctx.layers.getNewLayer({ ...layerData, name: newName });
-          ctx.layers.addLayer(activeFrame.id, newLayer);
+          let metadata = layerData.metadata;
+          if (metadata?.assocMaskId) {
+            const { assocMaskId: _, ...restMeta } = metadata;
+            metadata = restMeta;
+          }
+          const newLayer = ctx.layers.getNewLayer({
+            ...layerData,
+            metadata,
+            name: newName,
+            vectorMasks: ctx.layers.cleanInheritedMasks(layerData.vectorMasks),
+            bitmapMasks: ctx.layers.cleanInheritedMasks(layerData.bitmapMasks),
+          });
+          const insertAt = ctx.layers.getInsertIndexAbove(activeFrame, latestLayer.id);
+          ctx.layers.addLayer(activeFrame.id, newLayer, insertAt);
         }
       } catch (err) {
         console.error('[ClipCommands] Layer via Copy failed:', err);
@@ -110,9 +123,10 @@ export const LayerCmdJCommands = {
           });
         }
 
-        // Add the fragment layer
+        // Add the fragment layer directly above the source layer
         result.newLayer.locked = false; // New layers must never inherit lock state
-        ctx.layers.addLayer(activeFrame.id, result.newLayer);
+        const insertAt = ctx.layers.getInsertIndexAbove(activeFrame, latestLayer.id);
+        ctx.layers.addLayer(activeFrame.id, result.newLayer, insertAt);
       } catch (err) {
         console.error('[ClipCommands] Layer via Cut failed:', err);
       }

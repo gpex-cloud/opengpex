@@ -183,7 +183,7 @@ export function localToWorldShape(shape: Shape, source: Layer | Frame): WorldSha
   let worldRect;
   let worldPathData: string | undefined = (shape as { pathData?: string }).pathData;
 
-  if ('type' in source && (source.type === 'image' || source.type === 'text' || source.type === 'vector' || source.type === 'color')) {
+  if ('type' in source && (source.type === 'image' || source.type === 'text' || source.type === 'vector' || source.type === 'color' || source.type === 'paint')) {
     const wm = getLayerWorldMatrix(source as Layer);
     const x = (shape.rect.x * wm.a) + (shape.rect.y * wm.c) + wm.tx;
     const y = (shape.rect.x * wm.b) + (shape.rect.y * wm.d) + wm.ty;
@@ -224,7 +224,7 @@ export function worldToLocalShape(shape: WorldShape, target: Layer | Frame): Loc
   let localRect;
   let localPathData: string | undefined = (shape as { pathData?: string }).pathData;
 
-  if ('type' in target && (target.type === 'image' || target.type === 'text' || target.type === 'vector' || target.type === 'color')) {
+  if ('type' in target && (target.type === 'image' || target.type === 'text' || target.type === 'vector' || target.type === 'color' || target.type === 'paint')) {
     const wm = getLayerWorldMatrix(target as Layer);
     localRect = getLayerLocalAABB(target as Layer, shape.rect, wm);
 

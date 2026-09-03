@@ -118,6 +118,11 @@ export const LayerUnionCommands = {
 
       // ═══ Phase 4: Construct new merged layer ═══
       try {
+        // Group membership: if all selected layers belong to the same group, retain it
+        const commonGroupId = targetLayers.every(l => l.groupId && l.groupId === baseLayer.groupId)
+          ? baseLayer.groupId
+          : undefined;
+
         const newLayer = LayerFactory.getNewLayer({
           src: baseLayer.src,
           assetId: baseLayer.assetId,
@@ -127,6 +132,7 @@ export const LayerUnionCommands = {
           adjustments: baseLayer.adjustments ? { ...baseLayer.adjustments } : undefined,
           opacity: baseLayer.opacity,
           blendMode: baseLayer.blendMode,
+          groupId: commonGroupId,
           vectorMasks: baseLayer.vectorMasks?.filter(m => !m.assocLayerId) || [],
           bitmapMasks: baseLayer.bitmapMasks || [],
           name: baseLayer.name,
@@ -235,10 +241,19 @@ export const LayerUnionCommands = {
         }
 
         // ═══ Phase 6: Commit — remove old layers, add merged layer ═══
+        // Insert directly at the position of the highest target layer to preserve z-order and group positioning
+        const targetIndices = targetLayers
+          .map(l => activeFrame.layers.order.indexOf(l.id))
+          .filter(i => i >= 0);
+        const topTargetId = targetIndices.length > 0
+          ? activeFrame.layers.order[Math.max(...targetIndices)]
+          : undefined;
+        const insertAt = LayerFactory.getInsertIndexAbove(activeFrame, topTargetId);
+
         // IMPORTANT: Remove fragment layers FIRST. The removeLayers cleanup hook
         // auto-removes their hole masks from the source. THEN we write the definitive
         // source vectorMasks state (our write is LAST and overwrites the hook's work).
-        layers.addLayer(activeFrame.id, newLayer);
+        layers.addLayer(activeFrame.id, newLayer, insertAt);
 
         // Remove original fragment layers (cleanup hooks remove their old hole masks)
         for (const layer of targetLayers) {

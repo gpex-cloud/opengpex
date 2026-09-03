@@ -143,7 +143,8 @@ export function createFragmentOperations(
       const { id: _oldId, ...layerData } = layer;
       newLayer = LayerFactory.getNewLayer({
         ...layerData,
-        vectorMasks: layerData.vectorMasks?.filter(m => !m.reserved) || [],
+        vectorMasks: LayerFactory.cleanInheritedMasks(layerData.vectorMasks),
+        bitmapMasks: LayerFactory.cleanInheritedMasks(layerData.bitmapMasks),
         name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id])),
         hostId: undefined
       });
@@ -168,11 +169,15 @@ export function createFragmentOperations(
         ...layerData,
         name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id])),
         vectorMasks: [],
+        bitmapMasks: LayerFactory.cleanInheritedMasks(layerData.bitmapMasks),
       });
 
       // invertedRegular → inverted=true → "show everything except shape" (pixel-perfect)
       // normal → inverted=false → "show only the shape area"
-      newLayer.vectorMasks = [LayerFactory.getNewVectorMask(localShape, { inverted: invertedRegular, feather })];
+      newLayer.vectorMasks = [
+        ...LayerFactory.cleanInheritedMasks(layerData.vectorMasks),
+        LayerFactory.getNewVectorMask(localShape, { inverted: invertedRegular, feather }),
+      ];
 
       if (frame.latestClipTool) {
         newLayer.metadata = { ...newLayer.metadata, clipTool: frame.latestClipTool };
@@ -249,7 +254,8 @@ export function createFragmentOperations(
       ...layerData,
       src: assetUrl,
       assetId: assetId,
-      vectorMasks: layerData.vectorMasks?.filter(m => !m.reserved) || [],
+      vectorMasks: [],
+      bitmapMasks: [],
       name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id])),
       hostId: undefined,
       visibleShape: asLocalShape({ x: 0, y: 0, w: trimW, h: trimH }),

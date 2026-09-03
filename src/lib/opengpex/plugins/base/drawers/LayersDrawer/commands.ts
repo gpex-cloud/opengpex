@@ -46,7 +46,19 @@ export const LAYERS_COMMANDS = {
         execute: (ctx: EditorContextValue, payload?: { frameId?: string; layerId?: string }) => {
             const frameId = payload?.frameId || ctx.activeFrame?.id;
             const layerId = payload?.layerId || ctx.activeLayer?.id;
-            if (frameId && layerId) ctx.layers.removeLayers(frameId, layerId);
+            if (!frameId || !layerId) return;
+
+            const frame = ctx.state.frames.byId[frameId];
+            if (!frame) return;
+
+            const layer = frame.layers.byId[layerId];
+            if (layer?.type === 'group') {
+                // Deleting a group → also delete all children that belong to this group
+                const childIds = frame.layers.order.filter(id => frame.layers.byId[id].groupId === layerId);
+                ctx.layers.removeLayers(frameId, [layerId, ...childIds]);
+            } else {
+                ctx.layers.removeLayers(frameId, layerId);
+            }
         }
     } as EditorCommand<{ frameId?: string; layerId?: string }, void>,
 
@@ -55,7 +67,21 @@ export const LAYERS_COMMANDS = {
         name: 'Toggle Layer Visibility',
         execute: (ctx: EditorContextValue, payload: { frameId?: string; layerId: string; visible: boolean }) => {
             const frameId = payload.frameId || ctx.activeFrame?.id;
-            if (frameId && payload.layerId) {
+            if (!frameId || !payload.layerId) return;
+
+            const frame = ctx.state.frames.byId[frameId];
+            const layer = frame?.layers.byId[payload.layerId];
+
+            // Group batch operation: toggling a group toggles all its children
+            if (layer?.type === 'group' && frame) {
+                const patches: Record<string, Partial<Layer>> = { [payload.layerId]: { visible: payload.visible } };
+                for (const id of frame.layers.order) {
+                    if (frame.layers.byId[id].groupId === payload.layerId) {
+                        patches[id] = { visible: payload.visible };
+                    }
+                }
+                ctx.actions.batchUpdateLayers(frameId, patches);
+            } else {
                 ctx.actions.updateLayer(frameId, payload.layerId, { visible: payload.visible });
             }
         }
@@ -66,7 +92,21 @@ export const LAYERS_COMMANDS = {
         name: 'Toggle Layer Lock',
         execute: (ctx: EditorContextValue, payload: { frameId?: string; layerId: string; locked: boolean }) => {
             const frameId = payload.frameId || ctx.activeFrame?.id;
-            if (frameId && payload.layerId) {
+            if (!frameId || !payload.layerId) return;
+
+            const frame = ctx.state.frames.byId[frameId];
+            const layer = frame?.layers.byId[payload.layerId];
+
+            // Group batch operation: toggling a group toggles all its children
+            if (layer?.type === 'group' && frame) {
+                const patches: Record<string, Partial<Layer>> = { [payload.layerId]: { locked: payload.locked } };
+                for (const id of frame.layers.order) {
+                    if (frame.layers.byId[id].groupId === payload.layerId) {
+                        patches[id] = { locked: payload.locked };
+                    }
+                }
+                ctx.actions.batchUpdateLayers(frameId, patches);
+            } else {
                 ctx.actions.updateLayer(frameId, payload.layerId, { locked: payload.locked });
             }
         }
@@ -145,9 +185,13 @@ export const LAYERS_COMMANDS = {
             const hostLayers = LayerFactory.getHostLayers(layersArray);
             const name = LayerFactory.getNewLayerName(hostLayers, 'Layer');
 
+            const activeLayer = activeFrame.activeLayerId ? activeFrame.layers.byId[activeFrame.activeLayerId] : undefined;
+            const targetGroupId = activeLayer?.type === 'group' ? activeLayer.id : activeLayer?.groupId;
+
             const newLayer = LayerFactory.getNewLayer({
                 name,
                 type: 'image',
+                groupId: targetGroupId,
                 bounding: activeFrame.canvas,
                 visibleShape: asLocalShape({ x: 0, y: 0, w: activeFrame.canvas.w, h: activeFrame.canvas.h }),
                 cx: 0,
@@ -155,9 +199,9 @@ export const LAYERS_COMMANDS = {
                 locked: false,
             });
 
-            // Insert above the currently active layer
-            const activeIdx = hostLayers.findIndex(l => l.id === activeFrame.activeLayerId);
-            ctx.layers.addLayer(activeFrame.id, newLayer, activeIdx >= 0 ? activeIdx + 1 : undefined);
+            // Insert above the currently active layer (or highest child if group)
+            const insertAt = LayerFactory.getInsertIndexAbove(activeFrame, activeFrame.activeLayerId);
+            ctx.layers.addLayer(activeFrame.id, newLayer, insertAt);
         }
     } as EditorCommand<void, void>,
 
@@ -194,12 +238,14 @@ export const LAYERS_COMMANDS = {
                 ...layerData,
                 metadata,
                 name: newName,
+                vectorMasks: LayerFactory.cleanInheritedMasks(layerData.vectorMasks),
+                bitmapMasks: LayerFactory.cleanInheritedMasks(layerData.bitmapMasks),
                 locked: false, // Duplicated layer is always unlocked
             });
 
-            // Insert above the original layer
-            const insertIdx = hostLayers.findIndex(l => l.id === targetId);
-            ctx.layers.addLayer(activeFrame.id, newLayer, insertIdx >= 0 ? insertIdx + 1 : undefined);
+            // Insert directly above the original layer
+            const insertAt = LayerFactory.getInsertIndexAbove(activeFrame, targetId);
+            ctx.layers.addLayer(activeFrame.id, newLayer, insertAt);
         }
     } as EditorCommand<{ layerId?: string } | undefined, void>,
 
@@ -326,5 +372,170 @@ export const LAYERS_COMMANDS = {
 
             ctx.actions.updateLayer(frameId, layerId, { opacity });
         }
-    } as EditorCommand<{ _shortcutKey?: string }, void>
+    } as EditorCommand<{ _shortcutKey?: string }, void>,
+
+    // ─── Layer Group Commands (Phase 1) ──────────────────────────────────────────
+
+    createGroup: {
+        id: P.CMD_CREATE_GROUP,
+        name: 'Create Group',
+        category: 'Layers',
+        undoable: true,
+        shortcuts: [{ key: 'g', meta: true }],
+        execute: (ctx: EditorContextValue, payload?: { layerIds?: string[] }) => {
+            const { activeFrame } = ctx;
+            if (!activeFrame) return;
+
+            const layersArray = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]);
+            const hostLayers = LayerFactory.getHostLayers(layersArray);
+
+            // Determine which layers to group
+            const selectedIds = payload?.layerIds;
+            const hasSelection = selectedIds && selectedIds.length > 0;
+
+            // Smart naming
+            const groupName = LayerFactory.getNewLayerName(hostLayers, 'Group');
+            const group = LayerFactory.getNewGroup({ name: groupName });
+
+            if (hasSelection) {
+                // Group selected layers: insert group right above the topmost selected layer
+                // Filter out any group layers from selection (groups can't be nested)
+                const validIds = selectedIds.filter(id => {
+                    const l = activeFrame.layers.byId[id];
+                    return l && l.type !== 'group' && !l.hostId;
+                });
+                if (validIds.length === 0) return;
+
+                // Assign groupId to selected layers
+                const patches: Record<string, Partial<Layer>> = {};
+                for (const id of validIds) {
+                    patches[id] = { groupId: group.id };
+                }
+                ctx.actions.batchUpdateLayers(activeFrame.id, patches);
+
+                // Find the topmost selected layer in the flat order, skip past its children
+                const orderArr = activeFrame.layers.order;
+                const topIdx = Math.max(...validIds.map(id => orderArr.indexOf(id)));
+                const topLayerId = orderArr[topIdx];
+                let insertAt = topIdx + 1;
+                while (insertAt < orderArr.length && activeFrame.layers.byId[orderArr[insertAt]]?.hostId === topLayerId) {
+                    insertAt++;
+                }
+                ctx.layers.addLayer(activeFrame.id, group, insertAt);
+            } else {
+                // No selection: create empty group above the active layer
+                const orderArr = activeFrame.layers.order;
+                const activeId = activeFrame.activeLayerId;
+                const activeOrderIdx = activeId ? orderArr.indexOf(activeId) : -1;
+
+                if (activeOrderIdx < 0) {
+                    ctx.layers.addLayer(activeFrame.id, group);
+                    return;
+                }
+
+                // Skip past any children (exchange/frag) of the active layer
+                let insertAt = activeOrderIdx + 1;
+                while (insertAt < orderArr.length && activeFrame.layers.byId[orderArr[insertAt]]?.hostId === activeId) {
+                    insertAt++;
+                }
+                ctx.layers.addLayer(activeFrame.id, group, insertAt);
+            }
+        }
+    } as EditorCommand<{ layerIds?: string[] } | undefined, void>,
+
+    ungroupLayers: {
+        id: P.CMD_UNGROUP_LAYERS,
+        name: 'Ungroup Layers',
+        category: 'Layers',
+        undoable: true,
+        execute: (ctx: EditorContextValue, payload: { groupId: string }) => {
+            const { activeFrame } = ctx;
+            if (!activeFrame) return;
+
+            const group = activeFrame.layers.byId[payload.groupId];
+            if (!group || group.type !== 'group') return;
+
+            // Clear groupId from all child layers
+            const patches: Record<string, Partial<Layer>> = {};
+            for (const id of activeFrame.layers.order) {
+                const l = activeFrame.layers.byId[id];
+                if (l.groupId === payload.groupId) {
+                    patches[id] = { groupId: undefined };
+                }
+            }
+
+            if (Object.keys(patches).length > 0) {
+                ctx.actions.batchUpdateLayers(activeFrame.id, patches);
+            }
+
+            // Remove the group layer itself
+            ctx.layers.removeLayers(activeFrame.id, payload.groupId);
+        }
+    } as EditorCommand<{ groupId: string }, void>,
+
+    toggleGroupCollapse: {
+        id: P.CMD_TOGGLE_GROUP_COLLAPSE,
+        name: 'Toggle Group Collapse',
+        execute: (ctx: EditorContextValue, payload: { frameId?: string; groupId: string; collapsed?: boolean }) => {
+            const frameId = payload.frameId || ctx.activeFrame?.id;
+            if (!frameId) return;
+
+            const frame = ctx.state.frames.byId[frameId];
+            if (!frame) return;
+
+            const group = frame.layers.byId[payload.groupId];
+            if (!group || group.type !== 'group') return;
+
+            const newCollapsed = payload.collapsed !== undefined ? payload.collapsed : !group.collapsed;
+            ctx.actions.updateLayer(frameId, payload.groupId, { collapsed: newCollapsed });
+        }
+    } as EditorCommand<{ frameId?: string; groupId: string; collapsed?: boolean }, void>,
+
+    moveToGroup: {
+        id: P.CMD_MOVE_TO_GROUP,
+        name: 'Move to Group',
+        undoable: true,
+        execute: (ctx: EditorContextValue, payload: { layerIds: string[]; groupId: string }) => {
+            const { activeFrame } = ctx;
+            if (!activeFrame) return;
+
+            const group = activeFrame.layers.byId[payload.groupId];
+            if (!group || group.type !== 'group') return;
+
+            // 过滤：只允许非 group、非子层（无 hostId）的图层移入组
+            const validIds = payload.layerIds.filter(id => {
+                const l = activeFrame.layers.byId[id];
+                return l && l.type !== 'group' && !l.hostId;
+            });
+            if (validIds.length === 0) return;
+
+            const patches: Record<string, Partial<Layer>> = {};
+            for (const id of validIds) {
+                patches[id] = { groupId: payload.groupId };
+            }
+            ctx.actions.batchUpdateLayers(activeFrame.id, patches);
+        }
+    } as EditorCommand<{ layerIds: string[]; groupId: string }, void>,
+
+    moveOutOfGroup: {
+        id: P.CMD_MOVE_OUT_OF_GROUP,
+        name: 'Move out of Group',
+        undoable: true,
+        execute: (ctx: EditorContextValue, payload: { layerIds: string[] }) => {
+            const { activeFrame } = ctx;
+            if (!activeFrame) return;
+
+            const validIds = payload.layerIds.filter(id => {
+                const l = activeFrame.layers.byId[id];
+                return l && l.groupId;
+            });
+            if (validIds.length === 0) return;
+
+            const patches: Record<string, Partial<Layer>> = {};
+            for (const id of validIds) {
+                patches[id] = { groupId: undefined };
+            }
+            ctx.actions.batchUpdateLayers(activeFrame.id, patches);
+        }
+    } as EditorCommand<{ layerIds: string[] }, void>
 };

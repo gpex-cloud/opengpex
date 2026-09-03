@@ -82,7 +82,7 @@ export const LayerFactory = {
    * Completes the ID and all default values, returning a complete layer instance.
    */
   getNewLayer(patch: Partial<Layer> = {}): Layer {
-    const id = patch.id || `l-${Date.now().toString(36)}-${Math.random().toString(36).substr(2, 5)}`;
+    const id = patch.id || `l-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
     const layer = {
       ...this.getBlank(),
@@ -116,6 +116,36 @@ export const LayerFactory = {
     }
 
     return layer;
+  },
+
+  /**
+   * getNewGroup: Group layer production factory.
+   * Creates a group layer with no pixel data, used purely for organizational grouping in the UI.
+   * Group layers are skipped by the rendering pipeline (type:'group' has no bitmap).
+   */
+  getNewGroup(patch: Partial<Layer> = {}): Layer {
+    const id = patch.id || `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    return {
+      id,
+      name: patch.name || 'Group',
+      type: 'group',
+      src: TRANSPARENT_PIXEL,
+      assetId: 'asset-transparent-pixel',
+      cx: 0,
+      cy: 0,
+      scale: 1,
+      rotation: 0,
+      opacity: 1,
+      visible: true,
+      locked: false,
+      interactive: false,       // Groups are not hit-testable on canvas
+      flip: { h: false, v: false },
+      bounding: { w: 0, h: 0 },
+      vectorMasks: [],
+      bitmapMasks: [],
+      collapsed: false,
+      ...patch,
+    } as Layer;
   },
 
   /**
@@ -153,6 +183,39 @@ export const LayerFactory = {
       enabled: true,
       feather: 0
     };
+  },
+
+  /**
+   * cleanInheritedMasks: Sanitizes masks (VectorMask or BitmapMask) when deriving or duplicating layers.
+   *
+   * 1. Filters out reserved masks.
+   * 2. Strips `assocLayerId` from hole masks so that derived/duplicate layers do not mistakenly
+   *    claim ownership of cut fragments (which belong to the original source layer).
+   * 3. Assigns fresh unique IDs to inherited masks to avoid cross-layer mask ID collisions.
+   */
+  cleanInheritedMasks<T extends VectorMask | BitmapMask>(masks?: T[]): T[] {
+    if (!masks || masks.length === 0) return [];
+    return masks
+      .filter(m => !('reserved' in m && m.reserved))
+      .map(m => {
+        // VectorMask must have shape (LocalShape), while BitmapMask has bounds/assetId/src
+        const isBitmap = !('shape' in m) || 'assetId' in m || 'bounds' in m;
+        const prefix = isBitmap ? 'bmask' : 'mask';
+        const cleanId = `${prefix}-inherited-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
+        if ('assocLayerId' in m && m.assocLayerId) {
+          const { assocLayerId: _, ...cleanMask } = m;
+          return {
+            ...cleanMask,
+            id: cleanId,
+          } as unknown as T;
+        }
+
+        return {
+          ...m,
+          id: cleanId,
+        };
+      });
   },
 
   /**
@@ -380,6 +443,41 @@ export const LayerFactory = {
     return false;
   },
 
+  /**
+   * getInsertIndexAbove: Returns the index in frame.layers.order to insert a layer
+   * directly above `targetLayerId` (skipping past all child sublayers of targetLayerId,
+   * or above the highest child if targetLayerId is a group).
+   */
+  getInsertIndexAbove(frame: Frame, targetLayerId?: string | null): number | undefined {
+    if (!targetLayerId) return undefined;
+    const order = frame.layers.order;
+    const targetIdx = order.indexOf(targetLayerId);
+    if (targetIdx < 0) return undefined;
+
+    const targetLayer = frame.layers.byId[targetLayerId];
+    if (targetLayer?.type === 'group') {
+      // Find the highest child belonging to this group via single reverse scan (O(N), 0 allocations)
+      let topChildIdx = targetIdx;
+      for (let i = order.length - 1; i > targetIdx; i--) {
+        if (frame.layers.byId[order[i]]?.groupId === targetLayerId) {
+          topChildIdx = i;
+          break;
+        }
+      }
+      let insertAt = topChildIdx + 1;
+      const topId = order[topChildIdx];
+      while (insertAt < order.length && frame.layers.byId[order[insertAt]]?.hostId === topId) {
+        insertAt++;
+      }
+      return insertAt;
+    }
+
+    let insertAt = targetIdx + 1;
+    while (insertAt < order.length && frame.layers.byId[order[insertAt]]?.hostId === targetLayerId) {
+      insertAt++;
+    }
+    return insertAt;
+  },
 };
 
 // =================================================================================

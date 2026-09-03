@@ -143,6 +143,9 @@ export class CompositeDispatcher {
     const descriptors: LayerDescriptor[] = [];
 
     for (const layer of layers) {
+      // Group layers have no pixel data — skip in composite pipeline (Phase 1)
+      if (layer.type === 'group') continue;
+
       if (layer.type === 'text') {
         const rasterized = await this.preRasterizeText(layer);
         descriptors.push(rasterized);

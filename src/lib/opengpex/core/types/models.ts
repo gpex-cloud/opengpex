@@ -212,7 +212,7 @@ export interface TextLayerData {
 export interface Layer {
   id: string;
   name: string;
-  type: 'image' | 'text' | 'vector' | 'color' | 'paint';
+  type: 'image' | 'text' | 'vector' | 'color' | 'paint' | 'group';
   src: string;
   assetId: string;
   role?: LayerRole;
@@ -281,6 +281,7 @@ export interface Layer {
   // Relationship attributes
   hostId?: string;    // Triplet binding: exchange/frag → host layer (internal mechanism)
   groupId?: string;   // Layer group membership: points to a type:'group' layer id (user-facing hierarchy)
+  collapsed?: boolean; // Group-only: whether this group is collapsed in the layers panel (default false = expanded)
   ancestor?: boolean; // Mark whether it is the "ancestor" layer (used as reference for coordinate alignment)
 }
 

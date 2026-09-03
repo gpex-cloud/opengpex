@@ -107,6 +107,9 @@ export class StageComposer {
       const layer = f.layers.byId[layerId];
       if (!layer.visible) continue;
 
+      // Group layers have no pixel data — skip rendering (Phase 1: UI-only grouping)
+      if (layer.type === 'group') continue;
+
       // 4a. Construct logical snapshot containing animation states
       const displayRotation = getAnimatedRotation(layer);
       const latestLayer = {

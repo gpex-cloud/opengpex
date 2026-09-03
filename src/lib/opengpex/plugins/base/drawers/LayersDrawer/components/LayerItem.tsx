@@ -62,6 +62,12 @@ interface LayerItemProps {
   onToggleMarking?: (layerId: string) => void;
   /** Semantic color for the marked badge — mapped to CSS internally */
   markedColor?: 'green' | 'amber' | 'red';
+  /** Available group layers this layer can be moved into */
+  availableGroups?: Array<{ id: string; name: string }>;
+  /** When true, renders as a plain div instead of Reorder.Item (avoids nested <li>) */
+  isGroupChild?: boolean;
+  /** Name of the current group this layer belongs to (for menu display) */
+  currentGroupName?: string;
 }
 
 export const LayerItem = React.memo(
@@ -78,6 +84,9 @@ export const LayerItem = React.memo(
     isMarked,
     onToggleMarking,
     markedColor = 'red',
+    availableGroups,
+    isGroupChild,
+    currentGroupName,
   }: LayerItemProps) => {
     const { actions } = useEditorServices();
     const {
@@ -116,13 +125,15 @@ export const LayerItem = React.memo(
       }
     }, [isActive]);
 
+    // Group children use <div> wrapper to avoid nested <li> (Reorder.Item renders <li>).
+    // Top-level layers use <Reorder.Item> for drag-to-reorder support.
+    const Wrapper = isGroupChild ? motion.div : Reorder.Item;
+    const wrapperProps = isGroupChild
+      ? {}
+      : { value: layer, dragListener: false, dragControls, id: layer.id };
+
     return (
-      <Reorder.Item
-        value={layer}
-        dragListener={false}
-        dragControls={dragControls}
-        id={layer.id}
-      >
+      <Wrapper {...(wrapperProps as any)}>
         <motion.div
           layout="position"
           className={`group/layer relative flex items-center h-[36px] cursor-pointer transition-opacity ${isScrolling ? "opacity-90" : "opacity-100"}`}
@@ -359,6 +370,9 @@ export const LayerItem = React.memo(
                 setIsMasksExpanded={setIsMasksExpanded}
                 canMergeBack={Boolean(layer.metadata?.sourceLayerId && layer.metadata?.assocMaskId)}
                 canMergeBackAll={Boolean(layer.vectorMasks?.some(m => m.assocLayerId))}
+                availableGroups={availableGroups}
+                currentGroupId={layer.groupId}
+                currentGroupName={currentGroupName}
               />
             </div>
           </div>
@@ -422,7 +436,7 @@ export const LayerItem = React.memo(
             </motion.div>
           )}
         </AnimatePresence>
-      </Reorder.Item>
+      </Wrapper>
     );
   },
 );

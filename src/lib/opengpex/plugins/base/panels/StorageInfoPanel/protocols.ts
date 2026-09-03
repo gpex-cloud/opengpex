@@ -71,7 +71,7 @@ export interface AssetMetric {
 export interface LayerMetric {
   id: string;
   name: string;
-  type: 'image' | 'text' | 'vector' | 'color' | 'paint';
+  type: 'image' | 'text' | 'vector' | 'color' | 'paint' | 'group';
   visible: boolean;
   locked: boolean;
   opacity: number;
