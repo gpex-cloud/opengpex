@@ -228,6 +228,12 @@ export interface GeometryService {
     layerLocalToFrameLocal: (shape: Shape, layer: Layer, frame: Frame) => LocalShape;
     /** Calculates joint bounding box shape of a set of layers in world space */
     unitedShapeOfLayers: (layers: Layer[]) => WorldShape | null;
+    /**
+     * Pure-scale (no translation) all absolute coordinates in an SVG path string.
+     * Used by the resample/resize pipeline to map pathData from the old src
+     * coordinate system to the new one (resize spec §4.2 / §4.3).
+     */
+    scalePathData: (pathData: string, scaleX: number, scaleY: number) => string;
   };
 
   /**

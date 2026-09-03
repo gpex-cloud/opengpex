@@ -4,6 +4,12 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.1.4
+
+- Resize: fixed cut-out pieces disappearing or shifting when resizing the document; pieces, masks, blur, and text now scale correctly and stay sharp
+
+---
+
 ## v1.1.3
 
 - Masks: "Apply as Mask" now creates vector masks instead of bitmap masks — lighter, sharper, and correctly aligned on rotated or flipped layers

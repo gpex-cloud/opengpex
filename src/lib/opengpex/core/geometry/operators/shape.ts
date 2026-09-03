@@ -269,7 +269,7 @@ export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleSh
  *
  * Formula per point: newX = x * scaleX + dx, newY = y * scaleY + dy.
  */
-function translatePathData(pathData: string, dx: number, dy: number, scaleX = 1, scaleY = 1): string {
+export function translatePathData(pathData: string, dx: number, dy: number, scaleX = 1, scaleY = 1): string {
   const rings = parsePathDataToRings(pathData);
   if (!rings.length) return pathData;
 
@@ -287,6 +287,20 @@ function translatePathData(pathData: string, dx: number, dy: number, scaleX = 1,
     parts.push(segs.join(' '));
   }
   return parts.join(' ');
+}
+
+/**
+ * scalePathData — Pure scale (no translation) of all absolute coordinates in an
+ * SVG path string. Thin semantic wrapper over `translatePathData` for the resize
+ * / resample pipeline, where pathData must map from the old src coordinate system
+ * to the new one using only `scaleX / scaleY` (see resize spec §4.2 / §4.3).
+ *
+ * Note: coordinates are only scaled, never snapped — pathData is a sub-pixel
+ * precise clipping source and snapping vertices would distort the outline. The
+ * enclosing rect carries pixel-grid alignment instead (spec §5).
+ */
+export function scalePathData(pathData: string, scaleX: number, scaleY: number): string {
+  return translatePathData(pathData, 0, 0, scaleX, scaleY);
 }
 
 /**

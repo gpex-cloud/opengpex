@@ -54,8 +54,8 @@ export interface LayerService {
   fragmentToNewLayer: (frame: Frame, layer: Layer, options?: { feather?: number; mode?: 'copy' | 'cut' }) => Promise<FragmentResult | null>;
   /** Physical fragment: always produces a baked PNG blob (needed for clipboard external paste) */
   fragmentToNewLayerPhysical: (frame: Frame, layer: Layer) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
-  /** Physically resamples layer: adjusts pixel resolution and proportionally scales visible areas and masks */
-  resampleLayerPhysical: (layer: Layer, scaleX: number, scaleY: number, frame: Frame) => Promise<{ newUrl: string, newAssetId: string, patch: Partial<Layer> } | null>;
+  /** Resamples layer to a new resolution: uniform scale preserves the non-destructive structure (zero-copy shared src, visibleShape offset, vector/bitmap masks scaled geometrically); non-uniform scale flattens (bakes) the layer. */
+  resampleLayer: (frame: Frame, layer: Layer, scaleX: number, scaleY: number) => Promise<{ newUrl: string, newAssetId: string, patch: Partial<Layer> } | null>;
   /** Applies a fragment to an existing layer (e.g. Exchange layer) */
   fragmentToExistLayer: (frame: Frame, sourceLayer: Layer, targetLayer: Layer, selection: LocalShape | LocalPolygon) => { updatedLayer: Layer, localShape: LocalShape } | null;
   /** Creates a layer from an external image Blob (handles asset registration and position calculation) */

@@ -88,7 +88,7 @@ export const FrameResizeCommands = {
 
       for (const layer of hostLayers) {
         try {
-          const result = await ctx.layers.resampleLayerPhysical(layer, scaleX, scaleY, activeFrame);
+          const result = await ctx.layers.resampleLayer(activeFrame, layer, scaleX, scaleY);
           if (result) {
             patches[layer.id] = result.patch;
           }
@@ -176,7 +176,7 @@ export const FrameResizeCommands = {
 
       for (const layer of otherHostLayers) {
         try {
-          const result = await ctx.layers.resampleLayerPhysical(layer, scaleX, scaleY, activeFrame);
+          const result = await ctx.layers.resampleLayer(activeFrame, layer, scaleX, scaleY);
           if (result) {
             patches[layer.id] = result.patch;
           }

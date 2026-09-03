@@ -292,10 +292,12 @@ export interface PixelService {
      * Resample (resize) an image to the given target dimensions.
      * Delegates to the Worker for high-quality bicubic downsampling.
      *
-     * Accepts either `targetSize` (exact dimensions) or `maxSize` (scale longest edge,
-     * maintain aspect ratio). When `maxSize` is provided, `targetSize` is ignored.
+     * Accepts `targetSize` (exact dimensions), `maxSize` (scale longest edge,
+     * maintain aspect ratio), or `scale` (uniform factor applied to the source's
+     * TRUE pixel dimensions). When `maxSize` is provided, `targetSize` is ignored;
+     * when `scale` is provided, `targetSize` is ignored (but `maxSize` still wins).
      */
-    resample: (src: string, options: { targetSize?: { w: number; h: number }; maxSize?: number }) => Promise<ResampleResult>;
+    resample: (src: string, options: { targetSize?: { w: number; h: number }; maxSize?: number; scale?: number }) => Promise<ResampleResult>;
 
     /**
      * Clear all bitmap caches (SourceBitmapCache).

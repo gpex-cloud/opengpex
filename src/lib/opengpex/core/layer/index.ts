@@ -267,7 +267,7 @@ export function createLayerService(
     fragmentToExistLayer: fragmentOps.fragmentToExistLayer,
 
     // ── Resample operations (delegated to resample.ts) ──────────────────────────
-    resampleLayerPhysical: resampleOps.resampleLayerPhysical,
+    resampleLayer: resampleOps.resampleLayer,
 
     createLayerFromBlob: async (blob, frame, screenPoint) => {
       const bmp = await createImageBitmap(blob);

@@ -35,7 +35,7 @@ import {
 } from '@opengpex/editor/core/types';
 import {
   frameLocalToLayerLocal, layerLocalToFrameLocal, intersectWithLayer, getStairedSvgPath, getSmoothSvgPath,
-  localToWorldShape, worldToLocalShape, unitedShapeOfLayers
+  localToWorldShape, worldToLocalShape, unitedShapeOfLayers, scalePathData
 } from './operators/shape';
 import {
   computePolygonBounds, localToWorldPolygon, worldToLocalPolygon,
@@ -153,6 +153,7 @@ export function createGeometryService(): GeometryService {
       worldToLocalShape: (shape: WorldShape, target: Layer | Frame) => worldToLocalShape(shape, target),
       layerLocalToFrameLocal: (shape: Shape, layer: Layer, frame: Frame) => layerLocalToFrameLocal(shape, layer, frame),
       unitedShapeOfLayers: (layers: Layer[]) => unitedShapeOfLayers(layers),
+      scalePathData: (pathData: string, scaleX: number, scaleY: number) => scalePathData(pathData, scaleX, scaleY),
     },
     polygon: {
       computePolygonBounds: (rings: Point2D[][]) => computePolygonBounds(rings),

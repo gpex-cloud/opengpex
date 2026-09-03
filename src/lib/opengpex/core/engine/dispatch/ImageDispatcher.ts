@@ -50,10 +50,17 @@ interface DecodeBitmapResult {
 }
 
 export interface ResampleOptions {
-  /** Exact target dimensions. Ignored when maxSize is provided. */
+  /** Exact target dimensions. Ignored when maxSize or scale is provided. */
   targetSize?: { w: number; h: number };
   /** Scale longest edge to this value, maintaining aspect ratio. Takes priority over targetSize. */
   maxSize?: number;
+  /**
+   * Uniform scale factor applied to the source's TRUE pixel dimensions.
+   * The source size is resolved in-dispatcher (cache hit = zero cost, else a
+   * decode round-trip), so callers never need to know src dimensions up front.
+   * Takes priority over targetSize (but maxSize wins if both are set).
+   */
+  scale?: number;
 }
 
 export class ImageDispatcher {
@@ -218,8 +225,9 @@ export class ImageDispatcher {
   /**
    * Resample a source image to the specified target dimensions.
    *
-   * Accepts either `targetSize` (exact) or `maxSize` (scale longest edge, maintain ratio).
-   * When `maxSize` is provided, source dimensions are resolved from SourceBitmapCache
+   * Accepts either `targetSize` (exact) or `maxSize` (scale longest edge, maintain ratio)
+   * or `scale` (uniform factor on the source's true pixel dimensions).
+   * When `maxSize` / `scale` is provided, source dimensions are resolved from SourceBitmapCache
    * (cache hit = zero cost) or via loadBitmap (triggers Worker decode on miss).
    *
    * Uses high-quality bicubic interpolation in the Worker.
@@ -242,10 +250,21 @@ export class ImageDispatcher {
         target = ratio > 1
           ? { w: Math.round(ms), h: Math.round(ms / ratio) }
           : { w: Math.round(ms * ratio), h: Math.round(ms) };
+      } else if (opts.scale != null) {
+        // Resolve scale → targetSize from the source's TRUE pixel dimensions.
+        // Zero-cost on cache hit; decode round-trip otherwise. This is what lets
+        // the resample pipeline scale a shared full-image src correctly (resize
+        // spec §4.1 route X) instead of squashing it into the selection window.
+        const bmp = this.resolveSourceDimensions(src);
+        const bitmap = bmp ?? await this.loadSourceDimensions(src);
+        target = {
+          w: Math.max(1, Math.round(bitmap.width * opts.scale)),
+          h: Math.max(1, Math.round(bitmap.height * opts.scale)),
+        };
       } else if (opts.targetSize) {
         target = opts.targetSize;
       } else {
-        throw new Error('[ImageDispatcher] resample requires either targetSize or maxSize');
+        throw new Error('[ImageDispatcher] resample requires either targetSize, maxSize, or scale');
       }
     }
 

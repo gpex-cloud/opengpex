@@ -164,8 +164,8 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
       async histogram(assetId: string): Promise<Uint32Array> {
         return image.histogram(assetId);
       },
-      /** Resample (resize) an image. Accepts targetSize or maxSize. */
-      async resample(src: string, options: { targetSize?: { w: number; h: number }; maxSize?: number }) {
+      /** Resample (resize) an image. Accepts targetSize, maxSize, or scale. */
+      async resample(src: string, options: { targetSize?: { w: number; h: number }; maxSize?: number; scale?: number }) {
         return image.resample(src, options);
       },
       /** Clear all bitmap caches. */
