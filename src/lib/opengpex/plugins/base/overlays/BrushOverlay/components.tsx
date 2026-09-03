@@ -353,17 +353,29 @@ const MaskFocusOverlay = React.memo(function MaskFocusOverlay() {
       const lx = layer.cx + canvasW / 2 - lw / 2;
       const ly = layer.cy + canvasH / 2 - lh / 2;
 
+      // Mask placement inside the layer's bounding-local space.
+      // `bounds.x/y` is non-zero for fragment layers (the mask is anchored to
+      // visibleShape.rect, see LayerUtils.getMaskOrigin), so the highlight must
+      // be offset by it — otherwise the green preview would sit somewhere the
+      // mask does not actually apply. Falls back to the full bounding rect for
+      // legacy masks persisted without an offset.
+      const mb = mask.bounds;
+      const mx = lx + (mb?.x ?? 0);
+      const my = ly + (mb?.y ?? 0);
+      const mw = mb?.w ?? lw;
+      const mh = mb?.h ?? lh;
+
       // Green semi-transparent highlight over visible mask areas
       ctx.fillStyle = 'rgba(34, 197, 94, 0.4)';
-      ctx.fillRect(lx, ly, lw, lh);
+      ctx.fillRect(mx, my, mw, mh);
 
       ctx.globalCompositeOperation = 'destination-in';
-      ctx.drawImage(img, lx, ly, lw, lh);
+      ctx.drawImage(img, mx, my, mw, mh);
       ctx.globalCompositeOperation = 'source-over';
     };
     img.src = mask.src;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mask?.src, maskFocus, maskEditing?.layerId, maskEditing?.maskId, layer?.cx, layer?.cy, layer?.bounding?.w, layer?.bounding?.h, canvasW, canvasH]);
+  }, [mask?.src, mask?.bounds?.x, mask?.bounds?.y, mask?.bounds?.w, mask?.bounds?.h, maskFocus, maskEditing?.layerId, maskEditing?.maskId, layer?.cx, layer?.cy, layer?.bounding?.w, layer?.bounding?.h, canvasW, canvasH]);
 
   // Follow camera positioning (extracted to useFastSync.ts)
   useMaskFocusOverlayFastSync(containerRef);

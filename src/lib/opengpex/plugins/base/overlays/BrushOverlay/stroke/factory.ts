@@ -25,6 +25,7 @@
  */
 
 import type { InteractionEvent, Layer, Frame } from '@opengpex/editor/core/types';
+import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import { CraftDrawerAPI, MOSAIC_SIZE_PRESETS } from '../../../drawers/CraftDrawer/protocols';
 import type { CraftDrawerConfig } from '../../../drawers/CraftDrawer/protocols';
 import { ColorOptionsAPI } from '../../../options/ColorOptions/protocols';
@@ -125,6 +126,19 @@ function createMaskSession(
   const scaleX = Math.sqrt(localMatrix.a * localMatrix.a + localMatrix.b * localMatrix.b) || 1;
   const localBrushSize = config.brushSize / scaleX;
 
+  // ── Mask coordinate basis (fragment coordinate fix) ──────────────────────────
+  // The mask canvas keeps `bounding` DIMENSIONS, but its ORIGIN must coincide with
+  // the origin of the layer content. `painter2d` blits content into the
+  // bounding-local rect (vx, vy, vw, vh), so a mask anchored at (0,0) would be
+  // disjoint from the content of a zero-copy logical fragment (where
+  // visibleShape.rect.x/y != 0) → destination-in wipes the whole fragment.
+  //
+  // `maskOrigin` is the single basis shared by:
+  //   1. stamp placement          (MaskStrokeSession subtracts it from local points)
+  //   2. bm.bounds.x/y            (live-preview override + baked BitmapMask)
+  // For regular full-layer images maskOrigin is (0,0) → behaviour unchanged.
+  const maskOrigin = LayerUtils.getMaskOrigin(targetLayer);
+
   const maskW = targetLayer.bounding.w;
   const maskH = targetLayer.bounding.h;
 
@@ -156,7 +170,7 @@ function createMaskSession(
           bitmap.close();
           // Retrigger preview after async load
           e.actions.fast.override(frame.id, targetLayer.id, {
-            bitmapMaskOverride: { maskId, source: maskCanvas },
+            bitmapMaskOverride: { maskId, source: maskCanvas, bounds: maskOrigin },
           }, 'layer');
         }).catch(err => {
           console.warn('[BrushOverlay] Async mask load failed:', err);
@@ -166,7 +180,7 @@ function createMaskSession(
 
     // Trigger initial fast-track override for live preview
     e.actions.fast.override(frame.id, targetLayer.id, {
-      bitmapMaskOverride: { maskId, source: maskCanvas },
+      bitmapMaskOverride: { maskId, source: maskCanvas, bounds: maskOrigin },
     }, 'layer');
 
     return new MaskStrokeSession({
@@ -180,6 +194,7 @@ function createMaskSession(
       maskCtx,
       localMatrixInverse,
       localBrushSize,
+      maskOrigin,
       frameId: frame.id,
     });
   } catch (err) {

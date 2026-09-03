@@ -510,11 +510,25 @@ export class Canvas2dEngine implements IRenderer {
     if (options.bitmapMaskOverride) {
       const overrideId = options.bitmapMaskOverride.maskId;
       if (!activeBitmapMasks.some(bm => bm.id === overrideId)) {
+        // Synthetic descriptor for the live eraser/restore preview.
+        //
+        // bounds.x/y = the layer-local origin the mask canvas is anchored to
+        // (`LayerUtils.getMaskOrigin`, forwarded through bitmapMaskOverride).
+        // This MUST equal the bounds the bake writes into the real BitmapMask,
+        // otherwise the stroke would look correct while dragging and jump on
+        // release. For regular full-layer images the origin is (0,0), which is
+        // byte-identical to the previous hardcoded value.
+        const overrideOrigin = options.bitmapMaskOverride.bounds;
         activeBitmapMasks.push({
           id: overrideId,
           src: '',
           assetId: '',
-          bounds: asLocalRect({ x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h }),
+          bounds: asLocalRect({
+            x: overrideOrigin?.x ?? 0,
+            y: overrideOrigin?.y ?? 0,
+            w: layer.bounding.w,
+            h: layer.bounding.h,
+          }),
           inverted: false,
           enabled: true,
           feather: 0,

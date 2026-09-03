@@ -141,6 +141,12 @@ async function executeMaskBake(request: MaskBakeRequest, e: InteractionEvent): P
         patch: {
           src: asset.url,
           assetId: asset.assetId,
+          // Re-assert bounds: an older mask may have been persisted before the
+          // fragment origin fix (bounds.x/y === 0). Rewriting it keeps the reused
+          // mask on the same basis the stamps were just drawn in.
+          bounds: asLocalRect({
+            x: maskBounds.x, y: maskBounds.y, w: maskBounds.w, h: maskBounds.h,
+          }),
         },
       });
     } else {
@@ -149,7 +155,9 @@ async function executeMaskBake(request: MaskBakeRequest, e: InteractionEvent): P
         layerId: targetLayerId,
         src: asset.url,
         assetId: asset.assetId,
-        bounds: asLocalRect({ x: 0, y: 0, w: maskBounds.w, h: maskBounds.h }),
+        bounds: asLocalRect({
+          x: maskBounds.x, y: maskBounds.y, w: maskBounds.w, h: maskBounds.h,
+        }),
       });
     }
   } finally {

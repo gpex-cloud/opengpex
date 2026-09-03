@@ -34,7 +34,15 @@ export interface DrawLayerOptions {
   opacity?: number;
   drawRect?: Rect;
   clipSequence?: ClipDescriptor[];
-  bitmapMaskOverride?: { maskId: string; source: CanvasImageSource };
+  /**
+   * Live eraser/restore mask preview source (fast-track).
+   *
+   * `bounds` is the layer-local ORIGIN the mask canvas is anchored to
+   * (see `LayerUtils.getMaskOrigin`). The engine writes it into the synthetic
+   * BitmapMask descriptor so the preview composites on exactly the same basis
+   * as the baked mask. Defaults to (0,0) — regular full-layer behaviour.
+   */
+  bitmapMaskOverride?: { maskId: string; source: CanvasImageSource; bounds?: { x: number; y: number } };
   width?: number;
   height?: number;
   imageSmoothingQuality?: 'low' | 'high';

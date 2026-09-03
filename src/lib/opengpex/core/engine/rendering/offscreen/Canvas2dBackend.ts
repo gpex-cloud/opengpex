@@ -302,6 +302,12 @@ export class Canvas2dBackend {
         }
         const inverted = (bm as { inverted?: boolean }).inverted ?? false;
         layerCtx.globalCompositeOperation = inverted ? 'destination-out' : 'destination-in';
+        // `bounds.x/y` is the mask's origin in layer-local space and is honoured
+        // verbatim — identical to the main-thread branch in Canvas2dEngine. For
+        // eraser masks on fragments this origin equals visibleShape.rect.x/y
+        // (see LayerUtils.getMaskOrigin), which is exactly where painter2d blits
+        // the content. Do NOT add any further offset here: the alignment is
+        // already encoded in `bounds`, so subtracting again would double-shift.
         const bounds = (bm as { bounds?: { x: number; y: number; w: number; h: number } }).bounds;
         if (bounds) {
           layerCtx.drawImage(maskBitmap, bounds.x, bounds.y, bounds.w, bounds.h);
@@ -446,6 +452,8 @@ export class Canvas2dBackend {
         const inverted = (bm as { inverted?: boolean }).inverted ?? false;
         tempCtx.globalCompositeOperation = inverted ? 'destination-out' : 'destination-in';
 
+        // `bounds.x/y` = mask origin in layer-local space, honoured verbatim.
+        // See the sibling branch above for why no extra offset may be applied.
         const bounds = (bm as { bounds?: { x: number; y: number; w: number; h: number } }).bounds;
         if (bounds) {
           tempCtx.drawImage(maskBitmap, bounds.x, bounds.y, bounds.w, bounds.h);

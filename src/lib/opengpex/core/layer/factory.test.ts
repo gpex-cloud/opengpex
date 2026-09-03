@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { LayerFactory } from './factory';
-import { VectorMask, BitmapMask, asLocalShape, asLocalRect } from '@opengpex/editor/core/types';
+import { VectorMask, BitmapMask, asLocalShape, asLocalRect, type Frame, type Layer } from '@opengpex/editor/core/types';
 
 describe('LayerFactory.cleanInheritedMasks', () => {
   it('returns empty array when input is undefined or empty', () => {
@@ -100,11 +100,11 @@ describe('LayerFactory.getInsertIndexAbove', () => {
       layers: {
         order: ['l1', 'l2'],
         byId: {
-          l1: { id: 'l1' } as any,
-          l2: { id: 'l2' } as any,
+          l1: { id: 'l1' } as unknown as Layer,
+          l2: { id: 'l2' } as unknown as Layer,
         },
       },
-    } as any;
+    } as unknown as Frame;
 
     expect(LayerFactory.getInsertIndexAbove(mockFrame)).toBeUndefined();
     expect(LayerFactory.getInsertIndexAbove(mockFrame, 'non-existent')).toBeUndefined();
@@ -116,12 +116,12 @@ describe('LayerFactory.getInsertIndexAbove', () => {
       layers: {
         order: ['l1', 'l2', 'l3'],
         byId: {
-          l1: { id: 'l1' } as any,
-          l2: { id: 'l2' } as any,
-          l3: { id: 'l3' } as any,
+          l1: { id: 'l1' } as unknown as Layer,
+          l2: { id: 'l2' } as unknown as Layer,
+          l3: { id: 'l3' } as unknown as Layer,
         },
       },
-    } as any;
+    } as unknown as Frame;
 
     expect(LayerFactory.getInsertIndexAbove(mockFrame, 'l1')).toBe(1);
     expect(LayerFactory.getInsertIndexAbove(mockFrame, 'l2')).toBe(2);
@@ -134,13 +134,13 @@ describe('LayerFactory.getInsertIndexAbove', () => {
       layers: {
         order: ['l1', 'l1-child1', 'l1-child2', 'l2'],
         byId: {
-          l1: { id: 'l1' } as any,
-          'l1-child1': { id: 'l1-child1', hostId: 'l1' } as any,
-          'l1-child2': { id: 'l1-child2', hostId: 'l1' } as any,
-          l2: { id: 'l2' } as any,
+          l1: { id: 'l1' } as unknown as Layer,
+          'l1-child1': { id: 'l1-child1', hostId: 'l1' } as unknown as Layer,
+          'l1-child2': { id: 'l1-child2', hostId: 'l1' } as unknown as Layer,
+          l2: { id: 'l2' } as unknown as Layer,
         },
       },
-    } as any;
+    } as unknown as Frame;
 
     expect(LayerFactory.getInsertIndexAbove(mockFrame, 'l1')).toBe(3);
   });
@@ -151,13 +151,13 @@ describe('LayerFactory.getInsertIndexAbove', () => {
       layers: {
         order: ['g1', 'c1', 'c2', 'l_outside'],
         byId: {
-          g1: { id: 'g1', type: 'group' } as any,
-          c1: { id: 'c1', groupId: 'g1' } as any,
-          c2: { id: 'c2', groupId: 'g1' } as any,
-          l_outside: { id: 'l_outside' } as any,
+          g1: { id: 'g1', type: 'group' } as unknown as Layer,
+          c1: { id: 'c1', groupId: 'g1' } as unknown as Layer,
+          c2: { id: 'c2', groupId: 'g1' } as unknown as Layer,
+          l_outside: { id: 'l_outside' } as unknown as Layer,
         },
       },
-    } as any;
+    } as unknown as Frame;
 
     // Highest child is c2 at index 2, so inserting above group inserts at index 3
     expect(LayerFactory.getInsertIndexAbove(mockFrame, 'g1')).toBe(3);

@@ -187,7 +187,16 @@ export interface VolatileState {
   buffered: {
     layers: Record<string, Partial<Layer> & {
       imageOverride?: CanvasImageSource;
-      bitmapMaskOverride?: { maskId: string; source: CanvasImageSource };
+      /**
+       * Live eraser/restore mask preview source.
+       *
+       * `bounds` is the layer-local ORIGIN the mask canvas is anchored to (see
+       * `LayerUtils.getMaskOrigin`). It must match the `BitmapMask.bounds.x/y`
+       * that the subsequent bake writes, otherwise the preview and the committed
+       * result would disagree ("preview right, landing wrong"). Omitted / (0,0)
+       * for regular full-layer images.
+       */
+      bitmapMaskOverride?: { maskId: string; source: CanvasImageSource; bounds?: { x: number; y: number } };
     }>;
     frames: Record<string, Partial<Frame>>;
     project: Partial<EditorData>;

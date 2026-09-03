@@ -49,6 +49,16 @@ export interface MaskSessionParams {
   maskCtx: OffscreenCanvasRenderingContext2D;
   localMatrixInverse: IMatrix3x3;
   localBrushSize: number;
+  /**
+   * Layer-local origin the mask canvas is anchored to (`LayerUtils.getMaskOrigin`).
+   *
+   * `localMatrixInverse` maps a canvas point into BOUNDING-local space, but the
+   * mask canvas covers the layer-local rect `(origin.x, origin.y, bounding.w,
+   * bounding.h)` — matching where `painter2d` actually blits the content. Stamps
+   * therefore have to be translated by `-origin` before being written to the
+   * mask canvas. `(0,0)` for regular full-layer images (no behaviour change).
+   */
+  maskOrigin: { x: number; y: number };
   frameId: string;
 }
 
@@ -68,6 +78,7 @@ export class MaskStrokeSession implements StrokeSession {
   private _version = 0;
 
   private localMatrixInverse: IMatrix3x3;
+  private maskOrigin: { x: number; y: number };
   private config: StrokeConfig;
 
   private isEraser: boolean;
@@ -97,6 +108,7 @@ export class MaskStrokeSession implements StrokeSession {
     this.maskCanvas = params.maskCanvas;
     this.maskCtx = params.maskCtx;
     this.localMatrixInverse = params.localMatrixInverse;
+    this.maskOrigin = params.maskOrigin;
     this.frameId = params.frameId;
 
     // Placeholder canvas for StrokePreview interface (mask preview uses fast.override)
@@ -111,15 +123,37 @@ export class MaskStrokeSession implements StrokeSession {
     this.smoother = new StrokeSmoother();
   }
 
+  /**
+   * Projects a canvas-space point into MASK-CANVAS space.
+   *
+   * Two steps, both mandatory:
+   *   1. `localMatrixInverse` → bounding-local space (undoes camera + layer pose).
+   *   2. `- maskOrigin`       → mask-canvas space.
+   *
+   * Step 2 exists because the mask canvas covers the layer-local rect
+   * `(originX, originY, bounding.w, bounding.h)` rather than `(0, 0, ...)`.
+   * That is the rect where `painter2d` actually blits the layer content
+   * (`drawImage(src, v.x, v.y, v.w, v.h, v.x, v.y, v.w, v.h)`), so anchoring the
+   * mask there is what makes `destination-in` overlap the content instead of
+   * missing it entirely.
+   *
+   * For regular full-layer images `maskOrigin` is `(0, 0)`, making this
+   * arithmetically identical to the previous plain `localMatrixInverse.apply()`.
+   */
+  private toMaskSpace(point: Point2D): Point2D {
+    const local = this.localMatrixInverse.apply(point);
+    return { x: local.x - this.maskOrigin.x, y: local.y - this.maskOrigin.y };
+  }
+
   begin(point: Point2D, _pressure: number): void {
     this.lastPoint = point;
     this.lastDrawnPoint = point;
     this.pointCount = 1;
 
-    // Transform start point to local (layer) coordinates
-    const localPoint = this.localMatrixInverse.apply(point);
+    // Transform start point to mask-canvas coordinates
+    const localPoint = this.toMaskSpace(point);
 
-    // Initialize stamp position in local space
+    // Initialize stamp position in mask-canvas space
     this.stamp.lastStampX = localPoint.x;
     this.stamp.lastStampY = localPoint.y;
 
@@ -148,8 +182,8 @@ export class MaskStrokeSession implements StrokeSession {
     const craft = e.state.interaction.signals[ACTIVE_CRAFT_KEY] as string;
     this.currentIsRestore = craft === 'restore';
 
-    // Transform smooth points to local space
-    const localSmoothPoints = smoothPoints.map(p => this.localMatrixInverse.apply(p));
+    // Transform smooth points to mask-canvas space
+    const localSmoothPoints = smoothPoints.map(p => this.toMaskSpace(p));
 
     this.maskCtx.save();
     this.maskCtx.globalCompositeOperation = this.currentIsRestore ? 'source-over' : 'destination-out';
@@ -158,15 +192,17 @@ export class MaskStrokeSession implements StrokeSession {
       this.stamp.stampAlongPath(this.maskCtx, localSmoothPoints);
       this.lastDrawnPoint = smoothPoints[smoothPoints.length - 1];
     } else if (this.pointCount === 2) {
-      const localNewPoint = this.localMatrixInverse.apply(point);
+      const localNewPoint = this.toMaskSpace(point);
       this.stamp.stampAlongPath(this.maskCtx, [localNewPoint]);
     }
 
     this.maskCtx.restore();
 
-    // Trigger real-time fast-track override for live preview
+    // Trigger real-time fast-track override for live preview.
+    // `bounds` carries the mask origin so the engine composites the preview on
+    // exactly the same basis the bake will persist (preview == landing).
     e.actions.fast.override(this.frameId, this.targetLayerId, {
-      bitmapMaskOverride: { maskId: this.maskId, source: this.maskCanvas },
+      bitmapMaskOverride: { maskId: this.maskId, source: this.maskCanvas, bounds: this.maskOrigin },
     }, 'layer');
 
     this.lastPoint = point;
@@ -178,7 +214,7 @@ export class MaskStrokeSession implements StrokeSession {
     if (this.lastDrawnPoint) {
       const finalSegment = this.smoother.finish();
       if (finalSegment.length > 0) {
-        const localFinalSegment = finalSegment.map(p => this.localMatrixInverse.apply(p));
+        const localFinalSegment = finalSegment.map(p => this.toMaskSpace(p));
 
         this.maskCtx.save();
         this.maskCtx.globalCompositeOperation = this.currentIsRestore ? 'source-over' : 'destination-out';
@@ -199,6 +235,10 @@ export class MaskStrokeSession implements StrokeSession {
       targetLayerId: this.targetLayerId,
       existingMaskId: this.existingMaskId,
       maskBounds: {
+        // Origin is carried through so the persisted BitmapMask.bounds matches
+        // the basis used by the stamps above AND by the live preview override.
+        x: this.maskOrigin.x,
+        y: this.maskOrigin.y,
         w: this.maskCanvas.width,
         h: this.maskCanvas.height,
       },

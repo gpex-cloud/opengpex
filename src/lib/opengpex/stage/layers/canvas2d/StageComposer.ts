@@ -42,7 +42,7 @@ interface RenderOptions {
   viewportPadding?: number;
   getAnimatedRotation: (layer: Layer) => number;
   getImageOverride?: (layerId: string) => CanvasImageSource | undefined;
-  getBitmapMaskOverride?: (layerId: string) => { maskId: string; source: CanvasImageSource } | undefined;
+  getBitmapMaskOverride?: (layerId: string) => { maskId: string; source: CanvasImageSource; bounds?: { x: number; y: number } } | undefined;
   theme?: 'light' | 'dark';
   /** Display Transform config (channel view, future ICC/soft-proof). */
   displayConfig?: DisplayTransformConfig;

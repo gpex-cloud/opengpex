@@ -127,13 +127,15 @@ export const LayerItem = React.memo(
 
     // Group children use <div> wrapper to avoid nested <li> (Reorder.Item renders <li>).
     // Top-level layers use <Reorder.Item> for drag-to-reorder support.
-    const Wrapper = isGroupChild ? motion.div : Reorder.Item;
+    // Typed as ElementType so the two components' differing prop requirements
+    // (Reorder.Item needs `value`, motion.div does not) can share one spread.
+    const Wrapper: React.ElementType = isGroupChild ? motion.div : Reorder.Item;
     const wrapperProps = isGroupChild
       ? {}
       : { value: layer, dragListener: false, dragControls, id: layer.id };
 
     return (
-      <Wrapper {...(wrapperProps as any)}>
+      <Wrapper {...wrapperProps}>
         <motion.div
           layout="position"
           className={`group/layer relative flex items-center h-[36px] cursor-pointer transition-opacity ${isScrolling ? "opacity-90" : "opacity-100"}`}

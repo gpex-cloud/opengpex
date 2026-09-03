@@ -62,8 +62,16 @@ export interface MaskBakeRequest {
   targetLayerId: string;
   /** Existing mask ID if editing (undefined if creating new) */
   existingMaskId: string | undefined;
-  /** Mask dimensions (= target layer bounding) */
-  maskBounds: { w: number; h: number };
+  /**
+   * Mask placement in layer-local space.
+   *
+   * `w/h` = target layer bounding. `x/y` = the layer-local ORIGIN the mask canvas
+   * is anchored to (`LayerUtils.getMaskOrigin`) — non-zero for zero-copy logical
+   * fragments and for imported layers with a `contentBounds` offset, `(0,0)` for
+   * regular full-layer images. Written verbatim into `BitmapMask.bounds`, which
+   * both the main-thread and Worker composite branches consume as-is.
+   */
+  maskBounds: { x: number; y: number; w: number; h: number };
 }
 
 export type BakeRequest = PaintBakeRequest | MaskBakeRequest;

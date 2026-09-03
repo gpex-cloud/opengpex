@@ -4,6 +4,12 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.1.1
+
+- Eraser: fixed erasing on a cut-out (lasso) fragment wiping out the whole fragment instead of just the brushed area
+
+---
+
 ## v1.1.0
 
 - Layers: added layer groups — organize your layers into folders you can collapse, expand, and rearrange
