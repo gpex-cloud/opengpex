@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.1.5
+
+- AI Tools: model list now shows all models your endpoint offers with clearer errors; local/home-network backends (ComfyUI, Ollama, LocalAI) work out of the box again
+- Metrics HUD: added a quick hide button
+- Internal: reorganized fast-track interaction code and removed dead code — no behavior change
+
+---
+
 ## v1.1.4
 
 - Resize: fixed cut-out pieces disappearing or shifting when resizing the document; pieces, masks, blur, and text now scale correctly and stay sharp

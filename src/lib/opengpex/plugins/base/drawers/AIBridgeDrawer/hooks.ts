@@ -39,20 +39,15 @@ export function useAIBridgeState() {
   // Local loading state (transient, not persisted)
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchModelError, setFetchModelError] = useState<string | null>(null);
-  const [isModelFilterFallback, setIsModelFilterFallback] = useState(false);
 
   // Fetch model list
   const handleFetchModels = useCallback(async () => {
     setIsFetchingModels(true);
     setFetchModelError(null);
-    setIsModelFilterFallback(false);
     try {
-      const result = await fetchModelsCmd?.execute() as { success: boolean; error?: string; isFilterFallback?: boolean } | undefined;
+      const result = await fetchModelsCmd?.execute() as { success: boolean; error?: string } | undefined;
       if (result && !result.success) {
         setFetchModelError(result.error || 'Unknown error');
-      }
-      if (result?.isFilterFallback) {
-        setIsModelFilterFallback(true);
       }
     } catch (err) {
       setFetchModelError(err instanceof Error ? err.message : String(err));
@@ -116,7 +111,6 @@ export function useAIBridgeState() {
       cachedModels,
       isFetchingModels,
       fetchModelError,
-      isModelFilterFallback,
 
       // Actions
       updateConfig: setSelfConfig,
@@ -132,5 +126,5 @@ export function useAIBridgeState() {
       generateCmd,
       openSettingsCmd,
     };
-  }, [config, setSelfConfig, generateCmd, openSettingsCmd, activeLayer, isFetchingModels, fetchModelError, isModelFilterFallback, handleFetchModels]);
+  }, [config, setSelfConfig, generateCmd, openSettingsCmd, activeLayer, isFetchingModels, fetchModelError, handleFetchModels]);
 }

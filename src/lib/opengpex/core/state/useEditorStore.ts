@@ -26,7 +26,7 @@ import {
 } from '@opengpex/editor/core/types';
 import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import { initialState, editorReducer } from './reducer';
-import { useVolatileState } from './useVolatileState';
+import { useVolatileState, createFastFacade } from './volatile';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**
@@ -552,151 +552,15 @@ export function useEditorStore() {
     };
 
     const fastActions = {
-      fast: {
-        latestLayer: (frameId: string, id: string) => {
-          const v = volatileRef.current;
-          const frame = stateRef.current.frames.byId[frameId];
-          const layer = frame?.layers.byId[id];
-          if (!layer) return null;
-
-          const compositeKey = LayerUtils.getCompositeKey(frameId, id);
-          const draft = v.buffered.layers[compositeKey];
-          return (v.activeState.interacting && draft) ? LayerUtils.mergeLayerDraft(layer, draft) : layer;
-        },
-        latestFrame: (id: string) => {
-          const v = volatileRef.current;
-          const frame = stateRef.current.frames.byId[id];
-          if (!frame) return null;
-          const draft = v.buffered.frames[id];
-          return (v.activeState.interacting && draft) ? { ...frame, ...draft } : frame;
-        },
-        latestCamera: (id: string) => {
-          const v = volatileRef.current;
-          const frame = stateRef.current.frames.byId[id];
-          if (!frame) return { x: 0, y: 0, k: 1 };
-          // [Fix] Do not gate on interacting flag.
-          // fast.commit() sets interacting=false synchronously but dispatches UPDATE_FRAME via rAF.
-          // In the window between commit and rAF execution, interacting=false but frame.camera is
-          // still the old Redux value. If a new session starts in this window, latestCamera would
-          // return the stale frame.camera as the baseline, causing the new session's camera
-          // calculations to start from the wrong position — producing the visible "snap-back".
-          // Fix: always prefer buffered.camera if it exists, regardless of interacting state.
-          const bufferedCamera = v.buffered.frames[id]?.camera;
-          return bufferedCamera ?? frame.camera;
-        },
-        isInteracting: () => volatileRef.current.activeState.interacting,
-        getTransient: (key: string) => volatileRef.current.transient[key],
-        setTransient: (key: string, data: unknown) => mutateVolatile(v => { v.transient[key] = data as Record<string, unknown>; }),
-        override: (frameId: string, id: string, props: Record<string, unknown>, type: 'layer' | 'frame' | 'project' = 'layer') => {
-          mutateVolatile(v => {
-            if (type === 'layer') {
-              const compositeKey = LayerUtils.getCompositeKey(frameId, id);
-              v.buffered.layers[compositeKey] = { ...v.buffered.layers[compositeKey], ...props };
-              v._bufferVersion++; // [P2 Perf] Invalidate snapshot cache
-            } else if (type === 'frame') {
-              v.buffered.frames[id] = { ...v.buffered.frames[id], ...props };
-              v._bufferVersion++; // [P2 Perf] Invalidate snapshot cache
-            } else {
-              v.buffered.project = { ...v.buffered.project, ...props };
-            }
-          });
-        },
-        commit: (id?: string | null, type: 'layer' | 'layers' | 'frame' | 'frames' | 'project' = 'layer') => {
-          const v = volatileRef.current;
-          if (type === 'layers') {
-            // Group patches of composite keys (frameId:layerId) by frame for submission
-            const frameGroups: Record<string, Record<string, Partial<Layer>>> = {};
-
-            Object.entries(v.buffered.layers).forEach(([compositeKey, patch]) => {
-              const [fId, lId] = compositeKey.split(':');
-              if (!frameGroups[fId]) frameGroups[fId] = {};
-              // Filter out non-serialized imageOverride and bitmapMaskOverride properties to prevent them from entering the Redux Store
-              const { imageOverride: _io1, bitmapMaskOverride: _bm1, ...serializablePatch } = patch;
-              if (Object.keys(serializablePatch).length > 0) {
-                frameGroups[fId][lId] = serializablePatch;
-              }
-            });
-
-            Object.entries(frameGroups).forEach(([fId, patches]) => {
-              if (Object.keys(patches).length > 0) {
-                enhancedDispatch({ type: 'BATCH_UPDATE_LAYER', payload: { frameId: fId, patches } });
-              }
-            });
-          } else if (type === 'frames') {
-            const patches = { ...v.buffered.frames };
-            if (Object.keys(patches).length > 0) enhancedDispatch({ type: 'BATCH_UPDATE_FRAME', payload: { patches } });
-          } else if (type === 'layer' || type === 'frame') {
-            if (!id) return;
-
-            if (type === 'layer') {
-              // Note: When submitting a single layer, we need to find which frame it belongs to
-              // Simplified handling here: find the first composite key matching the layerId
-              const compositeEntry = Object.entries(v.buffered.layers).find(([key]) => key.endsWith(`:${id}`));
-              if (compositeEntry) {
-                const [fId] = compositeEntry[0].split(':');
-                // Filter out non-serialized imageOverride and bitmapMaskOverride properties to prevent them from entering the Redux Store
-                const { imageOverride: _io2, bitmapMaskOverride: _bm2, ...serializablePatch } = compositeEntry[1];
-                if (Object.keys(serializablePatch).length > 0) {
-                  enhancedDispatch({ type: 'UPDATE_LAYER', payload: { frameId: fId, layerId: id, patch: serializablePatch } });
-                }
-              }
-            } else {
-              const patch = v.buffered.frames[id];
-              if (patch) enhancedDispatch({ type: 'UPDATE_FRAME', payload: { id, patch } });
-            }
-          }
-          // [Critical Fix] Delay clearing buffered to prevent fast-track/slow-track tearing.
-          // dispatch is asynchronous (React batches it), but delete is synchronous.
-          // If cleared synchronously, the Ticker might read an empty draft + old State before React updates -> flash.
-          // Delay clearing by one frame to ensure React has consumed the draft before removal.
-          volatileRef.current.activeState.interacting = false;
-          requestAnimationFrame(() => {
-            const vRef = volatileRef.current;
-            if (type === 'layers') vRef.buffered.layers = {};
-            else if (type === 'frames') vRef.buffered.frames = {};
-            else if (type === 'project') vRef.buffered.project = {};
-            else if (id) {
-              if (type === 'layer') {
-                const keys = Object.keys(vRef.buffered.layers).filter(k => k.endsWith(`:${id}`));
-                keys.forEach(k => delete vRef.buffered.layers[k]);
-              }
-              else if (type === 'frame') delete vRef.buffered.frames[id];
-            }
-            // 💡 After the interaction is completely committed, clear transient reference data like alignment guides to prevent erroneous activation during two-finger panning
-            if (vRef.transient.smartguides !== undefined) {
-              delete vRef.transient.smartguides;
-            }
-          });
-        },
-        signal: (frameId: string) => {
-          mutateVolatile(v => { v.activeState.interacting = true; });
-          enhancedDispatch({ type: 'SIGNAL_COMMIT', payload: { frameId } });
-        },
-        reset: resetVolatile,
-
-        // ─── Volatile Interaction (high-frequency transient state) ─────────
-        setCursor: (cursor: string | null) => {
-          const vi = volatileRef.current.interaction;
-          if (vi.cursorOverride === cursor) return;
-          vi.cursorOverride = cursor;
-          viNotify('cursorOverride');
-        },
-        getCursor: () => volatileRef.current.interaction.cursorOverride,
-        setHover: (layerId: string | null, isHoveringActive = false) => {
-          const vi = volatileRef.current.interaction;
-          const hoverChanged = vi.hoveredLayerId !== layerId;
-          const activeChanged = vi.isHoveringActiveLayer !== isHoveringActive;
-          if (!hoverChanged && !activeChanged) return;
-          if (hoverChanged) { vi.hoveredLayerId = layerId; viNotify('hoveredLayerId'); }
-          if (activeChanged) { vi.isHoveringActiveLayer = isHoveringActive; viNotify('isHoveringActiveLayer'); }
-        },
-        subscribeInteraction: (key: string, listener: () => void) => {
-          const map = viListenersRef.current;
-          if (!map.has(key)) map.set(key, new Set());
-          map.get(key)!.add(listener);
-          return () => { map.get(key)?.delete(listener); };
-        },
-      }
+      fast: createFastFacade({
+        volatileRef,
+        stateRef,
+        mutateVolatile,
+        resetVolatile,
+        dispatch: enhancedDispatch,
+        notify: viNotify,
+        listenersRef: viListenersRef,
+      }),
     };
 
     return {

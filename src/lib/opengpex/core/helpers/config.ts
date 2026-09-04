@@ -132,60 +132,6 @@ export const ESTIMATION_PRESETS = {
   MIN_BPP_LOSSY: 0.15,
 };
 
-/** -----------------------------------------------------------------*/
-/** AI Image Model Keywords -----------------------------------------*/
-/** -----------------------------------------------------------------*/
-
-/**
- * Keyword list of known image generation models.
- * Used to filter out image models from the complete model list returned by the /v1/models endpoint.
- * To support a new model, simply add the keyword here (case-insensitive).
- */
-export const IMAGE_MODEL_KEYWORDS: string[] = [
-  // OpenAI
-  'dall-e',
-  'gpt-image',
-  // Stability AI
-  'stable-diffusion',
-  'stable_diffusion',
-  'sdxl',
-  'sd3',
-  'sd-',
-  'ssd',
-  // Black Forest Labs
-  'flux',
-  // Midjourney
-  'midjourney',
-  // Google
-  'imagen',
-  // Kandinsky
-  'kandinsky',
-  // Playground
-  'playground',
-  // Community / Fine-tunes
-  'dreamshaper',
-  'realvis',
-  'deliberate',
-  'proteus',
-  'juggernaut',
-  'animagine',
-  'waifu',
-  'anything-v',
-  'counterfeit',
-  'rev-animated',
-  'openjourney',
-  // Generic keywords
-  'txt2img',
-  'img2img',
-  'image-gen',
-  'image_gen',
-  'art-',
-  'paint-',
-  'draw-',
-  'creative-',
-  'qwen3-vl-',
-  'qwen-image'
-];
 
 /** -----------------------------------------------------------------*/
 /** Adjustments / Filter Presets ------------------------------------*/

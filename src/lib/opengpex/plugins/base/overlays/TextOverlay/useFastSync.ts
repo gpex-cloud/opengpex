@@ -19,7 +19,7 @@
 
 import { useRef, useCallback } from 'react';
 import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
-import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
+import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { Motion } from '@opengpex/editor/core/motion';
 import { Frame, CameraState, VolatileState, asLocalShape } from '@opengpex/editor/core/types';
 import { LayerUtils } from '@opengpex/editor/core/layer/utils';

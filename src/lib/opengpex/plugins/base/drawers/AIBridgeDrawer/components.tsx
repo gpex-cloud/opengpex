@@ -82,7 +82,6 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
     cachedModels,
     isFetchingModels,
     fetchModelError,
-    isModelFilterFallback,
     updateConfig,
     setMode,
     setModel,
@@ -221,7 +220,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
       {/* Generate Content */}
       {drawerTab === "generate" && !needsSetup && (
         <>
-          <div className="space-y-2">
+          <motion.div layout="position" className="space-y-2">
             {/* Mode Tabs */}
             <FunctionTabs
               options={MODE_LIST.map((m) => ({
@@ -258,6 +257,8 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                 <div className="flex-1 min-w-0">
                   {cachedModels.length > 0 ? (
                     <ActionDropdown
+                      className="w-full block [&>div]:w-full"
+                      matchTriggerWidth={true}
                       options={cachedModels.map((m) => ({
                         label: m.id,
                         value: m.id,
@@ -315,15 +316,6 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                 variant="rose"
                 icon={<AlertTriangle size={14} />}
                 title={fetchModelError}
-              />
-            )}
-
-            {/* No Image Models Detected Notice */}
-            {isModelFilterFallback && cachedModels.length > 0 && (
-              <StatusBanner
-                variant="amber"
-                icon={<AlertTriangle size={14} />}
-                title="No image models detected. Showing all available models."
               />
             )}
 
@@ -506,7 +498,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                 </span>
               </FancyButton>
             </div>
-          </div>
+          </motion.div>
         </>
       )}
     </div>

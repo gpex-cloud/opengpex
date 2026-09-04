@@ -19,10 +19,10 @@
 
 import React, { useLayoutEffect, useCallback, useRef } from 'react';
 import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
-import { LayerUtils } from '@opengpex/editor/core/layer/utils';
-import { VolatileState, Frame, CameraState, Rect, IMatrix3x3, LocalRect, WorldRect, LocalShape, Layer } from '@opengpex/editor/core/types';
-import { useTicker } from './animation';
-import { Motion } from '../index';
+import { VolatileState, Frame, CameraState, Rect, IMatrix3x3, LocalRect, WorldRect, LocalShape } from '@opengpex/editor/core/types';
+import { useTicker } from '@opengpex/editor/core/motion/hooks/animation';
+import { Motion } from '@opengpex/editor/core/motion';
+import { mergeFrameSnapshot } from './merge';
 
 /**
  * MatrixRect: Matrix object carrying physical dimension information
@@ -78,29 +78,10 @@ export function useFastSync<T extends Element>(
       latestFrame = snapshot.frame;
       latestCam = snapshot.cam;
     } else {
-      // Cache miss: first subscriber this tick — compute merge
-      const frameDraft = v.buffered.frames[frame.id];
-
-      // [Critical Fix] Do not use isInteracting as the sole guard.
-      // isInteracting is synchronously set to false after commit, but React State updates asynchronously.
-      // If we skip merging now, it will flash back to the old frame data (tearing).
-      // Correct approach: as long as there are drafts in the buffer, continue to merge until React consumes them.
-      latestFrame = frame;
-      const hasLayerDrafts = Object.keys(v.buffered.layers).length > 0;
-      if (frameDraft || hasLayerDrafts) {
-        latestFrame = { ...frame, ...frameDraft };
-        // Deep stitching: merge fast-track layer increments into the layers array
-        if (hasLayerDrafts) {
-          const nextById: Record<string, Layer> = {};
-          for (const id of frame.layers.order) {
-            nextById[id] = LayerUtils.mergeLayerDraft(frame.layers.byId[id], v.buffered.layers[LayerUtils.getCompositeKey(frame.id, id)]);
-          }
-          latestFrame.layers = { byId: nextById, order: frame.layers.order };
-        }
-      }
-
-      // Merge camera (fast-track first: use draft as long as it exists)
-      latestCam = frameDraft?.camera ? frameDraft.camera : frame.camera;
+      // Cache miss: first subscriber this tick — compute merge via the SSOT
+      const merged = mergeFrameSnapshot(v, frame);
+      latestFrame = merged.frame;
+      latestCam = merged.cam;
 
       // Store snapshot for subsequent subscribers in this tick
       v._snapshot = { version: v._bufferVersion, sourceFrame: frame, frame: latestFrame, cam: latestCam };

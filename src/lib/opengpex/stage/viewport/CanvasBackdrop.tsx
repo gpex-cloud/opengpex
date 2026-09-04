@@ -34,7 +34,7 @@ interface CanvasBackdropProps {
   showChess?: boolean;
 }
 
-import { useFastSync } from "@opengpex/editor/core/motion/hooks/navigation";
+import { useFastSync } from "@opengpex/editor/core/state/volatile";
 import { useOverlayRotationSync } from "@opengpex/editor/core/context";
 import { snapCanvasRect } from "@opengpex/editor/core/geometry/operators/snapping";
 

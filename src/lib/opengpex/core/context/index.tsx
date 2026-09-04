@@ -63,7 +63,7 @@ import { CORE_VERSION } from "@opengpex/editor/core/plugin/version";
 import { presets } from "@opengpex/editor/core/helpers/preferences";
 import "../../index.css";
 
-export * from "@opengpex/editor/core/state/useVolatileState";
+export * from "@opengpex/editor/core/state/volatile";
 
 /* ==========================================================================
    SECTION 1: Context Declarations

@@ -26,7 +26,7 @@ import { resolveDisplayColorSpace } from '@opengpex/editor/core/color/ColorPipel
 import { FontService } from '@opengpex/editor/core/fonts';
 import { PERF_MON } from '@opengpex/editor/core/helpers/config';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
-import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
+import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { useOverlayRotationSync } from '@opengpex/editor/core/motion/hooks/animation';
 import { sourceBitmapCache, tileCache, filterCache, getEngine } from '@opengpex/editor/core/engine/renderer';
 import { DISPLAY_CHANNEL_SIGNAL_KEY, type ChannelMask } from '@opengpex/editor/core/engine/protocol/DisplayTransform';

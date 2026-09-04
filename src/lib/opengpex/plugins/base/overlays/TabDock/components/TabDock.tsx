@@ -24,6 +24,7 @@ import {
   Grip,
   Layers,
   X,
+  Minus,
   Settings,
   Activity,
   Globe,
@@ -157,9 +158,25 @@ function fpsColor(fps: number): string {
  */
 function DockMetricsHUD() {
   const { fps, world, local, mem } = useDockMetrics();
+  const { updateConfig } = useTabDockContext();
 
   return (
-    <div className="flex flex-col gap-1 font-mono select-none">
+    <div className="relative flex flex-col gap-1 font-mono select-none group/hud">
+      {/* Collapse button: floats over the HUD's top-right corner, takes no layout space.
+          Acts as a shortcut for the Metrics HUD toggle in settings. */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          updateConfig({ showMetricsHud: false });
+        }}
+        title="Hide Metrics HUD"
+        aria-label="Hide Metrics HUD"
+        className="absolute -top-2 -right-2 z-[1200] flex items-center justify-center w-3.5 h-3.5 rounded-full bg-zinc-700 text-white hover:bg-zinc-600 dark:bg-zinc-300 dark:text-zinc-900 dark:hover:bg-zinc-200 border border-black/10 dark:border-white/10 opacity-0 group-hover/hud:opacity-100 transition-all shadow-sm"
+      >
+        <Minus size={8} strokeWidth={3} />
+      </button>
+
       {/* FPS */}
       <div className="flex items-center gap-1">
         <Activity size={8} className={`shrink-0 ${fpsColor(fps)}`} />

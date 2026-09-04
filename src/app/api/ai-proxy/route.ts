@@ -37,6 +37,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { checkSsrfTarget } from '@opengpex/editor/core/helpers/ssrf-guard';
 
 // Allowed target URL protocols
 const ALLOWED_PROTOCOLS = ['https:', 'http:'];
@@ -90,19 +91,15 @@ async function proxyRequest(request: NextRequest, method: string): Promise<NextR
       );
     }
 
-    // Block intranet requests (basic SSRF protection)
-    const hostname = parsedUrl.hostname;
-    if (
-      hostname === 'localhost' ||
-      hostname === '127.0.0.1' ||
-      hostname === '0.0.0.0' ||
-      hostname.startsWith('192.168.') ||
-      hostname.startsWith('10.') ||
-      hostname.startsWith('172.') ||
-      hostname === '::1'
-    ) {
+    // SSRF Protection (shared guard):
+    //  1. Cloud instance metadata (169.254.x.x) is always blocked.
+    //  2. Private/LAN targets are allowed by default (so users can reach LocalAI,
+    //     Ollama, ComfyUI, LM Studio, etc.) and only blocked when
+    //     GPEX_API_ROUTE_BLOCK_LAN=true — intended for public multi-tenant SaaS.
+    const verdict = checkSsrfTarget(parsedUrl.hostname);
+    if (!verdict.allowed) {
       return NextResponse.json(
-        { error: { message: 'Internal network targets not allowed' } },
+        { error: { message: verdict.reason } },
         { status: 403 },
       );
     }

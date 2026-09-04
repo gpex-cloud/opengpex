@@ -27,7 +27,6 @@
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
 import { SettingsPanelAPI } from '../../panels/SettingsPanel/protocols';
 import { AIBridgeConfig, AIProvider, AIMode, AI_MODE_META, AIModelInfo, GenerationRecord } from './protocols';
-import { IMAGE_MODEL_KEYWORDS } from '@opengpex/editor/core/helpers/config';
 
 import * as P from './protocols';
 
@@ -424,30 +423,61 @@ export const AI_BRIDGE_COMMANDS = {
         });
 
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status} ${res.statusText}`);
+          const errData = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+          throw new Error(errData.error?.message || `HTTP ${res.status} ${res.statusText}`);
         }
 
-        const data = (await res.json()) as { data?: AIModelInfo[] };
-        const allModels: AIModelInfo[] = data.data || [];
+        const rawJson = (await res.json()) as Record<string, unknown>;
+        const allRawModels: Record<string, unknown>[] = Array.isArray(rawJson?.data)
+          ? (rawJson.data as Record<string, unknown>[])
+          : Array.isArray(rawJson)
+            ? (rawJson as Record<string, unknown>[])
+            : Array.isArray(rawJson?.models)
+              ? (rawJson.models as Record<string, unknown>[])
+              : [];
 
-        // Filtering strategy: uses the image model keyword whitelist maintained in presets.ts
-        const imageModels = allModels.filter(m =>
-          IMAGE_MODEL_KEYWORDS.some(kw => m.id.toLowerCase().includes(kw.toLowerCase()))
-        );
+        // No client-side type filtering. The OpenAI-standard /v1/models response
+        // only guarantees an `id` per model (e.g. LocalAI returns just {id, object}).
+        // Capability hints like supported_endpoint_types / architecture.modality /
+        // supportedGenerationMethods are non-standard, gateway-specific extensions
+        // (litellm / OpenRouter / Gemini), so we list every model as-is and let the
+        // user pick the right one for image generation.
+        const finalModels: AIModelInfo[] = allRawModels.map(m => ({
+          id: String(m.id || m.name || ''),
+          owned_by: typeof m.owned_by === 'string' ? m.owned_by : undefined,
+        }));
 
-        // If no image model matches, fall back to the entire list
-        const finalModels = imageModels.length > 0 ? imageModels : allModels;
-        const isFilterFallback = imageModels.length === 0 && allModels.length > 0;
+        // If models were fetched and the currently selected model is not in the list, auto-switch to the first valid model
+        let updatedProviders = config.providers;
+        if (finalModels.length > 0) {
+          const currentModelInList = finalModels.some(m => m.id === activeProvider.model);
+          if (!currentModelInList && config.providers) {
+            updatedProviders = config.providers.map(p =>
+              p.id === activeProvider.id ? { ...p, model: finalModels[0].id } : p
+            );
+          }
+        }
 
-        // Update cache
+        // Update cache and providers
         const nextCachedModels = {
           ...(config.cachedModels || {}),
           [activeProvider.id]: finalModels,
         };
 
-        setSelfConfig?.({ cachedModels: nextCachedModels });
+        setSelfConfig?.({
+          cachedModels: nextCachedModels,
+          ...(updatedProviders ? { providers: updatedProviders } : {}),
+        });
 
-        return { success: true, models: finalModels, isFilterFallback };
+        if (finalModels.length === 0) {
+          return {
+            success: false,
+            models: [],
+            error: 'The endpoint returned no models.',
+          };
+        }
+
+        return { success: true, models: finalModels };
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.warn('[AIBridge] Fetch models failed:', errMsg);

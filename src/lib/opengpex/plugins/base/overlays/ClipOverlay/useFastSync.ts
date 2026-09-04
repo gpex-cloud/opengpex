@@ -19,7 +19,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
-import { useFastSync, useFastRectSync, useFastSvgGroupSync, useFastMarchingAntsSync, useFastAnchorSync } from '@opengpex/editor/core/motion/hooks/navigation';
+import { useFastSync, useFastRectSync, useFastSvgGroupSync, useFastMarchingAntsSync, useFastAnchorSync } from '@opengpex/editor/core/state/volatile';
 import { LocalShape, LocalPolygon, LocalPoint, asLocalShape, asLocalPolygon, asLocalRect, Point2D } from '@opengpex/editor/core/types';
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { ClipTool } from '../../options/ClipOptions/protocols';

@@ -19,7 +19,7 @@
 
 import { useRef } from 'react';
 import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
-import { useFastSync, useFastAnchorSync } from '@opengpex/editor/core/motion/hooks/navigation';
+import { useFastSync, useFastAnchorSync } from '@opengpex/editor/core/state/volatile';
 import { Motion } from '@opengpex/editor/core/motion';
 import { Layer } from '@opengpex/editor/core/types';
 

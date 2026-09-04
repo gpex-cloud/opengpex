@@ -23,8 +23,10 @@
  * Proxies HTTP requests from the browser to a local/remote ComfyUI instance.
  * This solves CORS restrictions — browsers cannot directly fetch localhost:8188.
  *
- * Unlike the ai-proxy route, this route ALLOWS private IP targets (localhost, 192.168.x.x, etc.)
- * because ComfyUI is expected to run on the user's local machine or LAN.
+ * Unlike the ai-proxy route, this route allows private IP targets (localhost, 192.168.x.x, etc.)
+ * BY DEFAULT, because ComfyUI is expected to run on the user's local machine or LAN.
+ * For public multi-tenant SaaS hosting, set GPEX_API_ROUTE_BLOCK_LAN=true to block them.
+ * Cloud instance metadata (169.254.x.x) is always blocked regardless of that setting.
  *
  * Usage:
  *   POST /api/comfy/upload/image
@@ -38,6 +40,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { checkSsrfTarget } from '@opengpex/editor/core/helpers/ssrf-guard';
 
 // Request body size limit (50MB — ComfyUI uploads can be large images)
 const MAX_BODY_SIZE = 50 * 1024 * 1024;
@@ -70,6 +73,19 @@ async function proxyToComfy(
       return NextResponse.json(
         { error: { message: validation.error } },
         { status: 400 },
+      );
+    }
+
+    // SSRF Protection (shared guard):
+    //  1. Cloud instance metadata (169.254.x.x) is always blocked.
+    //  2. Private/LAN targets are allowed by default — ComfyUI is expected to
+    //     run on the user's local machine or LAN — and only blocked when
+    //     GPEX_API_ROUTE_BLOCK_LAN=true (for public multi-tenant SaaS hosting).
+    const verdict = checkSsrfTarget(validation.url!.hostname);
+    if (!verdict.allowed) {
+      return NextResponse.json(
+        { error: { message: verdict.reason } },
+        { status: 403 },
       );
     }
 

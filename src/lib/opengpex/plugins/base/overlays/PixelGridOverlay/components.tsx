@@ -21,7 +21,7 @@
 
 import React, { useRef, useEffect } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
-import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
+import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { Grid } from 'lucide-react';
 import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
 import { usePixelGridCommands } from './hooks';

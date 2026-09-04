@@ -18,7 +18,7 @@
  */
 
 import { useRef } from 'react';
-import { useFastSync } from '@opengpex/editor/core/motion/hooks/navigation';
+import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { VolatileState, Frame, CameraState } from '@opengpex/editor/core/types';
 import { getStrokeBuffer, getStrokeVersion } from './interactions';
 
