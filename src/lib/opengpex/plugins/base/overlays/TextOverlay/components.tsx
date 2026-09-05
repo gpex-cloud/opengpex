@@ -22,6 +22,7 @@
 import React, { useRef, useCallback, useEffect, useState } from "react";
 import { useEditorState, useEditorServices, useVolatileInteraction } from "@opengpex/editor/core/context";
 import { TEXT_LAYER_PADDING } from "@opengpex/editor/core/helpers/config";
+import { TransformGizmo } from "@opengpex/editor/widgets/TransformGizmo";
 import { useTextEditorFastSync } from "./useFastSync";
 import { useTextOverlayState, useInlineTextEditing } from "./hooks";
 
@@ -154,6 +155,12 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
     [commitEditing, editorRef],
   );
 
+  // Prevent default mousedown on a resize handle so the contenteditable does not
+  // lose focus when the user grabs a handle (was TextResizeHandles' preventBlur).
+  const preventHandleBlur = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+  }, []);
+
   if (!activeFrame || !layer || !textData) return null;
 
   const boxMode = textData.boxMode || "auto";
@@ -249,121 +256,16 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
           )}
 
           {/* Resize Handles (always visible during editing, counter-scaled for consistent screen size) */}
-          <TextResizeHandles cameraK={camera.k} rotation={layer.rotation} flip={layer.flip} />
+          <TransformGizmo
+            rotation={layer.rotation}
+            flip={layer.flip}
+            handleSizePx={10 / camera.k}
+            handleClassName="border border-gray-400"
+            onHandlePointerDown={preventHandleBlur}
+          />
+
         </div>
       </div>
   );
 });
 
-// ─── TextResizeHandles ─────────────────────────────────────────────────────────
-
-/**
- * Map an on-screen direction (degrees) to the nearest of the 4 resize cursors.
- *
- * Cursors are bidirectional, so the direction is folded into [0,180) and then
- * bucketed every 45°: e/w → `ew-resize`, ne/sw → `nesw-resize`,
- * n/s → `ns-resize`, nw/se → `nwse-resize`.
- *
- * TODO(Phase 6): this is copied verbatim from MarkerOverlay/components.tsx
- * (`cursorForAngle` / `resolveHandleCursor`). Both should be lifted into the
- * shared `<TransformGizmo>` extraction (see plans doc §11/§12).
- */
-function cursorForAngle(angleDeg: number): string {
-  const a = ((angleDeg % 180) + 180) % 180;
-  const bucket = Math.round(a / 45) % 4;
-  switch (bucket) {
-    case 0: return 'ew-resize';
-    case 1: return 'nwse-resize';   // pointing down-right (screen +y is down)
-    case 2: return 'ns-resize';
-    default: return 'nesw-resize';  // pointing up-right
-  }
-}
-
-/**
- * Resolve a handle's cursor for the layer's current pose.
- *
- * The editor box is drawn through the layer's full world matrix (see
- * useTextEditorFastSync), so after a canvas Rotate Left/Right the box
- * self-rotates — but CSS `cursor` keywords ignore CSS `transform`. We therefore
- * rotate the handle's local outward normal by `layer.rotation` (mirroring flips
- * first, matching the renderer's R × F convention) and pick the matching cursor.
- */
-function resolveHandleCursor(
-  angle: number,
-  rotation: number,
-  flip: { h: boolean; v: boolean } | undefined
-): string {
-  const rad = (angle * Math.PI) / 180;
-  let dx = Math.cos(rad);
-  let dy = Math.sin(rad);
-  if (flip?.h) dx = -dx;
-  if (flip?.v) dy = -dy;
-  const screenAngle = (Math.atan2(dy, dx) * 180) / Math.PI + rotation;
-  return cursorForAngle(screenAngle);
-}
-
-/**
- * TextResizeHandles: 8-direction resize handles (circular dots on the border)
- * - always visible during editing
- * - all handles are standard circular dots positioned on the dashed border
- * - counter-scaled by 1/cameraK so they appear constant screen size regardless of zoom
- * - handle elements have pointer-events-auto + preventDefault to prevent loss of focus
- * - interaction area keeps pointer-events-none to avoid intercepting contenteditable clicks
- * - cursors are rotation-aware: the container self-rotates via CSS matrix, but CSS
- *   cursor keywords ignore transforms, so each handle's cursor is recomputed from
- *   its LOCAL outward-normal angle + the layer's rotation/flip.
- */
-function TextResizeHandles({
-  cameraK,
-  rotation,
-  flip,
-}: {
-  cameraK: number;
-  rotation: number;
-  flip: { h: boolean; v: boolean } | undefined;
-}) {
-  // Prevent default mousedown behavior on handle to avoid contenteditable loss of focus
-  const preventBlur = (e: React.MouseEvent) => {
-    e.preventDefault();
-  };
-
-  // Screen-space handle size (constant regardless of zoom)
-  const SCREEN_SIZE = 10; // px on screen
-  // Canvas-space size: counter-scale to maintain constant screen appearance
-  const canvasSize = SCREEN_SIZE / cameraK;
-  const half = canvasSize / 2;
-
-  // `angle` is each handle's outward normal in the layer's LOCAL space, screen
-  // convention (0° = +x/east, growing clockwise since screen +y points down).
-  const handles = [
-    // Corners
-    { h: "nw", angle: 225, style: { top: -half, left: -half } },
-    { h: "ne", angle: 315, style: { top: -half, right: -half } },
-    { h: "sw", angle: 135, style: { bottom: -half, left: -half } },
-    { h: "se", angle: 45, style: { bottom: -half, right: -half } },
-    // Edges
-    { h: "n", angle: 270, style: { top: -half, left: "50%", marginLeft: -half } },
-    { h: "s", angle: 90, style: { bottom: -half, left: "50%", marginLeft: -half } },
-    { h: "w", angle: 180, style: { left: -half, top: "50%", marginTop: -half } },
-    { h: "e", angle: 0, style: { right: -half, top: "50%", marginTop: -half } },
-  ] as const;
-
-  return (
-    <div className="absolute inset-0 pointer-events-none">
-      {handles.map(({ h, angle, style }) => (
-        <div
-          key={h}
-          data-handle={h}
-          onMouseDown={preventBlur}
-          className="absolute rounded-full bg-white border border-gray-400 shadow-sm pointer-events-auto hover:scale-125 transition-transform duration-150"
-          style={{
-            width: `${canvasSize}px`,
-            height: `${canvasSize}px`,
-            cursor: resolveHandleCursor(angle, rotation, flip),
-            ...style,
-          }}
-        />
-      ))}
-    </div>
-  );
-}

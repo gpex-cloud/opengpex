@@ -51,7 +51,6 @@ export interface InteractionState {
   isHoveringActiveLayer?: boolean;
   interactionMode: InteractionMode;
   selectionErrorPulse?: number;
-  smartguides: SmartGuideData | null;
   hud?: {
     message: string;
     type: 'info' | 'success' | 'error';

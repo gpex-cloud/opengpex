@@ -57,7 +57,6 @@ export const initialState: EditorData = {
   confirm: null,
   choice: null,
   interaction: {
-    smartguides: null,
     interactionMode: 'pan',
     isInteracting: false,
     signals: {},

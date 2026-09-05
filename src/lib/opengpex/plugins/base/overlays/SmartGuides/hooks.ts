@@ -20,28 +20,26 @@
 'use client';
 
 import { useMemo } from 'react';
-import { usePluginCommands, useEditorState } from '@opengpex/editor/core/context';
+import { usePluginCommands } from '@opengpex/editor/core/context';
 import { usePreset } from '@opengpex/editor/core/helpers/preferences/usePreset';
 import type { SmartGuidesCommandsMap } from './commands.d';
 
 /**
- * useSmartGuides: Unified hook for smart guides (State observation + commands).
+ * useSmartGuides: Unified hook for smart guides (enable-state observation + commands).
+ *
+ * NOTE: this hook deliberately does NOT expose guide geometry. Live guide data
+ * lives in `volatile.transient.smartguides` and is consumed at 30Hz by
+ * `useSmartGuidesFastSync`, which writes straight to the DOM — routing it through
+ * React would defeat the fast path. (A `state.interaction.smartguides` slow-state
+ * field used to exist but was never written after the volatile migration; it and
+ * the dead `isVisible` branch here were removed.)
  */
 export const useSmartGuides = () => {
-  const { state, activeFrame } = useEditorState();
   const isEnabled = usePreset('SNAP_ENABLED');
   const { toggleCmd } = usePluginCommands<SmartGuidesCommandsMap>();
 
-  return useMemo(() => {
-    const { smartguides } = state.interaction;
-
-    const data = (!isEnabled || !smartguides || !activeFrame)
-      ? { isVisible: false, isEnabled }
-      : { isVisible: true, isEnabled, smartguides };
-
-    return {
-      ...data,
-      toggleCmd,
-    };
-  }, [state.interaction, isEnabled, activeFrame, toggleCmd]);
+  return useMemo(() => ({
+    isEnabled,
+    toggleCmd,
+  }), [isEnabled, toggleCmd]);
 };

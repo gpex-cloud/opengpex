@@ -57,12 +57,37 @@ function computeWorldMatrix(props: {
 
 /**
  * [External] Convert semantic state to 2x2 rotation-mirror matrix part
+ *
+ * Contract: **O = R × F** (mirror first, then rotate), rotation in degrees.
+ * This is THE single source of truth for orientation sign convention across
+ * rendering (`computeWorldMatrix`), move (`computeLayerMovePose`), resize
+ * (`localToWorldCenter` in space.ts) and snapping (`snapEdgeRotated`). Any
+ * hand-rolled sin/cos that disagrees with it will mirror the result relative to
+ * what the user sees on screen — always call this instead of re-deriving it.
  */
-function getOrientationMatrix(rotation: number, flip?: { h: boolean, v: boolean }): Matrix3x3 {
+export function getOrientationMatrix(rotation: number, flip?: { h: boolean, v: boolean }): Matrix3x3 {
   const safeFlip = flip || { h: false, v: false };
   const R = Matrix3x3.rotate(rotation);
   const F = new Matrix3x3(safeFlip.h ? -1 : 1, 0, 0, safeFlip.v ? -1 : 1, 0, 0);
   return R.multiply(F);
+}
+
+/**
+ * Whether a layer's own axes diverge from the canvas axes.
+ *
+ * True when the layer carries a non-zero rotation (normalised to [0,360)) or any
+ * mirror flag — e.g. after a canvas Rotate Left/Right, where `transformFrame`
+ * bumps `rotation` but leaves `bounding` untouched.
+ *
+ * THE SINGLE SOURCE OF TRUTH for the "does this need local-axes math?" question.
+ * `TransformHandler.needsOrientationPath` and the marker/text resize handlers all
+ * defer to this: if they ever disagreed, one side would treat a rect as canvas-
+ * local while the other treats it as object-local — a silent coordinate error
+ * with no type-level protection (both are branded `LocalRect`).
+ */
+export function isRotatedPose(layer: Pick<Layer, 'rotation' | 'flip'>): boolean {
+  const rot = ((layer.rotation % 360) + 360) % 360;
+  return rot !== 0 || !!layer.flip?.h || !!layer.flip?.v;
 }
 
 /**

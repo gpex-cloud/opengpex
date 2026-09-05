@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.2.3
+
+- Snapping: rotated text and markers now snap to canvas edges, centers, and other layers while you resize them, with the usual straight guide lines
+- Resize handles: text and marker overlays now share a single reusable gizmo — same look, fewer bugs
+- Layers panel: group rows are more compact with a refined amber color scheme
+
+---
+
 ## v1.2.2
 
 - Text & Markers: consecutively added text or markers now group together automatically, and new items land right above the layer you have selected

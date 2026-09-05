@@ -24,7 +24,7 @@ import {
   asLocalPoint, asLocalRect, asWorldRect, Layer, IMatrix3x3, Point2D, Shape, NormalizedState
 } from '@opengpex/editor/core/types';
 import { getCameraMatrix } from './camera';
-import { getLayerWorldMatrix } from './transform';
+import { getLayerWorldMatrix, getOrientationMatrix } from './transform';
 
 /**
  * Viewport physical coordinates -> World absolute coordinates (offset from center)
@@ -84,6 +84,48 @@ export function worldToLocalRect(w_rect: WorldRect, canvasDim: Dimensions): Loca
 export function localToWorldRect(l_rect: Rect, canvasDim: Dimensions): WorldRect {
   const w_pos = localToWorld(l_rect.x, l_rect.y, canvasDim);
   return asWorldRect({ ...w_pos, w: l_rect.w, h: l_rect.h });
+}
+
+/**
+ * [Space Conversion] Object-LOCAL-axes rect centre -> World centre (cx, cy).
+ *
+ * The inverse of the pose half of `computeWorldMatrix`
+ * (`Translate(cx,cy) × O × Translate(-w/2,-h/2)`), used by the orientation-aware
+ * resize path: while a rotated layer is being resized the math runs in the
+ * object's OWN axes, so the resulting rect is local. To write the layer back we
+ * need its new world centre.
+ *
+ * Derivation — during a resize the anchored (opposite) corner must stay pinned in
+ * world space, so the bounding centre moves by exactly the local centre delta,
+ * rotated into world space:
+ *
+ *   worldCentre = startCentre + O × (newLocalCentre − startLocalCentre)
+ *
+ * Uses `getOrientationMatrix` (O = R × F) so the sign convention is shared with
+ * the renderer by construction — this function exists precisely so callers stop
+ * hand-rolling sin/cos and risking a mirrored result.
+ *
+ * @param startCenter    World centre at gesture start (layer.cx / layer.cy).
+ * @param startLocalRect The LOCAL-axes rect at gesture start.
+ * @param nextLocalRect  The LOCAL-axes rect produced by the resize math.
+ * @param orientation    The layer's pose; constant for the whole gesture.
+ * @returns The layer's new world centre.
+ */
+export function localToWorldCenter(
+  startCenter: { cx: number; cy: number },
+  startLocalRect: Rect,
+  nextLocalRect: Rect,
+  orientation: { rotation: number; flip?: { h: boolean; v: boolean } }
+): Point2D {
+  const startLocalCx = startLocalRect.x + startLocalRect.w / 2;
+  const startLocalCy = startLocalRect.y + startLocalRect.h / 2;
+  const nextLocalCx = nextLocalRect.x + nextLocalRect.w / 2;
+  const nextLocalCy = nextLocalRect.y + nextLocalRect.h / 2;
+
+  const O = getOrientationMatrix(orientation.rotation, orientation.flip);
+  const delta = O.apply({ x: nextLocalCx - startLocalCx, y: nextLocalCy - startLocalCy });
+
+  return { x: startCenter.cx + delta.x, y: startCenter.cy + delta.y };
 }
 
 /**

@@ -19,6 +19,7 @@
 
 import { InteractionHandler, InteractionEvent, LocalRect, asWorldPoint } from '@opengpex/editor/core/types';
 import { Matrix3x3 } from '@opengpex/editor/core/geometry/matrix';
+import { isRotatedPose } from '@opengpex/editor/core/geometry/operators/transform';
 import { InteractionMath } from '../Math';
 import { InteractionTransaction } from '../Transaction';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
@@ -64,6 +65,18 @@ export interface LayerOrientation {
   rotation: number;
   /** Mirror flags (layer.flip) */
   flip: { h: boolean; v: boolean };
+  /**
+   * World-space centre of the object's bounding box (layer.cx / layer.cy).
+   *
+   * OPTIONAL, but required to get **rotation-aware edge snapping**. The local-axes
+   * resize path only knows the object's local rect; to snap its edges against
+   * canvas edges / centre lines / other layers, the framework must project that
+   * local rect back into canvas space, which needs the world centre it is
+   * anchored to. Supply both or neither — when absent, edge snapping is skipped
+   * for the rotated path (the resize math itself is unaffected).
+   */
+  cx?: number;
+  cy?: number;
 }
 
 /**
@@ -273,11 +286,45 @@ function buildOrientationMatrix(o: LayerOrientation): Matrix3x3 {
  * A zero rotation with no mirroring means canvas axes and local axes coincide,
  * so we deliberately fall through to the original canvas-space math (identical
  * results, zero regression risk, and edge snapping stays available).
+ *
+ * Delegates to core `isRotatedPose` so the framework and its consumers (the
+ * marker/text resize handlers, which call the same helper in `getInitialState`)
+ * can never disagree about which space the rect is in.
  */
 function needsOrientationPath(o: LayerOrientation | null | undefined): o is LayerOrientation {
   if (!o) return false;
-  const rot = ((o.rotation % 360) + 360) % 360;
-  return rot !== 0 || !!o.flip?.h || !!o.flip?.v;
+  return isRotatedPose({ rotation: o.rotation, flip: o.flip });
+}
+
+/**
+ * finalizeRectAlignment: single exit point for the pixel-grid invariant.
+ *
+ * Every resize/move/create branch must emit integer-aligned rects (the pixel
+ * editor requires it even when canvas clamping is off, e.g. Re-Canvas). Two
+ * strategies:
+ *   - `alignToLayerId` set → snap to that layer's physical pixel grid (handles
+ *     the layer's own rotation/flip via alignToPhysicalPixels);
+ *   - otherwise → round to the integer canvas grid.
+ *
+ * Consolidating the three previously-duplicated tails here is the "align as a
+ * unified post-process" step of Phase 2 (see the plans doc §4.4). It is a pure
+ * refactor: behaviour is identical for all existing consumers.
+ */
+function finalizeRectAlignment(
+  e: InteractionEvent,
+  rect: LocalRect,
+  alignToLayerId?: string
+): LocalRect {
+  if (alignToLayerId) {
+    return InteractionMath.alignToPhysicalPixels(e, rect, alignToLayerId);
+  }
+  return {
+    ...rect,
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    w: Math.round(rect.w),
+    h: Math.round(rect.h),
+  } as LocalRect;
 }
 
 // ─── Factory ───────────────────────────────────────────────────────────────────
@@ -307,6 +354,11 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
   // Captured once at onStart because rotation/flip never change mid-gesture.
   let startOrientation: LayerOrientation | null = null;
   let startOrientInverse: Matrix3x3 | null = null;
+  // World-space centre + local rect at gesture start. Both are needed to project
+  // the local-axes rect back into canvas space for rotation-aware edge snapping
+  // (null when the consumer's getOrientation omitted cx/cy → snapping skipped).
+  let startWorldCenter: { cx: number; cy: number } | null = null;
+  let startLocalRect: LocalRect | null = null;
 
   return {
     id: config.id,
@@ -344,9 +396,18 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
       if (needsOrientationPath(rawOrientation)) {
         startOrientation = rawOrientation;
         startOrientInverse = buildOrientationMatrix(rawOrientation).inverse();
+        // Capture the world pose so onMove can project the local rect back into
+        // canvas space for rotation-aware edge snapping. cx/cy are optional on
+        // LayerOrientation: absent → snapping is skipped, resize math unchanged.
+        startWorldCenter = (rawOrientation.cx != null && rawOrientation.cy != null)
+          ? { cx: rawOrientation.cx, cy: rawOrientation.cy }
+          : null;
+        startLocalRect = { ...startState };
       } else {
         startOrientation = null;
         startOrientInverse = null;
+        startWorldCenter = null;
+        startLocalRect = null;
       }
 
       let ax = startState.x;
@@ -408,6 +469,34 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
         }
       }
 
+      // ─── Resize/Move dispatch: THREE deliberate paths (do NOT naively merge) ──
+      //
+      // This looks like duplicated resize math, but the branches encode genuinely
+      // different behaviours. Merging them was evaluated and rejected (see the plans
+      // doc "待办 A"); the duplication is bounded and intentional. Kept separate on
+      // purpose — read this before attempting any unification:
+      //
+      //   1. move / peel        → translate only.
+      //   2. orientation branch → object carries rotation/flip (logical rotation:
+      //      marker/text). Resize runs in the object's LOCAL axes; pointer delta is
+      //      mapped through the inverse orientation matrix. Edge snapping goes
+      //      through `snapEdgeRotated` (world-AABB projection), not the canvas-axis
+      //      `snapEdge`.
+      //   3. canvas-axis branch → rotation=0 (clip selection, or unrotated layer).
+      //      Splits AGAIN into two DIFFERENT interaction models:
+      //        · clamp   (crop box): handle follows RELATIVE displacement — the grab
+      //                   offset from the corner is preserved for the whole drag.
+      //                   Dragged edges are clamped to canvas bounds.
+      //        · unclamp (text/marker): corner snaps to the ABSOLUTE pointer world
+      //                   position; free to extend past the canvas edge (like PS
+      //                   layers, which are never clamped — only crop is).
+      //      These two models are NOT interchangeable: with an off-corner grab they
+      //      produce different results, and the difference is only observable by hand
+      //      (no automated test guards it). This — not rotation — is the real blocker
+      //      to collapsing into a single path.
+      //
+      // If a future merge is ever attempted, the prerequisite is a pixel-exact
+      // ClipOverlay baseline test + a product decision on unifying clamp/unclamp feel.
       if (intent.category === 'move' || intent.sub === 'peel') {
         nextRect = InteractionMath.snapAndSync(e, {
           ...startState,
@@ -415,20 +504,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
           y: startState.y + dy
         }, opState, { clamp: constraints.clamp });
 
-        if (constraints.alignToLayerId) {
-          nextRect = InteractionMath.alignToPhysicalPixels(e, nextRect, constraints.alignToLayerId);
-        } else {
-          // Pixel editor invariant: all rect outputs must align to integer pixel grid,
-          // regardless of whether canvas clamping is active (e.g. Re-Canvas needs
-          // clamp=false to exceed canvas bounds, but still requires integer coordinates).
-          nextRect = {
-            ...nextRect,
-            x: Math.round(nextRect.x),
-            y: Math.round(nextRect.y),
-            w: Math.round(nextRect.w),
-            h: Math.round(nextRect.h)
-          } as LocalRect;
-        }
+        nextRect = finalizeRectAlignment(e, nextRect, constraints.alignToLayerId);
       } else if (startOrientation && startOrientInverse) {
         // ─── Orientation-aware resize (local axes) ─────────────────────────
         // The object carries a non-zero rotation/flip, so canvas axes ≠ object
@@ -487,18 +563,53 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
           { w: startState.w, h: startState.h }
         );
 
-        // Edge snapping is intentionally skipped here: snapEdge compares
-        // canvas-axis edges and cannot represent a rotated edge. Tracked as a
-        // follow-up (rotated snapEdge) in the plans doc.
-        e.actions.fast.setTransient('smartguides', null);
+        // ─── Rotation-aware edge snapping ──────────────────────────────────
+        // `resized` is in LOCAL axes, so the canvas-axis `snapEdge` cannot be
+        // used directly. `snapEdgeRotated` projects the local rect's corners
+        // into canvas space, snaps the resulting world **AABB** edges to the
+        // same targets (canvas edges/centres + layer AABBs), then maps the
+        // correction back through O⁻¹ onto the dragged local edge(s).
+        //
+        // AABB semantics keep the guides plain H/V lines (see snapEdgeRotated
+        // docs), so SmartGuideData / the SmartGuides renderer are unchanged.
+        //
+        // Requires the world centre from `getOrientation` (cx/cy). Consumers
+        // that omit it keep the previous no-snap behaviour.
+        let orientedRect = resized as unknown as LocalRect;
+        const isResizeHandleOriented = ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'].includes(internalType);
 
-        // Pixel-grid invariant still applies (dimensions are in local pixels).
-        nextRect = {
-          x: Math.round(resized.x),
-          y: Math.round(resized.y),
-          w: Math.round(resized.w),
-          h: Math.round(resized.h)
-        } as LocalRect;
+        if (
+          presets.get('SNAP_ENABLED') &&
+          isResizeHandleOriented &&
+          startWorldCenter &&
+          startLocalRect
+        ) {
+          const snapped = e.geometry.snapping.snapEdgeRotated(
+            orientedRect,
+            resizeType,
+            {
+              rotation: startOrientation.rotation,
+              flip: startOrientation.flip,
+              startCenter: startWorldCenter,
+              startLocalRect,
+            },
+            e.activeFrame,
+            {
+              snapToCanvas: presets.get('SNAP_TO_CANVAS'),
+              snapToLayers: presets.get('SNAP_TO_LAYERS'),
+              maxSnapTargets: presets.get('SNAP_MAX_TARGETS'),
+            }
+          );
+          orientedRect = snapped.rect as LocalRect;
+          e.actions.fast.setTransient('smartguides', snapped.smartguides);
+        } else {
+          e.actions.fast.setTransient('smartguides', null);
+        }
+
+        // Pixel-grid invariant (dimensions are in local pixels). The orientation
+        // path never uses alignToLayerId, so this always rounds — pass undefined
+        // to keep that behaviour explicit via the shared exit point.
+        nextRect = finalizeRectAlignment(e, orientedRect, undefined);
       } else {
         // Resizing logic (category = 'resize' or 'create')
         const resizeType = internalType === 'create' ? 'se' : internalType;
@@ -541,6 +652,12 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
             });
             nextRect = snapped.rect as LocalRect;
             e.actions.fast.setTransient('smartguides', snapped.smartguides);
+          } else {
+            // Clear explicitly, like every other snap site. Previously this branch
+            // had no else and relied on downstream fallbacks (useFastSync's
+            // `interacting` check + the post-commit rAF cleanup) to hide stale
+            // guides — correct only by coincidence.
+            e.actions.fast.setTransient('smartguides', null);
           }
         } else {
           // Unclamped bounding box scaling
@@ -569,20 +686,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
           }
         }
 
-        if (constraints.alignToLayerId) {
-          nextRect = InteractionMath.alignToPhysicalPixels(e, nextRect, constraints.alignToLayerId);
-        } else {
-          // Pixel editor invariant: all rect outputs must align to integer pixel grid,
-          // regardless of whether canvas clamping is active (e.g. Re-Canvas needs
-          // clamp=false to exceed canvas bounds, but still requires integer coordinates).
-          nextRect = {
-            ...nextRect,
-            x: Math.round(nextRect.x),
-            y: Math.round(nextRect.y),
-            w: Math.round(nextRect.w),
-            h: Math.round(nextRect.h)
-          } as LocalRect;
-        }
+        nextRect = finalizeRectAlignment(e, nextRect, constraints.alignToLayerId);
       }
 
       config.onUpdate(e, nextRect, tx, { ...currentContext, dx, dy });
@@ -659,6 +763,8 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
       internalType = '';
       startOrientation = null;
       startOrientInverse = null;
+      startWorldCenter = null;
+      startLocalRect = null;
     },
 
     onCancel: (e) => {
@@ -674,6 +780,8 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
       internalType = '';
       startOrientation = null;
       startOrientInverse = null;
+      startWorldCenter = null;
+      startLocalRect = null;
     }
   };
 }

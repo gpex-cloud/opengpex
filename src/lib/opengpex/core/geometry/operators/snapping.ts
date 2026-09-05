@@ -352,16 +352,297 @@ export function snapEdge(
 
   // Build target edge positions in canvas-local coordinates
   const { w: cw, h: ch } = frame.canvas;
+  const { targetXs, targetYs } = collectEdgeSnapTargets(frame, options);
+
+  const guides: SmartGuideData = {};
+  let newRect = { ...rect };
+
+  // Snap X edge
+  if (snapX) {
+    const activeEdgeX = snapX === 'right' ? rect.x + rect.w : rect.x;
+    const bestTarget = findNearestTarget(activeEdgeX, targetXs, threshold);
+
+    if (bestTarget !== undefined) {
+      if (snapX === 'right') {
+        newRect = { ...newRect, w: bestTarget - newRect.x };
+      } else {
+        const oldRight = newRect.x + newRect.w;
+        newRect = { ...newRect, x: bestTarget, w: oldRight - bestTarget };
+      }
+      guides.x = bestTarget - cw / 2; // Convert to world-space for guide rendering
+    }
+  }
+
+  // Snap Y edge
+  if (snapY) {
+    const activeEdgeY = snapY === 'bottom' ? rect.y + rect.h : rect.y;
+    const bestTarget = findNearestTarget(activeEdgeY, targetYs, threshold);
+
+    if (bestTarget !== undefined) {
+      if (snapY === 'bottom') {
+        newRect = { ...newRect, h: bestTarget - newRect.y };
+      } else {
+        const oldBottom = newRect.y + newRect.h;
+        newRect = { ...newRect, y: bestTarget, h: oldBottom - bestTarget };
+      }
+      guides.y = bestTarget - ch / 2; // Convert to world-space for guide rendering
+    }
+  }
+
+  const smartguides = Object.keys(guides).length ? guides : null;
+  return { rect: newRect, smartguides };
+}
+
+/**
+ * RotatedEdgePose: the world-space pose needed to project a LOCAL-axes rect back
+ * into canvas space for rotation-aware edge snapping.
+ *
+ * `TransformHandler`'s orientation branch runs its resize math in the object's
+ * OWN axes, where the rect is axis-aligned by definition. To snap against canvas
+ * edges / centre lines / other layers we must first project that local rect into
+ * canvas space, which needs the object's rotation/flip PLUS the world centre the
+ * local rect is anchored to.
+ *
+ * Supplied by the framework, which gets rotation/flip/cx/cy from the consumer's
+ * `getOrientation` callback (see `LayerOrientation`).
+ */
+export interface RotatedEdgePose {
+  /** Rotation in degrees (layer.rotation) */
+  rotation: number;
+  /** Mirror flags (layer.flip) */
+  flip: { h: boolean; v: boolean };
+  /** World-space centre of the object's bounding box at gesture START. */
+  startCenter: { cx: number; cy: number };
+  /** The LOCAL-axes rect at gesture START (whose centre maps to startCenter). */
+  startLocalRect: Rect;
+}
+
+/**
+ * Build the orientation (rotation + mirror) matrix for a pose.
+ *
+ * MUST stay sign-compatible with `getOrientationMatrix` in `./transform.ts`
+ * (R × F, rotation in degrees), which is what `computeWorldMatrix` (rendering)
+ * and `computeLayerMovePose` (move) use. If these disagree the snap direction
+ * would be mirrored relative to what the user sees on screen.
+ */
+function buildPoseMatrix(pose: { rotation: number; flip: { h: boolean; v: boolean } }): Matrix3x3 {
+  const R = Matrix3x3.rotate(pose.rotation);
+  const F = new Matrix3x3(pose.flip?.h ? -1 : 1, 0, 0, pose.flip?.v ? -1 : 1, 0, 0);
+  return R.multiply(F);
+}
+
+/**
+ * Rotation-aware edge snapping for resize on rotated/mirrored objects.
+ *
+ * ── Why this exists ──────────────────────────────────────────────────────────
+ * Plain `snapEdge` compares CANVAS-axis edges. For a rotated object the resize
+ * math runs in the object's LOCAL axes, so its "right edge" is a slanted line in
+ * canvas space and has no canvas-axis coordinate to compare against.
+ *
+ * ── Snapping semantics (AABB projection, Figma/Sketch model) ─────────────────
+ * We snap the object's world-space **axis-aligned bounding box (AABB)** edges,
+ * not the (slanted) true edges:
+ *
+ *   1. Project the 4 corners of the current LOCAL rect into canvas space.
+ *   2. Take their AABB.
+ *   3. Determine which AABB edges are "active" — which AABB sides the dragged
+ *      handle pushes outward, by projecting the handle's local outward direction
+ *      through the orientation matrix.
+ *   4. Snap those active AABB edges to the SAME targets plain `snapEdge` uses
+ *      (shared via `collectEdgeSnapTargets`).
+ *   5. Map the canvas-space correction back through O⁻¹ into local space and
+ *      apply it to the local rect's dragged edge(s).
+ *
+ * This is well-defined at every angle (including 45°, where "slanted edge onto a
+ * vertical line" has no solution), and because AABB edges are always H/V the
+ * guide lines stay plain full-screen H/V lines — so `SmartGuideData { x?, y? }`
+ * and the existing SmartGuides renderer need no changes.
+ *
+ * @param localRect - The CURRENT local-axes rect produced by the resize math.
+ * @param handle    - Resize handle ('n'|'s'|'e'|'w'|'nw'|'ne'|'sw'|'se').
+ * @param pose      - World pose (rotation/flip + start centre + start local rect).
+ * @param frame     - Active frame (canvas dims, layers, camera for threshold).
+ * @returns The corrected LOCAL rect + smart guide data (world-space H/V lines).
+ *
+ * Returns `localRect` untouched (and `smartguides: null`) when nothing is within
+ * the snap threshold, so callers can use the result unconditionally.
+ */
+export function snapEdgeRotated(
+  localRect: Rect,
+  handle: string,
+  pose: RotatedEdgePose,
+  frame: Frame,
+  options: { threshold?: number } & SnapFilterOptions = {}
+): { rect: Rect, smartguides: SmartGuideData | null } {
+  const cameraScale = frame.camera?.k || 1;
+  const threshold = (options.threshold ?? 15) / cameraScale;
+  const { w: cw, h: ch } = frame.canvas;
+
+  const O = buildPoseMatrix(pose);
+
+  // ── 1. Project the current local rect into canvas space ────────────────────
+  // Local→world: worldPoint = startCenter + O × (localPoint − startLocalCentre).
+  // Canvas-local adds the (cw/2, ch/2) origin shift, matching the target set.
+  const startLocalCx = pose.startLocalRect.x + pose.startLocalRect.w / 2;
+  const startLocalCy = pose.startLocalRect.y + pose.startLocalRect.h / 2;
+
+  const localToCanvas = (lx: number, ly: number): Point2D => {
+    const rotated = O.apply({ x: lx - startLocalCx, y: ly - startLocalCy });
+    return {
+      x: pose.startCenter.cx + rotated.x + cw / 2,
+      y: pose.startCenter.cy + rotated.y + ch / 2,
+    };
+  };
+
+  const corners = [
+    localToCanvas(localRect.x, localRect.y),
+    localToCanvas(localRect.x + localRect.w, localRect.y),
+    localToCanvas(localRect.x, localRect.y + localRect.h),
+    localToCanvas(localRect.x + localRect.w, localRect.y + localRect.h),
+  ];
+
+  const aabbLeft = Math.min(corners[0].x, corners[1].x, corners[2].x, corners[3].x);
+  const aabbRight = Math.max(corners[0].x, corners[1].x, corners[2].x, corners[3].x);
+  const aabbTop = Math.min(corners[0].y, corners[1].y, corners[2].y, corners[3].y);
+  const aabbBottom = Math.max(corners[0].y, corners[1].y, corners[2].y, corners[3].y);
+
+  // ── 2. Which AABB edges does the dragged handle push? ──────────────────────
+  // Resize only moves the dragged LOCAL edge(s). Growing local axis A by 1 unit
+  // displaces the two corners on that edge by `unitA` in canvas space, so the
+  // dragged corner's canvas motion is the sum over the handle's local axes.
+  // The AABB side it leads is simply the side it moves toward.
+  const localDirX = handle.includes('e') ? 1 : handle.includes('w') ? -1 : 0;
+  const localDirY = handle.includes('s') ? 1 : handle.includes('n') ? -1 : 0;
+
+  // Canvas displacement of a point when its LOCAL x (resp. y) increases by 1.
+  const unitX = O.apply({ x: 1, y: 0 });
+  const unitY = O.apply({ x: 0, y: 1 });
+
+  // Sub-pixel projections are rotation noise (e.g. cos(90°) ≈ 6e-17), not intent.
+  const DIR_EPSILON = 1e-6;
+
+  // Canvas-space displacement of the DRAGGED corner per unit of local growth.
+  const dragDispX = unitX.x * localDirX + unitY.x * localDirY;
+  const dragDispY = unitX.y * localDirX + unitY.y * localDirY;
+
+  // The dragged corner leads an AABB side only if it moves that way.
+  const activeX: 'left' | 'right' | null =
+    dragDispX > DIR_EPSILON ? 'right' : dragDispX < -DIR_EPSILON ? 'left' : null;
+  const activeY: 'top' | 'bottom' | null =
+    dragDispY > DIR_EPSILON ? 'bottom' : dragDispY < -DIR_EPSILON ? 'top' : null;
+
+  if (!activeX && !activeY) {
+    return { rect: localRect, smartguides: null };
+  }
+
+  // ── 3. Snap targets (shared with the canvas-axis snapEdge) ─────────────────
+  const { targetXs, targetYs } = collectEdgeSnapTargets(frame, options);
+
+  // ── 4. Nearest target per active AABB edge → canvas-space correction ───────
+  const guides: SmartGuideData = {};
+  let correctX = 0;
+  let correctY = 0;
+
+  if (activeX) {
+    const edgeValue = activeX === 'right' ? aabbRight : aabbLeft;
+    const target = findNearestTarget(edgeValue, targetXs, threshold);
+    if (target !== undefined) {
+      correctX = target - edgeValue;
+      guides.x = target - cw / 2; // Convert to world-space for guide rendering
+    }
+  }
+
+  if (activeY) {
+    const edgeValue = activeY === 'bottom' ? aabbBottom : aabbTop;
+    const target = findNearestTarget(edgeValue, targetYs, threshold);
+    if (target !== undefined) {
+      correctY = target - edgeValue;
+      guides.y = target - ch / 2; // Convert to world-space for guide rendering
+    }
+  }
+
+  if (correctX === 0 && correctY === 0) {
+    return { rect: localRect, smartguides: null };
+  }
+
+  // ── 5. Solve for the local size deltas that land the AABB edge on target ───
+  // Growing local axis A by δ displaces the dragged corner by δ × unitA (canvas).
+  // To land the active AABB edge exactly on its target we invert that scalar.
+  //
+  // A local axis can drive BOTH canvas axes (e.g. at 45° each contributes 1/√2).
+  // When a snap was found on only one canvas axis we must solve against THAT
+  // axis; when both snapped we prefer the component this local axis dominates
+  // (largest |gradient|), which is also the correct tie-break at 45°.
+  const solveDelta = (unit: Point2D, axisDir: number): number => {
+    if (axisDir === 0) return 0;
+    const gx = unit.x * axisDir;
+    const gy = unit.y * axisDir;
+    const canX = correctX !== 0 && Math.abs(gx) > DIR_EPSILON;
+    const canY = correctY !== 0 && Math.abs(gy) > DIR_EPSILON;
+
+    if (canX && canY) return Math.abs(gx) >= Math.abs(gy) ? correctX / gx : correctY / gy;
+    if (canX) return correctX / gx;
+    if (canY) return correctY / gy;
+    return 0;
+  };
+
+  const deltaLocalX = solveDelta(unitX, localDirX);
+  const deltaLocalY = solveDelta(unitY, localDirY);
+
+  if (deltaLocalX === 0 && deltaLocalY === 0) {
+    return { rect: localRect, smartguides: null };
+  }
+
+  // Apply the growth to the dragged edge(s) only — the anchored edge stays fixed,
+  // exactly like plain snapEdge does in canvas space.
+  let nextRect = { ...localRect };
+
+  if (deltaLocalX !== 0) {
+    if (localDirX > 0) {
+      // 'e' side dragged → adjust width, keep the local left edge fixed.
+      nextRect = { ...nextRect, w: nextRect.w + deltaLocalX };
+    } else {
+      // 'w' side dragged → move the local left edge, keep the right edge fixed.
+      nextRect = { ...nextRect, x: nextRect.x - deltaLocalX, w: nextRect.w + deltaLocalX };
+    }
+  }
+
+  if (deltaLocalY !== 0) {
+    if (localDirY > 0) {
+      // 's' side dragged → adjust height, keep the local top edge fixed.
+      nextRect = { ...nextRect, h: nextRect.h + deltaLocalY };
+    } else {
+      // 'n' side dragged → move the local top edge, keep the bottom edge fixed.
+      nextRect = { ...nextRect, y: nextRect.y - deltaLocalY, h: nextRect.h + deltaLocalY };
+    }
+  }
+
+  const smartguides = Object.keys(guides).length ? guides : null;
+  return { rect: nextRect, smartguides };
+}
+
+/**
+ * Collect canvas-local edge snap target positions (X and Y candidate lines).
+ *
+ * Extracted so `snapEdge` (canvas axes) and `snapEdgeRotated` (rotated AABB)
+ * share ONE definition of "what counts as a snap target": canvas edges + centre
+ * lines, plus each eligible layer's world AABB edges + centre.
+ */
+function collectEdgeSnapTargets(
+  frame: Frame,
+  options: SnapFilterOptions
+): { targetXs: number[], targetYs: number[] } {
+  const { w: cw, h: ch } = frame.canvas;
   const targetXs: number[] = [];
   const targetYs: number[] = [];
 
-  // Canvas edges
+  // Canvas edges + centre lines
   if (options.snapToCanvas !== false) {
     targetXs.push(0, cw / 2, cw);
     targetYs.push(0, ch / 2, ch);
   }
 
-  // Layer edges
+  // Layer edges (world AABB, so rotated layers are handled correctly)
   if (options.snapToLayers !== false) {
     const layerTargets = frame.layers.order
       .map(id => frame.layers.byId[id])
@@ -387,61 +668,23 @@ export function snapEdge(
     }
   }
 
-  const guides: SmartGuideData = {};
-  let newRect = { ...rect };
+  return { targetXs, targetYs };
+}
 
-  // Snap X edge
-  if (snapX) {
-    const activeEdgeX = snapX === 'right' ? rect.x + rect.w : rect.x;
-    let bestDiff = threshold;
-    let bestTarget: number | undefined;
-
-    for (const tx of targetXs) {
-      const diff = Math.abs(activeEdgeX - tx);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        bestTarget = tx;
-      }
-    }
-
-    if (bestTarget !== undefined) {
-      if (snapX === 'right') {
-        newRect = { ...newRect, w: bestTarget - newRect.x };
-      } else {
-        const oldRight = newRect.x + newRect.w;
-        newRect = { ...newRect, x: bestTarget, w: oldRight - bestTarget };
-      }
-      guides.x = bestTarget - cw / 2; // Convert to world-space for guide rendering
+/**
+ * Pick the nearest snap target within `threshold`, or undefined if none qualify.
+ */
+function findNearestTarget(value: number, targets: number[], threshold: number): number | undefined {
+  let bestDiff = threshold;
+  let best: number | undefined;
+  for (const t of targets) {
+    const diff = Math.abs(value - t);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = t;
     }
   }
-
-  // Snap Y edge
-  if (snapY) {
-    const activeEdgeY = snapY === 'bottom' ? rect.y + rect.h : rect.y;
-    let bestDiff = threshold;
-    let bestTarget: number | undefined;
-
-    for (const ty of targetYs) {
-      const diff = Math.abs(activeEdgeY - ty);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        bestTarget = ty;
-      }
-    }
-
-    if (bestTarget !== undefined) {
-      if (snapY === 'bottom') {
-        newRect = { ...newRect, h: bestTarget - newRect.y };
-      } else {
-        const oldBottom = newRect.y + newRect.h;
-        newRect = { ...newRect, y: bestTarget, h: oldBottom - bestTarget };
-      }
-      guides.y = bestTarget - ch / 2; // Convert to world-space for guide rendering
-    }
-  }
-
-  const smartguides = Object.keys(guides).length ? guides : null;
-  return { rect: newRect, smartguides };
+  return best;
 }
 
 /**

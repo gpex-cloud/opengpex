@@ -20,7 +20,7 @@
 import { Matrix3x3 } from './matrix';
 import {
   screenToWorld, worldToScreen, worldToLocal, localToWorld, screenToLocal, localToScreen,
-  localToWorldRect, worldToLocalRect, getLayerLocalAABB,
+  localToWorldRect, worldToLocalRect, localToWorldCenter, getLayerLocalAABB,
   calculateResizedRect, clampRectWithAspect, clampPointToRect, balanceVectorByAspect,
   clampRectWithOverlap, getLayerBoundingBox, getRectIntersection, getSurroundingRects,
   isPointInRect, isPointInShape, testLayerHit, pickLayersAt, pickTopLayer,
@@ -48,13 +48,14 @@ import {
   invertRings, isBoundingRing, computePolygonBounds as computePolygonBoundsP2D,
   rectToLocalPolygon, ellipseToLocalPolygon
 } from './operators/point2d';
-import { snapRect, snapEdge, snapToPixel, snapRectToPixel } from './operators/snapping';
+import { snapRect, snapEdge, snapEdgeRotated, snapToPixel, snapRectToPixel } from './operators/snapping';
 import {
   decomposeMatrix,
   getLayerWorldMatrix,
   getLayerLocalMatrix,
   computeFragmentCenter,
   computeLayerMovePose,
+  isRotatedPose,
   transformFrame
 } from './operators/transform';
 import {
@@ -74,6 +75,12 @@ export function createGeometryService(): GeometryService {
       worldToLocal: (wx: number, wy: number, frame: Frame) => worldToLocal(wx, wy, frame.canvas),
       localToWorld: (px: number, py: number, frame: Frame) => localToWorld(px, py, frame.canvas),
       localToWorldRect: (rect: Rect, frame: Frame) => localToWorldRect(rect, frame.canvas),
+      localToWorldCenter: (
+        startCenter: { cx: number; cy: number },
+        startLocalRect: Rect,
+        nextLocalRect: Rect,
+        orientation: { rotation: number; flip?: { h: boolean; v: boolean } }
+      ) => localToWorldCenter(startCenter, startLocalRect, nextLocalRect, orientation),
       worldToLocalRect: (rect: WorldRect, frame: Frame) => worldToLocalRect(rect, frame.canvas),
       screenToLocal: (vx: number, vy: number, frame: Frame, camera?: CameraState) => screenToLocal(vx, vy, camera || frame.camera),
       localToScreen: (px: number, py: number, frame: Frame, camera?: CameraState) => localToScreen(px, py, camera || frame.camera),
@@ -115,6 +122,7 @@ export function createGeometryService(): GeometryService {
       pickTopLayer: (pos: WorldPoint, layers: NormalizedState<Layer>) => pickTopLayer(pos, layers),
     },
     transform: {
+      isRotatedPose: (l: Pick<Layer, 'rotation' | 'flip'>) => isRotatedPose(l),
       getLayerWorldMatrix: (l: Layer, extra?: LayerPoseOverride) => getLayerWorldMatrix(l, extra),
       getLayerLocalMatrix: (l: Layer, f: Frame, extra?: LayerPoseOverride) => getLayerLocalMatrix(l, f.canvas, extra),
       getLayerCenter: (l: Layer) => {
@@ -138,6 +146,13 @@ export function createGeometryService(): GeometryService {
       snapPoint: (pos: Point2D) => snapToPixel(pos),
       snapRect: (rect: Rect, frame: Frame, options?: { clamp?: boolean; threshold?: number; excludeLayerId?: string; snapToCanvas?: boolean; snapToBirth?: boolean; snapToLayers?: boolean; excludeLayerTypes?: string[]; ignoreLockedLayers?: boolean; ignoreSmallLayers?: boolean; smallLayerThreshold?: number; maxSnapTargets?: number }) => snapRect(rect, frame, options),
       snapEdge: (rect: Rect, handle: string, frame: Frame, options?: { threshold?: number; snapToCanvas?: boolean; snapToLayers?: boolean; maxSnapTargets?: number }) => snapEdge(rect, handle, frame, options),
+      snapEdgeRotated: (
+        localRect: Rect,
+        handle: string,
+        pose: { rotation: number; flip: { h: boolean; v: boolean }; startCenter: { cx: number; cy: number }; startLocalRect: Rect },
+        frame: Frame,
+        options?: { threshold?: number; snapToCanvas?: boolean; snapToLayers?: boolean; maxSnapTargets?: number }
+      ) => snapEdgeRotated(localRect, handle, pose, frame, options),
       snapRectToPixel: (
         targetRect: WorldRect,
         canvasDim: Dimensions,

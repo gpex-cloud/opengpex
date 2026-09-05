@@ -149,7 +149,7 @@ export const createTextMoveHandler = (): InteractionHandler => {
 /**
  * TextResizeHandler: Editing state text box scaling interaction handler
  *
- * Only active in editing state, identifying drag direction via data-handle attribute,
+ * Only active in editing state, identifying drag direction via data-gizmo-handle attribute,
  * using createTransformHandler factory to implement standard 8-direction scaling.
  * Automatically switches to fixed boxMode after dragging.
  */
@@ -159,16 +159,6 @@ export const createTextResizeHandler = (): InteractionHandler => {
   // local resize result back to world cx/cy. Mirrors MarkerOverlay's handler.
   let startCenter: { cx: number; cy: number } | null = null;
   let startLocalRect: { x: number; y: number; w: number; h: number } | null = null;
-
-  /**
-   * A text layer inherits a non-zero `rotation`/`flip` from canvas Rotate
-   * Left/Right (`transformFrame` bumps rotation but keeps bounding), so its own
-   * axes no longer match the canvas axes and resize must run in local space.
-   */
-  const isRotatedPose = (layer: Layer): boolean => {
-    const rot = ((layer.rotation % 360) + 360) % 360;
-    return rot !== 0 || !!layer.flip?.h || !!layer.flip?.v;
-  };
 
   return createTransformHandler({
     id: 'text-resize',
@@ -187,10 +177,10 @@ export const createTextResizeHandler = (): InteractionHandler => {
 
       // Only responds to resize handle clicks
       const target = e.nativeEvent.target as HTMLElement;
-      const handleEl = target.closest('[data-handle]') as HTMLElement;
+      const handleEl = target.closest('[data-gizmo-handle]') as HTMLElement;
       if (!handleEl) return null;
 
-      const handleType = handleEl.dataset.handle;
+      const handleType = handleEl.dataset.gizmoHandle;
       // Exclude 'move' (clicks inside text box are handled by contenteditable)
       if (!handleType || handleType === 'move') return null;
 
@@ -206,7 +196,7 @@ export const createTextResizeHandler = (): InteractionHandler => {
       // Rotated / mirrored text → work in the layer's LOCAL axes. Origin is the
       // bounding-box top-left, so the rect is simply (0,0,w,h); the framework
       // maps pointer deltas into this space via getOrientation.
-      if (isRotatedPose(layer)) {
+      if (e.geometry.transform.isRotatedPose(layer)) {
         startCenter = { cx: layer.cx, cy: layer.cy };
         startLocalRect = { x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h };
         return startLocalRect as LocalRect;
@@ -228,11 +218,13 @@ export const createTextResizeHandler = (): InteractionHandler => {
     // text layer carries a non-zero `rotation` while its `bounding` is
     // unchanged, so the resize math must run in the layer's own axes. Returns
     // null when unrotated so the framework short-circuits to the canvas path.
+    // cx/cy are supplied so the framework can project the local rect back into
+    // canvas space for rotation-aware edge snapping (snapEdgeRotated).
     getOrientation: (e) => {
       const editingId = e.state.interaction.signals[EDITING_TEXT_KEY] as string;
       const layer = e.activeFrame.layers.byId[editingId];
       if (!layer) return null;
-      return { rotation: layer.rotation, flip: layer.flip };
+      return { rotation: layer.rotation, flip: layer.flip, cx: layer.cx, cy: layer.cy };
     },
 
     getConstraints: () => ({
@@ -259,27 +251,17 @@ export const createTextResizeHandler = (): InteractionHandler => {
       let newCy: number;
 
       if (context.orientation && startCenter && startLocalRect) {
-        // Orientation-aware path: newRect is in the layer's LOCAL axes.
-        // The bounding centre moved by (newLocalCentre − oldLocalCentre) in local
-        // space; rotate that offset into world space to keep the anchored corner
-        // visually fixed. Uses the same R × F convention as the renderer (core
-        // getOrientationMatrix / computeWorldMatrix).
-        const oldLocalCx = startLocalRect.x + startLocalRect.w / 2;
-        const oldLocalCy = startLocalRect.y + startLocalRect.h / 2;
-        const newLocalCx = newRect.x + finalW / 2;
-        const newLocalCy = newRect.y + finalH / 2;
-
-        const { rotation, flip } = context.orientation;
-        const rad = (rotation * Math.PI) / 180;
-        const cos = Math.cos(rad);
-        const sin = Math.sin(rad);
-        const mirrorX = flip?.h ? -1 : 1;
-        const mirrorY = flip?.v ? -1 : 1;
-        const lx = (newLocalCx - oldLocalCx) * mirrorX;
-        const ly = (newLocalCy - oldLocalCy) * mirrorY;
-
-        newCx = startCenter.cx + (cos * lx - sin * ly);
-        newCy = startCenter.cy + (sin * lx + cos * ly);
+        // Orientation-aware path: newRect is in the layer's LOCAL axes. Recover
+        // the world centre via the shared core helper, which uses the renderer's
+        // own O = R × F convention (no hand-rolled sin/cos here on purpose).
+        const worldCenter = e.geometry.space.localToWorldCenter(
+          startCenter,
+          startLocalRect,
+          { x: newRect.x, y: newRect.y, w: finalW, h: finalH },
+          context.orientation
+        );
+        newCx = worldCenter.x;
+        newCy = worldCenter.y;
       } else {
         // Axis-aligned path: canvas-local rect → world cx/cy (unchanged).
         newCx = newRect.x + finalW / 2 - canvas.w / 2;
@@ -326,7 +308,7 @@ export const createTextPlaceHandler = (): InteractionHandler => {
 
       // Exclude UI element clicks and resize handles
       const target = e.nativeEvent.target as HTMLElement;
-      if (target.closest('button, a, input, [data-role="ui"], [contenteditable], [data-handle]')) return false;
+      if (target.closest('button, a, input, [data-role="ui"], [contenteditable], [data-handle], [data-gizmo-handle]')) return false;
 
       // Click within canvas range
       const frame = e.activeFrame;

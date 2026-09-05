@@ -21,6 +21,7 @@
 
 import React, { useRef } from 'react';
 import { useEditorState, useOverlayRotationSync } from '@opengpex/editor/core/context';
+import { TransformGizmo } from '@opengpex/editor/widgets/TransformGizmo';
 import { useMarkerOverlayState, useMarkerPreviewFastSync, useMarkerToolLifecycle, useMarkerSelectionFastSync } from './hooks';
 
 // ─── MarkerOverlayMain ───────────────────────────────────────────────────────────
@@ -103,76 +104,13 @@ const MarkerDrawPreview = React.memo(function MarkerDrawPreview() {
 const HANDLE_SIZE = 10;
 
 /**
- * The 8 resize handles: 4 corners + 4 edge midpoints.
- *
- * `angle` is the handle's outward normal in the layer's LOCAL space, measured in
- * screen convention (0° = +x / east, growing clockwise because screen +y points
- * down). It is used to pick a rotation-correct cursor: CSS cursors are not
- * affected by CSS `transform`, so a rotated selection box would otherwise keep
- * showing the unrotated (canvas-axis) arrows.
- */
-const MARKER_HANDLES = [
-  { h: 'nw', angle: 225, style: { top: 0, left: 0 } },
-  { h: 'ne', angle: 315, style: { top: 0, left: '100%' } },
-  { h: 'sw', angle: 135, style: { top: '100%', left: 0 } },
-  { h: 'se', angle: 45, style: { top: '100%', left: '100%' } },
-  { h: 'n', angle: 270, style: { top: 0, left: '50%' } },
-  { h: 's', angle: 90, style: { top: '100%', left: '50%' } },
-  { h: 'w', angle: 180, style: { top: '50%', left: 0 } },
-  { h: 'e', angle: 0, style: { top: '50%', left: '100%' } },
-] as const;
-
-/**
- * Map an on-screen direction (degrees) to the nearest of the 4 resize cursors.
- *
- * Cursors are bidirectional, so the direction is folded into [0,180) and then
- * bucketed every 45°: e/w → `ew-resize`, ne/sw → `nesw-resize`,
- * n/s → `ns-resize`, nw/se → `nwse-resize`.
- */
-function cursorForAngle(angleDeg: number): string {
-  const a = ((angleDeg % 180) + 180) % 180;
-  const bucket = Math.round(a / 45) % 4;
-  switch (bucket) {
-    case 0: return 'ew-resize';
-    case 1: return 'nwse-resize';   // pointing down-right (screen +y is down)
-    case 2: return 'ns-resize';
-    default: return 'nesw-resize';  // pointing up-right
-  }
-}
-
-/**
- * Resolve each handle's cursor for the layer's current pose.
- *
- * The selection box is drawn through the layer's full world matrix (see
- * `useMarkerSelectionFastSync`), so after a canvas Rotate Left/Right the box
- * self-rotates — but CSS `cursor` keywords ignore `transform`. We therefore
- * rotate the handle's local normal by `layer.rotation` (mirroring flips first,
- * matching the renderer's R × F convention) and pick the matching cursor.
- */
-function resolveHandleCursor(
-  angle: number,
-  rotation: number,
-  flip: { h: boolean; v: boolean } | undefined
-): string {
-  // Mirror the direction vector before rotating (F then R, as in getOrientationMatrix).
-  const rad = (angle * Math.PI) / 180;
-  let dx = Math.cos(rad);
-  let dy = Math.sin(rad);
-  if (flip?.h) dx = -dx;
-  if (flip?.v) dy = -dy;
-
-  const screenAngle = (Math.atan2(dy, dx) * 180) / Math.PI + rotation;
-  return cursorForAngle(screenAngle);
-}
-
-
-/**
  * MarkerSelectionBox: outline + 8 resize handles over the active marker layer.
  *
  * A screen-space div (not camera-transformed): `useMarkerSelectionFastSync`
  * writes its left/top/width/height every frame from the fast-track-merged layer
- * bounds, so it tracks camera pan/zoom and live move/resize. Handles carry
- * `data-marker-handle=<dir>` which MarkerResizeHandler's `test` detects; they
+ * bounds, so it tracks camera pan/zoom and live move/resize. The shared
+ * `<TransformGizmo>` renders the outline + handles; handles carry
+ * `data-gizmo-handle=<dir>` which MarkerResizeHandler's `test` detects; they
  * are `pointer-events-auto` while the outline stays non-interactive so it never
  * blocks move/draw on the shape body.
  */
@@ -200,25 +138,16 @@ const MarkerSelectionBox = React.memo(function MarkerSelectionBox() {
         className="absolute top-0 left-0 pointer-events-none"
         style={{ display: 'none', transformOrigin: '0 0', willChange: 'transform, width, height' }}
       >
-        {/* Selection outline (1px, non-interactive). */}
-        <div className="absolute -inset-[1px] border border-indigo-500/80" />
-
-        {/* Resize handles (interactive dots). */}
-        {MARKER_HANDLES.map(({ h, angle, style }) => (
-          <div
-            key={h}
-            data-marker-handle={h}
-            className="absolute rounded-full bg-white border border-indigo-500 shadow-sm pointer-events-auto hover:scale-125 transition-transform duration-150"
-            style={{
-              width: `${HANDLE_SIZE}px`,
-              height: `${HANDLE_SIZE}px`,
-              cursor: resolveHandleCursor(angle, activeLayer?.rotation ?? 0, activeLayer?.flip),
-              transform: 'translate(-50%, -50%)',
-              ...style,
-            }}
-          />
-        ))}
+        <TransformGizmo
+          rotation={activeLayer?.rotation ?? 0}
+          flip={activeLayer?.flip}
+          handleSizePx={HANDLE_SIZE}
+          handleClassName="border border-indigo-500"
+          showOutline
+          outlineClassName="border-indigo-500/80"
+        />
       </div>
     </div>
   );
 });
+

@@ -127,7 +127,7 @@ export const createMarkerMoveHandler = (): InteractionHandler => {
 
       // Exclude UI element clicks (buttons, panels, resize handles).
       const target = e.nativeEvent.target as HTMLElement;
-      if (target.closest('button, a, input, [data-role="ui"], [data-handle]')) return false;
+      if (target.closest('button, a, input, [data-role="ui"], [data-handle], [data-gizmo-handle]')) return false;
 
       const hitLayer = findMarkerLayerAtPoint(e.geometry, e.activeFrame, e.point.canvas);
       if (hitLayer) {
@@ -189,7 +189,7 @@ export const createMarkerMoveHandler = (): InteractionHandler => {
  * on a resize handle must win over move / draw. Built on the shared
  * `createTransformHandler` (same infra as TextOverlay's text-resize), gated to
  * craft mode + activeCraft==='marker'. The handles are DOM dots rendered by the
- * overlay carrying `data-marker-handle`; `test` only fires when one is hit.
+ * overlay carrying `data-gizmo-handle`; `test` only fires when one is hit.
  *
  * onUpdate writes the new bounding + recentered cx/cy to the fast track. For
  * arrow markers the tail/head endpoints are rescaled proportionally so the
@@ -209,16 +209,6 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
   /** Minimum bounding side (canvas px) so a marker can never collapse to 0. */
   const MIN_SIZE = 8;
 
-  /**
-   * A marker inherits a non-zero `rotation` from canvas Rotate Left/Right
-   * (`transformFrame` bumps rotation but keeps bounding), so its own axes no
-   * longer match the canvas axes and resize must run in local space.
-   */
-  const isRotatedPose = (layer: Layer): boolean => {
-    const rot = ((layer.rotation % 360) + 360) % 360;
-    return rot !== 0 || !!layer.flip?.h || !!layer.flip?.v;
-  };
-
   return createTransformHandler({
     id: 'marker-resize',
     priority: 160,
@@ -228,10 +218,10 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
       if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'marker') return null;
 
       const target = e.nativeEvent.target as HTMLElement;
-      const handleEl = target.closest('[data-marker-handle]') as HTMLElement | null;
+      const handleEl = target.closest('[data-gizmo-handle]') as HTMLElement | null;
       if (!handleEl) return null;
 
-      const handle = handleEl.dataset.markerHandle;
+      const handle = handleEl.dataset.gizmoHandle;
       if (!handle) return null;
 
       // Bind to the currently active marker layer.
@@ -256,7 +246,7 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
       // Rotated / mirrored marker → work in the layer's LOCAL axes.
       // Origin is the bounding-box top-left, so the rect is simply (0,0,w,h);
       // the framework maps pointer deltas into this space via getOrientation.
-      if (isRotatedPose(layer)) {
+      if (e.geometry.transform.isRotatedPose(layer)) {
         startCenter = { cx: layer.cx, cy: layer.cy };
         startLocalRect = { x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h };
         return startLocalRect as LocalRect;
@@ -277,10 +267,12 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
     // Opt into orientation-aware resize: after a canvas Rotate Left/Right the
     // marker layer carries a non-zero `rotation` while its `bounding` is
     // unchanged, so the resize math must run in the layer's own axes.
+    // cx/cy are supplied so the framework can project the local rect back into
+    // canvas space for rotation-aware edge snapping (snapEdgeRotated).
     getOrientation: (e) => {
       const layer = resizeLayerId ? e.activeFrame.layers.byId[resizeLayerId] : null;
       if (!layer) return null;
-      return { rotation: layer.rotation, flip: layer.flip };
+      return { rotation: layer.rotation, flip: layer.flip, cx: layer.cx, cy: layer.cy };
     },
 
     // Free-form resize (no aspect lock unless Shift, handled by the framework);
@@ -300,29 +292,17 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
       let newCy: number;
 
       if (context.orientation && startCenter && startLocalRect) {
-        // Orientation-aware path: newRect is in the layer's LOCAL axes.
-        // The bounding centre moved by (newLocalCentre − oldLocalCentre) in local
-        // space; rotate that offset into world space to keep the anchored corner
-        // visually fixed.
-        const oldLocalCx = startLocalRect.x + startLocalRect.w / 2;
-        const oldLocalCy = startLocalRect.y + startLocalRect.h / 2;
-        const newLocalCx = newRect.x + finalW / 2;
-        const newLocalCy = newRect.y + finalH / 2;
-
-        // Rotate the local centre delta into world space. Uses the same
-        // orientation convention as the renderer (R × F, see core
-        // getOrientationMatrix / computeWorldMatrix).
-        const { rotation, flip } = context.orientation;
-        const rad = (rotation * Math.PI) / 180;
-        const cos = Math.cos(rad);
-        const sin = Math.sin(rad);
-        const mirrorX = flip?.h ? -1 : 1;
-        const mirrorY = flip?.v ? -1 : 1;
-        const lx = (newLocalCx - oldLocalCx) * mirrorX;
-        const ly = (newLocalCy - oldLocalCy) * mirrorY;
-
-        newCx = startCenter.cx + (cos * lx - sin * ly);
-        newCy = startCenter.cy + (sin * lx + cos * ly);
+        // Orientation-aware path: newRect is in the layer's LOCAL axes. Recover
+        // the world centre via the shared core helper, which uses the renderer's
+        // own O = R × F convention (no hand-rolled sin/cos here on purpose).
+        const worldCenter = e.geometry.space.localToWorldCenter(
+          startCenter,
+          startLocalRect,
+          { x: newRect.x, y: newRect.y, w: finalW, h: finalH },
+          context.orientation
+        );
+        newCx = worldCenter.x;
+        newCy = worldCenter.y;
       } else {
         // Axis-aligned path: canvas-local rect → world cx/cy (unchanged).
         newCx = newRect.x + finalW / 2 - canvas.w / 2;
@@ -401,7 +381,7 @@ export const createMarkerDrawHandler = (): InteractionHandler => {
       if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'marker') return false;
 
       const target = e.nativeEvent.target as HTMLElement;
-      if (target.closest('button, a, input, [data-role="ui"], [data-handle]')) return false;
+      if (target.closest('button, a, input, [data-role="ui"], [data-handle], [data-gizmo-handle]')) return false;
 
       // Must be within the canvas and NOT over an existing marker (move wins).
       const frame = e.activeFrame;

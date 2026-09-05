@@ -102,6 +102,17 @@ export interface GeometryService {
     localToWorld: (px: number, py: number, frame: Frame) => WorldPoint;
     /** Local relative rect -> World absolute rect */
     localToWorldRect: (rect: Rect, frame: Frame) => WorldRect;
+    /**
+     * Object-LOCAL-axes rect centre -> World centre (cx, cy).
+     * Inverse of the pose half of `computeWorldMatrix`, for the orientation-aware
+     * resize path. Shares the O = R × F convention with the renderer.
+     */
+    localToWorldCenter: (
+      startCenter: { cx: number, cy: number },
+      startLocalRect: Rect,
+      nextLocalRect: Rect,
+      orientation: { rotation: number, flip?: { h: boolean, v: boolean } }
+    ) => Point2D;
     /** World absolute rect -> Local relative rect */
     worldToLocalRect: (rect: WorldRect, frame: Frame) => LocalRect;
     /** Viewport physical coordinates -> Local relative coordinates */
@@ -160,6 +171,13 @@ export interface GeometryService {
 
   /** Geometry transformation service */
   transform: {
+    /**
+     * Whether a layer's own axes diverge from the canvas axes (non-zero rotation
+     * or any mirror flag). THE single source of truth for "does this need
+     * local-axes math?" — the framework's resize dispatch and the marker/text
+     * resize handlers all defer to this so they can never disagree.
+     */
+    isRotatedPose: (layer: Pick<Layer, 'rotation' | 'flip'>) => boolean;
     /** Gets layer world transformation matrix */
     getLayerWorldMatrix: (layer: Layer, extraOverride?: LayerPoseOverride) => IMatrix3x3;
     /** Gets layer local transformation matrix */
@@ -196,6 +214,21 @@ export interface GeometryService {
     snapRect: (rect: Rect, frame: Frame, options?: { clamp?: boolean, threshold?: number, excludeLayerId?: string, snapToCanvas?: boolean, snapToBirth?: boolean, snapToLayers?: boolean, excludeLayerTypes?: string[], ignoreLockedLayers?: boolean, ignoreSmallLayers?: boolean, smallLayerThreshold?: number, maxSnapTargets?: number }) => { x: number, y: number, smartguides: SmartGuideData | null };
     /** Edge-level snapping for resize operations */
     snapEdge: (rect: Rect, handle: string, frame: Frame, options?: { threshold?: number, snapToCanvas?: boolean, snapToLayers?: boolean, maxSnapTargets?: number }) => { rect: Rect, smartguides: SmartGuideData | null };
+    /**
+     * Rotation-aware edge snapping for resize of rotated/mirrored objects.
+     *
+     * Takes a rect expressed in the object's LOCAL axes plus its world pose,
+     * projects the corners into canvas space, snaps the resulting world AABB
+     * edges, and maps the correction back into local axes. Guides stay plain
+     * H/V lines (AABB edges are axis-aligned by construction).
+     */
+    snapEdgeRotated: (
+      localRect: Rect,
+      handle: string,
+      pose: { rotation: number, flip: { h: boolean, v: boolean }, startCenter: { cx: number, cy: number }, startLocalRect: Rect },
+      frame: Frame,
+      options?: { threshold?: number, snapToCanvas?: boolean, snapToLayers?: boolean, maxSnapTargets?: number }
+    ) => { rect: Rect, smartguides: SmartGuideData | null };
     /** Physical pixel snapping */
     snapToPixel: <T extends Rect | Point2D>(r: T, strategy?: 'round' | 'floor' | 'ceil') => T;
     /** Grid snapping */
