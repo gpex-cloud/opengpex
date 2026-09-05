@@ -154,6 +154,22 @@ export const createTextMoveHandler = (): InteractionHandler => {
  * Automatically switches to fixed boxMode after dragging.
  */
 export const createTextResizeHandler = (): InteractionHandler => {
+  // Orientation-aware resize snapshot (non-null only for rotated/mirrored text):
+  // the world centre and the local-axes rect at gesture start, used to map the
+  // local resize result back to world cx/cy. Mirrors MarkerOverlay's handler.
+  let startCenter: { cx: number; cy: number } | null = null;
+  let startLocalRect: { x: number; y: number; w: number; h: number } | null = null;
+
+  /**
+   * A text layer inherits a non-zero `rotation`/`flip` from canvas Rotate
+   * Left/Right (`transformFrame` bumps rotation but keeps bounding), so its own
+   * axes no longer match the canvas axes and resize must run in local space.
+   */
+  const isRotatedPose = (layer: Layer): boolean => {
+    const rot = ((layer.rotation % 360) + 360) % 360;
+    return rot !== 0 || !!layer.flip?.h || !!layer.flip?.v;
+  };
+
   return createTransformHandler({
     id: 'text-resize',
     priority: 160,
@@ -187,7 +203,19 @@ export const createTextResizeHandler = (): InteractionHandler => {
       const layer = frame.layers.byId[editingId];
       const canvas = frame.canvas;
 
-      // Convert layer cx/cy + bounding to canvas-local coordinate system rectangle
+      // Rotated / mirrored text → work in the layer's LOCAL axes. Origin is the
+      // bounding-box top-left, so the rect is simply (0,0,w,h); the framework
+      // maps pointer deltas into this space via getOrientation.
+      if (isRotatedPose(layer)) {
+        startCenter = { cx: layer.cx, cy: layer.cy };
+        startLocalRect = { x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h };
+        return startLocalRect as LocalRect;
+      }
+
+      // Axis-aligned text → canvas-local rect (original behaviour, keeps the
+      // canvas-space resize math byte-for-byte unchanged).
+      startCenter = null;
+      startLocalRect = null;
       return {
         x: canvas.w / 2 + layer.cx - layer.bounding.w / 2,
         y: canvas.h / 2 + layer.cy - layer.bounding.h / 2,
@@ -196,12 +224,23 @@ export const createTextResizeHandler = (): InteractionHandler => {
       } as LocalRect;
     },
 
+    // Opt into orientation-aware resize: after a canvas Rotate Left/Right the
+    // text layer carries a non-zero `rotation` while its `bounding` is
+    // unchanged, so the resize math must run in the layer's own axes. Returns
+    // null when unrotated so the framework short-circuits to the canvas path.
+    getOrientation: (e) => {
+      const editingId = e.state.interaction.signals[EDITING_TEXT_KEY] as string;
+      const layer = e.activeFrame.layers.byId[editingId];
+      if (!layer) return null;
+      return { rotation: layer.rotation, flip: layer.flip };
+    },
+
     getConstraints: () => ({
       aspect: undefined,
       clamp: false,
     }),
 
-    onUpdate: (e, newRect, tx) => {
+    onUpdate: (e, newRect, tx, context) => {
       const editingId = e.state.interaction.signals[EDITING_TEXT_KEY] as string;
       const frame = e.activeFrame;
       const canvas = frame.canvas;
@@ -215,9 +254,37 @@ export const createTextResizeHandler = (): InteractionHandler => {
       const finalW = Math.max(minW, newRect.w);
       const finalH = Math.max(minH, newRect.h);
 
-      // newRect (canvas-local) -> cx/cy (world coordinates)
-      const newCx = newRect.x + finalW / 2 - canvas.w / 2;
-      const newCy = newRect.y + finalH / 2 - canvas.h / 2;
+      // Recover the new world centre.
+      let newCx: number;
+      let newCy: number;
+
+      if (context.orientation && startCenter && startLocalRect) {
+        // Orientation-aware path: newRect is in the layer's LOCAL axes.
+        // The bounding centre moved by (newLocalCentre − oldLocalCentre) in local
+        // space; rotate that offset into world space to keep the anchored corner
+        // visually fixed. Uses the same R × F convention as the renderer (core
+        // getOrientationMatrix / computeWorldMatrix).
+        const oldLocalCx = startLocalRect.x + startLocalRect.w / 2;
+        const oldLocalCy = startLocalRect.y + startLocalRect.h / 2;
+        const newLocalCx = newRect.x + finalW / 2;
+        const newLocalCy = newRect.y + finalH / 2;
+
+        const { rotation, flip } = context.orientation;
+        const rad = (rotation * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        const mirrorX = flip?.h ? -1 : 1;
+        const mirrorY = flip?.v ? -1 : 1;
+        const lx = (newLocalCx - oldLocalCx) * mirrorX;
+        const ly = (newLocalCy - oldLocalCy) * mirrorY;
+
+        newCx = startCenter.cx + (cos * lx - sin * ly);
+        newCy = startCenter.cy + (sin * lx + cos * ly);
+      } else {
+        // Axis-aligned path: canvas-local rect → world cx/cy (unchanged).
+        newCx = newRect.x + finalW / 2 - canvas.w / 2;
+        newCy = newRect.y + finalH / 2 - canvas.h / 2;
+      }
 
       tx.update({
         cx: newCx,

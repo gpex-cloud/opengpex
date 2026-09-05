@@ -138,7 +138,7 @@ export const LayerItem = React.memo(
       <Wrapper {...wrapperProps}>
         <motion.div
           layout="position"
-          className={`group/layer relative flex items-center h-[36px] cursor-pointer transition-opacity ${isScrolling ? "opacity-90" : "opacity-100"}`}
+          className={`group/layer relative flex items-center h-[32px] cursor-pointer transition-opacity ${isScrolling ? "opacity-90" : "opacity-100"}`}
           onClick={() => actions.setActiveLayer(activeFrameId, layer.id)}
           onMouseEnter={() => {
             if (isScrolling) return;
@@ -161,7 +161,7 @@ export const LayerItem = React.memo(
           >
             {isActive && (
               <div
-                className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-r-full transition-all duration-300 ${layer.metadata?.physicalPixels === false ? "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.4)]" : "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]"} ${isScrolling ? "opacity-50" : "opacity-100"}`}
+                className={`absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r-full transition-all duration-300 ${layer.metadata?.physicalPixels === false ? "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.4)]" : "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]"} ${isScrolling ? "opacity-50" : "opacity-100"}`}
               />
             )}
           </div>
@@ -170,7 +170,7 @@ export const LayerItem = React.memo(
             <div
               onPointerDown={(e) => dragControls.start(e)}
               style={{ touchAction: "none" }}
-              className={`relative w-[26px] h-[26px] shrink-0 rounded-md border overflow-hidden flex items-center justify-center transition-all cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-[var(--border-light)] select-none
+              className={`relative w-[24px] h-[24px] shrink-0 rounded-md border overflow-hidden flex items-center justify-center transition-all cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-[var(--border-light)] select-none
  ${
    isActive
      ? "border-[var(--border-light)] bg-[var(--bg-panel)] shadow-sm"
@@ -181,7 +181,7 @@ export const LayerItem = React.memo(
             >
               {layer.type === "color" ? (
                 <div
-                  className="w-full h-full flex items-center justify-center font-black text-[16px] tracking-tighter"
+                  className="w-full h-full flex items-center justify-center font-black text-[14px] tracking-tighter rounded-[inherit]"
                   style={{
                     background:
                       "linear-gradient(315deg, #f472b6, #a78bfa, #38bdf8)",
@@ -192,7 +192,7 @@ export const LayerItem = React.memo(
                 </div>
               ) : layer.type === "paint" ? (
                 <div
-                  className="w-full h-full flex items-center justify-center font-black text-[16px] tracking-tighter"
+                  className="w-full h-full flex items-center justify-center font-black text-[14px] tracking-tighter rounded-[inherit]"
                   style={{
                     background:
                       "linear-gradient(45deg, #ef4444, #f59e0b, #10b981, #3b82f6, #8b5cf6)",
@@ -203,7 +203,7 @@ export const LayerItem = React.memo(
                 </div>
               ) : layer.type === "text" ? (
                 <div
-                  className="w-full h-full flex items-center justify-center font-black text-[16px] tracking-tighter ring-1 ring-inset ring-black/10"
+                  className="w-full h-full flex items-center justify-center font-black text-[14px] tracking-tighter rounded-[inherit]"
                   style={{
                     background: "#ffffff",
                     color: "#1a1a1a",
@@ -213,11 +213,10 @@ export const LayerItem = React.memo(
                 </div>
               ) : layer.type === "vector" ? (
                 <div
-                  className="w-full h-full flex items-center justify-center font-black text-[16px] tracking-tighter"
+                  className="w-full h-full flex items-center justify-center font-black text-[13px] tracking-tighter rounded-[inherit]"
                   style={{
-                    background:
-                      "linear-gradient(135deg, #f59e0b, #f43f5e, #6366f1)",
-                    color: "#ffffff",
+                    background: "#e4e4e7",
+                    color: "#1a1a1a",
                   }}
                 >
                   V
@@ -397,7 +396,7 @@ export const LayerItem = React.memo(
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="ml-4 mr-1 mt-1 mb-1.5 pl-2.5 border-l-2 border-[var(--border-light)] flex flex-col gap-1 overflow-hidden"
+              className="ml-4 mr-1 mt-0.5 mb-1 pl-2.5 border-l-2 border-[var(--border-light)] flex flex-col gap-0.5 overflow-hidden"
             >
               {childLayers.map((subLayer, idx) => (
                 <SubLayerItem
@@ -416,7 +415,7 @@ export const LayerItem = React.memo(
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="ml-4 mr-1 mt-1 mb-1.5 pl-2.5 border-l-2 border-emerald-500/25 dark:border-emerald-500/40 flex flex-col gap-1 overflow-hidden"
+              className="ml-4 mr-1 mt-0.5 mb-1 pl-2.5 border-l-2 border-emerald-500/25 dark:border-emerald-500/40 flex flex-col gap-0.5 overflow-hidden"
             >
               {layer.vectorMasks &&
                 [...layer.vectorMasks].reverse().map((mask: VectorMask) => {

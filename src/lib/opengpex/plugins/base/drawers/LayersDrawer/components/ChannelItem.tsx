@@ -63,7 +63,7 @@ export const ChannelItem = React.memo(function ChannelItem({
 }: ChannelItemProps) {
   return (
     <div
-      className={`group/channel relative flex items-center h-[36px] cursor-pointer transition-opacity
+      className={`group/channel relative flex items-center h-[32px] cursor-pointer transition-opacity
         ${!visible ? 'opacity-50' : 'opacity-100'}
       `}
       onClick={onSelect}
@@ -80,7 +80,7 @@ export const ChannelItem = React.memo(function ChannelItem({
         {/* Active indicator bar (left edge) */}
         {isActive && (
           <div
-            className="absolute left-0 top-2 bottom-2 w-0.5 rounded-r-full shadow-[0_0_8px_rgba(99,102,241,0.4)] transition-all duration-300"
+            className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r-full shadow-[0_0_8px_rgba(99,102,241,0.4)] transition-all duration-300"
             style={{ backgroundColor: color || '#6366f1' }}
           />
         )}
@@ -90,7 +90,7 @@ export const ChannelItem = React.memo(function ChannelItem({
       <div className="relative z-10 flex-1 flex items-center h-full px-1.5 gap-2">
         {/* Channel color swatch (mimics LayerItem thumbnail) */}
         <div
-          className={`relative w-[26px] h-[26px] shrink-0 rounded-md border overflow-hidden flex items-center justify-center transition-all
+          className={`relative w-[24px] h-[24px] shrink-0 rounded-md border overflow-hidden flex items-center justify-center transition-all
             ${isActive
               ? 'border-[var(--border-light)] bg-[var(--bg-panel)] shadow-sm'
               : 'border-[var(--border-subtle)] bg-[var(--bg-stage)]/40 group-hover/channel:border-[var(--border-light)] group-hover/channel:shadow-sm'
@@ -100,12 +100,12 @@ export const ChannelItem = React.memo(function ChannelItem({
         >
           {gradient ? (
             <div
-              className="w-full h-full"
+              className="w-full h-full rounded-[inherit]"
               style={{ background: gradient }}
             />
           ) : (
             <div
-              className="w-full h-full flex items-center justify-center"
+              className="w-full h-full flex items-center justify-center rounded-[inherit]"
               style={{ backgroundColor: color ? `${color}20` : '#71717a20' }}
             >
               <div

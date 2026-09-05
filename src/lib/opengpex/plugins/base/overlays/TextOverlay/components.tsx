@@ -20,7 +20,7 @@
 "use client";
 
 import React, { useRef, useCallback, useEffect, useState } from "react";
-import { useEditorState, useVolatileInteraction } from "@opengpex/editor/core/context";
+import { useEditorState, useEditorServices, useVolatileInteraction } from "@opengpex/editor/core/context";
 import { TEXT_LAYER_PADDING } from "@opengpex/editor/core/helpers/config";
 import { useTextEditorFastSync } from "./useFastSync";
 import { useTextOverlayState, useInlineTextEditing } from "./hooks";
@@ -62,6 +62,7 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
   layerId,
 }: InlineTextEditorProps) {
   const { activeFrame } = useEditorState();
+  const { geometry } = useEditorServices();
   const cursorOverride = useVolatileInteraction('cursorOverride');
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -157,23 +158,25 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
 
   const boxMode = textData.boxMode || "auto";
 
-  // Calculate initial screen coordinates (for SSR/first frame, taken over by useFastSync Ticker subsequently)
+  // Calculate initial transform (for SSR/first frame, taken over by useFastSync Ticker subsequently).
+  // Mirrors useFastSync: project the layer's full world matrix (incl. rotation/flip)
+  // through the camera matrix, so the box is correctly rotated on the very first paint.
   const camera = activeFrame.camera;
   const canvas = activeFrame.canvas;
   const localX = canvas.w / 2 + layer.cx - layer.bounding.w / 2;
-  const localY = canvas.h / 2 + layer.cy - layer.bounding.h / 2;
-  const screenX = localX * camera.k + camera.x;
-  const screenY = localY * camera.k + camera.y;
+  const worldMatrix = geometry.transform.getLayerWorldMatrix(layer);
+  const viewMatrix = geometry.camera.getCameraMatrix(activeFrame, camera);
+  const screenMatrix = viewMatrix.multiply(worldMatrix);
 
   return (
       <div
         ref={containerRef}
         className="absolute pointer-events-auto"
         style={{
-          left: `${screenX}px`,
-          top: `${screenY}px`,
-          transform: `scale(${camera.k})`,
-          transformOrigin: "top left",
+          left: 0,
+          top: 0,
+          transform: `matrix(${screenMatrix.a}, ${screenMatrix.b}, ${screenMatrix.c}, ${screenMatrix.d}, ${screenMatrix.tx}, ${screenMatrix.ty})`,
+          transformOrigin: "0 0",
           minWidth: "80px",
           maxWidth: boxMode === "fixed" ? undefined : `${Math.max(200, canvas.w - localX)}px`,
         }}
@@ -246,7 +249,7 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
           )}
 
           {/* Resize Handles (always visible during editing, counter-scaled for consistent screen size) */}
-          <TextResizeHandles cameraK={camera.k} />
+          <TextResizeHandles cameraK={camera.k} rotation={layer.rotation} flip={layer.flip} />
         </div>
       </div>
   );
@@ -255,14 +258,70 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
 // ─── TextResizeHandles ─────────────────────────────────────────────────────────
 
 /**
+ * Map an on-screen direction (degrees) to the nearest of the 4 resize cursors.
+ *
+ * Cursors are bidirectional, so the direction is folded into [0,180) and then
+ * bucketed every 45°: e/w → `ew-resize`, ne/sw → `nesw-resize`,
+ * n/s → `ns-resize`, nw/se → `nwse-resize`.
+ *
+ * TODO(Phase 6): this is copied verbatim from MarkerOverlay/components.tsx
+ * (`cursorForAngle` / `resolveHandleCursor`). Both should be lifted into the
+ * shared `<TransformGizmo>` extraction (see plans doc §11/§12).
+ */
+function cursorForAngle(angleDeg: number): string {
+  const a = ((angleDeg % 180) + 180) % 180;
+  const bucket = Math.round(a / 45) % 4;
+  switch (bucket) {
+    case 0: return 'ew-resize';
+    case 1: return 'nwse-resize';   // pointing down-right (screen +y is down)
+    case 2: return 'ns-resize';
+    default: return 'nesw-resize';  // pointing up-right
+  }
+}
+
+/**
+ * Resolve a handle's cursor for the layer's current pose.
+ *
+ * The editor box is drawn through the layer's full world matrix (see
+ * useTextEditorFastSync), so after a canvas Rotate Left/Right the box
+ * self-rotates — but CSS `cursor` keywords ignore CSS `transform`. We therefore
+ * rotate the handle's local outward normal by `layer.rotation` (mirroring flips
+ * first, matching the renderer's R × F convention) and pick the matching cursor.
+ */
+function resolveHandleCursor(
+  angle: number,
+  rotation: number,
+  flip: { h: boolean; v: boolean } | undefined
+): string {
+  const rad = (angle * Math.PI) / 180;
+  let dx = Math.cos(rad);
+  let dy = Math.sin(rad);
+  if (flip?.h) dx = -dx;
+  if (flip?.v) dy = -dy;
+  const screenAngle = (Math.atan2(dy, dx) * 180) / Math.PI + rotation;
+  return cursorForAngle(screenAngle);
+}
+
+/**
  * TextResizeHandles: 8-direction resize handles (circular dots on the border)
  * - always visible during editing
  * - all handles are standard circular dots positioned on the dashed border
  * - counter-scaled by 1/cameraK so they appear constant screen size regardless of zoom
  * - handle elements have pointer-events-auto + preventDefault to prevent loss of focus
  * - interaction area keeps pointer-events-none to avoid intercepting contenteditable clicks
+ * - cursors are rotation-aware: the container self-rotates via CSS matrix, but CSS
+ *   cursor keywords ignore transforms, so each handle's cursor is recomputed from
+ *   its LOCAL outward-normal angle + the layer's rotation/flip.
  */
-function TextResizeHandles({ cameraK }: { cameraK: number }) {
+function TextResizeHandles({
+  cameraK,
+  rotation,
+  flip,
+}: {
+  cameraK: number;
+  rotation: number;
+  flip: { h: boolean; v: boolean } | undefined;
+}) {
   // Prevent default mousedown behavior on handle to avoid contenteditable loss of focus
   const preventBlur = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -274,22 +333,24 @@ function TextResizeHandles({ cameraK }: { cameraK: number }) {
   const canvasSize = SCREEN_SIZE / cameraK;
   const half = canvasSize / 2;
 
+  // `angle` is each handle's outward normal in the layer's LOCAL space, screen
+  // convention (0° = +x/east, growing clockwise since screen +y points down).
   const handles = [
     // Corners
-    { h: "nw", cursor: "nwse-resize", style: { top: -half, left: -half } },
-    { h: "ne", cursor: "nesw-resize", style: { top: -half, right: -half } },
-    { h: "sw", cursor: "nesw-resize", style: { bottom: -half, left: -half } },
-    { h: "se", cursor: "nwse-resize", style: { bottom: -half, right: -half } },
+    { h: "nw", angle: 225, style: { top: -half, left: -half } },
+    { h: "ne", angle: 315, style: { top: -half, right: -half } },
+    { h: "sw", angle: 135, style: { bottom: -half, left: -half } },
+    { h: "se", angle: 45, style: { bottom: -half, right: -half } },
     // Edges
-    { h: "n", cursor: "ns-resize", style: { top: -half, left: "50%", marginLeft: -half } },
-    { h: "s", cursor: "ns-resize", style: { bottom: -half, left: "50%", marginLeft: -half } },
-    { h: "w", cursor: "ew-resize", style: { left: -half, top: "50%", marginTop: -half } },
-    { h: "e", cursor: "ew-resize", style: { right: -half, top: "50%", marginTop: -half } },
+    { h: "n", angle: 270, style: { top: -half, left: "50%", marginLeft: -half } },
+    { h: "s", angle: 90, style: { bottom: -half, left: "50%", marginLeft: -half } },
+    { h: "w", angle: 180, style: { left: -half, top: "50%", marginTop: -half } },
+    { h: "e", angle: 0, style: { right: -half, top: "50%", marginTop: -half } },
   ] as const;
 
   return (
     <div className="absolute inset-0 pointer-events-none">
-      {handles.map(({ h, cursor, style }) => (
+      {handles.map(({ h, angle, style }) => (
         <div
           key={h}
           data-handle={h}
@@ -298,7 +359,7 @@ function TextResizeHandles({ cameraK }: { cameraK: number }) {
           style={{
             width: `${canvasSize}px`,
             height: `${canvasSize}px`,
-            cursor,
+            cursor: resolveHandleCursor(angle, rotation, flip),
             ...style,
           }}
         />

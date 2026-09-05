@@ -101,7 +101,7 @@ export function ChannelsPanel() {
   const isComposite = visibility.r && visibility.g && visibility.b && !visibility.a;
 
   return (
-    <div className="flex flex-col gap-1 px-1 py-1">
+    <div className="flex flex-col gap-0.5 px-1 py-1">
       {/* RGB Composite row */}
       <ChannelItem
         channelKey="rgb"

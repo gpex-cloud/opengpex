@@ -36,7 +36,7 @@ export function useTextEditorFastSync(
   layerId: string,
   isActive: boolean
 ) {
-  const { actions } = useEditorServices();
+  const { actions, geometry } = useEditorServices();
   const { activeFrame } = useEditorState();
 
   // Track cumulative bounding + position to correctly compensate cx/cy across rapid calls
@@ -52,25 +52,36 @@ export function useTextEditorFastSync(
     const layer = f.layers.byId[layerId];
     if (!layer) return;
 
-    const canvas = f.canvas;
+    // Project the container through the layer's FULL world matrix (includes
+    // layer.rotation/flip — after a canvas Rotate Left/Right, transformFrame
+    // bumps rotation but NOT bounding.w/h) composed with the camera matrix, so
+    // the editor box self-rotates to match the layer just like LayerOverlay.
+    //
+    // Unlike MarkerOverlay we deliberately DO NOT split the camera scale out of
+    // the matrix: the contenteditable renders text at canvas-space fontSize and
+    // relies on the uniform scale(cam.k) to look right on screen. Splitting scale
+    // would force fontSize × k, whose glyph wrapping no longer matches the
+    // rasterizer (painter2d wraps at the zoom-independent fontSize), breaking
+    // WYSIWYG. So the combined matrix carries rotation + uniform scale together,
+    // and the box origin (bounding top-left = local 0,0) lands at matrix.{tx,ty}.
+    const worldMatrix = geometry.transform.getLayerWorldMatrix(layer);
+    const viewMatrix = geometry.camera.getCameraMatrix(f, cam);
+    const screenMatrix = viewMatrix.multiply(worldMatrix);
 
-    // Position of top-left corner of layer in canvas space (canvas-local, top-left origin)
-    const localX = canvas.w / 2 + layer.cx - layer.bounding.w / 2;
-    const localY = canvas.h / 2 + layer.cy - layer.bounding.h / 2;
-
-    // Project to screen coordinates
-    const screenX = localX * cam.k + cam.x;
-    const screenY = localY * cam.k + cam.y;
-
-    // Directly manipulate DOM to achieve 60fps sync (bypassing React)
+    // Directly manipulate DOM to achieve 60fps sync (bypassing React). Position
+    // is baked into the matrix translation, so left/top are pinned to 0 and the
+    // transform origin is the box top-left (0,0) — the rotation pivot is already
+    // encoded in the world matrix (Translate(cx,cy) × O × Translate(-w/2,-h/2)).
     Motion.set(el, {
-      left: screenX,
-      top: screenY,
-      transform: `scale(${cam.k})`,
+      left: 0,
+      top: 0,
+      transformOrigin: '0 0',
+      transform: `matrix(${screenMatrix.a}, ${screenMatrix.b}, ${screenMatrix.c}, ${screenMatrix.d}, ${screenMatrix.tx}, ${screenMatrix.ty})`,
       overwrite: true,
     });
 
-    // Sync width and height in fixed mode to editor DOM
+    // Sync width and height in fixed mode to editor DOM. These stay in canvas
+    // space (px), unaffected by rotation — the matrix above handles rotation/scale.
     const mode = layer.textData?.boxMode || 'auto';
     if (mode === 'fixed') {
       const editorEl = el.querySelector('[contenteditable]') as HTMLElement;
