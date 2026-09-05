@@ -262,6 +262,9 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
             handleSizePx={10 / camera.k}
             handleClassName="border border-gray-400"
             onHandlePointerDown={preventHandleBlur}
+            showRotateHandle
+            rotateHandleOffset={24 / camera.k}
+            rotateHandleClassName="border border-gray-400"
           />
 
         </div>

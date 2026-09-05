@@ -60,34 +60,32 @@ export function useLayerTweens(activeFrame: Frame | null) {
         const layer = activeFrame.layers.byId[layerId];
         const lastRot = prevStatesRef.current.get(layer.id);
         if (lastRot !== undefined && lastRot !== layer.rotation) {
-          const delta = layer.rotation - lastRot;
-          
-          // 1. Classic 90-degree multiple jumps (covers standard full-image 90/180/270 degree rotation and regular undo)
-          const isMultipleOf90 = Math.abs(delta) % 90 === 0;
-
-          // 2. Structural canvas alignment reset of arbitrary angle (covers 45-degree or future free angle merge and undo)
-          const isStructuralReset = 
-            (lastRot === activeFrame.rotation && layer.rotation === 0) ||
-            (lastRot === 0 && layer.rotation === activeFrame.rotation);
-
-          if (isMultipleOf90 || isStructuralReset) {
-            // If rotation delta is multiple of 90 degrees, or structural canvas alignment reset (merge and undo), perform instantaneous rigid sync without animation
-            if (tweenMapRef.current.has(layer.id)) {
-              const tweenTarget = tweenMapRef.current.get(layer.id)!;
-              Motion.set(tweenTarget, { rotation: layer.rotation });
-              tweenMapRef.current.delete(layer.id);
-            }
-          } else {
-            if (!tweenMapRef.current.has(layer.id)) {
-              tweenMapRef.current.set(layer.id, { rotation: lastRot });
-            }
+          // ────────────────────────────────────────────────────────────────────
+          // [2026-09-06] Always instant-snap — tween branch REMOVED.
+          //
+          // History: the original code had an `else` branch that triggered a
+          // GSAP tween for non-90° rotation deltas, intended as future-proofing
+          // for smooth rotation effects. When RotationHandler (free-rotation)
+          // landed, this caused a visible "double rotation" artifact on marker
+          // layers: the user drags to rotate (60fps fast-track preview), releases
+          // → tx.commit() writes the final angle to Redux → useLayerTweens sees
+          // a non-90° delta → plays a tween that RE-ANIMATES the same change
+          // the user already watched live. Text didn't show it because its DOM
+          // overlay occludes the canvas tween.
+          //
+          // The tween is wrong for EVERY current rotation source:
+          //   • Canvas ±90°: viewport swap-rotate compensation handles it
+          //   • Free-rotation: fast-track handled it; commit is just persistence
+          //   • Undo / structural reset: should be instantaneous by nature
+          //
+          // If future requirements need a post-commit animation (e.g. "snap to
+          // nearest 90°" with ease), add it as a new opt-in code path here,
+          // gated by an explicit flag — do NOT restore the unconditional tween.
+          // ────────────────────────────────────────────────────────────────────
+          if (tweenMapRef.current.has(layer.id)) {
             const tweenTarget = tweenMapRef.current.get(layer.id)!;
-            animate(tweenTarget, { 
-              rotation: layer.rotation,
-              onComplete: () => {
-                tweenMapRef.current.delete(layer.id);
-              }
-            });
+            Motion.set(tweenTarget, { rotation: layer.rotation });
+            tweenMapRef.current.delete(layer.id);
           }
         }
         prevStatesRef.current.set(layer.id, layer.rotation);

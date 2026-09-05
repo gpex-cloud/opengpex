@@ -19,7 +19,7 @@
 
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Split,
   ChevronDown,
@@ -70,7 +70,7 @@ const ASPECT_RATIOS = [
  */
 export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
   const { state, activeFrame } = useEditorState();
-  const { actions } = useEditorServices();
+  const { actions, volatileRef } = useEditorServices();
   const {
     toggleModeCmd,
     exitClipModeCmd,
@@ -104,6 +104,29 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
   const [isOffsetOpen, setIsOffsetOpen] = useState(false);
   const [offsetValue, setOffsetValue] = useState(0);
   const featherPopoverTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ─── Re-Canvas live W/H: poll volatile fast-track during drag ────────────
+  // During drag the canvasClipBox only lives in the volatile buffer (60 fps);
+  // Redux is updated on pointerup. This rAF loop feeds the Popover W/H inputs.
+  const [liveReCanvasRect, setLiveReCanvasRect] = useState<{ w: number; h: number } | null>(null);
+
+  useEffect(() => {
+    if (!reCanvasActiveSignal?.value || !state.interaction.isInteracting || !activeFrame) {
+      return;
+    }
+    let rafId: number;
+    const tick = () => {
+      const draft = volatileRef.current.buffered.frames[activeFrame.id];
+      const rect = (draft?.canvasClipBox as { rect?: { w: number; h: number } } | undefined)?.rect;
+      if (rect) {
+        const w = Math.round(rect.w), h = Math.round(rect.h);
+        setLiveReCanvasRect(prev => (prev?.w === w && prev?.h === h) ? prev : { w, h });
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => { cancelAnimationFrame(rafId); setLiveReCanvasRect(null); };
+  }, [reCanvasActiveSignal?.value, state.interaction.isInteracting, activeFrame, volatileRef]);
 
   const handleDropdownClick = () => {
     if (!activeFrame || isPanMode || isIrregularTool) return;
@@ -862,7 +885,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
               <div className="flex items-center gap-1.5">
                 <ComboInput
                   label="W"
-                  value={Math.round(clipRect.w)}
+                  value={liveReCanvasRect?.w ?? Math.round(clipRect.w)}
                   type="number"
                   className="w-[64px]"
                   onChange={() => {}}
@@ -882,7 +905,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                 <span className="text-zinc-500 text-[10px]">×</span>
                 <ComboInput
                   label="H"
-                  value={Math.round(clipRect.h)}
+                  value={liveReCanvasRect?.h ?? Math.round(clipRect.h)}
                   type="number"
                   className="w-[64px]"
                   onChange={() => {}}

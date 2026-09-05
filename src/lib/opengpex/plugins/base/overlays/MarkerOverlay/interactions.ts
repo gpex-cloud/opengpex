@@ -21,6 +21,7 @@ import { InteractionHandler, InteractionEvent, GeometryService, Layer, Frame, Ma
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import { createTransformHandler, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
+import { ROTATE_CURSOR } from '@opengpex/editor/icons';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
 import { MARKER_REGISTRY } from './registry';
@@ -345,6 +346,115 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
       startLocalRect = null;
     },
   });
+};
+
+// ─── MarkerRotateHandler ────────────────────────────────────────────────────────
+
+/**
+ * MarkerRotateHandler: drag the rotation handle to freely rotate the active marker.
+ *
+ * Priority 165 (> MarkerResizeHandler 160 > MarkerMoveHandler 155): a
+ * pointerdown on the rotate handle must win over resize / move. Gated to
+ * craft mode + activeCraft==='marker'. The handle is a DOM dot rendered by
+ * the overlay carrying `data-gizmo-rotate`; `test` only fires when it is hit.
+ *
+ * Math:
+ *   startAngle = atan2(pointer.world − layer center)
+ *   onMove: delta = currentAngle − startAngle → newRotation = startRotation + delta
+ *   Shift → snap to nearest 15° (industry standard: 0/15/30/45/60/75/90…)
+ *
+ * No sin/cos orientation matrix construction here — only atan2 for angle
+ * measurement (pure arithmetic). §5.4 iron rule observed.
+ *
+ * Non-silent → a single undoable checkpoint per rotate gesture.
+ */
+export const createMarkerRotateHandler = (): InteractionHandler => {
+  let rotateLayerId: string | null = null;
+  let startAngleRad = 0;  // atan2 at gesture start
+  let startRotation = 0;  // layer.rotation at gesture start
+  let tx: InteractionTransaction | null = null;
+  let layerCx = 0;
+  let layerCy = 0;
+
+  return {
+    id: 'marker-rotate',
+    priority: 165,
+
+    test: (e) => {
+      if (e.state.interaction.interactionMode !== 'craft') return false;
+      if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'marker') return false;
+
+      const target = e.nativeEvent.target as HTMLElement;
+      const rotateEl = target.closest('[data-gizmo-rotate]') as HTMLElement | null;
+      if (!rotateEl) return false;
+
+      // Bind to the currently active marker layer.
+      const frame = e.activeFrame;
+      const activeId = frame.activeLayerId;
+      const layer = activeId ? frame.layers.byId[activeId] : null;
+      if (!layer || layer.type !== 'vector' || !layer.markerData) return false;
+
+      rotateLayerId = layer.id;
+      return true;
+    },
+
+    onStart: (e) => {
+      if (!rotateLayerId) return;
+      const frame = e.activeFrame;
+      const layer = frame.layers.byId[rotateLayerId];
+      if (!layer) return;
+
+      layerCx = layer.cx;
+      layerCy = layer.cy;
+      startRotation = layer.rotation;
+      startAngleRad = Math.atan2(
+        e.point.world.y - layerCy,
+        e.point.world.x - layerCx,
+      );
+
+      tx = new InteractionTransaction(e);
+      tx.begin(false);
+      e.actions.fast.setCursor(ROTATE_CURSOR);
+    },
+
+    onMove: (e) => {
+      if (!rotateLayerId || !tx) return;
+
+      const currentAngleRad = Math.atan2(
+        e.point.world.y - layerCy,
+        e.point.world.x - layerCx,
+      );
+
+      const deltaDeg = ((currentAngleRad - startAngleRad) * 180) / Math.PI;
+      let newRotation = e.geometry.transform.normalizeAngle(startRotation + deltaDeg);
+
+      // Shift → snap to nearest 15°.
+      if ((e.nativeEvent as MouseEvent).shiftKey) {
+        newRotation = e.geometry.transform.normalizeAngle(
+          e.geometry.transform.snapAngle(startRotation + deltaDeg, 15),
+        );
+      }
+
+      tx.update({ rotation: newRotation }, 'layer', rotateLayerId);
+    },
+
+    onEnd: (e) => {
+      if (tx) {
+        tx.commit();
+        tx = null;
+      }
+      rotateLayerId = null;
+      e.actions.fast.setCursor(null);
+    },
+
+    onCancel: () => {
+      if (tx) {
+        tx.abort();
+        tx = null;
+      }
+      rotateLayerId = null;
+    },
+  };
 };
 
 // ─── MarkerDrawHandler ─────────────────────────────────────────────────────────

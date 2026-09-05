@@ -21,6 +21,7 @@ import { InteractionHandler, GeometryService, Layer, Frame, LocalRect, asLocalSh
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import { createTransformHandler, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
+import { ROTATE_CURSOR } from '@opengpex/editor/icons';
 import { CraftDrawerAPI, getReferenceFontSize } from '../../drawers/CraftDrawer/protocols';
 import type { PendingTextData } from '../../drawers/CraftDrawer/protocols';
 import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, _CMD_PLACE_UID, _CMD_EDIT_START_UID } from './protocols';
@@ -284,6 +285,108 @@ export const createTextResizeHandler = (): InteractionHandler => {
 
     // No onEnd needed — autoCommit handles resize completion.
   });
+};
+
+// ─── TextRotateHandler ──────────────────────────────────────────────────────────
+
+/**
+ * TextRotateHandler: drag the rotation handle to freely rotate the text layer.
+ *
+ * Priority 165 (> TextResizeHandler 160 > TextPlaceHandler 150): a pointerdown
+ * on the rotate handle must win over resize / place. Gated to craft mode +
+ * activeCraft==='text' + an editing text layer is active. The handle is a DOM
+ * dot rendered by the overlay carrying `data-gizmo-rotate`.
+ *
+ * Math: identical to MarkerRotateHandler — atan2 delta → rotation.
+ * Shift → snap to nearest 15°.
+ *
+ * Silent: true — same as TextResizeHandler, because rotate drags only occur in
+ * active text editing mode. Prevents checkpointing unrasterized temporary states.
+ */
+export const createTextRotateHandler = (): InteractionHandler => {
+  let rotateLayerId: string | null = null;
+  let startAngleRad = 0;
+  let startRotation = 0;
+  let tx: InteractionTransaction | null = null;
+  let layerCx = 0;
+  let layerCy = 0;
+
+  return {
+    id: 'text-rotate',
+    priority: 165,
+
+    test: (e) => {
+      if (e.state.interaction.interactionMode !== 'craft') return false;
+      if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'text') return false;
+
+      // Must have a text layer currently being edited
+      const editingId = e.state.interaction.signals[EDITING_TEXT_KEY] as string | null;
+      if (!editingId) return false;
+
+      const target = e.nativeEvent.target as HTMLElement;
+      const rotateEl = target.closest('[data-gizmo-rotate]') as HTMLElement | null;
+      if (!rotateEl) return false;
+
+      rotateLayerId = editingId;
+      return true;
+    },
+
+    onStart: (e) => {
+      if (!rotateLayerId) return;
+      const frame = e.activeFrame;
+      const layer = frame.layers.byId[rotateLayerId];
+      if (!layer) return;
+
+      layerCx = layer.cx;
+      layerCy = layer.cy;
+      startRotation = layer.rotation;
+      startAngleRad = Math.atan2(
+        e.point.world.y - layerCy,
+        e.point.world.x - layerCx,
+      );
+
+      tx = new InteractionTransaction(e);
+      tx.begin(true); // silent, same as text-resize
+      e.actions.fast.setCursor(ROTATE_CURSOR);
+    },
+
+    onMove: (e) => {
+      if (!rotateLayerId || !tx) return;
+
+      const currentAngleRad = Math.atan2(
+        e.point.world.y - layerCy,
+        e.point.world.x - layerCx,
+      );
+
+      const deltaDeg = ((currentAngleRad - startAngleRad) * 180) / Math.PI;
+      let newRotation = e.geometry.transform.normalizeAngle(startRotation + deltaDeg);
+
+      if ((e.nativeEvent as MouseEvent).shiftKey) {
+        newRotation = e.geometry.transform.normalizeAngle(
+          e.geometry.transform.snapAngle(startRotation + deltaDeg, 15),
+        );
+      }
+
+      tx.update({ rotation: newRotation }, 'layer', rotateLayerId);
+    },
+
+    onEnd: (e) => {
+      if (tx) {
+        tx.commit();
+        tx = null;
+      }
+      rotateLayerId = null;
+      e.actions.fast.setCursor(null);
+    },
+
+    onCancel: () => {
+      if (tx) {
+        tx.abort();
+        tx = null;
+      }
+      rotateLayerId = null;
+    },
+  };
 };
 
 // ─── TextPlaceHandler ──────────────────────────────────────────────────────────

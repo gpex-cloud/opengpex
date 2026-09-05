@@ -80,8 +80,13 @@ export function useMarkerToolLifecycle(isMarkerMode: boolean) {
     let currentCursor = 'crosshair';
 
     const onPointerMove = (ev: PointerEvent) => {
-      // A draw/move drag owns the cursor; skip to prevent oscillation.
+      // A draw/move/rotate drag owns the cursor; skip to prevent oscillation.
+      // Check both the React-state ref AND the fast-track cursor: the fast-track
+      // cursor is set synchronously by onStart before React processes the state
+      // update, so it catches the first frame of interaction that React misses.
       if (isInteractingRef.current) return;
+      const activeCursor = actions.fast.getCursor();
+      if (activeCursor && activeCursor.startsWith('url(')) return;
 
       const frame = frameRef.current;
       if (!frame) return;

@@ -58,6 +58,7 @@ import {
   isRotatedPose,
   transformFrame
 } from './operators/transform';
+import { normalizeAngle, snapAngle } from './operators/rotator';
 import {
   getFitCamera,
   projectZoom,
@@ -133,6 +134,8 @@ export function createGeometryService(): GeometryService {
       transformFrame: (frame: Frame, operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v') => transformFrame(frame, operation),
       computeFragmentCenter: (worldCenter: Point2D, visibleOffset: Point2D, rotation: number, flip: { h: boolean; v: boolean }) => computeFragmentCenter(worldCenter, visibleOffset, rotation, flip),
       computeLayerMovePose: (layer: Layer) => computeLayerMovePose(layer),
+      normalizeAngle: (deg: number) => normalizeAngle(deg),
+      snapAngle: (deg: number, step: number) => snapAngle(deg, step),
     },
     camera: {
       getFitCamera: (viewport: Dimensions, content: Dimensions, options?: CameraCenterOptions) => getFitCamera(viewport, content, options),

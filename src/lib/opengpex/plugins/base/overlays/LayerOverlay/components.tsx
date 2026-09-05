@@ -195,7 +195,7 @@ function LayerOverlayContent() {
           />
         ))}
 
-      {/* Layer move delta label: shows displacement during drag */}
+      {/* Layer move/rotate delta label: shows displacement and/or angle during drag */}
       <LayerMoveDeltaLabel />
     </div>
   );

@@ -20,6 +20,7 @@
 'use client';
 
 import React, { CSSProperties } from 'react';
+import { ROTATE_CURSOR } from '@opengpex/editor/icons';
 
 /**
  * The 8 transform-gizmo handle directions (4 corners + 4 edge midpoints).
@@ -141,6 +142,18 @@ export interface TransformGizmoProps {
    * the contenteditable from losing focus). Omitted for marker.
    */
   onHandlePointerDown?: (e: React.MouseEvent) => void;
+  /**
+   * Whether to render the rotation handle (a dedicated dot above top-center
+   * connected by a thin stem line). Defaults to false for backward compat.
+   */
+  showRotateHandle?: boolean;
+  /**
+   * Distance (in the box's CSS units) from the top edge to the rotation
+   * handle centre. Defaults to 24.
+   */
+  rotateHandleOffset?: number;
+  /** Extra classes for the rotation handle dot. */
+  rotateHandleClassName?: string;
 }
 
 /**
@@ -170,6 +183,9 @@ export const TransformGizmo = React.memo(function TransformGizmo({
   showOutline = false,
   outlineClassName = '',
   onHandlePointerDown,
+  showRotateHandle = false,
+  rotateHandleOffset = 24,
+  rotateHandleClassName = '',
 }: TransformGizmoProps) {
   return (
     <div className="absolute inset-0 pointer-events-none">
@@ -192,6 +208,38 @@ export const TransformGizmo = React.memo(function TransformGizmo({
           }}
         />
       ))}
+
+      {/* Rotation handle: a dot above the top-center, connected by a thin stem. */}
+      {showRotateHandle && (
+        <>
+          {/* Stem line from top-center to the rotate dot */}
+          <div
+            className="absolute pointer-events-none"
+            style={{
+              left: '50%',
+              top: `${-rotateHandleOffset}px`,
+              width: '1px',
+              height: `${rotateHandleOffset}px`,
+              transform: 'translateX(-50%)',
+              backgroundColor: 'rgba(255, 255, 255, 0.5)',
+            }}
+          />
+          {/* Rotate handle dot */}
+          <div
+            data-gizmo-rotate="true"
+            onMouseDown={onHandlePointerDown}
+            className={`absolute rounded-full bg-white shadow-sm pointer-events-auto hover:scale-125 transition-transform duration-150 ${rotateHandleClassName}`}
+            style={{
+              width: `${handleSizePx}px`,
+              height: `${handleSizePx}px`,
+              left: '50%',
+              top: `${-rotateHandleOffset}px`,
+              transform: 'translate(-50%, -50%)',
+              cursor: ROTATE_CURSOR,
+            }}
+          />
+        </>
+      )}
     </div>
   );
 });

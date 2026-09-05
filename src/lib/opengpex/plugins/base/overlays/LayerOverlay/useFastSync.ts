@@ -147,18 +147,21 @@ export function useLayerOverlaySync(
 // ─── useLayerMoveDeltaSync ─────────────────────────────────────────────────────
 
 /**
- * Fast-track hook for the layer-move delta label (e.g. "→ 42  ↓ 18").
+ * Fast-track hook for the layer interaction delta label.
+ *
+ * Shows at the active layer's bottom-left corner during move or rotation:
+ *   - Move:   `→ 12  ↓ 34`       (dx / dy in pixels)
+ *   - Rotate: `↻ 45°`            (absolute angle, 0.1° precision)
  *
  * Fully self-contained in the plugin — does NOT require any transient from core handlers.
  *
- * Key insight: During a drag, the React state (committed) does NOT change (the
- * InteractionTransaction hasn't committed yet). The `useFastSync` callback receives
- * `f` = merged frame (committed + buffered), which reflects the LIVE position.
- * We capture the committed frame via `useEditorState()` (stable during drag) and
- * compare it with the merged `f` to derive the displacement.
+ * Detection:
+ *   `buffered.cx !== undefined`       → move in progress
+ *   `buffered.rotation !== undefined`  → rotation in progress
+ * (Mutually exclusive — dispatcher is single-active-handler.)
  *
- * Detection: `v.buffered.layers[id].cx !== undefined` means a layer move is active.
- * When the interaction ends (buffer cleared), the delta becomes 0 → label hides.
+ * During a drag the React state (committed) stays frozen; `f` = merged frame
+ * reflects the LIVE pose. Comparing the two gives the delta.
  */
 export function useLayerMoveDeltaSync(isActive: boolean) {
   const deltaRef = useRef<HTMLDivElement>(null);
@@ -175,7 +178,7 @@ export function useLayerMoveDeltaSync(isActive: boolean) {
       // Buffer uses composite key: "frameId:layerId"
       const compositeKey = `${f.id}:${activeLayerId}`;
       const buffered = v.buffered.layers[compositeKey];
-      if (!buffered || buffered.cx === undefined) return null;
+      if (!buffered || (buffered.cx === undefined && buffered.rotation === undefined)) return null;
 
       // f = merged frame (live position during drag)
       const liveLayer = f.layers.byId[activeLayerId];
@@ -205,21 +208,34 @@ export function useLayerMoveDeltaSync(isActive: boolean) {
     // Buffer uses composite key: "frameId:layerId"
     const compositeKey = `${f.id}:${activeLayerId}`;
     const buffered = v.buffered.layers[compositeKey];
-    if (!buffered || buffered.cx === undefined) {
+    const isMove = buffered && buffered.cx !== undefined;
+    const isRotate = buffered && buffered.rotation !== undefined;
+
+    if (!isMove && !isRotate) {
       el.style.display = 'none';
       return;
     }
 
+    const liveLayer = f.layers.byId[activeLayerId];
+    if (!liveLayer) {
+      el.style.display = 'none';
+      return;
+    }
+
+    // ── Rotation gesture: show absolute angle ──
+    if (isRotate) {
+      const liveRot = liveLayer.rotation;
+      const displayAngle = Math.abs(liveRot) < 0.05 ? 0 : Math.round(liveRot * 10) / 10;
+      const span = el.firstElementChild as HTMLSpanElement;
+      if (span) span.textContent = `↻ ${displayAngle}°`;
+      el.style.display = '';
+      return;
+    }
+
+    // ── Move gesture: show dx / dy in pixels ──
     // committedFrame = React state (unchanged during drag)
     const committedLayer = committedFrame?.layers.byId[activeLayerId];
     if (!committedLayer) {
-      el.style.display = 'none';
-      return;
-    }
-
-    // f = merged frame → f.layers.byId[id].cx = live position
-    const liveLayer = f.layers.byId[activeLayerId];
-    if (!liveLayer) {
       el.style.display = 'none';
       return;
     }
@@ -236,8 +252,15 @@ export function useLayerMoveDeltaSync(isActive: boolean) {
     const hArrow = dx >= 0 ? '→' : '←';
     const vArrow = dy >= 0 ? '↓' : '↑';
 
+    // If the layer has a non-zero rotation, append it to the label so the user
+    // always sees the current angle while repositioning a rotated object.
+    const rot = committedLayer.rotation;
+    const rotSuffix = rot !== 0
+      ? `  ↻ ${Math.abs(rot) < 0.05 ? 0 : Math.round(rot * 10) / 10}°`
+      : '';
+
     const span = el.firstElementChild as HTMLSpanElement;
-    if (span) span.textContent = `${hArrow} ${Math.abs(dx)}  ${vArrow} ${Math.abs(dy)}`;
+    if (span) span.textContent = `${hArrow} ${Math.abs(dx)}  ${vArrow} ${Math.abs(dy)}${rotSuffix}`;
     el.style.display = '';
   });
 

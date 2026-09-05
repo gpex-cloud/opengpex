@@ -19,7 +19,7 @@
 
 import { EditorPlugin } from '@opengpex/editor/core/types';
 import { TextOverlayMain } from './components';
-import { createTextMoveHandler, createTextResizeHandler, createTextPlaceHandler } from './interactions';
+import { createTextMoveHandler, createTextResizeHandler, createTextRotateHandler, createTextPlaceHandler } from './interactions';
 import { TEXT_OVERLAY_COMMANDS } from './commands';
 import * as P from './protocols';
 
@@ -31,6 +31,7 @@ import * as P from './protocols';
  *
  * Interaction priority chain:
  * - text-move (170): Cmd/Ctrl + drag to move text layer
+ * - text-rotate (165): drag rotation handle to freely rotate
  * - text-resize (160): editing state resize handles scale
  * - text-place (150): click-to-place/wake up editing
  */
@@ -53,6 +54,7 @@ export const plugin: EditorPlugin = {
 
   interactions: [
     createTextMoveHandler(),    // Priority 170 - Cmd+drag to move (highest)
+    createTextRotateHandler(),  // Priority 165 - drag rotation handle
     createTextResizeHandler(),  // Priority 160 - editing state resize handle
     createTextPlaceHandler(),   // Priority 150 - place/wake up
   ],

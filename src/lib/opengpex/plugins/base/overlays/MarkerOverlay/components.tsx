@@ -145,6 +145,8 @@ const MarkerSelectionBox = React.memo(function MarkerSelectionBox() {
           handleClassName="border border-indigo-500"
           showOutline
           outlineClassName="border-indigo-500/80"
+          showRotateHandle
+          rotateHandleClassName="border border-indigo-500"
         />
       </div>
     </div>

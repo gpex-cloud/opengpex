@@ -192,6 +192,10 @@ export interface GeometryService {
     computeFragmentCenter: (worldCenter: Point2D, visibleOffset: Point2D, rotation: number, flip: { h: boolean; v: boolean }) => Point2D;
     /** Computes rotation-aware pose info (AABB size, center offset) for layer move operations */
     computeLayerMovePose: (layer: Layer) => LayerMovePose;
+    /** Normalise an angle into the half-open range [0, 360). */
+    normalizeAngle: (deg: number) => number;
+    /** Snap an angle to the nearest multiple of `step` degrees. */
+    snapAngle: (deg: number, step: number) => number;
   };
 
   /** Camera service */

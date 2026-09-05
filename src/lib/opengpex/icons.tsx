@@ -225,3 +225,20 @@ export function PremiumCloudIcon({ className }: { className?: string }) {
   );
 }
 
+// ─── Rotation Cursor ────────────────────────────────────────────────────────────
+
+/**
+ * ROTATE_CURSOR: Custom cursor for the rotation handle (↻ circular arrow).
+ *
+ * CSS has no built-in rotation cursor, so we use an inline SVG data URI.
+ * 24×24 canvas with a ~240° arc + filled triangle arrowhead. Dual-layer
+ * rendering: white outline (5px / fill) underneath + black detail (2.5px / fill)
+ * on top — visible on any background (same approach as TEXT_PREEDIT_CURSOR).
+ * Hotspot at (12,12) = centre of the arc.
+ *
+ * Used as both the CSS hover cursor on the rotate handle dot AND the fast-track
+ * cursor override during the rotation drag.
+ */
+export const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M20.5 12a8.5 8.5 0 1 1-4.3-7.4' stroke='white' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolygon points='22,1 22,8 15,8' fill='white' stroke='white' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M20.5 12a8.5 8.5 0 1 1-4.3-7.4' stroke='%23222' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolygon points='22,1 22,8 15,8' fill='%23222'/%3E%3C/svg%3E") 12 12, pointer`;
+
+

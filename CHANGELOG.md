@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.2.4
+
+- Text & Markers: freely rotate text and markers by dragging the new rotation handle above the selection box; hold Shift to snap to 15° increments
+- Fixed a visual glitch where markers briefly re-animated after finishing a rotation drag
+- Re-Canvas: the W/H inputs in the popover now update in real time while dragging the selection box
+
+---
+
 ## v1.2.3
 
 - Snapping: rotated text and markers now snap to canvas edges, centers, and other layers while you resize them, with the usual straight guide lines
