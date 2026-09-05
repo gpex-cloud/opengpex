@@ -18,6 +18,9 @@ export interface CraftDrawerCommandsMap {
   setCraftBrushCmd: CommandInstance;
   setCraftEraserCmd: CommandInstance;
   setCraftMosaicCmd: CommandInstance;
+  setCraftMarkerCmd: CommandInstance;
+  cycleMarkerForwardCmd: CommandInstance;
+  cycleMarkerBackwardCmd: CommandInstance;
   deactivateCraftCmd: CommandInstance;
   brushSizeUpCmd: CommandInstance;
   brushSizeDownCmd: CommandInstance;

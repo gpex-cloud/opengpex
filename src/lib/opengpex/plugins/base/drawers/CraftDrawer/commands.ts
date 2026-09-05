@@ -26,6 +26,9 @@ import type { CraftType, CraftDrawerConfig } from './protocols';
 import {
   TextOverlayAPI,
 } from '../../overlays/TextOverlay/protocols';
+import { MARKER_REGISTRY } from '../../overlays/MarkerOverlay/registry';
+// Side-effect import: ensures built-in markers are registered before cycling.
+import '../../overlays/MarkerOverlay/markers';
 
 // ─── Shared Logic ──────────────────────────────────────────────────────────────
 
@@ -48,6 +51,31 @@ function activateCraft(ctx: EditorContextValue, craft: CraftType) {
 function deactivate(ctx: EditorContextValue) {
   ctx.scoped!.setSignal(P.SIGNAL_ACTIVE_CRAFT, null);
   ctx.actions.setInteraction({ interactionMode: 'pan' });
+}
+
+/**
+ * Cycle activeMarkerKind by `step` (+1 forward / -1 backward) within the
+ * declaration order of MARKER_REGISTRY. Mirrors ClipOptions.cycleClipTool.
+ *
+ * Guarded: only fires when activeCraft === 'marker'. No-op otherwise, so the
+ * same Tab key is free for other modes (e.g. Clip's own Tab cycling — its
+ * guard is interactionMode === 'clip', which never overlaps craft mode).
+ */
+function cycleMarkerKind(ctx: EditorContextValue, step: 1 | -1): void {
+  const craft = ctx.scoped!.getSignal<P.ActiveCraft>(P.SIGNAL_ACTIVE_CRAFT, null);
+  if (craft !== 'marker') return;
+
+  const order = MARKER_REGISTRY.kinds();
+  if (order.length === 0) return;
+
+  const config = ctx.scoped!.selfConfig as CraftDrawerConfig;
+  const current = config.activeMarkerKind ?? order[0];
+  const idx = order.indexOf(current);
+  // `(idx + step + len) % len` keeps the modulo non-negative even for step=-1.
+  const next = order[(idx + step + order.length) % order.length];
+
+  ctx.scoped!.setSelfConfig({ activeMarkerKind: next } as Partial<CraftDrawerConfig>);
+  ctx.actions.notifyHUD(`Marker: ${MARKER_REGISTRY.get(next)?.label ?? next}`, 'info');
 }
 
 // ─── Commands ──────────────────────────────────────────────────────────────────
@@ -106,6 +134,34 @@ export const CRAFT_COMMANDS = {
       activateCraft(ctx, 'mosaic');
     },
     shortcut: { key: 'm' },
+  } as EditorCommand<void, void>,
+
+  setCraftMarker: {
+    id: P.CMD_SET_CRAFT_MARKER,
+    name: 'Marker Tool',
+    category: 'Drawing',
+    execute: (ctx: EditorContextValue) => {
+      activateCraft(ctx, 'marker');
+    },
+    shortcut: { key: 'u' },
+  } as EditorCommand<void, void>,
+
+  // Marker sub-type cycling (mirrors ClipOptions.cycleToolForward/Backward).
+  // Guarded internally by activeCraft === 'marker', so Tab stays free for Clip.
+  cycleMarkerForward: {
+    id: P.CMD_CYCLE_MARKER_FORWARD,
+    name: 'Next Marker Type',
+    category: 'Drawing',
+    execute: (ctx: EditorContextValue) => cycleMarkerKind(ctx, +1),
+    shortcut: { key: 'Tab' },
+  } as EditorCommand<void, void>,
+
+  cycleMarkerBackward: {
+    id: P.CMD_CYCLE_MARKER_BACKWARD,
+    name: 'Previous Marker Type',
+    category: 'Drawing',
+    execute: (ctx: EditorContextValue) => cycleMarkerKind(ctx, -1),
+    shortcut: { key: 'Tab', shift: true },
   } as EditorCommand<void, void>,
 
   deactivateCraft: {

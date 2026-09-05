@@ -28,16 +28,9 @@ import {
   asLocalPolygon, asWorldPolygon,
 } from '@opengpex/editor/core/types';
 import { getLayerWorldMatrix } from './transform';
+import { isLayerSource } from './utils';
 import { computePolygonBounds, point2dToLocalShape, ringsToPathData } from './point2d';
 import { bresenhamSteps } from '../bresenham';
-
-/**
- * Detects whether a source/target is a Layer (image/text/vector/color) vs a Frame.
- * Aligned with shape.ts::localToWorldShape branch test.
- */
-function isLayerSource(s: Layer | Frame): s is Layer {
-  return 'type' in s && (s.type === 'image' || s.type === 'text' || s.type === 'vector' || s.type === 'color' || s.type === 'paint');
-}
 
 // computePolygonBounds re-exported from point2d.ts for backward compatibility
 export { computePolygonBounds } from './point2d';

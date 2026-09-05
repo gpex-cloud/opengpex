@@ -149,6 +149,9 @@ export class CompositeDispatcher {
       if (layer.type === 'text') {
         const rasterized = await this.preRasterizeText(layer);
         descriptors.push(rasterized);
+      } else if (layer.type === 'vector' && layer.markerData) {
+        const rasterized = await this.preRasterizeMarker(layer);
+        descriptors.push(rasterized);
       } else {
         const descriptor = await this.buildDescriptor(layer);
         descriptors.push(descriptor);
@@ -171,6 +174,61 @@ export class CompositeDispatcher {
     const ctx = canvas.getContext('2d')!;
 
     // Use shared painter to draw text content
+    drawLayerInstance(ctx, layer, null);
+
+    const blob = await canvasToBlob(canvas);
+    const hash = await calculateHash(blob);
+    const tileMeta = buildTileMeta(w, h, 1);
+
+    // Register as temporary asset (cache warming via AssetService hooks)
+    const id = await this.assets.inject(hash, blob, tileMeta);
+
+    const raw = this.geometry.transform.getLayerWorldMatrix(layer);
+    const worldMatrix = asWorldMatrix(raw);
+
+    return {
+      type: 'image', // ← Downgraded to image type
+      assetId: id,
+      hash, // ← Worker uses hash to look up WorkerCache
+      metadata: layer.metadata,
+      textData: undefined,
+      bounding: layer.bounding,
+      visibleShape: layer.visibleShape,
+      vectorMasks: layer.vectorMasks,
+      bitmapMasks: layer.bitmapMasks,
+      opacity: layer.opacity,
+      blendMode: layer.blendMode ?? 'source-over',
+      fill: layer.fill,
+      adjustments: layer.adjustments,
+      curves: layer.curves,
+      levels: layer.levels,
+      channelMix: layer.channelMix,
+      colorBalance: layer.colorBalance,
+      worldMatrix,
+      dprScale: 1,
+    };
+  }
+
+  /**
+   * Marker layer pre-rasterize:
+   * Main thread paints markerData onto an OffscreenCanvas via the shared painter →
+   * registers it as a temporary asset → returns an image-type descriptor.
+   * The Worker receives a plain image, no marker handling needed.
+   *
+   * ⚠️ This is a *temporary rasterize*, NOT a *bake*: the produced image asset is
+   *    content-hash cached and only used to feed the Worker for composite/export.
+   *    It does NOT write back to `layer.markerData` — the layer's persistent state
+   *    stays fully vector (see spec §3.5.2). Semantics are identical to
+   *    `preRasterizeText`; the only difference is the draw call resolves to the
+   *    shared painter's `paintMarker` (via `drawLayerInstance`).
+   */
+  private async preRasterizeMarker(layer: Layer): Promise<LayerDescriptor> {
+    const w = layer.bounding.w || 1;
+    const h = layer.bounding.h || 1;
+    const canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext('2d')!;
+
+    // Use shared painter to draw marker content (dispatches to paintMarker).
     drawLayerInstance(ctx, layer, null);
 
     const blob = await canvasToBlob(canvas);

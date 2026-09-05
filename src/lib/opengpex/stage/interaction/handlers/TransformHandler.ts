@@ -17,7 +17,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionHandler, InteractionEvent, LocalRect } from '@opengpex/editor/core/types';
+import { InteractionHandler, InteractionEvent, LocalRect, asWorldPoint } from '@opengpex/editor/core/types';
+import { Matrix3x3 } from '@opengpex/editor/core/geometry/matrix';
 import { InteractionMath } from '../Math';
 import { InteractionTransaction } from '../Transaction';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
@@ -52,6 +53,20 @@ export interface ModifierState {
 }
 
 /**
+ * LayerOrientation: The pose (rotation/flip) of the object being transformed.
+ *
+ * Supplied by consumers via `TransformHandlerConfig.getOrientation` so the resize
+ * math can operate in the object's own local axes instead of the canvas axes.
+ * See the "Orientation-aware resize" section on `getOrientation` for details.
+ */
+export interface LayerOrientation {
+  /** Rotation in degrees (layer.rotation) */
+  rotation: number;
+  /** Mirror flags (layer.flip) */
+  flip: { h: boolean; v: boolean };
+}
+
+/**
  * TransformContext: Created at onStart, available throughout the gesture lifecycle.
  */
 export interface TransformContext {
@@ -65,6 +80,13 @@ export interface TransformContext {
   startTime: number;
   /** Unique incrementing ID for this gesture */
   generation: number;
+  /**
+   * Non-null when the gesture is running in orientation-aware mode, i.e. the
+   * rect passed to `onUpdate` is expressed in the object's LOCAL axes rather
+   * than canvas axes. Consumers that opt into `getOrientation` must check this
+   * to interpret the rect correctly (see `getOrientation` docs).
+   */
+  orientation?: LayerOrientation | null;
 }
 
 /**
@@ -136,6 +158,38 @@ export interface TransformHandlerConfig<T = LocalRect> {
   /** Get the initial state (e.g., initial rect, crop box) */
   getInitialState: (e: InteractionEvent, intent: TransformIntent) => T;
 
+  /**
+   * [Orientation-aware resize — opt-in]
+   *
+   * Return the pose (rotation/flip) of the object being resized, or null/undefined
+   * for plain axis-aligned objects.
+   *
+   * WHY: the resize math is fundamentally "resize an axis-aligned rect". For an
+   * object carrying a non-zero `rotation` (e.g. a marker layer after a canvas
+   * Rotate Left/Right, where `transformFrame` bumps `layer.rotation` but leaves
+   * `layer.bounding` untouched), the canvas axes and the object's own axes no
+   * longer coincide — dragging the visually-"east" handle must grow the object
+   * along ITS OWN local x axis, not the canvas x axis. Supplying the orientation
+   * lets the framework map the pointer delta through the inverse orientation
+   * matrix so the single resize algorithm runs in the object's local axes.
+   *
+   * CONTRACT when a non-zero orientation is returned:
+   *   - `onUpdate` receives a rect in the object's LOCAL axes: `w`/`h` are the
+   *     new local dimensions, and `x`/`y` are the local top-left. Consumers
+   *     typically only need `w`/`h` plus the framework-provided local centre
+   *     (recoverable from the rect) and should write them straight to
+   *     `bounding` / `cx`+`cy`.
+   *   - `context.orientation` is non-null, so consumers can assert the space.
+   *   - Edge snapping is skipped (see the rotated-snapEdge TODO in
+   *     `docs/opengpex/plans/v1/20260905_transform_handler_rotation_aware_resize.md`):
+   *     `snapEdge` compares canvas-axis edges and cannot express a rotated edge.
+   *
+   * When this returns null/undefined, or `rotation === 0` with no flip, the
+   * gesture takes the original canvas-space code path byte-for-byte (this keeps
+   * ClipOverlay's pixel-exact behaviour and its edge snapping intact).
+   */
+  getOrientation?: (e: InteractionEvent, intent: TransformIntent) => LayerOrientation | null | undefined;
+
   /** Get constraints such as aspect ratio, whether to clamp to canvas, or a specific layer ID to snap to. */
   getConstraints?: (e: InteractionEvent, intent: TransformIntent) => {
     aspect?: number;
@@ -198,6 +252,34 @@ function resolveHandleType(intent: TransformIntent): string {
   return 'move';
 }
 
+/**
+ * Build the orientation (rotation + mirror) matrix for a layer pose.
+ *
+ * MUST stay sign-compatible with `getOrientationMatrix` in
+ * `core/geometry/operators/transform.ts` (R × F, rotation in degrees), which is
+ * what `computeWorldMatrix` (rendering) and `computeLayerMovePose` (move) use.
+ * If these two ever disagree, the resize direction would be mirrored relative to
+ * what the user sees on screen.
+ */
+function buildOrientationMatrix(o: LayerOrientation): Matrix3x3 {
+  const R = Matrix3x3.rotate(o.rotation);
+  const F = new Matrix3x3(o.flip?.h ? -1 : 1, 0, 0, o.flip?.v ? -1 : 1, 0, 0);
+  return R.multiply(F);
+}
+
+/**
+ * Decide whether a supplied orientation actually requires the local-axes path.
+ *
+ * A zero rotation with no mirroring means canvas axes and local axes coincide,
+ * so we deliberately fall through to the original canvas-space math (identical
+ * results, zero regression risk, and edge snapping stays available).
+ */
+function needsOrientationPath(o: LayerOrientation | null | undefined): o is LayerOrientation {
+  if (!o) return false;
+  const rot = ((o.rotation % 360) + 360) % 360;
+  return rot !== 0 || !!o.flip?.h || !!o.flip?.v;
+}
+
 // ─── Factory ───────────────────────────────────────────────────────────────────
 
 /**
@@ -220,6 +302,11 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
 
   // Internal type string used by resize math (matches handle direction)
   let internalType = '';
+
+  // Orientation-aware resize state (null = plain canvas-axes path).
+  // Captured once at onStart because rotation/flip never change mid-gesture.
+  let startOrientation: LayerOrientation | null = null;
+  let startOrientInverse: Matrix3x3 | null = null;
 
   return {
     id: config.id,
@@ -250,6 +337,17 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
       _hasMoved = false;
       startState = { ...config.getInitialState(e, intent) };
       startCanvas = { x: e.point.canvas.x, y: e.point.canvas.y };
+
+      // Resolve orientation once. Only a genuinely rotated/mirrored pose switches
+      // to the local-axes path; rotation=0 keeps the original canvas-space math.
+      const rawOrientation = config.getOrientation ? config.getOrientation(e, intent) : null;
+      if (needsOrientationPath(rawOrientation)) {
+        startOrientation = rawOrientation;
+        startOrientInverse = buildOrientationMatrix(rawOrientation).inverse();
+      } else {
+        startOrientation = null;
+        startOrientInverse = null;
+      }
 
       let ax = startState.x;
       let ay = startState.y;
@@ -282,6 +380,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
         startModifiers: captureModifiers(e),
         startTime: Date.now(),
         generation: myGen,
+        orientation: startOrientation,
       };
 
       // Initialize Transaction
@@ -330,6 +429,76 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
             h: Math.round(nextRect.h)
           } as LocalRect;
         }
+      } else if (startOrientation && startOrientInverse) {
+        // ─── Orientation-aware resize (local axes) ─────────────────────────
+        // The object carries a non-zero rotation/flip, so canvas axes ≠ object
+        // axes. We map the pointer delta through the inverse orientation matrix
+        // and then run the SAME resize algorithm in the object's local axes.
+        //
+        // startState is the object's local-axes rect (from getInitialState):
+        // x/y = local top-left, w/h = local dimensions. In local space the rect
+        // is axis-aligned by definition, which is exactly what the resize math
+        // expects — the rotation lives entirely in the delta mapping below.
+        const resizeType = internalType === 'create' ? 'se' : internalType;
+
+        // Pointer delta: canvas axes → local axes (pure rotation/mirror, no translation).
+        const localDelta = startOrientInverse.apply({ x: dx, y: dy });
+
+        const isHorizontalEdge = internalType === 'e' || internalType === 'w';
+        const isVerticalEdge = internalType === 'n' || internalType === 's';
+        const ldx = isVerticalEdge ? 0 : localDelta.x;
+        const ldy = isHorizontalEdge ? 0 : localDelta.y;
+
+        // Anchor = the FIXED corner/edge; handle = the corner being dragged.
+        // Both in local axes.
+        //
+        // For an axis the handle does NOT address (e.g. the x axis of an 'n'
+        // handle), anchor and handle must COINCIDE so the mapped delta is zero on
+        // that axis and `calculateResizedRect` restores the original dimension
+        // from `startDim` — mirroring the canvas-space path's use of startAnchor.
+        const addressesX = internalType.includes('w') || internalType.includes('e');
+        const addressesY = internalType.includes('n') || internalType.includes('s');
+
+        const anchorX = internalType.includes('w') ? startState.x + startState.w : startState.x;
+        const anchorY = internalType.includes('n') ? startState.y + startState.h : startState.y;
+
+        const handleX = addressesX
+          ? (internalType.includes('w') ? startState.x : startState.x + startState.w)
+          : anchorX;
+        const handleY = addressesY
+          ? (internalType.includes('n') ? startState.y : startState.y + startState.h)
+          : anchorY;
+
+        const curLocalX = handleX + (addressesX ? ldx : 0);
+        const curLocalY = handleY + (addressesY ? ldy : 0);
+
+        const isShiftPressed = (e.nativeEvent as MouseEvent).shiftKey;
+        let effectiveAspect = constraints.aspect;
+        if (!effectiveAspect && isShiftPressed) {
+          effectiveAspect = (startState.w > 0 && startState.h > 0) ? startState.w / startState.h : 1;
+        }
+
+        // Reuse the shared, coordinate-system-agnostic rect math.
+        const resized = e.geometry.space.calculateResizedRect(
+          asWorldPoint({ x: curLocalX, y: curLocalY }),
+          asWorldPoint({ x: anchorX, y: anchorY }),
+          effectiveAspect,
+          resizeType,
+          { w: startState.w, h: startState.h }
+        );
+
+        // Edge snapping is intentionally skipped here: snapEdge compares
+        // canvas-axis edges and cannot represent a rotated edge. Tracked as a
+        // follow-up (rotated snapEdge) in the plans doc.
+        e.actions.fast.setTransient('smartguides', null);
+
+        // Pixel-grid invariant still applies (dimensions are in local pixels).
+        nextRect = {
+          x: Math.round(resized.x),
+          y: Math.round(resized.y),
+          w: Math.round(resized.w),
+          h: Math.round(resized.h)
+        } as LocalRect;
       } else {
         // Resizing logic (category = 'resize' or 'create')
         const resizeType = internalType === 'create' ? 'se' : internalType;
@@ -488,6 +657,8 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
       currentContext = null;
       intent = null;
       internalType = '';
+      startOrientation = null;
+      startOrientInverse = null;
     },
 
     onCancel: (e) => {
@@ -501,6 +672,8 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
       currentContext = null;
       intent = null;
       internalType = '';
+      startOrientation = null;
+      startOrientInverse = null;
     }
   };
 }

@@ -25,7 +25,6 @@ export interface LayersDrawerCommandsMap {
   setLayerOpacityCmd: CommandInstance<{ frameId?: string; layerId?: string; opacity: number }>;
   setLayerFillCmd: CommandInstance<{ frameId?: string; layerId?: string; fill: number }>;
   opacityShortcutCmd: CommandInstance<{ _shortcutKey?: string }>;
-  // Layer Group commands (Phase 1)
   createGroupCmd: CommandInstance<{ layerIds?: string[] } | undefined>;
   ungroupLayersCmd: CommandInstance<{ groupId: string }>;
   toggleGroupCollapseCmd: CommandInstance<{ frameId?: string; groupId: string; collapsed?: boolean }>;

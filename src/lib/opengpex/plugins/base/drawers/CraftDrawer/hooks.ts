@@ -23,9 +23,13 @@ import { useCallback, useMemo, useEffect, useRef } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals, usePluginSelfConfig, usePluginConfig } from '@opengpex/editor/core/context';
 import { TextOverlayAPI } from '../../overlays/TextOverlay/protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
+import { MarkerOverlayAPI } from '../../overlays/MarkerOverlay/protocols';
+import { MARKER_REGISTRY } from '../../overlays/MarkerOverlay/registry';
+// Side-effect import: ensures built-in markers are registered before panel reads.
+import '../../overlays/MarkerOverlay/markers';
 import { getReferenceFontSize, MOSAIC_SIZE_PRESETS } from './protocols';
 import type { ActiveCraft, CraftType, CraftDrawerConfig, PendingTextData } from './protocols';
-import type { TextLayerData } from '@opengpex/editor/core/types/models';
+import type { TextLayerData, MarkerKind, MarkerData, MarkerDataBase } from '@opengpex/editor/core/types';
 import type { CraftDrawerCommandsMap, CraftDrawerSignalsMap } from './commands.d';
 
 // ─── useCraftDrawer ────────────────────────────────────────────────────────────
@@ -433,3 +437,141 @@ export function useBrushPanel() {
     updateBrushColor,
   }), [brushSize, brushOpacity, brushHardness, brushColor, isEraser, updateBrushParam, updateBrushColor]);
 }
+
+// ─── useMarkerPanel ────────────────────────────────────────────────────────────
+
+/** Default pending marker style (stroke/fill) used before any layer is selected. */
+const DEFAULT_MARKER_STYLE: MarkerDataBase = {
+  kind: 'rect',
+  stroke: { color: '#FF3B30', width: 3 },
+  fill: { color: '#FF3B30', opacity: 0 },
+};
+
+/**
+ * useMarkerPanel: Semantic Hook for MarkerPanel.
+ *
+ * Mirrors useTextPanel's dual-mode binding:
+ * - When a marker layer (`type:'vector' + markerData`) is selected, the panel
+ *   reads/writes that layer's live markerData (undoable via MarkerOverlay's
+ *   update command; live for continuous slider drags).
+ * - Otherwise it reads/writes `pendingMarkerData` + `activeMarkerKind` in
+ *   pluginConfig, which drives new-marker defaults and the draw preview.
+ *
+ * The active kind is shared with Tab cycling: both selector click and Tab write
+ * the same `activeMarkerKind`, so the panel highlight stays in sync (§5.3/§8.2).
+ */
+export function useMarkerPanel() {
+  const { state, activeFrame, activeLayer } = useEditorState();
+  const { actions } = useEditorServices();
+  const [selfConfig, setSelfConfig] = usePluginSelfConfig<CraftDrawerConfig>();
+
+  // Registered marker kinds (declaration order = selector order = Tab order).
+  const kinds = MARKER_REGISTRY.kinds();
+  const definitions = MARKER_REGISTRY.getAll();
+
+  // Selected marker layer (only when it is a marker vector layer).
+  const targetLayer = activeLayer && activeLayer.type === 'vector' && activeLayer.markerData ? activeLayer : null;
+  const layerMarkerData = targetLayer?.markerData;
+
+  // Active kind: a selected layer wins; otherwise the persisted pending kind.
+  const activeMarkerKind: MarkerKind = (layerMarkerData?.kind
+    ?? selfConfig.activeMarkerKind
+    ?? kinds[0]
+    ?? 'rect') as MarkerKind;
+
+  const activeDef = MARKER_REGISTRY.get(activeMarkerKind);
+
+  // Synthesized markerData for the panel UI (layer data or pending style).
+  const pendingMarkerData = selfConfig.pendingMarkerData;
+  const markerData: MarkerData | undefined = useMemo(() => {
+    if (layerMarkerData) return layerMarkerData;
+    const def = MARKER_REGISTRY.get(activeMarkerKind);
+    if (!def) return undefined;
+    const base = def.defaults();
+    if (pendingMarkerData?.stroke) base.stroke = { ...base.stroke, ...pendingMarkerData.stroke };
+    if (pendingMarkerData?.fill) base.fill = { ...base.fill, ...pendingMarkerData.fill };
+    if (typeof pendingMarkerData?.cornerRadius === 'number' && base.kind === 'rect') {
+      (base as { cornerRadius: number }).cornerRadius = pendingMarkerData.cornerRadius;
+    }
+    return base;
+  }, [layerMarkerData, activeMarkerKind, pendingMarkerData]);
+
+  // Select a marker sub-type (panel click). Shares activeMarkerKind with Tab.
+  const selectKind = useCallback((kind: MarkerKind) => {
+    setSelfConfig({ activeMarkerKind: kind } as Partial<CraftDrawerConfig>);
+    // If a marker layer is currently selected, its own kind otherwise wins the
+    // panel binding (layerMarkerData.kind takes precedence over the pending
+    // kind), so the selector/panel would appear "stuck" on the layer's kind.
+    // Deselecting reverts the panel to pending-mode, which immediately reflects
+    // the just-clicked kind — matching mainstream tools (a type switch targets
+    // the NEXT drawn shape, never mutates the existing selection).
+    if (targetLayer && activeFrame) {
+      actions.setActiveLayer(activeFrame.id, null);
+    }
+  }, [setSelfConfig, targetLayer, activeFrame, actions]);
+
+  /**
+   * Update marker style properties (stroke/fill/cornerRadius).
+   *
+   * Two modes, each keeping the controlled panel sliders live-updating:
+   * 1. A marker layer is selected → edit it (undoable command on commit, or live
+   *    updateLayer for continuous slider drags). The layer's own data drives the
+   *    slider value, so it moves in real time. Sync stroke/fill/cornerRadius to
+   *    `pendingMarkerData` only on commit (non-live) to avoid config write spam.
+   * 2. No layer selected (pending mode) → write `pendingMarkerData` on EVERY
+   *    call, including live drags. pendingMarkerData is what drives the slider
+   *    value here, so skipping live writes would freeze the thumb (the earlier
+   *    bug: sliders "couldn't be dragged" until a marker was drawn/selected).
+   */
+  const updateMarkerData = useCallback((patch: Partial<MarkerData>, live = false) => {
+    // ── Mode 1: a marker layer is selected ──
+    if (targetLayer && activeFrame && layerMarkerData) {
+      if (live) {
+        actions.updateLayer(activeFrame.id, targetLayer.id, {
+          markerData: { ...layerMarkerData, ...patch } as MarkerData,
+        });
+      } else {
+        actions.executeCommand(MarkerOverlayAPI.commands.updateMarker.uid, {
+          frameId: activeFrame.id,
+          layerId: targetLayer.id,
+          patch,
+        });
+      }
+      // Remember as the next-marker preset — commit only (avoid live spam).
+      if (!live) {
+        const nextPending: Partial<MarkerDataBase> & { cornerRadius?: number } = { ...(pendingMarkerData ?? {}) };
+        if (patch.stroke) nextPending.stroke = { ...(pendingMarkerData?.stroke ?? DEFAULT_MARKER_STYLE.stroke), ...patch.stroke };
+        if (patch.fill) nextPending.fill = { ...(pendingMarkerData?.fill ?? DEFAULT_MARKER_STYLE.fill), ...patch.fill };
+        if (typeof (patch as { cornerRadius?: number }).cornerRadius === 'number') {
+          nextPending.cornerRadius = (patch as { cornerRadius?: number }).cornerRadius;
+        }
+        setSelfConfig({ pendingMarkerData: nextPending } as Partial<CraftDrawerConfig>);
+      }
+      return;
+    }
+
+    // ── Mode 2: pending mode (no layer) — always write, incl. live drags ──
+    const nextPending: Partial<MarkerDataBase> & { cornerRadius?: number } = { ...(pendingMarkerData ?? {}) };
+    if (patch.stroke) nextPending.stroke = { ...(pendingMarkerData?.stroke ?? DEFAULT_MARKER_STYLE.stroke), ...patch.stroke };
+    if (patch.fill) nextPending.fill = { ...(pendingMarkerData?.fill ?? DEFAULT_MARKER_STYLE.fill), ...patch.fill };
+    if (typeof (patch as { cornerRadius?: number }).cornerRadius === 'number') {
+      nextPending.cornerRadius = (patch as { cornerRadius?: number }).cornerRadius;
+    }
+    setSelfConfig({ pendingMarkerData: nextPending } as Partial<CraftDrawerConfig>);
+  }, [targetLayer, activeFrame, layerMarkerData, pendingMarkerData, actions, setSelfConfig]);
+
+  // Keep this hook's state reference stable across renders unless inputs change.
+  void state;
+
+  return useMemo(() => ({
+    kinds,
+    definitions,
+    activeMarkerKind,
+    activeDef,
+    markerData,
+    hasSelectedLayer: !!targetLayer,
+    selectKind,
+    updateMarkerData,
+  }), [kinds, definitions, activeMarkerKind, activeDef, markerData, targetLayer, selectKind, updateMarkerData]);
+}
+

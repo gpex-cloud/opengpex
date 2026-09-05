@@ -35,10 +35,11 @@
  * - Preserves pure function signatures for onscreen + offscreen sharing.
  */
 
-import type { ClipDescriptor, TileData, AdjustmentState, LocalShape } from '@opengpex/editor/core/types';
+import type { ClipDescriptor, TileData, AdjustmentState, LocalShape, MarkerData } from '@opengpex/editor/core/types';
 import { shapeToPath2D } from '@opengpex/editor/core/helpers/path2d';
 import { shrinkInvertedMask } from '@opengpex/editor/core/helpers/sub-pixel';
 import { TEXT_LAYER_PADDING } from '@opengpex/editor/core/helpers/config';
+import { paintMarker } from './markerPainter';
 
 // ─── LayerLike Interface ───
 
@@ -70,6 +71,7 @@ export interface LayerLike {
     underline?: boolean;
     strikethrough?: boolean;
   };
+  markerData?: MarkerData;
   assetId?: string;
 }
 
@@ -324,6 +326,11 @@ function drawLayerContent(
     }
   } else if (layer.type === 'text' && layer.textData) {
     drawTextContent(ctx, layer, layer.textData);
+  } else if (layer.type === 'vector' && layer.markerData) {
+    // Marker (annotation shape) branch — symmetric with the text branch above.
+    // `ctx` has already been translated/transformed to the layer-local origin
+    // by the caller; `paintMarker` dispatches on markerData.kind (rect / arrow / …).
+    paintMarker(ctx, layer.markerData, layer.bounding);
   } else if (Array.isArray(source)) {
     // TileData tile drawing branch.
     // visibleShape clip is already applied by applyClipSequence (with expansion for fragments).

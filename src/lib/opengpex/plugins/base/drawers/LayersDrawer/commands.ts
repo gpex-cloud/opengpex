@@ -398,7 +398,9 @@ export const LAYERS_COMMANDS = {
             const group = LayerFactory.getNewGroup({ name: groupName });
 
             if (hasSelection) {
-                // Group selected layers: insert group right above the topmost selected layer
+                // Group selected layers: insert group right BELOW the bottommost
+                // selected layer (spec §2.2: group header sits at the bottom of its
+                // member block, children stacked above — matches getInsertIndexAbove).
                 // Filter out any group layers from selection (groups can't be nested)
                 const validIds = selectedIds.filter(id => {
                     const l = activeFrame.layers.byId[id];
@@ -413,17 +415,13 @@ export const LAYERS_COMMANDS = {
                 }
                 ctx.actions.batchUpdateLayers(activeFrame.id, patches);
 
-                // Find the topmost selected layer in the flat order, skip past its children
+                // Insert the group header just below the bottommost selected layer.
                 const orderArr = activeFrame.layers.order;
-                const topIdx = Math.max(...validIds.map(id => orderArr.indexOf(id)));
-                const topLayerId = orderArr[topIdx];
-                let insertAt = topIdx + 1;
-                while (insertAt < orderArr.length && activeFrame.layers.byId[orderArr[insertAt]]?.hostId === topLayerId) {
-                    insertAt++;
-                }
-                ctx.layers.addLayer(activeFrame.id, group, insertAt);
+                const bottomIdx = Math.min(...validIds.map(id => orderArr.indexOf(id)));
+                ctx.layers.addLayer(activeFrame.id, group, bottomIdx);
             } else {
-                // No selection: create empty group above the active layer
+                // No selection: create empty group below the active layer
+                // (header sits at the bottom of where its future members will go).
                 const orderArr = activeFrame.layers.order;
                 const activeId = activeFrame.activeLayerId;
                 const activeOrderIdx = activeId ? orderArr.indexOf(activeId) : -1;
@@ -433,12 +431,7 @@ export const LAYERS_COMMANDS = {
                     return;
                 }
 
-                // Skip past any children (exchange/frag) of the active layer
-                let insertAt = activeOrderIdx + 1;
-                while (insertAt < orderArr.length && activeFrame.layers.byId[orderArr[insertAt]]?.hostId === activeId) {
-                    insertAt++;
-                }
-                ctx.layers.addLayer(activeFrame.id, group, insertAt);
+                ctx.layers.addLayer(activeFrame.id, group, activeOrderIdx);
             }
         }
     } as EditorCommand<{ layerIds?: string[] } | undefined, void>,

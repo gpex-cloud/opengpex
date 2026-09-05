@@ -20,7 +20,7 @@
 "use client";
 
 import React from "react";
-import { Type, Paintbrush, Eraser, Undo2, Settings } from "lucide-react";
+import { Type, Paintbrush, Eraser, Undo2, Settings, Star } from "lucide-react";
 import { MosaicIcon } from "./icon";
 import { motion } from "framer-motion";
 import { useEditorServices } from "@opengpex/editor/core/context";
@@ -31,6 +31,7 @@ import ActionGroup, { type ActionGroupItem } from "@opengpex/editor/widgets/Acti
 import { TextPanel } from "./panels/text";
 import { BrushPanel } from "./panels/brush";
 import { MosaicPanel } from "./panels/mosaic";
+import { MarkerPanel } from "./panels/marker";
 import { useCraftDrawer, useCraftTrigger, useCraftButtonGroup } from "./hooks";
 import { CraftDrawerIcon } from "./icon";
 import type { CraftType } from "./protocols";
@@ -49,6 +50,12 @@ const CRAFT_BUTTONS: {
     icon: <MosaicIcon size={13} />,
     iconSmall: <MosaicIcon size={10} />,
     label: "Mosaic Tool (M)",
+  },
+  {
+    type: "marker",
+    icon: <Star size={13} />,
+    iconSmall: <Star size={10} />,
+    label: "Marker Tool (U)",
   },
   {
     type: "text",
@@ -221,13 +228,15 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
 
   const showMosaicPanel = activeCraft === "mosaic";
 
+  const showMarkerPanel = activeCraft === "marker";
+
   const showBrushPanel =
     activeCraft === "brush" ||
     activeCraft === "eraser" ||
     activeCraft === "restore" ||
     (activeCraft === null && activeLayerIsPaint);
 
-  const showPlaceholder = !showTextPanel && !showBrushPanel && !showMosaicPanel;
+  const showPlaceholder = !showTextPanel && !showBrushPanel && !showMosaicPanel && !showMarkerPanel;
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
@@ -238,7 +247,7 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
         <div className="flex items-center gap-2">
           <CraftDrawerIcon size={12} className="text-indigo-600 dark:text-indigo-400" />
           <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
-            Drawing Tools
+            Drawing
           </span>
         </div>
         <div className="flex items-center gap-1.5">
@@ -262,6 +271,12 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
       {showMosaicPanel && (
         <motion.div layout="position" className="flex flex-col">
           <MosaicPanel />
+        </motion.div>
+      )}
+
+      {showMarkerPanel && (
+        <motion.div layout="position" className="flex flex-col">
+          <MarkerPanel />
         </motion.div>
       )}
 

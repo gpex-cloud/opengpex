@@ -4,6 +4,12 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.2.0
+
+- Markers: new annotation tool — drop rectangles, arrows, and ellipses on your image, then move, resize, and restyle them anytime since they stay fully editable; resizing stays accurate even after you rotate the canvas
+
+---
+
 ## v1.1.5
 
 - AI Tools: model list now shows all models your endpoint offers with clearer errors; local/home-network backends (ComfyUI, Ollama, LocalAI) work out of the box again

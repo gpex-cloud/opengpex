@@ -209,6 +209,82 @@ export interface TextLayerData {
   boxHeight?: number;
 }
 
+/**
+ * Marker primitive type identifier.
+ * Registry-based: adding a new marker type only requires adding to this union
+ * and implementing the corresponding `XxxMarkerData` + a `paintMarker` switch case.
+ */
+export type MarkerKind = 'rect' | 'arrow' | 'ellipse';
+// Phase 2+: | 'line' | 'rounded-rect' | 'star' | ...
+
+/**
+ * Base marker descriptor — common properties for all marker kinds.
+ * Stored on `Layer.markerData`, consumed by the painter (core) and overlay (plugin).
+ */
+export interface MarkerDataBase {
+  kind: MarkerKind;
+
+  /** Stroke (border) properties */
+  stroke: {
+    color: string;     // CSS color, e.g. '#FF3B30'
+    width: number;     // px, range [1, 50]
+  };
+
+  /** Fill properties (for closed shapes like rect/ellipse) */
+  fill: {
+    color: string;     // CSS color
+    opacity: number;   // 0–1, 0 = no fill
+  };
+}
+
+/**
+ * Rect marker data.
+ *
+ * Geometry is implicitly defined by `Layer.bounding` (w × h) —
+ * the rect always fills the entire layer bounding box.
+ * No extra geometry fields needed.
+ */
+export interface RectMarkerData extends MarkerDataBase {
+  kind: 'rect';
+  /** Corner radius in px. 0 = sharp corners. */
+  cornerRadius: number;
+}
+
+/**
+ * Arrow marker data.
+ *
+ * Geometry defined by two endpoints in layer-local coordinates.
+ * `Layer.bounding` is the axis-aligned bounding box of these two points
+ * (expanded by strokeWidth / 2 + arrowhead size).
+ *
+ * `Layer.cx/cy` is the world-space center of the bounding box.
+ * Endpoints are relative to the bounding box top-left (local space).
+ */
+export interface ArrowMarkerData extends MarkerDataBase {
+  kind: 'arrow';
+  /** Start point in layer-local coordinates (relative to bounding top-left) */
+  tail: { x: number; y: number };
+  /** End point (arrowhead) in layer-local coordinates */
+  head: { x: number; y: number };
+  /** Arrowhead size multiplier (relative to strokeWidth). Default 3. */
+  headScale: number;
+}
+
+/**
+ * Ellipse marker data.
+ *
+ * Geometry is implicitly defined by `Layer.bounding` (w × h) — the ellipse is
+ * inscribed in the layer bounding box (rx = w/2, ry = h/2). No extra geometry
+ * fields needed (same model as rect, minus cornerRadius).
+ */
+export interface EllipseMarkerData extends MarkerDataBase {
+  kind: 'ellipse';
+}
+
+/** Discriminated union of all marker data variants */
+export type MarkerData = RectMarkerData | ArrowMarkerData | EllipseMarkerData;
+// Phase 2+: | LineMarkerData | ...
+
 export interface Layer {
   id: string;
   name: string;
@@ -217,12 +293,21 @@ export interface Layer {
   assetId: string;
   role?: LayerRole;
   textData?: TextLayerData;
+  /** Marker tool data — only present when type='vector' and created by the Marker Tool. */
+  markerData?: MarkerData;
   metadata?: {
     fillColor?: string;
     /** This layer was derived from which source layer (both copy and cut set this). */
     sourceLayerId?: string;
     /** The hole mask id on the source layer that corresponds to this cut fragment (only cut fragments have this). */
     assocMaskId?: string;
+    /**
+     * Marks a `type:'group'` layer as an auto-created container for consecutively
+     * drawn Marker Tool vectors. Distinguishes it from user-created manual groups
+     * so the Marker Tool only ever appends into its own groups (see MarkerOverlay
+     * place command). Absent/false on all other groups.
+     */
+    isVectorGroup?: boolean;
     [key: string]: unknown;
   };
 

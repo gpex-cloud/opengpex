@@ -211,6 +211,17 @@ export const LayerItem = React.memo(
                 >
                   T
                 </div>
+              ) : layer.type === "vector" ? (
+                <div
+                  className="w-full h-full flex items-center justify-center font-black text-[16px] tracking-tighter"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, #f59e0b, #f43f5e, #6366f1)",
+                    color: "#ffffff",
+                  }}
+                >
+                  V
+                </div>
               ) : (
                 <ImageAsset
                   assetId={layer.assetId}

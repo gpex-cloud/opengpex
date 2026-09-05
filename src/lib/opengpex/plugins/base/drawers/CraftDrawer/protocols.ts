@@ -38,7 +38,13 @@ export const CMD_SET_CRAFT = 'cmd.set_craft';
 export const CMD_SET_CRAFT_TEXT = 'cmd.set_craft_text';
 export const CMD_SET_CRAFT_BRUSH = 'cmd.set_craft_brush';
 export const CMD_SET_CRAFT_ERASER = 'cmd.set_craft_eraser';
+export const CMD_SET_CRAFT_MARKER = 'cmd.set_craft_marker';
 export const CMD_DEACTIVATE_CRAFT = 'cmd.deactivate_craft';
+
+/** Marker sub-type cycling (Tab / Shift+Tab, mirrors ClipOptions.cycleToolForward/Backward) */
+export const CMD_CYCLE_MARKER_FORWARD = 'cmd.cycle_marker_forward';
+export const CMD_CYCLE_MARKER_BACKWARD = 'cmd.cycle_marker_backward';
+
 
 export const CMD_BRUSH_SIZE_UP = 'cmd.brush_size_up';
 export const CMD_BRUSH_SIZE_DOWN = 'cmd.brush_size_down';
@@ -75,7 +81,9 @@ export const CraftDrawerAPI = {
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-export type CraftType = 'text' | 'brush' | 'eraser' | 'restore' | 'mosaic';
+import type { MarkerKind, MarkerDataBase } from '@opengpex/editor/core/types';
+
+export type CraftType = 'text' | 'brush' | 'eraser' | 'restore' | 'mosaic' | 'marker';
 export type ActiveCraft = CraftType | null;
 
 /** Pending text style preset (persisted across tool activations) */
@@ -99,6 +107,14 @@ export interface CraftDrawerConfig {
   pendingTextData?: PendingTextData;
   /** Mosaic brush size preset */
   mosaicSizePreset: 'S' | 'M' | 'L' | 'XL';
+  /** Active marker sub-type (persisted across tool switches; default resolves to first registered kind) */
+  activeMarkerKind?: MarkerKind;
+  /**
+   * Pending marker style preset, persisted across tool activations and reused as
+   * the style of the NEXT drawn marker. Carries stroke/fill (all kinds) plus an
+   * optional cornerRadius (rect only — ignored by other kinds).
+   */
+  pendingMarkerData?: Partial<MarkerDataBase> & { cornerRadius?: number };
 }
 
 // ─── Mosaic Size Presets ───────────────────────────────────────────────────────
