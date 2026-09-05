@@ -163,3 +163,118 @@ describe('LayerFactory.getInsertIndexAbove', () => {
     expect(LayerFactory.getInsertIndexAbove(mockFrame, 'g1')).toBe(3);
   });
 });
+
+// Shared predicates matching the Text/Marker tool usage of resolveNeighborGroupTarget.
+const isText = (l: Layer | null | undefined) => !!l && l.type === 'text';
+const isTextGroup = (l: Layer | null | undefined) =>
+  !!l && l.type === 'group' && (l as Layer).metadata?.isTextGroup === true;
+
+describe('LayerFactory.resolveActiveHostLayer', () => {
+  it('returns null when there is no active selection', () => {
+    const frame = {
+      activeLayerId: null,
+      layers: { order: ['l1'], byId: { l1: { id: 'l1' } as unknown as Layer } },
+    } as unknown as Frame;
+    expect(LayerFactory.resolveActiveHostLayer(frame)).toBeNull();
+  });
+
+  it('returns the active host layer directly', () => {
+    const l1 = { id: 'l1' } as unknown as Layer;
+    const frame = {
+      activeLayerId: 'l1',
+      layers: { order: ['l1'], byId: { l1 } },
+    } as unknown as Frame;
+    expect(LayerFactory.resolveActiveHostLayer(frame)).toBe(l1);
+  });
+
+  it('resolves an active triplet sub-layer (hostId) up to its host', () => {
+    const host = { id: 'host' } as unknown as Layer;
+    const sub = { id: 'sub', hostId: 'host' } as unknown as Layer;
+    const frame = {
+      activeLayerId: 'sub',
+      layers: { order: ['host', 'sub'], byId: { host, sub } },
+    } as unknown as Frame;
+    expect(LayerFactory.resolveActiveHostLayer(frame)).toBe(host);
+  });
+});
+
+describe('LayerFactory.resolveHostAbove', () => {
+  const l1 = { id: 'l1' } as unknown as Layer;
+  const l2 = { id: 'l2' } as unknown as Layer;
+  const frame = {
+    layers: { order: ['l1', 'l2'], byId: { l1, l2 } },
+  } as unknown as Frame;
+
+  it('returns null for undefined slot (push-to-top) and for a top-of-stack slot', () => {
+    expect(LayerFactory.resolveHostAbove(frame, undefined)).toBeNull();
+    expect(LayerFactory.resolveHostAbove(frame, 2)).toBeNull();
+  });
+
+  it('returns the host at the slot', () => {
+    expect(LayerFactory.resolveHostAbove(frame, 1)).toBe(l2);
+  });
+
+  it('resolves a triplet sub-layer at the slot up to its host', () => {
+    const host = { id: 'host' } as unknown as Layer;
+    const sub = { id: 'sub', hostId: 'host' } as unknown as Layer;
+    const f = {
+      layers: { order: ['host', 'sub'], byId: { host, sub } },
+    } as unknown as Frame;
+    expect(LayerFactory.resolveHostAbove(f, 1)).toBe(host);
+  });
+});
+
+describe('LayerFactory.resolveNeighborGroupTarget', () => {
+  const predicates = { isMember: isText, isGroupHeader: isTextGroup };
+  const run = (frame: Frame, below: Layer | null, above: Layer | null) =>
+    LayerFactory.resolveNeighborGroupTarget(frame, below, above, predicates);
+  const emptyFrame = { layers: { order: [], byId: {} } } as unknown as Frame;
+
+  it("both neighbours irrelevant → 'none'", () => {
+    expect(run(emptyFrame, null, null)).toEqual({ mode: 'none' });
+    const img = { id: 'img', type: 'image' } as unknown as Layer;
+    expect(run(emptyFrame, img, img)).toEqual({ mode: 'none' });
+  });
+
+  it("below is a bare text → 'create' (below wins, above never consulted)", () => {
+    const t1 = { id: 't1', type: 'text' } as unknown as Layer;
+    const gAbove = { id: 'g', type: 'group', metadata: { isTextGroup: true } } as unknown as Layer;
+    const frame = { layers: { order: ['t1', 'g'], byId: { t1, g: gAbove } } } as unknown as Frame;
+    expect(run(frame, t1, gAbove)).toEqual({ mode: 'create', seedLayerId: 't1' });
+  });
+
+  it("below irrelevant, above is a bare text → 'create' via above neighbour", () => {
+    const img = { id: 'img', type: 'image' } as unknown as Layer;
+    const t1 = { id: 't1', type: 'text' } as unknown as Layer;
+    const frame = { layers: { order: ['img', 't1'], byId: { img, t1 } } } as unknown as Frame;
+    expect(run(frame, img, t1)).toEqual({ mode: 'create', seedLayerId: 't1' });
+  });
+
+  it("neighbour is a text-group header → 'append'", () => {
+    const g = { id: 'g', type: 'group', metadata: { isTextGroup: true } } as unknown as Layer;
+    const frame = { layers: { order: ['g'], byId: { g } } } as unknown as Frame;
+    expect(run(frame, g, null)).toEqual({ mode: 'append', groupId: 'g' });
+  });
+
+  it("neighbour is a text already inside a text group → 'append' (via groupId)", () => {
+    const g = { id: 'g', type: 'group', metadata: { isTextGroup: true } } as unknown as Layer;
+    const t1 = { id: 't1', type: 'text', groupId: 'g' } as unknown as Layer;
+    const frame = { layers: { order: ['t1', 'g'], byId: { t1, g } } } as unknown as Frame;
+    expect(run(frame, t1, null)).toEqual({ mode: 'append', groupId: 'g' });
+  });
+
+  it("neighbour text inside a MANUAL (non-text) group → 'none' (respects manual grouping)", () => {
+    const g = { id: 'g', type: 'group', metadata: {} } as unknown as Layer;
+    const t1 = { id: 't1', type: 'text', groupId: 'g' } as unknown as Layer;
+    const frame = { layers: { order: ['t1', 'g'], byId: { t1, g } } } as unknown as Frame;
+    expect(run(frame, t1, null)).toEqual({ mode: 'none' });
+  });
+
+  it('injected predicates isolate kinds: a vector group is not a text target → falls through to above', () => {
+    const gm = { id: 'gm', type: 'group', metadata: { isVectorGroup: true } } as unknown as Layer;
+    const t1 = { id: 't1', type: 'text' } as unknown as Layer;
+    const frame = { layers: { order: ['gm', 't1'], byId: { gm, t1 } } } as unknown as Frame;
+    // below (vector group) is irrelevant for text predicates → above bare text seeds.
+    expect(run(frame, gm, t1)).toEqual({ mode: 'create', seedLayerId: 't1' });
+  });
+});

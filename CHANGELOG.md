@@ -4,6 +4,19 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.2.2
+
+- Text & Markers: consecutively added text or markers now group together automatically, and new items land right above the layer you have selected
+
+---
+
+## v1.2.1
+
+- Text: the text editing box now follows canvas rotation — the box, handles, and resize behavior all line up correctly after you rotate the canvas
+- Layers panel: tidier, more compact layout with refined spacing and icons
+
+---
+
 ## v1.2.0
 
 - Markers: new annotation tool — drop rectangles, arrows, and ellipses on your image, then move, resize, and restyle them anytime since they stay fully editable; resizing stays accurate even after you rotate the canvas

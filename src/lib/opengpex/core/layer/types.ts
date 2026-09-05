@@ -65,6 +65,17 @@ export interface LayerService {
   getNewBitmapMask: (src: string, assetId: string, bounds: LocalRect) => BitmapMask;
   cleanInheritedMasks: <T extends VectorMask | BitmapMask>(masks?: T[]) => T[];
   getInsertIndexAbove: (frame: Frame, targetLayerId?: string | null) => number | undefined;
+  /** Host layer the active selection belongs to (triplet sub-layers resolve to their host). */
+  resolveActiveHostLayer: (frame: Frame) => Layer | null;
+  /** Host layer directly above an insertion slot (triplet sub-layers resolve to their host). */
+  resolveHostAbove: (frame: Frame, insertAt: number | undefined) => Layer | null;
+  /** Generic "auto-group with nearest same-kind neighbour" decision; KIND predicates injected. */
+  resolveNeighborGroupTarget: (
+    frame: Frame,
+    below: Layer | null,
+    above: Layer | null,
+    predicates: { isMember: (l: Layer | null | undefined) => boolean; isGroupHeader: (l: Layer | null | undefined) => boolean },
+  ) => { mode: 'none' } | { mode: 'append'; groupId: string } | { mode: 'create'; seedLayerId: string };
 }
 
 /**

@@ -25,20 +25,6 @@ import * as P from './protocols';
 
 // ─── Commands ──────────────────────────────────────────────────────────────────
 
-/**
- * resolveTopHostLayer: the topmost host layer in z-order (ignores exchange/frag
- * sub-layers, which carry a `hostId`). This is the "previous layer" a freshly
- * drawn marker sits on top of.
- */
-function resolveTopHostLayer(frame: Frame): Layer | null {
-  const order = frame.layers.order;
-  for (let i = order.length - 1; i >= 0; i--) {
-    const l = frame.layers.byId[order[i]];
-    if (l && !l.hostId) return l;
-  }
-  return null;
-}
-
 /** A marker layer is a `type:'vector'` layer produced by the Marker Tool. */
 function isMarkerLayer(l: Layer | undefined | null): boolean {
   return !!l && l.type === 'vector' && !!l.markerData;
@@ -50,40 +36,20 @@ function isVectorGroup(l: Layer | undefined | null): boolean {
 }
 
 /**
- * Auto-grouping decision for a newly drawn marker, based on the current
- * top-of-stack layer (see spec discussion):
- *   - 'append': add the marker into an existing vector group `groupId`.
- *   - 'create': the top layer is a bare marker `seedLayerId` — create a new
- *               vector group and move both it and the new marker into it.
- *   - 'none':   place the marker as a plain top layer (no grouping). Applies
- *               when the stack top is not a marker, or is a marker already
- *               inside a user-created (non-vector) group.
- *
- * Resolving off both the group header AND a marker's `groupId` keeps this correct
- * regardless of whether the group header sits above or below its children in the
- * flat order (the two layouts produced by createGroup vs. panel reorder).
+ * Auto-grouping decision for a newly drawn marker, delegating the generic
+ * "nearest same-kind neighbour" mechanism to LayerFactory and injecting only the
+ * marker-specific predicates. See LayerFactory.resolveNeighborGroupTarget for the
+ * below-first / create / append / none semantics.
  */
 function resolveGrouping(
   frame: Frame,
+  below: Layer | null,
+  above: Layer | null,
 ): { mode: 'none' } | { mode: 'append'; groupId: string } | { mode: 'create'; seedLayerId: string } {
-  const top = resolveTopHostLayer(frame);
-  if (!top) return { mode: 'none' };
-
-  // Stack top is a vector group header → append into it.
-  if (isVectorGroup(top)) return { mode: 'append', groupId: top.id };
-
-  // Stack top is a marker.
-  if (isMarkerLayer(top)) {
-    if (top.groupId) {
-      const g = frame.layers.byId[top.groupId];
-      // Already inside a vector group → append; inside a manual group → leave it.
-      return isVectorGroup(g) ? { mode: 'append', groupId: g.id } : { mode: 'none' };
-    }
-    // Bare marker → seed a new vector group holding both markers.
-    return { mode: 'create', seedLayerId: top.id };
-  }
-
-  return { mode: 'none' };
+  return LayerFactory.resolveNeighborGroupTarget(frame, below, above, {
+    isMember: isMarkerLayer,
+    isGroupHeader: isVectorGroup,
+  });
 }
 
 /**
@@ -108,12 +74,23 @@ const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
     const frame = ctx.state.frames.byId[payload.frameId];
     if (!frame) return;
 
-    const decision = resolveGrouping(frame);
+    // The new marker always lands directly above the active layer. `insertAt` is
+    // the single source of truth for its slot; grouping only decides `groupId` and
+    // whether/where a group header is inserted — never the new layer's slot.
+    const below = LayerFactory.resolveActiveHostLayer(frame);
+    const insertAt = LayerFactory.getInsertIndexAbove(frame, below?.id);
+    const above = LayerFactory.resolveHostAbove(frame, insertAt);
+    const decision = resolveGrouping(frame, below, above);
 
+    // 'append': join the group and land at the TOP of its member block via
+    // getInsertIndexAbove(groupId). This is the group-contiguity guarantee — a
+    // plain `insertAt` could wedge the new layer BELOW the group header when the
+    // group was matched via the above neighbour, violating spec §2.2 (header at
+    // the bottom of the member block).
     if (decision.mode === 'append') {
       const layer = { ...payload.layer, groupId: decision.groupId };
-      const insertAt = LayerFactory.getInsertIndexAbove(frame, decision.groupId);
-      ctx.layers.addLayer(payload.frameId, layer, insertAt);
+      const groupInsertAt = LayerFactory.getInsertIndexAbove(frame, decision.groupId);
+      ctx.layers.addLayer(payload.frameId, layer, groupInsertAt);
       ctx.layers.activate(payload.frameId, layer.id);
       return;
     }
@@ -131,28 +108,33 @@ const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
         metadata: { isVectorGroup: true },
       });
 
-      // Move the existing bare marker (the seed) into the group. It stays where
-      // it is in z-order — only its groupId changes.
+      // Move the existing bare marker (the seed) into the group — only its groupId
+      // changes; its z-order slot is untouched.
       ctx.actions.updateLayer(payload.frameId, seedId, { groupId: group.id });
 
-      // Group header goes to the BOTTOM of the member block (spec §2.2). The seed
-      // is the current top-of-stack HOST layer (hostId is empty), so the slot the
-      // seed's block starts at is exactly `indexOf(seedId)` — inserting there
-      // pushes the seed block up and leaves the header just beneath it.
-      const seedBlockStart = frame.layers.order.indexOf(seedId);
-      ctx.layers.addLayer(payload.frameId, group, seedBlockStart);
+      // Header goes to the BOTTOM of the combined {seed, new-marker} member block
+      // (spec §2.2). The block's lowest slot is min(seedIdx, insertAt):
+      //   • seed BELOW the slot (active is the seed) → seedIdx < insertAt → seedIdx
+      //   • seed ABOVE the slot (grouped via the above neighbour) → seedIdx === insertAt
+      // In create mode `insertAt` is always defined (either neighbour that seeded
+      // the group implies a defined slot).
+      const seedIdx = frame.layers.order.indexOf(seedId);
+      const headerIndex = Math.min(seedIdx, insertAt as number);
+      ctx.layers.addLayer(payload.frameId, group, headerIndex);
 
-      // The new marker is the newest → top of the group. Since the seed was the
-      // top-of-stack host layer, "top" is simply the end of the order (default
-      // append, same as mode 'none'). No hand-computed index needed.
+      // Inserting the header at headerIndex (≤ insertAt) shifted the new-marker slot
+      // up by exactly one, so it lands at insertAt + 1 — directly above the seed
+      // when the seed is below, or directly below the seed when the seed is above.
       const layer = { ...payload.layer, groupId: group.id };
-      ctx.layers.addLayer(payload.frameId, layer);
+      ctx.layers.addLayer(payload.frameId, layer, (insertAt as number) + 1);
       ctx.layers.activate(payload.frameId, layer.id);
       return;
     }
 
-    // mode 'none': plain top layer (original behavior).
-    ctx.layers.addLayer(payload.frameId, payload.layer);
+    // mode 'none': plain layer, inserted directly above the active layer
+    // (getInsertIndexAbove handles group / hostId targets). Falls back to
+    // append-on-top (undefined index → reducer push) when there is no active layer.
+    ctx.layers.addLayer(payload.frameId, payload.layer, insertAt);
     ctx.layers.activate(payload.frameId, payload.layer.id);
   },
 };

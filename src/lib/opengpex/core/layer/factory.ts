@@ -478,6 +478,97 @@ export const LayerFactory = {
     }
     return insertAt;
   },
+
+  /**
+   * resolveActiveHostLayer: the host layer the currently active layer belongs to
+   * — the layer a freshly placed layer lands directly on top of (Photoshop-style
+   * "insert above the selected layer"). If the active layer is a triplet
+   * sub-layer / mask attachment (carries a `hostId`), resolves up to its host so
+   * the new layer is never wedged inside a triplet. Returns null when there is no
+   * selection (callers then fall back to appending on top of the stack).
+   */
+  resolveActiveHostLayer(frame: Frame): Layer | null {
+    const activeId = frame.activeLayerId;
+    if (!activeId) return null;
+    const layer = frame.layers.byId[activeId];
+    if (!layer) return null;
+    if (layer.hostId) return frame.layers.byId[layer.hostId] ?? null;
+    return layer;
+  },
+
+  /**
+   * resolveHostAbove: the host layer sitting directly ABOVE an insertion slot,
+   * i.e. the layer that will end up right on top of a layer inserted at `insertAt`.
+   * Resolves a triplet sub-layer (hostId) up to its host. Returns null when the
+   * slot is at the top of the stack or is undefined (no reference → push to top).
+   */
+  resolveHostAbove(frame: Frame, insertAt: number | undefined): Layer | null {
+    if (typeof insertAt !== 'number') return null;
+    const order = frame.layers.order;
+    if (insertAt >= order.length) return null;
+    const l = frame.layers.byId[order[insertAt]];
+    if (!l) return null;
+    return l.hostId ? (frame.layers.byId[l.hostId] ?? null) : l;
+  },
+
+  /**
+   * resolveNeighborGroupTarget: generic "auto-group with the nearest same-kind
+   * neighbour" decision, shared by the Text and Marker tools (and any future
+   * consecutive-placement tool). The KIND-specific predicates are injected so
+   * core stays plugin-agnostic:
+   *   - `isMember`:      is this a bare layer that can seed / join this kind of
+   *                      auto-group (e.g. a text layer, or a marker layer)?
+   *   - `isGroupHeader`: is this a `type:'group'` header of this kind's auto-group
+   *                      (e.g. metadata.isTextGroup / isVectorGroup)?
+   *
+   * Given the two neighbours around the insertion slot — `below` (≈ the active
+   * layer) and `above` (the layer that will sit on top of the new one) — returns:
+   *   - 'append': a neighbour belongs to an auto-group → fold the new layer in.
+   *   - 'create': a neighbour is a bare member `seedLayerId` → create a fresh
+   *               auto-group holding both it and the new layer.
+   *   - 'none':   neither neighbour is relevant (foreign type / manual group /
+   *               empty).
+   *
+   * The BELOW neighbour (what the user actually selected) is considered first and
+   * fully; only when it yields no context do we look at the ABOVE neighbour. This
+   * preserves the consecutive-creation flow while still grouping when the new
+   * layer lands just beneath an existing member / auto-group. Resolving off both
+   * the group header AND a member's `groupId` keeps this correct regardless of the
+   * header's flat-order position (createGroup vs. panel-reorder layouts).
+   */
+  resolveNeighborGroupTarget(
+    frame: Frame,
+    below: Layer | null,
+    above: Layer | null,
+    predicates: { isMember: (l: Layer | null | undefined) => boolean; isGroupHeader: (l: Layer | null | undefined) => boolean },
+  ): { mode: 'none' } | { mode: 'append'; groupId: string } | { mode: 'create'; seedLayerId: string } {
+    const { isMember, isGroupHeader } = predicates;
+
+    const classify = (layer: Layer | null): { kind: 'group'; groupId: string } | { kind: 'seed'; seedId: string } | null => {
+      if (!layer) return null;
+      if (isGroupHeader(layer)) return { kind: 'group', groupId: layer.id };
+      if (isMember(layer)) {
+        if (layer.groupId) {
+          const g = frame.layers.byId[layer.groupId];
+          // Already inside our auto-group → append; inside a manual group → leave it.
+          return isGroupHeader(g) ? { kind: 'group', groupId: g.id } : null;
+        }
+        // Bare member → seed a fresh auto-group.
+        return { kind: 'seed', seedId: layer.id };
+      }
+      return null;
+    };
+
+    const b = classify(below);
+    if (b?.kind === 'group') return { mode: 'append', groupId: b.groupId };
+    if (b?.kind === 'seed') return { mode: 'create', seedLayerId: b.seedId };
+
+    const a = classify(above);
+    if (a?.kind === 'group') return { mode: 'append', groupId: a.groupId };
+    if (a?.kind === 'seed') return { mode: 'create', seedLayerId: a.seedId };
+
+    return { mode: 'none' };
+  },
 };
 
 // =================================================================================
