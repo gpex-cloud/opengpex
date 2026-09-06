@@ -580,6 +580,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
 
         if (
           presets.get('SNAP_ENABLED') &&
+          !InteractionMath.isSnapSuppressed(e) &&
           isResizeHandleOriented &&
           startWorldCenter &&
           startLocalRect
@@ -631,7 +632,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
 
         // Read edge snap scope from PresetsFactory
         const edgeSnapScope = presets.get('SNAP_EDGE_SCOPE');
-        const isSnapping = presets.get('SNAP_ENABLED');
+        const isSnapping = presets.get('SNAP_ENABLED') && !InteractionMath.isSnapSuppressed(e);
 
         if (constraints.clamp) {
           nextRect = InteractionMath.calculateElasticRect(e, {

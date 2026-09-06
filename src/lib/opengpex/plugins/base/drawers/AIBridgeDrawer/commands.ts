@@ -16,233 +16,67 @@
  *
  * SPDX-License-Identifier: GPL-3.0-only
  */
-
 /**
  * AIBridgeDrawer Commands
- * 
- * Extracts generation logic into independent Command, following commands pattern of Plugin Spec.
- * Supports Generate / Edit / Variations modes.
+ *
+ * Generation logic as independent Commands, per the Plugin Spec.
+ *
+ * Dispatch is deliberately trivial: each endpoint records which provider it
+ * belongs to, so `getAdapter(endpoint)` returns exactly one implementation and
+ * that implementation runs. No protocol candidates, no fallback chain — a 404
+ * means the selected provider does not match the service, and the error says so.
  */
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
 import { SettingsPanelAPI } from '../../panels/SettingsPanel/protocols';
-import { AIBridgeConfig, AIProvider, AIMode, AI_MODE_META, AIModelInfo, GenerationRecord } from './protocols';
+import { asLocalShape } from '@opengpex/editor/core/types';
+import {
+  AIBridgeConfig,
+  AIEndpoint,
+  AIModelInfo,
+  GenerationRecord,
+  InputSource,
+} from './protocols';
+import { getAdapter } from './adapters/registry';
 
 import * as P from './protocols';
 
-// ─── Helper: Generate mock image via local Canvas ──────────────────────────────
+// ─── Describe instruction ──────────────────────────────────────────────────────
 
-function createMockImageBlob(_prompt: string, size: string): Promise<Blob> {
-  return new Promise((resolve) => {
-    const [w, h] = size.split('x').map(Number);
-    const canvas = document.createElement('canvas');
-    canvas.width = w || 1024;
-    canvas.height = h || 1024;
-    const ctx = canvas.getContext('2d')!;
+/** Asks for a ready-to-use generation prompt rather than a caption, so the
+ *  result can be pasted straight into the Generate prompt box. */
+export const DESCRIBE_INSTRUCTION =
+  'Describe this image as a text-to-image generation prompt. Output ONLY the prompt itself — a single vivid comma-separated description covering subject, composition, style, lighting and color. No preamble, no quotes, no explanation.';
 
-    // gradient background
-    const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-    grad.addColorStop(0, `hsl(${Math.random() * 360}, 70%, 50%)`);
-    grad.addColorStop(0.5, `hsl(${Math.random() * 360}, 60%, 40%)`);
-    grad.addColorStop(1, `hsl(${Math.random() * 360}, 80%, 30%)`);
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+// ─── Helper: resolve the active endpoint ───────────────────────────────────────
 
-    // noise overlay
-    for (let i = 0; i < 3000; i++) {
-      ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.08})`;
-      ctx.fillRect(
-        Math.random() * canvas.width,
-        Math.random() * canvas.height,
-        Math.random() * 4 + 1,
-        Math.random() * 4 + 1,
-      );
-    }
-
-    canvas.toBlob((blob) => resolve(blob!), 'image/png');
-  });
+function activeEndpointOf(config: AIBridgeConfig): AIEndpoint | undefined {
+  const endpoints = config.endpoints || [];
+  return endpoints.find(e => e.id === config.activeEndpointId) || endpoints[0];
 }
 
-// ─── Helper: Build endpoint URL from base + mode ───────────────────────────────
+// ─── Helper: Get source image as Blob for Edit / Describe ──────────────────────
+//
+// Input source selection:
+//   - 'merged-frame': composite ALL visible layers of the active frame
+//   - 'active-layer': composite the active layer only (includes transforms /
+//     masks / adjustments)
+//
+async function getInputImageBlob(ctx: EditorContextValue, inputSource: InputSource): Promise<Blob | null> {
+  const { activeFrame, pixels } = ctx;
+  if (!activeFrame) return null;
 
-function buildEndpointUrl(baseUrl: string, mode: AIMode): string {
-  const clean = baseUrl.replace(/\/+$/, '');
-  return clean + AI_MODE_META[mode].endpoint;
-}
-
-// ─── Helper: Proxy fetch — All external requests are proxied via /api/ai-proxy ────────────────
-
-const AI_PROXY_PATH = '/api/ai-proxy';
-
-interface ProxyFetchOptions {
-  targetUrl: string;
-  apiKey: string;
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  body?: BodyInit | null;
-  contentType?: string;
-}
-
-async function proxyFetch(opts: ProxyFetchOptions): Promise<Response> {
-  const headers: Record<string, string> = {
-    'X-Target-URL': opts.targetUrl,
-    'X-API-Key': opts.apiKey,
-  };
-  if (opts.contentType) {
-    headers['Content-Type'] = opts.contentType;
+  if (inputSource === 'merged-frame') {
+    const result = await pixels.render.compositeFrame(activeFrame);
+    return await result.toBlob('image/png');
   }
 
-  return fetch(AI_PROXY_PATH, {
-    method: opts.method || 'POST',
-    headers,
-    body: opts.body,
-  });
-}
+  const { activeLayer } = ctx;
+  if (!activeLayer) return null;
 
-// ─── Helper: Call OpenAI-compatible Generate endpoint ───────────────────────────
-
-async function callGenerate(
-  provider: AIProvider,
-  config: AIBridgeConfig,
-  seed: number,
-): Promise<Blob> {
-  const endpoint = buildEndpointUrl(provider.baseUrl, 'generate');
-
-  // OpenAI standard parameters: model, prompt, n, size, quality, style, response_format
-  // Extension parameters (non-OpenAI standard, but supported by many compatible APIs): seed, negative_prompt
-  const body: Record<string, unknown> = {
-    prompt: config.prompt,
-    n: 1,
-    size: config.size || '1024x1024',        // OpenAI standard
-    response_format: 'b64_json',             // OpenAI standard
-  };
-  if (provider.model) body.model = provider.model;  // OpenAI standard
-
-  // Extension parameters: only sent for non-standard OpenAI models (SD WebUI / ComfyUI, etc.)
-  // OpenAI official models (dall-e-*, gpt-image-*) do not support seed/negative_prompt and will return errors
-  const isStandardOpenAI = /^(dall-e|gpt-image)/i.test(provider.model || '');
-  if (!isStandardOpenAI) {
-    if (config.negativePrompt) body.negative_prompt = config.negativePrompt;
-    if (seed >= 0) body.seed = seed;
-  }
-
-  // Workaround for litellm/Azure gateway bug: gpt-image-1 requests routed through litellm can
-  // fail with "Attempted to access streaming request content, without having called `read()`"
-  // because litellm's image generation handler incorrectly treats the request as a streaming
-  // request. Explicitly setting stream=false forces it onto the non-streaming code path.
-  // See: https://github.com/BerriAI/litellm/issues (image generation + Azure)
-  if (/^gpt-image/i.test(provider.model || '')) {
-    body.stream = false;
-  }
-
-  const res = await proxyFetch({
-    targetUrl: endpoint,
-    apiKey: provider.apiKey,
-    method: 'POST',
-    body: JSON.stringify(body),
-    contentType: 'application/json',
-  });
-
-  if (!res.ok) {
-    const errData = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-    throw new Error(errData.error?.message || `HTTP ${res.status} ${res.statusText}`);
-  }
-
-  return extractImageFromResponse(res);
-}
-
-// ─── Helper: Call OpenAI-compatible Edit endpoint ──────────────────────────────
-
-async function callEdit(
-  provider: AIProvider,
-  config: AIBridgeConfig,
-  sourceImage: Blob,
-  maskImage?: Blob,
-): Promise<Blob> {
-  const endpoint = buildEndpointUrl(provider.baseUrl, 'edit');
-  const formData = new FormData();
-  formData.append('image', sourceImage, 'source.png');
-  if (maskImage) formData.append('mask', maskImage, 'mask.png');
-  formData.append('prompt', config.prompt || '');
-  formData.append('n', '1');
-  formData.append('size', config.size || '1024x1024');
-  formData.append('response_format', 'b64_json');
-  if (provider.model) formData.append('model', provider.model);
-
-  const res = await proxyFetch({
-    targetUrl: endpoint,
-    apiKey: provider.apiKey,
-    method: 'POST',
-    body: formData,
-    // Do not set contentType, let the browser automatically set the multipart boundary
-  });
-
-  if (!res.ok) {
-    const errData = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-    throw new Error(errData.error?.message || `HTTP ${res.status} ${res.statusText}`);
-  }
-
-  return extractImageFromResponse(res);
-}
-
-// ─── Helper: Call OpenAI-compatible Variations endpoint (multipart) ─────────────
-
-async function callVariations(
-  provider: AIProvider,
-  config: AIBridgeConfig,
-  sourceImage: Blob,
-): Promise<Blob> {
-  const endpoint = buildEndpointUrl(provider.baseUrl, 'variations');
-  const formData = new FormData();
-  formData.append('image', sourceImage, 'source.png');
-  formData.append('n', '1');
-  formData.append('size', config.size || '1024x1024');
-  formData.append('response_format', 'b64_json');
-  if (provider.model) formData.append('model', provider.model);
-
-  const res = await proxyFetch({
-    targetUrl: endpoint,
-    apiKey: provider.apiKey,
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!res.ok) {
-    const errData = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-    throw new Error(errData.error?.message || `HTTP ${res.status} ${res.statusText}`);
-  }
-
-  return extractImageFromResponse(res);
-}
-
-// ─── Helper: Extract image blob from API response ──────────────────────────────
-
-async function extractImageFromResponse(res: Response): Promise<Blob> {
-  const data = (await res.json()) as { data?: { b64_json?: string; url?: string }[] };
-  const item = data.data?.[0];
-
-  if (item?.b64_json) {
-    const binary = atob(item.b64_json);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return new Blob([bytes], { type: 'image/png' });
-  } else if (item?.url) {
-    const imgRes = await fetch(item.url);
-    if (!imgRes.ok) throw new Error('Failed to fetch image from returned URL');
-    return await imgRes.blob();
-  }
-
-  throw new Error('Invalid API response: no image data found');
-}
-
-// ─── Helper: Get active canvas layer as Blob (for Edit/Variations) ─────────────
-
-async function getActiveLayerBlob(ctx: EditorContextValue): Promise<Blob | null> {
-  const { activeLayer, assets } = ctx;
-  if (!activeLayer || !activeLayer.assetId) return null;
-
-  // Direct memory read from AssetService pool — no fetch/network overhead
-  const entry = assets.get(activeLayer.assetId);
-  return entry?.blob ?? null;
+  const localRoi = asLocalShape({ x: 0, y: 0, w: activeFrame.canvas.w, h: activeFrame.canvas.h });
+  const { result } = await pixels.render.compositeLayers([activeLayer], activeFrame, localRoi, { precision: 8 });
+  return await result.toBlob('image/png');
 }
 
 // ─── Helper: Append generation record to history ───────────────────────────────
@@ -256,7 +90,7 @@ function appendHistoryRecord(
   const { setSelfConfig, selfConfig } = ctx.scoped || {};
   if (!setSelfConfig) return;
 
-  const config = selfConfig as AIBridgeConfig & { generationHistory?: GenerationRecord[] };
+  const config = selfConfig as AIBridgeConfig;
   const history = config.generationHistory || [];
 
   const record: GenerationRecord = {
@@ -265,9 +99,7 @@ function appendHistoryRecord(
     timestamp: Date.now(),
   };
 
-  // Keep the most recent MAX_HISTORY_RECORDS records
-  const nextHistory = [...history, record].slice(-MAX_HISTORY_RECORDS);
-  setSelfConfig({ generationHistory: nextHistory });
+  setSelfConfig({ generationHistory: [...history, record].slice(-MAX_HISTORY_RECORDS) });
 }
 
 // ─── Command Definitions ───────────────────────────────────────────────────────
@@ -280,84 +112,94 @@ export const AI_BRIDGE_COMMANDS = {
       const { actions } = ctx;
       const { selfConfig } = ctx.scoped || {};
       const config = selfConfig as AIBridgeConfig;
+      const mode = config.mode === 'edit' ? 'edit' : 'generate';
 
-      if (!config?.prompt?.trim() && config?.mode === 'generate' && !config?.isMockMode) {
+      if (!config?.prompt?.trim() && mode === 'generate') {
         actions.setInteraction({ hud: { message: 'Please enter a prompt first', type: 'info' } });
         return { success: false };
       }
 
-      const providers = config.providers || [];
-      const activeProvider = providers.find(p => p.id === config.activeProviderId) || providers[0];
-
-      if (!activeProvider?.apiKey && !config.isMockMode) {
+      const endpoint = activeEndpointOf(config);
+      if (!endpoint?.apiKey) {
         actions.setInteraction({ hud: { message: 'API Key missing. Configure in Settings.', type: 'error' } });
         return { success: false };
+      }
+
+      const adapter = getAdapter(endpoint);
+      const model = endpoint.modelByKind?.image || endpoint.modelByKind?.multi || '';
+
+      // Providers without an image API reject early with a clear message; the UI
+      // already disables those tabs, this is the safety net.
+      if (!adapter.capabilities[mode]) {
+        const msg = `${adapter.displayName} does not offer image ${mode === 'edit' ? 'editing' : 'generation'}`;
+        actions.setInteraction({ hud: { message: msg, type: 'error' } });
+        return { success: false, error: msg };
       }
 
       const actualSeed = (config.seed ?? -1) === -1
         ? Math.floor(Math.random() * 1_000_000_000)
         : config.seed;
       const size = config.size || '1024x1024';
-      const mode = config.mode || 'generate';
       const startTime = Date.now();
-      // Sets generating signal (not lost when drawer is closed and reopened, auto-prefixed with plugin uid via scoped)
+
+      // Busy signal survives the drawer being closed and reopened
       ctx.scoped!.setBusy(true);
 
       try {
         let imageBlob: Blob;
 
-        if (config.isMockMode) {
-          await new Promise(r => setTimeout(r, 1200));
-          imageBlob = await createMockImageBlob(config.prompt || '', size);
-        } else if (mode === 'generate') {
-          imageBlob = await callGenerate(activeProvider, config, actualSeed);
-        } else if (mode === 'edit') {
-          const sourceBlob = await getActiveLayerBlob(ctx);
-          if (!sourceBlob) {
-            actions.setInteraction({ hud: { message: 'Edit mode requires an active image layer', type: 'error' } });
-            return { success: false };
-          }
-          imageBlob = await callEdit(activeProvider, config, sourceBlob);
+        if (mode === 'generate') {
+          imageBlob = await adapter.generate(endpoint, {
+            prompt: config.prompt || '',
+            negativePrompt: config.negativePrompt || undefined,
+            size,
+            seed: actualSeed,
+          });
         } else {
-          // variations
-          const sourceBlob = await getActiveLayerBlob(ctx);
+          const sourceBlob = await getInputImageBlob(ctx, config.inputSource || 'active-layer');
           if (!sourceBlob) {
-            actions.setInteraction({ hud: { message: 'Variations mode requires an active image layer', type: 'error' } });
+            actions.setInteraction({ hud: { message: 'Edit mode requires an image source (open a frame with a layer)', type: 'error' } });
+            ctx.scoped!.setBusy(false);
             return { success: false };
           }
-          imageBlob = await callVariations(activeProvider, config, sourceBlob);
+          imageBlob = await adapter.edit(endpoint, {
+            images: [sourceBlob],
+            prompt: config.prompt || '',
+            negativePrompt: config.negativePrompt || undefined,
+            size,
+            seed: actualSeed,
+          });
         }
 
         // Build file metadata
-        const safeProviderName = (config.isMockMode ? 'MockMode' : activeProvider.name)
-          .replace(/[^a-zA-Z0-9]/g, '');
+        const safeName = endpoint.name.replace(/[^a-zA-Z0-9]/g, '');
         const ext = imageBlob.type === 'image/jpeg' ? 'jpg'
           : imageBlob.type === 'image/webp' ? 'webp'
           : 'png';
-        const fileName = `aigen_${safeProviderName}_${mode}_${Date.now()}.${ext}`;
+        const fileName = `aigen_${safeName}_${mode}_${Date.now()}.${ext}`;
         const file = new File([imageBlob], fileName, { type: imageBlob.type });
         const durationMs = Date.now() - startTime;
 
         const extra = {
           ai_generation: true,
-          ai_provider: config.isMockMode ? 'Mock Mode' : activeProvider.name,
-          ai_mode: mode,
+          ai_provider: endpoint.name,
+          // Industry vocabulary, shared with ComfyBridge
+          ai_mode: mode === 'generate' ? 'txt2img' : 'img2img',
           ai_positive_prompt: config.prompt,
           ai_negative_prompt: config.negativePrompt,
           ai_seed: actualSeed,
           ai_size: size,
-          ai_model: activeProvider?.model || undefined,
+          ai_model: model || undefined,
           ai_duration_ms: durationMs,
         };
 
         actions.adv.frame.create.trunk.execute({ source: file, switchFrame: false, extra });
         actions.setInteraction({ hud: { message: '✨ AI image added to canvas', type: 'success' } });
 
-        // Record successful history
         appendHistoryRecord(ctx, {
-          provider: config.isMockMode ? 'Mock Mode' : activeProvider.name,
-          model: activeProvider?.model || 'unknown',
-          mode, prompt: config.prompt || '', negativePrompt: config.negativePrompt || '',
+          provider: endpoint.name,
+          model: model || 'unknown',
+          mode, kind: 'image', prompt: config.prompt || '', negativePrompt: config.negativePrompt || '',
           seed: actualSeed, size, success: true, durationMs,
         });
 
@@ -367,31 +209,27 @@ export const AI_BRIDGE_COMMANDS = {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.warn('[AIBridge] Generation failed:', errMsg);
 
-        // Detect known litellm gateway bug: /images/edits and /images/variations endpoints
-        // are broken in certain litellm versions — they fail with a streaming request error
-        // regardless of model or provider. This is a server-side bug, not a client issue.
+        // Known litellm gateway bug: its /images/edits handler mishandles the
+        // request as streaming, failing for every model behind that gateway.
         const isLitellmStreamingBug = /streaming request content.*without having called.*read/i.test(errMsg);
         let hudMsg: string;
-        if (isLitellmStreamingBug && mode !== 'generate') {
-          hudMsg = '⚠️ Gateway bug: image edit/variations not supported by your API gateway (litellm). Please upgrade litellm or use a direct API endpoint.';
+        if (isLitellmStreamingBug && mode === 'edit') {
+          hudMsg = '⚠️ Gateway bug: image editing is broken in your API gateway (litellm). Upgrade litellm or use a direct API endpoint.';
           console.error(
-            '[AIBridge] Known litellm bug detected: the /images/edits endpoint handler in litellm has a streaming bug.\n' +
-            'This affects ALL models when using Edit/Variations mode through litellm.\n' +
-            'Fix: upgrade litellm to a version that fixes this issue, or connect directly to the provider API.',
+            '[AIBridge] Known litellm bug: the /images/edits handler has a streaming bug affecting all models.\n' +
+            'Fix: upgrade litellm, or point this endpoint directly at the provider API.',
           );
         } else {
-          hudMsg = errMsg.length > 80 ? errMsg.slice(0, 80) + '…' : errMsg;
-          hudMsg = `Generation Failed: ${hudMsg}`;
+          const short = errMsg.length > 80 ? errMsg.slice(0, 80) + '…' : errMsg;
+          hudMsg = `Generation Failed: ${short}`;
         }
         actions.setInteraction({ hud: { message: hudMsg, type: 'error' } });
 
-        // Record failed history
-        const durationMs = Date.now() - startTime;
         appendHistoryRecord(ctx, {
-          provider: config.isMockMode ? 'Mock Mode' : activeProvider.name,
-          model: activeProvider?.model || 'unknown',
-          mode, prompt: config.prompt || '', negativePrompt: config.negativePrompt || '',
-          seed: actualSeed, size, success: false, error: errMsg, durationMs,
+          provider: endpoint.name,
+          model: model || 'unknown',
+          mode, kind: 'image', prompt: config.prompt || '', negativePrompt: config.negativePrompt || '',
+          seed: actualSeed, size, success: false, error: errMsg, durationMs: Date.now() - startTime,
         });
 
         ctx.scoped!.setBusy(false);
@@ -400,6 +238,65 @@ export const AI_BRIDGE_COMMANDS = {
     },
   } as EditorCommand<void, Promise<{ success: boolean; seed?: number; error?: string }>>,
 
+  describe: {
+    id: P.CMD_DESCRIBE,
+    name: 'Describe Image',
+    execute: async (ctx: EditorContextValue): Promise<{ success: boolean; description?: string; error?: string }> => {
+      const { selfConfig } = ctx.scoped || {};
+      const config = selfConfig as AIBridgeConfig;
+
+      const endpoint = activeEndpointOf(config);
+      if (!endpoint?.apiKey) {
+        ctx.actions.setInteraction({ hud: { message: 'API Key missing. Configure in Settings.', type: 'error' } });
+        return { success: false };
+      }
+
+      const adapter = getAdapter(endpoint);
+      const model = endpoint.modelByKind?.multi || endpoint.modelByKind?.text || '';
+      const startTime = Date.now();
+      ctx.scoped!.setBusy(true);
+
+      try {
+        const sourceBlob = await getInputImageBlob(ctx, config.inputSource || 'active-layer');
+        if (!sourceBlob) {
+          ctx.actions.setInteraction({ hud: { message: 'Describe needs an image — open a frame with a layer', type: 'error' } });
+          ctx.scoped!.setBusy(false);
+          return { success: false };
+        }
+
+        const description = await adapter.describe(endpoint, sourceBlob, DESCRIBE_INSTRUCTION);
+        const durationMs = Date.now() - startTime;
+        ctx.actions.setInteraction({ hud: { message: '✨ Prompt ready — copy it below', type: 'success' } });
+
+        appendHistoryRecord(ctx, {
+          provider: endpoint.name,
+          model: model || 'unknown',
+          mode: 'describe', kind: 'text', prompt: '(describe: image → prompt)',
+          negativePrompt: '', seed: -1, size: '-', success: true, durationMs,
+        });
+
+        ctx.scoped!.setBusy(false);
+        return { success: true, description };
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn('[AIBridge] Describe failed:', errMsg);
+        const short = errMsg.length > 80 ? errMsg.slice(0, 80) + '…' : errMsg;
+        ctx.actions.setInteraction({ hud: { message: `Describe failed: ${short}`, type: 'error' } });
+
+        appendHistoryRecord(ctx, {
+          provider: endpoint.name,
+          model: model || 'unknown',
+          mode: 'describe', kind: 'text', prompt: '(describe: image → prompt)',
+          negativePrompt: '', seed: -1, size: '-', success: false, error: errMsg,
+          durationMs: Date.now() - startTime,
+        });
+
+        ctx.scoped!.setBusy(false);
+        return { success: false, error: errMsg };
+      }
+    },
+  } as EditorCommand<void, Promise<{ success: boolean; description?: string; error?: string }>>,
+
   fetchModels: {
     id: P.CMD_FETCH_MODELS,
     name: 'Fetch Available Models',
@@ -407,77 +304,41 @@ export const AI_BRIDGE_COMMANDS = {
       const { selfConfig, setSelfConfig } = ctx.scoped || {};
       const config = selfConfig as AIBridgeConfig;
 
-      const providers = config?.providers || [];
-      const activeProvider = providers.find(p => p.id === config?.activeProviderId) || providers[0];
-
-      if (!activeProvider?.apiKey || !activeProvider?.baseUrl) {
+      const endpoint = activeEndpointOf(config);
+      if (!endpoint?.apiKey || !endpoint?.baseUrl) {
         return { success: false, error: 'Missing API key or base URL' };
       }
 
       try {
-        const modelsUrl = `${activeProvider.baseUrl.replace(/\/+$/, '')}/v1/models`;
-        const res = await proxyFetch({
-          targetUrl: modelsUrl,
-          apiKey: activeProvider.apiKey,
-          method: 'GET',
-        });
+        // The provider decides how to discover models — some expose richer
+        // capability data than the standard /v1/models listing.
+        const models: AIModelInfo[] = await getAdapter(endpoint).fetchModels(endpoint);
 
-        if (!res.ok) {
-          const errData = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-          throw new Error(errData.error?.message || `HTTP ${res.status} ${res.statusText}`);
+        if (models.length === 0) {
+          return { success: false, models: [], error: 'The endpoint returned no models.' };
         }
 
-        const rawJson = (await res.json()) as Record<string, unknown>;
-        const allRawModels: Record<string, unknown>[] = Array.isArray(rawJson?.data)
-          ? (rawJson.data as Record<string, unknown>[])
-          : Array.isArray(rawJson)
-            ? (rawJson as Record<string, unknown>[])
-            : Array.isArray(rawJson?.models)
-              ? (rawJson.models as Record<string, unknown>[])
-              : [];
+        // Keep each slot pointing at a model that still exists, preferring one
+        // whose modality suits the slot.
+        const has = (id?: string) => Boolean(id && models.some(m => m.id === id));
+        const firstOf = (...kinds: Array<AIModelInfo['modality']>) =>
+          models.find(m => kinds.includes(m.modality))?.id;
 
-        // No client-side type filtering. The OpenAI-standard /v1/models response
-        // only guarantees an `id` per model (e.g. LocalAI returns just {id, object}).
-        // Capability hints like supported_endpoint_types / architecture.modality /
-        // supportedGenerationMethods are non-standard, gateway-specific extensions
-        // (litellm / OpenRouter / Gemini), so we list every model as-is and let the
-        // user pick the right one for image generation.
-        const finalModels: AIModelInfo[] = allRawModels.map(m => ({
-          id: String(m.id || m.name || ''),
-          owned_by: typeof m.owned_by === 'string' ? m.owned_by : undefined,
-        }));
+        const nextSlots = { ...(endpoint.modelByKind || {}) };
+        if (!has(nextSlots.image)) nextSlots.image = firstOf('image', 'multi') || models[0].id;
+        if (!has(nextSlots.multi)) nextSlots.multi = firstOf('multi');
+        if (!has(nextSlots.text)) nextSlots.text = firstOf('text', 'multi');
 
-        // If models were fetched and the currently selected model is not in the list, auto-switch to the first valid model
-        let updatedProviders = config.providers;
-        if (finalModels.length > 0) {
-          const currentModelInList = finalModels.some(m => m.id === activeProvider.model);
-          if (!currentModelInList && config.providers) {
-            updatedProviders = config.providers.map(p =>
-              p.id === activeProvider.id ? { ...p, model: finalModels[0].id } : p
-            );
-          }
-        }
-
-        // Update cache and providers
-        const nextCachedModels = {
-          ...(config.cachedModels || {}),
-          [activeProvider.id]: finalModels,
-        };
+        const nextEndpoints = (config.endpoints || []).map(e =>
+          e.id === endpoint.id ? { ...e, modelByKind: nextSlots } : e,
+        );
 
         setSelfConfig?.({
-          cachedModels: nextCachedModels,
-          ...(updatedProviders ? { providers: updatedProviders } : {}),
+          cachedModels: { ...(config.cachedModels || {}), [endpoint.id]: models },
+          endpoints: nextEndpoints,
         });
 
-        if (finalModels.length === 0) {
-          return {
-            success: false,
-            models: [],
-            error: 'The endpoint returned no models.',
-          };
-        }
-
-        return { success: true, models: finalModels };
+        return { success: true, models };
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.warn('[AIBridge] Fetch models failed:', errMsg);
@@ -496,3 +357,5 @@ export const AI_BRIDGE_COMMANDS = {
     },
   } as EditorCommand<void, void>,
 };
+
+

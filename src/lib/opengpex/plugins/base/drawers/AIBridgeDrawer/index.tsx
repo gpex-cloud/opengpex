@@ -33,7 +33,7 @@ export const plugin: EditorPlugin = {
     displayName: "AI Bridge",
     version: "2.0.0",
     description:
-      "Connect to external AI models for image generation, editing, and variations.",
+      "Connect to AI providers (OpenAI / Gemini / Qwen / LocalAI) for image generation, editing and describing.",
     author: P.PLUGIN_AUTHOR,
     category: "drawers",
     requirements: {
@@ -52,15 +52,14 @@ export const plugin: EditorPlugin = {
 
   // --- 4. Initial Config (inline, framework applies before component mount) ---
   initialConfig: {
-    providers: P.DEFAULT_PROVIDERS,
-    activeProviderId: "openai",
+    endpoints: P.DEFAULT_ENDPOINTS,
+    activeEndpointId: "openai",
     mode: "generate",
     prompt: "",
     negativePrompt: "",
     seed: -1,
-    isMockMode: false,
     size: "1024x1024",
-    strength: 0.7,
+    inputSource: "active-layer",
     cachedModels: {},
     generationHistory: [],
   },

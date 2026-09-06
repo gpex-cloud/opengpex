@@ -218,8 +218,17 @@ export default function TabbedPluginSlot({
     plugins,
   ]);
 
+  // ─── Active tab resolution (before hooks so effect order stays stable) ─────
+  // Supports matching by group ID or display title; falls back to the first tab.
+  const resolvedActiveTab =
+    tabs.find(
+      (t) => t.id === internalActiveTabId || t.title === internalActiveTabId,
+    ) || tabs.find((t) => t.id === activeTabId || t.title === activeTabId)
+      || tabs[0];
+
   // ─── Scroll state for tab bar overflow ─────────────────────────────────────
   const tabBarRef = useRef<HTMLDivElement>(null);
+  const tabButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
@@ -243,6 +252,28 @@ export default function TabbedPluginSlot({
     };
   }, [checkScroll, tabs.length]);
 
+  /**
+   * Keeps the active tab visible in the scrollable tab bar.
+   *
+   * Matters most for cross-plugin jumps: another plugin can activate a tab via
+   * the panel's tab signal (e.g. AI Bridge's settings button targeting the
+   * "AI Bridge Keys" tab), and that tab is often scrolled out of view — without
+   * this the panel opens showing an unrelated part of the tab strip.
+   *
+   * Only the tab bar is scrolled (nearest block) so the surrounding panel never
+   * jumps.
+   */
+  const activeTabKey = resolvedActiveTab?.id;
+  useEffect(() => {
+    if (!activeTabKey) return;
+    const btn = tabButtonRefs.current[activeTabKey];
+    const bar = tabBarRef.current;
+    if (!btn || !bar) return;
+    // Nothing to do when the strip is not overflowing
+    if (bar.scrollWidth <= bar.clientWidth) return;
+    btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }, [activeTabKey]);
+
   const scrollTabs = useCallback((direction: 'left' | 'right') => {
     const el = tabBarRef.current;
     if (!el) return;
@@ -251,12 +282,7 @@ export default function TabbedPluginSlot({
 
   if (tabs.length === 0) return null;
 
-  // Ensure valid tab (supports matching by ID or title)
-  let activeTab =
-    tabs.find(
-      (t) => t.id === internalActiveTabId || t.title === internalActiveTabId,
-    ) || tabs.find((t) => t.id === activeTabId || t.title === activeTabId);
-  if (!activeTab) activeTab = tabs[0];
+  const activeTab = resolvedActiveTab;
 
   const defaultHeader = (
     <div className="relative flex items-center mb-4">
@@ -282,6 +308,7 @@ export default function TabbedPluginSlot({
           return (
             <button
               key={tab.id}
+              ref={(el) => { tabButtonRefs.current[tab.id] = el; }}
               onClick={() => {
                 setInternalActiveTabId(tab.id);
                 onTabChange?.(tab.id);

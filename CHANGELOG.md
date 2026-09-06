@@ -4,6 +4,17 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.2.5
+
+- AI Bridge: now supports 7 services — OpenAI, Claude, Gemini, Grok, Qwen, LocalAI, and Ollama; add as many endpoints as you need and switch between them
+- AI Bridge: new **Describe** page writes a prompt from your image, replacing the old Variations page
+- AI Bridge: improved model list display; removed the developer mock mode — an API key is now always required
+- Snapping: hold Shift or Alt while dragging to temporarily turn off smart guides for precise placement; release the key to re-enable
+- Panels: jumping to a settings tab now brings that tab into view
+- Heads-up: your AI Bridge endpoints and API keys need to be added once again after updating
+
+---
+
 ## v1.2.4
 
 - Text & Markers: freely rotate text and markers by dragging the new rotation handle above the selection box; hold Shift to snap to 15° increments

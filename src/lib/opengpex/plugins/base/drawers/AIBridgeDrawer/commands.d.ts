@@ -14,6 +14,7 @@ import type { AIModelInfo } from './protocols';
 export interface AIBridgeDrawerCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   generateCmd: CommandInstance<void, Promise<{ success: boolean; seed?: number; error?: string }>>;
+  describeCmd: CommandInstance<void, Promise<{ success: boolean; description?: string; error?: string }>>;
   fetchModelsCmd: CommandInstance<void, Promise<{ success: boolean; models?: AIModelInfo[]; error?: string }>>;
   openSettingsCmd: CommandInstance;
 }

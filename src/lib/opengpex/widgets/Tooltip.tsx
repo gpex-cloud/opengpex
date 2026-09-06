@@ -36,6 +36,8 @@ interface TooltipProps {
   align?: TooltipAlign;
   uppercase?: boolean;
   contentClassName?: string;
+  /** Max width for long tooltip content (e.g. '240px'). Default: unlimited (nowrap). */
+  maxWidth?: string;
 }
 
 export default function Tooltip({
@@ -49,7 +51,8 @@ export default function Tooltip({
   containerClassName = '',
   align = 'center',
   uppercase = true,
-  contentClassName = ''
+  contentClassName = '',
+  maxWidth,
 }: TooltipProps) {
   const [isVisible, setIsVisible] = useState(false);
   const [tooltipPos, setTooltipPos] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
@@ -190,9 +193,12 @@ export default function Tooltip({
       {(alwaysShow || (isVisible && showOnHover)) && typeof document !== 'undefined' && createPortal(
         <div
           style={getTooltipStyle()}
-          className={`whitespace-nowrap animate-in fade-in zoom-in-95 duration-200 ${className}`}
+          className={`animate-in fade-in zoom-in-95 duration-200 ${maxWidth ? 'whitespace-normal' : 'whitespace-nowrap'} ${className}`}
         >
-          <div className={`bg-white dark:bg-zinc-900 text-zinc-800 dark:text-white text-[10px] rounded-lg py-1.5 px-2.5 shadow-2xl border border-zinc-200 dark:border-white/10 ${uppercase ? 'uppercase font-bold tracking-wider' : 'font-medium tracking-tight whitespace-pre-line leading-relaxed'} ${contentClassName}`}>
+          <div
+            style={maxWidth ? { maxWidth, whiteSpace: 'normal' } : undefined}
+            className={`bg-white dark:bg-zinc-900 text-zinc-800 dark:text-white text-[10px] rounded-lg py-1.5 px-2.5 shadow-2xl border border-zinc-200 dark:border-white/10 ${uppercase ? 'uppercase font-bold tracking-wider' : 'font-medium tracking-tight whitespace-pre-line leading-relaxed'} ${contentClassName}`}
+          >
             {content}
           </div>
           <div className={`border-4 border-transparent w-0 h-0 absolute ${arrowStyles[position][align]}`}></div>

@@ -16,156 +16,233 @@
  *
  * SPDX-License-Identifier: GPL-3.0-only
  */
-
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { usePluginSelfConfig } from "@opengpex/editor/core/context";
-import { Key, Link, Plus, Trash2, CheckCircle2, AlertCircle, Eye, EyeOff } from "lucide-react";
-import { AIBridgeConfig, AIProvider, validateBaseUrl } from "../protocols";
+import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
+import { Key, Link, Plus, Trash2, CheckCircle2, AlertCircle, Eye, EyeOff, Boxes, ChevronDown } from "lucide-react";
+import {
+  AIBridgeConfig,
+  AIEndpoint,
+  PROVIDER_REGISTRY,
+  DEFAULT_PROVIDER_KEY,
+  getProvider,
+  validateBaseUrl,
+} from "../protocols";
 
+/**
+ * AIBridgeSettings — endpoint asset management.
+ *
+ * An endpoint is one access point the user has: a base URL, a key, and the
+ * provider whose API rules it follows. The provider is chosen from a dropdown
+ * and fully determines runtime behaviour, so there is nothing else to configure
+ * and nothing is auto-detected.
+ */
 export function AIBridgeSettings() {
   const [config, setConfig] = usePluginSelfConfig<AIBridgeConfig>();
   const [urlWarnings, setUrlWarnings] = useState<Record<string, string | null>>({});
   const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({});
+  // Just-added endpoint: scrolls its card into view
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  const toggleKeyVisibility = (providerId: string) => {
-    setVisibleKeys((prev) => ({ ...prev, [providerId]: !prev[providerId] }));
+  const endpoints: AIEndpoint[] = config.endpoints || [];
+
+  const toggleKeyVisibility = (id: string) => {
+    setVisibleKeys((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const updateProvider = (id: string, patch: Partial<AIProvider>) => {
-    const nextProviders = config.providers.map((p) =>
-      p.id === id ? { ...p, ...patch } : p,
-    );
-    setConfig({ providers: nextProviders });
-  };
-
-  const handleBaseUrlChange = (providerId: string, rawUrl: string) => {
-    const result = validateBaseUrl(rawUrl);
-
-    if (result.warning && result.cleaned) {
-      // Auto-correct the URL and show warning
-      setUrlWarnings((prev) => ({ ...prev, [providerId]: result.warning! }));
-      updateProvider(providerId, { baseUrl: result.cleaned });
-    } else if (result.warning) {
-      // Invalid URL, still update for user to see, show warning
-      setUrlWarnings((prev) => ({ ...prev, [providerId]: result.warning! }));
-      updateProvider(providerId, { baseUrl: rawUrl });
-    } else {
-      // Valid URL
-      setUrlWarnings((prev) => ({ ...prev, [providerId]: null }));
-      updateProvider(providerId, { baseUrl: result.cleaned || rawUrl });
-    }
-  };
-
-  const addProvider = () => {
-    const newId = `custom-${Date.now()}`;
-    const newProvider: AIProvider = {
-      id: newId,
-      name: "Custom Provider",
-      baseUrl: "",
-      apiKey: "",
-    };
-    // Adds only, does not automatically switch active provider
+  const updateEndpoint = (id: string, patch: Partial<AIEndpoint>) => {
     setConfig({
-      providers: [...config.providers, newProvider],
+      endpoints: endpoints.map((e) => (e.id === id ? { ...e, ...patch } : e)),
     });
   };
 
-  const removeProvider = (id: string) => {
-    const nextProviders = config.providers.filter((p) => p.id !== id);
-    let nextActiveId = config.activeProviderId;
-    if (nextActiveId === id && nextProviders.length > 0) {
-      nextActiveId = nextProviders[0].id;
+  const handleBaseUrlChange = (id: string, rawUrl: string) => {
+    const result = validateBaseUrl(rawUrl);
+    if (result.warning && result.cleaned) {
+      setUrlWarnings((prev) => ({ ...prev, [id]: result.warning! }));
+      updateEndpoint(id, { baseUrl: result.cleaned });
+    } else if (result.warning) {
+      setUrlWarnings((prev) => ({ ...prev, [id]: result.warning! }));
+      updateEndpoint(id, { baseUrl: rawUrl });
+    } else {
+      setUrlWarnings((prev) => ({ ...prev, [id]: null }));
+      updateEndpoint(id, { baseUrl: result.cleaned || rawUrl });
     }
-    setConfig({ providers: nextProviders, activeProviderId: nextActiveId });
-    // Clean up warning
-    setUrlWarnings((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
+  };
+
+  /** Adds an endpoint for the given provider, pre-filling its default base URL. */
+  const addEndpoint = (providerKey: string) => {
+    const provider = getProvider(providerKey);
+    if (!provider) return;
+    const newId = `${provider.key}-${crypto.randomUUID().slice(0, 8)}`;
+    const newEndpoint: AIEndpoint = {
+      id: newId,
+      name: provider.displayName,
+      baseUrl: provider.defaultBaseUrl,
+      apiKey: "",
+      provider: provider.key,
+      modelByKind: {},
+    };
+    // Adds only — does not switch the active endpoint, since a keyless endpoint
+    // would immediately show "API Key Missing" in the drawer.
+    setConfig({ endpoints: [...endpoints, newEndpoint] });
+    requestAnimationFrame(() => {
+      cardRefs.current[newId]?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   };
+
+  /** Switching provider re-points the endpoint at a different API dialect.
+   *  The base URL is only replaced when it still holds the old default. */
+  const changeProvider = (id: string, providerKey: string) => {
+    const endpoint = endpoints.find((e) => e.id === id);
+    const nextProvider = getProvider(providerKey);
+    if (!endpoint || !nextProvider) return;
+    const prevProvider = getProvider(endpoint.provider);
+    const urlIsUntouched =
+      !endpoint.baseUrl || endpoint.baseUrl === prevProvider?.defaultBaseUrl;
+
+    updateEndpoint(id, {
+      provider: nextProvider.key,
+      ...(urlIsUntouched ? { baseUrl: nextProvider.defaultBaseUrl } : {}),
+    });
+  };
+
+  const removeEndpoint = (id: string) => {
+    const next = endpoints.filter((e) => e.id !== id);
+    let nextActiveId = config.activeEndpointId;
+    if (nextActiveId === id && next.length > 0) nextActiveId = next[0].id;
+    setConfig({ endpoints: next, activeEndpointId: nextActiveId });
+    setUrlWarnings((prev) => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
+  };
+
+  // Dropdown options are label-only: ActionDropdown's `description` slot is a
+  // short right-aligned hint, so long prose would fight the label for space.
+  // The full explanation is shown full-width under the card's provider field.
+  const providerOptions = PROVIDER_REGISTRY.map((p) => ({
+    label: p.displayName,
+    value: p.key,
+  }));
+
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between pl-1">
-          <h5 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-1.5">
-            <Key size={11} /> Universal AI Endpoints
+          <h5 className="text-[10.5px] font-black text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-1.5">
+            <Key size={11} /> AI Endpoints
           </h5>
-          <button
-            onClick={addProvider}
-            className="flex items-center gap-1 text-[9px] font-bold text-amber-500 hover transition-colors uppercase tracking-wider"
-          >
-            <Plus size={10} /> Add
-          </button>
+          {/* Add = pick which provider the new endpoint belongs to */}
+          <ActionDropdown
+            options={providerOptions}
+            onSelect={addEndpoint}
+            align="right"
+            trigger={
+              <span className="flex items-center gap-1 text-[10.5px] font-bold text-amber-500 hover:text-amber-400 transition-colors uppercase tracking-wider cursor-pointer">
+                <Plus size={10} /> Add
+              </span>
+            }
+          />
         </div>
 
-        <div className="flex flex-col gap-3 overflow-y-auto pr-1">
-          {config.providers.map((provider) => {
-            const isActive = config.activeProviderId === provider.id;
-            const warning = urlWarnings[provider.id];
+        <div className="flex flex-col gap-2">
+          {endpoints.map((endpoint) => {
+            const isActive = config.activeEndpointId === endpoint.id;
+            const warning = urlWarnings[endpoint.id];
+            const provider = getProvider(endpoint.provider);
+            const providerLabel = provider?.displayName
+              ?? `Unknown (${endpoint.provider || DEFAULT_PROVIDER_KEY})`;
+
             return (
               <div
-                key={provider.id}
-                className={`flex flex-col gap-3 rounded-xl p-3 border transition-all ${
-                  isActive
-                    ? "bg-[var(--bg-stage)] border-amber-500/50"
-                    : "bg-[var(--bg-stage)] border-[var(--border-subtle)] "
+                key={endpoint.id}
+                ref={(el) => { cardRefs.current[endpoint.id] = el; }}
+                // Active state is conveyed by the border only — the background
+                // stays uniform so the list reads as one consistent surface.
+                className={`flex flex-col gap-2.5 p-2.5 rounded-xl border bg-[var(--bg-stage)] transition-all ${
+                  isActive ? "border-amber-500/50" : "border-[var(--border-subtle)]"
                 }`}
               >
-                {/* Header: Name and Active status */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 flex-1">
+                {/* Header: activate + editable name + delete */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
                     <button
-                      onClick={() =>
-                        setConfig({ activeProviderId: provider.id })
-                      }
-                      className={`p-1 rounded-full transition-colors ${isActive ? "text-amber-500" : "text-[var(--text-muted)] hover:text-[var(--text-main)]"}`}
-                      title={isActive ? "Active Provider" : "Set as Active"}
+                      onClick={() => setConfig({ activeEndpointId: endpoint.id })}
+                      className={`p-1 rounded-full transition-colors ${
+                        isActive
+                          ? "text-amber-500"
+                          : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                      }`}
+                      title={isActive ? "Active endpoint" : "Set as active"}
                     >
-                      <CheckCircle2
-                        size={14}
-                        className={isActive ? "opacity-100" : "opacity-50"}
-                      />
+                      <CheckCircle2 size={14} className={isActive ? "opacity-100" : "opacity-50"} />
                     </button>
                     <input
                       type="text"
-                      value={provider.name}
-                      onChange={(e) =>
-                        updateProvider(provider.id, { name: e.target.value })
-                      }
-                      className="bg-transparent border-none text-[11px] font-bold text-[var(--text-main)] focus:outline-none w-32 focus:ring-1 focus:ring-amber-500/50 rounded px-1 -ml-1"
+                      value={endpoint.name}
+                      onChange={(e) => updateEndpoint(endpoint.id, { name: e.target.value })}
+                      className="bg-transparent border-none text-[12px] font-bold text-[var(--text-main)] focus:outline-none flex-1 min-w-0 focus:ring-1 focus:ring-amber-500/50 rounded px-1 -ml-1"
                     />
                   </div>
-                  {config.providers.length > 1 && (
+                  {endpoints.length > 1 && (
                     <button
-                      onClick={() => removeProvider(provider.id)}
+                      onClick={() => removeEndpoint(endpoint.id)}
                       className="text-[var(--text-muted)] hover:text-rose-500 transition-colors p-1"
+                      title="Remove endpoint"
                     >
                       <Trash2 size={12} />
                     </button>
                   )}
                 </div>
 
-                {/* Inputs */}
                 <div className="flex flex-col gap-2.5">
+                  {/* Provider selection — decides how requests are built */}
                   <div className="flex flex-col gap-1">
-                    <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-wider pl-0.5 flex items-center gap-1">
+                    <span className="text-[10.5px] font-bold text-[var(--text-muted)] uppercase tracking-wider pl-0.5 flex items-center gap-1">
+                      <Boxes size={9} /> Provider
+                    </span>
+                    <ActionDropdown
+                      className="w-full block [&>div]:w-full"
+                      matchTriggerWidth
+                      options={providerOptions.map((o) => ({
+                        ...o,
+                        checked: o.value === endpoint.provider,
+                      }))}
+                      onSelect={(key) => changeProvider(endpoint.id, key)}
+                      align="left"
+                      trigger={(isOpen) => (
+                        <button className="w-full flex items-center justify-between gap-1 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg px-2 py-1.5 text-[11.5px] font-bold text-[var(--text-main)] hover:border-amber-500/40 transition-colors focus:outline-none">
+                          <span className="truncate">{providerLabel}</span>
+                          <ChevronDown
+                            size={11}
+                            className={`text-[var(--text-muted)] transition-transform shrink-0 ${isOpen ? "rotate-180" : ""}`}
+                          />
+                        </button>
+                      )}
+                    />
+                    <span className="text-[10.5px] text-[var(--text-muted)] pl-0.5 italic opacity-60 leading-snug">
+                      {provider?.description
+                        ?? "This endpoint references an unknown provider — pick one from the list."}
+                    </span>
+                  </div>
+
+                  {/* Base URL */}
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10.5px] font-bold text-[var(--text-muted)] uppercase tracking-wider pl-0.5 flex items-center gap-1">
                       <Link size={9} /> Base URL
                     </span>
                     <input
                       type="text"
-                      value={provider.baseUrl ?? ''}
-                      onChange={(e) =>
-                        handleBaseUrlChange(provider.id, e.target.value)
-                      }
-                      onBlur={(e) =>
-                        handleBaseUrlChange(provider.id, e.target.value)
-                      }
-                      placeholder="https://api.openai.com"
-                      className={`w-full bg-[var(--bg-panel)] border rounded-lg px-2 py-1.5 text-[10px] text-[var(--text-main)] focus:outline-none transition-all ${
+                      value={endpoint.baseUrl ?? ""}
+                      onChange={(e) => handleBaseUrlChange(endpoint.id, e.target.value)}
+                      onBlur={(e) => handleBaseUrlChange(endpoint.id, e.target.value)}
+                      placeholder={provider?.defaultBaseUrl || "http://localhost:8080"}
+                      className={`w-full bg-[var(--bg-panel)] border rounded-lg px-2 py-1.5 text-[11.5px] text-[var(--text-main)] focus:outline-none transition-all ${
                         warning
                           ? "border-amber-500/50 focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
                           : "border-[var(--border-subtle)] focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
@@ -174,37 +251,36 @@ export function AIBridgeSettings() {
                     {warning && (
                       <div className="flex items-start gap-1 mt-0.5 px-0.5">
                         <AlertCircle size={9} className="text-amber-500 mt-0.5 shrink-0" />
-                        <span className="text-[8px] font-bold text-amber-500 leading-tight">
+                        <span className="text-[9.5px] font-bold text-amber-500 leading-tight">
                           {warning}
                         </span>
                       </div>
                     )}
-                    <span className="text-[8px] text-[var(--text-muted)] pl-0.5 italic opacity-60">
-                      Enter base URL only. Paths like /v1/images/generations are added automatically.
+                    <span className="text-[10.5px] text-[var(--text-muted)] pl-0.5 italic opacity-60">
+                      Enter the base URL only. Paths like /v1/images/generations are added automatically.
                     </span>
                   </div>
 
+                  {/* API Key */}
                   <div className="flex flex-col gap-1">
-                    <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-wider pl-0.5 flex items-center gap-1">
+                    <span className="text-[10.5px] font-bold text-[var(--text-muted)] uppercase tracking-wider pl-0.5 flex items-center gap-1">
                       <Key size={9} /> API Key
                     </span>
                     <div className="relative">
                       <input
-                        type={visibleKeys[provider.id] ? "text" : "password"}
-                        value={provider.apiKey}
-                        onChange={(e) =>
-                          updateProvider(provider.id, { apiKey: e.target.value })
-                        }
+                        type={visibleKeys[endpoint.id] ? "text" : "password"}
+                        value={endpoint.apiKey}
+                        onChange={(e) => updateEndpoint(endpoint.id, { apiKey: e.target.value })}
                         placeholder="sk-..."
-                        className="w-full bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg px-2 py-1.5 pr-8 text-[10px] text-[var(--text-main)] focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all placeholder:text-[var(--text-muted)]"
+                        className="w-full bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg px-2 py-1.5 pr-8 text-[11.5px] text-[var(--text-main)] focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all placeholder:text-[var(--text-muted)]"
                       />
                       <button
                         type="button"
-                        onClick={() => toggleKeyVisibility(provider.id)}
+                        onClick={() => toggleKeyVisibility(endpoint.id)}
                         className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors focus:outline-none"
-                        title={visibleKeys[provider.id] ? "Hide API Key" : "Show API Key"}
+                        title={visibleKeys[endpoint.id] ? "Hide API Key" : "Show API Key"}
                       >
-                        {visibleKeys[provider.id] ? <EyeOff size={12} /> : <Eye size={12} />}
+                        {visibleKeys[endpoint.id] ? <EyeOff size={12} /> : <Eye size={12} />}
                       </button>
                     </div>
                   </div>
@@ -215,9 +291,13 @@ export function AIBridgeSettings() {
         </div>
       </div>
 
-      <p className="px-1 text-[8px] text-[var(--text-muted)] font-bold leading-relaxed uppercase tracking-tight italic opacity-60">
-        Your API keys are stored securely in your browser&apos;s local storage
-        and are never sent to our servers. The plugin will automatically append the correct API path (/v1/images/generations, /v1/images/edits, etc.) based on the selected mode.
+      <p className="px-1 flex items-start gap-1.5 text-[10.5px] text-[var(--text-muted)] font-bold leading-relaxed uppercase tracking-tight italic opacity-60">
+        <AlertCircle size={12} className="shrink-0 mt-[1px]" />
+        <span>
+          Your API keys are stored in your browser&apos;s local storage and are never
+          sent to our servers. Add an endpoint, pick the provider that matches your
+          service, paste your key, then fetch models.
+        </span>
       </p>
     </div>
   );

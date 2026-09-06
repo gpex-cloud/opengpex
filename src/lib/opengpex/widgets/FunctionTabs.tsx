@@ -28,6 +28,8 @@ interface Option<T> {
   icon?: React.ReactNode;
   tooltip?: string;
   tooltipAlign?: TooltipAlign;
+  /** Disables this tab only (e.g. the current provider cannot do that task). */
+  disabled?: boolean;
 }
 
 interface FunctionTabsProps<T> {
@@ -61,15 +63,16 @@ export default function FunctionTabs<T extends string>({
     <div className={`flex p-0.5 bg-zinc-100/80 dark:bg-black/20 ${containerRadius} border border-zinc-200 dark:border-white/5 ${className} shadow-inner`}>
       {options.map((opt) => {
         const isActive = opt.value === value;
+        const isDisabled = disabled || opt.disabled;
         const button = (
           <button
             key={opt.value}
             onClick={() => onChange(opt.value)}
-            disabled={disabled}
+            disabled={isDisabled}
             className={`
               w-full flex items-center justify-center ${gap} ${buttonPadding} ${buttonRadius} 
               ${fontSize} transition-all outline-none 
-              disabled:opacity-50 
+              disabled:opacity-50 disabled:cursor-not-allowed
               ${isActive 
                 ? (['crop'].includes(opt.value as string) 
                     ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20 active:scale-[0.98]' 

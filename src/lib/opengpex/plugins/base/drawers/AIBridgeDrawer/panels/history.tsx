@@ -22,7 +22,7 @@
 import React, { useState } from "react";
 import { Download, Trash2, Clock, CheckCircle2, XCircle, Copy, Check } from "lucide-react";
 import { usePluginSelfConfig } from "@opengpex/editor/core/context";
-import { GenerationRecord } from "../protocols";
+import { GenerationRecord, AIMode } from "../protocols";
 
 interface HistoryConfig {
   generationHistory?: GenerationRecord[];
@@ -30,17 +30,26 @@ interface HistoryConfig {
 
 /**
  * AIBridgeHistory: Generation history panel
- * Displays metadata list of all generation history, providing text download function.
+ * Displays metadata list of generation history, providing text download function.
+ * When filterMode is given, only records of that mode are shown; Clear All
+ * removes only the filtered records.
  */
-export function AIBridgeHistory() {
+export function AIBridgeHistory({ filterMode }: { filterMode?: AIMode }) {
   const [config, setConfig] = usePluginSelfConfig<HistoryConfig>();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const history: GenerationRecord[] = config.generationHistory || [];
+  const allHistory: GenerationRecord[] = config.generationHistory || [];
+  const history: GenerationRecord[] = filterMode
+    ? allHistory.filter((r) => r.mode === filterMode)
+    : allHistory;
 
   const clearHistory = () => {
-    setConfig({ generationHistory: [] });
+    // Only clear records visible under the current filter (other modes' history is kept)
+    const next = filterMode
+      ? allHistory.filter((r) => r.mode !== filterMode)
+      : [];
+    setConfig({ generationHistory: next });
   };
 
   const deleteRecord = (id: string, e: React.MouseEvent) => {

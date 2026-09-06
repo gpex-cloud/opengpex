@@ -35,9 +35,12 @@ export function AiGenerationPanel({ extra }: AiGenerationPanelProps) {
   const aiProvider = String(extra.ai_provider || "Unknown Provider");
   const aiModel = extra.ai_model ? String(extra.ai_model) : null;
   const aiModeRaw = extra.ai_mode ? String(extra.ai_mode) : null;
-  const aiMode = aiModeRaw === "generate" ? "Generate"
-    : aiModeRaw === "edit" ? "Edit"
-    : aiModeRaw === "variations" ? "Vary"
+  // Task vocabulary (txt2img/img2img) with legacy fallbacks (generate/edit/variations)
+  const aiMode = aiModeRaw === "txt2img" ? "txt2img"
+    : aiModeRaw === "img2img" ? "img2img"
+    : aiModeRaw === "generate" ? "txt2img"
+    : aiModeRaw === "edit" ? "img2img"
+    : aiModeRaw === "variations" ? "img2img"
     : aiModeRaw;
   const aiSize = extra.ai_size ? String(extra.ai_size) : null;
   const aiSeed = extra.ai_seed !== undefined ? String(extra.ai_seed) : null;

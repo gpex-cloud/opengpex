@@ -84,6 +84,22 @@ export const InteractionMath = {
   },
 
   /**
+   * isSnapSuppressed: Global drag-time modifier check.
+   *
+   * Holding Shift or Alt/Option during a drag temporarily bypasses smart guides
+   * (mirrors the Figma/Photoshop "hold-to-bypass snapping" convention). This is
+   * evaluated on every pointer event, so releasing the key restores snapping
+   * and guide rendering immediately — no persistent state to manage.
+   *
+   * Note: Alt is the "clean" bypass key. Shift additionally carries gesture
+   * semantics elsewhere (aspect-ratio lock in resize, 45° arrow snap, 15°
+   * rotation snap), so Shift+drag disables guides AND those behaviours fire.
+   */
+  isSnapSuppressed(e: InteractionEvent): boolean {
+    return e.keys.shift || e.keys.alt;
+  },
+
+  /**
    * snapAndSync: Perform snapping and sync guides (With built-in throttling)
    * 
    * @param e         Interaction event
@@ -97,7 +113,7 @@ export const InteractionMath = {
     state: { lastThrottleTime: number },
     options: { clamp?: boolean; throttleMs?: number; excludeLayerId?: string } = {}
   ): LocalRect {
-    const isSnapping = presets.get('SNAP_ENABLED');
+    const isSnapping = presets.get('SNAP_ENABLED') && !InteractionMath.isSnapSuppressed(e);
     const frame = e.activeFrame;
 
     // Read snap filter options from PresetsFactory (no plugin dependency)
