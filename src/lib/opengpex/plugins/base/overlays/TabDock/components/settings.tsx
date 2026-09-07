@@ -20,7 +20,7 @@
 "use client";
 
 import React from "react";
-import { Rows2, Columns2, Maximize2, Indent, Activity } from "lucide-react";
+import { Maximize2, Indent, Activity, Settings, AlignHorizontalDistributeCenter } from "lucide-react";
 import Switch from "@opengpex/editor/widgets/Switch";
 import { useTabDock } from "../hooks";
 
@@ -30,52 +30,44 @@ import { useTabDock } from "../hooks";
 export function TabDockSettings() {
   const { state, updateConfig } = useTabDock();
   const { config } = state;
+  const showSettingsButton = config.showSettingsButton ?? true;
 
   // Feature toggles to easily toggle read-only behavior for settings
-  const IS_LAYOUT_READ_ONLY = true;
-  const IS_GRID_RESTRICTED_READ_ONLY = true; // when true, grid items other than BL, BC, BR are read-only
+
+  const SNAP_OPTIONS = [
+    { id: 'BL', label: 'Left' },
+    { id: 'BC', label: 'Center' },
+    { id: 'BR', label: 'Right' },
+  ] as const;
+
+  const snapLabel = SNAP_OPTIONS.find((o) => o.id === (config.snap || 'BC'))?.label ?? 'Center';
 
   return (
     <div className="flex flex-col gap-3">
       <h5 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest pl-1">
         Tab Dock Layout
-      </h5>
-
-      {/* 1. Orientation Toggle */}
-      <div className="flex bg-[var(--bg-stage)] rounded-xl p-1 gap-1">
-        {[
-          { id: "horizontal", icon: <Rows2 size={13} />, label: "Horizontal" },
-          { id: "vertical", icon: <Columns2 size={13} />, label: "Vertical" },
-        ].map((item) => {
-          const isActive = (config.orientation || "horizontal") === item.id;
-          return (
-            <button
-              key={item.id}
-              disabled={IS_LAYOUT_READ_ONLY}
-              onClick={() => {
-                if (IS_LAYOUT_READ_ONLY) return;
-                updateConfig({
-                  orientation: item.id as "horizontal" | "vertical",
-                });
-              }}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg transition-all ${
-                isActive
-                  ? IS_LAYOUT_READ_ONLY
-                    ? "bg-[var(--bg-panel)]/60 text-indigo-500/60 shadow-none"
-                    : "bg-[var(--bg-panel)] text-indigo-500 shadow-sm"
-                  : IS_LAYOUT_READ_ONLY
-                    ? "text-[var(--text-muted)]/50"
-                    : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
-              } ${IS_LAYOUT_READ_ONLY ? "cursor-not-allowed opacity-50" : ""}`}
-            >
-              {item.icon}{" "}
-              <span className="text-[10px] font-black uppercase tracking-tight">
-                {item.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      </h5>      
+      {/* 1. Show Settings Button Toggle */}
+      <button
+        onClick={() => updateConfig({ showSettingsButton: !showSettingsButton })}
+        className="flex items-center justify-between w-full p-2.5 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] group"
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${showSettingsButton ? "bg-violet-500/10 text-violet-500" : "bg-[var(--bg-stage)] text-[var(--text-muted)]"}`}
+          >
+            <Settings size={13} />
+          </div>
+          <span className="text-[10px] font-black text-[var(--text-main)] uppercase tracking-tight">
+            Show Settings Button
+          </span>
+        </div>
+        <Switch
+          checked={showSettingsButton}
+          onChange={(v) => updateConfig({ showSettingsButton: v })}
+          activeColor="bg-violet-500"
+        />
+      </button>
 
       {/* 2. Always Expand Switch */}
       <button
@@ -153,86 +145,46 @@ export function TabDockSettings() {
         />
       </button>
 
-      {/* 5. Dock Alignment (Miniature Grid) */}
-      <div className="flex items-start justify-between p-2.5 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] transition-colors hover group">
-        <div className="flex flex-col pl-1 pt-1 text-left leading-tight">
-          <span className="text-[10px] font-black text-[var(--text-main)] uppercase tracking-tight">
-            Dock Alignment
-          </span>
-          <span className="text-[8px] text-[var(--text-muted)] font-bold uppercase">
-            {config.snap === "TC"
-              ? "Top Center"
-              : (config.snap || "BC") === "BC"
-                ? "Bottom Center"
-                : config.snap === "TL"
-                  ? "Top Left"
-                  : config.snap === "TR"
-                    ? "Top Right"
-                    : config.snap === "BL"
-                      ? "Bottom Left"
-                      : config.snap === "BR"
-                        ? "Bottom Right"
-                        : config.snap}
-          </span>
+      {/* 6. Dock Alignment */}
+      <div className="flex items-center justify-between p-2.5 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)]">
+        <div className="flex items-center gap-3">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-indigo-500/10 text-indigo-500">
+            <AlignHorizontalDistributeCenter size={13} />
+          </div>
+          <div className="flex flex-col text-left leading-tight">
+            <span className="text-[10px] font-black text-[var(--text-main)] uppercase tracking-tight">
+              Dock Alignment
+            </span>
+            <span className="text-[8px] text-[var(--text-muted)] font-bold uppercase">
+              {snapLabel}
+            </span>
+          </div>
         </div>
 
-        <div className="w-16 aspect-square p-1 flex items-center justify-center">
-          <div className="grid grid-cols-3 grid-rows-3 gap-1.5 w-full h-full">
-            {(
-              ["TL", "TC", "TR", "ML", "MC", "MR", "BL", "BC", "BR"] as const
-            ).map((snap) => {
-              const isHorizontal =
-                (config.orientation || "horizontal") === "horizontal";
-              const isInactive =
-                snap === "MC" ||
-                (isHorizontal
-                  ? snap === "ML" || snap === "MR"
-                  : snap === "TC" || snap === "BC");
-
-              const isSnapReadOnly =
-                IS_GRID_RESTRICTED_READ_ONLY &&
-                !["BL", "BC", "BR"].includes(snap);
-
-              return isInactive ? (
+        <div className="flex gap-1">
+          {SNAP_OPTIONS.map(({ id, label }) => {
+            const isActive = (config.snap || "BC") === id;
+            return (
+              <button
+                key={id}
+                onClick={() => updateConfig({ snap: id, position: undefined })}
+                title={label}
+                className={`w-3.5 h-3.5 rounded-md transition-all flex items-center justify-center ${
+                  isActive
+                    ? "bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]"
+                    : "bg-[var(--bg-panel)]/50 hover:bg-[var(--border-subtle)]"
+                }`}
+              >
                 <div
-                  key={snap}
-                  className="flex items-center justify-center pointer-events-none opacity-10"
-                >
-                  <div className="w-0.5 h-0.5 rounded-full bg-[var(--text-muted)]" />
-                </div>
-              ) : (
-                <button
-                  key={snap}
-                  disabled={isSnapReadOnly}
-                  onClick={() => {
-                    if (isSnapReadOnly) return;
-                    updateConfig({ snap, position: undefined });
-                  }}
-                  className={`group/snap relative rounded-md transition-all flex items-center justify-center ${
-                    (config.snap || "BC") === snap
-                      ? isSnapReadOnly
-                        ? "bg-indigo-500/40 shadow-none"
-                        : "bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]"
-                      : `bg-[var(--bg-panel)]/50 ${isSnapReadOnly ? "" : "hover:bg-[var(--border-subtle)]"}`
-                  } ${isSnapReadOnly ? "cursor-not-allowed opacity-40" : ""}`}
-                >
-                  <div
-                    className={`w-1 h-1 rounded-full transition-all duration-300 ${
-                      (config.snap || "BC") === snap
-                        ? isSnapReadOnly
-                          ? "bg-[var(--text-main)]/50"
-                          : "bg-[var(--text-main)]"
-                        : `bg-[var(--text-muted)] opacity-50 ${
-                            isSnapReadOnly
-                              ? ""
-                              : "group-hover/snap:bg-[var(--text-main)] group-hover/snap:opacity-100"
-                          }`
-                    }`}
-                  />
-                </button>
-              );
-            })}
-          </div>
+                  className={`w-1 h-1 rounded-full transition-all duration-300 ${
+                    isActive
+                      ? "bg-[var(--text-main)]"
+                      : "bg-[var(--text-muted)] opacity-50"
+                  }`}
+                />
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

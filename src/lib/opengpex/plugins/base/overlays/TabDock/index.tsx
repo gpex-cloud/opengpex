@@ -47,11 +47,11 @@ export const plugin: EditorPlugin = {
   order: 10,
   commands: Object.values(TAB_DOCK_COMMANDS),
   initialConfig: {
-    orientation: 'horizontal',
     snap: 'BC',
     showProps: true,
     indentBranches: true,
     showMetricsHud: false,
+    showSettingsButton: true,
   },
   contributions: [
     {

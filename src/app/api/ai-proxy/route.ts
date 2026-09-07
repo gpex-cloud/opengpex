@@ -107,9 +107,26 @@ async function proxyRequest(request: NextRequest, method: string): Promise<NextR
     // Build forwarding request headers
     const forwardHeaders: Record<string, string> = {};
 
+    // Auth mode: OpenAI-compatible services use Bearer; Anthropic's native
+    // Messages API uses the x-api-key header instead.
+    const authMode = request.headers.get('X-Auth-Mode') || 'bearer';
     if (apiKey) {
-      forwardHeaders['Authorization'] = `Bearer ${apiKey}`;
+      if (authMode === 'anthropic') {
+        forwardHeaders['x-api-key'] = apiKey;
+      } else {
+        forwardHeaders['Authorization'] = `Bearer ${apiKey}`;
+      }
     }
+
+    // Replay any X-Forward-* headers verbatim (stripping the prefix), e.g.
+    // X-Forward-anthropic-version → anthropic-version. Lets adapters attach
+    // provider-specific headers without the proxy knowing about each one.
+    request.headers.forEach((value, key) => {
+      const lower = key.toLowerCase();
+      if (lower.startsWith('x-forward-')) {
+        forwardHeaders[key.slice('x-forward-'.length)] = value;
+      }
+    });
 
     // Passthrough Content-Type
     const contentType = request.headers.get('Content-Type');
@@ -138,7 +155,27 @@ async function proxyRequest(request: NextRequest, method: string): Promise<NextR
     // Initiate proxy request
     const response = await fetch(targetUrl, fetchOptions);
 
-    // Passthrough response
+    // ─── SSE streaming passthrough ──────────────────────────────────────────────
+    // When the upstream responds with text/event-stream (SSE), pipe the body
+    // through as a ReadableStream instead of buffering the entire response.
+    // This is required for Agent Copilot streaming chat completions.
+    const upstreamContentType = response.headers.get('content-type') || '';
+    if (upstreamContentType.includes('text/event-stream') && response.body) {
+      const streamHeaders = new Headers();
+      streamHeaders.set('content-type', 'text/event-stream');
+      streamHeaders.set('cache-control', 'no-cache');
+      streamHeaders.set('connection', 'keep-alive');
+      const xReqId = response.headers.get('x-request-id');
+      if (xReqId) streamHeaders.set('x-request-id', xReqId);
+
+      return new NextResponse(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: streamHeaders,
+      });
+    }
+
+    // ─── Non-streaming passthrough (existing behaviour) ─────────────────────────
     const responseBody = await response.arrayBuffer();
     const responseHeaders = new Headers();
 

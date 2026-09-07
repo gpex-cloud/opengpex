@@ -20,9 +20,10 @@
 import { EditorPlugin } from "@opengpex/editor/core/types";
 import { Key } from "lucide-react";
 import { AIGenerationDrawer } from "./components";
-import { AIBridgeSettings } from "./panels/settings";
+import { AIBridgeSettings } from "./panels/EndPointSettings";
 import { AI_BRIDGE_COMMANDS } from "./commands";
 import { AIBridgeIcon } from "./icon";
+import { AgentDockButton } from "./agent/AgentDockButton";
 
 import * as P from "./protocols";
 
@@ -62,6 +63,9 @@ export const plugin: EditorPlugin = {
     inputSource: "active-layer",
     cachedModels: {},
     generationHistory: [],
+    agents: [],
+    activeAgentId: null,
+    enableAgents: true,
   },
 
   // --- 5. Commands ---
@@ -76,6 +80,11 @@ export const plugin: EditorPlugin = {
       title: "AI Bridge Keys",
       icon: <Key size={12} />,
       order: 320,
+    },
+    {
+      slot: "DOCK_ACTIONS",
+      component: AgentDockButton,
+      order: 10,
     },
   ],
 };

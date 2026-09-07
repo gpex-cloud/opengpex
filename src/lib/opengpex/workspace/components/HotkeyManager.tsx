@@ -90,12 +90,16 @@ export default function HotkeyManager() {
       // 1. Avoid input fields (Avoid triggering when typing in inputs)
       // Exception: range inputs (sliders) are not text-entry — hotkeys must
       // still fire after dragging opacity/fill/feather sliders.
+      // Exception: modifier-key combos (Ctrl+K, ⌘K, etc.) are never "typing"
+      //   — they are intentional global actions even when an input is focused.
+      //   Without this, shortcuts like ⌘K (toggle agent chat) would be
+      //   silently swallowed while the user is focused on any text input.
       const target = e.target as HTMLElement;
-      if (
+      const isTextInput =
         (target.tagName === "INPUT" && (target as HTMLInputElement).type !== "range") ||
         target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      ) {
+        target.isContentEditable;
+      if (isTextInput && !e.ctrlKey && !e.metaKey) {
         return;
       }
 

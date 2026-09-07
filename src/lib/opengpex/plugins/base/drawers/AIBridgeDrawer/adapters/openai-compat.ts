@@ -34,7 +34,7 @@
  * own and layers its own quirks on top (e.g. Qwen adds negative_prompt / seed).
  */
 
-import type { AIEndpoint, AIModelInfo, ChatMessage } from './types';
+import type { AIEndpoint, AIModelInfo, ChatMessage, AgentToolDef, AgentToolCall, AgentMessage } from './types';
 import {
   joinUrl,
   proxyFetch,
@@ -47,6 +47,7 @@ import {
   endpointMismatchMessage,
 } from './transport';
 import { inferModality } from '../modality';
+import { streamAnthropicMessagesForAgent } from './anthropic-agent';
 
 // ─── Multimodal message parts ──────────────────────────────────────────────────
 
@@ -181,4 +182,222 @@ export async function fetchStandardModels(
       modality: inferModality(id),
     };
   });
+}
+
+// ─── Agent chat (non-streaming) ─────────────────────────────────────────────────
+
+export interface AgentChatOptions {
+  endpoint: AIEndpoint;
+  providerName: string;
+  model: string;
+  messages: AgentMessage[];
+  tools?: AgentToolDef[];
+  tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
+  signal?: AbortSignal;
+}
+
+export interface AgentChatResult {
+  content: string | null;
+  tool_calls: AgentToolCall[];
+  finish_reason: string;
+}
+
+/**
+ * Chat completion with tool calling support (non-streaming).
+ *
+ * Returns the full structured assistant response instead of just a string.
+ * Calling path: AgentDef → resolve endpoint → chatCompletionsForAgent()
+ * (bypasses ProviderDefinition.chat(), calls openai-compat directly)
+ */
+export async function chatCompletionsForAgent(
+  opts: AgentChatOptions,
+): Promise<AgentChatResult> {
+  const targetUrl = joinUrl(opts.endpoint.baseUrl, '/v1/chat/completions');
+  const body: Record<string, unknown> = {
+    model: opts.model,
+    messages: opts.messages,
+    stream: false,
+  };
+  if (opts.tools?.length) {
+    body.tools = opts.tools;
+    body.tool_choice = opts.tool_choice ?? 'auto';
+  }
+  const res = await proxyFetch({
+    targetUrl,
+    apiKey: opts.endpoint.apiKey,
+    method: 'POST',
+    body: JSON.stringify(body),
+    contentType: 'application/json',
+    signal: opts.signal,
+  });
+  if (!res.ok) {
+    await throwRequestError(res, {
+      endpoint: opts.endpoint,
+      providerName: opts.providerName,
+      action: 'Agent chat',
+    });
+  }
+  const json = await res.json();
+  const choice = json.choices?.[0];
+  const message = choice?.message ?? {};
+  return {
+    content: message.content ?? null,
+    tool_calls: message.tool_calls ?? [],
+    finish_reason: choice?.finish_reason ?? 'stop',
+  };
+}
+
+// ─── Agent chat (SSE streaming) ─────────────────────────────────────────────────
+
+export interface StreamAgentChatCallbacks {
+  /** Called for each text token as it arrives. */
+  onToken: (token: string) => void;
+  /** Called once when the stream finishes (includes accumulated tool_calls). */
+  onComplete: (result: AgentChatResult) => void;
+  /** Called on non-abort errors. */
+  onError: (error: Error) => void;
+}
+
+/**
+ * Streaming chat completion with tool calling support.
+ *
+ * Fires `onToken` per text delta for typewriter effect, then `onComplete` with
+ * the fully assembled result (including any tool_calls).
+ * Returns an AbortController — call `.abort()` to cancel mid-stream.
+ */
+export function streamChatCompletionsForAgent(
+  opts: AgentChatOptions,
+  callbacks: StreamAgentChatCallbacks,
+): AbortController {
+  // Anthropic Claude: use the NATIVE Messages API, not this OpenAI-compat
+  // path. The OpenAI-compat shim mangles tool_use/tool_result pairing and
+  // returns a 400. See adapters/anthropic-agent.ts.
+  if (opts.providerName === 'anthropic') {
+    return streamAnthropicMessagesForAgent(opts, callbacks);
+  }
+
+  const controller = new AbortController();
+
+  // Merge external signal with our own controller
+  const signal = opts.signal
+    ? AbortSignal.any([opts.signal, controller.signal])
+    : controller.signal;
+
+  (async () => {
+    try {
+      const targetUrl = joinUrl(opts.endpoint.baseUrl, '/v1/chat/completions');
+      const body: Record<string, unknown> = {
+        model: opts.model,
+        messages: opts.messages,
+        stream: true,
+      };
+      if (opts.tools?.length) {
+        body.tools = opts.tools;
+        body.tool_choice = opts.tool_choice ?? 'auto';
+      }
+
+      const res = await proxyFetch({
+        targetUrl,
+        apiKey: opts.endpoint.apiKey,
+        method: 'POST',
+        body: JSON.stringify(body),
+        contentType: 'application/json',
+        signal,
+      });
+
+      if (!res.ok) {
+        const info = await readErrorInfo(res);
+        throw new Error(`Agent chat failed (${info.status}): ${info.message}`);
+      }
+      if (!res.body) {
+        throw new Error('Response body is null — streaming not supported by proxy');
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let content = '';
+      const toolCalls: AgentToolCall[] = [];
+      let finishReason = 'stop';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process complete SSE lines
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';  // keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') continue;
+
+          let chunk: Record<string, unknown>;
+          try {
+            chunk = JSON.parse(data);
+          } catch {
+            continue;  // skip malformed chunks
+          }
+
+          const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
+          const delta = choices?.[0]?.delta as Record<string, unknown> | undefined;
+
+          if (delta?.content) {
+            const token = delta.content as string;
+            content += token;
+            callbacks.onToken(token);
+          }
+
+          // Accumulate tool_calls deltas (OpenAI streams them incrementally)
+          if (delta?.tool_calls) {
+            const deltaToolCalls = delta.tool_calls as Array<{
+              index: number;
+              id?: string;
+              type?: string;
+              function?: { name?: string; arguments?: string };
+            }>;
+            for (const dtc of deltaToolCalls) {
+              const idx = dtc.index;
+              if (!toolCalls[idx]) {
+                toolCalls[idx] = {
+                  id: dtc.id || '',
+                  type: 'function',
+                  function: {
+                    name: dtc.function?.name || '',
+                    arguments: dtc.function?.arguments || '',
+                  },
+                };
+              } else {
+                if (dtc.id) toolCalls[idx].id = dtc.id;
+                if (dtc.function?.name) {
+                  toolCalls[idx].function.name += dtc.function.name;
+                }
+                if (dtc.function?.arguments) {
+                  toolCalls[idx].function.arguments += dtc.function.arguments;
+                }
+              }
+            }
+          }
+
+          if (choices?.[0]?.finish_reason) {
+            finishReason = choices[0].finish_reason as string;
+          }
+        }
+      }
+
+      callbacks.onComplete({
+        content: content || null,
+        tool_calls: toolCalls,
+        finish_reason: finishReason,
+      });
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        callbacks.onError(err as Error);
+      }
+    }
+  })();
+
+  return controller;
 }

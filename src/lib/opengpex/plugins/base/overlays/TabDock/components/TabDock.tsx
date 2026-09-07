@@ -237,15 +237,12 @@ function useTabDockContext() {
 
 function BranchMenu({
   branches,
-  orientation,
   snap,
 }: {
   trunkId: string;
   branches: { frame: Frame; depth: number }[];
-  orientation: string;
   snap: string;
 }) {
-  const isHorizontal = orientation === "horizontal";
   const isBottom = snap?.startsWith("B") ?? true;
   const isRight = snap?.endsWith("R") ?? false;
   const { state, switchFrame, removeFrame } = useTabDockContext();
@@ -255,27 +252,19 @@ function BranchMenu({
     <motion.div
       initial={{
         opacity: 0,
-        y: isHorizontal ? (isBottom ? 10 : -10) : 0,
-        x: !isHorizontal ? (isRight ? 10 : -10) : 0,
+        y: isBottom ? 10 : -10,
         scale: 0.95,
       }}
       animate={{ opacity: 1, y: 0, x: 0, scale: 1 }}
       exit={{
         opacity: 0,
-        y: isHorizontal ? (isBottom ? 10 : -10) : 0,
-        x: !isHorizontal ? (isRight ? 10 : -10) : 0,
+        y: isBottom ? 10 : -10,
         scale: 0.95,
       }}
       className={`absolute z-[1100] flex flex-col pointer-events-none
- ${
-   isHorizontal
-     ? isBottom
-       ? `bottom-full mb-10 ${isRight ? "right-0" : "left-0"}`
-       : `top-full mt-10 ${isRight ? "right-0" : "left-0"}`
-     : isRight
-       ? `right-full mr-10 ${isBottom ? "bottom-0" : "top-0"}`
-       : `left-full ml-10 ${isBottom ? "bottom-0" : "top-0"}`
- }
+ ${isBottom
+        ? `bottom-full mb-10 ${isRight ? "right-0" : "left-0"}`
+        : `top-full mt-10 ${isRight ? "right-0" : "left-0"}`}
 `}
     >
       {/* 1. Real menu content (events enabled) */}
@@ -372,11 +361,7 @@ function BranchMenu({
       {/* 2. Bridge layer */}
       <div
         className={`absolute pointer-events-auto
- ${
-   isHorizontal
-     ? `w-12 h-10 ${isRight ? "right-0" : "left-0"} ${isBottom ? "top-full" : "bottom-full"}`
-     : `w-10 h-12 ${isBottom ? "bottom-0" : "top-0"} ${isRight ? "left-full" : "right-full"}`
- }
+ w-12 h-10 ${isRight ? "right-0" : "left-0"} ${isBottom ? "top-full" : "bottom-full"}
 `}
       />
     </motion.div>
@@ -388,17 +373,13 @@ function BranchMenu({
 function FrameThumbnail({
   frame,
   isActive,
-  isHorizontal,
   isBottom,
-  isRight,
   isPhysicalExpanded,
   isDragging,
 }: {
   frame: Frame;
   isActive: boolean;
-  isHorizontal: boolean;
   isBottom: boolean;
-  isRight: boolean;
   isPhysicalExpanded: boolean;
   isDragging: boolean;
 }) {
@@ -442,7 +423,6 @@ function FrameThumbnail({
           <BranchMenu
             trunkId={frame.id}
             branches={branches}
-            orientation={state.config.orientation}
             snap={state.config.snap}
           />
         )}
@@ -456,19 +436,17 @@ function FrameThumbnail({
         }}
         className={`relative group shrink-0 w-12 h-12 cursor-pointer rounded-2xl ${shadowClass}`}
         style={{
-          originX: isHorizontal ? 0.5 : isRight ? 1 : 0,
-          originY: isHorizontal ? (isBottom ? 1 : 0) : 0.5,
+          originX: 0.5,
+          originY: isBottom ? 1 : 0,
         }}
         animate={{
           scale: state.hoveredTrunkId === frame.id ? 1.6 : 1,
           marginLeft:
-            state.hoveredTrunkId === frame.id && isHorizontal ? 18 : 0,
+            state.hoveredTrunkId === frame.id ? 18 : 0,
           marginRight:
-            state.hoveredTrunkId === frame.id && isHorizontal ? 18 : 0,
-          marginTop:
-            state.hoveredTrunkId === frame.id && !isHorizontal ? 18 : 0,
-          marginBottom:
-            state.hoveredTrunkId === frame.id && !isHorizontal ? 18 : 0,
+            state.hoveredTrunkId === frame.id ? 18 : 0,
+          marginTop: 0,
+          marginBottom: 0,
           zIndex: state.hoveredTrunkId === frame.id ? 1060 : 1,
         }}
       >
@@ -516,25 +494,26 @@ function FrameThumbnail({
 
 function DockGlobalActions() {
   const { state, openSettings } = useTabDockContext();
-  const isHorizontal = state.config.orientation === "horizontal";
+  const showSettingsBtn = state.config.showSettingsButton ?? true;
 
   return (
     <div
-      className={`flex items-center gap-2 transition-all duration-500 
- ${isHorizontal ? "flex-row" : "flex-col"}
+      className={`flex items-center gap-2 flex-row transition-all duration-500 
  ${state.showFull ? "opacity-100 scale-100" : "opacity-0 scale-95 overflow-hidden"} 
- ${isHorizontal ? (state.showFull ? "w-auto" : "w-0") : state.showFull ? "h-auto" : "h-0"}`}
+ ${state.showFull ? "w-auto" : "w-0"}`}
     >
+      {showSettingsBtn && (
+        <ActionButton
+          onClick={() => openSettings()}
+          icon={<Settings size={14} />}
+          tooltip="Viewport Settings"
+          size="sm"
+          variant="glass"
+        />
+      )}
       <PluginSlot
         name="DOCK_ACTIONS"
-        className={`flex gap-2 ${isHorizontal ? "flex-row" : "flex-col"}`}
-      />
-      <ActionButton
-        onClick={() => openSettings()}
-        icon={<Settings size={14} />}
-        tooltip="Viewport Settings"
-        size="sm"
-        variant="glass"
+        className="flex gap-2 flex-row"
       />
     </div>
   );
@@ -551,7 +530,6 @@ export function TabDockComponent() {
   const containerRef = useRef<HTMLDivElement>(null);
   const dragControls = useDragControls();
 
-  const isHorizontal = state.config.orientation === "horizontal";
   const isBottom = state.config.snap?.startsWith("B") ?? true;
   const isRight = state.config.snap?.endsWith("R") ?? false;
   const showMetrics = state.config.showMetricsHud ?? false;
@@ -585,13 +563,7 @@ export function TabDockComponent() {
             ...state.initialPos,
             opacity: 1,
             scale: 1,
-            padding: state.showFull
-              ? isHorizontal
-                ? "6px 16px"
-                : "16px 6px"
-              : isHorizontal
-                ? "4px 8px"
-                : "8px 4px",
+            padding: state.showFull ? "6px 16px" : "4px 8px",
             gap: state.showFull ? "12px" : "0px",
           }}
           transition={{
@@ -608,7 +580,7 @@ export function TabDockComponent() {
             scale: { duration: 0.3 },
           }}
           className={`z-[1000] backdrop-blur-3xl border border-[var(--border-subtle)] rounded-[30px] shadow-[0_20px_50px_rgba(0,0,0,0.3)] flex items-center select-none pointer-events-auto bg-[var(--bg-panel)]/80 
- ${isHorizontal ? (isRight ? "flex-row-reverse" : "flex-row") : isBottom ? "flex-col-reverse" : "flex-col"}
+ ${isRight ? "flex-row-reverse" : "flex-row"}
 `}
           style={{ position: "absolute" }}
         >
@@ -619,23 +591,21 @@ export function TabDockComponent() {
             <Grip size={14} />
           </div>
           <div
-            className={`bg-[var(--border-subtle)] transition-opacity ${state.showFull ? "opacity-100" : "opacity-0"} ${isHorizontal ? "w-[1px] h-6 mx-1" : "w-6 h-[1px] my-1"}`}
+            className={`bg-[var(--border-subtle)] transition-opacity ${state.showFull ? "opacity-100" : "opacity-0"} w-[1px] h-6 mx-1`}
           />
 
           <Reorder.Group
-            axis={isHorizontal ? "x" : "y"}
+            axis="x"
             values={state.trunkFrames}
             onReorder={handleReorder}
-            className={`flex items-center gap-2 px-1 ${isHorizontal ? (isRight ? "flex-row-reverse" : "flex-row") : isBottom ? "flex-col-reverse" : "flex-col"}`}
+            className={`flex items-center gap-2 px-1 ${isRight ? "flex-row-reverse" : "flex-row"}`}
           >
             {state.trunkFrames.map((frame) => (
               <FrameThumbnail
                 key={frame.id}
                 frame={frame}
                 isActive={frame.id === state.activeTrunkId}
-                isHorizontal={isHorizontal}
                 isBottom={isBottom}
-                isRight={isRight}
                 isPhysicalExpanded={state.isPhysicalExpanded}
                 isDragging={state.isDragging}
               />
@@ -646,12 +616,12 @@ export function TabDockComponent() {
           {showMetrics && (
             <>
               <div
-                className={`bg-[var(--bg-stage)] transition-opacity ${state.showFull ? "opacity-100" : "opacity-0"} ${isHorizontal ? "w-[1px] h-6 mx-1" : "w-6 h-[1px] my-1"}`}
+                className={`bg-[var(--bg-stage)] transition-opacity ${state.showFull ? "opacity-100" : "opacity-0"} w-[1px] h-6 mx-1`}
               />
               <div
                 className={`transition-all duration-500
                   ${state.showFull ? "opacity-100 scale-100" : "opacity-0 scale-95 overflow-hidden"}
-                  ${isHorizontal ? (state.showFull ? "w-auto" : "w-0") : state.showFull ? "h-auto" : "h-0"}`}
+                  ${state.showFull ? "w-auto" : "w-0"}`}
               >
                 <DockMetricsHUD />
               </div>
@@ -659,7 +629,7 @@ export function TabDockComponent() {
           )}
 
           <div
-            className={`bg-[var(--bg-stage)] transition-opacity ${state.showFull ? "opacity-100" : "opacity-0"} ${isHorizontal ? "w-[1px] h-6 mx-1" : "w-6 h-[1px] my-1"}`}
+            className={`bg-[var(--bg-stage)] transition-opacity ${state.showFull ? "opacity-100" : "opacity-0"} w-[1px] h-6 mx-1`}
           />
           <DockGlobalActions />
         </motion.div>

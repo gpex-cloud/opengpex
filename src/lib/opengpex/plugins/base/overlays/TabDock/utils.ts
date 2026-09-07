@@ -43,23 +43,14 @@ export const calculateDockPosition = (config: TabDockConfig) => {
   
   const OFF_L = 'var(--v-offset-fixed-left)';
   const OFF_R = 'var(--v-offset-fixed-right)';
-  const OFF_T = 'var(--v-offset-top)';
   const OFF_B = 'var(--v-offset-bottom)';
 
   const LEFT = `calc(${OFF_L} + ${MARGIN}px)`;
   const RIGHT = `calc(${OFF_R} + ${MARGIN}px)`;
-  const TOP = `calc(${OFF_T} + ${MARGIN}px)`;
   const BOTTOM = `calc(${OFF_B} + ${MARGIN}px)`;
   const CENTER_X = `calc(${OFF_L} + (100% - ${OFF_L} - ${OFF_R}) / 2)`;
-  const CENTER_Y = `calc(${OFF_T} + (100% - ${OFF_T} - ${OFF_B}) / 2)`;
   
   const points: Record<string, DockPosition> = {
-    'TL': { left: LEFT, top: TOP, right: 'auto', bottom: 'auto', x: 0, y: 0 },
-    'TC': { left: CENTER_X, top: TOP, right: 'auto', bottom: 'auto', x: '-50%', y: 0 },
-    'TR': { left: 'auto', top: TOP, right: RIGHT, bottom: 'auto', x: 0, y: 0 },
-    'ML': { left: LEFT, top: CENTER_Y, right: 'auto', bottom: 'auto', x: 0, y: '-50%' },
-    'MC': { left: CENTER_X, top: CENTER_Y, right: 'auto', bottom: 'auto', x: '-50%', y: '-50%' },
-    'MR': { left: 'auto', top: CENTER_Y, right: RIGHT, bottom: 'auto', x: 0, y: '-50%' },
     'BL': { left: LEFT, top: 'auto', right: 'auto', bottom: BOTTOM, x: 0, y: 0 },
     'BC': { left: CENTER_X, top: 'auto', right: 'auto', bottom: BOTTOM, x: '-50%', y: 0 },
     'BR': { left: 'auto', top: 'auto', right: RIGHT, bottom: BOTTOM, x: 0, y: 0 },

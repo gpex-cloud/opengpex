@@ -36,6 +36,7 @@ export const CMD_GENERATE = 'cmd.generate';
 export const CMD_DESCRIBE = 'cmd.describe';
 export const CMD_OPEN_SETTINGS = 'cmd.open_settings';
 export const CMD_FETCH_MODELS = 'cmd.fetch_models';
+export const CMD_TOGGLE_AGENT_CHAT = 'cmd.toggle_agent_chat';
 
 /**
  * @deprecated Use PluginService.isBusy() instead.
@@ -59,6 +60,9 @@ import type {
   ImageGenRequest as ImageGenRequestType,
   ImageEditRequest as ImageEditRequestType,
   ChatMessage as ChatMessageType,
+  AgentToolDef as AgentToolDefType,
+  AgentToolCall as AgentToolCallType,
+  AgentMessage as AgentMessageType,
 } from './adapters/types';
 import type {
   ModelModality as ModelModalityType,
@@ -82,6 +86,12 @@ export type ChatMessage = ChatMessageType;
 export type ModelModality = ModelModalityType;
 /** Structured capability payload some services expose */
 export type ModelCapabilityHints = ModelCapabilityHintsType;
+/** Tool definition sent in a chat-completion request (OpenAI function calling format) */
+export type AgentToolDef = AgentToolDefType;
+/** A tool call returned by the assistant */
+export type AgentToolCall = AgentToolCallType;
+/** Agent conversation message — superset of ChatMessage */
+export type AgentMessage = AgentMessageType;
 
 export {
   PROVIDER_REGISTRY,
@@ -116,6 +126,23 @@ export const AI_MODE_META: Record<AIMode, { label: string }> = {
 /** Which model slot a task reads from */
 export type ModelSlot = 'image' | 'text' | 'multi';
 
+// ─── Agent Definition ───────────────────────────────────────────────────────────
+
+/** Agent response style preset — controls verbosity, not capabilities. */
+export type AgentBehaviorPreset = 'auto' | 'concise' | 'detailed';
+
+/** An Agent configuration: which endpoint + model to use for conversation. */
+export interface AgentDef {
+  id: string;
+  name: string;
+  /** References config.endpoints[].id — carries baseUrl + apiKey + provider */
+  endpointId: string;
+  /** Model ID selected from the endpoint's cachedModels at configuration time */
+  model: string;
+  /** Behavior preset — controls response style, not capabilities. Default 'auto'. */
+  behaviorPreset?: AgentBehaviorPreset;
+}
+
 // ─── Plugin Config (persisted via pluginConfig) ────────────────────────────────
 
 export interface AIBridgeConfig {
@@ -136,6 +163,40 @@ export interface AIBridgeConfig {
   cachedModels: Record<string, AIModelInfo[]>;
   /** Generation history (most recent last) */
   generationHistory: GenerationRecord[];
+
+  // ─── Agent (Phase 1) ───
+  /** Whether the Agent dock button & chat panel are enabled */
+  enableAgents?: boolean;
+  /** Configured agents (each references an endpoint + model) */
+  agents: AgentDef[];
+  /** Currently active agent for conversation (null = none) */
+  activeAgentId: string | null;
+  /** Global agent chat sessions (persisted to IndexedDB via pluginConfig).
+   *  Sessions are agent-independent — switching agents mid-conversation is allowed. */
+  agentChatStore?: AgentChatStore;
+}
+
+// ─── Agent Knowledge (Phase 1.2) ───────────────────────────────────────────────
+
+/** Cloud base URL — reads from env, falls back to production. */
+const GPEX_CLOUD_URL = process.env.NEXT_PUBLIC_GPEX_CLOUD_URL || 'https://gpex.cloud';
+
+/** Documentation search API endpoint used by the Agent's `search_docs` tool. */
+export const GPEX_DOCS_API_URL = `${GPEX_CLOUD_URL}/api/docs`;
+
+/** A single conversation session (agent-independent). */
+export interface AgentChatSession {
+  id: string;
+  /** Auto-generated from first user message. */
+  title: string;
+  createdAt: number;
+  messages: import('./adapters/types').AgentMessage[];
+}
+
+/** Global chat storage: all sessions + which one is active. */
+export interface AgentChatStore {
+  sessions: AgentChatSession[];
+  activeSessionId: string | null;
 }
 
 // ─── Generation History Record ─────────────────────────────────────────────────

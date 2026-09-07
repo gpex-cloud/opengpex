@@ -21,7 +21,7 @@
 import React, { useState, useRef } from "react";
 import { usePluginSelfConfig } from "@opengpex/editor/core/context";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
-import { Key, Link, Plus, Trash2, CheckCircle2, AlertCircle, Eye, EyeOff, Boxes, ChevronDown } from "lucide-react";
+import { Key, Link, Plus, Trash2, CheckCircle2, AlertCircle, Eye, EyeOff, Boxes, ChevronDown, Bot } from "lucide-react";
 import {
   AIBridgeConfig,
   AIEndpoint,
@@ -30,6 +30,15 @@ import {
   getProvider,
   validateBaseUrl,
 } from "../protocols";
+import { AgentSettings } from "./AgentSettings";
+
+// ─── Agent-tab navigation flag ──────────────────────────────────────────────
+// Mutable module-level flag: external callers set it to true via
+// requestAgentsTab(), and the component consumes it on the next render.
+// Avoids event-timing issues since this contribution stays mounted.
+let _pendingAgentsTab = false;
+export function requestAgentsTab() { _pendingAgentsTab = true; }
+function consumeAgentsTab() { const v = _pendingAgentsTab; _pendingAgentsTab = false; return v; }
 
 /**
  * AIBridgeSettings — endpoint asset management.
@@ -41,16 +50,22 @@ import {
  */
 export function AIBridgeSettings() {
   const [config, setConfig] = usePluginSelfConfig<AIBridgeConfig>();
+  const [activeTab, setActiveTab] = useState<'endpoints' | 'agents'>('endpoints');
+
+  // If an external caller requested the Agents tab (e.g. AgentChatPanel's
+  // settings button), consume the flag and switch. Read during render is safe
+  // because consumeAgentsTab() is a one-shot read-and-clear with no side effects
+  // beyond the subsequent setState.
+  if (consumeAgentsTab() && activeTab !== 'agents') {
+    setActiveTab('agents');
+  }
+
   const [urlWarnings, setUrlWarnings] = useState<Record<string, string | null>>({});
   const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({});
   // Just-added endpoint: scrolls its card into view
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const endpoints: AIEndpoint[] = config.endpoints || [];
-
-  const toggleKeyVisibility = (id: string) => {
-    setVisibleKeys((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
 
   const updateEndpoint = (id: string, patch: Partial<AIEndpoint>) => {
     setConfig({
@@ -113,7 +128,21 @@ export function AIBridgeSettings() {
     const next = endpoints.filter((e) => e.id !== id);
     let nextActiveId = config.activeEndpointId;
     if (nextActiveId === id && next.length > 0) nextActiveId = next[0].id;
-    setConfig({ endpoints: next, activeEndpointId: nextActiveId });
+
+    // ─── Cascade: clean up agents referencing this endpoint ──
+    const agents = (config.agents || []);
+    const cleanedAgents = agents.filter((a) => a.endpointId !== id);
+    let nextActiveAgentId = config.activeAgentId ?? null;
+    if (nextActiveAgentId && !cleanedAgents.find((a) => a.id === nextActiveAgentId)) {
+      nextActiveAgentId = cleanedAgents.length > 0 ? cleanedAgents[0].id : null;
+    }
+
+    setConfig({
+      endpoints: next,
+      activeEndpointId: nextActiveId,
+      agents: cleanedAgents,
+      activeAgentId: nextActiveAgentId,
+    });
     setUrlWarnings((prev) => {
       const copy = { ...prev };
       delete copy[id];
@@ -131,13 +160,95 @@ export function AIBridgeSettings() {
 
 
   return (
+    <div className="flex flex-col gap-4">
+      {/* ─── Segment Control (Pill Toggle) ────────────────────── */}
+      <div className="flex gap-0.5 p-0.5 rounded-lg bg-[var(--bg-stage)] border border-[var(--border-subtle)]">
+        {([
+          { value: 'endpoints' as const, label: 'Endpoints', icon: <Key size={12} /> },
+          { value: 'agents' as const, label: 'Agents', icon: <Bot size={12} /> },
+        ]).map((tab) => {
+          const isActive = activeTab === tab.value;
+          const count = tab.value === 'agents' ? (config.agents || []).length : 0;
+          return (
+            <button
+              key={tab.value}
+              onClick={() => setActiveTab(tab.value)}
+              className={`flex-1 relative flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all duration-150 ${
+                isActive
+                  ? 'bg-[var(--bg-panel)] text-[var(--text-main)] shadow-sm'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+              }`}
+            >
+              {tab.icon}
+              {tab.label}
+              {tab.value === 'agents' && count > 0 && (
+                <span className="text-[8px] opacity-60">({count})</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ═══ Endpoints Tab ═══ */}
+      {activeTab === 'endpoints' && (
+        <EndpointsPanel
+          config={config}
+          setConfig={setConfig}
+          endpoints={endpoints}
+          urlWarnings={urlWarnings}
+          visibleKeys={visibleKeys}
+          setVisibleKeys={setVisibleKeys}
+          cardRefs={cardRefs}
+          updateEndpoint={updateEndpoint}
+          handleBaseUrlChange={handleBaseUrlChange}
+          addEndpoint={addEndpoint}
+          changeProvider={changeProvider}
+          removeEndpoint={removeEndpoint}
+          providerOptions={providerOptions}
+        />
+      )}
+
+      {/* ═══ Agents Tab ═══ */}
+      {activeTab === 'agents' && (
+        <AgentSettings config={config} setConfig={setConfig} />
+      )}
+    </div>
+  );
+}
+
+// ─── Endpoints Panel (extracted for tab) ────────────────────────────────────────
+
+function EndpointsPanel({
+  config, setConfig, endpoints, urlWarnings,
+  visibleKeys, setVisibleKeys, cardRefs,
+  updateEndpoint, handleBaseUrlChange, addEndpoint, changeProvider,
+  removeEndpoint, providerOptions,
+}: {
+  config: AIBridgeConfig;
+  setConfig: (patch: Partial<AIBridgeConfig>) => void;
+  endpoints: AIEndpoint[];
+  urlWarnings: Record<string, string | null>;
+  visibleKeys: Record<string, boolean>;
+  setVisibleKeys: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  cardRefs: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
+  updateEndpoint: (id: string, patch: Partial<AIEndpoint>) => void;
+  handleBaseUrlChange: (id: string, rawUrl: string) => void;
+  addEndpoint: (providerKey: string) => void;
+  changeProvider: (id: string, providerKey: string) => void;
+  removeEndpoint: (id: string) => void;
+  providerOptions: Array<{ label: string; value: string }>;
+}) {
+  const toggleKeyVisibility = (id: string) => {
+    setVisibleKeys((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between pl-1">
           <h5 className="text-[10.5px] font-black text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-1.5">
             <Key size={11} /> AI Endpoints
           </h5>
-          {/* Add = pick which provider the new endpoint belongs to */}
           <ActionDropdown
             options={providerOptions}
             onSelect={addEndpoint}
@@ -162,8 +273,6 @@ export function AIBridgeSettings() {
               <div
                 key={endpoint.id}
                 ref={(el) => { cardRefs.current[endpoint.id] = el; }}
-                // Active state is conveyed by the border only — the background
-                // stays uniform so the list reads as one consistent surface.
                 className={`flex flex-col gap-2.5 p-2.5 rounded-xl border bg-[var(--bg-stage)] transition-all ${
                   isActive ? "border-amber-500/50" : "border-[var(--border-subtle)]"
                 }`}

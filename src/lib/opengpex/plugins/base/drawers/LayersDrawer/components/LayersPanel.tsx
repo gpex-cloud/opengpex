@@ -20,9 +20,21 @@
 "use client";
 
 import React, { useRef, useMemo, useState } from "react";
-import { Layers, Eye, ScanEye, CirclePlus, ChevronRight, ChevronDown, Merge, FolderPlus } from "lucide-react";
+import {
+  Layers,
+  Eye,
+  ScanEye,
+  CirclePlus,
+  ChevronRight,
+  ChevronDown,
+  Merge,
+  FolderPlus,
+} from "lucide-react";
 import { Reorder, motion, AnimatePresence } from "framer-motion";
-import { usePluginCommands, usePluginSignals } from "@opengpex/editor/core/context";
+import {
+  usePluginCommands,
+  usePluginSignals,
+} from "@opengpex/editor/core/context";
 import { Layer, Frame } from "@opengpex/editor/core/types";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
@@ -31,7 +43,10 @@ import { MergeVisibleIcon } from "@opengpex/editor/icons";
 import { LayerItem } from "./LayerItem";
 import { GroupHeader } from "./GroupHeader";
 import { LayerPropsBar } from "./LayerPropsBar";
-import type { LayersDrawerCommandsMap, LayersDrawerSignalsMap } from "../commands.d";
+import type {
+  LayersDrawerCommandsMap,
+  LayersDrawerSignalsMap,
+} from "../commands.d";
 
 interface LayersPanelProps {
   activeFrame: Frame;
@@ -40,9 +55,19 @@ interface LayersPanelProps {
   onViewSwitch?: (view: string) => void;
 }
 
-export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onViewSwitch }: LayersPanelProps) {
-  const { reorder, mergeVisible, toggleAll, isolateSelection, addBlankLayerCmd } =
-    useLayerCommands();
+export function LayersPanel({
+  activeFrame,
+  activeLayerId,
+  activeLayerHostId,
+  onViewSwitch,
+}: LayersPanelProps) {
+  const {
+    reorder,
+    mergeVisible,
+    toggleAll,
+    isolateSelection,
+    addBlankLayerCmd,
+  } = useLayerCommands();
 
   const { createGroupCmd } = usePluginCommands<LayersDrawerCommandsMap>();
 
@@ -51,8 +76,11 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
 
   // ─── Union merge multi-selection (encapsulated in hook) ───────────────────────
   const {
-    unionSelection, unionStatus, canUnionMerge,
-    toggleUnionMark, handleUnionMerge,
+    unionSelection,
+    unionStatus,
+    canUnionMerge,
+    toggleUnionMark,
+    handleUnionMerge,
   } = useUnionMerge(activeFrame);
 
   // Read showSubLayers signal once in parent — pass value to children
@@ -83,16 +111,19 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
 
   // Non-group host layers for count display (exclude group layers from user-facing count)
   const nonGroupHostLayers = useMemo(
-    () => hostLayers.filter(l => l.type !== 'group'),
+    () => hostLayers.filter((l) => l.type !== "group"),
     [hostLayers],
   );
 
   // Top-level display items: host layers that are NOT grouped (no groupId) — includes group layers themselves
   const topLevelLayers = useMemo(
-    () => hostLayers.filter(l => !l.groupId),
+    () => hostLayers.filter((l) => !l.groupId),
     [hostLayers],
   );
-  const displayLayers = useMemo(() => [...topLevelLayers].reverse(), [topLevelLayers]);
+  const displayLayers = useMemo(
+    () => [...topLevelLayers].reverse(),
+    [topLevelLayers],
+  );
 
   // Group membership map: groupId → child layers (non-host sub-layers excluded)
   const groupChildrenMap = useMemo(() => {
@@ -109,9 +140,10 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
 
   // All group layers — used for "Move to Group" menu options
   const availableGroups = useMemo(
-    () => hostLayers
-      .filter(l => l.type === 'group')
-      .map(l => ({ id: l.id, name: l.name })),
+    () =>
+      hostLayers
+        .filter((l) => l.type === "group")
+        .map((l) => ({ id: l.id, name: l.name })),
     [hostLayers],
   );
 
@@ -125,7 +157,9 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
   // Pre-compute child layers map for all host layers
   const childLayersMap = useMemo(() => {
     const map = new Map<string, Layer[]>();
-    const allLayers = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]);
+    const allLayers = activeFrame.layers.order.map(
+      (id) => activeFrame.layers.byId[id],
+    );
     for (const layer of allLayers) {
       if (layer.hostId) {
         const existing = map.get(layer.hostId);
@@ -145,7 +179,7 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
     const fullHostOrder: Layer[] = [];
     for (const layer of [...newDisplayOrder].reverse()) {
       fullHostOrder.push(layer);
-      if (layer.type === 'group') {
+      if (layer.type === "group") {
         const children = groupChildrenMap.get(layer.id);
         if (children) fullHostOrder.push(...children);
       }
@@ -155,13 +189,16 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1 overflow-hidden">
-      <motion.div layout="position" className="flex items-center justify-between shrink-0">
+      <motion.div
+        layout="position"
+        className="flex items-center justify-between shrink-0"
+      >
         <div className="flex items-center gap-2">
           <Layers size={12} className="text-indigo-600 dark:text-indigo-400" />
           <ActionDropdown
             options={[
-              { value: 'layers', label: 'Layers' },
-              { value: 'channels', label: 'Channels' },
+              { value: "layers", label: "Layers" },
+              { value: "channels", label: "Channels" },
             ]}
             onSelect={(val) => onViewSwitch?.(val)}
             trigger={(isOpen) => (
@@ -174,7 +211,7 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
                 </span>
                 <ChevronDown
                   size={10}
-                  className={`text-[var(--text-muted)] transition-transform duration-200 group-hover ${isOpen ? 'rotate-180' : ''}`}
+                  className={`text-[var(--text-muted)] transition-transform duration-200 group-hover ${isOpen ? "rotate-180" : ""}`}
                 />
               </div>
             )}
@@ -233,17 +270,22 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
               handleUnionMerge();
             }}
             icon={<Merge size={12} className="rotate-180" />}
-            tooltip={canUnionMerge ? `Union Merge (${unionSelection.length})` : "Union Merge"}
+            tooltip={
+              canUnionMerge
+                ? `Union Merge (${unionSelection.length})`
+                : "Union Merge"
+            }
             variant="glass"
             size="sm"
             disabled={!canUnionMerge}
-            className={canUnionMerge
-              ? unionStatus === 'green'
-                ? "text-emerald-400 hover:text-emerald-300"
-                : unionStatus === 'amber'
-                  ? "text-amber-400 hover:text-amber-300"
-                  : "text-rose-400 hover:text-rose-300"
-              : "text-[var(--text-muted)] opacity-40 cursor-not-allowed"
+            className={
+              canUnionMerge
+                ? unionStatus === "green"
+                  ? "text-emerald-400 hover:text-emerald-300"
+                  : unionStatus === "amber"
+                    ? "text-amber-400 hover:text-amber-300"
+                    : "text-rose-400 hover:text-rose-300"
+                : "text-[var(--text-muted)] opacity-40 cursor-not-allowed"
             }
           />
           <ActionButton
@@ -263,7 +305,7 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
       <div className="flex flex-col gap-0">
         <div
           onScroll={handleScroll}
-          className="flex flex-col min-h-[200px] max-h-[396px] overflow-y-auto px-1 pb-2 custom-scrollbar [mask-image:linear-gradient(to_bottom,transparent,black_8px,black_calc(100%-8px),transparent)]"
+          className="flex flex-col min-h-[200px] max-h-[396px] overflow-y-auto px-1 pb-1 custom-scrollbar [mask-image:linear-gradient(to_bottom,transparent,black_4px,black_calc(100%-4px),transparent)]"
         >
           <div
             className={`pt-1 flex flex-col gap-0.5 ${isScrolling ? "pointer-events-none" : ""}`}
@@ -277,109 +319,132 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
               </div>
             ) : (
               <>
-                {nonGroupHostLayers.length < 5 &&
-                  Array.from({ length: 5 - nonGroupHostLayers.length }).map((_, i) => (
-                    <div
-                      key={`placeholder-${i}`}
-                      className="h-[32px] rounded-lg border border-dashed border-[var(--border-subtle)] bg-transparent flex items-center px-2 gap-2 transition-colors shrink-0"
-                    >
-                      <div className="w-[24px] h-[24px] rounded-md border border-dashed border-[var(--border-subtle)] bg-transparent shrink-0 flex items-center justify-center">
-                        <div className="w-1 h-1 rounded-full bg-[var(--border-light)] " />
+                {nonGroupHostLayers.length < 6 &&
+                  Array.from({ length: 6 - nonGroupHostLayers.length }).map(
+                    (_, i) => (
+                      <div
+                        key={`placeholder-${i}`}
+                        className="h-[32px] rounded-lg border border-dashed border-[var(--border-subtle)] bg-transparent flex items-center px-2 gap-2 transition-colors shrink-0"
+                      >
+                        <div className="w-[24px] h-[24px] rounded-md border border-dashed border-[var(--border-subtle)] bg-transparent shrink-0 flex items-center justify-center">
+                          <div className="w-1 h-1 rounded-full bg-[var(--border-light)] " />
+                        </div>
+                        <div className="flex-1 h-1.5 w-16 bg-[var(--border-light)] rounded-full" />
                       </div>
-                      <div className="flex-1 h-1.5 w-16 bg-[var(--border-light)] rounded-full" />
-                    </div>
-                  ))}
+                    ),
+                  )}
 
-                    <Reorder.Group
-                      axis="y"
-                      values={displayLayers}
-                      onReorder={handleReorder}
-                      className="flex flex-col gap-0.5"
-                    >
-                      {displayLayers.map(layer => {
-                        // ── Group layer: render GroupHeader + indented children ──
-                        if (layer.type === 'group') {
-                          const groupChildren = groupChildrenMap.get(layer.id) || emptyChildLayers;
-                          const isCollapsed = layer.collapsed ?? false;
-                          const hasActiveChild = groupChildren.some(
-                            cl => cl.id === activeLayerId || activeLayerHostId === cl.id
-                          );
-                          return (
-                            <Reorder.Item
-                              key={layer.id}
-                              value={layer}
-                              className="list-none"
-                              transition={{ layout: { duration: 0 } }}
-                            >
-                              <GroupHeader
-                                group={layer}
-                                childCount={groupChildren.length}
-                                activeFrameId={activeFrame.id}
-                                isActive={layer.id === activeLayerId}
-                                hasActiveChild={hasActiveChild}
-                              />
-                              {/* Render children when expanded — animate height for smooth collapse */}
-                              <AnimatePresence initial={false}>
-                                {!isCollapsed && groupChildren.length > 0 && (
-                                  <motion.div
-                                    initial={{ height: 0, opacity: 0 }}
-                                    animate={{ height: "auto", opacity: 1 }}
-                                    exit={{ height: 0, opacity: 0 }}
-                                    transition={{ duration: 0.15, ease: "easeInOut" }}
-                                    className="overflow-y-hidden overflow-x-visible"
-                                  >
-                                    <div className="pl-1.5 mt-0.5 pb-0.5 pr-0.5 flex flex-col gap-0.5 border-l border-amber-500/20 ml-1.5">
-                                      {[...groupChildren].reverse().map(child => (
-                                        <LayerItem
-                                          key={child.id}
-                                          layerId={child.id}
-                                          layer={child}
-                                          index={hostIndexMap.get(child.id) ?? 0}
-                                          activeFrameId={activeFrame.id}
-                                          canvasSize={activeFrame.canvas}
-                                          isActive={child.id === activeLayerId || activeLayerHostId === child.id}
-                                          canDelete={hostLayers.length > 1}
-                                          isScrolling={isScrolling}
-                                          childLayers={childLayersMap.get(child.id) || emptyChildLayers}
-                                          showSubLayers={showSubLayers}
-                                          isMarked={unionSelection.includes(child.id)}
-                                          onToggleMarking={toggleUnionMark}
-                                          markedColor={unionStatus}
-                                          availableGroups={availableGroups.filter(g => g.id !== layer.id)}
-                                          isGroupChild
-                                          currentGroupName={layer.name}
-                                        />
-                                      ))}
-                                    </div>
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </Reorder.Item>
-                          );
-                        }
-
-                        // ── Regular (ungrouped) layer ──
-                        return (
-                          <LayerItem
-                            key={layer.id}
-                            layerId={layer.id}
-                            layer={layer}
-                            index={hostIndexMap.get(layer.id) ?? 0}
+                <Reorder.Group
+                  axis="y"
+                  values={displayLayers}
+                  onReorder={handleReorder}
+                  className="flex flex-col gap-0.5"
+                >
+                  {displayLayers.map((layer) => {
+                    // ── Group layer: render GroupHeader + indented children ──
+                    if (layer.type === "group") {
+                      const groupChildren =
+                        groupChildrenMap.get(layer.id) || emptyChildLayers;
+                      const isCollapsed = layer.collapsed ?? false;
+                      const hasActiveChild = groupChildren.some(
+                        (cl) =>
+                          cl.id === activeLayerId ||
+                          activeLayerHostId === cl.id,
+                      );
+                      return (
+                        <Reorder.Item
+                          key={layer.id}
+                          value={layer}
+                          className="list-none"
+                          transition={{ layout: { duration: 0 } }}
+                        >
+                          <GroupHeader
+                            group={layer}
+                            childCount={groupChildren.length}
                             activeFrameId={activeFrame.id}
-                            canvasSize={activeFrame.canvas}
-                            isActive={layer.id === activeLayerId || activeLayerHostId === layer.id}
-                            canDelete={hostLayers.length > 1}
-                            isScrolling={isScrolling}
-                            childLayers={childLayersMap.get(layer.id) || emptyChildLayers}
-                            showSubLayers={showSubLayers}
-                            isMarked={unionSelection.includes(layer.id)}
-                            onToggleMarking={toggleUnionMark}
-                            markedColor={unionStatus}
-                            availableGroups={availableGroups}
+                            isActive={layer.id === activeLayerId}
+                            hasActiveChild={hasActiveChild}
                           />
-                        );
-                      })}
-                    </Reorder.Group>
+                          {/* Render children when expanded — animate height for smooth collapse */}
+                          <AnimatePresence initial={false}>
+                            {!isCollapsed && groupChildren.length > 0 && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{
+                                  duration: 0.15,
+                                  ease: "easeInOut",
+                                }}
+                                className="overflow-y-hidden overflow-x-visible"
+                              >
+                                <div className="pl-1.5 mt-0.5 pb-0.5 pr-0.5 flex flex-col gap-0.5 border-l border-amber-500/20 ml-1.5">
+                                  {[...groupChildren].reverse().map((child) => (
+                                    <LayerItem
+                                      key={child.id}
+                                      layerId={child.id}
+                                      layer={child}
+                                      index={hostIndexMap.get(child.id) ?? 0}
+                                      activeFrameId={activeFrame.id}
+                                      canvasSize={activeFrame.canvas}
+                                      isActive={
+                                        child.id === activeLayerId ||
+                                        activeLayerHostId === child.id
+                                      }
+                                      canDelete={hostLayers.length > 1}
+                                      isScrolling={isScrolling}
+                                      childLayers={
+                                        childLayersMap.get(child.id) ||
+                                        emptyChildLayers
+                                      }
+                                      showSubLayers={showSubLayers}
+                                      isMarked={unionSelection.includes(
+                                        child.id,
+                                      )}
+                                      onToggleMarking={toggleUnionMark}
+                                      markedColor={unionStatus}
+                                      availableGroups={availableGroups.filter(
+                                        (g) => g.id !== layer.id,
+                                      )}
+                                      isGroupChild
+                                      currentGroupName={layer.name}
+                                    />
+                                  ))}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </Reorder.Item>
+                      );
+                    }
+
+                    // ── Regular (ungrouped) layer ──
+                    return (
+                      <LayerItem
+                        key={layer.id}
+                        layerId={layer.id}
+                        layer={layer}
+                        index={hostIndexMap.get(layer.id) ?? 0}
+                        activeFrameId={activeFrame.id}
+                        canvasSize={activeFrame.canvas}
+                        isActive={
+                          layer.id === activeLayerId ||
+                          activeLayerHostId === layer.id
+                        }
+                        canDelete={hostLayers.length > 1}
+                        isScrolling={isScrolling}
+                        childLayers={
+                          childLayersMap.get(layer.id) || emptyChildLayers
+                        }
+                        showSubLayers={showSubLayers}
+                        isMarked={unionSelection.includes(layer.id)}
+                        onToggleMarking={toggleUnionMark}
+                        markedColor={unionStatus}
+                        availableGroups={availableGroups}
+                      />
+                    );
+                  })}
+                </Reorder.Group>
               </>
             )}
           </div>
@@ -387,18 +452,25 @@ export function LayersPanel({ activeFrame, activeLayerId, activeLayerHostId, onV
       </div>
 
       {/* ─── Divider ─── */}
-      <div className="h-px bg-[var(--border-subtle)] mx-1 -mt-1" />
+      <div className="border-t border-[var(--border-subtle)] dark:border-white/10" />
 
       {/* ─── Blend & Opacity Section (collapsible, default collapsed) ─── */}
       <div className="flex flex-col gap-1.5">
         <button
-          onClick={() => setBlendCollapsed(prev => !prev)}
+          onClick={() => setBlendCollapsed((prev) => !prev)}
           className="flex items-center gap-1.5 px-1 py-0.5 rounded hover:bg-[var(--bg-stage)]/50 transition-colors w-full text-left"
         >
-          {blendCollapsed
-            ? <ChevronRight size={10} className="text-[var(--text-muted)] shrink-0" />
-            : <ChevronDown size={10} className="text-[var(--text-muted)] shrink-0" />
-          }
+          {blendCollapsed ? (
+            <ChevronRight
+              size={10}
+              className="text-[var(--text-muted)] shrink-0"
+            />
+          ) : (
+            <ChevronDown
+              size={10}
+              className="text-[var(--text-muted)] shrink-0"
+            />
+          )}
           <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-wide">
             Blend & Opacity
           </span>

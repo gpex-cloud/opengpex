@@ -40,12 +40,18 @@ export const IMAGE_INFO_COMMANDS = {
       id: P.CMD_DOWNLOAD,
       name: 'Download Creation',
       category: 'File',
-      execute: async (ctx: EditorContextValue) => {
+      execute: async (ctx: EditorContextValue, payload?: { format?: P.ExportFormat }) => {
          const { activeFrame, pixels, files, geometry } = ctx;
          const { selfConfig } = ctx.scoped || {};
          if (!activeFrame) return;
 
-         const config = selfConfig as P.ExportConfig;
+         const baseConfig = selfConfig as P.ExportConfig;
+         // Optional one-shot format override (e.g. from the Agent's export_image
+         // tool). Does NOT mutate the user's persisted UI selection — it only
+         // affects this single export. Falls back to the UI-configured format.
+         const config: P.ExportConfig = payload?.format
+            ? { ...baseConfig, format: payload.format }
+            : baseConfig;
          const isClipMode = ctx.state.interaction.interactionMode === 'clip';
          const box = getClipBox(activeFrame);
 
@@ -137,7 +143,7 @@ export const IMAGE_INFO_COMMANDS = {
          }
       },
       shortcuts: [{ key: 's', meta: true, shift: true }, { key: 's', ctrl: true, shift: true }]
-   } as EditorCommand<void, Promise<void>>,
+   } as EditorCommand<{ format?: P.ExportFormat } | void, Promise<void>>,
 
    applyResize: {
       id: P.CMD_APPLY_RESIZE,

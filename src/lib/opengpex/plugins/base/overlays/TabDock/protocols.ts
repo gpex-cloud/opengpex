@@ -29,11 +29,11 @@ export const PLUGIN_AUTHOR = 'opengpex';
  * Custom Config Interface
  */
 export interface TabDockConfig {
-  orientation: 'horizontal' | 'vertical';
-  snap: string; // TL, TC, TR, ML, MC, MR, BL, BC, BR
+  snap: string; // BL, BC, BR
   showProps: boolean;
   indentBranches: boolean;
   showMetricsHud: boolean;
+  showSettingsButton?: boolean;
   position?: { x: number; y: number };
 }
 

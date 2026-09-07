@@ -356,6 +356,16 @@ export const AI_BRIDGE_COMMANDS = {
       ctx.actions.setStateSignal(SettingsPanelAPI.signals.open, true);
     },
   } as EditorCommand<void, void>,
+
+  toggleAgentChat: {
+    id: P.CMD_TOGGLE_AGENT_CHAT,
+    name: 'Toggle Agent Chat',
+    category: 'AI',
+    shortcuts: [{ key: 'k', meta: true }, { key: 'k', ctrl: true }],
+    execute: () => {
+      window.dispatchEvent(new CustomEvent('editor:toggle-agent-chat'));
+    },
+  } as EditorCommand<void, void>,
 };
 
 

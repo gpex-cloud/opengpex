@@ -17,4 +17,5 @@ export interface AIBridgeDrawerCommandsMap {
   describeCmd: CommandInstance<void, Promise<{ success: boolean; description?: string; error?: string }>>;
   fetchModelsCmd: CommandInstance<void, Promise<{ success: boolean; models?: AIModelInfo[]; error?: string }>>;
   openSettingsCmd: CommandInstance;
+  toggleAgentChatCmd: CommandInstance;
 }

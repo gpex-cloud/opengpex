@@ -48,6 +48,16 @@ export interface ProxyFetchOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   body?: BodyInit | null;
   contentType?: string;
+  /** Optional abort signal — supports cancelling streaming requests. */
+  signal?: AbortSignal;
+  /**
+   * How the API key is presented to the upstream service.
+   *  - 'bearer' (default): `Authorization: Bearer <key>` (OpenAI-compatible)
+   *  - 'anthropic':        `x-api-key: <key>` (Anthropic native Messages API)
+   */
+  authMode?: 'bearer' | 'anthropic';
+  /** Extra headers forwarded verbatim to the upstream (e.g. anthropic-version). */
+  extraHeaders?: Record<string, string>;
 }
 
 /** Proxies a request server-side, translating X-API-Key → Authorization: Bearer. */
@@ -57,11 +67,21 @@ export async function proxyFetch(opts: ProxyFetchOptions): Promise<Response> {
     'X-API-Key': opts.apiKey,
   };
   if (opts.contentType) headers['Content-Type'] = opts.contentType;
+  // Tell the proxy how to present the key upstream (default: bearer).
+  if (opts.authMode) headers['X-Auth-Mode'] = opts.authMode;
+  // Forward extra upstream headers via a prefixed passthrough envelope so the
+  // proxy can replay them without colliding with its own control headers.
+  if (opts.extraHeaders) {
+    for (const [k, v] of Object.entries(opts.extraHeaders)) {
+      headers[`X-Forward-${k}`] = v;
+    }
+  }
 
   return fetch(AI_PROXY_PATH, {
     method: opts.method || 'POST',
     headers,
     body: opts.body,
+    signal: opts.signal,
   });
 }
 

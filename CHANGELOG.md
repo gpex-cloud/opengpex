@@ -4,6 +4,14 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.3.0
+
+- AI Bridge: new **Agent Copilot** — a chat assistant that understands your canvas and can drive the editor for you (transform, selections, layers, background removal, export, and more); open it from the tab dock (⌘K)
+- Agent: streaming replies with Markdown, multi-conversation history, product-doc search, and Auto / Concise / Detailed styles; toggle on or off in Settings
+- Heads-up: works best with capable models (≥8B) for reliable tool use
+
+---
+
 ## v1.2.5
 
 - AI Bridge: now supports 7 services — OpenAI, Claude, Gemini, Grok, Qwen, LocalAI, and Ollama; add as many endpoints as you need and switch between them

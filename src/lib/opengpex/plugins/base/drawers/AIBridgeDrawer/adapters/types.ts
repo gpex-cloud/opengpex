@@ -153,3 +153,32 @@ export function unsupportedTask(providerName: string, task: string): Error {
     `Switch this endpoint to a provider that does, or use a different endpoint.`,
   );
 }
+
+// ─── Agent tool-calling types (Phase 1) ─────────────────────────────────────────
+
+/** Tool definition sent in the request (OpenAI function calling format). */
+export interface AgentToolDef {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;  // JSON Schema
+  };
+}
+
+/** A tool call returned by the assistant. */
+export interface AgentToolCall {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;  // JSON string
+  };
+}
+
+/** Agent conversation message — superset of ChatMessage. */
+export type AgentMessage =
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string }
+  | { role: 'assistant'; content: string | null; tool_calls?: AgentToolCall[] }
+  | { role: 'tool'; content: string; tool_call_id: string };
