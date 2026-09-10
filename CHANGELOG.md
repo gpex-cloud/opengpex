@@ -4,6 +4,12 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.3.1
+
+- Snapping: holding Shift or Alt while moving a selection now fully turns off snapping, matching how it already works for layers, text, and markers
+
+---
+
 ## v1.3.0
 
 - AI Bridge: new **Agent Copilot** — a chat assistant that understands your canvas and can drive the editor for you (transform, selections, layers, background removal, export, and more); open it from the tab dock (⌘K)

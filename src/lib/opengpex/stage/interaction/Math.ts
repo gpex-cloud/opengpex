@@ -133,10 +133,16 @@ export const InteractionMath = {
       e.actions.fast.setTransient('smartguides', null);
       
       if (options.clamp) {
+        // BUGFIX: snapRect collects snap targets by "opt-out" (`snapToX !== false`),
+        // so omitting the filter here left canvas/birth/layer snapping ACTIVE even
+        // though guides were hidden — the selection still snapped invisibly when the
+        // user held Shift/Alt (or disabled Smart Guides). Explicitly disable all snap
+        // targets so this branch does ONLY canvas-bounds clamping, never snapping.
         const clamped = e.geometry.snapping.snapRect(rect, frame, { 
           clamp: true,
-          // By providing an empty target or a flag, we ensure only clamping happens
-          // In our geometry engine, snapRect with snapping disabled or no guides found will still clamp if requested.
+          snapToCanvas: false,
+          snapToBirth: false,
+          snapToLayers: false,
         });
         return e.geometry.asLocalRect({ ...rect, x: clamped.x, y: clamped.y });
       }
