@@ -20,40 +20,37 @@
 /**
  * engine/renderer — Public surface for the onscreen rendering subsystem.
  *
- * Consumers: stage/layers/canvas2d/ (CanvasStage, StageComposer)
- *
  * Provides:
- *   - getEngine(): lazy-created IRenderer singleton (no module-load side-effect)
- *   - IRenderer protocol types (for StageComposer typing)
- *   - Cache singletons (subscribe/setDragging for render loop coordination)
- *
- * Internal modules (Canvas2dEngine internals, dispatchers, worker) are NOT
- * accessible through this barrel — consumers interact only via these exports.
+ *   - getGpuEngine(): lazy-created IEngine singleton
+ *   - getEngine(): alias to getGpuEngine() for backwards compatibility
+ *   - Cache singletons (sourceBitmapCache, tileCache)
  */
 
-import { EngineFactory, type EngineType } from './rendering/onscreen/EngineFactory';
-import { STAGE_RENDER_ENGINE } from '../helpers/config';
-import type { IRenderer } from './protocol/IRenderer';
+import { WebGpuEngine } from '@opengpex/editor/core/gpu';
+import type { IEngine } from '@opengpex/editor/core/gpu';
 
-// ── Lazy Engine Singleton ──
-let _engine: IRenderer | null = null;
-
-/**
- * Returns the global onscreen renderer (lazy-created on first call).
- * Replaces the previous module-level `export const engine = ...` pattern
- * to eliminate module-load-time side effects.
- */
-export function getEngine(): IRenderer {
-  if (!_engine) {
-    _engine = EngineFactory.create(STAGE_RENDER_ENGINE as EngineType);
-  }
-  return _engine;
+// ── Lazy WebGPU Engine Singleton (spec §5.1) ──
+declare global {
+  var __opengpex_v2_webgpu_engine__: IEngine | undefined;
 }
 
-// ── Protocol Types (for StageComposer) ──
-export type { IRenderer, RenderCommand, DrawLayerOptions } from './protocol/IRenderer';
+let _gpuEngine: IEngine | null = null;
+
+export function getGpuEngine(): IEngine {
+  if (typeof globalThis !== 'undefined') {
+    if (!globalThis.__opengpex_v2_webgpu_engine__) {
+      globalThis.__opengpex_v2_webgpu_engine__ = new WebGpuEngine();
+    }
+    return globalThis.__opengpex_v2_webgpu_engine__;
+  }
+  if (!_gpuEngine) {
+    _gpuEngine = new WebGpuEngine();
+  }
+  return _gpuEngine;
+}
+
+export const getEngine = getGpuEngine;
 
 // ── Cache Singletons (render loop subscribe + lifecycle) ──
 export { sourceBitmapCache } from './cache/SourceBitmapCache';
 export { tileCache } from './cache/TileCache';
-export { filterCache } from './cache/FilterCache';

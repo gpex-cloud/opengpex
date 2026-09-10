@@ -37,14 +37,11 @@ import { WorkerBridge } from '../dispatch/bridge/WorkerBridge';
 import { ImageDispatcher } from '../dispatch/ImageDispatcher';
 import { CompositeDispatcher } from '../dispatch/CompositeDispatcher';
 import type { CompositeRequest } from '../dispatch/CompositeDispatcher';
-import { FilterDispatcher } from '../dispatch/FilterDispatcher';
 import { RasterizeDispatcher } from '../dispatch/RasterizeDispatcher';
 import { FileIoDispatcher } from '../dispatch/FileIoDispatcher';
 import { sourceBitmapCache } from '../cache/SourceBitmapCache';
 import { tileCache } from '../cache/TileCache';
-import { filterCache } from '../cache/FilterCache';
 import { fetchFromUrl, download } from '../utils/pixel-utils';
-import { computeFilterCacheKey, normalizeFilterDescriptors } from '../protocol/normalizer';
 import type { CompositeResult } from '../results/CompositeResult';
 import type {
   PixelService,
@@ -79,16 +76,17 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
   // ── Dispatcher instances ──
   const image = new ImageDispatcher(sourceBitmapCache, bridge, assets);
   const composite = new CompositeDispatcher(bridge, geometry, assets);
-  const filter = new FilterDispatcher(bridge);
   const rasterize = new RasterizeDispatcher(bridge, assets);
   const fileIo = new FileIoDispatcher(bridge);
 
-  // ── Initialize FilterCache with DI (Phase 6.9) ──
-  filterCache.initialize({
-    keyFn: computeFilterCacheKey,
-    normalizerFn: normalizeFilterDescriptors,
-    dispatchFn: filter.createDispatchFn(),
-  });
+  // ── (removed in v2) FilterDispatcher + FilterCache DI ──
+  //
+  // v1 wired `filterCache.initialize({ keyFn, normalizerFn, dispatchFn })` here
+  // so a cache miss would fire a FILTER job at the Worker and notify subscribers
+  // when the bitmap came back. The entire chain — FilterDispatcher →
+  // WorkerBridge → FilterHandler → Canvas2dFilterBackend → filter2d — has been
+  // deleted (spec §15). Adjustments are shader state in v2: no descriptor
+  // normalization, no cache key, no round-trip (§2.2).
 
   // ── Initialize TileCache fetcher (decouples TileCache from WorkerBridge) ──
   // [Sparse Tile] Worker returns null for fully-transparent tiles (Phase 3 optimization).

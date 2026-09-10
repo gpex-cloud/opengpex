@@ -31,7 +31,7 @@ We recommend following the **5-File Pattern** to keep your plugin architecture m
    During startup, `scripts/scan-plugins.mjs` will automatically detect your plugin and update `src/lib/opengpex/plugins/registry-user.ts`.
 
 4. **Test in Browser**:
-   Open http://localhost:3030 and your custom plugin will be loaded and functional.
+   Open http://localhost:3040 and your custom plugin will be loaded and functional.
 
 ---
 

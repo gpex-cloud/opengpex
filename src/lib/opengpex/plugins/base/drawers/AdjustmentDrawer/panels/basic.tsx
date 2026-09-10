@@ -36,7 +36,7 @@
  *   single undoable checkpoint at pointerdown and closes it at pointerup, so
  *   one continuous slider drag collapses into exactly one Undo step.
  * - Writes go to `layer.adjustments` via `updateAdjustments({ patch })`.
- *   `Canvas2dEngine.drawLayerDirect()` sees the mutation on the next frame:
+ *   The render engine sees the mutation on the next frame:
  *   because `hasAdvancedFilters(layer)` INTENTIONALLY does not consult
  *   `layer.adjustments`, a Basic-only edit stays on the painter's `ctx.filter`
  *   fast path (no worker roundtrip). When Basic is combined with

@@ -369,6 +369,12 @@ export interface Layer {
    */
   colorBalance?: ColorBalanceState;
   interactive?: boolean; // Whether involved in collision detection (Hit-Testing)
+  /**
+   * Clip to the layer below (Photoshop-style clipping mask). Consumed by the v2
+   * render pipeline (`Scene.LayerNode.clip` → `blend.wgsl` clip flag). Optional;
+   * absent/false means the layer composites normally.
+   */
+  clip?: boolean;
 
   birthCenter?: { cx: number; cy: number }; // Initial birth center (world coordinates)
 

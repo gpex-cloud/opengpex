@@ -21,7 +21,7 @@
  * FilterResult — concrete result type for filter operations (Phase 4).
  *
  * Extends PixelResult with filter-specific capabilities:
- *   - Carries an optional `ImageBitmap` that Canvas2dEngine can use directly
+ *   - Carries an optional `ImageBitmap` that the render engine can use directly
  *     (avoids redundant decode from blob → bitmap).
  *   - `dispose()` releases the transferred bitmap to free GPU/memory resources.
  *
@@ -29,7 +29,7 @@
  *   - result.toAsset()     → register in AssetService, auto cache warming
  *   - result.toBlob()      → get the raw filtered blob
  *   - result.toImageData() → get pixel data for CPU inspection
- *   - result.bitmap        → direct ImageBitmap reference for Canvas2dEngine
+ *   - result.bitmap        → direct ImageBitmap reference for the render engine
  *   - result.dispose()     → release bitmap resources when no longer needed
  */
 
@@ -49,7 +49,7 @@ export interface FilterResultData extends PixelResultData {
  * FilterResult — Worker-produced filtered image.
  *
  * The `bitmap` field provides a zero-copy ImageBitmap reference that was
- * transferred from the Worker. Canvas2dEngine uses it directly for rendering
+ * transferred from the Worker. The render engine uses it directly for rendering
  * without needing to decode the blob again.
  */
 export class FilterResult extends PixelResult {
@@ -61,7 +61,7 @@ export class FilterResult extends PixelResult {
   }
 
   /**
-   * Get the ImageBitmap for direct use in Canvas2dEngine.
+   * Get the ImageBitmap for direct use in the render engine.
    * Avoids redundant blob → bitmap decode on the main thread.
    */
   get bitmap(): ImageBitmap | null {

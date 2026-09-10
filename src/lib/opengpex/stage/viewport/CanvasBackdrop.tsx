@@ -68,7 +68,7 @@ export default function CanvasBackdrop({
   useFastSync(svgRef, true, (_v, f, cam) => {
     if (!polygonBgRef.current || !polygonChessRef.current) return;
 
-    // [Pixel-Snap] Use the same snap logic as StageComposer's artboardClip.
+    // [Pixel-Snap] Use the same snap logic as the artboardClip.
     // This ensures the SVG polygon boundary aligns exactly with the Canvas 2D
     // clip boundary at physical pixel granularity, eliminating:
     //   - Ghost vertical lines during pan (anti-aliased SVG edge residue)

@@ -23,7 +23,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { VolatileState, Frame, CameraState, Layer } from '@opengpex/editor/core/types';
-import { markerToSvg } from '@opengpex/editor/core/engine/rendering/shared/markerPainter';
+import { markerToSvg } from '@opengpex/editor/core/gpu/raster/markerPainter';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import { getMarkerPreview, getMarkerPreviewVersion } from './interactions';
 

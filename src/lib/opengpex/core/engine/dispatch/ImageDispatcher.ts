@@ -81,7 +81,7 @@ export class ImageDispatcher {
    *
    * Dedup mechanism: multiple callers requesting the same src concurrently
    * will only trigger a single DECODE Job. Common scenario: multiple components
-   * mounting simultaneously, Canvas2dEngine + merge both needing the same bitmap.
+   * mounting simultaneously, engine + merge both needing the same bitmap.
    */
   async loadBitmap(src: string): Promise<ImageBitmap> {
     // 1. Cache hit → return immediately

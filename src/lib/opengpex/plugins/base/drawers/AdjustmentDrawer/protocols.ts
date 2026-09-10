@@ -37,7 +37,7 @@
  *   will migrate its basic sliders in as a fourth 'basic' tab.
  * - §4.6 layer data model — panels write into `layer.curves / .levels /
  *   .channelMix` (already declared in `core/types/models.ts`). Filter dispatch
- *   happens in `Canvas2dEngine.drawLayerDirect()` (spec §3.5); this plugin is
+ *   happens in the render engine (spec §3.5); this plugin is
  *   pure UI + state writer and does NOT know about the render backend.
  */
 

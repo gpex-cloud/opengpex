@@ -193,7 +193,7 @@ describe('preview equals landing (acceptance case 3)', () => {
     const origin = LayerUtils.getMaskOrigin(layer);
 
     // What factory/MaskStrokeSession send through `fast.override`, then read back
-    // by Canvas2dEngine as `overrideOrigin?.x ?? 0`.
+    // by the engine as `overrideOrigin?.x ?? 0`.
     const previewBounds = { x: origin.x ?? 0, y: origin.y ?? 0, w: bounding.w, h: bounding.h };
     // What MaskStrokeSession.end() → bake.ts persists into BitmapMask.bounds.
     const bakedBounds = { x: origin.x, y: origin.y, w: bounding.w, h: bounding.h };
@@ -202,7 +202,7 @@ describe('preview equals landing (acceptance case 3)', () => {
   });
 
   it('falls back to (0,0) when an override omits bounds (legacy override path)', () => {
-    // Mirrors `overrideOrigin?.x ?? 0` in Canvas2dEngine — an undefined bounds
+    // Mirrors `overrideOrigin?.x ?? 0` in the engine — an undefined bounds
     // must degrade to the regular-layer basis, never to NaN.
     const override: { bounds?: { x: number; y: number } } = {};
     const overrideOrigin = override.bounds;

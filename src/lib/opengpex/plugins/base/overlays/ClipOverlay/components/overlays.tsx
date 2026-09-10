@@ -31,7 +31,7 @@ import {
   useMoveDeltaSync,
 } from "../useFastSync";
 import { lassoPreviewPathRef } from "../interactions";
-import { PixelGridOverlayAPI } from "../../PixelGridOverlay/protocols";
+import { PixelGridOverlayAPI, DEFAULT_MIN_PIXEL_SIZE } from "../../PixelGridOverlay/protocols";
 import { MARCHING_ANTS_DURATION_S, ClipOverlayAPI } from "../protocols";
 import type { ClipOverlayConfig } from "../protocols";
 
@@ -89,10 +89,13 @@ export function ClipOverlayMain() {
   const marchingAntsAnimated = clipConfig?.marchingAntsAnimated ?? false;
 
   const gridConfig = state.pluginConfig[PixelGridOverlayAPI.configKey] as
-    | { enabled?: boolean; zoomThreshold?: number }
+    | { enabled?: boolean; minPixelSize?: number }
     | undefined;
-  const showGridThreshold = gridConfig?.enabled
-    ? (gridConfig.zoomThreshold ?? 8)
+  // Rule-of-thirds guides hide when the pixel grid appears. Share the pixel
+  // grid's GIMP-style criterion (min on-screen physical px per source pixel),
+  // not an absolute camera.k — see PixelGridOverlay/geometry.ts.
+  const gridMinPixelSize = gridConfig?.enabled
+    ? (gridConfig.minPixelSize ?? DEFAULT_MIN_PIXEL_SIZE)
     : null;
 
   // ─── Activation gates ────────────────────────────────────────────────────
@@ -117,7 +120,7 @@ export function ClipOverlayMain() {
     boxRef,
     boxActive,
     isReCanvas,
-    showGridThreshold,
+    gridMinPixelSize,
   );
 
   // Dimension label

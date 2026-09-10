@@ -49,9 +49,9 @@
  *        final layer state is already durable; nothing to commit.
  *
  * - This panel does NOT dispatch to `AsyncFilterCache` or the engine worker —
- *   that's `Canvas2dEngine.drawLayerDirect()`'s job (spec §5.1). We only
+ *   that's the render engine's job (spec §5.1). We only
  *   mutate `layer.curves`; the render loop picks up the change on its next
- *   frame and, on cache-miss, `Canvas2dEngine.resolveFilteredSource()`
+ *   frame and, on cache-miss, the engine
  *   schedules the worker job. Kept the strict "UI ↔ state" boundary the spec
  *   §3.5 asks for.
  */

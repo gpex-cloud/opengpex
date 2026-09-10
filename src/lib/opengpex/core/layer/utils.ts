@@ -66,7 +66,7 @@ export const LayerUtils = {
    *   - `BitmapMask.bounds.x/y`    → equals the origin (bake + live-preview override)
    *
    * Since `BitmapMask.bounds` is consumed verbatim by both the main-thread
-   * (`Canvas2dEngine`) and the Worker (`Canvas2dBackend`) composite branches,
+   * onscreen engine and the Worker composite branches,
    * encoding the origin into `bounds` keeps screen rendering and export aligned
    * without any extra offset at composite time (no double-subtraction).
    *

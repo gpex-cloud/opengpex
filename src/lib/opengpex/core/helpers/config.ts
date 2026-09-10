@@ -41,7 +41,7 @@ export const HOST_LAYER_ORDER = 10;
 
 /**
  * Performance monitoring switch.
- * When enabled, CanvasStage and Canvas2dEngine emit console.warn diagnostics
+ * When enabled, CanvasStage and WebGpuEngine emit console.warn diagnostics
  * whenever a frame or flush exceeds the 16 ms budget. Disabling this avoids
  * performance.now() calls and counter increments on every frame.
  *
@@ -50,12 +50,9 @@ export const HOST_LAYER_ORDER = 10;
 export const PERF_MON = process.env.NEXT_PUBLIC_GPEX_PERF_MON === 'true';
 
 /**
- * Sub-pixel seam prevention debug switches.
- * Toggle these to isolate which mechanism is contributing to seam reduction.
- *   - SEAM_SHRINK_HOLE: Controls hole mask inward shrink (shrinkInvertedMask)
+ * Sub-pixel seam prevention switch.
  *   - SEAM_EXPAND_FRAGMENT: Controls fragment visibleShape outward expansion (Phase 2)
  */
-export const SEAM_SHRINK_HOLE = true;
 export const SEAM_EXPAND_FRAGMENT = true;
 
 /** Industrial-grade rendering safety threshold: 144MP (approx. 12000x12000). Exceeding this value forces tiled rendering to prevent OOM */
@@ -79,13 +76,6 @@ export const MAX_REALTIME_FILTER_PIXELS = 1_000_000;
 export const LAYER_ROLE_CONFIGS = {
   exchange: { label: 'Exchange', order: 30, follow: true },
 } as const;
-
-/**
- * Frontend viewport (CanvasStage) driver engine switch
- * - 'canvas2d': Stable, most compatible 2D API drawing (currently default).
- * - 'webgl': (Experimental) High-performance native GPU rendering, suitable for rendering large-scale artboards with 100k+ nodes.
- */
-export const STAGE_RENDER_ENGINE: 'canvas2d' | 'webgl' = 'canvas2d';
 
 /**
  * Off-screen calculation (background Worker) driver engine switch

@@ -25,9 +25,9 @@
  * Interaction & data-flow (spec §5, §6 & §7, mirrors CurvesPanel / LevelsPanel):
  *
  * - The panel is a strict UI + state-writer layer: it only mutates
- *   `layer.channelMix` through the plugin's commands. `Canvas2dEngine.drawLayerDirect()`
+ *   `layer.channelMix` through the plugin's commands. The render engine
  *   observes the mutation on the next frame and, on cache-miss, dispatches
- *   the worker via `resolveFilteredSource` (spec §5.1 / §3.5). This file has
+ *   the worker (spec §5.1 / §3.5). This file has
  *   ZERO knowledge of `AsyncFilterCache` / `WorkerBridge` — the hard
  *   constraint in spec §3.5.
  *

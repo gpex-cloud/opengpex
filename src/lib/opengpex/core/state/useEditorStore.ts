@@ -54,7 +54,8 @@ export function useEditorStore() {
     mutate: mutateVolatile,
     update: updateVolatile,
     commit: commitVolatile,
-    reset: resetVolatile
+    reset: resetVolatile,
+    cleanup: cleanupVolatile
   } = useVolatileState();
 
   // Volatile Interaction event bus: lightweight per-field listener map
@@ -127,16 +128,19 @@ export function useEditorStore() {
 
       // C. [Architecture Fix] Fast-track Garbage Collection
       // The logic here is like Redux Middleware, ensuring that when slow-track data is deleted, fast-track shadows are removed synchronously.
+      // Uses `cleanupVolatile` (flag-neutral), NOT `mutateVolatile`: GC is not a
+      // user interaction. mutateVolatile would set interacting=true, and after
+      // REMOVE_FRAME (with no following commit) that left the flag stuck true.
       if (action.type === 'REMOVE_LAYERS') {
         const { frameId, layerIds } = action.payload;
-        mutateVolatile(v => {
+        cleanupVolatile(v => {
           layerIds.forEach(layerId => {
             delete v.buffered.layers[LayerUtils.getCompositeKey(frameId, layerId)];
           });
         });
       } else if (action.type === 'REMOVE_FRAME') {
         const { frameIds } = action.payload;
-        mutateVolatile(v => {
+        cleanupVolatile(v => {
           frameIds.forEach(fId => {
             Object.keys(v.buffered.layers).forEach(key => {
               if (key.startsWith(`${fId}:`)) delete v.buffered.layers[key];
@@ -152,7 +156,7 @@ export function useEditorStore() {
     // canvasClipBox (LocalShape) snapping is handled at the SET_CANVAS_CLIP_BOX level
     // if needed in the future. For now, pass all actions through unmodified.
     dispatch(action);
-  }, [scheduleAssetSync, ASSET_CRITICAL_ACTIONS, mutateVolatile]);
+  }, [scheduleAssetSync, ASSET_CRITICAL_ACTIONS, cleanupVolatile]);
 
   const confirmResolverRef = useRef<((val: boolean) => void) | null>(null);
   const choiceResolverRef = useRef<((val: string | null) => void) | null>(null);

@@ -50,7 +50,7 @@
  */
 
 import type { WorkingColorSpace } from '@opengpex/editor/core/types';
-import { srgbToLinear, linearToSrgb } from '@opengpex/editor/core/engine/rendering/shared/trc';
+import { srgbToLinear, linearToSrgb } from './trc';
 
 // ────────────────────────────────────────────────────────────────────────────────
 // 3×3 Conversion Matrices (row-major, linear-light domain)

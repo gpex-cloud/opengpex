@@ -18,16 +18,18 @@
  */
 
 /**
- * cache/ barrel export — all main-thread caches for Engine V2.
+ * cache/ barrel export — main-thread caches.
+ *
+ * v2 note: `filterCache` (the "AsyncFilterCache" of spec §15) is GONE along
+ * with the Track A / Track B dual-track preview it coordinated. Adjustments now
+ * live permanently on the GPU — there is no filtered-bitmap cache to keep, no
+ * Worker RPC to debounce, and no anti-flash bridge state machine (§2.2).
+ *
+ * `sourceBitmapCache` and `tileCache` survive: they cache DECODED SOURCE
+ * pixels, which the WebGPU engine still needs as the upload source for
+ * `IEngine.upload()`.
  */
 
 export { sourceBitmapCache } from './SourceBitmapCache';
 export { tileCache } from './TileCache';
 export type { TileFetcher } from './TileCache';
-export { filterCache } from './FilterCache';
-export type {
-  FilterKeyFn,
-  FilterDispatchFn,
-  FilterCacheLayer,
-  FilterNormalizerFn,
-} from './FilterCache';

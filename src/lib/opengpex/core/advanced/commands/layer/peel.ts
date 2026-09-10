@@ -219,7 +219,7 @@ export const LayerPeelCommands = {
           // composites raw bitmaps only. The host retains its adjustment properties
           // in the store — the renderer will apply them once at display time.
           // This prevents double-application of adjustments (once by pipeline bake,
-          // once by Canvas2dEngine filter pass).
+          // once by engine filter pass).
           const stripAdj = (l: typeof host) => ({
             ...l,
             adjustments: undefined,

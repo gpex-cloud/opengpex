@@ -131,6 +131,19 @@ export const Motion = {
   /**
    * syncViewportGeometry: Industrial-grade viewport geometry sync protocol
    * Decouples complex animation decisions from the Viewport component to the physical engine layer
+   *
+   * ⚠️ `onGroomed` is a VISIBILITY GATE, not an animation lifecycle callback.
+   * `Viewport` keeps the whole stage (canvas + checkerboard backdrop) at
+   * `opacity: 0` until it fires. It must therefore be released on EVERY path,
+   * including the early-return below — otherwise the editor renders correctly
+   * but stays invisible.
+   *
+   * Regression this guards (see viewport-groom.test.ts): closing one of several
+   * open frames remounts `Viewport` via its `key={activeFrameId}`, resetting
+   * `isGroomed` to false. If `activeState.interacting` was still true from the
+   * close gesture, this function used to bail before `onGroomed`, and because
+   * the owning effect's deps (`[frame, ...]`) no longer change, it never re-ran
+   * — leaving canvas AND checkerboard dark until an unrelated state change.
    */
   syncViewportGeometry(params: {
     stage: HTMLElement | null,
@@ -141,6 +154,22 @@ export const Motion = {
     onGroomed?: () => void
   }) {
     const { stage, artboard, current, prev, interaction, onGroomed } = params;
+
+    // Release the visibility gate FIRST, unconditionally and synchronously.
+    //
+    // Two reasons this must not be deferred:
+    //   1. Early-out below (missing refs / mid-interaction) previously skipped
+    //      it entirely, leaving the stage at opacity:0 forever (see module doc).
+    //   2. Strategy A used to hand the gate to gsap's `onStart`/`onComplete`.
+    //      With `overwrite: 'auto'` a tween can be killed BEFORE it starts, in
+    //      which case neither callback ever fires — and the bootstrap/
+    //      frame-switch path is exactly where that overwrite is most likely.
+    //
+    // Safe to release early: this function applies placement (`set`) inside the
+    // same synchronous call, and the gate governs an OUTER container while the
+    // fade animates `stage` itself — so nothing can flash unplaced content.
+    onGroomed?.();
+
     if (!stage || !artboard || interaction.isInteracting) return;
 
     const isInitialLoad = prev.k === 0;
@@ -159,13 +188,14 @@ export const Motion = {
           duration: isInitialLoad ? 0.4 : 0.15, // 0.15s only when switching
           ease: 'power2.out',
           overwrite: 'auto',
-          onStart: onGroomed, // release signal as soon as animation starts, do not wait for completion
-          onComplete: onGroomed // double insurance
+          // NOTE: `onGroomed` is deliberately NOT wired here — it is released
+          // synchronously at the top of this function. Binding it to tween
+          // callbacks was unreliable: `overwrite: 'auto'` can kill this tween
+          // before it starts, firing neither onStart nor onComplete.
         }
       );
     } else {
       // Strategy B: Update flow (Updates)
-      onGroomed?.(); // ensure all paths trigger the signal
       const sizeChanged = w !== prev.w || h !== prev.h;
 
       if (sizeChanged && !interaction.isRotationSwap) {

@@ -40,7 +40,7 @@ import { asWorldMatrix } from '../protocol/descriptors';
 import type { CompositeJob } from '../protocol/jobs';
 import type { PixelResultData } from '../protocol/results';
 import { CompositeResult } from '../results/CompositeResult';
-import { drawLayerInstance } from '../rendering/shared/painter2d';
+import { drawLayerInstance } from '@opengpex/editor/core/gpu/raster/rasterizer';
 import { canvasToBlob, calculateHash, buildTileMeta } from '../utils/pixel-utils';
 import { getCompositeStrategy } from '@opengpex/editor/core/color/ColorPipeline';
 import type {

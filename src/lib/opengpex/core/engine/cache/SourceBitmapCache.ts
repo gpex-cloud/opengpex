@@ -23,7 +23,7 @@
  * Engine V2 version — reused from v1 with identical API.
  * This is the main-thread "truth source" for all decoded ImageBitmaps:
  *
- *   • Canvas2dEngine.drawLayerDirect (drawImage / tile fallback / bitmap mask)
+ *   • Onscreen rendering (drawImage / tile fallback / bitmap mask)
  *   • FilterFastTrack preview
  *   • PixelFacade.decode.{bitmap, dimensions, contentBounds}
  *   • Plugin overlays (Brush, Clip wand, Adjustment histogram, AITools)

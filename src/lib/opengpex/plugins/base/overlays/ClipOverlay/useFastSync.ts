@@ -24,6 +24,7 @@ import { LocalShape, LocalPolygon, LocalPoint, asLocalShape, asLocalPolygon, asL
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { ClipTool } from '../../options/ClipOptions/protocols';
 import { MARCHING_ANTS_MAX_VERTICES } from './protocols';
+import { shouldShowPixelGrid } from '../PixelGridOverlay/geometry';
 
 const EMPTY_SHAPE: LocalShape = asLocalShape({ x: 0, y: 0, w: 0, h: 0 });
 
@@ -151,7 +152,7 @@ export function useRegularBoxSync(
   ref: React.RefObject<HTMLElement | null>,
   isActive: boolean,
   isReCanvas: boolean,
-  showGridThreshold: number | null
+  gridMinPixelSize: number | null
 ) {
   const { geometry } = useEditorServices();
   const guidesRef = useRef<HTMLDivElement>(null);
@@ -172,11 +173,14 @@ export function useRegularBoxSync(
     }
   });
 
-  // Rule-of-thirds: hide when zoom exceeds pixel grid threshold
+  // Rule-of-thirds: hide when the pixel grid appears (same GIMP-style criterion:
+  // one source pixel covers >= gridMinPixelSize physical screen px). See
+  // PixelGridOverlay/geometry.ts. Uses camera.k × dpr, decoupled from image size.
   useFastSync(guidesRef, isActive, (_v, f, cam) => {
     if (guidesRef.current) {
       const k = geometry.getScale(f, cam);
-      if (showGridThreshold !== null && k >= showGridThreshold) {
+      const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+      if (gridMinPixelSize !== null && shouldShowPixelGrid(k, dpr, gridMinPixelSize)) {
         guidesRef.current.style.opacity = '0';
       } else {
         guidesRef.current.style.opacity = '0.2';

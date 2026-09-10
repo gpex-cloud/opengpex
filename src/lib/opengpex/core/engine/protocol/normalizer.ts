@@ -245,7 +245,7 @@ export function normalizeFilterDescriptors(layer: Pick<Layer, 'adjustments' | 'c
 
 /**
  * True when the layer has ANY non-identity filter descriptor.
- * Gate used by Canvas2dEngine before entering resolveFilteredSource().
+ * Gate used before entering resolveFilteredSource().
  * Replaces the former hasAdvancedFilters() which only checked curves/levels/channelMix/colorBalance.
  *
  * NOTE: blur is handled by the offscreen composite path, not the filter pipeline.

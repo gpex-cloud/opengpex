@@ -21,14 +21,18 @@
  * router.ts — Worker-side job dispatcher.
  *
  * Receives a Job from the main thread (via entry.worker.ts) and routes it
- * to the appropriate handler. Phase 0 implements only ENSURE_ASSET;
- * all other job types are stubs that throw "not yet implemented".
+ * to the appropriate handler.
  *
- * Subsequent Phases fill in handlers:
- * - Phase 2: DECODE, RESAMPLE
- * - Phase 3: COMPOSITE
- * - Phase 4: FILTER
- * - Phase 5: FILE_IO (high-depth)
+ * v2 note: the FILTER route is GONE. Filtering was the Worker's job only because
+ * the main thread could not afford per-pixel CPU work; in v2 adjustments and
+ * convolutions run in `AdjustPass` / `FilterPass` shaders on data already
+ * resident in VRAM, so there is nothing to dispatch (spec §2.2, §10.1, §15).
+ * COMPOSITE remains routed but its handler is a Phase 4 stub — see
+ * `handlers/compositor.ts`.
+ *
+ * The Worker's surviving remit is decode / resample / rasterize / tile /
+ * file-io / pixel-extract / histogram — i.e. codec and CPU-analysis duties that
+ * have nothing to do with compositing.
  */
 
 import type { Job } from '../protocol/jobs';
@@ -36,7 +40,6 @@ import { workerCache } from './cache/WorkerCache';
 import { DecoderHandler } from './handlers/decoder';
 import { ResampleHandler } from './handlers/resample';
 import { CompositorHandler } from './handlers/compositor';
-import { FilterHandler } from './handlers/filter';
 import { RasterizeHandler } from './handlers/rasterize';
 import { TileHandler } from './handlers/tile';
 import { FileIoHandler } from './handlers/file-io';
@@ -48,7 +51,6 @@ import { HistogramHandler } from './handlers/histogram';
 const decoderHandler = new DecoderHandler();
 const resampleHandler = new ResampleHandler();
 const compositorHandler = new CompositorHandler();
-const filterHandler = new FilterHandler();
 const rasterizeHandler = new RasterizeHandler();
 const tileHandler = new TileHandler();
 const fileIoHandler = new FileIoHandler();
@@ -78,9 +80,6 @@ export async function router(job: Job): Promise<RouterResult> {
 
     case 'COMPOSITE':
       return compositorHandler.handle(job);
-
-    case 'FILTER':
-      return filterHandler.handle(job);
 
     case 'DECODE':
       return decoderHandler.handle(job);

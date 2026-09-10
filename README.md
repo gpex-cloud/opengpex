@@ -115,7 +115,7 @@ OpenGPEX gives you full creative control: use traditional manual tools for preci
 git clone https://github.com/gpex-cloud/opengpex.git && cd opengpex && pnpm install && pnpm dev
 ```
 
-Open **http://localhost:3030** — drag an image in to start editing.  
+Open **http://localhost:3040** — drag an image in to start editing.  
 Or skip setup entirely: **[gpex.cloud](https://gpex.cloud)** (online version).
 
 <details>

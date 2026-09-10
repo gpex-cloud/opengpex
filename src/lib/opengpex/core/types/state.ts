@@ -236,4 +236,11 @@ export interface VolatileStateHandle {
   update: (patch: Partial<VolatileState>) => void;
   commit: () => void;
   reset: () => void;
+  /**
+   * Flag-neutral mutation for garbage-collection style cleanup (e.g. dropping
+   * shadow buffers of removed frames/layers). Unlike `mutate`, it does NOT set
+   * `activeState.interacting = true` — GC is not a user interaction, and forcing
+   * the flag on left it stuck `true` after REMOVE_FRAME (see 缺陷记录 步骤 6).
+   */
+  cleanup: (mutator: (v: VolatileState) => void) => void;
 }

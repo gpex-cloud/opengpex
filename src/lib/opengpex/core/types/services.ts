@@ -242,7 +242,7 @@ export interface PixelService {
      * Flow: cache hit → return | in-flight dedup → share | miss → Worker DECODE job → cache → return.
      *
      * Callers must NOT close the returned bitmap; it is owned by
-     * SourceBitmapCache and shared across every consumer (Canvas2dEngine,
+     * SourceBitmapCache and shared across every consumer (render engine,
      * BrushOverlay, ClipTool wand, Adjustment histogram, BgRemoval, …).
      */
     loadBitmap: (src: string) => Promise<ImageBitmap>;

@@ -20,44 +20,35 @@
 'use client';
 
 import React, { useRef, useEffect, useLayoutEffect } from 'react';
-import { Frame, CameraState } from '@opengpex/editor/core/types';
-import { convertImageDataColorSpace, displaySupportsP3 } from '@opengpex/editor/core/color/matrices';
-import { resolveDisplayColorSpace } from '@opengpex/editor/core/color/ColorPipeline';
-import { FontService } from '@opengpex/editor/core/fonts';
+import type { Frame, CameraState } from '@opengpex/editor/core/types';
 import { PERF_MON } from '@opengpex/editor/core/helpers/config';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { useOverlayRotationSync } from '@opengpex/editor/core/motion/hooks/animation';
-import { sourceBitmapCache, tileCache, filterCache, getEngine } from '@opengpex/editor/core/engine/renderer';
+import { sourceBitmapCache, tileCache, getGpuEngine } from '@opengpex/editor/core/engine/renderer';
+import { GpuDevice } from '@opengpex/editor/core/gpu/device/GpuDevice';
+import { SceneAssembler } from '@opengpex/editor/core/gpu/scene/SceneAssembler';
+import { SceneContentCache } from '@opengpex/editor/core/gpu/scene/SceneContentCache';
+import type { ChannelMaskMode } from '@opengpex/editor/core/gpu/shaders/layer';
 import { DISPLAY_CHANNEL_SIGNAL_KEY, type ChannelMask } from '@opengpex/editor/core/engine/protocol/DisplayTransform';
-// [Filter Pipeline §3.5 hard invariant] AsyncFilterCache is imported ONLY from
-// main-thread modules (this file + Canvas2dEngine.ts). painter.ts and any
-// worker/** module MUST NOT import it — that would drag WorkerBridge (which
-// spins up new Worker(...) at module top-level) into the engine worker's own
-// module graph, causing Turbopack to fan out ~30 helper `turbopack-worker-*`
-// VMs and crash the landing page (see 2026-07-09 retrospective in spec §3.5.2).
-
-
 
 import { useLayerTweens } from './useLayerTweens';
-import { stageComposer } from './StageComposer';
-
 
 /**
- * CanvasStage: Industrial-grade high-performance rendering engine (60FPS+ smooth optimized version)
+ * CanvasStage: Industrial-grade high-performance rendering stage (WebGPU v2 Core)
  */
 export default function CanvasStage() {
   const { state, activeFrame } = useEditorState();
-  const { geometry, assets, fonts } = useEditorServices();
+  const { geometry, assets } = useEditorServices();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // 1. Animation state management (Encapsulated)
   const { getAnimatedRotation, isAnimating } = useLayerTweens(activeFrame);
-  
-  // [Phase 4 Fix] Inject artboard-level CSS rotation sync animation
+
+  // Inject artboard-level CSS rotation sync animation
   useOverlayRotationSync(canvasRef, activeFrame);
 
-  // [Display Transform] Read channel mask signal
+  // [Display Transform] Read channel mask signal ('rgb' | 'r' | 'g' | 'b' | 'a')
   const channelMask = (state.interaction.signals[DISPLAY_CHANNEL_SIGNAL_KEY] as ChannelMask) || 'rgb';
 
   /**
@@ -66,14 +57,71 @@ export default function CanvasStage() {
   const needsRenderRef = useRef(true); // Default to first render
   const _renderCountRef = useRef(0); // Cold-start counter for perf warning suppression
 
-  // [Display Transform] Inject SVG filter definitions on mount (one-time)
+  // ─── [PERF_MON] P1 diagnostics: split assemble vs render + frame cadence ───
+  // Only allocated/used when PERF_MON is on; zero cost otherwise. These let a
+  // real-machine capture answer the P1 question ("is the 120→100 dip in the CPU
+  // assemble or in the GPU render?") and see the inter-frame cadence jitter
+  // ("无规律波动") that a single-frame threshold gate cannot.
+  const _lastTickTsRef = useRef(0); // previous tick timestamp (for inter-frame gap)
+  const _perfWindowRef = useRef<{
+    n: number;
+    assembleSum: number;
+    assembleMax: number;
+    renderSum: number;
+    renderMax: number;
+    gapSum: number;
+    gapMax: number;
+    over83: number; // frames exceeding the 120Hz budget (~8.3ms end-to-end)
+    lastFlush: number;
+  }>({ n: 0, assembleSum: 0, assembleMax: 0, renderSum: 0, renderMax: 0, gapSum: 0, gapMax: 0, over83: 0, lastFlush: 0 });
+
+  const gpuEngine = getGpuEngine();
+  const isGpuReadyRef = useRef(false);
+
+  // ─── WebGPU Canvas Mount & Surface Configuration (§4.3, §13.3) ───
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !GpuDevice.isSupported()) return;
+
+    const colorSpace = activeFrame?.colorSpace ?? 'srgb';
+
+    // Synchronously bind new or remounted canvas in layout phase before fastSync ticker fires
+    if (gpuEngine.isReady()) {
+      gpuEngine.attachCanvas(canvas, { colorSpace, hdr: false });
+      isGpuReadyRef.current = true;
+      needsRenderRef.current = true;
+    }
+  }, [gpuEngine, activeFrame?.id, activeFrame?.colorSpace]);
+
   useEffect(() => {
-    ensureChannelFiltersSVG();
-  }, []);
+    const canvas = canvasRef.current;
+    if (!canvas || !GpuDevice.isSupported()) return;
+
+    let cancelled = false;
+    const colorSpace = activeFrame?.colorSpace ?? 'srgb';
+
+    void gpuEngine
+      .init(canvas, {
+        colorSpace,
+        hdr: false,
+      })
+      .then((caps) => {
+        if (cancelled) return;
+        isGpuReadyRef.current = true;
+        needsRenderRef.current = true;
+        console.info('[CanvasStage] WebGPU engine mounted to canvas:', caps);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        console.warn('[CanvasStage] WebGPU init failed on stage canvas:', err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [gpuEngine, activeFrame?.id, activeFrame?.colorSpace]);
 
   // [Display Transform] Mark dirty when channel mask changes.
-  // Reset render counter to suppress perf warnings during the 1-2 frames of
-  // GPU pipeline reconfiguration (intermediate canvas allocation + filter warmup).
   const channelMaskRef = useRef(channelMask);
   useLayoutEffect(() => {
     if (channelMaskRef.current !== channelMask) {
@@ -83,50 +131,22 @@ export default function CanvasStage() {
     }
   }, [channelMask]);
 
-  // [Font Loading] Inject FontService into engine with redraw callback
-  const engine = getEngine();
-  useEffect(() => {
-    if ('setFontService' in engine) {
-      (engine as { setFontService: (fonts: FontService, cb: () => void) => void }).setFontService(fonts, () => {
-        needsRenderRef.current = true;
-      });
-    }
-  }, [fonts, engine]);
-
-  // 1. Subscribe to cache changes; mark redraw needed once slices or full images load
+  // 2. Subscribe to cache changes; mark redraw needed once slices or full images load
   useEffect(() => {
     const unsubTiles = tileCache.subscribe(() => {
       needsRenderRef.current = true;
     });
-    // [SourceBitmapCache refactor 2026-07-10] Redraws are now triggered when a
-    // shared ImageBitmap lands (fetch → blob → createImageBitmap completes).
-    // The consumer set (Canvas2dEngine, BrushOverlay, ClipTool wand, …) is
-    // exactly the same as before; only the storage type changed from
-    // HTMLImageElement to ImageBitmap. See
-    // docs/opengpex/plans/20260710_source_bitmap_cache_refactor_plan.md.
     const unsubImages = sourceBitmapCache.subscribe(() => {
       needsRenderRef.current = true;
     });
-    // [Filter Pipeline §5.2 / Step 3] Redraw when a filtered bitmap lands.
-    // Canvas2dEngine.drawLayerDirect schedules async APPLY_FILTER jobs on
-    // cache miss and degrades to the raw source for the current frame.
-    // Subscribing here ensures the next frame picks up the filtered result.
-    const unsubFilters = filterCache.subscribe(() => {
-      needsRenderRef.current = true;
-    });
-    // [Filter Fast-Track §2.3] TileFilterCache removed — tiles now show raw
-    // during interaction and AsyncFilterCache handles post-interaction filter.
 
     return () => {
       unsubTiles();
       unsubImages();
-      unsubFilters();
     };
-
   }, []);
 
-
-  // 2. State synchronization: trigger redraw when layer properties (e.g. visible) or artboard state change
+  // 3. State synchronization: trigger redraw when active frame changes
   useLayoutEffect(() => {
     needsRenderRef.current = true;
   }, [activeFrame]);
@@ -134,24 +154,23 @@ export default function CanvasStage() {
   const lastFrameRef = useRef<Frame | null>(null);
   const lastCamRef = useRef<CameraState | null>(null);
 
-  // [Performance Optimization] Integrates with unified sync pipeline, ensuring Canvas pixel drawing and Gizmo borders are absolutely atomically synchronized geometrically
+  // [P1 §4] CPU-side compose-once/view-many: memoize the camera-independent
+  // content half so pan/zoom frames skip the O(layers) re-assembly and run only
+  // the cheap view fold. See SceneContentCache for the never-false-clean proof.
+  const contentCacheRef = useRef<SceneContentCache>(new SceneContentCache());
+
+  // [Performance Optimization] Integrates with unified sync pipeline (60fps Ticker)
   useFastSync(canvasRef, true, (v, f, cam) => {
     const canvas = canvasRef.current;
     if (!canvas || !f || !cam) return;
 
-    // [Phase 3] Physical viewport synchronization and Retina high-DPI adaptation
-    // [Critical Fix] CSS dimensions and buffer dimensions MUST update atomically
-    // in the same rAF tick — and BEFORE the skip-render gate below.
-    // Previously, CSS was set via React state (immediate on re-render) while
-    // buffer resized here in rAF — causing 1-frame stretch on window resize
-    // because CSS size changes before buffer catches up.
-    // This block must run unconditionally so viewport resizes are never delayed.
+    // Physical viewport synchronization and Retina high-DPI adaptation
     const { w, h } = state.ui.viewportDim;
     const dpr = window.devicePixelRatio || 1;
     let bufferResized = false;
-    
+
     if (w > 0 && h > 0) {
-      // Sync CSS display size (imperative, bypasses React for atomic timing)
+      // Sync CSS display size
       if (canvas.style.width !== `${w}px`) canvas.style.width = `${w}px`;
       if (canvas.style.height !== `${h}px`) canvas.style.height = `${h}px`;
 
@@ -166,173 +185,153 @@ export default function CanvasStage() {
     }
 
     const isDirty = needsRenderRef.current || bufferResized;
-    
-    // [Smart Admission Determination]
-    // If all of the following conditions are met, the screen is considered static, skip render:
-    // 1. Core geometric states (f, cam) are completely consistent with previous frame
-    // 2. No manually marked dirty redraws (isDirty) and no buffer resize
-    // 3. And not currently animating (isAnimating)
+
+    // Skip render if scene is completely static
     if (
-      !isDirty && 
-      !isAnimating && 
-      f === lastFrameRef.current && 
+      !isDirty &&
+      !isAnimating &&
+      f === lastFrameRef.current &&
       cam === lastCamRef.current
     ) {
       return;
     }
 
+    if (!gpuEngine.isReady()) {
+      return;
+    }
+
     const isInteracting = v.activeState.interacting;
     let _frameT0 = 0;
-    if (PERF_MON) { _frameT0 = performance.now(); }
+    let _assembleT0 = 0;
+    if (PERF_MON) {
+      _frameT0 = performance.now();
+    }
 
     // Update snapshot
     lastFrameRef.current = f;
     lastCamRef.current = cam;
-
-    // Clear dirty marks
     needsRenderRef.current = false;
 
-    // [Phase 4] Gets currently active theme (supports System / Dark / Light)
-    const theme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-
-    // 4. Execute scheduled rendering (Phase C: resolve display colorSpace via strategy matrix)
-    const canvasColorSpace = resolveDisplayColorSpace(f.colorSpace, displaySupportsP3());
-    const ctx = canvas.getContext('2d', {
-      alpha: true,
-      colorSpace: canvasColorSpace,
-    }) as CanvasRenderingContext2D;
-
-    if ('attach' in engine) {
-      (engine as { attach: (ctx: CanvasRenderingContext2D) => void }).attach(ctx);
+    if (PERF_MON) {
+      _assembleT0 = performance.now();
     }
 
-    // [Phase 3 — Linear-Light Blend] Set frame color config so engine can
-    // decide whether to use linear-light blending for blend mode layers.
-    if ('setFrameConfig' in engine) {
-      (engine as { setFrameConfig: (config: { trc: string; colorSpace: string }) => void }).setFrameConfig({
-        trc: f.trc,
+    // Assemble immutable Scene descriptor from state + volatile fast-track (§5.4)
+    //
+    // [P1 §4] CPU compose-once/view-many: the camera-INDEPENDENT content half
+    // (layers/masks/uploads) is memoized on a reference-identity key; only the
+    // cheap view fold (`composeView`) runs every frame. On a cam-only frame the
+    // key is unchanged → same content object → the O(layers) loop is skipped.
+    // `dirty` (needsRender/bufferResize) and `isAnimating` force a rebuild, and
+    // any genuine edit yields a new `f.layers` reference (see SceneContentCache).
+    //
+    // ⚠️ REAL-MACHINE FINDING (2026-09, §4): the "pan/zoom 120→100" that prompted
+    // P1 was a DevTools measurement artifact — with F12 closed the pipeline holds
+    // ~120 (min 116) and PERF_MON reports assemble≈0.01ms / render≈0.07ms. This
+    // memo is therefore a defence-in-depth win for heavy (many-layer / masked)
+    // scenes, NOT a fix for a per-frame CPU defect on the common 2-layer case.
+    const { content, uploads } = contentCacheRef.current.get(
+      {
+        layersRef: f.layers,
+        canvasW: f.canvas.w,
+        canvasH: f.canvas.h,
         colorSpace: f.colorSpace,
-      });
-    }
+        dirty: isDirty,
+        animating: isAnimating,
+      },
+      () =>
+        SceneAssembler.buildContent({
+          frame: f,
+          geometry,
+          assets,
+          getAnimatedRotation,
+          getImageOverride: (layerId: string) => {
+            const compositeKey = `${f.id}:${layerId}`;
+            const draft = v.buffered.layers[compositeKey];
+            return draft?.imageOverride || undefined;
+          },
+          getBitmapMaskOverride: (layerId: string) => {
+            const compositeKey = `${f.id}:${layerId}`;
+            const draft = v.buffered.layers[compositeKey];
+            return draft?.bitmapMaskOverride || undefined;
+          },
+        }),
+    );
 
-    let _renderT0 = 0;
-    if (PERF_MON) { _renderT0 = performance.now(); }
-    stageComposer.render(engine, f, cam, state.ui.viewportDim, geometry, assets, {
-      isInteracting,
-      getAnimatedRotation,
-      displayConfig: channelMask !== 'rgb' ? { channelMask } : undefined,
-      getImageOverride: (layerId: string) => {
-        const compositeKey = `${f.id}:${layerId}`;
-        const draft = v.buffered.layers[compositeKey];
-        const result = draft?.imageOverride || undefined;
-        if (draft?.imageOverride) {
-          console.log('[EraserDebug] getImageOverride:', layerId, '| interacting =', v.activeState.interacting, '| hasDraft =', !!draft, '| returning =', result ? 'OVERRIDE' : 'undefined');
-        }
-        return result;
-      },
-      getBitmapMaskOverride: (layerId: string) => {
-        const compositeKey = `${f.id}:${layerId}`;
-        const draft = v.buffered.layers[compositeKey];
-        return draft?.bitmapMaskOverride || undefined;
-      },
-      theme,
+    // Flush the (possibly empty on a cache hit) upload plan into the engine.
+    SceneAssembler.syncAssets(uploads, gpuEngine);
+
+    // Fold the camera-dependent view onto the content to get the final Scene.
+    const scene = SceneAssembler.composeView(content, {
+      frame: f,
+      camera: cam,
+      viewportDim: state.ui.viewportDim,
+      dpr,
+      geometry,
+      channelMask: channelMask as ChannelMaskMode,
     });
 
-    // ── Phase C (C5): Display-time color space conversion ──
-    // When Frame.colorSpace is P3 (or AdobeRGB) but canvas is sRGB
-    // (display doesn't support P3), apply CPU matrix conversion on the
-    // composited output to ensure accurate color rendering.
-    if (f.colorSpace !== 'srgb' && canvasColorSpace === 'srgb') {
-      const cw = canvas.width;
-      const ch = canvas.height;
-      if (cw > 0 && ch > 0) {
-        const imageData = ctx.getImageData(0, 0, cw, ch);
-        convertImageDataColorSpace(imageData.data, f.colorSpace, 'srgb');
-        ctx.putImageData(imageData, 0, 0);
-        console.debug(
-          '[ColorMgmt] Display: %s→sRGB matrix applied (frame=%s, canvas=%s)',
-          f.colorSpace, f.colorSpace, canvasColorSpace,
-        );
-      }
+    let _renderT0 = 0;
+    if (PERF_MON) {
+      _renderT0 = performance.now();
     }
 
+    // Render directly to WebGPU Swapchain
+    gpuEngine.render(scene);
+
     if (PERF_MON) {
-      const _frameDuration = performance.now() - _frameT0;
+      const _now = performance.now();
+      const _assembleDuration = _renderT0 - _assembleT0; // CPU scene assembly
+      const _renderDuration = _now - _renderT0; // engine.render (compose?/present)
+      const _frameDuration = _now - _frameT0; // end-to-end work this tick
+      const _gap = _lastTickTsRef.current > 0 ? _frameT0 - _lastTickTsRef.current : 0;
+      _lastTickTsRef.current = _now;
       _renderCountRef.current++;
-      if (_frameDuration > 16 && _renderCountRef.current > 3) {
-        const _renderDuration = performance.now() - _renderT0;
-        console.warn(`[CanvasStage.rAF] ⚠️ total=${_frameDuration.toFixed(1)}ms render=${_renderDuration.toFixed(1)}ms layers=${f.layers.order.length} interacting=${isInteracting}`);
+
+      // Accumulate a rolling window and flush a summary ~1×/sec so the console
+      // shows the AVERAGE/MAX split + cadence jitter rather than noisy per-frame
+      // spikes. The 120Hz budget is ~8.3ms end-to-end; count frames over it.
+      const win = _perfWindowRef.current;
+      if (win.lastFlush === 0) win.lastFlush = _now;
+      if (_renderCountRef.current > 3) {
+        win.n++;
+        win.assembleSum += _assembleDuration;
+        win.renderSum += _renderDuration;
+        win.gapSum += _gap;
+        if (_assembleDuration > win.assembleMax) win.assembleMax = _assembleDuration;
+        if (_renderDuration > win.renderMax) win.renderMax = _renderDuration;
+        if (_gap > win.gapMax) win.gapMax = _gap;
+        if (_frameDuration > 8.3) win.over83++;
+      }
+
+      if (win.n > 0 && _now - win.lastFlush >= 1000) {
+        console.warn(
+          `[CanvasStage.WebGPU] window(${win.n}f) ` +
+            `assemble avg=${(win.assembleSum / win.n).toFixed(2)}ms max=${win.assembleMax.toFixed(2)}ms | ` +
+            `render avg=${(win.renderSum / win.n).toFixed(2)}ms max=${win.renderMax.toFixed(2)}ms | ` +
+            `gap avg=${(win.gapSum / win.n).toFixed(2)}ms max=${win.gapMax.toFixed(2)}ms | ` +
+            `over8.3ms=${win.over83}/${win.n} layers=${scene.layers.length} interacting=${isInteracting}`,
+        );
+        win.n = 0;
+        win.assembleSum = 0;
+        win.assembleMax = 0;
+        win.renderSum = 0;
+        win.renderMax = 0;
+        win.gapSum = 0;
+        win.gapMax = 0;
+        win.over83 = 0;
+        win.lastFlush = _now;
       }
     }
   });
 
   if (!activeFrame) return null;
 
-  // [Critical Fix] CSS dimensions are now managed imperatively inside useFastSync
-  // to ensure atomic sync with buffer resize. React-controlled style.width/height
-  // was the source of the 1-frame stretch bug on window resize.
   return (
-    <canvas 
+    <canvas
       ref={canvasRef}
       className="absolute top-0 left-0 bg-transparent"
       style={{ display: 'block' }}
     />
   );
-}
-
-// ─── Display Transform: SVG Filter Injection ─────────────────────────────────
-
-const CHANNEL_SVG_ID = '__gpex_channel_filters_svg';
-
-/**
- * Injects hidden SVG filter definitions into the document for GPU-accelerated
- * channel isolation via ctx.filter = 'url(#...)'.
- *
- * Called once on CanvasStage mount. Idempotent — skips if already injected.
- *
- * Single-channel filters (grayscale output):
- * - Red:   R→RGB, A=opaque  (row-major: 1 0 0 0 0 | 1 0 0 0 0 | 1 0 0 0 0 | 0 0 0 0 1)
- * - Green: G→RGB, A=opaque
- * - Blue:  B→RGB, A=opaque
- *
- * Multi-channel filters (color output, disabled channels zeroed):
- * - RG: Keep R and G rows, zero B row
- * - RB: Keep R and B rows, zero G row
- * - GB: Keep G and B rows, zero R row
- */
-function ensureChannelFiltersSVG(): void {
-  if (typeof document === 'undefined') return;
-  if (document.getElementById(CHANNEL_SVG_ID)) return;
-
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('id', CHANNEL_SVG_ID);
-  svg.setAttribute('style', 'position:absolute;width:0;height:0;overflow:hidden');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.innerHTML = `
-    <!-- Single-channel grayscale filters (preserve original alpha so transparent areas stay transparent) -->
-    <filter id="__gpex_ch_red" color-interpolation-filters="sRGB">
-      <feColorMatrix type="matrix" values="1 0 0 0 0  1 0 0 0 0  1 0 0 0 0  0 0 0 1 0"/>
-    </filter>
-    <filter id="__gpex_ch_green" color-interpolation-filters="sRGB">
-      <feColorMatrix type="matrix" values="0 1 0 0 0  0 1 0 0 0  0 1 0 0 0  0 0 0 1 0"/>
-    </filter>
-    <filter id="__gpex_ch_blue" color-interpolation-filters="sRGB">
-      <feColorMatrix type="matrix" values="0 0 1 0 0  0 0 1 0 0  0 0 1 0 0  0 0 0 1 0"/>
-    </filter>
-    <!-- Alpha channel: force opaque output (A=1) to visualize alpha value as grayscale -->
-    <filter id="__gpex_ch_alpha" color-interpolation-filters="sRGB">
-      <feColorMatrix type="matrix" values="0 0 0 1 0  0 0 0 1 0  0 0 0 1 0  0 0 0 0 1"/>
-    </filter>
-    <!-- Multi-channel color filters (disabled channels zeroed) -->
-    <filter id="__gpex_ch_rg" color-interpolation-filters="sRGB">
-      <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0"/>
-    </filter>
-    <filter id="__gpex_ch_rb" color-interpolation-filters="sRGB">
-      <feColorMatrix type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
-    </filter>
-    <filter id="__gpex_ch_gb" color-interpolation-filters="sRGB">
-      <feColorMatrix type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
-    </filter>
-  `;
-  document.body.appendChild(svg);
 }

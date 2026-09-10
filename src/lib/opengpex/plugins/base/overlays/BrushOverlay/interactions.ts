@@ -135,9 +135,9 @@ export const createBrushStrokeHandler = (): InteractionHandler => ({
         //
         // Problem:
         //   executeCommand(CMD_BAKE) updates React state synchronously,
-        //   but Canvas2dEngine consumes the new state on the NEXT rAF tick.
+        //   but the render engine consumes the new state on the NEXT rAF tick.
         //   If we clear previewHold immediately, StrokePreview clears its
-        //   canvas in the same tick — before Canvas2dEngine has rendered
+        //   canvas in the same tick — before the render engine has rendered
         //   the baked layer. Result: one frame where neither preview nor
         //   baked content is visible → visible flash on mouseUp.
         //
@@ -148,16 +148,16 @@ export const createBrushStrokeHandler = (): InteractionHandler => ({
         //   the baked content", rather than by a timing assumption.
         //
         //   However, introducing that callback requires cross-layer plumbing
-        //   (interactions → Motion ticker → IRenderer) that doesn't yet exist.
+        //   (interactions → Motion ticker → engine) that doesn't yet exist.
         //   A natural opportunity to add it is the WebGPU migration, which will
         //   restructure the render loop around explicit command-buffer fences
         //   where frame-completion signals are a built-in primitive.
         //
         // Why this workaround is safe:
         //   - rAF fires after the browser has completed its rendering
-        //     opportunity, so Canvas2dEngine's flush() has already executed.
+        //     opportunity, so the engine's render pass has already executed.
         //   - cacheBitmap() pre-warms the decode cache before CMD_BAKE,
-        //     so the engine's next flush() has the bitmap immediately.
+        //     so the engine's next pass has the bitmap immediately.
         //   - Identity guard prevents a stale rAF callback from clobbering
         //     a newer stroke's previewHold (fast successive strokes).
         //   - Extra 1 frame (~8ms@120Hz) of preview overlap is invisible

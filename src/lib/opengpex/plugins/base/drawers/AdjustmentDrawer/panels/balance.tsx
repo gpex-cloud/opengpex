@@ -25,9 +25,9 @@
  * Interaction & data-flow (mirrors mixer.tsx / levels.tsx):
  *
  * - The panel is a strict UI + state-writer layer: it only mutates
- *   `layer.colorBalance` through the plugin's commands. `Canvas2dEngine`
+ *   `layer.colorBalance` through the plugin's commands. The render engine
  *   observes the mutation on the next frame and dispatches through
- *   `resolveFilteredSource`. This file has ZERO knowledge of
+ *   its filter pipeline. This file has ZERO knowledge of
  *   `AsyncFilterCache` / `WorkerBridge`.
  *
  * - Layout:

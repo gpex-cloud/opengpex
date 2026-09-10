@@ -34,7 +34,7 @@
 
 import { WorkerBridge } from './bridge/WorkerBridge';
 import { RasterizeResult } from '../results/RasterizeResult';
-import { drawLayerInstance } from '../rendering/shared/painter2d';
+import { drawLayerInstance } from '@opengpex/editor/core/gpu/raster/rasterizer';
 import { canvasToBlob, calculateHash, buildTileMeta } from '../utils/pixel-utils';
 import type { PixelResultData } from '../protocol/results';
 import type { AssetService, Layer } from '@opengpex/editor/core/types';

@@ -68,8 +68,8 @@
  *   affects contrast, not tint/brightness bias.
  *
  * - This panel does NOT dispatch to `AsyncFilterCache` or WorkerBridge.
- *   Writing to `layer.levels` triggers `Canvas2dEngine.drawLayerDirect()`
- *   on the next frame; that path is responsible for `resolveFilteredSource`
+ *   Writing to `layer.levels` triggers the render engine
+ *   on the next frame; that path is responsible for
  *   dispatching the worker (spec §5.1 / §3.5 hard constraint).
  */
 

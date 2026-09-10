@@ -33,10 +33,15 @@
  */
 
 // ── LUT Generators (for Adjustment panel sliders) ──
-export { generateLevelsLUT, generateCurveLUT } from './rendering/shared/filter2d';
+export { generateLevelsLUT, generateCurveLUT } from '../color/luts';
 
 // ── Pixel Utilities (for bake/content-bounds operations) ──
 export { calculateContentBoundsFromImageData } from './utils/pixel-utils';
 
-// ── Filter Cache (for gesture coordination — setDragging/subscribe) ──
-export { filterCache } from './cache/FilterCache';
+// ── (removed in v2) filterCache ──
+//
+// `filterCache` used to be re-exported here so `useFilterGesture` could call
+// `setDragging()` — telling the cache to stop scheduling full-resolution Worker
+// jobs while a slider was being dragged. That whole coordination problem is
+// gone: adjustments are GPU uniforms/LUTs evaluated at full resolution every
+// frame, so there is nothing to throttle and nothing to cache (spec §2.2, §15).

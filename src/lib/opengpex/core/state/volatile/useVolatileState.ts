@@ -76,5 +76,14 @@ export function useVolatileState(): VolatileStateHandle {
     volatileRef.current.transient = {};
   }, []);
 
-  return { volatileRef, mutate, update, commit, reset };
+  // Flag-neutral cleanup: mutate the buffer WITHOUT touching `interacting`.
+  // Used for GC-style removal of shadow buffers (REMOVE_FRAME / REMOVE_LAYERS),
+  // which is not a user interaction. Using `mutate` there wrongly set
+  // interacting=true and — with no following commit — left it stuck true after
+  // REMOVE_FRAME, polluting fast-track throttle / merge gating / idle checks.
+  const cleanup = useCallback((mutator: (v: VolatileState) => void) => {
+    mutator(volatileRef.current);
+  }, []);
+
+  return { volatileRef, mutate, update, commit, reset, cleanup };
 }

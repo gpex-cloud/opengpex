@@ -20,7 +20,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { filterCache } from '@opengpex/editor/core/engine/filters';
 
 // ─── useFilterGesture ──────────────────────────────────────────────────────────
 
@@ -37,12 +36,24 @@ import { filterCache } from '@opengpex/editor/core/engine/filters';
  *
  * A short window between `begin` and `end` is tracked so back-to-back panels
  * (or the reset button) can query whether a drag is in progress via
- * `isDragging()` — useful for skipping expensive full-res AsyncFilterCache
- * warmups while the user is still dragging (spec §5.3 Dual-Track preview).
+ * `isDragging()`.
  *
- * Design note: Steps 6 and 7 will invoke this same hook with different
- * `beginCommand` refs (`beginLevelsEditCmd` / `beginChannelMixEditCmd`);
- * the hook itself is deliberately command-agnostic to enable reuse.
+ * ═══ v2 SIMPLIFICATION (spec §13.3 / §15) ═══
+ *
+ * The `filterCache.setDragging(true/false)` calls are GONE. In v1 this hook had a
+ * second job: throttling the render pipeline. On `pointerdown` it told
+ * `AsyncFilterCache` to stop dispatching full-resolution Worker filter jobs (so
+ * a drag wouldn't queue one RPC per tick), and on `pointerup` it re-enabled
+ * scheduling for the single settled recipe. It even needed unmount cleanup,
+ * because leaving the global flag stuck at `true` would silently wedge the
+ * filter pipeline for every later gesture.
+ *
+ * None of that is necessary now. Adjustments are GPU uniforms / LUT textures
+ * evaluated at full resolution every frame in <0.2ms, so there is no expensive
+ * job to defer and no shared mutable flag to leak (§2.2, §9).
+ *
+ * What remains is pure UNDO SEMANTICS — bookending a drag with one history
+ * checkpoint — which is a state-layer concern with no rendering coupling at all.
  */
 export interface FilterGestureCommand {
   execute?: (payload?: never) => unknown;
@@ -53,7 +64,7 @@ export interface FilterGestureHandle {
   begin: () => void;
   /** Called on pointerup / cancel. Idempotent. */
   end: () => void;
-  /** True while inside a begin/end pair. Useful for preview/full-res dispatch. */
+  /** True while inside a begin/end pair. */
   isDragging: () => boolean;
 }
 
@@ -65,13 +76,6 @@ export function useFilterGesture(
   const begin = useCallback(() => {
     if (draggingRef.current) return;
     draggingRef.current = true;
-    // Dual-Track preview (spec §5.3): tell the AsyncFilterCache to stop
-    // scheduling worker jobs — painter will paint from `getStale()` for
-    // the duration of the drag so we don't drown the worker in per-tick
-    // recipes. See `AsyncFilterCache.setDragging` for the schedule-side
-    // suppression logic.
-    filterCache.setDragging(true);
-    // [Filter Fast-Track §2.3] TileFilterCache removed.
     beginCommand?.execute?.();
   }, [beginCommand]);
 
@@ -79,26 +83,15 @@ export function useFilterGesture(
     // No-op unless we're actively in a gesture; keeps double-firing safe.
     if (!draggingRef.current) return;
     draggingRef.current = false;
-    // Re-enable full-res scheduling. AsyncFilterCache internally notifies
-    // subscribers so the next paint pass schedules exactly one Worker
-    // job for the final settled recipe (§5.3 commit).
-    filterCache.setDragging(false);
-    // [Filter Fast-Track §2.3] TileFilterCache removed.
   }, []);
 
   const isDragging = useCallback(() => draggingRef.current, []);
 
-  // Belt-and-suspenders cleanup: if the panel unmounts mid-drag (tab
-  // switch, drawer close), we must reset the global cache flag so the
-  // NEXT gesture starts from a known good state. Without this the
-  // schedule() guard could stick to `true` forever.
+  // Reset the flag if the panel unmounts mid-drag (tab switch, drawer close) so
+  // the next gesture starts from a known good state.
   useEffect(() => {
     return () => {
-      if (draggingRef.current) {
-        draggingRef.current = false;
-        filterCache.setDragging(false);
-        // [Filter Fast-Track §2.3] TileFilterCache removed.
-      }
+      draggingRef.current = false;
     };
   }, []);
 

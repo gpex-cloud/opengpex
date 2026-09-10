@@ -43,13 +43,6 @@ export type {
 export type { PixelResultData } from './results';
 
 export type {
-  DrawLayerOptions,
-  RenderLayerCommand,
-  RenderCommand,
-  IRenderer,
-} from './IRenderer';
-
-export type {
   ChannelMask,
   ChannelVisibility,
   DisplayTransformConfig,

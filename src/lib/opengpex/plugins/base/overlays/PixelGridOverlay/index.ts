@@ -47,8 +47,9 @@ export const plugin: EditorPlugin = {
   initialConfig: {
     enabled: true,
     hardEdge: false,
-    zoomThreshold: 8,
-    color: 'rgba(255, 255, 255, 0.2)'
+    minPixelSize: P.DEFAULT_MIN_PIXEL_SIZE,
+    color: P.DEFAULT_GRID_COLOR,
+    casingColor: P.DEFAULT_GRID_CASING_COLOR
   },
   commands: Object.values(PIXEL_GRID_COMMANDS),
   contributions: [

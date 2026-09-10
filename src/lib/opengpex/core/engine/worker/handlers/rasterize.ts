@@ -34,7 +34,7 @@
 import type { RasterizeJob } from '../../protocol/jobs';
 import type { PixelResultData } from '../../protocol/results';
 import type { VectorMask, ClipDescriptor } from '@opengpex/editor/core/types';
-import { drawLayerInstance } from '../../rendering/shared/painter2d';
+import { drawLayerInstance } from '@opengpex/editor/core/gpu/raster/rasterizer';
 import { workerCache } from '../cache/WorkerCache';
 import { canvasToBlob, calculateHash, buildTileMeta } from '../../utils/pixel-utils';
 import { shapeToPath2D } from '@opengpex/editor/core/helpers/path2d';
@@ -154,10 +154,7 @@ export class RasterizeHandler {
     };
 
     // Build clip sequence from vector masks
-    //
-    // NOTE: No `shrinkInvertedMask` here — same rationale as Canvas2dBackend.buildClipSequence.
-    // Rasterize permanently bakes pixels; shrinking inverted masks at scale=1 would introduce
-    // Canvas2D AA on originally-pixel-perfect integer boundaries.
+    // Rasterize permanently bakes pixels without geometric offsets.
     const clipSequence: ClipDescriptor[] = masks.map(m => ({
       shape: m.shape,
       inverted: m.inverted,
