@@ -76,13 +76,14 @@ import { usePixelGridCommands } from './hooks';
 /**
  * PixelGridOverlayContainer: Canvas2D-based pixel grid overlay.
  *
- * Renders a 1px physical grid aligned with image pixels when zoomed in (scale >= zoomThreshold).
+ * Renders a 1px physical grid aligned with image pixels when zoomed in
+ * (one source pixel covers >= minPixelSize physical screen pixels, see geometry.ts).
  * Replaces the legacy CSS linear-gradient implementation for performance.
  */
 export function PixelGridOverlayContainer() {
   const { state, activeFrame } = useEditorState();
   const { geometry } = useEditorServices();
-  const { isEnabled, zoomThreshold, gridColor } = usePixelGridCommands();
+  const { isEnabled, minPixelSize, gridColor, gridCasingColor } = usePixelGridCommands();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // ─── Persistent Refs (survive across frames, never cause re-renders) ───
@@ -138,8 +139,12 @@ export function PixelGridOverlayContainer() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    const dpr = window.devicePixelRatio || 1;
     const scale = geometry.getScale(f, cam);
-    const shouldShow = isEnabled && scale >= zoomThreshold;
+    // §8: criterion is "on-screen physical pixel size of one source pixel"
+    // (p = scale × dpr >= minPixelSize), NOT the absolute `camera.k`. This decouples
+    // grid onset from image size / fit / DPR (GIMP-style criterion).
+    const shouldShow = isEnabled && scale * dpr >= minPixelSize;
 
     // --- Visibility toggle (write to DOM only when state changes) ---
     // Use visibility:hidden (not just opacity:0) to fully remove the canvas from
@@ -179,21 +184,20 @@ export function PixelGridOverlayContainer() {
     if (!ctx) return;
 
     // --- Clear the previously drawn sub-region ---
-    // Expand by 2px on each side to account for:
+    // Expand by 3px on each side to account for:
     //   - Math.round(x) + 0.5 offset placing line centers at fractional positions
-    //   - ctx.lineWidth = 1 extending 0.5px beyond path coordinates
+    //   - the 2px dark casing stroke extending 1px beyond path coordinates
     // Without this expansion, edge pixels from previous frames accumulate during
     // panning, creating visible residual vertical/horizontal lines (ghost lines).
     if (lastDrawRectRef.current) {
       const r = lastDrawRectRef.current;
-      ctx.clearRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
+      ctx.clearRect(r.x - 3, r.y - 3, r.w + 6, r.h + 6);
     }
 
     // --- Compute visible grid region ---
     // The grid is only drawn within the intersection of:
     //   - The artboard (image canvas) bounds projected to screen
     //   - The viewport bounds
-    const dpr = window.devicePixelRatio || 1;
     const canvasWorldRect = geometry.asWorldRect({
       x: -f.canvas.w / 2, y: -f.canvas.h / 2,
       w: f.canvas.w, h: f.canvas.h
@@ -218,16 +222,19 @@ export function PixelGridOverlayContainer() {
     }
 
     // --- Grid spacing (in physical pixels) ---
-    // Each grid cell = 1 image pixel = `scale` logical px = `scale * dpr` physical px
+    // Each grid cell = 1 image pixel = `scale` logical px = `scale * dpr` physical px.
+    // Past the shouldShow gate this equals the criterion value p and is >= minPixelSize.
     const gridSpacing = scale * dpr;
 
-    // --- Safety cap: prevent path explosion at threshold boundary ---
-    // At zoomThreshold=8, dpr=2: spacing=16px → ~180+112=292 lines (fine).
-    // During zoom animation, scale might briefly hover at threshold causing
-    // a large number of lines. Cap total to prevent GPU stall.
+    // --- Safety cap: prevent path explosion in pathological cases ---
+    // Past the gate, gridSpacing >= minPixelSize (default 4), so the line count
+    // is bounded by (viewport physical extent / minPixelSize). On large hi-DPI
+    // displays at grid onset this can reach ~1500 lines — all drawn in a single
+    // batched stroke (<1ms). The cap is a defensive ceiling against degenerate
+    // spacing, not a normal-operation limit.
     const hLineCount = Math.ceil(drawW / gridSpacing);
     const vLineCount = Math.ceil(drawH / gridSpacing);
-    if (hLineCount + vLineCount > 800) {
+    if (hLineCount + vLineCount > 4000) {
       lastDrawRectRef.current = null;
       return;
     }
@@ -245,10 +252,13 @@ export function PixelGridOverlayContainer() {
     const firstX = originX + Math.ceil((clipLeft - originX) / gridSpacing) * gridSpacing;
     const firstY = originY + Math.ceil((clipTop - originY) / gridSpacing) * gridSpacing;
 
-    // --- Draw grid lines ---
-    // Single beginPath + batch all lines + single stroke = minimal draw calls
-    ctx.strokeStyle = gridColor;
-    ctx.lineWidth = 1;
+    // --- Draw grid lines (dual-tone "casing" for background-agnostic contrast) ---
+    // Build the line path ONCE, then stroke it TWICE:
+    //   1. a slightly wider dark casing/halo underneath (visible on light areas)
+    //   2. a thin light core on top (visible on dark areas)
+    // A single fixed color always vanishes against some background; the casing
+    // guarantees at least one tone stays visible everywhere. Static solid lines
+    // (no dash, no animation) — distinct from ClipOverlay's marching ants.
     ctx.beginPath();
 
     // Vertical lines (one per visible image pixel column)
@@ -266,7 +276,16 @@ export function PixelGridOverlayContainer() {
       ctx.lineTo(clipRight, py);
     }
 
-    // Single stroke call — GPU rasterizes all lines in one draw call
+    // Pass 1: dark casing (slightly wider) — two batched strokes over the same path.
+    // Kept subtle (2px + low alpha) so the grid reads as a faint guide, not a
+    // heavy black lattice that dominates light images.
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = gridCasingColor;
+    ctx.stroke();
+
+    // Pass 2: light core (thin) on top.
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = gridColor;
     ctx.stroke();
   });
 

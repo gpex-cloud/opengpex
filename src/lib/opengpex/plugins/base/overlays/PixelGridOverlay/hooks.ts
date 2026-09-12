@@ -33,15 +33,17 @@ export function usePixelGridCommands() {
 
   const isEnabled = selfConfig?.enabled ?? true;
   const isHardEdge = selfConfig?.hardEdge ?? false;
-  const zoomThreshold = selfConfig?.zoomThreshold ?? 8;
-  const gridColor = selfConfig?.color ?? 'rgba(0, 0, 0, 0.25)';
+  const minPixelSize = selfConfig?.minPixelSize ?? P.DEFAULT_MIN_PIXEL_SIZE;
+  const gridColor = selfConfig?.color ?? P.DEFAULT_GRID_COLOR;
+  const gridCasingColor = selfConfig?.casingColor ?? P.DEFAULT_GRID_CASING_COLOR;
 
   return useMemo(() => ({
     isEnabled,
     isHardEdge,
-    zoomThreshold,
+    minPixelSize,
     gridColor,
+    gridCasingColor,
     toggleCmd,
     hardedgeToggleCmd,
-  }), [isEnabled, isHardEdge, zoomThreshold, gridColor, toggleCmd, hardedgeToggleCmd]);
+  }), [isEnabled, isHardEdge, minPixelSize, gridColor, gridCasingColor, toggleCmd, hardedgeToggleCmd]);
 }

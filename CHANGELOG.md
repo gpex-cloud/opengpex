@@ -4,6 +4,12 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.3.2
+
+- Pixel Grid: softer dual-tone lines with clear visibility across both light and dark backgrounds, and consistent zoom display
+
+---
+
 ## v1.3.1
 
 - Snapping: holding Shift or Alt while moving a selection now fully turns off snapping, matching how it already works for layers, text, and markers
