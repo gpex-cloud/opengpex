@@ -45,8 +45,8 @@ export const DEFAULT_MIN_PIXEL_SIZE = 12;
  * visible — no contrast blind spot. This mirrors the dual-path contrast technique
  * already used by ClipOverlay's marching ants (but here: static, solid lines).
  */
-export const DEFAULT_GRID_COLOR = 'rgba(255, 255, 255, 0.8)';         // light core
-export const DEFAULT_GRID_CASING_COLOR = 'rgba(0, 0, 0, 0.14)';      // dark casing/halo (subtle)
+export const DEFAULT_GRID_COLOR = 'rgba(255, 255, 255, 0.21)';         // light core
+export const DEFAULT_GRID_CASING_COLOR = 'rgba(0, 0, 0, 0.13)';      // dark casing/halo (subtle)
 
 /**
  * Custom Config Interface
