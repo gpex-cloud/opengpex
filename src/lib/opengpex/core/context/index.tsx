@@ -121,10 +121,19 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     () => createLayerService(geometry, pixels, assets, actions, () => state),
     [geometry, pixels, assets, actions, state],
   );
-  const storage = useMemo(() => createStateStorage(assets), [assets]);
+  const plugins = useMemo(() => createPluginService(), []);
+  // Persist only real per-plugin overrides, not seeded source defaults — lets
+  // changes to a plugin's initialConfig take effect on reload (resolver read lazily at save time).
+  const storage = useMemo(
+    () => createStateStorage(assets, () =>
+      Object.fromEntries(
+        plugins.getAllPlugins().map((p) => [p.uid, p.initialConfig ?? {}]),
+      ),
+    ),
+    [assets, plugins],
+  );
   const clipboard = useMemo(() => createClipboardService(), []);
 
-  const plugins = useMemo(() => createPluginService(), []);
   const fonts = useMemo(() => createFontService(), []);
 
   // 3. Construct split static/dynamic context values

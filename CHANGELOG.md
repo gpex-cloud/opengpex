@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.3.3
+
+- Pixel Grid: lighter, subtler grid lines that stay out of the way
+- Settings: changes to built-in defaults now apply on refresh without needing to clear your data
+
+---
+
 ## v1.3.2
 
 - Pixel Grid: softer dual-tone lines with clear visibility across both light and dark backgrounds, and consistent zoom display
