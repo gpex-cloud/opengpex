@@ -241,4 +241,60 @@ export function PremiumCloudIcon({ className }: { className?: string }) {
  */
 export const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M20.5 12a8.5 8.5 0 1 1-4.3-7.4' stroke='white' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolygon points='22,1 22,8 15,8' fill='white' stroke='white' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M20.5 12a8.5 8.5 0 1 1-4.3-7.4' stroke='%23222' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolygon points='22,1 22,8 15,8' fill='%23222'/%3E%3C/svg%3E") 12 12, pointer`;
 
+/**
+ * PipetteAllIcon: Eyedropper with stacked layers badge (Sample All Layers).
+ * Combines the primary Pipette with a stacked layers indicator in the corner.
+ */
+export function PipetteAllIcon({ size = 13, className }: { size?: number; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`lucide-icon ${className || ''}`}
+    >
+      {/* Pipette body */}
+      <path d="m2 22 1-1h3l9-9" />
+      <path d="M3 21v-3l9-9" />
+      <path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z" />
+      {/* Stacked layers indicator (All Layers) */}
+      <polygon points="18.5 13 22.5 15 18.5 17 14.5 15" strokeWidth="1.75" />
+      <polyline points="14.5 18.5 18.5 20.5 22.5 18.5" strokeWidth="1.75" />
+    </svg>
+  );
+}
+
+/**
+ * PipetteLayerIcon: Eyedropper with single layer badge (Sample Current Layer).
+ * Combines the primary Pipette with a single layer plane in the corner.
+ */
+export function PipetteLayerIcon({ size = 13, className }: { size?: number; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`lucide-icon ${className || ''}`}
+    >
+      {/* Pipette body */}
+      <path d="m2 22 1-1h3l9-9" />
+      <path d="M3 21v-3l9-9" />
+      <path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z" />
+      {/* Single layer indicator (Current Layer) */}
+      <polygon points="18.5 15.5 22.5 17.5 18.5 19.5 14.5 17.5" strokeWidth="1.75" />
+    </svg>
+  );
+}
+
+
 

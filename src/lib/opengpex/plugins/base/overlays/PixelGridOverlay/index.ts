@@ -48,8 +48,8 @@ export const plugin: EditorPlugin = {
     enabled: true,
     hardEdge: false,
     minPixelSize: P.DEFAULT_MIN_PIXEL_SIZE,
-    color: P.DEFAULT_GRID_COLOR,
-    casingColor: P.DEFAULT_GRID_CASING_COLOR
+    gridColor: P.DEFAULT_GRID_COLOR,
+    gridCasingColor: P.DEFAULT_GRID_CASING_COLOR
   },
   commands: Object.values(PIXEL_GRID_COMMANDS),
   contributions: [

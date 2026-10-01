@@ -45,8 +45,18 @@ export const ADV_FRAME_RESAMPLE = 'adv.frame.resample';
 export const ADV_FRAME_REPLACE = 'adv.frame.replace';
 export const ADV_FRAME_REMOVE = 'adv.frame.remove';
 export const ADV_FRAME_TRUNK = 'adv.frame.trunk';
-export const ADV_FRAME_EXPORT = 'adv.frame.export';
-export const ADV_FRAME_IMPORT = 'adv.frame.import';
+export const ADV_GPEX_PACK = 'adv.gpex.pack';
+export const ADV_GPEX_UNPACK = 'adv.gpex.unpack';
+/** @deprecated Alias for ADV_GPEX_PACK */
+export const ADV_FRAME_PACKING = ADV_GPEX_PACK;
+/** @deprecated Alias for ADV_GPEX_UNPACK */
+export const ADV_FRAME_UNPACKING = ADV_GPEX_UNPACK;
+/** @deprecated Alias for ADV_GPEX_PACK */
+export const ADV_FRAME_EXPORT = ADV_GPEX_PACK;
+/** @deprecated Alias for ADV_GPEX_UNPACK */
+export const ADV_FRAME_IMPORT = ADV_GPEX_UNPACK;
+/** Export-to-file logic (egest decision + GPU render + files.encode → Blob). */
+export const ADV_FRAME_EXPORT_ENCODE = 'adv.frame.export.encode';
 
 // 3. Asset Management
 export const ADV_ASSET_REGISTER = 'adv.system.asset.register';

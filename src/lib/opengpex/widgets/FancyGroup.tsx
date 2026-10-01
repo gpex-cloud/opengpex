@@ -30,7 +30,7 @@ export interface FancyGroupItem {
   /** Unique key for the item. */
   key: string;
   /** Icon element (lucide or custom SVG). */
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   /** Tooltip text shown on hover. */
   tooltip?: string;
   /** Click handler. */
@@ -43,6 +43,8 @@ export interface FancyGroupItem {
   className?: string;
   /** Custom content to render instead of just icon (e.g. color swatch). */
   render?: (props: { className: string }) => React.ReactNode;
+  /** Custom element to render directly without wrapping in a fixed-width button. */
+  element?: React.ReactNode;
 }
 
 export type FancyGroupShape = "rounded" | "pill";
@@ -196,7 +198,11 @@ export default function FancyGroup({
             />
           ) : null;
 
-          const buttonEl = item.render ? (
+          const buttonEl = item.element ? (
+            <React.Fragment key={item.key}>
+              {item.element}
+            </React.Fragment>
+          ) : item.render ? (
             <div
               key={item.key}
               className={`relative flex items-center justify-center ${config.buttonWidth} h-full ${posRadius} transition-all hover:bg-[var(--bg-stage)] outline-none cursor-pointer group ${item.active ? "bg-[var(--bg-stage)]" : ""} ${item.disabled ? "opacity-40 pointer-events-none" : ""} ${item.className || ""}`}

@@ -18,10 +18,10 @@
  */
 
 /**
- * RasterizeDispatcher — dispatches RASTERIZE jobs to Worker (Phase 6).
+ * RasterizeDispatcher — MAIN-THREAD layer rasterization (text/color/vector → bitmap).
  *
  * Responsibilities:
- * 1. Text layer rasterization (text → bitmap via Worker or main-thread fallback)
+ * 1. Text layer rasterization (text → bitmap on the main thread)
  *
  * RasterizeDispatcher's boundary:
  *   - Only handles "pure rendering" without effect stacking
@@ -29,20 +29,27 @@
  *
  * For "layer flattening" (with masks/adjustments/blend), use CompositeDispatcher.
  *
- * Architecture: facade → RasterizeDispatcher → WorkerBridge → Worker (RasterizeHandler)
+ * ⚠️ NOT a Worker dispatcher (despite the name). `layer()` runs entirely on the
+ * main thread (OffscreenCanvas + `drawLayerInstance`) because reliable `FontFace`
+ * access only exists on the main thread. The former Worker-side `RasterizeHandler`
+ * (RASTERIZE job) was retired as dead code on 20260912 — it never received a job.
+ * The `bridge` ctor arg is retained only for construction symmetry with the other
+ * dispatchers (PixelFacade passes it uniformly); this class does not use it.
+ *
+ * Architecture: facade → RasterizeDispatcher.layer() → OffscreenCanvas (main thread)
  */
 
 import { WorkerBridge } from './bridge/WorkerBridge';
-import { RasterizeResult } from '../results/RasterizeResult';
-import { drawLayerInstance } from '@opengpex/editor/core/gpu/raster/rasterizer';
-import { canvasToBlob, calculateHash, buildTileMeta } from '../utils/pixel-utils';
-import type { PixelResultData } from '../protocol/results';
+import type { RasterizedImage } from '../types';
+import { drawLayerInstance } from '@opengpex/editor/core/engine/raster/rasterizer';
+import { buildTextHighDepth } from '@opengpex/editor/core/engine/raster/paintText';
+import { canvasToBlob, calculateHash } from '../utils/pixel-utils';
 import type { AssetService, Layer } from '@opengpex/editor/core/types';
 
 export class RasterizeDispatcher {
   constructor(
     private bridge: WorkerBridge,
-    private assets: AssetService,
+    private assets?: AssetService,
   ) {}
 
   /**
@@ -53,9 +60,9 @@ export class RasterizeDispatcher {
    *
    * @param layer - The layer to rasterize
    * @param opts  - Optional DPR for retina resolution
-   * @returns RasterizeResult with the rasterized bitmap blob
+   * @returns RasterizedImage with the rasterized bitmap blob
    */
-  async layer(layer: Layer, opts?: { dpr?: number }): Promise<RasterizeResult> {
+  async layer(layer: Layer, opts?: { dpr?: number }): Promise<RasterizedImage> {
     const dpr = opts?.dpr ?? ((typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
     const w = layer.bounding.w || 1;
     const h = layer.bounding.h || 1;
@@ -64,20 +71,30 @@ export class RasterizeDispatcher {
     ctx.scale(dpr, dpr);
 
     // Use shared painter to render the layer content (text/color/vector)
-    drawLayerInstance(ctx, layer, null);
+    drawLayerInstance(ctx, layer);
 
     const blob = await canvasToBlob(canvas);
     const hash = await calculateHash(blob);
-    const tileMeta = buildTileMeta(Math.ceil(w * dpr), Math.ceil(h * dpr), dpr);
 
-    const data: PixelResultData = {
-      blob,
-      hash,
-      tileMeta,
-      depth: 8,
-      bounds: { x: 0, y: 0, w: Math.ceil(w * dpr), h: Math.ceil(h * dpr) },
+    const pxW = Math.ceil(w * dpr);
+    const pxH = Math.ceil(h * dpr);
+
+    const highDepth =
+      layer.type === 'text' && layer.textData
+        ? buildTextHighDepth(layer, pxW, pxH, dpr)
+        : undefined;
+
+    return {
+      displayBlob: blob,
+      width: pxW,
+      height: pxH,
+      dprScale: dpr,
+      colorIdentity: highDepth
+        ? { gamut: highDepth.space, trc: 'srgb-trc', bitDepth: 16, dataFormat: 'rgba16float' }
+        : { gamut: 'srgb', trc: 'srgb-trc', bitDepth: 8 },
+      highDepthSource: highDepth ? { data: highDepth.data, width: pxW, height: pxH } : undefined,
+      bounds: { x: 0, y: 0, w: pxW, h: pxH },
+      precomputedHash: hash,
     };
-
-    return new RasterizeResult(data, this.assets);
   }
 }

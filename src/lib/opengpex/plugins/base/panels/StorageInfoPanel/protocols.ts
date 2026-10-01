@@ -56,13 +56,6 @@ export interface AssetMetric {
   refCount: number;
   usages: AssetUsage[];
   tags: ('active' | 'history' | 'clipboard' | 'shared')[];
-  tileMeta?: {
-    width: number;
-    height: number;
-    cols?: number;
-    rows?: number;
-    [key: string]: unknown;
-  };
 }
 
 /**
@@ -97,8 +90,11 @@ export interface FrameMetric {
   historyCount: number;
   // Frame-level document information
   dpi: number;
-  bitDepth: 8 | 16 | 32;
-  colorSpace: string;
+  // NOTE: no `bitDepth` / `colorSpace` here. Per §8.4.4 R2 colour truth is
+  // per-ASSET (`StoredAsset.colorIdentity`), never frame-level, so a
+  // document-wide answer would be a fiction as soon as two differently-tagged
+  // assets coexist. Both fields were write-only (nothing rendered them); a
+  // per-asset badge belongs on {@link AssetMetric}, keyed off the real identity.
   sourceFileName?: string;
   sourceFormat?: string;
 }

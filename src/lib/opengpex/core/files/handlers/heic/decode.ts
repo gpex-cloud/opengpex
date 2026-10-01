@@ -10,34 +10,48 @@
  */
 
 /**
- * HEIC decode — HEIC→JPEG transcoding + color pipeline routing.
+ * HEIC decode — pure pixel producer driven by the pre-resolved IngestDecision.
  *
- * HEIC is not browser-natively decodable in all environments,
- * so we transcode to JPEG first, then apply the color pipeline.
+ * The handler does not sniff metadata or derive a colour
+ * strategy of its own. The FileService entry injects `metadata` + `decision`
+ * (the single `resolveIngestDecision` call), and this function simply executes
+ * the assigned `decision.decodeChannel`. `colorIdentity` / `sourceBlob` are
+ * mounted by the entry — hence the `Omit` return.
+ *
+ * HEIC specifics vs. the jpeg/png pilots:
+ *   - HEIC is not browser-natively decodable in all environments, so it ALWAYS
+ *     routes to the `heic-to` channel (`format === 'heic'` short-circuits in
+ *     `resolveIngestDecision` before any colour-space branch). Step one is thus
+ *     always a HEIC → JPEG transcode (q0.95 proxy container).
+ *   - Colour handling then splits on the pre-resolved `colorIdentity.gamut`,
+ *     exactly like TIFF splits inside its `vips` channel: standard sRGB / P3
+ *     keeps the transcoded JPEG verbatim as the displayBlob, while 8-bit wide
+ *     gamut (Adobe RGB / ProPhoto) reads the transcoded pixels back and hands
+ *     them to the shared `decodeWideGamut8` (f16 lift + P3 proxy fold).
  */
 
-import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/types';
-import type { DecodeOptions, DecodeResult } from '../../types';
-import type { ImageMetadata } from '../../types';
-import { bitmapToCanvas } from '../../index';
-import { iccToBase64, parseIccProfileName } from '../../icc';
-import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
-import { resolveColorSpaceForFormat, getImportStrategy } from '@opengpex/editor/core/color/ColorPipeline';
-import { extractHeicMetadata } from './metadata';
+import type { ImageMetadata, DecodedPayload } from '../../types';
+import type { IngestDecision } from '../../strategy';
+import { decodeWideGamut8 } from '../../shared/lib-custom';
+import { readImageDimensions } from '../../utils';
 import { convertHeicToBlob } from './transcode';
 
 /**
- * Decode a HEIC file: extract metadata (V2), transcode to JPEG, then color pipeline routing.
+ * Decode a HEIC file by executing the entry-resolved ingest decision.
  */
 export async function decodeHeic(
   file: File,
-  pixels: PixelService,
-  _options?: DecodeOptions,
-): Promise<DecodeResult> {
-  // 1. Extract metadata before transcoding (HEIC container has EXIF)
-  const metadata: ImageMetadata = await extractHeicMetadata(file);
+  _metadata: ImageMetadata,
+  decision: IngestDecision,
+): Promise<DecodedPayload[]> {
+  if (decision.decodeChannel !== 'heic-to') {
+    // HEIC only ever routes to 'heic-to'; any other channel is a decision/handler
+    // mismatch that must fail loudly rather than mis-decode.
+    throw new Error(`decodeHeic: unexpected decodeChannel '${decision.decodeChannel}'`);
+  }
 
-  // 2. Transcode HEIC → JPEG via heic-to (quality 0.9)
+  // 1. Transcode HEIC → JPEG (q0.95 proxy container) via heic-to. The browser's
+  //    native HEIC decoder (where available) already colour-manages this step.
   const jpegBlob = await convertHeicToBlob(file);
   const safeFile = new File(
     [jpegBlob],
@@ -45,75 +59,30 @@ export async function decodeHeic(
     { type: 'image/jpeg' },
   );
 
-  // 3. Strategy-based color pipeline routing (applied to transcoded JPEG)
-  const detectedCS = resolveColorSpaceForFormat('heic', metadata.colorSpace);
-  const strategy = getImportStrategy(detectedCS);
-
+  const gamut = decision.colorIdentity.gamut;
   let displayBlob: Blob = safeFile;
   let dimensions: { w: number; h: number };
+  let highDepthSource: DecodedPayload['highDepthSource'];
 
-  switch (strategy.conversion) {
-    case 'none': {
-      // Zero conversion: browser-native decode is sufficient (sRGB, P3 from iPhone)
-      const img = await createImageBitmap(safeFile);
-      dimensions = { w: img.width, h: img.height };
-      img.close();
-      break;
-    }
-
-    case 'matrix': {
-      // 3×3 matrix conversion (e.g. AdobeRGB→P3)
-      const img = await createImageBitmap(safeFile, { colorSpaceConversion: 'none' });
-      const w = img.width;
-      const h = img.height;
-      dimensions = { w, h };
-
-      const tmpCanvas = bitmapToCanvas(img);
-      img.close();
-      const tmpCtx = tmpCanvas.getContext('2d')!;
-      const imageData = tmpCtx.getImageData(0, 0, w, h);
-
-      convertImageDataColorSpace(imageData.data, detectedCS as WorkingColorSpace, strategy.frameColorSpace);
-
-      const outCS: PredefinedColorSpace = strategy.frameColorSpace === 'display-p3' ? 'display-p3' : 'srgb';
-      const outCanvas = new OffscreenCanvas(w, h);
-      const outCtx = outCanvas.getContext('2d', { colorSpace: outCS })!;
-      const outImageData = new ImageData(imageData.data, w, h, { colorSpace: outCS });
-      outCtx.putImageData(outImageData, 0, 0);
-      displayBlob = await outCanvas.convertToBlob({ type: 'image/png' });
-      break;
-    }
-
-    case 'icc-engine': {
-      // Full ICC engine conversion (custom ICC profiles, unknown spaces)
-      const bytes = new Uint8Array(await safeFile.arrayBuffer());
-      const { width, height, data, iccProfileData } = await pixels.fileIO.iccToSrgb(bytes);
-      dimensions = { w: width, h: height };
-
-      if (iccProfileData && iccProfileData.length > 0) {
-        if (!metadata.raw.icc) {
-          metadata.raw.icc = {
-            data: iccToBase64(iccProfileData),
-            name: parseIccProfileName(iccProfileData) || 'Embedded',
-          };
-        }
-      }
-
-      const canvas = new OffscreenCanvas(width, height);
-      const ctx = canvas.getContext('2d')!;
-      const clamped = new Uint8ClampedArray(data.length);
-      clamped.set(data);
-      ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
-      displayBlob = await canvas.convertToBlob({ type: 'image/png' });
-      break;
-    }
+  if (gamut === 'adobe-rgb' || gamut === 'prophoto-rgb') {
+    // 8-bit wide-gamut: decode with browser colour management OFF, lift f16
+    // naked line AND fold P3 display proxy in one call.
+    // `gamut` is already narrowed to 'adobe-rgb' | 'prophoto-rgb' here.
+    const decoded = await decodeWideGamut8(safeFile, gamut);
+    dimensions = { w: decoded.width, h: decoded.height };
+    displayBlob = decoded.displayBlob;
+    // Bare payload only — container/trc/gamut live on the sibling `colorIdentity`
+    // the entry injects (Path B).
+    highDepthSource = {
+      data: decoded.highDepthSource.data,
+      width: decoded.highDepthSource.width,
+      height: decoded.highDepthSource.height,
+    };
+  } else {
+    // Standard sRGB / Display-P3 (incl. unknown → srgb): browser-native decode of
+    // the transcoded JPEG is sufficient; its bytes stay the verbatim displayBlob.
+    dimensions = await readImageDimensions(safeFile);
   }
 
-  // HEIC: sourceBlob retained for revert (original HEIC needed for metadata re-extraction)
-  return {
-    dimensions,
-    metadata,
-    subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }],
-    sourceBlob: file,
-  };
+  return [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0, highDepthSource }];
 }

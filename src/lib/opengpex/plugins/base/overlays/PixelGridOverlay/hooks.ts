@@ -34,8 +34,8 @@ export function usePixelGridCommands() {
   const isEnabled = selfConfig?.enabled ?? true;
   const isHardEdge = selfConfig?.hardEdge ?? false;
   const minPixelSize = selfConfig?.minPixelSize ?? P.DEFAULT_MIN_PIXEL_SIZE;
-  const gridColor = selfConfig?.color ?? P.DEFAULT_GRID_COLOR;
-  const gridCasingColor = selfConfig?.casingColor ?? P.DEFAULT_GRID_CASING_COLOR;
+  const gridColor = selfConfig?.gridColor ?? P.DEFAULT_GRID_COLOR;
+  const gridCasingColor = selfConfig?.gridCasingColor ?? P.DEFAULT_GRID_CASING_COLOR;
 
   return useMemo(() => ({
     isEnabled,

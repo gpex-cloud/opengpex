@@ -60,6 +60,9 @@ export interface SmartGuideData {
   isBirthY?: boolean;
 }
 
+/** Default snap threshold fallback in screen pixels (15 for backward-compatible operator fallback) */
+export const DEFAULT_SNAP_THRESHOLD = 15;
+
 /**
  * Snap filter options for fine-grained control over which layers participate.
  */
@@ -72,6 +75,9 @@ export interface SnapFilterOptions {
   ignoreSmallLayers?: boolean;
   smallLayerThreshold?: number;
   maxSnapTargets?: number;
+  /** Sticky guide tracking for anti-jitter persistence */
+  lastGuideX?: number;
+  lastGuideY?: number;
 }
 
 /**
@@ -86,9 +92,10 @@ export function snapRect(
   const c2w = Matrix3x3.translate(-iw / 2, -ih / 2);
   const w2c = c2w.inverse();
 
+  const threshold = options.threshold ?? DEFAULT_SNAP_THRESHOLD;
   const snapped = getSnappedPosition(
     asWorldPoint(c2w.apply({ x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 })),
-    { w: rect.w, h: rect.h }, frame, options.excludeLayerId || '', options.threshold ?? 15,
+    { w: rect.w, h: rect.h }, frame, options.excludeLayerId || '', threshold,
     options
   );
 
@@ -155,7 +162,7 @@ function getSnappedPosition(
   targetDim: Dimensions,
   frame: Frame,
   activeLayerId: string,
-  threshold: number = 15,
+  threshold: number = DEFAULT_SNAP_THRESHOLD,
   filterOptions: SnapFilterOptions = {}
 ): { x: number, y: number, smartguides: SmartGuideData | null } {
   const cameraScale = frame.camera?.k || 1;
@@ -231,7 +238,7 @@ function getSnappedPosition(
         const db = Math.hypot(b.cx - w_pos.x, b.cy - w_pos.y);
         return da - db;
       })
-      .slice(0, filterOptions.maxSnapTargets || 8);
+      .slice(0, filterOptions.maxSnapTargets || 10);
 
     for (const l of layerTargets) {
       const aabb = getLayerWorldAABB(l);
@@ -272,9 +279,18 @@ function getSnappedPosition(
         const srcEdge = w_pos.x + dx;
         const diff = Math.abs(srcEdge - tEx);
 
+        // 💡 Sticky lock preference: if this guide was active previously, give it priority
+        // to prevent jitter between close targets
+        const isSticky = filterOptions.lastGuideX !== undefined && Math.abs(tEx - filterOptions.lastGuideX) < 1e-2;
         // 💡 Center-to-center preference: 0.8 discount for center alignment stability
         const isCenterToCenter = (dx === 0 && tEx === t.center.x);
-        const evalDiff = isCenterToCenter ? diff * 0.8 : diff;
+
+        let evalDiff = diff;
+        if (isSticky) {
+          evalDiff *= 0.55;
+        } else if (isCenterToCenter) {
+          evalDiff *= 0.8;
+        }
 
         if (evalDiff < bestDiffX) {
           bestDiffX = evalDiff;
@@ -293,9 +309,17 @@ function getSnappedPosition(
         const srcEdge = w_pos.y + dy;
         const diff = Math.abs(srcEdge - tEy);
 
+        // 💡 Sticky lock preference for Y axis
+        const isSticky = filterOptions.lastGuideY !== undefined && Math.abs(tEy - filterOptions.lastGuideY) < 1e-2;
         // 💡 Center-to-center preference coefficient for Y axis
         const isCenterToCenter = (dy === 0 && tEy === t.center.y);
-        const evalDiff = isCenterToCenter ? diff * 0.8 : diff;
+
+        let evalDiff = diff;
+        if (isSticky) {
+          evalDiff *= 0.55;
+        } else if (isCenterToCenter) {
+          evalDiff *= 0.8;
+        }
 
         if (evalDiff < bestDiffY) {
           bestDiffY = evalDiff;
@@ -344,7 +368,7 @@ export function snapEdge(
   options: { threshold?: number } & SnapFilterOptions = {}
 ): { rect: Rect, smartguides: SmartGuideData | null } {
   const cameraScale = frame.camera?.k || 1;
-  const threshold = (options.threshold ?? 15) / cameraScale;
+  const threshold = (options.threshold ?? DEFAULT_SNAP_THRESHOLD) / cameraScale;
 
   // Determine which edges are active based on handle
   const snapX = handle.includes('e') ? 'right' : handle.includes('w') ? 'left' : null;
@@ -475,7 +499,7 @@ export function snapEdgeRotated(
   options: { threshold?: number } & SnapFilterOptions = {}
 ): { rect: Rect, smartguides: SmartGuideData | null } {
   const cameraScale = frame.camera?.k || 1;
-  const threshold = (options.threshold ?? 15) / cameraScale;
+  const threshold = (options.threshold ?? DEFAULT_SNAP_THRESHOLD) / cameraScale;
   const { w: cw, h: ch } = frame.canvas;
 
   const O = buildPoseMatrix(pose);

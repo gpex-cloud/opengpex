@@ -30,6 +30,7 @@ import '../../overlays/MarkerOverlay/markers';
 import { getReferenceFontSize, MOSAIC_SIZE_PRESETS } from './protocols';
 import type { ActiveCraft, CraftType, CraftDrawerConfig, PendingTextData } from './protocols';
 import type { TextLayerData, MarkerKind, MarkerData, MarkerDataBase } from '@opengpex/editor/core/types';
+import { fromHex, type ColorValue } from '@opengpex/editor/core/engine/color';
 import type { CraftDrawerCommandsMap, CraftDrawerSignalsMap } from './commands.d';
 
 // ─── useCraftDrawer ────────────────────────────────────────────────────────────
@@ -61,7 +62,7 @@ export function useCraftDrawer() {
  * Encapsulates states and commands required for tool button group.
  */
 export function useCraftTrigger() {
-  const { setCraftCmd } = usePluginCommands<CraftDrawerCommandsMap>();
+  const { setCraftCmd, cycleMarkerForwardCmd, cycleMarkerBackwardCmd } = usePluginCommands<CraftDrawerCommandsMap>();
   const { activeCraftSignal } = usePluginSignals<CraftDrawerSignalsMap>();
 
   const activeCraft = (activeCraftSignal?.value ?? null) as ActiveCraft;
@@ -72,6 +73,31 @@ export function useCraftTrigger() {
     },
     [setCraftCmd]
   );
+
+  // Tab / Shift+Tab cycling over marker kinds while in marker craft mode
+  useEffect(() => {
+    if (activeCraft !== 'marker') return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+
+      const target = e.target as HTMLElement | null;
+      const isTextInput =
+        (target?.tagName === 'INPUT' && (target as HTMLInputElement).type !== 'range') ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.isContentEditable;
+      if (isTextInput) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.shiftKey) {
+        cycleMarkerBackwardCmd?.execute();
+      } else {
+        cycleMarkerForwardCmd?.execute();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
+  }, [activeCraft, cycleMarkerForwardCmd, cycleMarkerBackwardCmd]);
 
   return { activeCraft, selectCraft };
 }
@@ -121,6 +147,9 @@ const DEFAULT_TEXT_STYLE: Required<PendingTextData> = {
   underline: false,
   strikethrough: false,
 };
+
+/** Stable fallback ColorValue when no `pendingColor` exists yet (module-scoped so identity is stable across renders). */
+const DEFAULT_TEXT_COLOR: ColorValue = fromHex('#FFFFFF');
 
 // ─── useTextPanel ──────────────────────────────────────────────────────────────
 
@@ -175,7 +204,7 @@ export function useTextPanel() {
       italic: pendingTextData.italic ?? DEFAULT_TEXT_STYLE.italic,
       underline: pendingTextData.underline ?? DEFAULT_TEXT_STYLE.underline,
       strikethrough: pendingTextData.strikethrough ?? DEFAULT_TEXT_STYLE.strikethrough,
-      color: '#FFFFFF', // placeholder, actual color managed by ColorOptions
+      color: DEFAULT_TEXT_COLOR, // placeholder, actual color managed by ColorOptions
       boxMode: 'auto',
     } as TextLayerData;
   }, [layerTextData, pendingTextData, userExplicitFontSize, referenceFontSize]);
@@ -274,12 +303,12 @@ export function useTextPanel() {
   );
 
   // ─── Color Synchronization ──────────────────────────────────────────────────
-  const [colorConfig] = usePluginConfig<{ pendingColor?: string }>(ColorOptionsAPI.configKey);
-  const globalColor = colorConfig?.pendingColor || '#FFFFFF';
-  const textColor = layerTextData?.color || globalColor;
+  const [colorConfig] = usePluginConfig<{ pendingColor?: ColorValue }>(ColorOptionsAPI.configKey);
+  const globalColor: ColorValue = colorConfig?.pendingColor ?? DEFAULT_TEXT_COLOR;
+  const textColor: ColorValue = layerTextData?.color || globalColor;
 
   const updateTextColor = useCallback(
-    (color: string) => {
+    (color: ColorValue) => {
       actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: color });
       if (targetLayerId && layerTextData) {
         updateTextData({ color });
@@ -289,7 +318,7 @@ export function useTextPanel() {
   );
 
   const updateTextColorLive = useCallback(
-    (color: string) => {
+    (color: ColorValue) => {
       actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: color });
       if (targetLayerId && layerTextData) {
         updateTextDataLive({ color });
@@ -409,9 +438,11 @@ export function useBrushPanel() {
   const brushOpacity = selfConfig.brushOpacity ?? 100;
   const brushHardness = selfConfig.brushHardness ?? 80;
 
-  // Reads brush color (from pendingColor of ColorOptions)
-  const [colorConfig] = usePluginConfig<{ pendingColor?: string }>(ColorOptionsAPI.configKey);
-  const brushColor = colorConfig?.pendingColor || '#FFFFFF';
+  // Reads brush color (from pendingColor of ColorOptions).
+  // PHASE 1 BRIDGE: brush colour stays a hex string (brush wide-gamut is out of
+  // scope), so read `.hex` and wrap writes in fromHex.
+  const [colorConfig] = usePluginConfig<{ pendingColor?: ColorValue }>(ColorOptionsAPI.configKey);
+  const brushColor = colorConfig?.pendingColor?.hex || '#FFFFFF';
 
   const updateBrushParam = useCallback(
     (key: string, value: number) => {
@@ -422,7 +453,7 @@ export function useBrushPanel() {
 
   const updateBrushColor = useCallback(
     (color: string) => {
-      actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: color });
+      actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: fromHex(color) });
     },
     [actions]
   );
@@ -443,8 +474,8 @@ export function useBrushPanel() {
 /** Default pending marker style (stroke/fill) used before any layer is selected. */
 const DEFAULT_MARKER_STYLE: MarkerDataBase = {
   kind: 'rect',
-  stroke: { color: '#FF3B30', width: 3 },
-  fill: { color: '#FF3B30', opacity: 0 },
+  stroke: { color: fromHex('#FF3B30'), width: 3 },
+  fill: { color: fromHex('#FF3B30'), opacity: 0 },
 };
 
 /**

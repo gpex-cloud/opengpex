@@ -13,7 +13,7 @@
 
 import { useMemo } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
-import { Frame, Layer, AssetEntryInfo } from '@opengpex/editor/core/types';
+import { Frame, Layer, InMemAsset } from '@opengpex/editor/core/types';
 import * as P from '../protocols';
 
 /**
@@ -101,7 +101,7 @@ export const useAssetPool = (isEnabled: boolean, refreshKey: number) => {
       });
     });
 
-    const buildAssetMetric = (id: string, entry: AssetEntryInfo): P.AssetMetric => {
+    const buildAssetMetric = (id: string, entry: InMemAsset): P.AssetMetric => {
       const usages = usagesMap.get(id) || [];
       const tags: P.AssetMetric['tags'] = [];
       const tagSet = tagsMap.get(id) || new Set();
@@ -121,7 +121,6 @@ export const useAssetPool = (isEnabled: boolean, refreshKey: number) => {
         refCount: usages.length,
         usages,
         tags,
-        tileMeta: entry.tileMeta as P.AssetMetric['tileMeta']
       };
     };
 

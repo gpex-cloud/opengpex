@@ -13,15 +13,15 @@
 
 import { useMemo } from 'react';
 import { useEditorState } from '@opengpex/editor/core/context';
-import { AssetEntryInfo } from '@opengpex/editor/core/types';
+import { InMemAsset } from '@opengpex/editor/core/types';
 import * as P from '../protocols';
 
 interface AssetPoolResult {
-  pool: Record<string, AssetEntryInfo>;
+  pool: Record<string, InMemAsset>;
   usagesMap: Map<string, P.AssetUsage[]>;
   tagsMap: Map<string, Set<P.AssetMetric['tags'][number]>>;
   activeAssetIds: Set<string>;
-  buildAssetMetric: (id: string, entry: AssetEntryInfo) => P.AssetMetric;
+  buildAssetMetric: (id: string, entry: InMemAsset) => P.AssetMetric;
 }
 
 /**
@@ -93,8 +93,6 @@ export const useFrameMetrics = (
         layers,
         historyCount: state.history.byFrameId[f.id]?.past?.length || 0,
         dpi: f.dpi,
-        bitDepth: f.bitDepth,
-        colorSpace: f.colorSpace,
         sourceFileName: f.metadata?.sourceFileName,
         sourceFormat: f.metadata?.sourceFormat,
       };

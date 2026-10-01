@@ -20,6 +20,7 @@
 "use client";
 
 import { EditorPlugin } from "@opengpex/editor/core/types";
+import { fromHex } from "@opengpex/editor/core/engine/color";
 import { ColorOptionsComponent } from "./components";
 import { COLOR_OPTIONS_COMMANDS } from "./commands";
 import * as P from "./protocols";
@@ -47,7 +48,17 @@ export const plugin: EditorPlugin = {
   order: 300,
   component: ColorOptionsComponent,
   commands: Object.values(COLOR_OPTIONS_COMMANDS),
-  initialConfig: { pendingColor: "#EAB308" },
+  signals: [
+    // Ephemeral modal lifecycle of the canvas eyedropper. `public` so other
+    // plugins / overlays can tell that the sampler owns the pointer.
+    {
+      id: P.SIGNAL_SAMPLER_ACTIVE,
+      name: "Color Sampler Active",
+      defaultValue: false,
+      scope: "public",
+    },
+  ],
+  initialConfig: { pendingColor: fromHex("#EAB308") },
 };
 
 export default plugin;

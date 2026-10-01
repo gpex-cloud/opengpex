@@ -147,7 +147,9 @@ export const SNAP_IGNORE_SMALL_LAYERS: boolean = true;
 /** Small layer threshold in screen pixels² (default 400 ≈ 20×20) */
 export const SNAP_SMALL_LAYER_THRESHOLD: number = 400;
 /** Maximum number of layers participating in snap calculation */
-export const SNAP_MAX_TARGETS: number = 50;
+export const SNAP_MAX_TARGETS: number = 10;
+/** Default snap threshold in screen pixels (Photoshop-like 6px for gentle, accurate snapping) */
+export const SNAP_THRESHOLD: number = 6;
 /** Edge snap scope during resize: 'recanvas' | 'all' */
 export const SNAP_EDGE_SCOPE: 'recanvas' | 'all' = 'recanvas';
 

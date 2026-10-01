@@ -23,7 +23,20 @@
  * .gpex is a container format that bundles:
  *   - A WebP thumbnail (for previews)
  *   - A JSON manifest (metadata: frame info, dimensions, etc.)
- *   - A ZIP payload (state.json + assets/ blobs)
+ *   - A ZIP payload (state.json + assets-manifest.json + assets/ + raw/ + dec/)
+ *
+ * Payload ZIP layout:
+ *   state.json               dehydrated Frame
+ *   assets-manifest.json     `GpexAssetManifest` — per-asset geometry + colour
+ *                            identity + provenance (see below). Absent in
+ *                            legacy containers; readers degrade to category ①.
+ *   assets/{id}.png|webp     8-bit display bitmap, one per referenced assetId
+ *   raw/{fileHash}           original ENCODED source file (category ②),
+ *                            deduplicated by content hash — multi-page imports
+ *                            share one copy
+ *   dec/{id}.bin             DECODED high-depth naked pixels (category ③),
+ *                            a bare `Uint16Array`/`Float32Array` byte image
+ *                            read according to `colorIdentity.dataFormat`
  *
  * Binary Layout:
  * ┌────────────────────────────────────────────────────┐
@@ -43,7 +56,49 @@
  * for local export/import, drag-and-drop, or any file I/O scenario.
  */
 
+import type { ColorIdentity } from '@opengpex/editor/core/storage/asset/AssetStore';
+
 // ─── Types ──────────────────────────────────────────────────────────────────
+
+/**
+ * GpexAssetMeta — one asset's entry in the INNER `assets-manifest.json`, which
+ * travels inside the payload ZIP.
+ *
+ * Do not confuse it with `GpexManifest` below: that one is the OUTER file
+ * header (frameLocalId / canvas size / editor version) the cloud server reads
+ * without touching the ZIP. This one is the per-asset hydration contract that
+ * lets `unpack` restore an asset's exact identity — geometry, colour identity
+ * and provenance — with zero re-decoding.
+ */
+export interface GpexAssetMeta {
+  id: string;
+  width: number;
+  height: number;
+  dprScale?: number;
+  colorIdentity: ColorIdentity;
+  mimeType: string;
+  /** Original file name (extension drives format routing on cold recovery). */
+  sourceFileName?: string;
+  /**
+   * Content hash of this asset's ENCODED source file; written only when
+   * `assets.getRaw(id)` was non-empty at pack time (category ②). Multi-page
+   * imports share one source file, so several assets carry the same value and
+   * `raw/` holds exactly one copy.
+   */
+  rawFileHash?: string;
+  /**
+   * This asset is a render bake product (merge / rasterize / peel / create):
+   * no source file exists to rebuild it from, so `dec/{id}.bin` ships the
+   * naked pixels verbatim (category ③). Mutually exclusive with `rawFileHash`.
+   */
+  bakedDecOnly?: boolean;
+}
+
+/** Contents of `assets-manifest.json` inside the payload ZIP. */
+export interface GpexAssetManifest {
+  version: 1;
+  assets: Record<string, GpexAssetMeta>;
+}
 
 /**
  * Manifest embedded in every .gpex file.
@@ -58,7 +113,15 @@ export interface GpexManifest {
   canvasHeight: number;
   layerCount: number;
   assetCount: number;
-  /** Document bit depth (8 / 16 / 32). Defaults to 8 when absent (backward-compatible). */
+  /**
+   * Document bit depth (8 / 16 / 32). Defaults to 8 when absent.
+   *
+   * LEGACY — READ-ONLY (§8.4.4 R2): no longer written. It was fed from the
+   * deleted `Frame.bitDepth`, and a .gpex carries MANY assets whose depths can
+   * differ, so one document-wide number is a fiction. Depth now travels per
+   * asset (`StoredAsset.colorIdentity.bitDepth`) inside the payload ZIP. Kept
+   * optional so manifests written by older builds still parse.
+   */
   bitDepth?: 8 | 16 | 32;
   /** Document resolution in dots per inch. Defaults to 72 when absent (backward-compatible). */
   dpi?: number;

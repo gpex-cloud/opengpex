@@ -26,6 +26,7 @@ import { CraftDrawerAPI, getReferenceFontSize } from '../../drawers/CraftDrawer/
 import type { PendingTextData } from '../../drawers/CraftDrawer/protocols';
 import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, _CMD_PLACE_UID, _CMD_EDIT_START_UID } from './protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
+import { fromHex, type ColorValue } from '@opengpex/editor/core/engine/color';
 
 /** Shared signal keys (cross-plugin constants) */
 const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
@@ -449,8 +450,8 @@ export const createTextPlaceHandler = (): InteractionHandler => {
       const alignedCx = alignedCenter.x;
       const alignedCy = alignedCenter.y;
 
-      const colorConfig = e.state.pluginConfig[ColorOptionsAPI.configKey] as { pendingColor?: string } | undefined;
-      const initialColor = colorConfig?.pendingColor || '#FFFFFF';
+      const colorConfig = e.state.pluginConfig[ColorOptionsAPI.configKey] as { pendingColor?: ColorValue } | undefined;
+      const initialColor: ColorValue = colorConfig?.pendingColor ?? fromHex('#FFFFFF');
 
       // Read pending text style from CraftDrawer's pluginConfig (user's pre-edit choices)
       const craftConfig = e.state.pluginConfig[CraftDrawerAPI.configKey] as { pendingTextData?: PendingTextData } | undefined;

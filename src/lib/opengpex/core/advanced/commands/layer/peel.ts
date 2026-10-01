@@ -232,12 +232,12 @@ export const LayerPeelCommands = {
           // Participants in z-order: host (bottom) → frags (stamps) → exchange (top)
           const participants = [stripAdj(host), ...frags.map(stripAdj), stripAdj(exchange)];
 
-          const { result, bounds } = await pixels.render.compositeLayers(participants, activeFrame);
-          const { assetId, url: assetUrl } = await result.toAsset();
+          const composited = await pixels.render.compositeLayers(participants, activeFrame);
+          const { assetId, url: assetUrl } = await assets.storeBundle(composited);
 
           // Ensure bitmap is decoded into SourceBitmapCache BEFORE state update.
-          // toAsset().inject() creates an object URL backed by the in-memory blob;
-          // loadBitmap is cache-first and fetches from that URL (no network, instant).
+          // storeBundle() registers the asset (onRegistered hook warms both caches);
+          // loadBitmap is cache-first so this is instant, no network.
           await pixels.image.loadBitmap(assetUrl);
 
           // [4] Start transaction update (commit all changes atomically)
@@ -250,10 +250,10 @@ export const LayerPeelCommands = {
             tx.edit(host.id)
               .setAsset({ assetId, url: assetUrl })
               .patch({
-                cx: bounds.cx,
-                cy: bounds.cy,
-                bounding: { w: bounds.w, h: bounds.h },
-                visibleShape: asLocalShape({ x: 0, y: 0, w: bounds.w, h: bounds.h }),
+                cx: composited.bounds.x + composited.bounds.w / 2,
+                cy: composited.bounds.y + composited.bounds.h / 2,
+                bounding: { w: composited.bounds.w, h: composited.bounds.h },
+                visibleShape: asLocalShape({ x: 0, y: 0, w: composited.bounds.w, h: composited.bounds.h }),
                 scale: 1,
                 rotation: 0,
                 flip: { h: false, v: false },

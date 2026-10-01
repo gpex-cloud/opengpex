@@ -27,7 +27,7 @@ import localforage from 'localforage';
 // 1. State driver (stores artboard JSON state)
 export const StateDriver = localforage.createInstance({
   name: 'OpenGPEX',
-  storeName: 'State_V1'
+  storeName: 'State_V2'
 });
 
 // 2. Asset driver (stores binary image Blob)

@@ -18,7 +18,7 @@
  */
 
 import { EditorContextValue, EditorCommand, Frame, Layer } from '@opengpex/editor/core/types';
-import { GifHandler } from '@opengpex/editor/core/files/handlers/gif';
+import type { GifHandler } from '@opengpex/editor/core/files/handlers/gif';
 
 import * as P from './protocols';
 
@@ -74,7 +74,7 @@ async function exportAnimatedGif(
    pixels: EditorContextValue['pixels'],
    config: P.AnimatedImagesConfig,
 ): Promise<Blob> {
-   const gifHandler = new GifHandler();
+   const { files } = ctx;
 
    // Collect GIF sequence layers (host layers only — no parentId)
    const hostLayers = activeFrame.layers.order
@@ -88,9 +88,8 @@ async function exportAnimatedGif(
    // If no multi-frame sequence found, export single frame
    if (sequenceLayers.length <= 1) {
       const result = await pixels.render.compositeFrame(activeFrame);
-      const blob = await result.toBlob('image/png');
-      const bitmap = await createImageBitmap(blob);
-      return gifHandler.encode(bitmap, {});
+      const bitmap = await createImageBitmap(result.displayBlob);
+      return files.encode(bitmap, 'image/gif', {});
    }
 
    // Animated export: load each frame layer's asset directly
@@ -129,5 +128,6 @@ async function exportAnimatedGif(
    }
 
    // config.loop: boolean → GIF loop count: 0 = infinite loop, 1 = play once
+   const gifHandler = files.getHandlerByMimeType('image/gif') as GifHandler;
    return gifHandler.encodeSequence(gifFrames, { loop: config.loop ? 0 : 1 });
 }

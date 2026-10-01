@@ -34,9 +34,9 @@
  *   whitepoint against real image data.
  *
  * - On top of the histogram we overlay the current levels-LUT curve, which
- *   is computed by the same `generateLevelsLUT` function the worker uses to
- *   bake the filter into pixels (`core/engine/filters/lut.ts`). Keeping the
- *   preview and the worker on ONE evaluator eliminates the "editor says one
+ *   is computed by the same `generateLevelsLUT` function the render path uses
+ *   to build the resident 1D LUT texture (`core/engine/color/luts.ts`). Keeping the
+ *   preview and the GPU on ONE evaluator eliminates the "editor says one
  *   thing, canvas shows another" class of bugs.
  *
  * - Two horizontal tracks below the histogram carry the handles:
@@ -80,7 +80,7 @@ import React, {
   useRef,
 } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { generateLevelsLUT } from "@opengpex/editor/core/engine/filters";
+import { generateLevelsLUT } from "@opengpex/editor/core/engine/color";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { LevelsState } from "@opengpex/editor/core/types/models";
 import type { AdjustmentDrawerCommandsMap } from "../commands.d";

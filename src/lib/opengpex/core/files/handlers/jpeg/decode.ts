@@ -10,107 +10,85 @@
  */
 
 /**
- * JPEG decode — color pipeline routing.
+ * JPEG decode — pure pixel producer driven by the pre-resolved IngestDecision.
  *
- * Uses the centralized ColorPipeline strategy to determine the correct
- * import conversion path (none / matrix / icc-engine).
+ * The handler no longer sniffs metadata or derives a colour
+ * strategy of its own. The FileService entry injects `metadata` + `decision`
+ * (the single `resolveIngestDecision` call), and this function simply executes
+ * the assigned `decision.decodeChannel`, delegating the 8-bit wide-gamut fold to
+ * the shared `decodeWideGamut8`. `colorIdentity` / `sourceBlob` are
+ * mounted by the entry — hence the `Omit` return.
  */
 
-import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/types';
-import type { DecodeOptions, DecodeResult } from '../../types';
-import type { ImageMetadata } from '../../types';
-import { bitmapToCanvas } from '../../index';
-import { iccToBase64, parseIccProfileName } from '../../icc';
-import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
-import { resolveColorSpaceForFormat, getImportStrategy, shouldRetainSourceBlob } from '@opengpex/editor/core/color/ColorPipeline';
-import { extractJpegMetadata } from './metadata';
-import { rgbaToBlob } from './utils';
+import type { ImageMetadata, DecodedPayload } from '../../types';
+import type { IngestDecision } from '../../strategy';
+import { iccToBase64, parseIccProfileName } from '../../shared/icc';
+import { getLibVips } from '../../shared/lib-vips';
+import { decodeWideGamut8 } from '../../shared/lib-custom';
+import { readImageDimensions, rgbaToBlob } from '../../utils';
 
 /**
- * Decode a JPEG file: extract metadata (V2) + color pipeline routing.
+ * Decode a JPEG file by executing the entry-resolved ingest decision.
  */
 export async function decodeJpeg(
   file: File,
-  pixels: PixelService,
-  _options?: DecodeOptions,
-): Promise<DecodeResult> {
-  const metadata: ImageMetadata = await extractJpegMetadata(file);
-
-  // ── Strategy-based color pipeline routing ──
-  const detectedCS = resolveColorSpaceForFormat('jpeg', metadata.colorSpace);
-  const strategy = getImportStrategy(detectedCS);
+  metadata: ImageMetadata,
+  decision: IngestDecision,
+): Promise<DecodedPayload[]> {
 
   let displayBlob: Blob = file;
   let dimensions: { w: number; h: number };
+  let highDepthSource: DecodedPayload['highDepthSource'];
 
-  switch (strategy.conversion) {
-    case 'none': {
-      // Zero conversion: browser-native decode is sufficient (sRGB, P3)
-      const img = await createImageBitmap(file);
-      dimensions = { w: img.width, h: img.height };
-      img.close();
-      // console.debug('[ColorMgmt] JPEG decode: %s conversion=none, detectedCS=%s, frameCS=%s', file.name, detectedCS, strategy.frameColorSpace);
+  switch (decision.decodeChannel) {
+    case 'image-bitmap': {
+      // Standard sRGB / Display-P3 8-bit: browser-native decode is sufficient,
+      // the original file bytes remain the verbatim displayBlob.
+      dimensions = await readImageDimensions(file);
       break;
     }
 
-    case 'matrix': {
-      // 3×3 matrix conversion (e.g. AdobeRGB→P3)
-      // Must disable browser auto color management to preserve source pixel values
-      const img = await createImageBitmap(file, { colorSpaceConversion: 'none' });
-      const w = img.width;
-      const h = img.height;
-      dimensions = { w, h };
-
-      // Use sRGB canvas to extract raw pixel values (avoids browser implicit conversion)
-      const tmpCanvas = bitmapToCanvas(img);
-      img.close();
-      const tmpCtx = tmpCanvas.getContext('2d')!;
-      const imageData = tmpCtx.getImageData(0, 0, w, h);
-
-      // Matrix conversion: detectedCS → frameColorSpace
-      convertImageDataColorSpace(imageData.data, detectedCS as WorkingColorSpace, strategy.frameColorSpace);
-
-      // Write to target-space canvas with correct color space tagging
-      const outCS: PredefinedColorSpace = strategy.frameColorSpace === 'display-p3' ? 'display-p3' : 'srgb';
-      const outCanvas = new OffscreenCanvas(w, h);
-      const outCtx = outCanvas.getContext('2d', { colorSpace: outCS })!;
-      const outImageData = new ImageData(imageData.data, w, h, { colorSpace: outCS });
-      outCtx.putImageData(outImageData, 0, 0);
-      displayBlob = await outCanvas.convertToBlob({ type: 'image/png' });
-
-      // console.debug('[ColorMgmt] JPEG decode: %s matrix %s→%s', file.name, detectedCS, strategy.frameColorSpace);
+    case 'wide-gamut-8': {
+      // 8-bit wide-gamut (Adobe RGB / ProPhoto): decode with browser colour management
+      // OFF, lift f16 naked line AND fold P3 preview in one call.
+      const decoded = await decodeWideGamut8(
+        file,
+        decision.colorIdentity.gamut as 'adobe-rgb' | 'prophoto-rgb',
+      );
+      dimensions = { w: decoded.width, h: decoded.height };
+      displayBlob = decoded.displayBlob;
+      // Bare payload only — container/trc/gamut live on the sibling `colorIdentity`
+      // the entry injects (Path B).
+      highDepthSource = {
+        data: decoded.highDepthSource.data,
+        width: decoded.highDepthSource.width,
+        height: decoded.highDepthSource.height,
+      };
       break;
     }
 
-    case 'icc-engine': {
-      // Full ICC engine conversion (CMYK, custom ICC profiles, unknown spaces)
+    case 'vips-icc': {
+      // CMYK / custom ICC profiles / unknown spaces: full LibVips ICC engine.
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const { width, height, data, iccProfileData } = await pixels.fileIO.iccToSrgb(bytes);
+      const { width, height, data, iccProfileData } = await getLibVips().iccToSrgb(bytes);
       dimensions = { w: width, h: height };
 
-      // Vips reliably extracts ICC — populate metadata if handler missed it
-      if (iccProfileData && iccProfileData.length > 0) {
-        if (!metadata.raw.icc) {
-          metadata.raw.icc = {
-            data: iccToBase64(iccProfileData),
-            name: parseIccProfileName(iccProfileData) || 'Embedded',
-          };
-        }
+      // Vips reliably extracts ICC — backfill metadata if the header sniff missed it.
+      if (iccProfileData && iccProfileData.length > 0 && !metadata.raw.icc) {
+        metadata.raw.icc = {
+          data: iccToBase64(iccProfileData),
+          name: parseIccProfileName(iccProfileData) || 'Embedded',
+        };
       }
       displayBlob = await rgbaToBlob(data, width, height);
-
-      // console.debug('[ColorMgmt] JPEG decode: %s icc-engine %s→%s', file.name, detectedCS, strategy.frameColorSpace);
       break;
     }
+
+    default:
+      // JPEG only ever routes to the three channels above; any other channel is
+      // a decision/handler mismatch that must fail loudly rather than silently.
+      throw new Error(`decodeJpeg: unexpected decodeChannel '${decision.decodeChannel}'`);
   }
 
-  // sourceBlob retention via centralized strategy
-  const sourceBlob = shouldRetainSourceBlob('jpeg', metadata, strategy.frameColorSpace) ? file : undefined;
-
-  return {
-    dimensions,
-    metadata,
-    subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }],
-    sourceBlob,
-  };
+  return [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0, highDepthSource }];
 }

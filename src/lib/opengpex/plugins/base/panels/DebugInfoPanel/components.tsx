@@ -46,7 +46,7 @@ import Switch from "@opengpex/editor/widgets/Switch";
 import { useEditorState, useEditorServices } from "@opengpex/editor/core/context";
 import { LayersDrawerAPI } from "../../drawers/LayersDrawer/protocols";
 import { useDebugInfo } from "./hooks";
-import type { PerfMetrics, MemoryMetrics, DebugMetrics, AppResourceMetrics, TileStats } from "./hooks";
+import type { PerfMetrics, MemoryMetrics, DebugMetrics, AppResourceMetrics } from "./hooks";
 import { PopupPanel } from "@opengpex/editor/widgets/PopupPanel";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -121,7 +121,7 @@ function CollapsibleSection({ icon, title, isOpen, onToggle, badge, borderTop, c
  * Subscribes to debug configuration and metrics.
  */
 export const DebugInfoComponent = React.memo(function DebugInfoComponent() {
-  const { metrics, perf, memory, resources, tiles, toggleCmd, isEnabled } = useDebugInfo();
+  const { metrics, perf, memory, resources, toggleCmd, isEnabled } = useDebugInfo();
 
   if (!isEnabled || !metrics) return null;
 
@@ -131,7 +131,6 @@ export const DebugInfoComponent = React.memo(function DebugInfoComponent() {
       perf={perf}
       memory={memory}
       resources={resources}
-      tiles={tiles}
       onToggle={() => toggleCmd?.execute()}
     />
   );
@@ -144,7 +143,6 @@ interface DebugInfoPanelProps {
   perf: PerfMetrics;
   memory: MemoryMetrics;
   resources: AppResourceMetrics;
-  tiles: TileStats;
   onToggle: () => void;
 }
 
@@ -155,7 +153,6 @@ const DebugInfoPanel = React.memo(function DebugInfoPanel({
   perf,
   memory,
   resources,
-  tiles,
   onToggle,
 }: DebugInfoPanelProps) {
   const { activeLayer } = metrics;
@@ -166,7 +163,6 @@ const DebugInfoPanel = React.memo(function DebugInfoPanel({
   // Section collapse state (Active Layer + Cursor Tracking default collapsed)
   const [sections, setSections] = useState({
     performance: true,
-    tileCache: true,
     activeLayer: false,
     cursorTracking: false,
     canvasViewport: true,
@@ -290,40 +286,6 @@ const DebugInfoPanel = React.memo(function DebugInfoPanel({
             </div>
           </div>
         </CollapsibleSection>
-
-        {/* ─── 1b. Tile Cache ─────────────────────────────────────────── */}
-        {(tiles.cached > 0 || tiles.pending > 0) && (
-          <CollapsibleSection
-            icon={<Database size={11} className="text-[var(--text-muted)]" />}
-            title="Tile Cache"
-            isOpen={sections.tileCache}
-            onToggle={() => toggle('tileCache')}
-          >
-            <div className="bg-[var(--bg-stage)] p-3 rounded-2xl border border-[var(--border-subtle)] space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-wider">LRU Capacity</span>
-                <span className="text-[8px] font-bold text-[var(--text-main)] tabular-nums">{tiles.cached} / {tiles.max}</span>
-              </div>
-              <div className="w-full h-1.5 rounded-full bg-[var(--bg-panel)] border border-[var(--border-subtle)] overflow-hidden">
-                <div className={`h-full rounded-full transition-all duration-500 ${tiles.utilization < 0.7 ? 'bg-emerald-500' : tiles.utilization < 0.9 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${Math.min(100, tiles.utilization * 100)}%` }} />
-              </div>
-              <div className="grid grid-cols-3 gap-1.5 text-[8px]">
-                <div className="flex flex-col items-center bg-[var(--bg-panel)] px-2 py-1.5 rounded-md border border-[var(--border-subtle)]">
-                  <span className="text-[7px] font-bold text-[var(--text-muted)] uppercase">Cached</span>
-                  <span className="font-black text-emerald-600 tabular-nums">{tiles.cached}</span>
-                </div>
-                <div className="flex flex-col items-center bg-[var(--bg-panel)] px-2 py-1.5 rounded-md border border-[var(--border-subtle)]">
-                  <span className="text-[7px] font-bold text-[var(--text-muted)] uppercase">Empty</span>
-                  <span className="font-black text-[var(--text-main)] tabular-nums">{tiles.empty}</span>
-                </div>
-                <div className="flex flex-col items-center bg-[var(--bg-panel)] px-2 py-1.5 rounded-md border border-[var(--border-subtle)]">
-                  <span className="text-[7px] font-bold text-[var(--text-muted)] uppercase">Pending</span>
-                  <span className={`font-black tabular-nums ${tiles.pending > 0 ? 'text-amber-500' : 'text-[var(--text-main)]'}`}>{tiles.pending}</span>
-                </div>
-              </div>
-            </div>
-          </CollapsibleSection>
-        )}
 
         {/* ─── 2. Canvas & Camera ─────────────────────────────────────── */}
         <CollapsibleSection

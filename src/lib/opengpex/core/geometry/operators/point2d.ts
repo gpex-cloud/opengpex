@@ -113,7 +113,7 @@ export function parsePathDataToRings(pathData: string): Point2D[][] {
  *
  * This is the inverse of `parsePathDataToRings` and the canonical serializer for
  * the `M x y L x y ... Z` format used across the geometry engine (matching the
- * output of `polygonToShape`, `intersectPathWithRect`, and `intersectPathWithPath`).
+ * output of `polygonToShape` and `intersectPathWithPath`).
  *
  * Rings with fewer than 3 points are dropped: a degenerate ring (a point or a
  * line) has no area and would break downstream boolean-clipping operations.

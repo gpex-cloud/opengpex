@@ -19,100 +19,55 @@
  * Chrome 111+ can produce P3 WebP when given a display-p3 canvas.
  */
 
-import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/types';
+import type { GamutId } from '@opengpex/editor/core/types';
+import { toGamutId } from '@opengpex/editor/core/types';
 import type { EncodeOptions } from '../../types';
 import { bitmapToCanvas } from '../../index';
-import { base64ToIcc, getStockIccProfile } from '../../icc';
-import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
-import { getExportStrategy, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
+import { base64ToIcc, getStockIccProfile } from '../../shared/icc';
+import { toCanvasColorSpace } from '@opengpex/editor/core/engine/color';
 import { injectWebpIcc, stripWebpIcc, injectWebpExif } from './riff';
 import { resetExifOrientation } from '../../metadata/tiff-ifd-reader';
 
 /**
  * Encode a canvas/bitmap to WebP with ICC injection.
+ *
+ * ── COLOR CONTRACT ──────────────────────────────────────────────────────────
+ * Pixels arrive ALREADY in the target gamut with the target TRC applied — the
+ * terminal `unpremultiplyEncodeGamut` in the export command did the single
+ * source→target matrix + TRC + quantization step, and there is NO reverse
+ * pre-encode conversion anymore (the `srgb-to-icc` step was removed mechanism-
+ * level: choosing sRGB now yields true sRGB, so `FileService.encode()` hands the
+ * pixels straight to this handler untouched).
+ * This encoder performs ZERO internal color conversion — it writes the WebP
+ * RIFF container and the ICC profile matching what the pixels now carry.
+ * (WebP has no browser PredefinedColorSpace beyond srgb/display-p3, so
+ * wide-gamut Adobe RGB / ProPhoto targets are routed to the PNG/TIFF raw lanes
+ * upstream and never reach this handler.)
  */
 export async function encodeWebp(
   source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
-  pixels: PixelService,
   options: EncodeOptions,
 ): Promise<Blob> {
   const quality = options.quality ?? 0.80;
   const meta = options.metadata;
   const config = options.exportConfig;
 
-  // ── Strategy-based export color pipeline ──
-  const frameCS: WorkingColorSpace = (config?.frameColorSpace as WorkingColorSpace) || 'srgb';
-  const exportStrategy = getExportStrategy(frameCS, 'webp');
   const embedIcc = config?.embedIcc ?? false;
 
-  // Centralized pixel conversion decision via resolveExportPixelConversion()
-  const pixelConv = resolveExportPixelConversion(
-    frameCS,
-    { colorSpace: meta?.colorSpace, hasIccProfileData: !!meta?.raw?.icc?.data },
-    embedIcc,
-    'webp',
-  );
+  // The gamut the incoming pixels ARE in = the egest decision's `targetGamut`;
+  // the pixels were already converted into it upstream.
+  const targetGamut: GamutId = (config?.targetGamut as GamutId | undefined) ?? 'srgb';
+  // Embed the SOURCE profile verbatim ONLY when the output gamut still equals the
+  // source file's gamut (exact round-trip) — the pixels are then in the source's
+  // numeric space, so a stock `targetGamut` profile would mislabel them.
+  const sourceIccMatchesTarget = !!meta?.raw?.icc?.data && toGamutId(meta?.colorSpace) === targetGamut;
+  const embedSourceIccVerbatim = sourceIccMatchesTarget;
 
-  let canvas: OffscreenCanvas;
-
-  if (pixelConv === 'p3-to-srgb') {
-    // Format fallback: P3 frame → sRGB (format doesn't support P3)
-    const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source, 'display-p3') : source as OffscreenCanvas;
-    const w = srcCanvas.width;
-    const h = srcCanvas.height;
-    const tmpCanvas = new OffscreenCanvas(w, h);
-    const tmpCtx = tmpCanvas.getContext('2d', { colorSpace: 'display-p3' })!;
-    tmpCtx.drawImage(srcCanvas, 0, 0);
-    const imageData = tmpCtx.getImageData(0, 0, w, h);
-    convertImageDataColorSpace(imageData.data, 'display-p3', 'srgb');
-    const outCanvas = new OffscreenCanvas(w, h);
-    const outCtx = outCanvas.getContext('2d')!;
-    outCtx.putImageData(new ImageData(imageData.data, w, h), 0, 0);
-    canvas = outCanvas;
-  } else if (pixelConv === 'srgb-to-icc') {
-    // Pixels are sRGB, need to convert to target ICC space before embedding.
-    // Atomic operation: srgbToIcc pixel conversion + RIFF ICC injection.
-    const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
-    const w = srcCanvas.width;
-    const h = srcCanvas.height;
-    const tmpCanvas = new OffscreenCanvas(w, h);
-    const tmpCtx = tmpCanvas.getContext('2d')!;
-    tmpCtx.drawImage(srcCanvas, 0, 0);
-    const imageData = tmpCtx.getImageData(0, 0, w, h);
-
-    // Step 1: Convert pixels from sRGB to target ICC space
-    const iccBytes = base64ToIcc(meta!.raw!.icc!.data);
-    const { data: convertedData } = await pixels.fileIO.srgbToIcc(
-      new Uint8Array(imageData.data.buffer),
-      w, h, iccBytes,
-    );
-
-    // Step 2: Put converted pixels onto canvas and encode to WebP
-    const clamped = new Uint8ClampedArray(convertedData.length);
-    clamped.set(convertedData);
-    const outCanvas = new OffscreenCanvas(w, h);
-    const outCtx = outCanvas.getContext('2d')!;
-    outCtx.putImageData(new ImageData(clamped, w, h), 0, 0);
-    const webpBlob = await outCanvas.convertToBlob({ type: 'image/webp', quality });
-
-    // Step 3: Inject ICC Profile into the WebP RIFF container
-    const webpBytes = new Uint8Array(await webpBlob.arrayBuffer());
-    const finalBytes = injectWebpIcc(webpBytes, iccBytes);
-
-    let resultBlob = new Blob([finalBytes.buffer as ArrayBuffer], { type: 'image/webp' });
-    // EXIF injection (post-ICC) — reset Orientation since pixels are already corrected
-    if (config?.preserveExif && meta?.raw?.exif) {
-      const exifRaw = resetExifOrientation(base64ToIcc(meta.raw.exif));
-      const webpBuf = new Uint8Array(await resultBlob.arrayBuffer());
-      const withExif = injectWebpExif(webpBuf, exifRaw);
-      resultBlob = new Blob([withExif.buffer as ArrayBuffer], { type: 'image/webp' });
-    }
-    return resultBlob;
-  } else {
-    canvas = source instanceof ImageBitmap
-      ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
-      : source as OffscreenCanvas;
-  }
+  // Pixels already carry targetGamut + its TRC — tag the canvas to match so the
+  // browser encoder does not reinterpret them. NO color conversion here.
+  const canvas: OffscreenCanvas = source instanceof ImageBitmap
+    ? bitmapToCanvas(source, toCanvasColorSpace(targetGamut))
+    : source as OffscreenCanvas;
 
   const baseBlob = await canvas.convertToBlob({
     type: 'image/webp',
@@ -120,10 +75,9 @@ export async function encodeWebp(
   });
 
   // Embed ICC Profile into WebP RIFF container (when embedIcc=true).
-  // Handles case where no pixel conversion needed but user wants ICC Profile embedded.
-  if (embedIcc && meta?.raw?.icc?.data) {
-    // Source has ICC Profile data → embed original (round-trip)
-    const iccBytes = base64ToIcc(meta.raw.icc?.data);
+  if (embedIcc && embedSourceIccVerbatim) {
+    // Round-trip (output gamut == source gamut) → embed the source's own profile.
+    const iccBytes = base64ToIcc(meta!.raw!.icc!.data);
     const webpBytes = new Uint8Array(await baseBlob.arrayBuffer());
     const finalBytes = injectWebpIcc(webpBytes, iccBytes);
     let iccResultBlob = new Blob([finalBytes.buffer as ArrayBuffer], { type: 'image/webp' });
@@ -136,8 +90,8 @@ export async function encodeWebp(
     }
     return iccResultBlob;
   } else if (embedIcc) {
-    // Source has no ICC data but user requested embedding → use stock profile for frame CS
-    const stockProfile = getStockIccProfile(frameCS);
+    // No matching source ICC (none present, or gamut changed) → stock OUTPUT-gamut profile
+    const stockProfile = getStockIccProfile(targetGamut);
     if (stockProfile) {
       const webpBytes = new Uint8Array(await baseBlob.arrayBuffer());
       const finalBytes = injectWebpIcc(webpBytes, stockProfile.bytes);

@@ -18,10 +18,26 @@
  */
 
 import { AssetService } from '@opengpex/editor/core/storage/asset/AssetService';
-import { Hydrating } from './Hydrating';
+import type { ColorIdentity } from '@opengpex/editor/core/storage/asset/AssetStore';
+import { Hydrating, type DehydratedAssetPool } from './Hydrating';
 import { ShardedStateDriver, StateDriver } from '@opengpex/editor/core/storage/Driver';
 import { EditorData, Frame, GlobalHistoryState, UIConfig } from '@opengpex/editor/core/types';
+import type { FrameExportResult } from '@opengpex/editor/core/types';
+import type { GpexAssetManifest, GpexAssetMeta } from '@opengpex/editor/core/helpers/gpex-format';
 import { PERF_MON } from '@opengpex/editor/core/helpers/config';
+
+/**
+ * The 8-bit sRGB baseline used when a pooled asset yielded no colour identity
+ * (only possible for the `src`-blob fallback branch of `dehydrate`, which has
+ * no light record to read). An ordinary 8-bit display bitmap genuinely IS
+ * sRGB / srgb-trc, so this is the correct identity, not a lossy guess.
+ */
+const EXPORT_FALLBACK_IDENTITY: ColorIdentity = {
+  gamut: 'srgb',
+  trc: 'srgb-trc',
+  bitDepth: 8,
+  dataFormat: undefined,
+};
 
 /** Sharded structure of persistent project metadata */
 interface ProjectMeta {
@@ -32,13 +48,66 @@ interface ProjectMeta {
 }
 
 /**
+ * Prunes each plugin's persisted config down to only the fields that genuinely
+ * differ from the plugin's source-defined `initialConfig`.
+ *
+ * ## Why this exists
+ *
+ * `INIT_PLUGIN_CONFIG` seeds the FULL `initialConfig` into `state.pluginConfig`,
+ * so the runtime config always carries every default field. If we persisted that
+ * verbatim, the default values would be frozen into IndexedDB — and a later change
+ * to a source default (e.g. `DEFAULT_GRID_COLOR`) would be permanently masked by
+ * the stale persisted copy (`{...initialConfig, ...persisted}` lets persisted win).
+ * The user would have to "Wipe All" to see any default change.
+ *
+ * By storing only true overrides, untouched defaults are re-read live from source
+ * on every load, while genuine user changes (and runtime-only keys not present in
+ * `initialConfig`, e.g. `pendingColor`) survive.
+ */
+function prunePluginConfig(
+  pluginConfig: Record<string, Record<string, unknown>>,
+  initialConfigs: Record<string, Record<string, unknown>>,
+): Record<string, Record<string, unknown>> {
+  const pruned: Record<string, Record<string, unknown>> = {};
+  for (const [uid, config] of Object.entries(pluginConfig)) {
+    const defaults = initialConfigs[uid];
+    // Unknown/unregistered plugin (no known defaults) — keep as-is to avoid data loss.
+    if (!defaults) {
+      pruned[uid] = config;
+      continue;
+    }
+    const diff: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(config)) {
+      // Keep a field only if it isn't a default field, or its value actually differs
+      // from the default. Values are small (colors/numbers/booleans/small objects),
+      // so JSON.stringify is a cheap, adequate deep-equality check.
+      if (!(key in defaults) || JSON.stringify(value) !== JSON.stringify(defaults[key])) {
+        diff[key] = value;
+      }
+    }
+    // Omit the plugin entirely when nothing was overridden — INIT_PLUGIN_CONFIG
+    // will re-seed the full defaults from source on the next load.
+    if (Object.keys(diff).length > 0) pruned[uid] = diff;
+  }
+  return pruned;
+}
+
+/**
  * StateStorage: Persistence service dedicated to editor artboard states (JSON)
  */
 export class StateStorage {
   // Artboard reference tracking in memory for $O(1)$ dirty checking
   private lastSavedFrameRefs = new Map<string, Frame>();
 
-  constructor(private assets: AssetService) {}
+  constructor(
+    private assets: AssetService,
+    /**
+     * Resolver returning the current `uid -> initialConfig` map from the plugin
+     * registry. Invoked lazily at save time (avoids service-construction ordering
+     * issues). When absent, pluginConfig is persisted unpruned (legacy behavior).
+     */
+    private getInitialConfigs?: () => Record<string, Record<string, unknown>>,
+  ) {}
 
   /**
    * Saves state to persistent medium (incremental sharded save)
@@ -68,10 +137,15 @@ export class StateStorage {
       updates['history_index'] = serializedHistory;
 
       // 4. Update main config shard
+      // Persist only genuine per-plugin overrides, not the seeded source defaults,
+      // so later changes to a plugin's `initialConfig` take effect on reload.
+      const initialConfigs = this.getInitialConfigs?.();
       updates['project_meta'] = {
         frameIds,
         activeFrameId: state.activeFrameId,
-        pluginConfig: state.pluginConfig,
+        pluginConfig: initialConfigs
+          ? prunePluginConfig(state.pluginConfig, initialConfigs)
+          : state.pluginConfig,
         ui: state.ui,
         isLoaded: true
       };
@@ -208,15 +282,49 @@ export class StateStorage {
   /**
    * Exports artboard to portable serialized form (dehydration + asset Blob collection)
    * No local persistence involved, for use by Advanced Command / external consumers.
+   *
+   * Unlike `save()`, this runs the dehydration with heavy provenance probing on
+   * (§4.1/§4.2): every referenced asset is classified into one of three
+   * categories and the corresponding physical payload is collected, so the
+   * container is a lossless snapshot rather than a bag of 8-bit thumbnails.
    */
-  async export(frame: Frame): Promise<{ state: unknown; assets: Record<string, Blob> }> {
-    const assetsPool: Record<string, { blob: Blob }> = {};
-    const state = await Hydrating.dehydrateSingleFrame(frame, this.assets, assetsPool);
+  async export(frame: Frame): Promise<FrameExportResult> {
+    const assetsPool: DehydratedAssetPool = {};
+    const state = await Hydrating.dehydrateSingleFrame(frame, this.assets, assetsPool, true);
+
     const assets: Record<string, Blob> = {};
-    for (const [id, { blob }] of Object.entries(assetsPool)) {
-      assets[id] = blob;
+    const rawBlobs: Record<string, Blob> = {};
+    const decBuffers: Record<string, Uint16Array | Float32Array> = {};
+    const manifest: GpexAssetManifest = { version: 1, assets: {} };
+
+    for (const [id, collected] of Object.entries(assetsPool)) {
+      assets[id] = collected.blob;
+
+      const meta: GpexAssetMeta = {
+        id,
+        width: collected.width ?? 0,
+        height: collected.height ?? 0,
+        dprScale: collected.dprScale,
+        colorIdentity: collected.colorIdentity ?? EXPORT_FALLBACK_IDENTITY,
+        mimeType: collected.mimeType || collected.blob.type || 'image/png',
+        sourceFileName: collected.sourceFileName,
+      };
+
+      if (collected.rawBlob && collected.rawFileHash) {
+        // Category ②: ship the source file once per content hash; `recover()`
+        // rebuilds the high-depth pixels lazily on the other side.
+        meta.rawFileHash = collected.rawFileHash;
+        rawBlobs[collected.rawFileHash] = collected.rawBlob;
+      } else if (collected.decBuffer) {
+        // Category ③: bake product — the naked pixels are the only truth.
+        meta.bakedDecOnly = true;
+        decBuffers[id] = collected.decBuffer;
+      }
+
+      manifest.assets[id] = meta;
     }
-    return { state, assets };
+
+    return { state, assets, manifest, rawBlobs, decBuffers };
   }
 
   /**
@@ -238,4 +346,7 @@ export class StateStorage {
 /**
  * Factory function: creates StateStorage instance
  */
-export const createStateStorage = (assets: AssetService) => new StateStorage(assets);
+export const createStateStorage = (
+  assets: AssetService,
+  getInitialConfigs?: () => Record<string, Record<string, unknown>>,
+) => new StateStorage(assets, getInitialConfigs);

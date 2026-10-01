@@ -24,10 +24,11 @@
 import type {
   ImageFormatHandler,
   DecodeOptions,
-  DecodeResult,
+  DecodedPayload,
   EncodeOptions,
 } from '../types';
 import type { ImageMetadata } from '../types';
+import type { IngestDecision } from '../strategy';
 
 export class VectorHandler implements ImageFormatHandler {
   readonly format = 'vector';
@@ -39,16 +40,23 @@ export class VectorHandler implements ImageFormatHandler {
 
   // ─── Decode ──────────────────────────────────────────────────────────────
 
-  async decode(file: File, options?: DecodeOptions): Promise<DecodeResult> {
-    // 0. Extract metadata
-    const metadata = await this.extractMetadata(file);
-
+  // Direct-passthrough format (pure-producer contract): SVG/EPS rasterize to an 8-bit
+  // sRGB PNG, so there is no colour-strategy branching — `decision` carries no fold for
+  // this format. Consumes the entry-supplied `metadata` (no internal re-extract) and
+  // returns naked pixels; the entry mounts `colorIdentity` / `sourceBlob`.
+  // `options.forcedWidth/forcedHeight` DO drive rasterization size (vector DPI dialog).
+  async decode(
+    file: File,
+    _metadata: ImageMetadata,
+    _decision: IngestDecision,
+    options?: DecodeOptions,
+  ): Promise<DecodedPayload[]> {
     // 1. Main thread: fast intrinsic size detection
     const intrinsicSize = await getVectorIntrinsicSize(file);
 
     // Determine target rasterization dimensions
-    const targetW = options?.targetWidth || Math.round(intrinsicSize.w);
-    const targetH = options?.targetHeight || Math.round(intrinsicSize.h);
+    const targetW = options?.forcedWidth || Math.round(intrinsicSize.w);
+    const targetH = options?.forcedHeight || Math.round(intrinsicSize.h);
 
     // 2. Worker thread: heavy rasterization
     const vectorFormat = detectVectorFormat(file);
@@ -78,11 +86,7 @@ export class VectorHandler implements ImageFormatHandler {
       { type: 'image/png' },
     );
 
-    return {
-      dimensions: { w: targetW, h: targetH },
-      metadata,
-      subImages: [{ displayBlob: safeFile, width: targetW, height: targetH, index: 0 }],
-    };
+    return [{ displayBlob: safeFile, width: targetW, height: targetH, index: 0 }];
   }
 
   // ─── Encode (not supported) ──────────────────────────────────────────────
@@ -308,6 +312,45 @@ function parseSvgLength(value: string): number {
     case '%': return 0;
     default: return num;
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Rasterization Sizing (needsTranscoding-symmetric capability + pure math)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Maximum raster dimension (px) per side — output is clamped to this, aspect preserved. */
+export const MAX_RASTER_DIMENSION = 16384;
+
+/**
+ * Whether the caller must pin down a raster target size before decoding this
+ * file (SVG/EPS need a DPI-derived size; every other format decodes at its
+ * own intrinsic size). Mirrors the existing `needsTranscoding(file)` shape.
+ */
+export function needsRasterSize(file: File): boolean {
+  return detectVectorFormat(file) !== null;
+}
+
+/**
+ * Compute the raster target size from an intrinsic (points) size and a DPI,
+ * clamped to `MAX_RASTER_DIMENSION` per side with aspect ratio preserved.
+ */
+export function computeRasterSize(
+  intrinsic: { w: number; h: number },
+  dpi: number,
+): { width: number; height: number; clamped: boolean } {
+  const scale = dpi / 72;
+  let width = Math.round(intrinsic.w * scale);
+  let height = Math.round(intrinsic.h * scale);
+
+  let clamped = false;
+  if (width > MAX_RASTER_DIMENSION || height > MAX_RASTER_DIMENSION) {
+    const clampRatio = MAX_RASTER_DIMENSION / Math.max(width, height);
+    width = Math.round(width * clampRatio);
+    height = Math.round(height * clampRatio);
+    clamped = true;
+  }
+
+  return { width, height, clamped };
 }
 
 function parseEpsBoundingBox(headerText: string): { w: number; h: number } {

@@ -21,14 +21,15 @@
  * Future: migrate to Worker-based libheif-wasm for better perf.
  */
 
-import type { AssetService, PixelService } from '@opengpex/editor/core/types';
+import type { AssetService } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   DecodeOptions,
-  DecodeResult,
+  DecodedPayload,
   EncodeOptions,
 } from '../../types';
 import type { ImageMetadata } from '../../types';
+import type { IngestDecision } from '../../strategy';
 import { decodeHeic } from './decode';
 import { extractHeicMetadata } from './metadata';
 
@@ -38,10 +39,15 @@ export class HeicHandler implements ImageFormatHandler {
   readonly mimeTypes = ['image/heic', 'image/heif'];
   readonly extensions = ['heic', 'heif'];
 
-  constructor(private assets: AssetService, private pixels: PixelService) {}
+  constructor(private assets: AssetService) {}
 
-  decode(file: File, options?: DecodeOptions): Promise<DecodeResult> {
-    return decodeHeic(file, this.pixels, options);
+  decode(
+    file: File,
+    metadata: ImageMetadata,
+    decision: IngestDecision,
+    _options?: DecodeOptions,
+  ): Promise<DecodedPayload[]> {
+    return decodeHeic(file, metadata, decision);
   }
 
   async encode(

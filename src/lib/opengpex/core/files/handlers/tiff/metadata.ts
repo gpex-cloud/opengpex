@@ -18,8 +18,8 @@
 
 import ExifReader from 'exifreader';
 import type { ImageMetadata, ColorSpaceId } from '../../types';
-import { iccToBase64, parseIccProfileName } from '../../icc';
-import { extractTiffIcc, extractTiffExif } from '../../metadata/tiff-ifd-reader';
+import { iccToBase64, parseIccProfileName, inferColorSpaceFromIcc } from '../../shared/icc';
+import { extractTiffIcc, extractTiffExif, probeTiffPages } from '../../metadata/tiff-ifd-reader';
 
 /**
  * Extract full V2 metadata from a TIFF file.
@@ -62,14 +62,24 @@ export async function extractTiffMetadata(file: File): Promise<ImageMetadata> {
       if (bps > 0) meta.bitDepth = bps;
     }
 
+    // ── Sample format (TIFF tag 339: 1 = uint, 2 = int, 3 = IEEE float) ──
+    // Per TIFF 6.0, an absent tag 339 defaults to 1 (unsigned int) — honor that
+    // spec default instead of guessing float for high bit depths; a genuinely
+    // float file that omits tag 339 would be unreadable by any conformant reader.
+    const exifRecord = tags.exif as Record<string, { value?: unknown } | undefined> | undefined;
+    const sampleFormatTag = exifRecord?.['SampleFormat']?.value;
+    if (sampleFormatTag != null) {
+      const sf = Array.isArray(sampleFormatTag) ? Number(sampleFormatTag[0]) : Number(sampleFormatTag);
+      if (sf === 3) meta.sampleFormat = 'float';
+      else if (sf === 1 || sf === 2) meta.sampleFormat = 'uint';
+    } else {
+      meta.sampleFormat = 'uint';
+    }
+
     // ── Color space / photometric interpretation ──
     const photoInterp = tags.exif?.PhotometricInterpretation?.value;
     if (photoInterp != null) {
-      switch (Number(photoInterp)) {
-        case 5: meta.colorSpace = 'cmyk'; break;
-        case 1: case 0: meta.colorSpace = 'grayscale'; break;
-        default: meta.colorSpace = 'srgb';
-      }
+      meta.colorSpace = photometricToColorSpace(Number(photoInterp));
     }
 
     // ── Alpha ──
@@ -79,6 +89,11 @@ export async function extractTiffMetadata(file: File): Promise<ImageMetadata> {
 
     // ── Raw EXIF extraction (for "Keep EXIF Data" re-embed support) ──
     const tiffBytes = new Uint8Array(fileBuffer);
+
+    // ── Multi-page probe (Stage 1 authoritative isMultiFrame; reuses tiffBytes,
+    //    no LibVips getPageCount round-trip) ──
+    meta.isMultiFrame = probeTiffPages(tiffBytes).isMultiFrame;
+
     const exifRaw = extractTiffExif(tiffBytes);
     if (exifRaw && exifRaw.length > 0) {
       meta.raw.exif = iccToBase64(exifRaw); // reuse base64 helper
@@ -125,15 +140,20 @@ export async function extractTiffMetadata(file: File): Promise<ImageMetadata> {
     const fNum = tags.exif?.FNumber?.value;
     const expTime = tags.exif?.ExposureTime?.value;
     const iso = tags.exif?.ISOSpeedRatings?.value;
-    if (fNum || expTime || iso) {
+    const focalLength = tags.exif?.FocalLength?.value;
+    const orientation = tags.exif?.Orientation?.value;
+    if (fNum != null || expTime != null || iso != null || focalLength != null || orientation != null) {
       meta.capture = {
         fNumber: fNum ? (Array.isArray(fNum) ? fNum[0] / (fNum[1] || 1) : Number(fNum)) : undefined,
         exposureTime: expTime ? (Array.isArray(expTime) ? expTime[0] / (expTime[1] || 1) : Number(expTime)) : undefined,
         iso: iso ? (Array.isArray(iso) ? Number(iso[0]) : Number(iso)) : undefined,
-        focalLength: tags.exif?.FocalLength?.value
-          ? (Array.isArray(tags.exif.FocalLength.value)
-              ? tags.exif.FocalLength.value[0] / (tags.exif.FocalLength.value[1] || 1)
-              : Number(tags.exif.FocalLength.value))
+        focalLength: focalLength
+          ? (Array.isArray(focalLength)
+              ? focalLength[0] / (focalLength[1] || 1)
+              : Number(focalLength))
+          : undefined,
+        orientation: orientation != null
+          ? (Array.isArray(orientation) ? Number(orientation[0]) : Number(orientation))
           : undefined,
       };
     }
@@ -164,16 +184,36 @@ export async function extractTiffMetadata(file: File): Promise<ImageMetadata> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Internal Helpers
+// Shared tag → ColorSpaceId inference
+//
+// EXPORTED (not private) because the multi-page decode path in `tiff/decode.ts`
+// must classify EACH page's own tags by the EXACT same rules the file-level
+// extraction above uses. Two copies of these rules would let per-page and
+// file-level colour drift apart silently.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/** Infer color space from ICC profile name */
-function inferColorSpaceFromIcc(profileName: string): ColorSpaceId {
-  const name = profileName.toLowerCase();
-  if (name.includes('adobe') && name.includes('rgb')) return 'adobe-rgb';
-  if (name.includes('display p3') || name.includes('p3')) return 'display-p3';
-  if (name.includes('prophoto')) return 'prophoto-rgb';
-  if (name.includes('srgb')) return 'srgb';
-  return 'unknown';
+/**
+ * Map a TIFF `PhotometricInterpretation` (tag 0x0106) to a `ColorSpaceId`.
+ *
+ * 5 = Separated (CMYK); 0 = WhiteIsZero, 1 = BlackIsZero (both grayscale);
+ * everything else (2 = RGB, 3 = palette, 8 = Lab, …) is handled as RGB-ish and
+ * folded to 'srgb' — the ICC profile, when present, is the finer authority and
+ * takes precedence at both call sites.
+ */
+export function photometricToColorSpace(photoInterp: number): ColorSpaceId {
+  switch (photoInterp) {
+    case 5: return 'cmyk';
+    case 1: case 0: return 'grayscale';
+    default: return 'srgb';
+  }
 }
+
+/**
+ * Infer color space from ICC profile name.
+ *
+ * Re-exported from `shared/icc.ts` (not a local copy) so `tiff/decode.ts`'s
+ * existing `import { inferColorSpaceFromIcc } from './metadata'` keeps working
+ * unchanged while the actual implementation is shared across every raster handler.
+ */
+export { inferColorSpaceFromIcc } from '../../shared/icc';
 

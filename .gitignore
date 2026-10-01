@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/tests
 
 # next.js
 /.next/
@@ -67,6 +68,7 @@ next-env.d.ts
 *.swp
 
 # AI Assistants & Agents (LLM Tools)
+CLAUDE.md
 .cursor/
 cursor-tombstones/
 .windsurf/

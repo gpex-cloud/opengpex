@@ -20,8 +20,8 @@
  */
 
 import ExifReader from 'exifreader';
-import type { ImageMetadata, ColorSpaceId } from '../../types';
-import { iccToBase64, parseIccProfileName } from '../../icc';
+import type { ImageMetadata } from '../../types';
+import { iccToBase64, parseIccProfileName, inferColorSpaceFromIcc } from '../../shared/icc';
 import { extractIsobmffIcc, extractIsobmffNclx, extractIsobmffExif, nclxToColorSpace } from '../../metadata/isobmff-reader';
 
 /**
@@ -141,18 +141,4 @@ export async function extractHeicMetadata(file: File): Promise<ImageMetadata> {
   }
 
   return meta;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Internal Helpers
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/** Infer color space from ICC profile name */
-function inferColorSpaceFromIcc(profileName: string): ColorSpaceId {
-  const name = profileName.toLowerCase();
-  if (name.includes('display p3') || name.includes('p3')) return 'display-p3';
-  if (name.includes('adobe') && name.includes('rgb')) return 'adobe-rgb';
-  if (name.includes('prophoto')) return 'prophoto-rgb';
-  if (name.includes('srgb')) return 'srgb';
-  return 'unknown';
 }

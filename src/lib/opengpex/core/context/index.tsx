@@ -110,21 +110,31 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     () => new WorkerBridge(new Worker(new URL('../engine/worker/entry.worker.ts', import.meta.url), { type: 'module' })),
     [],
   );
+  // FileService no longer depends on PixelService — construct it first so it can
+  // be injected into PixelFacade for cold-recovery (`files.recover`).
+  const files = useMemo(() => createFileService(assets), [assets]);
   // v2 PixelFacade — replaces createPixelService (Phase 6 engine integration)
   const pixels = useMemo(
-    () => createPixelFacade({ geometry, assets, bridge }),
-    [geometry, assets, bridge],
+    () => createPixelFacade({ geometry, assets, bridge, files }),
+    [geometry, assets, bridge, files],
   );
-  // FileService depends on PixelService.fileIO for TIFF/RAW Worker operations (Phase 7.2 vips unification)
-  const files = useMemo(() => createFileService(assets, pixels), [assets, pixels]);
   const layers = useMemo(
     () => createLayerService(geometry, pixels, assets, actions, () => state),
     [geometry, pixels, assets, actions, state],
   );
-  const storage = useMemo(() => createStateStorage(assets), [assets]);
+  const plugins = useMemo(() => createPluginService(), []);
+  // Persist only real per-plugin overrides, not seeded source defaults — lets
+  // changes to a plugin's initialConfig take effect on reload (resolver read lazily at save time).
+  const storage = useMemo(
+    () => createStateStorage(assets, () =>
+      Object.fromEntries(
+        plugins.getAllPlugins().map((p) => [p.uid, p.initialConfig ?? {}]),
+      ),
+    ),
+    [assets, plugins],
+  );
   const clipboard = useMemo(() => createClipboardService(), []);
 
-  const plugins = useMemo(() => createPluginService(), []);
   const fonts = useMemo(() => createFontService(), []);
 
   // 3. Construct split static/dynamic context values
@@ -173,11 +183,13 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     ...serviceContextValue,
   } as EditorContextValue;
 
+
+
   // 4. Environment-side side effects (Environment Side Effects)
 
   // 4.0 AssetService ↔ Engine cache wiring is now fully internal to createPixelFacade.
   // PixelFacade calls assets.setCallbacks() during construction (synchronous, no race window).
-  // See: core/engine/facade/PixelFacade.ts §"Wire AssetService lifecycle"
+  // See: core/engine/PixelFacade.ts §"Wire AssetService lifecycle"
 
   // 4.1 Core bootstrapping and persistent recovery (Bootstrap & Hydration)
   const sysCommandsRegistered = useRef(false);

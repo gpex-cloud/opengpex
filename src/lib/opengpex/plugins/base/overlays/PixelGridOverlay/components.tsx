@@ -25,7 +25,6 @@ import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { Grid } from 'lucide-react';
 import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
 import { usePixelGridCommands } from './hooks';
-import { shouldShowPixelGrid } from './geometry';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PixelGridOverlayContainer
@@ -78,7 +77,7 @@ import { shouldShowPixelGrid } from './geometry';
  * PixelGridOverlayContainer: Canvas2D-based pixel grid overlay.
  *
  * Renders a 1px physical grid aligned with image pixels when zoomed in
- * (one source pixel covers >= minPixelSize physical screen pixels, see geometry.ts).
+ * (one source pixel covers >= minPixelSize physical screen pixels).
  * Replaces the legacy CSS linear-gradient implementation for performance.
  */
 export function PixelGridOverlayContainer() {
@@ -127,6 +126,16 @@ export function PixelGridOverlayContainer() {
       canvas.style.height = `${h}px`;
       // Must re-acquire context after buffer reallocation (resets internal state)
       ctxRef.current = canvas.getContext('2d');
+      // Setting canvas.width already wiped the buffer — nothing stale left behind.
+    } else {
+      // Effect re-ran without a real size change (e.g. state.ui.viewportDim got a
+      // new object identity after IndexedDB hydration). The buffer was NOT cleared,
+      // so the previous frame's grid lines are still on it. Since we invalidate
+      // lastDrawRectRef below, the next redraw won't clear them and would composite
+      // new semi-transparent strokes on top of the old ones — doubling the alpha and
+      // making the grid look too bright until a pan triggers a normal clear cycle.
+      // Wipe the whole surface now so the next redraw starts from a blank canvas.
+      ctxRef.current?.clearRect(0, 0, canvas.width, canvas.height);
     }
 
     // Invalidate caches so next tick will redraw
@@ -142,11 +151,10 @@ export function PixelGridOverlayContainer() {
 
     const dpr = window.devicePixelRatio || 1;
     const scale = geometry.getScale(f, cam);
-    // §8 (step 9): criterion is "on-screen physical pixel size of one source
-    // pixel" (p = camera.k × dpr), NOT the absolute `camera.k`. This decouples
-    // grid onset from image size / fit / DPR — a 1000² and a 3000² image both
-    // show the grid when a source pixel reaches the same visual size.
-    const shouldShow = isEnabled && shouldShowPixelGrid(scale, dpr, minPixelSize);
+    // §8: criterion is "on-screen physical pixel size of one source pixel"
+    // (p = scale × dpr >= minPixelSize), NOT the absolute `camera.k`. This decouples
+    // grid onset from image size / fit / DPR (GIMP-style criterion).
+    const shouldShow = isEnabled && scale * dpr >= minPixelSize;
 
     // --- Visibility toggle (write to DOM only when state changes) ---
     // Use visibility:hidden (not just opacity:0) to fully remove the canvas from

@@ -25,7 +25,7 @@ import { motion } from "framer-motion";
 import { useEditorState, useEditorServices } from "@opengpex/editor/core/context";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
-import { DISPLAY_CHANNEL_SIGNAL_KEY } from "@opengpex/editor/core/engine/protocol/DisplayTransform";
+import { DISPLAY_CHANNEL_SIGNAL_KEY, CHANNEL_MASK_RGB } from "@opengpex/editor/core/engine";
 import { LayersPanel } from "./LayersPanel";
 import { ChannelsPanel } from "./ChannelsPanel";
 
@@ -45,7 +45,7 @@ export const LayersComponent = React.memo(function LayersComponent() {
     setActiveView(view);
     // When switching back to layers, reset channel display to RGB
     if (view === 'layers') {
-      actions.setStateSignal(DISPLAY_CHANNEL_SIGNAL_KEY, 'rgb');
+      actions.setStateSignal(DISPLAY_CHANNEL_SIGNAL_KEY, CHANNEL_MASK_RGB);
     }
   }, [actions]);
 

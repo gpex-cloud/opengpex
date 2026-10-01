@@ -16,88 +16,104 @@
  * then reassembles chunks with metadata injection (pHYs, iCCP/sRGB, tEXt, tIME).
  */
 
-import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/types';
-import type { EncodeOptions } from '../../types';
+import type { GamutId } from '@opengpex/editor/core/types';
+import { toGamutId } from '@opengpex/editor/core/types';
+import type { EncodeOptions, EncodeSource } from '../../types';
+import { isRawPixelSource } from '../../types';
 import { bitmapToCanvas } from '../../index';
-import { base64ToIcc, getStockIccProfile } from '../../icc';
+import { base64ToIcc, getStockIccProfile } from '../../shared/icc';
 import { resetExifOrientation } from '../../metadata/tiff-ifd-reader';
-import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
-import { getExportStrategy, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
+import { toCanvasColorSpace } from '@opengpex/editor/core/engine/color';
+import { getLibVips } from '../../shared/lib-vips';
 import { verifySignature, iterateChunks, concat } from './chunks';
 import { buildPhysChunk, buildSrgbChunk, buildIccpChunk, buildTextChunk, buildTimeChunk, buildExifChunk } from './writers';
 
 /**
  * Encode a canvas/bitmap to PNG with metadata injection.
+ *
+ * ── COLOR CONTRACT ──────────────────────────────────────────────────────────
+ * Pixels arrive ALREADY in the target gamut with the target TRC applied — the
+ * terminal `unpremultiplyEncodeGamut` in the export command did the single
+ * source→target matrix + TRC + quantization step, and there is NO reverse
+ * pre-encode conversion anymore (the `srgb-to-icc` step was removed mechanism-
+ * level: choosing sRGB now yields true sRGB, so `FileService.encode()` hands the
+ * pixels straight to this handler untouched).
+ * This encoder performs ZERO internal color conversion — it writes the PNG
+ * container and the color chunks (iCCP / sRGB / pHYs / tEXt) matching what the
+ * pixels now carry. The RawPixelSource path (8-bit `raw-8` or 16-bit `raw-16`)
+ * is exactly how wide-gamut Adobe RGB / ProPhoto output ships: naked pixels
+ * straight to vips + a stock `targetGamut` iCCP chunk, at the source's own bit
+ * depth, with no browser canvas reinterpretation.
  */
 export async function encodePng(
-  source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
-  pixels: PixelService,
+  source: EncodeSource,
   options: EncodeOptions,
 ): Promise<Blob> {
   const meta = options.metadata;
   const config = options.exportConfig;
 
-  // ── Strategy-based export color pipeline ──
-  const frameCS: WorkingColorSpace = (config?.frameColorSpace as WorkingColorSpace) || 'srgb';
-  const exportStrategy = getExportStrategy(frameCS, 'png');
-  const embedIcc = config?.embedIcc ?? false;
+  // The gamut the incoming pixels ARE in = the egest decision's `targetGamut`.
+  // The terminal encode already converted into it upstream, so it drives ONLY the
+  // canvas tag + colour-chunk selection here.
+  const targetGamut: GamutId = (config?.targetGamut as GamutId | undefined) ?? 'srgb';
+  // Embed the SOURCE profile verbatim ONLY when the output gamut still equals the
+  // source file's gamut (exact round-trip): the pixels are then in the source's
+  // numeric space, so a stock `targetGamut` profile would mislabel them.
+  const sourceIccMatchesTarget = !!meta?.raw?.icc?.data && toGamutId(meta?.colorSpace) === targetGamut;
+  const embedSourceIccVerbatim = sourceIccMatchesTarget;
 
-  // Centralized pixel conversion decision
-  const pixelConv = resolveExportPixelConversion(
-    frameCS,
-    { colorSpace: meta?.colorSpace, hasIccProfileData: !!meta?.raw?.icc?.data },
-    embedIcc,
-    'png',
-  );
+  let baseBlob: Blob;
 
-  let canvas: OffscreenCanvas;
+  if (isRawPixelSource(source)) {
+    // Both 8-bit (`raw-8`) and 16-bit (`raw-16`) go straight to vips, which
+    // encodes each at the source's native bit depth with no canvas hop.
+    const rgbaData = source.data instanceof Uint8Array
+      ? source.data
+      : new Uint8Array(source.data.buffer, source.data.byteOffset, source.data.byteLength);
 
-  if (pixelConv === 'p3-to-srgb') {
-    // Format fallback: P3 frame → sRGB (format doesn't support P3)
-    const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source, 'display-p3') : source as OffscreenCanvas;
-    const w = srcCanvas.width;
-    const h = srcCanvas.height;
-    const tmpCanvas = new OffscreenCanvas(w, h);
-    const tmpCtx = tmpCanvas.getContext('2d', { colorSpace: 'display-p3' })!;
-    tmpCtx.drawImage(srcCanvas, 0, 0);
-    const imageData = tmpCtx.getImageData(0, 0, w, h);
-    convertImageDataColorSpace(imageData.data, 'display-p3', 'srgb');
-    const outCanvas = new OffscreenCanvas(w, h);
-    const outCtx = outCanvas.getContext('2d')!;
-    outCtx.putImageData(new ImageData(imageData.data, w, h), 0, 0);
-    canvas = outCanvas;
-    // console.debug('[ColorMgmt] PNG Export: pixelConversion=p3-to-srgb');
-  } else if (pixelConv === 'srgb-to-icc') {
-    // Pixels are sRGB, need to convert to target ICC space before embedding
-    const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
-    const w = srcCanvas.width;
-    const h = srcCanvas.height;
-    const tmpCanvas = new OffscreenCanvas(w, h);
-    const tmpCtx = tmpCanvas.getContext('2d')!;
-    tmpCtx.drawImage(srcCanvas, 0, 0);
-    const imageData = tmpCtx.getImageData(0, 0, w, h);
-
-    const iccBytes = base64ToIcc(meta!.raw!.icc!.data);
-    const { data } = await pixels.fileIO.srgbToIcc(
-      new Uint8Array(imageData.data.buffer),
-      w, h, iccBytes,
+    const pngBytes = await getLibVips().encodePng(
+      rgbaData,
+      source.width,
+      source.height,
+      {
+        compression: config?.pngCompression ?? 6,
+        dpi: config?.dpi || meta?.dpi || 72,
+        bitDepth: source.bitDepth,
+      },
     );
-
-    const clamped = new Uint8ClampedArray(data.length);
-    clamped.set(data);
-    tmpCtx.putImageData(new ImageData(clamped, w, h), 0, 0);
-    canvas = tmpCanvas;
-    // console.debug('[ColorMgmt] PNG Export: pixelConversion=srgb-to-icc, targetProfile=%s', meta!.raw!.icc?.name || 'custom');
+    baseBlob = new Blob([pngBytes.buffer as ArrayBuffer], { type: 'image/png' });
   } else {
-    // Strategy-driven: use encodeColorSpace to prevent implicit browser conversion
-    canvas = source instanceof ImageBitmap
-      ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
+    // Pixels already carry targetGamut + its TRC — tag the canvas to match so the
+    // browser encoder does not reinterpret them. NO color conversion here.
+    const canvas: OffscreenCanvas = source instanceof ImageBitmap
+      ? bitmapToCanvas(source, toCanvasColorSpace(targetGamut))
       : source as OffscreenCanvas;
-    // console.debug('[ColorMgmt] PNG Export: frameCS=%s, encodeColorSpace=%s, embedIcc=%s', frameCS, exportStrategy.encodeColorSpace, embedIcc);
-  }
 
-  // 1. Get base PNG blob from browser encoder
-  const baseBlob = await canvas.convertToBlob({ type: 'image/png' });
+    if (config?.pngCompression !== undefined) {
+      // The browser's `convertToBlob` has no compression-level knob, so an explicit
+      // user choice (NONE / DEFAULT / MAX) would be silently dropped on the 8-bit
+      // path. Route those through vips instead, which honours `compression` at
+      // `bitDepth: 8` exactly as it does at 16. Colour is unaffected: the pixels are
+      // read back from the already-tagged canvas, and no conversion happens either
+      // side of the hop.
+      const ctx = canvas.getContext('2d')!;
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const pngBytes = await getLibVips().encodePng(
+        new Uint8Array(imageData.data.buffer),
+        canvas.width,
+        canvas.height,
+        {
+          compression: config.pngCompression,
+          dpi: config?.dpi || meta?.dpi || 72,
+          bitDepth: 8,
+        },
+      );
+      baseBlob = new Blob([pngBytes.buffer as ArrayBuffer], { type: 'image/png' });
+    } else {
+      // Default: the browser encoder (fastest, zero wasm hop).
+      baseBlob = await canvas.convertToBlob({ type: 'image/png' });
+    }
+  }
 
   // If no metadata to inject, return as-is
   const dpi = config?.dpi || meta?.dpi;
@@ -130,20 +146,20 @@ export async function encodePng(
     }
 
     // Insert color profile declaration (iCCP or sRGB chunk, mutually exclusive per PNG spec)
-    if (config?.embedIcc && meta?.raw?.icc?.data) {
-      // Source has ICC Profile data → embed as iCCP chunk (round-trip original profile)
-      const iccBytes = base64ToIcc(meta.raw.icc?.data);
-      chunks.push(await buildIccpChunk(iccBytes, meta.raw.icc?.name));
+    if (config?.embedIcc && embedSourceIccVerbatim) {
+      // Round-trip (output gamut == source gamut) → embed the source's own profile.
+      const iccBytes = base64ToIcc(meta!.raw!.icc!.data);
+      chunks.push(await buildIccpChunk(iccBytes, meta!.raw!.icc!.name));
     } else if (config?.embedIcc) {
-      // Source has no ICC data but user requested embedding → use stock profile for frame CS
-      const stockProfile = getStockIccProfile(frameCS);
+      // No matching source ICC (none present, or gamut changed) → use the stock
+      // profile for the OUTPUT gamut, which is what the pixels now carry.
+      const stockProfile = getStockIccProfile(targetGamut);
       if (stockProfile) {
         chunks.push(await buildIccpChunk(stockProfile.bytes, stockProfile.name));
-        // console.debug('[ColorMgmt] PNG Export: embedded stock ICC profile for %s', frameCS);
       } else {
         chunks.push(buildSrgbChunk());
       }
-    } else if (frameCS === 'srgb') {
+    } else if (targetGamut === 'srgb') {
       // No embedding requested → insert sRGB chunk as lightweight color declaration
       chunks.push(buildSrgbChunk());
     }

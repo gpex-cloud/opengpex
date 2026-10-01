@@ -19,260 +19,174 @@
 
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useEditorState, useEditorServices, usePluginConfig } from '@opengpex/editor/core/context';
-import { useBrushCursorFastSync } from './useFastSync';
-import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
+import type { ColorValue } from '@opengpex/editor/core/engine/color';
+import { CraftDrawerAPI, type CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
-import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
-import { DEFAULT_BRUSH_SIZE } from './protocols';
+import { useBrushCursorFastSync } from './useFastSync';
 
-// ─── useBrushOverlayState ──────────────────────────────────────────────────────
+/** Only used when CraftDrawer has no persisted size yet (mirrors interactions.ts). */
+const FALLBACK_BRUSH_SIZE = 12;
+
+// ─── useBrushOverlayState ─────────────────────────────────────────────────────
 
 /**
- * useBrushOverlayState: Hook for BrushOverlay main component state
- *
- * Manages cursor hiding (cursorOverride: 'none') in brush/eraser mode
- * and Escape exit logic. Returns whether in active brush/eraser mode.
+ * useBrushOverlayState: reads whether the brush is the active craft,
+ * which drives the overlay's early return (it renders nothing otherwise).
  */
 export function useBrushOverlayState() {
   const { state, activeFrame } = useEditorState();
-  const { actions } = useEditorServices();
-
   const activeCraft = state.interaction.signals[CraftDrawerAPI.signals.activeCraft] as string | null;
-  const isBrushMode = activeCraft === 'brush' || activeCraft === 'eraser' || activeCraft === 'restore' || activeCraft === 'mosaic';
+  return { isBrushMode: activeCraft === 'brush', activeCraft, activeFrame };
+}
 
-  // Sets/clears cursorOverride: 'none' to hide system cursor (replaced by DOM circle)
-  useEffect(() => {
-    if (isBrushMode) {
-      // Hide system cursor, use custom DOM cursor instead
-      actions.fast.setCursor('none');
-    } else {
-      // When exiting brush mode, restore default if current cursor is 'none' (set by this plugin)
-      if (actions.fast.getCursor() === 'none') {
-        actions.fast.setCursor(null);
-      }
-    }
-  }, [isBrushMode]); // eslint-disable-line react-hooks/exhaustive-deps
+// ─── useBrushParams / useBrushColor ──────────────────────────────────────────
 
-  // Escape key exits brush/eraser mode (via CraftDrawer's deactivate command, following cross-plugin boundaries)
-  useEffect(() => {
-    if (!isBrushMode) return;
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        // Deactivate tool via CraftDrawer's command system (following signal ownership boundaries)
-        actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
-        actions.fast.setCursor(null);
-      }
-    };
-
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [isBrushMode, actions]);
-
-  // Tab key toggles eraser ↔ restore (only when in eraser/restore craft mode)
-  useEffect(() => {
-    if (activeCraft !== 'eraser' && activeCraft !== 'restore') return;
-
-    const handleTab = (e: KeyboardEvent) => {
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        e.stopPropagation();
-        const nextCraft = activeCraft === 'eraser' ? 'restore' : 'eraser';
-        actions.setStateSignal(CraftDrawerAPI.signals.activeCraft, nextCraft);
-      }
-    };
-
-    document.addEventListener('keydown', handleTab);
-    return () => document.removeEventListener('keydown', handleTab);
-  }, [activeCraft, actions]);
-
-  // Restore cursor on component unmount
-  useEffect(() => {
-    return () => {
-      if (actions.fast.getCursor() === 'none') {
-        actions.fast.setCursor(null);
-      }
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
+/**
+ * Paint parameters for the CURSOR ring. The gesture itself re-reads the same
+ * config in `interactions.ts` (outside React), so these two must stay in sync.
+ */
+export function useBrushParams() {
+  const [craftConfig] = usePluginConfig<CraftDrawerConfig>(CraftDrawerAPI.configKey);
   return {
-    isBrushMode,
-    activeCraft,
-    activeFrame,
+    brushSize: craftConfig?.brushSize ?? FALLBACK_BRUSH_SIZE,
+    brushOpacity: craftConfig?.brushOpacity ?? 100,
+    brushHardness: craftConfig?.brushHardness ?? 80,
   };
 }
 
-// ─── useBrushCursorTracking ────────────────────────────────────────────────────
+/** Foreground colour as a CSS string, for the cursor ring's fill preview only. */
+export function useBrushColor(): string {
+  const [colorConfig] = usePluginConfig<{ pendingColor?: ColorValue }>(ColorOptionsAPI.configKey);
+  return colorConfig?.pendingColor?.hex || '#FFFFFF';
+}
+
+// ─── useBrushCursorTracking ───────────────────────────────────────────────────
 
 /**
- * useBrushCursorTracking: 60fps mouse position tracking + camera.k real-time synchronization
+ * useBrushCursorTracking: 60fps pointer following for the brush ring.
  *
- * Updates cursor DOM position in real time via pointermove event listener,
- * and synchronizes cursor size in real time via useFastSync Ticker (follows camera.k zoom).
- * Both directly manipulate the DOM (bypassing React) to achieve zero-redraw cursor following.
- *
- * @param cursorRef Cursor DOM element reference
- * @param isActive Whether tracking is active
- * @param brushSize Current brush size (pixels)
+ * Position comes from a `pointermove` listener coalesced into a rAF, size comes
+ * from the volatile ticker (`useBrushCursorFastSync`, camera.k). Both write
+ * `style` directly — the ring never re-renders through React.
  */
 export function useBrushCursorTracking(
   cursorRef: React.RefObject<HTMLDivElement | null>,
   isActive: boolean,
-  brushSize: number = DEFAULT_BRUSH_SIZE,
-  activeCraft: string = 'brush',
+  brushSize: number,
 ) {
-  // Store latest mouse screen coordinates (relative to viewport container)
   const pointerRef = useRef({ x: 0, y: 0 });
   const rafIdRef = useRef<number>(0);
   const isVisibleRef = useRef(false);
 
-  // ─── Fast track: camera.k real-time synchronization of cursor size (extracted to useFastSync.ts)
   useBrushCursorFastSync(cursorRef, isActive, brushSize);
 
-  // ─── Pointer position tracking ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isActive) {
       const el = cursorRef.current;
-      if (el) {
-        el.style.opacity = '0';
-      }
+      if (el) el.style.opacity = '0';
       isVisibleRef.current = false;
       return;
     }
 
-    const handlePointerMove = (e: PointerEvent) => {
-      const viewportContainer = cursorRef.current?.closest('.editor-viewport-container');
-      if (!viewportContainer) return;
+    const viewportContainer = cursorRef.current?.closest('.editor-viewport-container');
+    if (!viewportContainer) return;
 
+    const handlePointerMove = (ev: Event) => {
+      const e = ev as PointerEvent;
       const rect = viewportContainer.getBoundingClientRect();
       pointerRef.current.x = e.clientX - rect.left;
       pointerRef.current.y = e.clientY - rect.top;
 
-      if (!rafIdRef.current) {
-        rafIdRef.current = requestAnimationFrame(() => {
-          rafIdRef.current = 0;
-          const el = cursorRef.current;
-          if (!el) return;
-
-          el.style.transform = `translate(${pointerRef.current.x}px, ${pointerRef.current.y}px)`;
-
-          if (!isVisibleRef.current) {
-            el.style.opacity = '1';
-            isVisibleRef.current = true;
-          }
-        });
-      }
+      if (rafIdRef.current) return;
+      rafIdRef.current = requestAnimationFrame(() => {
+        rafIdRef.current = 0;
+        const el = cursorRef.current;
+        if (!el) return;
+        el.style.transform = `translate(${pointerRef.current.x}px, ${pointerRef.current.y}px)`;
+        if (!isVisibleRef.current) {
+          el.style.opacity = '1';
+          isVisibleRef.current = true;
+        }
+      });
     };
 
     const handlePointerLeave = () => {
       const el = cursorRef.current;
-      if (el) {
-        el.style.opacity = '0';
-        isVisibleRef.current = false;
-      }
+      if (el) el.style.opacity = '0';
+      isVisibleRef.current = false;
     };
 
-    const viewportContainer = cursorRef.current?.closest('.editor-viewport-container');
-    if (viewportContainer) {
-      viewportContainer.addEventListener('pointermove', handlePointerMove as EventListener);
-      viewportContainer.addEventListener('pointerleave', handlePointerLeave as EventListener);
-    }
+    viewportContainer.addEventListener('pointermove', handlePointerMove);
+    viewportContainer.addEventListener('pointerleave', handlePointerLeave);
 
     return () => {
-      if (viewportContainer) {
-        viewportContainer.removeEventListener('pointermove', handlePointerMove as EventListener);
-        viewportContainer.removeEventListener('pointerleave', handlePointerLeave as EventListener);
-      }
+      viewportContainer.removeEventListener('pointermove', handlePointerMove);
+      viewportContainer.removeEventListener('pointerleave', handlePointerLeave);
       if (rafIdRef.current) {
         cancelAnimationFrame(rafIdRef.current);
         rafIdRef.current = 0;
       }
     };
   }, [isActive, cursorRef]);
+}
 
-  // Keep a ref to the latest activeCraft for use in event handlers (avoids stale closure)
-  const activeCraftRef = useRef(activeCraft);
+// ─── useBrushToolLifecycle ────────────────────────────────────────────────────
+
+/**
+ * useBrushToolLifecycle: cursor ownership + Escape handling for the vector brush.
+ *
+ * CURSOR: the native cursor is hidden (`'none'`) for the whole session, because
+ * the overlay draws its own size-accurate ring (with a crosshair at its centre).
+ *
+ * ESCAPE: mid-stroke, the viewport-level Esc handler cancels the gesture
+ * (`dispatcher.cancelAll()` → our `onCancel`, which aborts the transaction and
+ * drops the half-drawn layer) and we stay in the tool; idle, Esc leaves the
+ * tool through CraftDrawer's own command, respecting signal ownership.
+ *
+ * Called unconditionally before the overlay's early return (hook-order rule),
+ * so every effect gates on `isBrushMode` itself and cleans up on tool switch.
+ */
+export function useBrushToolLifecycle(isBrushMode: boolean) {
+  const { state } = useEditorState();
+  const { actions } = useEditorServices();
+
+  const isInteractingRef = useRef(false);
+  useLayoutEffect(() => { isInteractingRef.current = !!state.interaction.isInteracting; });
+
+  // ─── Cursor: hide the native pointer, the ring replaces it ─────────────
   useEffect(() => {
-    activeCraftRef.current = activeCraft;
-  }, [activeCraft]);
-
-  // ─── Cmd/Ctrl modifier key listening: control visibility of "+" new layer/mask badge ────────────────────────────
-  useEffect(() => {
-    if (!isActive) return;
-
-    const setBadgeVisibility = (visible: boolean) => {
-      const el = cursorRef.current;
-      if (!el) return;
-      const badge = el.querySelector('[data-badge="new-layer"]') as HTMLElement;
-      if (badge) {
-        badge.style.opacity = visible ? '1' : '0';
-      }
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Meta' || e.key === 'Control') {
-        // Restore mode: Cmd has no effect (can't create new mask), badge stays as-is
-        if (activeCraftRef.current === 'restore') return;
-        setBadgeVisibility(true);
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Meta' || e.key === 'Control') {
-        // Restore mode: badge is always visible (React controls it), don't hide
-        if (activeCraftRef.current === 'restore') return;
-        setBadgeVisibility(false);
-      }
-    };
-
-    // Also clear badge on window blur (prevents residual Meta key state after switching windows)
-    const handleBlur = () => {
-      // Restore mode: badge is permanently visible, don't hide on blur
-      if (activeCraftRef.current === 'restore') return;
-      setBadgeVisibility(false);
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('blur', handleBlur);
-
+    if (!isBrushMode) return;
+    actions.fast.setCursor('none');
     return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('blur', handleBlur);
+      // Only release what we set — another tool may already own the cursor.
+      if (actions.fast.getCursor() === 'none') actions.fast.setCursor(null);
     };
-  }, [isActive, cursorRef]);
-}
+  }, [isBrushMode, actions]);
 
-// ─── useBrushParams (read) ─────────────────────────────────────────────────────
+  // ─── Escape: cancel in-progress stroke / else exit the tool ────────────
+  useEffect(() => {
+    if (!isBrushMode) return;
 
-/**
- * useBrushParams: Reads current brush parameters
- *
- * Reads brush parameters from CraftDrawer's pluginConfig, returning currently active size/opacity/hardness.
- */
-export function useBrushParams() {
-  const [craftConfig] = usePluginConfig<CraftDrawerConfig>(CraftDrawerAPI.configKey);
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (isInteractingRef.current) return; // viewport-level cancelAll owns this
 
-  const brushSize = craftConfig?.brushSize ?? DEFAULT_BRUSH_SIZE;
-  const brushOpacity = craftConfig?.brushOpacity ?? 100;
-  const brushHardness = craftConfig?.brushHardness ?? 80;
+      e.preventDefault();
+      e.stopPropagation();
+      actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
+      actions.fast.setCursor(null);
+    };
 
-  return { brushSize, brushOpacity, brushHardness };
-}
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isBrushMode, actions]);
 
-// ─── useBrushColor ─────────────────────────────────────────────────────────────
-
-/**
- * useBrushColor: Reads current brush color
- *
- * Reads pendingColor from ColorOptions' pluginConfig as the brush color.
- */
-export function useBrushColor(): string {
-  const [colorConfig] = usePluginConfig<{ pendingColor?: string }>(ColorOptionsAPI.configKey);
-  return colorConfig?.pendingColor || '#FFFFFF';
+  // Safety net: never leave a hidden cursor behind on unmount.
+  useEffect(() => {
+    return () => {
+      if (actions.fast.getCursor() === 'none') actions.fast.setCursor(null);
+    };
+  }, [actions]);
 }

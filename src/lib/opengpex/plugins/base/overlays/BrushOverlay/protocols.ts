@@ -20,8 +20,8 @@
 /**
  * BrushOverlay Plugin Protocols
  *
- * Defines constants and signals for brush overlay plugin.
- * BrushOverlay renders brush cursor and stroke preview in STAGE_OVERLAY layer.
+ * Constants + typed facade for the vector BRUSH overlay — the vector
+ * spine's `renderer: 'stroke'` tool.
  */
 
 export const PLUGIN_ID = 'overlays.brush_overlay';
@@ -29,28 +29,65 @@ export const PLUGIN_AUTHOR = 'opengpex';
 
 // ─── Signal IDs ────────────────────────────────────────────────────────────────
 
-/** Whether stroke is in progress (true = drawing in progress) */
-export const SIGNAL_IS_STROKING = 'signal.is_stroking';
-
-// ─── Cross-Plugin Constants (cross-plugin references) ───────────────────────────────────────
-
-/** Cross-plugin signal storage key: whether drawing is in progress */
-export const BRUSH_OVERLAY_SIGNAL_IS_STROKING = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_IS_STROKING}`;
+/** Whether a brush stroke is currently being drawn (boolean). */
+export const SIGNAL_DRAWING_STROKE = 'signal.drawing_stroke';
 
 // ─── Command IDs ───────────────────────────────────────────────────────────────
 
-/** Bake stroke to target layer (generate independent undo history record) */
-export const CMD_BAKE = 'cmd.bake';
+/** Places a freshly started stroke as a `type:'vector'` layer (undoable). */
+export const CMD_PLACE = 'cmd.place';
 
-// ─── Internal UID Constants (used by plugin internal interactions) ───────────────────────
+// ─── Internal UID Constants ──────────────────────────────────────────────────────
 
-/** Internal command UID: Bake stroke */
-export const _CMD_BAKE_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_BAKE}`;
+/** Internal command UID: place a new stroke layer. */
+export const _CMD_PLACE_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PLACE}`;
 
-// ─── Default Brush Parameters ──────────────────────────────────────────────────
+// ─── Tunables ──────────────────────────────────────────────────────────────────
 
-export const DEFAULT_BRUSH_SIZE = 12;    // px
-export const DEFAULT_BRUSH_OPACITY = 100; // %
-export const DEFAULT_BRUSH_HARDNESS = 80; // %
-export const MIN_BRUSH_SIZE = 1;
-export const MAX_BRUSH_SIZE = 500;
+/**
+ * Minimum canvas-pixel distance between two RECORDED trajectory samples.
+ *
+ * Performance guard, not a smoothing filter: `computeCompositeSignature`
+ * serializes the whole packed point stream every frame, so an unfiltered
+ * pointer feed (which can emit coalesced sub-pixel moves at 240Hz+) makes the
+ * signature cost grow without adding a single visible pixel. The final raw
+ * sample is always appended on pointerup regardless of this threshold, so the
+ * stroke's end point stays exact.
+ */
+export const MIN_SAMPLE_DISTANCE_PX = 2;
+
+/**
+ * Hard cap on trajectory point count for a single continuous (unlifted) drag.
+ *
+ * Crash-prevention guard, not a UX feature: `StrokeRenderer`'s `vertsRing` is a
+ * fixed 8 MiB storage ring (`STROKE_RING_CAPACITY`), holding at most ~43,690
+ * segments (~43,691 points) before `BufferRing.allocate` returns an
+ * out-of-bounds slot and WebGPU raises a validation error instead of degrading
+ * gracefully. `onMove` stops appending new samples once this cap is hit — the
+ * stroke drawn so far stays put (it does not disappear), releasing the pointer
+ * commits it normally via `tightenStroke`, and the next stroke is unaffected.
+ * At `MIN_SAMPLE_DISTANCE_PX`, this is a ≥80,000 logical-px cumulative path
+ * budget per drag — normal brush usage will not reach it.
+ */
+export const MAX_STROKE_POINTS = 40_000;
+
+/**
+ * Padding added around the trajectory's raw bounding box when tightening the
+ * layer box at commit: half the tip diameter reaches beyond the centre-line,
+ * plus 1px for the analytic edge feather.
+ */
+export const STROKE_BOX_PADDING_EXTRA_PX = 1;
+
+// ─── Cross-Plugin Typed Facade ──────────────────────────────────────────────────
+
+/**
+ * BrushOverlayAPI: structured cross-plugin facade for external consumers.
+ */
+export const BrushOverlayAPI = {
+  signals: {
+    /** Whether a brush stroke drag is currently in progress. */
+    drawingStroke: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_DRAWING_STROKE}` as const,
+  },
+  /** pluginConfig storage key */
+  configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
+} as const;

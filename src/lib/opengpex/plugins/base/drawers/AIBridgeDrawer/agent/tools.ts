@@ -118,7 +118,7 @@ export const AGENT_TOOLS: AgentToolDef[] = [
       },
     },
   },
-  // ── Phase 1.5 阶段 A: History ──────────────────────────────────────────
+  // ── History ──────────────────────────────────────────────────────────
   {
     type: 'function',
     function: {
@@ -135,7 +135,7 @@ export const AGENT_TOOLS: AgentToolDef[] = [
       parameters: { type: 'object', properties: {} },
     },
   },
-  // ── Phase 1.5 阶段 A: Selection operations ─────────────────────────────
+  // ── Selection operations ─────────────────────────────────────────────
   {
     type: 'function',
     function: {
@@ -152,7 +152,7 @@ export const AGENT_TOOLS: AgentToolDef[] = [
       parameters: { type: 'object', properties: {} },
     },
   },
-  // ── Phase 1.5 阶段 A: Canvas resize ────────────────────────────────────
+  // ── Canvas resize ────────────────────────────────────────────────────
   {
     type: 'function',
     function: {
@@ -172,11 +172,11 @@ export const AGENT_TOOLS: AgentToolDef[] = [
     type: 'function',
     function: {
       name: 'revert_image',
-      description: 'Revert the current image back to its original imported state, discarding ALL edits. This is NOT undoable. IMPORTANT: When the user says "undo", "go back", "回退", or "revert last change", they almost certainly want the undo tool instead. Only use revert_image when the user EXPLICITLY asks to reset/restore to the original imported image AND you have confirmed this is their intent (e.g. "Are you sure? This will discard all edits and cannot be undone.").',
+      description: 'Revert the current image back to its original imported state, discarding ALL edits. This is NOT undoable. IMPORTANT: When the user says "undo", "go back", "step back", or "revert last change", they almost certainly want the undo tool instead. Only use revert_image when the user EXPLICITLY asks to reset/restore to the original imported image AND you have confirmed this is their intent (e.g. "Are you sure? This will discard all edits and cannot be undone.").',
       parameters: { type: 'object', properties: {} },
     },
   },
-  // ── Phase 1.5 阶段 A: Cross-plugin (AI Tools + Export) ─────────────────
+  // ── Cross-plugin (AI Tools + Export) ─────────────────────────────────
   {
     type: 'function',
     function: {
@@ -202,7 +202,7 @@ export const AGENT_TOOLS: AgentToolDef[] = [
       },
     },
   },
-  // ── Phase 1.2: Knowledge query ──────────────────────────────────────────
+  // ── Knowledge query ──────────────────────────────────────────────────
   {
     type: 'function',
     function: {
@@ -221,7 +221,7 @@ export const AGENT_TOOLS: AgentToolDef[] = [
       },
     },
   },
-  // ── Phase 1.5 阶段 B: Skill-based Planning ─────────────────────────────
+  // ── Skill-based Planning ─────────────────────────────────────────────
   {
     type: 'function',
     function: {

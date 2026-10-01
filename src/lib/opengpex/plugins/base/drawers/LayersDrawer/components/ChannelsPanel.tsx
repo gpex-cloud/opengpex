@@ -22,11 +22,37 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
 import {
+  CHANNEL_MASK_R,
+  CHANNEL_MASK_G,
+  CHANNEL_MASK_B,
+  CHANNEL_MASK_A,
   DISPLAY_CHANNEL_SIGNAL_KEY,
-  deriveChannelMask,
-  type ChannelVisibility,
-} from '@opengpex/editor/core/engine/protocol/DisplayTransform';
+  type SceneChannelMask,
+} from '@opengpex/editor/core/engine';
 import { ChannelItem } from './ChannelItem';
+
+/**
+ * Per-channel visibility state for the Channels panel toggles. The panel folds
+ * this into the engine's canonical 4-bit `SceneChannelMask` via a straight
+ * bit-pack — every display rule (alpha coverage, single-channel grayscale,
+ * two-channel colour, all-off → normal RGB) lives in ONE place, the view-pass
+ * shader's Photoshop rule (view.ts), so there is no second copy to drift.
+ */
+interface ChannelVisibility {
+  r: boolean;
+  g: boolean;
+  b: boolean;
+  a: boolean;
+}
+
+function deriveChannelMask(vis: ChannelVisibility): SceneChannelMask {
+  let mask = 0;
+  if (vis.r) mask |= CHANNEL_MASK_R;
+  if (vis.g) mask |= CHANNEL_MASK_G;
+  if (vis.b) mask |= CHANNEL_MASK_B;
+  if (vis.a) mask |= CHANNEL_MASK_A;
+  return mask;
+}
 
 interface ChannelDef {
   key: 'r' | 'g' | 'b' | 'a';

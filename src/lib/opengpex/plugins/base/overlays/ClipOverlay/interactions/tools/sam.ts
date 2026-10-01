@@ -129,7 +129,10 @@ export const createSamHandler = (): InteractionHandler => {
         const layer = pickSamTargetLayer(e);
         if (!layer || !isSamableLayer(layer)) {
           console.warn('[SAM] No target raster layer at click point');
-          e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+          e.actions.setInteraction({
+            selectionErrorPulse: Date.now(),
+            hud: { message: 'No target image layer at click point', type: 'error' }
+          });
           return;
         }
 
@@ -224,7 +227,10 @@ export const createSamHandler = (): InteractionHandler => {
 
         if (!decResult.masks || decResult.masks.length === 0 || decResult.masks[0].rings.length === 0) {
           console.warn('[SAM] Decoder returned empty mask');
-          e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+          e.actions.setInteraction({
+            selectionErrorPulse: Date.now(),
+            hud: { message: 'Area is empty', type: 'error' }
+          });
           return;
         }
 
@@ -252,7 +258,10 @@ export const createSamHandler = (): InteractionHandler => {
 
         if (framePolygons.length === 0) {
           console.warn('[SAM] All masks projected to empty polygons');
-          e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+          e.actions.setInteraction({
+            selectionErrorPulse: Date.now(),
+            hud: { message: 'Area is empty', type: 'error' }
+          });
           return;
         }
 

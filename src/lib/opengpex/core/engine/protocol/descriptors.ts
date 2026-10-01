@@ -23,7 +23,7 @@
  * Design rules:
  * 1. All fields must be JSON-safe (structured-clone compatible).
  * 2. No DOM refs, no functions, no closures.
- * 3. WorldMatrix is the ONLY branded matrix type — see architecture doc §五.
+ * 3. WorldMatrix is the ONLY branded matrix type across coordinate spaces.
  */
 
 import type {

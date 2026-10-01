@@ -2,6 +2,23 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.0-beta.1
+
+- Rendering: next-generation GPU engine now fully powered by WebGPU, delivering ultra-smooth real-time composition, instant live previews, and significantly reduced CPU overhead
+- Color: standardized on a Linear Display-P3 working color space in 16-bit float (with ultra-wide gamut planned for post-v2.0), featuring unclamped GPU gamut mapping and ICC support to keep colors vibrant, accurate, and faithful across displays and exports
+- File Import: new decision-matrix architecture that systematically evaluates file format, color space, and decoding channels, guaranteeing lossless raw fidelity, correct metadata, and proper EXIF orientations
+- File Export: unified decision-matrix export and bake pipeline on top of off-screen GPU rendering, ensuring pixel-perfect parity with on-screen visuals alongside native wide-gamut and 16-bit high-depth output
+- Masking: new dual-track mask system cleanly separates freehand brush erasing from vector geometric clipping, allowing smooth transforms and non-destructive editing with zero quality loss
+- Tools: Brush, Eraser, and Mosaic now run on dedicated, responsive interaction paths for zero-lag strokes and cleaner edits
+
+---
+
+## v1.3.2
+
+- Markers: rectangle, ellipse, and arrow annotations now render in real time as crisp vector shapes — they stay sharp at any zoom level and in high-resolution (2×/4×) exports, with no more blurred edges from bitmap scaling
+- Markers: style changes (color, stroke width, corner radius, fill) now apply instantly with zero lag
+- Markers: fill opacity now looks identical between the live preview and the final result
+
 ---
 
 ## v1.3.1

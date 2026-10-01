@@ -22,6 +22,7 @@
 import React from 'react';
 import { Square } from 'lucide-react';
 import type { RectMarkerData } from '@opengpex/editor/core/types';
+import { fromHex } from '@opengpex/editor/core/engine/color';
 import type { MarkerDefinition } from '../registry';
 
 /**
@@ -40,8 +41,8 @@ export const RectDefinition: MarkerDefinition<RectMarkerData> = {
 
   defaults: (): RectMarkerData => ({
     kind: 'rect',
-    stroke: { color: '#FF3B30', width: 3 },
-    fill: { color: '#FF3B30', opacity: 0 },
+    stroke: { color: fromHex('#FF3B30'), width: 3 },
+    fill: { color: fromHex('#FF3B30'), opacity: 0 },
     cornerRadius: 0,
   }),
 

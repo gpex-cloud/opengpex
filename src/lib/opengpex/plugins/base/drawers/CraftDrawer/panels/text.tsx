@@ -208,9 +208,9 @@ export const TextPanel = React.memo(function TextPanel() {
         <div className="flex flex-col gap-1.5">
           <ColorPickerPro
             variant="compact"
-            color={textColor}
-            onChange={updateTextColorLive}
-            onCommit={updateTextColor}
+            value={textColor}
+            onValueChange={updateTextColorLive}
+            onValueCommit={updateTextColor}
             showHarmony={false}
             showRecents={false}
           />

@@ -196,7 +196,7 @@ export default function Tooltip({
           className={`animate-in fade-in zoom-in-95 duration-200 ${maxWidth ? 'whitespace-normal' : 'whitespace-nowrap'} ${className}`}
         >
           <div
-            style={maxWidth ? { maxWidth, whiteSpace: 'normal' } : undefined}
+            style={maxWidth ? { maxWidth, whiteSpace: uppercase ? 'normal' : 'pre-line' } : undefined}
             className={`bg-white dark:bg-zinc-900 text-zinc-800 dark:text-white text-[10px] rounded-lg py-1.5 px-2.5 shadow-2xl border border-zinc-200 dark:border-white/10 ${uppercase ? 'uppercase font-bold tracking-wider' : 'font-medium tracking-tight whitespace-pre-line leading-relaxed'} ${contentClassName}`}
           >
             {content}

@@ -945,41 +945,6 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                               </span>
                             </div>
 
-                            {selectedNode.data.tileMeta && (
-                              <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] dark:border-t-white/[0.06] space-y-2">
-                                <div className="text-[8px] font-black uppercase text-[var(--text-muted)] ">
-                                  Decoding Tile Meta
-                                </div>
-                                <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
-                                  <span className="text-[var(--text-muted)] ">
-                                    RESOLUTION
-                                  </span>
-                                  <span className="text-[var(--text-main)] font-bold">
-                                    {selectedNode.data.tileMeta.width} x{""}
-                                    {selectedNode.data.tileMeta.height} px
-                                  </span>
-                                </div>
-                                <div className="flex justify-between py-1 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] ">
-                                  <span className="text-[var(--text-muted)] ">
-                                    COLUMNS / ROWS
-                                  </span>
-                                  <span className="text-[var(--text-main)] ">
-                                    {selectedNode.data.tileMeta.cols ??
-                                      Math.ceil(
-                                        selectedNode.data.tileMeta.width / 256,
-                                      )}
-                                    {""}x{""}
-                                    {selectedNode.data.tileMeta.rows ??
-                                      Math.ceil(
-                                        selectedNode.data.tileMeta.height / 256,
-                                      )}
-                                    {""}
-                                    tiles
-                                  </span>
-                                </div>
-                              </div>
-                            )}
-
                             <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] dark:border-t-white/[0.06] flex gap-2">
                               <button
                                 onClick={() =>

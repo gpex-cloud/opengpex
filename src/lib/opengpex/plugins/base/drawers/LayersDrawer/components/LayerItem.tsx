@@ -22,7 +22,8 @@
 "use client";
 
 import React, { useRef, useEffect } from "react";
-import { Eye, EyeOff, Lock, Unlock, Maximize2 } from "lucide-react";
+import { Eye, EyeOff, Lock, Unlock, Maximize2, Star, Paintbrush, Image as ImageIcon, Folder } from "lucide-react";
+import { MosaicIcon } from "@opengpex/editor/plugins/base/drawers/CraftDrawer/icon";
 import { Motion } from "@opengpex/editor/core/motion";
 import {
   Reorder,
@@ -181,25 +182,27 @@ export const LayerItem = React.memo(
             >
               {layer.type === "color" ? (
                 <div
-                  className="w-full h-full flex items-center justify-center font-black text-[14px] tracking-tighter rounded-[inherit]"
-                  style={{
-                    background:
-                      "linear-gradient(315deg, #f472b6, #a78bfa, #38bdf8)",
-                    color: "#ffffff",
-                  }}
-                >
-                  C
-                </div>
-              ) : layer.type === "paint" ? (
-                <div
-                  className="w-full h-full flex items-center justify-center font-black text-[14px] tracking-tighter rounded-[inherit]"
+                  className="w-full h-full rounded-[inherit]"
                   style={{
                     background:
                       "linear-gradient(45deg, #ef4444, #f59e0b, #10b981, #3b82f6, #8b5cf6)",
-                    color: "#ffffff",
+                  }}
+                />
+              ) : layer.type === "paint" ? (
+                <div
+                  className="w-full h-full flex items-center justify-center rounded-[inherit]"
+                  style={{
+                    background: "#e4e4e7",
+                    color: "#1a1a1a",
                   }}
                 >
-                  P
+                  {layer.metadata?.sourceTool === "mosaic" ? (
+                    <MosaicIcon size={13} />
+                  ) : layer.metadata?.sourceTool === "brush" ? (
+                    <Paintbrush size={13} strokeWidth={2} />
+                  ) : (
+                    <ImageIcon size={13} strokeWidth={2} />
+                  )}
                 </div>
               ) : layer.type === "text" ? (
                 <div
@@ -213,13 +216,29 @@ export const LayerItem = React.memo(
                 </div>
               ) : layer.type === "vector" ? (
                 <div
-                  className="w-full h-full flex items-center justify-center font-black text-[13px] tracking-tighter rounded-[inherit]"
+                  className="w-full h-full flex items-center justify-center rounded-[inherit]"
                   style={{
                     background: "#e4e4e7",
                     color: "#1a1a1a",
                   }}
                 >
-                  V
+                  {layer.metadata?.sourceTool === "marker" ? (
+                    <Star size={13} strokeWidth={2} />
+                  ) : layer.metadata?.sourceTool === "brush" ? (
+                    <Paintbrush size={13} strokeWidth={2} />
+                  ) : (
+                    <ImageIcon size={13} strokeWidth={2} />
+                  )}
+                </div>
+              ) : layer.type === "group" ? (
+                <div
+                  className="w-full h-full flex items-center justify-center rounded-[inherit]"
+                  style={{
+                    background: "#fce7f3",
+                    color: "#1a1a1a",
+                  }}
+                >
+                  <Folder size={13} strokeWidth={2} />
                 </div>
               ) : (
                 <ImageAsset

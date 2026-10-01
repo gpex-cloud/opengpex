@@ -18,11 +18,13 @@
  */
 
 import {
-  GeometryService, PixelService,
+  GeometryService, PixelService, AssetService,
   Frame, Layer, VectorMask, BitmapMask, LocalRect,
   asLocalShape, asLocalRect
 } from '@opengpex/editor/core/types';
 import { LayerFactory } from '../factory';
+import { highDepthTextureCache, type HighDepthSource } from '../../engine/sources/HighDepthSource';
+import { resampleBilinear } from '@opengpex/editor/core/engine/color';
 
 /**
  * createResampleOperations: Factory that creates layer resampling operations
@@ -30,7 +32,8 @@ import { LayerFactory } from '../factory';
  */
 export function createResampleOperations(
   geometry: GeometryService,
-  pixels: PixelService
+  pixels: PixelService,
+  assets: AssetService,
 ) {
   /**
    * resampleLayer: Resamples a layer's pixel content to a new resolution.
@@ -71,8 +74,8 @@ export function createResampleOperations(
       let url = layer.src;
 
       if (hasContent) {
-        const { result } = await pixels.render.compositeResizedLayers([layer], frame, { w: targetW, h: targetH });
-        ({ assetId, url } = await result.toAsset());
+        const composited = await pixels.render.compositeResizedLayers([layer], frame, { w: targetW, h: targetH });
+        ({ assetId, url } = await assets.storeBundle(composited));
       }
 
       const patch: Partial<Layer> = {
@@ -130,8 +133,76 @@ export function createResampleOperations(
         // The Worker resolves src size, so a shared full-image src scales correctly
         // instead of being squashed into the selection window. Throws on decode
         // failure → caught above → flatten fallback.
-        const result = await pixels.image.resample(layer.src, { scale: scaleX });
-        ({ assetId, url } = await result.toAsset());
+
+        // PR-4.1a: Check if this layer has a 16/32-bit high-depth source
+        let hdSource: HighDepthSource | undefined = layer.assetId
+          ? highDepthTextureCache.get(layer.assetId)
+          : undefined;
+        // Light record lookup (sync, near-zero cost): needed for BOTH the cold-reload
+        // high-depth recovery below AND the 8-bit path's source gamut (so the Worker's
+        // OffscreenCanvas colorSpace matches instead of clamping wide-gamut sources).
+        const lightRecord = layer.assetId ? assets.get(layer.assetId) : undefined;
+        if (!hdSource && lightRecord?.dataFormat && layer.assetId) {
+          // Cold reload (this session never warmed the in-memory cache): the light
+          // record's `dataFormat` is the persisted "a dec: truth exists" predicate,
+          // and per AssetStore.getDec's contract, geometry + colour identity are
+          // reassembled from that SAME light record, not from the bare dec buffer.
+          const decData = await assets.getDec(layer.assetId);
+          if (decData) {
+            hdSource = {
+              data: decData,
+              width: lightRecord.width,
+              height: lightRecord.height,
+              dataFormat: lightRecord.dataFormat,
+              trc: lightRecord.trc,
+              // §8.1 forwarding: carry the persisted source gamut through the cold
+              // reload so the GPU converts it.
+              gamut: lightRecord.gamut,
+              // RAW Route B §5.3: carry the persisted render intent through too, so a
+              // cold-reloaded RAW still tone-maps identically.
+              renderIntent: lightRecord.renderIntent,
+            };
+          } else {
+            // dataFormat promised a truth that isn't there — persist failure /
+            // mis-GC, not a silent degrade (AssetStore.getDec's own contract).
+            console.warn('[LayerService] dec: missing for high-depth asset:', layer.assetId);
+          }
+        }
+
+        let resampled = await pixels.image.resample(layer.src, { scale: scaleX, sourceGamut: lightRecord?.gamut });
+
+        if (hdSource) {
+          // PR-4.1a: a resized 16-bit layer resamples the STRAIGHT high-depth naked
+          // pixels DIRECTLY via CPU bilinear (f32 intermediate) to preserve high precision.
+          // The element type round-trips, so a 32-bit float layer stays f32 (§6.5).
+          const targetW = Math.max(1, Math.round(hdSource.width * scaleX));
+          const targetH = Math.max(1, Math.round(hdSource.height * scaleY));
+          const scaledData = resampleBilinear(
+            hdSource.data,
+            hdSource.width,
+            hdSource.height,
+            targetW,
+            targetH,
+          );
+          resampled = {
+            ...resampled,
+            highDepthSource: {
+              data: scaledData,
+              width: targetW,
+              height: targetH,
+            },
+            colorIdentity: {
+              gamut: hdSource.gamut ?? 'srgb',
+              trc: hdSource.trc ?? 'linear',
+              bitDepth: hdSource.dataFormat === 'rgba32float' ? 32 : 16,
+              dataFormat: hdSource.dataFormat,
+              // Preserve the render intent across a resize re-store (RAW Route B §5.3).
+              renderIntent: hdSource.renderIntent,
+            },
+          };
+        }
+
+        ({ assetId, url } = await assets.storeBundle(resampled));
       }
 
       // Snap "positioning" quantities (rect / bounds) to the integer pixel grid to
@@ -183,8 +254,8 @@ export function createResampleOperations(
           layer.bitmapMasks.map(async (bm: BitmapMask) => {
             const scaledBounds = scaleRectSnap(bm.bounds);
             const targetSize = { w: Math.max(1, scaledBounds.w), h: Math.max(1, scaledBounds.h) };
-            const bmResult = await pixels.image.resample(bm.src, { targetSize });
-            const { assetId: bmAssetId, url: bmUrl } = await bmResult.toAsset();
+            const bmResampled = await pixels.image.resample(bm.src, { targetSize });
+            const { assetId: bmAssetId, url: bmUrl } = await assets.storeBundle(bmResampled);
             return {
               ...bm,
               bounds: scaledBounds,

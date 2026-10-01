@@ -19,8 +19,11 @@
 
 import { EditorContextValue, EditorCommand, BuiltCommand } from '@opengpex/editor/core/types';
 import { FrameCreateCommands } from './commands/frame/create';
+import { FramePackCommands } from './commands/frame/pack';
 import { FrameRevertCommands } from './commands/frame/revert';
+import { FrameRemoveCommands } from './commands/frame/remove';
 import { FrameResizeCommands } from './commands/frame/resize';
+import { FrameExportCommands } from './commands/frame/export';
 import { LayerToggleCommands } from './commands/layer/toggle';
 import { LayerMergeCommands } from './commands/layer/merge';
 import { LayerUnionCommands } from './commands/layer/union';
@@ -42,8 +45,11 @@ export * from './protocols';
  * Export advanced command sets
  */
 export * from './commands/frame/create';
+export * from './commands/frame/pack';
 export * from './commands/frame/revert';
+export * from './commands/frame/remove';
 export * from './commands/frame/resize';
+export * from './commands/frame/export';
 export * from './commands/layer/toggle';
 export * from './commands/layer/merge';
 export * from './commands/layer/union';
@@ -62,8 +68,11 @@ export * from './commands/viewport/transform';
 export function registerAdvancedCommands(ctx: EditorContextValue['actions']) {
   const allCommandSets = [
     FrameCreateCommands,
+    FramePackCommands,
     FrameRevertCommands,
+    FrameRemoveCommands,
     FrameResizeCommands,
+    FrameExportCommands,
     LayerToggleCommands,
     LayerMergeCommands,
     LayerUnionCommands,

@@ -22,6 +22,7 @@
 import React, { useRef, useCallback, useEffect, useState } from "react";
 import { useEditorState, useEditorServices, useVolatileInteraction } from "@opengpex/editor/core/context";
 import { TEXT_LAYER_PADDING } from "@opengpex/editor/core/helpers/config";
+import { toCssColor4 } from "@opengpex/editor/core/engine/color";
 import { TransformGizmo } from "@opengpex/editor/widgets/TransformGizmo";
 import { useTextEditorFastSync } from "./useFastSync";
 import { useTextOverlayState, useInlineTextEditing } from "./hooks";
@@ -210,7 +211,7 @@ const InlineTextEditor = React.memo(function InlineTextEditor({
                 ]
                   .filter(Boolean)
                   .join(" ") || "none",
-              color: textData.color,
+              color: toCssColor4(textData.color),
               textAlign: textData.align,
               lineHeight: textData.lineHeight,
               minHeight: "1em",

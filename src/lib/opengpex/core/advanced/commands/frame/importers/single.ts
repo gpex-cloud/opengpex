@@ -13,127 +13,25 @@
  * Single Image Import Strategy.
  *
  * Architecture:
- *   - `buildFrameContent` — Pure content builder (layers, camera, metadata).
- *     Shared by both importSingleImage (new frame) and revert (in-place rebuild).
- *   - `importSingleImage` — Creates a new frame and adds it to the store.
+ *   - `importSingleImage` — Full pipeline: decode → asset registration →
+ *     thumbnail → new frame → addFrame.
+ *   - `revertSingleImage` — Lighter counterpart for `revertFrame` (in-place
+ *     rebuild): same base-layer assembly, but skips thumbnail generation
+ *     since a revert never changes it; commits via updateFrame instead of
+ *     addFrame and reports success/failure as a boolean.
  */
 
 'use client';
 
-import { asLocalShape, EditorContextValue, WorkingColorSpace, Layer, NormalizedState, CameraState, LocalShape } from '@opengpex/editor/core/types';
-import type { ImageMetadata } from '@opengpex/editor/core/files/types';
+import { asLocalShape, EditorContextValue } from '@opengpex/editor/core/types';
 import { getDefaultCanvasClipBox } from '@opengpex/editor/core/helpers/selection';
+import { newFrameId } from '../_naming';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
-import { resolveColorSpaceForFormat, getImportStrategy } from '@opengpex/editor/core/color/ColorPipeline';
 import type { DecodeResult } from '@opengpex/editor/core/files/types';
-import type { Dimensions } from '@opengpex/editor/core/types';
 import type { ImportOptions } from './_types';
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// BuildFrameContent — Pure content builder (reusable by import + revert)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/** Output of buildFrameContent — everything needed to create or update a frame. */
-export interface FrameContent {
-  layers: NormalizedState<Layer>;
-  activeLayerId: string;
-  canvas: Dimensions;
-  camera: CameraState;
-  canvasClipBox: LocalShape;
-  /** Frame-level asset ID: source blob if available, otherwise display blob. Used for fast-export/revert. */
-  assetId: string;
-  thumbnail: { src: string; assetId: string };
-  dpi: number;
-  bitDepth: 8 | 16 | 32;
-  colorSpace: WorkingColorSpace;
-  metadata?: ImageMetadata;
-}
-
-/**
- * Builds frame content from a decoded image — layers, camera, metadata.
- *
- * This is the shared core used by both `importSingleImage` (new frame creation)
- * and `revert` (in-place frame rebuild). It does NOT touch the store — it only
- * produces the data needed to construct or update a frame.
- *
- * @param ctx - Editor context (for asset registration, pixel ops, geometry)
- * @param decoded - Decoded image result from FileService
- * @param chosenDpi - Optional DPI override (from vector dialog or import options)
- * @returns FrameContent — all data needed to create/update a frame
- */
-export async function buildFrameContent(
-  ctx: EditorContextValue,
-  decoded: DecodeResult,
-  chosenDpi?: number,
-): Promise<FrameContent> {
-  const { assets, pixels, state, geometry } = ctx;
-  const { dimensions: decodeDimensions, metadata, sourceBlob, subImages } = decoded;
-
-  const displayBlob = subImages[0].displayBlob;
-
-  // 1. Register display asset
-  const { assetId, url: assetUrl } = await assets.register(displayBlob, decodeDimensions);
-
-  // 1b. Store source blob for lossless re-export (16-bit fidelity)
-  const sourceAssetId = await assets.storeRaw(sourceBlob);
-
-  // 2. Concurrently: decode content bounds + generate thumbnail
-  const [contentBounds, thumbResult] = await Promise.all([
-    pixels.image.contentBounds(assetUrl),
-    pixels.image.resample(assetUrl, { maxSize: 256 }),
-  ]);
-  const thumbBlob = await thumbResult.toBlob('image/webp');
-  const dimension = decodeDimensions;
-
-  // 3. Register thumbnail asset (dimensions from resample output)
-  const thumbDim = thumbResult.dimensions;
-  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, thumbDim);
-
-  // 4. Camera calculation
-  const { insets } = state.ui.theme.config;
-  const camera = geometry.camera.getFitCamera(
-    state.ui.viewportDim,
-    dimension,
-    { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right },
-  );
-  const canvasClipBox = getDefaultCanvasClipBox(dimension);
-
-  // 5. Assemble base layer
-  const baseLayer = LayerFactory.getNewLayer({
-    name: 'Background',
-    src: assetUrl,
-    assetId,
-    cx: 0,
-    cy: 0,
-    locked: true,
-    bounding: dimension,
-    visibleShape: asLocalShape(contentBounds),
-  });
-
-  const expandedLayers = LayerFactory.expandLayers([baseLayer]);
-
-  // 6. Detect bit depth and color space
-  const detectedBitDepth: 8 | 16 | 32 = metadata.bitDepth >= 32 ? 32 : metadata.bitDepth > 8 ? 16 : 8;
-  const detectedCS = resolveColorSpaceForFormat(metadata.sourceFormat, metadata.colorSpace);
-  const strategy = getImportStrategy(detectedCS);
-  const colorSpace: WorkingColorSpace = strategy.frameColorSpace;
-
-  return {
-    layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
-    activeLayerId: baseLayer.id,
-    canvas: dimension,
-    camera,
-    canvasClipBox,
-    assetId: sourceAssetId || assetId,
-    thumbnail: { src: thumbAssetUrl, assetId: thumbAssetId },
-    dpi: chosenDpi || metadata.dpi,
-    bitDepth: detectedBitDepth,
-    colorSpace,
-    metadata,
-  };
-}
+import { transcodeBlob } from '@opengpex/editor/core/engine/utils/pixel-utils';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // importSingleImage — Creates a new frame and adds to store
@@ -143,48 +41,163 @@ export async function buildFrameContent(
  * Import a single image as a new frame with one layer.
  *
  * @param ctx - Editor context
- * @param decoded - Decoded image result from FileService
- * @param file - Original source file (for frame naming)
- * @param opts - Import options (switchFrame, dpi, extra)
+ * @param file - Resolved source file (frame naming)
+ * @param decoded - Decode result from FileService: { metadata, pages, sourceBlob }
+ * @param opts - Import options, with `dpi` already finalized
  * @returns Frame ID of the created frame.
  */
 export async function importSingleImage(
   ctx: EditorContextValue,
-  decoded: DecodeResult,
   file: File,
+  decoded: DecodeResult,
   opts: ImportOptions,
 ): Promise<{ frameId: string; thumbnailUrl: string }> {
-  const { actions } = ctx;
-  const { switchFrame, dpi: chosenFrameDpi, extra, parentId, seqNum, nameOverride } = opts;
+  const { actions, assets, pixels, state, geometry } = ctx;
+  const { switchFrame, parentId, seqNum, nameOverride, extra } = opts;
+  const { metadata, sourceBlob, pages } = decoded;
 
-  // Build all frame content (layers, camera, metadata)
-  const content = await buildFrameContent(ctx, decoded, chosenFrameDpi);
+  // Single-image path: exactly one page (multi-page/animated routes through
+  // multi-tiff.ts / multi-gif.ts before this function is ever reached).
+  const page = pages[0];
 
-  // Derive frame name
-  const frameName = file.name.replace(/\.[^.]+$/, '');
+  // 1. Ingest: register display asset + store raw source + warm high-depth
+  // cache if the page carries pre-decoded naked pixels (TIFF/PNG/RAW). See
+  // `AssetService.storeBundle` for the full rationale. `bundle.url` is always
+  // the 8-bit display URL (fallback bitmap for a cold high-depth cache);
+  // `bundle.assetId` is the page's unified content address — `${sourceHash}#${pageIndex}`
+  // when a source file exists (light record + `dec:` under this id, `raw:` under
+  // its `#` prefix), else the display asset hash. The base layer composites from
+  // this single id, whichever richness it resolves to (banded 8-bit display blob
+  // was never acceptable post-adjust).
+  const bundle = await assets.storeBundle(page, sourceBlob);
+
+  // 2. Concurrently: decode content bounds + generate thumbnail
+  const [contentBounds, thumbResult] = await Promise.all([
+    pixels.image.contentBounds(bundle.url),
+    pixels.image.resample(bundle.url, { maxSize: 256 }),
+  ]);
+  const thumbBlob = await transcodeBlob(thumbResult.displayBlob, 'image/webp');
+
+  // 3. Register thumbnail asset (dimensions from resample output)
+  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, { width: thumbResult.width, height: thumbResult.height });
+
+  // 4. Camera calculation
+  const { insets } = state.ui.theme.config;
+  const camera = geometry.camera.getFitCamera(
+    state.ui.viewportDim,
+    { w: page.width, h: page.height },
+    { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right },
+  );
+  const canvasClipBox = getDefaultCanvasClipBox({ w: page.width, h: page.height });
+
+  // 5. Assemble base layer
+  const baseLayer = LayerFactory.getNewLayer({
+    name: 'Background',
+    src: bundle.url,
+    assetId: bundle.assetId,
+    cx: 0,
+    cy: 0,
+    locked: true,
+    bounding: { w: page.width, h: page.height },
+    visibleShape: asLocalShape(contentBounds),
+  });
+
+  const expandedLayers = LayerFactory.expandLayers([baseLayer]);
 
   // Assemble and add the frame
+  const frameName = file.name.replace(/\.[^.]+$/, '');
   const frame = LayerFactory.getNewFrame({
-    id: `f-${Date.now().toString(36)}-${parentId ? 'branch' : 'trunk'}`,
+    id: newFrameId(!!parentId),
     parentId,
     seqNum,
     name: nameOverride || frameName || file.name,
     source: file.name,
-    canvas: content.canvas,
-    dpi: content.dpi,
-    bitDepth: content.bitDepth,
-    colorSpace: content.colorSpace,
-    trc: 'srgb-trc',
-    layers: content.layers,
-    activeLayerId: content.activeLayerId,
-    camera: content.camera,
-    canvasClipBox: content.canvasClipBox,
-    assetId: content.assetId,
-    thumbnail: content.thumbnail,
     extra,
-    metadata: content.metadata,
+    layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
+    activeLayerId: baseLayer.id,
+    canvas: { w: page.width, h: page.height },
+    camera,
+    canvasClipBox,
+    assetId: bundle.assetId,
+    thumbnail: { src: thumbAssetUrl, assetId: thumbAssetId },
+    dpi: opts.dpi || metadata.dpi,
+    metadata,
   });
 
   actions.addFrame(frame, switchFrame);
-  return { frameId: frame.id, thumbnailUrl: content.thumbnail.src };
+  return { frameId: frame.id, thumbnailUrl: thumbAssetUrl };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// revertSingleImage — Rebuilds an existing frame in-place and commits via updateFrame
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Rebuild `frameId`'s layers/camera/metadata from re-decoded original bytes and
+ * commit in-place — the revert counterpart to `importSingleImage` (which commits
+ * via `addFrame`; this commits via `updateFrame`). A revert re-decodes the same
+ * original bytes, so frame.assetId/thumbnail/dpi never change and don't need
+ * recomputing. Duplicates the base-layer assembly from `importSingleImage`
+ * (asset registration, high-depth cache warm — see that function for the
+ * rationale) minus the thumbnail generation that only a new frame needs.
+ *
+ * @returns true if reverted successfully, false otherwise.
+ */
+export async function revertSingleImage(
+  ctx: EditorContextValue,
+  frameId: string,
+  decoded: DecodeResult,
+): Promise<boolean> {
+  const { actions, assets, pixels, state, geometry } = ctx;
+  try {
+    const { sourceBlob, pages, metadata } = decoded;
+    const page = pages[0];
+
+    // 1. Ingest: register display asset + store raw source + warm high-depth
+    // cache (see importSingleImage / AssetService.storeBundle for rationale).
+    const bundle = await assets.storeBundle(page, sourceBlob);
+
+    // 2. Decode content bounds (no thumbnail — revert never changes it)
+    const contentBounds = await pixels.image.contentBounds(bundle.url);
+
+    // 3. Camera calculation
+    const { insets } = state.ui.theme.config;
+    const camera = geometry.camera.getFitCamera(
+      state.ui.viewportDim,
+      { w: page.width, h: page.height },
+      { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right },
+    );
+    const canvasClipBox = getDefaultCanvasClipBox({ w: page.width, h: page.height });
+
+    // 4. Assemble base layer
+    const baseLayer = LayerFactory.getNewLayer({
+      name: 'Background',
+      src: bundle.url,
+      assetId: bundle.assetId,
+      cx: 0,
+      cy: 0,
+      locked: true,
+      bounding: { w: page.width, h: page.height },
+      visibleShape: asLocalShape(contentBounds),
+    });
+    const expandedLayers = LayerFactory.expandLayers([baseLayer]);
+
+    // 5. Commit in-place (updateFrame, not addFrame) + reset history
+    actions.updateFrame(frameId, {
+      layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
+      activeLayerId: baseLayer.id,
+      canvas: { w: page.width, h: page.height },
+      camera,
+      canvasClipBox,
+      metadata,
+      clipBoxes: {},
+    });
+    actions.resetHistory();
+    actions.setInteraction({ hud: { message: 'Reverted to original — all edits discarded.', type: 'success' } });
+    return true;
+  } catch (err) {
+    console.error('[FrameService] Standard revert failed:', err);
+    actions.setInteraction({ hud: { message: 'Failed to revert. Original asset may be missing.', type: 'error' } });
+    return false;
+  }
 }

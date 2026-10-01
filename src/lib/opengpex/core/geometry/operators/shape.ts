@@ -26,7 +26,6 @@ import { isLayerSource } from './utils';
 import { getLayerLocalAABB, getRectIntersection, getLayerBoundingBox, getMultiRectUnion } from './space';
 import { snapToPixel } from './snapping';
 import { parsePathDataToRings, shapeToPoint2D, ringsToPathData } from './point2d';
-import { intersectPathWithRect } from '../sut-hod';
 import { intersectPathWithPath, differencePathWithPath } from '../poly-clip';
 
 /**
@@ -77,10 +76,18 @@ function shapeToPathData(shape: LocalShape): string {
  * - inverted=false (clip mask) → intersect (∩)
  * - inverted=true  (hole mask) → subtract (−, difference)
  *
- * Degradation (returns the untouched `visibleShape` with `degraded:true`) when
- * the geometry cannot be represented as a crisp polygon:
- *   - any enabled bitmapMask exists (raster, not geometrizable)
- *   - any enabled vectorMask has feather>0 (soft edge, not geometrizable)
+ * Feathering is NOT a boolean-topology change (M3 §M3.d.1): a soft edge never moves
+ * which pixels are inside the shape, only the alpha falloff at the boundary. So the
+ * fold runs on the HARD contours as usual and returns the participating `featherPx`
+ * alongside the tight geometry — the caller (`fragmentToNewLayer`) turns that into a
+ * padded bbox + a feathered vmask instead of the old whole-layer fallback.
+ *
+ * Degradation (returns the untouched `visibleShape` with `degraded:true`) only when
+ * the geometry genuinely cannot be represented as a crisp polygon + single feather:
+ *   - any enabled bitmapMask exists (raster alpha, not geometrizable)
+ *   - the participating vectorMasks carry ≥2 DISTINCT positive feathers (a single
+ *     folded shape cannot express per-edge softness — §M3.h.2 keeps the whole-layer
+ *     / per-submask path for that rare divergent-feather corner; correct, not tight).
  * Disabled masks (enabled=false) are always skipped.
  *
  * Empty result (e.g. base fully carved away by holes) → returns a degenerate
@@ -88,15 +95,24 @@ function shapeToPathData(shape: LocalShape): string {
  */
 export function getEffectiveVisibleShape(
   layer: Layer
-): { shape: LocalShape; degraded: boolean } {
+): { shape: LocalShape; degraded: boolean; featherPx: number } {
   const base = layer.visibleShape!;
   const vMasks = (layer.vectorMasks ?? []).filter(m => m.enabled);
   const bMasks = (layer.bitmapMasks ?? []).filter(m => m.enabled);
 
-  // Non-geometrizable capabilities → degrade to the raw visibleShape.
-  if (bMasks.length > 0) return { shape: base, degraded: true };          // raster mask
-  if (vMasks.some(m => m.feather > 0)) return { shape: base, degraded: true }; // soft edge
-  if (vMasks.length === 0) return { shape: base, degraded: false };       // zero-regression fast path
+  // Non-geometrizable capability → degrade to the raw visibleShape.
+  if (bMasks.length > 0) return { shape: base, degraded: true, featherPx: 0 }; // raster mask
+  if (vMasks.length === 0) return { shape: base, degraded: false, featherPx: 0 }; // zero-regression fast path
+
+  // Feather is a per-shape scalar on the folded result. A single value (or a single
+  // shared value across masks) can be carried exactly; ≥2 distinct positive feathers
+  // cannot be folded into one soft shape, so we degrade to the whole-layer / polygon
+  // multi-submask fallback for that corner (§M3.h.2 default, confirmed).
+  const positiveFeathers = [...new Set(vMasks.map(m => m.feather).filter(f => f > 0))];
+  if (positiveFeathers.length > 1) {
+    return { shape: base, degraded: true, featherPx: 0 }; // divergent feather → whole-layer
+  }
+  const featherPx = positiveFeathers[0] ?? 0;
 
   // Fold masks into an evolving pathData:
   //   base → pathData; for each mask: intersect (inverted:false) / difference (inverted:true)
@@ -121,6 +137,7 @@ export function getEffectiveVisibleShape(
           __brand: 'local',
         } as unknown as LocalShape,
         degraded: false,
+        featherPx,
       };
     }
 
@@ -147,6 +164,7 @@ export function getEffectiveVisibleShape(
       __brand: 'local',
     } as unknown as LocalShape,
     degraded: false,
+    featherPx,
   };
 }
 
@@ -154,15 +172,15 @@ export function getEffectiveVisibleShape(
  * intersectWithLayer: Calculates the intersection of the selection shape with the layer's visible area, returning the intersection shape and center world coordinates
  * (i.e. original LayerService.deriveLogical, now moved to the geometry engine with swapped parameter order)
  */
-export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleShape: LocalShape, center: Point2D } | null {
+export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleShape: LocalShape, center: Point2D, featherPx: number } | null {
   // Mask-aware effective visible shape (§4.3 / §5.1). The flag lets us fall back
   // to the legacy "raw visibleShape" behavior in an emergency (§5.4).
   const eff = MASK_AWARE_INTERSECTION
     ? getEffectiveVisibleShape(layer)
-    : { shape: layer.visibleShape!, degraded: false };
+    : { shape: layer.visibleShape!, degraded: false, featherPx: 0 };
 
-  // §5.2: degraded (feather/bitmap mask) → return null so callers fall back to
-  // the vectorMask render path (fragmentToNewLayer's else branch).
+  // §5.2: degraded (bitmap mask / divergent feather) → return null so callers fall
+  // back to the vectorMask render path (fragmentToNewLayer's else branch).
   if (eff.degraded) return null;
 
   const layerShape = eff.shape;
@@ -176,24 +194,29 @@ export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleSh
 
   // Determine effective visibleShape via true geometric intersection.
   //
-  // Case 1: rect selection + path/circle layer → clip the layer's path by the selection rect
-  //   Uses Sutherland-Hodgman to compute the exact intersection polygon.
-  //   This produces a new pathData that the tile renderer can correctly clip.
+  // - If either shape is non-rect or has pathData (holes/masks/irregular), compute
+  //   the exact geometric intersection via polygon-clipping (Martinez-Rueda-Feito).
+  //   This cleanly resolves arbitrary boundaries, multi-ring holes, and concave shapes,
+  //   eliminating redundant edges and marching-ant artifacts in Refocus.
   //
-  // Case 2: path selection + rect layer → the selection path IS the constraint
-  //   (rect is "all pixels valid", so path ∩ rect = path when path is within rect)
-  //
-  // Case 3: path selection + path layer → polygon-clipping (Martinez-Rueda-Feito)
-  //   Computes the exact geometric intersection of two arbitrary polygons.
+  // - If both are simple axis-aligned rectangles without pathData, keep the fast
+  //   rect ∩ rect intersection.
   const layerPathData = (layerShape as { pathData?: string }).pathData;
   const selectionPathData = (shape as { pathData?: string }).pathData;
 
+  const isComplex =
+    layerShape.type !== 'rect' ||
+    shape.type !== 'rect' ||
+    Boolean(layerPathData) ||
+    Boolean(selectionPathData);
+
   let visibleShape: LocalShape;
-  if (layerShape.type !== 'rect' && shape.type === 'rect' && layerPathData) {
-    // Case 1: Rect selection + path layer — Sutherland-Hodgman (polygon ∩ rect)
-    const clipped = intersectPathWithRect(layerPathData, s);
+  if (isComplex) {
+    const pA = shapeToPathData(layerShape);
+    const pB = shapeToPathData(shape);
+    const clipped = intersectPathWithPath(pA, pB);
     if (clipped) {
-      // Snap the polygon's tight bbox to enclosing integer pixel grid.
+      // Snap the polygon intersection's tight bbox to enclosing integer pixel grid.
       // The pathData provides exact sub-pixel clipping; but the rect must be
       // pixel-aligned so that bounding/cx/cy computations downstream produce
       // integer-aligned positions (avoiding sub-pixel seams between fragments).
@@ -206,54 +229,27 @@ export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleSh
       };
       visibleShape = {
         type: 'path',
-        rect: snappedRect,
-        hardEdge: layerShape.hardEdge,
-        antiAliased: (layerShape as { antiAliased?: boolean }).antiAliased,
+        rect: asLocalRect(snappedRect),
+        hardEdge: Boolean(shape.hardEdge && layerShape.hardEdge),
+        antiAliased: (shape as { antiAliased?: boolean }).antiAliased ?? (layerShape as { antiAliased?: boolean }).antiAliased,
         pathData: clipped.pathData,
         __brand: 'local',
       } as unknown as LocalShape;
     } else {
-      // Entire path is outside the selection rect — no visible content
-      return null;
-    }
-  } else if (shape.type === 'path' && layerShape.type === 'path' && selectionPathData && layerPathData) {
-    // Case 3: Path selection + path layer — polygon-clipping (polygon ∩ polygon)
-    const clipped = intersectPathWithPath(layerPathData, selectionPathData);
-    if (clipped) {
-      // Snap the polygon intersection's tight bbox to enclosing integer pixel grid.
-      // Without this, nested lasso cuts (path ∩ path) produce non-integer bounding
-      // and cx/cy, causing sub-pixel misalignment seams when fragments are snapped
-      // back to their birth position via smart guides.
-      const cr = clipped.rect;
-      const snappedRect = {
-        x: Math.floor(cr.x),
-        y: Math.floor(cr.y),
-        w: Math.ceil(cr.x + cr.w) - Math.floor(cr.x),
-        h: Math.ceil(cr.y + cr.h) - Math.floor(cr.y),
-      };
-      visibleShape = {
-        type: 'path',
-        rect: snappedRect,
-        hardEdge: shape.hardEdge,
-        antiAliased: (shape as { antiAliased?: boolean }).antiAliased,
-        pathData: clipped.pathData,
-        __brand: 'local',
-      } as unknown as LocalShape;
-    } else {
-      // No geometric intersection between the two paths
+      // No geometric intersection between the two shapes
       return null;
     }
   } else {
-    // Case 2: Path/circle selection on rect layer, or both rects → use selection shape
+    // Both are simple axis-aligned rectangles
     visibleShape = { ...shape, rect: s } as LocalShape;
   }
 
   // Compute world center from the actual visibleShape.rect (not from `s`),
-  // because for Cases 1 & 3 the polygon intersection's tight bbox differs from `s`.
+  // because for complex intersections the polygon's tight bbox differs from `s`.
   const vr = visibleShape.rect;
   const vCenter = M_orig.apply({ x: vr.x + vr.w / 2, y: vr.y + vr.h / 2 });
 
-  return { visibleShape, center: { x: vCenter.x, y: vCenter.y } as Point2D };
+  return { visibleShape, center: { x: vCenter.x, y: vCenter.y } as Point2D, featherPx: eff.featherPx };
 }
 
 

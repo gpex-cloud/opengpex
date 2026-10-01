@@ -112,42 +112,6 @@ export interface IMatrix3x3Constructor {
   extractAABB(size: Dimensions, matrix: IMatrix3x3): Rect;
 }
 
-export interface TileMetadata {
-  width: number;
-  height: number;
-  tileSize: number;
-  cols: number;
-  rows: number;
-  levels: number;
-  isTiled: boolean; // Whether tiling is enabled (small images can be false for fast rendering)
-  contentBounds?: LocalRect; // Bounding box of non-transparent content (local coordinates)
-  isPeeled?: boolean;      // Marker indicating if region is peeled
-  dprScale?: number;       // Ratio of physical asset dimensions to logical dimensions
-}
-
-/**
- * Wraps raw tile rendering instruction for cross-layer transmission (Data-Driven Rendering)
- */
-export interface TileData {
-  bitmap: ImageBitmap | HTMLImageElement;
-  x: number;
-  y: number;
-  scale: number;
-  overlap: number;
-}
-
-/**
- * ClipDescriptor: Clip instruction descriptor (used to abstract rendering pipeline)
- */
-export interface ClipDescriptor {
-  shape: LocalShape;
-  inverted: boolean;
-  /** Feather radius in logical pixels (0 = no feather, sharp clip) */
-  feather?: number;
-  /** Pre-compiled Path2D cache (worker/render perf optimization) */
-  __compiledPath2D?: Path2D;
-}
-
 /**
  * Shape Engine Models: Unified shape engine models
  */
@@ -159,6 +123,15 @@ export interface Shape {
   hardEdge: boolean;     // Physical "aliased step mode" switch
   antiAliased?: boolean; // New: whether anti-aliasing is enabled (defaults to true)
   pathData?: string;     // Data for complex paths (e.g. SVG Path)
+  /**
+   * Feather radius (px) carried by a fragment's `visibleShape`.
+   * When >0, the implicit shape mask synthesised in `SceneAssembler` renders a soft
+   * edge instead of a hard clip. Absent/0 = hard edge (the crop rect IS the shape),
+   * the zero-regression default for every non-feathered shape. NOT part of the
+   * boolean topology — feathering never changes which pixels are inside the shape,
+   * only the alpha falloff at its boundary.
+   */
+  featherPx?: number;
 }
 
 /**
@@ -198,7 +171,7 @@ export const asLocalShape = (rect: Rect, type: ShapeType = 'rect', antiAliased: 
  *   - Shape  = single rect + regular type (rect/circle/path), used by render pipeline / hit-test / clip masks
  *   - Polygon = multi-ring point set (outer ring + inner holes), used by lasso / wand / AI matting selections
  *
- * The two MUST NOT be merged into a union type. See docs/opengpex/phase1_irregular_clip_spec.md §2.0.
+ * The two MUST NOT be merged into a union type.
  */
 
 /**
@@ -214,9 +187,8 @@ export interface Polygon {
   rings: Point2D[][];
   rect: Rect;
   /**
-   * Reserved for Phase 2 pixel variant; default true behavior (smooth float lines).
-   * Phase 1 declares this field but does NOT consume it; all Phase 1 polygon operators
-   * treat polygons as anti-aliased (smooth) regardless of this value.
+   * Whether polygon rendering and rasterization uses anti-aliasing (smooth float lines).
+   * Defaults to true; when false, represents a stair-stepped/pixelated boundary.
    */
   antiAliased?: boolean;
 }
@@ -270,5 +242,59 @@ export function isPolygon(sel: WorldShape | WorldPolygon): sel is WorldPolygon;
 export function isPolygon(sel: Shape | Polygon): sel is Polygon {
   return Array.isArray((sel as Polygon).rings);
 }
+
+/**
+ * Color primitives
+ *
+ * `GamutId` — the canonical source physical color gamut of a set of pixels.
+ * Consumed as a per-asset tag by the wide-gamut pipeline and GPU matrix conversion.
+ */
+export type GamutId = 'srgb' | 'display-p3' | 'adobe-rgb' | 'prophoto-rgb' | 'rec2020';
+
+/**
+ * Defensive type guard & mapper for color space strings.
+ * Safely normalizes arbitrary ICC detected color spaces into canonical GamutId.
+ * Fallback to 'srgb' if unrecognized or non-RGB (e.g. CMYK / grayscale / unknown).
+ */
+export function toGamutId(val: string | null | undefined): GamutId {
+  switch (val) {
+    case 'display-p3':
+    case 'p3':
+      return 'display-p3';
+    case 'adobe-rgb':
+    case 'adobergb':
+      return 'adobe-rgb';
+    case 'prophoto-rgb':
+    case 'prophoto':
+    case 'romm-rgb':
+      return 'prophoto-rgb';
+    case 'rec2020':
+    case 'bt2020':
+      return 'rec2020';
+    case 'srgb':
+    default:
+      return 'srgb';
+  }
+}
+
+/**
+ * `RenderIntent` — the OUT-OF-BOX rendering intent a source asset must receive at
+ * composite time, carried FORWARD as an explicit provenance axis from the ingest
+ * decision (RAW Route B §5.3, method (a)). It is orthogonal to `GamutId`/`trc`
+ * (which describe the pixels' physical color identity): those say *what the pixels
+ * are*, this says *how they must be rendered to be looked at*.
+ *
+ * - `'sdr'`     — already Display-Referred (JPEG/PNG/text/vector, camera-baked
+ *                 look): pass through untouched. This is the OMITTED default —
+ *                 nothing that is not explicitly tagged ever gets tone-mapped.
+ * - `'filmic'`  — Scene-Referred linear RAW with no vendor curve: apply the generic
+ *                 Filmic S-curve in the shader.
+ * - `'dng-lut'` — RAW carrying a DNG `ProfileToneCurve`: sample that 1D LUT (falls
+ *                 back to Filmic when the LUT is absent). Reserved; wired later.
+ *
+ * Consumed lazily as a per-asset tag; the GPU shader stage that reads it (via the
+ * `render_intent` flags nibble) lands with `sourceNormalize.ts`.
+ */
+export type RenderIntent = 'sdr' | 'filmic' | 'dng-lut';
 
 

@@ -88,7 +88,7 @@ export const useTabDock = () => {
     },
     updateConfig: (patch: Partial<P.TabDockConfig>) => configUpdateCmd?.execute(patch),
     switchFrame: (id: string) => actions.switchFrame(id),
-    removeFrame: (id: string) => actions.adv.frame.create.remove.execute(id),
+    removeFrame: (id: string) => actions.adv.frame.remove.execute(id),
     handleReorder: (newTrunkOrder: typeof trunkFrames) => {
       const nextFrames = newTrunkOrder.flatMap(root => {
         const descendants = branchesByParent[root.id] || [];

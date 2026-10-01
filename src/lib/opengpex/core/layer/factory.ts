@@ -42,31 +42,19 @@ export const LayerFactory = {
   /**
    * getNewFrame: Artboard production factory (formerly createFrame)
    * Standardizes the initial structure and default state of the artboard.
-   *
-   * Phase B (TRC default):
-   * - bitDepth >= 16 → `trc: 'linear'` (VipsBackend operates natively in linear-light)
-   * - bitDepth === 8  → `trc: 'srgb-trc'` (backward-compatible, Canvas2dBackend default)
-   *
-   * Callers may still explicitly override `trc` in the patch.
    */
   getNewFrame(patch: Partial<Frame>): Frame {
     const id = patch.id || `f-${Date.now().toString(36)}`;
-    const bitDepth = patch.bitDepth ?? 8;
 
-    // Phase B: High-bit-depth documents default to linear-light TRC.
-    // VipsBackend (16-bit path) already works in linear, so this aligns the
-    // Frame's declared TRC with the actual pixel encoding for those documents.
-    // 8-bit documents keep sRGB-TRC for backward compatibility with Canvas2dBackend.
-    const defaultTRC = bitDepth >= 16 ? 'linear' : 'srgb-trc';
-
+    // §8.4.4 R2: NO `bitDepth` / `colorSpace` defaults here. Colour and depth are
+    // per-ASSET truth (`StoredAsset.colorIdentity`), resolved by `SceneAssembler`
+    // from `assets.get(layer.assetId)`; a frame-level default was a second source
+    // that silently overrode a 16-bit/P3 import with 8-bit sRGB.
     return {
       id,
       name: 'New Project',
       canvas: { w: 0, h: 0 },
       dpi: 72,
-      bitDepth,
-      colorSpace: 'srgb',
-      trc: defaultTRC,
       rotation: 0,
       layers: { byId: {}, order: [] },
       camera: { x: 0, y: 0, k: 1 },

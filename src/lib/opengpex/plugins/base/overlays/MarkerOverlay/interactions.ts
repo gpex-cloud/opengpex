@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionHandler, InteractionEvent, GeometryService, Layer, Frame, MarkerData, ArrowMarkerData, LocalRect, asWorldRect, asLocalShape } from '@opengpex/editor/core/types';
+import { InteractionHandler, InteractionEvent, GeometryService, Layer, Frame, MarkerData, ArrowMarkerData, LocalRect, asLocalShape } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import { createTransformHandler, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
@@ -554,11 +554,17 @@ export const createMarkerDrawHandler = (): InteractionHandler => {
         { shiftKey: e.keys.shift },
       );
 
-      // Pixel-align the bounding box, then convert its center to world space.
-      const alignedRect = e.geometry.snapping.snapRectToPixel(
-        asWorldRect({ x: centerLocal.x - bounding.w / 2, y: centerLocal.y - bounding.h / 2, w: bounding.w, h: bounding.h }),
-        frame.canvas,
-      );
+      // Pixel-align the bounding box directly in canvas-local space (centerLocal/bounding
+      // are already canvas-local, top-left-origin — routing them through
+      // snapRectToPixel's WorldRect contract mislabeled the coordinate system and left
+      // w/h as floats, which is why a drag-created marker's bounding differed from the
+      // same marker's bounding after a resize), then convert its center to world space.
+      const alignedRect = {
+        x: Math.round(centerLocal.x - bounding.w / 2),
+        y: Math.round(centerLocal.y - bounding.h / 2),
+        w: Math.round(bounding.w),
+        h: Math.round(bounding.h),
+      };
       const alignedCenterLocal = e.geometry.space.getRectCenter(alignedRect);
       const worldCenter = e.geometry.space.localToWorld(alignedCenterLocal.x, alignedCenterLocal.y, frame);
 
@@ -575,6 +581,7 @@ export const createMarkerDrawHandler = (): InteractionHandler => {
         bounding: { w: alignedRect.w, h: alignedRect.h },
         visible: true,
         markerData: finalData,
+        metadata: { sourceTool: 'marker' },
       });
 
       e.actions.executeCommand(_CMD_PLACE_UID, {

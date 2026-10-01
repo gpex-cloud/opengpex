@@ -40,15 +40,15 @@ import { Loader2, CheckCircle2, X } from 'lucide-react';
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface InferencePanelProps {
-  /** 当前阶段描述文字 (e.g. "Loading model...", "Processing...", "Tile 3/8") */
+  /** Current phase description text (e.g. "Loading model...", "Processing...", "Tile 3/8") */
   message: string;
-  /** 0-1 进度值；null/undefined 时为 indeterminate（pulse 动画） */
+  /** 0-1 progress value; null/undefined indicates indeterminate (pulse animation) */
   progress?: number | null;
-  /** 右侧补充文字（如 "45%", "3/8"）；不传则自动从 progress 生成百分比 */
+  /** Right-side supplementary text (e.g. "45%", "3/8"); omitted to auto-generate percentage from progress */
   detail?: string;
-  /** 进度条颜色变体 */
+  /** Progress bar color variant */
   variant?: 'default' | 'success';
-  /** 取消按钮回调，不传则不显示 Cancel */
+  /** Cancel button callback; omitted to hide Cancel */
   onCancel?: () => void;
 }
 

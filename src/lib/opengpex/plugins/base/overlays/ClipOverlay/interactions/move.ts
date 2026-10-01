@@ -41,7 +41,7 @@ const EDGE_HIT_THRESHOLD_PX = 6;
  * (LocalShape from rect/ellipse, or LocalPolygon from lasso/wand), providing:
  *
  *   - **Move**: drag inside existing selection → translate selection by (dx, dy)
- *   - **Peel (剥离)**: Meta+drag inside selection → fragment the image layer and
+ *   - **Peel**: Meta+drag inside selection → fragment the image layer and
  *     move the fragment (delegating to `peelToExchange`)
  *
  * Architecture: wraps `createTransformHandler` to inherit its built-in capabilities:

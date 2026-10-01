@@ -81,6 +81,8 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
     updateClipBox,
     closeReCanvas,
     clipToolSetCmd,
+    clipToolCycleForwardCmd,
+    clipToolCycleBackwardCmd,
     applyMaskCmd,
     antiAliasToggleCmd,
     invertSelectionCmd,
@@ -155,9 +157,40 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
   // and the AA tooltip below is the only place this component still cares
   // about the `A A` binding (it reads the label off `shortcutLabel`).
 
+  const isClipActive = state.interaction.interactionMode === "clip";
+  const isReCanvas = !!reCanvasActiveSignal?.value;
+
+  // ─── Tab / Shift+Tab tool cycling ──────────────────────────────────────
+  // Bound via local capture-phase listener instead of HotkeyManager, matching
+  // the ColorOptions / BrushOverlay architecture so modal Tab cycling stays
+  // isolated and collision-free.
+  useEffect(() => {
+    if (!isClipActive || isReCanvas) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+
+      const target = e.target as HTMLElement | null;
+      const isTextInput =
+        (target?.tagName === 'INPUT' && (target as HTMLInputElement).type !== 'range') ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.isContentEditable;
+      if (isTextInput) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.shiftKey) {
+        clipToolCycleBackwardCmd?.execute();
+      } else {
+        clipToolCycleForwardCmd?.execute();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
+  }, [isClipActive, isReCanvas, clipToolCycleForwardCmd, clipToolCycleBackwardCmd]);
+
   if (!activeFrame) return null;
 
-  const isReCanvas = !!reCanvasActiveSignal.value;
   const clipShape = isReCanvas
     ? activeFrame.canvasClipBox
     : getRegularClipShape(activeFrame) || activeFrame.canvasClipBox;
@@ -166,7 +199,6 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
     ? activeFrame.canvasAspect
     : activeFrame.imageAspect;
 
-  const isClipActive = state.interaction.interactionMode === "clip";
   const isPanMode = !isClipActive;
   const currentRatio =
     ASPECT_RATIOS.find((r) => r.value === activeAspect) || ASPECT_RATIOS[0];
@@ -338,7 +370,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                         <div className="mx-1 w-px h-5 bg-[var(--border-subtle)]" />
                       )}
                       <Tooltip
-                        content={s.label}
+                        content={`${s.label} (Tab)`}
                         position="bottom"
                         display="inline-flex"
                       >

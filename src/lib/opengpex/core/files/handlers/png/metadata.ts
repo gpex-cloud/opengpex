@@ -23,10 +23,10 @@
  */
 
 import ExifReader from 'exifreader';
-import type { ImageMetadata, ColorSpaceId } from '../../types';
+import type { ImageMetadata } from '../../types';
 import { iterateChunks, verifySignature } from './chunks';
 import { readIHDR, readpHYs, readiCCP, readeXIf, readtEXt, readiTXt, readtIME, readgAMA } from './readers';
-import { iccToBase64, parseIccProfileName } from '../../icc';
+import { iccToBase64, parseIccProfileName, inferColorSpaceFromIcc } from '../../shared/icc';
 
 /**
  * Extract full V2 metadata from a PNG file.
@@ -147,16 +147,6 @@ export async function extractPngMetadata(file: File): Promise<ImageMetadata> {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Internal Helpers
 // ═══════════════════════════════════════════════════════════════════════════════
-
-/** Infer color space from ICC profile name */
-function inferColorSpaceFromIcc(profileName: string): ColorSpaceId {
-  const name = profileName.toLowerCase();
-  if (name.includes('adobe') && name.includes('rgb')) return 'adobe-rgb';
-  if (name.includes('display p3') || name.includes('p3')) return 'display-p3';
-  if (name.includes('prophoto')) return 'prophoto-rgb';
-  if (name.includes('srgb')) return 'srgb';
-  return 'unknown';
-}
 
 /** Apply tEXt/iTXt key-value to metadata */
 function applyTextToMeta(key: string, value: string, meta: ImageMetadata): void {

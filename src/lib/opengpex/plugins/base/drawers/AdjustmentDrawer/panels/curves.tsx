@@ -32,10 +32,10 @@
  *   pointer capture on `pointerdown`, so we standardized on right-click.)
  *
  * - The curve preview uses the SAME Fritsch-Carlson monotonic cubic-spline
- *   evaluator that powers the runtime LUT (`core/engine/filters/lut.ts`),
+ *   evaluator that powers the runtime LUT (`core/engine/color/luts.ts`),
  *   sampled at ~64 subdivisions for the SVG path. This means the preview
- *   line the user sees is byte-identical to the tone curve that the worker
- *   eventually bakes into the layer bitmap — no visual drift between
+ *   line the user sees is byte-identical to the tone curve the GPU samples
+ *   from the resident 1D LUT texture — no visual drift between
  *   "editor preview" and "rendered result".
  *
  * - Editing is decoupled into three phases (spec §5.6 gesture coalescing):
@@ -64,7 +64,7 @@ import React, {
   useState,
 } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { generateCurveLUT } from "@opengpex/editor/core/engine/filters";
+import { generateCurveLUT } from "@opengpex/editor/core/engine/color";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { CurvePoints, CurvesState } from "@opengpex/editor/core/types/models";
 import type { AdjustmentDrawerCommandsMap } from "../commands.d";

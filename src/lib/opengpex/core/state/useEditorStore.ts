@@ -23,6 +23,9 @@ import {
   BuiltPlugin, EditorShortcut, BuiltCommand, Dimensions, NormalizedState,
   EditorActions, EditorContextValue, GlobalHistoryState, LocalShape,
   InteractionSignalValue, ClipboardLayerMetadata, BitmapMask, LocalPolygon,
+  FrameExportResult, FrameUnpackPayload,
+  FrameExportEncodePayload, FrameExportEncodeResult,
+  ChoiceSwitchConfig, ChoiceResult,
 } from '@opengpex/editor/core/types';
 import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import { initialState, editorReducer } from './reducer';
@@ -159,7 +162,7 @@ export function useEditorStore() {
   }, [scheduleAssetSync, ASSET_CRITICAL_ACTIONS, cleanupVolatile]);
 
   const confirmResolverRef = useRef<((val: boolean) => void) | null>(null);
-  const choiceResolverRef = useRef<((val: string | null) => void) | null>(null);
+  const choiceResolverRef = useRef<((val: string | ChoiceResult | null) => void) | null>(null);
 
   // --- 4. Semantic Action Definition (Semantic Actions) ---
   const actions: EditorActions = useMemo(() => {
@@ -187,7 +190,10 @@ export function useEditorStore() {
         return {
           ...context,
           scoped: {
-            selfConfig: currentStore.pluginConfig[pluginUid] || initialConfig || {},
+            selfConfig: {
+              ...(initialConfig || {}),
+              ...(currentStore.pluginConfig[pluginUid] || {}),
+            },
             setSelfConfig: (patch: Record<string, unknown>) => {
               context.actions.updatePluginConfig(pluginUid, patch);
             },
@@ -352,13 +358,28 @@ export function useEditorStore() {
         }
         enhancedDispatch({ type: 'HIDE_CONFIRM' });
       },
-      askChoice: (title: string, options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>, helpText?: string) => {
-        return new Promise<string | null>((resolve) => {
-          choiceResolverRef.current = resolve;
-          enhancedDispatch({ type: 'SHOW_CHOICE', payload: { title, options, helpText } });
+      askChoice: ((
+        title: string,
+        options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>,
+        helpText?: string,
+        switchConfig?: ChoiceSwitchConfig,
+      ) => {
+        return new Promise<string | ChoiceResult | null>((resolve) => {
+          choiceResolverRef.current = (result: string | ChoiceResult | null) => {
+            if (switchConfig) {
+              if (result === null) resolve(null);
+              else if (typeof result === 'string') resolve({ id: result, switchValue: switchConfig.defaultValue ?? false });
+              else resolve(result);
+            } else {
+              if (result === null) resolve(null);
+              else if (typeof result === 'string') resolve(result);
+              else resolve(result.id);
+            }
+          };
+          enhancedDispatch({ type: 'SHOW_CHOICE', payload: { title, options, helpText, switchConfig } });
         });
-      },
-      resolveChoice: (val: string | null) => {
+      }) as EditorActions['askChoice'],
+      resolveChoice: (val: string | ChoiceResult | null) => {
         if (choiceResolverRef.current) {
           choiceResolverRef.current(val);
           choiceResolverRef.current = null;
@@ -483,6 +504,10 @@ export function useEditorStore() {
             zoom: advRef(P.ADV_VIEWPORT_ZOOM, (k: number) => executeCommand(P.ADV_VIEWPORT_ZOOM, k)),
           },
         },
+        gpex: {
+          pack: advRef(P.ADV_GPEX_PACK, (frame: Frame) => executeCommand<Frame, Promise<FrameExportResult>>(P.ADV_GPEX_PACK, frame)),
+          unpack: advRef(P.ADV_GPEX_UNPACK, (payload: FrameUnpackPayload) => executeCommand<unknown, Promise<Frame>>(P.ADV_GPEX_UNPACK, payload)),
+        },
         frame: {
           create: {
             trunk: advRef(P.ADV_FRAME_TRUNK, (payload: { source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }) => executeCommand<unknown, Promise<string>>(P.ADV_FRAME_TRUNK, payload)),
@@ -490,10 +515,16 @@ export function useEditorStore() {
               fromFile: advRef(P.ADV_FRAME_BRANCH_FILE, (payload: { source: File; extra?: Record<string, unknown> }) => executeCommand<{ source: File; extra?: Record<string, unknown> }, Promise<string | undefined>>(P.ADV_FRAME_BRANCH_FILE, payload)),
               fromSelection: advRef(P.ADV_FRAME_BRANCH_CROP, () => executeCommand<void, Promise<string | undefined>>(P.ADV_FRAME_BRANCH_CROP)),
             },
-            revert: advRef(P.ADV_FRAME_REVERT, () => executeCommand(P.ADV_FRAME_REVERT)),
-            remove: advRef(P.ADV_FRAME_REMOVE, (id?: string) => executeCommand(P.ADV_FRAME_REMOVE, id)),
-            export: advRef(P.ADV_FRAME_EXPORT, (frame: Frame) => executeCommand<Frame, Promise<{ state: unknown; assets: Record<string, Blob> }>>(P.ADV_FRAME_EXPORT, frame)),
-            import: advRef(P.ADV_FRAME_IMPORT, (payload: { state: unknown; assetBlobs: Record<string, Blob>; replaceId?: string; switchFrame?: boolean }) => executeCommand<unknown, Promise<Frame>>(P.ADV_FRAME_IMPORT, payload)),
+          },
+          revert: advRef(P.ADV_FRAME_REVERT, () => executeCommand(P.ADV_FRAME_REVERT)),
+          remove: advRef(P.ADV_FRAME_REMOVE, (id?: string) => executeCommand(P.ADV_FRAME_REMOVE, id)),
+          gpex: {
+            pack: advRef(P.ADV_GPEX_PACK, (frame: Frame) => executeCommand<Frame, Promise<FrameExportResult>>(P.ADV_GPEX_PACK, frame)),
+            unpack: advRef(P.ADV_GPEX_UNPACK, (payload: FrameUnpackPayload) => executeCommand<unknown, Promise<Frame>>(P.ADV_GPEX_UNPACK, payload)),
+          },
+          export: {
+            encode: advRef(P.ADV_FRAME_EXPORT_ENCODE, (payload: FrameExportEncodePayload) =>
+              executeCommand<FrameExportEncodePayload, Promise<FrameExportEncodeResult>>(P.ADV_FRAME_EXPORT_ENCODE, payload)),
           },
           resize: {
             resizeCanvas: advRef(P.ADV_FRAME_RESIZE_CANVAS, () => executeCommand(P.ADV_FRAME_RESIZE_CANVAS)),
@@ -631,9 +662,11 @@ export function useEditorStore() {
   // Enterprise design: Automatically manage the lifecycle of HUD, preventing messages from being "deadlocked" on the interface due to parallel operations or logical competition.
   useEffect(() => {
     if (state.interaction.hud) {
+      const defaultDuration = state.interaction.hud.type === 'error' ? 1200 : 2500;
+      const duration = state.interaction.hud.duration ?? defaultDuration;
       const timer = setTimeout(() => {
         actions.setInteraction({ hud: null });
-      }, 2500);
+      }, duration);
       return () => clearTimeout(timer);
     }
   }, [state.interaction.hud, actions]);

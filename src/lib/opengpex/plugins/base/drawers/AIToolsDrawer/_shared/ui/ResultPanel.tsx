@@ -39,13 +39,13 @@ import { Trash2 } from 'lucide-react';
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface ResultPanelProps {
-  /** Header 标题（默认 "Result"） */
+  /** Header title (defaults to "Result") */
   title?: string;
-  /** 右侧耗时文字（如 "1.2s"） */
+  /** Right-side elapsed time string (e.g. "1.2s") */
   elapsed?: string;
-  /** Clear 回调 — 渲染 footer Clear 按钮 */
+  /** Clear callback — renders footer Clear button */
   onClear: () => void;
-  /** 工具特定的结果内容（完全自由） */
+  /** Tool-specific result content */
   children: React.ReactNode;
 }
 

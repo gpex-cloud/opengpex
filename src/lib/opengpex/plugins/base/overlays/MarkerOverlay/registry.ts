@@ -22,7 +22,7 @@
  *
  * IMPORTANT (see spec §4.0): this registry only holds UI / interaction
  * METADATA. The pixel/SVG drawing logic (`paintMarker` / `markerToSvg`) lives
- * in core (`core/gpu/raster/markerPainter.ts`) so the render
+ * in core (`core/raster/paintMarker.ts`) so the render
  * pipeline can consume it without importing plugin code. `MarkerDefinition`
  * therefore intentionally does NOT carry any `paint` / `toSvg` function —
  * it only describes "how the tool looks in the panel and how a drag maps to

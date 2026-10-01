@@ -67,16 +67,16 @@ async function getInputImageBlob(ctx: EditorContextValue, inputSource: InputSour
   if (!activeFrame) return null;
 
   if (inputSource === 'merged-frame') {
-    const result = await pixels.render.compositeFrame(activeFrame);
-    return await result.toBlob('image/png');
+    const composited = await pixels.render.compositeFrame(activeFrame);
+    return composited.displayBlob;
   }
 
   const { activeLayer } = ctx;
   if (!activeLayer) return null;
 
   const localRoi = asLocalShape({ x: 0, y: 0, w: activeFrame.canvas.w, h: activeFrame.canvas.h });
-  const { result } = await pixels.render.compositeLayers([activeLayer], activeFrame, localRoi, { precision: 8 });
-  return await result.toBlob('image/png');
+  const composited = await pixels.render.compositeLayers([activeLayer], activeFrame, localRoi);
+  return composited.displayBlob;
 }
 
 // ─── Helper: Append generation record to history ───────────────────────────────

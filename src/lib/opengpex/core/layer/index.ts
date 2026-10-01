@@ -30,8 +30,8 @@ export function createLayerService(
   getState: () => EditorData
 ): LayerService {
   // ── Delegate fragment and resample operations to dedicated modules ──
-  const fragmentOps = createFragmentOperations(geometry, pixels);
-  const resampleOps = createResampleOperations(geometry, pixels);
+  const fragmentOps = createFragmentOperations(geometry, pixels, assets);
+  const resampleOps = createResampleOperations(geometry, pixels, assets);
 
   return {
     ...LayerFactory,
@@ -273,7 +273,7 @@ export function createLayerService(
       const bmp = await createImageBitmap(blob);
       const dim = { w: bmp.width, h: bmp.height };
       bmp.close();
-      const { assetId, url } = await assets.register(blob, dim);
+      const { assetId, url } = await assets.register(blob, {width: dim.w, height: dim.h});
 
       // layer.cx/cy uses the world coordinate system (origin at canvas center), directly using the screenToWorld result
       let cx, cy;

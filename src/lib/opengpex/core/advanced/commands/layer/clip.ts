@@ -45,7 +45,10 @@ async function copyCropBoxToClipboard(
   // 1. Physical blob: always needed for external clipboard (WeChat, Word, etc.)
   const physicalResult = await ctx.layers.fragmentToNewLayerPhysical(activeFrame, latestLayer);
   if (!physicalResult) {
-    actions.setInteraction({ selectionErrorPulse: Date.now() });
+    actions.setInteraction({
+      selectionErrorPulse: Date.now(),
+      hud: { message: 'Area is empty', type: 'error' }
+    });
     return null;
   }
 
@@ -84,7 +87,10 @@ export const LayerClipCommands = {
         const isClipMode = state.interaction.interactionMode === 'clip';
 
         if (!activeFrame || !activeLayer || !isClipMode || activeLayer.type !== 'image') {
-          actions.setInteraction({ selectionErrorPulse: Date.now() });
+          actions.setInteraction({
+            selectionErrorPulse: Date.now(),
+            hud: { message: 'No editable layer selected', type: 'error' }
+          });
           return;
         }
 
@@ -119,8 +125,23 @@ export const LayerClipCommands = {
         const { activeFrame, activeLayer, actions, state } = ctx;
         const isClipMode = state.interaction.interactionMode === 'clip';
 
-        if (!activeFrame || !activeLayer || !isClipMode || activeLayer.type !== 'image') {
-          actions.setInteraction({ selectionErrorPulse: Date.now() });
+        const latestLayer = (activeFrame && activeLayer)
+          ? (actions.fast?.latestLayer?.(activeFrame.id, activeLayer.id) || activeLayer)
+          : null;
+
+        if (!activeFrame || !latestLayer || !isClipMode || latestLayer.type !== 'image') {
+          actions.setInteraction({
+            selectionErrorPulse: Date.now(),
+            hud: { message: 'No editable layer selected', type: 'error' }
+          });
+          return;
+        }
+
+        if (latestLayer.locked) {
+          actions.setInteraction({
+            selectionErrorPulse: Date.now(),
+            hud: { message: 'Layer is locked', type: 'error' }
+          });
           return;
         }
 
@@ -135,20 +156,20 @@ export const LayerClipCommands = {
             if (result.holeMask) {
               const { shape, inverted, assocLayerId, feather: maskFeather, maskId } = result.holeMask;
               ctx.layers.updateLayer(activeFrame.id, tx => {
-                tx.edit(activeLayer.id)
+                tx.edit(latestLayer.id)
                   .applyMask(shape, { maskId, assocLayerId, inverted, feather: maskFeather });
               });
             }
 
           } else {
             // Without selection: cut the entire layer (clear content, keep layer)
-            await ctx.clipboard.writeByUrl(activeLayer.src, {
-              layer: activeLayer,
+            await ctx.clipboard.writeByUrl(latestLayer.src, {
+              layer: latestLayer,
               sourceFrameId: activeFrame.id,
             });
 
             ctx.layers.updateLayer(activeFrame.id, tx => {
-              tx.edit(activeLayer.id).maskLayer();
+              tx.edit(latestLayer.id).maskLayer();
             });
           }
         } catch (err) {
@@ -178,7 +199,7 @@ export const LayerClipCommands = {
           blob = res?.blob;
         }
 
-        // {无, 无} → abort
+        // Neither metadata nor blob available → abort
         if (!meta && !blob) return;
 
         // ═══ Step 2: No active frame → create new frame from blob ═══
@@ -259,19 +280,35 @@ export const LayerClipCommands = {
 
       const box = getClipBox(activeFrame);
       if (!box) {
-        actions.setInteraction({ selectionErrorPulse: Date.now() });
+        actions.setInteraction({
+          selectionErrorPulse: Date.now(),
+          hud: { message: 'No active selection', type: 'error' }
+        });
         return;
       }
 
       // Resolve target layer: explicit payload > activeLayer
       const targetLayerId = payload?.layerId ?? activeLayer?.id;
       if (!targetLayerId) {
-        actions.setInteraction({ selectionErrorPulse: Date.now() });
+        actions.setInteraction({
+          selectionErrorPulse: Date.now(),
+          hud: { message: 'No target layer', type: 'error' }
+        });
         return;
       }
-      const targetLayer = activeFrame.layers.byId[targetLayerId];
+      const targetLayer = actions.fast?.latestLayer?.(activeFrame.id, targetLayerId) || activeFrame.layers.byId[targetLayerId];
       if (!targetLayer) {
-        actions.setInteraction({ selectionErrorPulse: Date.now() });
+        actions.setInteraction({
+          selectionErrorPulse: Date.now(),
+          hud: { message: 'Target layer not found', type: 'error' }
+        });
+        return;
+      }
+      if (targetLayer.locked) {
+        actions.setInteraction({
+          selectionErrorPulse: Date.now(),
+          hud: { message: 'Layer is locked', type: 'error' }
+        });
         return;
       }
 
@@ -295,7 +332,10 @@ export const LayerClipCommands = {
       // same red pulse the removed bitmap branch used. Also covers the empty
       // rect/ellipse case the regular branch previously ignored.
       if (localShape.rect.w <= 0 || localShape.rect.h <= 0) {
-        actions.setInteraction({ selectionErrorPulse: Date.now() });
+        actions.setInteraction({
+          selectionErrorPulse: Date.now(),
+          hud: { message: 'Area is empty', type: 'error' }
+        });
         return;
       }
 
@@ -327,10 +367,23 @@ export const LayerClipCommands = {
       if (!activeFrame || !activeLayer || !isClipActive) return;
 
       try {
-        const latestLayer = actions.fast.latestLayer(activeFrame.id, activeLayer.id) || activeLayer;
+        const latestLayer = actions.fast?.latestLayer?.(activeFrame.id, activeLayer.id) || activeLayer;
+        if (latestLayer.locked) {
+          actions.setInteraction({
+            selectionErrorPulse: Date.now(),
+            hud: { message: 'Layer is locked', type: 'error' }
+          });
+          return;
+        }
 
         const box = getClipBox(activeFrame);
-        if (!box) return;
+        if (!box) {
+          actions.setInteraction({
+            selectionErrorPulse: Date.now(),
+            hud: { message: 'No active selection', type: 'error' }
+          });
+          return;
+        }
 
         const feather = payload?.feather ?? 0;
 

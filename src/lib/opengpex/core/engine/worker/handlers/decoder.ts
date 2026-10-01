@@ -48,7 +48,7 @@ export class DecoderHandler {
     }
     const blob = await response.blob();
 
-    // Store blob+bitmap in Worker-side cache for future use (e.g., by ResampleHandler, TileHandler)
+    // Store blob+bitmap in Worker-side cache for future use (e.g., by ResampleHandler)
     const hash = await calculateHash(blob);
     await workerCache.ingest(hash, blob);
 

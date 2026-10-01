@@ -109,11 +109,11 @@ export default function ActionDropdown({
   };
 
   return (
-    <div ref={containerRef} className={`relative inline-block ${className}`}>
+    <div ref={containerRef} className={`relative inline-block select-none outline-none ${className}`}>
       {/* Trigger Area */}
       <div 
         onClick={handleTriggerClick}
-        className={`cursor-pointer select-none transition-all ${disabled ? 'opacity-50 pointer-events-none' : ''}`}
+        className={`cursor-pointer select-none outline-none transition-all ${disabled ? 'opacity-50 pointer-events-none' : ''}`}
       >
         {typeof trigger === 'function' ? trigger(isOpen) : trigger}
       </div>
@@ -144,6 +144,7 @@ export default function ActionDropdown({
                 border border-zinc-200 dark:border-white/10 
                 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] p-1
               `}
+              data-sampler-chrome=""
             >
               <div
                 className={`${cols > 1 ? 'grid gap-0.5' : 'flex flex-col gap-0.5'}${maxVisibleItems ? ' custom-scrollbar' : ''}`}

@@ -40,7 +40,10 @@ export const LayerCmdJCommands = {
       const isClipMode = state.interaction.interactionMode === 'clip';
 
       if (!activeFrame || !activeLayer || !isClipMode || activeLayer.type !== 'image') {
-        ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
+        ctx.actions.setInteraction({
+          selectionErrorPulse: Date.now(),
+          hud: { message: 'No editable layer selected', type: 'error' }
+        });
         return;
       }
 
@@ -52,7 +55,10 @@ export const LayerCmdJCommands = {
         if (box) {
           const result = await ctx.layers.fragmentToNewLayer(activeFrame, latestLayer, { feather });
           if (!result) {
-            ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
+            ctx.actions.setInteraction({
+              selectionErrorPulse: Date.now(),
+              hud: { message: 'Area is empty', type: 'error' }
+            });
             return;
           }
           result.newLayer.locked = false;
@@ -92,16 +98,34 @@ export const LayerCmdJCommands = {
     execute: async (ctx: EditorContextValue, payload?: { feather?: number }): Promise<void> => {
       const { activeFrame, activeLayer, actions, state } = ctx;
       const isClipMode = state.interaction.interactionMode === 'clip';
-      if (!activeFrame || !activeLayer || !isClipMode || activeLayer.type !== 'image') {
-        actions.setInteraction({ selectionErrorPulse: Date.now() });
+
+      const latestLayer = (activeFrame && activeLayer)
+        ? (actions.fast?.latestLayer?.(activeFrame.id, activeLayer.id) || activeLayer)
+        : null;
+
+      if (!activeFrame || !latestLayer || !isClipMode || latestLayer.type !== 'image') {
+        actions.setInteraction({
+          selectionErrorPulse: Date.now(),
+          hud: { message: 'No editable layer selected', type: 'error' }
+        });
+        return;
+      }
+
+      if (latestLayer.locked) {
+        actions.setInteraction({
+          selectionErrorPulse: Date.now(),
+          hud: { message: 'Layer is locked', type: 'error' }
+        });
         return;
       }
 
       try {
-        const latestLayer = actions.fast.latestLayer(activeFrame.id, activeLayer.id) || activeLayer;
         const box = getClipBox(activeFrame);
         if (!box) {
-          actions.setInteraction({ selectionErrorPulse: Date.now() });
+          actions.setInteraction({
+            selectionErrorPulse: Date.now(),
+            hud: { message: 'No active selection', type: 'error' }
+          });
           return;
         }
 
@@ -110,7 +134,10 @@ export const LayerCmdJCommands = {
         // Create fragment via unified strategy resolver (mode:'cut' generates sourceHole)
         const result = await ctx.layers.fragmentToNewLayer(activeFrame, latestLayer, { feather, mode: 'cut' });
         if (!result) {
-          actions.setInteraction({ selectionErrorPulse: Date.now() });
+          actions.setInteraction({
+            selectionErrorPulse: Date.now(),
+            hud: { message: 'Area is empty', type: 'error' }
+          });
           return;
         }
 
@@ -118,7 +145,7 @@ export const LayerCmdJCommands = {
         if (result.holeMask) {
           const { shape, inverted, assocLayerId, feather: maskFeather, maskId } = result.holeMask;
           ctx.layers.updateLayer(activeFrame.id, (tx) => {
-            tx.edit(activeLayer.id)
+            tx.edit(latestLayer.id)
               .applyMask(shape, { maskId, assocLayerId, inverted, feather: maskFeather });
           });
         }

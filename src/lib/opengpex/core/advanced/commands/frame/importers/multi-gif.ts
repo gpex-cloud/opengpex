@@ -28,6 +28,7 @@ import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
 import type { DecodeResult } from '@opengpex/editor/core/files/types';
 import type { ImportOptions } from './_types';
+import { transcodeBlob } from '@opengpex/editor/core/engine/utils/pixel-utils';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // buildGifFrameContent — Pure GIF content builder (shared by import + revert)
@@ -55,11 +56,18 @@ export interface GifFrameContent {
 export async function buildGifFrameContent(
   ctx: EditorContextValue,
   decoded: DecodeResult,
+  /**
+   * The original GIF's `raw:` hash, used to mint per-frame asset ids of the
+   * SAME shape `single.ts`/`multi-tiff.ts` produce via storeBundle
+   * (`${fileHash}#${index}`). Pass `undefined` to let `register` self-hash each
+   * frame blob (pre-change behaviour) — callers that have no original file hash.
+   */
+  fileHash: string | undefined,
 ): Promise<GifFrameContent | null> {
   const { assets, actions, state, geometry } = ctx;
-  const { dimensions: decodeDimensions, metadata, subImages } = decoded;
+  const { metadata, pages } = decoded;
 
-  let framesToImport = subImages;
+  let framesToImport = pages;
   const totalFrames = framesToImport.length;
   const GIF_DEFAULT_LIMIT = 30;
 
@@ -75,32 +83,51 @@ export async function buildGifFrameContent(
 
     limitOptions.push({ id: '1', label: `All ${totalFrames} frames`, description: 'May use significant memory' });
 
-    const chosenStep = await actions.askChoice(
-      `GIF has ${totalFrames} frames`, limitOptions,
-      `This animated GIF contains ${totalFrames} frames. Importing all frames may use significant memory. Choose a frame limit for decimation (sampled frames will preserve animation timing).`,
+    const choiceResult = await actions.askChoice(
+      `GIF has ${totalFrames} frames`,
+      limitOptions,
+      `This animated GIF contains ${totalFrames} frames. Importing all frames may use significant memory. Choose a frame limit for decimation.`,
+      {
+        label: 'Preserve Frame Rate',
+        description: 'Keep original playback fps (overall duration will be shortened)',
+        defaultValue: true,
+      },
     );
-    if (!chosenStep) return null; // User cancelled
+    if (!choiceResult) return null; // User cancelled
+
+    const chosenStep = typeof choiceResult === 'string' ? choiceResult : choiceResult.id;
+    const keepFps = typeof choiceResult === 'object' && choiceResult ? !!choiceResult.switchValue : false;
 
     const step = parseInt(chosenStep, 10) || 1;
     if (step > 1) {
       const sampled: typeof framesToImport = [];
       for (let i = 0; i < totalFrames; i += step) {
         const si = framesToImport[i];
-        sampled.push({ ...si, delay: (si.delay || 100) * step, index: sampled.length });
+        const delay = keepFps ? (si.delay || 100) : (si.delay || 100) * step;
+        sampled.push({ ...si, delay, index: sampled.length });
       }
       framesToImport = sampled;
-      actions.notifyHUD(`Decimated: ${totalFrames} → ${sampled.length} frames (step=${step})`, 'info');
+      actions.notifyHUD(
+        `Decimated: ${totalFrames} → ${sampled.length} frames (step=${step}${keepFps ? ', preserve fps' : ''})`,
+        'info',
+      );
     }
   }
 
-  // Register frame assets + build layers
-  const dimension = decodeDimensions;
-  const gifSequenceId = `gif-seq-${Date.now().toString(36)}-${Math.random().toString(36).substr(2, 6)}`;
+  // Register frame assets + build layers.
+  // Canvas size is the GIF's logical screen — established by the first page.
+  const canvasDim: Dimensions = { w: pages[0].width, h: pages[0].height };
+  const gifSequenceId = `gif-seq-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
   const frameAssets = await Promise.all(
     framesToImport.map(async (f) => {
-      const { assetId, url: assetUrl } = await assets.register(f.displayBlob, dimension);
-      return { assetId, assetUrl, delay: f.delay || 100, index: f.index };
+      const { assetId, url: assetUrl } = await assets.register(f.displayBlob, {
+        width: f.width,
+        height: f.height,
+        ...f.colorIdentity,
+        precomputedHash: fileHash ? `${fileHash}#${f.index}` : undefined,
+      });
+      return { assetId, assetUrl, delay: f.delay || 100, index: f.index, width: f.width, height: f.height };
     }),
   );
 
@@ -111,8 +138,8 @@ export async function buildGifFrameContent(
     cx: 0, cy: 0,
     locked: false,
     visible: i === 0,
-    bounding: dimension,
-    visibleShape: asLocalShape({ x: 0, y: 0, w: dimension.w, h: dimension.h }),
+    bounding: { w: fa.width, h: fa.height },
+    visibleShape: asLocalShape({ x: 0, y: 0, w: fa.width, h: fa.height }),
     metadata: {
       gifSequenceId,
       gifFrameIndex: i, gifFrameDelay: fa.delay, gifTotalFrames: framesToImport.length,
@@ -124,16 +151,16 @@ export async function buildGifFrameContent(
   // Camera calculation
   const { insets } = state.ui.theme.config;
   const camera = geometry.camera.getFitCamera(
-    state.ui.viewportDim, dimension,
+    state.ui.viewportDim, canvasDim,
     { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right },
   );
 
   return {
     layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
     activeLayerId: frameLayers[0].id,
-    canvas: dimension,
+    canvas: canvasDim,
     camera,
-    canvasClipBox: getDefaultCanvasClipBox(dimension),
+    canvasClipBox: getDefaultCanvasClipBox(canvasDim),
     gifSequenceId,
     gifFrameCount: framesToImport.length,
     metadata,
@@ -148,18 +175,19 @@ export async function importAnimatedGif(
   ctx: EditorContextValue,
   decoded: DecodeResult,
   file: File,
-  _sourceType: 'local' | 'url',
   opts: ImportOptions,
 ): Promise<string> {
   const { assets, pixels, actions } = ctx;
   const { switchFrame, extra } = opts;
 
-  // 1. Build GIF content (includes frame count dialog)
-  const content = await buildGifFrameContent(ctx, decoded);
-  if (!content) return ''; // User cancelled
-
-  // 2. Store original GIF file as raw source (for future revert)
+  // 1. Store original GIF file as raw source (for future revert) — done first so
+  //    buildGifFrameContent can mint per-frame asset ids of the same shape
+  //    (`${fileHash}#${index}`) single.ts/multi-tiff.ts produce via storeBundle.
   const originalGifAssetId = await assets.storeRaw(file);
+
+  // 2. Build GIF content (includes frame count dialog)
+  const content = await buildGifFrameContent(ctx, decoded, originalGifAssetId);
+  if (!content) return ''; // User cancelled
 
   // 3. Generate thumbnail
   const firstLayerId = content.layers.order[0];
@@ -168,8 +196,8 @@ export async function importAnimatedGif(
     pixels.image.contentBounds(firstLayer.src),
     pixels.image.resample(firstLayer.src, { maxSize: 256 }),
   ]);
-  const thumbBlob = await thumbResult.toBlob('image/webp');
-  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, thumbResult.dimensions);
+  const thumbBlob = await transcodeBlob(thumbResult.displayBlob, 'image/webp');
+  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, { width: thumbResult.width, height: thumbResult.height });
 
   // 4. Assemble and add frame
   const frameName = file.name.replace(/\.[^.]+$/, '');

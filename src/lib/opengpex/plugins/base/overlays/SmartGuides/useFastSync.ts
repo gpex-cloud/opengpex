@@ -92,5 +92,5 @@ export function useSmartGuidesFastSync(
     } else {
       Motion.set(yRef.current, { opacity: 0, display: 'none' });
     }
-  }, { throttleHz: 30 });
+  }, { throttleHz: 60 });
 }

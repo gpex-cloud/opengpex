@@ -119,7 +119,7 @@ class ClipComputeClient {
 
   /**
    * Inverts a selection using polygon boolean difference (canvas - selection).
-   * Produces clean geometry without the "日"-shape artifact of simple ring prepend.
+   * Produces clean geometry without the figure-8 / double-box artifact of simple ring prepend.
    */
   runInvert(
     params: Omit<InvertRequest, 'reqId'>

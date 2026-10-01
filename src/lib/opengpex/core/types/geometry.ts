@@ -256,7 +256,7 @@ export interface GeometryService {
     /** Projects artboard selection to layer local space (used for clipping/peeling) */
     frameLocalToLayerLocal: (shape: Shape, frame: Frame, layer: Layer) => LocalShape;
     /** Calculates intersection of selection shape and layer visible area */
-    intersectWithLayer: (shape: LocalShape, layer: Layer) => { visibleShape: LocalShape, center: Point2D } | null;
+    intersectWithLayer: (shape: LocalShape, layer: Layer) => { visibleShape: LocalShape, center: Point2D, featherPx: number } | null;
     /** Converts local coordinate shape to world coordinate shape (atomic tool) */
     localToWorldShape: (shape: Shape, source: Layer | Frame) => WorldShape;
     /** Converts world coordinate shape to local coordinate shape (atomic tool) */

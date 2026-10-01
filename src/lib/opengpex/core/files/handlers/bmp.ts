@@ -20,17 +20,17 @@
  * Thread model: ALL operations run on main thread.
  */
 
-import type { WorkingColorSpace } from '@opengpex/editor/core/types';
+import type { GamutId } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   DecodeOptions,
-  DecodeResult,
+  DecodedPayload,
   EncodeOptions,
 } from '../types';
 import type { ImageMetadata } from '../types';
+import type { IngestDecision } from '../strategy';
 import { bitmapToCanvas } from '../index';
-import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
-import { getExportStrategy, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
+import { toCanvasColorSpace } from '@opengpex/editor/core/engine/color';
 
 export class BmpHandler implements ImageFormatHandler {
   readonly format = 'bmp';
@@ -39,15 +39,22 @@ export class BmpHandler implements ImageFormatHandler {
 
   // ─── Decode ──────────────────────────────────────────────────────────────
 
-  async decode(file: File, _options?: DecodeOptions): Promise<DecodeResult> {
+  // Direct-passthrough format (pure-producer contract): BMP is always browser-native
+  // 8-bit sRGB, so there is no colour-strategy branching to do — `decision` carries no
+  // fold for this format. Consumes the entry-supplied `metadata` (no internal re-extract)
+  // and returns naked pixels; the entry mounts `colorIdentity` / `sourceBlob`.
+  async decode(
+    file: File,
+    _metadata: ImageMetadata,
+    _decision: IngestDecision,
+    _options?: DecodeOptions,
+  ): Promise<DecodedPayload[]> {
     // BMP is browser-native — no transcoding needed
     const img = await createImageBitmap(file);
     const dimensions = { w: img.width, h: img.height };
     img.close();
 
-    const metadata = await this.extractMetadata(file);
-
-    return { dimensions, metadata, subImages: [{ displayBlob: file, width: dimensions.w, height: dimensions.h, index: 0 }] };
+    return [{ displayBlob: file, width: dimensions.w, height: dimensions.h, index: 0 }];
   }
 
   // ─── Encode ──────────────────────────────────────────────────────────────
@@ -59,43 +66,19 @@ export class BmpHandler implements ImageFormatHandler {
     const meta = options.metadata;
     const config = options.exportConfig;
 
-    // ── Strategy-based export color pipeline ──
-    const frameCS: WorkingColorSpace = (config?.frameColorSpace as WorkingColorSpace) || 'srgb';
-    const exportStrategy = getExportStrategy(frameCS, 'bmp');
-    const pixelConv = resolveExportPixelConversion(
-      frameCS,
-      { colorSpace: meta?.colorSpace, hasIccProfileData: false },
-      false, // BMP never embeds ICC
-      'bmp',
-    );
-
-    let imageData: ImageData;
-    let w: number;
-    let h: number;
-
-    if (pixelConv === 'p3-to-srgb') {
-      // P3→sRGB downgrade: use P3 intermediate canvas to preserve raw P3 values,
-      // then apply a single manual matrix conversion (avoids double conversion via browser CM).
-      const srcCanvas = source instanceof ImageBitmap
-        ? bitmapToCanvas(source, 'display-p3')
-        : source as OffscreenCanvas;
-      w = srcCanvas.width;
-      h = srcCanvas.height;
-      const tmpCanvas = new OffscreenCanvas(w, h);
-      const tmpCtx = tmpCanvas.getContext('2d', { colorSpace: 'display-p3' })!;
-      tmpCtx.drawImage(srcCanvas, 0, 0);
-      imageData = tmpCtx.getImageData(0, 0, w, h);
-      convertImageDataColorSpace(imageData.data, 'display-p3', 'srgb');
-    } else {
-      // Normal path: use encodeColorSpace to prevent implicit browser color conversion
-      const canvas = source instanceof ImageBitmap
-        ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
-        : source as OffscreenCanvas;
-      const ctx = canvas.getContext('2d')!;
-      w = canvas.width;
-      h = canvas.height;
-      imageData = ctx.getImageData(0, 0, w, h);
-    }
+    // BMP is a fixed-sRGB container — `resolveEgestDecision`'s container clamp
+    // (clamp gate 2) already forces the egest `targetGamut` to 'srgb' for this
+    // format, and the terminal `unpremultiplyEncodeGamut` upstream has already
+    // converted the pixels accordingly. This handler only tags the canvas to match
+    // so the browser performs no implicit conversion — no in-handler P3→sRGB step.
+    const pixelGamut: GamutId = (config?.targetGamut as GamutId | undefined) ?? 'srgb';
+    const canvas = source instanceof ImageBitmap
+      ? bitmapToCanvas(source, toCanvasColorSpace(pixelGamut))
+      : source as OffscreenCanvas;
+    const ctx = canvas.getContext('2d')!;
+    const w = canvas.width;
+    const h = canvas.height;
+    const imageData = ctx.getImageData(0, 0, w, h);
 
     const pixels = imageData.data;
     const dpi = config?.dpi || meta?.dpi || 72;
@@ -166,8 +149,10 @@ export class BmpHandler implements ImageFormatHandler {
     };
 
     try {
-      // Read first 54 bytes (BMP file header + DIB header)
-      const headerSlice = file.slice(0, 54);
+      // Read up to BITMAPV5HEADER's span (14 + 124 bytes) so the V3+ alpha mask
+      // field (absolute offset 66) is reachable when present; most BMPs only need
+      // the first 54 bytes, this is just a safe upper bound.
+      const headerSlice = file.slice(0, Math.min(file.size, 14 + 124));
       const buffer = await headerSlice.arrayBuffer();
       const view = new DataView(buffer);
 
@@ -182,9 +167,25 @@ export class BmpHandler implements ImageFormatHandler {
       meta.width = Math.abs(view.getInt32(18, true));
       meta.height = Math.abs(view.getInt32(22, true));
 
-      // Bits per pixel (at offset 28)
-      meta.bitDepth = view.getUint16(28, true);
-      meta.hasAlpha = meta.bitDepth === 32;
+      // Bits per pixel (at offset 28). Decode always goes through createImageBitmap,
+      // which yields 8-bit RGBA regardless of source bpp — BMP has no real 16-bit-
+      // per-channel format, so bitDepth is always 8.
+      const bpp = view.getUint16(28, true);
+      meta.bitDepth = 8;
+
+      // Real alpha requires an explicit declaration: BI_RGB (compression=0) 32bpp is
+      // the common "XRGB" case where the 4th byte is padding, not alpha. Only
+      // BI_BITFIELDS(3)/BI_ALPHABITFIELDS(6) with a non-zero alpha mask (absolute
+      // offset 66, present from BITMAPV3INFOHEADER/dibSize>=56 onward) means the
+      // file actually carries alpha.
+      meta.hasAlpha = false;
+      if (bpp === 32) {
+        const compression = view.getUint32(30, true);
+        if ((compression === 3 || compression === 6) && dibSize >= 56 && buffer.byteLength >= 70) {
+          const alphaMask = view.getUint32(66, true);
+          meta.hasAlpha = alphaMask !== 0;
+        }
+      }
 
       // X resolution in pixels per meter (at offset 38)
       const ppmX = view.getInt32(38, true);

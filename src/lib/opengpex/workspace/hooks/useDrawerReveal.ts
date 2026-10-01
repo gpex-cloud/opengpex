@@ -50,7 +50,7 @@ export function useDrawerReveal(
   actions: EditorActions,
 ) {
   const prevConditions = useRef<Record<string, boolean>>({});
-  /** 首次渲染时建立基线，之后才开始边沿检测 */
+  /** Establish baseline on initial render before edge detection begins */
   const isInitialized = useRef(false);
   /** For 'restore' mode plugins: snapshot of whether drawer was open before activation */
   const preActivationOpen = useRef<Record<string, boolean>>({});
@@ -83,8 +83,8 @@ export function useDrawerReveal(
 
   // Edge detection + dispatch
   useEffect(() => {
-    // 首次渲染：用当前状态建立基线，不触发任何动作。
-    // 防止 localStorage 恢复的持久信号在刷新时导致误弹出。
+    // Initial render: establish baseline with current state, triggering no action.
+    // Prevents persisted signals from localStorage causing accidental reveals on refresh.
     if (!isInitialized.current) {
       isInitialized.current = true;
       for (const plugin of revealPlugins) {

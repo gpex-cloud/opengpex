@@ -19,17 +19,12 @@
 
 "use client";
 
-import React, { useRef, useState, useEffect, useMemo } from "react";
+import React, { useRef } from "react";
 import {
   Grip,
   Layers,
   X,
-  Minus,
   Settings,
-  Activity,
-  Globe,
-  MapPin,
-  MemoryStick,
 } from "lucide-react";
 import {
   motion,
@@ -41,186 +36,12 @@ import ImageAsset from "@opengpex/editor/widgets/ImageAsset";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import PluginSlot from "@opengpex/editor/workspace/components/PluginSlot";
 import type { Frame } from "@opengpex/editor/core/types";
-import { useEditorServices, useEditorState } from "@opengpex/editor/core/context";
+import { useEditorServices } from "@opengpex/editor/core/context";
 import { useTabDock } from "../hooks";
+import { MetricsHUD } from "./MetricsHUD";
 
-// ─── DockMetricsHUD: FPS + World + Local coords ───────────────────────────────
 
-interface DockMetrics {
-  fps: number;
-  world: { x: number; y: number };
-  local: { x: number; y: number };
-  mem: string | null; // e.g. "128 MB", null if unavailable
-}
 
-function formatMB(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
-}
-
-function useDockMetrics(): DockMetrics {
-  const { activeFrame } = useEditorState();
-  const { actions, geometry } = useEditorServices();
-
-  const [fps, setFps] = useState(0);
-  const fpsRef = useRef({ frames: 0, lastTime: 0 });
-
-  // RAF-driven FPS counter
-  useEffect(() => {
-    fpsRef.current = { frames: 0, lastTime: performance.now() };
-    let rafId: number;
-    const fpsTick = () => {
-      const now = performance.now();
-      fpsRef.current.frames++;
-      const elapsed = now - fpsRef.current.lastTime;
-      if (elapsed >= 1000) {
-        setFps(Math.round((fpsRef.current.frames * 1000) / elapsed));
-        fpsRef.current = { frames: 0, lastTime: now };
-      }
-      rafId = requestAnimationFrame(fpsTick);
-    };
-    rafId = requestAnimationFrame(fpsTick);
-    return () => cancelAnimationFrame(rafId);
-  }, []);
-
-  // Mouse position tracking (use state so coordinate reads don't access refs during render)
-  const [mousePos, setMousePos] = useState({ vx: 0, vy: 0 });
-  useEffect(() => {
-    let latestVx = 0;
-    let latestVy = 0;
-    let dirty = false;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const container = document.querySelector('.editor-viewport-container');
-      if (!container) return;
-      const rect = container.getBoundingClientRect();
-      latestVx = Math.round(e.clientX - rect.left);
-      latestVy = Math.round(e.clientY - rect.top);
-      dirty = true;
-    };
-    window.addEventListener('mousemove', handleMouseMove);
-
-    // ~15Hz tick for coordinate updates
-    let rafId: number;
-    let lastUpdate = 0;
-    const loop = () => {
-      const now = performance.now();
-      if (now - lastUpdate >= 66) {
-        lastUpdate = now;
-        if (dirty) {
-          dirty = false;
-          setMousePos({ vx: latestVx, vy: latestVy });
-        }
-      }
-      rafId = requestAnimationFrame(loop);
-    };
-    rafId = requestAnimationFrame(loop);
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      cancelAnimationFrame(rafId);
-    };
-  }, []);
-
-  // Memory (2s interval, Chrome only)
-  const [mem, setMem] = useState<string | null>(null);
-  useEffect(() => {
-    const collect = () => {
-      const perf = performance as Performance & {
-        memory?: { usedJSHeapSize: number };
-      };
-      setMem(perf.memory ? formatMB(perf.memory.usedJSHeapSize) : null);
-    };
-    collect();
-    const timer = setInterval(collect, 2000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const coords = useMemo(() => {
-    if (!activeFrame) return { world: { x: 0, y: 0 }, local: { x: 0, y: 0 } };
-    const cam = actions.fast.latestCamera(activeFrame.id);
-    const { vx, vy } = mousePos;
-    const world = geometry.space.screenToWorld(vx, vy, activeFrame, cam);
-    const local = geometry.space.screenToLocal(vx, vy, activeFrame, cam);
-    return { world, local };
-  }, [mousePos, activeFrame, actions.fast, geometry]);
-
-  return { fps, world: coords.world, local: coords.local, mem };
-}
-
-function fpsColor(fps: number): string {
-  if (fps >= 50) return "text-emerald-500";
-  if (fps >= 30) return "text-amber-500";
-  return "text-rose-500";
-}
-
-/**
- * DockMetricsHUD: Compact FPS + World + Local coords display for TabDock.
- */
-function DockMetricsHUD() {
-  const { fps, world, local, mem } = useDockMetrics();
-  const { updateConfig } = useTabDockContext();
-
-  return (
-    <div className="relative flex flex-col gap-1 font-mono select-none group/hud">
-      {/* Collapse button: floats over the HUD's top-right corner, takes no layout space.
-          Acts as a shortcut for the Metrics HUD toggle in settings. */}
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          updateConfig({ showMetricsHud: false });
-        }}
-        title="Hide Metrics HUD"
-        aria-label="Hide Metrics HUD"
-        className="absolute -top-2 -right-2 z-[1200] flex items-center justify-center w-3.5 h-3.5 rounded-full bg-zinc-700 text-white hover:bg-zinc-600 dark:bg-zinc-300 dark:text-zinc-900 dark:hover:bg-zinc-200 border border-black/10 dark:border-white/10 opacity-0 group-hover/hud:opacity-100 transition-all shadow-sm"
-      >
-        <Minus size={8} strokeWidth={3} />
-      </button>
-
-      {/* FPS */}
-      <div className="flex items-center gap-1">
-        <Activity size={8} className={`shrink-0 ${fpsColor(fps)}`} />
-        <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-7">FPS</span>
-        <span className={`text-[9px] font-black tabular-nums leading-none ${fpsColor(fps)}`}>
-          {fps}
-        </span>
-      </div>
-
-      {/* Memory */}
-      {mem !== null && (
-        <div className="flex items-center gap-1">
-          <MemoryStick size={8} className="text-violet-400 shrink-0" />
-          <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-7">Mem</span>
-          <span className="text-[9px] font-bold text-[var(--text-muted)] tabular-nums leading-none">
-            {mem}
-          </span>
-        </div>
-      )}
-
-      {/* World coords */}
-      <div className="flex items-center gap-1">
-        <Globe size={8} className="text-amber-400 shrink-0" />
-        <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-7">World</span>
-        <span className="text-[9px] font-bold text-[var(--text-muted)] tabular-nums leading-none inline-flex gap-0.5">
-          <span className="inline-block w-[5ch] text-right">{Math.round(world.x)}</span>
-          <span className="text-[var(--text-muted)]">,</span>
-          <span className="inline-block w-[5ch] text-right">{Math.round(world.y)}</span>
-        </span>
-      </div>
-
-      {/* Local coords */}
-      <div className="flex items-center gap-1">
-        <MapPin size={8} className="text-cyan-400 shrink-0" />
-        <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-7">Local</span>
-        <span className="text-[9px] font-bold text-[var(--text-muted)] tabular-nums leading-none inline-flex gap-0.5">
-          <span className="inline-block w-[5ch] text-right">{Math.round(local.x)}</span>
-          <span className="text-[var(--text-muted)]">,</span>
-          <span className="inline-block w-[5ch] text-right">{Math.round(local.y)}</span>
-        </span>
-      </div>
-    </div>
-  );
-}
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
@@ -526,7 +347,7 @@ function DockGlobalActions() {
  */
 export function TabDockComponent() {
   const dock = useTabDock();
-  const { state, handleReorder, handleDockDragEnd, setIsHovered } = dock;
+  const { state, handleReorder, handleDockDragEnd, setIsHovered, updateConfig } = dock;
   const containerRef = useRef<HTMLDivElement>(null);
   const dragControls = useDragControls();
 
@@ -623,7 +444,7 @@ export function TabDockComponent() {
                   ${state.showFull ? "opacity-100 scale-100" : "opacity-0 scale-95 overflow-hidden"}
                   ${state.showFull ? "w-auto" : "w-0"}`}
               >
-                <DockMetricsHUD />
+                <MetricsHUD onCollapse={() => updateConfig({ showMetricsHud: false })} />
               </div>
             </>
           )}

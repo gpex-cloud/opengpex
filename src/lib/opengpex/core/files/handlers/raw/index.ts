@@ -27,10 +27,11 @@ import type { AssetService } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   DecodeOptions,
-  DecodeResult,
+  DecodedPayload,
   EncodeOptions,
 } from '../../types';
 import type { ImageMetadata } from '../../types';
+import type { IngestDecision } from '../../strategy';
 import { decodeRaw } from './decode';
 import { extractRawMetadata } from './metadata';
 
@@ -49,8 +50,13 @@ export class RawHandler implements ImageFormatHandler {
 
   constructor(private assets: AssetService) {}
 
-  decode(file: File, options?: DecodeOptions): Promise<DecodeResult> {
-    return decodeRaw(file, options);
+  decode(
+    file: File,
+    metadata: ImageMetadata,
+    decision: IngestDecision,
+    _options?: DecodeOptions,
+  ): Promise<DecodedPayload[]> {
+    return decodeRaw(file, metadata, decision);
   }
 
   async encode(

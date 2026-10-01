@@ -147,13 +147,12 @@ export const CRAFT_COMMANDS = {
   } as EditorCommand<void, void>,
 
   // Marker sub-type cycling (mirrors ClipOptions.cycleToolForward/Backward).
-  // Guarded internally by activeCraft === 'marker', so Tab stays free for Clip.
+  // Bound via local keydown listener in CraftDrawer (not HotkeyManager).
   cycleMarkerForward: {
     id: P.CMD_CYCLE_MARKER_FORWARD,
     name: 'Next Marker Type',
     category: 'Drawing',
     execute: (ctx: EditorContextValue) => cycleMarkerKind(ctx, +1),
-    shortcut: { key: 'Tab' },
   } as EditorCommand<void, void>,
 
   cycleMarkerBackward: {
@@ -161,7 +160,6 @@ export const CRAFT_COMMANDS = {
     name: 'Previous Marker Type',
     category: 'Drawing',
     execute: (ctx: EditorContextValue) => cycleMarkerKind(ctx, -1),
-    shortcut: { key: 'Tab', shift: true },
   } as EditorCommand<void, void>,
 
   deactivateCraft: {

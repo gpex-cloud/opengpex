@@ -114,8 +114,7 @@ async function getInputImageBlob(ctx: EditorContextValue, inputSource: InputSour
   if (inputSource === 'merged-frame') {
     // Composite all visible layers of the active frame (non-destructive)
     const result = await pixels.render.compositeFrame(activeFrame);
-    const blob = await result.toBlob('image/png');
-    return blob;
+    return result.displayBlob;
   }
 
   // Default: active-layer — composite single layer (includes transforms/masks/adjustments)
@@ -123,9 +122,8 @@ async function getInputImageBlob(ctx: EditorContextValue, inputSource: InputSour
   if (!activeLayer) return null;
 
   const localRoi = asLocalShape({ x: 0, y: 0, w: activeFrame.canvas.w, h: activeFrame.canvas.h });
-  const { result } = await pixels.render.compositeLayers([activeLayer], activeFrame, localRoi, { precision: 8 });
-  const blob = await result.toBlob('image/png');
-  return blob;
+  const composited = await pixels.render.compositeLayers([activeLayer], activeFrame, localRoi);
+  return composited.displayBlob;
 }
 
 // ─── Helper: Append execution record to history ────────────────────────────────

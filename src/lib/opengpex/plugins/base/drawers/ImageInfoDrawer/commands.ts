@@ -17,10 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { EditorContextValue, EditorCommand, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
-import type { EncodeOptions } from '@opengpex/editor/core/files';
-import { mimeToFormat } from '@opengpex/editor/core/files';
-import { shouldEmbedIcc } from '@opengpex/editor/core/color/ColorPipeline';
+import { EditorContextValue, EditorCommand, LocalShape } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
 import { calcFinalDims } from './utils';
@@ -30,10 +27,25 @@ import * as P from './protocols';
 /**
  * IMAGE_INFO_COMMANDS: Declarative command configurations.
  *
- * ── Refactor note (2026-08-19 Unified Composite-8bit) ────────────────────────
- * Export logic always uses compositeFrame(frame, roi, { precision: 8 }) + encode.
- * The old resolveExportStrategy three-path routing (fast-export / fast-re-encode /
- * composite-8bit) has been removed. WebGPU will restore 16-bit support natively.
+ * ── Phase 4 PR-2 note (WebGPU unified export, §11 / §16.2.1) ─────────────────
+ * Export now goes through the SINGLE WebGPU RenderGraph, exactly like on-screen
+ * preview (One Pipeline, spec §1.2):
+ *
+ *   1. Pass-through (unedited + full-frame + format match + sourceBlob) → the
+ *      original file bytes are downloaded verbatim (avoids re-compression /
+ *      preserves original ICC/EXIF). Never touches the RenderGraph.
+ *   2. Otherwise: re-assemble the SAME frame's Scene → `engine.export()` reads
+ *      back the composite (premultiplied LINEAR RGBA) → `exportEncode`
+ *      un-premultiplies + TRC-encodes via the SAME `linearToSrgb` as view.wgsl
+ *      (§16.2.1 single encode point) → `files.encode` for container + ICC.
+ *
+ * DEFERRED (clear TODOs, out of PR-2 scope):
+ *   • 16/32-bit encoded output (PNG16/TIFF16 via the naked-pixel
+ *     `fileIO.encodeTiff` worker path). PR-2 is 8-bit end-to-end.
+ *   • `export()` region/scale: its signature is full-document only, so clip is a
+ *     CPU crop and resize is a post-encode canvas scale (below).
+ *   • Fine-grained pass-through param sensitivity (quality/compression/DPI/ICC
+ *     toggle "isUnchanged"): PR-2 only fast-paths the untouched full-default case.
  */
 export const IMAGE_INFO_COMMANDS = {
    download: {
@@ -41,7 +53,7 @@ export const IMAGE_INFO_COMMANDS = {
       name: 'Download Creation',
       category: 'File',
       execute: async (ctx: EditorContextValue, payload?: { format?: P.ExportFormat }) => {
-         const { activeFrame, pixels, files, geometry } = ctx;
+         const { activeFrame, pixels, geometry } = ctx;
          const { selfConfig } = ctx.scoped || {};
          if (!activeFrame) return;
 
@@ -52,6 +64,7 @@ export const IMAGE_INFO_COMMANDS = {
          const config: P.ExportConfig = payload?.format
             ? { ...baseConfig, format: payload.format }
             : baseConfig;
+
          const isClipMode = ctx.state.interaction.interactionMode === 'clip';
          const box = getClipBox(activeFrame);
 
@@ -76,68 +89,21 @@ export const IMAGE_INFO_COMMANDS = {
          const baseH = clipShape ? clipShape.rect.h : activeFrame.canvas.h;
          const { w: exportW, h: exportH } = calcFinalDims(baseW, baseH, config);
 
-         const dpi = config.dpi || activeFrame.dpi || 72;
-         const layerMeta = activeFrame.metadata;
-         const needsResize = exportW !== baseW || exportH !== baseH;
-
-         const exportFormat = mimeToFormat[config.format] ?? 'unknown';
-
-         // ICC embed decision
-         const userEmbedIccOverride = config.embedIccOverride;
-         const embedIcc = shouldEmbedIcc(exportFormat, activeFrame.colorSpace, userEmbedIccOverride);
-
-         // ═══ 3. Always composite-8bit ═══════════════════════════════════════
          try {
-            const localRoi = clipShape
-               ? clipShape
-               : asLocalShape({ x: 0, y: 0, w: activeFrame.canvas.w, h: activeFrame.canvas.h });
-
-            const result = await pixels.render.compositeFrame(activeFrame, localRoi, { precision: 8 });
-
-            // Encode the composite result via FileService handlers.
-            const encodeOpts: EncodeOptions = {
-               quality: config.quality ? config.quality / 100 : 0.92,
-               metadata: layerMeta,
-               exportConfig: {
-                  dpi,
-                  preserveExif: config.keepExif,
-                  writeSoftwareTag: true,
-                  embedIcc,
-                  frameColorSpace: activeFrame.colorSpace,
-                  tiffCompression: config.tiffCompression,
-                  pngCompression: config.pngCompression,
-                  jpegQuality: config.jpegQuality,
-                  tiffPredictor: config.tiffPredictor,
-                  tiffBigtiff: config.tiffBigtiff,
-                  tiffTile: config.tiffTile,
-                  tiffTileWidth: config.tiffTileWidth,
-                  tiffTileHeight: config.tiffTileHeight,
-               },
-            };
-
-            let bitmap = await createImageBitmap(await result.toBlob());
-
-            // ─── Post-composite resize ──────────────────────────────────────
-            // compositeFrame always outputs at the ROI's native pixel size.
-            // When the user has set different export dimensions via the Resize
-            // controls, we scale the composite bitmap here before encoding so
-            // the final file actually reflects the requested size.
-            if (needsResize) {
-               const resizeCanvas = new OffscreenCanvas(exportW, exportH);
-               const resizeCtx = resizeCanvas.getContext('2d')!;
-               resizeCtx.drawImage(bitmap, 0, 0, exportW, exportH);
-               bitmap.close();
-               bitmap = await createImageBitmap(resizeCanvas);
-            }
-
-            const blob = await files.encode(bitmap, config.format, encodeOpts);
-            bitmap.close();
+            // ═══ 3. Egest decision + GPU render + encode → Blob ═══════════════
+            // Delegated to `actions.adv.frame.export.encode` (core/advanced/commands/
+            // frame/export.ts) — owns the pass-through fast path AND the full
+            // WebGPU readback/encode path (spec §11 pass-through, §16.2.1 single
+            // encode point). This command only triggers the actual browser save.
+            const { blob, filename } = await ctx.actions.adv.frame.export.encode.execute({
+               exportWidth: exportW,
+               exportHeight: exportH,
+               region: clipShape?.rect,
+               config,
+            });
 
             // ═══ 4. Download ═════════════════════════════════════════════════
-            const actualFormat = blob.type || config.format;
-            const filename = files.getExportFilename(activeFrame.name, exportW, exportH, actualFormat);
             await pixels.utils.download(blob, filename);
-            // console.debug('[ExportCmd] Composite-8bit: encode completed, format=%s, dims=%dx%d', actualFormat, exportW, exportH);
          } catch (err) {
             console.error('[ExportPanel] Download failed:', err);
          }

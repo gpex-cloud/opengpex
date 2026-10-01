@@ -22,6 +22,7 @@
 import React from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import type { ArrowMarkerData } from '@opengpex/editor/core/types';
+import { fromHex } from '@opengpex/editor/core/engine/color';
 import type { MarkerDefinition } from '../registry';
 
 /** 45° angle snap step (radians) applied when Shift is held. */
@@ -44,8 +45,8 @@ export const ArrowDefinition: MarkerDefinition<ArrowMarkerData> = {
 
   defaults: (): ArrowMarkerData => ({
     kind: 'arrow',
-    stroke: { color: '#0A84FF', width: 6 },
-    fill: { color: '#000000', opacity: 0 },
+    stroke: { color: fromHex('#0A84FF'), width: 6 },
+    fill: { color: fromHex('#000000'), opacity: 0 },
     tail: { x: 0, y: 0 },
     head: { x: 0, y: 0 },
     headScale: 3,

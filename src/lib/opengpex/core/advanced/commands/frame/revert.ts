@@ -13,7 +13,8 @@
  * Revert Command — Thin dispatch shell.
  *
  * Routes to the appropriate revert strategy:
- * - GIF frames → revertGifFrame (multi-layer rebuild with frame count dialog)
+ * - GIF frames → revertGifFrame (multi-layer rebuild with frame count dialog,
+ *   routed via extra.gifSequenceId)
  * - Standard frames → revertFrame (single-layer rebuild from original blob)
  *
  * All heavy lifting is in `importers/index.ts`.
@@ -23,7 +24,7 @@
 
 import { EditorCommand, EditorContextValue } from '@opengpex/editor/core/types';
 import * as P from '@opengpex/editor/core/advanced/protocols';
-import { revertFrame, revertGifFrame } from './importers';
+import { revertFrame, revertGifFrame, revertMultiPageTiffGroup } from './importers';
 
 export const FrameRevertCommand = {
   id: P.ADV_FRAME_REVERT,
@@ -33,10 +34,15 @@ export const FrameRevertCommand = {
     const { activeFrame } = ctx;
     if (!activeFrame) return;
 
-    // Route: GIF (has originalGifAssetId in extra) vs standard
-    const isGif = !!(activeFrame.extra as Record<string, unknown>)?.originalGifAssetId;
+    // Route: multi-page TIFF group (shared tiffGroupId) vs GIF (has
+    // gifSequenceId in extra) vs standard
+    const extra = activeFrame.extra as Record<string, unknown> | undefined;
+    const isTiffGroup = !!extra?.tiffGroupId;
+    const isGif = !!extra?.gifSequenceId;
 
-    if (isGif) {
+    if (isTiffGroup) {
+      await revertMultiPageTiffGroup(ctx, activeFrame.id);
+    } else if (isGif) {
       await revertGifFrame(ctx, activeFrame.id);
     } else {
       await revertFrame(ctx, activeFrame.id);

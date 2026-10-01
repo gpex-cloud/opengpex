@@ -64,49 +64,49 @@ const VARIANT_THEMES: Record<
     solid:
       "bg-emerald-600 text-white hover:bg-emerald-500 border border-emerald-500/20 shadow-sm",
     subtle:
-      "bg-emerald-600/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-600 hover:text-white hover:border-emerald-500 shadow-sm",
+      "bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 hover:text-emerald-900 hover:border-emerald-300 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-300 shadow-sm",
     active: "bg-emerald-700 text-white border-emerald-600 shadow-inner",
   },
   indigo: {
     solid:
       "bg-indigo-600 text-white hover:bg-indigo-500 border border-indigo-500/20 shadow-sm",
     subtle:
-      "bg-indigo-600/10 text-indigo-500 border border-indigo-500/20 hover:bg-indigo-600 hover:text-white hover:border-indigo-500 shadow-sm",
+      "bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 hover:text-indigo-900 hover:border-indigo-300 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20 dark:hover:bg-indigo-500/20 dark:hover:text-indigo-300 shadow-sm",
     active: "bg-indigo-700 text-white border-indigo-600 shadow-inner",
   },
   amber: {
     solid:
       "bg-amber-600 text-white hover:bg-amber-500 border border-amber-500/20 shadow-sm",
     subtle:
-      "bg-amber-600/10 text-amber-500 border border-amber-500/20 hover:bg-amber-600 hover:text-white hover:border-amber-500 shadow-sm",
+      "bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100 hover:text-amber-950 hover:border-amber-300 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/20 dark:hover:bg-amber-500/20 dark:hover:text-amber-200 shadow-sm",
     active: "bg-amber-700 text-white border-amber-600 shadow-inner",
   },
   cyan: {
     solid:
       "bg-cyan-600 text-white hover:bg-cyan-500 border border-cyan-500/20 shadow-sm",
     subtle:
-      "bg-cyan-600/10 text-cyan-500 border border-cyan-500/20 hover:bg-cyan-600 hover:text-white hover:border-cyan-500 shadow-sm",
+      "bg-cyan-50 text-cyan-900 border border-cyan-200 hover:bg-cyan-100 hover:text-cyan-950 hover:border-cyan-300 dark:bg-cyan-500/10 dark:text-cyan-400 dark:border-cyan-500/20 dark:hover:bg-cyan-500/20 dark:hover:text-cyan-300 shadow-sm",
     active: "bg-cyan-700 text-white border-cyan-600 shadow-inner",
   },
   red: {
     solid:
       "bg-rose-600 text-white hover:bg-rose-500 border border-rose-500/20 shadow-sm",
     subtle:
-      "bg-rose-600/10 text-rose-500 border border-rose-500/30 hover:bg-rose-600 hover:text-white hover:border-rose-500 shadow-sm",
+      "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 hover:text-rose-900 hover:border-rose-300 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/20 dark:hover:bg-rose-500/20 dark:hover:text-rose-300 shadow-sm",
     active: "bg-rose-700 text-white border-rose-600 shadow-inner",
   },
   blue: {
     solid:
       "bg-blue-600 text-white hover:bg-blue-500 border border-blue-500/20 shadow-sm",
     subtle:
-      "bg-blue-600/10 text-blue-500 border border-blue-500/30 hover:bg-blue-600 hover:text-white hover:border-blue-500 shadow-sm",
+      "bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100 hover:text-blue-900 hover:border-blue-300 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20 dark:hover:bg-blue-500/20 dark:hover:text-blue-300 shadow-sm",
     active: "bg-blue-700 text-white border-blue-600 shadow-inner",
   },
   zinc: {
     solid:
       "bg-zinc-900 text-zinc-50 border-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-100 dark:hover:bg-zinc-200",
     subtle:
-      "bg-zinc-100 text-zinc-700 border-zinc-200 hover:bg-zinc-200/80 dark:bg-zinc-800 dark:text-zinc-200 dark:border-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-50",
+      "bg-zinc-100 text-zinc-700 border-zinc-200 hover:bg-zinc-200/80 hover:text-zinc-900 dark:bg-zinc-800 dark:text-zinc-200 dark:border-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-50",
     active:
       "bg-zinc-200 text-zinc-900 border-zinc-300 dark:bg-zinc-950 dark:text-white dark:border-zinc-800 shadow-inner",
   },

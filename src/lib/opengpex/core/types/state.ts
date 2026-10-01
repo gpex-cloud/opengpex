@@ -54,6 +54,8 @@ export interface InteractionState {
   hud?: {
     message: string;
     type: 'info' | 'success' | 'error';
+    subtitle?: string;
+    duration?: number;
   } | null;
   signals: Record<string, InteractionSignalValue>;
   /** Cursor override value that plugin can set (null = use default logic) */
@@ -83,7 +85,7 @@ export interface EditorData {
   isLoaded: boolean;
   storageUsage?: { totalBytes: number; blobCount: number };
   confirm: { isVisible: boolean; title: string; message: string; type?: 'info' | 'danger' | 'warning'; variant?: 'square' | 'rect' } | null;
-  choice: { isVisible: boolean; title: string; options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>; helpText?: string } | null;
+  choice: { isVisible: boolean; title: string; options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>; helpText?: string; switchConfig?: { label: string; description?: string; defaultValue?: boolean } } | null;
   interaction: InteractionState;
   history: GlobalHistoryState;
 }
@@ -141,7 +143,7 @@ export type EditorAction =
   | { type: 'HYDRATE'; payload: Partial<EditorState> }
   | { type: 'SHOW_CONFIRM'; payload: { title: string; message: string; type?: 'info' | 'danger' | 'warning'; variant?: 'square' | 'rect' } }
   | { type: 'HIDE_CONFIRM' }
-  | { type: 'SHOW_CHOICE'; payload: { title: string; options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>; helpText?: string } }
+  | { type: 'SHOW_CHOICE'; payload: { title: string; options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>; helpText?: string; switchConfig?: { label: string; description?: string; defaultValue?: boolean } } }
   | { type: 'HIDE_CHOICE' }
   | { type: 'UPDATE_VIEW_SIZE'; payload: { w: number; h: number } }
   | { type: 'SET_INTERACTION'; payload: Partial<InteractionState> }
@@ -169,7 +171,7 @@ export interface VolatileInteraction {
   /** Cursor override value set by plugins/tools (null = use default logic) */
   cursorOverride: string | null;
   /** HUD toast message (null = no message) */
-  hud: { message: string; type: 'info' | 'success' | 'error' } | null;
+  hud: { message: string; type: 'info' | 'success' | 'error'; subtitle?: string; duration?: number } | null;
   /** Smart guide alignment data during interactions */
   smartguides: SmartGuideData | null;
   /** Selection error pulse counter */
@@ -195,7 +197,7 @@ export interface VolatileState {
        * result would disagree ("preview right, landing wrong"). Omitted / (0,0)
        * for regular full-layer images.
        */
-      bitmapMaskOverride?: { maskId: string; source: CanvasImageSource; bounds?: { x: number; y: number } };
+      bitmapMaskOverride?: { maskId: string; source: ImageBitmap | OffscreenCanvas; bounds?: { x: number; y: number }; version?: number };
     }>;
     frames: Record<string, Partial<Frame>>;
     project: Partial<EditorData>;
@@ -240,7 +242,7 @@ export interface VolatileStateHandle {
    * Flag-neutral mutation for garbage-collection style cleanup (e.g. dropping
    * shadow buffers of removed frames/layers). Unlike `mutate`, it does NOT set
    * `activeState.interacting = true` — GC is not a user interaction, and forcing
-   * the flag on left it stuck `true` after REMOVE_FRAME (see 缺陷记录 步骤 6).
+   * the flag on left it stuck `true` after REMOVE_FRAME.
    */
   cleanup: (mutator: (v: VolatileState) => void) => void;
 }

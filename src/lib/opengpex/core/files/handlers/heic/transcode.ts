@@ -54,7 +54,7 @@ export async function convertHeicToBlob(file: File): Promise<Blob> {
   const blob = await heicToFn({
     blob: file,
     type: 'image/jpeg',
-    quality: 0.9,
+    quality: 0.95,
   });
 
   if (!blob) throw new Error('HEIC conversion returned null');

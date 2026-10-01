@@ -21,8 +21,10 @@
 
 import React, { useState } from 'react';
 import { ColorPickerPro } from '@opengpex/editor/widgets/ColorPickerPro';
+import { fromHex } from '@opengpex/editor/core/engine/color';
 import Popover from '@opengpex/editor/widgets/Popover';
 import Tooltip from '@opengpex/editor/widgets/Tooltip';
+import Switch from '@opengpex/editor/widgets/Switch';
 import { useMarkerPanel } from '../hooks';
 
 const ROW_LABEL = 'text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-20 shrink-0';
@@ -112,8 +114,7 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
 
   const strokeWidth = markerData.stroke.width;
   const strokeColor = markerData.stroke.color;
-  const fillColor = markerData.fill.color;
-  const fillOpacityPct = Math.round(markerData.fill.opacity * 100);
+  const fillEnabled = markerData.fill.opacity > 0;
   const cornerRadius = markerData.kind === 'rect' ? markerData.cornerRadius : 0;
 
   return (
@@ -124,7 +125,7 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
           {definitions.map((def) => {
             const isActive = def.kind === activeMarkerKind;
             return (
-              <Tooltip key={def.kind} content={def.label} position="top" display="inline-flex">
+              <Tooltip key={def.kind} content={`${def.label} (Tab)`} position="top" display="inline-flex">
                 <button
                   type="button"
                   aria-label={def.label}
@@ -146,9 +147,14 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
       {/* ─── Stroke (all kinds) ─── */}
       <div className="flex flex-col gap-1.5 p-1">
         <ColorSwatchRow
-          label="Stroke Color"
-          color={strokeColor}
-          onChange={(c) => updateMarkerData({ stroke: { ...markerData.stroke, color: c } })}
+          label="Color"
+          color={strokeColor.hex}
+          onChange={(c) =>
+            updateMarkerData({
+              stroke: { ...markerData.stroke, color: fromHex(c) },
+              fill: { ...markerData.fill, color: fromHex(c) },
+            })
+          }
         />
 
         <div className="flex items-center gap-1.5 px-1">
@@ -177,38 +183,23 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
         </div>
       </div>
 
-      {/* ─── Fill (hasFill kinds only) ─── */}
+      {/* ─── Fill (hasFill kinds only) — same color as stroke, on/off toggle ─── */}
       {activeDef?.hasFill && (
         <div className="flex flex-col gap-1.5 p-1">
-          <ColorSwatchRow
-            label="Fill Color"
-            color={fillColor}
-            onChange={(c) => updateMarkerData({ fill: { ...markerData.fill, color: c } })}
-          />
-
           <div className="flex items-center gap-1.5 px-1">
-            <span className={ROW_LABEL}>Fill Opacity</span>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              step="1"
-              value={fillOpacityPct}
-              onChange={(e) => updateMarkerData({ fill: { ...markerData.fill, opacity: Number(e.target.value) / 100 } }, true)}
-              onMouseUp={(e) => { updateMarkerData({ fill: { ...markerData.fill, opacity: Number((e.target as HTMLInputElement).value) / 100 } }); e.currentTarget.blur(); }}
-              className={RANGE_CLASS}
+            <span className={ROW_LABEL}>Fill</span>
+            <div className="flex-1" />
+            <Switch
+              checked={fillEnabled}
+              size="compact"
+              onChange={(on) =>
+                updateMarkerData({
+                  fill: on
+                    ? { color: strokeColor, opacity: 1 }
+                    : { ...markerData.fill, opacity: 0 },
+                })
+              }
             />
-            <div className="flex items-center gap-0.5 text-right w-9 justify-end text-indigo-600 dark:text-indigo-400 font-black text-[10px] tabular-nums">
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={fillOpacityPct}
-                onChange={(e) => updateMarkerData({ fill: { ...markerData.fill, opacity: Math.max(0, Math.min(100, Number(e.target.value) || 0)) / 100 } })}
-                className={NUM_INPUT}
-              />
-              <span className="text-[8px] font-bold text-[var(--text-muted)] shrink-0">%</span>
-            </div>
           </div>
         </div>
       )}

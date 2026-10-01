@@ -19,14 +19,15 @@
  * PNG chunk parsing is O(n) over chunk headers only, skipping IDAT data.
  */
 
-import type { PixelService } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   DecodeOptions,
-  DecodeResult,
+  DecodedPayload,
   EncodeOptions,
+  EncodeSource,
 } from '../../types';
 import type { ImageMetadata } from '../../types';
+import type { IngestDecision } from '../../strategy';
 import { decodePng } from './decode';
 import { encodePng } from './encode';
 import { extractPngMetadata } from './metadata';
@@ -36,17 +37,20 @@ export class PngHandler implements ImageFormatHandler {
   readonly mimeTypes = ['image/png'];
   readonly extensions = ['png'];
 
-  constructor(private pixels: PixelService) {}
-
-  decode(file: File, options?: DecodeOptions): Promise<DecodeResult> {
-    return decodePng(file, this.pixels, options);
+  decode(
+    file: File,
+    metadata: ImageMetadata,
+    decision: IngestDecision,
+    _options?: DecodeOptions,
+  ): Promise<DecodedPayload[]> {
+    return decodePng(file, metadata, decision);
   }
 
   encode(
-    source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
+    source: EncodeSource,
     options: EncodeOptions,
   ): Promise<Blob> {
-    return encodePng(source, this.pixels, options);
+    return encodePng(source, options);
   }
 
   async extractMetadata(file: File): Promise<ImageMetadata> {

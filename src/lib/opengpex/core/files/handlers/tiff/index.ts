@@ -17,19 +17,21 @@
  *
  * Also re-exports public APIs for 16-bit high-res export.
  *
- * Thread model (Phase 7.2 — vips unification):
- * - All vips operations flow through the unified engine Worker via PixelService.fileIO
+ * Thread model (vips unification):
+ * - All vips operations flow through the files-layer shared lib-vips worker
  * - IFD metadata extraction runs on main thread (lightweight header-only parse, <10ms)
  */
 
-import type { AssetService, PixelService } from '@opengpex/editor/core/types';
+import type { AssetService } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   DecodeOptions,
-  DecodeResult,
+  DecodedPayload,
   EncodeOptions,
+  EncodeSource,
 } from '../../types';
 import type { ImageMetadata } from '../../types';
+import type { IngestDecision } from '../../strategy';
 import { decodeTiff } from './decode';
 import { encodeTiff } from './encode';
 import { extractTiffMetadata } from './metadata';
@@ -42,18 +44,22 @@ export class TiffHandler implements ImageFormatHandler {
 
   constructor(
     private assets: AssetService,
-    private pixels: PixelService,
   ) {}
 
-  decode(file: File, options?: DecodeOptions): Promise<DecodeResult> {
-    return decodeTiff(file, this.pixels, options);
+  decode(
+    file: File,
+    metadata: ImageMetadata,
+    decision: IngestDecision,
+    _options?: DecodeOptions,
+  ): Promise<DecodedPayload[]> {
+    return decodeTiff(file, metadata, decision);
   }
 
   encode(
-    source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
+    source: EncodeSource,
     options: EncodeOptions,
   ): Promise<Blob> {
-    return encodeTiff(source, this.pixels, options);
+    return encodeTiff(source, options);
   }
 
   async extractMetadata(file: File): Promise<ImageMetadata> {

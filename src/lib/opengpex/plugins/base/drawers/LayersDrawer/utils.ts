@@ -78,8 +78,8 @@ export function commitRefocusToOverlay(
  * (basic sliders, curves, levels, channel mix, or color balance).
  *
  * Used by `LayerItem` to render the purple "has adjustments" indicator dot.
- * Self-contained — intentionally does NOT import from `engine/protocol/normalizer`
- * to keep LayersDrawer free of render-engine coupling.
+ * Self-contained by design — it reads `Layer` state directly rather than depending
+ * on any render-engine module, keeping LayersDrawer free of engine coupling.
  */
 export function hasLayerAdjustments(layer: Layer): boolean {
   // Basic adjustments (brightness/contrast/saturation/hueRotate/blur)

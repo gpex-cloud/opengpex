@@ -28,7 +28,7 @@ import FancyChoice from "@opengpex/editor/widgets/FancyChoice";
 import type { ChoiceOption } from "@opengpex/editor/widgets/FancyChoice";
 import EditorHUD from "@opengpex/editor/widgets/EditorHUD";
 import BranchFlyEffect from "@opengpex/editor/widgets/BranchFlyEffect";
-import { AlertCircle, CheckCircle2, Info, Layers, PlusSquare, type LucideIcon } from "lucide-react";
+import { CheckCircle2, Info, Layers, PlusSquare, type LucideIcon } from "lucide-react";
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
 
 /** Icon lookup: maps string names stored in state to LucideIcon components */
@@ -61,22 +61,27 @@ export const GlobalUI = () => {
       >
         <EditorHUD
           isVisible={!!hud}
+          type={hud?.type}
           icon={
             hud?.type === "success" ? (
               <CheckCircle2 size={16} />
             ) : hud?.type === "error" ? (
-              <AlertCircle size={16} />
+              <div className="flex items-center justify-center w-3.5 h-3.5">
+                <div className="w-2 h-2 rounded-full bg-white animate-pulse" />
+              </div>
             ) : (
               <Info size={16} />
             )
           }
           title={hud?.message || ""}
           subtitle={
-            hud?.type === "success"
-              ? "Operation Success"
-              : hud?.type === "error"
-                ? "System Error"
-                : "Editor Notice"
+            (hud as { subtitle?: string })?.subtitle || (
+              hud?.type === "success"
+                ? "Operation Success"
+                : hud?.type === "error"
+                  ? "Action Blocked"
+                  : "Editor Notice"
+            )
           }
         />
       </div>
@@ -97,9 +102,16 @@ export const GlobalUI = () => {
         isVisible={!!choice?.isVisible}
         title={choice?.title || ""}
         options={choiceOptions}
-        onSelect={(id) => actions.resolveChoice(id)}
+        onSelect={(id, switchValue) => {
+          if (choice?.switchConfig) {
+            actions.resolveChoice({ id, switchValue });
+          } else {
+            actions.resolveChoice(id);
+          }
+        }}
         onCancel={() => actions.resolveChoice(null)}
         helpText={choice?.helpText}
+        switchConfig={choice?.switchConfig}
       />
 
       {/* 4. Branch animation */}

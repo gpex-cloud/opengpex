@@ -22,6 +22,7 @@
  */
 import { Dimensions, LocalShape, LocalRect, LocalPolygon } from './primitives';
 import type { ImageMetadata } from '../files/types';
+import type { ColorValue } from '@opengpex/editor/core/engine/color';
 // LocalShape is used by VectorMask, canvasClipBox, etc.
 // LocalPolygon is used by clipBoxes (unified selection type after selection_layer_unification).
 
@@ -195,7 +196,7 @@ export interface TextLayerData {
   fontFamily: string;
   fontSize: number;
   fontWeight: number;
-  color: string;
+  color: ColorValue;  // structured foreground colour (wide-gamut currency)
   align: 'left' | 'center' | 'right';
   lineHeight: number;
   italic?: boolean;
@@ -226,13 +227,13 @@ export interface MarkerDataBase {
 
   /** Stroke (border) properties */
   stroke: {
-    color: string;     // CSS color, e.g. '#FF3B30'
+    color: ColorValue;  // structured foreground colour (wide-gamut currency)
     width: number;     // px, range [1, 50]
   };
 
   /** Fill properties (for closed shapes like rect/ellipse) */
   fill: {
-    color: string;     // CSS color
+    color: ColorValue; // structured foreground colour (wide-gamut currency)
     opacity: number;   // 0–1, 0 = no fill
   };
 }
@@ -285,6 +286,52 @@ export interface EllipseMarkerData extends MarkerDataBase {
 export type MarkerData = RectMarkerData | ArrowMarkerData | EllipseMarkerData;
 // Phase 2+: | LineMarkerData | ...
 
+/**
+ * One sample of a logic-brush trajectory (logic_brush.md §11.1).
+ * Coordinates are layer-local pixels; the tip radius at this point is
+ * `size / 2 × pressure`.
+ */
+export interface StrokePoint {
+  readonly x: number;
+  readonly y: number;
+  /** 0..1 pen pressure. */
+  readonly pressure: number;
+}
+
+/**
+ * Vector brush point-stream model — stored on `Layer.strokeData` for a
+ * `type:'vector'` layer, sibling to `markerData`. The scene-assembly mapper
+ * (`strokeToVectorSource`) converts `color` to working-gamut linear and packs the
+ * points into the GPU-side {@link StrokeParams}; the StrokeRenderer extrudes a ribbon.
+ */
+export interface StrokeData {
+  readonly points: readonly StrokePoint[];
+  /** Author-space colour (mapper converts to working-gamut linear). */
+  readonly color: ColorValue;
+  /** Tip diameter at pressure=1, in px. */
+  readonly size: number;
+  /** Soft-edge hardness, 0..1. */
+  readonly hardness: number;
+}
+
+/**
+ * UI-only provenance tag for the layers-panel icon — purely a display label for
+ * "which tool produced this layer", decoupled from `Layer.type` (the render-engine
+ * dispatch key). The render pipeline (Scene / SceneAssembler / RenderGraph /
+ * VectorRenderer) must never read this field — it only ever branches on `Layer.type`.
+ *
+ * A missing tag, or one the icon table doesn't recognise (e.g. a third-party
+ * plugin's own tool tag), resolves to the `misc` fallback icon.
+ */
+export type LayerSourceTool =
+  | 'image'    // Plain imported bitmap
+  | 'marker'   // Marker tool (rect/ellipse/arrow annotation)
+  | 'brush'    // Vector brush stroke
+  | 'eraser'   // Legacy eraser bake
+  | 'restore'  // Legacy restore bake
+  | 'mosaic'   // Mosaic bake
+  | 'misc';    // Fallback: tag missing or unrecognised
+
 export interface Layer {
   id: string;
   name: string;
@@ -295,8 +342,12 @@ export interface Layer {
   textData?: TextLayerData;
   /** Marker tool data — only present when type='vector' and created by the Marker Tool. */
   markerData?: MarkerData;
+  /** Vector brush point-stream data — only present when type='vector' and created by the Brush Tool. */
+  strokeData?: StrokeData;
   metadata?: {
-    fillColor?: string;
+    fillColor?: ColorValue;
+    /** Layers-panel icon provenance tag, display-only. See `LayerSourceTool`. */
+    sourceTool?: LayerSourceTool;
     /** This layer was derived from which source layer (both copy and cut set this). */
     sourceLayerId?: string;
     /** The hole mask id on the source layer that corresponds to this cut fragment (only cut fragments have this). */
@@ -396,52 +447,6 @@ export interface Frame {
   canvas: Dimensions;
   /** Document resolution in dots per inch. Default 72 (screen). */
   dpi: number;
-  /**
-   * Document bit depth — determines the working precision for all composition
-   * operations on this frame. Set at creation time by detecting the source
-   * image's actual bit depth. Immutable after creation (changing mode is a
-   * future feature).
-   *
-   * - `8`: Standard (PNG/JPEG/WebP) — Uint8 per channel
-   * - `16`: High fidelity (16-bit TIFF/PNG) — Uint16 per channel
-   * - `32`: HDR/EXR (future) — Float32 per channel
-   *
-   * When `CompositeRequest.precision = 'auto'`, the pipeline reads this value
-   * to determine which compositor backend to use. Lower-precision layers
-   * (e.g. 8-bit image in a 16-bit frame) are automatically promoted to the
-   * frame's bitDepth during composition — source data storage is unaffected.
-   *
-   * @default 8
-   */
-  bitDepth: 8 | 16 | 32;
-
-  /**
-   * Working color space — auto-detected from source image ICC Profile.
-   * Immutable after frame creation (same pattern as `bitDepth`).
-   *
-   * Determined at import time:
-   * - Source has Display P3 profile → colorSpace = 'display-p3'
-   * - Source has Adobe RGB profile → colorSpace = 'adobe-rgb'
-   * - Source has sRGB or no profile → colorSpace = 'srgb' (default)
-   * - Source has other/unknown ICC → convert to sRGB, colorSpace = 'srgb'
-   *
-   * When colorSpace !== 'srgb', the pipeline preserves pixels in their
-   * native color space, avoiding lossy round-trip conversions.
-   *
-   * @default 'srgb'
-   */
-  colorSpace: WorkingColorSpace;
-
-  /**
-   * Transfer characteristic (TRC) of the working pixel buffer.
-   * Describes the gamma encoding applied to stored pixel values.
-   *
-   * - `'srgb-trc'`: Standard sRGB gamma (~2.2 with linear toe). Default for all editing.
-   * - `'linear'`: Linear-light encoding. Used for physically-correct compositing (Phase B).
-   *
-   * @default 'srgb-trc'
-   */
-  trc: TRC;
 
   camera: CameraState;
 

@@ -18,7 +18,47 @@
  */
 
 import { AssetService } from '@opengpex/editor/core/storage/asset/AssetService';
+import type { ColorIdentity } from '@opengpex/editor/core/storage/asset/AssetStore';
 import { Frame, HistoryStep } from '@opengpex/editor/core/types';
+
+/**
+ * DehydratedAsset — one entry of the pool `dehydrate` fills while walking a
+ * state tree. Historically this was just `{ blob }` (the 8-bit display
+ * bitmap), which is why packed projects came back colour-washed: the light
+ * record's geometry/identity and the heavy `raw:`/`dec:` payloads were never
+ * collected, so the unpacker had to re-sniff everything with
+ * `createImageBitmap` and fell back to 8-bit sRGB.
+ *
+ * `rawBlob` / `decBuffer` are mutually exclusive and only ever populated when
+ * `probeHeavy` is requested (see `dehydrate`): an asset with a source file is
+ * category ②, one without is a bake product (category ③).
+ */
+export interface DehydratedAsset {
+  blob: Blob;
+  width?: number;
+  height?: number;
+  dprScale?: number;
+  colorIdentity?: ColorIdentity;
+  sourceFileName?: string;
+  mimeType?: string;
+  /** Category ②: the original ENCODED source file (`raw:${fileHash}`). */
+  rawBlob?: Blob;
+  /** Content hash the raw blob is keyed by — the `#` prefix of the asset id. */
+  rawFileHash?: string;
+  /** Category ③: DECODED high-depth naked pixels (`dec:${id}`). */
+  decBuffer?: Uint16Array | Float32Array;
+}
+
+export type DehydratedAssetPool = Record<string, DehydratedAsset>;
+
+/**
+ * Strips the `#pageIndex` suffix to recover the physical `raw:` key. Mirrors
+ * `AssetService`'s own private `fileHashOf` — `raw:` is stored once per source
+ * file, so every page of a multi-page import maps onto the same hash.
+ */
+function fileHashOf(id: string): string {
+  return id.split('#')[0];
+}
 
 /**
  * Hydrating: State conversion operators
@@ -60,13 +100,27 @@ export const Hydrating = {
    * 
    * Solution: Added 'checkpoint' and 'byId' to the container list. Introduced the `isMap` parameter.
    * When key is 'byId', `isMap = true` is passed to traverse all dynamic map entries (e.g. layers) in O(N).
+   *
+   * @param probeHeavy Opt-in provenance probing for the PORTABLE-EXPORT path
+   *   (`StateStorage.export`). When set, every high-depth asset (`dataFormat`
+   *   present) is additionally classified by hitting IDB: `getRaw` non-empty ⇒
+   *   category ② (ship the source file), empty ⇒ category ③ (ship `dec:`).
+   *   Deliberately OFF for the local incremental `save()` path — those two
+   *   reads per asset would drag multi-hundred-MB `dec:` buffers out of IDB on
+   *   every autosave, for a pool that `save()` throws away anyway.
    */
-  async dehydrate(obj: unknown, assets: AssetService, assetsPool: Record<string, { blob: Blob }>, isMap = false): Promise<unknown> {
+  async dehydrate(
+    obj: unknown,
+    assets: AssetService,
+    assetsPool: DehydratedAssetPool,
+    isMap = false,
+    probeHeavy = false,
+  ): Promise<unknown> {
     if (!obj || typeof obj !== 'object' || obj instanceof Blob) return obj;
 
     // 1. Process array (e.g. frames or layers)
     if (Array.isArray(obj)) {
-      return await Promise.all(obj.map(item => this.dehydrate(item, assets, assetsPool)));
+      return await Promise.all(obj.map(item => this.dehydrate(item, assets, assetsPool, false, probeHeavy)));
     }
 
     const record = obj as Record<string, unknown>;
@@ -76,7 +130,7 @@ export const Hydrating = {
       const result: Record<string, unknown> = {};
       let hasChanged = false;
       for (const [k, v] of Object.entries(record)) {
-        const processed = await this.dehydrate(v, assets, assetsPool);
+        const processed = await this.dehydrate(v, assets, assetsPool, false, probeHeavy);
         if (processed !== v) {
           hasChanged = true;
         }
@@ -99,10 +153,39 @@ export const Hydrating = {
       if (!assetsPool[assetId]) {
         const entry = assets.get(assetId);
         if (entry?.blob) {
-          assetsPool[assetId] = { blob: entry.blob };
+          const collected: DehydratedAsset = {
+            blob: entry.blob,
+            width: entry.width,
+            height: entry.height,
+            dprScale: entry.dprScale,
+            sourceFileName: entry.sourceFileName,
+            mimeType: entry.blob.type,
+            colorIdentity: {
+              gamut: entry.gamut,
+              trc: entry.trc,
+              bitDepth: entry.bitDepth,
+              dataFormat: entry.dataFormat,
+              renderIntent: entry.renderIntent,
+            },
+          };
+
+          // Provenance split (§4.1). Only high-depth assets can be anything but
+          // category ①, so a plain 8-bit asset costs zero extra IDB reads.
+          if (probeHeavy && entry.dataFormat) {
+            const rawBlob = await assets.getRaw(assetId);
+            if (rawBlob) {
+              collected.rawBlob = rawBlob;
+              collected.rawFileHash = fileHashOf(assetId);
+            } else {
+              const decBuffer = await assets.getDec(assetId);
+              if (decBuffer) collected.decBuffer = decBuffer;
+            }
+          }
+
+          assetsPool[assetId] = collected;
         } else if (record[IMG_SRC_HANDLE]) {
           const blob = await ensureBlob(record[IMG_SRC_HANDLE]);
-          if (blob instanceof Blob) assetsPool[assetId] = { blob };
+          if (blob instanceof Blob) assetsPool[assetId] = { blob, mimeType: blob.type };
         }
       }
       // Bleach the src of the copy
@@ -113,7 +196,7 @@ export const Hydrating = {
     const containers = ['frames', 'past', 'future', 'checkpoint', 'layers', 'thumbnail', 'bitmapMasks', 'byId'];
     for (const key of containers) {
       if (record[key]) {
-        const processed = await this.dehydrate(record[key], assets, assetsPool, key === 'byId');
+        const processed = await this.dehydrate(record[key], assets, assetsPool, key === 'byId', probeHeavy);
         if (processed !== record[key]) {
           if (!hasChanged) { result = { ...record }; hasChanged = true; }
           result[key] = processed;
@@ -210,8 +293,13 @@ export const Hydrating = {
   /**
    * Specifically for dehydrating a single Frame
    */
-  async dehydrateSingleFrame(frame: Frame, assets: AssetService, assetsPool: Record<string, { blob: Blob }>): Promise<Frame> {
-    return (await this.dehydrate(frame, assets, assetsPool)) as Frame;
+  async dehydrateSingleFrame(
+    frame: Frame,
+    assets: AssetService,
+    assetsPool: DehydratedAssetPool,
+    probeHeavy = false,
+  ): Promise<Frame> {
+    return (await this.dehydrate(frame, assets, assetsPool, false, probeHeavy)) as Frame;
   },
 
   /**
@@ -224,7 +312,7 @@ export const Hydrating = {
   /**
    * Specifically for dehydrating a single HistoryStep snapshot
    */
-  async dehydrateSnapshot(snapshot: HistoryStep, assets: AssetService, assetsPool: Record<string, { blob: Blob }>): Promise<HistoryStep> {
+  async dehydrateSnapshot(snapshot: HistoryStep, assets: AssetService, assetsPool: DehydratedAssetPool): Promise<HistoryStep> {
     return (await this.dehydrate(snapshot, assets, assetsPool)) as HistoryStep;
   },
 

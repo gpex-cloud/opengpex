@@ -140,7 +140,7 @@ const { runCommand, abortCommand } = createToolCommand<
     const blob = await patchCanvas.convertToBlob({ type: 'image/png' });
 
     // Register as Asset
-    const { assetId, url } = await ctx.assets.register(blob, { w: patchW, h: patchH });
+    const { assetId, url } = await ctx.assets.register(blob, { width: patchW, height: patchH });
 
     // Read output mode from config
     const inpaintConfig = getInpaintConfig(ctx);
@@ -166,7 +166,7 @@ const { runCommand, abortCommand } = createToolCommand<
 
       // Convert composited result to a new asset
       const compositeBlob = await compositeCanvas.convertToBlob({ type: 'image/png' });
-      const compositeAsset = await ctx.assets.register(compositeBlob, { w: srcW, h: srcH });
+      const compositeAsset = await ctx.assets.register(compositeBlob, { width: srcW, height: srcH });
 
       // Update source layer in-place
       actions.updateLayer(frameId, layerId, { src: compositeAsset.url, assetId: compositeAsset.assetId });

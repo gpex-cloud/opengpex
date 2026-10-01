@@ -19,10 +19,10 @@
  */
 
 import ExifReader from 'exifreader';
-import type { ImageMetadata, ColorSpaceId } from '../../types';
-import { iccToBase64, parseIccProfileName } from '../../icc';
+import type { ImageMetadata } from '../../types';
+import { iccToBase64, parseIccProfileName, inferColorSpaceFromIcc } from '../../shared/icc';
 import { extractJpegExif, extractJpegIcc } from './jfif';
-import { parseDateToISO } from './utils';
+import { parseDateToISO } from '../../utils';
 
 /**
  * Extract full V2 metadata from a JPEG file.
@@ -84,18 +84,20 @@ export async function extractJpegMetadata(file: File): Promise<ImageMetadata> {
     const fNum = tags.exif?.FNumber?.value;
     const expTime = tags.exif?.ExposureTime?.value;
     const iso = tags.exif?.ISOSpeedRatings?.value;
-    if (fNum || expTime || iso) {
+    const focalLength = tags.exif?.FocalLength?.value;
+    const orientation = tags.exif?.Orientation?.value;
+    if (fNum != null || expTime != null || iso != null || focalLength != null || orientation != null) {
       meta.capture = {
         fNumber: fNum ? (Array.isArray(fNum) ? fNum[0] / (fNum[1] || 1) : Number(fNum)) : undefined,
         exposureTime: expTime ? (Array.isArray(expTime) ? expTime[0] / (expTime[1] || 1) : Number(expTime)) : undefined,
         iso: iso ? (Array.isArray(iso) ? Number(iso[0]) : Number(iso)) : undefined,
-        focalLength: tags.exif?.FocalLength?.value
-          ? (Array.isArray(tags.exif.FocalLength.value)
-              ? tags.exif.FocalLength.value[0] / (tags.exif.FocalLength.value[1] || 1)
-              : Number(tags.exif.FocalLength.value))
+        focalLength: focalLength
+          ? (Array.isArray(focalLength)
+              ? focalLength[0] / (focalLength[1] || 1)
+              : Number(focalLength))
           : undefined,
-        orientation: tags.exif?.Orientation?.value
-          ? Number(tags.exif.Orientation.value)
+        orientation: orientation != null
+          ? (Array.isArray(orientation) ? Number(orientation[0]) : Number(orientation))
           : undefined,
       };
     }
@@ -147,18 +149,4 @@ export async function extractJpegMetadata(file: File): Promise<ImageMetadata> {
   }
 
   return meta;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Internal Helpers
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/** Infer color space from ICC profile name */
-function inferColorSpaceFromIcc(profileName: string): ColorSpaceId {
-  const name = profileName.toLowerCase();
-  if (name.includes('adobe') && name.includes('rgb')) return 'adobe-rgb';
-  if (name.includes('display p3') || name.includes('p3')) return 'display-p3';
-  if (name.includes('prophoto')) return 'prophoto-rgb';
-  if (name.includes('srgb')) return 'srgb';
-  return 'unknown';
 }

@@ -30,11 +30,10 @@ import { useViewportSync, useVolatileInteraction } from "@opengpex/editor/core/c
 import { useViewportEvents } from "./useViewportEvents";
 import { useCameraInit } from "./useCameraInit";
 import CanvasBackdrop from "./CanvasBackdrop";
-import CanvasStage from "../layers/canvas2d/CanvasStage";
+import CanvasStage from "./CanvasStage";
 
 import { Frame, AssetService } from "@opengpex/editor/core/types";
-import { sourceBitmapCache, getGpuEngine } from "@opengpex/editor/core/engine/renderer";
-import { GpuDevice } from "@opengpex/editor/core/gpu/device/GpuDevice";
+import { sourceBitmapCache, getGpuEngine, GpuDevice } from "@opengpex/editor/core/engine";
 
 interface ViewportProps {
   frameId: string;

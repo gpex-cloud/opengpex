@@ -21,19 +21,25 @@
  * Unified File Service — factory and public exports.
  *
  * Creates a FileService instance with all format handlers registered.
- * Dependencies: AssetService + PixelService (for fileIO namespace — TIFF/RAW Worker ops).
- * Phase 7.2: FileService depends on PixelService.fileIO (vips unified Worker).
+ * Dependencies: AssetService (for registering ICC/EXIF blobs).
  */
 
-import type { AssetService, PixelService } from '@opengpex/editor/core/types';
+import type { AssetService } from '@opengpex/editor/core/types';
 import type {
   FileService,
   ImageFormatHandler,
   ImageMetadata,
   DecodeOptions,
   DecodeResult,
+  DecodedPayload,
   EncodeOptions,
+  EncodeSource,
+  RawPixelSource,
+  DecodeBlobInput,
 } from './types';
+import { isRawPixelSource } from './types';
+export { isRawPixelSource };
+export type { EncodeSource, RawPixelSource };
 import { JpegHandler } from './handlers/jpeg';
 import { PngHandler } from './handlers/png';
 import { BmpHandler } from './handlers/bmp';
@@ -42,15 +48,20 @@ import { TiffHandler } from './handlers/tiff';
 import { RawHandler } from './handlers/raw';
 import { WebpHandler } from './handlers/webp';
 import { AvifHandler } from './handlers/avif';
-import { VectorHandler, getVectorIntrinsicSize, detectVectorFormat } from './handlers/vector';
+import { VectorHandler, getVectorIntrinsicSize, detectVectorFormat, needsRasterSize, computeRasterSize, MAX_RASTER_DIMENSION } from './handlers/vector';
 import { GifHandler } from './handlers/gif';
-import { mimeToExt } from './mime';
+import { mimeToExt } from './shared/mime';
+// strategy.ts is NOT part of the './color' barrel — the entry imports the single
+// ingest-decision authority explicitly.
+import { resolveIngestDecision } from './strategy';
+import type { IngestDecision } from './strategy';
 
 // Re-export vector utilities (used by frame/create command)
-export { getVectorIntrinsicSize, detectVectorFormat };
+export { getVectorIntrinsicSize, detectVectorFormat, needsRasterSize, computeRasterSize, MAX_RASTER_DIMENSION };
 
-// Re-export metadata display helpers
-export { hasDisplayableMetadata, isComfyUiWorkflow } from './utils';
+// Re-export metadata display + file acquisition + page semantics helpers
+export { hasDisplayableMetadata, isComfyUiWorkflow, toFile, fromUrl, classifyDecode } from './utils';
+export type { DecodeKind } from './utils';
 
 // Re-export all public types
 export type {
@@ -63,10 +74,19 @@ export type {
   SourceFormat,
   DpiSource,
   ColorSpaceId,
+  DecodeBlobInput,
 } from './types';
 
 // Re-export V2 metadata types
 export type { ImageMetadata, RawBinaryData } from './types';
+
+// Re-export unified ingest decision strategy
+export { resolveIngestDecision, isWideGamut } from './strategy';
+export type { IngestDecision, DecodeChannel } from './strategy';
+
+// Re-export unified egest (export) decision strategy — the mirror of the above.
+export { resolveEgestDecision, resolveEmbedIcc, FORMAT_EGEST_CAPABILITIES } from './strategy';
+export type { EgestDecision, EgestRequest, EgestChannel, FormatEgestCapability } from './strategy';
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -78,39 +98,29 @@ class FallbackHandler implements ImageFormatHandler {
   readonly mimeTypes: string[] = [];
   readonly extensions: string[] = [];
 
-  async decode(file: File): Promise<DecodeResult> {
-    // Return file as-is — let the browser try to handle it
+  async decode(
+    file: File,
+    _metadata: ImageMetadata,
+    _decision: IngestDecision,
+    _options?: DecodeOptions,
+  ): Promise<DecodedPayload[]> {
+    // Return file as-is — let the browser try to handle it. The real canvas size
+    // comes from a browser probe and rides on the page (per-page dims are truth);
+    // file-level `metadata` is the entry's Stage 1 object, injected around us.
     const img = await createImageBitmap(file);
     const dimensions = { w: img.width, h: img.height };
     img.close();
-    const metadata: ImageMetadata = {
-      sourceFormat: 'unknown',
-      sourceFileName: file.name,
-      sourceFileSize: file.size,
-      width: dimensions.w,
-      height: dimensions.h,
-      dpi: 72,
-      dpiSource: 'default',
-      colorSpace: 'srgb',
-      bitDepth: 8,
-      hasAlpha: false,
-      raw: {},
-    };
-    return {
-      dimensions,
-      metadata,
-      subImages: [{ displayBlob: file, width: dimensions.w, height: dimensions.h, index: 0 }],
-    };
+    return [{ displayBlob: file, width: dimensions.w, height: dimensions.h, index: 0 }];
   }
 
   async encode(
-    source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
+    source: EncodeSource,
     _options: EncodeOptions,
   ): Promise<Blob> {
     // Fallback: encode as PNG
     const canvas = source instanceof ImageBitmap
       ? bitmapToCanvas(source)
-      : source;
+      : (source as OffscreenCanvas);
     return (canvas as OffscreenCanvas).convertToBlob({ type: 'image/png' });
   }
 
@@ -151,22 +161,20 @@ export function bitmapToCanvas(bitmap: ImageBitmap, colorSpace?: PredefinedColor
  * Creates a unified FileService instance.
  *
  * @param assets - AssetService for registering ICC/EXIF blobs
- * @param pixels - PixelService (provides fileIO namespace for TIFF/RAW Worker operations)
  */
 export function createFileService(
   assets: AssetService,
-  pixels: PixelService,
 ): FileService {
   // Instantiate all format handlers
   const handlers: ImageFormatHandler[] = [
-    new JpegHandler(pixels),
-    new PngHandler(pixels),
-    new WebpHandler(pixels),
-    new AvifHandler(pixels),
+    new JpegHandler(),
+    new PngHandler(),
+    new WebpHandler(),
+    new AvifHandler(),
     new BmpHandler(),
     new GifHandler(),
-    new HeicHandler(assets, pixels),
-    new TiffHandler(assets, pixels),
+    new HeicHandler(assets),
+    new TiffHandler(assets),
     new RawHandler(assets),
     new VectorHandler(),
   ];
@@ -201,6 +209,7 @@ export function createFileService(
 
   /** Route MIME type string → handler */
   function getHandlerByMimeType(mimeType: string): ImageFormatHandler {
+    if (!mimeType || typeof mimeType !== 'string') return fallback;
     return mimeMap.get(mimeType.toLowerCase()) || fallback;
   }
 
@@ -210,13 +219,64 @@ export function createFileService(
     getHandler,
     getHandlerByMimeType,
 
+    /**
+     * Unified decode — the two-stage ingest pipeline (single decision point).
+     *
+     * Stage 1: sniff objective metadata (header-only extract).
+     * Stage 2: resolve the authoritative IngestDecision — the ONLY call site of
+     *          `resolveIngestDecision` in the whole codebase.
+     * Stage 3: hand the pre-resolved decision + metadata to the format handler,
+     *          which becomes a pure pixel producer.
+     * Stage 4: the entry uniformly mounts `colorIdentity` and `sourceBlob`, so no
+     *          handler can under- or over-report them.
+     */
     async decode(file: File, options?: DecodeOptions): Promise<DecodeResult> {
       const handler = getHandler(file);
-      return handler.decode(file, options);
+
+      // Stage 1: sniff objective metadata (header-only extract).
+      const metadata = await handler.extractMetadata(file);
+
+      // Stage 2: the single authoritative ingest decision. AVIF >8-bit degrades
+      // to 8-bit here per strategy.ts (no throw), and the working gamut is the
+      // engine constant WORKING_GAMUT — never derived from the image.
+      const decision = resolveIngestDecision(metadata);
+
+      // Stage 3: pure pixel extraction. `metadata` + `decision` are the entry's
+      // own resolved context, handed to the handler as explicit arguments (not an
+      // options bag it must re-validate); `options` carries only caller overrides.
+      // The handler emits naked pages (no colorIdentity); any metadata enrichment
+      // (e.g. TIFF ICC backfill) happens in-place on the shared `metadata` object.
+      const pages = await handler.decode(file, metadata, decision, options);
+
+      // Stage 4: entry-owned result wrapping. Path B — the entry injects the
+      // authoritative `colorIdentity` into every page (the decision is the single
+      // colour authority; handlers never mint it), and owns `sourceBlob` retention.
+      // The ONE exception: a handler whose pages can genuinely carry different
+      // colour per page (only multi-page TIFF today — each IFD may declare its own
+      // PhotometricInterpretation / BitsPerSample / ICC) may set `colorIdentity`
+      // itself, and that per-page value wins. Every other handler leaves it unset
+      // and takes the file-level decision unchanged.
+      const result: DecodeResult = {
+        metadata,
+        pages: pages.map((page) => ({
+          ...page,
+          colorIdentity: page.colorIdentity ?? decision.colorIdentity,
+          sourceFileName: metadata.sourceFileName ?? file.name,
+        })),
+        sourceBlob: decision.retainSourceBlob ? file : undefined,
+      };
+
+
+
+      return result;
+    },
+
+    decodeBlob(input: DecodeBlobInput): DecodeResult {
+      return decodeBlob(input);
     },
 
     async encode(
-      source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
+      source: EncodeSource,
       mimeType: string,
       options: EncodeOptions,
     ): Promise<Blob> {
@@ -238,14 +298,139 @@ export function createFileService(
       const handler = getHandler(file);
       return handler.needsTranscoding === true;
     },
+
+    /**
+     * Cold recovery: assetId → original encodable bytes → DecodeResult.
+     * Two-tier fallback, cheapest/most-faithful first:
+     *   1. assets.getRaw(id) — the `storeRaw`-persisted original (16-bit
+     *      TIFF/PNG/RAW, or an animated GIF's original bytes);
+     *   2. assets.hydrate + get(id).blob — an 8-bit asset, whose displayBlob
+     *      IS the original.
+     * Both empty → null (the caller owns the error messaging).
+     */
+    async decodeAsset(assetId: string, fileName?: string, options?: DecodeOptions): Promise<DecodeResult | null> {
+      let blob: Blob | null = await assets.getRaw(assetId);
+      if (!blob) {
+        await assets.hydrate(new Set([assetId]));
+        blob = assets.get(assetId)?.blob ?? null;
+      }
+      if (!blob) return null;
+
+      const file = new File([blob], fileName || 'image', { type: blob.type });
+      return service.decode(file, options);
+    },
+
+    async recover(assetId: string) {
+      // Ensure the asset's light record is hydrated in memory (mirrors decodeAsset).
+      let lightRecord = assets.get(assetId);
+      if (!lightRecord && assets.hydrate) {
+        await assets.hydrate(new Set([assetId]));
+        lightRecord = assets.get(assetId);
+      }
+
+      // 1. Persisted self-describing high-depth buffer (bake products + RAW
+      //    imports): a direct warm, no decode. Fastest, and the ONLY viable path
+      //    for RAW (its `raw:` blob is the original camera file vips cannot read).
+      //    Mirrors the layer-service cold-reload pattern (core/layer/services/resample.ts):
+      //    the light record's `dataFormat` is the persisted "a dec: truth exists"
+      //    predicate; geometry/colour identity are reassembled from THAT record,
+      //    not from the bare `getDec` buffer (which carries no metadata).
+      if (lightRecord?.dataFormat) {
+        const decData = await assets.getDec(assetId);
+        if (decData) {
+          return {
+            data: decData,
+            width: lightRecord.width,
+            height: lightRecord.height,
+            // Pass the persisted container through verbatim. This used to
+            // rewrite 'rgba32float' → 'rgba16float', which described f32 bytes as
+            // 8 bytes/texel and mis-strided every row of a recovered 32-bit source.
+            dataFormat: lightRecord.dataFormat,
+            trc: lightRecord.trc,
+            gamut: lightRecord.gamut,
+            renderIntent: lightRecord.renderIntent,
+          };
+        }
+      }
+      // 2. Encoded source file (TIFF/PNG/RAW/HEIC) → re-decode via the full format routing pipeline.
+      const rawBlob = await assets.getRaw(assetId);
+      if (!rawBlob) return null;
+
+      const fileName = lightRecord?.sourceFileName ?? 'recovered';
+      let result: DecodeResult | null = null;
+      try {
+        result = await service.decodeAsset(assetId, fileName);
+      } catch (err) {
+        console.warn('[FileService.recover] decodeAsset failed for', assetId, err);
+      }
+
+      if (result && result.pages.length > 0) {
+        const pageIndexStr = assetId.includes('#') ? assetId.split('#')[1] : '0';
+        const pageIndex = parseInt(pageIndexStr, 10) || 0;
+        const page = (pageIndex >= 0 && pageIndex < result.pages.length)
+          ? result.pages[pageIndex]
+          : result.pages[0];
+
+        if (page.colorIdentity.dataFormat && page.highDepthSource) {
+          return {
+            data: page.highDepthSource.data,
+            width: page.highDepthSource.width,
+            height: page.highDepthSource.height,
+            dataFormat: page.colorIdentity.dataFormat,
+            trc: page.colorIdentity.trc,
+            gamut: page.colorIdentity.gamut ?? lightRecord?.gamut ?? 'srgb',
+            renderIntent: page.colorIdentity.renderIntent ?? lightRecord?.renderIntent,
+          };
+        }
+      }
+
+      // decodeAsset failed, or the page it produced carries no highDepthSource.
+      // No further fallback: for the channels this matters most (`libraw`,
+      // `heic-to`) the raw source bytes are exactly what the browser's native
+      // decode already can't read, so re-attempting a bare readback here would
+      // just fail the same way. The caller (HighDepthTextureCache) negative-
+      // caches this and degrades to the 8-bit display path.
+      return null;
+    },
   };
 
   return service;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// decodeBlob — Compose a DecodeResult from an already-encoded blob
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Synthesize a single-page `DecodeResult` from an existing blob (branch-from-
+ * selection, future paste/generate entries). Structurally mirrors `decode`'s
+ * Stage 2/4: `colorIdentity` is never supplied by the caller, it is derived by
+ * feeding `metadata` into `resolveIngestDecision` — a synthetic ingest is
+ * treated as "decoding the same PNG again", so the command layer never mints
+ * colour identity itself (Path B, the single authority stays in this module).
+ */
+export function decodeBlob(input: DecodeBlobInput): DecodeResult {
+  const { blob, width, height, metadata } = input;
+  const decision = resolveIngestDecision(metadata);
+
+  return {
+    metadata,
+    pages: [{
+      displayBlob: blob,
+      width,
+      height,
+      index: 0,
+      colorIdentity: decision.colorIdentity,
+      sourceFileName: metadata.sourceFileName,
+    }],
+    sourceBlob: decision.retainSourceBlob ? blob : undefined,
+  };
+}
+
 // Re-export MIME utilities (stateless helpers used without FileService access)
-export { mimeToFormat, formatToMime, detectFormat } from './mime';
+export { mimeToFormat, formatToMime, detectFormat } from './shared/mime';
 
 // Re-export DPI utilities consumed by external modules (plugins / UI components)
-export { DPI_PRESETS, formatPrintSize } from './dpi';
+export { DPI_PRESETS, formatPrintSize } from './shared/dpi';
 export { supportsExifEmbed } from './types';
+

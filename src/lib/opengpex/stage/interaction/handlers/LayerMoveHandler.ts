@@ -18,7 +18,7 @@
  */
 
 import { InteractionHandler, Layer, LayerMovePose } from '@opengpex/editor/core/types';
-import { InteractionMath } from '../Math';
+import { InteractionMath, type SnapOpState } from '../Math';
 import { InteractionTransaction } from '../Transaction';
 
 /**
@@ -46,7 +46,7 @@ export const createLayerMoveHandler = (): InteractionHandler => {
   let targetLayer: Layer | null = null;
   let tx: InteractionTransaction | null = null;
   let pose: LayerMovePose | null = null;
-  const opState = { lastThrottleTime: 0 };
+  const opState: SnapOpState = { lastThrottleTime: 0 };
 
   return {
     id: 'layer-move',
@@ -103,6 +103,9 @@ export const createLayerMoveHandler = (): InteractionHandler => {
       pose = e.geometry.transform.computeLayerMovePose(targetLayer);
 
       opState.lastThrottleTime = 0;
+      delete opState.lastPointerPos;
+      delete opState.lastGuideX;
+      delete opState.lastGuideY;
     },
     onMove: (e) => {
       if (!targetLayer || !tx || !pose) return;
@@ -193,6 +196,9 @@ export const createLayerMoveHandler = (): InteractionHandler => {
       }
       targetLayer = null;
       pose = null;
+      delete opState.lastPointerPos;
+      delete opState.lastGuideX;
+      delete opState.lastGuideY;
     }
   };
 };

@@ -25,43 +25,47 @@ import * as P from '@opengpex/editor/core/advanced/protocols';
 // ─── Shared composite helper ────────────────────────────────────────────────
 /**
  * compositeLayersToAsset — Delegates to `pixels.render.compositeLayers()` to
- * compute the union shape and composite, then injects the result as an asset.
- * Returns the asset reference and the computed union geometry.
+ * compute the union shape and composite, then registers the result as an asset.
+ * Returns the asset reference and the composite's bounds (world-space, corner Rect).
  */
 async function compositeLayersToAsset(
   layers: Layer[],
   ctx: Pick<EditorContextValue, 'pixels' | 'assets' | 'activeFrame'>,
 ) {
-  const { pixels, activeFrame } = ctx;
+  const { pixels, assets, activeFrame } = ctx;
   if (!activeFrame) throw new Error('No active frame');
 
-  const { result, bounds } = await pixels.render.compositeLayers(layers, activeFrame);
+  const composited = await pixels.render.compositeLayers(layers, activeFrame);
 
-  const asset = await result.toAsset();
+  const asset = await assets.storeBundle(composited);
   if (!asset.assetId) throw new Error('Composite failed');
 
   // Ensure bitmap is decoded into SourceBitmapCache before state update.
-  // toAsset().inject() creates an object URL backed by the in-memory blob;
-  // loadBitmap is cache-first and fetches from that URL (no network, instant).
+  // storeBundle() registers the asset (onRegistered hook warms both caches);
+  // loadBitmap is cache-first so this is instant, no network.
   await pixels.image.loadBitmap(asset.url);
 
-  return { asset, bounds };
+  return { asset, bounds: composited.bounds };
 }
 
 /**
  * LayerMergeCommands: Advanced layer merge commands.
  *
- * Step 8 migration: All merge/rasterize operations now use the unified
- * `pixels.composite()` pipeline instead of the old scattered APIs:
- *   - pixels.worker.mergeLayersWithShape → pixels.composite()
- *   - pixels.render.flattenLayers → pixels.composite()
- *   - preRasterizeLayers → handled internally by pipeline's IStrategyResolver
+ * v2 (Phase 4 PR-3/PR-4): All merge / rasterize operations composite through
+ * the SINGLE WebGPU RenderGraph via `pixels.render.compositeLayers()`. There is
+ * no backend selection any more — the internal composite assembles a synthetic
+ * ROI-box frame, reuses the same `layer.assetId` residency the preview warmed,
+ * runs the identical compile + `RenderGraph.composite` path as `render()`, then
+ * reads back a `CompositedImage` (plain-data bitmap). Composite pixels ≡ preview
+ * pixels for the same layer subset (see CompositeDispatcher one-pipeline note).
  *
- * The pipeline internally resolves layer strategies (text/color/bitmap/raw),
- * selects the best backend (Canvas2D 8-bit / HighDepth 16-bit), and produces
- * a CompositeResult. Asset injection uses result.toAsset() which delegates
- * to the injected assetInjector wired by PixelService.
+ * These commands only CONSUME the result: `assets.storeBundle()` registers the
+ * bitmap (auto cache-warm via AssetService hooks) and `bounds` drives `resetWithBounds`.
  *
+ * Precision (§4.5.2 #12): the product bit depth follows the participating
+ * layers' highest source bit depth. That is resolved centrally in
+ * `PixelFacade.compositeLayers` (PR-4 bake-precision settlement), so these
+ * call-sites need not pass `precision` explicitly.
  */
 export const LayerMergeCommands = {
   mergeDown: {
@@ -91,7 +95,7 @@ export const LayerMergeCommands = {
         layers.updateLayer(activeFrame.id, (tx) => {
           tx.edit(targetLayer.id)
             .setAsset(assetResult)
-            .resetWithBounds(bounds.w, bounds.h, bounds.cx, bounds.cy);
+            .resetWithBounds(bounds.w, bounds.h, bounds.x + bounds.w / 2, bounds.y + bounds.h / 2);
         });
 
         // Type inference after merging:
@@ -149,7 +153,7 @@ export const LayerMergeCommands = {
         layers.updateLayer(activeFrame.id, (tx) => {
           tx.edit(targetLayer.id)
             .setAsset(assetResult)
-            .resetWithBounds(bounds.w, bounds.h, bounds.cx, bounds.cy);
+            .resetWithBounds(bounds.w, bounds.h, bounds.x + bounds.w / 2, bounds.y + bounds.h / 2);
         });
 
         // Type inference after merging (consistent with mergeDown):
@@ -209,7 +213,7 @@ export const LayerMergeCommands = {
         layers.updateLayer(activeFrame.id, (tx) => {
           tx.edit(layer.id)
             .setAsset(assetResult)
-            .resetWithBounds(bounds.w, bounds.h, bounds.cx, bounds.cy);
+            .resetWithBounds(bounds.w, bounds.h, bounds.x + bounds.w / 2, bounds.y + bounds.h / 2);
         });
 
         // After rasterization, the layer becomes a pure bitmap — all non-destructive

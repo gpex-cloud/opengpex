@@ -482,15 +482,17 @@ export const ADJUSTMENT_COMMANDS = {
   // ─── Basic Adjustments commands (Step 7.5 — migrated from AdjustmentDrawer) ─
   //
   // Mirrors the Levels / Channel-Mix shape but writes into `layer.adjustments`
-  // rather than `layer.curves|levels|channelMix`. Semantically these are the
-  // "fast-path" filters — the Canvas2D painter feeds them straight into
-  // `ctx.filter` (see `getAdjustmentsData()` in backends/canvas2d/painter.ts)
-  // and `hasAdvancedFilters(layer)` deliberately IGNORES `layer.adjustments`,
-  // so a Basic-only edit never spawns a worker roundtrip. When Basic is
-  // combined with Curves/Levels/Mixer, `normalizeFilterDescriptors` folds
-  // adjustments into the same filter chain and the painter side sees
-  // `effectiveLayer = { ...layer, adjustments: undefined }` to avoid a second
-  // application (spec §5.1 & §Step 7.5 序言 "引擎行为不变").
+  // rather than `layer.curves|levels|channelMix`.
+  //
+  // ⚠️ v2: there is no longer a "fast path" vs "advanced" split. The old comment
+  // here described the deleted Canvas2D painter (`ctx.filter` + a CPU descriptor
+  // chain + an `adjustments: undefined` guard against double application). In v2
+  // every arm — Basic, Curves, Levels, Mixer, Colour Balance — is translated by
+  // `SceneAssembler` into `AdjustmentDesc[]` and evaluated ONCE per frame by
+  // `adjust.wgsl` on the GPU (spec §9.1 single track, §9.1.1 assembly). Double
+  // application is prevented structurally: the descriptor list IS the single
+  // source, and the only place a grade is pre-baked (AdjustPrePass, ahead of a
+  // compute filter) explicitly suppresses the inline evaluation.
 
   beginAdjustmentsEdit: {
     id: P.CMD_BEGIN_ADJUSTMENTS_EDIT,

@@ -36,16 +36,16 @@
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 /**
- * 通用 AI 工具任务状态。所有工具共享相同的 task 结构。
+ * General AI tool task state. All tools share the same task structure.
  */
 export interface AIToolTask {
-  /** 当前阶段描述（显示在 UI 上） */
+  /** Current phase description (displayed in UI) */
   message: string;
-  /** 0-1 进度（loading 阶段为 0，processing 阶段为实际进度） */
+  /** 0-1 progress value (0 during loading, actual progress during processing) */
   progress: number;
-  /** 检测到的设备 */
+  /** Detected device */
   device: 'webgpu' | 'wasm' | null;
-  /** 下载相关（仅 downloading 阶段） */
+  /** Download details (downloading phase only) */
   download?: {
     loaded: number;
     total: number;
@@ -54,30 +54,30 @@ export interface AIToolTask {
 }
 
 /**
- * AI 工具 Store 状态。TResult 为工具特定的结果类型。
+ * AI tool store state. TResult is the tool-specific result type.
  */
 export interface AIToolStoreState<TResult> {
-  /** 非 null = 正在工作，显示进度卡 */
+  /** Non-null when active, renders progress card */
   task: AIToolTask | null;
-  /** 上次成功结果（常驻直到用户清除或下次运行覆盖） */
+  /** Last successful result (resident until cleared or overwritten by next run) */
   lastResult: TResult | null;
-  /** 错误信息（非 null 时显示错误卡） */
+  /** Error message (renders error card when non-null) */
   error: string | null;
 }
 
 /**
- * AI 工具 Store 实例。由 createAIToolStore() 返回。
+ * AI tool store instance returned by createAIToolStore().
  */
 export interface AIToolStore<TResult> {
-  /** 获取当前状态快照 */
+  /** Get current state snapshot */
   getState: () => AIToolStoreState<TResult>;
-  /** 订阅状态变化（返回 unsubscribe 函数） */
+  /** Subscribe to state changes (returns unsubscribe function) */
   subscribe: (fn: () => void) => () => void;
-  /** 部分更新状态 */
+  /** Partially update state */
   setState: (next: Partial<AIToolStoreState<TResult>>) => void;
-  /** 重置为初始状态 */
+  /** Reset to initial state */
   reset: () => void;
-  /** 注册 busy sync（组件 mount 时调用一次） */
+  /** Register busy sync (called once when component mounts) */
   initBusySync: (
     plugins: { setBusy(uid: string, busy: boolean): void },
     uid: string,

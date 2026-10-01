@@ -22,26 +22,25 @@
 /**
  * BasicPanel — brightness / contrast / saturation / hueRotate / blur.
  *
- * Step 7.5 (spec §六 Step 7.5): migrates the AdjustmentDrawer UI into
+ * Migrates the AdjustmentDrawer UI into
  * AdjustmentDrawer as its fourth sub-panel. Visual style is a faithful
  * port of the original AdjustmentDrawer content (native `<input type="range">`
  * with dynamic accent color: gray at identity, emerald above, amber below),
  * minus the panel-level "Adjustments" header + Reset button — those live at
  * the AdjustmentDrawer header now (one drawer = one reset UI).
  *
- * Data flow & undo coalescing mirror the sibling panels (spec §5.6):
+ * Data flow & undo coalescing mirror the sibling panels:
  *
  * - `useAdjustmentDrawer().activeLayer` reads the layer.
  * - `useFilterGesture(beginAdjustmentsEditCmd)` bookends each drag with a
  *   single undoable checkpoint at pointerdown and closes it at pointerup, so
  *   one continuous slider drag collapses into exactly one Undo step.
  * - Writes go to `layer.adjustments` via `updateAdjustments({ patch })`.
- *   The render engine sees the mutation on the next frame:
- *   because `hasAdvancedFilters(layer)` INTENTIONALLY does not consult
- *   `layer.adjustments`, a Basic-only edit stays on the painter's `ctx.filter`
- *   fast path (no worker roundtrip). When Basic is combined with
- *   Curves/Levels/Mixer, `normalizeFilterDescriptors` folds the adjustments
- *   into the same filter chain (spec §5.1 / §Step 7.5 序言 "引擎行为不变").
+ *   The render engine picks the mutation up on the next frame with no special
+ *   casing: `SceneAssembler` translates the state into `AdjustmentDesc[]`, the
+ *   composite signature dirties, and `adjust.wgsl` evaluates it on the GPU at
+ *   full resolution (spec §9.1.1). Basic / Curves / Levels / Mixer all travel the
+ *   SAME single path — there is no fast/slow track and no worker roundtrip.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";

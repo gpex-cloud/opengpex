@@ -18,14 +18,14 @@
  * Thread model: ALL operations run on main thread (<100ms for typical files).
  */
 
-import type { PixelService } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   DecodeOptions,
-  DecodeResult,
+  DecodedPayload,
   EncodeOptions,
 } from '../../types';
 import type { ImageMetadata } from '../../types';
+import type { IngestDecision } from '../../strategy';
 import { decodeJpeg } from './decode';
 import { encodeJpeg } from './encode';
 import { extractJpegMetadata } from './metadata';
@@ -35,17 +35,20 @@ export class JpegHandler implements ImageFormatHandler {
   readonly mimeTypes = ['image/jpeg'];
   readonly extensions = ['jpg', 'jpeg'];
 
-  constructor(private pixels: PixelService) {}
-
-  decode(file: File, options?: DecodeOptions): Promise<DecodeResult> {
-    return decodeJpeg(file, this.pixels, options);
+  decode(
+    file: File,
+    metadata: ImageMetadata,
+    decision: IngestDecision,
+    _options?: DecodeOptions,
+  ): Promise<DecodedPayload[]> {
+    return decodeJpeg(file, metadata, decision);
   }
 
   encode(
     source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
     options: EncodeOptions,
   ): Promise<Blob> {
-    return encodeJpeg(source, this.pixels, options);
+    return encodeJpeg(source, options);
   }
 
   async extractMetadata(file: File): Promise<ImageMetadata> {

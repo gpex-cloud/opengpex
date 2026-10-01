@@ -28,7 +28,7 @@ export const WORKSPACE_GEOMETRY = {
     SIDEBAR_WIDTH: 320,
     DRAWER_BAR_WIDTH: 40,
     HEADER_HEIGHT: 48,
-    /** 固定模式下 ToolMenu 侧边栏宽度（px）。调整此值可改变图钉固定后的栏宽。 */
+    /** ToolMenu sidebar width in pinned mode (px). Adjust to change pinned width. */
     TOOL_MENU_WIDTH: 44,
 };
 
@@ -109,8 +109,8 @@ export const getWorkspaceStyles = (
         },
 
         // --- Tool Menu ---
-        // [宽度控制] 固定模式通过 width + maxWidth 双重锁定宽度为 TOOL_MENU_WIDTH；
-        // 去除了固定模式的 transition-all 防止从浮动模式切换时宽度动画溢出。
+        // [Width control] Pinned mode locks width to TOOL_MENU_WIDTH via width + maxWidth;
+        // removed transition-all in pinned mode to prevent width animation overflow when toggling from floating mode.
         toolMenu: {
             className: isToolMenuPinned
                 ? `relative pointer-events-auto h-full shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-panel)]/80 backdrop-blur-xl shadow-[4px_0_24px_rgba(0,0,0,0.05)]`

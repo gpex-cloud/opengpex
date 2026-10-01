@@ -20,14 +20,25 @@
 "use client";
 
 import React from "react";
-import { Type, Paintbrush, Eraser, Undo2, Settings, Star } from "lucide-react";
+import {
+  Type,
+  Paintbrush,
+  Eraser,
+  Undo2,
+  Settings,
+  Star,
+} from "lucide-react";
 import { MosaicIcon } from "./icon";
 import { motion } from "framer-motion";
 import { useEditorServices } from "@opengpex/editor/core/context";
 import { SettingsPanelAPI } from "../../panels/SettingsPanel/protocols";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
-import FancyGroup, { type FancyGroupItem } from "@opengpex/editor/widgets/FancyGroup";
-import ActionGroup, { type ActionGroupItem } from "@opengpex/editor/widgets/ActionGroup";
+import FancyGroup, {
+  type FancyGroupItem,
+} from "@opengpex/editor/widgets/FancyGroup";
+import ActionGroup, {
+  type ActionGroupItem,
+} from "@opengpex/editor/widgets/ActionGroup";
 import { TextPanel } from "./panels/text";
 import { BrushPanel } from "./panels/brush";
 import { MosaicPanel } from "./panels/mosaic";
@@ -35,7 +46,6 @@ import { MarkerPanel } from "./panels/marker";
 import { useCraftDrawer, useCraftTrigger, useCraftButtonGroup } from "./hooks";
 import { CraftDrawerIcon } from "./icon";
 import type { CraftType } from "./protocols";
-
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -93,18 +103,23 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
   const tipContent =
     activeCraft === "text"
       ? "Click canvas to place text\nHold Cmd/Ctrl to move\nEsc to exit"
-      : activeCraft === "brush"
-        ? "Draw on canvas\nEsc to exit"
-        : activeCraft === "eraser" || activeCraft === "restore"
-          ? "Erase / Restore mask pixels\nTab to toggle eraser ↔ restore\nCmd/Ctrl+click to create new mask\nEsc to exit"
-          : activeCraft === "mosaic"
-            ? "Paint on canvas to pixelate\nEsc to exit"
-            : null;
+      : activeCraft === "marker"
+        ? "Draw marker on canvas\nTab to cycle marker type\nEsc to exit"
+        : activeCraft === "brush"
+          ? "Draw on canvas\nEsc to exit"
+          : activeCraft === "eraser" || activeCraft === "restore"
+              ? "Erase / Restore mask pixels\nTab to toggle eraser ↔ restore\nCmd/Ctrl+click to create new mask\nEsc to exit"
+              : activeCraft === "mosaic"
+                ? "Paint on canvas to pixelate\nEsc to exit"
+                : null;
 
   // Build FancyGroup items with dynamic icon/tooltip for eraser restore sub-mode
   const groupItems: FancyGroupItem[] = CRAFT_BUTTONS.map((btn) => {
-    const isActive = activeCraft === btn.type || (btn.type === 'eraser' && activeCraft === 'restore');
-    const isRestoreOnEraser = btn.type === 'eraser' && activeCraft === 'restore';
+    const isActive =
+      activeCraft === btn.type ||
+      (btn.type === "eraser" && activeCraft === "restore");
+    const isRestoreOnEraser =
+      btn.type === "eraser" && activeCraft === "restore";
     const displayIcon = isRestoreOnEraser ? <Undo2 size={13} /> : btn.icon;
     const tooltipText = isRestoreOnEraser ? "Restore Mode (Tab)" : btn.label;
 
@@ -198,8 +213,6 @@ const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
   return <ActionGroup items={items} onSelect={handleButtonClick} />;
 });
 
-
-
 // ─── CraftDrawerComponent ──────────────────────────────────────────────────────
 
 /**
@@ -218,7 +231,7 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
   const { actions } = useEditorServices();
 
   const handleOpenSettings = React.useCallback(() => {
-    actions.setStateSignal(SettingsPanelAPI.signals.tab, 'Fonts');
+    actions.setStateSignal(SettingsPanelAPI.signals.tab, "Fonts");
     actions.setStateSignal(SettingsPanelAPI.signals.open, true);
   }, [actions]);
 
@@ -236,7 +249,8 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
     activeCraft === "restore" ||
     (activeCraft === null && activeLayerIsPaint);
 
-  const showPlaceholder = !showTextPanel && !showBrushPanel && !showMosaicPanel && !showMarkerPanel;
+  const showPlaceholder =
+    !showTextPanel && !showBrushPanel && !showMosaicPanel && !showMarkerPanel;
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
@@ -245,7 +259,10 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
         className="flex justify-between items-center shrink-0"
       >
         <div className="flex items-center gap-2">
-          <CraftDrawerIcon size={12} className="text-indigo-600 dark:text-indigo-400" />
+          <CraftDrawerIcon
+            size={12}
+            className="text-indigo-600 dark:text-indigo-400"
+          />
           <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
             Drawing
           </span>

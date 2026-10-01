@@ -29,8 +29,29 @@
  * - All functions are async where browser APIs require it.
  */
 
-import type { LocalRect, TileMetadata } from '@opengpex/editor/core/types';
-import { buildTileMeta } from '@opengpex/editor/core/helpers/tiling';
+import { toCanvasColorSpace } from '@opengpex/editor/core/engine/color/gamut';
+import type { LocalRect, GamutId } from '@opengpex/editor/core/types';
+import type { CompositedImage } from '../types';
+
+/**
+ * Display-track-specific canvas color space mapping — distinct from
+ * `core/files/color.ts::toCanvasColorSpace`. That function serves export (egest)
+ * scenarios where wide-gamut documents are routed to the 16-bit vips raw-pixel
+ * channel by `resolveEgestDecision`, never reaching canvas tagging, so it clamps
+ * adobe-rgb/prophoto-rgb/rec2020 down to 'srgb'.
+ *
+ * Any 8-bit OffscreenCanvas display track (composite readback, Worker resample)
+ * has no such detour — it unconditionally emits a canvas bitmap for every source
+ * gamut. Reusing the egest fallback there would silently clamp wide-gamut sources
+ * to sRGB, forfeiting the 'display-p3' option 8-bit canvas already supports.
+ * Hence this separate mapping: only exact 'srgb' stays 'srgb'; every other gamut
+ * (including adobe-rgb / prophoto-rgb / rec2020, which have no native
+ * PredefinedColorSpace) maps to 'display-p3' as the closest canvas-representable
+ * superset.
+ */
+export function toDisplayTrackCanvasColorSpace(gamut: GamutId): PredefinedColorSpace {
+  return gamut === 'srgb' ? 'srgb' : 'display-p3';
+}
 
 /**
  * Compute SHA-256 hash of a Blob.
@@ -55,8 +76,42 @@ export async function canvasToBlob(
   return canvas.convertToBlob({ type, quality });
 }
 
-// buildTileMeta re-exported from canonical source for backward compatibility
-export { buildTileMeta };
+/**
+ * Convert a display Blob or ImageBitmap to ImageData for CPU pixel inspection.
+ * Ported from the retired `PixelResult.toImageData()`.
+ */
+export async function blobToImageData(
+  source: Blob | ImageBitmap,
+  colorSpace?: PredefinedColorSpace,
+): Promise<ImageData> {
+  const bitmap = source instanceof ImageBitmap ? source : await createImageBitmap(source);
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const ctx = canvas.getContext('2d', colorSpace ? { colorSpace } : undefined)!;
+  ctx.drawImage(bitmap, 0, 0);
+  if (!(source instanceof ImageBitmap)) {
+    bitmap.close();
+  }
+  return ctx.getImageData(0, 0, canvas.width, canvas.height, colorSpace ? { colorSpace } : undefined);
+}
+
+export const toImageData = blobToImageData;
+
+/**
+ * Transcode a Blob to another MIME format (e.g. PNG → WebP for thumbnails).
+ */
+export async function transcodeBlob(
+  blob: Blob,
+  type = 'image/webp',
+  quality = 0.85,
+): Promise<Blob> {
+  if (blob.type === type) return blob;
+  const bitmap = await createImageBitmap(blob);
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  return canvasToBlob(canvas, type, quality);
+}
 
 /**
  * Scan visible region of a bitmap (Content Bounds Detection).
@@ -146,28 +201,61 @@ export function calculateContentBoundsFromImageData(
 }
 
 /**
- * Wrap a result blob with hash + TileMetadata (convenience for handlers).
+ * Trim transparent margins from a `CompositedImage`'s display bitmap.
+ *
+ * Ported from the retired `CompositeResult.trimmed()` OOP wrapper.
+ * Only the 8-bit `displayBlob` is scanned/cropped —
+ * `highDepthSource`, if present, is dropped from the result, matching the
+ * original's behavior (it never carried high-depth pixels through trimming either).
+ *
+ * Returns `null` when the image is fully transparent (no content to trim to).
  */
-export async function wrapResult(
-  blob: Blob,
-  dprScale?: number,
-): Promise<{ blob: Blob; hash: string; tileMeta: TileMetadata }> {
-  const hash = await calculateHash(blob);
-  const bitmap = await createImageBitmap(blob);
-  const tileMeta = buildTileMeta(bitmap.width, bitmap.height, dprScale ?? 1);
+export async function trimTransparentMargins(
+  image: CompositedImage,
+): Promise<{ image: CompositedImage; offset: { x: number; y: number } } | null> {
+  const canvasColorSpace = toCanvasColorSpace(image.colorIdentity.gamut);
+  const bitmap = await createImageBitmap(image.displayBlob);
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const ctx = canvas.getContext('2d', { colorSpace: canvasColorSpace })!;
+  ctx.drawImage(bitmap, 0, 0);
   bitmap.close();
-  return { blob, hash, tileMeta };
-}
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const { data, width, height } = imageData;
 
-/**
- * Fetch image from URL and convert to File object.
- */
-export async function fetchFromUrl(url: string): Promise<File> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error('Network response was not ok');
-  const blob = await response.blob();
-  const filename = url.split('/').pop() || 'downloaded-image';
-  return new File([blob], filename, { type: blob.type });
+  let top = height, bottom = 0, left = width, right = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const alpha = data[(y * width + x) * 4 + 3];
+      if (alpha > 0) {
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+        if (x < left) left = x;
+        if (x > right) right = x;
+      }
+    }
+  }
+  if (top > bottom || left > right) return null;
+
+  const trimW = right - left + 1;
+  const trimH = bottom - top + 1;
+  const trimmedCanvas = new OffscreenCanvas(trimW, trimH);
+  const trimmedCtx = trimmedCanvas.getContext('2d', { colorSpace: canvasColorSpace })!;
+  const trimmedBitmap = await createImageBitmap(imageData, left, top, trimW, trimH);
+  trimmedCtx.drawImage(trimmedBitmap, 0, 0);
+  trimmedBitmap.close();
+
+  const displayBlob = await canvasToBlob(trimmedCanvas);
+
+  return {
+    image: {
+      displayBlob,
+      width: trimW,
+      height: trimH,
+      colorIdentity: image.colorIdentity,
+      bounds: { x: image.bounds.x + left, y: image.bounds.y + top, w: trimW, h: trimH },
+    },
+    offset: { x: left, y: top },
+  };
 }
 
 /**

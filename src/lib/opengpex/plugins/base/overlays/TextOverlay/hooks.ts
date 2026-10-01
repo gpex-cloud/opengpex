@@ -423,7 +423,11 @@ function isSessionDirty(
     c.fontFamily !== o.fontFamily ||
     c.fontSize !== o.fontSize ||
     c.fontWeight !== o.fontWeight ||
-    c.color !== o.color ||
+    c.color.space !== o.color.space ||
+    c.color.alpha !== o.color.alpha ||
+    c.color.coords.r !== o.color.coords.r ||
+    c.color.coords.g !== o.color.coords.g ||
+    c.color.coords.b !== o.color.coords.b ||
     c.align !== o.align ||
     c.lineHeight !== o.lineHeight ||
     c.italic !== o.italic ||

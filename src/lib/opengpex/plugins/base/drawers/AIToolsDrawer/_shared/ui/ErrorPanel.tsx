@@ -33,9 +33,9 @@ import React from 'react';
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface ErrorPanelProps {
-  /** 错误信息 */
+  /** Error message */
   message: string;
-  /** 点击 Dismiss 回调 */
+  /** Dismiss click callback */
   onDismiss: () => void;
 }
 

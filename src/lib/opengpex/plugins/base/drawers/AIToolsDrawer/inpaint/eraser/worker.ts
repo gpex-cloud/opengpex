@@ -143,14 +143,14 @@ function extractPatch(
       const dstIdx = (row * w + col) * 4;
 
       if (mask[srcIdx] > 128) {
-        // mask 内：使用 inpainted 像素
+        // Inside mask: use inpainted pixels
         const si = srcIdx * 4;
         patch[dstIdx] = inpaintedRgba[si];
         patch[dstIdx + 1] = inpaintedRgba[si + 1];
         patch[dstIdx + 2] = inpaintedRgba[si + 2];
         patch[dstIdx + 3] = 255;
       } else {
-        // mask 外：transparent
+        // Outside mask: transparent
         patch[dstIdx + 3] = 0;
       }
     }

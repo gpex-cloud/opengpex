@@ -126,7 +126,10 @@ export const createWandHandler = (): InteractionHandler => {
       // 1. Pick target layer.
       const layer = pickWandTargetLayer(e);
       if (!layer || !isWandableLayer(layer)) {
-        e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+        e.actions.setInteraction({
+          selectionErrorPulse: Date.now(),
+          hud: { message: 'No image layer at click point', type: 'error' }
+        });
         return;
       }
 
@@ -149,7 +152,10 @@ export const createWandHandler = (): InteractionHandler => {
         seed.x < 0 || seed.y < 0 ||
         seed.x >= imageData.width || seed.y >= imageData.height
       ) {
-        e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+        e.actions.setInteraction({
+          selectionErrorPulse: Date.now(),
+          hud: { message: 'Clicked outside layer bounds', type: 'error' }
+        });
         return;
       }
 
@@ -177,7 +183,10 @@ export const createWandHandler = (): InteractionHandler => {
       }
 
       if (!resp.rings.length) {
-        e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+        e.actions.setInteraction({
+          selectionErrorPulse: Date.now(),
+          hud: { message: 'Area is empty', type: 'error' }
+        });
         return;
       }
 

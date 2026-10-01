@@ -22,7 +22,8 @@
 import React, { useRef } from 'react';
 import { useEditorState, useOverlayRotationSync } from '@opengpex/editor/core/context';
 import { TransformGizmo } from '@opengpex/editor/widgets/TransformGizmo';
-import { useMarkerOverlayState, useMarkerPreviewFastSync, useMarkerToolLifecycle, useMarkerSelectionFastSync } from './hooks';
+import { useMarkerOverlayState, useMarkerToolLifecycle } from './hooks';
+import { useMarkerPreviewFastSync, useMarkerSelectionFastSync } from './useFastSync';
 
 // ─── MarkerOverlayMain ───────────────────────────────────────────────────────────
 

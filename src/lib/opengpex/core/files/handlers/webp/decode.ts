@@ -10,102 +10,118 @@
  */
 
 /**
- * WebP decode — color pipeline routing.
+ * WebP decode — pure pixel producer driven by the pre-resolved IngestDecision.
  *
- * Uses the centralized ColorPipeline strategy to determine the correct
- * import conversion path (none / matrix / icc-engine).
+ * The handler no longer sniffs metadata or derives a colour
+ * strategy of its own. The FileService entry injects `metadata` + `decision`
+ * (the single `resolveIngestDecision` call), and this function simply executes
+ * the assigned `decision.decodeChannel`, delegating the 8-bit wide-gamut fold to
+ * the shared `decodeWideGamut8`. `colorIdentity` / `sourceBlob` are
+ * mounted by the entry — hence the `Omit` return.
+ *
+ * WebP is 8-bit only, so its channels mirror the JPEG pilot exactly
+ * (image-bitmap / wide-gamut-8 / vips-icc); there is no high-depth `vips` path.
+ * Unlike JPEG (auto-uprighted by the browser), WebP's `decision.applyOrientation`
+ * is 'explicit', so this decoder runs `applyExifOrientation` after producing the
+ * displayBlob (mirrors the PNG handler).
  */
 
-import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/types';
-import type { DecodeOptions, DecodeResult } from '../../types';
-import type { ImageMetadata } from '../../types';
-import { bitmapToCanvas } from '../../index';
-import { iccToBase64, parseIccProfileName } from '../../icc';
-import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
-import { resolveColorSpaceForFormat, getImportStrategy, shouldRetainSourceBlob } from '@opengpex/editor/core/color/ColorPipeline';
-import { extractWebpMetadata } from './metadata';
+import type { ImageMetadata, DecodedPayload } from '../../types';
+import type { IngestDecision } from '../../strategy';
+import { iccToBase64, parseIccProfileName } from '../../shared/icc';
+import { getLibVips } from '../../shared/lib-vips';
+import { decodeWideGamut8 } from '../../shared/lib-custom';
+import { applyExifOrientation, rotateNakedRgba } from '../../shared/orientation';
+import { readImageDimensions, rgbaToBlob } from '../../utils';
 
 /**
- * Decode a WebP file: extract metadata (V2) + color pipeline routing.
+ * Decode a WebP file by executing the entry-resolved ingest decision.
  */
 export async function decodeWebp(
   file: File,
-  pixels: PixelService,
-  _options?: DecodeOptions,
-): Promise<DecodeResult> {
-  const metadata: ImageMetadata = await extractWebpMetadata(file);
-
-  // ── Strategy-based color pipeline routing ──
-  const detectedCS = resolveColorSpaceForFormat('webp', metadata.colorSpace);
-  const strategy = getImportStrategy(detectedCS);
+  metadata: ImageMetadata,
+  decision: IngestDecision,
+): Promise<DecodedPayload[]> {
 
   let displayBlob: Blob = file;
   let dimensions: { w: number; h: number };
+  let highDepthSource: DecodedPayload['highDepthSource'];
 
-  switch (strategy.conversion) {
-    case 'none': {
-      // Zero conversion: browser-native decode is sufficient (sRGB, P3)
-      const img = await createImageBitmap(file);
-      dimensions = { w: img.width, h: img.height };
-      img.close();
+  switch (decision.decodeChannel) {
+    case 'image-bitmap': {
+      // Standard sRGB / Display-P3 8-bit: browser-native decode is sufficient,
+      // the original file bytes remain the verbatim displayBlob.
+      dimensions = await readImageDimensions(file);
       break;
     }
 
-    case 'matrix': {
-      // 3×3 matrix conversion (e.g. AdobeRGB→P3)
-      const img = await createImageBitmap(file, { colorSpaceConversion: 'none' });
-      const w = img.width;
-      const h = img.height;
-      dimensions = { w, h };
-
-      const tmpCanvas = bitmapToCanvas(img);
-      img.close();
-      const tmpCtx = tmpCanvas.getContext('2d')!;
-      const imageData = tmpCtx.getImageData(0, 0, w, h);
-
-      convertImageDataColorSpace(imageData.data, detectedCS as WorkingColorSpace, strategy.frameColorSpace);
-
-      const outCS: PredefinedColorSpace = strategy.frameColorSpace === 'display-p3' ? 'display-p3' : 'srgb';
-      const outCanvas = new OffscreenCanvas(w, h);
-      const outCtx = outCanvas.getContext('2d', { colorSpace: outCS })!;
-      const outImageData = new ImageData(imageData.data, w, h, { colorSpace: outCS });
-      outCtx.putImageData(outImageData, 0, 0);
-      displayBlob = await outCanvas.convertToBlob({ type: 'image/png' });
+    case 'wide-gamut-8': {
+      // 8-bit wide-gamut (Adobe RGB / ProPhoto): decode with browser colour management
+      // OFF, lift f16 naked line AND fold P3 preview in one call.
+      const decoded = await decodeWideGamut8(
+        file,
+        decision.colorIdentity.gamut as 'adobe-rgb' | 'prophoto-rgb',
+      );
+      dimensions = { w: decoded.width, h: decoded.height };
+      displayBlob = decoded.displayBlob;
+      // Bare payload only — container/trc/gamut live on the sibling `colorIdentity`
+      // the entry injects (Path B).
+      highDepthSource = {
+        data: decoded.highDepthSource.data,
+        width: decoded.highDepthSource.width,
+        height: decoded.highDepthSource.height,
+      };
       break;
     }
 
-    case 'icc-engine': {
-      // Full ICC engine conversion (custom ICC profiles, unknown spaces)
+    case 'vips-icc': {
+      // CMYK / custom ICC profiles: full LibVips ICC engine.
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const { width, height, data, iccProfileData } = await pixels.fileIO.iccToSrgb(bytes);
+      const { width, height, data, iccProfileData } = await getLibVips().iccToSrgb(bytes);
       dimensions = { w: width, h: height };
 
-      if (iccProfileData && iccProfileData.length > 0) {
-        if (!metadata.raw.icc) {
-          metadata.raw.icc = {
-            data: iccToBase64(iccProfileData),
-            name: parseIccProfileName(iccProfileData) || 'Embedded',
-          };
-        }
+      // Vips reliably extracts ICC — backfill metadata if the header sniff missed it.
+      if (iccProfileData && iccProfileData.length > 0 && !metadata.raw.icc) {
+        metadata.raw.icc = {
+          data: iccToBase64(iccProfileData),
+          name: parseIccProfileName(iccProfileData) || 'Embedded',
+        };
       }
-
-      const canvas = new OffscreenCanvas(width, height);
-      const ctx = canvas.getContext('2d')!;
-      const clamped = new Uint8ClampedArray(data.length);
-      clamped.set(data);
-      ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
-      displayBlob = await canvas.convertToBlob({ type: 'image/png' });
+      displayBlob = await rgbaToBlob(data, width, height);
       break;
+    }
+
+    default:
+      // WebP only ever routes to the three channels above; any other channel is
+      // a decision/handler mismatch that must fail loudly rather than silently.
+      throw new Error(`decodeWebp: unexpected decodeChannel '${decision.decodeChannel}'`);
+  }
+
+  // ── EXIF Orientation correction (WebP-specific: applyOrientation is 'explicit') ──
+  // Neither createImageBitmap nor vips uprights WebP pixels. If the WebP carries an
+  // EXIF chunk with Orientation ≠ 1, manually rotate the produced displayBlob (and
+  // swap dimensions), keeping it co-oriented with any dec: naked pixels.
+  const orientation = metadata.capture?.orientation;
+  if (orientation && orientation !== 1) {
+    const rotated = await applyExifOrientation(displayBlob, dimensions, orientation);
+    displayBlob = rotated.blob;
+    dimensions = rotated.dimensions;
+
+    // Upright the naked high-depth buffer too (wide-gamut-8 branch), with ITS
+    // OWN width/height — `dimensions` above is already the rotated display dims.
+    // Left pre-EXIF, the f16 buffer mismatches its display proxy: mis-strided /
+    // mis-sized for orientation 5-8, mirrored/inverted for 2/3/4.
+    if (highDepthSource) {
+      const rotatedNaked = rotateNakedRgba(
+        highDepthSource.data, highDepthSource.width, highDepthSource.height, orientation,
+      );
+      highDepthSource = {
+        data: rotatedNaked.data,
+        width: rotatedNaked.width,
+        height: rotatedNaked.height,
+      };
     }
   }
 
-  // sourceBlob retention via centralized strategy
-  const sourceBlob = shouldRetainSourceBlob('webp', metadata, strategy.frameColorSpace) ? file : undefined;
-
-  return {
-    dimensions,
-    metadata,
-    subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }],
-    sourceBlob,
-  };
+  return [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0, highDepthSource }];
 }

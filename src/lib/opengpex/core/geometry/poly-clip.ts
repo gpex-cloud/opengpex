@@ -20,9 +20,12 @@
 /**
  * poly-clip.ts — Polygon ∩ Polygon intersection using polygon-clipping library.
  *
- * Complements sut-hod.ts (which only handles polygon ∩ rect via Sutherland-Hodgman).
- * This module handles the general case: arbitrary polygon ∩ arbitrary polygon,
- * enabling logical (non-destructive) cuts when both selection and layer are paths.
+ * Handles the general case: arbitrary polygon ∩ arbitrary polygon (including rect,
+ * which is just a 4-point polygon), enabling exact geometric intersection for both
+ * simple selections and holed/multi-ring shapes. `intersectWithLayer` (shape.ts)
+ * routes every non-trivial case here; the former dedicated rect-clipper (`sut-hod.ts`,
+ * Sutherland-Hodgman) was retired because it couldn't represent hole topology and
+ * produced illegal double-ring output — see the M2/M3 design doc.
  *
  * Algorithm: Martinez-Rueda-Feito (via polygon-clipping@0.15.7)
  * Time complexity: O((n + k) log n) where n = total vertices, k = intersections.
@@ -41,26 +44,122 @@ type Ring = [number, number][];
 type Polygon = Ring[];
 type MultiPolygon = Polygon[];
 
+function pointInRing(pt: Pt, ring: Pt[]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].x, yi = ring[i].y;
+    const xj = ring[j].x, yj = ring[j].y;
+    const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+      (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Representative interior point used to test ring-in-ring containment.
+ *
+ * The centroid (not the first vertex) is used deliberately: a ring produced by
+ * a lasso/wand selection can have a vertex sitting exactly ON the parent ring's
+ * boundary (a "keyhole" touch), where ray-casting containment is ill-defined.
+ * The centroid of a hole/child ring is virtually never on the parent's edge.
+ * Caveat: for a strongly non-convex ring the centroid can itself fall outside
+ * the ring — still a looser assumption than "first vertex", not a proof.
+ */
+function centroid(pts: Pt[]): Pt {
+  let sx = 0, sy = 0;
+  for (const p of pts) { sx += p.x; sy += p.y; }
+  return { x: sx / pts.length, y: sy / pts.length };
+}
+
+/** Shoelace area (unsigned) of an open ring (no closing duplicate required). */
+function ringAreaPts(pts: Pt[]): number {
+  let area = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    area += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
+  }
+  return Math.abs(area) / 2;
+}
+
+/** Shoelace area (unsigned) of a closed `Ring` (polygon-clipping coord format). */
+function ringAreaFromCoords(coords: Ring): number {
+  const pts = coords.map(([x, y]) => ({ x, y }));
+  if (pts.length > 1) {
+    const first = pts[0], last = pts[pts.length - 1];
+    if (first.x === last.x && first.y === last.y) pts.pop();
+  }
+  return ringAreaPts(pts);
+}
+
 /**
  * Convert Point2D rings to polygon-clipping format.
  * polygon-clipping expects closed rings: first point === last point.
+ * Distinguishes holes (contained in an outer ring) from separate polygon islands.
+ *
+ * INPUT ORDER CONTRACT: within a single ring set, a ring's outer boundary must
+ * appear BEFORE any of its holes/nested rings (matches `Shape.pathData`'s own
+ * convention: rings[0] = outer, rings[1..] = holes). Classification below is a
+ * single left-to-right pass — a hole listed ahead of its outer has no existing
+ * polygon to nest into yet and is silently registered as its own top-level
+ * island instead, corrupting the topology. All current producers of the rings
+ * fed here (`shape.ts`, `getEffectiveVisibleShape`) already honor this order;
+ * the dev-only assertion below exists to catch a future producer that doesn't.
  */
 function ringsToMultiPolygon(rings: Pt[][]): MultiPolygon {
-  // Treat the ring set as a single polygon with potential holes.
-  // Ring[0] = outer boundary, Ring[1..n] = holes (standard GeoJSON winding convention).
-  const polygon: Polygon = rings.map(ring => {
+  if (rings.length === 0) return [];
+
+  const closedRings: { pts: Pt[]; coords: Ring }[] = [];
+  for (const ring of rings) {
+    if (ring.length < 3) continue;
     const coords: Ring = ring.map(p => [p.x, p.y]);
-    // Close the ring if not already closed
-    if (coords.length > 0) {
-      const first = coords[0];
-      const last = coords[coords.length - 1];
-      if (first[0] !== last[0] || first[1] !== last[1]) {
-        coords.push([first[0], first[1]]);
+    const first = coords[0];
+    const last = coords[coords.length - 1];
+    if (first[0] !== last[0] || first[1] !== last[1]) {
+      coords.push([first[0], first[1]]);
+    }
+    closedRings.push({ pts: ring, coords });
+  }
+
+  if (closedRings.length === 0) return [];
+  if (closedRings.length === 1) return [[closedRings[0].coords]];
+
+  const polygons: { outerPts: Pt[]; rings: Polygon }[] = [];
+  for (const item of closedRings) {
+    const testPt = centroid(item.pts);
+    let parent: { outerPts: Pt[]; rings: Polygon } | null = null;
+    for (const poly of polygons) {
+      if (pointInRing(testPt, poly.outerPts)) {
+        parent = poly;
+        break;
       }
     }
-    return coords;
-  });
-  return [polygon];
+    if (parent) {
+      parent.rings.push(item.coords);
+    } else {
+      polygons.push({ outerPts: item.pts, rings: [item.coords] });
+    }
+  }
+
+  // Dev-only order-contract guard: a hole/nested ring can never be larger than
+  // the outer ring it nests inside. A violation here means a ring was fed out
+  // of order (see contract note above) and got misclassified as a top-level
+  // island rather than folded as a hole.
+  if (process.env.NODE_ENV !== 'production') {
+    for (const poly of polygons) {
+      const outerArea = ringAreaPts(poly.outerPts);
+      for (let k = 1; k < poly.rings.length; k++) {
+        const holeArea = ringAreaFromCoords(poly.rings[k]);
+        console.assert(
+          holeArea <= outerArea,
+          `ringsToMultiPolygon: nested ring area ${holeArea.toFixed(1)} exceeds its outer ring ` +
+          `area ${outerArea.toFixed(1)} — ring input order contract violated (outer ring must ` +
+          `precede its holes; see comment above ringsToMultiPolygon in poly-clip.ts).`
+        );
+      }
+    }
+  }
+
+  return polygons.map(p => p.rings);
 }
 
 /**

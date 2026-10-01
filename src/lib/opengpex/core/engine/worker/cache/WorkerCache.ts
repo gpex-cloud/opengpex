@@ -21,7 +21,7 @@
  * WorkerCache — Worker-side bitmap and blob cache for Engine V2.
  *
  * Adapted from v1 `worker/core/WorkerCache.ts` with the following changes:
- * - Simplified API to match the Phase 0 design spec:
+ * - Simplified API design:
  *   • getBitmap(hash): single full-resolution bitmap (not pyramid).
  *   • getBlob(hash): get the display blob for a given hash.
  *   • ingest(hash, blob): decode blob → ImageBitmap, store both.
@@ -29,7 +29,7 @@
  *   • clear(): release all resources.
  * - LRU eviction policy with configurable capacity.
  *
- * Invariant (architecture doc §六.6): Worker is self-sufficient — it resolves
+ * Invariant: Worker is self-sufficient — it resolves
  * bitmaps from WorkerCache and NEVER requests pixels from the main thread.
  *
  * Design (beta 52): rawBufferCache removed — IDB is the source of truth for

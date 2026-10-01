@@ -66,9 +66,15 @@ interface FrameInfoPanelProps {
   isHighRes: boolean;
   /** Layer is lower resolution than canvas */
   isUpScaled: boolean;
-  /** Frame's working bit depth */
-  frameBitDepth: 8 | 16 | 32;
-  /** Layer's source bit depth (if available) */
+  /**
+   * Layer's source bit depth (if available).
+   *
+   * There is deliberately no `frameBitDepth` sibling (§8.4.4 R2): the frame owns
+   * no colour/depth truth any more — the GPU working buffer is always
+   * rgba16float and per-asset depth lives on `StoredAsset.colorIdentity`. The
+   * old "Canvas" badge read the deleted `Frame.bitDepth`, which after the cutover
+   * could only have echoed this very same source-file number.
+   */
   layerBitDepth?: number;
   /** Image metadata (EXIF, ICC, color space etc.) */
   imageMetadata?: ImageMetadata;
@@ -88,7 +94,6 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
   layerDim,
   isHighRes,
   isUpScaled,
-  frameBitDepth,
   layerBitDepth,
   imageMetadata,
 }: FrameInfoPanelProps) {
@@ -293,11 +298,6 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
             <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight">
               {isClipMode ? "Selection" : "Canvas"}
             </span>
-            {frameBitDepth > 8 && (
-              <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
-                {frameBitDepth}-bit
-              </span>
-            )}
           </div>
           <span className="text-[10px] font-bold text-[var(--text-main)] tabular-nums uppercase">
             {baseW} × {baseH}

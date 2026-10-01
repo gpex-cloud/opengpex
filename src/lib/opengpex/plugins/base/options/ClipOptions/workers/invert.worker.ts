@@ -16,7 +16,7 @@
  *   result = canvasRect \ selectionPolygon  (boolean difference)
  *
  * This produces clean geometry that SVG ant-line rendering can stroke
- * without spurious "日"-shaped artifacts.
+ * without spurious double-box / figure-8 artifacts.
  */
 
 import type { InvertRequest, InvertResponse } from './protocol';

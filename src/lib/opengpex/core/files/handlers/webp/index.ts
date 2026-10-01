@@ -18,14 +18,14 @@
  * Thread model: ALL operations run on main thread (<100ms for typical files).
  */
 
-import type { PixelService } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   DecodeOptions,
-  DecodeResult,
+  DecodedPayload,
   EncodeOptions,
 } from '../../types';
 import type { ImageMetadata } from '../../types';
+import type { IngestDecision } from '../../strategy';
 import { decodeWebp } from './decode';
 import { encodeWebp } from './encode';
 import { extractWebpMetadata } from './metadata';
@@ -35,17 +35,20 @@ export class WebpHandler implements ImageFormatHandler {
   readonly mimeTypes = ['image/webp'];
   readonly extensions = ['webp'];
 
-  constructor(private pixels: PixelService) {}
-
-  decode(file: File, options?: DecodeOptions): Promise<DecodeResult> {
-    return decodeWebp(file, this.pixels, options);
+  decode(
+    file: File,
+    metadata: ImageMetadata,
+    decision: IngestDecision,
+    _options?: DecodeOptions,
+  ): Promise<DecodedPayload[]> {
+    return decodeWebp(file, metadata, decision);
   }
 
   encode(
     source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
     options: EncodeOptions,
   ): Promise<Blob> {
-    return encodeWebp(source, this.pixels, options);
+    return encodeWebp(source, options);
   }
 
   async extractMetadata(file: File): Promise<ImageMetadata> {

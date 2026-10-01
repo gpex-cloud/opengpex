@@ -84,7 +84,7 @@ export const TIMETRAVEL_COMMANDS = {
         'rect'
       );
       if (confirmed) {
-        ctx.actions.adv.frame.create.revert.execute();
+        ctx.actions.adv.frame.revert.execute();
       }
     }
   } as EditorCommand<void, Promise<void>>,

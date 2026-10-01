@@ -45,6 +45,7 @@ export function SmartGuidesSettings() {
   const ignoreLockedLayers = usePreset('SNAP_IGNORE_LOCKED_LAYERS');
   const ignoreSmallLayers = usePreset('SNAP_IGNORE_SMALL_LAYERS');
   const edgeSnapScope = usePreset('SNAP_EDGE_SCOPE');
+  const snapThreshold = usePreset('SNAP_THRESHOLD');
 
   const toggleExclude = useCallback((type: ExcludableLayerType) => {
     const current = excludeLayerTypes || [];
@@ -66,6 +67,43 @@ export function SmartGuidesSettings() {
           </div>
         </div>
         <Switch checked={snapEnabled} onChange={() => presets.set('SNAP_ENABLED', !snapEnabled)} />
+      </div>
+
+      {/* ─── Section 0: Snap Sensitivity ─── */}
+      <div className="flex flex-col gap-3">
+        <h5 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-1.5 pl-1">
+          <SlidersHorizontal size={11} /> Snap Distance & Sensitivity
+        </h5>
+
+        <div className="flex flex-col gap-2 rounded-xl p-3 bg-[var(--bg-stage)] border border-[var(--border-subtle)]">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-[var(--text-main)]">Snap Distance</span>
+            <span className="text-[10px] font-mono font-bold text-amber-500">{snapThreshold ?? 6}px</span>
+          </div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {[
+              { label: 'Gentle (4px)', value: 4 },
+              { label: 'Standard (6px)', value: 6 },
+              { label: 'Strong (10px)', value: 10 },
+            ].map(opt => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => presets.set('SNAP_THRESHOLD', opt.value)}
+                className={`py-1.5 px-2 rounded-lg text-[9px] font-bold transition-all border ${
+                  (snapThreshold ?? 6) === opt.value
+                    ? 'bg-amber-500/15 border-amber-500/60 text-amber-500'
+                    : 'bg-transparent border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <span className="text-[8.5px] text-[var(--text-muted)] leading-tight">
+            Lower distances (4~6px) provide smooth, Photoshop-like gliding; higher distances feel more magnetic.
+          </span>
+        </div>
       </div>
 
       {/* ─── Section 1: Snap Targets ─── */}
@@ -173,6 +211,7 @@ export function SmartGuidesSettings() {
           presets.reset('SNAP_IGNORE_SMALL_LAYERS');
           presets.reset('SNAP_SMALL_LAYER_THRESHOLD');
           presets.reset('SNAP_MAX_TARGETS');
+          presets.reset('SNAP_THRESHOLD');
           presets.reset('SNAP_EDGE_SCOPE');
         }}
         className="w-full rounded-xl p-2.5 text-[10px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] border border-[var(--border-subtle)] hover:border-amber-500/50 hover:text-amber-500 transition-colors uppercase tracking-wider"

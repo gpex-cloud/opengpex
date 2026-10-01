@@ -18,14 +18,36 @@
  */
 
 import {
-  GeometryService, PixelService,
+  GeometryService, PixelService, AssetService,
   Frame, Layer, LocalShape, LocalPolygon,
-  asLocalShape, isPolygon
+  asLocalShape, asLocalRect, isPolygon
 } from '@opengpex/editor/core/types';
 import { polygonToShape } from '@opengpex/editor/core/geometry/operators/polygon';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
-import { isBoundingRing, point2dToLocalShape } from '@opengpex/editor/core/geometry/operators/point2d';
+import { isBoundingRing, point2dToLocalShape, shapeToPoint2D, ringsToPathData } from '@opengpex/editor/core/geometry/operators/point2d';
+import { trimTransparentMargins } from '@opengpex/editor/core/engine/utils/pixel-utils';
 import { LayerFactory } from '../factory';
+
+/**
+ * Anti-alias safety margin (px) added to the feather radius when expanding a
+ * fragment's crop bbox (M3 §M3.h.1). Guards the soft edge's outermost falloff row
+ * from being clipped by the crop window.
+ */
+const AA_MARGIN = 1;
+
+/**
+ * shapeToAbsPathData — Serialise any LocalShape into ABSOLUTE-coordinate SVG
+ * pathData (layer-local px). Path shapes return their pathData verbatim; rect /
+ * circle shapes decompose into rings via `shapeToPoint2D` (which already emits
+ * absolute coords from `shape.rect`) and serialise via `ringsToPathData`. Used to
+ * turn a feathered fragment's TIGHT intersection geometry into the path that the
+ * implicit shape mask feathers around, inset inside the padded crop window.
+ */
+function shapeToAbsPathData(shape: LocalShape): string {
+  const pd = (shape as { pathData?: string }).pathData;
+  if (shape.type === 'path' && pd) return pd;
+  return ringsToPathData(shapeToPoint2D(shape));
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Types
@@ -102,7 +124,8 @@ export function resolveLocalShape(
  */
 export function createFragmentOperations(
   geometry: GeometryService,
-  pixels: PixelService
+  pixels: PixelService,
+  assets: AssetService
 ) {
 
   // ─── fragmentToNewLayer (Unified Entry Point) ────────────────────────────────
@@ -132,9 +155,12 @@ export function createFragmentOperations(
     let newLayer: Layer;
 
     // ── Path decision: logical first, vectorMask fallback ──────────────────────
-    // Logical is only viable when feather=0, not invertedRegular, and the
-    // geometry service can compute a valid intersection.
-    const intersection = (feather === 0 && !invertedRegular)
+    // Logical (tight crop) is viable for both hard and feathered cuts:
+    // feathering never changes the boolean topology, so the hard contour bbox is
+    // always computable. The only whole-layer fallbacks left are `invertedRegular`
+    // (annular: outer ring = canvas boundary, no tight bbox exists) and the degrade
+    // cases inside intersectWithLayer (bitmap mask / divergent per-mask feather).
+    const intersection = (!invertedRegular)
       ? geometry.shape.intersectWithLayer(localShape, layer)
       : null;
 
@@ -143,18 +169,55 @@ export function createFragmentOperations(
       const { id: _oldId, ...layerData } = layer;
       newLayer = LayerFactory.getNewLayer({
         ...layerData,
-        vectorMasks: LayerFactory.cleanInheritedMasks(layerData.vectorMasks),
+        // The effective visibleShape from intersectWithLayer already folded EVERY
+        // enabled hole/clip mask into the geometry (getEffectiveVisibleShape →
+        // difference/intersect); this logical path only runs when that fold did NOT
+        // degrade, so every vectorMask is already baked in. Inheriting them again
+        // would re-subtract the holes a second time — in the SOURCE's coordinate
+        // frame, not the re-centred fragment's — turning the fragment transparent.
+        vectorMasks: [],
         bitmapMasks: LayerFactory.cleanInheritedMasks(layerData.bitmapMasks),
         name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id])),
         hostId: undefined
       });
 
+      // Effective feather = max(new-cut feather, folded source-mask feather). The
+      // dominant case (plain layer, feathered cut) has folded featherPx=0, so this is
+      // just the new cut's feather. §M3.d.2 padding + the implicit shape mask below.
       const v = intersection.visibleShape.rect;
-      newLayer.bounding = { w: v.w, h: v.h };
-      newLayer.visibleShape = { ...intersection.visibleShape };
-      const pose = geometry.transform.computeFragmentCenter(intersection.center, { x: v.x, y: v.y }, layer.rotation, layer.flip);
-      newLayer.cx = pose.x;
-      newLayer.cy = pose.y;
+      const effFeather = Math.max(feather, intersection.featherPx ?? 0);
+      const pad = effFeather > 0 ? Math.ceil(effFeather + AA_MARGIN) : 0;
+
+      if (pad > 0) {
+        // ── Feathered fragment: pad the crop bbox outward by `pad` on all sides so
+        // the soft edge has real source pixels to fade against, and carry the TIGHT
+        // geometry as pathData + `featherPx`. SceneAssembler renders this as an
+        // implicit (feathered) vmask; symmetric padding keeps the tight region's
+        // world centre fixed, so `intersection.center` is still the anchor and the
+        // visibleOffset is simply the padded rect's origin (§M3.d.2 / d.3).
+        const tightPath = shapeToAbsPathData(intersection.visibleShape);
+        const paddedRect = asLocalRect({ x: v.x - pad, y: v.y - pad, w: v.w + 2 * pad, h: v.h + 2 * pad });
+        newLayer.bounding = { w: paddedRect.w, h: paddedRect.h };
+        newLayer.visibleShape = {
+          type: 'path',
+          rect: paddedRect,
+          hardEdge: intersection.visibleShape.hardEdge,
+          antiAliased: (intersection.visibleShape as { antiAliased?: boolean }).antiAliased,
+          pathData: tightPath,
+          featherPx: effFeather,
+          __brand: 'local',
+        } as unknown as LocalShape;
+        const pose = geometry.transform.computeFragmentCenter(intersection.center, { x: paddedRect.x, y: paddedRect.y }, layer.rotation, layer.flip);
+        newLayer.cx = pose.x;
+        newLayer.cy = pose.y;
+      } else {
+        // ── Hard fragment (feather=0): tight crop, value-for-value unchanged. ──
+        newLayer.bounding = { w: v.w, h: v.h };
+        newLayer.visibleShape = { ...intersection.visibleShape };
+        const pose = geometry.transform.computeFragmentCenter(intersection.center, { x: v.x, y: v.y }, layer.rotation, layer.flip);
+        newLayer.cx = pose.x;
+        newLayer.cy = pose.y;
+      }
       newLayer.birthCenter = { cx: newLayer.cx, cy: newLayer.cy };
       newLayer.metadata = { ...newLayer.metadata, physicalPixels: false };
 
@@ -163,7 +226,12 @@ export function createFragmentOperations(
       }
 
     } else {
-      // ═══ VectorMask path: full layer + mask for visibility control ═══
+      // ═══ Whole-layer fallback: full layer + vmask for visibility control ═══
+      // This branch serves ONLY the two cases that have no
+      // tight bbox to crop to — `invertedRegular` (annular: outer ring is the canvas
+      // boundary) and the intersectWithLayer degrade cases (bitmap mask present, or
+      // ≥2 distinct per-mask feathers). Plain feathered cuts do not land here —
+      // they take the logical (padded) path above.
       const { id: _id, hostId: _pid, role: _role, locked: _locked, interactive: _inter, ...layerData } = layer;
       newLayer = LayerFactory.getNewLayer({
         ...layerData,
@@ -192,19 +260,16 @@ export function createFragmentOperations(
       const maskId = `mask-hole-${newLayer.id}`;
 
       // §5.3: the hole punched into the source layer MUST be the *real* geometry
-      // the fragment actually took — i.e. `newLayer.visibleShape` (= true
-      // intersection, mask-aware), NOT the raw selection `localShape`.
-      //
-      // When the logical path succeeded (`intersection` is non-null), the fragment's
-      // visibleShape is the true intersection of the selection with the source's
-      // effective visible shape (selection ∩ (A − prior holes)). Using this as the
-      // hole guarantees the hole and the fragment are strictly complementary, so
-      // deleting the fragment (heal) precisely reverses this cut — no punch-through /
-      // no leftover void. When the logical path degraded to a vectorMask fallback
-      // (`intersection` is null), there is no geometric intersection to use, so the
-      // hole falls back to the raw selection `localShape` (legacy behavior).
+      // the fragment actually took — the TIGHT intersection (selection ∩ (A − prior
+      // holes)), NOT the fragment's padded visibleShape. For a hard cut the two are
+      // identical (pad=0); for a feathered cut the fragment's visibleShape is grown
+      // by `pad` to hold the soft edge, but the hole must stay tight so hole+fragment
+      // are complementary (the hole carries the same `feather` below, so heal — delete
+      // the fragment — precisely reverses this cut, no punch-through / no leftover
+      // void). When the logical path degraded to a vectorMask fallback (`intersection`
+      // is null), fall back to the raw selection `localShape` (legacy behavior).
       const holeShape: LocalShape = intersection
-        ? { ...newLayer.visibleShape! }
+        ? { ...intersection.visibleShape }
         : localShape;
 
       baseResult.holeMask = {
@@ -254,14 +319,14 @@ export function createFragmentOperations(
     const worldSelection = geometry.shape.localToWorldShape(frameLocalShape, frame);
 
     // ── Composite + trim in memory (no intermediate asset registration) ────
-    const { result: fragResult } = await pixels.render.compositeLayers([layer], frame, frameLocalShape);
-    const trimResult = await fragResult.trimmed();
+    const composited = await pixels.render.compositeLayers([layer], frame, frameLocalShape);
+    const trimResult = await trimTransparentMargins(composited);
     if (!trimResult) return null; // Entirely transparent — no content in selection
 
-    const { result: trimmedResult, offset } = trimResult;
-    const trimW = trimmedResult.bounds.w;
-    const trimH = trimmedResult.bounds.h;
-    const { assetId, url: assetUrl } = await trimmedResult.toAsset();
+    const { image: trimmedImage, offset } = trimResult;
+    const trimW = trimmedImage.bounds.w;
+    const trimH = trimmedImage.bounds.h;
+    const { assetId, url: assetUrl } = await assets.storeBundle(trimmedImage);
     const cx = worldSelection.rect.x + (offset.x + trimW / 2);
     const cy = worldSelection.rect.y + (offset.y + trimH / 2);
 

@@ -29,11 +29,85 @@
 import type {
   ImageFormatHandler,
   DecodeOptions,
-  DecodeResult,
+  DecodedPayload,
   EncodeOptions,
 } from '../types';
 import type { ImageMetadata } from '../types';
+import type { IngestDecision } from '../strategy';
 import { bitmapToCanvas } from '../index';
+import { rgbaToBlob } from '../utils';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Header Probe (Stage 1 — lightweight, main-thread, NO gifuct-js load)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Fast-probe a GIF's logical canvas size and multi-frame flag by scanning the
+ * block structure — pure in-memory parse (typically < 0.1ms), short-circuits the
+ * instant a 2nd Image Descriptor (0x2C) is seen, so a multi-frame GIF need not be
+ * fully walked. Distinct from `quickFrameCount` (which counts every frame): this
+ * only answers "≥ 2 frames?" and additionally recovers width/height, fixing the
+ * long-standing `extractMetadata` returning `0 × 0`.
+ */
+export function probeGifHeader(bytes: Uint8Array): {
+  width: number;
+  height: number;
+  isMultiFrame: boolean;
+} {
+  if (bytes.length < 13) return { width: 0, height: 0, isMultiFrame: false };
+  const sig = String.fromCharCode(bytes[0], bytes[1], bytes[2]);
+  if (sig !== 'GIF') return { width: 0, height: 0, isMultiFrame: false };
+
+  // Logical Screen Descriptor: bytes 6-9 little-endian screen width/height.
+  const width = bytes[6] | (bytes[7] << 8);
+  const height = bytes[8] | (bytes[9] << 8);
+
+  // Skip the Global Color Table if the packed flags (byte 10) declare one.
+  let pos = 13;
+  const flags = bytes[10];
+  if ((flags & 0x80) !== 0) {
+    pos += 3 * (1 << ((flags & 0x07) + 1));
+  }
+
+  // Walk data blocks; stop at the 2nd Image Descriptor or the trailer.
+  let imageCount = 0;
+  while (pos < bytes.length) {
+    const block = bytes[pos];
+    if (block === 0x2c) {
+      imageCount++;
+      if (imageCount > 1) {
+        return { width, height, isMultiFrame: true };
+      }
+      // Image Descriptor is 10 bytes; its final (packed) byte declares an LCT.
+      pos += 10;
+      if (pos < bytes.length) {
+        const lctFlags = bytes[pos - 1];
+        if ((lctFlags & 0x80) !== 0) {
+          pos += 3 * (1 << ((lctFlags & 0x07) + 1));
+        }
+      }
+      pos += 1; // LZW minimum code size byte
+      while (pos < bytes.length) {
+        const blockSize = bytes[pos];
+        pos += 1;
+        if (blockSize === 0) break;
+        pos += blockSize;
+      }
+    } else if (block === 0x21) {
+      pos += 2; // extension introducer + label
+      while (pos < bytes.length) {
+        const blockSize = bytes[pos];
+        pos += 1;
+        if (blockSize === 0) break;
+        pos += blockSize;
+      }
+    } else {
+      break; // trailer (0x3B) or corrupt/truncated stream
+    }
+  }
+
+  return { width, height, isMultiFrame: false };
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Dynamic Script Loading (same pattern as heic-to)
@@ -122,40 +196,35 @@ export class GifHandler implements ImageFormatHandler {
 
   // ─── Decode ──────────────────────────────────────────────────────────────
 
-  async decode(file: File, _options?: DecodeOptions): Promise<DecodeResult> {
-    const buffer = await file.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    const frameCount = quickFrameCount(bytes);
-
-    // Get dimensions via browser-native decode
-    const img = await createImageBitmap(file);
-    const dimensions = { w: img.width, h: img.height };
-    img.close();
-
-    const metadata = await this.extractMetadata(file);
-
-    // Single-frame GIF → return as-is
-    if (frameCount <= 1) {
-      return { dimensions, metadata, subImages: [{ displayBlob: file, width: dimensions.w, height: dimensions.h, index: 0 }] };
+  // Direct-passthrough format (pure-producer contract): GIF is always 8-bit sRGB, so
+  // there is no colour-strategy branching. Single vs multi-frame is decided by the
+  // Stage 1 authority `metadata.isMultiFrame` (probed by `probeGifHeader`) — the
+  // handler no longer re-counts frames itself. Returns naked pixels; the entry mounts
+  // per-page `colorIdentity` / `sourceBlob`.
+  async decode(
+    file: File,
+    metadata: ImageMetadata,
+    _decision: IngestDecision,
+    _options?: DecodeOptions,
+  ): Promise<DecodedPayload[]> {
+    // Single-frame GIF → return the source file as the sole page (canvas size from
+    // the Stage 1 header probe; no browser decode needed).
+    if (!metadata.isMultiFrame) {
+      return [{ displayBlob: file, width: metadata.width, height: metadata.height, index: 0 }];
     }
 
-    // Multi-frame GIF → decode via gifuct-js
+    // Multi-frame GIF → composite every frame via gifuct-js.
+    const bytes = new Uint8Array(await file.arrayBuffer());
     const gifuctJs = await ensureGifuctJs();
     const { width, height, frames: rawFrames } = decodeGifFrames(bytes, gifuctJs);
 
-    // Convert each RGBA frame to PNG Blob → SubImage with delay
-    const subImages = await Promise.all(
+    // Convert each RGBA frame to a PNG Blob → a page carrying its per-frame delay.
+    return Promise.all(
       rawFrames.map(async (frame) => {
         const blob = await rgbaToBlob(frame.data, width, height);
         return { displayBlob: blob, width, height, index: frame.index, delay: frame.delay };
       }),
     );
-
-    return {
-      dimensions: { w: width, h: height },
-      metadata,
-      subImages,
-    };
   }
 
   // ─── Encode ──────────────────────────────────────────────────────────────
@@ -204,6 +273,7 @@ export class GifHandler implements ImageFormatHandler {
       gif.writeFrame(indexed, frame.width, frame.height, {
         palette,
         delay: frame.delay,
+        repeat: options?.loop ?? 0,
       });
     }
 
@@ -232,17 +302,19 @@ export class GifHandler implements ImageFormatHandler {
   // ─── Metadata Extraction ─────────────────────────────────────────────────
 
   async extractMetadata(file: File): Promise<ImageMetadata> {
+    const probe = probeGifHeader(new Uint8Array(await file.arrayBuffer()));
     return {
       sourceFormat: 'gif',
       sourceFileName: file.name,
       sourceFileSize: file.size,
-      width: 0,
-      height: 0,
+      width: probe.width,
+      height: probe.height,
       dpi: 72,
       dpiSource: 'default',
       colorSpace: 'srgb',
       bitDepth: 8,
       hasAlpha: true,
+      isMultiFrame: probe.isMultiFrame,
       raw: {},
     };
   }
@@ -327,73 +399,4 @@ function decodeGifFrames(bytes: Uint8Array, gifuctJs: GifuctJsGlobals): {
   }
 
   return { width, height, frames };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Utility: RGBA → PNG Blob
-// ═══════════════════════════════════════════════════════════════════════════════
-
-async function rgbaToBlob(rgba: Uint8Array, width: number, height: number): Promise<Blob> {
-  const canvas = new OffscreenCanvas(width, height);
-  const ctx = canvas.getContext('2d')!;
-  const clamped = new Uint8ClampedArray(width * height * 4);
-  clamped.set(rgba.subarray(0, width * height * 4));
-  const imageData = new ImageData(clamped, width, height);
-  ctx.putImageData(imageData, 0, 0);
-  return canvas.convertToBlob({ type: 'image/png' });
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Utility: Quick frame count (lightweight binary scan, no library needed)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function quickFrameCount(bytes: Uint8Array): number {
-  if (bytes.length < 13) return 0;
-  const sig = String.fromCharCode(bytes[0], bytes[1], bytes[2]);
-  if (sig !== 'GIF') return 0;
-
-  let count = 0;
-  let pos = 13;
-
-  const flags = bytes[10];
-  const hasGCT = (flags & 0x80) !== 0;
-  if (hasGCT) {
-    pos += 3 * (1 << ((flags & 0x07) + 1));
-  }
-
-  while (pos < bytes.length) {
-    const block = bytes[pos];
-
-    if (block === 0x2C) {
-      count++;
-      pos += 10;
-      if (pos < bytes.length) {
-        const lctFlags = bytes[pos - 1];
-        if ((lctFlags & 0x80) !== 0) {
-          pos += 3 * (1 << ((lctFlags & 0x07) + 1));
-        }
-      }
-      pos += 1;
-      while (pos < bytes.length) {
-        const blockSize = bytes[pos];
-        pos += 1;
-        if (blockSize === 0) break;
-        pos += blockSize;
-      }
-    } else if (block === 0x21) {
-      pos += 2;
-      while (pos < bytes.length) {
-        const blockSize = bytes[pos];
-        pos += 1;
-        if (blockSize === 0) break;
-        pos += blockSize;
-      }
-    } else if (block === 0x3B) {
-      break;
-    } else {
-      break;
-    }
-  }
-
-  return count;
 }

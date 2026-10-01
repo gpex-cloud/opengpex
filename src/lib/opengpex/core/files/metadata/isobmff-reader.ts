@@ -120,15 +120,15 @@ export function extractIsobmffExif(bytes: Uint8Array): Uint8Array | null {
     // meta is a full-box: skip 4 bytes (version + flags)
     const metaContent = metaPayload.subarray(4);
 
-    // Step 1: Find Exif item ID from iinf box
+    // 1. Find Exif item ID from iinf box
     const exifItemId = findExifItemId(metaContent);
     if (exifItemId < 0) return null;
 
-    // Step 2: Locate item data via iloc box
+    // 2. Locate item data via iloc box
     const itemData = locateItemData(metaContent, exifItemId, bytes);
     if (!itemData || itemData.length < 4) return null;
 
-    // Step 3: Skip 4-byte Exif TIFF header offset prefix
+    // 3. Skip 4-byte Exif TIFF header offset prefix
     // The prefix is a BE uint32 indicating offset from prefix end to TIFF header.
     // Usually 0 (TIFF starts immediately after).
     const tiffOffset = readUint32BE(itemData, 0);

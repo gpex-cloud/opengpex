@@ -1,0 +1,267 @@
+/**
+ * OpenGPEX - An Open-source, Web-based Graphics and Photo editor.
+ * Copyright (C) 2026 The OpenGPEX Authors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
+'use client';
+
+import { useEffect, useRef } from 'react';
+import { useEditorState, useEditorServices, usePluginConfig } from '@opengpex/editor/core/context';
+import { useBrushCursorFastSync } from './useFastSync';
+import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
+import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
+import { DEFAULT_BRUSH_SIZE } from './protocols';
+
+// ─── useEraserOverlayState ─────────────────────────────────────────────────────
+
+/**
+ * useEraserOverlayState: Hook for EraserOverlay main component state.
+ *
+ * Manages cursor hiding (cursorOverride: 'none') in eraser/restore mode,
+ * Escape exit logic, and Tab toggling between eraser and restore.
+ * Returns whether in active eraser/restore mode.
+ */
+export function useEraserOverlayState() {
+  const { state, activeFrame } = useEditorState();
+  const { actions } = useEditorServices();
+
+  const activeCraft = state.interaction.signals[CraftDrawerAPI.signals.activeCraft] as string | null;
+  const isEraserMode = activeCraft === 'eraser' || activeCraft === 'restore';
+
+  // Sets/clears cursorOverride: 'none' to hide system cursor (replaced by DOM circle)
+  useEffect(() => {
+    if (isEraserMode) {
+      // Hide system cursor, use custom DOM cursor instead
+      actions.fast.setCursor('none');
+    } else {
+      // When exiting eraser mode, restore default if current cursor is 'none' (set by this plugin)
+      if (actions.fast.getCursor() === 'none') {
+        actions.fast.setCursor(null);
+      }
+    }
+  }, [isEraserMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Escape key exits eraser/restore mode (via CraftDrawer's deactivate command, following cross-plugin boundaries)
+  useEffect(() => {
+    if (!isEraserMode) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        // Deactivate tool via CraftDrawer's command system (following signal ownership boundaries)
+        actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
+        actions.fast.setCursor(null);
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isEraserMode, actions]);
+
+  // Tab key toggles eraser ↔ restore
+  useEffect(() => {
+    if (!isEraserMode) return;
+
+    const handleTab = (e: KeyboardEvent) => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        e.stopPropagation();
+        const nextCraft = activeCraft === 'eraser' ? 'restore' : 'eraser';
+        actions.setStateSignal(CraftDrawerAPI.signals.activeCraft, nextCraft);
+      }
+    };
+
+    document.addEventListener('keydown', handleTab);
+    return () => document.removeEventListener('keydown', handleTab);
+  }, [activeCraft, isEraserMode, actions]);
+
+  // Restore cursor on component unmount
+  useEffect(() => {
+    return () => {
+      if (actions.fast.getCursor() === 'none') {
+        actions.fast.setCursor(null);
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return {
+    isEraserMode,
+    activeCraft,
+    activeFrame,
+  };
+}
+
+// ─── useBrushCursorTracking ────────────────────────────────────────────────────
+
+/**
+ * useBrushCursorTracking: 60fps mouse position tracking + camera.k real-time synchronization.
+ *
+ * Updates cursor DOM position in real time via pointermove event listener,
+ * and synchronizes cursor size in real time via useFastSync Ticker (follows camera.k zoom).
+ * Both directly manipulate the DOM (bypassing React) to achieve zero-redraw cursor following.
+ *
+ * @param cursorRef Cursor DOM element reference
+ * @param isActive Whether tracking is active
+ * @param brushSize Current brush size (pixels)
+ * @param activeCraft Current craft ('eraser' | 'restore')
+ */
+export function useBrushCursorTracking(
+  cursorRef: React.RefObject<HTMLDivElement | null>,
+  isActive: boolean,
+  brushSize: number = DEFAULT_BRUSH_SIZE,
+  activeCraft: string = 'eraser',
+) {
+  // Store latest mouse screen coordinates (relative to viewport container)
+  const pointerRef = useRef({ x: 0, y: 0 });
+  const rafIdRef = useRef<number>(0);
+  const isVisibleRef = useRef(false);
+
+  // ─── Fast track: camera.k real-time synchronization of cursor size (extracted to useFastSync.ts)
+  useBrushCursorFastSync(cursorRef, isActive, brushSize);
+
+  // ─── Pointer position tracking ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isActive) {
+      const el = cursorRef.current;
+      if (el) {
+        el.style.opacity = '0';
+      }
+      isVisibleRef.current = false;
+      return;
+    }
+
+    const handlePointerMove = (e: PointerEvent) => {
+      const viewportContainer = cursorRef.current?.closest('.editor-viewport-container');
+      if (!viewportContainer) return;
+
+      const rect = viewportContainer.getBoundingClientRect();
+      pointerRef.current.x = e.clientX - rect.left;
+      pointerRef.current.y = e.clientY - rect.top;
+
+      if (!rafIdRef.current) {
+        rafIdRef.current = requestAnimationFrame(() => {
+          rafIdRef.current = 0;
+          const el = cursorRef.current;
+          if (!el) return;
+
+          el.style.transform = `translate(${pointerRef.current.x}px, ${pointerRef.current.y}px)`;
+
+          if (!isVisibleRef.current) {
+            el.style.opacity = '1';
+            isVisibleRef.current = true;
+          }
+        });
+      }
+    };
+
+    const handlePointerLeave = () => {
+      const el = cursorRef.current;
+      if (el) {
+        el.style.opacity = '0';
+        isVisibleRef.current = false;
+      }
+    };
+
+    const viewportContainer = cursorRef.current?.closest('.editor-viewport-container');
+    if (viewportContainer) {
+      viewportContainer.addEventListener('pointermove', handlePointerMove as EventListener);
+      viewportContainer.addEventListener('pointerleave', handlePointerLeave as EventListener);
+    }
+
+    return () => {
+      if (viewportContainer) {
+        viewportContainer.removeEventListener('pointermove', handlePointerMove as EventListener);
+        viewportContainer.removeEventListener('pointerleave', handlePointerLeave as EventListener);
+      }
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = 0;
+      }
+    };
+  }, [isActive, cursorRef]);
+
+  // Keep a ref to the latest activeCraft for use in event handlers (avoids stale closure)
+  const activeCraftRef = useRef(activeCraft);
+  useEffect(() => {
+    activeCraftRef.current = activeCraft;
+  }, [activeCraft]);
+
+  // ─── Cmd/Ctrl modifier key listening: control visibility of "+" new mask badge ────────────────────────────
+  useEffect(() => {
+    if (!isActive) return;
+
+    const setBadgeVisibility = (visible: boolean) => {
+      const el = cursorRef.current;
+      if (!el) return;
+      const badge = el.querySelector('[data-badge="new-layer"]') as HTMLElement;
+      if (badge) {
+        badge.style.opacity = visible ? '1' : '0';
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Meta' || e.key === 'Control') {
+        // Restore mode: Cmd has no effect (can't create new mask), badge stays as-is
+        if (activeCraftRef.current === 'restore') return;
+        setBadgeVisibility(true);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Meta' || e.key === 'Control') {
+        // Restore mode: badge is always visible (React controls it), don't hide
+        if (activeCraftRef.current === 'restore') return;
+        setBadgeVisibility(false);
+      }
+    };
+
+    // Also clear badge on window blur (prevents residual Meta key state after switching windows)
+    const handleBlur = () => {
+      // Restore mode: badge is permanently visible, don't hide on blur
+      if (activeCraftRef.current === 'restore') return;
+      setBadgeVisibility(false);
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [isActive, cursorRef]);
+}
+
+// ─── useBrushParams (read) ─────────────────────────────────────────────────────
+
+/**
+ * useBrushParams: Reads current brush parameters.
+ *
+ * Reads brush parameters from CraftDrawer's pluginConfig, returning currently active size/opacity/hardness.
+ */
+export function useBrushParams() {
+  const [craftConfig] = usePluginConfig<CraftDrawerConfig>(CraftDrawerAPI.configKey);
+
+  const brushSize = craftConfig?.brushSize ?? DEFAULT_BRUSH_SIZE;
+  const brushOpacity = craftConfig?.brushOpacity ?? 100;
+  const brushHardness = craftConfig?.brushHardness ?? 80;
+
+  return { brushSize, brushOpacity, brushHardness };
+}

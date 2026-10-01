@@ -495,7 +495,7 @@ export const LAYERS_COMMANDS = {
             const group = activeFrame.layers.byId[payload.groupId];
             if (!group || group.type !== 'group') return;
 
-            // 过滤：只允许非 group、非子层（无 hostId）的图层移入组
+            // Filter: only allow non-group, non-sublayer (no hostId) layers to be moved into a group
             const validIds = payload.layerIds.filter(id => {
                 const l = activeFrame.layers.byId[id];
                 return l && l.type !== 'group' && !l.hostId;

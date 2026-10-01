@@ -10,137 +10,94 @@
  */
 
 /**
- * AVIF encode — Dual-Engine Architecture with size-aware routing.
+ * AVIF encode — @jsquash/avif only (isolated Worker).
  *
- * Encoding engines:
- * 1. @jsquash/avif — isolated Worker, ALLOW_MEMORY_GROWTH (no 2GB cap), no ICC embed
- * 2. vips-heif — engine Worker, ICC embed + 10-bit, shares wasm-vips 2GB heap
+ * ── DESIGN DECISION (deliberate, not an oversight) ─────────────────────────
+ * AVIF encoding runs EXCLUSIVELY through @jsquash/avif in a dedicated, crash-
+ * isolated Worker (`./worker` → `/ext/wasm/avif/avif-worker.js`). This mirrors
+ * the WebP handler's shape (encode does NOT touch the shared wasm-vips engine),
+ * the only difference being that AVIF has no browser-native encoder so it uses
+ * @jsquash instead of `canvas.convertToBlob`.
  *
- * Routing logic (when USE_VIPS_FOR_ICC_AVIF=true):
- *   - Image ≤ 16 Mpx → vips-heif (ICC embedding, high-quality AV1)
- *   - Image > 16 Mpx  → @jsquash/avif (OOM protection, no ICC embed)
+ * WHY WE DROPPED THE vips-heif ENCODE PATH:
+ *   The former dual-engine routing (vips-heif ≤16Mpx for ICC embed, @jsquash
+ *   >16Mpx) was removed. wasm-vips has a fixed heap and libaom's encoder
+ *   buffers exhaust it on large images; worse, an OOM inside the SHARED vips
+ *   singleton corrupts it (Emscripten ABORT) and takes down every other vips
+ *   consumer (TIFF/PNG/ICC) until a full page reload — with no restart path.
+ *   Self-compiling vips to lift the heap cap was evaluated and judged not worth it.
  *
- * The 16 Mpx threshold prevents libaom from exhausting the wasm-vips 2GB heap
- * when allocating encoder lag buffers for large images.
+ * ⚠️ KNOWN DEFECT (accepted, tracked): AVIF export CANNOT embed an ICC profile.
+ *   @jsquash/avif has no ICC-embed capability. Pixels are still encoded
+ *   correctly (sRGB or P3 as prepared by the colour pipeline below), but the
+ *   output carries NO colour-space marker. This is a metadata-only side issue —
+ *   it does NOT corrupt the image data. Consequence: a P3 AVIF may be
+ *   interpreted as sRGB by naive viewers. Acceptable trade-off for a simple,
+ *   crash-safe pipeline. FUTURE FIX (no vips needed): inject an ISOBMFF `colr`
+ *   box post-encode, or adopt an encoder library that supports ICC embedding —
+ *   then this handler can regain profile embedding without the OOM risk.
+ * ───────────────────────────────────────────────────────────────────────────
  */
 
-import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/types';
+import type { GamutId } from '@opengpex/editor/core/types';
 import type { EncodeOptions } from '../../types';
 import { bitmapToCanvas } from '../../index';
-import { base64ToIcc } from '../../icc';
-import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
-import { getExportStrategy, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
+import { toCanvasColorSpace } from '@opengpex/editor/core/engine/color';
 import { encodeAvifJsquash } from './worker';
 
 /**
- * When true, AVIF exports route through vips-heif for ICC embedding support.
- * When false, ALL encoding uses @jsquash/avif in an isolated Worker.
+ * Encode a canvas/bitmap to AVIF with colour management.
  *
- * Note: vips-heif shares the wasm-vips 2GB heap. For large images (>16 Mpx),
- * libaom's encoder buffers can exhaust available memory. The routing logic
- * below automatically falls back to @jsquash for images exceeding the threshold.
- */
-const USE_VIPS_FOR_ICC_AVIF = true;
-
-/**
- * Maximum pixel count (width × height) for which vips-heif encoding is safe.
- * Above this threshold, encoding falls back to @jsquash/avif to avoid OOM.
+ * ── COLOR CONTRACT ──────────────────────────────────────────────────────────
+ * Pixels arrive ALREADY in the target gamut with the target TRC applied (the
+ * terminal `unpremultiplyEncodeGamut` in the export command did the single
+ * source→target matrix + TRC + quantization step). This encoder performs ZERO
+ * internal color conversion — it only tags the canvas to match `config.targetGamut`
+ * so the browser round-trip does not reinterpret the pixels. (Wide-gamut Adobe RGB /
+ * ProPhoto targets are routed to the PNG/TIFF 16-bit path upstream and never reach
+ * this handler.) See the KNOWN DEFECT note: AVIF still cannot embed an ICC profile.
  *
- * 16 Mpx ≈ 4096×4000 — libaom needs ~5-8× raw size for encoder buffers,
- * so 16Mpx × 4 bytes × 6 ≈ 384 MB peak, well within the 2GB wasm heap.
- * A 24.5 Mpx image (4284×5712) would need ~600-800MB for lag buffers alone,
- * which combined with other vips allocations risks OOM.
- */
-const VIPS_HEIF_MAX_PIXELS = 16_000_000;
-
-/**
- * Encode a canvas/bitmap to AVIF with color management.
+ * `pixels` is retained in the signature for interface parity with the other
+ * handlers (ImageFormatHandler), but AVIF encode no longer dispatches any vips
+ * job — see the DESIGN DECISION note above.
  */
 export async function encodeAvif(
   source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
-  pixels: PixelService,
   options: EncodeOptions,
 ): Promise<Blob> {
   const quality = Math.round((options.quality ?? 0.80) * 100);
-  const meta = options.metadata;
   const config = options.exportConfig;
 
-  const frameCS: WorkingColorSpace = (config?.frameColorSpace as WorkingColorSpace) || 'srgb';
-  const exportStrategy = getExportStrategy(frameCS, 'avif');
   const embedIcc = config?.embedIcc ?? false;
 
-  const pixelConv = resolveExportPixelConversion(
-    frameCS,
-    { colorSpace: meta?.colorSpace, hasIccProfileData: !!meta?.raw?.icc?.data },
-    embedIcc,
-    'avif',
-  );
+  // The gamut the incoming pixels ARE in. AVIF only ever receives
+  // srgb / display-p3 here (wide-gamut is routed onto the PNG/TIFF raw lanes).
+  const targetGamut: GamutId = (config?.targetGamut as GamutId | undefined) ?? 'srgb';
 
-  // Pixel extraction with color space handling
-  let canvas: OffscreenCanvas | HTMLCanvasElement;
-
-  if (pixelConv === 'p3-to-srgb') {
-    const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source, 'display-p3') : source as OffscreenCanvas;
-    const w = srcCanvas.width;
-    const h = srcCanvas.height;
-    const tmpCanvas = new OffscreenCanvas(w, h);
-    const tmpCtx = tmpCanvas.getContext('2d', { colorSpace: 'display-p3' })!;
-    tmpCtx.drawImage(srcCanvas, 0, 0);
-    const imgData = tmpCtx.getImageData(0, 0, w, h);
-    convertImageDataColorSpace(imgData.data, 'display-p3', 'srgb');
-    const outCanvas = new OffscreenCanvas(w, h);
-    const outCtx = outCanvas.getContext('2d')!;
-    outCtx.putImageData(new ImageData(imgData.data, w, h), 0, 0);
-    canvas = outCanvas;
-  } else {
-    canvas = source instanceof ImageBitmap
-      ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
-      : source as OffscreenCanvas;
-  }
+  // Pixel extraction. Pixels already carry targetGamut + its TRC — tag the canvas
+  // to match so the browser round-trip does not reinterpret them. NO color
+  // conversion here.
+  const canvas: OffscreenCanvas | HTMLCanvasElement = source instanceof ImageBitmap
+    ? bitmapToCanvas(source, toCanvasColorSpace(targetGamut))
+    : source as OffscreenCanvas;
 
   const ctx = (canvas as OffscreenCanvas).getContext('2d')!;
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const rgbaData = new Uint8Array(imageData.data.buffer);
 
-  // ICC profile preparation
-  let iccProfileBytes: Uint8Array | undefined;
-
-  if (embedIcc && meta?.raw?.icc?.data) {
-    iccProfileBytes = base64ToIcc(meta.raw.icc?.data);
-
-    if (pixelConv === 'srgb-to-icc') {
-      const { data: convertedData } = await pixels.fileIO.srgbToIcc(
-        rgbaData, canvas.width, canvas.height, iccProfileBytes,
-      );
-      rgbaData.set(convertedData);
-    }
-  } else if (embedIcc && !meta?.raw?.icc?.data) {
-    // embedIcc=true but no source ICC data; sRGB assumed
+  // ⚠️ KNOWN DEFECT (see file header): ICC embedding is unsupported for AVIF.
+  if (embedIcc) {
+    console.warn(
+      '[AvifHandler] AVIF export cannot embed an ICC profile (@jsquash/avif ' +
+      'limitation). Pixels are encoded correctly but no colour-space marker is ' +
+      'written. Tracked defect — see avif/encode.ts header. Colours preserved, ' +
+      'profile omitted.',
+    );
   }
 
-  // Engine routing — size-aware dual-engine dispatch
-  const totalPixels = canvas.width * canvas.height;
-  const useVips = USE_VIPS_FOR_ICC_AVIF && totalPixels <= VIPS_HEIF_MAX_PIXELS;
-
-  if (useVips) {
-    const avifBytes = await pixels.fileIO.encodeAvif(rgbaData, canvas.width, canvas.height, {
-      quality, lossless: false, effort: 4,
-      iccProfileBytes: embedIcc ? iccProfileBytes : undefined,
-      bitDepth: meta?.bitDepth, dpi: config?.dpi || meta?.dpi,
-    });
-    return new Blob([avifBytes.buffer as ArrayBuffer], { type: 'image/avif' });
-  }
-
-  // @jsquash/avif path — isolated Worker, no ICC embedding, no size limit
-  if (USE_VIPS_FOR_ICC_AVIF && totalPixels > VIPS_HEIF_MAX_PIXELS) {
-    console.warn('[AvifHandler] Image too large for vips-heif (%dx%d = %d Mpx > %d Mpx limit). Falling back to @jsquash/avif.',
-      canvas.width, canvas.height, Math.round(totalPixels / 1_000_000), Math.round(VIPS_HEIF_MAX_PIXELS / 1_000_000));
-    if (embedIcc) {
-      console.warn('[AvifHandler] ICC profile will be omitted for this large image (vips-heif OOM protection).');
-    }
-  } else if (embedIcc) {
-    console.warn('[AvifHandler] ICC embed not supported (USE_VIPS_FOR_ICC_AVIF=false). Colors preserved, profile omitted.');
-  }
+  // Single encode path — isolated @jsquash Worker, ALLOW_MEMORY_GROWTH, no size
+  // limit, crash-isolated from the shared vips singleton.
   const avifBytes = await encodeAvifJsquash(rgbaData, canvas.width, canvas.height, { quality, speed: 6 });
   return new Blob([avifBytes.buffer as ArrayBuffer], { type: 'image/avif' });
 }
+

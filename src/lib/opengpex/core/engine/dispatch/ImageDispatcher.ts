@@ -35,11 +35,11 @@
  * Architecture: facade → ImageDispatcher → WorkerBridge → Worker (DecoderHandler / ResampleHandler)
  */
 
-import { sourceBitmapCache } from '../cache/SourceBitmapCache';
+import { sourceBitmapCache } from '../sources/SourceBitmapCache';
 import { WorkerBridge } from './bridge/WorkerBridge';
-import { ResampleResult } from '../results/ResampleResult';
+import type { ResampledImage } from '../types';
 import type { PixelResultData } from '../protocol/results';
-import type { AssetService, Rect } from '@opengpex/editor/core/types';
+import type { AssetService, ColorIdentity, GamutId, Rect } from '@opengpex/editor/core/types';
 
 /** Inferred type of the SourceBitmapCache singleton (class not exported — singleton pattern). */
 type SourceBitmapCache = typeof sourceBitmapCache;
@@ -61,6 +61,12 @@ export interface ResampleOptions {
    * Takes priority over targetSize (but maxSize wins if both are set).
    */
   scale?: number;
+  /**
+   * Gamut of the source image (from the caller's light asset record). Threaded
+   * through to the Worker so ResampleHandler picks the matching OffscreenCanvas
+   * colorSpace instead of defaulting to sRGB and clamping wide-gamut sources.
+   */
+  sourceGamut?: GamutId;
 }
 
 export class ImageDispatcher {
@@ -231,16 +237,21 @@ export class ImageDispatcher {
    * (cache hit = zero cost) or via loadBitmap (triggers Worker decode on miss).
    *
    * Uses high-quality bicubic interpolation in the Worker.
-   * Returns a ResampleResult which can be consumed via `.toAsset()` or `.toBlob()`.
+   * Returns a ResampledImage plain data object.
    */
-  async resample(src: string, options: ResampleOptions | { w: number; h: number }): Promise<ResampleResult> {
+  async resample(
+    src: string,
+    options: ResampleOptions | { w: number; h: number },
+  ): Promise<ResampledImage> {
     let target: { w: number; h: number };
+    let sourceGamut: GamutId | undefined;
 
     // Legacy overload: plain { w, h } object
     if ('w' in options && 'h' in options) {
       target = options as { w: number; h: number };
     } else {
       const opts = options as ResampleOptions;
+      sourceGamut = opts.sourceGamut;
       if (opts.maxSize != null) {
         // Resolve maxSize → targetSize from source bitmap dimensions
         const bmp = this.resolveSourceDimensions(src);
@@ -253,8 +264,8 @@ export class ImageDispatcher {
       } else if (opts.scale != null) {
         // Resolve scale → targetSize from the source's TRUE pixel dimensions.
         // Zero-cost on cache hit; decode round-trip otherwise. This is what lets
-        // the resample pipeline scale a shared full-image src correctly (resize
-        // spec §4.1 route X) instead of squashing it into the selection window.
+        // the resample pipeline scale a shared full-image src correctly
+        // instead of squashing it into the selection window.
         const bmp = this.resolveSourceDimensions(src);
         const bitmap = bmp ?? await this.loadSourceDimensions(src);
         target = {
@@ -273,9 +284,24 @@ export class ImageDispatcher {
       src,
       targetWidth: target.w,
       targetHeight: target.h,
+      sourceGamut,
     });
 
-    return new ResampleResult(data, this.assets);
+    return {
+      displayBlob: data.blob,
+      width: data.width,
+      height: data.height,
+      colorIdentity: data.colorIdentity ?? {
+        gamut: 'srgb',
+        trc: 'srgb-trc',
+        bitDepth: (data.depth ?? 8) as ColorIdentity['bitDepth'],
+      },
+      bounds: data.bounds,
+      dimensions: { w: data.width, h: data.height },
+      precomputedHash: data.hash,
+      dprScale: data.dprScale,
+      highDepthSource: data.highDepthSource,
+    };
   }
 
   // ── Private helpers ──

@@ -22,6 +22,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Motion } from '@opengpex/editor/core/motion';
 import { X, AlertCircle, type LucideIcon } from 'lucide-react';
+import Switch from '@opengpex/editor/widgets/Switch';
 
 export interface ChoiceOption {
   id: string;
@@ -34,14 +35,21 @@ export interface ChoiceOption {
   primary?: boolean;
 }
 
+export interface ChoiceSwitchConfig {
+  label: string;
+  description?: string;
+  defaultValue?: boolean;
+}
+
 interface FancyChoiceProps {
   isVisible: boolean;
   title: string;
   options: ChoiceOption[];
-  onSelect: (id: string) => void;
+  onSelect: (id: string, switchValue?: boolean) => void;
   onCancel: () => void;
   /** Optional help text displayed at the bottom of the dialog */
   helpText?: string;
+  switchConfig?: ChoiceSwitchConfig;
 }
 
 /**
@@ -58,6 +66,7 @@ export default function FancyChoice({
   onSelect,
   onCancel,
   helpText,
+  switchConfig,
 }: FancyChoiceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -67,11 +76,13 @@ export default function FancyChoice({
 
   const [shouldRender, setShouldRender] = useState(isVisible);
   const [prevIsVisible, setPrevIsVisible] = useState(isVisible);
+  const [switchChecked, setSwitchChecked] = useState(switchConfig?.defaultValue ?? false);
 
   if (isVisible !== prevIsVisible) {
     setPrevIsVisible(isVisible);
     if (isVisible) {
       setShouldRender(true);
+      setSwitchChecked(switchConfig?.defaultValue ?? false);
     }
   }
 
@@ -149,7 +160,7 @@ export default function FancyChoice({
               return (
                 <button
                   key={opt.id}
-                  onClick={() => onSelect(opt.id)}
+                  onClick={() => onSelect(opt.id, switchChecked)}
                   className="group relative w-full flex items-center gap-4 px-4 py-3.5 rounded-xl
                     border border-[var(--border-subtle)] dark:border-white/[0.08]
                     bg-[var(--bg-stage)]/40 dark:bg-white/[0.02]
@@ -199,7 +210,7 @@ export default function FancyChoice({
               {options.map((opt) => (
                 <button
                   key={opt.id}
-                  onClick={() => onSelect(opt.id)}
+                  onClick={() => onSelect(opt.id, switchChecked)}
                   title={opt.description || opt.label}
                   className={`group relative px-2 py-2.5 rounded-lg text-center
                     border transition-all duration-150 cursor-pointer active:scale-95
@@ -217,6 +228,33 @@ export default function FancyChoice({
                   )}
                 </button>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Switch toggle (if configured) */}
+        {switchConfig && (
+          <div className="px-5 pb-4 -mt-2">
+            <div
+              onClick={() => setSwitchChecked(!switchChecked)}
+              className="flex items-center justify-between p-3 rounded-xl bg-[var(--bg-stage)]/40 dark:bg-white/[0.02] border border-[var(--border-subtle)] dark:border-white/[0.06] hover:border-[var(--border-light)] dark:hover:border-white/[0.12] transition-colors duration-200 cursor-pointer select-none"
+            >
+              <div className="flex flex-col pr-3 min-w-0">
+                <span className="text-xs font-bold text-[var(--text-main)]">
+                  {switchConfig.label}
+                </span>
+                {switchConfig.description && (
+                  <span className="text-[10px] text-[var(--text-muted)]/70 mt-0.5 leading-snug">
+                    {switchConfig.description}
+                  </span>
+                )}
+              </div>
+              <Switch
+                checked={switchChecked}
+                onChange={setSwitchChecked}
+                size="compact"
+                activeColor="bg-emerald-500"
+              />
             </div>
           </div>
         )}

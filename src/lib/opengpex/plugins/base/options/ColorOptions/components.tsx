@@ -20,15 +20,23 @@
 "use client";
 
 import React, { useRef, useState, useEffect } from "react";
-import { Palette, PaintBucket, Pin, Pipette, MonitorUp } from "lucide-react";
+import { Palette, PaintBucket, Pin } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ColorPickerPro } from "@opengpex/editor/widgets/ColorPickerPro";
-import { ColorSampler } from "@opengpex/editor/widgets/ColorSampler";
+import { ColorSampler, SAMPLER_CHROME_ATTR } from "./ColorSampler";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
+import SplitButton from "@opengpex/editor/widgets/SplitButton";
+import type { ActionOption } from "@opengpex/editor/widgets/ActionDropdown";
 import FancyGroup, { type FancyGroupItem } from "@opengpex/editor/widgets/FancyGroup";
 import PluginSlot from "@opengpex/editor/workspace/components/PluginSlot";
 import { useColorOptions } from "./hooks";
-import { COLOR_OPTIONS_CRAFT_SLOT } from "./protocols";
+import {
+  COLOR_OPTIONS_CRAFT_SLOT,
+  samplerStripTools,
+  samplerBarTools,
+  type SamplerTool,
+  type SamplerToolStrategy,
+} from "./protocols";
 
 export const ColorOptionsComponent = React.memo(
   function ColorOptionsComponent() {
@@ -37,11 +45,21 @@ export const ColorOptionsComponent = React.memo(
       applyColor,
       fillAsLayerCmd,
       sampleColor,
-      sampleColorNative,
       isSampling,
       handleSampled,
       cancelSampling,
       activeFrame,
+      snapshot,
+      onRequestSnapshot,
+      captureExactAt,
+      releaseSnapshot,
+      geometry,
+      getCamera,
+      sampleAllLayers,
+      activeSamplerTool,
+      samplerToolSetCmd,
+      frameGamut,
+      autoExpandPro,
     } = useColorOptions();
 
     const containerRef = useRef<HTMLDivElement>(null);
@@ -91,23 +109,64 @@ export const ColorOptionsComponent = React.memo(
         </div>
 
         {/* Group 2: Actions */}
-        <div className="relative flex items-center" ref={containerRef}>
+        <div
+          className="relative flex items-center"
+          ref={containerRef}
+          {...{ [SAMPLER_CHROME_ATTR]: "" }}
+        >
           <FancyGroup
             size="xs"
             highlighted={isDropdownOpen || isSampling}
             items={(() => {
               const groupItems: FancyGroupItem[] = [];
 
-              // Conditionally add sample button when EyeDropper API is available
-              if (typeof window !== "undefined" && "EyeDropper" in window) {
+              // Canvas sampler SplitButton — compact, memorized between All Layers and Current Layer.
+              // Selecting from dropdown updates the tool and immediately closes without occluding ColorPickerPro.
+              const samplerDropdownOptions: ActionOption[] = (
+                samplerStripTools() as SamplerToolStrategy[]
+              ).map((s) => {
+                const Icon = s.icon;
+                return {
+                  value: s.id,
+                  label: s.label,
+                  icon: <Icon size={13} />,
+                };
+              });
+
+              groupItems.push({
+                key: "sample",
+                element: (
+                  <SplitButton
+                    compact
+                    borderless
+                    active={isSampling}
+                    value={activeSamplerTool}
+                    onChange={(val) => {
+                      samplerToolSetCmd?.execute({ tool: val as SamplerTool });
+                    }}
+                    onClick={sampleColor}
+                    dropdownOptions={samplerDropdownOptions}
+                    tooltip={`Sample ${sampleAllLayers ? "All Layers" : "Current Layer"} (i)`}
+                  />
+                ),
+              });
+
+              // Bar-surface sampler tools (`surface: 'bar'`) — currently just
+              // the native screen picker. It sits beside the pipette rather
+              // than inside the strip because it is a peer ENTRY POINT: it does
+              // not need canvas sampling to be running, and it is momentary, so
+              // it has no "active" state and is outside the Tab cycle. Hidden
+              // entirely where `window.EyeDropper` is missing (its own gate).
+              for (const s of samplerBarTools() as SamplerToolStrategy[]) {
+                const Icon = s.icon;
                 groupItems.push({
-                  key: "sample",
-                  tooltip: "Sample Color",
-                  onClick: sampleColor,
+                  key: `tool-${s.id}`,
+                  tooltip: s.label,
+                  onClick: () => samplerToolSetCmd?.execute({ tool: s.id }),
                   icon: (
-                    <Pipette
+                    <Icon
                       size={13}
-                      className="text-zinc-800 dark:text-zinc-200 group-hover:text-amber-500 transition-colors"
+                      className="text-zinc-800 dark:text-zinc-200 transition-colors group-hover:text-indigo-500"
                     />
                   ),
                 });
@@ -121,7 +180,7 @@ export const ColorOptionsComponent = React.memo(
                 icon: (
                   <div
                     className="w-4 h-4 rounded shadow-inner ring-1 ring-zinc-800 dark:ring-zinc-200 transition-transform active:scale-90"
-                    style={{ backgroundColor: currentColor }}
+                    style={{ backgroundColor: currentColor.hex }}
                   />
                 ),
               });
@@ -136,7 +195,7 @@ export const ColorOptionsComponent = React.memo(
                     {/* Subtle color glow background */}
                     <div
                       className="absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity rounded-r-xl"
-                      style={{ backgroundColor: currentColor }}
+                      style={{ backgroundColor: currentColor.hex }}
                     />
                     <PaintBucket
                       size={13}
@@ -164,46 +223,27 @@ export const ColorOptionsComponent = React.memo(
                 onMouseLeave={handleMouseLeave}
                 className="absolute top-full mt-3 bg-[var(--bg-panel)] backdrop-blur-xl border border-[var(--border-subtle)] rounded-2xl shadow-2xl overflow-hidden z-[999] p-3 ring-1 ring-black/5"
               >
-                <div className="flex justify-between items-center mb-2">
-                  <div className="flex items-center gap-0.5">
-                    <Tooltip content="Sample from canvas" position="bottom" display="inline-flex">
+                <ColorPickerPro
+                  value={currentColor}
+                  onValueChange={applyColor}
+                  onValueCommit={handleCommitColor}
+                  enablePro
+                  frameGamut={frameGamut}
+                  autoExpandPro={autoExpandPro}
+                  headerRight={
+                    <Tooltip content={isPinned ? "Unpin" : "Pin Color Picker"} position="bottom" display="inline-flex">
                       <button
-                        onClick={() => { setIsDropdownOpen(false); sampleColor(); }}
-                        className="p-1 rounded-md transition-colors text-[var(--text-muted)] hover:text-amber-500 hover:bg-[var(--bg-stage)] group"
+                        onClick={() => setIsPinned(!isPinned)}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          isPinned
+                            ? "text-amber-500 bg-amber-500/10"
+                            : "text-[var(--text-muted)] hover:bg-[var(--bg-stage)] hover:text-[var(--text-normal)]"
+                        }`}
                       >
-                        <Pipette
-                          size={14}
-                          className="group-hover:scale-110 transition-transform"
-                        />
+                        <Pin size={13} className={isPinned ? "fill-current" : ""} />
                       </button>
                     </Tooltip>
-                    {typeof window !== "undefined" && "EyeDropper" in window && (
-                      <Tooltip content="Sample from screen (native)" position="bottom" display="inline-flex">
-                        <button
-                          onClick={() => { setIsDropdownOpen(false); sampleColorNative(); }}
-                          className="p-1 rounded-md transition-colors text-[var(--text-muted)] hover:text-indigo-500 hover:bg-[var(--bg-stage)] group"
-                        >
-                          <MonitorUp
-                            size={14}
-                            className="group-hover:scale-110 transition-transform"
-                          />
-                        </button>
-                      </Tooltip>
-                    )}
-                  </div>
-                  <Tooltip content={isPinned ? "Unpin" : "Pin Color Picker"} position="bottom" display="inline-flex">
-                    <button
-                      onClick={() => setIsPinned(!isPinned)}
-                      className={`p-1 rounded-md transition-colors ${isPinned ? "text-amber-500 bg-amber-500/10" : "text-[var(--text-muted)] hover:bg-[var(--bg-stage)]"}`}
-                    >
-                      <Pin size={14} className={isPinned ? "fill-current" : ""} />
-                    </button>
-                  </Tooltip>
-                </div>
-                <ColorPickerPro
-                  color={currentColor}
-                  onChange={applyColor}
-                  onCommit={handleCommitColor}
+                  }
                 />
               </motion.div>
             )}
@@ -216,9 +256,17 @@ export const ColorOptionsComponent = React.memo(
           className="flex items-center ml-1"
         />
 
-        {/* ColorSampler: Custom canvas pixel sampler overlay */}
+        {/* ColorSampler: WebGPU snapshot pixel sampler overlay */}
         <ColorSampler
           active={isSampling}
+          snapshot={snapshot}
+          onRequestSnapshot={onRequestSnapshot}
+          captureExact={captureExactAt}
+          onReleaseSnapshot={releaseSnapshot}
+          frame={activeFrame}
+          geometry={geometry}
+          getCamera={getCamera}
+          currentLayerOnly={!sampleAllLayers}
           onSample={handleSampled}
           onCancel={cancelSampling}
         />

@@ -23,82 +23,51 @@
 
 // @ts-expect-error - piexifjs lacks official TypeScript declarations
 import * as piexif from 'piexifjs';
-import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/types';
+import type { GamutId } from '@opengpex/editor/core/types';
+import { toGamutId } from '@opengpex/editor/core/types';
 import type { EncodeOptions } from '../../types';
 import { bitmapToCanvas } from '../../index';
-import { base64ToIcc, getStockIccProfile } from '../../icc';
-import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
-import { getExportStrategy, resolveExportPixelConversion } from '@opengpex/editor/core/color/ColorPipeline';
+import { base64ToIcc, getStockIccProfile } from '../../shared/icc';
+import { toCanvasColorSpace } from '@opengpex/editor/core/engine/color';
 import { injectJpegExif, injectJpegIcc } from './jfif';
-import { blobToBase64, base64ToBlob } from './utils';
+import { blobToBase64, base64ToBlob } from '../../utils';
 
 /**
  * Encode a canvas/bitmap to JPEG with metadata injection.
+ *
+ * ── COLOR CONTRACT ──────────────────────────────────────────────────────────
+ * Pixels arrive ALREADY in the target gamut with the target TRC applied — the
+ * terminal `unpremultiplyEncodeGamut` in the export command performed the single
+ * source→target gamut matrix + TRC + quantization step. This encoder therefore
+ * performs ZERO internal color conversion: it only writes the JPEG container and
+ * the EXIF/ICC metadata matching what the pixels now carry (the source ICC
+ * verbatim on a same-gamut round-trip; a stock profile for `targetGamut`
+ * otherwise). The canvas is tagged `toCanvasColorSpace(targetGamut)` purely to
+ * prevent the browser encoder from reinterpreting the already-correct pixels.
  */
 export async function encodeJpeg(
   source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
-  pixels: PixelService,
   options: EncodeOptions,
 ): Promise<Blob> {
   const quality = options.quality ?? 0.92;
   const meta = options.metadata;
   const config = options.exportConfig;
 
-  // ── Strategy-based export color pipeline ──
-  const frameCS: WorkingColorSpace = (config?.frameColorSpace as WorkingColorSpace) || 'srgb';
-  const exportStrategy = getExportStrategy(frameCS, 'jpeg');
-  const embedIcc = config?.embedIcc ?? false;
+  // The gamut the incoming pixels ARE in = the egest decision's `targetGamut`.
+  // The terminal encode already converted into it upstream, so it drives ONLY the
+  // canvas tag + ICC selection here.
+  const targetGamut: GamutId = (config?.targetGamut as GamutId | undefined) ?? 'srgb';
+  // Embed the SOURCE profile verbatim ONLY when the output gamut still equals the
+  // source file's gamut (exact round-trip) — the pixels are then in the source's
+  // numeric space, so a stock `targetGamut` profile would mislabel them.
+  const sourceIccMatchesTarget = !!meta?.raw?.icc?.data && toGamutId(meta?.colorSpace) === targetGamut;
+  const embedSourceIccVerbatim = sourceIccMatchesTarget;
 
-  // Centralized pixel conversion decision via resolveExportPixelConversion()
-  const pixelConv = resolveExportPixelConversion(
-    frameCS,
-    { colorSpace: meta?.colorSpace, hasIccProfileData: !!meta?.raw?.icc?.data },
-    embedIcc,
-    'jpeg',
-  );
-
-  let canvas: OffscreenCanvas;
-
-  if (pixelConv === 'p3-to-srgb') {
-    // Format fallback: P3 frame → sRGB (format doesn't support P3)
-    const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source, 'display-p3') : source as OffscreenCanvas;
-    const w = srcCanvas.width;
-    const h = srcCanvas.height;
-    const tmpCanvas = new OffscreenCanvas(w, h);
-    const tmpCtx = tmpCanvas.getContext('2d', { colorSpace: 'display-p3' })!;
-    tmpCtx.drawImage(srcCanvas, 0, 0);
-    const imageData = tmpCtx.getImageData(0, 0, w, h);
-    convertImageDataColorSpace(imageData.data, 'display-p3', 'srgb');
-    const outCanvas = new OffscreenCanvas(w, h);
-    const outCtx = outCanvas.getContext('2d')!;
-    outCtx.putImageData(new ImageData(imageData.data, w, h), 0, 0);
-    canvas = outCanvas;
-  } else if (pixelConv === 'srgb-to-icc') {
-    // Pixels are sRGB, need to convert to target ICC space
-    const srcCanvas = source instanceof ImageBitmap ? bitmapToCanvas(source) : source as OffscreenCanvas;
-    const w = srcCanvas.width;
-    const h = srcCanvas.height;
-    const tmpCanvas = new OffscreenCanvas(w, h);
-    const tmpCtx = tmpCanvas.getContext('2d')!;
-    tmpCtx.drawImage(srcCanvas, 0, 0);
-    const imageData = tmpCtx.getImageData(0, 0, w, h);
-
-    const iccBytes = base64ToIcc(meta!.raw!.icc!.data);
-    const { data } = await pixels.fileIO.srgbToIcc(
-      new Uint8Array(imageData.data.buffer),
-      w, h, iccBytes,
-    );
-
-    const clamped = new Uint8ClampedArray(data.length);
-    clamped.set(data);
-    tmpCtx.putImageData(new ImageData(clamped, w, h), 0, 0);
-    canvas = tmpCanvas;
-  } else {
-    // Strategy-driven: use encodeColorSpace to prevent implicit browser conversion
-    canvas = source instanceof ImageBitmap
-      ? bitmapToCanvas(source, exportStrategy.encodeColorSpace)
-      : source as OffscreenCanvas;
-  }
+  // Pixels already carry targetGamut + its TRC — tag the canvas to match so the
+  // browser encoder does not reinterpret them. NO color conversion here.
+  const canvas: OffscreenCanvas = source instanceof ImageBitmap
+    ? bitmapToCanvas(source, toCanvasColorSpace(targetGamut))
+    : source as OffscreenCanvas;
 
   // 1. Get base JPEG blob from browser encoder
   const baseBlob = await canvas.convertToBlob({
@@ -166,14 +135,16 @@ export async function encodeJpeg(
     let resultBlob = base64ToBlob(newBase64, 'image/jpeg');
 
     // 3. Inject ICC Profile if embedding is requested
-    if (config?.embedIcc && meta?.raw?.icc?.data) {
-      const iccBytes = base64ToIcc(meta.raw.icc?.data);
+    if (config?.embedIcc && embedSourceIccVerbatim) {
+      // Round-trip OR post-pre-encode-conversion → embed the source's own profile.
+      const iccBytes = base64ToIcc(meta!.raw!.icc!.data);
       const jpegBytes = new Uint8Array(await resultBlob.arrayBuffer());
       const withIcc = injectJpegIcc(jpegBytes, iccBytes);
       resultBlob = new Blob([withIcc.buffer as ArrayBuffer], { type: 'image/jpeg' });
-    } else if (config?.embedIcc && !meta?.raw?.icc?.data) {
-      // embedIcc requested but no source ICC data → embed stock profile for frame CS
-      const stockProfile = getStockIccProfile(frameCS);
+    } else if (config?.embedIcc) {
+      // No matching source ICC (none present, or gamut changed) → embed the stock
+      // profile for the OUTPUT gamut, which is what the pixels now carry.
+      const stockProfile = getStockIccProfile(targetGamut);
       if (stockProfile) {
         const jpegBytes = new Uint8Array(await resultBlob.arrayBuffer());
         const withIcc = injectJpegIcc(jpegBytes, stockProfile.bytes);

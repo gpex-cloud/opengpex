@@ -24,67 +24,7 @@
  * Transferable fields (Blob, ArrayBuffer) are annotated for the bridge to extract.
  */
 
-import type { LayerDescriptor } from './descriptors';
-import type { FilterDescriptor } from './IFilter';
-import type { Shape, TRC } from '@opengpex/editor/core/types';
-
-// ─── CompositeJob ───
-
-export interface CompositeJob {
-  type: 'COMPOSITE';
-  layers: LayerDescriptor[];
-  roi: Shape;
-  precision: 8 | 16 | 32;
-  dpr: number;
-  outputWidth: number;
-  outputHeight: number;
-
-  /**
-   * Target TRC for compositing — determines the blending path.
-   *
-   * ⚠️ PERFORMANCE-CRITICAL MODE SWITCH:
-   *   - `'srgb-trc'` (default): Hardware-accelerated Canvas 2D globalCompositeOperation.
-   *     Blend modes operate in gamma space. Fast (~1ms/frame for 4K).
-   *   - `'linear'`: Manual per-pixel blending via ImageData + blend2d module.
-   *     Blend modes operate in physically-correct linear-light space
-   *     (matching Photoshop CC+ "Blend Colors Using Gamma 1.0").
-   *     Slow (~50-200ms/frame for 4K). Only used for offscreen export,
-   *     NOT for onscreen preview.
-   *
-   * Derived from Frame.trc. Default frames use 'srgb-trc'; frames with
-   * bitDepth >= 16 may default to 'linear' (set by LayerFactory.getNewFrame).
-   *
-   * @default 'srgb-trc'
-   */
-  compositeTRC?: TRC;
-
-  /**
-   * Color space for the compositing pipeline (Phase C — wide gamut).
-   *
-   * Must match the frame's working color space to prevent implicit browser color
-   * conversions when drawing bitmaps. Only `'srgb'` and `'display-p3'` are supported
-   * by the Canvas 2D API as of 2026.
-   *
-   * Named `compositeColorSpace` (not `canvasColorSpace`) to decouple from the
-   * Canvas 2D implementation detail — for a future WebGPU backend this field
-   * determines the compute shader's pixel encoding, not a canvas context option.
-   *
-   * @default 'srgb'
-   */
-  compositeColorSpace?: 'srgb' | 'display-p3';
-}
-
-// ─── FilterJob ───
-
-export interface FilterJob {
-  type: 'FILTER';
-  /** Worker-transferred ImageBitmap (owned clone). Neutered after transfer. */
-  source: ImageBitmap;
-  /** Ordered filter descriptors to apply */
-  descriptors: FilterDescriptor[];
-  /** Opaque cache key echoed back for bookkeeping (not read by Worker). */
-  key?: string;
-}
+import type { GamutId } from '@opengpex/editor/core/types';
 
 // ─── ResampleJob ───
 
@@ -93,14 +33,12 @@ export interface ResampleJob {
   src: string;
   targetWidth: number;
   targetHeight: number;
-}
-
-// ─── RasterizeJob ───
-
-export interface RasterizeJob {
-  type: 'RASTERIZE';
-  subType: 'text' | 'mask';
-  payload: unknown;
+  /**
+   * Gamut of the source image, resolved by the caller (light asset record).
+   * Drives the OffscreenCanvas `colorSpace` so wide-gamut sources aren't
+   * silently clamped to sRGB during resample. Absent → handler defaults to 'srgb'.
+   */
+  sourceGamut?: GamutId;
 }
 
 // ─── DecodeJob ───
@@ -137,16 +75,6 @@ export interface ExtractPixelsJob {
   rect?: { x: number; y: number; w: number; h: number };  // optional crop region
 }
 
-// ─── GetTileJob ───
-
-export interface GetTileJob {
-  type: 'GET_TILE';
-  hash: string;
-  level: number;
-  x: number;
-  y: number;
-}
-
 // ─── HistogramJob ───
 
 /**
@@ -159,45 +87,12 @@ export interface HistogramJob {
   src: string;  // content hash (WorkerCache key)
 }
 
-// ─── FileIoJob ───
-
-export interface FileIoJob {
-  type: 'FILE_IO';
-  fn: 'decodeTiff' | 'encodeTiff' | 'encodeAvif' | 'decodePages' | 'decodePage' | 'getPageCount' | 'iccToSrgb' | 'srgbToIcc';
-  /** Whether to preserve original color space pixels (skip ICC transform). Used by decodeTiff. */
-  preserveColorSpace?: boolean;
-  bytes?: Uint8Array;
-  rgbaData?: Uint8Array;
-  width?: number;
-  height?: number;
-  page?: number;
-  options?: Record<string, unknown>;
-  /** Target ICC Profile binary data (used by srgbToIcc for reverse color conversion). */
-  iccProfileData?: Uint8Array;
-  layers?: Array<{
-    bytes: Uint8Array;
-    x: number;
-    y: number;
-    blendMode: string;
-    opacity: number;
-    is8bit: boolean;
-    adjustments?: Record<string, unknown>;
-  }>;
-  canvasWidth?: number;
-  canvasHeight?: number;
-}
-
 // ─── Job union ───
 
 export type Job =
-  | CompositeJob
-  | FilterJob
   | ResampleJob
-  | RasterizeJob
   | DecodeJob
   | EnsureAssetJob
   | ForgetJob
   | ExtractPixelsJob
-  | GetTileJob
-  | HistogramJob
-  | FileIoJob;
+  | HistogramJob;

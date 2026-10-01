@@ -21,6 +21,7 @@
 
 import { EditorContextValue, EditorCommand, asLocalRect, asLocalShape, Frame, LocalRect, LocalShape, LocalPolygon, EditorActions, GeometryService, Point2D } from '@opengpex/editor/core/types';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+import { blobToImageData } from '@opengpex/editor/core/engine/utils/pixel-utils';
 import { clipComputeClient } from './workers/client';
 import * as P from './protocols';
 import type { ClipTool } from './protocols';
@@ -173,6 +174,7 @@ export const CLIP_OPTIONS_COMMANDS = {
    *
    * Only active when `interactionMode === 'clip'`; no-op in any other mode.
    * Re-Canvas guard: no-op when active (Re-Canvas is rect-only).
+   * Bound via local keydown listener in ClipOptionsMain (not HotkeyManager).
    */
   cycleToolForward: {
     id: P.CMD_CYCLE_TOOL_FORWARD,
@@ -183,7 +185,6 @@ export const CLIP_OPTIONS_COMMANDS = {
       if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
       cycleClipTool(ctx, +1);
     },
-    shortcut: { key: 'Tab' }
   } as EditorCommand<void, void>,
 
   /**
@@ -192,6 +193,7 @@ export const CLIP_OPTIONS_COMMANDS = {
    *
    * Only active when `interactionMode === 'clip'`; no-op in any other mode.
    * Re-Canvas guard: no-op when active (Re-Canvas is rect-only).
+   * Bound via local keydown listener in ClipOptionsMain (not HotkeyManager).
    */
   cycleToolBackward: {
     id: P.CMD_CYCLE_TOOL_BACKWARD,
@@ -202,7 +204,6 @@ export const CLIP_OPTIONS_COMMANDS = {
       if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
       cycleClipTool(ctx, -1);
     },
-    shortcut: { key: 'Tab', shift: true }
   } as EditorCommand<void, void>,
 
 
@@ -699,18 +700,15 @@ export const CLIP_OPTIONS_COMMANDS = {
           return;
         }
 
-        // Composite at 1x DPR — we only need the alpha channel for contour tracing.
-        const compositeResult = await ctx.pixels.composite({
+        // Composite at 1:1 — we only need the alpha channel for contour tracing.
+        const composited = await ctx.pixels.composite({
           layers: [layer],
           roi: worldShape,
-          precision: 8,
-          dpr: 1,
-          compositeTRC: frame.trc,
-          compositeColorSpace: frame.colorSpace,
+          frame,
         });
 
-        // Direct path: toImageData() avoids the asset → Image → canvas → getImageData cycle
-        imageData = await compositeResult.toImageData();
+        // Direct path: blobToImageData() avoids the asset → Image → canvas → getImageData cycle
+        imageData = await blobToImageData(composited.displayBlob);
       } catch (err) {
         console.error('[SelectFromAlpha] Failed to read layer image data:', err);
         ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
@@ -738,7 +736,8 @@ export const CLIP_OPTIONS_COMMANDS = {
 
         // ─── Build polygon and coordinate-transform ────────────────────
         // The alpha worker output is in "composite space" (0-based pixel coords
-        // of the mergeLayersWithShape output). When the layer's visibleShape.rect
+        // of the compositeLayers/`pixels.composite` output). When the layer's
+        // visibleShape.rect
         // has non-zero x/y (deriveLogical layers sharing a parent src, or trunk
         // imports with transparent borders), composite space ≠ layer-local space.
         // We must offset by visibleShape.rect.(x,y) to convert to true layer-local

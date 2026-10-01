@@ -30,45 +30,33 @@ export type {
 export { asWorldMatrix, translateToRoi } from './descriptors';
 
 export type {
-  CompositeJob,
-  FilterJob,
   ResampleJob,
-  RasterizeJob,
   DecodeJob,
   EnsureAssetJob,
-  FileIoJob,
   Job,
 } from './jobs';
 
 export type { PixelResultData } from './results';
 
-export type {
-  ChannelMask,
-  ChannelVisibility,
-  DisplayTransformConfig,
-} from './DisplayTransform';
-export { DISPLAY_CHANNEL_SIGNAL_KEY, deriveChannelMask } from './DisplayTransform';
+// ── (removed in v2) DisplayTransform protocol layer ──
+//
+// `DisplayTransform.ts` was a post-composite "protocol stage" whose only live job
+// was channel-view isolation, expressed as a string enum that diverged from the
+// engine's own channel mask (the root of the channel-view regression). Under the
+// WebGPU architecture the display channel lives on `Scene.display.channelMask`
+// (`core/gpu/scene/Scene.ts`) as a 4-bit visibility mask applied in the view pass;
+// its "future" roles (ICC/soft-proof/HDR) are already served by `Scene.display`
+// + the in-shader colour pipeline, not a separate protocol layer. The UI fold
+// helper moved to `plugins/base/drawers/LayersDrawer/components/channelMask.ts`
+// and the signal key to `Scene.ts`.
 
-export type {
-  FilterDescriptor,
-  FilterType,
-  FilterKind,
-  FilterInput,
-  FilterApplyOptions,
-  HighResPixelBuffer,
-  IFilter,
-  BrightnessFilter,
-  ContrastFilter,
-  SaturationFilter,
-  HueRotateFilter,
-  BlurFilter,
-  CurvesFilter,
-  LevelsFilter,
-  ChannelMixFilter,
-  CustomFilter,
-  CurvePoints,
-  CurvesData,
-  LevelsData,
-  ChannelMixData,
-} from './IFilter';
-export { classifyFilter, hasNeighborhoodFilter } from './IFilter';
+// ── (removed in v2) IFilter contract ──
+//
+// `IFilter.ts` described the CPU/Canvas2D filter runtime: a descriptor union with
+// per-op arms, the classification/colour-hint helpers, and the backend interface.
+// All of it is superseded by the declarative `AdjustmentDesc` / `FilterDesc` shapes
+// in `core/gpu/scene/Scene.ts`, evaluated by `adjust.wgsl` and `FilterPass`.
+// The DATA types it also held (curve points / levels config / channel
+// mixer matrix) live in `core/types/models.ts`, which is where the persisted
+// `Layer.curves` / `Layer.levels` / `Layer.channelMix` already pointed — so nothing
+// was lost, one duplicate declaration was removed.

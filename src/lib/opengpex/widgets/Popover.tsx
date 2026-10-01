@@ -60,6 +60,25 @@ interface PopoverProps {
    * popover vs the aspect-ratio dropdown in `ClipOptions/components.tsx`).
    */
   zIndex?: number;
+  /**
+   * CSS selector, queried INSIDE the trigger subtree, naming the element that
+   * the popover bubble (and by default the arrow) should position against.
+   *
+   * Needed when the trigger is a composite (e.g. a `FancyGroup` of several
+   * buttons) and the popover logically belongs to ONE specific button, so both
+   * the popover bubble and the arrow are centered/aligned to that inner element.
+   * Default: triggerRef.current.
+   */
+  anchorSelector?: string;
+  /**
+   * CSS selector, queried INSIDE the trigger subtree, naming the element the
+   * arrow specifically should point at. Default: falls back to `anchorSelector`
+   * if provided, otherwise the trigger's own center.
+   *
+   * Needed when bubble placement follows one target (or the whole trigger) but
+   * the arrow should point at another inner element.
+   */
+  arrowAnchorSelector?: string;
 }
 
 
@@ -85,6 +104,8 @@ export default function Popover({
   display = 'inline-flex',
   offset = 8,
   zIndex = 5000,
+  anchorSelector,
+  arrowAnchorSelector,
 }: PopoverProps) {
 
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -97,10 +118,30 @@ export default function Popover({
   // `coords` so a single re-position pass keeps both in sync.
   const [arrowOffset, setArrowOffset] = useState<{ x: number; y: number } | null>(null);
 
+  // Reset coordinates and offset when popover closes.
+  // Uses React's "adjusting state on prop change" pattern during render rather
+  // than useEffect, avoiding cascading renders and setState-in-effect linter errors.
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+  if (prevIsOpen !== isOpen) {
+    setPrevIsOpen(isOpen);
+    if (!isOpen) {
+      setCoords(null);
+      setArrowOffset(null);
+    }
+  }
+
   // Compute position from trigger bounding rect
   const updatePosition = useCallback(() => {
     if (!triggerRef.current) return;
-    const rect = triggerRef.current.getBoundingClientRect();
+    const triggerEl = triggerRef.current;
+    const anchorEl = (anchorSelector ? triggerEl.querySelector<HTMLElement>(anchorSelector) : null) ?? triggerEl;
+    const rect = anchorEl.getBoundingClientRect();
+
+    // Arrow anchor: falls back to anchorEl if arrowAnchorSelector is not provided
+    const arrowEl = (arrowAnchorSelector
+      ? triggerEl.querySelector<HTMLElement>(arrowAnchorSelector)
+      : null) ?? anchorEl;
+    const arrowRect = arrowEl.getBoundingClientRect();
     const scrollX = window.scrollX;
     const scrollY = window.scrollY;
 
@@ -140,7 +181,7 @@ export default function Popover({
           left = rect.right + scrollX;
           break;
       }
-      triggerCenterViewport = rect.left + scrollX + rect.width / 2;
+      triggerCenterViewport = arrowRect.left + scrollX + arrowRect.width / 2;
     } else {
       switch (align) {
         case 'start':
@@ -153,7 +194,7 @@ export default function Popover({
           top = rect.bottom + scrollY;
           break;
       }
-      triggerCenterViewport = rect.top + scrollY + rect.height / 2;
+      triggerCenterViewport = arrowRect.top + scrollY + arrowRect.height / 2;
     }
 
     setCoords({ top, left });
@@ -181,8 +222,35 @@ export default function Popover({
         setArrowOffset({ x: 0, y: clampedY });
       }
     });
-  }, [position, align, offset]);
+  }, [position, align, offset, anchorSelector, arrowAnchorSelector]);
 
+  // Whenever coords are set and the popover element mounts, compute arrowOffset
+  // accurately (solves initial render where rAF might fire before DOM mount).
+  useEffect(() => {
+    if (!isOpen || !coords || !popoverRef.current) return;
+    const popEl = popoverRef.current;
+    const popRect = popEl.getBoundingClientRect();
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+
+    const triggerEl = triggerRef.current;
+    if (!triggerEl) return;
+    const anchorEl = (anchorSelector ? triggerEl.querySelector<HTMLElement>(anchorSelector) : null) ?? triggerEl;
+    const arrowEl = (arrowAnchorSelector ? triggerEl.querySelector<HTMLElement>(arrowAnchorSelector) : null) ?? anchorEl;
+    const arrowRect = arrowEl.getBoundingClientRect();
+
+    if (position === 'top' || position === 'bottom') {
+      const triggerCenterViewport = arrowRect.left + scrollX + arrowRect.width / 2;
+      const localX = triggerCenterViewport - scrollX - popRect.left;
+      const clampedX = Math.max(12, Math.min(popRect.width - 12, localX));
+      setArrowOffset({ x: clampedX, y: 0 });
+    } else {
+      const triggerCenterViewport = arrowRect.top + scrollY + arrowRect.height / 2;
+      const localY = triggerCenterViewport - scrollY - popRect.top;
+      const clampedY = Math.max(12, Math.min(popRect.height - 12, localY));
+      setArrowOffset({ x: 0, y: clampedY });
+    }
+  }, [isOpen, coords, position, anchorSelector, arrowAnchorSelector]);
 
   useEffect(() => {
     if (isOpen) {

@@ -118,7 +118,7 @@ export async function executeAgentTool(
         });
       }
 
-      // ── Phase 1.5 阶段 A: History ──────────────────────────────────────
+      // ── History ─────────────────────────────────────────────────────────
       case 'undo':
         actions.history.undo();
         return JSON.stringify({ success: true, action: 'Undid last action' });
@@ -127,7 +127,7 @@ export async function executeAgentTool(
         actions.history.redo();
         return JSON.stringify({ success: true, action: 'Redid last action' });
 
-      // ── Phase 1.5 阶段 A: Selection operations ─────────────────────────
+      // ── Selection operations ────────────────────────────────────────────
       case 'drill_selection': {
         actions.adv.layer.clip.drill.execute({ feather: 0 });
         // Exit clip mode (back to pan) — selection data stays on the frame
@@ -141,7 +141,7 @@ export async function executeAgentTool(
         await actions.executeCommand('opengpex.options.clip_options.cmd.invert_selection');
         return JSON.stringify({ success: true, action: 'Inverted selection' });
 
-      // ── Phase 1.5 阶段 A: Canvas resize ────────────────────────────────
+      // ── Canvas resize ───────────────────────────────────────────────────
       case 'resize_image': {
         const snap = getEditorSnapshot();
         const frame = snap.activeFrame;
@@ -153,10 +153,10 @@ export async function executeAgentTool(
       }
 
       case 'revert_image':
-        actions.adv.frame.create.revert.execute();
+        actions.adv.frame.revert.execute();
         return JSON.stringify({ success: true, action: 'Reverted image to original imported state' });
 
-      // ── Phase 1.5 阶段 A: Cross-plugin (AI Tools + Export) ─────────────
+      // ── Cross-plugin (AI Tools + Export) ────────────────────────────────
       case 'remove_background':
         await actions.executeCommand('opengpex.drawers.ai_tools.cmd.remove_bg');
         return JSON.stringify({ success: true, action: 'Background removal completed. A selection has been created around the foreground.' });
@@ -180,7 +180,7 @@ export async function executeAgentTool(
         return JSON.stringify({ success: true, action: `Image exported/downloaded as ${fmtKey.toUpperCase()}.` });
       }
 
-      // ── Phase 1.2: Knowledge query ───────────────────────────────────────
+      // ── Knowledge query ──────────────────────────────────────────────────
       case 'search_docs': {
         const query: string = args.query || '';
         const cacheKey = `docs:${query}`;
@@ -200,7 +200,7 @@ export async function executeAgentTool(
         }
       }
 
-      // ── Phase 1.5 阶段 B: Skill-based Planning ─────────────────────────
+      // ── Skill-based Planning ─────────────────────────────────────────────
       case 'get_skill': {
         const detail = getSkillDetail(args.skill_id);
         if (!detail) return JSON.stringify({ success: false, error: `Unknown skill: ${args.skill_id}` });

@@ -20,7 +20,7 @@
 import { InteractionHandler, InteractionEvent, LocalRect, asWorldPoint } from '@opengpex/editor/core/types';
 import { Matrix3x3 } from '@opengpex/editor/core/geometry/matrix';
 import { isRotatedPose } from '@opengpex/editor/core/geometry/operators/transform';
-import { InteractionMath } from '../Math';
+import { InteractionMath, type SnapOpState } from '../Math';
 import { InteractionTransaction } from '../Transaction';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 
@@ -345,7 +345,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
   let thresholdCrossed = false; // For 'create' category: has the drag threshold been crossed?
   let _hasMoved = false; // Tracks whether onUpdate produced ≥1px integer displacement
 
-  const opState = { lastThrottleTime: 0 };
+  const opState: SnapOpState = { lastThrottleTime: 0 };
 
   // Internal type string used by resize math (matches handle direction)
   let internalType = '';
@@ -389,6 +389,9 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
       _hasMoved = false;
       startState = { ...config.getInitialState(e, intent) };
       startCanvas = { x: e.point.canvas.x, y: e.point.canvas.y };
+      delete opState.lastPointerPos;
+      delete opState.lastGuideX;
+      delete opState.lastGuideY;
 
       // Resolve orientation once. Only a genuinely rotated/mirrored pose switches
       // to the local-axes path; rotation=0 keeps the original canvas-space math.
@@ -472,8 +475,8 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
       // ─── Resize/Move dispatch: THREE deliberate paths (do NOT naively merge) ──
       //
       // This looks like duplicated resize math, but the branches encode genuinely
-      // different behaviours. Merging them was evaluated and rejected (see the plans
-      // doc "待办 A"); the duplication is bounded and intentional. Kept separate on
+      // different behaviours. Merging them was evaluated and rejected;
+      // the duplication is bounded and intentional. Kept separate on
       // purpose — read this before attempting any unification:
       //
       //   1. move / peel        → translate only.
@@ -596,6 +599,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
             },
             e.activeFrame,
             {
+              threshold: presets.get('SNAP_THRESHOLD'),
               snapToCanvas: presets.get('SNAP_TO_CANVAS'),
               snapToLayers: presets.get('SNAP_TO_LAYERS'),
               maxSnapTargets: presets.get('SNAP_MAX_TARGETS'),
@@ -647,6 +651,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
           // Edge snapping for clamped resize
           if (isSnapping && isResizeHandle && edgeSnapScope === 'all') {
             const snapped = e.geometry.snapping.snapEdge(nextRect, resizeType, e.activeFrame, {
+              threshold: presets.get('SNAP_THRESHOLD'),
               snapToCanvas: presets.get('SNAP_TO_CANVAS'),
               snapToLayers: presets.get('SNAP_TO_LAYERS'),
               maxSnapTargets: presets.get('SNAP_MAX_TARGETS'),
@@ -676,6 +681,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
           // Edge snapping
           if (isSnapping && isResizeHandle) {
             const snapped = e.geometry.snapping.snapEdge(nextRect, resizeType, e.activeFrame, {
+              threshold: presets.get('SNAP_THRESHOLD'),
               snapToCanvas: presets.get('SNAP_TO_CANVAS'),
               snapToLayers: presets.get('SNAP_TO_LAYERS'),
               maxSnapTargets: presets.get('SNAP_MAX_TARGETS'),
@@ -766,6 +772,9 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
       startOrientInverse = null;
       startWorldCenter = null;
       startLocalRect = null;
+      delete opState.lastPointerPos;
+      delete opState.lastGuideX;
+      delete opState.lastGuideY;
     },
 
     onCancel: (e) => {

@@ -62,8 +62,8 @@
  *
  * - Performance note (spec §7 risk 8): 3×3 matrix per-pixel is 3–9× slower
  *   than the 1D LUT of curves/levels, but still lands in the same
- *   `resolveFilteredSource → worker` path. The panel doesn't need to know or
- *   care — it only writes state; the worker eats the CPU cost.
+ *   adjustment pipeline. The panel doesn't need to know or
+ *   care — it only writes state; the pipeline eats the cost.
  */
 
 import React, { useCallback, useMemo, useState } from "react";

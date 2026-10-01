@@ -10,99 +10,82 @@
  */
 
 /**
- * AVIF decode — color pipeline routing.
+ * AVIF decode — pure pixel producer driven by the pre-resolved IngestDecision.
  *
- * Uses the centralized ColorPipeline strategy to determine the correct
- * import conversion path (none / matrix / icc-engine).
+ * The handler no longer sniffs metadata or derives a colour
+ * strategy of its own. The FileService entry injects `metadata` + `decision`
+ * (the single `resolveIngestDecision` call), and this function simply executes
+ * the assigned `decision.decodeChannel`, delegating the 8-bit wide-gamut fold to
+ * the shared `decodeWideGamut8`. `colorIdentity` / `sourceBlob` are
+ * mounted by the entry — hence the `Omit` return.
+ *
+ * ⚠️ KNOWN DEFECT (deliberate, tracked — see also ./encode.ts): AVIF is uniformly
+ * 8-bit in this editor. High-depth (10/12-bit) AVIF decode would need vips-heif,
+ * which shares the wasm-vips singleton + its fixed heap; an OOM there corrupts
+ * every other vips consumer (TIFF/PNG/ICC) with no restart path. So the ingest
+ * decision clamps a >8-bit AVIF to 8-bit at its source, and
+ * this decoder only ever sees the two 8-bit channels below (`image-bitmap` /
+ * `wide-gamut-8`); a >8-bit AVIF is decoded to an 8-bit display bitmap and does
+ * NOT gain >8-bit screen precision. FUTURE FIX (no shared-vips risk): decode
+ * 10/12-bit AVIF via an isolated @jsquash/avif-style decoder, then AVIF can
+ * rejoin the >8-bit high-depth set.
  */
 
-import type { PixelService, WorkingColorSpace } from '@opengpex/editor/core/types';
-import type { DecodeOptions, DecodeResult } from '../../types';
-import type { ImageMetadata } from '../../types';
-import { bitmapToCanvas } from '../../index';
-import { iccToBase64, parseIccProfileName } from '../../icc';
-import { convertImageDataColorSpace } from '@opengpex/editor/core/color/matrices';
-import { resolveColorSpaceForFormat, getImportStrategy, shouldRetainSourceBlob } from '@opengpex/editor/core/color/ColorPipeline';
-import { extractAvifMetadata } from './metadata';
+import type { ImageMetadata, DecodedPayload } from '../../types';
+import type { IngestDecision } from '../../strategy';
+import { decodeWideGamut8 } from '../../shared/lib-custom';
+import { readImageDimensions } from '../../utils';
 
 /**
- * Decode an AVIF file: extract metadata (V2) + color pipeline routing.
+ * Decode an AVIF file by executing the entry-resolved ingest decision.
  */
 export async function decodeAvif(
   file: File,
-  pixels: PixelService,
-  _options?: DecodeOptions,
-): Promise<DecodeResult> {
-  const metadata: ImageMetadata = await extractAvifMetadata(file);
-
-  // ── Strategy-based color pipeline routing ──
-  const detectedCS = resolveColorSpaceForFormat('avif', metadata.colorSpace);
-  const strategy = getImportStrategy(detectedCS);
+  metadata: ImageMetadata,
+  decision: IngestDecision,
+): Promise<DecodedPayload[]> {
 
   let displayBlob: Blob = file;
   let dimensions: { w: number; h: number };
+  let highDepthSource: DecodedPayload['highDepthSource'];
 
-  switch (strategy.conversion) {
-    case 'none': {
-      const img = await createImageBitmap(file);
-      dimensions = { w: img.width, h: img.height };
-      img.close();
+  switch (decision.decodeChannel) {
+    case 'image-bitmap': {
+      // Standard sRGB / Display-P3 8-bit: browser-native decode is sufficient,
+      // the original file bytes remain the verbatim displayBlob.
+      dimensions = await readImageDimensions(file);
       break;
     }
 
-    case 'matrix': {
-      const img = await createImageBitmap(file, { colorSpaceConversion: 'none' });
-      const w = img.width;
-      const h = img.height;
-      dimensions = { w, h };
-
-      const tmpCanvas = bitmapToCanvas(img);
-      img.close();
-      const tmpCtx = tmpCanvas.getContext('2d')!;
-      const imageData = tmpCtx.getImageData(0, 0, w, h);
-
-      convertImageDataColorSpace(imageData.data, detectedCS as WorkingColorSpace, strategy.frameColorSpace);
-
-      const outCS: PredefinedColorSpace = strategy.frameColorSpace === 'display-p3' ? 'display-p3' : 'srgb';
-      const outCanvas = new OffscreenCanvas(w, h);
-      const outCtx = outCanvas.getContext('2d', { colorSpace: outCS })!;
-      outCtx.putImageData(new ImageData(imageData.data, w, h, { colorSpace: outCS }), 0, 0);
-      displayBlob = await outCanvas.convertToBlob({ type: 'image/png' });
-
+    case 'wide-gamut-8': {
+      // 8-bit wide-gamut (Adobe RGB / ProPhoto): decode with browser colour management
+      // OFF, lift f16 naked line AND fold P3 preview in one call.
+      // NB: this is the CPU helper path (createImageBitmap + gammaToLinear), NOT
+      // the vips-heif >8-bit path — no shared-singleton OOM hazard. Wide-gamut
+      // AVIF is near-nonexistent in practice (its wide gamut is rec2020 = gap #8),
+      // wired only for consistency since the shared decode is format-agnostic.
+      const decoded = await decodeWideGamut8(
+        file,
+        decision.colorIdentity.gamut as 'adobe-rgb' | 'prophoto-rgb',
+      );
+      dimensions = { w: decoded.width, h: decoded.height };
+      displayBlob = decoded.displayBlob;
+      // Bare payload only — container/trc/gamut live on the sibling `colorIdentity`
+      // the entry injects (Path B).
+      highDepthSource = {
+        data: decoded.highDepthSource.data,
+        width: decoded.highDepthSource.width,
+        height: decoded.highDepthSource.height,
+      };
       break;
     }
 
-    case 'icc-engine': {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const { width, height, data, iccProfileData } = await pixels.fileIO.iccToSrgb(bytes);
-      dimensions = { w: width, h: height };
-
-      const canvas = new OffscreenCanvas(width, height);
-      const ctx = canvas.getContext('2d')!;
-      const clamped = new Uint8ClampedArray(data.length);
-      clamped.set(data);
-      ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
-      displayBlob = await canvas.convertToBlob({ type: 'image/png' });
-
-      if (iccProfileData && iccProfileData.length > 0) {
-        if (!metadata.raw.icc) {
-          metadata.raw.icc = {
-            data: iccToBase64(iccProfileData),
-            name: parseIccProfileName(iccProfileData) || 'Embedded',
-          };
-        }
-      }
-
-      break;
-    }
+    default:
+      // AVIF only ever routes to the two 8-bit channels above (unknown / multi-
+      // frame / high-depth are steered to 'unsupported' at the entry). Any other
+      // channel is a decision/handler mismatch that must fail loudly.
+      throw new Error(`decodeAvif: unexpected decodeChannel '${decision.decodeChannel}'`);
   }
 
-  const sourceBlob = shouldRetainSourceBlob('avif', metadata, strategy.frameColorSpace) ? file : undefined;
-
-  return {
-    dimensions,
-    metadata,
-    subImages: [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0 }],
-    sourceBlob,
-  };
+  return [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0, highDepthSource }];
 }

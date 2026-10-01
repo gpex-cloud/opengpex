@@ -756,7 +756,15 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
         frames: migratedFrames || state.frames,
         // Ensure UI and History always have fallback values to prevent component crashes due to empty data
         ui: payload.ui ? { ...state.ui, ...payload.ui } : state.ui,
-        pluginConfig: payload.pluginConfig ? { ...state.pluginConfig, ...payload.pluginConfig } : state.pluginConfig,
+        pluginConfig: payload.pluginConfig
+          ? Object.entries(payload.pluginConfig).reduce(
+              (acc, [uid, cfg]) => {
+                acc[uid] = { ...(acc[uid] || {}), ...cfg };
+                return acc;
+              },
+              { ...state.pluginConfig }
+            )
+          : state.pluginConfig,
         history: finalHistory,
         isLoaded: true,
         confirm: null,

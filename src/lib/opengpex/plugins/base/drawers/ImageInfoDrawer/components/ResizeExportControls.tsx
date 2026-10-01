@@ -28,18 +28,17 @@ import {
   ChevronDown,
   Download,
   ImageDown,
+  Scaling,
 } from "lucide-react";
 import FancyButton from "@opengpex/editor/widgets/FancyButton";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
-import Switch from "@opengpex/editor/widgets/Switch";
-
-import { CommandInstance, WorkingColorSpace } from "@opengpex/editor/core/types";
-import { formatPrintSize, DPI_PRESETS, supportsExifEmbed, mimeToFormat, formatToMime } from "@opengpex/editor/core/files";
+import { CommandInstance } from "@opengpex/editor/core/types";
+import { formatPrintSize, DPI_PRESETS, formatToMime } from "@opengpex/editor/core/files";
 import type { ImageMetadata } from "@opengpex/editor/core/files";
-import { shouldEmbedIcc, getFormatColorStrategy } from "@opengpex/editor/core/color/ColorPipeline";
 import * as P from "../protocols";
+import { ResizeExportRules } from "./ResizeExportRules";
 import {
   deriveResizeState,
   calculateNextPixelsByWidth,
@@ -54,8 +53,6 @@ interface ResizeExportControlsProps {
   baseH: number;
   /** Frame's committed DPI (used as fallback when config.dpi is 0) */
   frameDpi: number;
-  /** Frame's working color space (used for ICC embed strategy decision) */
-  frameColorSpace: WorkingColorSpace;
   isClipMode: boolean;
   /** Whether an active selection exists (clip box is non-null) */
   hasSelection?: boolean;
@@ -74,49 +71,18 @@ export function ResizeExportControls({
   baseW,
   baseH,
   frameDpi,
-  frameColorSpace,
   isClipMode,
   hasSelection,
   applyResizeCmd,
   downloadCmd,
   imageMetadata,
+  sourceBitDepth,
+  isSingleLayer,
 }: ResizeExportControlsProps) {
   // Effective DPI: pending override in config, or frame's committed value
   const effectiveDpi = config.dpi || frameDpi;
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
-
-  // TODO: WebGPU 上线后重新启用 16-bit export UI
-  // ─── canExport16bit: unified 16-bit availability decision (Phase D) ───
-  // const export16bitStatus = React.useMemo(() => {
-  //   if (!sourceBitDepth || sourceBitDepth <= 8) {
-  //     return { allowed: false, reason: 'Source file is 8-bit' } as const;
-  //   }
-  //   if (isModified) {
-  //     return { allowed: false, reason: 'Modified frames export at 8-bit only' } as const;
-  //   }
-  //   return { allowed: true, reason: '' } as const;
-  // }, [sourceBitDepth, isModified]);
-  //
-  // const canExport16bit = export16bitStatus.allowed;
-  // const bitDepthDisabledReason = export16bitStatus.reason;
-  //
-  // const show16BitToggle = sourceBitDepth !== undefined && sourceBitDepth > 8;
-  // React.useEffect(() => {
-  //   if (show16BitToggle && canExport16bit) {
-  //     if (config.exportBitDepth === undefined) {
-  //       updateConfig({ exportBitDepth: sourceBitDepth as 8 | 16 });
-  //     }
-  //   } else if (show16BitToggle && !canExport16bit) {
-  //     if (config.exportBitDepth !== undefined && config.exportBitDepth !== 8) {
-  //       updateConfig({ exportBitDepth: 8 });
-  //     }
-  //   } else {
-  //     if (config.exportBitDepth !== undefined) {
-  //       updateConfig({ exportBitDepth: undefined });
-  //     }
-  //   }
-  // }, [show16BitToggle, canExport16bit]);
 
   const { currentW, currentH, currentPercent } = deriveResizeState(
     baseW,
@@ -228,12 +194,16 @@ export function ResizeExportControls({
             >
               <FancyButton
                 onClick={() => updateConfig({ lockAspect: !config.lockAspect })}
-                active={config.lockAspect}
                 variant={config.lockAspect ? "indigo" : "red"}
                 subtle={true}
                 disabled={isClipMode}
                 size="xs"
                 iconOnly={true}
+                className={
+                  config.lockAspect
+                    ? "bg-indigo-50/70 text-indigo-600 border-indigo-200/70 hover:bg-indigo-100 hover:text-indigo-900 dark:bg-indigo-500/15 dark:text-indigo-400 dark:border-indigo-500/25 dark:hover:bg-indigo-500/25 dark:hover:text-indigo-200"
+                    : "bg-rose-50/60 text-rose-500 border-rose-200/60 hover:bg-rose-100 hover:text-rose-800 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/20 dark:hover:bg-rose-500/25 dark:hover:text-rose-200"
+                }
               >
                 {config.lockAspect ? <Link2 size={12} /> : <Unlink size={12} />}
               </FancyButton>
@@ -288,14 +258,18 @@ export function ResizeExportControls({
           <Tooltip content={config.resample ? "Resample ON" : "Resample OFF"}>
             <FancyButton
               onClick={() => updateConfig({ resample: !config.resample })}
-              active={config.resample}
-              variant={config.resample ? "amber" : "zinc"}
+              variant={config.resample ? "indigo" : "zinc"}
               subtle={true}
               size="xs"
               iconOnly={true}
               disabled={isClipMode}
+              className={
+                config.resample
+                  ? "bg-indigo-50/70 text-indigo-600 border-indigo-200/70 hover:bg-indigo-100 hover:text-indigo-900 dark:bg-indigo-500/15 dark:text-indigo-400 dark:border-indigo-500/25 dark:hover:bg-indigo-500/25 dark:hover:text-indigo-200"
+                  : "bg-zinc-100/70 text-zinc-500 border-zinc-200/60 hover:bg-zinc-200/80 hover:text-zinc-900 dark:bg-zinc-800/60 dark:text-zinc-400 dark:border-zinc-700/60 dark:hover:bg-zinc-700 dark:hover:text-zinc-100"
+              }
             >
-              <Link2 size={10} className={config.resample ? "text-amber-500" : ""} />
+              <Scaling size={12} />
             </FancyButton>
           </Tooltip>
           <span className="text-[9px] text-[var(--text-muted)] truncate flex-1 text-right">
@@ -333,236 +307,14 @@ export function ResizeExportControls({
         </div>
       </div>
 
-      <div className="border-t border-[var(--border-subtle)] dark:border-white/10 space-y-2.5">
-        {config.format === "image/tiff" && (
-          <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-300">
-            <div className="flex items-center gap-2 px-1 mt-3">
-              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
-                Compress
-              </span>
-              <ActionDropdown
-                direction="up"
-                onSelect={(val: string) => {
-                  updateConfig({ tiffCompression: val as 'none' | 'lzw' | 'zip' | 'jpeg' });
-                }}
-                className="shrink-0"
-                options={[
-                  { label: "None", value: "none", description: "uncompressed" },
-                  { label: "LZW", value: "lzw", description: "universal, fast" },
-                  { label: "ZIP", value: "zip", description: "smaller, slower" },
-                  { label: "JPEG", value: "jpeg", description: "lossy, smallest" },
-                ]}
-                trigger={
-                  <FancyButton variant="zinc" subtle={true} size="xs">
-                    {(config.tiffCompression || "none").toUpperCase()} <ChevronDown size={8} className="opacity-50" />
-                  </FancyButton>
-                }
-              />
-              <div className="flex-1" />
-              {/* TODO: WebGPU 上线后重新启用 16-bit FunctionTabs
-              {sourceBitDepth && sourceBitDepth > 8 && (
-                <Tooltip content={!canExport16bit ? bitDepthDisabledReason : ''}>
-                  <FunctionTabs
-                    options={[
-                      { label: "8-bit", value: "8", tooltip: "Standard 8-bit export" },
-                      { label: "16-bit", value: "16", tooltip: canExport16bit ? (isSingleLayer ? "Lossless from raw source" : "16-bit composite export") : bitDepthDisabledReason },
-                    ]}
-                    value={!canExport16bit ? "8" : (config.exportBitDepth === 8 ? "8" : "16")}
-                    onChange={(val) => {
-                      if (!canExport16bit && val === "16") return;
-                      updateConfig({ exportBitDepth: val === "8" ? 8 : 16 });
-                    }}
-                    disabled={!canExport16bit}
-                    className={`w-28 [&_button]:py-0.5 ${!canExport16bit ? 'opacity-50 pointer-events-none' : ''}`}
-                  />
-                </Tooltip>
-              )}
-              */}
-            </div>
-            {config.tiffCompression === "jpeg" && (
-              <div className="flex items-center gap-2 px-1 animate-in fade-in slide-in-from-top-1 duration-200">
-                <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
-                  Quality
-                </span>
-                <input
-                  type="range"
-                  min="1"
-                  max="100"
-                  value={config.jpegQuality ?? 85}
-                  onChange={(e) => updateConfig({ jpegQuality: parseInt(e.target.value) })}
-                  onMouseUp={(e) => e.currentTarget.blur()}
-                  onTouchEnd={(e) => e.currentTarget.blur()}
-                  style={{ accentColor: "#6366f1" }}
-                  className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
-                />
-                <span className="text-[10px] font-black w-8 text-right tabular-nums text-indigo-600 dark:text-indigo-400">
-                  {config.jpegQuality ?? 85}%
-                </span>
-              </div>
-            )}
-            {/* Predictor (LZW/ZIP only) — improves compression 10-30% for photos */}
-            {(config.tiffCompression === "lzw" || config.tiffCompression === "zip") && (
-              <div className="flex items-center gap-2 px-1 animate-in fade-in slide-in-from-top-1 duration-200">
-                <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
-                  Predictor
-                </span>
-                <ActionDropdown
-                  direction="up"
-                  onSelect={(val: string) => updateConfig({ tiffPredictor: val as 'none' | 'horizontal' | 'float' })}
-                  className="shrink-0"
-                  options={[
-                    { label: "None", value: "none", description: "no prediction" },
-                    { label: "Horizontal", value: "horizontal", description: "best for photos" },
-                    { label: "Float", value: "float", description: "floating-point data" },
-                  ]}
-                  trigger={
-                    <FancyButton variant="zinc" subtle={true} size="xs">
-                      {(config.tiffPredictor || "none").charAt(0).toUpperCase() + (config.tiffPredictor || "none").slice(1)} <ChevronDown size={8} className="opacity-50" />
-                    </FancyButton>
-                  }
-                />
-              </div>
-            )}
-          </div>
-        )}
-        {config.format === "image/png" && (
-          <div className="flex items-center gap-2 px-1 mt-3 animate-in fade-in slide-in-from-top-1 duration-300">
-            <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-14">
-              Compress
-            </span>
-            <ActionDropdown
-              direction="up"
-              onSelect={(val: string) => {
-                updateConfig({ pngCompression: Number(val) as 0 | 6 | 9 });
-              }}
-              className="shrink-0"
-              options={[
-                { label: "None", value: "0", description: "fastest, largest" },
-                { label: "Default", value: "6", description: "balanced" },
-                { label: "Max", value: "9", description: "smallest, slowest" },
-              ]}
-              trigger={
-                <FancyButton variant="zinc" subtle={true} size="xs">
-                  {config.pngCompression === 0 ? "NONE" : config.pngCompression === 9 ? "MAX" : "DEFAULT"} <ChevronDown size={8} className="opacity-50" />
-                </FancyButton>
-              }
-            />
-            <div className="flex-1" />
-            {/* TODO: WebGPU 上线后重新启用 16-bit FunctionTabs
-            {sourceBitDepth && sourceBitDepth > 8 && (
-              <Tooltip content={!canExport16bit ? bitDepthDisabledReason : ''}>
-                <FunctionTabs
-                  options={[
-                    { label: "8-bit", value: "8", tooltip: "Standard (smaller file)" },
-                    { label: "16-bit", value: "16", tooltip: canExport16bit ? (isSingleLayer ? "Lossless from raw source" : "16-bit composite export") : bitDepthDisabledReason },
-                  ]}
-                  value={!canExport16bit ? "8" : (config.exportBitDepth === 8 ? "8" : "16")}
-                  onChange={(val) => {
-                    if (!canExport16bit && val === "16") return;
-                    updateConfig({ exportBitDepth: val === "8" ? 8 : 16 });
-                  }}
-                  disabled={!canExport16bit}
-                  className={`w-28 [&_button]:py-0.5 ${!canExport16bit ? 'opacity-50 pointer-events-none' : ''}`}
-                />
-              </Tooltip>
-            )}
-            */}
-          </div>
-        )}
-        {config.format !== "image/png" && config.format !== "image/tiff" && config.format !== "image/bmp" && (
-          <div className="flex items-center gap-2 px-1 mt-3 animate-in fade-in slide-in-from-top-1 duration-300">
-            <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-8">
-              Quality
-            </span>
-            <input
-              type="range"
-              min="1"
-              max="100"
-              value={config.quality ?? 92}
-              onChange={(e) => {
-                const val = parseInt(e.target.value);
-                const snapPoints = [60, 95];
-                const threshold = 3;
-                let finalVal = val;
-                for (const p of snapPoints) {
-                  if (Math.abs(val - p) <= threshold) {
-                    finalVal = p;
-                    break;
-                  }
-                }
-                updateConfig({ quality: finalVal });
-              }}
-              style={{
-                accentColor: (() => {
-                  const val = config.quality ?? 92;
-                  if (val === 92) return "#666666";
-                  return val > 92 ? "#10b981" : "#f59e0b";
-                })(),
-              }}
-              className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
-            />
-            <span
-              className="text-[10px] font-black w-10 text-right tabular-nums transition-colors duration-300"
-              style={{
-                color: (() => {
-                  const q = config.quality ?? 92;
-                  const ratio = Math.min(1, Math.max(0, (q - 30) / (92 - 30)));
-                  const h = 142 - ratio * (142 - 38);
-                  return `hsl(${h}, 80%, 45%)`;
-                })(),
-              }}
-            >
-              {config.quality ?? 92}%
-            </span>
-          </div>
-        )}
-
-        {/* Metadata toggles (EXIF + ICC) — grouped with tight spacing */}
-        {(() => {
-          const exportFmt = mimeToFormat[config.format] ?? 'unknown';
-          const formatStrategy = getFormatColorStrategy(exportFmt);
-          const showExif = !!(imageMetadata?.raw?.exif && supportsExifEmbed(config.format));
-          const showIcc = formatStrategy.supportsIccEmbed;
-
-          if (!showExif && !showIcc) return null;
-
-          const effectiveEmbedIcc = showIcc
-            ? shouldEmbedIcc(exportFmt, frameColorSpace, config.embedIccOverride)
-            : false;
-
-          return (
-            <div className="space-y-1 pt-1 animate-in fade-in slide-in-from-top-1 duration-300">
-              {showExif && (
-                <div className="flex justify-between items-center px-1">
-                  <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
-                    Keep EXIF Data
-                  </span>
-                  <Switch
-                    checked={!!config.keepExif}
-                    onChange={(val) => updateConfig({ keepExif: val })}
-                    activeColor="bg-emerald-500"
-                    size="compact"
-                  />
-                </div>
-              )}
-              {showIcc && (
-                <div className="flex justify-between items-center px-1">
-                  <Tooltip content="Embed ICC color profile in the exported file for accurate color reproduction across applications">
-                    <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest cursor-help">
-                      Embed ICC Profile
-                    </span>
-                  </Tooltip>
-                  <Switch
-                    checked={effectiveEmbedIcc}
-                    onChange={(val) => updateConfig({ embedIccOverride: val })}
-                    activeColor="bg-indigo-500"
-                    size="compact"
-                  />
-                </div>
-              )}
-            </div>
-          );
-        })()}
+      <div className="mt-2.5 pt-3 border-t border-[var(--border-subtle)] dark:border-white/10 space-y-2.5">
+        <ResizeExportRules
+          config={config}
+          updateConfig={updateConfig}
+          imageMetadata={imageMetadata}
+          sourceBitDepth={sourceBitDepth}
+          isSingleLayer={isSingleLayer}
+        />
 
         <div className="flex gap-2 pt-2">
           <FancyButton

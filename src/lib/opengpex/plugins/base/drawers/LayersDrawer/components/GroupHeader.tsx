@@ -127,15 +127,27 @@ function GroupHeaderView({
       : "bg-amber-500/[0.06] border border-amber-500/15 hover:bg-amber-500/[0.11] hover:border-amber-500/25";
 
   return (
-    <div onClick={onSelect} className={`flex items-center gap-1 px-1.5 h-[26px] rounded-md cursor-pointer transition-all ${borderClass}`}>
+    <div onClick={onSelect} className={`flex items-center gap-2 px-1.5 h-[32px] rounded-lg cursor-pointer transition-all ${borderClass}`}>
       <button
         onClick={onToggleCollapse}
         title={isCollapsed ? "Expand group" : "Collapse group"}
-        className="w-5 h-5 flex items-center justify-center rounded transition-colors hover:bg-[var(--bg-stage)] shrink-0 cursor-pointer"
+        className={`relative w-[24px] h-[24px] shrink-0 rounded-md border overflow-hidden flex items-center justify-center transition-all cursor-pointer hover:ring-2 hover:ring-[var(--border-light)] select-none border-[var(--border-subtle)] bg-[var(--bg-stage)]/40 hover:border-[var(--border-light)] ${
+          !group.visible ? "opacity-30 grayscale" : "opacity-100"
+        }`}
       >
-        {isCollapsed
-          ? <Folder size={14} className="text-amber-500/80 hover:text-amber-500 transition-colors" />
-          : <FolderOpen size={14} className="text-amber-500 hover:text-amber-400 transition-colors" />}
+        <div
+          className="w-full h-full flex items-center justify-center rounded-[inherit]"
+          style={{
+            background: "#fce7f3",
+            color: "#1a1a1a",
+          }}
+        >
+          {isCollapsed ? (
+            <Folder size={13} strokeWidth={2} />
+          ) : (
+            <FolderOpen size={13} strokeWidth={2} />
+          )}
+        </div>
       </button>
       <div className="flex-1 min-w-0 flex items-center gap-1.5">
         <EditableLabel
@@ -146,13 +158,13 @@ function GroupHeaderView({
         <span className="text-[9px] font-bold text-[var(--text-muted)] tabular-nums shrink-0">({childCount})</span>
       </div>
       <div className="flex items-center gap-0 opacity-60 group-hover:opacity-100 transition-opacity shrink-0">
-        <ActionButton onClick={onToggleVisibility} icon={group.visible ? <Eye size={11} /> : <EyeOff size={11} className="text-rose-500" />} variant="glass" size="sm" className={`w-5 h-5 ${group.visible ? "" : "text-[var(--text-muted)]"}`} />
-        <ActionButton onClick={onToggleLock} icon={group.locked ? <Lock size={11} className="text-amber-500" /> : <Unlock size={11} />} variant="glass" size="sm" className={`w-5 h-5 ${group.locked ? "" : "text-[var(--text-muted)]"}`} />
+        <ActionButton onClick={onToggleVisibility} icon={group.visible ? <Eye size={12} /> : <EyeOff size={12} className="text-rose-500" />} variant="glass" size="sm" className={`w-6 h-6 ${group.visible ? "" : "text-[var(--text-muted)]"}`} />
+        <ActionButton onClick={onToggleLock} icon={group.locked ? <Lock size={12} className="text-amber-500" /> : <Unlock size={12} />} variant="glass" size="sm" className={`w-6 h-6 ${group.locked ? "" : "text-[var(--text-muted)]"}`} />
         <div className="relative ml-0.5">
           <ActionDropdown
             trigger={(isOpen) => (
-              <button className={`w-5 h-5 flex items-center justify-center rounded transition-colors outline-none cursor-pointer focus:outline-none border border-transparent ${isOpen ? "bg-[var(--bg-stage)] border-[var(--border-subtle)]" : "hover:bg-[var(--bg-stage)] hover:border-[var(--border-subtle)]"}`}>
-                <MoreVertical size={11} className={`transition-colors ${isOpen ? "text-[var(--text-main)]" : "text-[var(--text-muted)] hover:text-[var(--text-main)]"}`} />
+              <button className={`w-6 h-6 flex items-center justify-center rounded transition-colors outline-none cursor-pointer focus:outline-none border border-transparent ${isOpen ? "bg-[var(--bg-stage)] border-[var(--border-subtle)]" : "hover:bg-[var(--bg-stage)] hover:border-[var(--border-subtle)]"}`}>
+                <MoreVertical size={12} className={`transition-colors ${isOpen ? "text-[var(--text-main)]" : "text-[var(--text-muted)] hover:text-[var(--text-main)]"}`} />
               </button>
             )}
             align="right"

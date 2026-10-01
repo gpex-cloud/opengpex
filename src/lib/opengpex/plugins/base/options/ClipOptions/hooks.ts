@@ -49,6 +49,8 @@ export const useClipOptionsCommands = () => {
     branchCreateCmd,
     boxResetCmd,
     clipToolSetCmd, // ← derived from CMD_SET_CLIP_TOOL = 'cmd.clip_tool.set'
+    clipToolCycleForwardCmd,
+    clipToolCycleBackwardCmd,
     invertSelectionCmd, // ← derived from CMD_INVERT_SELECTION = 'cmd.invert_selection'
     selectFromAlphaCmd, // ← derived from CMD_SELECT_FROM_ALPHA = 'cmd.select_from_alpha'
     offsetSelectionCmd, // ← derived from CMD_OFFSET_SELECTION = 'cmd.offset_selection'
@@ -112,6 +114,8 @@ export const useClipOptionsCommands = () => {
       branchCreateCmd,
       boxResetCmd,
       clipToolSetCmd,
+      clipToolCycleForwardCmd,
+      clipToolCycleBackwardCmd,
       invertSelectionCmd,
       selectFromAlphaCmd,
       offsetSelectionCmd,
@@ -228,6 +232,8 @@ export const useClipOptionsCommands = () => {
     branchCreateCmd,
     boxResetCmd,
     clipToolSetCmd,
+    clipToolCycleForwardCmd,
+    clipToolCycleBackwardCmd,
     invertSelectionCmd,
     selectFromAlphaCmd,
     offsetSelectionCmd,

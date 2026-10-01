@@ -10,26 +10,27 @@
  */
 
 /**
- * AVIF Format Handler (V2) — Dual-Engine Architecture.
+ * AVIF Format Handler (V2).
  *
  * High-level entry point implementing ImageFormatHandler.
  * Delegates to decode/encode/metadata sub-modules.
  *
  * Thread model:
- * - Decode: main thread (browser-native createImageBitmap)
- * - Encode (@jsquash): static Worker at /ext/wasm/avif/avif-worker.js
- * - Encode (vips): engine Worker via FileIO.encodeAvif dispatch
+ * - Decode: main thread (browser-native createImageBitmap) + ICC read via vips
+ * - Encode: @jsquash/avif in an isolated Worker (/ext/wasm/avif/avif-worker.js).
+ *   Does NOT use vips-heif — see encode.ts header for rationale + the tracked
+ *   "no ICC embed" defect.
  * - Metadata: main thread via ExifReader
  */
 
-import type { PixelService } from '@opengpex/editor/core/types';
 import type {
   ImageFormatHandler,
   DecodeOptions,
-  DecodeResult,
+  DecodedPayload,
   EncodeOptions,
 } from '../../types';
 import type { ImageMetadata } from '../../types';
+import type { IngestDecision } from '../../strategy';
 import { decodeAvif } from './decode';
 import { encodeAvif } from './encode';
 import { extractAvifMetadata } from './metadata';
@@ -39,17 +40,20 @@ export class AvifHandler implements ImageFormatHandler {
   readonly mimeTypes = ['image/avif'];
   readonly extensions = ['avif'];
 
-  constructor(private pixels: PixelService) {}
-
-  decode(file: File, options?: DecodeOptions): Promise<DecodeResult> {
-    return decodeAvif(file, this.pixels, options);
+  decode(
+    file: File,
+    metadata: ImageMetadata,
+    decision: IngestDecision,
+    _options?: DecodeOptions,
+  ): Promise<DecodedPayload[]> {
+    return decodeAvif(file, metadata, decision);
   }
 
   encode(
     source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
     options: EncodeOptions,
   ): Promise<Blob> {
-    return encodeAvif(source, this.pixels, options);
+    return encodeAvif(source, options);
   }
 
   async extractMetadata(file: File): Promise<ImageMetadata> {

@@ -24,23 +24,23 @@ import { BRUSH_OVERLAY_COMMANDS } from './commands';
 import * as P from './protocols';
 
 /**
- * BrushOverlay Plugin: Brush cursor + real-time stroke overlay
+ * BrushOverlay Plugin: the vector brush tool.
  *
- * Render in STAGE_OVERLAY layer:
- * - Double-layer circular brush cursor (follows mouse at 60fps)
- * - Real-time stroke preview Canvas (Phase 3 Step 3)
+ * A stroke is a `type:'vector'` layer carrying `strokeData`
+ * (trajectory + colour + size + hardness), extruded into a ribbon by `cs_extrude`
+ * and rasterized by `StrokeRenderer` every composite.
  *
- * Activated when activeCraft is 'brush' or 'eraser'.
+ * Renders in STAGE_OVERLAY. Activated when activeCraft === 'brush'.
  *
- * Interaction priority chain (to be added in Step 2):
- * - brush-stroke (150): Brush stroke interaction
+ * Interaction priority:
+ * - brush-stroke (145): drag the canvas to paint.
  */
 export const plugin: EditorPlugin = {
   manifest: {
     id: P.PLUGIN_ID,
     displayName: 'Brush Overlay',
     version: '1.0.0',
-    description: 'Brush cursor and real-time stroke preview overlay for the canvas stage.',
+    description: 'Vector brush overlay — resolution-independent, re-editable strokes.',
     category: 'overlays',
     author: P.PLUGIN_AUTHOR,
     requirements: {
@@ -53,15 +53,15 @@ export const plugin: EditorPlugin = {
   component: BrushOverlayMain,
 
   interactions: [
-    createBrushStrokeHandler(),  // Priority 150 - Brush stroke interaction
+    createBrushStrokeHandler(), // Priority 145 — paint a stroke
   ],
 
   commands: BRUSH_OVERLAY_COMMANDS,
 
   signals: [
     {
-      id: P.SIGNAL_IS_STROKING,
-      name: 'Is Brush Stroking',
+      id: P.SIGNAL_DRAWING_STROKE,
+      name: 'Is Drawing Stroke',
       defaultValue: false,
       scope: 'public',
     },

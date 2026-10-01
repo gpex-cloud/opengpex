@@ -21,7 +21,13 @@ import { Frame, Layer, CameraState, NormalizedState, BitmapMask } from './models
 import { Dimensions, LocalShape, LocalRect, LocalPolygon } from './primitives';
 import { VolatileState, InteractionState, UIConfig, GlobalHistoryState, InteractionSignalValue } from './state';
 import { BuiltCommand, EditorShortcut, BuiltPlugin } from './plugins';
-import { ClipboardLayerMetadata } from './services';
+import {
+  ClipboardLayerMetadata,
+  FrameExportResult,
+  FrameUnpackPayload,
+  FrameExportEncodePayload,
+  FrameExportEncodeResult,
+} from './services';
 
 /**
  * AdvCommandRef: Rich reference object for advanced commands
@@ -41,6 +47,17 @@ export interface AdvCommandRef<TPayload = void, TReturn = void> {
     /** Execute without generating an undo checkpoint (suppress SIGNAL_COMMIT). */
     noundo: [TPayload] extends [void] ? () => TReturn : (payload: TPayload) => TReturn;
   };
+}
+
+export interface ChoiceSwitchConfig {
+  label: string;
+  description?: string;
+  defaultValue?: boolean;
+}
+
+export interface ChoiceResult {
+  id: string;
+  switchValue?: boolean;
 }
 
 /** 
@@ -97,10 +114,23 @@ export interface EditorActions {
   updatePluginConfig: (pluginId: string, patch: Record<string, unknown>) => void;
   getPluginConfig: (pluginId: string) => Record<string, unknown> | undefined;
 
+  // --- Standard Semantic Operations ---
   askConfirm: (title: string, message: string, type?: 'info' | 'danger' | 'warning', variant?: 'square' | 'rect') => Promise<boolean>;
   confirm: (val: boolean) => void;
-  askChoice: (title: string, options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>, helpText?: string) => Promise<string | null>;
-  resolveChoice: (val: string | null) => void;
+  askChoice: {
+    (
+      title: string,
+      options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>,
+      helpText?: string,
+    ): Promise<string | null>;
+    (
+      title: string,
+      options: Array<{ id: string; label: string; description?: string; icon?: string; iconGradient?: string; primary?: boolean }>,
+      helpText: string | undefined,
+      switchConfig: ChoiceSwitchConfig,
+    ): Promise<ChoiceResult | null>;
+  };
+  resolveChoice: (val: string | ChoiceResult | null) => void;
 
   clearAllData: () => void;
   updateStorageStats: () => void;
@@ -133,6 +163,10 @@ export interface EditorActions {
         zoom: AdvCommandRef<number>;
       };
     };
+    gpex: {
+      pack: AdvCommandRef<Frame, Promise<FrameExportResult>>;
+      unpack: AdvCommandRef<FrameUnpackPayload, Promise<Frame>>;
+    };
     frame: {
       create: {
         trunk: AdvCommandRef<{ source: File | string; switchFrame?: boolean; extra?: Record<string, unknown> }, Promise<string>>;
@@ -140,10 +174,15 @@ export interface EditorActions {
           fromFile: AdvCommandRef<{ source: File; extra?: Record<string, unknown> }, Promise<string | undefined>>;
           fromSelection: AdvCommandRef<void, Promise<string | undefined>>;
         };
-        revert: AdvCommandRef;
-        remove: AdvCommandRef<string | undefined>;
-        export: AdvCommandRef<Frame, Promise<{ state: unknown; assets: Record<string, Blob> }>>;
-        import: AdvCommandRef<{ state: unknown; assetBlobs: Record<string, Blob>; replaceId?: string; switchFrame?: boolean }, Promise<Frame>>;
+      };
+      revert: AdvCommandRef;
+      remove: AdvCommandRef<string | undefined>;
+      gpex: {
+        pack: AdvCommandRef<Frame, Promise<FrameExportResult>>;
+        unpack: AdvCommandRef<FrameUnpackPayload, Promise<Frame>>;
+      };
+      export: {
+        encode: AdvCommandRef<FrameExportEncodePayload, Promise<FrameExportEncodeResult>>;
       };
       resize: {
         resizeCanvas: AdvCommandRef;

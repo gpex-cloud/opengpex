@@ -19,3 +19,4 @@
 
 export { TabDockComponent } from "./TabDock";
 export { TabDockSettings } from "./settings";
+export { MetricsHUD } from "./MetricsHUD";

@@ -31,7 +31,6 @@ import {
   useMoveDeltaSync,
 } from "../useFastSync";
 import { lassoPreviewPathRef } from "../interactions";
-import { PixelGridOverlayAPI, DEFAULT_MIN_PIXEL_SIZE } from "../../PixelGridOverlay/protocols";
 import { MARCHING_ANTS_DURATION_S, ClipOverlayAPI } from "../protocols";
 import type { ClipOverlayConfig } from "../protocols";
 
@@ -70,7 +69,6 @@ export function ClipOverlayMain() {
     isReCanvas,
     isClipActive,
     dragType,
-    showError,
     boxRef,
     clipType,
     clipTool,
@@ -87,16 +85,6 @@ export function ClipOverlayMain() {
 
   const clipConfig = state.pluginConfig[ClipOverlayAPI.configKey] as Partial<ClipOverlayConfig> | undefined;
   const marchingAntsAnimated = clipConfig?.marchingAntsAnimated ?? false;
-
-  const gridConfig = state.pluginConfig[PixelGridOverlayAPI.configKey] as
-    | { enabled?: boolean; minPixelSize?: number }
-    | undefined;
-  // Rule-of-thirds guides hide when the pixel grid appears. Share the pixel
-  // grid's GIMP-style criterion (min on-screen physical px per source pixel),
-  // not an absolute camera.k — see PixelGridOverlay/geometry.ts.
-  const gridMinPixelSize = gridConfig?.enabled
-    ? (gridConfig.minPixelSize ?? DEFAULT_MIN_PIXEL_SIZE)
-    : null;
 
   // ─── Activation gates ────────────────────────────────────────────────────
   const isOverlayActive = isClipActive || isReCanvas;
@@ -120,7 +108,6 @@ export function ClipOverlayMain() {
     boxRef,
     boxActive,
     isReCanvas,
-    gridMinPixelSize,
   );
 
   // Dimension label
@@ -214,15 +201,6 @@ export function ClipOverlayMain() {
           style={{ borderRadius: clipType === "circle" ? "50%" : "0%" }}
           data-handle="move"
         >
-          {showError && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in duration-300">
-              <div className="bg-red-500 text-white font-black uppercase text-[10px] tracking-widest px-3 py-1.5 rounded shadow-2xl flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                <span>Area is empty</span>
-              </div>
-            </div>
-          )}
-
           {/* Resize Handles (corners) — always visible for ellipse, hover for rect */}
           {[
             { h: "nw", c: "top-0 left-0", cursor: "nwse-resize" },

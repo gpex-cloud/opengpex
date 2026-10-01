@@ -120,7 +120,6 @@ export function ImageInfoComponent() {
           layerDim={layerDim}
           isHighRes={isHighRes}
           isUpScaled={isUpScaled}
-          frameBitDepth={activeFrame.bitDepth}
           layerBitDepth={layerBitDepth}
           imageMetadata={meta.imageMetadata}
         />
@@ -136,7 +135,6 @@ export function ImageInfoComponent() {
           baseW={baseW}
           baseH={baseH}
           frameDpi={meta.frameDpi}
-          frameColorSpace={activeFrame.colorSpace}
           isClipMode={isClipMode}
           hasSelection={!!box}
           applyResizeCmd={applyResizeCmd}

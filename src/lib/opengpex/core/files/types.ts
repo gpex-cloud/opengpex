@@ -29,6 +29,10 @@
  * Previously split across types.ts + metadata.ts; unified 2026-08-07.
  */
 
+import type { GamutId } from '@opengpex/editor/core/types';
+import type { ColorIdentity, ImageAssetPayload } from '@opengpex/editor/core/storage/asset/AssetStore';
+import type { IngestDecision } from './strategy';
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Metadata Types (canonical definitions — re-exported by metadata.ts for compat)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -79,6 +83,14 @@ export interface ImageMetadata {
   /** Per-channel data type. Default 'uint'. TIFF 32-bit float = 'float'. */
   sampleFormat?: 'uint' | 'float';
   hasAlpha: boolean;
+
+  /**
+   * Whether the source is a multi-frame container (animated GIF, multi-page
+   * TIFF, multi-image HEIC). Read by `resolveIngestDecision` to route the
+   * decode channel (e.g. GIF → `gifuct`) and to forbid verbatim passthrough.
+   * Optional: a handler that does not populate it is treated as single-frame.
+   */
+  isMultiFrame?: boolean;
 
   // ═══ Camera ═══════════════════════════════════════════════════════════════
   camera?: {
@@ -168,6 +180,60 @@ export interface RawBinaryData {
   gamma?: number;
 
   /**
+   * Source transfer characteristic probed at ingest (HDR seam).
+   *
+   * ONLY populated by the RAW handler today, from the embedded ICC profile
+   * name / DNG tags: an ST 2084 (PQ) marker → `'pq'`, HLG marker → `'hlg'`,
+   * else `'sdr'` when a colour signal was found, `undefined` when nothing was
+   * probed. WRITE-ONLY this phase — no consumer reads it yet; it is the forward
+   * seam the future HDR pipeline reads to branch PQ/HLG rendering. Distinct
+   * from `ColorIdentity.trc` (`srgb-trc | linear`), which is the STORAGE/render
+   * TRC of the decoded pixels, not the source's original transfer function.
+   */
+  transfer?: 'pq' | 'hlg' | 'sdr';
+
+  /**
+   * DNG `ProfileToneCurve` (tag 50940) control points, `[input, output]` pairs
+   * in [0, 1] and increasing in `input` — the camera vendor's own rendering
+   * intent curve.
+   *
+   * ONLY populated by the RAW handler, and only when the container actually
+   * carries the tag (Apple ProRAW, Pixel/Expert RAW, Adobe DNG Converter output;
+   * absent from most native DSLR RAW). Currently write-only — nothing samples
+   * it. It serves as a rendering intent seam: an enhanced rendering intent samples this
+   * LUT when present and degrades to the generic filmic baseline when not.
+   *
+   * Structural type (not `DngToneCurvePoint`) so this base module stays free of
+   * handler-layer imports.
+   */
+  dngToneCurve?: readonly (readonly [number, number])[];
+
+  /**
+   * DNG camera-profile colour tables: `ProfileHueSatMap`
+   * (tags 50937/50938/50939 — a hue/sat/value warp grid) and `ProfileLookTable`
+   * (tags 50981/50982 — the creative-Look grid; Apple ProRAW's vivid look lives
+   * largely here). Each grid is `dims = [hDiv, sDiv, vDiv]` addressing
+   * `hDiv*sDiv*vDiv*3` floats of `(hueShift°, satScale, valScale)` triples.
+   *
+   * ONLY populated by the RAW handler, and only when the container carries the
+   * tags (absent from most native DSLR RAW). Reserved for forward display-engine
+   * seams. Structural type
+   * (not `DngHueSatMap` / `DngLookTable`) so this base module stays free of
+   * handler-layer imports.
+   */
+  dngProfile?: {
+    hueSatMap?: {
+      dims: readonly [number, number, number];
+      data1: readonly number[];
+      data2?: readonly number[];
+    };
+    lookTable?: {
+      dims: readonly [number, number, number];
+      data: readonly number[];
+    };
+  };
+
+  /**
    * Raw PNG tEXt/iTXt key-value entries.
    * Preserves non-standard text chunks (e.g. ComfyUI "prompt" workflow JSON,
    * SD WebUI "parameters") for round-trip and AI provenance detection.
@@ -196,12 +262,21 @@ export function supportsExifEmbed(format: string): boolean {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface DecodeOptions {
-  /** Override DPI for vector import */
-  dpi?: number;
-  /** Target rasterization width (for vector formats) */
-  targetWidth?: number;
-  /** Target rasterization height (for vector formats) */
-  targetHeight?: number;
+  /**
+   * Caller-supplied decode OVERRIDES — genuine external inputs, distinct from the
+   * entry's own ingest context. Today the sole source is the vector-import DPI
+   * dialog (`promptVectorDpi`), a UI concern that deliberately lives OUTSIDE the
+   * FileService. `metadata` + `decision` are NOT here: they are the entry's
+   * pre-resolved context and reach a handler as explicit `decode(...)` arguments,
+   * never smuggled through this bag.
+   */
+
+  /** Forced rasterization DPI for vector import (from the UI DPI dialog). */
+  forcedDpi?: number;
+  /** Forced rasterization width in px for vector import. */
+  forcedWidth?: number;
+  /** Forced rasterization height in px for vector import. */
+  forcedHeight?: number;
 }
 
 export interface EncodeOptions {
@@ -226,26 +301,35 @@ export interface ExportMetadataConfig {
   author?: { name?: string; copyright?: string };
 
   /**
-   * Frame's working color space at export time.
+   * The gamut the pixels handed to the encoder ARE in = the egest decision's
+   * `targetGamut` (`core/files/strategy/egest.ts`) — already clamped to what this
+   * container can carry, so the name and the meaning are identical end to end.
    *
-   * Passed from the compositor/command layer (= activeFrame.colorSpace).
-   * Used by handlers to query `getExportStrategy(frameColorSpace)` for
-   * correct canvas colorSpace and pixel conversion decisions.
+   * The terminal `unpremultiplyEncodeGamut` already converted into this gamut and
+   * applied its TRC, so the encoder does ZERO colour math — it reads this only to
+   * pick the canvas `colorSpace` tag (`toCanvasColorSpace`) and the embedded stock
+   * ICC profile (`getStockIccProfile`).
    *
-   * When undefined, handlers derive from metadata via IMPORT_PIPELINE lookup.
+   * It replaced a second field, `frameColorSpace` (the document's working space),
+   * which said the same thing less accurately: because the working buffer is always
+   * Linear Display-P3, feeding that to the old `resolveExportPixelConversion`
+   * reported a spurious `'p3-to-srgb'` for a plain sRGB export and converted twice.
+   *
+   * When undefined, encoders fall back to plain `'srgb'` tagging.
    */
-  frameColorSpace?: 'srgb' | 'display-p3' | 'adobe-rgb' | 'prophoto-rgb';
-
-  /** Target resize dimensions (if post-composite resize is needed) */
-  resize?: { w: number; h: number };
+  targetGamut?: GamutId;
 
   // ─── Format-specific options (passed through to handlers) ───
   /** TIFF compression method */
   tiffCompression?: string;
   /** PNG compression level (0-9) */
   pngCompression?: number;
-  /** JPEG quality for TIFF JPEG compression (1-100) */
-  jpegQuality?: number;
+  /**
+   * JPEG quality (1-100) for the JPEG codec INSIDE a TIFF — only read when
+   * `tiffCompression === 'jpeg'`. Unrelated to `EncodeOptions.quality` (0-1),
+   * which is the JPEG/WebP/AVIF container quality.
+   */
+  tiffJpegQuality?: number;
   /** TIFF predictor */
   tiffPredictor?: string;
   /** BigTIFF format */
@@ -259,55 +343,62 @@ export interface ExportMetadataConfig {
 }
 
 /**
- * A single sub-image within a decoded file.
+ * A single fully-decoded image — the complete, self-contained representation
+ * of ONE image inside a decoded file.
  *
  * Unified representation for:
- * - Single-page images (JPEG/PNG/WebP/BMP/HEIC/RAW/TIFF single)
+ * - Single-page images (JPEG/PNG/WebP/BMP/HEIC/RAW/TIFF single) → the sole page
  * - Multi-page TIFF pages
  * - Animated GIF/APNG frames
+ *
+ * Extends the storage layer's producer-agnostic `ImageAssetPayload` (so a
+ * page IS a valid `AssetService.storeBundle` payload with zero adaptation),
+ * adding only the two file-decode-specific facts an in-composite bake product
+ * (`CompositedImage`) has no use for: page ordering and animation delay.
+ * Self-contained: it carries its own `colorIdentity` and (optionally) its own
+ * high-depth naked pixels, so a consumer can ingest one page without reading
+ * anything back off the parent `DecodeResult`. Formerly `SubImage`, when colour
+ * identity + high-depth pixels lived once at the file level and could not be
+ * expressed per-page (the multi-page 16-bit TIFF gap).
+ *
+ * Invariant on `highDepthSource`: its `width`/`height` are IDENTICAL to this
+ * image's display `width`/`height`. The decode handlers upright the naked
+ * buffer with the same EXIF Orientation as the display proxy (PNG/WebP
+ * `rotateNakedRgba`), so the two never disagree — including for orientation 5-8
+ * where both are the post-EXIF (swapped) dims. This makes the light record's
+ * geometry a valid source for reconstructing the high-depth buffer.
  */
-export interface SubImage {
-  /** 8-bit display-ready blob (PNG/JPEG for Canvas2D/WebGPU texture upload) */
-  displayBlob: Blob;
-
-  /** Pixel dimensions of this sub-image */
-  width: number;
-  height: number;
-
+export interface DecodedImage extends ImageAssetPayload {
   /** Zero-based index within the source file */
-  index: number;
+  readonly index: number;
 
   /**
    * Frame delay in milliseconds.
    * Present ONLY for animated formats (GIF, APNG, WebP animation).
    * Undefined for static multi-page formats (TIFF pages, PDF pages).
    */
-  delay?: number;
-
-  /**
-   * Per-sub-image bit depth (if different from metadata.bitDepth).
-   * Typically undefined — inherited from top-level metadata.
-   */
-  bitDepth?: number;
+  readonly delay?: number;
 }
 
-/** Decode result returned by handlers */
+/** Decode result returned by the FileService — a thin file-level container over `pages`. */
 export interface DecodeResult {
-  /** Decoded pixel dimensions (canvas size: first/largest page) */
-  dimensions: { w: number; h: number };
-  /** Extracted metadata (format-agnostic semantic layer) */
+  /** Extracted metadata (format-agnostic semantic layer, file-level) */
   metadata: ImageMetadata;
 
   /**
-   * Sub-images: always present, length ≥ 1.
+   * Decoded pages: always present, length ≥ 1. Each element is a complete,
+   * self-contained `DecodedImage` (own `colorIdentity`, own optional
+   * `highDepthSource`), so per-page colour identity and high-depth pixels are
+   * now expressible — the multi-page 16-bit TIFF gap that a single file-level
+   * `colorIdentity`/`highDepthSource` could not represent.
    *
    * - Single-page file → length = 1
    * - Multi-page TIFF → length = N pages
    * - Animated GIF/APNG → length = N frames
    *
-   * Consumers iterate this array uniformly.
+   * Consumers iterate this array uniformly. (Formerly `subImages`.)
    */
-  subImages: SubImage[];
+  pages: DecodedImage[];
 
   /**
    * Original source blob for high-fidelity operations.
@@ -322,6 +413,51 @@ export interface DecodeResult {
    * Design: ONE shared source blob (not N per-page copies) — memory efficient.
    */
   sourceBlob?: Blob;
+}
+
+/**
+ * A page as produced by a format handler: a `DecodedImage` whose
+ * `colorIdentity` is OPTIONAL (it stays REQUIRED on `DecodedImage` itself).
+ *
+ * The FileService entry (Stage 4) injects each page's `colorIdentity` from the
+ * authoritative `IngestDecision` (Path B — the decision is the single colour
+ * authority), so no handler synthesises colour identity itself. `highDepthSource`
+ * (when present) is therefore the BARE `{ data, width, height }` payload; its
+ * container / trc / gamut are read from the injected sibling `colorIdentity`.
+ *
+ * The optional `colorIdentity` is the ONE deliberate crack in that rule. It
+ * exists ONLY for formats whose pages can carry genuinely different colour per
+ * page within the same file (currently: only multi-page TIFF, where each IFD may
+ * declare its own PhotometricInterpretation / BitsPerSample / ICC). A handler
+ * that leaves it unset — every single-page handler, GIF/APNG frames, and TIFF's
+ * own single-page branch — gets the file-level `decision.colorIdentity` from the
+ * entry's Stage 4 fallback, so there is zero behaviour change for any format
+ * that does not need this. See `files/index.ts` Stage 4.
+ */
+export type DecodedPayload = Omit<DecodedImage, 'colorIdentity'> & {
+  colorIdentity?: ColorIdentity;
+};
+
+/** Raw pixel data source for direct export (supports 8/16-bit without 8-bit Canvas degradation) */
+export interface RawPixelSource {
+  readonly width: number;
+  readonly height: number;
+  readonly data: Uint8Array | Uint16Array | Uint8ClampedArray;
+  readonly bitDepth: 8 | 16 | 32;
+  readonly colorSpace?: string;
+}
+
+export type EncodeSource = HTMLCanvasElement | OffscreenCanvas | ImageBitmap | RawPixelSource;
+
+export function isRawPixelSource(source: unknown): source is RawPixelSource {
+  return (
+    typeof source === 'object' &&
+    source !== null &&
+    'width' in source &&
+    'height' in source &&
+    'data' in source &&
+    'bitDepth' in source
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -354,17 +490,34 @@ export interface ImageFormatHandler {
   readonly needsTranscoding?: boolean;
 
   /**
-   * Decode: transcode to browser-safe format + extract metadata.
+   * Decode: transcode to browser-safe format + produce display pixels.
    * For natively supported formats (JPEG/PNG), returns the original file.
    * For non-native formats (HEIC/RAW/SVG/EPS), transcodes to PNG/JPEG.
+   *
+   * `metadata` and `decision` are the entry-resolved ingest context, passed as
+   * REQUIRED arguments — `createFileService().decode` is their single source, so
+   * a handler consumes them directly with no re-sniff or runtime re-validation.
+   * `options` carries only caller-supplied overrides (vector DPI).
+   *
+   * A handler is a PURE pixel producer: it never mints `colorIdentity` nor
+   * decides `sourceBlob` retention — the FileService entry owns both, injecting
+   * per-page `colorIdentity` and the file-level `sourceBlob` from the single
+   * `resolveIngestDecision` call. Hence the naked `DecodedPayload[]` (a
+   * `DecodedImage[]` minus `colorIdentity`); the entry maps it into the public
+   * `DecodeResult`.
    */
-  decode(file: File, options?: DecodeOptions): Promise<DecodeResult>;
+  decode(
+    file: File,
+    metadata: ImageMetadata,
+    decision: IngestDecision,
+    options?: DecodeOptions,
+  ): Promise<DecodedPayload[]>;
 
   /**
    * Encode: compress Canvas/Bitmap to this format with metadata/DPI injection.
    */
   encode(
-    source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
+    source: EncodeSource,
     options: EncodeOptions,
   ): Promise<Blob>;
 
@@ -372,6 +525,13 @@ export interface ImageFormatHandler {
    * Fast metadata-only extraction (reads file header, no pixel decode).
    */
   extractMetadata(file: File): Promise<ImageMetadata>;
+}
+
+export interface DecodeBlobInput {
+  blob: Blob;
+  width: number;
+  height: number;
+  metadata: ImageMetadata;
 }
 
 /**
@@ -396,11 +556,18 @@ export interface FileService {
   decode(file: File, options?: DecodeOptions): Promise<DecodeResult>;
 
   /**
+   * Compose a single-page DecodeResult from an already-encoded blob (branch-from-
+   * selection, future paste/generate entries). Structurally mirrors `decode`'s
+   * Stage 2/4: derives colorIdentity from metadata via resolveIngestDecision.
+   */
+  decodeBlob(input: DecodeBlobInput): DecodeResult;
+
+  /**
    * Unified encode: pixel compression + metadata/DPI injection.
    * Single call replaces the old convertToBlob + injectToBlob + injectPngDpi pattern.
    */
   encode(
-    source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
+    source: EncodeSource,
     mimeType: string,
     options: EncodeOptions,
   ): Promise<Blob>;
@@ -421,4 +588,44 @@ export interface FileService {
    * Delegates to the matched handler's `needsTranscoding` flag.
    */
   needsTranscoding(file: File): boolean;
+
+  /**
+   * Cold recovery: assetId → original encodable bytes → DecodeResult. Two-tier
+   * fallback, cheapest/most-faithful first:
+   *   1. `assets.getRaw(id)` — the `storeRaw`-persisted original (16-bit
+   *      TIFF/PNG/RAW, or an animated GIF's original bytes);
+   *   2. `assets.hydrate` + `get(id).blob` — an 8-bit asset, whose displayBlob
+   *      IS the original.
+   * Both empty → null (the caller owns the error messaging).
+   * Pairs with `recover(assetId)`: `recover` fetches naked high-depth pixels,
+   * `decodeAsset` fetches decodable bytes.
+   */
+  decodeAsset(assetId: string, fileName?: string, options?: DecodeOptions): Promise<DecodeResult | null>;
+
+  /**
+   * Recover the high-bit-depth naked pixels for an asset on a COLD RELOAD/revert,
+   * when the in-memory HighDepthTextureCache is empty. Three-tier, cheapest first:
+   *   1. persisted self-describing high-depth buffer (`assets.get` light record's
+   *      `dataFormat` + `assets.getDec`) — bake products + RAW imports, a direct
+   *      warm with no decode;
+   *   2. else the encoded source file (`assets.getRaw`) re-decoded via the
+   *      files-layer shared vips worker (TIFF/PNG).
+   * Returns null when the source is ≤8-bit (negative-cache upstream) or absent.
+   *
+   * This is the files-layer home of what was the engine `decodeHighDepth` path:
+   * "recover a file's high-depth pixels" is file decoding, so it belongs here.
+   *
+   * `dataFormat` reports the container `data` actually is and MUST be passed through
+   * from the source, not downgraded: a 32-bit float source recovers as a
+   * `Float32Array` / `rgba32float`. Re-labelling those bytes `rgba16float` halves
+   * the `bytesPerRow` the GPU upload computes and shreds the image.
+   */
+  recover(assetId: string): Promise<{
+    data: Uint16Array | Float32Array;
+    width: number;
+    height: number;
+    dataFormat: 'rgba16float' | 'rgba32float';
+    trc: 'srgb-trc' | 'linear';
+    gamut?: GamutId;
+  } | null>;
 }

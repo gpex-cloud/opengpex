@@ -26,8 +26,8 @@ import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 export const getToolMenuStyles = (isCollapsed: boolean, isPinned: boolean = false) => {
     return {
         // Main shell (floating mode vs pinned mode)
-        // [宽度控制] 固定模式: w-full + max-w-full 填满父容器（由 TOOL_MENU_WIDTH 决定）；
-        //            浮动模式: 展开 280px / 收起 34px，带 transition-all 动画。
+        // [Width control] Pinned mode: w-full + max-w-full fills parent (determined by TOOL_MENU_WIDTH);
+        //                 Floating mode: expand 280px / collapse 34px with transition-all animation.
         container: {
             className: `
                 relative flex flex-col overflow-visible
@@ -54,7 +54,7 @@ export const getToolMenuStyles = (isCollapsed: boolean, isPinned: boolean = fals
             `
         },
         // ✨ Globally unified high-precision divider
-        // [内边距] 固定模式 mx-1 紧凑 / 浮动模式 mx-2 正常
+        // [Padding] Pinned mode mx-1 compact / Floating mode mx-2 normal
         divider: {
             className: `h-px self-stretch bg-[var(--border-subtle)] ${isPinned ? 'mx-1' : 'mx-2'} my-0.5 shrink-0`
         },
