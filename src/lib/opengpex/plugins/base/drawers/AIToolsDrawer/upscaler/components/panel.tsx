@@ -147,10 +147,10 @@ export function UpscalerPanel() {
             <AlertTriangle size={10} className={`shrink-0 mt-0.5 ${sizeWarning === 'critical' ? 'text-amber-500 dark:text-amber-400' : 'text-yellow-500 dark:text-yellow-400/70'}`} />
             <div className="flex flex-col gap-0.5">
               <span className={`text-[9px] ${sizeWarning === 'critical' ? 'text-amber-700 dark:text-amber-300' : 'text-yellow-700 dark:text-yellow-300/80'}`}>
-                {sizeWarning === 'critical' ? 'Very large image — may be slow or fail.' : 'Large image — processing will take longer.'}
+                {sizeWarning === 'critical' ? 'Very large image — may take a while.' : 'Large image — processing will take longer.'}
               </span>
               {sizeWarning === 'critical' && (
-                <span className="text-[8px] text-[var(--text-muted)] italic">For best results, use ComfyUI Upscale with GPU.</span>
+                <span className="text-[8px] text-[var(--text-muted)] italic">For better performance, use ComfyUI Upscale with GPU.</span>
               )}
             </div>
           </div>
