@@ -184,19 +184,38 @@ function SpotlightBubble({
 
   // Hide when any drawer panel is expanded AND re-locate when drawer shifts
   // (e.g. XTEND_SLOT resize pushes drawer icons down)
+  //
+  // ⚠️ subtree:false — intentional. Setting subtree:true would cause the observer
+  // to re-fire on the bubble's own style updates (written by locateTarget/setPosStyle),
+  // creating an infinite repaint loop. We only need to watch direct children of the
+  // drawer bar to detect panel open/close transitions.
+  // RAF debounce further prevents multiple synchronous firings from batching into
+  // a single paint frame.
   useEffect(() => {
     if (!visible) return;
+    let rafId: ReturnType<typeof requestAnimationFrame>;
     const check = () => {
-      setHidden(isAnyDrawerExpanded());
-      locateTarget();
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        setHidden(isAnyDrawerExpanded());
+        locateTarget();
+      });
     };
     check(); // initial check
     const observer = new MutationObserver(check);
     const bars = document.querySelectorAll("[data-drawer-bar]");
     bars.forEach((bar) =>
-      observer.observe(bar, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] }),
+      observer.observe(bar, {
+        childList: true,
+        subtree: false, // do NOT watch subtree — avoids self-triggering loop
+        attributes: true,
+        attributeFilter: ["style"],
+      }),
     );
-    return () => observer.disconnect();
+    return () => {
+      cancelAnimationFrame(rafId);
+      observer.disconnect();
+    };
   }, [visible, locateTarget]);
 
   if (!visible || !posStyle || hidden) return null;

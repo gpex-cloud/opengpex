@@ -129,13 +129,12 @@ export function useOnboarding(trigger: SpotlightTrigger): OnboardingState {
     return candidates[0];
   }, [trigger, sessionDismissed, spotlightDisabledForever]);
 
-  // Reset message index when active spotlight changes
-  const prevSpotlightId = useMemo(() => activeSpotlight?.id, [activeSpotlight]);
-  const [lastSpotlightId, setLastSpotlightId] = useState(prevSpotlightId);
-  if (prevSpotlightId !== lastSpotlightId) {
-    setLastSpotlightId(prevSpotlightId);
+  // Reset message index when active spotlight changes.
+  // This intentionally uses useEffect (not a render-phase setState) to avoid
+  // triggering an extra synchronous re-render on every render pass.
+  useEffect(() => {
     setMessageIndex(0);
-  }
+  }, [activeSpotlight?.id]);
 
   // Advance cycles through messages (wraps around), never auto-dismisses
   const advanceOrDismissSpotlight = useCallback((id: string) => {

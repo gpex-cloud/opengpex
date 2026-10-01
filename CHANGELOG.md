@@ -4,6 +4,12 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.3.4
+
+- Fixed infinite repaint loop and render-phase setState anti-pattern in the Onboarding spotlight bubble.
+
+---
+
 ## v1.3.3
 
 - Pixel Grid: lighter, subtler grid lines that stay out of the way
