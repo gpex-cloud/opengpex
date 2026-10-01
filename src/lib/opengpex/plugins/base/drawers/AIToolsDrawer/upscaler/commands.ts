@@ -81,7 +81,7 @@ const { runCommand, abortCommand } = createToolCommand<
     // Large image warning (non-blocking)
     const maxDim = Math.max(imageData.width, imageData.height);
     if (maxDim > 2048) {
-      ctx.actions.setInteraction({ hud: { message: '⚠️ Large image — upscale may take a while. Consider using ComfyUI for best results.', type: 'info' } });
+      ctx.actions.setInteraction({ hud: { message: '⚠️ Large image — upscale may take a while. Consider using ComfyUI for better performance.', type: 'info' } });
     }
 
     return null;
