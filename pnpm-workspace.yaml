@@ -4,3 +4,9 @@ allowBuilds:
   protobufjs: true
   sharp: true
   unrs-resolver: true
+
+# Intentionally staying on eslint v9 — eslint-config-next's transitive plugins
+# (eslint-plugin-import, eslint-plugin-jsx-a11y, eslint-plugin-react) haven't
+# declared eslint v10 peer support yet. Suppress the deprecation noise until they do.
+allowedDeprecatedVersions:
+  eslint: "9"
