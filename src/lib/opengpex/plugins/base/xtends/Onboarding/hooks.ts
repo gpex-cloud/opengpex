@@ -97,7 +97,14 @@ export function useOnboarding(trigger: SpotlightTrigger): OnboardingState {
   const [spotlightDisabledForever, setSpotlightDisabledForever] = useState<boolean>(readSpotlightDisabled);
   const [tipsDisabledForever, setTipsDisabledForever] = useState<boolean>(readTipsDisabled);
   const [tipsHiddenSession, setTipsHiddenSession] = useState(false);
-  const [messageIndex, setMessageIndex] = useState(0);
+  // Pair the index with the spotlight ID it belongs to.
+  // When activeSpotlight changes, the stored ID no longer matches and
+  // messageIndex naturally reads as 0 — no effect or render-phase setState needed.
+  // NOTE: the messageIndex derivation must come after the activeSpotlight useMemo below.
+  const [messageState, setMessageState] = useState<{ spotlightId: string | undefined; index: number }>({
+    spotlightId: undefined,
+    index: 0,
+  });
 
   // Listen for settings changes (same-tab reactivity via custom event)
   useEffect(() => {
@@ -129,18 +136,20 @@ export function useOnboarding(trigger: SpotlightTrigger): OnboardingState {
     return candidates[0];
   }, [trigger, sessionDismissed, spotlightDisabledForever]);
 
-  // Reset message index when active spotlight changes.
-  // This intentionally uses useEffect (not a render-phase setState) to avoid
-  // triggering an extra synchronous re-render on every render pass.
-  useEffect(() => {
-    setMessageIndex(0);
-  }, [activeSpotlight?.id]);
+  // Derive effective message index — if spotlight changed, the stored ID won't match and we get 0.
+  const messageIndex =
+    messageState.spotlightId === activeSpotlight?.id ? messageState.index : 0;
+
+
 
   // Advance cycles through messages (wraps around), never auto-dismisses
   const advanceOrDismissSpotlight = useCallback((id: string) => {
     const spotlight = SPOTLIGHTS.find((s) => s.id === id);
     if (!spotlight) return;
-    setMessageIndex((prev) => (prev + 1) % spotlight.messages.length);
+    setMessageState((prev) => {
+      const current = prev.spotlightId === id ? prev.index : 0;
+      return { spotlightId: id, index: (current + 1) % spotlight.messages.length };
+    });
   }, []);
 
   // Dismiss only for this session (no localStorage write — will show again next time)
@@ -150,7 +159,7 @@ export function useOnboarding(trigger: SpotlightTrigger): OnboardingState {
       next.add(id);
       return next;
     });
-    setMessageIndex(0);
+    setMessageState({ spotlightId: undefined, index: 0 });
   }, []);
 
   const dismissSpotlightForever = useCallback(() => {
