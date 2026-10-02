@@ -116,12 +116,35 @@ function Thumbnail({ previewB64, size = 'sm' }: { previewB64: string | null; siz
   );
 }
 
-// ─── Version Badge ───────────────────────────────────────────────────────────
+// ─── Revision Badge (File save revision: Rev 1, Rev 2...) ─────────────────────
 
-function VersionBadge({ version }: { version: number }) {
+function RevisionBadge({ version }: { version: number }) {
   return (
-    <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-indigo-500/15 text-[8px] font-black text-indigo-400 uppercase tracking-wide leading-none">
-      v{version}
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-[var(--bg-stage)] text-[8px] font-mono font-medium text-[var(--text-muted)] border border-[var(--border-subtle)] leading-none shrink-0">
+      Rev {version}
+    </span>
+  );
+}
+
+// ─── Version Badge (OpenGPEX architecture generation: v1 / v2) ────────────────
+
+function VersionBadge({
+  gpexVersion,
+  className,
+}: {
+  gpexVersion?: 'v1' | 'v2' | string;
+  className?: string;
+}) {
+  const isV2 = gpexVersion === 'v2';
+  return (
+    <span
+      className={`inline-flex items-center px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider leading-none shadow-sm backdrop-blur-md shrink-0 ${
+        isV2
+          ? 'bg-indigo-600/90 text-white border border-indigo-400/40 shadow-indigo-500/20'
+          : 'bg-zinc-800/90 text-zinc-300 border border-zinc-600/40'
+      } ${className ?? ''}`}
+    >
+      {isV2 ? 'v2' : 'v1'}
     </span>
   );
 }
@@ -207,20 +230,27 @@ function CardItem({
 }) {
   const dims = formatDimensions(file.manifest?.canvasWidth, file.manifest?.canvasHeight);
   const layers = file.manifest?.layerCount;
+  const isV2 = file.manifest?.gpexVersion === 'v2' || file.manifest?.editorVersion?.startsWith('2.');
+  const gpexVersion = isV2 ? 'v2' : 'v1';
 
   return (
     <div className="group flex flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:border-indigo-500/30 hover:shadow-md hover:shadow-indigo-500/5 transition-all duration-200 overflow-hidden">
       {/* Thumbnail Area */}
-      <Thumbnail previewB64={file.previewB64} size="lg" />
+      <div className="relative">
+        <Thumbnail previewB64={file.previewB64} size="lg" />
+        <div className="absolute top-1.5 left-1.5 z-10 pointer-events-none">
+          <VersionBadge gpexVersion={gpexVersion} />
+        </div>
+      </div>
 
       {/* Info Area */}
       <div className="flex flex-col px-2 py-1.5 gap-1 flex-grow">
-        {/* Title + Version */}
+        {/* Title + Revision */}
         <div className="flex items-center gap-1 min-w-0">
           <span className="flex-1 text-[10px] font-bold text-[var(--text-main)] truncate leading-tight">
             {file.manifest?.frameName || file.fileLocalId}
           </span>
-          <VersionBadge version={file.version} />
+          <RevisionBadge version={file.version} />
         </div>
 
         {/* Metadata row */}
@@ -260,9 +290,9 @@ function CardItem({
       <div className="px-2 py-1.5 border-t border-[var(--border-subtle)]/30 bg-[var(--bg-stage)]/40 flex items-center justify-end gap-1 shrink-0">
         <button
           onClick={onSelect}
-          disabled={isOpening}
-          className="flex items-center justify-center w-6 h-6 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:border-indigo-500/50 hover:text-indigo-400 text-[var(--text-muted)] transition-all cursor-pointer border-0 outline-none disabled:opacity-60"
-          title="Open"
+          disabled={isOpening || isV2}
+          className="flex items-center justify-center w-6 h-6 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:border-indigo-500/50 hover:text-indigo-400 text-[var(--text-muted)] transition-all cursor-pointer border-0 outline-none disabled:opacity-20 disabled:cursor-not-allowed"
+          title={isV2 ? "This project was created in OpenGPEX v2 and cannot be opened in v1" : "Open"}
         >
           {isOpening
             ? <Loader2 size={11} className="animate-spin" />
@@ -271,9 +301,9 @@ function CardItem({
         </button>
         <button
           onClick={onShare}
-          disabled={isSharing}
-          className="flex items-center justify-center w-6 h-6 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:border-emerald-500/50 hover:text-emerald-400 text-[var(--text-muted)] transition-all cursor-pointer border-0 outline-none disabled:opacity-60"
-          title="Share"
+          disabled={isSharing || isV2}
+          className="flex items-center justify-center w-6 h-6 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:border-emerald-500/50 hover:text-emerald-400 text-[var(--text-muted)] transition-all cursor-pointer border-0 outline-none disabled:opacity-20 disabled:cursor-not-allowed"
+          title={isV2 ? "This project was created in OpenGPEX v2 and cannot be shared from v1" : "Share"}
         >
           {isSharing
             ? <Loader2 size={11} className="animate-spin" />
@@ -282,9 +312,9 @@ function CardItem({
         </button>
         <button
           onClick={onDelete}
-          disabled={isDeleting}
-          className="flex items-center justify-center w-6 h-6 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:border-red-500/50 hover:text-red-400 text-[var(--text-muted)] transition-all cursor-pointer border-0 outline-none disabled:opacity-40"
-          title="Delete"
+          disabled={isDeleting || isV2}
+          className="flex items-center justify-center w-6 h-6 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:border-red-500/50 hover:text-red-400 text-[var(--text-muted)] transition-all cursor-pointer border-0 outline-none disabled:opacity-20 disabled:cursor-not-allowed"
+          title={isV2 ? "This project was created in OpenGPEX v2 and cannot be deleted from v1" : "Delete"}
         >
           {isDeleting
             ? <Loader2 size={11} className="animate-spin" />
@@ -313,6 +343,8 @@ function ListItem({
 }) {
   const dims = formatDimensions(file.manifest?.canvasWidth, file.manifest?.canvasHeight);
   const layers = file.manifest?.layerCount;
+  const isV2 = file.manifest?.gpexVersion === 'v2' || file.manifest?.editorVersion?.startsWith('2.');
+  const gpexVersion = isV2 ? 'v2' : 'v1';
 
   return (
     <div className="group flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-[var(--bg-stage)] transition-colors">
@@ -325,7 +357,8 @@ function ListItem({
           <span className="text-[11px] font-bold text-[var(--text-main)] truncate">
             {file.manifest?.frameName || file.fileLocalId}
           </span>
-          <VersionBadge version={file.version} />
+          <VersionBadge gpexVersion={gpexVersion} />
+          <RevisionBadge version={file.version} />
         </div>
         <div className="flex items-center gap-2 text-[9px] text-[var(--text-muted)] font-medium">
           {dims && (
@@ -351,9 +384,9 @@ function ListItem({
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={onSelect}
-          disabled={isOpening}
-          className="flex items-center justify-center w-7 h-7 rounded-lg hover:bg-indigo-500/20 transition-colors cursor-pointer border-0 outline-none disabled:opacity-60"
-          title="Open"
+          disabled={isOpening || isV2}
+          className="flex items-center justify-center w-7 h-7 rounded-lg hover:bg-indigo-500/20 transition-colors cursor-pointer border-0 outline-none disabled:opacity-20 disabled:cursor-not-allowed"
+          title={isV2 ? "This project was created in OpenGPEX v2 and cannot be opened in v1" : "Open"}
         >
           {isOpening
             ? <Loader2 size={13} className="animate-spin text-indigo-400" />
@@ -362,9 +395,9 @@ function ListItem({
         </button>
         <button
           onClick={onDelete}
-          disabled={isDeleting}
-          className="flex items-center justify-center w-7 h-7 rounded-lg hover:bg-red-500/20 transition-colors cursor-pointer border-0 outline-none disabled:opacity-40"
-          title="Delete"
+          disabled={isDeleting || isV2}
+          className="flex items-center justify-center w-7 h-7 rounded-lg hover:bg-red-500/20 transition-colors cursor-pointer border-0 outline-none disabled:opacity-20 disabled:cursor-not-allowed"
+          title={isV2 ? "This project was created in OpenGPEX v2 and cannot be deleted from v1" : "Delete"}
         >
           {isDeleting
             ? <Loader2 size={13} className="animate-spin text-red-400" />
@@ -460,6 +493,8 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
   }, []);
 
   const handleOpen = useCallback(async (file: GpexFileItem) => {
+    const isV2 = file.manifest?.gpexVersion === 'v2' || file.manifest?.editorVersion?.startsWith('2.');
+    if (isV2) return;
     setOpeningId(file.fileId);
     setProgress(0);
     try {

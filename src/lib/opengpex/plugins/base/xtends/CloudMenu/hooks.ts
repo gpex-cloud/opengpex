@@ -193,6 +193,12 @@ export const useCloudMenu = () => {
   }, []);
 
   const handleSelectFile = useCallback(async (file: GpexFileItem, onProgress?: GpexFileProgress) => {
+    const isV2 = file.manifest?.gpexVersion === 'v2' || file.manifest?.editorVersion?.startsWith('2.');
+    if (isV2) {
+      actions.notifyHUD('⚠️ Cannot open OpenGPEX v2 project in v1 editor');
+      return;
+    }
+
     try {
       const result = await openFromCloudCmd.execute({
         fileId: file.fileId,
@@ -214,10 +220,18 @@ export const useCloudMenu = () => {
         // Establish SyncRecord for newly downloaded frame
         // import triggers resetHistory -> past.length = 0, so savedHistoryLength = 0
         saveSyncRecord(result.id, {
-          version: 1,
+          version: file.version,
           savedAt: new Date().toISOString(),
           savedHistoryLength: 0,
         });
+
+        setLastSaveResult({
+          fileId: result.id,
+          version: file.version,
+          isNewFile: false,
+          savedAt: new Date().toISOString(),
+        });
+        bumpSyncTick();
 
         // Notify user
         const name = file.manifest?.frameName || 'File';
@@ -226,7 +240,7 @@ export const useCloudMenu = () => {
     } catch (err) {
       console.error('[CloudSync] Open failed:', err);
     }
-  }, [openFromCloudCmd, actions]);
+  }, [openFromCloudCmd, actions, bumpSyncTick]);
 
   // ─── Conflict resolution ────────────────────────────────────────
   const handleConfirmOverwrite = useCallback(() => {

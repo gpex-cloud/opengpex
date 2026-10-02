@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.3.5
+
+- Cloud Sync: added v1 and v2 tags to cloud projects, with save counts now clearly shown as Rev
+- Cloud Sync: projects created in v2 are now protected and cannot be opened in the v1 editor
+
+---
+
 ## v1.3.4
 
 - Fixed infinite repaint loop and render-phase setState anti-pattern in the Onboarding spotlight bubble.

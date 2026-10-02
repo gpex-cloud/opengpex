@@ -97,6 +97,7 @@ export const CLOUD_MENU_COMMANDS = {
         const manifest: GpexManifest = {
           format: 'gpex',
           version: 1,
+          gpexVersion: 'v1',
           frameLocalId: frame.id,
           frameName: frame.name || 'Untitled',
           canvasWidth: frame.canvas?.w || 0,
@@ -135,6 +136,14 @@ export const CLOUD_MENU_COMMANDS = {
       const { actions, state } = ctx;
       const { fileId, fileLocalId, fileManifest, fileSize, onConflict, onProgress } = payload;
 
+      // 0. Pre-download version check: only v1 files can be opened in OpenGPEX v1
+      if (fileManifest) {
+        const isV2 = fileManifest.gpexVersion === 'v2' || fileManifest.editorVersion?.startsWith('2.');
+        if (isV2) {
+          throw new Error('This file was created in OpenGPEX v2 and cannot be opened in OpenGPEX v1.');
+        }
+      }
+
       // 1. Pre-download conflict check (using metadata from file list, no download needed)
       if (fileLocalId && fileManifest) {
         const existingFrame = state.frames.byId[fileLocalId];
@@ -149,6 +158,12 @@ export const CLOUD_MENU_COMMANDS = {
 
       // 3. Unpack .gpex container
       const { manifest, payload: zipPayload } = unpackGpex(buffer);
+
+      // Post-download version guard: reject v2 container
+      const isDownloadedV2 = manifest.gpexVersion === 'v2' || manifest.editorVersion?.startsWith('2.');
+      if (isDownloadedV2) {
+        throw new Error('This file was created in OpenGPEX v2 and cannot be opened in OpenGPEX v1.');
+      }
 
       // 4. Unzip to extract state + asset blobs
       const { state: frameState, assetBlobs } = unpackPayload(zipPayload);
