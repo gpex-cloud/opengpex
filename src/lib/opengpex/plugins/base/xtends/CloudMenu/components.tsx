@@ -61,7 +61,7 @@ const _SyncStatusIndicator = ({
         <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/15 border border-emerald-600/30">
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.6)]" />
           <span className="text-[9px] font-bold text-emerald-600">
-            Synced{lastSaveResult ? ` · v${lastSaveResult.version}` : ""}
+            Synced{lastSaveResult ? ` · Rev ${lastSaveResult.version}` : ""}
           </span>
         </div>
       );
@@ -157,7 +157,7 @@ const _SavePhaseLabel = ({
           <span className="text-[9px] text-emerald-400 font-bold">
             {lastSaveResult.isNewFile
               ? "✨ Saved!"
-              : `Updated to v${lastSaveResult.version}`}
+              : `Updated to Rev ${lastSaveResult.version}`}
           </span>
         );
       }
@@ -498,7 +498,7 @@ function CloudMenuInner() {
                           <Upload size={9} />
                         )}
                         <span className="text-[8px] font-bold whitespace-nowrap">
-                          {isSaving ? "Syncing…" : syncStatus === "SYNCED" ? `Synced v${lastSaveResult?.version ?? ""}` : syncStatus === "LOCAL_AHEAD" ? "Sync" : syncStatus === "NEVER_SAVED" ? "Upload" : "Offline"}
+                          {isSaving ? "Syncing…" : syncStatus === "SYNCED" ? `Synced Rev ${lastSaveResult?.version ?? ""}` : syncStatus === "LOCAL_AHEAD" ? "Sync" : syncStatus === "NEVER_SAVED" ? "Upload" : "Offline"}
                         </span>
                       </button>
                     </div>

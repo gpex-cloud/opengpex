@@ -52,6 +52,8 @@
 export interface GpexManifest {
   format: "gpex";
   version: number;
+  /** Architecture generation of OpenGPEX ('v1' | 'v2'). Defaults to 'v1' if absent. */
+  gpexVersion?: "v1" | "v2";
   frameLocalId: string;
   frameName: string;
   canvasWidth: number;
