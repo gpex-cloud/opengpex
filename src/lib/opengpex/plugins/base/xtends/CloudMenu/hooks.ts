@@ -214,9 +214,16 @@ export const useCloudMenu = () => {
         // Establish SyncRecord for newly downloaded frame
         // import triggers resetHistory -> past.length = 0, so savedHistoryLength = 0
         saveSyncRecord(result.id, {
-          version: 1,
+          version: file.version,
           savedAt: new Date().toISOString(),
           savedHistoryLength: 0,
+        });
+
+        setLastSaveResult({
+          fileId: file.fileId,
+          version: file.version,
+          isNewFile: false,
+          savedAt: new Date().toISOString(),
         });
 
         // Notify user

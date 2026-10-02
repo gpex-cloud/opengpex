@@ -116,12 +116,35 @@ function Thumbnail({ previewB64, size = 'sm' }: { previewB64: string | null; siz
   );
 }
 
-// ─── Version Badge ───────────────────────────────────────────────────────────
+// ─── Revision Badge (File save revision: Rev 1, Rev 2...) ─────────────────────
 
-function VersionBadge({ version }: { version: number }) {
+function RevisionBadge({ version }: { version: number }) {
   return (
-    <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-indigo-500/15 text-[8px] font-black text-indigo-400 uppercase tracking-wide leading-none">
-      v{version}
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-[var(--bg-stage)] text-[8px] font-mono font-medium text-[var(--text-muted)] border border-[var(--border-subtle)] leading-none shrink-0">
+      Rev {version}
+    </span>
+  );
+}
+
+// ─── Version Badge (OpenGPEX architecture generation: v1 / v2) ────────────────
+
+function VersionBadge({
+  gpexVersion,
+  className,
+}: {
+  gpexVersion?: 'v1' | 'v2' | string;
+  className?: string;
+}) {
+  const isV2 = gpexVersion === 'v2';
+  return (
+    <span
+      className={`inline-flex items-center px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider leading-none shadow-sm backdrop-blur-md shrink-0 ${
+        isV2
+          ? 'bg-indigo-600/90 text-white border border-indigo-400/40 shadow-indigo-500/20'
+          : 'bg-zinc-800/90 text-zinc-300 border border-zinc-600/40'
+      } ${className ?? ''}`}
+    >
+      {isV2 ? 'v2' : 'v1'}
     </span>
   );
 }
@@ -207,20 +230,26 @@ function CardItem({
 }) {
   const dims = formatDimensions(file.manifest?.canvasWidth, file.manifest?.canvasHeight);
   const layers = file.manifest?.layerCount;
+  const gpexVersion = file.manifest?.gpexVersion || (file.manifest?.editorVersion?.startsWith('2.') ? 'v2' : 'v1');
 
   return (
-    <div className="group flex flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:border-indigo-500/30 hover:shadow-md hover:shadow-indigo-500/5 transition-all duration-200 overflow-hidden">
-      {/* Thumbnail Area */}
-      <Thumbnail previewB64={file.previewB64} size="lg" />
+    <div className="group flex flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:border-indigo-500/30 hover:shadow-md hover:shadow-indigo-500/5 transition-all duration-200 overflow-hidden relative">
+      {/* Thumbnail Area with v1/v2 Corner Badge */}
+      <div className="relative">
+        <Thumbnail previewB64={file.previewB64} size="lg" />
+        <div className="absolute top-1.5 left-1.5 z-10 pointer-events-none">
+          <VersionBadge gpexVersion={gpexVersion} />
+        </div>
+      </div>
 
       {/* Info Area */}
       <div className="flex flex-col px-2 py-1.5 gap-1 flex-grow">
-        {/* Title + Version */}
+        {/* Title + Revision */}
         <div className="flex items-center gap-1 min-w-0">
           <span className="flex-1 text-[10px] font-bold text-[var(--text-main)] truncate leading-tight">
             {file.manifest?.frameName || file.fileLocalId}
           </span>
-          <VersionBadge version={file.version} />
+          <RevisionBadge version={file.version} />
         </div>
 
         {/* Metadata row */}
@@ -313,6 +342,7 @@ function ListItem({
 }) {
   const dims = formatDimensions(file.manifest?.canvasWidth, file.manifest?.canvasHeight);
   const layers = file.manifest?.layerCount;
+  const gpexVersion = file.manifest?.gpexVersion || (file.manifest?.editorVersion?.startsWith('2.') ? 'v2' : 'v1');
 
   return (
     <div className="group flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-[var(--bg-stage)] transition-colors">
@@ -325,7 +355,8 @@ function ListItem({
           <span className="text-[11px] font-bold text-[var(--text-main)] truncate">
             {file.manifest?.frameName || file.fileLocalId}
           </span>
-          <VersionBadge version={file.version} />
+          <VersionBadge gpexVersion={gpexVersion} />
+          <RevisionBadge version={file.version} />
         </div>
         <div className="flex items-center gap-2 text-[9px] text-[var(--text-muted)] font-medium">
           {dims && (
@@ -524,7 +555,7 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
     <PopupPanel
       isVisible={true}
       onClose={onClose}
-      title="Cloud Files"
+      title="Cloud Gallery"
       subTitle={files.length > 0 ? `${files.length} file${files.length !== 1 ? 's' : ''}` : 'Browse & Manage'}
       icon={<Cloud size={16} />}
       size="lg"

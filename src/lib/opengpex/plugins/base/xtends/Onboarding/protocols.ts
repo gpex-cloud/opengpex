@@ -30,6 +30,7 @@ export const CMD_RESET_ONBOARDING = "cmd.reset_onboarding";
 export const STORAGE_KEY_SPOTLIGHTS = "gpex_onboarding_dismissed_spotlights";
 export const STORAGE_KEY_SPOTLIGHT_DISABLED = "gpex_onboarding_spotlight_disabled";
 export const STORAGE_KEY_TIPS = "gpex_onboarding_tips_disabled";
+export const STORAGE_KEY_WELCOME_V2 = "gpex_onboarding_welcome_v2_shown";
 
 // ─── Spotlight Definitions ──────────────────────────────────────────────────
 

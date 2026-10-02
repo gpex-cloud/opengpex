@@ -30,8 +30,20 @@ export const StateDriver = localforage.createInstance({
   storeName: 'State_V2'
 });
 
-// 2. Asset driver (stores binary image Blob)
+// 1.1 Legacy v1 state driver (read-only for automatic migration)
+export const LegacyStateDriver = localforage.createInstance({
+  name: 'OpenGPEX',
+  storeName: 'State_V1'
+});
+
+// 2. Asset driver (stores binary image Blob in v2)
 export const AssetDriver = localforage.createInstance({
+  name: 'OpenGPEXAssets',
+  storeName: 'Assets_V3'
+});
+
+// 2.1 Legacy v1 asset driver (read-only for automatic migration from Assets_V2)
+export const LegacyAssetDriver = localforage.createInstance({
   name: 'OpenGPEXAssets',
   storeName: 'Assets_V2'
 });

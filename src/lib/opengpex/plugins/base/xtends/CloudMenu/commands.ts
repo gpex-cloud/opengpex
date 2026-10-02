@@ -102,6 +102,7 @@ export const CLOUD_MENU_COMMANDS = {
         const manifest: GpexManifest = {
           format: 'gpex',
           version: 1,
+          gpexVersion: 'v2',
           frameLocalId: frame.id,
           frameName: frame.name || 'Untitled',
           canvasWidth: frame.canvas?.w || 0,

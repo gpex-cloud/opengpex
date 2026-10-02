@@ -2,6 +2,15 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.0-beta.2
+
+- Cloud Sync: added v1 and v2 tags to cloud projects, with save counts now clearly shown as Rev
+- Project Compatibility: seamlessly open and upgrade v1 projects from the cloud into v2
+- Data Migration: automatically migrates your previous local drafts when upgrading to v2
+- Onboarding: cleaner welcome experience with smoother tips and guide cards
+
+---
+
 ## v2.0.0-beta.1
 
 - Rendering: next-generation GPU engine now fully powered by WebGPU, delivering ultra-smooth real-time composition, instant live previews, and significantly reduced CPU overhead

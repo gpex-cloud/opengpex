@@ -45,6 +45,7 @@ import {
 } from "@opengpex/editor/core/types";
 import { createAssetService } from "@opengpex/editor/core/storage/asset/AssetService";
 import { createStateStorage } from "@opengpex/editor/core/storage/state/StateStorage";
+import { runV1MigrationAndHealing } from "@opengpex/editor/core/helpers/migrator/v1t2";
 
 import { useEditorStore } from "@opengpex/editor/core/state/useEditorStore";
 import { createGeometryService } from "@opengpex/editor/core/geometry";
@@ -199,6 +200,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       let restoreFailed = false;
 
       try {
+        await runV1MigrationAndHealing();
         savedState = await Promise.race([
           storage.restore(),
           new Promise<null>((_, reject) =>

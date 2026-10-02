@@ -21,6 +21,7 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   STORAGE_KEY_TIPS,
   STORAGE_KEY_SPOTLIGHT_DISABLED,
+  STORAGE_KEY_WELCOME_V2,
   SPOTLIGHTS,
   EVERYDAY_TIPS,
   type SpotlightDef,
@@ -73,6 +74,13 @@ export interface OnboardingState {
   currentMessageIndex: number;
   /** Whether the Everyday Tips banner is enabled */
   tipsEnabled: boolean;
+  /** Whether the v2 welcome modal should be shown */
+  showWelcomeModal: boolean;
+  /**
+   * Dismiss the v2 welcome modal.
+   * @param forever - if true, writes to localStorage (never show again); if false, session-only dismiss (shows again on next reload)
+   */
+  dismissWelcomeModal: (forever: boolean) => void;
   /** Advance to next message; if last message, dismiss the spotlight entirely */
   advanceOrDismissSpotlight: (id: string) => void;
   /** Dismiss a spotlight for this session only */
@@ -97,7 +105,25 @@ export function useOnboarding(trigger: SpotlightTrigger): OnboardingState {
   const [spotlightDisabledForever, setSpotlightDisabledForever] = useState<boolean>(readSpotlightDisabled);
   const [tipsDisabledForever, setTipsDisabledForever] = useState<boolean>(readTipsDisabled);
   const [tipsHiddenSession, setTipsHiddenSession] = useState(false);
-  const [messageIndex, setMessageIndex] = useState(0);
+
+  // Welcome modal: show once per browser only if user checked "Don't show again".
+  // By default (no localStorage entry) the modal reappears every session.
+  const [welcomeModalDismissedForever, setWelcomeModalDismissedForever] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY_WELCOME_V2) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [welcomeModalHiddenSession, setWelcomeModalHiddenSession] = useState(false);
+  // Pair the index with the spotlight ID it belongs to.
+  // When activeSpotlight changes, the stored ID no longer matches and
+  // messageIndex naturally reads as 0 — no effect or render-phase setState needed.
+  // NOTE: the messageIndex derivation must come after the activeSpotlight useMemo below.
+  const [messageState, setMessageState] = useState<{ spotlightId: string | undefined; index: number }>({
+    spotlightId: undefined,
+    index: 0,
+  });
 
   // Listen for settings changes (same-tab reactivity via custom event)
   useEffect(() => {
@@ -129,19 +155,20 @@ export function useOnboarding(trigger: SpotlightTrigger): OnboardingState {
     return candidates[0];
   }, [trigger, sessionDismissed, spotlightDisabledForever]);
 
-  // Reset message index when active spotlight changes
-  const prevSpotlightId = useMemo(() => activeSpotlight?.id, [activeSpotlight]);
-  const [lastSpotlightId, setLastSpotlightId] = useState(prevSpotlightId);
-  if (prevSpotlightId !== lastSpotlightId) {
-    setLastSpotlightId(prevSpotlightId);
-    setMessageIndex(0);
-  }
+  // Derive effective message index — if spotlight changed, the stored ID won't match and we get 0.
+  const messageIndex =
+    messageState.spotlightId === activeSpotlight?.id ? messageState.index : 0;
+
+
 
   // Advance cycles through messages (wraps around), never auto-dismisses
   const advanceOrDismissSpotlight = useCallback((id: string) => {
     const spotlight = SPOTLIGHTS.find((s) => s.id === id);
     if (!spotlight) return;
-    setMessageIndex((prev) => (prev + 1) % spotlight.messages.length);
+    setMessageState((prev) => {
+      const current = prev.spotlightId === id ? prev.index : 0;
+      return { spotlightId: id, index: (current + 1) % spotlight.messages.length };
+    });
   }, []);
 
   // Dismiss only for this session (no localStorage write — will show again next time)
@@ -151,7 +178,7 @@ export function useOnboarding(trigger: SpotlightTrigger): OnboardingState {
       next.add(id);
       return next;
     });
-    setMessageIndex(0);
+    setMessageState({ spotlightId: undefined, index: 0 });
   }, []);
 
   const dismissSpotlightForever = useCallback(() => {
@@ -170,10 +197,26 @@ export function useOnboarding(trigger: SpotlightTrigger): OnboardingState {
 
   const tipsEnabled = !tipsDisabledForever && !tipsHiddenSession;
 
+  const dismissWelcomeModal = useCallback((forever: boolean) => {
+    if (forever) {
+      setWelcomeModalDismissedForever(true);
+      try {
+        localStorage.setItem(STORAGE_KEY_WELCOME_V2, "true");
+      } catch {
+        // graceful
+      }
+    } else {
+      // Session-only: will reappear on next page load
+      setWelcomeModalHiddenSession(true);
+    }
+  }, []);
+
   return {
     activeSpotlight,
     currentMessageIndex: messageIndex,
     tipsEnabled,
+    showWelcomeModal: !welcomeModalDismissedForever && !welcomeModalHiddenSession,
+    dismissWelcomeModal,
     advanceOrDismissSpotlight,
     dismissSpotlight,
     dismissSpotlightForever,

@@ -14,6 +14,7 @@
 import { EditorCommand, EditorContextValue, Frame } from '@opengpex/editor/core/types';
 import type { FrameExportResult, FrameUnpackPayload } from '@opengpex/editor/core/types';
 import * as P from '@opengpex/editor/core/advanced/protocols';
+import { sanitizeFrame } from '@opengpex/editor/core/helpers/migrator/v1t2';
 
 /**
  * FRAME_PACK_COMMANDS: Handles artboard (Frame) serialization/dehydration (pack)
@@ -101,10 +102,23 @@ export const FramePackCommands = {
           // written before `assets-manifest.json` existed has no meta at all.
           // Such containers never carried raw:/dec: either, so 8-bit is their
           // own historical ceiling, not a loss introduced here.
+          let width = meta?.width ?? 0;
+          let height = meta?.height ?? 0;
+          if ((width <= 0 || height <= 0) && typeof createImageBitmap === 'function') {
+            try {
+              const bmp = await createImageBitmap(blob);
+              width = bmp.width;
+              height = bmp.height;
+              bmp.close();
+            } catch {
+              // Ignore failure (e.g. non-decodable format)
+            }
+          }
+
           await assets.register(blob, {
             precomputedHash: id, // ★ pin the original assetId — never re-hash
-            width: meta?.width ?? 0,
-            height: meta?.height ?? 0,
+            width,
+            height,
             dprScale: meta?.dprScale,
             sourceFileName: meta?.sourceFileName,
             ...identity,
@@ -112,8 +126,9 @@ export const FramePackCommands = {
         }
       }
 
-      // 2. Hydrate/restore artboard
-      const frame = storage.import(state);
+      // 2. Hydrate/restore artboard (sanitizing legacy v1 colors & fields if needed)
+      const cleanState = state && typeof state === 'object' ? sanitizeFrame(state as Record<string, unknown>) : state;
+      const frame = storage.import(cleanState);
 
       // 3. Add to store (supports add or overwrite mode)
       if (replaceId) {

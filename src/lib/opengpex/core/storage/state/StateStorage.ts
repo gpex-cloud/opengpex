@@ -18,7 +18,7 @@
  */
 
 import { AssetService } from '@opengpex/editor/core/storage/asset/AssetService';
-import type { ColorIdentity } from '@opengpex/editor/core/storage/asset/AssetStore';
+import { type ColorIdentity } from '@opengpex/editor/core/storage/asset/AssetStore';
 import { Hydrating, type DehydratedAssetPool } from './Hydrating';
 import { ShardedStateDriver, StateDriver } from '@opengpex/editor/core/storage/Driver';
 import { EditorData, Frame, GlobalHistoryState, UIConfig } from '@opengpex/editor/core/types';
