@@ -82,7 +82,7 @@ export async function buildFrameContent(
   // 2. Concurrently: decode content bounds + generate thumbnail
   const [contentBounds, thumbResult] = await Promise.all([
     pixels.image.contentBounds(assetUrl),
-    pixels.image.resample(assetUrl, { maxSize: 256 }),
+    pixels.image.resample(assetUrl, { maxSize: 512 }),
   ]);
   const thumbBlob = await thumbResult.toBlob('image/webp');
   const dimension = decodeDimensions;
