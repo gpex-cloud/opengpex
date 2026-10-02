@@ -464,6 +464,17 @@ export class SceneAssembler {
       if (rawUpload) {
         uploads.push({ assetId: sourceAssetId, source: rawUpload });
       } else if (!isVectorLayer && rawImg && typeof (rawImg as ImageBitmap).close === 'function') {
+        // [P3-Debug][5] SceneAssembler bitmap upload: this is the gamut that will
+        // steer copyExternalImageToTexture's destColorSpace in WebGpuEngine.
+        // If gamut is 'srgb' for a P3 image, the GPU will NOT do an identity
+        // copy — the P3 intrinsic values will be misread as sRGB, causing drift.
+        const resolvedGamut = assets?.get(sourceAssetId)?.gamut ?? 'srgb';
+        console.log('[ColorProfile-Debug][5.SceneAssembler-BITMAP-UPLOAD]', {
+          assetId: sourceAssetId.slice(0, 24),
+          rawImgPresent: !!rawImg,
+          resolvedGamut,
+          isDefaultFallback: !assets?.get(sourceAssetId)?.gamut,
+        });
         uploads.push({
           assetId: sourceAssetId,
           // Tag the 8-bit color raster with the asset's OWN
@@ -480,7 +491,7 @@ export class SceneAssembler {
           // scene layer's `source.gamut` below — both read `assets?.get(sourceAssetId)?.gamut`.
           // They are two independent channels (upload identity vs. shader
           // gamut_to_working); diverging them double-converts or fails to align.
-          source: { kind: 'bitmap', data: rawImg as ImageBitmap, gamut: assets?.get(sourceAssetId)?.gamut ?? 'srgb' },
+          source: { kind: 'bitmap', data: rawImg as ImageBitmap, gamut: resolvedGamut },
         });
       }
 

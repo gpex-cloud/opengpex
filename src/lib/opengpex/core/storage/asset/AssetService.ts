@@ -386,8 +386,6 @@ export class AssetService {
       precomputedHash: finalId,
     });
 
-
-
     return { assetId, url, colorIdentity: effectiveColorIdentity };
   }
 
@@ -470,6 +468,16 @@ export class AssetService {
     // dataFormat) is inherited straight off the persisted record — no
     // TileMetadata to rebuild (it is abolished; the WebGPU renderer has no
     // use for tiling).
+    // [P3-Debug][3] Cold-recovery path: gamut restored from IDB. If this shows
+    // 'display-p3' for a P3 image, the StoredAsset round-trip is correct.
+    // If it shows 'srgb', the IDB record lost the gamut — that IS the root cause.
+    console.log('[ColorProfile-Debug][3.loadEntry-FROM-IDB]', {
+      id: item.id.slice(0, 24),
+      gamut: item.gamut,
+      trc: item.trc,
+      bitDepth: item.bitDepth,
+      version: item.version,
+    });
     const url = URL.createObjectURL(item.blob);
     this.pool.set(item.id, {
       ...item,
@@ -478,6 +486,7 @@ export class AssetService {
       owners: new Set(),
       lastUsedAt: Date.now()
     });
+
     resourceTracker.track(`asset:${item.id}`, 'image_decoded', item.blob.size, `Hydrated ${item.id.slice(0, 8)}`);
 
     // Display asset: notify engine layer to warm Worker cache

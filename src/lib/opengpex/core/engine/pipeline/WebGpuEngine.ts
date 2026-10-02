@@ -1002,9 +1002,8 @@ export class WebGpuEngine implements IEngine {
         label: `LayerAsset (${assetId})`,
       });
 
-      // Identity upload: the bitmap was decoded with
-      // `colorSpaceConversion:'none'`, so its pixels are still in the source's
-      // intrinsic gamut. Tag the copy destination with that SAME gamut so
+      // Identity upload: the bitmap preserves its intrinsic source gamut (e.g. Display-P3
+      // via embedded ICC). Tag the copy destination with that SAME gamut so
       // `copyExternalImageToTexture` performs NO gamut conversion (identity);
       // the shader's gamut-align step later maps gamut_id→working (P3).
       //   • color rasters carry gamut = frame.colorSpace ∈ {srgb, display-p3};
@@ -1015,6 +1014,14 @@ export class WebGpuEngine implements IEngine {
       // oversaturation bug this fix removes.
       const destColorSpace: GPUPredefinedColorSpace =
         src.gamut === 'display-p3' ? 'display-p3' : 'srgb';
+
+      console.log('[ColorProfile-Debug][5.WebGpuUpload]', {
+        assetId,
+        width,
+        height,
+        srcGamut: src.gamut,
+        destColorSpace,
+      });
 
       device.queue.copyExternalImageToTexture(
         { source: bitmap },

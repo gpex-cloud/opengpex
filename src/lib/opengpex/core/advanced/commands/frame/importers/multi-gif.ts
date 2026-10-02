@@ -192,10 +192,7 @@ export async function importAnimatedGif(
   // 3. Generate thumbnail
   const firstLayerId = content.layers.order[0];
   const firstLayer = content.layers.byId[firstLayerId];
-  const [_contentBounds, thumbResult] = await Promise.all([
-    pixels.image.contentBounds(firstLayer.src),
-    pixels.image.resample(firstLayer.src, { maxSize: 256 }),
-  ]);
+  const thumbResult = await pixels.image.resample(firstLayer.src, { maxSize: 256 });
   const thumbBlob = await transcodeBlob(thumbResult.displayBlob, 'image/webp');
   const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, { width: thumbResult.width, height: thumbResult.height });
 

@@ -53,7 +53,6 @@ import type {
   Shape,
   WorldShape,
   LocalShape,
-  LocalRect,
   Rect,
   GamutId,
 } from '@opengpex/editor/core/types';
@@ -116,6 +115,16 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
     onRegistered: (assetId, blob) => {
       imageDispatcher.ensureAsset(assetId, blob).catch(() => { /* non-fatal */ });
       const url = assets.getURL(assetId);
+      // [P3-Debug][4] onRegistered fired — this is the ONLY path that calls
+      // warmFromBlob. Fires both on first import (register writes new record) and
+      // on cold recovery (loadEntry replays the IDB record). The gamut shown here
+      // is what the SceneAssembler will later read from assets.get(assetId).gamut.
+      // If url is null here, warmFromBlob is SKIPPED entirely — that would be a bug.
+      console.log('[ColorProfile-Debug][4.onRegistered]', {
+        assetId: assetId.slice(0, 24),
+        urlResolved: !!url,
+        gamutInPool: assets.get(assetId)?.gamut ?? '(not in pool)',
+      });
       if (url) {
         sourceBitmapCache.warmFromBlob(url, blob).catch(() => { /* non-fatal */ });
       }
@@ -147,12 +156,6 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
       /** Sync probe: returns cached bitmap or undefined (fires background decode on miss). */
       ensureBitmap(src: string): ImageBitmap | undefined {
         return imageDispatcher.ensureBitmap(src);
-      },
-      /** Calculate non-transparent content bounding box. */
-      async contentBounds(src: string): Promise<LocalRect> {
-        const bmp = await imageDispatcher.loadBitmap(src);
-        const { calculateContentBounds } = await import('./utils/pixel-utils');
-        return calculateContentBounds(bmp);
       },
       /** Extract raw RGBA ImageData via Worker (zero main-thread blocking). */
       async imageData(src: string, rect?: Rect): Promise<ImageData> {

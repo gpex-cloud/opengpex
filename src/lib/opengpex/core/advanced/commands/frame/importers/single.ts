@@ -71,12 +71,10 @@ export async function importSingleImage(
   // was never acceptable post-adjust).
   const bundle = await assets.storeBundle(page, sourceBlob);
 
-  // 2. Concurrently: decode content bounds + generate thumbnail
-  const [contentBounds, thumbResult] = await Promise.all([
-    pixels.image.contentBounds(bundle.url),
-    pixels.image.resample(bundle.url, { maxSize: 256 }),
-  ]);
+  // 2. Generate thumbnail (content bounds is precomputed during file decode)
+  const thumbResult = await pixels.image.resample(bundle.url, { maxSize: 256 });
   const thumbBlob = await transcodeBlob(thumbResult.displayBlob, 'image/webp');
+  const contentBounds = page.contentBounds ?? { x: 0, y: 0, w: page.width, h: page.height };
 
   // 3. Register thumbnail asset (dimensions from resample output)
   const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, { width: thumbResult.width, height: thumbResult.height });
@@ -148,7 +146,7 @@ export async function revertSingleImage(
   frameId: string,
   decoded: DecodeResult,
 ): Promise<boolean> {
-  const { actions, assets, pixels, state, geometry } = ctx;
+  const { actions, assets, state, geometry } = ctx;
   try {
     const { sourceBlob, pages, metadata } = decoded;
     const page = pages[0];
@@ -157,8 +155,8 @@ export async function revertSingleImage(
     // cache (see importSingleImage / AssetService.storeBundle for rationale).
     const bundle = await assets.storeBundle(page, sourceBlob);
 
-    // 2. Decode content bounds (no thumbnail — revert never changes it)
-    const contentBounds = await pixels.image.contentBounds(bundle.url);
+    // 2. Resolve content bounds (precomputed during file decode)
+    const contentBounds = page.contentBounds ?? { x: 0, y: 0, w: page.width, h: page.height };
 
     // 3. Camera calculation
     const { insets } = state.ui.theme.config;

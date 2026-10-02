@@ -176,18 +176,14 @@ export const FrameCreateCommands = {
           hasAlpha: true,
         };
 
-        // ── Step 4: Concurrently resolve visible-content bounds + thumbnail —
-        // mirrors importSingleImage's ingest, keeps metadata parity with a
-        // file-imported frame ────────────────────────────────────────────────
-        const [contentBounds, thumbResult] = await Promise.all([
-          pixels.image.contentBounds(bundle.url),
-          pixels.image.resample(bundle.url, { maxSize: 256 }),
-        ]);
+        // ── Step 4: Generate thumbnail (bounds pre-aligned to composite region) ───
+        const thumbResult = await pixels.image.resample(bundle.url, { maxSize: 256 });
         const thumbBlob = await transcodeBlob(thumbResult.displayBlob, 'image/webp');
         const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, {
           width: thumbResult.width,
           height: thumbResult.height,
         });
+        const contentBounds = { x: 0, y: 0, w: composited.width, h: composited.height };
 
         // ── Step 5: Camera + base layer + new frame assembly ────────────────
         const { insets } = state.ui.theme.config;

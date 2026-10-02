@@ -128,20 +128,52 @@ class SourceBitmapCache {
   public async warmFromBlob(src: string, blob: Blob): Promise<void> {
     if (!isBitmapCapable) return;
     // Fast exit: another path (e.g. writeBitmap) already populated the cache.
-    if (this.cache.has(src)) return;
+    if (this.cache.has(src)) {
+      // [P3-Debug][1a] warmFromBlob fast-exit: cache already had this src BEFORE
+      // createImageBitmap. This means a prior path (writeBitmap / another
+      // warmFromBlob call) beat us here. The bitmap that will be used for
+      // rendering is NOT the one we would have decoded here.
+      console.log('[ColorProfile-Debug][1a.warmFromBlob-FAST-EXIT]', {
+        src: src.slice(0, 32),
+        reason: 'cache already populated before decode',
+      });
+      return;
+    }
     try {
-      // colorSpaceConversion:'none' — do NOT let the decoder color-manage/clip
-      // wide-gamut (P3) pixels down to sRGB. The intrinsic source gamut is
-      // preserved so the identity upload (copyExternalImageToTexture with a
-      // matching target colorSpace) keeps the full P3 gamut.
+      // Decode image blob using default color management so embedded ICC profiles
+      // (e.g. Display P3) are preserved and correctly tagged on the ImageBitmap.
+      // This ensures WebGPU's copyExternalImageToTexture performs an identity copy.
       const bitmap = await createImageBitmap(blob, {
         imageOrientation: 'from-image',
-        colorSpaceConversion: 'none',
       });
+
+      try {
+        const cvs = new OffscreenCanvas(1, 1);
+        const ctx = cvs.getContext('2d', { willReadFrequently: true })!;
+        ctx.drawImage(bitmap, Math.floor(bitmap.width / 2), Math.floor(bitmap.height / 2), 1, 1, 0, 0, 1, 1);
+        const px = ctx.getImageData(0, 0, 1, 1).data;
+        console.log('[ColorProfile-Debug][1b.warmFromBlob-DECODED]', {
+          src: src.slice(0, 32),
+          width: bitmap.width,
+          height: bitmap.height,
+          colorSpaceConversion: 'default',
+          centerPixel: [px[0], px[1], px[2], px[3]],
+        });
+      } catch {
+        // ignore
+      }
+
       // Re-check after async gap — writeBitmap may have populated the entry
       // while createImageBitmap was in progress.
       if (this.cache.has(src)) {
         bitmap.close();
+        // [P3-Debug][1c] warmFromBlob async-gap-exit: cache was populated by
+        // another path DURING our createImageBitmap await. The bitmap we just
+        // decoded is discarded; the winner's bitmap will be used for rendering.
+        console.log('[ColorProfile-Debug][1c.warmFromBlob-ASYNC-GAP-EXIT]', {
+          src: src.slice(0, 32),
+          reason: 'cache populated by another path during createImageBitmap',
+        });
         return;
       }
       this.set(src, bitmap);
@@ -194,16 +226,38 @@ class SourceBitmapCache {
   // ────────────────────────────────────────────────────────────
 
   private startLoad(src: string): void {
+    // [P3-Debug][2] startLoad triggered — SceneAssembler called getOrFetch() and
+    // found a cache miss. This path fetches from the ObjectURL and decodes with
+    // default color management. If this fires during cold recovery, it means
+    // warmFromBlob either hadn't resolved yet or was fast-exited.
+    console.log('[ColorProfile-Debug][2.startLoad-TRIGGERED]', { src: src.slice(0, 32) });
     const promise = (async (): Promise<ImageBitmap> => {
       const response = await fetch(src, { credentials: 'omit' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const blob = await response.blob();
-      // colorSpaceConversion:'none' — preserve intrinsic source gamut (see
-      // warmFromBlob); the identity upload restores it to the P3 working space.
-      return createImageBitmap(blob, {
+      // Decode image blob using default color management so embedded ICC profiles
+      // are respected and appropriately tagged for identity upload.
+      const bitmap = await createImageBitmap(blob, {
         imageOrientation: 'from-image',
-        colorSpaceConversion: 'none',
       });
+
+      try {
+        const cvs = new OffscreenCanvas(1, 1);
+        const ctx = cvs.getContext('2d', { willReadFrequently: true })!;
+        ctx.drawImage(bitmap, Math.floor(bitmap.width / 2), Math.floor(bitmap.height / 2), 1, 1, 0, 0, 1, 1);
+        const px = ctx.getImageData(0, 0, 1, 1).data;
+        console.log('[ColorProfile-Debug][SourceBitmapCache-startLoad]', {
+          src: src.slice(0, 32),
+          width: bitmap.width,
+          height: bitmap.height,
+          colorSpaceConversion: 'default',
+          centerPixel: [px[0], px[1], px[2], px[3]],
+        });
+      } catch {
+        // ignore
+      }
+
+      return bitmap;
     })();
     this.pending.set(src, promise);
 

@@ -52,9 +52,27 @@ export class DecoderHandler {
     const hash = await calculateHash(blob);
     await workerCache.ingest(hash, blob);
 
-    // Create a fresh bitmap to transfer to main thread
-    // (the one in workerCache is retained for Worker-side use)
-    const bitmap = await createImageBitmap(blob);
+    // Decode bitmap with default browser color management so wide-gamut sources
+    // (Display-P3, etc.) retain their embedded ICC tags when transferred to main thread.
+    const bitmap = await createImageBitmap(blob, {
+      imageOrientation: 'from-image',
+    });
+
+    try {
+      const cvs = new OffscreenCanvas(1, 1);
+      const ctx = cvs.getContext('2d', { willReadFrequently: true })!;
+      ctx.drawImage(bitmap, Math.floor(bitmap.width / 2), Math.floor(bitmap.height / 2), 1, 1, 0, 0, 1, 1);
+      const px = ctx.getImageData(0, 0, 1, 1).data;
+      console.log('[ColorProfile-Debug][Worker-DecoderHandler]', {
+        src: job.src.slice(0, 32),
+        width: bitmap.width,
+        height: bitmap.height,
+        colorSpaceConversion: 'default',
+        centerPixel: [px[0], px[1], px[2], px[3]],
+      });
+    } catch {
+      // ignore
+    }
 
     return {
       result: { bitmap },

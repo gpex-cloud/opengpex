@@ -32,7 +32,7 @@ import {
   LayerBlendMode,
 } from './models';
 import {
-  LocalRect, Dimensions, Shape, LocalShape, WorldShape, GamutId, Rect
+  Dimensions, Shape, LocalShape, WorldShape, GamutId, Rect
 } from './primitives';
 import { EditorData } from './state';
 import type { ImageMetadata, EncodeSource } from '../files/types';
@@ -383,12 +383,6 @@ export interface PixelService {
      * when `undefined` is returned.
      */
     ensureBitmap: (src: string) => ImageBitmap | undefined;
-
-    /**
-     * Calculate the non-transparent content bounding box of an image.
-     * Decodes and scans pixels.
-     */
-    contentBounds: (src: string) => Promise<LocalRect>;
 
     /**
      * Extract raw RGBA pixel data via Worker (zero main-thread blocking).

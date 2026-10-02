@@ -47,7 +47,9 @@ export class ResampleHandler {
       throw new Error(`[ResampleHandler] Fetch failed for ${src}: HTTP ${response.status}`);
     }
     const srcBlob = await response.blob();
-    const srcBitmap = await createImageBitmap(srcBlob);
+    const srcBitmap = await createImageBitmap(srcBlob, {
+      imageOrientation: 'from-image',
+    });
 
     // 2. Resample via OffscreenCanvas with high-quality bicubic interpolation.
     // colorSpace MUST match the source's gamut — otherwise Canvas2D silently

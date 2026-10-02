@@ -115,14 +115,14 @@ async function rebuildOnePage(
   metadata: ImageMetadata,
   sourceBlob: Blob | null | undefined,
 ): Promise<void> {
-  const { actions, assets, pixels, state, geometry } = ctx;
+  const { actions, assets, state, geometry } = ctx;
 
   // 1. Ingest: register display asset + store raw source (raw: dedups by hash
   //    across every page, see importSingleImage / AssetService.storeBundle).
   const bundle = await assets.storeBundle(page, sourceBlob ?? undefined);
 
-  // 2. Decode content bounds (no thumbnail — revert never changes it)
-  const contentBounds = await pixels.image.contentBounds(bundle.url);
+  // 2. Resolve content bounds (precomputed during file decode)
+  const contentBounds = page.contentBounds ?? { x: 0, y: 0, w: page.width, h: page.height };
 
   // 3. Camera calculation
   const { insets } = state.ui.theme.config;

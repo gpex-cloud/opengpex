@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.0-beta.3
+
+- Color Accuracy: fixed an issue where wide-gamut Display P3 images appeared washed out or desaturated, ensuring vivid and faithful color reproduction across all displays
+
+---
+
 ## v2.0.0-beta.2
 
 - Cloud Sync: added v1 and v2 tags to cloud projects, with save counts now clearly shown as Rev

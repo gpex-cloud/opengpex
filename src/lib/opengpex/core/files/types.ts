@@ -29,7 +29,7 @@
  * Previously split across types.ts + metadata.ts; unified 2026-08-07.
  */
 
-import type { GamutId } from '@opengpex/editor/core/types';
+import type { GamutId, LocalRect } from '@opengpex/editor/core/types';
 import type { ColorIdentity, ImageAssetPayload } from '@opengpex/editor/core/storage/asset/AssetStore';
 import type { IngestDecision } from './strategy';
 
@@ -378,6 +378,13 @@ export interface DecodedImage extends ImageAssetPayload {
    * Undefined for static multi-page formats (TIFF pages, PDF pages).
    */
   readonly delay?: number;
+
+  /**
+   * Precomputed visible-content bounding box (non-transparent region).
+   * Populated by FileService.decode during ingest.
+   * Guaranteed to match { x: 0, y: 0, w: width, h: height } when `hasAlpha` is false.
+   */
+  readonly contentBounds?: LocalRect;
 }
 
 /** Decode result returned by the FileService — a thin file-level container over `pages`. */

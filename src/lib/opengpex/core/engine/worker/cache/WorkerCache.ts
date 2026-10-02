@@ -78,8 +78,10 @@ class WorkerCache {
     // Evict if at capacity
     this.evictIfNeeded();
 
-    // Decode blob to bitmap
-    const bitmap = await createImageBitmap(blob);
+    // Decode blob to bitmap using default color management so embedded ICC profile is preserved
+    const bitmap = await createImageBitmap(blob, {
+      imageOrientation: 'from-image',
+    });
     this.blobCache.set(hash, blob);
     this.bitmapCache.set(hash, bitmap);
     this.usageOrder.push(hash);

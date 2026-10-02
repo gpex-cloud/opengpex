@@ -24,13 +24,14 @@
  * Dependencies: AssetService (for registering ICC/EXIF blobs).
  */
 
-import type { AssetService } from '@opengpex/editor/core/types';
+import type { AssetService, LocalRect } from '@opengpex/editor/core/types';
 import type {
   FileService,
   ImageFormatHandler,
   ImageMetadata,
   DecodeOptions,
   DecodeResult,
+  DecodedImage,
   DecodedPayload,
   EncodeOptions,
   EncodeSource,
@@ -250,23 +251,38 @@ export function createFileService(
 
       // Stage 4: entry-owned result wrapping. Path B — the entry injects the
       // authoritative `colorIdentity` into every page (the decision is the single
-      // colour authority; handlers never mint it), and owns `sourceBlob` retention.
+      // colour authority; handlers never mint it), precomputes `contentBounds`
+      // (fast path for opaque images, avoids downstream async Worker round-trips),
+      // and owns `sourceBlob` retention.
       // The ONE exception: a handler whose pages can genuinely carry different
       // colour per page (only multi-page TIFF today — each IFD may declare its own
       // PhotometricInterpretation / BitsPerSample / ICC) may set `colorIdentity`
       // itself, and that per-page value wins. Every other handler leaves it unset
       // and takes the file-level decision unchanged.
+      const resolvedPages: DecodedImage[] = await Promise.all(
+        pages.map(async (page) => {
+          const contentBounds =
+            page.contentBounds ??
+            (await resolvePageContentBounds(
+              page.displayBlob,
+              page.width,
+              page.height,
+              metadata.hasAlpha,
+            ));
+          return {
+            ...page,
+            contentBounds,
+            colorIdentity: page.colorIdentity ?? decision.colorIdentity,
+            sourceFileName: metadata.sourceFileName ?? file.name,
+          };
+        }),
+      );
+
       const result: DecodeResult = {
         metadata,
-        pages: pages.map((page) => ({
-          ...page,
-          colorIdentity: page.colorIdentity ?? decision.colorIdentity,
-          sourceFileName: metadata.sourceFileName ?? file.name,
-        })),
+        pages: resolvedPages,
         sourceBlob: decision.retainSourceBlob ? file : undefined,
       };
-
-
 
       return result;
     },
@@ -420,11 +436,45 @@ export function decodeBlob(input: DecodeBlobInput): DecodeResult {
       width,
       height,
       index: 0,
+      contentBounds: !metadata.hasAlpha ? ({ x: 0, y: 0, w: width, h: height } as LocalRect) : undefined,
       colorIdentity: decision.colorIdentity,
       sourceFileName: metadata.sourceFileName,
     }],
     sourceBlob: decision.retainSourceBlob ? blob : undefined,
   };
+}
+
+/**
+ * Compute the non-transparent content bounding box for a decoded page.
+ *
+ * Fast path: if `hasAlpha` is false (e.g. JPEG), the bounds are guaranteed
+ * to be the entire canvas (0, 0, width, height) with zero decode/scan overhead.
+ * Slow path: only when `hasAlpha` is true, decodes via createImageBitmap with
+ * `colorSpaceConversion: 'none'` and scans the alpha channel.
+ */
+async function resolvePageContentBounds(
+  blob: Blob,
+  width: number,
+  height: number,
+  hasAlpha: boolean,
+): Promise<LocalRect> {
+  if (!hasAlpha) {
+    return { x: 0, y: 0, w: width, h: height } as LocalRect;
+  }
+  try {
+    const bitmap = await createImageBitmap(blob, {
+      imageOrientation: 'from-image',
+      colorSpaceConversion: 'none',
+    });
+    try {
+      const { calculateContentBounds } = await import('../engine/utils/pixel-utils');
+      return await calculateContentBounds(bitmap);
+    } finally {
+      bitmap.close();
+    }
+  } catch {
+    return { x: 0, y: 0, w: width, h: height } as LocalRect;
+  }
 }
 
 // Re-export MIME utilities (stateless helpers used without FileService access)
