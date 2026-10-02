@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.0-beta.4
+
+- Workspace: refined Tab Dock and thumbnail sizing for a cleaner, more compact layout
+- Visuals: upgraded project thumbnail resolution for significantly clearer previews when saving and sharing
+
+---
+
 ## v2.0.0-beta.3
 
 - Color Accuracy: fixed an issue where wide-gamut Display P3 images appeared washed out or desaturated, ensuring vivid and faithful color reproduction across all displays

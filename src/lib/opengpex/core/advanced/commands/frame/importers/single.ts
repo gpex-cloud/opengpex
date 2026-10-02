@@ -72,7 +72,7 @@ export async function importSingleImage(
   const bundle = await assets.storeBundle(page, sourceBlob);
 
   // 2. Generate thumbnail (content bounds is precomputed during file decode)
-  const thumbResult = await pixels.image.resample(bundle.url, { maxSize: 256 });
+  const thumbResult = await pixels.image.resample(bundle.url, { maxSize: 512 });
   const thumbBlob = await transcodeBlob(thumbResult.displayBlob, 'image/webp');
   const contentBounds = page.contentBounds ?? { x: 0, y: 0, w: page.width, h: page.height };
 

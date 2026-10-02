@@ -177,7 +177,7 @@ export const FrameCreateCommands = {
         };
 
         // ── Step 4: Generate thumbnail (bounds pre-aligned to composite region) ───
-        const thumbResult = await pixels.image.resample(bundle.url, { maxSize: 256 });
+        const thumbResult = await pixels.image.resample(bundle.url, { maxSize: 512 });
         const thumbBlob = await transcodeBlob(thumbResult.displayBlob, 'image/webp');
         const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, {
           width: thumbResult.width,
