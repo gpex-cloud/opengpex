@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.3.6
+
+- Visuals: upgraded project thumbnail resolution for significantly clearer previews when saving and sharing
+- Cloud Files: refined file browser layout and viewing experience
+
+---
+
 ## v1.3.5
 
 - Cloud Sync: added v1 and v2 tags to cloud projects, with save counts now clearly shown as Rev

@@ -17,26 +17,48 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Trash2, FolderOpen, FileImage, Loader2, Cloud, LayoutGrid, List, Layers, Image as ImageIcon, Share2, Link2, X, Check } from 'lucide-react';
-import { PopupPanel } from '@opengpex/editor/widgets/PopupPanel';
-import FancyConfirm from '@opengpex/editor/widgets/FancyConfirm';
-import EditorPortal from '@opengpex/editor/widgets/Portal';
-import { gpexStorage, type GpexFileItem, type GpexFileProgress } from '@opengpex/editor/core/cloud';
+import { useState, useEffect, useCallback, useMemo } from "react";
+import {
+  Trash2,
+  FolderOpen,
+  FileImage,
+  Loader2,
+  Cloud,
+  LayoutGrid,
+  List,
+  Layers,
+  Image as ImageIcon,
+  Share2,
+  Link2,
+  X,
+  Check,
+  Copy,
+} from "lucide-react";
+import { PopupPanel } from "@opengpex/editor/widgets/PopupPanel";
+import FancyConfirm from "@opengpex/editor/widgets/FancyConfirm";
+import EditorPortal from "@opengpex/editor/widgets/Portal";
+import {
+  gpexStorage,
+  type GpexFileItem,
+  type GpexFileProgress,
+} from "@opengpex/editor/core/cloud";
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
 interface CloudBrowserProps {
-  onSelect: (file: GpexFileItem, onProgress?: GpexFileProgress) => Promise<void>;
+  onSelect: (
+    file: GpexFileItem,
+    onProgress?: GpexFileProgress,
+  ) => Promise<void>;
   onDelete: (fileId: string) => Promise<void>;
   onClose: () => void;
 }
 
 // ─── View Mode ───────────────────────────────────────────────────────────────
 
-type ViewMode = 'grid' | 'list';
+type ViewMode = "grid" | "list";
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
@@ -49,21 +71,35 @@ const formatSize = (bytes: number) => {
 const formatDate = (iso: string) => {
   try {
     return new Date(iso).toLocaleDateString(undefined, {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
-  } catch { return iso; }
+  } catch {
+    return iso;
+  }
 };
 
 const formatDateGroup = (iso: string) => {
   try {
     const d = new Date(iso);
     const now = new Date();
-    const diffDays = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
-    if (diffDays === 0) return 'Today';
-    if (diffDays === 1) return 'Yesterday';
-    if (diffDays < 7) return d.toLocaleDateString(undefined, { weekday: 'long' });
-    return d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
-  } catch { return iso; }
+    const diffDays = Math.floor(
+      (now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24),
+    );
+    if (diffDays === 0) return "Today";
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7)
+      return d.toLocaleDateString(undefined, { weekday: "long" });
+    return d.toLocaleDateString(undefined, {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return iso;
+  }
 };
 
 const formatDimensions = (w?: number, h?: number) => {
@@ -85,20 +121,31 @@ function groupByDate(files: GpexFileItem[]): DateGroup[] {
     if (!groups.has(label)) groups.set(label, []);
     groups.get(label)!.push(file);
   }
-  return Array.from(groups.entries()).map(([label, groupFiles]) => ({ label, files: groupFiles }));
+  return Array.from(groups.entries()).map(([label, groupFiles]) => ({
+    label,
+    files: groupFiles,
+  }));
 }
 
 // ─── Thumbnail Component ─────────────────────────────────────────────────────
 
-function Thumbnail({ previewB64, size = 'sm' }: { previewB64: string | null; size?: 'sm' | 'lg' }) {
+function Thumbnail({
+  previewB64,
+  size = "sm",
+}: {
+  previewB64: string | null;
+  size?: "sm" | "lg";
+}) {
   const sizeClasses = {
-    sm: 'w-10 h-10 rounded-lg',
-    lg: 'w-full aspect-[3/2] rounded-lg',
+    sm: "w-10 h-10 rounded-lg",
+    lg: "w-full aspect-[3/2] rounded-lg",
   };
 
   if (previewB64) {
     return (
-      <div className={`${sizeClasses[size]} overflow-hidden bg-[var(--bg-stage)] border border-[var(--border-subtle)] shrink-0`}>
+      <div
+        className={`${sizeClasses[size]} overflow-hidden bg-[var(--bg-stage)] border border-[var(--border-subtle)] shrink-0`}
+      >
         <img
           src={previewB64}
           alt="Preview"
@@ -110,8 +157,13 @@ function Thumbnail({ previewB64, size = 'sm' }: { previewB64: string | null; siz
   }
 
   return (
-    <div className={`${sizeClasses[size]} flex items-center justify-center bg-[var(--bg-stage)] border border-[var(--border-subtle)] shrink-0`}>
-      <FileImage size={size === 'lg' ? 20 : 14} className="text-[var(--text-muted)] opacity-40" />
+    <div
+      className={`${sizeClasses[size]} flex items-center justify-center bg-[var(--bg-stage)] border border-[var(--border-subtle)] shrink-0`}
+    >
+      <FileImage
+        size={size === "lg" ? 20 : 14}
+        className="text-[var(--text-muted)] opacity-40"
+      />
     </div>
   );
 }
@@ -132,19 +184,19 @@ function VersionBadge({
   gpexVersion,
   className,
 }: {
-  gpexVersion?: 'v1' | 'v2' | string;
+  gpexVersion?: "v1" | "v2" | string;
   className?: string;
 }) {
-  const isV2 = gpexVersion === 'v2';
+  const isV2 = gpexVersion === "v2";
   return (
     <span
       className={`inline-flex items-center px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider leading-none shadow-sm backdrop-blur-md shrink-0 ${
         isV2
-          ? 'bg-indigo-600/90 text-white border border-indigo-400/40 shadow-indigo-500/20'
-          : 'bg-zinc-800/90 text-zinc-300 border border-zinc-600/40'
-      } ${className ?? ''}`}
+          ? "bg-indigo-600/90 text-white border border-indigo-400/40 shadow-indigo-500/20"
+          : "bg-zinc-800/90 text-zinc-300 border border-zinc-600/40"
+      } ${className ?? ""}`}
     >
-      {isV2 ? 'v2' : 'v1'}
+      {isV2 ? "v2" : "v1"}
     </span>
   );
 }
@@ -165,7 +217,13 @@ function DateHeader({ label }: { label: string }) {
 
 // ─── Share Toast ─────────────────────────────────────────────────────────────
 
-function ShareToast({ shareUrl, onClose }: { shareUrl: string; onClose: () => void }) {
+function ShareToast({
+  shareUrl,
+  onClose,
+}: {
+  shareUrl: string;
+  onClose: () => void;
+}) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -173,7 +231,9 @@ function ShareToast({ shareUrl, onClose }: { shareUrl: string; onClose: () => vo
       await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
   };
 
   return (
@@ -191,10 +251,11 @@ function ShareToast({ shareUrl, onClose }: { shareUrl: string; onClose: () => vo
         className="flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 transition-colors cursor-pointer border-0 outline-none shrink-0"
         title="Copy link"
       >
-        {copied
-          ? <Check size={12} className="text-emerald-400" />
-          : <Link2 size={12} className="text-emerald-400" />
-        }
+        {copied ? (
+          <Check size={12} className="text-emerald-400" />
+        ) : (
+          <Copy size={12} className="text-emerald-400" />
+        )}
       </button>
       <button
         onClick={onClose}
@@ -228,10 +289,15 @@ function CardItem({
   isSharing: boolean;
   downloadProgress: number;
 }) {
-  const dims = formatDimensions(file.manifest?.canvasWidth, file.manifest?.canvasHeight);
+  const dims = formatDimensions(
+    file.manifest?.canvasWidth,
+    file.manifest?.canvasHeight,
+  );
   const layers = file.manifest?.layerCount;
-  const isV2 = file.manifest?.gpexVersion === 'v2' || file.manifest?.editorVersion?.startsWith('2.');
-  const gpexVersion = isV2 ? 'v2' : 'v1';
+  const isV2 =
+    file.manifest?.gpexVersion === "v2" ||
+    file.manifest?.editorVersion?.startsWith("2.");
+  const gpexVersion = isV2 ? "v2" : "v1";
 
   return (
     <div className="group flex flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:border-indigo-500/30 hover:shadow-md hover:shadow-indigo-500/5 transition-all duration-200 overflow-hidden">
@@ -292,34 +358,49 @@ function CardItem({
           onClick={onSelect}
           disabled={isOpening || isV2}
           className="flex items-center justify-center w-6 h-6 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:border-indigo-500/50 hover:text-indigo-400 text-[var(--text-muted)] transition-all cursor-pointer border-0 outline-none disabled:opacity-20 disabled:cursor-not-allowed"
-          title={isV2 ? "This project was created in OpenGPEX v2 and cannot be opened in v1" : "Open"}
-        >
-          {isOpening
-            ? <Loader2 size={11} className="animate-spin" />
-            : <FolderOpen size={11} />
+          title={
+            isV2
+              ? "This project was created in OpenGPEX v2 and cannot be opened in v1"
+              : "Open"
           }
+        >
+          {isOpening ? (
+            <Loader2 size={11} className="animate-spin" />
+          ) : (
+            <FolderOpen size={11} />
+          )}
         </button>
         <button
           onClick={onShare}
           disabled={isSharing || isV2}
           className="flex items-center justify-center w-6 h-6 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:border-emerald-500/50 hover:text-emerald-400 text-[var(--text-muted)] transition-all cursor-pointer border-0 outline-none disabled:opacity-20 disabled:cursor-not-allowed"
-          title={isV2 ? "This project was created in OpenGPEX v2 and cannot be shared from v1" : "Share"}
-        >
-          {isSharing
-            ? <Loader2 size={11} className="animate-spin" />
-            : <Share2 size={11} />
+          title={
+            isV2
+              ? "This project was created in OpenGPEX v2 and cannot be shared from v1"
+              : "Share"
           }
+        >
+          {isSharing ? (
+            <Loader2 size={11} className="animate-spin" />
+          ) : (
+            <Share2 size={11} />
+          )}
         </button>
         <button
           onClick={onDelete}
           disabled={isDeleting || isV2}
           className="flex items-center justify-center w-6 h-6 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:border-red-500/50 hover:text-red-400 text-[var(--text-muted)] transition-all cursor-pointer border-0 outline-none disabled:opacity-20 disabled:cursor-not-allowed"
-          title={isV2 ? "This project was created in OpenGPEX v2 and cannot be deleted from v1" : "Delete"}
-        >
-          {isDeleting
-            ? <Loader2 size={11} className="animate-spin" />
-            : <Trash2 size={11} />
+          title={
+            isV2
+              ? "This project was created in OpenGPEX v2 and cannot be deleted from v1"
+              : "Delete"
           }
+        >
+          {isDeleting ? (
+            <Loader2 size={11} className="animate-spin" />
+          ) : (
+            <Trash2 size={11} />
+          )}
         </button>
       </div>
     </div>
@@ -341,10 +422,15 @@ function ListItem({
   isDeleting: boolean;
   isOpening: boolean;
 }) {
-  const dims = formatDimensions(file.manifest?.canvasWidth, file.manifest?.canvasHeight);
+  const dims = formatDimensions(
+    file.manifest?.canvasWidth,
+    file.manifest?.canvasHeight,
+  );
   const layers = file.manifest?.layerCount;
-  const isV2 = file.manifest?.gpexVersion === 'v2' || file.manifest?.editorVersion?.startsWith('2.');
-  const gpexVersion = isV2 ? 'v2' : 'v1';
+  const isV2 =
+    file.manifest?.gpexVersion === "v2" ||
+    file.manifest?.editorVersion?.startsWith("2.");
+  const gpexVersion = isV2 ? "v2" : "v1";
 
   return (
     <div className="group flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-[var(--bg-stage)] transition-colors">
@@ -386,23 +472,33 @@ function ListItem({
           onClick={onSelect}
           disabled={isOpening || isV2}
           className="flex items-center justify-center w-7 h-7 rounded-lg hover:bg-indigo-500/20 transition-colors cursor-pointer border-0 outline-none disabled:opacity-20 disabled:cursor-not-allowed"
-          title={isV2 ? "This project was created in OpenGPEX v2 and cannot be opened in v1" : "Open"}
-        >
-          {isOpening
-            ? <Loader2 size={13} className="animate-spin text-indigo-400" />
-            : <FolderOpen size={13} className="text-indigo-400" />
+          title={
+            isV2
+              ? "This project was created in OpenGPEX v2 and cannot be opened in v1"
+              : "Open"
           }
+        >
+          {isOpening ? (
+            <Loader2 size={13} className="animate-spin text-indigo-400" />
+          ) : (
+            <FolderOpen size={13} className="text-indigo-400" />
+          )}
         </button>
         <button
           onClick={onDelete}
           disabled={isDeleting || isV2}
           className="flex items-center justify-center w-7 h-7 rounded-lg hover:bg-red-500/20 transition-colors cursor-pointer border-0 outline-none disabled:opacity-20 disabled:cursor-not-allowed"
-          title={isV2 ? "This project was created in OpenGPEX v2 and cannot be deleted from v1" : "Delete"}
-        >
-          {isDeleting
-            ? <Loader2 size={13} className="animate-spin text-red-400" />
-            : <Trash2 size={13} className="text-red-400" />
+          title={
+            isV2
+              ? "This project was created in OpenGPEX v2 and cannot be deleted from v1"
+              : "Delete"
           }
+        >
+          {isDeleting ? (
+            <Loader2 size={13} className="animate-spin text-red-400" />
+          ) : (
+            <Trash2 size={13} className="text-red-400" />
+          )}
         </button>
       </div>
     </div>
@@ -411,26 +507,32 @@ function ListItem({
 
 // ─── View Mode Toggle ────────────────────────────────────────────────────────
 
-function ViewModeToggle({ viewMode, onChange }: { viewMode: ViewMode; onChange: (v: ViewMode) => void }) {
+function ViewModeToggle({
+  viewMode,
+  onChange,
+}: {
+  viewMode: ViewMode;
+  onChange: (v: ViewMode) => void;
+}) {
   return (
     <div className="flex items-center gap-0.5">
       <button
-        onClick={() => onChange('grid')}
+        onClick={() => onChange("grid")}
         className={`flex items-center justify-center w-6 h-6 rounded-md transition-all cursor-pointer border-0 outline-none ${
-          viewMode === 'grid'
-            ? 'bg-indigo-500/20 text-indigo-400'
-            : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-stage)]'
+          viewMode === "grid"
+            ? "bg-indigo-500/20 text-indigo-400"
+            : "text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-stage)]"
         }`}
         title="Card view"
       >
         <LayoutGrid size={12} />
       </button>
       <button
-        onClick={() => onChange('list')}
+        onClick={() => onChange("list")}
         className={`flex items-center justify-center w-6 h-6 rounded-md transition-all cursor-pointer border-0 outline-none ${
-          viewMode === 'list'
-            ? 'bg-indigo-500/20 text-indigo-400'
-            : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-stage)]'
+          viewMode === "list"
+            ? "bg-indigo-500/20 text-indigo-400"
+            : "text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-stage)]"
         }`}
         title="List view"
       >
@@ -446,7 +548,11 @@ function ViewModeToggle({ viewMode, onChange }: { viewMode: ViewMode; onChange: 
  * CloudBrowser: PopupPanel overlay for browsing and managing cloud-stored .gpex files.
  * Supports card and list view modes with chronological date grouping (timeline).
  */
-export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps) {
+export function CloudBrowser({
+  onSelect,
+  onDelete,
+  onClose,
+}: CloudBrowserProps) {
   const [files, setFiles] = useState<GpexFileItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -457,8 +563,11 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
   const [sharingId, setSharingId] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    try { return (localStorage.getItem('gpex_browser_view') as ViewMode) || 'grid'; }
-    catch { return 'grid'; }
+    try {
+      return (localStorage.getItem("gpex_browser_view") as ViewMode) || "grid";
+    } catch {
+      return "grid";
+    }
   });
 
   // Group files chronologically
@@ -466,7 +575,11 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
 
   // Persist view mode choice
   useEffect(() => {
-    try { localStorage.setItem('gpex_browser_view', viewMode); } catch { /* noop */ }
+    try {
+      localStorage.setItem("gpex_browser_view", viewMode);
+    } catch {
+      /* noop */
+    }
   }, [viewMode]);
 
   // Fetch file list on mount
@@ -482,32 +595,39 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
         }
       } catch (err) {
         if (!cancelled) {
-          setError('Failed to load files from cloud.');
-          console.error('[CloudBrowser] List error:', err);
+          setError("Failed to load files from cloud.");
+          console.error("[CloudBrowser] List error:", err);
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const handleOpen = useCallback(async (file: GpexFileItem) => {
-    const isV2 = file.manifest?.gpexVersion === 'v2' || file.manifest?.editorVersion?.startsWith('2.');
-    if (isV2) return;
-    setOpeningId(file.fileId);
-    setProgress(0);
-    try {
-      await onSelect(file, (loaded, total) => {
-        setProgress(Math.round((loaded / total) * 100));
-      });
-    } catch (err) {
-      console.error('[CloudBrowser] Open failed:', err);
-    } finally {
-      setOpeningId(null);
+  const handleOpen = useCallback(
+    async (file: GpexFileItem) => {
+      const isV2 =
+        file.manifest?.gpexVersion === "v2" ||
+        file.manifest?.editorVersion?.startsWith("2.");
+      if (isV2) return;
+      setOpeningId(file.fileId);
       setProgress(0);
-    }
-  }, [onSelect]);
+      try {
+        await onSelect(file, (loaded, total) => {
+          setProgress(Math.round((loaded / total) * 100));
+        });
+      } catch (err) {
+        console.error("[CloudBrowser] Open failed:", err);
+      } finally {
+        setOpeningId(null);
+        setProgress(0);
+      }
+    },
+    [onSelect],
+  );
 
   // Request delete (shows confirmation)
   const requestDelete = useCallback((fileId: string) => {
@@ -523,9 +643,9 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
     setDeletingId(fileId);
     try {
       await onDelete(fileId);
-      setFiles(prev => prev.filter(f => f.fileId !== fileId));
+      setFiles((prev) => prev.filter((f) => f.fileId !== fileId));
     } catch (err) {
-      console.error('[CloudBrowser] Delete failed:', err);
+      console.error("[CloudBrowser] Delete failed:", err);
     } finally {
       setDeletingId(null);
     }
@@ -543,9 +663,13 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
       const result = await gpexStorage.share(fileId);
       setShareUrl(result.shareUrl);
       // Auto-copy to clipboard
-      try { await navigator.clipboard.writeText(result.shareUrl); } catch { /* noop */ }
+      try {
+        await navigator.clipboard.writeText(result.shareUrl);
+      } catch {
+        /* noop */
+      }
     } catch (err) {
-      console.error('[CloudBrowser] Share failed:', err);
+      console.error("[CloudBrowser] Share failed:", err);
     } finally {
       setSharingId(null);
     }
@@ -560,21 +684,28 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
       isVisible={true}
       onClose={onClose}
       title="Cloud Files"
-      subTitle={files.length > 0 ? `${files.length} file${files.length !== 1 ? 's' : ''}` : 'Browse & Manage'}
+      subTitle={
+        files.length > 0
+          ? `${files.length} file${files.length !== 1 ? "s" : ""}`
+          : "Browse & Manage"
+      }
       icon={<Cloud size={16} />}
       size="lg"
       position="CT"
       closeOnOutsideClick={false}
       headerRight={
-        !loading && !error && files.length > 0
-          ? <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
-          : undefined
+        !loading && !error && files.length > 0 ? (
+          <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+        ) : undefined
       }
     >
       <div className="flex-1 flex flex-col overflow-y-auto min-h-0 custom-scrollbar">
         {loading && (
           <div className="flex-1 flex items-center justify-center">
-            <Loader2 size={20} className="animate-spin text-[var(--text-muted)]" />
+            <Loader2
+              size={20}
+              className="animate-spin text-[var(--text-muted)]"
+            />
           </div>
         )}
 
@@ -586,13 +717,18 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
 
         {!loading && !error && files.length === 0 && (
           <div className="flex-1 flex flex-col items-center justify-center gap-2">
-            <FileImage size={28} className="text-[var(--text-muted)] opacity-40" />
-            <p className="text-[11px] text-[var(--text-muted)] font-medium">No files saved yet</p>
+            <FileImage
+              size={28}
+              className="text-[var(--text-muted)] opacity-40"
+            />
+            <p className="text-[11px] text-[var(--text-muted)] font-medium">
+              No files saved yet
+            </p>
           </div>
         )}
 
         {/* Grid View — with date grouping */}
-        {!loading && !error && files.length > 0 && viewMode === 'grid' && (
+        {!loading && !error && files.length > 0 && viewMode === "grid" && (
           <div className="flex flex-col p-3 gap-1">
             {dateGroups.map((group) => (
               <div key={group.label}>
@@ -608,7 +744,9 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
                       isDeleting={deletingId === file.fileId}
                       isOpening={openingId === file.fileId}
                       isSharing={sharingId === file.fileId}
-                      downloadProgress={openingId === file.fileId ? progress : 0}
+                      downloadProgress={
+                        openingId === file.fileId ? progress : 0
+                      }
                     />
                   ))}
                 </div>
@@ -618,7 +756,7 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
         )}
 
         {/* List View — with date grouping */}
-        {!loading && !error && files.length > 0 && viewMode === 'list' && (
+        {!loading && !error && files.length > 0 && viewMode === "list" && (
           <div className="flex flex-col p-2 gap-0">
             {dateGroups.map((group) => (
               <div key={group.label}>
@@ -662,5 +800,3 @@ export function CloudBrowser({ onSelect, onDelete, onClose }: CloudBrowserProps)
     </PopupPanel>
   );
 }
-
-
