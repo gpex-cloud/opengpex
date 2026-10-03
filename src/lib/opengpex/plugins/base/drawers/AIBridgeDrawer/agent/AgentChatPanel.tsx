@@ -577,7 +577,7 @@ const StreamingBubble = React.memo(function StreamingBubble({
     <div className="flex justify-start">
       <div className="max-w-[85%] px-3 py-2 rounded-2xl rounded-bl-sm bg-[var(--bg-stage)] text-[11.5px] text-[var(--text-main)] leading-relaxed break-words agent-md">
         <div dangerouslySetInnerHTML={{ __html: html }} />
-        <span className="inline-block w-1.5 h-3 bg-[var(--text-muted)] animate-pulse ml-0.5 rounded-sm opacity-60" />
+        <span className="inline-block w-1.5 h-3 bg-[var(--text-muted)] animate-pulse-lite ml-0.5 rounded-sm opacity-60" />
       </div>
     </div>
   );

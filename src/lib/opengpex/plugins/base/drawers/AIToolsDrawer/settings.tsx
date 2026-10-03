@@ -147,7 +147,7 @@ export function AIToolsSettings() {
               <Icon size={10} />
               {tab.label}
               {downloadingTab === tab.key && (
-                <Loader2 size={9} className="animate-spin text-[var(--text-secondary)]" />
+                <Loader2 size={9} className="animate-spin-lite text-[var(--text-secondary)]" />
               )}
               {hasCustom && (
                 <span

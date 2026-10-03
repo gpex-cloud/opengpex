@@ -161,8 +161,17 @@ export const getWorkspaceStyles = (
         },
 
         // Floating Panel Mode
+        // NOTE: bg + backdrop-blur live on `sidebarFloatingBackdrop` (a childless sibling layer).
+        // A backdrop-filter element re-blurs its whole area whenever ANY descendant repaints, so
+        // keeping content out of it lets in-panel animations (spinners, progress bars) run cheaply.
         sidebarFloating: {
-            className: `relative w-[320px] h-auto max-h-[calc(100vh-120px)] overflow-hidden bg-[var(--bg-panel)]/85 backdrop-blur-xl shadow-2xl z-[900] rounded-[20px] border border-[var(--border-subtle)]`,
+            className: `relative w-[320px] h-auto max-h-[calc(100vh-120px)] overflow-hidden shadow-2xl z-[900] rounded-[20px] border border-[var(--border-subtle)]`,
+            style: {}
+        },
+
+        // Childless blur layer: -inset-px so it also covers the 1px border area of the shell.
+        sidebarFloatingBackdrop: {
+            className: `absolute -inset-px rounded-[20px] bg-[var(--bg-panel)]/85 backdrop-blur-xl pointer-events-none`,
             style: {}
         },
 

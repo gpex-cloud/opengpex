@@ -296,7 +296,7 @@ export function WorkflowsPanel({ config, setConfig }: WorkflowsPanelProps) {
       {/* Server Import: Fetching */}
       {serverImportState === 'fetching' && (
         <div className="flex items-center gap-2 p-3 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)]">
-          <Loader2 size={14} className="text-emerald-500 animate-spin" />
+          <Loader2 size={14} className="text-emerald-500 animate-spin-lite" />
           <span className="text-[10px] font-bold text-[var(--text-muted)]">Fetching workflow history from server...</span>
         </div>
       )}

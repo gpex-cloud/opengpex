@@ -86,7 +86,7 @@ export const DownloadPanel = React.memo(function DownloadPanel({
       {/* Header: label + percent + cancel */}
       <div className="flex justify-between items-center">
         <span className="text-[10px] text-[var(--text-muted)] font-medium flex items-center gap-1">
-          <Loader2 size={10} className="animate-spin" />
+          <Loader2 size={10} className="animate-spin-lite" />
           {label ?? 'Downloading...'}
         </span>
         <div className="flex items-center gap-1.5">
@@ -109,7 +109,7 @@ export const DownloadPanel = React.memo(function DownloadPanel({
       {/* Progress bar */}
       <div className="h-1 rounded-full bg-white/5 overflow-hidden">
         <div
-          className="h-full rounded-full transition-all duration-300 bg-purple-500/80"
+          className="h-full rounded-full bg-purple-500/80"
           style={{ width: `${percent}%` }}
         />
       </div>

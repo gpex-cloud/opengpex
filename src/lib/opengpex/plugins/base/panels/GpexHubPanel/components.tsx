@@ -129,7 +129,7 @@ function ExploreTab() {
     <div className="absolute inset-0 flex items-center justify-center bg-[var(--bg-panel)]/80 backdrop-blur-sm">
       <div className="flex flex-col items-center gap-4 max-w-sm text-center px-8">
         <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 dark:bg-indigo-500/15 flex items-center justify-center border border-indigo-500/20">
-          <Store size={28} className="text-indigo-500 animate-pulse" />
+          <Store size={28} className="text-indigo-500 animate-pulse-lite" />
         </div>
         <div>
           <h3 className="text-base font-black text-[var(--text-main)] mb-1.5 tracking-tight">
@@ -490,7 +490,7 @@ function InstalledTab() {
               className={`w-full text-xs transition-all duration-200 flex items-center justify-center gap-1.5 select-none
                 ${
                   isDragging
-                    ? "border-2 border-dashed border-indigo-500 bg-indigo-500/10 dark:bg-indigo-500/15 text-indigo-500 dark:text-indigo-400 animate-pulse shadow-[0_0_15px_rgba(99,102,241,0.2)]"
+                    ? "border-2 border-dashed border-indigo-500 bg-indigo-500/10 dark:bg-indigo-500/15 text-indigo-500 dark:text-indigo-400 animate-pulse-lite shadow-[0_0_15px_rgba(99,102,241,0.2)]"
                     : "border-transparent"
                 }
               `}
@@ -522,7 +522,7 @@ function InstalledTab() {
           <div className="flex flex-col items-center justify-center py-12 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50/50 dark:bg-zinc-800/10">
             <Package
               size={24}
-              className="text-zinc-300 dark:text-zinc-700 mb-2 animate-pulse"
+              className="text-zinc-300 dark:text-zinc-700 mb-2 animate-pulse-lite"
             />
             <div className="text-xs font-semibold text-zinc-400 dark:text-zinc-500">
               No plugins found in this category
@@ -732,7 +732,7 @@ function PluginListRow({
           </div>
         ) : (
           <div className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] text-emerald-500 font-bold">
-            <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse-lite" />
             Active
           </div>
         )}

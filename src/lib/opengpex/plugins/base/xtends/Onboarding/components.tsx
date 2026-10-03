@@ -327,15 +327,6 @@ function EverydayTips({
     >
       {/* Card container */}
       <div className="relative bg-[var(--bg-panel)]/95 backdrop-blur-xl border border-[var(--border-subtle)] rounded-2xl px-5 py-4 shadow-xl shadow-black/20 w-[380px]">
-        {/* Shimmer background animation */}
-        <div
-          className="absolute inset-0 rounded-2xl opacity-[0.05] overflow-hidden"
-          style={{
-            background: "linear-gradient(90deg, transparent 0%, #818cf8 50%, transparent 100%)",
-            backgroundSize: "200% 100%",
-            animation: "shimmer 3s ease-in-out infinite",
-          }}
-        />
 
         {/* Top: Tip content area (fixed 2-line height) */}
         <div className="relative flex items-start gap-2.5">
@@ -404,13 +395,6 @@ function EverydayTips({
         ))}
       </div>
 
-      {/* CSS keyframes */}
-      <style>{`
-        @keyframes shimmer {
-          0% { background-position: -200% 0; }
-          100% { background-position: 200% 0; }
-        }
-      `}</style>
     </div>
   );
 }
