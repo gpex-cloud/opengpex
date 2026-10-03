@@ -347,7 +347,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                 >
                   <RefreshCw
                     size={11}
-                    className={isFetchingModels ? "animate-spin" : ""}
+                    className={isFetchingModels ? "animate-spin-lite" : ""}
                   />
                 </button>
               </div>

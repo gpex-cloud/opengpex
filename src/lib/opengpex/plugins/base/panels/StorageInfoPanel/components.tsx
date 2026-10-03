@@ -254,7 +254,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                 >
                   <RefreshCw
                     size={12}
-                    className={isRefreshing ? "animate-spin" : ""}
+                    className={isRefreshing ? "animate-spin-lite" : ""}
                   />
                 </button>
               </div>

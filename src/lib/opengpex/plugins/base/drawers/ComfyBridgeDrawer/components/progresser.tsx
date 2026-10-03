@@ -124,7 +124,7 @@ export function ExecutionProgressPanel({ execState, onCancel }: ExecutionProgres
               disabled={cancelPending}
               className={`flex items-center justify-center w-4 h-4 rounded transition-colors focus:outline-none ${
                 cancelPending
-                  ? 'text-rose-500 animate-pulse cursor-not-allowed'
+                  ? 'text-rose-500 animate-pulse-lite cursor-not-allowed'
                   : 'text-[var(--text-muted)] hover:text-rose-500 hover:bg-rose-500/10'
               }`}
             >
@@ -142,9 +142,9 @@ export function ExecutionProgressPanel({ execState, onCancel }: ExecutionProgres
             style={{ width: `${progressPct}%` }}
           />
         ) : cancelPending ? (
-          <div className="h-full bg-rose-500/60 rounded-full animate-pulse" style={{ width: '100%' }} />
+          <div className="h-full bg-rose-500/60 rounded-full animate-pulse-lite" style={{ width: '100%' }} />
         ) : (
-          <div className="h-full bg-emerald-500/60 rounded-full animate-pulse" style={{ width: '100%' }} />
+          <div className="h-full bg-emerald-500/60 rounded-full animate-pulse-lite" style={{ width: '100%' }} />
         )}
       </div>
     </div>

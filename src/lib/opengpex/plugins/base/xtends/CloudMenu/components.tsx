@@ -421,7 +421,6 @@ function CloudMenuInner() {
           >
             <PremiumCloud isOpen={true} isActive={isSignedIn} />
           </button>
-
           <div className="flex flex-col items-start leading-tight text-left overflow-hidden pr-2">
             <span className="text-[11px] font-bold text-[var(--text-main)] truncate w-full">
               {isSignedIn ? DEFAULT_CLOUD_URL.replace(/^.*?\/\//, "") : "GPEX-Cloud"}
@@ -436,10 +435,10 @@ function CloudMenuInner() {
         <div className="flex flex-col w-full px-2 pb-2 gap-0.5">
           <div className={styles.divider.className} />
 
-          {isSignedIn ? (
-            <>
-              {/* Storage & Sync Status Card */}
-              <div className={styles.infoWidget.container}>
+          {/* Storage & Action Card */}
+          <div className={styles.infoWidget.container}>
+            {isSignedIn ? (
+              <>
                 {/* Cloud Storage Section */}
                 <div className={styles.infoWidget.storageContainer}>
                   <div className={styles.infoWidget.storageHeader}>
@@ -504,52 +503,88 @@ function CloudMenuInner() {
                     </div>
                   </>
                 )}
+              </>
+            ) : (
+              <>
+                <div className={styles.infoWidget.storageContainer}>
+                  <div className={styles.infoWidget.storageHeader}>
+                    <span className={styles.infoWidget.storageLabel}>
+                      Storage
+                    </span>
+                    <span className={styles.infoWidget.storageValue}>
+                      100 MB Free
+                    </span>
+                  </div>
+                  <p className="text-[10px] leading-relaxed text-[var(--text-muted)] font-medium">
+                    Sign in to get 100 MB cloud storage for syncing across devices.
+                  </p>
+                </div>
+
+                <div className="h-px w-full bg-[var(--border-subtle)]" />
+
+                <button
+                  className="w-full h-8 flex items-center justify-center gap-1.5 rounded-lg text-[12px] font-bold bg-gradient-to-r from-[#00F2FE] to-[#4FACFE] text-zinc-950 hover:brightness-110 active:scale-[0.98] transition-all cursor-pointer shadow-md shadow-[#00F2FE]/10 border-0 outline-none"
+                  onClick={() => {
+                    setIsOpen(false);
+                    openLogin();
+                  }}
+                >
+                  <LogIn size={14} />
+                  <span>Sign In / Up</span>
+                </button>
+              </>
+            )}
+          </div>
+
+          <div className={styles.divider.className} />
+
+          {/* Actions Menu */}
+          <div className="flex flex-col gap-0.5">
+            <button
+              className={`${styles.menuItem.button} ${
+                !isSignedIn
+                  ? "opacity-40 cursor-not-allowed hover:bg-transparent"
+                  : ""
+              }`}
+              onClick={isSignedIn ? handleOpenBrowser : undefined}
+              disabled={!isSignedIn}
+              title={!isSignedIn ? "Available after sign-in" : "Cloud Gallery"}
+            >
+              <div className={styles.menuItem.icon}>
+                <FolderOpen size={14} />
               </div>
+              <span className={styles.menuItem.label}>Cloud Gallery</span>
+            </button>
 
-              <div className={styles.divider.className} />
+            <a
+              href={DOCUMENTATION_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.menuItem.button + " no-underline"}
+            >
+              <div className={styles.menuItem.icon}>
+                <BookMarked size={14} />
+              </div>
+              <span className={styles.menuItem.label}>
+                Documentation
+              </span>
+            </a>
 
-              {/* Cloud Actions (bottom) */}
-              <div className="flex flex-col gap-0.5">
-                <button
-                  className={styles.menuItem.button}
-                  onClick={handleOpenBrowser}
-                >
-                  <div className={styles.menuItem.icon}>
-                    <FolderOpen size={14} />
-                  </div>
-                  <span className={styles.menuItem.label}>Cloud Gallery</span>
-                </button>
+            <button
+              className={styles.menuItem.button}
+              onClick={handleGoToCloud}
+            >
+              <div className={styles.menuItem.icon}>
+                <ExternalLink size={14} />
+              </div>
+              <span className={styles.menuItem.label}>
+                To GPEX-Cloud
+              </span>
+            </button>
 
-                <a
-                  href={DOCUMENTATION_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={styles.menuItem.button + " no-underline"}
-                >
-                  <div className={styles.menuItem.icon}>
-                    <BookMarked size={14} />
-                  </div>
-                  <span className={styles.menuItem.label}>
-                    Documentation
-                  </span>
-                </a>
-                
-                <button
-                  className={styles.menuItem.button}
-                  onClick={handleGoToCloud}
-                >
-                  <div className={styles.menuItem.icon}>
-                    <ExternalLink size={14} />
-                  </div>
-                  <span className={styles.menuItem.label}>
-                    To GPEX-Cloud
-                  </span>
-                </button>
-
-
-
+            {isSignedIn && (
+              <>
                 <div className={styles.divider.className} />
-
                 <button
                   className={styles.menuItemDestructive.button}
                   onClick={signOut}
@@ -561,45 +596,9 @@ function CloudMenuInner() {
                     Log Out
                   </span>
                 </button>
-              </div>
-            </>
-          ) : (
-            <div className="p-3 flex flex-col items-center text-center gap-3">
-              <p className="text-[11px] leading-relaxed text-[var(--text-muted)] font-medium">
-                Create a account to get{" "}
-                <strong className="text-[var(--text-main)]">100 MB</strong>{" "}
-                cloud storage for syncing your creations across devices.
-              </p>
-              <button
-                className="w-full h-8 flex items-center justify-center gap-1.5 rounded-lg text-[12px] font-bold bg-gradient-to-r from-[#00F2FE] to-[#4FACFE] text-zinc-950 hover:brightness-110 active:scale-[0.98] transition-all cursor-pointer shadow-md shadow-[#00F2FE]/10 border-0 outline-none"
-                onClick={() => {
-                  setIsOpen(false);
-                  openLogin();
-                }}
-              >
-                <LogIn size={14} />
-                <span>Sign In / Up</span>
-              </button>
-              <a
-                href={DOCUMENTATION_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full h-8 flex items-center justify-center gap-1.5 rounded-lg text-[12px] font-bold border border-[var(--border-subtle)] hover:border-[var(--border-light)] bg-[var(--bg-stage)] hover:bg-[var(--bg-header)] text-[var(--text-main)] transition-all cursor-pointer no-underline"
-              >
-                <BookMarked size={14} />
-                <span>Documentation</span>
-              </a>
-              <a
-                href={DEFAULT_CLOUD_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full h-8 flex items-center justify-center gap-1.5 rounded-lg text-[12px] font-bold border border-[var(--border-subtle)] hover:border-[var(--border-light)] bg-[var(--bg-stage)] hover:bg-[var(--bg-header)] text-[var(--text-main)] transition-all cursor-pointer no-underline"
-              >
-                <ExternalLink size={14} />
-                <span>To GPEX-Cloud</span>
-              </a>
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
       </div>
 

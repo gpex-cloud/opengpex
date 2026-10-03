@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.0-beta.5
+
+- Performance: streamlined AI model downloads to prevent memory buildup, keeping canvas interactions smooth and responsive
+- UI & Stability: optimized panel animations to cut down heat and fan noise, with smoother streaming responses across AI tools
+
+---
+
 ## v2.0.0-beta.4
 
 - Workspace: refined Tab Dock and thumbnail sizing for a cleaner, more compact layout

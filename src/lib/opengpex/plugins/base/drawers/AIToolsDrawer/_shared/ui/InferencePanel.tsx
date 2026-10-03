@@ -73,7 +73,7 @@ export const InferencePanel = React.memo(function InferencePanel({
         <span className="text-[10px] text-[var(--text-muted)] font-medium flex items-center gap-1">
           {isSuccess
             ? <CheckCircle2 size={10} className="text-emerald-400" />
-            : <Loader2 size={10} className="animate-spin" />
+            : <Loader2 size={10} className="animate-spin-lite" />
           }
           {message}
         </span>
@@ -89,7 +89,7 @@ export const InferencePanel = React.memo(function InferencePanel({
         <div
           className={`h-full rounded-full transition-all duration-300 ${
             isSuccess ? 'bg-emerald-500/80' : 'bg-purple-500/80'
-          } ${isIndeterminate ? 'animate-pulse' : ''}`}
+          } ${isIndeterminate ? 'animate-pulse-lite' : ''}`}
           style={{ width: `${percent}%` }}
         />
       </div>

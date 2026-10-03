@@ -314,7 +314,7 @@ export function EnvironmentsPanel({ config, setConfig }: EnvironmentsPanelProps)
                   disabled={isChecking}
                   className="flex items-center gap-1 text-[9px] font-bold text-[var(--text-muted)] hover:text-emerald-500 transition-colors uppercase tracking-wider disabled:opacity-50"
                 >
-                  <Wifi size={9} className={isChecking ? 'animate-pulse' : ''} />
+                  <Wifi size={9} className={isChecking ? 'animate-pulse-lite' : ''} />
                   {isChecking ? 'Checking...' : 'Check Health'}
                 </button>
                 {health && (

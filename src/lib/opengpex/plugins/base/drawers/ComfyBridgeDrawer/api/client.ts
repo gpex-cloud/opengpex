@@ -154,11 +154,14 @@ export class ComfyClient {
     }
 
     this.ws.onmessage = (event) => {
+      // Binary frames (e.g. live preview images) are not used: skip them without
+      // paying for a JSON.parse that always throws.
+      if (typeof event.data !== 'string') return;
       try {
-        const msg = JSON.parse(event.data as string);
+        const msg = JSON.parse(event.data);
         this.handleWsMessage(msg);
       } catch {
-        // Ignore non-JSON messages (e.g. binary preview frames)
+        // Ignore malformed JSON
       }
     };
 
