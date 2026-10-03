@@ -133,28 +133,31 @@ export function useAgentChat(): UseAgentChatReturn {
   const bubbleIdRef = useRef(0);
   const nextId = () => `msg-${++bubbleIdRef.current}`;
 
-  // ─── Streaming token buffer (rAF-coalesced) ──────────────────────────────
+  // ─── Streaming token buffer (time-throttled) ─────────────────────────────
   // Tokens can arrive dozens of times per second. Calling setStreamingText on
   // every token forces a re-render + Markdown re-parse each time (CPU spikes,
-  // fan noise). Instead we buffer incoming tokens and flush the accumulated
-  // text at most once per animation frame.
+  // fan noise). We buffer incoming tokens and flush the accumulated text at
+  // most once per STREAM_FLUSH_MS (~10Hz). rAF is deliberately NOT used: it
+  // would flush at the display refresh rate (120Hz) and re-parse the growing
+  // Markdown every frame.
+  const STREAM_FLUSH_MS = 100;
   const streamBufRef = useRef('');
-  const rafRef = useRef<number | null>(null);
+  const rafRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flushStream = useCallback(() => {
     rafRef.current = null;
     setStreamingText(streamBufRef.current);
   }, []);
   const scheduleFlush = useCallback(() => {
     if (rafRef.current != null) return;
-    rafRef.current = requestAnimationFrame(flushStream);
+    rafRef.current = setTimeout(flushStream, STREAM_FLUSH_MS);
   }, [flushStream]);
   const cancelFlush = useCallback(() => {
     if (rafRef.current != null) {
-      cancelAnimationFrame(rafRef.current);
+      clearTimeout(rafRef.current);
       rafRef.current = null;
     }
   }, []);
-  // Clean up any pending frame on unmount.
+  // Clean up any pending flush on unmount.
   useEffect(() => () => cancelFlush(), [cancelFlush]);
 
   // ─── Store helpers ───────────────────────────────────────────────────────

@@ -43,7 +43,7 @@ export const PlayerBar = React.memo(function PlayerBar({ state, actions }: Anima
    return (
       <div className="space-y-2">
          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-lite shrink-0" />
             <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-widest">
                {sequence.type.toUpperCase()} Animation
             </span>

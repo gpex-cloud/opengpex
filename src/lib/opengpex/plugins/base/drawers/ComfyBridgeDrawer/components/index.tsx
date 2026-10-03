@@ -153,7 +153,7 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
               <span className={`w-1.5 h-1.5 rounded-full ${
                 connectionStatus === 'healthy' ? 'bg-green-500' :
                 connectionStatus === 'unhealthy' ? 'bg-red-500' :
-                connectionStatus === 'checking' ? 'bg-yellow-500 animate-pulse' :
+                connectionStatus === 'checking' ? 'bg-yellow-500 animate-pulse-lite' :
                 'bg-gray-400'
               }`} />
               <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
@@ -211,8 +211,8 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
               } disabled:opacity-50`}
             >
               {connectionStatus === 'unhealthy'
-                ? <WifiOff size={12} className={isTesting ? 'animate-pulse' : ''} />
-                : <Wifi size={12} className={isTesting ? 'animate-pulse' : ''} />
+                ? <WifiOff size={12} className={isTesting ? 'animate-pulse-lite' : ''} />
+                : <Wifi size={12} className={isTesting ? 'animate-pulse-lite' : ''} />
               }
             </button>
           </Tooltip>

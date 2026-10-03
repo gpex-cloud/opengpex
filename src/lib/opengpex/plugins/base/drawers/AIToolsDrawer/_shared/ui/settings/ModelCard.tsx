@@ -168,7 +168,7 @@ export function ModelCard({
                 disabled={isBusy || isAnyDownloading || isCached}
                 className="flex items-center gap-0.5 px-1.5 py-1 -my-0.5 rounded text-[10px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-main)] hover:bg-white/5 disabled:opacity-40 transition-colors"
               >
-                {isBusy && !isCached ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
+                {isBusy && !isCached ? <Loader2 size={10} className="animate-spin-lite" /> : <Download size={10} />}
                 <span>Download</span>
               </button>
             </Tooltip>
@@ -203,7 +203,7 @@ export function ModelCard({
                   disabled={isBusy}
                   className="flex items-center gap-0.5 px-1.5 py-1 -my-0.5 rounded text-[10px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-main)] hover:bg-white/5 disabled:opacity-40 transition-colors"
                 >
-                  {isBusy ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
+                  {isBusy ? <Loader2 size={10} className="animate-spin-lite" /> : <Trash2 size={10} />}
                   <span>Delete</span>
                 </button>
               </Tooltip>

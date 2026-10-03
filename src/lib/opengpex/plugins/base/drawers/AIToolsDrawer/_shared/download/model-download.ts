@@ -131,6 +131,59 @@ export class SpeedEstimator {
   }
 }
 
+/** Constant progress-report cadence (time-driven, independent of chunk size). */
+const REPORT_INTERVAL_MS = 120;
+
+/**
+ * Zero-allocation sliding-window speed estimator (fixed ring buffer).
+ * Only samples within WINDOW_MS contribute to the speed calculation.
+ */
+export class RingSpeedEstimator {
+  private static readonly WINDOW_MS = 2500;
+  private static readonly MAX_SLOTS = 32;
+
+  private times = new Float64Array(RingSpeedEstimator.MAX_SLOTS);
+  private bytes = new Float64Array(RingSpeedEstimator.MAX_SLOTS);
+  private head = 0;
+  private count = 0;
+
+  update(currentBytes: number, now: number): void {
+    const N = RingSpeedEstimator.MAX_SLOTS;
+    this.times[this.head] = now;
+    this.bytes[this.head] = currentBytes;
+    this.head = (this.head + 1) % N;
+    if (this.count < N) this.count++;
+  }
+
+  /** Bytes/sec over the most recent window. */
+  getSpeed(): number {
+    if (this.count < 2) return 0;
+    const N = RingSpeedEstimator.MAX_SLOTS;
+    const newest = (this.head - 1 + N) % N;
+    const tNew = this.times[newest];
+    let oldest = newest;
+    for (let i = 1; i < this.count; i++) {
+      const idx = (newest - i + N) % N;
+      if (tNew - this.times[idx] > RingSpeedEstimator.WINDOW_MS) break;
+      oldest = idx;
+    }
+    if (oldest === newest) oldest = (newest - 1 + N) % N;
+    const dt = (tNew - this.times[oldest]) / 1000;
+    const db = this.bytes[newest] - this.bytes[oldest];
+    return dt > 0.05 ? Math.max(0, db / dt) : 0;
+  }
+
+  getEta(currentBytes: number, totalBytes: number, speedBps: number): number {
+    if (speedBps <= 0 || totalBytes <= 0 || currentBytes >= totalBytes) return 0;
+    return (totalBytes - currentBytes) / speedBps;
+  }
+
+  reset(): void {
+    this.head = 0;
+    this.count = 0;
+  }
+}
+
 // ─── Download Service ────────────────────────────────────────────────────────
 
 /**
@@ -163,7 +216,8 @@ export async function downloadModel(
     const cached = await cache.match(url);
     if (cached) {
       // Already cached — count toward overall total but skip download
-      const size = file.expectedBytes ?? (await cached.blob()).size;
+      const headerLen = Number(cached.headers.get('content-length') || 0);
+      const size = file.expectedBytes ?? (headerLen > 0 ? headerLen : (await cached.blob()).size);
       overallTotal += size;
       overallLoaded += size;
     } else {
@@ -189,7 +243,7 @@ export async function downloadModel(
     return;
   }
 
-  const speedEstimator = new SpeedEstimator();
+  const speedEstimator = new RingSpeedEstimator();
   let downloadedSoFar = overallLoaded; // bytes from already-cached files
 
   for (let i = 0; i < filesToDownload.length; i++) {
@@ -210,8 +264,8 @@ export async function downloadModel(
       fileTotal: file.expectedBytes,
       overallLoaded: downloadedSoFar,
       overallTotal,
-      speedBps: speedEstimator.bytesPerSecond,
-      etaSeconds: speedEstimator.etaSeconds,
+      speedBps: speedEstimator.getSpeed(),
+      etaSeconds: 0,
       error: null,
     });
 
@@ -246,74 +300,73 @@ export async function downloadModel(
       overallTotal = overallTotal - file.expectedBytes + contentLength;
     }
 
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error(`No response body reader for ${file.filename}`);
+    if (!response.body) {
+      throw new Error(`No response body for ${file.filename}`);
     }
 
-    const chunks: Uint8Array[] = [];
     let fileLoaded = 0;
+    let lastReportTime = performance.now();
+
+    const emit = (now: number, final: boolean) => {
+      speedEstimator.update(downloadedSoFar, now);
+      const speed = speedEstimator.getSpeed();
+      onProgress?.({
+        stage: 'downloading',
+        currentFile: file.filename,
+        currentFileIdx: i,
+        totalFiles: filesToDownload.length,
+        fileLoaded,
+        fileTotal,
+        overallLoaded: downloadedSoFar,
+        overallTotal,
+        speedBps: speed,
+        etaSeconds: final ? 0 : speedEstimator.getEta(downloadedSoFar, overallTotal, speed),
+        error: null,
+      });
+    };
+
+    // Pass-through counting stream: no chunk is retained in the JS heap.
+    const countingStream = new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        fileLoaded += chunk.byteLength;
+        downloadedSoFar += chunk.byteLength;
+        controller.enqueue(chunk);
+        const now = performance.now();
+        if (now - lastReportTime >= REPORT_INTERVAL_MS) {
+          lastReportTime = now;
+          emit(now, false);
+        }
+      },
+      flush() {
+        emit(performance.now(), true);
+      },
+    });
+
+    const cacheHeaders: Record<string, string> = {
+      'content-type': 'application/octet-stream',
+    };
+    // Only forward a real, server-provided length (never for chunked/unknown)
+    if (contentLength > 0) {
+      cacheHeaders['content-length'] = String(contentLength);
+    }
 
     try {
-      while (true) {
-        // Check abort during streaming
-        if (signal?.aborted) {
-          reader.cancel();
-          throw new DOMException('Aborted', 'AbortError');
-        }
-
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        chunks.push(value);
-        fileLoaded += value.byteLength;
-        downloadedSoFar += value.byteLength;
-
-        // Update speed estimator with overall progress
-        speedEstimator.update(downloadedSoFar, overallTotal);
-
-        // Report progress
-        onProgress?.({
-          stage: 'downloading',
-          currentFile: file.filename,
-          currentFileIdx: i,
-          totalFiles: filesToDownload.length,
-          fileLoaded,
-          fileTotal,
-          overallLoaded: downloadedSoFar,
-          overallTotal,
-          speedBps: speedEstimator.bytesPerSecond,
-          etaSeconds: speedEstimator.etaSeconds,
-          error: null,
-        });
+      await cache.put(
+        file.url,
+        new Response(response.body.pipeThrough(countingStream), { headers: cacheHeaders }),
+      );
+      if (contentLength > 0 && fileLoaded !== contentLength) {
+        throw new Error(
+          `Download truncated for ${file.filename}: expected ${contentLength} bytes, received ${fileLoaded}`,
+        );
       }
     } catch (err) {
-      // Re-throw abort errors
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        throw err;
-      }
+      // Atomic rollback: never leave a partial model in the cache
+      await cache.delete(file.url).catch(() => {});
+      if (err instanceof DOMException && err.name === 'AbortError') throw err;
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       throw new Error(`Download stream error for ${file.filename}: ${err instanceof Error ? err.message : String(err)}`);
     }
-
-    // Combine chunks into a single buffer
-    const totalLength = chunks.reduce((sum, c) => sum + c.byteLength, 0);
-    const buffer = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of chunks) {
-      buffer.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-
-    // Write to cache only after full download (atomic — no partial writes)
-    await cache.put(
-      file.url,
-      new Response(buffer.buffer, {
-        headers: {
-          'content-type': 'application/octet-stream',
-          'content-length': String(totalLength),
-        },
-      }),
-    );
   }
 
   // All files downloaded successfully
@@ -326,7 +379,7 @@ export async function downloadModel(
     fileTotal: 0,
     overallLoaded: downloadedSoFar,
     overallTotal,
-    speedBps: speedEstimator.bytesPerSecond,
+    speedBps: speedEstimator.getSpeed(),
     etaSeconds: 0,
     error: null,
   });

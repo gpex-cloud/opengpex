@@ -9,6 +9,31 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ==========================================================================
+   Low-frame-rate animations ("-lite")
+   Use these instead of animate-spin / animate-pulse for any persistent
+   animation that lives over a backdrop-blur surface (panels, bars, popovers).
+   Stepped timing caps repaints at ~8-10fps instead of the display refresh
+   rate (120Hz), which avoids continuous re-blurring on the GPU.
+   See docs/opengpex/plans/v2/refactor/20261003_ai_model_download_heat_fps_postmortem.md
+   ========================================================================== */
+@theme {
+  --animate-spin-lite: spin-lite 0.8s steps(8, end) infinite;
+  --animate-pulse-lite: pulse-lite 2s steps(6, end) infinite;
+
+  @keyframes spin-lite {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes pulse-lite {
+    50% {
+      opacity: 0.5;
+    }
+  }
+}
+
+/* ==========================================================================
    Global Theme Transitions - Site-wide smooth theme switching
    ========================================================================== */
 *,

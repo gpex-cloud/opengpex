@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.3.7
+
+- Performance: streamlined AI model downloads to prevent memory buildup, keeping canvas interactions smooth and responsive
+- UI & Stability: optimized panel animations to cut down heat and fan noise, with smoother streaming responses across AI tools
+
+---
+
 ## v1.3.6
 
 - Visuals: upgraded project thumbnail resolution for significantly clearer previews when saving and sharing

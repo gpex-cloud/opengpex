@@ -145,7 +145,7 @@ export function FileLoaderComponent() {
           title="Ready to Drop"
           subtitle="Release to add as new project"
           icon={
-            <div className="w-5 h-5 bg-indigo-600 rounded-full flex items-center justify-center shadow-lg shadow-indigo-600/40 transform-gpu animate-pulse">
+            <div className="w-5 h-5 bg-indigo-600 rounded-full flex items-center justify-center shadow-lg shadow-indigo-600/40 transform-gpu animate-pulse-lite">
               <ImagePlus size={11} className="text-white" strokeWidth={3} />
             </div>
           }
@@ -158,7 +158,7 @@ export function FileLoaderComponent() {
             <div className="w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center shadow-lg shadow-amber-500/40">
               <Loader2
                 size={11}
-                className="text-white animate-spin"
+                className="text-white animate-spin-lite"
                 strokeWidth={3}
               />
             </div>
