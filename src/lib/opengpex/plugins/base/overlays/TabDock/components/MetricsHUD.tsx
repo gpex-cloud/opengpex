@@ -20,8 +20,13 @@
 "use client";
 
 import React, { useRef, useState, useEffect } from "react";
-import { Activity, MemoryStick, Cpu, Minus } from "lucide-react";
+import { Activity, MemoryStick, Cpu, Minus, Zap } from "lucide-react";
 import { useEditorServices } from "@opengpex/editor/core/context";
+import {
+  createPowerMonitor,
+  type PowerLevel,
+  type PowerMonitor,
+} from "../hooks";
 
 export interface MetricsHUDProps {
   onCollapse?: () => void;
@@ -30,6 +35,12 @@ export interface MetricsHUDProps {
 function fpsColor(fps: number): string {
   if (fps >= 50) return "text-emerald-500";
   if (fps >= 30) return "text-amber-500";
+  return "text-rose-500";
+}
+
+function pwrColor(level: PowerLevel): string {
+  if (level === "LOW") return "text-emerald-500";
+  if (level === "MOD") return "text-amber-500";
   return "text-rose-500";
 }
 
@@ -63,12 +74,16 @@ export function MetricsHUD({ onCollapse }: MetricsHUDProps) {
   // 1. RAF-driven FPS counter
   const [fps, setFps] = useState(0);
   const fpsRef = useRef({ frames: 0, lastTime: 0 });
+  const powerRef = useRef<PowerMonitor | null>(null);
 
   useEffect(() => {
     fpsRef.current = { frames: 0, lastTime: performance.now() };
+    let lastFrame = performance.now();
     let rafId: number;
     const fpsTick = () => {
       const now = performance.now();
+      powerRef.current?.noteFrame(now - lastFrame);
+      lastFrame = now;
       fpsRef.current.frames++;
       const elapsed = now - fpsRef.current.lastTime;
       if (elapsed >= 1000) {
@@ -87,10 +102,16 @@ export function MetricsHUD({ onCollapse }: MetricsHUDProps) {
     gpuMem: "0 MB",
     vendor: "GPU",
     tooltip: "",
+    pwr: "LOW" as PowerLevel,
+    busy: null as number | null,
+    degraded: false,
   });
 
   useEffect(() => {
+    const power = createPowerMonitor();
+    powerRef.current = power;
     const collect = () => {
+      const pwrState = power.tick();
       // JS Heap
       const perf = performance as Performance & {
         memory?: { usedJSHeapSize: number };
@@ -138,18 +159,28 @@ export function MetricsHUD({ onCollapse }: MetricsHUDProps) {
         mem: heapStr,
         gpuMem: gpuStr,
         vendor: vdrStr,
-        tooltip: tip,
+        tooltip:
+          pwrState.busy !== null
+            ? `${tip}\n--------------------------------\nMain Thread Busy: ${pwrState.busy}%${pwrState.degraded ? " (fallback: frame time, may under-report)" : ""}`
+            : tip,
+        pwr: pwrState.level,
+        busy: pwrState.busy,
+        degraded: pwrState.degraded,
       });
     };
 
     collect();
     const timer = setInterval(collect, 1000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      power.dispose();
+      powerRef.current = null;
+    };
   }, [pixels]);
 
   return (
     <div
-      className="relative flex flex-col gap-1.5 font-mono select-none group/hud"
+      className="relative flex flex-col gap-0.5 font-mono select-none group/hud"
       title={metrics.tooltip}
     >
       {/* Collapse button: floats over the HUD's top-right corner, takes no layout space.
@@ -205,6 +236,22 @@ export function MetricsHUD({ onCollapse }: MetricsHUDProps) {
           {metrics.gpuMem}
         </span>
       </div>
+
+      {/* Row 4: PWR (qualitative main-thread load, duty-cycled sampling) */}
+      {metrics.busy !== null && (
+        <div className="flex items-center gap-1">
+          <Zap size={8} className={`shrink-0 ${pwrColor(metrics.pwr)}`} />
+          <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-[18px]">
+            PWR
+          </span>
+          <span
+            className={`text-[9px] tabular-nums leading-none ${pwrColor(metrics.pwr)} ${metrics.pwr === "HIGH" ? "font-black" : "font-bold"}`}
+          >
+            {metrics.pwr}
+            {metrics.degraded ? "*" : ""}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

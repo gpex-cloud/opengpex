@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.0-beta.6
+
+- Performance & Monitoring: added real-time main-thread power load indicator (PWR) to Metrics HUD with duty-cycled sampling to track UI responsiveness without extra overhead
+
+---
+
 ## v2.0.0-beta.5
 
 - Performance: streamlined AI model downloads to prevent memory buildup, keeping canvas interactions smooth and responsive
