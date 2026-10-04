@@ -120,7 +120,6 @@ export type ShapeType = 'rect' | 'circle' | 'path';
 export interface Shape {
   type: ShapeType;
   rect: Rect;            // Bounding box of shape (basic definition)
-  hardEdge: boolean;     // Physical "aliased step mode" switch
   antiAliased?: boolean; // New: whether anti-aliasing is enabled (defaults to true)
   pathData?: string;     // Data for complex paths (e.g. SVG Path)
   /**
@@ -153,14 +152,12 @@ export interface LocalShape extends Shape {
 export const asWorldShape = (rect: Rect, type: ShapeType = 'rect', antiAliased: boolean = true): WorldShape => ({
   type,
   rect: asWorldRect(rect),
-  hardEdge: false,
   antiAliased
 } as WorldShape);
 
 export const asLocalShape = (rect: Rect, type: ShapeType = 'rect', antiAliased: boolean = true): LocalShape => ({
   type,
   rect: asLocalRect(rect),
-  hardEdge: false,
   antiAliased
 } as LocalShape);
 

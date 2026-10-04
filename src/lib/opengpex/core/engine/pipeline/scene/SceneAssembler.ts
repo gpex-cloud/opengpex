@@ -146,7 +146,7 @@ export function buildVectorMaskDesc(
         rect: [cx / sw, cy / sh, r.w / 2 / sw, r.h / 2 / sh] as const,
         featherPx: m.feather ?? 0,
         inverted: m.inverted,
-        hard: !!m.shape.hardEdge,
+        hard: false,
       };
     }
   }

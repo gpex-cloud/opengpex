@@ -131,8 +131,7 @@ export function getEffectiveVisibleShape(
         shape: {
           type: 'path',
           rect: asLocalRect({ x: 0, y: 0, w: 0, h: 0 }),
-          hardEdge: base.hardEdge,
-          antiAliased: (base as { antiAliased?: boolean }).antiAliased,
+          antiAliased: base.antiAliased,
           pathData: '',
           __brand: 'local',
         } as unknown as LocalShape,
@@ -158,8 +157,7 @@ export function getEffectiveVisibleShape(
     shape: {
       type: 'path',
       rect: asLocalRect(snappedRect),
-      hardEdge: base.hardEdge,
-      antiAliased: (base as { antiAliased?: boolean }).antiAliased,
+      antiAliased: base.antiAliased,
       pathData: currentPathData,
       __brand: 'local',
     } as unknown as LocalShape,
@@ -230,8 +228,7 @@ export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleSh
       visibleShape = {
         type: 'path',
         rect: asLocalRect(snappedRect),
-        hardEdge: Boolean(shape.hardEdge && layerShape.hardEdge),
-        antiAliased: (shape as { antiAliased?: boolean }).antiAliased ?? (layerShape as { antiAliased?: boolean }).antiAliased,
+        antiAliased: shape.antiAliased ?? layerShape.antiAliased,
         pathData: clipped.pathData,
         __brand: 'local',
       } as unknown as LocalShape;
@@ -396,7 +393,6 @@ export function unitedShapeOfLayers(layers: Layer[]): WorldShape | null {
   return {
     type: 'rect' as const,
     rect: unionBox,
-    hardEdge: false,
     __brand: 'world'
   } as WorldShape;
 }

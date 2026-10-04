@@ -115,7 +115,7 @@ function resolveRegularClip(
   if (!poly) return EMPTY_SHAPE;
   // Convert LocalPolygon to LocalShape for CSS box positioning
   const { rect, antiAliased } = poly;
-  return { type: 'rect', rect, hardEdge: false, antiAliased, __brand: 'local' } as LocalShape;
+  return { type: 'rect', rect, antiAliased, __brand: 'local' } as LocalShape;
 }
 
 // ─── useCropDimSync ────────────────────────────────────────────────────────────

@@ -201,8 +201,7 @@ export function createFragmentOperations(
         newLayer.visibleShape = {
           type: 'path',
           rect: paddedRect,
-          hardEdge: intersection.visibleShape.hardEdge,
-          antiAliased: (intersection.visibleShape as { antiAliased?: boolean }).antiAliased,
+          antiAliased: intersection.visibleShape.antiAliased,
           pathData: tightPath,
           featherPx: effFeather,
           __brand: 'local',

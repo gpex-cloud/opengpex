@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.0-beta.7
+
+- Architecture & Maintenance: streamlined internal shape geometry models and retired legacy edge options for cleaner and more consistent vector rendering
+
+---
+
 ## v2.0.0-beta.6
 
 - Performance & Monitoring: added real-time main-thread power load indicator (PWR) to Metrics HUD with duty-cycled sampling to track UI responsiveness without extra overhead
