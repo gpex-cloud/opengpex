@@ -17,10 +17,11 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import {
   useOverlayRotationSync,
   useEditorState,
+  useEditorServices,
 } from "@opengpex/editor/core/context";
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
 import { useClipOverlayCommands, useClipCursor } from "../hooks";
@@ -78,13 +79,21 @@ export function ClipOverlayMain() {
 
   useClipCursor(isClipActive, clipTool, boxRef, isReCanvas);
 
-  const { state } = useEditorState();
+  const { state, activeLayer } = useEditorState();
+  const { geometry } = useEditorServices();
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useOverlayRotationSync(overlayRef, activeFrame);
 
   const clipConfig = state.pluginConfig[ClipOverlayAPI.configKey] as Partial<ClipOverlayConfig> | undefined;
   const marchingAntsAnimated = clipConfig?.marchingAntsAnimated ?? false;
+
+  // Ellipse-family selection: the true ellipse (tool 'ellipse', ShapeType
+  // 'circle') AND the 360-point path ellipse (tool 'pathellipse', ShapeType
+  // 'path' — never circle-recognized by polygonToShape). Used to clip the
+  // rule-of-thirds guides to the elliptical shape; without it the guide line
+  // ends poke out past the inscribed ellipse at the rect corners.
+  const isEllipseSelection = clipType === "circle" || clipTool === "pathellipse" || clipTool === "ellipse";
 
   // ─── Activation gates ────────────────────────────────────────────────────
   const isOverlayActive = isClipActive || isReCanvas;
@@ -95,13 +104,26 @@ export function ClipOverlayMain() {
   // Box (handles + dim label): only for regular tools or Re-Canvas
   const boxActive = isOverlayActive && (isReCanvas || isRegularTool);
 
+  // ─── Staircase grid phase (P1 ants/GPU alignment) ────────────────────────
+  // The aa/na ants are the pixel staircase of the TARGET layer's (active
+  // layer's) pixel grid. That grid sits at the layer's origin in frame-local
+  // space, whose offset fraction is 0 or 0.5 (odd canvas dims shift it by .5)
+  // — the staircase must use this phase or the ants and the GPU-cut pixels
+  // misalign by 1px. Layers with other offsets don't match the ants
+  // pixel-for-pixel (accepted, per plan §7.2 decision 3).
+  const antsGridOffset = useMemo(() => {
+    if (!activeLayer || !activeFrame) return { x: 0, y: 0 };
+    const m = geometry.transform.getLayerLocalMatrix(activeLayer, activeFrame);
+    return { x: geometry.camera.quantizeGridOffset(m.tx), y: geometry.camera.quantizeGridOffset(m.ty) };
+  }, [activeLayer, activeFrame, geometry]);
+
   // ─── Fast-track hooks ────────────────────────────────────────────────────
 
   // Unified marching ants (dual-path: black base + white/red foreground)
   const groupRef = useRef<SVGGElement>(null);
   const pathBgRef = useRef<SVGPathElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
-  useSelectionAntsSync(groupRef, pathBgRef, pathRef, antsActive, isReCanvas, clipTool);
+  useSelectionAntsSync(groupRef, pathBgRef, pathRef, antsActive, isReCanvas, clipTool, antsGridOffset);
 
   // CSS box for drag handles + guides (regular tools only)
   const { guidesRef } = useRegularBoxSync(
@@ -238,7 +260,7 @@ export function ClipOverlayMain() {
           <div
             ref={guidesRef}
             className="absolute inset-0 opacity-20 pointer-events-none overflow-hidden"
-            style={{ borderRadius: clipType === "circle" ? "50%" : "0%" }}
+            style={{ borderRadius: isEllipseSelection ? "50%" : "0%" }}
           >
             <div className="absolute top-1/3 left-0 w-full h-px bg-white" />
             <div className="absolute top-2/3 left-0 w-full h-px bg-white" />

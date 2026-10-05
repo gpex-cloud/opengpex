@@ -41,7 +41,7 @@ import {
   computePolygonBounds, localToWorldPolygon, worldToLocalPolygon,
   frameLocalToLayerLocal as polyFrameToLayer, layerLocalToFrameLocal as polyLayerToFrame, polygonToSvgPathD,
   isPointInPolygon, computeRingArea, simplifyOpen, simplifyRing, translatePolygon,
-  ellipsePathToLocalPolygon, polygonToShape
+  ellipsePathToLocalPolygon, polygonToShape, deriveEdgeDisplayMode
 } from './operators/polygon';
 import {
   shapeToPoint2D, point2dToLocalShape, point2dToLocalPolygon,
@@ -64,7 +64,11 @@ import {
   projectZoom,
   projectPan,
   getCameraMatrix,
-  getViewportWorldRect
+  getViewportWorldRect,
+  getVisibleRect,
+  visibleGridWindow,
+  quantizeGridOffset,
+  type VisibleRectOptions
 } from './operators/camera';
 
 export function createGeometryService(): GeometryService {
@@ -143,6 +147,14 @@ export function createGeometryService(): GeometryService {
       projectPan: (current: CameraState, delta: Point2D) => projectPan(current, delta),
       getCameraMatrix: (frame: Frame, camera?: CameraState) => getCameraMatrix(camera || frame.camera, frame.canvas),
       getViewportWorldRect: (viewportDim: Dimensions, camera: CameraState, canvas: Dimensions, padding = 0) => getViewportWorldRect(viewportDim, camera, canvas, padding),
+      getVisibleRect: (viewportDim: Dimensions, cam: CameraState, options?: VisibleRectOptions) => getVisibleRect(viewportDim, cam, options),
+      visibleGridWindow: (
+        viewportDim: Dimensions,
+        cam: CameraState,
+        gridOffset: { readonly x: number; readonly y: number },
+        options?: VisibleRectOptions
+      ) => visibleGridWindow(viewportDim, cam, gridOffset, options),
+      quantizeGridOffset: (v: number) => quantizeGridOffset(v),
     },
     snapping: {
       snapToPixel: <T extends Rect | Point2D>(r: T, strategy?: 'round' | 'floor' | 'ceil') => snapToPixel(r as Rect & Point2D, strategy) as T,
@@ -179,7 +191,12 @@ export function createGeometryService(): GeometryService {
       worldToLocalPolygon: (poly: WorldPolygon, target: Layer | Frame) => worldToLocalPolygon(poly, target),
       frameLocalToLayerLocal: (poly: LocalPolygon, frame: Frame, layer: Layer) => polyFrameToLayer(poly, frame, layer),
       layerLocalToFrameLocal: (poly: LocalPolygon, layer: Layer, frame: Frame) => polyLayerToFrame(poly, layer, frame),
-      polygonToSvgPathD: (poly: LocalPolygon) => polygonToSvgPathD(poly),
+      polygonToSvgPathD: (
+        poly: LocalPolygon,
+        gridOffset?: { readonly x: number; readonly y: number },
+        window?: { readonly k0: number; readonly r0: number; readonly k1: number; readonly r1: number },
+      ) => polygonToSvgPathD(poly, gridOffset, window),
+      deriveEdgeDisplayMode: (antiAliased?: boolean, ssdepMode?: boolean) => deriveEdgeDisplayMode(antiAliased, ssdepMode),
       isPointInPolygon: (point: Point2D, rings: Point2D[][]) => isPointInPolygon(point, rings),
       computeRingArea: (ring: Point2D[]) => computeRingArea(ring),
       simplifyOpen: (points: Point2D[], epsilon: number) => simplifyOpen(points, epsilon),

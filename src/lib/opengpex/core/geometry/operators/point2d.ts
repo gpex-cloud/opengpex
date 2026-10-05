@@ -35,7 +35,6 @@ import {
   LocalShape, LocalPolygon,
   asLocalRect, asLocalShape, asLocalPolygon,
 } from '@opengpex/editor/core/types';
-import { bresenhamSteps } from '../bresenham';
 
 // ─────────────────────────── Shape ↔ Point2D Conversions ───────────────────────
 
@@ -132,65 +131,6 @@ export function ringsToPathData(rings: Point2D[][]): string {
   return parts.join(' ');
 }
 
-/**
- * smoothToStairedPath: Convert a smooth M/L/Z SVG path string into a Bresenham
- * stair-stepped path string for No-AA (hard-edge) rendering.
- *
- * (Formerly `helpers/path2d.ts::stairedPathFromSmooth`; moved here as a pure
- * ring-level transform. It is the `type:'path'` counterpart to the circle
- * stair-step engine in `helpers/path2d.ts::shapeToPath2D`.)
- *
- * Algorithm:
- *   1. Parse the smooth pathData back into Point2D rings (`parsePathDataToRings`).
- *   2. For each ring, walk every edge (including the closing edge) and decompose
- *      diagonal segments into H/V Bresenham steps (`bresenhamSteps`).
- *   3. Reassemble into a valid SVG path string using only M/H/V/Z commands —
- *      no diagonal L segments — so the path never crosses pixel boundaries
- *      diagonally.
- */
-export function smoothToStairedPath(pathData: string): string {
-  const rings = parsePathDataToRings(pathData);
-  if (!rings.length) return pathData;
-
-  const parts: string[] = [];
-
-  for (const ring of rings) {
-    if (ring.length < 2) continue;
-
-    const segs: string[] = [];
-    const x0 = Math.round(ring[0].x);
-    const y0 = Math.round(ring[0].y);
-    segs.push(`M ${x0} ${y0}`);
-
-    const len = ring.length;
-    for (let i = 0; i < len; i++) {
-      const next = (i + 1) % len;
-      const ax = Math.round(ring[i].x);
-      const ay = Math.round(ring[i].y);
-      const bx = Math.round(ring[next].x);
-      const by = Math.round(ring[next].y);
-
-      if (ax === bx && ay === by) continue;
-
-      if (ay === by) {
-        segs.push(`H ${bx}`);
-        continue;
-      }
-      if (ax === bx) {
-        segs.push(`V ${by}`);
-        continue;
-      }
-
-      // Diagonal: Bresenham stair-step decomposition
-      bresenhamSteps(ax, ay, bx, by, segs);
-    }
-
-    segs.push('Z');
-    parts.push(segs.join(' '));
-  }
-
-  return parts.join(' ');
-}
 
 /**
  * point2dToLocalShape: Attempt to convert Point2D rings into a LocalShape.

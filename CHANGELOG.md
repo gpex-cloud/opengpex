@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.0-beta.8
+
+- Selection: refactored the selection system with unified edge rendering and viewport culling, delivering pixel-accurate masks and smoother canvas interactions
+
+---
+
 ## v2.0.0-beta.7
 
 - Architecture & Maintenance: streamlined internal shape geometry models and retired legacy edge options for cleaner and more consistent vector rendering

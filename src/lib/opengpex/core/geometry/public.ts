@@ -32,7 +32,7 @@
  * so that internal operator refactors never ripple into the plugin layer.
  *
  * That rule only guards the `operators/*` subdirectory. Files at the geometry
- * ROOT (this file, `poly-clip.ts`, `bresenham.ts`) are NOT blocked
+ * ROOT (this file, `poly-clip.ts`) are NOT blocked
  * and are treated as the deliberate public surface of the geometry engine.
  *
  * ── When to use this file ─────────────────────────────────────────────────────

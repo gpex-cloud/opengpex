@@ -219,7 +219,7 @@ export const CLIP_TOOL_STRATEGIES: Record<ClipTool, ClipToolStrategy> = {
   'ellipse':     { id: 'ellipse',     label: 'Ellipse',        icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox',     forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_AA_CURSOR, enabled: false },
   'pathellipse': { id: 'pathellipse', label: 'Ellipse (Path)', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'pathellipse', forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_AA_CURSOR  },
   'lasso':       { id: 'lasso',       label: 'Lasso',          icon: Lasso,  accent: 'purple', family: 'irregular', handlerKind: 'lasso',       forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_LASSO_CURSOR    },
-  'wand':        { id: 'wand',        label: 'Wand',           icon: Wand2,  accent: 'purple', family: 'irregular', handlerKind: 'wand',        forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_WAND_CURSOR     },
+  'wand':        { id: 'wand',        label: 'Wand',           icon: Wand2,  accent: 'purple', family: 'irregular', handlerKind: 'wand',        forbiddenInReCanvas: true,  supportsAntiAlias: false,  cursor: CLIP_WAND_CURSOR     },
   'sam':         { id: 'sam',         label: 'SAM',            icon: Shapes, accent: 'cyan',   family: 'irregular', handlerKind: 'sam',         forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_SAM_CURSOR      },
 };
 

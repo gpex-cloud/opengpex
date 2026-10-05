@@ -25,7 +25,6 @@ import {
   asLocalRect,
   asLocalPolygon,
 } from '@opengpex/editor/core/types';
-import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { createAsyncHandler } from '../../../../../../stage/interaction/handlers/AsyncHandler';
 import { magicWandClient } from '../../workers/client';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
@@ -44,9 +43,13 @@ const WAND_TIMEOUT_MS = 5_000;
  * Effective epsilon used by the Worker is `WAND_SIMPLIFY_COEF / scale` where
  * `scale` is the current viewport zoom. The division means: zoom in → finer
  * detail preserved; zoom out → aggressive collapse.
+ *
+ * The floor caps the zoomed-out epsilon at 1.0 document px — the plan's "≤1px"
+ * fidelity budget, matching the `selectFromAlpha` path (epsilon = 1.0). Above
+ * ~0.8× zoom `0.8 / scale` is already < 1 and the floor never binds.
  */
 const WAND_SIMPLIFY_COEF = 0.8;
-const WAND_SIMPLIFY_FLOOR = 1.5;
+const WAND_SIMPLIFY_FLOOR = 1.0;
 
 // ─── Internal Helpers ──────────────────────────────────────────────────────────
 
@@ -194,12 +197,14 @@ export const createWandHandler = (): InteractionHandler => {
       if (ctx.isDiscarded()) return;
 
       // 5. Project layer-local rings → frame-local.
-      const clipBox = getClipBox(e.activeFrame);
-      const wandAA = clipBox?.antiAliased ?? true;
-
+      // Wand is a PIXEL-selection tool: pinned to a hard binary edge
+      // (plan §7.1.1 — `antiAliased:false, ssdepMode:false`). The DP-simplified
+      // ring is the workingRings; both the GPU fill-pass (center-point binary
+      // test) and the ants staircase derive from the same rule, so the ants
+      // coincide with the cut pixels. Softening is Feather's job, not AA's.
       const layerRings = resp.rings.map(ring => ring.map(p => asLocalPoint({ x: p.x, y: p.y })));
       const layerBounds = asLocalRect(e.geometry.polygon.computePolygonBounds(layerRings));
-      const layerPoly = asLocalPolygon(layerRings, layerBounds, wandAA);
+      const layerPoly = asLocalPolygon(layerRings, layerBounds, false);
       const framePoly = e.geometry.polygon.layerLocalToFrameLocal(
         layerPoly, layer, e.activeFrame
       );

@@ -92,11 +92,13 @@ function vmaskSig(mask: VectorMaskDesc | undefined): string {
   if (mask.kind === 'analytic') {
     return `analytic:${mask.shape}:${mask.rect.join(',')}:${mask.featherPx}:${mask.inverted ? 1 : 0}:${mask.hard ? 1 : 0}`;
   }
-  // polygon: serialize every sub-mask (rings + its own feather/invert). Rings
-  // are layer-local, so a geometry/feather/invert edit flips the sig while a
-  // pure move does not (mirrors getVmaskKey).
+  // polygon: serialize every sub-mask (rings + its own feather/invert/antiAliased).
+  // Rings are layer-local, so a geometry/feather/invert edit flips the sig while a
+  // pure move does not (mirrors getVmaskKey). The AA token is REQUIRED here: the
+  // baked coverage texture (and thus the composited pixels) changes with the AA
+  // toggle even though rings/feather/invert stay identical.
   const parts = mask.subMasks.map(
-    (sm) => `${JSON.stringify(sm.rings)}:${sm.featherPx}:${sm.inverted ? 1 : 0}`,
+    (sm) => `${JSON.stringify(sm.rings)}:${sm.featherPx}:${sm.inverted ? 1 : 0}:${sm.antiAliased ? 1 : 0}`,
   );
   return `polygon:${parts.join('|')}`;
 }

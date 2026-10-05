@@ -97,8 +97,7 @@ function toRawUpload(
  * `rect` is always translated. `pathData` (type `'path'`) stores ABSOLUTE
  * coordinates independent of `rect` and must be translated in lockstep via
  * `translatePathData`, or the path renders offset from the mask canvas.
- * `circle` has no coordinates of its own (derived entirely from `rect` — see
- * `shapeToPath2D`), so translating `rect` alone is sufficient.
+ * `circle` has no coordinates of its own (derived entirely from `rect`).
  */
 export function translateLocalShapeToOrigin(shape: LocalShape, dx: number, dy: number): LocalShape {
   return {
@@ -120,7 +119,8 @@ export function translateLocalShapeToOrigin(shape: LocalShape, dx: number, dy: n
  *   • polygon — every other case (paths, ≥2 stacked masks) becomes a sub-mask
  *     table baked by the compute fill-pass (`prepareVmaskSources.ts`). Each mask
  *     contributes its rings (layer-local px, via `shapeToPoint2D`) plus its own
- *     feather/invert; the shader INTERSECTS them (v1 `ctx.clip()` intersection).
+ *     feather/invert/antiAliased; the shader INTERSECTS them (v1 `ctx.clip()`
+ *     intersection).
  *
  * `masks` are the already-combined, origin-translated `VectorMask`s for the layer
  * (same set the deleted CPU path consumed). `w`/`h` are the layer's content dims.
@@ -146,7 +146,13 @@ export function buildVectorMaskDesc(
         rect: [cx / sw, cy / sh, r.w / 2 / sw, r.h / 2 / sh] as const,
         featherPx: m.feather ?? 0,
         inverted: m.inverted,
-        hard: false,
+        // `antiAliased === false` is the ONLY hard-edge signal (Shape.hardEdge
+        // was deleted — it was a v1 leftover that was false everywhere with no
+        // UI to set it). A rect's edges are pixel-snapped upstream
+        // (geometry/operators/snapping.ts), so the flag is effectively a no-op
+        // for plain rects, but the mapping stays uniform for the ellipse
+        // legacy branch.
+        hard: m.shape.antiAliased === false,
       };
     }
   }
@@ -155,6 +161,10 @@ export function buildVectorMaskDesc(
     rings: shapeToPoint2D(m.shape).map((ring) => ring.map((p) => [p.x, p.y] as const)),
     featherPx: m.feather ?? 0,
     inverted: m.inverted,
+    // GPU-side AA switch (default ON): only an EXPLICIT `antiAliased: false`
+    // downgrades the fill-pass to the 1-bit binary edge. Display-only modes
+    // (e.g. the future ssdepMode) must never reach the GPU descriptor.
+    antiAliased: m.shape.antiAliased !== false,
   }));
   return { kind: 'polygon', subMasks };
 }
@@ -464,17 +474,7 @@ export class SceneAssembler {
       if (rawUpload) {
         uploads.push({ assetId: sourceAssetId, source: rawUpload });
       } else if (!isVectorLayer && rawImg && typeof (rawImg as ImageBitmap).close === 'function') {
-        // [P3-Debug][5] SceneAssembler bitmap upload: this is the gamut that will
-        // steer copyExternalImageToTexture's destColorSpace in WebGpuEngine.
-        // If gamut is 'srgb' for a P3 image, the GPU will NOT do an identity
-        // copy — the P3 intrinsic values will be misread as sRGB, causing drift.
         const resolvedGamut = assets?.get(sourceAssetId)?.gamut ?? 'srgb';
-        console.log('[ColorProfile-Debug][5.SceneAssembler-BITMAP-UPLOAD]', {
-          assetId: sourceAssetId.slice(0, 24),
-          rawImgPresent: !!rawImg,
-          resolvedGamut,
-          isDefaultFallback: !assets?.get(sourceAssetId)?.gamut,
-        });
         uploads.push({
           assetId: sourceAssetId,
           // Tag the 8-bit color raster with the asset's OWN

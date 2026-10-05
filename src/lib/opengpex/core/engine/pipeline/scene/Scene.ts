@@ -327,6 +327,14 @@ export interface VectorSubMask {
   readonly rings: readonly (readonly (readonly [number, number])[])[];
   readonly featherPx: number;
   readonly inverted: boolean;
+  /**
+   * Document-space anti-aliasing for this sub-mask. `false` ⇒ the fill-pass
+   * emits a pure 1-bit binary edge (`select(0,1,inside)`); `true` (the default
+   * whenever the upstream `Shape.antiAliased` is not explicitly false) ⇒ the
+   * baked coverage is `clamp(0.5 - d, 0, 1)`, a 1-document-pixel-wide sub-pixel
+   * falloff. Feather (when > 0) takes precedence over this flag.
+   */
+  readonly antiAliased: boolean;
 }
 
 // ────────────────────────────────────────────────────────────

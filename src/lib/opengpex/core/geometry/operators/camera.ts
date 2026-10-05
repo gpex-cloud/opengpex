@@ -18,7 +18,7 @@
  */
 
 import { Matrix3x3 } from '../matrix';
-import { CameraState, Dimensions, ViewportPoint, Point2D, WorldRect, asWorldRect } from '@opengpex/editor/core/types';
+import { CameraState, Dimensions, ViewportPoint, Point2D, WorldRect, LocalRect, asWorldRect, asLocalRect } from '@opengpex/editor/core/types';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_ZOOM_MIN = presets.get('VIEWPORT_ZOOM_MIN');
 const VIEWPORT_ZOOM_MAX = presets.get('VIEWPORT_ZOOM_MAX');
@@ -190,4 +190,154 @@ export function getViewportWorldRect(
     w: maxX - minX,
     h: maxY - minY
   });
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Viewport culling: visible window infrastructure.
+//
+// Single source for the "what part of the document is on screen" question:
+// maps the viewport through the camera into frame-local space, pads it with a
+// safety margin, and snaps it outward to a block lattice so that small pans
+// produce the IDENTICAL rect and key (stable cache identity for consumers
+// like the marching-ants viewport culling).
+//
+// Scope boundary: this block owns viewport→rect mapping + quantization ONLY.
+// What "outside the window" means (uncovered grid cells / skipped anchors /
+// texel ROI) stays in each consumer's domain.
+// ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * GridOffset: WHERE the target layer's document-pixel-grid lines fall — the
+ * fractional part (0 or 0.5) of the TARGET LAYER's origin (the active layer
+ * the cut/mask will be applied to) expressed in frame-local space. Pixel
+ * (k, row) of that layer spans
+ * `[gx + k, gx + k + 1] × [gy + row, gy + row + 1]`,
+ * so any pixel-aligned derivation (ants staircase) MUST be computed on this
+ * grid or it misaligns by 1px when the parities of the canvas and layer
+ * dimensions differ (layer origin lands at .5). The integer part is
+ * deliberately dropped: cells are unit-sized, so only the phase matters.
+ */
+export interface GridOffset {
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * Snap a frame-local coordinate's fraction onto the grid-offset domain
+ * {0, 0.5}. Tolerates float drift in layer matrices: < .25 → 0, within
+ * ±.25 of .5 → .5, otherwise back to 0.
+ */
+export function quantizeGridOffset(v: number): 0 | 0.5 {
+  const f = v - Math.floor(v);
+  return f < 0.25 ? 0 : f < 0.75 ? 0.5 : 0;
+}
+
+/**
+ * Visible-window bounds in GRID CELL INDEX space (inclusive): pixel-aligned
+ * derivations consume ONLY cells (k, row) within [k0..k1] × [r0..r1]. Cells
+ * outside are treated as uncovered — e.g. the ants staircase terminates
+ * against the window edges (contours close along them), keeping the emitted
+ * path viewport-sized.
+ */
+export interface GridWindow {
+  readonly k0: number;
+  readonly r0: number;
+  readonly k1: number;
+  readonly r1: number;
+}
+
+export interface VisibleRectOptions {
+  /**
+   * Safety margin in DOCUMENT units around the viewport rect before
+   * quantization: 'halfDiagonal' (default) pads by half the viewport
+   * diagonal — guaranteed to cover any pan until the next re-derive —
+   * or an explicit number.
+   */
+  margin?: 'halfDiagonal' | number;
+  /**
+   * Quantization block size in CSS px (default 128). The document-space
+   * block size is `blockSizeCssPx / cam.k`; the rect is snapped OUTWARD to
+   * block boundaries, so pans within a block keep the same rect and key.
+   */
+  blockSizeCssPx?: number;
+}
+
+export interface VisibleRect {
+  /** Viewport (+ margin, block-snapped) rect in frame-local space. */
+  rect: LocalRect;
+  /** Stable identity of the quantized rect — cache key across ticks. */
+  key: string;
+}
+
+/**
+ * getVisibleRect: viewport → (margin-padded, block-quantized) frame-local rect.
+ *
+ * Frame-local mapping via `inv(T(cam.x, cam.y)·S(k))` — the same transform as
+ * `space.ts::screenToLocal` (local = T(canvas/2)·world, so the camera inverse
+ * alone lands in frame-local space; no canvas translate involved).
+ *
+ * Returns null for a degenerate camera (scale ≤ 0) or empty viewport —
+ * consumers fall back to uncapped behavior.
+ */
+export function getVisibleRect(
+  viewportDim: Dimensions,
+  cam: CameraState,
+  options: VisibleRectOptions = {},
+): VisibleRect | null {
+  const scale = cam.k;
+  if (!(viewportDim.w > 0 && viewportDim.h > 0) || !(scale > 0)) return null;
+
+  const invM = Matrix3x3.translate(cam.x, cam.y)
+    .multiply(Matrix3x3.scale(scale))
+    .inverse();
+  const p0 = invM.apply({ x: 0, y: 0 });
+  const p1 = invM.apply({ x: viewportDim.w, y: viewportDim.h });
+  const x0 = Math.min(p0.x, p1.x);
+  const x1 = Math.max(p0.x, p1.x);
+  const y0 = Math.min(p0.y, p1.y);
+  const y1 = Math.max(p0.y, p1.y);
+
+  const margin = options.margin === undefined || options.margin === 'halfDiagonal'
+    ? Math.hypot(x1 - x0, y1 - y0) / 2
+    : options.margin;
+  const block = (options.blockSizeCssPx ?? 128) / scale;
+
+  // Snap outward to block boundaries: the rect only ever GROWS across pans,
+  // and slides by whole blocks — same rect ⇒ same key ⇒ consumers' caches hit.
+  const wx0 = Math.floor((x0 - margin) / block) * block;
+  const wy0 = Math.floor((y0 - margin) / block) * block;
+  const wx1 = Math.ceil((x1 + margin) / block) * block;
+  const wy1 = Math.ceil((y1 + margin) / block) * block;
+
+  const rect = asLocalRect({ x: wx0, y: wy0, w: wx1 - wx0, h: wy1 - wy0 });
+  return { rect, key: `${wx0},${wy0},${wx1},${wy1}` };
+}
+
+/**
+ * visibleGridWindow: one-stop visible window for pixel-aligned derivations —
+ * `getVisibleRect` + the LocalRect → grid-cell conversion in a single call.
+ *
+ * The cell mapping is THE contract with pixel-aligned consumers (the ants
+ * staircase scanline derives exactly these cells): cell (k, r) covers
+ * frame-local `[gx+k, gx+k+1] × [gy+r, gy+r+1]` where (gx, gy) = gridOffset.
+ *
+ * Returns `{ window: undefined, key: 'full' }` for a degenerate camera/viewport
+ * (consumer falls back to uncapped derivation) and `{ window: undefined, key }`
+ * when the visible rect maps to no grid cells (still keyed by the rect).
+ */
+export function visibleGridWindow(
+  viewportDim: Dimensions,
+  cam: CameraState,
+  gridOffset: GridOffset,
+  options: VisibleRectOptions = {},
+): { window?: GridWindow; key: string } {
+  const visible = getVisibleRect(viewportDim, cam, options);
+  if (!visible) return { window: undefined, key: 'full' };
+
+  const k0 = Math.floor(visible.rect.x - gridOffset.x);
+  const r0 = Math.floor(visible.rect.y - gridOffset.y);
+  const k1 = Math.ceil(visible.rect.x + visible.rect.w - gridOffset.x) - 1;
+  const r1 = Math.ceil(visible.rect.y + visible.rect.h - gridOffset.y) - 1;
+  const window = k1 < k0 || r1 < r0 ? undefined : { k0, r0, k1, r1 };
+  return { window, key: visible.key };
 }

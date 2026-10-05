@@ -129,7 +129,7 @@ export const COLOR_OPTIONS_COMMANDS = {
           // Serialize the polygon to a LocalShape for the layer model.
           // polygonToShape uses absolute coordinates (suitable for Path2D),
           // recognizes rect/circle shapes, and preserves the antiAliased flag
-          // so shapeToPath2D can apply Bresenham stair-stepping at render time.
+          // as the GPU pipeline's hard-edge signal.
           // The resulting shape's rect is in frame-local space (absolute coords),
           // but the layer is positioned at (cx, cy) relative to canvas center,
           // so we must offset the shape rect to layer-local space (origin at 0,0).

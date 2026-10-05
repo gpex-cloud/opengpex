@@ -34,27 +34,35 @@
  * confirmed). Each mask keeps its OWN `feather` + `inverted`, so they cannot be
  * flattened into one ring set (a per-mask invert must bake before the product).
  * The shader therefore takes a SUBMASK TABLE: each entry is a `[edge_start,
- * edge_count)` slice into the shared edge buffer plus that mask's feather/invert.
+ * edge_count)` slice into the shared edge buffer plus that mask's feather/flags
+ * (bit0 = inverted, bit1 = antiAliased).
  * `coverage = Π_m cov_m` — one even-odd + nearest-edge solve per sub-mask, the
  * per-mask invert baked, then multiplied. A single sub-mask degrades to the
  * plain one-polygon case (product of one term).
  *
  * ── PER-PIXEL ALGORITHM per sub-mask ──
- *   a. Even-odd winding: cast a horizontal ray from the texel and count edge
- *      crossings within THIS sub-mask's slice (odd ⇒ inside). Independent
- *      oracle: the classic pnpoly test, so self-intersecting rings get true
- *      even-odd semantics.
- *   b. Nearest-edge distance: min `sdf_segment(p,a,b)` over that slice, signed
- *      by the winding result — a continuous SDF field for feathering.
- *   `feather > 0` ⇒ `smoothstep(-feather, feather, d)`; `feather == 0` ⇒ the
- *   binary inside/outside coverage (hard edge, no AA).
+ *   a. Even-odd winding: cast a horizontal ray from the OFFSET sample point
+ *      p_test = pixel-center + (1/64, 1/128) (CPU/GPU shared tie-break, see
+ *      the rule document in polygon.ts) and count edge crossings within THIS
+ *      sub-mask's slice (odd ⇒ inside). Independent oracle: the classic
+ *      pnpoly test, so self-intersecting rings get true even-odd semantics.
+ *   b. Nearest-edge distance: min `sdf_segment(p,a,b)` over that slice at the
+ *      TRUE pixel center, signed by the winding result — a continuous SDF
+ *      field for feathering/AA.
+ *   Coverage mapping (in priority order):
+ *   `feather > 0` ⇒ `1 - smoothstep(-feather, feather, d)` (soft band wins);
+ *   `feather == 0` + AA flag ⇒ `clamp(0.5 - d, 0, 1)` — a 1-document-pixel
+ *   sub-pixel coverage ramp (formula B), the standard Photoshop AA ON edge;
+ *   `feather == 0` + AA clear ⇒ binary `inside ? 1 : 0` — the explicit hard,
+ *   aliased edge (Photoshop AA OFF).
  *
- * ── INVERT BAKED IN-PASS ──
- * Each sub-mask's `inverted` is resolved HERE (`1 - cov_m`) BEFORE the product,
- * so the baked texel IS the final mask value; the sampling side only does a
- * linear multiply. (Analytic keeps invert in `fs_main` because it has no
- * intermediate texture to bake into.) `hard` is NOT a polygon concept — a
- * non-feathered sub-mask (`feather == 0`) already yields a binary edge.
+ * ── FLAGS BAKED IN-PASS ──
+ * Each sub-mask's `inverted` (flags bit0) is resolved HERE (`1 - cov_m`) BEFORE
+ * the product, so the baked texel IS the final mask value; the sampling side
+ * only does a linear multiply. (Analytic keeps invert/hard in `fs_main` because
+ * it has no intermediate texture to bake into.) The AA flag (bit1) is likewise
+ * per-sub-mask: a polygon mask mixed from an AA-off and an AA-on shape bakes
+ * each half with its own edge quality before the coverage product.
  *
  * ── COORDINATE CONTRACT ──
  * Edges arrive flattened (every ring closed, last→first appended) in the SAME
@@ -80,7 +88,7 @@ export const VMASK_UNIFORM_SIZE = 32;
 
 /**
  * Size of one `SubMask` std430 record in bytes (16B = edge_start:u32,
- * edge_count:u32, feather:f32, inverted:u32). The orchestrator packs
+ * edge_count:u32, feather:f32, flags:u32). The orchestrator packs
  * `submaskCount × VMASK_SUBMASK_SIZE` bytes into the submask storage buffer.
  */
 export const VMASK_SUBMASK_SIZE = 16;
@@ -98,13 +106,14 @@ struct VmaskUniforms {
 };
 
 // One intersected sub-mask: a [edge_start, edge_start+edge_count) slice of the
-// shared edge buffer, plus that mask's own feather / invert (baked per sub-mask
+// shared edge buffer, plus that mask's own feather / flags (baked per sub-mask
 // before the product). std430: 16 bytes, tightly packed.
+// flags bits: bit0 = inverted, bit1 = antiAliased (document-space sub-pixel AA).
 struct SubMask {
   edge_start : u32,
   edge_count : u32,
   feather    : f32,
-  inverted   : u32,
+  flags      : u32,
 };
 
 // Flattened polygon edges: every ring closed (last vertex → first), all rings
@@ -124,15 +133,25 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
 
   let p = (vec2<f32>(f32(gid.x), f32(gid.y)) + vec2<f32>(0.5, 0.5)) * u.px_scale;
 
+  // Even-odd SAMPLE point: pixel center nudged by (+1/64, +1/128) in ring
+  // space — the CPU staircase's tie-break (polygon.ts shared rule document).
+  // A nudge is required so CPU (f64) and GPU (f32) break exact ties (45°
+  // integer-vertex edges of wand/DP output) identically; without it the two
+  // sides disagree on individual boundary pixels. Used ONLY for the inside
+  // test below — d_signed and the AA formula stay at the TRUE center p
+  // (1-document-px coverage ramp is defined on the physical pixel center).
+  let p_test = p + vec2<f32>(0.015625, 0.0078125); // (+1/64, +1/128) — exact in f32
+
   // Intersection of all sub-masks: coverage = Π cov_m. Start at 1.0 so a
   // single sub-mask degrades to its own coverage.
   var coverage = 1.0;
   for (var m = 0u; m < u.mask_count; m = m + 1u) {
     let sm = submasks[m];
 
-    // (a) Even-odd winding via horizontal ray cast (independent oracle: pnpoly).
-    // (b) Nearest-edge unsigned distance, accumulated in the same loop — both
-    //     restricted to THIS sub-mask's [start, end) edge slice.
+    // (a) Even-odd winding via horizontal ray cast from p_test (independent
+    //     oracle: pnpoly — same sample point as the CPU staircase).
+    // (b) Nearest-edge unsigned distance at the TRUE center p, accumulated in
+    //     the same loop — both restricted to THIS sub-mask's [start, end) edge slice.
     var inside = false;
     var min_dist = 1e30;
     let start = sm.edge_start;
@@ -141,11 +160,11 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
       let e = edges[i];
       let a = e.xy;
       let b = e.zw;
-      // Ray-crossing test: does the edge straddle the horizontal line y = p.y?
-      if ((a.y > p.y) != (b.y > p.y)) {
-        let t = (p.y - a.y) / (b.y - a.y);
+      // Ray-crossing test: does the edge straddle the horizontal line y = p_test.y?
+      if ((a.y > p_test.y) != (b.y > p_test.y)) {
+        let t = (p_test.y - a.y) / (b.y - a.y);
         let x_cross = a.x + t * (b.x - a.x);
-        if (p.x < x_cross) {
+        if (p_test.x < x_cross) {
           inside = !inside;
         }
       }
@@ -157,13 +176,28 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
 
     var cov_m : f32;
     if (sm.feather > 0.0) {
+      // Feather wins over the AA flag: the soft band is the requested effect.
       cov_m = 1.0 - smoothstep(-sm.feather, sm.feather, d_signed);
+    } else if ((sm.flags & 2u) != 0u) {
+      // AA ON (flag bit1): standard 1-document-pixel sub-pixel coverage from the
+      // Euclidean distance field. UNIT CONTRACT: p = (texel + 0.5) * px_scale is
+      // in RING SPACE (= layer-local document px), so d_signed is in DOCUMENT
+      // PIXELS regardless of exportScale — the transition band is always 1
+      // document px wide (~1 texel at 1×, ~2 texels at 2× export supersample).
+      // Do NOT rewrite this in texel units. Formula B: linear ramp, exact on
+      // horizontal/vertical edges (d is axis distance there), sampled at the
+      // physical pixel centre. coverage ≥ 0.5 ⇔ d_signed ≤ 0 ⇔ the pixel centre
+      // is inside — so thresholding this at 50% reproduces the AA-OFF mask.
+      cov_m = clamp(0.5 - d_signed, 0.0, 1.0);
     } else {
+      // AA OFF (flag bit1 clear): pure 1-bit binary hard edge — a jaggies-only
+      // stair-stepped coverage, by explicit user choice (Photoshop AA off).
       cov_m = select(0.0, 1.0, inside);
     }
 
-    // Per-sub-mask invert baked BEFORE the product: the texel IS final.
-    if (sm.inverted != 0u) {
+    // Per-sub-mask flags baked BEFORE the product: the texel IS final.
+    // bit0 = inverted.
+    if ((sm.flags & 1u) != 0u) {
       cov_m = 1.0 - cov_m;
     }
 

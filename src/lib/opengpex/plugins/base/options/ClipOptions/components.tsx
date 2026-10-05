@@ -536,7 +536,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
               <Tooltip
                 content={
                   !supportsAntiAlias
-                    ? "Anti-aliasing only applies to the Ellipse tool"
+                    ? "This tool always uses a hard pixel-staircase edge; use Feather to soften the boundary"
                     : `Anti-Alias: ${isAntiAliased ? "ON" : "OFF"} (Dbl-Click A)`
                 }
                 position="bottom"

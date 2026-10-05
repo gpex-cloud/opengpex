@@ -44,8 +44,9 @@
  *
  * ── PER-LAYER ENCODE ──
  * Flatten every sub-mask's rings into one shared edge buffer (each ring closed,
- * last→first appended), build a sub-mask table of `[edge_start, edge_count, feather,
- * inverted]` slices, upload both to private storage rings + the 32B uniform, then
+ * last→first appended), build a sub-mask table of `[edge_start, edge_count,
+ * feather, flags]` slices (flags: bit0 = inverted, bit1 = antiAliased), upload
+ * both to private storage rings + the 32B uniform, then
  * `dispatchWorkgroups(ceil(w/8), ceil(h/8))`. The shader intersects the sub-masks
  * (`coverage = Π cov_m`, each invert baked before the product — v1 `ctx.clip()` intersection).
  *
@@ -70,10 +71,11 @@ const VMASK_RING_CAPACITY = 2 * 1024 * 1024;
 
 /**
  * Position-free cache key for a polygon vmask's baked coverage. Digests the
- * sub-mask geometry (layer-local rings) + per-mask feather/invert + the mask texel
- * dims. EXCLUDES the layer's world transform: the rings are layer-local, so a pan/
- * move produces the identical key and reuses the baked texture (zero re-bake). A
- * geometry edit, feather/invert toggle, or a resize (dims change) all flip the key.
+ * sub-mask geometry (layer-local rings) + per-mask feather/invert/antiAliased +
+ * the mask texel dims. EXCLUDES the layer's world transform: the rings are
+ * layer-local, so a pan/move produces the identical key and reuses the baked
+ * texture (zero re-bake). A geometry edit, feather/invert/AA toggle, or a resize
+ * (dims change) all flip the key.
  *
  * Exported for stability golden test (same geometry + different transform ⇒ same
  * key; any geometry/dims change ⇒ different key).
@@ -87,7 +89,7 @@ export function getVmaskKey(
     const rings = sm.rings
       .map((ring) => ring.map((p) => `${p[0]},${p[1]}`).join(' '))
       .join('|');
-    return `${sm.featherPx}_${sm.inverted ? 1 : 0}:${rings}`;
+    return `${sm.featherPx}_${sm.inverted ? 1 : 0}_${sm.antiAliased ? 1 : 0}:${rings}`;
   });
   return `${maskW}x${maskH}#${parts.join(';')}`;
 }
@@ -206,6 +208,8 @@ class VmaskCache {
     // ── Flatten edges + build the sub-mask table ──
     // Each sub-mask owns a [edge_start, edge_start+edge_count) slice; every ring is
     // closed (last vertex → first). Edge = (a.x, a.y, b.x, b.y) in layer-local px.
+    // Slot 3 packs the per-mask flags: bit0 = inverted, bit1 = antiAliased
+    // (feather stays its own f32 slot — it is a length, not a flag).
     const edgeVals: number[] = [];
     const table = new ArrayBuffer(Math.max(1, subMasks.length) * VMASK_SUBMASK_SIZE);
     const tableU32 = new Uint32Array(table);
@@ -226,7 +230,7 @@ class VmaskCache {
       tableU32[m * 4 + 0] = edgeStart;
       tableU32[m * 4 + 1] = edgeCount;
       tableF32[m * 4 + 2] = sm.featherPx;
-      tableU32[m * 4 + 3] = sm.inverted ? 1 : 0;
+      tableU32[m * 4 + 3] = (sm.inverted ? 1 : 0) | (sm.antiAliased ? 2 : 0);
     }
     // WebGPU rejects a zero-sized storage binding; when every ring was degenerate,
     // pad one dummy edge so the buffer is non-empty (the table's edge_count is 0, so

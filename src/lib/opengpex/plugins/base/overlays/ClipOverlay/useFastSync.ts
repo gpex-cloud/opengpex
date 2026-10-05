@@ -17,90 +17,30 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useEffect, useRef } from 'react';
-import { useEditorServices } from '@opengpex/editor/core/context';
+import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
 import { useFastSync, useFastRectSync, useFastSvgGroupSync, useFastMarchingAntsSync, useFastAnchorSync } from '@opengpex/editor/core/state/volatile';
-import { LocalShape, LocalPolygon, LocalPoint, asLocalShape, asLocalPolygon, asLocalRect, Point2D } from '@opengpex/editor/core/types';
+import { LocalShape, LocalPolygon, asLocalShape, Frame, CameraState } from '@opengpex/editor/core/types';
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { ClipTool } from '../../options/ClipOptions/protocols';
-import { MARCHING_ANTS_MAX_VERTICES } from './protocols';
+import { resolveAntsPath, simplifyPolygonForAnts, type AntsPathCache } from './antsPath';
+
+/** Grid phase identity: the target layer's origin fraction, 0 or 0.5 (see GeometryService.quantizeGridOffset). */
+type GridOffset = { readonly x: number; readonly y: number };
 
 const EMPTY_SHAPE: LocalShape = asLocalShape({ x: 0, y: 0, w: 0, h: 0 });
 
-// ─── Marching Ants Path Simplification ─────────────────────────────────────────
+// ─── Marching Ants Path Derivation ──────────────────────────────────────────────
 
-/**
- * Cached simplified polygon for marching ants display.
- * Avoids re-running Douglas–Peucker on every tick when data hasn't changed.
- *
- * Cache invalidation keys:
- *   - `sourceRings` (reference equality): Detects when the polygon geometry changes.
- *     For regular tools (rect/ellipse), `regularShapeToLocalPolygon` always creates
- *     a new array → new reference → cache invalidates naturally.
- *     For irregular tools (lasso/wand), rings are the original user-drawn/algorithm-
- *     generated point set — they never change because AA only affects rendering style,
- *     not the underlying geometry. toggleAntiAlias patches only the `antiAliased` flag
- *     via shallow spread (`{ ...clipBox, antiAliased }`), preserving the same rings ref.
- *
- *   - `antiAliased` (value equality): Detects when the rendering style changes.
- *     The same rings produce different SVG paths depending on AA (smooth M/L/Z vs
- *     Bresenham staired H/V steps). Without this key, toggling AA on an irregular
- *     polygon would return stale cached path — the ants wouldn't visually update
- *     until the tool is switched and switched back (which clears the cache).
- */
-interface AntsSimplifyCache {
-  /** Source polygon identity (reference equality check) */
-  sourceRings: Point2D[][];
-  /** AA state at time of caching (path changes between smooth/staired) */
-  antiAliased: boolean;
-  /** Simplified SVG path `d` string */
-  simplifiedD: string;
-}
-
-/**
- * simplifyPolygonForAnts: Reduces polygon vertex count for marching ants display.
- *
- * Strategy:
- *   - If total vertex count ≤ ANTS_VERTEX_THRESHOLD, use the polygon as-is.
- *   - Otherwise, apply Douglas–Peucker with adaptive epsilon based on polygon
- *     bounding rect size. Iteratively doubles epsilon until total vertices
- *     fall below ANTS_MAX_VERTICES.
- *
- * The simplified polygon is ONLY used for SVG overlay display — the source data
- * in clipBoxes is never mutated, so cut/copy/mask operations remain pixel-precise.
- */
-function simplifyPolygonForAnts(
-  poly: LocalPolygon,
-  simplifyRingFn: (ring: Point2D[], epsilon: number) => Point2D[]
-): LocalPolygon {
-  // Count total vertices
-  let totalVerts = 0;
-  for (const ring of poly.rings) totalVerts += ring.length;
-
-  // Below threshold: no simplification needed
-  if (totalVerts <= MARCHING_ANTS_MAX_VERTICES) return poly;
-
-  // Adaptive epsilon: start at 0.5% of the longer bounding dimension.
-  // This is perceptually invisible at screen scale but eliminates redundant
-  // micro-vertices from marching-squares / contour tracing outputs.
-  const maxDim = Math.max(poly.rect.w, poly.rect.h);
-  let epsilon = maxDim * 0.005;
-
-  let simplified: Point2D[][] = poly.rings;
-  let count = totalVerts;
-
-  // Iterative reduction: double epsilon until within budget
-  for (let attempt = 0; attempt < 6 && count > MARCHING_ANTS_MAX_VERTICES; attempt++) {
-    simplified = poly.rings.map(ring => simplifyRingFn(ring, epsilon));
-    count = 0;
-    for (const ring of simplified) count += ring.length;
-    epsilon *= 2;
-  }
-
-  // Safe cast: simplifyRing preserves the original LocalPoint objects (Douglas–Peucker
-  // only drops vertices, never creates new ones), so the output is still LocalPoint[].
-  return asLocalPolygon(simplified as unknown as LocalPoint[][], asLocalRect(poly.rect), poly.antiAliased);
-}
+// Derivation + cache rules live in `./antsPath` (pure, unit-tested); this file
+// keeps only the ticker wiring. The visible window comes from the geometry
+// infra in ONE call — `geometry.camera.visibleGridWindow` (camera map + half-
+// diagonal margin + 128 CSS px block quantization + LocalRect→grid-cell
+// conversion). Photoshop model: the ants are a VIEWPORT artifact — deriving
+// only the visible cells keeps every re-rasterization (pan/zoom transform
+// change, dash animation frame) at O(visible arc) instead of O(full perimeter
+// × device zoom), which is what burned energy on 4K selections at high
+// magnification.
 
 /**
  * Resolve the regular clip shape for the CSS box (handles + dim label).
@@ -212,8 +152,23 @@ export function useRegularBoxSync(
  *   - Polygon selections (lasso / wand / inverted)
  *   - Re-Canvas (red rect, always a shape)
  *
- * Fill is dynamically switched: `fill="none"` for shapes, semi-transparent
- * evenodd fill for polygons (helps visualize inside/outside of complex paths).
+ * Edge-mode contract (P1 staircase unification): `ss` renders the smooth
+ * geometry (DP-simplified); `aa`/`na` render the IDENTICAL pixel staircase
+ * derived from the raw rings on the target layer's pixel grid — which is why
+ * `gridOffset` (the active layer's grid offset, the origin fraction) is a
+ * required input for irregular selections.
+ *
+ * Viewport culling (2026-10-05): the aa/na staircase is derived ONLY for the
+ * cells inside the visible window (+ margin, block-snapped — see
+ * `computeAntsWindow`). Contours close along the window edges, so the drawn
+ * path stays viewport-sized; panning/zooming re-derives lazily and cheaply.
+ *
+ * NO semi-transparent fill: the evenodd tint (`rgba(240,230,255,0.06)`) that
+ * used to visualize the selection interior was removed (user decision) — when
+ * the selection covered the viewport it painted a full-screen translucent
+ * layer on EVERY pan/zoom frame (sustained GPU load / heat) while carrying
+ * zero inside/outside information. Both ant paths render stroke-only
+ * (`fill="none"` in overlays.tsx).
  */
 export function useSelectionAntsSync(
   groupRef: React.RefObject<SVGGElement | null>,
@@ -221,15 +176,30 @@ export function useSelectionAntsSync(
   pathRef: React.RefObject<SVGPathElement | null>,
   isActive: boolean,
   isReCanvas: boolean,
-  clipTool: string
+  clipTool: string,
+  gridOffset: GridOffset = { x: 0, y: 0 }
 ) {
   const { geometry } = useEditorServices();
+  const { state } = useEditorState();
+  const viewportDimRef = useRef(state.ui.viewportDim);
+  useLayoutEffect(() => {
+    viewportDimRef.current = state.ui.viewportDim;
+  }, [state.ui.viewportDim]);
 
-  // ─── [Perf A] Simplification cache ───────────────────────────────────────
-  // Caches the simplified SVG path string keyed by source polygon rings reference.
-  // Since polygon data is immutable (new reference = new data), reference equality
-  // is a reliable and O(1) cache invalidation strategy.
-  const antsCacheRef = useRef<AntsSimplifyCache | null>(null);
+  // ─── [Perf A] Derivation cache ───────────────────────────────────────────
+  // Four-key cache (rings ref + mode + grid phase + visible window) with the
+  // integer-translation drag fast path — rules in `./antsPath`.
+  const antsCacheRef = useRef<AntsPathCache | null>(null);
+
+  // ─── [Perf C] Per-tick selector memo ─────────────────────────────────────
+  // The bg and fg paths BOTH invoke the selector on the same ticker tick with
+  // the SAME merged frame/cam snapshot objects (snapshot cache in useFastSync),
+  // so matching identities ⇒ identical inputs ⇒ reuse the computed path
+  // instead of resolving window + cache twice per tick.
+  const antsMemoRef = useRef<{
+    frame: Frame; cam: CameraState; gridOffsetKey: string;
+    vw: number; vh: number; d: string;
+  } | null>(null);
 
   // SVG group positioning (at bounding rect origin, frame-local space)
   useFastSvgGroupSync(groupRef, isActive, {
@@ -243,27 +213,42 @@ export function useSelectionAntsSync(
   });
 
   // Shared selector for both paths (bg + fg share the same geometry).
-  // [Perf A] Applies Douglas–Peucker simplification for complex polygons and
-  // caches the result — avoids re-computing on every tick.
-  const antsSelector = (_v: unknown, f: { clipBoxes: Record<string, unknown>; canvasClipBox: LocalShape }): LocalShape | string | null => {
+  const antsSelector = (_v: unknown, f: Frame, cam: CameraState): LocalShape | string | null => {
     if (isReCanvas) return f.canvasClipBox;
     const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
     if (!entry) return null;
 
-    // Cache hit: same polygon rings reference AND same AA state → return cached SVG path string
-    const cache = antsCacheRef.current;
-    const entryAA = entry.antiAliased !== false;
-    if (cache && cache.sourceRings === entry.rings && cache.antiAliased === entryAA) {
-      return cache.simplifiedD;
+    const gridOffsetKey = `${gridOffset.x}_${gridOffset.y}`;
+    const viewportDim = viewportDimRef.current;
+
+    const memo = antsMemoRef.current;
+    if (memo && memo.frame === f && memo.cam === cam && memo.gridOffsetKey === gridOffsetKey &&
+        memo.vw === viewportDim.w && memo.vh === viewportDim.h) {
+      return memo.d;
     }
 
-    // Cache miss: simplify if needed, then generate SVG path
-    const simplified = simplifyPolygonForAnts(entry, geometry.polygon.simplifyRing);
-    const d = geometry.polygon.polygonToSvgPathD(simplified);
+    // Viewport window for the staircase (aa/na only — ss is viewport-agnostic).
+    const mode = geometry.polygon.deriveEdgeDisplayMode(entry.antiAliased, entry.ssdepMode);
+    const { window, key: windowKey } = mode === 'ss'
+      ? { window: undefined, key: 'full' }
+      : geometry.camera.visibleGridWindow(viewportDim, cam, gridOffset);
 
-    // Store in cache (include AA state for invalidation on toggle)
-    antsCacheRef.current = { sourceRings: entry.rings, antiAliased: entryAA, simplifiedD: d };
-    return d;
+    // Cache hit paths: same rings reference AND same edge mode AND same grid
+    // phase AND same visible window — OR a pure INTEGER translation of the
+    // cached rings (all four keys equal). Otherwise a full O(H·k+P) derivation.
+    const { pathD, cache } = resolveAntsPath(antsCacheRef.current, {
+      entry,
+      mode,
+      gridOffsetKey,
+      windowKey,
+      derive: () => mode === 'ss'
+        ? geometry.polygon.polygonToSvgPathD(simplifyPolygonForAnts(entry, geometry.polygon.simplifyRing))
+        : geometry.polygon.polygonToSvgPathD(entry, gridOffset, window),
+    });
+
+    antsCacheRef.current = cache;
+    antsMemoRef.current = { frame: f, cam, gridOffsetKey, vw: viewportDim.w, vh: viewportDim.h, d: pathD };
+    return pathD;
   };
 
   // Background path (black, offset phase) — fills the foreground gaps
@@ -276,20 +261,6 @@ export function useSelectionAntsSync(
   useFastMarchingAntsSync(pathRef, isActive, {
     selector: antsSelector,
     resetKey: clipTool,
-  });
-
-  // Dynamic fill: semi-transparent evenodd fill for irregular polygons (lasso/wand),
-  // none for rect/ellipse (4-point or 64-point polygon — visually clean without fill).
-  useFastSync(pathRef, isActive, (_v, f) => {
-    if (!pathRef.current) return;
-    if (isReCanvas) {
-      pathRef.current.setAttribute('fill', 'none');
-      return;
-    }
-    const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
-    // Irregular polygon: rings.length > 1 or ring has many points (lasso/wand/AI)
-    const isIrregular = entry && entry.rings.length > 0 && entry.rings[0].length > 64;
-    pathRef.current.setAttribute('fill', isIrregular ? 'rgba(240, 230, 255, 0.06)' : 'none');
   });
 
   // Group visibility: hidden when no data

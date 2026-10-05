@@ -499,13 +499,16 @@ export const CLIP_OPTIONS_COMMANDS = {
 
       // For regular tools (rect/ellipse): rebuild the polygon with the new AA flag
       // so that rings are regenerated correctly (not just patching metadata).
-      // For irregular tools (lasso/wand): patch antiAliased directly on the polygon.
+      // For irregular tools (lasso/wand): patch the edge-mode flags directly on the
+      // polygon. INVARIANT (three-state model): the AA toggle is the sole writer
+      // and must write BOTH flags — `ssdepMode` is display-only (SSDEP, P2) and
+      // always resets to false here; it never enters GPU descriptors.
       if (tool === 'rect' || tool === 'ellipse') {
         const newPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, clipBox.rect, newAA);
         ctx.actions.setClipBox(frame.id, tool, newPoly);
       } else {
-        // Irregular (lasso / wand): patch antiAliased directly
-        const newPoly = { ...clipBox, antiAliased: newAA };
+        // Irregular (lasso / wand): patch antiAliased + ssdepMode directly
+        const newPoly = { ...clipBox, antiAliased: newAA, ssdepMode: false };
         ctx.actions.setClipBox(frame.id, tool, newPoly);
       }
     }
@@ -749,7 +752,10 @@ export const CLIP_OPTIONS_COMMANDS = {
           : (response.rings as Point2D[][]).map(ring =>
               ring.map(p => ({ x: p.x + vx, y: p.y + vy }))
             );
-        const layerPoly = ctx.geometry.point2d.point2dToLocalPolygon(adjustedRings, true);
+        // Wand results are PIXEL selections: pinned to a hard binary edge
+        // (plan §7.1.1 — `antiAliased:false, ssdepMode:false`), matching the
+        // wand click handler. Softening is Feather's job, not AA's.
+        const layerPoly = ctx.geometry.point2d.point2dToLocalPolygon(adjustedRings, false);
         const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(layerPoly, layer, frame);
 
         // ─── Write to wand slot and switch tool to wand ──────────────

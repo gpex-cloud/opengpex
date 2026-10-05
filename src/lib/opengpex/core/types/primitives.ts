@@ -123,6 +123,20 @@ export interface Shape {
   antiAliased?: boolean; // New: whether anti-aliasing is enabled (defaults to true)
   pathData?: string;     // Data for complex paths (e.g. SVG Path)
   /**
+   * Viewport DISPLAY-ONLY edge-mode flag (three-state model: ss / aa / na).
+   * `ssdepMode === true` selects the SSDEP display mode ("ss": smooth viewport
+   * ants, reserved for the future SSDEP pass — P2). INVARIANT:
+   * `ssdepMode === true ⇒ antiAliased === true` — for the GPU an ss shape IS an
+   * aa shape, so this flag must NEVER enter a GPU descriptor (`VectorSubMask`
+   * carries only `antiAliased`, and `getVmaskKey`/`vmaskSig` key on
+   * `antiAliased` alone, so ss ↔ aa switching never re-bakes). Readers must
+   * normalize `antiAliased === false && ssdepMode === true` to
+   * `ssdepMode = false`. Display-mode derivation:
+   * `ssdepMode ? 'ss' : (antiAliased ? 'aa' : 'na')`.
+   * Defaults to false (absent) — zero regression for existing data.
+   */
+  ssdepMode?: boolean;
+  /**
    * Feather radius (px) carried by a fragment's `visibleShape`.
    * When >0, the implicit shape mask synthesised in `SceneAssembler` renders a soft
    * edge instead of a hard clip. Absent/0 = hard edge (the crop rect IS the shape),
@@ -188,6 +202,11 @@ export interface Polygon {
    * Defaults to true; when false, represents a stair-stepped/pixelated boundary.
    */
   antiAliased?: boolean;
+  /**
+   * Viewport DISPLAY-ONLY SSDEP flag (see {@link Shape.ssdepMode} for the
+   * invariant and normalization rule). Not persisted to GPU descriptors.
+   */
+  ssdepMode?: boolean;
 }
 
 /** Polygon in canvas-local coordinate space (origin (0,0) at canvas top-left). */
@@ -211,22 +230,26 @@ export interface WorldPolygon extends Polygon {
 export const asLocalPolygon = (
   rings: LocalPoint[][],
   rect: LocalRect,
-  antiAliased: boolean = true
+  antiAliased: boolean = true,
+  ssdepMode: boolean = false
 ): LocalPolygon => ({
   rings,
   rect,
   antiAliased,
+  ssdepMode,
   __brand: 'local'
 } as LocalPolygon);
 
 export const asWorldPolygon = (
   rings: WorldPoint[][],
   rect: WorldRect,
-  antiAliased: boolean = true
+  antiAliased: boolean = true,
+  ssdepMode: boolean = false
 ): WorldPolygon => ({
   rings,
   rect,
   antiAliased,
+  ssdepMode,
   __brand: 'world'
 } as WorldPolygon);
 

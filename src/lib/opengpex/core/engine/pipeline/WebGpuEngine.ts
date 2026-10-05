@@ -1015,14 +1015,6 @@ export class WebGpuEngine implements IEngine {
       const destColorSpace: GPUPredefinedColorSpace =
         src.gamut === 'display-p3' ? 'display-p3' : 'srgb';
 
-      console.log('[ColorProfile-Debug][5.WebGpuUpload]', {
-        assetId,
-        width,
-        height,
-        srcGamut: src.gamut,
-        destColorSpace,
-      });
-
       device.queue.copyExternalImageToTexture(
         { source: bitmap },
         { texture, colorSpace: destColorSpace },

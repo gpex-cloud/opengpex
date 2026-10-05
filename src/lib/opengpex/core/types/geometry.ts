@@ -210,6 +210,40 @@ export interface GeometryService {
     getCameraMatrix: (frame: Frame, camera?: CameraState) => IMatrix3x3;
     /** Calculates viewport bounding rect in world space */
     getViewportWorldRect: (viewportDim: Dimensions, camera: CameraState, canvas: Dimensions, padding?: number) => WorldRect;
+    /**
+     * Viewport → visible frame-local rect: camera-mapped, margin-padded,
+     * block-quantized, with a stable `key` (cache identity across pans).
+     * Viewport-culling infrastructure — consumers own the "outside the rect"
+     * semantics.
+     */
+    getVisibleRect: (viewportDim: Dimensions, camera: CameraState, options?: {
+      margin?: 'halfDiagonal' | number;
+      blockSizeCssPx?: number;
+    }) => { rect: LocalRect; key: string } | null;
+    /**
+     * One-stop visible window for pixel-aligned derivations (the ants
+     * staircase): `getVisibleRect` + the frame-local rect → target-layer
+     * grid-cell conversion in a single call. `gridOffset` is the target
+     * layer's grid phase (0/.5). `{ window: undefined, key: 'full' }` for a
+     * degenerate camera/viewport (caller falls back to uncapped derivation).
+     */
+    visibleGridWindow: (
+      viewportDim: Dimensions,
+      camera: CameraState,
+      gridOffset: { readonly x: number; readonly y: number },
+      options?: {
+        margin?: 'halfDiagonal' | number;
+        blockSizeCssPx?: number;
+      }
+    ) => {
+      window?: { readonly k0: number; readonly r0: number; readonly k1: number; readonly r1: number };
+      key: string;
+    };
+    /**
+     * Snaps a frame-local coordinate's fraction onto the grid-offset domain
+     * {0, 0.5} (the target layer's document-pixel-grid phase).
+     */
+    quantizeGridOffset: (v: number) => 0 | 0.5;
   };
 
   /** Geometry snapping service */
@@ -291,8 +325,29 @@ export interface GeometryService {
     /**
      * Generates a multi-ring SVG path `d` string (relative to `poly.rect.x/y`),
      * suitable for evenodd fill rule rendering.
+     *
+     * `gridOffset` — WHERE the TARGET layer's document-pixel-grid lines fall:
+     * the fractional part (0 or 0.5) of the layer's origin in ring space; the
+     * aa/na pixel-staircase ants must be computed on that grid to coincide
+     * with the GPU-cut pixels (ignored by the smooth `ss` mode).
+     *
+     * `window` — optional visible-window bounds in grid cell index space
+     * (inclusive k0..k1 × r0..r1): the aa/na staircase is derived ONLY for
+     * cells inside (viewport culling — the ants' raster cost stops scaling
+     * with the full selection perimeter × device zoom). Contours close along
+     * the window edges, so stroke/fill stay correct inside the window.
      */
-    polygonToSvgPathD: (poly: LocalPolygon) => string;
+    polygonToSvgPathD: (
+      poly: LocalPolygon,
+      gridOffset?: { readonly x: number; readonly y: number },
+      window?: { readonly k0: number; readonly r0: number; readonly k1: number; readonly r1: number },
+    ) => string;
+    /**
+     * Resolves the display-edge mode from the shape flags (`ssdepMode ⇒
+     * antiAliased` invariant repaired on read): 'ss' smooth SSDEP display,
+     * 'aa' AA on, 'na' AA off. The aa/na modes share ONE pixel staircase.
+     */
+    deriveEdgeDisplayMode: (antiAliased?: boolean, ssdepMode?: boolean) => 'ss' | 'aa' | 'na';
     /**
      * Determines whether a point lies inside a multi-ring polygon using ray-casting
      * (even-odd rule). Useful for hit-testing clicks against irregular selections.
