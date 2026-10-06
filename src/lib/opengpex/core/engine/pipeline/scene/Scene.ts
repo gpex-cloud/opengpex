@@ -153,6 +153,13 @@ export interface SdfShapeParams {
   /** Arrowhead size multiplier (ignored by rounded_rect/ellipse). */
   readonly headScale: number;
   /**
+   * Edge anti-aliasing. `true` (the normalized default — the scene-assembly mapper
+   * turns an absent business flag into this) keeps the analytic `smoothstep` AA;
+   * `false` snaps coverage to a single-pixel hard edge (`select` on the sign of the
+   * signed distance) for 8-bit / UI-annotation art styles.
+   */
+  readonly antiAliased: boolean;
+  /**
    * Shape-specific geometry (LOCAL pixel space):
    * - rounded_rect: [cornerRadius, 0, 0, 0]
    * - ellipse:      [0, 0, 0, 0] (geometry implied by `size`)
@@ -191,6 +198,13 @@ export interface StrokeParams {
   readonly width: number;
   /** Bounding height in LOGICAL pixels (see {@link StrokeParams.width}). */
   readonly height: number;
+  /**
+   * Normalized by the scene mapper (`strokeToVectorSource`, `!== false`): `true`
+   * keeps the analytic smoothstep AA edge, `false` selects binary capsule
+   * coverage (hard edge, `dn <= 1`) in `fs_paint`. Required — never `undefined`
+   * by the time params reach the renderer.
+   */
+  readonly antiAliased: boolean;
 }
 
 /**
@@ -270,11 +284,49 @@ export type LayerSource =
  * into one representation.
  */
 
-/** Bitmap mask: an alpha texture sampled 1:1 over the layer quad (eraser). */
-export interface BitmapMaskDesc {
+/**
+ * One enabled bmask record contributing to the layer's combined mask texture.
+ * A pure reference to a resident alpha texture plus its two SEMANTIC bits —
+ * the record's pixels are untouched by these; the combine pass applies them
+ * when it bakes the combined texture.
+ */
+export interface BitmapMaskRecord {
   readonly maskId: string;
+  /**
+   * FAMILY discriminant of the restore inverted-record architecture:
+   * `false` = erase family (coverage α multiplies into the erase product);
+   * `true` = restore family (contributes `1 − α` into the restore max).
+   * No v2 producer writes `true` yet (restore lands in T3) — the field is
+   * carried now so the combine pass is the single place the two-family
+   * semantics live.
+   */
   readonly inverted: boolean;
+  /**
+   * HARD record — threshold the sampled alpha at 0.5 BEFORE the family op
+   * (binary "pencil eraser" edge). Omitted / false = soft (sample alpha as-is).
+   */
   readonly hard?: boolean;
+}
+
+/** Bitmap mask: alpha record textures combined into ONE texture sampled 1:1 over the layer quad (eraser/restore). */
+export interface BitmapMaskDesc {
+  /**
+   * ALL enabled bmask records with a RESOLVED texture, NEWEST first. The GPU
+   * bmask combine pass evaluates, per pixel:
+   *
+   *   `vis = max( Π_erase-family αᵢ , max_restore-family (1 − αⱼ) )`
+   *
+   * and the layer/blend shaders multiply that single combined alpha in — no
+   * per-record sampling, no stack slots. With no `inverted` record (today's
+   * only production shape) this reduces to the plain coverage product the
+   * retired stack slots computed. The FIRST entry (the live override
+   * mid-stroke, else the newest enabled record) anchors the combined
+   * texture's dimensions — the record the pre-combine pipeline bound as the
+   * primary mask; multiply/max are commutative, so order carries no other
+   * semantics. There is deliberately NO cap: the combine pass enumerates
+   * every record (the retired 4-record slot limit is gone).
+   */
+  readonly records: readonly BitmapMaskRecord[];
 }
 
 /**
@@ -335,6 +387,21 @@ export interface VectorSubMask {
    * falloff. Feather (when > 0) takes precedence over this flag.
    */
   readonly antiAliased: boolean;
+  /**
+   * Signed distance-field bias in document px, added to `d_signed` before the
+   * coverage ramp (`d_used = d + distBiasPx`). Positive values push the ramp
+   * INWARD (the mask erodes): a bias of 1 on an INVERTED sub-mask makes it
+   * fully opaque across the entire 1px AA band of its complement instead of
+   * exactly complementary.
+   *
+   * Used by cut-to-layer seam backing: a hole mask associated with a fragment
+   * layer (`assocLayerId`) must fully back the fragment's partial edge
+   * coverage — two complementary semi-transparent layers composite to
+   * α = 1 − c(1−c) (a 25% background dip at c=0.5, the visible seam), while
+   * "hole opaque wherever the fragment is partial" composites to α ≡ 1, making
+   * the unmoved cut invisible. `undefined`/0 ⇒ exact geometric ramp (default).
+   */
+  readonly distBiasPx?: number;
 }
 
 // ────────────────────────────────────────────────────────────

@@ -116,6 +116,8 @@ export function markerToVectorSource(
       hasFill: fillOpacity > FILL_EPSILON,
       fillColor,
       headScale,
+      // AA defaults ON: only an explicit `false` on the business data opts out.
+      antiAliased: data.antiAliased !== false,
       shapeParams,
     },
   };

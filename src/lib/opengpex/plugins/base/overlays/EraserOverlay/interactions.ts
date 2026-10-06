@@ -120,7 +120,11 @@ export const createEraserStrokeHandler = (): InteractionHandler => ({
 
     const bakePromise = (async () => {
       try {
-        const request = await current.end(e.activeFrame);
+        // Pass the pointerup position (stroke ends exactly where the pointer
+        // was released — the <2px move gate may have dropped it) and the event
+        // (dispatches the FINAL preview covering the trailing segment + cap —
+        // they land after the last move's dispatch).
+        const request = await current.end(e.activeFrame, e.point.canvas, e);
         if (request) {
           await executeBake(request, e);
         }

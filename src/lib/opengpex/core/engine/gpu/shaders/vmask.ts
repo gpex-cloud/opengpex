@@ -87,11 +87,12 @@ export const VMASK_WORKGROUP_SIZE = 8;
 export const VMASK_UNIFORM_SIZE = 32;
 
 /**
- * Size of one `SubMask` std430 record in bytes (16B = edge_start:u32,
- * edge_count:u32, feather:f32, flags:u32). The orchestrator packs
- * `submaskCount × VMASK_SUBMASK_SIZE` bytes into the submask storage buffer.
+ * Size of one `SubMask` std430 record in bytes (20B = edge_start:u32,
+ * edge_count:u32, feather:f32, flags:u32, dist_bias:f32). The orchestrator
+ * packs `submaskCount × VMASK_SUBMASK_SIZE` bytes into the submask storage
+ * buffer.
  */
-export const VMASK_SUBMASK_SIZE = 16;
+export const VMASK_SUBMASK_SIZE = 20;
 
 // SDF_PRIMITIVES_WGSL provides binding-free `sdf_segment` (shared with sdf.ts /
 // layer.ts / blend.ts — one definition, no drift). WGSL has no imports, so it is
@@ -106,14 +107,18 @@ struct VmaskUniforms {
 };
 
 // One intersected sub-mask: a [edge_start, edge_start+edge_count) slice of the
-// shared edge buffer, plus that mask's own feather / flags (baked per sub-mask
-// before the product). std430: 16 bytes, tightly packed.
+// shared edge buffer, plus that mask's own feather / flags / distance bias
+// (baked per sub-mask before the product). std430: 20 bytes, tightly packed.
 // flags bits: bit0 = inverted, bit1 = antiAliased (document-space sub-pixel AA).
+// dist_bias shifts the signed field BEFORE the coverage ramp
+// (d_used = d_signed + dist_bias); the binary AA-OFF branch ignores it (it
+// tests the inside flag directly), so hard-edge masks are bias-free.
 struct SubMask {
   edge_start : u32,
   edge_count : u32,
   feather    : f32,
   flags      : u32,
+  dist_bias  : f32,
 };
 
 // Flattened polygon edges: every ring closed (last vertex → first), all rings
@@ -172,7 +177,9 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
     }
 
     // Signed field: negative inside, positive outside (matches SDF convention).
-    let d_signed = select(min_dist, -min_dist, inside);
+    // dist_bias (cut-to-layer seam backing) shifts the ramp evaluation inward;
+    // the even-odd inside oracle above stays at the TRUE center by design.
+    let d_signed = select(min_dist, -min_dist, inside) + sm.dist_bias;
 
     var cov_m : f32;
     if (sm.feather > 0.0) {

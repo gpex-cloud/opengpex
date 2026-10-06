@@ -103,6 +103,26 @@ export interface CraftDrawerConfig {
   brushSize: number;
   brushOpacity: number;
   brushHardness: number;
+  /**
+   * Eraser edge AA toggle (always visible in the eraser panel; two-way bound to
+   * `brushHardness` — turning it on snaps hardness to 100, dragging hardness
+   * below 100 turns it off). `false` routes `hard: true` into the eraser's
+   * BitmapMask — the GPU thresholds the sampled mask alpha at 0.5 for a binary
+   * "pencil eraser" edge. Omitted = AA on (the historical behaviour).
+   */
+  eraserAntiAliased?: boolean;
+  /**
+   * Brush (stroke paint tool) edge AA toggle — the BRUSH mode sibling of
+   * `eraserAntiAliased`, always visible in the brush panel. Bound to
+   * `brushHardness` in the OPPOSITE direction of the eraser: AA OFF ignores the
+   * hardness feather entirely, so the pair is only self-consistent at
+   * hardness = 100 (switching AA off snaps hardness to 100; dragging hardness
+   * below 100 forces AA back on — a soft tip must be AA'd; switching AA on
+   * leaves hardness untouched). `false` freezes `antiAliased: false` into the
+   * stroke's `StrokeData` at pointerdown for a binary "pixel pencil" edge.
+   * Omitted = AA on (the historical behaviour).
+   */
+  brushAntiAliased?: boolean;
   /** User-configured text style preset for next text layer creation */
   pendingTextData?: PendingTextData;
   /** Mosaic brush size preset */

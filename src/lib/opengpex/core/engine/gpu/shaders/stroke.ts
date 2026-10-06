@@ -95,10 +95,11 @@ export const STROKE_VERTEX_STRIDE = 32;
 export const STROKE_VERTS_PER_SEGMENT = 6;
 
 /**
- * Paint uniform block size in bytes (32 = 8 float slots):
- * `color` vec4 (16) + `target_size` vec2 (8) + `size` f32 (4) + `hardness` f32 (4).
+ * Paint uniform block size in bytes (48 = 12 float slots):
+ * `color` vec4 (16) + `target_size` vec2 (8) + `size` f32 (4) + `hardness` f32 (4)
+ * + `hard_edge` u32 (4) + 4 bytes tail padding (WGSL uniform block rounding to 16).
  */
-export const STROKE_UNIFORM_BUFFER_SIZE = 32;
+export const STROKE_UNIFORM_BUFFER_SIZE = 48;
 
 /**
  * COMPUTE module: extrude the capsule bounding quad from the trajectory point stream.
@@ -180,8 +181,9 @@ fn cs_extrude(@builtin(global_invocation_id) gid : vec3<u32>) {
  * RENDER module: rasterize the extruded capsule with a distance-field soft-edge falloff.
  *
  * Bindings (group 0):
- *   0 — `u` : `StrokeUniforms` (color / target_size / size / hardness) — VERTEX reads
- *       `target_size` (NDC map), FRAGMENT reads `color` + `hardness` (coverage).
+ *   0 — `u` : `StrokeUniforms` (color / target_size / size / hardness / hard_edge) —
+ *       VERTEX reads `target_size` (NDC map), FRAGMENT reads `color` + `hardness` +
+ *       `hard_edge` (coverage).
  *
  * Vertex buffer: the `cs_extrude` output (arrayStride 32; pos @0, a @8, b @16, radii @24).
  */
@@ -198,6 +200,10 @@ struct StrokeUniforms {
   // offset 28 (4 bytes) — soft-edge hardness 0..1 (fraction of the radius kept
   // fully opaque before the edge falloff begins).
   hardness    : f32,
+  // offset 32 (4 bytes) — edge style flag, packed as u32 by the renderer's Uint32
+  // view. 0 = analytic smoothstep AA (default), 1 = binary hard edge
+  // (coverage 1 inside the capsule, 0 outside; pixel-art pencil tip).
+  hard_edge   : u32,
 };
 
 @group(0) @binding(0) var<uniform> u : StrokeUniforms;
@@ -245,6 +251,15 @@ fn fs_paint(in : VSOut) -> @location(0) vec4<f32> {
 
   // Normalized radial distance: 0 on the core, 1 at the capsule edge, >1 outside.
   let dn = length(in.p - c) / r;
+
+  // Hard-edge branch: binary capsule coverage — every sample inside the capsule
+  // (dn <= 1) is fully opaque, everything outside fully transparent. hardness is
+  // ignored (the hard-edge flag only makes sense with a fully-hard tip). No
+  // fwidth term: the step lands exactly on the geometry edge (pixel-art look).
+  if (u.hard_edge == 1u) {
+    let cov = select(0.0, 1.0, dn <= 1.0);
+    return vec4<f32>(u.color.rgb, u.color.a * cov);
+  }
 
   // Analytic edge AA from the screen-space gradient, so the geometric edge stays smooth
   // at any zoom / export scale.

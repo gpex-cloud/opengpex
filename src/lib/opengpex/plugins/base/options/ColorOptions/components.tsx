@@ -179,7 +179,7 @@ export const ColorOptionsComponent = React.memo(
                 onClick: () => setIsDropdownOpen(!isDropdownOpen),
                 icon: (
                   <div
-                    className="w-4 h-4 rounded shadow-inner ring-1 ring-zinc-800 dark:ring-zinc-200 transition-transform active:scale-90"
+                    className="w-4 h-4 rounded shadow-inner ring-1 ring-zinc-500 dark:ring-zinc-200 transition-transform active:scale-90"
                     style={{ backgroundColor: currentColor.hex }}
                   />
                 ),

@@ -72,7 +72,7 @@ struct MarkerUniforms {
   // offset 16 (16 bytes)
   stroke_width : f32,         // logical px
   head_scale   : f32,         // arrow head length factor (arrow only)
-  _pad0        : f32,
+  hard_edge    : u32,         // 0: smoothstep AA (default), 1: binary hard edge
   _pad1        : f32,
 
   // offset 32 (16 bytes) — stroke colour, working-gamut linear, straight alpha
@@ -189,15 +189,24 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   // Arrow is a SOLID capsule+triangle, painted entirely in the stroke colour (the
   // CPU path fills the whole arrow with the stroke colour — no interior/fill split).
   if (marker.shape_type == 2u) {
-    let cov = 1.0 - smoothstep(-aa, aa, d);
+    // Soft edge: analytic smoothstep AA. Hard edge: binary coverage at the
+    // signed-distance zero crossing (single-pixel step, no fwidth smoothing).
+    let cov = select(1.0 - smoothstep(-aa, aa, d),
+                     select(0.0, 1.0, d <= 0.0),
+                     marker.hard_edge == 1u);
     // STRAIGHT alpha: colour is the stroke RGB directly, alpha = coverage × stroke α.
     return vec4<f32>(marker.stroke_color.rgb, marker.stroke_color.a * cov);
   }
 
   // Rect / ellipse: a stroke RING (shape − interior) over an optional fill, where
   // the interior is the shape inset by stroke_width (d + stroke_width ≤ 0).
-  let shape_cov = 1.0 - smoothstep(-aa, aa, d);
-  let interior_cov = 1.0 - smoothstep(-aa, aa, d + marker.stroke_width);
+  var shape_cov = 1.0 - smoothstep(-aa, aa, d);
+  var interior_cov = 1.0 - smoothstep(-aa, aa, d + marker.stroke_width);
+  if (marker.hard_edge == 1u) {
+    // Hard edge: both coverages collapse to binary tests at their zero crossings.
+    shape_cov = select(0.0, 1.0, d <= 0.0);
+    interior_cov = select(0.0, 1.0, d + marker.stroke_width <= 0.0);
+  }
   let stroke_cov = clamp(shape_cov - interior_cov, 0.0, 1.0);
   let fill_cov = select(0.0, interior_cov, marker.has_fill == 1u);
 

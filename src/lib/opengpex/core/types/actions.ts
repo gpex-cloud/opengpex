@@ -60,6 +60,33 @@ export interface ChoiceResult {
   switchValue?: boolean;
 }
 
+/**
+ * ONE record write inside an `adv.layer.bitmapMask.applyBatch` payload —
+ * the single-undoable-unit multi-record bake of an eraser/restore stroke
+ * (the erase record + every hole-filled restore record). Mirrors the
+ * command's `BitmapMaskBatchOp` (declared beside the command to keep the
+ * types layer free of command imports).
+ */
+export interface BitmapMaskBatchOpPayload {
+  /** APPLY semantics: land on the record `maskId` points at; create + adopt when absent. */
+  kind: 'apply';
+  /**
+   * Target record id — the session's transient id for a brand-new record
+   * (adopted as the record's permanent id when free) or an existing record's
+   * id (rewritten in place). Membership at execute time decides which.
+   */
+  maskId?: string;
+  src: string;
+  assetId: string;
+  bounds: LocalRect;
+  /** HARD mask edge; `false`/omitted clears a stale `hard: true` (patch spread). */
+  hard?: boolean;
+  /** Family (erase family when omitted); only written when the op creates a record. */
+  inverted?: boolean;
+  /** Marks the record as having received stamps (see `BitmapMask.painted`). */
+  painted?: boolean;
+}
+
 /** 
  * EditorActions: Editor core actions API surface
  * Defines all commands that can change the editor state or trigger behaviors.
@@ -217,8 +244,9 @@ export interface EditorActions {
         clearAll: AdvCommandRef<{ layerId: string; frameId?: string }>;
       };
       bitmapMask: {
-        add: AdvCommandRef<{ frameId?: string; layerId: string; src: string; assetId: string; bounds: LocalRect }>;
+        add: AdvCommandRef<{ frameId?: string; layerId: string; src: string; assetId: string; bounds: LocalRect; hard?: boolean; inverted?: boolean; painted?: boolean }>;
         update: AdvCommandRef<{ frameId?: string; layerId: string; maskId: string; patch: Partial<BitmapMask> }>;
+        applyBatch: AdvCommandRef<{ frameId?: string; layerId: string; ops: BitmapMaskBatchOpPayload[] }>;
         toggle: AdvCommandRef<{ frameId?: string; layerId: string; maskId: string }>;
         remove: AdvCommandRef<{ frameId?: string; layerId: string; maskId: string }>;
         clearAll: AdvCommandRef<{ frameId?: string; layerId: string }>;

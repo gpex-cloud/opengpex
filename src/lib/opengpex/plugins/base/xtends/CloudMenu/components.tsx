@@ -512,11 +512,11 @@ function CloudMenuInner() {
                       Storage
                     </span>
                     <span className={styles.infoWidget.storageValue}>
-                      100 MB Free
+                      200 MB Free
                     </span>
                   </div>
                   <p className="text-[10px] leading-relaxed text-[var(--text-muted)] font-medium">
-                    Sign in to get 100 MB cloud storage for syncing across devices.
+                    Sign in to get 200 MB cloud storage for syncing across devices.
                   </p>
                 </div>
 

@@ -70,11 +70,18 @@ import type { VectorRenderer, VectorRenderContext, VectorRenderArgs } from './Ve
 const STROKE_RING_CAPACITY = 8 * 1024 * 1024;
 
 /**
- * Reusable scratch for packing the paint uniform block (32 bytes). MODULE-LEVEL and
+ * Reusable scratch for packing the paint uniform block (48 bytes). MODULE-LEVEL and
  * mutable, safe under the strictly single-threaded synchronous render path (mirrors
  * `SdfRenderer`'s `uniformData` note — convert to per-call if ever made async).
  */
 const uniformData = new Float32Array(STROKE_UNIFORM_BUFFER_SIZE / 4);
+
+/**
+ * Uint32 view over `uniformData.buffer` for writing the non-float flag slot
+ * (`hard_edge: u32` at byte offset 32 = float index 8). Mirrors `SdfRenderer`'s
+ * uint view over its uniform scratch.
+ */
+const uniformUintView = new Uint32Array(uniformData.buffer);
 
 export class StrokeRenderer implements VectorRenderer {
   /** Stroke writes pure coverage/colour; it never reads a composited backdrop. */
@@ -182,6 +189,8 @@ export class StrokeRenderer implements VectorRenderer {
     // offset 24 (4B) size, offset 28 (4B) hardness
     uniformData[6] = p.size;
     uniformData[7] = p.hardness;
+    // offset 32 (4B) hard_edge flag (u32 via the Uint32 view — same bytes, typed lane)
+    uniformUintView[8] = p.antiAliased ? 0 : 1;
 
     const slot = bufferRing.writeSlot(uniformData);
 

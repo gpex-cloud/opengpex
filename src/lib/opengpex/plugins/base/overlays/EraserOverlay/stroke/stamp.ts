@@ -62,16 +62,16 @@ export class StampEngine {
   dirtyMaxY = -Infinity;
 
   /**
-   * @param brushSize Brush diameter in pixels
+   * @param size Brush diameter in pixels
    * @param hardness Hardness 0-100
    * @param color Brush color (hex format, e.g. '#FF0000')
-   * @param brushOpacity Opacity 0-100
+   * @param opacity Opacity 0-100
    */
-  constructor(brushSize: number, hardness: number, color: string, brushOpacity: number) {
-    this.radius = brushSize / 2;
-    this.opacity = brushOpacity / 100;
-    this.stampSpacing = Math.max(brushSize * 0.15, 1);
-    this.dab = createDab(brushSize, hardness, color);
+  constructor(size: number, hardness: number, color: string, opacity: number, binaryDab = false) {
+    this.radius = size / 2;
+    this.opacity = opacity / 100;
+    this.stampSpacing = Math.max(size * 0.15, 1);
+    this.dab = createDab(size, hardness, color, binaryDab);
   }
 
   /**
@@ -207,9 +207,10 @@ export class StampEngine {
  * @param size Brush diameter in pixels
  * @param hardness Hardness 0-100
  * @param color Brush color hex
+ * @param binaryDab Threshold the rendered dab's alpha to {0,1} (hard masks)
  * @returns OffscreenCanvas containing the dab (size × size pixels)
  */
-function createDab(size: number, hardness: number, color: string): OffscreenCanvas {
+function createDab(size: number, hardness: number, color: string, binaryDab = false): OffscreenCanvas {
   // Ensure minimum size of 1px (avoid 0-size canvas)
   const canvasSize = Math.max(Math.ceil(size), 1);
   const canvas = new OffscreenCanvas(canvasSize, canvasSize);
@@ -235,6 +236,28 @@ function createDab(size: number, hardness: number, color: string): OffscreenCanv
     ctx.beginPath();
     ctx.arc(cx, cy, radius, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+    // Environment guard: every WebGPU-capable browser implements getImageData
+    // on OffscreenCanvas2D; minimal test doubles may not — skip binarization
+    // there (irrelevant to what those tests assert).
+    if (binaryDab && typeof ctx.getImageData === 'function') {
+    // HARD-MASK IDEMPOTENCE — why the dab must be binary:
+    // dest-out accumulates multiplicatively (`α ← α·(1−dab)`). With an
+    // antialiased dab, every re-stamp of the IDENTICAL dab re-multiplies the
+    // edge ramp, so the GPU's hard-edge 0.5 threshold boundary walks outward
+    // across the ramp each click (0.5 → 0.293 → 0.129 contours…) — repeated
+    // clicks at one spot visibly GROW the hole. A binary dab makes dest-out
+    // idempotent (`α ← 0` or `α ← α`): the erased region is exactly the dab's
+    // support, pixel-stable across any number of stamps. The 0.5 cut of the
+    // same rasterizer matches the edge the GPU threshold was already showing,
+    // so the rendered shape is unchanged.
+    const img = ctx.getImageData(0, 0, canvasSize, canvasSize);
+    const data = img.data;
+    for (let i = 3; i < data.length; i += 4) {
+      data[i] = data[i] >= 128 ? 255 : 0;
+    }
+    ctx.putImageData(img, 0, 0);
   }
 
   return canvas;

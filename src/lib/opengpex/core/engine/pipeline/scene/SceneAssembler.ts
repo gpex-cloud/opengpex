@@ -39,13 +39,14 @@ import type {
   Layer,
   VectorMask,
   LocalShape,
+  BitmapMaskOverrideMap,
 } from '@opengpex/editor/core/types';
 import { snapCanvasRect } from '@opengpex/editor/core/geometry/operators/snapping';
 import { translatePathData } from '@opengpex/editor/core/geometry/operators/shape';
 import { shapeToPoint2D } from '@opengpex/editor/core/geometry/operators/point2d';
 import { sourceBitmapCache } from '@opengpex/editor/core/engine/sources';
 import { buildSolidColorSource, SOLID_COLOR_SOURCE_FORMAT, type SolidColorSource } from '@opengpex/editor/core/engine/sources/SolidColorSource';
-import type { Scene, SceneContent, LayerNode, BitmapMaskDesc, VectorMaskDesc, VectorSubMask, Mat3, SceneChannelMask } from './Scene';
+import type { Scene, SceneContent, LayerNode, BitmapMaskDesc, BitmapMaskRecord, VectorMaskDesc, VectorSubMask, Mat3, SceneChannelMask } from './Scene';
 import { CHANNEL_MASK_RGB } from './Scene';
 import type { IEngine, UploadSource, LutUpload } from '@opengpex/editor/core/engine/pipeline/IEngine';
 import type { HighDepthSource } from '@opengpex/editor/core/engine/sources/HighDepthSource';
@@ -110,6 +111,16 @@ export function translateLocalShapeToOrigin(shape: LocalShape, dx: number, dy: n
 }
 
 /**
+ * Cut-to-layer seam-backing distance bias (document px). The minimum bias that
+ * makes an inverted hole mask fully opaque across the fragment's whole 1px AA
+ * band: with `d_used = d + 1`, `1 − clamp(0.5 − d_used) = clamp(d + 1.5)` is 1
+ * wherever the fragment's `clamp(0.5 − d)` is partial (d > −0.5), so
+ * `1 − (1 − cov_fragment)(1 − cov_hole) ≡ 1` — the unmoved cut composites back
+ * to the original pixels with no background dip.
+ */
+export const CUT_SEAM_BACKING_BIAS_PX = 1;
+
+/**
  * Build the DECLARATIVE {@link VectorMaskDesc} for a layer's vmask set.
  * No CPU rasterization, no upload — the descriptor is consumed on the GPU:
  *   • analytic — a SINGLE unfeathered-or-feathered rect/circle collapses to a
@@ -165,6 +176,24 @@ export function buildVectorMaskDesc(
     // downgrades the fill-pass to the 1-bit binary edge. Display-only modes
     // (e.g. the future ssdepMode) must never reach the GPU descriptor.
     antiAliased: m.shape.antiAliased !== false,
+    // Cut-to-layer seam backing (plan 20261006_cut_to_layer_aa_seam_symmetry):
+    // a hole mask tied to a cut fragment (`assocLayerId`) must fully back the
+    // fragment's 1px AA edge band instead of being exactly complementary —
+    // two complementary semi-transparent layers composite to
+    // α = 1 − c(1−c), a 25% background dip at the seam center (the visible
+    // "dirty seam" on AA cuts; aa-off is immune because its binary halves
+    // never both go partial). With distBiasPx = 1 the inverted hole stays
+    // fully opaque wherever the fragment has partial coverage, so the unmoved
+    // composite is α ≡ 1 (cut invisible until the fragment moves) while each
+    // separated piece keeps its own AA edge. Only the AA ramp case qualifies:
+    // feathered holes use the smoothstep branch (bias semantics unvalidated
+    // there) and binary hard edges need no backing (never partial).
+    distBiasPx:
+      m.assocLayerId !== undefined &&
+      (m.feather ?? 0) === 0 &&
+      m.shape.antiAliased !== false
+        ? CUT_SEAM_BACKING_BIAS_PX
+        : undefined,
   }));
   return { kind: 'polygon', subMasks };
 }
@@ -214,7 +243,7 @@ export interface SceneContentOptions {
   readonly getImageOverride?: (layerId: string) => ImageBitmap | CanvasImageSource | undefined;
   readonly getBitmapMaskOverride?: (
     layerId: string,
-  ) => { maskId: string; source: ImageBitmap | OffscreenCanvas; bounds?: { x: number; y: number }; version?: number } | undefined;
+  ) => BitmapMaskOverrideMap | undefined;
   /**
    * Per-layer precision seam. Given a source `assetId`,
    * returns decoded high-bit-depth pixels when that asset is a 16/32-bit source,
@@ -498,54 +527,113 @@ export class SceneAssembler {
       // Resolve optional mask — SPLIT model. A layer can
       // carry BOTH an eraser bitmap mask (bitmapMasks / live override) AND a
       // vector "hole" mask (vectorMasks / implicit non-rect visibleShape). They
-      // are NO LONGER combined on the CPU: the bmask uploads its own alpha
-      // texture, the vmask becomes a DECLARATIVE descriptor solved on the GPU
-      // (analytic per-fragment SDF, or a compute fill-pass for polygons). The
-      // layer shader multiplies both: `color.a *= bmask.a * vmask.a`.
+      // are NO LONGER combined on the CPU: the bmask records are enumerated
+      // into a declarative descriptor (the GPU bmask combine pass bakes ALL of
+      // them into ONE texture), the vmask becomes a DECLARATIVE descriptor
+      // solved on the GPU (analytic per-fragment SDF, or a compute fill-pass
+      // for polygons). The layer shader multiplies both combined results:
+      // `color.a *= bmask.a * vmask.a`.
       let bmaskDesc: BitmapMaskDesc | undefined;
       let vmaskDesc: VectorMaskDesc | undefined;
 
-      // ── (1) bmask alpha source: live override SUPERSEDES the baked bitmapMask ──
-      let bmaskSource: ImageBitmap | OffscreenCanvas | undefined;
-      let bmaskId: string | undefined;
-      let bmaskInverted = false;
-      let bmaskVersion: number | undefined;
-      const maskOverride = getBitmapMaskOverride ? getBitmapMaskOverride(layer.id) : undefined;
-      if (maskOverride && maskOverride.source) {
-        // `maskOverride.source` is EITHER a live-preview `OffscreenCanvas`
-        // (an in-progress eraser/restore drag, which never has `.close`) OR
-        // an already-baked `ImageBitmap` — both upload directly through the
-        // same path, no discriminator needed.
-        bmaskSource = maskOverride.source;
-        bmaskId = maskOverride.maskId;
-        bmaskInverted = false;
-        bmaskVersion = maskOverride.version;
-      } else if (layer.bitmapMasks && layer.bitmapMasks.length > 0) {
-        // Selection standard unified with factory → LAST enabled mask
-        // (the newest / active one).
-        const enabled = layer.bitmapMasks.filter((m) => m.enabled !== false);
-        const activeMask = enabled.length > 0 ? enabled[enabled.length - 1] : undefined;
-        if (activeMask) {
-          const maskSrc = assets
-            ? assets.resolve(activeMask.assetId, activeMask.src)
-            : activeMask.src;
-          const maskImg = sourceBitmapCache.getOrFetch(maskSrc);
-          if (maskImg && typeof (maskImg as ImageBitmap).close === 'function') {
-            bmaskSource = maskImg as ImageBitmap;
-            bmaskId = activeMask.id;
-            bmaskInverted = !!activeMask.inverted;
-          }
+      // ── (1) bmask records: each live override REPLACES its own record's baked copy ──
+      // ALL enabled records with a RESOLVED texture are enumerated (no cap —
+      // the retired stack-slot limit is gone). Live-override entries come
+      // FIRST (map insertion order), then the baked enabled records newest
+      // first; the FIRST entry — the live scratch mid-stroke, else the newest
+      // enabled record — anchors the combined texture's dims exactly as the
+      // pre-combine pipeline's primary mask did. An override keyed to a record
+      // that does not exist in `layer.bitmapMasks` yet (a brand-new record
+      // mid-stroke, baked as an add at stroke end) still contributes. If NO
+      // record resolves at all, the layer renders unmasked.
+      const bmaskRecords: BitmapMaskRecord[] = [];
+      const overrideMap = getBitmapMaskOverride ? getBitmapMaskOverride(layer.id) : undefined;
+      // Live scratch first. `entry.source` is EITHER a live-preview
+      // `OffscreenCanvas` (an in-progress eraser/restore drag, which never has
+      // `.close`) OR an already-baked `ImageBitmap` — both upload through the
+      // same path, no discriminator needed. Each entry uploads with its own
+      // `version` stamp so the engine's upload dedup re-transfers the mutated
+      // canvas and bumps the asset epoch — which invalidates the GPU bmask
+      // combine cache for this layer (the per-frame re-combine of a live stroke).
+      const overriddenMaskIds = new Set<string>();
+      if (overrideMap) {
+        for (const [maskId, entry] of Object.entries(overrideMap)) {
+          if (!entry || !entry.source) continue;
+          overriddenMaskIds.add(maskId);
+          bmaskRecords.push({
+            maskId,
+            // The override entry carries the record's FAMILY (erase vs restore)
+            // so the combine pass samples the live scratch with the same
+            // semantics the baked record gets — preview == landing.
+            inverted: entry.inverted === true,
+            ...(entry.hard === true ? { hard: true } : {}),
+          });
+          uploads.push({
+            assetId: maskId,
+            source: { kind: 'bitmap', data: entry.source, channel: 'r' },
+            ...(entry.version !== undefined ? { version: entry.version } : {}),
+          });
         }
       }
-      if (bmaskSource && bmaskId) {
-        // Upload the bmask alpha AS-IS (no CPU combine); the shader applies
-        // `inverted` at sample time. Unchanged from the pre-split eraser path.
-        uploads.push({
-          assetId: bmaskId,
-          source: { kind: 'bitmap', data: bmaskSource },
-          version: bmaskVersion,
+      const enabled = layer.bitmapMasks?.filter((m) => m.enabled !== false) ?? [];
+      // No live stroke: the NEWEST enabled record anchors the descriptor —
+      // the pre-combine primary, selection standard unified with factory.
+      // If ITS texture is unresolved the layer renders unmasked entirely (the
+      // pre-combine "primary unloaded → unmasked" behaviour — no silent
+      // fallback to an older record), so the enumeration below is skipped.
+      let anchorUnloaded = false;
+      if (overriddenMaskIds.size === 0 && bmaskRecords.length === 0 && enabled.length > 0) {
+        const activeMask = enabled[enabled.length - 1];
+        const maskSrc = assets
+          ? assets.resolve(activeMask.assetId, activeMask.src)
+          : activeMask.src;
+        const maskImg = sourceBitmapCache.getOrFetch(maskSrc);
+        if (maskImg && typeof (maskImg as ImageBitmap).close === 'function') {
+          bmaskRecords.push({
+            maskId: activeMask.id,
+            inverted: !!activeMask.inverted,
+            ...(activeMask.hard === true ? { hard: true } : {}),
+          });
+          uploads.push({
+            assetId: activeMask.id,
+            source: { kind: 'bitmap', data: maskImg as ImageBitmap, channel: 'r' },
+          });
+        } else {
+          anchorUnloaded = true;
+        }
+      }
+      // Remaining enabled records, newest first. A record whose id is live-
+      // overridden is skipped: its baked copy is stale mid-stroke; the live
+      // scratch above already carries the current content. The no-override
+      // anchor (already pushed above) is skipped too. Unresolved records are
+      // skipped (multiply identity), matching the primary mask's
+      // "unloaded → unmasked" behaviour.
+      const anchorMaskId = overriddenMaskIds.size === 0 && bmaskRecords.length > 0
+        ? bmaskRecords[0].maskId
+        : null;
+      for (let i = enabled.length - 1; i >= 0 && !anchorUnloaded; i--) {
+        const rec = enabled[i];
+        if (overriddenMaskIds.has(rec.id) || rec.id === anchorMaskId) continue;
+        const recSrc = assets ? assets.resolve(rec.assetId, rec.src) : rec.src;
+        const recImg = sourceBitmapCache.getOrFetch(recSrc);
+        if (!recImg || typeof (recImg as ImageBitmap).close !== 'function') continue;
+        bmaskRecords.push({
+          maskId: rec.id,
+          inverted: !!rec.inverted,
+          ...(rec.hard === true ? { hard: true } : {}),
         });
-        bmaskDesc = { maskId: bmaskId, inverted: bmaskInverted };
+        uploads.push({
+          assetId: rec.id,
+          source: { kind: 'bitmap', data: recImg as ImageBitmap, channel: 'r' },
+        });
+      }
+      if (bmaskRecords.length > 0) {
+        // Every record's pixels are uploaded AS-IS (no CPU combine — the GPU
+        // combine pass applies each record's hard/family semantics), as
+        // single-channel `r8unorm` textures: `channel: 'r'` has the engine
+        // remap each record's alpha coverage into the red channel at upload
+        // time (4× VRAM saving per record; the sampling side reads `.r`).
+        bmaskDesc = { records: bmaskRecords };
       }
 
       // ── (2) vmask: vectorMasks + implicit non-rect visibleShape → declarative ──

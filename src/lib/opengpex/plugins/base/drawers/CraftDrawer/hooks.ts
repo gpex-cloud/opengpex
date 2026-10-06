@@ -437,6 +437,11 @@ export function useBrushPanel() {
   const brushSize = selfConfig.brushSize ?? 12;
   const brushOpacity = selfConfig.brushOpacity ?? 100;
   const brushHardness = selfConfig.brushHardness ?? 80;
+  // Eraser edge AA (panel keeps it two-way bound to hardness: AA on ⇒ 100).
+  const eraserAntiAliased = selfConfig.eraserAntiAliased ?? true;
+  // Brush edge AA (mirror of eraserAntiAliased; opposite hardness binding — see
+  // CraftDrawerConfig.brushAntiAliased).
+  const brushAntiAliased = selfConfig.brushAntiAliased ?? true;
 
   // Reads brush color (from pendingColor of ColorOptions).
   // PHASE 1 BRIDGE: brush colour stays a hex string (brush wide-gamut is out of
@@ -458,15 +463,33 @@ export function useBrushPanel() {
     [actions]
   );
 
+  const updateEraserAntiAliased = useCallback(
+    (antiAliased: boolean) => {
+      setSelfConfig({ eraserAntiAliased: antiAliased });
+    },
+    [setSelfConfig]
+  );
+
+  const updateBrushAntiAliased = useCallback(
+    (antiAliased: boolean) => {
+      setSelfConfig({ brushAntiAliased: antiAliased });
+    },
+    [setSelfConfig]
+  );
+
   return useMemo(() => ({
     brushSize,
     brushOpacity,
     brushHardness,
     brushColor,
     isEraser,
+    eraserAntiAliased,
+    brushAntiAliased,
     updateBrushParam,
     updateBrushColor,
-  }), [brushSize, brushOpacity, brushHardness, brushColor, isEraser, updateBrushParam, updateBrushColor]);
+    updateEraserAntiAliased,
+    updateBrushAntiAliased,
+  }), [brushSize, brushOpacity, brushHardness, brushColor, isEraser, eraserAntiAliased, brushAntiAliased, updateBrushParam, updateBrushColor, updateEraserAntiAliased, updateBrushAntiAliased]);
 }
 
 // ─── useMarkerPanel ────────────────────────────────────────────────────────────
@@ -524,6 +547,7 @@ export function useMarkerPanel() {
     if (typeof pendingMarkerData?.cornerRadius === 'number' && base.kind === 'rect') {
       (base as { cornerRadius: number }).cornerRadius = pendingMarkerData.cornerRadius;
     }
+    if (pendingMarkerData?.antiAliased !== undefined) base.antiAliased = pendingMarkerData.antiAliased;
     return base;
   }, [layerMarkerData, activeMarkerKind, pendingMarkerData]);
 
@@ -576,6 +600,7 @@ export function useMarkerPanel() {
         if (typeof (patch as { cornerRadius?: number }).cornerRadius === 'number') {
           nextPending.cornerRadius = (patch as { cornerRadius?: number }).cornerRadius;
         }
+        if (patch.antiAliased !== undefined) nextPending.antiAliased = patch.antiAliased;
         setSelfConfig({ pendingMarkerData: nextPending } as Partial<CraftDrawerConfig>);
       }
       return;
@@ -588,6 +613,7 @@ export function useMarkerPanel() {
     if (typeof (patch as { cornerRadius?: number }).cornerRadius === 'number') {
       nextPending.cornerRadius = (patch as { cornerRadius?: number }).cornerRadius;
     }
+    if (patch.antiAliased !== undefined) nextPending.antiAliased = patch.antiAliased;
     setSelfConfig({ pendingMarkerData: nextPending } as Partial<CraftDrawerConfig>);
   }, [targetLayer, activeFrame, layerMarkerData, pendingMarkerData, actions, setSelfConfig]);
 

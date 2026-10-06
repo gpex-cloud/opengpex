@@ -2,6 +2,14 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.0-beta.9
+
+- Anti-aliasing toggle is now available independently for selection, eraser, restore, marker, and brush tools, with crisp hard edges when off and smooth edges when on
+- New unified rendering engine for erase/restore masks: unlimited mask layers per image, faster preview, and lower memory usage
+- Improved marching-ants performance for very large selections at high zoom
+
+---
+
 ## v2.0.0-beta.8
 
 - Selection: refactored the selection system with unified edge rendering and viewport culling, delivering pixel-accurate masks and smoother canvas interactions

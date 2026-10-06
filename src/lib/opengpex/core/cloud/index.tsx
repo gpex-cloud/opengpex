@@ -85,6 +85,11 @@ export {
   unshare,
 } from "./storage";
 
+export {
+  MAX_SINGLE_FILE_BYTES,
+  DEFAULT_STORAGE_QUOTA_BYTES,
+} from "./protocol";
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type {
   GpexQuota,

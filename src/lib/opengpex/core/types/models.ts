@@ -160,9 +160,31 @@ export interface BitmapMask {
   src: string;              // Grayscale asset URL
   assetId: string;          // Asset ID (content-addressed, persistent)
   bounds: LocalRect;        // Position and dimensions of mask in layer local space
-  inverted: boolean;        // Inversion effect (true: destination-out, false: destination-in)
+  /**
+   * FAMILY discriminator (restore inverted-record architecture): `false` = erase
+   * family (contributes alpha to the combine PRODUCT), `true` = restore family
+   * (contributes `1 − alpha` to the combine MAX). Both families boot white, so
+   * the two initializations are identical — only the combine-side semantics and
+   * the write-side op routing differ.
+   */
+  inverted: boolean;
   enabled: boolean;         // Whether enabled
   feather: number;          // Feather radius (px), applies Gaussian blur during rendering (0 = no feather)
+  /**
+   * HARD mask — threshold the sampled alpha at 0.5 instead of using it as-is
+   * (1-bit binary edge, "pencil eraser"). Omitted / false = soft (sample alpha
+   * as-is). Only settable while brush hardness is 100%; the GPU does the
+   * binarization at sample time, the baked alpha stays untouched.
+   */
+  hard?: boolean;
+  /**
+   * PAINTED marker — the record has received at least one eraser/restore stamp
+   * (set on every stroke bake). A restore-family record without it is PRISTINE:
+   * the erase op's hole-fill skips it (no pointless epoch bump / upload for a
+   * still-all-white record). Erase-family records are written unconditionally,
+   * so the flag only gates the restore family's hole-fill targeting.
+   */
+  painted?: boolean;
   tag?: string;             // Optional semantic tag (e.g. 'drilled' for drill-merged mask)
 }
 
@@ -236,6 +258,13 @@ export interface MarkerDataBase {
     color: ColorValue; // structured foreground colour (wide-gamut currency)
     opacity: number;   // 0–1, 0 = no fill
   };
+
+  /**
+   * Edge anti-aliasing toggle. `undefined`/`true` = smoothstep AA (default,
+   * zero-regression); `false` = hard edge (single-pixel step, 8-bit art style).
+   * Persisted with the layer's markerData.
+   */
+  antiAliased?: boolean;
 }
 
 /**
@@ -312,6 +341,12 @@ export interface StrokeData {
   readonly size: number;
   /** Soft-edge hardness, 0..1. */
   readonly hardness: number;
+  /**
+   * Edge anti-aliasing toggle. `undefined`/`true` = analytic smoothstep AA
+   * (default, zero-regression); `false` = hard edge (binary capsule coverage,
+   * pixel-art style). Persisted with the layer's strokeData.
+   */
+  readonly antiAliased?: boolean;
 }
 
 /**

@@ -38,9 +38,7 @@ import { resolveVmaskUniform } from '../support/vmaskUniform';
 import {
   LAYER_FLAG_HAS_MASK,
   LAYER_FLAG_CLIP,
-  LAYER_FLAG_HARD_MASK,
   LAYER_FLAG_SOURCE_LINEAR,
-  LAYER_FLAG_HAS_BMASK_INVERTED,
   LAYER_GAMUT_SHIFT,
   LAYER_RENDER_INTENT_SHIFT,
 } from '@opengpex/editor/core/engine/gpu/shaders/layer';
@@ -68,6 +66,13 @@ export interface DrawBlendParams {
   readonly layer: LayerNode;
   readonly fgTexture: LayerTexture;
   readonly bgTexture: LayerTexture;
+  /**
+   * The layer's COMBINED bmask coverage — the texture the bmask combine pass
+   * baked from ALL enabled records (each record's hard bit + erase/restore
+   * family folded into its red channel). Absent when the layer has no bmask or
+   * no record resolved; then the default white view binds and the layer renders
+   * unmasked. Same contract as `CompositePass.DrawLayerParams`.
+   */
   readonly maskTexture?: LayerTexture;
   /** Polygon-baked vmask coverage texture (analytic/none → default white). */
   readonly vmaskTexture?: LayerTexture;
@@ -125,11 +130,10 @@ export class BlendPass {
     let flags = 0;
     if (maskTexture) flags |= LAYER_FLAG_HAS_MASK;
     if (layer.clip) flags |= LAYER_FLAG_CLIP;
-    if (layer.bmask?.hard) flags |= LAYER_FLAG_HARD_MASK;
-    // Same shared decision as CompositePass, so
-    // an inverted bmask cannot render correctly under one blend mode and wrongly
-    // under another.
-    if (layer.bmask?.inverted) flags |= LAYER_FLAG_HAS_BMASK_INVERTED;
+    // The retired bmask hard/invert/stack flag bits (3/10/11..17) are gone:
+    // the combine pass bakes every record's semantics into the combined mask
+    // texture, which the shader plain-multiplies (same shared decision as
+    // CompositePass).
     // Same shared decision as CompositePass, so a layer cannot change
     // appearance merely by switching between a class-A and class-B blend mode.
     if (isSourceLinear(layer, params.sourceIsLinear)) flags |= LAYER_FLAG_SOURCE_LINEAR;

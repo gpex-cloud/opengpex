@@ -20,10 +20,11 @@
 /**
  * Mask Bake Pipeline
  *
- * Commits a completed eraser/restore stroke into a non-destructive bitmap mask:
- * register encoded blob → update/add bitmap mask → clear the live-preview
- * override. Runs entirely through the core `adv.layer.bitmapMask` actions; no
- * custom command and no Worker are involved.
+ * Commits a completed eraser/restore stroke into non-destructive bitmap masks:
+ * register encoded blobs → apply ALL touched records as ONE undoable batch
+ * (the erase record + every hole-filled restore record) → clear the
+ * live-preview override. Runs entirely through the core `adv.layer.bitmapMask`
+ * actions; no custom command and no Worker are involved.
  */
 
 import { flushSync } from 'react-dom';
@@ -43,51 +44,59 @@ export async function executeBake(request: BakeRequest, e: InteractionEvent): Pr
 // ─── Mask Bake ─────────────────────────────────────────────────────────────────
 
 async function executeMaskBake(request: MaskBakeRequest, e: InteractionEvent): Promise<void> {
-  const { blob, targetLayerId, existingMaskId, maskBounds } = request;
+  const { records, targetLayerId, maskBounds } = request;
   const frame = e.activeFrame;
 
   try {
-    // Register mask blob as asset
-    const asset = await e.assets.register(blob, { width: maskBounds.w, height: maskBounds.h });
+    // Register every record's blob as an asset (parallel — independent uploads)
+    const assets = await Promise.all(records.map(async (rec) => {
+      const asset = await e.assets.register(rec.blob, { width: maskBounds.w, height: maskBounds.h });
+      // Pre-warm the decode cache for the baked mask asset
+      await e.pixels.image.cacheBitmap(asset.url, rec.blob);
+      return asset;
+    }));
 
-    // Pre-warm the decode cache for the baked mask asset
-    await e.pixels.image.cacheBitmap(asset.url, blob);
-
-    // Force a SYNCHRONOUS commit of the bitmap-mask dispatch so the next stroke
-    // reads the just-baked bitmapMasks (not the pre-bake empty array). Scoped to
-    // THIS bake path only. `execute` is a synchronous void command, so awaiting
-    // it would be a no-op.
-    if (existingMaskId) {
-      flushSync(() => {
-        e.actions.adv.layer.bitmapMask.update.execute({
-          frameId: frame.id,
-          layerId: targetLayerId,
-          maskId: existingMaskId,
-          patch: {
-            src: asset.url,
-            assetId: asset.assetId,
-            // Re-assert bounds: an older mask may have been persisted before the
-            // fragment origin fix (bounds.x/y === 0). Rewriting it keeps the reused
-            // mask on the same basis the stamps were just drawn in.
-            bounds: asLocalRect({
-              x: maskBounds.x, y: maskBounds.y, w: maskBounds.w, h: maskBounds.h,
-            }),
-          },
-        });
-      });
-    } else {
-      flushSync(() => {
-        e.actions.adv.layer.bitmapMask.add.execute({
-          frameId: frame.id,
-          layerId: targetLayerId,
-          src: asset.url,
-          assetId: asset.assetId,
+    // Commit ALL record writes through ONE undoable batch command, synchronously.
+    //
+    // An erase stroke touches several records at once (the erase-family record
+    // update + a white hole-fill into every painted restore-family record).
+    // Those writes are one logical edit: separate undoable commands would let
+    // undo/redo tear apart the "erase and hole-fill move together" invariant,
+    // so they land as a single batch (single pre-execution SIGNAL_COMMIT →
+    // one undo step restores every touched record).
+    //
+    // `execute` is a synchronous void command, so awaiting it would be a no-op;
+    // flushSync forces the commit before the next stroke reads bitmapMasks.
+    flushSync(() => {
+      e.actions.adv.layer.bitmapMask.applyBatch.execute({
+        frameId: frame.id,
+        layerId: targetLayerId,
+        ops: records.map((rec, i) => ({
+          // Single APPLY semantic: the batch command routes on its own
+          // membership lookup — an id present in layer.bitmapMasks is rewritten
+          // in place, an absent one (the session's transient `mask-*-erase` /
+          // `mask-*-restore`) is created and ADOPTED, which re-keys the live
+          // preview's resident GPU texture under the bake instead of orphaning
+          // it, and makes undo/redo re-executions id-stable.
+          kind: 'apply' as const,
+          maskId: rec.maskId,
+          src: assets[i].url,
+          assetId: assets[i].assetId,
           bounds: asLocalRect({
             x: maskBounds.x, y: maskBounds.y, w: maskBounds.w, h: maskBounds.h,
           }),
-        });
+          // Rides both routes so an edited mask always re-syncs to the
+          // panel's AA toggle (`false` clears a stale hard:true via the batch
+          // command's patch spread).
+          hard: rec.hard,
+          // Family is only WRITTEN when the op creates the record (a record's
+          // family is fixed at birth — restore records are born
+          // `inverted: true`); an in-place rewrite ignores it.
+          inverted: rec.inverted,
+          painted: true,
+        })),
       });
-    }
+    });
   } finally {
     // Commit the fast-track override (clear live preview)
     e.actions.fast.commit(targetLayerId, 'layer');

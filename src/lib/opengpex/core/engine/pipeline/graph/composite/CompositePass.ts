@@ -35,9 +35,7 @@ import {
   LAYER_UNIFORM_BUFFER_SIZE,
   LAYER_FLAG_HAS_MASK,
   LAYER_FLAG_CLIP,
-  LAYER_FLAG_HARD_MASK,
   LAYER_FLAG_SOURCE_LINEAR,
-  LAYER_FLAG_HAS_BMASK_INVERTED,
   LAYER_GAMUT_SHIFT,
   LAYER_RENDER_INTENT_SHIFT,
 } from '@opengpex/editor/core/engine/gpu/shaders/layer';
@@ -67,6 +65,14 @@ export interface CompositePassContext {
 export interface DrawLayerParams {
   readonly layer: LayerNode;
   readonly texture: LayerTexture;
+  /**
+   * The layer's COMBINED bmask coverage — the texture the bmask combine pass
+   * baked from ALL enabled records (each record's hard bit + erase/restore
+   * family folded into its red channel). Absent when the layer has no bmask or
+   * no record resolved; then the default white view binds and the layer renders
+   * unmasked. The retired per-record hard/invert flag bits carry no meaning
+   * here — the combined texture IS the final mask.
+   */
   readonly maskTexture?: LayerTexture;
   /**
    * The polygon-baked vmask coverage texture for this layer, produced by
@@ -233,10 +239,9 @@ export class CompositePass {
     let flags = 0;
     if (maskTexture) flags |= LAYER_FLAG_HAS_MASK;
     if (layer.clip) flags |= LAYER_FLAG_CLIP;
-    if (layer.bmask?.hard) flags |= LAYER_FLAG_HARD_MASK;
-    // Bmask destination-out erase semantics.
-    // SceneAssembler already resolves `inverted`; only the flag bit was missing.
-    if (layer.bmask?.inverted) flags |= LAYER_FLAG_HAS_BMASK_INVERTED;
+    // The retired bmask hard/invert/stack flag bits (3/10/11..17) are gone:
+    // the combine pass bakes every record's semantics into the combined mask
+    // texture, which the shader plain-multiplies.
     // Tell the shader to SKIP the sRGB→linear decode when this layer's pixels
     // are already linear light — either a genuinely linear source asset, or a
     // filtered/baked transient that the filter chain already converted.

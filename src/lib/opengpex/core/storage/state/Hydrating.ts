@@ -246,6 +246,24 @@ export const Hydrating = {
       });
     }
 
+    // Defensive legacy-document migration (restore inverted-record architecture,
+    // task T1): before T3, v2 had NO producer of `inverted: true` bmask records,
+    // but a hypothetical legacy import must not load one verbatim — under the
+    // two-family combine semantics an inverted record would silently change
+    // meaning (restore max instead of erase product). Since T3, restore-eraser
+    // strokes ARE a legitimate inverted producer, and they always stamp
+    // `painted: true` on their records — so the migration clears the bit ONLY
+    // on unpainted records (a pre-T3 legacy entry can never carry `painted`).
+    // VectorMask has no assetId/bounds, so it never matches.
+    if (
+      result.inverted === true &&
+      result.painted !== true &&
+      typeof result.assetId === 'string' &&
+      result.bounds !== undefined
+    ) {
+      result.inverted = false;
+    }
+
     return result;
   },
 

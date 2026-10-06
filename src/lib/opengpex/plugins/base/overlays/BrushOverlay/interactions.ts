@@ -57,6 +57,8 @@ interface PaintParams {
   hardness: number;
   /** 0..1 — lands on `layer.opacity`, applied downstream by `drawLayer`. */
   opacity: number;
+  /** Edge AA toggle (frozen with the rest of the params at pointerdown). */
+  antiAliased: boolean;
 }
 
 /** Read the paint parameters out of the shared CraftDrawer / ColorOptions config. */
@@ -71,6 +73,8 @@ function readPaintParams(e: InteractionEvent): PaintParams {
     size: (craft.brushSize as number) ?? FALLBACK_BRUSH_SIZE,
     hardness: ((craft.brushHardness as number) ?? 80) / 100,
     opacity: ((craft.brushOpacity as number) ?? 100) / 100,
+    // Normalize the tri-state config field: omitted = AA on.
+    antiAliased: (craft.brushAntiAliased as boolean | undefined ?? true) !== false,
   };
 }
 
@@ -94,6 +98,7 @@ const buildStrokeData = (params: PaintParams, points: StrokePoint[]): StrokeData
   color: params.color,
   size: params.size,
   hardness: params.hardness,
+  antiAliased: params.antiAliased,
 });
 
 // ─── BrushStrokeHandler ───────────────────────────────────────────────────────
@@ -110,6 +115,14 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
   let points: StrokePoint[] = [];
   let params: PaintParams | null = null;
   let drawing = false;
+  // Coordinates of the last LANDED sample — the fixed reference the sampling
+  // threshold accumulates against. Kept separate from `points[n-1]` because the
+  // transient tail (below) continuously moves that point; comparing against it
+  // would reset the accumulation every event and slow drags would never land a
+  // new sample (the ribbon degenerates to one anchor→cursor segment that
+  // pivots with the pointer).
+  let anchorX = 0;
+  let anchorY = 0;
 
   const reset = (e: InteractionEvent) => {
     tx = null;
@@ -218,6 +231,8 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
     onStart: (e) => {
       params = readPaintParams(e);
       points = [{ x: e.point.canvas.x, y: e.point.canvas.y, pressure: samplePressure(e) }];
+      anchorX = e.point.canvas.x;
+      anchorY = e.point.canvas.y;
       drawing = true;
       e.actions.setStateSignal(DRAWING_STROKE_KEY, true);
     },
@@ -228,14 +243,27 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
       // drawn so far just stops extending — no new samples are recorded.
       if (points.length >= P.MAX_STROKE_POINTS) return;
 
-      const last = points[points.length - 1];
       const x = e.point.canvas.x;
       const y = e.point.canvas.y;
-      // Sampling guard (see MIN_SAMPLE_DISTANCE_PX): sub-pixel samples add
-      // signature cost every frame without adding a pixel.
-      if (Math.hypot(x - last.x, y - last.y) < P.MIN_SAMPLE_DISTANCE_PX) return;
+
+      // Sampling guard (see MIN_SAMPLE_DISTANCE_PX): a new sample only lands
+      // when the pointer has travelled ≥ threshold from the last LANDED one
+      // (the anchor), so sub-threshold displacement still accumulates across
+      // events. Below the threshold, drag the trailing endpoint along as a
+      // preview-only tail — no new sample, no quad growth, the last segment
+      // follows the cursor and the trail-tip gap never appears. (With a
+      // single point nothing is painted yet, so the stroke origin stays put.)
+      if (Math.hypot(x - anchorX, y - anchorY) < P.MIN_SAMPLE_DISTANCE_PX) {
+        if (points.length >= 2) {
+          points[points.length - 1] = { x, y, pressure: samplePressure(e) };
+          if (layerId) tx?.update({ strokeData: buildStrokeData(params, points) }, 'layer', layerId);
+        }
+        return;
+      }
 
       points.push({ x, y, pressure: samplePressure(e) });
+      anchorX = x;
+      anchorY = y;
 
       // Full-canvas layer: the box is fixed for the
       // whole drag, so a new sample is just appended and only the growing
@@ -263,12 +291,16 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
       }
 
       const frame = e.activeFrame;
-      const tight = points.length >= 2 ? tightenStroke(points, params.size, frame.canvas) : null;
 
-      // A click that never moved has no segment, so `cs_extrude` would emit no
-      // geometry: discard it instead of leaving an invisible empty layer behind
-      // (same spirit as marker-draw's mis-click guard). Round caps — which would
-      // let a single tap paint a dab — are not part of the ribbon shader yet.
+      // A click that never moved has no segment (`cs_extrude` emits
+      // pointCount-1 quads), but the shader's degenerate-segment fallback
+      // renders a coincident a==b pair as a full round dab — so a single tap
+      // paints a dot by duplicating the point. The dab diameter follows the
+      // sample's pressure (width = size × pressure), same as any segment.
+      const strokePoints =
+        points.length === 1 ? [points[0], { ...points[0] }] : points;
+      const tight = tightenStroke(strokePoints, params.size, frame.canvas);
+
       if (!tight) {
         discardLayer(e);
         reset(e);

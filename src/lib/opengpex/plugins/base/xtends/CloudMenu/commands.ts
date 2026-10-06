@@ -119,6 +119,13 @@ export const CLOUD_MENU_COMMANDS = {
         // 5. Pack .gpex binary container
         const gpexBuffer = packGpex(thumbnail, manifest, zipPayload);
 
+        // Pre-upload validation: single file size limit (20MB)
+        if (gpexBuffer.byteLength > P.MAX_SINGLE_FILE_BYTES) {
+          const sizeMb = (gpexBuffer.byteLength / (1024 * 1024)).toFixed(1);
+          const limitMb = (P.MAX_SINGLE_FILE_BYTES / (1024 * 1024)).toFixed(0);
+          throw new Error(`File is too large (${sizeMb} MB). Maximum single file size is ${limitMb} MB.`);
+        }
+
         // 6. Upload
         onPhaseChange?.('UPLOADING');
         const file = new File([gpexBuffer], `${manifest.frameName}.gpex`, {

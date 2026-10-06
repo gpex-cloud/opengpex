@@ -22,17 +22,17 @@
  *
  * Creates a MaskStrokeSession for eraser/restore edits based on the current
  * interaction state and target layer. Mask edits never sample the brush colour
- * (they write pure white into a non-destructive mask), so no colour source is
- * read here — the config's `brushColor` is a fixed white to satisfy the shared
- * StampEngine signature.
+ * (they write pure white into a non-destructive mask), so `StrokeConfig` carries
+ * no colour field — `MaskStrokeSession` stamps white unconditionally.
  */
 
-import type { InteractionEvent, Layer, Frame } from '@opengpex/editor/core/types';
+import type { InteractionEvent, Layer, Frame, BitmapMask } from '@opengpex/editor/core/types';
 import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import { CraftDrawerAPI } from '../../../drawers/CraftDrawer/protocols';
 import { LayersDrawerAPI, type MaskEditingSignal } from '../../../drawers/LayersDrawer/protocols';
 import { DEFAULT_BRUSH_SIZE } from '../protocols';
 import { MaskStrokeSession } from './MaskStrokeSession';
+import type { MaskSessionRecordDesc } from './MaskStrokeSession';
 import type { StrokeSession, StrokeConfig } from './types';
 
 /** Shared signal keys */
@@ -43,7 +43,7 @@ const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
 /**
  * Creates a MaskStrokeSession for the current eraser/restore interaction.
  *
- * Returns null if no valid target layer exists or OffscreenCanvas creation fails.
+ * Returns null if no valid target layer exists.
  */
 export function createStrokeSession(e: InteractionEvent): StrokeSession | null {
   const frame = e.activeFrame;
@@ -68,6 +68,10 @@ function createMaskSession(
   isRestore: boolean,
   isCmdPressed: boolean,
 ): StrokeSession | null {
+  // `forceNewMask` (Eraser + Cmd) bypasses ERASE-family record matching — the
+  // erase stroke always bakes as a brand-new record. The restore family keeps
+  // its normal targeting: Cmd is an erase-side gesture, and a Tab flip to
+  // restore mid-stroke must still resume the matching restore record.
   const forceNewMask = isEraser && isCmdPressed;
 
   // Find target layer for mask editing
@@ -78,27 +82,82 @@ function createMaskSession(
   }
   const targetLayer = targetLayerInfo.layer;
 
-  // Mask target selection strategy:
-  //   1. Check maskEditing signal (from LayerDrawerAPI)
-  //   2. Fallback to topmost (last in array) enabled mask
-  //   3. Or force create new mask (Eraser + Cmd)
   const maskEditing = e.state.interaction.signals[LayersDrawerAPI.signals.maskEditing] as MaskEditingSignal;
   const hasFocusedMask = maskEditing && maskEditing.layerId === targetLayer.id;
 
   const enabledMasks = targetLayer.bitmapMasks?.filter(m => m.enabled) ?? [];
-  const activeMask = forceNewMask
-    ? undefined
-    : (hasFocusedMask
-        ? targetLayer.bitmapMasks?.find(m => m.id === maskEditing.maskId)
-        : (enabledMasks.length > 0 ? enabledMasks[enabledMasks.length - 1] : undefined));
-  const maskId = activeMask?.id || (hasFocusedMask ? maskEditing.maskId : `mask-${Date.now()}`);
 
+  // ── FAMILY-DISCRIMINATED TARGET SELECTION ────────────────────────────────────
+  // `BitmapMask.inverted` is the family discriminator: erase family (false,
+  // contributes α to the combine PRODUCT) vs restore family (true, contributes
+  // 1−α to the combine MAX). The SAME AA-aware rule runs INDEPENDENTLY inside
+  // each family — a stroke may only accumulate into a record whose hard flag
+  // matches its own (the GPU thresholds the record's ENTIRE texture at sample
+  // time, so a mismatched write would flip that record's whole history):
+  //   1. The focused mask (LayersDrawer signal) IF it belongs to this family
+  //      and its hard flag matches
+  //   2. The newest enabled record of this family whose hard flag matches (an
+  //      AA toggle-back resumes the matching record instead of piling up new
+  //      ones)
+  //   3. No match → a fresh record is created at bake time (add branch carries
+  //      the family's `inverted` flag). The mismatch case IS the AA-toggle
+  //      record split; each family converges to at most a soft and a hard
+  //      record — two families × two hard flags = the architecture's four
+  //      records-per-layer ceiling.
+  const selectFamilyTarget = (familyInverted: boolean, respectForceNew: boolean): BitmapMask | undefined => {
+    if (respectForceNew) return undefined;
+    if (hasFocusedMask) {
+      const focused = targetLayer.bitmapMasks?.find(m => m.id === maskEditing.maskId);
+      if (focused && !!focused.inverted === familyInverted && !!focused.hard === !!config.hard) return focused;
+    }
+    for (let i = enabledMasks.length - 1; i >= 0; i--) {
+      const m = enabledMasks[i];
+      if (!!m.inverted === familyInverted && !!m.hard === !!config.hard) return m;
+    }
+    return undefined;
+  };
+
+  const eraseTarget = selectFamilyTarget(false, forceNewMask);
+  const restoreTarget = selectFamilyTarget(true, false);
+
+  // ── PINNED RECORD SET (fixed for the whole stroke) ───────────────────────────
+  // Both family targets (a Tab flip mid-stroke must reuse them — existing
+  // convention) plus every PAINTED restore-family record (the erase op's
+  // hole-fill set). Pristine restore records (`painted === false`) are excluded:
+  // hole-filling an all-white record is a visual no-op that would only waste an
+  // epoch bump and an upload. Deduped by maskId — a painted restore record that
+  // IS the restore target appears once and serves both roles.
+  const records: MaskSessionRecordDesc[] = [];
+  const pinnedIds = new Set<string>();
+  const pin = (
+    maskId: string,
+    target: BitmapMask | undefined,
+    inverted: boolean,
+  ): void => {
+    if (pinnedIds.has(maskId)) return;
+    pinnedIds.add(maskId);
+    records.push({
+      maskId,
+      existingMaskId: target?.id,
+      src: target?.src,
+      inverted,
+      hard: target ? !!target.hard : config.hard,
+      painted: target ? target.painted !== false : false,
+    });
+  };
+  pin(eraseTarget?.id ?? `mask-${Date.now()}-erase`, eraseTarget, false);
+  pin(restoreTarget?.id ?? `mask-${Date.now()}-restore`, restoreTarget, true);
+  for (let i = enabledMasks.length - 1; i >= 0; i--) {
+    const m = enabledMasks[i];
+    if (!m.inverted || m.painted === false) continue;
+    pin(m.id, m, true);
+  }
 
   // Compute local-space transform
   const localMatrix = e.geometry.transform.getLayerLocalMatrix(targetLayer, frame);
   const localMatrixInverse = localMatrix.inverse();
   const scaleX = Math.sqrt(localMatrix.a * localMatrix.a + localMatrix.b * localMatrix.b) || 1;
-  const localBrushSize = config.brushSize / scaleX;
+  const localBrushSize = config.size / scaleX;
 
   // ── Mask coordinate basis (fragment coordinate fix) ──────────────────────────
   // The mask canvas keeps `bounding` DIMENSIONS, but its ORIGIN must coincide with
@@ -116,88 +175,26 @@ function createMaskSession(
   const maskW = targetLayer.bounding.w;
   const maskH = targetLayer.bounding.h;
 
-  try {
-    const maskCanvas = new OffscreenCanvas(maskW, maskH);
-    const maskCtx = maskCanvas.getContext('2d');
-    if (!maskCtx) {
-      console.warn('[EraserOverlay] Failed to get OffscreenCanvas 2D context for mask');
-      return null;
-    }
+  const session = new MaskStrokeSession({
+    config,
+    targetLayerId: targetLayer.id,
+    frameId: frame.id,
+    localMatrixInverse,
+    localBrushSize,
+    maskOrigin,
+    maskW,
+    maskH,
+    records,
+    initialIsRestore: isRestore,
+  });
 
-    // Bootstrap dispatches (below) happen before `MaskStrokeSession` exists,
-    // so they can't use its `_version` counter yet. Both the sync dispatch
-    // and the async-fallback dispatch write to the SAME `maskCanvas`
-    // reference — if both used version 0, the engine's upload dedup would
-    // treat the async dispatch (which just composited freshly-decoded mask
-    // pixels in) as "unchanged" and silently drop them. `bootstrapVersion`
-    // keeps the two dispatches distinguishable; `MaskStrokeSession` picks up
-    // from here via `initialVersion` so its own counter never repeats a
-    // bootstrap value.
-    let bootstrapVersion = 0;
+  // Materialize the session-start op's canvases, load existing record content
+  // (with per-record async fallback) and dispatch the initial live preview.
+  // The session owns this because mid-stroke Tab flips use the same path to
+  // materialize lazily.
+  session.bootstrap(e);
 
-    // Constructed here (before the mask content is initialized below) so the
-    // async load-fallback closure can close over the real instance instead of
-    // a not-yet-assigned variable — `syncVersionFloor` then always reaches it,
-    // even when the async load resolves before the caller's first move().
-    const session = new MaskStrokeSession({
-      config,
-      isEraser,
-      isRestore,
-      targetLayerId: targetLayer.id,
-      maskId,
-      existingMaskId: activeMask?.id,
-      maskCanvas,
-      maskCtx,
-      localMatrixInverse,
-      localBrushSize,
-      maskOrigin,
-      frameId: frame.id,
-      initialVersion: bootstrapVersion,
-    });
-
-    // Initialize mask canvas content
-    if (!activeMask) {
-      // New mask: start with white (fully visible)
-      maskCtx.fillStyle = '#FFFFFF';
-      maskCtx.fillRect(0, 0, maskW, maskH);
-    } else if (activeMask.src) {
-      // Existing mask: draw current content
-      const bmp = e.pixels.image.ensureBitmap(activeMask.src);
-      if (bmp) {
-        maskCtx.drawImage(bmp, 0, 0, maskW, maskH);
-      } else {
-        // Async fallback: load bitmap in background
-        loadImageBitmap(activeMask.src).then(bitmap => {
-          maskCtx.save();
-          maskCtx.globalCompositeOperation = 'destination-over';
-          maskCtx.drawImage(bitmap, 0, 0, maskW, maskH);
-          maskCtx.restore();
-          bitmap.close();
-          // Retrigger preview after async load
-          bootstrapVersion += 1;
-          // The session's own seed was snapshotted at construction time
-          // (before this increment), so it's now stale — raise it so the
-          // session's next move() doesn't repeat this dispatch's version.
-          session.syncVersionFloor(bootstrapVersion);
-          e.actions.fast.override(frame.id, targetLayer.id, {
-            bitmapMaskOverride: { maskId, source: maskCanvas, bounds: maskOrigin, version: bootstrapVersion },
-          }, 'layer');
-        }).catch(err => {
-          console.warn('[EraserOverlay] Async mask load failed:', err);
-        });
-      }
-    }
-
-    // Trigger initial fast-track override for live preview
-    e.actions.fast.override(frame.id, targetLayer.id, {
-      bitmapMaskOverride: { maskId, source: maskCanvas, bounds: maskOrigin, version: bootstrapVersion },
-    }, 'layer');
-
-    return session;
-  } catch (err) {
-    console.warn('[EraserOverlay] OffscreenCanvas creation for mask failed:', err);
-    return null;
-  }
+  return session;
 }
 
 // ─── Helper Functions ──────────────────────────────────────────────────────────
@@ -205,18 +202,25 @@ function createMaskSession(
 /**
  * Reads mask brush configuration from plugin state.
  *
- * Mask edits paint pure white into a non-destructive mask, so no brush colour is
- * sourced — `brushColor` is fixed to white purely to satisfy the shared
- * StampEngine signature (`MaskStrokeSession` ignores it and stamps white).
+ * Translates the PERSISTED CraftDrawer panel keys (`craftConfig.brushSize` etc.)
+ * into the tool-neutral `StrokeConfig` field names. Mask edits paint pure white
+ * into a non-destructive mask, so no brush colour is sourced.
  */
 function readBrushConfig(e: InteractionEvent, frame: Frame): StrokeConfig {
   const craftConfig = e.state.pluginConfig[CraftDrawerAPI.configKey] || {};
 
+  // HARD mask edge: straight from the panel's AA toggle. The panel keeps the
+  // AA ⇔ hardness two-way binding (AA on forces hardness to 100, hardness < 100
+  // forces AA off), so no extra hardness gate is needed here — AA off is a
+  // deliberate user choice at ANY hardness. Shared by BOTH families (restore
+  // and eraser read the same toggle — zero special-casing).
+  const eraserAntiAliased = craftConfig.eraserAntiAliased as boolean | undefined;
+
   return {
-    brushSize: (craftConfig.brushSize as number) ?? DEFAULT_BRUSH_SIZE,
-    brushColor: '#FFFFFF',
-    brushOpacity: (craftConfig.brushOpacity as number) ?? 100,
-    brushHardness: (craftConfig.brushHardness as number) ?? 80,
+    size: (craftConfig.brushSize as number) ?? DEFAULT_BRUSH_SIZE,
+    opacity: (craftConfig.brushOpacity as number) ?? 100,
+    hardness: (craftConfig.brushHardness as number) ?? 80,
+    hard: eraserAntiAliased === false,
     canvasSize: { w: frame.canvas.w, h: frame.canvas.h },
   };
 }
@@ -255,13 +259,4 @@ export function findEraserTarget(frame: Frame): { layer: Layer; isNew: boolean }
   }
 
   return null;
-}
-
-/**
- * Loads image as ImageBitmap via URL.
- */
-async function loadImageBitmap(src: string): Promise<ImageBitmap> {
-  const response = await fetch(src);
-  const blob = await response.blob();
-  return createImageBitmap(blob);
 }

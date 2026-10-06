@@ -175,6 +175,17 @@ export function createFastFacade(deps: FastFacadeDeps) {
         if (vRef.transient.smartguides !== undefined) {
           delete vRef.transient.smartguides;
         }
+        // BUFFER-CLEAR INVALIDATION: the per-tick snapshot cache keys on
+        // `_bufferVersion` + the committed frame reference, and this deferred
+        // clear changes the MERGED result (override scratch sources revert to
+        // baked records) without touching either key. Without this bump the
+        // snapshot keeps serving the draft-merged frame forever — CanvasStage's
+        // `f === lastFrame` skip then freezes the composite at the last live
+        // preview, and the baked record's pixels never upload (their engine
+        // epoch never bumps) until some unrelated version change (pan, next
+        // stroke) forces a re-merge. Bump so the next tick re-merges from the
+        // committed state.
+        vRef._bufferVersion++;
       });
     },
     signal: (frameId: string) => {

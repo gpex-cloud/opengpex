@@ -89,7 +89,7 @@ export function getVmaskKey(
     const rings = sm.rings
       .map((ring) => ring.map((p) => `${p[0]},${p[1]}`).join(' '))
       .join('|');
-    return `${sm.featherPx}_${sm.inverted ? 1 : 0}_${sm.antiAliased ? 1 : 0}:${rings}`;
+    return `${sm.featherPx}_${sm.inverted ? 1 : 0}_${sm.antiAliased ? 1 : 0}_${sm.distBiasPx ?? 0}:${rings}`;
   });
   return `${maskW}x${maskH}#${parts.join(';')}`;
 }
@@ -208,8 +208,9 @@ class VmaskCache {
     // ── Flatten edges + build the sub-mask table ──
     // Each sub-mask owns a [edge_start, edge_start+edge_count) slice; every ring is
     // closed (last vertex → first). Edge = (a.x, a.y, b.x, b.y) in layer-local px.
-    // Slot 3 packs the per-mask flags: bit0 = inverted, bit1 = antiAliased
-    // (feather stays its own f32 slot — it is a length, not a flag).
+    // Slot 2 is the feather f32; slot 3 packs the per-mask flags: bit0 = inverted,
+    // bit1 = antiAliased; slot 4 is the signed distance bias f32 (cut-to-layer
+    // seam backing; 0 for plain masks).
     const edgeVals: number[] = [];
     const table = new ArrayBuffer(Math.max(1, subMasks.length) * VMASK_SUBMASK_SIZE);
     const tableU32 = new Uint32Array(table);
@@ -227,10 +228,11 @@ class VmaskCache {
         }
       }
       const edgeCount = edgeVals.length / 4 - edgeStart;
-      tableU32[m * 4 + 0] = edgeStart;
-      tableU32[m * 4 + 1] = edgeCount;
-      tableF32[m * 4 + 2] = sm.featherPx;
-      tableU32[m * 4 + 3] = (sm.inverted ? 1 : 0) | (sm.antiAliased ? 2 : 0);
+      tableU32[m * 5 + 0] = edgeStart;
+      tableU32[m * 5 + 1] = edgeCount;
+      tableF32[m * 5 + 2] = sm.featherPx;
+      tableU32[m * 5 + 3] = (sm.inverted ? 1 : 0) | (sm.antiAliased ? 2 : 0);
+      tableF32[m * 5 + 4] = sm.distBiasPx ?? 0;
     }
     // WebGPU rejects a zero-sized storage binding; when every ring was degenerate,
     // pad one dummy edge so the buffer is non-empty (the table's edge_count is 0, so

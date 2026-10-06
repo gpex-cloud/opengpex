@@ -92,13 +92,29 @@ export interface ExportResult {
  *     `rgba8unorm`); no VRAM waste, no needless f16 fattening. `gamut` tags the
  *     source's intrinsic gamut (= frame.colorSpace) so the copy is an identity
  *     (no P3→sRGB narrowing) and the shader aligns gamut_id→working.
+ *   • 8-bit MASK sources → `bitmap` + `channel: 'r'` (`r8unorm`, 1 byte/pixel —
+ *     a 4× VRAM saving over `rgba8unorm` per record). Bitmap masks keep their
+ *     coverage in the ALPHA channel on the CPU (alpha compositing is how eraser
+ *     strokes accumulate); the engine remaps α→R at upload time, so the
+ *     SAMPLING side must read `.r` — the ONE bmask channel convention on the
+ *     GPU (see `bmaskCombine.ts`).
  *   • 16/32-bit sources → `raw` (vips/wasm-decoded naked pixels via
  *     `writeTexture` → `rgba16float`/`rgba32float`).
  *
  * The composite working buffer stays `rgba16float` regardless.
  */
 export type UploadSource =
-  | { kind: 'bitmap'; data: ImageBitmap | VideoFrame | OffscreenCanvas; gamut?: GamutId }
+  | {
+    kind: 'bitmap';
+    data: ImageBitmap | VideoFrame | OffscreenCanvas;
+    gamut?: GamutId;
+    /**
+     * Single-channel upload: the source is a bitmap MASK whose coverage lives
+     * in the alpha channel; the resident texture is `r8unorm` with the alpha
+     * remapped into R. Omit for color rasters (`rgba8unorm`).
+     */
+    channel?: 'r';
+  }
   | {
     kind: 'raw';
     data: Float32Array | Uint16Array;
@@ -175,7 +191,8 @@ export interface IEngine {
    * Upload/update a resident GPUTexture from an ingested source.
    *
    * The source bit depth deterministically selects the resident texture format
-   * (precision invariant): `bitmap` → `rgba8unorm` (zero-copy), `raw` →
+   * (precision invariant): `bitmap` → `rgba8unorm` (zero-copy), or `r8unorm`
+   * when `channel: 'r'` (bitmap masks — alpha remapped into R), `raw` →
    * `rgba16float`/`rgba32float`. Callers never pick precision.
    *
    * Dedup contract: if `assetId` is already resident and unchanged, this

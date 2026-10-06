@@ -178,9 +178,11 @@ export const useCloudMenu = () => {
     } catch (err) {
       console.error('[CloudSync] Save failed:', err);
       setSavePhase('ERROR');
+      const message = err instanceof Error ? err.message : 'Failed to save to cloud';
+      actions.notifyHUD(`⚠️ ${message}`, 'error');
       setTimeout(() => setSavePhase('IDLE'), 3000);
     }
-  }, [activeFrame, savePhase, saveToCloudCmd, state.history, bumpSyncTick]);
+  }, [activeFrame, savePhase, saveToCloudCmd, state.history, bumpSyncTick, actions]);
 
   // ─── Cloud Gallery ────────────────────────────────────────────
   const handleOpenBrowser = useCallback(() => {

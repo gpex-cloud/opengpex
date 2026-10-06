@@ -53,6 +53,7 @@ import { effectiveScale } from './support/layerGeometry';
 import { prepareFilteredSources } from './build/prepareFilteredSources';
 import { prepareVectorSources } from './build/prepareVectorSources';
 import { prepareVmaskSources } from './build/prepareVmaskSources';
+import { prepareBmaskCombineSources } from './build/prepareBmaskCombine';
 import type { BuildContext, PreparedSource } from './build/types';
 
 /** Context for the compositing half (camera-independent, document space). */
@@ -67,6 +68,12 @@ export interface CompositeContext {
   readonly resolveLutView?: (lutId: string) => GPUTextureView | undefined;
   /** Resolve a resident 3D `.cube` LUT view by lutId. */
   readonly resolveLut3dView?: (lutId: string) => GPUTextureView | undefined;
+  /**
+   * Monotonically-increasing epoch per resident asset id, bumped on every
+   * GENUINE re-transfer. Keys the bmask combine cache: a record re-upload
+   * (e.g. a live fast-override stroke) must re-combine that layer's mask.
+   */
+  readonly getAssetEpoch?: (assetId: string) => number;
   /** Optional export viewport & destination size */
   readonly exportViewport?: ExportViewport;
   /**
@@ -132,6 +139,8 @@ export interface RenderGraphContext {
   readonly resolveLutView?: (lutId: string) => GPUTextureView | undefined;
   /** Resolve a resident 3D `.cube` LUT view by lutId. */
   readonly resolveLut3dView?: (lutId: string) => GPUTextureView | undefined;
+  /** Per-asset epoch (bmask combine cache keying) — see {@link CompositeContext}. */
+  readonly getAssetEpoch?: (assetId: string) => number;
   /** Optional export viewport & destination size */
   readonly exportView?: {
     readonly targetWidth: number;
@@ -242,6 +251,14 @@ export class RenderGraph {
     const vmaskSources = new Map<string, LayerTexture>();
     prepareVmaskSources(commandEncoder, compiled, buildCtx, vmaskSources, vectorScale);
 
+    // Combine every layer's enabled bmask records into ONE owned coverage
+    // texture, keyed by layer id (the retired stack slots' replacement). Also
+    // a compute phase, recorded before any composite render pass opens. Layers
+    // with a single soft erase record bind their record texture directly
+    // (identity fast path — zero dispatch).
+    const bmaskSources = new Map<string, LayerTexture>();
+    prepareBmaskCombineSources(commandEncoder, compiled, buildCtx, bmaskSources);
+
     if (compiled.isPureDirect) {
       // ── Pure separable: composite all layers into ONE target. ──
       // Reuse the engine-owned exact-size target when provided; otherwise
@@ -293,7 +310,8 @@ export class RenderGraph {
           const src = filtered.get(layer.id);
           const texture = resolveGuardTexture(layer, assets, filtered);
           if (!texture) continue;
-          const maskTex = layer.bmask ? assets.get(layer.bmask.maskId) : undefined;
+          // The COMBINED bmask coverage (bmask combine pass). Absent → unmasked.
+          const maskTex = bmaskSources.get(layer.id);
           CompositePass.drawLayer(renderPass, passCtx, {
             layer,
             texture,
@@ -325,6 +343,7 @@ export class RenderGraph {
       allocatedHeight,
       filtered,
       vmaskSources,
+      bmaskSources,
       filterScratch,
       ev,
     );
@@ -348,6 +367,7 @@ export class RenderGraph {
     allocatedHeight: number,
     filtered: Map<string, PreparedSource>,
     vmaskSources: Map<string, LayerTexture>,
+    bmaskSources: Map<string, LayerTexture>,
     filterScratch: GPUTexture[],
     exportViewport?: ExportViewport,
   ): CompositeResult {
@@ -443,7 +463,8 @@ export class RenderGraph {
           const src = filtered.get(layer.id);
           const texture = resolveGuardTexture(layer, assets, filtered);
           if (!texture) continue;
-          const maskTex = layer.bmask ? assets.get(layer.bmask.maskId) : undefined;
+          // The COMBINED bmask coverage (bmask combine pass). Absent → unmasked.
+          const maskTex = bmaskSources.get(layer.id);
           CompositePass.drawLayer(renderPass, passCtx, {
             layer,
             texture,
@@ -466,7 +487,8 @@ export class RenderGraph {
         const src = filtered.get(layer.id);
         const fgTexture = resolveGuardTexture(layer, assets, filtered);
         if (!fgTexture) continue;
-        const maskTex = layer.bmask ? assets.get(layer.bmask.maskId) : undefined;
+        // The COMBINED bmask coverage (bmask combine pass). Absent → unmasked.
+        const maskTex = bmaskSources.get(layer.id);
 
         if (isFirstStep) {
           const initPass = commandEncoder.beginRenderPass({
@@ -595,6 +617,7 @@ export class RenderGraph {
       workingFormat: ctx.workingFormat,
       resolveLutView: ctx.resolveLutView,
       resolveLut3dView: ctx.resolveLut3dView,
+      getAssetEpoch: ctx.getAssetEpoch,
     });
 
     RenderGraph.present(result, {

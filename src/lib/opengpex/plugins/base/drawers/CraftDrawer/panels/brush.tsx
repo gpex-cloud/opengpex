@@ -21,6 +21,7 @@
 
 import React from "react";
 import { ColorPickerPro } from "@opengpex/editor/widgets/ColorPickerPro";
+import Switch from "@opengpex/editor/widgets/Switch";
 import { useBrushPanel } from "../hooks";
 
 // ─── Logarithmic Slider Helpers ────────────────────────────────────────────────
@@ -54,7 +55,36 @@ function sizeToSlider(size: number): number {
  * Parameter changes written via pluginConfig, in real-time affecting BrushCursor and BrushStrokeHandler.
  */
 export const BrushPanel = React.memo(function BrushPanel() {
-  const { brushSize, brushOpacity, brushHardness, brushColor, isEraser, updateBrushParam, updateBrushColor } = useBrushPanel();
+  const {
+    brushSize, brushOpacity, brushHardness, brushColor, isEraser,
+    eraserAntiAliased, brushAntiAliased, updateBrushParam, updateBrushColor,
+    updateEraserAntiAliased, updateBrushAntiAliased,
+  } = useBrushPanel();
+
+  // Eraser AA ⇔ hardness two-way binding: AA only means anything on a fully hard
+  // tip, so dragging hardness below 100 forces the switch off, and lighting the
+  // switch snaps hardness up to 100. OFF routes `hard: true` into the BitmapMask —
+  // the GPU thresholds the sampled mask alpha at 0.5 ("pencil eraser").
+  //
+  // Brush mode mirrors the binding in the OPPOSITE direction: AA OFF ignores the
+  // hardness feather entirely, so the pair is only self-consistent at hardness=100 —
+  // switching AA off snaps hardness up to 100, dragging hardness below 100 forces
+  // AA back ON (a soft tip must be AA'd), and switching AA on leaves hardness alone.
+  const handleHardnessChange = (value: number) => {
+    updateBrushParam('brushHardness', value);
+    if (isEraser && value < 100 && eraserAntiAliased) updateEraserAntiAliased(false);
+    if (!isEraser && value < 100 && !brushAntiAliased) updateBrushAntiAliased(true);
+  };
+
+  const handleEraserAAChange = (aa: boolean) => {
+    updateEraserAntiAliased(aa);
+    if (aa && brushHardness < 100) updateBrushParam('brushHardness', 100);
+  };
+
+  const handleBrushAAChange = (aa: boolean) => {
+    updateBrushAntiAliased(aa);
+    if (!aa && brushHardness < 100) updateBrushParam('brushHardness', 100);
+  };
 
   return (
     <div className="flex flex-col gap-2">
@@ -135,7 +165,7 @@ export const BrushPanel = React.memo(function BrushPanel() {
             max="100"
             step="1"
             value={brushHardness}
-            onChange={(e) => updateBrushParam('brushHardness', Number(e.target.value))}
+            onChange={(e) => handleHardnessChange(Number(e.target.value))}
             onMouseUp={(e) => e.currentTarget.blur()}
             onTouchEnd={(e) => e.currentTarget.blur()}
             className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
@@ -148,12 +178,25 @@ export const BrushPanel = React.memo(function BrushPanel() {
               value={brushHardness}
               onChange={(e) => {
                 const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
-                updateBrushParam('brushHardness', val);
+                handleHardnessChange(val);
               }}
               className="w-8 bg-transparent text-right focus:outline-none outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
             />
             <span className="text-[8px] font-bold text-[var(--text-muted)] shrink-0">%</span>
           </div>
+        </div>
+
+        {/* Edge AA (always visible in brush & eraser modes) — OFF = binary
+            "pixel pencil" / "pencil eraser" edge, hardness frozen at 100 by the binding above */}
+        <div className="flex items-center justify-between px-1">
+          <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
+            Anti Alias
+          </span>
+          <Switch
+            checked={isEraser ? eraserAntiAliased : brushAntiAliased}
+            onChange={isEraser ? handleEraserAAChange : handleBrushAAChange}
+            activeColor="bg-indigo-500"
+          />
         </div>
       </div>
 

@@ -51,6 +51,7 @@ import { SceneCompiler } from '@opengpex/editor/core/engine/pipeline/graph/Scene
 import { RenderGraph, compositeDims, type ExportViewport } from '@opengpex/editor/core/engine/pipeline/graph/RenderGraph';
 import { computeCompositeSignature } from '@opengpex/editor/core/engine/pipeline/scene/compositeSignature';
 import { clearVmaskCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareVmaskSources';
+import { clearBmaskCombineCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareBmaskCombine';
 import { GPUTextureUsage, GPUBufferUsage } from '@opengpex/editor/core/engine/gpu/constants';
 import { halfToFloat } from '@opengpex/editor/core/engine/color/float16';
 import type { IEngine, ExportOptions, ExportResult, UploadSource, LutUpload } from '@opengpex/editor/core/engine/pipeline/IEngine';
@@ -223,6 +224,17 @@ export class WebGpuEngine implements IEngine {
     string,
     { source: ImageBitmap | VideoFrame | OffscreenCanvas | Float32Array | Uint16Array; version?: number }
   >();
+
+  /**
+   * Reusable scratch canvas for `channel: 'r'` mask uploads. The source mask
+   * keeps its coverage in the ALPHA channel on the CPU (alpha compositing is
+   * how eraser strokes accumulate); `copyExternalImageToTexture` into
+   * `r8unorm` takes the source's RED channel, so the upload first composites
+   * the mask over opaque black — white paint over black yields `R = 255·α`,
+   * `A = 1`, byte-exact in premultiplied 8-bit. Lazily created and resized;
+   * kept across uploads so a live stroke only pays one drawImage per frame.
+   */
+  private alphaRedScratch: OffscreenCanvas | HTMLCanvasElement | null = null;
 
   /** Cheap synchronous probe used by the shell to decide v2-vs-v1 routing. */
   static isSupported(): boolean {
@@ -515,6 +527,9 @@ export class WebGpuEngine implements IEngine {
         workingFormat,
         resolveLutView: (lutId) => this.getLutView(lutId),
         resolveLut3dView: (lutId) => this.getLut3dView(lutId),
+        // Keys the bmask combine cache: a re-uploaded mask record (live
+        // fast-override stroke) must re-combine that layer's mask.
+        getAssetEpoch: (assetId) => this.assetEpochs.get(assetId) ?? 0,
         target: this.compositeTexture,
         acquireResidentTransient: this.residentTransients
           ? (key, desc) => this.residentTransients!.acquire(key, desc)
@@ -683,6 +698,7 @@ export class WebGpuEngine implements IEngine {
       workingFormat,
       resolveLutView: (lutId) => this.getLutView(lutId),
       resolveLut3dView: (lutId) => this.getLut3dView(lutId),
+      getAssetEpoch: (assetId) => this.assetEpochs.get(assetId) ?? 0,
       exportViewport,
     });
 
@@ -956,6 +972,8 @@ export class WebGpuEngine implements IEngine {
    *
    * Dispatches by source bit depth:
    *   • `bitmap` → zero-copy `copyExternalImageToTexture` → `rgba8unorm`.
+   *   • `bitmap` + `channel: 'r'` → alpha→red scratch composite → `r8unorm`
+   *     (bitmap masks; 1 byte/pixel = 4× VRAM saving per record).
    *   • `raw`    → `writeTexture` of decoded naked pixels → `rgba16float` /
    *     `rgba32float` (16/32-bit sources; the composite buffer stays f16).
    *
@@ -992,9 +1010,21 @@ export class WebGpuEngine implements IEngine {
       const width = 'displayWidth' in bitmap ? bitmap.displayWidth : bitmap.width;
       const height = 'displayHeight' in bitmap ? bitmap.displayHeight : bitmap.height;
 
+      // Bitmap masks upload as single-channel `r8unorm` (1 byte/pixel — a 4×
+      // VRAM saving per record). Their CPU-side coverage lives in the ALPHA
+      // channel (alpha compositing is how eraser strokes accumulate), and
+      // `copyExternalImageToTexture` into `r8unorm` takes the source's RED
+      // channel — so the mask is remapped α→R on a scratch canvas first. The
+      // SAMPLING side reads `.r` for every bmask texture (bmaskCombine.ts).
+      const isMask = src.channel === 'r';
+      const copySource: ImageBitmap | VideoFrame | OffscreenCanvas | HTMLCanvasElement = isMask
+        ? this.maskAlphaToRed(bitmap, width, height)
+        : bitmap;
+      const format: GPUTextureFormat = isMask ? 'r8unorm' : 'rgba8unorm';
+
       const texture = device.createTexture({
         size: [width, height, 1],
-        format: 'rgba8unorm',
+        format,
         usage:
           GPUTextureUsage.TEXTURE_BINDING |
           GPUTextureUsage.COPY_DST |
@@ -1016,12 +1046,12 @@ export class WebGpuEngine implements IEngine {
         src.gamut === 'display-p3' ? 'display-p3' : 'srgb';
 
       device.queue.copyExternalImageToTexture(
-        { source: bitmap },
+        { source: copySource },
         { texture, colorSpace: destColorSpace },
         [width, height],
       );
 
-      layerTex = new LayerTexture({ texture, width, height, format: 'rgba8unorm' });
+      layerTex = new LayerTexture({ texture, width, height, format });
     } else {
       // Precision invariant: 16/32-bit sources land as naked pixels via
       // writeTexture. This branch is the resident dispatch skeleton —
@@ -1068,6 +1098,45 @@ export class WebGpuEngine implements IEngine {
       this.assets.delete(assetId);
     }
     this.assetMeta.delete(assetId);
+  }
+
+  /**
+   * Composite a bitmap mask over opaque black on the shared scratch canvas so
+   * its ALPHA coverage becomes the RED channel (`R = 255·α`, `A = 1`). The
+   * composite is byte-exact for the white-on-transparent masks
+   * `MaskStrokeSession` stamps: source-over onto opaque black in premultiplied
+   * 8-bit is `out = srcPremul + black·(1−α) = α` (baked records decode from
+   * the same white-on-transparent canvases, so the contract covers them too).
+   * The scratch is lazily created and kept across uploads — a live stroke only
+   * pays one drawImage per frame, and the black backfill fully overwrites the
+   * previous content every call.
+   */
+  private maskAlphaToRed(
+    bitmap: ImageBitmap | VideoFrame | OffscreenCanvas,
+    width: number,
+    height: number,
+  ): OffscreenCanvas | HTMLCanvasElement {
+    if (!this.alphaRedScratch) {
+      this.alphaRedScratch = typeof OffscreenCanvas !== 'undefined'
+        ? new OffscreenCanvas(width, height)
+        : document.createElement('canvas');
+    }
+    const scratch = this.alphaRedScratch;
+    if (scratch.width !== width) scratch.width = width;
+    if (scratch.height !== height) scratch.height = height;
+    const ctx = scratch.getContext('2d') as
+      | CanvasRenderingContext2D
+      | OffscreenCanvasRenderingContext2D
+      | null;
+    if (!ctx) {
+      // Unreachable in every WebGPU-capable browser (2D context support is
+      // universal there); a null context means the α→R remap cannot run.
+      throw new Error('2D context unavailable for mask alpha→red upload conversion');
+    }
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(bitmap as CanvasImageSource, 0, 0, width, height);
+    return scratch;
   }
 
   hasLut(lutId: string): boolean {
@@ -1204,6 +1273,8 @@ export class WebGpuEngine implements IEngine {
     this.sigMemoValue = null;
     // Release owned vmask coverage textures + private compute rings.
     clearVmaskCache();
+    // Release owned combined bmask textures + private uniform ring.
+    clearBmaskCombineCache();
     this.lastScene = null;
     this.initPromise = null;
     // [PERF_MON] Free GPU timer resources.

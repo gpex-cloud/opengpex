@@ -178,6 +178,47 @@ export interface VolatileInteraction {
   selectionErrorPulse: number;
 }
 
+/**
+ * ONE live eraser/restore mask preview record — the mid-stroke scratch that
+ * replaces that record's baked copy in the composited scene.
+ *
+ * `bounds` is the layer-local ORIGIN the mask canvas is anchored to (see
+ * `LayerUtils.getMaskOrigin`). It must match the `BitmapMask.bounds.x/y`
+ * that the subsequent bake writes, otherwise the preview and the committed
+ * result would disagree ("preview right, landing wrong"). Omitted / (0,0)
+ * for regular full-layer images.
+ *
+ * `hard` mirrors the `BitmapMask.hard` the bake will persist (same
+ * "preview == landing" contract as `bounds`): threshold the sampled mask
+ * alpha at 0.5 for a binary edge. Omitted = soft.
+ *
+ * `inverted` mirrors the `BitmapMask.inverted` the bake will persist (same
+ * contract): the record's FAMILY in the two-family combine — `false` (omit)
+ * = erase family (alpha into the product), `true` = restore family (`1 − α`
+ * into the max). The combine pass must sample the live scratch with the same
+ * family semantics the baked record will get, or the preview and the landing
+ * would disagree.
+ */
+export interface BitmapMaskOverrideEntry {
+  source: ImageBitmap | OffscreenCanvas;
+  bounds?: { x: number; y: number };
+  version?: number;
+  hard?: boolean;
+  inverted?: boolean;
+}
+
+/**
+ * Live bmask preview records of ONE layer, keyed by `maskId`. Multi-slot by
+ * design: a single stroke may drive several records at once (the restore
+ * architecture's "erase a hole into every active restore record" op), so the
+ * assembler replaces EACH keyed record's baked source with its live scratch
+ * while the remaining records keep their baked textures. The dispatched map
+ * is the session's FULL live set — it replaces the previous map wholesale.
+ * A key may reference a record that does not exist in `layer.bitmapMasks`
+ * yet (a brand-new record mid-stroke, baked as an add at stroke end).
+ */
+export type BitmapMaskOverrideMap = Record<string, BitmapMaskOverrideEntry>;
+
 export interface VolatileState {
   /** Synthesized active state signal */
   activeState: {
@@ -189,15 +230,11 @@ export interface VolatileState {
     layers: Record<string, Partial<Layer> & {
       imageOverride?: CanvasImageSource;
       /**
-       * Live eraser/restore mask preview source.
-       *
-       * `bounds` is the layer-local ORIGIN the mask canvas is anchored to (see
-       * `LayerUtils.getMaskOrigin`). It must match the `BitmapMask.bounds.x/y`
-       * that the subsequent bake writes, otherwise the preview and the committed
-       * result would disagree ("preview right, landing wrong"). Omitted / (0,0)
-       * for regular full-layer images.
+       * Live eraser/restore mask preview records, keyed by `maskId` — see
+       * {@link BitmapMaskOverrideMap} / {@link BitmapMaskOverrideEntry} for the
+       * per-record "preview == landing" contracts (`bounds`, `hard`, `version`).
        */
-      bitmapMaskOverride?: { maskId: string; source: ImageBitmap | OffscreenCanvas; bounds?: { x: number; y: number }; version?: number };
+      bitmapMaskOverride?: BitmapMaskOverrideMap;
     }>;
     frames: Record<string, Partial<Frame>>;
     project: Partial<EditorData>;

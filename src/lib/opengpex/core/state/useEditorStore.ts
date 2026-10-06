@@ -565,8 +565,9 @@ export function useEditorStore() {
             clearAll: advRef(P.ADV_LAYER_MASK_CLEAR, (payload: { layerId: string; frameId?: string }) => executeCommand(P.ADV_LAYER_MASK_CLEAR, payload)),
           },
           bitmapMask: {
-            add: advRef(P.ADV_LAYER_BITMAP_MASK_ADD, (payload: { frameId?: string; layerId: string; src: string; assetId: string; bounds: LocalShape['rect'] }) => executeCommand(P.ADV_LAYER_BITMAP_MASK_ADD, payload)),
+            add: advRef(P.ADV_LAYER_BITMAP_MASK_ADD, (payload: { frameId?: string; layerId: string; src: string; assetId: string; bounds: LocalShape['rect']; hard?: boolean; inverted?: boolean; painted?: boolean }) => executeCommand(P.ADV_LAYER_BITMAP_MASK_ADD, payload)),
             update: advRef(P.ADV_LAYER_BITMAP_MASK_UPDATE, (payload: { frameId?: string; layerId: string; maskId: string; patch: Partial<BitmapMask> }) => executeCommand(P.ADV_LAYER_BITMAP_MASK_UPDATE, payload)),
+            applyBatch: advRef(P.ADV_LAYER_BITMAP_MASK_APPLY_BATCH, (payload: { frameId?: string; layerId: string; ops: { kind: 'apply'; maskId?: string; src: string; assetId: string; bounds: LocalShape['rect']; hard?: boolean; inverted?: boolean; painted?: boolean }[] }) => executeCommand(P.ADV_LAYER_BITMAP_MASK_APPLY_BATCH, payload)),
             toggle: advRef(P.ADV_LAYER_BITMAP_MASK_TOGGLE, (payload: { frameId?: string; layerId: string; maskId: string }) => executeCommand(P.ADV_LAYER_BITMAP_MASK_TOGGLE, payload)),
             remove: advRef(P.ADV_LAYER_BITMAP_MASK_REMOVE, (payload: { frameId?: string; layerId: string; maskId: string }) => executeCommand(P.ADV_LAYER_BITMAP_MASK_REMOVE, payload)),
             clearAll: advRef(P.ADV_LAYER_BITMAP_MASK_CLEAR, (payload: { frameId?: string; layerId: string }) => executeCommand(P.ADV_LAYER_BITMAP_MASK_CLEAR, payload)),

@@ -183,6 +183,19 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
         </div>
       </div>
 
+      {/* ─── Edge anti-aliasing (all kinds, always visible; default ON) ─── */}
+      <div className="flex flex-col gap-1.5 p-1">
+        <div className="flex items-center gap-1.5 px-1">
+          <span className={ROW_LABEL}>Anti Alias</span>
+          <div className="flex-1" />
+          <Switch
+            checked={markerData.antiAliased !== false}
+            size="compact"
+            onChange={(on) => updateMarkerData({ antiAliased: on })}
+          />
+        </div>
+      </div>
+
       {/* ─── Fill (hasFill kinds only) — same color as stroke, on/off toggle ─── */}
       {activeDef?.hasFill && (
         <div className="flex flex-col gap-1.5 p-1">

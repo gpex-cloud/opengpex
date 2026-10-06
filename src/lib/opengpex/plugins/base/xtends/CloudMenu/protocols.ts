@@ -50,5 +50,6 @@ export interface SyncRecord {
 }
 
 export { CORE_VERSION as APP_VERSION } from '@opengpex/editor/core/plugin/version';
+export { MAX_SINGLE_FILE_BYTES, DEFAULT_STORAGE_QUOTA_BYTES } from '@opengpex/editor/core/cloud';
 export const SYNC_STORAGE_PREFIX = 'gpex_sync_';
 

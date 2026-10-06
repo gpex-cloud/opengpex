@@ -53,8 +53,17 @@ export const LAYER_FLAG_CLIP = 1 << 1;
  * re-premultiply dance around every STRAIGHT-domain, non-linear operation.
  */
 export const LAYER_FLAG_PREMULTIPLIED_SOURCE = 1 << 2;
-/** `flags` bit 3: mask is HARD — threshold its alpha at 0.5 instead of sampling soft. */
-export const LAYER_FLAG_HARD_MASK = 1 << 3;
+/**
+ * ⚠️ RETIRED BITS 3 / 10 / 11 / 12..17 — do NOT renumber, do NOT reuse blindly.
+ * Bit 3 (`LAYER_FLAG_HARD_MASK`) and bit 10 (`LAYER_FLAG_HAS_BMASK_INVERTED`)
+ * carried the bmask primary record's hard/inverted sampling semantics, and
+ * bit 11 + bits 12..17 carried the bmask stack (3 slots × hard/invert pairs).
+ * The bmask combine pass bakes every record's hard/family semantics into the
+ * ONE combined mask texture, so the fragment shaders plain-multiply it and
+ * these bits have no consumers. Remaining bit numbers (0..2, 4..9) are
+ * UNCHANGED so no other flag moved.
+ */
+
 /**
  * `flags` bit 4: this layer's source pixels are ALREADY linear light, so the shader
  * must SKIP the sRGB→linear decode.
@@ -93,16 +102,9 @@ export const LAYER_RENDER_INTENT_SHIFT = 8;
 export const LAYER_RENDER_INTENT_MASK = 0x3;
 
 /**
- * `flags` bit 10: the bound bmask (bitmap/freehand raster mask) alpha is INVERTED —
- * destination-out erase semantics (`1 - mask_alpha`) instead of the default
- * destination-in (multiply). Mirrors `VMASK_FLAG_INVERTED` for the vector-mask path
- * Bits 5..9 are GAMUT_ID/RENDER_INTENT, so this
- * is the next free bit. Packed by `CompositePass`/`BlendPass` from
- * `layer.bmask?.inverted`; consumed by the bmask block in `layer.ts`/`blend.ts`
- * `fs_main`, gated so pre-existing (non-inverted) bmask layers render byte-for-byte
- * unchanged.
+ * ⚠️ RETIRED bit 10 (`LAYER_FLAG_HAS_BMASK_INVERTED`) — see the note at bit 3.
+ * Bits 5..9 are GAMUT_ID/RENDER_INTENT; bits 10..17 stay unused/reserved.
  */
-export const LAYER_FLAG_HAS_BMASK_INVERTED = 1 << 10;
 
 // ────────────────────────────────────────────────────────────
 // Source normalise pipeline (WGSL). Prepended after COLORSPACE_WGSL.

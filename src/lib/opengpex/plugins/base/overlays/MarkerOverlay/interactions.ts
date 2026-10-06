@@ -97,6 +97,7 @@ function resolveMarkerData(e: { state: { pluginConfig: Record<string, unknown> }
     if (typeof pending.cornerRadius === 'number' && base.kind === 'rect') {
       (base as { cornerRadius: number }).cornerRadius = pending.cornerRadius;
     }
+    if (pending.antiAliased !== undefined) base.antiAliased = pending.antiAliased;
   }
   return base;
 }

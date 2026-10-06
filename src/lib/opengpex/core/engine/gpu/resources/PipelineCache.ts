@@ -39,6 +39,7 @@ import { ADJUST_UNIFORM_BUFFER_SIZE } from '../shaders/adjust';
 import { ADJUST_PRE_WGSL, ADJUST_PRE_UNIFORM_BUFFER_SIZE } from '../shaders/adjustPre';
 import { buildGaussianWgsl, GAUSS_UNIFORM_BUFFER_SIZE } from '../shaders/gaussian';
 import { VMASK_WGSL, VMASK_UNIFORM_SIZE } from '../shaders/vmask';
+import { BMASK_COMBINE_WGSL, BMASK_COMBINE_UNIFORM_SIZE } from '../shaders/bmaskCombine';
 import { GPUBufferUsage, GPUTextureUsage, GPUShaderStage, GPUColorWrite } from '../constants';
 
 export const BLEND_UNIFORM_BUFFER_SIZE = 80;
@@ -184,6 +185,10 @@ export class PipelineCache {
   private vmaskBindGroupLayout: GPUBindGroupLayout | null = null;
   private vmaskPipelineLayout: GPUPipelineLayout | null = null;
   private vmaskPipeline: GPUComputePipeline | null = null;
+  private bmaskCombineShaderModule: GPUShaderModule | null = null;
+  private bmaskCombineBindGroupLayout: GPUBindGroupLayout | null = null;
+  private bmaskCombinePipelineLayout: GPUPipelineLayout | null = null;
+  private bmaskCombinePipeline: GPUComputePipeline | null = null;
 
   /** Separable-Gaussian COMPUTE pipelines, keyed by storage format. */
   private readonly computePipelines = new Map<string, GPUComputePipeline>();
@@ -336,6 +341,9 @@ export class PipelineCache {
           visibility: GPUShaderStage.FRAGMENT,
           texture: { sampleType: 'float' },
         },
+        // The bmask stack slots (retired bindings 5..7) are gone: the bmask
+        // combine pass bakes ALL enabled records into ONE texture bound at
+        // slot 3, so the layer pipeline needs no per-record slots.
       ],
     });
     return this.layerBindGroupLayout;
@@ -801,6 +809,9 @@ export class PipelineCache {
           visibility: GPUShaderStage.FRAGMENT,
           texture: { sampleType: 'float' },
         },
+        // The bmask stack slots (retired bindings 6..8) are gone: the bmask
+        // combine pass bakes ALL enabled records into ONE texture bound at
+        // slot 4, so the blend pipeline needs no per-record slots.
       ],
     });
     return this.blendBindGroupLayout;
@@ -1193,6 +1204,78 @@ export class PipelineCache {
     return this.vmaskPipeline;
   }
 
+  getBmaskCombineShaderModule(): GPUShaderModule {
+    if (this.bmaskCombineShaderModule) return this.bmaskCombineShaderModule;
+    this.bmaskCombineShaderModule = this.device.createShaderModule({
+      code: BMASK_COMBINE_WGSL,
+      label: 'Bmask Combine WGSL Module',
+    });
+    return this.bmaskCombineShaderModule;
+  }
+
+  /**
+   * Group-0 layout for the bmask combine compute pass: binding 0 = the 32B
+   * `BmaskCombineUniforms` dynamic-free uniform, binding 1 = the record texture
+   * this fold reads (textureLoad — no sampler), binding 2 = the running
+   * accumulator (previous fold's output; the record texture placeholder on the
+   * first fold), binding 3 = the `rgba8unorm` write-only storage texture the
+   * fold writes (an intermediate ping/pong accumulator, or the final combined
+   * output on the last fold).
+   */
+  getBmaskCombineBindGroupLayout(): GPUBindGroupLayout {
+    if (this.bmaskCombineBindGroupLayout) return this.bmaskCombineBindGroupLayout;
+    this.bmaskCombineBindGroupLayout = this.device.createBindGroupLayout({
+      label: 'Bmask Combine Bind Group Layout',
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: 'uniform', hasDynamicOffset: false, minBindingSize: BMASK_COMBINE_UNIFORM_SIZE },
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType: 'float' },
+        },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType: 'float' },
+        },
+        {
+          binding: 3,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: { access: 'write-only', format: 'rgba8unorm', viewDimension: '2d' },
+        },
+      ],
+    });
+    return this.bmaskCombineBindGroupLayout;
+  }
+
+  getBmaskCombinePipelineLayout(): GPUPipelineLayout {
+    if (this.bmaskCombinePipelineLayout) return this.bmaskCombinePipelineLayout;
+    this.bmaskCombinePipelineLayout = this.device.createPipelineLayout({
+      bindGroupLayouts: [this.getBmaskCombineBindGroupLayout()],
+      label: 'Bmask Combine Pipeline Layout',
+    });
+    return this.bmaskCombinePipelineLayout;
+  }
+
+  /**
+   * The bmask-coverage COMPUTE pipeline (one fold per record + the final
+   * two-family combine). Fixed `rgba8unorm` storage output, so a single cached
+   * instance serves every layer/record count.
+   */
+  getBmaskCombinePipeline(): GPUComputePipeline {
+    if (this.bmaskCombinePipeline) return this.bmaskCombinePipeline;
+    this.bmaskCombinePipeline = this.device.createComputePipeline({
+      label: 'Bmask Combine Compute Pipeline',
+      layout: this.getBmaskCombinePipelineLayout(),
+      compute: { module: this.getBmaskCombineShaderModule(), entryPoint: 'cs_main' },
+    });
+    return this.bmaskCombinePipeline;
+  }
+
   getStrokePaintShaderModule(): GPUShaderModule {
     if (this.strokePaintShaderModule) return this.strokePaintShaderModule;
     this.strokePaintShaderModule = this.device.createShaderModule({
@@ -1325,6 +1408,10 @@ export class PipelineCache {
     this.vmaskBindGroupLayout = null;
     this.vmaskPipelineLayout = null;
     this.vmaskPipeline = null;
+    this.bmaskCombineShaderModule = null;
+    this.bmaskCombineBindGroupLayout = null;
+    this.bmaskCombinePipelineLayout = null;
+    this.bmaskCombinePipeline = null;
     this.adjustBindGroupLayout = null;
     this.defaultAdjustBuffer = null;
     this.defaultAdjustBindGroup = null;

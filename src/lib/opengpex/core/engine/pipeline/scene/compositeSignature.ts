@@ -39,9 +39,9 @@
  *   • per raster layer: the asset EPOCH — bumps whenever the resident texture is
  *     actually re-transferred (erase/filter/redecode). This is the defence
  *     against "same assetId, new pixels" (R2 miss-detection).
- *   • per bitmap-kind mask (override / BitmapMask / vector-composited): the
- *     same asset EPOCH treatment, keyed by `mask.maskId` — a re-bake onto an
- *     already-non-empty mask (e.g. a second cmdj/drill hole, or a second
+ *   • per bitmap-kind mask RECORD (override / BitmapMask / vector-composited):
+ *     the same asset EPOCH treatment, keyed by the record's `maskId` — a re-bake
+ *     onto an already-non-empty mask (e.g. a second cmdj/drill hole, or a second
  *     Eraser stroke into the same BitmapMask) keeps `maskId`/`inverted`/`hard`
  *     unchanged, so without the epoch the sig is identical and the new mask
  *     content never gets composited.
@@ -80,7 +80,16 @@ function bmaskSig(mask: BitmapMaskDesc | undefined, opts: CompositeSignatureOpti
   // `maskId` is stable (per-mask for real BitmapMasks) across re-bakes, so the
   // epoch must be in the sig or a second bake onto an already-non-empty mask
   // never triggers recomposite.
-  return `bitmap:${mask.maskId}:${opts.getAssetEpoch(mask.maskId)}:${mask.inverted ? 1 : 0}:${mask.hard ? 1 : 0}`;
+  // FULL RECORD ENUMERATION (the retired primary+stack split is gone): every
+  // enabled record's id/epoch/hard/invert enters the sig — a record added,
+  // removed, re-baked, or enabled-toggled (membership is re-assembled by
+  // SceneAssembler from the enabled records) must invalidate the composite.
+  // Multiply/max are commutative, so only the SET matters; the serialization
+  // order (newest first) is stable per membership, which keeps sigs comparable.
+  const parts = mask.records.map(
+    (r) => `${r.maskId}:${opts.getAssetEpoch(r.maskId)}:${r.inverted ? 1 : 0}:${r.hard ? 1 : 0}`,
+  );
+  return `bitmap:${parts.join('+')}`;
 }
 
 function vmaskSig(mask: VectorMaskDesc | undefined): string {

@@ -160,16 +160,24 @@ export const LayerFactory = {
 
   /**
    * getNewBitmapMask: Creates a standardized bitmap mask object.
+   *
+   * `hard` thresholds the mask alpha at 0.5 in the GPU sampler ("pencil
+   * eraser"); omitted = soft. See `BitmapMask.hard`.
+   *
+   * `inverted` selects the record's FAMILY (see `BitmapMask.inverted`):
+   * omitted = erase family (alpha into the combine product); `true` = restore
+   * family (`1 − α` into the combine max — the restore eraser's records).
    */
-  getNewBitmapMask(src: string, assetId: string, bounds: LocalRect): BitmapMask {
+  getNewBitmapMask(src: string, assetId: string, bounds: LocalRect, hard?: boolean, inverted?: boolean): BitmapMask {
     return {
       id: `bmask-${Date.now()}`,
       src,
       assetId,
       bounds,
-      inverted: false,
+      inverted: inverted === true,
       enabled: true,
-      feather: 0
+      feather: 0,
+      ...(hard ? { hard: true } : {})
     };
   },
 

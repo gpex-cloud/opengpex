@@ -89,6 +89,7 @@ export const ADV_LAYER_MASK_CLEAR = 'adv.layer.mask.clear_all';
 // 4b. Bitmap Mask Operations
 export const ADV_LAYER_BITMAP_MASK_ADD = 'adv.layer.bitmapMask.add';
 export const ADV_LAYER_BITMAP_MASK_UPDATE = 'adv.layer.bitmapMask.update';
+export const ADV_LAYER_BITMAP_MASK_APPLY_BATCH = 'adv.layer.bitmapMask.apply_batch';
 export const ADV_LAYER_BITMAP_MASK_REMOVE = 'adv.layer.bitmapMask.remove';
 export const ADV_LAYER_BITMAP_MASK_TOGGLE = 'adv.layer.bitmapMask.toggle';
 export const ADV_LAYER_BITMAP_MASK_CLEAR = 'adv.layer.bitmapMask.clear_all';

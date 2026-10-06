@@ -79,7 +79,7 @@ export class SdfRenderer implements VectorRenderer {
     // offset 16 (16B)
     uniformData[4] = m.strokeWidth;
     uniformData[5] = m.headScale;
-    uniformData[6] = 0;
+    uniformUintView[6] = m.antiAliased ? 0 : 1; // shader `hard_edge` (0 = AA on)
     uniformData[7] = 0;
     // offset 32 (16B) stroke_color
     uniformData[8] = m.strokeColor[0];

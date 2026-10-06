@@ -40,7 +40,7 @@ struct LayerUniforms {
   uv_rect      : vec4<f32>,     // (u0, v0, du, dv) (16 bytes, offset 48..63)
   opacity      : f32,           // Offset 64
   blend_mode   : u32,           // Offset 68
-  flags        : u32,           // Offset 72 (bits 0..3: has_mask/clip/premult/hard_mask, bit 4: source_is_linear, bits 5..7: gamut_id, bits 8..9: render_intent, bit 10: bmask_inverted)
+  flags        : u32,           // Offset 72 (bits 0..2: has_mask/clip/premult, bit 4: source_is_linear, bits 5..7: gamut_id, bits 8..9: render_intent; bits 3/10..17 RETIRED — bmask hard/invert/stack now bake into the combined mask texture)
   vmask_flags  : u32,           // Offset 76 (was _pad; bit0 HAS_VMASK_ANALYTIC, bit1 HAS_VMASK_TEX, bit2 INVERTED, bit3 HARD, bits4-5 SHAPE 0=rect/1=ellipse)
   vmask_rect   : vec4<f32>,     // Offset 80 (16B) — (cx, cy, halfW, halfH) in layer-local pixel space (analytic only)
   vmask_feather: vec4<f32>,     // Offset 96 (16B) — (featherPx, maskPxW, maskPxH, _reserved)
@@ -51,6 +51,10 @@ struct LayerUniforms {
 @group(0) @binding(2) var layer_tex     : texture_2d<f32>;
 @group(0) @binding(3) var mask_tex      : texture_2d<f32>;
 @group(0) @binding(4) var vmask_tex     : texture_2d<f32>;
+// The bmask stack slots (retired bindings 5..7) are gone: the bmask combine
+// pass bakes ALL enabled records (each record's hard bit + erase/restore
+// family) into the ONE texture bound at mask_tex, so a single sample covers
+// the whole mask set.
 
 struct VSInput {
   @location(0) pos : vec2<f32>,
@@ -106,16 +110,16 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
     }
   }
 
-  // Optional mask (bmask — freehand raster alpha)
+  // Optional mask (bmask — freehand raster alpha). The bound texture is the
+  // COMBINED coverage the bmask combine pass baked: every enabled record's
+  // hard bit and erase/restore family are already folded into it, so the
+  // sampling side is a plain multiply (the retired per-record hard/invert
+  // flag bits and stack slots are gone). Coverage lives in the RED channel —
+  // record textures upload as r8unorm and the combined output mirrors .r,
+  // so both shapes of the bound texture (identity fast path vs combined)
+  // sample identically.
   if ((layer.flags & 1u) != 0u) {
-    var mask_alpha = textureSample(mask_tex, samp, in.mask_uv).a;
-    if ((layer.flags & 8u) != 0u) {
-      mask_alpha = step(0.5, mask_alpha);
-    }
-    if ((layer.flags & 1024u) != 0u) {            // HAS_BMASK_INVERTED (bit10)
-      mask_alpha = 1.0 - mask_alpha;              // destination-out (erase semantics)
-    }
-    color.a *= mask_alpha;
+    color.a *= textureSample(mask_tex, samp, in.mask_uv).r;
   }
 
   // Optional vmask (analytic SDF or baked polygon texture). Independent
@@ -194,12 +198,10 @@ export {
   LAYER_FLAG_HAS_MASK,
   LAYER_FLAG_CLIP,
   LAYER_FLAG_PREMULTIPLIED_SOURCE,
-  LAYER_FLAG_HARD_MASK,
   LAYER_FLAG_SOURCE_LINEAR,
   LAYER_GAMUT_SHIFT,
   LAYER_GAMUT_MASK,
   LAYER_RENDER_INTENT_SHIFT,
   LAYER_RENDER_INTENT_MASK,
-  LAYER_FLAG_HAS_BMASK_INVERTED,
 } from './sourceNormalize';
 

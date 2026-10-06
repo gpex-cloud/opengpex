@@ -66,7 +66,13 @@ export const API_FILES_BY_ID = "/api/user/files";
 /** POST - Create share link; DELETE - Revoke share link. Append /:id/share */
 export const API_FILES_SHARE = "/api/user/files";
 
-// ─── Quota ────────────────────────────────────────────────────────────────────
+// ─── Quota & Limits ───────────────────────────────────────────────────────────
 
 /** GET - Get user storage quota */
 export const API_QUOTA = "/api/user/quota";
+
+/** Maximum single file upload size: 20MB */
+export const MAX_SINGLE_FILE_BYTES = 20 * 1024 * 1024; // 20,971,520 bytes
+
+/** Default storage quota per user: 200MB */
+export const DEFAULT_STORAGE_QUOTA_BYTES = 200 * 1024 * 1024; // 209,715,200 bytes

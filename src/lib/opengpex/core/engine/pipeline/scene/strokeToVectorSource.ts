@@ -95,6 +95,8 @@ export function strokeToVectorSource(
       color,
       size: data.size,
       hardness: data.hardness,
+      // Normalize: undefined = AA on (zero-regression default for legacy strokes).
+      antiAliased: data.antiAliased !== false,
       width: w,
       height: h,
     },
