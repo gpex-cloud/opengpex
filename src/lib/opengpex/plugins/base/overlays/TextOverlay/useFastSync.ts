@@ -23,6 +23,7 @@ import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { Motion } from '@opengpex/editor/core/motion';
 import { Frame, CameraState, VolatileState, asLocalShape } from '@opengpex/editor/core/types';
 import { LayerUtils } from '@opengpex/editor/core/layer/utils';
+import { compensateCenterX, compensateCenterY, reanchorCompensationBase } from './anchor';
 
 /**
  * useTextEditorFastSync: Text editor fast track synchronizer
@@ -42,6 +43,12 @@ export function useTextEditorFastSync(
   // Track cumulative bounding + position to correctly compensate cx/cy across rapid calls
   // (React state may be stale between batched updates, so we maintain our own source of truth)
   const lastStateRef = useRef<{ w: number; h: number; cx: number; cy: number } | null>(null);
+  // Last cx/cy/w/h OBSERVED on the layer. Our own writes land here too (they
+  // mirror lastStateRef), so only a value that differs from the previous
+  // observation is a genuine EXTERNAL geometry change — a Cmd/Ctrl+Drag move
+  // during editing — and must re-anchor the compensation base, otherwise the
+  // next size change would write the pre-move cx/cy back (box jumps back).
+  const lastLayerObservedRef = useRef<{ w: number; h: number; cx: number; cy: number } | null>(null);
 
   // [P0 Perf] Throttle to ~30Hz during interaction — text box positioning
   useFastSync(containerRef, isActive, (v: VolatileState, f: Frame, cam: CameraState) => {
@@ -82,12 +89,14 @@ export function useTextEditorFastSync(
 
     // Sync width and height in fixed mode to editor DOM. These stay in canvas
     // space (px), unaffected by rotation — the matrix above handles rotation/scale.
+    // The size belongs to the clip wrapper (which also owns vertical
+    // alignment); the contenteditable inside stays auto-height.
     const mode = layer.textData?.boxMode || 'auto';
     if (mode === 'fixed') {
-      const editorEl = el.querySelector('[contenteditable]') as HTMLElement;
-      if (editorEl) {
-        editorEl.style.width = `${layer.bounding.w}px`;
-        editorEl.style.height = `${layer.bounding.h}px`;
+      const clipEl = el.querySelector('[data-text-clip]') as HTMLElement | null;
+      if (clipEl) {
+        clipEl.style.width = `${layer.bounding.w}px`;
+        clipEl.style.height = `${layer.bounding.h}px`;
       }
     }
   }, { throttleHz: 30 });
@@ -97,8 +106,9 @@ export function useTextEditorFastSync(
    * This allows LayerOverlay's gizmo to immediately perceive bounding changes via fast track.
    * Also synchronize updating visibleShape to ensure rendering pipeline doesn't crop text to old size.
    *
-   * cx/cy compensation: When bounding width/height changes, cx/cy are adjusted so that the
-   * top-left corner of the text box stays fixed (the box expands rightward/downward only).
+   * cx/cy compensation: when bounding width/height changes, cx/cy are adjusted
+   * so the alignment-aware anchor stays fixed (left edge / centre / right edge
+   * horizontally per textData.align; top edge vertically).
    */
   const notifyBoundingChange = useCallback((w: number, h: number) => {
     if (!activeFrame) return;
@@ -110,14 +120,30 @@ export function useTextEditorFastSync(
       lastStateRef.current = { w: layer.bounding.w, h: layer.bounding.h, cx: layer.cx, cy: layer.cy };
     }
 
+    // Re-anchor the compensation base when the layer moved/resized EXTERNALLY
+    // since the last notify (Cmd/Ctrl+Drag move, gizmo resize during editing):
+    // `lastStateRef` only tracks OUR compensations, so without this the next
+    // size-changing input (e.g. Enter newline growing the box) computes cx/cy
+    // from the stale pre-move base and visibly snaps the box back. See
+    // `reanchorCompensationBase` for the staleness guard.
+    reanchorCompensationBase(lastStateRef.current, lastLayerObservedRef.current, layer);
+    lastLayerObservedRef.current = {
+      w: layer.bounding.w,
+      h: layer.bounding.h,
+      cx: layer.cx,
+      cy: layer.cy,
+    };
+
     // Debounce: write only when size actually changes
     if (lastStateRef.current.w === w && lastStateRef.current.h === h) return;
 
-    // Compute cx/cy compensation to keep top-left corner fixed
-    const deltaW = w - lastStateRef.current.w;
-    const deltaH = h - lastStateRef.current.h;
-    const newCx = lastStateRef.current.cx + deltaW / 2;
-    const newCy = lastStateRef.current.cy + deltaH / 2;
+    // Compute cx/cy compensation. Horizontal: align-aware anchor (left edge
+    // pinned for left-aligned text, centre for centred, right edge for right) —
+    // the box grows in the direction the alignment pulls it, eliminating the
+    // visual jump while typing. Vertical: the top edge stays pinned for every
+    // alignment.
+    const newCx = compensateCenterX(lastStateRef.current.cx, lastStateRef.current.w, w, layer.textData?.align);
+    const newCy = compensateCenterY(lastStateRef.current.cy, lastStateRef.current.h, h);
 
     lastStateRef.current = { w, h, cx: newCx, cy: newCy };
 

@@ -33,7 +33,7 @@ import type { BufferRing } from '@opengpex/editor/core/engine/gpu/resources/Buff
 import { BLEND_MODE_MAP, BLEND_UNIFORM_BUFFER_SIZE } from '@opengpex/editor/core/engine/gpu/shaders/blend';
 import { packLayerUniforms } from './CompositePass';
 import { resolveAdjustBindGroup as resolveAdjust } from '../support/adjustBindGroup';
-import { resolveLayerGeometry, effectiveScale } from '../support/layerGeometry';
+import { resolveLayerGeometry, resolveLayerDprScale, effectiveScale } from '../support/layerGeometry';
 import { resolveVmaskUniform } from '../support/vmaskUniform';
 import {
   LAYER_FLAG_HAS_MASK,
@@ -81,6 +81,8 @@ export interface DrawBlendParams {
    * layer's adjustments baked in (AdjustPrePass → FilterPass path).
    */
   readonly suppressAdjust?: boolean;
+  /** `texture` is a vector transient — UV ratio derives from the texture, not `layer.dprScale`. */
+  readonly vectorTransient?: boolean;
   /**
    * The `fgTexture` already holds LINEAR light because the pipeline produced it
    * (`AdjustPrePass` bake and/or `FilterPass` output), regardless of the original
@@ -153,7 +155,7 @@ export class BlendPass {
       layer,
       fgTexture.width,
       fgTexture.height,
-      layer.dprScale ?? 1,
+      resolveLayerDprScale(layer, fgTexture.width, params.vectorTransient),
     );
 
     // ⚠️ POT-BUCKET UV FIX: same rationale as CompositePass — scale content-relative

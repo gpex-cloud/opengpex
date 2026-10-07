@@ -49,6 +49,7 @@ import { CompositePass, type CompositePassContext } from './composite/CompositeP
 import { BlendPass, type BlendPassContext } from './composite/BlendPass';
 import { ViewPass, type ViewPassContext, composeViewMatrix } from './present/ViewPass';
 import { vectorExportScale } from './support/vectorTransient';
+import { densityCompositeDims } from './support/densityComposite';
 import { effectiveScale } from './support/layerGeometry';
 import { prepareFilteredSources } from './build/prepareFilteredSources';
 import { prepareVectorSources } from './build/prepareVectorSources';
@@ -86,6 +87,15 @@ export interface CompositeContext {
    */
   readonly target?: LayerTexture;
   /**
+   * Interactive density-banded composite scale (P3, plan §3.3) — the ACHIEVED
+   * per-axis scale from `resolveInteractiveDensity` (quantized band, clamped
+   * by the VRAM hard cap). Present on the render path only; the composite
+   * target, ping-pong buffers and vector/vmask transients then render at this
+   * density, so magnified text / vector content stays sharp. Absent on
+   * export/tests: `exportViewport` drives the scale there (`vectorExportScale`).
+   */
+  readonly interactiveScale?: readonly [number, number];
+  /**
    * Engine-owned exact-size reuse for FULL-CANVAS /
    * oversized transients that must bypass the POT pool (`isOversizedTransient`).
    * When present (render path), the vector-stroke transient + ping-pong buffers
@@ -121,6 +131,15 @@ export interface PresentContext {
   readonly targetFormat: GPUTextureFormat;
   /** The Scene whose `view` + `frame` + `display` drive the present. */
   readonly scene: Scene;
+  /**
+   * The interactive composite's ACHIEVED density scale (P3, plan §3.3) — the
+   * `min(scaleX, scaleY)` the composite was rendered at. One composited texel
+   * is then `1/scale` document px, so the magnify/minify sampler sees
+   * `effectiveScale / scale` — inside the band the composite is always
+   * minified-or-1:1 (linear keeps text/vector edges smooth); beyond the cap
+   * (hard-clamped big canvases) nearest returns, the pre-P3 behaviour.
+   */
+  readonly densityScale?: number;
   /** [PERF_MON] When set, the view pass writes GPU begin/end timestamps. */
   readonly gpuTimer?: GpuTimer;
 }
@@ -217,8 +236,15 @@ export class RenderGraph {
 
     const ev = ctx.exportViewport;
     const baseDims = compositeDims(scene);
-    const frameWidth = ev ? Math.max(1, Math.round(ev.targetWidth)) : baseDims.frameWidth;
-    const frameHeight = ev ? Math.max(1, Math.round(ev.targetHeight)) : baseDims.frameHeight;
+    const density = ctx.interactiveScale;
+    // Interactive density band: scale the composite extent (and round via the
+    // SHARED `densityCompositeDims` so the engine-owned `ctx.target` matches);
+    // export keeps its own viewport-driven extent; plain tests stay 1:1.
+    const [scaledW, scaledH] = density
+      ? densityCompositeDims(baseDims.frameWidth, baseDims.frameHeight, density)
+      : [baseDims.frameWidth, baseDims.frameHeight];
+    const frameWidth = ev ? Math.max(1, Math.round(ev.targetWidth)) : scaledW;
+    const frameHeight = ev ? Math.max(1, Math.round(ev.targetHeight)) : scaledH;
     const allocatedWidth = snapToPowerOfTwo(frameWidth);
     const allocatedHeight = snapToPowerOfTwo(frameHeight);
 
@@ -239,9 +265,28 @@ export class RenderGraph {
     // and merge into the SAME map, so the four composite guards below treat them as
     // ordinary straight-alpha raster sources. Also recorded before any composite
     // render pass opens (its per-source render passes cannot nest inside one).
-    // Supersample the transient to the export density so 2×/4× exports stay
-    // razor-sharp (`vectorExportScale` is [1,1] on the interactive path).
-    const vectorScale = vectorExportScale(ev, baseDims.frameWidth, baseDims.frameHeight);
+    // Supersample the transient to the target density so 2×/4× exports AND the
+    // density-banded interactive composite stay razor-sharp. Export derives it
+    // from the viewport; the interactive path receives the achieved band scale
+    // directly (`vectorExportScale` is [1,1] only when no density is given).
+    const vectorScale = ev
+      ? vectorExportScale(ev, baseDims.frameWidth, baseDims.frameHeight)
+      : (density ?? [1, 1]);
+
+    // Interactive density band expressed as a VIEWPORT: same world space (the
+    // DOCUMENT rect — the NDC basis in packLayerUniforms must stay document
+    // dims, world does not grow with the target) mapped onto the larger pixel
+    // extent. Reuses the exact src→target machinery the export path exercises,
+    // so CompositePass/BlendPass scale every layer quad (and the blend
+    // fg_frame_to_local inverse) by the density with zero new branches.
+    const densityViewport: ExportViewport | undefined = density
+      ? {
+          targetWidth: frameWidth,
+          targetHeight: frameHeight,
+          sourceRect: [0, 0, baseDims.frameWidth, baseDims.frameHeight],
+        }
+      : undefined;
+    const passViewport = ev ?? densityViewport;
     prepareVectorSources(commandEncoder, compiled, buildCtx, filtered, vectorScale);
 
     // Bake every POLYGON vmask into an owned coverage texture, keyed by
@@ -297,7 +342,7 @@ export class RenderGraph {
         targetFormat: workingFormat,
         resolveLutView: ctx.resolveLutView,
         resolveLut3dView: ctx.resolveLut3dView,
-        exportViewport: ev,
+        exportViewport: passViewport,
       };
 
       for (let s = 0; s < compiled.steps.length; s++) {
@@ -319,6 +364,7 @@ export class RenderGraph {
             vmaskTexture: vmaskSources.get(layer.id),
             isBottomOpaque: false,
             suppressAdjust: src?.suppressAdjust,
+            vectorTransient: src?.vectorTransient,
             sourceIsLinear: src?.sourceIsLinear,
             sourceIsWorkingGamut: src?.sourceIsWorkingGamut,
             sourceIntentApplied: src?.sourceIntentApplied,
@@ -345,7 +391,7 @@ export class RenderGraph {
       vmaskSources,
       bmaskSources,
       filterScratch,
-      ev,
+      passViewport,
     );
   }
 
@@ -472,6 +518,7 @@ export class RenderGraph {
             vmaskTexture: vmaskSources.get(layer.id),
             isBottomOpaque: false,
             suppressAdjust: src?.suppressAdjust,
+            vectorTransient: src?.vectorTransient,
             sourceIsLinear: src?.sourceIsLinear,
             sourceIsWorkingGamut: src?.sourceIsWorkingGamut,
             sourceIntentApplied: src?.sourceIntentApplied,
@@ -530,6 +577,7 @@ export class RenderGraph {
           maskTexture: maskTex,
           vmaskTexture: vmaskSources.get(layer.id),
           suppressAdjust: src?.suppressAdjust,
+          vectorTransient: src?.vectorTransient,
           sourceIsLinear: src?.sourceIsLinear,
           sourceIsWorkingGamut: src?.sourceIsWorkingGamut,
           sourceIntentApplied: src?.sourceIntentApplied,
@@ -591,8 +639,11 @@ export class RenderGraph {
       channelMask: scene.display.channelMask,
       viewMatrix,
       // Screen physical px per composited texel = the camera's
-      // effective scale (canvas→physical). Drives nearest(magnify)/linear(minify).
-      sourceScale: effectiveScale(scene.view.transform),
+      // effective scale (canvas→physical) divided by the density the composite
+      // was rendered at (1 composited texel = 1/scale document px). Drives
+      // nearest(magnify)/linear(minify); inside the band this is ≤ 1.
+      sourceScale:
+        effectiveScale(scene.view.transform) / Math.max(1e-6, ctx.densityScale ?? 1),
     };
 
     ViewPass.draw(viewPass, viewCtx, compositeTex);

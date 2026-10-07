@@ -82,6 +82,16 @@ export interface ContentKey {
   readonly dirty: boolean;
   /** A tween is animating a display value this frame — always rebuild. */
   readonly animating: boolean;
+  /**
+   * The quantized interactive DENSITY BAND (P3, plan §3.3) — the ONLY
+   * camera-derived dimension allowed in this key. Quantized onto the
+   * glyph-atlas bands (`quantizeDensityBand`), so pan/zoom INSIDE a band
+   * leaves it constant and the cache still hits (the pre-P3 pan/zoom contract
+   * is intact); crossing a band is the "re-composite signal" at the CPU layer
+   * and costs exactly one rebuild per crossing. Never add a per-frame camera
+   * field here (see the 120→100fps lesson above).
+   */
+  readonly densityBand: number;
 }
 
 
@@ -93,7 +103,8 @@ function keysEqual(a: ContentKey, b: ContentKey): boolean {
     a.layersRef === b.layersRef &&
     a.canvasW === b.canvasW &&
     a.canvasH === b.canvasH &&
-    a.colorSpace === b.colorSpace
+    a.colorSpace === b.colorSpace &&
+    a.densityBand === b.densityBand
   );
 }
 

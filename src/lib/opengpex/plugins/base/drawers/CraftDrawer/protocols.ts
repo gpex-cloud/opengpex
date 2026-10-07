@@ -24,6 +24,8 @@
  * CraftDrawer is a unified sidebar panel for text/brush/eraser tools.
  */
 
+import { TEXT_LAYER_PADDING } from '@opengpex/editor/core/helpers/config';
+
 export const PLUGIN_ID = 'drawers.craft_tools';
 export const PLUGIN_AUTHOR = 'opengpex';
 
@@ -93,6 +95,8 @@ export interface PendingTextData {
   fontWeight?: number;
   align?: 'left' | 'center' | 'right';
   lineHeight?: number;
+  letterSpacing?: number;
+  verticalAlign?: 'top' | 'middle' | 'bottom';
   italic?: boolean;
   underline?: boolean;
   strikethrough?: boolean;
@@ -186,6 +190,30 @@ export function getReferenceFontSize(canvasW: number, canvasH: number): number {
   const shortSide = Math.min(canvasW, canvasH);
   const raw = Math.max(REF_MIN, Math.min(REF_MAX, shortSide * REF_RATIO));
   return snapToNiceSize(raw);
+}
+
+/** Line height used when the user has not chosen one (mirrors the layer default). */
+export const TEXT_DEFAULT_LINE_HEIGHT = 1.4;
+
+/**
+ * Computes the initial inline text box size for a newly placed text layer.
+ *
+ * Height follows the font metrics (fontSize × lineHeight + vertical padding) so
+ * the empty box hugs the first line at any canvas resolution. Width scales with
+ * the font size and is capped to a fraction of the canvas width, so a 4K canvas
+ * gets a proportionally usable input box instead of a fixed-pixel sliver.
+ *
+ * Shared by the place handler (initial layer bounding) and the inline editor
+ * (CSS minWidth) so the two never disagree on the very first frame.
+ */
+export function getInitialTextBoxSize(
+  fontSize: number,
+  lineHeight: number,
+  canvasW: number,
+): { w: number; h: number } {
+  const h = Math.ceil(fontSize * lineHeight) + TEXT_LAYER_PADDING.y * 2;
+  const w = Math.round(Math.min(Math.max(fontSize * 5.6, 140), Math.max(140, canvasW * 0.42)));
+  return { w, h };
 }
 
 /**

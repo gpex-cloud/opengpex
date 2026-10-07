@@ -23,8 +23,8 @@
  * a single straight-alpha `rgba16float` buffer, tagged with a `GamutId`, ready
  * for the same `highDepthSource` ingestion seam as `buildSolidColorSource`.
  *
- * Pure module — no DOM/Canvas types here; `paintText.ts` / `paintMarker.ts`
- * own the OffscreenCanvas readback and call into this module.
+ * Pure module — no DOM/Canvas types here; `paintMarker.ts`
+ * owns the OffscreenCanvas readback and calls into this module.
  *
  * @module core/raster/coverageTint
  */

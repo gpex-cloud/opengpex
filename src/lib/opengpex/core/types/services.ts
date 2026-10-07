@@ -181,7 +181,7 @@ export interface LayerItemForWorker {
    * Layer type — forwarded from `Layer.type` so the Worker merger can
    * dispatch non-bitmap layers (color → fillRect) without a bitmap.
    * Defaults to `'image'` when absent (backward-compatible).
-   * Phase 3: color layers skip bitmap lookup entirely; text still pre-rasterized.
+   * Phase 3: color layers skip bitmap lookup entirely.
    */
   type?: 'image' | 'color' | 'text';
   /** Layer metadata — forwarded from `Layer.metadata`. */
@@ -542,13 +542,6 @@ export interface PixelService {
      */
     gpuInfo: () => GpuInfo;
   };
-
-  rasterize: {
-    /** Rasterizes any layer to bitmap Asset (text -> fillText, color -> fillRect, image -> flatten masks/adjustments).
-     *  Accepts optional opts.dpr to control output resolution. */
-    layer: (layer: Layer, opts?: { dpr?: number }) => Promise<{ assetId: string; url: string }>;
-  };
-
 
   /**
    * Unified composite pipeline entry point.

@@ -26,6 +26,7 @@ import { useEditorState, useEditorServices } from '@opengpex/editor/core/context
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { useOverlayRotationSync } from '@opengpex/editor/core/motion/hooks/animation';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color';
+import { quantizeDensityBand } from '@opengpex/editor/core/engine/text/glyphAtlas';
 import {
   sourceBitmapCache,
   getGpuEngine,
@@ -247,6 +248,14 @@ export default function CanvasStage() {
         // (§8.4.4 R2). Constant today, so it never forces a rebuild; kept so the
         // key stays a faithful 1:1 image of SceneContent's inputs.
         colorSpace: WORKING_GAMUT,
+        // P3 (plan §3.3): the quantized interactive density band — the ONLY
+        // camera-derived key dimension. Quantized onto the glyph-atlas bands,
+        // so pan/zoom inside a band keeps the cache hit; crossing a band costs
+        // exactly one rebuild (the CPU-side re-composite signal). Computed from
+        // cam.k × dpr, the same quantity the engine quantizes via
+        // `effectiveScale(scene.view.transform)`; band quantization absorbs the
+        // pixel-snap difference.
+        densityBand: quantizeDensityBand(cam.k * dpr),
         dirty: isDirty,
         animating: false,
       },

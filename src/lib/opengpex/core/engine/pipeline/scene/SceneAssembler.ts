@@ -52,6 +52,7 @@ import type { IEngine, UploadSource, LutUpload } from '@opengpex/editor/core/eng
 import type { HighDepthSource } from '@opengpex/editor/core/engine/sources/HighDepthSource';
 import { translateLayerAdjustments } from './adjustments';
 import { markerToVectorSource } from './markerToVectorSource';
+import { textToVectorSource } from './textToVectorSource';
 import { strokeToVectorSource } from './strokeToVectorSource';
 
 /**
@@ -404,21 +405,24 @@ export class SceneAssembler {
       const layerHeight = latestLayer.bounding.h;
 
       // Vector spine (architecture B): a `vector` layer is rendered analytically on
-      // the GPU instead of the CPU Canvas2D bitmap path. Two renderer strategies share
+      // the GPU instead of the CPU Canvas2D bitmap path. Three renderer strategies share
       // this seam, mapped ONCE here (the sole business→vector boundary):
       //   • `markerData`  → `renderer: 'sdf'`    (rect/ellipse/arrow fragment solve)
       //   • `strokeData`  → `renderer: 'stroke'` (logic brush; compute-extruded ribbon)
-      // A vector layer carries exactly one of the two; the marker mapper returns
-      // undefined for a stroke layer and vice-versa, so the `??` chain picks the right
+      //   • `textData`    → `renderer: 'text'`   (GPU glyph quads over a coverage atlas;
+      //     CPU layout runs in the mapper, the GPU side never re-computes layout)
+      // A vector layer carries exactly one of the three; the mappers return
+      // undefined for each other's kinds, so the `??` chain picks the right
       // strategy. `size`/bounding MUST match the LayerNode dims below (marker takes them
-      // explicitly; stroke reads `layer.bounding` internally — same source). When
+      // explicitly; stroke/text read `layer.bounding` internally — same source). When
       // defined, the layer skips the bitmap upload entirely and its `source` becomes the
       // `{ kind: 'vector', ... }` descriptor; the shared tail (transform / crop / mask /
       // adjust / opacity / blend / clip) is identical to a raster's. Working gamut is
       // Display-P3 (see colorSpace below).
       const vectorSource =
         markerToVectorSource(latestLayer, 'display-p3', layerWidth, layerHeight) ??
-        strokeToVectorSource(latestLayer, 'display-p3');
+        strokeToVectorSource(latestLayer, 'display-p3') ??
+        textToVectorSource(latestLayer, 'display-p3');
       const isVectorLayer = vectorSource !== undefined;
 
       let crop: { x: number; y: number; w: number; h: number } | undefined;
@@ -463,9 +467,8 @@ export class SceneAssembler {
       const fillColor = latestLayer.type === 'color' ? latestLayer.metadata?.fillColor : undefined;
       const solid = fillColor ? buildSolidColorSource(fillColor) : undefined;
       const sourceAssetId = solid ? solid.assetId : layer.assetId || layer.id;
-      // A DPR-aware rasterized texture (e.g. a committed Text
-      // layer produced by `pixels.rasterize.layer`, sized `bounding × dpr`) tags
-      // its asset with `dprScale = dpr`. `crop` here is in LOGICAL (document)
+      // A DPR-aware rasterized texture (e.g. a resampled
+      // layer bitmap sized `bounding × dpr`) tags its asset with `dprScale = dpr`. `crop` here is in LOGICAL (document)
       // pixels, so the crop→UV mapping in `resolveLayerGeometry` needs this
       // factor to sample the physical texture correctly. Bitmap / fragment
       // assets have `dprScale` undefined → treated as 1 (crop already in source
@@ -713,7 +716,7 @@ export class SceneAssembler {
         width: layerWidth,
         height: layerHeight,
         crop,
-        dprScale: sourceDprScale,
+        dprScale: vectorSource ? 1 : sourceDprScale,
         opacity: typeof layer.opacity === 'number' ? layer.opacity : 1.0,
         blendMode: layer.blendMode || 'source-over',
         bmask: bmaskDesc,

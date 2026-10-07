@@ -49,8 +49,15 @@ import { PipelineCache } from '@opengpex/editor/core/engine/gpu/resources/Pipeli
 import { GpuTimer } from '@opengpex/editor/core/engine/gpu/resources/GpuTimer';
 import { SceneCompiler } from '@opengpex/editor/core/engine/pipeline/graph/SceneCompiler';
 import { RenderGraph, compositeDims, type ExportViewport } from '@opengpex/editor/core/engine/pipeline/graph/RenderGraph';
+import { effectiveScale } from '@opengpex/editor/core/engine/pipeline/graph/support/layerGeometry';
+import {
+  resolveInteractiveDensity,
+  densityCompositeDims,
+  INTERACTIVE_COMPOSITE_CEIL_PX,
+} from '@opengpex/editor/core/engine/pipeline/graph/support/densityComposite';
 import { computeCompositeSignature } from '@opengpex/editor/core/engine/pipeline/scene/compositeSignature';
 import { clearVmaskCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareVmaskSources';
+import { releaseExportGlyphAtlas } from '@opengpex/editor/core/engine/pipeline/graph/build/vectorRenderers/TextRenderer';
 import { clearBmaskCombineCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareBmaskCombine';
 import { GPUTextureUsage, GPUBufferUsage } from '@opengpex/editor/core/engine/gpu/constants';
 import { halfToFloat } from '@opengpex/editor/core/engine/color/float16';
@@ -124,9 +131,18 @@ export class WebGpuEngine implements IEngine {
   /** Content signature of the cached composite (see compositeSignature.ts). */
   private compositeSignature: string | null = null;
   /** Dims the cached composite was built at — a change forces a rebuild (R5). */
-  private compositeDocW = 0;
-  private compositeDocH = 0;
+  private compositeTargetW = 0;
+  private compositeTargetH = 0;
   private compositeFormat: GPUTextureFormat | null = null;
+  /**
+   * The ACHIEVED interactive density scale (`min(scaleX, scaleY)` of
+   * {@link InteractiveDensity}) the cached composite was rendered at — the
+   * per-frame dirty signal for density-band crossings: a band change scales
+   * the composite dims → `dimsChanged` below → exactly one re-composite per
+   * crossing, while pan/zoom inside a band leaves the dims (and everything
+   * else) untouched → zero re-composites. Also feeds the present sampler.
+   */
+  private compositeDensityScale = 1;
 
   /**
    * Per-asset epoch, bumped on every GENUINE re-transfer in `upload()` (not on
@@ -304,8 +320,9 @@ export class WebGpuEngine implements IEngine {
             this.compositeTexture = null;
             this.compositeSignature = null;
             this.compositeFormat = null;
-            this.compositeDocW = 0;
-            this.compositeDocH = 0;
+            this.compositeTargetW = 0;
+            this.compositeTargetH = 0;
+            this.compositeDensityScale = 1;
             if (scene) this.render(scene);
           });
         });
@@ -393,8 +410,9 @@ export class WebGpuEngine implements IEngine {
       this.compositeTexture = null;
       this.compositeSignature = null;
       this.compositeFormat = null;
-      this.compositeDocW = 0;
-      this.compositeDocH = 0;
+      this.compositeTargetW = 0;
+      this.compositeTargetH = 0;
+      this.compositeDensityScale = 1;
       this.assetEpochs.clear();
       // Device rebuild invalidates the signature memo too.
       this.sigMemoLayers = null;
@@ -436,6 +454,22 @@ export class WebGpuEngine implements IEngine {
     // compositing entirely and replay just the cheap view pass.
     const { frameWidth: docW, frameHeight: docH } = compositeDims(scene);
 
+    // P3 — density-banded interactive composite (plan §3.3). Quantize the
+    // camera's screen scale (cam.k × dpr, pixel-snapped) onto the glyph-atlas
+    // density bands, clamped per edge by the VRAM hard cap
+    // (min(maxTextureDimension2D, 4096)). Recomputing each frame is a few
+    // compares; only the QUANTIZED value matters downstream — inside a band
+    // pan/zoom leaves the composite dims unchanged (cache hit), crossing a band
+    // changes them → exactly one re-composite per crossing.
+    const density = resolveInteractiveDensity(
+      effectiveScale(scene.view.transform),
+      docW,
+      docH,
+      device.limits?.maxTextureDimension2D ?? INTERACTIVE_COMPOSITE_CEIL_PX,
+    );
+    const [compW, compH] = densityCompositeDims(docW, docH, [density.scaleX, density.scaleY]);
+    const densityScale = Math.min(density.scaleX, density.scaleY);
+
     // Reuse the memoized signature when the inputs it derives from are
     // unchanged (same `scene.layers` reference on a cam-only frame + same dims /
     // format / asset-epoch version). Skips the per-frame layer walk + JSON work.
@@ -470,10 +504,11 @@ export class WebGpuEngine implements IEngine {
     const _pSigMs = PERF_MON ? performance.now() - _pSigT0 : 0;
 
     // R5 — composite texture lifecycle: rebuild when the cached one is missing,
-    // its dims changed, or the working format changed.
+    // its dims changed (document resize OR a density-band crossing — the
+    // band-scaled dims move), or the working format changed.
     const dimsChanged =
-      this.compositeDocW !== docW ||
-      this.compositeDocH !== docH ||
+      this.compositeTargetW !== compW ||
+      this.compositeTargetH !== compH ||
       this.compositeFormat !== workingFormat;
 
     const needsRecomposite =
@@ -502,7 +537,7 @@ export class WebGpuEngine implements IEngine {
         this.texturePool.evictUnused(0);
       }
       if (!this.compositeTexture) {
-        this.compositeTexture = this.#createCompositeTarget(device, docW, docH, workingFormat);
+        this.compositeTexture = this.#createCompositeTarget(device, compW, compH, workingFormat);
       }
 
       // [PERF_MON] Arm the composite GPU timer (skips if a prior readback is still
@@ -531,6 +566,9 @@ export class WebGpuEngine implements IEngine {
         // fast-override stroke) must re-combine that layer's mask.
         getAssetEpoch: (assetId) => this.assetEpochs.get(assetId) ?? 0,
         target: this.compositeTexture,
+        // P3: render the composite (and the vector/text transients through the
+        // same supersampling seam) at the current density band's achieved scale.
+        interactiveScale: [density.scaleX, density.scaleY],
         acquireResidentTransient: this.residentTransients
           ? (key, desc) => this.residentTransients!.acquire(key, desc)
           : undefined,
@@ -546,9 +584,10 @@ export class WebGpuEngine implements IEngine {
       this.residentTransients?.endFrame();
 
       this.compositeSignature = signature;
-      this.compositeDocW = docW;
-      this.compositeDocH = docH;
+      this.compositeTargetW = compW;
+      this.compositeTargetH = compH;
       this.compositeFormat = workingFormat;
+      this.compositeDensityScale = densityScale;
 
       if (PERF_MON) {
         _pCompEncMs = performance.now() - _pCompEncT0;
@@ -592,6 +631,9 @@ export class WebGpuEngine implements IEngine {
       // whose preferred format differs, failing pipeline validation.
       targetFormat: SWAPCHAIN_FORMAT,
       scene,
+      // P3: the composite holds densityScale texels per document px, so the
+      // magnify/minify sampler compares the camera scale against THAT density.
+      densityScale: this.compositeDensityScale,
       gpuTimer: _presArmed ? this._presTimer! : undefined,
     });
 
@@ -759,6 +801,14 @@ export class WebGpuEngine implements IEngine {
       // Export composite target + scratch are one-shot: return them all.
       this.texturePool.release(composite.texture);
       for (const tex of scratch) this.texturePool.release(tex);
+      // The export-band glyph atlas is ONE-SHOT (plan §3.4): the composite
+      // above rasterized text at the export density band; release it on EVERY
+      // exit path so interactive VRAM is never taxed by export-scale glyphs.
+      // Same scale the vector spine was fed (target px per source px,
+      // region-aware). Kept inside export() so every caller of the engine
+      // black-box gets the release — dispatch layers must not reach into the
+      // renderer internals for it.
+      releaseExportGlyphAtlas(Math.max(targetW / Math.max(1, srcW), targetH / Math.max(1, srcH)));
     }
   }
 
@@ -773,12 +823,14 @@ export class WebGpuEngine implements IEngine {
   }
 
   /**
-   * Allocate the engine-owned composite target at its EXACT document size
-   * (no POT snap → no waste) and OUTSIDE the TexturePool (a single-size,
+   * Allocate the engine-owned composite target at its EXACT density-scaled
+   * document extent (no POT snap → no waste; P3 dims come from
+   * `densityCompositeDims`, shared with RenderGraph so the graph's frame dims
+   * always match) and OUTSIDE the TexturePool (a single-size,
    * single-instance resident texture gains nothing from bucketing).
    * Usage mirrors the pool's default set so any sampler/readback path that used
    * to see a pooled target behaves identically. Lifetime: reused in place until
-   * a dims/format change or teardown destroys it.
+   * a dims/format change (incl. a density-band crossing) or teardown destroys it.
    */
 
   #createCompositeTarget(
@@ -1266,8 +1318,9 @@ export class WebGpuEngine implements IEngine {
     this.residentTransients = null;
     this.compositeSignature = null;
     this.compositeFormat = null;
-    this.compositeDocW = 0;
-    this.compositeDocH = 0;
+    this.compositeTargetW = 0;
+    this.compositeTargetH = 0;
+    this.compositeDensityScale = 1;
     // Drop the signature memo on teardown.
     this.sigMemoLayers = null;
     this.sigMemoValue = null;

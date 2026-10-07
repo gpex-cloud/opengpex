@@ -22,7 +22,7 @@
 "use client";
 
 import React, { useRef, useEffect } from "react";
-import { Layer, Frame } from "@opengpex/editor/core/types";
+import { Layer } from "@opengpex/editor/core/types";
 import { Focus } from "lucide-react";
 import {
   useEditorState,
@@ -30,6 +30,7 @@ import {
   useVolatileInteraction,
 } from "@opengpex/editor/core/context";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
+import { TransformGizmo } from "@opengpex/editor/widgets/TransformGizmo";
 import { useLayerOverlayCommands } from "./hooks";
 import { SIGNAL_FORCE_SHOW_TYPES } from "./protocols";
 
@@ -47,7 +48,6 @@ export function LayerOverlayItem({
   showAlways,
   forceShow,
 }: {
-  activeFrame: Frame;
   layer: Layer;
   index: number;
   isActive: boolean;
@@ -134,6 +134,24 @@ export function LayerOverlayItem({
             </span>
           </div>
         </div>
+        {/* Text transform gizmo: pre-edit text-craft only (forceShow). The
+            editing-state box carries no gizmo — geometry changes happen here or
+            via Cmd/Ctrl+Drag. Handles are pointer-events-auto inside the
+            pointer-events-none item; the data attribute lets TextOverlay's
+            resize/rotate handlers resolve the target layer. */}
+        {forceShow && layer.type === "text" && (
+          <div data-text-gizmo-layer={layer.id} className="absolute inset-0">
+            <TransformGizmo
+              rotation={layer.rotation}
+              flip={layer.flip}
+              handleSizePx={10}
+              handleClassName="border border-gray-400"
+              showRotateHandle
+              rotateHandleOffset={24}
+              rotateHandleClassName="border border-gray-400"
+            />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -184,7 +202,6 @@ function LayerOverlayContent() {
         .map((layer, idx) => (
           <LayerOverlayItem
             key={layer.id}
-            activeFrame={activeFrame}
             layer={layer}
             index={idx + 1}
             isActive={layer.id === activeLayerId}

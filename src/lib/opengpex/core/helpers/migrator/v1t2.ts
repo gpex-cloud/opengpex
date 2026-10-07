@@ -122,16 +122,35 @@ export function migrateToColorValue(val: unknown, fallbackHex = '#FFFFFF'): Colo
 export function sanitizeLayer(layer: Record<string, unknown>): boolean {
   let changed = false;
 
-  // 1. TextLayerData.color
+  // 1. TextLayerData: color, boxMode, verticalAlign
+  // Align with 12_text_tool_spec: ensure structured color, valid boxMode and verticalAlign
   if (layer.textData && typeof layer.textData === 'object') {
     const td = layer.textData as Record<string, unknown>;
     if (td.color !== undefined && !isColorValueLike(td.color)) {
       td.color = migrateToColorValue(td.color);
       changed = true;
     }
+    if (td.boxMode === undefined || td.boxMode === 'auto') {
+      td.boxMode = 'auto_width';
+      changed = true;
+    }
+    if (td.verticalAlign === undefined) {
+      td.verticalAlign = 'top';
+      changed = true;
+    }
   }
 
-  // 2. MarkerData: stroke.color, fill.color
+  // 2. StrokeData.color (Brush2 / Logic Brush)
+  // Align with 11_hard_edge_spec: StrokeData requires structured ColorValue for vector pipeline
+  if (layer.strokeData && typeof layer.strokeData === 'object') {
+    const sd = layer.strokeData as Record<string, unknown>;
+    if (sd.color !== undefined && !isColorValueLike(sd.color)) {
+      sd.color = migrateToColorValue(sd.color);
+      changed = true;
+    }
+  }
+
+  // 3. MarkerData: stroke.color, fill.color
   if (layer.markerData && typeof layer.markerData === 'object') {
     const md = layer.markerData as Record<string, unknown>;
     if (md.stroke && typeof md.stroke === 'object') {
@@ -150,13 +169,20 @@ export function sanitizeLayer(layer: Record<string, unknown>): boolean {
     }
   }
 
-  // 3. metadata.fillColor
+  // 4. metadata.fillColor
   if (layer.metadata && typeof layer.metadata === 'object') {
     const meta = layer.metadata as Record<string, unknown>;
     if (meta.fillColor !== undefined && !isColorValueLike(meta.fillColor)) {
       meta.fillColor = migrateToColorValue(meta.fillColor);
       changed = true;
     }
+  }
+
+  // 5. Bounding defensive healing: ensure layer.bounding conforms to layer.rect
+  // Align with 12_text_tool_spec: WebGPU textToVectorSource relies on bounding.w/h
+  if (!layer.bounding && layer.rect && typeof layer.rect === 'object') {
+    layer.bounding = { ...(layer.rect as Record<string, unknown>) };
+    changed = true;
   }
 
   return changed;
@@ -464,14 +490,17 @@ export async function checkAndMigrateV1(): Promise<void> {
   }
 }
 
+export const V2_HEAL_FLAG_KEY = 'v2_healed_specs_aligned';
+
 /**
  * One-time healing pass for records already migrated to State_V2.
  * Ensures layer colors are structured ColorValue, text assets preserve dprScale,
+ * strokeData colors and textData boxMode/verticalAlign/bounding conform to v2 specs,
  * and missing frame raw source blobs are backfilled from LegacyAssetDriver.
  */
 export async function healExistingV2Records(): Promise<void> {
   try {
-    const isHealed = await StateDriver.getItem<boolean>('v2_healed_layer_colors_dpr');
+    const isHealed = await StateDriver.getItem<boolean>(V2_HEAL_FLAG_KEY);
     if (isHealed) {
       return;
     }
@@ -530,7 +559,7 @@ export async function healExistingV2Records(): Promise<void> {
       }
 
       if (frameModified) {
-        console.info(`[Migrator]   ✓ Healed layer colors for frame [${id}]`);
+        console.info(`[Migrator]   ✓ Healed layer colors and attributes for frame [${id}]`);
         updates[`frame:${id}`] = frameData;
       }
     }
@@ -539,6 +568,7 @@ export async function healExistingV2Records(): Promise<void> {
       await ShardedStateDriver.setItems(updates);
     }
 
+    await StateDriver.setItem(V2_HEAL_FLAG_KEY, true);
     await StateDriver.setItem('v2_healed_layer_colors_dpr', true);
     console.info('[Migrator] ✅ Post-migration healing pass completed successfully.');
   } catch (err) {

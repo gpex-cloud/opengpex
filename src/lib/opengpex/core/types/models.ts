@@ -213,6 +213,18 @@ export interface CameraState {
   k: number;
 }
 
+/**
+ * Text box dimension mode. 'auto' is a read-time alias of 'auto_width' — new
+ * layers must be created with an explicit modern mode; persisted projects
+ * carrying 'auto' keep rendering/measuring as auto-width without migration.
+ */
+export type TextBoxMode = 'auto' | 'auto_width' | 'auto_height' | 'fixed';
+
+/** True when the mode hugs its content on the X axis (legacy alias included). */
+export function isAutoWidthMode(mode: TextBoxMode | undefined): boolean {
+  return mode === undefined || mode === 'auto' || mode === 'auto_width';
+}
+
 export interface TextLayerData {
   content: string;
   fontFamily: string;
@@ -221,11 +233,25 @@ export interface TextLayerData {
   color: ColorValue;  // structured foreground colour (wide-gamut currency)
   align: 'left' | 'center' | 'right';
   lineHeight: number;
+  /** Extra spacing inserted after each glyph, in canvas-local px (default 0) */
+  letterSpacing?: number;
+  /**
+   * Vertical alignment of the content block inside a fixed-size text box
+   * ('auto_width'/'auto_height' boxes hug the content, so only 'fixed'
+   * honors this). Default 'top'.
+   */
+  verticalAlign?: 'top' | 'middle' | 'bottom';
   italic?: boolean;
   underline?: boolean;
   strikethrough?: boolean;
-  /** Text box dimension mode: auto=expand to content, fixed=user-specified fixed dimensions */
-  boxMode: 'auto' | 'fixed';
+  /**
+   * Text box dimension mode:
+   * - 'auto': legacy alias of 'auto_width' (kept for persisted projects)
+   * - 'auto_width': point text — width and height both hug the content, no wrapping
+   * - 'auto_height': paragraph text — width locked to boxWidth, wraps, height grows
+   * - 'fixed': user-sized box, overflow clipped (no overflow badge)
+   */
+  boxMode: TextBoxMode;
   /** Fixed width specified by user in fixed mode (canvas local px) */
   boxWidth?: number;
   /** Fixed height specified by user in fixed mode (canvas local px) */

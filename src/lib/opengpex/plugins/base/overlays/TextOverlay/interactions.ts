@@ -17,14 +17,17 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionHandler, GeometryService, Layer, Frame, LocalRect, asLocalShape, asWorldRect } from '@opengpex/editor/core/types';
+import { InteractionHandler, InteractionEvent, GeometryService, Layer, Frame, LocalRect, asLocalShape, asWorldRect } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import { createTransformHandler, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import { ROTATE_CURSOR } from '@opengpex/editor/icons';
-import { CraftDrawerAPI, getReferenceFontSize } from '../../drawers/CraftDrawer/protocols';
+import { TEXT_LAYER_PADDING } from '@opengpex/editor/core/helpers/config';
+import { CraftDrawerAPI, getReferenceFontSize, getInitialTextBoxSize, TEXT_DEFAULT_LINE_HEIGHT } from '../../drawers/CraftDrawer/protocols';
 import type { PendingTextData } from '../../drawers/CraftDrawer/protocols';
-import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, _CMD_PLACE_UID, _CMD_EDIT_START_UID } from './protocols';
+import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, TEXT_BORDER_BAND_RATIO, _CMD_PLACE_UID, _CMD_EDIT_START_UID } from './protocols';
+import { TEXT_OVERLAY_SIGNAL_PLACE_MARQUEE, TEXT_OVERLAY_EVT_COMMIT_REQUEST } from './protocols';
+import type { PlaceMarqueeRect } from './protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
 import { fromHex, type ColorValue } from '@opengpex/editor/core/engine/color';
 
@@ -47,18 +50,51 @@ function findTextLayerAtPoint(geometry: GeometryService, frame: Frame, point: { 
   return hits.find((l: Layer) => l.type === 'text') || null;
 }
 
+/**
+ * Whether the pointer sits in the border band of the given layer. The band is
+ * proportional to the box's min side (TEXT_BORDER_BAND_RATIO) and straddles
+ * the border: 2/3 of its thickness outside the rect, 1/3 inside — hit-testing
+ * is the ring between the rect grown by the outward part and the rect shrunk
+ * by the inward part. Axis-aligned canvas-space approximation, consistent with
+ * the rest of this handler's rect math. Handles are excluded by the callers —
+ * this only answers "is it the border".
+ */
+export function isPointInLayerBorderBand(layer: Layer, frame: Frame, p: { x: number; y: number }): boolean {
+  const band = Math.min(layer.bounding.w, layer.bounding.h) * TEXT_BORDER_BAND_RATIO;
+  const outward = (band * 2) / 3;
+  const inward = band / 3;
+  const rectX = frame.canvas.w / 2 + layer.cx - layer.bounding.w / 2;
+  const rectY = frame.canvas.h / 2 + layer.cy - layer.bounding.h / 2;
+  const rectW = layer.bounding.w;
+  const rectH = layer.bounding.h;
+
+  const inOuter = p.x >= rectX - outward && p.x <= rectX + rectW + outward
+    && p.y >= rectY - outward && p.y <= rectY + rectH + outward;
+  if (!inOuter) return false;
+
+  const inInner = p.x >= rectX + inward && p.x <= rectX + rectW - inward
+    && p.y >= rectY + inward && p.y <= rectY + rectH - inward;
+  return !inInner;
+}
+
 // ─── TextMoveHandler ───────────────────────────────────────────────────────────
 
 /**
  * TextMoveHandler: Cmd/Ctrl + drag to move text layer
  *
  * In text craft mode (regardless of entering editing state), hold Meta/Ctrl key
- * and drag an existing text layer to move its position.
+ * and drag an existing text layer to move its position. Without a modifier the
+ * editing-state box belongs entirely to caret placement / text selection (the
+ * editing-state border-band drag path was removed); in the PRE-editing state a
+ * plain drag on the border band still moves the layer.
  *
  * Design considerations:
  * - Does not trigger entering/exiting editing state
  * - Cursor position remains after moving in editing state (only changes cx/cy)
- * - Uses InteractionTransaction to guarantee undo support
+ * - Independent undoable transaction: tx.begin() creates its own history step
+ *   that lands immediately at drag end (NOT silent) — a deliberate geometry
+ *   move is an undoable edit in its own right, ordered before the session's
+ *   CMD_MODIFY_COMMIT when both happen during one editing session.
  */
 export const createTextMoveHandler = (): InteractionHandler => {
   let startCanvas = { x: 0, y: 0 };
@@ -75,26 +111,49 @@ export const createTextMoveHandler = (): InteractionHandler => {
       if (e.state.interaction.interactionMode !== 'craft') return false;
       if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'text') return false;
 
-      // Must hold Cmd/Ctrl
-      const mouseEvent = e.nativeEvent as MouseEvent;
-      if (!mouseEvent.metaKey && !mouseEvent.ctrlKey) return false;
-
       // Exclude UI elements
+      const mouseEvent = e.nativeEvent as MouseEvent;
       const target = mouseEvent.target as HTMLElement;
       if (target.closest('button, a, input, [data-role="ui"]')) return false;
+      // Resize/rotate handles own their gestures (this handler's priority 170
+      // would otherwise swallow them), so a pointerdown on one must never
+      // become a move — with or without Cmd.
+      if (target.closest('[data-gizmo-handle], [data-gizmo-rotate]')) return false;
 
-      // Case 1: Layer being edited -> use as target directly
+      // Case 1: Layer being edited -> use as target directly.
+      // Editing state: ONLY Cmd/Ctrl + drag moves the layer. Every plain
+      // mousedown in the box — border band included — stays with the
+      // contenteditable (caret placement / text selection); border-band drag
+      // while typing was removed as a mis-drag source. Pre-edit band drag is
+      // Case 2 below.
       const editingId = e.state.interaction.signals[EDITING_TEXT_KEY] as string | null;
       if (editingId) {
         targetLayerId = editingId;
-        return true;
+        return mouseEvent.metaKey || mouseEvent.ctrlKey;
       }
 
-      // Case 2: Pre-editing state -> find text layer via hit detection
-      const hitLayer = findTextLayerAtPoint(e.geometry, e.activeFrame, e.point.canvas);
-      if (hitLayer) {
-        targetLayerId = hitLayer.id;
-        return true;
+      // Case 2: Pre-editing state.
+      // - Cmd/Ctrl + drag anywhere over a text layer (existing behaviour)
+      // - plain drag on the border band of a text layer (topmost wins);
+      //   the interior without Cmd falls through to the place handler
+      //   (click empty canvas to create / wake editing).
+      const hasCmd = mouseEvent.metaKey || mouseEvent.ctrlKey;
+      if (hasCmd) {
+        const hitLayer = findTextLayerAtPoint(e.geometry, e.activeFrame, e.point.canvas);
+        if (hitLayer) {
+          targetLayerId = hitLayer.id;
+          return true;
+        }
+        return false;
+      }
+      const order = e.activeFrame.layers.order;
+      for (let i = order.length - 1; i >= 0; i--) {
+        const layer = e.activeFrame.layers.byId[order[i]];
+        if (!layer || layer.type !== 'text' || !layer.visible) continue;
+        if (isPointInLayerBorderBand(layer, e.activeFrame, e.point.canvas)) {
+          targetLayerId = layer.id;
+          return true;
+        }
       }
 
       return false;
@@ -109,12 +168,11 @@ export const createTextMoveHandler = (): InteractionHandler => {
       startCanvas = { x: e.point.canvas.x, y: e.point.canvas.y };
       startLayerPos = { x: layer.cx, y: layer.cy };
 
+      // Non-silent: the gesture creates its own undo checkpoint (independent
+      // immediate transaction — the editing session's commit no longer carries
+      // geometry, so the move must be undoable on its own).
       tx = new InteractionTransaction(e);
-      const editingId = e.state.interaction.signals[EDITING_TEXT_KEY] as string | null;
-      // If the target layer is currently being edited, run silently to avoid creating
-      // intermediate undo checkpoints with unrasterized (empty assetId/src) temporary state.
-      const isSilent = !!(editingId && targetLayerId === editingId);
-      tx.begin(isSilent);
+      tx.begin();
 
       // Set grabbing onStart (fast-track, no React re-render)
       e.actions.fast.setCursor('grabbing');
@@ -126,10 +184,7 @@ export const createTextMoveHandler = (): InteractionHandler => {
       const dx = e.point.canvas.x - startCanvas.x;
       const dy = e.point.canvas.y - startCanvas.y;
 
-      const newCx = startLayerPos.x + dx;
-      const newCy = startLayerPos.y + dy;
-
-      tx.update({ cx: newCx, cy: newCy }, 'layer', targetLayerId);
+      tx.update({ cx: startLayerPos.x + dx, cy: startLayerPos.y + dy }, 'layer', targetLayerId);
     },
 
     onEnd: (e) => {
@@ -140,6 +195,7 @@ export const createTextMoveHandler = (): InteractionHandler => {
       targetLayerId = null;
 
       // If still holding Cmd/Ctrl when drag ends, restore to grab, otherwise reset to null
+      // (the border-band hover cursor re-evaluates on the next mousemove).
       const stillHoldingCmd = e.keys.meta;
       e.actions.fast.setCursor(stillHoldingCmd ? 'grab' : null);
     },
@@ -149,11 +205,30 @@ export const createTextMoveHandler = (): InteractionHandler => {
 // ─── TextResizeHandler ─────────────────────────────────────────────────────────
 
 /**
- * TextResizeHandler: Editing state text box scaling interaction handler
+ * Resolves the text layer a transform-gizmo handle belongs to. The pre-edit
+ * gizmo is rendered inside LayerOverlayItem wrapped in an element carrying
+ * `data-text-gizmo-layer=<layerId>`, so the hit DOM node identifies the target
+ * unambiguously (the editing-state gizmo was removed with the session-gizmo
+ * split — geometry changes happen either pre-edit here or via Cmd+Drag move).
+ */
+function resolveGizmoTargetLayer(e: InteractionEvent): Layer | null {
+  const target = e.nativeEvent.target as HTMLElement | null;
+  if (!target) return null;
+  const host = target.closest('[data-text-gizmo-layer]');
+  const layerId = host?.getAttribute('data-text-gizmo-layer');
+  if (!layerId) return null;
+  const layer = e.activeFrame.layers.byId[layerId];
+  return layer && layer.type === 'text' ? layer : null;
+}
+
+/**
+ * TextResizeHandler: pre-edit text box scaling interaction handler
  *
- * Only active in editing state, identifying drag direction via data-gizmo-handle attribute,
- * using createTransformHandler factory to implement standard 8-direction scaling.
- * Automatically switches to fixed boxMode after dragging.
+ * Active in text craft pre-edit state, identifying drag direction via
+ * data-gizmo-handle attribute (the gizmo is rendered by LayerOverlay for the
+ * force-shown text layer), using createTransformHandler factory to implement
+ * standard 8-direction scaling. Automatically switches to fixed boxMode after
+ * dragging. Non-silent: the resize lands as its own undoable history step.
  */
 export const createTextResizeHandler = (): InteractionHandler => {
   // Orientation-aware resize snapshot (non-null only for rotated/mirrored text):
@@ -161,38 +236,37 @@ export const createTextResizeHandler = (): InteractionHandler => {
   // local resize result back to world cx/cy. Mirrors MarkerOverlay's handler.
   let startCenter: { cx: number; cy: number } | null = null;
   let startLocalRect: { x: number; y: number; w: number; h: number } | null = null;
+  let targetLayerId: string | null = null;
 
   return createTransformHandler({
     id: 'text-resize',
     priority: 160,
-    // Always run silently because resize handle drags only occur in active text editing mode.
-    // This prevents checkpointing unrasterized (empty assetId/src) temporary states in the history stack.
-    silent: true,
 
     test: (e) => {
-      // Must be in craft mode to resize text layer
+      // Must be in text craft mode (the gizmo is force-shown only there)
       if (e.state.interaction.interactionMode !== 'craft') return null;
-
-      // Must have a text layer currently being edited
-      const editingId = e.state.interaction.signals[EDITING_TEXT_KEY] as string | null;
-      if (!editingId) return null;
+      if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'text') return null;
 
       // Only responds to resize handle clicks
       const target = e.nativeEvent.target as HTMLElement;
-      const handleEl = target.closest('[data-gizmo-handle]') as HTMLElement;
-      if (!handleEl) return null;
+      if (!target.closest('[data-gizmo-handle]')) return null;
 
+      const handleEl = target.closest('[data-gizmo-handle]') as HTMLElement;
       const handleType = handleEl.dataset.gizmoHandle;
-      // Exclude 'move' (clicks inside text box are handled by contenteditable)
+      // Exclude 'move' (clicks inside the box fall through to other handlers)
       if (!handleType || handleType === 'move') return null;
+
+      const layer = resolveGizmoTargetLayer(e);
+      if (!layer) return null;
+      targetLayerId = layer.id;
 
       return { category: 'resize', handle: handleType as ResizeHandle };
     },
 
     getInitialState: (e) => {
-      const editingId = e.state.interaction.signals[EDITING_TEXT_KEY] as string;
       const frame = e.activeFrame;
-      const layer = frame.layers.byId[editingId];
+      const layer = targetLayerId ? frame.layers.byId[targetLayerId] : null;
+      if (!layer) return { x: 0, y: 0, w: 0, h: 0 } as LocalRect;
       const canvas = frame.canvas;
 
       // Rotated / mirrored text → work in the layer's LOCAL axes. Origin is the
@@ -204,8 +278,7 @@ export const createTextResizeHandler = (): InteractionHandler => {
         return startLocalRect as LocalRect;
       }
 
-      // Axis-aligned text → canvas-local rect (original behaviour, keeps the
-      // canvas-space resize math byte-for-byte unchanged).
+      // Axis-aligned text → canvas-local rect.
       startCenter = null;
       startLocalRect = null;
       return {
@@ -223,8 +296,7 @@ export const createTextResizeHandler = (): InteractionHandler => {
     // cx/cy are supplied so the framework can project the local rect back into
     // canvas space for rotation-aware edge snapping (snapEdgeRotated).
     getOrientation: (e) => {
-      const editingId = e.state.interaction.signals[EDITING_TEXT_KEY] as string;
-      const layer = e.activeFrame.layers.byId[editingId];
+      const layer = targetLayerId ? e.activeFrame.layers.byId[targetLayerId] : null;
       if (!layer) return null;
       return { rotation: layer.rotation, flip: layer.flip, cx: layer.cx, cy: layer.cy };
     },
@@ -235,11 +307,10 @@ export const createTextResizeHandler = (): InteractionHandler => {
     }),
 
     onUpdate: (e, newRect, tx, context) => {
-      const editingId = e.state.interaction.signals[EDITING_TEXT_KEY] as string;
+      if (!targetLayerId) return;
       const frame = e.activeFrame;
       const canvas = frame.canvas;
-      // Get latest layer data from fast track (layer might be in fast track buffer during editing)
-      const layer = e.actions.fast.latestLayer(frame.id, editingId) || frame.layers.byId[editingId];
+      const layer = frame.layers.byId[targetLayerId];
       if (!layer) return;
 
       // Minimum size constraint
@@ -265,7 +336,7 @@ export const createTextResizeHandler = (): InteractionHandler => {
         newCx = worldCenter.x;
         newCy = worldCenter.y;
       } else {
-        // Axis-aligned path: canvas-local rect → world cx/cy (unchanged).
+        // Axis-aligned path: canvas-local rect → world cx/cy.
         newCx = newRect.x + finalW / 2 - canvas.w / 2;
         newCy = newRect.y + finalH / 2 - canvas.h / 2;
       }
@@ -281,10 +352,17 @@ export const createTextResizeHandler = (): InteractionHandler => {
           boxWidth: finalW,
           boxHeight: finalH,
         },
-      }, 'layer', editingId);
+      }, 'layer', targetLayerId);
     },
 
-    // No onEnd needed — autoCommit handles resize completion.
+    onEnd: () => {
+      targetLayerId = null;
+    },
+
+    onCancel: () => {
+      targetLayerId = null;
+    },
+    // No autoCommit concerns — the framework commits resize completion.
   });
 };
 
@@ -294,23 +372,22 @@ export const createTextResizeHandler = (): InteractionHandler => {
  * TextRotateHandler: drag the rotation handle to freely rotate the text layer.
  *
  * Priority 165 (> TextResizeHandler 160 > TextPlaceHandler 150): a pointerdown
- * on the rotate handle must win over resize / place. Gated to craft mode +
- * activeCraft==='text' + an editing text layer is active. The handle is a DOM
- * dot rendered by the overlay carrying `data-gizmo-rotate`.
+ * on the rotate handle must win over resize / place. Gated to text craft
+ * pre-edit state; the handle is a DOM dot rendered by LayerOverlay's text
+ * gizmo carrying `data-gizmo-rotate`.
  *
  * Math: identical to MarkerRotateHandler — atan2 delta → rotation.
  * Shift → snap to nearest 15°.
  *
- * Silent: true — same as TextResizeHandler, because rotate drags only occur in
- * active text editing mode. Prevents checkpointing unrasterized temporary states.
+ * Non-silent: the rotation lands as its own undoable history step.
  */
 export const createTextRotateHandler = (): InteractionHandler => {
   let rotateLayerId: string | null = null;
   let startAngleRad = 0;
   let startRotation = 0;
-  let tx: InteractionTransaction | null = null;
   let layerCx = 0;
   let layerCy = 0;
+  let tx: InteractionTransaction | null = null;
 
   return {
     id: 'text-rotate',
@@ -320,15 +397,13 @@ export const createTextRotateHandler = (): InteractionHandler => {
       if (e.state.interaction.interactionMode !== 'craft') return false;
       if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'text') return false;
 
-      // Must have a text layer currently being edited
-      const editingId = e.state.interaction.signals[EDITING_TEXT_KEY] as string | null;
-      if (!editingId) return false;
-
       const target = e.nativeEvent.target as HTMLElement;
-      const rotateEl = target.closest('[data-gizmo-rotate]') as HTMLElement | null;
-      if (!rotateEl) return false;
+      if (!target.closest('[data-gizmo-rotate]')) return false;
 
-      rotateLayerId = editingId;
+      const layer = resolveGizmoTargetLayer(e);
+      if (!layer) return false;
+
+      rotateLayerId = layer.id;
       return true;
     },
 
@@ -346,8 +421,9 @@ export const createTextRotateHandler = (): InteractionHandler => {
         e.point.world.x - layerCx,
       );
 
+      // Non-silent: own undoable history step (see TextMoveHandler).
       tx = new InteractionTransaction(e);
-      tx.begin(true); // silent, same as text-resize
+      tx.begin();
       e.actions.fast.setCursor(ROTATE_CURSOR);
     },
 
@@ -392,12 +468,150 @@ export const createTextRotateHandler = (): InteractionHandler => {
 
 // ─── TextPlaceHandler ──────────────────────────────────────────────────────────
 
+/** Pointer travel (px, canvas space) below which a press is a click, not a drag. */
+const PLACE_DRAG_THRESHOLD_PX = 5;
+
+/** Minimum box width for a click-created point text (just enough for the caret). */
+const POINT_TEXT_MIN_W_PX = 10;
+
+/** Minimum dragged box width (canvas px) — narrower drags clamp to this. */
+const DRAG_MIN_W_PX = 20;
+
 /**
  * TextPlaceHandler: Text placement interaction handler
  *
- * In text craft mode, click canvas to create a new text layer and enter editing state.
+ * Two-stage click arbitration (Figma-style): while a text layer is being
+ * edited, the FIRST canvas click only commits the running session (via the
+ * commit-request DOM event the InlineTextEditor listens for) and is consumed;
+ * the SECOND click on empty canvas starts creation.
+ *
+ * Click vs drag: onStart only records the anchor point. A drag ≥ 5px shows a
+ * dashed marquee (SIGNAL_PLACE_MARQUEE). On release, a click creates an
+ * auto_width point text; a mostly-horizontal drag creates an auto_height
+ * paragraph box (locked width, growing height); any two-axis drag creates a
+ * fixed box.
  */
 export const createTextPlaceHandler = (): InteractionHandler => {
+  // Drag gesture state (canvas-local anchor; null = no gesture in progress)
+  let startPoint: { x: number; y: number } | null = null;
+  let dragging = false;
+
+  /** Reads the user's pre-edit style preset for a new text layer. */
+  const readPendingStyle = (e: InteractionEvent) => {
+    const craftConfig = e.state.pluginConfig[CraftDrawerAPI.configKey] as
+      | { pendingTextData?: PendingTextData }
+      | undefined;
+    const pending = craftConfig?.pendingTextData;
+    const fontSize = pending?.fontSize || getReferenceFontSize(e.activeFrame.canvas.w, e.activeFrame.canvas.h);
+    const lineHeight = pending?.lineHeight || TEXT_DEFAULT_LINE_HEIGHT;
+    return { pending, fontSize, lineHeight };
+  };
+
+  const readPendingColor = (e: InteractionEvent): ColorValue => {
+    const colorConfig = e.state.pluginConfig[ColorOptionsAPI.configKey] as { pendingColor?: ColorValue } | undefined;
+    return colorConfig?.pendingColor ?? fromHex('#FFFFFF');
+  };
+
+  const buildTextLayer = (
+    e: InteractionEvent,
+    geometry: { cx: number; cy: number; w: number; h: number },
+    box: { mode: 'auto_width' | 'auto_height' | 'fixed'; boxWidth?: number; boxHeight?: number },
+  ): Layer => {
+    const frame = e.activeFrame;
+    const { pending, fontSize, lineHeight } = readPendingStyle(e);
+    const layersArray = frame.layers.order.map(id => frame.layers.byId[id]);
+    return LayerFactory.getNewLayer({
+      name: LayerFactory.getNewLayerName(layersArray, 'Text'),
+      type: 'text',
+      cx: geometry.cx,
+      cy: geometry.cy,
+      bounding: { w: geometry.w, h: geometry.h },
+      visible: true,
+      textData: {
+        content: '',
+        fontFamily: pending?.fontFamily || 'Inter',
+        fontSize,
+        fontWeight: pending?.fontWeight || 400,
+        color: readPendingColor(e),
+        align: pending?.align || 'left',
+        lineHeight,
+        letterSpacing: pending?.letterSpacing || 0,
+        verticalAlign: pending?.verticalAlign || 'top',
+        italic: pending?.italic || false,
+        underline: pending?.underline || false,
+        strikethrough: pending?.strikethrough || false,
+        boxMode: box.mode,
+        boxWidth: box.boxWidth,
+        boxHeight: box.boxHeight,
+      },
+    });
+  };
+
+  /** Click (< 5px travel): caret-anchored auto_width point text. */
+  const createPointText = (e: InteractionEvent, point: { x: number; y: number }) => {
+    const frame = e.activeFrame;
+    const { fontSize, lineHeight } = readPendingStyle(e);
+    const initH = getInitialTextBoxSize(fontSize, lineHeight, frame.canvas.w).h;
+    // Caret-anchored placement: inside the editor, contenteditable has
+    // padding-left: TEXT_LAYER_PADDING.x (4px). To align the initial flashing
+    // caret (instead of the outer dashed border) precisely under the pointer,
+    // offset the box origin leftward by the horizontal padding.
+    const boxLocalX = Math.max(0, point.x - TEXT_LAYER_PADDING.x);
+    const initW = Math.max(
+      POINT_TEXT_MIN_W_PX,
+      Math.min(Math.round(fontSize * 1.5), frame.canvas.w - boxLocalX),
+    );
+    // Convert boxLocalX to world space so snapRectToPixel and cx/cy aren't
+    // shifted by (+canvas.w/2, +canvas.h/2).
+    const worldPoint = e.geometry.space.localToWorld(boxLocalX, point.y, frame);
+    const alignedRect = e.geometry.snapping.snapRectToPixel(
+      asWorldRect({ x: worldPoint.x, y: worldPoint.y - initH / 2, w: initW, h: initH }),
+      frame.canvas
+    );
+    const center = e.geometry.space.getRectCenter(alignedRect);
+    const layer = buildTextLayer(
+      e,
+      { cx: center.x, cy: center.y, w: initW, h: initH },
+      { mode: 'auto_width' },
+    );
+    e.actions.executeCommand(CMD_PLACE_UID, { frameId: frame.id, layer });
+  };
+
+  /** Drag (≥ 5px travel): marquee rect → auto_height / fixed paragraph box. */
+  const createDraggedBox = (e: InteractionEvent, start: { x: number; y: number }, end: { x: number; y: number }) => {
+    const frame = e.activeFrame;
+    const { fontSize, lineHeight } = readPendingStyle(e);
+    const lineH = getInitialTextBoxSize(fontSize, lineHeight, frame.canvas.w).h;
+
+    const dx = Math.abs(end.x - start.x);
+    const dy = Math.abs(end.y - start.y);
+    const w = Math.max(DRAG_MIN_W_PX, Math.round(dx));
+    // Horizontal-only drag → auto_height (height grows with lines); any
+    // significant vertical travel → fixed box clipped to the dragged height.
+    const isHorizontal = dy < PLACE_DRAG_THRESHOLD_PX;
+    const h = isHorizontal ? lineH : Math.max(lineH, Math.round(dy));
+
+    const rectX = Math.min(start.x, end.x);
+    const rectY = Math.min(start.y, end.y);
+    // Pixel alignment: snap the dragged size, keep the centre on the pointer path.
+    const cx = rectX + w / 2;
+    const cy = rectY + h / 2;
+    const worldCenter = e.geometry.space.localToWorld(cx, cy, frame);
+
+    const layer = buildTextLayer(
+      e,
+      { cx: worldCenter.x, cy: worldCenter.y, w, h },
+      isHorizontal
+        ? { mode: 'auto_height', boxWidth: w }
+        : { mode: 'fixed', boxWidth: w, boxHeight: h },
+    );
+    e.actions.executeCommand(CMD_PLACE_UID, { frameId: frame.id, layer });
+  };
+
+  const clearMarquee = (e: InteractionEvent) => {
+    e.actions.setStateSignal(TEXT_OVERLAY_SIGNAL_PLACE_MARQUEE, null);
+  };
+
   return {
     id: 'text-place',
     priority: 150,
@@ -407,12 +621,9 @@ export const createTextPlaceHandler = (): InteractionHandler => {
       if (e.state.interaction.interactionMode !== 'craft') return false;
       if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'text') return false;
 
-      // No response if existing layer is being edited (taken over by InlineTextEditor)
-      if (e.state.interaction.signals[EDITING_TEXT_KEY]) return false;
-
-      // Exclude UI element clicks and resize handles
+      // Exclude UI element clicks, the live editor, and gizmo handles
       const target = e.nativeEvent.target as HTMLElement;
-      if (target.closest('button, a, input, [data-role="ui"], [contenteditable], [data-handle], [data-gizmo-handle]')) return false;
+      if (target.closest('button, a, input, [data-role="ui"], [contenteditable], [data-handle], [data-gizmo-handle], [data-gizmo-rotate]')) return false;
 
       // Click within canvas range
       const frame = e.activeFrame;
@@ -424,7 +635,17 @@ export const createTextPlaceHandler = (): InteractionHandler => {
     onStart: (e) => {
       const frame = e.activeFrame;
 
-      // Check if clicking an existing text layer -> wake up editing
+      // ── Two-stage click arbitration ──
+      // A session is running: this click only commits it and is consumed —
+      // creating a box on the same click would throw away the caret focus the
+      // user just finished with. The editor owns commit; this handler only
+      // requests it. (NOT silent-creating a layer here.)
+      if (e.state.interaction.signals[EDITING_TEXT_KEY]) {
+        window.dispatchEvent(new CustomEvent(TEXT_OVERLAY_EVT_COMMIT_REQUEST));
+        return;
+      }
+
+      // Clicking an existing text layer -> wake up editing
       const hitTextLayer = findTextLayerAtPoint(e.geometry, frame, e.point.canvas);
       if (hitTextLayer) {
         // Enter editing state via command system (automatically establish undo baseline)
@@ -435,66 +656,46 @@ export const createTextPlaceHandler = (): InteractionHandler => {
         return;
       }
 
-      // No hit -> create new text layer via LayerFactory (automatically fill in all defaults)
-      // Pixel alignment: use snapRectToPixel to align initial bounding box to canvas physical grid
-      // (consistent with LayerMoveHandler onEnd)
-      const rawCx = e.point.world.x;
-      const rawCy = e.point.world.y;
-      const initW = 100;
-      const initH = 34;
-      const alignedRect = e.geometry.snapping.snapRectToPixel(
-        asWorldRect({ x: rawCx - initW / 2, y: rawCy - initH / 2, w: initW, h: initH }),
-        frame.canvas
-      );
-      const alignedCenter = e.geometry.space.getRectCenter(alignedRect);
-      const alignedCx = alignedCenter.x;
-      const alignedCy = alignedCenter.y;
-
-      const colorConfig = e.state.pluginConfig[ColorOptionsAPI.configKey] as { pendingColor?: ColorValue } | undefined;
-      const initialColor: ColorValue = colorConfig?.pendingColor ?? fromHex('#FFFFFF');
-
-      // Read pending text style from CraftDrawer's pluginConfig (user's pre-edit choices)
-      const craftConfig = e.state.pluginConfig[CraftDrawerAPI.configKey] as { pendingTextData?: PendingTextData } | undefined;
-      const pending = craftConfig?.pendingTextData;
-
-      const layersArray = frame.layers.order.map(id => frame.layers.byId[id]);
-      const smartName = LayerFactory.getNewLayerName(layersArray, 'Text');
-
-      const textLayer = LayerFactory.getNewLayer({
-        name: smartName,
-        type: 'text',
-        cx: alignedCx,
-        cy: alignedCy,
-        bounding: { w: initW, h: initH },  // reasonable initial size, will be updated to actual content size during editing
-        visible: true,
-        textData: {
-          content: '',
-          fontFamily: pending?.fontFamily || 'Inter',
-          fontSize: pending?.fontSize || getReferenceFontSize(frame.canvas.w, frame.canvas.h),
-          fontWeight: pending?.fontWeight || 400,
-          color: initialColor,
-          align: pending?.align || 'left',
-          lineHeight: pending?.lineHeight || 1.4,
-          italic: pending?.italic || false,
-          underline: pending?.underline || false,
-          strikethrough: pending?.strikethrough || false,
-          boxMode: 'auto',
-        },
-      });
-
-      // Place layer via command system (automatically establish undo baseline)
-      e.actions.executeCommand(CMD_PLACE_UID, {
-        frameId: frame.id,
-        layer: textLayer,
-      });
+      // Empty canvas: record the anchor only — click vs drag is decided at
+      // onEnd so the marquee can preview the dragged box.
+      startPoint = { x: e.point.canvas.x, y: e.point.canvas.y };
+      dragging = false;
     },
 
-    onMove: () => {
-      // Text tool does not require dragging
+    onMove: (e) => {
+      if (!startPoint) return;
+      const dx = e.point.canvas.x - startPoint.x;
+      const dy = e.point.canvas.y - startPoint.y;
+      if (!dragging && Math.hypot(dx, dy) < PLACE_DRAG_THRESHOLD_PX) return;
+      dragging = true;
+
+      const rect: PlaceMarqueeRect = {
+        x: Math.min(startPoint.x, e.point.canvas.x),
+        y: Math.min(startPoint.y, e.point.canvas.y),
+        w: Math.abs(dx),
+        h: Math.abs(dy),
+      };
+      e.actions.setStateSignal(TEXT_OVERLAY_SIGNAL_PLACE_MARQUEE, rect);
     },
 
-    onEnd: () => {
-      // Creation already completed in onStart
+    onEnd: (e) => {
+      if (!startPoint) return; // arbitration or edit-start consumed the gesture
+      const start = startPoint;
+      startPoint = null;
+      clearMarquee(e);
+
+      if (dragging) {
+        dragging = false;
+        createDraggedBox(e, start, { x: e.point.canvas.x, y: e.point.canvas.y });
+      } else {
+        createPointText(e, start);
+      }
+    },
+
+    onCancel: (e) => {
+      startPoint = null;
+      dragging = false;
+      clearMarquee(e);
     },
   };
 };

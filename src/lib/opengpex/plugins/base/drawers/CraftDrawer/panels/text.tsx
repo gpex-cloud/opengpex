@@ -20,7 +20,7 @@
 "use client";
 
 import React from "react";
-import { AlignLeft, AlignCenter, AlignRight } from "lucide-react";
+import { AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical } from "lucide-react";
 import { ColorPickerPro } from "@opengpex/editor/widgets/ColorPickerPro";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import { FontPicker } from "@opengpex/editor/widgets/FontPicker";
@@ -318,6 +318,58 @@ export const TextPanel = React.memo(function TextPanel() {
             {(textData?.lineHeight || 1.4).toFixed(1)}
           </span>
         </div>
+
+        {/* Letter Spacing (canvas-local px, symmetric around 0) */}
+        <div className="flex items-center gap-2 px-1">
+          <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
+            Spacing
+          </span>
+          <input
+            type="range"
+            min="-5"
+            max="30"
+            step="0.5"
+            value={textData?.letterSpacing || 0}
+            onChange={(e) => updateTextDataLive({ letterSpacing: Number(e.target.value) })}
+            onMouseUp={(e) => {
+              // Commit undoable snapshot when released (generates independent undo point in non-editing state)
+              updateTextData({ letterSpacing: Number(e.currentTarget.value) });
+              e.currentTarget.blur();
+            }}
+            onTouchEnd={(e) => {
+              updateTextData({ letterSpacing: Number(e.currentTarget.value) });
+              e.currentTarget.blur();
+            }}
+            className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
+          />
+          <span className="text-[10px] font-black w-8 text-right tabular-nums text-indigo-600 dark:text-indigo-400">
+            {(textData?.letterSpacing || 0).toFixed(1)}
+          </span>
+        </div>
+
+        {/* Vertical Align: content block position inside a fixed-size box */}
+        {textData?.boxMode === "fixed" && (
+          <div className="flex items-center gap-2 px-1">
+            <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
+              V-Align
+            </span>
+            <div className="flex items-center gap-1">
+              {(["top", "middle", "bottom"] as const).map((va) => (
+                <FancyButton iconOnly shape="rect"
+                  key={va}
+                  onClick={() => updateTextData({ verticalAlign: va })}
+                  active={(textData?.verticalAlign || "top") === va}
+                  variant="ghost"
+                  className="w-8 h-7 !rounded-lg text-[10px]"
+                >
+                  {va === "top" && <AlignStartVertical size={13} />}
+                  {va === "middle" && <AlignCenterVertical size={13} />}
+                  {va === "bottom" && <AlignEndVertical size={13} />}
+                </FancyButton>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -38,9 +38,9 @@
  * retired.
  *
  * RASTERIZE is ALSO gone (20260912 dead-code cleanup): the Worker-side
- * `RasterizeHandler` never received a job. Text rasterization runs on the MAIN
- * thread (`RasterizeDispatcher.layer` → OffscreenCanvas + `drawLayerInstance`)
- * because Worker `FontFace` access is unreliable; the `mask` sub-path mapped to a
+ * `RasterizeHandler` never received a job. The main-thread text rasterization
+ * path (`RasterizeDispatcher.layer`) was itself retired on 20261007 when text
+ * moved fully to the GPU vector spine; the `mask` sub-path mapped to a
  * `WorkerProxy.bakeMasks` facade that was never implemented or called.
  *
  * The Worker's surviving remit is decode / resample /

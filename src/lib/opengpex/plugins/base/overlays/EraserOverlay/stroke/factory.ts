@@ -77,7 +77,18 @@ function createMaskSession(
   // Find target layer for mask editing
   const targetLayerInfo = findEraserTarget(frame);
   if (!targetLayerInfo) {
-    console.warn('[EraserOverlay] No valid target layer for mask editing');
+    // Surface the rejection as a HUD hint (same channel as the layer commands):
+    // the common causes are an explicitly locked or hidden active layer; anything
+    // else (no active layer, no pixel content / empty bounding) stays generic.
+    const activeLayer = frame.activeLayerId ? frame.layers.byId[frame.activeLayerId] : null;
+    const message = !activeLayer
+      ? 'No editable layer selected'
+      : activeLayer.locked
+        ? 'Layer is locked'
+        : !activeLayer.visible
+          ? 'Layer is hidden'
+          : 'No valid target layer for mask editing';
+    e.actions.setInteraction({ hud: { message, type: 'error' } });
     return null;
   }
   const targetLayer = targetLayerInfo.layer;

@@ -40,7 +40,6 @@ import { CompositeDispatcher } from './dispatch/CompositeDispatcher';
 import type { CompositeRequest } from './dispatch/CompositeDispatcher';
 import { ExportDispatcher } from './dispatch/ExportDispatcher';
 import type { ExportRequest } from './dispatch/ExportDispatcher';
-import { RasterizeDispatcher } from './dispatch/RasterizeDispatcher';
 import { sourceBitmapCache } from './sources/SourceBitmapCache';
 import { download } from './utils/pixel-utils';
 import type { CompositedImage, SampledPixels } from './types';
@@ -83,7 +82,6 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
   const compositeDispatcher = new CompositeDispatcher(geometry, assets, files);
   // Unified document export, symmetric to composite.
   const exportDispatcher = new ExportDispatcher(geometry, assets, files);
-  const rasterizeDispatcher = new RasterizeDispatcher(bridge, assets);
   // ICC colour conversion (and all other vips-backed file transcoding) now lives
   // in the files-layer shared lib-vips worker (`core/files/shared/lib-vips.ts`).
   // The engine Worker no longer loads wasm-vips at all (20260912 migration).
@@ -220,17 +218,6 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
       },
       renderForExport: (request: ExportRequest): Promise<EncodeSource> => {
         return exportDispatcher.export(request);
-      },
-    },
-
-    // ════════════════════════════════════════════════════════════
-    // 4. Rasterize namespace
-    // ════════════════════════════════════════════════════════════
-    rasterize: {
-      async layer(layer: Layer, opts?: { dpr?: number }) {
-        const rasterized = await rasterizeDispatcher.layer(layer, opts);
-        const { assetId, url } = await assets.storeBundle(rasterized);
-        return { assetId, url };
       },
     },
 

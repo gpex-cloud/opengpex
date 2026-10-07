@@ -39,6 +39,7 @@ import type { CompositeContext } from '../RenderGraph';
 export type PreparedSource = {
   texture: LayerTexture;
   suppressAdjust: boolean;
+  vectorTransient?: boolean;
   sourceIsLinear: boolean;
   sourceIsWorkingGamut: boolean;
   sourceIntentApplied: boolean;

@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.0-beta.10
+
+- Text: text layers now render in real time as crisp vector typography, staying sharp at any zoom level and in high-resolution exports without pixelation
+
+---
+
 ## v2.0.0-beta.9
 
 - Anti-aliasing toggle is now available independently for selection, eraser, restore, marker, and brush tools, with crisp hard edges when off and smooth edges when on

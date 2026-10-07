@@ -63,6 +63,22 @@ export interface VectorRenderContext {
 export interface VectorRenderArgs {
   readonly params: VectorParams;
   readonly backdrop?: GPUTextureView;
+  /**
+   * Target PHYSICAL density (texels per logical px) of the transient the
+   * strategy draws into — `max(exportScale)` on the spine's sizing path
+   * (1 on the interactive composite). Resolution-dependent strategies (the
+   * text glyph atlas quantizes it into a rasterization band) read this;
+   * analytic strategies (sdf/stroke) ignore it — their `fwidth`/geometry AA
+   * resolves at whatever texel density the transient happens to have.
+   */
+  readonly density?: number;
+  /**
+   * Opaque per-composite token: a fresh object minted by `prepareVectorSources`
+   * for every composite invocation. Stateful strategies use it as a FRAME
+   * boundary (the text atlas applies deferred Paging+Flush evictions exactly
+   * once per frame, never mid-frame).
+   */
+  readonly frameToken?: object;
 }
 
 export interface VectorRenderer {

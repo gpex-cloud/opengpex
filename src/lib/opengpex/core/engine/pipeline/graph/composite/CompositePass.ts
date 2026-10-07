@@ -40,7 +40,7 @@ import {
   LAYER_RENDER_INTENT_SHIFT,
 } from '@opengpex/editor/core/engine/gpu/shaders/layer';
 import { resolveAdjustBindGroup as resolveAdjust } from '../support/adjustBindGroup';
-import { resolveLayerGeometry, effectiveScale } from '../support/layerGeometry';
+import { resolveLayerGeometry, resolveLayerDprScale, effectiveScale } from '../support/layerGeometry';
 import { resolveVmaskUniform } from '../support/vmaskUniform';
 import { isSourceLinear } from '../support/sourceDomain';
 import { resolveSourceGamutId } from '../support/sourceGamut';
@@ -87,6 +87,8 @@ export interface DrawLayerParams {
    * applying the grade twice.
    */
   readonly suppressAdjust?: boolean;
+  /** `texture` is a vector transient — UV ratio derives from the texture, not `layer.dprScale`. */
+  readonly vectorTransient?: boolean;
   /**
    * The `texture` already holds LINEAR light because the pipeline produced it
    * (`AdjustPrePass` bake and/or `FilterPass` output), regardless of the original
@@ -260,7 +262,7 @@ export class CompositePass {
       layer,
       texture.width,
       texture.height,
-      layer.dprScale ?? 1,
+      resolveLayerDprScale(layer, texture.width, params.vectorTransient),
     );
 
     // ⚠️ POT-BUCKET UV FIX: `resolveLayerGeometry` computes UVs in CONTENT-relative

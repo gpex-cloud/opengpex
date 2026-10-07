@@ -27,13 +27,15 @@ import * as P from './protocols';
  * TextOverlay Plugin: Text inline editing DOM overlay
  *
  * Render text editor (contenteditable) in STAGE_OVERLAY layer.
- * Activated when activeCraft === 'text', providing click-to-place + inline editing capabilities.
+ * Activated when activeCraft === 'text', providing click/drag-to-place + inline
+ * editing capabilities with two-stage click arbitration (click empty canvas
+ * while editing commits the session; the next click creates).
  *
  * Interaction priority chain:
- * - text-move (170): Cmd/Ctrl + drag to move text layer
- * - text-rotate (165): drag rotation handle to freely rotate
- * - text-resize (160): editing state resize handles scale
- * - text-place (150): click-to-place/wake up editing
+ * - text-move (170): Cmd/Ctrl + drag to move text layer (independent undoable transaction)
+ * - text-rotate (165): pre-edit drag of the LayerOverlay rotation handle
+ * - text-resize (160): pre-edit drag of the LayerOverlay resize handles
+ * - text-place (150): two-stage arbitration + click/drag-to-place
  */
 export const plugin: EditorPlugin = {
   manifest: {
@@ -67,6 +69,12 @@ export const plugin: EditorPlugin = {
       name: 'Editing Text Layer ID',
       defaultValue: null,
       scope: 'public',
+    },
+    {
+      id: P.SIGNAL_PLACE_MARQUEE,
+      name: 'Text Place Marquee Rect',
+      defaultValue: null,
+      scope: 'private',
     },
   ],
 };

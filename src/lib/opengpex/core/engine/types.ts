@@ -103,11 +103,3 @@ export interface ResampledImage extends ImageAssetPayload {
   readonly bounds: Rect;
   readonly dimensions: { readonly w: number; readonly h: number };
 }
-
-/**
- * RasterizedImage — the plain-data product of `RasterizeDispatcher.layer()`.
- * Replaces the OOP `RasterizeResult` wrapper.
- */
-export interface RasterizedImage extends ImageAssetPayload {
-  readonly bounds: Rect;
-}

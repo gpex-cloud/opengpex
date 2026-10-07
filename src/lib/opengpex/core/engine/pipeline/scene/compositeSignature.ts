@@ -132,12 +132,19 @@ function layerSig(layer: LayerNode, opts: CompositeSignatureOptions): string {
     srcSig = `raster:${layer.source.assetId}:${opts.getAssetEpoch(layer.source.assetId)}:${trc}`;
   } else {
     // Vector source: no asset epoch — the geometry/colour params ARE the pixels.
-    // Discriminate on `renderer` so the two strategies' param blobs never collide.
+    // Discriminate on `renderer` so the three strategies' param blobs never collide.
     // All fields are plain numbers/arrays, so JSON is deterministic; any style/
-    // geometry edit changes the token and re-composites.
+    // geometry edit changes the token and re-composites. The text layout's
+    // per-char x offsets (`charX`) are DERIVED data (prefix measures of the line
+    // text under the same metrics) — excluded to keep the signature compact.
     const src = layer.source;
-    const params = src.renderer === 'sdf' ? src.sdf : src.stroke;
-    srcSig = `vector:${src.renderer}:${JSON.stringify(params)}`;
+    const params =
+      src.renderer === 'sdf'
+        ? src.sdf
+        : src.renderer === 'stroke'
+          ? src.stroke
+          : src.text;
+    srcSig = `vector:${src.renderer}:${JSON.stringify(params, (k, v) => (k === 'charX' ? undefined : v))}`;
   }
 
   // adjustments/filters are small declarative arrays; JSON is

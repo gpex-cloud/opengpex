@@ -82,6 +82,9 @@ export function prepareVectorSources(
   exportScale: readonly [number, number],
 ): void {
   const { device, pipelineCache, bufferRing, texturePool, workingFormat, scratch } = ctx;
+  // One opaque token per composite invocation — strategies use it as a frame
+  // boundary (the text atlas applies deferred flushes once per frame).
+  const frameToken: object = {};
   const vectorCtx: VectorRenderContext = {
     device,
     pipelineCache,
@@ -161,7 +164,7 @@ export function prepareVectorSources(
     // BEFORE the render pass opens so a compute-based strategy can encode its prepass —
     // WebGPU forbids beginning a compute pass while a render pass is active.
     const renderer = resolveVectorRenderer(source.renderer);
-    renderer.encodePrepass?.(encoder, vectorCtx, { params: source });
+    renderer.encodePrepass?.(encoder, vectorCtx, { params: source, frameToken });
 
     const vectorPass = encoder.beginRenderPass({
       label: `Vector Pass (${layer.id})`,
@@ -173,13 +176,21 @@ export function prepareVectorSources(
     // Viewport = the VALID content rect; the pooled texture may be POT-larger, and
     // downstream sampling is bounded to [0, maxU]×[0, maxV].
     vectorPass.setViewport(0, 0, reqW, reqH, 0, 1);
-    renderer.render(vectorPass, vectorCtx, { params: source });
+    // Density = the transient's physical texels per logical px. Resolution-
+    // DEPENDENT strategies (text: glyph atlas rasterization band) read it;
+    // analytic ones (sdf/stroke) ignore it and stay sharp at any texel count.
+    renderer.render(vectorPass, vectorCtx, {
+      params: source,
+      density: Math.max(scale[0], scale[1]),
+      frameToken,
+    });
     vectorPass.end();
 
     // The strategy resolved colour AND domain: straight-alpha working-gamut linear light.
     const vectorSource: PreparedSource = {
       texture: transient,
       suppressAdjust: false,
+      vectorTransient: true,
       sourceIsLinear: true,
       sourceIsWorkingGamut: true,
       sourceIntentApplied: true,

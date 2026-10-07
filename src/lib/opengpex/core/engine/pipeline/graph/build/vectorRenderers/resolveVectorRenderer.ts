@@ -34,6 +34,7 @@ import type { VectorRendererId } from '../../../scene/Scene';
 import type { VectorRenderer } from './VectorRenderer';
 import { sdfRenderer } from './SdfRenderer';
 import { strokeRenderer } from './StrokeRenderer';
+import { textRenderer } from './TextRenderer';
 
 export function resolveVectorRenderer(id: VectorRendererId): VectorRenderer {
   switch (id) {
@@ -41,5 +42,7 @@ export function resolveVectorRenderer(id: VectorRendererId): VectorRenderer {
       return sdfRenderer;
     case 'stroke':
       return strokeRenderer;
+    case 'text':
+      return textRenderer;
   }
 }

@@ -19,9 +19,13 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, Layer, Frame } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, Layer, Frame, asLocalShape } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
+import { isAutoWidthMode } from '@opengpex/editor/core/types/models';
+import { TEXT_LAYER_PADDING } from '@opengpex/editor/core/helpers/config';
+import { wrapText } from '@opengpex/editor/core/engine/text/textLayout';
+import { compensateCenterX, compensateCenterY } from './anchor';
 import * as P from './protocols';
 
 // ─── Auto-grouping helpers ───────────────────────────────────────────────────
@@ -181,24 +185,103 @@ const editStartCommand: EditorCommand<{ frameId: string; layerId: string }, void
  *
  * undoable: true → Automatically establish SIGNAL_COMMIT undo baseline before execution.
  * Only used for attribute modifications in non-editing state (editing state modifications should go directly to updateLayer to avoid fragmented snapshots).
+ *
+ * Text layers render on the GPU from `textData` (vector spine), so a style
+ * patch only needs the model update — no baked asset to refresh. Auto-mode
+ * boxes are re-measured here, mirroring the editing commit's DOM measurement
+ * (line-box model + padding, top-left anchored), so a larger font is never
+ * clipped by the old bounding.
  */
 const updatePropertiesCommand: EditorCommand<{ frameId: string; layerId: string; patch: Partial<TextLayerData> }, void> = {
   id: P.CMD_UPDATE_PROPERTIES,
   name: 'Update Text Properties',
   undoable: true,
-  execute: (ctx: EditorContextValue, payload: { frameId: string; layerId: string; patch: Partial<TextLayerData> }) => {
+  execute: (ctx: EditorContextValue, payload: { frameId: string; layerId: string; patch: Partial<TextLayerData> }): void => {
     const frame = ctx.state.frames.byId[payload.frameId];
     const layer = frame?.layers.byId[payload.layerId];
     if (!frame || !layer || !layer.textData) return;
 
+    const textData: TextLayerData = { ...layer.textData, ...payload.patch };
+
+    let bounding = layer.bounding;
+    let cx = layer.cx;
+    let cy = layer.cy;
+    const mode = textData.boxMode || 'auto';
+    if (isAutoWidthMode(mode)) {
+      const measured = measureTextBounding(textData);
+      if (measured.w !== bounding.w || measured.h !== bounding.h) {
+        // Align-aware anchor compensation — same formula the editing commit
+        // path uses (left edge / centre / right edge per textAlign; the top
+        // edge anchors vertical growth).
+        cx = compensateCenterX(layer.cx, bounding.w, measured.w, textData.align);
+        cy = compensateCenterY(layer.cy, bounding.h, measured.h);
+        bounding = measured;
+      }
+    } else if (mode === 'auto_height') {
+      // Width is locked (boxWidth); re-measure only the wrapped height so a
+      // style change never clips the paragraph.
+      const measured = measureTextBounding(textData, textData.boxWidth || bounding.w);
+      if (measured.h !== bounding.h) {
+        cy = compensateCenterY(layer.cy, bounding.h, measured.h);
+        bounding = { w: bounding.w, h: measured.h };
+      }
+    }
+    // 'fixed': the user owns the box — never re-measured here.
+    const visibleShape = asLocalShape({ x: 0, y: 0, w: bounding.w, h: bounding.h });
+
     ctx.actions.updateLayer(payload.frameId, payload.layerId, {
-      textData: {
-        ...layer.textData,
-        ...payload.patch,
-      },
+      textData,
+      bounding,
+      visibleShape,
+      cx,
+      cy,
     });
   },
 };
+
+/**
+ * Measure the content bounding of a text layer, mirroring the DOM line-box
+ * model the InlineTextEditor measurement produces: one line box of
+ * `fontSize × lineHeight` per content line, plus padding on both axes.
+ * With `wrapWidth` (auto_height mode) lines wrap at the locked width first.
+ * Slightly generous is fine — it only has to never clip the glyphs.
+ */
+function measureTextBounding(td: TextLayerData, wrapWidth?: number): { w: number; h: number } {
+  const ctx = getMeasureCtx();
+  const fontStyle = td.italic ? 'italic' : 'normal';
+  ctx.font = `${fontStyle} ${td.fontWeight || 400} ${td.fontSize || 24}px ${td.fontFamily || 'sans-serif'}`;
+  // Shared measure context: always reset so a previous layer's spacing never leaks in.
+  if ('letterSpacing' in ctx) ctx.letterSpacing = `${td.letterSpacing || 0}px`;
+  const lineH = (td.fontSize || 24) * (td.lineHeight || 1.4);
+  let lineCount = 0;
+  let maxLineW = 0;
+  for (const paragraph of (td.content || '').split('\n')) {
+    const lines = wrapWidth !== undefined
+      ? wrapText(ctx, paragraph, wrapWidth - TEXT_LAYER_PADDING.x * 2)
+      : [paragraph];
+    lineCount += lines.length;
+    for (const line of lines) maxLineW = Math.max(maxLineW, ctx.measureText(line).width);
+  }
+  if (wrapWidth !== undefined) {
+    // auto_height: the width is locked; only the height follows the content.
+    return {
+      w: wrapWidth,
+      h: Math.max(Math.ceil(lineCount * lineH) + TEXT_LAYER_PADDING.y * 2, 20),
+    };
+  }
+  return {
+    w: Math.max(Math.ceil(maxLineW) + TEXT_LAYER_PADDING.x * 2, 4),
+    h: Math.max(Math.ceil(lineCount * lineH) + TEXT_LAYER_PADDING.y * 2, 20),
+  };
+}
+
+let measureCtx: CanvasRenderingContext2D | null = null;
+function getMeasureCtx(): CanvasRenderingContext2D {
+  if (!measureCtx) {
+    measureCtx = document.createElement('canvas').getContext('2d')!;
+  }
+  return measureCtx;
+}
 
 /**
  * cmd.modify_commit: Commits a modify session with full layer patch

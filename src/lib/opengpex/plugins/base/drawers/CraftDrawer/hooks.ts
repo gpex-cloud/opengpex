@@ -143,6 +143,8 @@ const DEFAULT_TEXT_STYLE: Required<PendingTextData> = {
   fontWeight: 400,
   align: 'left',
   lineHeight: 1.4,
+  letterSpacing: 0,
+  verticalAlign: 'top',
   italic: false,
   underline: false,
   strikethrough: false,
@@ -219,6 +221,8 @@ export function useTextPanel() {
         if (patch.fontWeight !== undefined) pendingPatch.fontWeight = patch.fontWeight;
         if (patch.align !== undefined) pendingPatch.align = patch.align;
         if (patch.lineHeight !== undefined) pendingPatch.lineHeight = patch.lineHeight;
+        if (patch.letterSpacing !== undefined) pendingPatch.letterSpacing = patch.letterSpacing;
+        if (patch.verticalAlign !== undefined) pendingPatch.verticalAlign = patch.verticalAlign;
         if (patch.italic !== undefined) pendingPatch.italic = patch.italic;
         if (patch.underline !== undefined) pendingPatch.underline = patch.underline;
         if (patch.strikethrough !== undefined) pendingPatch.strikethrough = patch.strikethrough;
@@ -255,6 +259,8 @@ export function useTextPanel() {
       if (patch.fontWeight !== undefined) pendingSync.fontWeight = patch.fontWeight;
       if (patch.align !== undefined) pendingSync.align = patch.align;
       if (patch.lineHeight !== undefined) pendingSync.lineHeight = patch.lineHeight;
+      if (patch.letterSpacing !== undefined) pendingSync.letterSpacing = patch.letterSpacing;
+      if (patch.verticalAlign !== undefined) pendingSync.verticalAlign = patch.verticalAlign;
       if (patch.italic !== undefined) pendingSync.italic = patch.italic;
       if (patch.underline !== undefined) pendingSync.underline = patch.underline;
       if (patch.strikethrough !== undefined) pendingSync.strikethrough = patch.strikethrough;
@@ -282,6 +288,8 @@ export function useTextPanel() {
         if (patch.fontWeight !== undefined) pendingPatch.fontWeight = patch.fontWeight;
         if (patch.align !== undefined) pendingPatch.align = patch.align;
         if (patch.lineHeight !== undefined) pendingPatch.lineHeight = patch.lineHeight;
+        if (patch.letterSpacing !== undefined) pendingPatch.letterSpacing = patch.letterSpacing;
+        if (patch.verticalAlign !== undefined) pendingPatch.verticalAlign = patch.verticalAlign;
         if (patch.italic !== undefined) pendingPatch.italic = patch.italic;
         if (patch.underline !== undefined) pendingPatch.underline = patch.underline;
         if (patch.strikethrough !== undefined) pendingPatch.strikethrough = patch.strikethrough;

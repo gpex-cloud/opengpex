@@ -67,8 +67,7 @@ export interface PixelResultData {
    * shader apply a spurious sRGB→P3 lift — the oversaturation on merge/peel
    * products that the composite-side gamut fix alone does NOT remove.
    *
-   * Optional for back-compat with dispatchers that do not (yet) settle colour:
-   * `RasterizeDispatcher` synthesizes 8-bit sRGB content and correctly omits it.
+   * Optional: dispatchers producing plain 8-bit sRGB content may omit it.
    */
   colorIdentity?: ColorIdentity;
 }

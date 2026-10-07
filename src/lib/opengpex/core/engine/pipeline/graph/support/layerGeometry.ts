@@ -110,3 +110,30 @@ export function effectiveScale(transform: Mat3): number {
   return Math.min(sx, sy);
 }
 
+/**
+ * Physical-texels-per-LOGICAL-px ratio for {@link resolveLayerGeometry}'s UV
+ * mapping (the `dprScale` factor).
+ *
+ *   • Raster layers: the resident asset's own `layer.dprScale` (a DPR-aware
+ *     baked bitmap is `logical × dprScale` physical px).
+ *   • VECTOR transients (`isVectorTransient`): the texture IS the content at
+ *     composite density, so the ratio is derived from the texture itself —
+ *     `textureWidth / logical content width`. Inheriting `layer.dprScale` here
+ *     would apply the retired commit-time baked bitmap's factor (`dpr ×
+ *     superscale`) to a texture that was never bitmap-scaled, squeezing the
+   *     content into the quad's top-left corner (the committed-text-layer case:
+   *     it carries BOTH the vector source and the stale baked asset).
+ */
+export function resolveLayerDprScale(
+  layer: LayerNode,
+  textureWidth: number,
+  isVectorTransient = false,
+): number {
+  if (!isVectorTransient) return layer.dprScale ?? 1;
+  // The transient covers the layer's FULL logical extent (`layer.width` — the
+  // same basis `prepareVectorSources` sizes it with); `crop` only selects a
+  // sub-rect within it, so the ratio must NOT be derived from `crop.w`.
+  const logicalW =
+    typeof layer.width === 'number' && layer.width > 0 ? layer.width : textureWidth;
+  return textureWidth / Math.max(1, logicalW);
+}

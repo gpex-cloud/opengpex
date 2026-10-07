@@ -44,6 +44,7 @@
  */
 
 import type { Rect, WorkingColorSpace, LayerBlendMode, GamutId, RenderIntent } from '@opengpex/editor/core/types';
+import type { TextLayout } from '@opengpex/editor/core/engine/text/textLayout';
 
 // ────────────────────────────────────────────────────────────
 // Geometry
@@ -168,8 +169,42 @@ export interface SdfShapeParams {
   readonly shapeParams: readonly [number, number, number, number];
 }
 
+/**
+ * GPU-side params for the `text` renderer (instanced glyph quads over a
+ * coverage atlas). Pure engine-neutral data: the CPU layout (`TextLayout`,
+ * box-local LOGICAL pixels — the single layout source of truth produced by
+ * `computeTextLayout`) plus the font identity the renderer needs to
+ * rasterize glyphs into the atlas at the target density band. Colours are
+ * already in the document WORKING gamut (Display-P3) LINEAR light, straight
+ * alpha, resolved by the scene-assembly mapper (`textToVectorSource`).
+ */
+export interface TextParams {
+  /** Pure CPU layout — box-local logical px. The renderer NEVER re-computes layout. */
+  readonly layout: TextLayout;
+  /** Atlas identity: `family|weight|italic`. Glyphs key on this + fontSize + band. */
+  readonly fontKey: string;
+  /** CSS font family string (as measured by the layout). */
+  readonly fontFamily: string;
+  /** Font size in logical px (quad sizing + atlas raster size = fontSize × band). */
+  readonly fontSize: number;
+  /** CSS weight (part of the atlas font identity). */
+  readonly fontWeight: number;
+  /** Italic flag (part of the atlas font identity). */
+  readonly italic: boolean;
+  /** Text colour: working-gamut LINEAR straight-alpha RGBA (0..1). */
+  readonly color: readonly [number, number, number, number];
+  /**
+   * Bounding width in LOGICAL pixels — the value `prepareVectorSources` sizes
+   * the transient from (`layer.width`); the vertex shader maps the logical-pixel
+   * glyph quads into NDC by dividing by this (same channel as `StrokeParams.width`).
+   */
+  readonly width: number;
+  /** Bounding height in LOGICAL pixels (see {@link TextParams.width}). */
+  readonly height: number;
+}
+
 /** The built-in vector rendering strategies (static union — no runtime registry). */
-export type VectorRendererId = 'sdf' | 'stroke';
+export type VectorRendererId = 'sdf' | 'stroke' | 'text';
 
 /**
  * GPU-side params for the `stroke` renderer (logic brush ribbon extrusion).
@@ -214,7 +249,8 @@ export interface StrokeParams {
  */
 export type VectorParams =
   | { readonly renderer: 'sdf'; readonly sdf: SdfShapeParams }
-  | { readonly renderer: 'stroke'; readonly stroke: StrokeParams };
+  | { readonly renderer: 'stroke'; readonly stroke: StrokeParams }
+  | { readonly renderer: 'text'; readonly text: TextParams };
 
 export type LayerSource =
   /** A resident GPUTexture, keyed by asset id (bitmap / pre-rasterized text / vector). */
@@ -493,8 +529,8 @@ export interface LayerNode {
    * Physical-to-logical pixel ratio of the resident texture.
    *
    * `crop` / `width` / `height` are expressed in LOGICAL (document) pixels, but a
-   * DPR-aware rasterized texture (e.g. a committed Text layer produced by
-   * `pixels.rasterize.layer`) is `bounding × dpr` PHYSICAL pixels. This factor —
+   * DPR-aware rasterized texture (e.g. a resampled layer bitmap) is
+   * `bounding × dpr` PHYSICAL pixels. This factor —
    * sourced from the asset's `AssetEntry.dprScale` — lets `resolveLayerGeometry`
    * map the logical crop into the physical texture's UV space
    * (`uv = crop × dprScale / texSize`). Defaults to 1 (bitmap / fragment layers

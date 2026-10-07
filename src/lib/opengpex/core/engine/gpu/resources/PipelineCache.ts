@@ -35,6 +35,7 @@ import { BLEND_WGSL, isHardwareBlendable } from '../shaders/blend';
 import { VIEW_WGSL, VIEW_UNIFORM_BUFFER_SIZE } from '../shaders/view';
 import { SDF_WGSL, SDF_UNIFORM_BUFFER_SIZE } from '../shaders/sdf';
 import { STROKE_EXTRUDE_WGSL, STROKE_PAINT_WGSL, STROKE_UNIFORM_BUFFER_SIZE } from '../shaders/stroke';
+import { TEXT_PAINT_WGSL, TEXT_UNIFORM_BUFFER_SIZE, TEXT_INSTANCE_STRIDE } from '../shaders/text';
 import { ADJUST_UNIFORM_BUFFER_SIZE } from '../shaders/adjust';
 import { ADJUST_PRE_WGSL, ADJUST_PRE_UNIFORM_BUFFER_SIZE } from '../shaders/adjustPre';
 import { buildGaussianWgsl, GAUSS_UNIFORM_BUFFER_SIZE } from '../shaders/gaussian';
@@ -175,6 +176,16 @@ export class PipelineCache {
   private strokePaintShaderModule: GPUShaderModule | null = null;
   private strokeRenderBindGroupLayout: GPUBindGroupLayout | null = null;
   private strokeRenderPipelineLayout: GPUPipelineLayout | null = null;
+
+  /**
+   * Vector spine TEXT strategy: instanced glyph quads over a grayscale coverage
+   * atlas (`shaders/text.ts`). Render-only (no compute prepass — the CPU layout
+   * and atlas rasterization happen outside the GPU encoder), format-keyed like
+   * the other render pipelines.
+   */
+  private textPaintShaderModule: GPUShaderModule | null = null;
+  private textBindGroupLayout: GPUBindGroupLayout | null = null;
+  private textPipelineLayout: GPUPipelineLayout | null = null;
 
   /**
    * Vmask polygon fill COMPUTE pipeline (even-odd winding + SDF feather,
@@ -1373,6 +1384,125 @@ export class PipelineCache {
     return pipeline;
   }
 
+  // ─── Vector spine TEXT pipeline (instanced glyph quads × coverage atlas) ───
+
+  getTextPaintShaderModule(): GPUShaderModule {
+    if (this.textPaintShaderModule) return this.textPaintShaderModule;
+    this.textPaintShaderModule = this.device.createShaderModule({
+      code: TEXT_PAINT_WGSL,
+      label: 'Text Paint WGSL Module',
+    });
+    return this.textPaintShaderModule;
+  }
+
+  /**
+   * Group-0 layout for the text paint pass: the dynamic-offset uniform (VERTEX
+   * reads `target_size` for the NDC map — the classic bindgroup-visibility trap
+   * again), the coverage atlas texture (r-channel grayscale), and a filtering
+   * sampler. The texture binding has NO dynamic offset: the TextRenderer issues
+   * one draw per atlas PAGE, binding each page texture directly.
+   */
+  getTextBindGroupLayout(): GPUBindGroupLayout {
+    if (this.textBindGroupLayout) return this.textBindGroupLayout;
+    this.textBindGroupLayout = this.device.createBindGroupLayout({
+      label: 'Text Bind Group Layout',
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+          buffer: {
+            type: 'uniform',
+            hasDynamicOffset: true,
+            minBindingSize: TEXT_UNIFORM_BUFFER_SIZE,
+          },
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { sampleType: 'float' },
+        },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.FRAGMENT,
+          sampler: { type: 'filtering' },
+        },
+      ],
+    });
+    return this.textBindGroupLayout;
+  }
+
+  getTextPipelineLayout(): GPUPipelineLayout {
+    if (this.textPipelineLayout) return this.textPipelineLayout;
+    this.textPipelineLayout = this.device.createPipelineLayout({
+      bindGroupLayouts: [this.getTextBindGroupLayout()],
+      label: 'Text Pipeline Layout',
+    });
+    return this.textPipelineLayout;
+  }
+
+  /**
+   * Acquire the text PAINT pipeline. Vertex input: buffer 0 = the shared unit
+   * quad (stride 16, `corner` at location 0 — location 1 carries the quad's uv
+   * which this shader does not consume; unused vertex attributes are legal),
+   * buffer 1 = per-glyph instances (stride {@link TEXT_INSTANCE_STRIDE},
+   * stepMode `instance`: origin/size/uv_min/uv_size at locations 2-5). MAX
+   * blend (coverage union) like the stroke paint pass: overlapping glyph
+   * coverage (negative letterSpacing, decoration × descender) must merge
+   * without holes or double-darkening.
+   */
+  getTextPipeline(targetFormat: GPUTextureFormat = 'rgba16float'): GPURenderPipeline {
+    const key = `text:${targetFormat}`;
+    const cached = this.pipelines.get(key);
+    if (cached) return cached;
+
+    const pipeline = this.device.createRenderPipeline({
+      label: `Text Pipeline (${key})`,
+      layout: this.getTextPipelineLayout(),
+      vertex: {
+        module: this.getTextPaintShaderModule(),
+        entryPoint: 'vs_text_instanced',
+        buffers: [
+          {
+            arrayStride: 16,
+            stepMode: 'vertex',
+            attributes: [
+              { format: 'float32x2', offset: 0, shaderLocation: 0 },  // corner
+              { format: 'float32x2', offset: 8, shaderLocation: 1 },  // quad uv (unused)
+            ],
+          },
+          {
+            arrayStride: TEXT_INSTANCE_STRIDE,
+            stepMode: 'instance',
+            attributes: [
+              { format: 'float32x2', offset: 0, shaderLocation: 2 },  // origin
+              { format: 'float32x2', offset: 8, shaderLocation: 3 },  // size
+              { format: 'float32x2', offset: 16, shaderLocation: 4 }, // uv_min
+              { format: 'float32x2', offset: 24, shaderLocation: 5 }, // uv_size
+            ],
+          },
+        ],
+      },
+      fragment: {
+        module: this.getTextPaintShaderModule(),
+        entryPoint: 'fs_text',
+        targets: [
+          {
+            format: targetFormat,
+            blend: MAX_BLEND,
+            writeMask: GPUColorWrite.ALL,
+          },
+        ],
+      },
+      primitive: {
+        topology: 'triangle-list',
+        cullMode: 'none',
+      },
+    });
+
+    this.pipelines.set(key, pipeline);
+    return pipeline;
+  }
+
   destroy(): void {
     this.pipelines.clear();
     this.quadVertexBuffer?.destroy();
@@ -1404,6 +1534,9 @@ export class PipelineCache {
     this.strokePaintShaderModule = null;
     this.strokeRenderBindGroupLayout = null;
     this.strokeRenderPipelineLayout = null;
+    this.textPaintShaderModule = null;
+    this.textBindGroupLayout = null;
+    this.textPipelineLayout = null;
     this.vmaskShaderModule = null;
     this.vmaskBindGroupLayout = null;
     this.vmaskPipelineLayout = null;

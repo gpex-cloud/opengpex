@@ -318,9 +318,8 @@ export class AssetService {
    *
    * Callers and contract for `payload.precomputedHash`:
    * 1. Background: performance optimization to avoid redundant SHA-256 calculation of large displayBlobs on the main thread.
-   * 2. The 2 callers in the codebase:
-   *    - `layer/services/resample.ts`: returned via `ImageDispatcher.resample()`, where the Web Worker computes `data.hash` during the RESAMPLE task;
-   *    - `PixelFacade.rasterize.layer`: returned via `RasterizeDispatcher.layer()`, where the dispatcher precomputes `calculateHash(blob)` after rasterizing text/vectors to bitmaps.
+   * 2. The caller in the codebase:
+   *    - `layer/services/resample.ts`: returned via `ImageDispatcher.resample()`, where the Web Worker computes `data.hash` during the RESAMPLE task.
    * 3. Other internal pixel operations (e.g. merge, peel, fragment, frame create):
    *    Passed `CompositedImage`s have no precomputed hash (undefined), falling back automatically to `calculateHash(payload.displayBlob)` below.
    */

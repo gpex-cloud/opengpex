@@ -61,6 +61,7 @@ export function runFilterChain(
   return {
     texture: filtered,
     suppressAdjust: suppressAdjust ?? (layer.adjustments !== undefined && layer.adjustments.length > 0),
+    vectorTransient: layer.source?.kind === 'vector',
     sourceIsLinear: true,
     // ⚠️ NOT unconditionally true: gamut alignment only happened if a bake ran.
     sourceIsWorkingGamut: inputIsWorkingGamut,
