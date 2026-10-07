@@ -68,76 +68,92 @@ export const createClipboardService = (): ClipboardService => {
     },
 
     read: async (e?: ClipboardEvent) => {
-      try {
-        // 1. Try to get custom metadata from DataTransfer (sync event) first
-        if (e?.clipboardData) {
-          const items = e.clipboardData.items;
+      // ═══ CRITICAL: Synchronous extraction from DataTransfer ═══
+      // The browser invalidates/detaches e.clipboardData once an asynchronous tick occurs.
+      // Any File/Blob references or string promises from e.clipboardData MUST be acquired
+      // synchronously before any `await` (such as navigator.clipboard.read()).
+      let syncBlob: Blob | undefined = undefined;
+      let syncMetaPromise: Promise<string> | undefined = undefined;
+
+      if (e?.clipboardData) {
+        // 1. Scan items synchronously
+        const items = e.clipboardData.items;
+        if (items) {
           for (let i = 0; i < items.length; i++) {
             const item = items[i];
             if (item.type === CLIPBOARD_MIME_METADATA) {
-              const text = await new Promise<string>((resolve) => item.getAsString(resolve));
-              return { metadata: JSON.parse(text) as ClipboardLayerMetadata };
-            }
-          }
-          // No custom metadata in DataTransfer, do not rush to return the blob
-          // Continue to try the Async Clipboard API, which supports Web Custom Formats
-        }
-
-        // 2. Read using the Async Clipboard API (supports Web Custom Formats)
-        const clipboardItems = await navigator.clipboard.read();
-
-        for (const item of clipboardItems) {
-          // 2.1 Check internal metadata — always also read the image blob alongside
-          if (item.types.includes(CLIPBOARD_MIME_METADATA)) {
-            const metaBlob = await item.getType(CLIPBOARD_MIME_METADATA);
-            const text = await metaBlob.text();
-            const metadata = JSON.parse(text) as ClipboardLayerMetadata;
-            // Also read physical blob (used for cross-frame paste physical path)
-            const imageType = item.types.find(t => t.startsWith('image/'));
-            const blob = imageType ? await item.getType(imageType) : undefined;
-            return { metadata, blob };
-          }
-
-          // 2.2 Check image (external paste — no internal metadata)
-          const imageType = item.types.find(t => t.startsWith('image/'));
-          if (imageType) {
-            const blob = await item.getType(imageType);
-            console.debug('[ClipboardService] Read external image blob from Async Clipboard API');
-            return { blob };
-          }
-        }
-
-        // 3. If the Async API returns no results, fallback to the image in DataTransfer (compatible with older browsers/restricted scenarios)
-        if (e?.clipboardData) {
-          const items = e.clipboardData.items;
-          for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            if (item.kind === 'file' && item.type.startsWith('image/')) {
-              const blob = item.getAsFile();
-              if (blob) {
-                console.debug('[ClipboardService] Fallback: read image blob from DataTransfer');
-                return { blob };
+              syncMetaPromise = new Promise<string>((resolve) => item.getAsString(resolve));
+            } else if (!syncBlob && item.kind === 'file') {
+              const file = item.getAsFile();
+              if (file && (file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|tiff?|avif|svg)$/i.test(file.name))) {
+                syncBlob = file;
               }
             }
           }
         }
-      } catch (err) {
-        console.warn('[ClipboardService] Read failed:', err);
-        // The Async API may fail due to permission issues, fallback to the image in DataTransfer
-        if (e?.clipboardData) {
-          const items = e.clipboardData.items;
-          for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            if (item.kind === 'file' && item.type.startsWith('image/')) {
-              const blob = item.getAsFile();
-              if (blob) {
-                console.debug('[ClipboardService] Fallback (after error): read image blob from DataTransfer');
-                return { blob };
-              }
+
+        // 2. Scan files collection synchronously as well (common for Finder / WeChat file copy)
+        if (!syncBlob && e.clipboardData.files && e.clipboardData.files.length > 0) {
+          for (let i = 0; i < e.clipboardData.files.length; i++) {
+            const file = e.clipboardData.files[i];
+            if (file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|tiff?|avif|svg)$/i.test(file.name)) {
+              syncBlob = file;
+              break;
             }
           }
         }
       }
+
+      try {
+        // 1. If DataTransfer had internal layer metadata, resolve it directly
+        if (syncMetaPromise) {
+          const text = await syncMetaPromise;
+          const metadata = JSON.parse(text) as ClipboardLayerMetadata;
+          return { metadata, blob: syncBlob };
+        }
+
+        // 2. Try reading via Async Clipboard API (for Web Custom Formats or screenshot blobs)
+        if (typeof navigator !== 'undefined' && navigator.clipboard?.read) {
+          try {
+            const clipboardItems = await navigator.clipboard.read();
+
+            for (const item of clipboardItems) {
+              // 2.1 Internal OpenGPEX layer metadata (Web Custom Format)
+              if (item.types.includes(CLIPBOARD_MIME_METADATA)) {
+                const metaBlob = await item.getType(CLIPBOARD_MIME_METADATA);
+                const text = await metaBlob.text();
+                const metadata = JSON.parse(text) as ClipboardLayerMetadata;
+                const imageType = item.types.find(t => t.startsWith('image/'));
+                const blob = imageType ? await item.getType(imageType) : syncBlob;
+                return { metadata, blob };
+              }
+
+              // 2.2 Async image blob (fallback if no syncBlob was provided by DataTransfer)
+              if (!syncBlob) {
+                const imageType = item.types.find(t => t.startsWith('image/'));
+                if (imageType) {
+                  const blob = await item.getType(imageType);
+                  return { blob };
+                }
+              }
+            }
+          } catch (asyncErr) {
+            // Permission denied, unfocused document, or unsupported format
+            console.debug('[ClipboardService] Async Clipboard API fallback to DataTransfer:', asyncErr);
+          }
+        }
+
+        // 3. If we captured an image file from DataTransfer (WeChat, Finder, etc.), return it!
+        if (syncBlob) {
+          return { blob: syncBlob };
+        }
+      } catch (err) {
+        console.warn('[ClipboardService] Clipboard read error:', err);
+        if (syncBlob) {
+          return { blob: syncBlob };
+        }
+      }
+
       return null;
     }
   };

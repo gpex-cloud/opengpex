@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.0-beta.11
+
+- Clipboard: improved image paste support, allowing images copied directly from desktop apps to be pasted seamlessly into the canvas
+
+---
+
 ## v2.0.0-beta.10
 
 - Text: text layers now render in real time as crisp vector typography, staying sharp at any zoom level and in high-resolution exports without pixelation
