@@ -699,7 +699,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       try {
         const worldShape = ctx.geometry.shape.unitedShapeOfLayers([layer]);
         if (!worldShape) {
-          ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
+          ctx.actions.setInteraction({ hud: { message: 'Failed to analyze layer pixels', type: 'error' } });
           return;
         }
 
@@ -714,7 +714,7 @@ export const CLIP_OPTIONS_COMMANDS = {
         imageData = await blobToImageData(composited.displayBlob);
       } catch (err) {
         console.error('[SelectFromAlpha] Failed to read layer image data:', err);
-        ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
+        ctx.actions.setInteraction({ hud: { message: 'Failed to analyze layer pixels', type: 'error' } });
         return;
       }
 
@@ -732,8 +732,8 @@ export const CLIP_OPTIONS_COMMANDS = {
         });
 
         if (!response.rings) {
-          // No opaque pixels → error pulse
-          ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
+          // No opaque pixels in the layer
+          ctx.actions.setInteraction({ hud: { message: 'No opaque pixels found', type: 'error' } });
           return;
         }
 
@@ -770,7 +770,7 @@ export const CLIP_OPTIONS_COMMANDS = {
         }
       } catch (err) {
         console.warn('[SelectFromAlpha] Worker failed:', err);
-        ctx.actions.setInteraction({ selectionErrorPulse: Date.now() });
+        ctx.actions.setInteraction({ hud: { message: 'Failed to analyze layer pixels', type: 'error' } });
       }
     }
   } as EditorCommand<void, Promise<void>>,

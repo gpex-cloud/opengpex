@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.0-beta.12
+
+- Startup: added live status feedback during initial loading and data upgrades, with protection against accidental page closure during migrations
+- Feedback: streamlined action alerts and error messages into clear, unified notifications
+
+---
+
 ## v2.0.0-beta.11
 
 - Clipboard: improved image paste support, allowing images copied directly from desktop apps to be pasted seamlessly into the canvas

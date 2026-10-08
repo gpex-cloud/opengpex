@@ -50,7 +50,6 @@ export interface InteractionState {
   hoveredLayerId?: string | null;
   isHoveringActiveLayer?: boolean;
   interactionMode: InteractionMode;
-  selectionErrorPulse?: number;
   hud?: {
     message: string;
     type: 'info' | 'success' | 'error';
@@ -174,8 +173,6 @@ export interface VolatileInteraction {
   hud: { message: string; type: 'info' | 'success' | 'error'; subtitle?: string; duration?: number } | null;
   /** Smart guide alignment data during interactions */
   smartguides: SmartGuideData | null;
-  /** Selection error pulse counter */
-  selectionErrorPulse: number;
 }
 
 /**

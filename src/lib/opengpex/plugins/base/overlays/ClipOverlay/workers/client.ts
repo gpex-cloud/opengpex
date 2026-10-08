@@ -38,7 +38,7 @@ import type { WandRequest, WandResponse } from './protocol';
  * Failure semantics: `run()` rejects with a descriptive `Error` for every
  * recoverable failure (timeout / aborted / load failure / worker error).
  * Callers (typically `interactions.ts::createWandHandler`) should catch and
- * trigger `selectionErrorPulse` plus a toast. We deliberately do NOT
+ * trigger an error HUD toast. We deliberately do NOT
  * implicitly fall back here — surfacing the failure lets the UI decide.
  */
 export class MagicWandClient {

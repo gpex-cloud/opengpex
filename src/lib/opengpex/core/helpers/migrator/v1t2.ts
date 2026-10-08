@@ -350,11 +350,16 @@ export async function upgradeAssetIfLegacy(
   }
 }
 
+/** Boot lifecycle stages reported by the migration pipeline (optional callback). */
+export type MigrationStage = 'checking' | 'migrating' | 'healing' | 'done';
+
 /**
  * Automatic fault-tolerant migration from v1 (State_V1) to v2 (State_V2).
  * Ensures zero-touch upgrade for legacy users on cold boot.
  */
-export async function checkAndMigrateV1(): Promise<void> {
+export async function checkAndMigrateV1(
+  onStage?: (stage: MigrationStage) => void,
+): Promise<void> {
   try {
     // 1. O(1) Preflight: terminal flag check in State_V1
     const isMigrated = await LegacyStateDriver.getItem<boolean>('v2_migrated');
@@ -372,6 +377,7 @@ export async function checkAndMigrateV1(): Promise<void> {
       return;
     }
 
+    onStage?.('migrating');
     console.info(`[Migrator] 🚀 Detected ${legacyMeta.frameIds.length} legacy v1 artboard(s). Starting automatic migration to State_V2...`);
 
     const updates: Record<string, unknown> = {};
@@ -578,8 +584,16 @@ export async function healExistingV2Records(): Promise<void> {
 
 /**
  * Combined entry point: runs automatic v1 migration and post-migration healing pass.
+ * Reports lifecycle progress via the optional `onStage` callback (used by the
+ * boot overlay to show the migration subtitle). Note: both sub-steps swallow
+ * their own errors internally, so failures never reject this promise.
  */
-export async function runV1MigrationAndHealing(): Promise<void> {
-  await checkAndMigrateV1();
+export async function runV1MigrationAndHealing(
+  onStage?: (stage: MigrationStage) => void,
+): Promise<void> {
+  onStage?.('checking');
+  await checkAndMigrateV1(onStage);
+  onStage?.('healing');
   await healExistingV2Records();
+  onStage?.('done');
 }

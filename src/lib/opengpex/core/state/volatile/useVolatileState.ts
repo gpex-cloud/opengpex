@@ -39,7 +39,6 @@ export const INITIAL_VOLATILE: VolatileState = {
     cursorOverride: null,
     hud: null,
     smartguides: null,
-    selectionErrorPulse: 0,
   },
   // [P2 Perf] Buffer version counter for snapshot cache invalidation
   _bufferVersion: 0,

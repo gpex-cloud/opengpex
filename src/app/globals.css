@@ -34,6 +34,39 @@
 }
 
 /* ==========================================================================
+   Boot overlay enter/exit (FancyOverlay.tsx)
+   Tailwind's animate-in/animate-out utilities are NOT available (no
+   tw-animate-css import in this project), so the overlay defines its own
+   plain-CSS animations. Pure CSS is a hard requirement there: JS-driven
+   animation replays under StrictMode double-mount (see FancyOverlay.tsx).
+   ========================================================================== */
+@keyframes gpex-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes gpex-overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.gpex-overlay-in {
+  animation: gpex-overlay-in 300ms ease both;
+}
+
+.gpex-overlay-out {
+  animation: gpex-overlay-out 300ms ease both;
+}
+
+/* ==========================================================================
    Global Theme Transitions - Site-wide smooth theme switching
    ========================================================================== */
 *,

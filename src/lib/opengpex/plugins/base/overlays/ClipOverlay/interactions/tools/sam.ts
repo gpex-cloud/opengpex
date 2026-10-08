@@ -103,7 +103,7 @@ export const createSamHandler = (): InteractionHandler => {
     },
 
     onBusy: (e) => {
-      e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+      e.actions.setInteraction({ hud: { message: 'Selection busy', type: 'error' } });
     },
 
     onCancel: () => {
@@ -130,7 +130,6 @@ export const createSamHandler = (): InteractionHandler => {
         if (!layer || !isSamableLayer(layer)) {
           console.warn('[SAM] No target raster layer at click point');
           e.actions.setInteraction({
-            selectionErrorPulse: Date.now(),
             hud: { message: 'No target image layer at click point', type: 'error' }
           });
           return;
@@ -142,7 +141,7 @@ export const createSamHandler = (): InteractionHandler => {
         try {
           imageData = await e.pixels.image.imageData(layer.assetId!);
         } catch (_err) {
-          e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+          e.actions.setInteraction({ hud: { message: 'Failed to read layer pixels', type: 'error' } });
           return;
         }
 
@@ -167,7 +166,7 @@ export const createSamHandler = (): InteractionHandler => {
         // executeCommand returns the result synchronously (the Promise itself)
         const encResult = await encodeResult;
         if (!encResult || !encResult.success) {
-          e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+          e.actions.setInteraction({ hud: { message: 'Segmentation encode failed', type: 'error' } });
           return;
         }
 
@@ -221,14 +220,13 @@ export const createSamHandler = (): InteractionHandler => {
 
         const decResult = await decodeResult;
         if (!decResult || !decResult.success) {
-          e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+          e.actions.setInteraction({ hud: { message: 'Segmentation decode failed', type: 'error' } });
           return;
         }
 
         if (!decResult.masks || decResult.masks.length === 0 || decResult.masks[0].rings.length === 0) {
           console.warn('[SAM] Decoder returned empty mask');
           e.actions.setInteraction({
-            selectionErrorPulse: Date.now(),
             hud: { message: 'Area is empty', type: 'error' }
           });
           return;
@@ -259,7 +257,6 @@ export const createSamHandler = (): InteractionHandler => {
         if (framePolygons.length === 0) {
           console.warn('[SAM] All masks projected to empty polygons');
           e.actions.setInteraction({
-            selectionErrorPulse: Date.now(),
             hud: { message: 'Area is empty', type: 'error' }
           });
           return;

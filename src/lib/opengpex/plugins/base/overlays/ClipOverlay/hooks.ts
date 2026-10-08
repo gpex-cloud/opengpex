@@ -17,9 +17,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useState, useRef, useEffect, useLayoutEffect, type RefObject } from 'react';
+import { useRef, useEffect, useLayoutEffect, type RefObject } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
-import { Motion } from '@opengpex/editor/core/motion';
 import { asLocalShape, LocalPolygon } from '@opengpex/editor/core/types';
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import {
@@ -39,7 +38,6 @@ export function useClipOverlayCommands() {
   const resetBox = () => actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
 
   const boxRef = useRef<HTMLDivElement>(null);
-  const [showError, setShowError] = useState(false);
 
   const isReCanvas = state.getStateSignal(ClipOptionsAPI.signals.reCanvas);
   const isClipActive = state.interaction.interactionMode === 'clip';
@@ -63,23 +61,6 @@ export function useClipOverlayCommands() {
   const clipShape = isReCanvas ? canvasClipBox : (imageClipBox ? geometry.polygon.polygonToShape(imageClipBox) : asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
   const clipBox = clipShape.rect;
   const clipType = clipShape.type;
-
-  // Error pulse animation
-  const lastPulse = useRef(state.interaction.selectionErrorPulse);
-  useEffect(() => {
-    if (state.interaction.selectionErrorPulse && state.interaction.selectionErrorPulse !== lastPulse.current) {
-      lastPulse.current = state.interaction.selectionErrorPulse;
-      setShowError(true);
-      if (boxRef.current) {
-        Motion.to(boxRef.current, {
-          borderColor: '#ef4444',
-          duration: 0.15, repeat: 3, yoyo: true,
-          onComplete: () => { Motion.set(boxRef.current, { borderColor: '#ffffff' }); }
-        });
-      }
-      setTimeout(() => setShowError(false), 1000);
-    }
-  }, [state.interaction.selectionErrorPulse]);
 
   // Unmount cleanup: discard any in-flight peel.
   // [noundo] discardExchange is called via `.noundo()` because this cleanup
@@ -113,7 +94,6 @@ export function useClipOverlayCommands() {
     isRegularTool,
     isIrregularTool,
     dragType: state.interaction.isInteracting ? 'move' : '',
-    showError,
     boxRef,
     reset: resetBox
   };

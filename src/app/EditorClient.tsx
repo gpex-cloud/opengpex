@@ -29,7 +29,11 @@ import dynamic from "next/dynamic";
 const GPEX = dynamic(() => import("@opengpex/editor/workspace"), {
   ssr: false,
   loading: () => (
-    <div className="flex h-full w-full bg-zinc-50 dark:bg-zinc-950" />
+    <div className="flex h-full w-full items-center justify-center bg-zinc-50 dark:bg-zinc-950">
+      <span className="text-[10px] font-bold tracking-[0.25em] uppercase text-zinc-400 dark:text-zinc-600">
+        OpenGPEX
+      </span>
+    </div>
   ),
 });
 

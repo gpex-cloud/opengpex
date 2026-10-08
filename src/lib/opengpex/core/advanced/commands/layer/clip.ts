@@ -46,7 +46,6 @@ async function copyCropBoxToClipboard(
   const physicalResult = await ctx.layers.fragmentToNewLayerPhysical(activeFrame, latestLayer);
   if (!physicalResult) {
     actions.setInteraction({
-      selectionErrorPulse: Date.now(),
       hud: { message: 'Area is empty', type: 'error' }
     });
     return null;
@@ -88,7 +87,6 @@ export const LayerClipCommands = {
 
         if (!activeFrame || !activeLayer || !isClipMode || activeLayer.type !== 'image') {
           actions.setInteraction({
-            selectionErrorPulse: Date.now(),
             hud: { message: 'No editable layer selected', type: 'error' }
           });
           return;
@@ -131,7 +129,6 @@ export const LayerClipCommands = {
 
         if (!activeFrame || !latestLayer || !isClipMode || latestLayer.type !== 'image') {
           actions.setInteraction({
-            selectionErrorPulse: Date.now(),
             hud: { message: 'No editable layer selected', type: 'error' }
           });
           return;
@@ -139,7 +136,6 @@ export const LayerClipCommands = {
 
         if (latestLayer.locked) {
           actions.setInteraction({
-            selectionErrorPulse: Date.now(),
             hud: { message: 'Layer is locked', type: 'error' }
           });
           return;
@@ -281,7 +277,6 @@ export const LayerClipCommands = {
       const box = getClipBox(activeFrame);
       if (!box) {
         actions.setInteraction({
-          selectionErrorPulse: Date.now(),
           hud: { message: 'No active selection', type: 'error' }
         });
         return;
@@ -291,7 +286,6 @@ export const LayerClipCommands = {
       const targetLayerId = payload?.layerId ?? activeLayer?.id;
       if (!targetLayerId) {
         actions.setInteraction({
-          selectionErrorPulse: Date.now(),
           hud: { message: 'No target layer', type: 'error' }
         });
         return;
@@ -299,14 +293,12 @@ export const LayerClipCommands = {
       const targetLayer = actions.fast?.latestLayer?.(activeFrame.id, targetLayerId) || activeFrame.layers.byId[targetLayerId];
       if (!targetLayer) {
         actions.setInteraction({
-          selectionErrorPulse: Date.now(),
           hud: { message: 'Target layer not found', type: 'error' }
         });
         return;
       }
       if (targetLayer.locked) {
         actions.setInteraction({
-          selectionErrorPulse: Date.now(),
           hud: { message: 'Layer is locked', type: 'error' }
         });
         return;
@@ -333,7 +325,6 @@ export const LayerClipCommands = {
       // rect/ellipse case the regular branch previously ignored.
       if (localShape.rect.w <= 0 || localShape.rect.h <= 0) {
         actions.setInteraction({
-          selectionErrorPulse: Date.now(),
           hud: { message: 'Area is empty', type: 'error' }
         });
         return;
@@ -370,7 +361,6 @@ export const LayerClipCommands = {
         const latestLayer = actions.fast?.latestLayer?.(activeFrame.id, activeLayer.id) || activeLayer;
         if (latestLayer.locked) {
           actions.setInteraction({
-            selectionErrorPulse: Date.now(),
             hud: { message: 'Layer is locked', type: 'error' }
           });
           return;
@@ -379,7 +369,6 @@ export const LayerClipCommands = {
         const box = getClipBox(activeFrame);
         if (!box) {
           actions.setInteraction({
-            selectionErrorPulse: Date.now(),
             hud: { message: 'No active selection', type: 'error' }
           });
           return;

@@ -59,7 +59,7 @@ const WAND_SIMPLIFY_FLOOR = 1.0;
  * Resolution order:
  *   1. Top-most layer hit by the click point.
  *   2. activeLayer fallback when click is over transparent area.
- *   3. Otherwise null → caller surfaces selectionErrorPulse.
+ *   3. Otherwise null → caller surfaces an error HUD message.
  */
 function pickWandTargetLayer(e: InteractionEvent): Layer | null {
   const top = e.geometry.space.pickTopLayer(e.point.world, e.activeFrame.layers);
@@ -111,7 +111,7 @@ export const createWandHandler = (): InteractionHandler => {
     },
 
     onBusy: (e) => {
-      e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+      e.actions.setInteraction({ hud: { message: 'Selection busy', type: 'error' } });
     },
 
     execute: async (e, ctx) => {
@@ -130,7 +130,6 @@ export const createWandHandler = (): InteractionHandler => {
       const layer = pickWandTargetLayer(e);
       if (!layer || !isWandableLayer(layer)) {
         e.actions.setInteraction({
-          selectionErrorPulse: Date.now(),
           hud: { message: 'No image layer at click point', type: 'error' }
         });
         return;
@@ -142,7 +141,7 @@ export const createWandHandler = (): InteractionHandler => {
         imageData = await e.pixels.image.imageData(layer.assetId!);
       } catch (err) {
         console.error('[Wand] Failed to read layer image data:', err);
-        e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+        e.actions.setInteraction({ hud: { message: 'Failed to read layer pixels', type: 'error' } });
         return;
       }
 
@@ -156,7 +155,6 @@ export const createWandHandler = (): InteractionHandler => {
         seed.x >= imageData.width || seed.y >= imageData.height
       ) {
         e.actions.setInteraction({
-          selectionErrorPulse: Date.now(),
           hud: { message: 'Clicked outside layer bounds', type: 'error' }
         });
         return;
@@ -181,13 +179,12 @@ export const createWandHandler = (): InteractionHandler => {
         }, { timeoutMs: WAND_TIMEOUT_MS });
       } catch (err) {
         console.error('[Wand] Worker invocation failed:', err);
-        e.actions.setInteraction({ selectionErrorPulse: Date.now() });
+        e.actions.setInteraction({ hud: { message: 'Selection analysis failed', type: 'error' } });
         return;
       }
 
       if (!resp.rings.length) {
         e.actions.setInteraction({
-          selectionErrorPulse: Date.now(),
           hud: { message: 'Area is empty', type: 'error' }
         });
         return;

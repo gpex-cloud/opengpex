@@ -45,6 +45,15 @@ import DrawerBar from "./components/DrawerBar";
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
 import HotkeyManager from "./components/HotkeyManager";
 
+/** Boot overlay subtitles keyed by the core.bootStage lifecycle signal. */
+const BOOT_SUBTITLES: Record<string, string> = {
+  checking: "Checking environment...",
+  migrating: "Migrating legacy data — do not close this page...",
+  healing: "Migrating legacy data — do not close this page...",
+  restoring: "Restoring workspace...",
+  finalizing: "Loading system components...",
+};
+
 export function Workspace() {
   const { state } = useEditorState();
   const { actions } = useEditorServices();
@@ -95,11 +104,16 @@ export function Workspace() {
         className={styles.root.className}
         style={styles.root.style}
       >
-        {/* Global loading overlay */}
+        {/* Global loading overlay — subtitle follows the real boot lifecycle
+            stage dispatched by EditorProvider (core.bootStage signal). The
+            'healing' key is a defensive fallback: the provider intentionally
+            never writes it, healing reuses the migrating copy. */}
         <FancyOverlay
           isVisible={status === "BOOTING"}
-          title="Initializing Workspace"
-          subtitle="Hydrating editor state from storage..."
+          title="Initializing OpenGPEX..."
+          subtitle={BOOT_SUBTITLES[
+            state.getStateSignal<string>("core.bootStage", "checking")
+          ] || "Loading workspace..."}
           style={{ zIndex: EDITOR_Z_INDEX.UI.POPOVER + 10 }}
         />
 

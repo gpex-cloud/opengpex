@@ -195,12 +195,41 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   // 4.1 Core bootstrapping and persistent recovery (Bootstrap & Hydration)
   const sysCommandsRegistered = useRef(false);
   useEffect(() => {
+    // Registered only during the migration window so the browser warns before
+    // closing the tab mid-migration (healing is deliberately NOT covered —
+    // its flag guarantees a retry on next boot).
+    const preventUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+
     async function init() {
       let savedState: Awaited<ReturnType<typeof storage.restore>> = null;
       let restoreFailed = false;
 
+      actions.setStateSignal("core.bootStage", "checking");
+
       try {
-        await runV1MigrationAndHealing();
+        await runV1MigrationAndHealing((stage) => {
+          if (stage === "migrating") {
+            actions.setStateSignal("core.bootStage", "migrating");
+            window.addEventListener("beforeunload", preventUnload);
+          }
+          // 'healing' intentionally does not switch the stage — the Workspace
+          // maps it onto the migrating subtitle as a defensive fallback.
+        });
+      } catch (err) {
+        // Defensive only: v1t2 swallows its own errors internally, so this
+        // path is effectively unreachable. Migration failure is non-fatal
+        // and retries automatically on next boot.
+        console.warn("[EditorProvider] Migration non-fatal error:", err);
+      } finally {
+        window.removeEventListener("beforeunload", preventUnload);
+      }
+
+      actions.setStateSignal("core.bootStage", "restoring");
+
+      try {
         savedState = await Promise.race([
           storage.restore(),
           new Promise<null>((_, reject) =>
@@ -218,6 +247,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         savedState = null;
         restoreFailed = true;
       }
+
+      actions.setStateSignal("core.bootStage", "finalizing");
 
       if (savedState) {
         dispatch({ type: "HYDRATE", payload: savedState });
