@@ -179,10 +179,13 @@ function BranchMenu({
         </div>
       </div>
 
-      {/* 2. Bridge layer: wide hover bridge to prevent pointer disconnection on diagonal movement */}
+      {/* 2. Bridge layer: prevents pointer disconnection on diagonal movement.
+          Stops ~16px short of the thumbnail edge: the hovered trunk scales up
+          (originY at the dock side) and must stay hoverable up to its top edge,
+          otherwise the trunk delete button (CSS group-hover) loses :hover. */}
       <div
         className={`absolute pointer-events-auto -left-6 -right-6 ${
-          isBottom ? "top-full -mt-2 h-10" : "bottom-full -mb-2 h-10"
+          isBottom ? "top-full -mt-2 h-6" : "bottom-full -mb-2 h-6"
         }`}
       />
     </motion.div>

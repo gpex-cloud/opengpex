@@ -156,3 +156,20 @@ export const SNAP_EDGE_SCOPE: 'recanvas' | 'all' = 'recanvas';
 /** Master toggle: enable/disable snapping & smart guides globally */
 export const SNAP_ENABLED: boolean = true;
 
+
+
+/** -----------------------------------------------------------------*/
+/** System & Privacy Settings ---------------------------------------*/
+/** -----------------------------------------------------------------*/
+
+/**
+ * Master toggle for the automatic update check (auto trigger only).
+ *
+ * When true, the editor sends one anonymous version ping per 12h (throttled
+ * in localStorage) via the local BFF route to gpex.cloud, purely to surface
+ * new releases and security fixes. The manual "Check for Updates" menu item
+ * stays available regardless of this setting. Turn OFF to stop all automatic
+ * checks for this browser; setting DO_NOT_TRACK=1 in the environment
+ * disables it globally on the server side.
+ */
+export const SYSTEM_UPDATES_AUTO_CHECK: boolean = true;

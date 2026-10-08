@@ -2,6 +2,15 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.0
+
+- Updates: added built-in update notifications and release guides to help you stay up to date
+- Canvas: fixed canvas aspect ratio distortion when zooming in on non-square projects
+- Account & Login: improved verification code input to automatically clear previous digits and focus the first box when requesting a new code
+- Stability: improved project migration from v1 versions to handle photos and RAW images smoothly
+
+---
+
 ## v2.0.0-beta.12
 
 - Startup: added live status feedback during initial loading and data upgrades, with protection against accidental page closure during migrations

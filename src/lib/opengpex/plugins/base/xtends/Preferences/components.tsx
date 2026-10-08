@@ -20,7 +20,7 @@
 'use client';
 
 import React from 'react';
-import { Mouse, Scissors, Move } from 'lucide-react';
+import { Mouse, Scissors, Move, ShieldCheck, Info } from 'lucide-react';
 import Switch from '@opengpex/editor/widgets/Switch';
 import { usePreset } from '@opengpex/editor/core/helpers/preferences/usePreset';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
@@ -33,6 +33,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number }>> = {
   Mouse,
   Scissors,
   Move,
+  ShieldCheck,
 };
 
 // ─── Grouped Manifest ─────────────────────────────────────────────────────────
@@ -247,6 +248,21 @@ export function PreferencesPanel() {
       <p className="px-1 text-[8px] text-[var(--text-muted)] font-bold leading-relaxed uppercase tracking-tight italic opacity-60">
         Changes take effect immediately and persist across sessions.
       </p>
+
+      {/* ─── Privacy & Compliance Notice ─── */}
+      <div className="rounded-xl p-3 bg-[var(--bg-stage)] border border-[var(--border-subtle)] flex flex-col gap-1.5">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold text-[var(--text-main)]">
+          <Info size={12} className="text-amber-500" />
+          <span>Privacy &amp; Open-source Compliance</span>
+        </div>
+        <p className="text-[9px] text-[var(--text-muted)] leading-relaxed">
+          OpenGPEX respects your privacy. The update check only transmits a
+          random anonymous browser ID and the current version — never
+          hostnames, file paths, or canvas content. Set{' '}
+          <code className="font-mono">DO_NOT_TRACK=1</code> in the environment
+          to disable all outbound checks globally.
+        </p>
+      </div>
     </div>
   );
 }

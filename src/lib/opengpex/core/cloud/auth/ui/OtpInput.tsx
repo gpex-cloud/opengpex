@@ -26,9 +26,11 @@ interface OtpInputProps {
   onChange: (value: string) => void;
   accentColor: string;
   disabled?: boolean;
+  /** Bump to re-focus the first digit after an external reset (e.g. OTP resend) */
+  resetKey?: number;
 }
 
-export function OtpInput({ value, onChange, accentColor, disabled }: OtpInputProps) {
+export function OtpInput({ value, onChange, accentColor, disabled, resetKey }: OtpInputProps) {
   const inputsRef = useRef<HTMLInputElement[]>([]);
   const length = 6;
 
@@ -41,6 +43,13 @@ export function OtpInput({ value, onChange, accentColor, disabled }: OtpInputPro
       inputsRef.current[0].focus();
     }
   }, []);
+
+  // Re-focus the first digit when the parent resets the input
+  useEffect(() => {
+    if (resetKey !== undefined) {
+      inputsRef.current[0]?.focus();
+    }
+  }, [resetKey]);
 
   const handleChange = (val: string, index: number) => {
     const sanitizedVal = val.replace(/[^0-9a-zA-Z]/g, "").slice(-1);

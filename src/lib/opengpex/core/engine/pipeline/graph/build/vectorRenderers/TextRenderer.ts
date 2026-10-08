@@ -95,7 +95,10 @@ class CanvasGlyphRasterizer implements GlyphRasterizer {
         typeof OffscreenCanvas !== 'undefined'
           ? new OffscreenCanvas(1, 1)
           : document.createElement('canvas');
-      this.ctx = this.canvas.getContext('2d') as
+      // willReadFrequently: the rasterizer draws one glyph then immediately
+      // readbacks alpha via getImageData per glyph — a CPU-backed canvas avoids
+      // the GPU→CPU readback penalty (and the Chrome console warning).
+      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true }) as
         | OffscreenCanvasRenderingContext2D
         | CanvasRenderingContext2D
         | null;

@@ -92,6 +92,18 @@ export const PRESET_MANIFEST: PresetManifestEntry[] = [
     order: 0,
   },
 
+  {
+    key: 'SYSTEM_UPDATES_AUTO_CHECK',
+    group: 'System & Privacy',
+    groupIcon: 'ShieldCheck',
+    label: 'Auto check for updates',
+    description:
+      'Send an anonymous version ping to gpex.cloud (at most once per 12h) to receive release and security-fix notifications.',
+    control: 'switch',
+    switchMap: { onValue: true, offValue: false },
+    order: 0,
+  },
+
   // ─── Future examples (uncomment when ready to expose) ────────────────────
   //
   // {

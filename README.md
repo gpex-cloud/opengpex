@@ -207,6 +207,14 @@ The following pre-compiled WASM/JS libraries are bundled in `public/ext/` for cl
 
 ---
 
+## 🔒 Privacy & Telemetry
+
+OpenGPEX periodically checks for updates with anonymous telemetry (version, OS, and an irreversibly salted host hash) to alert you of new releases and security patches. No personal data, images, or canvas contents are ever collected.
+
+You can completely disable update checks and telemetry at any time in the Preferences menu. See [TELEMETRY.md](./TELEMETRY.md) for full details.
+
+---
+
 ## ⚖️ License
 
 **GPL-3.0-only** — see [LICENSE](./LICENSE).

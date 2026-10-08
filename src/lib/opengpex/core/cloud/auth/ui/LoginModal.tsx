@@ -84,6 +84,7 @@ export function LoginModal({ isOpen, onClose, onSuccess, apiBaseUrl, branding, o
   const [oauthPending, setOauthPending] = useState(false);
   const [lockCountdown, setLockCountdown] = useState(0);
   const [otp, setOtp] = useState("");
+  const [otpResetKey, setOtpResetKey] = useState(0);
   const [resendCountdown, setResendCountdown] = useState(0);
 
   const submittingRef = useRef(false);
@@ -141,6 +142,9 @@ export function LoginModal({ isOpen, onClose, onSuccess, apiBaseUrl, branding, o
       const data = await res.json() as { error?: string };
       if (!res.ok) throw new Error(data.error || "Failed to resend code");
       setResendCountdown(60);
+      // Fresh code sent: clear stale digits and put the caret back on box 1
+      setOtp("");
+      setOtpResetKey((k) => k + 1);
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to resend code");
     } finally { setLoading(false); }
@@ -316,6 +320,7 @@ export function LoginModal({ isOpen, onClose, onSuccess, apiBaseUrl, branding, o
             <form onSubmit={handleOtpSubmit}>
               <OtpInput
                 value={otp}
+                resetKey={otpResetKey}
                 onChange={(val) => { setOtp(val); if (val.length === 6) handleOtpSubmit(undefined, val); }}
                 accentColor={accent}
                 disabled={loading}

@@ -26,6 +26,11 @@ import "./globals.css";
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
+  // No <link rel="preload"> for the woff2: the editor is a canvas-first app —
+  // DOM text paints behind the boot overlay, so Chrome kept warning
+  // "preloaded but not used within a few seconds". The @font-face still loads
+  // the font via normal CSS discovery when body text first renders.
+  preload: false,
 });
 
 const geistMono = Geist_Mono({

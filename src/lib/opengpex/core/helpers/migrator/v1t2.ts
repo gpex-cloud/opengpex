@@ -211,15 +211,192 @@ export function sanitizeFrame(frameData: Record<string, unknown>): Record<string
 }
 
 /**
+ * A legacy display record resolved from Assets_V2, normalized to v5 fields.
+ */
+interface ResolvedLegacyAsset {
+  blob: Blob;
+  width: number;
+  height: number;
+  dprScale: number | undefined;
+  timestamp: number;
+}
+
+/**
+ * Copies `raw:${assetId}` from Assets_V2 to Assets_V3 when missing (the raw
+ * store is content-addressed and keyed identically on both sides — verbatim
+ * copy). Returns the legacy raw blob (also when the v3 copy already exists)
+ * so the caller can inspect the source file.
+ */
+async function copyRawSource(assetId: string): Promise<Blob | null> {
+  const legacyRawBlob = await LegacyAssetDriver.getItem<Blob>(`raw:${assetId}`);
+  if (!(legacyRawBlob instanceof Blob)) return null;
+  const existingV3Raw = await AssetDriver.getItem<Blob>(`raw:${assetId}`);
+  if (!existingV3Raw) {
+    await AssetDriver.setItem(`raw:${assetId}`, legacyRawBlob);
+    console.debug(`[Migrator] Copied raw source blob [raw:${assetId.slice(0, 10)}] to Assets_V3 (${legacyRawBlob.size} bytes)`);
+  }
+  return legacyRawBlob;
+}
+
+/**
+ * Reads the legacy display record at `${assetId}` (Assets_V2) and normalizes
+ * it to v5 fields. Accepts both a bare Blob (old plain-blob records) and a
+ * StoredAsset-shaped record (with tileMeta dimension/dpr fallbacks). Returns
+ * null when no record exists.
+ */
+async function loadLegacyRecord(
+  assetId: string,
+  hintDprScale?: number,
+): Promise<ResolvedLegacyAsset | null> {
+  const raw = await LegacyAssetDriver.getItem<LegacyAssetRecord | Blob>(assetId);
+  if (raw instanceof Blob) {
+    return { blob: raw, width: 0, height: 0, dprScale: hintDprScale, timestamp: Date.now() };
+  }
+  if (raw && typeof raw === 'object' && raw.blob instanceof Blob) {
+    return {
+      blob: raw.blob,
+      width: raw.tileMeta?.originalDimensions?.w || raw.width || 0,
+      height: raw.tileMeta?.originalDimensions?.h || raw.height || 0,
+      dprScale: raw.dprScale || raw.tileMeta?.dprScale || raw.tileMeta?.dpr || hintDprScale,
+      timestamp: raw.timestamp || Date.now(),
+    };
+  }
+  return null;
+}
+
+/** Decodes a blob via `createImageBitmap` to obtain its physical dimensions. */
+async function probeDimensions(blob: Blob): Promise<{ w: number; h: number } | null> {
+  if (typeof createImageBitmap !== 'function') return null;
+  try {
+    const bmp = await createImageBitmap(blob);
+    const dims = { w: bmp.width, h: bmp.height };
+    bmp.close();
+    return dims.w > 0 && dims.h > 0 ? dims : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * MIME types every major browser engine decodes identically via
+ * `createImageBitmap`. Raw-source containers (HEIC/HEIF, TIFF, camera RAW)
+ * are deliberately absent: some engines (Safari 17+ natively decodes HEIC)
+ * would pass a decode probe that Chrome/Firefox fail, and a StoredAsset built
+ * on such a blob breaks on every other browser (plus violates the ingest
+ * decision spec — display assets must be universal formats).
+ */
+const UNIVERSALLY_DECODABLE_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'image/bmp',
+  'image/avif',
+]);
+
+/**
+ * Conservative decodability check for raw source blobs. An empty MIME type
+ * (possible in very old records) defers to the runtime decode probe; a known
+ * non-universal container is rejected WITHOUT probing, so engine-specific
+ * decode support (Safari HEIC) cannot sneak a raw blob into the display store.
+ */
+function isUniversallyDecodableMime(blob: Blob): boolean {
+  return !blob.type || UNIVERSALLY_DECODABLE_MIME_TYPES.has(blob.type);
+}
+
+/**
+ * Resolves the final width/height (+ possibly a substituted display blob) for
+ * a legacy asset whose record carried no usable dimensions.
+ * Ladder: browser decode probe → companion asset borrow → fallback dims
+ * (layer rect / canvas extent; only trusted for raw source files the browser
+ * cannot decode by definition).
+ */
+async function resolveDimensions(
+  assetId: string,
+  blob: Blob,
+  legacyRawBlob: Blob | null,
+  companionAssetId?: string,
+  fallbackDim?: { w: number; h: number },
+): Promise<{ w: number; h: number; blob: Blob } | null> {
+  const probed = await probeDimensions(blob);
+  if (probed) {
+    console.debug(`[Migrator] Probed physical dimensions from blob for [${assetId.slice(0, 10)}]: ${probed.w}x${probed.h}`);
+    return { w: probed.w, h: probed.h, blob };
+  }
+
+  // Probe failed (e.g. undecodable record blob) — try borrowing the display
+  // blob + dimensions wholesale from the frame's companion display asset.
+  // Read the companion from Assets_V3 first, falling back to its (not-yet-
+  // upgraded) Assets_V2 record: the Set-iteration order of the upgrade loop
+  // gives no guarantee the companion was migrated before this id, and the
+  // borrow must not depend on it. We only READ here — the companion's own
+  // pass persists it to Assets_V3.
+  if (companionAssetId) {
+    const comp = (await AssetDriver.getItem<StoredAsset>(companionAssetId))
+      ?? (await LegacyAssetDriver.getItem<StoredAsset>(companionAssetId));
+    if (comp?.blob && comp.width && comp.width > 0 && comp.height && comp.height > 0) {
+      console.debug(`[Migrator] Borrowed display blob & dimensions (${comp.width}x${comp.height}) from companion asset [${companionAssetId.slice(0, 10)}] for [${assetId.slice(0, 10)}]`);
+      return { w: comp.width, h: comp.height, blob: comp.blob };
+    }
+  }
+
+  if (legacyRawBlob && fallbackDim && fallbackDim.w > 0 && fallbackDim.h > 0) {
+    console.debug(`[Migrator] Using fallback dimensions for [${assetId.slice(0, 10)}]: ${fallbackDim.w}x${fallbackDim.h}`);
+    return { w: fallbackDim.w, h: fallbackDim.h, blob };
+  }
+
+  console.warn(`[Migrator] Failed to probe dimensions from blob for asset [${assetId.slice(0, 10)}].`);
+  return null;
+}
+
+/** Validates dimensions and persists the v5 StoredAsset into Assets_V3. */
+async function writeUpgradedAsset(
+  assetId: string,
+  asset: ResolvedLegacyAsset,
+): Promise<void> {
+  // Hard defensive guard against zero-dimension textures in WebGPU
+  if (asset.width <= 0 || asset.height <= 0) {
+    console.error(`[Migrator] Asset [${assetId.slice(0, 10)}] has invalid/zero dimensions (${asset.width}x${asset.height}), skipping to protect WebGPU.`);
+    return;
+  }
+
+  const upgraded: StoredAsset = {
+    id: assetId,
+    blob: asset.blob,
+    width: asset.width,
+    height: asset.height,
+    ...(asset.dprScale && asset.dprScale > 0 ? { dprScale: asset.dprScale } : {}),
+    gamut: 'srgb',
+    trc: 'srgb-trc',
+    bitDepth: 8,
+    version: ASSET_VERSION,
+    timestamp: asset.timestamp,
+  };
+
+  // Save strictly to Assets_V3 without touching Assets_V2
+  await AssetDriver.setItem(assetId, upgraded);
+  console.info(`[Migrator] Migrated legacy asset [${assetId.slice(0, 10)}] from Assets_V2 -> Assets_V3 (${asset.width}x${asset.height}${asset.dprScale ? `, ${asset.dprScale}x DPR` : ''}, 8-bit sRGB)`);
+}
+
+/**
  * Upgrades a legacy asset record from Assets_V2 to ASSET_VERSION 5 in Assets_V3
  * with valid ColorIdentity, dimension healing, DPR preservation, and raw sourceBlob handling.
  * Completely non-destructive: Assets_V2 is strictly read-only.
  *
  * Handles both:
  * 1. Standard display assets: stored at `${assetId}` in Assets_V2.
- * 2. Raw source blobs: stored at `raw:${assetId}` in Assets_V2 (e.g. frame.assetId).
- *    Copies `raw:${assetId}` to Assets_V3, and also materializes a display StoredAsset
- *    under `${assetId}` so WebGPU / SceneAssembler has an actual renderable texture.
+ * 2. Raw source blobs: stored at `raw:${assetId}` in Assets_V2 (e.g. frame.assetId
+ *    pointing at the source-file hash for revert / fast-export). The raw copy is
+ *    ALWAYS migrated. A display StoredAsset under `${assetId}` is materialized
+ *    ONLY when the id has no companion display asset AND the raw blob's MIME
+ *    type is universally browser-decodable (and the decode probe agrees). An
+ *    undecodable OR engine-only-decodable source (HEIC — Safari 17+ decodes it
+ *    natively, Chrome does not — camera RAW, TIFF) must NEVER be wrapped into a
+ *    StoredAsset: it can never be decoded portably at render time. The
+ *    renderable display proxy lives under its own asset id and migrates as a
+ *    normal light record; the raw-only source pointer needs just the `raw:`
+ *    copy (consumed via `assets.getRaw`, which passes bare hashes through
+ *    untouched).
  */
 export async function upgradeAssetIfLegacy(
   assetId: string,
@@ -233,129 +410,206 @@ export async function upgradeAssetIfLegacy(
   }
 
   try {
-    // 1. Check if raw source blob exists in LegacyAssetDriver (Assets_V2)
-    const legacyRawBlob = await LegacyAssetDriver.getItem<Blob>(`raw:${assetId}`);
-    if (legacyRawBlob instanceof Blob) {
-      const existingV3Raw = await AssetDriver.getItem<Blob>(`raw:${assetId}`);
-      if (!existingV3Raw) {
-        await AssetDriver.setItem(`raw:${assetId}`, legacyRawBlob);
-        console.info(`[Migrator]       ✓ Migrated raw source blob [raw:${assetId.slice(0, 10)}] to Assets_V3 (${legacyRawBlob.size} bytes)`);
-      }
-    }
+    // 1. Raw source blob: always copy to Assets_V3, keep it for step 4.
+    const legacyRawBlob = await copyRawSource(assetId);
 
-    // 2. Check if display asset already exists in v2 store (Assets_V3)
+    // 2. Display asset already in Assets_V3? Only backfill a missing dprScale.
     const existingV3 = await AssetDriver.getItem<StoredAsset>(assetId);
     if (existingV3 && existingV3.blob) {
       if (!existingV3.dprScale && hintDprScale && hintDprScale > 1) {
         existingV3.dprScale = hintDprScale;
         await AssetDriver.setItem(assetId, existingV3);
-        console.info(`[Migrator]       ✓ Added dprScale (${hintDprScale}x) to existing v3 asset [${assetId.slice(0, 10)}]`);
-      } else {
-        console.debug(`[Migrator]       ✓ Asset [${assetId.slice(0, 10)}] already in Assets_V3.`);
+        console.debug(`[Migrator] Added dprScale (${hintDprScale}x) to existing v3 asset [${assetId.slice(0, 10)}]`);
       }
       return;
     }
 
-    // 3. Fetch record from LegacyAssetDriver
-    // It could be under `${assetId}` (legacy record or blob)
-    const raw = await LegacyAssetDriver.getItem<LegacyAssetRecord | Blob>(assetId);
-    let blob: Blob | undefined;
-    let width = 0;
-    let height = 0;
-    let dprScale: number | undefined = hintDprScale && hintDprScale > 0 ? hintDprScale : undefined;
-    let timestamp = Date.now();
+    // 3. Legacy display record from Assets_V2 (if any).
+    const record = await loadLegacyRecord(assetId, hintDprScale);
 
-    if (raw) {
-      if (raw instanceof Blob) {
-        blob = raw;
-      } else if (typeof raw === 'object' && raw.blob instanceof Blob) {
-        blob = raw.blob;
-        width = raw.tileMeta?.originalDimensions?.w || raw.width || 0;
-        height = raw.tileMeta?.originalDimensions?.h || raw.height || 0;
-        dprScale = raw.dprScale || raw.tileMeta?.dprScale || raw.tileMeta?.dpr || dprScale;
-        if (raw.timestamp) timestamp = raw.timestamp;
+    // 4. No display record but a raw source exists → the id is a v1 SOURCE
+    // POINTER (frame.assetId → source-file hash). Materialize a display asset
+    // ONLY when the raw blob is universally browser-decodable. Two gates, in
+    // order:
+    //   a. COMPANION GATE — when this id has a companion display asset (the
+    //      frame's base layer), it is by definition a pure source pointer: the
+    //      renderable proxy migrates under its own id and this id needs only
+    //      the `raw:` copy.
+    //   b. MIME GATE — a raw-source container (HEIC/HEIF/TIFF/camera RAW) is
+    //      rejected without even probing. A decode probe alone is NOT a safe
+    //      gate: Safari 17+ natively decodes HEIC, so on WebKit the probe
+    //      would succeed and re-introduce the exact StoredAsset that Chrome
+    //      then fails to decode on every boot.
+    if (!record && legacyRawBlob) {
+      const rawOnly = (reason: string) => {
+        console.debug(`[Migrator] Raw-only source pointer [${assetId.slice(0, 10)}]: raw copied, no display record (${reason}).`);
+        return;
+      };
+      if (companionAssetId) {
+        return rawOnly('companion display asset migrates under its own id');
       }
-    }
-
-    // 4. If no display record at `${assetId}`, but `raw:${assetId}` exists:
-    // This happens when frame.assetId points to sourceBlob!
-    if (!blob && legacyRawBlob instanceof Blob) {
-      blob = legacyRawBlob;
-      console.info(`[Migrator]       📦 Using legacy raw source blob for display asset [${assetId.slice(0, 10)}]`);
-    }
-
-    if (!blob || blob.size === 0) {
-      console.debug(`[Migrator]       ⚠️ Asset [${assetId.slice(0, 10)}] has no record/blob or empty blob in legacy Assets_V2, skipping.`);
+      if (!isUniversallyDecodableMime(legacyRawBlob)) {
+        return rawOnly(`undecodable / non-universal source (${legacyRawBlob.type || 'untyped blob'})`);
+      }
+      const probed = await probeDimensions(legacyRawBlob);
+      if (!probed) {
+        return rawOnly('decode probe failed');
+      }
+      console.debug(`[Migrator] Using decodable legacy raw blob for display asset [${assetId.slice(0, 10)}] (${probed.w}x${probed.h})`);
+      await writeUpgradedAsset(assetId, {
+        blob: legacyRawBlob,
+        width: probed.w,
+        height: probed.h,
+        dprScale: hintDprScale,
+        timestamp: Date.now(),
+      });
       return;
     }
 
-    // 5. Resolve dimensions with multi-level fallback, self-healing, and companion borrowing
+    if (!record || record.blob.size === 0) {
+      console.debug(`[Migrator] Asset [${assetId.slice(0, 10)}] has no record/blob or empty blob in legacy Assets_V2, skipping.`);
+      return;
+    }
+
+    // 5. Heal missing dimensions: probe → companion borrow → fallback dims.
+    let { blob, width, height } = record;
     if (width <= 0 || height <= 0) {
-      // 5a. Try sniffing dimensions via createImageBitmap
-      try {
-        if (typeof createImageBitmap === 'function') {
-          const bmp = await createImageBitmap(blob);
-          width = bmp.width;
-          height = bmp.height;
-          bmp.close();
-          console.info(`[Migrator]       🔍 Probed physical dimensions from blob for [${assetId.slice(0, 10)}]: ${width}x${height}`);
-        }
-      } catch (e) {
-        // If probing fails (e.g. un-decodable camera RAW/TIFF), try borrowing from companion asset
-        if (companionAssetId) {
-          const compV3 = await AssetDriver.getItem<StoredAsset>(companionAssetId);
-          if (compV3?.blob && compV3.width > 0 && compV3.height > 0) {
-            blob = compV3.blob;
-            width = compV3.width;
-            height = compV3.height;
-            console.info(`[Migrator]       🔗 Borrowed display blob & dimensions (${width}x${height}) from companion asset [${companionAssetId.slice(0, 10)}] for [${assetId.slice(0, 10)}]`);
-          }
-        }
-        // If still unresolved, only use fallbackDim if it's a raw source file (unsupported by browser createImageBitmap)
-        if ((width <= 0 || height <= 0) && legacyRawBlob && fallbackDim && fallbackDim.w > 0 && fallbackDim.h > 0) {
-          width = fallbackDim.w;
-          height = fallbackDim.h;
-          console.info(`[Migrator]       📐 Using fallback dimensions for [${assetId.slice(0, 10)}]: ${width}x${height}`);
-        } else if (width <= 0 || height <= 0) {
-          console.warn(`[Migrator]       ⚠️ Failed to probe dimensions from blob for asset [${assetId.slice(0, 10)}]:`, e);
-        }
-      }
+      const resolved = await resolveDimensions(assetId, blob, legacyRawBlob, companionAssetId, fallbackDim);
+      if (!resolved) return;
+      blob = resolved.blob;
+      width = resolved.w;
+      height = resolved.h;
     }
 
-    // Hard defensive guard against zero-dimension textures in WebGPU
-    if (width <= 0 || height <= 0) {
-      console.error(`[Migrator]       ❌ Asset [${assetId.slice(0, 10)}] has invalid/zero dimensions (${width}x${height}), skipping to protect WebGPU.`);
-      return;
-    }
-
-    // Construct compliant v5 StoredAsset for Assets_V3
-    const upgraded: StoredAsset = {
-      id: assetId,
-      blob,
-      width,
-      height,
-      ...(dprScale && dprScale > 0 ? { dprScale } : {}),
-      gamut: 'srgb',
-      trc: 'srgb-trc',
-      bitDepth: 8,
-      version: ASSET_VERSION,
-      timestamp,
-    };
-
-    // Save strictly to Assets_V3 without touching Assets_V2
-    await AssetDriver.setItem(assetId, upgraded);
-    console.info(`[Migrator]       ✓ Migrated legacy asset [${assetId.slice(0, 10)}] from Assets_V2 -> Assets_V3 (${width}x${height}${dprScale ? `, ${dprScale}x DPR` : ''}, 8-bit sRGB)`);
+    // 6. Write the compliant v5 StoredAsset to Assets_V3.
+    await writeUpgradedAsset(assetId, { ...record, blob, width, height });
   } catch (err) {
-    console.warn(`[Migrator]       ❌ Failed to upgrade legacy asset [${assetId.slice(0, 10)}]:`, err);
+    console.warn(`[Migrator] Failed to upgrade legacy asset [${assetId.slice(0, 10)}]:`, err);
   }
 }
-
 /** Boot lifecycle stages reported by the migration pipeline (optional callback). */
 export type MigrationStage = 'checking' | 'migrating' | 'healing' | 'done';
+
+/** Everything step 3 of the migration collects from the legacy frames. */
+interface CollectedLegacyFrames {
+  /** Sanitized frames (+ history_index + project_meta) to batch-write into State_V2. */
+  updates: Record<string, unknown>;
+  /** Every asset id referenced anywhere in the collected state. */
+  activeAssetIds: Set<string>;
+  /** Text asset id → layer logical rect width (to derive a dprScale hint). */
+  assetLogicalWidths: Map<string, number>;
+  /** Asset id → best-known logical dimensions (layer bounding/rect/canvas). */
+  assetFallbackDims: Map<string, { w: number; h: number }>;
+  /** frame.assetId → baseLayer.assetId, for raw-pointer ↔ display-proxy pairing. */
+  frameCompanionAssets: Map<string, string>;
+}
+
+/**
+ * Step 3 — reads every frame from State_V1, sanitizes it in memory
+ * (string colors → ColorValue, obsolete top-level fields stripped, text
+ * boxMode/verticalAlign/bounding healed) and gathers the asset-reference
+ * metadata the asset-upgrade pass needs.
+ */
+async function collectLegacyFrames(frameIds: string[]): Promise<CollectedLegacyFrames> {
+  const result: CollectedLegacyFrames = {
+    updates: {},
+    activeAssetIds: new Set(),
+    assetLogicalWidths: new Map(),
+    assetFallbackDims: new Map(),
+    frameCompanionAssets: new Map(),
+  };
+  const { updates, activeAssetIds, assetLogicalWidths, assetFallbackDims, frameCompanionAssets } = result;
+
+  for (const id of frameIds) {
+    const frameData = await LegacyStateDriver.getItem<Record<string, unknown>>(`frame:${id}`);
+    if (!frameData) {
+      console.warn(`[Migrator] Legacy frame:${id} referenced in project_meta was not found in State_V1.`);
+      continue;
+    }
+
+    // Collect all referenced asset IDs
+    Hydrating.extractAllIds(frameData, activeAssetIds);
+
+    const canvas = frameData.canvas as { w?: number; h?: number } | undefined;
+    const frameAssetId = frameData.assetId as string | undefined;
+    if (frameAssetId) {
+      activeAssetIds.add(frameAssetId);
+      if (canvas && typeof canvas.w === 'number' && typeof canvas.h === 'number' && canvas.w > 0 && canvas.h > 0) {
+        assetFallbackDims.set(frameAssetId, { w: canvas.w, h: canvas.h });
+      }
+    }
+
+    // Sanitize frame: strip obsolete top-level fields (bitDepth, colorSpace, trc)
+    // without polluting frame.metadata
+    const cleanFrame = { ...frameData };
+    delete cleanFrame.bitDepth;
+    delete cleanFrame.colorSpace;
+    delete cleanFrame.trc;
+
+    // Sanitize layers in cleanFrame (convert text/marker string colors to ColorValue)
+    const layers = cleanFrame.layers as { byId?: Record<string, Record<string, unknown>>; order?: string[] } | undefined;
+    if (layers?.byId) {
+      const baseLayerId = (cleanFrame.activeLayerId as string) || (layers.order && layers.order[0]);
+      const baseLayer = baseLayerId ? layers.byId[baseLayerId] : undefined;
+      const baseAssetId = (baseLayer?.assetId || (baseLayer as Record<string, unknown> | undefined)?.sourceAssetId) as string | undefined;
+      if (frameAssetId && baseAssetId && frameAssetId !== baseAssetId) {
+        frameCompanionAssets.set(frameAssetId, baseAssetId);
+      }
+
+      for (const layerId of Object.keys(layers.byId)) {
+        const layer = layers.byId[layerId];
+        sanitizeLayer(layer);
+
+        const assetId = (layer.assetId || (layer as Record<string, unknown>).sourceAssetId) as string | undefined;
+        const rect = layer.rect as { w?: number; h?: number } | undefined;
+        const bounding = layer.bounding as { w?: number; h?: number } | undefined;
+        const dim = bounding || rect || canvas;
+
+        if (assetId && dim && typeof dim.w === 'number' && typeof dim.h === 'number' && dim.w > 0 && dim.h > 0) {
+          if (!assetFallbackDims.has(assetId)) {
+            assetFallbackDims.set(assetId, { w: dim.w, h: dim.h });
+          }
+        }
+
+        // Record logical width hint for text assets to compute DPR if needed
+        if (layer.type === 'text') {
+          if (assetId && rect && typeof rect.w === 'number' && rect.w > 0) {
+            assetLogicalWidths.set(assetId, rect.w);
+          }
+        }
+      }
+    }
+
+    const frameName = typeof cleanFrame.name === 'string' ? cleanFrame.name : 'Untitled';
+    console.debug(`[Migrator] Prepared frame [${id}] ("${frameName}")`);
+    updates[`frame:${id}`] = cleanFrame;
+  }
+
+  return result;
+}
+
+/**
+ * Derives a dprScale hint for a text asset from its rasterized physical width
+ * vs the layer's logical rect width (only when that ratio exceeds 1).
+ */
+async function resolveTextDprHint(assetId: string, assetLogicalWidths: Map<string, number>): Promise<number | undefined> {
+  const logicalW = assetLogicalWidths.get(assetId);
+  if (!logicalW || logicalW <= 0) return undefined;
+  const legacyAsset = await LegacyAssetDriver.getItem<LegacyAssetRecord>(assetId);
+  const v3Asset = !legacyAsset ? await AssetDriver.getItem<StoredAsset>(assetId) : null;
+  const physW = legacyAsset?.tileMeta?.originalDimensions?.w || legacyAsset?.width || v3Asset?.width || 0;
+  if (physW <= 0) return undefined;
+  const calc = Math.round((physW / logicalW) * 100) / 100;
+  return calc > 1 ? calc : undefined;
+}
 
 /**
  * Automatic fault-tolerant migration from v1 (State_V1) to v2 (State_V2).
  * Ensures zero-touch upgrade for legacy users on cold boot.
+ *
+ * Log contract: `debug` narrates the process (per-frame preparation, per-asset
+ * probing, batch writes); `info` is reserved for final outcomes (per-asset
+ * migration success, overall success) and `warn`/`error` for failures.
  */
 export async function checkAndMigrateV1(
   onStage?: (stage: MigrationStage) => void,
@@ -364,7 +618,7 @@ export async function checkAndMigrateV1(
     // 1. O(1) Preflight: terminal flag check in State_V1
     const isMigrated = await LegacyStateDriver.getItem<boolean>('v2_migrated');
     if (isMigrated) {
-      console.debug('[Migrator] v1 migration preflight: already migrated. Skipping.');
+      console.debug('[Migrator] v1 already migrated.');
       return;
     }
 
@@ -378,80 +632,11 @@ export async function checkAndMigrateV1(
     }
 
     onStage?.('migrating');
-    console.info(`[Migrator] 🚀 Detected ${legacyMeta.frameIds.length} legacy v1 artboard(s). Starting automatic migration to State_V2...`);
+    console.debug(`[Migrator] Detected ${legacyMeta.frameIds.length} legacy v1 artboard(s). Starting automatic migration to State_V2...`);
 
-    const updates: Record<string, unknown> = {};
-    const activeAssetIds = new Set<string>();
-
-    // 3. Read and sanitize all frames from State_V1
-    const assetLogicalWidths = new Map<string, number>();
-    const assetFallbackDims = new Map<string, { w: number; h: number }>();
-    const frameCompanionAssets = new Map<string, string>(); // frame.assetId -> baseLayer.assetId
-
-    for (const id of legacyMeta.frameIds) {
-      const frameData = await LegacyStateDriver.getItem<Record<string, unknown>>(`frame:${id}`);
-      if (!frameData) {
-        console.warn(`[Migrator]   ⚠️ Legacy frame:${id} referenced in project_meta was not found in State_V1.`);
-        continue;
-      }
-
-      // Collect all referenced asset IDs
-      Hydrating.extractAllIds(frameData, activeAssetIds);
-
-      const canvas = frameData.canvas as { w?: number; h?: number } | undefined;
-      const frameAssetId = frameData.assetId as string | undefined;
-      if (frameAssetId) {
-        activeAssetIds.add(frameAssetId);
-        if (canvas && typeof canvas.w === 'number' && typeof canvas.h === 'number' && canvas.w > 0 && canvas.h > 0) {
-          assetFallbackDims.set(frameAssetId, { w: canvas.w, h: canvas.h });
-        }
-      }
-
-      // Sanitize frame: strip obsolete top-level fields (bitDepth, colorSpace, trc)
-      // without polluting frame.metadata
-      const cleanFrame = { ...frameData };
-      delete cleanFrame.bitDepth;
-      delete cleanFrame.colorSpace;
-      delete cleanFrame.trc;
-
-      // Sanitize layers in cleanFrame (convert text/marker string colors to ColorValue)
-      const layers = cleanFrame.layers as { byId?: Record<string, Record<string, unknown>>; order?: string[] } | undefined;
-      if (layers?.byId) {
-        const baseLayerId = (cleanFrame.activeLayerId as string) || (layers.order && layers.order[0]);
-        const baseLayer = baseLayerId ? layers.byId[baseLayerId] : undefined;
-        const baseAssetId = (baseLayer?.assetId || (baseLayer as Record<string, unknown> | undefined)?.sourceAssetId) as string | undefined;
-        if (frameAssetId && baseAssetId && frameAssetId !== baseAssetId) {
-          frameCompanionAssets.set(frameAssetId, baseAssetId);
-        }
-
-        for (const layerId of Object.keys(layers.byId)) {
-          const layer = layers.byId[layerId];
-          sanitizeLayer(layer);
-
-          const assetId = (layer.assetId || (layer as Record<string, unknown>).sourceAssetId) as string | undefined;
-          const rect = layer.rect as { w?: number; h?: number } | undefined;
-          const bounding = layer.bounding as { w?: number; h?: number } | undefined;
-          const dim = bounding || rect || canvas;
-
-          if (assetId && dim && typeof dim.w === 'number' && typeof dim.h === 'number' && dim.w > 0 && dim.h > 0) {
-            if (!assetFallbackDims.has(assetId)) {
-              assetFallbackDims.set(assetId, { w: dim.w, h: dim.h });
-            }
-          }
-
-          // Record logical width hint for text assets to compute DPR if needed
-          if (layer.type === 'text') {
-            if (assetId && rect && typeof rect.w === 'number' && rect.w > 0) {
-              assetLogicalWidths.set(assetId, rect.w);
-            }
-          }
-        }
-      }
-
-      const frameName = typeof cleanFrame.name === 'string' ? cleanFrame.name : 'Untitled';
-      console.info(`[Migrator]   📦 Prepared frame [${id}] ("${frameName}")`);
-      updates[`frame:${id}`] = cleanFrame;
-    }
+    // 3. Read + sanitize all frames from State_V1
+    const { updates, activeAssetIds, assetLogicalWidths, assetFallbackDims, frameCompanionAssets } =
+      await collectLegacyFrames(legacyMeta.frameIds);
 
     // Also read history_index if present
     const historyIndex = await LegacyStateDriver.getItem<GlobalHistoryState>('history_index');
@@ -463,36 +648,27 @@ export async function checkAndMigrateV1(
     updates['project_meta'] = legacyMeta;
 
     // 4. Upgrade referenced legacy assets in Assets_V2 with self-healing, raw sourceBlobs, and guards
-    console.info(`[Migrator]   🎨 Inspecting and upgrading ${activeAssetIds.size} referenced asset(s)...`);
+    console.debug(`[Migrator] Inspecting and upgrading ${activeAssetIds.size} referenced asset(s)...`);
     for (const assetId of activeAssetIds) {
-      let hintDpr: number | undefined;
-      const logicalW = assetLogicalWidths.get(assetId);
-      if (logicalW && logicalW > 0) {
-        const legacyAsset = await LegacyAssetDriver.getItem<LegacyAssetRecord>(assetId);
-        const v3Asset = !legacyAsset ? await AssetDriver.getItem<StoredAsset>(assetId) : null;
-        const physW = legacyAsset?.tileMeta?.originalDimensions?.w || legacyAsset?.width || v3Asset?.width || 0;
-        if (physW > 0) {
-          const calc = Math.round((physW / logicalW) * 100) / 100;
-          if (calc > 1) {
-            hintDpr = calc;
-          }
-        }
-      }
-      const fallbackDim = assetFallbackDims.get(assetId);
-      const companionAssetId = frameCompanionAssets.get(assetId);
-      await upgradeAssetIfLegacy(assetId, hintDpr, fallbackDim, companionAssetId);
+      const hintDpr = await resolveTextDprHint(assetId, assetLogicalWidths);
+      await upgradeAssetIfLegacy(
+        assetId,
+        hintDpr,
+        assetFallbackDims.get(assetId),
+        frameCompanionAssets.get(assetId),
+      );
     }
 
     // 5. Transactional batch write into State_V2
-    console.info(`[Migrator]   💾 Writing ${Object.keys(updates).length} record(s) to State_V2...`);
+    console.debug(`[Migrator] Writing ${Object.keys(updates).length} record(s) to State_V2...`);
     await ShardedStateDriver.setItems(updates);
 
     // 6. Only after ALL writes succeed, commit terminal flag in State_V1
     await LegacyStateDriver.setItem('v2_migrated', true);
 
-    console.info('[Migrator] ✅ Successfully migrated legacy v1 artboards to v2! Terminal flag set in State_V1.');
+    console.info('[Migrator] Successfully migrated legacy v1 artboards to v2! Terminal flag set in State_V1.');
   } catch (err) {
-    console.error('[Migrator] ❌ Automatic migration from v1 failed (will retry on next refresh):', err);
+    console.error('[Migrator] Automatic migration from v1 failed (will retry on next refresh):', err);
   }
 }
 
@@ -516,7 +692,7 @@ export async function healExistingV2Records(): Promise<void> {
       return;
     }
 
-    console.info('[Migrator] 🩺 Running post-migration healing pass on State_V2 records...');
+    console.debug('[Migrator] Running post-migration healing pass on State_V2 records...');
     const updates: Record<string, unknown> = {};
 
     for (const id of meta.frameIds) {
@@ -554,7 +730,7 @@ export async function healExistingV2Records(): Promise<void> {
               if (asset && (!asset.dprScale || asset.dprScale === 1) && rect && typeof rect.w === 'number' && rect.w > 0) {
                 const calculatedDpr = Math.round((asset.width / rect.w) * 100) / 100;
                 if (calculatedDpr > 1) {
-                  console.info(`[Migrator]   ✓ Healed dprScale for text asset [${assetId.slice(0, 10)}] (${calculatedDpr}x)`);
+                  console.debug(`[Migrator] Healed dprScale for text asset [${assetId.slice(0, 10)}] (${calculatedDpr}x)`);
                   asset.dprScale = calculatedDpr;
                   await AssetDriver.setItem(assetId, asset);
                 }
@@ -565,7 +741,7 @@ export async function healExistingV2Records(): Promise<void> {
       }
 
       if (frameModified) {
-        console.info(`[Migrator]   ✓ Healed layer colors and attributes for frame [${id}]`);
+        console.debug(`[Migrator] Healed layer colors and attributes for frame [${id}]`);
         updates[`frame:${id}`] = frameData;
       }
     }
@@ -576,9 +752,9 @@ export async function healExistingV2Records(): Promise<void> {
 
     await StateDriver.setItem(V2_HEAL_FLAG_KEY, true);
     await StateDriver.setItem('v2_healed_layer_colors_dpr', true);
-    console.info('[Migrator] ✅ Post-migration healing pass completed successfully.');
+    console.info('[Migrator] Post-migration healing pass completed successfully.');
   } catch (err) {
-    console.warn('[Migrator] ⚠️ Post-migration healing pass encountered an error (will retry next time):', err);
+    console.warn('[Migrator] Post-migration healing pass encountered an error (will retry next time):', err);
   }
 }
 

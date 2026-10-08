@@ -34,6 +34,7 @@ import {
   BookMarked,
 } from "lucide-react";
 import { GpexCloudProvider, gpexStorage } from "@opengpex/editor/core/cloud";
+import { getOrCreateClientId } from "@opengpex/editor/core/system/client-id";
 import { PremiumCloudIcon } from "@opengpex/editor/icons";
 import { useCloudMenu, type SyncStatus, type LastSaveResult } from "./hooks";
 import { CloudBrowser } from "./CloudBrowser";
@@ -333,6 +334,13 @@ function CloudMenuInner() {
     fileCount: number;
   } | null>(null);
   const [prevIsSignedIn, setPrevIsSignedIn] = useState(isSignedIn);
+  // Anonymous update-check client id (also the stats identity in gpex.cloud).
+  // Lazy init: reading localStorage is a pure external read, no effect needed.
+  const [clientId] = useState(() => getOrCreateClientId());
+
+  const handleCopyClientId = useCallback(() => {
+    if (clientId) navigator.clipboard?.writeText(clientId).catch(() => {});
+  }, [clientId]);
 
   if (isSignedIn !== prevIsSignedIn) {
     setPrevIsSignedIn(isSignedIn);
@@ -428,6 +436,15 @@ function CloudMenuInner() {
             <span className="text-[9px] font-bold text-[var(--text-muted)] mt-0.5 tracking-wide uppercase">
               {isSignedIn ? user?.email : "Offline"}
             </span>
+            {clientId && (
+              <button
+                className="text-[8px] font-semibold text-[var(--text-muted)] mt-0.5 tracking-wide uppercase truncate w-full text-left hover:text-[var(--text-main)] transition-colors"
+                title={`${clientId} — click to copy`}
+                onClick={handleCopyClientId}
+              >
+                ID {clientId.slice(0, 8)}
+              </button>
+            )}
           </div>
         </div>
 

@@ -34,11 +34,14 @@
  *     atlas uses, so the atlas and the composite always rasterize at a
  *     consistent density and pan/zoom inside a band is quantized away (zero
  *     re-composite; crossing a band costs exactly one).
- *   • The achieved per-axis scale is the band clamped by the VRAM hard cap:
- *     `min(band, ceil / docDim)` per edge, `ceil = min(maxTextureDimension2D,
- *     4096)`. A clamped axis degrades toward document-resolution compositing
- *     instead of allocating an over-limit / 400 MB+ texture; 4K/8K canvases at
- *     high zoom land here.
+ *   • The achieved scale is the band clamped UNIFORMLY by the VRAM hard cap:
+ *     `min(band, ceil / max(docW, docH))`, `ceil = min(maxTextureDimension2D,
+ *     4096)`. The clamp factor is shared by BOTH axes (driven by the LONGER
+ *     edge) so the composite always preserves the document aspect ratio — the
+ *     present channel (`ViewPass` / `densityScale`) consumes a single scalar
+ *     and cannot express per-axis densities. 4K/8K canvases at high zoom land
+ *     here, degrading toward document-resolution compositing instead of
+ *     allocating an over-limit / 400 MB+ texture.
  *
  * @module core/engine/pipeline/graph/support/densityComposite
  */
@@ -52,7 +55,7 @@ import { quantizeDensityBand } from '@opengpex/editor/core/engine/text/glyphAtla
  */
 export const INTERACTIVE_COMPOSITE_CEIL_PX = 4096;
 
-/** Quantized interactive composite density, per axis, after the hard cap. */
+/** Quantized interactive composite density (uniform scalar, shared by both axes). */
 export interface InteractiveDensity {
   /**
    * The quantized density band (glyph-atlas bands). Constant inside a
@@ -60,9 +63,13 @@ export interface InteractiveDensity {
    * cache may key on.
    */
   readonly band: number;
-  /** Achieved composite scale on X (≤ band, < 1 only when hard-cap clamped). */
+  /**
+   * Achieved composite scale on X (≤ band; < 1 only when hard-cap clamped).
+   * ALWAYS equal to `scaleY` — the hard cap clamps via the longer edge so the
+   * composite keeps the document aspect ratio.
+   */
   readonly scaleX: number;
-  /** Achieved composite scale on Y. */
+  /** Achieved composite scale on Y (=== `scaleX`, see above). */
   readonly scaleY: number;
 }
 
@@ -82,11 +89,12 @@ export function resolveInteractiveDensity(
   const ceil = Math.max(1, Math.min(maxTextureDimension2D, INTERACTIVE_COMPOSITE_CEIL_PX));
   const w = Math.max(1, docWidth);
   const h = Math.max(1, docHeight);
-  return {
-    band,
-    scaleX: Math.min(band, ceil / w),
-    scaleY: Math.min(band, ceil / h),
-  };
+  // Aspect-preserving clamp: BOTH axes share one factor driven by the longer
+  // edge. Per-edge clamping here produced non-uniform densities that the
+  // present channel flattened into a single `densityScale` scalar (visible as
+  // a ~1.33x horizontal stretch on a 3:4 canvas once band > ceil/shortEdge).
+  const scale = Math.min(band, ceil / Math.max(w, h));
+  return { band, scaleX: scale, scaleY: scale };
 }
 
 /**

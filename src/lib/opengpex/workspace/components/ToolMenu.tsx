@@ -28,16 +28,21 @@ import {
   PinOff,
   ChevronRight,
   Wrench,
+  CircleAlert,
+  ArrowUpCircle,
+  Loader2,
 } from "lucide-react";
 import {
   useEditorState,
   useEditorServices,
 } from "@opengpex/editor/core/context";
 import { useTheme } from "@opengpex/components/theme/ThemeContext";
+import { useUpdateChecker } from "@opengpex/editor/core/system/useUpdateChecker";
 // Import isolated local styles
 import { getToolMenuStyles } from "../styles//ToolMenu.styles";
 import PluginSlot from "./PluginSlot";
 import Tooltip from "../../widgets/Tooltip";
+import ReleaseGuideCard from "./ReleaseGuideCard";
 import { GITHUB_REPO_URL } from "@opengpex/editor/core/helpers/config";
 
 // --- 1. Define infinitely recursive menu item data structure ---
@@ -170,6 +175,21 @@ export default function ToolMenu() {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const { updateInfo, isChecking, checkNow, skipVersion } = useUpdateChecker();
+  const [showReleaseGuide, setShowReleaseGuide] = useState(false);
+
+  const handleCheckUpdate = async () => {
+    const info = await checkNow();
+    if (!info) {
+      actions.notifyHUD('Update check failed. Check your network and try again.', 'error');
+    } else if (info.hasUpdate) {
+      actions.notifyHUD(`New version v${info.latestVersion} available`, 'success');
+      setShowReleaseGuide(true);
+    } else {
+      actions.notifyHUD('OpenGPEX is up to date', 'info');
+    }
+  };
+
   const isCollapsed = !(isOpen || isToolMenuPinned);
   const styles = getToolMenuStyles(isCollapsed, isToolMenuPinned);
 
@@ -237,6 +257,11 @@ export default function ToolMenu() {
                   <span className="ml-1.5 text-[9px] font-semibold text-[var(--text-muted)] tracking-normal">
                     v{process.env.NEXT_PUBLIC_CORE_VERSION}
                   </span>
+                  {updateInfo?.hasUpdate && (
+                    <span className="inline-flex items-center ml-1 px-1 py-px rounded-full text-[8px] font-bold bg-amber-500/20 text-amber-500">
+                      NEW
+                    </span>
+                  )}
                 </span>
                 <a
                   href={GITHUB_REPO_URL}
@@ -307,7 +332,40 @@ export default function ToolMenu() {
               isPinned={isToolMenuPinned}
             />
           </div>
+
+          <div className={styles.divider.className} />
+
+          {/* 5. Update check */}
+          <div className={`flex flex-col gap-0.5 ${isToolMenuPinned ? 'px-1' : 'px-2'}`}>
+            <NativeMenuItem
+              data={{
+                label: isChecking ? "Checking for Updates..." : "Check for Updates",
+                shortcut: updateInfo?.hasUpdate
+                  ? `v${updateInfo.latestVersion}`
+                  : undefined,
+                icon: isChecking ? (
+                  <Loader2 size={14} className="animate-spin text-amber-500" />
+                ) : updateInfo?.hasUpdate ? (
+                  <ArrowUpCircle size={14} className="text-amber-500" />
+                ) : (
+                  <CircleAlert size={14} />
+                ),
+                onClick: handleCheckUpdate,
+              }}
+              styles={styles}
+              isPinned={isToolMenuPinned}
+            />
+          </div>
         </div>
+      )}
+
+      {/* Update guide modal (opened from the menu item) */}
+      {showReleaseGuide && updateInfo?.hasUpdate && (
+        <ReleaseGuideCard
+          info={updateInfo}
+          onClose={() => setShowReleaseGuide(false)}
+          onSkipVersion={skipVersion}
+        />
       )}
     </div>
   );
