@@ -65,7 +65,7 @@ export const plugin: EditorPlugin = {
     generationHistory: [],
     agents: [],
     activeAgentId: null,
-    enableAgents: true,
+    enableAgents: false,
   },
 
   // --- 5. Commands ---

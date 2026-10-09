@@ -30,6 +30,7 @@ import { TEXT_OVERLAY_SIGNAL_PLACE_MARQUEE, TEXT_OVERLAY_EVT_COMMIT_REQUEST } fr
 import type { PlaceMarqueeRect } from './protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
 import { fromHex, type ColorValue } from '@opengpex/editor/core/engine/color';
+import { setPendingEditCaretPoint } from './editCaret';
 
 /** Shared signal keys (cross-plugin constants) */
 const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
@@ -207,15 +208,15 @@ export const createTextMoveHandler = (): InteractionHandler => {
 /**
  * Resolves the text layer a transform-gizmo handle belongs to. The pre-edit
  * gizmo is rendered inside LayerOverlayItem wrapped in an element carrying
- * `data-text-gizmo-layer=<layerId>`, so the hit DOM node identifies the target
+ * `data-overlay-gizmo-layer=<layerId>`, so the hit DOM node identifies the target
  * unambiguously (the editing-state gizmo was removed with the session-gizmo
  * split — geometry changes happen either pre-edit here or via Cmd+Drag move).
  */
 function resolveGizmoTargetLayer(e: InteractionEvent): Layer | null {
   const target = e.nativeEvent.target as HTMLElement | null;
   if (!target) return null;
-  const host = target.closest('[data-text-gizmo-layer]');
-  const layerId = host?.getAttribute('data-text-gizmo-layer');
+  const host = target.closest('[data-overlay-gizmo-layer]');
+  const layerId = host?.getAttribute('data-overlay-gizmo-layer');
   if (!layerId) return null;
   const layer = e.activeFrame.layers.byId[layerId];
   return layer && layer.type === 'text' ? layer : null;
@@ -648,6 +649,10 @@ export const createTextPlaceHandler = (): InteractionHandler => {
       // Clicking an existing text layer -> wake up editing
       const hitTextLayer = findTextLayerAtPoint(e.geometry, frame, e.point.canvas);
       if (hitTextLayer) {
+        // Hand the click point to the inline editor so the caret lands where
+        // the user clicked instead of at the end of the text.
+        const mouseEvent = e.nativeEvent as MouseEvent;
+        setPendingEditCaretPoint({ clientX: mouseEvent.clientX, clientY: mouseEvent.clientY });
         // Enter editing state via command system (automatically establish undo baseline)
         e.actions.executeCommand(CMD_EDIT_START_UID, {
           frameId: frame.id,

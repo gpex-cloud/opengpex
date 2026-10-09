@@ -94,7 +94,7 @@ export function AgentDockButton() {
   }, [togglePanel]);
 
   // Hide entirely when agents are disabled in settings
-  if ((config.enableAgents ?? true) === false) return null;
+  if ((config.enableAgents ?? false) === false) return null;
 
   return (
     <div ref={wrapRef} className="relative">

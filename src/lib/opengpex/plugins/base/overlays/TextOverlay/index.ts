@@ -23,6 +23,9 @@ import { createTextMoveHandler, createTextResizeHandler, createTextRotateHandler
 import { TEXT_OVERLAY_COMMANDS } from './commands';
 import * as P from './protocols';
 
+// Side-effect import: registers TextOverlay's LayerOverlay usage source.
+import './usage';
+
 /**
  * TextOverlay Plugin: Text inline editing DOM overlay
  *

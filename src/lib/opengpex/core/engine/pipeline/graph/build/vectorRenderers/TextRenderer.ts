@@ -73,8 +73,7 @@ import type { VectorRenderer, VectorRenderContext, VectorRenderArgs } from './Ve
 /**
  * Capacity of the instance ring (4 MiB ≈ 131k instances of 32 bytes). A text
  * layer's glyph + decoration count is bounded by the document, far below this;
- * `buildInstances` hard-caps at the ring's capacity and drops the overflow
- * rather than wrapping mid-quad.
+ * the draw loop drops overflow rather than wrapping mid-quad.
  */
 const TEXT_INSTANCE_RING_CAPACITY = 4 * 1024 * 1024;
 
@@ -146,12 +145,13 @@ class CanvasGlyphRasterizer implements GlyphRasterizer {
     text: string,
     font: string,
     rasterFontSize: number,
+    metrics: { inkW: number; inkH: number; inkAscent: number; inkLeft: number },
     into: Uint8Array,
     pageSize: number,
     x: number,
     y: number,
   ): void {
-    const m = this.measure(text, font, rasterFontSize);
+    const m = metrics;
     const w = Math.ceil(m.inkW);
     const h = Math.ceil(m.inkH);
     if (w <= 0 || h <= 0) return;
@@ -229,6 +229,17 @@ export class TextRenderer implements VectorRenderer {
   private scratchF32 = new Float32Array(0);
   private uniformScratch = new Float32Array(TEXT_UNIFORM_BUFFER_SIZE / 4);
 
+  /** Pages already uploaded during the current frame (setKey:pageIndex →
+   * version): several text layers in one composite share atlas sets, and each
+   * layer's render adds glyphs that bump page versions — this guards against
+   * re-uploading an identical (page, version) whole-page snapshot within the
+   * same frame. Cleared at the frame boundary with lastFrameToken. */
+  private frameUploads = new Map<string, number>();
+
+  /** setKey:page indices already warned about for a missing GPU texture —
+   * keeps the defensive-drop warning to one line per page instead of per frame. */
+  private missingTextureWarned = new Set<string>();
+
   private ensureCache(device: GPUDevice): GlyphAtlasCache {
     if (this.cache && this.cacheDevice === device) return this.cache;
     this.cache = new GlyphAtlasCache();
@@ -283,11 +294,6 @@ export class TextRenderer implements VectorRenderer {
   }
 
   /**
-   * Pack one text layer's layout into per-page instance batches. PURE (no GPU,
-   * no DOM) — exported for tests. Returns null when the layer has no drawable
-   * content. Instance order within a page batch is stable (lines in order).
-   */
-  /**
    * Drop the atlas sets rasterized at `band` AND their GPU page mirrors
    * (export path: the export-band atlas is one-shot — rasterize, composite,
    * release). Mirrors `GlyphAtlasCache.evictBand` + the generation-driven
@@ -320,6 +326,7 @@ export class TextRenderer implements VectorRenderer {
     // this frame's requests — the Paging + Flush eviction contract.
     if (this.lastFrameToken !== (args.frameToken ?? null)) {
       this.lastFrameToken = args.frameToken ?? null;
+      this.frameUploads.clear();
       cache.beginFrame();
     }
     if (cache.generation !== this.seenGeneration) {
@@ -329,6 +336,7 @@ export class TextRenderer implements VectorRenderer {
       }
       this.gpuSets.clear();
       this.seenVersions.clear();
+      this.missingTextureWarned.clear();
       this.seenGeneration = cache.generation;
     }
 
@@ -362,6 +370,7 @@ export class TextRenderer implements VectorRenderer {
     // Pack instances per page: glyphs first, then decoration rects (white pixel).
     const scratch = this.scratchPages;
     for (const arr of scratch.values()) arr.length = 0;
+    let hasInstances = false;
     const emit = (page: number, vals: number[]) => {
       let arr = scratch.get(page);
       if (!arr) {
@@ -369,6 +378,7 @@ export class TextRenderer implements VectorRenderer {
         scratch.set(page, arr);
       }
       for (const v of vals) arr.push(v);
+      hasInstances = true;
     };
 
     for (const line of p.layout.lines) {
@@ -389,9 +399,10 @@ export class TextRenderer implements VectorRenderer {
       }
     }
     if (decoUV) {
-      const decoPage = 0;
+      // Decorations sample the page the white pixel actually landed on (page 0
+      // fills up like any other — DecoPixel.page is the only source of truth).
       const push = (x: number, y: number, w: number, h: number) => {
-        emit(decoPage, [
+        emit(decoUV.page, [
           x, y, w, h,
           decoUV.u0, decoUV.v0,
           decoUV.u1 - decoUV.u0, decoUV.v1 - decoUV.v0,
@@ -400,12 +411,15 @@ export class TextRenderer implements VectorRenderer {
       for (const r of p.layout.underlines) push(r.x, r.y, r.w, r.h);
       for (const r of p.layout.strikethroughs) push(r.x, r.y, r.w, r.h);
     }
-    if (!scratch.size) return;
+    if (!hasInstances) return;
 
     // Upload dirty atlas pages BEFORE encoding draws (queue ordering at submit).
     const gpuSet = this.gpuSets.get(setKey) ?? emptyGpuSet();
     this.gpuSets.set(setKey, gpuSet);
     for (const dirty of cache.takeDirtyPages(this.seenVersions)) {
+      const uploadKey = `${dirty.setKey}:${dirty.pageIndex}`;
+      if (this.frameUploads.get(uploadKey) === dirty.version) continue;
+      this.frameUploads.set(uploadKey, dirty.version);
       const target = dirty.setKey === setKey
         ? gpuSet
         : (this.gpuSets.get(dirty.setKey) ?? emptyGpuSet());
@@ -438,18 +452,26 @@ export class TextRenderer implements VectorRenderer {
     }
 
     for (const [page, floats] of scratch) {
+      if (!floats.length) continue;
       if (floats.length / INSTANCE_FLOATS > instanceCapacity) continue; // absurd layer; drop rather than corrupt the ring
-      const count = floats.length;
-      if (count > this.scratchF32.length) {
-        this.scratchF32 = new Float32Array(Math.max(count, 4096));
+
+      const texture = gpuSet.textures[page];
+      if (!texture) {
+        // Unreachable by construction (every instance's page was uploaded via
+        // takeDirtyPages above) — warn once instead of failing silently.
+        const warnKey = `${setKey}:${page}`;
+        if (!this.missingTextureWarned.has(warnKey)) {
+          this.missingTextureWarned.add(warnKey);
+          console.warn(
+            `[TextRenderer] missing GPU texture for atlas page ${page} of set "${setKey}" — dropping ${floats.length / INSTANCE_FLOATS} glyph instances`,
+          );
+        }
+        continue;
       }
-      const packed = this.scratchF32.subarray(0, count);
-      for (let i = 0; i < count; i++) packed[i] = floats[i];
-      const slot = ring.writeSlot(packed);
-      const slotU = ctx.bufferRing.writeSlot(uniformData);
+
       let view = gpuSet.views[page];
       if (!view) {
-        view = gpuSet.textures[page].createView();
+        view = texture.createView();
         gpuSet.views[page] = view;
       }
       let bindGroup = cachedBindGroups[page];
@@ -468,6 +490,16 @@ export class TextRenderer implements VectorRenderer {
         });
         cachedBindGroups[page] = bindGroup;
       }
+
+      const count = floats.length;
+      if (count > this.scratchF32.length) {
+        this.scratchF32 = new Float32Array(Math.max(count, 4096));
+      }
+      const packed = this.scratchF32.subarray(0, count);
+      for (let i = 0; i < count; i++) packed[i] = floats[i];
+      const slot = ring.writeSlot(packed);
+      const slotU = ctx.bufferRing.writeSlot(uniformData);
+
       pass.setVertexBuffer(1, slot.buffer, slot.offset, slot.size);
       pass.setBindGroup(0, bindGroup, [slotU.offset]);
       pass.draw(6, count / INSTANCE_FLOATS);

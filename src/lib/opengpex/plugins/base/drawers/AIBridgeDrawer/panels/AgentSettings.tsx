@@ -49,7 +49,7 @@ export function AgentSettings({ config, setConfig }: AgentSettingsProps) {
   const cachedModels = config.cachedModels || {};
   const validEndpoints = useMemo(() => usableEndpoints(config.endpoints || []), [config.endpoints]);
 
-  const enableAgents = config.enableAgents ?? true;
+  const enableAgents = config.enableAgents ?? false;
 
   const updateAgent = (id: string, patch: Partial<AgentDef>) => {
     setConfig({

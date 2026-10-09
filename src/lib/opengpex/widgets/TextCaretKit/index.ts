@@ -17,27 +17,20 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-'use client';
-
 /**
- * LayerOverlay Plugin Protocols
+ * TextCaretKit: self-contained custom caret toolkit for contenteditable hosts.
+ *
+ * - geometry.ts: pure DOM measurement/projection/placement (unit-testable).
+ * - useCaretAnchor: React hook tracking the caret as a container-local anchor.
+ * - TextCaret: render-only caret bar (blink, counter-scaled screen-constant).
+ *
+ * Host contract: the host owns the container transform (live, may be written
+ * by a ticker) and a counter-scale CSS variable (default `--text-caret-scale`,
+ * value = 1 / camera scale). Everything else is the kit's job.
  */
-export const PLUGIN_ID = 'overlays.layer_overlay';
-export const PLUGIN_AUTHOR = 'opengpex';
 
-/**
- * Custom Config Interface
- */
-export interface LayerOverlayConfig {
-  showAlways: boolean;
-}
-
-/**
- * Commands
- */
-export const CMD_TOGGLE = 'cmd.toggle';
-
-/**
- * Cross-plugin Reference UIDs
- */
-export const LAYER_OVERLAY_CMD_TOGGLE = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_TOGGLE}`;
+export * from './geometry';
+export * from './useCaretAnchor';
+export * from './Caret';
+export * from './useSelectionRects';
+export * from './Selection';

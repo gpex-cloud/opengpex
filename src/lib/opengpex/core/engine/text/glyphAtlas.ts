@@ -132,10 +132,17 @@ export interface GlyphRasterizer {
   /** CSS font string, e.g. `italic 400 24px sans-serif`. */
   font(fontFamily: string, fontWeight: number, italic: boolean, rasterFontSize: number): string;
   measure(text: string, font: string, rasterFontSize: number): GlyphMetrics;
+  /**
+   * Draw one glyph's ink into the page bitmap at the given cell origin (the
+   * caller has already reserved pad margins around the ink box). `metrics` is
+   * the ink box `measure` returned for the same (text, font, rasterFontSize) —
+   * passed through so implementations don't re-measure.
+   */
   rasterize(
     text: string,
     font: string,
     rasterFontSize: number,
+    metrics: GlyphMetrics,
     into: Uint8Array,
     pageSize: number,
     x: number,
@@ -190,7 +197,7 @@ class AtlasSet {
   constructor(readonly key: string, readonly band: number) {}
 
   /** Reserved all-white 1×1 UV used by decoration quads (underline/strikethrough). */
-  decoUV: { u0: number; v0: number; u1: number; v1: number } | null = null;
+  decoUV: DecoPixel | null = null;
 }
 
 /** A page whose pixels changed since the consumer last uploaded it. */
@@ -198,6 +205,20 @@ export interface DirtyPage {
   readonly setKey: string;
   readonly pageIndex: number;
   readonly data: Uint8Array;
+  /** The page version this dirty report carries (for consumer-side dedup). */
+  readonly version: number;
+}
+
+/** The reserved all-white pixel decoration quads sample: solid coverage 1. */
+export interface DecoPixel {
+  /** Page the pixel was placed on — usually 0, but a full page 0 pushes it to
+   * the next page, so consumers must sample THIS page, never a hardcoded one. */
+  readonly page: number;
+  /** Ink-box UV rect (normalized, pad excluded). */
+  readonly u0: number;
+  readonly v0: number;
+  readonly u1: number;
+  readonly v1: number;
 }
 
 /** Result of one batched per-layer request. */
@@ -205,7 +226,7 @@ export interface AtlasRequestResult {
   /** Placement per requested glyph key, in request order (null = missing this frame). */
   readonly placements: (GlyphPlacement | null)[];
   /** UV of the reserved decoration pixel (solid coverage 1). */
-  readonly decoUV: { u0: number; v0: number; u1: number; v1: number } | null;
+  readonly decoUV: DecoPixel | null;
 }
 
 /** One glyph to place: identity + logical size. */
@@ -308,9 +329,25 @@ export class GlyphAtlasCache {
         placements[i] = null;
         continue;
       }
-      // Metrics stay in the ORIGINAL pxSize space (placeGlyph divides by band
-      // for the logical quad); only the raster happened at the clamped size.
-      const m =
+      // Unplaceable glyph: drawn ink larger than the biggest cell a page can
+      // hold (checked in DRAWN space — mRaw is measured at the clamped raster
+      // size, which is the space the cell actually allocates; comparing the
+      // pxSize-space logical metrics here would reject every legitimately huge
+      // glyph and permanently blank the layer). MAX_GLYPH_RASTER_SIZE is a
+      // raster QUALITY cap, not a placement bound — real fonts legitimately
+      // overshoot their em slightly (italic f/j, swashes, sub-pixel rounding),
+      // so the bound is the page size minus the pad margins. Above it no
+      // flush would help either.
+      if (
+        Math.ceil(mRaw.inkW) > ATLAS_PAGE_SIZE - GLYPH_PAD_PX * 2 ||
+        Math.ceil(mRaw.inkH) > ATLAS_PAGE_SIZE - GLYPH_PAD_PX * 2
+      ) {
+        placements[i] = null;
+        continue;
+      }
+      // LOGICAL metrics stay in the ORIGINAL pxSize space (placeGlyph divides
+      // by band for the quad); only the raster happened at the clamped size.
+      const logical =
         rasterScale === 1
           ? mRaw
           : {
@@ -319,17 +356,13 @@ export class GlyphAtlasCache {
               inkAscent: mRaw.inkAscent / rasterScale,
               inkLeft: mRaw.inkLeft / rasterScale,
             };
-      if (
-        Math.ceil(m.inkW) > MAX_GLYPH_RASTER_SIZE ||
-        Math.ceil(m.inkH) > MAX_GLYPH_RASTER_SIZE
-      ) {
-        // Ink box still over the raster cap after clamping (pathological
-        // glyph whose ink exceeds its em box) — never placeable, no flush
-        // would help.
-        placements[i] = null;
-        continue;
-      }
-      const placed = this.placeGlyph(set, req.char, font, rasterFontSize, m, rasterizer);
+      // Cell + UV are sized by the DRAWN ink (mRaw), logical quad metrics by
+      // `logical` — the quad spans the full glyph extent and samples the
+      // smaller raster with a bilinear upscale (soft beyond the raster cap,
+      // never MISSING, and the cell never exceeds the raster cap + pad, so a
+      // glyph can always be allocated and the set can't enter a permanent
+      // flush cycle at huge font sizes).
+      const placed = this.placeGlyph(set, req.char, font, rasterFontSize, mRaw, logical, rasterizer);
       if (placed) {
         set.glyphs.set(glyphKey, placed);
         placements[i] = placed.placement;
@@ -358,7 +391,7 @@ export class GlyphAtlasCache {
         const key = `${setKey}:${i}`;
         if (page.version === since.get(key)) continue;
         since.set(key, page.version);
-        out.push({ setKey, pageIndex: i, data: page.data });
+        out.push({ setKey, pageIndex: i, data: page.data, version: page.version });
       }
     }
     return out;
@@ -381,10 +414,11 @@ export class GlyphAtlasCache {
     if (set.decoUV) return false;
     const rasterFontSize = set.band;
     const font = rasterizer.font(fontFamily, fontWeight, italic, rasterFontSize);
-    const m = { inkW: 1, inkH: 1, inkAscent: 1, inkLeft: 0 };
-    const placed = this.placeGlyph(set, DECO_CHAR, font, rasterFontSize, m, rasterizer);
+    const onePx = { inkW: 1, inkH: 1, inkAscent: 1, inkLeft: 0 };
+    const placed = this.placeGlyph(set, DECO_CHAR, font, rasterFontSize, onePx, onePx, rasterizer);
     if (!placed) return false;
     set.decoUV = {
+      page: placed.pageIndex,
       u0: placed.placement.u0,
       v0: placed.placement.v0,
       u1: placed.placement.u1,
@@ -394,23 +428,28 @@ export class GlyphAtlasCache {
   }
 
   /**
-   * Allocate + rasterize one glyph with PRE-MEASURED metrics (physical px in
-   * the rasterizer's rasterFontSize space). The only failure mode left is
-   * page-full (returns null, caller queues a flush) — cap and measurability
-   * checks already ran in `request`.
+   * Allocate + rasterize one glyph. `drawn` are the ink metrics in the
+   * rasterizer's rasterFontSize space — they size the CELL and the UV rect
+   * and are what `rasterize` actually draws. `logical` are the ink metrics in
+   * pxSize space — they become the placement's logical quad metrics (divided
+   * by the band). The two are identical below the raster cap and decoupled
+   * above it (drawn stays at the cap, the quad upscales). The only failure
+   * mode left is page-full (returns null, caller queues a flush) — cap and
+   * measurability checks already ran in `request`.
    */
   private placeGlyph(
     set: AtlasSet,
     char: string,
     font: string,
     rasterFontSize: number,
-    m: GlyphMetrics,
+    drawn: GlyphMetrics,
+    logical: GlyphMetrics,
     rasterizer: GlyphRasterizer,
   ): GlyphEntry | null {
     const band = set.band;
     // Physical raster rect (the atlas texels the glyph occupies).
-    const rasterW = Math.ceil(m.inkW);
-    const rasterH = Math.ceil(m.inkH);
+    const rasterW = Math.max(1, Math.ceil(drawn.inkW));
+    const rasterH = Math.max(1, Math.ceil(drawn.inkH));
 
     const cellW = rasterW + GLYPH_PAD_PX * 2;
     const cellH = rasterH + GLYPH_PAD_PX * 2;
@@ -452,7 +491,7 @@ export class GlyphAtlasCache {
       page.data[inkY * ATLAS_PAGE_SIZE + inkX] = 255;
     } else {
       // Draw ink into the pad margins' interior; cell ink origin is (inkX, inkY).
-      rasterizer.rasterize(char, font, rasterFontSize, page.data, ATLAS_PAGE_SIZE, inkX, inkY);
+      rasterizer.rasterize(char, font, rasterFontSize, drawn, page.data, ATLAS_PAGE_SIZE, inkX, inkY);
     }
     page.version++;
 
@@ -465,12 +504,12 @@ export class GlyphAtlasCache {
         v0: inkY / pageSize,
         u1: (inkX + rasterW) / pageSize,
         v1: (inkY + rasterH) / pageSize,
-        // The measure ran at physical pxSize — divide by the band for the
+        // `logical` is in physical pxSize space — divide by the band for the
         // LOGICAL metrics the renderer's quad uses on the layout grid.
-        inkW: m.inkW / band,
-        inkH: m.inkH / band,
-        inkAscent: m.inkAscent / band,
-        inkLeft: m.inkLeft / band,
+        inkW: logical.inkW / band,
+        inkH: logical.inkH / band,
+        inkAscent: logical.inkAscent / band,
+        inkLeft: logical.inkLeft / band,
       },
     };
   }

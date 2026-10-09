@@ -47,6 +47,13 @@ export function AuthProvider({ apiBaseUrl, branding, oauthProviders, children }:
 
   const restoreSession = useCallback(async () => {
     try {
+      // Cross-origin fetches carry no cookies, so with no tokens in
+      // localStorage there is nothing the server could recognize us by —
+      // skip the anonymous probe entirely.
+      if (!getAccessToken() && !getRefreshToken()) {
+        return;
+      }
+
       // After page reload, accessToken is lost (memory-only).
       // If we have a refreshToken, exchange it for a new accessToken first.
       if (!getAccessToken() && getRefreshToken()) {

@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.1
+
+- Text Editing: improved inline text selection and cursor interactions
+- Typography: fixed rendering issues with oversized fonts and decorations to ensure all characters display reliably
+
+---
+
 ## v2.0.0
 
 - Updates: added built-in update notifications and release guides to help you stay up to date

@@ -21,6 +21,7 @@
 
 import { InteractionHandler, InteractionEvent, Layer } from '@opengpex/editor/core/types';
 import { TEXT_OVERLAY_CMD_EDIT_START } from '../TextOverlay/protocols';
+import { setPendingEditCaretPoint } from '../TextOverlay/editCaret';
 
 /**
  * Window between two consecutive pointerdowns that still counts as a
@@ -93,6 +94,10 @@ export const createTextDblClickEditHandler = (): InteractionHandler => {
     onStart: (e) => {
       const hitTextLayer = findTextLayerAtPoint(e);
       if (!hitTextLayer) return;
+      // Hand the double-click point to the inline editor so the caret lands
+      // where the user double-clicked instead of at the end of the text.
+      const mouseEvent = e.nativeEvent as MouseEvent;
+      setPendingEditCaretPoint({ clientX: mouseEvent.clientX, clientY: mouseEvent.clientY });
       // cmd.edit_start activates the layer and opens the inline editing
       // session (modify session, own snapshot/undo handling).
       e.actions.executeCommand(TEXT_OVERLAY_CMD_EDIT_START, {

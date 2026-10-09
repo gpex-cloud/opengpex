@@ -18,6 +18,7 @@
  */
 
 import { InteractionHandler, CameraState } from '@opengpex/editor/core/types';
+import { hasOuterCanvasPanImmunity } from '../InteractionImmunity';
 import { InteractionTransaction } from '../Transaction';
 
 /**
@@ -47,8 +48,15 @@ export const createViewportPanHandler = (): InteractionHandler => {
         x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h
       });
 
+      // EXCEPT when the left press lands on a surface that declared
+      // outer-canvas pan immunity (see InteractionImmunity): such a
+      // surface may straddle the canvas edge, and its off-canvas part must
+      // keep its native press behaviour (e.g. text selection), not start a
+      // pan. Middle/right button and explicit pan mode keep panning everywhere.
+      const panImmune = !isPanButton && hasOuterCanvasPanImmunity(mouseEvent.target);
+
       // If middle/right-click, or pan mode is active, or mouse is outside canvas
-      return isPanButton || isPanMode || isOutsideCanvas;
+      return isPanButton || isPanMode || (isOutsideCanvas && !panImmune);
     },
     onStart: (e) => {
       lastMouse = { x: e.nativeEvent.clientX, y: e.nativeEvent.clientY };

@@ -32,7 +32,7 @@ import {
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import { TransformGizmo } from "@opengpex/editor/widgets/TransformGizmo";
 import { useLayerOverlayCommands } from "./hooks";
-import { SIGNAL_FORCE_SHOW_TYPES } from "./protocols";
+import { aggregateLayerOverlayUsage } from "./usage";
 
 import { useLayerOverlaySync, useLayerMoveDeltaSync } from "./useFastSync";
 
@@ -134,13 +134,12 @@ export function LayerOverlayItem({
             </span>
           </div>
         </div>
-        {/* Text transform gizmo: pre-edit text-craft only (forceShow). The
-            editing-state box carries no gizmo — geometry changes happen here or
-            via Cmd/Ctrl+Drag. Handles are pointer-events-auto inside the
-            pointer-events-none item; the data attribute lets TextOverlay's
-            resize/rotate handlers resolve the target layer. */}
-        {forceShow && layer.type === "text" && (
-          <div data-text-gizmo-layer={layer.id} className="absolute inset-0">
+        {/* Generic gizmo slot: rendered for every layer type claimed by a usage
+            source. Handles are pointer-events-auto inside the pointer-events-none
+            item; `data-overlay-gizmo-layer` lets the OWNING plugin's interaction
+            handlers resolve the target layer. */}
+        {forceShow && (
+          <div data-overlay-gizmo-layer={layer.id} className="absolute inset-0">
             <TransformGizmo
               rotation={layer.rotation}
               flip={layer.flip}
@@ -181,8 +180,9 @@ function LayerOverlayContent() {
   const activeLayerId = activeFrame?.activeLayerId;
   const { isAlwaysOn: showAlways } = useLayerOverlayCommands();
 
-  // Read force-show signal: other plugins can request specific layer types to be always visible
-  const forceShowTypes = state.interaction.signals[SIGNAL_FORCE_SHOW_TYPES] as string[] | null;
+  // Aggregate usage intents from every registered plugin (render-time pure
+  // call — useEditorState already re-renders this component on signal change).
+  const usage = aggregateLayerOverlayUsage({ signals: state.interaction.signals });
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -205,10 +205,10 @@ function LayerOverlayContent() {
             layer={layer}
             index={idx + 1}
             isActive={layer.id === activeLayerId}
-            isHoveringActive={isHoveringActive}
-            isHovered={layer.id === hoveredLayerId}
+            isHoveringActive={isHoveringActive && !usage.suppressHover}
+            isHovered={layer.id === hoveredLayerId && !usage.suppressHover}
             showAlways={!!showAlways}
-            forceShow={!!forceShowTypes?.includes(layer.type)}
+            forceShow={usage.gizmoTypes.has(layer.type)}
           />
         ))}
 

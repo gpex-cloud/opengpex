@@ -128,3 +128,8 @@
   color: #fff;
 }
 
+/* Contenteditable custom text selection: suppress native oversized highlight */
+[data-text-editor-container] ::selection {
+  background: transparent !important;
+}
+

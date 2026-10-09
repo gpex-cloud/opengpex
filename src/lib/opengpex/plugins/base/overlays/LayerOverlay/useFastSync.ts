@@ -52,9 +52,18 @@ export function useLayerOverlaySync(
   useFastSync(ref, isActive, (v, f, cam) => {
     if (!ref.current) return;
 
-    // [Interaction Hide] Instant — runs every frame, no throttle delay
-    // Must also disable CSS transition to prevent 200ms fade-out delay
-    if (v.activeState.interacting) {
+    // [Interaction Hide] Instant — runs every frame, no throttle delay.
+    // Hide ONLY during CAMERA interactions (pan/zoom): the volatile camera
+    // buffer diverges from the committed frame camera for the whole gesture
+    // (and until the post-commit rAF lands, per the facade's buffered-camera
+    // preference), so a plain field compare is a reliable discriminator.
+    // Layer-edit interactions (move/resize/rotate drafts) must NOT hide the
+    // overlay — the outline and its gizmo ARE the manipulation affordance
+    // (vanishing handles while dragging read as a bug), and with a static
+    // camera the 30Hz-throttled matrix sync below tracks the draft correctly.
+    // Must also disable CSS transition to prevent 200ms fade-out delay.
+    const camMoving = cam.x !== f.camera.x || cam.y !== f.camera.y || cam.k !== f.camera.k;
+    if (camMoving) {
       wasInteractingRef.current = true;
       pendingRestoreRef.current = true;
       if (ref.current.style.opacity !== '0') {

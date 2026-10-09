@@ -24,7 +24,6 @@ import { useEditorState, useEditorServices, useVolatileInteraction } from '@open
 import { asLocalShape } from '@opengpex/editor/core/types';
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
-import { SIGNAL_FORCE_SHOW_TYPES } from '../../overlays/LayerOverlay/protocols';
 import {
   TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID,
   TEXT_OVERLAY_SIGNAL_SESSION_TYPE,
@@ -34,6 +33,8 @@ import {
 } from './protocols';
 import type { TextEditingSession } from './protocols';
 import { isPointInLayerBorderBand } from './interactions';
+import { consumePendingEditCaretPoint } from './editCaret';
+import { placeCaretAtPoint } from '@opengpex/editor/widgets/TextCaretKit';
 import { compensateCenterX, compensateCenterY } from './anchor';
 import { isAutoWidthMode } from '@opengpex/editor/core/types/models';
 import { TEXT_PREEDIT_CURSOR } from '@opengpex/editor/icons';
@@ -69,17 +70,6 @@ export function useTextOverlayState() {
       actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
     }
   }, [editingLayerId, layerExists, actions]);
-
-  // Force-show text layers in LayerOverlay when in text craft mode (pre-edit state)
-  useEffect(() => {
-    const isTextCraftPreEdit = activeCraft === 'text' && !editingLayerId;
-    if (isTextCraftPreEdit) {
-      actions.setStateSignal(SIGNAL_FORCE_SHOW_TYPES, ['text']);
-    } else {
-      // Clear the signal when leaving text craft mode or entering editing state
-      actions.setStateSignal(SIGNAL_FORCE_SHOW_TYPES, null);
-    }
-  }, [activeCraft, editingLayerId, actions]);
 
   // Escape in pre-edit state -> exits craft mode (via CraftDrawer's deactivate command, following cross-plugin boundaries)
   useEffect(() => {
@@ -353,8 +343,18 @@ export function useInlineTextEditing(
         el.focus();
         const sel = window.getSelection();
         if (sel) {
-          sel.selectAllChildren(el);
-          sel.collapseToEnd();
+          // If the session was started by a pointer gesture, drop the caret at
+          // the clicked position (viewport-space point resolved against the
+          // freshly laid-out editor DOM). Falls back to end-of-text when the
+          // point is unavailable or unresolvable (e.g. non-pointer entry).
+          const clickPoint = consumePendingEditCaretPoint();
+          const placed = clickPoint
+            ? placeCaretAtPoint(el, clickPoint.clientX, clickPoint.clientY)
+            : false;
+          if (!placed) {
+            sel.selectAllChildren(el);
+            sel.collapseToEnd();
+          }
         }
         if (activeFrame) {
           const mode = textData?.boxMode || 'auto';
@@ -535,10 +535,11 @@ export function useInlineTextEditing(
 
       if (e.key === 'Escape') {
         // stopPropagation keeps Esc from being stolen by HotkeyManager /
-        // dispatcher.cancelAll before the editor can cancel its own session.
+        // dispatcher.cancelAll before the editor can commit its own session.
+        // Figma standard: Esc commits and exits editing (transitions to layer selected state).
         e.preventDefault();
         e.stopPropagation();
-        cancelEditing();
+        commitEditing();
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
         // Select-all inside the editor: let the browser's native contenteditable
         // select-all run (no preventDefault), but stop the event before it
@@ -560,7 +561,7 @@ export function useInlineTextEditing(
         document.execCommand('insertLineBreak');
       }
     },
-    [cancelEditing, commitEditing],
+    [commitEditing],
   );
 
   // Commit requests from the interaction state machine (two-stage click
@@ -619,10 +620,7 @@ export function useInlineTextEditing(
   // Mirrors useFastSync: project the layer's full world matrix (incl. rotation/flip)
   // through the camera matrix, so the box is correctly rotated on the very first paint.
   let screenMatrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
-  let autoMaxWidth = 200;
   if (activeFrame && layer) {
-    const canvas = activeFrame.canvas;
-    const localX = canvas.w / 2 + layer.cx - layer.bounding.w / 2;
     const worldMatrix = geometry.transform.getLayerWorldMatrix(layer);
     const viewMatrix = geometry.camera.getCameraMatrix(activeFrame, activeFrame.camera);
     const matrix = viewMatrix.multiply(worldMatrix);
@@ -634,7 +632,6 @@ export function useInlineTextEditing(
       tx: matrix.tx,
       ty: matrix.ty,
     };
-    autoMaxWidth = Math.max(200, canvas.w - localX);
   }
 
   return {
@@ -645,7 +642,6 @@ export function useInlineTextEditing(
     boxMode,
     fixedVAlignOffset,
     screenMatrix,
-    autoMaxWidth,
     cursorOverride,
     handleInput,
     handleKeyDown,

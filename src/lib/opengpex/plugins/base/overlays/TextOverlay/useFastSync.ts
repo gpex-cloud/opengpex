@@ -87,6 +87,18 @@ export function useTextEditorFastSync(
       overwrite: true,
     });
 
+    const currentScale = Math.hypot(screenMatrix.a, screenMatrix.b) || 1;
+    el.style.setProperty('--box-corner-scale', `${1 / currentScale}`);
+    el.style.setProperty('--text-caret-scale', `${1 / currentScale}`);
+
+    // Collision-free clamp for box corners: ensure arm length never collides
+    // in screen space when box is narrow or canvas is zoomed far out.
+    const boxScreenW = (layer.bounding.w || 24) * currentScale;
+    const boxScreenH = (layer.bounding.h || 24) * currentScale;
+    const maxArmScreen = Math.min(boxScreenW * 0.36, boxScreenH * 0.36);
+    const safeArmScreen = Math.max(2, Math.min(10, maxArmScreen));
+    el.style.setProperty('--box-corner-arm-ratio', `${safeArmScreen / 10}`);
+
     // Sync width and height in fixed mode to editor DOM. These stay in canvas
     // space (px), unaffected by rotation — the matrix above handles rotation/scale.
     // The size belongs to the clip wrapper (which also owns vertical
@@ -99,7 +111,7 @@ export function useTextEditorFastSync(
         clipEl.style.height = `${layer.bounding.h}px`;
       }
     }
-  }, { throttleHz: 30 });
+  }, { throttleHz: 60 });
 
   /**
    * notifyBoundingChange: When editor content size changes, synchronize writing to fast track buffer.
