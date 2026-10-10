@@ -32,6 +32,7 @@ import {
   PenTool,
   Clock,
   Type,
+  Eye,
   HelpCircle,
   MessageSquare,
   ScanSearch,
@@ -75,8 +76,8 @@ function ModalityBadge({ modality }: { modality: ModelModality | undefined }) {
   if (modality === 'image') {
     return <Camera size={13} className="shrink-0" />;
   }
-  if (modality === 'multi') {
-    return <ImageIcon size={13} className="shrink-0" />;
+  if (modality === 'vision') {
+    return <Eye size={13} className="shrink-0" />;
   }
   if (modality === 'text') {
     return <Type size={13} className="shrink-0" />;

@@ -100,9 +100,14 @@ export const COLOR_OPTIONS_COMMANDS = {
       if (!activeFrame) return;
 
       // When invoked via keyboard shortcut, payload is undefined — read from plugin config
-      const fillColor = payload?.fillColor
+      const pickedColor = payload?.fillColor
         || (state.pluginConfig[`${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}`] as { pendingColor?: ColorValue } | undefined)?.pendingColor
         || fromHex('#EAB308');
+      // Fill is always opaque: the pending colour may carry a sampled/edited
+      // alpha, but the fill layer's coverage is governed by its own layer
+      // opacity, not the colour value (Photoshop semantics — the foreground
+      // colour has no alpha channel).
+      const fillColor: ColorValue = { ...pickedColor, alpha: 1 };
       const isClipMode = state.interaction.interactionMode === 'clip';
       let w: number, h: number, box_cx: number, box_cy: number;
       let visibleShape: LocalShape;

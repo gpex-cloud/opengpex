@@ -36,7 +36,7 @@
 
 import type { AIEndpoint, AIModelInfo, ChatMessage, AgentToolDef, AgentToolCall, AgentMessage } from './types';
 import {
-  joinUrl,
+  apiUrl,
   proxyFetch,
   blobToDataUrl,
   throwRequestError,
@@ -89,7 +89,7 @@ export interface ChatImageOptions {
 
 /** Requests an image through /v1/chat/completions (image-in-chat style). */
 export async function chatCompletionsForImage(opts: ChatImageOptions): Promise<Blob> {
-  const targetUrl = joinUrl(opts.endpoint.baseUrl, '/v1/chat/completions');
+  const targetUrl = apiUrl(opts.endpoint.baseUrl, '/v1/chat/completions');
   const body: Record<string, unknown> = {
     model: opts.model,
     messages: opts.messages,
@@ -114,7 +114,7 @@ export async function chatCompletionsForText(
   model: string,
   messages: ChatMessage[],
 ): Promise<string> {
-  const targetUrl = joinUrl(endpoint.baseUrl, '/v1/chat/completions');
+  const targetUrl = apiUrl(endpoint.baseUrl, '/v1/chat/completions');
   const res = await proxyFetch({
     targetUrl,
     apiKey: endpoint.apiKey,
@@ -139,7 +139,7 @@ export async function chatCompletionsForDescribe(
   if (!model) {
     throw new Error('No vision-capable model selected. Pick one in the model list first.');
   }
-  const targetUrl = joinUrl(endpoint.baseUrl, '/v1/chat/completions');
+  const targetUrl = apiUrl(endpoint.baseUrl, '/v1/chat/completions');
   const message = await buildUserMessage(instruction, [image]);
   const res = await proxyFetch({
     targetUrl,
@@ -164,7 +164,7 @@ export async function fetchStandardModels(
   endpoint: AIEndpoint,
   providerName: string,
 ): Promise<AIModelInfo[]> {
-  const targetUrl = joinUrl(endpoint.baseUrl, '/v1/models');
+  const targetUrl = apiUrl(endpoint.baseUrl, '/v1/models');
   const res = await proxyFetch({ targetUrl, apiKey: endpoint.apiKey, method: 'GET' });
   if (!res.ok) {
     const info = await readErrorInfo(res);
@@ -212,7 +212,7 @@ export interface AgentChatResult {
 export async function chatCompletionsForAgent(
   opts: AgentChatOptions,
 ): Promise<AgentChatResult> {
-  const targetUrl = joinUrl(opts.endpoint.baseUrl, '/v1/chat/completions');
+  const targetUrl = apiUrl(opts.endpoint.baseUrl, '/v1/chat/completions');
   const body: Record<string, unknown> = {
     model: opts.model,
     messages: opts.messages,
@@ -285,7 +285,7 @@ export function streamChatCompletionsForAgent(
 
   (async () => {
     try {
-      const targetUrl = joinUrl(opts.endpoint.baseUrl, '/v1/chat/completions');
+      const targetUrl = apiUrl(opts.endpoint.baseUrl, '/v1/chat/completions');
       const body: Record<string, unknown> = {
         model: opts.model,
         messages: opts.messages,

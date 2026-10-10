@@ -60,6 +60,7 @@ export default function CanvasBackdrop({
   const svgRef = useRef<SVGSVGElement>(null);
   const polygonBgRef = useRef<SVGPolygonElement>(null);
   const polygonChessRef = useRef<SVGPolygonElement>(null);
+  const lastPointsRef = useRef<string | null>(null);
 
   // [Counter-Animation Protocol]: enables physical rotation transition alongside Viewport main stage
   useOverlayRotationSync(containerRef, frame);
@@ -81,6 +82,15 @@ export default function CanvasBackdrop({
     const y2 = y1 + h;
 
     const points = `${x1},${y1} ${x2},${y1} ${x2},${y2} ${x1},${y2}`;
+
+    // [Idle Zero-Cost Guard] setAttribute with an identical value still dirties the
+    // SVG in Chrome, forcing a full re-rasterization of the pattern-filled polygons
+    // every frame. While idle the ticker keeps firing, so without this guard a large
+    // transparent canvas area re-tiles the 32px checkerboard at 60fps and spins the
+    // fan. Skip all DOM writes when the projected rect is unchanged. See:
+    // docs/opengpex/v2/refactor/20261010_canvas_backdrop_idle_fan_analysis.md
+    if (points === lastPointsRef.current) return;
+    lastPointsRef.current = points;
 
     polygonBgRef.current.setAttribute("points", points);
     polygonChessRef.current.setAttribute("points", points);

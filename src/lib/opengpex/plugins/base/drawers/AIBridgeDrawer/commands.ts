@@ -325,9 +325,9 @@ export const AI_BRIDGE_COMMANDS = {
           models.find(m => kinds.includes(m.modality))?.id;
 
         const nextSlots = { ...(endpoint.modelByKind || {}) };
-        if (!has(nextSlots.image)) nextSlots.image = firstOf('image', 'multi') || models[0].id;
-        if (!has(nextSlots.multi)) nextSlots.multi = firstOf('multi');
-        if (!has(nextSlots.text)) nextSlots.text = firstOf('text', 'multi');
+        if (!has(nextSlots.image)) nextSlots.image = firstOf('image') || models[0].id;
+        if (!has(nextSlots.multi)) nextSlots.multi = firstOf('vision');
+        if (!has(nextSlots.text)) nextSlots.text = firstOf('text', 'vision');
 
         const nextEndpoints = (config.endpoints || []).map(e =>
           e.id === endpoint.id ? { ...e, modelByKind: nextSlots } : e,

@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import React, { ReactNode, useState, useRef, useEffect } from 'react';
+import React, { ReactNode, useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 
@@ -57,6 +57,7 @@ export default function Tooltip({
   const [isVisible, setIsVisible] = useState(false);
   const [tooltipPos, setTooltipPos] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
 
   const updateCoords = () => {
     if (anchorRef.current) {
@@ -155,6 +156,22 @@ export default function Tooltip({
     };
   };
 
+  // Clamp the rendered tooltip inside the viewport once its actual size is
+  // measurable (anchors near a screen edge would otherwise overflow). Applied
+  // imperatively on the portal element — no extra render pass.
+  useLayoutEffect(() => {
+    if ((!isVisible && !alwaysShow) || !tooltipPos) return;
+    const el = tooltipRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const margin = 8;
+    if (rect.right > window.innerWidth - margin) {
+      el.style.left = `${parseFloat(el.style.left || '0') + (window.innerWidth - margin - rect.right)}px`;
+    } else if (rect.left < margin) {
+      el.style.left = `${parseFloat(el.style.left || '0') + (margin - rect.left)}px`;
+    }
+  }, [isVisible, alwaysShow, tooltipPos, position, align, maxWidth]);
+
   // Arrow style configuration (maintain original logic)
   const arrowStyles: Record<TooltipPosition, Record<TooltipAlign, string>> = {
     top: {
@@ -192,6 +209,7 @@ export default function Tooltip({
       {children}
       {(alwaysShow || (isVisible && showOnHover)) && typeof document !== 'undefined' && createPortal(
         <div
+          ref={tooltipRef}
           style={getTooltipStyle()}
           className={`animate-in fade-in zoom-in-95 duration-200 ${maxWidth ? 'whitespace-normal' : 'whitespace-nowrap'} ${className}`}
         >

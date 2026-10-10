@@ -57,6 +57,7 @@ export const BUILTIN_ERASER_MODELS: InpaintEraserModelEntry[] = [
     name: 'LaMa FP32',
     modelId: 'Carve/LaMa-ONNX',
     onnxFile: 'lama_fp32.onnx',
+    expectedBytes: 208_044_816, // HEAD-probed 2026-10-10
     size: '~200 MB',
     description: 'Full-precision — maximum quality. Fixed 512×512 input.',
     builtin: true,

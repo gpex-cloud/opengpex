@@ -41,7 +41,7 @@ import type {
   ImageGenRequest,
   ProviderDefinition,
 } from '../types';
-import { joinUrl, proxyFetch, postJsonForImage, blobToBase64, readModelRecords } from '../transport';
+import { apiUrl, proxyFetch, postJsonForImage, blobToBase64, readModelRecords } from '../transport';
 import {
   chatCompletionsForText,
   chatCompletionsForDescribe,
@@ -84,7 +84,7 @@ export const localaiProvider: ProviderDefinition = {
       endpoint,
       providerName: NAME,
       action: 'Image generation',
-      targetUrl: joinUrl(endpoint.baseUrl, '/v1/images/generations'),
+      targetUrl: apiUrl(endpoint.baseUrl, '/v1/images/generations'),
       body: baseBody(endpoint, req),
     });
   },
@@ -98,7 +98,7 @@ export const localaiProvider: ProviderDefinition = {
       endpoint,
       providerName: NAME,
       action: 'Image editing',
-      targetUrl: joinUrl(endpoint.baseUrl, '/v1/images/generations'),
+      targetUrl: apiUrl(endpoint.baseUrl, '/v1/images/generations'),
       body: { ...baseBody(endpoint, req), ref_images: refImages },
     });
   },
@@ -120,7 +120,7 @@ export const localaiProvider: ProviderDefinition = {
   async fetchModels(endpoint: AIEndpoint): Promise<AIModelInfo[]> {
     try {
       const res = await proxyFetch({
-        targetUrl: joinUrl(endpoint.baseUrl, '/v1/models/capabilities'),
+        targetUrl: apiUrl(endpoint.baseUrl, '/v1/models/capabilities'),
         apiKey: endpoint.apiKey,
         method: 'GET',
       });

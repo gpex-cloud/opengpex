@@ -180,6 +180,16 @@ export default function SplitButton({
     </button>
   );
 
+  // Tooltip anchors to the primary button only — hovering the dropdown chevron
+  // must not surface the primary action's tooltip.
+  const primaryWithTooltip = displayTooltip ? (
+    <Tooltip content={displayTooltip} position={tooltipPosition} display="inline-flex">
+      {primaryButton}
+    </Tooltip>
+  ) : (
+    primaryButton
+  );
+
   const content = (
     <div
       className={`
@@ -190,13 +200,7 @@ export default function SplitButton({
         ${className}
       `}
     >
-      {compact && displayTooltip ? (
-        <Tooltip content={displayTooltip} position={tooltipPosition} display="inline-flex">
-          {primaryButton}
-        </Tooltip>
-      ) : (
-        primaryButton
-      )}
+      {primaryWithTooltip}
       {/* Separator — visible on group hover, hidden in compact mode */}
       {!compact && (
         <div className="w-px h-3 bg-zinc-300/0 dark:bg-white/0 group-hover/split:bg-zinc-300 dark:group-hover/split:bg-white/15 transition-colors duration-200" />
@@ -211,8 +215,5 @@ export default function SplitButton({
     </div>
   );
 
-  if (!compact && displayTooltip) {
-    return <Tooltip content={displayTooltip} position={tooltipPosition}>{content}</Tooltip>;
-  }
   return content;
 }

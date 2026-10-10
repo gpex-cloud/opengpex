@@ -69,7 +69,13 @@ function readPaintParams(e: InteractionEvent): PaintParams {
   return {
     // The full structured ColorValue, NOT a hex string: StrokeData carries the
     // wide-gamut currency all the way to `toWorkingLinearRgba` in the mapper.
-    color: (colorCfg.pendingColor as ColorValue | undefined) ?? fromHex('#FFFFFF'),
+    // Alpha is pinned to 1: the pending colour may carry a sampled/edited
+    // alpha, but stroke coverage is governed by `brushOpacity` alone
+    // (Photoshop semantics — the foreground colour has no alpha channel).
+    color: {
+      ...((colorCfg.pendingColor as ColorValue | undefined) ?? fromHex('#FFFFFF')),
+      alpha: 1,
+    },
     size: (craft.brushSize as number) ?? FALLBACK_BRUSH_SIZE,
     hardness: ((craft.brushHardness as number) ?? 80) / 100,
     opacity: ((craft.brushOpacity as number) ?? 100) / 100,

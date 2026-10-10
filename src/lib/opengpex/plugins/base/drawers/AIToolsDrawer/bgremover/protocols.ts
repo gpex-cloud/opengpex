@@ -59,7 +59,7 @@ export const BUILTIN_MODELS: ModelEntry[] = [
     name: 'InSPyReNet Ultra',
     modelId: 'OS-Software/InSPyReNet-SwinB-Plus-Ultra-ONNX',
     onnxFile: 'onnx/model_fp16.onnx',
-    expectedBytes: 210_000_000, // ~200 MB
+    expectedBytes: 199_133_027, // HEAD-probed 2026-10-10
     size: '~200 MB',
     description: 'Sharp edges, excellent for products & e-commerce',
     builtin: true,
@@ -69,8 +69,8 @@ export const BUILTIN_MODELS: ModelEntry[] = [
     name: 'RMBG 1.4',
     modelId: 'briaai/RMBG-1.4',
     onnxFile: 'onnx/model_fp16.onnx',
-    expectedBytes: 95_000_000, // ~90 MB
-    size: '~90 MB',
+    expectedBytes: 88_217_533, // HEAD-probed 2026-10-10
+    size: '~85 MB',
     description: 'Fast, general-purpose background removal',
     builtin: true,
   },

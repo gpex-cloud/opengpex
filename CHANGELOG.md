@@ -2,6 +2,14 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.2
+
+- Performance: eliminated unnecessary background re-rendering when the canvas is idle, reducing battery drain and fan noise
+- AI Bridge: expanded supported models and improved connection handling for custom API services
+- AI Tools: improved model download progress tracking with more accurate file size indicators
+
+---
+
 ## v2.0.1
 
 - Text Editing: improved inline text selection and cursor interactions

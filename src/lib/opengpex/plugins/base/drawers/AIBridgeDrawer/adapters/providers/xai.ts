@@ -44,7 +44,7 @@ import type {
   ImageGenRequest,
   ProviderDefinition,
 } from '../types';
-import { joinUrl, postJsonForImage, blobToDataUrl } from '../transport';
+import { apiUrl, postJsonForImage, blobToDataUrl } from '../transport';
 import {
   chatCompletionsForText,
   chatCompletionsForDescribe,
@@ -92,7 +92,7 @@ export const xaiProvider: ProviderDefinition = {
       endpoint,
       providerName: NAME,
       action: 'Image generation',
-      targetUrl: joinUrl(endpoint.baseUrl, '/v1/images/generations'),
+      targetUrl: apiUrl(endpoint.baseUrl, '/v1/images/generations'),
       body: await imagineBody(endpoint, req.prompt),
     });
   },
@@ -102,7 +102,7 @@ export const xaiProvider: ProviderDefinition = {
       endpoint,
       providerName: NAME,
       action: 'Image editing',
-      targetUrl: joinUrl(endpoint.baseUrl, '/v1/images/generations'),
+      targetUrl: apiUrl(endpoint.baseUrl, '/v1/images/generations'),
       body: await imagineBody(endpoint, req.prompt || 'Edit this image.', req.images),
     });
   },

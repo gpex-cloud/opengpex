@@ -243,6 +243,25 @@ export async function downloadModel(
     return;
   }
 
+  // Preflight: resolve real content-lengths in parallel via HEAD so the
+  // overall progress denominator is exact from the first report. Falls back
+  // to the manifest estimate when HEAD is unavailable (CORS, offline, ...).
+  await Promise.all(
+    filesToDownload.map(async (file) => {
+      try {
+        const head = await fetch(file.url, { method: 'HEAD', signal });
+        if (head.ok) {
+          const len = Number(head.headers.get('content-length') || 0);
+          if (len > 0) file.expectedBytes = len;
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') throw err;
+        // Keep the estimate; the per-file reconciliation below still applies.
+      }
+    }),
+  );
+  overallTotal = overallLoaded + filesToDownload.reduce((sum, f) => sum + f.expectedBytes, 0);
+
   const speedEstimator = new RingSpeedEstimator();
   let downloadedSoFar = overallLoaded; // bytes from already-cached files
 
@@ -292,12 +311,12 @@ export async function downloadModel(
     const contentLength = Number(response.headers.get('content-length') || 0);
     const fileTotal = contentLength || file.expectedBytes;
 
-    // Update overall total with real content-length if we didn't have expectedBytes
-    if (contentLength > 0 && file.expectedBytes === 0) {
-      overallTotal += contentLength;
-    } else if (contentLength > 0 && file.expectedBytes > 0) {
-      // Correct estimate with real value
-      overallTotal = overallTotal - file.expectedBytes + contentLength;
+    // Reconcile the denominator if the real size differs from the resolved
+    // value (HEAD missing or stale). Small deltas only — preflight already
+    // pinned the exact sizes in the common case, so no visible jumps.
+    if (contentLength > 0 && contentLength !== file.expectedBytes) {
+      overallTotal += contentLength - file.expectedBytes;
+      file.expectedBytes = contentLength;
     }
 
     if (!response.body) {

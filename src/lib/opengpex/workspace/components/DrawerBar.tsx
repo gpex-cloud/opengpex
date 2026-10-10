@@ -184,8 +184,12 @@ export default function DrawerBar({
   };
 
   const handleIsolate = (id: string) => {
+    const currentSidePluginIds = new Set(sortedPlugins.map((p) => p.uid));
+    const otherSideActiveIds = (ui.activeSidebarIds || []).filter(
+      (activeId) => !currentSidePluginIds.has(activeId)
+    );
     React.startTransition(() => {
-      actions.updateUI({ activeSidebarIds: [id] });
+      actions.updateUI({ activeSidebarIds: [...otherSideActiveIds, id] });
     });
   };
 
@@ -242,7 +246,7 @@ export default function DrawerBar({
     <div className={drawerBarClass} style={customStyle} data-drawer-bar={side}>
       {/* Full-height vertical scrolling container, does not block events in inactive areas */}
       <div
-        className={`absolute top-0 bottom-0 w-[100vw] overflow-y-auto scrollbar-hide pointer-events-none z-[900] ${side === "left" ? "left-0" : "right-0"}`}
+        className={`absolute top-0 -bottom-4 w-[100vw] overflow-y-auto scrollbar-hide pointer-events-none z-[900] ${side === "left" ? "left-0" : "right-0"}`}
       >
         {/* Top: dynamic placeholder, automatically avoids corner blocking areas (such as expanded XTEND_SLOT) */}
         <div
@@ -267,6 +271,7 @@ export default function DrawerBar({
               actions={actions}
               styles={styles}
               handleCombinedClick={handleCombinedClick}
+              handleIsolate={handleIsolate}
               isDraggingRef={isDraggingRef}
               side={side}
             />
@@ -291,6 +296,7 @@ function SidebarItem({
   actions,
   styles,
   handleCombinedClick,
+  handleIsolate,
   isDraggingRef,
   side,
 }: {
@@ -299,6 +305,7 @@ function SidebarItem({
   actions: EditorActions;
   styles: Record<string, WorkspaceStyleItem>;
   handleCombinedClick: (id: string, e: React.MouseEvent) => void;
+  handleIsolate: (id: string) => void;
   isDraggingRef: React.RefObject<boolean>;
   side: "left" | "right";
 }) {
@@ -496,7 +503,7 @@ function SidebarItem({
                   onPointerDown={(e) => dragControls.start(e)}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
-                    actions.updateUI({ activeSidebarIds: [plugin.uid] });
+                    handleIsolate(plugin.uid);
                   }}
                   title="Double click to isolate | Drag to reorder"
                 >

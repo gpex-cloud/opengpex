@@ -84,14 +84,14 @@ export const BUILTIN_SEG_MODELS: SegModelEntry[] = [
     id: 'onnx-community/sam2.1-hiera-tiny-ONNX',
     name: 'SAM 2.1 Tiny',
     modelId: 'onnx-community/sam2.1-hiera-tiny-ONNX',
-    size: '~300 MB',
+    size: '~150 MB',
     description: 'Recommended — fast interactive segmentation (transformers.js)',
     builtin: true,
     default: true,
     type: 'interactive',
     encoderFile: 'onnx/vision_encoder.onnx',
     decoderFile: 'onnx/prompt_encoder_mask_decoder.onnx',
-    expectedBytes: 155_000_000,
+    expectedBytes: 155_600_000,
   },
 ];
 
@@ -123,22 +123,21 @@ export const SEG_MODEL_FILES = [
  *   - vision_encoder ONNX + data (image encoder weights)
  *   - prompt_encoder_mask_decoder ONNX + data (decoder weights)
  *
- * Files are listed in the order transformers.js will request them.
+ * Files are listed in the order transformers.js will request them. Exact
+ * per-file sizes are resolved by the downloader's HEAD preflight, so no
+ * size estimates are needed here (external-data format makes the .onnx
+ * graph files tiny and the _data files carry the weights).
  */
-export function getSegModelFiles(model: SegModelEntry): { filename: string; expectedBytes?: number }[] {
+export function getSegModelFiles(model: SegModelEntry): { filename: string }[] {
   const encoderFile = model.encoderFile ?? DEFAULT_SEG_ENCODER_FILE;
   const decoderFile = model.decoderFile ?? DEFAULT_SEG_DECODER_FILE;
-  const totalBytes = model.expectedBytes;
-  // For transformers.js compatible models, include config + ONNX + data files
-  const encoderBytes = totalBytes ? Math.round(totalBytes * 0.87) : undefined; // ~134 MB
-  const decoderBytes = totalBytes ? Math.round(totalBytes * 0.13) : undefined; // ~21 MB
   return [
     { filename: 'config.json' },
     { filename: 'preprocessor_config.json' },
-    { filename: encoderFile, expectedBytes: encoderBytes },
-    { filename: `${encoderFile}_data`, expectedBytes: encoderBytes },
-    { filename: decoderFile, expectedBytes: decoderBytes },
-    { filename: `${decoderFile}_data`, expectedBytes: decoderBytes },
+    { filename: encoderFile },
+    { filename: `${encoderFile}_data` },
+    { filename: decoderFile },
+    { filename: `${decoderFile}_data` },
   ];
 }
 

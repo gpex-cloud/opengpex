@@ -38,6 +38,18 @@ export function joinUrl(baseUrl: string, path: string): string {
   return baseUrl.replace(/\/+$/, '') + path;
 }
 
+/**
+ * Joins an OpenAI-style API path (starting with /v1) onto a base URL,
+ * tolerating bases that already carry their own version segment — e.g.
+ * Zhipu's OpenAI-compatible endpoint lives at /api/paas/v4/chat/completions,
+ * so with baseUrl "…/api/paas/v4" the /v1 prefix must be dropped.
+ */
+export function apiUrl(baseUrl: string, path: string): string {
+  const base = baseUrl.replace(/\/+$/, '');
+  if (/\/v\d+$/.test(base)) return base + path.replace(/^\/v1(?=\/|$)/, '');
+  return base + path;
+}
+
 // ─── Proxy fetch — every external request goes through /api/ai-proxy ───────────
 
 const AI_PROXY_PATH = '/api/ai-proxy';

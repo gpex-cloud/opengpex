@@ -107,7 +107,7 @@ export {
   canProduceImage,
   canReadImage,
   modalityWarning,
-  MODALITY_HINTS,
+  MODEL_MODALITY_PROPERTIES,
 } from './modality';
 
 // ─── AI Mode ───────────────────────────────────────────────────────────────────

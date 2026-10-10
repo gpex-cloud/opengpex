@@ -57,6 +57,7 @@ export const BUILTIN_UPSCALE_MODELS: UpscaleModelEntry[] = [
     name: '2x AnimeSharp V4 Fast',
     modelId: 'Kim2091/2x-AnimeSharpV4',
     onnxFile: '2x-AnimeSharpV4_Fast_RCAN_PU_fp16_opset17.onnx',
+    expectedBytes: 31_585_593, // HEAD-probed 2026-10-10
     size: '~30 MB',
     scale: 2,
     description: 'Fast 2x anime upscale — PixelUnshuffle variant, smaller & faster',
@@ -67,6 +68,7 @@ export const BUILTIN_UPSCALE_MODELS: UpscaleModelEntry[] = [
     name: '4x Real-ESRGAN General',
     modelId: 'SceneWorks/real-esrgan-onnx',
     onnxFile: 'real_esrgan_x4.onnx',
+    expectedBytes: 67_051_616, // HEAD-probed 2026-10-10
     size: '~65 MB',
     scale: 4,
     description: 'Real-ESRGAN x4 — general purpose photo & illustration upscaler',

@@ -35,7 +35,7 @@ import type {
   ImageGenRequest,
   ProviderDefinition,
 } from '../types';
-import { joinUrl, proxyFetch, throwRequestError, postJsonForImage, extractImageFromResponse } from '../transport';
+import { apiUrl, proxyFetch, throwRequestError, postJsonForImage, extractImageFromResponse } from '../transport';
 import {
   chatCompletionsForText,
   chatCompletionsForDescribe,
@@ -100,14 +100,14 @@ export const openaiProvider: ProviderDefinition = {
       endpoint,
       providerName: NAME,
       action: 'Image generation',
-      targetUrl: joinUrl(endpoint.baseUrl, '/v1/images/generations'),
+      targetUrl: apiUrl(endpoint.baseUrl, '/v1/images/generations'),
       body,
     });
   },
 
   async edit(endpoint: AIEndpoint, req: ImageEditRequest): Promise<Blob> {
     const model = imageModel(endpoint);
-    const targetUrl = joinUrl(endpoint.baseUrl, '/v1/images/edits');
+    const targetUrl = apiUrl(endpoint.baseUrl, '/v1/images/edits');
 
     const formData = new FormData();
     formData.append('image', req.images[0], 'source.png');

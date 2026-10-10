@@ -174,19 +174,15 @@ export function useAIBridgeState() {
       updateConfig: setSelfConfig,
       setMode: (m: AIMode) => setSelfConfig({ mode: m }),
       /**
-       * Selects a model. The target slot follows the model's own modality, so
-       * picking a vision model from the list fills the Describe slot with no
-       * extra interaction. Pass `slotOverride` to force a specific slot.
+       * Selects a model for the current task: it always lands in the slot this
+       * mode reads from, whatever the model's modality. Modality stays advisory
+       * (badge + soft hint) — the server is the authority on what works.
        */
-      setModel: (model: string, slotOverride?: ModelSlot) => {
+      setModel: (model: string) => {
         if (!activeEndpoint) return;
-        const modality = cachedModels.find(m => m.id === model)?.modality ?? inferModality(model);
-        const target: ModelSlot = slotOverride
-          ?? (modality === 'text' ? 'text' : modality === 'multi' ? 'multi' : 'image');
-
         const nextEndpoints = endpoints.map(e =>
           e.id === activeEndpoint.id
-            ? { ...e, modelByKind: { ...e.modelByKind, [target]: model } }
+            ? { ...e, modelByKind: { ...e.modelByKind, [slot]: model } }
             : e,
         );
         setSelfConfig({ endpoints: nextEndpoints });
