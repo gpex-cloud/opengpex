@@ -36,6 +36,14 @@ interface ComboInputProps<T extends string | number> {
   inputStyle?: React.CSSProperties;
   /** Whether to render dropdown via Portal (default: true). Set to false to keep dropdown in-container. */
   byPortal?: boolean;
+  /** Optional node rendered inside the frame, after the input (e.g. a "px" unit suffix). */
+  suffix?: React.ReactNode;
+  /**
+   * Frameless variant: transparent background, no border, compact padding —
+   * for embedding directly inside toolbar strips where the surrounding
+   * chrome already provides the frame.
+   */
+  bare?: boolean;
   /**
    * Commit-on-blur mode: when provided, typing only updates internal local state.
    * The value is committed (onCommit called) only on Enter, blur, or Tab — matching
@@ -61,6 +69,8 @@ export default function ComboInput<T extends string | number>({
   inputStyle,
   byPortal = true,
   onCommit,
+  suffix,
+  bare = false,
 }: ComboInputProps<T>) {
   const [isOpen, setIsOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
@@ -129,7 +139,10 @@ export default function ComboInput<T extends string | number>({
   );
 
   return (
-    <div ref={containerRef} className={`relative flex items-center bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 gap-1.5 transition-all focus-within:border-indigo-500/50 focus-within:ring-1 focus-within:ring-indigo-500/20 ${disabled ? 'opacity-50 pointer-events-none' : ''} ${className}`}>
+    <div ref={containerRef} className={`relative flex items-center ${bare
+      ? "gap-0.5 px-1"
+      : "bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 gap-1.5"
+    } transition-all ${bare ? "" : "focus-within:border-indigo-500/50 focus-within:ring-1 focus-within:ring-indigo-500/20"} ${disabled ? 'opacity-50 pointer-events-none' : ''} ${className}`}>
       {label && (
         <span className="text-[9px] font-black text-zinc-400 dark:text-zinc-600 shrink-0 select-none uppercase tracking-tighter">
           {label}
@@ -184,6 +197,12 @@ export default function ComboInput<T extends string | number>({
         style={inputStyle}
         placeholder="-"
       />
+
+      {suffix && (
+        <span className="text-[9px] font-bold text-[var(--text-muted)] shrink-0 select-none tabular-nums">
+          {suffix}
+        </span>
+      )}
 
       {options && options.length > 0 && (
         <button 

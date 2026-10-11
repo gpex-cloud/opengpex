@@ -191,7 +191,7 @@ export function LayersPanel({
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1 overflow-hidden">
       <motion.div
         layout="position"
-        className="flex items-center justify-between shrink-0"
+        className="flex items-center justify-between h-6 shrink-0"
       >
         <div className="flex items-center gap-2">
           <Layers size={12} className="text-indigo-600 dark:text-indigo-400" />

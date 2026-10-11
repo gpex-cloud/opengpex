@@ -315,11 +315,13 @@ export const FontSettings = React.memo(function FontSettings() {
     const result = await queryLocalFonts(existingFamilies);
     setScanning(false);
     if (result.success) {
+      // Persisted scan results are system-available — reflect in load state immediately
+      fonts.primeSystemFonts();
       setMessage(`Found ${result.familyCount} local fonts. They are now available in the font picker.`);
     } else {
       setMessage(result.error || "Failed to scan local fonts.");
     }
-  }, [fullRegistry]);
+  }, [fullRegistry, fonts]);
 
   const handleRemoveLocalFonts = useCallback(() => {
     clearPersistedLocalFonts();

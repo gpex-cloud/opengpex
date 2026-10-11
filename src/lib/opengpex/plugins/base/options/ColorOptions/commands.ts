@@ -194,8 +194,14 @@ export const COLOR_OPTIONS_COMMANDS = {
       layers.addLayer(activeFrame.id, newLayer);
       actions.setActiveLayer(activeFrame.id, newLayer.id);
 
-      if (isClipMode) {
+      // A fill is a completed action: leave whichever transient mode was live
+      // (clip box consumed by the fill, or the colour sampler the fill was
+      // invoked from) instead of stranding the user in it.
+      if (isClipMode || state.interaction.interactionMode === 'sample') {
         actions.setInteraction({ interactionMode: 'pan' });
+      }
+      if (state.interaction.interactionMode === 'sample') {
+        ctx.scoped?.setSignal(P.SIGNAL_SAMPLER_ACTIVE, false);
       }
     }
   } as EditorCommand<{ fillColor: ColorValue }, void>,

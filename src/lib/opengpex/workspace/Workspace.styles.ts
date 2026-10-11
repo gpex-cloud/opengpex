@@ -139,11 +139,11 @@ export const getWorkspaceStyles = (
         },
 
         drawerBarHeaderItem: {
-            className: `flex items-center justify-center transition-all duration-300 outline-none focus:outline-none focus:ring-0 select-none w-[34px] h-[34px] rounded-xl bg-[var(--bg-panel)]/70 backdrop-blur-xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] hover:bg-[var(--bg-panel)]/90 active:scale-95 pointer-events-auto cursor-pointer`
+            className: `flex items-center justify-center transition-all duration-300 outline-none focus:outline-none focus:ring-0 select-none w-[34px] h-[34px] rounded-lg bg-[var(--bg-panel)]/70 backdrop-blur-xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] hover:bg-[var(--bg-panel)]/90 active:scale-95 pointer-events-auto cursor-pointer`
         },
 
         drawerBarItem: {
-            className: `relative flex items-center justify-center transition-all duration-300 cursor-pointer active:scale-95 [&_svg]:!w-5 [&_svg]:!h-5 w-[34px] h-[34px] rounded-xl bg-[var(--bg-panel)]/80 backdrop-blur-xl border border-[var(--border-subtle)] shadow-xl pointer-events-auto`
+            className: `relative flex items-center justify-center transition-all duration-300 cursor-pointer active:scale-95 [&_svg]:!w-5 [&_svg]:!h-5 w-[34px] h-[34px] rounded-lg bg-[var(--bg-panel)]/80 backdrop-blur-xl border border-[var(--border-subtle)] shadow-xl pointer-events-auto`
         },
 
         drawerBarItemActive: {
@@ -151,7 +151,7 @@ export const getWorkspaceStyles = (
         },
 
         drawerBarFooterItem: {
-            className: `flex items-center justify-center transition-all duration-300 outline-none focus:outline-none focus:ring-0 select-none w-[34px] h-[34px] rounded-xl bg-[var(--bg-panel)]/70 backdrop-blur-xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] hover:bg-[var(--bg-panel)]/90 active:scale-95 pointer-events-auto cursor-pointer`
+            className: `flex items-center justify-center transition-all duration-300 outline-none focus:outline-none focus:ring-0 select-none w-[34px] h-[34px] rounded-lg bg-[var(--bg-panel)]/70 backdrop-blur-xl border border-[var(--border-subtle)] shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] hover:bg-[var(--bg-panel)]/90 active:scale-95 pointer-events-auto cursor-pointer`
         },
 
         // Sidebar Container
@@ -165,18 +165,18 @@ export const getWorkspaceStyles = (
         // A backdrop-filter element re-blurs its whole area whenever ANY descendant repaints, so
         // keeping content out of it lets in-panel animations (spinners, progress bars) run cheaply.
         sidebarFloating: {
-            className: `relative w-[320px] h-auto max-h-[calc(100vh-120px)] overflow-hidden shadow-2xl z-[900] rounded-[20px] border border-[var(--border-subtle)]`,
+            className: `relative w-[320px] h-auto max-h-[calc(100vh-120px)] overflow-hidden shadow-2xl z-[900] rounded-[12px] border border-[var(--border-subtle)]`,
             style: {}
         },
 
         // Childless blur layer: -inset-px so it also covers the 1px border area of the shell.
         sidebarFloatingBackdrop: {
-            className: `absolute -inset-px rounded-[20px] bg-[var(--bg-panel)]/85 backdrop-blur-xl pointer-events-none`,
+            className: `absolute -inset-px rounded-[12px] bg-[var(--bg-panel)]/85 backdrop-blur-xl pointer-events-none`,
             style: {}
         },
 
         sidebarInner: {
-            className: `flex-1 flex flex-col overflow-y-auto scrollbar-hide pointer-events-auto px-1 pt-3 pb-2 gap-2`
+            className: `flex-1 flex flex-col overflow-y-auto scrollbar-hide pointer-events-auto px-0 pt-2 pb-2 gap-2`
         },
 
         // Viewport-aware UI overlay container

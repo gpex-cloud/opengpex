@@ -92,7 +92,7 @@ export function ImageInfoComponent() {
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
       {/* Header */}
-      <div className="flex justify-between items-center h-7 shrink-0">
+      <div className="flex justify-between items-center h-6 shrink-0">
         <div className="flex items-center gap-2">
           <Info size={12} className="text-indigo-600 dark:text-indigo-400" />
           <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">

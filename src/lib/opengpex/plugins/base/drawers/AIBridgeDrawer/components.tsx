@@ -206,7 +206,7 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1 overflow-hidden">
       {/* Header (always visible) */}
-      <motion.div layout="position" className="flex justify-between items-center shrink-0">
+      <motion.div layout="position" className="flex justify-between items-center h-6 shrink-0">
         <div className="flex items-center gap-2">
           <AIBridgeIcon className="text-indigo-600 dark:text-indigo-400" />
           {config.endpoints.length <= 1 ? (

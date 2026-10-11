@@ -30,7 +30,6 @@ import React, {
 import { ChevronDown, Loader2, Search, Check, Download, Globe } from "lucide-react";
 import { useEditorServices } from "@opengpex/editor/core/context";
 import {
-  getRecommendedFonts,
   splitFontsByLocale,
 } from "@opengpex/editor/core/fonts/locale";
 import type { WebFont } from "@opengpex/editor/core/fonts/registry";
@@ -38,6 +37,10 @@ import {
   searchGoogleFonts,
   saveUserDiscoveredFont,
 } from "@opengpex/editor/core/fonts/discovery";
+import {
+  getRecentFontFamilies,
+  recordRecentFont,
+} from "@opengpex/editor/core/fonts/recents";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -76,7 +79,7 @@ function getFontDisplayName(family: string, registry: WebFont[]): string {
  * lazy loading indicators, live preview, and Google Fonts remote discovery.
  *
  * Features:
- * - Groups fonts by locale (recommended first, then by category)
+ * - Groups fonts by locale (recent first, then by category)
  * - Shows loading spinner while font is being loaded
  * - Renders font names in their own typeface (live preview)
  * - Search/filter support with remote Google Fonts fallback
@@ -138,16 +141,30 @@ export const FontPicker = React.memo(function FontPicker({
     }
   }, [isOpen]);
 
-  // Compute grouped font list (locale-aware) using full registry
-  const { recommended, primary, secondary } = useMemo(() => {
-    const rec = getRecommendedFonts(fullRegistry);
+  // Compute grouped font list using full registry.
+  // "Recent" section: only locally recorded selections (no backfill) — hidden
+  // entirely when history is empty. Re-reads history each time the dropdown
+  // opens (selections happen between opens).
+  const { recent, primary, secondary } = useMemo(() => {
+    const byFamily = new Map(fullRegistry.map((f) => [f.family, f] as const));
+    const clean = (s: string) => s.replace(/['"]/g, "").trim().toLowerCase();
+    const picked: WebFont[] = [];
+    const seen = new Set<string>();
+    for (const family of getRecentFontFamilies()) {
+      const entry = byFamily.get(family) ?? fullRegistry.find((f) => clean(f.family) === clean(family));
+      if (entry && !seen.has(entry.family)) {
+        picked.push(entry);
+        seen.add(entry.family);
+      }
+    }
     const split = splitFontsByLocale(fullRegistry);
     return {
-      recommended: rec.slice(0, 6), // Top 6 for "Recommended" section
+      recent: picked,
       primary: split.primary,
       secondary: split.secondary,
     };
-  }, [fullRegistry]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-read recents from localStorage each time the picker opens
+  }, [fullRegistry, isOpen]);
 
   // Filter by search (local) + trigger remote search
   const filteredFonts = useMemo(() => {
@@ -208,6 +225,7 @@ export const FontPicker = React.memo(function FontPicker({
         await fonts.load(font.family);
       }
 
+      recordRecentFont(family);
       setLoadingFont(null);
       onChange(family);
     },
@@ -229,6 +247,7 @@ export const FontPicker = React.memo(function FontPicker({
       // Load the font
       await fonts.loadDiscovered(font);
 
+      recordRecentFont(family);
       setLoadingFont(null);
       onChange(family);
     },
@@ -406,17 +425,17 @@ export const FontPicker = React.memo(function FontPicker({
             ) : (
               // Grouped view (no search)
               <>
-                {/* Recommended Section */}
-                {recommended.length > 0 && (
+                {/* Recent Section */}
+                {recent.length > 0 && (
                   <>
                     <div className="flex items-center gap-2 px-1.5 py-1.5">
                       <div className="flex-1 h-px bg-[var(--border-subtle)]" />
                       <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-wider shrink-0">
-                        Recommended
+                        Recent
                       </span>
                       <div className="flex-1 h-px bg-[var(--border-subtle)]" />
                     </div>
-                    {recommended.map((f: WebFont) =>
+                    {recent.map((f: WebFont) =>
                       renderFontItem(
                         f,
                         cleanFamily(f.family) === cleanFamily(value),

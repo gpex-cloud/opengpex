@@ -19,7 +19,7 @@
 
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Split,
   ChevronDown,
@@ -102,10 +102,8 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
   const { reCanvasActiveSignal } = usePluginSignals<ClipOptionsSignalsMap>();
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [isFeatherOpen, setIsFeatherOpen] = useState(false);
   const [isOffsetOpen, setIsOffsetOpen] = useState(false);
   const [offsetValue, setOffsetValue] = useState(0);
-  const featherPopoverTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // ─── Re-Canvas live W/H: poll volatile fast-track during drag ────────────
   // During drag the canvasClipBox only lives in the volatile buffer (60 fps);
@@ -534,18 +532,14 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
             const aaDisabled = isPanMode || isReCanvas || !supportsAntiAlias;
             return (
               <Tooltip
-                content={
-                  !supportsAntiAlias
-                    ? "This tool always uses a hard pixel-staircase edge; use Feather to soften the boundary"
-                    : `Anti-Alias: ${isAntiAliased ? "ON" : "OFF"} (Dbl-Click A)`
-                }
+                content="Anti Alias"
                 position="bottom"
                 display="inline-flex"
               >
                 <button
                   onClick={() => antiAliasToggleCmd?.execute()}
                   disabled={aaDisabled}
-                  className={`flex items-center justify-center w-7 h-full transition-colors outline-none select-none
+                  className={`flex items-center justify-center w-6 h-full transition-colors outline-none select-none
                     ${aaDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
                   `}
                 >
@@ -582,7 +576,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                 <button
                   onClick={() => invertSelectionCmd?.execute()}
                   disabled={invertDisabled}
-                  className={`flex items-center justify-center w-7 h-full transition-colors outline-none select-none
+                  className={`flex items-center justify-center w-6 h-full transition-colors outline-none select-none
                     ${invertDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
                   `}
                 >
@@ -608,9 +602,9 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                 display="inline-flex"
               >
                 <button
-                  onClick={() => selectFromAlphaCmd?.execute()}
-                  disabled={alphaDisabled}
-                  className={`flex items-center justify-center w-7 h-full transition-colors outline-none select-none
+                    onClick={() => selectFromAlphaCmd?.execute()}
+                    disabled={alphaDisabled}
+                    className={`flex items-center justify-center w-6 h-full transition-colors outline-none select-none
                     ${alphaDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
                   `}
                 >
@@ -704,7 +698,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                   <button
                     onClick={() => setIsOffsetOpen((prev) => !prev)}
                     disabled={offsetDisabled}
-                    className={`flex items-center justify-center w-7 h-full transition-colors outline-none select-none
+                    className={`flex items-center justify-center w-6 h-full transition-colors outline-none select-none
                       ${offsetDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
                     `}
                   >
@@ -722,106 +716,47 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
 
           {/*
            * Segment 4: Feather — Independent selection modifier (parallel to AA).
-           * Shows current feather value; dropdown arrow opens Popover to edit.
-           * Feather is a selection-level attribute consumed by Apply Mask, Drill,
-           * and Cmd+J operations — not a sub-property of any single action.
+           * Inline numeric input (commit-on-blur, like the Re-Canvas W/H inputs):
+           * type a value, Enter/blur commits, Escape reverts. Feather is a
+           * selection-level attribute consumed by Apply Mask, Drill, and Cmd+J
+           * operations — not a sub-property of any single action.
            */}
           {(() => {
             const featherDisabled = isPanMode || isReCanvas;
+            const commitFeather = (val: number) => {
+              const clamped = Math.min(250, Math.max(0, Math.round(val) || 0));
+              setFeatherValue(clamped);
+              persistFeather(clamped);
+            };
             return (
-              <Popover
-                isOpen={isFeatherOpen}
-                onClose={() => setIsFeatherOpen(false)}
+              <Tooltip
+                content="Feather Radius (0–250px)"
                 position="bottom"
-                align="start"
-                offset={8}
                 display="inline-flex"
-                content={
-                  <div
-                    className="flex items-center gap-0.5 p-1"
-                    onMouseEnter={() => {
-                      if (featherPopoverTimerRef.current) {
-                        clearTimeout(featherPopoverTimerRef.current);
-                        featherPopoverTimerRef.current = null;
-                      }
-                    }}
-                    onMouseLeave={() => {
-                      featherPopoverTimerRef.current = setTimeout(() => {
-                        setIsFeatherOpen(false);
-                        featherPopoverTimerRef.current = null;
-                      }, 1500);
-                    }}
-                  >
-                    <span className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-wider shrink-0 pl-1 pr-0.5">
-                      Feather
-                    </span>
-                    <button
-                      onClick={() => { setFeatherValue(0); persistFeather(0); }}
-                      className="flex items-center justify-center w-5 h-6 rounded-md shrink-0 text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-stage)] transition-colors"
-                      title="Min (0)"
-                    >
-                      <span className="text-[9px] font-bold">0</span>
-                    </button>
-                    <input
-                      type="range"
-                      min={0}
-                      max={250}
-                      step={1}
-                      value={featherValue}
-                      onChange={(e) => setFeatherValue(Number(e.target.value))}
-                      onPointerUp={(e) => { persistFeather(Number((e.currentTarget as HTMLInputElement).value)); (e.currentTarget as HTMLInputElement).blur(); }}
-                      onKeyDown={(e) => { if (e.key === ' ') { e.preventDefault(); e.currentTarget.blur(); } }}
-                      className={`w-[140px] h-1 appearance-none rounded-full bg-zinc-200 dark:bg-zinc-700 cursor-pointer
-                        ${activeStrategy.accent === "cyan"
-                          ? "accent-cyan-500 [&::-webkit-slider-thumb]:bg-cyan-500 [&::-moz-range-thumb]:bg-cyan-500"
-                          : activeStrategy.accent === "purple"
-                            ? "accent-purple-500 [&::-webkit-slider-thumb]:bg-purple-500 [&::-moz-range-thumb]:bg-purple-500"
-                            : "accent-amber-500 [&::-webkit-slider-thumb]:bg-amber-500 [&::-moz-range-thumb]:bg-amber-500"}
-                        [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-sm
-                        [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0`}
-                    />
-                    <button
-                      onClick={() => { setFeatherValue(250); persistFeather(250); }}
-                      className="flex items-center justify-center h-6 px-1.5 rounded-md shrink-0 text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-stage)] transition-colors"
-                      title="Max (250)"
-                    >
-                      <span className="text-[9px] font-bold tabular-nums">{featherValue}/250</span>
-                    </button>
-                  </div>
-                }
               >
-                <Tooltip
-                  content={`Feather: ${featherValue > 0 ? featherValue + "px" : "None"}`}
-                  position="bottom"
-                  display="inline-flex"
+                <div
+                  className={`flex items-center gap-1 pl-1.5 pr-0.5 h-6 ${featherDisabled ? disabledClasses : ""}`}
                 >
-                  <button
-                    onClick={() => setIsFeatherOpen((prev) => !prev)}
+                  <Feather
+                    size={12}
+                    className={`shrink-0 transition-colors ${
+                      featherValue > 0 && !featherDisabled
+                        ? toolVisual.textClass
+                        : "text-[var(--text-muted)]"
+                    }`}
+                  />
+                  <ComboInput
+                    type="number"
+                    value={featherValue}
+                    onChange={() => {}}
+                    onCommit={(val) => commitFeather(Number(val))}
                     disabled={featherDisabled}
-                    className={`flex items-center gap-1 px-1.5 h-full transition-colors outline-none select-none
-                      ${featherDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
-                    `}
-                  >
-                    {/* Feather icon — Lucide */}
-                    <Feather
-                      size={12}
-                      className={`transition-colors ${
-                        featherValue > 0 && !featherDisabled
-                          ? toolVisual.textClass
-                          : "text-[var(--text-muted)]"
-                      }`}
-                    />
-                    {/* Fixed-width label: shows value or "None" */}
-                    <span className="text-[9px] font-bold text-[var(--text-muted)] w-[26px] text-center tabular-nums">
-                      {featherValue > 0 ? `${featherValue}px` : "None"}
-                    </span>
-                    <ChevronDown
-                      size={9}
-                      className={`text-[var(--text-muted)] transition-transform duration-200 ${isFeatherOpen ? "rotate-180" : ""}`}
-                    />
-                  </button>
-                </Tooltip>
-              </Popover>
+                    suffix="px"
+                    bare
+                    className="w-[44px]"
+                  />
+                </div>
+              </Tooltip>
             );
           })()}
 
@@ -843,7 +778,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                 <button
                   onClick={() => applyMaskCmd?.execute({ feather: featherValue })}
                   disabled={maskDisabled}
-                  className={`flex items-center justify-center w-7 h-full transition-colors outline-none select-none
+                  className={`flex items-center justify-center w-6 h-full transition-colors outline-none select-none
                     ${maskDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
                   `}
                 >

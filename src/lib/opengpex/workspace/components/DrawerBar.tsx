@@ -486,8 +486,8 @@ function SidebarItem({
                 <div
                   className={`${styles.sidebarInner.className} relative`}
                   style={{
-                    paddingLeft: side === "left" ? "4px" : "12px",
-                    paddingRight: side === "left" ? "12px" : "4px",
+                    paddingLeft: side === "left" ? "2px" : "8px",
+                    paddingRight: side === "left" ? "8px" : "2px",
                   }}
                 >
                   <PluginSlot
@@ -616,7 +616,7 @@ function DrawerItem({
  */
 function SidebarSkeleton() {
   return (
-    <div className="flex flex-col gap-4 p-3 w-full h-full animate-pulse-lite pointer-events-none select-none">
+    <div className="flex flex-col gap-4 pt-2 pb-2 w-full h-full animate-pulse-lite pointer-events-none select-none">
       {/* Title bar skeleton */}
       <div className="flex items-center gap-3 mb-1 mt-1">
         <div className="w-5 h-5 rounded-[6px] bg-[var(--border-subtle)] " />

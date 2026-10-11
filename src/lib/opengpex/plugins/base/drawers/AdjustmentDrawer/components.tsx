@@ -166,7 +166,7 @@ export const AdjustmentDrawerComponent = React.memo(function AdjustmentDrawerCom
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
       <motion.div
         layout="position"
-        className="flex justify-between items-center shrink-0"
+        className="flex justify-between items-center h-6 shrink-0"
       >
         <div className="flex items-center gap-2">
           <ChartSpline size={12} className="text-indigo-600 dark:text-indigo-400" />

@@ -28,6 +28,7 @@ export { getUserLocaleHint, getRecommendedFonts, splitFontsByLocale } from './lo
 export { searchGoogleFonts, getUserDiscoveredFonts, saveUserDiscoveredFont, removeUserDiscoveredFont } from './discovery';
 export { isLocalFontAccessSupported, queryLocalFonts, getPersistedLocalFonts, clearPersistedLocalFonts } from './local';
 export type { LocalFontScanResult } from './local';
+export { getRecentFontFamilies, recordRecentFont, clearRecentFonts, MAX_RECENT_FONTS } from './recents';
 
 /**
  * FontService: Core font loading and management service.
@@ -53,6 +54,12 @@ export interface FontService {
   loadDiscovered(font: WebFont): Promise<boolean>;
   /** Hydrate: Restore cached fonts from IndexedDB on startup */
   hydrate(): Promise<void>;
+  /**
+   * Mark all no-download fonts as available: built-in system fonts plus
+   * persisted local-scan fonts (Local Font Access). Safe to call any time;
+   * notifies subscribers only when something new was primed.
+   */
+  primeSystemFonts(): void;
   /** Get all supported font descriptors from the registry (built-in + user-discovered) */
   getRegistry(): WebFont[];
   /** Get the list of currently loaded font family names */
@@ -108,6 +115,34 @@ export function createFontService(): FontService {
   function markFailed(family: string): void {
     const r = failedFonts.get(family) || { count: 0, lastAttempt: 0 };
     failedFonts.set(family, { count: r.count + 1, lastAttempt: Date.now() });
+  }
+
+  /**
+   * Mark every no-download font as available in the in-memory set.
+   *
+   * System-available fonts come from two sources: the built-in FONT_REGISTRY
+   * (isSystem) and persisted local-scan fonts from the Local Font Access API
+   * (also isSystem, persisted in localStorage). Both are usable without any
+   * download, so both must be reflected in `loadedFonts` — otherwise the UI
+   * shows them as permanently unloaded.
+   *
+   * @returns true if any family was newly added
+   */
+  function primeSystemFonts(): boolean {
+    let added = false;
+    for (const font of FONT_REGISTRY) {
+      if (font.isSystem && !loadedFonts.has(font.family)) {
+        loadedFonts.add(font.family);
+        added = true;
+      }
+    }
+    for (const font of getPersistedLocalFonts()) {
+      if (!loadedFonts.has(font.family)) {
+        loadedFonts.add(font.family);
+        added = true;
+      }
+    }
+    return added;
   }
 
   /**
@@ -226,7 +261,10 @@ export function createFontService(): FontService {
     }
 
     // Unknown font (not in any registry) — treat as system font, assume available
-    if (!fontInfo) return true;
+    if (!fontInfo) {
+      loadedFonts.add(family);
+      return true;
+    }
 
     // System font — no download needed
     if (fontInfo.isSystem) {
@@ -319,12 +357,9 @@ export function createFontService(): FontService {
     async hydrate(): Promise<void> {
       if (typeof window === 'undefined') return; // SSR safety
 
-      // 1. Pre-populate system fonts (always available, no download needed)
-      for (const font of FONT_REGISTRY) {
-        if (font.isSystem) {
-          loadedFonts.add(font.family);
-        }
-      }
+      // 1. Pre-populate system fonts (always available, no download needed):
+      //    built-in registry system fonts + persisted local-scan fonts
+      primeSystemFonts();
 
       // 2. Restore cached fonts from IndexedDB
       try {
@@ -385,11 +420,17 @@ export function createFontService(): FontService {
       return cachedFamilies;
     },
 
+    primeSystemFonts(): void {
+      if (primeSystemFonts()) notify();
+    },
+
     async clearCache(): Promise<void> {
       await fontStore.clear();
       loadedFonts.clear();
       failedFonts.clear();
       pendingLoads.clear();
+      // Downloaded binaries are gone, but system fonts never depended on them
+      primeSystemFonts();
       notify();
     },
 

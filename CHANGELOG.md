@@ -2,6 +2,15 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.3
+
+- Typography: added recently used fonts to the font picker for quicker access, with smoother system font discovery
+- Selection Tools: streamlined edge feathering with direct numeric input right in the options bar
+- Workspace & UI: refined sidebar panels with cleaner spacing, unified title bars, and a more compact look
+- Tools: automatically returns to normal editing mode after using the eyedropper to fill color
+
+---
+
 ## v2.0.2
 
 - Performance: eliminated unnecessary background re-rendering when the canvas is idle, reducing battery drain and fan noise
