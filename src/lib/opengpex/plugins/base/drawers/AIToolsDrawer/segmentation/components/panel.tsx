@@ -125,11 +125,12 @@ export function SegmentationPanel() {
                 <button
                   key={idx}
                   onClick={() => handleSelectCandidate(idx)}
-                  className={`flex items-center gap-2 px-2 py-1.5 rounded-xl text-left transition-all cursor-pointer ${
+                  className={`flex items-center gap-2 px-2 py-1.5 rounded-xl text-left transition-all cursor-pointer select-none outline-none focus:outline-none ${
                     isActive
                       ? 'bg-purple-600/15 ring-1 ring-purple-500/30'
                       : 'bg-[var(--bg-panel)] hover:bg-[var(--border-subtle)]'
                   }`}
+                  style={{ WebkitTapHighlightColor: 'transparent' }}
                 >
                   <span className={`w-2 h-2 rounded-full shrink-0 ${isActive ? 'bg-purple-400' : 'bg-[var(--border-light)]'}`} />
                   <span className="text-[10px] font-medium text-[var(--text-main)]">Mask {idx + 1}</span>

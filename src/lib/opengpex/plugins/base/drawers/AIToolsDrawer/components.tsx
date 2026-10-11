@@ -36,6 +36,7 @@ import { SegmentationPanel } from './segmentation/components/panel';
 import { InpaintEraserPanel } from './inpaint/eraser/components/panel';
 import type { AIToolsDrawerCommandsMap } from './commands.d';
 import { AIToolsDrawerAPI } from './protocols';
+import { ClipOptionsAPI } from '../../options/ClipOptions/protocols';
 
 // ─── Tool definitions ────────────────────────────────────────────────────────
 
@@ -55,16 +56,29 @@ export function AIToolsDrawerContent() {
   const { state, activeFrame } = useEditorState();
   const { actions, plugins } = useEditorServices();
   const [config, setConfig] = usePluginSelfConfig<Record<string, unknown>>();
+  // True while any AI tool has an in-flight task — blocks tool switching so
+  // exiting clip mode can't tear down a running SAM session mid-inference.
+  const [anyToolBusy, setAnyToolBusy] = useState(false);
 
   // Persist active tool selection in config so it survives page refresh
   const savedTool = (config?.activeTool as AITool) || 'upscaler';
   const [userSelectedTool, setUserSelectedTool] = useState<AITool>(savedTool);
 
+  const isClipSam = state.interaction.interactionMode === 'clip' && activeFrame?.latestClipTool === 'sam';
+
   const handleToolSelect = useCallback((val: string) => {
     const tool = val as AITool;
+    // Switching away from Segmentation while the SAM clip tool is active
+    // first exits clip mode (via the standard exitClip command so peel/
+    // exchange teardown stays in one place). The forced segmentation
+    // binding below rolls the tab back if the exit didn't land (e.g. the
+    // Re-Canvas branch of exitClip only closes Re-Canvas).
+    if (isClipSam && tool !== 'segmentation') {
+      void actions.executeCommand(ClipOptionsAPI.commands.exitClip.uid);
+    }
     setUserSelectedTool(tool);
     setConfig({ activeTool: tool });
-  }, [setConfig]);
+  }, [isClipSam, actions, setConfig]);
 
   // One-time: give the download singleton a reference to PluginService
   // so it can auto-sync busy state even after this component unmounts.
@@ -81,6 +95,7 @@ export function AIToolsDrawerContent() {
         upscaleStore.getState().task !== null ||
         inpaintEraserStore.getState().task !== null;
       plugins.setBusy(uid, isBusy);
+      setAnyToolBusy(isBusy);
     };
 
     const unsubs = [
@@ -96,9 +111,9 @@ export function AIToolsDrawerContent() {
     return () => { unsubs.forEach(fn => fn()); };
   }, [plugins]);
 
-  // When SAM clip tool is active, force Segmentation panel (results appear there).
-  // User must switch away from SAM to access BG Remover.
-  const isClipSam = state.interaction.interactionMode === 'clip' && activeFrame?.latestClipTool === 'sam';
+  // While the SAM clip tool is active the Segmentation panel stays in front
+  // (results render there); switching to another tool exits clip mode first
+  // (see handleToolSelect).
   const activeTool: AITool = isClipSam ? 'segmentation' : userSelectedTool;
 
   // Sync active tab to a state signal so autoReveal.when() can read it
@@ -124,19 +139,17 @@ export function AIToolsDrawerContent() {
               value: t.value,
               label: t.label,
             }))}
-            disabled={isClipSam}
+            disabled={anyToolBusy}
             onSelect={handleToolSelect}
             trigger={(isOpen) => (
-              <div className={`flex items-center gap-1 group ${isClipSam ? 'cursor-default' : 'cursor-pointer'}`} title={isClipSam ? 'Locked to Segmentation while SAM tool is active' : undefined}>
-                <span className={`text-[10px] font-black uppercase tracking-[0.15em] transition-colors ${isClipSam ? 'text-indigo-500 dark:text-indigo-400' : 'text-[var(--text-main)] group-hover'}`}>
+              <div className={`flex items-center gap-1 group cursor-pointer ${anyToolBusy ? 'opacity-60' : ''}`} title={anyToolBusy ? 'Tool switching unavailable while a task is running' : undefined}>
+                <span className={`text-[10px] font-black uppercase tracking-[0.15em] transition-colors text-[var(--text-main)] group-hover`}>
                   {activeToolMeta.label}
                 </span>
-                {!isClipSam && (
-                  <ChevronDown
-                    size={10}
-                    className={`text-[var(--text-muted)] transition-transform duration-200 group-hover ${isOpen ? 'rotate-180' : ''}`}
-                  />
-                )}
+                <ChevronDown
+                  size={10}
+                  className={`text-[var(--text-muted)] transition-transform duration-200 group-hover ${isOpen ? 'rotate-180' : ''}`}
+                />
               </div>
             )}
           />

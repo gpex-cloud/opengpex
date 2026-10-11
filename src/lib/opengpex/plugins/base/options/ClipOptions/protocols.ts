@@ -270,6 +270,10 @@ export const ClipOptionsAPI = {
     resetBox: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_RESET_BOX}` } as { uid: string; _payload: void },
     /** Enter / Cycle Clip Tool */
     toggleMode: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_TOGGLE_MODE}` } as { uid: string; _payload: void },
+    /** Escape — close Re-Canvas if open, else exit clip mode (discard peel) */
+    exitClip: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_EXIT_CLIP_MODE}` } as { uid: string; _payload: void },
+    /** Invert the active selection */
+    invertSelection: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_INVERT_SELECTION}` } as { uid: string; _payload: void },
     /** Set crop tool */
     setClipTool: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CLIP_TOOL}` } as { uid: string; _payload: { tool: ClipTool } },
   },

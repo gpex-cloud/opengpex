@@ -89,7 +89,7 @@ export const LayerItem = React.memo(
     isGroupChild,
     currentGroupName,
   }: LayerItemProps) => {
-    const { actions } = useEditorServices();
+    const { actions, assets } = useEditorServices();
     const {
       visibilityCmd,
       lockCmd,
@@ -101,6 +101,14 @@ export const LayerItem = React.memo(
     const dragControls = useDragControls();
     const [isMasksExpanded, setIsMasksExpanded] = React.useState(false);
     const [isSubLayersExpanded, setIsSubLayersExpanded] = React.useState(false);
+    // Intrinsic dimensions of the layer's source image, straight from the
+    // asset light record (AssetEntry.width/height; pool is hydrate-populated,
+    // sync KB-level read). The object-view-box thumbnail crop below is
+    // computed against these — NOT frame canvas size, which only coincides
+    // with src dims for logical fragments and made self-contained layers
+    // (e.g. AI-eraser patches) crop to a transparent sliver → black thumbnail.
+    const srcAsset = layer.assetId ? assets.get(layer.assetId) : undefined;
+    const srcSize = srcAsset ? { w: srcAsset.width, h: srcAsset.height } : null;
 
     const hasSubLayers = childLayers.length > 0 && showSubLayers;
     // Only show sub-layers dot if there are non-internal (exchange/frag) child layers
@@ -249,16 +257,19 @@ export const LayerItem = React.memo(
                   style={(() => {
                     // When layer has a logical crop (visibleShape is a sub-region of source image),
                     // use object-view-box to display only the cropped portion in the thumbnail.
-                    // canvasSize represents the full source image dimensions.
+                    // Crop fractions are relative to the SRC image's intrinsic dimensions
+                    // (asset light record); fall back to frame canvas only if the
+                    // asset is missing from the pool.
                     const vs = layer.visibleShape;
-                    if (!vs || !canvasSize || canvasSize.w === 0 || canvasSize.h === 0) return undefined;
+                    const refSize = srcSize ?? canvasSize;
+                    if (!vs || !refSize || refSize.w === 0 || refSize.h === 0) return undefined;
                     const r = vs.rect;
-                    // Skip if visibleShape covers the entire canvas (no crop needed)
-                    if (r.x === 0 && r.y === 0 && r.w >= canvasSize.w && r.h >= canvasSize.h) return undefined;
-                    const top = (r.y / canvasSize.h * 100).toFixed(1);
-                    const right = ((canvasSize.w - r.x - r.w) / canvasSize.w * 100).toFixed(1);
-                    const bottom = ((canvasSize.h - r.y - r.h) / canvasSize.h * 100).toFixed(1);
-                    const left = (r.x / canvasSize.w * 100).toFixed(1);
+                    // Skip if visibleShape covers the entire source image (no crop needed)
+                    if (r.x === 0 && r.y === 0 && r.w >= refSize.w && r.h >= refSize.h) return undefined;
+                    const top = (r.y / refSize.h * 100).toFixed(1);
+                    const right = ((refSize.w - r.x - r.w) / refSize.w * 100).toFixed(1);
+                    const bottom = ((refSize.h - r.y - r.h) / refSize.h * 100).toFixed(1);
+                    const left = (r.x / refSize.w * 100).toFixed(1);
                     return { objectViewBox: `inset(${top}% ${right}% ${bottom}% ${left}%)` } as React.CSSProperties;
                   })()}
                   fallback={

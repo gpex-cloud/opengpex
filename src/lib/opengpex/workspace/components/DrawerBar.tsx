@@ -158,7 +158,7 @@ export default function DrawerBar({
     () => sortedPlugins.filter((p) => !!p.autoReveal),
     [sortedPlugins]
   );
-  useDrawerReveal(revealPlugins, state, actions);
+  const { markUserEngaged } = useDrawerReveal(revealPlugins, state, actions);
 
   // 3. Interaction handling
   const clickTimer = React.useRef<NodeJS.Timeout | null>(null);
@@ -274,6 +274,7 @@ export default function DrawerBar({
               handleIsolate={handleIsolate}
               isDraggingRef={isDraggingRef}
               side={side}
+              markUserEngaged={markUserEngaged}
             />
           ))}
         </Reorder.Group>
@@ -299,6 +300,7 @@ function SidebarItem({
   handleIsolate,
   isDraggingRef,
   side,
+  markUserEngaged,
 }: {
   plugin: BuiltPlugin;
   ui: EditorData["ui"];
@@ -308,6 +310,7 @@ function SidebarItem({
   handleIsolate: (id: string) => void;
   isDraggingRef: React.RefObject<boolean>;
   side: "left" | "right";
+  markUserEngaged: (uid: string) => void;
 }) {
   const { plugins } = useEditorServices();
   const isActive = (ui.activeSidebarIds || []).includes(plugin.uid);
@@ -464,6 +467,8 @@ function SidebarItem({
               <motion.div
                 ref={panelRef}
                 layout={false}
+                onPointerDownCapture={() => markUserEngaged(plugin.uid)}
+                onKeyDownCapture={() => markUserEngaged(plugin.uid)}
                 initial={{
                   x: side === "left" ? -panelWidth : (panelWidth as number),
                   opacity: 0,

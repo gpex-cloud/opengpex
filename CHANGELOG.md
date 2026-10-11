@@ -2,6 +2,14 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.4
+
+- Workspace & UI: auto-opened side panels now stay open while you are actively using them, preventing accidental closing
+- Layers: fixed layer thumbnail previews for AI eraser patches and cropped images
+- AI Tools: smoother tool switching and refined mask controls, with safeguards during active tasks
+
+---
+
 ## v2.0.3
 
 - Typography: added recently used fonts to the font picker for quicker access, with smoother system font discovery

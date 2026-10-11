@@ -33,6 +33,7 @@ import type { EditorActions, Frame, Layer, EditorState } from '@opengpex/editor/
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { getSkillDetail } from './skills';
 import { GPEX_DOCS_API_URL } from '../protocols';
+import { ClipOptionsAPI } from '../../../options/ClipOptions/protocols';
 
 /** In-memory cache for docs search results (same query → no repeat fetch within session). */
 const _docsCache = new Map<string, string>();
@@ -133,12 +134,12 @@ export async function executeAgentTool(
         // Exit clip mode (back to pan) — selection data stays on the frame
         // but the clip overlay is dismissed so the user sees the clean result.
         // Uses the ClipOptions exit command which properly discards any peel triplet.
-        await actions.executeCommand('opengpex.options.clip_options.cmd.exit_clip_mode');
+        await actions.executeCommand(ClipOptionsAPI.commands.exitClip.uid);
         return JSON.stringify({ success: true, action: 'Drilled selection (made selected area transparent) and exited clip mode' });
       }
 
       case 'invert_selection':
-        await actions.executeCommand('opengpex.options.clip_options.cmd.invert_selection');
+        await actions.executeCommand(ClipOptionsAPI.commands.invertSelection.uid);
         return JSON.stringify({ success: true, action: 'Inverted selection' });
 
       // ── Canvas resize ───────────────────────────────────────────────────

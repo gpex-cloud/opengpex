@@ -79,9 +79,11 @@ export const plugin: EditorPlugin = {
   autoReveal: {
     when: (state) => {
       // Reveal when in clip mode with SAM tool active.
-      // Uses sticky mode (collapseWhenFalse: false) — drawer auto-opens
-      // but never auto-closes. Manual close is handled in components.tsx
-      // to avoid false-edge bugs when the user switches tabs.
+      // 'restore' mode: drawer auto-opens on SAM activation and closes on
+      // exit unless the user interacted with it in between (the reveal
+      // engine's markUserEngaged upgrades the snapshot on any pointer/key
+      // event inside the panel), so switching tools inside the drawer —
+      // which exits clip mode — keeps the drawer open.
       if (state.interaction.interactionMode !== 'clip') return false;
       const frame = state.activeFrameId ? state.frames.byId[state.activeFrameId] : null;
       return frame?.latestClipTool === 'sam';

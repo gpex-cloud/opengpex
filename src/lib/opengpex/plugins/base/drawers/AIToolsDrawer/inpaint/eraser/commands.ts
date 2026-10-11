@@ -181,7 +181,7 @@ const { runCommand, abortCommand } = createToolCommand<
       // Create a new patch Layer
       const layersArray = targetFrame.layers.order.map(id => targetFrame.layers.byId[id]);
       const newLayer = ctx.layers.getNewLayer({
-        name: ctx.layers.getNewLayerName(layersArray, 'Erased'),
+        name: ctx.layers.getNewLayerName(layersArray, 'AI-Eraser'),
         src: url,
         assetId,
         cx,

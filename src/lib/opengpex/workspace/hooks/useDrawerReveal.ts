@@ -19,7 +19,7 @@
 
 'use client';
 
-import { useRef, useEffect, useMemo } from 'react';
+import { useRef, useEffect, useMemo, useCallback } from 'react';
 import type { EditorState, EditorActions, BuiltPlugin } from '@opengpex/editor/core/types';
 
 /**
@@ -139,4 +139,26 @@ export function useDrawerReveal(
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conditionResults]);
+
+  /**
+   * Mark a drawer as "user-opened" for the current activation cycle.
+   *
+   * Fixes the restore-snapshot flaw: `preActivationOpen` was snapshotted only
+   * at the false→true reveal edge and never updated afterwards, so a drawer
+   * the user was actively interacting with got closed by an edge the user
+   * themselves caused (e.g. picking a different tool inside an auto-revealed
+   * drawer flips the reveal condition). Called by the drawer container on
+   * capture-phase pointer/key events, i.e. BEFORE the resulting state change
+   * runs the edge detector.
+   *
+   * Guarded to mid-activation so stray calls can't seed a stale snapshot;
+   * the reveal edge overwrites the snapshot on every new activation anyway.
+   */
+  const markUserEngaged = useCallback((uid: string) => {
+    if (prevConditions.current[uid]) {
+      preActivationOpen.current[uid] = true;
+    }
+  }, []);
+
+  return { markUserEngaged };
 }
