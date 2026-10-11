@@ -184,8 +184,10 @@ AI features download pre-trained models on-demand from HuggingFace (not bundled)
 |-------|---------|--------|---------|
 | RMBG 1.4 | Background removal | [briaai/RMBG-1.4](https://huggingface.co/briaai/RMBG-1.4) | BRIA RMBG-1.4 (non-commercial) |
 | InSPyReNet Ultra | Background removal (high-quality edges) | [OS-Software/InSPyReNet-SwinB-Plus-Ultra-ONNX](https://huggingface.co/OS-Software/InSPyReNet-SwinB-Plus-Ultra-ONNX) | MIT |
-| SAM 2.1 | AI segmentation (Segment Anything) | [anthropics/sam2.1-hiera-tiny](https://huggingface.co/anthropics/sam2.1-hiera-tiny) | Apache-2.0 |
-| Upscale models | Super-resolution (2×/4×) | Various (ESRGAN-based) | Model-specific |
+| SAM 2.1 | AI segmentation (Segment Anything) | [onnx-community/sam2.1-hiera-tiny-ONNX](https://huggingface.co/onnx-community/sam2.1-hiera-tiny-ONNX) | Apache-2.0 |
+| LaMa | Inpainting (AI eraser) | [Carve/LaMa-ONNX](https://huggingface.co/Carve/LaMa-ONNX) | See model repo |
+| 2x-AnimeSharpV4 | Super resolution (2×, illustration) | [Kim2091/2x-AnimeSharpV4](https://huggingface.co/Kim2091/2x-AnimeSharpV4) | See model repo |
+| Real-ESRGAN (x4) | Super resolution | [SceneWorks/real-esrgan-onnx](https://huggingface.co/SceneWorks/real-esrgan-onnx) | See model repo |
 
 ---
 

@@ -4,6 +4,13 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v1.3.8
+
+- Tab Dock: fixed frame thumbnail close button not showing reliably when hovering over frames
+- Documentation: updated AI model catalog references
+
+---
+
 ## v1.3.7
 
 - Performance: streamlined AI model downloads to prevent memory buildup, keeping canvas interactions smooth and responsive

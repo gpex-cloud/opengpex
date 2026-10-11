@@ -392,6 +392,11 @@ function FrameThumbnail({
   const firstLayerId = frame.layers.order[0];
   const firstLayer = firstLayerId ? frame.layers.byId[firstLayerId] : undefined;
 
+  // Driven by hoveredTrunkId instead of CSS group-hover: when a BranchMenu is
+  // open, its bridge layer overlaps the scaled-up thumbnail's top edge and
+  // intercepts pointer events, which would break the group-hover chain.
+  const isHovered = state.hoveredTrunkId === frame.id;
+
   const isTrunkActive = state.activeFrameId === frame.id;
   const isBranchActiveOfThisTrunk =
     state.activeTrunkId === frame.id && !isTrunkActive;
@@ -481,7 +486,9 @@ function FrameThumbnail({
             e.stopPropagation();
             removeFrame(frame.id);
           }}
-          className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-rose-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-xl border border-[var(--border-subtle)]"
+          className={`absolute -top-1 -right-1 w-3.5 h-3.5 bg-rose-500 text-white rounded-full flex items-center justify-center transition-all shadow-xl border border-[var(--border-subtle)] ${
+            isHovered ? "opacity-100" : "opacity-0"
+          }`}
         >
           <X size={7} strokeWidth={4} />
         </button>
