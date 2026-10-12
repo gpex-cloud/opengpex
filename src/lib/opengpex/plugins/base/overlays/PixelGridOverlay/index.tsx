@@ -20,7 +20,9 @@
 'use client';
 
 import { EditorPlugin } from '@opengpex/editor/core/types';
+import { Grid } from 'lucide-react';
 import { PixelGridOverlayContainer, PixelGridToggle } from './components';
+import { PixelGridSettings } from './settings';
 import { PIXEL_GRID_COMMANDS } from './commands';
 import * as P from './protocols';
 
@@ -48,6 +50,7 @@ export const plugin: EditorPlugin = {
     enabled: true,
     hardEdge: false,
     minPixelSize: P.DEFAULT_MIN_PIXEL_SIZE,
+    lineStyle: P.DEFAULT_LINE_STYLE,
     gridColor: P.DEFAULT_GRID_COLOR,
     gridCasingColor: P.DEFAULT_GRID_CASING_COLOR
   },
@@ -57,6 +60,14 @@ export const plugin: EditorPlugin = {
       slot: 'TOOL_MENU',
       component: PixelGridToggle,
       order: 2030
+    },
+    {
+      slot: 'SETTINGS_CONFIG_PANEL',
+      group: 'viewport',
+      component: PixelGridSettings,
+      title: 'Pixel Grid',
+      icon: <Grid size={12} />,
+      order: 210
     }
   ]
 };

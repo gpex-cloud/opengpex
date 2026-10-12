@@ -35,6 +35,7 @@ import {
   VMASK_FLAG_HAS_TEX,
   VMASK_FLAG_INVERTED,
   VMASK_FLAG_HARD,
+  VMASK_FLAG_HAS_WINDOW,
   VMASK_SHAPE_SHIFT,
   VMASK_SHAPE_RECT,
   VMASK_SHAPE_ELLIPSE,
@@ -56,12 +57,16 @@ const NONE: VmaskUniformFields = { flags: 0, rect: [0, 0, 0, 0], feather: [0, 0,
  * @param contentWidth     layer content width in logical px (maps normalized→px)
  * @param contentHeight    layer content height in logical px
  * @param hasBakedTexture  whether the polygon fill-pass produced a texture this frame
+ * @param window           WINDOWED bake (hole windowing): the coverage texture
+ *   covers only this sub-rect of the layer, in the same layer-local px the rings
+ *   live in. Undefined → the texture spans the whole layer (historical behaviour).
  */
 export function resolveVmaskUniform(
   vmask: VectorMaskDesc | undefined,
   contentWidth: number,
   contentHeight: number,
   hasBakedTexture: boolean,
+  window?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
 ): VmaskUniformFields {
   if (!vmask) return NONE;
 
@@ -85,5 +90,15 @@ export function resolveVmaskUniform(
   // the 1×1 default-white view (which would multiply alpha by 1, i.e. no mask).
   if (!hasBakedTexture) return NONE;
   // invert/hard are ALREADY baked into the texture — no INVERTED/HARD bit.
+  if (window) {
+    // WINDOWED bake: vmask_rect is unused by the HAS_TEX branch, so it carries
+    // the window (origin + size, layer-local px); vmask_feather.yz carries the
+    // content dims the shader's uv remap multiplies the normalized uv by.
+    return {
+      flags: VMASK_FLAG_HAS_TEX | VMASK_FLAG_HAS_WINDOW,
+      rect: [window.x, window.y, window.w, window.h],
+      feather: [0, contentWidth, contentHeight, 0],
+    };
+  }
   return { flags: VMASK_FLAG_HAS_TEX, rect: [0, 0, 0, 0], feather: [0, 0, 0, 0] };
 }

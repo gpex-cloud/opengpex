@@ -67,6 +67,12 @@ export interface DrawBlendParams {
   readonly fgTexture: LayerTexture;
   readonly bgTexture: LayerTexture;
   /**
+   * WINDOWED-CONVOLUTION content rect (M1, source texels): `fgTexture` holds
+   * only this sub-rect of the source, so `uvRect` shifts by its origin (see
+   * `resolveLayerGeometry`). Undefined → content-aligned with the full source.
+   */
+  readonly contentWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  /**
    * The layer's COMBINED bmask coverage — the texture the bmask combine pass
    * baked from ALL enabled records (each record's hard bit + erase/restore
    * family folded into its red channel). Absent when the layer has no bmask or
@@ -76,6 +82,12 @@ export interface DrawBlendParams {
   readonly maskTexture?: LayerTexture;
   /** Polygon-baked vmask coverage texture (analytic/none → default white). */
   readonly vmaskTexture?: LayerTexture;
+  /**
+   * WINDOWED bake (hole windowing): the coverage texture covers only this
+   * sub-rect of the layer (layer-local px) — packed into vmask_rect with the
+   * HAS_WINDOW flag so the shader re-maps the uv. Undefined → full-layer bake.
+   */
+  readonly vmaskWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /**
    * Force the identity group-1 adjust bind group because `fgTexture` ALREADY has the
    * layer's adjustments baked in (AdjustPrePass → FilterPass path).
@@ -156,6 +168,7 @@ export class BlendPass {
       fgTexture.width,
       fgTexture.height,
       resolveLayerDprScale(layer, fgTexture.width, params.vectorTransient),
+      params.contentWindow,
     );
 
     // ⚠️ POT-BUCKET UV FIX: same rationale as CompositePass — scale content-relative
@@ -170,7 +183,7 @@ export class BlendPass {
     // Resolve vmask uniform triple (shared with CompositePass). Packed at
     // slots 19..27; the transform overwrite below only touches slots 0..11, so the
     // vmask fields survive untouched.
-    const vmaskU = resolveVmaskUniform(layer.vmask, contentWidth, contentHeight, !!vmaskTexture);
+    const vmaskU = resolveVmaskUniform(layer.vmask, contentWidth, contentHeight, !!vmaskTexture, params.vmaskWindow);
 
     // Pack uv_rect / opacity / blend_mode / flags at their fixed offsets
     // (12..18) plus vmask (19..27); slot 0..11 is OVERWRITTEN below with the

@@ -33,6 +33,11 @@ export interface AdjustmentDrawerCommandsMap {
   applyChannelMixPresetCmd: CommandInstance<{ presetId: ChannelMixPresetId }>;
   beginAdjustmentsEditCmd: CommandInstance;
   updateAdjustmentsCmd: CommandInstance<{ patch: AdjustmentsPatch }>;
+  fastUpdateAdjustmentsCmd: CommandInstance<{ patch: AdjustmentsPatch; exact?: boolean }>;
+  commitAdjustmentsCmd: CommandInstance;
+  fastUpdateEdgeFeatherCmd: CommandInstance<{ radius: number }>;
+  commitEdgeFeatherCmd: CommandInstance;
+  setEdgeFeatherCmd: CommandInstance<{ radius: number; cascade?: boolean; hole?: 'match' | 'clear' | 'none'; holeOnly?: boolean }>;
   beginColorBalanceEditCmd: CommandInstance;
   updateColorBalanceCmd: CommandInstance<{ patch: ColorBalancePatch }>;
 }

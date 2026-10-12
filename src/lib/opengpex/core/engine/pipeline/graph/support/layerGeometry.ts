@@ -63,6 +63,16 @@ export function resolveLayerGeometry(
   textureWidth: number,
   textureHeight: number,
   dprScale = 1,
+  /**
+   * WINDOWED-CONVOLUTION content rect (M1, source-texture texels): the texture
+   * holds ONLY this sub-rect of the source, so `uvRect` is re-expressed
+   * relative to it (`(crop·dpr − rect.xy) / texSize`). Everything else
+   * (`contentWidth/Height`, `localOffset`) describes the LAYER's document
+   * placement and is unchanged — the window is a texture-content fact, not a
+   * geometry fact. Undefined → the texture is content-aligned with the full
+   * source (historical behaviour, byte-identical UVs).
+   */
+  textureContentRect?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
 ): LayerGeometry {
   const contentWidth = layer.crop
     ? layer.crop.w
@@ -83,9 +93,14 @@ export function resolveLayerGeometry(
     const texH = Math.max(1, textureHeight);
     // Scale the logical crop into physical texture space (see DPR NOTE above).
     const d = dprScale > 0 ? dprScale : 1;
+    // Windowed: the texture's content starts at rect.x/y in the source, so the
+    // crop's physical offset shifts by the rect origin. (texW/texH are already
+    // the WINDOW's dims — the caller passes the filtered texture's own size.)
+    const cropX = layer.crop.x * d - (textureContentRect?.x ?? 0);
+    const cropY = layer.crop.y * d - (textureContentRect?.y ?? 0);
     uvRect = [
-      (layer.crop.x * d) / texW,
-      (layer.crop.y * d) / texH,
+      cropX / texW,
+      cropY / texH,
       (layer.crop.w * d) / texW,
       (layer.crop.h * d) / texH,
     ];

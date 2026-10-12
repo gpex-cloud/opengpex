@@ -143,7 +143,13 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
     if ((layer.vmask_flags & 8u) != 0u) { vmask_alpha = step(0.5, vmask_alpha); } // VMASK_HARD
     color.a *= vmask_alpha;
   } else if ((layer.vmask_flags & 2u) != 0u) {       // HAS_VMASK_TEX
-    var vmask_alpha = textureSample(vmask_tex, samp, in.mask_uv).a;
+    // WINDOWED bake: re-map normalized content uv into the coverage window.
+    var vmask_uv = in.mask_uv;
+    if ((layer.vmask_flags & 64u) != 0u) {           // VMASK_HAS_WINDOW
+      let px = in.mask_uv * layer.vmask_feather.yz;  // content uv → layer-local px
+      vmask_uv = (px - layer.vmask_rect.xy) / layer.vmask_rect.zw;
+    }
+    var vmask_alpha = textureSample(vmask_tex, samp, vmask_uv).a;
     if ((layer.vmask_flags & 4u) != 0u) { vmask_alpha = 1.0 - vmask_alpha; }
     if ((layer.vmask_flags & 8u) != 0u) { vmask_alpha = step(0.5, vmask_alpha); }
     color.a *= vmask_alpha;
@@ -183,6 +189,14 @@ export const VMASK_FLAG_HAS_ANALYTIC = 1;
 export const VMASK_FLAG_HAS_TEX = 2;
 export const VMASK_FLAG_INVERTED = 4;
 export const VMASK_FLAG_HARD = 8;
+/**
+ * WINDOWED bake (hole windowing): the polygon coverage texture covers only the
+ * `vmask_rect` sub-rect (origin xy, size zw in layer-local px) of the layer, so
+ * the tex sampler must re-map normalized content uv into the window before
+ * sampling. `vmask_rect` is unused by the HAS_TEX branch otherwise, and
+ * `vmask_feather.yz` carries the content dims the remap divides by.
+ */
+export const VMASK_FLAG_HAS_WINDOW = 64;
 /** Shape id occupies bits 4-5 (analytic only): 0 = rect, 1 = ellipse. */
 export const VMASK_SHAPE_SHIFT = 4;
 export const VMASK_SHAPE_RECT = 0;

@@ -53,7 +53,7 @@ import { densityCompositeDims } from './support/densityComposite';
 import { effectiveScale } from './support/layerGeometry';
 import { prepareFilteredSources } from './build/prepareFilteredSources';
 import { prepareVectorSources } from './build/prepareVectorSources';
-import { prepareVmaskSources } from './build/prepareVmaskSources';
+import { prepareVmaskSources, type VmaskBake } from './build/prepareVmaskSources';
 import { prepareBmaskCombineSources } from './build/prepareBmaskCombine';
 import type { BuildContext, PreparedSource } from './build/types';
 
@@ -314,7 +314,7 @@ export class RenderGraph {
     // layer id. Recorded here (before any composite render pass opens) because the
     // fill is a compute pass. Analytic vmasks are NOT in this map — they solve
     // per-fragment. The map threads into every drawLayer as `vmaskTexture`.
-    const vmaskSources = new Map<string, LayerTexture>();
+    const vmaskSources = new Map<string, VmaskBake>();
     prepareVmaskSources(commandEncoder, compiled, buildCtx, vmaskSources, vectorScale);
 
     // Combine every layer's enabled bmask records into ONE owned coverage
@@ -382,13 +382,15 @@ export class RenderGraph {
             layer,
             texture,
             maskTexture: maskTex,
-            vmaskTexture: vmaskSources.get(layer.id),
+            vmaskTexture: vmaskSources.get(layer.id)?.texture,
+          vmaskWindow: vmaskSources.get(layer.id)?.window,
             isBottomOpaque: false,
             suppressAdjust: src?.suppressAdjust,
             vectorTransient: src?.vectorTransient,
             sourceIsLinear: src?.sourceIsLinear,
             sourceIsWorkingGamut: src?.sourceIsWorkingGamut,
             sourceIntentApplied: src?.sourceIntentApplied,
+            contentWindow: src?.contentWindow,
           });
         }
       }
@@ -433,7 +435,7 @@ export class RenderGraph {
     allocatedWidth: number,
     allocatedHeight: number,
     filtered: Map<string, PreparedSource>,
-    vmaskSources: Map<string, LayerTexture>,
+    vmaskSources: Map<string, VmaskBake>,
     bmaskSources: Map<string, LayerTexture>,
     filterScratch: GPUTexture[],
     exportViewport?: ExportViewport,
@@ -536,13 +538,15 @@ export class RenderGraph {
             layer,
             texture,
             maskTexture: maskTex,
-            vmaskTexture: vmaskSources.get(layer.id),
+            vmaskTexture: vmaskSources.get(layer.id)?.texture,
+            vmaskWindow: vmaskSources.get(layer.id)?.window,
             isBottomOpaque: false,
             suppressAdjust: src?.suppressAdjust,
             vectorTransient: src?.vectorTransient,
             sourceIsLinear: src?.sourceIsLinear,
             sourceIsWorkingGamut: src?.sourceIsWorkingGamut,
             sourceIntentApplied: src?.sourceIntentApplied,
+            contentWindow: src?.contentWindow,
           });
         }
 
@@ -596,12 +600,14 @@ export class RenderGraph {
           fgTexture,
           bgTexture: currentAccumulator,
           maskTexture: maskTex,
-          vmaskTexture: vmaskSources.get(layer.id),
+          vmaskTexture: vmaskSources.get(layer.id)?.texture,
+            vmaskWindow: vmaskSources.get(layer.id)?.window,
           suppressAdjust: src?.suppressAdjust,
           vectorTransient: src?.vectorTransient,
           sourceIsLinear: src?.sourceIsLinear,
           sourceIsWorkingGamut: src?.sourceIsWorkingGamut,
           sourceIntentApplied: src?.sourceIntentApplied,
+          contentWindow: src?.contentWindow,
         });
         blendPass.end();
 

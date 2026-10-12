@@ -43,6 +43,13 @@ export type PreparedSource = {
   sourceIsLinear: boolean;
   sourceIsWorkingGamut: boolean;
   sourceIntentApplied: boolean;
+  /**
+   * WINDOWED-CONVOLUTION content rect (M1): the texture holds ONLY this
+   * sub-rect of the source asset (source-texel space), so the compositor's
+   * UV map must re-express `layer.crop` relative to it. Undefined → the
+   * texture is content-aligned with the full asset (historical behaviour).
+   */
+  contentWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
 };
 
 /**

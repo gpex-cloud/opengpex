@@ -39,7 +39,7 @@ import { snapToPowerOfTwo } from '@opengpex/editor/core/engine/gpu/resources/Tex
 import { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTexture';
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
 import { AdjustPrePass } from '../composite/AdjustPrePass';
-import { hasEffectiveFilters } from '../composite/FilterPass';
+import { hasEffectiveFilters, resolveFilterWindow } from '../composite/FilterPass';
 import { isSourceLinear } from '../support/sourceDomain';
 import { runFilterChain } from './runFilterChain';
 import type { BuildContext, PreparedSource } from './types';
@@ -150,6 +150,9 @@ function resolveLayerSourceTexture(
   }
 
   // ② Convolve + describe the output domain (shared with the vector path).
+  // M1: window the convolution to crop ∪ kernel reach so a cropped fragment
+  // never pays for its shared source asset's full extent.
+  const window = resolveFilterWindow(layer, asset.width, asset.height) ?? undefined;
   return runFilterChain(
     encoder,
     ctx,
@@ -158,6 +161,8 @@ function resolveLayerSourceTexture(
     filterInputIsLinear,
     filterInputIsWorkingGamut,
     filterInputIntentApplied,
+    undefined,
+    window,
   );
 }
 

@@ -43,9 +43,10 @@
  *   SAME single path — there is no fast/slow track and no worker roundtrip.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { AdjustmentState } from "@opengpex/editor/core/types/models";
+import { readEdgeFeather } from "@opengpex/editor/core/layer/services/fragment";
 import FancySvgSlider from "@opengpex/editor/widgets/FancySvgSlider";
 import type { AdjustmentDrawerCommandsMap } from "../commands.d";
 import { DEFAULT_ADJUSTMENTS_STATE } from "../protocols";
@@ -79,6 +80,12 @@ interface SliderSpec {
    * "measurement-only" sliders like Blur don't fake a false gradient.
    */
   trackGradient?: string;
+  /**
+   * Optional explanatory tooltip rendered on the row label — used by Edge
+   * Feather to set expectations on the bitmap-mask limitation (§3.4-5 of the
+   * post-bake edge feather proposal).
+   */
+  hint?: string;
 }
 
 const SLIDERS: readonly SliderSpec[] = [
@@ -133,6 +140,15 @@ const SLIDERS: readonly SliderSpec[] = [
   // subtle stage color. The rendered kernel radius is communicated by the
   // numeric value label alone.
   { key: "blur", label: "Blur", min: 0, max: 20, step: 0.1, unit: "px" },
+  // Edge Feather — 落层后边缘羽化. ROUTED slider: the write goes to whichever
+  // carrier holds this layer's edge (logical fragment → visibleShape re-pad;
+  // vector-mask layer → mask `feather`; otherwise → the `alphaFeather` filter
+  // via adjustments.edgeFeather). Display value likewise reads the routed
+  // carrier, not adjustments (see the value override in BasicPanel).
+  {
+    key: "edgeFeather", label: "Edge Feather", min: 0, max: 20, step: 0.1, unit: "px",
+    hint: "Softens layer edges. Feathering a bitmap-mask edge requires rasterizing the mask first.",
+  },
 ] as const;
 
 
@@ -157,7 +173,7 @@ function normalizeHueDeg(v: number): number {
  * inlines it either way.
  */
 function identityFor(key: keyof AdjustmentState): number {
-  return key === "hueRotate" || key === "blur" ? 0 : 100;
+  return key === "hueRotate" || key === "blur" || key === "edgeFeather" ? 0 : 100;
 }
 
 /**
@@ -170,6 +186,16 @@ function accentForValue(key: keyof AdjustmentState, value: number): string {
   if (Math.abs(value - identity) < 0.1) return "#666666";
   return value > identity ? "#10b981" : "#f59e0b"; // emerald-500 : amber-500
 }
+
+/**
+ * Neutral quantity sliders (Blur / Edge Feather — the ones without a semantic
+ * track gradient) are NOT semantic accents: a dragged value is not "better" or
+ * "worse", so emerald/amber would read as judgment. Their thumb + fill use a
+ * single theme-independent gray: zinc-400 reads as LIGHT gray on the dark
+ * stage track (#1e1e1e) and as mid gray on the light track (#f1f1f1) — one
+ * constant covers both themes (Tailwind's canonical disabled/neutral gray).
+ */
+const NEUTRAL_SLIDER_COLOR = "#a1a1aa";
 
 // ─── Slider row ───────────────────────────────────────────────────────────────
 
@@ -214,19 +240,22 @@ function AdjustmentSliderRow({
   onDragEnd: () => void;
   onFieldCommit: (v: number) => void;
 }) {
-  // Track fallback: neutral stage color when this slider has no semantic
-  // gradient (e.g. Blur). Kept opaque so the row height stays visually
-  // aligned with the gradient-backed rows.
-  const trackBg =
-    spec.trackGradient ??
-    "linear-gradient(90deg, var(--bg-stage), var(--bg-stage))";
+  // No semantic gradient (Blur / Edge Feather) → pass `undefined` so
+  // FancySvgSlider takes its plain-track branch: a neutral track PLUS the
+  // accent fill bar growing left→thumb on drag (the gradient branch suppresses
+  // the fill bar). The old flat `--bg-stage` gradient fallback made these two
+  // tracks read as solid black with zero drag feedback. Row height is set by
+  // the shared `heightClass`, not the track, so alignment is unaffected.
 
   // Derive precision from step: step=1 → 0, step=0.1 → 1, step=0.01 → 2
   const precision = spec.step < 1 ? Math.ceil(-Math.log10(spec.step)) : 0;
 
   return (
     <div className="space-y-0.5 group">
-      <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight">
+      <span
+        className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight"
+        title={spec.hint}
+      >
         {spec.label}
       </span>
       <FancySvgSlider
@@ -238,8 +267,10 @@ function AdjustmentSliderRow({
         slim
         withInput
         ariaLabel={spec.label}
-        trackGradient={trackBg}
-        accentColor={accentForValue(spec.key, value)}
+        trackGradient={spec.trackGradient}
+        accentColor={
+          spec.trackGradient ? accentForValue(spec.key, value) : NEUTRAL_SLIDER_COLOR
+        }
         onDragStart={onDragStart}
         onChange={onDragChange}
         onDragEnd={onDragEnd}
@@ -271,10 +302,55 @@ function readAdjustments(
 
 
 export function BasicPanel() {
-  const { beginAdjustmentsEditCmd, updateAdjustmentsCmd } =
-    usePluginCommands<AdjustmentDrawerCommandsMap>();
+  const {
+    beginAdjustmentsEditCmd,
+    updateAdjustmentsCmd,
+    fastUpdateAdjustmentsCmd,
+    commitAdjustmentsCmd,
+    fastUpdateEdgeFeatherCmd,
+    commitEdgeFeatherCmd,
+    setEdgeFeatherCmd,
+  } = usePluginCommands<AdjustmentDrawerCommandsMap>();
   const { activeLayer } = useAdjustmentDrawer();
   const gesture = useFilterGesture(beginAdjustmentsEditCmd);
+
+  // Cascade (碎片联动羽化源洞): opt-in checkbox, shown only on cut fragments
+  // that still carry the `assocMaskId` pointer to their source hole. When set,
+  // every routed Edge Feather write ALSO updates the hole mask on the source
+  // layer inside the same undo step (the command owns that write).
+  const [cascade, setCascade] = useState(false);
+  const showCascade = !!activeLayer?.metadata?.assocMaskId;
+
+  // Cascade live preview (M4 双写): BOTH sides of the complementary pair — the
+  // fragment's routed carrier and the source hole's mask feather — ride the
+  // volatile fast track per move (`fastUpdateEdgeFeatherCmd`) and land as ONE
+  // batched Redux write at gesture end (`commitEdgeFeatherCmd`). The two drafts
+  // merge in the SAME ticker tick, so the hole + fragment edges can never drift
+  // apart mid-drag (the 120ms idle-flush seam this replaced was exactly that
+  // drift, made visible as a gap between the live fragment edge and the
+  // not-yet-feathered hole edge). The old throttle existed because a hole write
+  // re-baked the source layer's mask at FULL-CANVAS cost; the vmask bake is
+  // windowed now (hole-sized — see prepareVmaskSources `resolveVmaskWindow`),
+  // so per-move hole updates are the same order as the fragment's.
+
+  // Checkbox transition = an EDIT of its own: the hole's feather state follows
+  // the checkbox unconditionally (checked → match the current radius, unchecked
+  // → clear to 0 immediately), written hole-only (the fragment keeps its value)
+  // inside a mini gesture so the transition is one undo step.
+  const handleCascadeChange = useCallback(
+    (checked: boolean) => {
+      setCascade(checked);
+      if (!activeLayer) return;
+      gesture.begin();
+      setEdgeFeatherCmd?.execute({
+        radius: readEdgeFeather(activeLayer),
+        holeOnly: true,
+        hole: checked ? "match" : "clear",
+      });
+      gesture.end();
+    },
+    [activeLayer, gesture, setEdgeFeatherCmd],
+  );
 
   const adjustments = useMemo(
     () => readAdjustments(activeLayer?.adjustments),
@@ -286,15 +362,59 @@ export function BasicPanel() {
   // mousedown for the same interaction — we want ONE undo checkpoint).
   const dragRef = useRef<keyof AdjustmentState | null>(null);
 
+  // M4 fast-track drag display: while a plain adjustments slider is dragged its
+  // value rides the volatile buffer (no Redux write → no React re-render from
+  // the store), so the thumb is fed from THIS local state until the gesture's
+  // single commit lands the final value in Redux. Local state re-renders only
+  // this panel — the expensive subscribers (canvas merge, engine) never see it.
+  const [fastDrag, setFastDrag] = useState<{ key: keyof AdjustmentState; value: number } | null>(null);
+
   const commitPatch = useCallback(
     (key: keyof AdjustmentState, value: number) => {
+      // Edge Feather is ROUTED, not a plain adjustments patch: the command
+      // dispatches to the layer's actual edge carrier (visibleShape pad /
+      // vectorMask feather / adjustments.edgeFeather). The hole side follows
+      // the checkbox as its single source of truth: checked → 'match' on the
+      // throttled flush (per-move otherwise 'none'); unchecked → 'clear'
+      // enforced on every move (the command's `feather !== 0` guard makes the
+      // follow-up moves free).
+      if (key === "edgeFeather") {
+        if (cascade) {
+          // Checked drag (M4 双写): fragment + hole parked on the fast track in
+          // one dispatch — lockstep merge, no Redux/React storm. `fastDrag`
+          // keeps the thumb honest (readEdgeFeather reads the store, which only
+          // updates at commit).
+          if (fastUpdateEdgeFeatherCmd && commitEdgeFeatherCmd) {
+            fastUpdateEdgeFeatherCmd.execute({ radius: value });
+            setFastDrag({ key, value });
+            return;
+          }
+          setEdgeFeatherCmd?.execute({ radius: value, hole: "none" });
+        } else {
+          // Unchecked drag: the hole stays clear (the command's guard makes
+          // this free once it already is).
+          setEdgeFeatherCmd?.execute({ radius: value, hole: "clear" });
+        }
+        return;
+      }
+      // M4 fast track: park the merged value on the volatile buffer — the canvas
+      // renders it live via mergeFrameSnapshot, with NO Redux dispatch / React
+      // re-render per pointermove. One `commitAdjustments` write lands at drag
+      // end (see handleDragEnd); `fastDrag` keeps the thumb honest meanwhile.
+      // (Edge Feather above stays on the Redux path: its routed carrier writes
+      // are structurally richer than a plain adjustments merge.)
+      if (fastUpdateAdjustmentsCmd && commitAdjustmentsCmd) {
+        fastUpdateAdjustmentsCmd.execute({ patch: { [key]: value } });
+        setFastDrag({ key, value });
+        return;
+      }
       if (!updateAdjustmentsCmd) return;
       // Minimal `{ [key]: value }` patch — `updateAdjustments` shallow-merges
       // onto the current record (or DEFAULT_ADJUSTMENTS_STATE if the field is
-      // undefined), so we never drop the other four sliders' values.
+      // undefined), so we never drop the other sliders' values.
       updateAdjustmentsCmd.execute({ patch: { [key]: value } });
     },
-    [updateAdjustmentsCmd],
+    [updateAdjustmentsCmd, fastUpdateAdjustmentsCmd, commitAdjustmentsCmd, fastUpdateEdgeFeatherCmd, commitEdgeFeatherCmd, setEdgeFeatherCmd, cascade],
   );
 
   const handleDragStart = useCallback(
@@ -316,9 +436,35 @@ export function BasicPanel() {
 
   const handleDragEnd = useCallback(() => {
     if (!dragRef.current) return;
+    const draggedKey = dragRef.current;
     dragRef.current = null;
+    // M4: land the fast-tracked draft(s) as ONE Redux write (the undo
+    // checkpoint from gesture.begin owns the history step), then hand display
+    // back to the store — the committed value equals the last fast-tracked
+    // one, so there is no flicker at the handoff. Edge Feather flushes BOTH
+    // drafts (fragment + source hole) via the batched commit.
+    if (draggedKey === "edgeFeather") {
+      // Motion was quantized to whole px (M5) — land the EXACT slider value in
+      // one final fast write (no-op when it equals the parked quantized value)
+      // so the committed state matches the slider, then flush both drafts.
+      if (fastDrag && fastUpdateEdgeFeatherCmd) {
+        fastUpdateEdgeFeatherCmd.execute({ radius: fastDrag.value });
+      }
+      commitEdgeFeatherCmd?.execute();
+    } else {
+      // Adjustments sliders: blur motion is quantized to 0.5σ (M5) — land the
+      // exact final value (`exact` skips quantization) before the commit.
+      if (fastDrag && fastUpdateAdjustmentsCmd) {
+        fastUpdateAdjustmentsCmd.execute({
+          patch: { [draggedKey]: fastDrag.value },
+          exact: true,
+        });
+      }
+      commitAdjustmentsCmd?.execute();
+    }
+    setFastDrag(null);
     gesture.end();
-  }, [gesture]);
+  }, [gesture, commitAdjustmentsCmd, commitEdgeFeatherCmd, fastUpdateEdgeFeatherCmd, fastUpdateAdjustmentsCmd, fastDrag]);
 
   // Numeric field commit: wraps in a mini gesture (begin → patch → end) so
   // each typed value is exactly one undo step, matching mixer.tsx pattern.
@@ -326,18 +472,34 @@ export function BasicPanel() {
     (key: keyof AdjustmentState) => (value: number) => {
       if (!activeLayer) return;
       gesture.begin();
-      commitPatch(key, value);
+      if (key === "edgeFeather") {
+        // Single commit, no throttle — land the value directly; the hole
+        // follows the checkbox state.
+        setEdgeFeatherCmd?.execute({ radius: value, hole: cascade ? "match" : "clear" });
+      } else {
+        // Typed-value commit is a ONE-SHOT write — it must land in Redux
+        // directly (the fast track has no dragEnd to commit it).
+        if (!updateAdjustmentsCmd) return;
+        updateAdjustmentsCmd.execute({ patch: { [key]: value } });
+      }
       gesture.end();
     },
-    [activeLayer, gesture, commitPatch],
+    [activeLayer, gesture, updateAdjustmentsCmd, setEdgeFeatherCmd, cascade],
   );
 
   // Belt-and-suspenders: if the panel unmounts mid-drag (e.g. tab switch to
-  // Curves), close the gesture cleanly. Same guardrail the sibling panels use.
+  // Curves), close the gesture cleanly and land any pending cascade value.
+  // Same guardrail the sibling panels use.
   useEffect(() => {
     return () => {
-      if (dragRef.current) {
+      const draggedKey = dragRef.current;
+      if (draggedKey) {
         dragRef.current = null;
+        // A fast-tracked drag interrupted by unmount must still land its
+        // draft(s) — adjustments on their own, Edge Feather with its hole.
+        if (draggedKey === "edgeFeather") commitEdgeFeatherCmd?.execute();
+        else commitAdjustmentsCmd?.execute();
+        setFastDrag(null);
         gesture.end();
       }
     };
@@ -348,15 +510,38 @@ export function BasicPanel() {
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
       <div className="space-y-2">
         {SLIDERS.map((spec) => (
-          <AdjustmentSliderRow
-            key={spec.key}
-            spec={spec}
-            value={adjustments[spec.key]}
-            onDragStart={handleDragStart(spec.key)}
-            onDragChange={handleDragChange(spec.key)}
-            onDragEnd={handleDragEnd}
-            onFieldCommit={handleFieldCommit(spec.key)}
-          />
+          <React.Fragment key={spec.key}>
+            <AdjustmentSliderRow
+              spec={spec}
+              value={
+                // Fast-tracked drag value FIRST — readEdgeFeather/adjustments
+                // read the STORE, which stays frozen until the gesture's single
+                // commit (the thumb would otherwise not move at all).
+                fastDrag?.key === spec.key
+                  ? fastDrag.value
+                  : spec.key === "edgeFeather" && activeLayer
+                    ? readEdgeFeather(activeLayer)
+                    : adjustments[spec.key] ?? identityFor(spec.key)
+              }
+              onDragStart={handleDragStart(spec.key)}
+              onDragChange={handleDragChange(spec.key)}
+              onDragEnd={handleDragEnd}
+              onFieldCommit={handleFieldCommit(spec.key)}
+            />
+            {spec.key === "edgeFeather" && showCascade && (
+              <label className="flex items-center gap-1.5 px-0.5 -mt-1 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={cascade}
+                  onChange={(e) => handleCascadeChange(e.target.checked)}
+                  className="size-3 accent-[var(--accent)]"
+                />
+                <span className="text-[9px] text-[var(--text-muted)]">
+                  Feather source hole too (seamless rejoin)
+                </span>
+              </label>
+            )}
+          </React.Fragment>
         ))}
       </div>
 

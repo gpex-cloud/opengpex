@@ -74,6 +74,13 @@ export interface AdjustmentState {
   saturation: number; // 0-200, default 100
   hueRotate: number;  // 0-360, default 0
   blur: number;       // 0-20, default 0
+  /**
+   * Edge feather σ in px (0-20, default 0) — softens the bitmap ALPHA edge via
+   * the non-destructive `alphaFeather` filter without blurring interior detail.
+   * Optional (absent = 0) so documents written before the field existed
+   * deserialize unchanged.
+   */
+  edgeFeather?: number;
 }
 
 // ─────────────────────────────────────────────────────────────

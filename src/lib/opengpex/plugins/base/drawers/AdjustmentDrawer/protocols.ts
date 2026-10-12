@@ -225,6 +225,47 @@ export const CMD_BEGIN_ADJUSTMENTS_EDIT = 'cmd.begin_adjustments_edit';
 /** Patch `layer.adjustments`. Payload: `{ patch: AdjustmentsPatch }`. Non-undoable. */
 export const CMD_UPDATE_ADJUSTMENTS = 'cmd.update_adjustments';
 
+/**
+ * Fast-track adjustments write (M4): park the merged `adjustments` on the
+ * volatile buffer so the canvas renders live WITHOUT a Redux dispatch / React
+ * re-render per pointermove. Payload: `{ patch: AdjustmentsPatch }`.
+ * Non-undoable — `CMD_COMMIT_ADJUSTMENTS` lands the final value.
+ */
+export const CMD_FAST_UPDATE_ADJUSTMENTS = 'cmd.fast_update_adjustments';
+
+/**
+ * Land the fast-tracked adjustments draft into Redux (one UPDATE_LAYER with the
+ * final merged value). Called at gesture end. Non-undoable — the
+ * `CMD_BEGIN_ADJUSTMENTS_EDIT` checkpoint owns the undo step.
+ */
+export const CMD_COMMIT_ADJUSTMENTS = 'cmd.commit_adjustments';
+
+/**
+ * Fast-track Edge Feather drag write (M4 双写): parks BOTH sides of the
+ * complementary pair on the volatile buffer in ONE dispatch — the fragment's
+ * routed carrier patch AND the source hole's `vectorMasks` feather — so both
+ * edges update in the SAME mergeFrameSnapshot tick (the motion seam between
+ * fragment preview and lagging hole becomes structurally impossible).
+ * Payload: `{ radius: number }`. Non-undoable — `CMD_COMMIT_EDGE_FEATHER` lands.
+ */
+export const CMD_FAST_UPDATE_EDGE_FEATHER = 'cmd.fast_update_edge_feather';
+
+/**
+ * Land the fast-tracked Edge Feather drafts (fragment + source hole) into
+ * Redux via one batched flush. Called at gesture end. Non-undoable.
+ */
+export const CMD_COMMIT_EDGE_FEATHER = 'cmd.commit_edge_feather';
+
+/**
+ * Route an Edge Feather edit to the layer's actual edge carrier. Payload:
+ * `{ radius: number; cascade?: boolean }`. Non-undoable — the slider gesture's
+ * `CMD_BEGIN_ADJUSTMENTS_EDIT` checkpoint is what makes the whole drag one undo
+ * step. Routing (see `resolveEdgeFeatherRoute`): logical fragment → visibleShape
+ * re-pad; vector-mask layer → mask `feather` fields; otherwise →
+ * `adjustments.edgeFeather` (the `alphaFeather` filter).
+ */
+export const CMD_SET_EDGE_FEATHER = 'cmd.set_edge_feather';
+
 // ─── Color Balance commands (Plan B) ───────────────────────────────────────────
 //
 // Same shape as Curves / Levels / Channel-Mixer: `beginColorBalanceEdit` is

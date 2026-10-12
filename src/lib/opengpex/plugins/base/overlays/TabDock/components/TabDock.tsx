@@ -403,7 +403,7 @@ export function TabDockComponent() {
             opacity: { duration: 0.3 },
             scale: { duration: 0.3 },
           }}
-          className={`z-[1000] backdrop-blur-3xl border border-[var(--border-subtle)] rounded-[20px] shadow-[0_20px_50px_rgba(0,0,0,0.3)] flex items-center select-none pointer-events-auto bg-[var(--bg-panel)]/80 
+          className={`z-[1000] backdrop-blur-3xl border border-[var(--border-subtle)] rounded-full shadow-[0_20px_50px_rgba(0,0,0,0.3)] flex items-center select-none pointer-events-auto bg-[var(--bg-panel)]/80 
  ${isRight ? "flex-row-reverse" : "flex-row"}
 `}
           style={{ position: "absolute" }}

@@ -156,6 +156,21 @@ export function useLayerOverlaySync(
 // ─── useLayerMoveDeltaSync ─────────────────────────────────────────────────────
 
 /**
+ * A POSE-ONLY draft: EVERY key is a pose field. Anything else (visibleShape /
+ * bounding / vectorMasks / adjustments …) marks a non-move edit that merely
+ * carries a pose side effect — e.g. the fragment feather repad re-derives cx/cy
+ * as the pad rect moves — and must never show the move/rotate delta. Whitelist
+ * (not blacklist) so future geometry-carrying drafts are guarded for free.
+ */
+function isPoseOnlyDraft(d: Record<string, unknown> | undefined): boolean {
+  if (!d) return false;
+  for (const k of Object.keys(d)) {
+    if (k !== 'cx' && k !== 'cy' && k !== 'rotation') return false;
+  }
+  return true;
+}
+
+/**
  * Fast-track hook for the layer interaction delta label.
  *
  * Shows at the active layer's bottom-left corner during move or rotation:
@@ -188,6 +203,10 @@ export function useLayerMoveDeltaSync(isActive: boolean) {
       const compositeKey = `${f.id}:${activeLayerId}`;
       const buffered = v.buffered.layers[compositeKey];
       if (!buffered || (buffered.cx === undefined && buffered.rotation === undefined)) return null;
+      // A cx/cy draft that ALSO carries non-pose fields is a GEOMETRY edit
+      // (fragment feather repad — buildFeatherRepadPatch re-derives the pose as
+      // a side effect), not a user move. Don't show the move delta for it.
+      if (!isPoseOnlyDraft(buffered)) return null;
 
       // f = merged frame (live position during drag)
       const liveLayer = f.layers.byId[activeLayerId];
@@ -217,8 +236,10 @@ export function useLayerMoveDeltaSync(isActive: boolean) {
     // Buffer uses composite key: "frameId:layerId"
     const compositeKey = `${f.id}:${activeLayerId}`;
     const buffered = v.buffered.layers[compositeKey];
-    const isMove = buffered && buffered.cx !== undefined;
-    const isRotate = buffered && buffered.rotation !== undefined;
+    // Same pose-only guard as the anchor sync above: a repad draft shifts cx/cy
+    // as a side effect — that is not a move.
+    const isMove = !!(buffered && buffered.cx !== undefined) && isPoseOnlyDraft(buffered);
+    const isRotate = !!(buffered && buffered.rotation !== undefined) && isPoseOnlyDraft(buffered);
 
     if (!isMove && !isRotate) {
       el.style.display = 'none';

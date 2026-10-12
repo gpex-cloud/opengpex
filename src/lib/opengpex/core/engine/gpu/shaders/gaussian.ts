@@ -120,9 +120,10 @@ export const GAUSS_WEIGHT_VEC4_COUNT = 16;
 /**
  * `GaussianUniforms` size in bytes: `array<vec4<f32>, 16>` weights (256) +
  * `dims` vec2<u32> (8) + `radius` u32 (4) + `axis` u32 (4) + `flags` u32 (4) +
- * 12 B tail padding to a 16-B multiple = 288.
+ * pad 4 + `src_dims` vec2<u32> (8) + `src_origin` vec2<u32> (8) + 8 B tail
+ * padding to a 16-B multiple = 304.
  */
-export const GAUSS_UNIFORM_BUFFER_SIZE = 288;
+export const GAUSS_UNIFORM_BUFFER_SIZE = 304;
 
 /** Number of 4-byte slots in `GaussianUniforms`. */
 export const GAUSS_UNIFORM_FLOATS = GAUSS_UNIFORM_BUFFER_SIZE / 4;
@@ -176,6 +177,14 @@ export function packGaussianUniform(
   height: number,
   axis: number,
   flags: number,
+  /**
+   * WINDOWED-CONVOLUTION coordinates (M1 crop-window filtering). `dims` above
+   * describes the OUTPUT window; the SOURCE texture may be larger (the full
+   * asset / AdjustPre bake) with the window living at `origin` inside it.
+   * Defaults (source == window at (0,0)) reproduce the un-windowed behaviour
+   * bit-for-bit. All values in source texels.
+   */
+  src?: { readonly width: number; readonly height: number; readonly originX: number; readonly originY: number },
 ): Float32Array {
   const out = new Float32Array(GAUSS_UNIFORM_FLOATS);
   const uints = new Uint32Array(out.buffer);
@@ -191,6 +200,12 @@ export function packGaussianUniform(
   uints[66] = radius >>> 0;
   uints[67] = axis >>> 0;
   uints[68] = flags >>> 0;
+  // [70..71] src_dims, [72..73] src_origin (vec2<u32> members are 8-B aligned in
+  // the WGSL struct, so they land on even float slots after a 4-B pad post-flags).
+  uints[70] = Math.max(1, src?.width ?? width) >>> 0;
+  uints[71] = Math.max(1, src?.height ?? height) >>> 0;
+  uints[72] = Math.max(0, src?.originX ?? 0) >>> 0;
+  uints[73] = Math.max(0, src?.originY ?? 0) >>> 0;
   return out;
 }
 
@@ -215,10 +230,18 @@ struct GaussianUniforms {
   // Half-kernel, vec4-packed: entry i is weights[i/4][i%4]. weights[0] is the
   // centre tap; entry i applies to BOTH taps at ±i (see gaussianWeights()).
   weights : array<vec4<f32>, ${GAUSS_WEIGHT_VEC4_COUNT}>,
-  dims    : vec2<u32>,   // source/destination size in texels
+  dims    : vec2<u32>,   // output window size in texels (== src size when un-windowed)
   radius  : u32,         // kernel half-width, 0 = identity
   axis    : u32,         // 0 = horizontal, 1 = vertical
   flags   : u32,         // bit0 premultiply-on-load, bit1 unpremultiply-on-store, bit2 src-is-linear
+  // WINDOWED CONVOLUTION (M1): the source may be the FULL asset with the
+  // output window at src_origin inside it. Halo taps read real neighbour
+  // texels beyond the window (clamped at the SOURCE bounds — the same
+  // clamp-to-edge behaviour the un-windowed pass had at the asset edge), so
+  // every output texel inside the window is bit-identical to a full-asset
+  // convolution of the same texels.
+  src_dims   : vec2<u32>,
+  src_origin : vec2<u32>,
 };
 
 @group(0) @binding(0) var<uniform> gauss : GaussianUniforms;
@@ -239,13 +262,18 @@ fn gauss_weight(i : u32) -> f32 {
 // convolution runs in linear premultiplied space and transparent texels
 // cannot bleed dark RGB.
 //
+// coord is WINDOW-local; the source offset maps it into the source texture,
+// where it clamps against the FULL source dims (not the window) so halo taps
+// at the window edge still read the real neighbouring texels.
+//
 // ⚠️ ORDER: decode BEFORE premultiply. Premultiplying gamma-encoded values is
 // mathematically wrong and is the classic edge-darkening bug. Alpha itself is a
 // coverage ratio and is never transfer-encoded.
 fn gauss_load(coord : vec2<i32>) -> vec4<f32> {
-  let max_x = i32(gauss.dims.x) - 1;
-  let max_y = i32(gauss.dims.y) - 1;
-  let c = vec2<i32>(clamp(coord.x, 0, max_x), clamp(coord.y, 0, max_y));
+  let max_x = i32(gauss.src_dims.x) - 1;
+  let max_y = i32(gauss.src_dims.y) - 1;
+  let sc = coord + vec2<i32>(gauss.src_origin);
+  let c = vec2<i32>(clamp(sc.x, 0, max_x), clamp(sc.y, 0, max_y));
   var s = textureLoad(src_tex, c, 0);
   if ((gauss.flags & ${GAUSS_FLAG_SRC_LINEAR}u) == 0u) {
     s = vec4<f32>(srgb_to_linear(s.rgb), s.a);
@@ -323,3 +351,91 @@ fn cs_gaussian(
  * structural guards (`wgsl-entrypoint`, `bindgroup-visibility`) can parse it.
  */
 export const GAUSSIAN_WGSL = buildGaussianWgsl('rgba16float');
+
+// ────────────────────────────────────────────────────────────
+// cs_feather_combine — pointwise alphaFeather combine pass
+// ────────────────────────────────────────────────────────────
+
+/** Workgroup edge for the 2D-tiled combine dispatch (`ceil(dim/8)` per axis). */
+export const FEATHER_COMBINE_WORKGROUP = 8;
+
+/**
+ * WGSL for the alphaFeather COMBINE pass — the third and final dispatch of an
+ * `{ kind: 'alphaFeather', radius }` filter.
+ *
+ * WHY A COMBINE EXISTS (and why plain `gaussianBlur` is not enough):
+ * the blur's premultiplied pipeline already produces the normalized-convolution
+ * result — `a' = blurHV(a)`, `bleed = blurHV(c·a) / blurHV(a)` (see the
+ * un-premultiply on store) — but its colour is the CONVOLVED colour, so textured
+ * interior detail is blurred across the whole opaque region (`c' = blur(c)` where
+ * the window is fully opaque). Edge feathering must NOT do that.
+ *
+ * The combine restores the interior by blending the bleed back toward the
+ * ORIGINAL texel using the original straight alpha as the mix factor:
+ *
+ *   c'(x) = mix(bleed.rgb, orig.rgb, orig.a)      // a=1 → orig EXACT (interior
+ *            // bit-preserved; a=0 → bleed (garbage-RGB texels get the extended
+ *            // colour, no halo); 0<a<1 → smooth blend across existing soft edges)
+ *   a'(x) = bleed.a  (= blurHV(a) — the feathered alpha)
+ *
+ * The blur's own store guard (`acc.a > 0.0001`, else rgb=0) guarantees
+ * `bleed.rgb` is already zeroed wherever the divisor would be denormal, so this
+ * pass needs NO division and cannot produce NaN.
+ *
+ * Bindings (group 0) — same uniform struct as `cs_gaussian` (only `dims` and
+ * `flags` are read; the kernel weights are ignored):
+ *   0 — `GaussianUniforms` (dims + flags; `flags` reuses `GAUSS_FLAG_SRC_LINEAR`
+ *       to say the ORIG binding is already linear and must not be decoded)
+ *   1 — `bleed_tex` : `texture_2d<f32>`  (blur output — straight LINEAR)
+ *   2 — `orig_tex`  : `texture_2d<f32>`  (the filter INPUT — straight, possibly
+ *                                          sRGB-encoded)
+ *   3 — `dst_tex`   : `texture_storage_2d<format, write>`
+ *
+ * DISPATCH CONTRACT: a plain 2D grid, `ceil(w/8) × ceil(h/8)` workgroups; every
+ * invocation guards against `dims`.
+ */
+export function buildFeatherCombineWgsl(format: 'rgba16float' | 'rgba32float'): string {
+  return COLORSPACE_WGSL + /* wgsl */ `
+struct GaussianUniforms {
+  weights : array<vec4<f32>, ${GAUSS_WEIGHT_VEC4_COUNT}>,  // unused here — layout parity
+  dims    : vec2<u32>,   // output window size
+  radius  : u32,                                           // unused here — layout parity
+  axis    : u32,                                           // unused here — layout parity
+  flags   : u32,                                           // bit2: orig is already linear
+  // Layout parity with cs_gaussian's windowed uniforms: orig may be the FULL
+  // asset while bleed/dst are the window, so orig is sampled at
+  // xy + src_origin.
+  src_dims   : vec2<u32>,                                 // unused here — layout parity
+  src_origin : vec2<u32>,
+};
+
+@group(0) @binding(0) var<uniform> gauss : GaussianUniforms;
+@group(0) @binding(1) var bleed_tex : texture_2d<f32>;
+@group(0) @binding(2) var orig_tex : texture_2d<f32>;
+@group(0) @binding(3) var dst_tex : texture_storage_2d<${format}, write>;
+
+@compute @workgroup_size(${FEATHER_COMBINE_WORKGROUP}, ${FEATHER_COMBINE_WORKGROUP}, 1)
+fn cs_feather_combine(@builtin(global_invocation_id) gid : vec3<u32>) {
+  if (gid.x >= gauss.dims.x || gid.y >= gauss.dims.y) {
+    return;
+  }
+  let xy = vec2<i32>(gid.xy);
+  let bleed = textureLoad(bleed_tex, xy, 0);
+  let orig = textureLoad(orig_tex, xy + vec2<i32>(gauss.src_origin), 0);
+  var o = orig.rgb;
+  if ((gauss.flags & ${GAUSS_FLAG_SRC_LINEAR}u) == 0u) {
+    o = srgb_to_linear(o);
+  }
+  // Interior (a=1) keeps the original colour exactly; formerly-transparent
+  // texels (a=0) take the normalized-convolution bleed; soft texels blend.
+  let c = mix(bleed.rgb, o, orig.a);
+  textureStore(dst_tex, xy, vec4<f32>(c, bleed.a));
+}
+`;
+}
+
+/**
+ * Default-format combine module source (stable string for the pure-Node
+ * structural guards, mirroring {@link GAUSSIAN_WGSL}).
+ */
+export const FEATHER_COMBINE_WGSL = buildFeatherCombineWgsl('rgba16float');

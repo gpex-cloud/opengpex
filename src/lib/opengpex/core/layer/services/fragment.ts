@@ -25,6 +25,7 @@ import {
 import { polygonToShape } from '@opengpex/editor/core/geometry/operators/polygon';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { isBoundingRing, point2dToLocalShape, shapeToPoint2D, ringsToPathData } from '@opengpex/editor/core/geometry/operators/point2d';
+import { computeFragmentCenter, getOrientationMatrix } from '@opengpex/editor/core/geometry/operators/transform';
 import { trimTransparentMargins } from '@opengpex/editor/core/engine/utils/pixel-utils';
 import { LayerFactory } from '../factory';
 
@@ -47,6 +48,158 @@ function shapeToAbsPathData(shape: LocalShape): string {
   const pd = (shape as { pathData?: string }).pathData;
   if (shape.type === 'path' && pd) return pd;
   return ringsToPathData(shapeToPoint2D(shape));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Edge Feather routing (落层后边缘羽化 — single UI slider, per-shape dispatch)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Which physical carrier holds the edge of this layer — i.e. where an
+ * "Edge Feather" edit must be routed. The three shapes a "cut-out fragment"
+ * can take carry their edge in DIFFERENT places (see `fragmentToNewLayer`):
+ *
+ *   - `'geometry'` — LOGICAL fragment: no (enabled) vectorMasks, and a
+ *     `visibleShape` that actually clips the original asset (a `path` with
+ *     `pathData`, a carried `featherPx`, or a rect strictly inside the content
+ *     box). The edge lives in the geometry; feathering is a pure data transform
+ *     (`featherPx` + symmetric pad, see `buildFeatherRepadPatch`) — lossless,
+ *     because the hard-cut-away pixels are still in the original asset.
+ *   - `'vmask'`    — DEGRADED fragment / any layer with explicit vectorMasks:
+ *     the edge is the mask boundary; feather = write the masks' `feather` field
+ *     (same semantics as selection-time feather, missing only the edit entry).
+ *   - `'bitmap'`   — everything else (baked fragments, AI-cutout imports, plain
+ *     photo layers): the edge is the asset's own bitmap alpha; feather = the
+ *     non-destructive `alphaFeather` filter via `adjustments.edgeFeather`.
+ *
+ * A full-bounds rect visibleShape clips nothing, so it counts as `'bitmap'` —
+ * that is exactly the shape `fragmentToNewLayerPhysical` gives a baked fragment.
+ */
+export function resolveEdgeFeatherRoute(layer: Layer): 'geometry' | 'vmask' | 'bitmap' {
+  if (layer.vectorMasks?.some((m) => m.enabled !== false)) return 'vmask';
+  const vs = layer.visibleShape;
+  if (!vs) return 'bitmap';
+  const typed = vs as { featherPx?: number; pathData?: string };
+  if (vs.type === 'path' && typed.pathData) return 'geometry';
+  if ((typed.featherPx ?? 0) > 0) return 'geometry';
+  if (vs.type === 'rect') {
+    const r = vs.rect;
+    const b = layer.bounding;
+    const fullBounds = r.x <= 0 && r.y <= 0 && r.w >= b.w && r.h >= b.h;
+    return fullBounds ? 'bitmap' : 'geometry';
+  }
+  return 'bitmap';
+}
+
+/**
+ * Read the CURRENT effective edge-feather radius off a layer, honouring the
+ * route — the UI slider displays this (the value does not live in
+ * `adjustments.edgeFeather` for the geometry/vmask routes).
+ */
+export function readEdgeFeather(layer: Layer): number {
+  switch (resolveEdgeFeatherRoute(layer)) {
+    case 'geometry':
+      return ((layer.visibleShape as { featherPx?: number } | undefined)?.featherPx ?? 0);
+    case 'vmask': {
+      const m = layer.vectorMasks?.find((k) => k.enabled !== false);
+      return m?.feather ?? 0;
+    }
+    default:
+      return layer.adjustments?.edgeFeather ?? 0;
+  }
+}
+
+/**
+ * buildFeatherRepadPatch — the route-`'geometry'` feather edit as a PURE data
+ * transform. Returns the full layer patch to apply (or `null` for a no-op).
+ *
+ * The fragment's visibleShape is the TIGHT cut geometry (`pathData`, in source-
+ * asset pixel coords) inset inside a symmetrically PADDED rect (`rect`, carrying
+ * `featherPx`); SceneAssembler renders it as an implicit feathered vmask
+ * (`buildVectorMaskDesc` crops by `rect` and normalises the path by the rect
+ * origin — the invariant that `bounding` == padded-rect size is load-bearing).
+ * Re-feathering therefore: insets the current rect by the OLD pad to recover the
+ * tight geometry, re-outsets by the NEW pad (`ceil(r + AA_MARGIN)`, the same
+ * rule `fragmentToNewLayer`'s feathered branch uses), and rewrites
+ * `visibleShape` + `bounding` as one consistent patch. `pathData` is carried
+ * verbatim (still the same tight geometry, still source-asset coords); a hard
+ * rect fragment (pad was 0, no pathData) is serialised to pathData here — the
+ * exact data shape a feathered cut of the same geometry would have produced.
+ *
+ * POSE: symmetric padding keeps the padded rect's local centre (= the tight
+ * region's centre) fixed, and the layer's (cx, cy) IS that centre's world
+ * anchor (`computeFragmentCenter` inverted/re-applied around the rect origin
+ * change below) — so the pose is re-derived, not left stale, and stays correct
+ * under rotation/flip.
+ */
+export function buildFeatherRepadPatch(
+  layer: Pick<Layer, 'bounding' | 'visibleShape' | 'cx' | 'cy' | 'rotation' | 'flip'>,
+  radius: number,
+): {
+  visibleShape: LocalShape;
+  bounding: { w: number; h: number };
+  cx: number;
+  cy: number;
+  birthCenter: { cx: number; cy: number };
+} | null {
+  const vs = layer.visibleShape as {
+    type: string;
+    rect: { x: number; y: number; w: number; h: number };
+    antiAliased?: boolean;
+    pathData?: string;
+    featherPx?: number;
+  } | undefined;
+  if (!vs) return null;
+
+  const curFeather = vs.featherPx ?? 0;
+  const pad0 = curFeather > 0 ? Math.ceil(curFeather + AA_MARGIN) : 0;
+  const pad1 = radius > 0 ? Math.ceil(radius + AA_MARGIN) : 0;
+  if (curFeather === radius && pad0 === pad1) return null;
+
+  // Tight geometry = current rect inset by the current symmetric pad.
+  const tight = {
+    x: vs.rect.x + pad0,
+    y: vs.rect.y + pad0,
+    w: vs.rect.w - 2 * pad0,
+    h: vs.rect.h - 2 * pad0,
+  };
+  const paddedRect = asLocalRect({
+    x: tight.x - pad1,
+    y: tight.y - pad1,
+    w: tight.w + 2 * pad1,
+    h: tight.h + 2 * pad1,
+  });
+
+  const pathData = vs.type === 'path' && vs.pathData ? vs.pathData : shapeToAbsPathData(vs as unknown as LocalShape);
+  const visibleShape = {
+    type: 'path',
+    rect: paddedRect,
+    antiAliased: vs.antiAliased ?? true,
+    pathData,
+    featherPx: radius,
+    __brand: 'local',
+  } as unknown as LocalShape;
+
+  // Re-derive the pose: recover the invariant tight-centre world anchor from the
+  // current pose (computeFragmentCenter inverted), then re-apply for the new
+  // rect origin — equivalent to computeFragmentCenter(center, rect1) with the
+  // SAME centre the fragment was born with.
+  const O = getOrientationMatrix(layer.rotation, layer.flip);
+  const rotatedOrigin0 = O.apply({ x: vs.rect.x, y: vs.rect.y });
+  const worldCenter = { x: layer.cx + rotatedOrigin0.x, y: layer.cy + rotatedOrigin0.y };
+  const pose = computeFragmentCenter(worldCenter, { x: paddedRect.x, y: paddedRect.y }, layer.rotation, layer.flip);
+
+  return {
+    visibleShape,
+    bounding: { w: paddedRect.w, h: paddedRect.h },
+    cx: pose.x,
+    cy: pose.y,
+    // birthCenter MUST track the new pose: snap-to-birth (snapping.ts) compares
+    // the layer's cx/cy against the stored birth centre — a stale one would snap
+    // the re-feathered fragment to the pre-re-pad position, offsetting the
+    // content by exactly the pad delta (real-device finding 2026-10-12).
+    birthCenter: { cx: pose.x, cy: pose.y },
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

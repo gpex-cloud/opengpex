@@ -490,6 +490,13 @@ export type AdjustmentDesc =
 export type FilterDesc =
   /** Separable Gaussian blur (`gaussian.wgsl`, two passes). */
   | { readonly kind: 'gaussianBlur'; readonly radius: number }
+  /**
+   * Edge feather (`gaussian.wgsl` H/V + `cs_feather_combine`): soften the bitmap
+   * ALPHA edge without touching interior colour. `radius` is the Gaussian σ in
+   * pixels — same semantics as `gaussianBlur`. See `shaders/gaussian.ts`
+   * (`buildFeatherCombineWgsl`) for the interior-preservation contract.
+   */
+  | { readonly kind: 'alphaFeather'; readonly radius: number }
   /** Generic convolution kernel (`convolve.wgsl`, tiled). */
   | {
     readonly kind: 'convolve';

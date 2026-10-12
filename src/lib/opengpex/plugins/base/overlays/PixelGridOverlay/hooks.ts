@@ -34,6 +34,7 @@ export function usePixelGridCommands() {
   const isEnabled = selfConfig?.enabled ?? true;
   const isHardEdge = selfConfig?.hardEdge ?? false;
   const minPixelSize = selfConfig?.minPixelSize ?? P.DEFAULT_MIN_PIXEL_SIZE;
+  const lineStyle = selfConfig?.lineStyle ?? P.DEFAULT_LINE_STYLE;
   const gridColor = selfConfig?.gridColor ?? P.DEFAULT_GRID_COLOR;
   const gridCasingColor = selfConfig?.gridCasingColor ?? P.DEFAULT_GRID_CASING_COLOR;
 
@@ -41,9 +42,10 @@ export function usePixelGridCommands() {
     isEnabled,
     isHardEdge,
     minPixelSize,
+    lineStyle,
     gridColor,
     gridCasingColor,
     toggleCmd,
     hardedgeToggleCmd,
-  }), [isEnabled, isHardEdge, minPixelSize, gridColor, gridCasingColor, toggleCmd, hardedgeToggleCmd]);
+  }), [isEnabled, isHardEdge, minPixelSize, lineStyle, gridColor, gridCasingColor, toggleCmd, hardedgeToggleCmd]);
 }

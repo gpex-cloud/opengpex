@@ -20,7 +20,9 @@
 'use client';
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
+import type { Layer } from '@opengpex/editor/core/types';
 import type { CurvePoints, CurvesState, LevelsState, ChannelMixState, ColorBalanceState, AdjustmentState } from '@opengpex/editor/core/types/models';
+import { resolveEdgeFeatherRoute, buildFeatherRepadPatch } from '@opengpex/editor/core/layer/services/fragment';
 import * as P from './protocols';
 import type {
   GradingTool,
@@ -121,6 +123,33 @@ function insertPointSorted(
 // ─── Commands ──────────────────────────────────────────────────────────────────
 
 /**
+ * Zero the layer's Edge Feather across ALL its carriers, honouring the route.
+ * Reset semantics: this layer's feather back to identity — the source hole (a
+ * different layer) stays owned by the cascade checkbox, not the reset button.
+ * Returns `undefined` when there is nothing to clear (the routed carrier is
+ * already at 0), so callers can spread it into their patch unconditionally.
+ */
+function clearEdgeFeatherPatch(layer: Layer): Partial<Layer> | undefined {
+  const route = resolveEdgeFeatherRoute(layer);
+  if (route === 'geometry') {
+    // Re-pad to 0: restores the tight rect, bounding, pose and birthCenter in
+    // one consistent patch; returns undefined when already unfeathered.
+    return buildFeatherRepadPatch(layer, 0) ?? undefined;
+  }
+  if (route === 'vmask') {
+    if (!layer.vectorMasks?.some((m) => m.enabled !== false && (m.feather ?? 0) !== 0)) {
+      return undefined;
+    }
+    return {
+      vectorMasks: layer.vectorMasks.map((m) => (m.enabled !== false ? { ...m, feather: 0 } : m)),
+    };
+  }
+  // bitmap route: the value lives in `adjustments.edgeFeather`, which the
+  // reset patches already clear via `adjustments: undefined`.
+  return undefined;
+}
+
+/**
  * ADJUSTMENT_COMMANDS: Command definitions for the AdjustmentDrawer.
  *
  * Curves editing follows the gesture-based Undo coalescing pattern from spec
@@ -212,6 +241,10 @@ export const ADJUSTMENT_COMMANDS = {
         levels: undefined,
         channelMix: undefined,
         colorBalance: undefined,
+        // Edge Feather's routed carriers (visibleShape pad / vectorMask
+        // feather) don't live in `adjustments` — clear them in the SAME write
+        // so reset stays one undo step.
+        ...clearEdgeFeatherPatch(activeLayer),
       });
     },
   } as EditorCommand<void, void>,
@@ -251,7 +284,15 @@ export const ADJUSTMENT_COMMANDS = {
           patch = { channelMix: undefined };
           break;
       }
-      actions.updateLayer(activeFrame.id, activeLayer.id, patch);
+      // Basic owns the Edge Feather slider — its routed carriers must reset
+      // with the panel (other tools never touched them).
+      actions.updateLayer(
+        activeFrame.id,
+        activeLayer.id,
+        tool === 'basic'
+          ? { ...patch, ...clearEdgeFeatherPatch(activeLayer) }
+          : patch,
+      );
     },
   } as EditorCommand<void, void>,
 
@@ -519,6 +560,242 @@ export const ADJUSTMENT_COMMANDS = {
       actions.updateLayer(activeFrame.id, activeLayer.id, { adjustments: next });
     },
   } as EditorCommand<{ patch: AdjustmentsPatch }, void>,
+
+  // ─── Fast-track drag path (M4) ─────────────────────────────────────────────
+  //
+  // A slider drag used to dispatch `updateAdjustments` (→ Redux → React re-render
+  // → new frame reference) on EVERY pointermove; the canvas merge coalesced the
+  // GPU work, but the dispatch/render storm ran at raw pointermove rate. The
+  // fast-track pair parks the merged value on the volatile buffer instead: the
+  // per-tick `mergeFrameSnapshot` folds it into the rendered frame (live canvas),
+  // React stays idle, and `commitAdjustments` lands ONE Redux write at gesture
+  // end. Same bookending as the move gesture (`fast.override` + `fast.commit`).
+
+  fastUpdateAdjustments: {
+    id: P.CMD_FAST_UPDATE_ADJUSTMENTS,
+    name: 'Fast-Track Basic Adjustments',
+    execute: (
+      ctx: EditorContextValue,
+      payload: { patch: AdjustmentsPatch; exact?: boolean },
+    ) => {
+      const { activeFrame, activeLayer, actions } = ctx;
+      if (!activeFrame || !activeLayer) return;
+      // Baseline on the FRESHEST draft (`fast.latestLayer`), not Redux — the
+      // draft replaces `adjustments` wholesale, so a Redux baseline would
+      // resurrect last frame's values mid-gesture.
+      const latest = actions.fast.latestLayer(activeFrame.id, activeLayer.id) ?? activeLayer;
+      const current = (latest.adjustments ?? P.DEFAULT_ADJUSTMENTS_STATE) as AdjustmentState;
+      const next: AdjustmentState = { ...current, ...payload.patch };
+
+      // ── Blur motion quantization (M5, same cure as fastUpdateEdgeFeather) ──
+      // The slider steps 0.1σ; a SLOW drag crosses a step on nearly every
+      // ticker frame and each step re-runs the full pipeline (both vmask
+      // bakes + whole-scene recomposite + the gaussian H/V dispatch — the
+      // latter at FULL-ASSET dims for an uncropped layer). Quantize the
+      // MOTION value to 0.5σ (adjacent frames differ imperceptibly while
+      // moving) so a slow drag re-renders ~5× less often; `basic.tsx` lands
+      // the EXACT slider value in one final `exact` write at drag end.
+      const keys = Object.keys(payload.patch);
+      if (!payload.exact && keys.length === 1 && keys[0] === 'blur') {
+        const q = Math.round((payload.patch.blur as number) * 2) / 2;
+        if (q === (current.blur ?? 0)) return; // already parked — byte-stable frame
+        next.blur = q;
+      }
+
+      actions.fast.override(activeFrame.id, activeLayer.id, { adjustments: next });
+    },
+  } as EditorCommand<{ patch: AdjustmentsPatch; exact?: boolean }, void>,
+
+  commitAdjustments: {
+    id: P.CMD_COMMIT_ADJUSTMENTS,
+    name: 'Commit Basic Adjustments',
+    execute: (ctx: EditorContextValue) => {
+      const { activeLayer, actions } = ctx;
+      if (!activeLayer) return;
+      actions.fast.commit(activeLayer.id);
+    },
+  } as EditorCommand<void, void>,
+
+  // ─── Edge Feather fast-track drag path (M4 双写) ────────────────────────────
+  //
+  // The cascade-checked drag used to split its writes in time: the fragment
+  // landed immediately (per-move Redux), the source hole only on the 120ms
+  // idle flush / gesture end — the complementary seam was BROKEN during
+  // motion (the live fragment edge overhung the not-yet-feathered hole edge).
+  // This pair parks BOTH sides on the volatile buffer per move: two drafts
+  // (`fast.override` on the fragment AND on the source layer) merge in the
+  // SAME `mergeFrameSnapshot` tick, so hole + fragment update in lockstep and
+  // the seam is structurally impossible — not just faster. Per-frame GPU cost
+  // is affordable because the hole's vmask bake is WINDOWED (hole-sized, see
+  // prepareVmaskSources `resolveVmaskWindow`).
+  //
+  // Same routing as `setEdgeFeather`, but every read baselines on
+  // `fast.latestLayer` (the freshest draft) — the draft replaces the touched
+  // fields wholesale, so a stale Redux baseline would resurrect last frame's
+  // values (the same discipline `fastUpdateAdjustments` follows).
+  //
+  // NON-UNDOABLE: the gesture's `beginAdjustmentsEdit` checkpoint owns undo;
+  // `commitEdgeFeather` flushes both drafts as one batched write at drag end.
+
+  fastUpdateEdgeFeather: {
+    id: P.CMD_FAST_UPDATE_EDGE_FEATHER,
+    name: 'Fast-Track Edge Feather',
+    execute: (
+      ctx: EditorContextValue,
+      payload: { radius: number },
+    ) => {
+      const { activeFrame, activeLayer, actions } = ctx;
+      if (!activeFrame || !activeLayer) return;
+      const frameId = activeFrame.id;
+
+      // ── Motion quantization (M5) ──
+      // The slider steps at 0.1px; a SLOW drag crosses a step on nearly every
+      // ticker frame, and each step re-bakes BOTH vmasks + re-composites the
+      // whole scene. Quantize the MOTION value to whole px (visually seamless
+      // at feather scale — the ramp is already ≥3px wide) so a slow drag
+      // re-renders ~10× less often; `basic.tsx` lands the EXACT slider value
+      // in one final write at drag end, before the commit.
+      const radius = Math.max(0, Math.round(payload.radius));
+
+      // ── Fragment side (routed carrier, baselined on the freshest draft) ──
+      const latest = actions.fast.latestLayer(frameId, activeLayer.id) ?? activeLayer;
+      const route = resolveEdgeFeatherRoute(latest);
+
+      // Skip when the quantized value is already parked (a slow drag between
+      // integer steps produces zero drafts — the merge stays byte-stable).
+      const parkedFeather = route === 'geometry'
+        ? ((latest.visibleShape as { featherPx?: number } | undefined)?.featherPx ?? 0)
+        : route === 'vmask'
+          ? (latest.vectorMasks?.find((m) => m.enabled !== false)?.feather ?? 0)
+          : ((latest.adjustments?.edgeFeather as number | undefined) ?? 0);
+      if (parkedFeather === radius) return;
+
+      if (route === 'geometry') {
+        const patch = buildFeatherRepadPatch(latest, radius);
+        if (patch) actions.fast.override(frameId, activeLayer.id, patch);
+      } else if (route === 'vmask') {
+        const masks = (latest.vectorMasks ?? []).map(
+          (m) => (m.enabled !== false ? { ...m, feather: radius } : m),
+        );
+        actions.fast.override(frameId, activeLayer.id, { vectorMasks: masks });
+      } else {
+        const current = (latest.adjustments ?? P.DEFAULT_ADJUSTMENTS_STATE) as AdjustmentState;
+        actions.fast.override(frameId, activeLayer.id, {
+          adjustments: { ...current, edgeFeather: radius },
+        });
+      }
+
+      // ── Hole side (same tick, same buffer — lockstep with the fragment) ──
+      // A dangling assocMaskId (source layer or hole deleted, e.g. after a
+      // heal) degrades SILENTLY — advisory metadata, never a hard dependency.
+      const assocMaskId = activeLayer.metadata?.assocMaskId;
+      const sourceLayerId = activeLayer.metadata?.sourceLayerId;
+      if (!assocMaskId || !sourceLayerId) return;
+      const latestSource = actions.fast.latestLayer(frameId, sourceLayerId)
+        ?? activeFrame.layers.byId[sourceLayerId];
+      const hole = latestSource?.vectorMasks?.find((m) => m.id === assocMaskId);
+      if (!latestSource || !hole) return;
+      if (hole.feather === radius) return; // guard: no redundant draft churn
+      const masks = (latestSource.vectorMasks ?? []).map(
+        (m) => (m.id === assocMaskId ? { ...m, feather: radius } : m),
+      );
+      actions.fast.override(frameId, sourceLayerId, { vectorMasks: masks });
+    },
+  } as EditorCommand<{ radius: number }, void>,
+
+  commitEdgeFeather: {
+    id: P.CMD_COMMIT_EDGE_FEATHER,
+    name: 'Commit Edge Feather',
+    execute: (ctx: EditorContextValue) => {
+      const { actions } = ctx;
+      // `'layers'` flush: every buffered draft this gesture parked (fragment +
+      // source hole) lands as ONE BATCH_UPDATE_LAYER group. The gesture's
+      // `beginAdjustmentsEdit` checkpoint owns the undo step.
+      actions.fast.commit(null, 'layers');
+    },
+  } as EditorCommand<void, void>,
+
+  // ─── Edge Feather (落层后边缘羽化) ───────────────────────────────────────────
+  //
+  // One slider, three edge carriers — the write is ROUTED by the layer's
+  // structure (`resolveEdgeFeatherRoute`), because a "fragment" carries its
+  // edge in different places depending on how it was produced:
+  //   • logical fragment → visibleShape re-pad (`buildFeatherRepadPatch`,
+  //     lossless: the hard-cut-away pixels are still in the original asset);
+  //   • vector-mask layer → every enabled mask's `feather` field (same
+  //     semantics as selection-time feather);
+  //   • otherwise → `adjustments.edgeFeather` (the `alphaFeather` filter).
+  //
+  // SOURCE-HOLE OWNERSHIP (the `hole` policy): when the layer is a cut
+  // fragment (`metadata.assocMaskId`), the checkbox is the single source of
+  // truth for whether the source hole is feathered AT ALL — the slider only
+  // supplies the value:
+  //   • `'match'`  — hole feather := radius (checkbox on: per-move or flush);
+  //   • `'clear'`  — hole feather := 0 (checkbox off — including enforcement
+  //                  during unchecked drags; guarded by `feather !== target`
+  //                  so an already-clear hole never re-composites the source);
+  //   • `'none'`   — leave the hole alone this dispatch (checked-drag moves
+  //                  between throttle flushes; the flush lands the value).
+  // Checkbox transitions dispatch `holeOnly` writes (no fragment-side edit),
+  // wrapped in the panel's gesture so the transition is one undo step.
+  //
+  // NON-UNDOABLE by design: the slider gesture opens its undo checkpoint via
+  // `beginAdjustmentsEdit` at pointerdown (same `useFilterGesture` bookending
+  // as every other Basic slider), so one drag = exactly one undo step that
+  // covers every routed write — including the hole writes above.
+  setEdgeFeather: {
+    id: P.CMD_SET_EDGE_FEATHER,
+    name: 'Set Edge Feather',
+    execute: (
+      ctx: EditorContextValue,
+      payload: { radius: number; cascade?: boolean; hole?: 'match' | 'clear' | 'none'; holeOnly?: boolean },
+    ) => {
+      const { activeFrame, activeLayer, actions } = ctx;
+      if (!activeFrame || !activeLayer) return;
+      const radius = Math.max(0, payload.radius);
+
+      if (!payload.holeOnly) {
+        const route = resolveEdgeFeatherRoute(activeLayer);
+        if (route === 'geometry') {
+          const patch = buildFeatherRepadPatch(activeLayer, radius);
+          if (patch) {
+            actions.updateLayer(activeFrame.id, activeLayer.id, patch);
+          }
+        } else if (route === 'vmask') {
+          // Every enabled mask, uniformly — "feather this layer's edges" is one
+          // intent; per-mask radii stay a selection-time concern.
+          const masks = (activeLayer.vectorMasks ?? []).map(
+            (m) => (m.enabled !== false ? { ...m, feather: radius } : m),
+          );
+          actions.updateLayer(activeFrame.id, activeLayer.id, { vectorMasks: masks });
+        } else {
+          const current = (activeLayer.adjustments ?? P.DEFAULT_ADJUSTMENTS_STATE) as AdjustmentState;
+          actions.updateLayer(activeFrame.id, activeLayer.id, {
+            adjustments: { ...current, edgeFeather: radius },
+          });
+        }
+      }
+
+      const holePolicy = payload.hole ?? (payload.cascade ? 'match' : 'none');
+      if (holePolicy === 'none') return;
+
+      // The hole write itself. A dangling assocMaskId (source layer or hole
+      // deleted, e.g. after a heal) degrades SILENTLY — the pointer is
+      // advisory metadata, never a hard dependency.
+      const assocMaskId = activeLayer.metadata?.assocMaskId;
+      const sourceLayerId = activeLayer.metadata?.sourceLayerId;
+      if (!assocMaskId || !sourceLayerId) return;
+      const source = activeFrame.layers.byId[sourceLayerId];
+      const hole = source?.vectorMasks?.find((m) => m.id === assocMaskId);
+      if (!source || !hole) return;
+      const holeTarget = holePolicy === 'match' ? radius : 0;
+      if (hole.feather === holeTarget) return; // guard: no redundant re-composite
+      const masks = (source.vectorMasks ?? []).map(
+        (m) => (m.id === assocMaskId ? { ...m, feather: holeTarget } : m),
+      );
+      actions.updateLayer(activeFrame.id, sourceLayerId, { vectorMasks: masks });
+    },
+  } as EditorCommand<{ radius: number; cascade?: boolean; hole?: 'match' | 'clear' | 'none'; holeOnly?: boolean }, void>,
 
   // ─── Color Balance commands (Plan B) ─────────────────────────────────────────
   //

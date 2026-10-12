@@ -242,7 +242,7 @@ class VmaskCache {
     const edgesSlot = edgesRing.writeSlot(edges);
     const tableSlot = tableRing.writeSlot(new Uint8Array(table));
 
-    // ── Uniform (32B): dims, mask_count, px_scale (texel grid → layer-local px) ──
+    // ── Uniform (32B): dims, mask_count, px_scale, origin (texel → layer-local px) ──
     const uni = new ArrayBuffer(VMASK_UNIFORM_SIZE);
     const uniU32 = new Uint32Array(uni);
     const uniF32 = new Float32Array(uni);
@@ -251,13 +251,14 @@ class VmaskCache {
     uniU32[2] = subMasks.length; // mask_count @8
     uniU32[3] = 0; // _pad0             @12
     // px_scale maps texel (x+0.5, y+0.5) → layer-local px: maskW texels cover the
-    // layer's logical width, so scale = logicalWidth / maskW (the inverse supersample
-    // factor; 1 on the interactive path). Computed by the caller and stashed on the
-    // instance so `encodeFill` need not grow a wider param list.
+    // bake's logical extent (the whole layer, or the window — see resolveVmaskWindow),
+    // so scale = extent / maskW (the inverse supersample factor; 1 on the interactive
+    // path). Computed by the caller and stashed on the instance so `encodeFill` need
+    // not grow a wider param list.
     uniF32[4] = this.pxScaleX; // px_scale.x  @16
     uniF32[5] = this.pxScaleY; // px_scale.y  @20
-    uniF32[6] = 0; // _pad1.x           @24
-    uniF32[7] = 0; // _pad1.y           @28
+    uniF32[6] = this.originX; // origin.x     @24 (windowed bake: ring coord of texel 0)
+    uniF32[7] = this.originY; // origin.y     @28
     const uniSlot = uniformRing.writeSlot(new Uint8Array(uni));
 
     const bindGroup = device.createBindGroup({
@@ -291,10 +292,18 @@ class VmaskCache {
   // wide param list. Set by `prepare` before it calls `encodeFill`.
   private pxScaleX = 1;
   private pxScaleY = 1;
+  /** WINDOWED bake: ring-space coord of texel (0,0); (0,0) = full-layer bake. */
+  private originX = 0;
+  private originY = 0;
 
   setPxScale(x: number, y: number): void {
     this.pxScaleX = x;
     this.pxScaleY = y;
+  }
+
+  setOrigin(x: number, y: number): void {
+    this.originX = x;
+    this.originY = y;
   }
 
   private wrap(entry: VmaskCacheEntry): LayerTexture {
@@ -334,6 +343,73 @@ class VmaskCache {
 
 const cache = new VmaskCache();
 
+/** A baked polygon vmask: the owned coverage texture + its optional WINDOW. */
+export interface VmaskBake {
+  readonly texture: LayerTexture;
+  /**
+   * WINDOWED bake (hole windowing): the texture covers only this sub-rect of
+   * the layer, in layer-local px. Undefined → the texture spans the whole layer.
+   */
+  readonly window?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+}
+
+/**
+ * Derive the bake WINDOW for a polygon vmask (hole windowing): the rings'
+ * bounding box expanded by the largest feather ramp (+ an AA margin), clamped
+ * to the layer bounds. `undefined` → bake the whole layer.
+ *
+ * WHY: the hole mask lives on the FULL-CANVAS source layer, so an un-windowed
+ * bake costs one full-canvas compute dispatch per feather edit. A 100×100 hole
+ * on a 6000×4000 canvas drops to ~1/1000 of that. Coverage outside the window
+ * is exactly 1 (fully-masked-in) for a normal hole — the window edge sits
+ * `margin` px outside the shape, where the ramp has already saturated — so the
+ * compositor's clamp-to-edge samples of out-of-window texels are correct.
+ *
+ * INVERTED SUB-MASKS ARE SAFE (and common — a cut hole on the source layer is
+ * `inverted: true`, fragment.ts `inverted: !invertedRegular`): outside the
+ * window every sub-mask's distance to its rings is ≥ margin > featherPx, so
+ * the coverage ramp is fully saturated (1 for non-inverted, 1−inside → also 1
+ * outside the shape for inverted) — exactly what the un-windowed bake writes
+ * there, and the sampler's clamp-to-edge reproduces it at the window border.
+ *
+ * Skipped (full bake) when: no rings resolve, or the expanded box still covers
+ * ≥90% of the layer (windowing would save nothing — e.g. an inverted-regular
+ * annulus whose rings span the canvas).
+ */
+export function resolveVmaskWindow(
+  subMasks: readonly VectorSubMask[],
+  layerWidth: number,
+  layerHeight: number,
+): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } | undefined {
+  if (layerWidth <= 0 || layerHeight <= 0) return undefined;
+  let margin = 2; // AA ramp margin (mirrors the fragment AA_MARGIN posture)
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  let anyRing = false;
+  for (const sm of subMasks) {
+    margin = Math.max(margin, Math.ceil(sm.featherPx) + 2);
+    for (const ring of sm.rings) {
+      // Skip degenerate rings — same rule encodeFill applies to edge emission
+      // (n < 3 has no area and contributes no coverage).
+      if (ring.length < 3) continue;
+      for (const p of ring) {
+        anyRing = true;
+        x0 = Math.min(x0, p[0]);
+        y0 = Math.min(y0, p[1]);
+        x1 = Math.max(x1, p[0]);
+        y1 = Math.max(y1, p[1]);
+      }
+    }
+  }
+  if (!anyRing) return undefined;
+  const x = Math.max(0, Math.floor(x0 - margin));
+  const y = Math.max(0, Math.floor(y0 - margin));
+  const w = Math.min(layerWidth, Math.ceil(x1 + margin)) - x;
+  const h = Math.min(layerHeight, Math.ceil(y1 + margin)) - y;
+  if (w <= 0 || h <= 0) return undefined;
+  if (w * h >= layerWidth * layerHeight * 0.9) return undefined;
+  return { x, y, w, h };
+}
+
 /**
  * Bake every POLYGON vmask in the scene into an owned coverage texture, recorded onto
  * `encoder` BEFORE the composite render passes open, and populate `out` keyed by layer
@@ -347,7 +423,7 @@ export function prepareVmaskSources(
   encoder: GPUCommandEncoder,
   compiled: CompiledScene,
   ctx: BuildContext,
-  out: Map<string, LayerTexture>,
+  out: Map<string, VmaskBake>,
   exportScale: readonly [number, number],
 ): void {
   const seen = new Set<string>();
@@ -358,13 +434,25 @@ export function prepareVmaskSources(
 
     const logicalW = Math.max(1, layer.width ?? 1);
     const logicalH = Math.max(1, layer.height ?? 1);
-    const [maskW, maskH] = vectorTransientSize(logicalW, logicalH, exportScale);
+    // WINDOWED bake (hole windowing): rings are layer-local, so the window is a
+    // pure function of the geometry — it flips the cache key with it (dims are
+    // in the key) and moves with the mask, never with the layer's world transform.
+    const window = resolveVmaskWindow(vmask.subMasks, logicalW, logicalH);
+    const bakeW = window?.w ?? logicalW;
+    const bakeH = window?.h ?? logicalH;
+    const [maskW, maskH] = vectorTransientSize(bakeW, bakeH, exportScale);
 
-    // px_scale = logical / mask (inverse supersample). The shader's `p = (gid+0.5) *
-    // px_scale` then lands in the layer-local px space the rings were emitted in.
-    cache.setPxScale(logicalW / maskW, logicalH / maskH);
+    // px_scale = logical bake extent / mask texels (inverse supersample). The
+    // shader's p = origin + (gid+0.5)·px_scale lands in the layer-local px space
+    // the rings were emitted in.
+    cache.setPxScale(bakeW / maskW, bakeH / maskH);
+    cache.setOrigin(
+      window ? window.x * (bakeW / maskW) : 0,
+      window ? window.y * (bakeH / maskH) : 0,
+    );
 
-    out.set(layer.id, cache.prepare(encoder, ctx, layer.id, vmask.subMasks, maskW, maskH));
+    const texture = cache.prepare(encoder, ctx, layer.id, vmask.subMasks, maskW, maskH);
+    out.set(layer.id, { texture, window: window ?? undefined });
     seen.add(layer.id);
   }
   cache.sweep(seen);

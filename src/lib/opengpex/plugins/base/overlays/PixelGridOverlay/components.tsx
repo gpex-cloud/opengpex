@@ -25,6 +25,7 @@ import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { Grid } from 'lucide-react';
 import { FancyButton } from '@opengpex/editor/widgets/FancyButton';
 import { usePixelGridCommands } from './hooks';
+import { resolveGridStrokePlan } from './lineStyle';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PixelGridOverlayContainer
@@ -83,7 +84,7 @@ import { usePixelGridCommands } from './hooks';
 export function PixelGridOverlayContainer() {
   const { state, activeFrame } = useEditorState();
   const { geometry } = useEditorServices();
-  const { isEnabled, minPixelSize, gridColor, gridCasingColor } = usePixelGridCommands();
+  const { isEnabled, minPixelSize, lineStyle, gridColor, gridCasingColor } = usePixelGridCommands();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // ─── Persistent Refs (survive across frames, never cause re-renders) ───
@@ -180,9 +181,12 @@ export function PixelGridOverlayContainer() {
     // Early exit: grid is invisible, zero computation
     if (!shouldShow) return;
 
-    // --- Dirty-check: skip entirely if camera hasn't moved ---
-    // This ensures 0ms cost when the viewport is static (solving the heating issue)
-    const camKey = `${cam.x}:${cam.y}:${cam.k}`;
+    // --- Dirty-check: skip entirely if nothing visual changed ---
+    // This ensures 0ms cost when the viewport is static (solving the heating issue).
+    // The key covers EVERY input the drawn pixels depend on — camera, line
+    // style / colors (config can change from the settings panel without any
+    // camera motion), and dpr (window moved between displays).
+    const camKey = `${cam.x}:${cam.y}:${cam.k}|${lineStyle}|${gridColor}|${gridCasingColor}|${dpr}`;
     if (camKey === lastCamKeyRef.current) return;
     lastCamKeyRef.current = camKey;
 
@@ -263,12 +267,17 @@ export function PixelGridOverlayContainer() {
     const firstY = originY + Math.ceil((clipTop - originY) / gridSpacing) * gridSpacing;
 
     // --- Draw grid lines (dual-tone "casing" for background-agnostic contrast) ---
-    // Build the line path ONCE, then stroke it TWICE:
+    // Build the line path ONCE, then stroke it per the plan:
     //   1. a slightly wider dark casing/halo underneath (visible on light areas)
     //   2. a thin light core on top (visible on dark areas)
-    // A single fixed color always vanishes against some background; the casing
-    // guarantees at least one tone stays visible everywhere. Static solid lines
-    // (no dash, no animation) — distinct from ClipOverlay's marching ants.
+    // The pair only fits when a line owns ≥2 device pixels — at DPR=1 both
+    // tones would collapse into ONE twice-as-wide device pixel (the thick-grid
+    // artifact on 1080p-class displays), so 'dual' auto-degrades to the single
+    // light hairline below the floor. Single-tone modes ('dark'/'light') are
+    // the PS/GIMP model: one crisp 1px line, tone switchable in settings.
+    // Static solid lines (no dash, no animation) — distinct from ClipOverlay's
+    // marching ants.
+    const plan = resolveGridStrokePlan(lineStyle, dpr);
     ctx.beginPath();
 
     // Vertical lines (one per visible image pixel column)
@@ -286,16 +295,17 @@ export function PixelGridOverlayContainer() {
       ctx.lineTo(clipRight, py);
     }
 
-    // Pass 1: dark casing (slightly wider) — two batched strokes over the same path.
-    // Kept subtle (2px + low alpha) so the grid reads as a faint guide, not a
-    // heavy black lattice that dominates light images.
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = gridCasingColor;
-    ctx.stroke();
+    if (plan.casing) {
+      // Pass 1: dark casing (slightly wider) — kept subtle (2px + low alpha) so
+      // the grid reads as a faint guide, not a heavy black lattice.
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = gridCasingColor;
+      ctx.stroke();
+    }
 
-    // Pass 2: light core (thin) on top.
+    // Pass 2 (final): the core hairline.
     ctx.lineWidth = 1;
-    ctx.strokeStyle = gridColor;
+    ctx.strokeStyle = plan.core === 'dark' ? gridCasingColor : gridColor;
     ctx.stroke();
   });
 

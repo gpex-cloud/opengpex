@@ -38,7 +38,11 @@ import { STROKE_EXTRUDE_WGSL, STROKE_PAINT_WGSL, STROKE_UNIFORM_BUFFER_SIZE } fr
 import { TEXT_PAINT_WGSL, TEXT_UNIFORM_BUFFER_SIZE, TEXT_INSTANCE_STRIDE } from '../shaders/text';
 import { ADJUST_UNIFORM_BUFFER_SIZE } from '../shaders/adjust';
 import { ADJUST_PRE_WGSL, ADJUST_PRE_UNIFORM_BUFFER_SIZE } from '../shaders/adjustPre';
-import { buildGaussianWgsl, GAUSS_UNIFORM_BUFFER_SIZE } from '../shaders/gaussian';
+import {
+  buildGaussianWgsl,
+  buildFeatherCombineWgsl,
+  GAUSS_UNIFORM_BUFFER_SIZE,
+} from '../shaders/gaussian';
 import { VMASK_WGSL, VMASK_UNIFORM_SIZE } from '../shaders/vmask';
 import { BMASK_COMBINE_WGSL, BMASK_COMBINE_UNIFORM_SIZE } from '../shaders/bmaskCombine';
 import { GPUBufferUsage, GPUTextureUsage, GPUShaderStage, GPUColorWrite } from '../constants';
@@ -205,7 +209,10 @@ export class PipelineCache {
   private readonly computePipelines = new Map<string, GPUComputePipeline>();
   private readonly gaussianShaderModules = new Map<string, GPUShaderModule>();
   private readonly filterBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
-  private readonly filterPipelineLayouts = new Map<string, GPUPipelineLayout>();
+  private readonly filterPipelineLayouts = new Map<string, GPUBindGroupLayout>();
+  private readonly featherCombineBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
+  private readonly featherCombinePipelineLayouts = new Map<string, GPUPipelineLayout>();
+  private readonly featherCombineShaderModules = new Map<string, GPUShaderModule>();
 
   constructor(readonly device: GPUDevice) {}
 
@@ -683,6 +690,103 @@ export class PipelineCache {
       label: `Gaussian Compute Pipeline (${storageFormat})`,
       layout: this.getFilterPipelineLayout(storageFormat),
       compute: { module: shaderModule, entryPoint: 'cs_gaussian' },
+    });
+    this.computePipelines.set(key, pipeline);
+    return pipeline;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // alphaFeather combine compute pipeline (cs_feather_combine)
+  // ──────────────────────────────────────────────────────────
+
+  /**
+   * Group-0 layout for the alphaFeather COMBINE pass: uniform + TWO sampled
+   * sources (bleed, orig) + write-only storage destination.
+   *
+   * A separate layout from {@link getFilterBindGroupLayout} because of the extra
+   * sampled binding — sharing one layout would force the Gaussian pass to declare
+   * a texture it never reads. Sample-type rule matches the Gaussian layout: the
+   * 32-bit tier demands `unfilterable-float` (textureLoad-only, no float32-filterable
+   * requirement); it also accepts filterable 8/16-bit sources, so the ORIG binding
+   * can be either the resident rgba8unorm asset or a working-format intermediate.
+   */
+  getFeatherCombineBindGroupLayout(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUBindGroupLayout {
+    const cached = this.featherCombineBindGroupLayouts.get(storageFormat);
+    if (cached) return cached;
+
+    const sampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
+    const layout = this.device.createBindGroupLayout({
+      label: `Feather Combine Bind Group Layout [${storageFormat}]`,
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: {
+            type: 'uniform',
+            hasDynamicOffset: true,
+            minBindingSize: GAUSS_UNIFORM_BUFFER_SIZE,
+          },
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType },
+        },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType },
+        },
+        {
+          binding: 3,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: { access: 'write-only', format: storageFormat },
+        },
+      ],
+    });
+    this.featherCombineBindGroupLayouts.set(storageFormat, layout);
+    return layout;
+  }
+
+  getFeatherCombinePipelineLayout(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUPipelineLayout {
+    const cached = this.featherCombinePipelineLayouts.get(storageFormat);
+    if (cached) return cached;
+    const layout = this.device.createPipelineLayout({
+      bindGroupLayouts: [this.getFeatherCombineBindGroupLayout(storageFormat)],
+      label: `Feather Combine Pipeline Layout [${storageFormat}]`,
+    });
+    this.featherCombinePipelineLayouts.set(storageFormat, layout);
+    return layout;
+  }
+
+  /**
+   * alphaFeather combine pipeline (pointwise, workgroup 8×8). One pipeline per
+   * working format; radius/flags ride the uniform, never the pipeline.
+   */
+  getFeatherCombinePipeline(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUComputePipeline {
+    const key = `feather-combine:${storageFormat}`;
+    const cached = this.computePipelines.get(key);
+    if (cached) return cached;
+
+    let shaderModule = this.featherCombineShaderModules.get(storageFormat);
+    if (!shaderModule) {
+      shaderModule = this.device.createShaderModule({
+        code: buildFeatherCombineWgsl(storageFormat),
+        label: `Feather Combine WGSL Module (${storageFormat})`,
+      });
+      this.featherCombineShaderModules.set(storageFormat, shaderModule);
+    }
+
+    const pipeline = this.device.createComputePipeline({
+      label: `Feather Combine Compute Pipeline (${storageFormat})`,
+      layout: this.getFeatherCombinePipelineLayout(storageFormat),
+      compute: { module: shaderModule, entryPoint: 'cs_feather_combine' },
     });
     this.computePipelines.set(key, pipeline);
     return pipeline;

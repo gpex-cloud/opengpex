@@ -80,6 +80,12 @@ export interface DrawLayerParams {
    * analytic vmasks solve per-fragment and bind the default white view.
    */
   readonly vmaskTexture?: LayerTexture;
+  /**
+   * WINDOWED bake (hole windowing): the coverage texture covers only this
+   * sub-rect of the layer (layer-local px) — packed into vmask_rect with the
+   * HAS_WINDOW flag so the shader re-maps the uv. Undefined → full-layer bake.
+   */
+  readonly vmaskWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   readonly isBottomOpaque?: boolean;
   /**
    * Force the identity group-1 adjust bind group because `texture` ALREADY has the
@@ -89,6 +95,12 @@ export interface DrawLayerParams {
   readonly suppressAdjust?: boolean;
   /** `texture` is a vector transient — UV ratio derives from the texture, not `layer.dprScale`. */
   readonly vectorTransient?: boolean;
+  /**
+   * WINDOWED-CONVOLUTION content rect (M1, source texels): `texture` holds only
+   * this sub-rect of the source, so `uvRect` shifts by its origin (see
+   * `resolveLayerGeometry`). Undefined → content-aligned with the full source.
+   */
+  readonly contentWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /**
    * The `texture` already holds LINEAR light because the pipeline produced it
    * (`AdjustPrePass` bake and/or `FilterPass` output), regardless of the original
@@ -263,6 +275,7 @@ export class CompositePass {
       texture.width,
       texture.height,
       resolveLayerDprScale(layer, texture.width, params.vectorTransient),
+      params.contentWindow,
     );
 
     // ⚠️ POT-BUCKET UV FIX: `resolveLayerGeometry` computes UVs in CONTENT-relative
@@ -280,7 +293,7 @@ export class CompositePass {
 
     // Resolve the vmask uniform triple (analytic → SDF params; polygon →
     // just the HAS_TEX bit, invert/hard already baked into vmaskTexture).
-    const vmaskU = resolveVmaskUniform(layer.vmask, contentWidth, contentHeight, !!vmaskTexture);
+    const vmaskU = resolveVmaskUniform(layer.vmask, contentWidth, contentHeight, !!vmaskTexture, params.vmaskWindow);
 
     // 1. Pack uniforms
     packLayerUniforms(

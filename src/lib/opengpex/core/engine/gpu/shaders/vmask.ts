@@ -103,7 +103,10 @@ struct VmaskUniforms {
   mask_count : u32,         // offset 8  — number of sub-masks in the submask table
   _pad0      : u32,         // offset 12
   px_scale   : vec2<f32>,   // offset 16 — texel (x+0.5, y+0.5) → ring-space coordinate
-  _pad1      : vec2<f32>,   // offset 24 — pad to 32B
+  origin     : vec2<f32>,   // offset 24 — WINDOWED bake: ring-space coord of texel (0,0).
+                            // (0,0) when the bake covers the whole layer — the bake
+                            // then samples the same texel→ring map as before, so the
+                            // coverage is bit-identical to the un-windowed fill.
 };
 
 // One intersected sub-mask: a [edge_start, edge_start+edge_count) slice of the
@@ -136,7 +139,7 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
     return;
   }
 
-  let p = (vec2<f32>(f32(gid.x), f32(gid.y)) + vec2<f32>(0.5, 0.5)) * u.px_scale;
+  let p = (vec2<f32>(f32(gid.x), f32(gid.y)) + vec2<f32>(0.5, 0.5)) * u.px_scale + u.origin;
 
   // Even-odd SAMPLE point: pixel center nudged by (+1/64, +1/128) in ring
   // space — the CPU staircase's tie-break (polygon.ts shared rule document).

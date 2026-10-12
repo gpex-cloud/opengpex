@@ -37,7 +37,7 @@
 
 import type { LayerNode } from '../../scene/Scene';
 import type { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTexture';
-import { FilterPass } from '../composite/FilterPass';
+import { FilterPass, type FilterWindow } from '../composite/FilterPass';
 import type { BuildContext, PreparedSource } from './types';
 
 export function runFilterChain(
@@ -49,12 +49,24 @@ export function runFilterChain(
   inputIsWorkingGamut: boolean,
   inputIntentApplied: boolean,
   suppressAdjust?: boolean,
+  /** WINDOWED convolution rect (M1, source texels) — see resolveFilterWindow. */
+  window?: FilterWindow,
 ): PreparedSource {
   const { device, pipelineCache, bufferRing, texturePool, workingFormat, scratch } = ctx;
   const filtered = FilterPass.run(
     encoder,
-    { device, pipelineCache, bufferRing, texturePool, workingFormat, scratch },
-    { layer, source: filterInput, sourceIsLinear: inputIsLinear },
+    {
+      device,
+      pipelineCache,
+      bufferRing,
+      texturePool,
+      workingFormat,
+      scratch,
+      // Oversized filter transients reuse engine-owned resident slots on the
+      // render path (undefined on export → one-shot exact-size instead).
+      acquireResidentTransient: ctx.acquireResidentTransient,
+    },
+    { layer, source: filterInput, sourceIsLinear: inputIsLinear, window },
   );
 
   // The grade is already in the pixels — do not let the composite re-apply it.
@@ -67,5 +79,8 @@ export function runFilterChain(
     sourceIsWorkingGamut: inputIsWorkingGamut,
     // ⚠️ Same discipline: intent was applied only if a bake ran.
     sourceIntentApplied: inputIntentApplied,
+    // The output holds ONLY the window's content — the compositor's UV map
+    // must re-express layer.crop relative to it (see resolveLayerGeometry).
+    contentWindow: window,
   };
 }

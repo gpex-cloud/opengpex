@@ -179,22 +179,33 @@ export function buildVectorMaskDesc(
     antiAliased: m.shape.antiAliased !== false,
     // Cut-to-layer seam backing (plan 20261006_cut_to_layer_aa_seam_symmetry):
     // a hole mask tied to a cut fragment (`assocLayerId`) must fully back the
-    // fragment's 1px AA edge band instead of being exactly complementary —
-    // two complementary semi-transparent layers composite to
-    // α = 1 − c(1−c), a 25% background dip at the seam center (the visible
-    // "dirty seam" on AA cuts; aa-off is immune because its binary halves
-    // never both go partial). With distBiasPx = 1 the inverted hole stays
-    // fully opaque wherever the fragment has partial coverage, so the unmoved
-    // composite is α ≡ 1 (cut invisible until the fragment moves) while each
-    // separated piece keeps its own AA edge. Only the AA ramp case qualifies:
-    // feathered holes use the smoothstep branch (bias semantics unvalidated
-    // there) and binary hard edges need no backing (never partial).
-    distBiasPx:
-      m.assocLayerId !== undefined &&
-      (m.feather ?? 0) === 0 &&
-      m.shape.antiAliased !== false
-        ? CUT_SEAM_BACKING_BIAS_PX
-        : undefined,
+    // fragment's edge band instead of being exactly complementary — two
+    // complementary semi-transparent layers composite to α = 1 − c(1−c), a 25%
+    // background dip at the seam center (the visible "dirty seam"; aa-off is
+    // immune because its binary halves never both go partial).
+    //
+    //   • HARD AA cut (feather 0): the fragment's partial band is the 1 px
+    //     `clamp(0.5−d)` ramp; distBiasPx = CUT_SEAM_BACKING_BIAS_PX keeps the
+    //     hole fully opaque across it (isocline 1 px tighter).
+    //   • FEATHERED cut (feather f > 0): the same dip re-appears spread over the
+    //     2f smoothstep band (real-device finding 2026-10-12 — the old
+    //     "feathered cuts are inherently seamless" assumption ignored that
+    //     complementary ≠ backing under source-over). Fragment coverage
+    //     αf(d) = 1 − smoothstep(−f, f, d) is partial on d ∈ (−f, f); the
+    //     inverted hole's keep-coverage is αh(d) = smoothstep(−f, f, d + b),
+    //     which saturates at 1 for d ≥ f − b. Full backing therefore needs
+    //     f − b ≤ −f, i.e. b = 2f exactly: the hole's erase ramp lives entirely
+    //     where the fragment is already opaque, the unmoved composite is
+    //     α ≡ 1, and each separated piece keeps its own smoothstep edge (the
+    //     hole's soft contour just sits 2f tighter than the cut line).
+    //   • Binary hard edges (antiAliased: false, feather 0) need no backing —
+    //     never partial. The feather branch ignores the AA flag on purpose:
+    //     feather > 0 always takes the smoothstep branch (羽化优先级).
+    distBiasPx: m.assocLayerId === undefined
+      ? undefined
+      : (m.feather ?? 0) === 0
+        ? (m.shape.antiAliased !== false ? CUT_SEAM_BACKING_BIAS_PX : undefined)
+        : (m.feather ?? 0) * 2,
   }));
   return { kind: 'polygon', subMasks };
 }

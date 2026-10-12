@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.6
+
+- Adjustments: added an Edge Feather slider to smoothly soften layer edges, with an option to simultaneously feather the source hole for seamless blending
+- Canvas: added customizable pixel grid line styles (dual-tone, dark, or light) in Settings with smart display tuning for crisp, non-intrusive guides
+
+---
+
 ## v2.0.5
 
 - Canvas: fixed pixel grid misalignment on large images at high zoom levels, ensuring grid lines accurately align with actual pixels

@@ -409,7 +409,14 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
     if ((blend_u.vmask_flags & 8u) != 0u) { vmask_alpha = step(0.5, vmask_alpha); }
     fg_sample.a *= vmask_alpha;
   } else if ((blend_u.vmask_flags & 2u) != 0u) {       // HAS_VMASK_TEX
-    var vmask_alpha = textureSample(vmask_tex, samp, local).a;
+    // WINDOWED bake: re-map normalized content uv into the coverage window
+    // (same contract as the layer.ts composite branch).
+    var vmask_uv = local;
+    if ((blend_u.vmask_flags & 64u) != 0u) {           // VMASK_HAS_WINDOW
+      let px = local * blend_u.vmask_feather.yz;
+      vmask_uv = (px - blend_u.vmask_rect.xy) / blend_u.vmask_rect.zw;
+    }
+    var vmask_alpha = textureSample(vmask_tex, samp, vmask_uv).a;
     if ((blend_u.vmask_flags & 4u) != 0u) { vmask_alpha = 1.0 - vmask_alpha; }
     if ((blend_u.vmask_flags & 8u) != 0u) { vmask_alpha = step(0.5, vmask_alpha); }
     fg_sample.a *= vmask_alpha;

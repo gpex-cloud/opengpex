@@ -34,8 +34,9 @@
  *     makes the composite signature (which JSON-serialises these arrays) collapse
  *     back to the un-adjusted signature (ensuring no spurious re-composite).
  *   • Ordering is deterministic: adjustments are emitted `basic → levels →
- *     curves → channelMix → colorBalance`; the single neighbourhood filter
- *     (`gaussianBlur`, from `adjustments.blur`) rides in `filters`.
+ *     curves → channelMix → colorBalance`; the neighbourhood filters
+ *     (`gaussianBlur` from `adjustments.blur`, then `alphaFeather` from
+ *     `adjustments.edgeFeather`) ride in `filters`.
  *   • curves/levels reference a resident 1D-LUT texture by a DETERMINISTIC
  *     `lutId` (content hash of the quantized config). LUT texture upload and
  *     deduplication are handled downstream; this module only produces the stable id so the
@@ -249,6 +250,14 @@ export function translateLayerAdjustments(layer: AdjustmentInputs): {
   // blur is a NEIGHBOURHOOD filter (not a colour adjustment) — rides in filters.
   if (a && (a.blur ?? 0) !== 0) {
     filters.push({ kind: 'gaussianBlur', radius: q(a.blur) });
+  }
+
+  // edgeFeather is the alpha-edge feather — a neighbourhood filter too, emitted
+  // AFTER blur so a layered blur+feather blurs first and feathers the result's
+  // edge. Ordering here is the deterministic contract (see the module header).
+  const edgeFeather = a?.edgeFeather;
+  if (edgeFeather !== undefined && edgeFeather !== 0) {
+    filters.push({ kind: 'alphaFeather', radius: q(edgeFeather) });
   }
 
   return {
