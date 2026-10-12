@@ -109,16 +109,18 @@ export interface CraftDrawerConfig {
   brushHardness: number;
   /**
    * Eraser edge AA toggle (always visible in the eraser panel; two-way bound to
-   * `brushHardness` — turning it on snaps hardness to 100, dragging hardness
-   * below 100 turns it off). `false` routes `hard: true` into the eraser's
-   * BitmapMask — the GPU thresholds the sampled mask alpha at 0.5 for a binary
-   * "pencil eraser" edge. Omitted = AA on (the historical behaviour).
+   * `brushHardness`, same direction as the brush — turning it OFF snaps hardness
+   * to 100, dragging hardness below 100 turns it back ON). `false` routes
+   * `hard: true` into the eraser's BitmapMask — the GPU thresholds the sampled
+   * mask alpha at 0.5 for a binary, idempotent "pencil eraser" edge. AA on with
+   * hardness < 100 = soft feathered erasing (the historical behaviour).
+   * Omitted = AA on.
    */
   eraserAntiAliased?: boolean;
   /**
-   * Brush (stroke paint tool) edge AA toggle — the BRUSH mode sibling of
+   * Brush (stroke paint tool) edge AA toggle — the brush-mode sibling of
    * `eraserAntiAliased`, always visible in the brush panel. Bound to
-   * `brushHardness` in the OPPOSITE direction of the eraser: AA OFF ignores the
+   * `brushHardness` in the SAME direction as the eraser: AA OFF ignores the
    * hardness feather entirely, so the pair is only self-consistent at
    * hardness = 100 (switching AA off snaps hardness to 100; dragging hardness
    * below 100 forces AA back on — a soft tip must be AA'd; switching AA on

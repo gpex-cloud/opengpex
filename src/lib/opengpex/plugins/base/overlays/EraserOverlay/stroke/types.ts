@@ -43,11 +43,13 @@ export interface StrokeConfig {
   /**
    * HARD mask edge ("pencil eraser"): the GPU thresholds the sampled mask alpha
    * at 0.5 for a binary edge. Resolved once at session start from the panel's
-   * AA toggle (two-way bound to hardness: AA on ⇒ hardness 100, but AA off is a
-   * deliberate choice at any hardness). Drives BOTH the live preview override
-   * and the baked `BitmapMask.hard`, so preview == landing. Named `hard` (not
-   * `antiAliased`) because it belongs to the bmask sampling-threshold family —
-   * same name and polarity all the way to `BitmapMask.hard`.
+   * AA toggle (two-way bound to hardness: AA off ⇒ hardness 100; dragging
+   * hardness below 100 forces AA back on — a soft tip is always AA'd, so
+   * `hard: true` only ever pairs with hardness 100). Drives BOTH the live
+   * preview override and the baked `BitmapMask.hard`, so preview == landing.
+   * Named `hard` (not `antiAliased`) because it belongs to the bmask
+   * sampling-threshold family — same name and polarity all the way to
+   * `BitmapMask.hard`.
    */
   hard: boolean;
   canvasSize: { w: number; h: number };

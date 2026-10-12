@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.5
+
+- Canvas: fixed pixel grid misalignment on large images at high zoom levels, ensuring grid lines accurately align with actual pixels
+- Drawing Tools: refined hardness and edge smoothing behavior for the eraser and brush, making soft erasing more intuitive and seamless
+
+---
+
 ## v2.0.4
 
 - Workspace & UI: auto-opened side panels now stay open while you are actively using them, preventing accidental closing

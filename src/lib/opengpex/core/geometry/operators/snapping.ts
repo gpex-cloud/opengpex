@@ -18,7 +18,7 @@
  */
 
 import { Matrix3x3 } from '../matrix';
-import { CameraState, Dimensions, Frame, Layer, WorldPoint, Rect, asWorldPoint, Point2D, WorldRect, asLocalRect } from '@opengpex/editor/core/types';
+import { CameraState, Dimensions, Frame, Layer, WorldPoint, Rect, asWorldPoint, Point2D, WorldRect, asLocalRect, LocalRect } from '@opengpex/editor/core/types';
 import { getLayerWorldMatrix } from './transform';
 import { worldToLocalRect, localToWorldRect } from './space';
 
@@ -734,6 +734,29 @@ export function snapRectToPixel(
 
   // 3. Project the aligned local space rectangle back to the world coordinate system
   return localToWorldRect(localRectAligned, canvasDim);
+}
+
+/**
+ * Snap a rect's EDGES (not its origin and size independently) outward onto the
+ * integer pixel lattice: left/top floor, right/bottom ceil. `snapToPixel`
+ * rounds every coordinate with ONE shared strategy, which cannot express
+ * "expand to cover the same region on whole-pixel boundaries"; this operator
+ * guarantees `snapped ⊇ input`, is idempotent, and produces an origin whose
+ * product with any integer scale factor is an integer — the property
+ * lattice-based consumers need to keep sub-lattices phase-aligned with the
+ * pixel grid (e.g. the render engine's ROI composite: integer rect origin ×
+ * integer density ⟹ texel boundaries coincide with document pixel boundaries).
+ *
+ * Frame-local (document pixel) space; degenerate inputs (w/h < 1 after the
+ * outward snap is impossible — floor/ceil of a non-empty rect spans ≥ 1) are
+ * guarded to a 1px minimum anyway.
+ */
+export function snapRectEdgesToPixel(rect: LocalRect): LocalRect {
+  const x0 = Math.floor(rect.x);
+  const y0 = Math.floor(rect.y);
+  const x1 = Math.ceil(rect.x + rect.w);
+  const y1 = Math.ceil(rect.y + rect.h);
+  return asLocalRect({ x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) });
 }
 
 // ─── Canvas Viewport Pixel-Snap ──────────────────────────────────────────────

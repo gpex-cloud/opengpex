@@ -34,9 +34,12 @@
  *     atlas uses, so the atlas and the composite always rasterize at a
  *     consistent density and pan/zoom inside a band is quantized away (zero
  *     re-composite; crossing a band costs exactly one).
- *   • The achieved scale is the band clamped UNIFORMLY by the VRAM hard cap:
- *     `min(band, ceil / max(docW, docH))`, `ceil = min(maxTextureDimension2D,
- *     4096)`. The clamp factor is shared by BOTH axes (driven by the LONGER
+ *   • The achieved scale is the band clamped UNIFORMLY by the caller-owned
+ *     ceiling: `min(band, ceil / max(docW, docH))`, `ceil = max(1,
+ *     maxTextureDimension2D)` — the caller passes
+ *     `min(deviceMaxDim, budgetDerivedCeilPx(...))` — physics + byte budget;
+ *     the old hard-coded 4096 fold is replaced. The clamp factor
+ *     is shared by BOTH axes (driven by the LONGER
  *     edge) so the composite always preserves the document aspect ratio — the
  *     present channel (`ViewPass` / `densityScale`) consumes a single scalar
  *     and cannot express per-axis densities. 4K/8K canvases at high zoom land
@@ -49,9 +52,12 @@
 import { quantizeDensityBand } from '@opengpex/editor/core/engine/text/glyphAtlas';
 
 /**
- * Absolute composite-texture edge ceiling (px) — plan §3.3 review fix. Bounds
- * the rgba16float composite target regardless of what `maxTextureDimension2D`
- * permits (4096² rgba16float ≈ 128 MiB; a second ping-pong buffer doubles it).
+ * Legacy composite-texture edge ceiling (px). The dual-channel policy
+ * (`compositeBudget.ts`) REPLACED this hard clamp as the sizing
+ * authority — the density ceiling is now owned by the CALLER
+ * (`min(deviceMaxDim, budgetDerivedCeilPx(...))`, i.e. physics + byte budget).
+ * The constant survives only as the engine's conservative fallback when the
+ * negotiated limits are unavailable.
  */
 export const INTERACTIVE_COMPOSITE_CEIL_PX = 4096;
 
@@ -86,7 +92,10 @@ export function resolveInteractiveDensity(
   maxTextureDimension2D: number,
 ): InteractiveDensity {
   const band = quantizeDensityBand(screenScale);
-  const ceil = Math.max(1, Math.min(maxTextureDimension2D, INTERACTIVE_COMPOSITE_CEIL_PX));
+  // The ceiling is OWNED BY THE CALLER since the dual-channel policy: pass
+  // `min(deviceMaxDim, budgetDerivedCeilPx(...))` — physics + byte budget
+  // prefolded. This function only applies the band-vs-ceiling clamp.
+  const ceil = Math.max(1, maxTextureDimension2D);
   const w = Math.max(1, docWidth);
   const h = Math.max(1, docHeight);
   // Aspect-preserving clamp: BOTH axes share one factor driven by the longer

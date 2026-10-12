@@ -221,10 +221,10 @@ function readBrushConfig(e: InteractionEvent, frame: Frame): StrokeConfig {
   const craftConfig = e.state.pluginConfig[CraftDrawerAPI.configKey] || {};
 
   // HARD mask edge: straight from the panel's AA toggle. The panel keeps the
-  // AA ⇔ hardness two-way binding (AA on forces hardness to 100, hardness < 100
-  // forces AA off), so no extra hardness gate is needed here — AA off is a
-  // deliberate user choice at ANY hardness. Shared by BOTH families (restore
-  // and eraser read the same toggle — zero special-casing).
+  // AA ⇔ hardness two-way binding (AA off forces hardness to 100, hardness < 100
+  // forces AA back on — a soft tip must be AA'd), so `hard: true` only ever
+  // pairs with hardness 100. Shared by BOTH families (restore and eraser read
+  // the same toggle — zero special-casing).
   const eraserAntiAliased = craftConfig.eraserAntiAliased as boolean | undefined;
 
   return {

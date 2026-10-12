@@ -122,6 +122,22 @@ export interface ExportViewport {
   readonly sourceRect?: readonly [number, number, number, number];
 }
 
+/**
+ * Where the composited texture sits inside the DOCUMENT (ROI channel). `origin` = the document coordinate of the texture's texel (0,0)
+ * (document PIXELS, not texels — the two differ by the composite density;
+ * unrelated to the ants' `gridOffset` phase); `docW/docH` = the covered
+ * document extent in document pixels. OMIT for the full channel — the texture
+ * then spans the whole document (origin 0,0, dims = `compositeDims(scene)`),
+ * byte-identical to the pre-ROI present. `origin` and the covered dims are
+ * ALWAYS passed together: present must not derive them independently (the ROI
+ * texture covers a sub-rect, which `compositeDims(scene)` cannot express).
+ */
+export interface TexPlacement {
+  readonly origin: { readonly x: number; readonly y: number };
+  readonly docW: number;
+  readonly docH: number;
+}
+
 /** Context for the view/present half (camera-dependent, swapchain). */
 export interface PresentContext {
   readonly device: GPUDevice;
@@ -140,6 +156,11 @@ export interface PresentContext {
    * (hard-clamped big canvases) nearest returns, the pre-P3 behaviour.
    */
   readonly densityScale?: number;
+  /**
+   * Document placement of `compositeTex` (ROI channel). Omit for
+   * the full-document texture (see {@link TexPlacement}).
+   */
+  readonly texPlacement?: TexPlacement;
   /** [PERF_MON] When set, the view pass writes GPU begin/end timestamps. */
   readonly gpuTimer?: GpuTimer;
 }
@@ -611,7 +632,10 @@ export class RenderGraph {
    */
   static present(compositeTex: LayerTexture, ctx: PresentContext): void {
     const { device, pipelineCache, bufferRing, currentView, targetFormat, scene } = ctx;
-    const { frameWidth, frameHeight } = compositeDims(scene);
+    // texPlacement (ROI) carries the covered document extent explicitly — the
+    // full channel omits it and derives the whole-document dims as before.
+    const frameWidth = ctx.texPlacement ? Math.max(1, ctx.texPlacement.docW) : compositeDims(scene).frameWidth;
+    const frameHeight = ctx.texPlacement ? Math.max(1, ctx.texPlacement.docH) : compositeDims(scene).frameHeight;
 
     const commandEncoder = device.createCommandEncoder({ label: 'RenderGraph Present Encoder' });
 
@@ -629,6 +653,10 @@ export class RenderGraph {
       frameHeight,
       scene.view.target.width,
       scene.view.target.height,
+      // ROI: fold the texture's document origin in front of the camera
+      // (N ∘ (camera ∘ T(origin)) ∘ S). Omitted (0,0) on the full channel →
+      // the pre-ROI mapping, byte-identical.
+      ctx.texPlacement?.origin,
     );
 
     const viewCtx: ViewPassContext = {

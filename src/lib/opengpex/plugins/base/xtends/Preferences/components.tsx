@@ -20,7 +20,7 @@
 'use client';
 
 import React from 'react';
-import { Mouse, Scissors, Move, ShieldCheck, Info } from 'lucide-react';
+import { Mouse, Scissors, Move, ShieldCheck, Gauge, Info } from 'lucide-react';
 import Switch from '@opengpex/editor/widgets/Switch';
 import { usePreset } from '@opengpex/editor/core/helpers/preferences/usePreset';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
@@ -34,6 +34,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number }>> = {
   Scissors,
   Move,
   ShieldCheck,
+  Gauge,
 };
 
 // ─── Grouped Manifest ─────────────────────────────────────────────────────────

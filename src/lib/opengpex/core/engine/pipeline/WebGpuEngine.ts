@@ -47,20 +47,32 @@ import { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTe
 import { BufferRing } from '@opengpex/editor/core/engine/gpu/resources/BufferRing';
 import { PipelineCache } from '@opengpex/editor/core/engine/gpu/resources/PipelineCache';
 import { GpuTimer } from '@opengpex/editor/core/engine/gpu/resources/GpuTimer';
-import { SceneCompiler } from '@opengpex/editor/core/engine/pipeline/graph/SceneCompiler';
-import { RenderGraph, compositeDims, type ExportViewport } from '@opengpex/editor/core/engine/pipeline/graph/RenderGraph';
+import { SceneCompiler, type CompiledScene } from '@opengpex/editor/core/engine/pipeline/graph/SceneCompiler';
+import {
+  RenderGraph,
+  compositeDims,
+  type ExportViewport,
+  type TexPlacement,
+} from '@opengpex/editor/core/engine/pipeline/graph/RenderGraph';
 import { effectiveScale } from '@opengpex/editor/core/engine/pipeline/graph/support/layerGeometry';
 import {
   resolveInteractiveDensity,
   densityCompositeDims,
   INTERACTIVE_COMPOSITE_CEIL_PX,
 } from '@opengpex/editor/core/engine/pipeline/graph/support/densityComposite';
+import {
+  resolveCompositePlan,
+  budgetDerivedCeilPx,
+  COMPOSITE_BUDGET_DEFAULT_BYTES,
+  workingFormatBpp,
+} from '@opengpex/editor/core/engine/pipeline/graph/support/compositeBudget';
+import { resolveRoiFrame } from '@opengpex/editor/core/engine/pipeline/graph/support/roiFrame';
 import { computeCompositeSignature } from '@opengpex/editor/core/engine/pipeline/scene/compositeSignature';
 import { clearVmaskCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareVmaskSources';
 import { releaseExportGlyphAtlas } from '@opengpex/editor/core/engine/pipeline/graph/build/vectorRenderers/TextRenderer';
 import { clearBmaskCombineCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareBmaskCombine';
-import { GPUTextureUsage, GPUBufferUsage } from '@opengpex/editor/core/engine/gpu/constants';
-import { halfToFloat } from '@opengpex/editor/core/engine/color/float16';
+import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
+import { readbackToPixels } from '@opengpex/editor/core/engine/gpu/readback';
 import type { IEngine, ExportOptions, ExportResult, UploadSource, LutUpload } from '@opengpex/editor/core/engine/pipeline/IEngine';
 import type { Lut3dUpload } from '@opengpex/editor/core/engine/pipeline/scene/lut3dPlan';
 import { PERF_MON } from '@opengpex/editor/core/helpers/config';
@@ -145,6 +157,51 @@ export class WebGpuEngine implements IEngine {
   private compositeDensityScale = 1;
 
   /**
+   * One-entry memo for the per-frame channel decision. The
+   * plan is a PURE function of (doc dims, bpp, negotiated limit) — this key is
+   * complete (two frames with equal inputs belong to equal plans; the byte
+   * budget is a compile-time constant, not a runtime input), so a hit skips
+   * the trivial recompute and, more importantly, gives the render loop a
+   * stable handle on the CURRENT channel. A frame-load or frame-resize needs
+   * no explicit hook: they change the inputs → the memo misses → the next
+   * frame re-decides.
+   */
+  private planMemo: {
+    docW: number; docH: number; bpp: number; deviceMaxDim: number;
+  } | null = null;
+  private planMemoMode: 'full' | 'roi' = 'full';
+
+  /**
+   * Documents whose density-1 footprint exceeds the composite budget or the
+   * device texture limit composite ONLY their visible region into this smaller
+   * resident target, re-rendered when the quantized visible rect moves (block
+   * lattice = the hysteresis), the band crosses, or content edits.
+   */
+  private roiTexture: LayerTexture | null = null;
+  /** Content signature the cached roi was rendered at. */
+  private roiSignature: string | null = null;
+  /** Quantized visible-rect rebuild key (`getVisibleRect` key + band) of the cache. */
+  private roiRectKey: string | null = null;
+  /** Document-space rect (frame-local px) the cached roi texture covers. */
+  private roiRectX = 0;
+  private roiRectY = 0;
+  private roiRectW = 0;
+  private roiRectH = 0;
+  /** Texel dims of the cached roi texture (rect × density). */
+  private roiTargetW = 0;
+  private roiTargetH = 0;
+  private roiFormat: GPUTextureFormat | null = null;
+  /** The ACHIEVED roi density (≥ 1 except where physics forces below — see resolveRoiDensity). */
+  private roiDensityScale = 1;
+  /**
+   * Document dims the cached roi was built for (transition guard: a roi
+   * from a DIFFERENT document — a resize channel flip — must never be
+   * presented as a fallback during the full-channel rebuild).
+   */
+  private roiDocW = 0;
+  private roiDocH = 0;
+
+  /**
    * Per-asset epoch, bumped on every GENUINE re-transfer in `upload()` (not on
    * deduped no-ops). Feeds the composite signature so an in-place pixel edit
    * (same assetId, new bitmap) invalidates the cache (R2 miss-detection).
@@ -200,7 +257,7 @@ export class WebGpuEngine implements IEngine {
     n: 0,
     compileSum: 0, compileMax: 0,
     sigSum: 0, sigMax: 0, sigMiss: 0,
-    recompN: 0, compEncSum: 0, compEncMax: 0,
+    recompN: 0, roiRecompN: 0, compEncSum: 0, compEncMax: 0,
     presEncSum: 0, presEncMax: 0,
     compGpuSum: 0, compGpuN: 0, compGpuMax: 0,
     presGpuSum: 0, presGpuN: 0, presGpuMax: 0,
@@ -211,6 +268,8 @@ export class WebGpuEngine implements IEngine {
     tsCompSpanSum: 0, tsCompSpanN: 0, tsCompSpanMax: 0,
     tsPass: {} as Record<string, { sum: number; n: number; max: number }>,
     docW: 0, docH: 0, layers: 0,
+    mode: 'full' as 'full' | 'roi',
+    roiTargetW: 0, roiTargetH: 0, roiDensity: 0,
     lastFlush: 0,
   };
 
@@ -292,37 +351,13 @@ export class WebGpuEngine implements IEngine {
         // On device loss, replay the last Scene once the device is back.
         this.gpu.setLostHandler(() => {
           this.initPromise = null;
-          for (const asset of this.assets.values()) {
-            asset.destroy();
-          }
-          this.assets.clear();
-          this.assetMeta.clear();
-
           const scene = this.lastScene;
           const currentCanvas = this.gpu.getCanvas() ?? canvas;
           void this.gpu.init(currentCanvas, surface).then(() => {
             const reloadedDevice = this.gpu.getDevice();
             if (reloadedDevice) {
-              this.texturePool?.destroy();
-              this.texturePool = this.#makeTexturePool(reloadedDevice, this.gpu.getCapabilities());
-              // The resident transients belonged to the lost device.
-              this.residentTransients?.clear();
-              this.residentTransients = new ResidentTransientCache(reloadedDevice);
-              this.pipelineCache?.destroy();
-              this.pipelineCache = new PipelineCache(reloadedDevice);
-              this.bufferRing?.destroy();
-              this.bufferRing = new BufferRing(reloadedDevice);
+              this.#adoptDevice(reloadedDevice, this.gpu.getCapabilities());
             }
-            // The composite target belonged to the lost device and is
-            // engine-owned (not freed by the pool teardown above). Destroy it and
-            // clear the cache stamps so the replay below rebuilds it fresh.
-            this.compositeTexture?.destroy();
-            this.compositeTexture = null;
-            this.compositeSignature = null;
-            this.compositeFormat = null;
-            this.compositeTargetW = 0;
-            this.compositeTargetH = 0;
-            this.compositeDensityScale = 1;
             if (scene) this.render(scene);
           });
         });
@@ -372,57 +407,15 @@ export class WebGpuEngine implements IEngine {
     const caps = this.gpu.getCapabilities();
     if (!context || !device || !caps) return;
 
-    // Safety checks: ensure device matches all cached resources
+    // Safety checks: ensure device matches all cached resources — a mismatch
+    // (e.g. a swapped device outside the lost-handler flow) re-adopts every
+    // device-owned resource in one sweep.
     if (
       this.pipelineCache.device !== device ||
       this.texturePool.device !== device ||
       this.bufferRing.device !== device
     ) {
-      this.pipelineCache.destroy();
-      this.pipelineCache = new PipelineCache(device);
-      this.texturePool.destroy();
-      this.texturePool = this.#makeTexturePool(device, caps);
-      // Resident transients belonged to the mismatched device.
-      this.residentTransients?.clear();
-      this.residentTransients = new ResidentTransientCache(device);
-      this.bufferRing.destroy();
-      this.bufferRing = new BufferRing(device);
-
-      for (const asset of this.assets.values()) {
-        asset.destroy();
-      }
-      this.assets.clear();
-      this.assetMeta.clear();
-      // LUT textures belonged to the destroyed device — drop them so the next
-      // frame re-uploads via the SceneAssembler LUT plan (dedup by lutId).
-      for (const entry of this.luts.values()) {
-        entry.texture.destroy();
-      }
-      this.luts.clear();
-      for (const entry of this.luts3d.values()) {
-        entry.texture.destroy();
-      }
-      this.luts3d.clear();
-      // Device rebuild invalidates the composite cache —
-      // the target is engine-owned (not pooled), so DESTROY it explicitly;
-      // the recreated TexturePool no longer frees it for us. Force a fresh composite.
-      this.compositeTexture?.destroy();
-      this.compositeTexture = null;
-      this.compositeSignature = null;
-      this.compositeFormat = null;
-      this.compositeTargetW = 0;
-      this.compositeTargetH = 0;
-      this.compositeDensityScale = 1;
-      this.assetEpochs.clear();
-      // Device rebuild invalidates the signature memo too.
-      this.sigMemoLayers = null;
-      this.sigMemoValue = null;
-      this.assetEpochVersion++;
-      // [PERF_MON] GPU timers held resources on the destroyed device.
-      this._compTimer?.destroy();
-      this._compTimer = null;
-      this._presTimer?.destroy();
-      this._presTimer = null;
+      this.#adoptDevice(device, caps);
     }
 
     // Safety checks: canvas must be connected to DOM and have non-zero dimensions
@@ -454,21 +447,24 @@ export class WebGpuEngine implements IEngine {
     // compositing entirely and replay just the cheap view pass.
     const { frameWidth: docW, frameHeight: docH } = compositeDims(scene);
 
-    // P3 — density-banded interactive composite (plan §3.3). Quantize the
-    // camera's screen scale (cam.k × dpr, pixel-snapped) onto the glyph-atlas
-    // density bands, clamped per edge by the VRAM hard cap
-    // (min(maxTextureDimension2D, 4096)). Recomputing each frame is a few
-    // compares; only the QUANTIZED value matters downstream — inside a band
-    // pan/zoom leaves the composite dims unchanged (cache hit), crossing a band
-    // changes them → exactly one re-composite per crossing.
-    const density = resolveInteractiveDensity(
-      effectiveScale(scene.view.transform),
-      docW,
-      docH,
-      device.limits?.maxTextureDimension2D ?? INTERACTIVE_COMPOSITE_CEIL_PX,
-    );
-    const [compW, compH] = densityCompositeDims(docW, docH, [density.scaleX, density.scaleY]);
-    const densityScale = Math.min(density.scaleX, density.scaleY);
+    // Density-banded interactive composite: quantize the camera's screen
+    // scale (cam.k × dpr, pixel-snapped) onto the glyph-atlas density bands.
+    // Recomputing each frame is a few compares; only the QUANTIZED value
+    // matters downstream — inside a band pan/zoom leaves the composite dims
+    // unchanged (cache hit), crossing a band changes them → exactly one
+    // re-composite per crossing.
+    //
+    // Dual channel: the byte budget (128 MiB policy constant,
+    // compositeBudget.ts) + the negotiated device limit decide — zoom-
+    // INDEPENDENTLY — whether the document holds a full-document 1:1 composite
+    // ('full': existing architecture) or must composite only its visible
+    // region ('roi'). The area-based budget is deliberately stricter than the
+    // old per-edge 4096 clamp on non-square documents.
+    const workingBpp = workingFormatBpp(workingFormat as 'rgba16float' | 'rgba32float');
+    const deviceMaxDim =
+      device.limits?.maxTextureDimension2D ?? caps.limits.maxTextureDimension2D ?? INTERACTIVE_COMPOSITE_CEIL_PX;
+    const budgetBytes = COMPOSITE_BUDGET_DEFAULT_BYTES;
+    const screenScale = effectiveScale(scene.view.transform);
 
     // Reuse the memoized signature when the inputs it derives from are
     // unchanged (same `scene.layers` reference on a cam-only frame + same dims /
@@ -503,6 +499,49 @@ export class WebGpuEngine implements IEngine {
     }
     const _pSigMs = PERF_MON ? performance.now() - _pSigT0 : 0;
 
+    // Re-decide the channel every frame, memoized on the
+    // plan's complete pure-input key (see planMemo). Frame load/resize needs
+    // no explicit hook — they change the inputs.
+    const memo = this.planMemo;
+    if (
+      !memo ||
+      memo.docW !== docW || memo.docH !== docH ||
+      memo.bpp !== workingBpp || memo.deviceMaxDim !== deviceMaxDim
+    ) {
+      this.planMemo = {
+        docW, docH, bpp: workingBpp, deviceMaxDim,
+      };
+      this.planMemoMode = resolveCompositePlan({
+        docW, docH, bpp: workingBpp, deviceMaxDim, budgetBytes,
+      }).mode;
+    }
+    const planMode = this.planMemoMode;
+
+    // Per-frame presentation state resolved by the channel branch below.
+    let activeTexture: LayerTexture | null = null;
+    let activeDensityScale = 1;
+    let activePlacement: TexPlacement | undefined;
+    let recomposited = false;
+    let recompositedRoi = false;
+    let _pCompEncMs = 0;
+
+    if (planMode === 'full') {
+    // ── FULL channel (existing architecture) ──
+    // Mode='full' guarantees density ≥ 1: the budget term ≥ 1 by the channel
+    // decision and the device term ≥ 1 by the physics veto — the mosaic
+    // failure mode is structurally impossible here.
+    const density = resolveInteractiveDensity(
+      screenScale,
+      docW,
+      docH,
+      // Budget-derived edge ceiling prefolded with the negotiated device limit:
+      // adds the area-budget clamp term to min(band, ceil/maxDocDim) without
+      // changing resolveInteractiveDensity's contract.
+      Math.min(deviceMaxDim, budgetDerivedCeilPx(docW, docH, workingBpp, budgetBytes)),
+    );
+    const [compW, compH] = densityCompositeDims(docW, docH, [density.scaleX, density.scaleY]);
+    const densityScale = Math.min(density.scaleX, density.scaleY);
+
     // R5 — composite texture lifecycle: rebuild when the cached one is missing,
     // its dims changed (document resize OR a density-band crossing — the
     // band-scaled dims move), or the working format changed.
@@ -514,9 +553,27 @@ export class WebGpuEngine implements IEngine {
     const needsRecomposite =
       this.compositeTexture === null || dimsChanged || this.compositeSignature !== signature;
 
+    // roi→full transition: the full target was DROPPED when the
+    // roi channel took over, so a channel flip rebuilds it. While that rebuild
+    // encodes (same tick, below), a CONTENT-FRESH roi for the SAME document
+    // keeps presenting — no white frame, no blocking; the fresh full lands the
+    // next rendered frame (pixels identical meanwhile). A roi from a DIFFERENT
+    // document (resize flip) or a STALE roi (edits since) must not show — the
+    // normal path presents the just-encoded full instead.
+    const roiFallbackUsable =
+      this.roiTexture !== null &&
+      this.roiDocW === docW && this.roiDocH === docH &&
+      this.roiSignature === signature;
+    const presentRoiDuringFullRebuild = needsRecomposite && roiFallbackUsable;
+    // Once the full channel is fresh again, the roi fallback is redundant
+    // VRAM — drop it (idempotent; a later channel flip rebuilds it cheaply).
+    if (!needsRecomposite && this.roiTexture) {
+      this.#clearRoiChannel();
+    }
+
     const _pCompEncT0 = PERF_MON ? performance.now() : 0;
-    let _pCompEncMs = 0;
     if (needsRecomposite) {
+      recomposited = true;
       // The composite target is ENGINE-OWNED — an exact-size
       // (NON-POT, NON-pool) texture reused IN PLACE across frames. A signature-
       // only change (any edit) re-renders into the SAME texture; only a dims/
@@ -540,87 +597,162 @@ export class WebGpuEngine implements IEngine {
         this.compositeTexture = this.#createCompositeTarget(device, compW, compH, workingFormat);
       }
 
-      // [PERF_MON] Arm the composite GPU timer (skips if a prior readback is still
-      // pending → natural sampling). `startSubmit` gates whether passes instrument.
-      let _compArmed = false;
-      if (PERF_MON) {
-        if (!this._compTimer) this._compTimer = new GpuTimer(device, 'composite');
-        _compArmed = this._compTimer.startSubmit();
-      }
-
-      // Open the resident-transient frame so this composite's `acquire`s
-      // mark their slots live; `endFrame()` after submit sweeps any slot that
-      // went untouched (a committed stroke's transient, idle ping-pong buffers).
-      this.residentTransients?.beginFrame();
-
-      const { scratch } = RenderGraph.composite(compiled, {
+      _pCompEncMs = this.#compositeInto(compiled, {
         device,
-        pipelineCache: this.pipelineCache,
-        bufferRing: this.bufferRing,
-        texturePool: this.texturePool,
-        assets: this.assets,
         workingFormat,
-        resolveLutView: (lutId) => this.getLutView(lutId),
-        resolveLut3dView: (lutId) => this.getLut3dView(lutId),
-        // Keys the bmask combine cache: a re-uploaded mask record (live
-        // fast-override stroke) must re-combine that layer's mask.
-        getAssetEpoch: (assetId) => this.assetEpochs.get(assetId) ?? 0,
-        target: this.compositeTexture,
-        // P3: render the composite (and the vector/text transients through the
-        // same supersampling seam) at the current density band's achieved scale.
+        target: this.compositeTexture!,
+        // P3: render the composite at the current density band's achieved
+        // scale.
         interactiveScale: [density.scaleX, density.scaleY],
-        acquireResidentTransient: this.residentTransients
-          ? (key, desc) => this.residentTransients!.acquire(key, desc)
-          : undefined,
-        gpuTimer: _compArmed ? this._compTimer! : undefined,
+        perfStart: _pCompEncT0,
       });
-
-      // The composite landed in the engine-owned `target`; only the pooled
-      // scratch (ping-pong spare + filter transients) returns to the pool.
-      // Resident buffers are excluded by RenderGraph (the cache owns them).
-      for (const tex of scratch) this.texturePool.release(tex);
-
-      // Sweep resident slots not touched this frame (lazy de-alloc).
-      this.residentTransients?.endFrame();
 
       this.compositeSignature = signature;
       this.compositeTargetW = compW;
       this.compositeTargetH = compH;
       this.compositeFormat = workingFormat;
       this.compositeDensityScale = densityScale;
+    }
 
-      if (PERF_MON) {
-        _pCompEncMs = performance.now() - _pCompEncT0;
-        // GPU-done latency for composite: measured from the start of encode until
-        // the queue signals this (and all prior) work complete. See _renderPerf.
-        const g0 = _pCompEncT0;
-        onQueueDone(device.queue, () => {
-          const ms = performance.now() - g0;
-          const w = this._renderPerf;
-          w.compGpuSum += ms; w.compGpuN++;
-          if (ms > w.compGpuMax) w.compGpuMax = ms;
-        });
-        // True per-pass GPU exec time (backlog-independent). Reads after submit.
-        if (_compArmed) {
-          this._compTimer!.read((r) => {
-            const w = this._renderPerf;
-            w.tsCompSpanSum += r.spanMs; w.tsCompSpanN++;
-            if (r.spanMs > w.tsCompSpanMax) w.tsCompSpanMax = r.spanMs;
-            for (const p of r.passes) this.#accumTsPass(p.label, p.ms);
-          });
+    if (presentRoiDuringFullRebuild) {
+        activeTexture = this.roiTexture;
+        activeDensityScale = this.roiDensityScale;
+        activePlacement = {
+          origin: { x: this.roiRectX, y: this.roiRectY },
+          docW: this.roiRectW,
+          docH: this.roiRectH,
+        };
+      } else {
+        activeTexture = this.compositeTexture;
+        activeDensityScale = densityScale;
+      }
+    } else {
+    // ── ROI channel ──
+    // Only the visible region composites, at band-clamped density ≥ 1 (the
+    // correctness root: every magnified texel is a real document pixel, so the
+    // pixel grid aligns at ANY zoom). Rebuild triggers: the quantized
+    // visible-rect key (the block lattice IS the hysteresis — no second
+    // design), a band crossing, a content edit, or target dims/format change.
+    // Within the rect, pan/zoom still replays only the cheap present.
+    //
+    // The full channel's resident target would go stale under roi-mode
+    // edits and double-book the budget — drop it when roi takes over. The way
+    // back rebuilds it in-frame while this roi (if fresh) keeps presenting.
+    if (this.compositeTexture) {
+      this.compositeTexture.destroy();
+      this.compositeTexture = null;
+      this.compositeSignature = null;
+      this.compositeFormat = null;
+      this.compositeTargetW = 0;
+      this.compositeTargetH = 0;
+      this.compositeDensityScale = 1;
+    }
+    // The whole roi decision — rect, density, dims, rebuild key, rebuild
+    // need — is one pure function of this frame's inputs plus the resident
+    // stamps (see roiFrame.ts); the engine consumes the decision and owns
+    // only the texture lifecycle.
+    const roi = resolveRoiFrame({
+      scene,
+      docW,
+      docH,
+      screenScale,
+      workingFormat: workingFormat as 'rgba16float' | 'rgba32float',
+      deviceMaxDim,
+      budgetBytes,
+      signature,
+      current: {
+        resident: this.roiTexture !== null,
+        rectKey: this.roiRectKey,
+        signature: this.roiSignature,
+        targetW: this.roiTargetW,
+        targetH: this.roiTargetH,
+        format: this.roiFormat,
+      },
+    });
+
+    if (roi.rect && roi.density) {
+      const intersect = roi.rect;
+      const roiDensity = roi.density;
+
+      const _pCompEncT0 = PERF_MON ? performance.now() : 0;
+      if (roi.needsComposite) {
+        recomposited = true;
+        recompositedRoi = true;
+        // Same engine-owned exact-size lifecycle as the full channel: in-place
+        // re-render on key/signature moves (constant-size pans re-render into
+        // the SAME texture), destroy + recreate only when the texel dims or
+        // format move. NOTE: unlike the full channel, a dims change does NOT
+        // clear the resident transients / evict the pool — the roi's
+        // ping-pong/vector transients resize WITH the roi and the resident
+        // cache sweeps their old slots lazily.
+        if (this.roiTexture && roi.dimsChanged) {
+          this.roiTexture.destroy();
+          this.roiTexture = null;
         }
+        if (!this.roiTexture) {
+          this.roiTexture = this.#createCompositeTarget(device, roi.targetW, roi.targetH, workingFormat);
+        }
+
+        _pCompEncMs = this.#compositeInto(compiled, {
+          device,
+          workingFormat,
+          target: this.roiTexture,
+          interactiveScale: [roiDensity.scaleX, roiDensity.scaleY],
+          exportViewport: {
+            targetWidth: roi.targetW,
+            targetHeight: roi.targetH,
+            sourceRect: [intersect.x, intersect.y, intersect.w, intersect.h],
+          } satisfies ExportViewport,
+          perfStart: _pCompEncT0,
+        });
+
+        this.roiSignature = signature;
+        this.roiRectKey = roi.rebuildKey;
+        this.roiRectX = intersect.x;
+        this.roiRectY = intersect.y;
+        this.roiRectW = intersect.w;
+        this.roiRectH = intersect.h;
+        this.roiTargetW = roi.targetW;
+        this.roiTargetH = roi.targetH;
+        this.roiFormat = workingFormat;
+        this.roiDensityScale = Math.min(roiDensity.scaleX, roiDensity.scaleY);
+        this.roiDocW = docW;
+        this.roiDocH = docH;
       }
     }
 
+    // Present from the roi cache whenever it exists — INCLUDING when the
+    // viewport is fully off-document (`intersect` null, no rebuild): mapping
+    // the stale rect's quad off-screen is what CLEARS the swapchain (present
+    // pass loadOp:'clear'); skipping the present would leave the previous
+    // frame's pixels on screen.
+    if (this.roiTexture) {
+      activeTexture = this.roiTexture;
+      activeDensityScale = this.roiDensityScale;
+      // origin + covered dims ALWAYS travel together:
+      // present must not re-derive the extent from compositeDims(scene).
+      activePlacement = {
+        origin: { x: this.roiRectX, y: this.roiRectY },
+        docW: this.roiRectW,
+        docH: this.roiRectH,
+      };
+    }
+    }
+
     // 3. Present the (possibly cached) composite to the swapchain applying the
-    // camera. This runs EVERY frame — it is the only work on pan/zoom.
+    // camera. This runs EVERY frame — it is the only work on pan/zoom (inside
+    // the roi rect: the block-quantized rect is stable across small pans).
+    // Skipped only when the roi channel has no texture yet (first frame with
+    // the viewport fully off-document — the swapchain's initial transparent
+    // black lets the stage's checkerboard show through).
+    if (activeTexture) {
     const _pPresEncT0 = PERF_MON ? performance.now() : 0;
     let _presArmed = false;
     if (PERF_MON) {
       if (!this._presTimer) this._presTimer = new GpuTimer(device, 'present');
       _presArmed = this._presTimer.startSubmit();
     }
-    RenderGraph.present(this.compositeTexture!, {
+    RenderGraph.present(activeTexture, {
       device,
       pipelineCache: this.pipelineCache,
       bufferRing: this.bufferRing,
@@ -633,7 +765,11 @@ export class WebGpuEngine implements IEngine {
       scene,
       // P3: the composite holds densityScale texels per document px, so the
       // magnify/minify sampler compares the camera scale against THAT density.
-      densityScale: this.compositeDensityScale,
+      densityScale: activeDensityScale,
+      // ROI: the texture covers a document SUB-RECT — present folds its origin
+      // in front of the camera. Undefined on the full
+      // channel → the whole-document mapping, byte-identical to pre-ROI.
+      texPlacement: activePlacement,
       gpuTimer: _presArmed ? this._presTimer! : undefined,
     });
 
@@ -656,13 +792,15 @@ export class WebGpuEngine implements IEngine {
         compileMs: _pCompileMs,
         sigMs: _pSigMs,
         sigMiss: _pSigMiss,
-        recomposite: needsRecomposite,
+        recomposite: recomposited,
+        recompositeRoi: recompositedRoi,
         compEncMs: _pCompEncMs,
         presEncMs,
         docW,
         docH,
         layers: scene.layers.length,
       });
+    }
     }
 
     // 3. Real pixels are now committed to the swapchain — release any one-shot
@@ -681,20 +819,16 @@ export class WebGpuEngine implements IEngine {
   /**
    * Same Scene, offscreen sink + readback (sharing the same render pipeline).
    *
-   * Readback flow:
-   *   composite → `copyTextureToBuffer` (256-aligned) → `mapAsync(READ)` →
-   *   de-pad rows → decode `rgba16float` texels → quantize to the requested
-   *   depth → `ExportResult`.
+   * Orchestration only: composite → `readbackToPixels` (staging + mapAsync +
+   * decode, in `gpu/readback.ts`) → one-shot release of the pooled target,
+   * scratch, and the export-band glyph atlas.
    *
    * DELIBERATELY DEFERRED (do NOT add here):
    *   • Large-image tiling when the row-padded buffer exceeds `maxBufferSize`
    *     (TODO: split into horizontal bands, copy+map each, stitch).
-   *   • TERMINAL TRC / colour-space ENCODE. The composite buffer is LINEAR light.
-   *     This method returns LINEAR values in the requested container; the single
-   *     sRGB/target-TRC encode belongs to the codec step, which MUST reuse the same
-   *     `linear_to_srgb` conversion as `view.wgsl` (no second encode point).
-   *     f16 depth returns the raw linear half decoded to float; u8/u16 quantize
-   *     the linear value as-is.
+   *   • TERMINAL TRC / colour-space ENCODE — the readback returns LINEAR
+   *     light in the requested container; the single sRGB/target-TRC encode
+   *     belongs to the codec step (see readback.ts).
    *
    * Reuses `RenderGraph.composite` (its pooled target already carries
    * `COPY_SRC`), so export shares the exact compile+composite path as `render()`.
@@ -744,60 +878,18 @@ export class WebGpuEngine implements IEngine {
       exportViewport,
     });
 
-    // Tracked out here so the `finally` can free it on ANY exit path: a lost
-    // device rejects `mapAsync`, and `#decodeReadback` throws on OOM. Either one
-    // used to leak the whole staging buffer (tens to hundreds of MB) per attempt.
-    let staging: GPUBuffer | undefined;
-    let mappedNow = false;
+    // 2. Read the composited target back. The staging buffer's lifecycle
+    // (including the lost-device / OOM exit paths) lives inside
+    // `readbackToPixels`.
+    let pixels: Uint8ClampedArray | Uint16Array | Float32Array;
     try {
-      // 2. Read the TARGET rect (targetW×targetH) back. rgba16float = 8 bytes/texel;
-      // rgba32float = 16. copyTextureToBuffer requires bytesPerRow % 256 === 0.
-      const bytesPerTexel = workingFormat === 'rgba32float' ? 16 : 8;
-      const bytesPerRow = Math.ceil((targetW * bytesPerTexel) / 256) * 256;
-      const bufferSize = bytesPerRow * targetH;
-
-      if (device.limits?.maxBufferSize && bufferSize > device.limits.maxBufferSize) {
-        throw new Error(
-          `[WebGpuEngine] Export readback buffer size (${bufferSize} bytes) exceeds device maxBufferSize (${device.limits.maxBufferSize} bytes).`,
-        );
-      }
-
-      staging = device.createBuffer({
-        label: 'Export Readback Staging',
-        size: bufferSize,
-        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-      });
-
-      const encoder = device.createCommandEncoder({ label: 'Export Readback Encoder' });
-      encoder.copyTextureToBuffer(
-        { texture: composite.texture, mipLevel: 0, origin: { x: 0, y: 0, z: 0 } },
-        { buffer: staging, offset: 0, bytesPerRow, rowsPerImage: targetH },
-        { width: targetW, height: targetH, depthOrArrayLayers: 1 },
-      );
-      device.queue.submit([encoder.finish()]);
-
-      // `bufferSize` is a multiple of 256, so it satisfies mapAsync's alignment.
-      await staging.mapAsync(GPUMapMode.READ, 0, bufferSize);
-      mappedNow = true;
-      const mapped = staging.getMappedRange(0, bufferSize);
-
-      // 3. De-pad rows + decode → quantize to the requested container.
-      const pixels = this.#decodeReadback(mapped, {
+      pixels = await readbackToPixels(device, composite.texture, {
         width: targetW,
         height: targetH,
-        bytesPerRow,
-        workingFormat,
+        workingFormat: workingFormat as 'rgba16float' | 'rgba32float',
         bitDepth: opts.bitDepth,
       });
-
-      return { width: targetW, height: targetH, bitDepth: opts.bitDepth, pixels };
     } finally {
-      // `unmap()` is only legal on a mapped buffer, hence the flag; `destroy()`
-      // is safe either way and implicitly unmaps.
-      if (staging) {
-        if (mappedNow) staging.unmap();
-        staging.destroy();
-      }
       // Export composite target + scratch are one-shot: return them all.
       this.texturePool.release(composite.texture);
       for (const tex of scratch) this.texturePool.release(tex);
@@ -810,6 +902,8 @@ export class WebGpuEngine implements IEngine {
       // renderer internals for it.
       releaseExportGlyphAtlas(Math.max(targetW / Math.max(1, srcW), targetH / Math.max(1, srcH)));
     }
+
+    return { width: targetW, height: targetH, bitDepth: opts.bitDepth, pixels };
   }
 
   /**
@@ -820,6 +914,199 @@ export class WebGpuEngine implements IEngine {
    */
   #makeTexturePool(device: GPUDevice, caps: Capabilities | null): TexturePool {
     return new TexturePool(device, { maxFreeBytes: derivePoolBudget(caps ?? UNKNOWN_CAPABILITIES) });
+  }
+
+  /**
+   * Destroy the ROI channel's resident state (device loss / device rebuild /
+   * teardown — the same moments the full-channel composite target is cleared).
+   */
+  #clearRoiChannel(): void {
+    this.roiTexture?.destroy();
+    this.roiTexture = null;
+    this.roiSignature = null;
+    this.roiRectKey = null;
+    this.roiRectX = 0;
+    this.roiRectY = 0;
+    this.roiRectW = 0;
+    this.roiRectH = 0;
+    this.roiTargetW = 0;
+    this.roiTargetH = 0;
+    this.roiFormat = null;
+    this.roiDensityScale = 1;
+    this.roiDocW = 0;
+    this.roiDocH = 0;
+  }
+
+  /**
+   * Drop every cache whose contents reference a GPU device: resident assets,
+   * LUTs, the engine-owned composite/roi targets, the dedup/epoch/signature
+   * memos, and the [PERF_MON] timers. The single home for this sweep — device
+   * loss recovery, the render-path device-mismatch guard, and teardown all
+   * used to hand-maintain near-identical copies that had already drifted (the
+   * lost path skipped the asset-epoch / signature-memo reset the mismatch
+   * path performed).
+   */
+  #releaseCaches(): void {
+    for (const asset of this.assets.values()) {
+      asset.destroy();
+    }
+    this.assets.clear();
+    this.assetMeta.clear();
+    // LUT textures belonged to the destroyed device — drop them so the next
+    // frame re-uploads via the SceneAssembler LUT plan (dedup by lutId).
+    for (const entry of this.luts.values()) {
+      entry.texture.destroy();
+    }
+    this.luts.clear();
+    for (const entry of this.luts3d.values()) {
+      entry.texture.destroy();
+    }
+    this.luts3d.clear();
+    // Engine-owned targets are OUTSIDE the pool (nothing else frees them):
+    // destroy explicitly and clear the stamps so the next frame rebuilds
+    // them fresh.
+    this.compositeTexture?.destroy();
+    this.compositeTexture = null;
+    this.compositeSignature = null;
+    this.compositeFormat = null;
+    this.compositeTargetW = 0;
+    this.compositeTargetH = 0;
+    this.compositeDensityScale = 1;
+    this.#clearRoiChannel();
+    // Epochs restart (an upload against the new device is a genuine first
+    // transfer) and the signature memo drops (the next frame recomputes).
+    this.assetEpochs.clear();
+    this.sigMemoLayers = null;
+    this.sigMemoValue = null;
+    this.assetEpochVersion++;
+    // [PERF_MON] GPU timers held resources on the destroyed device.
+    this._compTimer?.destroy();
+    this._compTimer = null;
+    this._presTimer?.destroy();
+    this._presTimer = null;
+  }
+
+  /**
+   * Bind every device-owned resource to a (re)negotiated device: sweep all
+   * caches ({@link #releaseCaches}) then rebuild the pool, resident
+   * transients, pipeline cache, and buffer ring against the new device.
+   * Device-loss recovery and the render-path device-mismatch guard both
+   * funnel here so their semantics cannot drift apart again.
+   */
+  #adoptDevice(device: GPUDevice, caps: Capabilities | null): void {
+    this.#releaseCaches();
+    this.texturePool?.destroy();
+    this.texturePool = this.#makeTexturePool(device, caps);
+    // The resident transients belonged to the old device.
+    this.residentTransients?.clear();
+    this.residentTransients = new ResidentTransientCache(device);
+    this.pipelineCache?.destroy();
+    this.pipelineCache = new PipelineCache(device);
+    this.bufferRing?.destroy();
+    this.bufferRing = new BufferRing(device);
+  }
+
+  /**
+   * Encode one composite submit into an engine-owned target — the shared body
+   * of the full and roi channel branches (the only `RenderGraph.composite`
+   * call site on the render path). Arms the [PERF_MON] composite timer, opens
+   * the resident-transient frame, submits, releases the pooled scratch back to
+   * the pool, sweeps idle resident slots, and folds the timings into the
+   * rolling window. Returns the CPU encode time in ms (0 when PERF_MON is
+   * off) for the caller's frame accounting. The caller owns the channel
+   * lifecycle around this call (target (re)creation + cache-stamp backfill).
+   */
+  #compositeInto(
+    compiled: CompiledScene,
+    opts: {
+      device: GPUDevice;
+      workingFormat: GPUTextureFormat;
+      /** Engine-owned exact-size target (render() guarantees it is created). */
+      target: LayerTexture;
+      interactiveScale: readonly [number, number];
+      /** ROI channel only: the sub-rect seam (sourceRect shifts world→NDC). */
+      exportViewport?: ExportViewport;
+      /** The `PERF_MON`-gated timestamp taken before the target lifecycle. */
+      perfStart: number;
+    },
+  ): number {
+    const { device, workingFormat, target, interactiveScale, exportViewport } = opts;
+    // render() validated these against the live device before dispatching.
+    const pipelineCache = this.pipelineCache!;
+    const bufferRing = this.bufferRing!;
+    const texturePool = this.texturePool!;
+
+    // [PERF_MON] Arm the composite GPU timer (skips if a prior readback is
+    // still pending → natural sampling). `startSubmit` gates whether passes
+    // instrument.
+    let armed = false;
+    if (PERF_MON) {
+      if (!this._compTimer) this._compTimer = new GpuTimer(device, 'composite');
+      armed = this._compTimer.startSubmit();
+    }
+
+    // Open the resident-transient frame so this composite's `acquire`s mark
+    // their slots live; `endFrame()` after submit sweeps any slot that went
+    // untouched (a committed stroke's transient, idle ping-pong buffers).
+    this.residentTransients?.beginFrame();
+
+    const { scratch } = RenderGraph.composite(compiled, {
+      device,
+      pipelineCache,
+      bufferRing,
+      texturePool,
+      assets: this.assets,
+      workingFormat,
+      resolveLutView: (lutId) => this.getLutView(lutId),
+      resolveLut3dView: (lutId) => this.getLut3dView(lutId),
+      // Keys the bmask combine cache: a re-uploaded mask record (live
+      // fast-override stroke) must re-combine that layer's mask.
+      getAssetEpoch: (assetId) => this.assetEpochs.get(assetId) ?? 0,
+      target,
+      // Render the composite (and the vector/text transients through the same
+      // supersampling seam) at the achieved density scale; on the roi channel
+      // the exportViewport seam shifts the world→NDC basis (the exact
+      // machinery the export path exercises).
+      interactiveScale,
+      exportViewport,
+      acquireResidentTransient: this.residentTransients
+        ? (key, desc) => this.residentTransients!.acquire(key, desc)
+        : undefined,
+      gpuTimer: armed ? this._compTimer! : undefined,
+    });
+
+    // The composite landed in the engine-owned `target`; only the pooled
+    // scratch (ping-pong spare + filter transients) returns to the pool.
+    // Resident buffers are excluded by RenderGraph (the cache owns them).
+    for (const tex of scratch) texturePool.release(tex);
+
+    // Sweep resident slots not touched this frame (lazy de-alloc).
+    this.residentTransients?.endFrame();
+
+    if (PERF_MON) {
+      const encMs = performance.now() - opts.perfStart;
+      // GPU-done latency for composite: measured from the start of encode
+      // until the queue signals this (and all prior) work complete. See
+      // _renderPerf.
+      const g0 = opts.perfStart;
+      onQueueDone(device.queue, () => {
+        const ms = performance.now() - g0;
+        const w = this._renderPerf;
+        w.compGpuSum += ms; w.compGpuN++;
+        if (ms > w.compGpuMax) w.compGpuMax = ms;
+      });
+      // True per-pass GPU exec time (backlog-independent). Reads after submit.
+      if (armed) {
+        this._compTimer!.read((r) => {
+          const w = this._renderPerf;
+          w.tsCompSpanSum += r.spanMs; w.tsCompSpanN++;
+          if (r.spanMs > w.tsCompSpanMax) w.tsCompSpanMax = r.spanMs;
+          for (const p of r.passes) this.#accumTsPass(p.label, p.ms);
+        });
+      }
+      return encMs;
+    }
+    return 0;
   }
 
   /**
@@ -873,6 +1160,7 @@ export class WebGpuEngine implements IEngine {
     sigMs: number;
     sigMiss: boolean;
     recomposite: boolean;
+    recompositeRoi: boolean;
     compEncMs: number;
     presEncMs: number;
     docW: number;
@@ -884,10 +1172,17 @@ export class WebGpuEngine implements IEngine {
     if (w.lastFlush === 0) w.lastFlush = now;
 
     w.n++;
+    w.mode = this.planMemoMode;
+    if (this.roiTexture) {
+      w.roiTargetW = this.roiTargetW;
+      w.roiTargetH = this.roiTargetH;
+      w.roiDensity = this.roiDensityScale;
+    }
     w.compileSum += s.compileMs; if (s.compileMs > w.compileMax) w.compileMax = s.compileMs;
     w.sigSum += s.sigMs; if (s.sigMs > w.sigMax) w.sigMax = s.sigMs; if (s.sigMiss) w.sigMiss++;
     if (s.recomposite) {
       w.recompN++;
+      if (s.recompositeRoi) w.roiRecompN++;
       w.compEncSum += s.compEncMs;
       if (s.compEncMs > w.compEncMax) w.compEncMax = s.compEncMs;
     }
@@ -897,8 +1192,12 @@ export class WebGpuEngine implements IEngine {
     if (now - w.lastFlush >= 1000 && w.n > 0) {
       const f = (x: number) => x.toFixed(2);
       const avg = (sum: number, n: number) => (n > 0 ? f(sum / n) : '-');
+      const roiStr = w.mode === 'roi'
+        ? ` roi=${w.roiTargetW}×${w.roiTargetH}@${f(w.roiDensity)}`
+        : '';
       console.warn(
-        `[Engine.render] window(${w.n}f) target=${w.docW}×${w.docH} layers=${w.layers} recomposite=${w.recompN}/${w.n} | ` +
+        `[Engine.render] window(${w.n}f) target=${w.docW}×${w.docH} layers=${w.layers} mode=${w.mode}${roiStr} ` +
+          `recomposite=${w.recompN}/${w.n} (roi=${w.roiRecompN}) | ` +
           `compile avg=${avg(w.compileSum, w.n)} max=${f(w.compileMax)} | ` +
           `sig avg=${avg(w.sigSum, w.n)} max=${f(w.sigMax)} miss=${w.sigMiss} | ` +
           `compEnc avg=${avg(w.compEncSum, w.recompN)} max=${f(w.compEncMax)} | ` +
@@ -923,7 +1222,7 @@ export class WebGpuEngine implements IEngine {
       w.n = 0;
       w.compileSum = 0; w.compileMax = 0;
       w.sigSum = 0; w.sigMax = 0; w.sigMiss = 0;
-      w.recompN = 0; w.compEncSum = 0; w.compEncMax = 0;
+      w.recompN = 0; w.roiRecompN = 0; w.compEncSum = 0; w.compEncMax = 0;
       w.presEncSum = 0; w.presEncMax = 0;
       w.compGpuSum = 0; w.compGpuN = 0; w.compGpuMax = 0;
       w.presGpuSum = 0; w.presGpuN = 0; w.presGpuMax = 0;
@@ -931,84 +1230,6 @@ export class WebGpuEngine implements IEngine {
       w.tsPass = {};
       w.lastFlush = now;
     }
-  }
-
-  // ── Readback staging ───────────────────────────────────────────────────────
-  // One fresh `MAP_READ` buffer per `export()`, destroyed in that method's
-  // `finally` as soon as the readback is decoded. No pooling: every readback path
-  // — file export, bake, and the colour sampler's press-time snapshot + commit
-  // micro-capture — is a one-shot at human cadence, so there is no repeated churn
-  // to amortise.
-
-  /**
-   * De-pad the row-aligned staging buffer and decode each texel to the requested
-   * output container. LINEAR values are preserved (final color encoding happens
-   * at the export codec step). Colour and alpha are treated identically — a straight
-   * numeric requantization.
-   */
-  #decodeReadback(
-    mapped: ArrayBuffer,
-    p: {
-      width: number;
-      height: number;
-      bytesPerRow: number;
-      workingFormat: GPUTextureFormat;
-      bitDepth: 8 | 16 | 32;
-    },
-  ): Uint8ClampedArray | Uint16Array | Float32Array {
-    const { width, height, bytesPerRow, workingFormat } = p;
-    const rowFloats = width * 4;
-    const isF32 = workingFormat === 'rgba32float';
-
-    // Read one un-padded row of RGBA floats from the padded staging buffer.
-    //
-    // The f32 lane returns a VIEW, not a copy: `mapped` is already f32, so the
-    // only work is skipping the 256-byte row padding, and `bytesPerRow` is a
-    // multiple of 256 — hence always 4-byte aligned, which `Float32Array` over an
-    // ArrayBuffer requires. The view is valid until `unmap()`, which happens after
-    // every caller below has consumed it, so this never escapes.
-    //
-    // It used to `.slice()` here. That was not needed by ANY lane — the 8/16-bit
-    // lanes only read `rowF[i]`, and the 32-bit lane immediately `out.set()`s the
-    // row, so the slice made it copy the same data twice and allocate one throwaway
-    // Float32Array per row. Invisible in `export()` (a one-shot user action), but
-    // the colour sampler put this on an interactive path: 92ms of main-thread copy
-    // per 4096×4096 capture, half of it pure waste.
-    const readRowFloats = (row: number): Float32Array => {
-      if (isF32) {
-        return new Float32Array(mapped, row * bytesPerRow, rowFloats);
-      }
-      const halves = new Uint16Array(mapped, row * bytesPerRow, rowFloats);
-      const out = new Float32Array(rowFloats);
-      for (let i = 0; i < rowFloats; i++) out[i] = halfToFloat(halves[i]);
-      return out;
-    };
-
-    if (p.bitDepth === 32) {
-      const need = width * height * 4;
-      const out = new Float32Array(need);
-      for (let y = 0; y < height; y++) out.set(readRowFloats(y), y * rowFloats);
-      return out;
-    }
-    if (p.bitDepth === 16) {
-      const out = new Uint16Array(width * height * 4);
-      for (let y = 0; y < height; y++) {
-        const rowF = readRowFloats(y);
-        const base = y * rowFloats;
-        for (let i = 0; i < rowFloats; i++) {
-          out[base + i] = Math.max(0, Math.min(65535, Math.round(rowF[i] * 65535)));
-        }
-      }
-      return out;
-    }
-    // 8-bit — Uint8ClampedArray auto-clamps to [0,255].
-    const out = new Uint8ClampedArray(width * height * 4);
-    for (let y = 0; y < height; y++) {
-      const rowF = readRowFloats(y);
-      const base = y * rowFloats;
-      for (let i = 0; i < rowFloats; i++) out[base + i] = Math.round(rowF[i] * 255);
-    }
-    return out;
   }
 
   /**
@@ -1294,47 +1515,17 @@ export class WebGpuEngine implements IEngine {
   }
 
   destroy(): void {
-    for (const asset of this.assets.values()) {
-      asset.destroy();
-    }
-    this.assets.clear();
-    this.assetMeta.clear();
-    this.assetEpochs.clear();
-    for (const entry of this.luts.values()) {
-      entry.texture.destroy();
-    }
-    this.luts.clear();
-    for (const entry of this.luts3d.values()) {
-      entry.texture.destroy();
-    }
-    this.luts3d.clear();
-    // The composite target is engine-owned (exact-size, not pooled), so
-    // DESTROY it explicitly — texturePool.destroy() does not free it for us.
-    this.compositeTexture?.destroy();
-    this.compositeTexture = null;
+    this.#releaseCaches();
     // The resident transient cache is engine-owned (exact-size, not
     // pooled) — destroy every live slot explicitly, like the composite target.
     this.residentTransients?.clear();
     this.residentTransients = null;
-    this.compositeSignature = null;
-    this.compositeFormat = null;
-    this.compositeTargetW = 0;
-    this.compositeTargetH = 0;
-    this.compositeDensityScale = 1;
-    // Drop the signature memo on teardown.
-    this.sigMemoLayers = null;
-    this.sigMemoValue = null;
     // Release owned vmask coverage textures + private compute rings.
     clearVmaskCache();
     // Release owned combined bmask textures + private uniform ring.
     clearBmaskCombineCache();
     this.lastScene = null;
     this.initPromise = null;
-    // [PERF_MON] Free GPU timer resources.
-    this._compTimer?.destroy();
-    this._compTimer = null;
-    this._presTimer?.destroy();
-    this._presTimer = null;
 
     this.texturePool?.destroy();
     this.pipelineCache?.destroy();

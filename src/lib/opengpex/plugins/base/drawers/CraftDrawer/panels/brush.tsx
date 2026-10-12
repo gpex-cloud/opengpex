@@ -61,24 +61,22 @@ export const BrushPanel = React.memo(function BrushPanel() {
     updateEraserAntiAliased, updateBrushAntiAliased,
   } = useBrushPanel();
 
-  // Eraser AA ⇔ hardness two-way binding: AA only means anything on a fully hard
-  // tip, so dragging hardness below 100 forces the switch off, and lighting the
-  // switch snaps hardness up to 100. OFF routes `hard: true` into the BitmapMask —
-  // the GPU thresholds the sampled mask alpha at 0.5 ("pencil eraser").
-  //
-  // Brush mode mirrors the binding in the OPPOSITE direction: AA OFF ignores the
-  // hardness feather entirely, so the pair is only self-consistent at hardness=100 —
-  // switching AA off snaps hardness up to 100, dragging hardness below 100 forces
-  // AA back ON (a soft tip must be AA'd), and switching AA on leaves hardness alone.
+  // AA ⇔ hardness two-way binding, IDENTICAL for brush and eraser: a soft tip
+  // (hardness < 100) always needs AA, so dragging hardness below 100 forces the
+  // switch ON, and switching AA OFF snaps hardness up to 100 — the pair is only
+  // self-consistent at hardness=100. Eraser OFF routes `hard: true` into the
+  // BitmapMask — the GPU thresholds the sampled mask alpha at 0.5 ("pencil
+  // eraser", idempotent under repeated clicks). AA ON leaves hardness alone so
+  // soft feathered erasing (hardness < 100) stays reachable.
   const handleHardnessChange = (value: number) => {
     updateBrushParam('brushHardness', value);
-    if (isEraser && value < 100 && eraserAntiAliased) updateEraserAntiAliased(false);
+    if (isEraser && value < 100 && !eraserAntiAliased) updateEraserAntiAliased(true);
     if (!isEraser && value < 100 && !brushAntiAliased) updateBrushAntiAliased(true);
   };
 
   const handleEraserAAChange = (aa: boolean) => {
     updateEraserAntiAliased(aa);
-    if (aa && brushHardness < 100) updateBrushParam('brushHardness', 100);
+    if (!aa && brushHardness < 100) updateBrushParam('brushHardness', 100);
   };
 
   const handleBrushAAChange = (aa: boolean) => {

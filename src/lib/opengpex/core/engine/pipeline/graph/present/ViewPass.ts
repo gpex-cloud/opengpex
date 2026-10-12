@@ -79,6 +79,18 @@ export const IDENTITY_VIEW_MATRIX: ViewMatrix = {
  *   • camera: canvas → swapchain physical pixels                = `scene.view.transform`
  *   • N: physical (0..targetW, 0..targetH) → NDC (-1..1), Y flip = the swapchain map
  *
+ * `origin` (ROI channel) optionally folds a DOCUMENT-space
+ * translation in front of the camera:
+ *
+ *   view_matrix = N ∘ (camera ∘ T(origin)) ∘ S(docW, docH)
+ *
+ * i.e. the texture's texel (0,0) sits at document coordinate `origin` and the
+ * quad spans `origin .. origin+(docW,docH)` — a SUB-RECTANGLE of the document
+ * (the roi composite). `origin` is in DOCUMENT PIXELS, not texels (the two
+ * differ by the composite density), and is unrelated to the ants'
+ * `gridOffset` phase. Omitting it (0,0) reproduces the full-document mapping
+ * EXACTLY — the full channel never passes it.
+ *
  * SELF-CONSISTENCY: with `camera = identity` and `docW===targetW`,
  * `docH===targetH` this reduces EXACTLY to {2,0,0,-2,-1,1} = IDENTITY_VIEW_MATRIX,
  * i.e. the 1:1 present (see unit test).
@@ -89,17 +101,22 @@ export function composeViewMatrix(
   docH: number,
   targetW: number,
   targetH: number,
+  origin?: { readonly x: number; readonly y: number },
 ): ViewMatrix {
   const tW = Math.max(1, targetW);
   const tH = Math.max(1, targetH);
+  const ox = origin?.x ?? 0;
+  const oy = origin?.y ?? 0;
 
-  // M1 = camera ∘ scale(docW, docH): unit → physical.
+  // M1 = camera ∘ translate(origin) ∘ scale(docW, docH): unit → physical.
+  // The affine composition pre-multiplies the origin into the camera's
+  // translation column: p ↦ camera(origin + scale·p).
   const m1a = camera.a * docW;
   const m1b = camera.b * docW;
   const m1c = camera.c * docH;
   const m1d = camera.d * docH;
-  const m1tx = camera.tx;
-  const m1ty = camera.ty;
+  const m1tx = camera.a * ox + camera.c * oy + camera.tx;
+  const m1ty = camera.b * ox + camera.d * oy + camera.ty;
 
   // N: physical → NDC. Na = 2/tW, Nd = -2/tH, Ntx = -1, Nty = 1.
   const na = 2 / tW;
