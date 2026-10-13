@@ -53,7 +53,7 @@ function docRect(frame: Frame) {
 }
 
 /**
- * Compute the freeze-snapshot ROI + its capture resolution (§3.4②).
+ * Compute the freeze-snapshot ROI + its capture resolution.
  *
  * THE ROI IS WHAT YOU CAN SEE, THE SCALE IS WHAT YOU CAN RESOLVE. The window is
  * the camera's viewport world box (+ {@link ROI_PAD_RATIO}) ∩ document, and it is
@@ -121,7 +121,7 @@ function computeSnapshotRoi(
 }
 
 /**
- * Layer subset for CURRENT-LAYER sampling (§3.3 #5) — what `capture({ layers })`
+ * Layer subset for CURRENT-LAYER sampling — what `capture({ layers })`
  * receives instead of the engine's default "all visible, non-host, non-group".
  *
  * The active layer alone, or — when it is a group — every non-group descendant of
@@ -182,7 +182,7 @@ export const useColorOptions = () => {
   const [config, setConfig] = usePluginSelfConfig<ColorOptionsConfig>();
   const pendingColor = config.pendingColor || fromHex("#EAB308");
 
-  // ── Sampling scope (§3.3 #5) ──
+  // ── Sampling scope ──
   // Persisted, and DEFAULTS TO ALL LAYERS: `undefined` config (every existing
   // install) must keep the historical full-composite behaviour.
   //
@@ -225,7 +225,7 @@ export const useColorOptions = () => {
     }
   }, [isSampling, samplerActiveSignal]);
 
-  // Freeze snapshot (§3): captured on the PRESS that starts a pick, indexed
+  // Freeze snapshot: captured on the PRESS that starts a pick, indexed
   // in-memory while the button is held, dropped when sampling ends.
   const [snapshot, setSnapshot] = useState<SampledPixels | null>(null);
   // Ref mirror so the overlay's press handler can read the just-captured snapshot
@@ -268,7 +268,7 @@ export const useColorOptions = () => {
   const snapshotSeqRef = useRef(0);
 
   /**
-   * Capture the freeze snapshot for ONE press (§3.4④). Called from the overlay's
+   * Capture the freeze snapshot for ONE press. Called from the overlay's
    * `mousedown` — never on tool-enter and never per pointer move, so navigation
    * (pan/zoom) does zero GPU readback: the frame drops that motivated this
    * refactor were the per-move re-capture storm, now gone.
@@ -312,7 +312,7 @@ export const useColorOptions = () => {
   );
 
   /**
-   * Warm-up predraw for the readback pipeline (§3.4④). A throwaway 1×1 `scale: 1`
+   * Warm-up predraw for the readback pipeline. A throwaway 1×1 `scale: 1`
    * capture run on tool-enter: it forces the engine to compile the export shaders
    * and warm its high-depth path NOW, so the first real press pays no compile
    * hitch. The result is discarded — only the side effect (a warm GPU pipeline)
@@ -389,7 +389,7 @@ export const useColorOptions = () => {
   //
   // The snapshot is dropped in the CLEANUP, not the body: leaving sample mode (or
   // switching frames) tears the effect down, which drops the `linearPixels`
-  // reference (§3.4①) without a synchronous setState-in-effect cascade. With the
+  // reference without a synchronous setState-in-effect cascade. With the
   // pool gone there is nothing else to release — the previous snapshot simply falls
   // to GC.
   //
@@ -415,7 +415,7 @@ export const useColorOptions = () => {
   // (interactionMode === 'sample' is now the single source of truth for isSampling,
   // so any external tool activation like Brush/Clip automatically exits the sampler cleanly)
 
-  // ── While sampling: own the modal keys (§3.4③) ──
+  // ── While sampling: own the modal keys ──
   // Swallow undo / redo / delete so the frozen document can't change under us, and
   // route Tab / Shift+Tab to the sampler tool strip.
   //
@@ -453,7 +453,7 @@ export const useColorOptions = () => {
     };
   }, [isSampling, activeFrame, samplerToolCycleForwardCmd, samplerToolCycleBackwardCmd]);
 
-  // ── Frame colour identity (§5.4 / decision I) ──
+  // ── Frame colour identity ──
   // Authoritative anchor: StoredAsset via assetId, mirroring
   // `ImageInfoDrawer/hooks.ts`'s `sourceGamut`/`docBitDepth`. Drives the Pro
   // panel's LOCKED view gamut and its auto-expand judgement — this hook
@@ -531,17 +531,17 @@ export const useColorOptions = () => {
     handleSampled,
     cancelSampling,
     activeFrame,
-    // Frame colour identity (§5.4) — locked Pro-panel view gamut + auto-expand.
+    // Frame colour identity — locked Pro-panel view gamut + auto-expand.
     frameGamut,
     autoExpandPro,
-    // Sampler tool strip (§3.3 #5). The scope IS the active canvas tool, so
+    // Sampler tool strip. The scope IS the active canvas tool, so
     // there is nothing to derive beyond projecting it; the three tools are
     // driven exclusively through the commands below.
     sampleAllLayers,
     activeSamplerTool,
     samplerToolSetCmd,
     exitSamplerCmd,
-    // Freeze snapshot + projection deps for ColorSampler (§3.3 #1). The overlay
+    // Freeze snapshot + projection deps for ColorSampler. The overlay
     // takes the snapshot on press via `onRequestSnapshot`, indexes it in-memory
     // while dragging, and commits with `captureExactAt` on release.
     snapshot,

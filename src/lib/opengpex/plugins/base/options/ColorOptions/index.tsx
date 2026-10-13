@@ -20,7 +20,7 @@
 "use client";
 
 import { EditorPlugin } from "@opengpex/editor/core/types";
-import { fromHex } from "@opengpex/editor/core/engine/color";
+import { fromHex, convertColorGamut, WORKING_GAMUT } from "@opengpex/editor/core/engine/color";
 import { ColorOptionsComponent } from "./components";
 import { COLOR_OPTIONS_COMMANDS } from "./commands";
 import * as P from "./protocols";
@@ -58,7 +58,9 @@ export const plugin: EditorPlugin = {
       scope: "public",
     },
   ],
-  initialConfig: { pendingColor: fromHex("#EAB308") },
+  // Seed the default in WORKING_GAMUT form — the single canonical storage
+  // representation every `pendingColor` writer converges on.
+  initialConfig: { pendingColor: convertColorGamut(fromHex("#EAB308"), WORKING_GAMUT) },
 };
 
 export default plugin;

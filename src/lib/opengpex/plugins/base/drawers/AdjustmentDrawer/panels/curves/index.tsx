@@ -22,6 +22,11 @@
 /**
  * CurvesPanel — SVG-based tone-curve editor.
  *
+ * Pure geometry (coordinate mapping, hit-testing, point constraints, spline
+ * preview) lives in `./geometry`; shared cross-panel helpers (histogram
+ * path, clamps) in `../helpers`. This file is the interaction/render
+ * orchestrator.
+ *
  * Design (spec §5 & §6):
  *
  * - Users can drag existing control points, add new ones by clicking on the
@@ -48,6 +53,25 @@
  *     3. pointerup → `useFilterGesture.end()` marks the drag complete. The
  *        final layer state is already durable; nothing to commit.
  *
+ * - Histogram background (grid → histogram → curve, painted back-to-front):
+ *   the layer's SOURCE histograms are computed once per bitmap in the Worker
+ *   (`useLayerHistogram()`), then scattered through the SAME levels→curves
+ *   LUT chain the GPU applies (`deriveLayerHistogram`) on every frame — so
+ *   the background deforms live while dragging control points, which is the
+ *   core PS Curves feedback loop. Tint follows the active channel tab via the
+ *   CHANNEL_TABS brand hex (rgb → theme gray); each histogram layer is
+ *   `pointer-events: none` so it never interferes with point hit-testing.
+ *
+ * - Graph geometry is 256×192 (4:3, PS-like) — X stays 1:1 with the histogram
+ *   bins and the CSS aspect matches the viewBox ratio so the render scale is
+ *   uniform (circles stay round). The selected control point gets PS-style
+ *   In/Out numeric fields (0–255, editable, one Undo per commit) below the
+ *   graph; endpoints are x-pinned by `movePointConstrained` exactly as when
+ *   dragging. The row is always on screen — with no point selected both
+ *   fields sit disabled at "-". Reset / undo / preset / layer switch clear
+ *   the selection (see `selection` below) so the fields never show stale
+ *   values.
+ *
  * - This panel does NOT dispatch to `AsyncFilterCache` or the engine worker —
  *   that's the render engine's job (spec §5.1). We only
  *   mutate `layer.curves`; the render loop picks up the change on its next
@@ -64,13 +88,29 @@ import React, {
   useState,
 } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { generateCurveLUT } from "@opengpex/editor/core/engine/color";
+import { deriveLayerHistogram } from "@opengpex/editor/core/engine/color";
 import { usePluginCommands } from "@opengpex/editor/core/context";
-import type { CurvePoints, CurvesState } from "@opengpex/editor/core/types/models";
-import type { AdjustmentDrawerCommandsMap } from "../commands.d";
-import type { CurveChannel } from "../protocols";
-import { IDENTITY_CURVE_POINTS } from "../protocols";
-import { useAdjustmentDrawer, useFilterGesture } from "../hooks";
+import type { CurvesState } from "@opengpex/editor/core/types/models";
+import type { AdjustmentDrawerCommandsMap } from "../../commands.d";
+import type { CurveChannel } from "../../protocols";
+import { NumberField } from "../../components";
+import {
+  curveToPathD,
+  findHitIndex,
+  insertLocalPreview,
+  movePointConstrained,
+  normalizedToSvg,
+  readPointsFor,
+  svgToNormalized,
+  VB_H,
+  VB_W,
+} from "./geometry";
+import { clamp01, histogramToPathD } from "../helpers";
+import {
+  useAdjustmentDrawer,
+  useFilterGesture,
+  useLayerHistogram,
+} from "../../hooks";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -106,139 +146,23 @@ const CHANNEL_TABS: {
   { channel: "blue", label: "B", strokeLight: "#3b82f6", strokeDark: "#3b82f6", hex: "#3b82f6" },
 ];
 
-/** SVG viewBox side (square). Keeps math simple: x,y ∈ [0, VB]. */
-const VB = 256;
 /**
- * Number of samples along the preview path. 64 keeps the SVG small and easy
- * to diff in devtools while still producing a visually smooth curve — the
- * eye can't distinguish >32 segments on a 256px-wide canvas.
+ * Selection anchor state. `curves` holds the `layer.curves` OBJECT the point
+ * was selected against; the panel is the single authority for what that
+ * object is after its own writes — but a command handler can't observe the
+ * fresh object its `execute` created (the store isn't synchronously readable
+ * from here), so authored writes park the anchor at `null` ("pending") and
+ * the NEXT render binds it to the `curves` it came with (guarded render-phase
+ * state adjustment, the pattern React documents for derived state). Any
+ * curves REFERENCE change the panel didn't author — Reset button, undo /
+ * redo, preset, layer switch — then fails the binding and drops the
+ * selection, so the In/Out fields fall back to "-" instead of showing stale
+ * values (e.g. 255/255 for an endpoint after Reset).
  */
-const PREVIEW_SAMPLES = 64;
-/**
- * Radius (in viewBox units) around a control point where a pointerdown counts
- * as "grabbed this point" rather than "add a new point somewhere else". At
- * VB=256 this is ~4% of the width, comfortable for touch.
- */
-const HIT_RADIUS_VB = 10;
-
-// ─── Utilities ─────────────────────────────────────────────────────────────────
-
-/** Clamp helper. */
-const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
-
-/**
- * Read the current points for `channel`, defaulting to a fresh copy of the
- * identity segment. We hand back a COPY because the caller often needs to
- * mutate the result before writing back through `updateChannelCurve`.
- */
-function readPointsFor(
-  curves: CurvesState | undefined,
-  channel: CurveChannel,
-): CurvePoints {
-  const existing = curves?.[channel];
-  if (existing && existing.length >= 2) {
-    return existing.map((p) => [p[0], p[1]] as [number, number]);
-  }
-  return IDENTITY_CURVE_POINTS.map((p) => [p[0], p[1]] as [number, number]);
-}
-
-/**
- * Convert an SVG coordinate to a normalized (x, y) in [0, 1]. Y is inverted
- * because SVG's origin is top-left, but the curve editor's origin is
- * bottom-left (higher y = brighter output — standard tone-curve convention).
- */
-function svgToNormalized(vx: number, vy: number): [number, number] {
-  return [clamp01(vx / VB), clamp01(1 - vy / VB)];
-}
-
-function normalizedToSvg(x: number, y: number): [number, number] {
-  return [x * VB, (1 - y) * VB];
-}
-
-/**
- * Distance² between a point and (px, py) in viewBox space. We compare
- * squared distance to avoid a `Math.sqrt` inside the hit-test loop.
- */
-function dist2(x0: number, y0: number, x1: number, y1: number): number {
-  const dx = x1 - x0;
-  const dy = y1 - y0;
-  return dx * dx + dy * dy;
-}
-
-/**
- * Locate a control-point index within `HIT_RADIUS_VB` of (vx, vy).
- * Returns -1 when no point is close enough to grab.
- */
-function findHitIndex(
-  pts: CurvePoints,
-  vx: number,
-  vy: number,
-): number {
-  const r2 = HIT_RADIUS_VB * HIT_RADIUS_VB;
-  let bestIdx = -1;
-  let bestDist = Infinity;
-  for (let i = 0; i < pts.length; i++) {
-    const [sx, sy] = normalizedToSvg(pts[i][0], pts[i][1]);
-    const d = dist2(sx, sy, vx, vy);
-    if (d < r2 && d < bestDist) {
-      bestDist = d;
-      bestIdx = i;
-    }
-  }
-  return bestIdx;
-}
-
-/**
- * Build the SVG polyline `d` attribute from a set of control points. We
- * sample the same `generateCurveLUT` used by the runtime so the preview and
- * the actual filter apply share ONE spline evaluator.
- */
-function curveToPathD(pts: CurvePoints): string {
-  // `generateCurveLUT` at N samples gives us the y-values for xs = 0/(N-1),
-  // 1/(N-1), …, 1. We convert those to SVG (with y inverted).
-  const lut = generateCurveLUT(pts, 256 as const, "f32") as Float32Array;
-  // Down-sample to PREVIEW_SAMPLES points for a compact SVG path.
-  const step = (lut.length - 1) / (PREVIEW_SAMPLES - 1);
-  const parts: string[] = [];
-  for (let i = 0; i < PREVIEW_SAMPLES; i++) {
-    const li = Math.round(i * step);
-    const x = li / (lut.length - 1);
-    const y = lut[li];
-    const [sx, sy] = normalizedToSvg(x, y);
-    parts.push(`${i === 0 ? "M" : "L"}${sx.toFixed(2)},${sy.toFixed(2)}`);
-  }
-  return parts.join(" ");
-}
-
-/**
- * Constrain the new x of a dragged interior point so it can't jump past its
- * neighbors — this keeps the point list strictly x-sorted and matches the
- * "monotonic domain" invariant `normalizeControlPoints` (in lut.ts) enforces
- * anyway. Endpoints (i=0 and i=n-1) stay pinned at x=0 / x=1.
- */
-function movePointConstrained(
-  pts: CurvePoints,
-  index: number,
-  nx: number,
-  ny: number,
-): CurvePoints {
-  const next = pts.map((p) => [p[0], p[1]] as [number, number]);
-  const clampedY = clamp01(ny);
-  if (index === 0) {
-    next[0] = [0, clampedY];
-    return next;
-  }
-  if (index === next.length - 1) {
-    next[next.length - 1] = [1, clampedY];
-    return next;
-  }
-  // Interior: leave a tiny gap so points can't sit exactly on each other's x.
-  const eps = 1 / VB; // ~0.4%: enough to keep the sort strict.
-  const leftX = next[index - 1][0] + eps;
-  const rightX = next[index + 1][0] - eps;
-  const clampedX = Math.max(leftX, Math.min(rightX, clamp01(nx)));
-  next[index] = [clampedX, clampedY];
-  return next;
+interface SelectionAnchor {
+  index: number;
+  /** Bound `layer.curves` reference; `null` = pending bind after an authored write. */
+  curves: CurvesState | undefined | null;
 }
 
 // ─── Component ─────────────────────────────────────────────────────────────────
@@ -252,6 +176,7 @@ export function CurvesPanel() {
   } = usePluginCommands<AdjustmentDrawerCommandsMap>();
   const { activeLayer } = useAdjustmentDrawer();
   const gesture = useFilterGesture(beginCurvesEditCmd);
+  const { histogram: srcHistogram } = useLayerHistogram();
 
   /**
    * The channel selector is a UI-only concern: which curve the user is
@@ -261,6 +186,13 @@ export function CurvesPanel() {
    * later without breaking the panel.
    */
   const [channel, setChannel] = useState<CurveChannel>("rgb");
+
+  /**
+   * Currently selected control point (PS Curves parity): its In/Out values
+   * are shown as editable number fields below the graph. See `SelectionAnchor`
+   * for how the anchor survives authored writes but dies on reset / undo.
+   */
+  const [selectionState, setSelection] = useState<SelectionAnchor | null>(null);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   /**
@@ -278,18 +210,64 @@ export function CurvesPanel() {
 
   const pathD = useMemo(() => curveToPathD(points), [points]);
 
+  // ── Selection binding & external-write invalidation ─────────────────────────
+  // Conditional render-phase state adjustment (guarded, own-component only —
+  // the React-documented pattern). Two cases:
+  //   pending anchor (authored write) → bind to this render's curves object;
+  //   bound anchor that no longer matches (or index out of range) → drop it.
+  const curvesNow = activeLayer?.curves;
+  let selection = selectionState;
+  if (selection && selection.curves === null) {
+    selection = { ...selection, curves: curvesNow };
+    setSelection(selection);
+  } else if (
+    selection &&
+    (selection.index >= points.length || selection.curves !== curvesNow)
+  ) {
+    setSelection(null);
+    selection = null;
+  }
+  const selected: number | null = selection?.index ?? null;
+  const selectedPoint = selected !== null ? points[selected] : null;
+
+  // Histogram background, derived through the SAME levels+curves chain the
+  // GPU applies (deps must include levels AND curves — dropping either would
+  // freeze the background while the canvas moves).
+  const derivedHistogram = useMemo(
+    () =>
+      srcHistogram
+        ? deriveLayerHistogram(srcHistogram, activeLayer?.levels, activeLayer?.curves)
+        : null,
+    [srcHistogram, activeLayer?.levels, activeLayer?.curves],
+  );
+
+  const histogramData = useMemo(() => {
+    if (!derivedHistogram) return null;
+    switch (channel) {
+      case "red": return derivedHistogram.r;
+      case "green": return derivedHistogram.g;
+      case "blue": return derivedHistogram.b;
+      default: return derivedHistogram.composite;
+    }
+  }, [derivedHistogram, channel]);
+
+  const histogramPathD = useMemo(
+    () => histogramToPathD(histogramData, VB_W, VB_H),
+    [histogramData],
+  );
+
   /**
    * Translate a PointerEvent to viewBox coordinates. Uses `getBoundingClientRect`
    * to correctly account for CSS scaling — the SVG is 100% width, so its
-   * pixel width usually differs from `VB`.
+   * pixel width usually differs from `VB_W`.
    */
   const eventToVB = useCallback(
     (evt: { clientX: number; clientY: number }): [number, number] => {
       const svg = svgRef.current;
       if (!svg) return [0, 0];
       const rect = svg.getBoundingClientRect();
-      const vx = ((evt.clientX - rect.left) / rect.width) * VB;
-      const vy = ((evt.clientY - rect.top) / rect.height) * VB;
+      const vx = ((evt.clientX - rect.left) / rect.width) * VB_W;
+      const vy = ((evt.clientY - rect.top) / rect.height) * VB_H;
       return [vx, vy];
     },
     [],
@@ -316,6 +294,8 @@ export function CurvesPanel() {
 
       if (hitIdx >= 0) {
         dragIndexRef.current = hitIdx;
+        // Known object → anchor immediately.
+        setSelection({ index: hitIdx, curves: activeLayer.curves });
       } else {
         // No point close by — insert a new one at the click, then let the
         // subsequent pointermove drag the newly-inserted point around.
@@ -332,6 +312,9 @@ export function CurvesPanel() {
         // moves target it without waiting for a re-render.
         const inserted = insertLocalPreview(currentPts, nx, ny);
         dragIndexRef.current = inserted.index;
+        // The command built a fresh curves object we can't observe from here —
+        // park the anchor as pending; the next render binds it.
+        setSelection({ index: inserted.index, curves: null });
       }
 
       // Capture the pointer so we still receive move/up events even if the
@@ -358,6 +341,8 @@ export function CurvesPanel() {
       );
       // Fire non-undoable — coalesces via the beginCurvesEdit checkpoint.
       updateChannelCurveCmd?.execute({ channel, points: next });
+      // Authored write → re-pend the anchor for the next render.
+      setSelection((s) => (s ? { ...s, curves: null } : s));
     },
     [activeLayer, eventToVB, channel, updateChannelCurveCmd],
   );
@@ -420,8 +405,42 @@ export function CurvesPanel() {
       gesture.begin();
       removeCurvePointCmd?.execute({ channel, index: hitIdx });
       gesture.end();
+      // Authored write → re-pend. Removed index shifts the selection: same
+      // index → drop it, larger index → slide down by one.
+      setSelection((s) => {
+        if (!s) return s;
+        const nextIdx =
+          s.index === hitIdx ? null : s.index > hitIdx ? s.index - 1 : s.index;
+        return nextIdx === null ? null : { index: nextIdx, curves: null };
+      });
     },
     [activeLayer, eventToVB, channel, removeCurvePointCmd, gesture],
+  );
+
+  // ── Selected-point numeric editing (PS Curves parity) ────────────────────────
+
+  /**
+   * Commit a typed In/Out value (0–255) for the selected point. Routes through
+   * `movePointConstrained` so endpoints stay x-pinned and interior points keep
+   * the strict x-sort (an out-of-order In snaps into the legal gap). Wrapped
+   * in a short gesture → exactly one Undo step, same contract as the Levels
+   * panel's number fields.
+   */
+  const commitSelectedPoint = useCallback(
+    (axis: "x" | "y", value255: number) => {
+      if (selected === null || !activeLayer) return;
+      const currentPts = readPointsFor(activeLayer.curves, channel);
+      if (selected >= currentPts.length) return;
+      const nx = axis === "x" ? clamp01(value255 / 255) : currentPts[selected][0];
+      const ny = axis === "y" ? clamp01(value255 / 255) : currentPts[selected][1];
+      const next = movePointConstrained(currentPts, selected, nx, ny);
+      gesture.begin();
+      updateChannelCurveCmd?.execute({ channel, points: next });
+      gesture.end();
+      // Authored write → re-pend the anchor for the next render.
+      setSelection((s) => (s ? { ...s, curves: null } : s));
+    },
+    [selected, activeLayer, channel, updateChannelCurveCmd, gesture],
   );
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -460,7 +479,10 @@ export function CurvesPanel() {
               type="button"
               role="tab"
               aria-selected={active}
-              onClick={() => setChannel(tab.channel)}
+              onClick={() => {
+                setChannel(tab.channel);
+                setSelection(null); // point indices are per-channel
+              }}
               title={`Edit ${tab.label} curve`}
               className={`flex-1 h-5 rounded-md text-[10px] font-black tracking-widest transition-colors outline-none focus:outline-none focus-visible:outline-none ${
                 active
@@ -492,8 +514,8 @@ export function CurvesPanel() {
           rendered nearly invisible on the light theme's white-on-white. */}
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${VB} ${VB}`}
-        className="w-full aspect-square rounded-md touch-none select-none bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-white/10"
+        viewBox={`0 0 ${VB_W} ${VB_H}`}
+        className="w-full aspect-[4/3] rounded-md touch-none select-none bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-white/10"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -515,19 +537,19 @@ export function CurvesPanel() {
           {[0.25, 0.5, 0.75].map((t) => (
             <React.Fragment key={`l-${t}`}>
               <line
-                x1={t * VB}
+                x1={t * VB_W}
                 y1={0}
-                x2={t * VB}
-                y2={VB}
+                x2={t * VB_W}
+                y2={VB_H}
                 stroke="#a1a1aa"
                 strokeOpacity={0.45}
                 strokeWidth={1}
               />
               <line
                 x1={0}
-                y1={t * VB}
-                x2={VB}
-                y2={t * VB}
+                y1={t * VB_H}
+                x2={VB_W}
+                y2={t * VB_H}
                 stroke="#a1a1aa"
                 strokeOpacity={0.45}
                 strokeWidth={1}
@@ -537,8 +559,8 @@ export function CurvesPanel() {
           {/* Identity diagonal — solid mid-gray for the light theme. */}
           <line
             x1={0}
-            y1={VB}
-            x2={VB}
+            y1={VB_H}
+            x2={VB_W}
             y2={0}
             stroke="#71717a"
             strokeOpacity={0.55}
@@ -552,19 +574,19 @@ export function CurvesPanel() {
           {[0.25, 0.5, 0.75].map((t) => (
             <React.Fragment key={`d-${t}`}>
               <line
-                x1={t * VB}
+                x1={t * VB_W}
                 y1={0}
-                x2={t * VB}
-                y2={VB}
+                x2={t * VB_W}
+                y2={VB_H}
                 stroke="#ffffff"
                 strokeOpacity={0.18}
                 strokeWidth={1}
               />
               <line
                 x1={0}
-                y1={t * VB}
-                x2={VB}
-                y2={t * VB}
+                y1={t * VB_H}
+                x2={VB_W}
+                y2={t * VB_H}
                 stroke="#ffffff"
                 strokeOpacity={0.18}
                 strokeWidth={1}
@@ -573,8 +595,8 @@ export function CurvesPanel() {
           ))}
           <line
             x1={0}
-            y1={VB}
-            x2={VB}
+            y1={VB_H}
+            x2={VB_W}
             y2={0}
             stroke="#ffffff"
             strokeOpacity={0.35}
@@ -582,6 +604,40 @@ export function CurvesPanel() {
             strokeWidth={1}
           />
         </g>
+
+        {/* Histogram background — AFTER the grid, BEFORE the curve. Shows the
+            levels→curves OUTPUT distribution for the active channel so control
+            points are placed against real data. Tint follows CHANNEL_TABS:
+            rgb uses the theme gray pair (same as the Levels panel), per-channel
+            tabs reuse their brand hex on both themes. pointer-events: none —
+            hit-testing stays on the SVG root. */}
+        {histogramPathD && (
+          channelMeta.hex ? (
+            <path
+              d={histogramPathD}
+              fill={channelMeta.hex}
+              fillOpacity={0.3}
+              style={{ pointerEvents: "none" }}
+            />
+          ) : (
+            <>
+              <path
+                d={histogramPathD}
+                fill={channelMeta.strokeLight}
+                fillOpacity={0.35}
+                className="dark:hidden"
+                style={{ pointerEvents: "none" }}
+              />
+              <path
+                d={histogramPathD}
+                fill={channelMeta.strokeDark}
+                fillOpacity={0.35}
+                className="hidden dark:block"
+                style={{ pointerEvents: "none" }}
+              />
+            </>
+          )
+        )}
 
         {/* The curve itself — sampled by the same spline evaluator the runtime
             LUT uses so preview == final filter output.
@@ -643,6 +699,33 @@ export function CurvesPanel() {
         })}
       </svg>
 
+      {/* Selected-point In/Out numeric editing (PS Curves parity). The row is
+          ALWAYS on screen: with no point selected both fields sit disabled at
+          "-". Values are 0–255 like PS; typing commits through a one-Undo
+          mini-gesture. Fields live-update while the point is being dragged. */}
+      <div className="flex items-stretch gap-1">
+        <NumberField
+          label="In"
+          ariaLabel="Selected point input value"
+          value={selectedPoint ? Math.round(selectedPoint[0] * 255) : null}
+          min={0}
+          max={255}
+          step={1}
+          precision={0}
+          onCommit={(v) => commitSelectedPoint("x", v)}
+        />
+        <NumberField
+          label="Out"
+          ariaLabel="Selected point output value"
+          value={selectedPoint ? Math.round(selectedPoint[1] * 255) : null}
+          min={0}
+          max={255}
+          step={1}
+          precision={0}
+          onCommit={(v) => commitSelectedPoint("y", v)}
+        />
+      </div>
+
       {/* Helper caption — the right-click-to-remove affordance is not
           visible, so we spell it out. Point count on the right so a user
           can eyeball "did my click actually add a point?". */}
@@ -652,43 +735,4 @@ export function CurvesPanel() {
       </div>
     </div>
   );
-}
-
-// ─── Local-only helper: expected index of a newly-inserted point ───────────────
-
-/**
- * Mirrors `insertPointSorted` in `commands.ts` — kept locally so the panel
- * can predict WHERE in the array the new point will land WITHOUT waiting for
- * a re-render. The command is still the source of truth (it writes to the
- * layer store); this function just computes the index we'll target during
- * the drag that immediately follows a click-to-add.
- *
- * If `commands.ts::insertPointSorted` ever changes shape, this helper must
- * change too. Both are covered by the vitest suite so a drift would surface
- * immediately.
- */
-function insertLocalPreview(
-  points: CurvePoints,
-  x: number,
-  y: number,
-): { pts: CurvePoints; index: number } {
-  const cx = clamp01(x);
-  const cy = clamp01(y);
-  const next: CurvePoints = [];
-  let inserted = false;
-  let insertedAt = -1;
-  for (const p of points) {
-    if (!inserted && p[0] > cx) {
-      insertedAt = next.length;
-      next.push([cx, cy]);
-      inserted = true;
-    }
-    if (p[0] === cx) continue;
-    next.push([p[0], p[1]]);
-  }
-  if (!inserted) {
-    insertedAt = next.length;
-    next.push([cx, cy]);
-  }
-  return { pts: next, index: insertedAt };
 }

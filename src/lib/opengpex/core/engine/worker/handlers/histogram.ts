@@ -20,19 +20,18 @@
 /**
  * HistogramHandler — Worker-side handler for HISTOGRAM jobs.
  *
- * Computes a full-resolution RGB composite histogram matching Photoshop's
- * Levels dialog behavior. Unlike a per-pixel luminance histogram, Photoshop's
- * "RGB" composite counts each channel independently:
+ * Computes the five full-resolution layer histograms (r / g / b / luma /
+ * composite) matching Photoshop's Levels dialog behavior. The "RGB" composite
+ * counts each channel independently rather than collapsing to a weighted
+ * luminance — this preserves the individual channel peaks:
  *
- *   For each pixel → histR[R]++, histG[G]++, histB[B]++
- *   Display bin[i] = histR[i] + histG[i] + histB[i]
+ *   For each opaque pixel → histR[R]++, histG[G]++, histB[B]++
+ *   composite[i] = histR[i] + histG[i] + histB[i]
  *
- * This produces a visually different (and more informative) distribution than
- * a single weighted-luminance approach, because it preserves the individual
- * channel peaks rather than collapsing three dimensions into one.
- *
- * The resulting 256-bin Uint32Array is transferred (zero-copy) back to the
- * main thread via the ArrayBuffer transfer mechanism.
+ * The counting math and the packed 5 × 256 × 4 B wire format live in
+ * `core/engine/color/histograms.ts` (single source of truth, shared with the
+ * main-thread facade that unpacks the segments). This handler only wires the
+ * WorkerCache bitmap → OffscreenCanvas pixels → packed buffer → transfer.
  *
  * Performance: A 2000×2000 image (~16M pixel reads) completes in 15–30ms on
  * a modern device. Since this runs in the Worker thread, main-thread frame
@@ -40,6 +39,7 @@
  */
 
 import { workerCache } from '../cache/WorkerCache';
+import { countLayerHistograms, packLayerHistogramBuffer } from '@opengpex/editor/core/engine/color/histograms';
 import type { HistogramJob } from '../../protocol/jobs';
 import type { RouterResult } from '../router';
 
@@ -64,41 +64,10 @@ export class HistogramHandler {
     ctx.drawImage(bitmap, 0, 0);
     const { data } = ctx.getImageData(0, 0, width, height);
 
-    // Compute RGB composite histogram (Photoshop-style).
-    //
-    // Photoshop's "RGB" channel in the Levels dialog does NOT compute a
-    // per-pixel luminance. Instead, it counts each R, G, B channel value
-    // independently and sums them into one composite histogram:
-    //
-    //   For each opaque pixel:
-    //     histR[R]++; histG[G]++; histB[B]++;
-    //   composite[i] = histR[i] + histG[i] + histB[i]
-    //
-    // This preserves the individual channel peaks and produces a histogram
-    // shape that matches what Photoshop displays.
-    const histR = new Uint32Array(256);
-    const histG = new Uint32Array(256);
-    const histB = new Uint32Array(256);
-    for (let i = 0; i < data.length; i += 4) {
-      // Skip fully-transparent pixels so alpha-padded borders don't
-      // artificially inflate the black bin.
-      if (data[i + 3] === 0) continue;
-      histR[data[i]]++;
-      histG[data[i + 1]]++;
-      histB[data[i + 2]]++;
-    }
-
-    // Sum the three per-channel histograms into the composite.
-    const hist = new Uint32Array(256);
-    for (let i = 0; i < 256; i++) {
-      hist[i] = histR[i] + histG[i] + histB[i];
-    }
-
-    // Transfer the underlying ArrayBuffer (zero-copy to main thread).
-    const buffer = hist.buffer;
+    const histogramBuffer = packLayerHistogramBuffer(countLayerHistograms(data));
     return {
-      result: { histogram: buffer },
-      transfer: [buffer],
+      result: { histogramBuffer },
+      transfer: [histogramBuffer],
     };
   }
 }

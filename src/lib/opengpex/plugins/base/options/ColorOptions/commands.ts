@@ -21,7 +21,7 @@
 
 import { EditorCommand, EditorContextValue, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
-import { fromHex, type ColorValue } from '@opengpex/editor/core/engine/color';
+import { fromHex, convertColorGamut, WORKING_GAMUT, type ColorValue } from '@opengpex/editor/core/engine/color';
 
 import * as P from './protocols';
 
@@ -33,13 +33,21 @@ import * as P from './protocols';
  * the picker. Duplicated here rather than reached through the hook because the
  * native `EyeDropper` is driven by a command (the tool strip / Tab cycle), which
  * has no React scope to call into.
+ *
+ * `pendingColor` / `metadata.fillColor` are stored in exactly one canonical
+ * form: `WORKING_GAMUT` — every writer converts before persisting (`applyColor`
+ * in the hook is the other one). The native `EyeDropper` hands back an sRGB hex
+ * (`fromHex` → `space:'srgb'`); converting before persist keeps solid-source
+ * content addressing and downstream gamut derivation seeing a single
+ * representation.
  */
 function landPickedColor(ctx: EditorContextValue, color: ColorValue): void {
-  ctx.scoped?.setSelfConfig({ pendingColor: color });
+  const stored = convertColorGamut(color, WORKING_GAMUT);
+  ctx.scoped?.setSelfConfig({ pendingColor: stored });
   const { activeFrame, activeLayer, actions } = ctx;
   if (activeFrame && activeLayer?.type === 'color') {
     actions.updateLayer(activeFrame.id, activeLayer.id, {
-      metadata: { ...activeLayer.metadata, fillColor: color },
+      metadata: { ...activeLayer.metadata, fillColor: stored },
     });
   }
 }

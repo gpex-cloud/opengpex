@@ -214,7 +214,7 @@ export function ColorSampler({
   /**
    * Pointer (client coords) → world point through the LIVE camera.
    *
-   * Pan/zoom are NOT frozen while sampling (§3.4①), so the CAMERA is read live per
+   * Pan/zoom are NOT frozen while sampling, so the CAMERA is read live per
    * call; only the container's page rect is cached (`rectRef`, refreshed on
    * resize/scroll). `null` when the viewport or camera is unavailable.
    */
@@ -249,7 +249,7 @@ export function ColorSampler({
   );
 
   /**
-   * Sample the frozen snapshot at a screen position (proposal §3.3 #1).
+   * Sample the frozen snapshot at a screen position.
    *
    * The v1 `canvas.getContext('2d')` path is GONE — v2's main canvas is owned by
    * WebGPU, so a 2d context is always `null` there. Instead we inverse-project the
@@ -294,7 +294,7 @@ export function ColorSampler({
       const at = (px: number, py: number) =>
         ((py - block.y) * block.w + (px - block.x)) * 4;
 
-      // ── Center pixel: f32 track is the precision truth (§3.2) ──
+      // ── Center pixel: f32 track is the precision truth ──
       const fr = block.float[fi],
         fg = block.float[fi + 1],
         fb = block.float[fi + 2];
@@ -308,7 +308,7 @@ export function ColorSampler({
 
       setSampledColor(hex);
       // PHASE 1: carry the full structured colour (f32 coords + snapshot gamut),
-      // not just the 8-bit hex — the sampler is now a ColorValue source (§7).
+      // not just the 8-bit hex — the sampler is a full ColorValue source.
       sampledColorRef.current = {
         space: snapshot.gamut,
         coords: { r: fr, g: fg, b: fb },

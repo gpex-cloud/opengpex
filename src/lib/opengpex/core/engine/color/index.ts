@@ -41,6 +41,7 @@ export * from './gamut';
 export * from './trc';
 export * from './matrices';
 export * from './luts';
+export * from './histograms';
 export * from './float16';
 export * from './wideGamutF16';
 export * from './resampleHighDepth';

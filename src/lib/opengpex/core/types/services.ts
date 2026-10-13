@@ -18,6 +18,7 @@
  */
 
 import type { CompositeRequest, CompositedImage, ResampledImage, SampledPixels, GpuInfo } from '../engine/types';
+import type { LayerHistogramData } from '../engine/color/histograms';
 
 import {
   Frame,
@@ -390,11 +391,12 @@ export interface PixelService {
     imageData: (src: string, rect?: { x: number; y: number; w: number; h: number }) => Promise<ImageData>;
 
     /**
-     * Compute full-resolution RGB composite histogram via Worker (zero main-thread blocking).
-     * Returns a 256-bin Uint32Array (sum of per-channel R+G+B counts, matching
-     * Photoshop's Levels dialog "RGB" channel histogram).
+     * Compute the full-resolution layer histograms via Worker (zero main-thread
+     * blocking). Returns five 256-bin segments (r/g/b/luma/composite) —
+     * composite is the per-bin r+g+b sum matching Photoshop's Levels dialog
+     * "RGB" channel histogram.
      */
-    histogram: (assetId: string) => Promise<Uint32Array>;
+    histogram: (assetId: string) => Promise<LayerHistogramData>;
 
     /**
      * Resample (resize) an image to the given target dimensions.

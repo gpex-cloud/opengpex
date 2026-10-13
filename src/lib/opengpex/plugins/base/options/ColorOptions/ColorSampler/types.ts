@@ -42,7 +42,7 @@ export interface ColorSamplerProps {
   /** Called when user cancels (Escape key) */
   onCancel: () => void;
   /**
-   * Frozen document composite snapshot (proposal §3): RAW premultiplied-linear
+   * Frozen document composite snapshot: RAW premultiplied-linear
    * pixels, captured on the PRESS that starts a pick (via `onRequestSnapshot`).
    * `null` before the first press, while capturing, or when unavailable. Decoded
    * per-sample through `sampleGpuRawData` on the magnifier window under the
@@ -83,7 +83,7 @@ export interface ColorSamplerProps {
   frame: Frame;
   /** Geometry service (uses only `space.screenToWorld`). */
   geometry: GeometryService;
-  /** Live camera accessor (pan/zoom are NOT frozen — §3.4①). */
+  /** Live camera accessor (pan/zoom are NOT frozen while sampling). */
   getCamera: () => CameraState | undefined;
   /**
    * Whether the snapshot was captured from the ACTIVE LAYER only rather than the

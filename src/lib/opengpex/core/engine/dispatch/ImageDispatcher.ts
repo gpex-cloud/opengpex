@@ -190,27 +190,27 @@ export class ImageDispatcher {
   }
 
   /**
-   * Compute a full-resolution RGB composite histogram via the Worker thread.
+   * Compute the full-resolution layer histograms via the Worker thread.
    *
-   * Returns a 256-bin Uint32Array (sum of per-channel R+G+B counts). The
-   * computation runs entirely in the Worker (no main-thread pixel iteration,
-   * no downsampling), producing results that match Photoshop's Levels dialog
-   * "RGB" channel histogram.
+   * Returns the raw transferred ArrayBuffer: five packed 256-bin segments
+   * (r / g / b / luma / composite, see `core/engine/color/histograms.ts` for
+   * the layout). `PixelFacade` unpacks it into views. The computation runs
+   * entirely in the Worker (no main-thread pixel iteration, no downsampling).
    *
    * @param hash - Content hash (AssetService ID / WorkerCache key).
    */
-  async histogram(hash: string): Promise<Uint32Array> {
+  async histogram(hash: string): Promise<ArrayBuffer> {
     // Ensure the Worker has this asset in its cache.
     const entry = this.assets.get(hash);
     if (entry) {
       await this.ensureAsset(hash, entry.blob);
     }
 
-    const result = await this.bridge.request<{ histogram: ArrayBuffer }>({
+    const result = await this.bridge.request<{ histogramBuffer: ArrayBuffer }>({
       type: 'HISTOGRAM',
       src: hash,
     });
-    return new Uint32Array(result.histogram);
+    return result.histogramBuffer;
   }
 
   /**

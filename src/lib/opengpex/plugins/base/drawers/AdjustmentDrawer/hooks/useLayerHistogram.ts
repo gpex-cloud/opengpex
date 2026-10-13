@@ -20,6 +20,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import type { LayerHistogramData } from '@opengpex/editor/core/engine/color/histograms';
 import {
   useEditorState,
   useEditorServices,
@@ -28,24 +29,28 @@ import {
 // ─── useLayerHistogram ─────────────────────────────────────────────────────────
 
 /**
- * useLayerHistogram — full-resolution, per-layer RGB composite histogram via Worker.
+ * useLayerHistogram — full-resolution, per-layer source histograms via Worker.
  *
- * Returns `{ luminance }` where `luminance` is a `Uint32Array(256)` of bin
- * counts (RGB composite = sum of per-channel R+G+B counts, matching Photoshop's
- * Levels dialog "RGB" channel histogram) or `null` while the computation is
- * still pending. The hook is careful to:
+ * Returns `{ histogram }` where `histogram` is a `LayerHistogramData` — five
+ * 256-bin arrays (`r` / `g` / `b` / `luma` / `composite`) — or `null` while
+ * the computation is still pending. `composite` is the per-bin r+g+b sum
+ * matching Photoshop's Levels dialog "RGB" channel; `luma` is per-pixel
+ * Rec.601. These are SOURCE histograms: they describe the layer's bitmap and
+ * deliberately do NOT react to levels/curves edits — panels derive the output
+ * distribution from them via `deriveLayerHistogram` (see
+ * `core/engine/color/histograms.ts`). The hook is careful to:
  *
  * 1. Only compute once per `layer.assetId` — swapping the active layer or
- *    replacing its bitmap invalidates the cache; a pure `layer.levels` mutation
- *    does not trigger recomputation.
+ *    replacing its bitmap invalidates the cache; a pure `layer.levels` or
+ *    `layer.curves` mutation does not trigger recomputation.
  * 2. Compute on FULL resolution pixels in the Worker thread — no downsampling.
  *    This eliminates the bilinear interpolation artifacts that the old 256px
  *    thumbnail approach introduced, producing results that match Photoshop's
  *    Levels dialog histogram.
- * 3. Use the same algorithm as Photoshop: for each pixel, independently count
- *    R, G, B channel values, then sum the three histograms into one composite.
- *    This preserves individual channel peaks rather than collapsing them into
- *    a single weighted-luminance value.
+ * 3. Use the Photoshop composite algorithm: for each pixel, independently
+ *    count R, G, B channel values, then sum the three histograms into one
+ *    composite. This preserves individual channel peaks rather than collapsing
+ *    them into a single weighted-luminance value.
  * 4. Run entirely in the engine Worker via `pixels.image.histogram()`, so the
  *    main thread is never blocked by pixel iteration (zero main-thread compute).
  * 5. Ignore fully-transparent pixels (`a === 0`) so a masked layer's alpha-
@@ -58,14 +63,16 @@ import {
  */
 
 /**
- * Module-scoped LRU-ish cache: key is `layer.assetId`.
- * Bounded to a handful of entries because histograms are cheap to recompute
- * and users don't tend to keep dozens of layers open at once.
+ * Module-scoped FIFO cache: key is `layer.assetId`. Eviction drops the entry
+ * that was inserted first (Map preserves insertion order); cache hits do NOT
+ * re-insert, so this is not an LRU. Bounded to a handful of entries because
+ * histograms are cheap to recompute and users don't tend to keep dozens of
+ * layers open at once.
  */
-const HISTOGRAM_CACHE = new Map<string, Uint32Array>();
+const HISTOGRAM_CACHE = new Map<string, LayerHistogramData>();
 const HISTOGRAM_CACHE_MAX = 16;
 
-function rememberHistogram(key: string, hist: Uint32Array) {
+function rememberHistogram(key: string, hist: LayerHistogramData) {
   if (HISTOGRAM_CACHE.size >= HISTOGRAM_CACHE_MAX) {
     // Drop the oldest entry (Map preserves insertion order).
     const firstKey = HISTOGRAM_CACHE.keys().next().value;
@@ -75,8 +82,8 @@ function rememberHistogram(key: string, hist: Uint32Array) {
 }
 
 export interface LayerHistogram {
-  /** 256-bin luminance counts, indexed 0..255. `null` while pending or unavailable. */
-  luminance: Uint32Array | null;
+  /** Five 256-bin source histograms. `null` while pending or unavailable. */
+  histogram: LayerHistogramData | null;
   /** True during the async Worker computation. False once the histogram is cached or has failed. */
   loading: boolean;
 }
@@ -94,13 +101,13 @@ export function useLayerHistogram(): LayerHistogram {
   }, [activeLayer?.assetId]);
 
   // Version counter that ticks whenever a new histogram lands in the module
-  // cache — lets us re-derive `luminance` (and `loading`) synchronously from
+  // cache — lets us re-derive `histogram` (and `loading`) synchronously from
   // the cache during render.
   const [cacheVersion, setCacheVersion] = useState(0);
 
-  // Both `luminance` and `loading` are pure derivations off the module cache
+  // Both `histogram` and `loading` are pure derivations off the module cache
   // + `cacheVersion` bump.
-  const luminance = useMemo<Uint32Array | null>(() => {
+  const histogram = useMemo<LayerHistogramData | null>(() => {
     if (!cacheKey) return null;
     return HISTOGRAM_CACHE.get(cacheKey) ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -123,7 +130,7 @@ export function useLayerHistogram(): LayerHistogram {
       try {
         // Dispatch HISTOGRAM job to the engine Worker.
         // The Worker operates on the full-resolution bitmap (no downsampling),
-        // producing an accurate 256-bin Rec. 601 luminance histogram.
+        // producing the five 256-bin source histograms.
         const hist = await pixels.image.histogram(cacheKey);
         if (cancelled) return;
         rememberHistogram(cacheKey, hist);
@@ -131,7 +138,7 @@ export function useLayerHistogram(): LayerHistogram {
         // Worker failed (e.g. asset not in cache, canvas tainted).
         // Histogram stays null — panel still renders, user just loses the graph.
       }
-      // Bump the version so the `luminance` memo re-reads from the module
+      // Bump the version so the `histogram` memo re-reads from the module
       // cache on the next render.
       setCacheVersion((v) => v + 1);
     };
@@ -143,5 +150,5 @@ export function useLayerHistogram(): LayerHistogram {
     };
   }, [cacheKey, pixels]);
 
-  return { luminance, loading };
+  return { histogram, loading };
 }

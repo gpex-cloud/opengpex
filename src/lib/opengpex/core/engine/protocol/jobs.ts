@@ -78,9 +78,11 @@ export interface ExtractPixelsJob {
 // ─── HistogramJob ───
 
 /**
- * Compute full-resolution RGB composite histogram in the Worker thread.
- * Returns a 256-bin Uint32Array (sum of per-channel R+G+B counts, matching
- * Photoshop's Levels dialog "RGB" channel histogram).
+ * Compute the full-resolution layer histograms in the Worker thread.
+ * Returns a single packed ArrayBuffer (5 × 256 × 4 B) holding per-channel
+ * r/g/b, per-pixel Rec.601 luma, and the composite r+g+b sum (Photoshop's
+ * Levels dialog "RGB" channel histogram). Segment layout + pack/unpack live
+ * in `core/engine/color/histograms.ts`.
  */
 export interface HistogramJob {
   type: 'HISTOGRAM';

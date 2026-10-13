@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.8
+
+- Adjustments: real-time histogram previews for Curves and Levels, updating dynamically as you tweak tone sliders and curve control points
+- Color Tools: seamless wide-gamut color consistency and accurate synchronization across drawing tools
+
+---
+
 ## v2.0.7
 
 - Image Formats: faster HEIC/HEIF loading with hardware acceleration on supported devices, and improved high-precision AVIF image support

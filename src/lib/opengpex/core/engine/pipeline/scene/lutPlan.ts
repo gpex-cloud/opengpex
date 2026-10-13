@@ -22,24 +22,25 @@
  * reusing the LUT MATH single-source-of-truth.
  *
  * HARD CONSTRAINT: the tone tables come EXCLUSIVELY from
- * `generateCurveLUT` / `generateLevelsLUT` (`core/engine/color/luts.ts`) — the same
- * functions the curve/levels UI panels sample. This module only (a) composes the
- * per-channel curve tables the way v1 `buildFusedLUTs` did (index composition,
- * NOT curve re-derivation) and (b) packs the normalized results into half-float
- * RGBA so `adjust.wgsl` can sample them at working precision. Re-deriving any
- * curve/level math here would silently diverge the render from the stored curve.
+ * `generateLevelsLUT` / `buildCurvesChannelTablesF32`
+ * (`core/engine/color/luts.ts`) — the same functions the curve/levels UI panels
+ * and the histogram derivation sample. This module only packs the normalized
+ * f32 tables into half-float RGBA so `adjust.wgsl` can sample them at working
+ * precision. Re-deriving any curve/level math here would silently diverge the
+ * render from the stored curve.
  *
  * LAYOUT: `LUT_ENTRIES` texels, RGBA16F. R/G/B hold the per-channel mapping; A is
  * unused (set to 1). `adjust.wgsl` samples `.r/.g/.b` for the matching channel.
  *   • levels — ONE table applied to all three channels (v1: one LUT, all chans).
- *   • curves — per channel = `perChannel(master(x))` (v1 composition order:
- *     master rgb first, then the channel-specific curve).
+ *   • curves — per channel = `perChannel(master(x))` (composition baked by
+ *     `buildCurvesChannelTablesF32` in color/luts.ts: master rgb first, then
+ *     the channel-specific curve).
  *
  * @module core/gpu/scene/lutPlan
  */
 
 import type { CurvesState, LevelsState } from '@opengpex/editor/core/types';
-import { generateCurveLUT, generateLevelsLUT } from '@opengpex/editor/core/engine/color/luts';
+import { buildCurvesChannelTablesF32, generateLevelsLUT } from '@opengpex/editor/core/engine/color/luts';
 import { floatToHalf } from '@opengpex/editor/core/engine/color/float16';
 
 /** LUT resolution — matches generateCurveLUT/generateLevelsLUT default + v1. */
@@ -69,33 +70,13 @@ export function buildLevelsLutData(config: LevelsState): Uint16Array {
 }
 
 /**
- * Build the curves 1D-LUT data: per channel = `perChannel(master(x))`, matching
- * v1 `buildFusedLUTs` composition (index composition of the master rgb table and
- * the channel table, both from `generateCurveLUT`). `curves` is the SAME object
- * hashed into the `lutId`.
+ * Build the curves 1D-LUT data: per channel = `perChannel(master(x))`. The
+ * composition itself lives in `buildCurvesChannelTablesF32` (the single source
+ * of truth, shared with the histogram derivation) — this wrapper only packs
+ * the f32 tables into the RGBA16F layout. `curves` is the SAME object hashed
+ * into the `lutId`.
  */
 export function buildCurvesLutData(curves: CurvesState): Uint16Array {
-  const master = curves.rgb ? (generateCurveLUT(curves.rgb, LUT_ENTRIES, 'f32') as Float32Array) : null;
-  const red = curves.red ? (generateCurveLUT(curves.red, LUT_ENTRIES, 'f32') as Float32Array) : null;
-  const green = curves.green ? (generateCurveLUT(curves.green, LUT_ENTRIES, 'f32') as Float32Array) : null;
-  const blue = curves.blue ? (generateCurveLUT(curves.blue, LUT_ENTRIES, 'f32') as Float32Array) : null;
-  const maxIn = LUT_ENTRIES - 1;
-
-  // final[i] = per( round(master(i/maxIn) · maxIn) ), each step normalized —
-  // exactly v1 composeInto (result[i] = additional[readLUTIndex(target, i)]).
-  const channel = (per: Float32Array | null): Float32Array => {
-    const out = new Float32Array(LUT_ENTRIES);
-    for (let i = 0; i < LUT_ENTRIES; i++) {
-      const afterMaster = master ? master[i] : i / maxIn;
-      if (per) {
-        const idx = Math.round(afterMaster * maxIn);
-        out[i] = per[idx];
-      } else {
-        out[i] = afterMaster;
-      }
-    }
-    return out;
-  };
-
-  return packRgbaHalf(channel(red), channel(green), channel(blue));
+  const [r, g, b] = buildCurvesChannelTablesF32(curves, LUT_ENTRIES);
+  return packRgbaHalf(r, g, b);
 }

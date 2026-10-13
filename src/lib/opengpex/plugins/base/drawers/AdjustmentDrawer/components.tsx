@@ -243,8 +243,12 @@ export const AdjustmentDrawerComponent = React.memo(function AdjustmentDrawerCom
  * mutating layer state directly from the field.
  */
 export interface NumberFieldProps {
-  /** Current committed value. */
-  value: number;
+  /**
+   * Current committed value. `null` renders a DISABLED field showing
+   * `placeholder` (default "-") — the "nothing selected" state, e.g. the
+   * Curves panel's In/Out readout before a control point is clicked.
+   */
+  value: number | null;
   /** Inclusive lower bound. */
   min: number;
   /** Inclusive upper bound. */
@@ -275,6 +279,10 @@ export interface NumberFieldProps {
    * monochrome mode consolidates the constant across all outputs.
    */
   disabled?: boolean;
+  /**
+   * Text shown while `value` is `null` (default "-"). Ignored otherwise.
+   */
+  placeholder?: string;
 }
 
 export function NumberField({
@@ -287,8 +295,11 @@ export function NumberField({
   onCommit,
   ariaLabel,
   label,
+  placeholder,
 }: NumberFieldProps) {
-  const [draft, setDraft] = useState(value.toFixed(precision));
+  const empty = value === null;
+  const shown = empty ? (placeholder ?? "-") : value.toFixed(precision);
+  const [draft, setDraft] = useState(shown);
   const lastValueRef = useRef(value);
 
   // Sync external changes into the visible text unless the user is mid-typing.
@@ -296,12 +307,13 @@ export function NumberField({
   // on Reset / Preset apply / another panel writing the same field.
   useEffect(() => {
     if (lastValueRef.current !== value) {
-      setDraft(value.toFixed(precision));
+      setDraft(shown);
       lastValueRef.current = value;
     }
-  }, [value, precision]);
+  }, [value, shown]);
 
   const commit = useCallback(() => {
+    if (empty) return;
     const parsed = Number.parseFloat(draft);
     if (Number.isFinite(parsed)) {
       const clamped = Math.min(Math.max(parsed, min), max);
@@ -313,7 +325,7 @@ export function NumberField({
     } else {
       setDraft(value.toFixed(precision));
     }
-  }, [draft, min, max, step, precision, onCommit, value]);
+  }, [draft, min, max, step, precision, onCommit, value, empty]);
 
   // Field styling forks by container mode:
   //   - `label` present: fill parent width, sit under a small uppercase caption
@@ -331,7 +343,7 @@ export function NumberField({
       type="text"
       inputMode="decimal"
       value={draft}
-      disabled={disabled}
+      disabled={disabled || empty}
       aria-label={ariaLabel}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
@@ -339,7 +351,7 @@ export function NumberField({
         if (e.key === "Enter") {
           (e.target as HTMLInputElement).blur();
         } else if (e.key === "Escape") {
-          setDraft(value.toFixed(precision));
+          setDraft(shown);
           (e.target as HTMLInputElement).blur();
         }
       }}

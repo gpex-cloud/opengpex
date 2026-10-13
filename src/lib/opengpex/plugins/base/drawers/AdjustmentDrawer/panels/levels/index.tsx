@@ -22,16 +22,28 @@
 /**
  * LevelsPanel — Photoshop-style histogram + input/output/gamma editor.
  *
+ * Pure math (graph/track geometry, gamma mapping, histogram percentiles,
+ * LUT preview path) lives in `./geometry`; cross-panel helpers (histogram
+ * path, clamps) in `../helpers`. This file is the interaction/render
+ * orchestrator.
+ *
  * Interaction & data-flow (spec §5 & §6, mirrors CurvesPanel):
  *
- * - The histogram at the top of the panel is an RGB composite count
- *   (sum of per-channel R+G+B histograms, matching Photoshop's Levels "RGB"
- *   channel) computed from the active layer's full-resolution bitmap in the
- *   engine Worker (see `useLayerHistogram()`). The stat is lazy: on layer
- *   switch we render an empty grid immediately and swap in the bars once
- *   the Worker computation completes. The bars share the SAME `x ∈ [0,255]`
- *   axis as the input track below them, so users can eyeball the blackpoint /
- *   whitepoint against real image data.
+ * - The histogram at the top of the panel shows the levels+curves OUTPUT
+ *   distribution, derived live on every slider frame: the Worker computes the
+ *   layer's SOURCE histograms once per bitmap (see `useLayerHistogram()`),
+ *   and `deriveLayerHistogram` scatters them through the same LUT chain the
+ *   GPU applies — so the bars deform in real time while dragging, with zero
+ *   Worker traffic and zero drift from the canvas. The bars share the SAME
+ *   `x ∈ [0,255]` axis as the input track below them, so users can eyeball
+ *   the blackpoint / whitepoint against real image data.
+ *
+ * - Display modes (segmented control in the header): `Composite` (gray,
+ *   per-bin r+g+b sum — Photoshop Levels "RGB" convention), `RGB` (three
+ *   independently normalized channel overlays), and `Luma` (Rec.601 — a
+ *   per-pixel statistic that CANNOT be derived from per-channel marginals,
+ *   so it always shows the SOURCE distribution and does not react to the
+ *   panel's own adjustments).
  *
  * - On top of the histogram we overlay the current levels-LUT curve, which
  *   is computed by the same `generateLevelsLUT` function the render path uses
@@ -61,7 +73,7 @@
  *   also goes through a gesture (short-lived, begin → update → end)  so
  *   keyboard edits produce a single Undo step per commit.
  *
- * - "Auto" button reads the cached histogram, finds the 0.1 / 99.9
+ * - "Auto" button reads the SOURCE composite histogram, finds the 0.1 / 99.9
  *   percentiles (Photoshop convention), then dispatches `autoLevelsCmd`
  *   with the two computed inputBlack / inputWhite values. gamma/output are
  *   preserved — this matches user expectation that "Auto Levels" only
@@ -78,37 +90,34 @@ import React, {
   useEffect,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { generateLevelsLUT } from "@opengpex/editor/core/engine/color";
+import { deriveLayerHistogram } from "@opengpex/editor/core/engine/color";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { LevelsState } from "@opengpex/editor/core/types/models";
-import type { AdjustmentDrawerCommandsMap } from "../commands.d";
-import { DEFAULT_LEVELS_STATE } from "../protocols";
-import { NumberField } from "../components";
+import type { AdjustmentDrawerCommandsMap } from "../../commands.d";
+import { NumberField } from "../../components";
+import { clamp, histogramToPathD } from "../helpers";
+import {
+  gammaToTrackFraction,
+  GRAPH_VB_H,
+  GRAPH_VB_W,
+  levelsLutToPathD,
+  percentileFromHistogram,
+  pointerToIntensity,
+  readLevels,
+  thumbSvgPath,
+  TRACK_VB_H,
+  trackFractionToGamma,
+} from "./geometry";
 import {
   useAdjustmentDrawer,
   useFilterGesture,
   useLayerHistogram,
-} from "../hooks";
+} from "../../hooks";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
-
-/**
- * SVG viewBox width for the histogram + curve overlay. We chose 256 to line up
- * the histogram's 256 bins 1:1 with pixels in the coordinate system — a bin at
- * intensity 128 renders exactly at `x=128` without any fractional maths. Height
- * is smaller because the panel is narrow — we care about relative shape more
- * than absolute counts.
- */
-const GRAPH_VB_W = 256;
-const GRAPH_VB_H = 100;
-
-/** Number of subdivisions of the levels LUT we sample for the overlay curve. */
-const LUT_PREVIEW_SAMPLES = 64;
-
-/** Handle height in track viewBox units. Tracks are drawn at 24-unit tall SVG. */
-const TRACK_VB_H = 24;
 
 /** Which handle is currently being dragged. `null` means idle. */
 type DragTarget =
@@ -118,191 +127,32 @@ type DragTarget =
   | { kind: "outputBlack" }
   | { kind: "outputWhite" };
 
-// ─── Utilities ─────────────────────────────────────────────────────────────────
-
-const clamp = (v: number, lo: number, hi: number): number =>
-  v < lo ? lo : v > hi ? hi : v;
-
 /**
- * Generate an SVG path `d` attribute for the house/pentagon-shaped thumb used
- * by the triangle handles on the input/output tracks.
- *
- * @param cx - Center x position in the SVG coordinate system
- * @param height - Total height of the thumb in SVG units
- * @param halfWidth - Half-width of the thumb body (default 5)
- * @returns SVG path data string
+ * Histogram display modes. `composite` is the gray per-bin r+g+b sum (PS
+ * Levels "RGB" convention, default); `rgb` overlays the three channels with
+ * the brand hex shared with the Curves panel; `luma` shows the per-pixel
+ * Rec.601 SOURCE histogram — per-pixel luma cannot be derived from per-channel
+ * marginals, so that mode does not react to the panel's adjustments.
  */
-function thumbSvgPath(cx: number, height: number, halfWidth = 5): string {
-  const roofApexY = 0;
-  const roofBaseY = height * 0.28;
-  const bodyBottomY = height * 0.78;
-  const cornerR = 1;
+type HistogramDisplayMode = "composite" | "rgb" | "luma";
 
-  return [
-    `M ${cx} ${roofApexY}`,
-    `L ${cx + halfWidth} ${roofBaseY}`,
-    `L ${cx + halfWidth} ${bodyBottomY - cornerR}`,
-    `Q ${cx + halfWidth} ${bodyBottomY} ${cx + halfWidth - cornerR} ${bodyBottomY}`,
-    `L ${cx - halfWidth + cornerR} ${bodyBottomY}`,
-    `Q ${cx - halfWidth} ${bodyBottomY} ${cx - halfWidth} ${bodyBottomY - cornerR}`,
-    `L ${cx - halfWidth} ${roofBaseY}`,
-    `Z`,
-  ].join(' ');
-}
-
-/**
- * Read the current levels state, falling back to identity defaults. We return
- * a fresh copy every call (mutating the layer's state directly would defeat
- * React's referential-equality checks).
- */
-function readLevels(current: LevelsState | undefined): LevelsState {
-  return { ...DEFAULT_LEVELS_STATE, ...(current ?? {}) };
-}
-
-/**
- * Map gamma ∈ [0.1, 10] to a fraction ∈ [0, 1] along the input track between
- * `inputBlack` and `inputWhite`. Photoshop uses a log2 scale so gamma=1
- * lands exactly at the midpoint — we replicate this.
- *
- *   gamma = 1.0  → 0.5  (midpoint)
- *   gamma = 0.1  → 0.0  (leftmost, near black)
- *   gamma = 10   → 1.0  (rightmost, near white)
- *
- * Concretely:  fraction = 0.5 * (1 - log2(gamma) / log2(9.99))
- * (`9.99` because gamma range is [1/9.99, 9.99] symmetric around 1.0).
- */
-const GAMMA_LOG_RANGE = Math.log2(9.99); // ≈ 3.32
-
-function gammaToTrackFraction(gamma: number): number {
-  const clamped = clamp(gamma, 0.1, 10);
-  return 0.5 - (Math.log2(clamped) / GAMMA_LOG_RANGE) * 0.5;
-}
-
-function trackFractionToGamma(f: number): number {
-  const clamped = clamp(f, 0, 1);
-  const exp = ((0.5 - clamped) / 0.5) * GAMMA_LOG_RANGE;
-  return clamp(Math.pow(2, exp), 0.1, 10);
-}
-
-/**
- * Convert a horizontal pointer coordinate to an intensity value in [0, 255].
- * The track's SVG occupies `viewBox="0 0 256 24"`, so we scale by the DOM
- * rect and clamp — same maths as the Curves panel's `eventToVB`.
- */
-function pointerToIntensity(evt: { clientX: number }, el: Element): number {
-  const rect = el.getBoundingClientRect();
-  if (rect.width === 0) return 0;
-  const raw = ((evt.clientX - rect.left) / rect.width) * 255;
-  return clamp(Math.round(raw), 0, 255);
-}
-
-
-// ─── Histogram helpers ────────────────────────────────────────────────────────
-
-/**
- * Build the SVG polyline `d` for the histogram bars. We normalize by the
- * MAX-of-non-endpoint-bins so a single spike at 0 or 255 (very common on
- * masked or clipped layers) doesn't crush the rest of the graph into
- * invisibility. The endpoints are then re-scaled independently so they
- * still show up as bars, but capped at graph height.
- */
-function histogramToPathD(
-  hist: Uint32Array | null,
-  vbW: number,
-  vbH: number,
-): string {
-  if (!hist || hist.length === 0) return "";
-  // Ignore the two extreme bins when finding the display maximum so a common
-  // "all-zero-alpha corners" spike doesn't dominate. We still draw them,
-  // just clamped to the height ceiling.
-  let interiorMax = 0;
-  for (let i = 1; i < hist.length - 1; i++) {
-    if (hist[i] > interiorMax) interiorMax = hist[i];
-  }
-  if (interiorMax === 0) {
-    // Nothing interior — fall back to the true max so single-value images
-    // still render *something*.
-    for (let i = 0; i < hist.length; i++) {
-      if (hist[i] > interiorMax) interiorMax = hist[i];
-    }
-  }
-  if (interiorMax === 0) return "";
-
-  // We render as a filled polygon (baseline → bars → baseline) which reads
-  // better than 256 individual `<rect>`s and stays cheap to diff.
-  const parts: string[] = [`M 0 ${vbH}`];
-  const step = vbW / hist.length;
-  for (let i = 0; i < hist.length; i++) {
-    const h = Math.min(vbH, (hist[i] / interiorMax) * vbH);
-    const x = i * step;
-    parts.push(`L ${x.toFixed(2)} ${(vbH - h).toFixed(2)}`);
-    parts.push(`L ${(x + step).toFixed(2)} ${(vbH - h).toFixed(2)}`);
-  }
-  parts.push(`L ${vbW} ${vbH} Z`);
-  return parts.join(" ");
-}
-
-/**
- * Compute inputBlack/inputWhite from a luminance histogram at the given
- * percentile split (Photoshop uses 0.1% / 99.9% ≈ black/white clip).
- * Returns null if the histogram is empty (all-transparent layer).
- */
-function percentileFromHistogram(
-  hist: Uint32Array,
-  lowPct: number,
-  highPct: number,
-): { inputBlack: number; inputWhite: number } | null {
-  let total = 0;
-  for (let i = 0; i < hist.length; i++) total += hist[i];
-  if (total === 0) return null;
-  const lowTarget = total * lowPct;
-  const highTarget = total * highPct;
-  let acc = 0;
-  let inputBlack = 0;
-  let inputWhite = 255;
-  let foundLow = false;
-  for (let i = 0; i < hist.length; i++) {
-    acc += hist[i];
-    if (!foundLow && acc >= lowTarget) {
-      inputBlack = i;
-      foundLow = true;
-    }
-    if (acc >= highTarget) {
-      inputWhite = i;
-      break;
-    }
-  }
-  // Preserve at least a minimum span so autoLevels can't crush contrast to
-  // zero on a nearly-monochrome layer.
-  if (inputWhite <= inputBlack + 1) {
-    inputWhite = clamp(inputBlack + 2, 0, 255);
-  }
-  return { inputBlack, inputWhite };
-}
-
-/**
- * Sample the levels LUT into an SVG polyline path so users see how the
- * current input/gamma/output settings remap intensity. Because we use the
- * same `generateLevelsLUT` the worker uses, this line is a preview of the
- * final filter output — no drift between UI and render.
- */
-function levelsLutToPathD(
-  levels: LevelsState,
-  vbW: number,
-  vbH: number,
-): string {
-  const lut = generateLevelsLUT(levels, 256 as const, "f32") as Float32Array;
-  const step = (lut.length - 1) / (LUT_PREVIEW_SAMPLES - 1);
-  const parts: string[] = [];
-  for (let i = 0; i < LUT_PREVIEW_SAMPLES; i++) {
-    const li = Math.round(i * step);
-    const x = (li / (lut.length - 1)) * vbW;
-    // lut[li] ∈ [0,1] where 1 = white. SVG y grows downward, so invert.
-    const y = (1 - lut[li]) * vbH;
-    parts.push(`${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`);
-  }
-  return parts.join(" ");
-}
+const HISTOGRAM_MODES: {
+  value: HistogramDisplayMode;
+  label: string;
+  title: string;
+}[] = [
+  {
+    value: "composite",
+    label: "Comp",
+    title: "Composite histogram (R+G+B sum, Photoshop Levels default)",
+  },
+  { value: "rgb", label: "RGB", title: "Per-channel RGB overlay" },
+  {
+    value: "luma",
+    label: "Luma",
+    title: "Rec.601 luma — source only, does not reflect this panel's adjustments",
+  },
+];
 
 // ─── Handle SVG ────────────────────────────────────────────────────────────────
 
@@ -365,10 +215,25 @@ export function LevelsPanel() {
     autoLevelsCmd,
   } = usePluginCommands<AdjustmentDrawerCommandsMap>();
   const { activeLayer } = useAdjustmentDrawer();
-  const { luminance: histogram, loading: histLoading } = useLayerHistogram();
+  const { histogram: srcHistogram, loading: histLoading } = useLayerHistogram();
   const gesture = useFilterGesture(beginLevelsEditCmd);
 
   const levels = useMemo(() => readLevels(activeLayer?.levels), [activeLayer?.levels]);
+  // The render path applies levels AND curves; the derived histogram must
+  // consume both. Missing `curves` in the memo deps below would freeze the
+  // bars while the canvas moves — the exact single-evaluator bug class this
+  // panel exists to prevent.
+  const curves = activeLayer?.curves;
+
+  const [displayMode, setDisplayMode] = useState<HistogramDisplayMode>("composite");
+
+  // Output distribution = SOURCE histograms scattered through the same
+  // levels+curves LUT chain the GPU applies. Microsecond-scale, so it
+  // recomputes on every slider frame with zero Worker traffic.
+  const derivedHistogram = useMemo(
+    () => (srcHistogram ? deriveLayerHistogram(srcHistogram, levels, curves) : null),
+    [srcHistogram, levels, curves],
+  );
 
   const dragRef = useRef<DragTarget | null>(null);
   const graphRef = useRef<SVGSVGElement | null>(null);
@@ -377,10 +242,25 @@ export function LevelsPanel() {
 
   // ── Derived positions ───────────────────────────────────────────────────────
 
-  const histogramPath = useMemo(
-    () => histogramToPathD(histogram, GRAPH_VB_W, GRAPH_VB_H),
-    [histogram],
-  );
+  // Single-array display path: composite (derived) or luma (source-only).
+  // RGB mode renders three independently normalized paths instead.
+  const histogramPath = useMemo(() => {
+    if (displayMode === "luma") {
+      return histogramToPathD(srcHistogram?.luma ?? null, GRAPH_VB_W, GRAPH_VB_H);
+    }
+    if (displayMode === "rgb") return null;
+    return histogramToPathD(derivedHistogram?.composite ?? null, GRAPH_VB_W, GRAPH_VB_H);
+  }, [displayMode, srcHistogram, derivedHistogram]);
+
+  const rgbPaths = useMemo(() => {
+    if (displayMode !== "rgb" || !derivedHistogram) return null;
+    return {
+      r: histogramToPathD(derivedHistogram.r, GRAPH_VB_W, GRAPH_VB_H),
+      g: histogramToPathD(derivedHistogram.g, GRAPH_VB_W, GRAPH_VB_H),
+      b: histogramToPathD(derivedHistogram.b, GRAPH_VB_W, GRAPH_VB_H),
+    };
+  }, [displayMode, derivedHistogram]);
+
   const lutPath = useMemo(
     () => levelsLutToPathD(levels, GRAPH_VB_W, GRAPH_VB_H),
     [levels],
@@ -568,17 +448,20 @@ export function LevelsPanel() {
 
   // ── Auto Levels ─────────────────────────────────────────────────────────────
 
-  const autoLevelsAvailable = !!histogram && !histLoading && !!activeLayer;
+  const autoLevelsAvailable = !!srcHistogram && !histLoading && !!activeLayer;
 
   const handleAutoLevels = useCallback(() => {
-    if (!histogram) return;
+    if (!srcHistogram) return;
+    // Auto reads the SOURCE composite (not the derived display histogram) —
+    // percentiles of the unadjusted image, matching Photoshop. Feeding it the
+    // derived histogram would compound the current edit on every click.
     // Photoshop's Auto Levels defaults are 0.1% / 99.9% — leaves the extreme
     // outliers alone so a single bright specular or a pinpoint of pure black
     // doesn't blow the whole tonal range.
-    const pct = percentileFromHistogram(histogram, 0.001, 0.999);
+    const pct = percentileFromHistogram(srcHistogram.composite, 0.001, 0.999);
     if (!pct) return;
     autoLevelsCmd?.execute(pct);
-  }, [histogram, autoLevelsCmd]);
+  }, [srcHistogram, autoLevelsCmd]);
 
   // ── Position helpers for track SVG ──────────────────────────────────────────
 
@@ -595,17 +478,42 @@ export function LevelsPanel() {
     // Same "no outer card" pattern as CurvesPanel — parent drawer supplies
     // the surface. Padding lives on the drawer.
     <div className="flex flex-col gap-2">
-      {/* Auto row: tiny button aligned to the right. Placing it above the graph
-          rather than beside it keeps the graph full-width. */}
-      <div className="flex items-center justify-between">
+      {/* Header: panel title · histogram display mode · Auto. */}
+      <div className="flex items-center justify-between gap-1">
         <span className="text-[9px] font-black tracking-widest uppercase text-[var(--text-muted)]">
           Levels
         </span>
+        <div
+          role="radiogroup"
+          aria-label="Histogram display mode"
+          className="flex items-center gap-0.5"
+        >
+          {HISTOGRAM_MODES.map((m) => {
+            const active = displayMode === m.value;
+            return (
+              <button
+                key={m.value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setDisplayMode(m.value)}
+                title={m.title}
+                className={`px-1.5 py-0.5 rounded-md text-[9px] font-black tracking-widest uppercase transition-colors ${
+                  active
+                    ? "bg-zinc-200 dark:bg-white/10 text-[var(--text-main)]"
+                    : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                }`}
+              >
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
         <button
           type="button"
           disabled={!autoLevelsAvailable}
           onClick={handleAutoLevels}
-          title="Auto-set blackpoint / whitepoint from image histogram"
+          title="Auto-set blackpoint / whitepoint from the source image histogram"
           className={`text-[9px] font-black tracking-widest uppercase px-2 py-0.5 rounded-md border transition-colors ${
             autoLevelsAvailable
               ? "border-zinc-200 dark:border-white/10 hover:bg-zinc-100 dark:hover:bg-white/5 text-[var(--text-main)]"
@@ -622,7 +530,7 @@ export function LevelsPanel() {
         viewBox={`0 0 ${GRAPH_VB_W} ${GRAPH_VB_H}`}
         className="w-full h-24 rounded-md bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-white/10"
         role="img"
-        aria-label="Luminance histogram with levels curve overlay"
+        aria-label={`${displayMode} histogram with levels curve overlay`}
         preserveAspectRatio="none"
       >
         {/* Grid guides at 0.25/0.5/0.75 — same idiom as CurvesPanel. */}
@@ -655,8 +563,18 @@ export function LevelsPanel() {
           ))}
         </g>
 
-        {/* Histogram — theme-tinted fill, no stroke (bars would double-draw). */}
-        {histogramPath ? (
+        {/* Histogram bars — composite/luma as one theme-tinted polygon (no
+            stroke, bars would double-draw); RGB mode as three alpha-stacked
+            brand-hex paths (alpha blending, NOT mix-blend-mode: screen, which
+            washes out on the light theme). Each channel normalizes
+            independently so a single-channel spike can't flatten the others. */}
+        {displayMode === "rgb" && rgbPaths ? (
+          <>
+            <path d={rgbPaths.r} fill="#ef4444" fillOpacity={0.45} style={{ pointerEvents: "none" }} />
+            <path d={rgbPaths.g} fill="#22c55e" fillOpacity={0.45} style={{ pointerEvents: "none" }} />
+            <path d={rgbPaths.b} fill="#3b82f6" fillOpacity={0.45} style={{ pointerEvents: "none" }} />
+          </>
+        ) : histogramPath ? (
           <>
             <path
               d={histogramPath}

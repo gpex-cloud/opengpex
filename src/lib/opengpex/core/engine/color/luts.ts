@@ -32,7 +32,7 @@
  * @module core/engine/color/luts
  */
 
-import type { CurvePoints, LevelsState } from '@opengpex/editor/core/types/models';
+import type { CurvePoints, CurvesState, LevelsState } from '@opengpex/editor/core/types/models';
 
 // ────────────────────────────────────────────────────────────
 // Types
@@ -296,4 +296,50 @@ export function generateLevelsLUT(
     writeLUT(lut, i, y, entries, fmt);
   }
   return lut;
+}
+
+// ────────────────────────────────────────────────────────────
+// Curves composition
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Compose the per-channel curves tables as normalized f32, baked the way the
+ * GPU LUT stores them: `perChannel(master(x))` — master rgb first, then the
+ * channel-specific curve, each step sampled at bin resolution
+ * (`out[i] = per[round(afterMaster · maxIn)]`, v1 `composeInto` semantics).
+ *
+ * This is the SINGLE SOURCE OF TRUTH for curves composition: both the GPU
+ * packing (`lutPlan.buildCurvesLutData`) and the histogram derivation
+ * (`histograms.deriveLayerHistogram`) consume these exact tables, so the UI
+ * derivation and the render cannot diverge.
+ *
+ * Missing master/sub-curves fall back to identity (`i / maxIn`), matching
+ * `buildCurvesLutData`'s treatment of absent channels.
+ *
+ * @returns `[r, g, b]` tables of `entries` items each, values in [0, 1].
+ */
+export function buildCurvesChannelTablesF32(
+  curves: CurvesState | undefined,
+  entries: LUTEntries = 256,
+): [Float32Array, Float32Array, Float32Array] {
+  const maxIn = entries - 1;
+  const master = curves?.rgb ? (generateCurveLUT(curves.rgb, entries, 'f32') as Float32Array) : null;
+  const red = curves?.red ? (generateCurveLUT(curves.red, entries, 'f32') as Float32Array) : null;
+  const green = curves?.green ? (generateCurveLUT(curves.green, entries, 'f32') as Float32Array) : null;
+  const blue = curves?.blue ? (generateCurveLUT(curves.blue, entries, 'f32') as Float32Array) : null;
+
+  const channel = (per: Float32Array | null): Float32Array => {
+    const out = new Float32Array(entries);
+    for (let i = 0; i < entries; i++) {
+      const afterMaster = master ? master[i] : i / maxIn;
+      if (per) {
+        out[i] = per[Math.round(afterMaster * maxIn)];
+      } else {
+        out[i] = afterMaster;
+      }
+    }
+    return out;
+  };
+
+  return [channel(red), channel(green), channel(blue)];
 }

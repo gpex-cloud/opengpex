@@ -157,7 +157,7 @@ export const samplerToolFromScope = (sampleAllLayers: boolean): SamplerTool =>
   sampleAllLayers ? 'all' : 'layer';
 
 export interface ColorOptionsConfig {
-  /** Structured foreground colour — the wide-gamut currency (proposal §3.1). */
+  /** Structured foreground colour — the wide-gamut currency. */
   pendingColor: ColorValue;
   /**
    * Sampler scope: `true`/absent = the full visible composite (historical

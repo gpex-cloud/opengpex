@@ -42,6 +42,8 @@ import { ExportDispatcher } from './dispatch/ExportDispatcher';
 import type { ExportRequest } from './dispatch/ExportDispatcher';
 import { sourceBitmapCache } from './sources/SourceBitmapCache';
 import { download } from './utils/pixel-utils';
+import { unpackLayerHistogramBuffer } from '@opengpex/editor/core/engine/color/histograms';
+import type { LayerHistogramData } from '@opengpex/editor/core/engine/color/histograms';
 import type { CompositedImage, SampledPixels } from './types';
 import type {
   PixelService,
@@ -149,9 +151,9 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
       async imageData(src: string, rect?: Rect): Promise<ImageData> {
         return imageDispatcher.imageData(src, rect);
       },
-      /** Compute full-resolution RGB composite histogram via Worker (zero main-thread blocking). */
-      async histogram(assetId: string): Promise<Uint32Array> {
-        return imageDispatcher.histogram(assetId);
+      /** Compute the full-resolution layer histograms via Worker (zero main-thread blocking). */
+      async histogram(assetId: string): Promise<LayerHistogramData> {
+        return unpackLayerHistogramBuffer(await imageDispatcher.histogram(assetId));
       },
       /** Resample (resize) an image. Accepts targetSize, maxSize, or scale. */
       async resample(src: string, options: { targetSize?: { w: number; h: number }; maxSize?: number; scale?: number; sourceGamut?: GamutId }) {

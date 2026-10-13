@@ -30,7 +30,7 @@ import '../../overlays/MarkerOverlay/markers';
 import { getReferenceFontSize, MOSAIC_SIZE_PRESETS } from './protocols';
 import type { ActiveCraft, CraftType, CraftDrawerConfig, PendingTextData } from './protocols';
 import type { TextLayerData, MarkerKind, MarkerData, MarkerDataBase } from '@opengpex/editor/core/types';
-import { fromHex, type ColorValue } from '@opengpex/editor/core/engine/color';
+import { fromHex, convertColorGamut, WORKING_GAMUT, type ColorValue } from '@opengpex/editor/core/engine/color';
 import type { CraftDrawerCommandsMap, CraftDrawerSignalsMap } from './commands.d';
 
 // ─── useCraftDrawer ────────────────────────────────────────────────────────────
@@ -150,8 +150,8 @@ const DEFAULT_TEXT_STYLE: Required<PendingTextData> = {
   strikethrough: false,
 };
 
-/** Stable fallback ColorValue when no `pendingColor` exists yet (module-scoped so identity is stable across renders). */
-const DEFAULT_TEXT_COLOR: ColorValue = fromHex('#FFFFFF');
+/** Stable fallback ColorValue when no `pendingColor` exists yet (module-scoped so identity is stable across renders). Seeded in WORKING_GAMUT form — `pendingColor`'s canonical storage representation (white is gamut-invariant, so the seed is numerically identical to plain sRGB white). */
+const DEFAULT_TEXT_COLOR: ColorValue = convertColorGamut(fromHex('#FFFFFF'), WORKING_GAMUT);
 
 // ─── useTextPanel ──────────────────────────────────────────────────────────────
 
@@ -317,9 +317,14 @@ export function useTextPanel() {
 
   const updateTextColor = useCallback(
     (color: ColorValue) => {
-      actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: color });
+      // `pendingColor` / `textData.color` persist in WORKING_GAMUT form — the
+      // picker hands in a view-gamut value. Converting the SAME object into
+      // both keeps the selection-sync reference check
+      // (`layerTextData.color !== globalColor`) coherent.
+      const stored = convertColorGamut(color, WORKING_GAMUT);
+      actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: stored });
       if (targetLayerId && layerTextData) {
-        updateTextData({ color });
+        updateTextData({ color: stored });
       }
     },
     [actions, targetLayerId, layerTextData, updateTextData]
@@ -327,9 +332,10 @@ export function useTextPanel() {
 
   const updateTextColorLive = useCallback(
     (color: ColorValue) => {
-      actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: color });
+      const stored = convertColorGamut(color, WORKING_GAMUT);
+      actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: stored });
       if (targetLayerId && layerTextData) {
-        updateTextDataLive({ color });
+        updateTextDataLive({ color: stored });
       }
     },
     [actions, targetLayerId, layerTextData, updateTextDataLive]
@@ -357,9 +363,14 @@ export function useTextPanel() {
       // Layer selection changed
       lastTargetLayerIdRef.current = targetLayerId;
       if (targetLayerId && layerTextData) {
-        // Synchronize color of selected layer to global ColorOptions
+        // Synchronize color of selected layer to global Color Options,
+        // normalized to the WORKING_GAMUT storage form. Normally an identity
+        // (text colors descend from `pendingColor`, already working-form), so
+        // the reference the sync effect compares stays stable.
         if (layerTextData.color) {
-          actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: layerTextData.color });
+          actions.updatePluginConfig(ColorOptionsAPI.configKey, {
+            pendingColor: convertColorGamut(layerTextData.color, WORKING_GAMUT),
+          });
         }
         // Sync selected layer's text style to pendingTextData.
         // fontSize is intentionally CLEARED on layer selection change:
@@ -466,7 +477,11 @@ export function useBrushPanel() {
 
   const updateBrushColor = useCallback(
     (color: string) => {
-      actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: fromHex(color) });
+      // The string-API bridge enters as sRGB; persist the WORKING_GAMUT storage
+      // form like every other `pendingColor` writer.
+      actions.updatePluginConfig(ColorOptionsAPI.configKey, {
+        pendingColor: convertColorGamut(fromHex(color), WORKING_GAMUT),
+      });
     },
     [actions]
   );
@@ -520,7 +535,7 @@ const DEFAULT_MARKER_STYLE: MarkerDataBase = {
  *   pluginConfig, which drives new-marker defaults and the draw preview.
  *
  * The active kind is shared with Tab cycling: both selector click and Tab write
- * the same `activeMarkerKind`, so the panel highlight stays in sync (§5.3/§8.2).
+ * the same `activeMarkerKind`, so the panel highlight stays in sync.
  */
 export function useMarkerPanel() {
   const { state, activeFrame, activeLayer } = useEditorState();
