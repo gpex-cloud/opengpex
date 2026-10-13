@@ -36,19 +36,21 @@
 import ExifReader from 'exifreader';
 import type { ImageMetadata, ColorSpaceId } from '../../../types';
 import { iccToBase64, parseIccProfileName, inferColorSpaceFromIcc } from '../../../shared/icc';
+import { readTiffRawBitsPerSample } from '../../../metadata/tiff-ifd-reader';
 import { resolveRawIccBytes } from './icc';
 import {
   readDngProfileName,
   detectTransfer,
-  parseDngProfileToneCurve,
-  parseDngHueSatMap,
-  parseDngLookTable,
 } from './dng';
 
 export { resolveRawIccBytes } from './icc';
 export {
   readDngProfileName,
   detectTransfer,
+  // Parser re-exports stay part of the module surface (sub-package
+  // source-compatibility is pinned by index.test.ts); NOTE the parsed tables
+  // are intentionally NOT stored into ImageMetadata any more — see the
+  // profile-tables note at the bottom of extractRawMetadata.
   parseDngProfileToneCurve,
   parseDngHueSatMap,
   parseDngLookTable,
@@ -175,10 +177,21 @@ export async function extractRawMetadata(file: File): Promise<ImageMetadata> {
     }
 
     // ── Bit depth ──
-    const bpsTag = tags.exif?.BitsPerSample?.value;
-    if (bpsTag) {
-      const bps = Array.isArray(bpsTag) ? Number(bpsTag[0]) : Number(bpsTag);
-      if (bps > 0) meta.bitDepth = bps;
+    // TIFF-family RAW hangs the PREVIEW off IFD0 and the raw image off a
+    // SubIFD: Apple ProRAW reports 8,8,8 at IFD0 (YCbCr JPEG) while the raw
+    // SubIFD stores 10,10,10 — ExifReader only reaches IFD0, so the honest
+    // value comes from probing the raw-image IFD directly (TIFF-generic:
+    // DNG/CR2/NEF/ARW/PEF all qualify; non-TIFF RAW falls through to ExifReader).
+    const fileBytes = new Uint8Array(fileBuffer);
+    const rawBps = readTiffRawBitsPerSample(fileBytes);
+    if (rawBps) {
+      meta.bitDepth = rawBps;
+    } else {
+      const bpsTag = tags.exif?.BitsPerSample?.value;
+      if (bpsTag) {
+        const bps = Array.isArray(bpsTag) ? Number(bpsTag[0]) : Number(bpsTag);
+        if (bps > 0) meta.bitDepth = bps;
+      }
     }
 
     // ── Dimensions ──
@@ -188,7 +201,6 @@ export async function extractRawMetadata(file: File): Promise<ImageMetadata> {
     if (imgHeight) meta.height = Array.isArray(imgHeight) ? Number(imgHeight[0]) : Number(imgHeight);
 
     // ── ICC Profile (defect A deep probe — see ./icc.ts for the three tiers) ──
-    const fileBytes = new Uint8Array(fileBuffer);
     const iccBytes = resolveRawIccBytes(fileBytes);
     let iccProfileName: string | undefined;
     const dngProfileName = readDngProfileName(
@@ -221,24 +233,14 @@ export async function extractRawMetadata(file: File): Promise<ImageMetadata> {
     meta.colorSpace = colorSpace;
     if (transfer) meta.raw.transfer = transfer; // write-only HDR seam (not consumed this phase)
 
-    // ── DNG ProfileToneCurve (rendering-intent seam) ──
-    // WRITE-ONLY: the GPU samples the generic filmic baseline today; a present
-    // curve is what a later LUT-sampling intent would consume.
-    const toneCurve = parseDngProfileToneCurve(fileBytes);
-    if (toneCurve) meta.raw.dngToneCurve = toneCurve;
-
-    // ── DNG camera-profile colour tables ──
-    // WRITE-ONLY read-only infrastructure: HueSatMap (hue/sat/value warp) and
-    // LookTable (creative Look). Nothing samples them this phase; the display
-    // engine consumes them in future pipelines. Absent from most native DSLR RAW.
-    const hueSatMap = parseDngHueSatMap(fileBytes);
-    const lookTable = parseDngLookTable(fileBytes);
-    if (hueSatMap || lookTable) {
-      meta.raw.dngProfile = {
-        ...(hueSatMap ? { hueSatMap } : {}),
-        ...(lookTable ? { lookTable } : {}),
-      };
-    }
+    // ── DNG camera-profile colour tables: parsed, NOT stored ──
+    // ProfileToneCurve / HueSatMap / LookTable were previously parsed into
+    // ImageMetadata on every import — with zero consumers anywhere (probe
+    // 2026-10-13 also showed ProRAW's ProfileToneCurve is near-identity; the
+    // Apple look lives in ProfileGainTableMap, which is deliberately not read:
+    // 3 MB per file). The parsers remain exported above for the future
+    // 'dng-profile' render-intent route (05 spec §9.3); storage returns when a
+    // consumer exists. meta.raw.transfer above is the only retained seam.
   } catch {
     // EXIF extraction failed — non-critical; keep the pre-detection defaults.
   }

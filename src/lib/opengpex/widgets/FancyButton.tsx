@@ -20,7 +20,9 @@
 "use client";
 
 import React from "react";
+import { ChevronDown } from "lucide-react";
 import Tooltip, { TooltipPosition, TooltipAlign } from "./Tooltip";
+import ActionDropdown, { type ActionOption } from "./ActionDropdown";
 
 export type FancyButtonVariant =
   | "red"
@@ -54,6 +56,18 @@ interface FancyButtonProps {
   iconOnly?: boolean;
   tooltipAlign?: TooltipAlign;
   tooltipPosition?: TooltipPosition;
+  /**
+   * When provided, renders a chevron zone at the right edge (inside the same
+   * pill) opening this menu, while the button body stays the primary action —
+   * FancyButton gains a "split" personality WITHOUT touching its visual
+   * system (variant/size/loading/label all apply as usual). Omitted ⇒ exactly
+   * the plain single button, so existing call sites are unaffected.
+   */
+  dropdownOptions?: ActionOption[];
+  /** Handler when a dropdown option is selected (split mode only). */
+  onDropdownSelect?: (value: string) => void;
+  /** Direction the split dropdown's menu opens. Default "down". */
+  dropdownDirection?: "up" | "down";
 }
 
 const VARIANT_THEMES: Record<
@@ -143,6 +157,16 @@ const STANDARD_SIZES: Record<FancyButtonSize, string> = {
   sm: "text-[10px] px-2.5 h-8 gap-1",
   md: "text-xs px-3.5 h-9 gap-1.5",
   lg: "text-sm px-4 h-10 gap-1.5",
+};
+
+// Split mode sizes: text-size + height ONLY. STANDARD_SIZES' px/gap belong to a
+// single button's content — on the split container they pad the pill edges and
+// wedge the zones apart (and gap-* would override the container's gap-0).
+const SPLIT_SIZES: Record<FancyButtonSize, string> = {
+  xs: "text-[9px] h-7",
+  sm: "text-[10px] h-8",
+  md: "text-xs h-9",
+  lg: "text-sm h-10",
 };
 
 /**
@@ -237,6 +261,9 @@ export function FancyButton({
   iconOnly = false,
   tooltipAlign = "center",
   tooltipPosition = "top",
+  dropdownOptions,
+  onDropdownSelect,
+  dropdownDirection = "down",
   ...props
 }: FancyButtonProps & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   // tooltip and title are aliases — tooltip takes precedence if both provided
@@ -307,6 +334,109 @@ export function FancyButton({
       {children}
     </button>
   );
+
+  // ─── Split mode: labeled primary + attached chevron menu, one pill ─────────
+  // Opt-in via dropdownOptions. The theme/shape/size classes move to the
+  // CONTAINER so both zones share the pill's look; the primary stays the
+  // existing content (loading spinner + children) and the chevron opens the
+  // menu. The single-button path below is untouched when no menu is given.
+  const hasSplit = !!dropdownOptions && dropdownOptions.length > 0;
+  if (hasSplit) {
+    const splitContent = (
+      <div
+        className={mergeClasses(
+          "relative inline-flex items-stretch gap-0 transition-all duration-300",
+          "border font-bold uppercase cursor-pointer focus:outline-none",
+          "disabled:opacity-20 disabled:cursor-not-allowed",
+          roundedClass,
+          SPLIT_SIZES[size],
+          getVariantStyles(),
+          className,
+        )}
+        data-label={label || undefined}
+        data-shortcut={shortcut || undefined}
+        data-active={active || undefined}
+      >
+        <button
+          onClick={onClick}
+          onMouseUp={(e) => e.currentTarget.blur()}
+          onTouchEnd={(e) => e.currentTarget.blur()}
+          disabled={disabled || loading}
+          onKeyDown={(e) => {
+            if (e.key === " ") {
+              e.preventDefault();
+            }
+          }}
+          className="relative flex flex-1 min-w-0 items-center justify-center gap-1.5 px-2 transition-all duration-150 focus:outline-none active:scale-[0.98] disabled:cursor-not-allowed"
+          {...props}
+        >
+          {loading && (
+            <svg
+              className="animate-spin h-3.5 w-3.5"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              ></circle>
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
+            </svg>
+          )}
+          {children}
+        </button>
+        {/* Divider — flush against the primary's end, inset from top/bottom */}
+        <div className="w-px self-center h-4/5 bg-current opacity-20 pointer-events-none" />
+        {/* Chevron zone — FIXED 24px so the split sliver hugs the right edge.
+            self-center: ActionDropdown's inner wrapper is auto-height and
+            top-anchored, so stretching the root can't center the icon; instead
+            the root shrinks to the button's full pill height and the pill
+            centers it (the 2px border overshoot stays symmetric). */}
+        <ActionDropdown
+          className="self-center"
+          trigger={
+            <button
+              type="button"
+              disabled={disabled || loading}
+              aria-label="More options"
+              className={`w-6 px-0 flex items-center justify-center cursor-pointer ${SPLIT_SIZES[size]}`}
+            >
+              <ChevronDown size={10} strokeWidth={2.5} />
+            </button>
+          }
+          options={dropdownOptions}
+          onSelect={onDropdownSelect ?? (() => {})}
+          align="right"
+          direction={dropdownDirection}
+          disabled={disabled || loading}
+        />
+      </div>
+    );
+
+    if (resolvedTooltip) {
+      return (
+        <Tooltip
+          content={resolvedTooltip}
+          align={tooltipAlign}
+          position={tooltipPosition}
+          display="inline-flex"
+          containerClassName={className}
+        >
+          {splitContent}
+        </Tooltip>
+      );
+    }
+    return splitContent;
+  }
 
   if (resolvedTooltip) {
     return (

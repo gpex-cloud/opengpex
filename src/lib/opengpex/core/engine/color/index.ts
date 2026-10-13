@@ -45,3 +45,4 @@ export * from './float16';
 export * from './wideGamutF16';
 export * from './resampleHighDepth';
 export * from './cubeLut';
+export * from './filmic';

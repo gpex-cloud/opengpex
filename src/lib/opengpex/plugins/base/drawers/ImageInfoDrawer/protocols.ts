@@ -56,4 +56,5 @@ export interface ExportConfig extends FrameExportEncodeConfig {
 
 /* Command IDs */
 export const CMD_DOWNLOAD = 'cmd.download';
+export const CMD_DOWNLOAD_ORIGINAL = 'cmd.download_original';
 export const CMD_APPLY_RESIZE = 'cmd.apply_resize';

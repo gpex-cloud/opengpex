@@ -192,46 +192,11 @@ export interface RawBinaryData {
    */
   transfer?: 'pq' | 'hlg' | 'sdr';
 
-  /**
-   * DNG `ProfileToneCurve` (tag 50940) control points, `[input, output]` pairs
-   * in [0, 1] and increasing in `input` — the camera vendor's own rendering
-   * intent curve.
-   *
-   * ONLY populated by the RAW handler, and only when the container actually
-   * carries the tag (Apple ProRAW, Pixel/Expert RAW, Adobe DNG Converter output;
-   * absent from most native DSLR RAW). Currently write-only — nothing samples
-   * it. It serves as a rendering intent seam: an enhanced rendering intent samples this
-   * LUT when present and degrades to the generic filmic baseline when not.
-   *
-   * Structural type (not `DngToneCurvePoint`) so this base module stays free of
-   * handler-layer imports.
-   */
-  dngToneCurve?: readonly (readonly [number, number])[];
-
-  /**
-   * DNG camera-profile colour tables: `ProfileHueSatMap`
-   * (tags 50937/50938/50939 — a hue/sat/value warp grid) and `ProfileLookTable`
-   * (tags 50981/50982 — the creative-Look grid; Apple ProRAW's vivid look lives
-   * largely here). Each grid is `dims = [hDiv, sDiv, vDiv]` addressing
-   * `hDiv*sDiv*vDiv*3` floats of `(hueShift°, satScale, valScale)` triples.
-   *
-   * ONLY populated by the RAW handler, and only when the container carries the
-   * tags (absent from most native DSLR RAW). Reserved for forward display-engine
-   * seams. Structural type
-   * (not `DngHueSatMap` / `DngLookTable`) so this base module stays free of
-   * handler-layer imports.
-   */
-  dngProfile?: {
-    hueSatMap?: {
-      dims: readonly [number, number, number];
-      data1: readonly number[];
-      data2?: readonly number[];
-    };
-    lookTable?: {
-      dims: readonly [number, number, number];
-      data: readonly number[];
-    };
-  };
+  // NOTE: `dngToneCurve` / `dngProfile` (HueSatMap / LookTable) were removed
+  // from the metadata contract (2026-10-13) — they were parsed on every import
+  // with zero consumers anywhere. The parsers remain exported from
+  // handlers/raw/metadata for the future 'dng-profile' render-intent route
+  // (05_ingest_decision_spec §9.3); storage returns when a consumer exists.
 
   /**
    * Raw PNG tEXt/iTXt key-value entries.
@@ -240,6 +205,66 @@ export interface RawBinaryData {
    * Only populated for PNG sources.
    */
   pngText?: Record<string, string>;
+
+  /**
+   * HEIC container orientation record — BOTH container transforms and the EXIF
+   * tag, in full, because the two can disagree and the application precedence
+   * is: container irot/imir when non-zero (spec-authoritative), else EXIF
+   * 5..8. Empirical note (2026-10-13, synthetic-file libheif experiment): the
+   * irot angle lives in the LOW 2 bits of its payload byte, and Apple photos
+   * carry irot=3 (90° CW) + EXIF 6 — the same rotation tagged twice.
+   */
+  heicOrientation?: {
+    irotQuarterTurns: 0 | 1 | 2 | 3;
+    /** 0 = vertical axis, 1 = horizontal axis; null when no imir box. */
+    imirAxis: 0 | 1 | null;
+    exifOrientation: number | null;
+  };
+
+  /**
+   * HEIC auxiliary image STRUCTURES (gain map, semantic mattes) — presence and
+   * shape only. The coded bytes stay in the retained source blob (every HEIC
+   * ingest retains it); mounting megabytes of NAL data here would double the
+   * storage for zero gain, since any future HDR consumer must DECODE the
+   * aux items anyway and can re-parse them from the source blob via
+   * `parseHeicContainer`. Not decoded, not rendered.
+   */
+  heicAuxImages?: Array<{
+    auxType: string;
+    /** Single coded image or a (possibly nested) grid derivation. */
+    kind: 'hvc1' | 'grid';
+    grid?: { rows: number; cols: number; outputWidth: number; outputHeight: number };
+    tileCount?: number;
+  }>;
+
+  /** True when a gain-map aux item (`urn:com:apple:photo:2020:aux:hdrgainmap`) is present. */
+  hasGainmap?: boolean;
+
+  /**
+   * HEIC hvcC profile_idc of the coded primary (3 = Main Still — Apple, 1 =
+   * Main, 2 = Main 10, 4 = RExt). Picks which HEVC capability probe (`handlers/heic/capability.ts`) entry
+   * gates rule 19a for this file. Only populated when the container parser
+   * succeeded.
+   */
+  heicProfileIdc?: number;
+
+  /**
+   * AVIF container orientation record (irot low-2-bit angle + imir axis) —
+   * informational, parity with `heicOrientation`. Browser/libavif decoders
+   * apply these transforms as part of item derivation, so the ingest matrix
+   * keeps `applyOrientation: 'explicit'` for the EXIF tag only.
+   */
+  avifOrientation?: {
+    irotQuarterTurns: 0 | 1 | 2 | 3;
+    imirAxis: 0 | 1 | null;
+  };
+
+  /**
+   * AVIF av1C seq_profile of the coded primary (0 = Main 8/10-bit, 2 = Main 12
+   * / 4:4:4, 1 = High). Informational — the avif-proxy channel needs no
+   * capability gating (pure wasm decode).
+   */
+  avifSeqProfile?: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

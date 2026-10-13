@@ -41,7 +41,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   test: {
     environment: 'node',
-    include: process.env.TEST_SAMPLES ? ['src/lib/opengpex/samples.test.ts'] : ['tests/**/*.test.ts'],
+    include: process.env.TEST_SAMPLES
+      ? ['src/lib/opengpex/samples.test.ts', 'tests/**/*.samples.test.ts']
+      : ['tests/**/*.test.ts'],
     globals: false,
     reporters: 'default',
   },

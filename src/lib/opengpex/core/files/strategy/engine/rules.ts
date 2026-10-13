@@ -18,11 +18,14 @@
  */
 
 /**
- * 26-row complete decision matrix rule table.
+ * Complete decision matrix rule table.
  *
  * Rules are declared in priority order (row 1 → row 26), returning the first match via `./matcher.ts`.
  * CMYK (rule 25) is split into two rules with id=25 by bitDepth (8/16) to keep
  * `DecisionAction.dataFormat` statically typed.
+ * The HEIC family carries the spec labels `19a`–`19e` (plus the `19-wg`
+ * wide-gamut twin) per 05_ingest_decision_spec.md §10.2 — see that table for
+ * the authoritative semantics.
  *
  * @module core/files/strategy/engine/rules
  */
@@ -253,8 +256,10 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
 
-  // ── 6. AVIF ─────────────────────────────────────────────────────────────
-  // Note: AVIF >8-bit is clamped to 8-bit in pre-processing, no special branch needed
+  // ── 6. AVIF (spec labels 15a/15b/16-wg/18, 05_ingest_decision_spec.md §6) ─
+  // >8-bit is no longer clamped (probe rev2: the jsquash/libavif wasm decoder
+  // is bit-exact at native depth — gpex-cloud/probes/avif); high depth routes
+  // to the avif-proxy channel and the metadata reports the TRUE depth.
   {
     id: 15,
     condition: {
@@ -267,7 +272,26 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
       decodeChannel: 'image-bitmap',
       trc: 'srgb-trc',
       applyOrientation: 'explicit',
-      description: 'AVIF 8-bit standard passthrough',
+      description: 'AVIF 8-bit standard passthrough (15a)',
+    },
+  },
+  {
+    // High-depth SDR: f16 direct (probe B-variant) — jsquash decodes bit-exact
+    // at native depth; the 8-bit display proxy is produced browser-side
+    // (createImageBitmap's 10→8 downgrade is faithful, meanDev ≤ 1.4/255).
+    id: '15b',
+    condition: {
+      format: 'avif',
+      bitDepth: (d) => d >= 10,
+      colorSpace: ['srgb', 'display-p3'],
+      isMultiFrame: false,
+    },
+    action: {
+      decodeChannel: 'avif-proxy',
+      trc: 'srgb-trc',
+      dataFormat: 'rgba16float',
+      applyOrientation: 'explicit',
+      description: 'AVIF ≥10-bit SDR (15b) — avif-proxy f16 direct, metadata reports true depth',
     },
   },
   {
@@ -286,35 +310,154 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
       description: 'AVIF 8-bit wide-gamut',
     },
   },
-
-  // ── 7. HEIC ─────────────────────────────────────────────────────────────
   {
-    id: 19,
+    // High-depth wide gamut (type-reachable, rarely seen): mirror 19-wg —
+    // proxy + de-gamma to true linear (PNG/TIFF row-8 semantics).
+    id: '16-wg',
+    condition: {
+      format: 'avif',
+      bitDepth: (d) => d >= 10,
+      colorSpace: ['adobe-rgb', 'prophoto-rgb'],
+      isMultiFrame: false,
+    },
+    action: {
+      decodeChannel: 'avif-proxy',
+      trc: 'linear',
+      dataFormat: 'rgba16float',
+      applyOrientation: 'explicit',
+      description: 'AVIF ≥10-bit wide-gamut (16-wg) — avif-proxy, de-gamma to linear f16',
+    },
+  },
+  {
+    // PQ / HLG / BT.2020 resolve to colorSpace 'unknown' (transfer-aware
+    // nclxToColorSpace, 2026-10-13 probe): no tone mapping exists and the
+    // browser's own HDR→SDR mapping is uncontrolled (meanDev ≈ 30/255) —
+    // honest unsupported beats a silent wrong rendering. Mirrors HEIC 19d.
+    id: '18',
+    condition: {
+      format: 'avif',
+      bitDepth: '*',
+      colorSpace: 'unknown',
+    },
+    action: {
+      decodeChannel: 'unsupported',
+      trc: 'srgb-trc',
+      applyOrientation: 'explicit',
+      description: 'AVIF PQ/HLG/BT.2020 (18) — HDR tone mapping out of scope, unsupported',
+    },
+  },
+
+  // ── 7. HEIC (spec labels 19a–19e, 05_ingest_decision_spec.md §10.2) ──────
+  // 19a is capability-gated (rev5 §3.3): the decode entry awaits the one-shot
+  // HEVC capability probe (`handlers/heic/capability.ts`) and injects `hevcHardDecode` into the decision
+  // context (§10.3). Without the flag (plain calls, tests, no-WebCodecs
+  // runtimes) it defaults to `false` and 19e below owns the downgrade.
+  {
+    id: '19a',
     condition: {
       format: 'heic',
       bitDepth: 8,
       colorSpace: ['srgb', 'display-p3'],
+      isMultiFrame: false,
+      hevcHardDecode: true,
     },
     action: {
-      decodeChannel: 'heic-to',
+      decodeChannel: 'webcodecs-heic',
       trc: 'srgb-trc',
-      applyOrientation: 'auto',
-      description: 'HEIC 8-bit standard transcode',
+      applyOrientation: 'auto', // worker output is uprighted during composition (irot/imir + EXIF)
+      description: 'HEIC 8-bit SDR (19a) — WebCodecs hardware decode, capability-gated',
     },
   },
   {
-    id: 20,
+    // 10-bit delivers as 8-bit (no faithful webcodecs CPU path; probe-verified),
+    // but the metadata reports the TRUE depth so 19b/19c are distinguishable
+    // and the precision loss is declared, never silent.
+    id: '19b',
+    condition: {
+      format: 'heic',
+      bitDepth: 10,
+      colorSpace: ['srgb', 'display-p3'],
+      isMultiFrame: false,
+    },
+    action: {
+      decodeChannel: 'libheif-proxy',
+      trc: 'srgb-trc',
+      applyOrientation: 'auto',
+      description: 'HEIC 10-bit SDR (19b) — proxy delivers 8-bit, metadata reports 10',
+    },
+  },
+  {
+    id: '19c',
+    condition: {
+      format: 'heic',
+      bitDepth: (d) => d >= 12,
+      colorSpace: ['srgb', 'display-p3'],
+      isMultiFrame: false,
+    },
+    action: {
+      decodeChannel: 'libheif-proxy',
+      trc: 'srgb-trc',
+      applyOrientation: 'auto',
+      description: 'HEIC ≥12-bit (19c) — proxy delivers 8-bit, metadata reports the true depth',
+    },
+  },
+  {
+    // PQ / HLG / BT.2020 resolve to colorSpace 'unknown' (nclxToColorSpace /
+    // inferColorSpaceFromIcc): no tone mapping exists, and a wrong mapping is
+    // worse than an honest error — so route unsupported rather than proxy.
+    // No isMultiFrame condition: a multi-frame HDR file is equally unsupported.
+    id: '19d',
+    condition: {
+      format: 'heic',
+      bitDepth: '*',
+      colorSpace: 'unknown',
+    },
+    action: {
+      decodeChannel: 'unsupported',
+      trc: 'srgb-trc',
+      applyOrientation: 'explicit',
+      description: 'HEIC PQ/HLG/BT.2020 (19d) — HDR tone mapping out of scope, unsupported',
+    },
+  },
+  {
+    // 19e: the declarative proxy downgrade — reachable whenever 19a's
+    // capability gate does not admit the file (no WebCodecs, probe negative,
+    // or plain decision calls where the flag defaults to false).
+    id: '19e',
     condition: {
       format: 'heic',
       bitDepth: 8,
-      colorSpace: ['adobe-rgb', 'prophoto-rgb'],
+      colorSpace: ['srgb', 'display-p3'],
+      isMultiFrame: false,
     },
     action: {
-      decodeChannel: 'heic-to',
+      decodeChannel: 'libheif-proxy',
+      trc: 'srgb-trc',
+      applyOrientation: 'auto',
+      description: 'HEIC 8-bit without HEVC hardware decode (19e) — declarative proxy downgrade',
+    },
+  },
+  {
+    // Wide-gamut twin of 19a/19b/19c — the §10.2 footnote ("adobe-rgb/prophoto
+    // … 与行 19a/19b 同桩处理，宽色域依现行宽色域规则组合，不单列") as one row:
+    // any depth ≥8 routes to the proxy, and the STANDING wide-gamut composition
+    // applies (linear TRC + f16 container, mirroring jpeg/webp/png rows 2/4/6).
+    // `adobe-rgb`/`prophoto-rgb` HEIC sources are type-reachable but unseen in
+    // practice; the depth split needs no separate rows because the proxy
+    // delivers 8-bit pixels and the f16 lift is uniform on the wide branch.
+    id: '19-wg',
+    condition: {
+      format: 'heic',
+      bitDepth: (d) => d >= 8,
+      colorSpace: ['adobe-rgb', 'prophoto-rgb'],
+      isMultiFrame: false,
+    },
+    action: {
+      decodeChannel: 'libheif-proxy',
       trc: 'linear',
       dataFormat: 'rgba16float',
       applyOrientation: 'auto',
-      description: 'HEIC 8-bit wide-gamut transcode',
+      description: 'HEIC wide-gamut (§10.2 footnote) — proxy + standing wide-gamut composition',
     },
   },
 

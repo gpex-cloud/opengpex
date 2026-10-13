@@ -17,8 +17,8 @@
  *
  * Note: HEIC encoding is NOT supported (no browser HEIC encoder exists).
  *
- * Thread model: Decode runs on main thread via heic-to.
- * Future: migrate to Worker-based libheif-wasm for better perf.
+ * Thread model: decode runs in the files-layer heic-worker
+ * (libheif wasm, '/ext/wasm/libheif/'), off the main thread.
  */
 
 import type { AssetService } from '@opengpex/editor/core/types';

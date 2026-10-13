@@ -18,7 +18,7 @@
  * - Encode: RGBA frames → GIF binary via gifenc (NeuQuant + LZW)
  * - Metadata: frame count, total duration, loop count (main-thread header parse)
  *
- * Runtime loading model (heic-to pattern):
+ * Runtime loading model (shared /ext/js/ script pattern):
  * gifuct-js and gifenc are loaded from /ext/js/ at first use via <script> tag.
  * They are NOT bundled into the main JS bundle — avoiding wrangler bundle bloat.
  * postinstall-exts.mjs wraps their CJS builds into IIFE globals:
@@ -110,7 +110,7 @@ export function probeGifHeader(bytes: Uint8Array): {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Dynamic Script Loading (same pattern as heic-to)
+// Dynamic Script Loading (same pattern as the other /ext/js/ globals)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let gifuctLoaded = false;

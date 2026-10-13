@@ -10,23 +10,34 @@
  */
 
 /**
- * HEIC metadata extraction — fills ImageMetadata from EXIF + ICC.
+ * HEIC metadata extraction — fills ImageMetadata from the container parser +
+ * ExifReader.
  *
- * Uses ExifReader for semantic field parsing (camera, capture, dates, GPS, DPI).
- * ICC Profile name is extracted from ExifReader's `tags.icc` fields.
+ * Truths come from `parseHeicContainer` (one structural pass): bit depth
+ * (pixi/hvcC), stored dimensions (grid output / ispe), colour identity
+ * (colr ICC/nclx), orientation (irot/imir + EXIF tag), aux image structures
+ * (gain map etc. — presence and shape only; the coded bytes stay in the
+ * retained source blob), XMP text and multi-frame detection. ExifReader keeps
+ * the SEMANTIC field parsing (camera, capture params, dates, GPS, DPI).
  *
- * Note: HEIC ICC raw bytes extraction is limited — ExifReader may not expose
- * the raw colr box ICC data for HEIC as reliably as for AVIF.
+ * The container parse is fallible on exotic files; on failure the phase-1
+ * point extractors (isobmff-reader) still fill the critical fields.
  */
 
 import ExifReader from 'exifreader';
-import type { ImageMetadata } from '../../types';
-import { iccToBase64, parseIccProfileName, inferColorSpaceFromIcc } from '../../shared/icc';
-import { extractIsobmffIcc, extractIsobmffNclx, extractIsobmffExif, nclxToColorSpace } from '../../metadata/isobmff-reader';
+import type { ImageMetadata } from '../../../types';
+import { iccToBase64, parseIccProfileName, inferColorSpaceFromIcc } from '../../../shared/icc';
+import {
+  extractIsobmffIcc,
+  extractIsobmffNclx,
+  extractIsobmffExif,
+  extractIsobmffPixiBitDepth,
+  extractIsobmffHvcCBitDepth,
+  nclxToColorSpace,
+} from '../../../metadata/isobmff-reader';
+import { parseHeicContainer, type HeicFileView } from './container';
 
-/**
- * Extract full V2 metadata from a HEIC file.
- */
+/** Extract full V2 metadata from a HEIC file. */
 export async function extractHeicMetadata(file: File): Promise<ImageMetadata> {
   const meta: ImageMetadata = {
     sourceFormat: 'heic',
@@ -44,6 +55,7 @@ export async function extractHeicMetadata(file: File): Promise<ImageMetadata> {
 
   try {
     const fileBuffer = await file.arrayBuffer();
+    const fileBytes = new Uint8Array(fileBuffer);
     const tags = ExifReader.load(fileBuffer, { expanded: true });
 
     // ── DPI ──
@@ -110,14 +122,13 @@ export async function extractHeicMetadata(file: File): Promise<ImageMetadata> {
       meta.gps = { latitude: Number(lat), longitude: Number(lon) };
     }
 
-    // ── Dimensions ──
+    // ── Dimensions (EXIF as fallback) ──
     const imgWidth = tags.exif?.ImageWidth?.value ?? tags.exif?.PixelXDimension?.value;
     const imgHeight = tags.exif?.ImageLength?.value ?? tags.exif?.PixelYDimension?.value;
     if (imgWidth) meta.width = Array.isArray(imgWidth) ? Number(imgWidth[0]) : Number(imgWidth);
     if (imgHeight) meta.height = Array.isArray(imgHeight) ? Number(imgHeight[0]) : Number(imgHeight);
 
     // ── Raw EXIF bytes (TIFF IFD from ISOBMFF Exif item — for round-trip preservation) ──
-    const fileBytes = new Uint8Array(fileBuffer);
     const rawExif = extractIsobmffExif(fileBytes);
     if (rawExif && rawExif.length > 0) {
       meta.raw.exif = iccToBase64(rawExif); // reuse base64 helper
@@ -136,9 +147,68 @@ export async function extractHeicMetadata(file: File): Promise<ImageMetadata> {
         meta.colorSpace = nclxToColorSpace(nclx);
       }
     }
+
+    // ── Bit depth truth (phase-1 point extractors as the fallback path) ──
+    const pixiDepth = extractIsobmffPixiBitDepth(fileBytes);
+    const hvcCDepth = extractIsobmffHvcCBitDepth(fileBytes);
+    meta.bitDepth = pixiDepth ?? hvcCDepth ?? 8;
+
+    // ── Full container view (supersedes the point reads where it parses) ──
+    try {
+      const view = parseHeicContainer(fileBytes);
+      applyContainerView(meta, view);
+    } catch {
+      // Exotic container — the point-extractor fields above stand.
+    }
   } catch {
     // EXIF extraction failed — non-critical
   }
 
   return meta;
+}
+
+/**
+ * Overlay the container parser's truths onto the metadata. The point-extractor
+ * results already on `meta` are equivalent, but the view adds what they cannot
+ * see: orientation record, aux structures, XMP, multi-frame, true dimensions.
+ */
+function applyContainerView(meta: ImageMetadata, view: HeicFileView): void {
+  // Stored dimensions: grid output size, else the single tile's ispe.
+  const w = view.primary.grid?.outputWidth || view.primary.codedWidth;
+  const h = view.primary.grid?.outputHeight || view.primary.codedHeight;
+  if (w > 0) meta.width = w;
+  if (h > 0) meta.height = h;
+
+  meta.bitDepth = view.bitDepth;
+
+  // Colour: prefer the ICC description, then nclx (same precedence as above).
+  if (view.color.icc) {
+    const profileName = parseIccProfileName(view.color.icc) || 'Embedded';
+    meta.raw.icc = { data: iccToBase64(view.color.icc), name: profileName };
+    meta.colorSpace = inferColorSpaceFromIcc(profileName);
+  } else if (view.color.nclx) {
+    meta.colorSpace = nclxToColorSpace(view.color.nclx);
+  }
+
+  meta.raw.heicProfileIdc = view.primary.profileIdc;
+  meta.raw.heicOrientation = { ...view.orientation };
+  meta.raw.xmp = view.metadata.xmp;
+  meta.isMultiFrame = view.isMultiFrame;
+
+  if (view.auxImages.length > 0) {
+    meta.raw.heicAuxImages = view.auxImages.map((aux) => ({
+      auxType: aux.auxType,
+      kind: aux.payload.kind,
+      grid: aux.payload.kind === 'grid' && aux.payload.grid.rows > 0
+        ? {
+            rows: aux.payload.grid.rows,
+            cols: aux.payload.grid.cols,
+            outputWidth: aux.payload.grid.outputWidth,
+            outputHeight: aux.payload.grid.outputHeight,
+          }
+        : undefined,
+      tileCount: aux.payload.kind === 'grid' ? aux.payload.tiles.length : undefined,
+    }));
+    meta.raw.hasGainmap = view.auxImages.some((a) => a.auxType.includes('hdrgainmap'));
+  }
 }

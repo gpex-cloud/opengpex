@@ -177,6 +177,137 @@ export function getStockIccProfile(colorSpace: WorkingColorSpace | GamutId): { b
   }
 }
 
+// ─── PNG iCCP Injection ─────────────────────────────────────────────────────
+
+/**
+ * Inject an ICC profile into a PNG as an iCCP chunk, inserted directly after
+ * IHDR (PNG spec: iCCP must precede PLTE/IDAT).
+ *
+ * This is the colour-TAGGING half of the HEIC proxy fix: the pixel values in
+ * the canvas-encoded PNG are verbatim (canvas used purely as a dumb encoder),
+ * so the profile chunk is what tells every downstream decoder WHICH encoding
+ * those values are in — "数值保留 + 标签贴对". Without it a P3 proxy reads as
+ * sRGB and washes out; with it, both Chrome and Safari interpret the chunk
+ * (reading iCCP is standard behaviour).
+ *
+ * Any pre-existing colour-tag chunks (iCCP / sRGB / gAMA / cHRM) are stripped
+ * first — two profile carriers would leave interpretation undefined, and some
+ * encoders do emit their own. The injected profile is the single source of
+ * truth.
+ *
+ * The profile is zlib-compressed per the iCCP spec; `CompressionStream('deflate')`
+ * output IS the zlib format (deflate body + adler32), so it is used verbatim.
+ * Requires Chrome 80+ / Safari 16.4+ (both inside the support matrix).
+ *
+ * @param png     - PNG bytes
+ * @param profile - stock profile bytes + name (name embedded in the chunk,
+ *                  Latin-1, sanitized to iCCP's 1–79 byte keyword charset)
+ * @returns A new PNG byte array with the iCCP chunk inserted
+ */
+export async function injectPngIccProfile(
+  png: Uint8Array,
+  profile: { bytes: Uint8Array; name: string },
+): Promise<Uint8Array> {
+  if (png.length < 33) throw new Error('iCCP inject: PNG too short');
+  for (let i = 0; i < 8; i++) {
+    if (png[i] !== PNG_SIGNATURE[i]) throw new Error('iCCP inject: not a PNG');
+  }
+  // IHDR is always the first chunk: length(4)=13 + type(4) + data(13) + crc(4).
+  if (getFourCC(png, 12) !== 'IHDR') throw new Error('iCCP inject: IHDR not first chunk');
+
+  // Walk chunks; keep everything except the colour-tag carriers. Each chunk
+  // is length(4) + type(4) + data(len) + crc(4) = len + 12 bytes.
+  const COLOR_TAG_CHUNKS = new Set(['iCCP', 'sRGB', 'gAMA', 'cHRM']);
+  const kept: Uint8Array[] = [];
+  let pos = 33;
+  while (pos + 12 <= png.length) {
+    const len = (png[pos] << 24 | png[pos + 1] << 16 | png[pos + 2] << 8 | png[pos + 3]) >>> 0;
+    const end = pos + 12 + len;
+    if (end > png.length) throw new Error('iCCP inject: truncated chunk');
+    const type = getFourCC(png, pos + 4);
+    if (!COLOR_TAG_CHUNKS.has(type)) kept.push(png.subarray(pos, end));
+    pos = end;
+    if (type === 'IEND') break;
+  }
+
+  const compressed = await zlibDeflate(profile.bytes);
+  const nameBytes = sanitizeIccpName(profile.name);
+
+  // iCCP payload: profile name + 0x00 separator + compression method (0 = zlib)
+  // + compressed profile.
+  const payload = new Uint8Array(nameBytes.length + 2 + compressed.length);
+  payload.set(nameBytes, 0);
+  payload[nameBytes.length] = 0x00;     // null separator
+  payload[nameBytes.length + 1] = 0x00; // compression method: zlib
+  payload.set(compressed, nameBytes.length + 2);
+
+  const chunk = new Uint8Array(12 + payload.length); // len(4) + type(4) + data + crc(4)
+  const view = new DataView(chunk.buffer);
+  view.setUint32(0, payload.length);
+  chunk.set([0x69, 0x43, 0x43, 0x50], 4); // 'iCCP'
+  chunk.set(payload, 8);
+  view.setUint32(8 + payload.length, crc32(chunk.subarray(4, 8 + payload.length)));
+
+  // Final layout: signature + IHDR, then our iCCP, then the kept chunks in
+  // source order.
+  const parts: Uint8Array[] = [png.subarray(0, 33), chunk, ...kept];
+  let total = 0;
+  for (const p of parts) total += p.length;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const p of parts) {
+    out.set(p, offset);
+    offset += p.length;
+  }
+  return out;
+}
+
+/** PNG file signature (137 'P' 'N' 'G' \r \n \x1a \n). */
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/** Read a 4-byte ASCII FourCC. */
+function getFourCC(bytes: Uint8Array, offset: number): string {
+  return String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+}
+
+/** zlib-deflate bytes via the standard CompressionStream API. */
+async function zlibDeflate(bytes: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new CompressionStream('deflate'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+/**
+ * Sanitize a profile name to an iCCP keyword: Latin-1 printable subset
+ * (0x20–0xFF except 0x7F), 1–79 bytes.
+ */
+function sanitizeIccpName(name: string): Uint8Array {
+  const cleaned = name.replace(/[^\x20-\x7E\xA0-\xFF]/g, '').slice(0, 79) || 'ICC Profile';
+  const bytes = new Uint8Array(cleaned.length);
+  for (let i = 0; i < cleaned.length; i++) bytes[i] = cleaned.charCodeAt(i) & 0xFF;
+  return bytes;
+}
+
+/** CRC-32 (ISO 3309 / ITU-T V.42, the PNG chunk checksum). */
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) {
+    crc = CRC32_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 // ─── Internal Helpers ───────────────────────────────────────────────────────
 
 /** Read a 4-byte big-endian unsigned integer from a Uint8Array. */

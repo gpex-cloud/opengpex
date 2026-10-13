@@ -137,14 +137,21 @@ export function floatToHalf(value: number): number {
  * texture. Input length must be a multiple of 4; output has the same length.
  *
  * `src[i] / 65535` maps the integer range onto [0,1] — the same normalization
- * the GPU applies to `rgba8unorm` (`/255`), so an 8-bit and 16-bit source of the
- * same image sample to identical values, just with more precision retained.
+ * the GPU applies to `rgba8unorm` (`/255`), so an 8-bit and 16-bit source of
+ * the same image sample to identical values, just with more precision retained.
+ *
+ * `gain` (default 1) is an optional linear-light exposure scale applied to the
+ * RGB channels BEFORE packing — the RAW filmic stage-① anchor
+ * (core/engine/color/filmic.ts). Alpha is never gained: an opaque 65535 must
+ * stay opaque regardless of exposure. Values may exceed 65535·gain-free range —
+ * packing is unclamped (f16 keeps over-range linear highlight headroom).
  */
-export function normalizedUint16ToFloat16(src: Uint16Array): Uint16Array {
+export function normalizedUint16ToFloat16(src: Uint16Array, gain = 1): Uint16Array {
   const out = new Uint16Array(src.length);
-  const inv = 1 / 65535;
+  const inv = (1 / 65535) * gain;
   for (let i = 0; i < src.length; i++) {
-    out[i] = floatToHalf(src[i] * inv);
+    const v = i % 4 === 3 ? src[i] / 65535 : src[i] * inv;
+    out[i] = floatToHalf(v);
   }
   return out;
 }

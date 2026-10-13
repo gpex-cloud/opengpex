@@ -12,7 +12,7 @@ importers:
         specifier: ^4.2.0
         version: 4.2.0
       '@jsquash/avif':
-        specifier: ^2.1.1
+        specifier: 2.1.1
         version: 2.1.1
       '@okathira/ghostpdl-wasm':
         specifier: 1.1.0
@@ -32,12 +32,12 @@ importers:
       gsap:
         specifier: ^3.15.0
         version: 3.15.0
-      heic-to:
-        specifier: ^1.4.1
-        version: 1.5.2
       immer:
         specifier: ^11.1.8
         version: 11.1.8
+      libheif-js:
+        specifier: 1.23.5
+        version: 1.23.5
       libraw-wasm:
         specifier: ^1.5.0
         version: 1.5.0
@@ -1773,9 +1773,6 @@ packages:
     resolution: {integrity: sha512-ej4AhfhfL2Q2zpMmLo7U1Uv9+PyhIZpgQLGT1F9miIGmiCJIoCgSmczFdrc97mWT4kVY72KA+WnnhJ5pghSvSg==}
     engines: {node: '>= 0.4'}
 
-  heic-to@1.5.2:
-    resolution: {integrity: sha512-8Fns+lZHAWmz5U5IUxDeXKwIf3foBoKNPLxxFY4B0MkLjNuomEIHCoDbDE+x/llFK3NCEO1cu4+n3iUKY+Svmw==}
-
   hermes-estree@0.25.1:
     resolution: {integrity: sha512-0wUoCcLp+5Ev5pDW2OriHC2MJCbwLwuRx+gAqMTOkGKJJiBCLjtrvy4PWUGn6MIVefecRpzoOZ/UV6iGdOr+Cw==}
 
@@ -2012,6 +2009,10 @@ packages:
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
+
+  libheif-js@1.23.5:
+    resolution: {integrity: sha512-umXZPthnWZtF3iG/5mQG+AZ2V6i0UeYpo3z2CkggTEgL8dKmIIwJT6TDuAMuabXa1yTW8uJ1ZAgR+CxNTklYYw==}
+    engines: {node: '>=8.0.0'}
 
   libraw-wasm@1.5.0:
     resolution: {integrity: sha512-dYNuOnuGQVq6ldkOLoHz5BrY63aewpEuLaAfJdv7pxrfdHrtRxzuWywAmtwRDU3UB66Gl4Hk33N1qG/HjV1oXA==}
@@ -4731,8 +4732,6 @@ snapshots:
     dependencies:
       function-bind: 1.1.2
 
-  heic-to@1.5.2: {}
-
   hermes-estree@0.25.1: {}
 
   hermes-parser@0.25.1:
@@ -4967,6 +4966,8 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
       type-check: 0.4.0
+
+  libheif-js@1.23.5: {}
 
   libraw-wasm@1.5.0: {}
 

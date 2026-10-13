@@ -111,6 +111,30 @@ export const IMAGE_INFO_COMMANDS = {
       shortcuts: [{ key: 's', meta: true, shift: true }, { key: 's', ctrl: true, shift: true }]
    } as EditorCommand<{ format?: P.ExportFormat } | void, Promise<void>>,
 
+   downloadOriginal: {
+      id: P.CMD_DOWNLOAD_ORIGINAL,
+      name: 'Download Original File',
+      category: 'File',
+      execute: async (ctx: EditorContextValue) => {
+         const { activeFrame, assets, pixels } = ctx;
+         if (!activeFrame?.assetId) {
+            ctx.actions.setInteraction({ hud: { message: 'No source asset attached to this document.', type: 'error' } });
+            return;
+         }
+         // The retained source blob — the ORIGINAL file bytes verbatim (for RAW
+         // this is the untouched camera file; ingest retained it deliberately).
+         const blob = await assets.getRaw(activeFrame.assetId);
+         if (!blob) {
+            ctx.actions.setInteraction({ hud: { message: 'Original file was not retained for this source.', type: 'error' } });
+            return;
+         }
+         // Keep the ORIGINAL filename/extension (IMG_2591.DNG stays .dng — the
+         // export format dropdown has no say here by design).
+         const filename = activeFrame.metadata?.sourceFileName || activeFrame.name;
+         await pixels.utils.download(blob, filename);
+      },
+   } as EditorCommand<void, Promise<void>>,
+
    applyResize: {
       id: P.CMD_APPLY_RESIZE,
       name: 'Apply Resize',

@@ -98,14 +98,15 @@ export function useImageInfoMetadata() {
  */
 export function useExportConfig() {
    const [selfConfig, setSelfConfig] = usePluginSelfConfig<P.ExportConfig>();
-   const { downloadCmd, applyResizeCmd } = usePluginCommands<ImageInfoDrawerCommandsMap>();
+   const { downloadCmd, downloadOriginalCmd, applyResizeCmd } = usePluginCommands<ImageInfoDrawerCommandsMap>();
 
    return useMemo(() => ({
       config: selfConfig,
       updateConfig: setSelfConfig,
       downloadCmd,
+      downloadOriginalCmd,
       applyResizeCmd,
-   }), [selfConfig, setSelfConfig, downloadCmd, applyResizeCmd]);
+   }), [selfConfig, setSelfConfig, downloadCmd, downloadOriginalCmd, applyResizeCmd]);
 }
 
 /**

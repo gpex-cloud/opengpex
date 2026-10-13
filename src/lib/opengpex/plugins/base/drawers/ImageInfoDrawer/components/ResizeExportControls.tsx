@@ -58,6 +58,8 @@ interface ResizeExportControlsProps {
   hasSelection?: boolean;
   applyResizeCmd?: CommandInstance;
   downloadCmd?: CommandInstance;
+  /** Downloads the retained source blob (the ORIGINAL file bytes) verbatim. */
+  downloadOriginalCmd?: CommandInstance;
   imageMetadata?: ImageMetadata;
   /** Source image bit depth (e.g. 16 for 16-bit TIFF/PNG). Undefined = 8-bit default. */
   sourceBitDepth?: number;
@@ -75,6 +77,7 @@ export function ResizeExportControls({
   hasSelection,
   applyResizeCmd,
   downloadCmd,
+  downloadOriginalCmd,
   imageMetadata,
   sourceBitDepth,
   isSingleLayer,
@@ -332,7 +335,7 @@ export function ResizeExportControls({
             <span className="uppercase">Apply</span>
           </FancyButton>
 
-          <div className="flex gap-1 flex-1">
+          <div className="flex gap-1 flex-1 justify-end">
             <ActionDropdown
               direction="up"
               onSelect={handleFormatSelect}
@@ -383,6 +386,11 @@ export function ResizeExportControls({
                 </FancyButton>
               }
             />
+            {/* Save / Save Clip — primary action, behavior UNCHANGED (render +
+                encode via the egest pipeline; unedited + format-match rides the
+                pass-through gate). The attached chevron menu adds Save Original:
+                the retained source blob downloaded verbatim, bypassing format &
+                RenderGraph — the RAW round-trip exit (IMG_2591.DNG stays .dng). */}
             <FancyButton
               onClick={onDownload}
               disabled={isProcessing || (isClipMode && !hasSelection)}
@@ -390,6 +398,24 @@ export function ResizeExportControls({
               variant={isClipMode ? "amber" : "green"}
               size="xs"
               className="flex-1"
+              dropdownDirection="up"
+              dropdownOptions={[
+                {
+                  label: "Save Original",
+                  value: "original",
+                  description: "source file, verbatim",
+                },
+              ]}
+              onDropdownSelect={(val) => {
+                if (val === "original") {
+                  setIsProcessing(true);
+                  try {
+                    downloadOriginalCmd?.execute();
+                  } finally {
+                    setIsProcessing(false);
+                  }
+                }
+              }}
             >
               {!isProcessing && (
                 <Download size={12} className="text-white/80" />

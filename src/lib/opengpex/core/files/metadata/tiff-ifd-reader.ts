@@ -391,6 +391,12 @@ const TAG_COMPRESSION = 0x0103;          // Compression (7 = JPEG)
 const TAG_STRIP_OFFSETS = 0x0111;        // StripOffsets
 const TAG_STRIP_BYTE_COUNTS = 0x0117;    // StripByteCounts
 
+/** TIFF tags used by the raw-image bit-depth probe (`readTiffRawBitsPerSample`). */
+const TAG_BITS_PER_SAMPLE = 0x0102;      // BitsPerSample (SHORT, one per sample)
+const TAG_PHOTOMETRIC = 0x0106;          // PhotometricInterpretation
+/** PhotometricInterpretation values that mean "THIS IFD holds the raw sensor image". */
+const PHOTOMETRIC_RAW = new Set([32803, 34892]); // CFA (0x8023) / LinearRaw (0x886C)
+
 /** Candidate ICC sources found across a TIFF/DNG's full IFD tree. */
 export interface TiffIccCandidates {
   /** First raw ICC (`ICC_PROFILE_TAG`) found in ANY IFD (top-level or SubIFD). */
@@ -479,6 +485,80 @@ export function collectTiffIccCandidates(bytes: Uint8Array): TiffIccCandidates {
   }
 
   return result;
+}
+
+/**
+ * Read the BitsPerSample of the IFD that actually holds the RAW sensor image.
+ *
+ * WHY: TIFF-family RAW containers hang the PREVIEW off IFD0 and the raw image
+ * off a SubIFD — Apple ProRAW reports `8,8,8` (YCbCr JPEG preview) at IFD0
+ * while the LinearRaw SubIFD stores `10,10,10`. ExifReader (and every naive
+ * `exif.BitsPerSample` read) only reaches IFD0, so the ingest metadata lied
+ * about the storage depth. This walk identifies the raw image by its
+ * PhotometricInterpretation (CFA 32803 / LinearRaw 34892 — the only two values
+ * that mean "sensor data", covering DNG/CR2/NEF/ARW/PEF alike) and returns that
+ * IFD's BitsPerSample sample 0. TIFF-generic by construction: RAF/ORF/RW2
+ * (non-TIFF containers) yield `undefined` and the caller keeps its existing
+ * fallback.
+ *
+ * BFS over IFD0 → SubIFDs → next-IFD, same discipline as
+ * `collectTiffIccCandidates` (classic TIFF only, cycle-guarded). An IFD whose
+ * photometric is raw but which lacks BitsPerSample is skipped (malformed).
+ */
+export function readTiffRawBitsPerSample(bytes: Uint8Array): number | undefined {
+  const header = validateTiffHeader(bytes);
+  if (!header) return undefined;
+
+  const { isLE } = header;
+  const visited = new Set<number>();
+  const queue: number[] = [header.ifd0Offset];
+  let guard = 0;
+  const maxIfds = 64; // same magnitude guard as the ICC tree walk
+
+  while (queue.length > 0 && guard++ < maxIfds) {
+    const ifdOffset = queue.shift()!;
+    if (ifdOffset <= 0 || ifdOffset + 2 > bytes.length || visited.has(ifdOffset)) continue;
+    visited.add(ifdOffset);
+
+    const entryCount = readU16(bytes, ifdOffset, isLE);
+    const entriesStart = ifdOffset + 2;
+    if (entriesStart + entryCount * 12 + 4 > bytes.length) continue;
+
+    let photometric: number | null = null;
+    let bitsPerSample: number | null = null;
+
+    for (let i = 0; i < entryCount; i++) {
+      const e = entriesStart + i * 12;
+      switch (readU16(bytes, e, isLE)) {
+        case TAG_PHOTOMETRIC:
+          photometric = readFirstNumericValue(bytes, e, isLE);
+          break;
+        case TAG_BITS_PER_SAMPLE:
+          bitsPerSample = readFirstNumericValue(bytes, e, isLE);
+          break;
+        case TAG_SUBIFDS: {
+          const type = readU16(bytes, e + 2, isLE);
+          const count = readU32(bytes, e + 4, isLE);
+          const size = (TYPE_SIZES[type] || 4) * count;
+          const base = size <= 4 ? e + 8 : readU32(bytes, e + 8, isLE);
+          for (let k = 0; k < count; k++) {
+            const off = base + k * 4 + 4 <= bytes.length ? readU32(bytes, base + k * 4, isLE) : 0;
+            if (off > 0) queue.push(off);
+          }
+          break;
+        }
+      }
+    }
+
+    if (photometric !== null && PHOTOMETRIC_RAW.has(photometric) && bitsPerSample && bitsPerSample > 0) {
+      return bitsPerSample;
+    }
+
+    const next = readU32(bytes, entriesStart + entryCount * 12, isLE);
+    if (next > 0) queue.push(next);
+  }
+
+  return undefined;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

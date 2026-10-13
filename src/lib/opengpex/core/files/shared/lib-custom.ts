@@ -97,14 +97,14 @@ export interface WideGamut8Decoded {
 }
 
 /**
- * Decode the `wide-gamut-8` channel: a source file (JPEG, WebP, PNG, AVIF, HEIC) →
+ * Decode the `wide-gamut-8` channel: a source file (JPEG, WebP, PNG, AVIF) →
  * BOTH outputs a wide-gamut import needs, in one call.
  *
  *   1. Reads source-encoded pixels with browser colour management OFF via {@link readSourceEncodedRgba};
  *   2. Lifts UNCLAMPED f16-linear naked pixels straight from source readback via {@link wideGamut8ToF16};
  *   3. Renders the 8-bit display proxy Blob folded to Display P3 via {@link renderDisplayProxy}.
  *
- * @param source   - encoded image file or Blob (JPEG, WebP, PNG, AVIF, HEIC)
+ * @param source   - encoded image file or Blob (JPEG, WebP, PNG, AVIF)
  * @param srcGamut - the source gamut (adobe-rgb / prophoto-rgb)
  */
 export async function decodeWideGamut8(

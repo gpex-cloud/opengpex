@@ -48,7 +48,7 @@ import { ResizeExportControls } from "./components/ResizeExportControls";
 export function ImageInfoComponent() {
   // --- Hooks: isolated by change frequency ---
   const meta = useImageInfoMetadata();
-  const { config, updateConfig, downloadCmd, applyResizeCmd } = useExportConfig();
+  const { config, updateConfig, downloadCmd, downloadOriginalCmd, applyResizeCmd } = useExportConfig();
   const isClipMode = useClipMode();
 
   // [Perf] Deferred mount: render heavy ResizeExportControls after the first paint.
@@ -139,6 +139,7 @@ export function ImageInfoComponent() {
           hasSelection={!!box}
           applyResizeCmd={applyResizeCmd}
           downloadCmd={downloadCmd}
+          downloadOriginalCmd={downloadOriginalCmd}
           imageMetadata={meta.imageMetadata}
           sourceBitDepth={meta.sourceBitDepth}
           isSingleLayer={meta.isSingleLayer}

@@ -55,6 +55,8 @@ import { mimeToExt } from './shared/mime';
 // strategy.ts is NOT part of the './color' barrel — the entry imports the single
 // ingest-decision authority explicitly.
 import { resolveIngestDecision } from './strategy';
+import { unsupportedIngestError } from './errors';
+import { isHevcHardDecodeAvailable } from './handlers/heic/capability';
 import type { IngestDecision } from './strategy';
 
 // Re-export vector utilities (used by frame/create command)
@@ -83,6 +85,7 @@ export type { ImageMetadata, RawBinaryData } from './types';
 
 // Re-export unified ingest decision strategy
 export { resolveIngestDecision, isWideGamut } from './strategy';
+export { UnsupportedIngestError, unsupportedIngestError } from './errors';
 export type { IngestDecision, DecodeChannel } from './strategy';
 
 // Re-export unified egest (export) decision strategy — the mirror of the above.
@@ -237,10 +240,23 @@ export function createFileService(
       // Stage 1: sniff objective metadata (header-only extract).
       const metadata = await handler.extractMetadata(file);
 
-      // Stage 2: the single authoritative ingest decision. AVIF >8-bit degrades
-      // to 8-bit here per strategy.ts (no throw), and the working gamut is the
-      // engine constant WORKING_GAMUT — never derived from the image.
-      const decision = resolveIngestDecision(metadata);
+      // Stage 2: the single authoritative ingest decision. The working gamut is
+      // the engine constant WORKING_GAMUT — never derived from the image.
+      // HEIC injects the environment capability (rev5 §10.3/§3.3): the one-shot
+      // HEVC probe entry is picked by the file's hvcC profile_idc; the decision
+      // itself stays a synchronous pure function of {metadata, env}.
+      const env = metadata.sourceFormat === 'heic'
+        ? { hevcHardDecode: await isHevcHardDecodeAvailable(metadata.raw.heicProfileIdc) }
+        : undefined;
+      const decision = resolveIngestDecision(metadata, env);
+
+      // Declared terminus (matrix row 26 / 19d / 18): `unsupported` is a
+      // decision, not a malfunction — short-circuit here with the typed,
+      // reason-carrying error instead of dispatching into a handler whose
+      // Fail-Fast guard would only produce a misleading failure stack.
+      if (decision.decodeChannel === 'unsupported') {
+        throw unsupportedIngestError(metadata);
+      }
 
       // Stage 3: pure pixel extraction. `metadata` + `decision` are the entry's
       // own resolved context, handed to the handler as explicit arguments (not an
@@ -402,7 +418,7 @@ export function createFileService(
 
       // decodeAsset failed, or the page it produced carries no highDepthSource.
       // No further fallback: for the channels this matters most (`libraw`,
-      // `heic-to`) the raw source bytes are exactly what the browser's native
+      // `libheif-proxy`) the raw source bytes are exactly what the browser's native
       // decode already can't read, so re-attempting a bare readback here would
       // just fail the same way. The caller (HighDepthTextureCache) negative-
       // caches this and degrades to the 8-bit display path.

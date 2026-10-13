@@ -25,6 +25,10 @@ import {
   linearToSrgb,
   normalizedUint16ToFloat16,
 } from '@opengpex/editor/core/engine/color';
+import {
+  filmicExposureGain,
+  filmicToneMap,
+} from '@opengpex/editor/core/engine/color/filmic';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // LibRaw Worker Class
@@ -134,9 +138,10 @@ export interface RawDecodeResult {
   width: number;
   height: number;
   /**
-   * 16-bit naked pixels (IEEE binary16 bit patterns, RGBA interleaved), already
-   * in the working color space. Present ONLY when libraw yielded 16-bit output
-   * (`bits === 16`); absent → the decode degraded to the 8-bit display path only.
+   * 16-bit naked pixels (IEEE binary16 bit patterns, RGBA interleaved), LINEAR
+   * light in the source gamut, scaled by the stage-① exposure anchor. Present
+   * ONLY when libraw yielded 16-bit output (`bits === 16`); absent → the decode
+   * degraded to the 8-bit display path only.
    */
   highDepth?: {
     data: Uint16Array;
@@ -149,39 +154,44 @@ export interface RawDecodeResult {
 /**
  * Build the 8-bit display proxy from LINEAR source-gamut 16-bit RGBA.
  *
- * Libraw emits LINEAR light (`gamm:[1,1]`), so the
- * display proxy — a plain sRGB/P3 preview with NO GPU gamut/TRC step behind it
- * — must (optionally) fold the source gamut into the display target IN LINEAR
- * LIGHT, then apply the display target's OETF (the sRGB transfer curve, shared
- * by both `srgb` and `display-p3`) BEFORE the 16→8 quantise. Skipping the OETF
- * would ship raw linear code values to a display that expects encoded ones.
+ * Libraw emits LINEAR light (`gamm:[1,1]`), so the display proxy — a plain
+ * sRGB/P3 preview with NO GPU gamut/TRC step behind it — must carry the whole
+ * `filmic` display intent itself (`core/engine/color/filmic.ts`):
+ *   1. `exposureGain` — the per-file scene-median anchor (stage ①);
+ *   2. (optionally) the source→target gamut fold IN LINEAR LIGHT;
+ *   3. the luma-referenced knee (stage ②, same constants the GPU
+ *      `tone_map_filmic` injects) — ONE gain per pixel so chromaticity is
+ *      preserved — then the display target's OETF (the sRGB transfer curve,
+ *      shared by both `srgb` and `display-p3`) before the 16→8 quantise.
+ * Thumbnails / cold-reload fallback / pre-upload frames therefore match the
+ * canvas by construction.
  *
- * This function is the display-only leg: it NEVER touches the f16 truth line,
- * which stays linear + source-gamut for the GPU to fold source→working.
- *
- * @param linear16 - RGBA Uint16 (0..65535), LINEAR light, source gamut
- * @param matrix   - source→target 3×3 (row-major, linear light), or null (no fold)
+ * @param linear16     - RGBA Uint16 (0..65535), LINEAR light, source gamut
+ * @param matrix       - source→target 3×3 (row-major, linear light), or null (no fold)
+ * @param exposureGain - stage-① anchor (decode-computed; 1 = un-anchored)
  */
 export function linearRgba16ToDisplayProxy8(
   linear16: Uint16Array,
   matrix: Float32Array | null,
+  exposureGain = 1,
 ): Uint8ClampedArray<ArrayBuffer> {
   const out = new Uint8ClampedArray(linear16.length);
   const INV = 1 / 65535;
   for (let i = 0; i < linear16.length; i += 4) {
-    let lr = linear16[i] * INV;
-    let lg = linear16[i + 1] * INV;
-    let lb = linear16[i + 2] * INV;
+    let lr = linear16[i] * INV * exposureGain;
+    let lg = linear16[i + 1] * INV * exposureGain;
+    let lb = linear16[i + 2] * INV * exposureGain;
     if (matrix) {
       const r = matrix[0] * lr + matrix[1] * lg + matrix[2] * lb;
       const g = matrix[3] * lr + matrix[4] * lg + matrix[5] * lb;
       const b = matrix[6] * lr + matrix[7] * lg + matrix[8] * lb;
       lr = r; lg = g; lb = b;
     }
-    // clamp to [0,1] then apply the sRGB OETF (display target encoding).
-    out[i]     = Math.round(linearToSrgb(clamp01(lr)) * 255);
-    out[i + 1] = Math.round(linearToSrgb(clamp01(lg)) * 255);
-    out[i + 2] = Math.round(linearToSrgb(clamp01(lb)) * 255);
+    // filmic knee on luma (stage ②, chroma-preserving) then the sRGB OETF.
+    const [tr, tg, tb] = filmicToneMap(clamp01(lr), clamp01(lg), clamp01(lb));
+    out[i]     = Math.round(linearToSrgb(tr) * 255);
+    out[i + 1] = Math.round(linearToSrgb(tg) * 255);
+    out[i + 2] = Math.round(linearToSrgb(tb) * 255);
     out[i + 3] = Math.round(clamp01(linear16[i + 3] * INV) * 255); // alpha: linear, no OETF
   }
   return out;
@@ -202,15 +212,21 @@ function clamp01(v: number): number {
  *   libraw `outputBps:16` + `gamm:[1,1]` → RGB(A) `Uint16Array` in the resolved
  *   source gamut (`outputColor` derived per-gamut), LINEAR light
  *     → expand to RGBA Uint16
+ *     → stage-① filmic exposure anchor: K = 0.18/median(luma)
+ *       (`core/engine/color/filmic.ts` — libraw normalizes SENSOR WHITE to 1.0
+ *       with zero headroom, so scene placement must be anchored per capture)
  *     → highDepth: pack the source-gamut LINEAR pixels to half-float
- *       (`normalizedUint16ToFloat16`, /65535) → `highDepth.data`, tagged `linear`.
- *       The GPU sampling shader does the source→working gamut matrix (tagged
- *       per-asset in `raw/decode.ts`), so NO CPU gamut/TRC math happens on this
- *       branch — it is the true linear source line.
- *     → display blob: fold to the display target in LINEAR light (only for a wide
- *       source), apply the sRGB OETF, then downscale to 8-bit
- *       (`linearRgba16ToDisplayProxy8`). The proxy is a plain preview with no GPU
- *       step behind it, so it carries its own gamut fold + display encoding.
+ *       (`normalizedUint16ToFloat16`, /65535 × K) → `highDepth.data`, tagged
+ *       `linear`. The GPU sampling shader does the source→working gamut matrix
+ *       (tagged per-asset in `raw/decode.ts`) and the fixed filmic knee — NO
+ *       CPU gamut/TRC math happens on this branch; the gain keeps it
+ *       LINEAR light in the source gamut.
+ *     → display blob: the whole filmic display intent in one helper —
+ *       exposure anchor → linear gamut fold (only for a wide source) → fixed
+ *       knee → sRGB OETF → 8-bit (`linearRgba16ToDisplayProxy8`). The proxy is
+ *       a plain preview with no GPU step behind it, so it carries its own
+ *       display transform — identical constants to the GPU operator, so
+ *       thumbnails / cold-reload fallback / pre-upload frames match the canvas.
  *
  * @param file - RAW file to decode
  * @param colorConfig - Strategy-driven color conversion parameters
@@ -259,6 +275,20 @@ export async function convertRawToBlob(file: File, colorConfig: RawColorConfig):
         rgba16.set(new Uint16Array(src16.buffer, src16.byteOffset, px * 4));
       }
 
+      // Stage ① exposure anchor (filmic.ts): libraw normalizes SENSOR WHITE to
+      // 1.0 with zero headroom, so scene placement varies per capture — anchor
+      // the scene median onto 18% display-linear grey (dcraw auto-bright
+      // convention). Sampled, not exhaustive: ~64k luma points is plenty for a
+      // robust median at 12MP+.
+      const anchorStep = Math.max(1, Math.floor(px / 65536));
+      const lumaSample: number[] = [];
+      for (let p = 0; p < px; p += anchorStep) {
+        const j = p * 4;
+        lumaSample.push((0.2126 * rgba16[j] + 0.7152 * rgba16[j + 1] + 0.0722 * rgba16[j + 2]) / 65535);
+      }
+      lumaSample.sort((a, b) => a - b);
+      const exposureGain = filmicExposureGain(lumaSample[Math.floor(lumaSample.length / 2)]);
+
       // Asymmetric split:
       //   • 16-bit half-float highDepth → GPU: keep the ORIGINAL source-gamut
       //     pixels UNCONVERTED and LINEAR. The GPU sampling shader performs the
@@ -266,9 +296,13 @@ export async function convertRawToBlob(file: File, colorConfig: RawColorConfig):
       //     decode.ts). Folding here too would DOUBLE-CONVERT once the GPU consumer
       //     is active, and folding in 16-bit uint would clip highlights outside the
       //     target gamut before they ever reach the wide-gamut float buffer.
+      //     The `exposureGain` rides along on this line (RGB only, alpha
+      //     untouched): a positive linear gain keeps the line LINEAR-light in
+      //     the source gamut — `trc:'linear'` stays true — and f16 cannot clip.
       //   • 8-bit display blob → a plain sRGB/P3 preview with no GPU gamut step
-      //     behind it, so it folds the source gamut into the display target (in
-      //     LINEAR light) and applies the display-target OETF itself.
+      //     behind it, so it carries the whole filmic display intent itself:
+      //     the same exposure gain + the fixed knee (stage ②, shared constants
+      //     with the GPU operator) + the display-target OETF.
       // 'none' → source already IS the display target (no matrix fold needed).
       // 'icc-engine' → N/A for RAW (libraw emits known RGB spaces).
       const displayMatrix =
@@ -277,12 +311,14 @@ export async function convertRawToBlob(file: File, colorConfig: RawColorConfig):
           : null;
 
       // Pack the SOURCE-gamut LINEAR 16-bit pixels to half-float (normalized
-      // /65535) for the `{ kind: 'raw' }` → rgba16float resident upload; the GPU
-      // folds the gamut, so this stays the untouched linear source truth line.
-      const half = normalizedUint16ToFloat16(rgba16);
+      // /65535, exposure-anchored) for the `{ kind: 'raw' }` → rgba16float
+      // resident upload; the GPU folds the gamut and applies the knee, so this
+      // stays the untouched linear source truth line.
+      const half = normalizedUint16ToFloat16(rgba16, exposureGain);
 
-      // 8-bit display proxy: optional linear gamut fold → sRGB OETF → 16→8 quantise.
-      const rgba8 = linearRgba16ToDisplayProxy8(rgba16, displayMatrix);
+      // 8-bit display proxy: exposure anchor → optional linear gamut fold →
+      // filmic knee → sRGB OETF → 16→8 quantise.
+      const rgba8 = linearRgba16ToDisplayProxy8(rgba16, displayMatrix, exposureGain);
       const displayBlob = await encodeDisplayBlob(rgba8, width, height, colorConfig.targetColorSpace);
 
       return {
@@ -294,9 +330,9 @@ export async function convertRawToBlob(file: File, colorConfig: RawColorConfig):
     }
 
     // ── 8-bit fallback path (bits !== 16 — defensive, no 16-bit regression) ──
-    // libraw now emits LINEAR light (`gamm:[1,1]`) here too, so this path folds
-    // the source gamut in linear light and applies the display OETF via the same
-    // proxy helper (upscaled to the 16-bit linear domain it expects).
+    // libraw now emits LINEAR light (`gamm:[1,1]`) here too, so this path carries
+    // the same filmic intent via the same proxy helper (upscaled to the 16-bit
+    // linear domain it expects): median anchor → optional fold → knee → OETF.
     const linear16 = new Uint16Array(width * height * 4);
     if (colors === 3) {
       const src = data as Uint8Array;
@@ -311,11 +347,20 @@ export async function convertRawToBlob(file: File, colorConfig: RawColorConfig):
       for (let k = 0; k < src.length; k++) linear16[k] = src[k] * 257;
     }
 
+    const anchorStep = Math.max(1, Math.floor(width * height / 65536));
+    const lumaSample: number[] = [];
+    for (let p = 0; p < width * height; p += anchorStep) {
+      const j = p * 4;
+      lumaSample.push((0.2126 * linear16[j] + 0.7152 * linear16[j + 1] + 0.0722 * linear16[j + 2]) / 65535);
+    }
+    lumaSample.sort((a, b) => a - b);
+    const exposureGain = filmicExposureGain(lumaSample[Math.floor(lumaSample.length / 2)]);
+
     const fallbackMatrix =
       colorConfig.conversion === 'matrix'
         ? getConversionMatrix(colorConfig.sourceColorSpace, colorConfig.targetColorSpace)
         : null;
-    const rgbaData = linearRgba16ToDisplayProxy8(linear16, fallbackMatrix);
+    const rgbaData = linearRgba16ToDisplayProxy8(linear16, fallbackMatrix, exposureGain);
 
     const displayBlob = await encodeDisplayBlob(rgbaData, width, height, colorConfig.targetColorSpace);
     return { displayBlob, width, height };

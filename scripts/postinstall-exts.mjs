@@ -14,13 +14,14 @@
  *   public/ext/wasm/libraw/  ← libraw.wasm + libraw.js + libraw-worker.js
  *   public/ext/wasm/gs/      ← gs.wasm + gs.js + gs-worker.js
  *   public/ext/wasm/avif/    ← avif_enc.wasm + avif_enc.js + avif-worker.js (@jsquash/avif ST)
- *   (avif encoding via vips-heif.wasm in vips/ directory)  
- *   public/ext/js/           ← heic-to.js
+ *   (avif encoding via vips-heif.wasm in vips/ directory)
+ *   public/ext/wasm/libheif/ ← libheif.js + libheif.wasm + heic-worker.js (libheif-js, LGPL-3.0)
+ *   public/ext/js/           ← gifuct-js.js + gifenc.js + polygon-clipping.js
  *
  * This runs automatically after `pnpm install`.
  */
 
-import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,7 +30,7 @@ const ROOT = resolve(__dirname, '..');
 
 // ─── Ensure subdirectories exist ────────────────────────────────────────────────
 const WASM_BASE = resolve(ROOT, 'public/ext/wasm');
-const SUBDIRS = ['resvg', 'vips', 'libraw', 'gs', 'avif'];
+const SUBDIRS = ['resvg', 'vips', 'libraw', 'gs', 'avif', 'avif/dec', 'libheif'];
 for (const sub of SUBDIRS) {
   mkdirSync(resolve(WASM_BASE, sub), { recursive: true });
 }
@@ -54,9 +55,19 @@ const vendorFiles = [
   { src: 'node_modules/@okathira/ghostpdl-wasm/dist/gs.wasm', dest: 'gs/gs.wasm' },
   { src: 'node_modules/@okathira/ghostpdl-wasm/dist/gs.js',   dest: 'gs/gs.js' },
 
-  // ── avif (@jsquash/avif encoder — ST mode only, no MT files needed) ──
+  // ── avif (@jsquash/avif — ST encoder + libavif decoder. EXACT version pin
+  //    in package.json: the decode fidelity/depth probes were validated against
+  //    this build (gpex-cloud/probes/avif), bumping requires re-running them) ──
   { src: 'node_modules/@jsquash/avif/codec/enc/avif_enc.wasm', dest: 'avif/avif_enc.wasm' },
   { src: 'node_modules/@jsquash/avif/codec/enc/avif_enc.js',   dest: 'avif/avif_enc.js' },
+  { src: 'node_modules/@jsquash/avif/codec/dec/avif_dec.wasm', dest: 'avif/dec/avif_dec.wasm' },
+  { src: 'node_modules/@jsquash/avif/codec/dec/avif_dec.js',   dest: 'avif/dec/avif_dec.js' },
+
+  // ── libheif (libheif-js prebuilt wasm — HEIC proxy decode; EXACT version pin
+  //    in package.json: the six-sample probe was validated against this build,
+  //    bumping requires re-running gpex-cloud/probes/heic) ──
+  { src: 'node_modules/libheif-js/libheif-wasm/libheif.js',   dest: 'libheif/libheif.js' },
+  { src: 'node_modules/libheif-js/libheif-wasm/libheif.wasm', dest: 'libheif/libheif.wasm' },
 ];
 
 let copied = 0;
@@ -80,6 +91,7 @@ const workerFiles = [
   { src: 'gs-worker.js',    dest: 'gs/gs-worker.js' },
   { src: 'vips-worker.js',  dest: 'vips/vips-worker.js' },
   { src: 'avif-worker.js',  dest: 'avif/avif-worker.js' },
+  { src: 'heic-worker.js',  dest: 'libheif/heic-worker.js' },
 ];
 
 let workersCopied = 0;
@@ -96,26 +108,9 @@ for (const { src, dest } of workerFiles) {
 }
 console.log(`postinstall-exts: ${workersCopied}/${workerFiles.length} worker scripts copied.`);
 
-// ─── heic-to (LGPL-3.0) ───────────────────────────────────────────────────────
+// ─── public/ext/js (esbuild-bundled browser globals below) ────────────────────
 const JS_DEST = resolve(ROOT, 'public/ext/js');
 mkdirSync(JS_DEST, { recursive: true });
-
-const heicSrc = resolve(ROOT, 'node_modules/heic-to/dist/heic-to.js');
-const heicDestFile = resolve(JS_DEST, 'heic-to.js');
-
-if (existsSync(heicSrc)) {
-  copyFileSync(heicSrc, heicDestFile);
-  // Patch ESM export → window globals (loaded via <script> tag, not ES module)
-  let heicContent = readFileSync(heicDestFile, 'utf8');
-  heicContent = heicContent.replace(
-    /export\{B as heicTo,v as isHeic\};?/,
-    'window.heicTo=B;window.isHeic=v;'
-  );
-  writeFileSync(heicDestFile, heicContent);
-  console.log(`  ✓ heic-to.js (from node_modules/heic-to/dist/heic-to.js, patched ESM→globals)`);
-} else {
-  console.warn(`  ⚠ node_modules/heic-to/dist/heic-to.js not found — skipping`);
-}
 
 // ─── GIF libraries: gifuct-js + gifenc (MIT) ──────────────────────────────────
 // gifuct-js has require() calls to sub-modules → must be bundled via esbuild.

@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.7
+
+- Image Formats: faster HEIC/HEIF loading with hardware acceleration on supported devices, and improved high-precision AVIF image support
+- Export: added a "Save Original" option in the export menu to quickly download untouched source files (such as original RAW photos)
+
+---
+
 ## v2.0.6
 
 - Adjustments: added an Edge Feather slider to smoothly soften layer edges, with an option to simultaneously feather the source hole for seamless blending

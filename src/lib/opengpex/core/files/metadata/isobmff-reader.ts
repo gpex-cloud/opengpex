@@ -45,6 +45,13 @@ export interface NclxParams {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
+ * Box traversal primitives, formally exported for the full HEIC container
+ * parser (`handlers/heic/metadata/container.ts`) — the ONE shared home.
+ * Production modules must import from here, never from `_testHelpers`.
+ */
+export { readBoxHeader, findTopLevelBox, findChildBox, readVarIntBE, getFourCC };
+
+/**
  * Extract ICC profile raw bytes from ISOBMFF container (HEIC/AVIF).
  *
  * Traverses box hierarchy: meta → iprp → ipco → colr (prof/rICC)
@@ -142,6 +149,92 @@ export function extractIsobmffExif(bytes: Uint8Array): Uint8Array | null {
 }
 
 /**
+ * Extract the bit depth declared by a `pixi` (PixelInformation) box in the
+ * ISOBMFF property pool — the authoritative per-item declaration where present.
+ *
+ * pixi payload (ISO/IEC 23008-12 §6.5.5, FULL box — empirically confirmed on
+ * both Apple and libheif-written files):
+ *   [version+flags: 4B] [num_channels: 1B] [bits_per_channel[0]: 1B] ...
+ *
+ * @returns Bit depth of the first channel, or null when no pixi box exists
+ * (Apple tiles carry none — hvcC is the fallback there).
+ */
+export function extractIsobmffPixiBitDepth(bytes: Uint8Array): number | null {
+  try {
+    const ipcoPayload = findIpcoPayload(bytes);
+    if (!ipcoPayload) return null;
+
+    let pos = 0;
+    while (pos + 8 <= ipcoPayload.length) {
+      const header = readBoxHeader(ipcoPayload, pos);
+      if (!header) break;
+
+      if (header.type === 'pixi') {
+        const payload = ipcoPayload.subarray(header.dataOffset, header.boxEnd);
+        // [version+flags 4B][num_channels][bits_per_channel × num_channels]
+        if (payload.length >= 6) {
+          const numChannels = payload[4];
+          if (numChannels > 0 && payload.length >= 5 + numChannels) {
+            const depth = payload[5]; // first channel
+            if (depth >= 1 && depth <= 32) return depth;
+          }
+        }
+        return null; // malformed pixi — don't guess from other boxes
+      }
+
+      pos = header.boxEnd;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract the bit depth from an `hvcC` (HEVCDecoderConfigurationRecord) in the
+ * ISOBMFF property pool — `bitDepthLumaMinus8 + 8`.
+ *
+ * Box path: meta → iprp → ipco → hvcC. The item-to-property association lives
+ * in ipma (under iprp, NOT traversed here — the minimal phase-1 bridge), so
+ * when a file carries several hvcC records (Apple: base tiles + a 10-bit
+ * gain map), the FIRST one in the pool wins. That matches every observed
+ * writer: Apple lists the primary presentation's properties before aux/gainmap
+ * properties, and third-party encoders (ffmpeg/libheif) emit exactly one.
+ * Phase-2's container parser replaces this with proper ipma association.
+ *
+ * hvcC payload (ISO/IEC 14496-15 §8.3.3):
+ *   [configurationVersion 1B][profile_space/tier/profile_idc 1B]
+ *   [compat flags 4B][constraint flags 6B][level_idc 1B]
+ *   [min_spatial_segmentation 2B][parallelismType 1B][chromaFormat 1B]
+ *   [bitDepthLumaMinus8 1B ← offset 17, low 3 bits] ...
+ */
+export function extractIsobmffHvcCBitDepth(bytes: Uint8Array): number | null {
+  try {
+    const ipcoPayload = findIpcoPayload(bytes);
+    if (!ipcoPayload) return null;
+
+    let pos = 0;
+    while (pos + 8 <= ipcoPayload.length) {
+      const header = readBoxHeader(ipcoPayload, pos);
+      if (!header) break;
+
+      if (header.type === 'hvcC') {
+        const payload = ipcoPayload.subarray(header.dataOffset, header.boxEnd);
+        if (payload.length < 23) return null; // record too short to trust
+        if (payload[0] !== 1) return null;    // unsupported configurationVersion
+        const bitDepth = (payload[17] & 0x07) + 8;
+        return bitDepth >= 8 && bitDepth <= 16 ? bitDepth : null;
+      }
+
+      pos = header.boxEnd;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Map nclx colour_primaries to ColorSpaceId.
  *
  * CICP colour_primaries values (ISO/IEC 23091-2):
@@ -149,8 +242,18 @@ export function extractIsobmffExif(bytes: Uint8Array): Uint8Array | null {
  *   12 = Display P3 (DCI-P3 with D65 white point)
  *   2  = Unspecified
  *   9  = BT.2020
+ *
+ * Transfer characteristics gate BEFORE primaries (2026-10-13 AVIF probe): a
+ * PQ(16)/HLG(18) file is HDR regardless of primaries — a P3-PQ stream must
+ * not masquerade as 'display-p3' SDR and sail into a passthrough channel
+ * (probe-verified: the browser's tone-map on such files is uncontrolled,
+ * meanDev ≈ 30/255 vs truth). They resolve to 'unknown' → the ingest matrix's
+ * HDR-negative rows (AVIF 18 / HEIC 19d) take them.
  */
 export function nclxToColorSpace(nclx: NclxParams): ColorSpaceId {
+  if (nclx.transferCharacteristics === 16 || nclx.transferCharacteristics === 18) {
+    return 'unknown'; // PQ / HLG — HDR, out of the SDR gamut vocabulary
+  }
   switch (nclx.colourPrimaries) {
     case 1:  return 'srgb';
     case 12: return 'display-p3';
@@ -164,6 +267,23 @@ export function nclxToColorSpace(nclx: NclxParams): ColorSpaceId {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
+ * Locate the ipco (ItemPropertyAssociation pool) payload:
+ * top-level → meta (full-box) → iprp → ipco.
+ */
+function findIpcoPayload(bytes: Uint8Array): Uint8Array | null {
+  const metaPayload = findTopLevelBox(bytes, 'meta');
+  if (!metaPayload || metaPayload.length < 4) return null;
+
+  // `meta` is a full-box: skip 4 bytes (version + flags)
+  const metaContent = metaPayload.subarray(4);
+
+  const iprpPayload = findChildBox(metaContent, 'iprp');
+  if (!iprpPayload) return null;
+
+  return findChildBox(iprpPayload, 'ipco');
+}
+
+/**
  * Find the colr box payload within the ISOBMFF container.
  * Traverses: top-level → meta (full-box) → iprp → ipco → colr
  *
@@ -171,20 +291,7 @@ export function nclxToColorSpace(nclx: NclxParams): ColorSpaceId {
  * We also handle the case where colr appears at a shallow level for robustness.
  */
 function findColrBox(bytes: Uint8Array): Uint8Array | null {
-  // Strategy: find `meta` box at top level, then drill into iprp → ipco → colr
-  const metaPayload = findTopLevelBox(bytes, 'meta');
-  if (!metaPayload) return null;
-
-  // `meta` is a full-box: skip 4 bytes (version + flags)
-  if (metaPayload.length < 4) return null;
-  const metaContent = metaPayload.subarray(4);
-
-  // Find iprp inside meta
-  const iprpPayload = findChildBox(metaContent, 'iprp');
-  if (!iprpPayload) return null;
-
-  // Find ipco inside iprp
-  const ipcoPayload = findChildBox(iprpPayload, 'ipco');
+  const ipcoPayload = findIpcoPayload(bytes);
   if (!ipcoPayload) return null;
 
   // Find colr inside ipco (there may be multiple — prefer prof/rICC over nclx)
@@ -348,12 +455,16 @@ function findExifItemId(metaContent: Uint8Array): number {
  *   items[]: item_ID + construction_method(v1+) + data_reference_index +
  *            base_offset + extent_count + extents[]
  *
+ * construction_method 0 = extents absolute in the file (mdat);
+ * construction_method 1 = extents relative to the meta → idat payload
+ * (Apple grid configuration boxes live there).
+ *
  * @param metaContent - meta box content (after version+flags)
  * @param targetItemId - the item ID to locate
  * @param fileBytes - the full file bytes (for absolute offset reading)
  * @returns Raw item bytes, or null
  */
-function locateItemData(
+export function locateItemData(
   metaContent: Uint8Array,
   targetItemId: number,
   fileBytes: Uint8Array,
@@ -421,7 +532,16 @@ function locateItemData(
     pos += 2;
 
     // Read extents
-    if (itemId === targetItemId && constructionMethod === 0) {
+    if (itemId === targetItemId && (constructionMethod === 0 || constructionMethod === 1)) {
+      // construction_method 1: extents are relative to the meta → idat payload
+      // (Apple stores grid configuration boxes there).
+      let idatPayload: Uint8Array | null = null;
+      if (constructionMethod === 1) {
+        const idatBox = findChildBox(metaContent, 'idat');
+        if (!idatBox) return null;
+        idatPayload = idatBox;
+      }
+
       // Concatenate all extents for this item
       const chunks: Uint8Array[] = [];
       for (let e = 0; e < extentCount; e++) {
@@ -434,9 +554,15 @@ function locateItemData(
         const extentLength = readVarIntBE(ilocPayload, pos, lengthSize);
         pos += lengthSize;
 
-        const absOffset = baseOffset + extentOffset;
-        if (absOffset + extentLength <= fileBytes.length) {
-          chunks.push(fileBytes.subarray(absOffset, absOffset + extentLength));
+        if (constructionMethod === 1) {
+          if (extentOffset + extentLength <= idatPayload!.length) {
+            chunks.push(idatPayload!.subarray(extentOffset, extentOffset + extentLength));
+          }
+        } else {
+          const absOffset = baseOffset + extentOffset;
+          if (absOffset + extentLength <= fileBytes.length) {
+            chunks.push(fileBytes.subarray(absOffset, absOffset + extentLength));
+          }
         }
       }
       if (chunks.length === 0) return null;

@@ -42,15 +42,20 @@ import type { SourceFormat, ColorSpaceId } from '../../types';
  * - 'vips-icc': LibVips ICC colour-conversion engine (CMYK only; unrecognized
  *   custom profiles / BT.2020 that resolve to 'unknown' route to 'unsupported')
  * - 'libraw': LibRaw native camera-raw decode
- * - 'heic-to': standalone heic-to transcoder (/ext/js/heic-to.js)
+ * - 'libheif-proxy': HEIC proxy decode via the files-layer heic-worker
+ *   (libheif wasm → RGBA-8 → iCCP-tagged PNG proxy). Serves HEIC rules 19b/19c/19e
+ *   (10/12-bit sources, environments without HEVC hardware decode) — and, during
+ *   the phase-1 bridge, 19a as well.
+ * - 'webcodecs-heic': HEVC hardware decode via WebCodecs (HEIC rule 19a).
+ *   Declared now, wired in the WebCodecs stage — no rule routes to it yet.
  * - 'gifuct': gifuct-js per-frame RGBA animation parse
  * - 'vector': vector parser's internal 1:1 rasterization
  * - 'unsupported': CATCH-ALL TERMINUS. No specific supported spec matched (e.g.
  *   sub-8-bit PNG 1/2/4-bit, animated WebP/AVIF, an unmappable 'unknown' colour
- *   tag, not-yet-adapted formats). The decision reports this faithfully; the
- *   execution layer throws a "not yet supported" error rather than force-decoding
- *   (Fail-Fast). Supporting a spec later means promoting it to a concrete rule
- *   in the decision table.
+ *   tag, HEIC HDR transfer functions (rule 19d), not-yet-adapted formats). The
+ *   decision reports this faithfully; the execution layer throws a "not yet
+ *   supported" error rather than force-decoding (Fail-Fast). Supporting a spec
+ *   later means promoting it to a concrete rule in the decision table.
  *
  * Foundational vocabulary of the decision engine: the `DecisionAction` route
  * a rule binds. `ingest.ts` composes it into the public `IngestDecision` and
@@ -62,7 +67,9 @@ export type DecodeChannel =
   | 'vips'
   | 'vips-icc'
   | 'libraw'
-  | 'heic-to'
+  | 'libheif-proxy'
+  | 'webcodecs-heic'
+  | 'avif-proxy'
   | 'gifuct'
   | 'vector'
   | 'unsupported';
@@ -85,6 +92,16 @@ export interface NormalizedMatchContext {
   readonly bitDepth: number;
   readonly colorSpace: ColorSpaceId;
   readonly isMultiFrame: boolean;
+  /**
+   * Environment capability (rev5 §10.3): whether the runtime can hardware-
+   * decode THIS file's HEVC profile (probe entry picked by hvcC profile_idc).
+   * Injected by the decode entry (`FileService.decode` awaits the one-shot
+   * HEVC capability probe (`handlers/heic/capability.ts`)); plain decision calls default to `false`, which
+   * is the declarative-safe route (19e proxy downgrade, never a hard-decode
+   * guess). Defaults mirror §10.3's "capability is an environment property,
+   * not a file property".
+   */
+  readonly hevcHardDecode: boolean;
 }
 
 /** Match condition stub for a single rule */
@@ -93,6 +110,7 @@ export interface DecisionCondition {
   readonly bitDepth: MatchPattern<number>;
   readonly colorSpace: MatchPattern<ColorSpaceId>;
   readonly isMultiFrame?: MatchPattern<boolean>; // Defaults to '*'
+  readonly hevcHardDecode?: MatchPattern<boolean>; // Defaults to '*'
 }
 
 /** Decision action stub for a single rule */
@@ -116,7 +134,11 @@ export interface DecisionAction {
 
 /** Complete decision rule declaration */
 export interface DecisionRule {
-  readonly id: number; // Rule ID (1 ~ 26)
+  /**
+   * Rule ID — the numeric matrix rows (1 ~ 26) or the spec-table labels of the
+   * HEIC family ('19a' ~ '19e', per 05_ingest_decision_spec.md §10.2).
+   */
+  readonly id: number | string;
   readonly condition: DecisionCondition;
   readonly action: DecisionAction;
 }

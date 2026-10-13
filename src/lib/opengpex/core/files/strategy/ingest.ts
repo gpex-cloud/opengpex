@@ -123,7 +123,7 @@ export interface IngestDecision {
    * `decodeChannel === 'image-bitmap'` ⟺ verbatim passthrough (the original file
    * bytes ARE the displayBlob); every other supported channel transcodes a
    * full-resolution 1:1 proxy, whose container is likewise derived from the
-   * channel (`heic-to` → JPEG q0.95, every other → PNG).
+   * channel (`libheif-proxy` → iCCP-tagged PNG, every other → PNG).
    */
   readonly decodeChannel: DecodeChannel;
   /** 5. EXIF orientation responsibility (keeps displayBlob and dec: pixels co-oriented). */
@@ -183,11 +183,28 @@ export function shouldRetainSourceBlob(channel: DecodeChannel): boolean {
 }
 
 /**
+ * Environment inputs for {@link resolveIngestDecision} — runtime capabilities
+ * probed OUTSIDE this function (the decision stays a synchronous pure function
+ * of `{metadata, env}`).
+ */
+export interface IngestEnvironment {
+  /**
+   * HEVC hardware-decode capability for THIS file's profile (rev5 §10.3 —
+   * probe entry picked by hvcC profile_idc, injected by `FileService.decode`
+   * after awaiting the one-shot HEVC capability probe (`handlers/heic/capability.ts`)). Omitted/`false` =
+   * declarative proxy downgrade (rule 19e); `true` admits rule 19a's
+   * `webcodecs-heic` route.
+   */
+  readonly hevcHardDecode?: boolean;
+}
+
+/**
  * Resolve the complete ingest decision for one decoded file's metadata.
  *
  * This is the single call point, implemented as a declarative three-stage
  * pipeline:
- *   1. Pre-process — physical clamping (AVIF >8-bit degrades to 8-bit).
+ *   1. Pre-process — physical clamping (AVIF >8-bit degrades to 8-bit) and the
+ *      capability context assembly (HEIC `hevcHardDecode`, §10.3).
  *   2. Rule match — first-match-wins over `INGEST_DECISION_RULES`
  *      (`engine/rules.ts`).
  *   3. Post-process — assemble the authoritative `IngestDecision` (apply
@@ -203,7 +220,7 @@ export function shouldRetainSourceBlob(channel: DecodeChannel): boolean {
  * terminus (matrix row 26) carries no `dataFormat`: it produces no pixels, so
  * the execution layer throws rather than fabricating a phantom high-depth buffer.
  */
-export function resolveIngestDecision(metadata: ImageMetadata): IngestDecision {
+export function resolveIngestDecision(metadata: ImageMetadata, env?: IngestEnvironment): IngestDecision {
   const {
     sourceFormat: format,
     bitDepth: rawBitDepth,
@@ -212,10 +229,11 @@ export function resolveIngestDecision(metadata: ImageMetadata): IngestDecision {
     isMultiFrame = false,
   } = metadata;
 
-  // 1. Pre-process: physical constraints and clamping.
-  //    AVIF lacks a stable >8-bit decoder (browser passes 8-bit directly; vips-heif
-  //    high-depth path is disabled due to shared singleton OOM hazards), clamped to 8-bit uniformly.
-  const bitDepth = format === 'avif' ? Math.min(rawBitDepth, 8) : rawBitDepth;
+  // 1. Pre-process: physical constraints. The old AVIF >8→8-bit clamp is gone
+  //    (2026-10-13): the isolated jsquash/libavif wasm decoder is bit-exact at
+  //    native depth (gpex-cloud/probes/avif), so high depth routes to the
+  //    avif-proxy channel with the true depth declared — no clamping anywhere.
+  const bitDepth = rawBitDepth;
 
   // 2. Rule Match: first-match-wins over the decision table.
   const ctx: NormalizedMatchContext = {
@@ -223,6 +241,7 @@ export function resolveIngestDecision(metadata: ImageMetadata): IngestDecision {
     bitDepth,
     colorSpace: detectedColorSpace,
     isMultiFrame,
+    hevcHardDecode: env?.hevcHardDecode ?? false,
   };
   const matched = matchRule(INGEST_DECISION_RULES, ctx);
   const { action } = matched;

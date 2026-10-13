@@ -159,7 +159,7 @@ Plugins can be packaged and installed at runtime via ZIP upload through the Plug
 | State | Immer + custom store (dual-track fast/slow, volatile refs) |
 | Styling | Tailwind CSS v4 |
 | AI/ML | ONNX Runtime Web · transformers.js |
-| Formats | wasm-vips · LibRaw-Wasm · resvg-js · ghostpdl-wasm · gifenc |
+| Formats | wasm-vips · LibRaw-Wasm · resvg-js · ghostpdl-wasm · libheif · @jsquash/avif · gifenc · gifuct-js |
 | Animation | Framer Motion · GSAP |
 | Cloud (optional) | Cloudflare R2 + D1 + Workers |
 
@@ -193,11 +193,14 @@ Pre-compiled WASM/JS libraries in `public/ext/` handle client-side format proces
 
 | Library | Purpose | License |
 |---------|---------|---------|
-| wasm-vips | TIFF/AVIF codec, CMYK conversion | MIT / LGPL-3.0 |
+| wasm-vips | TIFF codec (8/16/32-bit, multi-page), CMYK conversion, high-precision decode | MIT / LGPL-3.0 |
 | LibRaw-Wasm | RAW decoding (CR2/NEF/ARW) | ISC |
+| libheif-js (libheif + libde265 wasm) | HEIC/HEIF proxy decode (10/12-bit sources & environments without HEVC hardware decode; 8-bit Apple photos use the browser's native WebCodecs — no bundled codec) | LGPL-3.0 |
+| @jsquash/avif (libavif + dav1d wasm) | AVIF encoding & high-depth decode (10/12-bit SDR / wide-gamut via the `avif-proxy` channel; 8-bit SDR uses the browser's native decoder — exact-pinned, see 07 spec §12.5) | Apache-2.0 |
 | resvg-js | SVG rasterization | MPL-2.0 |
 | ghostpdl-wasm | PostScript/PDF processing | AGPL-3.0 |
-| heic-to | HEIC/HEIF decoding | GPL-3.0 |
+| exifreader | Semantic metadata extraction (camera / GPS / DPI); ISOBMFF container structure (AVIF/HEIC bit depth, alpha, color, orientation) is parsed in-house | MPL-2.0 |
+| piexifjs | JPEG/WebP EXIF injection | MIT |
 | gifenc | GIF multi-frame encoding | MIT |
 | gifuct-js | GIF decoding | MIT |
 | polygon-clipping | Polygon boolean operations | MPL-2.0 |

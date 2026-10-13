@@ -10,10 +10,13 @@
  */
 
 /**
- * @jsquash/avif Worker — Encode RGBA → AVIF off main thread.
+ * @jsquash/avif Worker client — Encode RGBA → AVIF AND decode AVIF → raw
+ * pixels, off main thread, in one dedicated crash-isolated Worker.
  *
- * Uses a static Worker at /ext/wasm/avif/avif-worker.js.
- * ST encoder (avif_enc.js), ALLOW_MEMORY_GROWTH, crash-isolated from vips.
+ * Static Worker at /ext/wasm/avif/avif-worker.js (source:
+ * core/files/workers/avif-worker.js, synced by postinstall-exts.mjs).
+ * ST encoder (avif_enc.js) + libavif decoder (avif_dec.js), both
+ * ALLOW_MEMORY_GROWTH, crash-isolated from the shared vips singleton.
  */
 
 let _avifWorker: Worker | null = null;
@@ -62,5 +65,59 @@ export async function encodeAvifJsquash(
     const copy = new Uint8Array(rgbaData.byteLength);
     copy.set(new Uint8Array(rgbaData.buffer, rgbaData.byteOffset, rgbaData.byteLength));
     worker.postMessage({ id, rgbaData: copy, width, height, options }, [copy.buffer]);
+  });
+}
+
+export interface AvifDecodedNative {
+  /** RGBA pixels at NATIVE depth (0..2^bitDepth−1, probe-calibrated — NOT ×64). */
+  pixels: Uint16Array | Uint8ClampedArray;
+  width: number;
+  height: number;
+  isU16: boolean;
+  bitDepth: number;
+}
+
+/**
+ * Decode AVIF → raw RGBA at the requested bit depth via the shared codec
+ * Worker. `bitDepth` 10/12 returns native-scale `Uint16Array`; 8 returns an
+ * ImageData-shaped 8-bit buffer. The worker keeps the decoder module warm
+ * after the first call (cold first-decode is ~5× steady-state — probe B6).
+ */
+export async function decodeAvifJsquash(
+  avifBytes: ArrayBuffer,
+  bitDepth: 8 | 10 | 12 | 16 = 8,
+): Promise<AvifDecodedNative> {
+  const worker = getAvifWorker();
+  const id = ++_avifReqId;
+
+  return new Promise<AvifDecodedNative>((resolve, reject) => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.data.id !== id) return;
+      worker.removeEventListener('message', onMessage);
+      worker.removeEventListener('error', onError);
+      if (e.data.error) {
+        reject(new Error(e.data.error));
+      } else {
+        resolve({
+          pixels: e.data.pixels,
+          width: e.data.width,
+          height: e.data.height,
+          isU16: e.data.isU16,
+          bitDepth: e.data.bitDepth,
+        });
+      }
+    };
+    const onError = (e: ErrorEvent) => {
+      worker.removeEventListener('message', onMessage);
+      worker.removeEventListener('error', onError);
+      reject(new Error(`[AvifWorker] ${e.message || 'Unknown error'}`));
+    };
+
+    worker.addEventListener('message', onMessage);
+    worker.addEventListener('error', onError);
+
+    // copy: the caller's buffer may be the File's — never detach it
+    const copy = avifBytes.slice(0);
+    worker.postMessage({ id, op: 'decode', avifBytes: copy, bitDepth }, [copy]);
   });
 }

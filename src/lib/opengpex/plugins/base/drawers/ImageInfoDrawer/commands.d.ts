@@ -8,10 +8,12 @@
  */
 
 import type { CommandInstance } from '@opengpex/editor/core/types';
+import type { ExportFormat } from './protocols';
 
 /** Type map for usePluginCommands<ImageInfoDrawerCommandsMap>() */
 export interface ImageInfoDrawerCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
-  downloadCmd: CommandInstance<void, Promise<void>>;
+  downloadCmd: CommandInstance<{ format?: ExportFormat } | void, Promise<void>>;
+  downloadOriginalCmd: CommandInstance<void, Promise<void>>;
   applyResizeCmd: CommandInstance<void, Promise<void>>;
 }

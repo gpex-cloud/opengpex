@@ -72,6 +72,13 @@ async function resolveAndDecode(
   try {
     decoded = await files.decode(file, decodeOptions);
   } catch (err) {
+    // Declared ingest termini (row 26 / 19d / 18 — HDR, animation, sub-8-bit)
+    // are decisions, not failures: show the precise reason, keep the console
+    // free of a failure stack.
+    if (err instanceof UnsupportedIngestError) {
+      actions.notifyHUD(err.message, 'error');
+      return null;
+    }
     console.error(`[FrameCreate] File decode failed:`, err);
     actions.notifyHUD(`Failed to process file. The format may not be supported.`, 'error');
     return null;
@@ -84,6 +91,7 @@ async function resolveAndDecode(
 // createFrameFromFile — Unified "File → Frame" pipeline
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { UnsupportedIngestError } from '@opengpex/editor/core/files';
 import { importSingleImage, revertSingleImage } from './single';
 import { importAnimatedGif } from './multi-gif';
 import { importMultiPageTiff, revertMultiPageTiffGroup } from './multi-tiff';

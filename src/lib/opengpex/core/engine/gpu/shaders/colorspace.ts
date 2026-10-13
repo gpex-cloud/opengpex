@@ -63,12 +63,12 @@
  */
 
 import type { GamutId } from '@opengpex/editor/core/types/primitives';
+import { deriveMatrix64 } from '@opengpex/editor/core/engine/color/gamut';
 import {
-  deriveMatrix64,
-  deriveMatrixBetween,
-  GAMUT_PRIMARIES,
-  type GamutPrimaries,
-} from '@opengpex/editor/core/engine/color/gamut';
+  FILMIC_KNEE_GAIN,
+  FILMIC_LUMA_WEIGHTS,
+  FILMIC_PIVOT,
+} from '@opengpex/editor/core/engine/color/filmic';
 
 /**
  * Format an f64 matrix element as a fixed 7-decimal WGSL literal, collapsing the
@@ -99,23 +99,6 @@ function wgslMat(m: readonly number[]): string {
 function wgslMatToP3(from: GamutId): string {
   return wgslMat(deriveMatrix64(from, 'display-p3'));
 }
-
-/**
- * ACEScg (AP1) primaries — SMPTE ST 2065-4 / ACES, white ≈ D60. This is NOT a
- * source {@link GamutId} (never an ingest gamut), so it deliberately lives here and
- * NOT in the global `GAMUT_PRIMARIES` registry: it exists only as the wide internal
- * working space the Filmic RRT+ODT curve runs in (see `tone_map_filmic`).
- */
-const ACESCG_AP1: GamutPrimaries = {
-  R: [0.713, 0.293],
-  G: [0.165, 0.830],
-  B: [0.128, 0.044],
-  white: [0.32168, 0.33767],
-};
-
-/** Display-P3 (D65) ⇄ ACEScg (AP1, D60) — derived with Bradford adaptation. */
-const MAT_P3_TO_AP1_64 = deriveMatrixBetween(GAMUT_PRIMARIES['display-p3'], ACESCG_AP1);
-const MAT_AP1_TO_P3_64 = deriveMatrixBetween(ACESCG_AP1, GAMUT_PRIMARIES['display-p3']);
 
 /**
  * WGSL: `srgb_to_linear` / `linear_to_srgb` for scalars and vec3.
@@ -202,61 +185,54 @@ fn gamut_to_working(c : vec3<f32>, gamut_id : u32) -> vec3<f32> {
 // (render-intent = 1).
 //
 // Scene-linear RAW is a raw energy read-out with no baked look, so shown flat it
-// reads washed-out and grey. This is the generic S-curve that supplies the
-// midtone contrast + highlight roll-off a camera/Lightroom would otherwise bake
-// in — the baseline strategy applied to every featureless RAW without
+// reads washed-out and grey. This is the generic display transform that supplies
+// the exposure placement + highlight shoulder a camera/Lightroom would otherwise
+// bake in — the baseline strategy applied to every featureless RAW without
 // parsing a vendor curve.
 //
-// OPERATOR: Stephen Hill's "ACES Fitted" RRT+ODT rational (BakingLab), run PER
-// CHANNEL in ACEScg (AP1). Chosen over the earlier Narkowicz 2015 fit for ONE
-// decisive reason:
+// OPERATOR (see core/engine/color/filmic.ts for the full rationale + probe
+// evidence): the pixel's LUMA runs through a LINEAR KNEE — identity below
+// FILMIC_PIVOT, constant stretch above it so the anchored scene white lands
+// exactly on display white — and the whole RGB triple is scaled by that ONE
+// gain. Exposure placement is handled at decode time (median→0.18 anchor baked
+// into the f16 line); this operator owns only the knee, which is why its
+// constants are scene-independent.
 //
-//   ⚠️ OUTPUT DOMAIN — Narkowicz's fit approximates ACES RRT+ODT(sRGB) and so
-//   emits DISPLAY-ENCODED (sRGB-gamma) values. Our working buffer is LINEAR light
-//   and the terminal stage (view.ts / exportEncode.ts) unconditionally applies
-//   linear_to_srgb. Writing Narkowicz's gamma-encoded output into that linear
-//   buffer therefore DOUBLE-encodes (≈ x^(1/4.84)): midtones balloon (0.18 → ~0.55
-//   displayed instead of ~0.27) and colour desaturates — the "washed-out & bright"
-//   bug. Hill's RRTAndODTFit instead outputs LINEAR display-referred values, so the
-//   single terminal OETF is exactly right and the double-gamma is gone.
+// ⚠️ WHY A SCALAR GAIN AND NOT A PER-CHANNEL CURVE: the first device build
+// evaluated the knee per channel (in AP1, ACES-style) — with a 4.8× stretch
+// the channels cross the pivot at different tones and the hue skews with
+// brightness (measured: violet zenith, teal horizon). A uniform gain preserves
+// chromaticity exactly; highlights desaturate toward white together instead.
+// (This also retires the P3⇄AP1 fold: it existed to rescue per-channel hue,
+// which a scalar gain no longer needs.)
 //
-// WHY AP1, NOT the working Display-P3 directly: the curve is per-channel, and ACES'
-// signature highlight desaturation ("hue-preserving" roll-off) comes from evaluating
-// it in a WIDE gamut. AP1 is wider than P3, so bright saturated RAW highlights roll
-// toward white gracefully instead of clipping a channel and skewing hue. We fold
-// P3 → AP1 (Bradford D65→D60) before the curve and AP1 → P3 after; both matrices are
-// DERIVED from primaries via the same colorimetry as every other gamut matrix here.
-// NOTE: the small ACES RRT_SAT/ODT_SAT global saturation tweaks are intentionally
-// omitted (the wide-gamut per-channel curve already supplies the primary look).
-//
-// ⚠️ CONSTRAINT B: this is HIGHLY NON-LINEAR — it MUST be fed STRAIGHT
-// (un-premultiplied) values. Applied to premultiplied RGB (c·α) it crushes
-// semi-transparent edges to black. The caller (normalize_source_components)
-// owns that un-premultiply/re-premultiply dance; this operator assumes straight.
+// ⚠️ CONSTRAINT B: this is NON-LINEAR — it MUST be fed STRAIGHT
+// (un-premultiplied) values. Applied to premultiplied RGB (c·α) it distorts
+// semi-transparent edges. The caller (normalize_source_components) owns that
+// un-premultiply/re-premultiply dance; this operator assumes straight.
 // ────────────────────────────────────────────────────────────
 
-const MAT_P3_TO_AP1 = ${wgslMat(MAT_P3_TO_AP1_64)};
+const FILMIC_PIVOT = ${wgslFloat(FILMIC_PIVOT)};
 
-const MAT_AP1_TO_P3 = ${wgslMat(MAT_AP1_TO_P3_64)};
+const FILMIC_KNEE_GAIN = ${wgslFloat(FILMIC_KNEE_GAIN)};
 
-// Stephen Hill's RRT+ODT rational fit, evaluated per channel in ACEScg (AP1).
-// Outputs LINEAR display-referred light. Coefficients are the canonical BakingLab
-// values (a golden test parses them back out and re-derives the curve).
-fn rrt_odt_fit(v : vec3<f32>) -> vec3<f32> {
-  let a = v * (v + 0.0245786) - 0.000090537;
-  let b = v * (0.983729 * v + 0.432951) + 0.238081;
-  return a / b;
-}
+const FILMIC_LUMA_WEIGHTS = vec3<f32>(${wgslFloat(FILMIC_LUMA_WEIGHTS[0])}, ${wgslFloat(FILMIC_LUMA_WEIGHTS[1])}, ${wgslFloat(FILMIC_LUMA_WEIGHTS[2])});
 
-// Generic Filmic S-curve — ACES "Fitted" (Hill), LINEAR-light in, LINEAR-light out.
-// Fold working Display-P3 → AP1, apply the per-channel RRT+ODT fit, fold back to
-// Display-P3. Negatives are floored before the fold; the final clamp guards the
-// tiny overshoot the rational form and the AP1→P3 fold can produce at the extremes.
+// Generic Filmic display transform — LINEAR-light in, LINEAR-light out.
+// The knee runs on the pixel luma; the scalar gain k/luma scales the whole
+// pixel (identity below the pivot, chromaticity-preserving stretch above).
+// luma=0 → k=0 → gain 0 → black stays black; channels over 1 after the gain
+// are specular saturation and clamp.
 fn tone_map_filmic(c : vec3<f32>) -> vec3<f32> {
-  let ap1 = MAT_P3_TO_AP1 * max(c, vec3<f32>(0.0));
-  let mapped = rrt_odt_fit(ap1);
+  let luma = dot(c, FILMIC_LUMA_WEIGHTS);
+  let knee = select(
+    luma,
+    min(1.0, FILMIC_PIVOT + (luma - FILMIC_PIVOT) * FILMIC_KNEE_GAIN),
+    luma > FILMIC_PIVOT,
+  );
+  let gain = knee / max(luma, 1e-6);
   return clamp(
-    MAT_AP1_TO_P3 * mapped,
+    c * gain,
     vec3<f32>(0.0),
     vec3<f32>(1.0),
   );
