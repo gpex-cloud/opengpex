@@ -33,10 +33,21 @@
  *      GPU's own YUV→RGB. Verified faithful (meanDev 1.15 vs libheif on the
  *      12MP truth sample). Works around Chromium builds whose plane-index
  *      copyTo is broken for hardware frames (planeIndex ignored → every plane
- *      returns the Y plane → green/magenta cast; diagnosed 2026-10-13).
- *   2. Per-plane copy + fixed-point YUV→RGB ({@link yuvTileToRgba}) — the
- *      probe-validated lane for builds without conversion-copy support
- *      (real Chrome 152). NV12/I420, bilinear chroma, integer-only math.
+ *      returns the Y plane → green/magenta cast; diagnosed 2026-10-13). Only
+ *      taken when the format option PROVES support via the allocation-size
+ *      signature ({@link decideExtractionLane}) — Safari silently drops the
+ *      unknown dictionary member, hands out native NV12 bytes, and an RGBA
+ *      read of those was exactly the gray/magenta/black stripe corruption
+ *      diagnosed 2026-10-14.
+ *   2. Full-frame copy + fixed-point YUV→RGB ({@link yuvTileToRgba}) — the
+ *      fallback lane for builds without conversion-copy support (real Chrome
+ *      152 throws; Safari's dropped option fails the size signature). ONE
+ *      no-options copyTo (the spec's full-frame native copy — planeIndex
+ *      copies are broken on every diagnosed implementation: Safari 26 and
+ *      embedded Chromium ignore the index and return the full frame, which
+ *      read as chroma-from-luma → global magenta/green hue corruption,
+ *      diagnosed 2026-10-14) sliced contiguously by {@link sliceNativePlanes}.
+ *      NV12/I420, bilinear chroma, integer-only math.
  *
  * Orientation contract: the composed (stored-space) image is uprighted by ONE
  * inverse-mapped scatter pass during tile placement — never per-tile rotation.
@@ -367,6 +378,72 @@ function scatterTile(tileRgba, w, h, tile, tileW, tileH, composedW, composedH, p
   }
 }
 
+/**
+ * Decide the tile-extraction lane from the FIRST decoded frame (the answer is
+ * per-implementation, not per-frame).
+ *
+ * The RGBA conversion copy (`copyTo(buf, { format: 'RGBA' })`) is trusted only
+ * when the format option PROVABLY works, which the allocation-size signature
+ * proves: a real conversion allocates a tight w·h·4 buffer — strictly larger
+ * than the native allocation (NV12/I420 are 1.5 bytes/px; row padding never
+ * approaches the 2.67× width it would take to close that gap). A bare
+ * try/catch around `allocationSize({ format: 'RGBA' })` is NOT a probe:
+ * implementations whose VideoFrameCopyToOptions predates the conversion-copy
+ * spec (Safari) silently DROP the unknown dictionary member per WebIDL rules,
+ * report the NATIVE size, and copy native NV12 bytes that — wrapped as RGBA —
+ * render as the gray (Y-plane) / magenta-green (UV-plane) / black
+ * (out-of-bounds) stripe corruption diagnosed on Safari 2026-10-14. Size
+ * mismatch ⇒ planes lane; a throwing call (Chrome builds without conversion
+ * support) ⇒ planes lane.
+ */
+function decideExtractionLane(frame) {
+  const fmt = frame.format;
+  if (fmt !== 'NV12' && fmt !== 'I420' && fmt !== 'RGBA') return 'planes';
+  const w = frame.displayWidth || frame.codedWidth;
+  const h = frame.displayHeight || frame.codedHeight;
+  if (!w || !h) return 'planes';
+  try {
+    const rgbaSize = frame.allocationSize({ format: 'RGBA' });
+    if (rgbaSize !== w * h * 4) return 'planes'; // strided or native-sized output — don't trust it
+    if (fmt === 'RGBA') return 'rgba-copy'; // native RGBA: a tight plain copy already is RGBA
+    return rgbaSize > frame.allocationSize() ? 'rgba-copy' : 'planes';
+  } catch {
+    return 'planes';
+  }
+}
+
+/**
+ * Slice one full-frame native copy into its planes. copyTo() with NO options
+ * is the spec's full-frame copy in the native layout, laid out contiguously:
+ * Y rows at the luma stride, then chroma. NV12: interleaved UV at yStride·h
+ * (chroma byte stride = luma byte stride — probe-verified on both engines).
+ * I420: U then V quarter planes, chroma strides detected from their own
+ * regions.
+ */
+function sliceNativePlanes(fmt, buf, w, h, allocSize) {
+  const yStride = detectPlaneStride(buf, w, h, allocSize);
+  const chromaRows = (h + 1) >> 1;
+  if (fmt === 'NV12') {
+    const uvStart = yStride * h;
+    return {
+      y: buf.subarray(0, uvStart), yStride,
+      uv: buf.subarray(uvStart), uvStride: yStride,
+      u: null, uStride: 0, v: null, vStride: 0,
+    };
+  }
+  const uStart = yStride * h;
+  const uRegion = buf.subarray(uStart);
+  const uStride = detectPlaneStride(uRegion, w >> 1, chromaRows, uRegion.byteLength);
+  const vStart = uStart + uStride * chromaRows;
+  const vRegion = buf.subarray(vStart);
+  const vStride = detectPlaneStride(vRegion, w >> 1, chromaRows, vRegion.byteLength);
+  return {
+    y: buf.subarray(0, uStart), yStride,
+    uv: null, uvStride: 0,
+    u: uRegion, uStride, v: vRegion, vStride,
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // decodeHard — pipeline
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -453,12 +530,7 @@ async function decodeHard(payload) {
         let tileRgba;
 
         if (extractionMode === null) {
-          try {
-            frame.allocationSize({ format: 'RGBA' });
-            extractionMode = 'rgba-copy';
-          } catch {
-            extractionMode = 'planes';
-          }
+          extractionMode = decideExtractionLane(frame);
         }
 
         if (extractionMode === 'rgba-copy') {
@@ -469,9 +541,15 @@ async function decodeHard(payload) {
           await frame.copyTo(buf, { format: 'RGBA' });
           tileRgba = new Uint8ClampedArray(buf.buffer, buf.byteOffset, buf.byteLength);
         } else {
-          // Per-plane lane (probe-validated on real Chrome 152). copyTo is
-          // ASYNC — always await, and finish before frame.close() below
-          // (close cancels in-flight copies → zero chroma).
+          // Full-frame lane (the planeIndex copies this lane used before are
+          // BROKEN on every diagnosed implementation: Safari 26 and embedded
+          // Chromium ignore planeIndex and return the FULL native frame for
+          // every index — probe 2026-10-14: three identical 393216-byte
+          // planes → chroma reads sampled Y bytes → global magenta/green hue
+          // corruption with perfect luma). copyTo() with NO options is the
+          // spec's full-frame native-layout copy and is reliable everywhere;
+          // slice the contiguous NV12/I420 layout from it. Truth: meanDev
+          // 1.41 (Chromium) / 7.74 (Safari, nearest-sample) vs ref-apple.
           const fmt = frame.format;
           if (fmt !== 'NV12' && fmt !== 'I420') {
             // 19a is 8-bit only; an opaque GPU frame here means the capability
@@ -479,42 +557,11 @@ async function decodeHard(payload) {
             // fallback.
             throw new Error(`unexpected VideoFrame format: ${String(fmt)} (opaque GPU frame?)`);
           }
-          const yAlloc = frame.allocationSize({ planeIndex: 0 });
-          const yBuf = new Uint8Array(yAlloc);
-          await frame.copyTo(yBuf, { planeIndex: 0 });
-          const yStride = detectPlaneStride(yBuf, w, h, yAlloc);
-
-          // Chroma planes share the LUMA byte stride in every observed decoder
-          // layout; probing them with texel-width gives a wrong pitch.
-          const chromaRows = (h + 1) >> 1;
-          let uv = null;
-          let uvStride = 0;
-          let u = null;
-          let uStride = 0;
-          let v = null;
-          let vStride = 0;
-          if (fmt === 'NV12') {
-            const alloc = frame.allocationSize({ planeIndex: 1 });
-            uv = new Uint8Array(alloc);
-            await frame.copyTo(uv, { planeIndex: 1 });
-            uvStride = alloc >= yStride * chromaRows
-              ? yStride
-              : detectPlaneStride(uv, w, chromaRows, alloc);
-          } else {
-            const uAlloc = frame.allocationSize({ planeIndex: 1 });
-            u = new Uint8Array(uAlloc);
-            await frame.copyTo(u, { planeIndex: 1 });
-            uStride = uAlloc >= yStride * chromaRows
-              ? yStride
-              : detectPlaneStride(u, (w + 1) >> 1, chromaRows, uAlloc);
-            const vAlloc = frame.allocationSize({ planeIndex: 2 });
-            v = new Uint8Array(vAlloc);
-            await frame.copyTo(v, { planeIndex: 2 });
-            vStride = vAlloc >= yStride * chromaRows
-              ? yStride
-              : detectPlaneStride(v, (w + 1) >> 1, chromaRows, vAlloc);
-          }
-          tileRgba = yuvTileToRgba(fmt, yBuf, yStride, u, uStride, v, vStride, uv, uvStride, w, h, coeffs);
+          const nativeSize = frame.allocationSize();
+          const buf = new Uint8Array(nativeSize);
+          await frame.copyTo(buf); // NO options — full frame, native layout
+          const sl = sliceNativePlanes(fmt, buf, w, h, nativeSize);
+          tileRgba = yuvTileToRgba(fmt, sl.y, sl.yStride, sl.u, sl.uStride, sl.v, sl.vStride, sl.uv, sl.uvStride, w, h, coeffs);
         }
         convertMs += performance.now() - tConvert;
 

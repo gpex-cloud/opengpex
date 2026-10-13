@@ -87,6 +87,10 @@ export const LandingPage = () => {
 
   // Pre-check hero image existence to avoid 404 in network/console
   const [heroSrc, setHeroSrc] = useState<string | null>(null);
+  // Only paint a REAL image (the placeholder slot may hold a blank 1×1 while
+  // no screenshot has been dropped in yet — painting that is what turned into
+  // Safari's black box).
+  const [heroIsReal, setHeroIsReal] = useState(false);
   useEffect(() => {
     let cancelled = false;
     fetch("/welcomed.webp", { method: "HEAD" })
@@ -155,9 +159,11 @@ export const LandingPage = () => {
       </div>
 
       {/* Right: Hero image with blend mode + fade-in animation.
-          Only rendered if a valid image source was detected (avoids 404). */}
-      {heroSrc && (
-        <div className="hidden dark:lg:block flex-1 max-w-[640px] relative -mt-12 animate-[fadeInScale_1s_ease-out_0.3s_both]">
+          Only rendered when the file exists AND decoded to a real image —
+          a blank/black placeholder must never paint (Safari renders that as
+          an opaque box when the blend below is dropped). */}
+      {heroSrc && heroIsReal && (
+        <div className="hidden dark:lg:block flex-1 max-w-[640px] relative -mt-12 animate-[fadeInScale_1s_ease-out_0.3s_backwards]">
           {/* Ambient glow behind (static — no animation, just soft backdrop) */}
           <div
             className="absolute inset-[-20%] -z-10"
@@ -171,12 +177,22 @@ export const LandingPage = () => {
 
           {/* The image: mix-blend-mode screen makes black → transparent.
               Static after fadeIn — no floating animation for stability.
-              Bottom + right edges fade to transparent via composite mask. */}
+              Bottom + right edges fade to transparent via composite mask.
+              SAFARI CONSTRAINT: keep this element free of `filter` — the
+              WebKit 26.x regression (mix-blend-mode + filter on one element,
+              cf. webkit bugs / home-assistant#29866) silently DROPS the blend
+              and paints the image opaque. The former contrast/brightness
+              boost was removed for exactly that; do not re-add it here. */}
           <img
             src={heroSrc}
             alt=""
             className="w-full aspect-[3/4] object-cover"
             draggable={false}
+            onLoad={(e) => {
+              const img = e.currentTarget;
+              setHeroIsReal(img.naturalWidth > 2 && img.naturalHeight > 2);
+            }}
+            onError={() => setHeroIsReal(false)}
             style={{
               mixBlendMode: "screen",
               maskImage:
@@ -185,7 +201,6 @@ export const LandingPage = () => {
                 "linear-gradient(to bottom, black 0%, black 60%, transparent 100%), linear-gradient(to left, transparent 0%, black 15%, black 100%)",
               maskComposite: "intersect",
               WebkitMaskComposite: "destination-in" as string,
-              filter: "contrast(1.1) brightness(1.05)",
             }}
           />
         </div>

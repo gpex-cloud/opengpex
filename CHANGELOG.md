@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.9
+
+- Image Formats: fixed color distortion when opening HEIC/HEIF photos across different browsers
+- Workspace: resolved display glitches and dark mode appearance on the welcome screen for Safari
+
+---
+
 ## v2.0.8
 
 - Adjustments: real-time histogram previews for Curves and Levels, updating dynamically as you tweak tone sliders and curve control points

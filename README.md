@@ -11,7 +11,7 @@
 
 <!-- ═══════════ Badges ═══════════ -->
 <p align="center">
-  <img src="https://img.shields.io/github/package-json/v/gpex-cloud/opengpex/v2-webgpu?style=flat-square&label=version&color=blue" alt="Version" />
+  <img src="https://img.shields.io/github/package-json/v/gpex-cloud/opengpex?style=flat-square&label=version&color=blue" alt="Version" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green?style=flat-square" alt="License" /></a>
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs Welcome" />
   <img src="https://img.shields.io/badge/rendering-WebGPU-blueviolet?style=flat-square" alt="WebGPU" />
@@ -56,7 +56,7 @@ OpenGPEX runs entirely in the browser — no server-side processing is involved 
 │    ├─ Document model: edits are metadata — the source layer is              │
 │    │  never modified; every operation is reversible                         │
 │    ├─ State: Immer store with dual-track (fast/slow) updates                │
-│    │  and volatile refs for 60 FPS interaction paths                        │
+│    │  and volatile refs for high-frequency interaction paths                │
 │    └─ Rendering: WebGPU render graph · tiled compositing ·                  │
 │       OffscreenCanvas + Web Workers · isomorphic painter                    │
 │                                                                             │
@@ -78,7 +78,7 @@ Key properties:
 - **Layers** — multi-layer compositing, 16 blend modes, opacity/fill/lock/visibility
 - **Brush & Eraser** — Catmull-Rom spline smoothing, adjustable size/opacity/hardness, stamp-based rendering
 - **Non-destructive eraser** — erasing paints a mask instead of destroying pixels; Tab toggles Restore
-- **Text** — inline contenteditable editing with full IME (CJK) support, Google Fonts search, local font access
+- **Text** — inline contenteditable editing with IME (CJK) support, Google Fonts search, local font access
 - **Transform** — move, scale (proportional/free), 8-direction handles
 
 ### Color & Adjustments (5-tab panel)
@@ -101,12 +101,12 @@ Key properties:
 - **ComfyUI Bridge** — connect local/remote ComfyUI for custom workflows
 - **LLM Image Bridge** — OpenAI-compatible API for text-to-image and editing
 
-Models are downloaded on demand from HuggingFace and cached locally; nothing is bundled and no image data leaves the device.
+Models are downloaded on demand from HuggingFace and cached locally; nothing is bundled, and the built-in tools never send image data off your device.
 
 ### Documents & Export
 - **Creation/Branch model** — trunk/branch hierarchy for AI multi-results and derived images
 - **TabDock** — floating document dock with thumbnails and branch badges
-- **Animated images** — multi-frame GIF/APNG import, playback, re-export
+- **Animated images** — animated GIF import, playback, re-export
 - **Export** — JPEG, PNG, WebP, AVIF, TIFF (8/16/32-bit), animated GIF, BMP; quality/DPI/ICC/EXIF control
 
 ## Quick Start
@@ -196,7 +196,7 @@ Pre-compiled WASM/JS libraries in `public/ext/` handle client-side format proces
 | wasm-vips | TIFF codec (8/16/32-bit, multi-page), CMYK conversion, high-precision decode | MIT / LGPL-3.0 |
 | LibRaw-Wasm | RAW decoding (CR2/NEF/ARW) | ISC |
 | libheif-js (libheif + libde265 wasm) | HEIC/HEIF proxy decode (10/12-bit sources & environments without HEVC hardware decode; 8-bit Apple photos use the browser's native WebCodecs — no bundled codec) | LGPL-3.0 |
-| @jsquash/avif (libavif + dav1d wasm) | AVIF encoding & high-depth decode (10/12-bit SDR / wide-gamut via the `avif-proxy` channel; 8-bit SDR uses the browser's native decoder — exact-pinned, see 07 spec §12.5) | Apache-2.0 |
+| @jsquash/avif (libavif + dav1d wasm) | AVIF encoding & high-depth decode (10/12-bit SDR / wide-gamut via the `avif-proxy` channel; 8-bit SDR uses the browser's native decoder — exact-pinned) | Apache-2.0 |
 | resvg-js | SVG rasterization | MPL-2.0 |
 | ghostpdl-wasm | PostScript/PDF processing | AGPL-3.0 |
 | exifreader | Semantic metadata extraction (camera / GPS / DPI); ISOBMFF container structure (AVIF/HEIC bit depth, alpha, color, orientation) is parsed in-house | MPL-2.0 |
