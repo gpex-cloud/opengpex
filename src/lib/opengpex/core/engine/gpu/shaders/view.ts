@@ -43,10 +43,30 @@
  *     `fs_main` covers grayscale/alpha/two-channel colour; the identity (all
  *     RGB on) path is byte-identical to the old 1:1 blit present.
  *
+ * DISPLAY PROJECTION
+ * ------------------
+ * The composited texture is linear light in `WORKING_GAMUT` (ProPhoto RGB — a
+ * superset of every display), but the swapchain is pinned to
+ * `colorSpace:'display-p3'` (`GpuDevice.configureSurface`). Before the terminal
+ * TRC encode, `fs_main` therefore PROJECTS W → display-p3 (build-time matrix,
+ * Bradford-adapted for the D50→D65 white shift) and clamps to [0,1] — the
+ * soft-proof step that turns the screen into a window onto W. The projection is
+ * INLINED here on purpose: a separate projection pass would add a full-screen
+ * read+write for ~12 ALU ops of work. With W = display-p3 the matrix degenerates
+ * to identity and the pass is byte-identical to the pre-projection present.
+ *
  * @module core/gpu/shaders/view
  */
 
-import { COLORSPACE_WGSL } from './colorspace';
+import { COLORSPACE_WGSL, wgslMat } from './colorspace';
+import { deriveMatrix64, WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
+
+/**
+ * The swapchain is ALWAYS display-p3 (`GpuDevice.configureSurface` pins it), so
+ * the projection target is a build-time constant — no uniform, no per-frame cost
+ * beyond the one 3×3 + clamp every presented pixel pays anyway.
+ */
+const MAT_WORKING_TO_DISPLAY = wgslMat(deriveMatrix64(WORKING_GAMUT, 'display-p3'));
 
 export const VIEW_WGSL = COLORSPACE_WGSL + /* wgsl */ `
 struct ViewUniforms {
@@ -59,6 +79,10 @@ struct ViewUniforms {
 @group(0) @binding(0) var<uniform> view_u : ViewUniforms;
 @group(0) @binding(1) var samp            : sampler;
 @group(0) @binding(2) var src_tex         : texture_2d<f32>;
+
+// WORKING_GAMUT → display-p3 projection (column-major, auto-derived — see the
+// module doc). Declared before fs_main, the only consumer.
+const MAT_WORKING_TO_DISPLAY = ${MAT_WORKING_TO_DISPLAY};
 
 struct VSInput {
   @location(0) pos : vec2<f32>,
@@ -83,13 +107,14 @@ fn vs_main(in : VSInput) -> VSOut {
 
 @fragment
 fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
-  // The composited texture is ALREADY premultiplied AND in LINEAR LIGHT (both
-  // compose paths store premultiplied linear rgba: layer.wgsl and blend.wgsl).
-  // The swapchain is 'premultiplied' alphaMode.
+  // The composited texture is ALREADY premultiplied AND in LINEAR LIGHT of the
+  // WORKING gamut (both compose paths store premultiplied linear rgba: layer.wgsl
+  // and blend.wgsl). The swapchain is 'premultiplied' alphaMode.
   //
-  // ── THE SINGLE TERMINAL TRC ENCODE ──
-  // This is the ONE place linear light becomes sRGB for display. Two rules make it
-  // correct and keep it unique:
+  // ── THE SINGLE TERMINAL ENCODE (projection + TRC) ──
+  // This is the ONE place working-gamut linear light becomes display-p3-encoded
+  // sRGB for screen: a W → display-p3 matrix projection (+ clamp, below) followed
+  // by the sRGB TRC. Two rules make it correct and keep it unique:
   //   1. ENCODE THE STRAIGHT VALUE: the right premultiplied result is
   //      encode(rgb/a)·a, NOT encode(rgb). Encoding the premultiplied value
   //      directly would shift the colour of every semi-transparent pixel.
@@ -135,11 +160,25 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   }
   let straight = color.rgb / color.a;
 
+  // ── THE DISPLAY PROJECTION (soft-proof, W → swapchain gamut) ──
+  // The composite is linear WORKING_GAMUT (ProPhoto) light; the swapchain is
+  // display-p3. Project in LINEAR light, then clamp to [0,1]: colours outside
+  // the display triangle (the whole point of a wide working gamut) clip to the
+  // display edge here, at the ONE presentation boundary — the composite buffer
+  // itself keeps the full W values. Clamp-before-encode (not after) so the TRC
+  // never sees a negative base. When W = display-p3 this matrix is identity and
+  // the clamp is a no-op on already-bounded values.
+  let display = clamp(
+    MAT_WORKING_TO_DISPLAY * straight,
+    vec3<f32>(0.0),
+    vec3<f32>(1.0),
+  );
+
   // Single-channel isolation: grayscale of the one enabled channel (TRC-encoded).
   if (rgb_count == 1u) {
-    var c = straight.r;
-    if (g_on) { c = straight.g; }
-    else if (b_on) { c = straight.b; }
+    var c = display.r;
+    if (g_on) { c = display.g; }
+    else if (b_on) { c = display.b; }
     let s = linear_to_srgb_channel(c);
     return vec4<f32>(s, s, s, 1.0);
   }
@@ -147,17 +186,17 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   // Two-channel colour mask: keep the enabled channels' colour, zero the other.
   if (rgb_count == 2u) {
     let masked = vec3<f32>(
-      select(0.0, straight.r, r_on),
-      select(0.0, straight.g, g_on),
-      select(0.0, straight.b, b_on),
+      select(0.0, display.r, r_on),
+      select(0.0, display.g, g_on),
+      select(0.0, display.b, b_on),
     );
     return vec4<f32>(linear_to_srgb(masked) * color.a, color.a);
   }
 
   // Full RGB (all three bits) or all-off safety: normal present. Un-premultiply →
-  // encode the STRAIGHT colour → re-premultiply (rule 1 above). This branch is
-  // byte-identical to the pre-isolation present path (identity).
-  return vec4<f32>(linear_to_srgb(straight) * color.a, color.a);
+  // project to the display gamut → encode the STRAIGHT colour → re-premultiply
+  // (rule 1 above).
+  return vec4<f32>(linear_to_srgb(display) * color.a, color.a);
 }
 `;
 

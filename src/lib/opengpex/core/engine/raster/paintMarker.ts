@@ -25,10 +25,17 @@
  * by the drag-preview overlay to mirror the on-canvas shape while a marker is being
  * drawn/resized.
  *
+ * Colors go out as CSS Color 4 `color()` values, never `.hex` — hex is the lossy
+ * clamp+quantize view, so a wide-gamut marker would preview visibly duller
+ * mid-drag and snap vivid on commit. Requires an engine that accepts `color()`
+ * in SVG presentation attributes (Chromium 111+, Safari 15+); older engines
+ * fall back to the initial fill (black).
+ *
  * @module core/raster/paintMarker
  */
 
 import type { MarkerData, RectMarkerData, ArrowMarkerData, EllipseMarkerData } from '@opengpex/editor/core/types';
+import { toCssColor4 } from '@opengpex/editor/core/engine/color';
 
 /** Minimal bounding contract — accepts both live Layer.bounding and descriptors. */
 export interface MarkerBounding {
@@ -65,14 +72,14 @@ function rectToSvg(data: RectMarkerData, bounding: MarkerBounding): string {
   if (w <= 0 || h <= 0) return '';
 
   const radius = clampRadius(data.cornerRadius, w, h);
-  const fill = data.fill.opacity > 0 ? data.fill.color.hex : 'none';
+  const fill = data.fill.opacity > 0 ? toCssColor4(data.fill.color) : 'none';
   const fillOpacity = data.fill.opacity > 0 ? data.fill.opacity : 0;
 
   return (
     `<rect x="${half}" y="${half}" width="${w}" height="${h}" ` +
     `rx="${radius}" ry="${radius}" ` +
     `fill="${fill}" fill-opacity="${fillOpacity}" ` +
-    `stroke="${data.stroke.color.hex}" stroke-width="${sw}" ` +
+    `stroke="${toCssColor4(data.stroke.color)}" stroke-width="${sw}" ` +
     `stroke-linejoin="miter" />`
   );
 }
@@ -103,9 +110,9 @@ function arrowToSvg(data: ArrowMarkerData): string {
 
   return (
     `<line x1="${tail.x}" y1="${tail.y}" x2="${shaftEndX}" y2="${shaftEndY}" ` +
-    `stroke="${data.stroke.color.hex}" stroke-width="${sw}" ` +
+    `stroke="${toCssColor4(data.stroke.color)}" stroke-width="${sw}" ` +
     `stroke-linecap="round" stroke-linejoin="round" />` +
-    `<polygon points="${p1} ${p2} ${p3}" fill="${data.stroke.color.hex}" />`
+    `<polygon points="${p1} ${p2} ${p3}" fill="${toCssColor4(data.stroke.color)}" />`
   );
 }
 
@@ -120,13 +127,13 @@ function ellipseToSvg(data: EllipseMarkerData, bounding: MarkerBounding): string
   const cy = half + h / 2;
   const rx = w / 2;
   const ry = h / 2;
-  const fill = data.fill.opacity > 0 ? data.fill.color.hex : 'none';
+  const fill = data.fill.opacity > 0 ? toCssColor4(data.fill.color) : 'none';
   const fillOpacity = data.fill.opacity > 0 ? data.fill.opacity : 0;
 
   return (
     `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" ` +
     `fill="${fill}" fill-opacity="${fillOpacity}" ` +
-    `stroke="${data.stroke.color.hex}" stroke-width="${sw}" />`
+    `stroke="${toCssColor4(data.stroke.color)}" stroke-width="${sw}" />`
   );
 }
 

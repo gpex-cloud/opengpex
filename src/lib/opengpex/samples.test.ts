@@ -13,7 +13,7 @@
  * OpenGPEX v2.0 Ingest & Egest Full Pipeline Automated Verification Suite.
  *
  * Data-Deterministic Acceptance Test Suite:
- * Directly tests the 21 physical sample image files generated under `opengpex_v2/samples/`,
+ * Directly tests the 32 physical sample image files generated under `opengpex_v2/samples/`,
  * executing real metadata extraction, ingest decision resolution, egest decision resolution,
  * pass-through fast-track gating, and container capability single-directional convergence.
  *
@@ -29,6 +29,7 @@ import {
   resolveIngestDecision,
   resolveEgestDecision,
 } from './core/files';
+import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color';
 import type { FileService } from './core/files/types';
 import type { AssetService } from './core/types';
 
@@ -51,10 +52,10 @@ describe('OpenGPEX v2.0 - Samples Ingest & Egest Automated Test Suite', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Section 1: Ingest Pipeline Matrix (Cases INGEST-1 to INGEST-8)
+  // Section 1: Ingest Pipeline Matrix (Cases INGEST-1 to INGEST-9)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe('Ingest Pipeline Matrix (INGEST-1 ~ INGEST-8)', () => {
+  describe('Ingest Pipeline Matrix (INGEST-1 ~ INGEST-9)', () => {
     it('Case INGEST-1: Native zero-copy passthrough channel (image-bitmap, retainSourceBlob=false)', async () => {
       // 1.1 8-bit Display-P3 JPEG
       const p3Jpg = loadSampleFile('08_chart_displayp3_8bit_2048.jpg', 'image/jpeg');
@@ -201,6 +202,50 @@ describe('OpenGPEX v2.0 - Samples Ingest & Egest Automated Test Suite', () => {
       const p3PngDecision = resolveIngestDecision(p3PngMeta);
       expect(p3PngDecision.decodeChannel).toBe('vips');
       expect(p3PngDecision.colorIdentity.trc).toBe('srgb-trc');
+
+      // 3.6 REAL PIXEL DECODE — regression guard for the `page` loader option.
+      // vips-worker's generic decode() used to pass `{ page: 0 }` to
+      // newFromBuffer unconditionally; pngload defines no `page` property (no
+      // libvips version ever has), so EVERY 16-bit PNG died with
+      // `no property named 'page'` while TIFF kept working. Drive wasm-vips
+      // exactly as the fixed worker does — NO page option for single-page
+      // files — and assert the 16-bit shape the vips channel must deliver.
+      const { default: createVips } = await import('wasm-vips');
+      const vips = await createVips();
+      for (const png of [
+        { file: adobePng, label: '05 (Adobe RGB)' },
+        { file: p3Png, label: '06 (Display P3)' },
+      ]) {
+        const bytes = new Uint8Array(await png.file.arrayBuffer());
+        const img = vips.Image.newFromBuffer(bytes, '', { access: 'sequential' });
+        expect(img.format, `${png.label} band format`).toBe('ushort');
+        expect(img.width, `${png.label} width`).toBe(2048);
+        expect(img.height, `${png.label} height`).toBe(2048);
+        // The worker's high-depth branch ships w*h*4 ushort naked pixels.
+        const rgba = img.hasAlpha() ? img : img.bandjoin(65535);
+        const naked = new Uint16Array(rgba.writeToMemory());
+        expect(naked.length, `${png.label} naked size`).toBe(img.width * img.height * 4);
+        expect(naked.some((v) => v > 0), `${png.label} pixels non-empty`).toBe(true);
+        rgba.delete();
+        img.delete();
+      }
+      // Static half of the guard: the worker's generic decode() must keep the
+      // gated page forwarding — every newFromBuffer read goes through the
+      // `page > 0` gated options, and the old unconditional interpolation
+      // (`newFromBuffer(bytes, '', { page, … })`) never comes back. (The
+      // ternary's own `? { page, … }` arm is the gate and is allowed.)
+      const workerSrc = fs.readFileSync(
+        path.resolve(process.cwd(), 'src/lib/opengpex/core/files/workers/vips-worker.js'),
+        'utf8',
+      );
+      const decodeStart = workerSrc.indexOf('async function decode(bytes, opts)');
+      const decodeBody = workerSrc.slice(decodeStart, workerSrc.indexOf('\nasync function', decodeStart + 10));
+      expect(decodeBody, 'worker decode() must gate the page option').toContain('const loadOpts = page > 0');
+      const newFromBufferCount = decodeBody.split('newFromBuffer').length - 1;
+      const loadOptsUses = decodeBody.split('loadOpts').length - 2; // minus the declaration itself
+      expect(newFromBufferCount, 'decode() loader reads found').toBeGreaterThan(0);
+      expect(loadOptsUses, 'every decode() loader read must use the gated loadOpts').toBe(newFromBufferCount);
+      expect(decodeBody, 'old unconditional page interpolation must stay gone').not.toContain("newFromBuffer(bytes, '', { page");
     });
 
     it('Case INGEST-4: 32-bit Float HDR direct passthrough (rgba32float uncompressed)', async () => {
@@ -296,6 +341,75 @@ describe('OpenGPEX v2.0 - Samples Ingest & Egest Automated Test Suite', () => {
       const decision = resolveIngestDecision(invalidMeta);
       expect(decision.decodeChannel).toBe('unsupported');
     });
+
+    it('Case INGEST-9: AVIF matrix routing (spec rows 15a / 15b / 16-wg / 17 / 18 / 26)', async () => {
+      // Row 15a: 8-bit SDR → verbatim passthrough (retainSourceBlob=false).
+      const sdr8 = resolveIngestDecision(await files.extractMetadata(
+        loadSampleFile('22_avif_15a_sdr8_srgb_12mp.avif', 'image/avif')));
+      expect(sdr8.decodeChannel).toBe('image-bitmap');
+      expect(sdr8.colorIdentity.gamut).toBe('srgb');
+      expect(sdr8.colorIdentity.bitDepth).toBe(8);
+      expect(sdr8.retainSourceBlob).toBe(false);
+
+      // Row 15a: 8-bit Display-P3 passthrough (saturation beyond sRGB kept via tag).
+      const p38 = resolveIngestDecision(await files.extractMetadata(
+        loadSampleFile('23_avif_15a_p3_8bit_12mp.avif', 'image/avif')));
+      expect(p38.decodeChannel).toBe('image-bitmap');
+      expect(p38.colorIdentity.gamut).toBe('display-p3');
+      expect(p38.colorIdentity.bitDepth).toBe(8);
+
+      // Row 15a: alpha aux → hasAlpha, content-bounds scan stays ON.
+      const alpha = resolveIngestDecision(await files.extractMetadata(
+        loadSampleFile('24_avif_15a_alpha_8bit_12mp.avif', 'image/avif')));
+      expect(alpha.decodeChannel).toBe('image-bitmap');
+      expect(alpha.skipContentBoundsScan).toBe(false);
+
+      // Row 15b: 10/12-bit SDR → avif-proxy f16 direct, TRUE depth declared.
+      const sdr10 = resolveIngestDecision(await files.extractMetadata(
+        loadSampleFile('25_avif_15b_sdr10_12mp.avif', 'image/avif')));
+      expect(sdr10.decodeChannel).toBe('avif-proxy');
+      expect(sdr10.colorIdentity.bitDepth).toBe(10);
+      expect(sdr10.colorIdentity.dataFormat).toBe('rgba16float');
+      const sdr12 = resolveIngestDecision(await files.extractMetadata(
+        loadSampleFile('26_avif_15b_sdr12_12mp.avif', 'image/avif')));
+      expect(sdr12.decodeChannel).toBe('avif-proxy');
+      expect(sdr12.colorIdentity.bitDepth).toBe(12);
+
+      // Row 17: 8-bit Adobe RGB ICC → wide-gamut-8 (linear f16 + P3 proxy).
+      const adobe8 = resolveIngestDecision(await files.extractMetadata(
+        loadSampleFile('27_avif_17_adobe8_icc_12mp.avif', 'image/avif')));
+      expect(adobe8.decodeChannel).toBe('wide-gamut-8');
+      expect(adobe8.colorIdentity.gamut).toBe('adobe-rgb');
+      expect(adobe8.colorIdentity.trc).toBe('linear');
+
+      // Row 16-wg: 10-bit Adobe RGB ICC → avif-proxy de-gamma to true linear.
+      const adobe10 = resolveIngestDecision(await files.extractMetadata(
+        loadSampleFile('28_avif_16wg_adobe10_icc_12mp.avif', 'image/avif')));
+      expect(adobe10.decodeChannel).toBe('avif-proxy');
+      expect(adobe10.colorIdentity.gamut).toBe('adobe-rgb');
+      expect(adobe10.colorIdentity.bitDepth).toBe(10);
+      expect(adobe10.colorIdentity.trc).toBe('linear');
+
+      // Row 18 NEGATIVES: PQ / HLG / BT.2020 → colorSpace 'unknown' (transfer-
+      // aware nclx mapping) → honest unsupported. Rendering an image = regression.
+      for (const name of [
+        '29_avif_18_pq10_bt2020_12mp.avif',
+        '30_avif_18_hlg10_bt2020_12mp.avif',
+        '31_avif_18_bt2020sdr10_12mp.avif',
+      ]) {
+        const meta = await files.extractMetadata(loadSampleFile(name, 'image/avif'));
+        expect(meta.colorSpace, `${name} must resolve to unknown`).toBe('unknown');
+        const neg = resolveIngestDecision(meta);
+        expect(neg.decodeChannel, `${name} must be rejected`).toBe('unsupported');
+      }
+
+      // Row 26 NEGATIVE: animated sequence → unsupported (never the first frame).
+      const animMeta = await files.extractMetadata(
+        loadSampleFile('32_avif_26_animated_720p.avifs', 'image/avif'));
+      expect(animMeta.isMultiFrame).toBe(true);
+      const anim = resolveIngestDecision(animMeta);
+      expect(anim.decodeChannel).toBe('unsupported');
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -367,7 +481,9 @@ describe('OpenGPEX v2.0 - Samples Ingest & Egest Automated Test Suite', () => {
     });
 
     it('Case EGEST-3: Container capability single-directional convergence', () => {
-      // Scenario A: JPEG container requested with Adobe RGB -> clamped to WORKING_GAMUT ('display-p3')
+      // Scenario A: JPEG (no prophoto envelope entry) -> clamped to the DISPLAY
+      // track ('display-p3', the widest canvas-representable gamut the container
+      // holds — matches the ImageInfoDrawer default suggestion ladder).
       const jpegWideDecision = resolveEgestDecision({
         format: 'jpeg',
         sourceGamut: 'adobe-rgb',
@@ -385,13 +501,16 @@ describe('OpenGPEX v2.0 - Samples Ingest & Egest Automated Test Suite', () => {
       expect(bmpDecision.channel).toBe('canvas-8');
       expect(bmpDecision.embedIcc).toBe(false);
 
-      // Scenario C: Rec.2020 requestedGamut -> protective downgrade to WORKING_GAMUT ('display-p3')
+      // Scenario C: Rec.2020 requestedGamut -> protective downgrade to
+      // WORKING_GAMUT (ProPhoto). TIFF's envelope carries prophoto-rgb, so the
+      // gamut is KEPT on the raw-8 lane — assert against the constant, never a
+      // hardcoded space name.
       const rec2020Decision = resolveEgestDecision({
         format: 'tiff',
         sourceGamut: 'rec2020',
       });
-      expect(rec2020Decision.targetGamut).toBe('display-p3');
-      expect(rec2020Decision.channel).toBe('canvas-8');
+      expect(rec2020Decision.targetGamut).toBe(WORKING_GAMUT);
+      expect(rec2020Decision.channel).toBe('raw-8');
     });
 
     it('Case EGEST-4: Pass-Through fast-track admission & tamper-proof breakout gate', () => {

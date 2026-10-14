@@ -61,7 +61,7 @@ export interface ExportOptions {
   /**
    * Desired output gamut. The readback itself is UNCHANGED —
    * it stays premultiplied LINEAR light in the ENGINE's working gamut
-   * (`core/engine/color/gamut.ts::WORKING_GAMUT` — always Linear Display-P3, never
+   * (`core/engine/color/gamut.ts::WORKING_GAMUT` — Linear ProPhoto RGB, never
    * derived from the document); the source→target gamut
    * matrix + target TRC are applied CPU-side by `unpremultiplyEncodeGamut` after
    * this readback. This field documents export intent and reserves a future GPU

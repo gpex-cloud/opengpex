@@ -63,7 +63,7 @@
  */
 
 import type { GamutId } from '@opengpex/editor/core/types/primitives';
-import { deriveMatrix64 } from '@opengpex/editor/core/engine/color/gamut';
+import { deriveMatrix64, WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
 import {
   FILMIC_KNEE_GAIN,
   FILMIC_LUMA_WEIGHTS,
@@ -83,21 +83,24 @@ function wgslFloat(n: number): string {
  * Render a row-major f64 3×3 as a COLUMN-MAJOR WGSL `mat3x3<f32>(...)` literal.
  * WGSL stores `mat3x3<f32>(col0, col1, col2)`, so column j of a row-major matrix
  * is (m[j], m[3+j], m[6+j]).
+ *
+ * Exported so the present pass (`view.ts`) can emit its WORKING → display
+ * projection matrix from the same formatter — one literal style, one derivation.
  */
-function wgslMat(m: readonly number[]): string {
+export function wgslMat(m: readonly number[]): string {
   const col = (j: number) =>
     `vec3<f32>(${wgslFloat(m[j])}, ${wgslFloat(m[3 + j])}, ${wgslFloat(m[6 + j])})`;
   return `mat3x3<f32>(\n  ${col(0)},\n  ${col(1)},\n  ${col(2)}\n)`;
 }
 
 /**
- * Render a `<gamut> → Display-P3` matrix as a COLUMN-MAJOR `mat3x3<f32>(...)`
- * literal, derived from `primaries.ts` (the single source of truth). The CPU path
+ * Render a `<gamut> → WORKING_GAMUT` matrix as a COLUMN-MAJOR `mat3x3<f32>(...)`
+ * literal, derived from `gamut.ts` (the single source of truth). The CPU path
  * (`core/engine/color/matrices.ts`) formats the SAME derivation into `Float32Array`s — the
  * two can never be independently edited.
  */
-function wgslMatToP3(from: GamutId): string {
-  return wgslMat(deriveMatrix64(from, 'display-p3'));
+function wgslMatToWorking(from: GamutId): string {
+  return wgslMat(deriveMatrix64(from, WORKING_GAMUT));
 }
 
 /**
@@ -149,33 +152,38 @@ fn linear_to_srgb(c : vec3<f32>) -> vec3<f32> {
 }
 
 // ────────────────────────────────────────────────────────────
-// 3×3 Gamut Conversion Matrices to Working Space (Display-P3, D65)
+// 3×3 Gamut Conversion Matrices to Working Space (ProPhoto RGB, D50)
 // Applied in LINEAR light AFTER srgb_to_linear.
 //
 // AUTO-DERIVED from core/engine/color/gamut.ts (xy primaries + white point) via
-// deriveMatrix64() — NOT hand-transcribed. Each matrix carries Bradford
-// adaptation automatically (only ProPhoto, D50, needs it → D65). The identical
+// deriveMatrix64(from, WORKING_GAMUT) — NOT hand-transcribed. Each matrix carries
+// Bradford adaptation automatically (only the D65→D50 hops need it). The identical
 // derivation feeds core/engine/color/matrices.ts on the CPU side; a golden test parses
 // these literals back out and asserts they equal the derivation.
 // WGSL mat3x3<f32>(col0, col1, col2) — COLUMN-MAJOR storage.
+//
+// There is deliberately NO ProPhoto→working constant: with W = ProPhoto RGB a
+// prophoto-tagged source is ALREADY in the working gamut, so it resolves to
+// gamut_id 0 (the passthrough arm) — one less matrix multiply per pixel.
 // ────────────────────────────────────────────────────────────
 
-const MAT_SRGB_TO_P3 = ${wgslMatToP3('srgb')};
+const MAT_SRGB_TO_WORKING = ${wgslMatToWorking('srgb')};
 
-const MAT_ADOBE_RGB_TO_P3 = ${wgslMatToP3('adobe-rgb')};
+const MAT_ADOBE_RGB_TO_WORKING = ${wgslMatToWorking('adobe-rgb')};
 
-const MAT_PROPHOTO_TO_P3 = ${wgslMatToP3('prophoto-rgb')};
+const MAT_DISPLAY_P3_TO_WORKING = ${wgslMatToWorking('display-p3')};
 
-const MAT_REC2020_TO_P3 = ${wgslMatToP3('rec2020')};
+const MAT_REC2020_TO_WORKING = ${wgslMatToWorking('rec2020')};
 
-// Map an input LINEAR colour in its source gamut to the working gamut (Display-P3).
-// gamut_id: 0 = already working (direct), 1 = sRGB, 2 = Adobe RGB, 3 = ProPhoto, 4 = Rec.2020.
+// Map an input LINEAR colour in its source gamut to the working gamut (ProPhoto RGB).
+// gamut_id: 0 = already working (direct; ProPhoto sources land here), 1 = sRGB,
+// 2 = Adobe RGB, 3 = Display-P3, 4 = Rec.2020.
 fn gamut_to_working(c : vec3<f32>, gamut_id : u32) -> vec3<f32> {
   switch (gamut_id) {
-    case 1u: { return MAT_SRGB_TO_P3 * c; }
-    case 2u: { return MAT_ADOBE_RGB_TO_P3 * c; }
-    case 3u: { return MAT_PROPHOTO_TO_P3 * c; }
-    case 4u: { return MAT_REC2020_TO_P3 * c; }
+    case 1u: { return MAT_SRGB_TO_WORKING * c; }
+    case 2u: { return MAT_ADOBE_RGB_TO_WORKING * c; }
+    case 3u: { return MAT_DISPLAY_P3_TO_WORKING * c; }
+    case 4u: { return MAT_REC2020_TO_WORKING * c; }
     default: { return c; }
   }
 }

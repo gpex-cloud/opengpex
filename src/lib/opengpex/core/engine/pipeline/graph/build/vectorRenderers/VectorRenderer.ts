@@ -33,7 +33,7 @@
  *   - `StrokeRenderer` — compute-extruded ribbon mesh (logic brush; empty slot).
  *
  * OUTPUT CONTRACT (load-bearing): a strategy MUST write STRAIGHT (un-premultiplied)
- * alpha in WORKING-gamut (Display-P3) linear light, with REPLACE blend over the
+ * alpha in WORKING-gamut (ProPhoto RGB) linear light, with REPLACE blend over the
  * caller-cleared transient, and apply NEITHER `layer.opacity` NOR mask — those are
  * the downstream `drawLayer`'s job, exactly as for any raster source.
  *

@@ -90,7 +90,7 @@ struct AdjustPreUniforms {
   uv_rect : vec4<f32>,
   // x: 0 = source is sRGB-encoded (decode it), 1 = source is already linear light.
   // y: GAMUT_ID (0..7) — the source physical gamut to align to the working space
-  //    (Display-P3) after the TRC decode; 0 = already working / direct (no-op).
+  //    (ProPhoto RGB) after the TRC decode; 0 = already working / direct (no-op).
   // z: RENDER_INTENT (0..3) — the out-of-box rendering intent tone-map (RAW Route B
   //    0 = SDR passthrough, 1 = Filmic, 2 = DNG LUT→Filmic. This
   //    bake is the FIRST sample of the raw asset, so it OWNS the tone-map; the
@@ -169,7 +169,7 @@ fn fs_adjust_pre(in : PreVSOut) -> @location(0) vec4<f32> {
  * from the texture format, because format does not imply colour domain.
  *
  * `gamutId` (0..4) is the source physical gamut to align to the working space
- * (Display-P3) after the TRC decode; 0 = already working / direct (no-op). It is
+ * (ProPhoto RGB) after the TRC decode; 0 = already working / direct (no-op). It is
  * written to `flags.y` and read back as an exact integer in the shader.
  *
  * `intent` (0..2) is the out-of-box rendering intent tone-map: 0 = SDR passthrough,

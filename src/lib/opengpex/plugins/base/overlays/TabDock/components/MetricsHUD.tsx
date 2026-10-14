@@ -180,7 +180,7 @@ export function MetricsHUD({ onCollapse }: MetricsHUDProps) {
 
   return (
     <div
-      className="relative flex flex-col gap-0.5 font-mono select-none group/hud"
+      className="relative flex flex-col gap-0.5 font-mono select-none group/hud w-[78px] whitespace-nowrap overflow-hidden"
       title={metrics.tooltip}
     >
       {/* Collapse button: floats over the HUD's top-right corner, takes no layout space.

@@ -28,7 +28,7 @@
  * (`gpu/`, `pipeline/graph/`, `shaders/`) consumes those without ever seeing a
  * `Layer`, a `markerData`, or a `MarkerKind`. The business kind → {@link SdfPrimitive}
  * translation (`'rect' → 'rounded_rect'`, others identity) happens ONLY here. Colours
- * are converted ONCE into the document WORKING gamut (Display-P3) linear light via
+ * are converted ONCE into the document WORKING gamut (ProPhoto RGB) linear light via
  * {@link toWorkingLinearRgba}.
  *
  * @module core/engine/pipeline/scene/markerToVectorSource
@@ -56,8 +56,8 @@ const MARKER_KIND_TO_PRIMITIVE: Record<MarkerKind, SdfPrimitive> = {
  * Map a Marker layer to a `vector` {@link LayerSource} (`renderer: 'sdf'`), or
  * `undefined` if the layer is not a marker.
  *
- * `workingSpace` is the document compositing gamut (always `'display-p3'` as
- * assembled — see `SceneAssembler` invariant). `width`/`height` are the layer's
+ * `workingSpace` is the document compositing gamut (always `WORKING_GAMUT`,
+ * ProPhoto RGB — see `SceneAssembler` invariant). `width`/`height` are the layer's
  * BOUNDING dimensions in LOGICAL pixels (`latestLayer.bounding.w/h`) — they become
  * the `LayerNode.width/height` the compositor places the quad at, so the SDF's
  * `size` MUST use the same numbers, not `layer.width` (which may differ from the

@@ -21,7 +21,7 @@
 
 import React from "react";
 import { Info } from "lucide-react";
-import { useVolatileInteraction } from "@opengpex/editor/core/context";
+import { useVolatileInteraction, useEditorServices } from "@opengpex/editor/core/context";
 import { getClipBox } from "@opengpex/editor/core/helpers/selection";
 
 import { useImageInfoMetadata, useExportConfig, useClipMode } from "./hooks";
@@ -60,6 +60,7 @@ export function ImageInfoComponent() {
 
   // Volatile (fast-track) hover state — doesn't trigger slow-track re-renders
   const hoveredLayerId = useVolatileInteraction('hoveredLayerId');
+  const { assets } = useEditorServices();
 
   // Reset overriding pixels when switching frames
   React.useEffect(() => {
@@ -88,6 +89,14 @@ export function ImageInfoComponent() {
 
     // Bit depth info for display badges (read from frame-level metadata)
     const layerBitDepth = activeFrame.metadata?.bitDepth;
+
+    // Document depth badge: the source asset's colour identity is the SSOT
+    // (frame.assetId → StoredAsset.bitDepth, same anchor the export rules use);
+    // frame metadata is the fallback for documents without a source asset
+    // (new canvas / imported content that never registered one).
+    const frameBitDepth =
+      (activeFrame.assetId ? assets.get(activeFrame.assetId)?.bitDepth : undefined)
+      ?? activeFrame.metadata?.bitDepth;
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
@@ -121,6 +130,7 @@ export function ImageInfoComponent() {
           isHighRes={isHighRes}
           isUpScaled={isUpScaled}
           layerBitDepth={layerBitDepth}
+          frameBitDepth={frameBitDepth}
           imageMetadata={meta.imageMetadata}
         />
 

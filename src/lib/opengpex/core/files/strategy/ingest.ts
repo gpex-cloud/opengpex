@@ -44,9 +44,9 @@
  *     `FORMAT_COLOR_STRATEGY` capability table both sides read, plus the one
  *     source-ICC-dependent `resolveExportPixelConversion` question.
  *
- * The working/compositing gamut is an ENGINE constant ('display-p3', future
- * 'prophoto-rgb') — never derived from the image. The engine dictates the
- * working space; the image never does.
+ * The working/compositing gamut is an ENGINE constant ('prophoto-rgb') — never
+ * derived from the image. The engine dictates the working space; the image never
+ * does.
  *
  * @module core/files/strategy/ingest
  */
@@ -105,8 +105,8 @@ export function colorSpaceToGamut(cs: ColorSpaceId): GamutId {
  * consumer can spread `...colorIdentity` straight into `AssetInputOptions`.
  *
  * ⚠️ The working/compositing colour space is NOT part of this decision — it is
- * an engine environment invariant (a fixed Display-P3 rgba16float linear-light
- * space today), never image-derived.
+ * an engine environment invariant (a fixed ProPhoto RGB rgba16float linear-light
+ * space), never image-derived.
  */
 export interface IngestDecision {
   /** 1. Authoritative colour identity — reflects the source's true physical properties. */

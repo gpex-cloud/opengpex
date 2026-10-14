@@ -21,11 +21,19 @@
 
 'use client';
 
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { useEditorState, useEditorServices, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
 import * as P from './protocols';
-import { calculateDockPosition, calculateBranches } from './utils';
+import { calculateDockPosition, calculateBranches, flattenReorderedFrames } from './utils';
 import type { TabDockCommandsMap } from './commands.d';
+
+/**
+ * Grace window before the hovered trunk "unhovers". The branch menu lives at
+ * dock level (outside the scrollable frame strip), so the pointer must cross a
+ * small gap between the thumbnail and the menu; the delay keeps the menu open
+ * during that crossing instead of closing on the thumbnail's mouseleave.
+ */
+const BRANCH_MENU_HOVER_GRACE_MS = 150;
 
 /**
  * useTabDock: Unified hook for bottom operation bar (State + Geometry + Commands).
@@ -43,13 +51,19 @@ export const useTabDock = () => {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isPhysicalExpanded, setIsPhysicalExpanded] = useState(false);
+  const [isReordering, setIsReordering] = useState(false);
   const [hoveredTrunkId, setHoveredTrunkId] = useState<string | null>(null);
 
   const expandTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hoverGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isReorderingRef = useRef(false);
+  // Set when a thumbnail reorder drag starts; the thumbnail's onClick consumes
+  // and resets it so releasing a drag never also switches frames.
+  const suppressClickRef = useRef(false);
 
   // Sync expanded state with hover/drag
   useEffect(() => {
-    if (isHovered || isDragging) {
+    if (isHovered || isDragging || isReordering) {
       if (expandTimeoutRef.current) clearTimeout(expandTimeoutRef.current);
       setIsPhysicalExpanded(true);
     } else {
@@ -60,12 +74,63 @@ export const useTabDock = () => {
     return () => {
       if (expandTimeoutRef.current) clearTimeout(expandTimeoutRef.current);
     };
-  }, [isHovered, isDragging]);
+  }, [isHovered, isDragging, isReordering]);
+
+  // Clear the pending hover close when the hook unmounts.
+  useEffect(() => () => {
+    if (hoverGraceTimerRef.current) clearTimeout(hoverGraceTimerRef.current);
+  }, []);
+
+  const hoverTrunk = useCallback((id: string) => {
+    if (isReorderingRef.current) return;
+    if (hoverGraceTimerRef.current) {
+      clearTimeout(hoverGraceTimerRef.current);
+      hoverGraceTimerRef.current = null;
+    }
+    setHoveredTrunkId(id);
+  }, []);
+
+  const unhoverTrunk = useCallback(() => {
+    // During a thumbnail drag the pointer may slide off the dragged item; the
+    // trunk must keep its hover (scale) until the drag settles.
+    if (isReorderingRef.current) return;
+    if (hoverGraceTimerRef.current) clearTimeout(hoverGraceTimerRef.current);
+    hoverGraceTimerRef.current = setTimeout(() => {
+      hoverGraceTimerRef.current = null;
+      setHoveredTrunkId(null);
+    }, BRANCH_MENU_HOVER_GRACE_MS);
+  }, []);
+
+  const setReordering = useCallback((value: boolean) => {
+    isReorderingRef.current = value;
+    setIsReordering(value);
+    if (value) {
+      // Freeze whichever trunk is currently hovered so the dragged thumbnail
+      // stays scaled for the whole drag. Only the pending hover close is
+      // cancelled (it would otherwise drop the state mid-drag); the branch
+      // menu itself is hidden while reordering via `state.isReordering`.
+      if (hoverGraceTimerRef.current) {
+        clearTimeout(hoverGraceTimerRef.current);
+        hoverGraceTimerRef.current = null;
+      }
+      suppressClickRef.current = true;
+    }
+  }, []);
 
   // 2. DFS Tree Calculation
   const activeTrunkId = activeFrame?.parentId || activeFrame?.id;
-  const trunkFrames = useMemo(() => frames.order.map(id => frames.byId[id]).filter(f => !f.parentId), [frames]);
-  const branchesByParent = useMemo(() => calculateBranches(frames.order.map(id => frames.byId[id]), trunkFrames), [frames, trunkFrames]);
+  const allOrderedFrames = useMemo(
+    () => frames.order.map((id) => frames.byId[id]).filter(Boolean),
+    [frames],
+  );
+  const trunkFrames = useMemo(
+    () => allOrderedFrames.filter((f) => !f.parentId),
+    [allOrderedFrames],
+  );
+  const branchesByParent = useMemo(
+    () => calculateBranches(allOrderedFrames, trunkFrames),
+    [allOrderedFrames, trunkFrames],
+  );
 
   // 3. Snap & Position Logic (Geometry)
   const initialPos = useMemo(() => calculateDockPosition(config), [config]);
@@ -76,6 +141,7 @@ export const useTabDock = () => {
       config,
       isHovered,
       isDragging,
+      isReordering,
       isPhysicalExpanded,
       hoveredTrunkId,
       activeTrunkId,
@@ -90,26 +156,26 @@ export const useTabDock = () => {
     switchFrame: (id: string) => actions.switchFrame(id),
     removeFrame: (id: string) => actions.adv.frame.remove.execute(id),
     handleReorder: (newTrunkOrder: typeof trunkFrames) => {
-      const nextFrames = newTrunkOrder.flatMap(root => {
-        const descendants = branchesByParent[root.id] || [];
-        return [root, ...descendants.map(d => d.frame)];
-      });
-      actions.setFrames(nextFrames);
+      actions.setFrames(flattenReorderedFrames(allOrderedFrames, newTrunkOrder));
     },
     openSettings: () => openSettingsCmd?.execute(),
     handleDockDragEnd: (rect: DOMRect, parentRect: { left: number; top: number }) => {
       setIsDragging(false);
-      configUpdateCmd?.execute({ 
-        position: { x: rect.left - parentRect.left, y: rect.top - parentRect.top } 
+      configUpdateCmd?.execute({
+        position: { x: rect.left - parentRect.left, y: rect.top - parentRect.top }
       });
     },
     setIsHovered,
     setIsDragging,
-    setHoveredTrunkId,
+    setReordering,
+    hoverTrunk,
+    unhoverTrunk,
+    suppressClickRef,
   }), [
-    actions, config, isHovered, isDragging, isPhysicalExpanded,
+    actions, config, isHovered, isDragging, isReordering, isPhysicalExpanded,
     hoveredTrunkId, activeTrunkId, trunkFrames, branchesByParent, initialPos,
-    frames.order.length, activeFrameId, configUpdateCmd, openSettingsCmd
+    frames.order.length, activeFrameId, allOrderedFrames,
+    configUpdateCmd, openSettingsCmd, setReordering, hoverTrunk, unhoverTrunk
   ]);
 };
 

@@ -19,7 +19,7 @@
 
 "use client";
 
-import React, { useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Grip,
   Layers,
@@ -45,7 +45,12 @@ import { MetricsHUD } from "./MetricsHUD";
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
-const TabDockContext = React.createContext<ReturnType<typeof useTabDock> | null>(null);
+type TabDockContextValue = ReturnType<typeof useTabDock> & {
+  /** Recomputes the branch-menu anchor from the given thumbnail's live rect. */
+  updateMenuAnchor: (frameId: string) => void;
+};
+
+const TabDockContext = React.createContext<TabDockContextValue | null>(null);
 
 function useTabDockContext() {
   const context = React.useContext(TabDockContext);
@@ -54,19 +59,40 @@ function useTabDockContext() {
   return context;
 }
 
+/** Finds a thumbnail element inside the strip by its data attribute. */
+function queryFrameItem(
+  strip: HTMLElement | null,
+  frameId: string,
+): HTMLElement | null {
+  return (
+    strip?.querySelector(
+      `[data-frame-id="${CSS.escape(frameId)}"]`,
+    ) as HTMLElement | null
+  ) ?? null;
+}
+
 // ─── BranchMenu ───────────────────────────────────────────────────────────────
 
+/**
+ * Rendered once at dock level (outside the scrollable frame strip) so the
+ * scroll container's overflow cannot clip it. `anchor` positions the menu
+ * horizontally over the hovered thumbnail, measured in dock-local pixels.
+ */
 function BranchMenu({
+  frame,
   branches,
-  snap,
+  isBottom,
+  isRight,
+  anchor,
 }: {
-  trunkId: string;
+  frame: Frame;
   branches: { frame: Frame; depth: number }[];
-  snap: string;
+  isBottom: boolean;
+  isRight: boolean;
+  anchor: { left: number } | { right: number } | null;
 }) {
-  const isBottom = snap?.startsWith("B") ?? true;
-  const isRight = snap?.endsWith("R") ?? false;
-  const { state, switchFrame, removeFrame } = useTabDockContext();
+  const { state, switchFrame, removeFrame, hoverTrunk, unhoverTrunk } =
+    useTabDockContext();
   const { assets } = useEditorServices();
 
   return (
@@ -82,11 +108,14 @@ function BranchMenu({
         y: isBottom ? 10 : -10,
         scale: 0.95,
       }}
-      className={`absolute z-[1100] flex flex-col pointer-events-none
- ${isBottom
-        ? `bottom-full mb-8 ${isRight ? "right-0" : "left-0"}`
-        : `top-full mt-8 ${isRight ? "right-0" : "left-0"}`}
-`}
+      // Hover continuity: the menu is no longer a DOM child of the thumbnail,
+      // so entering the menu must itself cancel the pending hover close.
+      onMouseEnter={() => hoverTrunk(frame.id)}
+      onMouseLeave={() => unhoverTrunk()}
+      style={anchor ?? (isRight ? { right: 0 } : { left: 0 })}
+      className={`absolute z-[1100] flex flex-col pointer-events-none ${
+        isBottom ? "bottom-full mb-8" : "top-full mt-8"
+      }`}
     >
       {/* 1. Real menu content (events enabled) */}
       <div className="flex flex-col gap-1 p-1 bg-[var(--bg-panel)]/95 backdrop-blur-3xl rounded-xl border border-[var(--border-subtle)] shadow-2xl min-w-[170px] pointer-events-auto">
@@ -96,7 +125,7 @@ function BranchMenu({
             Branches
           </span>
         </div>
-        <div className="flex flex-col gap-0.5 max-h-[260px] overflow-y-auto px-0.5 pt-0.5 pb-0.5 custom-scrollbar">
+        <div className="flex flex-col gap-0.5 max-h-[260px] overflow-y-auto p-0.5 custom-scrollbar">
           {branches.map(({ frame: snapFrame, depth }) => {
             const firstLayerId = snapFrame.layers.order[0];
             const firstLayer = firstLayerId
@@ -129,7 +158,7 @@ function BranchMenu({
                 <button
                   onClick={() => switchFrame(snapFrame.id)}
                   className={`flex items-center gap-2 p-0.5 pr-6 rounded-lg transition-all w-full relative
-                  ${isBranchActive ? "bg-orange-500/10 ring-1 ring-orange-600/30 dark:ring-orange-500/30" : "hover"}
+                  ${isBranchActive ? "bg-orange-500/10 ring-1 ring-orange-600/30 dark:ring-orange-500/30" : "hover:bg-[var(--bg-stage)]"}
                   `}
                 >
                   {isBranchActive && (
@@ -198,20 +227,23 @@ function FrameThumbnail({
   frame,
   isActive,
   isBottom,
-  isPhysicalExpanded,
-  isDragging,
 }: {
   frame: Frame;
   isActive: boolean;
   isBottom: boolean;
-  isPhysicalExpanded: boolean;
-  isDragging: boolean;
 }) {
-  const { state, switchFrame, removeFrame, setHoveredTrunkId } =
-    useTabDockContext();
+  const {
+    state,
+    switchFrame,
+    removeFrame,
+    hoverTrunk,
+    unhoverTrunk,
+    setReordering,
+    suppressClickRef,
+    updateMenuAnchor,
+  } = useTabDockContext();
   const branches = state.branchesByParent[frame.id] || [];
-  const isVisible =
-    isPhysicalExpanded || isDragging || isActive || state.config.showProps;
+  const isVisible = state.showFull || isActive;
 
   const firstLayerId = frame.layers.order[0];
   const firstLayer = firstLayerId ? frame.layers.byId[firstLayerId] : undefined;
@@ -238,24 +270,44 @@ function FrameThumbnail({
     <Reorder.Item
       value={frame}
       data-frame-id={frame.id}
-      className="relative flex items-center justify-center"
-      onMouseEnter={() => setHoveredTrunkId(frame.id)}
-      onMouseLeave={() => setHoveredTrunkId(null)}
+      dir="ltr"
+      onDragStart={() => {
+        // framer's reorder drag start.
+        setReordering(true);
+      }}
+      onDragEnd={() => {
+        setReordering(false);
+        // Thumbnails shifted while dragging: re-measure so the branch menu
+        // reopens over this item's new position (hover is still held).
+        updateMenuAnchor(frame.id);
+        // Release over a different thumbnail dispatches click on their common
+        // ancestor (the strip), so no item onClick consumes the flag; clear it
+        // after the click window so the next genuine click isn't swallowed.
+        setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 0);
+      }}
+      onPointerDown={() => {
+        suppressClickRef.current = false;
+      }}
+      onMouseEnter={() => {
+        hoverTrunk(frame.id);
+        updateMenuAnchor(frame.id);
+      }}
+      onMouseLeave={() => unhoverTrunk()}
+      className="pointer-events-auto relative flex items-center justify-center"
     >
-      <AnimatePresence>
-        {state.hoveredTrunkId === frame.id && branches.length > 0 && (
-          <BranchMenu
-            trunkId={frame.id}
-            branches={branches}
-            snap={state.config.snap}
-          />
-        )}
-      </AnimatePresence>
-
       <motion.div
         layout
+        onDragStart={(e) => e.preventDefault()}
         onClick={(e) => {
           e.stopPropagation();
+          // A reorder drag releases over a thumbnail and the browser still
+          // dispatches click; swallow it so reordering never switches frames.
+          if (suppressClickRef.current) {
+            suppressClickRef.current = false;
+            return;
+          }
           switchFrame(frame.id);
         }}
         className={`relative group shrink-0 w-10 h-10 cursor-pointer rounded-xl ${shadowClass}`}
@@ -271,7 +323,13 @@ function FrameThumbnail({
             state.hoveredTrunkId === frame.id ? 10 : 0,
           marginTop: 0,
           marginBottom: 0,
-          zIndex: state.hoveredTrunkId === frame.id ? 1060 : 1,
+          // Rest at z-index 0, never 1: Reorder.Item owns the li's z-index and
+          // holds it at 1 while the item is dragged. The li's z-index creates
+          // a stacking context, but resting siblings' li z-index is unset, so
+          // their inner z-index resolves in the dock-level context — an inner
+          // resting at 1 would tie with the dragged li and lose to DOM order
+          // when dragging rightward.
+          zIndex: state.hoveredTrunkId === frame.id ? 1060 : 0,
         }}
       >
         {branches.length > 0 && (
@@ -280,12 +338,13 @@ function FrameThumbnail({
           </div>
         )}
         <div
-          className={`w-full h-full rounded-xl overflow-hidden relative bg-[var(--bg-panel)] transition-all isolate ${ringClass}`}
+          className={`w-full h-full rounded-xl overflow-hidden relative bg-[var(--bg-panel)] transition-all isolate select-none ${ringClass}`}
         >
           <ImageAsset
             assetId={frame.thumbnail?.assetId || firstLayer?.assetId}
             src={frame.thumbnail?.src || firstLayer?.src}
-            className="w-full h-full object-cover rounded-xl"
+            className="w-full h-full object-cover rounded-xl pointer-events-none select-none"
+            draggable={false}
           />
           <motion.div
             animate={
@@ -293,7 +352,7 @@ function FrameThumbnail({
                 ? { opacity: 0 }
                 : { opacity: 0.8 }
             }
-            className="absolute bottom-0 left-0 right-0 bg-black/60 pb-0.5 rounded-b-xl"
+            className="absolute bottom-0 left-0 right-0 bg-black/60 pb-0.5 rounded-b-xl pointer-events-none select-none"
           >
             <p className="text-[7px] text-[var(--text-main)] font-bold text-center truncate px-1 uppercase tracking-tighter">
               {frame.name}
@@ -322,8 +381,8 @@ function DockGlobalActions() {
 
   return (
     <div
-      className={`flex items-center gap-2 flex-row transition-all duration-500 
- ${state.showFull ? "opacity-100 scale-100" : "opacity-0 scale-95 overflow-hidden"} 
+      className={`flex items-center gap-2 flex-row shrink-0 transition-all duration-500
+ ${state.showFull ? "opacity-100 scale-100" : "opacity-0 scale-95 overflow-hidden"}
  ${state.showFull ? "w-auto" : "w-0"}`}
     >
       {showSettingsBtn && (
@@ -352,14 +411,100 @@ export function TabDockComponent() {
   const dock = useTabDock();
   const { state, handleReorder, handleDockDragEnd, setIsHovered, updateConfig } = dock;
   const containerRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLUListElement>(null);
   const dragControls = useDragControls();
 
   const isBottom = state.config.snap?.startsWith("B") ?? true;
   const isRight = state.config.snap?.endsWith("R") ?? false;
   const showMetrics = state.config.showMetricsHud ?? false;
 
+  // Branch menu anchor: horizontal position of the hovered thumbnail measured
+  // against the dock, in dock-local pixels. Recomputed on strip scroll so the
+  // menu tracks the thumbnails while the strip scrolls underneath.
+  const [menuAnchor, setMenuAnchor] = useState<
+    { left: number } | { right: number } | null
+  >(null);
+
+  const updateMenuAnchor = useCallback(
+    (frameId: string) => {
+      const dockEl = containerRef.current;
+      const itemEl = queryFrameItem(stripRef.current, frameId);
+      if (!dockEl || !itemEl) return;
+      const dockRect = dockEl.getBoundingClientRect();
+      const itemRect = itemEl.getBoundingClientRect();
+      // Keep the menu (min-width 170px) within the dock's horizontal extent.
+      const maxOffset = Math.max(0, dockRect.width - 180);
+      const offset = isRight
+        ? dockRect.right - itemRect.right
+        : itemRect.left - dockRect.left;
+      const clamped = Math.max(0, Math.min(offset, maxOffset));
+      setMenuAnchor(isRight ? { right: clamped } : { left: clamped });
+    },
+    [isRight],
+  );
+
+  // Vertical-wheel → horizontal scroll for the frame strip, from anywhere on
+  // the dock. Native listener is required: React attaches wheel handlers
+  // passively, which would ignore preventDefault. In the mirrored (rtl) strip
+  // scrollLeft runs negative, so the wheel delta is inverted to keep
+  // "wheel down = scroll forward".
+  useEffect(() => {
+    const dockEl = containerRef.current;
+    if (!dockEl) return;
+    const rtlFactor = isRight ? -1 : 1;
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) return; // pinch-zoom gesture: leave to the browser
+      const delta = e.deltaX + e.deltaY;
+      if (!delta) return;
+      const strip = stripRef.current;
+      if (!strip) return;
+      e.preventDefault();
+      strip.scrollLeft += rtlFactor * delta;
+    };
+    dockEl.addEventListener("wheel", onWheel, { passive: false });
+    return () => dockEl.removeEventListener("wheel", onWheel);
+  }, [isRight]);
+
+  // Keep the active trunk in view when it changes or when the dock expands
+  // (the strip may have been scrolled away from it). Manual rect math instead
+  // of scrollIntoView: the latter can also scroll overflow-hidden ancestors
+  // like the stage wrapper.
+  useEffect(() => {
+    const frameId = state.activeTrunkId;
+    const strip = stripRef.current;
+    if (!frameId || !strip) return;
+    const raf = requestAnimationFrame(() => {
+      const el = queryFrameItem(strip, frameId);
+      if (!el) return;
+      const stripRect = strip.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      if (elRect.left < stripRect.left) {
+        strip.scrollLeft -= stripRect.left - elRect.left + 8;
+      } else if (elRect.right > stripRect.right) {
+        strip.scrollLeft += elRect.right - stripRect.right + 8;
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [state.activeTrunkId, state.isPhysicalExpanded]);
+
+  const hoveredTrunk = state.hoveredTrunkId
+    ? state.trunkFrames.find(f => f.id === state.hoveredTrunkId)
+    : undefined;
+  const hoveredBranches = hoveredTrunk
+    ? state.branchesByParent[hoveredTrunk.id]
+    : undefined;
+  const branchMenu =
+    hoveredTrunk && hoveredBranches && hoveredBranches.length > 0
+      ? { frame: hoveredTrunk, branches: hoveredBranches }
+      : null;
+
+  const contextValue = useMemo(
+    () => ({ ...dock, updateMenuAnchor }),
+    [dock, updateMenuAnchor],
+  );
+
   return (
-    <TabDockContext.Provider value={dock}>
+    <TabDockContext.Provider value={contextValue}>
       <AnimatePresence>
         <motion.div
           id="editor-tab-dock"
@@ -403,26 +548,61 @@ export function TabDockComponent() {
             opacity: { duration: 0.3 },
             scale: { duration: 0.3 },
           }}
-          className={`z-[1000] backdrop-blur-3xl border border-[var(--border-subtle)] rounded-full shadow-[0_20px_50px_rgba(0,0,0,0.3)] flex items-center select-none pointer-events-auto bg-[var(--bg-panel)]/80 
+          className={`z-[1000] backdrop-blur-3xl border border-[var(--border-subtle)] rounded-full shadow-[0_20px_50px_rgba(0,0,0,0.3)] flex items-center select-none pointer-events-auto bg-[var(--bg-panel)]/80
  ${isRight ? "flex-row-reverse" : "flex-row"}
 `}
           style={{ position: "absolute" }}
         >
+          {/* Branch menu lives at dock level so the strip's overflow cannot
+              clip it; anchored over the hovered thumbnail. Hidden while a
+              thumbnail is being dragged — its anchor would go stale as
+              siblings shift — and reopened on drag end (hover is still held,
+              the item's onDragEnd re-measures the anchor). */}
+          <AnimatePresence>
+            {branchMenu && !state.isReordering && (
+              <BranchMenu
+                key={`branch-menu-${branchMenu.frame.id}`}
+                frame={branchMenu.frame}
+                branches={branchMenu.branches}
+                isBottom={isBottom}
+                isRight={isRight}
+                anchor={menuAnchor}
+              />
+            )}
+          </AnimatePresence>
+
           <div
             onPointerDown={(e) => dragControls.start(e)}
-            className="flex items-center justify-center opacity-50 hover:opacity-100 transition-opacity px-1.5 cursor-grab active:cursor-grabbing"
+            className="shrink-0 flex items-center justify-center opacity-50 hover:opacity-100 transition-opacity px-1.5 cursor-grab active:cursor-grabbing"
           >
             <Grip size={13} />
           </div>
           <div
-            className={`bg-[var(--border-subtle)] transition-opacity ${state.showFull ? "opacity-100" : "opacity-0"} w-[1px] h-5 mx-1`}
+            className={`shrink-0 bg-[var(--border-subtle)] transition-opacity ${state.showFull ? "opacity-100" : "opacity-0"} w-[1px] h-5 mx-1`}
           />
 
+          {/* Frame strip: the only flex child allowed to shrink — pressure
+              from too many frames turns into horizontal scrolling instead of
+              squeezing the HUD or the action buttons. The overflow clip line
+              sits at the padding box, so py-6/-my-6 reserves 24px of invisible
+              clip room above/below for the hover-scaled thumbnails and their
+              delete button (19px over the top) without changing the pill's
+              outer size. pointer-events-none keeps those invisible bands from
+              intercepting hover — events land on the thumbnails and bubble to
+              the dock; wheel is handled at dock level. dir=rtl (for
+              right-snapped docks) mirrors the strip while keeping overflow
+              reachable — flex-row-reverse would clip it unscrollably. */}
           <Reorder.Group
             axis="x"
             values={state.trunkFrames}
             onReorder={handleReorder}
-            className={`flex items-center gap-2 px-1 ${isRight ? "flex-row-reverse" : "flex-row"}`}
+            layoutScroll
+            dir={isRight ? "rtl" : "ltr"}
+            ref={stripRef}
+            onScroll={() => {
+              if (state.hoveredTrunkId) updateMenuAnchor(state.hoveredTrunkId);
+            }}
+            className="pointer-events-none flex flex-row items-center gap-2 px-3 py-6 -mx-2 -my-6 min-w-0 overflow-x-auto max-w-[min(50vw,560px)] [scrollbar-width:none] [overscroll-behavior-x:contain] [&::-webkit-scrollbar]:hidden"
           >
             {state.trunkFrames.map((frame) => (
               <FrameThumbnail
@@ -430,8 +610,6 @@ export function TabDockComponent() {
                 frame={frame}
                 isActive={frame.id === state.activeTrunkId}
                 isBottom={isBottom}
-                isPhysicalExpanded={state.isPhysicalExpanded}
-                isDragging={state.isDragging}
               />
             ))}
           </Reorder.Group>
@@ -440,10 +618,10 @@ export function TabDockComponent() {
           {showMetrics && (
             <>
               <div
-                className={`bg-[var(--bg-stage)] transition-opacity ${state.showFull ? "opacity-100" : "opacity-0"} w-[1px] h-5 mx-1`}
+                className={`shrink-0 bg-[var(--bg-stage)] transition-opacity ${state.showFull ? "opacity-100" : "opacity-0"} w-[1px] h-5 mx-1`}
               />
               <div
-                className={`transition-all duration-500
+                className={`shrink-0 transition-all duration-500
                   ${state.showFull ? "opacity-100 scale-100" : "opacity-0 scale-95 overflow-hidden"}
                   ${state.showFull ? "w-auto" : "w-0"}`}
               >
@@ -453,7 +631,7 @@ export function TabDockComponent() {
           )}
 
           <div
-            className={`bg-[var(--bg-stage)] transition-opacity ${state.showFull ? "opacity-100" : "opacity-0"} w-[1px] h-5 mx-1`}
+            className={`shrink-0 bg-[var(--bg-stage)] transition-opacity ${state.showFull ? "opacity-100" : "opacity-0"} w-[1px] h-5 mx-1`}
           />
           <DockGlobalActions />
         </motion.div>

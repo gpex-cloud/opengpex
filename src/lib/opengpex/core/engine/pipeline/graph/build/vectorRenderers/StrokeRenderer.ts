@@ -26,7 +26,7 @@
  * a render TECHNIQUE parallel to `SdfRenderer`, not merged into its shader.
  *
  * OUTPUT CONTRACT (architecture B, identical to `SdfRenderer`): the target holds
- * STRAIGHT-alpha, WORKING-gamut (Display-P3) linear-light pixels. The caller clears the
+ * STRAIGHT-alpha, WORKING-gamut (ProPhoto RGB) linear-light pixels. The caller clears the
  * target first; this pass writes with REPLACE blend and applies neither `layer.opacity`
  * nor mask — those are the downstream `drawLayer`'s job, exactly as for any raster source.
  *

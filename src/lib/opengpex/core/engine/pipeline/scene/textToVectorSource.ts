@@ -68,8 +68,8 @@ function getMeasureContext(): TextMeasureContext | undefined {
  * `undefined` when the layer is not a GPU-text candidate: no `textData`, wrong
  * layer type, or no measure surface in the current environment.
  *
- * `workingSpace` is the document compositing gamut (always `'display-p3'` as
- * assembled — see `SceneAssembler` invariant). The layout is computed at
+ * `workingSpace` is the document compositing gamut (always `WORKING_GAMUT`,
+ * ProPhoto RGB — see `SceneAssembler` invariant). The layout is computed at
  * `layer.bounding` (the same extent the compositor places the quad at); the
  * GPU-side density multiplication and atlas banding happen in `TextRenderer`.
  *

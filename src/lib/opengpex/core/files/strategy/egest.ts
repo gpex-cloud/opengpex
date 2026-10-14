@@ -61,7 +61,7 @@
  * WHAT STAYS OUT
  * --------------
  * The WORKING gamut is NOT on this decision. It is the engine invariant
- * `core/engine/color/gamut.ts::WORKING_GAMUT` ('display-p3'), and the only consumer that
+ * `core/engine/color/gamut.ts::WORKING_GAMUT` ('prophoto-rgb'), and the only consumer that
  * needs it (`ExportDispatcher`, feeding `unpremultiplyEncodeGamut`'s `sourceGamut`)
  * imports the constant directly.
  *
@@ -181,7 +181,9 @@ export function resolveEmbedIcc(format: SourceFormat, userOverride?: boolean): b
  *      (`rec2020` has no matrix/stock ICC → safely downgrades to `WORKING_GAMUT`).
  *   2. Gamut convergence: the container's `supportedGamuts` is the SOLE
  *      judge. Intent that the container can hold survives; otherwise fall back to
- *      `WORKING_GAMUT`, else `'srgb'`. (No lane gate — the three-gate clamp is gone.)
+ *      `WORKING_GAMUT`, else the widest canvas-representable gamut
+ *      (`'display-p3'` — the display-track clamp, mirroring the UI default
+ *      suggestion ladder), else `'srgb'`. (No lane gate — the three-gate clamp is gone.)
  *   3. Depth & channel split (one-way):
  *      - 16-bit requested AND container has `'raw-16'` → 16-bit `'raw-16'`.
  *      - else 8-bit; a canvas-safe target (srgb / display-p3) → `'canvas-8'`,
@@ -214,12 +216,20 @@ export function resolveEgestDecision(request: EgestRequest): EgestDecision {
   // rec2020 has no conversion matrix and no stock ICC — painless downgrade to WORKING.
   const emittableIntent: GamutId = requestedGamut === 'rec2020' ? WORKING_GAMUT : requestedGamut;
 
-  // 2. Gamut convergence. Container capability is the only judge.
+  // 2. Gamut convergence. Container capability is the only judge. The fallback
+  //    ladder mirrors the ImageInfoDrawer default suggestion: the working gamut
+  //    when the container can hold it, else the widest canvas-representable
+  //    gamut (the display-track clamp — what the composite preview shows), else
+  //    'srgb'. The middle tier keeps the solver and the UI panel from disagreeing
+  //    when WORKING_GAMUT itself has no canvas form (ProPhoto) and the user
+  //    never made an explicit choice (config.targetGamut === undefined).
   const targetGamut: GamutId = cap.supportedGamuts.includes(emittableIntent)
     ? emittableIntent
     : cap.supportedGamuts.includes(WORKING_GAMUT)
       ? WORKING_GAMUT
-      : 'srgb';
+      : cap.supportedGamuts.includes('display-p3')
+        ? 'display-p3'
+        : 'srgb';
 
   // 3. Depth & channel split (one-way direct match).
   let bitDepth: 8 | 16;

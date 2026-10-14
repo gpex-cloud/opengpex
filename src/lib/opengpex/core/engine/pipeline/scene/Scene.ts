@@ -175,7 +175,7 @@ export interface SdfShapeParams {
  * box-local LOGICAL pixels — the single layout source of truth produced by
  * `computeTextLayout`) plus the font identity the renderer needs to
  * rasterize glyphs into the atlas at the target density band. Colours are
- * already in the document WORKING gamut (Display-P3) LINEAR light, straight
+ * already in the document WORKING gamut (ProPhoto RGB) LINEAR light, straight
  * alpha, resolved by the scene-assembly mapper (`textToVectorSource`).
  */
 export interface TextParams {
@@ -664,10 +664,10 @@ export interface SceneContent {
   /** Artboard clip bounds in document space. */
   readonly artboard?: Rect;
   /**
-   * The WORKING gamut — always `'display-p3'` as assembled. It is an
-   * INVARIANT, not a document property: `GpuDevice.configureSurface` hardcodes the
-   * swapchain to display-p3, and per-asset colour truth lives on each
-   * `LayerNode.source.gamut`. Do NOT re-derive it from the document.
+   * The WORKING gamut — always `'prophoto-rgb'` (`WORKING_GAMUT`) as assembled. It
+   * is an INVARIANT, not a document property: per-asset colour truth lives on each
+   * `LayerNode.source.gamut`, and the sampling shader treats the working gamut as
+   * the passthrough id. Do NOT re-derive it from the document.
    */
   readonly colorSpace: WorkingColorSpace;
   readonly hdr: boolean;

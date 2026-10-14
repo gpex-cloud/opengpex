@@ -82,7 +82,7 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   var color = textureSample(layer_tex, samp, in.uv);
 
   // ── Normalise the sampled source
-  // into WORKING-space (Display-P3) linear light with its rendering intent applied.
+  // into WORKING-space (ProPhoto RGB) linear light with its rendering intent applied.
   // ONE call shared by layer.ts / blend.ts / adjustPre.ts (sourceNormalize.wgsl):
   //   ① sRGB→linear decode unless flags bit 4 (SOURCE_LINEAR) is set — gamma-domain
   //      alpha maths is the root cause of v1's dark edges, so it must precede the

@@ -19,7 +19,7 @@
 
 /**
  * sourceGamut.ts — Single decision point for "which source gamut must the shader
- * align to the working space (Display-P3)?"
+ * align to the working space (ProPhoto RGB, `WORKING_GAMUT`)?"
  *
  * Sibling of `sourceDomain.ts`: exactly as `isSourceLinear` centralises the
  * `LAYER_FLAG_SOURCE_LINEAR` bit so `CompositePass` and `BlendPass` can never
@@ -29,7 +29,7 @@
  *
  * The returned integer is the SHADER contract, not the string enum:
  *   0 = already working / direct (no matrix), 1 = sRGB, 2 = Adobe RGB,
- *   3 = ProPhoto, 4 = Rec.2020 — matching the `gamut_to_working` switch in
+ *   3 = Display-P3, 4 = Rec.2020 — matching the `gamut_to_working` switch in
  *   `colorspace.ts` and the GAMUT_ID bit layout (`LAYER_GAMUT_SHIFT`).
  *
  * @module core/gpu/graph/support/sourceGamut
@@ -48,10 +48,11 @@ import type { LayerNode } from '../../scene/Scene';
  *      override precedence exactly.
  *   2. the source is not a raster asset, or carries no `gamut` tag — the "omit ⇒
  *      direct" contract. An 8-bit browser bitmap DOES now
- *      carry a gamut tag (= frame.colorSpace ∈ {srgb, display-p3}), so it resolves
- *      to 1 or 0 below; the untagged path remains only for non-raster sources and
- *      pipeline transients already in working P3 → 0 → correctly left untouched.
- *   3. the tag is `display-p3` — the source IS the working gamut.
+ *      carry a gamut tag (= the decoded canvas space ∈ {srgb, display-p3}), so it
+ *      resolves to 1 or 3 below; the untagged path remains only for non-raster
+ *      sources and pipeline transients already in working ProPhoto → 0 → correctly
+ *      left untouched.
+ *   3. the tag is `prophoto-rgb` — the source IS the working gamut.
  *
  * Otherwise it maps the per-ASSET `gamut` tag to the shader id.
  */
@@ -63,11 +64,11 @@ export function resolveSourceGamutId(layer: LayerNode, pipelineOverride?: boolea
       return 1;
     case 'adobe-rgb':
       return 2;
-    case 'prophoto-rgb':
+    case 'display-p3':
       return 3;
     case 'rec2020':
       return 4;
-    case 'display-p3':
+    case 'prophoto-rgb':
     default:
       return 0;
   }

@@ -54,6 +54,7 @@ import { translateLayerAdjustments } from './adjustments';
 import { markerToVectorSource } from './markerToVectorSource';
 import { textToVectorSource } from './textToVectorSource';
 import { strokeToVectorSource } from './strokeToVectorSource';
+import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
 
 /**
  * UNIFIED raw-upload seam — the single convergence point for every
@@ -429,11 +430,11 @@ export class SceneAssembler {
       // defined, the layer skips the bitmap upload entirely and its `source` becomes the
       // `{ kind: 'vector', ... }` descriptor; the shared tail (transform / crop / mask /
       // adjust / opacity / blend / clip) is identical to a raster's. Working gamut is
-      // Display-P3 (see colorSpace below).
+      // WORKING_GAMUT (see colorSpace below).
       const vectorSource =
-        markerToVectorSource(latestLayer, 'display-p3', layerWidth, layerHeight) ??
-        strokeToVectorSource(latestLayer, 'display-p3') ??
-        textToVectorSource(latestLayer, 'display-p3');
+        markerToVectorSource(latestLayer, WORKING_GAMUT, layerWidth, layerHeight) ??
+        strokeToVectorSource(latestLayer, WORKING_GAMUT) ??
+        textToVectorSource(latestLayer, WORKING_GAMUT);
       const isVectorLayer = vectorSource !== undefined;
 
       let crop: { x: number; y: number; w: number; h: number } | undefined;
@@ -698,7 +699,7 @@ export class SceneAssembler {
           // sRGB-encoded pixels). NEVER derived from `frame.trc` — see LayerSource.trc.
           trc: highDepth?.trc ?? 'srgb-trc',
           // Forwarding terminus: the per-asset source gamut the GPU sampling
-          // shader converts to the working space (Display-P3). High-depth sources
+          // shader converts to the working space (ProPhoto RGB). High-depth sources
           // carry their own decoded gamut; 8-bit bitmap sources (no high-depth
           // entry) read the asset's OWN colorIdentity.gamut (StoredAsset is the
           // sole owner of per-asset color truth, not the frame),
@@ -773,12 +774,11 @@ export class SceneAssembler {
         h: docH,
       },
       // The WORKING gamut, which is a hard invariant rather than a document
-      // property: `GpuDevice.configureSurface` configures the swapchain as
-      // display-p3 unconditionally, and `resolveSourceGamutId` treats display-p3
-      // as the passthrough id. Per-asset colour truth lives on each layer's
-      // `source.gamut` above, so there is nothing document-level left
-      // for this field to carry — it must NOT be re-derived from the frame.
-      colorSpace: 'display-p3',
+      // property: per-asset colour truth lives on each layer's `source.gamut`
+      // above, and `resolveSourceGamutId` treats the working gamut (ProPhoto RGB)
+      // as the passthrough id. There is nothing document-level left for this
+      // field to carry — it must NOT be re-derived from the frame.
+      colorSpace: WORKING_GAMUT,
       hdr,
       layers: sceneLayers,
     };

@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.10
+
+- Color: implemented a much wider working color space — vivid colors in Adobe RGB / Pro Photo photos are no longer clipped while you edit; previews, markers and brushes render in true-to-color wide gamut, and exports keep the full color range (Pro Photo for PNG/TIFF, Display P3 for JPEG/WebP/AVIF)
+
+---
+
 ## v2.0.9
 
 - Image Formats: fixed color distortion when opening HEIC/HEIF photos across different browsers

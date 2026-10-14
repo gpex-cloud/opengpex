@@ -381,8 +381,19 @@ async function decode(bytes, opts) {
   const v = await initVips();
   const { preserveColorSpace = false, wantHighDepth = false, page = 0 } = opts || {};
 
+  // ⚠️ `page` is a LOADER-scoped property, not a universal option: tiffload and
+  // the other multi-page loaders define it, pngload does not, and libvips
+  // rejects unknown properties outright (`no property named 'page'`) regardless
+  // of the value — a hard fail even at page=0. page=0 is exactly what a loader
+  // does WITHOUT the option, so forward it only when a non-default page is
+  // actually requested (multi-page TIFF); single-page files — including every
+  // PNG — load option-free.
+  const loadOpts = page > 0
+    ? { page, access: 'sequential' }
+    : { access: 'sequential' };
+
   // ── 8-bit display path (bit-exact with engine decodeTiff) ──────────────────
-  const image = v.Image.newFromBuffer(bytes, '', { page, access: 'sequential' });
+  const image = v.Image.newFromBuffer(bytes, '', loadOpts);
 
   let rgb = image;
   if (!preserveColorSpace && image.interpretation !== 'srgb' && image.interpretation !== 'b-w') {
@@ -418,7 +429,7 @@ async function decode(bytes, opts) {
 
   // ── High-bit-depth naked pixels (mirrors engine decodeHighDepth) ───────────
   if (wantHighDepth) {
-    const hi = v.Image.newFromBuffer(bytes, '', { page, access: 'sequential' });
+    const hi = v.Image.newFromBuffer(bytes, '', loadOpts);
     const fmt = hi.format;
     const isFloat = fmt === 'float' || fmt === 'double';
     const sourceBitDepth = fmt === 'ushort' ? 16 : isFloat ? 32 : 8;

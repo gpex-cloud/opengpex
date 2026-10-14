@@ -20,8 +20,8 @@
 /**
  * sourceNormalize.ts — the SINGLE source of truth for the layer `flags` u32 bit
  * layout, plus the WGSL that unpacks it and normalises a sampled source pixel into
- * WORKING-space (Display-P3) linear light with its rendering intent applied
- * (RAW image handling).
+ * WORKING-space (ProPhoto RGB, `WORKING_GAMUT`) linear light with its rendering
+ * intent applied (RAW image handling).
  *
  * WHY ONE MODULE: `layer.ts` (Pass 1), `blend.ts` (Pass 2) and `adjustPre.ts`
  * (Pass 3) all sample a source texture and must run the SAME normalise pipeline —
@@ -72,17 +72,18 @@ export const LAYER_FLAG_PREMULTIPLIED_SOURCE = 1 << 2;
  * (`HighDepthSource.trc` → `LayerSource.trc`), never from `frame.trc` — see the
  * decode comment in `layer.ts`'s `fs_main` for why that document-level field is
  * unusable here. 8-bit `bitmap` sources are always sRGB-encoded, so this bit stays
- * clear for them. Arbitrated by `isSourceLinear` (`passes/sourceDomain.ts`).
+ * clear for them. Arbitrated by `isSourceLinear` (`graph/support/sourceDomain.ts`).
  */
 export const LAYER_FLAG_SOURCE_LINEAR = 1 << 4;
 
 /**
  * `flags` bits 5..7: GAMUT_ID (0..4) — the source physical gamut the shader must
- * convert to the working space (Display-P3) via `gamut_to_working`, in LINEAR light
- * AFTER the TRC decode.
+ * convert to the working space (ProPhoto RGB) via `gamut_to_working`, in LINEAR
+ * light AFTER the TRC decode.
  *
- * 0 = already working / direct, 1 = sRGB, 2 = Adobe RGB, 3 = ProPhoto, 4 = Rec.2020.
- * Arbitrated by `resolveSourceGamutId` (`passes/sourceGamut.ts`).
+ * 0 = already working / direct (ProPhoto), 1 = sRGB, 2 = Adobe RGB,
+ * 3 = Display-P3, 4 = Rec.2020.
+ * Arbitrated by `resolveSourceGamutId` (`graph/support/sourceGamut.ts`).
  */
 export const LAYER_GAMUT_SHIFT = 5;
 /** Field width mask for GAMUT_ID (3 bits → 0..7, of which 0..4 are used). */
@@ -95,7 +96,7 @@ export const LAYER_GAMUT_MASK = 0x7;
  * 0 = SDR passthrough (no tone-map), 1 = generic Filmic S-curve, 2 = DNG
  * ProfileToneCurve LUT (falls back to Filmic until the LUT sampler lands). Carried
  * FORWARD explicitly from the ingest decision; arbitrated by
- * `resolveSourceRenderIntent` (`passes/sourceIntent.ts`).
+ * `resolveSourceRenderIntent` (`graph/support/sourceIntent.ts`).
  */
 export const LAYER_RENDER_INTENT_SHIFT = 8;
 /** Field width mask for RENDER_INTENT (2 bits → 0..3, of which 0..2 are used). */
@@ -112,13 +113,13 @@ export const LAYER_RENDER_INTENT_MASK = 0x3;
 // ────────────────────────────────────────────────────────────
 
 export const SOURCENORMALIZE_WGSL = /* wgsl */ `
-// Normalise a sampled source pixel into WORKING-space (Display-P3) linear light
+// Normalise a sampled source pixel into WORKING-space (ProPhoto RGB) linear light
 // with its rendering intent applied. Takes UNPACKED scalar parameters so the
 // 32-byte AdjustPrePass uniform (which cannot carry a u32 flags word) can call it
 // directly.
 //
 // Pipeline: ① TRC decode (if the source is not already linear)
-//           ② gamut fold to Display-P3 (if a non-working source gamut)
+//           ② gamut fold to ProPhoto (if a non-working source gamut)
 //           ③ render intent tone-map — CONSTRAINT B: run STRICTLY in the STRAIGHT
 //              (un-premultiplied) domain, because tone_map_filmic is non-linear and
 //              would crush semi-transparent edges to black if applied to c·α.
@@ -136,7 +137,7 @@ fn normalize_source_components(
     color = vec4<f32>(srgb_to_linear(color.rgb), color.a);
   }
 
-  // ② Source gamut → working (Display-P3), in linear light. gamut_id 0 is a no-op.
+  // ② Source gamut → working (ProPhoto), in linear light. gamut_id 0 is a no-op.
   if (gamut_id != 0u) {
     color = vec4<f32>(gamut_to_working(color.rgb, gamut_id), color.a);
   }

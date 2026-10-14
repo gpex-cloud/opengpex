@@ -50,20 +50,27 @@ import type { WorkingColorSpace } from '@opengpex/editor/core/types/models';
 // ════════════════════════════════════════════════════════════════════════════════
 
 /**
- * The gamut EVERY composite lives in — Linear Display-P3.
+ * The gamut EVERY composite lives in — Linear ProPhoto RGB (ROMM, D50).
  *
- * This is a HARD INVARIANT, not a default and not a document property:
- * `GpuDevice.configureSurface` hardcodes the swapchain to `colorSpace:'display-p3'`,
- * and `resolveSourceGamutId` treats display-p3 as gamut id 0 (passthrough). Every
- * source is lifted INTO this space by the sampling shader, so every readback —
- * bake (`CompositeDispatcher`) and egest (`resolveEgestDecision`) alike — is in
- * this gamut and the terminal encode must convert FROM here.
+ * This is a HARD INVARIANT, not a default and not a document property. Every
+ * source is lifted INTO this space by the sampling shader (`gamut_to_working`),
+ * so every readback — bake (`CompositeDispatcher`) and egest
+ * (`resolveEgestDecision`) alike — is in this gamut and the terminal encode must
+ * convert FROM here. `resolveSourceGamutId` treats prophoto-rgb as gamut id 0
+ * (passthrough) because a prophoto-tagged source is already in W.
+ *
+ * ProPhoto was chosen because it is a SUPERSET of every import gamut (sRGB /
+ * Display-P3 / Adobe RGB / Rec.2020 — probe-verified zero clipping on a 9³ grid,
+ * 2026-10-14), so editing never clips into a smaller working volume. The
+ * presentation side is NOT W: `GpuDevice.configureSurface` pins the swapchain to
+ * `colorSpace:'display-p3'`, and `view.wgsl` projects W → display-p3 (+ clamp)
+ * before the terminal TRC encode — the screen is a window onto W, not W itself.
  *
  * It lives in this module because both the engine and the file layer need it and
  * neither owns the other; `gamut.ts` is already the gamut authority. Deriving it
  * from a `Frame` field would cause gamut mistranslation.
  */
-export const WORKING_GAMUT: WorkingColorSpace = 'display-p3';
+export const WORKING_GAMUT: WorkingColorSpace = 'prophoto-rgb';
 
 /**
  * Map a working color space / gamut intent to the browser's `PredefinedColorSpace`

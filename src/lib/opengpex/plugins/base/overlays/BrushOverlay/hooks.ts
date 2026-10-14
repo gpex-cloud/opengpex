@@ -21,7 +21,7 @@
 
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useEditorState, useEditorServices, usePluginConfig } from '@opengpex/editor/core/context';
-import type { ColorValue } from '@opengpex/editor/core/engine/color';
+import { toCssColor4, type ColorValue } from '@opengpex/editor/core/engine/color';
 import { CraftDrawerAPI, type CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
 import { useBrushCursorFastSync } from './useFastSync';
@@ -59,7 +59,10 @@ export function useBrushParams() {
 /** Foreground colour as a CSS string, for the cursor ring's fill preview only. */
 export function useBrushColor(): string {
   const [colorConfig] = usePluginConfig<{ pendingColor?: ColorValue }>(ColorOptionsAPI.configKey);
-  return colorConfig?.pendingColor?.hex || '#FFFFFF';
+  // CSS Color 4 view, deliberately not `.hex` — hex is the lossy clamp+quantize
+  // view, so a wide-gamut pendingColor would paint the ring visibly duller than
+  // the stroke it is about to lay down. `backgroundColor` accepts color() natively.
+  return colorConfig?.pendingColor ? toCssColor4(colorConfig.pendingColor) : '#FFFFFF';
 }
 
 // ─── useBrushCursorTracking ───────────────────────────────────────────────────

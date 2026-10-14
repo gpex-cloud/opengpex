@@ -72,8 +72,13 @@ export async function renderDisplayProxy(
     // Follow the source: no pixel conversion, tag the native canvas space.
     canvasCS = gamut === 'display-p3' ? 'display-p3' : 'srgb';
   } else {
-    // Wide gamut (adobe-rgb / prophoto-rgb): fold source → working P3. The
-    // `as WorkingColorSpace` aligns the GamutId with the callee's input axis.
+    // Wide gamut (adobe-rgb / prophoto-rgb): fold the source into the DISPLAY
+    // track ('display-p3', the widest canvas-representable superset) for this
+    // 8-bit proxy — the decode-side projection of the same W→display step
+    // view.wgsl does at present. The compositing truth stays the UNCLAMPED
+    // source-gamut f16 line (see wideGamut8ToF16); this fold only bounds the
+    // preview copy. The `as WorkingColorSpace` aligns the GamutId with the
+    // callee's input axis.
     convertImageDataColorSpace(clamped, gamut as WorkingColorSpace, 'display-p3');
     canvasCS = 'display-p3';
   }

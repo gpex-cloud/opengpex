@@ -245,7 +245,12 @@ export function useExportRules(
       if (supportedGamuts.includes(sourceGamut)) {
          return sourceGamut;
       }
-      return supportedGamuts.includes(WORKING_GAMUT) ? WORKING_GAMUT : (supportedGamuts[0] ?? 'srgb');
+      // Container fallback ladder: the working gamut when the container can hold
+      // it, else the widest canvas-representable gamut (the display-track clamp —
+      // what the composite preview shows), else the container's first/only entry.
+      if (supportedGamuts.includes(WORKING_GAMUT)) return WORKING_GAMUT;
+      if (supportedGamuts.includes('display-p3')) return 'display-p3';
+      return supportedGamuts[0] ?? 'srgb';
    }, [supportedGamuts, sourceGamut]);
 
    // Effective active gamut: explicit user choice if valid for format, otherwise default

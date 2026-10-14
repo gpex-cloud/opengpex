@@ -61,6 +61,13 @@ import type { WorkingColorSpace, GamutId } from '@opengpex/editor/core/types';
  * (the shape `WebGpuEngine.export({ bitDepth: 32 })` returns) into straight,
  * sRGB-TRC-encoded 8-bit RGBA suitable for a Canvas `ImageData` / codec input.
  *
+ * ⚠️ NO GAMUT MATRIX — the linear input is assumed to already live in an
+ * sRGB/Display-P3-family gamut (same TRC, near-same primaries). Working-gamut
+ * (`WORKING_GAMUT`, ProPhoto) buffers MUST go through {@link unpremultiplyEncodeGamut}
+ * with `sourceGamut: WORKING_GAMUT` instead, which applies the W→target matrix.
+ * This helper has no production callers; it survives as the TRC regression
+ * baseline the gamut-aware siblings assert byte-identity against.
+ *
  * Per texel (mirrors `view.wgsl` `fs_main` default branch exactly):
  *   • `a <= 0`            → fully transparent, emit (0,0,0,0).
  *   • otherwise           → `straight = clamp(rgb / a, 0, 1)`, then
@@ -136,12 +143,12 @@ export function unpremultiplyEncodeSrgb8(
  * Bake-precision settlement: a 16-bit layer merge/peel keeps full
  * precision instead of truncating to 8-bit sRGB.
  *
- * GAMUT: the readback is in the WORKING gamut (always Linear Display-P3 —
- * `GpuDevice.configureSurface`). When the bake target gamut differs (an sRGB
- * document with a P3 layer in it), pass `gamut` so the naked pixels land in the
+ * GAMUT: the readback is in the WORKING gamut (Linear ProPhoto RGB —
+ * `WORKING_GAMUT`). When the bake target gamut differs (an sRGB
+ * document with a ProPhoto layer in it), pass `gamut` so the naked pixels land in the
  * SAME gamut as the 8-bit sibling blob and the asset's `ColorIdentity.gamut`.
- * Omitting it would register P3 numbers under an sRGB tag, and `SceneAssembler`
- * would then have the shader apply a spurious sRGB→P3 lift on re-composite.
+ * Omitting it would register W numbers under an sRGB tag, and `SceneAssembler`
+ * would then have the shader apply a spurious sRGB→W lift on re-composite.
  *
  * Unlike {@link unpremultiplyEncodeGamut}, the matrix output is NOT clamped to
  * [0,1]: half-float is the container precisely so out-of-gamut / over-range values
@@ -220,6 +227,12 @@ export function unpremultiplyEncodeLinearF16(
  * Convert one row-major `rgba32float` buffer of PREMULTIPLIED LINEAR-light RGBA
  * (the shape `WebGpuEngine.export({ bitDepth: 32 })` returns) into straight,
  * sRGB-TRC-encoded 16-bit integer RGBA suitable for lossless 16-bit TIFF/PNG export.
+ *
+ * ⚠️ NO GAMUT MATRIX — same caveat as {@link unpremultiplyEncodeSrgb8}: the linear
+ * input is assumed to already live in an sRGB/Display-P3-family gamut (same TRC,
+ * near-same primaries). Working-gamut (`WORKING_GAMUT`, ProPhoto) buffers MUST go
+ * through {@link unpremultiplyEncodeGamut} with `sourceGamut: WORKING_GAMUT`
+ * instead. No production callers; kept as the TRC regression baseline.
  *
  * Per texel (mirrors `unpremultiplyEncodeSrgb8` exactly, quantized to 16-bit 0..65535):
  *   • `a <= 0`   → fully transparent, emit (0,0,0,0).
@@ -403,7 +416,7 @@ export function unpremultiplyEncodeGamutF32(
 export interface GamutEncodeOptions {
   /**
    * Gamut of the readback buffer — in practice always
-   * `core/engine/color/gamut.ts::WORKING_GAMUT` ('display-p3'), an engine invariant
+   * `core/engine/color/gamut.ts::WORKING_GAMUT` ('prophoto-rgb'), an engine invariant
    * rather than a document property. This is the gamut the un-premultiplied
    * LINEAR pixels are currently in; the matrix converts FROM here. Pass the
    * constant `WORKING_GAMUT`; never re-derive it and never plumb it through a
@@ -430,9 +443,9 @@ export interface GamutEncodeOptions {
  * The BAKE path (`CompositeDispatcher`) also calls this, with `targetGamut`
  * restricted to the two canvas-representable gamuts (`core/strategy/bake.ts`) and
  * `sourceGamut` fixed to the working gamut. It converts for the same reason egest
- * does: the readback is always Linear Display-P3, so an sRGB document needs the
- * real P3→sRGB matrix — tagging the pixels `'srgb'` without it is what shipped P3
- * numbers under an sRGB profile.
+ * does: the readback is always Linear ProPhoto (the working gamut), so an sRGB
+ * document needs the real W→sRGB matrix — tagging the pixels `'srgb'` without it
+ * is what shipped working-space numbers under an sRGB profile.
  *
  * Per texel (float domain, in strict order, BEFORE any quantization):
  *   1. un-premultiply — `straight = rgb / a` (`a <= 0` → zeroed pixel, identical

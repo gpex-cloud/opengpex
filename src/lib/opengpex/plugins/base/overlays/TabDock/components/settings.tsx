@@ -32,8 +32,6 @@ export function TabDockSettings() {
   const { config } = state;
   const showSettingsButton = config.showSettingsButton ?? true;
 
-  // Feature toggles to easily toggle read-only behavior for settings
-
   const SNAP_OPTIONS = [
     { id: 'BL', label: 'Left' },
     { id: 'BC', label: 'Center' },
@@ -94,11 +92,11 @@ export function TabDockSettings() {
       {/* 3. Branch Indentation Toggle */}
       <button
         onClick={() => updateConfig({ indentBranches: !config.indentBranches })}
-        className="flex items-center justify-between w-full p-2.5 rounded-xl bg-[var(--bg-stage)] hover transition-all border border-[var(--border-subtle)] group"
+        className="flex items-center justify-between w-full p-2.5 rounded-xl bg-[var(--bg-stage)] transition-all border border-[var(--border-subtle)] group"
       >
         <div className="flex items-center gap-3">
           <div
-            className={`w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center transition-colors ${config.indentBranches ? "bg-indigo-500/10 text-indigo-600 " : "bg-[var(--bg-stage)] text-[var(--text-muted)]"}`}
+            className={`w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center transition-colors ${config.indentBranches ? "bg-indigo-500/10 text-indigo-600" : "bg-[var(--bg-stage)] text-[var(--text-muted)]"}`}
           >
             <Indent size={14} />
           </div>
@@ -121,7 +119,7 @@ export function TabDockSettings() {
       {/* 4. Metrics HUD Toggle */}
       <button
         onClick={() => updateConfig({ showMetricsHud: !config.showMetricsHud })}
-        className="flex items-center justify-between w-full p-2.5 rounded-xl bg-[var(--bg-stage)] hover transition-all border border-[var(--border-subtle)] group"
+        className="flex items-center justify-between w-full p-2.5 rounded-xl bg-[var(--bg-stage)] transition-all border border-[var(--border-subtle)] group"
       >
         <div className="flex items-center gap-3">
           <div

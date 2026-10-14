@@ -1308,7 +1308,8 @@ export class WebGpuEngine implements IEngine {
       // Identity upload: the bitmap preserves its intrinsic source gamut (e.g. Display-P3
       // via embedded ICC). Tag the copy destination with that SAME gamut so
       // `copyExternalImageToTexture` performs NO gamut conversion (identity);
-      // the shader's gamut-align step later maps gamut_id→working (P3).
+      // the shader's gamut-align step later maps gamut_id→working (ProPhoto,
+      // `WORKING_GAMUT`).
       //   • color rasters carry gamut = frame.colorSpace ∈ {srgb, display-p3};
       //   • untagged sources (masks, canvas-baked transients) are sRGB-intrinsic
       //     ⇒ default 'srgb' (identical to the pre-fix WebGPU default → zero

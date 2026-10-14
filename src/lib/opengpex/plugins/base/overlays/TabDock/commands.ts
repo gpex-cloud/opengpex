@@ -44,8 +44,9 @@ export const TAB_DOCK_COMMANDS = {
       // Only navigate among trunk frames (those without parentId)
       const trunkOrder = frames.order.filter(id => !frames.byId[id]?.parentId);
       if (trunkOrder.length <= 1) return;
-      const currentIndex = trunkOrder.indexOf(activeFrameId || '');
-      const nextIndex = (currentIndex + 1) % trunkOrder.length;
+      const currentTrunkId = frames.byId[activeFrameId || '']?.parentId || activeFrameId;
+      const currentIndex = trunkOrder.indexOf(currentTrunkId || '');
+      const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % trunkOrder.length;
       actions.switchFrame(trunkOrder[nextIndex]);
     },
     shortcuts: [{ key: 'ArrowRight', alt: true }]
@@ -61,8 +62,9 @@ export const TAB_DOCK_COMMANDS = {
       // Only navigate among trunk frames (those without parentId)
       const trunkOrder = frames.order.filter(id => !frames.byId[id]?.parentId);
       if (trunkOrder.length <= 1) return;
-      const currentIndex = trunkOrder.indexOf(activeFrameId || '');
-      const prevIndex = (currentIndex - 1 + trunkOrder.length) % trunkOrder.length;
+      const currentTrunkId = frames.byId[activeFrameId || '']?.parentId || activeFrameId;
+      const currentIndex = trunkOrder.indexOf(currentTrunkId || '');
+      const prevIndex = currentIndex === -1 ? trunkOrder.length - 1 : (currentIndex - 1 + trunkOrder.length) % trunkOrder.length;
       actions.switchFrame(trunkOrder[prevIndex]);
     },
     shortcuts: [{ key: 'ArrowLeft', alt: true }]

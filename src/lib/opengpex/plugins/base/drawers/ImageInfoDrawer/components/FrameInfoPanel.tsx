@@ -66,16 +66,19 @@ interface FrameInfoPanelProps {
   isHighRes: boolean;
   /** Layer is lower resolution than canvas */
   isUpScaled: boolean;
-  /**
-   * Layer's source bit depth (if available).
-   *
-   * There is deliberately no `frameBitDepth` sibling (§8.4.4 R2): the frame owns
-   * no colour/depth truth any more — the GPU working buffer is always
-   * rgba16float and per-asset depth lives on `StoredAsset.colorIdentity`. The
-   * old "Canvas" badge read the deleted `Frame.bitDepth`, which after the cutover
-   * could only have echoed this very same source-file number.
-   */
+  /** Layer card's source bit depth, from frame-level metadata (badge shows only above 8). */
   layerBitDepth?: number;
+  /**
+   * Document bit depth shown on the Canvas card (badge shows only above 8).
+   *
+   * The GPU working buffer is always rgba16float, so the working frame carries no
+   * depth of its own — the document's depth truth is the source asset's
+   * `ColorIdentity.bitDepth`, reached via `frame.assetId`. That number is what
+   * document-level behaviour (export defaults, depth gating) keys off, which is
+   * why the Canvas card surfaces it. The parent performs the asset lookup and
+   * falls back to frame metadata for documents without a source asset.
+   */
+  frameBitDepth?: number;
   /** Image metadata (EXIF, ICC, color space etc.) */
   imageMetadata?: ImageMetadata;
 }
@@ -95,6 +98,7 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
   isHighRes,
   isUpScaled,
   layerBitDepth,
+  frameBitDepth,
   imageMetadata,
 }: FrameInfoPanelProps) {
   const [copied, setCopied] = React.useState(false);
@@ -298,6 +302,11 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
             <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight">
               {isClipMode ? "Selection" : "Canvas"}
             </span>
+            {frameBitDepth != null && frameBitDepth > 8 && (
+              <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
+                {frameBitDepth}-bit
+              </span>
+            )}
           </div>
           <span className="text-[10px] font-bold text-[var(--text-main)] tabular-nums uppercase">
             {baseW} × {baseH}

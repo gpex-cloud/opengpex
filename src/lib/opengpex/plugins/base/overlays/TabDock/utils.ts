@@ -59,6 +59,40 @@ export const calculateDockPosition = (config: TabDockConfig) => {
 };
 
 /**
+ * Flattens a reordered trunk list back into a full frame order.
+ *
+ * Each trunk is emitted first, immediately followed by all of its descendant
+ * branches (any depth) in their original relative order as found in
+ * `orderedFrames`. Rebuilding descendants from the ordered list (instead of
+ * from the branch-menu structure, which lists newest-first) keeps branch order
+ * stable across trunk drags.
+ */
+export const flattenReorderedFrames = (
+  orderedFrames: Frame[],
+  newTrunkOrder: Frame[],
+): Frame[] => {
+  const byId = new Map(orderedFrames.map(f => [f.id, f]));
+  // Maps every frame to the id of the trunk it descends from (trunks map to
+  // themselves). The guard bounds the walk for malformed cyclic parent chains.
+  const rootIdOf = new Map<string, string>();
+  for (const f of orderedFrames) {
+    let cur: Frame | undefined = f;
+    let guard = 0;
+    while (cur?.parentId && guard++ <= orderedFrames.length) {
+      cur = byId.get(cur.parentId);
+    }
+    rootIdOf.set(f.id, cur?.id ?? f.id);
+  }
+
+  return newTrunkOrder.flatMap(root => {
+    const members = orderedFrames.filter(f => rootIdOf.get(f.id) === root.id);
+    const descendants = members.filter(f => f.id !== root.id);
+    const rootFirst = members.find(f => f.id === root.id) ?? root;
+    return [rootFirst, ...descendants];
+  });
+};
+
+/**
  * Calculates the branch structure for a set of frames.
  */
 export const calculateBranches = (frames: Frame[], trunkFrames: Frame[]) => {

@@ -70,7 +70,7 @@
  * AA edge can never punch a hole through a solid pixel a neighbour wrote, and equal-colour
  * overlaps do not double-darken. The downstream `drawLayer` applies `layer.opacity` /
  * blend / mask / adjust exactly as for any raster source. Colours arrive already in
- * WORKING-gamut (Display-P3) linear light (the scene-assembly mapper resolved them), and
+ * WORKING-gamut (ProPhoto RGB) linear light (the scene-assembly mapper resolved them), and
  * the prepass entry is flagged `sourceIsLinear/WorkingGamut/IntentApplied = true`, so no
  * further decode / convert / tone-map runs downstream.
  *

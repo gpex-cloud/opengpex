@@ -34,12 +34,13 @@
  * DELIBERATELY DEFERRED (do NOT add here):
  *   • Large-image tiling when the row-padded buffer exceeds `maxBufferSize`
  *     (TODO: split into horizontal bands, copy+map each, stitch).
- *   • TERMINAL TRC / colour-space ENCODE. The source texture is LINEAR light.
- *     This function returns LINEAR values in the requested container; the
- *     single sRGB/target-TRC encode belongs to the codec step, which MUST
- *     reuse the same `linear_to_srgb` conversion as `view.wgsl` (no second
- *     encode point). f16 depth returns the raw linear half decoded to float;
- *     u8/u16 quantize the linear value as-is.
+ *   • TERMINAL TRC / colour-space ENCODE. The source texture is LINEAR light in
+ *     `WORKING_GAMUT` (ProPhoto). This function returns LINEAR W values in the
+ *     requested container; the single terminal step belongs to the codec side
+ *     (`unpremultiplyEncodeGamut` / the display-track helpers), which MUST reuse
+ *     the same W→target gamut projection + `linear_to_srgb` conversion as
+ *     `view.wgsl` (no second encode point). f16 depth returns the raw linear
+ *     half decoded to float; u8/u16 quantize the linear value as-is.
  *
  * @module core/engine/gpu/readback
  */

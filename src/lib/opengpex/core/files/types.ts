@@ -336,8 +336,9 @@ export interface ExportMetadataConfig {
    * ICC profile (`getStockIccProfile`).
    *
    * It replaced a second field, `frameColorSpace` (the document's working space),
-   * which said the same thing less accurately: because the working buffer is always
-   * Linear Display-P3, feeding that to the old `resolveExportPixelConversion`
+   * which said the same thing less accurately: because the working buffer is
+   * always a fixed engine-chosen linear-light space (Linear Display-P3 at the
+   * time), feeding that to the old `resolveExportPixelConversion`
    * reported a spurious `'p3-to-srgb'` for a plain sRGB export and converted twice.
    *
    * When undefined, encoders fall back to plain `'srgb'` tagging.

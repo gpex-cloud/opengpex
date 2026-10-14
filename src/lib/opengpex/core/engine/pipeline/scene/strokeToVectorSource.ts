@@ -27,7 +27,7 @@
  * `Layer.bounding`) into an engine-neutral `vector` {@link LayerSource} carrying pure
  * numeric {@link StrokeParams} — the render core (`gpu/`, `pipeline/graph/`,
  * `shaders/`) consumes those without ever seeing a `Layer` or a `strokeData`. Colour is
- * converted ONCE into the document WORKING gamut (Display-P3) LINEAR light (straight
+ * converted ONCE into the document WORKING gamut (ProPhoto RGB) LINEAR light (straight
  * alpha) via {@link toWorkingLinearRgba}, and the trajectory is packed into the
  * `[x, y, width, _pad] × N` layout the `cs_extrude` compute pass reads — where
  * `width` is the effective tip DIAMETER (`size × pressure`), not the raw pressure.
@@ -46,8 +46,8 @@ const FLOATS_PER_POINT = 4;
  * Map a logic-brush layer to a `vector` {@link LayerSource} (`renderer: 'stroke'`),
  * or `undefined` if the layer carries no `strokeData`.
  *
- * `workingSpace` is the document compositing gamut (always `'display-p3'` as
- * assembled — see `SceneAssembler` invariant). `width`/`height` are read from the
+ * `workingSpace` is the document compositing gamut (always `WORKING_GAMUT`,
+ * ProPhoto RGB — see `SceneAssembler` invariant). `width`/`height` are read from the
  * layer's BOUNDING box (`layer.bounding.w/h`, same source the marker branch uses for
  * `SdfShapeParams.size`): they become the `LayerNode.width/height` the compositor
  * places the quad at, and the StrokeRenderer's vertex shader divides the logical-pixel

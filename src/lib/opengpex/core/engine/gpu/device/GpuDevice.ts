@@ -58,10 +58,11 @@ export class WebGpuUnavailableError extends Error {
  *
  * ⚠️ There is NO `colorSpace` here. The swapchain gamut is a hard
  * invariant — `configureSurface` below configures `colorSpace:'display-p3'`
- * unconditionally (see `core/engine/color/gamut.ts::WORKING_GAMUT`) — so the field this
- * interface used to carry could only ever be ignored. It was fed from the
- * now-deleted `Frame.colorSpace`, which is exactly the "document dictates the
- * working space" inversion R2 removed. `hdr` remains a genuine surface choice.
+ * unconditionally, and `view.wgsl` projects `WORKING_GAMUT` (ProPhoto) →
+ * display-p3 into it (see `core/engine/color/gamut.ts::WORKING_GAMUT`). The field this
+ * interface used to carry was fed from the now-deleted `Frame.colorSpace`, which is
+ * exactly the "document dictates the working space" inversion R2 removed. `hdr`
+ * remains a genuine surface choice.
  */
 export interface SurfaceConfig {
   readonly hdr: boolean;
@@ -240,11 +241,12 @@ export class GpuDevice {
       device: this.device,
       format: SWAPCHAIN_FORMAT,
       alphaMode: 'premultiplied',
-      // The swapchain is ALWAYS Display-P3. The working buffer is
-      // Linear Display-P3, and view.wgsl encodes linear→sRGB-TRC only —
-      // no gamut projection. Presenting on a P3 surface lets the OS map P3
-      // pixels correctly on both P3 and sRGB monitors. A gamut-following srgb
-      // swapchain would clip P3 content; abolished (no `toCanvasColorSpace`).
+      // The swapchain is ALWAYS Display-P3. The working buffer is Linear
+      // ProPhoto (`WORKING_GAMUT`), and view.wgsl projects W → display-p3
+      // (+ clamp) before its single linear→sRGB-TRC encode. Presenting on a P3
+      // surface lets the OS map P3 pixels correctly on both P3 and sRGB
+      // monitors. A gamut-following srgb swapchain would clip wide-gamut
+      // content; abolished (no `toCanvasColorSpace`).
       colorSpace: 'display-p3',
       ...(this.surface.hdr ? { toneMapping: { mode: 'extended' as const } } : {}),
     });

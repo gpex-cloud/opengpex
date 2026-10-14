@@ -42,7 +42,8 @@
  * `drawLayer` then applies `layer.opacity` / blend / mask / adjust exactly as it
  * does for any raster — which is why NO `layer_opacity` term appears here.
  *
- * Colours arrive already in WORKING-gamut (Display-P3) linear light from the scene
+ * Colours arrive already in WORKING-gamut (ProPhoto RGB, `WORKING_GAMUT`) linear
+ * light from the scene
  * source (`SdfShapeParams`) → the prepass entry is flagged
  * `sourceIsLinear/sourceIsWorkingGamut/sourceIntentApplied = true`, so the shader's
  * output is consumed without any further decode/convert/tone-map.
