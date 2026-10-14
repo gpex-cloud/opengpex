@@ -264,6 +264,21 @@ fn color_burn_ch(b : f32, f : f32) -> f32 {
 // ────────────────────────────────────────────────────────────
 
 fn apply_blend(bg : vec3<f32>, fg : vec3<f32>, mode : u32) -> vec3<f32> {
+  // ── BOUNDED FAMILY operand clamp (formula-family strategy) ──
+  // The bounded modes (overlay / color-dodge / color-burn / hard-light /
+  // soft-light + the four HSL modes) are authored on [0,1] operands (W3C), so
+  // their FOREGROUND operand is clamped here in STRAIGHT space — never the
+  // premultiplied value (clamping premultiplied RGB would hue-shift every
+  // semi-transparent HDR edge). The BACKDROP flows through unclamped:
+  // overlay/hard-light/soft-light extend polynomially and keep tracking HDR
+  // backdrop light; the dodge/burn guards and clip_color impose their own
+  // intrinsic W3C bounds. The total formulas (multiply / screen / darken /
+  // lighten / difference / exclusion / source-over) are total over ≥ 0 and
+  // pass through untouched. For [0,1] SDR content the clamp is a no-op —
+  // bit-identical to the pre-HDR behaviour.
+  let bounded = (mode >= 3u && mode <= 9u && mode != 4u && mode != 5u) || mode >= 12u;
+  let fg_op = select(fg, clamp(fg, vec3<f32>(0.0), vec3<f32>(1.0)), bounded);
+
   switch (mode) {
     case 0u: { // Normal / source-over
       return fg;
@@ -276,9 +291,9 @@ fn apply_blend(bg : vec3<f32>, fg : vec3<f32>, mode : u32) -> vec3<f32> {
     }
     case 3u: { // Overlay
       return vec3<f32>(
-        overlay_ch(bg.r, fg.r),
-        overlay_ch(bg.g, fg.g),
-        overlay_ch(bg.b, fg.b)
+        overlay_ch(bg.r, fg_op.r),
+        overlay_ch(bg.g, fg_op.g),
+        overlay_ch(bg.b, fg_op.b)
       );
     }
     case 4u: { // Darken
@@ -289,30 +304,30 @@ fn apply_blend(bg : vec3<f32>, fg : vec3<f32>, mode : u32) -> vec3<f32> {
     }
     case 6u: { // Color Dodge
       return vec3<f32>(
-        color_dodge_ch(bg.r, fg.r),
-        color_dodge_ch(bg.g, fg.g),
-        color_dodge_ch(bg.b, fg.b)
+        color_dodge_ch(bg.r, fg_op.r),
+        color_dodge_ch(bg.g, fg_op.g),
+        color_dodge_ch(bg.b, fg_op.b)
       );
     }
     case 7u: { // Color Burn
       return vec3<f32>(
-        color_burn_ch(bg.r, fg.r),
-        color_burn_ch(bg.g, fg.g),
-        color_burn_ch(bg.b, fg.b)
+        color_burn_ch(bg.r, fg_op.r),
+        color_burn_ch(bg.g, fg_op.g),
+        color_burn_ch(bg.b, fg_op.b)
       );
     }
     case 8u: { // Hard Light
       return vec3<f32>(
-        overlay_ch(fg.r, bg.r),
-        overlay_ch(fg.g, bg.g),
-        overlay_ch(fg.b, bg.b)
+        overlay_ch(fg_op.r, bg.r),
+        overlay_ch(fg_op.g, bg.g),
+        overlay_ch(fg_op.b, bg.b)
       );
     }
     case 9u: { // Soft Light
       return vec3<f32>(
-        soft_light_ch(bg.r, fg.r),
-        soft_light_ch(bg.g, fg.g),
-        soft_light_ch(bg.b, fg.b)
+        soft_light_ch(bg.r, fg_op.r),
+        soft_light_ch(bg.g, fg_op.g),
+        soft_light_ch(bg.b, fg_op.b)
       );
     }
     case 10u: { // Difference
@@ -322,16 +337,16 @@ fn apply_blend(bg : vec3<f32>, fg : vec3<f32>, mode : u32) -> vec3<f32> {
       return bg + fg - 2.0 * bg * fg;
     }
     case 12u: { // Hue
-      return blend_hue(bg, fg);
+      return blend_hue(bg, fg_op);
     }
     case 13u: { // Saturation
-      return blend_saturation(bg, fg);
+      return blend_saturation(bg, fg_op);
     }
     case 14u: { // Color
-      return blend_color(bg, fg);
+      return blend_color(bg, fg_op);
     }
     case 15u: { // Luminosity
-      return blend_luminosity(bg, fg);
+      return blend_luminosity(bg, fg_op);
     }
     default: {
       return fg;
@@ -423,10 +438,14 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   }
   fg_sample.a *= blend_u.opacity;
 
-  // Un-premultiply foreground RGB if source was premultiplied
+  // Un-premultiply foreground RGB if source was premultiplied. UNBOUNDED
+  // (scene-referred contract): the f16 foreground legitimately carries > 1.0
+  // HDR light, and a clamp here would flatten every highlight before the blend
+  // math ever sees it. For [0,1] SDR content this is bit-identical to the old
+  // clamp — clamping an in-range value is a no-op.
   var cs = fg_sample.rgb;
   if ((blend_u.flags & 4u) != 0u && fg_sample.a > 0.0001) {
-    cs = clamp(fg_sample.rgb / fg_sample.a, vec3<f32>(0.0), vec3<f32>(1.0));
+    cs = fg_sample.rgb / fg_sample.a;
   }
 
   // Per-layer colour adjustments on the STRAIGHT foreground rgb, before
@@ -448,8 +467,14 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
 
   let alpha_b = bg_sample.a;
   var cb = bg_sample.rgb;
+  // UNBOUNDED accumulator un-premultiply (scene-referred contract): the
+  // ping-pong accumulator is the previous composite and legitimately holds
+  // HDR light. This was the heaviest clamp in the pipeline — ANY layer with a
+  // non-source-over mode passes through here, so the old clamp flattened the
+  // whole already-composited highlight range on the very next ping-pong. For
+  // [0,1] SDR content it is a no-op (bit-identical).
   if (alpha_b > 0.0001) {
-    cb = clamp(bg_sample.rgb / alpha_b, vec3<f32>(0.0), vec3<f32>(1.0));
+    cb = bg_sample.rgb / alpha_b;
   }
 
   // 3. Compute blended color in un-premultiplied space.

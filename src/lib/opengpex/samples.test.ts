@@ -390,18 +390,30 @@ describe('OpenGPEX v2.0 - Samples Ingest & Egest Automated Test Suite', () => {
       expect(adobe10.colorIdentity.bitDepth).toBe(10);
       expect(adobe10.colorIdentity.trc).toBe('linear');
 
-      // Row 18 NEGATIVES: PQ / HLG / BT.2020 → colorSpace 'unknown' (transfer-
-      // aware nclx mapping) → honest unsupported. Rendering an image = regression.
-      for (const name of [
-        '29_avif_18_pq10_bt2020_12mp.avif',
-        '30_avif_18_hlg10_bt2020_12mp.avif',
-        '31_avif_18_bt2020sdr10_12mp.avif',
-      ]) {
-        const meta = await files.extractMetadata(loadSampleFile(name, 'image/avif'));
-        expect(meta.colorSpace, `${name} must resolve to unknown`).toBe('unknown');
-        const neg = resolveIngestDecision(meta);
-        expect(neg.decodeChannel, `${name} must be rejected`).toBe('unsupported');
-      }
+      // HDR rows (18-hdr-*, ultrawide phase B / D9): the wasm high-depth
+      // channel delivers RAW transfer code values bit-exactly (probe P0-4a,
+      // maxDev 0), so PQ/HLG now route to avif-proxy with our own 203-nit-
+      // anchored EOTF — scene-linear f16 in the source gamut. BT.2020
+      // primaries ride the row's rec2020 gamutOverride (gap #8 orbit).
+      // BT.2020-SDR (31) stays a negative: 'unknown' with NO transfer seam →
+      // row 18, honest unsupported.
+      const pq = resolveIngestDecision(await files.extractMetadata(
+        loadSampleFile('29_avif_18_pq10_bt2020_12mp.avif', 'image/avif')));
+      expect(pq.decodeChannel).toBe('avif-proxy');
+      expect(pq.colorIdentity.trc).toBe('linear');
+      expect(pq.colorIdentity.dataFormat).toBe('rgba16float');
+      expect(pq.colorIdentity.gamut).toBe('rec2020');
+      const hlg = resolveIngestDecision(await files.extractMetadata(
+        loadSampleFile('30_avif_18_hlg10_bt2020_12mp.avif', 'image/avif')));
+      expect(hlg.decodeChannel).toBe('avif-proxy');
+      expect(hlg.colorIdentity.trc).toBe('linear');
+      expect(hlg.colorIdentity.gamut).toBe('rec2020');
+
+      const bt2020sdr = await files.extractMetadata(
+        loadSampleFile('31_avif_18_bt2020sdr10_12mp.avif', 'image/avif'));
+      expect(bt2020sdr.colorSpace, `${bt2020sdr} must resolve to unknown`).toBe('unknown');
+      const neg = resolveIngestDecision(bt2020sdr);
+      expect(neg.decodeChannel, 'BT.2020 SDR must be rejected (gap #8)').toBe('unsupported');
 
       // Row 26 NEGATIVE: animated sequence → unsupported (never the first frame).
       const animMeta = await files.extractMetadata(

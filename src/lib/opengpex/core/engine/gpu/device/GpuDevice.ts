@@ -69,21 +69,36 @@ export interface SurfaceConfig {
 }
 
 /**
- * The swapchain texture format, PINNED.
+ * The swapchain texture formats, per presentation mode.
  *
- * ⚠️ Deliberately NOT `navigator.gpu.getPreferredCanvasFormat()`. That call may
- * return an `-srgb` variant, whose hardware would TRC-encode on write — and
- * `view.wgsl` already performs the pipeline's single terminal encode,
- * so the result would be double-encoded (visibly washed out) on those platforms
- * only. Pinning a non-`-srgb` format keeps the encode point unique, visible in
- * code, and testable. `Capabilities.preferredFormat` still records the real probe
- * result for diagnostics. See `configureSurface` for the full contract.
+ * ⚠️ SDR pin (A-phase terminal state): `SWAPCHAIN_FORMAT_SDR` is deliberately
+ * NOT `navigator.gpu.getPreferredCanvasFormat()`. That call may return an `-srgb`
+ * variant, whose hardware would TRC-encode on write — and the SDR `view.wgsl`
+ * variant already performs the pipeline's single terminal encode, so the result
+ * would be double-encoded (visibly washed out) on those platforms only. Pinning
+ * a non-`-srgb` format keeps the encode point unique, visible in code, and
+ * testable. `Capabilities.preferredFormat` still records the real probe result
+ * for diagnostics. `bgra8unorm` is guaranteed usable as a canvas format by the
+ * WebGPU spec and is the value `getPreferredCanvasFormat()` returns on the
+ * overwhelming majority of targets anyway.
  *
- * `bgra8unorm` is guaranteed usable as a canvas format by the WebGPU spec and is
- * the value `getPreferredCanvasFormat()` returns on the overwhelming majority of
- * targets anyway, so this costs no fast path.
+ * HDR pin (per-document HDR presentation switch): `rgba16float` — an 8-bit
+ * unorm target hard-clamps [0,1] at the ROP, so `bgra8unorm` can never carry
+ * the > 1.0 values the HDR contract outputs, no matter what `toneMapping` says
+ * (configure accepting it ≠ delivering HDR). `rgba16float` +
+ * `toneMapping:'extended'` lets the encode TAIL past white (linear light
+ * above display white encodes > 1.0) survive the write; the OS projects that
+ * excess onto the device headroom. The terminal encode STAYS in `view.wgsl`
+ * for both variants — device-verified: the compositor applies the canvas
+ * colorspace's transfer to float16 content as-is (linear content displayed
+ * raw reads crushed-dark), so the canvas holds encoded display-p3 either way.
+ *
+ * `SWAPCHAIN_FORMAT` keeps the historical name as the SDR pin; consumers that
+ * need the ACTIVE surface format read {@link GpuDevice.getSwapchainFormat}.
  */
-export const SWAPCHAIN_FORMAT: GPUTextureFormat = 'bgra8unorm';
+export const SWAPCHAIN_FORMAT_SDR: GPUTextureFormat = 'bgra8unorm';
+export const SWAPCHAIN_FORMAT_HDR: GPUTextureFormat = 'rgba16float';
+export const SWAPCHAIN_FORMAT = SWAPCHAIN_FORMAT_SDR;
 
 export class GpuDevice {
   private adapter: GPUAdapter | null = null;
@@ -217,19 +232,29 @@ export class GpuDevice {
    * into wide gamut; `toneMapping: 'extended'` unlocks true HDR headroom.
    *
    * ⚠️ COLOUR-SPACE CONTRACT — DO NOT "optimise" THIS BACK.
-   * The format is deliberately PINNED to a non-`-srgb` format and we deliberately do
-   * NOT use `navigator.gpu.getPreferredCanvasFormat()`'s return value here, in order
-   * to eliminate the `-srgb` DOUBLE-ENCODE risk: `view.wgsl` performs the pipeline's
-   * single terminal TRC encode (linear light → sRGB). If the swapchain
-   * were an `-srgb` format the hardware would encode a SECOND time on write, and the
-   * canvas would render visibly washed out on exactly those platforms whose preferred
-   * format happens to carry the suffix — a platform-dependent bug that no Node test
-   * can observe (H1 blind spot).
+   * SDR mode (`hdr:false`) pins a non-`-srgb` format (`bgra8unorm`) and we
+   * deliberately do NOT use `navigator.gpu.getPreferredCanvasFormat()`'s return
+   * value here, in order to eliminate the `-srgb` DOUBLE-ENCODE risk: the SDR
+   * `view.wgsl` variant performs the pipeline's single terminal TRC encode
+   * (linear light → sRGB). If the swapchain were an `-srgb` format the hardware
+   * would encode a SECOND time on write, and the canvas would render visibly
+   * washed out on exactly those platforms whose preferred format happens to
+   * carry the suffix — a platform-dependent bug that no Node test can observe
+   * (H1 blind spot).
    *
-   * `caps.preferredFormat` still records the true probe result for diagnostics and
-   * logging; it is simply not the authority for the surface's colour behaviour. If
-   * this ever needs to change, `view.wgsl`'s encode must be removed in the same
-   * commit — the two are a matched pair.
+   * HDR mode (`hdr:true`) pins `rgba16float` + `toneMapping:'extended'`: an
+   * 8-bit unorm ROP hard-clamps [0,1] so it can never deliver > 1.0, while the
+   * float16 surface carries the encode tail past white and 'extended' tells
+   * the OS to project that excess onto the device headroom. The HDR
+   * `view.wgsl` variant is the SDR contract minus the upper clamp — the
+   * terminal encode stays in the shader for BOTH variants (device-verified:
+   * the compositor does not re-encode float16 content; see `view.ts`). The
+   * single-encode invariant is untouched. `caps.preferredFormat` still records the true probe result for
+   * diagnostics and logging; it is simply not the authority for the surface's
+   * colour behaviour. Format and shader variant are a matched pair —
+   * `PipelineCache.getViewPipeline(format, hdr)` must be called with the same
+   * mode this function configured (the engine reads both from
+   * {@link getSwapchainFormat} / {@link isHdrPresentation}).
    */
   private configureSurface(): void {
     if (!this.device || !this.caps || !this.canvas) return;
@@ -239,11 +264,12 @@ export class GpuDevice {
 
     ctx.configure({
       device: this.device,
-      format: SWAPCHAIN_FORMAT,
+      format: this.getSwapchainFormat(),
       alphaMode: 'premultiplied',
       // The swapchain is ALWAYS Display-P3. The working buffer is Linear
-      // ProPhoto (`WORKING_GAMUT`), and view.wgsl projects W → display-p3
-      // (+ clamp) before its single linear→sRGB-TRC encode. Presenting on a P3
+      // ProPhoto (`WORKING_GAMUT`); the view pass projects W → display-p3
+      // (SDR variant: + clamp [0,1] + sRGB TRC in-shader; HDR variant: lower
+      // clamp only, linear out — the compositor encodes). Presenting on a P3
       // surface lets the OS map P3 pixels correctly on both P3 and sRGB
       // monitors. A gamut-following srgb swapchain would clip wide-gamut
       // content; abolished (no `toCanvasColorSpace`).
@@ -319,6 +345,22 @@ export class GpuDevice {
   }
 
   // ─── Accessors (borrowed by TexturePool / PipelineCache / passes) ───
+
+  /**
+   * The swapchain format the CURRENT surface mode configures — the single
+   * authority for "which format the present pipeline must be compiled against"
+   * (the engine's view pass reads this; it must never guess or read the probe
+   * result). SDR → `bgra8unorm`, HDR → `rgba16float`, matching
+   * {@link configureSurface} exactly.
+   */
+  getSwapchainFormat(): GPUTextureFormat {
+    return this.surface.hdr ? SWAPCHAIN_FORMAT_HDR : SWAPCHAIN_FORMAT_SDR;
+  }
+
+  /** True when the surface is configured for HDR presentation (f16 + extended). */
+  isHdrPresentation(): boolean {
+    return this.surface.hdr;
+  }
 
   getDevice(): GPUDevice | null {
     return this.device;

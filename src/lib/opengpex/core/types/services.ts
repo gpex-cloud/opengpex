@@ -520,8 +520,14 @@ export interface PixelService {
       targetHeight: number;
       region?: Rect;
       targetGamut: GamutId;
-      channel: 'canvas-8' | 'raw-8' | 'raw-16';
+      channel: 'canvas-8' | 'raw-8' | 'raw-16' | 'exr-half';
       canvasColorSpace: PredefinedColorSpace;
+      /**
+       * Per-document HDR presentation switch (D5, WYSIWYG): when false, the
+       * HDR export lanes ship the white-clamped SDR rendition instead of the
+       * full scene-referred headroom.
+       */
+      hdrSemantics?: boolean;
     }) => Promise<EncodeSource>;
   };
 

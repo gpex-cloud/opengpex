@@ -32,7 +32,7 @@
 import type { LayerBlendMode } from '@opengpex/editor/core/types';
 import { LAYER_WGSL, LAYER_UNIFORM_BUFFER_SIZE } from '../shaders/layer';
 import { BLEND_WGSL, isHardwareBlendable } from '../shaders/blend';
-import { VIEW_WGSL, VIEW_UNIFORM_BUFFER_SIZE } from '../shaders/view';
+import { VIEW_WGSL, VIEW_WGSL_HDR, VIEW_UNIFORM_BUFFER_SIZE } from '../shaders/view';
 import { SDF_WGSL, SDF_UNIFORM_BUFFER_SIZE } from '../shaders/sdf';
 import { STROKE_EXTRUDE_WGSL, STROKE_PAINT_WGSL, STROKE_UNIFORM_BUFFER_SIZE } from '../shaders/stroke';
 import { TEXT_PAINT_WGSL, TEXT_UNIFORM_BUFFER_SIZE, TEXT_INSTANCE_STRIDE } from '../shaders/text';
@@ -134,6 +134,7 @@ export class PipelineCache {
   private blendPipelineLayout: GPUPipelineLayout | null = null;
 
   private viewShaderModule: GPUShaderModule | null = null;
+  private viewHdrShaderModule: GPUShaderModule | null = null;
   private viewBindGroupLayout: GPUBindGroupLayout | null = null;
   private viewPipelineLayout: GPUPipelineLayout | null = null;
 
@@ -991,13 +992,30 @@ export class PipelineCache {
 
   // ─── View pipeline (composited document → swapchain, camera-applied) ───
 
-  getViewShaderModule(): GPUShaderModule {
-    if (this.viewShaderModule) return this.viewShaderModule;
-    this.viewShaderModule = this.device.createShaderModule({
-      code: VIEW_WGSL,
-      label: 'View WGSL Module',
+  /**
+   * Acquire a view shader module. Two variants share the concatenated prefix
+   * (structs / vertex stage / projection constant) and differ ONLY in the
+   * fragment tail: 'sdr' = project → clamp [0,1] → sRGB encode (the A-phase
+   * terminal contract, byte-identical); 'hdr' = project → lower clamp → the
+   * SAME encode, unclamped above 1 (the extended-range tail — see `view.ts`).
+   * The variant and the surface format are a matched pair with
+   * `GpuDevice.configureSurface`.
+   */
+  getViewShaderModule(hdr: boolean): GPUShaderModule {
+    if (!hdr) {
+      if (this.viewShaderModule) return this.viewShaderModule;
+      this.viewShaderModule = this.device.createShaderModule({
+        code: VIEW_WGSL,
+        label: 'View WGSL Module',
+      });
+      return this.viewShaderModule;
+    }
+    if (this.viewHdrShaderModule) return this.viewHdrShaderModule;
+    this.viewHdrShaderModule = this.device.createShaderModule({
+      code: VIEW_WGSL_HDR,
+      label: 'View HDR WGSL Module',
     });
-    return this.viewShaderModule;
+    return this.viewHdrShaderModule;
   }
 
   getViewBindGroupLayout(): GPUBindGroupLayout {
@@ -1047,9 +1065,15 @@ export class PipelineCache {
    * Acquire the VIEW pipeline. Maps the composited document texture
    * onto the swapchain applying the camera; writes with REPLACE_BLEND (the
    * swapchain is cleared first, matching the previous BlitPass behavior).
+   *
+   * `hdr` selects the shader variant AND must agree with the target format —
+   * SDR presents compile the clamped fragment against `bgra8unorm`;
+   * HDR presents compile the unclamped-tail fragment against `rgba16float`. The
+   * pair comes from `GpuDevice.getSwapchainFormat()` / `isHdrPresentation()`,
+   * the same authority `configureSurface` used.
    */
-  getViewPipeline(targetFormat: GPUTextureFormat = 'bgra8unorm'): GPURenderPipeline {
-    const key = `view:${targetFormat}`;
+  getViewPipeline(targetFormat: GPUTextureFormat = 'bgra8unorm', hdr = false): GPURenderPipeline {
+    const key = `view:${targetFormat}:${hdr ? 'hdr' : 'sdr'}`;
     let pipeline = this.pipelines.get(key);
     if (pipeline) return pipeline;
 
@@ -1057,7 +1081,7 @@ export class PipelineCache {
       label: `View Pipeline (${key})`,
       layout: this.getViewPipelineLayout(),
       vertex: {
-        module: this.getViewShaderModule(),
+        module: this.getViewShaderModule(hdr),
         entryPoint: 'vs_main',
         buffers: [
           {
@@ -1071,7 +1095,7 @@ export class PipelineCache {
         ],
       },
       fragment: {
-        module: this.getViewShaderModule(),
+        module: this.getViewShaderModule(hdr),
         entryPoint: 'fs_main',
         targets: [
           {
@@ -1626,6 +1650,7 @@ export class PipelineCache {
     this.blendBindGroupLayout = null;
     this.blendPipelineLayout = null;
     this.viewShaderModule = null;
+    this.viewHdrShaderModule = null;
     this.viewBindGroupLayout = null;
     this.viewPipelineLayout = null;
     this.sdfShaderModule = null;

@@ -214,41 +214,60 @@ fn adj_lut_coord(x : f32) -> f32 {
 const ADJUST_WGSL_BODY = /* wgsl */ `
 // Brightness — midtone-weighted quadratic curve (v1 generateBrightnessLUT):
 //   y = x + t·4·x·(1-x),  endpoints pinned, midtones lift/darken by t.
+//
+// HDR identity extension: for an encoded channel > 1 (an HDR highlight seen
+// through the TRC wrap) the quadratic's 4x(1−x) addend turns NEGATIVE — the
+// parabola folds — so the original formula would DARKEN highlights when the
+// user brightens. Above 1.0 the operator is therefore the identity, per
+// channel; inside [0,1] the v1 formula (and its output clamp, part of the
+// byte-faithful v1 contract) applies unchanged.
 fn adj_brightness(x : vec3<f32>, t : f32) -> vec3<f32> {
-  return clamp(x + t * 4.0 * x * (vec3<f32>(1.0) - x), vec3<f32>(0.0), vec3<f32>(1.0));
+  let sdr = clamp(x + t * 4.0 * x * (vec3<f32>(1.0) - x), vec3<f32>(0.0), vec3<f32>(1.0));
+  return select(sdr, x, x > vec3<f32>(1.0));
 }
 
 // Contrast — normalised tanh S-curve (v1 generateContrastLUT). Identity fast
 // path |c|<0.001; c>0 steepens around 0.5; c<0 linear compression to midpoint.
+// HDR identity extension: above 1.0 the operator is the identity per channel
+// (the tanh saturates — the un-extended curve would crush every HDR highlight
+// to its display ceiling).
 fn adj_contrast(x : vec3<f32>, c : f32) -> vec3<f32> {
   if (abs(c) < 0.001) {
     return x;
   }
+  var sdr = x;
   if (c > 0.0) {
     let factor = 1.0 + c * 4.0;
     let norm_denom = tanh(factor * 0.5);
-    return clamp(vec3<f32>(0.5) + 0.5 * tanh(factor * (x - vec3<f32>(0.5))) / norm_denom,
+    sdr = clamp(vec3<f32>(0.5) + 0.5 * tanh(factor * (x - vec3<f32>(0.5))) / norm_denom,
                  vec3<f32>(0.0), vec3<f32>(1.0));
+  } else {
+    let strength = 1.0 + c;
+    sdr = clamp(vec3<f32>(0.5) + (x - vec3<f32>(0.5)) * strength, vec3<f32>(0.0), vec3<f32>(1.0));
   }
-  let strength = 1.0 + c;
-  return clamp(vec3<f32>(0.5) + (x - vec3<f32>(0.5)) * strength, vec3<f32>(0.0), vec3<f32>(1.0));
+  return select(sdr, x, x > vec3<f32>(1.0));
 }
 
 // Colour balance — HSL-lightness-weighted additive offsets (v1
 // applyColorBalanceRGBA8). Weights (1-L)² / 4·L·(1-L) / L², each ×CB_SCALE=0.25.
 // Offsets arrive pre-scaled by CB_STRENGTH=1/100. Optional additive luminance
 // restoration (preserveLuminosity): add back the Rec.709 luma delta uniformly.
+//
+// HDR: the ZONE WEIGHT variable (HSL lightness) clamps to [0,1] — an HDR
+// pixel's unclamped L would fling the highlight weight past 1 and invert the
+// zone semantics — while the PIXEL flows through UNCLAMPED: the offsets are
+// additive and total, so an HDR highlight survives a colour balance.
 fn adj_color_balance(x : vec3<f32>) -> vec3<f32> {
-  let l = (max(x.r, max(x.g, x.b)) + min(x.r, min(x.g, x.b))) * 0.5;
+  let l_raw = (max(x.r, max(x.g, x.b)) + min(x.r, min(x.g, x.b))) * 0.5;
+  let l = clamp(l_raw, 0.0, 1.0);
   let one_minus_l = 1.0 - l;
   let w_s = one_minus_l * one_minus_l * 0.25;
   let w_m = 4.0 * l * one_minus_l * 0.25;
   let w_h = l * l * 0.25;
-  var n = clamp(x + adj.cb_shadows.rgb * w_s + adj.cb_midtones.rgb * w_m + adj.cb_highlights.rgb * w_h,
-                vec3<f32>(0.0), vec3<f32>(1.0));
+  var n = x + adj.cb_shadows.rgb * w_s + adj.cb_midtones.rgb * w_m + adj.cb_highlights.rgb * w_h;
   if (adj.cb_preserve > 0.5) {
     let d = dot(x, ADJ_LUMA) - dot(n, ADJ_LUMA);
-    n = clamp(n + vec3<f32>(d), vec3<f32>(0.0), vec3<f32>(1.0));
+    n = n + vec3<f32>(d);
   }
   return n;
 }
@@ -272,35 +291,50 @@ fn apply_adjustments(rgb_in : vec3<f32>) -> vec3<f32> {
     c = adj_contrast(c, adj.contrast_c);
   }
   // levels — one shared table applied to every channel (v1 generateLevelsLUT).
+  // HDR identity extension: a channel above the encoded table domain (> 1) is
+  // the identity — the table's [0,1] lookup coordinate stays clamped (its axis
+  // is a bounded encoding axis), and out-of-domain values pass through.
   if ((adj.flags & 8u) != 0u) {
-    c = vec3<f32>(
+    let tbl = vec3<f32>(
       textureSample(levels_lut, lut_samp, adj_lut_coord(c.r)).r,
       textureSample(levels_lut, lut_samp, adj_lut_coord(c.g)).g,
       textureSample(levels_lut, lut_samp, adj_lut_coord(c.b)).b,
     );
+    c = select(tbl, c, c > vec3<f32>(1.0));
   }
   // curves — per-channel tables baked as perChannel(master(x)) in the RGBA LUT
   // (v1 composition order); sample channel r/g/b from the matching LUT channel.
+  // Same HDR identity extension as levels.
   if ((adj.flags & 16u) != 0u) {
-    c = vec3<f32>(
+    let tbl = vec3<f32>(
       textureSample(curve_lut, lut_samp, adj_lut_coord(c.r)).r,
       textureSample(curve_lut, lut_samp, adj_lut_coord(c.g)).g,
       textureSample(curve_lut, lut_samp, adj_lut_coord(c.b)).b,
     );
+    c = select(tbl, c, c > vec3<f32>(1.0));
   }
   if ((adj.flags & 4u) != 0u) {
     c = adj_color_balance(c);
   }
+  // Fused saturation·hue·channelMix matrix. The output clamp is GONE: the
+  // operator is a linear (affine) map, total over all of ℝ — the v1-era clamp
+  // was the [0,1] container ceiling, not part of the operator's math, and on
+  // an HDR pixel it would crush every encoded > 1 highlight back to white.
   if ((adj.flags & 2u) != 0u) {
-    c = clamp(adj.color_matrix * c + adj.mat_constant.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    c = adj.color_matrix * c + adj.mat_constant.rgb;
   }
   // 3D LUT (.cube) — LAST in the chain (the film-emulation
   // look is applied to the already-graded colour). Hardware trilinear filtering
   // does the interpolation; lut3d_strength allows a partial application
   // (0 = bypass, 1 = full), so a strength of 0 is exactly the input.
+  // HDR identity extension: a pixel with ANY channel above the LUT's authored
+  // [0,1] domain is outside the table's colour solid — the look does not apply
+  // and the pixel passes through (the sample-coordinate clamp below is the
+  // bounded-axis contract, kept; it only keeps the lookup itself defined).
   if ((adj.flags & 32u) != 0u) {
     let lut_rgb = textureSample(lut3d_tex, lut_samp, clamp(c, vec3<f32>(0.0), vec3<f32>(1.0))).rgb;
-    c = mix(c, lut_rgb, clamp(adj.lut3d_strength, 0.0, 1.0));
+    let mixed = mix(c, lut_rgb, clamp(adj.lut3d_strength, 0.0, 1.0));
+    c = select(mixed, c, any(c > vec3<f32>(1.0)));
   }
   // TRC wrap, exit: encoded → linear. Restores linear working space for the caller,
   // which re-premultiplies and composites in linear light.

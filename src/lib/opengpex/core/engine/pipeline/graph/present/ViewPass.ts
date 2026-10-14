@@ -137,6 +137,13 @@ export interface ViewPassContext {
   readonly pipelineCache: PipelineCache;
   readonly bufferRing: BufferRing;
   readonly targetFormat: GPUTextureFormat;
+  /**
+   * HDR presentation variant — MUST agree with `targetFormat` (SDR pairs
+   * `bgra8unorm` with the clamped fragment; HDR pairs `rgba16float` with the
+   * unclamped-tail fragment — both encode in-shader, see `view.ts`).
+   * Defaults to false (the SDR contract).
+   */
+  readonly hdr?: boolean;
   readonly channelMask?: SceneChannelMask;
   /** unit quad (document extent) → NDC. Identity full-screen by default. */
   readonly viewMatrix: ViewMatrix;
@@ -223,7 +230,7 @@ export class ViewPass {
       ],
     });
 
-    passEncoder.setPipeline(ctx.pipelineCache.getViewPipeline(ctx.targetFormat));
+    passEncoder.setPipeline(ctx.pipelineCache.getViewPipeline(ctx.targetFormat, ctx.hdr ?? false));
     passEncoder.setVertexBuffer(0, ctx.pipelineCache.getQuadVertexBuffer());
     passEncoder.setBindGroup(0, bindGroup, [slot.offset]);
     passEncoder.draw(6);

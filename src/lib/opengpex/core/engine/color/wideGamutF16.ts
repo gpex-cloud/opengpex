@@ -54,6 +54,7 @@
 
 import { gammaToLinear, ADOBE_RGB_GAMMA, PROPHOTO_GAMMA } from './trc';
 import { linearFloatToFloat16 } from './float16';
+import { pqToSceneLinear, hlgToSceneLinear } from './hdrTransfer';
 
 /** Shape of the `highDepthSource` a wide-gamut degamma produces (mirrors DecodeResult). */
 export interface WideGamutHighDepth {
@@ -157,4 +158,33 @@ export function wideGamut16ToF16(
     trc: 'linear',
     gamut: srcGamut,
   };
+}
+
+/**
+ * HDR transfer delinearizer — the PQ/HLG sibling of the wide-gamut degamma.
+ *
+ * Input: naked interleaved RGBA at the 65535 scale carrying RAW TRANSFER CODE
+ * VALUES (what the wasm AVIF decoder delivers bit-exactly — no linearization,
+ * no OOTF). Output: f16 SCENE-REFERENCED linear light in the SOURCE gamut
+ * (1.0 = 203 cd/m² SDR white, D8 anchor; > 1.0 = headroom), the shape the GPU
+ * raw upload + `gamut_to_working` consume with `trc: 'linear'` and the
+ * source's gamut tag. Alpha is coverage and passes through normalized.
+ *
+ * NO gamut matrix, NO clamp here — same contract as the wide-gamut kernels:
+ * source-gamut scene-linear values pass straight through (the shader matrix
+ * later emits negatives for out-of-display colours; HDR headroom survives).
+ */
+export function hdrTransfer16ToF16(
+  naked: Uint16Array,
+  transfer: 'pq' | 'hlg',
+): Uint16Array {
+  const toScene = transfer === 'pq' ? pqToSceneLinear : hlgToSceneLinear;
+  const linear = new Float32Array(naked.length);
+  for (let i = 0; i < naked.length; i += 4) {
+    linear[i] = toScene(naked[i] / 65535);
+    linear[i + 1] = toScene(naked[i + 1] / 65535);
+    linear[i + 2] = toScene(naked[i + 2] / 65535);
+    linear[i + 3] = naked[i + 3] / 65535; // alpha: coverage, no TRC
+  }
+  return linearFloatToFloat16(linear);
 }

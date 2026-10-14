@@ -51,6 +51,7 @@ import { WebpHandler } from './handlers/webp';
 import { AvifHandler } from './handlers/avif';
 import { VectorHandler, getVectorIntrinsicSize, detectVectorFormat, needsRasterSize, computeRasterSize, MAX_RASTER_DIMENSION } from './handlers/vector';
 import { GifHandler } from './handlers/gif';
+import { ExrHandler } from './handlers/exr';
 import { mimeToExt } from './shared/mime';
 // strategy.ts is NOT part of the './color' barrel — the entry imports the single
 // ingest-decision authority explicitly.
@@ -63,8 +64,11 @@ import type { IngestDecision } from './strategy';
 export { getVectorIntrinsicSize, detectVectorFormat, needsRasterSize, computeRasterSize, MAX_RASTER_DIMENSION };
 
 // Re-export metadata display + file acquisition + page semantics helpers
-export { hasDisplayableMetadata, isComfyUiWorkflow, toFile, fromUrl, classifyDecode } from './utils';
+export { isComfyUiWorkflow, toFile, fromUrl, classifyDecode } from './utils';
 export type { DecodeKind } from './utils';
+
+// HDR document judgement (D5 presentation switch auto-default)
+export { fileCarriesHdr } from './hdr';
 
 // Re-export all public types
 export type {
@@ -181,6 +185,7 @@ export function createFileService(
     new TiffHandler(assets),
     new RawHandler(assets),
     new VectorHandler(),
+    new ExrHandler(),
   ];
 
   const fallback = new FallbackHandler();

@@ -51,7 +51,7 @@ import type { SourceFormat } from '../../../types';
 import type { GamutId } from '@opengpex/editor/core/types';
 
 /** The physical encode lane the pixels travel. */
-export type EgestChannel = 'canvas-8' | 'raw-8' | 'raw-16';
+export type EgestChannel = 'canvas-8' | 'raw-8' | 'raw-16' | 'exr-half';
 
 /**
  * The objective, per-container EXPORT capability facts — ICC, channel and gamut
@@ -91,6 +91,12 @@ export const FORMAT_EGEST_CAPABILITIES: Record<SourceFormat, FormatEgestCapabili
   gif:  { supportedChannels: ['canvas-8'], maxBitDepth: 8, supportedGamuts: ['srgb'], supportsIccEmbed: false },
   svg:  { supportedChannels: ['canvas-8'], maxBitDepth: 8, supportedGamuts: ['srgb'], supportsIccEmbed: false },
   eps:  { supportedChannels: ['canvas-8'], maxBitDepth: 8, supportedGamuts: ['srgb'], supportsIccEmbed: false },
+
+  // ─── HDR scene-referred container: the exr-half lane (own writer) ───
+  // Half-float LINEAR light; colour travels via the chromaticities header (the
+  // four gamuts with known CIE xy primaries), not an ICC profile. 16-bit truth
+  // by construction (f16 IS the container; there is no 8-bit EXR lane here).
+  exr:  { supportedChannels: ['exr-half'], maxBitDepth: 16, supportedGamuts: ['srgb', 'display-p3', 'adobe-rgb', 'prophoto-rgb'], supportsIccEmbed: false },
 
   // ─── Decode-only formats: no encoder exists, hence no channel at all ───
   heic: { supportedChannels: [], maxBitDepth: 8, supportedGamuts: ['srgb'], supportsIccEmbed: false },

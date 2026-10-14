@@ -47,3 +47,5 @@ export * from './wideGamutF16';
 export * from './resampleHighDepth';
 export * from './cubeLut';
 export * from './filmic';
+export * from './shoulder';
+export * from './hdrTransfer';

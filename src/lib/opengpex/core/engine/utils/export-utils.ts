@@ -165,6 +165,14 @@ export function unpremultiplyEncodeLinearF16(
   width: number,
   height: number,
   gamut?: { readonly sourceGamut: WorkingColorSpace; readonly targetGamut: WorkingColorSpace },
+  /**
+   * WYSIWYG SDR clamp (D5): when the per-document HDR switch is OFF, an HDR
+   * container export must carry the SDR semantics the panel showed — RGB
+   * clamps to [0,1] AFTER the gamut matrix (the SDR view's white clamp AND its
+   * negative-coordinate clamp), instead of shipping the full headroom.
+   * Default false (the scene-referred truth).
+   */
+  clampRgb = false,
 ): Uint16Array {
   const expected = width * height * 4;
   if (linearPremul.length < expected) {
@@ -207,11 +215,17 @@ export function unpremultiplyEncodeLinearF16(
     let b = linearPremul[i + 2] * inv;
 
     if (m) {
-      // Linear-light matrix, UNCLAMPED (see the gamut note above).
+      // Linear-light matrix, UNCLAMPED (see the gamut note above) unless the
+      // SDR white clamp is requested (the D5 OFF semantics).
       const lr = r, lg = g, lb = b;
       r = m[0] * lr + m[1] * lg + m[2] * lb;
       g = m[3] * lr + m[4] * lg + m[5] * lb;
       b = m[6] * lr + m[7] * lg + m[8] * lb;
+    }
+    if (clampRgb) {
+      r = r < 0 ? 0 : (r > 1 ? 1 : r);
+      g = g < 0 ? 0 : (g > 1 ? 1 : g);
+      b = b < 0 ? 0 : (b > 1 ? 1 : b);
     }
 
     out[i] = floatToHalf(r);

@@ -2,6 +2,15 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.11
+
+- Image Formats: HDR photos (PQ/HLG AVIF) now open with their true brightness on HDR-capable displays instead of being flattened into SDR white
+- Export: new OpenEXR (.exr) export keeps highlight values above SDR white intact for HDR/compositing workflows
+- Color: compositing, blending and adjustments no longer clip pixel values above display white, so HDR content survives every editing step
+- Workspace: new HDR presentation toggle in the image info panel (with an HDR badge) to switch a document between HDR and SDR rendering
+
+---
+
 ## v2.0.10
 
 - Color: implemented a much wider working color space — vivid colors in Adobe RGB / Pro Photo photos are no longer clipped while you edit; previews, markers and brushes render in true-to-color wide gamut, and exports keep the full color range (Pro Photo for PNG/TIFF, Display P3 for JPEG/WebP/AVIF)

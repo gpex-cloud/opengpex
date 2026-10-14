@@ -261,6 +261,50 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
   // is bit-exact at native depth — gpex-cloud/probes/avif); high depth routes
   // to the avif-proxy channel and the metadata reports the TRUE depth.
   {
+    // HDR (PQ/HLG) — probe P0-4a rewrote the evidence base: the wasm high-depth
+    // channel delivers RAW TRANSFER CODE VALUES bit-exactly (maxDev 0 on
+    // lossless identity ramps), so the EOTF is ours to apply. Route to
+    // avif-proxy; decode.ts applies the 203-nit-anchored PQ/HLG EOTF →
+    // scene-linear f16 in the source gamut (D8/D9). The SDR vocabulary rows
+    // below never see these files (first-match order).
+    id: '18-hdr-sdr-vocab',
+    condition: {
+      format: 'avif',
+      bitDepth: '*',
+      colorSpace: ['srgb', 'display-p3'],
+      transfer: ['pq', 'hlg'],
+      isMultiFrame: false,
+    },
+    action: {
+      decodeChannel: 'avif-proxy',
+      trc: 'linear',
+      dataFormat: 'rgba16float',
+      applyOrientation: 'explicit',
+      description: 'AVIF PQ/HLG, sRGB/P3 primaries — wasm decode + own EOTF, scene-linear f16',
+    },
+  },
+  {
+    // Same as above for BT.2020 primaries: no ColorSpaceId member (gap #8), so
+    // the row carries the authoritative gamutOverride ('rec2020' is a GamutId
+    // the render graph already has a matrix for).
+    id: '18-hdr-bt2020',
+    condition: {
+      format: 'avif',
+      bitDepth: '*',
+      colorSpace: 'unknown',
+      transfer: ['pq', 'hlg'],
+      isMultiFrame: false,
+    },
+    action: {
+      decodeChannel: 'avif-proxy',
+      trc: 'linear',
+      dataFormat: 'rgba16float',
+      gamutOverride: 'rec2020',
+      applyOrientation: 'explicit',
+      description: 'AVIF PQ/HLG, BT.2020 primaries — wasm decode + own EOTF, scene-linear f16 (rec2020)',
+    },
+  },
+  {
     id: 15,
     condition: {
       format: 'avif',
@@ -329,10 +373,10 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
   {
-    // PQ / HLG / BT.2020 resolve to colorSpace 'unknown' (transfer-aware
-    // nclxToColorSpace, 2026-10-13 probe): no tone mapping exists and the
-    // browser's own HDR→SDR mapping is uncontrolled (meanDev ≈ 30/255) —
-    // honest unsupported beats a silent wrong rendering. Mirrors HEIC 19d.
+    // Remaining 'unknown'-colourSpace files (SDR BT.2020, ICC-tagged oddities)
+    // and MULTI-FRAME HDR (the HDR rows above are single-frame): honest
+    // unsupported — the browser's own HDR→SDR mapping is uncontrolled
+    // (meanDev ≈ 30/255) and SDR BT.2020 is the gap-#8 orbit. Mirrors HEIC 19d.
     id: '18',
     condition: {
       format: 'avif',

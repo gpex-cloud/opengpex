@@ -157,45 +157,6 @@ export function classifyDecode(decoded: DecodeResult): DecodeKind {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Metadata Display Helpers
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Determine if an ImageMetadata has "displayable" content worth showing
- * in the metadata panel — beyond basic dimensions (which are always shown
- * in the canvas/layer cards).
- *
- * This function centralizes the "should we show metadata panel?" logic,
- * making it reusable across FrameInfoPanel, StorageInfoPanel, etc.
- *
- * Note: AI generation info from frame.extra is handled separately by
- * AiGenerationPanel and is NOT part of this function's concern.
- *
- * @param meta - Image metadata from frame.metadata
- * @returns true if metadata panel should be shown
- *
- * @future Will be migrated to `core/files/metadata/` directory.
- */
-export function hasDisplayableMetadata(meta?: ImageMetadata): boolean {
-  if (!meta) return false;
-
-  // Photographic metadata (EXIF camera/capture/dates)
-  if (meta.camera || meta.capture || meta.dates) return true;
-  // ICC Profile
-  if (meta.raw?.icc) return true;
-  // Non-trivial color space (not sRGB, not unknown)
-  if (meta.colorSpace && meta.colorSpace !== 'srgb' && meta.colorSpace !== 'unknown') return true;
-  // High bit depth (>8)
-  if ((meta.bitDepth ?? 8) > 8) return true;
-  // ComfyUI / SD WebUI workflow data in PNG tEXt
-  if (isComfyUiWorkflow(meta) !== undefined) return true;
-  // XMP data present (may contain AI provenance or other interesting info)
-  if (meta.raw?.xmp) return true;
-
-  return false;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // AI Provenance Detection
 // ═══════════════════════════════════════════════════════════════════════════════
 

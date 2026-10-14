@@ -40,7 +40,8 @@ import type { IngestDecision } from './strategy';
 /** Supported source format identifiers */
 export type SourceFormat =
   | 'jpeg' | 'png' | 'bmp' | 'webp' | 'avif'
-  | 'heic' | 'tiff' | 'raw' | 'svg' | 'eps' | 'gif' | 'unknown';
+  | 'heic' | 'tiff' | 'raw' | 'svg' | 'eps' | 'gif'
+  | 'exr' | 'unknown';
 
 /** How the DPI value was determined */
 export type DpiSource = 'exif' | 'png-phys' | 'bmp-header' | 'tiff-tag' | 'user' | 'default';

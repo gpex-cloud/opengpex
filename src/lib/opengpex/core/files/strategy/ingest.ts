@@ -228,6 +228,9 @@ export function resolveIngestDecision(metadata: ImageMetadata, env?: IngestEnvir
     hasAlpha,
     isMultiFrame = false,
   } = metadata;
+  // HDR seam: the container's transfer characteristic (PQ/HLG) routes the HDR
+  // decision rows; 'sdr'/undefined is the SDR vocabulary.
+  const transfer = metadata.raw?.transfer;
 
   // 1. Pre-process: physical constraints. The old AVIF >8→8-bit clamp is gone
   //    (2026-10-13): the isolated jsquash/libavif wasm decoder is bit-exact at
@@ -242,13 +245,17 @@ export function resolveIngestDecision(metadata: ImageMetadata, env?: IngestEnvir
     colorSpace: detectedColorSpace,
     isMultiFrame,
     hevcHardDecode: env?.hevcHardDecode ?? false,
+    transfer,
   };
   const matched = matchRule(INGEST_DECISION_RULES, ctx);
   const { action } = matched;
 
   // 3. Post-process: assemble output contract.
-  //    Gamut is determined by the input colorSpace via colorSpaceToGamut, not by rule actions.
-  const gamut: GamutId = colorSpaceToGamut(detectedColorSpace);
+  //    Gamut is determined by the input colorSpace via colorSpaceToGamut, not by rule actions —
+  //    with ONE documented exception: the HDR rows may override it, because
+  //    BT.2020 primaries have no ColorSpaceId member (gap #8) and the row is
+  //    where the container's true primaries are known.
+  const gamut: GamutId = action.gamutOverride ?? colorSpaceToGamut(detectedColorSpace);
 
   const colorIdentity: ColorIdentity = {
     gamut,

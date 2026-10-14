@@ -145,6 +145,13 @@ export interface PresentContext {
   readonly bufferRing: BufferRing;
   readonly currentView: GPUTextureView;
   readonly targetFormat: GPUTextureFormat;
+  /**
+   * HDR presentation variant — selects the view pipeline's shader variant
+   * (unclamped-tail vs SDR-clamped; both encode in-shader, see `view.ts`). Must come from the same
+   * surface state that configured `targetFormat`
+   * (`GpuDevice.isHdrPresentation()`); omitting it is the SDR contract.
+   */
+  readonly hdr?: boolean;
   /** The Scene whose `view` + `frame` + `display` drive the present. */
   readonly scene: Scene;
   /**
@@ -670,6 +677,7 @@ export class RenderGraph {
       pipelineCache,
       bufferRing,
       targetFormat,
+      hdr: ctx.hdr ?? false,
       channelMask: scene.display.channelMask,
       viewMatrix,
       // Screen physical px per composited texel = the camera's

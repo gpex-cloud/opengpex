@@ -55,6 +55,41 @@
  * read+write for ~12 ALU ops of work. With W = display-p3 the matrix degenerates
  * to identity and the pass is byte-identical to the pre-projection present.
  *
+ * TWO PIPELINE VARIANTS (SDR / HDR presentation)
+ * ----------------------------------------------
+ * `VIEW_WGSL` is the SDR variant — the A-phase terminal contract, byte-for-byte:
+ * project → clamp [0,1] → `linear_to_srgb` encode into a `bgra8unorm` swapchain.
+ * `VIEW_WGSL_HDR` is the HDR variant for the per-document HDR presentation
+ * switch (`SurfaceConfig.hdr`): the swapchain becomes `rgba16float` +
+ * `toneMapping:'extended'`, and the fragment is the SDR contract MINUS the
+ * upper clamp — un-premultiply → project → lower clamp ≥ 0 → the SAME
+ * `linear_to_srgb` encode, unclamped above 1.
+ *
+ * ⚠️ THE ENCODE STAYS IN THE SHADER (device-verified 2026-10-14): an earlier
+ * draft emitted LINEAR values on the theory that the compositor applies the
+ * transfer function to float16 canvas content at present time. On real Chrome
+ * the canvas colorspace's transfer applies to the buffer values AS-IS — linear
+ * midtones displayed raw read as crushed-dark, over-saturated (the whole frame
+ * drops by the missing OETF). So the canvas holds ENCODED display-p3 in both
+ * variants; 'extended' changes only the RANGE the target can carry: an 8-bit
+ * unorm ROP hard-clamps at 1 (the SDR white), while the float16 surface lets
+ * encode(linear > 1) — the OETF tail beyond white — survive the write, and the
+ * OS projects that excess onto the device's headroom. For ≤ 1 content the two
+ * variants are byte-identical BY CONSTRUCTION (same projection, same encode;
+ * the SDR clamp and the ROP clamp agree), which is the load-bearing rollback
+ * anchor. Where the OS maps the > 1 tail is device behaviour, quantified in
+ * the real-device batch.
+ *
+ * Both variants share the concatenated prefix (structs, vertex stage,
+ * projection constant) so they cannot drift; the fragment tails are compiled
+ * pipeline variants selected by `PipelineCache.getViewPipeline(targetFormat,
+ * hdr)` — zero per-pixel branches.
+ *
+ * The HDR variant also sanitizes its INPUT (f16 upper bound 65504 ≈ +16 stops;
+ * past it the composite buffer can hold Inf, and Inf cascades into NaN through
+ * the blend math): NaN components are scrubbed to 0 and everything clamps to the
+ * f16 max so the swapchain write is always finite.
+ *
  * @module core/gpu/shaders/view
  */
 
@@ -68,7 +103,13 @@ import { deriveMatrix64, WORKING_GAMUT } from '@opengpex/editor/core/engine/colo
  */
 const MAT_WORKING_TO_DISPLAY = wgslMat(deriveMatrix64(WORKING_GAMUT, 'display-p3'));
 
-export const VIEW_WGSL = COLORSPACE_WGSL + /* wgsl */ `
+/**
+ * Everything both pipeline variants share: the TRC helpers, the uniform block,
+ * the sampler bindings, the projection constant and the vertex stage. Each
+ * variant appends exactly one `fs_main` (WGSL forbids duplicate top-level
+ * definitions per module, so the tails must be mutually exclusive).
+ */
+const VIEW_WGSL_COMMON = COLORSPACE_WGSL + /* wgsl */ `
 struct ViewUniforms {
   view_matrix  : mat3x3<f32>,   // unit quad (document extent) -> NDC (48 bytes: 3× vec3 padded)
   uv_scale     : vec2<f32>,     // content fraction of the (POT-bucketed) source texture (offset 48)
@@ -104,6 +145,15 @@ fn vs_main(in : VSInput) -> VSOut {
   out.uv = in.uv * view_u.uv_scale;
   return out;
 }
+`;
+
+/**
+ * SDR pipeline variant — the A-phase terminal contract, UNCHANGED: project →
+ * clamp [0,1] → sRGB TRC encode, into the `bgra8unorm` swapchain. Every byte of
+ * this fragment is load-bearing for the SDR byte-identity guarantee (铁律: the
+ * SDR path is byte-identical to the A-phase terminal state by construction).
+ */
+export const VIEW_WGSL = VIEW_WGSL_COMMON + /* wgsl */ `
 
 @fragment
 fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
@@ -196,6 +246,103 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   // Full RGB (all three bits) or all-off safety: normal present. Un-premultiply →
   // project to the display gamut → encode the STRAIGHT colour → re-premultiply
   // (rule 1 above).
+  return vec4<f32>(linear_to_srgb(display) * color.a, color.a);
+}
+`;
+
+/**
+ * HDR pipeline variant (per-document HDR presentation switch, `SurfaceConfig.hdr`):
+ * the swapchain is `rgba16float` + `toneMapping:'extended'`, and this fragment
+ * is the SDR contract MINUS the upper clamp — un-premultiply → project →
+ * lower clamp ≥ 0 → the SAME `linear_to_srgb` encode, unclamped above 1 (the
+ * OETF tail past white survives the float16 write; the OS maps it onto the
+ * device headroom — see the module header for the device evidence that the
+ * encode cannot move to the compositor). For ≤ 1 content this is byte-identical
+ * to the SDR variant, which keeps the SDR rollback anchor constructive.
+ */
+export const VIEW_WGSL_HDR = VIEW_WGSL_COMMON + /* wgsl */ `
+
+@fragment
+fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
+  // Input guard (f16 ceiling): the composite buffer is rgba16float, whose max
+  // finite value is 65504 (~+16 stops over white). Values past it are Inf, and
+  // Inf cascades into NaN through the blend arithmetic; both must never reach
+  // the swapchain write. WGSL has no isnan/isinf builtins and its min/max
+  // propagate the FIRST operand on unordered comparisons, so neither
+  // min(x, 65504) nor clamp can be trusted against NaN/Inf. Two select
+  // guards instead, each on an ordered test that IEEE makes total:
+  //   1. NaN → 0: x != x is true ONLY for NaN (IEEE 754 self-comparison);
+  //   2. ≥ 65504 → 65504: catches +Inf and every over-range value (negative
+  //      Inf survives but is not light — the projection lower-clamp lands it).
+  let sampled = textureSample(src_tex, samp, in.uv);
+  let no_nan = select(sampled, vec4<f32>(0.0), sampled != sampled);
+  let color = select(no_nan, vec4<f32>(65504.0), no_nan >= vec4<f32>(65504.0));
+
+  // Same 4-bit channel-isolation rule and the SAME terminal encode as the SDR
+  // variant — the canvas holds ENCODED display-p3 in both (see the module
+  // header: the compositor does not re-encode float16 content; 'extended' only
+  // widens the range the surface can carry).
+  let mask = view_u.channel_mask;
+  let r_on = (mask & 1u) != 0u;
+  let g_on = (mask & 2u) != 0u;
+  let b_on = (mask & 4u) != 0u;
+  let a_on = (mask & 8u) != 0u;
+  let rgb_count = countOneBits(mask & 7u);
+
+  // Alpha isolation: coverage shown as grayscale (never transfer-encoded).
+  if (a_on) {
+    let a = color.a;
+    return vec4<f32>(a, a, a, 1.0);
+  }
+
+  // Fully transparent pixels stay at zero for every colour path. The 1e-4
+  // epsilon (same constant blend.wgsl's un-premultiply guards) also keeps the
+  // divide below in non-absurd territory: an f16-sourced premultiplied buffer
+  // cannot make rgb/a reach Inf in f32 (≤ 65504/2⁻²⁴ ≈ 1.1e12), but there is
+  // no reason to ride that arithmetic bound when sub-ε alpha is invisible
+  // anyway (encode·a ≤ ~1/255).
+  if (color.a <= 0.0001) {
+    return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+  }
+  let straight = color.rgb / color.a;
+
+  // ── DISPLAY PROJECTION, lower clamp only ──
+  // W → display-p3 in linear light (same build-time matrix as the SDR variant).
+  // The LOWER clamp stays: a wide-gamut projection legitimately produces
+  // negative coordinates (out-of-display-triangle colors), and a negative value
+  // would invert toward black. The UPPER clamp is gone — the entire point of
+  // the HDR contract: linear light above display white encodes past 1.0 (the
+  // OETF is monotone, so the tail stays ordered), survives the float16 write,
+  // and the OS maps that excess onto the device headroom. For ≤ 1 content this
+  // is byte-identical to the SDR variant.
+  let display = max(
+    MAT_WORKING_TO_DISPLAY * straight,
+    vec3<f32>(0.0),
+  );
+
+  // Single-channel isolation: grayscale of the one enabled channel (encoded,
+  // same as the SDR inspection views).
+  if (rgb_count == 1u) {
+    var c = display.r;
+    if (g_on) { c = display.g; }
+    else if (b_on) { c = display.b; }
+    let s = linear_to_srgb_channel(c);
+    return vec4<f32>(s, s, s, 1.0);
+  }
+
+  // Two-channel colour mask: keep the enabled channels' colour, zero the other.
+  if (rgb_count == 2u) {
+    let masked = vec3<f32>(
+      select(0.0, display.r, r_on),
+      select(0.0, display.g, g_on),
+      select(0.0, display.b, b_on),
+    );
+    return vec4<f32>(linear_to_srgb(masked) * color.a, color.a);
+  }
+
+  // Full RGB (all three bits) or all-off safety: normal present. Un-premultiply
+  // → project to the display gamut → encode the STRAIGHT colour (unclamped
+  // above 1 — the HDR tail) → re-premultiply.
   return vec4<f32>(linear_to_srgb(display) * color.a, color.a);
 }
 `;

@@ -25,7 +25,7 @@ import { useVolatileInteraction, useEditorServices } from "@opengpex/editor/core
 import { getClipBox } from "@opengpex/editor/core/helpers/selection";
 
 import { useImageInfoMetadata, useExportConfig, useClipMode } from "./hooks";
-import { isComfyUiWorkflow } from "@opengpex/editor/core/files";
+import { isComfyUiWorkflow, fileCarriesHdr } from "@opengpex/editor/core/files";
 import { FrameInfoPanel } from "./components/FrameInfoPanel";
 import { AiGenerationPanel } from "./components/AiGenerationPanel";
 import { ResizeExportControls } from "./components/ResizeExportControls";
@@ -60,7 +60,7 @@ export function ImageInfoComponent() {
 
   // Volatile (fast-track) hover state — doesn't trigger slow-track re-renders
   const hoveredLayerId = useVolatileInteraction('hoveredLayerId');
-  const { assets } = useEditorServices();
+  const { assets, actions } = useEditorServices();
 
   // Reset overriding pixels when switching frames
   React.useEffect(() => {
@@ -98,6 +98,17 @@ export function ImageInfoComponent() {
       (activeFrame.assetId ? assets.get(activeFrame.assetId)?.bitDepth : undefined)
       ?? activeFrame.metadata?.bitDepth;
 
+    // Per-document HDR presentation (D5): availability comes from the FILE
+    // (gain map / PQ·HLG transfer); the effective state is the frame's toggle
+    // with the file as auto-default. Toggling writes `frame.hdrRender` — a
+    // render filter, never pixel data.
+    const hdrAvailable = fileCarriesHdr(activeFrame.metadata);
+    const hdrEnabled = activeFrame.hdrRender ?? hdrAvailable;
+    const handleHdrToggle = (on: boolean) => {
+      if (activeFrame.hdrRender === on) return;
+      actions.updateFrame(activeFrame.id, { hdrRender: on });
+    };
+
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
       {/* Header */}
@@ -132,6 +143,9 @@ export function ImageInfoComponent() {
           layerBitDepth={layerBitDepth}
           frameBitDepth={frameBitDepth}
           imageMetadata={meta.imageMetadata}
+          hdrAvailable={hdrAvailable}
+          hdrEnabled={hdrEnabled}
+          onHdrToggle={handleHdrToggle}
         />
 
         <AiGenerationPanel extra={activeFrame.extra} />

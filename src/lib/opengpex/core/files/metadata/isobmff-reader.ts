@@ -262,6 +262,22 @@ export function nclxToColorSpace(nclx: NclxParams): ColorSpaceId {
   }
 }
 
+/**
+ * PRIMARIES-ONLY mapping — the HDR (PQ/HLG) companion to
+ * {@link nclxToColorSpace}: an HDR stream's TRANSFER is reported separately
+ * (`raw.transfer`), so its COLOR SPACE records just the primaries (a P3-PQ
+ * file is Display-P3 primaries carrying PQ light, not 'unknown'). BT.2020 has
+ * no ColorSpaceId member (gap #8) and stays 'unknown' — the HDR decision rows
+ * carry the `gamutOverride` for it.
+ */
+export function nclxPrimariesToColorSpace(nclx: NclxParams): ColorSpaceId {
+  switch (nclx.colourPrimaries) {
+    case 1:  return 'srgb';
+    case 12: return 'display-p3';
+    default: return 'unknown';
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Internal Implementation
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -117,6 +117,12 @@ const MIME_REGISTRY: readonly FormatDescriptor[] = [
     ext: 'eps',
     extAliases: ['epsf'],
   },
+  {
+    format: 'exr',
+    mime: 'image/x-exr',
+    mimeAliases: ['image/exr', 'application/x-exr'],
+    ext: 'exr',
+  },
 ] as const;
 
 // ═══════════════════════════════════════════════════════════════════════════════

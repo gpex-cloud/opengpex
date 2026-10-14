@@ -25,7 +25,7 @@ import type {
   FrameExportEncodePayload,
   FrameExportEncodeResult,
 } from '@opengpex/editor/core/types';
-import { resolveEgestDecision, mimeToFormat } from '@opengpex/editor/core/files';
+import { resolveEgestDecision, mimeToFormat, fileCarriesHdr } from '@opengpex/editor/core/files';
 import type { EncodeOptions } from '@opengpex/editor/core/files';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
@@ -101,6 +101,10 @@ export const FrameExportCommands = {
       // Sunk into `ExportDispatcher` (refactor doc §7.6 "Session 2"), reached
       // via `pixels.render.renderForExport` (Decision B1). ONE PIPELINE
       // EQUIVALENCE — see `ExportDispatcher.ts`'s doc comment.
+      // WYSIWYG (D5): the per-document HDR switch drives BOTH the presentation
+      // and the HDR-container export semantics — OFF means the HDR lanes ship
+      // the white-clamped SDR rendition, never a headroom surprise.
+      const hdrSemantics = activeFrame.hdrRender ?? fileCarriesHdr(activeFrame.metadata);
       const encodeSource = await pixels.render.renderForExport({
         frame: activeFrame,
         viewportDim: ctx.state.ui.viewportDim,
@@ -110,6 +114,7 @@ export const FrameExportCommands = {
         targetGamut: egest.targetGamut,
         channel: egest.channel,
         canvasColorSpace: egest.canvasColorSpace,
+        hdrSemantics,
       });
 
       // Encode the composited pixels via FileService handlers (container +

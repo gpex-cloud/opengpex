@@ -27,7 +27,7 @@
  * @module core/files/strategy/engine/types
  */
 
-import type { TRC, RenderIntent } from '@opengpex/editor/core/types';
+import type { TRC, RenderIntent, GamutId } from '@opengpex/editor/core/types';
 import type { ColorIdentity } from '@opengpex/editor/core/storage/asset/AssetStore';
 import type { SourceFormat, ColorSpaceId } from '../../types';
 
@@ -102,6 +102,8 @@ export interface NormalizedMatchContext {
    * not a file property".
    */
   readonly hevcHardDecode: boolean;
+  /** Source transfer characteristic (`metadata.raw.transfer`), for the HDR rows. */
+  readonly transfer: 'pq' | 'hlg' | 'sdr' | undefined;
 }
 
 /** Match condition stub for a single rule */
@@ -111,6 +113,12 @@ export interface DecisionCondition {
   readonly colorSpace: MatchPattern<ColorSpaceId>;
   readonly isMultiFrame?: MatchPattern<boolean>; // Defaults to '*'
   readonly hevcHardDecode?: MatchPattern<boolean>; // Defaults to '*'
+  /**
+   * Source transfer characteristic (`metadata.raw.transfer`, the HDR seam):
+   * `'pq' | 'hlg'` admit the HDR ingest rows; `'sdr' | undefined` matches the
+   * SDR rows. Absent pattern = '*'.
+   */
+  readonly transfer?: MatchPattern<'pq' | 'hlg' | 'sdr' | undefined>;
 }
 
 /** Decision action stub for a single rule */
@@ -126,6 +134,13 @@ export interface DecisionAction {
    * (camera RAW) specify 'filmic' for GPU tone-mapping via colorIdentity; other display-referred formats default.
    */
   readonly renderIntent?: RenderIntent;
+  /**
+   * HDR rows only: overrides the post-process `colorSpaceToGamut` mapping for
+   * sources whose primaries live outside the SDR `ColorSpaceId` vocabulary
+   * (BT.2020 → 'rec2020'; gap #8). Deliberate, documented exception — the row
+   * is where the container's true primaries are known.
+   */
+  readonly gamutOverride?: GamutId;
   /** EXIF orientation responsibility */
   readonly applyOrientation: OrientationResponsibility;
   /** Rule note / description (e.g. "#1 JPEG 8-bit standard") */

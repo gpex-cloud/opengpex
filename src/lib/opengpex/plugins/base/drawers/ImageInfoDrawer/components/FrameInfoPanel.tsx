@@ -24,7 +24,7 @@ import { Check, ChevronDown, Copy } from "lucide-react";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 
 import type { ImageMetadata } from "@opengpex/editor/core/files";
-import { hasDisplayableMetadata, isComfyUiWorkflow } from "@opengpex/editor/core/files";
+import { isComfyUiWorkflow } from "@opengpex/editor/core/files";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -81,6 +81,16 @@ interface FrameInfoPanelProps {
   frameBitDepth?: number;
   /** Image metadata (EXIF, ICC, color space etc.) */
   imageMetadata?: ImageMetadata;
+  /**
+   * Whether the source file carries HDR (gain map / PQ·HLG transfer). Gates the
+   * HDR badge and the per-document HDR presentation toggle — an SDR document
+   * stays toggle-free (the switch would be visually inert on it).
+   */
+  hdrAvailable: boolean;
+  /** Effective HDR presentation state (frame switch, auto-defaulted from the file). */
+  hdrEnabled: boolean;
+  /** Toggle handler — writes `frame.hdrRender`, the render filter (never pixel data). */
+  onHdrToggle: (on: boolean) => void;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -100,6 +110,9 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
   layerBitDepth,
   frameBitDepth,
   imageMetadata,
+  hdrAvailable,
+  hdrEnabled,
+  onHdrToggle,
 }: FrameInfoPanelProps) {
   const [copied, setCopied] = React.useState(false);
   const [isMetaExpanded, setIsMetaExpanded] = React.useState(false);
@@ -108,7 +121,6 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
   const meta = imageMetadata;
 
   const hasHighBitDepth = (meta?.bitDepth ?? 8) > 8;
-  const showMetadata = hasDisplayableMetadata(meta);
   const comfyWorkflowJson = isComfyUiWorkflow(meta);
 
   const hasIccProfile = !!meta?.raw?.icc;
@@ -132,7 +144,7 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
     return isNaN(d.getTime()) ? null : d.toLocaleString();
   };
 
-  const detailedItems = showMetadata ? [
+  const detailedItems = [
     { label: "Camera", value: mainCamera },
     {
       label: "Lens",
@@ -164,18 +176,30 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
       value: formatDate(meta?.dates?.created),
     },
     {
+      // Non-default gamuts only: the default sRGB is not a fact worth a row
+      // (it would open a one-row section on every bare EXIF-less JPEG).
       label: "Color Space",
       value: meta?.colorSpace && meta.colorSpace !== 'srgb' && meta.colorSpace !== 'unknown'
         ? formatColorSpace(meta.colorSpace)
-        : meta?.colorSpace === 'srgb' ? "sRGB" : null,
+        : null,
     },
     {
       label: "ICC Profile",
       value: hasIccProfile ? (meta!.raw.icc!.name || "Embedded") : null,
     },
     { label: "Software", value: meta?.camera?.software },
+    // HDR transfer characteristic (PQ / HLG) — the seam the ingest HDR lanes
+    // record; there is no EXIF equivalent for it.
+    {
+      label: "Transfer",
+      value: meta?.raw?.transfer === "pq"
+        ? "PQ (HDR)"
+        : meta?.raw?.transfer === "hlg"
+          ? "HLG (HDR)"
+          : null,
+    },
     ...(comfyWorkflowJson ? [{ label: "Produced by", value: "__comfyui__" }] : []),
-  ].filter((item) => !!item.value) : [];
+  ].filter((item) => !!item.value);
 
   return (
     <div className="space-y-2">
@@ -221,8 +245,11 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
           {fileName}
         </span>
 
-        {/* Metadata section (clickable to expand) */}
-        {showMetadata && detailedItems.length > 0 && (
+        {/* Metadata section (clickable to expand). The gate is the rows
+            themselves — a preview heuristic here can only drift from what the
+            rows actually render (it already did: bit-depth-only files hidden
+            by an empty-row check, HDR files stranded without EXIF). */}
+        {detailedItems.length > 0 && (
           <>
             <button
               onClick={() => setIsMetaExpanded(!isMetaExpanded)}
@@ -241,6 +268,39 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
                   {hasHighBitDepth && (
                     <span className="text-[7px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1 py-0.5 rounded border border-emerald-500/20 uppercase leading-none">
                       {meta!.bitDepth}-bit
+                    </span>
+                  )}
+                  {hdrAvailable && (
+                    // span[role=button], NOT <button>: this chip lives inside
+                    // the metadata expand <button> — HTML forbids nested
+                    // buttons (React hydration error), and stopPropagation
+                    // keeps the toggle from also expanding/collapsing the
+                    // metadata section.
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        onHdrToggle(!hdrEnabled);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          onHdrToggle(!hdrEnabled);
+                        }
+                      }}
+                      title={hdrEnabled
+                        ? "HDR presentation on — click to clamp to SDR white"
+                        : "HDR presentation off — click to enable extended range"}
+                      className={`cursor-pointer select-none text-[7px] font-bold uppercase leading-none px-1 py-0.5 rounded border transition-colors ${
+                        hdrEnabled
+                          ? "text-violet-600 dark:text-violet-400 bg-violet-500/10 border-violet-500/20"
+                          : "text-[var(--text-muted)] bg-[var(--bg-stage)] border-[var(--border-subtle)] opacity-70 hover:opacity-100"
+                      }`}
+                    >
+                      HDR
                     </span>
                   )}
                 </div>
@@ -288,6 +348,7 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
                     )}
                   </div>
                 ))}
+
               </div>
             )}
           </>

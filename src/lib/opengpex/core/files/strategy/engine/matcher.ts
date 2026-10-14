@@ -52,7 +52,8 @@ export function matchRule(
       testField(condition.bitDepth, ctx.bitDepth) &&
       testField(condition.colorSpace, ctx.colorSpace) &&
       testField(condition.isMultiFrame, ctx.isMultiFrame) &&
-      testField(condition.hevcHardDecode, ctx.hevcHardDecode)
+      testField(condition.hevcHardDecode, ctx.hevcHardDecode) &&
+      testField(condition.transfer, ctx.transfer)
     ) {
       return rule;
     }

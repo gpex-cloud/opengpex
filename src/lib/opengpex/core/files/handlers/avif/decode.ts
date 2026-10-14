@@ -39,7 +39,16 @@
 import type { ImageMetadata, DecodedPayload } from '../../types';
 import type { IngestDecision } from '../../strategy';
 import { decodeWideGamut8 } from '../../shared/lib-custom';
-import { wideGamut16ToF16, normalizedUint16ToFloat16 } from '@opengpex/editor/core/engine/color';
+import {
+  wideGamut16ToF16,
+  normalizedUint16ToFloat16,
+  hdrTransfer16ToF16,
+  pqToSceneLinear,
+  hlgToSceneLinear,
+  deriveMatrix64,
+} from '@opengpex/editor/core/engine/color';
+import { renderSdrDown } from '@opengpex/editor/core/engine/color/shoulder';
+import { linearToSrgb } from '@opengpex/editor/core/engine/color/trc';
 import { readImageDimensions } from '../../utils';
 import { buildGamutProxy } from '../heic/transcode';
 import { decodeAvifJsquash } from './worker';
@@ -109,7 +118,49 @@ export async function decodeAvif(
       const naked = new Uint16Array(native.pixels.length);
       for (let i = 0; i < native.pixels.length; i++) naked[i] = (native.pixels[i] * upscale + 0.5) | 0;
 
-      if (gamut === 'adobe-rgb' || gamut === 'prophoto-rgb') {
+      // ── HDR lane (PQ/HLG, rules 18-hdr-*) ──
+      // The decoder delivered RAW TRANSFER CODE VALUES (probe P0-4a: maxDev 0)
+      // — the EOTF is ours: 203-nit-anchored scene-linear (D8) in the SOURCE
+      // gamut, trc 'linear' + the source gamut tag (the shader's
+      // gamut_to_working does the W matrix; NO default look — the HDR
+      // presentation switch owns rendering semantics, D5).
+      const transfer = metadata.raw?.transfer;
+      if (transfer === 'pq' || transfer === 'hlg') {
+        highDepthSource = {
+          data: hdrTransfer16ToF16(naked, transfer),
+          width: native.width,
+          height: native.height,
+        };
+
+        // SDR display proxy: source-gamut scene-linear → display-p3 linear
+        // (projection) → direct-pass shoulder down-render (display domain,
+        // chromaticity-preserving scalar gain) → sRGB-encode → 8-bit PNG
+        // tagged display-p3. This is the toggle-OFF look the panel shows
+        // before the compositor takes over (WYSIWYG sibling of the SDR
+        // present variant's white clamp).
+        const m = deriveMatrix64(gamut, 'display-p3');
+        const toScene = transfer === 'pq' ? pqToSceneLinear : hlgToSceneLinear;
+        const rgba8 = new Uint8ClampedArray(native.width * native.height * 4);
+        for (let px = 0; px < rgba8.length; px += 4) {
+          // Raw transfer code → scene-linear (203 anchor) per channel, then
+          // the display-gamut projection and the shoulder down-render.
+          const sr = toScene(naked[px] / 65535);
+          const sg = toScene(naked[px + 1] / 65535);
+          const sb = toScene(naked[px + 2] / 65535);
+          const dr = m[0] * sr + m[1] * sg + m[2] * sb;
+          const dg = m[3] * sr + m[4] * sg + m[5] * sb;
+          const db = m[6] * sr + m[7] * sg + m[8] * sb;
+          const [or_, og, ob] = renderSdrDown(dr, dg, db);
+          rgba8[px] = linearToSrgb(Math.min(1, Math.max(0, or_))) * 255;
+          rgba8[px + 1] = linearToSrgb(Math.min(1, Math.max(0, og))) * 255;
+          rgba8[px + 2] = linearToSrgb(Math.min(1, Math.max(0, ob))) * 255;
+          // Alpha from the NATIVE-scale codes (naked is 16-bit scale —
+          // shifting it by depth−8 would clamp every α>1.5% to 255).
+          rgba8[px + 3] = native.pixels[px + 3] >> (requestedDepth - 8);
+        }
+        const proxy = await buildGamutProxy(rgba8, native.width, native.height, 'display-p3');
+        displayBlob = proxy.displayBlob;
+      } else if (gamut === 'adobe-rgb' || gamut === 'prophoto-rgb') {
         // 16-wg: de-gamma the source-encoded pixels onto the true-linear f16 line
         // (PNG/TIFF row-8 semantics — the wide-gamut standing rule).
         const lifted = wideGamut16ToF16(naked, native.width, native.height, gamut);

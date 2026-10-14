@@ -35,7 +35,7 @@
 import ExifReader from 'exifreader';
 import type { ImageMetadata } from '../../types';
 import { iccToBase64, parseIccProfileName, inferColorSpaceFromIcc } from '../../shared/icc';
-import { extractIsobmffExif, extractIsobmffIcc, extractIsobmffNclx, nclxToColorSpace } from '../../metadata/isobmff-reader';
+import { extractIsobmffExif, extractIsobmffIcc, extractIsobmffNclx, nclxToColorSpace, nclxPrimariesToColorSpace } from '../../metadata/isobmff-reader';
 import { parseAvifContainer } from './metadata/container';
 
 /**
@@ -88,7 +88,17 @@ export async function extractAvifMetadata(file: File): Promise<ImageMetadata> {
         meta.raw.icc = { data: iccToBase64(iccBytes), name: profileName };
         meta.colorSpace = inferColorSpaceFromIcc(profileName);
       } else if (view.primary.nclx) {
-        meta.colorSpace = nclxToColorSpace(view.primary.nclx);
+        const tc = view.primary.nclx.transferCharacteristics;
+        if (tc === 16 || tc === 18) {
+          // HDR (PQ/HLG): the transfer rides the `raw.transfer` seam (the HDR
+          // decision rows match on it); the colorSpace records just the
+          // PRIMARIES (a P3-PQ file is Display-P3 primaries carrying PQ
+          // light, not 'unknown' — BT.2020 stays 'unknown' per gap #8).
+          meta.raw.transfer = tc === 16 ? 'pq' : 'hlg';
+          meta.colorSpace = nclxPrimariesToColorSpace(view.primary.nclx);
+        } else {
+          meta.colorSpace = nclxToColorSpace(view.primary.nclx);
+        }
       }
 
       // ── metadata round-trip payloads ──
@@ -111,7 +121,15 @@ export async function extractAvifMetadata(file: File): Promise<ImageMetadata> {
         meta.colorSpace = inferColorSpaceFromIcc(profileName);
       } else {
         const nclx = extractIsobmffNclx(bytes);
-        if (nclx) meta.colorSpace = nclxToColorSpace(nclx);
+        if (nclx) {
+          const tc = nclx.transferCharacteristics;
+          if (tc === 16 || tc === 18) {
+            meta.raw.transfer = tc === 16 ? 'pq' : 'hlg';
+            meta.colorSpace = nclxPrimariesToColorSpace(nclx);
+          } else {
+            meta.colorSpace = nclxToColorSpace(nclx);
+          }
+        }
       }
       const rawExif = extractIsobmffExif(bytes);
       if (rawExif && rawExif.length > 0) meta.raw.exif = iccToBase64(rawExif);

@@ -26,6 +26,7 @@ import { useEditorState, useEditorServices } from '@opengpex/editor/core/context
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { useOverlayRotationSync } from '@opengpex/editor/core/motion/hooks/animation';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color';
+import { fileCarriesHdr } from '@opengpex/editor/core/files';
 import { quantizeDensityBand } from '@opengpex/editor/core/engine/text/glyphAtlas';
 import {
   sourceBitmapCache,
@@ -83,21 +84,34 @@ export default function CanvasStage() {
   const gpuEngine = getGpuEngine();
   const isGpuReadyRef = useRef(false);
 
+  // ─── Per-document HDR presentation switch (D5, render filter) ───
+  // `frame.hdrRender ?? fileCarriesHdr(metadata)`: undefined follows the file
+  // (HDR sources on, SDR sources off). The switch selects the SURFACE mode
+  // (SDR: bgra8unorm + white clamp, byte-identical to the A-phase terminal
+  // state; HDR: rgba16float + extended + unclamped-tail view variant) — it never
+  // touches pixel data. Re-running the layout effect on this value makes the
+  // GpuDevice reconfigure (format + toneMapping) before the next ticker frame.
+  const hdrPresentation = activeFrame
+    ? (activeFrame.hdrRender ?? fileCarriesHdr(activeFrame.metadata))
+    : false;
+
   // ─── WebGPU Canvas Mount & Surface Configuration (§4.3, §13.3) ───
   // The swapchain gamut is NOT passed: it is a hard invariant (WORKING_GAMUT,
   // hardcoded in `GpuDevice.configureSurface`), so `SurfaceConfig` carries only
-  // `hdr`. Neither effect depends on any document colour field (§8.4.4 R2).
+  // `hdr`. Neither effect depends on any document colour field (§8.4.4 R2);
+  // `hdrPresentation` is the one presentation-mode input (D5), deliberately in
+  // the dependency list so a toggle reconfigures the surface synchronously.
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !GpuDevice.isSupported()) return;
 
     // Synchronously bind new or remounted canvas in layout phase before fastSync ticker fires
     if (gpuEngine.isReady()) {
-      gpuEngine.attachCanvas(canvas, { hdr: false });
+      gpuEngine.attachCanvas(canvas, { hdr: hdrPresentation });
       isGpuReadyRef.current = true;
       needsRenderRef.current = true;
     }
-  }, [gpuEngine, activeFrame?.id]);
+  }, [gpuEngine, activeFrame?.id, hdrPresentation]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -106,7 +120,7 @@ export default function CanvasStage() {
     let cancelled = false;
 
     void gpuEngine
-      .init(canvas, { hdr: false })
+      .init(canvas, { hdr: hdrPresentation })
       .then((caps) => {
         if (cancelled) return;
         isGpuReadyRef.current = true;
@@ -123,7 +137,7 @@ export default function CanvasStage() {
     return () => {
       cancelled = true;
     };
-  }, [gpuEngine, activeFrame?.id]);
+  }, [gpuEngine, activeFrame?.id, hdrPresentation]);
 
   // [Display Transform] Mark dirty when channel mask changes.
   const channelMaskRef = useRef(channelMask);

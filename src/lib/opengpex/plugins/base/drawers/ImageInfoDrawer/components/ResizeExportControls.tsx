@@ -372,6 +372,11 @@ export function ResizeExportControls({
                   value: "BMP",
                   description: "legacy, uncompressed",
                 },
+                {
+                  label: "EXR",
+                  value: "EXR",
+                  description: "HDR, linear half-float",
+                },
               ]}
               trigger={
                 <FancyButton

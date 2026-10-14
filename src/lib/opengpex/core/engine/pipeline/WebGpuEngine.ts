@@ -38,7 +38,7 @@
 import type { Capabilities } from '@opengpex/editor/core/engine/gpu/device/Capabilities';
 import { UNKNOWN_CAPABILITIES } from '@opengpex/editor/core/engine/gpu/device/Capabilities';
 import type { GpuInfo } from '@opengpex/editor/core/engine/gpu/GpuInfo';
-import { GpuDevice, SWAPCHAIN_FORMAT, type SurfaceConfig } from '@opengpex/editor/core/engine/gpu/device/GpuDevice';
+import { GpuDevice, type SurfaceConfig } from '@opengpex/editor/core/engine/gpu/device/GpuDevice';
 import type { Scene, LayerNode } from '@opengpex/editor/core/engine/pipeline/scene/Scene';
 import { TexturePool, estimateTextureBytes } from '@opengpex/editor/core/engine/gpu/resources/TexturePool';
 import { ResidentTransientCache } from '@opengpex/editor/core/engine/gpu/resources/ResidentTransientCache';
@@ -757,11 +757,14 @@ export class WebGpuEngine implements IEngine {
       pipelineCache: this.pipelineCache,
       bufferRing: this.bufferRing,
       currentView,
-      // Surface format constraint: MUST match the format `GpuDevice.configureSurface` pinned, not the
-      // probe result — the view pipeline is compiled against the actual swapchain
-      // texture. Using `caps.preferredFormat` here would mismatch on any platform
-      // whose preferred format differs, failing pipeline validation.
-      targetFormat: SWAPCHAIN_FORMAT,
+      // Surface format constraint: MUST match the format `GpuDevice.configureSurface`
+      // pinned for the CURRENT surface mode, not the probe result — the view pipeline
+      // is compiled against the actual swapchain texture. Using `caps.preferredFormat`
+      // here would mismatch on any platform whose preferred format differs, failing
+      // pipeline validation. The HDR flag rides the same authority so the shader
+      // variant (unclamped-tail vs SDR-clamped) always pairs with the format.
+      targetFormat: this.gpu.getSwapchainFormat(),
+      hdr: this.gpu.isHdrPresentation(),
       scene,
       // P3: the composite holds densityScale texels per document px, so the
       // magnify/minify sampler compares the camera scale against THAT density.

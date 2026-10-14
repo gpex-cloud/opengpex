@@ -49,7 +49,7 @@ import { getGpuEngine } from '@opengpex/editor/core/engine/pipeline/WebGpuEngine
 import { SceneAssembler } from '@opengpex/editor/core/engine/pipeline/scene/SceneAssembler';
 import { highDepthTextureCache } from '@opengpex/editor/core/engine/sources/HighDepthSource';
 import type { HighDepthFetcher } from '@opengpex/editor/core/engine/sources/HighDepthSource';
-import { unpremultiplyEncodeGamut } from '@opengpex/editor/core/engine/utils/export-utils';
+import { unpremultiplyEncodeLinearF16, unpremultiplyEncodeGamut } from '@opengpex/editor/core/engine/utils/export-utils';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
 import type { EncodeSource, FileService } from '@opengpex/editor/core/files';
 import type {
@@ -80,9 +80,15 @@ export interface ExportRequest {
    */
   targetGamut: GamutId;
   /** Physical encode lane — `egest.channel`. */
-  channel: 'canvas-8' | 'raw-8' | 'raw-16';
+  channel: 'canvas-8' | 'raw-8' | 'raw-16' | 'exr-half';
   /** Canvas `colorSpace` tag for the `'canvas-8'` lane — `egest.canvasColorSpace`. */
   canvasColorSpace: PredefinedColorSpace;
+  /**
+   * Per-document HDR presentation switch (D5, WYSIWYG): `false` = the HDR
+   * lanes (exr-half) ship the white-clamped SDR rendition the panel showed;
+   * `true`/undefined = full scene-referred headroom.
+   */
+  hdrSemantics?: boolean;
 }
 
 // ─── ExportDispatcher ───
@@ -179,7 +185,34 @@ export class ExportDispatcher {
     // and deliberately NOT a field on `ExportRequest`.
     let encodeSource: EncodeSource;
 
-    if (channel === 'raw-16') {
+    if (channel === 'exr-half') {
+      // HDR scene-referred lane: STRAIGHT LINEAR half bit patterns, unclamped
+      // (the scene-referred contract — `unpremultiplyEncodeLinearF16` only
+      // clamps alpha; RGB keeps the full headroom). The gamut matrix targets
+      // the SAME gamut the EXR `chromaticities` attribute will declare, so
+      // colour truth and tag cannot diverge. No TRC anywhere — the container
+      // is definitionally linear.
+      if (targetGamut === 'rec2020') {
+        // The capability table never admits rec2020 for EXR; a request that
+        // reached here is a solver/handler mismatch and must fail loudly.
+        throw new Error('[exr] rec2020 target has no conversion matrix');
+      }
+      const half = unpremultiplyEncodeLinearF16(
+        exported.pixels as Float32Array,
+        exported.width,
+        exported.height,
+        { sourceGamut: WORKING_GAMUT, targetGamut },
+        // WYSIWYG (D5): switch OFF → the white-clamped SDR rendition.
+        request.hdrSemantics === false,
+      );
+      encodeSource = {
+        width: exported.width,
+        height: exported.height,
+        data: half,
+        bitDepth: 16,
+        colorSpace: targetGamut,
+      };
+    } else if (channel === 'raw-16') {
       const encoded16 = unpremultiplyEncodeGamut(
         exported.pixels as Float32Array,
         exported.width,

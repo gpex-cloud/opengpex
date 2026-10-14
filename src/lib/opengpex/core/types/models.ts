@@ -576,6 +576,18 @@ export interface Frame {
   /** Document-level image metadata (EXIF, ICC, source info). Persists regardless of layer changes. */
   metadata?: ImageMetadata;
 
+  /**
+   * Per-document HDR presentation switch (a render filter — D5). `undefined` =
+   * auto: follow the file (HDR sources on, SDR sources off). ON presents via
+   * the rgba16float + extended surface and the unclamped-tail view variant; OFF is
+   * the SDR surface (hard white clamp at the swapchain). NEVER touches pixel
+   * data — the composite buffer always holds the unbounded scene-referred
+   * truth; the switch only chooses the presentation filter. Also drives the
+   * HDR-container export semantics (WYSIWYG: panel display and exported file
+   * share one resolver).
+   */
+  hdrRender?: boolean;
+
 }
 
 export interface Asset {

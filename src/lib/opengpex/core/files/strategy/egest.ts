@@ -234,7 +234,13 @@ export function resolveEgestDecision(request: EgestRequest): EgestDecision {
   // 3. Depth & channel split (one-way direct match).
   let bitDepth: 8 | 16;
   let channel: EgestChannel;
-  if (requestedBitDepth === 16 && cap.supportedChannels.includes('raw-16')) {
+  if (cap.supportedChannels.includes('exr-half')) {
+    // EXR: the half-float scene-referred container is 16-bit truth by
+    // construction — f16 IS the container, there is no 8-bit form, so the
+    // requested bit depth does not reach the lane.
+    bitDepth = 16;
+    channel = 'exr-half';
+  } else if (requestedBitDepth === 16 && cap.supportedChannels.includes('raw-16')) {
     bitDepth = 16;
     channel = 'raw-16';
   } else {
