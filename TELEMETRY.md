@@ -62,6 +62,17 @@ Self-hosted operators can additionally block all outbound checks server-side, re
 DO_NOT_TRACK=1
 ```
 
+---
+
+## 5. Send Feedback (Explicit Submissions)
+
+The **Send Feedback** entry in the CloudMenu submits a message you wrote and can read before sending. It is a deliberate, per-submission action — not telemetry — and is therefore **not** affected by `DO_NOT_TRACK=1`, which only stops the silent update-check ping described above. Self-hosted operators who prefer no outbound feedback traffic at all can simply omit/restrict the relay route; the data flow is documented here for transparency:
+
+- **What leaves the browser**: your message text, the chosen category (Bug / Idea / Other), and a small diagnostics block — app version, user agent, OS label, screen resolution, canvas pixel size, and the engine's GPU snapshot (adapter name, working format, allocation limits). The full block is shown in the modal before sending. **No canvas content, file names, or layer data is ever included.**
+- **Identity**: signed-in submissions carry your session token (the message is then linked to your account so you can see replies); signed-out submissions carry **no identity fields at all**. A random device id travels in a request header solely as a rate-limit guard key and is stored server-side only as a salted hash; the connecting IP is masked to `/24` for the same guard. Neither is ever used to identify you.
+- **Where it goes**: the browser calls your deployment's own `/api/feedback` route, which relays to `gpex.cloud`. Anonymous history stays in your browser's `localStorage` only and is never synced.
+- **Rate limiting**: submissions are capped per browser / per IP segment / per account (sliding 1-hour windows); the modal shows exactly when you may retry.
+
 ## Questions or Feedback?
 
 If you have any questions, concerns, or audit requests regarding our telemetry practices, please open an issue or discussion on GitHub:

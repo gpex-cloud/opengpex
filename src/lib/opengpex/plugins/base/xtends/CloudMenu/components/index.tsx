@@ -32,20 +32,22 @@ import {
   RefreshCw,
   ExternalLink,
   BookMarked,
+  MessageSquareQuote,
 } from "lucide-react";
 import { GpexCloudProvider, gpexStorage } from "@opengpex/editor/core/cloud";
 import { getOrCreateClientId } from "@opengpex/editor/core/system/client-id";
 import { PremiumCloudIcon } from "@opengpex/editor/icons";
-import { useCloudMenu, type SyncStatus, type LastSaveResult } from "./hooks";
+import { useCloudMenu, type SyncStatus, type LastSaveResult } from "../hooks";
 import { CloudBrowser } from "./CloudBrowser";
+import { FeedbackModal } from "./FeedbackModal";
 import FancyConfirm from "@opengpex/editor/widgets/FancyConfirm";
 import EditorPortal from "@opengpex/editor/widgets/Portal";
-import { DEFAULT_CLOUD_URL, DOCUMENTATION_URL, type SavePhase } from "./protocols";
-import { API_AUTH_SSO_CODE } from "../../../../core/cloud/protocol";
+import { DEFAULT_CLOUD_URL, DOCUMENTATION_URL, type SavePhase } from "../protocols";
+import { API_AUTH_SSO_CODE } from "../../../../../core/cloud/protocol";
 // IMPORTANT: Must use relative path to ensure importing the exact same in-memory token-store instance
 // as other auth files. Do NOT replace with alias path (like @opengpex/editor/...) to prevent bundle duplication.
-import { authFetch } from "../../../../core/cloud/auth/http-client";
-import { getRefreshToken } from "../../../../core/cloud/auth/token-store";
+import { authFetch } from "../../../../../core/cloud/auth/http-client";
+import { getRefreshToken } from "../../../../../core/cloud/auth/token-store";
 
 // ─── Sync Status Indicator ───────────────────────────────────────────────────
 
@@ -289,6 +291,14 @@ function CloudMenuInner() {
   const styles = getStyles();
   const isSaving = savePhase === "PACKING" || savePhase === "UPLOADING";
 
+  // Send Feedback modal — collapses the menu on open (CloudBrowser precedent).
+  const [showFeedback, setShowFeedback] = useState(false);
+  const handleOpenFeedback = useCallback(() => {
+    setShowFeedback(true);
+    setIsOpen(false);
+  }, [setIsOpen]);
+  const handleCloseFeedback = useCallback(() => setShowFeedback(false), []);
+
   /**
    * Navigate to GPEX Cloud with SSO code for automatic login sync.
    * If signed in, generates a one-time code via /api/auth/sso-code,
@@ -391,6 +401,7 @@ function CloudMenuInner() {
             onClose={handleCloseBrowser}
           />
         )}
+        {showFeedback && <FeedbackModal onClose={handleCloseFeedback} />}
         <EditorPortal>
           <FancyConfirm
             isVisible={!!conflictState}
@@ -571,6 +582,19 @@ function CloudMenuInner() {
                 <FolderOpen size={14} />
               </div>
               <span className={styles.menuItem.label}>Cloud Gallery</span>
+            </button>
+
+            <button
+              className={styles.menuItem.button}
+              onClick={handleOpenFeedback}
+              title="Send Feedback"
+            >
+              <div className={styles.menuItem.icon}>
+                <MessageSquareQuote size={14} />
+              </div>
+              <span className={styles.menuItem.label}>
+                Send Feedback
+              </span>
             </button>
 
             <a

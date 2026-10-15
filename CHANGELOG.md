@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.14
+
+- Workspace: new "Send Feedback" entry in the cloud menu — send a bug report or idea straight to the team from inside the editor, with a diagnostics block (app version, browser/OS, screen, GPU info) you can read before sending; no canvas content or document data is ever included
+
+---
+
 ## v2.0.13
 
 - Image Formats: UltraHDR JPEG photos (the Android/Google gain-map format, e.g. from gainmaps.com) now open with their true HDR brightness on HDR-capable displays — the same presentation as HEIC gain-map photos, with a smooth fade-in
