@@ -167,7 +167,7 @@ export function computeUnionStatus(selection: string[], frame: Frame): UnionStat
     if (downstream.some(d => !selectionSet.has(d.id))) return 'red';
   }
 
-  // Mixed cut+copy is disallowed (Scheme B from spec §6.4):
+  // Mixed cut+copy is disallowed:
   // Some have assocMaskId (cut) and others don't (copy) → hole mask semantics would be inconsistent.
   const hasCut = layers.some(l => l.metadata?.assocMaskId);
   const hasCopy = layers.some(l => l.metadata?.sourceLayerId && !l.metadata?.assocMaskId);

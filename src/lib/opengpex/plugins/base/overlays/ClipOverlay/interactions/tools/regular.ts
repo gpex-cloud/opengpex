@@ -176,7 +176,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
       // the existing shape's type.
       const latestTool = (frame.latestClipTool as ClipTool) || 'rect';
       const activeTool = latestTool === 'ellipse' ? 'ellipse' : 'rect';
-      // P7: write a proper LocalPolygon (with rings) so downstream consumers
+      // Write a proper LocalPolygon (with rings) so downstream consumers
       // (polygonToShape, localToWorldPolygon, etc.) never see rings=undefined.
       const antiAliased = currentShape?.antiAliased ?? true;
       const newPoly = e.geometry.polygon.regularShapeToLocalPolygon(latestTool === 'ellipse' ? 'ellipse' : 'rect', newRect, antiAliased);

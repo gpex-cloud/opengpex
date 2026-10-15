@@ -198,7 +198,7 @@ export const LayerPeelCommands = {
         // common "user toggled clip mode without doing anything" path the
         // active layer is already host, so this whole branch becomes a few
         // hash lookups and returns immediately. Critical for keeping the
-        // space-bar exit-clip latency imperceptible (see clip tool guide §4.2).
+        // space-bar exit-clip latency imperceptible.
         if (!triplet.dirty) {
           if (activeLayer.id !== host.id) {
             layers.activate(activeFrame.id, host.id);

@@ -19,8 +19,8 @@
 
 /**
  * glyphAtlas.ts — glyph coverage atlas: CPU page allocation, shelf packing,
- * density-band quantization, and Atlas Paging + Flush eviction (plan
- * §3.2/§6 — deliberately NO per-glyph LRU: evicting single glyphs inside a
+ * density-band quantization, and Atlas Paging + Flush eviction (deliberately
+ * NO per-glyph LRU: evicting single glyphs inside a
  * GPU texture turns eviction into 2D bin-packing fragmentation management
  * that costs more than it saves).
  *
@@ -37,8 +37,9 @@
  * rasterized at the target physical font size: `rasterSize = fontSize × band`.
  * `quantizeDensityBand` snaps an arbitrary target density UP to one of a few
  * bands (upsampling is never allowed; downsampling a higher band linearly is
- * acceptable). The interactive path is pinned to band 1 this phase (P3 makes
- * it viewport-density aware); the export path quantizes `exportScale`.
+ * acceptable). The interactive path is pinned to band 1 (the viewport's
+ * density band is applied by the composite, not here); the export path
+ * quantizes `exportScale`.
  *
  * ── PAGING + FLUSH ──
  * Each atlas set (fontKey × band) holds at most `MAX_PAGES_PER_SET` pages of

@@ -51,7 +51,7 @@ export const PERF_MON = process.env.NEXT_PUBLIC_GPEX_PERF_MON === 'true';
 
 /**
  * Sub-pixel seam prevention switch.
- *   - SEAM_EXPAND_FRAGMENT: Controls fragment visibleShape outward expansion (Phase 2)
+ *   - SEAM_EXPAND_FRAGMENT: Controls fragment visibleShape outward expansion
  */
 export const SEAM_EXPAND_FRAGMENT = true;
 
@@ -160,7 +160,7 @@ export const FILTER_PRESETS = [
     id: 'cold',
     label: 'Cold',
     // [Hue signed range] Basic panel now models Hue as bidirectional
-    // [-180, 180] (see basic.tsx §SLIDERS). 200° folds to -160° via
+    // [-180, 180] (see the `SLIDERS` table in basic.tsx). 200° folds to -160° via
     // hue-rotate's modulo-360 semantics — same visual result, but now
     // the slider thumb lands inside its declared range.
     values: { brightness: 100, contrast: 105, saturation: 95, hueRotate: -160, blur: 0 }

@@ -105,7 +105,7 @@ export const FrameCreateCommands = {
    * branchFromSelection — Create a branch frame from the active selection.
    *
    * Composites the selection ROI straight into a `CompositedImage` (self-adaptive
-   * bit depth/gamut, §2.4) and assembles the new frame natively from that plain
+   * bit depth/gamut) and assembles the new frame natively from that plain
    * data — no synthetic `DecodeResult`/`File` round-trip through `files.decodeBlob`
    * any more. Metadata assembly mirrors `importSingleImage` for parity:
    *   - raw.icc is inherited from the parent, dropped only if the bake landed in a
@@ -132,12 +132,12 @@ export const FrameCreateCommands = {
 
       try {
         // ── Step 1: Composite the selection region — self-adaptive bit depth
-        // and source gamut, no options.precision/dpr interference (§2.4) ──────
+        // and source gamut, no options.precision/dpr interference ──────
         const branchShape: LocalShape = polygonToShape(box);
         const composited = await pixels.render.compositeFrame(activeFrame, branchShape);
 
         // ── Step 2: Golden Path ingest — display + high-depth naked pixels
-        // persisted together in one call (§2.3) ──────────────────────────────
+        // persisted together in one call ──────────────────────────────
         const bundle = await assets.storeBundle(composited);
 
         // ── Step 3: Assemble the new frame's authoritative metadata ─────────

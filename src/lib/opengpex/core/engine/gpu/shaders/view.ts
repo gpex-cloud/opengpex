@@ -187,7 +187,7 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   // any two-channel colour view all fall out of the same code — no per-mode case,
   // no "missing combination" (the class of bug the old string enum caused).
   //
-  // Encoding discipline (boundary ⑥, same as the identity path below): the stored
+  // Encoding discipline (same as the identity path below): the stored
   // value is premultiplied LINEAR light, so a colour channel is un-premultiplied
   // to its STRAIGHT value, then TRC-encoded — encode(rgb/a)·a, never encode(rgb).
   // Alpha is coverage and is never transfer-encoded.

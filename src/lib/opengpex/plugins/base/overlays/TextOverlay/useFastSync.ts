@@ -50,7 +50,7 @@ export function useTextEditorFastSync(
   // next size change would write the pre-move cx/cy back (box jumps back).
   const lastLayerObservedRef = useRef<{ w: number; h: number; cx: number; cy: number } | null>(null);
 
-  // [P0 Perf] Throttle to ~30Hz during interaction — text box positioning
+  // [Perf] Throttle to ~30Hz during interaction — text box positioning
   useFastSync(containerRef, isActive, (v: VolatileState, f: Frame, cam: CameraState) => {
     const el = containerRef.current;
     if (!el) return;

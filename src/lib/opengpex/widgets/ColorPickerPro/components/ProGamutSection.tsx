@@ -27,7 +27,7 @@ interface ProGamutSectionProps {
   proMode: boolean;
   onToggleProMode: () => void;
   /**
-   * The current frame's gamut (§5.4 / decision A: full lock). Display-only —
+   * The current frame's gamut (full lock). Display-only —
    * there is no user-triggerable switch, so this can never write back to
    * storage on a mere view action.
    */
@@ -75,7 +75,7 @@ export function ProGamutSection({
 
         {proMode && (
           <div className="flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
-            {/* Locked document gamut — display-only, never switchable (§5.4). */}
+            {/* Locked document gamut — display-only, never switchable. */}
             <div className="flex items-center gap-1.5">
               <span
                 className="px-1.5 py-0.5 rounded text-[9px] font-semibold text-indigo-700 dark:text-indigo-200 bg-indigo-500/15 ring-1 ring-indigo-500/30"

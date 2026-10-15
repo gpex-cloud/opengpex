@@ -11,7 +11,7 @@
 
 /**
  * HEVC hardware-decode capability probe — the ingest decision's one-time
- * environment signal (rev5 §3.1).
+ * environment signal.
  *
  * Two parallel `VideoDecoder.isConfigSupported` probes, cached as a module-level
  * Promise:
@@ -33,7 +33,7 @@
  * @module core/files/handlers/heic/capability
  */
 
-/** Canonical probe strings (probe-validated canned forms, see gpex-cloud/probes/heic). */
+/** Canonical probe strings (probe-validated canned forms). */
 const MAIN_STILL_CODEC = 'hvc1.3.70000000.L90.B0';
 const MAIN_CODEC = 'hvc1.1.6.L93.B0';
 

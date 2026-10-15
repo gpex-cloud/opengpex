@@ -27,7 +27,7 @@
  * path, clamps) in `../helpers`. This file is the interaction/render
  * orchestrator.
  *
- * Design (spec §5 & §6):
+ * Design:
  *
  * - Users can drag existing control points, add new ones by clicking on the
  *   empty grid, and remove interior points by right-clicking them. The
@@ -43,7 +43,7 @@
  *   from the resident 1D LUT texture — no visual drift between
  *   "editor preview" and "rendered result".
  *
- * - Editing is decoupled into three phases (spec §5.6 gesture coalescing):
+ * - Editing is decoupled into three phases (gesture coalescing):
  *     1. pointerdown → `useFilterGesture.begin()` fires the undoable checkpoint
  *        (`beginCurvesEdit`) which snapshots layer state into TimeTravel.
  *     2. pointermove → non-undoable `updateChannelCurve` writes accumulate on
@@ -73,11 +73,10 @@
  *   values.
  *
  * - This panel does NOT dispatch to `AsyncFilterCache` or the engine worker —
- *   that's the render engine's job (spec §5.1). We only
+ *   that's the render engine's job. We only
  *   mutate `layer.curves`; the render loop picks up the change on its next
  *   frame and, on cache-miss, the engine
- *   schedules the worker job. Kept the strict "UI ↔ state" boundary the spec
- *   §3.5 asks for.
+ *   schedules the worker job. Kept the strict "UI ↔ state" boundary.
  */
 
 import React, {
@@ -289,7 +288,7 @@ export function CurvesPanel() {
       if (evt.button !== 0) return;
 
       // Start the undoable gesture BEFORE the first mutation so TimeTravel
-      // snapshots the pre-edit state (spec §5.6).
+      // snapshots the pre-edit state.
       gesture.begin();
 
       if (hitIdx >= 0) {

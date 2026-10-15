@@ -268,8 +268,7 @@ export function invertRings(rings: Point2D[][], boundingW: number, boundingH: nu
  *
  * Produces a clockwise ring: TL → TR → BR → BL.
  * This is the canonical representation for rect selections in the unified
- * `Frame.clipBoxes: Record<string, LocalPolygon>` architecture (Phase 1 of
- * selection_layer_unification_spec).
+ * `Frame.clipBoxes: Record<string, LocalPolygon>` architecture.
  *
  * @param rect        The bounding rectangle in local (canvas) coordinates.
  * @param antiAliased Whether the selection edge should be anti-aliased (default true).
@@ -290,8 +289,7 @@ export function rectToLocalPolygon(rect: LocalRect, antiAliased: boolean = true)
  *
  * Samples 64 points uniformly around the ellipse (clockwise, starting at angle 0).
  * This is the canonical representation for ellipse selections in the unified
- * `Frame.clipBoxes: Record<string, LocalPolygon>` architecture (Phase 1 of
- * selection_layer_unification_spec).
+ * `Frame.clipBoxes: Record<string, LocalPolygon>` architecture.
  *
  * The 64-point count matches `shapeToPoint2D` (circle branch) and `point2dToLocalShape`
  * (ellipse recognition heuristic), ensuring round-trip fidelity:

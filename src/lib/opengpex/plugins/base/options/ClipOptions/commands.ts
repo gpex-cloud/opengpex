@@ -31,7 +31,7 @@ const { CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS } = P;
 /**
  * Single source of truth for "leave clip mode and discard any in-flight
  * peel/exchange triplet". Used by `exitClip` (Esc) and the `ClipOverlay`
- * unmount cleanup. See clip tool guide §4.6 for the full latency rationale.
+ * unmount cleanup.
  *
  * 2026-06-25 refactor: ESC now means "cancel" — if a peel was in progress,
  * the exchange is discarded (host hole mask removed, exchange reset) instead
@@ -418,8 +418,7 @@ export const CLIP_OPTIONS_COMMANDS = {
      * Re-Canvas mode is excluded (the canvas crop box must always exist).
      *
      * Uses `getClipBox` to resolve the active slot, then writes `null` to
-     * clear it. This is the "Clear Selection" entry point referenced in the
-     * clip tool guide §7.2 roadmap.
+     * clear it. This is the "Clear Selection" entry point.
      *
      * BUG FIX (2026-07-13): If there's an active peel (exchange layer), we
      * must commit/merge it before clearing. Otherwise the exchange layer
@@ -501,7 +500,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       // so that rings are regenerated correctly (not just patching metadata).
       // For irregular tools (lasso/wand): patch the edge-mode flags directly on the
       // polygon. INVARIANT (three-state model): the AA toggle is the sole writer
-      // and must write BOTH flags — `ssdepMode` is display-only (SSDEP, P2) and
+      // and must write BOTH flags — `ssdepMode` is display-only (SSDEP) and
       // always resets to false here; it never enters GPU descriptors.
       if (tool === 'rect' || tool === 'ellipse') {
         const newPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, clipBox.rect, newAA);
@@ -691,7 +690,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       const layer = ctx.activeLayer;
       if (!layer || layer.type !== 'image') return;
 
-      // ─── Get effective alpha via unified composite pipeline (Step 10) ──────
+      // ─── Get effective alpha via unified composite pipeline ────────────────
       // Composite the layer (source + VectorMasks + BitmapMasks + adjustments)
       // and extract ImageData directly — only the alpha channel is needed for
       // polygon contour tracing. NOT persisted to the frame/layer state.
@@ -753,7 +752,7 @@ export const CLIP_OPTIONS_COMMANDS = {
               ring.map(p => ({ x: p.x + vx, y: p.y + vy }))
             );
         // Wand results are PIXEL selections: pinned to a hard binary edge
-        // (plan §7.1.1 — `antiAliased:false, ssdepMode:false`), matching the
+        // (`antiAliased:false, ssdepMode:false`), matching the
         // wand click handler. Softening is Feather's job, not AA's.
         const layerPoly = ctx.geometry.point2d.point2dToLocalPolygon(adjustedRings, false);
         const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(layerPoly, layer, frame);
@@ -1010,7 +1009,7 @@ export const CLIP_INTERCEPTORS = {
     // canvas would then render the *previous* shape (e.g. the ellipse the
     // user had just drawn) under a toolbar that claimed 'rect' was active,
     // giving the misleading "tool says rect, selection is ellipse" UX
-    // reported as the 2026-06-23 bug 1 in the clip-tool guide.
+    // observed as a real-machine bug on 2026-06-23.
     //
     // The "rect-only during Re-Canvas" semantic is already enforced
     // *non-destructively* by the synthesis layer:
@@ -1021,7 +1020,7 @@ export const CLIP_INTERCEPTORS = {
     // user's actual tool selection. When Re-Canvas closes, the original
     // signal value is preserved and the user lands back on whichever tool
     // they had — exactly the round-trip behaviour the orthogonal-modal
-    // design (§3.2 of the guide) promises.
+    // design promises.
     return false;
   }
 };

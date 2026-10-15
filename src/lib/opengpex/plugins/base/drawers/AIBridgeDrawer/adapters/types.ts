@@ -154,7 +154,7 @@ export function unsupportedTask(providerName: string, task: string): Error {
   );
 }
 
-// ─── Agent tool-calling types (Phase 1) ─────────────────────────────────────────
+// ─── Agent tool-calling types ─────────────────────────────────────────
 
 /** Tool definition sent in the request (OpenAI function calling format). */
 export interface AgentToolDef {

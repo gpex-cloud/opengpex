@@ -31,7 +31,7 @@ const COLORS = {
  * useSmartGuidesFastSync: Smart guides screen-space synchronization.
  *
  * Projects world-coordinate guide positions to screen space every frame.
- * [P0 Perf] Throttled to ~30Hz during interaction — guide lines are transient UI hints.
+ * [Perf] Throttled to ~30Hz during interaction — guide lines are transient UI hints.
  */
 export function useSmartGuidesFastSync(
   xRef: React.RefObject<HTMLDivElement | null>,

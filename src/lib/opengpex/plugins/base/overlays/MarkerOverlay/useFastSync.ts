@@ -31,7 +31,7 @@ import { getMarkerPreview, getMarkerPreviewVersion } from './interactions';
  * the module-level preview version changes (same dirty-check idea as
  * BrushOverlay's useStrokePreviewFastSync). The preview SVG itself is produced
  * by core `markerToSvg`, guaranteeing pixel parity with the final rasterized
- * output (§6.6).
+ * output.
  */
 export function useMarkerPreviewFastSync(
   containerRef: React.RefObject<HTMLDivElement | null>,

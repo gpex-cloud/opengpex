@@ -38,7 +38,7 @@
  *    paint pass).
  *
  * ── DENSITY ──
- * `args.density` (export supersampling today; viewport density band in P3) is
+ * `args.density` (export supersampling today; viewport density band) is
  * quantized UP to a density band and the atlas rasterizes at that band. Same
  * band ⇒ on-screen glyph texels ≈ atlas texels (1:1, sharp); lower target
  * density downsamples linearly (acceptable); a higher one cannot happen by
@@ -511,7 +511,7 @@ export class TextRenderer implements VectorRenderer {
 export const textRenderer = new TextRenderer();
 
 /**
- * Release the export-band glyph atlas (plan §3.4: the export path rasterizes
+ * Release the export-band glyph atlas (the export path rasterizes
  * at `exportScale`'s density band as a ONE-SHOT — composite, then release, so
  * interactive VRAM is untouched by export-scale glyphs). The interactive band
  * (1×) atlas is never affected.

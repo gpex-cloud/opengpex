@@ -145,7 +145,7 @@ export interface FilterWindow {
 }
 
 /**
- * Derive the WINDOWED-CONVOLUTION rectangle (M1) for a filtered layer, or
+ * Derive the WINDOWED-CONVOLUTION rectangle for a filtered layer, or
  * `undefined` when the filter must run over the whole source (no crop →
  * un-windowed, the historical behaviour).
  *
@@ -221,7 +221,7 @@ export class FilterPass {
        */
       readonly sourceIsLinear?: boolean;
       /**
-       * WINDOWED convolution rect (M1, source-texture texels — see
+       * WINDOWED convolution rect (source-texture texels — see
        * {@link resolveFilterWindow}). Undefined → convolve the whole source.
        * The returned texture's content is THIS rect, so the caller must carry
        * it into `PreparedSource.contentWindow` for the compositor's UV map.

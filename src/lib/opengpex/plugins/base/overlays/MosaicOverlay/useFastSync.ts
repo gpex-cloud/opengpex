@@ -27,7 +27,7 @@ import { getStrokeBuffer, getStrokeVersion } from './interactions';
  *
  * Follows camera via CSS transform and detects strokeVersion changes to trigger
  * canvas drawImage only when the stroke buffer is actually dirty.
- * [P0 Perf] Throttled to ~60Hz during interaction.
+ * [Perf] Throttled to ~60Hz during interaction.
  */
 export function useStrokePreviewFastSync(
   containerRef: React.RefObject<HTMLDivElement | null>,
@@ -96,7 +96,7 @@ export function useStrokePreviewFastSync(
  * useMosaicCursorFastSync: Mosaic cursor size synchronization with camera.k.
  *
  * Resizes cursor DOM elements when camera zoom changes.
- * [P0 Perf] Throttled to ~60Hz during interaction.
+ * [Perf] Throttled to ~60Hz during interaction.
  */
 export function useMosaicCursorFastSync(
   cursorRef: React.RefObject<HTMLDivElement | null>,

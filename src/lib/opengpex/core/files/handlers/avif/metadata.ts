@@ -13,8 +13,7 @@
  * AVIF metadata extraction — fills ImageMetadata from the container parser
  * (`./metadata/container.ts`) plus ExifReader for the semantic EXIF fields.
  *
- * Truths come from the AVIF boxes themselves (probe-verified layout,
- * gpex-cloud/probes/avif/README.md):
+ * Truths come from the AVIF boxes themselves (probe-verified layout):
  *   - bit depth: pixi → av1C fallback — NEVER clamped, never defaulted to 8
  *     (the previous implementation read `tags.file?.BitDepth` from ExifReader,
  *     an API that does not exist for ISOBMFF — depth was always the default 8

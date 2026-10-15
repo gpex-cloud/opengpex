@@ -31,8 +31,8 @@ interface BitDepthOptionsProps {
 }
 
 /**
- * BitDepthOptions — an 8/16-bit segment control, orthogonal to gamut selection
- * (egest refactor §6.1). Rendered only for formats with a raw encode lane
+ * BitDepthOptions — an 8/16-bit segment control, orthogonal to gamut selection.
+ * Rendered only for formats with a raw encode lane
  * (PNG/TIFF); its visibility gate lives in `useExportRules.showBitDepth`.
  *
  * 1:1 with `config.exportBitDepth` — no source-depth or edited-state disable

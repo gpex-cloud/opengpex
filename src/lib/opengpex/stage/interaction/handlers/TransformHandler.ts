@@ -193,8 +193,7 @@ export interface TransformHandlerConfig<T = LocalRect> {
    *     (recoverable from the rect) and should write them straight to
    *     `bounding` / `cx`+`cy`.
    *   - `context.orientation` is non-null, so consumers can assert the space.
-   *   - Edge snapping is skipped (see the rotated-snapEdge TODO in
-   *     `docs/opengpex/plans/v1/20260905_transform_handler_rotation_aware_resize.md`):
+   *   - Edge snapping is skipped:
    *     `snapEdge` compares canvas-axis edges and cannot express a rotated edge.
    *
    * When this returns null/undefined, or `rotation === 0` with no flip, the
@@ -307,7 +306,7 @@ function needsOrientationPath(o: LayerOrientation | null | undefined): o is Laye
  *   - otherwise → round to the integer canvas grid.
  *
  * Consolidating the three previously-duplicated tails here is the "align as a
- * unified post-process" step of Phase 2 (see the plans doc §4.4). It is a pure
+ * unified post-process" pass. It is a pure
  * refactor: behaviour is identical for all existing consumers.
  */
 function finalizeRectAlignment(

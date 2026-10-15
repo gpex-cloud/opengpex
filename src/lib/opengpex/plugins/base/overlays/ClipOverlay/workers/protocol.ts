@@ -23,7 +23,7 @@
  * Wire-level types for the request / response exchanged between the main
  * thread (`client.ts`) and the wand worker (`wand.worker.ts`).
  *
- * Design notes (per phase1_irregular_clip_spec §6.2):
+ * Design notes:
  *   - Pixel buffer is sent as Transferable `ArrayBuffer` so a 4K (~32 MB RGBA)
  *     image takes <1 ms to hand off — postMessage with structured-clone would
  *     stall the main thread by ~100 ms.

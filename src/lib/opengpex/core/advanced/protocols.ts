@@ -96,7 +96,7 @@ export const ADV_LAYER_BITMAP_MASK_CLEAR = 'adv.layer.bitmapMask.clear_all';
 
 // 5. Irregular Selection (lasso / wand / AI matting → polygon → bitmap mask)
 //
-// Note (Pre-PR-6-2): there is intentionally NO `set` / `clear` adv command
+// Note: there is intentionally NO `set` / `clear` adv command
 // here. Producers (lasso / wand handlers, AI matting pipelines) write the
 // frame's `irregularCropBox` directly via `actions.setIrregularCropBox`,
 // matching the rect/ellipse pattern of writing `imageCropBox` /

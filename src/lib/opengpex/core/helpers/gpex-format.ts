@@ -118,7 +118,7 @@ export interface GpexManifest {
   /**
    * Document bit depth (8 / 16 / 32). Defaults to 8 when absent.
    *
-   * LEGACY — READ-ONLY (§8.4.4 R2): no longer written. It was fed from the
+   * LEGACY — READ-ONLY: no longer written. It was fed from the
    * deleted `Frame.bitDepth`, and a .gpex carries MANY assets whose depths can
    * differ, so one document-wide number is a fiction. Depth now travels per
    * asset (`StoredAsset.colorIdentity.bitDepth`) inside the payload ZIP. Kept

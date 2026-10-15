@@ -82,7 +82,7 @@ export interface AntsPathCache {
  * ONLY used by the `ss` (smooth SSDEP display) mode — see the caller. The aa/na
  * staircase modes must consume the RAW rings: the staircase is the pixel-exact
  * boundary shared with the GPU fill-pass, and Douglas–Peucker would shift steps
- * away from the actually-cut pixels (plan §7.1 fact 3 / decision 2).
+ * away from the actually-cut pixels.
  *
  * Strategy:
  *   - If total vertex count ≤ ANTS_MAX_VERTICES, use the polygon as-is.

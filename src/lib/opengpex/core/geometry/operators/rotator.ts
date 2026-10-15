@@ -23,7 +23,7 @@
  * These are the ONLY place rotation angle normalization and snapping are
  * defined.  The rotation handler (MarkerOverlay / TextOverlay) calls them;
  * no sin/cos or direction-matrix construction happens here — that stays in
- * `getOrientationMatrix` (transform.ts), per the §5.4 iron rule.
+ * `getOrientationMatrix` (transform.ts).
  */
 
 /**

@@ -114,7 +114,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   // FileService no longer depends on PixelService — construct it first so it can
   // be injected into PixelFacade for cold-recovery (`files.recover`).
   const files = useMemo(() => createFileService(assets), [assets]);
-  // v2 PixelFacade — replaces createPixelService (Phase 6 engine integration)
+  // v2 PixelFacade — replaces createPixelService (engine integration)
   const pixels = useMemo(
     () => createPixelFacade({ geometry, assets, bridge, files }),
     [geometry, assets, bridge, files],
@@ -190,7 +190,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
 
   // 4.0 AssetService ↔ Engine cache wiring is now fully internal to createPixelFacade.
   // PixelFacade calls assets.setCallbacks() during construction (synchronous, no race window).
-  // See: core/engine/PixelFacade.ts §"Wire AssetService lifecycle"
+  // See the `Wire AssetService lifecycle` block in core/engine/PixelFacade.ts.
 
   // 4.1 Core bootstrapping and persistent recovery (Bootstrap & Hydration)
   const sysCommandsRegistered = useRef(false);

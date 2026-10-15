@@ -92,10 +92,11 @@ struct AdjustPreUniforms {
   // x: 0 = source is sRGB-encoded (decode it), 1 = source is already linear light.
   // y: GAMUT_ID (0..7) — the source physical gamut to align to the working space
   //    (ProPhoto RGB) after the TRC decode; 0 = already working / direct (no-op).
-  // z: RENDER_INTENT (0..1) — the out-of-box rendering intent tone-map (RAW Route B:
-  //    0 = SDR passthrough, 1 = Filmic). This
+  // z: RENDER_INTENT (0..1) — the out-of-box rendering intent tone-map
+  //    (0 = SDR passthrough, 1 = Filmic). This
   //    bake is the FIRST sample of the raw asset, so it OWNS the tone-map; the
-  //    downstream composite is then told the intent is already applied (constraint A).
+  //    downstream composite is then told the intent is already applied (it must
+  //    never tone-map a second time).
   // w: FILMIC_WHITE_DOMAIN — the layer's per-file filmic knee domain (an f32 in
   //    [0.31, 0.95]; only read when z ≠ 0).
   // Kept in the padding slots the struct already reserved, so the 32-byte layout and
@@ -134,7 +135,7 @@ fn fs_adjust_pre(in : PreVSOut) -> @location(0) vec4<f32> {
   // Normalise the raw sample into WORKING-space
   // (Display-P3) linear light with its rendering intent applied — the SAME pipeline
   // layer.ts / blend.ts run, via the scalar-parameter entry point (this 32-byte
-  // uniform cannot carry a packed u32 flags word; constraint C). Input alpha is
+  // uniform cannot carry a packed u32 flags word). Input alpha is
   // STRAIGHT (CompositePass never premultiplies the bake source), so is_premult is
   // false and the intent's un-premultiply dance is a no-op. flags carry the fields as
   // exact integers in the f32 mantissa (0..7 / 0..3 exact; round discretises).
@@ -179,7 +180,7 @@ fn fs_adjust_pre(in : PreVSOut) -> @location(0) vec4<f32> {
  * `intent` (0..1) is the out-of-box rendering intent tone-map: 0 = SDR passthrough,
  * 1 = Filmic. Written to `flags.z`. The bake OWNS the
  * tone-map (it is the raw asset's first sample), so the downstream composite is
- * later told the intent is already applied (RAW Route B constraint A).
+ * later told the intent is already applied (never tone-map twice).
  *
  * `whiteDomain` is the layer's per-file filmic knee domain
  * (ColorIdentity.rawWhiteDomain), written to `flags.w` and consumed only when

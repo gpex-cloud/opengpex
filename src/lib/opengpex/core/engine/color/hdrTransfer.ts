@@ -21,14 +21,14 @@
  * hdrTransfer.ts — PQ (SMPTE ST 2084 / BT.2100) and HLG (BT.2100) transfer
  * functions, anchored to the scene-referred linear domain the engine works in.
  *
- * WHY WE OWN THE EOTF (probe P0-4a, ultrawide phase-B plan §1): the wasm
+ * WHY WE OWN THE EOTF (probe-verified): the wasm
  * AVIF decoder (libavif) delivers RAW TRANSFER CODE VALUES bit-exactly
  * (maxDev 0 on lossless identity-matrix ramps) — no linearization, no OOTF,
  * no tone mapping. The 8-bit `image-bitmap` path is the opposite (the browser
  * applies an uncontrolled tone map, meanDev ≈ 30/255). So for HDR AVIF the
  * EOTF is OURS to apply, deterministically.
  *
- * SCENE ANCHOR (D8): PQ is ABSOLUTE (code → cd/m²). The scene-referred 1.0 is
+ * SCENE ANCHOR: PQ is ABSOLUTE (code → cd/m²). The scene-referred 1.0 is
  * anchored at 203 cd/m² = SDR white (CIE 2108 and mainstream HDR graphics
  * practice), so linearScene = nits / HDR_REF_WHITE_NITS. Values > 1.0 are EDR
  * headroom (PQ 10-bit tops out at 10000/203 ≈ 49× white). HLG is relative:
@@ -40,7 +40,7 @@
  * EOTF → OETF → bit-exact codes) and the future HDR export lane.
  */
 
-/** PQ absolute reference white: the cd/m² level that is scene 1.0 (D8). */
+/** PQ absolute reference white: the cd/m² level that is scene 1.0. */
 export const HDR_REF_WHITE_NITS = 203;
 
 /** PQ peak luminance of the standard container (BT.2100: 10000 cd/m²). */

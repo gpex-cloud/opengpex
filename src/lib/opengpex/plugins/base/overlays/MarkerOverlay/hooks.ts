@@ -44,14 +44,14 @@ export function useMarkerOverlayState() {
 /**
  * useMarkerToolLifecycle: cursor feedback + Escape handling for the marker tool.
  *
- * Cursor (§8.6): while the tool is active the base cursor is `crosshair`; when
+ * Cursor: while the tool is active the base cursor is `crosshair`; when
  * the pointer hovers an existing marker layer it switches to `move` (matching
  * MarkerMoveHandler winning the hit). During an active drag (draw or move) the
  * cursor is owned by the interaction handler (draw keeps `crosshair`, move sets
  * `grabbing`), so hover recomputation is skipped to avoid flicker — same guard
  * as ClipOverlay's `useClipCursor`.
  *
- * Escape (§9): if a drag is in progress the viewport-level Esc handler cancels
+ * Escape: if a drag is in progress the viewport-level Esc handler cancels
  * it via `dispatcher.cancelAll()` (→ draw `onCancel` clears the preview) and we
  * stay in the tool; if idle, Esc deactivates the marker tool through
  * CraftDrawer's command (mirrors BrushOverlay / TextOverlay pre-edit Escape).

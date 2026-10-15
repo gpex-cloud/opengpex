@@ -27,7 +27,7 @@
  * can colour-manage the pixels; the default is the WORKING gamut (ProPhoto
  * RGB, D50 white).
  *
- * FORMAT FACTS (spec: "The Structure of an OpenEXR File"; the P0-4b probe's
+ * FORMAT FACTS (spec: "The Structure of an OpenEXR File"; the probe's
  * original pit-② note claimed per-pixel interleaving — that was WRONG, and the
  * self-written reader that "validated" it merely mirrored the same assumption.
  * The honest tell was ffmpeg decoding our interleaved file as garbled values:
@@ -46,8 +46,7 @@
  * requires the per-scanline difference predictor before zlib — it is NOT a
  * bare `CompressionStream('deflate')` of the pixel bytes and is deliberately
  * NOT implemented here (the MVP ships uncompressed; a ZIP lane must be
- * probe-validated against the OpenEXR toolchain first, same discipline as
- * P0-4b).
+ * probe-validated against the OpenEXR toolchain first).
  */
 
 /** CIE 1931 xy primaries per exportable gamut (the `chromaticities` attribute). */
@@ -112,11 +111,11 @@ export function encodeExrHalf(
 
   // ── Header attributes (order matters only for readability; offsets are computed) ──
   const channelsPayload: number[] = [];
-  // Alphabetical order is a hard OpenEXR requirement (P0-4b pit ②).
+  // Alphabetical order is a hard OpenEXR requirement.
   for (const name of ['A', 'B', 'G', 'R']) {
     writeName(channelsPayload, name);
-    channelsPayload.push(...leI32(1)); // pixelType HALF = 1 (pit ③)
-    channelsPayload.push(0, 0, 0, 0);  // pLinear(u8) + 3 reserved bytes (pit ①)
+    channelsPayload.push(...leI32(1)); // pixelType HALF = 1
+    channelsPayload.push(0, 0, 0, 0);  // pLinear(u8) + 3 reserved bytes
     channelsPayload.push(...leI32(1)); // xSampling = 1
     channelsPayload.push(...leI32(1)); // ySampling = 1
   }

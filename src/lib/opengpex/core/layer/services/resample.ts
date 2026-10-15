@@ -40,7 +40,7 @@ export function createResampleOperations(
    *
    * Uniform scale (|scaleX - scaleY| < 0.001):
    *   Non-destructive. The shared source is resampled by its TRUE pixel
-   *   dimensions × scale (NOT bounding × scale — see resize spec §4.1), and every
+   *   dimensions × scale (NOT bounding × scale), and every
    *   geometric attribute (visibleShape rect + pathData, vectorMasks rect +
    *   pathData + feather, bitmapMasks bounds + feather + grayscale src,
    *   adjustments.blur, textData fontSize/box) is mapped from the old coordinate
@@ -51,8 +51,8 @@ export function createResampleOperations(
    * Non-uniform scale:
    *   Destructive bake (flatten) then resample, resetting orientation. Vector /
    *   bitmap masks and the visibleShape offset are collapsed into the baked pixels
-   *   (known trade-off, see spec §7). Also used as the safety fallback when the
-   *   uniform path cannot resolve the source's true dimensions (spec §4.1 / §12.2)
+   *   (known trade-off). Also used as the safety fallback when the
+   *   uniform path cannot resolve the source's true dimensions
    *   — we NEVER fall back to the old buggy `bounding × scale` behavior.
    */
   async function resampleLayer(
@@ -99,7 +99,7 @@ export function createResampleOperations(
     } catch (err) {
       // Uniform path failed (e.g. src decode failed / asset missing). Fall back to
       // the flatten path — correct pixels, degraded structure — NEVER the old buggy
-      // bounding × scale behavior (spec §4.1 / §12.2).
+      // bounding × scale behavior.
       if (isUniform) {
         try {
           console.warn('[LayerService] Uniform resample failed, falling back to flatten for layer:', layer.id, err);
@@ -122,14 +122,14 @@ export function createResampleOperations(
       const boundingH = Math.max(1, Math.round(layer.bounding.h * scaleY));
 
       // Uniform branch guarantees scaleX ≈ scaleY, so a single scalar safely
-      // covers px-quantity attributes (feather / blur). See spec §4.6.
+      // covers px-quantity attributes (feather / blur).
       const featherScale = scaleX;
 
       let assetId = layer.assetId;
       let url = layer.src;
 
       if (hasContent) {
-        // Route X (spec §4.1): resample by the source's TRUE dimensions × scale.
+        // Resample by the source's TRUE dimensions × scale.
         // The Worker resolves src size, so a shared full-image src scales correctly
         // instead of being squashed into the selection window. Throws on decode
         // failure → caught above → flatten fallback.
@@ -155,10 +155,10 @@ export function createResampleOperations(
               height: lightRecord.height,
               dataFormat: lightRecord.dataFormat,
               trc: lightRecord.trc,
-              // §8.1 forwarding: carry the persisted source gamut through the cold
+              // Forwarding: carry the persisted source gamut through the cold
               // reload so the GPU converts it.
               gamut: lightRecord.gamut,
-              // RAW Route B §5.3: carry the persisted raw white domain through too
+              // Carry the persisted raw white domain through too
               // (its presence IS the render intent), so a cold-reloaded RAW still
               // tone-maps identically.
               rawWhiteDomain: lightRecord.rawWhiteDomain,
@@ -175,7 +175,7 @@ export function createResampleOperations(
         if (hdSource) {
           // PR-4.1a: a resized 16-bit layer resamples the STRAIGHT high-depth naked
           // pixels DIRECTLY via CPU bilinear (f32 intermediate) to preserve high precision.
-          // The element type round-trips, so a 32-bit float layer stays f32 (§6.5).
+          // The element type round-trips, so a 32-bit float layer stays f32.
           const targetW = Math.max(1, Math.round(hdSource.width * scaleX));
           const targetH = Math.max(1, Math.round(hdSource.height * scaleY));
           const scaledData = resampleBilinear(
@@ -197,7 +197,7 @@ export function createResampleOperations(
               trc: hdSource.trc ?? 'linear',
               bitDepth: hdSource.dataFormat === 'rgba32float' ? 32 : 16,
               dataFormat: hdSource.dataFormat,
-              // Preserve the raw white domain across a resize re-store (RAW Route B §5.3).
+              // Preserve the raw white domain across a resize re-store.
               rawWhiteDomain: hdSource.rawWhiteDomain,
             },
           };
@@ -207,7 +207,7 @@ export function createResampleOperations(
       }
 
       // Snap "positioning" quantities (rect / bounds) to the integer pixel grid to
-      // avoid sub-pixel AA blur / seams (spec §5). pathData vertices are NOT snapped
+      // avoid sub-pixel AA blur / seams. pathData vertices are NOT snapped
       // (they are a sub-pixel-precise clip source); the enclosing rect carries the
       // alignment instead.
       const scaleRectSnap = (r: { x: number; y: number; w: number; h: number }): LocalRect =>
@@ -220,7 +220,7 @@ export function createResampleOperations(
       // resizeCanvas): even dimensions → integer, odd → x.5.
       const snapHalf = (v: number) => Math.round(v * 2) / 2;
 
-      // visibleShape: rect (scale + snap) + pathData (scale only) — spec §4.2.
+      // visibleShape: rect (scale + snap) + pathData (scale only).
       let visibleShapePatch: Partial<Layer> = {};
       if (layer.visibleShape) {
         const vs = layer.visibleShape;
@@ -231,7 +231,7 @@ export function createResampleOperations(
         visibleShapePatch = { visibleShape: nextVs };
       }
 
-      // vectorMasks: rect (scale + snap) + pathData (scale) + feather (scale) — spec §4.3.
+      // vectorMasks: rect (scale + snap) + pathData (scale) + feather (scale).
       // All other fields (inverted / enabled / reserved / assocLayerId / id) preserved.
       let vectorMasksPatch: Partial<Layer> = {};
       if (layer.vectorMasks) {
@@ -246,7 +246,7 @@ export function createResampleOperations(
         };
       }
 
-      // bitmapMasks: bounds (scale + snap) + feather (scale) + grayscale src resample — spec §4.4.
+      // bitmapMasks: bounds (scale + snap) + feather (scale) + grayscale src resample.
       // The grayscale src is independent (not shared), so it must be resampled to
       // match the new bounds size. All other fields (inverted / enabled / tag / id) preserved.
       let bitmapMasksPatch: Partial<Layer> = {};
@@ -270,7 +270,7 @@ export function createResampleOperations(
       }
 
       // adjustments.blur: px-quantity → scale. Only rewrite when blur > 0 to avoid
-      // an unnecessary patch (spec §4.5).
+      // an unnecessary patch.
       let adjustmentsPatch: Partial<Layer> = {};
       if (layer.adjustments && layer.adjustments.blur > 0) {
         adjustmentsPatch = {

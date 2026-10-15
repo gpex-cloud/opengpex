@@ -22,14 +22,14 @@
 /**
  * ChannelMixerPanel — Photoshop-style 3×3 RGB channel mixer.
  *
- * Interaction & data-flow (spec §5, §6 & §7, mirrors CurvesPanel / LevelsPanel):
+ * Interaction & data-flow (mirrors CurvesPanel / LevelsPanel):
  *
  * - The panel is a strict UI + state-writer layer: it only mutates
  *   `layer.channelMix` through the plugin's commands. The render engine
  *   observes the mutation on the next frame and, on cache-miss, dispatches
- *   the worker (spec §5.1 / §3.5). This file has
+ *   the worker. This file has
  *   ZERO knowledge of `AsyncFilterCache` / `WorkerBridge` — the hard
- *   constraint in spec §3.5.
+ *   constraint.
  *
  * - Layout:
  *     • Preset dropdown at the top (None / B&W×3 / Sepia / Cross Process /
@@ -60,7 +60,7 @@
  *   style input pattern from levels.tsx; extracting it to a shared
  *   `components.tsx` is Step 8 housekeeping (not required to ship this panel).
  *
- * - Performance note (spec §7 risk 8): 3×3 matrix per-pixel is 3–9× slower
+ * - Performance note: 3×3 matrix per-pixel is 3–9× slower
  *   than the 1D LUT of curves/levels, but still lands in the same
  *   adjustment pipeline. The panel doesn't need to know or
  *   care — it only writes state; the pipeline eats the cost.

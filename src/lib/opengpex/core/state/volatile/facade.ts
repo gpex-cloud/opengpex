@@ -100,10 +100,10 @@ export function createFastFacade(deps: FastFacadeDeps) {
         if (type === 'layer') {
           const compositeKey = getCompositeKey(frameId, id);
           v.buffered.layers[compositeKey] = { ...v.buffered.layers[compositeKey], ...props };
-          v._bufferVersion++; // [P2 Perf] Invalidate snapshot cache
+          v._bufferVersion++; // [Perf] Invalidate snapshot cache
         } else if (type === 'frame') {
           v.buffered.frames[id] = { ...v.buffered.frames[id], ...props };
-          v._bufferVersion++; // [P2 Perf] Invalidate snapshot cache
+          v._bufferVersion++; // [Perf] Invalidate snapshot cache
         } else {
           v.buffered.project = { ...v.buffered.project, ...props };
         }

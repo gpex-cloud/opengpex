@@ -31,7 +31,7 @@ import { LayerFactory } from '../factory';
 
 /**
  * Anti-alias safety margin (px) added to the feather radius when expanding a
- * fragment's crop bbox (M3 §M3.h.1). Guards the soft edge's outermost falloff row
+ * fragment's crop bbox. Guards the soft edge's outermost falloff row
  * from being clipped by the crop window.
  */
 const AA_MARGIN = 1;
@@ -336,7 +336,7 @@ export function createFragmentOperations(
 
       // Effective feather = max(new-cut feather, folded source-mask feather). The
       // dominant case (plain layer, feathered cut) has folded featherPx=0, so this is
-      // just the new cut's feather. §M3.d.2 padding + the implicit shape mask below.
+      // just the new cut's feather. Padding + the implicit shape mask below.
       const v = intersection.visibleShape.rect;
       const effFeather = Math.max(feather, intersection.featherPx ?? 0);
       const pad = effFeather > 0 ? Math.ceil(effFeather + AA_MARGIN) : 0;
@@ -347,7 +347,7 @@ export function createFragmentOperations(
         // geometry as pathData + `featherPx`. SceneAssembler renders this as an
         // implicit (feathered) vmask; symmetric padding keeps the tight region's
         // world centre fixed, so `intersection.center` is still the anchor and the
-        // visibleOffset is simply the padded rect's origin (§M3.d.2 / d.3).
+        // visibleOffset is simply the padded rect's origin.
         const tightPath = shapeToAbsPathData(intersection.visibleShape);
         const paddedRect = asLocalRect({ x: v.x - pad, y: v.y - pad, w: v.w + 2 * pad, h: v.h + 2 * pad });
         newLayer.bounding = { w: paddedRect.w, h: paddedRect.h };
@@ -411,7 +411,7 @@ export function createFragmentOperations(
     if (options?.mode === 'cut') {
       const maskId = `mask-hole-${newLayer.id}`;
 
-      // §5.3: the hole punched into the source layer MUST be the *real* geometry
+      // The hole punched into the source layer MUST be the *real* geometry
       // the fragment actually took — the TIGHT intersection (selection ∩ (A − prior
       // holes)), NOT the fragment's padded visibleShape. For a hard cut the two are
       // identical (pad=0); for a feathered cut the fragment's visibleShape is grown

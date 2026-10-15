@@ -109,7 +109,7 @@ export const CLOUD_MENU_COMMANDS = {
           canvasHeight: frame.canvas?.h || 0,
           layerCount: LayerFactory.getHostLayers(frame.layers.order.map(id => frame.layers.byId[id])).length,
           assetCount: Object.keys(exported.assets).length,
-          // `bitDepth` is deliberately NOT written (§8.4.4 R2): it is legacy
+          // `bitDepth` is deliberately NOT written: it is legacy
           // read-only in GpexManifest now — per-asset depth travels with each
           // asset in the payload ZIP.
           dpi: frame.dpi ?? 72,
@@ -273,7 +273,7 @@ export function unpackPayload(payload: ArrayBuffer): UnpackedPayload {
   const state = JSON.parse(new TextDecoder().decode(stateJsonBytes));
 
   // Read the asset manifest first — `dec/` entries cannot be interpreted
-  // without each asset's `dataFormat`. Absent ⇒ legacy container (§4.4), and
+  // without each asset's `dataFormat`. Absent ⇒ legacy container, and
   // `unpack` degrades every asset to category ①.
   let manifest: GpexAssetManifest | undefined;
   const manifestBytes = zipData['assets-manifest.json'];

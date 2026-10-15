@@ -97,7 +97,7 @@ export interface DrawLayerParams {
   /** `texture` is a vector transient — UV ratio derives from the texture, not `layer.dprScale`. */
   readonly vectorTransient?: boolean;
   /**
-   * WINDOWED-CONVOLUTION content rect (M1, source texels): `texture` holds only
+   * WINDOWED-CONVOLUTION content rect (source texels): `texture` holds only
    * this sub-rect of the source, so `uvRect` shifts by its origin (see
    * `resolveLayerGeometry`). Undefined → content-aligned with the full source.
    */
@@ -119,7 +119,7 @@ export interface DrawLayerParams {
    * The `texture` already had its rendering-intent tone-map applied because the
    * pipeline produced it (the `AdjustPrePass` bake owns the tone-map), so the shader
    * must NOT re-apply it (it would double-tone-map, crushing contrast). Overrides
-   * `layer.source.renderIntent`; see `sourceIntent.ts` (RAW Route B constraint A).
+   * `layer.source.renderIntent`; see `sourceIntent.ts`.
    */
   readonly sourceIntentApplied?: boolean;
 }
@@ -127,7 +127,7 @@ export interface DrawLayerParams {
 /**
  * Reusable Float32Array / Uint32Array views for packing LayerUniforms (128 bytes).
  *
- * ⚠️ WP-5.6 concurrency note: these are MODULE-LEVEL mutable scratch buffers,
+ * ⚠️ Concurrency note: these are MODULE-LEVEL mutable scratch buffers,
  * shared by every `CompositePass.drawLayer` call. This is safe today because the
  * render path is strictly single-threaded and synchronous — each call fully
  * packs + copies into the BufferRing (`writeSlot`) before the next call runs.
@@ -272,7 +272,7 @@ export class CompositePass {
     flags |= (gamutId << LAYER_GAMUT_SHIFT);
     // Per-file filmic knee domain: its PRESENCE packs the render-intent nibble
     // (bits 8..9; a bake-tone-mapped transient passes sourceIntentApplied ⇒
-    // undefined ⇒ 0 — constraint A: never double-tone-map), its value packs the
+    // undefined ⇒ 0 — never double-tone-map), its value packs the
     // filmic_white uniform (unread when the nibble is 0).
     const rawWhiteDomain = resolveSourceRawWhiteDomain(layer, params.sourceIntentApplied);
     if (rawWhiteDomain !== undefined) flags |= (1 << LAYER_RENDER_INTENT_SHIFT);

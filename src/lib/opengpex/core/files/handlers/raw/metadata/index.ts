@@ -24,7 +24,7 @@
  *
  * Uses ExifReader for semantic field parsing (camera, capture, dates, GPS, DPI).
  *
- * Colour space is PROBED, not assumed (Route B / defect A): an embedded ICC
+ * Colour space is PROBED, not assumed: an embedded ICC
  * profile name or a DNG camera-profile name that names a known RGB gamut wins;
  * only when NOTHING is recognised do we fall back to `prophoto-rgb` (the widest
  * container for an untagged sensor). Bit depth is a hard fact for every RAW
@@ -227,7 +227,7 @@ export async function extractRawMetadata(file: File): Promise<ImageMetadata> {
       }
     }
 
-    // ── Real colour identity + HDR transfer probe (defect A) ──
+    // ── Real colour identity + HDR transfer probe ──
     // Priority: embedded ICC name → DNG ProfileName → prophoto-rgb fallback.
     const { colorSpace, transfer } = detectRawColorIdentity(iccProfileName, dngProfileName);
     meta.colorSpace = colorSpace;
@@ -239,7 +239,7 @@ export async function extractRawMetadata(file: File): Promise<ImageMetadata> {
     // 2026-10-13 also showed ProRAW's ProfileToneCurve is near-identity; the
     // Apple look lives in ProfileGainTableMap, which is deliberately not read:
     // 3 MB per file). The parsers remain exported above for the future
-    // 'dng-profile' render-intent route (05 spec §9.3); storage returns when a
+    // 'dng-profile' render-intent route; storage returns when a
     // consumer exists. meta.raw.transfer above is the only retained seam.
   } catch {
     // EXIF extraction failed — non-critical; keep the pre-detection defaults.

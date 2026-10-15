@@ -19,7 +19,7 @@
 
 /**
  * hdr.ts — "does this document carry HDR content" — the ONE judgement the
- * per-document HDR presentation switch (D5) auto-defaults from.
+ * per-document HDR presentation switch auto-defaults from.
  *
  * Consumers: CanvasStage (surface mode default), FrameInfoPanel (HDR badge +
  * toggle visibility) and the egest HDR-container lanes (WYSIWYG: the panel and

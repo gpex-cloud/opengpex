@@ -34,7 +34,7 @@ export const CMD_SET_BLEND_MODE = 'cmd.set_blend_mode';
 export const CMD_SET_LAYER_OPACITY = 'cmd.set_layer_opacity';
 export const CMD_SET_LAYER_FILL = 'cmd.set_layer_fill';
 
-// Layer Group commands (Phase 1)
+// Layer Group commands
 export const CMD_CREATE_GROUP = 'cmd.create_group';
 export const CMD_UNGROUP_LAYERS = 'cmd.ungroup_layers';
 export const CMD_TOGGLE_GROUP_COLLAPSE = 'cmd.toggle_group_collapse';

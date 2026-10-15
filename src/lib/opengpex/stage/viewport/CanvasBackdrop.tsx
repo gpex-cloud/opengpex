@@ -74,7 +74,6 @@ export default function CanvasBackdrop({
     // clip boundary at physical pixel granularity, eliminating:
     //   - Ghost vertical lines during pan (anti-aliased SVG edge residue)
     //   - 1px checkerboard bleed at canvas edges during zoom
-    // See: docs/opengpex/plans/20260815_canvas_edge_subpixel_artifact_fix.md
     const dpr = window.devicePixelRatio || 1;
     const snap = snapCanvasRect(cam, f.canvas, dpr);
     const { x: x1, y: y1, w, h } = snap.css;
@@ -87,8 +86,7 @@ export default function CanvasBackdrop({
     // SVG in Chrome, forcing a full re-rasterization of the pattern-filled polygons
     // every frame. While idle the ticker keeps firing, so without this guard a large
     // transparent canvas area re-tiles the 32px checkerboard at 60fps and spins the
-    // fan. Skip all DOM writes when the projected rect is unchanged. See:
-    // docs/opengpex/v2/refactor/20261010_canvas_backdrop_idle_fan_analysis.md
+    // fan. Skip all DOM writes when the projected rect is unchanged.
     if (points === lastPointsRef.current) return;
     lastPointsRef.current = points;
 

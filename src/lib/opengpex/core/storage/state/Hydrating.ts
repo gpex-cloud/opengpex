@@ -169,7 +169,7 @@ export const Hydrating = {
             },
           };
 
-          // Provenance split (§4.1). Only high-depth assets can be anything but
+          // Provenance split. Only high-depth assets can be anything but
           // category ①, so a plain 8-bit asset costs zero extra IDB reads.
           if (probeHeavy && entry.dataFormat) {
             const rawBlob = await assets.getRaw(assetId);

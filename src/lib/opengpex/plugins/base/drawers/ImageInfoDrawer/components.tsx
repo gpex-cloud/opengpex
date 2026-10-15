@@ -98,7 +98,7 @@ export function ImageInfoComponent() {
       (activeFrame.assetId ? assets.get(activeFrame.assetId)?.bitDepth : undefined)
       ?? activeFrame.metadata?.bitDepth;
 
-    // Per-document HDR presentation (D5): availability comes from the FILE
+    // Per-document HDR presentation: availability comes from the FILE
     // (gain map / PQ·HLG transfer); the effective state is the frame's toggle
     // with the file as auto-default. Toggling writes `frame.hdrRender` — a
     // render filter, never pixel data.

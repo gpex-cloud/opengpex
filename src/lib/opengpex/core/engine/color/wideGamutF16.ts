@@ -166,7 +166,7 @@ export function wideGamut16ToF16(
  * Input: naked interleaved RGBA at the 65535 scale carrying RAW TRANSFER CODE
  * VALUES (what the wasm AVIF decoder delivers bit-exactly — no linearization,
  * no OOTF). Output: f16 SCENE-REFERENCED linear light in the SOURCE gamut
- * (1.0 = 203 cd/m² SDR white, D8 anchor; > 1.0 = headroom), the shape the GPU
+ * (1.0 = 203 cd/m² SDR white anchor; > 1.0 = headroom), the shape the GPU
  * raw upload + `gamut_to_working` consume with `trc: 'linear'` and the
  * source's gamut tag. Alpha is coverage and passes through normalized.
  *

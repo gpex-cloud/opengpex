@@ -279,7 +279,7 @@ export function simplifyRing(ring: Point2D[], epsilon: number): Point2D[] {
 /**
  * Display-edge mode derivation (three-state model, see `Shape.ssdepMode`):
  *   - `ss`: SSDEP display mode — smooth geometric ants (viewport magic; the
- *     smooth path is kept but NOT wired to any backend rendering in P1).
+ *     smooth path is kept but NOT wired to any backend rendering yet).
  *   - `aa`: document-space AA on — GPU bakes a 1-document-px coverage ramp
  *     (`vmask.ts` formula B); ants are the pixel staircase.
  *   - `na`: AA off — GPU bakes a 1-bit binary edge; ants are the SAME pixel
@@ -340,7 +340,7 @@ const CENTER_OFFSET_Y = 1 / 128;
  * the existing `getSmoothSvgPath(LocalShape)` convention (which also outputs from origin (0,0)).
  *
  * Routing by the display-edge mode (`deriveEdgeDisplayMode`):
- *   - `ss` (SSDEP display, P2-reserved): Linear `M/L/Z` — connects float
+ *   - `ss` (SSDEP display, reserved): Linear `M/L/Z` — connects float
  *     vertices directly (smooth geometry ants).
  *   - `aa` / `na`: pixel-staircase `M/H/V/Z` produced by the scanline
  *     staircase (`polygonToStairedPathD`) — IDENTICAL output for both modes
@@ -392,7 +392,7 @@ export function polygonToSvgPathD(
  * overlay use), this function generates ABSOLUTE coordinates suitable for direct
  * `new Path2D(pathData)` consumption.
  *
- * Shape recognition (P5 — selection_layer_unification_spec §3.2):
+ * Shape recognition:
  *   - 4-point axis-aligned ring → `type:'rect'` (preserves rendering precision)
  *   - 64-point ellipse approximation ring → `type:'circle'` (preserves rendering precision)
  *   - All other polygons → `type:'path'` with smooth M/L/Z pathData
@@ -410,7 +410,7 @@ export function polygonToShape(poly: WorldPolygon): WorldShape;
 export function polygonToShape(poly: LocalPolygon | WorldPolygon): LocalShape | WorldShape {
   const antiAliased = poly.antiAliased !== false;
 
-  // ── P5: Shape recognition ──────────────────────────────────────────────────
+  // ── Shape recognition ──────────────────────────────────────────────────
   // Only attempt recognition for single-ring polygons (multi-ring = complex shape).
   // `point2dToLocalShape` is typed for LocalPolygon rings (LocalPoint[][]) but the
   // underlying algorithm only uses x/y coordinates, so casting is safe here.

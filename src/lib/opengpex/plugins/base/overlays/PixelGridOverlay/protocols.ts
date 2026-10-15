@@ -66,7 +66,7 @@ export const DEFAULT_LINE_STYLE: GridLineStyle = 'dual';
 export const DUAL_TONE_MIN_DPR = 1.5;
 
 /**
- * Default grid line colors — dual-tone "casing" scheme (§ pixel-grid contrast).
+ * Default grid line colors — dual-tone "casing" scheme.
  *
  * A single fixed color always fails against SOME background (white lines vanish
  * on light images, black lines vanish on dark ones). We draw each grid line

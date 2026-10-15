@@ -45,7 +45,7 @@ export function layerLocalToFrameLocal(shape: Shape, layer: Layer, frame: Frame)
 }
 
 /**
- * MASK_AWARE_INTERSECTION — emergency rollback master switch (§5.4).
+ * MASK_AWARE_INTERSECTION — emergency rollback master switch.
  *
  *  true  : mask-aware logical intersection (default, correct behavior). The layer's
  *          effective visible shape folds in all enabled vectorMasks before intersecting
@@ -76,7 +76,7 @@ function shapeToPathData(shape: LocalShape): string {
  * - inverted=false (clip mask) → intersect (∩)
  * - inverted=true  (hole mask) → subtract (−, difference)
  *
- * Feathering is NOT a boolean-topology change (M3 §M3.d.1): a soft edge never moves
+ * Feathering is NOT a boolean-topology change: a soft edge never moves
  * which pixels are inside the shape, only the alpha falloff at the boundary. So the
  * fold runs on the HARD contours as usual and returns the participating `featherPx`
  * alongside the tight geometry — the caller (`fragmentToNewLayer`) turns that into a
@@ -86,8 +86,8 @@ function shapeToPathData(shape: LocalShape): string {
  * the geometry genuinely cannot be represented as a crisp polygon + single feather:
  *   - any enabled bitmapMask exists (raster alpha, not geometrizable)
  *   - the participating vectorMasks carry ≥2 DISTINCT positive feathers (a single
- *     folded shape cannot express per-edge softness — §M3.h.2 keeps the whole-layer
- *     / per-submask path for that rare divergent-feather corner; correct, not tight).
+ *     folded shape cannot express per-edge softness — the whole-layer
+ *     / per-submask path is kept for that rare divergent-feather corner; correct, not tight).
  * Disabled masks (enabled=false) are always skipped.
  *
  * Empty result (e.g. base fully carved away by holes) → returns a degenerate
@@ -107,7 +107,7 @@ export function getEffectiveVisibleShape(
   // Feather is a per-shape scalar on the folded result. A single value (or a single
   // shared value across masks) can be carried exactly; ≥2 distinct positive feathers
   // cannot be folded into one soft shape, so we degrade to the whole-layer / polygon
-  // multi-submask fallback for that corner (§M3.h.2 default, confirmed).
+  // multi-submask fallback for that corner.
   const positiveFeathers = [...new Set(vMasks.map(m => m.feather).filter(f => f > 0))];
   if (positiveFeathers.length > 1) {
     return { shape: base, degraded: true, featherPx: 0 }; // divergent feather → whole-layer
@@ -171,13 +171,13 @@ export function getEffectiveVisibleShape(
  * (i.e. original LayerService.deriveLogical, now moved to the geometry engine with swapped parameter order)
  */
 export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleShape: LocalShape, center: Point2D, featherPx: number } | null {
-  // Mask-aware effective visible shape (§4.3 / §5.1). The flag lets us fall back
-  // to the legacy "raw visibleShape" behavior in an emergency (§5.4).
+  // Mask-aware effective visible shape. The flag lets us fall back
+  // to the legacy "raw visibleShape" behavior in an emergency.
   const eff = MASK_AWARE_INTERSECTION
     ? getEffectiveVisibleShape(layer)
     : { shape: layer.visibleShape!, degraded: false, featherPx: 0 };
 
-  // §5.2: degraded (bitmap mask / divergent feather) → return null so callers fall
+  // Degraded (bitmap mask / divergent feather) → return null so callers fall
   // back to the vectorMask render path (fragmentToNewLayer's else branch).
   if (eff.degraded) return null;
 
@@ -287,11 +287,11 @@ export function translatePathData(pathData: string, dx: number, dy: number, scal
  * scalePathData — Pure scale (no translation) of all absolute coordinates in an
  * SVG path string. Thin semantic wrapper over `translatePathData` for the resize
  * / resample pipeline, where pathData must map from the old src coordinate system
- * to the new one using only `scaleX / scaleY` (see resize spec §4.2 / §4.3).
+ * to the new one using only `scaleX / scaleY`.
  *
  * Note: coordinates are only scaled, never snapped — pathData is a sub-pixel
  * precise clipping source and snapping vertices would distort the outline. The
- * enclosing rect carries pixel-grid alignment instead (spec §5).
+ * enclosing rect carries pixel-grid alignment instead.
  */
 export function scalePathData(pathData: string, scaleX: number, scaleY: number): string {
   return translatePathData(pathData, 0, 0, scaleX, scaleY);

@@ -178,8 +178,8 @@ export function buildVectorMaskDesc(
     // downgrades the fill-pass to the 1-bit binary edge. Display-only modes
     // (e.g. the future ssdepMode) must never reach the GPU descriptor.
     antiAliased: m.shape.antiAliased !== false,
-    // Cut-to-layer seam backing (plan 20261006_cut_to_layer_aa_seam_symmetry):
-    // a hole mask tied to a cut fragment (`assocLayerId`) must fully back the
+    // Cut-to-layer seam backing: a hole mask tied to a cut fragment
+    // (`assocLayerId`) must fully back the
     // fragment's edge band instead of being exactly complementary — two
     // complementary semi-transparent layers composite to α = 1 − c(1−c), a 25%
     // background dip at the seam center (the visible "dirty seam"; aa-off is

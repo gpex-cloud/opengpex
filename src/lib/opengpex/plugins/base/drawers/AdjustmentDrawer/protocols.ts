@@ -25,19 +25,19 @@
  * three sub-panels (Curves / Levels / Channel Mixer) via an icon-button group at
  * the panel header — mirroring the visual pattern used by CraftDrawer.
  *
- * Design decisions (spec 20260604_filter_pipeline_architecture_spec.md §4):
- * - §4.1 single plugin + icon-switch — three tools share one Drawer slot instead
+ * Design decisions:
+ * - single plugin + icon-switch — three tools share one Drawer slot instead
  *   of occupying three separate sidebar icons.
- * - §4.2 mutually-exclusive panels — the icon group at the top-right selects one
+ * - mutually-exclusive panels — the icon group at the top-right selects one
  *   of `curves | levels | mixer` and the corresponding body renders.
- * - §4.3 NO keyboard shortcuts on the switch — this differentiates it from
+ * - NO keyboard shortcuts on the switch — this differentiates it from
  *   CraftDrawer (T/B/E shortcuts) because adjustment is a mouse-heavy
  *   workflow and stealing single-letter keys pollutes the global shortcut map.
- * - §4.4 AdjustmentDrawer stays a separate plugin for now; a future Step 7.5
- *   will migrate its basic sliders in as a fourth 'basic' tab.
- * - §4.6 layer data model — panels write into `layer.curves / .levels /
+ * - AdjustmentDrawer stays a separate plugin for now; a future iteration
+ *   may migrate its basic sliders in as a fourth 'basic' tab.
+ * - layer data model — panels write into `layer.curves / .levels /
  *   .channelMix` (already declared in `core/types/models.ts`). Filter dispatch
- *   happens in the render engine (spec §3.5); this plugin is
+ *   happens in the render engine; this plugin is
  *   pure UI + state writer and does NOT know about the render backend.
  */
 
@@ -50,11 +50,11 @@ import type { CurvePoints, CurvesState, LevelsState, ChannelMixState, ColorBalan
  * commands. Panels can therefore import both `CurveChannel` (defined here)
  * and `CurvePoints` (re-exported here) from a single path.
  *
- * `LevelsState` is re-exported for the same reason: Step 6 commands
- * (`updateLevels`) carry a `Partial<LevelsState>` payload, and the
+ * `LevelsState` is re-exported for the same reason: the
+ * `updateLevels` commands carry a `Partial<LevelsState>` payload, and the
  * gen-plugin-types script needs to resolve that identifier locally.
  *
- * `AdjustmentState` (Step 7.5) is the migrated payload shape of the old
+ * `AdjustmentState` is the migrated payload shape of the old
  * AdjustmentDrawer's basic slider bank (brightness / contrast / saturation /
  * hueRotate / blur). Panels write it through `updateAdjustments({ patch:
  * AdjustmentsPatch })` on the Basic sub-panel.
@@ -85,7 +85,7 @@ export type ChannelMixPatch = Partial<ChannelMixState>;
 
 /**
  * Partial-shaped patch of `AdjustmentState` for the `updateAdjustments`
- * command payload (Step 7.5 — migrated from the old AdjustmentDrawer).
+ * command payload (migrated from the old AdjustmentDrawer).
  * Same named-alias trick as `LevelsPatch` / `ChannelMixPatch` so the
  * `scripts/gen-plugin-types.mjs` regex scanner can resolve the payload
  * without tripping on nested `<>`.
@@ -109,7 +109,7 @@ export const PLUGIN_AUTHOR = 'opengpex';
 
 /**
  * Currently active grading tool selected in the drawer header (mutually
- * exclusive). Defaults to `'curves'` on first mount — spec §4.2.
+ * exclusive). Defaults to `'curves'` on first mount.
  *
  * Kept as a `public` signal so that other plugins (e.g. a future ChannelMixer
  * quick-toggle in ColorOptions) can read/write it, following the same pattern
@@ -143,13 +143,13 @@ export const CMD_OPEN_COLOR_BALANCE = 'cmd.open_color_balance';
 /** Open drawer and switch to Channel Mixer panel (Cmd+Shift+X / Ctrl+Shift+X). */
 export const CMD_OPEN_MIXER = 'cmd.open_mixer';
 
-// ─── Curves commands (Step 5) ──────────────────────────────────────────────────
+// ─── Curves commands ──────────────────────────────────────────────────
 //
 // `beginCurvesEdit` is the Undo checkpoint (undoable command with empty body,
 // following the AdjustmentDrawer pattern). The write commands
 // (`updateChannelCurve` / `addCurvePoint` / `removeCurvePoint`) are non-undoable
 // so a drag's `pointermove` train coalesces into a single history step at
-// `pointerup` (spec §5.6 gesture-based coalescing).
+// `pointerup` (gesture-based coalescing).
 
 /** Snapshot current layer state before a curve-edit gesture starts. */
 export const CMD_BEGIN_CURVES_EDIT = 'cmd.begin_curves_edit';
@@ -163,7 +163,7 @@ export const CMD_ADD_CURVE_POINT = 'cmd.add_curve_point';
 /** Remove an interior control point. Payload: `{channel, index}`. Endpoints protected. */
 export const CMD_REMOVE_CURVE_POINT = 'cmd.remove_curve_point';
 
-// ─── Levels commands (Step 6) ──────────────────────────────────────────────────
+// ─── Levels commands ──────────────────────────────────────────────────
 //
 // Same pattern as Curves: `beginLevelsEdit` is the undoable checkpoint (empty
 // body), `updateLevels` is the non-undoable state writer coalesced by
@@ -185,7 +185,7 @@ export const CMD_UPDATE_LEVELS = 'cmd.update_levels';
  */
 export const CMD_AUTO_LEVELS = 'cmd.auto_levels';
 
-// ─── Channel Mixer commands (Step 7) ───────────────────────────────────────────
+// ─── Channel Mixer commands ───────────────────────────────────────────
 //
 // Same shape as Curves / Levels: `beginChannelMixEdit` is the undoable
 // checkpoint fired by `useFilterGesture()` at the start of a drag;
@@ -202,7 +202,7 @@ export const CMD_UPDATE_CHANNEL_MIX = 'cmd.update_channel_mix';
 /** Atomically write a built-in channel-mix preset. Payload: `{ presetId }`. Undoable. */
 export const CMD_APPLY_CHANNEL_MIX_PRESET = 'cmd.apply_channel_mix_preset';
 
-// ─── Basic Adjustments commands (Step 7.5 — migrated from AdjustmentDrawer) ───
+// ─── Basic Adjustments commands (migrated from AdjustmentDrawer) ───
 //
 // Mirrors the Curves / Levels / Channel-Mixer shape: `beginAdjustmentsEdit`
 // is the undoable checkpoint (empty body — fires purely so the TimeTraveler
@@ -214,8 +214,8 @@ export const CMD_APPLY_CHANNEL_MIX_PRESET = 'cmd.apply_channel_mix_preset';
 //
 // Design note: we do NOT preserve the old AdjustmentDrawer's per-property
 // commands (`updateBrightness / updateContrast / …`) because a `git grep`
-// audit showed zero external consumers (spec §Step 7.5 decision "Option B" —
-// merge into one `updateAdjustments({ patch })`). If a future integration
+// audit showed zero external consumers, so they merge into one
+// `updateAdjustments({ patch })`. If a future integration
 // needs the granular ids, we can add thin forwarders here without breaking
 // the state pipeline.
 
@@ -226,7 +226,7 @@ export const CMD_BEGIN_ADJUSTMENTS_EDIT = 'cmd.begin_adjustments_edit';
 export const CMD_UPDATE_ADJUSTMENTS = 'cmd.update_adjustments';
 
 /**
- * Fast-track adjustments write (M4): park the merged `adjustments` on the
+ * Fast-track adjustments write: park the merged `adjustments` on the
  * volatile buffer so the canvas renders live WITHOUT a Redux dispatch / React
  * re-render per pointermove. Payload: `{ patch: AdjustmentsPatch }`.
  * Non-undoable — `CMD_COMMIT_ADJUSTMENTS` lands the final value.
@@ -241,7 +241,7 @@ export const CMD_FAST_UPDATE_ADJUSTMENTS = 'cmd.fast_update_adjustments';
 export const CMD_COMMIT_ADJUSTMENTS = 'cmd.commit_adjustments';
 
 /**
- * Fast-track Edge Feather drag write (M4 双写): parks BOTH sides of the
+ * Fast-track Edge Feather drag write (dual-write): parks BOTH sides of the
  * complementary pair on the volatile buffer in ONE dispatch — the fragment's
  * routed carrier patch AND the source hole's `vectorMasks` feather — so both
  * edges update in the SAME mergeFrameSnapshot tick (the motion seam between
@@ -266,7 +266,7 @@ export const CMD_COMMIT_EDGE_FEATHER = 'cmd.commit_edge_feather';
  */
 export const CMD_SET_EDGE_FEATHER = 'cmd.set_edge_feather';
 
-// ─── Color Balance commands (Plan B) ───────────────────────────────────────────
+// ─── Color Balance commands ───────────────────────────────────────────
 //
 // Same shape as Curves / Levels / Channel-Mixer: `beginColorBalanceEdit` is
 // the undoable checkpoint fired by `useFilterGesture()` at the start of a
@@ -287,14 +287,14 @@ export const CMD_UPDATE_COLOR_BALANCE = 'cmd.update_color_balance';
 /**
  * Which sub-panel is currently visible in the AdjustmentDrawer body.
  *
- * Step 7.5 extended the union with `'basic'` — the merged AdjustmentDrawer
+ * The `'basic'` tool extended the union — the merged AdjustmentDrawer
  * (brightness / contrast / saturation / hueRotate / blur sliders). It is
  * intentionally listed FIRST because Photoshop / Lightroom convention is to
  * expose the entry-level adjustments before Curves/Levels/Mixer, and we
  * default new documents to it via `DEFAULT_GRADING_TOOL` below.
  *
  * Backwards-compatibility note: `pluginConfig.lastTool` may hold a legacy
- * value of `'curves' | 'levels' | 'mixer'` from before Step 7.5 shipped;
+ * value of `'curves' | 'levels' | 'mixer'` from before `'basic'` shipped;
  * those values remain part of the union so persisted preferences continue
  * to round-trip without needing a migration.
  */
@@ -340,7 +340,7 @@ export type ActiveGradingTool = GradingTool;
 /**
  * Default sub-panel when the plugin first mounts.
  *
- * Step 7.5 changed this from `'curves'` to `'basic'` to align with the
+ * This changed from `'curves'` to `'basic'` to align with the
  * Photoshop / Lightroom onboarding convention: entry-level users should see
  * the familiar brightness / contrast / saturation sliders first, and only
  * dive into Curves/Levels/Mixer when they need pixel-precise tonal control.
@@ -398,7 +398,7 @@ export const DEFAULT_CHANNEL_MIX_STATE: ChannelMixState = {
 };
 
 /**
- * Identity adjustments (Step 7.5 — migrated from AdjustmentDrawer):
+ * Identity adjustments (migrated from AdjustmentDrawer):
  * - brightness / contrast / saturation are Photoshop-style percentages where
  *   `100` means "no change" (matches the `ctx.filter` CSS convention),
  * - `hueRotate` at 0° is the identity rotation,

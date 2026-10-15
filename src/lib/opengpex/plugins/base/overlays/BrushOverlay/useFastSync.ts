@@ -33,7 +33,7 @@ import { VolatileState, Frame, CameraState } from '@opengpex/editor/core/types';
  * useBrushCursorFastSync: resize the brush ring when the camera zoom changes,
  * so the ring always covers exactly the pixels the stroke will paint.
  *
- * [P0 Perf] Throttled to ~60Hz and short-circuited when `camera.k` is unchanged.
+ * [Perf] Throttled to ~60Hz and short-circuited when `camera.k` is unchanged.
  * Child order is the contract with `components.tsx`: [0] outer ring,
  * [1] inner ring, [2] colour fill; the crosshair bars carry `data-cross`.
  */

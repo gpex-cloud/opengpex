@@ -296,7 +296,7 @@ export class PipelineCache {
       label: 'Default 1x1 Dummy Mask',
     });
 
-    // WP-3.2: initialize to opaque white (a=255). The layer/blend shaders only
+    // Initialize to opaque white (a=255). The layer/blend shaders only
     // sample the mask when `flags & has_mask`, but an uninitialized texture is
     // undefined per WebGPU spec — writing white makes an accidental sample a
     // safe no-op (mask_alpha=1 keeps the source fully visible) instead of

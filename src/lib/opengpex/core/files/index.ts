@@ -67,7 +67,7 @@ export { getVectorIntrinsicSize, detectVectorFormat, needsRasterSize, computeRas
 export { isComfyUiWorkflow, toFile, fromUrl, classifyDecode } from './utils';
 export type { DecodeKind } from './utils';
 
-// HDR document judgement (D5 presentation switch auto-default)
+// HDR document judgement (the presentation switch auto-defaults from it)
 export { fileCarriesHdr } from './hdr';
 
 // Re-export all public types
@@ -246,7 +246,7 @@ export function createFileService(
 
       // Stage 2: the single authoritative ingest decision. The working gamut is
       // the engine constant WORKING_GAMUT — never derived from the image.
-      // HEIC injects the environment capability (rev5 §10.3/§3.3): the one-shot
+      // HEIC injects the environment capability: the one-shot
       // HEVC probe entry is picked by the file's hvcC profile_idc; the decision
       // itself stays a synchronous pure function of {metadata, env}.
       const env = metadata.sourceFormat === 'heic'

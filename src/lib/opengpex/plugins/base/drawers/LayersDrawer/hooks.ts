@@ -255,7 +255,7 @@ export function useUnionMerge(activeFrame: Frame) {
         });
     }, [activeFrame.layers.order]);
 
-    // Compute union status for smart color indicator (spec §14.1)
+    // Compute union status for smart color indicator
     const unionStatus: UnionStatus = useMemo(
         () => computeUnionStatus(unionSelection, activeFrame),
         [unionSelection, activeFrame]

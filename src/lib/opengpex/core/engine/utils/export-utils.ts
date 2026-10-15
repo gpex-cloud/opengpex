@@ -166,7 +166,7 @@ export function unpremultiplyEncodeLinearF16(
   height: number,
   gamut?: { readonly sourceGamut: WorkingColorSpace; readonly targetGamut: WorkingColorSpace },
   /**
-   * WYSIWYG SDR clamp (D5): when the per-document HDR switch is OFF, an HDR
+   * WYSIWYG SDR clamp: when the per-document HDR switch is OFF, an HDR
    * container export must carry the SDR semantics the panel showed — RGB
    * clamps to [0,1] AFTER the gamut matrix (the SDR view's white clamp AND its
    * negative-coordinate clamp), instead of shipping the full headroom.
@@ -216,7 +216,7 @@ export function unpremultiplyEncodeLinearF16(
 
     if (m) {
       // Linear-light matrix, UNCLAMPED (see the gamut note above) unless the
-      // SDR white clamp is requested (the D5 OFF semantics).
+      // SDR white clamp is requested (the HDR-switch-OFF semantics).
       const lr = r, lg = g, lb = b;
       r = m[0] * lr + m[1] * lg + m[2] * lb;
       g = m[3] * lr + m[4] * lg + m[5] * lb;

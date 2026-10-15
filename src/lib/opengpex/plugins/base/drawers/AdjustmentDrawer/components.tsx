@@ -42,14 +42,14 @@ import type { GradingTool } from "./protocols";
  * Header button definitions.
  *
  * Order deliberately puts Basic first, then Levels → Curves → Channel Mixer.
- * Basic fronts the list because Step 7.5 promoted it to the default tool
+ * Basic fronts the list because it is the default tool
  * (Photoshop / Lightroom convention — entry-level users see brightness/
  * contrast / saturation first). Levels precedes Curves because it's a
  * simpler operation (range clamp + gamma) suitable for intermediate users;
  * Curves is the most flexible (arbitrary tone mapping) and sits before
  * Mixer for pixel-precise tonal work.
  *
- * No shortcut label is shown (spec §4.3): we intentionally do NOT register
+ * No shortcut label is shown: we intentionally do NOT register
  * global shortcuts for these tools to avoid polluting the shortcut namespace
  * that CraftDrawer's T/B/E and existing selection tools already occupy.
  */

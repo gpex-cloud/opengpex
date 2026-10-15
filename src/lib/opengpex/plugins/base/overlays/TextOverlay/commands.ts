@@ -30,7 +30,7 @@ import * as P from './protocols';
 
 // ─── Auto-grouping helpers ───────────────────────────────────────────────────
 //
-// Mirrors MarkerOverlay's auto-group logic (see docs shape_tool_spec §3.5.4):
+// Mirrors MarkerOverlay's auto-group logic:
 // consecutively placed text layers are folded into a single auto-created group so
 // the layers panel is not polluted by one-layer-per-text. Kept symmetric to, but
 // deliberately separate from, the Marker implementation (distinct `isTextGroup`
@@ -97,8 +97,8 @@ const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
     // 'append': join the group and land at the TOP of its member block via
     // getInsertIndexAbove(groupId). This is the group-contiguity guarantee — a
     // plain `insertAt` could wedge the new layer BELOW the group header when the
-    // group was matched via the above neighbour, violating spec §2.2 (header at
-    // the bottom of the member block).
+    // group was matched via the above neighbour, violating the group-header rule
+    // (header at the bottom of the member block).
     if (decision.mode === 'append') {
       const layer = { ...payload.layer, groupId: decision.groupId };
       const groupInsertAt = LayerFactory.getInsertIndexAbove(frame, decision.groupId);
@@ -124,8 +124,8 @@ const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
       // changes; its z-order slot is untouched.
       ctx.actions.updateLayer(payload.frameId, seedId, { groupId: group.id });
 
-      // Header goes to the BOTTOM of the combined {seed, new-text} member block
-      // (layer group spec §2.2). The block's lowest slot is min(seedIdx, insertAt):
+      // Header goes to the BOTTOM of the combined {seed, new-text} member block.
+      // The block's lowest slot is min(seedIdx, insertAt):
       //   • seed BELOW the slot (active is the seed) → seedIdx < insertAt → seedIdx
       //   • seed ABOVE the slot (grouped via the above neighbour) → seedIdx === insertAt
       // In create mode `insertAt` is always defined (either neighbour that seeded

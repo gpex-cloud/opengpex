@@ -27,9 +27,9 @@ import * as P from './protocols';
 /**
  * IMAGE_INFO_COMMANDS: Declarative command configurations.
  *
- * ── Phase 4 PR-2 note (WebGPU unified export, §11 / §16.2.1) ─────────────────
+ * ── WebGPU unified export note (one pipeline) ─────────────────
  * Export now goes through the SINGLE WebGPU RenderGraph, exactly like on-screen
- * preview (One Pipeline, spec §1.2):
+ * preview (One Pipeline):
  *
  *   1. Pass-through (unedited + full-frame + format match + sourceBlob) → the
  *      original file bytes are downloaded verbatim (avoids re-compression /
@@ -37,7 +37,7 @@ import * as P from './protocols';
  *   2. Otherwise: re-assemble the SAME frame's Scene → `engine.export()` reads
  *      back the composite (premultiplied LINEAR RGBA) → `exportEncode`
  *      un-premultiplies + TRC-encodes via the SAME `linearToSrgb` as view.wgsl
- *      (§16.2.1 single encode point) → `files.encode` for container + ICC.
+ *      (single encode point) → `files.encode` for container + ICC.
  *
  * DEFERRED (clear TODOs, out of PR-2 scope):
  *   • 16/32-bit encoded output (PNG16/TIFF16 via the naked-pixel
@@ -93,7 +93,7 @@ export const IMAGE_INFO_COMMANDS = {
             // ═══ 3. Egest decision + GPU render + encode → Blob ═══════════════
             // Delegated to `actions.adv.frame.export.encode` (core/advanced/commands/
             // frame/export.ts) — owns the pass-through fast path AND the full
-            // WebGPU readback/encode path (spec §11 pass-through, §16.2.1 single
+            // WebGPU readback/encode path (pass-through, single
             // encode point). This command only triggers the actual browser save.
             const { blob, filename } = await ctx.actions.adv.frame.export.encode.execute({
                exportWidth: exportW,

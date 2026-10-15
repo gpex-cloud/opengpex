@@ -17,16 +17,15 @@
  * Peer of `isobmff-reader.ts` (which keeps its three point extractors for AVIF
  * and existing consumers); box primitives are imported from there. Every
  * non-obvious layout decision below is probe-verified against real Apple
- * 12/24/48MP grids and synthetic libheif/x265 files
- * (gpex-cloud/probes/heic/README.md):
+ * 12/24/48MP grids and synthetic libheif/x265 files:
  *
  *   - pixi and auxC carry a 4-byte version/flags prefix (FullBox) on BOTH
  *     Apple and libheif-written files — confirmed by hex dump 2026-10-13;
- *   - irot angle = LOW 2 bits of the payload byte. Confirmed by a
- *     synthetic-file experiment (irot=0x03 transposes libheif output,
- *     irot=0xC0 does not): Apple photos carry irot=3 (90° CW) with EXIF 6 as
- *     the same-direction duplicate — the probe README's "angle is in the high
- *     bits ⇒ irot is decorative" conclusion was a mis-read;
+   *   - irot angle = LOW 2 bits of the payload byte. Confirmed by a
+   *     synthetic-file experiment (irot=0x03 transposes libheif output,
+   *     irot=0xC0 does not): Apple photos carry irot=3 (90° CW) with EXIF 6 as
+   *     the same-direction duplicate — an earlier probe's "angle is in the
+   *     high bits ⇒ irot is decorative" reading was a mis-read;
  *   - ipma lives UNDER iprp (not directly in meta), can appear multiple
  *     times; flags bit0=0 → 1-byte associations (essential<<7|index),
  *     bit0=1 → 2-byte;
@@ -50,7 +49,7 @@ import type { NclxParams } from '../../../metadata/isobmff-reader';
 import { readBoxHeader, findTopLevelBox, findChildBox, getFourCC } from '../../../metadata/isobmff-reader';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Public Types (rev5 proposal §2.1, probe-verified)
+// Public Types (probe-verified)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface HeicTile {
@@ -310,7 +309,7 @@ export function parseHeicContainer(
   if (iccProp?.iccBytes) color.icc = iccProp.iccBytes;
 
   // ── 8-9. orientation: container props + EXIF tag, both recorded ───────────
-  // Application precedence (rev5 §2.2 point 9): irot/imir non-zero = container
+  // Application precedence: irot/imir non-zero = container
   // authoritative; else EXIF 5..8. Apple photos: irot=3 + EXIF 6 — same
   // rotation tagged twice, so either branch produces the same upright image.
   const orientation: HeicFileView['orientation'] = {
@@ -636,7 +635,7 @@ function parseHvcCFields(payload: Uint8Array): HvcCFields {
 }
 
 /**
- * Grid configuration — three real-world wire forms (rev5 §2.2 point 6):
+ * Grid configuration — three real-world wire forms:
  * (a) 22B with box header, (b) 14B standard payload, (c) Apple compact 8B
  * (`[ver][flags][rows-1][cols-1][w u16][h u16]`). Real files disambiguate by
  * iloc extent length; here payload length does.

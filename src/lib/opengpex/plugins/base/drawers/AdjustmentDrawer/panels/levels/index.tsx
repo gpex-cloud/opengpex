@@ -27,7 +27,7 @@
  * path, clamps) in `../helpers`. This file is the interaction/render
  * orchestrator.
  *
- * Interaction & data-flow (spec §5 & §6, mirrors CurvesPanel):
+ * Interaction & data-flow (mirrors CurvesPanel):
  *
  * - The histogram at the top of the panel shows the levels+curves OUTPUT
  *   distribution, derived live on every slider frame: the Worker computes the
@@ -67,7 +67,7 @@
  *   pattern as the Curves panel. A drag = one Undo step; the checkpoint is
  *   the `beginLevelsEdit` command (empty body, undoable) and every
  *   intermediate `updateLevels` write during the drag is non-undoable so
- *   the whole gesture coalesces (spec §5.6).
+ *   the whole gesture coalesces.
  *
  * - A row of numeric inputs mirrors the handle positions. Typing a value
  *   also goes through a gesture (short-lived, begin → update → end)  so
@@ -82,7 +82,7 @@
  * - This panel does NOT dispatch to `AsyncFilterCache` or WorkerBridge.
  *   Writing to `layer.levels` triggers the render engine
  *   on the next frame; that path is responsible for
- *   dispatching the worker (spec §5.1 / §3.5 hard constraint).
+ *   dispatching the worker (hard constraint).
  */
 
 import React, {

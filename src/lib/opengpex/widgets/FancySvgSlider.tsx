@@ -24,7 +24,7 @@
  *
  * Replaces native `<input type="range">` to avoid the controlled-input feedback
  * loop that causes "Maximum update depth exceeded" in React when using small step
- * values (e.g. step=0.1). See `docs/opengpex/plans/20260804_blur_slider_max_update_depth.md`.
+ * values (e.g. step=0.1).
  *
  * Core design:
  * - Pointer events (down/move/up) on an SVG element with setPointerCapture

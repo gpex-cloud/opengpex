@@ -18,7 +18,7 @@
  */
 
 /**
- * layerGeometry.ts — Shared per-layer quad geometry resolution (WP-5.3).
+ * layerGeometry.ts — Shared per-layer quad geometry resolution.
  *
  * CompositePass and BlendPass previously duplicated the same ~22 lines deriving
  * a layer's content size, local offset and texture UV sub-rect from its `crop`
@@ -64,7 +64,7 @@ export function resolveLayerGeometry(
   textureHeight: number,
   dprScale = 1,
   /**
-   * WINDOWED-CONVOLUTION content rect (M1, source-texture texels): the texture
+   * WINDOWED-CONVOLUTION content rect (source-texture texels): the texture
    * holds ONLY this sub-rect of the source, so `uvRect` is re-expressed
    * relative to it (`(crop·dpr − rect.xy) / texSize`). Everything else
    * (`contentWidth/Height`, `localOffset`) describes the LAYER's document

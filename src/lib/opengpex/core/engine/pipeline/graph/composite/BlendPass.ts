@@ -68,7 +68,7 @@ export interface DrawBlendParams {
   readonly fgTexture: LayerTexture;
   readonly bgTexture: LayerTexture;
   /**
-   * WINDOWED-CONVOLUTION content rect (M1, source texels): `fgTexture` holds
+   * WINDOWED-CONVOLUTION content rect (source texels): `fgTexture` holds
    * only this sub-rect of the source, so `uvRect` shifts by its origin (see
    * `resolveLayerGeometry`). Undefined → content-aligned with the full source.
    */
@@ -117,7 +117,7 @@ export interface DrawBlendParams {
   /**
    * The `fgTexture` already had its rendering-intent tone-map applied (the
    * `AdjustPrePass` bake owns it), so `blend.wgsl` must NOT re-apply it. Overrides
-   * `layer.source.renderIntent`; see `sourceIntent.ts` (RAW Route B constraint A).
+   * `layer.source.renderIntent`; see `sourceIntent.ts`.
    *
    * ⚠️ Only the FOREGROUND is ever tone-mapped. `bgTexture` is the accumulator and
    * carries no intent — `blend.wgsl` never tone-maps it.

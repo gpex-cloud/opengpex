@@ -244,14 +244,14 @@ export interface VolatileState {
   interaction: VolatileInteraction;
 
   /**
-   * @internal [P2 Perf] Buffer write version counter.
+   * @internal [Perf] Buffer write version counter.
    * Incremented on every `fast.override` write to buffered.layers or buffered.frames.
    * Used by useFastSync snapshot cache to detect staleness without Object.keys().
    */
   _bufferVersion: number;
 
   /**
-   * @internal [P2 Perf] Per-tick merged frame snapshot cache.
+   * @internal [Perf] Per-tick merged frame snapshot cache.
    * Computed once by the first useFastSync subscriber in each tick,
    * shared by all subsequent subscribers in the same tick.
    */

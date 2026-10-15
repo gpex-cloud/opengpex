@@ -152,7 +152,7 @@ export function useRegularBoxSync(
  *   - Polygon selections (lasso / wand / inverted)
  *   - Re-Canvas (red rect, always a shape)
  *
- * Edge-mode contract (P1 staircase unification): `ss` renders the smooth
+ * Edge-mode contract: `ss` renders the smooth
  * geometry (DP-simplified); `aa`/`na` render the IDENTICAL pixel staircase
  * derived from the raw rings on the target layer's pixel grid — which is why
  * `gridOffset` (the active layer's grid offset, the origin fraction) is a

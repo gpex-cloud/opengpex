@@ -51,7 +51,7 @@ async function compositeLayersToAsset(
 /**
  * LayerMergeCommands: Advanced layer merge commands.
  *
- * v2 (Phase 4 PR-3/PR-4): All merge / rasterize operations composite through
+ * v2: All merge / rasterize operations composite through
  * the SINGLE WebGPU RenderGraph via `pixels.render.compositeLayers()`. There is
  * no backend selection any more — the internal composite assembles a synthetic
  * ROI-box frame, reuses the same `layer.assetId` residency the preview warmed,
@@ -62,9 +62,9 @@ async function compositeLayersToAsset(
  * These commands only CONSUME the result: `assets.storeBundle()` registers the
  * bitmap (auto cache-warm via AssetService hooks) and `bounds` drives `resetWithBounds`.
  *
- * Precision (§4.5.2 #12): the product bit depth follows the participating
+ * Precision: the product bit depth follows the participating
  * layers' highest source bit depth. That is resolved centrally in
- * `PixelFacade.compositeLayers` (PR-4 bake-precision settlement), so these
+ * `PixelFacade.compositeLayers` (the central bake-precision rule), so these
  * call-sites need not pass `precision` explicitly.
  */
 export const LayerMergeCommands = {

@@ -82,11 +82,11 @@ export class AdjustPrePass {
     // of the original pixels), so there is no pipeline override — the bake performs
     // the source→working gamut alignment AND owns the render-intent tone-map itself
     // and RenderGraph then tells the downstream
-    // composite it is already working-gamut with its intent applied (constraint A).
+    // composite it is already working-gamut with its intent applied.
     const gamutId = resolveSourceGamutId(layer);
     // The bake OWNS the tone-map (always the raw asset's first sample, so no
     // pipeline override here) and must knee with the SAME per-file domain the
-    // downstream composite would have used (constraint A symmetry).
+    // downstream composite would have used.
     const rawWhiteDomain = resolveSourceRawWhiteDomain(layer);
     const uniform = packAdjustPreUniform(
       source.maxU,

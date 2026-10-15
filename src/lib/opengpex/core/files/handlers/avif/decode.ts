@@ -119,11 +119,11 @@ export async function decodeAvif(
       for (let i = 0; i < native.pixels.length; i++) naked[i] = (native.pixels[i] * upscale + 0.5) | 0;
 
       // ── HDR lane (PQ/HLG, rules 18-hdr-*) ──
-      // The decoder delivered RAW TRANSFER CODE VALUES (probe P0-4a: maxDev 0)
-      // — the EOTF is ours: 203-nit-anchored scene-linear (D8) in the SOURCE
+      // The decoder delivered RAW TRANSFER CODE VALUES (probe: maxDev 0)
+      // — the EOTF is ours: 203-nit-anchored scene-linear in the SOURCE
       // gamut, trc 'linear' + the source gamut tag (the shader's
       // gamut_to_working does the W matrix; NO default look — the HDR
-      // presentation switch owns rendering semantics, D5).
+      // presentation switch owns rendering semantics).
       const transfer = metadata.raw?.transfer;
       if (transfer === 'pq' || transfer === 'hlg') {
         highDepthSource = {

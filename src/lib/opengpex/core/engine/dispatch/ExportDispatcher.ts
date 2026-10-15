@@ -84,7 +84,7 @@ export interface ExportRequest {
   /** Canvas `colorSpace` tag for the `'canvas-8'` lane — `egest.canvasColorSpace`. */
   canvasColorSpace: PredefinedColorSpace;
   /**
-   * Per-document HDR presentation switch (D5, WYSIWYG): `false` = the HDR
+   * Per-document HDR presentation switch (WYSIWYG): `false` = the HDR
    * lanes (exr-half) ship the white-clamped SDR rendition the panel showed;
    * `true`/undefined = full scene-referred headroom.
    */
@@ -202,7 +202,7 @@ export class ExportDispatcher {
         exported.width,
         exported.height,
         { sourceGamut: WORKING_GAMUT, targetGamut },
-        // WYSIWYG (D5): switch OFF → the white-clamped SDR rendition.
+        // WYSIWYG: switch OFF → the white-clamped SDR rendition.
         request.hdrSemantics === false,
       );
       encodeSource = {

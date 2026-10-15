@@ -63,9 +63,9 @@ export default function CanvasStage() {
   const needsRenderRef = useRef(true); // Default to first render
   const _renderCountRef = useRef(0); // Cold-start counter for perf warning suppression
 
-  // ─── [PERF_MON] P1 diagnostics: split assemble vs render + frame cadence ───
+  // ─── [PERF_MON] diagnostics: split assemble vs render + frame cadence ───
   // Only allocated/used when PERF_MON is on; zero cost otherwise. These let a
-  // real-machine capture answer the P1 question ("is the 120→100 dip in the CPU
+  // real-machine capture answer the question ("is the 120→100 dip in the CPU
   // assemble or in the GPU render?") and see the inter-frame cadence jitter
   // ("irregular fluctuations") that a single-frame threshold gate cannot.
   const _lastTickTsRef = useRef(0); // previous tick timestamp (for inter-frame gap)
@@ -84,7 +84,7 @@ export default function CanvasStage() {
   const gpuEngine = getGpuEngine();
   const isGpuReadyRef = useRef(false);
 
-  // ─── Per-document HDR presentation switch (D5, render filter) ───
+  // ─── Per-document HDR presentation switch (render filter) ───
   // `frame.hdrRender ?? fileCarriesHdr(metadata)`: undefined follows the file
   // (HDR sources on, SDR sources off). The switch selects the SURFACE mode
   // (SDR: bgra8unorm + white clamp, byte-identical to the A-phase terminal
@@ -95,11 +95,11 @@ export default function CanvasStage() {
     ? (activeFrame.hdrRender ?? fileCarriesHdr(activeFrame.metadata))
     : false;
 
-  // ─── WebGPU Canvas Mount & Surface Configuration (§4.3, §13.3) ───
+  // ─── WebGPU Canvas Mount & Surface Configuration ───
   // The swapchain gamut is NOT passed: it is a hard invariant (WORKING_GAMUT,
   // hardcoded in `GpuDevice.configureSurface`), so `SurfaceConfig` carries only
-  // `hdr`. Neither effect depends on any document colour field (§8.4.4 R2);
-  // `hdrPresentation` is the one presentation-mode input (D5), deliberately in
+  // `hdr`. Neither effect depends on any document colour field;
+  // `hdrPresentation` is the one presentation-mode input, deliberately in
   // the dependency list so a toggle reconfigures the surface synchronously.
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
@@ -154,7 +154,7 @@ export default function CanvasStage() {
     const unsubImages = sourceBitmapCache.subscribe(() => {
       needsRenderRef.current = true;
     });
-    // §4.5.1 ingest axis: a late high-depth decode (cold reload) must trigger a
+    // Ingest axis: a late high-depth decode (cold reload) must trigger a
     // redraw so the base layer upgrades from its 8-bit display fallback to the
     // rgba16float raw texture — mirrors the sourceBitmapCache late-arrival path.
     const unsubHighDepth = highDepthTextureCache.subscribe(() => {
@@ -175,7 +175,7 @@ export default function CanvasStage() {
   const lastFrameRef = useRef<Frame | null>(null);
   const lastCamRef = useRef<CameraState | null>(null);
 
-  // [P1 §4] CPU-side compose-once/view-many: memoize the camera-independent
+  // CPU-side compose-once/view-many: memoize the camera-independent
   // content half so pan/zoom frames skip the O(layers) re-assembly and run only
   // the cheap view fold. See SceneContentCache for the never-false-clean proof.
   const contentCacheRef = useRef<SceneContentCache>(new SceneContentCache());
@@ -236,9 +236,9 @@ export default function CanvasStage() {
       _assembleT0 = performance.now();
     }
 
-    // Assemble immutable Scene descriptor from state + volatile fast-track (§5.4)
+    // Assemble immutable Scene descriptor from state + volatile fast-track
     //
-    // [P1 §4] CPU compose-once/view-many: the camera-INDEPENDENT content half
+    // CPU compose-once/view-many: the camera-INDEPENDENT content half
     // (layers/masks/uploads) is memoized on a reference-identity key; only the
     // cheap view fold (`composeView`) runs every frame. On a cam-only frame the
     // key is unchanged → same content object → the O(layers) loop is skipped.
@@ -247,8 +247,8 @@ export default function CanvasStage() {
     // SceneContentCache). Canvas ±90° rotation animates via a DOM-transform
     // compensation (stage/viewport swapRotate), NOT a per-frame scene rebuild.
     //
-    // ⚠️ REAL-MACHINE FINDING (2026-09, §4): the "pan/zoom 120→100" that prompted
-    // P1 was a DevTools measurement artifact — with F12 closed the pipeline holds
+    // ⚠️ REAL-MACHINE FINDING (2026-09): the "pan/zoom 120→100" that prompted
+    // the investigation was a DevTools measurement artifact — with F12 closed the pipeline holds
     // ~120 (min 116) and PERF_MON reports assemble≈0.01ms / render≈0.07ms. This
     // memo is therefore a defence-in-depth win for heavy (many-layer / masked)
     // scenes, NOT a fix for a per-frame CPU defect on the common 2-layer case.
@@ -258,11 +258,11 @@ export default function CanvasStage() {
         canvasW: f.canvas.w,
         canvasH: f.canvas.h,
         // Mirrors `SceneContent.colorSpace`, which `SceneAssembler.buildContent`
-        // assembles as the WORKING_GAMUT invariant — NOT a document field
-        // (§8.4.4 R2). Constant today, so it never forces a rebuild; kept so the
+        // assembles as the WORKING_GAMUT invariant — NOT a document field.
+        // Constant today, so it never forces a rebuild; kept so the
         // key stays a faithful 1:1 image of SceneContent's inputs.
         colorSpace: WORKING_GAMUT,
-        // P3 (plan §3.3): the quantized interactive density band — the ONLY
+        // The quantized interactive density band — the ONLY
         // camera-derived key dimension. Quantized onto the glyph-atlas bands,
         // so pan/zoom inside a band keeps the cache hit; crossing a band costs
         // exactly one rebuild (the CPU-side re-composite signal). Computed from
@@ -288,7 +288,7 @@ export default function CanvasStage() {
             const draft = v.buffered.layers[compositeKey];
             return draft?.bitmapMaskOverride || undefined;
           },
-          // §4.5.1 per-layer precision: serve decoded 16/32-bit source pixels so
+          // Per-layer precision: serve decoded 16/32-bit source pixels so
           // the base layer uploads as rgba16float. Import-time warm makes this a
           // sync hit; on a cold reload `getOrFetch` decodes from the IDB raw blob
           // once (negative-caching ≤8-bit sources) and notifies → next-frame

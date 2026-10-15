@@ -26,7 +26,7 @@
  * posture this module mirrors).
  *
  * ── WHY A COMBINE PASS ──
- * The restore inverted-record architecture (plan §9 阶段一) needs the two-family
+ * The restore inverted-record architecture needs the two-family
  * combine `vis = max(Π erase αᵢ, max(1 − α_restore j))`, which a pure multiply
  * stack cannot express, and removes the retired 4-records-per-layer slot cap.
  * With no inverted record (today's only shape) the output equals the plain
@@ -39,7 +39,7 @@
  * bmaskSig) plus the output texel dims. A key hit skips the dispatch entirely;
  * a static frame never re-combines. A live fast-override stroke re-uploads its
  * record texture with a bumped epoch every frame, so the key changes and the
- * layer re-combines — the plan's "live preview re-combines per frame" cost.
+ * layer re-combines — live preview re-combining per frame is by design.
  *
  * The textures are OWNED (device.createTexture, EXACT-size), not pooled (the
  * pool does not preserve content across frames). Entries whose layer is gone

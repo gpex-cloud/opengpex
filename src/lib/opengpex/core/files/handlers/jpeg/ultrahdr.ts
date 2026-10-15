@@ -27,7 +27,7 @@
  *   • MPF APP2 with a two-entry Multi-Picture directory (entry 0 = the primary
  *     base, entry 1 = the gain map), followed by the gain-map SOI.
  *
- * STRUCTURE FACTS (probe P0-4c, validated by segment walk + Chrome/Safari
+ * STRUCTURE FACTS (probe-validated by segment walk + Chrome/Safari
  * `createImageBitmap` decode of a hand-assembled file — the pitfalls the
  * probe hit are load-bearing below):
  *   • an MP Entry is 16 bytes (attribute u32, size u32, offset u32, and the

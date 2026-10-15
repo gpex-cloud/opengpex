@@ -78,7 +78,7 @@ export const useClipOptionsCommands = () => {
     // stale data from a removed tool), fall back to 'rect'.
     const rawClipTool = (activeFrame?.latestClipTool as ClipTool | undefined) ?? 'rect';
     const clipTool: ClipTool = CLIP_TOOL_STRATEGIES[rawClipTool] ? rawClipTool : 'rect';
-    // Pre-PR-6-2: derive from CLIP_TOOL_STRATEGIES via the helper functions
+    // Derive from CLIP_TOOL_STRATEGIES via the helper functions
     // exported from protocols.ts. This eliminates the previous duplicate
     // truth source (literal `clipTool === 'rect' || ...`) and makes the
     // tool family completely table-driven.
@@ -191,7 +191,7 @@ export const useClipOptionsCommands = () => {
        * setShapeType — preserved for backward compatibility (internal callers still
        * use it via the legacy shape dropdown path). New code should call
        * `clipToolSetCmd.execute({ tool })` instead, which is the unified entry
-       * for tool switching (covers regular + irregular branches per §3.2.3).
+       * for tool switching (covers regular + irregular branches).
        */
       setShapeType: (type: ShapeType, antiAliased?: boolean) => {
         if (!activeFrame) return;

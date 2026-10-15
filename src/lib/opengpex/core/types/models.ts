@@ -27,7 +27,7 @@ import type { ColorValue } from '@opengpex/editor/core/engine/color';
 // LocalPolygon is used by clipBoxes (unified selection type after selection_layer_unification).
 
 // ─────────────────────────────────────────────────────────────
-// Color Management Types (Phase A — Color-Aware Foundation)
+// Color Management Types
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -84,7 +84,7 @@ export interface AdjustmentState {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Advanced adjustment state (see filter pipeline spec §4.6)
+// Advanced adjustment state
 // ─────────────────────────────────────────────────────────────
 //
 // These are declarative, serializable per-layer states written by
@@ -93,7 +93,7 @@ export interface AdjustmentState {
 // through `WorkerBridge.postMessage` unchanged.
 //
 // Applying these adjustments does NOT change `Layer.assetId`, which
-// keeps the 16-bit fidelity export channel intact (spec §10.1).
+// keeps the 16-bit fidelity export channel intact.
 
 /** A single curve is a list of control points [input, output] in 0..1 range. */
 export type CurvePoints = Array<[number, number]>;
@@ -135,7 +135,7 @@ export interface ChannelMixState {
  * Each tone range has 3 sliders: [cyan-red, magenta-green, yellow-blue]
  * Range [-100, +100], 0 = no offset (identity).
  *
- * Consumed by IFilter (spec §4.6). Does not change `assetId`.
+ * Consumed by IFilter. Does not change `assetId`.
  */
 export interface ColorBalanceState {
   /** Shadows region [cyanRed, magentaGreen, yellowBlue] */
@@ -349,7 +349,7 @@ export type MarkerData = RectMarkerData | ArrowMarkerData | EllipseMarkerData;
 // Phase 2+: | LineMarkerData | ...
 
 /**
- * One sample of a logic-brush trajectory (logic_brush.md §11.1).
+ * One sample of a logic-brush trajectory.
  * Coordinates are layer-local pixels; the tip radius at this point is
  * `size / 2 × pressure`.
  */
@@ -469,22 +469,22 @@ export interface Layer {
   adjustments?: AdjustmentState;
   /**
    * Declarative RGB / per-channel tone curves written by `AdjustmentDrawer`.
-   * Consumed by IFilter (spec §4.6, §10.1). Does not change `assetId`.
+   * Consumed by IFilter. Does not change `assetId`.
    */
   curves?: CurvesState;
   /**
    * Declarative levels adjustment (histogram black/white/gamma remap).
-   * Consumed by IFilter (spec §4.6, §10.1). Does not change `assetId`.
+   * Consumed by IFilter. Does not change `assetId`.
    */
   levels?: LevelsState;
   /**
    * Declarative RGB channel-mixer matrix.
-   * Consumed by IFilter (spec §4.6, §10.1). Does not change `assetId`.
+   * Consumed by IFilter. Does not change `assetId`.
    */
   channelMix?: ChannelMixState;
   /**
    * Declarative color balance (shadow/midtone/highlight color offsets).
-   * Consumed by IFilter (Plan B: luminance-aware). Does not change `assetId`.
+   * Consumed by IFilter (luminance-aware). Does not change `assetId`.
    */
   colorBalance?: ColorBalanceState;
   interactive?: boolean; // Whether involved in collision detection (Hit-Testing)
@@ -537,8 +537,6 @@ export interface Frame {
    * `polygonToShape` to convert back to a LocalShape when needed.
    *
    * Missing key means "no selection produced by that tool yet".
-   *
-   * See `docs/opengpex/plans/20260717_selection_layer_unification_spec.md` §3.
    */
   clipBoxes: Record<string, LocalPolygon>;
   /** Re-Canvas dedicated clip box — orthogonal to tool-based selections. */
@@ -577,7 +575,7 @@ export interface Frame {
   metadata?: ImageMetadata;
 
   /**
-   * Per-document HDR presentation switch (a render filter — D5). `undefined` =
+   * Per-document HDR presentation switch (a render filter). `undefined` =
    * auto: follow the file (HDR sources on, SDR sources off). ON presents via
    * the rgba16float + extended surface and the unclamped-tail view variant; OFF is
    * the SDR surface (hard white clamp at the swapchain). NEVER touches pixel

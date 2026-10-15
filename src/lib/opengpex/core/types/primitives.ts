@@ -125,7 +125,7 @@ export interface Shape {
   /**
    * Viewport DISPLAY-ONLY edge-mode flag (three-state model: ss / aa / na).
    * `ssdepMode === true` selects the SSDEP display mode ("ss": smooth viewport
-   * ants, reserved for the future SSDEP pass — P2). INVARIANT:
+   * ants, reserved for the future SSDEP pass). INVARIANT:
    * `ssdepMode === true ⇒ antiAliased === true` — for the GPU an ss shape IS an
    * aa shape, so this flag must NEVER enter a GPU descriptor (`VectorSubMask`
    * carries only `antiAliased`, and `getVmaskKey`/`vmaskSig` key on

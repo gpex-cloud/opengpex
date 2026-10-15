@@ -16,9 +16,6 @@
  * Directly tests the 32 physical sample image files generated under `opengpex_v2/samples/`,
  * executing real metadata extraction, ingest decision resolution, egest decision resolution,
  * pass-through fast-track gating, and container capability single-directional convergence.
- *
- * Fully covers all test cases documented in:
- * `docs/opengpex/plans/v2/refrences/00_ingest_egest_manual_test_guide.md`
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
@@ -390,8 +387,8 @@ describe('OpenGPEX v2.0 - Samples Ingest & Egest Automated Test Suite', () => {
       expect(adobe10.colorIdentity.bitDepth).toBe(10);
       expect(adobe10.colorIdentity.trc).toBe('linear');
 
-      // HDR rows (18-hdr-*, ultrawide phase B / D9): the wasm high-depth
-      // channel delivers RAW transfer code values bit-exactly (probe P0-4a,
+      // HDR rows (18-hdr-*): the wasm high-depth
+      // channel delivers RAW transfer code values bit-exactly (probe:
       // maxDev 0), so PQ/HLG now route to avif-proxy with our own 203-nit-
       // anchored EOTF — scene-linear f16 in the source gamut. BT.2020
       // primaries ride the row's rec2020 gamutOverride (gap #8 orbit).
@@ -578,7 +575,8 @@ describe('OpenGPEX v2.0 - Samples Ingest & Egest Automated Test Suite', () => {
       const baseFrameGamut = 'srgb';
       const childLayerGamut = 'adobe-rgb';
 
-      // Replicating CompositeDispatcher's R2 rule (§8.4.4 R2):
+      // Replicating CompositeDispatcher's rule that the composite gamut strictly
+      // inherits the frame's base asset gamut (default 'srgb'):
       // const docAsset = request.frame.assetId ? this.assets.get(request.frame.assetId) : undefined;
       // const docGamut: GamutId = docAsset?.gamut ?? 'srgb';
       const compositedGamut = baseFrameGamut; // strictly inherits from frame base

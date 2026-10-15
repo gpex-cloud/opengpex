@@ -189,7 +189,7 @@ export function shouldRetainSourceBlob(channel: DecodeChannel): boolean {
  */
 export interface IngestEnvironment {
   /**
-   * HEVC hardware-decode capability for THIS file's profile (rev5 §10.3 —
+   * HEVC hardware-decode capability for THIS file's profile —
    * probe entry picked by hvcC profile_idc, injected by `FileService.decode`
    * after awaiting the one-shot HEVC capability probe (`handlers/heic/capability.ts`)). Omitted/`false` =
    * declarative proxy downgrade (rule 19e); `true` admits rule 19a's
@@ -204,7 +204,7 @@ export interface IngestEnvironment {
  * This is the single call point, implemented as a declarative three-stage
  * pipeline:
  *   1. Pre-process — physical clamping (AVIF >8-bit degrades to 8-bit) and the
- *      capability context assembly (HEIC `hevcHardDecode`, §10.3).
+ *      capability context assembly (HEIC `hevcHardDecode`).
  *   2. Rule match — first-match-wins over `INGEST_DECISION_RULES`
  *      (`engine/rules.ts`).
  *   3. Post-process — assemble the authoritative `IngestDecision` (apply

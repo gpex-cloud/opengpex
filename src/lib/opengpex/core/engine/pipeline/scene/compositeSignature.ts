@@ -38,7 +38,7 @@
  *     clip, mask (all fields), source (kind + assetId), adjustments, filters;
  *   • per raster layer: the asset EPOCH — bumps whenever the resident texture is
  *     actually re-transferred (erase/filter/redecode). This is the defence
- *     against "same assetId, new pixels" (R2 miss-detection).
+ *     against "same assetId, new pixels".
  *   • per bitmap-kind mask RECORD (override / BitmapMask / vector-composited):
  *     the same asset EPOCH treatment, keyed by the record's `maskId` — a re-bake
  *     onto an already-non-empty mask (e.g. a second cmdj/drill hole, or a second

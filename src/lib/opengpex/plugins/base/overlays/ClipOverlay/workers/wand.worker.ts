@@ -20,7 +20,7 @@
 /**
  * Magic-Wand Worker
  *
- * Pipeline (per phase1_irregular_clip_spec §6.3):
+ * Pipeline:
  *   Phase 1  Color-tolerance flood fill → binary mask                (BFS, 4-neighborhood)
  *   Phase 2  Marching Squares contour tracing → raw integer rings    (boundary edges, then chained)
  *   Phase 3  Douglas–Peucker simplification → final layer-local rings
@@ -327,8 +327,8 @@ function keepConnectedToSeed(
  * Extract the boundary rings of a binary mask using a simple horizontal-edge
  * tracer. Output rings are at integer pixel coordinates and start at the upper-
  * left corner of each contour, traversed clockwise (we don't currently
- * distinguish outer / inner winding — Phase 1 spec §3.3.2 renders with
- * `evenodd`, which works regardless of CW/CCW per ring).
+ * distinguish outer / inner winding — the overlay renders with the `evenodd`
+ * fill rule, which works regardless of CW/CCW per ring).
  *
  * Algorithm:
  *   1. For each pixel `(x, y)`, examine the four edges between this pixel and

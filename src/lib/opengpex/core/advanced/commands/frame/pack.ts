@@ -43,7 +43,7 @@ export const FramePackCommands = {
      * crashed on any container holding a RAW/TIFF source file.
      *
      * Instead each asset is restored along the one path that is lossless for
-     * its provenance (§4.1):
+     * its provenance:
      *   ② source file present  → `storeRaw` + light record with `dataFormat`,
      *                            high-depth pixels rebuilt lazily by `recover()`;
      *   ③ bake product         → `storeBundle` with the shipped `dec:` pixels,
@@ -85,7 +85,7 @@ export const FramePackCommands = {
         } else if (meta?.bakedDecOnly && decBuffers[id] && identity) {
           // ③ Bake product (merge / rasterize / peel / create). No source file
           // can regenerate it, so the shipped naked pixels go straight back to
-          // `dec:` — `storeBundle` keeps the §6.4 write ordering (dec first,
+          // `dec:` — `storeBundle` keeps the write ordering (dec first,
           // light record after) and warms HighDepthTextureCache.
           await assets.storeBundle({
             displayBlob: blob,
@@ -98,7 +98,7 @@ export const FramePackCommands = {
             sourceFileName: meta.sourceFileName,
           });
         } else {
-          // ① Plain 8-bit — and the legacy-container fallback (§4.4): a .gpex
+          // ① Plain 8-bit — and the legacy-container fallback: a .gpex
           // written before `assets-manifest.json` existed has no meta at all.
           // Such containers never carried raw:/dec: either, so 8-bit is their
           // own historical ceiling, not a loss introduced here.

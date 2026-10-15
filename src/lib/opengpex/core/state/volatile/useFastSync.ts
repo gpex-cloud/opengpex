@@ -57,7 +57,7 @@ export function useFastSync<T extends Element>(
 
     const v = volatileRef.current;
 
-    // [P0 Throttle] Time-based throttling for non-critical subscribers during interaction
+    // [Throttle] Time-based throttling for non-critical subscribers during interaction
     if (throttleInterval > 0 && v.activeState.interacting) {
       const now = performance.now();
       if (now - lastExecTimeRef.current < throttleInterval) {
@@ -66,7 +66,7 @@ export function useFastSync<T extends Element>(
       lastExecTimeRef.current = now;
     }
 
-    // --- [P2 Perf] Snapshot Cache ---
+    // --- [Perf] Snapshot Cache ---
     // The merge logic (Object.keys, spread, layer merge loop) is identical for all subscribers
     // in the same tick. Compute once, cache on volatile state, share across all subscribers.
     const snapshot = v._snapshot;

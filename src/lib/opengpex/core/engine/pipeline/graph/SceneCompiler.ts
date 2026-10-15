@@ -28,7 +28,7 @@
  *
  * NOTE: the `kind` discriminants (`'separable'` / `'non-separable'`) are kept as
  * stable string literals to preserve RenderGraph behavior; only the interface
- * names were modernized in WP-5.9.
+ * names were modernized.
  *
  * @module core/gpu/graph/SceneCompiler
  */

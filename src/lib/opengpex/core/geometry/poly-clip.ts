@@ -25,7 +25,7 @@
  * simple selections and holed/multi-ring shapes. `intersectWithLayer` (shape.ts)
  * routes every non-trivial case here; the former dedicated rect-clipper (`sut-hod.ts`,
  * Sutherland-Hodgman) was retired because it couldn't represent hole topology and
- * produced illegal double-ring output — see the M2/M3 design doc.
+ * produced illegal double-ring output.
  *
  * Algorithm: Martinez-Rueda-Feito (via polygon-clipping@0.15.7)
  * Time complexity: O((n + k) log n) where n = total vertices, k = intersections.

@@ -12,8 +12,9 @@
 /**
  * Declared ingest termini as typed errors.
  *
- * `unsupported` is a DECISION, not a malfunction (matrix row 26 semantics,
- * 05_ingest_decision_spec.md: 执行层据此抛「暂不支持」提示用户，不强行解码).
+ * `unsupported` is a DECISION, not a malfunction (matrix row 26 semantics:
+ * the execution layer throws this typed error to show a precise
+ * "unsupported" notice instead of forcing a decode attempt).
  * The FileService entry short-circuits the dispatch with this error BEFORE
  * any handler runs, so the UI can show the precise reason and the console
  * stays free of failure stack traces for expected rejections.

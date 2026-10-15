@@ -40,7 +40,7 @@ export const INITIAL_VOLATILE: VolatileState = {
     hud: null,
     smartguides: null,
   },
-  // [P2 Perf] Buffer version counter for snapshot cache invalidation
+  // [Perf] Buffer version counter for snapshot cache invalidation
   _bufferVersion: 0,
 };
 

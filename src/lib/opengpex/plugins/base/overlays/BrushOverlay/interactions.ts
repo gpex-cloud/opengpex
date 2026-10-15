@@ -182,7 +182,7 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
     const geom = { w, h, cx: 0, cy: 0 };
     const layer = buildLayer(e, buildStrokeData(params, points), geom);
 
-    // [PERF_MON] Isolate the drag-start hitch (see RCA §6): `executeCommand(place)`
+    // [PERF_MON] Isolate the drag-start hitch: `executeCommand(place)`
     // is the ONE store commit of the whole gesture — history diff + ADD_LAYER +
     // activate → a synchronous React re-render cascade the volatile drag path
     // avoids on every subsequent move. `syncMs` = the store dispatch itself;

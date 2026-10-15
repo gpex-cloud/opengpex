@@ -178,7 +178,7 @@ export function packGaussianUniform(
   axis: number,
   flags: number,
   /**
-   * WINDOWED-CONVOLUTION coordinates (M1 crop-window filtering). `dims` above
+   * WINDOWED-CONVOLUTION coordinates (crop-window filtering). `dims` above
    * describes the OUTPUT window; the SOURCE texture may be larger (the full
    * asset / AdjustPre bake) with the window living at `origin` inside it.
    * Defaults (source == window at (0,0)) reproduce the un-windowed behaviour
@@ -234,7 +234,7 @@ struct GaussianUniforms {
   radius  : u32,         // kernel half-width, 0 = identity
   axis    : u32,         // 0 = horizontal, 1 = vertical
   flags   : u32,         // bit0 premultiply-on-load, bit1 unpremultiply-on-store, bit2 src-is-linear
-  // WINDOWED CONVOLUTION (M1): the source may be the FULL asset with the
+  // WINDOWED CONVOLUTION: the source may be the FULL asset with the
   // output window at src_origin inside it. Halo taps read real neighbour
   // texels beyond the window (clamped at the SOURCE bounds — the same
   // clamp-to-edge behaviour the un-windowed pass had at the asset edge), so

@@ -152,8 +152,8 @@ function clearEdgeFeatherPatch(layer: Layer): Partial<Layer> | undefined {
 /**
  * ADJUSTMENT_COMMANDS: Command definitions for the AdjustmentDrawer.
  *
- * Curves editing follows the gesture-based Undo coalescing pattern from spec
- * §5.6 (mirrors `AdjustmentDrawer`): `beginCurvesEdit` is the ONLY undoable
+ * Curves editing follows the gesture-based Undo coalescing pattern (mirrors
+ * `AdjustmentDrawer`): `beginCurvesEdit` is the ONLY undoable
  * command — it takes a snapshot before the drag; `updateChannelCurve` /
  * `addCurvePoint` / `removeCurvePoint` run non-undoable so intermediate
  * `pointermove` writes collapse into a single history step at `pointerup`.
@@ -230,8 +230,8 @@ export const ADJUSTMENT_COMMANDS = {
       if (!activeFrame || !activeLayer) return;
       // Setting to undefined removes the fields entirely so `hasAdvancedFilters`
       // returns false and the layer short-circuits back to the ctx.filter
-      // fast path (spec §5.1 / §3.5).
-      // Step 7.5: `adjustments` is now managed by the Basic panel inside this
+      // fast path.
+      // `adjustments` is now managed by the Basic panel inside this
       // same drawer, so "Reset All Adjustment" also wipes it. Previously
       // AdjustmentDrawer owned its own reset path; merging into a single
       // reset preserves the mental model "one panel = one reset button".
@@ -259,7 +259,7 @@ export const ADJUSTMENT_COMMANDS = {
       const tool =
         (scoped!.getSignal(P.SIGNAL_ACTIVE_GRADING_TOOL, P.DEFAULT_GRADING_TOOL) as GradingTool) ??
         P.DEFAULT_GRADING_TOOL;
-      // Switch (not chained ternaries) so Step 7.5's `'basic'` case reads
+      // Switch (not chained ternaries) so the `'basic'` case reads
       // parallel to the existing three panels, and adding a fifth tool
       // later slots in without re-flowing the diff.
       let patch: Partial<Record<
@@ -297,12 +297,11 @@ export const ADJUSTMENT_COMMANDS = {
   } as EditorCommand<void, void>,
 
 
-  // ─── Curves-specific commands (Step 5) ───────────────────────────────────────
+  // ─── Curves-specific commands ───────────────────────────────────────
   //
   // These write to `layer.curves.{rgb|red|green|blue}`. `beginCurvesEdit` is
   // the Undo checkpoint — its execute body is intentionally empty because the
-  // history plugin snapshots layer state on any undoable command dispatch
-  // (spec §5.6 & AdjustmentDrawer parallel).
+  // history plugin snapshots layer state on any undoable command dispatch.
 
   beginCurvesEdit: {
     id: P.CMD_BEGIN_CURVES_EDIT,
@@ -374,13 +373,13 @@ export const ADJUSTMENT_COMMANDS = {
     },
   } as EditorCommand<{ channel: CurveChannel; index: number }, void>,
 
-  // ─── Levels-specific commands (Step 6) ───────────────────────────────────────
+  // ─── Levels-specific commands ───────────────────────────────────────
   //
   // These write to `layer.levels`. The interaction pattern mirrors Curves:
   // `beginLevelsEdit` snapshots layer state as the undoable checkpoint;
   // `updateLevels` fires non-undoable during pointer drags so the run of
   // intermediate writes coalesces into a single history entry at pointerup
-  // (spec §5.6 gesture-based coalescing).
+  // (gesture-based coalescing).
   //
   // `autoLevels` is a one-shot: the panel already owns the histogram, so it
   // computes the 0.1 / 99.9 percentile inputBlack/inputWhite locally and hands
@@ -445,7 +444,7 @@ export const ADJUSTMENT_COMMANDS = {
     },
   } as EditorCommand<{ inputBlack: number; inputWhite: number }, void>,
 
-  // ─── Channel Mixer commands (Step 7) ─────────────────────────────────────────
+  // ─── Channel Mixer commands ─────────────────────────────────────────
   //
   // Same gesture-coalescing shape as Curves & Levels. `beginChannelMixEdit`
   // is the undoable checkpoint (empty body — history plugin snapshots layer
@@ -520,7 +519,7 @@ export const ADJUSTMENT_COMMANDS = {
     },
   } as EditorCommand<{ presetId: ChannelMixPresetId }, void>,
 
-  // ─── Basic Adjustments commands (Step 7.5 — migrated from AdjustmentDrawer) ─
+  // ─── Basic Adjustments commands (migrated from AdjustmentDrawer) ─
   //
   // Mirrors the Levels / Channel-Mix shape but writes into `layer.adjustments`
   // rather than `layer.curves|levels|channelMix`.
@@ -530,7 +529,7 @@ export const ADJUSTMENT_COMMANDS = {
   // chain + an `adjustments: undefined` guard against double application). In v2
   // every arm — Basic, Curves, Levels, Mixer, Colour Balance — is translated by
   // `SceneAssembler` into `AdjustmentDesc[]` and evaluated ONCE per frame by
-  // `adjust.wgsl` on the GPU (spec §9.1 single track, §9.1.1 assembly). Double
+  // `adjust.wgsl` on the GPU. Double
   // application is prevented structurally: the descriptor list IS the single
   // source, and the only place a grade is pre-baked (AdjustPrePass, ahead of a
   // compute filter) explicitly suppresses the inline evaluation.
@@ -561,7 +560,7 @@ export const ADJUSTMENT_COMMANDS = {
     },
   } as EditorCommand<{ patch: AdjustmentsPatch }, void>,
 
-  // ─── Fast-track drag path (M4) ─────────────────────────────────────────────
+  // ─── Fast-track drag path ─────────────────────────────────────────────
   //
   // A slider drag used to dispatch `updateAdjustments` (→ Redux → React re-render
   // → new frame reference) on EVERY pointermove; the canvas merge coalesced the
@@ -587,7 +586,7 @@ export const ADJUSTMENT_COMMANDS = {
       const current = (latest.adjustments ?? P.DEFAULT_ADJUSTMENTS_STATE) as AdjustmentState;
       const next: AdjustmentState = { ...current, ...payload.patch };
 
-      // ── Blur motion quantization (M5, same cure as fastUpdateEdgeFeather) ──
+      // ── Blur motion quantization (same cure as fastUpdateEdgeFeather) ──
       // The slider steps 0.1σ; a SLOW drag crosses a step on nearly every
       // ticker frame and each step re-runs the full pipeline (both vmask
       // bakes + whole-scene recomposite + the gaussian H/V dispatch — the
@@ -616,7 +615,7 @@ export const ADJUSTMENT_COMMANDS = {
     },
   } as EditorCommand<void, void>,
 
-  // ─── Edge Feather fast-track drag path (M4 双写) ────────────────────────────
+  // ─── Edge Feather fast-track drag path (dual-write) ────────────────────────────
   //
   // The cascade-checked drag used to split its writes in time: the fragment
   // landed immediately (per-move Redux), the source hole only on the 120ms
@@ -648,7 +647,7 @@ export const ADJUSTMENT_COMMANDS = {
       if (!activeFrame || !activeLayer) return;
       const frameId = activeFrame.id;
 
-      // ── Motion quantization (M5) ──
+      // ── Motion quantization ──
       // The slider steps at 0.1px; a SLOW drag crosses a step on nearly every
       // ticker frame, and each step re-bakes BOTH vmasks + re-composites the
       // whole scene. Quantize the MOTION value to whole px (visually seamless
@@ -797,7 +796,7 @@ export const ADJUSTMENT_COMMANDS = {
     },
   } as EditorCommand<{ radius: number; cascade?: boolean; hole?: 'match' | 'clear' | 'none'; holeOnly?: boolean }, void>,
 
-  // ─── Color Balance commands (Plan B) ─────────────────────────────────────────
+  // ─── Color Balance commands ─────────────────────────────────────────
   //
   // Same gesture-coalescing shape as Curves / Levels / Channel-Mixer.
   // `beginColorBalanceEdit` is the undoable checkpoint (empty body — history

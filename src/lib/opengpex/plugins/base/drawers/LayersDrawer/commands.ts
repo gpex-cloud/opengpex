@@ -374,7 +374,7 @@ export const LAYERS_COMMANDS = {
         }
     } as EditorCommand<{ _shortcutKey?: string }, void>,
 
-    // ─── Layer Group Commands (Phase 1) ──────────────────────────────────────────
+    // ─── Layer Group Commands ──────────────────────────────────────────
 
     createGroup: {
         id: P.CMD_CREATE_GROUP,
@@ -399,7 +399,7 @@ export const LAYERS_COMMANDS = {
 
             if (hasSelection) {
                 // Group selected layers: insert group right BELOW the bottommost
-                // selected layer (spec §2.2: group header sits at the bottom of its
+                // selected layer (group header sits at the bottom of its
                 // member block, children stacked above — matches getInsertIndexAbove).
                 // Filter out any group layers from selection (groups can't be nested)
                 const validIds = selectedIds.filter(id => {

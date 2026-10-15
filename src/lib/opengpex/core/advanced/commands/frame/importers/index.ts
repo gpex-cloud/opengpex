@@ -170,11 +170,11 @@ export async function revertFrame(ctx: EditorContextValue, frameId: string): Pro
 
   // 1. Cold-recover original bytes + decode (raw-first, hydrate fallback).
   //    Pin the decode to the frame's ORIGINAL canvas size + dpi: once retainSourceBlob
-  //    widened (§9.3), a vector source (SVG/EPS) now hits the raw-first branch and
+  //    widened, a vector source (SVG/EPS) now hits the raw-first branch and
   //    would otherwise re-rasterize at its intrinsic size (VectorHandler.decode uses
   //    `options?.forcedWidth || intrinsicSize.w`), silently changing the canvas
   //    resolution on revert. frame.canvas.{w,h}/frame.dpi hold the user's original
-  //    choice, so forwarding them keeps revert dimensionally faithful (§9.4).
+  //    choice, so forwarding them keeps revert dimensionally faithful.
   const originalFileName = frame.source || frame.name || 'image.png';
   let decoded: DecodeResult | null = null;
   try {

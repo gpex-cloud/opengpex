@@ -22,7 +22,7 @@ import type { WandRequest, WandResponse } from './protocol';
 /**
  * MagicWandClient — singleton wrapper around the Magic-Wand Worker.
  *
- * Lifecycle (per phase1_irregular_clip_spec §6.4):
+ * Lifecycle:
  *   - Lazy: the Worker is constructed on first `run()`. Editor cold-start does
  *     not pay a worker spin-up tax for users who never use the wand tool.
  *   - 5-second hard timeout. On timeout we `terminate()` the worker (releases

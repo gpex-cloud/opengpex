@@ -46,7 +46,7 @@ export const LayerFactory = {
   getNewFrame(patch: Partial<Frame>): Frame {
     const id = patch.id || `f-${Date.now().toString(36)}`;
 
-    // §8.4.4 R2: NO `bitDepth` / `colorSpace` defaults here. Colour and depth are
+    // NO `bitDepth` / `colorSpace` defaults here. Colour and depth are
     // per-ASSET truth (`StoredAsset.colorIdentity`), resolved by `SceneAssembler`
     // from `assets.get(layer.assetId)`; a frame-level default was a second source
     // that silently overrode a 16-bit/P3 import with 8-bit sRGB.

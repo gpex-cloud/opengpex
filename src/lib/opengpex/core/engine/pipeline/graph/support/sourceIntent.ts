@@ -19,8 +19,7 @@
 
 /**
  * sourceIntent.ts — Single decision point for "what out-of-box rendering intent
- * must the shader apply to this layer's source pixels?" (RAW processing,
- * boundary ③).
+ * must the shader apply to this layer's source pixels?"
  *
  * Third sibling of `sourceDomain.ts` / `sourceGamut.ts`. Exactly as those
  * centralise the `LAYER_FLAG_SOURCE_LINEAR` bit and the GAMUT_ID nibble so

@@ -283,8 +283,8 @@ export class StateStorage {
    * Exports artboard to portable serialized form (dehydration + asset Blob collection)
    * No local persistence involved, for use by Advanced Command / external consumers.
    *
-   * Unlike `save()`, this runs the dehydration with heavy provenance probing on
-   * (§4.1/§4.2): every referenced asset is classified into one of three
+   * Unlike `save()`, this runs the dehydration with heavy provenance probing on:
+   * every referenced asset is classified into one of three
    * categories and the corresponding physical payload is collected, so the
    * container is a lossless snapshot rather than a bag of 8-bit thumbnails.
    */

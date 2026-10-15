@@ -12,7 +12,7 @@ export interface ColorPickerProProps {
   onChange?: (color: string) => void;
   onCommit?: (color: string) => void;
   /**
-   * Structured colour API (proposal §3.1). When `value` is supplied the picker is
+   * Structured colour API. When `value` is supplied the picker is
    * ColorValue-driven and, with {@link enablePro}, can expose the wide-gamut Pro
    * tier. `onValueChange` / `onValueCommit` fire alongside legacy string callbacks.
    */
@@ -25,7 +25,7 @@ export interface ColorPickerProProps {
    */
   enablePro?: boolean;
   /**
-   * The current frame's colour gamut (§5.4 / decision H/I). `ColorPickerPro` is
+   * The current frame's colour gamut. `ColorPickerPro` is
    * frame-agnostic — the caller (`ColorOptions`) resolves this from
    * `frame.assetId → ColorIdentity` and passes it down. In Pro mode this is the
    * LOCKED view gamut: selection = this prop, display = `convertColorGamut(value,

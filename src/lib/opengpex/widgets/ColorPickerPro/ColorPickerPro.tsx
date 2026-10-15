@@ -129,7 +129,7 @@ export function ColorPickerPro({
     return () => clearTimeout(timer);
   }, [isCompact]);
 
-  // Sync internal HSV from the DISPLAY value (§5.4: the view, never the raw
+  // Sync internal HSV from the DISPLAY value (the view, never the raw
   // working-space storage) — so the SV/Hue cursor position matches what the
   // panel actually shows in Simple (sRGB) or Pro (frameGamut) mode.
   const c = displayValue.coords;

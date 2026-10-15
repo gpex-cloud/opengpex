@@ -73,7 +73,7 @@ export interface AssetInputOptions extends Partial<ColorIdentity> {
  * live under this whole id; `raw:` lives under its `#` prefix `sourceHash`);
  * with no source file it falls back to the display asset's own hash. `url` is
  * always the 8-bit display ObjectURL, kept as the fallback bitmap even when the
- * asset is high-depth (§4.5.1 — the cache may be cold on a reload).
+ * asset is high-depth (the cache may be cold on a reload).
  */
 export interface AssetBundle {
   assetId: string;
@@ -275,14 +275,14 @@ export class AssetService {
   /**
    * Persists the DECODED high-depth naked pixels for `assetId` under `dec:${id}`
    * — the bare TypedArray, no wrapper: `Uint16Array` (f16) for
-   * `dataFormat:'rgba16float'`, `Float32Array` for `'rgba32float'` (§6.5). Used
+   * `dataFormat:'rgba16float'`, `Float32Array` for `'rgba32float'`. Used
    * by bake products (`PixelResult.toAsset`) and high-depth imports so a cold
    * reload/revert can warm `HighDepthTextureCache` directly, without re-decoding
    * through vips. Geometry + colour identity are NOT stored here — they belong to
    * the light `StoredAsset` (the sole owner). Reclaimed by the grace-protected
    * `dec:` scan in `sweep`.
    *
-   * §6.4 write ordering: callers persist `dec:` (heavy) BEFORE writing the light
+   * Write ordering: callers persist `dec:` (heavy) BEFORE writing the light
    * record's `dataFormat`, so the predicate never claims a truth that is not yet
    * on disk.
    */
@@ -304,7 +304,7 @@ export class AssetService {
    * store. Any producer (file decode's `DecodedImage`, engine composite bake's
    * `CompositedImage`) implements the same shape and converges on this one call.
    *
-   * Unified id (§2.1): when a `sourceBlob` exists the id is
+   * Unified id: when a `sourceBlob` exists the id is
    * `${sourceHash}#${pageIndex}` — the source file's content address plus its
    * zero-based page index, taken from `options.pageIndex` or (for callers still
    * passing a `DecodedImage` positionally) duck-typed off its own `index` field.
@@ -341,11 +341,11 @@ export class AssetService {
       ? `${fileHash}#${pageIndex}`
       : (payload.precomputedHash ?? await this.calculateHash(payload.displayBlob));
 
-    // Early birth protection (§2.3): protect finalId before any await in storeDec
+    // Early birth protection: protect finalId before any await in storeDec
     // or register so sweep() cannot mis-identify this in-flight asset as an orphan.
     this.pendingIds.add(finalId);
 
-    // 3. High-depth (write ordering §6.4): persist dec: (heavy) BEFORE writing
+    // 3. High-depth (write ordering): persist dec: (heavy) BEFORE writing
     //    the light record's dataFormat, so the light record never claims a truth
     //    that is not yet on disk. If storeDec fails (e.g. IDB quota exceeded),
     //    degrade dataFormat to undefined rather than leaving a dangling claim.
@@ -394,7 +394,7 @@ export class AssetService {
    * Reads a raw ENCODED source blob (the original imported file) by id, or null.
    * Facade over `assetStore.getRaw`. The caller passes the WHOLE unified id
    * (`${fileHash}#${index}`); `raw:` is keyed by `fileHash` alone, so we strip
-   * the `#index` via `fileHashOf` before the lookup (§3.5). `getDec` deliberately
+   * the `#index` via `fileHashOf` before the lookup. `getDec` deliberately
    * does NOT strip — `dec:` keys off the whole id.
    */
   async getRaw(id: string): Promise<Blob | null> {
@@ -418,7 +418,7 @@ export class AssetService {
    * Injects asset: bypasses hash calculation, registers directly under a
    * caller-provided id (result provided by PixelResult, or a high-depth
    * import repointing its base layer at the source hash). Single-line proxy
-   * onto `register` (§5.3, option A) — passing `assetId` as `precomputedHash`
+   * onto `register` — passing `assetId` as `precomputedHash`
    * reuses `register`'s entire disk-write + pool-activation pipeline verbatim,
    * eliminating the 40+ lines that used to duplicate it line-for-line. Safe
    * because `assetId` here is always a content hash (from `PixelResult` or a
@@ -586,7 +586,7 @@ export class AssetService {
       resourceTracker.release(`asset:${id}`);
       // Notify engine layer to evict Worker cache
       this.callbacks.onReleased?.(id);
-      // §6.4 delete ordering: erase the light record FIRST (so a concurrent
+      // Delete ordering: erase the light record FIRST (so a concurrent
       // get() sees the asset as absent), THEN the heavy `dec:` payload; any
       // residual `dec:` is a safety net for the grace-protected reclaim scan.
       // Raw blobs (raw:${hash}) are cleaned separately by the raw orphan sweep.
@@ -629,12 +629,12 @@ export class AssetService {
     }
     toRevoke.forEach(id => this.revoke(id));
 
-    // Build the protected set for the heavy-payload orphan-reclaim scan (§6.3):
+    // Build the protected set for the heavy-payload orphan-reclaim scan:
     //   protected = activeIdsInState ∪ pendingIds (new-asset grace)
     //             ∪ pool entries still inside their grace window.
     // A high-depth asset orphaned during a single reload never enters the pool
     // → is never revoke()'d → its ~192MB `dec:` would leak forever without this
-    // independent scan. Grace protection ALSO covers the `raw:` scan now (§2.3):
+    // independent scan. Grace protection ALSO covers the `raw:` scan now:
     // a just-written raw: has a naked window between storeRaw and the id landing
     // in activeIdsInState (addFrame commit + 2s debounce), so the raw branch must
     // consult pendingIds too — its former "grace-free by design" was a hazard.

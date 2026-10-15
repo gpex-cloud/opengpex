@@ -49,7 +49,7 @@ export function runFilterChain(
   inputIsWorkingGamut: boolean,
   inputIntentApplied: boolean,
   suppressAdjust?: boolean,
-  /** WINDOWED convolution rect (M1, source texels) — see resolveFilterWindow. */
+  /** WINDOWED convolution rect (source texels) — see resolveFilterWindow. */
   window?: FilterWindow,
 ): PreparedSource {
   const { device, pipelineCache, bufferRing, texturePool, workingFormat, scratch } = ctx;

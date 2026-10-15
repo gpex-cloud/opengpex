@@ -191,7 +191,7 @@ export function useExportRules(
    const cap = FORMAT_EGEST_CAPABILITIES[exportFmt];
    const supportedGamuts = useMemo(() => cap?.supportedGamuts ?? ['srgb'], [cap]);
 
-   // Bit-depth control display gate (egest refactor §6.1): show whenever the
+   // Bit-depth control display gate: show whenever the
    // format has a raw encode lane (PNG/TIFF) — inverted from v1's `sourceBitDepth
    // > 8` gate, so an 8-bit wide-gamut source can also explicitly pick 8-bit
    // (→ raw-8) or upgrade to 16-bit. No `canExport16bit`/`isModified` disable:
@@ -306,7 +306,7 @@ export function useExportRules(
       return effectiveGamutMeta.fullLabel;
    }, [effectiveGamutMeta.fullLabel]);
 
-   // Gamut selection is orthogonal to bit depth (egest refactor §6.1): choosing a
+   // Gamut selection is orthogonal to bit depth: choosing a
    // gamut NEVER changes `exportBitDepth`. Depth defaults from the source document
    // and is only changed by the explicit bit-depth control.
    const handleGamutSelect = (val: string) => {

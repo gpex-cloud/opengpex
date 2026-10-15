@@ -121,7 +121,7 @@ export const SOURCENORMALIZE_WGSL = /* wgsl */ `
 //
 // Pipeline: ① TRC decode (if the source is not already linear)
 //           ② gamut fold to ProPhoto (if a non-working source gamut)
-//           ③ render intent tone-map — CONSTRAINT B: run STRICTLY in the STRAIGHT
+//           ③ render intent tone-map — run STRICTLY in the STRAIGHT
 //              (un-premultiplied) domain, because tone_map_filmic is non-linear and
 //              would crush semi-transparent edges to black if applied to c·α.
 fn normalize_source_components(

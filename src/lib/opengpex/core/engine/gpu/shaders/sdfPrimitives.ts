@@ -46,7 +46,7 @@ fn sdf_rounded_rect(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
 // Ellipse (approximate analytic SDF, IQ's gradient form): p centred, semi-axes r.
 // Exact sign and zero-level (|p/r| == 1 ⇒ 0, < 1 inside, > 1 outside) and EXACT for
 // a circle (r.x == r.y); the magnitude is a first-order estimate whose error grows
-// with eccentricity — accepted per the plan, verified by golden + visual review.
+// with eccentricity — accepted after golden + visual review.
 fn sdf_ellipse(p: vec2<f32>, r: vec2<f32>) -> f32 {
   let k0 = length(p / r);
   let k1 = length(p / (r * r));

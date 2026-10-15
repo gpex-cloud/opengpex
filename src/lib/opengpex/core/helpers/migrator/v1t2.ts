@@ -123,7 +123,7 @@ export function sanitizeLayer(layer: Record<string, unknown>): boolean {
   let changed = false;
 
   // 1. TextLayerData: color, boxMode, verticalAlign
-  // Align with 12_text_tool_spec: ensure structured color, valid boxMode and verticalAlign
+  // Ensure structured color, valid boxMode and verticalAlign
   if (layer.textData && typeof layer.textData === 'object') {
     const td = layer.textData as Record<string, unknown>;
     if (td.color !== undefined && !isColorValueLike(td.color)) {
@@ -141,7 +141,7 @@ export function sanitizeLayer(layer: Record<string, unknown>): boolean {
   }
 
   // 2. StrokeData.color (Brush2 / Logic Brush)
-  // Align with 11_hard_edge_spec: StrokeData requires structured ColorValue for vector pipeline
+  // StrokeData requires structured ColorValue for vector pipeline
   if (layer.strokeData && typeof layer.strokeData === 'object') {
     const sd = layer.strokeData as Record<string, unknown>;
     if (sd.color !== undefined && !isColorValueLike(sd.color)) {
@@ -179,7 +179,7 @@ export function sanitizeLayer(layer: Record<string, unknown>): boolean {
   }
 
   // 5. Bounding defensive healing: ensure layer.bounding conforms to layer.rect
-  // Align with 12_text_tool_spec: WebGPU textToVectorSource relies on bounding.w/h
+  // WebGPU textToVectorSource relies on bounding.w/h
   if (!layer.bounding && layer.rect && typeof layer.rect === 'object') {
     layer.bounding = { ...(layer.rect as Record<string, unknown>) };
     changed = true;

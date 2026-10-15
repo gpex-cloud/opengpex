@@ -182,25 +182,25 @@ export interface LayerItemForWorker {
    * Layer type — forwarded from `Layer.type` so the Worker merger can
    * dispatch non-bitmap layers (color → fillRect) without a bitmap.
    * Defaults to `'image'` when absent (backward-compatible).
-   * Phase 3: color layers skip bitmap lookup entirely.
+   * Color layers skip bitmap lookup entirely.
    */
   type?: 'image' | 'color' | 'text';
   /** Layer metadata — forwarded from `Layer.metadata`. */
   metadata?: { [key: string]: unknown };
   adjustments?: AdjustmentState;
   /**
-   * Advanced tone-adjustment state (filter_pipeline_spec §5.1b.4).
+   * Advanced tone-adjustment state.
    *
    * These three fields are forwarded to `worker/handlers/merger.ts` so the export
    * layer loop can reproduce the on-screen grade. Any missing field on the
    * exported layer produces an unfiltered output — every producer site MUST copy
    * these when it builds a `LayerItemForWorker`.
    *
-   * ⚠️ v2 status: the ON-SCREEN grade is evaluated on the GPU (`adjust.wgsl`, §9.3)
+   * ⚠️ v2 status: the ON-SCREEN grade is evaluated on the GPU (`adjust.wgsl`)
    * from `AdjustmentDesc[]`, not by any CPU descriptor chain. These fields remain
    * the EXPORT-side carrier only; unifying export onto the same compiled
    * RenderGraph (so "preview === export" is structural rather than reproduced) is
-   * Phase 4 §11.
+   * still future work.
    *
    * Kept as optional plain JSON (not `Pick<Layer, ...>`) so producers
    * don't have to import the full Layer union just to satisfy the type.
@@ -257,12 +257,12 @@ export interface AssetService {
    * belong to the light `StoredAsset` (the sole owner); only the irreducible
    * pixel bytes live under `dec:`.
    *
-   * §6.4 write ordering: persist `dec:` (heavy) BEFORE writing the light record's
+   * Write ordering: persist `dec:` (heavy) BEFORE writing the light record's
    * `dataFormat`, so the predicate never claims a truth not yet on disk.
    *
    * `data` is the bare TypedArray whose element type matches the light record's
    * `dataFormat`: `Uint16Array` for `rgba16float`, `Float32Array` for a true
-   * 32-bit float source (`rgba32float`, §6.5).
+   * 32-bit float source (`rgba32float`).
    */
   storeDec: (assetId: string, data: Uint16Array | Float32Array) => Promise<void>;
   /** Reads a raw source blob (original imported file) by id, or null. Facade over the storage singleton (symmetry with storeRaw). */
@@ -303,7 +303,7 @@ export interface AssetService {
   hydrate: (activeIds?: Set<string>) => Promise<void>;
   clear: () => void;
   getPool: () => Record<string, InMemAsset>;
-  /** Phase 7.1: Wire lifecycle callbacks (engine layer subscribes to asset events) */
+  /** Wire lifecycle callbacks (engine layer subscribes to asset events) */
   setCallbacks: (callbacks: { onRegistered?: (assetId: string, blob: Blob) => void; onReleased?: (assetId: string) => void }) => void;
 }
 
@@ -479,7 +479,7 @@ export interface PixelService {
       encoder: (bitmap: ImageBitmap, options: { quality?: number; metadata?: ImageMetadata }) => Promise<Blob>,
     ) => () => void;
     /**
-     * capture — Pure-memory pixel snapshot (proposal §3.2): the WebGPU colour
+     * capture — Pure-memory pixel snapshot: the WebGPU colour
      * sampler / mosaic hot path. Shares the composite GPU-readback core but SKIPS
      * `canvasToBlob`/`blobToImageData` AND the terminal encode, returning the raw
      * premultiplied-linear working-gamut readback (`linearPixels`). Callers decode
@@ -523,7 +523,7 @@ export interface PixelService {
       channel: 'canvas-8' | 'raw-8' | 'raw-16' | 'exr-half';
       canvasColorSpace: PredefinedColorSpace;
       /**
-       * Per-document HDR presentation switch (D5, WYSIWYG): when false, the
+       * Per-document HDR presentation switch (WYSIWYG): when false, the
        * HDR export lanes ship the white-clamped SDR rendition instead of the
        * full scene-referred headroom.
        */
@@ -556,7 +556,7 @@ export interface PixelService {
    *
    * Replaces the old lane-detection logic (render.flatten / shapeToBlob / flattenLayers / worker.mergeLayersWithShape).
    * Callers describe "what to compose" via a CompositeRequest; the pipeline internally resolves
-   * the document-anchored gamut and auto-adaptive precision (§2.4) and returns a plain-data
+   * the document-anchored gamut and auto-adaptive precision and returns a plain-data
    * CompositedImage — pass it to `assets.storeBundle()` to persist.
    *
    */

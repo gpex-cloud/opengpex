@@ -76,7 +76,7 @@ export const FrameExportCommands = {
 
       // ═══ Pass-through (unedited + full-frame + format match + sourceBlob) ═══
       // Download the ORIGINAL file bytes verbatim — no RenderGraph, no
-      // re-compression, original ICC/EXIF preserved (spec §11 pass-through).
+      // re-compression, original ICC/EXIF preserved (pass-through).
       const srcFormat = activeFrame.metadata?.sourceFormat;
       const frameHistory = ctx.state.history.byFrameId[activeFrame.id];
       const unedited = !frameHistory || (frameHistory.past.length === 0 && !frameHistory.checkpoint);
@@ -98,10 +98,10 @@ export const FrameExportCommands = {
       }
 
       // ═══ Unified WebGPU export (Readback → encode) ═══════════════════════
-      // Sunk into `ExportDispatcher` (refactor doc §7.6 "Session 2"), reached
-      // via `pixels.render.renderForExport` (Decision B1). ONE PIPELINE
+      // Sunk into `ExportDispatcher`, reached
+      // via `pixels.render.renderForExport`. ONE PIPELINE
       // EQUIVALENCE — see `ExportDispatcher.ts`'s doc comment.
-      // WYSIWYG (D5): the per-document HDR switch drives BOTH the presentation
+      // WYSIWYG: the per-document HDR switch drives BOTH the presentation
       // and the HDR-container export semantics — OFF means the HDR lanes ship
       // the white-clamped SDR rendition, never a headroom surprise.
       const hdrSemantics = activeFrame.hdrRender ?? fileCarriesHdr(activeFrame.metadata);

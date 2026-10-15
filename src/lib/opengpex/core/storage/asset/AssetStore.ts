@@ -216,7 +216,7 @@ export class AssetStore {
    * touches `dec:${id}` (the physical basis for the heavy payload never being
    * dragged into memory by a `get()`).
    *
-   * §7 no-migration guard: a record from an older schema (version below current,
+   * No-migration guard: a record from an older schema (version below current,
    * or missing the flattened `gamut`/`trc`) is treated as ABSENT (returns
    * `null`) — a crash-protection guard that keeps stale-shape records out of
    * new code and lets the upper layer re-import/rebuild. NOT a field-by-field
@@ -297,7 +297,7 @@ export class AssetStore {
    * Persists the DECODED high-depth naked pixels under `dec:${id}` — the BARE
    * TypedArray, no wrapper record: a `Uint16Array` (IEEE binary16, RGBA
    * interleaved) for `dataFormat:'rgba16float'`, or a `Float32Array` for a true
-   * 32-bit float source (`'rgba32float'`, §6.5). The store itself is BYTE-AGNOSTIC
+   * 32-bit float source (`'rgba32float'`). The store itself is BYTE-AGNOSTIC
    * — IndexedDB's structured clone round-trips the concrete TypedArray
    * constructor — so widening this took no schema/`ASSET_VERSION` migration; the
    * light record's `dataFormat` remains the sole discriminator on read. Geometry

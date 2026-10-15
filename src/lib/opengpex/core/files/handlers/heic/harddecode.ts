@@ -10,7 +10,7 @@
  */
 
 /**
- * 'webcodecs-heic' channel (rule 19a, rev5 §3.2) — the main-thread half of the
+ * 'webcodecs-heic' channel (rule 19a) — the main-thread half of the
  * hardware decode pipeline.
  *
  * Flow: the already-parsed {@link HeicFileView} (extractPayload: true) is

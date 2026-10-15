@@ -90,7 +90,7 @@ export interface FrameMetric {
   historyCount: number;
   // Frame-level document information
   dpi: number;
-  // NOTE: no `bitDepth` / `colorSpace` here. Per §8.4.4 R2 colour truth is
+  // NOTE: no `bitDepth` / `colorSpace` here. Colour truth is
   // per-ASSET (`StoredAsset.colorIdentity`), never frame-level, so a
   // document-wide answer would be a fiction as soon as two differently-tagged
   // assets coexist. Both fields were write-only (nothing rendered them); a

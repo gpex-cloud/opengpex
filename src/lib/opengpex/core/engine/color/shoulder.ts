@@ -21,7 +21,7 @@
  * shoulder.ts — the SDR "direct-pass shoulder" — the down-render operator for
  * the EXPORT side of the HDR pipeline.
  *
- * WHY IT EXISTS (probe P0-2, ultrawide phase-B plan §1): every full-look tone
+ * WHY IT EXISTS (probe-verified): every full-look tone
  * transform (ACES / AgX / Khronos PBR Neutral) is an appearance-level rewrite
  * that fails SDR identity outright (SDR white drops to 0.62 / 0.59 / 0.89
  * display-linear; hue shifts up to 25° at +1 stop). An EDITOR must not change
@@ -43,11 +43,11 @@
  * the target display gamut (Rec.709 primaries ≈ native for sRGB/P3), where the
  * Rec.709 luma weights below are near-native. The ProPhoto working space's
  * TRUE luma is ≈ [0.288, 0.712, 0.000] — the Rec.709 weights must never be
- * carried into the W domain (phase-A review finding; the weights sum to 1 so
+ * carried into the W domain (review finding; the weights sum to 1 so
  * greys are exact, only saturated knees shift).
  *
- * DEFAULT k (0.5): asymptote 3.0 (≈ 3× SDR white). Provisional until the
- * real-device batch (D10) calibrates it against actual EDR headroom.
+ * DEFAULT k (0.5): asymptote 3.0 (≈ 3× SDR white). Provisional until a
+ * real-device batch calibrates it against actual EDR headroom.
  */
 
 /** Display-domain (Rec.709) luma weights — see the module header. */

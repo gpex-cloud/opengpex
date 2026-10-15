@@ -20,7 +20,7 @@
 /**
  * Volatile fast-track types.
  *
- * Per refactor decision D1(b): the canonical type declarations live in the
+ * The canonical type declarations live in the
  * global type aggregation point `core/types/state.ts`. This module simply
  * re-exports them so that everything under `core/state/volatile/` can import
  * its types from a single local entry point.

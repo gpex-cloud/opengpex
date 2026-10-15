@@ -19,11 +19,11 @@
  * items), plus the AV1-specific `av1C`. Box primitives are imported from
  * `metadata/isobmff-reader.ts` (the shared home); every non-obvious layout
  * decision below is probe-verified against synthetic avifenc/libavif samples
- * (gpex-cloud/probes/avif/README.md, 2026-10-13):
+ * (probe 2026-10-13):
  *
  *   - `ispe`, `pixi` and `auxC` are FullBoxes (4-byte version/flags prefix) —
  *     the HEIC lesson repeats verbatim in AVIF; bare payload reads misalign;
- *   - av1C byte 2 bit layout (ISO 23091-2 / HEIF §2.3.1): seq_tier(7),
+ *   - av1C byte 2 bit layout (ISO 23091-2): seq_tier(7),
  *     high_bitdepth(6), twelve_bit(5), monochrome(4), chroma_subsampling_x(3),
  *     chroma_subsampling_y(2), chroma_sample_position(0-1) — reading
  *     high_bitdepth from bit 7 misclassifies every 10/12-bit file as 8-bit;
@@ -447,7 +447,7 @@ function parseIref(metaContent: Uint8Array): Array<{ kind: string; from: number;
 // Internal: property payload decoders
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/** av1C (ISO/IEC 23001-18 / HEIF §2.3.1) — 4-byte fixed record. */
+/** av1C (ISO/IEC 23001-18) — 4-byte fixed record. */
 function parseAv1C(payload: Uint8Array): Av1CFields {
   // byte 0: marker(1) version(7); byte 1: seq_profile(3) seq_level_idx(5)
   // byte 2: seq_tier(7) high_bitdepth(6) twelve_bit(5) monochrome(4)

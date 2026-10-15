@@ -91,7 +91,7 @@ function resolveLayerSourceTexture(
   // so this stays false. (A per-pixel linear matrix commutes with the convolution,
   // so deferring it past FilterPass to the compositor is mathematically exact.)
   let filterInputIsWorkingGamut = false;
-  // RAW Route B ③: ONLY the AdjustPre bake applies the render-intent tone-map (it
+  // ONLY the AdjustPre bake applies the render-intent tone-map (it
   // is the raw asset's first sample). Without a bake the intent is still un-applied,
   // so the composite/blend must apply it — mirrors filterInputIsWorkingGamut. (The
   // tone-map is non-linear so it does NOT commute with the convolution; running it
@@ -145,12 +145,12 @@ function resolveLayerSourceTexture(
     filterInputIsLinear = true;
     // The bake also aligned the source gamut to the working space.
     filterInputIsWorkingGamut = true;
-    // …and applied the render-intent tone-map (RAW Route B ③).
+    // …and applied the render-intent tone-map.
     filterInputIntentApplied = true;
   }
 
   // ② Convolve + describe the output domain (shared with the vector path).
-  // M1: window the convolution to crop ∪ kernel reach so a cropped fragment
+  // Window the convolution to crop ∪ kernel reach so a cropped fragment
   // never pays for its shared source asset's full extent.
   const window = resolveFilterWindow(layer, asset.width, asset.height) ?? undefined;
   return runFilterChain(

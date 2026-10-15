@@ -30,8 +30,8 @@
  *
  * DECODE: unsupported — there is no EXR decoder in the system, and the ingest
  * decision table routes 'exr' to the honest unsupported terminus (row 26).
- * A future EXR ingest must re-probe decoder options first (the plan's
- * standing note: ffmpeg 9.0.2's exr-half numeric path is untrustworthy).
+ * A future EXR ingest must re-probe decoder options first (standing finding:
+ * ffmpeg 9.0.2's exr-half numeric path is untrustworthy).
  */
 
 import type {

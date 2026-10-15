@@ -28,7 +28,7 @@ import { getStrokeVersion } from './interactions';
  * Follows camera via CSS transform. For mask tools the live preview is rendered
  * by the engine through `fast.override`, so the preview canvas is kept clear —
  * this hook only tracks camera changes and clears any residual pixels.
- * [P0 Perf] Throttled to ~60Hz during interaction.
+ * [Perf] Throttled to ~60Hz during interaction.
  */
 export function useStrokePreviewFastSync(
   containerRef: React.RefObject<HTMLDivElement | null>,
@@ -93,7 +93,7 @@ export function useStrokePreviewFastSync(
  * useMaskFocusOverlayFastSync: Mask focus overlay camera follow.
  *
  * Positions the mask overlay to follow camera via CSS transform.
- * [P0 Perf] Throttled to ~60Hz during interaction.
+ * [Perf] Throttled to ~60Hz during interaction.
  */
 export function useMaskFocusOverlayFastSync(
   containerRef: React.RefObject<HTMLDivElement | null>,
@@ -109,7 +109,7 @@ export function useMaskFocusOverlayFastSync(
  * useBrushCursorFastSync: Eraser cursor size synchronization with camera.k.
  *
  * Resizes cursor DOM elements when camera zoom changes.
- * [P0 Perf] Throttled to ~60Hz during interaction.
+ * [Perf] Throttled to ~60Hz during interaction.
  */
 export function useBrushCursorFastSync(
   cursorRef: React.RefObject<HTMLDivElement | null>,

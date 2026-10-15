@@ -196,8 +196,8 @@ export interface RawBinaryData {
   // NOTE: `dngToneCurve` / `dngProfile` (HueSatMap / LookTable) were removed
   // from the metadata contract (2026-10-13) — they were parsed on every import
   // with zero consumers anywhere. The parsers remain exported from
-  // handlers/raw/metadata for the future 'dng-profile' render-intent route
-  // (05_ingest_decision_spec §9.3); storage returns when a consumer exists.
+  // handlers/raw/metadata for the future 'dng-profile' render-intent route;
+  // storage returns when a consumer exists.
 
   /**
    * Raw PNG tEXt/iTXt key-value entries.

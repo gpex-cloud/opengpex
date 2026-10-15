@@ -164,7 +164,7 @@ export interface AIBridgeConfig {
   /** Generation history (most recent last) */
   generationHistory: GenerationRecord[];
 
-  // ─── Agent (Phase 1) ───
+  // ─── Agent ───
   /** Whether the Agent dock button & chat panel are enabled */
   enableAgents?: boolean;
   /** Configured agents (each references an endpoint + model) */
@@ -176,7 +176,7 @@ export interface AIBridgeConfig {
   agentChatStore?: AgentChatStore;
 }
 
-// ─── Agent Knowledge (Phase 1.2) ───────────────────────────────────────────────
+// ─── Agent Knowledge ───────────────────────────────────────────────
 
 /** Cloud base URL — reads from env, falls back to production. */
 const GPEX_CLOUD_URL = process.env.NEXT_PUBLIC_GPEX_CLOUD_URL || 'https://gpex.cloud';

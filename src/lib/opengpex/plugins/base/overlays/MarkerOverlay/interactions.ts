@@ -365,7 +365,7 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
  *   Shift → snap to nearest 15° (industry standard: 0/15/30/45/60/75/90…)
  *
  * No sin/cos orientation matrix construction here — only atan2 for angle
- * measurement (pure arithmetic). §5.4 iron rule observed.
+ * measurement (pure arithmetic).
  *
  * Non-silent → a single undoable checkpoint per rotate gesture.
  */

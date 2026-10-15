@@ -20,7 +20,7 @@
 /**
  * MarkerOverlay Registry — plugin-side marker extension point.
  *
- * IMPORTANT (see spec §4.0): this registry only holds UI / interaction
+ * IMPORTANT: this registry only holds UI / interaction
  * METADATA. The pixel/SVG drawing logic (`paintMarker` / `markerToSvg`) lives
  * in core (`core/raster/paintMarker.ts`) so the render
  * pipeline can consume it without importing plugin code. `MarkerDefinition`

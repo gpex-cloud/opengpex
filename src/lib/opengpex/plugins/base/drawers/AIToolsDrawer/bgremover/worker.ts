@@ -28,7 +28,7 @@
  * All model loading, CDN import, device detection, caching, and WebGPU fallback
  * are delegated to the shared inference layer via the pipeline orchestrator.
  *
- * Per spec §2.4: Worker communication uses Transferable buffers (zero-copy).
+ * Worker communication uses Transferable buffers (zero-copy).
  */
 
 import type { BgRemoverRequest, BgRemoverResult } from './worker.types';

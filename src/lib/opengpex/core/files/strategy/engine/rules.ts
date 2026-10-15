@@ -24,8 +24,7 @@
  * CMYK (rule 25) is split into two rules with id=25 by bitDepth (8/16) to keep
  * `DecisionAction.dataFormat` statically typed.
  * The HEIC family carries the spec labels `19a`–`19e` (plus the `19-wg`
- * wide-gamut twin) per 05_ingest_decision_spec.md §10.2 — see that table for
- * the authoritative semantics.
+ * wide-gamut twin) — see the rule ids below for the authoritative semantics.
  *
  * @module core/files/strategy/engine/rules
  */
@@ -255,16 +254,16 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
 
-  // ── 6. AVIF (spec labels 15a/15b/16-wg/18, 05_ingest_decision_spec.md §6) ─
-  // >8-bit is no longer clamped (probe rev2: the jsquash/libavif wasm decoder
-  // is bit-exact at native depth — gpex-cloud/probes/avif); high depth routes
+  // ── 6. AVIF (labels 15a/15b/16-wg/18) ──────────────────────────────────
+  // >8-bit is no longer clamped (probe: the jsquash/libavif wasm decoder
+  // is bit-exact at native depth); high depth routes
   // to the avif-proxy channel and the metadata reports the TRUE depth.
   {
-    // HDR (PQ/HLG) — probe P0-4a rewrote the evidence base: the wasm high-depth
-    // channel delivers RAW TRANSFER CODE VALUES bit-exactly (maxDev 0 on
+    // HDR (PQ/HLG) — the wasm high-depth decode probe rewrote the evidence base:
+    // the channel delivers RAW TRANSFER CODE VALUES bit-exactly (maxDev 0 on
     // lossless identity ramps), so the EOTF is ours to apply. Route to
     // avif-proxy; decode.ts applies the 203-nit-anchored PQ/HLG EOTF →
-    // scene-linear f16 in the source gamut (D8/D9). The SDR vocabulary rows
+    // scene-linear f16 in the source gamut. The SDR vocabulary rows
     // below never see these files (first-match order).
     id: '18-hdr-sdr-vocab',
     condition: {
@@ -390,10 +389,10 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
 
-  // ── 7. HEIC (spec labels 19a–19e, 05_ingest_decision_spec.md §10.2) ──────
-  // 19a is capability-gated (rev5 §3.3): the decode entry awaits the one-shot
+  // ── 7. HEIC (labels 19a–19e) ─────────────────────────────────────────
+  // 19a is capability-gated: the decode entry awaits the one-shot
   // HEVC capability probe (`handlers/heic/capability.ts`) and injects `hevcHardDecode` into the decision
-  // context (§10.3). Without the flag (plain calls, tests, no-WebCodecs
+  // context. Without the flag (plain calls, tests, no-WebCodecs
   // runtimes) it defaults to `false` and 19e below owns the downgrade.
   {
     id: '19a',
@@ -481,8 +480,8 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
   {
-    // Wide-gamut twin of 19a/19b/19c — the §10.2 footnote ("adobe-rgb/prophoto
-    // … 与行 19a/19b 同桩处理，宽色域依现行宽色域规则组合，不单列") as one row:
+    // Wide-gamut twin of 19a/19b/19c — adobe-rgb/prophoto twins take the same
+    // wide-gamut lane as one row:
     // any depth ≥8 routes to the proxy, and the STANDING wide-gamut composition
     // applies (linear TRC + f16 container, mirroring jpeg/webp/png rows 2/4/6).
     // `adobe-rgb`/`prophoto-rgb` HEIC sources are type-reachable but unseen in
@@ -500,7 +499,7 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
       trc: 'linear',
       dataFormat: 'rgba16float',
       applyOrientation: 'auto',
-      description: 'HEIC wide-gamut (§10.2 footnote) — proxy + standing wide-gamut composition',
+      description: 'HEIC wide-gamut (19-wg) — proxy + standing wide-gamut composition',
     },
   },
 

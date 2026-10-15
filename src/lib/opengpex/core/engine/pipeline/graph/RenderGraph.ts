@@ -87,7 +87,7 @@ export interface CompositeContext {
    */
   readonly target?: LayerTexture;
   /**
-   * Interactive density-banded composite scale (P3, plan §3.3) — the ACHIEVED
+   * Interactive density-banded composite scale — the ACHIEVED
    * per-axis scale from `resolveInteractiveDensity` (quantized band, clamped
    * by the VRAM hard cap). Present on the render path only; the composite
    * target, ping-pong buffers and vector/vmask transients then render at this
@@ -155,12 +155,12 @@ export interface PresentContext {
   /** The Scene whose `view` + `frame` + `display` drive the present. */
   readonly scene: Scene;
   /**
-   * The interactive composite's ACHIEVED density scale (P3, plan §3.3) — the
+   * The interactive composite's ACHIEVED density scale — the
    * `min(scaleX, scaleY)` the composite was rendered at. One composited texel
    * is then `1/scale` document px, so the magnify/minify sampler sees
    * `effectiveScale / scale` — inside the band the composite is always
    * minified-or-1:1 (linear keeps text/vector edges smooth); beyond the cap
-   * (hard-clamped big canvases) nearest returns, the pre-P3 behaviour.
+   * (hard-clamped big canvases) nearest returns, the pre-banding behaviour.
    */
   readonly densityScale?: number;
   /**

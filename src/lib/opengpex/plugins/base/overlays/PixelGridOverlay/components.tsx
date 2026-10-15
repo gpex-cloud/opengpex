@@ -152,7 +152,7 @@ export function PixelGridOverlayContainer() {
 
     const dpr = window.devicePixelRatio || 1;
     const scale = geometry.getScale(f, cam);
-    // §8: criterion is "on-screen physical pixel size of one source pixel"
+    // Criterion: "on-screen physical pixel size of one source pixel"
     // (p = scale × dpr >= minPixelSize), NOT the absolute `camera.k`. This decouples
     // grid onset from image size / fit / DPR (GIMP-style criterion).
     const shouldShow = isEnabled && scale * dpr >= minPixelSize;
@@ -267,7 +267,7 @@ export function PixelGridOverlayContainer() {
     const firstY = originY + Math.ceil((clipTop - originY) / gridSpacing) * gridSpacing;
 
     // --- Draw grid lines (dual-tone "casing" for background-agnostic contrast) ---
-    // Build the line path ONCE, then stroke it per the plan:
+    // Build the line path ONCE, then stroke it:
     //   1. a slightly wider dark casing/halo underneath (visible on light areas)
     //   2. a thin light core on top (visible on dark areas)
     // The pair only fits when a line owns ≥2 device pixels — at DPR=1 both

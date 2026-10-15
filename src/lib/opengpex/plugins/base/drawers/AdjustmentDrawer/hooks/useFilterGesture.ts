@@ -38,7 +38,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
  * (or the reset button) can query whether a drag is in progress via
  * `isDragging()`.
  *
- * ═══ v2 SIMPLIFICATION (spec §13.3 / §15) ═══
+ * ═══ v2 SIMPLIFICATION ═══
  *
  * The `filterCache.setDragging(true/false)` calls are GONE. In v1 this hook had a
  * second job: throttling the render pipeline. On `pointerdown` it told
@@ -50,7 +50,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
  *
  * None of that is necessary now. Adjustments are GPU uniforms / LUT textures
  * evaluated at full resolution every frame in <0.2ms, so there is no expensive
- * job to defer and no shared mutable flag to leak (§2.2, §9).
+ * job to defer and no shared mutable flag to leak.
  *
  * What remains is pure UNDO SEMANTICS — bookending a drag with one history
  * checkpoint — which is a state-layer concern with no rendering coupling at all.

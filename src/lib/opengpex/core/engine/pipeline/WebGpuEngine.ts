@@ -142,7 +142,7 @@ export class WebGpuEngine implements IEngine {
   private compositeTexture: LayerTexture | null = null;
   /** Content signature of the cached composite (see compositeSignature.ts). */
   private compositeSignature: string | null = null;
-  /** Dims the cached composite was built at — a change forces a rebuild (R5). */
+  /** Dims the cached composite was built at — a change forces a rebuild. */
   private compositeTargetW = 0;
   private compositeTargetH = 0;
   private compositeFormat: GPUTextureFormat | null = null;
@@ -204,7 +204,7 @@ export class WebGpuEngine implements IEngine {
   /**
    * Per-asset epoch, bumped on every GENUINE re-transfer in `upload()` (not on
    * deduped no-ops). Feeds the composite signature so an in-place pixel edit
-   * (same assetId, new bitmap) invalidates the cache (R2 miss-detection).
+   * (same assetId, new bitmap) invalidates the cache.
    */
   private readonly assetEpochs = new Map<string, number>();
 
@@ -243,8 +243,8 @@ export class WebGpuEngine implements IEngine {
    *
    * WHY: during brush drags, a drag STILL recomposites the whole layer stack into a
    * FULL-CANVAS target every frame (composite target = `compositeDims` = frame
-   * size, never the stroke bbox — P1 only shrank the stroke's own vector
-   * transient). This panel quantifies exactly that: `recomposite=N/N` (fires
+   * size, never the stroke bbox — only the stroke's own vector
+   * transient was ever shrunk). This panel quantifies exactly that: `recomposite=N/N` (fires
    * every frame), `target=W×H` (stays full canvas), and `gpu→composite` (the
    * dominant cost). Zero cost when PERF_MON is off — every write is gated.
    *
@@ -542,7 +542,7 @@ export class WebGpuEngine implements IEngine {
     const [compW, compH] = densityCompositeDims(docW, docH, [density.scaleX, density.scaleY]);
     const densityScale = Math.min(density.scaleX, density.scaleY);
 
-    // R5 — composite texture lifecycle: rebuild when the cached one is missing,
+    // Composite texture lifecycle: rebuild when the cached one is missing,
     // its dims changed (document resize OR a density-band crossing — the
     // band-scaled dims move), or the working format changed.
     const dimsChanged =
@@ -601,7 +601,7 @@ export class WebGpuEngine implements IEngine {
         device,
         workingFormat,
         target: this.compositeTexture!,
-        // P3: render the composite at the current density band's achieved
+        // Render the composite at the current density band's achieved
         // scale.
         interactiveScale: [density.scaleX, density.scaleY],
         perfStart: _pCompEncT0,
@@ -766,7 +766,7 @@ export class WebGpuEngine implements IEngine {
       targetFormat: this.gpu.getSwapchainFormat(),
       hdr: this.gpu.isHdrPresentation(),
       scene,
-      // P3: the composite holds densityScale texels per document px, so the
+      // The composite holds densityScale texels per document px, so the
       // magnify/minify sampler compares the camera scale against THAT density.
       densityScale: activeDensityScale,
       // ROI: the texture covers a document SUB-RECT — present folds its origin
@@ -896,7 +896,7 @@ export class WebGpuEngine implements IEngine {
       // Export composite target + scratch are one-shot: return them all.
       this.texturePool.release(composite.texture);
       for (const tex of scratch) this.texturePool.release(tex);
-      // The export-band glyph atlas is ONE-SHOT (plan §3.4): the composite
+      // The export-band glyph atlas is ONE-SHOT: the composite
       // above rasterized text at the export density band; release it on EVERY
       // exit path so interactive VRAM is never taxed by export-scale glyphs.
       // Same scale the vector spine was fed (target px per source px,
@@ -1114,7 +1114,7 @@ export class WebGpuEngine implements IEngine {
 
   /**
    * Allocate the engine-owned composite target at its EXACT density-scaled
-   * document extent (no POT snap → no waste; P3 dims come from
+   * document extent (no POT snap → no waste; band dims come from
    * `densityCompositeDims`, shared with RenderGraph so the graph's frame dims
    * always match) and OUTSIDE the TexturePool (a single-size,
    * single-instance resident texture gains nothing from bucketing).

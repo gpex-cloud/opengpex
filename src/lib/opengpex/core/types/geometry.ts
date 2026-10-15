@@ -302,14 +302,14 @@ export interface GeometryService {
     /**
      * Pure-scale (no translation) all absolute coordinates in an SVG path string.
      * Used by the resample/resize pipeline to map pathData from the old src
-     * coordinate system to the new one (resize spec §4.2 / §4.3).
+     * coordinate system to the new one.
      */
     scalePathData: (pathData: string, scaleX: number, scaleY: number) => string;
   };
 
   /**
    * Polygon engine service: independent multi-ring vector polygon utilities for irregular selection.
-   * Parallel to `shape.*` and intentionally kept separate (see phase1_irregular_clip_spec §2.0).
+   * Parallel to `shape.*` and intentionally kept separate.
    */
   polygon: {
     /** Computes axis-aligned bounding box of a multi-ring point set (no brand). */

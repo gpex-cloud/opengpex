@@ -152,7 +152,7 @@ export function extractIsobmffExif(bytes: Uint8Array): Uint8Array | null {
  * Extract the bit depth declared by a `pixi` (PixelInformation) box in the
  * ISOBMFF property pool — the authoritative per-item declaration where present.
  *
- * pixi payload (ISO/IEC 23008-12 §6.5.5, FULL box — empirically confirmed on
+ * pixi payload (ISO/IEC 23008-12, FULL box — empirically confirmed on
  * both Apple and libheif-written files):
  *   [version+flags: 4B] [num_channels: 1B] [bits_per_channel[0]: 1B] ...
  *
@@ -202,7 +202,7 @@ export function extractIsobmffPixiBitDepth(bytes: Uint8Array): number | null {
  * properties, and third-party encoders (ffmpeg/libheif) emit exactly one.
  * Phase-2's container parser replaces this with proper ipma association.
  *
- * hvcC payload (ISO/IEC 14496-15 §8.3.3):
+ * hvcC payload (ISO/IEC 14496-15):
  *   [configurationVersion 1B][profile_space/tier/profile_idc 1B]
  *   [compat flags 4B][constraint flags 6B][level_idc 1B]
  *   [min_spatial_segmentation 2B][parallelismType 1B][chromaFormat 1B]

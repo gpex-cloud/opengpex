@@ -39,7 +39,7 @@
  *   The render engine picks the mutation up on the next frame with no special
  *   casing: `SceneAssembler` translates the state into `AdjustmentDesc[]`, the
  *   composite signature dirties, and `adjust.wgsl` evaluates it on the GPU at
- *   full resolution (spec §9.1.1). Basic / Curves / Levels / Mixer all travel the
+ *   full resolution. Basic / Curves / Levels / Mixer all travel the
  *   SAME single path — there is no fast/slow track and no worker roundtrip.
  */
 
@@ -57,8 +57,7 @@ import { useAdjustmentDrawer, useFilterGesture } from "../hooks";
 /**
  * One row per adjustment. Ranges match the old AdjustmentDrawer + CSS
  * `ctx.filter()` semantics (100 = identity for brightness/contrast/saturation;
- * 0 = identity for hueRotate/blur). See `docs/…/filter_pipeline_architecture_spec.md`
- * §Step 7.5 for the rationale on why we did NOT rescale to [-100, 100] during
+ * 0 = identity for hueRotate/blur). We did NOT rescale to [-100, 100] during
  * migration (Photoshop-compatible + zero cross-version data migration).
  */
 interface SliderSpec {
@@ -82,8 +81,7 @@ interface SliderSpec {
   trackGradient?: string;
   /**
    * Optional explanatory tooltip rendered on the row label — used by Edge
-   * Feather to set expectations on the bitmap-mask limitation (§3.4-5 of the
-   * post-bake edge feather proposal).
+   * Feather to set expectations on the bitmap-mask limitation.
    */
   hint?: string;
 }
@@ -321,7 +319,7 @@ export function BasicPanel() {
   const [cascade, setCascade] = useState(false);
   const showCascade = !!activeLayer?.metadata?.assocMaskId;
 
-  // Cascade live preview (M4 双写): BOTH sides of the complementary pair — the
+  // Cascade live preview (dual-write): BOTH sides of the complementary pair — the
   // fragment's routed carrier and the source hole's mask feather — ride the
   // volatile fast track per move (`fastUpdateEdgeFeatherCmd`) and land as ONE
   // batched Redux write at gesture end (`commitEdgeFeatherCmd`). The two drafts
@@ -362,7 +360,7 @@ export function BasicPanel() {
   // mousedown for the same interaction — we want ONE undo checkpoint).
   const dragRef = useRef<keyof AdjustmentState | null>(null);
 
-  // M4 fast-track drag display: while a plain adjustments slider is dragged its
+  // Fast-track drag display: while a plain adjustments slider is dragged its
   // value rides the volatile buffer (no Redux write → no React re-render from
   // the store), so the thumb is fed from THIS local state until the gesture's
   // single commit lands the final value in Redux. Local state re-renders only
@@ -380,7 +378,7 @@ export function BasicPanel() {
       // follow-up moves free).
       if (key === "edgeFeather") {
         if (cascade) {
-          // Checked drag (M4 双写): fragment + hole parked on the fast track in
+          // Checked drag (dual-write): fragment + hole parked on the fast track in
           // one dispatch — lockstep merge, no Redux/React storm. `fastDrag`
           // keeps the thumb honest (readEdgeFeather reads the store, which only
           // updates at commit).
@@ -397,7 +395,7 @@ export function BasicPanel() {
         }
         return;
       }
-      // M4 fast track: park the merged value on the volatile buffer — the canvas
+      // Fast track: park the merged value on the volatile buffer — the canvas
       // renders it live via mergeFrameSnapshot, with NO Redux dispatch / React
       // re-render per pointermove. One `commitAdjustments` write lands at drag
       // end (see handleDragEnd); `fastDrag` keeps the thumb honest meanwhile.
@@ -438,13 +436,13 @@ export function BasicPanel() {
     if (!dragRef.current) return;
     const draggedKey = dragRef.current;
     dragRef.current = null;
-    // M4: land the fast-tracked draft(s) as ONE Redux write (the undo
+    // Land the fast-tracked draft(s) as ONE Redux write (the undo
     // checkpoint from gesture.begin owns the history step), then hand display
     // back to the store — the committed value equals the last fast-tracked
     // one, so there is no flicker at the handoff. Edge Feather flushes BOTH
     // drafts (fragment + source hole) via the batched commit.
     if (draggedKey === "edgeFeather") {
-      // Motion was quantized to whole px (M5) — land the EXACT slider value in
+      // Motion was quantized to whole px — land the EXACT slider value in
       // one final fast write (no-op when it equals the parked quantized value)
       // so the committed state matches the slider, then flush both drafts.
       if (fastDrag && fastUpdateEdgeFeatherCmd) {
@@ -452,7 +450,7 @@ export function BasicPanel() {
       }
       commitEdgeFeatherCmd?.execute();
     } else {
-      // Adjustments sliders: blur motion is quantized to 0.5σ (M5) — land the
+      // Adjustments sliders: blur motion is quantized to 0.5σ — land the
       // exact final value (`exact` skips quantization) before the commit.
       if (fastDrag && fastUpdateAdjustmentsCmd) {
         fastUpdateAdjustmentsCmd.execute({

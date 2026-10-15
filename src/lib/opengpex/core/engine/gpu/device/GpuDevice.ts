@@ -61,8 +61,8 @@ export class WebGpuUnavailableError extends Error {
  * unconditionally, and `view.wgsl` projects `WORKING_GAMUT` (ProPhoto) →
  * display-p3 into it (see `core/engine/color/gamut.ts::WORKING_GAMUT`). The field this
  * interface used to carry was fed from the now-deleted `Frame.colorSpace`, which is
- * exactly the "document dictates the working space" inversion R2 removed. `hdr`
- * remains a genuine surface choice.
+ * exactly the "document dictates the working space" inversion that this deletion
+ * removes. `hdr` remains a genuine surface choice.
  */
 export interface SurfaceConfig {
   readonly hdr: boolean;

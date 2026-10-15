@@ -19,9 +19,9 @@
 
 /**
  * filmic.ts — the `filmic` render-intent's scene→display transform (the RAW
- * processing the 05_ingest_decision_spec §9 chain terminates in).
+ * processing operator the ingest pipeline's render-intent chain terminates in).
  *
- * WHY NOT ACES RRT+ODT ANYMORE (probe 2026-10-13, gpex-cloud/probes/raw): the
+ * WHY NOT ACES RRT+ODT ANYMORE (probe 2026-10-13): the
  * Hill fit assumes the ACES scene scale — diffuse white ≈ 0.18 with specular
  * headroom to ~16 — while the libraw channel's linear output is normalized to
  * SENSOR WHITE = 1.0 (outputBps:16 full-scale, zero headroom; ProRAW and

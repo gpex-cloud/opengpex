@@ -19,7 +19,7 @@
 
 /**
  * densityComposite.ts — Pure sizing for the density-banded interactive
- * composite (plan §3.3, P3).
+ * composite.
  *
  * Split out of `WebGpuEngine`/`RenderGraph` so the band arithmetic — the part
  * that decides at which density the interactive composite renders and how the
@@ -83,7 +83,7 @@ export interface InteractiveDensity {
  * Resolve the interactive composite density for the current camera frame.
  *
  * `screenScale ≤ 1` (fit / zoomed out / 100% on dpr 1) resolves to band 1 with
- * identity scale — byte-identical to the pre-P3 document-resolution composite.
+ * identity scale — byte-identical to the unbanded document-resolution composite.
  */
 export function resolveInteractiveDensity(
   screenScale: number,

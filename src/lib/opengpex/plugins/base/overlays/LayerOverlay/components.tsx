@@ -62,7 +62,7 @@ export function LayerOverlayItem({
   const isVisible = showAlways || forceShow || (isActive && isHoveringActive) || isHovered;
 
   // Use viewport-unified sync hook: Optimized for Screen Space (Ticker + Matrix)
-  // [P3 Perf] Only register ticker when overlay is visible — eliminates N×120Hz
+  // [Perf] Only register ticker when overlay is visible — eliminates N×120Hz
   // useless matrix computations when overlay is hidden. The useLayoutEffect inside
   // useFastSync guarantees correct positioning on the first visible frame.
   //

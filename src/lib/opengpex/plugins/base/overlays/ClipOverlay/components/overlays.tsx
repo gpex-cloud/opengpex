@@ -104,13 +104,13 @@ export function ClipOverlayMain() {
   // Box (handles + dim label): only for regular tools or Re-Canvas
   const boxActive = isOverlayActive && (isReCanvas || isRegularTool);
 
-  // ─── Staircase grid phase (P1 ants/GPU alignment) ────────────────────────
+  // ─── Staircase grid phase (ants/GPU alignment) ───────────────────────────
   // The aa/na ants are the pixel staircase of the TARGET layer's (active
   // layer's) pixel grid. That grid sits at the layer's origin in frame-local
   // space, whose offset fraction is 0 or 0.5 (odd canvas dims shift it by .5)
   // — the staircase must use this phase or the ants and the GPU-cut pixels
   // misalign by 1px. Layers with other offsets don't match the ants
-  // pixel-for-pixel (accepted, per plan §7.2 decision 3).
+  // pixel-for-pixel (accepted).
   const antsGridOffset = useMemo(() => {
     if (!activeLayer || !activeFrame) return { x: 0, y: 0 };
     const m = geometry.transform.getLayerLocalMatrix(activeLayer, activeFrame);

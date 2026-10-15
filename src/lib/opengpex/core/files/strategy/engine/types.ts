@@ -93,13 +93,13 @@ export interface NormalizedMatchContext {
   readonly colorSpace: ColorSpaceId;
   readonly isMultiFrame: boolean;
   /**
-   * Environment capability (rev5 §10.3): whether the runtime can hardware-
+   * Environment capability: whether the runtime can hardware-
    * decode THIS file's HEVC profile (probe entry picked by hvcC profile_idc).
    * Injected by the decode entry (`FileService.decode` awaits the one-shot
    * HEVC capability probe (`handlers/heic/capability.ts`)); plain decision calls default to `false`, which
    * is the declarative-safe route (19e proxy downgrade, never a hard-decode
-   * guess). Defaults mirror §10.3's "capability is an environment property,
-   * not a file property".
+   * guess). Defaults follow the principle that capability is an environment
+   * property, not a file property.
    */
   readonly hevcHardDecode: boolean;
   /** Source transfer characteristic (`metadata.raw.transfer`), for the HDR rows. */
@@ -146,7 +146,7 @@ export interface DecisionAction {
 export interface DecisionRule {
   /**
    * Rule ID — the numeric matrix rows (1 ~ 26) or the spec-table labels of the
-   * HEIC family ('19a' ~ '19e', per 05_ingest_decision_spec.md §10.2).
+   * HEIC family ('19a' ~ '19e').
    */
   readonly id: number | string;
   readonly condition: DecisionCondition;

@@ -23,7 +23,7 @@
  * re-decodes the original file once and rebuilds every currently-alive group
  * member in place via the private `rebuildOnePage` helper — deliberately a
  * standalone copy of `revertSingleImage`'s steps 2-5 rather than a shared
- * extraction, keeping `single.ts` untouched (see design §4.2).
+ * extraction, keeping `single.ts` untouched.
  */
 
 'use client';
@@ -102,7 +102,7 @@ export async function importMultiPageTiff(
 /**
  * Rebuild `frameId`'s layers/camera/metadata from one re-decoded page and commit
  * in-place. Deliberately duplicates `revertSingleImage`'s steps 2-5 (single.ts)
- * rather than sharing them — see design §4.2 (single.ts stays at zero change).
+ * rather than sharing them (single.ts stays at zero change).
  *
  * NOTE: does NOT reset history or set the HUD. It runs inside the group loop of
  * `revertMultiPageTiffGroup`, which owns the single history reset + HUD message

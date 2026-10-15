@@ -15,11 +15,11 @@
  * The handler does not sniff metadata or derive a colour strategy of its own.
  * The FileService entry injects `metadata` + `decision` (the single
  * `resolveIngestDecision` call, with the HEVC capability flag awaited in the
- * entry — §10.3/§3.3) and this function simply executes the assigned
+ * entry) and this function simply executes the assigned
  * `decision.decodeChannel`. `colorIdentity` / `sourceBlob` are mounted by the
  * entry — hence the `Omit` return.
  *
- * Channel map (rev5, both stages landed):
+ * Channel map (both stages landed):
  *   - `'webcodecs-heic'` (19a, capability-gated): container parse → per-tile
  *     VideoDecoder decode in the files-layer worker → fixed-point YUV→RGB →
  *     uprighted RGBA → iCCP-tagged PNG proxy. Fail-Fast: any hard-decode error

@@ -82,7 +82,6 @@ export function useEditorStore() {
      * These geometry-only operations never change asset references, so triggering GC was wasteful.
      * Actual asset-changing operations are already covered by ADD_LAYER, REMOVE_LAYERS, UPDATE_LAYER
      * (with assetId/src check), HISTORY_UNDO/REDO, HYDRATE, and SET_HISTORY.
-     * See: docs/opengpex/07-perf/gc_optimization_research.md
      */
   ]), []);
 

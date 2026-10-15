@@ -44,7 +44,7 @@ const WAND_TIMEOUT_MS = 5_000;
  * `scale` is the current viewport zoom. The division means: zoom in → finer
  * detail preserved; zoom out → aggressive collapse.
  *
- * The floor caps the zoomed-out epsilon at 1.0 document px — the plan's "≤1px"
+ * The floor caps the zoomed-out epsilon at 1.0 document px — the "≤1px"
  * fidelity budget, matching the `selectFromAlpha` path (epsilon = 1.0). Above
  * ~0.8× zoom `0.8 / scale` is already < 1 and the floor never binds.
  */
@@ -195,7 +195,7 @@ export const createWandHandler = (): InteractionHandler => {
 
       // 5. Project layer-local rings → frame-local.
       // Wand is a PIXEL-selection tool: pinned to a hard binary edge
-      // (plan §7.1.1 — `antiAliased:false, ssdepMode:false`). The DP-simplified
+      // (`antiAliased:false, ssdepMode:false`). The DP-simplified
       // ring is the workingRings; both the GPU fill-pass (center-point binary
       // test) and the ants staircase derive from the same rule, so the ants
       // coincide with the cut pixels. Softening is Feather's job, not AA's.
