@@ -96,6 +96,16 @@ export async function decodeRaw(
 
   const dimensions = { w: decoded.width, h: decoded.height };
 
+  // The filmic knee's per-file white domain is PIXEL-derived (decoded luma
+  // histogram), which the metadata-only ingest decision cannot express — so the
+  // handler attaches it to the page's colorIdentity here, the one sanctioned
+  // crack alongside multi-page TIFF's per-page identity (DecodedPayload). It
+  // MUST be the decision's identity SPREAD + one field, never minted from
+  // scratch: the decision stays the single colour authority.
+  const pageColorIdentity = decoded.highDepth?.rawWhiteDomain !== undefined
+    ? { ...decision.colorIdentity, rawWhiteDomain: decoded.highDepth.rawWhiteDomain }
+    : undefined;
+
   return [{
     displayBlob: safeFile,
     width: dimensions.w,
@@ -109,8 +119,8 @@ export async function decodeRaw(
     // empty and CanvasStage's `getOrFetch → getRaw → decodeHighDepth` fetches the
     // RAW source blob → vips cannot decode it → falls back to the 8-bit display
     // blob if rawbuf is unavailable (no crash, just loses >8-bit precision until re-import).
-    // BARE payload — container/trc/gamut live on the sibling `colorIdentity` the
-    // entry injects (Path B); the source-gamut tag is carried there, not per-page.
+    // BARE payload — container/trc/gamut/rawWhiteDomain live on the sibling
+    // `colorIdentity` (above); the source-gamut tag is carried there, not per-page.
     highDepthSource: decoded.highDepth
       ? {
           data: decoded.highDepth.data,
@@ -118,5 +128,6 @@ export async function decodeRaw(
           height: decoded.highDepth.height,
         }
       : undefined,
+    colorIdentity: pageColorIdentity,
   }];
 }

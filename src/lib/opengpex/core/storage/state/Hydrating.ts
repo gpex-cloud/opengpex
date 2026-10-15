@@ -165,7 +165,7 @@ export const Hydrating = {
               trc: entry.trc,
               bitDepth: entry.bitDepth,
               dataFormat: entry.dataFormat,
-              renderIntent: entry.renderIntent,
+              rawWhiteDomain: entry.rawWhiteDomain,
             },
           };
 

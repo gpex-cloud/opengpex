@@ -28,6 +28,8 @@ import {
 import {
   filmicExposureGain,
   filmicToneMap,
+  clampFilmicWhiteDomain,
+  FILMIC_WHITE_DOMAIN,
 } from '@opengpex/editor/core/engine/color/filmic';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -148,6 +150,15 @@ export interface RawDecodeResult {
     width: number;
     height: number;
     trc: 'linear';
+    /**
+     * The per-file filmic knee white domain this decode derived (anchored
+     * highlight percentile, clamped by `clampFilmicWhiteDomain`). Ride-along
+     * display-side parameter: the f16 pixels stay the K-anchored LINEAR truth;
+     * consumers forward this onto `ColorIdentity.rawWhiteDomain` so the GPU
+     * knee and any re-run of this proxy knee identically. Absent on the 8-bit
+     * fallback path (the proxy PNG already carries the whole display intent).
+     */
+    rawWhiteDomain?: number;
   };
 }
 
@@ -169,11 +180,14 @@ export interface RawDecodeResult {
  * @param linear16     - RGBA Uint16 (0..65535), LINEAR light, source gamut
  * @param matrix       - source→target 3×3 (row-major, linear light), or null (no fold)
  * @param exposureGain - stage-① anchor (decode-computed; 1 = un-anchored)
+ * @param whiteDomain  - stage-② knee domain (the anchored input mapped to display
+ *   white; decode-derived per file, `FILMIC_WHITE_DOMAIN` = the default)
  */
 export function linearRgba16ToDisplayProxy8(
   linear16: Uint16Array,
   matrix: Float32Array | null,
   exposureGain = 1,
+  whiteDomain: number = FILMIC_WHITE_DOMAIN,
 ): Uint8ClampedArray<ArrayBuffer> {
   const out = new Uint8ClampedArray(linear16.length);
   const INV = 1 / 65535;
@@ -188,7 +202,7 @@ export function linearRgba16ToDisplayProxy8(
       lr = r; lg = g; lb = b;
     }
     // filmic knee on luma (stage ②, chroma-preserving) then the sRGB OETF.
-    const [tr, tg, tb] = filmicToneMap(clamp01(lr), clamp01(lg), clamp01(lb));
+    const [tr, tg, tb] = filmicToneMap(clamp01(lr), clamp01(lg), clamp01(lb), whiteDomain);
     out[i]     = Math.round(linearToSrgb(tr) * 255);
     out[i + 1] = Math.round(linearToSrgb(tg) * 255);
     out[i + 2] = Math.round(linearToSrgb(tb) * 255);
@@ -218,7 +232,8 @@ function clamp01(v: number): number {
  *     → highDepth: pack the source-gamut LINEAR pixels to half-float
  *       (`normalizedUint16ToFloat16`, /65535 × K) → `highDepth.data`, tagged
  *       `linear`. The GPU sampling shader does the source→working gamut matrix
- *       (tagged per-asset in `raw/decode.ts`) and the fixed filmic knee — NO
+ *       (tagged per-asset in `raw/decode.ts`) and the filmic knee with the
+ *       per-file white domain (`rawWhiteDomain`, anchored p99.5) — NO
  *       CPU gamut/TRC math happens on this branch; the gain keeps it
  *       LINEAR light in the source gamut.
  *     → display blob: the whole filmic display intent in one helper —
@@ -289,6 +304,17 @@ export async function convertRawToBlob(file: File, colorConfig: RawColorConfig):
       lumaSample.sort((a, b) => a - b);
       const exposureGain = filmicExposureGain(lumaSample[Math.floor(lumaSample.length / 2)]);
 
+      // Stage ② white domain (filmic.ts): the median anchor places MIDDLE grey,
+      // but the display knee also needs to know where the scene's HIGHLIGHTS
+      // sit after anchoring — a ratio the median cannot express. Sample the
+      // anchored p99.5 off the SAME sorted sample (one extra read) and clamp
+      // into the knee's working domain: scenes at or below the default domain
+      // keep the original rendering; a high-contrast capture relaxes it upward
+      // so its highlights reach display white without the whole shoulder
+      // slamming everything above the domain to white first.
+      const anchoredP995 = lumaSample[Math.floor(lumaSample.length * 0.995)] * exposureGain;
+      const rawWhiteDomain = clampFilmicWhiteDomain(anchoredP995);
+
       // Asymmetric split:
       //   • 16-bit half-float highDepth → GPU: keep the ORIGINAL source-gamut
       //     pixels UNCONVERTED and LINEAR. The GPU sampling shader performs the
@@ -313,19 +339,21 @@ export async function convertRawToBlob(file: File, colorConfig: RawColorConfig):
       // Pack the SOURCE-gamut LINEAR 16-bit pixels to half-float (normalized
       // /65535, exposure-anchored) for the `{ kind: 'raw' }` → rgba16float
       // resident upload; the GPU folds the gamut and applies the knee, so this
-      // stays the untouched linear source truth line.
+      // stays the untouched linear source truth line. The knee's white domain
+      // rides alongside (NOT baked into the pixels — it is a display-side
+      // parameter consumed via ColorIdentity.rawWhiteDomain).
       const half = normalizedUint16ToFloat16(rgba16, exposureGain);
 
       // 8-bit display proxy: exposure anchor → optional linear gamut fold →
       // filmic knee → sRGB OETF → 16→8 quantise.
-      const rgba8 = linearRgba16ToDisplayProxy8(rgba16, displayMatrix, exposureGain);
+      const rgba8 = linearRgba16ToDisplayProxy8(rgba16, displayMatrix, exposureGain, rawWhiteDomain);
       const displayBlob = await encodeDisplayBlob(rgba8, width, height, colorConfig.targetColorSpace);
 
       return {
         displayBlob,
         width,
         height,
-        highDepth: { data: half, width, height, trc: 'linear' },
+        highDepth: { data: half, width, height, trc: 'linear', rawWhiteDomain },
       };
     }
 
@@ -355,12 +383,16 @@ export async function convertRawToBlob(file: File, colorConfig: RawColorConfig):
     }
     lumaSample.sort((a, b) => a - b);
     const exposureGain = filmicExposureGain(lumaSample[Math.floor(lumaSample.length / 2)]);
+    // Same stage-② domain derivation as the 16-bit path — the proxy must match
+    // the canvas knee even on this degraded branch.
+    const anchoredP995 = lumaSample[Math.floor(lumaSample.length * 0.995)] * exposureGain;
+    const rawWhiteDomain = clampFilmicWhiteDomain(anchoredP995);
 
     const fallbackMatrix =
       colorConfig.conversion === 'matrix'
         ? getConversionMatrix(colorConfig.sourceColorSpace, colorConfig.targetColorSpace)
         : null;
-    const rgbaData = linearRgba16ToDisplayProxy8(linear16, fallbackMatrix, exposureGain);
+    const rgbaData = linearRgba16ToDisplayProxy8(linear16, fallbackMatrix, exposureGain, rawWhiteDomain);
 
     const displayBlob = await encodeDisplayBlob(rgbaData, width, height, colorConfig.targetColorSpace);
     return { displayBlob, width, height };

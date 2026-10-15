@@ -233,7 +233,7 @@ export class AssetService {
       bitDepth: identity.bitDepth ?? DEFAULT_COLOR_IDENTITY.bitDepth,
       blob,
       dataFormat: identity.dataFormat,
-      renderIntent: identity.renderIntent,
+      rawWhiteDomain: identity.rawWhiteDomain,
       timestamp: Date.now(),
     };
     await assetStore.set(hash, record);
@@ -361,7 +361,7 @@ export class AssetService {
           dataFormat: payload.colorIdentity.dataFormat,
           trc: payload.colorIdentity.trc,
           gamut: payload.colorIdentity.gamut,
-          renderIntent: payload.colorIdentity.renderIntent,
+          rawWhiteDomain: payload.colorIdentity.rawWhiteDomain,
         }, { persisted: true });
       } catch (err) {
         console.error('[AssetService] storeDec failed, degrading dataFormat for', finalId, err);

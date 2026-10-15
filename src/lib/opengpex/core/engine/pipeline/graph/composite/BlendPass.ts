@@ -44,7 +44,8 @@ import {
 } from '@opengpex/editor/core/engine/gpu/shaders/layer';
 import { isSourceLinear } from '../support/sourceDomain';
 import { resolveSourceGamutId } from '../support/sourceGamut';
-import { resolveSourceRenderIntent } from '../support/sourceIntent';
+import { resolveSourceRawWhiteDomain } from '../support/sourceIntent';
+import { FILMIC_WHITE_DOMAIN } from '@opengpex/editor/core/engine/color/filmic';
 import type { ExportViewport } from '../RenderGraph';
 
 export interface BlendPassContext {
@@ -155,11 +156,11 @@ export class BlendPass {
     // foreground is converted; the bg accumulator is already the working gamut.
     const gamutId = resolveSourceGamutId(layer, params.sourceIsWorkingGamut);
     flags |= (gamutId << LAYER_GAMUT_SHIFT);
-    // Same shared intent decision as CompositePass, so a layer
-    // cannot change appearance by switching between a class-A and class-B blend
-    // mode. A bake-tone-mapped transient passes sourceIntentApplied → 0.
-    const renderIntent = resolveSourceRenderIntent(layer, params.sourceIntentApplied);
-    flags |= (renderIntent << LAYER_RENDER_INTENT_SHIFT);
+    // Same shared filmic-domain decision as CompositePass: presence packs the
+    // render-intent nibble (a bake-tone-mapped transient passes
+    // sourceIntentApplied ⇒ undefined ⇒ 0), value packs filmic_white.
+    const rawWhiteDomain = resolveSourceRawWhiteDomain(layer, params.sourceIntentApplied);
+    if (rawWhiteDomain !== undefined) flags |= (1 << LAYER_RENDER_INTENT_SHIFT);
 
     const blendModeIndex = BLEND_MODE_MAP[layer.blendMode] ?? 0;
 
@@ -206,6 +207,7 @@ export class BlendPass {
       vmaskU.flags,
       vmaskU.rect,
       vmaskU.feather,
+      rawWhiteDomain ?? FILMIC_WHITE_DOMAIN,
     );
 
     // ── Overwrite slots 0..11 with fg_frame_to_local = inverse of the forward

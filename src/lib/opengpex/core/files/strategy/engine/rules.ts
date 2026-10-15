@@ -250,7 +250,6 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
       decodeChannel: 'libraw',
       trc: 'linear',
       dataFormat: 'rgba16float',
-      renderIntent: 'filmic',
       applyOrientation: 'auto',
       description: 'Camera RAW native linear restoration',
     },

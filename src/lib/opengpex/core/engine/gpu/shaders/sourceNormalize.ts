@@ -90,13 +90,13 @@ export const LAYER_GAMUT_SHIFT = 5;
 export const LAYER_GAMUT_MASK = 0x7;
 
 /**
- * `flags` bits 8..9: RENDER_INTENT (0..2) — the out-of-box rendering intent applied
- * in the STRAIGHT domain at composite time.
+ * `flags` bits 8..9: RENDER_INTENT (0..1 used) — the out-of-box rendering intent
+ * applied in the STRAIGHT domain at composite time.
  *
- * 0 = SDR passthrough (no tone-map), 1 = generic Filmic S-curve, 2 = DNG
- * ProfileToneCurve LUT (falls back to Filmic until the LUT sampler lands). Carried
- * FORWARD explicitly from the ingest decision; arbitrated by
- * `resolveSourceRenderIntent` (`graph/support/sourceIntent.ts`).
+ * 0 = SDR passthrough (no tone-map), 1 = generic Filmic S-curve. Carried FORWARD
+ * explicitly from the ingest decision; arbitrated by
+ * `resolveSourceRawWhiteDomain` (`graph/support/sourceIntent.ts`). (Bit width stays
+ * 2 bits: the retired DNG-LUT id 2 keeps the layout stable.)
  */
 export const LAYER_RENDER_INTENT_SHIFT = 8;
 /** Field width mask for RENDER_INTENT (2 bits → 0..3, of which 0..2 are used). */
@@ -115,8 +115,9 @@ export const LAYER_RENDER_INTENT_MASK = 0x3;
 export const SOURCENORMALIZE_WGSL = /* wgsl */ `
 // Normalise a sampled source pixel into WORKING-space (ProPhoto RGB) linear light
 // with its rendering intent applied. Takes UNPACKED scalar parameters so the
-// 32-byte AdjustPrePass uniform (which cannot carry a u32 flags word) can call it
-// directly.
+// uniform structs (which cannot all carry a packed u32 flags word) can call it
+// directly. 'white_domain' is the layer's per-file filmic knee domain
+// (ColorIdentity.rawWhiteDomain; ignored when intent is 0).
 //
 // Pipeline: ① TRC decode (if the source is not already linear)
 //           ② gamut fold to ProPhoto (if a non-working source gamut)
@@ -129,6 +130,7 @@ fn normalize_source_components(
   is_premult : bool,
   gamut_id   : u32,
   intent     : u32,
+  white_domain : f32,
 ) -> vec4<f32> {
   var color = raw_sample;
 
@@ -142,15 +144,14 @@ fn normalize_source_components(
     color = vec4<f32>(gamut_to_working(color.rgb, gamut_id), color.a);
   }
 
-  // ③ Render intent. intent 0 = SDR passthrough (untouched). intent 1 = Filmic;
-  // intent 2 = DNG LUT, which falls back to Filmic until the LUT sampler lands
+  // ③ Render intent. intent 0 = SDR passthrough (untouched); intent 1 = Filmic.
   // CONSTRAINT B: un-premultiply → curve → re-premultiply.
-  if (intent == 1u || intent == 2u) {
+  if (intent == 1u) {
     var straight = color.rgb;
     if (is_premult && color.a > 0.0001) {
       straight = color.rgb / color.a;
     }
-    straight = tone_map_filmic(straight);
+    straight = tone_map_filmic(straight, white_domain);
     if (is_premult) {
       color = vec4<f32>(straight * color.a, color.a);
     } else {
@@ -162,13 +163,14 @@ fn normalize_source_components(
 }
 
 // Convenience wrapper for layer.ts / blend.ts, whose uniform carries the packed
-// u32 flags word. Unpacks the bit layout (interpolated from the TS constants) and
-// delegates. AdjustPrePass calls normalize_source_components directly instead.
-fn normalize_layer_source(raw_sample : vec4<f32>, flags : u32) -> vec4<f32> {
+// u32 flags word plus a scalar filmic_white field. Unpacks the bit layout
+// (interpolated from the TS constants) and delegates. AdjustPrePass calls
+// normalize_source_components directly instead.
+fn normalize_layer_source(raw_sample : vec4<f32>, flags : u32, white_domain : f32) -> vec4<f32> {
   let is_linear  = (flags & ${LAYER_FLAG_SOURCE_LINEAR}u) != 0u;
   let is_premult = (flags & ${LAYER_FLAG_PREMULTIPLIED_SOURCE}u) != 0u;
   let gamut_id   = (flags >> ${LAYER_GAMUT_SHIFT}u) & ${LAYER_GAMUT_MASK}u;
   let intent     = (flags >> ${LAYER_RENDER_INTENT_SHIFT}u) & ${LAYER_RENDER_INTENT_MASK}u;
-  return normalize_source_components(raw_sample, is_linear, is_premult, gamut_id, intent);
+  return normalize_source_components(raw_sample, is_linear, is_premult, gamut_id, intent, white_domain);
 }
 `;

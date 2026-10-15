@@ -20,7 +20,7 @@
 /**
  * sourceIntent.ts — Single decision point for "what out-of-box rendering intent
  * must the shader apply to this layer's source pixels?" (RAW processing,
- * boundary ③; render-intent axis method (a)).
+ * boundary ③).
  *
  * Third sibling of `sourceDomain.ts` / `sourceGamut.ts`. Exactly as those
  * centralise the `LAYER_FLAG_SOURCE_LINEAR` bit and the GAMUT_ID nibble so
@@ -29,10 +29,19 @@
  * would otherwise render correct on `source-over` and wrong the moment the user
  * picked `multiply` — the classic split-path symptom.
  *
- * The returned integer is the SHADER contract, not the string enum:
- *   0 = SDR passthrough (no tone-map), 1 = generic Filmic S-curve,
- *   2 = DNG ProfileToneCurve LUT — matching the `normalize_source_components`
- *   intent switch and the RENDER_INTENT bit layout (`LAYER_RENDER_INTENT_SHIFT`).
+ * THE INTENT SIGNAL IS `rawWhiteDomain` PRESENCE (2026-10-15): the former
+ * `RenderIntent` string tag ('sdr' | 'filmic') was deleted — after the DNG-LUT
+ * retirement it had exactly one non-default value, set by exactly the same
+ * decode that produces the white domain, so the tag was redundant bookkeeping.
+ * Now: the domain is present ⟺ apply the filmic knee (with that domain);
+ * absent ⟺ SDR passthrough. One field, one writer (the libraw decode), no
+ * second axis to carry forward.
+ *
+ * The shader contract stays the RENDER_INTENT nibble (0 = SDR passthrough, 1 =
+ * generic Filmic S-curve, `LAYER_RENDER_INTENT_SHIFT`) + the `filmic_white`
+ * uniform; both are DERIVED at the pass call sites from this module's single
+ * resolver result (present ⇒ nibble 1 + the domain value; absent/overridden ⇒
+ * nibble 0 + the default domain, which the shader never reads when intent is 0).
  *
  * @module core/gpu/graph/support/sourceIntent
  */
@@ -40,9 +49,15 @@
 import type { LayerNode } from '../../scene/Scene';
 
 /**
- * Resolve the source render-intent id (0..2) the sampling shader must apply.
+ * Resolve the layer's filmic knee WHITE DOMAIN — the anchored input the knee
+ * maps to display white (per-file, decode-sampled; see `filmic.ts`) — or
+ * undefined when the filmic intent must NOT apply. One resolver answers both
+ * halves: the caller derives the RENDER_INTENT nibble from the presence
+ * (`undefined ⇒ 0`) and packs the value itself, so intent and domain can never
+ * disagree between the `AdjustPrePass` bake (which OWNS the tone-map) and the
+ * composite/blend passes.
  *
- * Returns 0 (SDR passthrough, no tone-map) when:
+ * Returns undefined (SDR passthrough, no tone-map) when:
  *   1. `pipelineOverride` — the pixels come from a pipeline transient (an
  *      `AdjustPrePass` bake and/or `FilterPass` output). ⚠️ CONSTRAINT A: that
  *      transient has ALREADY been tone-mapped once during the bake; applying the
@@ -50,28 +65,17 @@ import type { LayerNode } from '../../scene/Scene';
  *      and blow contrast. The override MUST win, mirroring `isSourceLinear` /
  *      `resolveSourceGamutId` override precedence exactly.
  *   2. the source is not a raster asset — strokes/vectors are display-referred.
- *   3. the tag is absent or `'sdr'` — the OMITTED default. Every JPEG/PNG/text
- *      carries a baked look already and must pass through untouched.
+ *   3. the asset carries no `rawWhiteDomain` — every non-RAW source (JPEG/PNG/
+ *      text/…) has a baked look already and must pass through untouched.
  *
- * Otherwise it maps the per-ASSET `renderIntent` tag (carried forward explicitly
- * from the ingest decision — never re-sniffed here) to the
- * shader id.
+ * Otherwise returns the domain value (scene-linear RAW: the filmic knee, with
+ * the asset's own domain as its white point).
  */
-export function resolveSourceRenderIntent(layer: LayerNode, pipelineOverride?: boolean): number {
-  if (pipelineOverride) return 0;
-  if (layer.source.kind !== 'raster') return 0;
-  let code = 0;
-  switch (layer.source.renderIntent) {
-    case 'filmic':
-      code = 1;
-      break;
-    case 'dng-lut':
-      code = 2;
-      break;
-    case 'sdr':
-    default:
-      code = 0;
-      break;
-  }
-  return code;
+export function resolveSourceRawWhiteDomain(
+  layer: LayerNode,
+  pipelineOverride?: boolean,
+): number | undefined {
+  if (pipelineOverride) return undefined;
+  if (layer.source.kind !== 'raster') return undefined;
+  return layer.source.rawWhiteDomain;
 }

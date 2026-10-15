@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import type { GamutId, TRC, RenderIntent } from '@opengpex/editor/core/types';
+import type { GamutId, TRC } from '@opengpex/editor/core/types';
 import { AssetDriver } from '@opengpex/editor/core/storage/Driver';
 
 /**
@@ -65,15 +65,25 @@ export interface ColorIdentity {
   /** High-depth predicate: present ⟺ `dec:${id}` holds the f16 truth. */
   dataFormat?: 'rgba16float' | 'rgba32float';
   /**
-   * The asset's OUT-OF-BOX RENDERING INTENT (RAW Route B §5.3, method (a)).
-   * Omitted ⇒ `'sdr'` (Display-Referred passthrough) — correct for every
-   * JPEG/PNG/TIFF/bitmap. Scene-linear RAW ingest tags this `'filmic'` and it is
-   * carried FORWARD unchanged (never re-sniffed at render time); the GPU sampling
-   * shader applies the tone-map at composite via `resolveSourceRenderIntent` →
-   * `normalize_source_components`. Persisted alongside `trc`/`gamut` so a cold
-   * reload renders identically.
+   * The filmic knee's PER-FILE white domain for this asset (decoded RAW only):
+   * the anchored-linear input the knee maps to display white, sampled by the
+   * decoder from the same luma histogram as the exposure-anchor median and
+   * clamped by `clampFilmicWhiteDomain` ([0.31, 0.95]). The median anchor
+   * places middle grey but not highlights, so a high-contrast capture needs a
+   * larger domain to keep its highlights off display white (probe 2026-10-14,
+   * IMG_1795: fixed 0.31 blew 14.6% of pixels to ≥224 vs Apple's 0.1%).
+   *
+   * ⚠️ ITS PRESENCE **IS** THE RENDERING INTENT (2026-10-15): the former
+   * `RenderIntent` string tag was deleted — 'filmic' was set by exactly the
+   * decode that produces this domain, so the tag was redundant. Present ⇒ the
+   * GPU sampling shader applies the filmic knee at composite via
+   * `resolveSourceRawWhiteDomain` → `normalize_source_components`; absent ⇒ SDR
+   * passthrough (every JPEG/PNG/TIFF/bitmap — they are display-referred already,
+   * their look was baked by whoever produced them, so a per-file display
+   * transform is meaningless by definition). Persisted alongside `trc`/`gamut`
+   * so a cold reload renders identically.
    */
-  renderIntent?: RenderIntent;
+  rawWhiteDomain?: number;
 }
 
 /**

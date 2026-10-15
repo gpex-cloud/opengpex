@@ -43,7 +43,7 @@
  * @module core/gpu/scene/Scene
  */
 
-import type { Rect, WorkingColorSpace, LayerBlendMode, GamutId, RenderIntent } from '@opengpex/editor/core/types';
+import type { Rect, WorkingColorSpace, LayerBlendMode, GamutId } from '@opengpex/editor/core/types';
 import type { TextLayout } from '@opengpex/editor/core/engine/text/textLayout';
 
 // ────────────────────────────────────────────────────────────
@@ -282,15 +282,19 @@ export type LayerSource =
      */
     readonly gamut?: GamutId;
     /**
-     * The asset's OUT-OF-BOX RENDERING INTENT.
-     * Omitted ⇒ `'sdr'` (Display-Referred passthrough) — the default for every
-     * bitmap/text/vector, so a camera-baked JPEG is NEVER tone-mapped. RAW ingest
-     * tags this explicitly (`'filmic'` / `'dng-lut'`) and carries it FORWARD; the
-     * shader must never re-sniff it at render time.
+     * The asset's PER-FILE filmic knee white domain (decoded RAW only).
+     * Omitted ⇒ `FILMIC_WHITE_DOMAIN` (0.31) — and absence IS the SDR
+     * passthrough intent: every bitmap/text/vector is display-referred (its
+     * camera-baked look passes through untouched), while RAW ingest samples the
+     * anchored highlight percentile alongside the exposure-anchor median so a
+     * high-contrast capture's highlights don't slam to display white under the
+     * default domain (probe 2026-10-14, IMG_1795).
      *
-     * Consumed by `resolveSourceRenderIntent` → the `render_intent` flags nibble → `sourceNormalize.ts`.
+     * Consumed by `resolveSourceRawWhiteDomain` (one resolver, two products):
+     * presence packs the `render_intent` flags nibble, the value packs the
+     * `filmic_white` uniform field → `tone_map_filmic`'s `white_domain` parameter.
      */
-    readonly renderIntent?: RenderIntent;
+    readonly rawWhiteDomain?: number;
   }
   /**
    * A PROCEDURAL vector primitive rendered on the GPU by a {@link VectorParams}

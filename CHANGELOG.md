@@ -8,6 +8,8 @@ All notable changes to OpenGPEX are documented in this file.
 - Export: new OpenEXR (.exr) export keeps highlight values above SDR white intact for HDR/compositing workflows
 - Color: compositing, blending and adjustments no longer clip pixel values above display white, so HDR content survives every editing step
 - Workspace: new HDR presentation toggle in the image info panel (with an HDR badge) to switch a document between HDR and SDR rendering
+- RAW (DNG/ProRAW): high-contrast photos no longer render with blown-out, pure-white highlights — the tone curve's highlight shoulder now adapts to each photo's own dynamic range, while typical photos render pixel-for-pixel unchanged
+- Color: the per-photo highlight-shoulder placement now also carries the RAW rendering signal internally, replacing the former separate render-intent tag (no user-visible change)
 
 ---
 

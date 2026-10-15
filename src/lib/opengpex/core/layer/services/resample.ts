@@ -158,9 +158,10 @@ export function createResampleOperations(
               // §8.1 forwarding: carry the persisted source gamut through the cold
               // reload so the GPU converts it.
               gamut: lightRecord.gamut,
-              // RAW Route B §5.3: carry the persisted render intent through too, so a
-              // cold-reloaded RAW still tone-maps identically.
-              renderIntent: lightRecord.renderIntent,
+              // RAW Route B §5.3: carry the persisted raw white domain through too
+              // (its presence IS the render intent), so a cold-reloaded RAW still
+              // tone-maps identically.
+              rawWhiteDomain: lightRecord.rawWhiteDomain,
             };
           } else {
             // dataFormat promised a truth that isn't there — persist failure /
@@ -196,8 +197,8 @@ export function createResampleOperations(
               trc: hdSource.trc ?? 'linear',
               bitDepth: hdSource.dataFormat === 'rgba32float' ? 32 : 16,
               dataFormat: hdSource.dataFormat,
-              // Preserve the render intent across a resize re-store (RAW Route B §5.3).
-              renderIntent: hdSource.renderIntent,
+              // Preserve the raw white domain across a resize re-store (RAW Route B §5.3).
+              rawWhiteDomain: hdSource.rawWhiteDomain,
             },
           };
         }

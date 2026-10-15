@@ -44,6 +44,7 @@ struct LayerUniforms {
   vmask_flags  : u32,           // Offset 76 (was _pad; bit0 HAS_VMASK_ANALYTIC, bit1 HAS_VMASK_TEX, bit2 INVERTED, bit3 HARD, bits4-5 SHAPE 0=rect/1=ellipse)
   vmask_rect   : vec4<f32>,     // Offset 80 (16B) — (cx, cy, halfW, halfH) in layer-local pixel space (analytic only)
   vmask_feather: vec4<f32>,     // Offset 96 (16B) — (featherPx, maskPxW, maskPxH, _reserved)
+  filmic_white : f32,           // Offset 112 — the layer's per-file filmic knee domain (ColorIdentity.rawWhiteDomain; consumed only when render_intent ≠ 0)
 };
 
 @group(0) @binding(0) var<uniform> layer : LayerUniforms;
@@ -91,7 +92,7 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   //   ③ render-intent tone-map in the STRAIGHT domain (flags bits 8..9; 0 = SDR
   //      passthrough). Applied here — BEFORE per-layer adjustments (method α).
   // Alpha is never transfer-encoded; only .rgb is converted.
-  color = normalize_layer_source(color, layer.flags);
+  color = normalize_layer_source(color, layer.flags, layer.filmic_white);
 
   // Per-layer colour adjustments operate on STRAIGHT (un-premultiplied)
   // rgb in LINEAR light; apply_adjustments TRC-wraps its own chain internally.
@@ -175,8 +176,8 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
 }
 `;
 
-/** Size of LayerUniforms in bytes (112 bytes = 28 float/u32 slots, including vmask fields). */
-export const LAYER_UNIFORM_BUFFER_SIZE = 112;
+/** Size of LayerUniforms in bytes (128 bytes = 32 float/u32 slots, including vmask fields + filmic_white). */
+export const LAYER_UNIFORM_BUFFER_SIZE = 128;
 
 /**
  * `vmask_flags` bit layout. Mirrors the WGSL branch in LAYER_WGSL /

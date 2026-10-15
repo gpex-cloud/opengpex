@@ -65,7 +65,6 @@
 import type { GamutId } from '@opengpex/editor/core/types/primitives';
 import { deriveMatrix64, WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
 import {
-  FILMIC_KNEE_GAIN,
   FILMIC_LUMA_WEIGHTS,
   FILMIC_PIVOT,
 } from '@opengpex/editor/core/engine/color/filmic';
@@ -203,8 +202,13 @@ fn gamut_to_working(c : vec3<f32>, gamut_id : u32) -> vec3<f32> {
 // FILMIC_PIVOT, constant stretch above it so the anchored scene white lands
 // exactly on display white — and the whole RGB triple is scaled by that ONE
 // gain. Exposure placement is handled at decode time (median→0.18 anchor baked
-// into the f16 line); this operator owns only the knee, which is why its
-// constants are scene-independent.
+// into the f16 line); this operator owns only the knee. The knee's WHITE
+// DOMAIN — the anchored input that maps to display white — is PER FILE
+// ('white_domain' parameter, threaded from ColorIdentity.rawWhiteDomain
+// through every sampling uniform): the median anchor places middle grey but
+// not highlights, and a high-contrast capture anchors its highlights far above
+// the default domain, where a fixed slope would slam them all to display white
+// (probe 2026-10-14: IMG_1795 14.6% of pixels ≥224 vs Apple's 0.1%).
 //
 // ⚠️ WHY A SCALAR GAIN AND NOT A PER-CHANNEL CURVE: the first device build
 // evaluated the knee per channel (in AP1, ACES-style) — with a 4.8× stretch
@@ -222,20 +226,21 @@ fn gamut_to_working(c : vec3<f32>, gamut_id : u32) -> vec3<f32> {
 
 const FILMIC_PIVOT = ${wgslFloat(FILMIC_PIVOT)};
 
-const FILMIC_KNEE_GAIN = ${wgslFloat(FILMIC_KNEE_GAIN)};
-
 const FILMIC_LUMA_WEIGHTS = vec3<f32>(${wgslFloat(FILMIC_LUMA_WEIGHTS[0])}, ${wgslFloat(FILMIC_LUMA_WEIGHTS[1])}, ${wgslFloat(FILMIC_LUMA_WEIGHTS[2])});
 
 // Generic Filmic display transform — LINEAR-light in, LINEAR-light out.
 // The knee runs on the pixel luma; the scalar gain k/luma scales the whole
 // pixel (identity below the pivot, chromaticity-preserving stretch above).
-// luma=0 → k=0 → gain 0 → black stays black; channels over 1 after the gain
-// are specular saturation and clamp.
-fn tone_map_filmic(c : vec3<f32>) -> vec3<f32> {
+// 'white_domain' is the per-file anchored-highlight domain (see filmic.ts —
+// decode clamps it to [0.31, 0.95], both > the pivot, so the slope divide is
+// always sane). luma=0 → k=0 → gain 0 → black stays black; channels over 1
+// after the gain are specular saturation and clamp.
+fn tone_map_filmic(c : vec3<f32>, white_domain : f32) -> vec3<f32> {
+  let knee_gain = (1.0 - FILMIC_PIVOT) / max(white_domain - FILMIC_PIVOT, 1e-4);
   let luma = dot(c, FILMIC_LUMA_WEIGHTS);
   let knee = select(
     luma,
-    min(1.0, FILMIC_PIVOT + (luma - FILMIC_PIVOT) * FILMIC_KNEE_GAIN),
+    min(1.0, FILMIC_PIVOT + (luma - FILMIC_PIVOT) * knee_gain),
     luma > FILMIC_PIVOT,
   );
   let gain = knee / max(luma, 1e-6);

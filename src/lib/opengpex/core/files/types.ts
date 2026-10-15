@@ -460,13 +460,18 @@ export interface DecodeResult {
  * container / trc / gamut are read from the injected sibling `colorIdentity`.
  *
  * The optional `colorIdentity` is the ONE deliberate crack in that rule. It
- * exists ONLY for formats whose pages can carry genuinely different colour per
- * page within the same file (currently: only multi-page TIFF, where each IFD may
- * declare its own PhotometricInterpretation / BitsPerSample / ICC). A handler
- * that leaves it unset — every single-page handler, GIF/APNG frames, and TIFF's
- * own single-page branch — gets the file-level `decision.colorIdentity` from the
- * entry's Stage 4 fallback, so there is zero behaviour change for any format
- * that does not need this. See `files/index.ts` Stage 4.
+ * exists ONLY for truths the metadata-only decision cannot express:
+ *  (a) formats whose pages carry genuinely different colour per page within the
+ *      same file (currently: multi-page TIFF, where each IFD may declare its own
+ *      PhotometricInterpretation / BitsPerSample / ICC), and
+ *  (b) RAW's pixel-derived filmic white domain (`rawWhiteDomain` — sampled
+ *      from the decoded luma histogram, so only the decode knows it; the handler
+ *      SPREADS the decision's identity and adds the one field, never mints).
+ * A handler that leaves it unset — every single-page handler, GIF/APNG frames,
+ * and TIFF's own single-page branch — gets the file-level
+ * `decision.colorIdentity` from the entry's Stage 4 fallback, so there is zero
+ * behaviour change for any format that does not need this. See `files/index.ts`
+ * Stage 4.
  */
 export type DecodedPayload = Omit<DecodedImage, 'colorIdentity'> & {
   colorIdentity?: ColorIdentity;

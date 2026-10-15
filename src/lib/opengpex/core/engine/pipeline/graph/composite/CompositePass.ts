@@ -44,7 +44,8 @@ import { resolveLayerGeometry, resolveLayerDprScale, effectiveScale } from '../s
 import { resolveVmaskUniform } from '../support/vmaskUniform';
 import { isSourceLinear } from '../support/sourceDomain';
 import { resolveSourceGamutId } from '../support/sourceGamut';
-import { resolveSourceRenderIntent } from '../support/sourceIntent';
+import { resolveSourceRawWhiteDomain } from '../support/sourceIntent';
+import { FILMIC_WHITE_DOMAIN } from '@opengpex/editor/core/engine/color/filmic';
 import type { ExportViewport } from '../RenderGraph';
 
 export interface CompositePassContext {
@@ -124,7 +125,7 @@ export interface DrawLayerParams {
 }
 
 /**
- * Reusable Float32Array / Uint32Array views for packing LayerUniforms (80 bytes).
+ * Reusable Float32Array / Uint32Array views for packing LayerUniforms (128 bytes).
  *
  * ⚠️ WP-5.6 concurrency note: these are MODULE-LEVEL mutable scratch buffers,
  * shared by every `CompositePass.drawLayer` call. This is safe today because the
@@ -161,6 +162,7 @@ export function packLayerUniforms(
   vmaskFlags = 0,
   vmaskRect: readonly [number, number, number, number] = [0, 0, 0, 0],
   vmaskFeather: readonly [number, number, number, number] = [0, 0, 0, 0],
+  rawWhiteDomain: number = FILMIC_WHITE_DOMAIN,
 ): void {
   const srcX = exportViewport?.sourceRect ? exportViewport.sourceRect[0] : 0;
   const srcY = exportViewport?.sourceRect ? exportViewport.sourceRect[1] : 0;
@@ -229,6 +231,10 @@ export function packLayerUniforms(
   target[25] = vmaskFeather[1];
   target[26] = vmaskFeather[2];
   target[27] = vmaskFeather[3];
+
+  // filmic_white: f32, offset 112 (float 28). The layer's per-file filmic knee
+  // domain; the shader reads it only when render_intent ≠ 0.
+  target[28] = rawWhiteDomain;
 }
 
 /**
@@ -264,11 +270,12 @@ export class CompositePass {
     // (already working gamut, or a pipeline transient the bake already converted).
     const gamutId = resolveSourceGamutId(layer, params.sourceIsWorkingGamut);
     flags |= (gamutId << LAYER_GAMUT_SHIFT);
-    // Pack the render intent (0..2) into bits 8..9. A pipeline
-    // transient whose bake already tone-mapped passes sourceIntentApplied → 0
-    // (constraint A: never double-tone-map).
-    const renderIntent = resolveSourceRenderIntent(layer, params.sourceIntentApplied);
-    flags |= (renderIntent << LAYER_RENDER_INTENT_SHIFT);
+    // Per-file filmic knee domain: its PRESENCE packs the render-intent nibble
+    // (bits 8..9; a bake-tone-mapped transient passes sourceIntentApplied ⇒
+    // undefined ⇒ 0 — constraint A: never double-tone-map), its value packs the
+    // filmic_white uniform (unread when the nibble is 0).
+    const rawWhiteDomain = resolveSourceRawWhiteDomain(layer, params.sourceIntentApplied);
+    if (rawWhiteDomain !== undefined) flags |= (1 << LAYER_RENDER_INTENT_SHIFT);
 
     const { contentWidth, contentHeight, localOffset, uvRect } = resolveLayerGeometry(
       layer,
@@ -313,6 +320,7 @@ export class CompositePass {
       vmaskU.flags,
       vmaskU.rect,
       vmaskU.feather,
+      rawWhiteDomain ?? FILMIC_WHITE_DOMAIN,
     );
 
     // 2. Write to BufferRing with dynamic offset

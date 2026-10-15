@@ -27,7 +27,7 @@
  * @module core/files/strategy/engine/types
  */
 
-import type { TRC, RenderIntent, GamutId } from '@opengpex/editor/core/types';
+import type { TRC, GamutId } from '@opengpex/editor/core/types';
 import type { ColorIdentity } from '@opengpex/editor/core/storage/asset/AssetStore';
 import type { SourceFormat, ColorSpaceId } from '../../types';
 
@@ -129,11 +129,6 @@ export interface DecisionAction {
   readonly trc?: TRC;
   /** GPU storage container format (defaults to undefined, i.e. standard 8-bit) */
   readonly dataFormat?: ColorIdentity['dataFormat'];
-  /**
-   * Output rendering intent (defaults to undefined, i.e. direct 'sdr' display). Only scene-linear sources
-   * (camera RAW) specify 'filmic' for GPU tone-mapping via colorIdentity; other display-referred formats default.
-   */
-  readonly renderIntent?: RenderIntent;
   /**
    * HDR rows only: overrides the post-process `colorSpaceToGamut` mapping for
    * sources whose primaries live outside the SDR `ColorSpaceId` vocabulary

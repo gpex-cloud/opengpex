@@ -40,9 +40,10 @@ import type { PipelineCache } from '@opengpex/editor/core/engine/gpu/resources/P
 import type { BufferRing } from '@opengpex/editor/core/engine/gpu/resources/BufferRing';
 import type { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTexture';
 import { ADJUST_PRE_UNIFORM_BUFFER_SIZE, packAdjustPreUniform } from '@opengpex/editor/core/engine/gpu/shaders/adjustPre';
+import { FILMIC_WHITE_DOMAIN } from '@opengpex/editor/core/engine/color/filmic';
 import { resolveAdjustBindGroup, type ResolveAdjustDeps } from '../support/adjustBindGroup';
 import { resolveSourceGamutId } from '../support/sourceGamut';
-import { resolveSourceRenderIntent } from '../support/sourceIntent';
+import { resolveSourceRawWhiteDomain } from '../support/sourceIntent';
 
 export interface AdjustPrePassContext {
   readonly device: GPUDevice;
@@ -83,13 +84,17 @@ export class AdjustPrePass {
     // and RenderGraph then tells the downstream
     // composite it is already working-gamut with its intent applied (constraint A).
     const gamutId = resolveSourceGamutId(layer);
-    const intent = resolveSourceRenderIntent(layer);
+    // The bake OWNS the tone-map (always the raw asset's first sample, so no
+    // pipeline override here) and must knee with the SAME per-file domain the
+    // downstream composite would have used (constraint A symmetry).
+    const rawWhiteDomain = resolveSourceRawWhiteDomain(layer);
     const uniform = packAdjustPreUniform(
       source.maxU,
       source.maxV,
       params.sourceIsLinear ?? false,
       gamutId,
-      intent,
+      rawWhiteDomain !== undefined ? 1 : 0,
+      rawWhiteDomain ?? FILMIC_WHITE_DOMAIN,
     );
     const slot = bufferRing.writeSlot(uniform);
 

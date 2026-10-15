@@ -48,7 +48,7 @@
  * @module core/engine/sources/HighDepthSource
  */
 
-import type { GamutId, RenderIntent } from '@opengpex/editor/core/types';
+import type { GamutId } from '@opengpex/editor/core/types';
 
 /** Decoded high-bit-depth naked pixels, GPU-ready for a direct float upload. */
 export interface HighDepthSource {
@@ -93,12 +93,16 @@ export interface HighDepthSource {
    */
   readonly gamut?: GamutId;
   /**
-   * The pixels' OUT-OF-BOX RENDERING INTENT.
-   * Omitted ⇒ `'sdr'`. Forwarded verbatim from the asset's `ColorIdentity` so
-   * `SceneAssembler` can carry it onto the `LayerSource` and the GPU applies the
-   * tone-map at composite. Scene-linear RAW carries `'filmic'`.
+   * The pixels' PER-FILE filmic knee white domain (decoded RAW only).
+   * Omitted ⇒ `FILMIC_WHITE_DOMAIN` — and absence IS the SDR-passthrough
+   * intent: the former `RenderIntent` tag was deleted because 'filmic' was set
+   * by exactly the decode that produces this domain. Forwarded verbatim from
+   * the asset's `ColorIdentity` (decode-sampled from the anchored luma
+   * histogram) so `SceneAssembler` carries it onto the `LayerSource` and the
+   * GPU knee — and any re-run of the CPU display proxy — knees identically
+   * with the canvas.
    */
-  readonly renderIntent?: RenderIntent;
+  readonly rawWhiteDomain?: number;
 }
 
 /** Fetches + decodes the raw source for `assetId`, or null if it is not high-depth. */

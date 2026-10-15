@@ -716,13 +716,12 @@ export class SceneAssembler {
           // The 1×1 rgba16float texels are already in that space, so gamut_to_working
           // is the sole (lossless) conversion.
           gamut: fillColor ? fillColor.space : highDepth?.gamut ?? assets?.get(sourceAssetId)?.gamut ?? 'srgb',
-          // Forwarding terminus: the per-asset out-of-box render
-          // intent the GPU sampling shader tone-maps at composite. Only scene-linear
-          // sources (camera RAW) carry a high-depth entry tagged 'filmic'; 8-bit
-          // bitmaps have no high-depth entry ⇒ undefined ⇒ resolveSourceRenderIntent
-          // treats it as 'sdr' passthrough. Carried forward from the ingest decision,
-          // NEVER re-sniffed here.
-          renderIntent: highDepth?.renderIntent ?? 'sdr',
+          // Forwarding terminus: the per-asset raw white domain. Its PRESENCE is
+          // the render intent — only scene-linear sources (camera RAW) carry a
+          // high-depth entry with a domain; 8-bit bitmaps have no high-depth
+          // entry ⇒ undefined ⇒ SDR passthrough. Carried forward from the
+          // asset's color identity, NEVER re-sniffed here.
+          rawWhiteDomain: highDepth?.rawWhiteDomain,
         },
         transform,
         width: layerWidth,

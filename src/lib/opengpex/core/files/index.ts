@@ -96,7 +96,6 @@ export type { IngestDecision, DecodeChannel } from './strategy';
 export { resolveEgestDecision, resolveEmbedIcc, FORMAT_EGEST_CAPABILITIES } from './strategy';
 export type { EgestDecision, EgestRequest, EgestChannel, FormatEgestCapability } from './strategy';
 
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Fallback Handler (for unknown/unsupported formats)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -275,11 +274,13 @@ export function createFileService(
       // colour authority; handlers never mint it), precomputes `contentBounds`
       // (fast path for opaque images, avoids downstream async Worker round-trips),
       // and owns `sourceBlob` retention.
-      // The ONE exception: a handler whose pages can genuinely carry different
-      // colour per page (only multi-page TIFF today — each IFD may declare its own
-      // PhotometricInterpretation / BitsPerSample / ICC) may set `colorIdentity`
-      // itself, and that per-page value wins. Every other handler leaves it unset
-      // and takes the file-level decision unchanged.
+      // The sanctioned exceptions: a handler may set `colorIdentity` itself when
+      // the metadata-only decision cannot express the page's truth, and that
+      // per-page value wins — (a) multi-page TIFF (each IFD may declare its own
+      // PhotometricInterpretation / BitsPerSample / ICC), (b) RAW's pixel-derived
+      // filmic white domain (spread decision identity + one field, never minted).
+      // Every other handler leaves it unset and takes the file-level decision
+      // unchanged.
       const resolvedPages: DecodedImage[] = await Promise.all(
         pages.map(async (page) => {
           const contentBounds =
@@ -385,7 +386,7 @@ export function createFileService(
             dataFormat: lightRecord.dataFormat,
             trc: lightRecord.trc,
             gamut: lightRecord.gamut,
-            renderIntent: lightRecord.renderIntent,
+            rawWhiteDomain: lightRecord.rawWhiteDomain,
           };
         }
       }
@@ -416,7 +417,7 @@ export function createFileService(
             dataFormat: page.colorIdentity.dataFormat,
             trc: page.colorIdentity.trc,
             gamut: page.colorIdentity.gamut ?? lightRecord?.gamut ?? 'srgb',
-            renderIntent: page.colorIdentity.renderIntent ?? lightRecord?.renderIntent,
+            rawWhiteDomain: page.colorIdentity.rawWhiteDomain ?? lightRecord?.rawWhiteDomain,
           };
         }
       }

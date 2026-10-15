@@ -262,9 +262,6 @@ export function resolveIngestDecision(metadata: ImageMetadata, env?: IngestEnvir
     trc: action.trc ?? 'srgb-trc',
     bitDepth: bitDepth as ColorIdentity['bitDepth'],
     dataFormat: action.dataFormat,
-    // Explicit intent axis: fixed here and propagated forward, never re-sniffed during rendering.
-    // Only RAW specifies 'filmic'; other actions default to undefined (treated as 'sdr' by consumers).
-    renderIntent: action.renderIntent,
   };
 
   return {

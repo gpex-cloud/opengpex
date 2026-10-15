@@ -297,24 +297,4 @@ export function toGamutId(val: string | null | undefined): GamutId {
   }
 }
 
-/**
- * `RenderIntent` — the OUT-OF-BOX rendering intent a source asset must receive at
- * composite time, carried FORWARD as an explicit provenance axis from the ingest
- * decision (RAW Route B §5.3, method (a)). It is orthogonal to `GamutId`/`trc`
- * (which describe the pixels' physical color identity): those say *what the pixels
- * are*, this says *how they must be rendered to be looked at*.
- *
- * - `'sdr'`     — already Display-Referred (JPEG/PNG/text/vector, camera-baked
- *                 look): pass through untouched. This is the OMITTED default —
- *                 nothing that is not explicitly tagged ever gets tone-mapped.
- * - `'filmic'`  — Scene-Referred linear RAW with no vendor curve: apply the generic
- *                 Filmic S-curve in the shader.
- * - `'dng-lut'` — RAW carrying a DNG `ProfileToneCurve`: sample that 1D LUT (falls
- *                 back to Filmic when the LUT is absent). Reserved; wired later.
- *
- * Consumed lazily as a per-asset tag; the GPU shader stage that reads it (via the
- * `render_intent` flags nibble) lands with `sourceNormalize.ts`.
- */
-export type RenderIntent = 'sdr' | 'filmic' | 'dng-lut';
-
 

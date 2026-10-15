@@ -61,6 +61,7 @@
 
 import { ADJUST_WGSL } from './adjust';
 import { SOURCENORMALIZE_WGSL } from './sourceNormalize';
+import { FILMIC_WHITE_DOMAIN } from '@opengpex/editor/core/engine/color/filmic';
 
 /**
  * `AdjustPreUniforms` size in bytes: `uv_rect` vec4 (16) + `pad` vec4 (16) = 32.
@@ -91,11 +92,13 @@ struct AdjustPreUniforms {
   // x: 0 = source is sRGB-encoded (decode it), 1 = source is already linear light.
   // y: GAMUT_ID (0..7) — the source physical gamut to align to the working space
   //    (ProPhoto RGB) after the TRC decode; 0 = already working / direct (no-op).
-  // z: RENDER_INTENT (0..3) — the out-of-box rendering intent tone-map (RAW Route B
-  //    0 = SDR passthrough, 1 = Filmic, 2 = DNG LUT→Filmic. This
+  // z: RENDER_INTENT (0..1) — the out-of-box rendering intent tone-map (RAW Route B:
+  //    0 = SDR passthrough, 1 = Filmic). This
   //    bake is the FIRST sample of the raw asset, so it OWNS the tone-map; the
   //    downstream composite is then told the intent is already applied (constraint A).
-  // Kept in the padding slot the struct already reserved, so the 32-byte layout and
+  // w: FILMIC_WHITE_DOMAIN — the layer's per-file filmic knee domain (an f32 in
+  //    [0.31, 0.95]; only read when z ≠ 0).
+  // Kept in the padding slots the struct already reserved, so the 32-byte layout and
   // every existing offset are unchanged.
   flags   : vec4<f32>,
 };
@@ -135,12 +138,13 @@ fn fs_adjust_pre(in : PreVSOut) -> @location(0) vec4<f32> {
   // STRAIGHT (CompositePass never premultiplies the bake source), so is_premult is
   // false and the intent's un-premultiply dance is a no-op. flags carry the fields as
   // exact integers in the f32 mantissa (0..7 / 0..3 exact; round discretises).
-  let normalized = normalize_source_components(
+  const normalized = normalize_source_components(
     src,
     pre.flags.x >= 0.5,          // is_linear (skip decode)
     false,                       // is_premult — bake source is always straight
     u32(round(pre.flags.y)),     // gamut_id
     u32(round(pre.flags.z)),     // render_intent
+    pre.flags.w,                 // per-file filmic white domain
   );
   let linear_rgb = normalized.rgb;
 
@@ -172,10 +176,14 @@ fn fs_adjust_pre(in : PreVSOut) -> @location(0) vec4<f32> {
  * (ProPhoto RGB) after the TRC decode; 0 = already working / direct (no-op). It is
  * written to `flags.y` and read back as an exact integer in the shader.
  *
- * `intent` (0..2) is the out-of-box rendering intent tone-map: 0 = SDR passthrough,
- * 1 = Filmic, 2 = DNG LUT (→Filmic). Written to `flags.z`. The bake OWNS the
+ * `intent` (0..1) is the out-of-box rendering intent tone-map: 0 = SDR passthrough,
+ * 1 = Filmic. Written to `flags.z`. The bake OWNS the
  * tone-map (it is the raw asset's first sample), so the downstream composite is
  * later told the intent is already applied (RAW Route B constraint A).
+ *
+ * `whiteDomain` is the layer's per-file filmic knee domain
+ * (ColorIdentity.rawWhiteDomain), written to `flags.w` and consumed only when
+ * `intent` ≠ 0.
  */
 export function packAdjustPreUniform(
   maxU: number,
@@ -183,6 +191,7 @@ export function packAdjustPreUniform(
   sourceIsLinear = false,
   gamutId = 0,
   intent = 0,
+  whiteDomain: number = FILMIC_WHITE_DOMAIN,
 ): Float32Array {
   const out = new Float32Array(ADJUST_PRE_UNIFORM_FLOATS);
   out[0] = 0;
@@ -192,5 +201,6 @@ export function packAdjustPreUniform(
   out[4] = sourceIsLinear ? 1 : 0;
   out[5] = gamutId;
   out[6] = intent;
+  out[7] = whiteDomain;
   return out;
 }

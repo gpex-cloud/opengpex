@@ -44,12 +44,18 @@
  *      positive gain changes no hue, clips nothing in f16, and the `trc:
  *      'linear'` / `dataFormat: 'rgba16float'` identity stays true).
  *
- *   ② Fixed linear knee (display side, constants below): identity below
- *      {@link FILMIC_PIVOT} (shadows untouched — no crush), constant slope
- *      above it so a scene white parked at {@link FILMIC_WHITE_DOMAIN} by the
- *      anchor lands EXACTLY on display white. This is the shoulder every
- *      camera JPEG pipeline draws; ACES's soft asymptote is what made white
- *      unreachable.
+ *   ② Linear knee (display side, constants below): identity below
+ *      {@link FILMIC_PIVOT} (shadows untouched — no crush), constant slope above
+ *      it so the anchored scene white lands EXACTLY on display white. The white
+ *      domain — the anchored input that maps to display white — is PER FILE:
+ *      decode samples the anchored highlight percentile alongside the median
+ *      ({@link clampFilmicWhiteDomain}; floor = {@link FILMIC_WHITE_DOMAIN}, the
+ *      original fixed constant, which encoded a ~1.7× scene max/median ratio a
+ *      high-contrast capture violates — probe 2026-10-14: 14.6% of pixels blown
+ *      to white on IMG_1795 vs Apple's 0.1%). The per-file domain rides the
+ *      asset's `ColorIdentity.rawWhiteDomain` to the GPU operator (the
+ *      `white_domain` WGSL parameter) and the CPU display proxy, so canvas,
+ *      thumbnails and cold-reload fallback all knee identically.
  *
  * Stage ② runs identically in the GPU operator (`tone_map_filmic`, constants
  * injected into the WGSL from this module) and the CPU display proxy
@@ -73,14 +79,52 @@ export const FILMIC_EXPOSURE_CLAMP = 16;
 export const FILMIC_PIVOT = 0.18;
 
 /**
- * Linear-light input the anchored scene white is expected at (pivot × the
- * ~1.7× median→white ratio of typical negatives); an input here maps to
+ * DEFAULT linear-light input the anchored scene white is expected at (pivot ×
+ * the ~1.7× median→white ratio of typical negatives); an input here maps to
  * display white exactly.
+ *
+ * ⚠️ This is a PER-FILE FLOOR, not a universal constant: the median anchor
+ * places the scene's MIDDLE grey, but the knee also needs to know where the
+ * scene's HIGHLIGHTS sit — and that ratio (scene max / median) varies per
+ * capture. A sunny ProRAW clips at sensor white (ratio ≈ 1.7× → anchored
+ * highlights land right here), but a high-contrast interior (ratio ≈ 3.8×)
+ * anchors its highlights 2× ABOVE this domain and the fixed slope would slam
+ * them all to display white (probe 2026-10-14, IMG_1795: 14.6% of pixels
+ * ≥224 vs Apple's 0.1%). So decode derives the real domain from the file's own
+ * anchored highlight percentile ({@link clampFilmicWhiteDomain}) and threads it
+ * to the knee (CPU proxy + the `white_domain` WGSL parameter). This constant
+ * remains the floor: scenes whose anchored highlights sit BELOW it keep the
+ * original rendering (no auto-levels on flat/dark scenes) — the fix only
+ * relaxes the domain upward, never downward.
  */
 export const FILMIC_WHITE_DOMAIN = 0.31;
 
-/** Slope above the pivot: (1 − pivot) / (whiteDomain − pivot). */
+/** Ceiling for the per-file adaptive white domain (keeps the knee a knee). */
+export const FILMIC_WHITE_DOMAIN_MAX = 0.95;
+
+/** Slope above the pivot at the DEFAULT white domain: (1 − pivot) / (domain − pivot). */
 export const FILMIC_KNEE_GAIN = (1 - FILMIC_PIVOT) / (FILMIC_WHITE_DOMAIN - FILMIC_PIVOT);
+
+/**
+ * Clamp a file-derived anchored-highlight estimate into the knee's working
+ * domain: never below {@link FILMIC_WHITE_DOMAIN} (flat/dark scenes keep the
+ * original placement — the adaptive domain only relaxes UPWARD for
+ * high-contrast scenes), never above {@link FILMIC_WHITE_DOMAIN_MAX} (a
+ * near-unity domain would flatten the knee to a no-op; 0.95 keeps the pivot→
+ * white stretch meaningful). Non-finite input falls back to the default.
+ */
+export function clampFilmicWhiteDomain(whiteDomain: number): number {
+  if (!Number.isFinite(whiteDomain)) return FILMIC_WHITE_DOMAIN;
+  return Math.min(FILMIC_WHITE_DOMAIN_MAX, Math.max(FILMIC_WHITE_DOMAIN, whiteDomain));
+}
+
+/**
+ * Knee slope for a given white domain: the pivot→domain span stretches to
+ * pivot→1. Guarded against a degenerate domain ≤ pivot (division blowup).
+ */
+export function filmicKneeGain(whiteDomain: number): number {
+  return (1 - FILMIC_PIVOT) / Math.max(whiteDomain - FILMIC_PIVOT, 1e-4);
+}
 
 /**
  * Rec.709 luma weights — the scalar knee runs on the PIXEL'S LUMA, and the
@@ -104,11 +148,13 @@ export function filmicExposureGain(medianLuma: number): number {
 
 /**
  * Stage ② scalar — the linear knee on LUMA. Monotone; ≤ pivot is the identity;
- * the pivot→whiteDomain span is stretched to pivot→1.
+ * the pivot→`whiteDomain` span is stretched to pivot→1. `whiteDomain` is the
+ * per-file anchored-highlight domain ({@link clampFilmicWhiteDomain}); omitted
+ * ⇒ the default {@link FILMIC_WHITE_DOMAIN}.
  */
-export function filmicKnee(x: number): number {
+export function filmicKnee(x: number, whiteDomain: number = FILMIC_WHITE_DOMAIN): number {
   if (!(x > FILMIC_PIVOT)) return x;
-  return Math.min(1, FILMIC_PIVOT + (x - FILMIC_PIVOT) * FILMIC_KNEE_GAIN);
+  return Math.min(1, FILMIC_PIVOT + (x - FILMIC_PIVOT) * filmicKneeGain(whiteDomain));
 }
 
 /**
@@ -117,10 +163,16 @@ export function filmicKnee(x: number): number {
  * gain is 1 (identity), above it the whole pixel stretches toward white
  * together (highlights desaturate gracefully instead of hue-skewing).
  * Out-of-range channels after the gain clamp at 1 (specular saturation).
+ * `whiteDomain` — the per-file knee domain, same contract as {@link filmicKnee}.
  */
-export function filmicToneMap(r: number, g: number, b: number): [number, number, number] {
+export function filmicToneMap(
+  r: number,
+  g: number,
+  b: number,
+  whiteDomain: number = FILMIC_WHITE_DOMAIN,
+): [number, number, number] {
   const luma = FILMIC_LUMA_WEIGHTS[0] * r + FILMIC_LUMA_WEIGHTS[1] * g + FILMIC_LUMA_WEIGHTS[2] * b;
-  const gain = filmicKnee(luma) / Math.max(luma, 1e-6);
+  const gain = filmicKnee(luma, whiteDomain) / Math.max(luma, 1e-6);
   return [
     Math.min(1, Math.max(0, r * gain)),
     Math.min(1, Math.max(0, g * gain)),

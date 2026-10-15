@@ -90,6 +90,7 @@ struct BlendUniforms {
   vmask_flags  : u32,         // Offset 76 (was _pad; mirrors LayerUniforms.vmask_flags)
   vmask_rect   : vec4<f32>,   // Offset 80 (16B) — (cx, cy, halfW, halfH) in layer-local pixel space (analytic only)
   vmask_feather: vec4<f32>,   // Offset 96 (16B) — (featherPx, maskPxW, maskPxH, _reserved)
+  filmic_white : f32,         // Offset 112 — mirrors LayerUniforms.filmic_white (per-file filmic knee domain)
 };
 
 @group(0) @binding(0) var<uniform> blend_u : BlendUniforms;
@@ -390,7 +391,7 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   // rgba16float accumulator — it is ALREADY working-space linear light and must
   // NOT be re-normalised. Converting both sides would double-decode / double-fold /
   // double-tone-map the backdrop and darken every ping-pong blend.
-  fg_sample = normalize_layer_source(fg_sample, blend_u.flags);
+  fg_sample = normalize_layer_source(fg_sample, blend_u.flags, blend_u.filmic_white);
 
   // Optional mask on foreground (bmask, sampled in the same foreground-local space).
   // The bound texture is the COMBINED coverage the bmask combine pass baked:
@@ -505,5 +506,5 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
 }
 `;
 
-/** Size of BlendUniforms in bytes (112 bytes = 28 float/u32 slots, including vmask fields). */
-export const BLEND_UNIFORM_BUFFER_SIZE = 112;
+/** Size of BlendUniforms in bytes (128 bytes = 32 float/u32 slots, including vmask fields + filmic_white). */
+export const BLEND_UNIFORM_BUFFER_SIZE = 128;
