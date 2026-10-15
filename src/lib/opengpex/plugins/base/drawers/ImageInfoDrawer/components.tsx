@@ -98,12 +98,12 @@ export function ImageInfoComponent() {
       (activeFrame.assetId ? assets.get(activeFrame.assetId)?.bitDepth : undefined)
       ?? activeFrame.metadata?.bitDepth;
 
-    // Per-document HDR presentation: availability comes from the FILE
-    // (gain map / PQ·HLG transfer); the effective state is the frame's toggle
-    // with the file as auto-default. Toggling writes `frame.hdrRender` — a
-    // render filter, never pixel data.
+    // Per-document HDR presentation: the badge availability comes from the
+    // FILE (gain map / PQ·HLG transfer); the effective state is the frame's
+    // toggle, defaulting OFF — HDR is a per-document user opt-in. Toggling
+    // writes `frame.hdrRender` — a render filter, never pixel data.
     const hdrAvailable = fileCarriesHdr(activeFrame.metadata);
-    const hdrEnabled = activeFrame.hdrRender ?? hdrAvailable;
+    const hdrEnabled = activeFrame.hdrRender === true;
     const handleHdrToggle = (on: boolean) => {
       if (activeFrame.hdrRender === on) return;
       actions.updateFrame(activeFrame.id, { hdrRender: on });

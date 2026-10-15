@@ -40,7 +40,7 @@ import type {
   GainMapData,
 } from './types';
 import { isRawPixelSource } from './types';
-import { decodeHeicGainMap } from './handlers/heic/gainmap';
+import { decodeGainMapData } from './shared/gain-map';
 export { isRawPixelSource };
 export type { EncodeSource, RawPixelSource };
 import { JpegHandler } from './handlers/jpeg';
@@ -435,23 +435,13 @@ export function createFileService(
     },
 
     /**
-     * Decode one asset's gain map from its retained source file. Mirrors
-     * `recover`'s tier-2: the gain map is presentation adjunct metadata, never
-     * persisted alongside the asset — the `raw:` blob re-derives it in one
-     * container parse + one aux item decode. Every failure (no source file, no
-     * gain map, decode error) returns null so the caller negative-caches and
-     * keeps presenting the authoritative SDR base.
+     * Decode the gain map carried in one file's metadata (`raw.gainMap`,
+     * extracted at ingest — see the interface doc). One createImageBitmap per
+     * call; callers session-cache so it runs once per asset per session. No
+     * source-blob access: the metadata IS the payload carrier.
      */
-    async decodeGainMap(assetId: string): Promise<GainMapData | null> {
-      const rawBlob = await assets.getRaw(assetId);
-      if (!rawBlob) return null;
-      try {
-        const bytes = new Uint8Array(await rawBlob.arrayBuffer());
-        return await decodeHeicGainMap(bytes);
-      } catch (err) {
-        console.warn('[FileService.decodeGainMap] failed for', assetId, err);
-        return null;
-      }
+    async decodeGainMap(metadata: ImageMetadata): Promise<GainMapData | null> {
+      return decodeGainMapData(metadata);
     },
   };
 

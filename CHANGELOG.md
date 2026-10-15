@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.13
+
+- Image Formats: UltraHDR JPEG photos (the Android/Google gain-map format, e.g. from gainmaps.com) now open with their true HDR brightness on HDR-capable displays — the same presentation as HEIC gain-map photos, with a smooth fade-in
+- Export: edited documents can now be saved back as UltraHDR JPEG — the exported file carries an embedded gain map and shows HDR brightness in compatible viewers (Chromium browsers, gainmaps.com, macOS 15+ Photos)
+
+---
+
 ## v2.0.12
 
 - Image Formats: iPhone Adaptive HDR (HEIC gain-map) photos now open with their true HDR brightness — highlights render beyond SDR white on HDR-capable displays, matching macOS Photos, with a smooth fade-in; toggling HDR off returns to the original SDR rendition

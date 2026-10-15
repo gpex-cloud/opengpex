@@ -58,7 +58,7 @@ import type {
   GamutId,
 } from '@opengpex/editor/core/types';
 import { asWorldShape } from '@opengpex/editor/core/types';
-import type { ImageMetadata, EncodeSource, FileService } from '@opengpex/editor/core/files';
+import type { ImageMetadata, FileService } from '@opengpex/editor/core/files';
 
 export interface PixelFacadeDeps {
   geometry: GeometryService;
@@ -218,7 +218,7 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
       ): Promise<SampledPixels> => {
         return compositeDispatcher.capture(frame, opts);
       },
-      renderForExport: (request: ExportRequest): Promise<EncodeSource> => {
+      renderForExport: (request: ExportRequest) => {
         return exportDispatcher.export(request);
       },
     },

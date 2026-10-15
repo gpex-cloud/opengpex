@@ -242,6 +242,48 @@ export interface RawBinaryData {
   hasGainmap?: boolean;
 
   /**
+   * The gain map as a BROWSER-DECODABLE coded image, extracted at ingest —
+   * the decode-time-extract-everything half of the gain-map contract
+   * (`hasGainmap` is the presence half the decision rows and badge read; this
+   * carries the payload so the runtime never touches the source blob).
+   *
+   * - JPEG carrier: the original gain JPEG lifted verbatim out of the MPF
+   *   container (138 KB on the reference sample — full resolution, lossless).
+   * - HEIC carrier: the HEVC aux tiles are not browser-decodable, so ingest
+   *   decodes them once through the heic worker, caps the plane at the
+   *   subsystem resolution limit (`QUANTIZE_MAX_DIM`), and re-encodes JPEG
+   *   (~70 KB — the map is a smooth low-frequency field; lossy at q≈0.95 is
+   *   invisible at 8-bit precision).
+   *
+   * Consumers decode ONCE per session (`FileService.decodeGainMap` →
+   * createImageBitmap → single-channel plane) and session-cache the result;
+   * ~10 ms for a JPEG, no worker, no blob access.
+   */
+  gainMap?: {
+    readonly mime: 'image/jpeg' | 'image/png';
+    /** Base64 of the coded image bytes (the `raw.icc`/`raw.exif` convention). */
+    readonly data: string;
+    readonly width: number;
+    readonly height: number;
+    /** Map value at byte 0 (log2 HDR/SDR ratio; may be negative). */
+    readonly gainMin: number;
+    /** Map value at byte 255 (log2 HDR/SDR ratio). */
+    readonly gainMax: number;
+    /** Payload gamma (1 = log2-linear). */
+    readonly gamma: number;
+    /**
+     * True when the plane is ALREADY in display space — the HEIC carrier:
+     * libheif applies the aux item's own irot/imir at decode, so the stored
+     * plane is uprighted exactly like the master texture. Absent/false = the
+     * coded image is in FILE space (the JPEG carrier's verbatim gain JPEG)
+     * and the runtime must apply `metadata.capture.orientation` to align it
+     * with the uprighted master. Getting this wrong double-rotates (HEIC) or
+     * mis-aligns (JPEG) the gain field — a ghosted HDR rendition.
+     */
+    readonly oriented?: boolean;
+  };
+
+  /**
    * HEIC hvcC profile_idc of the coded primary (3 = Main Still — Apple, 1 =
    * Main, 2 = Main 10, 4 = RExt). Picks which HEVC capability probe (`handlers/heic/capability.ts`) entry
    * gates rule 19a for this file. Only populated when the container parser
@@ -590,6 +632,7 @@ export interface ImageFormatHandler {
    * Fast metadata-only extraction (reads file header, no pixel decode).
    */
   extractMetadata(file: File): Promise<ImageMetadata>;
+
 }
 
 export interface DecodeBlobInput {
@@ -695,12 +738,13 @@ export interface FileService {
   } | null>;
 
   /**
-   * Decode one asset's gain map from its retained source file (the presentation
-   * cache's cold fetcher — the gain map is deliberately NOT stored alongside the
-   * asset: it is presentation adjunct metadata, re-derivable from the `raw:`
-   * blob in one container parse + one aux item decode). Returns null when the
-   * asset has no source file, the file carries no gain map, or any decode step
-   * fails — the caller negative-caches and presents the authoritative SDR base.
+   * Decode the gain map carried in one file's metadata (`raw.gainMap` —
+   * extracted at ingest) into the single-channel plane the presentation cache
+   * and the export lane consume. One `createImageBitmap` per call; callers
+   * session-cache (`gainMapSourceCache`) so this runs once per asset per
+   * session. Returns null when the metadata carries no gain map or any decode
+   * step fails — the caller negative-caches and presents the authoritative
+   * SDR base.
    */
-  decodeGainMap(assetId: string): Promise<GainMapData | null>;
+  decodeGainMap(metadata: ImageMetadata | undefined): Promise<GainMapData | null>;
 }

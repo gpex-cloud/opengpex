@@ -34,6 +34,36 @@ import type { DecisionRule } from './types';
 export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
   // ── 1. JPEG ─────────────────────────────────────────────────────────────
   {
+    // 1-gm: gain-map carriers (UltraHDR — a GContainer XMP directory naming a
+    // GainMap item is present). Mirrors the HEIC 19-gm philosophy: the master
+    // is the SDR base lifted to LINEAR f16 and the gain map is deliberately
+    // NOT applied at ingest — the engine renders both HDR-ON and HDR-OFF from
+    // that ONE resident f16 line (a baked master would make OFF the CLAMPED
+    // HDR rendition instead of the file's authoritative SDR base). The lane
+    // keeps the original bytes as the display proxy (a JPEG is browser-native;
+    // a transcode could only degrade it) and retains the source file, which is
+    // what lets the presentation cache re-parse the multi-picture container
+    // for the gain map at view time (`FileService.decodeGainMap`). ORDER:
+    // ahead of rule 1 — first-match-wins means a carrier must never be
+    // captured by the verbatim row, whose retained=false would strand the
+    // gain decode with no source file.
+    id: '1-gm',
+    condition: {
+      format: 'jpeg',
+      hasGainmap: true,
+      bitDepth: 8,
+      colorSpace: ['srgb', 'display-p3'],
+      isMultiFrame: false,
+    },
+    action: {
+      decodeChannel: 'ultrahdr-base',
+      trc: 'linear',
+      dataFormat: 'rgba16float',
+      applyOrientation: 'auto',
+      description: 'JPEG gain-map carrier (1-gm) — SDR base lifted to the linear f16 master, source retained',
+    },
+  },
+  {
     id: 1,
     condition: {
       format: 'jpeg',

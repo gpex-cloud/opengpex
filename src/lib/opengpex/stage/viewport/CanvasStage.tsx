@@ -26,7 +26,6 @@ import { useEditorState, useEditorServices } from '@opengpex/editor/core/context
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { useOverlayRotationSync } from '@opengpex/editor/core/motion/hooks/animation';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color';
-import { fileCarriesHdr } from '@opengpex/editor/core/files';
 import { quantizeDensityBand } from '@opengpex/editor/core/engine/text/glyphAtlas';
 import {
   sourceBitmapCache,
@@ -86,15 +85,14 @@ export default function CanvasStage() {
   const isGpuReadyRef = useRef(false);
 
   // ─── Per-document HDR presentation switch (render filter) ───
-  // `frame.hdrRender ?? fileCarriesHdr(metadata)`: undefined follows the file
-  // (HDR sources on, SDR sources off). The switch selects the SURFACE mode
-  // (SDR: bgra8unorm + white clamp, byte-identical to the A-phase terminal
-  // state; HDR: rgba16float + extended + unclamped-tail view variant) — it never
-  // touches pixel data. Re-running the layout effect on this value makes the
-  // GpuDevice reconfigure (format + toneMapping) before the next ticker frame.
-  const hdrPresentation = activeFrame
-    ? (activeFrame.hdrRender ?? fileCarriesHdr(activeFrame.metadata))
-    : false;
+  // `frame.hdrRender === true` — defaults OFF even for HDR sources; HDR is a
+  // per-document user opt-in, not a file-driven auto-default. The switch
+  // selects the SURFACE mode (SDR: bgra8unorm + white clamp, byte-identical to
+  // the A-phase terminal state; HDR: rgba16float + extended + unclamped-tail
+  // view variant) — it never touches pixel data. Re-running the layout effect
+  // on this value makes the GpuDevice reconfigure (format + toneMapping)
+  // before the next ticker frame.
+  const hdrPresentation = activeFrame ? activeFrame.hdrRender === true : false;
 
   // ─── WebGPU Canvas Mount & Surface Configuration ───
   // The swapchain gamut is NOT passed: it is a hard invariant (WORKING_GAMUT,
@@ -320,11 +318,13 @@ export default function CanvasStage() {
     });
 
     // Gain-map presentation warm: when this frame is gain-eligible, probe the
-    // source cache once — a miss kicks the aux decode (fetcher = the retained
-    // source blob → container parse → per-item worker decode) and this frame
-    // presents SDR; the subscription above flips the next frame bright.
-    if (scene.display.gainMapAssetId) {
-      gainMapSourceCache.getOrFetch(scene.display.gainMapAssetId, (id) => files.decodeGainMap(id));
+    // source cache once — a miss decodes the metadata-carried map
+    // (`raw.gainMap`, extracted at ingest; one createImageBitmap, no source
+    // blob) and this frame presents SDR; the subscription above flips the
+    // next frame bright.
+    if (scene.display.gainMapAssetId && activeFrame?.metadata) {
+      gainMapSourceCache.getOrFetch(scene.display.gainMapAssetId, () =>
+        files.decodeGainMap(activeFrame.metadata!));
     }
 
     let _renderT0 = 0;

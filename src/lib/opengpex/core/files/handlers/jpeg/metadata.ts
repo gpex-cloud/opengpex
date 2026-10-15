@@ -22,6 +22,7 @@ import ExifReader from 'exifreader';
 import type { ImageMetadata } from '../../types';
 import { iccToBase64, parseIccProfileName, inferColorSpaceFromIcc } from '../../shared/icc';
 import { extractJpegExif, extractJpegIcc } from './jfif';
+import { extractJpegGainMapCarrier } from './gainmap';
 import { parseDateToISO } from '../../utils';
 
 /**
@@ -146,6 +147,27 @@ export async function extractJpegMetadata(file: File): Promise<ImageMetadata> {
       // "Uncalibrated" — often indicates AdobeRGB when InteropIndex = 'R03'
       meta.colorSpace = 'adobe-rgb';
     }
+  }
+
+  // ── Gain-map carrier extraction (UltraHDR) ──
+  // The GContainer XMP form is the detection key. Presence alone routes the
+  // `1-gm` ingest row (source retention + f16 master) via `hasGainmap`; the
+  // gain image itself is lifted VERBATIM out of the MPF container into
+  // `raw.gainMap` — a ~140 KB browser-decodable JPEG on real carriers, so the
+  // runtime (`FileService.decodeGainMap` → createImageBitmap) never touches
+  // the source blob. Pure byte surgery: no raster decode here.
+  const carrier = extractJpegGainMapCarrier(bytes);
+  if (carrier) {
+    meta.raw.hasGainmap = true;
+    meta.raw.gainMap = {
+      mime: 'image/jpeg',
+      data: iccToBase64(carrier.gainBytes),
+      width: carrier.width,
+      height: carrier.height,
+      gainMin: carrier.params.gainMin,
+      gainMax: carrier.params.gainMax,
+      gamma: carrier.params.gamma,
+    };
   }
 
   return meta;

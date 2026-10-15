@@ -51,22 +51,29 @@
  * saturated highlights from blowing out — the application math applies the
  * real value (negative exponent), never clamps it to zero.
  *
- * ── auxiliary image decode ──
+ * ── auxiliary image extraction (INGEST) ──
  * Hidden aux items never appear in libheif's top-level image enumeration, so
- * the pixels are fetched by ITEM ID: the container parser resolves the
- * `urn:com:apple:photo:2020:aux:hdrgainmap` auxl reference, and the shared
- * heic-worker decodes exactly that item through libheif's image-handle glue
- * (grid aux items — the 48MP 3×5 form — decode through the same entry; libheif
- * composes derived grids internally). Any failure returns null: the caller
- * treats a gain map as absent and presents the authoritative SDR base — the
- * file stays fully usable, just without HDR headroom.
+ * the pixels are fetched by ITEM ID through the shared heic-worker (grid aux
+ * items — the 48MP 3×5 form — decode through the same entry; libheif composes
+ * derived grids internally). This runs ONCE AT INGEST, inside the decode
+ * handler's "Converting…" phase: the plane is capped at the subsystem
+ * resolution limit (`downscaleGainMap` — a full-size Apple capture is a
+ * ~12 MB plane; the consumers sample it as a smooth low-frequency field) and
+ * re-encoded as a compact JPEG into `metadata.raw.gainMap`. WHY RE-ENCODE:
+ * the HEVC tiles are not browser-decodable, so a coded copy in metadata would
+ * be unusable at runtime — the decoded-then-JPEG form is what makes the
+ * metadata-carried contract work for this carrier. Any failure is fail-open:
+ * `raw.gainMap` stays unset, the presentation negative-caches and presents
+ * the authoritative SDR base.
  *
  * @module core/files/handlers/heic/gainmap
  */
 
-import type { GainMapData } from '../../types';
+import type { ImageMetadata } from '../../types';
 import { parseHeicContainer } from './metadata/container';
 import { heicWorkerCall } from './transcode';
+import { downscaleGainMap } from '@opengpex/editor/core/engine/color/gainMap';
+import { blobToBase64 } from '../../utils';
 
 /** The ISO 21496-1 tmap record's fixed rational denominator. */
 const TMAP_DENOMINATOR = 1_000_000;
@@ -154,43 +161,78 @@ interface DecodedAuxItem {
 const GAINMAP_AUX_TYPE = 'hdrgainmap';
 
 /**
- * Read a HEIC file's gain map: container parse → tone-map parameters →
- * per-item decode of the hidden `hdrgainmap` auxiliary image. Returns the
- * carrier-agnostic {@link GainMapData}, or null when the file carries no gain
- * map (or any step fails — the caller negative-caches and presents SDR).
+ * Extract the gain map into `metadata.raw.gainMap` — the INGEST-side half of
+ * the contract (runs inside the decode handler's converting phase): container
+ * parse → tone-map parameters → per-item worker decode → resolution cap →
+ * compact JPEG re-encode → base64. Fail-open: any failure leaves
+ * `raw.gainMap` unset (the presentation treats that as "no gain map").
  *
- * `bytes` is consumed (its buffer transfers to the worker); pass a caller-
- * owned copy.
+ * Reads its OWN copy of the file bytes — the decode handler's buffer may
+ * already have been transferred to the worker by an earlier call.
  */
-export async function decodeHeicGainMap(bytes: Uint8Array): Promise<GainMapData | null> {
-  if (bytes.length === 0) return null;
+export async function extractHeicGainMapInto(file: File, metadata: ImageMetadata): Promise<void> {
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // Parse BEFORE the worker call: `heicWorkerCall` transfers the buffer, but
+    // the extracted view payloads are standalone copies and stay valid.
+    const view = parseHeicContainer(bytes, { extractPayload: true });
+    const aux = view.auxImages.find((a) => a.auxType.includes(GAINMAP_AUX_TYPE));
+    if (!aux) return;
+    const params = extractHeicToneMapParams(view.idatPayload);
+    if (!params) return;
 
-  // Metadata-time parse only — no coded payloads are copied out; the aux
-  // decode below goes through the worker by item id.
-  const view = parseHeicContainer(bytes);
-  const aux = view.auxImages.find((a) => a.auxType.includes(GAINMAP_AUX_TYPE));
-  if (!aux) return null;
+    const out = await heicWorkerCall<DecodedAuxItem>('decodeItem', [bytes, aux.itemId], [
+      bytes.buffer as ArrayBuffer,
+    ]);
+    const px = out.width * out.height;
+    if (!out.rgba || out.rgba.length < px * 4) return;
 
-  const params = extractHeicToneMapParams(view.idatPayload);
-  if (!params) return null;
+    // The map is luminance-axis metadata: the worker's interleaved RGBA
+    // replicates gray across RGB, so the R plane is the single authoritative
+    // channel. Cap at the subsystem resolution contract before re-encode.
+    const plane = new Uint8Array(px);
+    for (let i = 0; i < px; i++) plane[i] = out.rgba[i * 4];
+    const capped = downscaleGainMap({
+      map: plane,
+      width: out.width,
+      height: out.height,
+      gainMin: params.gainMapMin,
+      gainMax: params.gainMapMax,
+      gamma: params.gamma,
+    });
 
-  const decoded = await heicWorkerCall<DecodedAuxItem>('decodeItem', [bytes, aux.itemId], [
-    bytes.buffer as ArrayBuffer,
-  ]);
-  const px = decoded.width * decoded.height;
-  if (!decoded.rgba || decoded.rgba.length < px * 4) return null;
+    // Gray-replicated RGBA → canvas → compact JPEG (a smooth low-frequency
+    // field at q≈0.95: ±1/255 codec noise is far below the 8-bit precision the
+    // format already carries).
+    const canvas = new OffscreenCanvas(capped.width, capped.height);
+    const ctx = canvas.getContext('2d')!;
+    const img = ctx.createImageData(capped.width, capped.height);
+    for (let i = 0; i < capped.map.length; i++) {
+      img.data[i * 4] = capped.map[i];
+      img.data[i * 4 + 1] = capped.map[i];
+      img.data[i * 4 + 2] = capped.map[i];
+      img.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.95 });
 
-  // The map is luminance-axis metadata: keep the single authoritative plane
-  // (libheif's interleaved RGBA replicates gray across RGB).
-  const map = new Uint8Array(px);
-  for (let i = 0; i < px; i++) map[i] = decoded.rgba[i * 4];
+    // `blobToBase64` returns a DATA URL (its piexif-oriented contract); the
+    // `raw.gainMap.data` convention is PURE base64 (the runtime atob-decodes
+    // it), so strip the `data:…;base64,` prefix.
+    const dataUrl = await blobToBase64(blob);
+    const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
 
-  return {
-    map,
-    width: decoded.width,
-    height: decoded.height,
-    gainMin: params.gainMapMin,
-    gainMax: params.gainMapMax,
-    gamma: params.gamma,
-  };
+    metadata.raw.gainMap = {
+      mime: 'image/jpeg',
+      data: base64,
+      width: capped.width,
+      height: capped.height,
+      gainMin: capped.gainMin,
+      gainMax: capped.gainMax,
+      gamma: capped.gamma,
+      oriented: true, // libheif already applied the aux item's irot/imir at decode
+    };
+  } catch (err) {
+    console.warn('[heic gainmap] extraction failed; presenting without HDR gain', err);
+  }
 }

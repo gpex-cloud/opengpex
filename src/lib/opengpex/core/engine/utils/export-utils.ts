@@ -574,3 +574,38 @@ export function unpremultiplyEncodeGamut(
   }
   return out;
 }
+
+/**
+ * Un-premultiply a row-major premultiplied LINEAR-light RGBA buffer into
+ * STRAIGHT linear RGBA — no gamut matrix, no TRC, no quantization. The raw
+ * straight-linear domain the gain-map math lives in (`hdr = sdr·2^gain` is a
+ * linear-light statement, and a ratio of two straight values is itself
+ * straight): the UltraHDR export lane builds its (SDR, HDR) pair here before
+ * quantizing the map.
+ *
+ * Per texel: `a <= 0` → (0,0,0,0); otherwise rgb/a, alpha clamped to [0,1]
+ * untouched by any curve. Returns a fresh Float32Array (the readback buffer is
+ * engine-owned ring memory and is never mutated in place).
+ */
+export function unpremultiplyLinearF32(
+  linearPremul: Float32Array,
+  width: number,
+  height: number,
+): Float32Array {
+  const expected = width * height * 4;
+  if (linearPremul.length < expected) {
+    throw new Error(
+      `[exportEncode] buffer too small: got ${linearPremul.length}, need ${expected} (${width}×${height} RGBA)`,
+    );
+  }
+  const out = new Float32Array(expected);
+  for (let i = 0; i < expected; i += 4) {
+    const a = linearPremul[i + 3];
+    if (a <= 0) continue; // fully transparent — stays zeroed
+    out[i] = linearPremul[i] / a;
+    out[i + 1] = linearPremul[i + 1] / a;
+    out[i + 2] = linearPremul[i + 2] / a;
+    out[i + 3] = clamp01(a);
+  }
+  return out;
+}

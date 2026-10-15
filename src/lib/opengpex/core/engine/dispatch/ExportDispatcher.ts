@@ -49,9 +49,10 @@ import { getGpuEngine } from '@opengpex/editor/core/engine/pipeline/WebGpuEngine
 import { SceneAssembler } from '@opengpex/editor/core/engine/pipeline/scene/SceneAssembler';
 import { highDepthTextureCache } from '@opengpex/editor/core/engine/sources/HighDepthSource';
 import type { HighDepthFetcher } from '@opengpex/editor/core/engine/sources/HighDepthSource';
-import { unpremultiplyEncodeLinearF16, unpremultiplyEncodeGamut } from '@opengpex/editor/core/engine/utils/export-utils';
+import { unpremultiplyEncodeLinearF16, unpremultiplyEncodeGamut, unpremultiplyLinearF32 } from '@opengpex/editor/core/engine/utils/export-utils';
+import { applyGainToF32, quantizeGainMapPair } from '@opengpex/editor/core/engine/color/gainMap';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
-import type { EncodeSource, FileService } from '@opengpex/editor/core/files';
+import type { EncodeSource, FileService, GainMapData } from '@opengpex/editor/core/files';
 import type {
   Frame,
   Layer,
@@ -89,6 +90,24 @@ export interface ExportRequest {
    * `true`/undefined = full scene-referred headroom.
    */
   hdrSemantics?: boolean;
+  /**
+   * UltraHDR lane input: the document source's decoded gain map (the caller
+   * fetches it via `FileService.decodeGainMap` — this dispatcher owns the GPU
+   * and the math, not the file read). Present + the `'canvas-8'` lane + a
+   * quantizable (SDR, HDR) pair → the result carries `gainMap` to assemble
+   * beside the base JPEG; absent, or a pair with no ratio information → the
+   * plain lane answers (an honest non-gain-map file). Every other channel
+   * ignores it.
+   */
+  readonly sourceGainMap?: GainMapData | null;
+}
+
+/** The unified export result: the encode source every lane produces, plus the
+ * gain map when the UltraHDR lane fired (its presence IS the caller's signal
+ * to assemble the container — no separate mode field). */
+export interface ExportResultSource {
+  readonly encodeSource: EncodeSource;
+  readonly gainMap?: GainMapData;
 }
 
 // ─── ExportDispatcher ───
@@ -126,26 +145,19 @@ export class ExportDispatcher {
   }
 
   /**
-   * Render the frame on the SAME WebGPU pipeline the preview uses and produce
-   * an `EncodeSource` ready for `FileService.encode()`.
+   * The camera-independent composite readback shared by every export lane:
+   * scene assembly + one f32 readback at the target dimensions. See the ONE
+   * PIPELINE EQUIVALENCE note in `export` for why this matches the preview.
    */
-  async export(request: ExportRequest): Promise<EncodeSource> {
-    const { frame, viewportDim, targetWidth, targetHeight, region, targetGamut, channel, canvasColorSpace } = request;
-
+  private async renderComposite(
+    frame: Frame,
+    viewportDim: Dimensions,
+    targetWidth: number,
+    targetHeight: number,
+    region: Rect | undefined,
+    targetGamut: GamutId,
+  ): Promise<{ pixels: Float32Array; width: number; height: number }> {
     await this.warmHighDepth(frame.layers.order.map((id) => frame.layers.byId[id]));
-
-    // ═══ Unified WebGPU export (Readback → encode) ═══════════════════════
-    // ONE PIPELINE EQUIVALENCE (why re-assembling here matches preview):
-    // The composite is derived ONLY from the camera-INDEPENDENT half of
-    // the Scene (`computeCompositeSignature` excludes `view`). We rebuild
-    // from the SAME `activeFrame` (same `layer.assetId` set, same working
-    // format `caps.workingFormat`) and the SAME high-depth source cache
-    // the preview uses; `syncAssets`→`uploadSource` dedups by assetId/ref,
-    // so already-resident preview textures are reused with zero
-    // re-transfer / re-decode. `export()` runs the identical compile +
-    // `RenderGraph.composite` path as `render()` and never touches the
-    // view/present pass, so passing `frame.camera`/`dpr:1` cannot perturb
-    // the composited pixels. Hence export pixels ≡ preview pixels.
     const engine = getGpuEngine();
     const { scene, uploads, lutUploads } = SceneAssembler.buildScene({
       frame,
@@ -172,6 +184,95 @@ export class ExportDispatcher {
       region,
       targetGamut,
     });
+    return { pixels: exported.pixels as Float32Array, width: exported.width, height: exported.height };
+  }
+
+  /**
+   * The canvas-8 terminal lane (un-premultiply → target gamut matrix + TRC →
+   * quantize → gamut-tagged canvas → ImageBitmap), factored so the plain
+   * export and the UltraHDR base share ONE encode (the assembled file's base
+   * must be pixel-identical to what a plain JPEG export would ship).
+   */
+  private async encodeCanvas8(
+    pixels: Float32Array,
+    width: number,
+    height: number,
+    targetGamut: GamutId,
+    canvasColorSpace: PredefinedColorSpace,
+  ): Promise<EncodeSource> {
+    const encoded8 = unpremultiplyEncodeGamut(
+      pixels,
+      width,
+      height,
+      { sourceGamut: WORKING_GAMUT, targetGamut, bitDepth: 8 },
+    ) as Uint8ClampedArray;
+    // `canvasColorSpace` is derived from the SAME `targetGamut`
+    // the matrix above targeted, so the tag can never contradict the
+    // pixels (wide-gamut targets never reach this lane — the decision
+    // routed them to 'raw-8' or 'raw-16').
+    const outCanvas = new OffscreenCanvas(width, height);
+    const outCtx = outCanvas.getContext('2d', { colorSpace: canvasColorSpace })!;
+    const imgData = outCtx.createImageData(width, height, { colorSpace: canvasColorSpace });
+    imgData.data.set(encoded8);
+    outCtx.putImageData(imgData, 0, 0);
+    return createImageBitmap(outCanvas);
+  }
+
+  /**
+   * The UltraHDR gain derivation, run on the SHARED composite readback: the
+   * HDR rendition is rebuilt through the source map (straight linear →
+   * `hdr = sdr·2^gain`) and the ratio is quantized against the REAL base
+   * pixels, so an edited document exports a map that matches its own pixels
+   * rather than parroting the source's. Null when the pair carries no ratio
+   * information (an all-black composite) — the caller then ships an honest
+   * plain JPEG.
+   */
+  private quantizeExportGainMap(
+    exported: { pixels: Float32Array; width: number; height: number },
+    sourceGainMap: GainMapData,
+  ): GainMapData | null {
+    // Straight (un-premultiplied) linear working-space pixels — the domain the
+    // gain math lives in (`hdr = sdr·2^gain` is a linear-light statement).
+    const straight = unpremultiplyLinearF32(exported.pixels, exported.width, exported.height);
+    const hdr = applyGainToF32(straight, exported.width, exported.height, sourceGainMap);
+    return quantizeGainMapPair(straight, hdr, exported.width, exported.height);
+  }
+
+  /**
+   * Render the frame on the SAME WebGPU pipeline the preview uses and produce
+   * the unified export result (`ExportResultSource`).
+   */
+  async export(request: ExportRequest): Promise<ExportResultSource> {
+    const { frame, viewportDim, targetWidth, targetHeight, region, targetGamut, channel, canvasColorSpace } = request;
+
+    // ═══ Unified WebGPU export (Readback → encode) ═══════════════════════
+    // ONE PIPELINE EQUIVALENCE (why re-assembling here matches preview):
+    // The composite is derived ONLY from the camera-INDEPENDENT half of
+    // the Scene (`computeCompositeSignature` excludes `view`). We rebuild
+    // from the SAME `activeFrame` (same `layer.assetId` set, same working
+    // format `caps.workingFormat`) and the SAME high-depth source cache
+    // the preview uses; `syncAssets`→`uploadSource` dedups by assetId/ref,
+    // so already-resident preview textures are reused with zero
+    // re-transfer / re-decode. `export()` runs the identical compile +
+    // `RenderGraph.composite` path as `render()` and never touches the
+    // view/present pass, so passing `frame.camera`/`dpr:1` cannot
+    // perturb the composited pixels. Hence export pixels ≡ preview pixels.
+    const exported = await this.renderComposite(frame, viewportDim, targetWidth, targetHeight, region, targetGamut);
+
+    // ═══ UltraHDR lane attempt (canvas-8 only) ═══════════════════════════
+    // A gain-map lane of the same readback the plain lanes share: the base is
+    // the SDR composite verbatim (a gain-map document's master IS its SDR
+    // base — the gain is a presentation adjunct, never baked). A null pair
+    // quantization falls through to the plain lane below.
+    if (channel === 'canvas-8' && request.sourceGainMap) {
+      const gainMap = this.quantizeExportGainMap(exported, request.sourceGainMap);
+      if (gainMap) {
+        return {
+          encodeSource: await this.encodeCanvas8(exported.pixels, exported.width, exported.height, targetGamut, canvasColorSpace),
+          gainMap,
+        };
+      }
+    }
 
     // ═══ Terminal gamut encode ═══════════════════════════════════════════
     // ONE float-domain step: un-premultiply → source→target gamut matrix →
@@ -198,7 +299,7 @@ export class ExportDispatcher {
         throw new Error('[exr] rec2020 target has no conversion matrix');
       }
       const half = unpremultiplyEncodeLinearF16(
-        exported.pixels as Float32Array,
+        exported.pixels,
         exported.width,
         exported.height,
         { sourceGamut: WORKING_GAMUT, targetGamut },
@@ -214,7 +315,7 @@ export class ExportDispatcher {
       };
     } else if (channel === 'raw-16') {
       const encoded16 = unpremultiplyEncodeGamut(
-        exported.pixels as Float32Array,
+        exported.pixels,
         exported.width,
         exported.height,
         { sourceGamut: WORKING_GAMUT, targetGamut, bitDepth: 16 },
@@ -231,7 +332,7 @@ export class ExportDispatcher {
       // encoder, NO canvas hop (a canvas would reinterpret adobe-rgb/prophoto-rgb
       // numbers as sRGB/P3). Same RawPixelSource shape as raw-16, bitDepth 8.
       const encoded8 = unpremultiplyEncodeGamut(
-        exported.pixels as Float32Array,
+        exported.pixels,
         exported.width,
         exported.height,
         { sourceGamut: WORKING_GAMUT, targetGamut, bitDepth: 8 },
@@ -244,28 +345,9 @@ export class ExportDispatcher {
         colorSpace: targetGamut,
       };
     } else {
-      const encoded8 = unpremultiplyEncodeGamut(
-        exported.pixels as Float32Array,
-        exported.width,
-        exported.height,
-        { sourceGamut: WORKING_GAMUT, targetGamut, bitDepth: 8 },
-      ) as Uint8ClampedArray;
-
-      // `canvasColorSpace` is derived from the SAME `targetGamut`
-      // the matrix above targeted, so the tag can never contradict the
-      // pixels (wide-gamut targets never reach this lane — the decision
-      // routed them to 'raw-8' or 'raw-16').
-      const outCanvas = new OffscreenCanvas(exported.width, exported.height);
-      const outCtx = outCanvas.getContext('2d', { colorSpace: canvasColorSpace })!;
-      const imgData = outCtx.createImageData(exported.width, exported.height, { colorSpace: canvasColorSpace });
-      imgData.data.set(encoded8);
-      outCtx.putImageData(imgData, 0, 0);
-
-      encodeSource = await createImageBitmap(outCanvas);
+      encodeSource = await this.encodeCanvas8(exported.pixels, exported.width, exported.height, targetGamut, canvasColorSpace);
     }
 
-
-
-    return encodeSource;
+    return { encodeSource };
   }
 }

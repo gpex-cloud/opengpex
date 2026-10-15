@@ -36,7 +36,7 @@ import {
   Dimensions, Shape, LocalShape, WorldShape, GamutId, Rect
 } from './primitives';
 import { EditorData } from './state';
-import type { ImageMetadata, EncodeSource } from '../files/types';
+import type { ImageMetadata, EncodeSource, GainMapData } from '../files/types';
 import type { ImageAssetPayload } from '../storage/asset/AssetStore';
 import type { ColorIdentity, AssetEntry } from '../storage/asset/AssetStore';
 import type { InMemAsset, AssetInputOptions, AssetBundle } from '../storage/asset/AssetService';
@@ -528,7 +528,15 @@ export interface PixelService {
        * full scene-referred headroom.
        */
       hdrSemantics?: boolean;
-    }) => Promise<EncodeSource>;
+      /**
+       * UltraHDR lane input: the document source's decoded gain map
+       * (`files.decodeGainMap`). Present + the `'canvas-8'` lane + a
+       * quantizable (SDR, HDR) pair → the result carries `gainMap` to
+       * assemble beside the base JPEG; absent or null-quantized → the plain
+       * lane answers (an honest non-gain-map file). Other channels ignore it.
+       */
+      sourceGainMap?: GainMapData | null;
+    }) => Promise<{ encodeSource: EncodeSource; gainMap?: GainMapData }>;
   };
 
   utils: {

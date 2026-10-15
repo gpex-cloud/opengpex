@@ -25,8 +25,9 @@ import type {
   FrameExportEncodePayload,
   FrameExportEncodeResult,
 } from '@opengpex/editor/core/types';
-import { resolveEgestDecision, mimeToFormat, fileCarriesHdr } from '@opengpex/editor/core/files';
+import { resolveEgestDecision, mimeToFormat } from '@opengpex/editor/core/files';
 import type { EncodeOptions } from '@opengpex/editor/core/files';
+import { buildGainMapEncodeSource, assembleUltraHdr } from '@opengpex/editor/core/files/handlers/jpeg/ultrahdr';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**
@@ -104,8 +105,25 @@ export const FrameExportCommands = {
       // WYSIWYG: the per-document HDR switch drives BOTH the presentation
       // and the HDR-container export semantics — OFF means the HDR lanes ship
       // the white-clamped SDR rendition, never a headroom surprise.
-      const hdrSemantics = activeFrame.hdrRender ?? fileCarriesHdr(activeFrame.metadata);
-      const encodeSource = await pixels.render.renderForExport({
+      const hdrSemantics = activeFrame.hdrRender === true;
+
+      // ═══ UltraHDR lane (gain-map JPEG export) ════════════════════════════
+      // Trigger (D-c3), resolved HERE so the dispatcher never reads files:
+      // JPEG container + the document's HDR switch ON + the canvas-8 lane
+      // (an 8-bit sRGB/P3 rendition is what a gain map is FOR) + a decodable
+      // source gain map. The dispatcher answers through the ONE export
+      // method — `result.gainMap` present = the lane fired (assemble it
+      // beside the base); absent = an honest plain file.
+      const wantUltraHdr =
+        exportFormat === 'jpeg' &&
+        hdrSemantics &&
+        egest.channel === 'canvas-8' &&
+        !!activeFrame.assetId;
+      const sourceGainMap = wantUltraHdr
+        ? await files.decodeGainMap(activeFrame.metadata)
+        : null;
+
+      const rendered = await pixels.render.renderForExport({
         frame: activeFrame,
         viewportDim: ctx.state.ui.viewportDim,
         targetWidth: exportWidth,
@@ -115,7 +133,10 @@ export const FrameExportCommands = {
         channel: egest.channel,
         canvasColorSpace: egest.canvasColorSpace,
         hdrSemantics,
+        sourceGainMap,
       });
+      const encodeSource = rendered.encodeSource;
+      const ultraHdrGainMap = rendered.gainMap ?? null;
 
       // Encode the composited pixels via FileService handlers (container +
       // ICC/EXIF/DPI injection).
@@ -144,9 +165,31 @@ export const FrameExportCommands = {
         encodeSource.close();
       }
 
-      const actualFormat = blob.type || config.format;
+      // ═══ UltraHDR assembly ═══════════════════════════════════════════════
+      // Both halves are finished encodes by this point (base from the JPEG
+      // handler, gain plane through its own high-quality JPEG encode); the
+      // assembler wraps the GContainer XMP + ISO 21496-1 + MPF around them.
+      // The MIME contract is load-bearing twice: `files.encode`'s second
+      // argument is a MIME ('image/jpeg' — a bare 'jpeg' silently falls to
+      // the PNG fallback and the assembler's SOI gate rejects the result),
+      // and `getExportFilename` reads the same MIME for its extension.
+      let finalBlob = blob;
+      if (ultraHdrGainMap && blob.type === 'image/jpeg') {
+        const gainSource = buildGainMapEncodeSource(ultraHdrGainMap);
+        const gainBlob = await files.encode(gainSource, 'image/jpeg', { quality: 0.95 });
+        const assembled = assembleUltraHdr({
+          baseJpeg: new Uint8Array(await blob.arrayBuffer()),
+          gainMapJpeg: new Uint8Array(await gainBlob.arrayBuffer()),
+          gainMapMin: ultraHdrGainMap.gainMin,
+          gainMapMax: ultraHdrGainMap.gainMax,
+          gainMapGamma: ultraHdrGainMap.gamma,
+        });
+        finalBlob = new Blob([assembled.buffer as ArrayBuffer], { type: 'image/jpeg' });
+      }
+
+      const actualFormat = finalBlob.type || config.format;
       const filename = files.getExportFilename(activeFrame.name, exportWidth, exportHeight, actualFormat);
-      return { blob, filename };
+      return { blob: finalBlob, filename };
     },
   } as EditorCommand<FrameExportEncodePayload, Promise<FrameExportEncodeResult>>,
 };

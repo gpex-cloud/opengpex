@@ -38,47 +38,12 @@
 
 import type { ImageMetadata, DecodedPayload } from '../../types';
 import type { IngestDecision } from '../../strategy';
-import {
-  wideGamut8ToF16,
-  srgbToLinear,
-  linearFloatToFloat16,
-} from '@opengpex/editor/core/engine/color';
+import { wideGamut8ToF16 } from '@opengpex/editor/core/engine/color';
+import { liftBaseToF16 } from '../../shared/gain-map';
 import { parseHeicContainer } from './metadata/container';
 import { convertHeicToBlob, buildGamutProxy } from './transcode';
 import { decodeHeicHard } from './harddecode';
-
-/**
- * Lift the decoded SDR base onto the linear f16 master line — and NOTHING
- * else. The gain map is deliberately NOT applied here.
- *
- * WHY NOT BAKE hdr = sdr·2^gain INTO THE MASTER: the engine renders BOTH
- * HDR-OFF and HDR-ON from the ONE resident f16 line (the `hdr` switch only
- * selects the view pipeline's white clamp vs extended range — never the data
- * source). A baked-HDR master therefore makes the OFF presentation the
- * CLAMPED HDR rendition, not the file's authoritative SDR base: a 2× sky
- * (0.2, 0.4, 1.8) clamps to (0.2, 0.4, 1.0) — the blue channel pins at white
- * and the image hue-skews (deep saturated sky, vivid foliage). PQ AVIF does
- * not have this problem because its scene-linear buffer IS its only
- * rendition; a gain-map file carries TWO (SDR base + HDR derived), and OFF
- * must show the former. The gain map stays a presentation adjunct — decoded
- * from the retained source file (`handlers/heic/gainmap.ts`) and applied at
- * the view pass (`engine/color/gainMap.ts` holds the math), so OFF is always
- * exactly the authored SDR look.
- */
-function liftBaseToF16(
-  rgba: Uint8ClampedArray,
-  width: number,
-  height: number,
-): DecodedPayload['highDepthSource'] {
-  const linear = new Float32Array(width * height * 4);
-  for (let i = 0; i < linear.length; i += 4) {
-    linear[i] = srgbToLinear(rgba[i] / 255);
-    linear[i + 1] = srgbToLinear(rgba[i + 1] / 255);
-    linear[i + 2] = srgbToLinear(rgba[i + 2] / 255);
-    linear[i + 3] = rgba[i + 3] / 255;
-  }
-  return { data: linearFloatToFloat16(linear), width, height };
-}
+import { extractHeicGainMapInto } from './gainmap';
 
 /**
  * Decode a HEIC file by executing the entry-resolved ingest decision.
@@ -138,6 +103,15 @@ export async function decodeHeic(
       width: lifted.width,
       height: lifted.height,
     };
+  }
+
+  // Gain-map carrier: extract the aux plane into `raw.gainMap` NOW — the
+  // decode handler's converting phase is the one moment the worker decode is
+  // free (fail-open: any failure leaves the metadata field unset and the
+  // presentation degrades to SDR). The runtime later decodes the COMPACT
+  // stored image per session; it never re-opens the source file.
+  if (metadata.raw?.hasGainmap) {
+    await extractHeicGainMapInto(file, metadata);
   }
 
   return [{ displayBlob, width, height, index: 0, highDepthSource }];

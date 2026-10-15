@@ -87,7 +87,7 @@ interface FrameInfoPanelProps {
    * stays toggle-free (the switch would be visually inert on it).
    */
   hdrAvailable: boolean;
-  /** Effective HDR presentation state (frame switch, auto-defaulted from the file). */
+  /** Effective HDR presentation state (frame switch; defaults OFF — user opt-in). */
   hdrEnabled: boolean;
   /** Toggle handler — writes `frame.hdrRender`, the render filter (never pixel data). */
   onHdrToggle: (on: boolean) => void;
@@ -279,6 +279,11 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
                     <span
                       role="button"
                       tabIndex={0}
+                      // Mouse clicks must not move keyboard focus here: the
+                      // canvas owns Space (temporary pan), and a focused chip
+                      // would swallow it (its own Space handler toggles).
+                      // Keyboard Tab focus still works — that is deliberate.
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={(e) => {
                         e.stopPropagation();
                         e.preventDefault();
