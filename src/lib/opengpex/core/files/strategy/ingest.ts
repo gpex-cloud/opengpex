@@ -231,6 +231,8 @@ export function resolveIngestDecision(metadata: ImageMetadata, env?: IngestEnvir
   // HDR seam: the container's transfer characteristic (PQ/HLG) routes the HDR
   // decision rows; 'sdr'/undefined is the SDR vocabulary.
   const transfer = metadata.raw?.transfer;
+  // Gain-map carrier flag: admits the 19-gm rows (linear f16 SDR-base master).
+  const hasGainmap = metadata.raw?.hasGainmap ?? false;
 
   // 1. Pre-process: physical constraints. The old AVIF >8→8-bit clamp is gone
   //    (2026-10-13): the isolated jsquash/libavif wasm decoder is bit-exact at
@@ -246,6 +248,7 @@ export function resolveIngestDecision(metadata: ImageMetadata, env?: IngestEnvir
     isMultiFrame,
     hevcHardDecode: env?.hevcHardDecode ?? false,
     transfer,
+    hasGainmap,
   };
   const matched = matchRule(INGEST_DECISION_RULES, ctx);
   const { action } = matched;

@@ -37,8 +37,10 @@ import type {
   EncodeSource,
   RawPixelSource,
   DecodeBlobInput,
+  GainMapData,
 } from './types';
 import { isRawPixelSource } from './types';
+import { decodeHeicGainMap } from './handlers/heic/gainmap';
 export { isRawPixelSource };
 export type { EncodeSource, RawPixelSource };
 import { JpegHandler } from './handlers/jpeg';
@@ -82,6 +84,7 @@ export type {
   DpiSource,
   ColorSpaceId,
   DecodeBlobInput,
+  GainMapData,
 } from './types';
 
 // Re-export V2 metadata types
@@ -429,6 +432,26 @@ export function createFileService(
       // just fail the same way. The caller (HighDepthTextureCache) negative-
       // caches this and degrades to the 8-bit display path.
       return null;
+    },
+
+    /**
+     * Decode one asset's gain map from its retained source file. Mirrors
+     * `recover`'s tier-2: the gain map is presentation adjunct metadata, never
+     * persisted alongside the asset — the `raw:` blob re-derives it in one
+     * container parse + one aux item decode. Every failure (no source file, no
+     * gain map, decode error) returns null so the caller negative-caches and
+     * keeps presenting the authoritative SDR base.
+     */
+    async decodeGainMap(assetId: string): Promise<GainMapData | null> {
+      const rawBlob = await assets.getRaw(assetId);
+      if (!rawBlob) return null;
+      try {
+        const bytes = new Uint8Array(await rawBlob.arrayBuffer());
+        return await decodeHeicGainMap(bytes);
+      } catch (err) {
+        console.warn('[FileService.decodeGainMap] failed for', assetId, err);
+        return null;
+      }
     },
   };
 

@@ -48,6 +48,7 @@ import type { CompiledScene } from './SceneCompiler';
 import { CompositePass, type CompositePassContext } from './composite/CompositePass';
 import { BlendPass, type BlendPassContext } from './composite/BlendPass';
 import { ViewPass, type ViewPassContext, composeViewMatrix } from './present/ViewPass';
+import type { PresentGainMap } from './support/gainPresenter';
 import { vectorExportScale } from './support/vectorTransient';
 import { densityCompositeDims } from './support/densityComposite';
 import { effectiveScale } from './support/layerGeometry';
@@ -168,6 +169,15 @@ export interface PresentContext {
    * the full-document texture (see {@link TexPlacement}).
    */
   readonly texPlacement?: TexPlacement;
+  /**
+   * The decoded single-source gain map for THIS present (HDR pipeline only) —
+   * texture + ISO 21496-1 parameters. The uv placement is derived HERE from
+   * `texPlacement` + the document dims (the ROI fold is a present-time fact);
+   * omitted presents the SDR base verbatim. Resolved per frame by the engine
+   * from the eligibility decision + the gain-map source cache — never cached
+   * across frames.
+   */
+  readonly gainMap?: PresentGainMap;
   /** [PERF_MON] When set, the view pass writes GPU begin/end timestamps. */
   readonly gpuTimer?: GpuTimer;
 }
@@ -645,10 +655,15 @@ export class RenderGraph {
    */
   static present(compositeTex: LayerTexture, ctx: PresentContext): void {
     const { device, pipelineCache, bufferRing, currentView, targetFormat, scene } = ctx;
+    // Full document dims — the gain-map uv space is DOCUMENT-normalized, which
+    // is NOT the same denominator as `frameWidth` below (the ROI channel
+    // presents a SUB-RECT whose dims would misplace the map — real-device
+    // ghosting, 2026-10-15).
+    const fullDims = compositeDims(scene);
     // texPlacement (ROI) carries the covered document extent explicitly — the
     // full channel omits it and derives the whole-document dims as before.
-    const frameWidth = ctx.texPlacement ? Math.max(1, ctx.texPlacement.docW) : compositeDims(scene).frameWidth;
-    const frameHeight = ctx.texPlacement ? Math.max(1, ctx.texPlacement.docH) : compositeDims(scene).frameHeight;
+    const frameWidth = ctx.texPlacement ? Math.max(1, ctx.texPlacement.docW) : fullDims.frameWidth;
+    const frameHeight = ctx.texPlacement ? Math.max(1, ctx.texPlacement.docH) : fullDims.frameHeight;
 
     const commandEncoder = device.createCommandEncoder({ label: 'RenderGraph Present Encoder' });
 
@@ -686,6 +701,19 @@ export class RenderGraph {
       // nearest(magnify)/linear(minify); inside the band this is ≤ 1.
       sourceScale:
         effectiveScale(scene.view.transform) / Math.max(1e-6, ctx.densityScale ?? 1),
+      // Gain map: fold the composite's document extent into the map's
+      // DOCUMENT-normalized uv space (full channel = identity [0,0]-[1,1];
+      // the ROI channel offsets by its origin and shrinks by its coverage,
+      // normalized by the FULL document dims — not the ROI's).
+      gainMap: ctx.gainMap
+        ? {
+            ...ctx.gainMap,
+            uvOriginX: (ctx.texPlacement?.origin.x ?? 0) / fullDims.frameWidth,
+            uvOriginY: (ctx.texPlacement?.origin.y ?? 0) / fullDims.frameHeight,
+            uvScaleX: (ctx.texPlacement?.docW ?? fullDims.frameWidth) / fullDims.frameWidth,
+            uvScaleY: (ctx.texPlacement?.docH ?? fullDims.frameHeight) / fullDims.frameHeight,
+          }
+        : undefined,
     };
 
     ViewPass.draw(viewPass, viewCtx, compositeTex);

@@ -32,6 +32,7 @@ import {
   sourceBitmapCache,
   getGpuEngine,
   highDepthTextureCache,
+  gainMapSourceCache,
   GpuDevice,
   SceneAssembler,
   SceneContentCache,
@@ -160,10 +161,16 @@ export default function CanvasStage() {
     const unsubHighDepth = highDepthTextureCache.subscribe(() => {
       needsRenderRef.current = true;
     });
+    // Gain-map axis: the first eligible frame kicks the aux decode and presents
+    // the SDR base; when the map lands the next frame flips bright.
+    const unsubGainMap = gainMapSourceCache.subscribe(() => {
+      needsRenderRef.current = true;
+    });
 
     return () => {
       unsubImages();
       unsubHighDepth();
+      unsubGainMap();
     };
   }, []);
 
@@ -311,6 +318,14 @@ export default function CanvasStage() {
       geometry,
       channelMask,
     });
+
+    // Gain-map presentation warm: when this frame is gain-eligible, probe the
+    // source cache once — a miss kicks the aux decode (fetcher = the retained
+    // source blob → container parse → per-item worker decode) and this frame
+    // presents SDR; the subscription above flips the next frame bright.
+    if (scene.display.gainMapAssetId) {
+      gainMapSourceCache.getOrFetch(scene.display.gainMapAssetId, (id) => files.decodeGainMap(id));
+    }
 
     let _renderT0 = 0;
     if (PERF_MON) {

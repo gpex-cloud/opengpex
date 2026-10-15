@@ -294,12 +294,20 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
                       title={hdrEnabled
                         ? "HDR presentation on — click to clamp to SDR white"
                         : "HDR presentation off — click to enable extended range"}
-                      className={`cursor-pointer select-none text-[7px] font-bold uppercase leading-none px-1 py-0.5 rounded border transition-colors ${
+                      aria-pressed={hdrEnabled}
+                      className={`cursor-pointer select-none outline-none focus:outline-none flex items-center gap-1 text-[7px] font-bold uppercase leading-none px-1 py-0.5 rounded border transition-colors ${
                         hdrEnabled
-                          ? "text-violet-600 dark:text-violet-400 bg-violet-500/10 border-violet-500/20"
-                          : "text-[var(--text-muted)] bg-[var(--bg-stage)] border-[var(--border-subtle)] opacity-70 hover:opacity-100"
+                          ? "text-violet-700 dark:text-violet-300 bg-violet-500/20 border-violet-500/50"
+                          : "text-[var(--text-muted)] bg-[var(--bg-stage)] border-[var(--border-subtle)] opacity-60 hover:opacity-100"
                       }`}
                     >
+                      {/* State dot: the 7px chip alone reads identically on/off
+                          at a glance — the LED makes the toggle state legible. */}
+                      <span
+                        className={`w-1 h-1 rounded-full shrink-0 ${
+                          hdrEnabled ? "bg-violet-500" : "bg-current opacity-50"
+                        }`}
+                      />
                       HDR
                     </span>
                   )}

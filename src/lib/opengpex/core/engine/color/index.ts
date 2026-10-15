@@ -49,3 +49,4 @@ export * from './cubeLut';
 export * from './filmic';
 export * from './shoulder';
 export * from './hdrTransfer';
+export * from './gainMap';

@@ -104,6 +104,14 @@ export interface HeicFileView {
   };
   metadata: { exif?: Uint8Array; xmp?: string };
   auxImages: HeicAuxImage[];
+  /**
+   * The meta box's `idat` payload verbatim (iloc construction-method-1 storage).
+   * Inherently small (grid configs + the ISO 21496-1 `tmap` gain-map parameter
+   * record are the only real-world contents), so it is resolved unconditionally
+   * alongside the other metadata items. The gain-map reader scans it for the
+   * `tmap` parameter record; undefined when the file has no idat box.
+   */
+  idatPayload?: Uint8Array;
   thumbnails: { itemId: number; nalData: Uint8Array }[];
   /** More than one top-level image item (burst / sequence) — routes `unsupported`. */
   isMultiFrame: boolean;
@@ -412,6 +420,7 @@ export function parseHeicContainer(
     orientation,
     metadata,
     auxImages,
+    idatPayload: idatPayload ?? undefined,
     thumbnails,
     isMultiFrame,
     companionVideoDetected: false, // reserved (Live Photo companion detection)

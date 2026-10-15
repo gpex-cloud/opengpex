@@ -53,7 +53,8 @@ export function matchRule(
       testField(condition.colorSpace, ctx.colorSpace) &&
       testField(condition.isMultiFrame, ctx.isMultiFrame) &&
       testField(condition.hevcHardDecode, ctx.hevcHardDecode) &&
-      testField(condition.transfer, ctx.transfer)
+      testField(condition.transfer, ctx.transfer) &&
+      testField(condition.hasGainmap, ctx.hasGainmap)
     ) {
       return rule;
     }

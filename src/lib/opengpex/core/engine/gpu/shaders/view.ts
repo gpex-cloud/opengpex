@@ -42,6 +42,8 @@
  *     (bit0=R bit1=G bit2=B bit3=A). One Photoshop-style rule in
  *     `fs_main` covers grayscale/alpha/two-channel colour; the identity (all
  *     RGB on) path is byte-identical to the old 1:1 blit present.
+ *   • `gain_tex` (binding 3): the single-source gain map, 1:1 with the document
+ *     extent. Only the HDR variant samples it — see the HDR variant section.
  *
  * DISPLAY PROJECTION
  * ------------------
@@ -90,6 +92,19 @@
  * the blend math): NaN components are scrubbed to 0 and everything clamps to the
  * f16 max so the swapchain write is always finite.
  *
+ * GAIN-MAP PRESENTATION (HDR variant only)
+ * ----------------------------------------
+ * When the presented frame is gain-map-eligible (a single visible layer whose
+ * asset carries the map, covering the canvas) and HDR presentation is on, the
+ * engine binds the decoded map at binding 3 and sets `gain_enabled`; the
+ * fragment multiplies the un-premultiplied straight colour by 2^gain —
+ * reconstructing the file's HDR rendition (`engine/color/gainMap.ts` holds the
+ * golden-locked math). `gain_enabled = 0` (not eligible, HDR off, or the map
+ * still decoding — first frames present SDR and flip bright when the async
+ * decode lands) binds a 1×1 dummy instead, so there is exactly ONE shader pair
+ * for the gain and no-gain cases. The SDR variant never samples the map: with
+ * HDR off the file presents its authoritative SDR base, byte-identically.
+ *
  * @module core/gpu/shaders/view
  */
 
@@ -115,11 +130,22 @@ struct ViewUniforms {
   uv_scale     : vec2<f32>,     // content fraction of the (POT-bucketed) source texture (offset 48)
   channel_mask : u32,           // 4-bit visibility mask: bit0=R bit1=G bit2=B bit3=A (offset 56)
   _pad         : u32,           // offset 60
+  gain_min     : f32,           // gain-map value at byte 0, log2 HDR/SDR ratio (offset 64)
+  gain_max     : f32,           // gain-map value at byte 255 (offset 68)
+  gain_gamma   : f32,           // payload gamma; 1 = log2-linear (offset 72)
+  gain_enabled : u32,           // 0 = present the SDR base verbatim (offset 76)
+  gain_uv_origin : vec2<f32>,   // document-normalized uv of the composite's (0,0) corner (offset 80)
+  gain_uv_scale  : vec2<f32>,   // document fraction the composite covers per axis (offset 88)
 };
 
 @group(0) @binding(0) var<uniform> view_u : ViewUniforms;
 @group(0) @binding(1) var samp            : sampler;
 @group(0) @binding(2) var src_tex         : texture_2d<f32>;
+// The single-source gain map (1:1 with the document extent; r8unorm). ALWAYS
+// bound: when no gain applies it is a 1×1 dummy and gain_enabled is 0, so one
+// bind group layout serves both the gain and no-gain cases with zero pipeline
+// variants beyond the SDR/HDR pair.
+@group(0) @binding(3) var gain_tex        : texture_2d<f32>;
 
 // WORKING_GAMUT → display-p3 projection (column-major, auto-derived — see the
 // module doc). Declared before fs_main, the only consumer.
@@ -275,6 +301,30 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   //   2. ≥ 65504 → 65504: catches +Inf and every over-range value (negative
   //      Inf survives but is not light — the projection lower-clamp lands it).
   let sampled = textureSample(src_tex, samp, in.uv);
+
+  // ── GAIN MAP SAMPLE (uniform control flow is a WGSL REQUIREMENT) ──
+  // A gain-map document's eligible HDR frame reconstructs the HDR rendition as
+  // hdr = sdr_linear × 2^gain, gain decoded affinely from the map byte exactly
+  // as engine/color/gainMap.ts::decodeGainSample states it (pow(s, 1/gamma) →
+  // affine → exp2 — the golden-locked operation order). The sample MUST sit in
+  // uniform control flow: WGSL forbids textureSample inside any branch
+  // conditioned on a possibly-non-uniform value, and the alpha early-outs
+  // below condition on the SOURCE sample — so a nested gain sample would fail
+  // shader compilation (real device, 2026-10-15). Hence: hoisted beside the
+  // source sample, gated by select() instead of a branch. When gain_enabled=0
+  // the bound texture is the 1×1 dummy and the factor collapses to exactly 1.
+  // gain_min may be NEGATIVE (ISO-legal darkening tail); exp2 of a negative
+  // gain legitimately dims those samples.
+  let doc_uv = in.uv / view_u.uv_scale;
+  let map_uv = view_u.gain_uv_origin + doc_uv * view_u.gain_uv_scale;
+  let gain_s = textureSample(gain_tex, samp, map_uv).r;
+  let gain_lin = pow(gain_s, 1.0 / max(view_u.gain_gamma, 1e-6));
+  let gain_factor = select(
+    1.0,
+    exp2(view_u.gain_min + gain_lin * (view_u.gain_max - view_u.gain_min)),
+    view_u.gain_enabled != 0u,
+  );
+
   let no_nan = select(sampled, vec4<f32>(0.0), sampled != sampled);
   let color = select(no_nan, vec4<f32>(65504.0), no_nan >= vec4<f32>(65504.0));
 
@@ -305,6 +355,11 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
     return vec4<f32>(0.0, 0.0, 0.0, 0.0);
   }
   let straight = color.rgb / color.a;
+  // The scalar gain commutes with premultiplication ((c·s)·a = (c·a)·s), so
+  // applying it to the STRAIGHT colour here and re-premultiplying at the encode
+  // is identical to scaling the stored premultiplied value — and every
+  // downstream branch reads one variable.
+  let linear_rgb = straight * gain_factor;
 
   // ── DISPLAY PROJECTION, lower clamp only ──
   // W → display-p3 in linear light (same build-time matrix as the SDR variant).
@@ -316,7 +371,7 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   // and the OS maps that excess onto the device headroom. For ≤ 1 content this
   // is byte-identical to the SDR variant.
   let display = max(
-    MAT_WORKING_TO_DISPLAY * straight,
+    MAT_WORKING_TO_DISPLAY * linear_rgb,
     vec3<f32>(0.0),
   );
 
@@ -347,5 +402,6 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
 }
 `;
 
-/** Size of ViewUniforms in bytes (48 matrix + 8 uv_scale + 4 mask + 4 pad = 64). */
-export const VIEW_UNIFORM_BUFFER_SIZE = 64;
+/** Size of ViewUniforms in bytes: 48 matrix + 8 uv_scale + 4 mask + 4 pad
+ * + 16 gain params + 16 gain uv placement = 96 (6 × 16, std140-friendly). */
+export const VIEW_UNIFORM_BUFFER_SIZE = 96;

@@ -268,6 +268,32 @@ export interface RawBinaryData {
   avifSeqProfile?: number;
 }
 
+/**
+ * Decoded gain map — the carrier-agnostic payload shape every gain-map reader
+ * produces (HEIC `hdrgainmap` today; the JPEG UltraHDR/AGTM carriers later).
+ * Consumers (the presentation cache, future export lanes) never learn where
+ * the bytes came from.
+ *
+ * `map` is SINGLE-CHANNEL (0..255, row-major, tightly packed w×h): gain maps
+ * are luminance-axis metadata and every real-world writer emits one plane.
+ * The application math — `hdr = sdr_linear × 2^gain` with the affine
+ * `gain = gainMin + (byte/255)^(1/γ)·(gainMax−gainMin)` — lives in
+ * `core/engine/color/gainMap.ts` (`decodeGainSample`), mirrored in the view
+ * shader.
+ */
+export interface GainMapData {
+  /** Single-channel quantized map samples, 0..255, `width × height` row-major. */
+  readonly map: Uint8Array;
+  readonly width: number;
+  readonly height: number;
+  /** Map value at byte 0 (log2 HDR/SDR ratio; may be negative). */
+  readonly gainMin: number;
+  /** Map value at byte 255 (log2 HDR/SDR ratio). */
+  readonly gainMax: number;
+  /** Payload gamma (1 = log2-linear; Apple writes ≈1.15). */
+  readonly gamma: number;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Format Capability Queries
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -667,4 +693,14 @@ export interface FileService {
     trc: 'srgb-trc' | 'linear';
     gamut?: GamutId;
   } | null>;
+
+  /**
+   * Decode one asset's gain map from its retained source file (the presentation
+   * cache's cold fetcher — the gain map is deliberately NOT stored alongside the
+   * asset: it is presentation adjunct metadata, re-derivable from the `raw:`
+   * blob in one container parse + one aux item decode). Returns null when the
+   * asset has no source file, the file carries no gain map, or any decode step
+   * fails — the caller negative-caches and presents the authoritative SDR base.
+   */
+  decodeGainMap(assetId: string): Promise<GainMapData | null>;
 }

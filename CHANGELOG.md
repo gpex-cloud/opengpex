@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.12
+
+- Image Formats: iPhone Adaptive HDR (HEIC gain-map) photos now open with their true HDR brightness — highlights render beyond SDR white on HDR-capable displays, matching macOS Photos, with a smooth fade-in; toggling HDR off returns to the original SDR rendition
+
+---
+
 ## v2.0.11
 
 - Image Formats: HDR photos (PQ/HLG AVIF) now open with their true brightness on HDR-capable displays instead of being flattened into SDR white

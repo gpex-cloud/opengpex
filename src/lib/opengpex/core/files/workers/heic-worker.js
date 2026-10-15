@@ -136,6 +136,72 @@ async function decodeProxy(buffer) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Channel: decodeItem (auxiliary image by ISOBMFF item id — gain map)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Decode ONE image item by its ISOBMFF item id — the gain-map auxiliary lane.
+ * The main thread's container parser owns the id (the iref auxl reference whose
+ * auxC type names the gain map); hidden aux items never appear in libheif's
+ * top-level image enumeration (decodeProxy's path), so addressing by id through
+ * the glue's JS wrappers is the ONLY route. Grid aux items (the 48MP 3×5 gain
+ * map form) decode through the same entry — libheif composes derived grids
+ * internally. Returns { rgba, width, height } — RGBA-8, stride-copied row by
+ * row when the plane is not tight.
+ */
+async function decodeItem(buffer, itemId) {
+  const mod = await initLibheif();
+  const ctx = mod.heif_context_alloc();
+  let handle = null;
+  let decoded = null;
+  try {
+    const rd = mod.heif_context_read_from_memory(ctx, buffer);
+    // PITFALL (real-device 2026-10-15): the glue's result is {code, message}
+    // where code is an EMBIND ENUM OBJECT — truthy even on success (message
+    // "Success"). A truthiness check misreads success as failure; compare
+    // against the Ok enum with LOOSE equality (== runs valueOf on both embind
+    // enum objects), the same comparison the glue's own HeifDecoder makes.
+    if (!rd || rd.code != mod.heif_error_code.heif_error_Ok) {
+      throw new Error(`HEIC: aux container read failed${rd?.message ? `: ${rd.message}` : ''}`);
+    }
+    handle = mod.heif_js_context_get_image_handle(ctx, itemId);
+    // handle/res results carry `.code` only on FAILURE (undefined on success),
+    // so a truthiness check is exactly right for these two.
+    if (!handle || handle.code) {
+      throw new Error(`HEIC: aux item ${itemId} handle failed${handle?.message ? `: ${handle.message}` : ''}`);
+    }
+    const res = await mod.heif_js_decode_image2(
+      handle,
+      mod.heif_colorspace.heif_colorspace_RGB,
+      mod.heif_chroma.heif_chroma_interleaved_RGBA,
+    );
+    if (!res || res.code) {
+      throw new Error(`HEIC: aux item ${itemId} decode failed${res?.message ? `: ${res.message}` : ''}`);
+    }
+    decoded = res;
+    // Enum values arrive as embind objects — loose equality compares their
+    // valueOf; the stride match is display()'s own robust fallback shape.
+    const ch = res.channels.find(
+      (c) => c.id == mod.heif_channel.heif_channel_interleaved || c.stride === c.width * 4,
+    );
+    if (!ch) throw new Error(`HEIC: aux item ${itemId} has no interleaved channel`);
+    const out = new Uint8ClampedArray(ch.width * ch.height * 4);
+    if (ch.stride === ch.width * 4) {
+      out.set(ch.data);
+    } else {
+      for (let y = 0; y < ch.height; y++) {
+        out.set(ch.data.subarray(y * ch.stride, y * ch.stride + ch.width * 4), y * ch.width * 4);
+      }
+    }
+    return { width: ch.width, height: ch.height, rgba: out };
+  } finally {
+    try { if (decoded?.image) mod.heif_image_release(decoded.image); } catch { /* best-effort */ }
+    try { if (handle && !handle.code) mod.heif_image_handle_release(handle); } catch { /* best-effort */ }
+    try { mod.heif_context_free(ctx); } catch { /* best-effort */ }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Channel: decodeHard (WebCodecs) — pure helpers (kept top-level for tests)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -599,7 +665,7 @@ async function decodeHard(payload) {
 // Worker Message Handler — { id, fn, args } → { id, out } | { id, error }
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const handlers = { decodeProxy, decodeHard };
+const handlers = { decodeProxy, decodeHard, decodeItem };
 
 self.onmessage = async ({ data: msg }) => {
   const { id, fn, args } = msg;

@@ -37,6 +37,7 @@ import type { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/La
 import type { PipelineCache } from '@opengpex/editor/core/engine/gpu/resources/PipelineCache';
 import type { BufferRing } from '@opengpex/editor/core/engine/gpu/resources/BufferRing';
 import { CHANNEL_MASK_RGB, type SceneChannelMask } from '../../scene/Scene';
+import type { PresentGainMap } from '../support/gainPresenter';
 
 /**
  * A 2D affine as the 6 meaningful components of a 3×3 (last row [0,0,1]),
@@ -157,13 +158,37 @@ export interface ViewPassContext {
    * passes cannot see the zoom — the view pass must.
    */
   readonly sourceScale?: number;
+  /**
+   * The single-source gain map to apply in the HDR pipeline variant
+   * (`view.ts`): texture + the ISO 21496-1 parameters + the document-normalized
+   * uv rect this composite texture covers. Omitted (or `hdr` false) presents
+   * the authoritative SDR base — the shader's `gain_enabled` stays 0 and the
+   * 1×1 dummy rides binding 3.
+   */
+  readonly gainMap?: ViewGainMap;
 }
 
 /**
- * Reusable scratch for ViewUniforms (64 bytes): mat3x3 (48) + uv_scale vec2 (8)
- * + channel_mask u32 (4) + pad (4). Column-major, each mat column padded to 16.
+ * Everything the HDR fragment needs to reconstruct the HDR rendition from the
+ * composited SDR base. Built by the engine per present (never cached across
+ * frames): the decoded map texture view, the affine decode parameters
+ * (`engine/color/gainMap.ts` owns the math), and the uv placement that maps
+ * the composite's document extent onto the map (full channel = [0,0]-[1,1];
+ * the ROI channel folds its document origin in).
  */
-const viewUniformData = new ArrayBuffer(64);
+export interface ViewGainMap extends PresentGainMap {
+  readonly uvOriginX: number;
+  readonly uvOriginY: number;
+  readonly uvScaleX: number;
+  readonly uvScaleY: number;
+}
+
+/**
+ * Reusable scratch for ViewUniforms (96 bytes): mat3x3 (48) + uv_scale vec2 (8)
+ * + channel_mask u32 (4) + pad (4) + gain params (16) + gain uv placement (16).
+ * Column-major, each mat column padded to 16.
+ */
+const viewUniformData = new ArrayBuffer(96);
 const viewUniformF32 = new Float32Array(viewUniformData);
 const viewUniformU32 = new Uint32Array(viewUniformData);
 
@@ -203,6 +228,31 @@ export class ViewPass {
     viewUniformU32[14] = ctx.channelMask ?? CHANNEL_MASK_RGB;
     viewUniformU32[15] = 0;
 
+    // Gain-map params (floats 16..19 = bytes 64..79) + document uv placement
+    // (floats 20..23 = bytes 80..95). `gain_enabled` (u32 slot 19) is set ONLY
+    // for the HDR variant with an eligible, decoded map — every other present
+    // keeps 0 and the shader multiplies nothing.
+    const gain = ctx.hdr ? ctx.gainMap : undefined;
+    if (gain) {
+      viewUniformF32[16] = gain.gainMin;
+      viewUniformF32[17] = gain.gainMax;
+      viewUniformF32[18] = gain.gamma;
+      viewUniformU32[19] = 1;
+      viewUniformF32[20] = gain.uvOriginX;
+      viewUniformF32[21] = gain.uvOriginY;
+      viewUniformF32[22] = gain.uvScaleX;
+      viewUniformF32[23] = gain.uvScaleY;
+    } else {
+      viewUniformF32[16] = 0;
+      viewUniformF32[17] = 0;
+      viewUniformF32[18] = 1;
+      viewUniformU32[19] = 0;
+      viewUniformF32[20] = 0;
+      viewUniformF32[21] = 0;
+      viewUniformF32[22] = 1;
+      viewUniformF32[23] = 1;
+    }
+
     const slot = ctx.bufferRing.writeSlot(viewUniformF32);
 
     const bindGroup = ctx.device.createBindGroup({
@@ -211,7 +261,7 @@ export class ViewPass {
       entries: [
         {
           binding: 0,
-          resource: { buffer: ctx.bufferRing.getBuffer(), offset: 0, size: 64 },
+          resource: { buffer: ctx.bufferRing.getBuffer(), offset: 0, size: 96 },
         },
         {
           binding: 1,
@@ -226,6 +276,10 @@ export class ViewPass {
         {
           binding: 2,
           resource: sourceTexture.view,
+        },
+        {
+          binding: 3,
+          resource: gain ? gain.textureView : ctx.pipelineCache.getGainDummyView(),
         },
       ],
     });

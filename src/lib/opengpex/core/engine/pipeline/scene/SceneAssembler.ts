@@ -42,6 +42,7 @@ import type {
   BitmapMaskOverrideMap,
 } from '@opengpex/editor/core/types';
 import { snapCanvasRect } from '@opengpex/editor/core/geometry/operators/snapping';
+import { resolveLayerGeometry } from '@opengpex/editor/core/engine/pipeline/graph/support/layerGeometry';
 import { translatePathData } from '@opengpex/editor/core/geometry/operators/shape';
 import { shapeToPoint2D } from '@opengpex/editor/core/geometry/operators/point2d';
 import { sourceBitmapCache } from '@opengpex/editor/core/engine/sources';
@@ -201,7 +202,8 @@ export function buildVectorMaskDesc(
     //     hole's soft contour just sits 2f tighter than the cut line).
     //   • Binary hard edges (antiAliased: false, feather 0) need no backing —
     //     never partial. The feather branch ignores the AA flag on purpose:
-    //     feather > 0 always takes the smoothstep branch (羽化优先级).
+    //     feather > 0 always takes the smoothstep branch (feather takes
+    //     precedence over the AA flag).
     distBiasPx: m.assocLayerId === undefined
       ? undefined
       : (m.feather ?? 0) === 0
@@ -279,6 +281,82 @@ export interface SceneViewOptions {
   readonly dpr: number;
   readonly geometry: GeometryService;
   readonly channelMask?: SceneChannelMask;
+}
+
+/**
+ * Gain-map presentation eligibility — the view-pass single-source ruling. The
+ * HDR gain application is only CORRECT when the presented composite IS the
+ * gain-map asset's pixels: a second visible layer would composite un-gained
+ * content under a gained frame (or vice versa), so any ambiguity degrades to
+ * the authoritative SDR presentation. A frame qualifies when:
+ *
+ *   1. its source FILE carried a gain map (`metadata.raw.hasGainmap`) and the
+ *      frame still points at that base asset (`frame.assetId`);
+ *   2. exactly ONE visible non-group layer exists (hidden groups excluded —
+ *      their children render nothing);
+ *   3. that layer is the base image itself (`type 'image'`, same asset id) —
+ *      fragments/adjustment proxies of other assets never qualify.
+ *
+ * Coverage (the layer's content actually spanning the canvas) is judged
+ * separately by {@link gainLayerCoversCanvas} on the assembled LayerNode, and
+ * a failing check equally degrades to SDR — silently by design: a non-eligible
+ * frame is not an error, it is a normal composite that happens to have no
+ * single HDR source.
+ */
+export function resolveGainMapEligibility(frame: Frame): { readonly assetId: string; readonly layerId: string } | null {
+  if (!frame.metadata?.raw?.hasGainmap || !frame.assetId) return null;
+
+  const hiddenGroups = new Set<string>();
+  for (const id of frame.layers.order) {
+    const l = frame.layers.byId[id];
+    if (l && l.type === 'group' && !l.visible) hiddenGroups.add(l.id);
+  }
+
+  let sole: Layer | undefined;
+  for (const id of frame.layers.order) {
+    const l = frame.layers.byId[id];
+    if (!l || l.hostId || l.visible === false || l.type === 'group') continue;
+    if (l.groupId && hiddenGroups.has(l.groupId)) continue;
+    if (sole) return null; // a second visible layer → no single source
+    sole = l;
+  }
+  if (!sole || sole.type !== 'image' || sole.assetId !== frame.assetId) return null;
+  return { assetId: sole.assetId, layerId: sole.id };
+}
+
+/**
+ * Whether the eligible layer's CONTENT rect actually spans the canvas: the
+ * four content corners (`resolveLayerGeometry` sizes — crop-aware) mapped
+ * through the layer's document-space transform must bound the canvas rect.
+ * The LayerNode transform is the LOCAL matrix (`getLayerLocalMatrix` =
+ * translate(canvas/2) ∘ world) — TOP-LEFT-origin document space, so the canvas
+ * is [0, canvasW] × [0, canvasH] (the center-origin convention belongs to the
+ * WORLD matrix used by culling, a different space). Axis-aligned corner bounds
+ * are exact for unrotated/quarter-turn placements; an arbitrary rotation yields
+ * the conservative corner hull, which for the base-photo placements this
+ * ruling targets (identity, flip, move) is the exact answer.
+ */
+export function gainLayerCoversCanvas(node: LayerNode, canvasW: number, canvasH: number): boolean {
+  const geo = resolveLayerGeometry(node, node.width ?? 0, node.height ?? 0, node.dprScale ?? 1);
+  const w = geo.contentWidth;
+  const h = geo.contentHeight;
+  if (!(w > 0) || !(h > 0) || !(canvasW > 0) || !(canvasH > 0)) return false;
+  const t = node.transform;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const cx of [0, w]) {
+    for (const cy of [0, h]) {
+      const x = t.a * cx + t.c * cy + t.tx;
+      const y = t.b * cx + t.d * cy + t.ty;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  return minX <= 0 && maxX >= canvasW && minY <= 0 && maxY >= canvasH;
 }
 
 export interface SceneAssemblerOptions extends SceneContentOptions, SceneViewOptions {}
@@ -756,6 +834,20 @@ export class SceneAssembler {
       }
     }
 
+    // Gain-map eligibility: judge the FRAME's visibility semantics (independent
+    // of the cull), then confirm the assembled node still spans the canvas. A
+    // culled eligible layer is by definition off-canvas → not covering → SDR.
+    // The verdict is present-time only — it never changes the composite, so it
+    // deliberately stays out of `computeCompositeSignature` (see SceneContent).
+    let gainMap: SceneContent['gainMap'];
+    const eligible = resolveGainMapEligibility(f);
+    if (eligible) {
+      const node = sceneLayers.find((n) => n.id === eligible.layerId);
+      if (node && gainLayerCoversCanvas(node, docW, docH)) {
+        gainMap = { assetId: eligible.assetId };
+      }
+    }
+
     const content: SceneContent = {
       // `frame` is the DOCUMENT (canvas) size — the composite
       // target — NOT the screen. Camera-independent, cacheable.
@@ -779,6 +871,7 @@ export class SceneAssembler {
       // field to carry — it must NOT be re-derived from the frame.
       colorSpace: WORKING_GAMUT,
       hdr,
+      gainMap,
       layers: sceneLayers,
     };
 
@@ -824,6 +917,7 @@ export class SceneAssembler {
         channelMask,
         colorSpace: content.colorSpace,
         hdr: content.hdr,
+        gainMapAssetId: content.gainMap?.assetId,
       },
       // The SOLE camera source. `M_camera` maps document/canvas
       // space → swapchain physical pixels; the view pass folds it into the

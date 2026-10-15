@@ -38,17 +38,54 @@
 
 import type { ImageMetadata, DecodedPayload } from '../../types';
 import type { IngestDecision } from '../../strategy';
-import { wideGamut8ToF16 } from '@opengpex/editor/core/engine/color';
+import {
+  wideGamut8ToF16,
+  srgbToLinear,
+  linearFloatToFloat16,
+} from '@opengpex/editor/core/engine/color';
 import { parseHeicContainer } from './metadata/container';
 import { convertHeicToBlob, buildGamutProxy } from './transcode';
 import { decodeHeicHard } from './harddecode';
+
+/**
+ * Lift the decoded SDR base onto the linear f16 master line — and NOTHING
+ * else. The gain map is deliberately NOT applied here.
+ *
+ * WHY NOT BAKE hdr = sdr·2^gain INTO THE MASTER: the engine renders BOTH
+ * HDR-OFF and HDR-ON from the ONE resident f16 line (the `hdr` switch only
+ * selects the view pipeline's white clamp vs extended range — never the data
+ * source). A baked-HDR master therefore makes the OFF presentation the
+ * CLAMPED HDR rendition, not the file's authoritative SDR base: a 2× sky
+ * (0.2, 0.4, 1.8) clamps to (0.2, 0.4, 1.0) — the blue channel pins at white
+ * and the image hue-skews (deep saturated sky, vivid foliage). PQ AVIF does
+ * not have this problem because its scene-linear buffer IS its only
+ * rendition; a gain-map file carries TWO (SDR base + HDR derived), and OFF
+ * must show the former. The gain map stays a presentation adjunct — decoded
+ * from the retained source file (`handlers/heic/gainmap.ts`) and applied at
+ * the view pass (`engine/color/gainMap.ts` holds the math), so OFF is always
+ * exactly the authored SDR look.
+ */
+function liftBaseToF16(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+): DecodedPayload['highDepthSource'] {
+  const linear = new Float32Array(width * height * 4);
+  for (let i = 0; i < linear.length; i += 4) {
+    linear[i] = srgbToLinear(rgba[i] / 255);
+    linear[i + 1] = srgbToLinear(rgba[i + 1] / 255);
+    linear[i + 2] = srgbToLinear(rgba[i + 2] / 255);
+    linear[i + 3] = rgba[i + 3] / 255;
+  }
+  return { data: linearFloatToFloat16(linear), width, height };
+}
 
 /**
  * Decode a HEIC file by executing the entry-resolved ingest decision.
  */
 export async function decodeHeic(
   file: File,
-  _metadata: ImageMetadata,
+  metadata: ImageMetadata,
   decision: IngestDecision,
 ): Promise<DecodedPayload[]> {
   const channel = decision.decodeChannel;
@@ -81,11 +118,18 @@ export async function decodeHeic(
     ({ displayBlob, width, height, rgba } = await convertHeicToBlob(file, gamut));
   }
 
-  // Wide gamut: lift the unclamped f16-linear line beside the (already folded)
-  // proxy — the standing wide-gamut rule composition, fed by the verbatim
-  // pixels both channels return.
+  // Gain-map carrier (19-gm*): the decision declares the f16 identity, and the
+  // master is the LIFTED SDR BASE — the gain map is NOT applied at ingest (see
+  // liftBaseToF16's header for why the bake is wrong). The lift can only fail
+  // on a decoder/decision mismatch, which fails loudly like every other
+  // channel.
   let highDepthSource: DecodedPayload['highDepthSource'];
-  if (gamut === 'adobe-rgb' || gamut === 'prophoto-rgb') {
+  if (decision.colorIdentity.dataFormat === 'rgba16float' && metadata.raw?.hasGainmap && rgba) {
+    highDepthSource = liftBaseToF16(rgba, width, height);
+  } else if (gamut === 'adobe-rgb' || gamut === 'prophoto-rgb') {
+    // Wide gamut: lift the unclamped f16-linear line beside the (already
+    // folded) proxy — the standing wide-gamut rule composition, fed by the
+    // verbatim pixels both channels return.
     const lifted = wideGamut8ToF16(rgba!, width, height, gamut);
     // Bare payload only — container/trc/gamut live on the sibling `colorIdentity`
     // the entry injects (Path B).

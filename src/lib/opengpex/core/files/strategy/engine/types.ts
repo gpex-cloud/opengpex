@@ -104,6 +104,15 @@ export interface NormalizedMatchContext {
   readonly hevcHardDecode: boolean;
   /** Source transfer characteristic (`metadata.raw.transfer`), for the HDR rows. */
   readonly transfer: 'pq' | 'hlg' | 'sdr' | undefined;
+  /**
+   * Gain-map carrier flag (`metadata.raw.hasGainmap` — an Apple `hdrgainmap`
+   * auxiliary image is present in the container). Admits the 19-gm rebuild
+   * rows ahead of the plain HEIC rows: a carrier's master must be the linear
+   * f16 SDR base so the view-pass gain application has a precision-ready line
+   * to sample. Files without the flag default to `false` and never match
+   * those rows.
+   */
+  readonly hasGainmap: boolean;
 }
 
 /** Match condition stub for a single rule */
@@ -119,6 +128,11 @@ export interface DecisionCondition {
    * SDR rows. Absent pattern = '*'.
    */
   readonly transfer?: MatchPattern<'pq' | 'hlg' | 'sdr' | undefined>;
+  /**
+   * Gain-map carrier flag (`metadata.raw.hasGainmap`): `true` admits the
+   * 19-gm rows (linear f16 SDR-base master). Absent pattern = '*'.
+   */
+  readonly hasGainmap?: MatchPattern<boolean>;
 }
 
 /** Decision action stub for a single rule */

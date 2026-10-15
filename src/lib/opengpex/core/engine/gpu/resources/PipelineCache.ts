@@ -137,6 +137,7 @@ export class PipelineCache {
   private viewHdrShaderModule: GPUShaderModule | null = null;
   private viewBindGroupLayout: GPUBindGroupLayout | null = null;
   private viewPipelineLayout: GPUPipelineLayout | null = null;
+  private gainDummyView: GPUTextureView | null = null;
 
   /** Group-1 adjustment bind group layout (shared by layer + blend pipelines). */
   private adjustBindGroupLayout: GPUBindGroupLayout | null = null;
@@ -1047,9 +1048,46 @@ export class PipelineCache {
           visibility: GPUShaderStage.FRAGMENT,
           texture: { sampleType: 'float' },
         },
+        {
+          // The gain map (r8unorm, document-extent 1:1). Declared in BOTH view
+          // variants (shared prefix); the SDR fragment never samples it, which
+          // WebGPU allows (extra layout entries without static use are legal).
+          // Keeping the entry in the one shared layout means the gain and
+          // no-gain cases differ only in the bound texture + a uniform flag —
+          // zero extra pipeline variants.
+          binding: 3,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { sampleType: 'float' },
+        },
       ],
     });
     return this.viewBindGroupLayout;
+  }
+
+  /**
+   * The 1×1 zero-filled stand-in for binding 3 when no gain map applies (not
+   * eligible / still decoding / HDR off). Binding layouts must be fully
+   * satisfied even when a binding is unsampled, so the view bind group always
+   * has a valid texture here; with `gain_enabled = 0` the shader never reads
+   * it. Created lazily, device-owned, never destroyed with the frame.
+   */
+  getGainDummyView(): GPUTextureView {
+    if (this.gainDummyView) return this.gainDummyView;
+
+    const texture = this.device.createTexture({
+      label: 'View Gain Dummy (1x1)',
+      size: { width: 1, height: 1 },
+      format: 'r8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
+    this.device.queue.writeTexture(
+      { texture },
+      new Uint8Array([0]),
+      { bytesPerRow: 1 },
+      { width: 1, height: 1 },
+    );
+    this.gainDummyView = texture.createView({ label: 'View Gain Dummy View' });
+    return this.gainDummyView;
   }
 
   getViewPipelineLayout(): GPUPipelineLayout {
@@ -1680,5 +1718,6 @@ export class PipelineCache {
     this.lutSampler = null;
     this.identityLutTexture = null;
     this.identityLutView = null;
+    this.gainDummyView = null;
   }
 }

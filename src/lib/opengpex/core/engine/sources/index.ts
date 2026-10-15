@@ -50,3 +50,7 @@ export {
   SOLID_COLOR_SOURCE_FORMAT,
 } from './SolidColorSource';
 export type { SolidColorSource } from './SolidColorSource';
+
+// ── gain map (presentation adjunct) + cache ──
+export { gainMapSourceCache } from './GainMapSource';
+export type { GainMapSource, GainMapFetcher } from './GainMapSource';

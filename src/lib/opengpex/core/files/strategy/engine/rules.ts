@@ -395,6 +395,60 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
   // context. Without the flag (plain calls, tests, no-WebCodecs
   // runtimes) it defaults to `false` and 19e below owns the downgrade.
   {
+    // 19-gm / 19-gm-proxy: gain-map carriers (an `hdrgainmap` auxiliary image
+    // is present). The SDR base is lifted to the LINEAR f16 master — and the
+    // gain map is deliberately NOT applied at ingest. The engine renders both
+    // HDR-ON and HDR-OFF from the ONE resident f16 line (the presentation
+    // switch only selects the view pipeline's clamp/extension, never the data
+    // source): a master baked with hdr = sdr·2^gain would make OFF present the
+    // CLAMPED HDR rendition instead of the file's authoritative SDR base — a
+    // 2× sky pins its blue channel at white and the image hue-skews. The gain
+    // application lives at the view pass (engine/color/gainMap.ts holds the
+    // math); the linear f16 identity here is the precision-ready master that
+    // application samples. Main decode follows the SAME capability gate as
+    // 19a (fail-fast preserved). ORDER: ahead of 19a/19e — first-match-wins
+    // means a gain-map file must never be captured by the plain rows, whose
+    // srgb-trc 8-bit master would strand the presentation slice; 19d still
+    // owns PQ/HLG (unknown colour tag) for carriers and non-carriers alike.
+    id: '19-gm',
+    condition: {
+      format: 'heic',
+      hasGainmap: true,
+      bitDepth: 8,
+      colorSpace: ['srgb', 'display-p3'],
+      isMultiFrame: false,
+      hevcHardDecode: true,
+    },
+    action: {
+      decodeChannel: 'webcodecs-heic',
+      trc: 'linear',
+      dataFormat: 'rgba16float',
+      applyOrientation: 'auto',
+      description: 'HEIC gain-map 8-bit (19-gm) — hard decode, SDR base lifted to the linear f16 master',
+    },
+  },
+  {
+    // Proxy twin of 19-gm: capability absent (or any depth) — same linear f16
+    // SDR-base master, proxy main decode. bitDepth '*' on purpose: a gain-map
+    // carrier is its own precision story (the map rides the file verbatim at
+    // any base depth), and the proxy delivers 8-bit pixels regardless.
+    id: '19-gm-proxy',
+    condition: {
+      format: 'heic',
+      hasGainmap: true,
+      bitDepth: '*',
+      colorSpace: ['srgb', 'display-p3'],
+      isMultiFrame: false,
+    },
+    action: {
+      decodeChannel: 'libheif-proxy',
+      trc: 'linear',
+      dataFormat: 'rgba16float',
+      applyOrientation: 'auto',
+      description: 'HEIC gain-map carrier (19-gm-proxy) — proxy decode, SDR base lifted to the linear f16 master',
+    },
+  },
+  {
     id: '19a',
     condition: {
       format: 'heic',

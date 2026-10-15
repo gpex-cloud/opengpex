@@ -617,6 +617,15 @@ export interface DisplayConfig {
   readonly colorSpace: WorkingColorSpace;
   /** When true the swapchain requests `toneMapping: { mode: 'extended' }`. */
   readonly hdr: boolean;
+  /**
+   * The gain-map-eligible single source's asset id, when THIS frame qualifies
+   * for HDR gain-map presentation (`resolveGainMapEligibility`): exactly one
+   * visible non-group layer, whose asset is the frame's gain-map-carrying
+   * base, covering the canvas. Undefined → the HDR variant still presents (the
+   * extended surface is a presentation mode) but with `gain_enabled = 0` — the
+   * authoritative SDR base, verbatim.
+   */
+  readonly gainMapAssetId?: string;
 }
 
 // ────────────────────────────────────────────────────────────
@@ -675,6 +684,16 @@ export interface SceneContent {
    */
   readonly colorSpace: WorkingColorSpace;
   readonly hdr: boolean;
+  /**
+   * Gain-map eligibility verdict (see {@link DisplayConfig.gainMapAssetId}).
+   * DELIBERATE EXCEPTION to the "every field feeds `computeCompositeSignature`"
+   * invariant: the verdict changes NOTHING about the composited pixels (the
+   * gain applies at the view pass only), so it must not take part in the
+   * composite signature — including it would force re-composites on eligibility
+   * flips that render identically. Read-side consumers reach it via
+   * `scene.display.gainMapAssetId`, populated by `composeView`.
+   */
+  readonly gainMap?: { readonly assetId: string };
   /** Bottom-to-top, flat. The composited layer set. */
   readonly layers: readonly LayerNode[];
 }
