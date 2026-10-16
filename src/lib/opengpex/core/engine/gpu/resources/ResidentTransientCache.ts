@@ -182,6 +182,28 @@ export class ResidentTransientCache {
     this.slots = [];
   }
 
+  /**
+   * Pressure-response reclaim: destroy every slot idle for longer than
+   * `maxIdleMs` wall-clock, keeping recently-used slots resident. Runs OUTSIDE
+   * the frame cycle (page-hidden shrink, idle sweep) — safety comes from the
+   * consumers' contract, not from frame liveness: every consumer fully
+   * rewrites its transient each frame, so a destroyed slot only costs the next
+   * `acquire` a fresh `createTexture`, never a stale-pixel read. `0` reclaims
+   * every slot (all of them are idle while the page is hidden — no frame can
+   * be mid-flight against rAF-gated rendering).
+   */
+  reclaimIdle(maxIdleMs = 0): void {
+    if (this.slots.length === 0) return;
+    const cutoff = performance.now() - maxIdleMs;
+    this.slots = this.slots.filter((s) => {
+      if (s.lastUsedAt < cutoff) {
+        s.texture.destroy();
+        return false;
+      }
+      return true;
+    });
+  }
+
   /** Sum of resident bytes across all live slots (diagnostics / GpuInfo). */
   totalBytes(): number {
     let bytes = 0;

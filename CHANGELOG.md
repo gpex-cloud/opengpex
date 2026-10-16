@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.16
+
+- Workspace: the editor now caps and proactively releases its own GPU memory on large documents — big memory drop when switching tabs or after idle
+
+---
+
 ## v2.0.15
 
 - Workspace: brush, marker and eraser gestures on large canvases are now driven by a named, hardened pipeline — Incremental Compositing — with no change to rendering output

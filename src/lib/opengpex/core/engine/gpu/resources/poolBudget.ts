@@ -75,3 +75,35 @@ export function derivePoolBudget(input: PoolBudgetInputs): number {
 
   return isIntegratedVendor || isLowBuffer ? POOL_BUDGET_INTEGRATED : POOL_BUDGET_DISCRETE;
 }
+
+/**
+ * The full-channel composite resident cost is TWO document-sized textures: the
+ * composite target itself plus the below-layers cache of the live-edit fast
+ * path (both exact-size, engine-owned, outside the pool). The budget check
+ * counts both — a document that would fit alone but not alongside its below
+ * cache belongs to the roi channel.
+ */
+export const RESIDENT_COMPOSITE_TARGETS = 2;
+
+/**
+ * How many pool budgets the ENGINE-OWNED resident working set (composite
+ * target + roi target + below-cache + resident transients) may consume: 2×.
+ * The pool's own idle cache is budgeted 1×; the resident side gets the same
+ * again. One multiplier only — a budget of 3×+ the pool's effectively removes
+ * the full/roi gate on discrete GPUs, which is exactly the unbounded resident
+ * growth this budget exists to cap.
+ */
+export const ENGINE_WORKING_SET_BUDGET_MULTIPLIER = 2;
+
+/**
+ * Derive the engine-owned resident budget from the SAME device tier the pool
+ * uses: integrated / low-VRAM adapters → 128 MiB, discrete → 512 MiB. This is
+ * the `budgetBytes` fed to the full/roi channel decision
+ * (`resolveCompositePlan` with `residentTargets: RESIDENT_COMPOSITE_TARGETS`);
+ * the density-clamp and roi-density budgets stay on the fixed
+ * `COMPOSITE_BUDGET_DEFAULT_BYTES` constant so the channel flip and the
+ * sharpness clamp never move together.
+ */
+export function deriveEngineWorkingSetBudget(poolBudgetBytes: number): number {
+  return Math.max(1, poolBudgetBytes) * ENGINE_WORKING_SET_BUDGET_MULTIPLIER;
+}

@@ -21,3 +21,4 @@ export * from './TexturePool';
 export * from './LayerTexture';
 export * from './BufferRing';
 export * from './PipelineCache';
+export * from './WorkingSet';

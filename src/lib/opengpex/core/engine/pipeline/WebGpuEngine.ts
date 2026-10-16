@@ -42,7 +42,15 @@ import { GpuDevice, type SurfaceConfig } from '@opengpex/editor/core/engine/gpu/
 import type { Scene, LayerNode } from '@opengpex/editor/core/engine/pipeline/scene/Scene';
 import { TexturePool, estimateTextureBytes } from '@opengpex/editor/core/engine/gpu/resources/TexturePool';
 import { ResidentTransientCache } from '@opengpex/editor/core/engine/gpu/resources/ResidentTransientCache';
-import { derivePoolBudget } from '@opengpex/editor/core/engine/gpu/resources/poolBudget';
+import {
+  derivePoolBudget,
+  deriveEngineWorkingSetBudget,
+  RESIDENT_COMPOSITE_TARGETS,
+} from '@opengpex/editor/core/engine/gpu/resources/poolBudget';
+import {
+  WorkingSet,
+  formatWorkingSetMiB,
+} from '@opengpex/editor/core/engine/gpu/resources/WorkingSet';
 import { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTexture';
 import { BufferRing } from '@opengpex/editor/core/engine/gpu/resources/BufferRing';
 import { PipelineCache } from '@opengpex/editor/core/engine/gpu/resources/PipelineCache';
@@ -97,6 +105,16 @@ function onQueueDone(queue: GPUQueue, cb: () => void): void {
   if (typeof done !== 'function') return;
   done.call(queue).then(cb).catch(() => { /* device lost — ignore */ });
 }
+
+/**
+ * Idle-shrink threshold for the render-entry sweep: when the previous render
+ * is more than this far in the past, the editor was left alone (no rAF-driven
+ * frame renders while idle), so the pool's stale free textures are evicted
+ * before the frame proceeds. There is no timer — the check is a single
+ * `performance.now()` compare at the door of the next render, which is the
+ * only moment the engine is guaranteed to be running.
+ */
+const IDLE_RENDER_SHRINK_MS = 30_000;
 
 export class WebGpuEngine implements IEngine {
   private readonly gpu = new GpuDevice();
@@ -200,19 +218,79 @@ export class WebGpuEngine implements IEngine {
   private belowCacheDensityScale = 1;
   /** ROI rebuild key the cache was built for (null on the full channel) — a rect move invalidates. */
   private belowCacheRoiKey: string | null = null;
+  /**
+   * The FULL-scene composite signature the below-cache was last VERIFIED
+   * consistent with. Equal full signatures guarantee equal below signatures
+   * (the below layers are a slice of the same input), so this is a cheap
+   * "has anything changed since the last verification" gate: only when it
+   * differs does the stale-check recompute the below signature — once per
+   * content change, never per idle frame.
+   */
+  private belowCacheCheckedFullSig: string | null = null;
+
+  /**
+   * Wall-clock of the last render() that passed its readiness checks. The idle
+   * shrink reads the gap at the NEXT render's entry: an editor left alone for
+   * longer than {@link IDLE_RENDER_SHRINK_MS} has its pool's stale free
+   * textures evicted before the frame proceeds.
+   */
+  private lastRenderAt = 0;
+
+  /**
+   * The ONE volatile-GPU ledger (see `resources/WorkingSet.ts`): pure byte
+   * providers over the engine's own resident fields, aggregated on demand for
+   * GpuInfo / MetricsHUD / the PERF_MON summary. No registration churn — each
+   * provider reads the field that already owns the texture's lifecycle.
+   */
+  private readonly workingSet = new WorkingSet({
+    compositeTargetBytes: () =>
+      this.compositeTexture
+        ? estimateTextureBytes(this.compositeTexture.allocatedWidth, this.compositeTexture.allocatedHeight, this.compositeTexture.format)
+        : 0,
+    roiTargetBytes: () =>
+      this.roiTexture
+        ? estimateTextureBytes(this.roiTexture.allocatedWidth, this.roiTexture.allocatedHeight, this.roiTexture.format)
+        : 0,
+    belowCacheBytes: () =>
+      this.belowCacheTexture
+        ? estimateTextureBytes(this.belowCacheTexture.allocatedWidth, this.belowCacheTexture.allocatedHeight, this.belowCacheTexture.format)
+        : 0,
+    residentTransientBytes: () => this.residentTransients?.totalBytes() ?? 0,
+    poolBytes: () => this.texturePool?.getStats().totalBytes ?? 0,
+  });
+
+  /**
+   * Pressure response for system memory: when the page hides, nothing will
+   * render until it returns, so every reclaimable cache is dropped NOW (the
+   * exact moment the OS is most likely to be under pressure). The composite /
+   * roi targets are deliberately KEPT — the returning first frame would
+   * otherwise pay a full re-composite with a white flash, and that cost buys
+   * nothing while the tab is hidden (the targets are never swept by anything
+   * else, but they are bounded by the channel budget, unlike the caches).
+   * Registered once on first init; removed on teardown.
+   */
+  readonly #onVisibilityChange = (): void => {
+    if (typeof document === 'undefined' || !document.hidden) return;
+    this.#releaseBelowCache();
+    this.texturePool?.evictUnused(0);
+    this.residentTransients?.reclaimIdle(0);
+  };
+
+  #visibilityListenerAttached = false;
 
   /**
    * One-entry memo for the per-frame channel decision. The
-   * plan is a PURE function of (doc dims, bpp, negotiated limit) — this key is
-   * complete (two frames with equal inputs belong to equal plans; the byte
-   * budget is a compile-time constant, not a runtime input), so a hit skips
+   * plan is a PURE function of (doc dims, bpp, negotiated limit, channel
+   * budget) — this key is complete (two frames with equal inputs belong to
+   * equal plans; the budget is constant per negotiated device, derived like
+   * every other capability), so a hit skips
    * the trivial recompute and, more importantly, gives the render loop a
    * stable handle on the CURRENT channel. A frame-load or frame-resize needs
    * no explicit hook: they change the inputs → the memo misses → the next
    * frame re-decides.
    */
   private planMemo: {
-    docW: number; docH: number; bpp: number; deviceMaxDim: number;
+    docW: number; docH: number; bpp: number; deviceMaxDim: number; budgetBytes: number;
   } | null = null;
   private planMemoMode: 'full' | 'roi' = 'full';
 
@@ -393,9 +471,15 @@ export class WebGpuEngine implements IEngine {
           this.bufferRing = new BufferRing(device);
         }
 
+        // Page-hidden shrink (see #onVisibilityChange): one document-level
+        // listener for the engine singleton's lifetime, attached on first init.
+        if (!this.#visibilityListenerAttached && typeof document !== 'undefined') {
+          document.addEventListener('visibilitychange', this.#onVisibilityChange);
+          this.#visibilityListenerAttached = true;
+        }
+
         // On device loss, replay the last Scene once the device is back.
-        this.gpu.setLostHandler(() => {
-          this.initPromise = null;
+        this.gpu.setLostHandler(() => {          this.initPromise = null;
           const scene = this.lastScene;
           const currentCanvas = this.gpu.getCanvas() ?? canvas;
           void this.gpu.init(currentCanvas, surface).then(() => {
@@ -476,6 +560,16 @@ export class WebGpuEngine implements IEngine {
     if (!canvas || canvas.width === 0 || canvas.height === 0) return;
     if (typeof canvas.isConnected === 'boolean' && !canvas.isConnected) return;
 
+    // Idle shrink (render-entry clock check — there is no timer): an editor
+    // left alone longer than IDLE_RENDER_SHRINK_MS drops its stale pooled free
+    // textures before this frame proceeds. Composite / roi / below-cache
+    // targets are untouched — the first frame back must not pay a rebuild.
+    const nowMs = performance.now();
+    if (this.lastRenderAt !== 0 && nowMs - this.lastRenderAt > IDLE_RENDER_SHRINK_MS) {
+      this.texturePool.evictUnused(10_000);
+    }
+    this.lastRenderAt = nowMs;
+
     let currentTexture: GPUTexture;
     try {
       currentTexture = context.getCurrentTexture();
@@ -516,7 +610,13 @@ export class WebGpuEngine implements IEngine {
     const workingBpp = workingFormatBpp(workingFormat as 'rgba16float' | 'rgba32float');
     const deviceMaxDim =
       device.limits?.maxTextureDimension2D ?? caps.limits.maxTextureDimension2D ?? INTERACTIVE_COMPOSITE_CEIL_PX;
-    const budgetBytes = COMPOSITE_BUDGET_DEFAULT_BYTES;
+    // Channel budget: device-derived engine working-set budget (pool tier ×2 —
+    // integrated 128 MiB / discrete 512 MiB), pricing BOTH document-sized
+    // residents (composite target + below cache) via residentTargets. The
+    // sharpness-side budgets (density clamp, roi density) deliberately stay on
+    // the fixed policy constant so flipping the channel never moves sharpness.
+    const budgetBytes = deriveEngineWorkingSetBudget(derivePoolBudget(caps));
+    const densityBudgetBytes = COMPOSITE_BUDGET_DEFAULT_BYTES;
     const screenScale = effectiveScale(scene.view.transform);
 
     // Reuse the memoized signature when the inputs it derives from are
@@ -552,6 +652,31 @@ export class WebGpuEngine implements IEngine {
     }
     const _pSigMs = PERF_MON ? performance.now() - _pSigT0 : 0;
 
+    // Below-cache staleness shrink: with NO live-edit hint (not in a gesture)
+    // the cache is not on the hot path, so if content changed since the last
+    // verification, verify ONCE whether the below layers are still the ones
+    // cached — an undo/redo below the live layer releases the (canvas-sized)
+    // cache immediately instead of stranding it until the next gesture
+    // rebuilds. Equal full signatures guarantee equal below signatures, so the
+    // expensive below-signature recompute runs at most once per content change.
+    const liveHintTopmost =
+      scene.layers.length >= 2 && scene.layers[scene.layers.length - 1]?.useIncreComp === true;
+    if (
+      this.belowCacheTexture !== null &&
+      !liveHintTopmost &&
+      this.belowCacheCheckedFullSig !== signature
+    ) {
+      const belowSig = computeCompositeSignature(
+        { ...scene, layers: scene.layers.slice(0, -1) },
+        { getAssetEpoch: (assetId) => this.assetEpochs.get(assetId) ?? 0, workingFormat },
+      );
+      if (belowSig !== this.belowCacheSig) {
+        this.#releaseBelowCache();
+      } else {
+        this.belowCacheCheckedFullSig = signature;
+      }
+    }
+
     // Re-decide the channel every frame, memoized on the
     // plan's complete pure-input key (see planMemo). Frame load/resize needs
     // no explicit hook — they change the inputs.
@@ -559,13 +684,15 @@ export class WebGpuEngine implements IEngine {
     if (
       !memo ||
       memo.docW !== docW || memo.docH !== docH ||
-      memo.bpp !== workingBpp || memo.deviceMaxDim !== deviceMaxDim
+      memo.bpp !== workingBpp || memo.deviceMaxDim !== deviceMaxDim ||
+      memo.budgetBytes !== budgetBytes
     ) {
       this.planMemo = {
-        docW, docH, bpp: workingBpp, deviceMaxDim,
+        docW, docH, bpp: workingBpp, deviceMaxDim, budgetBytes,
       };
       this.planMemoMode = resolveCompositePlan({
         docW, docH, bpp: workingBpp, deviceMaxDim, budgetBytes,
+        residentTargets: RESIDENT_COMPOSITE_TARGETS,
       }).mode;
     }
     const planMode = this.planMemoMode;
@@ -590,7 +717,7 @@ export class WebGpuEngine implements IEngine {
         // Budget-derived edge ceiling prefolded with the negotiated device limit:
         // adds the area-budget clamp term to min(band, ceil/maxDocDim) without
         // changing resolveInteractiveDensity's contract.
-        Math.min(deviceMaxDim, budgetDerivedCeilPx(docW, docH, workingBpp, budgetBytes)),
+        Math.min(deviceMaxDim, budgetDerivedCeilPx(docW, docH, workingBpp, densityBudgetBytes)),
       );
       const [compW, compH] = densityCompositeDims(docW, docH, [density.scaleX, density.scaleY]);
       const densityScale = Math.min(density.scaleX, density.scaleY);
@@ -647,10 +774,7 @@ export class WebGpuEngine implements IEngine {
           this.texturePool.evictUnused(0);
           // The below-cache was built at the old dims/density — release it now
           // instead of stranding a canvas-sized ghost until the next gesture.
-          this.belowCacheTexture?.destroy();
-          this.belowCacheTexture = null;
-          this.belowCacheSig = null;
-          this.belowCacheRoiKey = null;
+          this.#releaseBelowCache();
         }
         if (!this.compositeTexture) {
           this.compositeTexture = this.#createCompositeTarget(device, compW, compH, workingFormat);
@@ -664,7 +788,7 @@ export class WebGpuEngine implements IEngine {
         // BOTH channels (full + roi): the channel decision is budget-driven
         // (a 3024×4032 rgba32float document lands in roi), so a full-only
         // fast path would never fire on exactly the machines this exists for.
-        const encFast = this.#encodeWithBelowCache(device, scene, workingFormat, [density.scaleX, density.scaleY], densityScale, null, this.compositeTexture!, compW, compH, undefined, _pCompEncT0);
+        const encFast = this.#encodeWithBelowCache(device, scene, workingFormat, [density.scaleX, density.scaleY], densityScale, null, signature, this.compositeTexture!, compW, compH, undefined, _pCompEncT0);
         if (encFast !== null) {
           _pCompEncMs = encFast;
         } else {
@@ -716,10 +840,7 @@ export class WebGpuEngine implements IEngine {
         // channel's target; the roi branch rebuilds its own on the next
         // live-edit gesture (freeing the canvas-sized texture keeps the roi
         // budget clean).
-        this.belowCacheTexture?.destroy();
-        this.belowCacheTexture = null;
-        this.belowCacheSig = null;
-        this.belowCacheRoiKey = null;
+        this.#releaseBelowCache();
         this.compositeSignature = null;
         this.compositeFormat = null;
         this.compositeTargetW = 0;
@@ -737,7 +858,7 @@ export class WebGpuEngine implements IEngine {
         screenScale,
         workingFormat: workingFormat as 'rgba16float' | 'rgba32float',
         deviceMaxDim,
-        budgetBytes,
+        budgetBytes: densityBudgetBytes,
         signature,
         current: {
           resident: this.roiTexture !== null,
@@ -787,6 +908,7 @@ export class WebGpuEngine implements IEngine {
             [roiDensity.scaleX, roiDensity.scaleY],
             Math.min(roiDensity.scaleX, roiDensity.scaleY),
             roi.rebuildKey,
+            signature,
             this.roiTexture, roi.targetW, roi.targetH,
             roiViewport,
             _pCompEncT0,
@@ -1024,6 +1146,20 @@ export class WebGpuEngine implements IEngine {
   }
 
   /**
+   * Destroy the below-layers cache and drop every stamp that validates it.
+   * The one home for the release so the staleness shrink (render path), the
+   * dims-change sweep, the channel flip, the page-hidden shrink, and the
+   * device-loss teardown cannot drift apart.
+   */
+  #releaseBelowCache(): void {
+    this.belowCacheTexture?.destroy();
+    this.belowCacheTexture = null;
+    this.belowCacheSig = null;
+    this.belowCacheCheckedFullSig = null;
+    this.belowCacheRoiKey = null;
+  }
+
+  /**
    * Destroy the ROI channel's resident state (device loss / device rebuild /
    * teardown — the same moments the full-channel composite target is cleared).
    */
@@ -1086,14 +1222,11 @@ export class WebGpuEngine implements IEngine {
     // The below-cache is device-owned like the composite target — tear it down
     // with the same lifecycle (device loss / teardown); the next live-edit
     // gesture rebuilds it from the ordinary full composite.
-    this.belowCacheTexture?.destroy();
-    this.belowCacheTexture = null;
-    this.belowCacheSig = null;
+    this.#releaseBelowCache();
     this.belowCacheFormat = null;
     this.belowCacheW = 0;
     this.belowCacheH = 0;
     this.belowCacheDensityScale = 1;
-    this.belowCacheRoiKey = null;
     this.#clearRoiChannel();
     // Epochs restart (an upload against the new device is a genuine first
     // transfer) and the signature memo drops (the next frame recomputes).
@@ -1321,6 +1454,7 @@ export class WebGpuEngine implements IEngine {
     density: readonly [number, number],
     densityScale: number,
     rebuildKey: string | null,
+    fullSignature: string,
     target: LayerTexture,
     targetW: number,
     targetH: number,
@@ -1393,6 +1527,9 @@ export class WebGpuEngine implements IEngine {
         armTimer: false,
       });
       this.belowCacheSig = belowSig;
+      // Stamp the full-scene signature the cache was verified against, so the
+      // idle-frame staleness check can gate on it before recomputing belowSig.
+      this.belowCacheCheckedFullSig = fullSignature;
       return encBelow + encActive;
     }
 
@@ -1476,6 +1613,10 @@ export class WebGpuEngine implements IEngine {
         `gpu→composite avg=${avg(w.compGpuSum, w.compGpuN)} max=${f(w.compGpuMax)} | ` +
         `gpu→present avg=${avg(w.presGpuSum, w.presGpuN)} max=${f(w.presGpuMax)} (ms, GPU=latency incl. queue backlog)`,
       );
+      // Separate line: the volatile GPU working set (the ONE ledger,
+      // resources/WorkingSet.ts) — c=composite target, r=roi target,
+      // b=below cache, t=resident transients, p=pool total.
+      console.warn(`[Engine.render.workingSet] ${formatWorkingSetMiB(this.workingSet.snapshot())}`);
       // Separate line: TRUE per-pass GPU exec time (timestamp-query), which is
       // NOT backlog-inflated — compare against the gpu→* latencies above to tell
       // "genuinely expensive pass" from "cheap pass, deep queue".
@@ -1787,6 +1928,13 @@ export class WebGpuEngine implements IEngine {
   }
 
   destroy(): void {
+    // Detach the page-hidden shrink listener — the singleton may outlive the
+    // document that registered it (HMR / teardown), and a bare handler must
+    // never touch a torn-down engine.
+    if (this.#visibilityListenerAttached && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.#onVisibilityChange);
+      this.#visibilityListenerAttached = false;
+    }
     this.#releaseCaches();
     // The resident transient cache is engine-owned (exact-size, not
     // pooled) — destroy every live slot explicitly, like the composite target.
@@ -1832,10 +1980,7 @@ export class WebGpuEngine implements IEngine {
     const source = ready ? caps! : UNKNOWN_CAPABILITIES;
 
     const stats = this.texturePool?.getStats();
-    const ct = this.compositeTexture;
-    const compositeTargetBytes = ct
-      ? estimateTextureBytes(ct.allocatedWidth, ct.allocatedHeight, ct.format)
-      : 0;
+    const ws = this.workingSet.snapshot();
 
     return {
       ready,
@@ -1850,7 +1995,11 @@ export class WebGpuEngine implements IEngine {
         inUseBytes: stats?.inUseBytes ?? 0,
         freeBytes: stats?.freeBytes ?? 0,
         peakBytes: stats?.peakBytes ?? 0,
-        compositeTargetBytes,
+        compositeTargetBytes: ws.compositeTargetBytes,
+        roiTargetBytes: ws.roiTargetBytes,
+        belowCacheBytes: ws.belowCacheBytes,
+        residentTransientBytes: ws.residentTransientBytes,
+        workingSetBytes: ws.totalBytes,
       },
     };
   }

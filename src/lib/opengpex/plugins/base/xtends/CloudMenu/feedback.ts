@@ -124,7 +124,7 @@ export const GPU_UNAVAILABLE_SNAPSHOT: GpuInfo = {
   limits: { maxTextureDimension2D: 0, maxBufferSize: 0 },
   workingFormat: 'rgba16float',
   needsTiling: false,
-  memory: { inUseBytes: 0, freeBytes: 0, peakBytes: 0, compositeTargetBytes: 0 },
+  memory: { inUseBytes: 0, freeBytes: 0, peakBytes: 0, compositeTargetBytes: 0, roiTargetBytes: 0, belowCacheBytes: 0, residentTransientBytes: 0, workingSetBytes: 0 },
 };
 
 export interface DiagnosticsInput {

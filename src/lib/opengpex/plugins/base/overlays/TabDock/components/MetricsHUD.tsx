@@ -126,14 +126,16 @@ export function MetricsHUD({ onCollapse }: MetricsHUDProps) {
       try {
         const info = pixels?.system?.gpuInfo?.();
         if (info) {
-          const currentOccupied =
-            info.memory.inUseBytes + info.memory.compositeTargetBytes;
-          gpuStr = formatMB(currentOccupied);
+          // Headline GPU figure = the engine's whole volatile working set
+          // (pool + composite/roi/below targets + resident transients).
+          gpuStr = formatMB(info.memory.workingSetBytes);
           vdrStr = parseVendor(
             info.adapterInfo.vendor,
             info.adapterInfo.architecture,
           );
 
+          const m = info.memory;
+          const cat = (bytes: number) => (bytes > 0 ? `${formatMB(bytes)}` : "0");
           const tipLines = [
             info.adapterInfo.device ||
               info.adapterInfo.description ||
@@ -145,7 +147,12 @@ export function MetricsHUD({ onCollapse }: MetricsHUDProps) {
               ? `Arch: ${info.adapterInfo.architecture}`
               : null,
             `Format: ${info.workingFormat}`,
-            `Composite Target: ${formatMB(info.memory.compositeTargetBytes)}`,
+            `Working Set: ${formatMB(m.workingSetBytes)}`,
+            `  Composite: ${cat(m.compositeTargetBytes)}`,
+            `  ROI Target: ${cat(m.roiTargetBytes)}`,
+            `  Below Cache: ${cat(m.belowCacheBytes)}`,
+            `  Transients: ${cat(m.residentTransientBytes)}`,
+            `  Pool: ${cat(m.inUseBytes + m.freeBytes)}`,
             `Max Texture: ${info.limits.maxTextureDimension2D}px`,
           ].filter(Boolean);
 
@@ -180,11 +187,14 @@ export function MetricsHUD({ onCollapse }: MetricsHUDProps) {
 
   return (
     <div
-      className="relative flex flex-col gap-0.5 font-mono select-none group/hud w-[78px] whitespace-nowrap overflow-hidden"
+      className="relative flex flex-col gap-0.5 font-mono select-none group/hud w-[78px] whitespace-nowrap"
       title={metrics.tooltip}
     >
-      {/* Collapse button: floats over the HUD's top-right corner, takes no layout space.
-          Acts as a shortcut for the Metrics HUD toggle in settings. */}
+      {/* Collapse button: straddles the HUD's top-right corner, half outside
+          the dock pill. Takes ZERO HUD display area. Visible because neither
+          this root (no overflow-hidden — rows are short and nowrap) nor the
+          dock pill (no clip; same reason the branch badge overhangs) clips.
+          The bg-panel border ring keeps it readable across the pill edge. */}
       {onCollapse && (
         <button
           type="button"
@@ -194,7 +204,7 @@ export function MetricsHUD({ onCollapse }: MetricsHUDProps) {
           }}
           title="Hide Metrics HUD"
           aria-label="Hide Metrics HUD"
-          className="absolute -top-2 -right-2 z-[1200] flex items-center justify-center w-3.5 h-3.5 rounded-full bg-zinc-700 text-white hover:bg-zinc-600 dark:bg-zinc-300 dark:text-zinc-900 dark:hover:bg-zinc-200 border border-black/10 dark:border-white/10 opacity-0 group-hover/hud:opacity-100 transition-all shadow-sm"
+          className="absolute -top-1.5 -right-1.5 z-[1200] flex items-center justify-center w-3.5 h-3.5 rounded-full bg-zinc-700 text-white hover:bg-zinc-600 dark:bg-zinc-300 dark:text-zinc-900 dark:hover:bg-zinc-200 border border-[var(--bg-panel)] opacity-0 group-hover/hud:opacity-100 transition-all shadow-md"
         >
           <Minus size={8} strokeWidth={3} />
         </button>
@@ -226,7 +236,7 @@ export function MetricsHUD({ onCollapse }: MetricsHUDProps) {
         </div>
       )}
 
-      {/* Row 3: GPU (Current occupancy: in-use pool + composite target) */}
+      {/* Row 3: GPU (volatile engine working set: pool + all resident targets) */}
       <div className="flex items-center gap-1">
         <Cpu size={8} className="text-amber-400 shrink-0" />
         <span className="text-[7px] font-black text-[var(--text-muted)] uppercase leading-none w-[18px]">

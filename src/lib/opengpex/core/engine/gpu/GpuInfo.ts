@@ -29,8 +29,10 @@
  *   • `limits.maxBufferSize` / `limits.maxTextureDimension2D` are ALLOCATION
  *     CEILINGS the adapter is willing to grant — NOT the size of physical VRAM.
  *     A 2 GiB `maxBufferSize` does not mean the card has 2 GiB free, or even 2 GiB.
- *   • `memory.*` is the ENGINE's OWN book-keeping (what the pool + composite
- *     target currently hold), NOT the driver's real resident-memory figure.
+ *   • `memory.*` is the ENGINE's OWN book-keeping (what the pool + the
+ *     engine-owned exact-size targets — composite / roi / below-cache — plus
+ *     the resident transients currently hold), NOT the driver's real
+ *     resident-memory figure.
  *   Callers MUST NOT present these numbers as "hardware VRAM usage". They are for
  *   diagnostics, bug reports, and the device-tier heuristic (see `poolBudget.ts`).
  */
@@ -76,5 +78,17 @@ export interface GpuInfo {
      * stats above and accounted separately here. `0` before the first composite.
      */
     readonly compositeTargetBytes: number;
+    /** Roi-channel visible-rect composite target (`0` when the full channel holds). */
+    readonly roiTargetBytes: number;
+    /** Below-layers cache of the live-edit fast path (`0` outside a gesture). */
+    readonly belowCacheBytes: number;
+    /** Resident vector-stroke / ping-pong transients (`ResidentTransientCache`). */
+    readonly residentTransientBytes: number;
+    /**
+     * The total volatile engine working set (pool total + the four exact-size
+     * categories above) — the ONE headline figure the MetricsHUD presents. See
+     * `WorkingSet` (resources/WorkingSet.ts) for the ledger contract.
+     */
+    readonly workingSetBytes: number;
   };
 }

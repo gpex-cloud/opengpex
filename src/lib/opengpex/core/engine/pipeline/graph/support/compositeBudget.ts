@@ -52,9 +52,15 @@
  *     (density < 1 → present shows composite texels instead of document
  *     pixels) can never occur on the full channel. Documents that fail ①/②
  *     belong to the roi channel.
- *   • This budget is ORTHOGONAL to `poolBudget.ts` (the texture-pool cache
- *     tiering): that module governs pooled transient eviction, this one
- *     governs the resident composite target. Do not couple them.
+ *   • Budget SOURCING: the module is the DECISION home, but the channel budget
+ *     itself is device-derived — `deriveEngineWorkingSetBudget` (poolBudget.ts)
+ *     turns the negotiated pool tier into the engine-owned resident budget
+ *     (integrated 128 MiB / discrete 512 MiB), and the caller passes
+ *     `residentTargets: RESIDENT_COMPOSITE_TARGETS` so the check prices BOTH
+ *     document-sized residents (composite target + below cache). The
+ *     density-clamp and roi-density budgets deliberately stay on the fixed
+ *     `COMPOSITE_BUDGET_DEFAULT_BYTES`: sharpness must never move when the
+ *     channel gate does.
  *
  * @module core/engine/pipeline/graph/support/compositeBudget
  */
@@ -100,14 +106,25 @@ export function resolveCompositePlan(input: {
   bpp: number;
   /** Negotiated `GPUDevice.limits.maxTextureDimension2D` — never hard-coded. */
   deviceMaxDim: number;
-  /** Policy budget (COMPOSITE_BUDGET_DEFAULT_BYTES). Parameter, not a global:
-   * the decision stays a pure function testable without a GPU device. */
+  /** Policy budget. Parameter, not a global: the decision stays a pure
+   * function testable without a GPU device. The engine feeds the device-derived
+   * engine working-set budget (poolBudget.ts); the density clamps keep the
+   * fixed COMPOSITE_BUDGET_DEFAULT_BYTES. */
   budgetBytes: number;
+  /**
+   * How many document-sized textures the full channel holds resident (default
+   * 1): the live-edit fast path adds a below-layers cache, so the engine
+   * passes 2 and the budget prices the pair. Defaults to 1 when omitted so
+   * bare calls keep the single-texture semantics.
+   */
+  residentTargets?: number;
 }): CompositePlan {
   const w = Math.max(1, input.docW);
   const h = Math.max(1, input.docH);
+  const residentTargets = Math.max(1, input.residentTargets ?? 1);
   const fitsDevice = Math.max(w, h) <= Math.max(1, input.deviceMaxDim);
-  const fitsBudget = w * h * Math.max(1, input.bpp) <= Math.max(1, input.budgetBytes);
+  const fitsBudget =
+    w * h * Math.max(1, input.bpp) * residentTargets <= Math.max(1, input.budgetBytes);
   return { mode: fitsDevice && fitsBudget ? 'full' : 'roi' };
 }
 
