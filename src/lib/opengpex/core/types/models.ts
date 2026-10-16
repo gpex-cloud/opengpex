@@ -363,7 +363,7 @@ export interface StrokePoint {
 /**
  * Vector brush point-stream model — stored on `Layer.strokeData` for a
  * `type:'vector'` layer, sibling to `markerData`. The scene-assembly mapper
- * (`strokeToVectorSource`) converts `color` to working-gamut linear and packs the
+ * (`vectorSources.ts`) converts `color` to working-gamut linear and packs the
  * points into the GPU-side {@link StrokeParams}; the StrokeRenderer extrudes a ribbon.
  */
 export interface StrokeData {

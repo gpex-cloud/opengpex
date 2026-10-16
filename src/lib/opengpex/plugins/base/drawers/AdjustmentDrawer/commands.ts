@@ -601,7 +601,7 @@ export const ADJUSTMENT_COMMANDS = {
         next.blur = q;
       }
 
-      actions.fast.override(activeFrame.id, activeLayer.id, { adjustments: next });
+      actions.fast.overrideLayer(activeFrame.id, activeLayer.id, { adjustments: next });
     },
   } as EditorCommand<{ patch: AdjustmentsPatch; exact?: boolean }, void>,
 
@@ -671,15 +671,15 @@ export const ADJUSTMENT_COMMANDS = {
 
       if (route === 'geometry') {
         const patch = buildFeatherRepadPatch(latest, radius);
-        if (patch) actions.fast.override(frameId, activeLayer.id, patch);
+        if (patch) actions.fast.overrideLayer(frameId, activeLayer.id, patch);
       } else if (route === 'vmask') {
         const masks = (latest.vectorMasks ?? []).map(
           (m) => (m.enabled !== false ? { ...m, feather: radius } : m),
         );
-        actions.fast.override(frameId, activeLayer.id, { vectorMasks: masks });
+        actions.fast.overrideLayer(frameId, activeLayer.id, { vectorMasks: masks });
       } else {
         const current = (latest.adjustments ?? P.DEFAULT_ADJUSTMENTS_STATE) as AdjustmentState;
-        actions.fast.override(frameId, activeLayer.id, {
+        actions.fast.overrideLayer(frameId, activeLayer.id, {
           adjustments: { ...current, edgeFeather: radius },
         });
       }
@@ -698,7 +698,7 @@ export const ADJUSTMENT_COMMANDS = {
       const masks = (latestSource.vectorMasks ?? []).map(
         (m) => (m.id === assocMaskId ? { ...m, feather: radius } : m),
       );
-      actions.fast.override(frameId, sourceLayerId, { vectorMasks: masks });
+      actions.fast.overrideLayer(frameId, sourceLayerId, { vectorMasks: masks });
     },
   } as EditorCommand<{ radius: number }, void>,
 

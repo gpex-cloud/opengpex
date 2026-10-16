@@ -56,7 +56,7 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
       isMultiFrame: false,
     },
     action: {
-      decodeChannel: 'ultrahdr-base',
+      decodeChannel: 'jpeg-hdr',
       trc: 'linear',
       dataFormat: 'rgba16float',
       applyOrientation: 'auto',

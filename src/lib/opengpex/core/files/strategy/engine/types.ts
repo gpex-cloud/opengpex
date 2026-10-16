@@ -37,7 +37,7 @@ import type { SourceFormat, ColorSpaceId } from '../../types';
  *   POSITIVELY GATED (no longer the catch-all): admitted only for 8-bit,
  *   single-frame, whitelisted containers (jpeg/png/webp/bmp/gif/avif) whose
  *   gamut is canvas-native srgb/display-p3. Anything else falls to 'unsupported'.
- * - 'ultrahdr-base': gain-map JPEG (UltraHDR) base-rendition decode — browser
+ * - 'jpeg-hdr': gain-map JPEG (UltraHDR) base-rendition decode — browser
  *   primary decode with the ORIGINAL bytes kept as the display proxy, the SDR
  *   base lifted to the linear f16 master, and the source file retained so the
  *   presentation-time gain decode (`FileService.decodeGainMap`) can re-parse
@@ -68,7 +68,7 @@ import type { SourceFormat, ColorSpaceId } from '../../types';
  */
 export type DecodeChannel =
   | 'image-bitmap'
-  | 'ultrahdr-base'
+  | 'jpeg-hdr'
   | 'wide-gamut-8'
   | 'vips'
   | 'vips-icc'

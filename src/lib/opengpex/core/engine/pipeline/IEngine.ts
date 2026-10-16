@@ -161,7 +161,18 @@ export interface IEngine {
   /** Synchronously attach a new or remounted canvas to the existing device surface. */
   attachCanvas(canvas: HTMLCanvasElement, surface?: SurfaceConfig): boolean;
 
-  /** Declaratively render one frame to the swapchain. */
+  /**
+   * Declaratively render one frame to the swapchain.
+   *
+   * The LIVE-EDIT scheduling hint travels IN the scene: a vector `LayerNode`
+   * stamped `useIncreComp` by `composeView` (from the stage-injected draft
+   * probe) marks the layer whose transient re-renders every frame, so the
+   * engine gives it special care — exact-size resident routing instead of the
+   * POT pool, and the below-cache fast path. No node stamped (export, tests,
+   * no gesture) renders identically; the hint never affects composite
+   * invalidation. Because it rides the scene, replayed frames
+   * (`lastScene` self-pump) carry it too.
+   */
   render(scene: Scene): void;
 
   /**

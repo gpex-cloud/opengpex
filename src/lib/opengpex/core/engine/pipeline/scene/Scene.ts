@@ -126,14 +126,14 @@ export interface ViewConfig {
  * The engine-owned geometry primitive an {@link SdfShapeParams} describes. A
  * RENDER-CORE enum, deliberately DISTINCT from any business discriminant (e.g. the
  * marker plugin's `MarkerKind`): the scene-assembly layer translates business kinds
- * into these primitive names (`markerToVectorSource`), so nothing under `gpu/` /
+ * into these primitive names (`vectorSources.ts`), so nothing under `gpu/` /
  * `pipeline/graph/` / `shaders/` ever imports a business model.
  */
 export type SdfPrimitive = 'rounded_rect' | 'ellipse' | 'arrow';
 
 /**
  * Analytic SDF description of a vector primitive — PURE GPU maths, no business
- * model. Produced by the scene-assembly layer (`markerToVectorSource`) and consumed
+ * model. Produced by the scene-assembly layer (`vectorSources.ts`) and consumed
  * by `SdfRenderer` as a compact uniform. Colours are already in the document WORKING
  * gamut (Display-P3) LINEAR light, so the offscreen render feeds the compositor as an
  * already-linear / already-working-gamut source.
@@ -176,7 +176,7 @@ export interface SdfShapeParams {
  * `computeTextLayout`) plus the font identity the renderer needs to
  * rasterize glyphs into the atlas at the target density band. Colours are
  * already in the document WORKING gamut (ProPhoto RGB) LINEAR light, straight
- * alpha, resolved by the scene-assembly mapper (`textToVectorSource`).
+ * alpha, resolved by the scene-assembly mapper (`vectorSources.ts`).
  */
 export interface TextParams {
   /** Pure CPU layout — box-local logical px. The renderer NEVER re-computes layout. */
@@ -234,7 +234,7 @@ export interface StrokeParams {
   /** Bounding height in LOGICAL pixels (see {@link StrokeParams.width}). */
   readonly height: number;
   /**
-   * Normalized by the scene mapper (`strokeToVectorSource`, `!== false`): `true`
+   * Normalized by the scene mapper (`vectorSources.ts`, `!== false`): `true`
    * keeps the analytic smoothstep AA edge, `false` selects binary capsule
    * coverage (hard edge, `dn <= 1`) in `fs_paint`. Required — never `undefined`
    * by the time params reach the renderer.
@@ -562,6 +562,18 @@ export interface LayerNode {
   readonly filters?: readonly FilterDesc[];
   /** Clip to the layer below (Photoshop-style clipping mask). */
   readonly clip?: boolean;
+  /**
+   * Present-time scheduling hint: this vector source is being LIVE-EDITED
+   * (mid-gesture — the stage's fast-track draft is streaming source-defining
+   * patches into it), so its transient re-renders every frame and gets special
+   * care — exact-size resident texture routing instead of the POT pool,
+   * and the below-cache fast path. Never affects pixels or cache keys: it is
+   * deliberately excluded from the composite signature (same discipline as the
+   * gain-map decision), and `composeView` stamps it fresh on a CLONE each frame
+   * — the cached `SceneContent` layers are never mutated, so the flag cannot go
+   * stale. Gestures are exclusive, so at most one node carries it per frame.
+   */
+  readonly useIncreComp?: boolean;
 }
 
 // ────────────────────────────────────────────────────────────

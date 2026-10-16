@@ -283,15 +283,10 @@ export default function CanvasStage() {
           frame: f,
           geometry,
           assets,
-          getImageOverride: (layerId: string) => {
-            const compositeKey = `${f.id}:${layerId}`;
-            const draft = v.buffered.layers[compositeKey];
-            return draft?.imageOverride || undefined;
-          },
           getBitmapMaskOverride: (layerId: string) => {
             const compositeKey = `${f.id}:${layerId}`;
             const draft = v.buffered.layers[compositeKey];
-            return draft?.bitmapMaskOverride || undefined;
+            return draft?.mask || undefined;
           },
           // Per-layer precision: serve decoded 16/32-bit source pixels so
           // the base layer uploads as rgba16float. Import-time warm makes this a
@@ -315,6 +310,24 @@ export default function CanvasStage() {
       dpr,
       geometry,
       channelMask,
+      // LIVE-EDIT probe (session → engine seam): while a vector edit gesture is
+      // in flight (brush stroke, marker shape, …), its transaction streams
+      // source-defining patches into `buffered.layers[frameId:layerId]` and
+      // DECLARED it at open (`useIncreComp` — the writer's opt-in to Incremental
+      // Compositing). composeView stamps the topmost vector layer of a declared
+      // draft as `useIncreComp` — a RENDER-SCHEDULING hint only ("this layer's
+      // transient is re-rendered every frame; give it special care"): the engine
+      // routes that layer's canvas-spanning transient through the exact-size
+      // resident cache instead of the POT pool's largest block, and drives the
+      // below-cache fast path. Tool-agnostic by construction: the stage knows
+      // nothing about which tool produced the layer. Committed layers never
+      // carry a live draft and stay on the ordinary path.
+      needIncreComp: (layerId) => {
+        if (!v.activeState.interacting) return false;
+        // The writer declaration, not a payload-field sniff: move drags, slider
+        // streams and eraser mask previews never declare it.
+        return !!v.buffered.layers[`${f.id}:${layerId}`]?.useIncreComp;
+      },
     });
 
     // Gain-map presentation warm: when this frame is gain-eligible, probe the
@@ -332,7 +345,8 @@ export default function CanvasStage() {
       _renderT0 = performance.now();
     }
 
-    // Render directly to WebGPU Swapchain
+    // Render directly to WebGPU Swapchain. The live-edit hint travels in the
+    // scene (`composeView` stamped it from the draft probe above).
     gpuEngine.render(scene);
 
     if (PERF_MON) {

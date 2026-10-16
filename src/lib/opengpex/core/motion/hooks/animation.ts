@@ -147,7 +147,7 @@ export function useLayerSync(
     // [Fix] Use composite key (frameId:layerId) to ensure artboard state isolation
     const cKey = frameId ? LayerUtils.getCompositeKey(frameId, l.id) : l.id;
     const draft = v?.buffered?.layers?.[cKey];
-    const merged = LayerUtils.mergeLayerDraft(l, draft);
+    const merged = LayerUtils.mergeLayerDraft(l, draft?.patch);
     
     const { rotation, cx, cy } = merged;
 

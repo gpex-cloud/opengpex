@@ -55,14 +55,14 @@
  * OUTPUT ENTRY: `{ sourceIsLinear/sourceIsWorkingGamut/sourceIntentApplied: true }`
  * so the downstream `drawLayer` packs flags that SKIP sRGB-decode / gamut-convert /
  * tone-map — the colours were already resolved to working-gamut linear light by the
- * scene-assembly mapper (`markerToVectorSource`).
+ * scene-assembly mapper (`vectorSources.ts`).
  *
  * @module core/gpu/graph/build/prepareVectorSources
  */
 
 import type { CompiledScene } from '../SceneCompiler';
 import { snapToPowerOfTwo } from '@opengpex/editor/core/engine/gpu/resources/TexturePool';
-import { isOversizedTransient } from '@opengpex/editor/core/engine/gpu/resources/oversizedTransient';
+import { isOversizedTransient, isCanvasSpanningTransient } from '@opengpex/editor/core/engine/gpu/resources/oversizedTransient';
 import { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTexture';
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
 import { hasEffectiveFilters } from '../composite/FilterPass';
@@ -110,8 +110,28 @@ export function prepareVectorSources(
     // (render path: reused in place, dims-keyed) when the provider is present,
     // else a one-shot exact-size texture destroyed after the frame (export/tests).
     // A below-threshold transient stays pooled (the common small-layer case).
+    //
+    // LIVE-EDIT bypass: the layer being edited right now re-renders EVERY
+    // frame; its box is held canvas-sized for the whole gesture (the mapper
+    // keeps a stable full-canvas box mid-gesture), so in the pool it would
+    // occupy the ladder's LARGEST block (on a 3000×4000 canvas exactly 4096² —
+    // 256 MiB at rgba32float, equal to the pool's whole idle budget) and one
+    // more large transient flowing in evicts it → per-frame churn. The
+    // logical-size test alone is not a router (a committed layer's snug box
+    // can still span the canvas, and N committed spanning layers would pin N
+    // resident slots that never idle out) — the live-vector flag restricts the
+    // bypass to the single actively live-edited layer (composeView stamps it,
+    // gestures are exclusive).
     const usage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING;
-    const oversized = isOversizedTransient(reqW, reqH);
+    const oversized =
+      isOversizedTransient(reqW, reqH) ||
+      (layer.useIncreComp &&
+        isCanvasSpanningTransient(
+          layer.width ?? 1,
+          layer.height ?? 1,
+          compiled.scene.frame.width,
+          compiled.scene.frame.height,
+        ));
 
     let raw: GPUTexture;
     let allocatedWidth: number;

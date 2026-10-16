@@ -448,9 +448,7 @@ export class MaskStrokeSession implements StrokeSession {
     const map = this.buildOverrideMap();
     if (Object.keys(map).length === 0) return;
     this._version++;
-    e.actions.fast.override(this.frameId, this.targetLayerId, {
-      bitmapMaskOverride: map,
-    }, 'layer');
+    e.actions.fast.overrideMask(this.frameId, this.targetLayerId, map);
   }
 
   begin(point: Point2D, _pressure: number): void {

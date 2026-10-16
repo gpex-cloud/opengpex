@@ -65,3 +65,37 @@ export function isOversizedTransient(width: number, height: number): boolean {
     snapToPowerOfTwo(height) > POOL_BUCKET_CEILING
   );
 }
+
+/**
+ * True when a layer's transient spans the WHOLE document canvas at LOGICAL
+ * size (layer box ≥ frame box on both axes, scale-independent — the caller's
+ * `reqW/reqH` may additionally be enlarged by export superscale or the
+ * interactive density band, which must NOT influence this judgement).
+ *
+ * WHY: a canvas-spanning transient POT-snaps to the very top of the pool
+ * ladder — on a 3000×4000 canvas exactly 4096² — which is the pool's LARGEST
+ * block: 128 MiB (rgba16float) or 256 MiB (rgba32float, equal to the pool's
+ * whole idle budget). Every frame it spends in the pool, its `loadOp: 'clear'`
+ * rewrite floods ~25–40% more texels than the content needs, and at the 32-bit
+ * format the block sits EXACTLY at `maxFreeBytes`, so one more large transient
+ * flowing in evicts it → next-frame `createTexture` churn (the allocation
+ * thrash the pool was built to prevent, resurrected at the budget edge).
+ *
+ * Judged on LOGICAL sizes only. The intended (sole) caller routes the
+ * LIVE-EDITED layer's transient — whose box is held CANVAS-SIZED for the
+ * whole gesture precisely so its resident slot shape stays stable — to the
+ * engine's exact-size resident cache instead of the pool. Committed layers
+ * (snug bounding boxes) deliberately stay pooled: N committed spanning layers
+ * would otherwise pin N near-canvas resident slots that are re-acquired every
+ * recomposite frame and never idle out. Because committed snug boxes can still
+ * span the canvas, the size test alone is NOT a router — the caller must
+ * additionally match the actively live-edited layer id.
+ */
+export function isCanvasSpanningTransient(
+  layerW: number,
+  layerH: number,
+  frameW: number,
+  frameH: number,
+): boolean {
+  return layerW >= frameW && layerH >= frameH;
+}

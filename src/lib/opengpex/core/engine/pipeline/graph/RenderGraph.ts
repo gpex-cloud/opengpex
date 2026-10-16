@@ -106,6 +106,16 @@ export interface CompositeContext {
    * one-shot exact-size texture destroyed after the frame (via `scratch`).
    */
   readonly acquireResidentTransient?: (key: string, desc: ResidentTransientDesc) => GPUTexture;
+  /**
+   * Start the composite from the target's EXISTING content instead of clearing
+   * it (first render pass uses `loadOp: 'load'`). The below-cache fast path
+   * copies the pre-composited below-layer texture into the target and then
+   * composites ONLY the live layer on top of it — the backdrop is meaningful
+   * content, and both the pure-separable pass and the ping-pong accumulator
+   * must preserve it. Unset → today's clear-first behaviour (export, tests,
+   * ordinary composites).
+   */
+  readonly initialLoad?: boolean;
   /** [PERF_MON] When set, each composite render pass writes GPU begin/end timestamps. */
   readonly gpuTimer?: GpuTimer;
 }
@@ -365,7 +375,14 @@ export class RenderGraph {
       const renderPass = commandEncoder.beginRenderPass({
         label: 'Composite Pass (pure separable)',
         colorAttachments: [
-          { view: target.texture.createView(), clearValue: CLEAR_COLOR, loadOp: 'clear', storeOp: 'store' },
+          {
+            view: target.texture.createView(),
+            clearValue: CLEAR_COLOR,
+            // Below-cache fast path: the target already holds the composited
+            // backdrop — preserve it, the live layer draws on top.
+            loadOp: ctx.initialLoad ? 'load' : 'clear',
+            storeOp: 'store',
+          },
         ],
         timestampWrites: ctx.gpuTimer?.pass('composite(pure)'),
       });
@@ -526,7 +543,7 @@ export class RenderGraph {
             {
               view: currentAccumulator.texture.createView(),
               clearValue: CLEAR_COLOR,
-              loadOp: isFirstStep ? 'clear' : 'load',
+              loadOp: isFirstStep ? (ctx.initialLoad ? 'load' : 'clear') : 'load',
               storeOp: 'store',
             },
           ],
@@ -580,10 +597,19 @@ export class RenderGraph {
         const maskTex = bmaskSources.get(layer.id);
 
         if (isFirstStep) {
+          // First step is non-separable: seed the accumulator. Normally an
+          // empty clear (BlendPass rewrites every pixel of the scratch); on the
+          // below-cache fast path the accumulator ALREADY holds the backdrop —
+          // preserve it with a load (no draws, just carry the content over).
           const initPass = commandEncoder.beginRenderPass({
             label: 'Initial Background Clear Pass',
             colorAttachments: [
-              { view: currentAccumulator.texture.createView(), clearValue: CLEAR_COLOR, loadOp: 'clear', storeOp: 'store' },
+              {
+                view: currentAccumulator.texture.createView(),
+                clearValue: CLEAR_COLOR,
+                loadOp: ctx.initialLoad ? 'load' : 'clear',
+                storeOp: 'store',
+              },
             ],
           });
           initPass.end();

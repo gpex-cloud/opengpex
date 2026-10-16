@@ -61,7 +61,8 @@
  * @module core/gpu/scene/compositeSignature
  */
 
-import type { Scene, LayerNode, BitmapMaskDesc, VectorMaskDesc } from './Scene';
+import type { Scene, LayerNode, BitmapMaskDesc, VectorMaskDesc, VectorParams } from './Scene';
+import { strokeSourceFingerprint } from './vectorSources';
 
 export interface CompositeSignatureOptions {
   /**
@@ -112,6 +113,35 @@ function vmaskSig(mask: VectorMaskDesc | undefined): string {
   return `polygon:${parts.join('|')}`;
 }
 
+/**
+ * Per-renderer source-signature routing. Renderers that own a large dynamic
+ * buffer (an in-place-mutated packed point stream) provide their own O(1)
+ * fingerprinter, defined in the renderer's OWN domain file beside the writer
+ * contract it encodes — this module only routes to it and knows nothing about
+ * the stream's layout or mutation rules. All other renderers take the generic
+ * JSON path (slow but always correct — no renderer can be forgotten): the
+ * `renderer` discriminator keeps the strategies' param blobs from colliding,
+ * all fields are plain numbers/arrays so JSON is deterministic, and any style/
+ * geometry edit changes the token and re-composites.
+ */
+function vectorSourceSig(src: VectorParams): string {
+  switch (src.renderer) {
+    case 'stroke':
+      return strokeSourceFingerprint(src.stroke);
+    case 'sdf':
+      return `vector:sdf:${JSON.stringify(src.sdf, charXReplacer)}`;
+    case 'text':
+      return `vector:text:${JSON.stringify(src.text, charXReplacer)}`;
+  }
+}
+
+/** The text layout's per-char x offsets (`charX`) are DERIVED data (prefix
+ * measures of the line text under the same metrics) — excluded to keep the
+ * signature compact. */
+function charXReplacer(_k: string, v: unknown): unknown {
+  return _k === 'charX' ? undefined : v;
+}
+
 function layerSig(layer: LayerNode, opts: CompositeSignatureOptions): string {
   const t = layer.transform;
   const tSig = `${t.a},${t.b},${t.c},${t.d},${t.tx},${t.ty}`;
@@ -132,19 +162,9 @@ function layerSig(layer: LayerNode, opts: CompositeSignatureOptions): string {
     srcSig = `raster:${layer.source.assetId}:${opts.getAssetEpoch(layer.source.assetId)}:${trc}`;
   } else {
     // Vector source: no asset epoch — the geometry/colour params ARE the pixels.
-    // Discriminate on `renderer` so the three strategies' param blobs never collide.
-    // All fields are plain numbers/arrays, so JSON is deterministic; any style/
-    // geometry edit changes the token and re-composites. The text layout's
-    // per-char x offsets (`charX`) are DERIVED data (prefix measures of the line
-    // text under the same metrics) — excluded to keep the signature compact.
-    const src = layer.source;
-    const params =
-      src.renderer === 'sdf'
-        ? src.sdf
-        : src.renderer === 'stroke'
-          ? src.stroke
-          : src.text;
-    srcSig = `vector:${src.renderer}:${JSON.stringify(params, (k, v) => (k === 'charX' ? undefined : v))}`;
+    // Signature shape is each renderer's own concern (routed via
+    // vectorSourceSig); only the pixel-affecting fields may enter the token.
+    srcSig = vectorSourceSig(layer.source);
   }
 
   // adjustments/filters are small declarative arrays; JSON is

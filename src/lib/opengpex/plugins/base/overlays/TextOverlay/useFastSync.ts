@@ -165,13 +165,17 @@ export function useTextEditorFastSync(
     // Write to fast track buffer, enabling LayerOverlay gizmo to read new bounding on next frame Ticker
     const compositeKey = LayerUtils.getCompositeKey(activeFrame.id, layerId);
     actions.mutateVolatile((v: VolatileState) => {
-      if (!v.buffered.layers[compositeKey]) {
-        v.buffered.layers[compositeKey] = {};
-      }
-      v.buffered.layers[compositeKey].bounding = { w, h };
-      v.buffered.layers[compositeKey].visibleShape = newVisibleShape;
-      v.buffered.layers[compositeKey].cx = newCx;
-      v.buffered.layers[compositeKey].cy = newCy;
+      const draft = v.buffered.layers[compositeKey] ?? {};
+      v.buffered.layers[compositeKey] = {
+        ...draft,
+        patch: {
+          ...draft.patch,
+          bounding: { w, h },
+          visibleShape: newVisibleShape,
+          cx: newCx,
+          cy: newCy,
+        },
+      };
     });
 
     // Also update slow track (Redux) to keep React state eventually consistent

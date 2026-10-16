@@ -151,7 +151,7 @@ export const createMarkerMoveHandler = (): InteractionHandler => {
       startCanvas = { x: e.point.canvas.x, y: e.point.canvas.y };
       startLayerPos = { x: layer.cx, y: layer.cy };
 
-      tx = new InteractionTransaction(e);
+      tx = new InteractionTransaction(e, { useIncreComp: true });
       tx.begin(false);
       e.actions.fast.setCursor('grabbing');
     },
@@ -413,7 +413,7 @@ export const createMarkerRotateHandler = (): InteractionHandler => {
         e.point.world.x - layerCx,
       );
 
-      tx = new InteractionTransaction(e);
+      tx = new InteractionTransaction(e, { useIncreComp: true });
       tx.begin(false);
       e.actions.fast.setCursor(ROTATE_CURSOR);
     },

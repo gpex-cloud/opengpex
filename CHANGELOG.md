@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.15
+
+- Workspace: brush, marker and eraser gestures on large canvases are now driven by a named, hardened pipeline — Incremental Compositing — with no change to rendering output
+
+---
+
 ## v2.0.14
 
 - Workspace: new "Send Feedback" entry in the cloud menu — send a bug report or idea straight to the team from inside the editor, with a diagnostics block (app version, browser/OS, screen, GPU info) you can read before sending; no canvas content or document data is ever included

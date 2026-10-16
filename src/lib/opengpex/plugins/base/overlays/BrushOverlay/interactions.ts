@@ -193,7 +193,8 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
     layerId = layer.id;
 
     // silent: `cmd.place` already took the gesture's undo checkpoint.
-    tx = new InteractionTransaction(e);
+    // Vector source redefinition → opt this gesture into Incremental Compositing.
+    tx = new InteractionTransaction(e, { useIncreComp: true });
     tx.begin(true);
 
     if (PERF_MON) {

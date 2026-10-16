@@ -19,7 +19,7 @@
 
 import { Frame, Layer, CameraState, NormalizedState, BitmapMask } from './models';
 import { Dimensions, LocalShape, LocalRect, LocalPolygon } from './primitives';
-import { VolatileState, InteractionState, UIConfig, GlobalHistoryState, InteractionSignalValue } from './state';
+import { VolatileState, InteractionState, UIConfig, GlobalHistoryState, InteractionSignalValue, BitmapMaskOverrideMap } from './state';
 import { BuiltCommand, EditorShortcut, BuiltPlugin } from './plugins';
 import {
   ClipboardLayerMetadata,
@@ -271,7 +271,10 @@ export interface EditorActions {
      * @deprecated Do not directly call the underlying high-frequency override API. Direct use easily triggers memory leaks or infinite loops.
      * Plug-in developers should use the upper-level wrapped `InteractionTransaction` class for high-frequency state synchronization during interactions.
      */
-    override: (frameId: string, id: string, props: Record<string, unknown>, type?: 'layer' | 'frame' | 'project') => void;
+    overrideLayer: (frameId: string, id: string, props: Partial<Layer>, decl?: { useIncreComp?: boolean }) => void;
+    overrideFrame: (frameId: string, props: Partial<Frame>) => void;
+    /** Fast-track the live eraser/restore MASK PREVIEW map (never landed via the draft merge). */
+    overrideMask: (frameId: string, id: string, map: BitmapMaskOverrideMap) => void;
     latestLayer: (frameId: string, id: string) => Layer | null;
     latestFrame: (id: string) => Frame | null;
     latestCamera: (id: string) => CameraState;

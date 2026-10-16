@@ -216,6 +216,38 @@ export interface BitmapMaskOverrideEntry {
  */
 export type BitmapMaskOverrideMap = Record<string, BitmapMaskOverrideEntry>;
 
+/**
+ * A per-gesture fast-track draft for one layer (keyed `frameId:layerId` in
+ * `VolatileState.buffered.layers`). Split by LANDING semantics — the only
+ * data-level distinction the bag has:
+ *
+ *   • `patch`  — Layer fields streamed by the live gesture, LANDED onto the
+ *     Layer when the transaction commits (pose during a move, `adjustments`
+ *     during a slider drag, `strokeData`/`markerData` during vector drawing).
+ *   • `mask`   — live eraser/restore mask preview, keyed by `maskId`; NEVER
+ *     landed via the draft merge (the eraser bakes through its own commit
+ *     path). See {@link BitmapMaskOverrideMap} / {@link BitmapMaskOverrideEntry}
+ *     for the per-record "preview == landing" contracts.
+ *
+ * `useIncreComp` is a WRITER DECLARATION, not a layer property: the gesture
+ * session that redefines a vector source (brush stroke / marker shape) opts in
+ * once at transaction open, declaring "my updates are per-frame churn — run
+ * Incremental Compositing for me". It is a request, not a promise: engagement
+ * is still gated (topmost layer, ≥2 layers, below-stack signature match). The
+ * probe reads this declaration instead of sniffing payload field names, so the
+ * engine never needs to know which tools exist. Gestures are exclusive and
+ * drafts are cleared at commit/abort, so `patch` and `mask` never coexist on
+ * one draft in practice.
+ */
+export interface LayerDraft {
+  /** Landing patch — see the interface doc. */
+  patch?: Partial<Layer>;
+  /** Writer declaration: opt this gesture into Incremental Compositing. */
+  useIncreComp?: boolean;
+  /** Live mask preview — see the interface doc. */
+  mask?: BitmapMaskOverrideMap;
+}
+
 export interface VolatileState {
   /** Synthesized active state signal */
   activeState: {
@@ -224,15 +256,7 @@ export interface VolatileState {
 
   /** Entity attributes buffer layer (shadow overlap) */
   buffered: {
-    layers: Record<string, Partial<Layer> & {
-      imageOverride?: CanvasImageSource;
-      /**
-       * Live eraser/restore mask preview records, keyed by `maskId` — see
-       * {@link BitmapMaskOverrideMap} / {@link BitmapMaskOverrideEntry} for the
-       * per-record "preview == landing" contracts (`bounds`, `hard`, `version`).
-       */
-      bitmapMaskOverride?: BitmapMaskOverrideMap;
-    }>;
+    layers: Record<string, LayerDraft>;
     frames: Record<string, Partial<Frame>>;
     project: Partial<EditorData>;
   };

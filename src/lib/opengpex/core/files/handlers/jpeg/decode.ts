@@ -50,7 +50,7 @@ export async function decodeJpeg(
       break;
     }
 
-    case 'ultrahdr-base': {
+    case 'jpeg-hdr': {
       // Gain-map carrier (1-gm): the original bytes STAY the display proxy (a
       // JPEG is browser-native; a transcode could only degrade it), and the
       // master is the SDR base lifted to linear f16 — the gain map is NOT
@@ -68,7 +68,7 @@ export async function decodeJpeg(
         // The decision declares the f16 identity on this lane; the lift can
         // only fail on a decoder/decision mismatch, which fails loudly.
         if (decision.colorIdentity.dataFormat !== 'rgba16float') {
-          throw new Error("decodeJpeg: 'ultrahdr-base' decision must declare rgba16float");
+          throw new Error("decodeJpeg: 'jpeg-hdr' decision must declare rgba16float");
         }
         highDepthSource = liftBaseToF16(rgba, bitmap.width, bitmap.height);
       } finally {

@@ -97,7 +97,7 @@ export function mergeFrameSnapshot(v: VolatileState, frame: Frame): { frame: Fra
     if (hasLayerDrafts) {
       const nextById: Record<string, Layer> = {};
       for (const id of frame.layers.order) {
-        nextById[id] = mergeLayerDraft(frame.layers.byId[id], v.buffered.layers[getCompositeKey(frame.id, id)]);
+        nextById[id] = mergeLayerDraft(frame.layers.byId[id], v.buffered.layers[getCompositeKey(frame.id, id)]?.patch);
       }
       latestFrame.layers = { byId: nextById, order: frame.layers.order };
     }

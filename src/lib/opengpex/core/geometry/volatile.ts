@@ -34,12 +34,12 @@ export function getLayerWorldMatrixVolatile(
   // 1. Check if the fast-track buffer has overlay properties for this layer (shadow layer)
   const draft = v?.buffered.layers[LayerUtils.getCompositeKey(frameId, layer.id)];
   
-  if (draft) {
+  if (draft?.patch) {
     // Merge fast-track data
     return getLayerWorldMatrix(layer, {
-      cx: draft.cx ?? undefined,
-      cy: draft.cy ?? undefined,
-      rotation: draft.rotation ?? undefined
+      cx: draft.patch.cx ?? undefined,
+      cy: draft.patch.cy ?? undefined,
+      rotation: draft.patch.rotation ?? undefined
     });
   }
 
@@ -64,11 +64,11 @@ export function getLayerLocalMatrixVolatile(
 ): Matrix3x3 {
   const draft = v?.buffered.layers[LayerUtils.getCompositeKey(frameId, layer.id)];
   
-  if (draft) {
+  if (draft?.patch) {
     return getLayerLocalMatrix(layer, canvasDim, {
-      cx: draft.cx ?? undefined,
-      cy: draft.cy ?? undefined,
-      rotation: draft.rotation ?? undefined
+      cx: draft.patch.cx ?? undefined,
+      cy: draft.patch.cy ?? undefined,
+      rotation: draft.patch.rotation ?? undefined
     });
   }
 

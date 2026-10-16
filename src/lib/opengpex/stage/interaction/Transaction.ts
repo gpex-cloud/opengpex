@@ -45,7 +45,15 @@ export class InteractionTransaction {
   private hasFrameUpdates = false;
   private hasLayerUpdates = false;
 
-  constructor(private e: InteractionEvent) {}
+  /**
+   * `decl.useIncreComp` — the gesture session's WRITER DECLARATION that its
+   * updates redefine a vector source (brush stroke / marker shape). Declared
+   * once here at open; the facade keeps it stable on the draft for the whole
+   * gesture, and the engine's Incremental Compositing probe reads it instead
+   * of sniffing payload field names. Omitted ⇒ plain landing patch (move
+   * drags, slider streams, …) — the fast paths are never engaged for it.
+   */
+  constructor(private e: InteractionEvent, private decl?: { useIncreComp?: boolean }) {}
 
   /** Current transaction state */
   get state(): TransactionState { return this._state; }
@@ -95,10 +103,12 @@ export class InteractionTransaction {
 
     if (type === 'layer' && targetId) {
       this.hasLayerUpdates = true;
-      this.e.actions.fast.override(this.activeFrameId, targetId, props, 'layer');
+      this.e.actions.fast.overrideLayer(this.activeFrameId, targetId, props, {
+        useIncreComp: this.decl?.useIncreComp,
+      });
     } else if (type === 'frame') {
       this.hasFrameUpdates = true;
-      this.e.actions.fast.override(this.activeFrameId, this.activeFrameId, props, 'frame');
+      this.e.actions.fast.overrideFrame(this.activeFrameId, props);
     }
   }
 

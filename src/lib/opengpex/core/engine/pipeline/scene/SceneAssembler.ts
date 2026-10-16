@@ -52,9 +52,7 @@ import { CHANNEL_MASK_RGB } from './Scene';
 import type { IEngine, UploadSource, LutUpload } from '@opengpex/editor/core/engine/pipeline/IEngine';
 import type { HighDepthSource } from '@opengpex/editor/core/engine/sources/HighDepthSource';
 import { translateLayerAdjustments } from './adjustments';
-import { markerToVectorSource } from './markerToVectorSource';
-import { textToVectorSource } from './textToVectorSource';
-import { strokeToVectorSource } from './strokeToVectorSource';
+import { layerToVectorSource } from './vectorSources';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
 
 /**
@@ -255,7 +253,6 @@ export interface SceneContentOptions {
   readonly geometry: GeometryService;
   readonly assets?: AssetService;
   readonly engine?: IEngine;
-  readonly getImageOverride?: (layerId: string) => ImageBitmap | CanvasImageSource | undefined;
   readonly getBitmapMaskOverride?: (
     layerId: string,
   ) => BitmapMaskOverrideMap | undefined;
@@ -281,6 +278,15 @@ export interface SceneViewOptions {
   readonly dpr: number;
   readonly geometry: GeometryService;
   readonly channelMask?: SceneChannelMask;
+  /**
+   * Session-side probe for the LIVE-EDIT hint: returns whether the named
+   * vector layer's fast-track draft is currently streaming source-defining
+   * patches (brush/marker gesture in flight). Injected by the stage — this is
+   * editor session state the assembler (and engine) must not reach into, the
+   * same seam as buildContent's override getters. Omitted ⇒ no layer is ever
+   * stamped live (tests, export, idle frames).
+   */
+  readonly needIncreComp?: (layerId: string) => boolean;
 }
 
 /**
@@ -393,7 +399,6 @@ export class SceneAssembler {
       frame: f,
       geometry,
       assets,
-      getImageOverride,
       getBitmapMaskOverride,
       getHighDepthSource,
       hdr = false,
@@ -495,24 +500,24 @@ export class SceneAssembler {
       const layerHeight = latestLayer.bounding.h;
 
       // Vector spine (architecture B): a `vector` layer is rendered analytically on
-      // the GPU instead of the CPU Canvas2D bitmap path. Three renderer strategies share
-      // this seam, mapped ONCE here (the sole business→vector boundary):
+      // the GPU instead of the CPU Canvas2D bitmap path. `layerToVectorSource`
+      // (vectorSources.ts — the sole business→vector boundary and the ONLY engine
+      // module that knows which vector tools exist) maps the layer's tool payload
+      // ONCE to one of the renderer strategies:
       //   • `markerData`  → `renderer: 'sdf'`    (rect/ellipse/arrow fragment solve)
       //   • `strokeData`  → `renderer: 'stroke'` (logic brush; compute-extruded ribbon)
       //   • `textData`    → `renderer: 'text'`   (GPU glyph quads over a coverage atlas;
-      //     CPU layout runs in the mapper, the GPU side never re-computes layout)
-      // A vector layer carries exactly one of the three; the mappers return
-      // undefined for each other's kinds, so the `??` chain picks the right
-      // strategy. `size`/bounding MUST match the LayerNode dims below (marker takes them
+      //     CPU layout runs in the translator, the GPU side never re-computes layout)
+      // `size`/bounding MUST match the LayerNode dims below (marker takes them
       // explicitly; stroke/text read `layer.bounding` internally — same source). When
       // defined, the layer skips the bitmap upload entirely and its `source` becomes the
       // `{ kind: 'vector', ... }` descriptor; the shared tail (transform / crop / mask /
       // adjust / opacity / blend / clip) is identical to a raster's. Working gamut is
       // WORKING_GAMUT (see colorSpace below).
-      const vectorSource =
-        markerToVectorSource(latestLayer, WORKING_GAMUT, layerWidth, layerHeight) ??
-        strokeToVectorSource(latestLayer, WORKING_GAMUT) ??
-        textToVectorSource(latestLayer, WORKING_GAMUT);
+      const vectorSource = layerToVectorSource(latestLayer, WORKING_GAMUT, {
+        width: layerWidth,
+        height: layerHeight,
+      });
       const isVectorLayer = vectorSource !== undefined;
 
       let crop: { x: number; y: number; w: number; h: number } | undefined;
@@ -532,8 +537,7 @@ export class SceneAssembler {
           : layer.src
         : null;
 
-      const overrideImg = getImageOverride ? getImageOverride(layer.id) : undefined;
-      const rawImg = overrideImg || (currentSrc ? sourceBitmapCache.getOrFetch(currentSrc) : null);
+      const rawImg = currentSrc ? sourceBitmapCache.getOrFetch(currentSrc) : null;
 
       // Upload bitmap to GPU resident texture.
       // Key by `assetId` (source content hash), NOT `layer.id`,
@@ -910,6 +914,26 @@ export class SceneAssembler {
       geometry.Matrix.scale(snap.renderScale.x, snap.renderScale.y),
     );
 
+    // Stamp the LIVE-EDIT hint (present-time scheduling fact, same discipline
+    // as the gain-map decision below: recomputed every frame, never cached,
+    // never part of composite signatures). Gestures are exclusive, so the scan
+    // names at most one vector layer; it is stamped on a CLONE — the cached
+    // `content.layers` are shared across frames and must never be mutated.
+    const needIncreComp = options.needIncreComp;
+    let liveVectorLayerId: string | undefined;
+    if (needIncreComp) {
+      for (let i = content.layers.length - 1; i >= 0; i--) {
+        const l = content.layers[i];
+        if (l.source.kind === 'vector' && needIncreComp(l.id)) {
+          liveVectorLayerId = l.id;
+          break;
+        }
+      }
+    }
+    const layers = liveVectorLayerId
+      ? content.layers.map((l) => (l.id === liveVectorLayerId ? { ...l, useIncreComp: true } : l))
+      : content.layers;
+
     return {
       frame: content.frame,
       artboard: content.artboard,
@@ -934,7 +958,7 @@ export class SceneAssembler {
         },
         target: { width: targetW, height: targetH },
       },
-      layers: content.layers,
+      layers,
     };
   }
 

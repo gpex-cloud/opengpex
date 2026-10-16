@@ -25,7 +25,7 @@
  *   v1 imperative renderer                        → v2 declarative `IEngine`
  *   beginFrame + pushCommand* + flush + endFrame  → render(scene)
  *   drawLayerDirect (legacy back-door)            → (gone — one path only)
- *   DrawLayerOptions.isInteracting                → (gone — not a render concern)
+ *   DrawLayerOptions.useIncreComp                 → (gone — not a render concern)
  *   Legacy 2D + Vips (two engines)                → one RenderGraph, two sinks
  * Architecture overview:
  *   • Render pipeline: SceneCompiler + RenderGraph + CompositePass + ViewPass
@@ -80,6 +80,7 @@ import { PERF_MON } from '@opengpex/editor/core/helpers/config';
 
 // Backward-compatible re-export of the engine contract (defined inline here pre-refactor).
 export type { IEngine, ExportOptions, ExportResult, UploadSource, LutUpload } from '@opengpex/editor/core/engine/pipeline/IEngine';
+
 
 // ────────────────────────────────────────────────────────────
 // WebGpuEngine
@@ -171,6 +172,34 @@ export class WebGpuEngine implements IEngine {
    * else) untouched → zero re-composites. Also feeds the present sampler.
    */
   private compositeDensityScale = 1;
+
+  /**
+   * BELOW-CACHE fast path (live vector editing on many-layer documents): the
+   * composite of every layer EXCEPT the actively live-edited one, kept alive
+   * across frames. While a vector gesture is in flight, the below layers are
+   * provably static (gestures are exclusive — nothing else can edit mid-
+   * gesture), so after one rebuild each subsequent frame only has to copy this
+   * texture into the composite target and draw the ONE live layer on top —
+   * compositing cost becomes O(1) instead of O(layers × canvas). The cache is
+   * validated every fast-path frame against a freshly computed signature of
+   * the below layers (`belowCacheSig`), so ANY change below — content,
+   * attributes, order, count, undo/redo, asset re-upload — misses and forces a
+   * rebuild through the ordinary full composite. Runs on BOTH channels (the
+   * budget decision sends large 32-bit documents to the roi channel, exactly
+   * the machines this path exists for); the cache is sized to whichever
+   * channel's target (roi rect → smaller when zoomed in), keyed by the roi
+   * rebuild key so a viewport move mid-gesture rebuilds once.
+   */
+  private belowCacheTexture: LayerTexture | null = null;
+  /** Signature of the below layers (`scene.layers` minus the live layer) the cache was built from. */
+  private belowCacheSig: string | null = null;
+  /** Creation dims/format/density of the cache — a mismatch forces a rebuild. */
+  private belowCacheW = 0;
+  private belowCacheH = 0;
+  private belowCacheFormat: GPUTextureFormat | null = null;
+  private belowCacheDensityScale = 1;
+  /** ROI rebuild key the cache was built for (null on the full channel) — a rect move invalidates. */
+  private belowCacheRoiKey: string | null = null;
 
   /**
    * One-entry memo for the per-frame channel decision. The
@@ -411,6 +440,14 @@ export class WebGpuEngine implements IEngine {
    * Declarative frame submission.
    *
    * Draws scene layers bottom-to-top onto the swapchain render pass.
+   *
+   * The LIVE-EDIT hint (`LayerNode.useIncreComp`, stamped by `composeView`
+   * from the stage-injected draft probe — the topmost vector layer with a live
+   * source-defining patch; tool-agnostic) is a present-time scheduling hint for
+   * the vector prepass (resident-transient bypass) and the below-cache fast
+   * path; absent → compositing is unaffected. It rides the scene, so device-loss
+   * / reveal replays of `lastScene` carry it too — no pooled-route fallback
+   * frame on replay.
    */
   render(scene: Scene): void {
     this.lastScene = scene;
@@ -608,21 +645,39 @@ export class WebGpuEngine implements IEngine {
           // switch frees VRAM instead of stranding oversized ghosts in the pool cache.
           this.residentTransients?.clear();
           this.texturePool.evictUnused(0);
+          // The below-cache was built at the old dims/density — release it now
+          // instead of stranding a canvas-sized ghost until the next gesture.
+          this.belowCacheTexture?.destroy();
+          this.belowCacheTexture = null;
+          this.belowCacheSig = null;
+          this.belowCacheRoiKey = null;
         }
         if (!this.compositeTexture) {
           this.compositeTexture = this.#createCompositeTarget(device, compW, compH, workingFormat);
         }
 
-        _pCompEncMs = this.#compositeInto(compiled, {
-          device,
-          workingFormat,
-          target: this.compositeTexture!,
-          // Render the composite at the current density band's achieved
-          // scale.
-          interactiveScale: [density.scaleX, density.scaleY],
-          perfStart: _pCompEncT0,
-        });
-
+        // ── Below-cache fast path (live vector editing) ──
+        // While a vector gesture is in flight, every frame recomposites ONLY
+        // the live layer over a pre-baked copy of the below layers, instead of
+        // re-drawing all N layers (one-per-stroke layer model → cost grows
+        // with every committed stroke). See #encodeWithBelowCache. Runs on
+        // BOTH channels (full + roi): the channel decision is budget-driven
+        // (a 3024×4032 rgba32float document lands in roi), so a full-only
+        // fast path would never fire on exactly the machines this exists for.
+        const encFast = this.#encodeWithBelowCache(device, scene, workingFormat, [density.scaleX, density.scaleY], densityScale, null, this.compositeTexture!, compW, compH, undefined, _pCompEncT0);
+        if (encFast !== null) {
+          _pCompEncMs = encFast;
+        } else {
+          _pCompEncMs = this.#compositeInto(compiled, {
+            device,
+            workingFormat,
+            target: this.compositeTexture!,
+            // Render the composite at the current density band's achieved
+            // scale.
+            interactiveScale: [density.scaleX, density.scaleY],
+            perfStart: _pCompEncT0,
+          });
+        }
         this.compositeSignature = signature;
         this.compositeTargetW = compW;
         this.compositeTargetH = compH;
@@ -657,6 +712,14 @@ export class WebGpuEngine implements IEngine {
       if (this.compositeTexture) {
         this.compositeTexture.destroy();
         this.compositeTexture = null;
+        // Channel flip retires the fast path's cache along with the full
+        // channel's target; the roi branch rebuilds its own on the next
+        // live-edit gesture (freeing the canvas-sized texture keeps the roi
+        // budget clean).
+        this.belowCacheTexture?.destroy();
+        this.belowCacheTexture = null;
+        this.belowCacheSig = null;
+        this.belowCacheRoiKey = null;
         this.compositeSignature = null;
         this.compositeFormat = null;
         this.compositeTargetW = 0;
@@ -709,18 +772,37 @@ export class WebGpuEngine implements IEngine {
             this.roiTexture = this.#createCompositeTarget(device, roi.targetW, roi.targetH, workingFormat);
           }
 
-          _pCompEncMs = this.#compositeInto(compiled, {
-            device,
-            workingFormat,
-            target: this.roiTexture,
-            interactiveScale: [roiDensity.scaleX, roiDensity.scaleY],
-            exportViewport: {
-              targetWidth: roi.targetW,
-              targetHeight: roi.targetH,
-              sourceRect: [intersect.x, intersect.y, intersect.w, intersect.h],
-            } satisfies ExportViewport,
-            perfStart: _pCompEncT0,
-          });
+          // Below-cache fast path on the roi channel: identical mechanism to
+          // the full branch, sized to the roi rect (smaller than the document
+          // when zoomed in — proportionally cheaper copy + live-layer draw).
+          // The roi rebuild key participates in cache validity: panning the
+          // viewport mid-gesture shifts the rect → one rebuild at the new rect.
+          const roiViewport: ExportViewport = {
+            targetWidth: roi.targetW,
+            targetHeight: roi.targetH,
+            sourceRect: [intersect.x, intersect.y, intersect.w, intersect.h],
+          };
+          const encFast = this.#encodeWithBelowCache(
+            device, scene, workingFormat,
+            [roiDensity.scaleX, roiDensity.scaleY],
+            Math.min(roiDensity.scaleX, roiDensity.scaleY),
+            roi.rebuildKey,
+            this.roiTexture, roi.targetW, roi.targetH,
+            roiViewport,
+            _pCompEncT0,
+          );
+          if (encFast !== null) {
+            _pCompEncMs = encFast;
+          } else {
+            _pCompEncMs = this.#compositeInto(compiled, {
+              device,
+              workingFormat,
+              target: this.roiTexture,
+              interactiveScale: [roiDensity.scaleX, roiDensity.scaleY],
+              exportViewport: roiViewport,
+              perfStart: _pCompEncT0,
+            });
+          }
 
           this.roiSignature = signature;
           this.roiRectKey = roi.rebuildKey;
@@ -1001,6 +1083,17 @@ export class WebGpuEngine implements IEngine {
     this.compositeTargetW = 0;
     this.compositeTargetH = 0;
     this.compositeDensityScale = 1;
+    // The below-cache is device-owned like the composite target — tear it down
+    // with the same lifecycle (device loss / teardown); the next live-edit
+    // gesture rebuilds it from the ordinary full composite.
+    this.belowCacheTexture?.destroy();
+    this.belowCacheTexture = null;
+    this.belowCacheSig = null;
+    this.belowCacheFormat = null;
+    this.belowCacheW = 0;
+    this.belowCacheH = 0;
+    this.belowCacheDensityScale = 1;
+    this.belowCacheRoiKey = null;
     this.#clearRoiChannel();
     // Epochs restart (an upload against the new device is a genuine first
     // transfer) and the signature memo drops (the next frame recomputes).
@@ -1055,11 +1148,24 @@ export class WebGpuEngine implements IEngine {
       interactiveScale: readonly [number, number];
       /** ROI channel only: the sub-rect seam (sourceRect shifts world→NDC). */
       exportViewport?: ExportViewport;
+      /**
+       * Composite on TOP of the target's existing content (first pass
+       * `loadOp: 'load'`) — the below-cache fast path seeds the target with a
+       * copy of the below-layer cache before this call.
+       */
+      initialLoad?: boolean;
+      /**
+       * Skip arming the composite GpuTimer (below-cache fast path encodes TWO
+       * composites per frame; the first call arms it, subsequent calls must
+       * not — the timer self-throttles via its busy flag, but skipping keeps
+       * the pass instrumentation attributed to the primary encode).
+       */
+      armTimer?: boolean;
       /** The `PERF_MON`-gated timestamp taken before the target lifecycle. */
       perfStart: number;
     },
   ): number {
-    const { device, workingFormat, target, interactiveScale, exportViewport } = opts;
+    const { device, workingFormat, target, interactiveScale, exportViewport, initialLoad, armTimer = true } = opts;
     // render() validated these against the live device before dispatching.
     const pipelineCache = this.pipelineCache!;
     const bufferRing = this.bufferRing!;
@@ -1069,7 +1175,7 @@ export class WebGpuEngine implements IEngine {
     // still pending → natural sampling). `startSubmit` gates whether passes
     // instrument.
     let armed = false;
-    if (PERF_MON) {
+    if (PERF_MON && armTimer) {
       if (!this._compTimer) this._compTimer = new GpuTimer(device, 'composite');
       armed = this._compTimer.startSubmit();
     }
@@ -1101,6 +1207,7 @@ export class WebGpuEngine implements IEngine {
       acquireResidentTransient: this.residentTransients
         ? (key, desc) => this.residentTransients!.acquire(key, desc)
         : undefined,
+      initialLoad,
       gpuTimer: armed ? this._compTimer! : undefined,
     });
 
@@ -1168,6 +1275,141 @@ export class WebGpuEngine implements IEngine {
     // Exact size ⇒ allocated == content ⇒ maxU=maxV=1.0 (present samples the
     // whole texture; no POT sub-rect fraction).
     return new LayerTexture({ texture, width, height, format });
+  }
+
+  /**
+   * Full-canvas GPU-to-GPU copy between two engine-owned exact-size textures
+   * of identical dims/format (below-cache seeding). Runs on its own command
+   * encoder and submits immediately — WebGPU requires the copy to be recorded
+   * OUTSIDE any render pass, and both #compositeInto calls around it own their
+   * encoders.
+   */
+  #copyFullTexture(
+    device: GPUDevice,
+    src: GPUTexture,
+    dst: GPUTexture,
+    width: number,
+    height: number,
+  ): void {
+    const encoder = device.createCommandEncoder({ label: 'Below Cache Seed Copy' });
+    encoder.copyTextureToTexture({ texture: src }, { texture: dst }, [width, height, 1]);
+    device.queue.submit([encoder.finish()]);
+  }
+
+  /**
+   * Below-cache fast path encoder, shared by BOTH channels (full + roi).
+   *
+   * While the stage reports a live-edited TOPMOST vector layer, every
+   * recomposite frame is encoded as: below-layer cache → copy → live layer
+   * drawn on top (`initialLoad`), instead of re-drawing all N layers. The
+   * below cache is validated EVERY frame against a freshly computed signature
+   * of the below layers, so the whole invalidation matrix (below content /
+   * attributes / order / count, undo/redo, asset re-upload) collapses into one
+   * string compare; dims/format/density and the roi rebuild key (a viewport
+   * rect move) are compared alongside it.
+   *
+   * Returns the total encode time in ms, or `null` when the fast path does not
+   * apply this frame (no hint / hint not topmost / single-layer scene) — the
+   * caller then runs the ordinary full composite. `target`/`targetW`/`targetH`
+   * and `exportViewport` are channel-agnostic: the roi branch passes its rect
+   * viewport and the below cache is sized to the roi (smaller when zoomed in).
+   */
+  #encodeWithBelowCache(
+    device: GPUDevice,
+    scene: Scene,
+    workingFormat: GPUTextureFormat,
+    density: readonly [number, number],
+    densityScale: number,
+    rebuildKey: string | null,
+    target: LayerTexture,
+    targetW: number,
+    targetH: number,
+    exportViewport: ExportViewport | undefined,
+    perfStart: number,
+  ): number | null {
+    // Flag-based guard: the hint names the TOPMOST layer (an exclusive flag,
+    // stamped by composeView on the one live vector node). A flagged non-topmost
+    // layer fails here → ordinary full composite.
+    const last = scene.layers.length > 0 ? scene.layers[scene.layers.length - 1] : undefined;
+    if (!last?.useIncreComp || scene.layers.length < 2) return null;
+
+    const belowScene: Scene = { ...scene, layers: scene.layers.slice(0, -1) };
+    const activeScene: Scene = { ...scene, layers: [scene.layers[scene.layers.length - 1]] };
+    const belowSig = computeCompositeSignature(belowScene, {
+      getAssetEpoch: (assetId) => this.assetEpochs.get(assetId) ?? 0,
+      workingFormat,
+    });
+    const cacheDimsMatch =
+      this.belowCacheTexture !== null &&
+      this.belowCacheW === targetW &&
+      this.belowCacheH === targetH &&
+      this.belowCacheFormat === workingFormat &&
+      this.belowCacheDensityScale === densityScale &&
+      this.belowCacheRoiKey === rebuildKey;
+    const cacheValid = cacheDimsMatch && this.belowCacheSig === belowSig;
+
+    // [PERF_MON] Fast-path engagement beacon: EVERY fast frame prints
+    // "below-fast"; a rebuild additionally prints "below-fast rebuild". If
+    // neither prints during a brush drag, the fast path never engaged (hint
+    // chain broken) — if they do, the remaining cost is the O(1) constant
+    // floor (copy + live layer + present), not layer count.
+    if (PERF_MON) {
+      console.info(`[BelowCache] ${cacheValid ? 'fast' : 'rebuild'} layers=${scene.layers.length} belowSigHit=${cacheValid}`);
+    }
+
+    if (!cacheValid) {
+      // Rebuild: composite the below layers into the below cache…
+      if (!cacheDimsMatch) {
+        this.belowCacheTexture?.destroy();
+        this.belowCacheTexture = this.#createCompositeTarget(device, targetW, targetH, workingFormat);
+        this.belowCacheW = targetW;
+        this.belowCacheH = targetH;
+        this.belowCacheFormat = workingFormat;
+        this.belowCacheDensityScale = densityScale;
+        this.belowCacheRoiKey = rebuildKey;
+      }
+      const belowCompiled = SceneCompiler.compile(belowScene);
+      const encBelow = this.#compositeInto(belowCompiled, {
+        device,
+        workingFormat,
+        target: this.belowCacheTexture!,
+        interactiveScale: density,
+        exportViewport,
+        perfStart,
+        armTimer: false,
+      });
+      // …seed the composite target from it…
+      this.#copyFullTexture(device, this.belowCacheTexture!.texture, target.texture, targetW, targetH);
+      // …and draw the live layer on top of the backdrop.
+      const activeCompiled = SceneCompiler.compile(activeScene);
+      const encActive = this.#compositeInto(activeCompiled, {
+        device,
+        workingFormat,
+        target,
+        interactiveScale: density,
+        exportViewport,
+          initialLoad: true,
+        perfStart,
+        armTimer: false,
+      });
+      this.belowCacheSig = belowSig;
+      return encBelow + encActive;
+    }
+
+    // Fast frame: the below layers are provably unchanged — copy the cache and
+    // composite ONLY the live layer over it.
+    this.#copyFullTexture(device, this.belowCacheTexture!.texture, target.texture, targetW, targetH);
+    const activeCompiled = SceneCompiler.compile(activeScene);
+    return this.#compositeInto(activeCompiled, {
+      device,
+      workingFormat,
+      target,
+      interactiveScale: density,
+      exportViewport,
+      initialLoad: true,
+      perfStart,
+      armTimer: false,
+    });
   }
 
   /**

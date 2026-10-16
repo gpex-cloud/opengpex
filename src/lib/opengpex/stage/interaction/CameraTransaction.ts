@@ -51,7 +51,7 @@ export class CameraTransaction {
    * Override camera state at high frequency (60fps, no Undo generated)
    */
   override(camera: CameraState) {
-    this.actions.fast.override(this.frameId, this.frameId, { camera }, 'frame');
+    this.actions.fast.overrideFrame(this.frameId, { camera });
   }
 
   /**

@@ -22,6 +22,7 @@ import {
   VolatileState, EditorData, EditorAction, Layer, Frame, CameraState,
 } from '@opengpex/editor/core/types';
 import { getCompositeKey, mergeLayerDraft } from './merge';
+import type { BitmapMaskOverrideMap } from '@opengpex/editor/core/types';
 
 /**
  * Dependencies injected into the fast-track facade factory.
@@ -69,7 +70,7 @@ export function createFastFacade(deps: FastFacadeDeps) {
 
       const compositeKey = getCompositeKey(frameId, id);
       const draft = v.buffered.layers[compositeKey];
-      return (v.activeState.interacting && draft) ? mergeLayerDraft(layer, draft) : layer;
+      return (v.activeState.interacting && draft?.patch) ? mergeLayerDraft(layer, draft.patch) : layer;
     },
     latestFrame: (id: string): Frame | null => {
       const v = volatileRef.current;
@@ -95,18 +96,40 @@ export function createFastFacade(deps: FastFacadeDeps) {
     isInteracting: () => volatileRef.current.activeState.interacting,
     getTransient: (key: string) => volatileRef.current.transient[key],
     setTransient: (key: string, data: unknown) => mutateVolatile(v => { v.transient[key] = data as Record<string, unknown>; }),
-    override: (frameId: string, id: string, props: Record<string, unknown>, type: 'layer' | 'frame' | 'project' = 'layer') => {
+    overrideLayer: (frameId: string, id: string, props: Partial<Layer>, decl?: { useIncreComp?: boolean }) => {
       mutateVolatile(v => {
-        if (type === 'layer') {
-          const compositeKey = getCompositeKey(frameId, id);
-          v.buffered.layers[compositeKey] = { ...v.buffered.layers[compositeKey], ...props };
-          v._bufferVersion++; // [Perf] Invalidate snapshot cache
-        } else if (type === 'frame') {
-          v.buffered.frames[id] = { ...v.buffered.frames[id], ...props };
-          v._bufferVersion++; // [Perf] Invalidate snapshot cache
-        } else {
-          v.buffered.project = { ...v.buffered.project, ...props };
-        }
+        const compositeKey = getCompositeKey(frameId, id);
+        const draft = v.buffered.layers[compositeKey];
+        // Slot split by landing semantics: gesture Layer fields land via
+        // `patch`; the writer declaration rides along (a gesture-level fact,
+        // declared once at transaction open, stable for the whole gesture).
+        v.buffered.layers[compositeKey] = {
+          patch: { ...draft?.patch, ...props },
+          useIncreComp: decl?.useIncreComp || draft?.useIncreComp,
+          mask: draft?.mask,
+        };
+        v._bufferVersion++; // [Perf] Invalidate snapshot cache
+      });
+    },
+
+    overrideFrame: (frameId: string, props: Partial<Frame>) => {
+      mutateVolatile(v => {
+        v.buffered.frames[frameId] = { ...v.buffered.frames[frameId], ...props };
+        v._bufferVersion++; // [Perf] Invalidate snapshot cache
+      });
+    },
+
+    overrideMask: (frameId: string, id: string, map: BitmapMaskOverrideMap) => {
+      mutateVolatile(v => {
+        const compositeKey = getCompositeKey(frameId, id);
+        const draft = v.buffered.layers[compositeKey];
+        // The eraser streams the FULL live map each frame — replace, don't merge.
+        v.buffered.layers[compositeKey] = {
+          patch: draft?.patch,
+          useIncreComp: draft?.useIncreComp,
+          mask: map,
+        };
+        v._bufferVersion++; // [Perf] Invalidate snapshot cache
       });
     },
 
@@ -119,10 +142,11 @@ export function createFastFacade(deps: FastFacadeDeps) {
         Object.entries(v.buffered.layers).forEach(([compositeKey, patch]) => {
           const [fId, lId] = compositeKey.split(':');
           if (!frameGroups[fId]) frameGroups[fId] = {};
-          // Filter out non-serialized imageOverride and bitmapMaskOverride properties to prevent them from entering the Redux Store
-          const { imageOverride: _io1, bitmapMaskOverride: _bm1, ...serializablePatch } = patch;
-          if (Object.keys(serializablePatch).length > 0) {
-            frameGroups[fId][lId] = serializablePatch;
+          // Only the landing patch enters the Redux Store — the mask preview
+          // never lands here (the eraser bakes through its own commit path),
+          // and the useIncreComp declaration is a gesture fact, not layer data.
+          if (patch.patch && Object.keys(patch.patch).length > 0) {
+            frameGroups[fId][lId] = patch.patch;
           }
         });
 
@@ -143,10 +167,9 @@ export function createFastFacade(deps: FastFacadeDeps) {
           const compositeEntry = Object.entries(v.buffered.layers).find(([key]) => key.endsWith(`:${id}`));
           if (compositeEntry) {
             const [fId] = compositeEntry[0].split(':');
-            // Filter out non-serialized imageOverride and bitmapMaskOverride properties to prevent them from entering the Redux Store
-            const { imageOverride: _io2, bitmapMaskOverride: _bm2, ...serializablePatch } = compositeEntry[1];
-            if (Object.keys(serializablePatch).length > 0) {
-              dispatch({ type: 'UPDATE_LAYER', payload: { frameId: fId, layerId: id, patch: serializablePatch } });
+            const landingPatch = compositeEntry[1].patch;
+            if (landingPatch && Object.keys(landingPatch).length > 0) {
+              dispatch({ type: 'UPDATE_LAYER', payload: { frameId: fId, layerId: id, patch: landingPatch } });
             }
           }
         } else {
