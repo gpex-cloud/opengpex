@@ -160,6 +160,14 @@ function layerSig(layer: LayerNode, opts: CompositeSignatureOptions): string {
     // 'srgb-trc' hashes to the same token, so existing signatures are unchanged.
     const trc = layer.source.trc ?? 'srgb-trc';
     srcSig = `raster:${layer.source.assetId}:${opts.getAssetEpoch(layer.source.assetId)}:${trc}`;
+    // The RAW style preset flips the render-intent nibble (1↔2) at the
+    // composite — its composited output differs, so the toggle must re-composite
+    // (20261016 device finding: without this token the Style switch rendered
+    // stale pixels until an unrelated change rebuilt the cache). RAW-only field;
+    // undefined (every non-RAW source) hashes to the same token as before.
+    if (layer.source.rawStyleOn !== undefined) {
+      srcSig += layer.source.rawStyleOn ? ':style1' : ':style0';
+    }
   } else {
     // Vector source: no asset epoch — the geometry/colour params ARE the pixels.
     // Signature shape is each renderer's own concern (routed via

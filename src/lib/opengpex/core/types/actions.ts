@@ -112,10 +112,10 @@ export interface EditorActions {
    * Sets or clears a clip selection slot for a specific tool.
    *
    * @param frameId     Target frame.
-   * @param clipToolId  Producing tool id (e.g. `'rect'`, `'ellipse'`, `'lasso'`, `'wand'`).
+   * @param clipToolId  Producing tool id (e.g. `'rect'`, `'pathellipse'`, `'lasso'`, `'wand'`).
    *                    Each tool has its own slot in `Frame.clipBoxes`.
-   * @param value       The selection to store (LocalShape for rect/ellipse,
-   *                    LocalPolygon for lasso/wand), or `null` to clear the slot.
+   * @param value       The selection to store as a LocalPolygon, or `null` to
+   *                    clear the slot.
    */
   setClipBox: (frameId: string, clipToolId: string, value: LocalPolygon | null) => void;
   setCanvasClipBox: (frameId: string, clipBox: LocalShape) => void;

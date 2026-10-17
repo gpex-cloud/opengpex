@@ -107,7 +107,7 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
           const py = e.point.canvas.y;
 
           const latestTool = (e.activeFrame.latestClipTool as ClipTool) || 'rect';
-          const isEllipse = latestTool === 'ellipse' || latestTool === 'pathellipse';
+          const isEllipse = latestTool === 'pathellipse';
 
           if (isEllipse) {
             const cx = rect.x + rect.w / 2;

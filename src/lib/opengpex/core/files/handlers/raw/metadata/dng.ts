@@ -58,6 +58,17 @@ export const DNG_TAG_LOOK_TABLE_DIMS = 0xC725;
 /** DNG tag 50982 — `ProfileLookTableData`: the creative-Look 3D table (50981 dims). */
 export const DNG_TAG_LOOK_TABLE_DATA = 0xC726;
 
+/** DNG tag 52525 — `ProfileGainTableMap`: the spatial gain-table map (DNG 1.5+). */
+export const DNG_TAG_PROFILE_GAIN_TABLE_MAP = 0xCD2D;
+
+/** DNG tag 50730 — `BaselineExposure`: the baked rendering offset (RATIONAL[1], in stops). */
+export const DNG_TAG_BASELINE_EXPOSURE = 0xC62A;
+
+/** TIFF IFD entry type 5 = RATIONAL (u32/u32). */
+const TIFF_TYPE_RATIONAL = 5;
+/** TIFF IFD entry type 10 = SRATIONAL (i32/i32) — Apple writes BaselineExposure as this. */
+const TIFF_TYPE_SRATIONAL = 10;
+
 /** TIFF IFD entry type 11 = FLOAT (IEEE binary32) — `ProfileToneCurve`'s type. */
 const TIFF_TYPE_FLOAT = 11;
 
@@ -332,4 +343,139 @@ function findTiffEntry(
   }
 
   return null;
+}
+
+// ─── ProfileGainTableMap (DNG 1.5+, tag 52525) ────────────────────────────────
+
+/**
+ * A parsed DNG `ProfileGainTableMap`: a `pointsV × pointsH` grid of
+ * `pointsN`-entry FLOAT gain tables, positioned over the image in relative
+ * coordinates, plus the five `MapInputWeights` that fold a pixel's RGB into a
+ * scalar table input.
+ *
+ * Application contract (DNG 1.6 §ProfileGainTableMap): per pixel, bilinearly
+ * interpolate the four surrounding grid tables at the pixel's relative position
+ * (pixel-centred / half-pixel convention), fold the RGB into
+ * `clamp((R,G,B,min,max) · weights, 0, 1)`, index the interpolated table at
+ * `input × pointsN`, and multiply the resulting scalar gain into the pixel —
+ * in the RIMM (linear ProPhoto) domain, after the BaselineExposure adjustment.
+ */
+export interface DngGainTableMap {
+  pointsV: number;
+  pointsH: number;
+  pointsN: number;
+  /** Vertical/horizontal grid spacing, relative to image height/width. */
+  spacingV: number;
+  spacingH: number;
+  /** Grid origin, relative to image height/width (may be negative). */
+  originV: number;
+  originH: number;
+  /** The five `MapInputWeights` floats: `[R, G, B, min(R,G,B), max(R,G,B)]`. */
+  weights: readonly [number, number, number, number, number];
+  /** `tables[v * pointsH + h][n]` — one gain table per grid point. */
+  tables: readonly Float32Array[];
+}
+
+/**
+ * Sanity gate for a candidate header decode: a real map has a sane grid, a
+ * per-pixel gain in a plausible range, and positive input weights. Used to
+ * arbitrate endianness — ProRAW writes the payload BIG-ENDIAN inside a
+ * little-endian TIFF, so the first decode uses the file's byte order and the
+ * fallback retries the opposite one.
+ */
+function gainTableMapPlausible(m: DngGainTableMap): boolean {
+  if (m.pointsV < 1 || m.pointsH < 1 || m.pointsN < 2 || m.pointsN > 65536) return false;
+  if (!Number.isFinite(m.spacingV) || !Number.isFinite(m.spacingH)) return false;
+  if (m.spacingV <= 0 || m.spacingH <= 0) return false;
+  if (!m.weights.every(w => Number.isFinite(w) && w >= 0)) return false;
+  if (m.weights.reduce((a, b) => a + b, 0) <= 0) return false;
+  let min = Infinity, max = -Infinity;
+  for (const t of m.tables) {
+    for (const g of t) {
+      if (!Number.isFinite(g) || g < 1e-4 || g > 256) return false;
+      if (g < min) min = g;
+      if (g > max) max = g;
+    }
+  }
+  return max > min; // a constant table carries no signal — treat as absent
+}
+
+/**
+ * Parse the DNG `ProfileGainTableMap` (tag 52525) — the spatial gain-table map
+ * Apple ProRAW (and Adobe's Adaptive profile) bake their per-file tone shaping
+ * into. Wire format (DNG 1.6, type UNDEFINED, byte count = 64 + 4·V·H·N):
+ * BIG-endian LONG MapPointsV, LONG MapPointsH, DOUBLE MapSpacingV/H, DOUBLE
+ * MapOriginV/H, LONG MapPointsN, FLOAT×5 MapInputWeights, then V·H tables of N
+ * FLOAT gains. ⚠️ ProRAW writes the payload big-endian even inside a
+ * little-endian ('II') TIFF — decode with the file's order first, then retry
+ * the opposite; {@link gainTableMapPlausible} arbitrates.
+ *
+ * Read-only ingest seam: the tone-shaping consumer lives in the libraw decode
+ * path (auto-gated per file). Any absent/short/implausible map → `undefined`
+ * (a RAW must still import).
+ */
+export function parseDngGainTableMap(bytes: Uint8Array): DngGainTableMap | undefined {
+  const entry = findTiffEntry(bytes, DNG_TAG_PROFILE_GAIN_TABLE_MAP);
+  if (!entry) return undefined;
+
+  const { isLE, entryOffset } = entry;
+  // Type UNDEFINED (7) in the wild; the byte count is what matters — a LONG
+  // mislabel from another writer still carries the same payload semantics.
+  const count = readU32(bytes, entryOffset + 4, isLE);
+  const at = readU32(bytes, entryOffset + 8, isLE);
+  if (count < 64 + 4 * 1 * 1 * 2 || at + count > bytes.length) return undefined;
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (const be of [!isLE, isLE]) {
+    const pointsV = view.getUint32(at, !be);
+    const pointsH = view.getUint32(at + 4, !be);
+    const spacingV = view.getFloat64(at + 8, !be);
+    const spacingH = view.getFloat64(at + 16, !be);
+    const originV = view.getFloat64(at + 24, !be);
+    const originH = view.getFloat64(at + 32, !be);
+    const pointsN = view.getUint32(at + 40, !be);
+    const weights = [0, 1, 2, 3, 4].map(k => view.getFloat32(at + 44 + k * 4, !be)) as
+      [number, number, number, number, number];
+    if (64 + 4 * pointsV * pointsH * pointsN !== count) continue;
+    const tables: Float32Array[] = new Array(pointsV * pointsH);
+    for (let i = 0; i < pointsV * pointsH; i++) {
+      const t = new Float32Array(pointsN);
+      for (let n = 0; n < pointsN; n++) t[n] = view.getFloat32(at + 64 + (i * pointsN + n) * 4, !be);
+      tables[i] = t;
+    }
+    const candidate: DngGainTableMap = { pointsV, pointsH, pointsN, spacingV, spacingH, originV, originH, weights, tables };
+    if (gainTableMapPlausible(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Parse the DNG `BaselineExposure` (tag 50730, RATIONAL[1]) — the baked
+ * rendering offset in stops (+0.921 on Apple ProRAW). The GainTableMap's input
+ * weights ASSUME this adjustment has been applied (DNG 1.6: the map "should be
+ * applied after the BaselineExposure adjustment"); a consumer that skips it
+ * reads the table at the wrong indices — the map's steep low-input region —
+ * and bakes luminance plates into bright content (20261016 device finding).
+ * Absent/malformed → `undefined` (treat as 0 stops).
+ */
+export function parseDngBaselineExposure(bytes: Uint8Array): number | undefined {
+  const entry = findTiffEntry(bytes, DNG_TAG_BASELINE_EXPOSURE);
+  if (!entry) return undefined;
+
+  const { isLE, entryOffset } = entry;
+  const type = readU16(bytes, entryOffset + 2, isLE);
+  // Both rational spellings accepted: the spec says RATIONAL, Apple ProRAW
+  // writes SRATIONAL (20261016 field finding — a strict RATIONAL check parsed
+  // undefined on every real file and silently disabled the BE-shifted lookup).
+  if (type !== TIFF_TYPE_RATIONAL && type !== TIFF_TYPE_SRATIONAL) return undefined;
+  if (readU32(bytes, entryOffset + 4, isLE) < 1) return undefined;
+
+  const at = readU32(bytes, entryOffset + 8, isLE);
+  if (at + 8 > bytes.length) return undefined;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const srational = type === TIFF_TYPE_SRATIONAL;
+  const num = srational ? view.getInt32(at, isLE) : view.getUint32(at, isLE);
+  const den = view.getUint32(at + 4, isLE);
+  if (den === 0 || !Number.isFinite(num / den)) return undefined;
+  return num / den;
 }

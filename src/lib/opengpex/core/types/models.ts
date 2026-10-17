@@ -524,16 +524,17 @@ export interface Frame {
   // Clipping attributes
   /**
    * Unified per-tool clip selection map — **keyed by producing tool id**
-   * (e.g. `'rect'`, `'ellipse'`, `'lasso'`, `'wand'`, future `'polygon-lasso'`,
+   * (e.g. `'rect'`, `'pathellipse'`, `'lasso'`, `'wand'`, future `'polygon-lasso'`,
    * `'ai-matting'`).
    *
    * Each tool owns its own slot so switching tools never clobbers another
    * tool's selection. The canvas only shows the selection belonging to the
    * *currently active* tool (read via `latestClipTool`).
    *
-   * Value is a `LocalPolygon` for all tool types (rect/ellipse/lasso/wand).
-   * rect/ellipse tools write a 4-point or 64-point LocalPolygon via
-   * `rectToLocalPolygon` / `ellipseToLocalPolygon`. Consumers call
+   * Value is a `LocalPolygon` for all tool types (rect/pathellipse/lasso/wand).
+   * The rect tool writes a 4-point LocalPolygon via `rectToLocalPolygon`; the
+   * pathellipse tool writes a 360-point LocalPolygon via
+   * `ellipsePathToLocalPolygon`. Consumers call
    * `polygonToShape` to convert back to a LocalShape when needed.
    *
    * Missing key means "no selection produced by that tool yet".
@@ -547,7 +548,7 @@ export interface Frame {
    * restores the tool the user last used on that specific frame.
    * Default: 'rect'. Updated by `setClipTool`.
    */
-  latestClipTool: string; // 'rect' | 'ellipse' | 'lasso' | 'wand'
+  latestClipTool: string; // 'rect' | 'pathellipse' | 'lasso' | 'wand' | 'sam'
 
   imageAspect?: number;
   canvasAspect?: number;
@@ -585,6 +586,18 @@ export interface Frame {
    * share one resolver).
    */
   hdrRender?: boolean;
+
+  /**
+   * Per-document RAW style preset switch (the "pre-grade" colour step — a
+   * render filter, like {@link hdrRender}). `undefined`/ON = the preset applies
+   * to scene-linear (RAW) sources at composite time; OFF renders the neutral
+   * chromometric baseline (the pre-2026-10 look). NEVER touches pixel data —
+   * the f16 master stays the K-anchored linear truth; the switch only chooses
+   * the intent nibble (2 = Filmic + style vs 1 = Filmic). Present/meaningful
+   * only on RAW documents; non-RAW sources ignore it structurally (no white
+   * domain → SDR passthrough → the style is unreachable).
+   */
+  rawStyle?: boolean;
 
 }
 

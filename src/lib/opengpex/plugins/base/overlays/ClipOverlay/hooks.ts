@@ -26,6 +26,7 @@ import {
   CLIP_TOOL_STRATEGIES,
   ClipTool,
 } from '../../options/ClipOptions/protocols';
+import type { ClipToolAAMap } from '../../options/ClipOptions/protocols';
 import { CLIP_ELLIPSE_AA_OFF_CURSOR } from '@opengpex/editor/icons';
 
 /**
@@ -129,13 +130,18 @@ export function useClipCursor(
   const isInteractingRef = useRef(false);
   useLayoutEffect(() => { isInteractingRef.current = !!state.interaction.isInteracting; });
 
-  // Read AA state for dynamic cursor switching (ellipse/pathellipse: dashed cursor when AA off)
-  const clipBox_AA = (activeFrame?.clipBoxes?.[clipTool] as LocalPolygon | undefined)?.antiAliased ?? true;
+  // Read AA state for dynamic cursor switching (pathellipse: dashed cursor when AA off).
+  // A selection's own entity flag wins; with no selection on canvas the active
+  // tool's persistent AA preset fills the fallback so the dashed cursor reflects
+  // the toggle immediately, before anything is drawn.
+  const toolAAMap = state.getStateSignal<ClipToolAAMap | null>(ClipOptionsAPI.signals.clipToolAA);
+  const clipBox_AA = (activeFrame?.clipBoxes?.[clipTool] as LocalPolygon | undefined)?.antiAliased
+    ?? toolAAMap?.[clipTool] ?? true;
 
   useEffect(() => {
     if (isClipActive) {
-      // For ellipse-family tools: switch to dashed cursor when AA is off
-      const isEllipseFamily = clipTool === 'ellipse' || clipTool === 'pathellipse';
+      // For the pathellipse tool: switch to dashed cursor when AA is off
+      const isEllipseFamily = clipTool === 'pathellipse';
       const toolCursor = isEllipseFamily && !clipBox_AA
         ? CLIP_ELLIPSE_AA_OFF_CURSOR
         : CLIP_TOOL_STRATEGIES[clipTool].cursor;
@@ -262,7 +268,7 @@ export function useClipCursor(
       const px = canvasPt.x;
       const py = canvasPt.y;
 
-      const isEllipse = clipTool === 'ellipse' || clipTool === 'pathellipse';
+      const isEllipse = clipTool === 'pathellipse';
 
       // Determine desired cursor
       let desired = toolCursor;

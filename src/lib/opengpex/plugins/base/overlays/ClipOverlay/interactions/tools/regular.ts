@@ -24,7 +24,6 @@ import {
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import {
   ClipOptionsAPI,
-  ClipTool,
 } from '../../../../options/ClipOptions/protocols';
 import { createTransformHandler, TransformIntent, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import { makeClipToolGuard } from '../guard';
@@ -41,7 +40,7 @@ const EDGE_HIT_THRESHOLD_PX = 6;
  * Handles clip box: Resize and Create.
  *
  * Move and Peel are handled by the unified `createSelectionMoveHandler` which
- * operates on any selection type (rect/ellipse/polygon). This handler only
+ * operates on any selection type (rect/polygon). This handler only
  * retains resize handles and new-selection creation.
  *
  * Re-Canvas interactions are handled by the dedicated `createReCanvasHandler`
@@ -55,7 +54,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
 
     test: (e): TransformIntent | null => {
       // Strategy-driven guard: only fires when the active tool declares
-      // `handlerKind: 'clipbox'` (rect / ellipse rows).
+      // `handlerKind: 'clipbox'` (the rect row).
       if (!makeClipToolGuard('clipbox')(e)) return null;
 
       // Explicitly skip Re-Canvas (handled by dedicated re-canvas handler)
@@ -94,43 +93,8 @@ export const createClipBoxHandler = (): InteractionHandler => {
         const px = e.point.canvas.x;
         const py = e.point.canvas.y;
 
-        const latestTool = (e.activeFrame.latestClipTool as ClipTool) || 'rect';
-        const isEllipse = latestTool === 'ellipse';
-
-        if (isEllipse) {
-          // ─── Ellipse: distance to ellipse arc ─────────────────────────
-          // Uses normalized coordinates to compute approximate distance from
-          // the pointer to the ellipse boundary.
-          const cx = rect.x + rect.w / 2;
-          const cy = rect.y + rect.h / 2;
-          const rx = rect.w / 2;
-          const ry = rect.h / 2;
-
-          // Normalize to unit circle space
-          const nx = (px - cx) / rx;
-          const ny = (py - cy) / ry;
-          const r = Math.sqrt(nx * nx + ny * ny);
-
-          // Approximate distance to ellipse in canvas-local pixels
-          // Uses average radius for de-normalization (acceptable approximation
-          // for hit detection — exact ellipse distance requires iterative solving)
-          const avgRadius = (rx + ry) / 2;
-          const distToEllipse = Math.abs(r - 1) * avgRadius;
-
-          if (distToEllipse <= T) {
-            // Determine resize direction by pointer angle relative to center.
-            // Quadrant-based: |cos| > |sin| → horizontal (e/w), else vertical (n/s)
-            const cosA = (px - cx) / (Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy)) || 1);
-            const sinA = (py - cy) / (Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy)) || 1);
-
-            if (Math.abs(cosA) > Math.abs(sinA)) {
-              return { category: 'resize', handle: px < cx ? 'w' : 'e' };
-            } else {
-              return { category: 'resize', handle: py < cy ? 'n' : 's' };
-            }
-          }
-        } else {
-          // ─── Rectangle: distance to bounding rect edges ───────────────
+        // ─── Rectangle: distance to bounding rect edges ───────────────
+        {
           const dTop = Math.abs(py - rect.y);
           const dBottom = Math.abs(py - (rect.y + rect.h));
           const dLeft = Math.abs(px - rect.x);
@@ -174,12 +138,13 @@ export const createClipBoxHandler = (): InteractionHandler => {
 
       // Determine the active tool slot from the per-frame field, NOT from
       // the existing shape's type.
-      const latestTool = (frame.latestClipTool as ClipTool) || 'rect';
-      const activeTool = latestTool === 'ellipse' ? 'ellipse' : 'rect';
+      // This handler only serves the rect clipbox (pathellipse owns its own
+      // handler), so the slot id is always 'rect'.
+      const activeTool = 'rect' as const;
       // Write a proper LocalPolygon (with rings) so downstream consumers
       // (polygonToShape, localToWorldPolygon, etc.) never see rings=undefined.
-      const antiAliased = currentShape?.antiAliased ?? true;
-      const newPoly = e.geometry.polygon.regularShapeToLocalPolygon(latestTool === 'ellipse' ? 'ellipse' : 'rect', newRect, antiAliased);
+      const antiAliased = currentShape?.antiAliased;
+      const newPoly = e.geometry.polygon.regularShapeToLocalPolygon(activeTool, newRect, antiAliased);
       tx.update({ clipBoxes: { ...frame.clipBoxes, [activeTool]: newPoly } }, 'frame');
 
       // Sync exchange layer if needed
@@ -214,11 +179,10 @@ export const createClipBoxHandler = (): InteractionHandler => {
           const frame = e.activeFrame;
           const fullCanvasRect = asLocalRect({ x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h });
 
-          const latestTool = (frame.latestClipTool as ClipTool) || 'rect';
-          const activeTool = latestTool === 'ellipse' ? 'ellipse' : 'rect';
+          const activeTool = 'rect' as const;
           const currentShape = getRegularClipShape(frame);
-          const antiAliased = currentShape?.antiAliased ?? true;
-          const newPoly = e.geometry.polygon.regularShapeToLocalPolygon(latestTool === 'ellipse' ? 'ellipse' : 'rect', fullCanvasRect, antiAliased);
+          const antiAliased = currentShape?.antiAliased;
+          const newPoly = e.geometry.polygon.regularShapeToLocalPolygon(activeTool, fullCanvasRect, antiAliased);
           tx.update({ clipBoxes: { ...frame.clipBoxes, [activeTool]: newPoly } }, 'frame');
         }
       },

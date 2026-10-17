@@ -67,6 +67,9 @@ import { deriveMatrix64, WORKING_GAMUT } from '@opengpex/editor/core/engine/colo
 import {
   FILMIC_LUMA_WEIGHTS,
   FILMIC_PIVOT,
+  FILMIC_WHITE_DOMAIN,
+  RAW_STYLE_BOOST,
+  RAW_STYLE_K_MAX,
 } from '@opengpex/editor/core/engine/color/filmic';
 
 /**
@@ -225,22 +228,36 @@ fn gamut_to_working(c : vec3<f32>, gamut_id : u32) -> vec3<f32> {
 // ────────────────────────────────────────────────────────────
 
 const FILMIC_PIVOT = ${wgslFloat(FILMIC_PIVOT)};
+const FILMIC_WHITE_DOMAIN_FLOOR = ${wgslFloat(FILMIC_WHITE_DOMAIN)};
 
 const FILMIC_LUMA_WEIGHTS = vec3<f32>(${wgslFloat(FILMIC_LUMA_WEIGHTS[0])}, ${wgslFloat(FILMIC_LUMA_WEIGHTS[1])}, ${wgslFloat(FILMIC_LUMA_WEIGHTS[2])});
 
 // Generic Filmic display transform — LINEAR-light in, LINEAR-light out.
-// The knee runs on the pixel luma; the scalar gain k/luma scales the whole
-// pixel (identity below the pivot, chromaticity-preserving stretch above).
-// 'white_domain' is the per-file anchored-highlight domain (see filmic.ts —
-// decode clamps it to [0.31, 0.95], both > the pivot, so the slope divide is
-// always sane). luma=0 → k=0 → gain 0 → black stays black; channels over 1
-// after the gain are specular saturation and clamp.
+// The tone curve runs on the pixel luma; the scalar gain knee/luma scales the
+// whole pixel (chromaticity preserved exactly). The curve is a power S through
+// (0,0)/(pivot,pivot)/(white_domain,1): a TOE power below the pivot (shadows
+// reach a real black point) and a SHOULDER power above it (anchored scene
+// white lands on display white without dragging the upper mids along). Both
+// exponents are injected from filmic.ts (probe-calibrated 20261016 against the
+// platform reference; the former linear knee rendered shadows +33/255 and
+// highlights +35/255 against it). 'white_domain' is the per-file anchored-
+// highlight domain (see filmic.ts — decode clamps it to [0.31, 0.95], both >
+// the pivot, so the divide is always sane). luma=0 → knee=0 → gain 0 → black
+// stays black; channels over 1 after the gain are specular saturation, clamped.
 fn tone_map_filmic(c : vec3<f32>, white_domain : f32) -> vec3<f32> {
-  let knee_gain = (1.0 - FILMIC_PIVOT) / max(white_domain - FILMIC_PIVOT, 1e-4);
   let luma = dot(c, FILMIC_LUMA_WEIGHTS);
+  // Per-file exponents, adapted on the white domain (filmicCurveExponents
+  // mirror): sunny captures (domain at the floor) need the strong toe+shoulder,
+  // high-contrast interiors (the GainTableMap already lifted their shadows)
+  // need the milder pair — one fixed exponent pair cannot hit both files'
+  // black point and highlight percentile.
+  let adapt = max(white_domain - FILMIC_PIVOT, 0.0);
+  let toe = clamp(2.8 - 1.4 * adapt, 2.2, 3.0);
+  let shoulder = clamp(2.3 - 1.4 * adapt, 1.6, 2.3);
   let knee = select(
-    luma,
-    min(1.0, FILMIC_PIVOT + (luma - FILMIC_PIVOT) * knee_gain),
+    FILMIC_PIVOT * pow(luma / FILMIC_PIVOT, toe),
+    min(1.0, FILMIC_PIVOT + (1.0 - FILMIC_PIVOT)
+      * pow(min(1.0, (luma - FILMIC_PIVOT) / max(white_domain - FILMIC_PIVOT, 1e-4)), shoulder)),
     luma > FILMIC_PIVOT,
   );
   let gain = knee / max(luma, 1e-6);
@@ -249,5 +266,34 @@ fn tone_map_filmic(c : vec3<f32>, white_domain : f32) -> vec3<f32> {
     vec3<f32>(0.0),
     vec3<f32>(1.0),
   );
+}
+
+// RAW style preset operator (the colour step of the RAW render intent — the
+// "pre-grade"). Scales the pixel's chroma by k = min(1, s + boost) / s where
+// s = (max−min)/max, pivoting on the Rec.709 LUMA (hue and luma kept, value
+// rides along). Mirrors filmicRawStyle in filmic.ts EXACTLY (same constants,
+// same luma pivot, same clamp semantics) — the two can never drift because the
+// boost constant is injected from that module. Identity on neutrals (s ≈ 0).
+// The whole-pixel-scale variant is REJECTED (probe 2026-10-16): it explodes on
+// low-saturation pixels and overexposes the render. MUST run on STRAIGHT
+// values and BEFORE tone_map_filmic (the probe validated style-then-knee);
+// the caller (normalize_source_components) owns both orderings.
+const RAW_STYLE_BOOST_F = ${wgslFloat(RAW_STYLE_BOOST)};
+const RAW_STYLE_K_MAX_F = ${wgslFloat(RAW_STYLE_K_MAX)};
+
+// 'white_domain' adapts the dose (filmicStyleDose mirror): Apple's saturation
+// offset shrinks as the capture's dynamic compression grows — the sunny file
+// calibrates at the full base, the high-contrast interior runs over at it.
+fn apply_raw_style(c : vec3<f32>, white_domain : f32) -> vec3<f32> {
+  let mx = max(c.r, max(c.g, c.b));
+  let mn = min(c.r, min(c.g, c.b));
+  let s = (mx - mn) / max(mx, 1e-4);
+  let dose = min(RAW_STYLE_BOOST_F, RAW_STYLE_BOOST_F * pow(FILMIC_WHITE_DOMAIN_FLOOR / max(white_domain, FILMIC_WHITE_DOMAIN_FLOOR), 0.5));
+  // The k cap keeps near-neutrals from being amplified (sensor colour noise on
+  // clouds would otherwise blow up into cyan/magenta patches — 20261016 device
+  // finding); mid-saturation calibration points sit below the cap.
+  let k = select(1.0, min(min(1.0, s + dose) / s, RAW_STYLE_K_MAX_F), s > 1e-4);
+  let luma = dot(c, FILMIC_LUMA_WEIGHTS);
+  return clamp(vec3<f32>(luma) + (c - vec3<f32>(luma)) * k, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 `;

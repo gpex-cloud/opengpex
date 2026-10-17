@@ -24,10 +24,11 @@ import { findUpstreamAssetId, findDownstreamFragments } from '@opengpex/editor/c
 
 /**
  * Resolved refocus target: either a regular shape (rect/ellipse) or an irregular polygon.
+ * Regular ellipse-shaped targets always map to the 'pathellipse' tool slot.
  * All clip boxes are now stored as LocalPolygon — regular shapes are converted via asLocalPolygon.
  */
 export type RefocusTarget =
-    | { regular: true; clipToolId: 'rect' | 'ellipse'; shapeType: ShapeType; canvasX: number; canvasY: number; w: number; h: number }
+    | { regular: true; clipToolId: 'rect' | 'pathellipse'; shapeType: ShapeType; canvasX: number; canvasY: number; w: number; h: number }
     | { regular: false; clipToolId: string; polygon: LocalPolygon };
 
 /**
@@ -38,7 +39,7 @@ export type RefocusTarget =
  *   4. Enters clip mode
  *
  * This is the unified "write to overlay" exit point for all refocus paths
- * (rect, ellipse, lasso, wand, sam).
+ * (rect, pathellipse, lasso, wand, sam).
  */
 export function commitRefocusToOverlay(
     ctx: EditorContextValue,

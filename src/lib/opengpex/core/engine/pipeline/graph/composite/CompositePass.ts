@@ -44,7 +44,7 @@ import { resolveLayerGeometry, resolveLayerDprScale, effectiveScale } from '../s
 import { resolveVmaskUniform } from '../support/vmaskUniform';
 import { isSourceLinear } from '../support/sourceDomain';
 import { resolveSourceGamutId } from '../support/sourceGamut';
-import { resolveSourceRawWhiteDomain } from '../support/sourceIntent';
+import { resolveSourceRawIntentNibble, resolveSourceRawWhiteDomain } from '../support/sourceIntent';
 import { FILMIC_WHITE_DOMAIN } from '@opengpex/editor/core/engine/color/filmic';
 import type { ExportViewport } from '../RenderGraph';
 
@@ -275,7 +275,7 @@ export class CompositePass {
     // undefined ⇒ 0 — never double-tone-map), its value packs the
     // filmic_white uniform (unread when the nibble is 0).
     const rawWhiteDomain = resolveSourceRawWhiteDomain(layer, params.sourceIntentApplied);
-    if (rawWhiteDomain !== undefined) flags |= (1 << LAYER_RENDER_INTENT_SHIFT);
+    flags |= resolveSourceRawIntentNibble(layer, params.sourceIntentApplied) << LAYER_RENDER_INTENT_SHIFT;
 
     const { contentWidth, contentHeight, localOffset, uvRect } = resolveLayerGeometry(
       layer,

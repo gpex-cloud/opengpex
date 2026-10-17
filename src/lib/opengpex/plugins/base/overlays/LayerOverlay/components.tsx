@@ -34,7 +34,7 @@ import { TransformGizmo } from "@opengpex/editor/widgets/TransformGizmo";
 import { useLayerOverlayCommands } from "./hooks";
 import { aggregateLayerOverlayUsage } from "./usage";
 
-import { useLayerOverlaySync, useLayerMoveDeltaSync } from "./useFastSync";
+import { useLayerOverlaySync, useLayerMoveDeltaSync, useLayerOverlayCameraHide } from "./useFastSync";
 
 /**
  * LayerOverlayItem: A single geometric helper element for a layer on the stage.
@@ -185,6 +185,11 @@ function LayerOverlayContent() {
   const usage = aggregateLayerOverlayUsage({ signals: state.interaction.signals });
 
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Host-owned visibility policy: fade the whole container during camera moves
+  // unless a usage contributor declared keepDuringCameraMove. Per-item hooks
+  // stay policy-free (matrix sync + canvas-sized hide only).
+  useLayerOverlayCameraHide(containerRef, usage.keepDuringCameraMove);
 
   // Core: Sync viewport rotation animation (counter-animation protocol)
   useOverlayRotationSync(containerRef, activeFrame);

@@ -271,9 +271,9 @@ export function invertRings(rings: Point2D[][], boundingW: number, boundingH: nu
  * `Frame.clipBoxes: Record<string, LocalPolygon>` architecture.
  *
  * @param rect        The bounding rectangle in local (canvas) coordinates.
- * @param antiAliased Whether the selection edge should be anti-aliased (default true).
+ * @param antiAliased Whether the selection edge should be anti-aliased (default false for pixel-aligned rect).
  */
-export function rectToLocalPolygon(rect: LocalRect, antiAliased: boolean = true): LocalPolygon {
+export function rectToLocalPolygon(rect: LocalRect, antiAliased: boolean = false): LocalPolygon {
   const { x, y, w, h } = rect;
   const ring: LocalPoint[] = [
     { x, y } as LocalPoint,

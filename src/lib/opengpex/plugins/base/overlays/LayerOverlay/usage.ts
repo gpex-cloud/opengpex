@@ -25,6 +25,14 @@ export interface LayerOverlayUsage {
   gizmoTypes?: readonly string[];
   /** Suppress hover-driven outlines (passive hover + hover-on-active). */
   suppressHover?: boolean;
+  /**
+   * Opt this usage's content OUT of the host's camera-move auto-hide. During
+   * pan/zoom the host fades the whole overlay container out (outlines are
+   * anchored to a camera that is momentarily stale); a contributor whose
+   * affordance must stay readable across the gesture declares this to stand
+   * the auto-hide down for as long as its resolve() keeps returning it.
+   */
+  keepDuringCameraMove?: boolean;
 }
 
 /** Read-only view passed to `resolve`. Signals are the editor's interaction signals. */
@@ -57,10 +65,11 @@ export function registerLayerOverlayUsage(source: LayerOverlayUsageSource): () =
   };
 }
 
-/** Aggregated usage: gizmo types are a union, suppressHover is an OR. */
+/** Aggregated usage: gizmo types are a union, boolean intents are an OR. */
 export interface AggregatedLayerOverlayUsage {
   gizmoTypes: ReadonlySet<string>;
   suppressHover: boolean;
+  keepDuringCameraMove: boolean;
 }
 
 /**
@@ -70,6 +79,7 @@ export interface AggregatedLayerOverlayUsage {
 export function aggregateLayerOverlayUsage(ctx: LayerOverlayUsageContext): AggregatedLayerOverlayUsage {
   const gizmoTypes = new Set<string>();
   let suppressHover = false;
+  let keepDuringCameraMove = false;
   for (const source of sources.values()) {
     let usage: LayerOverlayUsage | null | undefined;
     try {
@@ -82,8 +92,9 @@ export function aggregateLayerOverlayUsage(ctx: LayerOverlayUsageContext): Aggre
     if (!usage) continue;
     for (const t of usage.gizmoTypes ?? []) gizmoTypes.add(t);
     if (usage.suppressHover) suppressHover = true;
+    if (usage.keepDuringCameraMove) keepDuringCameraMove = true;
   }
-  return { gizmoTypes, suppressHover };
+  return { gizmoTypes, suppressHover, keepDuringCameraMove };
 }
 
 /** Test-only: drop every registered source. */

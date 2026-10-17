@@ -202,8 +202,10 @@ export function createGeometryService(): GeometryService {
       simplifyOpen: (points: Point2D[], epsilon: number) => simplifyOpen(points, epsilon),
       simplifyRing: (ring: Point2D[], epsilon: number) => simplifyRing(ring, epsilon),
       translatePolygon: (poly: LocalPolygon, dx: number, dy: number) => translatePolygon(poly, dx, dy),
-      regularShapeToLocalPolygon: (tool: 'rect' | 'ellipse', rect: LocalRect, antiAliased?: boolean) =>
-        tool === 'ellipse' ? ellipseToLocalPolygon(rect, antiAliased) : rectToLocalPolygon(rect, antiAliased),
+      regularShapeToLocalPolygon: (tool: 'rect' | 'pathellipse', rect: LocalRect, antiAliased?: boolean) =>
+        tool === 'rect'
+          ? rectToLocalPolygon(rect, antiAliased ?? false)
+          : ellipseToLocalPolygon(rect, antiAliased ?? true),
       ellipsePathToLocalPolygon: (rect: LocalRect, antiAliased?: boolean) => ellipsePathToLocalPolygon(rect, antiAliased),
       polygonToShape: ((poly: LocalPolygon | WorldPolygon) => polygonToShape(poly as LocalPolygon)) as GeometryService['polygon']['polygonToShape'],
     },

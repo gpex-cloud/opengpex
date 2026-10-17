@@ -161,7 +161,7 @@ export const LAYERS_COMMANDS = {
                 const localCenter = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
                 const worldCenter = M.apply(localCenter);
 
-                const clipToolId = shapeType === 'circle' ? 'ellipse' as const : 'rect' as const;
+                const clipToolId = shapeType === 'circle' ? 'pathellipse' as const : 'rect' as const;
                 const canvasX = worldCenter.x + frame.canvas.w / 2 - rect.w / 2;
                 const canvasY = worldCenter.y + frame.canvas.h / 2 - rect.h / 2;
 
@@ -289,7 +289,7 @@ export const LAYERS_COMMANDS = {
 
                 target = { regular: false, clipToolId, polygon: framePoly };
             } else {
-                const clipToolId = shape.type === 'circle' ? 'ellipse' as const : 'rect' as const;
+                const clipToolId = shape.type === 'circle' ? 'pathellipse' as const : 'rect' as const;
                 const canvasX = worldCenter.x + frame.canvas.w / 2 - shape.rect.w / 2;
                 const canvasY = worldCenter.y + frame.canvas.h / 2 - shape.rect.h / 2;
 

@@ -39,14 +39,14 @@ export const CMD_TOGGLE_MODE = 'cmd.toggle_mode';
 
 /**
  * Tab — cycle through clip tools forward while already in clip mode
- * (rect → ellipse → lasso → wand → rect …). Only active when
+ * (rect → pathellipse → lasso → wand → rect …). Only active when
  * `interactionMode === 'clip'`; no-op in any other mode.
  */
 export const CMD_CYCLE_TOOL_FORWARD = 'cmd.clip_tool.cycle_forward';
 
 /**
  * Shift+Tab — reverse cycle through clip tools while already in clip
- * mode (rect ← ellipse ← lasso ← wand ← rect …). Only active when
+ * mode (rect ← pathellipse ← lasso ← wand ← rect …). Only active when
  * `interactionMode === 'clip'`; no-op in any other mode.
  */
 export const CMD_CYCLE_TOOL_BACKWARD = 'cmd.clip_tool.cycle_backward';
@@ -136,28 +136,55 @@ export const SIGNAL_RE_CANVAS = 'signal.re_canvas.active';
 /** Feather radius (px) for Apply Mask / Drill */
 export const SIGNAL_CLIP_FEATHER = 'signal.clip_feather.value';
 
+/**
+ * Per-tool selection anti-alias presets. Each clip tool owns an independent
+ * AA preference that is configurable whether or not a selection exists on
+ * canvas (Photoshop tool-options model). New selections inherit the active
+ * tool's preset; clearing a selection never resets it.
+ */
+export const SIGNAL_CLIP_TOOL_AA = 'signal.clip_tool_aa.map';
+
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
 /**
  * ClipTool: Active crop / selection tool.
  *
- * - 'rect' / 'ellipse'  → regular shapes (amber UI accent).
+ * - 'rect' / 'pathellipse' → regular shapes (amber UI accent).
  * - 'lasso' / 'wand'    → irregular polygon selections (purple UI accent).
  *
  * All tools write to the unified `clipBoxes[toolId]` record via
- * `actions.setClipBox(frameId, toolId, data)`. When switching between
- * regular tools (rect ↔ ellipse), `setClipTool` rebuilds the polygon
- * for the new slot using the previous slot's bounding rect.
+ * `actions.setClipBox(frameId, toolId, data)`.
  *
  * Anti-aliasing is **orthogonal** to tool identity — driven by the standalone
  * `AA` button (command `CMD_TOGGLE_ANTI_ALIAS`) which toggles the
- * `antiAliased` field on the active clip box's spatial. All tools default
- * AA to ON (true). The strategy table declares which tools expose this
- * control via `supportsAntiAlias`.
+ * `antiAliased` field on the active clip box's spatial. Tools that support AA
+ * default to ON (true); tools with supportsAntiAlias=false (rect/wand) are always
+ * hard-edged (antiAliased=false). The strategy table declares which tools expose
+ * this control via `supportsAntiAlias`.
  */
-export type ClipTool = 'rect' | 'ellipse' | 'pathellipse' | 'lasso' | 'wand' | 'sam';
+export type ClipTool = 'rect' | 'pathellipse' | 'lasso' | 'wand' | 'sam';
 
 export type ClipFamily = 'regular' | 'irregular';
+
+/**
+ * Anti-alias preset map keyed by clip tool. Tools with
+ * `supportsAntiAlias: false` (rect / wand) are invariants pinned to `false`
+ * and are never written by the toggle command.
+ */
+export type ClipToolAAMap = Record<ClipTool, boolean>;
+
+/**
+ * Factory defaults for per-tool AA presets. Matches the historical behaviour
+ * of a fresh selection (curved/irregular AA tools default ON; rect / wand are
+ * hard-edged). The toggle command persists user overrides on top of this map.
+ */
+export const DEFAULT_CLIP_TOOL_AA: ClipToolAAMap = {
+  rect: false,
+  pathellipse: true,
+  lasso: true,
+  wand: false,
+  sam: true,
+};
 
 export interface ClipToolStrategy {
   readonly id: ClipTool;
@@ -216,32 +243,11 @@ export interface ClipToolStrategy {
 
 export const CLIP_TOOL_STRATEGIES: Record<ClipTool, ClipToolStrategy> = {
   'rect':        { id: 'rect',        label: 'Rect',           icon: Square, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox',     forbiddenInReCanvas: false, supportsAntiAlias: false, cursor: CLIP_RECT_CURSOR     },
-  'ellipse':     { id: 'ellipse',     label: 'Ellipse',        icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox',     forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_AA_CURSOR, enabled: false },
   'pathellipse': { id: 'pathellipse', label: 'Ellipse (Path)', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'pathellipse', forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_AA_CURSOR  },
   'lasso':       { id: 'lasso',       label: 'Lasso',          icon: Lasso,  accent: 'purple', family: 'irregular', handlerKind: 'lasso',       forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_LASSO_CURSOR    },
   'wand':        { id: 'wand',        label: 'Wand',           icon: Wand2,  accent: 'purple', family: 'irregular', handlerKind: 'wand',        forbiddenInReCanvas: true,  supportsAntiAlias: false,  cursor: CLIP_WAND_CURSOR     },
   'sam':         { id: 'sam',         label: 'SAM',            icon: Shapes, accent: 'cyan',   family: 'irregular', handlerKind: 'sam',         forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_SAM_CURSOR      },
 };
-
-// ─── Clip Tool Behavior Settings ────────────────────────────────────────────────
-
-/**
- * Whether switching between regular clip tools (rect ↔ ellipse) inherits
- * the bounding box from the previous tool.
- *
- * - `true`  (default): rect→ellipse copies the rect's bounds into the
- *   ellipse slot (same area, different shape). Good for "crop mode" UX
- *   where the user adjusts a persistent region and wants to preview
- *   different shapes without redrawing.
- *
- * - `false`: each tool maintains its own independent slot. Switching
- *   tools starts from an empty selection (Photoshop-style marquee
- *   behavior). The user must draw a fresh selection after switching.
- *
- * Future: wire this into Preferences UI so users can choose their
- * preferred workflow.
- */
-export const CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS = false;
 
 // ─── Derived Helpers ────────────────────────────────────────────────────────────
 
@@ -264,6 +270,8 @@ export const ClipOptionsAPI = {
     reCanvas: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_RE_CANVAS}` as const,
     /** Feather radius (px) for Apply Mask / Drill */
     clipFeather: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_CLIP_FEATHER}` as const,
+    /** Per-tool selection anti-alias preset map */
+    clipToolAA: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_CLIP_TOOL_AA}` as const,
   },
   commands: {
     /** Clear the active selection (double-click reset) */

@@ -22,8 +22,8 @@ import { asLocalShape } from '@opengpex/editor/core/types';
 
 /**
  * getRegularClipShape — convenience wrapper over `getClipBox` that returns
- * the active selection ONLY when it is a regular (rect/ellipse) LocalPolygon
- * (i.e. a 4-point or 64-point polygon produced by the rect/ellipse tool).
+ * the active selection ONLY when the active tool slot holds a regular
+ * LocalPolygon (i.e. the 4-point rect polygon produced by the rect tool).
  *
  * Delegates entirely to `getClipBox(frame)` which reads `frame.latestClipTool`
  * as the single source of truth. No more blind-scanning of slot arrays.
@@ -40,7 +40,7 @@ export function getRegularClipShape(frame: { latestClipTool?: string; clipBoxes:
  * Reads `frame.latestClipTool` to determine which slot in `frame.clipBoxes`
  * holds the active selection and returns the `LocalPolygon` directly.
  *
- * All tool types (rect, ellipse, lasso, wand) now store a `LocalPolygon`.
+ * All tool types (rect, pathellipse, lasso, wand) now store a `LocalPolygon`.
  * Consumers that need a `LocalShape` for the rendering pipeline should call
  * `polygonToShape(box)` from `@opengpex/editor/core/geometry/operators/polygon`.
  *

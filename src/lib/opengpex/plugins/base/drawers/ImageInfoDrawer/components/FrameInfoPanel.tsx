@@ -91,6 +91,12 @@ interface FrameInfoPanelProps {
   hdrEnabled: boolean;
   /** Toggle handler — writes `frame.hdrRender`, the render filter (never pixel data). */
   onHdrToggle: (on: boolean) => void;
+  /** Whether the source is a decoded scene-linear RAW (gates the format-badge style toggle). */
+  rawStyleAvailable: boolean;
+  /** Effective RAW style preset state (frame switch; defaults ON — the out-of-box look). */
+  rawStyleEnabled: boolean;
+  /** Toggle handler — writes `frame.rawStyle`, the render filter (never pixel data). */
+  onRawStyleToggle: (on: boolean) => void;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -113,6 +119,9 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
   hdrAvailable,
   hdrEnabled,
   onHdrToggle,
+  rawStyleAvailable,
+  rawStyleEnabled,
+  onRawStyleToggle,
 }: FrameInfoPanelProps) {
   const [copied, setCopied] = React.useState(false);
   const [isMetaExpanded, setIsMetaExpanded] = React.useState(false);
@@ -225,9 +234,40 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
             />
           </div>
           <div className="flex items-center gap-1">
-            <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
-              {fileFormat}
-            </span>
+            {/* The format badge doubles as the RAW style toggle: only a
+                decoded-scene-linear RAW has the style preset to switch, so on
+                other formats it renders as the plain static badge. When the
+                file is a RAW, clicking swaps the render filter (never pixel
+                data); amber marks the vivid preset as on. */}
+            {rawStyleAvailable ? (
+              <span
+                role="button"
+                tabIndex={0}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onRawStyleToggle(!rawStyleEnabled)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onRawStyleToggle(!rawStyleEnabled);
+                  }
+                }}
+                title={rawStyleEnabled
+                  ? "RAW style preset on — click for the neutral baseline"
+                  : "RAW style preset off — click for the vivid out-of-box look"}
+                aria-pressed={rawStyleEnabled}
+                className={`cursor-pointer select-none outline-none focus:outline-none text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm border uppercase transition-colors ${
+                  rawStyleEnabled
+                    ? "text-amber-700 dark:text-amber-300 bg-amber-500/20 border-amber-500/50"
+                    : "text-[var(--text-muted)] bg-[var(--bg-stage)] border-[var(--border-subtle)] hover:opacity-80"
+                }`}
+              >
+                {fileFormat}
+              </span>
+            ) : (
+              <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
+                {fileFormat}
+              </span>
+            )}
             <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
               {dpi} DPI
             </span>

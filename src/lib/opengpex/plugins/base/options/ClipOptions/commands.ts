@@ -19,13 +19,12 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, asLocalRect, asLocalShape, Frame, LocalRect, LocalShape, LocalPolygon, EditorActions, GeometryService, Point2D } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, asLocalRect, asLocalShape, Frame, LocalRect, LocalShape, EditorActions, GeometryService, Point2D } from '@opengpex/editor/core/types';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { blobToImageData } from '@opengpex/editor/core/engine/utils/pixel-utils';
 import { clipComputeClient } from './workers/client';
 import * as P from './protocols';
 import type { ClipTool } from './protocols';
-const { CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS } = P;
 
 
 /**
@@ -79,7 +78,7 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
       if (isReCanvas) {
         actions.setCanvasClipBox(activeFrame.id, { ...shape, ...patch } as LocalShape);
       } else {
-        const toolId: 'rect' | 'ellipse' = shape.type === 'circle' ? 'ellipse' : 'rect';
+        const toolId: 'rect' | 'pathellipse' = shape.type === 'circle' ? 'pathellipse' : 'rect';
         // clipBoxes stores LocalPolygon — properly convert the patched rect to polygon with rings
         const patched = { ...shape, ...patch } as LocalShape;
         const poly = geometry.polygon.regularShapeToLocalPolygon(toolId, patched.rect, patched.antiAliased);
@@ -103,9 +102,8 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
  *
  * We delegate the actual write to `setClipTool` (via the ClipOptions
  * instance UID) rather than calling `scoped.setSignal` directly, because
- * `setClipTool` carries the strategy projection (e.g. patching
- * `imageCropBox.type` to 'circle' when switching to ellipse) plus the
- * pluginConfig persistence (so cross-session restoration survives).
+ * `setClipTool` carries the pluginConfig persistence (so cross-session
+ * restoration survives).
  *
  * Reading `SIGNAL_CLIP_TOOL` directly (rather than caching a local copy)
  * means we always pick up the *latest* tool regardless of who last set it
@@ -114,9 +112,7 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
 function cycleClipTool(ctx: EditorContextValue, step: 1 | -1): void {
   const order = (Object.keys(P.CLIP_TOOL_STRATEGIES) as ClipTool[]).filter(t => P.CLIP_TOOL_STRATEGIES[t].enabled !== false);
   const raw = (ctx.activeFrame?.latestClipTool as ClipTool | undefined) ?? order[0];
-  // Fallback: if the frame still has 'ellipse' from legacy data, map it to 'pathellipse'
-  const current = raw === 'ellipse' ? 'pathellipse' : raw;
-  const idx = order.indexOf(current);
+  const idx = order.indexOf(raw);
   // `(idx + step + len) % len` keeps the modulo non-negative even for step=-1.
   const next = order[(idx + step + order.length) % order.length];
   ctx.actions.executeCommand(
@@ -170,7 +166,7 @@ export const CLIP_OPTIONS_COMMANDS = {
 
   /**
    * Tab — cycle through clip tools forward while already in clip mode
-   * (rect → ellipse → lasso → wand → rect …).
+   * (rect → pathellipse → lasso → wand → rect …).
    *
    * Only active when `interactionMode === 'clip'`; no-op in any other mode.
    * Re-Canvas guard: no-op when active (Re-Canvas is rect-only).
@@ -189,7 +185,7 @@ export const CLIP_OPTIONS_COMMANDS = {
 
   /**
    * Shift+Tab — reverse cycle through clip tools while already in clip mode
-   * (rect ← ellipse ← lasso ← wand ← rect …).
+   * (rect ← pathellipse ← lasso ← wand ← rect …).
    *
    * Only active when `interactionMode === 'clip'`; no-op in any other mode.
    * Re-Canvas guard: no-op when active (Re-Canvas is rect-only).
@@ -413,7 +409,7 @@ export const CLIP_OPTIONS_COMMANDS = {
     undoable: true,
     /**
      * Double-click (or programmatic) clear — removes the active tool's
-     * selection. Works for ALL clip tools (rect / ellipse / lasso / wand).
+     * selection. Works for ALL clip tools (rect / pathellipse / lasso / wand).
      *
      * Re-Canvas mode is excluded (the canvas crop box must always exist).
      *
@@ -454,7 +450,11 @@ export const CLIP_OPTIONS_COMMANDS = {
     id: P.CMD_TOGGLE_ANTI_ALIAS,
     name: 'Toggle Anti-Alias',
     category: 'Selection',
-    undoable: true,
+    // [noundo] The toggle is a tool-preference change, not a document edit:
+    // it always writes the per-tool preset (and persists it to pluginConfig),
+    // and it now fires even when no selection exists, so it must never push
+    // an undo checkpoint.
+    undoable: false,
     // ─── Shortcut: double-tap `A` ──────────────────────────────────────────
     // Why double-tap rather than single?
     //   1) The single-letter `A` collides with too many adjacent idioms
@@ -484,29 +484,43 @@ export const CLIP_OPTIONS_COMMANDS = {
       const tool = (ctx.activeFrame?.latestClipTool as ClipTool | undefined) ?? 'rect';
       if (!P.CLIP_TOOL_STRATEGIES[tool]?.supportsAntiAlias) return;
 
-      // ─── Unified path via getClipBox ─────────────────────────────────
-      // getClipBox resolves the correct slot by latestClipTool and returns
-      // `{ regular, spatial }`. We branch on `.regular` (data-level truth)
-      // rather than on strategy.family (config-level declaration).
+      // ─── Step 1: flip the per-tool preset (works with no selection) ────
+      // The tool's preset lives in the reactive per-tool AA map. Toggling is
+      // a tool-options operation in its own right, so it always executes —
+      // an active selection is patched afterwards as a secondary effect.
+      const currentMap = (ctx.scoped!.getSignal(P.SIGNAL_CLIP_TOOL_AA) as P.ClipToolAAMap | undefined)
+        ?? P.DEFAULT_CLIP_TOOL_AA;
+      const currentAA = currentMap[tool] ?? true;
+      const newAA = !currentAA;
+      ctx.scoped!.setSignal(P.SIGNAL_CLIP_TOOL_AA, { ...currentMap, [tool]: newAA });
+
+      // NOTE: deliberately NO pluginConfig persistence here — the per-tool AA
+      // map is a session-scoped tool preference; a refresh resets it to the
+      // factory defaults (accepted product behaviour, unlike feather).
+
+      // ─── Step 2: patch the active selection in place (if any) ───────────
+      // The selection's own `antiAliased` entity flag is the data-level truth
+      // consumed by the GPU mask pipeline; keep it in sync with the preset so
+      // the visible selection reflects the toggle immediately.
       const frame = ctx.activeFrame;
       if (!frame) return;
       const clipBox = getClipBox(frame);
-      if (!clipBox) return;
+      if (!clipBox) return; // No selection on canvas -> tool setting updated, done!
 
-      const currentAA = clipBox.antiAliased ?? true;
-      const newAA = !currentAA;
-
-      // For regular tools (rect/ellipse): rebuild the polygon with the new AA flag
+      // For the rect tool: rebuild the polygon with the new AA flag
       // so that rings are regenerated correctly (not just patching metadata).
-      // For irregular tools (lasso/wand): patch the edge-mode flags directly on the
-      // polygon. INVARIANT (three-state model): the AA toggle is the sole writer
-      // and must write BOTH flags — `ssdepMode` is display-only (SSDEP) and
-      // always resets to false here; it never enters GPU descriptors.
-      if (tool === 'rect' || tool === 'ellipse') {
+      // For the path-based tools (pathellipse / lasso / sam): patch the
+      // edge-mode flags directly on the polygon. INVARIANT (three-state
+      // model): the AA toggle is the sole writer and must write BOTH flags —
+      // `ssdepMode` is display-only (SSDEP) and always resets to false here;
+      // it never enters GPU descriptors. Note rect can only reach this branch
+      // if a legacy rect selection is on canvas; the preset map never lets
+      // rect's toggle pass the supportsAntiAlias guard, so this is dead-path
+      // defensive parity with the previous behaviour.
+      if (tool === 'rect') {
         const newPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, clipBox.rect, newAA);
         ctx.actions.setClipBox(frame.id, tool, newPoly);
       } else {
-        // Irregular (lasso / wand): patch antiAliased + ssdepMode directly
         const newPoly = { ...clipBox, antiAliased: newAA, ssdepMode: false };
         ctx.actions.setClipBox(frame.id, tool, newPoly);
       }
@@ -517,20 +531,14 @@ export const CLIP_OPTIONS_COMMANDS = {
   /**
    * setClipTool — strategy-driven tool switch.
    *
-   * Side-effect matrix (by `family`):
-   *   - regular → regular   : `projectShape()` patches imageCropBox.type.
-   *   - regular → irregular : no data write; unified ants selector reads the
-   *                           new tool's (empty) slot → path clears.
-   *   - irregular → regular : no data write; ants selector reads the new
-   *                           tool's slot (empty or shape) → path updates.
-   *   - irregular → irregular : no data write. Per-tool slots mean the ants
-   *                           selector reads the new tool's (empty) slot and
-   *                           the path clears; previous tool's slot is
-   *                           preserved for round-trip symmetry.
+   * Each tool owns its own independent slot in `frame.clipBoxes`, so switching
+   * writes only `latestClipTool`; the ants selector reads the new tool's slot
+   * (empty or shape) and the path updates accordingly. Inactive slots are
+   * preserved for round-trip symmetry (switch back to see the old selection).
    *
    * Slot clears only happen via:
    *   1) `adv.layer.clip.toMask` (mission accomplished);
-   *   2) explicit "Clear Selection" command (future).
+   *   2) explicit "Clear Selection" command.
    *
    * [noundo] Tool switching is a UI navigation action, not a document edit.
    * It does NOT create an undo checkpoint — pressing Cmd+Z after a Tab cycle
@@ -543,72 +551,11 @@ export const CLIP_OPTIONS_COMMANDS = {
     name: 'Set Crop Tool',
     undoable: false,
     execute: (ctx: EditorContextValue, payload: { tool: ClipTool }) => {
-      const { activeFrame, actions, scoped } = ctx;
+      const { activeFrame, actions } = ctx;
       if (!activeFrame || !payload?.tool) return;
 
-      const tool = payload.tool;
-
       // Write to frame model (per-frame, persistent, participates in undo).
-      actions.updateFrame(activeFrame.id, { latestClipTool: tool });
-
-      // Regular tools (rect / ellipse): rebuild the polygon for the new slot
-      // and clear the old slot. Irregular tools (lasso / wand / sam) each own
-      // their own independent slot — no cross-slot work needed on switch.
-      if (tool === 'rect' || tool === 'ellipse') {
-        const newSlot = tool;
-        const oldSlot = tool === 'ellipse' ? 'rect' : 'ellipse';
-        const isReCanvas = !!scoped?.getSignal(P.SIGNAL_RE_CANVAS);
-
-        if (isReCanvas) {
-          // Re-Canvas is always rect-shaped; just coerce the type field.
-          actions.setCanvasClipBox(activeFrame.id, {
-            ...activeFrame.canvasClipBox,
-            type: tool === 'ellipse' ? 'circle' : 'rect',
-          });
-        } else {
-          if (CLIP_REGULAR_TOOL_SWITCH_INHERITS_BOUNDS) {
-            // Inherit mode: copy bounds from the previous regular slot into the
-            // new slot with the correct shape type. The user sees the same area
-            // but a different shape — good for "try ellipse on the same region"
-            // workflows.
-            //
-            // IMPORTANT: Do NOT use `getRegularClipShape(activeFrame)` here.
-            // `activeFrame` is the pre-update snapshot — `latestClipTool` is
-            // stale (still the old tool). If coming from an irregular tool
-            // (lasso/wand), the stale pointer makes `getClipBox` read the
-            // polygon slot, fail the `regular` check, return undefined, and
-            // the fallback overwrites the user's rect/ellipse with an empty
-            // 0×0 shape — destroying the selection they expect to see on
-            // return. Reading clipBoxes directly avoids this trap.
-            const sourceClip = (activeFrame.clipBoxes[oldSlot] as LocalPolygon | undefined)
-                             ?? (activeFrame.clipBoxes[newSlot] as LocalPolygon | undefined);
-            if (sourceClip) {
-              // Regenerate the polygon with the correct rings for the new shape type.
-              // Simply patching `type` on the old polygon would keep the old rings
-              // (e.g. 4-point rect rings when switching to ellipse), causing the
-              // marching ants to still render a rectangle. We must rebuild from the
-              // bounding rect so the rings match the new shape type.
-              const antiAliased = sourceClip.antiAliased ?? true;
-              const newPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, sourceClip.rect, antiAliased);
-              actions.setClipBox(activeFrame.id, newSlot, newPoly);
-            }
-          } else {
-            // Independent mode (Photoshop-style): new tool starts clean.
-            // Only rebuild the polygon if the target slot already has data.
-            const existing = activeFrame.clipBoxes[newSlot] as LocalPolygon | undefined;
-            if (existing) {
-              const antiAliased = existing.antiAliased ?? true;
-              const newPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, existing.rect, antiAliased);
-              actions.setClipBox(activeFrame.id, newSlot, newPoly);
-            }
-          }
-
-          // NOTE: Old slot is intentionally NOT cleared. `getRegularClipShape`
-          // resolves via `frame.latestClipTool`, so inactive slots are never
-          // read. Keeping data allows round-trip (rect→ellipse→rect preserves
-          // the original rect selection), matching lasso/wand behaviour.
-        }
-      }
+      actions.updateFrame(activeFrame.id, { latestClipTool: payload.tool });
     }
   } as EditorCommand<{ tool: ClipTool }, void>,
 
@@ -902,8 +849,8 @@ export const CLIP_OPTIONS_COMMANDS = {
    * CMD_SELECT_ALL — Select All (Cmd+A / Ctrl+A).
    *
    * Creates a full-canvas selection matching the current regular tool shape
-   * (rect or ellipse). Only active when already in clip mode with a regular
-   * tool (rect/ellipse) selected. Does NOT switch tools or enter clip mode.
+   * (rect). Only active when already in clip mode with the rect tool
+   * selected. Does NOT switch tools or enter clip mode.
    *
    * Re-Canvas guard: no-op when active (canvas resize owns the rect).
    */
@@ -922,13 +869,13 @@ export const CLIP_OPTIONS_COMMANDS = {
       const frame = ctx.activeFrame;
       if (!frame) return;
 
-      // Only works with regular tools (rect / ellipse)
+      // Only works with the rect tool
       const tool = (frame.latestClipTool as ClipTool) || 'rect';
-      if (tool !== 'rect' && tool !== 'ellipse') return;
+      if (tool !== 'rect') return;
 
       const { w, h } = frame.canvas;
       // Build a full-canvas polygon matching the current tool shape
-      const fullCanvasPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, asLocalRect({ x: 0, y: 0, w, h }), tool === 'ellipse');
+      const fullCanvasPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, asLocalRect({ x: 0, y: 0, w, h }), false);
 
       // Write to the current tool's slot (no tool switch)
       ctx.actions.setClipBox(frame.id, tool, fullCanvasPoly);
@@ -940,7 +887,7 @@ export const CLIP_OPTIONS_COMMANDS = {
    *
    * Clears the active tool's selection without exiting clip mode.
    * Equivalent to a single-click reset (same as `resetBox`).
-   * Only active when in clip mode with rect/ellipse tool.
+   * Only active when in clip mode with the rect tool.
    *
    * If a peel exchange layer exists, merges it before clearing.
    */
@@ -959,9 +906,9 @@ export const CLIP_OPTIONS_COMMANDS = {
       const frame = ctx.activeFrame;
       if (!frame) return;
 
-      // Only works with regular tools (rect / ellipse)
+      // Only works with the rect tool
       const tool = (frame.latestClipTool as ClipTool) || 'rect';
-      if (tool !== 'rect' && tool !== 'ellipse') return;
+      if (tool !== 'rect') return;
 
       const clipBox = getClipBox(frame);
       if (!clipBox) return; // already empty — nothing to clear
@@ -1005,17 +952,17 @@ export const CLIP_INTERCEPTORS = {
     // selected, on the theory that "canvas-resize is rectangular-only".
     // That mutation was destructive: there was no symmetric restore on
     // Re-Canvas exit, so closing Re-Canvas (Esc) left the user on 'rect'
-    // even when they had originally been on lasso / wand / ellipse — the
-    // canvas would then render the *previous* shape (e.g. the ellipse the
-    // user had just drawn) under a toolbar that claimed 'rect' was active,
-    // giving the misleading "tool says rect, selection is ellipse" UX
+    // even when they had originally been on lasso / wand — the
+    // canvas would then render the *previous* shape the
+    // user had just drawn under a toolbar that claimed 'rect' was active,
+    // giving the misleading "tool says rect, selection says otherwise" UX
     // observed as a real-machine bug on 2026-06-23.
     //
     // The "rect-only during Re-Canvas" semantic is already enforced
     // *non-destructively* by the synthesis layer:
     //   • ClipOverlay/hooks.ts → `effectiveTool: ClipTool = isReCanvas ? 'rect' : rawTool`
     //   • interactions.ts::makeClipToolGuard → same synthesis on the dispatch path
-    // so during Re-Canvas the canvas rect is draggable and the ellipse /
+    // so during Re-Canvas the canvas rect is draggable and the pathellipse /
     // lasso / wand handlers are filtered out, all without touching the
     // user's actual tool selection. When Re-Canvas closes, the original
     // signal value is preserved and the user lands back on whichever tool

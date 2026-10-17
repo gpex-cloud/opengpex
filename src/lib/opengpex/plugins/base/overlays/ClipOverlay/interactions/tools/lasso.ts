@@ -28,6 +28,7 @@ import {
 } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
+import type { ClipToolAAMap } from '../../../../options/ClipOptions/protocols';
 import { makeClipToolGuard } from '../guard';
 
 /**
@@ -129,7 +130,10 @@ export const createLassoHandler = (): InteractionHandler => {
     onStart: (e) => {
       active = true;
       const clipBox = getClipBox(e.activeFrame);
-      gestureAA = clipBox?.antiAliased ?? true;
+      // Fresh gesture with no selection on canvas: inherit the lasso tool's
+      // persistent AA preset; an existing selection keeps its own entity flag.
+      const toolAAMap = e.state.getStateSignal<ClipToolAAMap | undefined>(ClipOptionsAPI.signals.clipToolAA);
+      gestureAA = clipBox ? (clipBox.antiAliased ?? true) : (toolAAMap?.lasso ?? true);
 
       let { x: clampedX, y: clampedY } = e.geometry.space.clampPointToRect(e.point.canvas, e.activeFrame.canvas);
       // Always snap to pixel grid — ensures integer coordinates regardless of AA mode.

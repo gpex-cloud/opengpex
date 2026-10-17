@@ -93,7 +93,8 @@ const { runCommand, abortCommand } = createToolCommand<
     // Build polygon from contour rings
     const localRings = workerResult.rings.map(ring => ring.map(p => asLocalPoint({ x: p.x, y: p.y })));
     const bounds = asLocalRect(ctx.geometry.polygon.computePolygonBounds(localRings));
-    const polygon = asLocalPolygon(localRings, bounds, true);
+    // Wand slot is always hard-edged pixel selection (antiAliased: false)
+    const polygon = asLocalPolygon(localRings, bounds, false);
 
     // Apply clip box
     actions.setClipBox(frameId, 'wand', polygon);

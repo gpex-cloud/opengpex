@@ -43,7 +43,7 @@ import { ADJUST_PRE_UNIFORM_BUFFER_SIZE, packAdjustPreUniform } from '@opengpex/
 import { FILMIC_WHITE_DOMAIN } from '@opengpex/editor/core/engine/color/filmic';
 import { resolveAdjustBindGroup, type ResolveAdjustDeps } from '../support/adjustBindGroup';
 import { resolveSourceGamutId } from '../support/sourceGamut';
-import { resolveSourceRawWhiteDomain } from '../support/sourceIntent';
+import { resolveSourceRawIntentNibble, resolveSourceRawWhiteDomain } from '../support/sourceIntent';
 
 export interface AdjustPrePassContext {
   readonly device: GPUDevice;
@@ -93,7 +93,7 @@ export class AdjustPrePass {
       source.maxV,
       params.sourceIsLinear ?? false,
       gamutId,
-      rawWhiteDomain !== undefined ? 1 : 0,
+      resolveSourceRawIntentNibble(layer),
       rawWhiteDomain ?? FILMIC_WHITE_DOMAIN,
     );
     const slot = bufferRing.writeSlot(uniform);

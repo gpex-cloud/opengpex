@@ -736,8 +736,21 @@ export class SceneAssembler {
       // ── (2) vmask: vectorMasks + implicit non-rect visibleShape → declarative ──
       // (implicit shape mask preserves the fragment non-rect clip, see
       // translateLocalShapeToOrigin.)
-      const explicitMasks = latestLayer.vectorMasks?.filter((m) => m.enabled !== false) ?? [];
+      //
+      // COORDINATE CONTRACT: masks are STORED in the layer-local frame — the same
+      // frame `visibleShape.rect` lives in, where a fragment's content sits at the
+      // rect origin (vx, vy) inside its bounding box. The GPU mask space, however,
+      // is CROP-LOCAL: `resolveLayerGeometry` sets `localOffset = crop.xy`, so the
+      // shader's layer-local pixel origin is the content window's top-left. Every
+      // mask must therefore be re-based by (-vx, -vy) before entering the
+      // descriptor — the implicit shape mask below always was; explicit masks
+      // (cut holes, drill, to-mask) were not, which shifted the hole of a second
+      // cut performed on an off-origin fragment by exactly (+vx, +vy).
       const shape = latestLayer.visibleShape;
+      const explicitMasks = (latestLayer.vectorMasks?.filter((m) => m.enabled !== false) ?? [])
+        .map((m) => ((shape?.rect.x ?? 0) !== 0 || (shape?.rect.y ?? 0) !== 0)
+          ? { ...m, shape: translateLocalShapeToOrigin(m.shape, -(shape!.rect.x), -(shape!.rect.y)) }
+          : m);
       // A non-rect visibleShape is an implicit clip mask; a rect visibleShape that
       // carries a feather (feathered fragment) also needs one so its soft edge
       // renders. A plain rect fragment (featherPx 0/absent) keeps the crop-only path.
@@ -804,6 +817,14 @@ export class SceneAssembler {
           // entry ⇒ undefined ⇒ SDR passthrough. Carried forward from the
           // asset's color identity, NEVER re-sniffed here.
           rawWhiteDomain: highDepth?.rawWhiteDomain,
+          // The RAW style preset toggle (frame.rawStyle, undefined/ON = on),
+          // resolved ONCE at assembly so the render-intent nibble flips with
+          // the document switch without touching pixels. Filled only on
+          // scene-linear sources — display-referred layers stay undefined and
+          // the resolver's domain-presence gate keeps the style unreachable.
+          rawStyleOn: highDepth?.rawWhiteDomain !== undefined
+            ? f.rawStyle !== false
+            : undefined,
         },
         transform,
         width: layerWidth,

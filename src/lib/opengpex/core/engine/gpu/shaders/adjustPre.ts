@@ -92,8 +92,8 @@ struct AdjustPreUniforms {
   // x: 0 = source is sRGB-encoded (decode it), 1 = source is already linear light.
   // y: GAMUT_ID (0..7) — the source physical gamut to align to the working space
   //    (ProPhoto RGB) after the TRC decode; 0 = already working / direct (no-op).
-  // z: RENDER_INTENT (0..1) — the out-of-box rendering intent tone-map
-  //    (0 = SDR passthrough, 1 = Filmic). This
+  // z: RENDER_INTENT (0..2) — the out-of-box rendering intent tone-map
+  //    (0 = SDR passthrough, 1 = Filmic, 2 = Filmic + RAW style preset). This
   //    bake is the FIRST sample of the raw asset, so it OWNS the tone-map; the
   //    downstream composite is then told the intent is already applied (it must
   //    never tone-map a second time).

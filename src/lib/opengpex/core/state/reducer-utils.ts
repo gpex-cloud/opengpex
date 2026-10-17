@@ -129,7 +129,7 @@ export function reconcileEditorState(draft: EditorReconcileSubset, source: Edito
         // - camera: Must be excluded! Because viewport camera adjustment is an asynchronous fine-tuning operation in the UI layer, and does not represent a change in the physical state of the document.
         //   If not excluded, the automatic Camera Fit when opening a new drawing will pollute the undo stack, causing ghost steps that require cmd+z to be pressed twice to undo.
         // - latestClipTool: Must be excluded! Tool switching (Tab/Shift+Tab) is a UI navigation action, not a document edit.
-        //   Without this exclusion, cycling tools (rect→ellipse→lasso) creates undo steps, and Cmd+Z reverts the tool selection — completely unexpected.
+        //   Without this exclusion, cycling tools (rect→pathellipse→lasso) creates undo steps, and Cmd+Z reverts the tool selection — completely unexpected.
         // - activeLayerId: Must be allowed! Because when actual layer additions, deletions, or modifications occur, we need the focus selection state to naturally bounce back during undo.
         //   Moreover, clicking the layer list alone only dispatches SET_ACTIVE_LAYER and does not trigger SIGNAL_COMMIT, so it will never generate ghost steps.
         if (key === 'canvas' || key === 'camera' || key === 'latestClipTool') return; // Excluded from history tracking

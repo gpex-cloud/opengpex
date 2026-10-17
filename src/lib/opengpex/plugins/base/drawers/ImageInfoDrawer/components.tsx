@@ -109,6 +109,19 @@ export function ImageInfoComponent() {
       actions.updateFrame(activeFrame.id, { hdrRender: on });
     };
 
+    // Per-document RAW style preset (the pre-grade colour step): availability
+    // comes from the SOURCE ASSET's decoded RAW identity (white domain present
+    // = scene-linear capture); the effective state defaults ON — the preset is
+    // the out-of-box RAW look, the toggle opts OUT to the neutral baseline.
+    // Toggling writes `frame.rawStyle` — a render filter, never pixel data.
+    const rawStyleAvailable =
+      !!activeFrame.assetId && assets.get(activeFrame.assetId)?.rawWhiteDomain !== undefined;
+    const rawStyleEnabled = activeFrame.rawStyle !== false;
+    const handleRawStyleToggle = (on: boolean) => {
+      if (activeFrame.rawStyle !== false === on) return;
+      actions.updateFrame(activeFrame.id, { rawStyle: on });
+    };
+
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
       {/* Header */}
@@ -146,6 +159,9 @@ export function ImageInfoComponent() {
           hdrAvailable={hdrAvailable}
           hdrEnabled={hdrEnabled}
           onHdrToggle={handleHdrToggle}
+          rawStyleAvailable={rawStyleAvailable}
+          rawStyleEnabled={rawStyleEnabled}
+          onRawStyleToggle={handleRawStyleToggle}
         />
 
         <AiGenerationPanel extra={activeFrame.extra} />

@@ -17,23 +17,113 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
 import { useFastSync, useFastAnchorSync } from '@opengpex/editor/core/state/volatile';
+import { useTicker } from '@opengpex/editor/core/motion/hooks/animation';
 import { Motion } from '@opengpex/editor/core/motion';
 import { Layer } from '@opengpex/editor/core/types';
 
 /** Internal throttle interval for matrix computation (~30Hz) */
 const MATRIX_THROTTLE_MS = 1000 / 30; // ~33ms
 
+/** Grace period after a camera gesture before the overlay fades back in. */
+const CAMERA_RESTORE_DELAY_MS = 150;
+
+/**
+ * useLayerOverlayCameraHide: HOST-level camera-move auto-hide.
+ *
+ * LayerOverlay owns this policy — contributors never implement it. While the
+ * camera is moving (pan/zoom/programmatic), every outline is anchored to a
+ * stale camera, so the whole container fades out; 150ms after the gesture
+ * ends it fades back in. The discriminator compares the fast-track camera
+ * draft (written every frame by a camera transaction) against the committed
+ * React-state camera. Reading the committed camera — not the merged frame
+ * the per-item sync callbacks receive — is what makes this reliable: the
+ * merged frame already contains the draft camera, so a compare against it
+ * is tautologically false.
+ *
+ * Layer-edit gestures (move/resize/rotate) never open a camera draft, so
+ * this stays inert while the user manipulates a layer — outlines are the
+ * manipulation affordance and must not vanish mid-drag.
+ *
+ * A contributor that declares `keepDuringCameraMove` in its usage stands the
+ * auto-hide down entirely (and restores a hidden container immediately when
+ * the claim appears), so policy changes stay inside LayerOverlay while
+ * intent stays with the plugin that registered it.
+ */
+export function useLayerOverlayCameraHide(
+  ref: React.RefObject<HTMLElement | null>,
+  keepDuringCameraMove: boolean
+) {
+  const { volatileRef } = useEditorServices();
+  const { state } = useEditorState();
+  const committedFrame = state.activeFrameId ? state.frames.byId[state.activeFrameId] : undefined;
+  const keepRef = useRef(keepDuringCameraMove);
+  useEffect(() => {
+    keepRef.current = keepDuringCameraMove;
+  }, [keepDuringCameraMove]);
+  const wasMovingRef = useRef(false);
+  const interactionEndTimeRef = useRef(0);
+
+  useTicker(() => {
+    const el = ref.current;
+    if (!el || !committedFrame) return;
+
+    // A contributor claimed camera-move immunity: undo our own hide if it is
+    // still applied, then stand down for as long as the claim holds.
+    if (keepRef.current) {
+      if (el.dataset.cameraHidden === 'true') {
+        delete el.dataset.cameraHidden;
+        el.style.transition = 'opacity 0.2s ease-out';
+        el.style.opacity = '';
+      }
+      wasMovingRef.current = false;
+      return;
+    }
+
+    const bufferedCam = volatileRef.current.buffered.frames[committedFrame.id]?.camera;
+    const moving = !!bufferedCam && (
+      bufferedCam.x !== committedFrame.camera.x
+      || bufferedCam.y !== committedFrame.camera.y
+      || bufferedCam.k !== committedFrame.camera.k
+    );
+
+    if (moving) {
+      wasMovingRef.current = true;
+      el.dataset.cameraHidden = 'true';
+      if (el.style.opacity !== '0') {
+        // Bypass the CSS fade so the stale outlines vanish on the same frame
+        // the camera starts diverging.
+        el.style.transition = 'none';
+        el.style.opacity = '0';
+      }
+      return;
+    }
+
+    if (wasMovingRef.current) {
+      wasMovingRef.current = false;
+      interactionEndTimeRef.current = performance.now();
+    }
+
+    // Debounced restore: absorb rapid scroll/pinch bursts without flicker.
+    if (el.dataset.cameraHidden === 'true'
+        && performance.now() - interactionEndTimeRef.current >= CAMERA_RESTORE_DELAY_MS) {
+      delete el.dataset.cameraHidden;
+      el.style.transition = 'opacity 0.2s ease-out';
+      el.style.opacity = '';
+    }
+  });
+}
+
 /**
  * useLayerOverlaySync: Layer outline screen-space synchronization.
  * Responsible for projecting the layer's World Matrix to screen space every frame and directly manipulating DOM.
  *
- * [Interaction Hide] During pan/zoom interaction, hides overlay (opacity: 0) immediately
- * (no throttle delay) and skips expensive matrix computation.
- * [Internal Throttle] Matrix computation is self-throttled to ~30Hz when not interacting,
- * but the interacting check runs every frame for instant hide response.
+ * [Per-item scope] This hook deliberately does NOT own the camera-move hide —
+ * that policy lives once at the container level in useLayerOverlayCameraHide.
+ * What remains here is the per-layer decision (canvas-sized hide) plus the
+ * matrix sync itself.
  */
 export function useLayerOverlaySync(
   ref: React.RefObject<HTMLElement | null>,
@@ -43,52 +133,12 @@ export function useLayerOverlaySync(
 ) {
   const { geometry } = useEditorServices();
   const lastMatrixTimeRef = useRef<number>(0);
-  const interactionEndTimeRef = useRef<number>(0);
-  const wasInteractingRef = useRef<boolean>(false);
-  /** True only while waiting for post-interaction debounced restore */
-  const pendingRestoreRef = useRef<boolean>(false);
+  /** True while this item is hidden by the canvas-sized check. */
+  const canvasHiddenRef = useRef<boolean>(false);
 
-  // No throttleHz option — runs every frame so interacting hide is instant
-  useFastSync(ref, isActive, (v, f, cam) => {
+  // No throttleHz option — runs every frame
+  useFastSync(ref, isActive, (v, f) => {
     if (!ref.current) return;
-
-    // [Interaction Hide] Instant — runs every frame, no throttle delay.
-    // Hide ONLY during CAMERA interactions (pan/zoom): the volatile camera
-    // buffer diverges from the committed frame camera for the whole gesture
-    // (and until the post-commit rAF lands, per the facade's buffered-camera
-    // preference), so a plain field compare is a reliable discriminator.
-    // Layer-edit interactions (move/resize/rotate drafts) must NOT hide the
-    // overlay — the outline and its gizmo ARE the manipulation affordance
-    // (vanishing handles while dragging read as a bug), and with a static
-    // camera the 30Hz-throttled matrix sync below tracks the draft correctly.
-    // Must also disable CSS transition to prevent 200ms fade-out delay.
-    const camMoving = cam.x !== f.camera.x || cam.y !== f.camera.y || cam.k !== f.camera.k;
-    if (camMoving) {
-      wasInteractingRef.current = true;
-      pendingRestoreRef.current = true;
-      if (ref.current.style.opacity !== '0') {
-        ref.current.style.transition = 'none';
-        ref.current.style.opacity = '0';
-      }
-      return;
-    }
-
-    // [Debounced Restore] Wait 150ms after interaction ends before showing overlay.
-    // This prevents flicker during rapid scroll/pinch bursts and gives the canvas
-    // time to settle into its final position.
-    // Only fires when recovering from interaction-hide (pendingRestoreRef), NOT when
-    // hidden by the canvas-sized check — this prevents infinite show/hide cycling.
-    if (wasInteractingRef.current) {
-      wasInteractingRef.current = false;
-      interactionEndTimeRef.current = performance.now();
-    }
-
-    if (pendingRestoreRef.current && ref.current.style.opacity === '0') {
-      if (performance.now() - interactionEndTimeRef.current < 150) return;
-      pendingRestoreRef.current = false;
-      ref.current.style.transition = '';
-      ref.current.style.opacity = '';
-    }
 
     // [Canvas-sized Hide] Runs every frame (cheap comparison, no throttle needed).
     // If layer matches canvas dimensions exactly and sits at the origin, the outline
@@ -98,6 +148,7 @@ export function useLayerOverlaySync(
     const latestLayer = f.layers.byId[layer.id] || layer;
     if (latestLayer.bounding.w === f.canvas.w && latestLayer.bounding.h === f.canvas.h
         && latestLayer.cx === 0 && latestLayer.cy === 0) {
+      canvasHiddenRef.current = true;
       if (ref.current.style.opacity !== '0') {
         ref.current.style.opacity = '0';
       }
@@ -106,7 +157,8 @@ export function useLayerOverlaySync(
 
     // If layer was previously hidden by canvas-sized check but is no longer
     // canvas-sized (e.g. user resized layer), restore visibility.
-    if (ref.current.style.opacity === '0' && !pendingRestoreRef.current) {
+    if (canvasHiddenRef.current && ref.current.style.opacity === '0') {
+      canvasHiddenRef.current = false;
       ref.current.style.transition = '';
       ref.current.style.opacity = '';
     }
@@ -118,7 +170,7 @@ export function useLayerOverlaySync(
 
     // 1. Execute pure geometric operations
     const worldMatrix = geometry.transform.getLayerWorldMatrix(latestLayer);
-    const viewMatrix = geometry.camera.getCameraMatrix(f, cam);
+    const viewMatrix = geometry.camera.getCameraMatrix(f, f.camera);
     const screenMatrix = viewMatrix.multiply(worldMatrix);
 
     // 2. Consider local offset from visibleRect

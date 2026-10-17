@@ -28,6 +28,7 @@ import {
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { createAsyncHandler } from '../../../../../../stage/interaction/handlers/AsyncHandler';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
+import type { ClipToolAAMap } from '../../../../options/ClipOptions/protocols';
 import { AIToolsDrawerAPI } from '../../../../drawers/AIToolsDrawer/protocols';
 import { segStore } from '../../../../drawers/AIToolsDrawer/segmentation/store';
 import type {
@@ -236,8 +237,11 @@ export const createSamHandler = (): InteractionHandler => {
 
         // 5. Project ALL candidate masks to frame-local polygons.
         //    Store them in the signal so the panel can switch between them.
+        //    With no prior selection on canvas, inherit the sam tool's
+        //    persistent AA preset instead of a hard-coded default.
         const clipBox = getClipBox(e.activeFrame);
-        const samAA = clipBox?.antiAliased ?? true;
+        const toolAAMap = e.state.getStateSignal<ClipToolAAMap | undefined>(ClipOptionsAPI.signals.clipToolAA);
+        const samAA = clipBox ? clipBox.antiAliased : (toolAAMap?.sam ?? true);
 
         const framePolygons: Array<ReturnType<typeof asLocalPolygon>> = [];
         for (const mask of decResult.masks) {

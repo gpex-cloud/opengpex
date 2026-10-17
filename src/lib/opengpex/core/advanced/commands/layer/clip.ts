@@ -322,7 +322,7 @@ export const LayerClipCommands = {
       // empty/near-zero path. Applying it would silently append an invalid mask
       // (layer vanishes or no-ops) with no user feedback. Early-out with the
       // same red pulse the removed bitmap branch used. Also covers the empty
-      // rect/ellipse case the regular branch previously ignored.
+      // degenerate-rect case the regular branch previously ignored.
       if (localShape.rect.w <= 0 || localShape.rect.h <= 0) {
         actions.setInteraction({
           hud: { message: 'Area is empty', type: 'error' }

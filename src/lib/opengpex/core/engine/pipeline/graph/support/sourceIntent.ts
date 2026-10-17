@@ -78,3 +78,21 @@ export function resolveSourceRawWhiteDomain(
   if (layer.source.kind !== 'raster') return undefined;
   return layer.source.rawWhiteDomain;
 }
+
+/**
+ * Pack the RENDER_INTENT flags nibble (bits 8..9) for a layer's source:
+ *   0 = SDR passthrough, 1 = Filmic knee, 2 = Filmic knee + the RAW style
+ * preset colour step. Same arbitration as {@link resolveSourceRawWhiteDomain}
+ * (transient override wins, raster-only, domain presence required); the style
+ * value additionally requires the per-document `rawStyleOn` toggle that
+ * SceneAssembler fills on scene-linear sources — a RAW layer with the preset
+ * switched OFF packs 1 (knee only), never a half-applied state.
+ */
+export function resolveSourceRawIntentNibble(
+  layer: LayerNode,
+  pipelineOverride?: boolean,
+): number {
+  if (resolveSourceRawWhiteDomain(layer, pipelineOverride) === undefined) return 0;
+  if (layer.source.kind === 'raster' && layer.source.rawStyleOn) return 2;
+  return 1;
+}

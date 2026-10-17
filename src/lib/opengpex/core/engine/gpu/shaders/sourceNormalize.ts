@@ -90,13 +90,16 @@ export const LAYER_GAMUT_SHIFT = 5;
 export const LAYER_GAMUT_MASK = 0x7;
 
 /**
- * `flags` bits 8..9: RENDER_INTENT (0..1 used) — the out-of-box rendering intent
+ * `flags` bits 8..9: RENDER_INTENT (0..2 used) — the out-of-box rendering intent
  * applied in the STRAIGHT domain at composite time.
  *
- * 0 = SDR passthrough (no tone-map), 1 = generic Filmic S-curve. Carried FORWARD
+ * 0 = SDR passthrough (no tone-map), 1 = generic Filmic S-curve, 2 = Filmic +
+ * the RAW style preset colour step (the "pre-grade" — a per-document user
+ * toggle, so a RAW layer's intent can flip between 1 and 2 at frame cadence
+ * without touching pixels). Carried FORWARD
  * explicitly from the ingest decision; arbitrated by
  * `resolveSourceRawWhiteDomain` (`graph/support/sourceIntent.ts`). (Bit width stays
- * 2 bits: the retired DNG-LUT id 2 keeps the layout stable.)
+ * 2 bits: value 3 stays reserved.)
  */
 export const LAYER_RENDER_INTENT_SHIFT = 8;
 /** Field width mask for RENDER_INTENT (2 bits → 0..3, of which 0..2 are used). */
@@ -144,12 +147,17 @@ fn normalize_source_components(
     color = vec4<f32>(gamut_to_working(color.rgb, gamut_id), color.a);
   }
 
-  // ③ Render intent. intent 0 = SDR passthrough (untouched); intent 1 = Filmic.
-  // CONSTRAINT B: un-premultiply → curve → re-premultiply.
-  if (intent == 1u) {
+  // ③ Render intent. 0 = SDR passthrough (untouched); 1 = Filmic knee;
+  // 2 = Filmic knee + the RAW style preset colour step (the "pre-grade":
+  // apply_raw_style BEFORE the knee — the probe-validated order, and both are
+  // non-linear so both run in the STRAIGHT domain per CONSTRAINT B).
+  if (intent >= 1u) {
     var straight = color.rgb;
     if (is_premult && color.a > 0.0001) {
       straight = color.rgb / color.a;
+    }
+    if (intent == 2u) {
+      straight = apply_raw_style(straight, white_domain);
     }
     straight = tone_map_filmic(straight, white_domain);
     if (is_premult) {

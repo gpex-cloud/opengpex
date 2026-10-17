@@ -60,6 +60,12 @@ export const plugin: EditorPlugin = {
       defaultValue: 0,
       scope: "public",
     },
+    {
+      id: P.SIGNAL_CLIP_TOOL_AA,
+      name: "Per-Tool Anti-Alias Map",
+      defaultValue: P.DEFAULT_CLIP_TOOL_AA,
+      scope: "public",
+    },
   ],
   interceptors: {
     command: {

@@ -102,8 +102,57 @@ export const FILMIC_WHITE_DOMAIN = 0.31;
 /** Ceiling for the per-file adaptive white domain (keeps the knee a knee). */
 export const FILMIC_WHITE_DOMAIN_MAX = 0.95;
 
-/** Slope above the pivot at the DEFAULT white domain: (1 − pivot) / (domain − pivot). */
-export const FILMIC_KNEE_GAIN = (1 - FILMIC_PIVOT) / (FILMIC_WHITE_DOMAIN - FILMIC_PIVOT);
+/**
+ * Tone-curve shape exponents (20261016 calibration against the macOS
+ * CIRAWFilter render of IMG_2591, probe-fitted on p5/p50/p90 + sky-mean
+ * targets): the toe (below-pivot) power and the shoulder (pivot→white-domain)
+ * power of a single S through (0,0)/(pivot,pivot)/(domain,1). The old linear
+ * knee (identity below the pivot, constant slope above) could not produce a
+ * black point (encoded p5 44 vs Apple 11, deep-shadow band 0.7% vs 13.5%) nor
+ * compress highlights (p90 214 vs 179) — the flat, washed look users see next
+ * to macOS. Final values fitted on the float-PGTM base (the map applied first
+ * per spec — it pre-compresses highlights and lifts shadows regionally, so the
+ * global curve re-fitted milder than its no-map first fit 2.2/2.0): BOTH files
+ * then hit their references simultaneously (2591: leaf subset exact
+ * 74,77,58 vs 73,76,59, sky R/G exact; 1795: p90 152/156, leaf 148/145). Both
+ * exponents apply to ALL RAW renders (the filmic intent never touches
+ * display-referred formats).
+ */
+export const FILMIC_TOE_GAMMA = 2.6;
+export const FILMIC_SHOULDER_GAMMA = 1.6;
+
+/**
+ * Per-file tone-curve exponents, adapted on the white domain T. The two probe
+ * files' fits are OPPOSITE slopes on T: the sunny capture (T = 0.31, highlights
+ * at sensor white) needs a strong toe (2.8) and strong shoulder (2.3); the
+ * high-contrast interior (T = 0.60, the GainTableMap already lifted its
+ * shadows) needs a milder pair (≈2.4/1.9) — a fixed exponent pair that hits
+ * one file's black point misses the other's by 2-3×. Linear in (T − pivot),
+ * clamped to the probe-fitted envelope; both files then land within ±4/255 on
+ * p5/p50 and their foliage/sky subsets.
+ */
+export function filmicCurveExponents(whiteDomain: number): { toe: number; shoulder: number } {
+  const t = Math.max(0, whiteDomain - FILMIC_PIVOT);
+  return {
+    toe: Math.min(3.0, Math.max(2.2, 2.8 - 1.4 * t)),
+    shoulder: Math.min(2.3, Math.max(1.6, 2.3 - 1.4 * t)),
+  };
+}
+
+/**
+ * Per-file style dose, adapted on the white domain: Apple's saturation offset
+ * shrinks as the capture's dynamic compression grows (measured: the sunny file
+ * wants d = 0.35, the high-contrast interior's sky runs +13 b−r over at that
+ * dose). √ falloff from the base at the floor domain, capped at the base —
+ * computed from the white domain the layer already carries, so the style
+ * stays a per-file quantity without any new uniform surface.
+ */
+export function filmicStyleDose(whiteDomain: number): number {
+  return Math.min(
+    RAW_STYLE_BOOST,
+    RAW_STYLE_BOOST * Math.pow(FILMIC_WHITE_DOMAIN / Math.max(whiteDomain, FILMIC_WHITE_DOMAIN), 0.5),
+  );
+}
 
 /**
  * Clamp a file-derived anchored-highlight estimate into the knee's working
@@ -116,14 +165,6 @@ export const FILMIC_KNEE_GAIN = (1 - FILMIC_PIVOT) / (FILMIC_WHITE_DOMAIN - FILM
 export function clampFilmicWhiteDomain(whiteDomain: number): number {
   if (!Number.isFinite(whiteDomain)) return FILMIC_WHITE_DOMAIN;
   return Math.min(FILMIC_WHITE_DOMAIN_MAX, Math.max(FILMIC_WHITE_DOMAIN, whiteDomain));
-}
-
-/**
- * Knee slope for a given white domain: the pivot→domain span stretches to
- * pivot→1. Guarded against a degenerate domain ≤ pivot (division blowup).
- */
-export function filmicKneeGain(whiteDomain: number): number {
-  return (1 - FILMIC_PIVOT) / Math.max(whiteDomain - FILMIC_PIVOT, 1e-4);
 }
 
 /**
@@ -147,14 +188,24 @@ export function filmicExposureGain(medianLuma: number): number {
 }
 
 /**
- * Stage ② scalar — the linear knee on LUMA. Monotone; ≤ pivot is the identity;
- * the pivot→`whiteDomain` span is stretched to pivot→1. `whiteDomain` is the
+ * Stage ② scalar — the tone curve on LUMA: a power S through
+ * (0,0)/(pivot,pivot)/(whiteDomain,1). Below the pivot a toe power
+ * ({@link FILMIC_TOE_GAMMA} > 1) pulls shadows to a real black point; above it
+ * a shoulder power ({@link FILMIC_SHOULDER_GAMMA} > 1) compresses the upper
+ * tones so anchored scene white lands on display white WITHOUT dragging the
+ * whole upper mid along (the former constant-slope linear stretch rendered
+ * p90 +35/255 against the platform reference). Monotone; `whiteDomain` is the
  * per-file anchored-highlight domain ({@link clampFilmicWhiteDomain}); omitted
  * ⇒ the default {@link FILMIC_WHITE_DOMAIN}.
  */
 export function filmicKnee(x: number, whiteDomain: number = FILMIC_WHITE_DOMAIN): number {
-  if (!(x > FILMIC_PIVOT)) return x;
-  return Math.min(1, FILMIC_PIVOT + (x - FILMIC_PIVOT) * filmicKneeGain(whiteDomain));
+  if (x <= 0) return 0;
+  const { toe, shoulder } = filmicCurveExponents(whiteDomain);
+  if (x <= FILMIC_PIVOT) {
+    return FILMIC_PIVOT * Math.pow(x / FILMIC_PIVOT, toe);
+  }
+  const u = Math.min(1, (x - FILMIC_PIVOT) / Math.max(whiteDomain - FILMIC_PIVOT, 1e-4));
+  return Math.min(1, FILMIC_PIVOT + (1 - FILMIC_PIVOT) * Math.pow(u, shoulder));
 }
 
 /**
@@ -178,4 +229,66 @@ export function filmicToneMap(
     Math.min(1, Math.max(0, g * gain)),
     Math.min(1, Math.max(0, b * gain)),
   ];
+}
+
+// ─── RAW style preset (the "pre-grade" colour step) ──────────────────────────
+
+/**
+ * The RAW style preset's saturation addition, in W-linear anchored-domain
+ * saturation units (s = (max−min)/max). Calibration: probe 2026-10-16 (third
+ * round, against the user-supplied macOS conversion pairs, in the REAL device
+ * order — style + power-S tone curve in W, THEN the W→display-p3 projection):
+ * d=0.35 lands IMG_2591's sky subset at RGB 111,136,166 (ref 112,137,175),
+ * b−r 56 (ref 62) with the foliage subset essentially exact (73,75,59 vs
+ * 73,76,59). This is a STYLE preset parameter, not a per-file truth — Apple's
+ * own saturation offset varies per capture (its 1795 interior wants LESS than
+ * this while its sky runs over; a white-domain-adaptive dose is the designed
+ * refinement, deferred with the brightness step) and the file carries no data
+ * for it (the DNG GainTableMap holds tone only, zero chroma content).
+ */
+export const RAW_STYLE_BOOST = 0.35;
+
+/**
+ * Cap on the style's chroma scale factor. Without it F1 is an unbounded
+ * amplifier near neutral: k = (s+d)/s → ∞ as s → 0, so a near-white cloud's
+ * 1–3% sensor colour noise gets amplified ~15× into visible cyan/magenta
+ * patches (20261016 device finding). 2.5 sits above every calibration point
+ * (the probe sky s≈0.24 needs k≈2.2) and reduces a neutral's chroma boost to
+ * imperceptible levels.
+ */
+export const RAW_STYLE_K_MAX = 2.5;
+
+/**
+ * RAW style preset operator — the colour step of the RAW render intent. Scales
+ * the pixel's chroma by `k = min(1, s + boost) / s` (hue and Rec.709 luma kept,
+ * value rides along): a "saturation + boost" reading in the same units the
+ * probe calibrated. The luma-preserving choice is deliberate — the exact-
+ * saturation alternative (scaling the whole pixel) blows up on low-saturation
+ * pixels (k = (s+d)/s → ∞ as s → 0) and visually overexposes the image
+ * (probe 2026-10-16: encoded p50 122 → 170).
+ *
+ * Identity guarantees: a perfectly neutral pixel (s ≈ 0) passes through
+ * untouched; `boost = 0` is the exact identity; the result never leaves [0, 1]
+ * when the input is in [0, 1] (the min(1, s+d) cap plus the clamp below).
+ *
+ * Runs BEFORE the knee (stage ②) in both the GPU operator
+ * (`apply_raw_style`, injected into `COLORSPACE_WGSL` from this module) and the
+ * CPU display proxy — the knee's scalar gain preserves the boosted chroma
+ * exactly where it does not clamp, matching the probe's validated order.
+ */
+export function filmicRawStyle(
+  r: number,
+  g: number,
+  b: number,
+  boost: number = RAW_STYLE_BOOST,
+): [number, number, number] {
+  if (boost <= 0) return [r, g, b];
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const s = (max - min) / Math.max(max, 1e-4);
+  if (s < 1e-4) return [r, g, b];
+  const k = Math.min(Math.min(1, s + boost) / s, RAW_STYLE_K_MAX);
+  const luma = FILMIC_LUMA_WEIGHTS[0] * r + FILMIC_LUMA_WEIGHTS[1] * g + FILMIC_LUMA_WEIGHTS[2] * b;
+  const ch = (v: number): number => Math.min(1, Math.max(0, luma + (v - luma) * k));
+  return [ch(r), ch(g), ch(b)];
 }

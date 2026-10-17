@@ -44,7 +44,7 @@ import {
 } from '@opengpex/editor/core/engine/gpu/shaders/layer';
 import { isSourceLinear } from '../support/sourceDomain';
 import { resolveSourceGamutId } from '../support/sourceGamut';
-import { resolveSourceRawWhiteDomain } from '../support/sourceIntent';
+import { resolveSourceRawIntentNibble, resolveSourceRawWhiteDomain } from '../support/sourceIntent';
 import { FILMIC_WHITE_DOMAIN } from '@opengpex/editor/core/engine/color/filmic';
 import type { ExportViewport } from '../RenderGraph';
 
@@ -160,7 +160,7 @@ export class BlendPass {
     // render-intent nibble (a bake-tone-mapped transient passes
     // sourceIntentApplied ⇒ undefined ⇒ 0), value packs filmic_white.
     const rawWhiteDomain = resolveSourceRawWhiteDomain(layer, params.sourceIntentApplied);
-    if (rawWhiteDomain !== undefined) flags |= (1 << LAYER_RENDER_INTENT_SHIFT);
+    flags |= resolveSourceRawIntentNibble(layer, params.sourceIntentApplied) << LAYER_RENDER_INTENT_SHIFT;
 
     const blendModeIndex = BLEND_MODE_MAP[layer.blendMode] ?? 0;
 

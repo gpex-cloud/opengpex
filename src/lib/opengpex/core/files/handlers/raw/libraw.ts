@@ -22,15 +22,19 @@ import type { WorkingColorSpace } from '@opengpex/editor/core/types';
 import type { RawImageData, LibRawSettings } from 'libraw-wasm';
 import {
   getConversionMatrix,
+  linearFloatToFloat16,
   linearToSrgb,
-  normalizedUint16ToFloat16,
 } from '@opengpex/editor/core/engine/color';
 import {
   filmicExposureGain,
   filmicToneMap,
+  filmicRawStyle,
+  filmicStyleDose,
   clampFilmicWhiteDomain,
   FILMIC_WHITE_DOMAIN,
 } from '@opengpex/editor/core/engine/color/filmic';
+import { applyGainTableMapF32, gainTableMapCentreCoords, gainTableMapGainAt, gainTableMapInput } from './gainTableMap';
+import { parseDngBaselineExposure, parseDngGainTableMap, type DngGainTableMap } from './metadata/dng';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // LibRaw Worker Class
@@ -182,12 +186,19 @@ export interface RawDecodeResult {
  * @param exposureGain - stage-① anchor (decode-computed; 1 = un-anchored)
  * @param whiteDomain  - stage-② knee domain (the anchored input mapped to display
  *   white; decode-derived per file, `FILMIC_WHITE_DOMAIN` = the default)
+ * @param styleBoost   - the RAW style preset colour step applied BEFORE the knee
+ *   (`filmicRawStyle`). 0 = off. The decode proxy bakes the default-ON preset so
+ *   thumbnails / cold-reload fallback match the canvas default; a user toggled
+ *   OFF shows the neutral baseline on canvas (proxy regeneration is an accepted
+ *   v1 trade-off — the proxy is a static decode artifact, the canvas is the
+ *   authority).
  */
 export function linearRgba16ToDisplayProxy8(
   linear16: Uint16Array,
   matrix: Float32Array | null,
   exposureGain = 1,
   whiteDomain: number = FILMIC_WHITE_DOMAIN,
+  styleBoost = 0,
 ): Uint8ClampedArray<ArrayBuffer> {
   const out = new Uint8ClampedArray(linear16.length);
   const INV = 1 / 65535;
@@ -201,6 +212,9 @@ export function linearRgba16ToDisplayProxy8(
       const b = matrix[6] * lr + matrix[7] * lg + matrix[8] * lb;
       lr = r; lg = g; lb = b;
     }
+    if (styleBoost > 0) {
+      [lr, lg, lb] = filmicRawStyle(clamp01(lr), clamp01(lg), clamp01(lb), styleBoost);
+    }
     // filmic knee on luma (stage ②, chroma-preserving) then the sRGB OETF.
     const [tr, tg, tb] = filmicToneMap(clamp01(lr), clamp01(lg), clamp01(lb), whiteDomain);
     out[i]     = Math.round(linearToSrgb(tr) * 255);
@@ -213,6 +227,119 @@ export function linearRgba16ToDisplayProxy8(
 
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+/**
+ * The FLOAT twin of {@link linearRgba16ToDisplayProxy8}: same display intent
+ * (anchor → optional linear gamut fold → style → knee → OETF → 8-bit), sourced
+ * from the f32 scene line the GainTableMap application produces. The input is
+ * NOT clamped on entry — values above 1.0 are the spec-preserved overrange and
+ * flow through the knee like any other linear light (the 8-bit output remains
+ * the display container; `filmicToneMap` owns the tone-level clamp).
+ */
+export function linearRgbF32ToDisplayProxy8(
+  linear32: Float32Array,
+  matrix: Float32Array | null,
+  exposureGain = 1,
+  whiteDomain: number = FILMIC_WHITE_DOMAIN,
+  styleBoost = 0,
+): Uint8ClampedArray<ArrayBuffer> {
+  const out = new Uint8ClampedArray(linear32.length);
+  for (let i = 0; i < linear32.length; i += 4) {
+    let lr = linear32[i] * exposureGain;
+    let lg = linear32[i + 1] * exposureGain;
+    let lb = linear32[i + 2] * exposureGain;
+    if (matrix) {
+      const r = matrix[0] * lr + matrix[1] * lg + matrix[2] * lb;
+      const g = matrix[3] * lr + matrix[4] * lg + matrix[5] * lb;
+      const b = matrix[6] * lr + matrix[7] * lg + matrix[8] * lb;
+      lr = r; lg = g; lb = b;
+    }
+    if (styleBoost > 0) {
+      [lr, lg, lb] = filmicRawStyle(clamp01(lr), clamp01(lg), clamp01(lb), styleBoost);
+    }
+    const [tr, tg, tb] = filmicToneMap(clamp01(lr), clamp01(lg), clamp01(lb), whiteDomain);
+    out[i] = Math.round(linearToSrgb(tr) * 255);
+    out[i + 1] = Math.round(linearToSrgb(tg) * 255);
+    out[i + 2] = Math.round(linearToSrgb(tb) * 255);
+    out[i + 3] = Math.round(clamp01(linear32[i + 3]) * 255);
+  }
+  return out;
+}
+
+const REC709 = [0.2126, 0.7152, 0.0722] as const;
+
+/**
+ * Encoded-proxy p90 for the GainTableMap auto-gate: the FULL display intent
+ * (anchor → knee → OETF) evaluated on a luma sample, exactly the metric the
+ * 2026-10-16 probe validated — the map is a highlight compressor, so a file
+ * whose shoulder it IMPROVES shows a lower p90 here, and one it would hurt
+ * (its dark-lift re-anchored upward onto a high-contrast scene) shows a HIGHER
+ * one. Monotone in the visible outcome, cheap (sampled, not exhaustive).
+ */
+function gateEncodedP90(lumaSample: readonly number[]): number {
+  const sorted = [...lumaSample].sort((a, b) => a - b);
+  const k = filmicExposureGain(sorted[Math.floor(sorted.length / 2)]);
+  const anchored = lumaSample.map(l => l * k);
+  const anchoredSorted = [...anchored].sort((a, b) => a - b);
+  const t = clampFilmicWhiteDomain(anchoredSorted[Math.floor(anchoredSorted.length * 0.995)]);
+  const kneeGain = (l: number): number =>
+    l > 0.18
+      ? Math.min(1, 0.18 + (l - 0.18) * ((1 - 0.18) / Math.max(t - 0.18, 1e-4))) / Math.max(l, 1e-6)
+      : 1;
+  const enc = anchored
+    .map(l => Math.round(linearToSrgb(Math.min(1, Math.max(0, l * kneeGain(l)))) * 255))
+    .sort((a, b) => a - b);
+  return enc[Math.floor(enc.length * 0.9)];
+}
+
+/**
+ * Auto-gate for baking the DNG `ProfileGainTableMap` into a decode: apply it
+ * ONLY when it lowers the encoded highlight percentile on the file's own
+ * sample. The probe found the map is a per-file TONE shaping with file-
+ * conditional value — a clear win on sunny scenes (IMG_2591 p90 211 → 173 vs
+ * Apple's 179) and a regression on high-contrast interiors (IMG_1795 188 → 211
+ * vs Apple's 156, whose highlights get RE-brightened by the dark-lift after
+ * re-anchoring). The gate captures the win without the regression, with no
+ * user-visible switch; the decision is deterministic per file.
+ *
+ * Exported (not `_`-prefixed) so the samples-gated validation probe can run
+ * the EXACT production gate on real decodes.
+ */
+export function shouldApplyGainTableMap(
+  rgba16: Uint16Array,
+  width: number,
+  height: number,
+  map: DngGainTableMap,
+  anchorStep: number,
+  baselineExposure: number,
+): boolean {
+  const px = width * height;
+  const rawLuma: number[] = [];
+  const gtmLuma: number[] = [];
+  const beGain = Math.pow(2, baselineExposure);
+  for (let p = 0; p < px; p += anchorStep) {
+    const j = p * 4;
+    const r = rgba16[j] / 65535;
+    const g = rgba16[j + 1] / 65535;
+    const b = rgba16[j + 2] / 65535;
+    rawLuma.push(REC709[0] * r + REC709[1] * g + REC709[2] * b);
+    // The gate must model the shipped application exactly: spatially constant
+    // at the grid centre (see gainTableMap module header for why the spatial
+    // field is not baked).
+    const { fx, fy } = gainTableMapCentreCoords(map);
+    const inp = gainTableMapInput(
+      Math.min(1, r * beGain),
+      Math.min(1, g * beGain),
+      Math.min(1, b * beGain),
+      map.weights,
+    );
+    const gain = gainTableMapGainAt(map, fx, fy, inp);
+    gtmLuma.push(
+      REC709[0] * r * gain + REC709[1] * g * gain + REC709[2] * b * gain,
+    );
+  }
+  return gateEncodedP90(gtmLuma) < gateEncodedP90(rawLuma);
 }
 
 /**
@@ -252,6 +379,11 @@ export async function convertRawToBlob(file: File, colorConfig: RawColorConfig):
   try {
     const buffer = await file.arrayBuffer();
 
+    // Parse the DNG ProfileGainTableMap + BaselineExposure BEFORE instance.open
+    // — the open hands `buffer`'s ArrayBuffer to the worker as a transferable,
+    // which DETACHES it ("Cannot perform Construct on a detached ArrayBuffer").
+    const gainTableMap = parseDngGainTableMap(new Uint8Array(buffer));
+    const baselineExposure = parseDngBaselineExposure(new Uint8Array(buffer)) ?? 0;
     await instance.open(new Uint8Array(buffer), {
       useCameraWb: true,
       // Derived per-gamut in decode.ts (display-p3→7, prophoto→4, adobe→2, srgb→1).
@@ -296,10 +428,42 @@ export async function convertRawToBlob(file: File, colorConfig: RawColorConfig):
       // convention). Sampled, not exhaustive: ~64k luma points is plenty for a
       // robust median at 12MP+.
       const anchorStep = Math.max(1, Math.floor(px / 65536));
+
+      // DNG ProfileGainTableMap — spec consumption (20261016 final): applied in
+      // FLOAT, never clamped. The map is Apple's local tone mapping data
+      // (DNG 1.6: "applied after the BaselineExposure adjustment" — the input
+      // weights read the BE-adjusted value, and the BE factor itself is
+      // absorbed by the exposure anchor below). Applied SPATIALLY CONSTANT at
+      // the grid centre: the map's own spatial field, under every geometric
+      // convention (20261017 exhaustive probe, 8 orientations × both table
+      // layouts), misaligns against Apple's render on both reference files —
+      // Apple's true spatial variation is semantic-mask driven and not
+      // recoverable from grid geometry — so only the tables' input-dependent
+      // tone shaping is baked (the best block-fidelity on both files, block
+      // MAE 5.71/4.47 vs 10.84/5.31 for position-aware sampling).
+      // The earlier uint16 bake failed STRUCTURALLY: the spec stages
+      // the map in f32 RIMM and "encourages readers to preserve the overrange
+      // values", but a uint16 container clamps — bright content (clear-sky
+      // blue channels near sensor white) clamps asymmetrically and squashes
+      // chroma (measured: sky encoded b−r 60 → 28). In f32/f16 the overrange
+      // survives, so the application lands in the half-float master WITHOUT
+      // any clamp: it is the file's own rendering data, part of the scene
+      // truth like the anchor.
+      const scene32 = new Float32Array(rgba16.length);
+      for (let i = 0; i < rgba16.length; i += 4) {
+        scene32[i] = rgba16[i] / 65535;
+        scene32[i + 1] = rgba16[i + 1] / 65535;
+        scene32[i + 2] = rgba16[i + 2] / 65535;
+        scene32[i + 3] = 1;
+      }
+      if (gainTableMap) {
+        applyGainTableMapF32(scene32, width, height, gainTableMap, baselineExposure);
+      }
+
       const lumaSample: number[] = [];
       for (let p = 0; p < px; p += anchorStep) {
         const j = p * 4;
-        lumaSample.push((0.2126 * rgba16[j] + 0.7152 * rgba16[j + 1] + 0.0722 * rgba16[j + 2]) / 65535);
+        lumaSample.push(0.2126 * scene32[j] + 0.7152 * scene32[j + 1] + 0.0722 * scene32[j + 2]);
       }
       lumaSample.sort((a, b) => a - b);
       const exposureGain = filmicExposureGain(lumaSample[Math.floor(lumaSample.length / 2)]);
@@ -342,11 +506,24 @@ export async function convertRawToBlob(file: File, colorConfig: RawColorConfig):
       // stays the untouched linear source truth line. The knee's white domain
       // rides alongside (NOT baked into the pixels — it is a display-side
       // parameter consumed via ColorIdentity.rawWhiteDomain).
-      const half = normalizedUint16ToFloat16(rgba16, exposureGain);
+      // Pack the f32 scene line (PGTM-applied) straight to half floats with the
+      // anchor gain — NO uint16 detour (its [0,1] clamp is what killed the
+      // overrange the spec says to preserve).
+      const packed = new Float32Array(rgba16.length);
+      for (let i = 0; i < scene32.length; i += 4) {
+        packed[i] = scene32[i] * exposureGain;
+        packed[i + 1] = scene32[i + 1] * exposureGain;
+        packed[i + 2] = scene32[i + 2] * exposureGain;
+        packed[i + 3] = 1;
+      }
+      const half = linearFloatToFloat16(packed);
 
       // 8-bit display proxy: exposure anchor → optional linear gamut fold →
-      // filmic knee → sRGB OETF → 16→8 quantise.
-      const rgba8 = linearRgba16ToDisplayProxy8(rgba16, displayMatrix, exposureGain, rawWhiteDomain);
+      // RAW style preset → filmic knee → sRGB OETF → 16→8 quantise. The boost
+      // bakes the default-ON preset so the proxy matches the canvas default
+      // (see linearRgba16ToDisplayProxy8's styleBoost note for the toggle-off
+      // trade-off).
+      const rgba8 = linearRgbF32ToDisplayProxy8(scene32, displayMatrix, exposureGain, rawWhiteDomain, filmicStyleDose(rawWhiteDomain));
       const displayBlob = await encodeDisplayBlob(rgba8, width, height, colorConfig.targetColorSpace);
 
       return {

@@ -419,6 +419,32 @@ export function resolveVmaskWindow(
  *                    interactive). The coverage texture is sized `ceil(logical × scale)`
  *                    so a 2×/4× export bakes a supersampled mask edge.
  */
+/**
+ * Bake transform for one polygon vmask: the (px_scale, origin) pair the fill
+ * shader consumes. The shader evaluates the ring-space sample point as
+ * `p = (texel + 0.5) · px_scale + origin`, so px_scale is the inverse
+ * supersample (logical bake extent / mask texels) and origin is the RING-SPACE
+ * coordinate of texel (0,0) — the window's top-left verbatim (NOT scaled by
+ * px_scale; scaling it displaced the windowed coverage by window.xy·(s−1)
+ * whenever the bake ran at a non-1 density, smearing a cut hole into a giant
+ * transparent region exactly in those zoom bands). A full-layer bake has no
+ * window and starts at the ring-space origin (0, 0).
+ */
+export function vmaskBakeTransform(
+  window: { readonly x: number; readonly y: number; readonly w: number; readonly h: number } | undefined,
+  bakeW: number,
+  bakeH: number,
+  maskW: number,
+  maskH: number,
+): { pxScaleX: number; pxScaleY: number; originX: number; originY: number } {
+  return {
+    pxScaleX: bakeW / maskW,
+    pxScaleY: bakeH / maskH,
+    originX: window ? window.x : 0,
+    originY: window ? window.y : 0,
+  };
+}
+
 export function prepareVmaskSources(
   encoder: GPUCommandEncoder,
   compiled: CompiledScene,
@@ -442,14 +468,11 @@ export function prepareVmaskSources(
     const bakeH = window?.h ?? logicalH;
     const [maskW, maskH] = vectorTransientSize(bakeW, bakeH, exportScale);
 
-    // px_scale = logical bake extent / mask texels (inverse supersample). The
-    // shader's p = origin + (gid+0.5)·px_scale lands in the layer-local px space
-    // the rings were emitted in.
-    cache.setPxScale(bakeW / maskW, bakeH / maskH);
-    cache.setOrigin(
-      window ? window.x * (bakeW / maskW) : 0,
-      window ? window.y * (bakeH / maskH) : 0,
-    );
+    // px_scale = logical bake extent / mask texels (inverse supersample); origin
+    // = the window's ring-space top-left (see vmaskBakeTransform's unit contract).
+    const t = vmaskBakeTransform(window, bakeW, bakeH, maskW, maskH);
+    cache.setPxScale(t.pxScaleX, t.pxScaleY);
+    cache.setOrigin(t.originX, t.originY);
 
     const texture = cache.prepare(encoder, ctx, layer.id, vmask.subMasks, maskW, maskH);
     out.set(layer.id, { texture, window: window ?? undefined });

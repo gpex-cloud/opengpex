@@ -88,12 +88,13 @@ export function ClipOverlayMain() {
   const clipConfig = state.pluginConfig[ClipOverlayAPI.configKey] as Partial<ClipOverlayConfig> | undefined;
   const marchingAntsAnimated = clipConfig?.marchingAntsAnimated ?? false;
 
-  // Ellipse-family selection: the true ellipse (tool 'ellipse', ShapeType
-  // 'circle') AND the 360-point path ellipse (tool 'pathellipse', ShapeType
-  // 'path' — never circle-recognized by polygonToShape). Used to clip the
-  // rule-of-thirds guides to the elliptical shape; without it the guide line
-  // ends poke out past the inscribed ellipse at the rect corners.
-  const isEllipseSelection = clipType === "circle" || clipTool === "pathellipse" || clipTool === "ellipse";
+  // Ellipse-family selection: circle-shaped clip boxes (ShapeType 'circle',
+  // written by refocus paths) AND the 360-point path ellipse (tool
+  // 'pathellipse', ShapeType 'path' — never circle-recognized by
+  // polygonToShape). Used to clip the rule-of-thirds guides to the elliptical
+  // shape; without it the guide line ends poke out past the inscribed ellipse
+  // at the rect corners.
+  const isEllipseSelection = clipType === "circle" || clipTool === "pathellipse";
 
   // ─── Activation gates ────────────────────────────────────────────────────
   const isOverlayActive = isClipActive || isReCanvas;
@@ -230,7 +231,7 @@ export function ClipOverlayMain() {
             { h: "sw", c: "bottom-0 left-0", cursor: "nesw-resize" },
             { h: "se", c: "bottom-0 right-0", cursor: "nwse-resize" },
           ].map((p) => {
-            const isEllipse = clipTool === "ellipse" || clipTool === "pathellipse";
+            const isEllipse = clipTool === "pathellipse";
             return (
               <div
                 key={p.h}

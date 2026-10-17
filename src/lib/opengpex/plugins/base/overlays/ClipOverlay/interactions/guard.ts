@@ -51,18 +51,12 @@ export function makeClipToolGuard(targetKind: ClipToolStrategy['handlerKind']) {
 
     // ─── Tool admission ────────────────────────────────────────────────
     // During Re-Canvas, regardless of the user's *previously selected*
-    // clip tool (could be lasso / wand / ellipse), we want the rect
+    // clip tool (could be lasso / wand), we want the rect
     // clipbox handler to dispatch — so synthesize `'rect'` as the active
     // tool here. This mirrors the synthesis done in `ClipOverlay/hooks.ts`
     // for the rendering side.
     const rawTool = (e.activeFrame?.latestClipTool as ClipTool) || 'rect';
-    // Map legacy 'ellipse' → 'pathellipse': the 'ellipse' entry is disabled
-    // (replaced by pathellipse), but old frames may still carry 'ellipse' in
-    // latestClipTool. Without this mapping the clipbox handler fires instead
-    // of pathellipse, producing a 64-point polygon that's recognized as
-    // type:'circle' and breaks path ∩ path intersection in nested cuts.
-    const mappedTool: ClipTool = rawTool === 'ellipse' ? 'pathellipse' : rawTool;
-    const effectiveTool: ClipTool = inReCanvas ? 'rect' : mappedTool;
+    const effectiveTool: ClipTool = inReCanvas ? 'rect' : rawTool;
     return CLIP_TOOL_STRATEGIES[effectiveTool].handlerKind === targetKind;
   };
 }

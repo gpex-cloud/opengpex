@@ -2,6 +2,15 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.17
+
+- Color: RAW photos now open with a vivid style preset by default, switchable off from the info panel's format badge (amber = on); the pre-grade effect is still a work in progress and will be refined in later versions
+- Workspace: fixed cut/extract-to-layer producing mostly transparent results on some documents, and a second cut no longer shifts the cut-out content
+- Workspace: fixed half-pixel jaggies on cut-to-layer edges when anti-aliasing is off
+- Workspace: anti-aliasing for clip shapes is now a per-tool switch (per session) instead of one shared toggle
+
+---
+
 ## v2.0.16
 
 - Workspace: the editor now caps and proactively releases its own GPU memory on large documents — big memory drop when switching tabs or after idle

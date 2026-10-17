@@ -25,8 +25,8 @@ import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals,
 import { asLocalRect, ShapeType, LocalShape } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { getActiveTarget } from './commands';
-import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn, CLIP_TOOL_STRATEGIES } from './protocols';
-import type { ClipTool } from './protocols';
+import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn, CLIP_TOOL_STRATEGIES, DEFAULT_CLIP_TOOL_AA } from './protocols';
+import type { ClipTool, ClipToolAAMap } from './protocols';
 import type { ClipOptionsCommandsMap, ClipOptionsSignalsMap } from './commands.d';
 
 /**
@@ -56,7 +56,7 @@ export const useClipOptionsCommands = () => {
     offsetSelectionCmd, // ← derived from CMD_OFFSET_SELECTION = 'cmd.offset_selection'
   } = usePluginCommands<ClipOptionsCommandsMap>();
 
-  const { reCanvasActiveSignal, clipFeatherValueSignal } = usePluginSignals<ClipOptionsSignalsMap>();
+  const { reCanvasActiveSignal, clipFeatherValueSignal, clipToolAaMapSignal } = usePluginSignals<ClipOptionsSignalsMap>();
 
   // ─── Feather persistence (Path B: signal for real-time, config for persistence) ──
   // Read persisted feather from pluginConfig on mount and hydrate the signal.
@@ -69,6 +69,14 @@ export const useClipOptionsCommands = () => {
       hydratedRef.current = true;
     }
   }, [clipFeatherValueSignal, selfConfig.feather]);
+
+  // ─── Per-tool AA presets (reactive signal only, no persistence) ────────────
+  // The per-tool AA map is a session-scoped tool preference: the signal starts
+  // from the factory defaults each session and the toggle command mutates it
+  // directly. Unlike feather there is deliberately NO pluginConfig hydration —
+  // a refresh resets AA presets to defaults, which is accepted product
+  // behaviour (the defaults table + the command's supportsAntiAlias guard keep
+  // rect / wand pinned to false with no stale-record concern).
 
   return useMemo(() => {
     const isReCanvas = !!reCanvasActiveSignal?.value;
@@ -98,8 +106,12 @@ export const useClipOptionsCommands = () => {
     // Drives the AA button's `disabled` state so the button is greyed-out for
     // rect (always pixel-aligned).
     const supportsAntiAlias = CLIP_TOOL_STRATEGIES[clipTool].supportsAntiAlias;
-    // All tools default to AA ON (true) when no explicit value is set.
-    const isAntiAliased = clipBox?.antiAliased ?? true;
+    // The button reflects the tool's persistent preset (single source of truth),
+    // not the selection's entity flag: the preset is configurable whether or
+    // not a selection exists, and toggling keeps both in sync via the command.
+    // Tools without AA support (rect/wand) are always hard-edged (false).
+    const toolAAMap = (clipToolAaMapSignal?.value as ClipToolAAMap | undefined) ?? DEFAULT_CLIP_TOOL_AA;
+    const isAntiAliased = supportsAntiAlias ? (toolAAMap[clipTool] ?? true) : false;
 
 
     return {
@@ -203,7 +215,7 @@ export const useClipOptionsCommands = () => {
           // setShapeType is a legacy path — new code uses clipToolSetCmd.
           // For now, just switch the tool; the actual polygon will be written
           // by the tool interaction on next draw.
-          const toolId = type === 'circle' ? 'ellipse' : 'rect';
+          const toolId = type === 'circle' ? 'pathellipse' : 'rect';
           actions.setClipBox(activeFrame.id, toolId, null);
         }
       },
@@ -221,6 +233,7 @@ export const useClipOptionsCommands = () => {
     activeFrame,
     reCanvasActiveSignal,
     clipFeatherValueSignal,
+    clipToolAaMapSignal,
     setSelfConfig,
     toggleModeCmd,
     exitClipModeCmd,

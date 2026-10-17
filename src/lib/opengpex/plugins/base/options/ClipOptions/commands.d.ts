@@ -47,4 +47,8 @@ export interface ClipOptionsSignalsMap {
     value: number;
     set: (val: number) => void;
   };
+  clipToolAaMapSignal: {
+    value: unknown;
+    set: (val: unknown) => void;
+  };
 }

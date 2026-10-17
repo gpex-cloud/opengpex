@@ -375,11 +375,12 @@ export interface GeometryService {
      */
     translatePolygon: (poly: LocalPolygon, dx: number, dy: number) => LocalPolygon;
     /**
-     * Generates a high-density polygon for a regular shape (rect or ellipse).
-     * Rect produces 4 corners; ellipse produces 360-point adaptive polygon.
+     * Generates a polygon for a regular clip shape.
+     * 'rect' produces 4 corners; 'pathellipse' produces the 64-point ellipse
+     * approximation ring that polygonToShape recognizes as type:'circle'.
      * Returns a branded LocalPolygon ready for clipBox storage.
      */
-    regularShapeToLocalPolygon: (tool: 'rect' | 'ellipse', rect: LocalRect, antiAliased?: boolean) => LocalPolygon;
+    regularShapeToLocalPolygon: (tool: 'rect' | 'pathellipse', rect: LocalRect, antiAliased?: boolean) => LocalPolygon;
     /** 360-point path-based ellipse polygon (stays on type:'path' pipeline, never recognized as circle) */
     ellipsePathToLocalPolygon: (rect: LocalRect, antiAliased?: boolean) => LocalPolygon;
     /**

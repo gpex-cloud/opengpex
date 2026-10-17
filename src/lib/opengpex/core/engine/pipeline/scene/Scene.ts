@@ -295,6 +295,15 @@ export type LayerSource =
      * `filmic_white` uniform field → `tone_map_filmic`'s `white_domain` parameter.
      */
     readonly rawWhiteDomain?: number;
+    /**
+     * The RAW style preset ("pre-grade") user toggle for THIS document, filled
+     * by SceneAssembler only on scene-linear sources (`rawWhiteDomain` present):
+     * `frame.rawStyle !== false` at assembly time. The intent nibble then packs
+     * 2 (Filmic + style) instead of 1. Undefined on every non-RAW source — the
+     * resolver's domain-presence gate keeps the style structurally unreachable
+     * for display-referred pixels, so this flag alone is never a colour hazard.
+     */
+    readonly rawStyleOn?: boolean;
   }
   /**
    * A PROCEDURAL vector primitive rendered on the GPU by a {@link VectorParams}
