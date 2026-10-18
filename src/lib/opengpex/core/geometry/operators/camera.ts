@@ -260,6 +260,14 @@ export interface VisibleRectOptions {
    * block boundaries, so pans within a block keep the same rect and key.
    */
   blockSizeCssPx?: number;
+  /**
+   * When false, skip block snapping entirely and return the raw
+   * margin-padded viewport rect (float edges, key 'raw'). Consumers that
+   * bring their own hysteresis (e.g. the ROI channel's containment check)
+   * use this to obtain the exact needed extent without inheriting the
+   * scale-coupled lattice.
+   */
+  quantize?: boolean;
 }
 
 export interface VisibleRect {
@@ -300,6 +308,12 @@ export function getVisibleRect(
   const margin = options.margin === undefined || options.margin === 'halfDiagonal'
     ? Math.hypot(x1 - x0, y1 - y0) / 2
     : options.margin;
+  // quantize:false → raw margin rect (float edges, no lattice): the consumer
+  // owns rect stability in that case.
+  if (options.quantize === false) {
+    const rect = asLocalRect({ x: x0 - margin, y: y0 - margin, w: x1 - x0 + 2 * margin, h: y1 - y0 + 2 * margin });
+    return { rect, key: 'raw' };
+  }
   const block = (options.blockSizeCssPx ?? 128) / scale;
 
   // Snap outward to block boundaries: the rect only ever GROWS across pans,

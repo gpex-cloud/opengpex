@@ -581,8 +581,15 @@ export class SceneAssembler {
       // this layer's bounding (at DPR 1). A mismatch means a decoder skipped
       // `rotateNakedRgba` and we're about to upload a mis-oriented / mis-strided
       // texture. Guarded to DPR 1 to avoid false alarms on HiDPI rasters. (A solid
-      // source is 1×1 by construction — nothing to check.)
-      if (highDepth && process.env.NODE_ENV !== 'production' && sourceDprScale === 1) {
+      // source is 1×1 by construction — nothing to check.) A FRAGMENT layer
+      // (copy/cut logical path) shares the source assetId and samples a
+      // SUB-RECT of the full texture via its narrowed `visibleShape` — its
+      // bounding is smaller than the texture by design, so the guard only
+      // applies to layers that claim the whole asset.
+      if (
+        highDepth && process.env.NODE_ENV !== 'production' && sourceDprScale === 1 &&
+        !latestLayer.visibleShape
+      ) {
         console.assert(
           highDepth.width === layerWidth && highDepth.height === layerHeight,
           `SceneAssembler: high-depth texture ${highDepth.width}×${highDepth.height} ≠ ` +

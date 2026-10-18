@@ -27,8 +27,14 @@
  * (the resident roi texture and its stamps); nothing here touches a device.
  *
  * ── MODEL ──
- *   • rect: the block-quantized visible rect (`getVisibleRect`, 128px camera
- *     lattice + half-diagonal margin) snapped OUTWARD to integer document
+ *   • containment hysteresis: the raw needed extent (exact viewport, no
+ *     margin/lattice, doc-clipped) is compared against the resident rect at
+ *     the same density band — while contained, the resident rect is reused
+ *     verbatim. The 128px camera lattice + half-diagonal margin only
+ *     hystereses pans (margin and block are continuous in the camera scale);
+ *     containment is what makes zoom rebuild-free inside a band.
+ *   • derive (first frame, band crossing, or escape): the block-quantized
+ *     visible rect (`getVisibleRect`) snapped OUTWARD to integer document
  *     pixels (`snapRectEdgesToPixel` — the texel-phase guarantee) then
  *     clipped to the document. Null when the viewport is fully off-document:
  *     NO rebuild, the stale roi keeps presenting (its quad mapping off-screen
@@ -56,6 +62,7 @@ import { getVisibleRect } from '@opengpex/editor/core/geometry/operators/camera'
 import { getRectIntersection } from '@opengpex/editor/core/geometry/operators/space';
 import { snapRectEdgesToPixel } from '@opengpex/editor/core/geometry/operators/snapping';
 import { resolveRoiDensity, workingFormatBpp } from './compositeBudget';
+import { quantizeDensityBand } from '@opengpex/editor/core/engine/text/glyphAtlas';
 import {
   densityCompositeDims,
   type InteractiveDensity,
@@ -74,6 +81,13 @@ export interface RoiFrameState {
   readonly targetH: number;
   /** Working format the resident roi was built at. */
   readonly format: GPUTextureFormat | null;
+  /** Resident rect in document px — the containment-hysteresis extent. */
+  readonly rectX: number;
+  readonly rectY: number;
+  readonly rectW: number;
+  readonly rectH: number;
+  /** Density band the resident roi was rendered at (null when not resident). */
+  readonly band: number | null;
 }
 
 /** What the roi channel must render/present this frame. */
@@ -121,27 +135,54 @@ export function resolveRoiFrame(input: {
   readonly current: RoiFrameState;
 }): RoiFrameDecision {
   const m = input.scene.view.transform;
-  const visible = getVisibleRect(
-    { w: input.scene.view.target.width, h: input.scene.view.target.height },
-    // The consumer feeds the PHYSICAL camera (view.transform includes DPR;
-    // view.target is the physical viewport). The operator is unit-agnostic —
-    // blocks are 128 camera-output px, the same lattice mechanism the CSS-px
-    // ants consumer uses.
-    { x: m.tx, y: m.ty, k: input.screenScale },
-  );
-  if (!visible) {
-    return { rect: null, density: null, targetW: 0, targetH: 0, rebuildKey: '', dimsChanged: false, needsComposite: false };
-  }
+  const viewport = { w: input.scene.view.target.width, h: input.scene.view.target.height };
+  const cam = { x: m.tx, y: m.ty, k: input.screenScale };
+  const docRect = asLocalRect({ x: 0, y: 0, w: input.docW, h: input.docH });
+  const offDocument: RoiFrameDecision = {
+    rect: null, density: null, targetW: 0, targetH: 0, rebuildKey: '', dimsChanged: false, needsComposite: false,
+  };
 
-  // Snap OUTWARD to integer document pixels FIRST: the block lattice's
-  // fractional edges would otherwise offset the texel lattice against the
-  // document pixel grid — rest misalignment + a phase jump on every rebuild.
-  // Integer origin × integer band = zero phase, so rebuilds change only
-  // sharpness, never block positions.
-  const snapped = snapRectEdgesToPixel(visible.rect);
-  const rect = getRectIntersection(snapped, asLocalRect({ x: 0, y: 0, w: input.docW, h: input.docH }));
-  if (!rect) {
-    return { rect: null, density: null, targetW: 0, targetH: 0, rebuildKey: '', dimsChanged: false, needsComposite: false };
+  // The exact needed extent: raw viewport in document px (no margin, no
+  // lattice), clipped to the document. This — not the margin-padded rect —
+  // is what containment is judged against, so the hysteresis keeps a rect
+  // only while it genuinely covers everything on screen.
+  const raw = getVisibleRect(viewport, cam, { margin: 0, quantize: false });
+  const needed = raw ? getRectIntersection(raw.rect, docRect) : null;
+  if (!needed) return offDocument;
+
+  const band = quantizeDensityBand(input.screenScale);
+  const cur = input.current;
+  // Containment hysteresis: while the resident rect still covers the whole
+  // needed extent at the SAME density band, keep it verbatim. The block
+  // lattice's margin/block terms are continuous functions of the camera
+  // scale, so a zoom tick re-derives a different rect every frame — the
+  // lattice hystereses pans only. Containment covers zoom: magnifying
+  // shrinks the needed extent (always inside), so a pinch-in gesture inside
+  // one band performs ZERO rebuilds; zoom-out/pan escapes re-derive through
+  // the margin-padded path below, whose half-diagonal slack amortizes the
+  // next escape. Present maps the resident rect's quad, which by containment
+  // covers the viewport — reuse is pixel-exact.
+  const contained =
+    cur.resident && cur.band === band && cur.rectW > 0 && cur.rectH > 0 &&
+    cur.rectX <= needed.x && cur.rectY <= needed.y &&
+    cur.rectX + cur.rectW >= needed.x + needed.w &&
+    cur.rectY + cur.rectH >= needed.y + needed.h;
+
+  let rect: LocalRect;
+  if (contained) {
+    rect = asLocalRect({ x: cur.rectX, y: cur.rectY, w: cur.rectW, h: cur.rectH });
+  } else {
+    const visible = getVisibleRect(viewport, cam);
+    if (!visible) return offDocument;
+    // Snap OUTWARD to integer document pixels FIRST: the block lattice's
+    // fractional edges would otherwise offset the texel lattice against the
+    // document pixel grid — rest misalignment + a phase jump on every rebuild.
+    // Integer origin × integer band = zero phase, so rebuilds change only
+    // sharpness, never block positions.
+    const snapped = snapRectEdgesToPixel(visible.rect);
+    const clipped = getRectIntersection(snapped, docRect);
+    if (!clipped) return offDocument;
+    rect = clipped;
   }
 
   const density = resolveRoiDensity({
@@ -153,8 +194,8 @@ export function resolveRoiFrame(input: {
     budgetBytes: input.budgetBytes,
   });
   const [targetW, targetH] = densityCompositeDims(rect.w, rect.h, [density.scaleX, density.scaleY]);
-  // Rebuild key = the INTEGER roi extent + band (the block lattice underneath
-  // supplies the pan hysteresis, and the pixel snap makes the key the exact
+  // Rebuild key = the INTEGER roi extent + band (containment keeps the key
+  // literally identical across reuse; the pixel snap makes it the exact
   // identity of the rendered texture).
   const rebuildKey = `${rect.x},${rect.y},${rect.x + rect.w},${rect.y + rect.h}|b${density.band}`;
   const dimsChanged =

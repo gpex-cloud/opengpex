@@ -45,9 +45,8 @@ import {
 } from '../shaders/gaussian';
 import { VMASK_WGSL, VMASK_UNIFORM_SIZE } from '../shaders/vmask';
 import { BMASK_COMBINE_WGSL, BMASK_COMBINE_UNIFORM_SIZE } from '../shaders/bmaskCombine';
+import { BLEND_UNIFORM_BUFFER_SIZE } from '../shaders/blend';
 import { GPUBufferUsage, GPUTextureUsage, GPUShaderStage, GPUColorWrite } from '../constants';
-
-export const BLEND_UNIFORM_BUFFER_SIZE = 80;
 
 /** Unit quad vertices: 6 vertices, 2 triangles from (0,0) to (1,1). */
 const UNIT_QUAD_DATA = new Float32Array([

@@ -69,13 +69,27 @@ export function vectorExportScale(
  * Physical dimensions (≥ 1, integer) for a vector transient: `ceil(logical × scale)`
  * per axis. `scale = [1, 1]` reproduces the composite-density allocation exactly, so
  * the interactive path is unchanged.
+ *
+ * `maxDim` (a device's `maxTextureDimension2D`) applies a UNIFORM clamp factor
+ * `min(1, maxDim / max(w, h))` to BOTH axes when the request would exceed the
+ * limit — a transient that large cannot be created at all, and shrinking it
+ * uniformly (never per-axis) preserves the mask/coverage aspect. The visual
+ * cost is a slightly softer edge; the alternative is a failed creation.
  */
 export function vectorTransientSize(
   logicalWidth: number,
   logicalHeight: number,
   scale: readonly [number, number],
+  maxDim?: number,
 ): readonly [number, number] {
-  const w = Math.max(1, Math.ceil(Math.max(1, logicalWidth) * Math.max(scale[0], 0)));
-  const h = Math.max(1, Math.ceil(Math.max(1, logicalHeight) * Math.max(scale[1], 0)));
-  return [Math.max(1, w), Math.max(1, h)];
+  let w = Math.max(1, Math.ceil(Math.max(1, logicalWidth) * Math.max(scale[0], 0)));
+  let h = Math.max(1, Math.ceil(Math.max(1, logicalHeight) * Math.max(scale[1], 0)));
+  if (maxDim !== undefined && maxDim > 0) {
+    const clamp = Math.min(1, maxDim / Math.max(w, h));
+    if (clamp < 1) {
+      w = Math.max(1, Math.floor(w * clamp));
+      h = Math.max(1, Math.floor(h * clamp));
+    }
+  }
+  return [w, h];
 }

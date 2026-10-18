@@ -297,8 +297,9 @@ export class WebGpuEngine implements IEngine {
   /**
    * Documents whose density-1 footprint exceeds the composite budget or the
    * device texture limit composite ONLY their visible region into this smaller
-   * resident target, re-rendered when the quantized visible rect moves (block
-   * lattice = the hysteresis), the band crosses, or content edits.
+   * resident target, re-rendered when the needed extent escapes the resident
+   * rect (containment hysteresis, see roiFrame.ts), the band crosses, or
+   * content edits.
    */
   private roiTexture: LayerTexture | null = null;
   /** Content signature the cached roi was rendered at. */
@@ -323,6 +324,8 @@ export class WebGpuEngine implements IEngine {
    */
   private roiDocW = 0;
   private roiDocH = 0;
+  /** Density band the cached roi was rendered at (containment-hysteresis stamp). */
+  private roiBand: number | null = null;
 
   /**
    * Per-asset epoch, bumped on every GENUINE re-transfer in `upload()` (not on
@@ -825,10 +828,11 @@ export class WebGpuEngine implements IEngine {
       // ── ROI channel ──
       // Only the visible region composites, at band-clamped density ≥ 1 (the
       // correctness root: every magnified texel is a real document pixel, so the
-      // pixel grid aligns at ANY zoom). Rebuild triggers: the quantized
-      // visible-rect key (the block lattice IS the hysteresis — no second
-      // design), a band crossing, a content edit, or target dims/format change.
-      // Within the rect, pan/zoom still replays only the cheap present.
+      // pixel grid aligns at ANY zoom). Rebuild triggers: the needed extent
+      // escaping the resident rect at the same band (containment hysteresis —
+      // see roiFrame.ts), a band crossing, a content edit, or target
+      // dims/format change. Within the resident rect, pan/zoom still replays
+      // only the cheap present.
       //
       // The full channel's resident target would go stale under roi-mode
       // edits and double-book the budget — drop it when roi takes over. The way
@@ -867,6 +871,11 @@ export class WebGpuEngine implements IEngine {
           targetW: this.roiTargetW,
           targetH: this.roiTargetH,
           format: this.roiFormat,
+          rectX: this.roiRectX,
+          rectY: this.roiRectY,
+          rectW: this.roiRectW,
+          rectH: this.roiRectH,
+          band: this.roiBand,
         },
       });
 
@@ -938,6 +947,7 @@ export class WebGpuEngine implements IEngine {
           this.roiDensityScale = Math.min(roiDensity.scaleX, roiDensity.scaleY);
           this.roiDocW = docW;
           this.roiDocH = docH;
+          this.roiBand = roiDensity.band;
         }
       }
 
@@ -1178,6 +1188,7 @@ export class WebGpuEngine implements IEngine {
     this.roiDensityScale = 1;
     this.roiDocW = 0;
     this.roiDocH = 0;
+    this.roiBand = null;
   }
 
   /**

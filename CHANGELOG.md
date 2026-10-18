@@ -2,6 +2,14 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.18
+
+- Workspace: zooming deep into a document (past 1000%) no longer drops frames — the visible region is only re-rendered when the zoom level band changes or the view genuinely moves away, instead of on every zoom step; smooth on two-layer documents after cut/extract-to-layer
+- Color: fixed blend modes such as Darken and Screen failing to render (the layer would draw incorrectly and log GPU errors)
+- Workspace: fixed stray console assertion noise when copying, cutting, or dragging layers created from a selection
+
+---
+
 ## v2.0.17
 
 - Color: RAW photos now open with a vivid style preset by default, switchable off from the info panel's format badge (amber = on); the pre-grade effect is still a work in progress and will be refined in later versions

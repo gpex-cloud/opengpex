@@ -466,7 +466,13 @@ export function prepareVmaskSources(
     const window = resolveVmaskWindow(vmask.subMasks, logicalW, logicalH);
     const bakeW = window?.w ?? logicalW;
     const bakeH = window?.h ?? logicalH;
-    const [maskW, maskH] = vectorTransientSize(bakeW, bakeH, exportScale);
+    // maxTextureDimension2D clamp: an unwindowed (full-layer) bake at band
+    // density can exceed the device limit (e.g. 3000×4000 layer × 4 = 12000
+    // × 16000 texels) — a uniform shrink beats a failed creation.
+    const [maskW, maskH] = vectorTransientSize(
+      bakeW, bakeH, exportScale,
+      ctx.device.limits.maxTextureDimension2D,
+    );
 
     // px_scale = logical bake extent / mask texels (inverse supersample); origin
     // = the window's ring-space top-left (see vmaskBakeTransform's unit contract).
