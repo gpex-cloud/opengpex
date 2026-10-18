@@ -53,7 +53,7 @@ export const plugin: EditorPlugin = {
   slot: 'HIDDEN',
   component: () => null,
 
-  contributions: [
+  contributions: { ui: [
     {
       slot: 'SETTINGS_CONFIG_PANEL',
       group: 'preferences',
@@ -62,7 +62,7 @@ export const plugin: EditorPlugin = {
       icon: <SlidersHorizontal size={12} />,
       order: 10, // Ensures this tab appears first
     },
-  ],
+  ] },
 
   /**
    * Lifecycle: Initialize persistence on plugin load.

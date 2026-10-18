@@ -46,7 +46,7 @@ export const plugin: EditorPlugin = {
   show: 'frame-required',
   component: SmartGuides,
   commands: Object.values(SMART_GUIDES_COMMANDS),
-  contributions: [
+  contributions: { ui: [
     {
       slot: 'TOOL_MENU',
       component: SmartGuidesToggle,
@@ -60,7 +60,7 @@ export const plugin: EditorPlugin = {
       icon: <Magnet size={12} />,
       order: 200
     }
-  ]
+  ] }
 };
 
 export default plugin;

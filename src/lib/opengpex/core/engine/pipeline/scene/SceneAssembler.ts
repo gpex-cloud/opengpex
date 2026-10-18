@@ -281,7 +281,7 @@ export interface SceneViewOptions {
   /**
    * Session-side probe for the LIVE-EDIT hint: returns whether the named
    * vector layer's fast-track draft is currently streaming source-defining
-   * patches (brush/marker gesture in flight). Injected by the stage — this is
+   * patches (tool gesture in flight). Injected by the stage — this is
    * editor session state the assembler (and engine) must not reach into, the
    * same seam as buildContent's override getters. Omitted ⇒ no layer is ever
    * stamped live (tests, export, idle frames).
@@ -501,19 +501,19 @@ export class SceneAssembler {
 
       // Vector spine (architecture B): a `vector` layer is rendered analytically on
       // the GPU instead of the CPU Canvas2D bitmap path. `layerToVectorSource`
-      // (vectorSources.ts — the sole business→vector boundary and the ONLY engine
-      // module that knows which vector tools exist) maps the layer's tool payload
-      // ONCE to one of the renderer strategies:
-      //   • `markerData`  → `renderer: 'sdf'`    (rect/ellipse/arrow fragment solve)
-      //   • `strokeData`  → `renderer: 'stroke'` (logic brush; compute-extruded ribbon)
-      //   • `textData`    → `renderer: 'text'`   (GPU glyph quads over a coverage atlas;
+      // (vectorSources.ts — the sole business→vector boundary; the engine knows
+      // NO tool, translators register into its contributor registry) maps the
+      // layer's tool payload ONCE to one of the renderer strategies:
+      //   • SDF payload    → `renderer: 'sdf'`    (analytic fragment solve)
+      //   • stroke payload → `renderer: 'stroke'` (compute-extruded ribbon)
+      //   • text payload   → `renderer: 'text'`   (GPU glyph quads over a coverage atlas;
       //     CPU layout runs in the translator, the GPU side never re-computes layout)
-      // `size`/bounding MUST match the LayerNode dims below (marker takes them
-      // explicitly; stroke/text read `layer.bounding` internally — same source). When
-      // defined, the layer skips the bitmap upload entirely and its `source` becomes the
-      // `{ kind: 'vector', ... }` descriptor; the shared tail (transform / crop / mask /
-      // adjust / opacity / blend / clip) is identical to a raster's. Working gamut is
-      // WORKING_GAMUT (see colorSpace below).
+      // `size`/bounding MUST match the LayerNode dims below (SDF translators take
+      // them explicitly; stroke/text read `layer.bounding` internally — same
+      // source). When defined, the layer skips the bitmap upload entirely and its
+      // `source` becomes the `{ kind: 'vector', ... }` descriptor; the shared tail
+      // (transform / crop / mask / adjust / opacity / blend / clip) is identical to
+      // a raster's. Working gamut is WORKING_GAMUT (see colorSpace below).
       const vectorSource = layerToVectorSource(latestLayer, WORKING_GAMUT, {
         width: layerWidth,
         height: layerHeight,

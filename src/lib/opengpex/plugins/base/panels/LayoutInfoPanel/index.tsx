@@ -54,14 +54,14 @@ export const plugin: EditorPlugin = {
   component: LayoutInfoComponent,
   initialConfig: { enabled: false } satisfies P.LayoutConfig,
   commands: Object.values(LAYOUT_COMMANDS),
-  contributions: [
+  contributions: { ui: [
     {
       slot: "TOOL_SETTINGS",
       component: LayoutInfoSettings,
       title: "LayoutInfoPanel",
       order: 230,
     },
-  ],
+  ] },
 };
 
 export default plugin;

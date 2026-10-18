@@ -72,4 +72,3 @@ export {
 export type { SceneChannelMask } from './pipeline/scene/Scene';
 export { GpuDevice } from './gpu/device/GpuDevice';
 export { sourceBitmapCache, highDepthTextureCache, gainMapSourceCache } from './sources';
-export { markerToSvg } from './raster/paintMarker';

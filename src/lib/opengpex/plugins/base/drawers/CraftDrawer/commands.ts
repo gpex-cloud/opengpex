@@ -26,9 +26,9 @@ import type { CraftType, CraftDrawerConfig } from './protocols';
 import {
   TextOverlayAPI,
 } from '../../overlays/TextOverlay/protocols';
-import { MARKER_REGISTRY } from '../../overlays/MarkerOverlay/registry';
+import { MARKER_REGISTRY } from '../../overlays/MarkerOverlay/marker/registry';
 // Side-effect import: ensures built-in markers are registered before cycling.
-import '../../overlays/MarkerOverlay/markers';
+import '../../overlays/MarkerOverlay/marker';
 
 // ─── Shared Logic ──────────────────────────────────────────────────────────────
 

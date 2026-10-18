@@ -57,7 +57,7 @@ export const plugin: EditorPlugin = {
     createWandHandler(),
     createSamHandler()
   ],
-  contributions: [
+  contributions: { ui: [
     {
       slot: 'SETTINGS_CONFIG_PANEL',
       group: 'viewport',
@@ -65,7 +65,7 @@ export const plugin: EditorPlugin = {
       title: 'Selection',
       order: 200
     }
-  ],
+  ] },
   commands: [],
 };
 

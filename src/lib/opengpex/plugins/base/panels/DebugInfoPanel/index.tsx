@@ -56,14 +56,14 @@ export const plugin: EditorPlugin = {
   component: DebugInfoComponent as React.ComponentType<Record<string, unknown>>,
   initialConfig: { enabled: false },
   commands: Object.values(DEBUG_COMMANDS),
-  contributions: [
+  contributions: { ui: [
     {
       slot: "TOOL_SETTINGS",
       component: DebugInfoSettings as React.ComponentType<Record<string, unknown>>,
       title: "DebugInfoPanel",
       order: 210,
     },
-  ],
+  ] },
 };
 
 export default plugin;

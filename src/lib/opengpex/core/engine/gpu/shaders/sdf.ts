@@ -30,8 +30,8 @@
  * anti-aliasing stays isotropic under any aspect ratio.
  *
  * This shader knows ONLY engine-neutral geometry primitives (`prim` ids below); it
- * has no notion of any business model (marker/brush) — those are mapped to these
- * primitives in the scene-assembly layer (`markerToVectorSource`).
+ * has no notion of any business model — business payloads are mapped to these
+ * primitives by the vector-source translators (vectorSources.ts registry).
  *
  * ── ALPHA CONVENTION (load-bearing) ──
  * The whole composite chain samples STRAIGHT (un-premultiplied) alpha: `layer.wgsl`
@@ -54,17 +54,13 @@
  * with the stroke colour, so it has no interior/fill split; the fragment dispatches
  * this case separately from rounded_rect/ellipse).
  *
- * NOTE: the WGSL struct is still named `MarkerUniforms` and the uniform var `marker`
- * for a byte-for-byte behaviour-preserving refactor — these are shader-internal
- * identifiers, not part of the business coupling the vector spine removes.
- *
  * @module core/gpu/shaders/sdf
  */
 
 import { SDF_PRIMITIVES_WGSL } from './sdfPrimitives';
 
 export const SDF_WGSL = /* wgsl */ `
-struct MarkerUniforms {
+struct SdfUniforms {
   // offset 0 (16 bytes)
   layer_size   : vec2<f32>,   // logical width, height
   shape_type   : u32,         // 0: rounded_rect, 1: ellipse, 2: arrow
@@ -89,7 +85,7 @@ struct MarkerUniforms {
   shape_params : vec4<f32>,
 };
 
-@group(0) @binding(0) var<uniform> marker : MarkerUniforms;
+@group(0) @binding(0) var<uniform> u : SdfUniforms;
 
 struct VSInput {
   @location(0) pos : vec2<f32>,
@@ -107,7 +103,7 @@ fn vs_main(in : VSInput) -> VSOut {
   // Unit quad (0..1) -> full-target NDC. uv.v = 0 is the TOP row (matches the quad
   // buffer), and local pixels grow downward like the layer's own coordinate frame.
   out.clip_pos = vec4<f32>(in.pos.x * 2.0 - 1.0, 1.0 - in.pos.y * 2.0, 0.0, 1.0);
-  out.local = in.uv * marker.layer_size;
+  out.local = in.uv * u.layer_size;
   return out;
 }
 
@@ -132,8 +128,9 @@ fn sdf_isoceles_triangle(p: vec2<f32>, q: vec2<f32>) -> f32 {
 
 // Arrow = solid capsule shaft (tail → shaft_end) ∪ triangle head (apex at head).
 // tail/head are arbitrary layer-local endpoints (any direction, not axis-aligned);
-// headLen = stroke_w * head_scale keeps ONE formula shared with the CPU raster path
-// (paintMarker.ts::paintArrow). Returns the SOLID shape's signed distance.
+// headLen = stroke_w * head_scale keeps ONE formula shared with the marker
+// plugin's SVG drag preview (MarkerOverlay/marker/svg.ts). Returns the SOLID
+// shape's signed distance.
 fn sdf_arrow(p: vec2<f32>, tail: vec2<f32>, head: vec2<f32>, stroke_w: f32, head_scale: f32) -> f32 {
   let full_dir = head - tail;
   let full_len = max(length(full_dir), 1e-4);
@@ -160,22 +157,22 @@ fn sdf_arrow(p: vec2<f32>, tail: vec2<f32>, head: vec2<f32>, stroke_w: f32, head
 // d = 0 is the outer boundary, stroke grows inward). Arrow (2) returns the SOLID
 // shape's distance and is composited separately in fs_main.
 fn shape_distance(p: vec2<f32>) -> f32 {
-  if (marker.shape_type == 0u) {
-    let b = marker.layer_size * 0.5;
-    let r = clamp(marker.shape_params.x, 0.0, min(b.x, b.y));
+  if (u.shape_type == 0u) {
+    let b = u.layer_size * 0.5;
+    let r = clamp(u.shape_params.x, 0.0, min(b.x, b.y));
     return sdf_rounded_rect(p - b, b, r);
   }
-  if (marker.shape_type == 1u) {
-    let c = marker.layer_size * 0.5;
+  if (u.shape_type == 1u) {
+    let c = u.layer_size * 0.5;
     return sdf_ellipse(p - c, c);
   }
   // arrow (2)
   return sdf_arrow(
     p,
-    marker.shape_params.xy,
-    marker.shape_params.zw,
-    marker.stroke_width,
-    marker.head_scale,
+    u.shape_params.xy,
+    u.shape_params.zw,
+    u.stroke_width,
+    u.head_scale,
   );
 }
 
@@ -189,37 +186,37 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
 
   // Arrow is a SOLID capsule+triangle, painted entirely in the stroke colour (the
   // CPU path fills the whole arrow with the stroke colour — no interior/fill split).
-  if (marker.shape_type == 2u) {
+  if (u.shape_type == 2u) {
     // Soft edge: analytic smoothstep AA. Hard edge: binary coverage at the
     // signed-distance zero crossing (single-pixel step, no fwidth smoothing).
     let cov = select(1.0 - smoothstep(-aa, aa, d),
                      select(0.0, 1.0, d <= 0.0),
-                     marker.hard_edge == 1u);
+                     u.hard_edge == 1u);
     // STRAIGHT alpha: colour is the stroke RGB directly, alpha = coverage × stroke α.
-    return vec4<f32>(marker.stroke_color.rgb, marker.stroke_color.a * cov);
+    return vec4<f32>(u.stroke_color.rgb, u.stroke_color.a * cov);
   }
 
   // Rect / ellipse: a stroke RING (shape − interior) over an optional fill, where
   // the interior is the shape inset by stroke_width (d + stroke_width ≤ 0).
   var shape_cov = 1.0 - smoothstep(-aa, aa, d);
-  var interior_cov = 1.0 - smoothstep(-aa, aa, d + marker.stroke_width);
-  if (marker.hard_edge == 1u) {
+  var interior_cov = 1.0 - smoothstep(-aa, aa, d + u.stroke_width);
+  if (u.hard_edge == 1u) {
     // Hard edge: both coverages collapse to binary tests at their zero crossings.
     shape_cov = select(0.0, 1.0, d <= 0.0);
-    interior_cov = select(0.0, 1.0, d + marker.stroke_width <= 0.0);
+    interior_cov = select(0.0, 1.0, d + u.stroke_width <= 0.0);
   }
   let stroke_cov = clamp(shape_cov - interior_cov, 0.0, 1.0);
-  let fill_cov = select(0.0, interior_cov, marker.has_fill == 1u);
+  let fill_cov = select(0.0, interior_cov, u.has_fill == 1u);
 
   // Straight-alpha 'over': stroke above fill, in working-gamut linear light.
-  let sa = marker.stroke_color.a * stroke_cov;
-  let fa = marker.fill_color.a * fill_cov;
+  let sa = u.stroke_color.a * stroke_cov;
+  let fa = u.fill_color.a * fill_cov;
   let out_a = sa + fa * (1.0 - sa);
 
   var out_rgb = vec3<f32>(0.0);
   if (out_a > 1e-6) {
-    out_rgb = (marker.stroke_color.rgb * sa
-             + marker.fill_color.rgb * fa * (1.0 - sa)) / out_a;
+    out_rgb = (u.stroke_color.rgb * sa
+             + u.fill_color.rgb * fa * (1.0 - sa)) / out_a;
   }
 
   // STRAIGHT alpha — downstream drawLayer premultiplies and applies layer.opacity.

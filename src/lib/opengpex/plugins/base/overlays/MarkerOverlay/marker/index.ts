@@ -27,10 +27,10 @@
  * regardless of module evaluation order.
  */
 
-import { MARKER_REGISTRY } from '../registry';
-import { RectDefinition } from './rect';
-import { ArrowDefinition } from './arrow';
-import { EllipseDefinition } from './ellipse';
+import { MARKER_REGISTRY } from './registry';
+import { RectDefinition } from './shapes/rect';
+import { ArrowDefinition } from './shapes/arrow';
+import { EllipseDefinition } from './shapes/ellipse';
 
 MARKER_REGISTRY.register(RectDefinition);
 MARKER_REGISTRY.register(EllipseDefinition);

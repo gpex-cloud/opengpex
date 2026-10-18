@@ -19,22 +19,29 @@
 
 /**
  * vectorSources.ts — the SINGLE business → engine translation seam for vector
- * layer sources (Incremental Compositing plan, batch B1).
+ * layer sources.
  *
- * ARCHITECTURAL IDENTITY — this file is the ONLY place inside the engine that
- * is allowed to know which vector tools exist. Each built-in tool contributes a
- * translator (pure: `Layer` payload → engine-neutral `LayerSource`); the
- * dispatcher owns the per-tool routing, so no other engine module ever names a
- * tool or its payload field. The render core (`gpu/`, `pipeline/graph/`,
- * `shaders/`) consumes the translated params without ever seeing a `Layer`.
+ * ARCHITECTURAL IDENTITY — this file owns the vector-source REGISTRY: the
+ * vocabulary of pixel-production strategies, the contributor contract, and the
+ * dispatcher that consults it. The engine itself knows NO tool: each tool
+ * (built-in or plugin) contributes a translator (pure: `Layer` payload →
+ * engine-neutral `LayerSource`) and the dispatcher walks the registry until one
+ * recognizes the layer. Built-in strategies (stroke, text) self-register at
+ * module load below; plugin tools register through the plugin registry
+ * (`core/plugin/registry.ts`), which forwards every plugin's
+ * `contributions.engine.vectorSource` — so importing that registry is
+ * sufficient to have ALL contributors in place before the first scene
+ * assembly (production, engine tests, and headless pipelines alike).
  *
- * A future plugin-registry refactor (plan B3: `layerSourceContributor`) replaces
- * this file's dispatch with a lookup — tools then move the translators into
- * their own plugin directories and register them at boot. Until then, adding a
- * vector tool means exactly one edit, here.
+ * Registration contract: translators are non-overlapping — a contributor
+ * returns `undefined` for any layer whose payload it does not own, and the
+ * dispatcher takes the first non-`undefined` result. No dispatch ordering
+ * guarantee exists or is needed; a new tool therefore plugs in with ZERO
+ * edits to this file.
  *
  * Source vocabulary (engine pixel-production strategies, NOT tool identities):
- *   • `sdf`    — analytic primitive fragment solve     (marker rect/ellipse/arrow)
+ *   • `sdf`    — analytic primitive fragment solve (consumed today by the
+ *     marker plugin's rect/ellipse/arrow shapes)
  *   • `stroke` — compute-extruded ribbon from a packed point stream (vector brush)
  *   • `text`   — GPU glyph quads over a coverage atlas (text; CPU layout runs in
  *     the translator, the GPU side never re-computes layout)
@@ -46,13 +53,16 @@
  * @module core/engine/pipeline/scene/vectorSources
  */
 
-import type { Layer, MarkerKind, WorkingColorSpace } from '@opengpex/editor/core/types';
+import type { Layer, WorkingColorSpace } from '@opengpex/editor/core/types';
 import { toWorkingLinearRgba } from '@opengpex/editor/core/engine/color';
 import {
   computeTextLayout,
   type TextMeasureContext,
 } from '@opengpex/editor/core/engine/text/textLayout';
-import type { LayerSource, SdfPrimitive, StrokeParams } from './Scene';
+import type { LayerSource, StrokeParams } from './Scene';
+
+// Re-exported: the contributor contract's input/output types travel with it.
+export type { LayerSource };
 
 // ─── stroke → point stream (vector brush) ───────────────────────────────────
 
@@ -65,7 +75,7 @@ const FLOATS_PER_POINT = 4;
  *
  * `workingSpace` is the document compositing gamut (always `WORKING_GAMUT`,
  * ProPhoto RGB — see `SceneAssembler` invariant). `width`/`height` are read from the
- * layer's BOUNDING box (`layer.bounding.w/h`, same source the marker branch uses for
+ * layer's BOUNDING box (`layer.bounding.w/h`, same source the SDF translators take via `ctx.width/height`)
  * `SdfShapeParams.size`): they become the `LayerNode.width/height` the compositor
  * places the quad at, and the StrokeRenderer's vertex shader divides the logical-pixel
  * trajectory by them to reach NDC (see {@link StrokeParams.width}).
@@ -176,93 +186,6 @@ export function strokeSourceFingerprint(stroke: StrokeParams): string {
   ].join(':');
 }
 
-// ─── marker → sdf primitives ────────────────────────────────────────────────
-
-/** Fill is considered present above this opacity (mirrors "0 = no fill"). */
-const FILL_EPSILON = 0.001;
-
-/**
- * Marker business discriminant → engine-owned SDF primitive. This map is the ONLY
- * place the two vocabularies meet: `'rect'` becomes the engine's `'rounded_rect'`
- * (which also covers a zero-radius rectangle), ellipse/arrow keep their names.
- */
-const MARKER_KIND_TO_PRIMITIVE: Record<MarkerKind, SdfPrimitive> = {
-  rect: 'rounded_rect',
-  ellipse: 'ellipse',
-  arrow: 'arrow',
-};
-
-/**
- * Map a Marker layer to a `vector` {@link LayerSource} (`renderer: 'sdf'`), or
- * `undefined` if the layer is not a marker.
- *
- * `workingSpace` is the document compositing gamut (always `WORKING_GAMUT`,
- * ProPhoto RGB — see `SceneAssembler` invariant). `width`/`height` are the layer's
- * BOUNDING dimensions in LOGICAL pixels (`latestLayer.bounding.w/h`) — they become
- * the `LayerNode.width/height` the compositor places the quad at, so the SDF's
- * `size` MUST use the same numbers, not `layer.width` (which may differ from the
- * bounding box). The shader resolves sub-pixel AA at the render target's density
- * via `fwidth`.
- */
-export function markerToVectorSource(
-  layer: Layer,
-  workingSpace: WorkingColorSpace,
-  width: number,
-  height: number,
-): LayerSource | undefined {
-  const data = layer.markerData;
-  if (!data || layer.type !== 'vector') return undefined;
-
-  const w = Math.max(1, width);
-  const h = Math.max(1, height);
-
-  const strokeColor = toWorkingLinearRgba(data.stroke.color, workingSpace);
-
-  // fill is a required field on MarkerDataBase; "no fill" is expressed as opacity 0.
-  const fillOpacity = data.fill.opacity ?? 0;
-  const fillLinear = toWorkingLinearRgba(data.fill.color, workingSpace);
-  const fillColor: readonly [number, number, number, number] = [
-    fillLinear[0],
-    fillLinear[1],
-    fillLinear[2],
-    fillLinear[3] * fillOpacity,
-  ];
-
-  let shapeParams: readonly [number, number, number, number] = [0, 0, 0, 0];
-  let headScale = 0;
-
-  if (data.kind === 'rect') {
-    // Corner radius clamped to half the short side (a fuller round can't exist).
-    const maxR = Math.min(w, h) / 2;
-    const r = Math.min(Math.max(0, data.cornerRadius ?? 0), maxR);
-    shapeParams = [r, 0, 0, 0];
-  } else if (data.kind === 'arrow') {
-    // tail/head are the same layer-local endpoints the CPU path uses
-    // (paintMarker.ts::arrowCoverageLayers) — arbitrary direction, not axis-aligned.
-    // headLen is derived in-shader as strokeWidth * headScale, keeping ONE formula.
-    headScale = data.headScale || 3;
-    shapeParams = [data.tail.x, data.tail.y, data.head.x, data.head.y];
-  }
-  // ellipse: geometry fully implied by `size`; shapeParams stays [0,0,0,0].
-
-  return {
-    kind: 'vector',
-    renderer: 'sdf',
-    sdf: {
-      prim: MARKER_KIND_TO_PRIMITIVE[data.kind],
-      size: [w, h],
-      strokeWidth: data.stroke.width,
-      strokeColor,
-      hasFill: fillOpacity > FILL_EPSILON,
-      fillColor,
-      headScale,
-      // AA defaults ON: only an explicit `false` on the business data opts out.
-      antiAliased: data.antiAliased !== false,
-      shapeParams,
-    },
-  };
-}
-
 // ─── text → glyph layout ────────────────────────────────────────────────────
 
 /**
@@ -331,32 +254,94 @@ export function textToVectorSource(
   };
 }
 
-// ─── dispatcher (the one routing point) ─────────────────────────────────────
+// ─── contributor registry (the one routing point) ───────────────────────────
 
-/** Per-strategy extras the dispatcher forwards; each translator picks what it needs. */
+/** Per-strategy extras forwarded to translators; each picks what it needs. */
 export interface VectorSourceOptions {
-  /** Explicit bounding dims (marker takes them explicitly; stroke/text read `layer.bounding`). */
+  /** Explicit bounding dims (SDF translators take them explicitly; stroke/text read `layer.bounding`). */
   readonly width?: number;
   readonly height?: number;
   /** Injectable measure surface (text; tests only — production uses the shared canvas). */
   readonly measureContext?: TextMeasureContext;
 }
 
+/** Everything a translator may need to translate one layer. */
+export interface VectorSourceContext {
+  /** Document compositing gamut (always WORKING_GAMUT — see SceneAssembler invariant). */
+  readonly workingSpace: WorkingColorSpace;
+  /** Explicit bounding dims (required by SDF translators; missing ⇒ the caller
+   *  silently misplaces the shape — SceneAssembler always supplies them). */
+  readonly width?: number;
+  readonly height?: number;
+  /** Injectable measure surface (text; tests only). */
+  readonly measureContext?: TextMeasureContext;
+}
+
+/** A vector tool's entire exposure to the engine: one pure translator. */
+export interface VectorSourceContributor {
+  /** Registration/dedup key; engine dispatch logic never branches on it. */
+  readonly toolId: string;
+  /** Translate a business layer into an engine-neutral source, or `undefined`
+   *  for layers whose payload this tool does not own (non-overlap contract). */
+  translate(layer: Layer, ctx: VectorSourceContext): LayerSource | undefined;
+}
+
+/** Engine-side extension slots carried on a plugin under
+ *  `contributions.engine`. Each slot's registry anchor lives in this module
+ *  (the seam that consumes it). */
+export interface EngineContribution {
+  readonly vectorSource?: VectorSourceContributor;
+}
+
+const contributors = new Map<string, VectorSourceContributor>();
+
+/** Register a contributor (idempotent by toolId; later registration wins).
+ *  Returns the unregister function. Plugin contributors are wired by
+ *  `core/plugin/registry.ts`; built-in engine strategies self-register at this
+ *  module's load below. */
+export function registerVectorSourceContributor(c: VectorSourceContributor): () => void {
+  contributors.set(c.toolId, c);
+  // Identity-checked removal: an unregister from an OVERWRITTEN registration
+  // must not evict the newer contributor that now owns the key.
+  return () => {
+    if (contributors.get(c.toolId) === c) contributors.delete(c.toolId);
+  };
+}
+
+/** Test-only teardown: drop every contributor (including built-ins). */
+export function resetVectorSourceContributorsForTest(): void {
+  contributors.clear();
+}
+
 /**
- * Translate a business layer into an engine-neutral vector {@link LayerSource}.
- * A vector layer carries exactly one of the tool payloads; the translators
- * return `undefined` for each other's kinds, so the `??` chain picks the right
- * strategy. `undefined` overall ⇒ the caller falls through to the ordinary
- * raster path (this dispatcher never fabricates a bitmap branch).
+ * Translate a business layer into an engine-neutral vector {@link LayerSource}
+ * by walking the contributor registry. Translators are non-overlapping (each
+ * returns `undefined` for foreign payloads), so first non-`undefined` wins and
+ * no ordering guarantee is needed. `undefined` overall ⇒ the caller falls
+ * through to the ordinary raster path (this dispatcher never fabricates a
+ * bitmap branch).
  */
 export function layerToVectorSource(
   layer: Layer,
   workingSpace: WorkingColorSpace,
   opts?: VectorSourceOptions,
 ): LayerSource | undefined {
-  return (
-    markerToVectorSource(layer, workingSpace, opts?.width ?? 0, opts?.height ?? 0) ??
-    strokeToVectorSource(layer, workingSpace) ??
-    textToVectorSource(layer, workingSpace, opts?.measureContext)
-  );
+  const ctx: VectorSourceContext = { workingSpace, ...opts };
+  for (const c of contributors.values()) {
+    const src = c.translate(layer, ctx);
+    if (src) return src;
+  }
+  return undefined;
 }
+
+// Built-in engine strategies: translators live here, registered through the
+// same registry as plugin contributors (module load = registration, so any
+// importer of this module always sees them).
+registerVectorSourceContributor({
+  toolId: 'stroke',
+  translate: (layer, ctx) => strokeToVectorSource(layer, ctx.workingSpace),
+});
+registerVectorSourceContributor({
+  toolId: 'text',
+  translate: (layer, ctx) => textToVectorSource(layer, ctx.workingSpace, ctx.measureContext),
+});

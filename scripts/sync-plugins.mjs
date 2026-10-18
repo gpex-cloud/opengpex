@@ -94,11 +94,24 @@ const registryTemplate = `/**
  * Run "pnpm sync-plugins" to refresh this core registry.
  */
 
+import { registerVectorSourceContributor } from '../../core/engine/pipeline/scene/vectorSources';
+
 ${importStatements.join('\n')}
 
 export const PLUGINS = [
 ${registryEntries.join(',\n')}
 ];
+
+// Vector-source contributor wiring: every plugin declaring
+// contributions.engine.vectorSource is registered here, so importing this
+// registry is sufficient to have all contributors in place before the first
+// scene assembly (production, engine tests, and headless pipelines alike).
+for (const p of PLUGINS) {
+  const contributor = p.contributions?.engine?.vectorSource;
+  if (contributor) {
+    registerVectorSourceContributor(contributor);
+  }
+}
 
 export default PLUGINS;
 `;

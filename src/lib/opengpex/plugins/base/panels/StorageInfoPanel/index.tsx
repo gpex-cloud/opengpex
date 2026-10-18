@@ -63,14 +63,14 @@ export const plugin: EditorPlugin = {
 
   commands: Object.values(STORAGE_COMMANDS),
 
-  contributions: [
+  contributions: { ui: [
     {
       slot: "TOOL_SETTINGS",
       component: StorageInfoSettings,
       title: "StorageInfoPanel",
       order: 220,
     },
-  ],
+  ] },
 };
 
 export default plugin;

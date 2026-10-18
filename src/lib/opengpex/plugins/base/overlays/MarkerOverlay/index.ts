@@ -21,8 +21,9 @@ import { EditorPlugin } from '@opengpex/editor/core/types';
 import { MarkerOverlayMain } from './components';
 import { createMarkerMoveHandler, createMarkerDrawHandler, createMarkerResizeHandler, createMarkerRotateHandler } from './interactions';
 import { MARKER_OVERLAY_COMMANDS } from './commands';
+import { markerContributor } from './contribution';
 // Side-effect import: registers built-in markers (rect, arrow) into MARKER_REGISTRY.
-import './markers';
+import './marker';
 import * as P from './protocols';
 
 /**
@@ -52,6 +53,12 @@ export const plugin: EditorPlugin = {
 
   slot: 'STAGE_OVERLAY',
   component: MarkerOverlayMain,
+
+  // Scene-assembly exposure: the marker → `renderer:'sdf'` translator. Wired
+  // into the engine's vector-source registry by core/plugin/registry.ts.
+  contributions: {
+    engine: { vectorSource: markerContributor },
+  },
 
   interactions: [
     createMarkerRotateHandler(), // Priority 165 — rotate active marker (highest)

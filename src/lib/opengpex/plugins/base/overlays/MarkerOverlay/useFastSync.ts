@@ -21,7 +21,7 @@ import { useRef } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { VolatileState, Frame, CameraState } from '@opengpex/editor/core/types';
-import { markerToSvg } from '@opengpex/editor/core/engine';
+import { markerToSvg } from './marker/svg';
 import { getMarkerPreview, getMarkerPreviewVersion } from './interactions';
 
 /**
@@ -30,7 +30,7 @@ import { getMarkerPreview, getMarkerPreviewVersion } from './interactions';
  * Follows the camera via CSS transform and re-renders the SVG content only when
  * the module-level preview version changes (same dirty-check idea as
  * BrushOverlay's useStrokePreviewFastSync). The preview SVG itself is produced
- * by core `markerToSvg`, guaranteeing pixel parity with the final rasterized
+ * by `markerToSvg` (marker/svg.ts), guaranteeing pixel parity with the final rasterized
  * output.
  */
 export function useMarkerPreviewFastSync(

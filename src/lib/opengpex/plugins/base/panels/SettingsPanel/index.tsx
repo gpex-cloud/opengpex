@@ -56,7 +56,7 @@ export const plugin: EditorPlugin = {
     { id: P.SIGNAL_TAB, name: 'Active Tab', scope: 'public', defaultValue: null },
   ],
 
-  contributions: [
+  contributions: { ui: [
     {
       slot: "TOOL_SETTINGS",
       component: SettingsTrigger,
@@ -66,7 +66,7 @@ export const plugin: EditorPlugin = {
       slot: "ROOT_OVERLAY",
       component: SettingsPanel,
     },
-  ],
+  ] },
 };
 
 export default plugin;

@@ -20,37 +20,37 @@
 'use client';
 
 import React from 'react';
-import { Circle } from 'lucide-react';
-import type { EllipseMarkerData } from '@opengpex/editor/core/types';
+import { Square } from 'lucide-react';
+import type { RectMarkerData } from '../types';
 import { fromHex } from '@opengpex/editor/core/engine/color';
 import type { MarkerDefinition } from '../registry';
 
 /**
- * EllipseDefinition: ellipse / circle highlight.
+ * RectDefinition: rectangle highlight box.
  *
- * Geometry is fully implied by the layer bounding (the ellipse is inscribed in
- * it), so `computeFromDrag` only needs to turn the drag into an axis-aligned
- * box. Shift constrains to a circle. No extra data patch is needed — same
- * geometry model as rect, minus cornerRadius.
+ * Geometry is fully implied by the layer bounding (the rect always fills it),
+ * so `computeFromDrag` only needs to turn the drag into an axis-aligned box.
+ * Shift constrains to a square. No extra data patch is needed.
  */
-export const EllipseDefinition: MarkerDefinition<EllipseMarkerData> = {
-  kind: 'ellipse',
-  label: 'Ellipse',
-  icon: React.createElement(Circle, { size: 16 }),
+export const RectDefinition: MarkerDefinition<RectMarkerData> = {
+  kind: 'rect',
+  label: 'Rectangle',
+  icon: React.createElement(Square, { size: 16 }),
   hasFill: true,
-  hasCornerRadius: false,
+  hasCornerRadius: true,
 
-  defaults: (): EllipseMarkerData => ({
-    kind: 'ellipse',
+  defaults: (): RectMarkerData => ({
+    kind: 'rect',
     stroke: { color: fromHex('#FF3B30'), width: 3 },
     fill: { color: fromHex('#FF3B30'), opacity: 0 },
+    cornerRadius: 0,
   }),
 
   computeFromDrag: (drag, _data, options) => {
     let dx = drag.endX - drag.startX;
     let dy = drag.endY - drag.startY;
 
-    // Shift → circle: use the larger extent for both axes, preserving direction.
+    // Shift → square: use the larger extent for both sides, preserving direction.
     if (options.shiftKey) {
       const size = Math.max(Math.abs(dx), Math.abs(dy));
       dx = Math.sign(dx || 1) * size;

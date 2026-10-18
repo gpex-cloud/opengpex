@@ -110,7 +110,7 @@ export const plugin: EditorPlugin = {
   signals: [],
 
   // --- 8. Contributions ---
-  contributions: [
+  contributions: { ui: [
     {
       slot: "SETTINGS_CONFIG_PANEL",
       group: "ai-tools",
@@ -119,5 +119,5 @@ export const plugin: EditorPlugin = {
       icon: <Cpu size={12} />,
       order: 310,
     },
-  ],
+  ] },
 };

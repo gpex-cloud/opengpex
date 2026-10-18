@@ -50,6 +50,9 @@ const vendorFiles = [
   { src: 'node_modules/libraw-wasm/dist/libraw.wasm', dest: 'libraw/libraw.wasm' },
   { src: 'node_modules/libraw-wasm/dist/libraw.js',   dest: 'libraw/libraw.js' },
   { src: 'node_modules/libraw-wasm/dist/worker.js',   dest: 'libraw/libraw-worker.js' },
+  // The worker ends with //# sourceMappingURL=worker.js.map; without this file
+  // DevTools requests it on every RAW load and gets a 404 in the server log.
+  { src: 'node_modules/libraw-wasm/dist/worker.js.map', dest: 'libraw/worker.js.map' },
 
   // ── gs (ghostpdl) ──
   { src: 'node_modules/@okathira/ghostpdl-wasm/dist/gs.wasm', dest: 'gs/gs.wasm' },

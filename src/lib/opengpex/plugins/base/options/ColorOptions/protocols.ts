@@ -178,7 +178,7 @@ export interface ColorOptionsConfig {
  *   const [config] = usePluginConfig<ColorOptionsConfig>(ColorOptionsAPI.configKey);
  *   actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: fromHex('#FF0000') });
  *   // Contribution slot:
- *   contributions: [{ slot: ColorOptionsAPI.slots.craft, component: MyButtons }]
+ *   contributions: { ui: [{ slot: ColorOptionsAPI.slots.craft, component: MyButtons }] }
  */
 export const ColorOptionsAPI = {
   /** pluginConfig storage key */

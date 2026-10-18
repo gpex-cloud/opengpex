@@ -57,7 +57,7 @@ export const plugin: EditorPlugin = {
   commands: Object.values(COMFY_BRIDGE_COMMANDS),
 
   // --- 6. Contributions ---
-  contributions: [
+  contributions: { ui: [
     {
       slot: 'SETTINGS_CONFIG_PANEL',
       group: 'comfy-bridge',
@@ -66,5 +66,5 @@ export const plugin: EditorPlugin = {
       icon: <Link size={12} />,
       order: 330,
     },
-  ],
+  ] },
 };

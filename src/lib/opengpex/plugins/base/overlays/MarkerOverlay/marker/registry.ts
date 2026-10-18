@@ -21,21 +21,21 @@
  * MarkerOverlay Registry — plugin-side marker extension point.
  *
  * IMPORTANT: this registry only holds UI / interaction
- * METADATA. The pixel/SVG drawing logic (`paintMarker` / `markerToSvg`) lives
- * in core (`core/raster/paintMarker.ts`) so the render
- * pipeline can consume it without importing plugin code. `MarkerDefinition`
- * therefore intentionally does NOT carry any `paint` / `toSvg` function —
- * it only describes "how the tool looks in the panel and how a drag maps to
- * geometry".
+ * METADATA. The translation logic lives alongside it in this plugin:
+ * `vectorSource.ts` translates `markerData` into the engine's `renderer:'sdf'`
+ * source (final pixels, GPU), and `markerSvg.ts` builds the drag-preview SVG.
+ * `MarkerDefinition` intentionally does NOT carry any `paint` / `toSvg`
+ * function — it only describes "how the tool looks in the panel and how a
+ * drag maps to geometry".
  *
- * Adding a new marker (Phase 2+) requires:
- *   1. core: add a literal to `MarkerKind` + an `XxxMarkerData` interface
- *   2. core: add a `paintMarker` / `markerToSvg` switch case
+ * Adding a new marker requires:
+ *   1. core/types: add a literal to `MarkerKind` + an `XxxMarkerData` interface
+ *   2. plugin: add a `markerToVectorSource` / `markerToSvg` switch case
  *   3. plugin: implement a `MarkerDefinition` here and register it below
  */
 
 import type React from 'react';
-import type { MarkerData, MarkerKind } from '@opengpex/editor/core/types';
+import type { MarkerData, MarkerKind } from './types';
 
 /**
  * MarkerDefinition: per-marker-kind UI / interaction contract.

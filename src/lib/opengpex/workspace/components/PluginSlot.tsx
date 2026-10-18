@@ -83,7 +83,7 @@ export default function PluginSlot({
       }
 
       // 2. Contributed components (Contributed components)
-      p.contributions?.forEach((contrib, index) => {
+      p.contributions?.ui?.forEach((contrib, index) => {
         if (names.includes(contrib.slot)) {
           items.push({
             id: `${p.uid}-contrib-${index}`,

@@ -55,7 +55,7 @@ export const plugin: EditorPlugin = {
     { id: P.SIGNAL_OPEN, name: 'Guide Panel Open State', scope: 'private', defaultValue: false },
   ],
 
-  contributions: [
+  contributions: { ui: [
     {
       slot: "TOOL_SETTINGS",
       component: GuideTrigger,
@@ -65,7 +65,7 @@ export const plugin: EditorPlugin = {
       slot: "ROOT_OVERLAY",
       component: GuidePanel,
     },
-  ],
+  ] },
 };
 
 export default plugin;

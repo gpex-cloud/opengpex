@@ -19,7 +19,8 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, Layer, Frame, MarkerData } from '@opengpex/editor/core/types';
+import { EditorCommand, EditorContextValue, Frame, Layer } from '@opengpex/editor/core/types';
+import type { MarkerData } from './marker/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import * as P from './protocols';
 

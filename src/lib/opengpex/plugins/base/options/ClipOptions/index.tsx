@@ -72,13 +72,13 @@ export const plugin: EditorPlugin = {
       beforeExecute: (id, ctx) => CLIP_INTERCEPTORS.beforeExecute(id, ctx),
     },
   },
-  contributions: [
+  contributions: { ui: [
     {
       slot: "TOOL_MENU",
       component: ClipSelectionActions,
       order: 300,
     },
-  ],
+  ] },
 };
 
 export default plugin;

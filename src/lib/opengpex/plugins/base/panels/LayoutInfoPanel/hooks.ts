@@ -87,7 +87,7 @@ export const useLayoutInfo = () => {
         slotSet.add(p.slot);
       }
       // Also collect slots from contributions
-      p.contributions?.forEach(contrib => {
+      p.contributions?.ui?.forEach(contrib => {
         if (contrib.slot && contrib.slot !== 'HIDDEN') {
           slotSet.add(contrib.slot);
         }
@@ -164,7 +164,7 @@ export const useLayoutInfo = () => {
         }
 
         // 2. Extra Visual Contributions
-        p.contributions?.forEach((contrib, idx) => {
+        p.contributions?.ui?.forEach((contrib, idx) => {
           if (contrib.slot === slotName) {
             items.push({
               pluginId: p.uid,

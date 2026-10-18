@@ -7,7 +7,8 @@
  * DO NOT EDIT MANUALLY — run `pnpm gen-plugin-types` to regenerate.
  */
 
-import type { CommandInstance, InteractionSignalValue, Layer, MarkerData } from '@opengpex/editor/core/types';
+import type { CommandInstance, InteractionSignalValue, Layer } from '@opengpex/editor/core/types';
+import type { MarkerData } from './marker/types';
 
 /** Type map for usePluginCommands<MarkerOverlayCommandsMap>() */
 export interface MarkerOverlayCommandsMap {

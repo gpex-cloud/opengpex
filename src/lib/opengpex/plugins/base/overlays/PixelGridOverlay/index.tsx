@@ -55,7 +55,7 @@ export const plugin: EditorPlugin = {
     gridCasingColor: P.DEFAULT_GRID_CASING_COLOR
   },
   commands: Object.values(PIXEL_GRID_COMMANDS),
-  contributions: [
+  contributions: { ui: [
     {
       slot: 'TOOL_MENU',
       component: PixelGridToggle,
@@ -69,7 +69,7 @@ export const plugin: EditorPlugin = {
       icon: <Grid size={12} />,
       order: 210
     }
-  ]
+  ] }
 };
 
 export default plugin;

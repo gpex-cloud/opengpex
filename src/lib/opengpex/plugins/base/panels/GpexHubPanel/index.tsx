@@ -50,7 +50,7 @@ export const plugin: EditorPlugin = {
     panelPosition: "CT",
   } satisfies P.GpexHubConfig,
 
-  contributions: [
+  contributions: { ui: [
     {
       slot: "TOOL_MENU",
       component: GpexHubTrigger,
@@ -60,7 +60,7 @@ export const plugin: EditorPlugin = {
       slot: "ROOT_OVERLAY",
       component: GpexHubPanel,
     },
-  ],
+  ] },
 
   commands: Object.values(GPEX_HUB_COMMANDS),
 };

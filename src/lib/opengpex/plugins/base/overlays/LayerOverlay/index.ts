@@ -48,13 +48,13 @@ export const plugin: EditorPlugin = {
   initialConfig: { showAlways: false },
   interactions: [createTextDblClickEditHandler()],
   commands: Object.values(LAYER_OVERLAY_COMMANDS),
-  contributions: [
+  contributions: { ui: [
     {
       slot: 'TOOL_MENU',
       component: LayerOverlayToggle,
       order: 2020
     }
-  ]
+  ] }
 };
 
 export default plugin;

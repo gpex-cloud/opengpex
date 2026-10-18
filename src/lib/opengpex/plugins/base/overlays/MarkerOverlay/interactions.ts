@@ -17,14 +17,15 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionHandler, InteractionEvent, GeometryService, Layer, Frame, MarkerData, ArrowMarkerData, LocalRect, asLocalShape } from '@opengpex/editor/core/types';
+import { Frame, GeometryService, InteractionEvent, InteractionHandler, Layer, LocalRect, asLocalShape } from '@opengpex/editor/core/types';
+import type { ArrowMarkerData, MarkerData } from './marker/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import { createTransformHandler, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import { ROTATE_CURSOR } from '@opengpex/editor/icons';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
-import { MARKER_REGISTRY } from './registry';
+import { MARKER_REGISTRY } from './marker/registry';
 import { _CMD_PLACE_UID, MarkerOverlayAPI } from './protocols';
 
 /** Shared signal keys (cross-plugin constants) */

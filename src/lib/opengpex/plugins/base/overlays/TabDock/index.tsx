@@ -53,7 +53,7 @@ export const plugin: EditorPlugin = {
     showMetricsHud: false,
     showSettingsButton: true,
   },
-  contributions: [
+  contributions: { ui: [
     {
       slot: 'SETTINGS_CONFIG_PANEL',
       group: 'viewport',
@@ -62,7 +62,7 @@ export const plugin: EditorPlugin = {
       icon: <Monitor size={12} />,
       order: 100
     }
-  ]
+  ] }
 };
 
 export default plugin;

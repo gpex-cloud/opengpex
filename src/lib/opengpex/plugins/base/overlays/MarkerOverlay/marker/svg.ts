@@ -18,7 +18,7 @@
  */
 
 /**
- * paintMarker.ts — SVG preview fragments for annotation markers.
+ * markerSvg.ts — SVG preview fragments for annotation markers.
  *
  * Markers render on the GPU via the vector spine's analytic SDF strategy (see
  * `core/engine/gpu/shaders/sdf.ts`); this module only provides `markerToSvg`, used
@@ -31,10 +31,10 @@
  * in SVG presentation attributes (Chromium 111+, Safari 15+); older engines
  * fall back to the initial fill (black).
  *
- * @module core/raster/paintMarker
+ * @module plugins/base/overlays/MarkerOverlay/marker/svg
  */
 
-import type { MarkerData, RectMarkerData, ArrowMarkerData, EllipseMarkerData } from '@opengpex/editor/core/types';
+import type { ArrowMarkerData, EllipseMarkerData, MarkerData, RectMarkerData } from './types';
 import { toCssColor4 } from '@opengpex/editor/core/engine/color';
 
 /** Minimal bounding contract — accepts both live Layer.bounding and descriptors. */

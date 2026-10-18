@@ -83,7 +83,7 @@ export const CraftDrawerAPI = {
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-import type { MarkerKind, MarkerDataBase } from '@opengpex/editor/core/types';
+import type { MarkerDataBase, MarkerKind } from '../../overlays/MarkerOverlay/marker/types';
 
 export type CraftType = 'text' | 'brush' | 'eraser' | 'restore' | 'mosaic' | 'marker';
 export type ActiveCraft = CraftType | null;

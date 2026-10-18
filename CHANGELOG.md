@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.19
+
+- Workspace: marker tool (rect / arrow / ellipse) is now the first fully plugin-owned tool — its data model, GPU translation and drag preview live in the plugin instead of the core engine; no functional changes
+
+---
+
 ## v2.0.18
 
 - Workspace: zooming deep into a document (past 1000%) no longer drops frames — the visible region is only re-rendered when the zoom level band changes or the view genuinely moves away, instead of on every zoom step; smooth on two-layer documents after cut/extract-to-layer

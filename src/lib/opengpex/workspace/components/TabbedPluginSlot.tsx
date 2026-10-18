@@ -150,7 +150,7 @@ export default function TabbedPluginSlot({
       }
 
       // Contributed components
-      p.contributions?.forEach((contrib, index) => {
+      p.contributions?.ui?.forEach((contrib, index) => {
         if (contrib.slot === name) {
           flatItems.push({
             id: `${p.uid}-contrib-${index}`,

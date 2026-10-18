@@ -266,89 +266,6 @@ export interface TextLayerData {
 }
 
 /**
- * Marker primitive type identifier.
- * Registry-based: adding a new marker type only requires adding to this union
- * and implementing the corresponding `XxxMarkerData` + a `paintMarker` switch case.
- */
-export type MarkerKind = 'rect' | 'arrow' | 'ellipse';
-// Phase 2+: | 'line' | 'rounded-rect' | 'star' | ...
-
-/**
- * Base marker descriptor — common properties for all marker kinds.
- * Stored on `Layer.markerData`, consumed by the painter (core) and overlay (plugin).
- */
-export interface MarkerDataBase {
-  kind: MarkerKind;
-
-  /** Stroke (border) properties */
-  stroke: {
-    color: ColorValue;  // structured foreground colour (wide-gamut currency)
-    width: number;     // px, range [1, 50]
-  };
-
-  /** Fill properties (for closed shapes like rect/ellipse) */
-  fill: {
-    color: ColorValue; // structured foreground colour (wide-gamut currency)
-    opacity: number;   // 0–1, 0 = no fill
-  };
-
-  /**
-   * Edge anti-aliasing toggle. `undefined`/`true` = smoothstep AA (default,
-   * zero-regression); `false` = hard edge (single-pixel step, 8-bit art style).
-   * Persisted with the layer's markerData.
-   */
-  antiAliased?: boolean;
-}
-
-/**
- * Rect marker data.
- *
- * Geometry is implicitly defined by `Layer.bounding` (w × h) —
- * the rect always fills the entire layer bounding box.
- * No extra geometry fields needed.
- */
-export interface RectMarkerData extends MarkerDataBase {
-  kind: 'rect';
-  /** Corner radius in px. 0 = sharp corners. */
-  cornerRadius: number;
-}
-
-/**
- * Arrow marker data.
- *
- * Geometry defined by two endpoints in layer-local coordinates.
- * `Layer.bounding` is the axis-aligned bounding box of these two points
- * (expanded by strokeWidth / 2 + arrowhead size).
- *
- * `Layer.cx/cy` is the world-space center of the bounding box.
- * Endpoints are relative to the bounding box top-left (local space).
- */
-export interface ArrowMarkerData extends MarkerDataBase {
-  kind: 'arrow';
-  /** Start point in layer-local coordinates (relative to bounding top-left) */
-  tail: { x: number; y: number };
-  /** End point (arrowhead) in layer-local coordinates */
-  head: { x: number; y: number };
-  /** Arrowhead size multiplier (relative to strokeWidth). Default 3. */
-  headScale: number;
-}
-
-/**
- * Ellipse marker data.
- *
- * Geometry is implicitly defined by `Layer.bounding` (w × h) — the ellipse is
- * inscribed in the layer bounding box (rx = w/2, ry = h/2). No extra geometry
- * fields needed (same model as rect, minus cornerRadius).
- */
-export interface EllipseMarkerData extends MarkerDataBase {
-  kind: 'ellipse';
-}
-
-/** Discriminated union of all marker data variants */
-export type MarkerData = RectMarkerData | ArrowMarkerData | EllipseMarkerData;
-// Phase 2+: | LineMarkerData | ...
-
-/**
  * One sample of a logic-brush trajectory.
  * Coordinates are layer-local pixels; the tip radius at this point is
  * `size / 2 × pressure`.
@@ -408,8 +325,6 @@ export interface Layer {
   assetId: string;
   role?: LayerRole;
   textData?: TextLayerData;
-  /** Marker tool data — only present when type='vector' and created by the Marker Tool. */
-  markerData?: MarkerData;
   /** Vector brush point-stream data — only present when type='vector' and created by the Brush Tool. */
   strokeData?: StrokeData;
   metadata?: {

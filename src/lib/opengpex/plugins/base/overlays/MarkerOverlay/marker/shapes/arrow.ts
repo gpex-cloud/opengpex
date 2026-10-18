@@ -21,7 +21,7 @@
 
 import React from 'react';
 import { ArrowUpRight } from 'lucide-react';
-import type { ArrowMarkerData } from '@opengpex/editor/core/types';
+import type { ArrowMarkerData } from '../types';
 import { fromHex } from '@opengpex/editor/core/engine/color';
 import type { MarkerDefinition } from '../registry';
 

@@ -43,7 +43,7 @@ export const plugin: EditorPlugin = {
   slot: 'ROOT_OVERLAY',
   component: FileLoaderComponent,
   order: 0,
-  contributions: [
+  contributions: { ui: [
     {
       slot: 'TOOL_MENU',
       component: FileLoaderAction,
@@ -54,7 +54,7 @@ export const plugin: EditorPlugin = {
       component: FileLoaderLandingAction,
       order: 0
     }
-  ],
+  ] },
   commands: Object.values(FILE_LOADER_COMMANDS)
 };
 

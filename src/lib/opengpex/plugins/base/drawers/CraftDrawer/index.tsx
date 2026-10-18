@@ -68,13 +68,13 @@ export const plugin: EditorPlugin = {
   ],
 
   // --- 6. Contributions ---
-  contributions: [
+  contributions: { ui: [
     {
       slot: ColorOptionsAPI.slots.craft,
       component: CraftTriggerButtons,
       order: 100,
     },
-  ],
+  ] },
 
   // --- 7. Auto-Reveal ---
   autoReveal: {

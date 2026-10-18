@@ -72,7 +72,7 @@ export const plugin: EditorPlugin = {
   commands: Object.values(AI_BRIDGE_COMMANDS),
 
   // --- 6. Contributions ---
-  contributions: [
+  contributions: { ui: [
     {
       slot: "SETTINGS_CONFIG_PANEL",
       group: "ai-bridge",
@@ -86,5 +86,5 @@ export const plugin: EditorPlugin = {
       component: AgentDockButton,
       order: 10,
     },
-  ],
+  ] },
 };

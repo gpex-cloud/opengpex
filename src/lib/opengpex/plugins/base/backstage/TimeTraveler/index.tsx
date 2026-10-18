@@ -47,7 +47,7 @@ export const plugin: EditorPlugin = {
   component: () => null,
 
   commands: Object.values(TIMETRAVEL_COMMANDS),
-  contributions: [
+  contributions: { ui: [
     {
       slot: "TOOL_MENU",
       component: TimeTravelAction,
@@ -58,5 +58,5 @@ export const plugin: EditorPlugin = {
       component: LocalHistorySettings,
       order: 100,
     },
-  ],
+  ] },
 };

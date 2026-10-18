@@ -59,7 +59,7 @@ export const plugin: EditorPlugin = {
   component: OnboardingComponent,
   commands: Object.values(ONBOARDING_COMMANDS),
   initialConfig: P.DEFAULT_CONFIG,
-  contributions: [
+  contributions: { ui: [
     {
       slot: "SETTINGS_CONFIG_PANEL",
       group: "onboarding",
@@ -68,7 +68,7 @@ export const plugin: EditorPlugin = {
       icon: <Lightbulb size={12} />,
       order: 200,
     },
-  ],
+  ] },
 };
 
 export default plugin;

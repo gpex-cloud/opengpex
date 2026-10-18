@@ -22,7 +22,7 @@
  * (GPU vmask primitives).
  *
  * These three pure functions used to live inline inside `sdf.ts`'s SDF_WGSL
- * string, coupled to that shader's `MarkerUniforms @group(0) @binding(0)`. The
+ * string, coupled to that shader's `SdfUniforms @group(0) @binding(0)`. The
  * vmask paths (`layer.ts`/`blend.ts` analytic SDF, `vmask.ts` polygon fill) need
  * the SAME geometry maths, but importing `sdf.ts` wholesale would drag in a
  * conflicting binding. So the formulas are extracted here as a binding-free WGSL

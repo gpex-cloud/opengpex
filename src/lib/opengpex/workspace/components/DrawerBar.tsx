@@ -73,7 +73,7 @@ export default function DrawerBar({
     // Basic slot check
     const isSidebarPlugin =
       p.slot === "SIDE_BAR" ||
-      p.contributions?.some((c) => c.slot === "SIDE_BAR");
+      p.contributions?.ui?.some((c) => c.slot === "SIDE_BAR");
     if (!isSidebarPlugin) return false;
 
     // Visibility policy check (syncs with PluginSlot.tsx logic)

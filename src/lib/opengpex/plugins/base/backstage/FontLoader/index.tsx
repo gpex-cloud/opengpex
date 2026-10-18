@@ -66,7 +66,7 @@ export const plugin: EditorPlugin = {
     },
   ],
 
-  contributions: [
+  contributions: { ui: [
     {
       slot: "SETTINGS_CONFIG_PANEL",
       group: "fonts",
@@ -75,5 +75,5 @@ export const plugin: EditorPlugin = {
       icon: <Type size={12} />,
       order: 300,
     },
-  ],
+  ] },
 };

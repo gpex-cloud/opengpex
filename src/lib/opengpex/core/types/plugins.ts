@@ -26,6 +26,7 @@ import { Frame } from './models';
 import type { EditorActions } from './actions';
 import type { EditorContextValue } from './context';
 import type { PixelService, AssetService } from './services';
+import type { EngineContribution } from '../engine/pipeline/scene/vectorSources';
 
 export interface EditorShortcut {
   id: string;
@@ -76,6 +77,25 @@ export interface UIContribution {
   title?: string; // Display title / i18n translation key
   order?: number;
   icon?: React.ReactNode;
+}
+
+/**
+ * Namespaced contribution entry point on {@link EditorPlugin}.
+ *
+ * The namespaces split by CONSUMER, not by domain: `ui` holds mount points
+ * consumed by the React workspace; future engine-side extension points (e.g.
+ * scene-assembly translators) will live under `engine`, whose anchor interface
+ * and registry live next to the engine seam that consumes them. Tool-private
+ * logic never belongs in any namespace — only things the framework can consume
+ * without knowing the tool's identity.
+ */
+export interface PluginContributions {
+  /** UI slot mount points, consumed by the workspace render loop. */
+  readonly ui?: UIContribution[];
+  /** Engine extension points, consumed through registry seams (each slot's
+   *  anchor interface + registry live next to the engine module that consumes
+   *  them — e.g. `vectorSources.ts` owns the vectorSource slot). */
+  readonly engine?: EngineContribution;
 }
 
 export interface CommandInterceptor {
@@ -248,7 +268,7 @@ export interface EditorPlugin {
   initialConfig?: Record<string, unknown>;
   commands?: EditorCommand<never, unknown>[];
   signals?: EditorSignal[];
-  contributions?: UIContribution[];
+  contributions?: PluginContributions;
   interceptors?: {
     command?: CommandInterceptor;
   };

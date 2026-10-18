@@ -34,7 +34,7 @@
  *
  * The test is on the POT-SNAPPED extent, not the raw one: a transient whose
  * snapped size stays ≤ the ladder ceiling is exactly what the pool buckets were
- * modelled for (small markers, small strokes, small canvases) and stays pooled.
+ * modelled for (small annotations, small strokes, small canvases) and stays pooled.
  *
  * PURE — no device, no GPU handles — so the routing rule has a golden test
  * (`tests/.../oversizedTransient.test.ts`) independent of any live compositor.
@@ -57,7 +57,7 @@ export const POOL_BUCKET_CEILING = 4096;
  * pool (engine-owned reuse on the render path, one-shot destroy on export).
  *
  * Below the ceiling → pooled as before (this is the common case: small layers,
- * small canvases, marker/brush transients on a modest artboard).
+ * small canvases, tool transients on a modest artboard).
  */
 export function isOversizedTransient(width: number, height: number): boolean {
   return (

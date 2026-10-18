@@ -100,5 +100,5 @@ export const plugin: EditorPlugin = {
   // --- 6. Contributions ---
   // No cross-plugin contributions yet. A future iteration may add a
   // curve-preview dot into ColorOptions once the Curves editor is real.
-  contributions: [],
+  contributions: { ui: [] },
 };

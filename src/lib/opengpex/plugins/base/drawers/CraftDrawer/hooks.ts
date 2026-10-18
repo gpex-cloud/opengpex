@@ -24,12 +24,13 @@ import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals,
 import { TextOverlayAPI } from '../../overlays/TextOverlay/protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
 import { MarkerOverlayAPI } from '../../overlays/MarkerOverlay/protocols';
-import { MARKER_REGISTRY } from '../../overlays/MarkerOverlay/registry';
+import { MARKER_REGISTRY } from '../../overlays/MarkerOverlay/marker/registry';
 // Side-effect import: ensures built-in markers are registered before panel reads.
-import '../../overlays/MarkerOverlay/markers';
+import '../../overlays/MarkerOverlay/marker';
 import { getReferenceFontSize, MOSAIC_SIZE_PRESETS } from './protocols';
 import type { ActiveCraft, CraftType, CraftDrawerConfig, PendingTextData } from './protocols';
-import type { TextLayerData, MarkerKind, MarkerData, MarkerDataBase } from '@opengpex/editor/core/types';
+import type { TextLayerData } from '@opengpex/editor/core/types';
+import type { MarkerData, MarkerDataBase, MarkerKind } from '../../overlays/MarkerOverlay/marker/types';
 import { fromHex, convertColorGamut, WORKING_GAMUT, type ColorValue } from '@opengpex/editor/core/engine/color';
 import type { CraftDrawerCommandsMap, CraftDrawerSignalsMap } from './commands.d';
 

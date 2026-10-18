@@ -127,6 +127,55 @@ export class WebGpuEngine implements IEngine {
    * device lifetime), swept per frame, cleared on dimsChanged / device loss /
    * teardown. See {@link ResidentTransientCache}.
    */
+  /**
+   * Composite channel state, one state object per channel (`below` = the frozen
+   * stack beneath the live layer, `roi` = the interactive-zoom window target).
+   * No behaviour lives here — plain fields only; every consumer keeps its own
+   * invalidation logic. A null texture means the channel is cold.
+   */
+  #channel = {
+    below: {
+      /** Frozen-stack texture (composite of everything below the hot layer). */
+      texture: null as LayerTexture | null,
+      /** Content signature the below-cache was rendered at. */
+      sig: null as string | null,
+      /** Texel dims of the below-cache texture. */
+      w: 0,
+      h: 0,
+      format: null as GPUTextureFormat | null,
+      densityScale: 1,
+      /** ROI key the below-cache was widened for (containment hysteresis stamp). */
+      roiKey: null as string | null,
+      /** Full-composite signature already cleared by the damage check (skip re-check). */
+      checkedFullSig: null as string | null,
+    },
+    roi: {
+      /** Interactive-zoom window target texture. */
+      texture: null as LayerTexture | null,
+      /** Content signature the cached roi was rendered at. */
+      signature: null as string | null,
+      /** Quantized visible-rect rebuild key (`getVisibleRect` key + band) of the cache. */
+      rectKey: null as string | null,
+      /** Document-space rect (frame-local px) the cached roi texture covers. */
+      rect: { x: 0, y: 0, w: 0, h: 0 },
+      /** Texel dims of the cached roi texture (rect × density). */
+      targetW: 0,
+      targetH: 0,
+      format: null as GPUTextureFormat | null,
+      /** The ACHIEVED roi density (≥ 1 except where physics forces below — see resolveRoiDensity). */
+      densityScale: 1,
+      /**
+       * Document dims the cached roi was built for (transition guard: a roi
+       * from a DIFFERENT document — a resize channel flip — must never be
+       * presented as a fallback during the full-channel rebuild).
+       */
+      docW: 0,
+      docH: 0,
+      /** Density band the cached roi was rendered at (containment-hysteresis stamp). */
+      band: null as number | null,
+    },
+  };
+
   private residentTransients: ResidentTransientCache | null = null;
   private pipelineCache: PipelineCache | null = null;
   private bufferRing: BufferRing | null = null;
@@ -208,25 +257,6 @@ export class WebGpuEngine implements IEngine {
    * channel's target (roi rect → smaller when zoomed in), keyed by the roi
    * rebuild key so a viewport move mid-gesture rebuilds once.
    */
-  private belowCacheTexture: LayerTexture | null = null;
-  /** Signature of the below layers (`scene.layers` minus the live layer) the cache was built from. */
-  private belowCacheSig: string | null = null;
-  /** Creation dims/format/density of the cache — a mismatch forces a rebuild. */
-  private belowCacheW = 0;
-  private belowCacheH = 0;
-  private belowCacheFormat: GPUTextureFormat | null = null;
-  private belowCacheDensityScale = 1;
-  /** ROI rebuild key the cache was built for (null on the full channel) — a rect move invalidates. */
-  private belowCacheRoiKey: string | null = null;
-  /**
-   * The FULL-scene composite signature the below-cache was last VERIFIED
-   * consistent with. Equal full signatures guarantee equal below signatures
-   * (the below layers are a slice of the same input), so this is a cheap
-   * "has anything changed since the last verification" gate: only when it
-   * differs does the stale-check recompute the below signature — once per
-   * content change, never per idle frame.
-   */
-  private belowCacheCheckedFullSig: string | null = null;
 
   /**
    * Wall-clock of the last render() that passed its readiness checks. The idle
@@ -248,12 +278,12 @@ export class WebGpuEngine implements IEngine {
         ? estimateTextureBytes(this.compositeTexture.allocatedWidth, this.compositeTexture.allocatedHeight, this.compositeTexture.format)
         : 0,
     roiTargetBytes: () =>
-      this.roiTexture
-        ? estimateTextureBytes(this.roiTexture.allocatedWidth, this.roiTexture.allocatedHeight, this.roiTexture.format)
+      this.#channel.roi.texture
+        ? estimateTextureBytes(this.#channel.roi.texture.allocatedWidth, this.#channel.roi.texture.allocatedHeight, this.#channel.roi.texture.format)
         : 0,
     belowCacheBytes: () =>
-      this.belowCacheTexture
-        ? estimateTextureBytes(this.belowCacheTexture.allocatedWidth, this.belowCacheTexture.allocatedHeight, this.belowCacheTexture.format)
+      this.#channel.below.texture
+        ? estimateTextureBytes(this.#channel.below.texture.allocatedWidth, this.#channel.below.texture.allocatedHeight, this.#channel.below.texture.format)
         : 0,
     residentTransientBytes: () => this.residentTransients?.totalBytes() ?? 0,
     poolBytes: () => this.texturePool?.getStats().totalBytes ?? 0,
@@ -293,39 +323,6 @@ export class WebGpuEngine implements IEngine {
     docW: number; docH: number; bpp: number; deviceMaxDim: number; budgetBytes: number;
   } | null = null;
   private planMemoMode: 'full' | 'roi' = 'full';
-
-  /**
-   * Documents whose density-1 footprint exceeds the composite budget or the
-   * device texture limit composite ONLY their visible region into this smaller
-   * resident target, re-rendered when the needed extent escapes the resident
-   * rect (containment hysteresis, see roiFrame.ts), the band crosses, or
-   * content edits.
-   */
-  private roiTexture: LayerTexture | null = null;
-  /** Content signature the cached roi was rendered at. */
-  private roiSignature: string | null = null;
-  /** Quantized visible-rect rebuild key (`getVisibleRect` key + band) of the cache. */
-  private roiRectKey: string | null = null;
-  /** Document-space rect (frame-local px) the cached roi texture covers. */
-  private roiRectX = 0;
-  private roiRectY = 0;
-  private roiRectW = 0;
-  private roiRectH = 0;
-  /** Texel dims of the cached roi texture (rect × density). */
-  private roiTargetW = 0;
-  private roiTargetH = 0;
-  private roiFormat: GPUTextureFormat | null = null;
-  /** The ACHIEVED roi density (≥ 1 except where physics forces below — see resolveRoiDensity). */
-  private roiDensityScale = 1;
-  /**
-   * Document dims the cached roi was built for (transition guard: a roi
-   * from a DIFFERENT document — a resize channel flip — must never be
-   * presented as a fallback during the full-channel rebuild).
-   */
-  private roiDocW = 0;
-  private roiDocH = 0;
-  /** Density band the cached roi was rendered at (containment-hysteresis stamp). */
-  private roiBand: number | null = null;
 
   /**
    * Per-asset epoch, bumped on every GENUINE re-transfer in `upload()` (not on
@@ -665,18 +662,18 @@ export class WebGpuEngine implements IEngine {
     const liveHintTopmost =
       scene.layers.length >= 2 && scene.layers[scene.layers.length - 1]?.useIncreComp === true;
     if (
-      this.belowCacheTexture !== null &&
+      this.#channel.below.texture !== null &&
       !liveHintTopmost &&
-      this.belowCacheCheckedFullSig !== signature
+      this.#channel.below.checkedFullSig !== signature
     ) {
       const belowSig = computeCompositeSignature(
         { ...scene, layers: scene.layers.slice(0, -1) },
         { getAssetEpoch: (assetId) => this.assetEpochs.get(assetId) ?? 0, workingFormat },
       );
-      if (belowSig !== this.belowCacheSig) {
+      if (belowSig !== this.#channel.below.sig) {
         this.#releaseBelowCache();
       } else {
-        this.belowCacheCheckedFullSig = signature;
+        this.#channel.below.checkedFullSig = signature;
       }
     }
 
@@ -744,13 +741,13 @@ export class WebGpuEngine implements IEngine {
       // document (resize flip) or a STALE roi (edits since) must not show — the
       // normal path presents the just-encoded full instead.
       const roiFallbackUsable =
-        this.roiTexture !== null &&
-        this.roiDocW === docW && this.roiDocH === docH &&
-        this.roiSignature === signature;
+        this.#channel.roi.texture !== null &&
+        this.#channel.roi.docW === docW && this.#channel.roi.docH === docH &&
+        this.#channel.roi.signature === signature;
       const presentRoiDuringFullRebuild = needsRecomposite && roiFallbackUsable;
       // Once the full channel is fresh again, the roi fallback is redundant
       // VRAM — drop it (idempotent; a later channel flip rebuilds it cheaply).
-      if (!needsRecomposite && this.roiTexture) {
+      if (!needsRecomposite && this.#channel.roi.texture) {
         this.#clearRoiChannel();
       }
 
@@ -813,12 +810,12 @@ export class WebGpuEngine implements IEngine {
       }
 
       if (presentRoiDuringFullRebuild) {
-        activeTexture = this.roiTexture;
-        activeDensityScale = this.roiDensityScale;
+        activeTexture = this.#channel.roi.texture;
+        activeDensityScale = this.#channel.roi.densityScale;
         activePlacement = {
-          origin: { x: this.roiRectX, y: this.roiRectY },
-          docW: this.roiRectW,
-          docH: this.roiRectH,
+          origin: { x: this.#channel.roi.rect.x, y: this.#channel.roi.rect.y },
+          docW: this.#channel.roi.rect.w,
+          docH: this.#channel.roi.rect.h,
         };
       } else {
         activeTexture = this.compositeTexture;
@@ -865,17 +862,17 @@ export class WebGpuEngine implements IEngine {
         budgetBytes: densityBudgetBytes,
         signature,
         current: {
-          resident: this.roiTexture !== null,
-          rectKey: this.roiRectKey,
-          signature: this.roiSignature,
-          targetW: this.roiTargetW,
-          targetH: this.roiTargetH,
-          format: this.roiFormat,
-          rectX: this.roiRectX,
-          rectY: this.roiRectY,
-          rectW: this.roiRectW,
-          rectH: this.roiRectH,
-          band: this.roiBand,
+          resident: this.#channel.roi.texture !== null,
+          rectKey: this.#channel.roi.rectKey,
+          signature: this.#channel.roi.signature,
+          targetW: this.#channel.roi.targetW,
+          targetH: this.#channel.roi.targetH,
+          format: this.#channel.roi.format,
+          rectX: this.#channel.roi.rect.x,
+          rectY: this.#channel.roi.rect.y,
+          rectW: this.#channel.roi.rect.w,
+          rectH: this.#channel.roi.rect.h,
+          band: this.#channel.roi.band,
         },
       });
 
@@ -894,12 +891,12 @@ export class WebGpuEngine implements IEngine {
           // clear the resident transients / evict the pool — the roi's
           // ping-pong/vector transients resize WITH the roi and the resident
           // cache sweeps their old slots lazily.
-          if (this.roiTexture && roi.dimsChanged) {
-            this.roiTexture.destroy();
-            this.roiTexture = null;
+          if (this.#channel.roi.texture && roi.dimsChanged) {
+            this.#channel.roi.texture.destroy();
+            this.#channel.roi.texture = null;
           }
-          if (!this.roiTexture) {
-            this.roiTexture = this.#createCompositeTarget(device, roi.targetW, roi.targetH, workingFormat);
+          if (!this.#channel.roi.texture) {
+            this.#channel.roi.texture = this.#createCompositeTarget(device, roi.targetW, roi.targetH, workingFormat);
           }
 
           // Below-cache fast path on the roi channel: identical mechanism to
@@ -918,7 +915,7 @@ export class WebGpuEngine implements IEngine {
             Math.min(roiDensity.scaleX, roiDensity.scaleY),
             roi.rebuildKey,
             signature,
-            this.roiTexture, roi.targetW, roi.targetH,
+            this.#channel.roi.texture, roi.targetW, roi.targetH,
             roiViewport,
             _pCompEncT0,
           );
@@ -928,26 +925,26 @@ export class WebGpuEngine implements IEngine {
             _pCompEncMs = this.#compositeInto(compiled, {
               device,
               workingFormat,
-              target: this.roiTexture,
+              target: this.#channel.roi.texture,
               interactiveScale: [roiDensity.scaleX, roiDensity.scaleY],
               exportViewport: roiViewport,
               perfStart: _pCompEncT0,
             });
           }
 
-          this.roiSignature = signature;
-          this.roiRectKey = roi.rebuildKey;
-          this.roiRectX = intersect.x;
-          this.roiRectY = intersect.y;
-          this.roiRectW = intersect.w;
-          this.roiRectH = intersect.h;
-          this.roiTargetW = roi.targetW;
-          this.roiTargetH = roi.targetH;
-          this.roiFormat = workingFormat;
-          this.roiDensityScale = Math.min(roiDensity.scaleX, roiDensity.scaleY);
-          this.roiDocW = docW;
-          this.roiDocH = docH;
-          this.roiBand = roiDensity.band;
+          this.#channel.roi.signature = signature;
+          this.#channel.roi.rectKey = roi.rebuildKey;
+          this.#channel.roi.rect.x = intersect.x;
+          this.#channel.roi.rect.y = intersect.y;
+          this.#channel.roi.rect.w = intersect.w;
+          this.#channel.roi.rect.h = intersect.h;
+          this.#channel.roi.targetW = roi.targetW;
+          this.#channel.roi.targetH = roi.targetH;
+          this.#channel.roi.format = workingFormat;
+          this.#channel.roi.densityScale = Math.min(roiDensity.scaleX, roiDensity.scaleY);
+          this.#channel.roi.docW = docW;
+          this.#channel.roi.docH = docH;
+          this.#channel.roi.band = roiDensity.band;
         }
       }
 
@@ -956,15 +953,15 @@ export class WebGpuEngine implements IEngine {
       // the stale rect's quad off-screen is what CLEARS the swapchain (present
       // pass loadOp:'clear'); skipping the present would leave the previous
       // frame's pixels on screen.
-      if (this.roiTexture) {
-        activeTexture = this.roiTexture;
-        activeDensityScale = this.roiDensityScale;
+      if (this.#channel.roi.texture) {
+        activeTexture = this.#channel.roi.texture;
+        activeDensityScale = this.#channel.roi.densityScale;
         // origin + covered dims ALWAYS travel together:
         // present must not re-derive the extent from compositeDims(scene).
         activePlacement = {
-          origin: { x: this.roiRectX, y: this.roiRectY },
-          docW: this.roiRectW,
-          docH: this.roiRectH,
+          origin: { x: this.#channel.roi.rect.x, y: this.#channel.roi.rect.y },
+          docW: this.#channel.roi.rect.w,
+          docH: this.#channel.roi.rect.h,
         };
       }
     }
@@ -1162,11 +1159,11 @@ export class WebGpuEngine implements IEngine {
    * device-loss teardown cannot drift apart.
    */
   #releaseBelowCache(): void {
-    this.belowCacheTexture?.destroy();
-    this.belowCacheTexture = null;
-    this.belowCacheSig = null;
-    this.belowCacheCheckedFullSig = null;
-    this.belowCacheRoiKey = null;
+    this.#channel.below.texture?.destroy();
+    this.#channel.below.texture = null;
+    this.#channel.below.sig = null;
+    this.#channel.below.checkedFullSig = null;
+    this.#channel.below.roiKey = null;
   }
 
   /**
@@ -1174,21 +1171,21 @@ export class WebGpuEngine implements IEngine {
    * teardown — the same moments the full-channel composite target is cleared).
    */
   #clearRoiChannel(): void {
-    this.roiTexture?.destroy();
-    this.roiTexture = null;
-    this.roiSignature = null;
-    this.roiRectKey = null;
-    this.roiRectX = 0;
-    this.roiRectY = 0;
-    this.roiRectW = 0;
-    this.roiRectH = 0;
-    this.roiTargetW = 0;
-    this.roiTargetH = 0;
-    this.roiFormat = null;
-    this.roiDensityScale = 1;
-    this.roiDocW = 0;
-    this.roiDocH = 0;
-    this.roiBand = null;
+    this.#channel.roi.texture?.destroy();
+    this.#channel.roi.texture = null;
+    this.#channel.roi.signature = null;
+    this.#channel.roi.rectKey = null;
+    this.#channel.roi.rect.x = 0;
+    this.#channel.roi.rect.y = 0;
+    this.#channel.roi.rect.w = 0;
+    this.#channel.roi.rect.h = 0;
+    this.#channel.roi.targetW = 0;
+    this.#channel.roi.targetH = 0;
+    this.#channel.roi.format = null;
+    this.#channel.roi.densityScale = 1;
+    this.#channel.roi.docW = 0;
+    this.#channel.roi.docH = 0;
+    this.#channel.roi.band = null;
   }
 
   /**
@@ -1234,10 +1231,10 @@ export class WebGpuEngine implements IEngine {
     // with the same lifecycle (device loss / teardown); the next live-edit
     // gesture rebuilds it from the ordinary full composite.
     this.#releaseBelowCache();
-    this.belowCacheFormat = null;
-    this.belowCacheW = 0;
-    this.belowCacheH = 0;
-    this.belowCacheDensityScale = 1;
+    this.#channel.below.format = null;
+    this.#channel.below.w = 0;
+    this.#channel.below.h = 0;
+    this.#channel.below.densityScale = 1;
     this.#clearRoiChannel();
     // Epochs restart (an upload against the new device is a genuine first
     // transfer) and the signature memo drops (the next frame recomputes).
@@ -1485,13 +1482,13 @@ export class WebGpuEngine implements IEngine {
       workingFormat,
     });
     const cacheDimsMatch =
-      this.belowCacheTexture !== null &&
-      this.belowCacheW === targetW &&
-      this.belowCacheH === targetH &&
-      this.belowCacheFormat === workingFormat &&
-      this.belowCacheDensityScale === densityScale &&
-      this.belowCacheRoiKey === rebuildKey;
-    const cacheValid = cacheDimsMatch && this.belowCacheSig === belowSig;
+      this.#channel.below.texture !== null &&
+      this.#channel.below.w === targetW &&
+      this.#channel.below.h === targetH &&
+      this.#channel.below.format === workingFormat &&
+      this.#channel.below.densityScale === densityScale &&
+      this.#channel.below.roiKey === rebuildKey;
+    const cacheValid = cacheDimsMatch && this.#channel.below.sig === belowSig;
 
     // [PERF_MON] Fast-path engagement beacon: EVERY fast frame prints
     // "below-fast"; a rebuild additionally prints "below-fast rebuild". If
@@ -1505,26 +1502,26 @@ export class WebGpuEngine implements IEngine {
     if (!cacheValid) {
       // Rebuild: composite the below layers into the below cache…
       if (!cacheDimsMatch) {
-        this.belowCacheTexture?.destroy();
-        this.belowCacheTexture = this.#createCompositeTarget(device, targetW, targetH, workingFormat);
-        this.belowCacheW = targetW;
-        this.belowCacheH = targetH;
-        this.belowCacheFormat = workingFormat;
-        this.belowCacheDensityScale = densityScale;
-        this.belowCacheRoiKey = rebuildKey;
+        this.#channel.below.texture?.destroy();
+        this.#channel.below.texture = this.#createCompositeTarget(device, targetW, targetH, workingFormat);
+        this.#channel.below.w = targetW;
+        this.#channel.below.h = targetH;
+        this.#channel.below.format = workingFormat;
+        this.#channel.below.densityScale = densityScale;
+        this.#channel.below.roiKey = rebuildKey;
       }
       const belowCompiled = SceneCompiler.compile(belowScene);
       const encBelow = this.#compositeInto(belowCompiled, {
         device,
         workingFormat,
-        target: this.belowCacheTexture!,
+        target: this.#channel.below.texture!,
         interactiveScale: density,
         exportViewport,
         perfStart,
         armTimer: false,
       });
       // …seed the composite target from it…
-      this.#copyFullTexture(device, this.belowCacheTexture!.texture, target.texture, targetW, targetH);
+      this.#copyFullTexture(device, this.#channel.below.texture!.texture, target.texture, targetW, targetH);
       // …and draw the live layer on top of the backdrop.
       const activeCompiled = SceneCompiler.compile(activeScene);
       const encActive = this.#compositeInto(activeCompiled, {
@@ -1537,16 +1534,16 @@ export class WebGpuEngine implements IEngine {
         perfStart,
         armTimer: false,
       });
-      this.belowCacheSig = belowSig;
+      this.#channel.below.sig = belowSig;
       // Stamp the full-scene signature the cache was verified against, so the
       // idle-frame staleness check can gate on it before recomputing belowSig.
-      this.belowCacheCheckedFullSig = fullSignature;
+      this.#channel.below.checkedFullSig = fullSignature;
       return encBelow + encActive;
     }
 
     // Fast frame: the below layers are provably unchanged — copy the cache and
     // composite ONLY the live layer over it.
-    this.#copyFullTexture(device, this.belowCacheTexture!.texture, target.texture, targetW, targetH);
+    this.#copyFullTexture(device, this.#channel.below.texture!.texture, target.texture, targetW, targetH);
     const activeCompiled = SceneCompiler.compile(activeScene);
     return this.#compositeInto(activeCompiled, {
       device,
@@ -1592,10 +1589,10 @@ export class WebGpuEngine implements IEngine {
 
     w.n++;
     w.mode = this.planMemoMode;
-    if (this.roiTexture) {
-      w.roiTargetW = this.roiTargetW;
-      w.roiTargetH = this.roiTargetH;
-      w.roiDensity = this.roiDensityScale;
+    if (this.#channel.roi.texture) {
+      w.roiTargetW = this.#channel.roi.targetW;
+      w.roiTargetH = this.#channel.roi.targetH;
+      w.roiDensity = this.#channel.roi.densityScale;
     }
     w.compileSum += s.compileMs; if (s.compileMs > w.compileMax) w.compileMax = s.compileMs;
     w.sigSum += s.sigMs; if (s.sigMs > w.sigMax) w.sigMax = s.sigMs; if (s.sigMiss) w.sigMiss++;

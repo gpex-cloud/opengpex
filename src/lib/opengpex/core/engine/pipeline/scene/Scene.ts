@@ -117,17 +117,17 @@ export interface ViewConfig {
  * How a layer produces its pixels.
  *
  * Classified by RASTERIZATION METHOD, not by product-level tool type. Text /
- * marker / vector layers are all `raster`: the SceneAssembler pre-rasterizes
- * their declarative data (`textData` / `markerData` / path data) on the Worker
- * CPU into an `ImageBitmap`, then `upload()`s it as a resident texture. This
- * keeps the union from growing one arm per annotation tool.
+ * vector layers are all `raster` in this arm: the SceneAssembler pre-rasterizes
+ * their declarative payloads on the Worker CPU into an `ImageBitmap`, then
+ * `upload()`s it as a resident texture. This keeps the union from growing one
+ * arm per annotation tool.
  */
 /**
  * The engine-owned geometry primitive an {@link SdfShapeParams} describes. A
- * RENDER-CORE enum, deliberately DISTINCT from any business discriminant (e.g. the
- * marker plugin's `MarkerKind`): the scene-assembly layer translates business kinds
- * into these primitive names (`vectorSources.ts`), so nothing under `gpu/` /
- * `pipeline/graph/` / `shaders/` ever imports a business model.
+ * RENDER-CORE enum, deliberately DISTINCT from any business discriminant: the
+ * vector-source translators (vectorSources.ts registry) translate business kinds
+ * into these primitive names, so nothing under `gpu/` / `pipeline/graph/` /
+ * `shaders/` ever imports a business model.
  */
 export type SdfPrimitive = 'rounded_rect' | 'ellipse' | 'arrow';
 

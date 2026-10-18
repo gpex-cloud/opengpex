@@ -69,9 +69,10 @@ export function getClipBox(frame: Frame): LocalPolygon | null {
 
 /**
  * Re-Canvas default scale factor relative to canvas dimensions.
- * 1.1 = 110% of canvas (extends 10% beyond one or more edges).
+ * 1.0 = the clip box starts equal to the canvas; the user grows it outward
+ * from there. (Anchor presets below only matter for scales > 1.)
  */
-const RE_CANVAS_DEFAULT_SCALE = 1.1;
+const RE_CANVAS_DEFAULT_SCALE = 1.0;
 
 /**
  * Alignment anchor for the default Re-Canvas clip box.
@@ -89,9 +90,8 @@ export type ClipBoxAnchor = 'tl' | 'tr' | 'bl' | 'br' | 'ct';
  * getDefaultCanvasClipBox — computes the default Re-Canvas clip box for a
  * given canvas dimension.
  *
- * The clip box is sized to `RE_CANVAS_DEFAULT_SCALE` (currently 1.1×) of the
- * canvas dimensions, giving the user immediate room to expand the canvas
- * outward without first resizing the selection.
+ * The clip box is sized to `RE_CANVAS_DEFAULT_SCALE` (currently 1.0× — equal
+ * to the canvas) of the canvas dimensions.
  *
  * @param dim - Canvas dimensions `{ w, h }`
  * @param anchor - Alignment anchor (default: `'bl'` — bottom-left)
