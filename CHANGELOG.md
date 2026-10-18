@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.20
+
+- Workspace: the pixel grid now stays aligned with image pixels while zooming in deep into large documents — previously the grid lines could drift out of alignment during continuous zoom-in (fixable only by reloading) ; a brief sharpness step when crossing the alignment point is expected
+
+---
+
 ## v2.0.19
 
 - Workspace: marker tool (rect / arrow / ellipse) is now the first fully plugin-owned tool — its data model, GPU translation and drag preview live in the plugin instead of the core engine; no functional changes

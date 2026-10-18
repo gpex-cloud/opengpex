@@ -168,6 +168,24 @@ export function budgetDerivedCeilPx(
  *     zoomed far out, where the pixel grid is not shown and the minified
  *     LINEAR sampling hides the degradation. The deep-zoom correctness root
  *     (density ≥ 1 wherever magnification exposes texel edges) is untouched.
+ *
+ * ── INTEGER LATTICE (texel-phase contract) ──
+ *   A fractional density is only presentable while the composite is SAMPLED
+ *   AT MINIFICATION (`density ≥ screenScale`): the texel lattice is then
+ *   finer than the screen pixel grid and linear filtering hides its phase
+ *   against the document pixel grid. Once the camera magnifies beyond the
+ *   achieved density, the sampler switches to nearest and a fractional
+ *   density draws document pixels with UNEVEN device widths (alternating
+ *   n/n+1 px) — the pixel grid overlay is uniform, so the image reads as
+ *   misaligned. In that magnified regime the density is therefore floored to
+ *   the integer lattice, where texel boundaries coincide with document pixel
+ *   boundaries exactly. This matters because the roi rect can be FROZEN by
+ *   containment reuse at a rect derived at a lower zoom: its budget/device
+ *   clamp terms (continuous in the rect area) then hold the density at a
+ *   fractional value precisely in the deep-zoom range where the grid is
+ *   visible. Below 1 the density stays fractional — that regime only occurs
+ *   on over-limit documents at minified linear zooms, where no integer
+ *   lattice exists to snap to.
  */
 export function resolveRoiDensity(input: {
   screenScale: number;
@@ -182,6 +200,8 @@ export function resolveRoiDensity(input: {
   const h = Math.max(1, input.roiH);
   const budgetTerm = Math.max(1, Math.max(1, input.budgetBytes) / (w * h * Math.max(1, input.bpp)));
   const deviceTerm = Math.max(1, input.deviceMaxDim) / Math.max(w, h);
-  const scale = Math.min(band, budgetTerm, deviceTerm);
+  const raw = Math.min(band, budgetTerm, deviceTerm);
+  const scale =
+    raw >= input.screenScale || raw < 1 ? raw : Math.max(1, Math.floor(raw));
   return { band, scaleX: scale, scaleY: scale };
 }
