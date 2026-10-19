@@ -73,9 +73,10 @@ export type { DecodeChannel, OrientationResponsibility } from './engine/types';
  * an inline `cs as GamutId` assertion could never give (the two are distinct
  * semantic axes, not a subset relation).
  *
- * `rec2020` is intentionally absent: it is not a `ColorSpaceId` member yet
- * (TRC ambiguity SDR/PQ/HLG). When it is added, this switch will force
- * the branch to be written rather than let it slip through.
+ * `rec2020` maps to itself (D4, gap #8 closure): the primaries were already a
+ * `GamutId` the render graph has a matrix for (shader `case 4u`); the SDR
+ * transfer travels on `IngestDecision.transfer` ('bt709' for SDR BT.2020
+ * containers), so the two axes stay orthogonal here.
  *
  * `cmyk`/`grayscale`/`unknown` are not gamuts. `cmyk` folds to 8-bit sRGB on
  * the vips-icc path; `unknown` routes to 'unsupported' (its identity is still
@@ -95,6 +96,8 @@ export function colorSpaceToGamut(cs: ColorSpaceId): GamutId {
       return 'adobe-rgb';
     case 'prophoto-rgb':
       return 'prophoto-rgb';
+    case 'rec2020':
+      return 'rec2020';
   }
 }
 
@@ -191,11 +194,12 @@ export interface IngestEnvironment {
   /**
    * HEVC hardware-decode capability for THIS file's profile —
    * probe entry picked by hvcC profile_idc, injected by `FileService.decode`
-   * after awaiting the one-shot HEVC capability probe (`handlers/heic/capability.ts`)). Omitted/`false` =
-   * declarative proxy downgrade (rule 19e); `true` admits rule 19a's
-   * `webcodecs-heic` route.
+   * after awaiting the one-shot HEVC capability probe (`handlers/heic/capability.ts`)).
+   * The context never carries `false`: omitted = no hard decode (probe
+   * negative or not probed — the same decision state, the declarative proxy
+   * downgrade); `true` admits the `webcodecs-heic` route (rules 81/83).
    */
-  readonly hevcHardDecode?: boolean;
+  readonly hevcHardDecode?: true;
 }
 
 /**
@@ -226,13 +230,14 @@ export function resolveIngestDecision(metadata: ImageMetadata, env?: IngestEnvir
     bitDepth: rawBitDepth,
     colorSpace: detectedColorSpace,
     hasAlpha,
-    isMultiFrame = false,
+    isMultiFrame: rawIsMultiFrame,
   } = metadata;
   // HDR seam: the container's transfer characteristic (PQ/HLG) routes the HDR
   // decision rows; 'sdr'/undefined is the SDR vocabulary.
   const transfer = metadata.raw?.transfer;
-  // Gain-map carrier flag: admits the 19-gm rows (linear f16 SDR-base master).
-  const hasGainmap = metadata.raw?.hasGainmap ?? false;
+  // Gain-map carrier flag: admits the carrier rows 31 / 81 / 82 / 85 (linear
+  // f16 SDR-base master).
+  const hasGainmap = metadata.raw?.hasGainmap === true ? true : undefined;
 
   // 1. Pre-process: physical constraints. The old AVIF >8→8-bit clamp is gone
   //    (2026-10-13): the isolated jsquash/libavif wasm decoder is bit-exact at
@@ -245,20 +250,24 @@ export function resolveIngestDecision(metadata: ImageMetadata, env?: IngestEnvir
     format,
     bitDepth,
     colorSpace: detectedColorSpace,
-    isMultiFrame,
-    hevcHardDecode: env?.hevcHardDecode ?? false,
+    isMultiFrame: rawIsMultiFrame === true ? true : undefined,
+    // undefined-preserving: the capability probe is a HEIC-only runtime concern;
+    // other formats never inject it, so undeclared hevcHardDecode conditions
+    // (value equality) match them naturally.
+    hevcHardDecode: env?.hevcHardDecode,
     transfer,
-    hasGainmap,
+    hasGainmap: hasGainmap === true ? true : undefined,
   };
   const matched = matchRule(INGEST_DECISION_RULES, ctx);
   const { action } = matched;
 
   // 3. Post-process: assemble output contract.
-  //    Gamut is determined by the input colorSpace via colorSpaceToGamut, not by rule actions —
-  //    with ONE documented exception: the HDR rows may override it, because
-  //    BT.2020 primaries have no ColorSpaceId member (gap #8) and the row is
-  //    where the container's true primaries are known.
-  const gamut: GamutId = action.gamutOverride ?? colorSpaceToGamut(detectedColorSpace);
+  //    Gamut is determined by the input colorSpace via colorSpaceToGamut, never
+  //    by rule actions — no exceptions. (The former `gamutOverride` hatch lived
+  //    here for BT.2020 HDR while gap #8 was open; D4 closed the vocabulary gap,
+  //    so metadata reports 'rec2020' directly and the hatch is gone. An
+  //    unnameable gamut now routes to 'unsupported' upstream instead.)
+  const gamut: GamutId = colorSpaceToGamut(detectedColorSpace);
 
   const colorIdentity: ColorIdentity = {
     gamut,

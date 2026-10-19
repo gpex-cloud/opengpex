@@ -26,7 +26,6 @@ import {
   resolveIngestDecision,
   resolveEgestDecision,
 } from './core/files';
-import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color';
 import type { FileService } from './core/files/types';
 import type { AssetService } from './core/types';
 
@@ -133,10 +132,11 @@ describe('OpenGPEX v2.0 - Samples Ingest & Egest Automated Test Suite', () => {
       const adobeWebpMeta = await files.extractMetadata(adobeWebp);
       expect(adobeWebpMeta.colorSpace).toBe('adobe-rgb');
 
+      // Row 4 (WebP 8-bit wide-gamut) deleted 2026-10-18: WebP + Adobe RGB
+      // does not exist in the wild (synthetic fixture only) — per the standing
+      // principle the combo lands at the honest terminus, no never-used lane.
       const adobeWebpDecision = resolveIngestDecision(adobeWebpMeta);
-      expect(adobeWebpDecision.decodeChannel).toBe('wide-gamut-8');
-      expect(adobeWebpDecision.retainSourceBlob).toBe(true);
-      expect(adobeWebpDecision.colorIdentity.dataFormat).toBe('rgba16float');
+      expect(adobeWebpDecision.decodeChannel).toBe('unsupported');
     });
 
     it('Case INGEST-3: 16-bit LibVips high-depth channel (vips, retainSourceBlob=true, TRC de-gamma branching)', async () => {
@@ -339,7 +339,7 @@ describe('OpenGPEX v2.0 - Samples Ingest & Egest Automated Test Suite', () => {
       expect(decision.decodeChannel).toBe('unsupported');
     });
 
-    it('Case INGEST-9: AVIF matrix routing (spec rows 15a / 15b / 16-wg / 17 / 18 / 26)', async () => {
+    it('Case INGEST-9: AVIF matrix routing (spec rows 15a / 15b / 16-r2020 / 18-hdr-* / 26)', async () => {
       // Row 15a: 8-bit SDR → verbatim passthrough (retainSourceBlob=false).
       const sdr8 = resolveIngestDecision(await files.extractMetadata(
         loadSampleFile('22_avif_15a_sdr8_srgb_12mp.avif', 'image/avif')));
@@ -372,28 +372,22 @@ describe('OpenGPEX v2.0 - Samples Ingest & Egest Automated Test Suite', () => {
       expect(sdr12.decodeChannel).toBe('avif-proxy');
       expect(sdr12.colorIdentity.bitDepth).toBe(12);
 
-      // Row 17: 8-bit Adobe RGB ICC → wide-gamut-8 (linear f16 + P3 proxy).
+      // Wide-gamut AVIF rows (17 / 16-wg) DELETED 2026-10-18: the combo does
+      // not exist in the wild, so per the standing principle both Adobe RGB
+      // samples land at the honest terminus instead of a never-used strategy.
       const adobe8 = resolveIngestDecision(await files.extractMetadata(
         loadSampleFile('27_avif_17_adobe8_icc_12mp.avif', 'image/avif')));
-      expect(adobe8.decodeChannel).toBe('wide-gamut-8');
-      expect(adobe8.colorIdentity.gamut).toBe('adobe-rgb');
-      expect(adobe8.colorIdentity.trc).toBe('linear');
-
-      // Row 16-wg: 10-bit Adobe RGB ICC → avif-proxy de-gamma to true linear.
+      expect(adobe8.decodeChannel).toBe('unsupported');
       const adobe10 = resolveIngestDecision(await files.extractMetadata(
         loadSampleFile('28_avif_16wg_adobe10_icc_12mp.avif', 'image/avif')));
-      expect(adobe10.decodeChannel).toBe('avif-proxy');
-      expect(adobe10.colorIdentity.gamut).toBe('adobe-rgb');
-      expect(adobe10.colorIdentity.bitDepth).toBe(10);
-      expect(adobe10.colorIdentity.trc).toBe('linear');
+      expect(adobe10.decodeChannel).toBe('unsupported');
 
-      // HDR rows (18-hdr-*): the wasm high-depth
-      // channel delivers RAW transfer code values bit-exactly (probe:
-      // maxDev 0), so PQ/HLG now route to avif-proxy with our own 203-nit-
-      // anchored EOTF — scene-linear f16 in the source gamut. BT.2020
-      // primaries ride the row's rec2020 gamutOverride (gap #8 orbit).
-      // BT.2020-SDR (31) stays a negative: 'unknown' with NO transfer seam →
-      // row 18, honest unsupported.
+      // HDR rows (18-hdr-*): the wasm high-depth channel delivers RAW transfer
+      // code values bit-exactly (probe: maxDev 0), so PQ/HLG route to
+      // avif-proxy with our own 203-nit-anchored EOTF — scene-linear f16 in
+      // the source gamut. D4 closed gap #8: BT.2020 primaries report
+      // 'rec2020' straight from the metadata (the gamutOverride hatch is gone).
+      // A PQ file with unnameable primaries still falls to row 18 unsupported.
       const pq = resolveIngestDecision(await files.extractMetadata(
         loadSampleFile('29_avif_18_pq10_bt2020_12mp.avif', 'image/avif')));
       expect(pq.decodeChannel).toBe('avif-proxy');
@@ -405,12 +399,14 @@ describe('OpenGPEX v2.0 - Samples Ingest & Egest Automated Test Suite', () => {
       expect(hlg.decodeChannel).toBe('avif-proxy');
       expect(hlg.colorIdentity.trc).toBe('linear');
       expect(hlg.colorIdentity.gamut).toBe('rec2020');
-
-      const bt2020sdr = await files.extractMetadata(
-        loadSampleFile('31_avif_18_bt2020sdr10_12mp.avif', 'image/avif'));
-      expect(bt2020sdr.colorSpace, `${bt2020sdr} must resolve to unknown`).toBe('unknown');
-      const neg = resolveIngestDecision(bt2020sdr);
-      expect(neg.decodeChannel, 'BT.2020 SDR must be rejected (gap #8)').toBe('unsupported');
+      // Sample 31 (BT.2020 SDR) routes onto 16-r2020 since D4: gap #8 is
+      // closed, the metadata reports 'rec2020', and the BT.709 OETF inverse
+      // lane carries SDR BT.2020 (transfer seam guards the HDR rows).
+      const bt2020sdr = resolveIngestDecision(await files.extractMetadata(
+        loadSampleFile('31_avif_18_bt2020sdr10_12mp.avif', 'image/avif')));
+      expect(bt2020sdr.decodeChannel).toBe('avif-proxy');
+      expect(bt2020sdr.colorIdentity.gamut).toBe('rec2020');
+      expect(bt2020sdr.colorIdentity.bitDepth).toBe(10);
 
       // Row 26 NEGATIVE: animated sequence → unsupported (never the first frame).
       const animMeta = await files.extractMetadata(
@@ -510,16 +506,16 @@ describe('OpenGPEX v2.0 - Samples Ingest & Egest Automated Test Suite', () => {
       expect(bmpDecision.channel).toBe('canvas-8');
       expect(bmpDecision.embedIcc).toBe(false);
 
-      // Scenario C: Rec.2020 requestedGamut -> protective downgrade to
-      // WORKING_GAMUT (ProPhoto). TIFF's envelope carries prophoto-rgb, so the
-      // gamut is KEPT on the raw-8 lane — assert against the constant, never a
-      // hardcoded space name.
+      // Scenario C: Rec.2020 is a first-class TIFF target since D4 (gap #8
+      // closed) — the gamut is KEPT on the raw-8 lane, no protective downgrade,
+      // and no ICC ships (BT.2020 has no stock profile).
       const rec2020Decision = resolveEgestDecision({
         format: 'tiff',
         sourceGamut: 'rec2020',
       });
-      expect(rec2020Decision.targetGamut).toBe(WORKING_GAMUT);
+      expect(rec2020Decision.targetGamut).toBe('rec2020');
       expect(rec2020Decision.channel).toBe('raw-8');
+      expect(rec2020Decision.embedIcc).toBe(false);
     });
 
     it('Case EGEST-4: Pass-Through fast-track admission & tamper-proof breakout gate', () => {

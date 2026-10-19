@@ -68,17 +68,22 @@ async function ensureAvifDecReady() {
 
 /**
  * Encode RGBA → AVIF.
+ *
+ * `rgbaData` is a `Uint8Array` (SDR lane, 8-bit) or a `Uint16Array` (HDR lane,
+ * PQ code values 0..1023 with `options.bitDepth: 10`) — the encoder's
+ * `bitDepth` option selects how the buffer words are read; the SDR default
+ * path is unchanged.
  */
 async function encodeAvif(rgbaData, width, height, options) {
   await ensureAvifReady();
 
   const encOpts = { ...defaultOptions, ...options };
-  const output = avifModule.encode(
-    new Uint8Array(rgbaData.buffer || rgbaData),
-    width,
-    height,
-    encOpts,
+  const bytes = new Uint8Array(
+    rgbaData.buffer,
+    rgbaData.byteOffset,
+    rgbaData.byteLength,
   );
+  const output = avifModule.encode(bytes, width, height, encOpts);
 
   if (!output) {
     throw new Error('Encoding error — encoder returned null');

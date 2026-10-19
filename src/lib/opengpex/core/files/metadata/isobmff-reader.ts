@@ -257,7 +257,7 @@ export function nclxToColorSpace(nclx: NclxParams): ColorSpaceId {
   switch (nclx.colourPrimaries) {
     case 1:  return 'srgb';
     case 12: return 'display-p3';
-    case 9:  return 'unknown'; // BT.2020 — no direct mapping in our ColorSpaceId
+    case 9:  return 'rec2020'; // BT.2020 SDR (gap #8 closed, phase D4); transfer rides `raw.transfer`
     default: return 'unknown';
   }
 }
@@ -266,14 +266,16 @@ export function nclxToColorSpace(nclx: NclxParams): ColorSpaceId {
  * PRIMARIES-ONLY mapping — the HDR (PQ/HLG) companion to
  * {@link nclxToColorSpace}: an HDR stream's TRANSFER is reported separately
  * (`raw.transfer`), so its COLOR SPACE records just the primaries (a P3-PQ
- * file is Display-P3 primaries carrying PQ light, not 'unknown'). BT.2020 has
- * no ColorSpaceId member (gap #8) and stays 'unknown' — the HDR decision rows
- * carry the `gamutOverride` for it.
+ * file is Display-P3 primaries carrying PQ light, not 'unknown'). Since D4,
+ * BT.2020 primaries map to 'rec2020' too — the gamut id exists on both axes
+ * now; the HDR decision rows match `['unknown', 'rec2020']` so either report
+ * routes identically.
  */
 export function nclxPrimariesToColorSpace(nclx: NclxParams): ColorSpaceId {
   switch (nclx.colourPrimaries) {
     case 1:  return 'srgb';
     case 12: return 'display-p3';
+    case 9:  return 'rec2020'; // D4: gap #8 closed — metadata can name the gamut
     default: return 'unknown';
   }
 }

@@ -2,6 +2,15 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.21
+
+- Export: AVIF files now export as true HDR when the document's HDR switch is on — 10-bit BT.2020 PQ with the correct color metadata marker, so HDR phones and TVs show real highlights instead of a washed-out SDR render (switch off still exports the regular SDR rendition)
+- Export: BT.2020 is now a selectable color space for SDR exports; previously choosing it silently fell back to the working color space
+- Workspace: new Format Strategy panel showing how every image format is decided on import and export — which rule applies, which rules it shadows, and what each format supports, with live filtering
+- Image Formats: 10/12-bit BT.2020 AVIF images now import with correct wide-gamut colors (previously the color space was misread and colors came out off)
+
+---
+
 ## v2.0.20
 
 - Workspace: the pixel grid now stays aligned with image pixels while zooming in deep into large documents — previously the grid lines could drift out of alignment during continuous zoom-in (fixable only by reloading) ; a brief sharpness step when crossing the alignment point is expected

@@ -27,7 +27,7 @@
  * @module core/files/strategy/engine/types
  */
 
-import type { TRC, GamutId } from '@opengpex/editor/core/types';
+import type { TRC } from '@opengpex/editor/core/types';
 import type { ColorIdentity } from '@opengpex/editor/core/storage/asset/AssetStore';
 import type { SourceFormat, ColorSpaceId } from '../../types';
 
@@ -41,23 +41,22 @@ import type { SourceFormat, ColorSpaceId } from '../../types';
  *   primary decode with the ORIGINAL bytes kept as the display proxy, the SDR
  *   base lifted to the linear f16 master, and the source file retained so the
  *   presentation-time gain decode (`FileService.decodeGainMap`) can re-parse
- *   the multi-picture container. Serves the `1-gm` ingest row.
+ *   the multi-picture container. Serves ingest row 31.
  * - 'wide-gamut-8': 8-bit wide-gamut readback + matrix fold (f16 raw lift + P3 proxy)
  * - 'vips': LibVips native decode (single pass → 8-bit proxy + f16 naked pixels)
  * - 'vips-icc': LibVips ICC colour-conversion engine (CMYK only; unrecognized
  *   custom profiles / BT.2020 that resolve to 'unknown' route to 'unsupported')
  * - 'libraw': LibRaw native camera-raw decode
  * - 'libheif-proxy': HEIC proxy decode via the files-layer heic-worker
- *   (libheif wasm → RGBA-8 → iCCP-tagged PNG proxy). Serves HEIC rules 19b/19c/19e
- *   (10/12-bit sources, environments without HEVC hardware decode) — and, during
- *   the phase-1 bridge, 19a as well.
- * - 'webcodecs-heic': HEVC hardware decode via WebCodecs (HEIC rule 19a).
- *   Declared now, wired in the WebCodecs stage — no rule routes to it yet.
+ *   (libheif wasm → RGBA-8 → iCCP-tagged PNG proxy). Serves HEIC rules 82/84/85/86
+ *   (gain-map carriers, 10/12-bit sources, environments without HEVC hardware
+ *   decode).
+ * - 'webcodecs-heic': HEVC hardware decode via WebCodecs (HEIC rules 81/83).
  * - 'gifuct': gifuct-js per-frame RGBA animation parse
  * - 'vector': vector parser's internal 1:1 rasterization
  * - 'unsupported': CATCH-ALL TERMINUS. No specific supported spec matched (e.g.
  *   sub-8-bit PNG 1/2/4-bit, animated WebP/AVIF, an unmappable 'unknown' colour
- *   tag, HEIC HDR transfer functions (rule 19d), not-yet-adapted formats). The
+ *   tag, HEIC HDR transfer functions (rule 87), not-yet-adapted formats). The
  *   decision reports this faithfully; the execution layer throws a "not yet
  *   supported" error rather than force-decoding (Fail-Fast). Supporting a spec
  *   later means promoting it to a concrete rule in the decision table.
@@ -97,28 +96,33 @@ export interface NormalizedMatchContext {
   readonly format: SourceFormat;
   readonly bitDepth: number;
   readonly colorSpace: ColorSpaceId;
-  readonly isMultiFrame: boolean;
+  /** `true` only for multi-frame carriers; ABSENT (undefined) = single-frame. */
+  readonly isMultiFrame: boolean | undefined;
   /**
    * Environment capability: whether the runtime can hardware-
    * decode THIS file's HEVC profile (probe entry picked by hvcC profile_idc).
    * Injected by the decode entry (`FileService.decode` awaits the one-shot
-   * HEVC capability probe (`handlers/heic/capability.ts`)); plain decision calls default to `false`, which
-   * is the declarative-safe route (19e proxy downgrade, never a hard-decode
-   * guess). Defaults follow the principle that capability is an environment
-   * property, not a file property.
+   * HEVC capability probe (`handlers/heic/capability.ts`)) as `true` ONLY on
+   * admission — the context never carries `false`, so "probe negative" and
+   * "not probed" are one state spelled by omission (the declarative-safe
+   * proxy downgrade, never a hard-decode guess). Capability is an
+   * environment property, not a file property.
    */
-  readonly hevcHardDecode: boolean;
+  /** `true` = probe admitted; ABSENT = capability-less or non-HEIC. */
+  readonly hevcHardDecode: true | undefined;
   /** Source transfer characteristic (`metadata.raw.transfer`), for the HDR rows. */
   readonly transfer: 'pq' | 'hlg' | 'sdr' | undefined;
   /**
    * Gain-map carrier flag (`metadata.raw.hasGainmap` — an Apple `hdrgainmap`
-   * auxiliary image is present in the container). Admits the 19-gm rebuild
-   * rows ahead of the plain HEIC rows: a carrier's master must be the linear
-   * f16 SDR base so the view-pass gain application has a precision-ready line
+   * auxiliary image is present in the container). Admits the carrier rows
+   * (31 / 81 / 82 / 83) ahead of the plain rows: a carrier's master must be
+   * the linear f16 SDR base so the view-pass gain application has a
+   * precision-ready line
    * to sample. Files without the flag default to `false` and never match
    * those rows.
    */
-  readonly hasGainmap: boolean;
+  /** true only for gain-map carriers; ABSENT (undefined) = non-carrier. */
+  readonly hasGainmap: boolean | undefined;
 }
 
 /** Match condition stub for a single rule */
@@ -126,19 +130,22 @@ export interface DecisionCondition {
   readonly format: MatchPattern<SourceFormat>;
   readonly bitDepth: MatchPattern<number>;
   readonly colorSpace: MatchPattern<ColorSpaceId>;
-  readonly isMultiFrame?: MatchPattern<boolean>; // Defaults to '*'
-  readonly hevcHardDecode?: MatchPattern<boolean>; // Defaults to '*'
+  readonly isMultiFrame?: MatchPattern<boolean | undefined>; // undeclared = single-frame (value equality)
+  readonly hevcHardDecode?: MatchPattern<boolean | undefined>; // Defaults to '*'
   /**
    * Source transfer characteristic (`metadata.raw.transfer`, the HDR seam):
-   * `'pq' | 'hlg'` admit the HDR ingest rows; `'sdr' | undefined` matches the
-   * SDR rows. Absent pattern = '*'.
+   * `'pq' | 'hlg'` admit the HDR rows; real SDR files leave the field UNSET
+   * (nothing assigns 'sdr' — dead vocabulary). 2026-10-19 semantics: an
+   * UNDECLARED transfer condition matches only the undefined context
+   * (SDR-only, by value equality); '*' is the transfer-agnostic wildcard
+   * (terminus rows 76/00 and seam-free formats).
    */
   readonly transfer?: MatchPattern<'pq' | 'hlg' | 'sdr' | undefined>;
   /**
    * Gain-map carrier flag (`metadata.raw.hasGainmap`): `true` admits the
    * 19-gm rows (linear f16 SDR-base master). Absent pattern = '*'.
    */
-  readonly hasGainmap?: MatchPattern<boolean>;
+  readonly hasGainmap?: MatchPattern<boolean | undefined>;
 }
 
 /** Decision action stub for a single rule */
@@ -149,13 +156,6 @@ export interface DecisionAction {
   readonly trc?: TRC;
   /** GPU storage container format (defaults to undefined, i.e. standard 8-bit) */
   readonly dataFormat?: ColorIdentity['dataFormat'];
-  /**
-   * HDR rows only: overrides the post-process `colorSpaceToGamut` mapping for
-   * sources whose primaries live outside the SDR `ColorSpaceId` vocabulary
-   * (BT.2020 → 'rec2020'; gap #8). Deliberate, documented exception — the row
-   * is where the container's true primaries are known.
-   */
-  readonly gamutOverride?: GamutId;
   /** EXIF orientation responsibility */
   readonly applyOrientation: OrientationResponsibility;
   /** Rule note / description (e.g. "#1 JPEG 8-bit standard") */
@@ -165,8 +165,9 @@ export interface DecisionAction {
 /** Complete decision rule declaration */
 export interface DecisionRule {
   /**
-   * Rule ID — the numeric matrix rows (1 ~ 26) or the spec-table labels of the
-   * HEIC family ('19a' ~ '19e').
+   * Rule ID — the XY scheme: X = format family (1 BMP 2 GIF 3 JPEG 4 TIFF
+   * 5 PNG 6 WebP 7 AVIF 8 HEIC 9 RAW V vector 0 cross-format catch-all),
+   * Y = variant (grayscale occupies Y=1); every id is a string.
    */
   readonly id: number | string;
   readonly condition: DecisionCondition;

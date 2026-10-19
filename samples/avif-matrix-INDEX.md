@@ -11,11 +11,11 @@
 | `23_avif_15a_p3_8bit_12mp.avif` | 8-bit · nclx 12/13/6 full · 444 | Row 15a: Direct P3 passthrough; saturated patches in the color grid should noticeably exceed sRGB gamut |
 | `25_avif_15b_sdr10_12mp.avif` | **10-bit** · nclx 1/13/1 · 420 | Row 15b: avif-proxy → direct f16 ingest, `colorIdentity.bitDepth=10`; gradient ramp must exhibit no 8-bit banding; 1–3s initial warm-up delay on cold Worker start is a known behavior |
 | `26_avif_15b_sdr12_12mp.avif` | **12-bit** · nclx 1/13/1 · 420 | Row 15b: Same as above, `bitDepth=12` |
-| `27_avif_17_adobe8_icc_12mp.avif` | 8-bit · **colr prof (Adobe RGB)** · 444 | Row 17: wide-gamut-8 → linear f16 + collapsed P3 display proxy |
-| `28_avif_16wg_adobe10_icc_12mp.avif` | **10-bit** · colr prof (Adobe RGB) · 444 identity | Row 16-wg: avif-proxy → degamma true linear f16 (mirrors 19-wg) |
-| `29_avif_18_pq10_bt2020_12mp.avif` | 10-bit · nclx 9/**16**/9 | Row 18: **Reject import** ("Currently unsupported", HDR tone mapping out of scope) |
-| `30_avif_18_hlg10_bt2020_12mp.avif` | 10-bit · nclx 9/**18**/9 | Row 18: Same as above |
-| `31_avif_18_bt2020sdr10_12mp.avif` | 10-bit · nclx 9/**13**/9 | Row 18: Same as above (BT.2020 pending gap #8; error message must specify gamut reason) |
+| `27_avif_17_adobe8_icc_12mp.avif` | 8-bit · **colr prof (Adobe RGB)** · 444 | ~~Row 17~~ **已删除（2026-10-18）**：宽色域 AVIF 现实不存在 → 现落 26 兜底 unsupported |
+| `28_avif_16wg_adobe10_icc_12mp.avif` | **10-bit** · colr prof (Adobe RGB) · 444 identity | ~~Row 16-wg~~ **已删除（2026-10-18）：同 27 → 现落 26 兜底 unsupported** |
+| `29_avif_18_pq10_bt2020_12mp.avif` | 10-bit · nclx 9/**16**/9 | Row 75 (formerly 18-hdr-bt2020): avif-proxy → PQ EOTF → scene-linear f16, rec2020 |
+| `30_avif_18_hlg10_bt2020_12mp.avif` | 10-bit · nclx 9/**18**/9 | Row 75 (formerly 18-hdr-bt2020; since phase B): avif-proxy → HLG EOTF → scene-linear f16, rec2020 |
+| `31_avif_18_bt2020sdr10_12mp.avif` | 10-bit · nclx 9/**13**/9 | Row 73 (formerly 16-r2020; since D4, gap #8 closed): avif-proxy → BT.709 OETF inverse → linear f16, rec2020 (formerly Row 18 Reject) |
 | `24_avif_15a_alpha_8bit_12mp.avif` | 8-bit + **alpha aux** (radial soft-edge transparency) | Row 15a: Outside of the radial disc must be genuinely transparent; `skipContentBoundsScan=false` |
 | `32_avif_26_animated_720p.avifs` | 1280×720 · **moov sequence** · 16 frames | Row 26: **Reject import** (Animations currently unsupported — legacy pipeline silently ingested the first frame, this file serves as a regression anchor) |
 

@@ -32,12 +32,16 @@ function getAvifWorker(): Worker {
 /**
  * Encode RGBA → AVIF via @jsquash/avif in a dedicated Worker.
  * Uses ST encoder (avif_enc.js), ALLOW_MEMORY_GROWTH, crash-isolated from vips.
+ *
+ * `rgbaData` is 8-bit (`Uint8Array`) for the SDR lane, or 10-bit (`Uint16Array`,
+ * PQ code values 0..1023, BT.2020 primaries) for the HDR lane — the latter sets
+ * `options.bitDepth: 10` so the encoder reads the buffer as 16-bit words.
  */
 export async function encodeAvifJsquash(
-  rgbaData: Uint8Array,
+  rgbaData: Uint8Array | Uint16Array,
   width: number,
   height: number,
-  options: { quality?: number; speed?: number },
+  options: { quality?: number; speed?: number; bitDepth?: number },
 ): Promise<Uint8Array> {
   const worker = getAvifWorker();
   const id = ++_avifReqId;
@@ -62,8 +66,11 @@ export async function encodeAvifJsquash(
     worker.addEventListener('message', onMessage);
     worker.addEventListener('error', onError);
 
-    const copy = new Uint8Array(rgbaData.byteLength);
-    copy.set(new Uint8Array(rgbaData.buffer, rgbaData.byteOffset, rgbaData.byteLength));
+    // Copy in the buffer's own element type — the structured clone must carry
+    // the exact typed payload (a Uint16Array clone stays a Uint16Array).
+    const Ctor = rgbaData.constructor as new (length: number) => Uint8Array | Uint16Array;
+    const copy = new Ctor(rgbaData.length);
+    copy.set(rgbaData);
     worker.postMessage({ id, rgbaData: copy, width, height, options }, [copy.buffer]);
   });
 }

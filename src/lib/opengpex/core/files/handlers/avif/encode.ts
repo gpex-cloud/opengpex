@@ -40,15 +40,26 @@
  */
 
 import type { GamutId } from '@opengpex/editor/core/types';
-import type { EncodeOptions } from '../../types';
+import type { EncodeOptions, EncodeSource } from '../../types';
+import { isRawPixelSource } from '../../types';
 import { bitmapToCanvas } from '../../index';
 import { toCanvasColorSpace } from '@opengpex/editor/core/engine/color';
 import { encodeAvifJsquash } from './worker';
+import { patchNclxCicp, HDR_AVIF_CICP } from './cicp';
 
 /**
- * Encode a canvas/bitmap to AVIF with colour management.
+ * Encode a canvas/bitmap — or the HDR PQ raw lane — to AVIF.
  *
- * ── COLOR CONTRACT ──────────────────────────────────────────────────────────
+ * ── HDR PQ LANE (`egest` channel `'raw-10'`) ────────────────────────────────
+ * A `RawPixelSource` at `bitDepth: 10` IS the HDR lane's product: straight
+ * 10-bit PQ code values (0..1023) in BT.2020 primaries, produced by the export
+ * command's terminal `unpremultiplyEncodePq10` step. It bypasses the canvas
+ * entirely (a canvas would clamp to 8-bit sRGB and destroy the headroom) and
+ * goes to the same isolated jsquash Worker with `bitDepth: 10`; the encoded
+ * file then gets its `nclx` CICP triple patched in place to 9/16/9 so every
+ * consumer reads the pixels as PQ/BT.2020 rather than SDR.
+ *
+ * ── COLOR CONTRACT (SDR lanes, unchanged) ───────────────────────────────────
  * Pixels arrive ALREADY in the target gamut with the target TRC applied (the
  * terminal `unpremultiplyEncodeGamut` in the export command did the single
  * source→target matrix + TRC + quantization step). This encoder performs ZERO
@@ -62,13 +73,29 @@ import { encodeAvifJsquash } from './worker';
  * job — see the DESIGN DECISION note above.
  */
 export async function encodeAvif(
-  source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
+  source: EncodeSource,
   options: EncodeOptions,
 ): Promise<Blob> {
   const quality = Math.round((options.quality ?? 0.80) * 100);
   const config = options.exportConfig;
 
   const embedIcc = config?.embedIcc ?? false;
+
+  // ── HDR PQ lane: raw 10-bit straight to jsquash, CICP patched in place ──
+  if (isRawPixelSource(source)) {
+    if (source.bitDepth !== 10 || !(source.data instanceof Uint16Array)) {
+      // egest never routes an SDR raw source onto AVIF (SDR takes canvas-8);
+      // reaching here is a routing bug and must fail loudly.
+      throw new Error('[AvifHandler] unsupported raw source for AVIF (only the 10-bit PQ lane is accepted)');
+    }
+    const avifBytes = await encodeAvifJsquash(source.data, source.width, source.height, {
+      quality,
+      speed: 6,
+      bitDepth: 10,
+    });
+    patchNclxCicp(avifBytes, HDR_AVIF_CICP);
+    return new Blob([avifBytes.buffer as ArrayBuffer], { type: 'image/avif' });
+  }
 
   // The gamut the incoming pixels ARE in. AVIF only ever receives
   // srgb / display-p3 here (wide-gamut is routed onto the PNG/TIFF raw lanes).

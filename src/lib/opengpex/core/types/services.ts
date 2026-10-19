@@ -520,7 +520,7 @@ export interface PixelService {
       targetHeight: number;
       region?: Rect;
       targetGamut: GamutId;
-      channel: 'canvas-8' | 'raw-8' | 'raw-16' | 'exr-half';
+      channel: 'canvas-8' | 'raw-8' | 'raw-10' | 'raw-16' | 'exr-half';
       canvasColorSpace: PredefinedColorSpace;
       /**
        * Per-document HDR presentation switch (WYSIWYG): when false, the

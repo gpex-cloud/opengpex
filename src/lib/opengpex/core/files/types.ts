@@ -49,6 +49,7 @@ export type DpiSource = 'exif' | 'png-phys' | 'bmp-header' | 'tiff-tag' | 'user'
 /** Semantic color space identifier */
 export type ColorSpaceId =
   | 'srgb' | 'adobe-rgb' | 'display-p3' | 'prophoto-rgb'
+  | 'rec2020'
   | 'cmyk' | 'grayscale' | 'unknown';
 
 /**
@@ -435,6 +436,8 @@ export interface ExportMetadataConfig {
   tiffTileWidth?: number;
   /** Tile height */
   tiffTileHeight?: number;
+  /** EXR scanline chunk packing: 'zip' (16-line chunks, ImfZip transform + zlib, default) or 'none' (uncompressed) */
+  exrCompression?: string;
 }
 
 /**
@@ -545,12 +548,13 @@ export type DecodedPayload = Omit<DecodedImage, 'colorIdentity'> & {
   colorIdentity?: ColorIdentity;
 };
 
-/** Raw pixel data source for direct export (supports 8/16-bit without 8-bit Canvas degradation) */
+/** Raw pixel data source for direct export (supports 8/10/16-bit without 8-bit Canvas degradation) */
 export interface RawPixelSource {
   readonly width: number;
   readonly height: number;
   readonly data: Uint8Array | Uint16Array | Uint8ClampedArray;
-  readonly bitDepth: 8 | 16 | 32;
+  /** 10 is the HDR AVIF PQ lane only (egest `'raw-10'`) — no other encoder accepts it. */
+  readonly bitDepth: 8 | 10 | 16 | 32;
   readonly colorSpace?: string;
 }
 

@@ -249,11 +249,14 @@ export function createFileService(
 
       // Stage 2: the single authoritative ingest decision. The working gamut is
       // the engine constant WORKING_GAMUT — never derived from the image.
-      // HEIC injects the environment capability: the one-shot
-      // HEVC probe entry is picked by the file's hvcC profile_idc; the decision
-      // itself stays a synchronous pure function of {metadata, env}.
-      const env = metadata.sourceFormat === 'heic'
-        ? { hevcHardDecode: await isHevcHardDecodeAvailable(metadata.raw.heicProfileIdc) }
+      // HEIC injects the environment capability: the one-shot HEVC probe entry
+      // is picked by the file's hvcC profile_idc; the decision itself stays a
+      // synchronous pure function of {metadata, env}. Only TRUE is injected —
+      // "probe negative" and "not probed" are the same decision state, so the
+      // context never carries false (undeclared capability conditions mean
+      // exactly "no hard decode").
+      const env = metadata.sourceFormat === 'heic' && (await isHevcHardDecodeAvailable(metadata.raw.heicProfileIdc))
+        ? { hevcHardDecode: true as const }
         : undefined;
       const decision = resolveIngestDecision(metadata, env);
 

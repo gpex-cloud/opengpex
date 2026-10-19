@@ -75,7 +75,7 @@ export const GlobalUI = () => {
           }
           title={hud?.message || ""}
           subtitle={
-            (hud as { subtitle?: string })?.subtitle || (
+            hud?.subtitle || (
               hud?.type === "success"
                 ? "Operation Success"
                 : hud?.type === "error"

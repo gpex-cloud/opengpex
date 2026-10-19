@@ -186,7 +186,7 @@ export default function ToolMenu() {
       actions.notifyHUD(`New version v${info.latestVersion} available`, 'success');
       setShowReleaseGuide(true);
     } else {
-      actions.notifyHUD('OpenGPEX is up to date', 'info');
+      actions.notifyHUD('OpenGPEX is up to date', 'info', `Current version: v${info.currentVersion}`);
     }
   };
 

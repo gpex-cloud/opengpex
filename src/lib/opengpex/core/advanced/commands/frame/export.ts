@@ -60,6 +60,13 @@ export const FrameExportCommands = {
       const baseH = region ? region.h : activeFrame.canvas.h;
       const needsResize = exportWidth !== baseW || exportHeight !== baseH;
       const exportFormat = mimeToFormat[config.format] ?? 'unknown';
+      // WYSIWYG: the per-document HDR switch drives BOTH the presentation and
+      // the HDR-container export semantics — OFF means the HDR lanes ship the
+      // white-clamped SDR rendition, never a headroom surprise. Resolved BEFORE
+      // the egest decision: the AVIF container routes onto its HDR PQ lane
+      // (`raw-10`) exactly when this is true, and the same value feeds
+      // `renderForExport` below so decision and pixels cannot disagree.
+      const hdrSemantics = activeFrame.hdrRender === true;
 
       // ═══ The single egest decision (core/files/strategy/egest.ts) ═══════
       // Output gamut + container clamp + encode lane + canvas tag + ICC embed
@@ -72,6 +79,7 @@ export const FrameExportCommands = {
         sourceGamut,
         requestedGamut: config.targetGamut,
         requestedBitDepth: config.exportBitDepth,
+        hdrSemantics,
         embedIccOverride: config.embedIccOverride,
       });
 
@@ -102,10 +110,7 @@ export const FrameExportCommands = {
       // Sunk into `ExportDispatcher`, reached
       // via `pixels.render.renderForExport`. ONE PIPELINE
       // EQUIVALENCE — see `ExportDispatcher.ts`'s doc comment.
-      // WYSIWYG: the per-document HDR switch drives BOTH the presentation
-      // and the HDR-container export semantics — OFF means the HDR lanes ship
-      // the white-clamped SDR rendition, never a headroom surprise.
-      const hdrSemantics = activeFrame.hdrRender === true;
+      // `hdrSemantics` was resolved above, before the egest decision.
 
       // ═══ UltraHDR lane (gain-map JPEG export) ════════════════════════════
       // Trigger (D-c3), resolved HERE so the dispatcher never reads files:

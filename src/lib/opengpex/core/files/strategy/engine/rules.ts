@@ -20,11 +20,17 @@
 /**
  * Complete decision matrix rule table.
  *
- * Rules are declared in priority order (row 1 → row 26), returning the first match via `./matcher.ts`.
- * CMYK (rule 25) is split into two rules with id=25 by bitDepth (8/16) to keep
- * `DecisionAction.dataFormat` statically typed.
- * The HEIC family carries the spec labels `19a`–`19e` (plus the `19-wg`
- * wide-gamut twin) — see the rule ids below for the authoritative semantics.
+ * Rules are declared in priority order, returning the first match via
+ * `./matcher.ts`. Ids use the XY scheme: X = format family (1 BMP 2 GIF
+ * 3 JPEG 4 TIFF 5 PNG 6 WebP 7 AVIF 8 HEIC 9 RAW V vector 0 cross-format
+ * catch-all), Y = variant (grayscale occupies Y=1). CMYK is split into 01/02
+ * by bitDepth (8/16) to keep `DecisionAction.dataFormat` statically typed.
+ * The HEIC family spans ids 81–87 in physical order, pairwise disjoint
+ * (carrier / depth / capability axes — order never decides the winner):
+ * 81/82/85 the gain-map carrier rows (hard decode / no-capability proxy /
+ * ≥10-bit capability-agnostic proxy), 83/84/86 the plain-SDR rows (hard
+ * decode / no-capability downgrade / ≥10-bit proxy), 87 the unknown
+ * (HDR colour tag) terminus.
  *
  * @module core/files/strategy/engine/rules
  */
@@ -32,10 +38,55 @@
 import type { DecisionRule } from './types';
 
 export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
-  // ── 1. JPEG ─────────────────────────────────────────────────────────────
+  // ── 1. BMP / GIF ───────────────────────────────────────────────
   {
-    // 1-gm: gain-map carriers (UltraHDR — a GContainer XMP directory naming a
-    // GainMap item is present). Mirrors the HEIC 19-gm philosophy: the master
+    id: '11',
+    condition: {
+      format: 'bmp',
+      bitDepth: 8,
+      colorSpace: 'srgb',
+    },
+    action: {
+      decodeChannel: 'image-bitmap',
+      trc: 'srgb-trc',
+      applyOrientation: 'none',
+      description: 'BMP forced sRGB passthrough',
+    },
+  },
+  {
+    id: '21',
+    condition: {
+      format: 'gif',
+      bitDepth: 8,
+      colorSpace: 'srgb',
+    },
+    action: {
+      decodeChannel: 'image-bitmap',
+      trc: 'srgb-trc',
+      applyOrientation: 'none',
+      description: 'GIF single-frame static passthrough',
+    },
+  },
+  {
+    id: '22',
+    condition: {
+      format: 'gif',
+      bitDepth: 8,
+      colorSpace: 'srgb',
+      isMultiFrame: true,
+    },
+    action: {
+      decodeChannel: 'gifuct',
+      trc: 'srgb-trc',
+      applyOrientation: 'none',
+      description: 'GIF multi-frame parse frame-by-frame',
+    },
+  },
+
+  // ── 2. JPEG ─────────────────────────────────────────────────────────────
+  {
+    // 31: gain-map carriers (UltraHDR — a GContainer XMP directory naming a
+    // GainMap item is present). Mirrors the HEIC 81 philosophy: the master
     // is the SDR base lifted to LINEAR f16 and the gain map is deliberately
     // NOT applied at ingest — the engine renders both HDR-ON and HDR-OFF from
     // that ONE resident f16 line (a baked master would make OFF the CLAMPED
@@ -47,29 +98,27 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     // ahead of rule 1 — first-match-wins means a carrier must never be
     // captured by the verbatim row, whose retained=false would strand the
     // gain decode with no source file.
-    id: '1-gm',
+    id: '31',
     condition: {
       format: 'jpeg',
       hasGainmap: true,
       bitDepth: 8,
       colorSpace: ['srgb', 'display-p3'],
-      isMultiFrame: false,
     },
     action: {
       decodeChannel: 'jpeg-hdr',
       trc: 'linear',
       dataFormat: 'rgba16float',
       applyOrientation: 'auto',
-      description: 'JPEG gain-map carrier (1-gm) — SDR base lifted to the linear f16 master, source retained',
+      description: 'JPEG gain-map carrier (31) — SDR base lifted to the linear f16 master, source retained',
     },
   },
   {
-    id: 1,
+    id: '32',
     condition: {
       format: 'jpeg',
       bitDepth: 8,
       colorSpace: ['srgb', 'display-p3'],
-      isMultiFrame: false,
     },
     action: {
       decodeChannel: 'image-bitmap',
@@ -79,12 +128,11 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
   {
-    id: 2,
+    id: '33',
     condition: {
       format: 'jpeg',
       bitDepth: 8,
       colorSpace: ['adobe-rgb', 'prophoto-rgb'],
-      isMultiFrame: false,
     },
     action: {
       decodeChannel: 'wide-gamut-8',
@@ -95,14 +143,13 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
 
-  // ── 2. WebP ─────────────────────────────────────────────────────────────
+  // ── 3. WebP ─────────────────────────────────────────────────────────────
   {
-    id: 3,
+    id: '61',
     condition: {
       format: 'webp',
       bitDepth: 8,
       colorSpace: ['srgb', 'display-p3'],
-      isMultiFrame: false,
     },
     action: {
       decodeChannel: 'image-bitmap',
@@ -111,31 +158,44 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
       description: 'WebP 8-bit standard passthrough',
     },
   },
+  // ── 4. PNG ──────────────────────────────────────────────────────────────
   {
-    id: 4,
+    // Grayscale (PNG colour type 0/4): same achromatic fold to sRGB; the
+    // browser replicates the single channel into RGB on decode.
+    id: '51',
     condition: {
-      format: 'webp',
+      format: 'png',
       bitDepth: 8,
-      colorSpace: ['adobe-rgb', 'prophoto-rgb'],
-      isMultiFrame: false,
+      colorSpace: 'grayscale',
     },
     action: {
-      decodeChannel: 'wide-gamut-8',
-      trc: 'linear',
-      dataFormat: 'rgba16float',
-      applyOrientation: 'auto',
-      description: 'WebP 8-bit wide-gamut lift to f16',
+      decodeChannel: 'image-bitmap',
+      trc: 'srgb-trc',
+      applyOrientation: 'explicit',
+      description: 'PNG 8-bit grayscale — sRGB fold, browser channel replication',
     },
   },
-
-  // ── 3. PNG ──────────────────────────────────────────────────────────────
   {
-    id: 5,
+    id: '52',
+    condition: {
+      format: 'png',
+      bitDepth: 16,
+      colorSpace: 'grayscale',
+    },
+    action: {
+      decodeChannel: 'vips',
+      trc: 'srgb-trc',
+      dataFormat: 'rgba16float',
+      applyOrientation: 'explicit',
+      description: 'PNG 16-bit grayscale — vips dual product, source encoding kept',
+    },
+  },
+  {
+    id: '53',
     condition: {
       format: 'png',
       bitDepth: 8,
       colorSpace: ['srgb', 'display-p3'],
-      isMultiFrame: false,
     },
     action: {
       decodeChannel: 'image-bitmap',
@@ -145,12 +205,11 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
   {
-    id: 6,
+    id: '54',
     condition: {
       format: 'png',
       bitDepth: 8,
       colorSpace: ['adobe-rgb', 'prophoto-rgb'],
-      isMultiFrame: false,
     },
     action: {
       decodeChannel: 'wide-gamut-8',
@@ -161,7 +220,7 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
   {
-    id: 7,
+    id: '55',
     condition: {
       format: 'png',
       bitDepth: 16,
@@ -176,7 +235,7 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
   {
-    id: 8,
+    id: '56',
     condition: {
       format: 'png',
       bitDepth: 16,
@@ -191,10 +250,49 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
 
-  // ── 4. TIFF ─────────────────────────────────────────────────────────────
+  // ── 5. TIFF ─────────────────────────────────────────────────────────────
+  // Multi-page TIFF is a SUPPORTED document form (trunk + branch frame
+  // import, importer `frame/importers/multi-tiff.ts`), so every TIFF row
+  // admits multi-frame contexts via an explicit isMultiFrame wildcard —
+  // unlike the animated-sequence formats (WebP/AVIF/HEIC), whose rows omit
+  // the axis and thus exclude multi-frame contexts under value equality.
   {
-    id: 9,
+    // Grayscale (photometric 0/1): achromatic — no primaries exist, the gamut
+    // folds to sRGB (vips interpretation 'b-w' needs no colourspace conversion).
+    id: '41',
     condition: {
+      isMultiFrame: '*',
+      format: 'tiff',
+      bitDepth: 8,
+      colorSpace: 'grayscale',
+    },
+    action: {
+      decodeChannel: 'vips',
+      trc: 'srgb-trc',
+      applyOrientation: 'explicit',
+      description: 'TIFF 8-bit grayscale — vips sRGB fold',
+    },
+  },
+  {
+    id: '42',
+    condition: {
+      isMultiFrame: '*',
+      format: 'tiff',
+      bitDepth: 16,
+      colorSpace: 'grayscale',
+    },
+    action: {
+      decodeChannel: 'vips',
+      trc: 'srgb-trc',
+      dataFormat: 'rgba16float',
+      applyOrientation: 'explicit',
+      description: 'TIFF 16-bit grayscale — vips dual product, source encoding kept',
+    },
+  },
+  {
+    id: '43',
+    condition: {
+      isMultiFrame: '*',
       format: 'tiff',
       bitDepth: 8,
       colorSpace: ['srgb', 'display-p3'],
@@ -207,8 +305,9 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
   {
-    id: 10,
+    id: '44',
     condition: {
+      isMultiFrame: '*',
       format: 'tiff',
       bitDepth: 8,
       colorSpace: ['adobe-rgb', 'prophoto-rgb'],
@@ -222,8 +321,9 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
   {
-    id: 11,
+    id: '45',
     condition: {
+      isMultiFrame: '*',
       format: 'tiff',
       bitDepth: 16,
       colorSpace: ['srgb', 'display-p3'],
@@ -237,8 +337,9 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
   {
-    id: 12,
+    id: '46',
     condition: {
+      isMultiFrame: '*',
       format: 'tiff',
       bitDepth: 16,
       colorSpace: ['adobe-rgb', 'prophoto-rgb'],
@@ -252,8 +353,14 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
   {
-    id: 13,
+    // colorSpace '*' on purpose, and it is NOT a violation of the
+    // "unmappable tag → honest unsupported" policy: 32-bit implies float
+    // samples (sampleFormat float), whose pixel values are already linear —
+    // no colour conversion participates, so there is no tag to mistranslate.
+    // Known accepted exception, not an oversight.
+    id: '47',
     condition: {
+      isMultiFrame: '*',
       format: 'tiff',
       bitDepth: (d) => d >= 32,
       colorSpace: '*',
@@ -267,165 +374,125 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
 
-  // ── 5. Camera RAW ────────────────────────────────────────────────────────
-  {
-    id: 14,
-    condition: {
-      format: 'raw',
-      bitDepth: '*',
-      colorSpace: '*',
-    },
-    action: {
-      decodeChannel: 'libraw',
-      trc: 'linear',
-      dataFormat: 'rgba16float',
-      applyOrientation: 'auto',
-      description: 'Camera RAW native linear restoration',
-    },
-  },
-
-  // ── 6. AVIF (labels 15a/15b/16-wg/18) ──────────────────────────────────
+  // ── 6. AVIF (labels 71/72/73/74/75) ───────────────────────────────
   // >8-bit is no longer clamped (probe: the jsquash/libavif wasm decoder
   // is bit-exact at native depth); high depth routes
   // to the avif-proxy channel and the metadata reports the TRUE depth.
   {
-    // HDR (PQ/HLG) — the wasm high-depth decode probe rewrote the evidence base:
-    // the channel delivers RAW TRANSFER CODE VALUES bit-exactly (maxDev 0 on
-    // lossless identity ramps), so the EOTF is ours to apply. Route to
-    // avif-proxy; decode.ts applies the 203-nit-anchored PQ/HLG EOTF →
-    // scene-linear f16 in the source gamut. The SDR vocabulary rows
-    // below never see these files (first-match order).
-    id: '18-hdr-sdr-vocab',
-    condition: {
-      format: 'avif',
-      bitDepth: '*',
-      colorSpace: ['srgb', 'display-p3'],
-      transfer: ['pq', 'hlg'],
-      isMultiFrame: false,
-    },
-    action: {
-      decodeChannel: 'avif-proxy',
-      trc: 'linear',
-      dataFormat: 'rgba16float',
-      applyOrientation: 'explicit',
-      description: 'AVIF PQ/HLG, sRGB/P3 primaries — wasm decode + own EOTF, scene-linear f16',
-    },
-  },
-  {
-    // Same as above for BT.2020 primaries: no ColorSpaceId member (gap #8), so
-    // the row carries the authoritative gamutOverride ('rec2020' is a GamutId
-    // the render graph already has a matrix for).
-    id: '18-hdr-bt2020',
-    condition: {
-      format: 'avif',
-      bitDepth: '*',
-      colorSpace: 'unknown',
-      transfer: ['pq', 'hlg'],
-      isMultiFrame: false,
-    },
-    action: {
-      decodeChannel: 'avif-proxy',
-      trc: 'linear',
-      dataFormat: 'rgba16float',
-      gamutOverride: 'rec2020',
-      applyOrientation: 'explicit',
-      description: 'AVIF PQ/HLG, BT.2020 primaries — wasm decode + own EOTF, scene-linear f16 (rec2020)',
-    },
-  },
-  {
-    id: 15,
+    id: '71',
     condition: {
       format: 'avif',
       bitDepth: 8,
       colorSpace: ['srgb', 'display-p3'],
-      isMultiFrame: false,
     },
     action: {
       decodeChannel: 'image-bitmap',
       trc: 'srgb-trc',
       applyOrientation: 'explicit',
-      description: 'AVIF 8-bit standard passthrough (15a)',
+      description: 'AVIF 8-bit standard passthrough (71)',
     },
   },
   {
     // High-depth SDR: f16 direct (probe B-variant) — jsquash decodes bit-exact
     // at native depth; the 8-bit display proxy is produced browser-side
     // (createImageBitmap's 10→8 downgrade is faithful, meanDev ≤ 1.4/255).
-    id: '15b',
+    id: '72',
     condition: {
       format: 'avif',
       bitDepth: (d) => d >= 10,
       colorSpace: ['srgb', 'display-p3'],
-      isMultiFrame: false,
     },
     action: {
       decodeChannel: 'avif-proxy',
       trc: 'srgb-trc',
       dataFormat: 'rgba16float',
       applyOrientation: 'explicit',
-      description: 'AVIF ≥10-bit SDR (15b) — avif-proxy f16 direct, metadata reports true depth',
+      description: 'AVIF ≥10-bit SDR (72) — avif-proxy f16 direct, metadata reports true depth',
     },
   },
   {
-    id: 17,
-    condition: {
-      format: 'avif',
-      bitDepth: 8,
-      colorSpace: ['adobe-rgb', 'prophoto-rgb'],
-      isMultiFrame: false,
-    },
-    action: {
-      decodeChannel: 'wide-gamut-8',
-      trc: 'linear',
-      dataFormat: 'rgba16float',
-      applyOrientation: 'explicit',
-      description: 'AVIF 8-bit wide-gamut',
-    },
-  },
-  {
-    // High-depth wide gamut (type-reachable, rarely seen): mirror 19-wg —
-    // proxy + de-gamma to true linear (PNG/TIFF row-8 semantics).
-    id: '16-wg',
+    // SDR BT.2020 (phase D4, gap #8 closure): primaries-9 SDR containers now
+    // report `colorSpace: 'rec2020'` straight from the nclx map. The wasm proxy
+    // delivers raw transfer code values bit-exactly; the BT.709/BT.2020 OETF
+    // (the α/β piecewise curve both standards publish — the TRC the user
+    // adjudicated for SDR BT.2020 in phase D4) is ours to invert onto the
+    // f16-linear line in the source gamut. 8-bit BT.2020 stays below with the
+    // honest fallback (rare container; not probed, not routed here).
+    id: '73',
     condition: {
       format: 'avif',
       bitDepth: (d) => d >= 10,
-      colorSpace: ['adobe-rgb', 'prophoto-rgb'],
-      isMultiFrame: false,
+      colorSpace: 'rec2020',
     },
     action: {
       decodeChannel: 'avif-proxy',
       trc: 'linear',
       dataFormat: 'rgba16float',
       applyOrientation: 'explicit',
-      description: 'AVIF ≥10-bit wide-gamut (16-wg) — avif-proxy, de-gamma to linear f16',
+      description: 'AVIF ≥10-bit SDR BT.2020 (73) — avif-proxy, BT.709 OETF inverse to linear f16 (rec2020)',
     },
   },
   {
-    // Remaining 'unknown'-colourSpace files (SDR BT.2020, ICC-tagged oddities)
-    // and MULTI-FRAME HDR (the HDR rows above are single-frame): honest
-    // unsupported — the browser's own HDR→SDR mapping is uncontrolled
-    // (meanDev ≈ 30/255) and SDR BT.2020 is the gap-#8 orbit. Mirrors HEIC 19d.
-    id: '18',
+    // HDR (PQ/HLG) — the wasm high-depth decode probe rewrote the evidence base:
+    // the channel delivers RAW TRANSFER CODE VALUES bit-exactly (maxDev 0 on
+    // lossless identity ramps), so the EOTF is ours to apply. Route to
+    // avif-proxy; decode.ts applies the 203-nit-anchored PQ/HLG EOTF →
+    // scene-linear f16 in the source gamut. One row for every supported
+    // primaries set (sRGB/P3/BT.2020): the action is identical and the gamut
+    // is derived from the colorSpace id (csToGamut), so a per-primaries split
+    // would be documentation, not semantics (D4 closed gap #8 — the nclx map
+    // reports 'rec2020' directly, no override hatch). A PQ file whose
+    // primaries still report 'unknown' falls to rule 75's honest unsupported,
+    // never a guessed gamut. Disjoint from the SDR rows below purely by the
+    // transfer axis (they declare no transfer), never by row order.
+    id: '74',
+    condition: {
+      format: 'avif',
+      bitDepth: '*',
+      colorSpace: ['srgb', 'display-p3', 'rec2020'],
+      transfer: ['pq', 'hlg'],
+    },
+    action: {
+      decodeChannel: 'avif-proxy',
+      trc: 'linear',
+      dataFormat: 'rgba16float',
+      applyOrientation: 'explicit',
+      description: 'AVIF PQ/HLG — wasm decode + own EOTF, scene-linear f16 in the source gamut',
+    },
+  },
+  {
+    // Remaining 'unknown'-colourSpace files (ICC-tagged oddities, sub-10-bit
+    // BT.2020) and MULTI-FRAME HDR (the HDR rows above are single-frame):
+    // honest unsupported — the browser's own HDR→SDR mapping is uncontrolled
+    // (meanDev ≈ 30/255). SDR BT.2020 ≥10-bit moved UP to 73 (phase D4);
+    // HEIC/MOV-carried BT.2020 stays here (D3-table scope). Mirrors HEIC 86.
+    id: '75',
     condition: {
       format: 'avif',
       bitDepth: '*',
       colorSpace: 'unknown',
+      transfer: '*',
+      isMultiFrame: '*',
     },
     action: {
       decodeChannel: 'unsupported',
       trc: 'srgb-trc',
       applyOrientation: 'explicit',
-      description: 'AVIF PQ/HLG/BT.2020 (18) — HDR tone mapping out of scope, unsupported',
+      description: 'AVIF PQ/HLG multi-frame + odd-tag leftovers (75) — unsupported',
     },
   },
-
-  // ── 7. HEIC (labels 19a–19e) ─────────────────────────────────────────
-  // 19a is capability-gated: the decode entry awaits the one-shot
-  // HEVC capability probe (`handlers/heic/capability.ts`) and injects `hevcHardDecode` into the decision
-  // context. Without the flag (plain calls, tests, no-WebCodecs
-  // runtimes) it defaults to `false` and 19e below owns the downgrade.
+  // ── 7. HEIC (labels 81–87) ─────────────────────────────────────────
+  // Capability axis: `FileService.decode` awaits the one-shot HEVC probe
+  // (`handlers/heic/capability.ts`) and injects `hevcHardDecode: true` ONLY
+  // on admission — the context never carries `false`, so "probe negative"
+  // and "not probed" (plain calls, tests, no-WebCodecs runtimes) are one
+  // state, spelled by OMITTING the condition. Condition vocabulary for the
+  // two boolean axes (hevcHardDecode / hasGainmap) is therefore exactly:
+  // `true` = admit, `'*'` = agnostic, undeclared = absent. Rows are grouped
+  // 8-bit first; every row is pairwise disjoint (carrier / depth /
+  // capability axes), so this order is presentation, never correctness.
   {
-    // 19-gm / 19-gm-proxy: gain-map carriers (an `hdrgainmap` auxiliary image
+    // 81 / 82 / 85: gain-map carriers (an `hdrgainmap` auxiliary image
     // is present). The SDR base is lifted to the LINEAR f16 master — and the
     // gain map is deliberately NOT applied at ingest. The engine renders both
     // HDR-ON and HDR-OFF from the ONE resident f16 line (the presentation
@@ -436,17 +503,14 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     // application lives at the view pass (engine/color/gainMap.ts holds the
     // math); the linear f16 identity here is the precision-ready master that
     // application samples. Main decode follows the SAME capability gate as
-    // 19a (fail-fast preserved). ORDER: ahead of 19a/19e — first-match-wins
-    // means a gain-map file must never be captured by the plain rows, whose
-    // srgb-trc 8-bit master would strand the presentation slice; 19d still
-    // owns PQ/HLG (unknown colour tag) for carriers and non-carriers alike.
-    id: '19-gm',
+    // 85 (fail-fast preserved); 87 still owns PQ/HLG (unknown colour tag) for
+    // carriers and non-carriers alike.
+    id: '81',
     condition: {
       format: 'heic',
       hasGainmap: true,
       bitDepth: 8,
       colorSpace: ['srgb', 'display-p3'],
-      isMultiFrame: false,
       hevcHardDecode: true,
     },
     action: {
@@ -454,186 +518,152 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
       trc: 'linear',
       dataFormat: 'rgba16float',
       applyOrientation: 'auto',
-      description: 'HEIC gain-map 8-bit (19-gm) — hard decode, SDR base lifted to the linear f16 master',
+      description: 'HEIC gain-map 8-bit (81) — hard decode, SDR base lifted to the linear f16 master',
     },
   },
   {
-    // Proxy twin of 19-gm: capability absent (or any depth) — same linear f16
-    // SDR-base master, proxy main decode. bitDepth '*' on purpose: a gain-map
+    // 8-bit carrier WITHOUT capability: same linear-f16 SDR-base master via
+    // the proxy. No hevcHardDecode declaration on purpose: under value
+    // equality an undeclared condition matches only the capability-less
+    // context — disjoint from 81 (true) by the capability axis and from 85
+    // by depth.
+    id: '82',
+    condition: {
+      format: 'heic',
+      bitDepth: 8,
+      colorSpace: ['srgb', 'display-p3'],
+      hasGainmap: true,
+    },
+    action: {
+      decodeChannel: 'libheif-proxy',
+      trc: 'linear',
+      dataFormat: 'rgba16float',
+      applyOrientation: 'auto',
+      description: 'HEIC 8-bit gain-map carrier without capability (82) — proxy, linear f16 SDR-base master',
+    },
+  },
+  {
+    // 8-bit SDR non-carrier WITH capability: 8-bit masters stay 8-bit (no f16
+    // lift needed — there is no gain map whose application needs headroom), so
+    // the srgb-trc 8-bit master is both cheapest and faithful. Disjoint from
+    // 81/82 by the carrier axis (undeclared hasGainmap = non-carrier) and
+    // from 86 by depth.
+    id: '83',
+    condition: {
+      format: 'heic',
+      bitDepth: 8,
+      colorSpace: ['srgb', 'display-p3'],
+      hevcHardDecode: true,
+    },
+    action: {
+      decodeChannel: 'webcodecs-heic',
+      trc: 'srgb-trc',
+      applyOrientation: 'auto',
+      description: 'HEIC 8-bit SDR with hard decode (83) — webcodecs main decode, 8-bit srgb-trc master',
+    },
+  },
+  {
+    // The declarative proxy downgrade: NON-CARRIERS the 84 gate does not
+    // admit. Both boolean axes stay undeclared on purpose: no hasGainmap =
+    // non-carrier, no hevcHardDecode = capability-less (probe negative or
+    // not probed) — pairwise disjoint from every other HEIC row, zero
+    // row-order dependence.
+    id: '84',
+    condition: {
+      format: 'heic',
+      bitDepth: 8,
+      colorSpace: ['srgb', 'display-p3'],
+    },
+    action: {
+      decodeChannel: 'libheif-proxy',
+      trc: 'srgb-trc',
+      applyOrientation: 'auto',
+      description: 'HEIC 8-bit without HEVC hardware decode (84) — declarative proxy downgrade',
+    },
+  },
+  {
+    // Proxy twin of 81 at high depth: capability-agnostic (hevcHardDecode
+    // '*' — the proxy main decode runs with or without hard-decode support)
+    // — same linear f16 SDR-base master. bitDepth '*' on purpose: a gain-map
     // carrier is its own precision story (the map rides the file verbatim at
     // any base depth), and the proxy delivers 8-bit pixels regardless.
-    id: '19-gm-proxy',
+    id: '85',
     condition: {
       format: 'heic',
-      hasGainmap: true,
-      bitDepth: '*',
+      bitDepth: (d) => d >= 10,
       colorSpace: ['srgb', 'display-p3'],
-      isMultiFrame: false,
+      hasGainmap: true,
+      hevcHardDecode: '*',
     },
     action: {
       decodeChannel: 'libheif-proxy',
       trc: 'linear',
       dataFormat: 'rgba16float',
       applyOrientation: 'auto',
-      description: 'HEIC gain-map carrier (19-gm-proxy) — proxy decode, SDR base lifted to the linear f16 master',
+      description: 'HEIC ≥10-bit gain-map carrier (85) — proxy decode, SDR base lifted to the linear f16 master',
     },
   },
   {
-    id: '19a',
+    // ≥10-bit SDR delivers as 8-bit (no faithful webcodecs CPU path at any
+    // high depth; probe-verified) — one row, not per-depth splits: the action
+    // is identical for 10/12/14-bit, so the split would be documentation, not
+    // semantics. The metadata reports the TRUE depth; only the ROUTE
+    // degrades, and the loss is declared, never silent.
+    id: '86',
     condition: {
       format: 'heic',
-      bitDepth: 8,
+      bitDepth: (d) => d >= 10,
       colorSpace: ['srgb', 'display-p3'],
-      isMultiFrame: false,
-      hevcHardDecode: true,
-    },
-    action: {
-      decodeChannel: 'webcodecs-heic',
-      trc: 'srgb-trc',
-      applyOrientation: 'auto', // worker output is uprighted during composition (irot/imir + EXIF)
-      description: 'HEIC 8-bit SDR (19a) — WebCodecs hardware decode, capability-gated',
-    },
-  },
-  {
-    // 10-bit delivers as 8-bit (no faithful webcodecs CPU path; probe-verified),
-    // but the metadata reports the TRUE depth so 19b/19c are distinguishable
-    // and the precision loss is declared, never silent.
-    id: '19b',
-    condition: {
-      format: 'heic',
-      bitDepth: 10,
-      colorSpace: ['srgb', 'display-p3'],
-      isMultiFrame: false,
+      hevcHardDecode: '*',
     },
     action: {
       decodeChannel: 'libheif-proxy',
       trc: 'srgb-trc',
       applyOrientation: 'auto',
-      description: 'HEIC 10-bit SDR (19b) — proxy delivers 8-bit, metadata reports 10',
+      description: 'HEIC ≥10-bit SDR (86) — proxy delivers 8-bit, metadata reports the true depth',
     },
   },
   {
-    id: '19c',
-    condition: {
-      format: 'heic',
-      bitDepth: (d) => d >= 12,
-      colorSpace: ['srgb', 'display-p3'],
-      isMultiFrame: false,
-    },
-    action: {
-      decodeChannel: 'libheif-proxy',
-      trc: 'srgb-trc',
-      applyOrientation: 'auto',
-      description: 'HEIC ≥12-bit (19c) — proxy delivers 8-bit, metadata reports the true depth',
-    },
-  },
-  {
-    // PQ / HLG / BT.2020 resolve to colorSpace 'unknown' (nclxToColorSpace /
-    // inferColorSpaceFromIcc): no tone mapping exists, and a wrong mapping is
+    // Family terminus, id-last by convention (mirrors the 00 catch-all): PQ /
+    // HLG / BT.2020 resolve to colorSpace 'unknown' (nclxToColorSpace /
+    // inferColorSpaceFromIcc). No tone mapping exists, and a wrong mapping is
     // worse than an honest error — so route unsupported rather than proxy.
     // No isMultiFrame condition: a multi-frame HDR file is equally unsupported.
-    id: '19d',
+    id: '87',
     condition: {
       format: 'heic',
       bitDepth: '*',
       colorSpace: 'unknown',
+      transfer: '*',
+      isMultiFrame: '*',
+      hevcHardDecode: '*',
     },
     action: {
       decodeChannel: 'unsupported',
       trc: 'srgb-trc',
       applyOrientation: 'explicit',
-      description: 'HEIC PQ/HLG/BT.2020 (19d) — HDR tone mapping out of scope, unsupported',
+      description: 'HEIC PQ/HLG/BT.2020 (87) — HDR tone mapping out of scope, unsupported',
     },
   },
+  // ── 8. Camera RAW ────────────────────────────────────────────────────────
   {
-    // 19e: the declarative proxy downgrade — reachable whenever 19a's
-    // capability gate does not admit the file (no WebCodecs, probe negative,
-    // or plain decision calls where the flag defaults to false).
-    id: '19e',
+    id: '91',
     condition: {
-      format: 'heic',
-      bitDepth: 8,
-      colorSpace: ['srgb', 'display-p3'],
-      isMultiFrame: false,
+      format: 'raw',
+      bitDepth: '*',
+      colorSpace: '*',
+      transfer: '*',
     },
     action: {
-      decodeChannel: 'libheif-proxy',
-      trc: 'srgb-trc',
-      applyOrientation: 'auto',
-      description: 'HEIC 8-bit without HEVC hardware decode (19e) — declarative proxy downgrade',
-    },
-  },
-  {
-    // Wide-gamut twin of 19a/19b/19c — adobe-rgb/prophoto twins take the same
-    // wide-gamut lane as one row:
-    // any depth ≥8 routes to the proxy, and the STANDING wide-gamut composition
-    // applies (linear TRC + f16 container, mirroring jpeg/webp/png rows 2/4/6).
-    // `adobe-rgb`/`prophoto-rgb` HEIC sources are type-reachable but unseen in
-    // practice; the depth split needs no separate rows because the proxy
-    // delivers 8-bit pixels and the f16 lift is uniform on the wide branch.
-    id: '19-wg',
-    condition: {
-      format: 'heic',
-      bitDepth: (d) => d >= 8,
-      colorSpace: ['adobe-rgb', 'prophoto-rgb'],
-      isMultiFrame: false,
-    },
-    action: {
-      decodeChannel: 'libheif-proxy',
+      decodeChannel: 'libraw',
       trc: 'linear',
       dataFormat: 'rgba16float',
       applyOrientation: 'auto',
-      description: 'HEIC wide-gamut (19-wg) — proxy + standing wide-gamut composition',
-    },
-  },
-
-  // ── 8. BMP / GIF / Vector ───────────────────────────────────────────────
-  {
-    id: 21,
-    condition: {
-      format: 'bmp',
-      bitDepth: 8,
-      colorSpace: 'srgb',
-    },
-    action: {
-      decodeChannel: 'image-bitmap',
-      trc: 'srgb-trc',
-      applyOrientation: 'none',
-      description: 'BMP forced sRGB passthrough',
+      description: 'Camera RAW native linear restoration',
     },
   },
   {
-    id: 22,
-    condition: {
-      format: 'gif',
-      bitDepth: 8,
-      colorSpace: 'srgb',
-      isMultiFrame: false,
-    },
-    action: {
-      decodeChannel: 'image-bitmap',
-      trc: 'srgb-trc',
-      applyOrientation: 'none',
-      description: 'GIF single-frame static passthrough',
-    },
-  },
-  {
-    id: 23,
-    condition: {
-      format: 'gif',
-      bitDepth: 8,
-      colorSpace: 'srgb',
-      isMultiFrame: true,
-    },
-    action: {
-      decodeChannel: 'gifuct',
-      trc: 'srgb-trc',
-      applyOrientation: 'none',
-      description: 'GIF multi-frame parse frame-by-frame',
-    },
-  },
-  {
-    id: 24,
+    id: 'V1',
     condition: {
       format: ['svg', 'eps'],
       bitDepth: '*',
@@ -647,12 +677,17 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
 
-  // ── 9. Special color modes (CMYK & unrecognized) ──────────────────────────
+  // ── 9. Vector ─────────────────────────────────────────────────────────────
+  // The vector proxy sits after the raster/RAW families by convention (it is
+  // format-disjoint from every row above; position is presentation only).
+
+  // ── 10. Special color modes (CMYK & unrecognized) ──────────────────────────
   // CMYK is split into two rules with id=25 by bitDepth (8-bit / 16-bit) to
   // keep `dataFormat` statically typed:
   {
-    id: 25,
+    id: '01',
     condition: {
+      isMultiFrame: '*',
       format: '*',
       bitDepth: 8,
       colorSpace: 'cmyk',
@@ -665,8 +700,9 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
   {
-    id: 25,
+    id: '02',
     condition: {
+      isMultiFrame: '*',
       format: '*',
       bitDepth: 16,
       colorSpace: 'cmyk',
@@ -682,12 +718,15 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
 
   // ── 10. Fallback terminus (Unsupported) ──────────────────────────────────
   {
-    id: 26,
+    id: '00',
     condition: {
       format: '*',
       bitDepth: '*',
       colorSpace: '*',
       isMultiFrame: '*',
+      transfer: '*',
+      hasGainmap: '*',
+      hevcHardDecode: '*',
     },
     action: {
       decodeChannel: 'unsupported',

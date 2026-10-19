@@ -50,8 +50,16 @@
 import type { SourceFormat } from '../../../types';
 import type { GamutId } from '@opengpex/editor/core/types';
 
-/** The physical encode lane the pixels travel. */
-export type EgestChannel = 'canvas-8' | 'raw-8' | 'raw-16' | 'exr-half';
+/**
+ * The physical encode lane the pixels travel.
+ *
+ * `'raw-10'` is the HDR AVIF terminal lane: 10-bit PQ (ST 2084) code values in
+ * the BT.2020 primaries, packed as `Uint16Array` (0..1023) and handed straight
+ * to the @jsquash encoder — no canvas hop, same naked-buffer shape as the other
+ * raw lanes. It exists only for `avif` documents exported with the HDR switch
+ * ON (`egest.ts` routes nothing else onto it).
+ */
+export type EgestChannel = 'canvas-8' | 'raw-8' | 'raw-10' | 'raw-16' | 'exr-half';
 
 /**
  * The objective, per-container EXPORT capability facts — ICC, channel and gamut
@@ -67,7 +75,7 @@ export interface FormatEgestCapability {
   /** Which physical encode lane(s) this container's own encoder can accept. */
   readonly supportedChannels: readonly EgestChannel[];
   /** The widest bit depth the container's encoder can write. */
-  readonly maxBitDepth: 8 | 16;
+  readonly maxBitDepth: 8 | 10 | 16;
   /** Every gamut the container can hold without corrupting/reinterpreting pixels. */
   readonly supportedGamuts: readonly GamutId[];
   /** Whether the container has a place to put an ICC profile at all. */
@@ -76,15 +84,23 @@ export interface FormatEgestCapability {
 
 export const FORMAT_EGEST_CAPABILITIES: Record<SourceFormat, FormatEgestCapability> = {
   // ─── Full-channel professional containers: canvas-8, raw-8 AND raw-16 ───
-  png:  { supportedChannels: ['canvas-8', 'raw-8', 'raw-16'], maxBitDepth: 16, supportedGamuts: ['srgb', 'display-p3', 'adobe-rgb', 'prophoto-rgb'], supportsIccEmbed: true },
-  tiff: { supportedChannels: ['canvas-8', 'raw-8', 'raw-16'], maxBitDepth: 16, supportedGamuts: ['srgb', 'display-p3', 'adobe-rgb', 'prophoto-rgb'], supportsIccEmbed: true },
+  // rec2020 (D4) rides the raw lanes: the pixels carry the BT.709/BT.2020 OETF
+  // and there is NO stock ICC profile for BT.2020 — `embedIcc` must stay false
+  // for a rec2020 target (the egest solver and handlers enforce this; the raw
+  // container tags the gamut by its own metadata instead of a profile).
+  png:  { supportedChannels: ['canvas-8', 'raw-8', 'raw-16'], maxBitDepth: 16, supportedGamuts: ['srgb', 'display-p3', 'adobe-rgb', 'prophoto-rgb', 'rec2020'], supportsIccEmbed: true },
+  tiff: { supportedChannels: ['canvas-8', 'raw-8', 'raw-16'], maxBitDepth: 16, supportedGamuts: ['srgb', 'display-p3', 'adobe-rgb', 'prophoto-rgb', 'rec2020'], supportsIccEmbed: true },
 
   // ─── Canvas-first containers: depend on the browser / MozJPEG encoder ───
   jpeg: { supportedChannels: ['canvas-8'], maxBitDepth: 8, supportedGamuts: ['srgb', 'display-p3'], supportsIccEmbed: true },
   webp: { supportedChannels: ['canvas-8'], maxBitDepth: 8, supportedGamuts: ['srgb', 'display-p3'], supportsIccEmbed: true },
   // jsquash's AVIF encoder has no ICC-embed API — unlike jpeg/webp/tiff/png,
   // `supportsIccEmbed` is a real physical `false` here, not just "off by default".
-  avif: { supportedChannels: ['canvas-8'], maxBitDepth: 8, supportedGamuts: ['srgb', 'display-p3'], supportsIccEmbed: false },
+  // `raw-10` is the HDR lane (10-bit PQ / BT.2020), reached only when the export
+  // command resolves with the document's HDR switch ON — see `egest.ts`. The SDR
+  // gamut envelope (`supportedGamuts`) deliberately stays 8-bit-only: a plain SDR
+  // AVIF export must never resolve to rec2020.
+  avif: { supportedChannels: ['canvas-8', 'raw-10'], maxBitDepth: 10, supportedGamuts: ['srgb', 'display-p3'], supportsIccEmbed: false },
 
   // ─── Legacy containers fixed to sRGB (no ICC, no wide gamut at all) ───
   bmp:  { supportedChannels: ['canvas-8'], maxBitDepth: 8, supportedGamuts: ['srgb'], supportsIccEmbed: false },

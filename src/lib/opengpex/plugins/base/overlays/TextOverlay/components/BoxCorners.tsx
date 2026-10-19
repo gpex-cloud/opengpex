@@ -30,7 +30,7 @@ import React from "react";
  * - Screen-invariant: Counter-scaled against parent matrix zoom, keeping physical screen size
  *   and stroke width constant regardless of canvas camera zoom (matching TransformGizmo).
  */
-const CORNER_ARM_PX = 10;
+const CORNER_ARM_PX = 5;
 
 export interface BoxCornersProps {
   /** Box width in canvas pixels (backwards-compat) */

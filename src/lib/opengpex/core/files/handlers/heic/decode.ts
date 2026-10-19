@@ -26,7 +26,7 @@
  *     propagates — the decision-time capability probe already admitted this
  *     route, so a failure means probe/decoder disagreement, never a silent
  *     proxy fallback.
- *   - `'libheif-proxy'` (19b/19c/19e/19-wg): heic-worker libheif decode → same
+ *   - `'libheif-proxy'` (19b/19c/19e/19-gm-proxy): heic-worker libheif decode → same
  *     proxy tail. 10/12-bit sources deliver 8-bit while the metadata reports
  *     the TRUE depth.
  *

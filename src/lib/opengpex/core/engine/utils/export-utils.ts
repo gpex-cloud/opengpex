@@ -51,9 +51,11 @@
  * @module core/engine/utils/export-utils
  */
 
-import { linearToSrgb, linearToGamma } from '@opengpex/editor/core/engine/color/trc';
+import { linearToSrgb, linearToGamma, linearToRec2020 } from '@opengpex/editor/core/engine/color/trc';
 import { floatToHalf } from '@opengpex/editor/core/engine/color/float16';
 import { getConversionMatrix } from '@opengpex/editor/core/engine/color/matrices';
+import { deriveMatrix64, WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
+import { sceneLinearToPq } from '@opengpex/editor/core/engine/color/hdrTransfer';
 import type { WorkingColorSpace, GamutId } from '@opengpex/editor/core/types';
 
 /**
@@ -364,16 +366,15 @@ export function unpremultiplyEncodeGamutF32(
 
   const { sourceGamut, targetGamut } = opts;
 
-  // rec2020 has no conversion matrix and is not a WorkingColorSpace — guard so
-  // getConversionMatrix stays well-typed and a mis-route fails loudly (mirrors
-  // unpremultiplyEncodeGamut).
-  if (targetGamut === 'rec2020') {
-    throw new Error('[exportEncode] rec2020 target gamut has no conversion matrix');
-  }
-  const target: WorkingColorSpace = targetGamut;
+  // rec2020 is a first-class SDR target since D4: f64 primaries derivation for
+  // the matrix, BT.709/BT.2020 OETF for the TRC (mirrors unpremultiplyEncodeGamut).
+  const isRec2020Target = targetGamut === 'rec2020';
+  const target: WorkingColorSpace = isRec2020Target ? 'prophoto-rgb' : targetGamut;
 
   // IDENTITY when source === target (the regression-safe default path).
-  const matrix = getConversionMatrix(sourceGamut, target);
+  const matrix = isRec2020Target
+    ? new Float32Array(deriveMatrix64(sourceGamut, 'rec2020'))
+    : getConversionMatrix(sourceGamut, target);
   if (!matrix) {
     throw new Error(`[exportEncode] no conversion matrix for ${sourceGamut}→${target}`);
   }
@@ -383,7 +384,9 @@ export function unpremultiplyEncodeGamutF32(
 
   // Per-target encode TRC — identical selection to unpremultiplyEncodeGamut.
   const encode: (c: number) => number =
-    target === 'adobe-rgb'
+    isRec2020Target
+      ? linearToRec2020
+      : target === 'adobe-rgb'
       ? (c) => linearToGamma(c, 1 / 2.2)
       : target === 'prophoto-rgb'
         ? (c) => linearToGamma(c, 1 / 1.8)
@@ -502,16 +505,19 @@ export function unpremultiplyEncodeGamut(
 
   const { sourceGamut, targetGamut, bitDepth } = opts;
 
-  // rec2020 has no conversion matrix and is not a WorkingColorSpace — commands.ts
-  // routing never produces it as a target. Guard so getConversionMatrix stays
-  // well-typed and any future mis-route fails loudly instead of silently wrong.
-  if (targetGamut === 'rec2020') {
-    throw new Error('[exportEncode] rec2020 target gamut has no conversion matrix');
-  }
-  const target: WorkingColorSpace = targetGamut;
+  // rec2020 is a first-class SDR target since D4 (gap #8 closed): same matrix
+  // + TRC + quantize contract as the working spaces, with the BT.709/BT.2020
+  // OETF as the encode curve (the user-adjudicated SDR transfer). The matrix
+  // comes from the f64 primaries derivation — `getConversionMatrix`'s registry
+  // only covers the four WorkingColorSpaces. Any OTHER mis-route still fails
+  // loudly below.
+  const isRec2020Target = targetGamut === 'rec2020';
+  const target: WorkingColorSpace = isRec2020Target ? 'prophoto-rgb' : targetGamut;
 
   // IDENTITY when source === target (the regression-safe default path).
-  const matrix = getConversionMatrix(sourceGamut, target);
+  const matrix = isRec2020Target
+    ? new Float32Array(deriveMatrix64(sourceGamut, 'rec2020'))
+    : getConversionMatrix(sourceGamut, target);
   if (!matrix) {
     // Defensive: every {srgb,display-p3}→{4 working spaces} pair exists in the
     // registry, so this is unreachable in practice — treat as passthrough.
@@ -523,11 +529,13 @@ export function unpremultiplyEncodeGamut(
 
   // Per-target encode TRC (agrees with the stock ICC `curv` gamma).
   const encode: (c: number) => number =
-    target === 'adobe-rgb'
-      ? (c) => linearToGamma(c, 1 / 2.2)
-      : target === 'prophoto-rgb'
-        ? (c) => linearToGamma(c, 1 / 1.8)
-        : linearToSrgb; // srgb & display-p3
+    isRec2020Target
+      ? linearToRec2020 // BT.709/BT.2020 OETF (D4: the SDR BT.2020 transfer)
+      : target === 'adobe-rgb'
+        ? (c) => linearToGamma(c, 1 / 2.2)
+        : target === 'prophoto-rgb'
+          ? (c) => linearToGamma(c, 1 / 1.8)
+          : linearToSrgb; // srgb & display-p3
 
   const bits8 = bitDepth === 8;
   const out: Uint8ClampedArray | Uint16Array = bits8
@@ -606,6 +614,102 @@ export function unpremultiplyLinearF32(
     out[i + 1] = linearPremul[i + 1] / a;
     out[i + 2] = linearPremul[i + 2] / a;
     out[i + 3] = clamp01(a);
+  }
+  return out;
+}
+
+/**
+ * The cached working-space → BT.2020 row-major matrix, derived once per session.
+ * This lane deliberately does NOT go through `getConversionMatrix`: that helper
+ * clamps its output to [0,1], which would destroy the scene-referred headroom
+ * (linear values > 1) a PQ container exists to carry. Here negative channel
+ * results are floored at 0 (negative linear light is unphysical) but values
+ * above 1 pass through untouched — `sceneLinearToPq` maps the whole non-negative
+ * domain into [0,1] code space (1.0 scene-linear = 203 cd/m², PQ range extends
+ * to 10000), so the headroom survives into the code values.
+ */
+let pqWorkingToRec2020: number[] | null = null;
+function workingToRec2020Matrix(): number[] {
+  if (!pqWorkingToRec2020) pqWorkingToRec2020 = deriveMatrix64(WORKING_GAMUT, 'rec2020');
+  return pqWorkingToRec2020;
+}
+
+/**
+ * HDR AVIF terminal encode (the `'raw-10'` egest lane) — turns the premultiplied
+ * LINEAR working-gamut readback into straight, BT.2020-primary, PQ-encoded
+ * 10-bit RGBA (`Uint16Array`, code values 0..1023).
+ *
+ * Per texel (float domain, in strict order, BEFORE quantization):
+ *   1. un-premultiply — `straight = rgb / a` (`a <= 0` → zeroed pixel), NO clamp,
+ *      identical to the sibling `unpremultiplyEncodeGamut`.
+ *   2. gamut matrix in linear light — the cached f64 working→BT.2020 derivation;
+ *      negative results floored at 0, headroom (> 1) preserved (see the matrix
+ *      note above).
+ *   3. PQ transfer — `sceneLinearToPq` (ST 2084 around the 203-nit scene-linear
+ *      anchor from `core/engine/color/hdrTransfer.ts`), output already in [0,1].
+ *   4. quantize — `Math.round(× 1023)` into `Uint16Array`; alpha is coverage, NOT
+ *      light: `clamp01(a) × 1023`, NO matrix, NO PQ.
+ *
+ * `NaN` anywhere funnels to 0, matching the sibling lanes' NaN discipline.
+ *
+ * @param linearPremul - Float32Array of length `width*height*4`, premultiplied
+ *                       linear-light RGBA in the working (`WORKING_GAMUT`) space.
+ * @returns Uint16Array of straight BT.2020/PQ 10-bit RGBA, same pixel count.
+ */
+export function unpremultiplyEncodePq10(
+  linearPremul: Float32Array,
+  width: number,
+  height: number,
+): Uint16Array {
+  const expected = width * height * 4;
+  if (linearPremul.length < expected) {
+    throw new Error(
+      `[exportEncode] buffer too small: got ${linearPremul.length}, need ${expected} (${width}×${height} RGBA)`,
+    );
+  }
+
+  const [m0, m1, m2, m3, m4, m5, m6, m7, m8] = workingToRec2020Matrix();
+  const out = new Uint16Array(expected);
+
+  for (let i = 0; i < expected; i += 4) {
+    const a = linearPremul[i + 3];
+
+    if (a <= 0) {
+      // Fully transparent — emit zeroed pixel (matches the sibling a<=0 branch).
+      out[i] = 0;
+      out[i + 1] = 0;
+      out[i + 2] = 0;
+      out[i + 3] = 0;
+      continue;
+    }
+
+    // 1. Un-premultiply to straight linear (NO clamp — preserve headroom).
+    const invA = 1 / a;
+    const lr = linearPremul[i] * invA;
+    const lg = linearPremul[i + 1] * invA;
+    const lb = linearPremul[i + 2] * invA;
+
+    // 2. Gamut matrix in linear light — floor at 0, keep > 1 (headroom).
+    let r = m0 * lr + m1 * lg + m2 * lb;
+    let g = m3 * lr + m4 * lg + m5 * lb;
+    let b = m6 * lr + m7 * lg + m8 * lb;
+    r = r > 0 ? r : 0;
+    g = g > 0 ? g : 0;
+    b = b > 0 ? b : 0;
+
+    // 3. PQ transfer (output already normalized to [0,1]; NaN → 0).
+    r = sceneLinearToPq(r);
+    g = sceneLinearToPq(g);
+    b = sceneLinearToPq(b);
+    if (!Number.isFinite(r)) r = 0;
+    if (!Number.isFinite(g)) g = 0;
+    if (!Number.isFinite(b)) b = 0;
+
+    // 4. 10-bit quantize; alpha is coverage, no transfer curve.
+    out[i] = Math.round(r * 1023);
+    out[i + 1] = Math.round(g * 1023);
+    out[i + 2] = Math.round(b * 1023);
+    out[i + 3] = Math.round(clamp01(a) * 1023);
   }
   return out;
 }

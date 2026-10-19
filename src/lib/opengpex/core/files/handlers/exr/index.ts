@@ -43,7 +43,7 @@ import type {
 import type { ImageMetadata } from '../../types';
 import type { IngestDecision } from '../../strategy';
 import { isRawPixelSource } from '../../types';
-import { encodeExrHalf } from './encode';
+import { encodeExrHalf, encodeExrHalfZip } from './encode';
 
 export class ExrHandler implements ImageFormatHandler {
   readonly format = 'exr';
@@ -76,7 +76,12 @@ export class ExrHandler implements ImageFormatHandler {
     }
     const gamut = (options.exportConfig?.targetGamut as string | undefined)
       ?? (source.colorSpace as string | undefined);
-    const bytes = encodeExrHalf(source.data, source.width, source.height, gamut);
+    // ZIP (per-scanline predictor + zlib) is the default lane; the
+    // uncompressed writer stays reachable for byte-comparison diagnostics.
+    const compression = (options.exportConfig?.exrCompression as string | undefined) ?? 'zip';
+    const bytes = compression === 'none'
+      ? encodeExrHalf(source.data, source.width, source.height, gamut)
+      : await encodeExrHalfZip(source.data, source.width, source.height, gamut);
     return new Blob([bytes as BlobPart], { type: 'image/x-exr' });
   }
 }

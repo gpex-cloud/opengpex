@@ -102,6 +102,13 @@ export interface EgestRequest {
   readonly requestedGamut?: GamutId;
   /** Explicit user depth request (`config.exportBitDepth`). Omitted ⇒ 8. */
   readonly requestedBitDepth?: 8 | 16;
+  /**
+   * The document's HDR presentation switch (`activeFrame.hdrRender === true`),
+   * resolved by the caller BEFORE this decision. `true` on the `avif` container
+   * routes onto the HDR PQ lane (`'raw-10'` / rec2020 / 10-bit) — see the early
+   * rule in `resolveEgestDecision`. Omitted or `false` ⇒ the generic SDR solve.
+   */
+  readonly hdrSemantics?: boolean;
   /** ICC embed toggle. Omitted ⇒ the format's default (embed when supported). */
   readonly embedIccOverride?: boolean;
 }
@@ -126,8 +133,8 @@ export interface EgestDecision {
    *    down to the handlers.
    */
   readonly targetGamut: GamutId;
-  /** 4. Terminal encode quantization (8 → `Uint8*Array`, 16 → `Uint16Array`). */
-  readonly bitDepth: 8 | 16;
+  /** 4. Terminal encode quantization (8 → `Uint8*Array`, 10/16 → `Uint16Array`). */
+  readonly bitDepth: 8 | 10 | 16;
   /** 5. Physical encode lane (see {@link EgestChannel}). */
   readonly channel: EgestChannel;
   /**
@@ -178,7 +185,7 @@ export function resolveEmbedIcc(format: SourceFormat, userOverride?: boolean): b
  * one-way constraint solve:
  *
  *   1. Pre-process: validate the format has an encode lane; normalize intent
- *      (`rec2020` has no matrix/stock ICC → safely downgrades to `WORKING_GAMUT`).
+ *      (`rec2020` rides the raw lanes since D4 — no downgrade).
  *   2. Gamut convergence: the container's `supportedGamuts` is the SOLE
  *      judge. Intent that the container can hold survives; otherwise fall back to
  *      `WORKING_GAMUT`, else the widest canvas-representable gamut
@@ -202,8 +209,31 @@ export function resolveEgestDecision(request: EgestRequest): EgestDecision {
     sourceGamut: requestSourceGamut,
     requestedGamut: explicitGamut,
     requestedBitDepth,
+    hdrSemantics,
     embedIccOverride,
   } = request;
+
+  // 0. HDR AVIF early rule — resolved BEFORE the generic solve, because the
+  //    container's static `supportedGamuts` describes its SDR envelope and must
+  //    not grow a rec2020 entry that a plain SDR AVIF export could then pick up.
+  //    With the document's HDR switch ON, an AVIF file is a legitimate BT.2020
+  //    consumer: PQ transfer (anchored by hdrTransfer's 203-nit scene-linear
+  //    reference) + 10-bit code values + an nclx CICP 9/16/9 marker patched in
+  //    post-encode. The requested depth/user gamut do not reach this lane (same
+  //    as EXR, whose container IS the truth). hdrSemantics anything-but-true
+  //    falls through to the generic SDR solve — OFF ships the SDR rendition.
+  if (format === 'avif' && hdrSemantics === true) {
+    return {
+      sourceGamut: requestSourceGamut ?? 'srgb',
+      requestedGamut: explicitGamut ?? (requestSourceGamut ?? 'srgb'),
+      targetGamut: 'rec2020',
+      bitDepth: 10,
+      channel: 'raw-10',
+      canvasColorSpace: toCanvasColorSpace('srgb'),
+      embedIcc: false,
+      gamutPassThroughEligible: (explicitGamut ?? (requestSourceGamut ?? 'srgb')) === (requestSourceGamut ?? 'srgb'),
+    };
+  }
 
   // 1. Pre-process: capability lookup + intent normalization.
   const cap = lookupCapability(format);
@@ -213,8 +243,10 @@ export function resolveEgestDecision(request: EgestRequest): EgestDecision {
 
   const sourceGamut: GamutId = requestSourceGamut ?? 'srgb';
   const requestedGamut: GamutId = explicitGamut ?? sourceGamut;
-  // rec2020 has no conversion matrix and no stock ICC — painless downgrade to WORKING.
-  const emittableIntent: GamutId = requestedGamut === 'rec2020' ? WORKING_GAMUT : requestedGamut;
+  // rec2020 is a first-class intent since D4 (gap #8 closed): the matrix exists
+  // (shader `case 4u`), the SDR terminal encode carries the BT.709/BT.2020 OETF,
+  // and the raw lanes can hold it. No downgrade — the HDR AVIF lane above owns
+  // the PQ form of the same primaries.
 
   // 2. Gamut convergence. Container capability is the only judge. The fallback
   //    ladder mirrors the ImageInfoDrawer default suggestion: the working gamut
@@ -223,6 +255,7 @@ export function resolveEgestDecision(request: EgestRequest): EgestDecision {
   //    'srgb'. The middle tier keeps the solver and the UI panel from disagreeing
   //    when WORKING_GAMUT itself has no canvas form (ProPhoto) and the user
   //    never made an explicit choice (config.targetGamut === undefined).
+  const emittableIntent: GamutId = requestedGamut;
   const targetGamut: GamutId = cap.supportedGamuts.includes(emittableIntent)
     ? emittableIntent
     : cap.supportedGamuts.includes(WORKING_GAMUT)
@@ -251,7 +284,10 @@ export function resolveEgestDecision(request: EgestRequest): EgestDecision {
     channel = isCanvasSafe ? 'canvas-8' : 'raw-8';
   }
 
-  // 4. Post-process: assemble output contract.
+  // 4. Post-process: assemble output contract. A rec2020 target ships WITHOUT
+  //    an ICC profile — no stock BT.2020 profile exists (J4), and a fabricated
+  //    one would be worse than a clean gamut-tagged raw container. The user
+  //    toggle cannot override a physical absence.
   return {
     sourceGamut,
     requestedGamut,
@@ -259,7 +295,7 @@ export function resolveEgestDecision(request: EgestRequest): EgestDecision {
     bitDepth,
     channel,
     canvasColorSpace: toCanvasColorSpace(targetGamut),
-    embedIcc: resolveEmbedIcc(format, embedIccOverride),
+    embedIcc: targetGamut === 'rec2020' ? false : resolveEmbedIcc(format, embedIccOverride),
     gamutPassThroughEligible: requestedGamut === sourceGamut,
   };
 }

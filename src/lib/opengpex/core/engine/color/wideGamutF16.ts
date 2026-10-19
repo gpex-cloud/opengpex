@@ -52,7 +52,7 @@
  * @module core/engine/color/wideGamutF16
  */
 
-import { gammaToLinear, ADOBE_RGB_GAMMA, PROPHOTO_GAMMA } from './trc';
+import { gammaToLinear, ADOBE_RGB_GAMMA, PROPHOTO_GAMMA, rec2020ToLinear } from './trc';
 import { linearFloatToFloat16 } from './float16';
 import { pqToSceneLinear, hlgToSceneLinear } from './hdrTransfer';
 
@@ -63,7 +63,7 @@ export interface WideGamutHighDepth {
   height: number;
   format: 'rgba16float';
   trc: 'linear';
-  gamut: 'adobe-rgb' | 'prophoto-rgb';
+  gamut: 'adobe-rgb' | 'prophoto-rgb' | 'rec2020';
 }
 
 /**
@@ -141,14 +141,35 @@ export function wideGamut8ToF16(
  * @param naked    - interleaved RGBA16 source-encoded ushort pixels (length = w*h*4)
  * @param width    - pixel width
  * @param height   - pixel height
- * @param srcGamut - the source gamut (adobe-rgb / prophoto-rgb)
+ * @param srcGamut - the source gamut (adobe-rgb / prophoto-rgb / rec2020-SDR)
  */
 export function wideGamut16ToF16(
   naked: Uint16Array,
   width: number,
   height: number,
-  srcGamut: 'adobe-rgb' | 'prophoto-rgb',
+  srcGamut: 'adobe-rgb' | 'prophoto-rgb' | 'rec2020',
 ): WideGamutHighDepth {
+  if (srcGamut === 'rec2020') {
+    // SDR BT.2020 (phase D4, gap #8): the container's transfer IS the ITU
+    // BT.709/BT.2020 OETF (α/β piecewise — the same constants both standards
+    // publish; `rec2020ToLinear` is its exact inverse). Same f16-linear
+    // contract as the gamma siblings: source-gamut linear, no matrix, no clamp.
+    const linear = new Float32Array(naked.length);
+    for (let i = 0; i < naked.length; i += 4) {
+      linear[i] = rec2020ToLinear(naked[i] / 65535);
+      linear[i + 1] = rec2020ToLinear(naked[i + 1] / 65535);
+      linear[i + 2] = rec2020ToLinear(naked[i + 2] / 65535);
+      linear[i + 3] = naked[i + 3] / 65535; // alpha: coverage, no TRC
+    }
+    return {
+      data: linearFloatToFloat16(linear),
+      width,
+      height,
+      format: 'rgba16float',
+      trc: 'linear',
+      gamut: srcGamut,
+    };
+  }
   const gamma = srcGamut === 'adobe-rgb' ? ADOBE_RGB_GAMMA : PROPHOTO_GAMMA;
   return {
     data: degammaToF16Linear(naked, 1 / 65535, gamma),

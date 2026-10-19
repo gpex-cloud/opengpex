@@ -21,13 +21,13 @@
  * Channels (2026-10-13 avif pipeline, probe-backed — gpex-cloud/probes/avif):
  *   - `'image-bitmap'` (15a): 8-bit SDR verbatim passthrough, browser-native.
  *   - `'wide-gamut-8'` (17): 8-bit wide-gamut CPU lift + P3 fold (unchanged).
- *   - `'avif-proxy'` (15b / 16-wg, NEW): the old >8→8-bit clamp is gone — the
+ *   - `'avif-proxy'` (15b / 16-r2020, NEW): the old >8→8-bit clamp is gone — the
  *     isolated jsquash/libavif wasm decoder delivers bit-exact NATIVE-depth
  *     pixels (ramp probes round-trip with zero error; 12MP ≈ 0.57s). ONE
  *     decode feeds both outputs:
  *       • highDepthSource = f16, left-shifted to the 65535 scale (lossless:
  *         10-bit << 6, 12-bit << 4 ⇒ value = native / (2^bit − 1)) — srgb-trc
- *         rows keep the source encoding, 16-wg de-gammas to true linear via
+ *         rows keep the source encoding; the wide-gamut rows were deleted (2026-10-18),
  *         the standing wideGamut16ToF16;
  *       • display proxy = 8-bit truncation of the same native pixels, iCCP-
  *         tagged by the shared gamut proxy (folded P3 for wide gamut).
@@ -38,7 +38,6 @@
 
 import type { ImageMetadata, DecodedPayload } from '../../types';
 import type { IngestDecision } from '../../strategy';
-import { decodeWideGamut8 } from '../../shared/lib-custom';
 import {
   wideGamut16ToF16,
   normalizedUint16ToFloat16,
@@ -74,31 +73,8 @@ export async function decodeAvif(
       break;
     }
 
-    case 'wide-gamut-8': {
-      // 8-bit wide-gamut (Adobe RGB / ProPhoto): decode with browser colour management
-      // OFF, lift f16 naked line AND fold P3 preview in one call.
-      // NB: this is the CPU helper path (createImageBitmap + gammaToLinear), NOT
-      // the vips-heif >8-bit path — no shared-singleton OOM hazard. Wide-gamut
-      // AVIF is near-nonexistent in practice (its wide gamut is rec2020 = gap #8),
-      // wired only for consistency since the shared decode is format-agnostic.
-      const decoded = await decodeWideGamut8(
-        file,
-        decision.colorIdentity.gamut as 'adobe-rgb' | 'prophoto-rgb',
-      );
-      dimensions = { w: decoded.width, h: decoded.height };
-      displayBlob = decoded.displayBlob;
-      // Bare payload only — container/trc/gamut live on the sibling `colorIdentity`
-      // the entry injects (Path B).
-      highDepthSource = {
-        data: decoded.highDepthSource.data,
-        width: decoded.highDepthSource.width,
-        height: decoded.highDepthSource.height,
-      };
-      break;
-    }
-
     case 'avif-proxy': {
-      // ≥10-bit SDR (15b) / wide-gamut (16-wg): wasm decode at the source's
+      // ≥10-bit (15b / 16-r2020): wasm decode at the source's
       // TRUE depth — the metadata already declares it honestly (no clamp).
       const gamut = decision.colorIdentity.gamut;
       const requestedDepth = metadata.bitDepth >= 12 ? 12 : 10;
@@ -160,9 +136,10 @@ export async function decodeAvif(
         }
         const proxy = await buildGamutProxy(rgba8, native.width, native.height, 'display-p3');
         displayBlob = proxy.displayBlob;
-      } else if (gamut === 'adobe-rgb' || gamut === 'prophoto-rgb') {
-        // 16-wg: de-gamma the source-encoded pixels onto the true-linear f16 line
-        // (PNG/TIFF row-8 semantics — the wide-gamut standing rule).
+      } else if (gamut === 'adobe-rgb' || gamut === 'prophoto-rgb' || gamut === 'rec2020') {
+        // D4's SDR BT.2020 (and the deleted 16-wg used the same shape): de-gamma the source-encoded pixels onto
+        // the true-linear f16 line (PNG/TIFF row-8 semantics — the wide-gamut
+        // standing rule). rec2020 de-gammas through the BT.709/BT.2020 OETF.
         const lifted = wideGamut16ToF16(naked, native.width, native.height, gamut);
         highDepthSource = { data: lifted.data, width: lifted.width, height: lifted.height };
       } else {

@@ -49,7 +49,7 @@ import { getGpuEngine } from '@opengpex/editor/core/engine/pipeline/WebGpuEngine
 import { SceneAssembler } from '@opengpex/editor/core/engine/pipeline/scene/SceneAssembler';
 import { highDepthTextureCache } from '@opengpex/editor/core/engine/sources/HighDepthSource';
 import type { HighDepthFetcher } from '@opengpex/editor/core/engine/sources/HighDepthSource';
-import { unpremultiplyEncodeLinearF16, unpremultiplyEncodeGamut, unpremultiplyLinearF32 } from '@opengpex/editor/core/engine/utils/export-utils';
+import { unpremultiplyEncodeLinearF16, unpremultiplyEncodeGamut, unpremultiplyEncodePq10, unpremultiplyLinearF32 } from '@opengpex/editor/core/engine/utils/export-utils';
 import { applyGainToF32, quantizeGainMapPair } from '@opengpex/editor/core/engine/color/gainMap';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
 import type { EncodeSource, FileService, GainMapData } from '@opengpex/editor/core/files';
@@ -81,7 +81,7 @@ export interface ExportRequest {
    */
   targetGamut: GamutId;
   /** Physical encode lane — `egest.channel`. */
-  channel: 'canvas-8' | 'raw-8' | 'raw-16' | 'exr-half';
+  channel: 'canvas-8' | 'raw-8' | 'raw-10' | 'raw-16' | 'exr-half';
   /** Canvas `colorSpace` tag for the `'canvas-8'` lane — `egest.canvasColorSpace`. */
   canvasColorSpace: PredefinedColorSpace;
   /**
@@ -311,6 +311,24 @@ export class ExportDispatcher {
         height: exported.height,
         data: half,
         bitDepth: 16,
+        colorSpace: targetGamut,
+      };
+    } else if (channel === 'raw-10') {
+      // HDR AVIF PQ lane (egest's HDR early rule is the ONLY router onto it):
+      // straight BT.2020-primary PQ code values at 10 bits, un-premultiplied,
+      // headroom preserved. The CICP marker (nclx 9/16/9) is patched onto the
+      // encoded file by the AVIF handler — pixels and marker cannot diverge.
+      if (request.hdrSemantics !== true) {
+        // Unreachable through resolveEgestDecision; a request here is a
+        // caller/decision mismatch and must fail loudly (exr guard style).
+        throw new Error('[raw-10] PQ lane requires the document HDR switch ON');
+      }
+      const encoded10 = unpremultiplyEncodePq10(exported.pixels, exported.width, exported.height);
+      encodeSource = {
+        width: exported.width,
+        height: exported.height,
+        data: encoded10,
+        bitDepth: 10,
         colorSpace: targetGamut,
       };
     } else if (channel === 'raw-16') {
