@@ -19,11 +19,13 @@
 
 import { EditorPlugin } from '@opengpex/editor/core/types';
 import { MarkerOverlayMain } from './components';
-import { createMarkerMoveHandler, createMarkerDrawHandler, createMarkerResizeHandler, createMarkerRotateHandler } from './interactions';
+import { createMarkerMoveHandler, createMarkerDrawHandler, createMarkerResizeHandler, createMarkerRotateHandler, createMarkerDblClickActivateHandler } from './interactions';
 import { MARKER_OVERLAY_COMMANDS } from './commands';
 import { markerContributor } from './contribution';
-// Side-effect import: registers built-in markers (rect, arrow) into MARKER_REGISTRY.
+// Side-effect import: registers built-in markers into MARKER_REGISTRY (must run
+// before the shape-contributed interactions below are collected).
 import './marker';
+import { MARKER_REGISTRY } from './marker/registry';
 import * as P from './protocols';
 
 /**
@@ -61,10 +63,13 @@ export const plugin: EditorPlugin = {
   },
 
   interactions: [
+    createMarkerDblClickActivateHandler(), // Priority 175 — pan mode: double-click a marker to enter the tool
     createMarkerRotateHandler(), // Priority 165 — rotate active marker (highest)
     createMarkerResizeHandler(), // Priority 160 — resize active marker
     createMarkerMoveHandler(),   // Priority 155 — move existing marker
     createMarkerDrawHandler(),   // Priority 145 — draw new marker
+    // Shape-specific handlers (e.g. callout tail drag, 162), owned by each shape.
+    ...MARKER_REGISTRY.getAll().flatMap((def) => def.interactions?.() ?? []),
   ],
 
   commands: MARKER_OVERLAY_COMMANDS,

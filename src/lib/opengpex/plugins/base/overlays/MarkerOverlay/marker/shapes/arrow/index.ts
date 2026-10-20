@@ -21,9 +21,9 @@
 
 import React from 'react';
 import { ArrowUpRight } from 'lucide-react';
-import type { ArrowMarkerData } from '../types';
+import type { ArrowMarkerData } from '../../types';
 import { fromHex } from '@opengpex/editor/core/engine/color';
-import type { MarkerDefinition } from '../registry';
+import type { MarkerDefinition } from '../../registry';
 
 /** 45° angle snap step (radians) applied when Shift is held. */
 const SNAP_STEP = Math.PI / 4;

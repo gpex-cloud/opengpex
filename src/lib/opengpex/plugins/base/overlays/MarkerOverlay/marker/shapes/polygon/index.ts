@@ -20,37 +20,58 @@
 'use client';
 
 import React from 'react';
-import { Square } from 'lucide-react';
-import type { RectMarkerData } from '../types';
+import { Triangle } from 'lucide-react';
+import type { PolygonMarkerData } from '../../types';
 import { fromHex } from '@opengpex/editor/core/engine/color';
-import type { MarkerDefinition } from '../registry';
+import type { MarkerDefinition } from '../../registry';
+
+/** Default side count (triangle). */
+export const POLYGON_DEFAULT_SIDES = 3;
+
+/** Conventional names for regular polygons by side count (4 is a diamond: first vertex points up). */
+const POLYGON_NAMES: Record<number, string> = {
+  3: 'Triangle',
+  4: 'Diamond',
+  5: 'Pentagon',
+  6: 'Hexagon',
+  7: 'Heptagon',
+  8: 'Octagon',
+  9: 'Nonagon',
+  10: 'Decagon',
+  11: 'Hendecagon',
+  12: 'Dodecagon',
+};
+
+export function polygonLayerName(sides: number): string {
+  const n = Math.max(3, Math.round(sides));
+  return POLYGON_NAMES[n] ?? `${n}-gon`;
+}
 
 /**
- * RectDefinition: rectangle highlight box.
- *
- * Geometry is fully implied by the layer bounding (the rect always fills it),
- * so `computeFromDrag` only needs to turn the drag into an axis-aligned box.
- * Shift constrains to a square. No extra data patch is needed.
+ * PolygonDefinition: regular polygon inscribed in the layer bounding (same drag
+ * model as the ellipse; Shift constrains to a square so the polygon is
+ * undistorted). Rendered through the engine's star primitive at the polygon
+ * end of its sharpness range — a regular n-gon IS the degenerate n-point star.
  */
-export const RectDefinition: MarkerDefinition<RectMarkerData> = {
-  kind: 'rect',
-  label: 'Rectangle',
-  icon: React.createElement(Square, { size: 16 }),
+export const PolygonDefinition: MarkerDefinition<PolygonMarkerData> = {
+  kind: 'polygon',
+  label: 'Polygon',
+  icon: React.createElement(Triangle, { size: 16 }),
   hasFill: true,
-  hasCornerRadius: true,
+  hasCornerRadius: false,
+  layerName: (data) => polygonLayerName(data.sides),
 
-  defaults: (): RectMarkerData => ({
-    kind: 'rect',
+  defaults: (): PolygonMarkerData => ({
+    kind: 'polygon',
     stroke: { color: fromHex('#FF3B30'), width: 3 },
     fill: { color: fromHex('#FF3B30'), opacity: 0 },
-    cornerRadius: 0,
+    sides: POLYGON_DEFAULT_SIDES,
   }),
 
   computeFromDrag: (drag, _data, options) => {
     let dx = drag.endX - drag.startX;
     let dy = drag.endY - drag.startY;
 
-    // Shift → square: use the larger extent for both sides, preserving direction.
     if (options.shiftKey) {
       const size = Math.max(Math.abs(dx), Math.abs(dy));
       dx = Math.sign(dx || 1) * size;

@@ -22,7 +22,7 @@
  * (vector spine, Layer B — the `SdfRenderer` strategy).
  *
  * A ZERO-TEXTURE procedural primitive: the pipeline binds only the SDF uniform
- * block (80 bytes, group 0 binding 0) — no sampler, no source/mask texture. The
+ * block (96 bytes, group 0 binding 0) — no sampler, no source/mask texture. The
  * vertex shader stretches the unit quad over the whole render target (the vector
  * source is drawn into its OWN transient, not into document space — the camera/quad
  * transform is a downstream `drawLayer` concern under architecture B), and the
@@ -48,11 +48,11 @@
  * `sourceIsLinear/sourceIsWorkingGamut/sourceIntentApplied = true`, so the shader's
  * output is consumed without any further decode/convert/tone-map.
  *
- * Primitives: `shape_type == 0` rounded_rect, `1` ellipse (both drawn as an outline
- * stroke over an optional interior fill), `2` arrow — a SOLID capsule-shaft +
- * triangle-head union painted entirely in the STROKE colour (the arrow is filled
- * with the stroke colour, so it has no interior/fill split; the fragment dispatches
- * this case separately from rounded_rect/ellipse).
+ * Primitives: `shape_type == 0` rounded_rect, `1` ellipse, `5` star, `6` callout
+ * (all drawn as an outline stroke over an optional interior fill); `2` arrow, `3`
+ * line, `4` darrow — SOLID shapes (capsule shaft, optional triangle heads)
+ * painted entirely in the STROKE colour (no interior/fill split; the fragment
+ * dispatches the solid family separately from the outline family).
  *
  * @module core/gpu/shaders/sdf
  */
@@ -63,12 +63,12 @@ export const SDF_WGSL = /* wgsl */ `
 struct SdfUniforms {
   // offset 0 (16 bytes)
   layer_size   : vec2<f32>,   // logical width, height
-  shape_type   : u32,         // 0: rounded_rect, 1: ellipse, 2: arrow
+  shape_type   : u32,         // 0 rounded_rect, 1 ellipse, 2 arrow, 3 line, 4 darrow, 5 star, 6 callout
   has_fill     : u32,         // 0: no fill, 1: fill
 
   // offset 16 (16 bytes)
   stroke_width : f32,         // logical px
-  head_scale   : f32,         // arrow head length factor (arrow only)
+  head_scale   : f32,         // arrow head length factor (arrow / darrow only)
   hard_edge    : u32,         // 0: smoothstep AA (default), 1: binary hard edge
   _pad1        : f32,
 
@@ -78,11 +78,16 @@ struct SdfUniforms {
   // offset 48 (16 bytes) — fill colour, working-gamut linear, alpha already × fill.opacity
   fill_color   : vec4<f32>,
 
-  // offset 64 (16 bytes) — shape geometry:
-  //   rounded_rect: [cornerRadius, 0, 0, 0]
-  //   ellipse:      [0, 0, 0, 0]  (geometry implied by layer_size)
+  // offset 64 (32 bytes) — shape geometry, up to 8 scalars packed as two vec4
+  // ([0] = scalars 0..3, [1] = scalars 4..7; unused tail is zero):
+  //   rounded_rect: [cornerRadius]
+  //   ellipse:      []  (geometry implied by layer_size)
   //   arrow:        [tail.x, tail.y, head.x, head.y]
-  shape_params : vec4<f32>,
+  //   line:         [a.x, a.y, b.x, b.y]
+  //   darrow: [a.x, a.y, b.x, b.y]
+  //   star:         [points, sharpness]
+  //   callout:      [body.x, body.y, body.w, body.h, tip.x, tip.y, cornerRadius, tailHalfBase]
+  shape_params : array<vec4<f32>, 2>,
 };
 
 @group(0) @binding(0) var<uniform> u : SdfUniforms;
@@ -153,24 +158,141 @@ fn sdf_arrow(p: vec2<f32>, tail: vec2<f32>, head: vec2<f32>, stroke_w: f32, head
   return min(d_shaft, d_head);
 }
 
-// Signed distance to the shape OUTLINE for the active shape_type (rect/ellipse:
-// d = 0 is the outer boundary, stroke grows inward). Arrow (2) returns the SOLID
-// shape's distance and is composited separately in fs_main.
+// Line = solid capsule between two arbitrary layer-local endpoints (no heads).
+fn sdf_line(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, stroke_w: f32) -> f32 {
+  return sdf_segment(p, a, b) - (stroke_w * 0.5);
+}
+
+// Double arrow = capsule shaft ∪ a triangle head at EACH end. Both heads use the
+// same head_len = stroke_w * head_scale as the single arrow; the shaft is clipped
+// back by head_len on both sides so neither union seam shows a coverage step.
+fn sdf_darrow(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, stroke_w: f32, head_scale: f32) -> f32 {
+  let full_dir = b - a;
+  let full_len = max(length(full_dir), 1e-4);
+  let dir = full_dir / full_len;
+  let normal = vec2<f32>(-dir.y, dir.x);
+
+  let head_len = stroke_w * head_scale;
+  let head_half_w = head_len * 0.5;
+  let shaft_a = a + dir * head_len;
+  let shaft_b = b - dir * head_len;
+  let d_shaft = sdf_segment(p, shaft_a, shaft_b) - (stroke_w * 0.5);
+
+  let rel_b = p - b;
+  let local_b = vec2<f32>(dot(rel_b, normal), -dot(rel_b, dir));
+  let d_head_b = sdf_isoceles_triangle(local_b, vec2<f32>(head_half_w, head_len));
+
+  // Head at point a points the other way: mirror the frame along dir.
+  let rel_a = p - a;
+  let local_a = vec2<f32>(dot(rel_a, normal), dot(rel_a, dir));
+  let d_head_a = sdf_isoceles_triangle(local_a, vec2<f32>(head_half_w, head_len));
+
+  return min(d_shaft, min(d_head_a, d_head_b));
+}
+
+// IQ's regular star SDF: n points, outer radius r, "sharpness" m in [2, n] (2 =
+// regular n-gon, n = spikes thinning all the way to the centre; the inner vertex
+// radius is r * (cos(pi/n) - sin(pi/n) / tan(pi/m))). p is centred on the star; the first point
+// is on +y. GLSL mod() is floor-mod, WGSL % is trunc-mod, hence the explicit
+// floor form for the sector fold.
+fn sdf_star(p_in: vec2<f32>, r: f32, n: f32, m: f32) -> f32 {
+  let an = 3.141592653589793 / n;
+  let en = 3.141592653589793 / m;
+  let acs = vec2<f32>(cos(an), sin(an));
+  let ecs = vec2<f32>(cos(en), sin(en));
+
+  let ang = atan2(p_in.x, p_in.y);
+  let period = 2.0 * an;
+  let bn = (ang - period * floor(ang / period)) - an;
+  var p = length(p_in) * vec2<f32>(cos(bn), abs(sin(bn)));
+  p = p - r * acs;
+  p = p + ecs * clamp(-dot(p, ecs), 0.0, r * acs.y / ecs.y);
+  return length(p) * sign(p.x);
+}
+
+// IQ's exact 2D triangle SDF for an arbitrary triangle (p0, p1, p2), any winding.
+fn sdf_triangle(p: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>) -> f32 {
+  let e0 = p1 - p0;
+  let e1 = p2 - p1;
+  let e2 = p0 - p2;
+  let v0 = p - p0;
+  let v1 = p - p1;
+  let v2 = p - p2;
+  let pq0 = v0 - e0 * clamp(dot(v0, e0) / dot(e0, e0), 0.0, 1.0);
+  let pq1 = v1 - e1 * clamp(dot(v1, e1) / dot(e1, e1), 0.0, 1.0);
+  let pq2 = v2 - e2 * clamp(dot(v2, e2) / dot(e2, e2), 0.0, 1.0);
+  let s = sign(e0.x * e2.y - e0.y * e2.x);
+  let d = min(
+    min(
+      vec2<f32>(dot(pq0, pq0), s * (v0.x * e0.y - v0.y * e0.x)),
+      vec2<f32>(dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x)),
+    ),
+    vec2<f32>(dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x)),
+  );
+  return -sqrt(d.x) * sign(d.y);
+}
+
+// Callout = rounded-rect body ∪ tail triangle. The tail's base lies ACROSS the
+// body centre (centre ± perpendicular * half_base), so the part of the triangle
+// inside the body is swallowed by the union and only the protruding wedge toward
+// the tip shows — with the tip inside the body the whole triangle is hidden and
+// the callout degrades gracefully to a plain rounded rect.
+fn sdf_callout(p: vec2<f32>, body: vec4<f32>, tip: vec2<f32>, radius: f32, half_base: f32) -> f32 {
+  let b = body.zw * 0.5;
+  let c = body.xy + b;
+  let r = clamp(radius, 0.0, min(b.x, b.y));
+  let d_body = sdf_rounded_rect(p - c, b, r);
+
+  let to_tip = tip - c;
+  let len = max(length(to_tip), 1e-4);
+  let dir = to_tip / len;
+  let perp = vec2<f32>(-dir.y, dir.x) * half_base;
+  let d_tail = sdf_triangle(p, tip, c + perp, c - perp);
+
+  return min(d_body, d_tail);
+}
+
+// Signed distance to the shape OUTLINE for the outline family (rounded_rect /
+// ellipse / star / callout: d = 0 is the outer boundary, stroke grows inward), or
+// to the SOLID shape for the solid family (arrow / line / darrow), which
+// fs_main composites separately.
 fn shape_distance(p: vec2<f32>) -> f32 {
   if (u.shape_type == 0u) {
     let b = u.layer_size * 0.5;
-    let r = clamp(u.shape_params.x, 0.0, min(b.x, b.y));
+    let r = clamp(u.shape_params[0].x, 0.0, min(b.x, b.y));
     return sdf_rounded_rect(p - b, b, r);
   }
   if (u.shape_type == 1u) {
     let c = u.layer_size * 0.5;
     return sdf_ellipse(p - c, c);
   }
+  if (u.shape_type == 3u) {
+    return sdf_line(p, u.shape_params[0].xy, u.shape_params[0].zw, u.stroke_width);
+  }
+  if (u.shape_type == 4u) {
+    return sdf_darrow(p, u.shape_params[0].xy, u.shape_params[0].zw, u.stroke_width, u.head_scale);
+  }
+  if (u.shape_type == 5u) {
+    // Inscribed in layer_size: map the (possibly non-square) box onto a circle of
+    // radius r_min, solve the star there, and scale the distance back by the
+    // smaller axis. Under a non-square aspect the stroke is thinner along the
+    // stretched axis — the same approximation an anisotropically scaled SVG makes.
+    let b = u.layer_size * 0.5;
+    let r_min = min(b.x, b.y);
+    // Flip y so the first point faces UP on screen (local y grows downward).
+    let q = (p - b) * (r_min / b) * vec2<f32>(1.0, -1.0);
+    let n = max(3.0, round(u.shape_params[0].x));
+    let m = clamp(u.shape_params[0].y, 2.0, n);
+    return sdf_star(q, r_min, n, m);
+  }
+  if (u.shape_type == 6u) {
+    return sdf_callout(p, u.shape_params[0], u.shape_params[1].xy, u.shape_params[1].z, u.shape_params[1].w);
+  }
   // arrow (2)
   return sdf_arrow(
     p,
-    u.shape_params.xy,
-    u.shape_params.zw,
+    u.shape_params[0].xy,
+    u.shape_params[0].zw,
     u.stroke_width,
     u.head_scale,
   );
@@ -184,9 +306,9 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   // same for d and d+stroke_width (pure translation), so one aa serves both.
   let aa = max(fwidth(d), 1e-6) * 0.5;
 
-  // Arrow is a SOLID capsule+triangle, painted entirely in the stroke colour (the
-  // CPU path fills the whole arrow with the stroke colour — no interior/fill split).
-  if (u.shape_type == 2u) {
+  // Solid family (arrow / line / darrow): capsule (+ heads) painted entirely
+  // in the stroke colour — no interior/fill split.
+  if (u.shape_type == 2u || u.shape_type == 3u || u.shape_type == 4u) {
     // Soft edge: analytic smoothstep AA. Hard edge: binary coverage at the
     // signed-distance zero crossing (single-pixel step, no fwidth smoothing).
     let cov = select(1.0 - smoothstep(-aa, aa, d),
@@ -196,8 +318,9 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
     return vec4<f32>(u.stroke_color.rgb, u.stroke_color.a * cov);
   }
 
-  // Rect / ellipse: a stroke RING (shape − interior) over an optional fill, where
-  // the interior is the shape inset by stroke_width (d + stroke_width ≤ 0).
+  // Outline family (rounded_rect / ellipse / star / callout): a stroke RING
+  // (shape − interior) over an optional fill, where the interior is the shape
+  // inset by stroke_width (d + stroke_width ≤ 0).
   var shape_cov = 1.0 - smoothstep(-aa, aa, d);
   var interior_cov = 1.0 - smoothstep(-aa, aa, d + u.stroke_width);
   if (u.hard_edge == 1u) {
@@ -224,5 +347,5 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
 }
 `;
 
-/** Size of the SDF uniform block in bytes (80 bytes = 20 float/u32 slots). */
-export const SDF_UNIFORM_BUFFER_SIZE = 80;
+/** Size of the SDF uniform block in bytes (96 bytes = 24 float/u32 slots). */
+export const SDF_UNIFORM_BUFFER_SIZE = 96;

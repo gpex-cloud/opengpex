@@ -26,6 +26,12 @@ import Popover from '@opengpex/editor/widgets/Popover';
 import Tooltip from '@opengpex/editor/widgets/Tooltip';
 import Switch from '@opengpex/editor/widgets/Switch';
 import { useMarkerPanel } from '../hooks';
+import { ABSOLUTE_MARKER_STROKE_MAX } from '../protocols';
+import { hasCornerRadius } from '../../../overlays/MarkerOverlay/marker/types';
+
+/** Side / point count range for polygon and star markers. */
+const COUNT_MIN = 3;
+const COUNT_MAX = 12;
 
 const ROW_LABEL = 'text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-20 shrink-0';
 const NUM_INPUT = 'w-8 bg-transparent text-right focus:outline-none outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
@@ -106,6 +112,7 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
     activeMarkerKind,
     activeDef,
     markerData,
+    strokeWidthMax,
     selectKind,
     updateMarkerData,
   } = useMarkerPanel();
@@ -115,7 +122,7 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
   const strokeWidth = markerData.stroke.width;
   const strokeColor = markerData.stroke.color;
   const fillEnabled = markerData.fill.opacity > 0;
-  const cornerRadius = markerData.kind === 'rect' ? markerData.cornerRadius : 0;
+  const cornerRadius = hasCornerRadius(markerData) ? markerData.cornerRadius : 0;
 
   return (
     <div className="flex flex-col gap-2">
@@ -130,7 +137,7 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
                   type="button"
                   aria-label={def.label}
                   onClick={() => selectKind(def.kind)}
-                  className={`flex items-center justify-center w-[52px] py-2.5 rounded-lg border transition-colors ${
+                  className={`flex items-center justify-center w-[52px] py-2.5 rounded-lg border outline-none transition-colors ${
                     isActive
                       ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-600 dark:text-indigo-300'
                       : 'bg-[var(--bg-stage)] border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
@@ -162,7 +169,7 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
           <input
             type="range"
             min="1"
-            max="50"
+            max={strokeWidthMax}
             step="1"
             value={strokeWidth}
             onChange={(e) => updateMarkerData({ stroke: { ...markerData.stroke, width: Number(e.target.value) } }, true)}
@@ -173,9 +180,9 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
             <input
               type="number"
               min="1"
-              max="50"
+              max={ABSOLUTE_MARKER_STROKE_MAX}
               value={strokeWidth}
-              onChange={(e) => updateMarkerData({ stroke: { ...markerData.stroke, width: Math.max(1, Math.min(50, Number(e.target.value) || 1)) } })}
+              onChange={(e) => updateMarkerData({ stroke: { ...markerData.stroke, width: Math.max(1, Math.min(ABSOLUTE_MARKER_STROKE_MAX, Number(e.target.value) || 1)) } })}
               className={NUM_INPUT}
             />
             <span className="text-[8px] font-bold text-[var(--text-muted)] shrink-0">px</span>
@@ -217,8 +224,45 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
         </div>
       )}
 
+      {/* ─── Sides / Points (polygon / star) ─── */}
+      {(markerData.kind === 'polygon' || markerData.kind === 'star') && (() => {
+        const isPolygon = markerData.kind === 'polygon';
+        const label = isPolygon ? 'Sides' : 'Points';
+        const field = isPolygon ? 'sides' : 'points';
+        const value = isPolygon ? markerData.sides : markerData.points;
+        const clampCount = (n: number) => Math.max(COUNT_MIN, Math.min(COUNT_MAX, Math.round(n) || COUNT_MIN));
+        const setCount = (n: number) => updateMarkerData({ [field]: clampCount(n) } as never);
+        return (
+          <div className="flex flex-col gap-1.5 p-1">
+            <div className="flex items-center gap-1.5 px-1">
+              <span className={ROW_LABEL}>{label}</span>
+              <input
+                type="range"
+                min={COUNT_MIN}
+                max={COUNT_MAX}
+                step="1"
+                value={value}
+                onChange={(e) => updateMarkerData({ [field]: clampCount(Number(e.target.value)) } as never, true)}
+                onMouseUp={(e) => { setCount(Number((e.target as HTMLInputElement).value)); e.currentTarget.blur(); }}
+                className={RANGE_CLASS}
+              />
+              <div className="flex items-center gap-0.5 text-right w-9 justify-end text-indigo-600 dark:text-indigo-400 font-black text-[10px] tabular-nums">
+                <input
+                  type="number"
+                  min={COUNT_MIN}
+                  max={COUNT_MAX}
+                  value={value}
+                  onChange={(e) => setCount(Number(e.target.value))}
+                  className={NUM_INPUT}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ─── Corner radius (hasCornerRadius kinds only) ─── */}
-      {activeDef?.hasCornerRadius && markerData.kind === 'rect' && (
+      {activeDef?.hasCornerRadius && hasCornerRadius(markerData) && (
         <div className="flex flex-col gap-1.5 p-1">
           <div className="flex items-center gap-1.5 px-1">
             <span className={ROW_LABEL}>Corner Radius</span>

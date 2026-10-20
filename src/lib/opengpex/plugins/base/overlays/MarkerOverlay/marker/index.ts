@@ -31,9 +31,28 @@ import { MARKER_REGISTRY } from './registry';
 import { RectDefinition } from './shapes/rect';
 import { ArrowDefinition } from './shapes/arrow';
 import { EllipseDefinition } from './shapes/ellipse';
+import { LineDefinition } from './shapes/line';
+import { DarrowDefinition } from './shapes/darrow';
+import { StarDefinition } from './shapes/star';
+import { PolygonDefinition } from './shapes/polygon';
+import { CalloutDefinition } from './shapes/callout';
 
 MARKER_REGISTRY.register(RectDefinition);
 MARKER_REGISTRY.register(EllipseDefinition);
 MARKER_REGISTRY.register(ArrowDefinition);
+MARKER_REGISTRY.register(LineDefinition);
+MARKER_REGISTRY.register(DarrowDefinition);
+MARKER_REGISTRY.register(PolygonDefinition);
+MARKER_REGISTRY.register(StarDefinition);
+MARKER_REGISTRY.register(CalloutDefinition);
 
-export { RectDefinition, ArrowDefinition, EllipseDefinition };
+export {
+  RectDefinition,
+  ArrowDefinition,
+  EllipseDefinition,
+  LineDefinition,
+  DarrowDefinition,
+  StarDefinition,
+  PolygonDefinition,
+  CalloutDefinition,
+};

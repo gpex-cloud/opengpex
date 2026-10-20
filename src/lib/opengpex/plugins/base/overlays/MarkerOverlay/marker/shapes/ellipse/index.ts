@@ -21,9 +21,9 @@
 
 import React from 'react';
 import { Circle } from 'lucide-react';
-import type { EllipseMarkerData } from '../types';
+import type { EllipseMarkerData } from '../../types';
 import { fromHex } from '@opengpex/editor/core/engine/color';
-import type { MarkerDefinition } from '../registry';
+import type { MarkerDefinition } from '../../registry';
 
 /**
  * EllipseDefinition: ellipse / circle highlight.

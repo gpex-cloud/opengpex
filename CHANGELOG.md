@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.23
+
+- Marker Tool: major update — five new shapes (Line, Double Arrow, Polygon, Star, Callout speech bubble with a draggable tail) join Rectangle, Ellipse and Arrow; markers now select and edit like text boxes: click to select, drag to move or resize, double-click to jump into the tool, and each shape remembers its own style. Text boxes and markers share one selection frame style
+
+---
+
 ## v2.0.22
 
 - Text Tool: major rework — text boxes now behave like standard design tools: click to select, drag to move or resize, double-click to edit, with all text boxes outlined while the tool is active. Text rendering and the editing caret are pixel-faithful to what you see while typing, including line wraps, spaces and boxes that are too small for their content

@@ -25,6 +25,9 @@
  * hit-testing/move for existing marker (`type:'vector' + markerData`) layers.
  */
 
+import type { Layer } from '@opengpex/editor/core/types';
+import type { MarkerKind } from './marker/types';
+
 export const PLUGIN_ID = 'overlays.marker_overlay';
 export const PLUGIN_AUTHOR = 'opengpex';
 
@@ -70,3 +73,58 @@ export const MarkerOverlayAPI = {
   /** pluginConfig storage key */
   configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
 } as const;
+
+// ─── Tool state derivation ─────────────────────────────────────────────────────
+
+/**
+ * The marker tool's selection state — ONE pure derivation consumed by every
+ * party that must agree on it (CraftDrawer's marker panel binding, the overlay's
+ * frame rendering, the Escape ladder, the click-to-arm handler). Nothing stores
+ * this state; it is recomputed from two inputs:
+ *
+ *   - the selected layer (is it a marker, and of which kind)
+ *   - the armed kind (CraftDrawer's `activeMarkerKind`: what the next drag draws)
+ *
+ * Phases:
+ *   - `idle`     — no marker layer is selected. The panel edits the armed kind's
+ *                  next-marker preset; the overlay draws only sibling ghosts.
+ *   - `active`   — a marker is selected and its kind IS the armed kind. The panel
+ *                  edits that layer; the overlay shows the full gizmo.
+ *   - `inactive` — a marker is selected but another kind is armed (the user
+ *                  switched kind from the panel / Tab while it stayed selected).
+ *                  The panel edits the armed kind's preset; the overlay shows the
+ *                  selection as a handle-less ghost; Escape re-arms its kind.
+ *
+ * Same shape as the text tool's derivation (`useTextOverlayState`: two signals in,
+ * one judgement out) — keep all phase logic here rather than re-deriving
+ * `kind === armedKind` at call sites.
+ */
+
+export type MarkerToolPhase = 'idle' | 'active' | 'inactive';
+
+export interface MarkerToolState {
+  readonly phase: MarkerToolPhase;
+  /** The selected marker layer's id, or null when idle. */
+  readonly layerId: string | null;
+  /** The selected marker layer's kind, or null when idle. */
+  readonly selectedKind: MarkerKind | null;
+}
+
+const IDLE: MarkerToolState = { phase: 'idle', layerId: null, selectedKind: null };
+
+/**
+ * Derive the tool state for `layer` (the selected — or, for click-to-arm, the
+ * about-to-be-selected — layer) against the armed kind.
+ */
+export function resolveMarkerToolState(
+  layer: Layer | null | undefined,
+  armedKind: MarkerKind | undefined,
+): MarkerToolState {
+  if (!layer || layer.type !== 'vector' || !layer.markerData) return IDLE;
+  const selectedKind = layer.markerData.kind;
+  return {
+    phase: selectedKind === armedKind ? 'active' : 'inactive',
+    layerId: layer.id,
+    selectedKind,
+  };
+}

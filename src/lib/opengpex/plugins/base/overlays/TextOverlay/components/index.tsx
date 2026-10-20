@@ -57,7 +57,6 @@ export const TextOverlayMain = React.memo(function TextOverlayMain() {
   return null;
 });
 
-export { BoxCorners, type BoxCornersProps } from './BoxCorners';
 export { InlineTextEditor, type InlineTextEditorProps } from './InlineTextEditor';
 export { PlaceMarquee };
 export { PreEditFrame };

@@ -22,36 +22,64 @@
  * source vocabulary: business `markerData` → `renderer: 'sdf'` LayerSource.
  *
  * This is the plugin's ENTIRE exposure to the engine's scene assembly. It
- * imports only engine public exports (colour conversion + types); the engine
- * never imports this module — the contributor is wired through the plugin
- * registry's `contributions.engine.vectorSource` slot.
+ * imports only engine public exports (colour conversion + types) and the
+ * shapes' React-free `render.ts` modules; the engine never imports this module —
+ * the contributor is wired through the plugin registry's
+ * `contributions.engine.vectorSource` slot.
  *
  * @module plugins/base/overlays/MarkerOverlay/contribution
  */
 
 import type { Layer } from '@opengpex/editor/core/types';
-import type { MarkerKind } from './marker/types';
+import type { MarkerData, MarkerBounding, SdfGeometry } from './marker/types';
 import { toWorkingLinearRgba } from '@opengpex/editor/core/engine/color';
 import type {
   LayerSource,
   VectorSourceContributor,
   VectorSourceContext,
 } from '@opengpex/editor/core/engine/pipeline/scene/vectorSources';
-import type { SdfPrimitive } from '@opengpex/editor/core/engine/pipeline/scene/Scene';
+import { rectToSdf } from './marker/shapes/rect/render';
+import { ellipseToSdf } from './marker/shapes/ellipse/render';
+import { arrowToSdf } from './marker/shapes/arrow/render';
+import { lineToSdf } from './marker/shapes/line/render';
+import { darrowToSdf } from './marker/shapes/darrow/render';
+import { starToSdf } from './marker/shapes/star/render';
+import { polygonToSdf } from './marker/shapes/polygon/render';
+import { calloutToSdf } from './marker/shapes/callout/render';
 
 /** Fill is considered present above this opacity (mirrors "0 = no fill"). */
 const FILL_EPSILON = 0.001;
 
 /**
- * Marker business discriminant → engine-owned SDF primitive. This map is the ONLY
- * place the two vocabularies meet: `'rect'` becomes the engine's `'rounded_rect'`
- * (which also covers a zero-radius rectangle), ellipse/arrow keep their names.
+ * Business kind → engine SDF geometry. Each kind owns its translation in
+ * `shapes/<kind>/render.ts` (render-side, React-free); this switch is the ONLY
+ * place the business discriminant meets the engine primitive vocabulary.
  */
-const MARKER_KIND_TO_PRIMITIVE: Record<MarkerKind, SdfPrimitive> = {
-  rect: 'rounded_rect',
-  ellipse: 'ellipse',
-  arrow: 'arrow',
-};
+function markerToSdfGeometry(data: MarkerData, size: MarkerBounding): SdfGeometry {
+  switch (data.kind) {
+    case 'rect':
+      return rectToSdf(data, size);
+    case 'ellipse':
+      return ellipseToSdf(data, size);
+    case 'arrow':
+      return arrowToSdf(data, size);
+    case 'line':
+      return lineToSdf(data, size);
+    case 'darrow':
+      return darrowToSdf(data, size);
+    case 'star':
+      return starToSdf(data, size);
+    case 'polygon':
+      return polygonToSdf(data, size);
+    case 'callout':
+      return calloutToSdf(data, size);
+    default: {
+      const _never: never = data;
+      void _never;
+      throw new Error('unknown marker kind');
+    }
+  }
+}
 
 /**
  * Map a Marker layer to a `vector` {@link LayerSource} (`renderer: 'sdf'`), or
@@ -87,37 +115,22 @@ function markerToVectorSource(
     fillLinear[3] * fillOpacity,
   ];
 
-  let shapeParams: readonly [number, number, number, number] = [0, 0, 0, 0];
-  let headScale = 0;
-
-  if (data.kind === 'rect') {
-    // Corner radius clamped to half the short side (a fuller round can't exist).
-    const maxR = Math.min(w, h) / 2;
-    const r = Math.min(Math.max(0, data.cornerRadius ?? 0), maxR);
-    shapeParams = [r, 0, 0, 0];
-  } else if (data.kind === 'arrow') {
-    // tail/head are the same layer-local endpoints the CPU path uses
-    // (arrowToSvg) — arbitrary direction, not axis-aligned.
-    // headLen is derived in-shader as strokeWidth * headScale, keeping ONE formula.
-    headScale = data.headScale || 3;
-    shapeParams = [data.tail.x, data.tail.y, data.head.x, data.head.y];
-  }
-  // ellipse: geometry fully implied by `size`; shapeParams stays [0,0,0,0].
+  const geometry = markerToSdfGeometry(data, { w, h });
 
   return {
     kind: 'vector',
     renderer: 'sdf',
     sdf: {
-      prim: MARKER_KIND_TO_PRIMITIVE[data.kind],
+      prim: geometry.prim,
       size: [w, h],
       strokeWidth: data.stroke.width,
       strokeColor,
       hasFill: fillOpacity > FILL_EPSILON,
       fillColor,
-      headScale,
+      headScale: geometry.headScale ?? 0,
       // AA defaults ON: only an explicit `false` on the business data opts out.
       antiAliased: data.antiAliased !== false,
-      shapeParams,
+      shapeParams: geometry.shapeParams,
     },
   };
 }

@@ -44,6 +44,8 @@ export const CMD_DEACTIVATE_CRAFT = 'cmd.deactivate_craft';
 /** Marker sub-type cycling (Tab / Shift+Tab, mirrors ClipOptions.cycleToolForward/Backward) */
 export const CMD_CYCLE_MARKER_FORWARD = 'cmd.cycle_marker_forward';
 export const CMD_CYCLE_MARKER_BACKWARD = 'cmd.cycle_marker_backward';
+/** Set the active marker sub-type directly (used when entering the tool from an existing marker layer). */
+export const CMD_SET_MARKER_KIND = 'cmd.set_marker_kind';
 
 
 export const CMD_BRUSH_SIZE_UP = 'cmd.brush_size_up';
@@ -76,6 +78,10 @@ export const CraftDrawerAPI = {
     deactivate: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_DEACTIVATE_CRAFT}` } as { uid: string; _payload: void },
     /** Activate the text tool (no-op toggle risk: callers must guard against already-active) */
     activateText: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CRAFT_TEXT}` } as { uid: string; _payload: void },
+    /** Activate the marker tool (same toggle semantics as activateText: guard against already-active) */
+    activateMarker: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CRAFT_MARKER}` } as { uid: string; _payload: void },
+    /** Set the active marker sub-type (unknown kinds are ignored) */
+    setMarkerKind: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_MARKER_KIND}` } as { uid: string; _payload: { kind: MarkerKind } },
   },
   /** pluginConfig storage key */
   configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
@@ -136,12 +142,29 @@ export interface CraftDrawerConfig {
   /** Active marker sub-type (persisted across tool switches; default resolves to first registered kind) */
   activeMarkerKind?: MarkerKind;
   /**
-   * Pending marker style preset, persisted across tool activations and reused as
-   * the style of the NEXT drawn marker. Carries stroke/fill (all kinds) plus an
-   * optional cornerRadius (rect only — ignored by other kinds).
+   * Legacy single pending marker style. Kept only as the fallback for kinds that
+   * have no entry in `pendingMarkerByKind` yet; never written any more.
    */
-  pendingMarkerData?: Partial<MarkerDataBase> & { cornerRadius?: number };
+  pendingMarkerData?: PendingMarkerStyle;
+  /**
+   * Per-kind pending marker style, persisted across tool activations and reused
+   * as the style of the NEXT drawn marker of that kind. Each kind remembers its
+   * own stroke/fill (+ cornerRadius where the kind has one), so arming the star
+   * tool never shows or edits the arrow's colours.
+   */
+  pendingMarkerByKind?: Partial<Record<MarkerKind, PendingMarkerStyle>>;
 }
+
+/**
+ * Style subset a pending (not yet drawn) marker remembers per kind: stroke/fill
+ * (all kinds) plus the kind-specific knobs that have panel controls
+ * (cornerRadius for rect/callout, sides for polygon, points for star).
+ */
+export type PendingMarkerStyle = Partial<MarkerDataBase> & {
+  cornerRadius?: number;
+  sides?: number;
+  points?: number;
+};
 
 // ─── Mosaic Size Presets ───────────────────────────────────────────────────────
 
@@ -219,6 +242,36 @@ export function getDynamicTextSizeMax(canvasW?: number, canvasH?: number): numbe
 
 /** Absolute maximum for number input (regardless of slider range) */
 export const ABSOLUTE_TEXT_SIZE_MAX = 2000;
+
+/** Static fallback for the marker stroke-width slider max when no canvas is open. */
+const MARKER_STROKE_STATIC_MAX = 50;
+
+/**
+ * Dynamic slider maximum for the marker stroke width, by canvas size — the
+ * same idea as `getDynamicTextSizeMax`: a 50 px ceiling is plenty on a 1000 px
+ * screenshot but invisible on a 6000 px photo, while a fixed large ceiling
+ * makes the slider too coarse on small images.
+ *
+ * Rules:
+ * - Always >= 50
+ * - For large canvases, 5% of the canvas short side, rounded UP to a multiple
+ *   of 5 (3042 px → 155, 3140 px → 160)
+ * - Hard cap at ABSOLUTE_MARKER_STROKE_MAX
+ */
+export function getDynamicMarkerStrokeMax(canvasW?: number, canvasH?: number): number {
+  if (!canvasW || !canvasH) return MARKER_STROKE_STATIC_MAX;
+  const shortSide = Math.min(canvasW, canvasH);
+  // Round UP to a multiple of 5 so the ceiling reads as a tidy number
+  // (3042 px → 152.1 → 155, not 152).
+  const scaled = Math.ceil((shortSide * 0.05) / MARKER_STROKE_MAX_STEP) * MARKER_STROKE_MAX_STEP;
+  return Math.min(ABSOLUTE_MARKER_STROKE_MAX, Math.max(MARKER_STROKE_STATIC_MAX, scaled));
+}
+
+/** The dynamic ceiling snaps up to this granularity. */
+const MARKER_STROKE_MAX_STEP = 5;
+
+/** Absolute maximum for the stroke-width number input (regardless of slider range). */
+export const ABSOLUTE_MARKER_STROKE_MAX = 400;
 
 /** Minimum font size constant */
 export const TEXT_SIZE_MIN = 6;

@@ -26,7 +26,7 @@ import type { ColorValue } from "@opengpex/editor/core/engine/color";
 import { toCssColor4, toRgb8 } from "@opengpex/editor/core/engine/color";
 import { useInlineTextEditing, getEditorMeasureContext } from "../hooks";
 import { getEditorMinWidth, safeCornerArmRatio } from "../geometry";
-import { BoxCorners } from "./BoxCorners";
+import { TransformGizmo } from "@opengpex/editor/widgets/TransformGizmo";
 import { TextCaret, TextSelection } from "@opengpex/editor/widgets/TextCaretKit";
 
 /**
@@ -102,7 +102,7 @@ export const InlineTextEditor = React.memo(function InlineTextEditor({
 
   if (!layer || !textData) return null;
 
-  // Initial inverse scale and screen-constant arm ratio for screen-invariant elements (BoxCorners and TextCaret)
+  // Initial inverse scale and screen-constant arm ratio for screen-invariant elements (frame marks and TextCaret)
   const initialScale = Math.hypot(screenMatrix.a, screenMatrix.b) || 1;
   const initialArmRatio = safeCornerArmRatio();
 
@@ -128,8 +128,8 @@ export const InlineTextEditor = React.memo(function InlineTextEditor({
     lineHeight: textData.lineHeight,
     letterSpacing: `${textData.letterSpacing || 0}px`,
     minHeight: "1em",
-    // Editing-state decoration is NOT a border here: the box's corner marks
-    // (BoxCorners, rendered by the container below) are the only frame. No
+    // Editing-state decoration is NOT a border here: the box's frame marks
+    // (TransformGizmo, rendered by the container below) are the only frame. No
     // outline/border on the contenteditable — in fixed mode its height is the
     // CONTENT height, so a full outline would detach from the actual box
     // (boxWidth/boxHeight) after a resize (real-device acceptance 2026-10-07).
@@ -172,10 +172,10 @@ export const InlineTextEditor = React.memo(function InlineTextEditor({
         } as React.CSSProperties),
       }}
     >
-      <BoxCorners
-        boxWidth={textData.boxWidth || layer.bounding.w}
-        boxHeight={textData.boxHeight || layer.bounding.h}
-      />
+      {/* Editing-state frame marks: visual only (no resize/rotate while
+          editing). The marks counter-scale through --box-corner-scale set on
+          this camera-transformed container, so they stay screen-constant. */}
+      <TransformGizmo visualOnly />
       <TextSelection
         editorRef={editorRef}
         fontSize={textData.fontSize}

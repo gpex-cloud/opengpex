@@ -27,6 +27,7 @@ import {
   TextOverlayAPI,
 } from '../../overlays/TextOverlay/protocols';
 import { MARKER_REGISTRY } from '../../overlays/MarkerOverlay/marker/registry';
+import type { MarkerKind } from '../../overlays/MarkerOverlay/marker/types';
 // Side-effect import: ensures built-in markers are registered before cycling.
 import '../../overlays/MarkerOverlay/marker';
 
@@ -46,6 +47,16 @@ function activateCraft(ctx: EditorContextValue, craft: CraftType) {
   // Activate target tool
   ctx.scoped!.setSignal(P.SIGNAL_ACTIVE_CRAFT, craft);
   ctx.actions.setInteraction({ interactionMode: 'craft' });
+
+  // Entering the marker tool with a marker already selected arms that layer's
+  // kind, so the tool opens in the ACTIVE state (panel edits the selection)
+  // rather than detached from it.
+  if (craft === 'marker') {
+    const selectedKind = ctx.activeLayer?.type === 'vector' ? ctx.activeLayer.markerData?.kind : undefined;
+    if (selectedKind && MARKER_REGISTRY.get(selectedKind)) {
+      ctx.scoped!.setSelfConfig({ activeMarkerKind: selectedKind } as Partial<CraftDrawerConfig>);
+    }
+  }
 }
 
 function deactivate(ctx: EditorContextValue) {
@@ -161,6 +172,19 @@ export const CRAFT_COMMANDS = {
     category: 'Drawing',
     execute: (ctx: EditorContextValue) => cycleMarkerKind(ctx, -1),
   } as EditorCommand<void, void>,
+
+  // Direct sub-type selection, used when the marker tool is entered FROM an
+  // existing marker layer (double-click) so the toolbar reflects that layer's
+  // kind instead of whatever was drawn last. Unknown kinds are ignored rather
+  // than written, so a stale/foreign kind can never poison the toolbar state.
+  setMarkerKind: {
+    id: P.CMD_SET_MARKER_KIND,
+    name: 'Set Marker Type',
+    execute: (ctx: EditorContextValue, payload: { kind: MarkerKind }) => {
+      if (!MARKER_REGISTRY.get(payload.kind)) return;
+      ctx.scoped!.setSelfConfig({ activeMarkerKind: payload.kind } as Partial<CraftDrawerConfig>);
+    },
+  } as EditorCommand<{ kind: MarkerKind }, void>,
 
   deactivateCraft: {
     id: P.CMD_DEACTIVATE_CRAFT,

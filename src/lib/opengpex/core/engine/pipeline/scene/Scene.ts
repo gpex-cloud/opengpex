@@ -129,7 +129,14 @@ export interface ViewConfig {
  * into these primitive names, so nothing under `gpu/` / `pipeline/graph/` /
  * `shaders/` ever imports a business model.
  */
-export type SdfPrimitive = 'rounded_rect' | 'ellipse' | 'arrow';
+export type SdfPrimitive =
+  | 'rounded_rect'
+  | 'ellipse'
+  | 'arrow'
+  | 'line'
+  | 'darrow'
+  | 'star'
+  | 'callout';
 
 /**
  * Analytic SDF description of a vector primitive — PURE GPU maths, no business
@@ -151,7 +158,7 @@ export interface SdfShapeParams {
   readonly hasFill: boolean;
   /** Fill colour: working-gamut LINEAR RGB + alpha already ×fill.opacity (0..1). */
   readonly fillColor: readonly [number, number, number, number];
-  /** Arrowhead size multiplier (ignored by rounded_rect/ellipse). */
+  /** Arrowhead size multiplier (arrow / darrow only; ignored elsewhere). */
   readonly headScale: number;
   /**
    * Edge anti-aliasing. `true` (the normalized default — the scene-assembly mapper
@@ -161,12 +168,22 @@ export interface SdfShapeParams {
    */
   readonly antiAliased: boolean;
   /**
-   * Shape-specific geometry (LOCAL pixel space):
-   * - rounded_rect: [cornerRadius, 0, 0, 0]
-   * - ellipse:      [0, 0, 0, 0] (geometry implied by `size`)
+   * Shape-specific geometry (LOCAL pixel space), up to 8 scalars; the renderer
+   * zero-pads the tail, so each primitive lists only what it uses:
+   * - rounded_rect: [cornerRadius]
+   * - ellipse:      [] (geometry implied by `size`)
    * - arrow:        [tail.x, tail.y, head.x, head.y] (arbitrary direction)
+   * - line:         [a.x, a.y, b.x, b.y] (solid capsule, no heads)
+   * - darrow: [a.x, a.y, b.x, b.y] (a head at both ends)
+   * - star:         [points, sharpness] — `points` ≥ 3 (integer-valued),
+   *                 `sharpness` in [2, points] (2 = regular polygon, points =
+   *                 spikes thinning to the centre); the star is inscribed in `size`
+   * - callout:      [body.x, body.y, body.w, body.h, tip.x, tip.y, cornerRadius,
+   *                 tailHalfBase] — speech-bubble body rect, tail apex, body corner
+   *                 radius, and half width of the tail base (which lies across the
+   *                 body centre so the union hides it and only the wedge shows)
    */
-  readonly shapeParams: readonly [number, number, number, number];
+  readonly shapeParams: readonly number[];
 }
 
 /**

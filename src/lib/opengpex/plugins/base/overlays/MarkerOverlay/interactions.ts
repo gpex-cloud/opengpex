@@ -18,7 +18,9 @@
  */
 
 import { Frame, GeometryService, InteractionEvent, InteractionHandler, Layer, LocalRect, asLocalShape } from '@opengpex/editor/core/types';
-import type { ArrowMarkerData, MarkerData } from './marker/types';
+import type { MarkerData } from './marker/types';
+import { resolveNextMarkerData } from './marker/pending';
+
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import { createTransformHandler, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
@@ -26,7 +28,7 @@ import { ROTATE_CURSOR } from '@opengpex/editor/icons';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
 import { MARKER_REGISTRY } from './marker/registry';
-import { _CMD_PLACE_UID, MarkerOverlayAPI } from './protocols';
+import { _CMD_PLACE_UID, MarkerOverlayAPI, resolveMarkerToolState } from './protocols';
 
 /** Shared signal keys (cross-plugin constants) */
 const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
@@ -78,29 +80,41 @@ function findMarkerLayerAtPoint(geometry: GeometryService, frame: Frame, point: 
   return hits.find((l: Layer) => l.type === 'vector' && !!l.markerData) || null;
 }
 
-/** Reads the active marker kind + pending style from CraftDrawer's config. */
+/**
+ * The data the NEXT marker is drawn with: CraftDrawer's armed kind, its registry
+ * defaults overlaid with that kind's remembered style (same resolver the panel
+ * uses, so what the panel shows is exactly what gets drawn).
+ */
 function resolveMarkerData(e: { state: { pluginConfig: Record<string, unknown> } }): MarkerData | null {
   const config = e.state.pluginConfig[CraftDrawerAPI.configKey] as CraftDrawerConfig | undefined;
   const order = MARKER_REGISTRY.kinds();
   if (order.length === 0) return null;
-
   const kind = config?.activeMarkerKind ?? order[0];
-  const def = MARKER_REGISTRY.get(kind);
-  if (!def) return null;
+  return resolveNextMarkerData(config, kind) ?? null;
+}
 
-  // Base defaults, then overlay any pending stroke/fill/cornerRadius the user chose.
-  const base = def.defaults();
-  const pending = config?.pendingMarkerData;
-  if (pending) {
-    if (pending.stroke) base.stroke = { ...base.stroke, ...pending.stroke };
-    if (pending.fill) base.fill = { ...base.fill, ...pending.fill };
-    // cornerRadius is rect-only; apply when the resolved kind supports it.
-    if (typeof pending.cornerRadius === 'number' && base.kind === 'rect') {
-      (base as { cornerRadius: number }).cornerRadius = pending.cornerRadius;
-    }
-    if (pending.antiAliased !== undefined) base.antiAliased = pending.antiAliased;
+/**
+ * Rescale the layer-local geometry a marker stores (endpoints, body, tip) by the
+ * bounding box's resize factors so the shape keeps tracking the box. Kinds whose
+ * geometry is fully implied by the bounding (rect / ellipse / star) pass through.
+ */
+function rescaleLocalGeometry(data: MarkerData, sx: number, sy: number): MarkerData {
+  const pt = (p: { x: number; y: number }) => ({ x: p.x * sx, y: p.y * sy });
+  switch (data.kind) {
+    case 'arrow':
+      return { ...data, tail: pt(data.tail), head: pt(data.head) };
+    case 'line':
+    case 'darrow':
+      return { ...data, a: pt(data.a), b: pt(data.b) };
+    case 'callout':
+      return {
+        ...data,
+        body: { x: data.body.x * sx, y: data.body.y * sy, w: data.body.w * sx, h: data.body.h * sy },
+        tip: pt(data.tip),
+      };
+    default:
+      return data;
   }
-  return base;
 }
 
 // ─── MarkerMoveHandler ─────────────────────────────────────────────────────────
@@ -130,7 +144,7 @@ export const createMarkerMoveHandler = (): InteractionHandler => {
 
       // Exclude UI element clicks (buttons, panels, resize handles).
       const target = e.nativeEvent.target as HTMLElement;
-      if (target.closest('button, a, input, [data-role="ui"], [data-handle], [data-gizmo-handle]')) return false;
+      if (target.closest('button, a, input, [data-role="ui"], [data-handle], [data-gizmo-handle], [data-gizmo-rotate], [data-marker-tail-handle]')) return false;
 
       const hitLayer = findMarkerLayerAtPoint(e.geometry, e.activeFrame, e.point.canvas);
       if (hitLayer) {
@@ -146,8 +160,15 @@ export const createMarkerMoveHandler = (): InteractionHandler => {
       const layer = frame.layers.byId[targetLayerId];
       if (!layer) return;
 
-      // Select the marker so MarkerPanel binds to its properties.
+      // Select the marker and arm its kind: a single click always lands in the
+      // ACTIVE state (panel edits this layer, handles shown). The INACTIVE
+      // detached-ghost state only arises from an explicit kind change afterwards.
       e.actions.setActiveLayer(frame.id, targetLayerId);
+      const armed = (e.state.pluginConfig[CraftDrawerAPI.configKey] as unknown as CraftDrawerConfig | undefined)?.activeMarkerKind;
+      const next = resolveMarkerToolState(layer, armed);
+      if (next.phase === 'inactive' && next.selectedKind) {
+        e.actions.executeCommand(CraftDrawerAPI.commands.setMarkerKind.uid, { kind: next.selectedKind });
+      }
 
       startCanvas = { x: e.point.canvas.x, y: e.point.canvas.y };
       startLayerPos = { x: layer.cx, y: layer.cy };
@@ -170,7 +191,10 @@ export const createMarkerMoveHandler = (): InteractionHandler => {
         tx = null;
       }
       targetLayerId = null;
-      e.actions.fast.setCursor(null);
+      // The pointer is still over the marker it just dragged: hand the hover
+      // cursor back directly instead of clearing to the arrow and waiting for
+      // the next pointermove (same fix as TextOverlay's move handler).
+      e.actions.fast.setCursor('move');
     },
 
     onCancel: () => {
@@ -314,15 +338,12 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
 
       // Rescale marker geometry that is stored in layer-local coords.
       let nextMarkerData: MarkerData = startMarkerData;
-      if (startMarkerData.kind === 'arrow' && startBounding.w > 0 && startBounding.h > 0) {
-        const sx = finalW / startBounding.w;
-        const sy = finalH / startBounding.h;
-        const src = startMarkerData as ArrowMarkerData;
-        nextMarkerData = {
-          ...src,
-          tail: { x: src.tail.x * sx, y: src.tail.y * sy },
-          head: { x: src.head.x * sx, y: src.head.y * sy },
-        };
+      if (startBounding.w > 0 && startBounding.h > 0) {
+        nextMarkerData = rescaleLocalGeometry(
+          startMarkerData,
+          finalW / startBounding.w,
+          finalH / startBounding.h,
+        );
       }
 
       tx.update({
@@ -493,7 +514,7 @@ export const createMarkerDrawHandler = (): InteractionHandler => {
       if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'marker') return false;
 
       const target = e.nativeEvent.target as HTMLElement;
-      if (target.closest('button, a, input, [data-role="ui"], [data-handle], [data-gizmo-handle]')) return false;
+      if (target.closest('button, a, input, [data-role="ui"], [data-handle], [data-gizmo-handle], [data-gizmo-rotate], [data-marker-tail-handle]')) return false;
 
       // Must be within the canvas and NOT over an existing marker (move wins).
       const frame = e.activeFrame;
@@ -573,7 +594,8 @@ export const createMarkerDrawHandler = (): InteractionHandler => {
       const finalData = { ...markerData, ...patch } as MarkerData;
 
       const layersArray = frame.layers.order.map(id => frame.layers.byId[id]);
-      const smartName = LayerFactory.getNewLayerName(layersArray, def.label);
+      const baseName = def.layerName ? def.layerName(finalData) : def.label;
+      const smartName = LayerFactory.getNewLayerName(layersArray, baseName);
 
       const markerLayer = LayerFactory.getNewLayer({
         name: smartName,
@@ -600,3 +622,84 @@ export const createMarkerDrawHandler = (): InteractionHandler => {
   };
 };
 
+
+// ─── MarkerDblClickActivateHandler ─────────────────────────────────────────────
+
+/** Max gap between two presses to count as a double-click (fallback path). */
+const DBL_CLICK_INTERVAL_MS = 450;
+
+/** Max pointer travel between the two presses (canvas px, fallback path). */
+const DBL_CLICK_TRAVEL_PX = 5;
+
+/**
+ * MarkerDblClickActivateHandler: double-click a marker layer from OUTSIDE the
+ * marker tool (pan mode) to enter the tool with that layer selected.
+ *
+ * Unlike the text tool (pre-edit + editing, where double-click also advances
+ * from pre-edit into editing), the marker tool has a single state: once it is
+ * active a single click on a marker already selects it through marker-move,
+ * and there is no deeper state a double-click could enter. So this handler is
+ * pan-mode only and stays out of the way inside the tool.
+ *
+ * Priority 175 (same as text-dblclick-edit): in pan mode the first press of
+ * the pair goes to the stage LayerMoveHandler (priority 10, selects the layer),
+ * the second press is claimed here and fully consumed (empty onMove/onEnd) so
+ * it can never degrade into a stray drag. Text's and marker's double-click
+ * handlers both filter by layer type, so they never compete for the same hit.
+ *
+ * Entering the tool also syncs the toolbar's active marker kind to the hit
+ * layer's kind, so the next draw matches what the user just double-clicked.
+ */
+export const createMarkerDblClickActivateHandler = (): InteractionHandler => {
+  let lastDownTime = 0;
+  let lastDownX = 0;
+  let lastDownY = 0;
+
+  const findActivatableMarker = (e: InteractionEvent): Layer | null => {
+    if (!e.activeFrame) return null;
+    const hit = findMarkerLayerAtPoint(e.geometry, e.activeFrame, e.point.canvas);
+    return hit && hit.visible && !hit.locked ? hit : null;
+  };
+
+  return {
+    id: 'marker-dblclick-activate',
+    priority: 175,
+
+    test: (e) => {
+      if (e.state.interaction.interactionMode !== 'pan') return false;
+
+      const target = e.nativeEvent.target as HTMLElement | null;
+      if (target?.closest('button, a, input, [data-role="ui"], [data-handle], [data-gizmo-handle], [data-gizmo-rotate], [data-marker-tail-handle]')) return false;
+
+      const now = performance.now();
+      const isDoubleClick =
+        (e.nativeEvent as MouseEvent).detail === 2 ||
+        (now - lastDownTime <= DBL_CLICK_INTERVAL_MS &&
+          Math.hypot(e.point.canvas.x - lastDownX, e.point.canvas.y - lastDownY) <= DBL_CLICK_TRAVEL_PX);
+      lastDownTime = now;
+      lastDownX = e.point.canvas.x;
+      lastDownY = e.point.canvas.y;
+
+      if (!isDoubleClick) return false;
+      return !!findActivatableMarker(e);
+    },
+
+    onStart: (e) => {
+      const hit = findActivatableMarker(e);
+      if (!hit) return;
+      // Pan-mode gate above guarantees the marker craft is not active, so the
+      // toggle semantics of activateCraft cannot deactivate it here.
+      e.actions.executeCommand(CraftDrawerAPI.commands.activateMarker.uid);
+      const kind = hit.markerData?.kind;
+      if (kind) {
+        e.actions.executeCommand(CraftDrawerAPI.commands.setMarkerKind.uid, { kind });
+      }
+      e.actions.setActiveLayer(e.activeFrame.id, hit.id);
+    },
+
+    // Claimed gestures are fully consumed: the double-click must never fall
+    // through to a layer drag.
+    onMove: () => {},
+    onEnd: () => {},
+  };
+};

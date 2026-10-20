@@ -20,7 +20,7 @@
 /**
  * SdfRenderer.ts — Vector render strategy: analytic SDF fragment draw (Layer B).
  * Renders one engine-neutral SDF primitive (rounded_rect / ellipse / arrow) into a
- * transient texture. A zero-texture procedural draw: pack the 80-byte SDF uniform
+ * transient texture. A zero-texture procedural draw: pack the 96-byte SDF uniform
  * block into the shared BufferRing, bind it alone (no sampler/source/mask), and
  * issue the full-target quad draw.
  *
@@ -36,15 +36,19 @@ import type { SdfShapeParams, SdfPrimitive } from '../../../scene/Scene';
 import { SDF_UNIFORM_BUFFER_SIZE } from '@opengpex/editor/core/engine/gpu/shaders/sdf';
 import type { VectorRenderer, VectorRenderContext, VectorRenderArgs } from './VectorRenderer';
 
-/** shape_type wire values — must match `sdf.ts` (0 rounded_rect, 1 ellipse, 2 arrow). */
+/** shape_type wire values — must match `sdf.ts`. */
 const SHAPE_TYPE: Record<SdfPrimitive, number> = {
   rounded_rect: 0,
   ellipse: 1,
   arrow: 2,
+  line: 3,
+  darrow: 4,
+  star: 5,
+  callout: 6,
 };
 
 /**
- * Reusable scratch for packing the SDF uniform block (80 bytes). MODULE-LEVEL and
+ * Reusable scratch for packing the SDF uniform block (96 bytes). MODULE-LEVEL and
  * mutable, safe under the strictly single-threaded, synchronous render path (mirrors
  * `CompositePass`'s `uniformData` note — convert to per-call if ever made async).
  */
@@ -91,11 +95,10 @@ export class SdfRenderer implements VectorRenderer {
     uniformData[13] = m.fillColor[1];
     uniformData[14] = m.fillColor[2];
     uniformData[15] = m.fillColor[3];
-    // offset 64 (16B) shape_params
-    uniformData[16] = m.shapeParams[0];
-    uniformData[17] = m.shapeParams[1];
-    uniformData[18] = m.shapeParams[2];
-    uniformData[19] = m.shapeParams[3];
+    // offset 64 (32B) shape_params: up to 8 scalars, zero-padded
+    for (let i = 0; i < 8; i++) {
+      uniformData[16 + i] = m.shapeParams[i] ?? 0;
+    }
 
     const slot = bufferRing.writeSlot(uniformData);
 

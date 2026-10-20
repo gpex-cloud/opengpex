@@ -21,6 +21,7 @@ export interface CraftDrawerCommandsMap {
   setCraftMarkerCmd: CommandInstance;
   cycleMarkerForwardCmd: CommandInstance;
   cycleMarkerBackwardCmd: CommandInstance;
+  setMarkerKindCmd: CommandInstance<{ kind: MarkerKind }>;
   deactivateCraftCmd: CommandInstance;
   brushSizeUpCmd: CommandInstance;
   brushSizeDownCmd: CommandInstance;

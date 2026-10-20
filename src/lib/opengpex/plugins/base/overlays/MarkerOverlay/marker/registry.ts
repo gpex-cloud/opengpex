@@ -35,6 +35,7 @@
  */
 
 import type React from 'react';
+import type { InteractionHandler } from '@opengpex/editor/core/types';
 import type { MarkerData, MarkerKind } from './types';
 
 /**
@@ -60,6 +61,29 @@ export interface MarkerDefinition<T extends MarkerData = MarkerData> {
 
   /** Default MarkerData for new marker creation */
   defaults: () => T;
+
+  /**
+   * Shape-specific interaction handlers (e.g. a callout's tail-tip drag),
+   * registered by the plugin alongside the shared move/resize/rotate/draw set.
+   * Omitted = none.
+   */
+  interactions?: () => InteractionHandler[];
+
+  /**
+   * Extra on-canvas control points for a selected layer of this kind, rendered
+   * inside the selection box in the ACTIVE state in addition to the shared
+   * TransformGizmo handles (e.g. a callout's tail-tip knob). Receives the live
+   * data and the layer bounding; must position itself in bounding percentages.
+   * Omitted = none.
+   */
+  renderHandles?: (data: T, bounding: { w: number; h: number }) => React.ReactNode;
+
+  /**
+   * Base name for a newly created layer of this kind, given its final data.
+   * Omitted = `label`. Lets data-driven kinds name themselves ("Hexagon",
+   * "6-Point Star") instead of the generic kind label.
+   */
+  layerName?: (data: T) => string;
 
   /**
    * Compute bounding box + geometry from a raw drag (canvas-local space).
