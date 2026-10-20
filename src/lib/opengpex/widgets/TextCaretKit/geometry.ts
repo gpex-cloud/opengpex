@@ -22,7 +22,32 @@
  *
  * No React, no editor state — every function takes what it needs as arguments
  * so it can be unit-tested against a bare DOM (or jsdom stubs) in isolation.
+ *
+ * Caret position resolution is layered:
+ * 1. Math path (caretLayout.ts): the DOM selection is scalarized to a code
+ *    point index and the position is solved from the shared text layout —
+ *    no client rects, no per-shape special cases.
+ * 2. Rect fallback: when the math path cannot answer, the collapsed range's
+ *    own client rects (or, at a text node's trailing edge, the previous
+ *    character's right edge) are projected through the live container matrix.
+ * 3. Degenerate endings: genuinely empty content snaps to the start padding;
+ *    any other unmeasurable state keeps the previously rendered caret —
+ *    never a hijack to the first line.
+ *
+ * Every path is strictly read-only: nothing here ever mutates the DOM or the
+ * selection, so resolution can never feed back into the selectionchange
+ * events it serves.
  */
+
+import {
+  linearizeContent,
+  solveCaretFromLayout,
+  type CaretLayoutSource,
+} from './caretLayout';
+
+/** Numeric node-type constant — the DOM `Node` global is unavailable in the
+ * bare Node test environment, and only text nodes are probed here. */
+const NODE_TEXT = 3;
 
 /** Viewport-space caret rectangle as reported by DOM selection APIs. */
 export interface CaretScreenRect {
@@ -60,6 +85,16 @@ export interface CaretResolveOptions {
   startPadding: { x: number; y: number };
   /** Live container-local→viewport matrix provider (see getLiveMatrixFromOffsetParent). */
   getLiveMatrix: () => DOMMatrixReadOnly | null;
+  /**
+   * Layout-backed math fast path (see caretLayout.ts). When provided and an
+   * IME composition is NOT active, the caret position is solved purely from
+   * the live DOM content string against the shared text layout; rect
+   * inference remains as the fallback for unlinearizable/unsolvable states.
+   */
+  caretLayout?: CaretLayoutSource;
+  /** True while an IME composition is active — forces the rect fallback,
+   * because the composition string is browser-managed transient DOM. */
+  isComposing?: boolean;
 }
 
 /**
@@ -71,10 +106,35 @@ export function getCaretHeight(fontSize: number): number {
 }
 
 /**
+ * Step (in UTF-16 code units) from a caret offset to the start of the previous
+ * full code point, so surrogate pairs are stepped over as one glyph.
+ */
+function previousCodePointStep(text: string | null | undefined, offset: number): number {
+  if (!text || offset < 1) return 1;
+  const unit = text.charCodeAt(offset - 1);
+  if (unit >= 0xdc00 && unit <= 0xdfff && offset >= 2) {
+    const high = text.charCodeAt(offset - 2);
+    if (high >= 0xd800 && high <= 0xdbff) return 2;
+  }
+  return 1;
+}
+
+/**
  * Resolve the caret's viewport-space rectangle for a collapsed selection.
- * Uses range.getClientRects() and falls back to a zero-width U+200B probe for
- * collapsed positions on empty lines / trailing edges. Returns null when the
- * position is not measurable (caller decides the fallback).
+ * RECT FALLBACK only — the primary path is the layout-backed math solver in
+ * caretLayout.ts; this function serves states the math path cannot answer.
+ *
+ * Strictly read-only — this function NEVER mutates the DOM or the selection:
+ * - Direct position: the collapsed range's own client rects (glyph lines).
+ * - Trailing edge (caret after the last character of a text node): the
+ *   previous character's rect; its right edge already includes any
+ *   letter-spacing, so the value is the browser's own layout truth (kept
+ *   unrounded — subpixel is exact, rounding would introduce error).
+ * There is deliberately NO per-shape special casing beyond these two: line
+ * starts, empty lines and alignment are solved by the math path; when rects
+ * are unavailable here the caller keeps the previous caret instead of
+ * guessing (guessing is what produced the line-start hijack bugs).
+ * Returns null when nothing measurable surrounds the caret.
  */
 export function resolveCaretScreenRect(
   editor: HTMLElement,
@@ -88,28 +148,23 @@ export function resolveCaretScreenRect(
     return { left: rects[0].left, top: rects[0].top, height: rects[0].height };
   }
 
-  // Zero-width probe for collapsed positions on empty lines or trailing edge
-  try {
-    const marker = document.createTextNode('\u200b');
-    const clone = range.cloneRange();
-    clone.insertNode(marker);
-    let result: CaretScreenRect | null = null;
-    const markerRects = clone.getClientRects();
-    if (markerRects.length > 0 && markerRects[0].height > 0) {
-      result = {
-        left: markerRects[0].left,
-        top: markerRects[0].top,
-        height: markerRects[0].height,
-      };
+  const node = range.startContainer as { nodeType: number; textContent?: string } | null;
+  const offset = range.startOffset;
+
+  // Trailing edge: caret at the end of a text node → previous character.
+  if (node && node.nodeType === NODE_TEXT && offset > 0) {
+    const step = previousCodePointStep(node.textContent, offset);
+    const r = document.createRange();
+    r.setStart(range.startContainer, offset - step);
+    r.setEnd(range.startContainer, offset);
+    const charRects = r.getClientRects();
+    const last = charRects[charRects.length - 1];
+    if (last && last.height > 0) {
+      return { left: last.right, top: last.top, height: last.height };
     }
-    marker.remove();
-    // Restore range safely
-    sel.removeAllRanges();
-    sel.addRange(range);
-    return result;
-  } catch {
-    return null;
   }
+
+  return null;
 }
 
 /**
@@ -159,7 +214,17 @@ export function projectScreenRectToLocal(
 /**
  * Full caret resolution for one update pass. Pure with respect to its inputs;
  * the only DOM access is through `editor`, `window.getSelection()` and the
- * injected matrix provider.
+ * injected providers.
+ *
+ * This is the kit's public caretPos entry point: given the editor element and
+ * the live selection it answers "where is the caret, container-locally" with
+ * ZERO DOM or selection mutation (see resolveCaretScreenRect and
+ * caretLayout.ts), so calling it can never feed back into the selectionchange
+ * events it listens to.
+ *
+ * Order: math path (layout-backed, primary) → rect fallback → degenerate
+ * endings (empty content snaps to start padding; anything else unmeasurable
+ * keeps the previously rendered caret).
  */
 export function resolveCaretAnchor(
   editor: HTMLElement | null,
@@ -177,9 +242,57 @@ export function resolveCaretAnchor(
 
   const caretH = getCaretHeight(options.fontSize);
 
-  // Empty content or unmeasurable fallback: snap to starting padding
+  // Math path: scalarize the collapsed selection to a code point index of the
+  // live content string, then solve (line, column) against the shared layout.
+  const linearization = linearizeContent(editor);
+  if (linearization && options.caretLayout && !options.isComposing) {
+    const range = sel.getRangeAt(0);
+    if (editor.contains(range.startContainer)) {
+      const caretIndex = linearization.indexOf(range.startContainer, range.startOffset);
+      const solved =
+        caretIndex !== null
+          ? solveCaretFromLayout(
+              linearization,
+              caretIndex,
+              editor,
+              options.caretLayout,
+              options.verticalAlignOffset,
+              caretH,
+            )
+          : null;
+      if (solved) {
+        return { kind: 'visible', anchor: { localX: solved.localX, localY: solved.localY, height: caretH } };
+      }
+    }
+  }
+
+  // Rect fallback: browser-reported rects projected through the live matrix.
   const screenRect = resolveCaretScreenRect(editor, sel);
-  if (!screenRect) {
+  if (screenRect) {
+    const matrix = options.getLiveMatrix();
+    if (matrix) {
+      const local = projectScreenRectToLocal(screenRect, matrix);
+      if (local) {
+        const currentScale = Math.hypot(matrix.a, matrix.b) || 1;
+        const rowH =
+          screenRect.height > 0
+            ? screenRect.height / currentScale
+            : options.fontSize * options.lineHeight;
+        const offsetY = Math.max(0, (rowH - caretH) / 2);
+        return {
+          kind: 'visible',
+          anchor: { localX: local.localX, localY: local.localY + offsetY, height: caretH },
+        };
+      }
+    } else {
+      return { kind: 'keepPrevious' };
+    }
+  }
+
+  // Nothing measurable: only genuinely empty content snaps to the start
+  // padding anchor; any other failure keeps the previous caret rather than
+  // hijacking it to the first line (the historical line-start bug).
+  if (!linearization || linearization.text === '') {
     const lineH = options.fontSize * options.lineHeight;
     const offsetY = Math.max(0, (lineH - caretH) / 2);
     return {
@@ -191,22 +304,7 @@ export function resolveCaretAnchor(
       },
     };
   }
-
-  const matrix = options.getLiveMatrix();
-  if (!matrix) return { kind: 'keepPrevious' };
-
-  const local = projectScreenRectToLocal(screenRect, matrix);
-  if (!local) return { kind: 'keepPrevious' };
-
-  const currentScale = Math.hypot(matrix.a, matrix.b) || 1;
-  const rowH =
-    screenRect.height > 0 ? screenRect.height / currentScale : options.fontSize * options.lineHeight;
-  const offsetY = Math.max(0, (rowH - caretH) / 2);
-
-  return {
-    kind: 'visible',
-    anchor: { localX: local.localX, localY: local.localY + offsetY, height: caretH },
-  };
+  return { kind: 'keepPrevious' };
 }
 
 /**
@@ -244,6 +342,14 @@ export function placeCaretAtPoint(
     return false;
   }
 }
+
+/**
+ * caretPos — the kit's measurement facade (alias of resolveCaretAnchor):
+ * "given the text box and the selection, where is the caret?" Everything the
+ * answer needs (live container matrix, glyph-line rects, degenerate-position
+ * inference) is resolved inside the kit; hosts never measure themselves.
+ */
+export const caretPos = resolveCaretAnchor;
 
 /** Container-local selection rectangle for custom text highlight. */
 export interface TextSelectionRect {

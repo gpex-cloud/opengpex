@@ -196,6 +196,12 @@ export interface GeometryService {
     normalizeAngle: (deg: number) => number;
     /** Snap an angle to the nearest multiple of `step` degrees. */
     snapAngle: (deg: number, step: number) => number;
+    /**
+     * Screen-space angle of a LOCAL direction angle under the layer's pose
+     * (flip mirrored first, then rotation added). Math only — mapping the
+     * result to direction-keyed vocabulary (resize cursors) is the caller's.
+     */
+    poseScreenAngle: (angleDeg: number, rotationDeg: number, flip?: { h: boolean; v: boolean }) => number;
   };
 
   /** Camera service */

@@ -30,6 +30,7 @@
  */
 
 export * from './geometry';
+export * from './caretLayout';
 export * from './useCaretAnchor';
 export * from './Caret';
 export * from './useSelectionRects';

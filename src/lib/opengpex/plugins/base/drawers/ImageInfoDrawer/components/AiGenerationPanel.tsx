@@ -70,6 +70,7 @@ export function AiGenerationPanel({ extra }: AiGenerationPanelProps) {
         {/* Summary Header */}
         <button
           onClick={() => setIsAiInfoExpanded(!isAiInfoExpanded)}
+          onMouseDown={(e) => e.preventDefault()}
           className="w-full flex items-center justify-between p-2 hover:bg-[var(--bg-stage)] transition-colors text-left select-none"
         >
           <div className="flex flex-col pr-2 overflow-hidden">

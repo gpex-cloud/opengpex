@@ -110,8 +110,12 @@ export default function ActionDropdown({
 
   return (
     <div ref={containerRef} className={`relative inline-block select-none outline-none ${className}`}>
-      {/* Trigger Area */}
-      <div 
+      {/* Trigger Area — suppress mousedown default so clickable trigger
+          content (buttons, tabIndex spans) never takes focus on click;
+          otherwise a subsequent Space/Enter re-fires the trigger instead of
+          reaching the canvas shortcuts */}
+      <div
+        onMouseDown={(e) => e.preventDefault()}
         onClick={handleTriggerClick}
         className={`cursor-pointer select-none outline-none transition-all ${disabled ? 'opacity-50 pointer-events-none' : ''}`}
       >

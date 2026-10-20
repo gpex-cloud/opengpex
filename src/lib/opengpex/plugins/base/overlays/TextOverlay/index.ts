@@ -19,12 +19,9 @@
 
 import { EditorPlugin } from '@opengpex/editor/core/types';
 import { TextOverlayMain } from './components';
-import { createTextMoveHandler, createTextResizeHandler, createTextRotateHandler, createTextPlaceHandler } from './interactions';
+import { createTextMoveHandler, createTextResizeHandler, createTextRotateHandler, createTextPlaceHandler, createTextDblClickEditHandler } from './interactions';
 import { TEXT_OVERLAY_COMMANDS } from './commands';
 import * as P from './protocols';
-
-// Side-effect import: registers TextOverlay's LayerOverlay usage source.
-import './usage';
 
 /**
  * TextOverlay Plugin: Text inline editing DOM overlay
@@ -58,10 +55,11 @@ export const plugin: EditorPlugin = {
   component: TextOverlayMain,
 
   interactions: [
-    createTextMoveHandler(),    // Priority 170 - Cmd+drag to move (highest)
-    createTextRotateHandler(),  // Priority 165 - drag rotation handle
-    createTextResizeHandler(),  // Priority 160 - editing state resize handle
-    createTextPlaceHandler(),   // Priority 150 - place/wake up
+    createTextMoveHandler(),        // Priority 170 - Cmd+drag to move (highest)
+    createTextRotateHandler(),      // Priority 165 - drag rotation handle
+    createTextResizeHandler(),      // Priority 160 - pre-edit resize handles
+    createTextPlaceHandler(),       // Priority 150 - place/wake up (craft mode)
+    createTextDblClickEditHandler() // Priority 140 - double-click to edit (pan mode)
   ],
 
   commands: TEXT_OVERLAY_COMMANDS,
@@ -72,12 +70,6 @@ export const plugin: EditorPlugin = {
       name: 'Editing Text Layer ID',
       defaultValue: null,
       scope: 'public',
-    },
-    {
-      id: P.SIGNAL_PLACE_MARQUEE,
-      name: 'Text Place Marquee Rect',
-      defaultValue: null,
-      scope: 'private',
     },
   ],
 };

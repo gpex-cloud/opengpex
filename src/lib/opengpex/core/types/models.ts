@@ -227,9 +227,14 @@ export interface CameraState {
  */
 export type TextBoxMode = 'auto' | 'auto_width' | 'auto_height' | 'fixed';
 
-/** True when the mode hugs its content on the X axis (legacy alias included). */
-export function isAutoWidthMode(mode: TextBoxMode | undefined): boolean {
-  return mode === undefined || mode === 'auto' || mode === 'auto_width';
+/**
+ * Collapse the legacy spellings to the modern canonical value: `undefined`
+ * (pre-boxMode layers) and the persisted-project alias 'auto' both read as
+ * 'auto_width'. Every consumer that branches on the mode normalizes FIRST, so
+ * no downstream code ever needs to know the alias exists.
+ */
+export function normalizeBoxMode(mode: TextBoxMode | undefined): TextBoxMode {
+  return mode === undefined || mode === 'auto' ? 'auto_width' : mode;
 }
 
 export interface TextLayerData {

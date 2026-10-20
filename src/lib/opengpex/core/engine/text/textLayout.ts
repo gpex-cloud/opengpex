@@ -35,6 +35,7 @@
  */
 
 import { TEXT_LAYER_PADDING } from '@opengpex/editor/core/helpers/config';
+import { normalizeBoxMode } from '@opengpex/editor/core/types/models';
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
 
 /**
@@ -108,7 +109,7 @@ export interface TextLayout {
 const CJK_CHAR_RE =
   /[\u1100-\u11FF\u2E80-\uA4CF\uA960-\uA97F\uAC00-\uD7FF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF]|[\u{20000}-\u{2FA1F}]/u;
 
-type WrapUnit = { text: string; kind: 'word' | 'char' | 'space' };
+type WrapUnit = { text: string; kind: 'word' | 'char' | 'space'; start: number };
 
 /**
  * Splits a paragraph into greedy-breaking units: unbreakable words (Latin and
@@ -120,9 +121,11 @@ function tokenizeForWrap(text: string): WrapUnit[] {
   const units: WrapUnit[] = [];
   let run = '';
   let runKind: WrapUnit['kind'] | null = null;
+  let runStart = 0;
+  let cp = 0;
 
   const flush = () => {
-    if (run) units.push({ text: run, kind: runKind! });
+    if (run) units.push({ text: run, kind: runKind!, start: runStart });
     run = '';
     runKind = null;
   };
@@ -133,8 +136,10 @@ function tokenizeForWrap(text: string): WrapUnit[] {
     if (kind !== runKind || kind === 'char') {
       flush();
       runKind = kind;
+      runStart = cp;
     }
     run += ch;
+    cp++;
   }
   flush();
   return units;
@@ -144,36 +149,96 @@ function trimTrailingSpaces(line: string): string {
   return line.replace(/\s+$/, '');
 }
 
+/** One wrapped line, tied back to its source paragraph. */
+export interface WrappedTextLine {
+  /** The line's visible text (spaces collapsed at wrap points are stripped). */
+  text: string;
+  /**
+   * Code point offset of the line's first character within the source
+   * paragraph. Whitespace stripped at break points (trailing spaces, skipped
+   * leading spaces) belongs to the PRECEDING line's half-open source range
+   * `[start, nextStart)` — a caret sitting inside it hangs at this line's
+   * trailing edge, which the caret solver measures straight from the source.
+   */
+  start: number;
+}
+
 /**
  * Word-aware greedy line wrap aligned with DOM contenteditable behaviour:
- * Latin words never break mid-word (a word wider than the line overflows,
- * as in CSS `overflow-wrap: normal`), CJK text breaks between characters,
- * and trailing spaces collapse at a break point.
+ * Latin words move to the next line when they do not fit (never break
+ * mid-word), EXCEPT a word wider than a full line, which the editor DOM
+ * breaks character by character under `overflow-wrap: break-word` — mirrored
+ * here so layout, GPU rendering and the caret solver agree with what the
+ * contenteditable shows. CJK text breaks between characters, and trailing
+ * spaces collapse at a break point. Each line carries its source offset so
+ * consumers can map caret positions back to the paragraph without
+ * reconstructing where the stripped whitespace lived.
  */
 export function wrapText(
   mc: TextMeasureContext,
   text: string,
   maxWidth: number,
-): string[] {
-  if (!text) return [''];
-  const lines: string[] = [];
+): WrappedTextLine[] {
+  if (!text) return [{ text: '', start: 0 }];
+  const lines: WrappedTextLine[] = [];
   let line = '';
+  let lineStart = 0;
 
   for (const unit of tokenizeForWrap(text)) {
     if (unit.kind === 'space') {
-      // Leading spaces after a break point collapse (CSS behaviour).
-      if (line) line += unit.text;
+      // Leading spaces at the very start of the PARAGRAPH render in pre-wrap
+      // (the DOM keeps them, so the layout must keep them too — dropping
+      // them displaces every glyph of the first line against the editor).
+      // Leading spaces after a break point collapse (CSS behaviour): the
+      // pending line keeps its pre-space start and the spaces stay owned by
+      // the preceding line's range, where a caret hangs past its text.
+      if (line) {
+        line += unit.text;
+      } else if (lines.length === 0) {
+        line = unit.text;
+        lineStart = unit.start;
+      }
       continue;
     }
-    const candidate = line + unit.text;
-    if (!line || mc.measureText(candidate).width <= maxWidth) {
-      line = candidate;
+    // The editor DOM styles the contenteditable with `overflow-wrap:
+    // break-word`, so a unit wider than a full line must break here too —
+    // keeping it intact would diverge from what the user sees while editing
+    // (DOM wraps mid-word, layout overflows) and misplace the caret solver,
+    // whose geometry is this wrap. Chromium's break-word moves the oversized
+    // word to a fresh line first (the previous line keeps its remainder),
+    // then breaks it character by character at the line edge.
+    if (mc.measureText(unit.text).width <= maxWidth) {
+      const candidate = line + unit.text;
+      if (!line || mc.measureText(candidate).width <= maxWidth) {
+        if (!line) lineStart = unit.start;
+        line = candidate;
+      } else {
+        lines.push({ text: trimTrailingSpaces(line), start: lineStart });
+        lineStart = unit.start;
+        line = unit.text;
+      }
     } else {
-      lines.push(trimTrailingSpaces(line));
-      line = unit.text;
+      if (line) {
+        lines.push({ text: trimTrailingSpaces(line), start: lineStart });
+        line = '';
+      }
+      let i = 0;
+      for (const ch of unit.text) {
+        if (!line) {
+          lineStart = unit.start + i;
+          line = ch;
+        } else if (mc.measureText(line + ch).width <= maxWidth) {
+          line += ch;
+        } else {
+          lines.push({ text: trimTrailingSpaces(line), start: lineStart });
+          lineStart = unit.start + i;
+          line = ch;
+        }
+        i++;
+      }
     }
   }
-  lines.push(trimTrailingSpaces(line));
+  lines.push({ text: trimTrailingSpaces(line), start: lineStart });
   return lines;
 }
 
@@ -198,7 +263,7 @@ export function computeTextLayout(
 ): TextLayout {
   const fontSize = td.fontSize || 24;
   const lineH = fontSize * (td.lineHeight || 1.4);
-  const boxMode = td.boxMode || 'auto';
+  const boxMode = normalizeBoxMode(td.boxMode);
   // 'auto_height' and 'fixed' both wrap at the box width; only 'fixed' clips
   // the lines that overflow the box height ('auto_height' grows downward).
   const wrapMode = boxMode === 'fixed' || boxMode === 'auto_height';
@@ -240,13 +305,13 @@ export function computeTextLayout(
   // height measurement AND the line assembly loop below — wrapping each
   // paragraph twice ran the identical word-split + Canvas2D measure pass two
   // full times (hot path for every fixed-box text layer per layout).
-  let wrappedParagraphs: string[][] | null = null;
+  let wrappedParagraphs: WrappedTextLine[][] | null = null;
   const wrapped = () =>
     (wrappedParagraphs ??= paragraphs.map((paragraph) => wrapText(mc, paragraph, maxWidth!)));
   if (clipToBox) {
     const perParagraph = wrapped();
     let visibleEnd = perParagraph.length;
-    while (visibleEnd > 0 && perParagraph[visibleEnd - 1].every((l) => !l.trim())) {
+    while (visibleEnd > 0 && perParagraph[visibleEnd - 1].every((l) => !l.text.trim())) {
       visibleEnd--;
     }
     const totalLines = perParagraph
@@ -303,7 +368,7 @@ export function computeTextLayout(
           clipped = true;
           break outer;
         }
-        pushLine(line, lineTop + fbAsc);
+        pushLine(line.text, lineTop + fbAsc);
         lineTop += lineH;
       }
     }

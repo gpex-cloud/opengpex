@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
 import { useFastSync, useFastAnchorSync } from '@opengpex/editor/core/state/volatile';
 import { useTicker } from '@opengpex/editor/core/motion/hooks/animation';
@@ -46,41 +46,19 @@ const CAMERA_RESTORE_DELAY_MS = 150;
  * Layer-edit gestures (move/resize/rotate) never open a camera draft, so
  * this stays inert while the user manipulates a layer — outlines are the
  * manipulation affordance and must not vanish mid-drag.
- *
- * A contributor that declares `keepDuringCameraMove` in its usage stands the
- * auto-hide down entirely (and restores a hidden container immediately when
- * the claim appears), so policy changes stay inside LayerOverlay while
- * intent stays with the plugin that registered it.
  */
 export function useLayerOverlayCameraHide(
-  ref: React.RefObject<HTMLElement | null>,
-  keepDuringCameraMove: boolean
+  ref: React.RefObject<HTMLElement | null>
 ) {
   const { volatileRef } = useEditorServices();
   const { state } = useEditorState();
   const committedFrame = state.activeFrameId ? state.frames.byId[state.activeFrameId] : undefined;
-  const keepRef = useRef(keepDuringCameraMove);
-  useEffect(() => {
-    keepRef.current = keepDuringCameraMove;
-  }, [keepDuringCameraMove]);
   const wasMovingRef = useRef(false);
   const interactionEndTimeRef = useRef(0);
 
   useTicker(() => {
     const el = ref.current;
     if (!el || !committedFrame) return;
-
-    // A contributor claimed camera-move immunity: undo our own hide if it is
-    // still applied, then stand down for as long as the claim holds.
-    if (keepRef.current) {
-      if (el.dataset.cameraHidden === 'true') {
-        delete el.dataset.cameraHidden;
-        el.style.transition = 'opacity 0.2s ease-out';
-        el.style.opacity = '';
-      }
-      wasMovingRef.current = false;
-      return;
-    }
 
     const bufferedCam = volatileRef.current.buffered.frames[committedFrame.id]?.camera;
     const moving = !!bufferedCam && (

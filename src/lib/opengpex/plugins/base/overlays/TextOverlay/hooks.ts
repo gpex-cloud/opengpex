@@ -24,19 +24,19 @@ import { useEditorState, useEditorServices, useVolatileInteraction } from '@open
 import { asLocalShape } from '@opengpex/editor/core/types';
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
+import { LayersDrawerAPI } from '../../drawers/LayersDrawer/protocols';
 import {
   TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID,
   TEXT_OVERLAY_SIGNAL_SESSION_TYPE,
-  TEXT_OVERLAY_SIGNAL_PLACE_MARQUEE,
   TEXT_OVERLAY_EVT_COMMIT_REQUEST,
   _CMD_MODIFY_COMMIT_UID,
 } from './protocols';
 import type { TextEditingSession } from './protocols';
-import { isPointInLayerBorderBand } from './interactions';
-import { consumePendingEditCaretPoint } from './editCaret';
+import { findTextLayerAtPoint, consumePendingEditCaretPoint, isTextMoveDragging } from './interactions';
 import { placeCaretAtPoint } from '@opengpex/editor/widgets/TextCaretKit';
-import { compensateCenterX, compensateCenterY } from './anchor';
-import { isAutoWidthMode } from '@opengpex/editor/core/types/models';
+import { compensateCenterX, compensateCenterY } from './geometry';
+import { normalizeBoxMode } from '@opengpex/editor/core/types/models';
+import { measureEditorBox } from './geometry';
 import { TEXT_PREEDIT_CURSOR } from '@opengpex/editor/icons';
 import { useTextEditorFastSync } from './useFastSync';
 import {
@@ -58,9 +58,6 @@ export function useTextOverlayState() {
 
   const activeCraft = state.interaction.signals[CraftDrawerAPI.signals.activeCraft];
   const editingLayerId = state.interaction.signals[TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID] as string | null;
-  const placeMarquee = state.interaction.signals[TEXT_OVERLAY_SIGNAL_PLACE_MARQUEE] as
-    | { x: number; y: number; w: number; h: number }
-    | null;
 
   // Detect if the layer pointed by signal is still valid
   const layerExists = !!(editingLayerId && activeFrame?.layers.byId[editingLayerId]?.type === 'text');
@@ -88,89 +85,84 @@ export function useTextOverlayState() {
     return () => document.removeEventListener('keydown', handleEscape);
   }, [activeCraft, editingLayerId, actions]);
 
-  // Pre-edit border hover: grab cursor when the pointer is on the border band
-  // of a text layer (a plain drag there moves it — TextMoveHandler's pre-edit
-  // border path). Hover has no InteractionEvent, so replicate the dispatcher's
-  // coordinate math: viewport rect -> screen -> world -> canvas, latest
-  // fast-track camera. Cmd/Ctrl hover and drags own the cursor elsewhere.
-  const borderHoverRef = useRef(false);
+  // Pre-edit cursor: SINGLE WRITER rule —
+  //   dragging (text-move gesture)  → gesture owns the cursor, untouched
+  //   pointer over any text box     → grab
+  //   otherwise                     → text-tool pre-edit cursor
+  // The rule is applied from both inputs that can change it: mousemove
+  // (hover position) and every reactive re-run of this effect (layer state
+  // changes, craft/entry switches) — so no other code path needs to restore
+  // or patch the cursor in this state.
+  // Pre-edit cursor: SINGLE WRITER rule —
+  //   dragging (text-move gesture)  → gesture owns the cursor, untouched
+  //   pointer over any text box     → grab
+  //   otherwise                     → text-tool pre-edit cursor
+  // The rule is REACTIVE: cursorOverride is a dependency, so ANY write to the
+  // cursor (hover mousemove, gesture start/end, the dispatcher's fast.reset
+  // wiping it after a gesture) re-runs the rule and restores the correct
+  // value. No other pre-edit code path writes or restores the cursor.
+  const cursorOverride = useVolatileInteraction('cursorOverride');
+  const hoverCanvasPosRef = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => {
-    if (activeCraft !== 'text' || editingLayerId || !activeFrame) return;
+    if (activeCraft !== 'text' || !activeFrame) return;
     const frame = activeFrame;
 
-    const restoreCursor = () => {
-      if (borderHoverRef.current) {
-        borderHoverRef.current = false;
-        actions.fast.setCursor(TEXT_PREEDIT_CURSOR);
-      }
-    };
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (e.metaKey || e.ctrlKey) return; // Cmd/Ctrl hover sets grab in the effect below
-      if (actions.fast.getCursor() === 'grabbing') return;
-
-      const container = document.querySelector('.editor-viewport-container');
-      if (!container) return;
-      const containerRect = container.getBoundingClientRect();
-      const cam = actions.fast.latestCamera(frame.id) || frame.camera;
-      const world = geometry.space.screenToWorld(e.clientX - containerRect.left, e.clientY - containerRect.top, frame, cam);
-      const canvasPoint = geometry.space.worldToLocal(world.x, world.y, frame);
-
-      const order = frame.layers.order;
-      let onBorder = false;
-      for (let i = order.length - 1; i >= 0; i--) {
-        const layer = frame.layers.byId[order[i]];
-        if (!layer || layer.type !== 'text' || !layer.visible) continue;
-        if (isPointInLayerBorderBand(layer, frame, canvasPoint)) {
-          onBorder = true;
-          break;
-        }
-      }
-
-      if (onBorder) {
-        borderHoverRef.current = true;
-        if (actions.fast.getCursor() !== 'grab') actions.fast.setCursor('grab');
-      } else {
-        restoreCursor();
-      }
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      restoreCursor();
-    };
-  }, [activeCraft, editingLayerId, activeFrame, actions, geometry]);
-
-  // Dynamic cursor and keyboard modifier key control (Cmd/Ctrl → grab in both pre-edit and editing states)
-  useEffect(() => {
-    const isTextCraft = activeCraft === 'text';
-    const isPreEdit = isTextCraft && !editingLayerId;
-
-    if (!isTextCraft) {
-      // Not in text craft mode at all, clean up any lingering cursors
-      if (
-        actions.fast.getCursor() === TEXT_PREEDIT_CURSOR ||
-        actions.fast.getCursor() === 'grab'
-      ) {
+    // Live editing session: the editor owns the cursor (default none, Cmd
+    // switches to grab via the dedicated effect below) — the pre-edit rule
+    // must not write while the contenteditable is up.
+    if (editingLayerId) {
+      if (cursorOverride === 'grab' || cursorOverride === TEXT_PREEDIT_CURSOR) {
         actions.fast.setCursor(null);
       }
       return;
     }
 
-    // Default cursor for pre-edit state
-    if (isPreEdit) {
-      if (
-        actions.fast.getCursor() !== 'grab' &&
-        actions.fast.getCursor() !== 'grabbing' &&
-        actions.fast.getCursor() !== TEXT_PREEDIT_CURSOR
-      ) {
-        actions.fast.setCursor(TEXT_PREEDIT_CURSOR);
-      }
-    }
+    const applyCursorRule = () => {
+      // The move gesture owns the cursor while its drag is live.
+      if (cursorOverride === 'grabbing' || isTextMoveDragging()) return;
+      const overBox =
+        !!hoverCanvasPosRef.current &&
+        !!findTextLayerAtPoint(geometry, frame, hoverCanvasPosRef.current);
+      actions.fast.setCursor(overBox ? 'grab' : TEXT_PREEDIT_CURSOR);
+    };
 
-    // The "rest" cursor when Cmd is released (pre-edit → preedit cursor; editing → null)
-    const restCursor = isPreEdit ? TEXT_PREEDIT_CURSOR : null;
+    applyCursorRule();
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isTextMoveDragging()) return;
+      const container = document.querySelector('.editor-viewport-container');
+      if (!container) return;
+      const containerRect = container.getBoundingClientRect();
+      const cam = actions.fast.latestCamera(frame.id) || frame.camera;
+      const world = geometry.space.screenToWorld(e.clientX - containerRect.left, e.clientY - containerRect.top, frame, cam);
+      hoverCanvasPosRef.current = geometry.space.worldToLocal(world.x, world.y, frame);
+      applyCursorRule();
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      // Cleanup deliberately does NOT touch the cursor: the rule re-applies
+      // on the next cursorOverride change or mousemove.
+    };
+  }, [activeCraft, editingLayerId, activeFrame, actions, geometry, cursorOverride]);
+
+  // Craft exit: the rule's reactive scope ends with the craft, so drop its
+  // cursor explicitly — otherwise the pre-edit cursor survives into pan mode.
+  useEffect(() => {
+    if (activeCraft === 'text') return;
+    if (cursorOverride === TEXT_PREEDIT_CURSOR || cursorOverride === 'grab') {
+      actions.fast.setCursor(null);
+    }
+  }, [activeCraft, cursorOverride, actions]);
+
+  // Editing state: Cmd/Ctrl press switches to the grab cursor for the
+  // editing-state Cmd-drag move; releasing restores the normal caret cursor.
+  // The PRE-edit state has no modifier logic — plain drag already moves
+  // (two-level click model), so its cursor is hover-driven only.
+  useEffect(() => {
+    const isEditing = activeCraft === 'text' && !!editingLayerId;
+    if (!isEditing) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey) {
@@ -186,14 +178,14 @@ export function useTextOverlayState() {
     const handleKeyUp = (e: KeyboardEvent) => {
       if (!e.metaKey && !e.ctrlKey) {
         if (actions.fast.getCursor() === 'grab') {
-          actions.fast.setCursor(restCursor);
+          actions.fast.setCursor(null);
         }
       }
     };
 
     const handleWindowBlur = () => {
       if (actions.fast.getCursor() === 'grab') {
-        actions.fast.setCursor(restCursor);
+        actions.fast.setCursor(null);
       }
     };
 
@@ -217,41 +209,20 @@ export function useTextOverlayState() {
 
   return {
     activeFrame,
+    activeCraft,
     editingLayerId,
     layerExists,
-    placeMarquee,
-  };
-}
-
-// ─── usePlaceMarquee ───────────────────────────────────────────────────────────
-
-/**
- * usePlaceMarquee: Calculates screen-space projection for the drag-to-create preview marquee.
- */
-export function usePlaceMarquee(rect: { x: number; y: number; w: number; h: number }) {
-  const { activeFrame } = useEditorState();
-  const { geometry } = useEditorServices();
-  if (!activeFrame) return null;
-
-  const canvas = activeFrame.canvas;
-  const viewMatrix = geometry.camera.getCameraMatrix(activeFrame, activeFrame.camera);
-  const topLeft = viewMatrix.apply({ x: canvas.w / 2 + rect.x, y: canvas.h / 2 + rect.y });
-  const scale = viewMatrix.a || 1;
-
-  return {
-    left: topLeft.x,
-    top: topLeft.y,
-    width: Math.max(rect.w * scale, 1),
-    height: Math.max(rect.h * scale, 1),
   };
 }
 
 /**
  * Shared offscreen measuring surface for the editor's layout calls (same
  * structurally-satisfied Canvas2D context the vector-source mapper uses).
+ * Exported so the inline caret solver (TextCaretKit caretLayout) measures
+ * with the identical context — caret geometry and GPU geometry must agree.
  */
 let editorMeasureContext: TextMeasureContext | null = null;
-function getEditorMeasureContext(): TextMeasureContext | null {
+export function getEditorMeasureContext(): TextMeasureContext | null {
   if (editorMeasureContext) return editorMeasureContext;
   if (typeof document === 'undefined') return null;
   const ctx = document.createElement('canvas').getContext('2d');
@@ -357,12 +328,9 @@ export function useInlineTextEditing(
           }
         }
         if (activeFrame) {
-          const mode = textData?.boxMode || 'auto';
-          if (isAutoWidthMode(mode)) {
-            const rect = el.getBoundingClientRect();
-            const k = activeFrame.camera.k || 1;
-            const w = Math.max(Math.ceil(rect.width / k), 20);
-            const h = Math.max(Math.ceil(rect.height / k), 20);
+          const mode = normalizeBoxMode(textData?.boxMode);
+          if (mode === 'auto_width') {
+            const { w, h } = measureEditorBox(el, activeFrame.camera.k);
             notifyBoundingChange(w, h);
           }
         }
@@ -377,19 +345,15 @@ export function useInlineTextEditing(
     const el = editorRef.current;
     if (!el || !activeFrame) return;
     const content = el.innerText || '';
-    const mode = textData?.boxMode || 'auto';
+    const mode = normalizeBoxMode(textData?.boxMode);
 
     // Content-hugging modes re-measure the box from the DOM on every input.
     // auto_width measures both axes; auto_height keeps the locked width and
     // re-measures only the height (the CSS width never changes).
-    if (isAutoWidthMode(mode) || mode === 'auto_height') {
-      const camera = activeFrame.camera;
-      const rect = el.getBoundingClientRect();
-      const actualW = isAutoWidthMode(mode)
-        ? Math.ceil(rect.width / camera.k) || 4
-        : layer!.bounding.w;
-      const actualH = Math.ceil(rect.height / camera.k) || 20;
-      notifyBoundingChange(actualW, actualH);
+    if (mode === 'auto_width' || mode === 'auto_height') {
+      const { w, h } = measureEditorBox(el, activeFrame.camera.k);
+      const actualW = mode === 'auto_width' ? w : layer!.bounding.w;
+      notifyBoundingChange(actualW, h);
     }
 
     actions.updateLayer(activeFrame.id, layerId, {
@@ -438,41 +402,52 @@ export function useInlineTextEditing(
       return;
     }
 
-    const content = editorRef.current?.innerText?.trim() || '';
+    // Empty determination trims, but the stored content must NOT: a trailing
+    // space the user typed is a real edit, and trimming it here silently
+    // discarded it on every commit (most visible in fixed/auto_height boxes
+    // where a trailing space at the line edge renders as nothing).
+    const raw = editorRef.current?.innerText || '';
+    const content = raw.trim() ? raw : '';
 
-    // ── Empty content: equivalent to cancel ──
+    // ── Empty content ──
+    // Create session: undo removes the freshly placed layer entirely.
+    // Modify session: the user deleted every character and committed — the
+    // layer is dead (Figma/Sketch behavior). Restore the snapshot silently
+    // FIRST so the undoable remove command baselines the PRE-EDIT state and
+    // Cmd+Z brings the layer back with its original text.
     if (!content) {
       if (session.type === 'create') {
         // Clear signals FIRST to prevent state tearing, then undo
         actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
         actions.setStateSignal(TEXT_OVERLAY_SIGNAL_SESSION_TYPE, null);
         actions.history.undo();
-      } else if (session.originalSnapshot) {
-        actions.updateLayer(session.frameId, session.layerId, session.originalSnapshot);
+      } else {
+        if (session.originalSnapshot) {
+          actions.updateLayer(session.frameId, session.layerId, session.originalSnapshot);
+        }
         actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
         actions.setStateSignal(TEXT_OVERLAY_SIGNAL_SESSION_TYPE, null);
+        actions.executeCommand(LayersDrawerAPI.commands.remove.uid, {
+          frameId: session.frameId,
+          layerId: session.layerId,
+        });
       }
       sessionRef.current = null;
       return;
     }
 
     // ── Has content: measure final bounding ──
-    const mode = textData?.boxMode || 'auto';
+    const mode = normalizeBoxMode(textData?.boxMode);
     let finalBounding = layer.bounding;
     let finalVisibleShape = layer.visibleShape!;
     let finalCx = layer.cx;
     let finalCy = layer.cy;
 
-    if (isAutoWidthMode(mode) || mode === 'auto_height') {
+    if (mode === 'auto_width' || mode === 'auto_height') {
       const el = editorRef.current;
       if (el) {
-        const rect = el.getBoundingClientRect();
-        const k = activeFrame.camera.k || 1;
-        const w = isAutoWidthMode(mode)
-          ? Math.max(Math.ceil(rect.width / k), 4)
-          : layer.bounding.w;
-        const h = Math.max(Math.ceil(rect.height / k), 20);
-        finalBounding = { w, h };
+        const { w, h } = measureEditorBox(el, activeFrame.camera.k);
+        finalBounding = { w: mode === 'auto_width' ? w : layer.bounding.w, h };
         finalVisibleShape = asLocalShape({ x: 0, y: 0, w, h });
         // Align-aware anchor compensation, mirroring the live
         // notifyBoundingChange path: the width change anchors per textAlign
@@ -595,7 +570,7 @@ export function useInlineTextEditing(
     if (e.metaKey || e.ctrlKey) e.preventDefault();
   }, []);
 
-  const boxMode = textData?.boxMode || 'auto';
+  const boxMode = normalizeBoxMode(textData?.boxMode);
   // Fixed mode: vertical position of the content block inside the box comes
   // from the SHARED layout (computeTextLayout) as vAlignOffset — the same
   // offset the GPU renderer bakes into its baselines. Flex centering is NOT

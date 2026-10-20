@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.22
+
+- Text Tool: major rework — text boxes now behave like standard design tools: click to select, drag to move or resize, double-click to edit, with all text boxes outlined while the tool is active. Text rendering and the editing caret are pixel-faithful to what you see while typing, including line wraps, spaces and boxes that are too small for their content
+
+---
+
 ## v2.0.21
 
 - Export: AVIF files now export as true HDR when the document's HDR switch is on — 10-bit BT.2020 PQ with the correct color metadata marker, so HDR phones and TVs show real highlights instead of a washed-out SDR render (switch off still exports the regular SDR rendition)

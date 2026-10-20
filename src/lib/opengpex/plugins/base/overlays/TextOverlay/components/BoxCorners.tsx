@@ -30,7 +30,15 @@ import React from "react";
  * - Screen-invariant: Counter-scaled against parent matrix zoom, keeping physical screen size
  *   and stroke width constant regardless of canvas camera zoom (matching TransformGizmo).
  */
-const CORNER_ARM_PX = 5;
+const CORNER_ARM_PX = 7;
+
+/**
+ * Default outset of the brackets from the box edges (screen px), matching the
+ * LayerOverlay outline's -inset-x-[6px] -inset-y-[4px] so brackets, edge
+ * ticks and the hover outline all sit on the same line.
+ */
+export const CORNER_OUTSET_X_PX = 6;
+export const CORNER_OUTSET_Y_PX = 4;
 
 export interface BoxCornersProps {
   /** Box width in canvas pixels (backwards-compat) */
@@ -61,8 +69,11 @@ export const BoxCorners = React.memo(function BoxCorners({
   offsetPx,
 }: BoxCornersProps) {
   const arm = armLengthPx;
-  const offX = offsetX ?? offsetPx ?? 8;
-  const offY = offsetY ?? offsetPx ?? 8;
+  // Outset aligned with the pre-edit LayerOverlay outline (-inset-x-[6px]
+  // -inset-y-[4px]) so the editing brackets and the selection gizmo sit at
+  // the same visual distance from the box edge.
+  const offX = offsetX ?? offsetPx ?? CORNER_OUTSET_X_PX;
+  const offY = offsetY ?? offsetPx ?? CORNER_OUTSET_Y_PX;
 
   const renderCorner = (
     points: string,

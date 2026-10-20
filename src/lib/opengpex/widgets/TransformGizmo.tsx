@@ -20,6 +20,7 @@
 'use client';
 
 import React, { CSSProperties } from 'react';
+import { poseScreenAngle } from '@opengpex/editor/core/geometry/operators/rotator';
 import { ROTATE_CURSOR } from '@opengpex/editor/icons';
 
 /**
@@ -79,8 +80,12 @@ const HANDLE_GEOMETRY: readonly GizmoHandleDef[] = [
  * Cursors are bidirectional, so the direction is folded into [0,180) and then
  * bucketed every 45°: e/w → `ew-resize`, ne/sw → `nesw-resize`,
  * n/s → `ns-resize`, nw/se → `nwse-resize`.
+ *
+ * Pure UI vocabulary: the angle math (direction under flip + rotation) lives
+ * in `poseScreenAngle` (core/geometry/operators/rotator.ts) — compose the
+ * two for pose-aware handle cursors.
  */
-function cursorForAngle(angleDeg: number): string {
+export function cursorForScreenAngle(angleDeg: number): string {
   const a = ((angleDeg % 180) + 180) % 180;
   const bucket = Math.round(a / 45) % 4;
   switch (bucket) {
@@ -89,31 +94,6 @@ function cursorForAngle(angleDeg: number): string {
     case 2: return 'ns-resize';
     default: return 'nesw-resize';  // pointing up-right
   }
-}
-
-/**
- * Resolve a handle's cursor for the layer's current pose.
- *
- * The selection box is drawn through the layer's full world matrix (see each
- * overlay's pose-sync), so after a canvas Rotate Left/Right the box self-rotates
- * — but CSS `cursor` keywords ignore CSS `transform`. We therefore rotate the
- * handle's local outward normal by `layer.rotation` (mirroring flips first,
- * matching the renderer's R × F convention) and pick the matching cursor.
- */
-function resolveHandleCursor(
-  angle: number,
-  rotation: number,
-  flip: { h: boolean; v: boolean } | undefined
-): string {
-  // Mirror the direction vector before rotating (F then R, as in getOrientationMatrix).
-  const rad = (angle * Math.PI) / 180;
-  let dx = Math.cos(rad);
-  let dy = Math.sin(rad);
-  if (flip?.h) dx = -dx;
-  if (flip?.v) dy = -dy;
-
-  const screenAngle = (Math.atan2(dy, dx) * 180) / Math.PI + rotation;
-  return cursorForAngle(screenAngle);
 }
 
 export interface TransformGizmoProps {
@@ -202,7 +182,7 @@ export const TransformGizmo = React.memo(function TransformGizmo({
           style={{
             width: `${handleSizePx}px`,
             height: `${handleSizePx}px`,
-            cursor: resolveHandleCursor(angle, rotation, flip),
+            cursor: cursorForScreenAngle(poseScreenAngle(angle, rotation, flip)),
             transform: 'translate(-50%, -50%)',
             ...style,
           }}

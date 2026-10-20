@@ -19,29 +19,52 @@
 
 "use client";
 
-import React from "react";
-import { usePlaceMarquee } from "../hooks";
-
-export interface PlaceMarqueeProps {
-  rect: { x: number; y: number; w: number; h: number };
-}
+import React, { useRef } from "react";
+import { useFastSync, useFastRectSync } from "@opengpex/editor/core/state/volatile";
+import { TEXT_PLACE_MARQUEE_TRANSIENT_KEY } from "../protocols";
 
 /**
  * PlaceMarquee: dashed preview rectangle for the drag-to-create gesture.
- * Screen-space projection is managed by usePlaceMarquee so presentation
- * remains decoupled from camera matrix math.
+ *
+ * Follows the ClipOverlay fast-track practice: the rect lives in the volatile
+ * transient store (written by the place handler at pointermove rate) and this
+ * component is driven by the Ticker — left/top/width/height are written
+ * straight to the DOM ref per frame via `useFastRectSync`, with a companion
+ * `useFastSync` gate for the empty→hidden transition. React renders this
+ * component exactly once per pre-edit session; zero re-renders while dragging.
+ * The projection (canvas-local → screen, camera included) is handled inside
+ * `useFastRectSync` against the merged fast camera, so the box stays glued to
+ * the pointer even mid-pan/zoom.
  */
-export const PlaceMarquee = React.memo(function PlaceMarquee({
-  rect,
-}: PlaceMarqueeProps) {
-  const style = usePlaceMarquee(rect);
-  if (!style) return null;
+export const PlaceMarquee = React.memo(function PlaceMarquee() {
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  // Box geometry: canvas-local rect → screen px (fast camera merged in).
+  useFastRectSync(boxRef, true, {
+    selector: (v) =>
+      (v.transient[TEXT_PLACE_MARQUEE_TRANSIENT_KEY] as
+        | { x: number; y: number; w: number; h: number }
+        | null
+        | undefined) ?? null,
+    space: "local",
+  });
+
+  // Visibility gate: the transient slot is empty before the drag starts and
+  // after it ends — hide instead of painting a stale box at (0,0).
+  useFastSync(boxRef, true, (v) => {
+    const el = boxRef.current;
+    if (!el) return;
+    const has = !!v.transient[TEXT_PLACE_MARQUEE_TRANSIENT_KEY];
+    const next = has ? "visible" : "hidden";
+    if (el.style.visibility !== next) el.style.visibility = next;
+  });
 
   return (
     <div
+      ref={boxRef}
       className="absolute pointer-events-none"
       style={{
-        ...style,
+        visibility: "hidden",
         border: "1px dashed var(--accent, #6366f1)",
         background: "rgba(99, 102, 241, 0.08)",
         boxSizing: "border-box",

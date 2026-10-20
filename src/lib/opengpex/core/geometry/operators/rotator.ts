@@ -18,12 +18,14 @@
  */
 
 /**
- * rotator.ts — pure arithmetic helpers for the free-rotation gesture.
+ * rotator.ts — pure arithmetic helpers for rotation gestures and rotated
+ * poses.
  *
- * These are the ONLY place rotation angle normalization and snapping are
- * defined.  The rotation handler (MarkerOverlay / TextOverlay) calls them;
- * no sin/cos or direction-matrix construction happens here — that stays in
- * `getOrientationMatrix` (transform.ts).
+ * Angle normalization, Shift-snapping, and the screen-space angle of a
+ * direction under a layer's pose (flip + rotation) are defined ONLY here.
+ * The rotation handlers and handle-cursor resolution (MarkerOverlay /
+ * TextOverlay / TransformGizmo) call these; full direction-MATRIX
+ * construction stays in `getOrientationMatrix` (transform.ts).
  */
 
 /**
@@ -51,4 +53,33 @@ export function normalizeAngle(deg: number): number {
  */
 export function snapAngle(deg: number, step: number): number {
   return Math.round(deg / step) * step;
+}
+
+/**
+ * Screen-space angle of a LOCAL direction angle under the layer's current
+ * pose (flip + rotation).
+ *
+ * A selection box is drawn through the layer's full world matrix, so after a
+ * canvas rotation the box self-rotates — but anything keyed to the box's
+ * local directions (resize cursors, handle hit semantics) must rotate the
+ * LOCAL direction angle by the layer pose manually: mirror by flip first
+ * (matching the renderer's R × F convention), then add the layer rotation.
+ *
+ *   poseScreenAngle(225, 90, { h: true, v: false }) → 315
+ *   (a 225° local direction, mirrored horizontally and rotated 90°)
+ *
+ * Purely mathematical: the result is an angle in degrees — mapping it to any
+ * direction-keyed vocabulary (CSS resize cursors, …) is the consumer's concern.
+ */
+export function poseScreenAngle(
+  angleDeg: number,
+  rotationDeg: number,
+  flip?: { h: boolean; v: boolean },
+): number {
+  const rad = (angleDeg * Math.PI) / 180;
+  let dx = Math.cos(rad);
+  let dy = Math.sin(rad);
+  if (flip?.h) dx = -dx;
+  if (flip?.v) dy = -dy;
+  return (Math.atan2(dy, dx) * 180) / Math.PI + rotationDeg;
 }

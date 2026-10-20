@@ -21,7 +21,6 @@
 
 import { EditorPlugin } from '@opengpex/editor/core/types';
 import { LayerOverlayContainer, LayerOverlayToggle } from './components';
-import { createTextDblClickEditHandler } from './interactions';
 import { LAYER_OVERLAY_COMMANDS } from './commands';
 import * as P from './protocols';
 
@@ -46,7 +45,7 @@ export const plugin: EditorPlugin = {
   component: LayerOverlayContainer,
   order: 10,
   initialConfig: { showAlways: false },
-  interactions: [createTextDblClickEditHandler()],
+  interactions: [],
   commands: Object.values(LAYER_OVERLAY_COMMANDS),
   contributions: { ui: [
     {

@@ -83,4 +83,10 @@ export const LayersDrawerAPI = {
     maskFocus: MASK_FOCUS_KEY,
     showSubLayers: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SHOW_SUB_LAYERS_KEY}` as const,
   },
+  commands: {
+    /** Remove a layer (undoable; group removal takes its children with it) */
+    remove: {
+      uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_REMOVE}`,
+    } as { uid: string; _payload: { frameId?: string; layerId?: string } },
+  },
 } as const;

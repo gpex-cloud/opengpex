@@ -30,9 +30,7 @@ import {
   useVolatileInteraction,
 } from "@opengpex/editor/core/context";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
-import { TransformGizmo } from "@opengpex/editor/widgets/TransformGizmo";
 import { useLayerOverlayCommands } from "./hooks";
-import { aggregateLayerOverlayUsage } from "./usage";
 
 import { useLayerOverlaySync, useLayerMoveDeltaSync, useLayerOverlayCameraHide } from "./useFastSync";
 
@@ -46,7 +44,6 @@ export function LayerOverlayItem({
   isHoveringActive,
   isHovered,
   showAlways,
-  forceShow,
 }: {
   layer: Layer;
   index: number;
@@ -54,12 +51,11 @@ export function LayerOverlayItem({
   isHoveringActive: boolean;
   isHovered: boolean;
   showAlways: boolean;
-  forceShow: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
   const prevVisibleRef = useRef(false);
-  const isVisible = showAlways || forceShow || (isActive && isHoveringActive) || isHovered;
+  const isVisible = showAlways || (isActive && isHoveringActive) || isHovered;
 
   // Use viewport-unified sync hook: Optimized for Screen Space (Ticker + Matrix)
   // [Perf] Only register ticker when overlay is visible — eliminates N×120Hz
@@ -92,7 +88,7 @@ export function LayerOverlayItem({
     >
       {/* Unified Layer Outline (Standard 1px Contrast Line) */}
       <div
-        className={`absolute -inset-[1px] transition-opacity duration-200 pointer-events-none ${isVisible ? "opacity-100" : "opacity-0"}`}
+        className={`absolute -inset-x-[6px] -inset-y-[4px] transition-opacity duration-200 pointer-events-none ${isVisible ? "opacity-100" : "opacity-0"}`}
       >
         <svg className="absolute inset-0 w-full h-full overflow-visible">
           {/* Base Layer: Solid Black Line for contrast */}
@@ -134,23 +130,6 @@ export function LayerOverlayItem({
             </span>
           </div>
         </div>
-        {/* Generic gizmo slot: rendered for every layer type claimed by a usage
-            source. Handles are pointer-events-auto inside the pointer-events-none
-            item; `data-overlay-gizmo-layer` lets the OWNING plugin's interaction
-            handlers resolve the target layer. */}
-        {forceShow && (
-          <div data-overlay-gizmo-layer={layer.id} className="absolute inset-0">
-            <TransformGizmo
-              rotation={layer.rotation}
-              flip={layer.flip}
-              handleSizePx={10}
-              handleClassName="border border-gray-400"
-              showRotateHandle
-              rotateHandleOffset={24}
-              rotateHandleClassName="border border-gray-400"
-            />
-          </div>
-        )}
       </div>
     </div>
   );
@@ -174,22 +153,17 @@ export function LayerOverlayContainer() {
 }
 
 function LayerOverlayContent() {
-  const { activeFrame, state } = useEditorState();
+  const { activeFrame } = useEditorState();
   const hoveredLayerId = useVolatileInteraction('hoveredLayerId');
   const isHoveringActive = useVolatileInteraction('isHoveringActiveLayer');
   const activeLayerId = activeFrame?.activeLayerId;
   const { isAlwaysOn: showAlways } = useLayerOverlayCommands();
 
-  // Aggregate usage intents from every registered plugin (render-time pure
-  // call — useEditorState already re-renders this component on signal change).
-  const usage = aggregateLayerOverlayUsage({ signals: state.interaction.signals });
-
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Host-owned visibility policy: fade the whole container during camera moves
-  // unless a usage contributor declared keepDuringCameraMove. Per-item hooks
-  // stay policy-free (matrix sync + canvas-sized hide only).
-  useLayerOverlayCameraHide(containerRef, usage.keepDuringCameraMove);
+  // Host-owned visibility policy: fade the whole container during camera moves.
+  // Per-item hooks stay policy-free (matrix sync + canvas-sized hide only).
+  useLayerOverlayCameraHide(containerRef);
 
   // Core: Sync viewport rotation animation (counter-animation protocol)
   useOverlayRotationSync(containerRef, activeFrame);
@@ -210,10 +184,9 @@ function LayerOverlayContent() {
             layer={layer}
             index={idx + 1}
             isActive={layer.id === activeLayerId}
-            isHoveringActive={isHoveringActive && !usage.suppressHover}
-            isHovered={layer.id === hoveredLayerId && !usage.suppressHover}
+            isHoveringActive={isHoveringActive}
+            isHovered={layer.id === hoveredLayerId}
             showAlways={!!showAlways}
-            forceShow={usage.gizmoTypes.has(layer.type)}
           />
         ))}
 

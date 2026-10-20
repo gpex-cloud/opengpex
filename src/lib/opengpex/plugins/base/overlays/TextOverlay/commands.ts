@@ -22,10 +22,10 @@
 import { EditorContextValue, EditorCommand, Layer, Frame, asLocalShape } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
-import { isAutoWidthMode } from '@opengpex/editor/core/types/models';
+import { normalizeBoxMode } from '@opengpex/editor/core/types/models';
 import { TEXT_LAYER_PADDING } from '@opengpex/editor/core/helpers/config';
-import { wrapText } from '@opengpex/editor/core/engine/text/textLayout';
-import { compensateCenterX, compensateCenterY } from './anchor';
+import { computeTextLayout } from '@opengpex/editor/core/engine/text/textLayout';
+import { compensateCenterX, compensateCenterY } from './geometry';
 import * as P from './protocols';
 
 // ─── Auto-grouping helpers ───────────────────────────────────────────────────
@@ -206,8 +206,8 @@ const updatePropertiesCommand: EditorCommand<{ frameId: string; layerId: string;
     let bounding = layer.bounding;
     let cx = layer.cx;
     let cy = layer.cy;
-    const mode = textData.boxMode || 'auto';
-    if (isAutoWidthMode(mode)) {
+    const mode = normalizeBoxMode(textData.boxMode);
+    if (mode === 'auto_width') {
       const measured = measureTextBounding(textData);
       if (measured.w !== bounding.w || measured.h !== bounding.h) {
         // Align-aware anchor compensation — same formula the editing commit
@@ -240,38 +240,33 @@ const updatePropertiesCommand: EditorCommand<{ frameId: string; layerId: string;
 };
 
 /**
- * Measure the content bounding of a text layer, mirroring the DOM line-box
- * model the InlineTextEditor measurement produces: one line box of
- * `fontSize × lineHeight` per content line, plus padding on both axes.
- * With `wrapWidth` (auto_height mode) lines wrap at the locked width first.
- * Slightly generous is fine — it only has to never clip the glyphs.
+ * Measure the content bounding of a text layer for the style-patch path
+ * (cmd.update_properties), delegating wrapping and glyph measurement to the
+ * shared `computeTextLayout` so this path can never drift from the layout the
+ * GPU renderer and the DOM editor both consume. The height uses the same
+ * line-box model as the DOM editor: one `fontSize × lineHeight` box per
+ * content line, plus padding on both axes. With `wrapWidth` (auto_height
+ * mode) lines wrap at the locked width first. Slightly generous is fine — it
+ * only has to never clip the glyphs.
  */
 function measureTextBounding(td: TextLayerData, wrapWidth?: number): { w: number; h: number } {
   const ctx = getMeasureCtx();
-  const fontStyle = td.italic ? 'italic' : 'normal';
-  ctx.font = `${fontStyle} ${td.fontWeight || 400} ${td.fontSize || 24}px ${td.fontFamily || 'sans-serif'}`;
-  // Shared measure context: always reset so a previous layer's spacing never leaks in.
-  if ('letterSpacing' in ctx) ctx.letterSpacing = `${td.letterSpacing || 0}px`;
-  const lineH = (td.fontSize || 24) * (td.lineHeight || 1.4);
-  let lineCount = 0;
+  const layout = computeTextLayout(
+    ctx,
+    { ...td, boxMode: wrapWidth !== undefined ? 'auto_height' : 'auto_width' },
+    wrapWidth ?? 0,
+    0,
+  );
   let maxLineW = 0;
-  for (const paragraph of (td.content || '').split('\n')) {
-    const lines = wrapWidth !== undefined
-      ? wrapText(ctx, paragraph, wrapWidth - TEXT_LAYER_PADDING.x * 2)
-      : [paragraph];
-    lineCount += lines.length;
-    for (const line of lines) maxLineW = Math.max(maxLineW, ctx.measureText(line).width);
-  }
+  for (const line of layout.lines) maxLineW = Math.max(maxLineW, line.width);
+  const h = Math.max(Math.ceil(layout.lines.length * layout.lineHeight) + TEXT_LAYER_PADDING.y * 2, 20);
   if (wrapWidth !== undefined) {
     // auto_height: the width is locked; only the height follows the content.
-    return {
-      w: wrapWidth,
-      h: Math.max(Math.ceil(lineCount * lineH) + TEXT_LAYER_PADDING.y * 2, 20),
-    };
+    return { w: wrapWidth, h };
   }
   return {
     w: Math.max(Math.ceil(maxLineW) + TEXT_LAYER_PADDING.x * 2, 4),
-    h: Math.max(Math.ceil(lineCount * lineH) + TEXT_LAYER_PADDING.y * 2, 20),
+    h,
   };
 }
 

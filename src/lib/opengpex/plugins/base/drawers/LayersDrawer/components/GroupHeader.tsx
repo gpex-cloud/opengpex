@@ -130,6 +130,7 @@ function GroupHeaderView({
     <div onClick={onSelect} className={`flex items-center gap-2 px-1.5 h-[32px] rounded-lg cursor-pointer transition-all ${borderClass}`}>
       <button
         onClick={onToggleCollapse}
+        onMouseDown={(e) => e.preventDefault()}
         title={isCollapsed ? "Expand group" : "Collapse group"}
         className={`relative w-[24px] h-[24px] shrink-0 rounded-md border overflow-hidden flex items-center justify-center transition-all cursor-pointer hover:ring-2 hover:ring-[var(--border-light)] select-none border-[var(--border-subtle)] bg-[var(--bg-stage)]/40 hover:border-[var(--border-light)] ${
           !group.visible ? "opacity-30 grayscale" : "opacity-100"

@@ -102,7 +102,7 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
 
   const tipContent =
     activeCraft === "text"
-      ? "Click canvas to place text\nHold Cmd/Ctrl to move\nEsc to exit"
+      ? "Drag empty canvas to place text\nClick text to select · drag to move\nDouble-click text to edit\nEsc to exit"
       : activeCraft === "marker"
         ? "Draw marker on canvas\nTab to cycle marker type\nEsc to exit"
         : activeCraft === "brush"

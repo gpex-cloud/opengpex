@@ -22,10 +22,51 @@
 import React from "react";
 import { TEXT_LAYER_PADDING } from "@opengpex/editor/core/helpers/config";
 import { OUTER_CANVAS_PAN_IMMUNITY_ATTR } from "@opengpex/editor/stage/interaction/InteractionImmunity";
-import { toCssColor4 } from "@opengpex/editor/core/engine/color";
-import { useInlineTextEditing } from "../hooks";
+import type { ColorValue } from "@opengpex/editor/core/engine/color";
+import { toCssColor4, toRgb8 } from "@opengpex/editor/core/engine/color";
+import { useInlineTextEditing, getEditorMeasureContext } from "../hooks";
+import { getEditorMinWidth, safeCornerArmRatio } from "../geometry";
 import { BoxCorners } from "./BoxCorners";
 import { TextCaret, TextSelection } from "@opengpex/editor/widgets/TextCaretKit";
+
+/**
+ * Editing-scrim feature gate. When true, the contenteditable gets a
+ * semi-transparent background tinted OPPOSITE to the text's luminance, so the
+ * text and caret stay readable over busy image content. Pure rgba tint only —
+ * never backdrop-filter: blur(), which re-filters the underlying canvas every
+ * frame and has already caused sustained-fan issues in this project.
+ * Surface this constant as a system preference when one exists.
+ */
+const TEXT_EDIT_SCRIM_ENABLED = false;
+
+/** Scrim opacity for both the dark and the light tint. */
+const TEXT_EDIT_SCRIM_ALPHA = 0.3;
+
+/**
+ * WCAG relative luminance of the text color, from sRGB 8-bit channels.
+ * Below this threshold the text reads as "dark" and gets a light scrim;
+ * at or above it, a dark scrim.
+ */
+const TEXT_SCRIM_LUMINANCE_THRESHOLD = 0.35;
+
+function linearize(channel8: number): number {
+  const c = channel8 / 255;
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+/**
+ * Contrast scrim color for the given text color: dark tint behind light text,
+ * light tint behind dark text. Recomputed per render is intentional — it is a
+ * handful of arithmetic ops and a conversion, negligible even per keystroke.
+ */
+function textEditScrim(textColor: ColorValue): string {
+  const { r, g, b } = toRgb8(textColor);
+  const luminance =
+    0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b);
+  return luminance >= TEXT_SCRIM_LUMINANCE_THRESHOLD
+    ? `rgba(0, 0, 0, ${TEXT_EDIT_SCRIM_ALPHA})`
+    : `rgba(255, 255, 255, ${TEXT_EDIT_SCRIM_ALPHA})`;
+}
 
 export interface InlineTextEditorProps {
   layerId: string;
@@ -61,13 +102,9 @@ export const InlineTextEditor = React.memo(function InlineTextEditor({
 
   if (!layer || !textData) return null;
 
-  // Initial inverse scale and collision-free arm ratio for screen-invariant elements (BoxCorners and TextCaret)
+  // Initial inverse scale and screen-constant arm ratio for screen-invariant elements (BoxCorners and TextCaret)
   const initialScale = Math.hypot(screenMatrix.a, screenMatrix.b) || 1;
-  const initialBoxW = textData.boxWidth || layer.bounding.w || 24;
-  const initialBoxH = textData.boxHeight || layer.bounding.h || 24;
-  const initialMaxArm = Math.min(initialBoxW * initialScale * 0.36, initialBoxH * initialScale * 0.36);
-  const initialSafeArm = Math.max(2, Math.min(10, initialMaxArm));
-  const initialArmRatio = initialSafeArm / 10;
+  const initialArmRatio = safeCornerArmRatio();
 
   // Shared typographic styles for the contenteditable (both fixed-clip and
   // plain variants). letterSpacing mirrors the rasterizer's ctx.letterSpacing
@@ -85,6 +122,8 @@ export const InlineTextEditor = React.memo(function InlineTextEditor({
         .filter(Boolean)
         .join(" ") || "none",
     color: toCssColor4(textData.color),
+    // Editing scrim: luminance-contrast tint (see TEXT_EDIT_SCRIM_ENABLED).
+    ...(TEXT_EDIT_SCRIM_ENABLED ? { background: textEditScrim(textData.color) } : {}),
     textAlign: textData.align,
     lineHeight: textData.lineHeight,
     letterSpacing: `${textData.letterSpacing || 0}px`,
@@ -112,17 +151,20 @@ export const InlineTextEditor = React.memo(function InlineTextEditor({
       style={{
         left: 0,
         top: 0,
+        // Above the whole LayerOverlay stack (its active item sits at zIndex 10
+        // inside its own container) — same level as PreEditFrame — so the
+        // editing box, brackets and caret are never painted under the hover
+        // outlines / index labels.
+        zIndex: 20,
         transform: `matrix(${screenMatrix.a}, ${screenMatrix.b}, ${screenMatrix.c}, ${screenMatrix.d}, ${screenMatrix.tx}, ${screenMatrix.ty})`,
         transformOrigin: "0 0",
-        // No maxWidth in ANY mode: layers may straddle the canvas edge (moving
-        // already allows it), and a canvas-edge clamp would force-wrap the
-        // contenteditable mid-typing while the GPU layout stays unwrapped —
-        // a DOM/GPU layout mismatch. The initial creation width is clamped
-        // once in the text-place handler instead.
-        minWidth:
-          boxMode === "fixed" || boxMode === "auto_height"
-            ? undefined
-            : `${Math.max(32, Math.round((textData.fontSize || 24) * 1.4))}px`,
+        // No minWidth and no maxWidth on the CONTAINER in any mode: layers may
+        // straddle the canvas edge (moving already allows it), and a canvas-edge
+        // clamp would force-wrap the contenteditable mid-typing while the GPU
+        // layout stays unwrapped — a DOM/GPU layout mismatch. The auto-width
+        // caret-room floor lives directly on the contenteditable below, the
+        // same element the live bounding measurement reads. The initial
+        // creation width is clamped once in the text-place handler instead.
         ...({
           "--box-corner-scale": `${1 / initialScale}`,
           "--box-corner-arm-ratio": `${initialArmRatio}`,
@@ -145,6 +187,12 @@ export const InlineTextEditor = React.memo(function InlineTextEditor({
         lineHeight={textData.lineHeight}
         verticalAlignOffset={boxMode === "fixed" ? fixedVAlignOffset : 0}
         startPadding={TEXT_LAYER_PADDING}
+        caretLayout={{
+          input: textData,
+          boxWidth: textData.boxWidth || layer.bounding.w,
+          boxHeight: textData.boxHeight || layer.bounding.h,
+          measure: getEditorMeasureContext,
+        }}
       />
       {/* fixed mode: clip wrapper owns the box size + vertical alignment;
           the contenteditable inside stays a plain auto-height block so the
@@ -202,15 +250,32 @@ export const InlineTextEditor = React.memo(function InlineTextEditor({
           onInput={handleInput}
           onKeyDown={handleKeyDown}
           className="outline-none whitespace-pre-wrap break-words caret-transparent"
-          style={{
-            ...editorStyle,
-            // auto_height: locked width from the drag, height grows with lines
-            ...(boxMode === "auto_height" && {
-              width: `${textData.boxWidth || layer.bounding.w}px`,
-              wordWrap: "break-word" as const,
-              overflowWrap: "break-word" as const,
-            }),
-          }}
+            style={{
+              ...editorStyle,
+              // auto_width contract: the box hugs the content and NEVER wraps
+              // (computeTextLayout lays one unwrapped line per paragraph). The
+              // DOM editor must obey the same contract: a block in an absolute
+              // shrink-to-fit container otherwise wraps at "viewport width
+              // minus layer left edge" once pasted content exceeds it, while
+              // the GPU layout keeps the single long line — the two
+              // representations diverge (double-printed text while editing,
+              // and a too-narrow measured bounding that horizontally clips the
+              // committed layer). width: max-content forbids the viewport from
+              // acting as a wrap constraint; the box may overhang the viewport
+              // exactly like the rendered layer overhangs the canvas. The
+              // caret-room floor (sizing.ts getEditorMinWidth) lives on the
+              // same measured element so constraint and measurement agree.
+              ...(boxMode === "auto_width" && {
+                width: "max-content",
+                minWidth: getEditorMinWidth(),
+              }),
+              // auto_height: locked width from the drag, height grows with lines
+              ...(boxMode === "auto_height" && {
+                width: `${textData.boxWidth || layer.bounding.w}px`,
+                wordWrap: "break-word" as const,
+                overflowWrap: "break-word" as const,
+              }),
+            }}
         />
       )}
     </div>

@@ -153,6 +153,7 @@ export function ResizeExportControls({
       {/* Collapsible Section Header */}
       <button
         onClick={() => setCollapsed(!collapsed)}
+        onMouseDown={(e) => e.preventDefault()}
         className="flex items-center gap-1.5 w-full pb-1 group cursor-pointer"
       >
         <ImageDown size={12} className="text-indigo-600 dark:text-indigo-400" />
@@ -253,7 +254,9 @@ export function ResizeExportControls({
               description: p.label,
             }))}
             trigger={
-              <button className="flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-stage)] text-[10px] font-black text-[var(--text-main)] tabular-nums hover:bg-[var(--border-subtle)] transition-colors">
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                className="flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-stage)] text-[10px] font-black text-[var(--text-main)] tabular-nums hover:bg-[var(--border-subtle)] transition-colors">
                 {effectiveDpi} <ChevronDown size={8} className="opacity-40" />
               </button>
             }

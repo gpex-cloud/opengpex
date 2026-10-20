@@ -21,16 +21,45 @@ import { InteractionHandler, InteractionEvent, GeometryService, Layer, Frame, Lo
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import { createTransformHandler, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
-import { ROTATE_CURSOR } from '@opengpex/editor/icons';
+import { ROTATE_CURSOR, TEXT_PREEDIT_CURSOR } from '@opengpex/editor/icons';
 import { TEXT_LAYER_PADDING } from '@opengpex/editor/core/helpers/config';
-import { CraftDrawerAPI, getReferenceFontSize, getInitialTextBoxSize, TEXT_DEFAULT_LINE_HEIGHT } from '../../drawers/CraftDrawer/protocols';
+import { CraftDrawerAPI, getReferenceFontSize, TEXT_DEFAULT_LINE_HEIGHT } from '../../drawers/CraftDrawer/protocols';
+import { getInitialLineBoxHeight, getInitialPointTextBoxWidth } from './geometry';
 import type { PendingTextData } from '../../drawers/CraftDrawer/protocols';
-import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, TEXT_BORDER_BAND_RATIO, _CMD_PLACE_UID, _CMD_EDIT_START_UID } from './protocols';
-import { TEXT_OVERLAY_SIGNAL_PLACE_MARQUEE, TEXT_OVERLAY_EVT_COMMIT_REQUEST } from './protocols';
+import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, _CMD_PLACE_UID, _CMD_EDIT_START_UID } from './protocols';
+import { TEXT_OVERLAY_EVT_COMMIT_REQUEST, TEXT_PLACE_MARQUEE_TRANSIENT_KEY } from './protocols';
 import type { PlaceMarqueeRect } from './protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
 import { fromHex, type ColorValue } from '@opengpex/editor/core/engine/color';
-import { setPendingEditCaretPoint } from './editCaret';
+// ─── Edit-start caret handoff ──────────────────────────────────────────────────
+
+/**
+ * One-shot handoff of the pointer position that started a text edit session.
+ *
+ * The interaction handlers below (text-place click, pan-mode double-click)
+ * know WHERE the user clicked, but the inline editor mounts later (React
+ * effect). The starter stores the viewport-space point here; the editor's
+ * init effect consumes it once to drop the caret at the clicked position (via
+ * TextCaretKit's placeCaretAtPoint) instead of always collapsing to the text
+ * end. Consume-on-read: the value is only valid for the very next session
+ * mount; non-pointer entry paths never store one and get the fallback.
+ */
+export interface PendingEditCaretPoint {
+  clientX: number;
+  clientY: number;
+}
+
+let pendingEditCaretPoint: PendingEditCaretPoint | null = null;
+
+export function setPendingEditCaretPoint(point: PendingEditCaretPoint): void {
+  pendingEditCaretPoint = point;
+}
+
+export function consumePendingEditCaretPoint(): PendingEditCaretPoint | null {
+  const point = pendingEditCaretPoint;
+  pendingEditCaretPoint = null;
+  return point;
+}
 
 /** Shared signal keys (cross-plugin constants) */
 const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
@@ -44,50 +73,43 @@ const CMD_EDIT_START_UID = _CMD_EDIT_START_UID;
  * Finds hit layer of type 'text' using core geometry hit-testing.
  * Uses pickLayersAt (supports visibleShape, rotation, interactive flag) filtered to text layers.
  * Accepts canvas-local point and converts to world coordinates via geometry service.
+ * Exported for the hover-cursor effect in hooks.ts, which has no
+ * InteractionEvent and replicates this hit test on raw mousemove.
  */
-function findTextLayerAtPoint(geometry: GeometryService, frame: Frame, point: { x: number; y: number }): Layer | null {
+export function findTextLayerAtPoint(geometry: GeometryService, frame: Frame, point: { x: number; y: number }): Layer | null {
   const worldPoint = geometry.space.localToWorld(point.x, point.y, frame);
   const hits = geometry.space.pickLayersAt(worldPoint, frame.layers);
   return hits.find((l: Layer) => l.type === 'text') || null;
 }
 
-/**
- * Whether the pointer sits in the border band of the given layer. The band is
- * proportional to the box's min side (TEXT_BORDER_BAND_RATIO) and straddles
- * the border: 2/3 of its thickness outside the rect, 1/3 inside — hit-testing
- * is the ring between the rect grown by the outward part and the rect shrunk
- * by the inward part. Axis-aligned canvas-space approximation, consistent with
- * the rest of this handler's rect math. Handles are excluded by the callers —
- * this only answers "is it the border".
- */
-export function isPointInLayerBorderBand(layer: Layer, frame: Frame, p: { x: number; y: number }): boolean {
-  const band = Math.min(layer.bounding.w, layer.bounding.h) * TEXT_BORDER_BAND_RATIO;
-  const outward = (band * 2) / 3;
-  const inward = band / 3;
-  const rectX = frame.canvas.w / 2 + layer.cx - layer.bounding.w / 2;
-  const rectY = frame.canvas.h / 2 + layer.cy - layer.bounding.h / 2;
-  const rectW = layer.bounding.w;
-  const rectH = layer.bounding.h;
-
-  const inOuter = p.x >= rectX - outward && p.x <= rectX + rectW + outward
-    && p.y >= rectY - outward && p.y <= rectY + rectH + outward;
-  if (!inOuter) return false;
-
-  const inInner = p.x >= rectX + inward && p.x <= rectX + rectW - inward
-    && p.y >= rectY + inward && p.y <= rectY + rectH - inward;
-  return !inInner;
-}
-
 // ─── TextMoveHandler ───────────────────────────────────────────────────────────
 
 /**
- * TextMoveHandler: Cmd/Ctrl + drag to move text layer
+ * Drag-gesture flag shared with the hover-cursor effect (hooks.ts): while a
+ * move drag is live the gesture owns the cursor ('grabbing') and the hover
+ * rule must not fight it. Set in onStart, cleared in onEnd — the trailing
+ * state update from tx.commit re-renders the overlay AFTER the clear, so the
+ * hover rule re-applies the correct cursor without any mousemove.
+ */
+let textMoveDragActive = false;
+export function isTextMoveDragging(): boolean {
+  return textMoveDragActive;
+}
+
+/**
+ * TextMoveHandler: drag to move text layer
  *
- * In text craft mode (regardless of entering editing state), hold Meta/Ctrl key
- * and drag an existing text layer to move its position. Without a modifier the
- * editing-state box belongs entirely to caret placement / text selection (the
- * editing-state border-band drag path was removed); in the PRE-editing state a
- * plain drag on the border band still moves the layer.
+ * Two distinct gestures, one handler:
+ * - EDITING state: Cmd/Ctrl + drag moves the layer while the session stays
+ *   alive. Without a modifier every press in the box stays with the
+ *   contenteditable (caret placement / text selection) — plain press-drag
+ *   inside the editor is NOT a move.
+ * - PRE-EDIT state (two-level click model): a plain drag anywhere over a text
+ *   layer moves it, no modifier needed. A press also flips the active layer
+ *   (drag-on-unselected selects + moves in one gesture). The gesture is
+ *   claimed even for a press that never drags: the active-layer flip IS the
+ *   click-to-select of the two-level model (place handler never sees presses
+ *   on text layers).
  *
  * Design considerations:
  * - Does not trigger entering/exiting editing state
@@ -96,12 +118,21 @@ export function isPointInLayerBorderBand(layer: Layer, frame: Frame, p: { x: num
  *   that lands immediately at drag end (NOT silent) — a deliberate geometry
  *   move is an undoable edit in its own right, ordered before the session's
  *   CMD_MODIFY_COMMIT when both happen during one editing session.
+ * - The second press of a double-click is yielded (detail===2, plus a
+ *   time/distance fallback) so text-dblclick-edit can claim it — a move drag
+ *   must never steal the double-click-to-edit gesture.
  */
 export const createTextMoveHandler = (): InteractionHandler => {
   let startCanvas = { x: 0, y: 0 };
   let startLayerPos = { x: 0, y: 0 };
   let targetLayerId: string | null = null;
+  let selectOnStart = false;
   let tx: InteractionTransaction | null = null;
+
+  // Double-click yield tracker (see the doc comment above).
+  let lastDownTime = 0;
+  let lastDownX = 0;
+  let lastDownY = 0;
 
   return {
     id: 'text-move',
@@ -118,45 +149,42 @@ export const createTextMoveHandler = (): InteractionHandler => {
       if (target.closest('button, a, input, [data-role="ui"]')) return false;
       // Resize/rotate handles own their gestures (this handler's priority 170
       // would otherwise swallow them), so a pointerdown on one must never
-      // become a move — with or without Cmd.
+      // become a move.
       if (target.closest('[data-gizmo-handle], [data-gizmo-rotate]')) return false;
+
+      // Yield the second press of a double-click pair to text-dblclick-edit
+      // (native detail, plus a time/distance fallback for browsers that leave
+      // pointerdown detail at 0).
+      const now = performance.now();
+      const isSecondClick =
+        mouseEvent.detail === 2 ||
+        (now - lastDownTime <= DBL_CLICK_INTERVAL_MS &&
+          Math.hypot(e.point.canvas.x - lastDownX, e.point.canvas.y - lastDownY) <= DBL_CLICK_TRAVEL_PX);
+      lastDownTime = now;
+      lastDownX = e.point.canvas.x;
+      lastDownY = e.point.canvas.y;
+      if (isSecondClick) return false;
 
       // Case 1: Layer being edited -> use as target directly.
       // Editing state: ONLY Cmd/Ctrl + drag moves the layer. Every plain
-      // mousedown in the box — border band included — stays with the
-      // contenteditable (caret placement / text selection); border-band drag
-      // while typing was removed as a mis-drag source. Pre-edit band drag is
-      // Case 2 below.
+      // press in the box — border band included — stays with the
+      // contenteditable (caret placement / text selection).
       const editingId = e.state.interaction.signals[EDITING_TEXT_KEY] as string | null;
       if (editingId) {
         targetLayerId = editingId;
+        selectOnStart = false;
         return mouseEvent.metaKey || mouseEvent.ctrlKey;
       }
 
-      // Case 2: Pre-editing state.
-      // - Cmd/Ctrl + drag anywhere over a text layer (existing behaviour)
-      // - plain drag on the border band of a text layer (topmost wins);
-      //   the interior without Cmd falls through to the place handler
-      //   (click empty canvas to create / wake editing).
-      const hasCmd = mouseEvent.metaKey || mouseEvent.ctrlKey;
-      if (hasCmd) {
-        const hitLayer = findTextLayerAtPoint(e.geometry, e.activeFrame, e.point.canvas);
-        if (hitLayer) {
-          targetLayerId = hitLayer.id;
-          return true;
-        }
-        return false;
+      // Case 2: Pre-editing state — a plain press anywhere over a text layer
+      // (topmost wins) claims the gesture: the drag moves the layer and the
+      // press itself selects it (active-layer flip in onStart). No modifier.
+      const hitLayer = findTextLayerAtPoint(e.geometry, e.activeFrame, e.point.canvas);
+      if (hitLayer) {
+        targetLayerId = hitLayer.id;
+        selectOnStart = true;
+        return true;
       }
-      const order = e.activeFrame.layers.order;
-      for (let i = order.length - 1; i >= 0; i--) {
-        const layer = e.activeFrame.layers.byId[order[i]];
-        if (!layer || layer.type !== 'text' || !layer.visible) continue;
-        if (isPointInLayerBorderBand(layer, e.activeFrame, e.point.canvas)) {
-          targetLayerId = layer.id;
-          return true;
-        }
-      }
-
       return false;
     },
 
@@ -165,6 +193,12 @@ export const createTextMoveHandler = (): InteractionHandler => {
       const frame = e.activeFrame;
       const layer = frame.layers.byId[targetLayerId];
       if (!layer) return;
+
+      if (selectOnStart) {
+        e.actions.setActiveLayer(frame.id, targetLayerId);
+        // The gesture owns the cursor while it lives (hover rule yields).
+        textMoveDragActive = true;
+      }
 
       startCanvas = { x: e.point.canvas.x, y: e.point.canvas.y };
       startLayerPos = { x: layer.cx, y: layer.cy };
@@ -189,16 +223,43 @@ export const createTextMoveHandler = (): InteractionHandler => {
     },
 
     onEnd: (e) => {
+      // Tear down gesture state before anything else: the hover-cursor rule
+      // must see the flags cleared no matter what commit does.
+      const wasPreEditDrag = selectOnStart;
+      const wasEditingDrag = !selectOnStart && !!tx;
+      targetLayerId = null;
+      selectOnStart = false;
+      textMoveDragActive = false;
+
       if (tx) {
         tx.commit();
         tx = null;
       }
-      targetLayerId = null;
 
-      // If still holding Cmd/Ctrl when drag ends, restore to grab, otherwise reset to null
-      // (the border-band hover cursor re-evaluates on the next mousemove).
-      const stillHoldingCmd = e.keys.meta;
-      e.actions.fast.setCursor(stillHoldingCmd ? 'grab' : null);
+      if (wasPreEditDrag) {
+        // Reapply the hover rule for the current pointer position — the same
+        // source of truth as the reactive rule in hooks.ts. The write here is
+        // required because nothing else may change cursorOverride after the
+        // gesture, and the rule's own 'grabbing' guard would otherwise latch.
+        const overBox = !!findTextLayerAtPoint(e.geometry, e.activeFrame, e.point.canvas);
+        e.actions.fast.setCursor(overBox ? 'grab' : TEXT_PREEDIT_CURSOR);
+      } else if (wasEditingDrag) {
+        // Editing-state Cmd-drag: restore per the (possibly still held) modifier.
+        const stillHoldingModifier =
+          e.keys.meta || (e.nativeEvent as MouseEvent).ctrlKey;
+        e.actions.fast.setCursor(stillHoldingModifier ? 'grab' : null);
+      }
+    },
+
+    onCancel: () => {
+      // Same teardown as onEnd's pre-edit path; the cursor is left for the
+      // hover rule, which reapplies on the next mousemove or re-render.
+      if (tx) {
+        tx = null;
+      }
+      targetLayerId = null;
+      selectOnStart = false;
+      textMoveDragActive = false;
     },
   };
 };
@@ -207,10 +268,12 @@ export const createTextMoveHandler = (): InteractionHandler => {
 
 /**
  * Resolves the text layer a transform-gizmo handle belongs to. The pre-edit
- * gizmo is rendered inside LayerOverlayItem wrapped in an element carrying
- * `data-overlay-gizmo-layer=<layerId>`, so the hit DOM node identifies the target
- * unambiguously (the editing-state gizmo was removed with the session-gizmo
- * split — geometry changes happen either pre-edit here or via Cmd+Drag move).
+ * frame (corners / edge ticks / rotate handle) is drawn by TextOverlay itself
+ * (components/PreEditFrame) and its box carries
+ * `data-overlay-gizmo-layer=<layerId>`, so the hit DOM node identifies the
+ * target unambiguously (the editing-state gizmo was removed with the
+ * session-gizmo split — geometry changes happen either pre-edit here or via
+ * Cmd+Drag move).
  */
 function resolveGizmoTargetLayer(e: InteractionEvent): Layer | null {
   const target = e.nativeEvent.target as HTMLElement | null;
@@ -226,8 +289,9 @@ function resolveGizmoTargetLayer(e: InteractionEvent): Layer | null {
  * TextResizeHandler: pre-edit text box scaling interaction handler
  *
  * Active in text craft pre-edit state, identifying drag direction via
- * data-gizmo-handle attribute (the gizmo is rendered by LayerOverlay for the
- * force-shown text layer), using createTransformHandler factory to implement
+ * data-gizmo-handle attribute (the handles are the corner brackets / edge
+ * ticks of TextOverlay's own PreEditFrame), using createTransformHandler
+ * factory to implement
  * standard 8-direction scaling. Automatically switches to fixed boxMode after
  * dragging. Non-silent: the resize lands as its own undoable history step.
  */
@@ -467,13 +531,131 @@ export const createTextRotateHandler = (): InteractionHandler => {
   };
 };
 
+// ─── TextDblClickEditHandler ───────────────────────────────────────────────────
+
+/**
+ * Window between two consecutive pointerdowns that still counts as a
+ * double-click (ms). Matches the platform double-click interval closely
+ * enough that users cannot tell the difference.
+ */
+const DBL_CLICK_INTERVAL_MS = 450;
+
+/** Max pointer travel between the two clicks of a double-click (canvas px) */
+const DBL_CLICK_TRAVEL_PX = 5;
+
+/**
+ * TextDblClickEditHandler: Double Click to Edit — in pan mode AND in the text
+ * tool's pre-edit state (the two-level click model: single click selects,
+ * double click edits).
+ *
+ * In pan mode, double-clicking a text layer activates the Text Craft tool and
+ * enters the inline editing session via `cmd.edit_start` (mirrors
+ * Figma/Photoshop behaviour). When the editing session ends the user lands in
+ * the text tool's pre-edit state — a further Esc or V is needed to return to
+ * pan. Registered by the TextOverlay plugin though it also fires in pan mode:
+ * the dispatcher arbitrates all plugins' handlers in one global priority pool,
+ * so living here (its behaviour owner) costs nothing and keeps LayerOverlay
+ * free of any text knowledge.
+ *
+ * In text craft mode this handler is what makes double-click edit work under
+ * the two-level model: the FIRST click of the pair falls through to
+ * text-place (select-only), the SECOND click is claimed here and enters the
+ * editing session with the caret at the clicked position.
+ *
+ * Detection strategy: `test()` only claims the gesture when THIS pointerdown
+ * is the second click of a pair (native detail === 2 when the browser reports
+ * it, plus a time/distance fallback for browsers that leave pointerdown
+ * detail at 0). Every pointerdown updates the tracker, so the FIRST click of
+ * the pair falls through to layer-move / text-place untouched. When claimed,
+ * the handler consumes the whole gesture (no move/end behaviour), so the
+ * second click never starts a layer drag.
+ *
+ * Priority 175: ABOVE text-move (170) so this handler's test runs on every
+ * press — its double-click tracker must see BOTH presses of a pair (the
+ * dispatcher short-circuits at the first passing handler, so a tracker living
+ * below move would miss the first press once move started claiming text-layer
+ * presses). Single presses fall through to text-move; the second press of a
+ * pair is claimed here. In the EDITING state the gesture is never claimed —
+ * double-click inside the live editor is the browser's native word-select.
+ */
+export const createTextDblClickEditHandler = (): InteractionHandler => {
+  // Double-click tracker: last pointerdown time + canvas point. Updated on
+  // every pointerdown (test() runs once per gesture start), regardless of
+  // whether this handler claims it.
+  let lastDownTime = 0;
+  let lastDownX = 0;
+  let lastDownY = 0;
+
+  const findEditableTextLayerAtPoint = (e: InteractionEvent): Layer | null => {
+    const hits = e.geometry.space.pickLayersAt(e.point.world, e.activeFrame.layers);
+    return hits.find((l: Layer) => l.type === 'text' && l.visible && !l.locked && !!l.textData) || null;
+  };
+
+  const inTextCraft = (e: InteractionEvent): boolean =>
+    e.state.interaction.interactionMode === 'craft' &&
+    e.state.interaction.signals[ACTIVE_CRAFT_KEY] === 'text';
+
+  return {
+    id: 'text-dblclick-edit',
+    priority: 175,
+
+    test: (e) => {
+      // Pan mode (edit from outside the tool) and text craft pre-edit (the
+      // two-level click model) only. Never during a live editing session —
+      // double-click inside the editor is the browser's word-select.
+      if (e.state.interaction.signals[EDITING_TEXT_KEY]) return false;
+      if (e.state.interaction.interactionMode !== 'pan' && !inTextCraft(e)) return false;
+
+      const target = e.nativeEvent.target as HTMLElement | null;
+      if (target?.closest('button, a, input, [data-role="ui"], [contenteditable], [data-handle], [data-gizmo-handle], [data-gizmo-rotate]')) return false;
+
+      const now = performance.now();
+      const isDoubleClick =
+        (e.nativeEvent as MouseEvent).detail === 2 ||
+        (now - lastDownTime <= DBL_CLICK_INTERVAL_MS &&
+          Math.hypot(e.point.canvas.x - lastDownX, e.point.canvas.y - lastDownY) <= DBL_CLICK_TRAVEL_PX);
+      lastDownTime = now;
+      lastDownX = e.point.canvas.x;
+      lastDownY = e.point.canvas.y;
+
+      if (!isDoubleClick) return false;
+      return !!findEditableTextLayerAtPoint(e);
+    },
+
+    onStart: (e) => {
+      const hitTextLayer = findEditableTextLayerAtPoint(e);
+      if (!hitTextLayer) return;
+      // Hand the double-click point to the inline editor so the caret lands
+      // where the user double-clicked instead of at the end of the text.
+      const mouseEvent = e.nativeEvent as MouseEvent;
+      setPendingEditCaretPoint({ clientX: mouseEvent.clientX, clientY: mouseEvent.clientY });
+      // Activate the text tool FIRST so the editing session runs inside the
+      // text craft state machine: when the session ends the user lands in
+      // the tool's pre-edit state (drawer open, place/move semantics live).
+      // Skipped when the text craft is already active — activateCraft is a
+      // toggle and would deactivate the tool mid-double-click.
+      if (!inTextCraft(e)) {
+        e.actions.executeCommand(CraftDrawerAPI.commands.activateText.uid);
+      }
+      // cmd.edit_start activates the layer and opens the inline editing
+      // session (modify session, own snapshot/undo handling).
+      e.actions.executeCommand(CMD_EDIT_START_UID, {
+        frameId: e.activeFrame.id,
+        layerId: hitTextLayer.id,
+      });
+    },
+
+    // Claimed gestures are fully consumed: the double-click must never fall
+    // through to a layer drag.
+    onMove: () => {},
+    onEnd: () => {},
+  };
+};
+
 // ─── TextPlaceHandler ──────────────────────────────────────────────────────────
 
 /** Pointer travel (px, canvas space) below which a press is a click, not a drag. */
 const PLACE_DRAG_THRESHOLD_PX = 5;
-
-/** Minimum box width for a click-created point text (just enough for the caret). */
-const POINT_TEXT_MIN_W_PX = 10;
 
 /** Minimum dragged box width (canvas px) — narrower drags clamp to this. */
 const DRAG_MIN_W_PX = 20;
@@ -552,16 +734,13 @@ export const createTextPlaceHandler = (): InteractionHandler => {
   const createPointText = (e: InteractionEvent, point: { x: number; y: number }) => {
     const frame = e.activeFrame;
     const { fontSize, lineHeight } = readPendingStyle(e);
-    const initH = getInitialTextBoxSize(fontSize, lineHeight, frame.canvas.w).h;
+    const initH = getInitialLineBoxHeight(fontSize, lineHeight);
     // Caret-anchored placement: inside the editor, contenteditable has
     // padding-left: TEXT_LAYER_PADDING.x (4px). To align the initial flashing
     // caret (instead of the outer dashed border) precisely under the pointer,
     // offset the box origin leftward by the horizontal padding.
     const boxLocalX = Math.max(0, point.x - TEXT_LAYER_PADDING.x);
-    const initW = Math.max(
-      POINT_TEXT_MIN_W_PX,
-      Math.min(Math.round(fontSize * 1.5), frame.canvas.w - boxLocalX),
-    );
+    const initW = getInitialPointTextBoxWidth(frame.canvas.w - boxLocalX);
     // Convert boxLocalX to world space so snapRectToPixel and cx/cy aren't
     // shifted by (+canvas.w/2, +canvas.h/2).
     const worldPoint = e.geometry.space.localToWorld(boxLocalX, point.y, frame);
@@ -582,7 +761,7 @@ export const createTextPlaceHandler = (): InteractionHandler => {
   const createDraggedBox = (e: InteractionEvent, start: { x: number; y: number }, end: { x: number; y: number }) => {
     const frame = e.activeFrame;
     const { fontSize, lineHeight } = readPendingStyle(e);
-    const lineH = getInitialTextBoxSize(fontSize, lineHeight, frame.canvas.w).h;
+    const lineH = getInitialLineBoxHeight(fontSize, lineHeight);
 
     const dx = Math.abs(end.x - start.x);
     const dy = Math.abs(end.y - start.y);
@@ -610,7 +789,7 @@ export const createTextPlaceHandler = (): InteractionHandler => {
   };
 
   const clearMarquee = (e: InteractionEvent) => {
-    e.actions.setStateSignal(TEXT_OVERLAY_SIGNAL_PLACE_MARQUEE, null);
+    e.actions.fast.setTransient(TEXT_PLACE_MARQUEE_TRANSIENT_KEY, null);
   };
 
   return {
@@ -646,18 +825,13 @@ export const createTextPlaceHandler = (): InteractionHandler => {
         return;
       }
 
-      // Clicking an existing text layer -> wake up editing
+      // Clicking an existing text layer = SELECT only (Figma two-level
+      // model): the pre-edit frame's handles go live on it immediately, so
+      // resize/rotate/move need no detour through an editing session.
+      // Double-click enters editing via text-dblclick-edit.
       const hitTextLayer = findTextLayerAtPoint(e.geometry, frame, e.point.canvas);
       if (hitTextLayer) {
-        // Hand the click point to the inline editor so the caret lands where
-        // the user clicked instead of at the end of the text.
-        const mouseEvent = e.nativeEvent as MouseEvent;
-        setPendingEditCaretPoint({ clientX: mouseEvent.clientX, clientY: mouseEvent.clientY });
-        // Enter editing state via command system (automatically establish undo baseline)
-        e.actions.executeCommand(CMD_EDIT_START_UID, {
-          frameId: frame.id,
-          layerId: hitTextLayer.id,
-        });
+        e.actions.setActiveLayer(frame.id, hitTextLayer.id);
         return;
       }
 
@@ -680,7 +854,11 @@ export const createTextPlaceHandler = (): InteractionHandler => {
         w: Math.abs(dx),
         h: Math.abs(dy),
       };
-      e.actions.setStateSignal(TEXT_OVERLAY_SIGNAL_PLACE_MARQUEE, rect);
+      // Volatile fast track, NOT a store signal: the marquee updates at
+      // pointermove rate, and a Redux dispatch here re-renders the whole tree
+      // per move — sustained 60 Hz drags drive React's nested-update counter
+      // past its limit on heavy documents ("Maximum update depth exceeded").
+      e.actions.fast.setTransient(TEXT_PLACE_MARQUEE_TRANSIENT_KEY, rect);
     },
 
     onEnd: (e) => {

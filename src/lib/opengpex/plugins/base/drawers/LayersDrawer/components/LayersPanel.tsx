@@ -458,6 +458,7 @@ export function LayersPanel({
       <div className="flex flex-col gap-1.5">
         <button
           onClick={() => setBlendCollapsed((prev) => !prev)}
+          onMouseDown={(e) => e.preventDefault()}
           className="flex items-center gap-1.5 px-1 py-0.5 rounded hover:bg-[var(--bg-stage)]/50 transition-colors w-full text-left"
         >
           {blendCollapsed ? (

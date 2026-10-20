@@ -23,18 +23,20 @@ import React from 'react';
 import { useTextOverlayState } from '../hooks';
 import { InlineTextEditor } from './InlineTextEditor';
 import { PlaceMarquee } from './PlaceMarquee';
+import { PreEditFrame } from './PreEditFrame';
 
 /**
  * TextOverlayMain: Text overlay main component
  *
  * Renders based on state:
  * - editing_text_layer_id has value -> renders InlineTextEditor
- * - Pre-edit: LayerOverlay draws text outlines + transform gizmo via the
- *   registered LayerOverlay usage source (usage.ts); a drag marquee preview is
- *   rendered here while the text tool drags out a new box.
+ * - Pre-edit: the active text layer's self-drawn crop-mark frame
+ *   (PreEditFrame — corners/edge ticks are the resize handles) plus the drag
+ *   marquee preview; the marquee self-hides via the volatile transient
+ *   (no per-move React updates).
  */
 export const TextOverlayMain = React.memo(function TextOverlayMain() {
-  const { activeFrame, editingLayerId, layerExists, placeMarquee } =
+  const { activeFrame, activeCraft, editingLayerId, layerExists } =
     useTextOverlayState();
 
   // Editing state: render InlineTextEditor
@@ -42,9 +44,14 @@ export const TextOverlayMain = React.memo(function TextOverlayMain() {
     return <InlineTextEditor layerId={editingLayerId} />;
   }
 
-  // Pre-editing state: drag-to-create marquee (canvas-local rect → screen space)
-  if (placeMarquee && activeFrame) {
-    return <PlaceMarquee rect={placeMarquee} />;
+  // Pre-editing state: self-drawn active-layer frame + marquee watcher
+  if (activeCraft === 'text' && activeFrame) {
+    return (
+      <>
+        <PreEditFrame />
+        <PlaceMarquee />
+      </>
+    );
   }
 
   return null;
@@ -52,4 +59,5 @@ export const TextOverlayMain = React.memo(function TextOverlayMain() {
 
 export { BoxCorners, type BoxCornersProps } from './BoxCorners';
 export { InlineTextEditor, type InlineTextEditorProps } from './InlineTextEditor';
-export { PlaceMarquee, type PlaceMarqueeProps } from './PlaceMarquee';
+export { PlaceMarquee };
+export { PreEditFrame };

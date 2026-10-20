@@ -232,6 +232,8 @@ export const LayerPropsBar = React.memo(function LayerPropsBar() {
           onPointerDown={handleOpacityPointerDown}
           onChange={handleOpacitySlider}
           onPointerUp={handleOpacityPointerUp}
+          onMouseUp={(e) => e.currentTarget.blur()}
+          onTouchEnd={(e) => e.currentTarget.blur()}
           disabled={disabled}
           className={`flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border border-[var(--border-subtle)] shadow-inner disabled:opacity-30 disabled:cursor-not-allowed [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-sm [&::-webkit-slider-thumb]:cursor-ew-resize ${opacityPercent >= 100 ? '[&::-webkit-slider-thumb]:bg-[#9ca3af]' : '[&::-webkit-slider-thumb]:bg-indigo-400'}`}
         />
@@ -263,6 +265,8 @@ export const LayerPropsBar = React.memo(function LayerPropsBar() {
           onPointerDown={handleFillPointerDown}
           onChange={handleFillSlider}
           onPointerUp={handleFillPointerUp}
+          onMouseUp={(e) => e.currentTarget.blur()}
+          onTouchEnd={(e) => e.currentTarget.blur()}
           disabled={disabled}
           className={`flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border border-[var(--border-subtle)] shadow-inner disabled:opacity-30 disabled:cursor-not-allowed [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-sm [&::-webkit-slider-thumb]:cursor-ew-resize ${fillPercent >= 100 ? '[&::-webkit-slider-thumb]:bg-[#9ca3af]' : '[&::-webkit-slider-thumb]:bg-indigo-400'}`}
         />

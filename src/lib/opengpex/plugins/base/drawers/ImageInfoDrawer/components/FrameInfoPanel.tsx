@@ -293,6 +293,7 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
           <>
             <button
               onClick={() => setIsMetaExpanded(!isMetaExpanded)}
+              onMouseDown={(e) => e.preventDefault()}
               className="w-full flex items-center justify-between mt-1 pt-1.5 border-t border-[var(--border-subtle)] dark:border-white/10 hover:opacity-80 transition-opacity text-left select-none"
             >
               <div className="flex flex-col pr-2 overflow-hidden">
@@ -381,6 +382,7 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
                     {item.value === "__comfyui__" ? (
                       <span className="text-[9px] font-semibold text-[var(--text-main)]">
                         ComfyUI / <button
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => {
                             const blob = new Blob([comfyWorkflowJson!], { type: 'application/json' });
                             const url = URL.createObjectURL(blob);

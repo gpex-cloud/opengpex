@@ -23,7 +23,9 @@ import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { Motion } from '@opengpex/editor/core/motion';
 import { Frame, CameraState, VolatileState, asLocalShape } from '@opengpex/editor/core/types';
 import { LayerUtils } from '@opengpex/editor/core/layer/utils';
-import { compensateCenterX, compensateCenterY, reanchorCompensationBase } from './anchor';
+import { compensateCenterX, compensateCenterY, reanchorCompensationBase } from './geometry';
+import { safeCornerArmRatio } from './geometry';
+import { normalizeBoxMode } from '@opengpex/editor/core/types/models';
 
 /**
  * useTextEditorFastSync: Text editor fast track synchronizer
@@ -91,19 +93,14 @@ export function useTextEditorFastSync(
     el.style.setProperty('--box-corner-scale', `${1 / currentScale}`);
     el.style.setProperty('--text-caret-scale', `${1 / currentScale}`);
 
-    // Collision-free clamp for box corners: ensure arm length never collides
-    // in screen space when box is narrow or canvas is zoomed far out.
-    const boxScreenW = (layer.bounding.w || 24) * currentScale;
-    const boxScreenH = (layer.bounding.h || 24) * currentScale;
-    const maxArmScreen = Math.min(boxScreenW * 0.36, boxScreenH * 0.36);
-    const safeArmScreen = Math.max(2, Math.min(10, maxArmScreen));
-    el.style.setProperty('--box-corner-arm-ratio', `${safeArmScreen / 10}`);
+    // Corner arms are screen-constant (sizing.ts) — the ratio stays neutral 1.
+    el.style.setProperty('--box-corner-arm-ratio', `${safeCornerArmRatio()}`);
 
     // Sync width and height in fixed mode to editor DOM. These stay in canvas
     // space (px), unaffected by rotation — the matrix above handles rotation/scale.
     // The size belongs to the clip wrapper (which also owns vertical
     // alignment); the contenteditable inside stays auto-height.
-    const mode = layer.textData?.boxMode || 'auto';
+    const mode = normalizeBoxMode(layer.textData?.boxMode);
     if (mode === 'fixed') {
       const clipEl = el.querySelector('[data-text-clip]') as HTMLElement | null;
       if (clipEl) {
@@ -188,5 +185,73 @@ export function useTextEditorFastSync(
   }, [activeFrame, layerId, actions]);
 
   return { notifyBoundingChange };
+}
+
+// ─── usePreEditFrameSync ───────────────────────────────────────────────────────
+
+/**
+ * usePreEditFrameSync: positions the pre-edit frame (corner brackets + edge
+ * ticks + rotate handle) over the active text layer, following the camera and
+ * any live move/resize at 60fps — the same job MarkerOverlay's
+ * useMarkerSelectionFastSync does for markers.
+ *
+ * Scale handling follows LayerOverlayItem (NOT the inline editor): the camera
+ * scale is split into width/height so the box's CSS pixels are screen pixels,
+ * and the transform keeps only the pure rotation/flip. That constancy is what
+ * lets the corner hit zones, edge ticks and rotate handle use fixed screen-px
+ * sizes, and it keeps the rotated-pose handle-direction semantics identical to
+ * the LayerOverlay gizmo this frame replaced (TextResizeHandler's
+ * getOrientation math depends on it).
+ *
+ * The box lands in screen pixels (no counter-scale var needed by its
+ * children — see the callback comment).
+ */
+export function usePreEditFrameSync(
+  boxRef: React.RefObject<HTMLDivElement | null>,
+  layerId: string | null,
+) {
+  const { geometry } = useEditorServices();
+
+  useFastSync(boxRef, !!layerId, (_v: VolatileState, f: Frame, cam: CameraState) => {
+    const el = boxRef.current;
+    if (!el || !layerId) return;
+
+    const layer = f.layers.byId[layerId];
+    if (!layer || layer.type !== 'text' || !layer.textData || !layer.visible) {
+      el.style.display = 'none';
+      return;
+    }
+
+    // Project the bounding box through the layer's FULL world matrix (includes
+    // layer.rotation/flip; canvas rotation is baked into the layer pose by
+    // transformFrame without changing bounding.w/h) composed with the camera
+    // matrix — same pipeline as LayerOverlay and MarkerOverlay.
+    const worldMatrix = geometry.transform.getLayerWorldMatrix(layer);
+    const viewMatrix = geometry.camera.getCameraMatrix(f, cam);
+    const screenMatrix = viewMatrix.multiply(worldMatrix);
+
+    // Bounding is layer-local (top-left at 0,0) — no visibleShape offset.
+    const w = layer.bounding.w;
+    const h = layer.bounding.h;
+    const matrix = { ...screenMatrix, w, h };
+    const { scaleX, scaleY } = geometry.transform.decomposeMatrix(matrix);
+
+    // Split scale (→ width/height) from pure rotation/flip (→ CSS matrix).
+    const pureA = matrix.a / (scaleX || 0.001);
+    const pureB = matrix.b / (scaleX || 0.001);
+    const pureC = matrix.c / (scaleY || 0.001);
+    const pureD = matrix.d / (scaleY || 0.001);
+
+    el.style.display = 'block';
+    el.style.width = `${w * scaleX}px`;
+    el.style.height = `${h * scaleY}px`;
+    el.style.transform = `matrix(${pureA}, ${pureB}, ${pureC}, ${pureD}, ${matrix.tx}, ${matrix.ty})`;
+
+    // No --box-corner-scale here: the box above is already in SCREEN pixels
+    // (scale split into width/height), so BoxCorners and the edge ticks render
+    // at their natural px sizes (var defaults to 1). This differs from the
+    // editing state, whose contenteditable box carries the camera scale in its
+    // transform and therefore needs the 1/k counter-scale.
+  }, { throttleHz: 60 });
 }
 

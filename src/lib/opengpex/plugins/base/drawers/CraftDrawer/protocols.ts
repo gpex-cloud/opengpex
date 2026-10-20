@@ -24,8 +24,6 @@
  * CraftDrawer is a unified sidebar panel for text/brush/eraser tools.
  */
 
-import { TEXT_LAYER_PADDING } from '@opengpex/editor/core/helpers/config';
-
 export const PLUGIN_ID = 'drawers.craft_tools';
 export const PLUGIN_AUTHOR = 'opengpex';
 
@@ -76,6 +74,8 @@ export const CraftDrawerAPI = {
   commands: {
     /** Deactivate current craft tool */
     deactivate: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_DEACTIVATE_CRAFT}` } as { uid: string; _payload: void },
+    /** Activate the text tool (no-op toggle risk: callers must guard against already-active) */
+    activateText: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CRAFT_TEXT}` } as { uid: string; _payload: void },
   },
   /** pluginConfig storage key */
   configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
@@ -196,27 +196,6 @@ export function getReferenceFontSize(canvasW: number, canvasH: number): number {
 
 /** Line height used when the user has not chosen one (mirrors the layer default). */
 export const TEXT_DEFAULT_LINE_HEIGHT = 1.4;
-
-/**
- * Computes the initial inline text box size for a newly placed text layer.
- *
- * Height follows the font metrics (fontSize × lineHeight + vertical padding) so
- * the empty box hugs the first line at any canvas resolution. Width scales with
- * the font size and is capped to a fraction of the canvas width, so a 4K canvas
- * gets a proportionally usable input box instead of a fixed-pixel sliver.
- *
- * Shared by the place handler (initial layer bounding) and the inline editor
- * (CSS minWidth) so the two never disagree on the very first frame.
- */
-export function getInitialTextBoxSize(
-  fontSize: number,
-  lineHeight: number,
-  canvasW: number,
-): { w: number; h: number } {
-  const h = Math.ceil(fontSize * lineHeight) + TEXT_LAYER_PADDING.y * 2;
-  const w = Math.round(Math.min(Math.max(fontSize * 5.6, 140), Math.max(140, canvasW * 0.42)));
-  return { w, h };
-}
 
 /**
  * Static fallback for slider max when canvas dimensions are unavailable.
