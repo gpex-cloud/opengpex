@@ -414,26 +414,25 @@ export function ResizeExportControls({
                   description: "source file, verbatim",
                 },
               ]}
-              onDropdownSelect={(val) => {
+              onDropdownSelect={async (val) => {
                 if (val === "original") {
                   setIsProcessing(true);
                   try {
-                    downloadOriginalCmd?.execute();
+                    await downloadOriginalCmd?.execute();
                   } finally {
                     setIsProcessing(false);
                   }
                 }
               }}
             >
+              {/* While processing the FancyButton `loading` spinner takes the
+                  icon slot; the label stays put so the button width does not
+                  jump between "Save" and a status string. */}
               {!isProcessing && (
                 <Download size={12} className="text-white/80" />
               )}
               <span className="uppercase">
-                {isProcessing
-                  ? "Processing..."
-                  : isClipMode
-                    ? "Save Clip"
-                    : "Save"}
+                {isClipMode ? "Save Clip" : "Save"}
               </span>
             </FancyButton>
           </div>

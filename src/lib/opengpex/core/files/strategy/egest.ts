@@ -100,7 +100,17 @@ export interface EgestRequest {
   readonly sourceGamut?: GamutId;
   /** Explicit user/agent gamut request. Omitted ⇒ round-trip the source gamut. */
   readonly requestedGamut?: GamutId;
-  /** Explicit user depth request (`config.exportBitDepth`). Omitted ⇒ 8. */
+  /**
+   * The DOCUMENT's own stored bit depth = `assets.get(frame.assetId)?.bitDepth`,
+   * the depth axis of the same StoredAsset anchor as `sourceGamut`. Only consulted
+   * when `requestedBitDepth` is omitted. Omitted ⇒ 8.
+   */
+  readonly sourceBitDepth?: number;
+  /**
+   * Explicit user depth request (`config.exportBitDepth`). Omitted ⇒ follow the
+   * source: 16 when `sourceBitDepth > 8`, else 8 — the depth twin of the gamut
+   * rule above, so an untouched export round-trips the document's own depth.
+   */
   readonly requestedBitDepth?: 8 | 16;
   /**
    * The document's HDR presentation switch (`activeFrame.hdrRender === true`),
@@ -185,7 +195,9 @@ export function resolveEmbedIcc(format: SourceFormat, userOverride?: boolean): b
  * one-way constraint solve:
  *
  *   1. Pre-process: validate the format has an encode lane; normalize intent
- *      (`rec2020` rides the raw lanes since D4 — no downgrade).
+ *      (`rec2020` rides the raw lanes since D4 — no downgrade; an omitted depth
+ *      request follows `sourceBitDepth`, exactly as an omitted gamut request
+ *      follows `sourceGamut`).
  *   2. Gamut convergence: the container's `supportedGamuts` is the SOLE
  *      judge. Intent that the container can hold survives; otherwise fall back to
  *      `WORKING_GAMUT`, else the widest canvas-representable gamut
@@ -208,7 +220,8 @@ export function resolveEgestDecision(request: EgestRequest): EgestDecision {
     format,
     sourceGamut: requestSourceGamut,
     requestedGamut: explicitGamut,
-    requestedBitDepth,
+    sourceBitDepth,
+    requestedBitDepth: explicitBitDepth,
     hdrSemantics,
     embedIccOverride,
   } = request;
@@ -243,6 +256,9 @@ export function resolveEgestDecision(request: EgestRequest): EgestDecision {
 
   const sourceGamut: GamutId = requestSourceGamut ?? 'srgb';
   const requestedGamut: GamutId = explicitGamut ?? sourceGamut;
+  // Depth intent mirrors the gamut intent: an explicit request wins, otherwise the
+  // document's own stored depth is round-tripped (anything above 8 ⇒ 16).
+  const requestedBitDepth: 8 | 16 = explicitBitDepth ?? ((sourceBitDepth ?? 8) > 8 ? 16 : 8);
   // rec2020 is a first-class intent since D4 (gap #8 closed): the matrix exists
   // (shader `case 4u`), the SDR terminal encode carries the BT.709/BT.2020 OETF,
   // and the raw lanes can hold it. No downgrade — the HDR AVIF lane above owns

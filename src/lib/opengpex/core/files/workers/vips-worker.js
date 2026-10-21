@@ -159,15 +159,55 @@ async function iccToSrgb(bytes) {
 }
 
 /**
+ * Wrap interleaved RGBA samples as a vips image at the requested bit depth.
+ *
+ * wasm-vips copies `newFromMemory` input ELEMENT by element through the typed
+ * array's own element type and ignores the `format` argument for that purpose:
+ * handing it a Uint8Array byte view of 16-bit samples turns every byte into its
+ * own ushort sample (garbage values, wrong pixel count). 16-bit data therefore
+ * has to be presented as a Uint16Array view over the same bytes.
+ *
+ * The 16-bit image is also re-tagged: `newFromMemory` yields the 'multiband'
+ * interpretation, and pngsave treats a 'multiband' ushort image as 8-bit data in
+ * a 16-bit container (shifts it >> 8 and writes an 8-bit PNG); only 'rgb16'
+ * keeps the 16-bit code values. tiffsave does not care, but both lanes share the
+ * tag so the two encoders stay on one contract. 8-bit input is left untouched.
+ *
+ * @param {object} v - Initialised wasm-vips module
+ * @param {Uint8Array|Uint16Array} rgbaData - Interleaved RGBA samples
+ * @param {number} width
+ * @param {number} height
+ * @param {8|16} bitDepth
+ * @returns {object} vips Image (caller owns it: call `.delete()` when done)
+ */
+function rgbaToVipsImage(v, rgbaData, width, height, bitDepth) {
+  const is16 = bitDepth === 16;
+  let samples = rgbaData;
+  if (is16 && !(rgbaData instanceof Uint16Array)) {
+    samples = new Uint16Array(rgbaData.buffer, rgbaData.byteOffset, rgbaData.byteLength / 2);
+  }
+  const expected = width * height * 4;
+  if (samples.length !== expected) {
+    throw new Error(`[vips-worker] RGBA sample count mismatch: got ${samples.length}, need ${expected} (${width}x${height}, ${bitDepth}-bit)`);
+  }
+  const raw = v.Image.newFromMemory(samples, width, height, 4, is16 ? 'ushort' : 'uchar');
+  if (!is16) return raw;
+  const tagged = raw.copy({ interpretation: 'rgb16' });
+  raw.delete();
+  return tagged;
+}
+
+/**
  * Encode RGBA pixel data → TIFF bytes.
  *
- * @param {Uint8Array} rgbaData - RGBA pixel data
+ * @param {Uint8Array} rgbaData - RGBA pixel data (8-bit uchar or 16-bit ushort bytes)
  * @param {number} width - Image width
  * @param {number} height - Image height
  * @param {object} options - Encode options
  * @param {string} options.compression - 'none'|'lzw'|'zip'
  * @param {number} options.dpi - Output DPI
  * @param {Uint8Array} [options.iccProfileBytes] - Optional ICC Profile bytes to embed
+ * @param {number} [options.bitDepth=8] - 8 or 16
  */
 async function encodeTiff(rgbaData, width, height, options) {
   const v = await initVips();
@@ -185,8 +225,7 @@ async function encodeTiff(rgbaData, width, height, options) {
     tileHeight = 256,
   } = options || {};
 
-  const bandFormat = options?.bitDepth === 16 ? 'ushort' : 'uchar';
-  let image = v.Image.newFromMemory(rgbaData, width, height, 4, bandFormat);
+  let image = rgbaToVipsImage(v, rgbaData, width, height, options?.bitDepth === 16 ? 16 : 8);
 
   // Attach ICC Profile if provided
   if (iccProfileBytes && iccProfileBytes.length > 0) {
@@ -502,12 +541,15 @@ async function decode(bytes, opts) {
 /**
  * Encode RGBA pixel data → PNG bytes (supports 8/16-bit).
  *
+ * Resolution (pHYs) is deliberately NOT written here: libvips' pngsave has no
+ * xres/yres save options (those belong to tiffsave), and the PNG handler rebuilds
+ * the pHYs chunk from the export DPI during its chunk reassembly pass anyway.
+ *
  * @param {Uint8Array} rgbaData - RGBA pixel data (8-bit uchar or 16-bit ushort)
  * @param {number} width - Image width
  * @param {number} height - Image height
  * @param {object} options - Encode options
  * @param {number} [options.compression=6] - Compression level 0-9
- * @param {number} [options.dpi=72] - DPI
  * @param {Uint8Array} [options.iccProfileBytes] - Optional ICC Profile bytes
  * @param {number} [options.bitDepth=8] - 8 or 16
  * @returns {Promise<Uint8Array>}
@@ -517,13 +559,11 @@ async function encodePng(rgbaData, width, height, options) {
 
   const {
     compression = 6,
-    dpi = 72,
     iccProfileBytes,
     bitDepth = 8,
   } = options || {};
 
-  const bandFormat = bitDepth === 16 ? 'ushort' : 'uchar';
-  let image = v.Image.newFromMemory(rgbaData, width, height, 4, bandFormat);
+  let image = rgbaToVipsImage(v, rgbaData, width, height, bitDepth === 16 ? 16 : 8);
 
   if (iccProfileBytes && iccProfileBytes.length > 0) {
     try {
@@ -533,10 +573,10 @@ async function encodePng(rgbaData, width, height, options) {
     }
   }
 
+  // Level 0 (NONE) is a legitimate choice, so only non-numeric input falls back.
+  const level = Number(compression);
   const saveOpts = {
-    compression: Number(compression) || 6,
-    xres: dpi / 25.4,
-    yres: dpi / 25.4,
+    compression: Number.isFinite(level) ? level : 6,
   };
 
   const pngBuffer = image.writeToBuffer('.png', saveOpts);

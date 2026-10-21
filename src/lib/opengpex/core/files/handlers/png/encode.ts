@@ -66,7 +66,8 @@ export async function encodePng(
 
   if (isRawPixelSource(source)) {
     // Both 8-bit (`raw-8`) and 16-bit (`raw-16`) go straight to vips, which
-    // encodes each at the source's native bit depth with no canvas hop.
+    // encodes each at the source's native bit depth with no canvas hop. DPI is
+    // not passed: the pHYs chunk is written by the reassembly pass below.
     const rgbaData = source.data instanceof Uint8Array
       ? source.data
       : new Uint8Array(source.data.buffer, source.data.byteOffset, source.data.byteLength);
@@ -77,7 +78,6 @@ export async function encodePng(
       source.height,
       {
         compression: config?.pngCompression ?? 6,
-        dpi: config?.dpi || meta?.dpi || 72,
         bitDepth: source.bitDepth,
       },
     );
@@ -104,7 +104,6 @@ export async function encodePng(
         canvas.height,
         {
           compression: config.pngCompression,
-          dpi: config?.dpi || meta?.dpi || 72,
           bitDepth: 8,
         },
       );

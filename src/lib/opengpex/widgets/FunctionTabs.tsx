@@ -32,6 +32,23 @@ interface Option<T> {
   disabled?: boolean;
 }
 
+/**
+ * Accent applied to the ACTIVE tab only. The default is the neutral raised pill;
+ * 'green' / 'amber' carry the export panel's source-match semantics (green = the
+ * selection equals the document's own value, amber = it deviates from it) so a
+ * segment control can speak the same colour language as the gamut dropdown.
+ */
+export type FunctionTabsActiveTone = 'default' | 'green' | 'amber';
+
+const ACTIVE_TONE_CLASSES: Record<FunctionTabsActiveTone, string> = {
+  default:
+    'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm dark:shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)]',
+  green:
+    'bg-emerald-50 text-emerald-700 border border-emerald-200/70 shadow-sm dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/25',
+  amber:
+    'bg-amber-50 text-amber-700 border border-amber-200/70 shadow-sm dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/25',
+};
+
 interface FunctionTabsProps<T> {
   options: Option<T>[];
   value: T;
@@ -40,6 +57,8 @@ interface FunctionTabsProps<T> {
   className?: string; // Additional wrapper classes
   /** Size variant: 'sm' for compact drawers, 'md' (default) for standard use */
   size?: 'sm' | 'md';
+  /** Colour accent of the active tab; see FunctionTabsActiveTone. */
+  activeTone?: FunctionTabsActiveTone;
 }
 
 export default function FunctionTabs<T extends string>({
@@ -49,6 +68,7 @@ export default function FunctionTabs<T extends string>({
   disabled,
   className = '',
   size = 'md',
+  activeTone = 'default',
 }: FunctionTabsProps<T>) {
   const isSm = size === 'sm';
 
@@ -76,7 +96,7 @@ export default function FunctionTabs<T extends string>({
               ${isActive 
                 ? (['crop'].includes(opt.value as string) 
                     ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20 active:scale-[0.98]' 
-                    : 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm dark:shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)]')
+                    : ACTIVE_TONE_CLASSES[activeTone])
                 : 'text-zinc-500 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
               }
             `}

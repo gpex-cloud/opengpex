@@ -199,18 +199,6 @@ export function useExportRules(
    const showBitDepth = !!cap && cap.supportedChannels.some(
       (ch) => ch === 'raw-8' || ch === 'raw-16',
    );
-   const exportBitDepth: 8 | 16 = config.exportBitDepth === 16 ? 16 : 8;
-   const handleBitDepthChange = (next: 8 | 16) => {
-      updateConfig({ exportBitDepth: next });
-   };
-
-   // Anti-Silent-Downgrade: if current targetGamut is no longer supported by the newly
-   // selected format, automatically revert to undefined (Follow Source).
-   useEffect(() => {
-      if (config.targetGamut && !supportedGamuts.includes(config.targetGamut)) {
-         updateConfig({ targetGamut: undefined });
-      }
-   }, [config.format, config.targetGamut, supportedGamuts, updateConfig]);
 
    // Authoritative document bit depth anchor (SSOT: StoredAsset, fallback: metadata)
    const docBitDepth = useMemo(() => {
@@ -222,13 +210,26 @@ export function useExportRules(
    }, [activeFrame, assets, sourceBitDepth]);
 
    const sourceIs16Bit = docBitDepth !== undefined && docBitDepth > 8;
+   const sourceDefaultBitDepth: 8 | 16 = sourceIs16Bit ? 16 : 8;
 
-   // Lifecycle synchronization for exportBitDepth — default only, never a force.
+   // Depth follows the same contract as gamut: `config.exportBitDepth === undefined`
+   // means "follow the source document", and the displayed value is derived from
+   // the active frame on every render. Nothing is written back on frame switch, so
+   // a choice made for one document never leaks into the next one; the egest
+   // resolver applies the identical default from `sourceBitDepth`.
+   const exportBitDepth: 8 | 16 = config.exportBitDepth ?? sourceDefaultBitDepth;
+   const isSourceBitDepth = exportBitDepth === sourceDefaultBitDepth;
+   const handleBitDepthChange = (next: 8 | 16) => {
+      updateConfig({ exportBitDepth: next === sourceDefaultBitDepth ? undefined : next });
+   };
+
+   // Anti-Silent-Downgrade: if current targetGamut is no longer supported by the newly
+   // selected format, automatically revert to undefined (Follow Source).
    useEffect(() => {
-      if (sourceIs16Bit && config.exportBitDepth === undefined) {
-         updateConfig({ exportBitDepth: 16 });
+      if (config.targetGamut && !supportedGamuts.includes(config.targetGamut)) {
+         updateConfig({ targetGamut: undefined });
       }
-   }, [sourceIs16Bit, config.exportBitDepth, updateConfig]);
+   }, [config.format, config.targetGamut, supportedGamuts, updateConfig]);
 
    // ─── Metadata & color toggles visibility ───
    const showExif = !!(imageMetadata?.raw?.exif && supportsExifEmbed(config.format));
@@ -268,7 +269,7 @@ export function useExportRules(
    const isAdapted = !config.targetGamut && !supportedGamuts.includes(sourceGamut);
 
    // Can reset if user has changed color space or bit depth away from document defaults
-   const isBitDepthChanged = showBitDepth && (sourceIs16Bit ? config.exportBitDepth === 8 : config.exportBitDepth === 16);
+   const isBitDepthChanged = showBitDepth && !isSourceBitDepth;
    const canReset = config.targetGamut !== undefined || isBitDepthChanged;
 
    const sourceGamutMeta = GAMUT_META[sourceGamut] ?? { fullLabel: sourceGamut.toUpperCase(), label: sourceGamut.toUpperCase() };
@@ -319,7 +320,7 @@ export function useExportRules(
    const handleGamutReset = () => {
       updateConfig({
          targetGamut: undefined,
-         exportBitDepth: sourceIs16Bit ? 16 : undefined,
+         exportBitDepth: undefined,
       });
    };
 
@@ -339,6 +340,7 @@ export function useExportRules(
       handleGamutReset,
       showBitDepth,
       exportBitDepth,
+      isSourceBitDepth,
       handleBitDepthChange,
    };
 }

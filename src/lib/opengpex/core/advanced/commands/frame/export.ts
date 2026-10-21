@@ -73,11 +73,11 @@ export const FrameExportCommands = {
       // + the colour half of the pass-through gate, all resolved together so
       // they cannot disagree. Everything colour-related below just READS it.
       const sourceAsset = activeFrame.assetId ? assets.get(activeFrame.assetId) : undefined;
-      const sourceGamut = sourceAsset?.gamut;
       const egest = resolveEgestDecision({
         format: exportFormat,
-        sourceGamut,
+        sourceGamut: sourceAsset?.gamut,
         requestedGamut: config.targetGamut,
+        sourceBitDepth: sourceAsset?.bitDepth,
         requestedBitDepth: config.exportBitDepth,
         hdrSemantics,
         embedIccOverride: config.embedIccOverride,

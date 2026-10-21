@@ -82,6 +82,7 @@ export function ResizeExportRules({
       {rules.showBitDepth && (
         <BitDepthOptions
           value={rules.exportBitDepth}
+          isSourceBitDepth={rules.isSourceBitDepth}
           onChange={rules.handleBitDepthChange}
         />
       )}

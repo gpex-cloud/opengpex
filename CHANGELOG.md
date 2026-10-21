@@ -2,6 +2,15 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.24
+
+- Workspace: new markers, text boxes and brush strokes are no longer folded into automatically created "Group Markers" / "Group Texts" / "Group Strokes" layer groups — each one is placed as a plain layer directly above the active layer, leaving grouping entirely up to you
+- Export: the bit depth selector now follows the document by default, matching the behavior of the color space setting; the active tab is green while it matches the document and amber when it deviates
+- Export: 16-bit PNG and TIFF exports now carry the real 16-bit pixel values instead of garbage or fully transparent pixels
+- Export: PNG exports now store the DPI setting correctly in the file
+
+---
+
 ## v2.0.23
 
 - Marker Tool: major update — five new shapes (Line, Double Arrow, Polygon, Star, Callout speech bubble with a draggable tail) join Rectangle, Ellipse and Arrow; markers now select and edit like text boxes: click to select, drag to move or resize, double-click to jump into the tool, and each shape remembers its own style. Text boxes and markers share one selection frame style

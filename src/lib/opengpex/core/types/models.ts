@@ -340,22 +340,6 @@ export interface Layer {
     sourceLayerId?: string;
     /** The hole mask id on the source layer that corresponds to this cut fragment (only cut fragments have this). */
     assocMaskId?: string;
-    /**
-     * Marks a `type:'group'` layer as an auto-created container for consecutively
-     * drawn Marker Tool vectors. Distinguishes it from user-created manual groups
-     * so the Marker Tool only ever appends into its own groups (see MarkerOverlay
-     * place command). Absent/false on all other groups.
-     */
-    isVectorGroup?: boolean;
-    /**
-     * Marks a `type:'group'` layer as an auto-created container for consecutively
-     * placed Text Tool layers. Symmetric to `isVectorGroup` but kept as a separate
-     * flag on purpose: the Text Tool must only append into its own text groups and
-     * never mix text into a Marker group (and vice versa), so mixed text/marker
-     * creation naturally starts a fresh group when the tool switches. See the
-     * TextOverlay place command. Absent/false on all other groups.
-     */
-    isTextGroup?: boolean;
     [key: string]: unknown;
   };
 
