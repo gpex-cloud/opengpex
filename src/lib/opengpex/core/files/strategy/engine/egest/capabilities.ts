@@ -94,13 +94,14 @@ export const FORMAT_EGEST_CAPABILITIES: Record<SourceFormat, FormatEgestCapabili
   // ─── Canvas-first containers: depend on the browser / MozJPEG encoder ───
   jpeg: { supportedChannels: ['canvas-8'], maxBitDepth: 8, supportedGamuts: ['srgb', 'display-p3'], supportsIccEmbed: true },
   webp: { supportedChannels: ['canvas-8'], maxBitDepth: 8, supportedGamuts: ['srgb', 'display-p3'], supportsIccEmbed: true },
-  // jsquash's AVIF encoder has no ICC-embed API — unlike jpeg/webp/tiff/png,
-  // `supportsIccEmbed` is a real physical `false` here, not just "off by default".
+  // jsquash's AVIF encoder has no ICC-embed API, so the AVIF handler writes the
+  // ICC `colr(prof)` box itself post-encode (handlers/avif/tagger.ts) — ICC
+  // embedding is therefore a genuine capability here, on par with jpeg/webp.
   // `raw-10` is the HDR lane (10-bit PQ / BT.2020), reached only when the export
   // command resolves with the document's HDR switch ON — see `egest.ts`. The SDR
   // gamut envelope (`supportedGamuts`) deliberately stays 8-bit-only: a plain SDR
   // AVIF export must never resolve to rec2020.
-  avif: { supportedChannels: ['canvas-8', 'raw-10'], maxBitDepth: 10, supportedGamuts: ['srgb', 'display-p3'], supportsIccEmbed: false },
+  avif: { supportedChannels: ['canvas-8', 'raw-10'], maxBitDepth: 10, supportedGamuts: ['srgb', 'display-p3'], supportsIccEmbed: true },
 
   // ─── Legacy containers fixed to sRGB (no ICC, no wide gamut at all) ───
   bmp:  { supportedChannels: ['canvas-8'], maxBitDepth: 8, supportedGamuts: ['srgb'], supportsIccEmbed: false },

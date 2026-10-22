@@ -56,9 +56,6 @@ export const FrameExportCommands = {
       const { exportWidth, exportHeight, region, config } = payload;
       const dpi = config.dpi || activeFrame.dpi || 72;
       const layerMeta = activeFrame.metadata;
-      const baseW = region ? region.w : activeFrame.canvas.w;
-      const baseH = region ? region.h : activeFrame.canvas.h;
-      const needsResize = exportWidth !== baseW || exportHeight !== baseH;
       const exportFormat = mimeToFormat[config.format] ?? 'unknown';
       // WYSIWYG: the per-document HDR switch drives BOTH the presentation and
       // the HDR-container export semantics — OFF means the HDR lanes ship the
@@ -69,9 +66,13 @@ export const FrameExportCommands = {
       const hdrSemantics = activeFrame.hdrRender === true;
 
       // ═══ The single egest decision (core/files/strategy/egest.ts) ═══════
-      // Output gamut + container clamp + encode lane + canvas tag + ICC embed
-      // + the colour half of the pass-through gate, all resolved together so
-      // they cannot disagree. Everything colour-related below just READS it.
+      // Output gamut + container clamp + encode lane + canvas tag + ICC embed,
+      // all resolved together so they cannot disagree. Everything colour-related
+      // below just READS it. There is deliberately NO pass-through here: Save
+      // always re-encodes through the pipeline so the decision, the pixels and
+      // the file agree; the verbatim source bytes are exclusively the explicit
+      // "Save Original" command (ImageInfoDrawer `downloadOriginal`, which
+      // bypasses this command entirely).
       const sourceAsset = activeFrame.assetId ? assets.get(activeFrame.assetId) : undefined;
       const egest = resolveEgestDecision({
         format: exportFormat,
@@ -82,29 +83,6 @@ export const FrameExportCommands = {
         hdrSemantics,
         embedIccOverride: config.embedIccOverride,
       });
-
-      // ═══ Pass-through (unedited + full-frame + format match + sourceBlob) ═══
-      // Download the ORIGINAL file bytes verbatim — no RenderGraph, no
-      // re-compression, original ICC/EXIF preserved (pass-through).
-      const srcFormat = activeFrame.metadata?.sourceFormat;
-      const frameHistory = ctx.state.history.byFrameId[activeFrame.id];
-      const unedited = !frameHistory || (frameHistory.past.length === 0 && !frameHistory.checkpoint);
-
-      const isPassThroughEligible =
-        !region &&
-        !needsResize &&
-        unedited &&
-        srcFormat === exportFormat &&
-        egest.gamutPassThroughEligible &&
-        !!activeFrame.assetId;
-
-      if (isPassThroughEligible && activeFrame.assetId) {
-        const sourceBlob = await assets.getRaw(activeFrame.assetId);
-        if (sourceBlob) {
-          const filename = files.getExportFilename(activeFrame.name, exportWidth, exportHeight, config.format);
-          return { blob: sourceBlob, filename };
-        }
-      }
 
       // ═══ Unified WebGPU export (Readback → encode) ═══════════════════════
       // Sunk into `ExportDispatcher`, reached

@@ -21,7 +21,7 @@
 import ExifReader from 'exifreader';
 import type { ImageMetadata } from '../../types';
 import { iccToBase64, parseIccProfileName, inferColorSpaceFromIcc } from '../../shared/icc';
-import { extractWebpIcc, extractWebpExif } from './riff';
+import { extractWebpIcc, extractWebpExif, extractWebpHasAlpha } from './riff';
 
 /**
  * Extract full V2 metadata from a WebP file.
@@ -132,6 +132,9 @@ export async function extractWebpMetadata(file: File): Promise<ImageMetadata> {
   } catch {
     // ExifReader parsing failed — non-critical
   }
+
+  // ── Alpha channel from container flags (VP8X alpha bit / VP8L alpha hint) ──
+  meta.hasAlpha = extractWebpHasAlpha(bytes);
 
   // ── Raw EXIF bytes (TIFF IFD from RIFF EXIF chunk) ──
   const rawExif = extractWebpExif(bytes);

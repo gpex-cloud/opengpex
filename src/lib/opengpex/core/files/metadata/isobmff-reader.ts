@@ -249,12 +249,29 @@ export function extractIsobmffHvcCBitDepth(bytes: Uint8Array): number | null {
  * (probe-verified: the browser's tone-map on such files is uncontrolled,
  * meanDev ≈ 30/255 vs truth). They resolve to 'unknown' → the ingest matrix's
  * HDR-negative rows (AVIF 18 / HEIC 19d) take them.
+ *
+ * Unspecified CICP axes (code 2) are NOT unknown: the common encoder default
+ * (2/2/6) and absent-colr containers resolve to 'srgb' — see the lenient
+ * fallback inside the function body.
  */
 export function nclxToColorSpace(nclx: NclxParams): ColorSpaceId {
-  if (nclx.transferCharacteristics === 16 || nclx.transferCharacteristics === 18) {
+  const tc = nclx.transferCharacteristics;
+  if (tc === 16 || tc === 18) {
     return 'unknown'; // PQ / HLG — HDR, out of the SDR gamut vocabulary
   }
-  switch (nclx.colourPrimaries) {
+  const p = nclx.colourPrimaries;
+  // Lenient SDR fallback for UN_specified CICP axes (H.273 code 2): a large
+  // share of real-world SDR AVIF/HEVC containers — including this editor's
+  // own older encodes — carry nclx 2/2/6 or omit the colr box entirely.
+  // Treating that as 'unknown' rejected ordinary SDR images, so mirror the
+  // untagged PNG/BMP convention: assume sRGB. The matrix axis is irrelevant
+  // here (the browser/decoder proxy channel applies the pixel transfer), so
+  // only the primaries/transfer pair matters. Explicit SDR transfers
+  // (BT.709 = 1, sRGB = 13) with unspecified primaries are admitted on the
+  // same logic. Real HDR (PQ/HLG) never reaches this branch — returned above
+  // — so the leniency cannot swallow a file the HDR rows must reject.
+  if (p === 2 && (tc === 2 || tc === 1 || tc === 13)) return 'srgb';
+  switch (p) {
     case 1:  return 'srgb';
     case 12: return 'display-p3';
     case 9:  return 'rec2020'; // BT.2020 SDR (gap #8 closed, phase D4); transfer rides `raw.transfer`

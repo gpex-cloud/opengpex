@@ -394,11 +394,12 @@ export function ResizeExportControls({
                 </FancyButton>
               }
             />
-            {/* Save / Save Clip — primary action, behavior UNCHANGED (render +
-                encode via the egest pipeline; unedited + format-match rides the
-                pass-through gate). The attached chevron menu adds Save Original:
-                the retained source blob downloaded verbatim, bypassing format &
-                RenderGraph — the RAW round-trip exit (IMG_2591.DNG stays .dng). */}
+            {/* Save / Save Clip — primary action: render + encode via the
+                egest pipeline, every time (no pass-through: the decision, the
+                pixels and the file must agree). The attached chevron menu adds
+                Save Original: the retained source blob downloaded verbatim via
+                `downloadOriginal` (getRaw), bypassing format & RenderGraph —
+                the RAW round-trip exit (IMG_2591.DNG stays .dng). */}
             <FancyButton
               onClick={onDownload}
               disabled={isProcessing || (isClipMode && !hasSelection)}

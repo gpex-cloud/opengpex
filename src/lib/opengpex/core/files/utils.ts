@@ -85,8 +85,11 @@ export function parseDateToISO(rawDate: unknown): string | undefined {
  * original file — the bitmap itself is not needed, only its size. `close()` runs
  * in `finally` so the bitmap is freed even if dimension access ever throws.
  */
-export async function readImageDimensions(file: Blob): Promise<{ w: number; h: number }> {
-  const img = await createImageBitmap(file);
+export async function readImageDimensions(
+  file: Blob,
+  options?: { imageOrientation?: ImageOrientation },
+): Promise<{ w: number; h: number }> {
+  const img = await createImageBitmap(file, options);
   try {
     return { w: img.width, h: img.height };
   } finally {

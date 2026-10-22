@@ -174,6 +174,61 @@ export function injectWebpExif(webpBytes: Uint8Array, exifBytes: Uint8Array): Ui
 }
 
 /**
+ * Detect whether a WebP bitstream carries an alpha channel.
+ *
+ * Per the WebP container spec:
+ *   - Extended format (VP8X): alpha presence is flagged in the VP8X flags
+ *     byte (bit 4, 0x10). This flag is authoritative for both lossy (VP8 +
+ *     ALPH chunk) and lossless (VP8L) payloads.
+ *   - Simple lossy (VP8 ) has no alpha support at all.
+ *   - Simple lossless (VP8L): the bitstream header carries an
+ *     `alpha_is_used` hint bit (bit 28 of the 32-bit header word).
+ *     We honor it, but conservatively treat ANY simple VP8L as non-alpha
+ *     only when the bit is clear — encoders must set it when alpha exists.
+ *
+ * The VP8X flag is checked first because real-world alpha WebP files are
+ * written in extended format; the ALPH-chunk fallback covers malformed
+ * files where the flag was not set but an ALPH chunk is present.
+ *
+ * @returns true when the container signals an alpha channel
+ */
+export function extractWebpHasAlpha(bytes: Uint8Array): boolean {
+  if (!isRiffWebP(bytes)) return false;
+
+  let pos = 12;
+  while (pos + 8 <= bytes.length) {
+    const chunkId = getFourCC(bytes, pos);
+    const chunkSize = readUint32LE(bytes, pos + 4);
+
+    if (chunkId === 'VP8X') {
+      // VP8X data byte 0 is the flags byte; bit 4 (0x10) = alpha present.
+      // Keep scanning afterwards so a stray ALPH chunk still counts as alpha
+      // even when the flag was not set by a non-conforming encoder.
+      if (chunkSize >= 1 && (bytes[pos + 8] & 0x10) !== 0) return true;
+    }
+
+    if (chunkId === 'VP8L') {
+      // VP8L header: after the 0x2F signature byte, bits 0-13 = width-1,
+      // bits 14-27 = height-1, bit 28 = alpha_is_used
+      if (chunkSize < 5) return false;
+      const d = pos + 8;
+      const bits =
+        bytes[d + 1] |
+        (bytes[d + 2] << 8) |
+        (bytes[d + 3] << 16) |
+        (bytes[d + 4] << 24);
+      return ((bits >>> 28) & 1) === 1;
+    }
+
+    if (chunkId === 'ALPH') return true;
+
+    pos += 8 + chunkSize + (chunkSize % 2);
+  }
+
+  return false;
+}
+
+/**
  * Extract raw EXIF bytes from WebP RIFF EXIF chunk.
  *
  * WebP EXIF chunk contains TIFF IFD structure.
@@ -479,4 +534,5 @@ export const _testHelpers = {
   getFourCC,
   buildChunk,
   parseWebPDimensions,
+  readUint32LE,
 };

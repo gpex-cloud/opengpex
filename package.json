@@ -1,6 +1,6 @@
 {
   "name": "opengpex",
-  "version": "2.0.24",
+  "version": "2.0.25",
   "license": "GPL-3.0-only",
   "private": true,
   "scripts": {
@@ -15,7 +15,6 @@
     "start": "next start --port 3040",
     "lint": "eslint",
     "test": "vitest run",
-    "test:samples": "TEST_SAMPLES=1 vitest run",
     "test:watch": "vitest",
     "postinstall": "node scripts/postinstall-exts.mjs && pnpm sync-plugins && pnpm scan-plugins"
   },

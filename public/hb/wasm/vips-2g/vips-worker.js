@@ -1,0 +1,742 @@
+/**
+ * OpenGPEX - TIFF Worker (wasm-vips powered)
+ *
+ * This Worker handles TIFF decode/encode operations using wasm-vips (libvips compiled to WebAssembly).
+ * It is lazily loaded by the TiffHandler when TIFF files are imported or exported.
+ *
+ * Protocol: { id, fn, args } → { id, out } | { id, error }
+ *
+ * Functions:
+ * - decodeTiff(bytes: Uint8Array) → { width, height, data: Uint8Array (RGBA) }
+ * - encodeTiff(rgbaData: Uint8Array, width, height, options) → Uint8Array (TIFF bytes)
+ * - encodeJpeg(rgbaData: Uint8Array, width, height, options) → Uint8Array (JPEG bytes, 4:4:4)
+ *
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
+let vips = null;
+
+/**
+ * Base URL for the wasm-vips module files (vips.js / vips.wasm / side modules).
+ *
+ * Defaults to the upstream npm build served from /ext/wasm/vips/. The
+ * self-built large-heap variant lives in a different static directory and is
+ * launched with a `base` query parameter on the worker script URL (see
+ * lib-vips.ts), e.g. `/hb/wasm/vips-2g/vips-worker.js?base=%2Fhb%2Fwasm%2Fvips-2g%2F`.
+ * WorkerGlobalScope.location exposes `search` just like window.location, so the
+ * same worker script serves both variants; only the glue/wasm binaries differ.
+ */
+const VIPS_BASE = new URLSearchParams(self.location.search).get('base') || '/hb/wasm/vips-2g/';
+
+/**
+ * Initialize wasm-vips from locally-served files.
+ */
+async function initVips() {
+  if (vips) return vips;
+
+  // Import the JS glue from local static path (same origin as this worker)
+  importScripts(VIPS_BASE + 'vips.js');
+
+  // The imported script exposes a global `Vips` factory function
+  // NOTE: wasm-vips uses Emscripten pthreads — it spawns sub-Workers internally.
+  // We must set mainScriptUrlOrBlob so pthread workers can find vips.js.
+  vips = await self.Vips({
+    mainScriptUrlOrBlob: VIPS_BASE + 'vips.js',
+    locateFile: (fileName) => VIPS_BASE + fileName,
+    // Load vips-heif.wasm for AVIF/HEIC encoding support (libheif + libaom)
+    dynamicLibraries: ['vips-heif.wasm'],
+    print: () => {},
+    printErr: () => {},
+  });
+
+  // console.log('[VipsWorker] wasm-vips initialized (local WASM)');
+  return vips;
+}
+
+/**
+ * Decode TIFF bytes → RGBA pixel data.
+ */
+async function decodeTiff(bytes) {
+  const v = await initVips();
+
+  const image = v.Image.newFromBuffer(bytes, '', {
+    page: 0,
+    access: 'sequential',
+  });
+
+  // Convert to sRGB if needed (handles CMYK, Lab, etc.)
+  let rgb = image;
+  if (image.interpretation !== 'srgb' && image.interpretation !== 'b-w') {
+    rgb = image.colourspace('srgb');
+  }
+
+  // Ensure 8-bit
+  let img8 = rgb;
+  if (rgb.format !== 'uchar') {
+    if (rgb.format === 'ushort') {
+      img8 = rgb.linear(1.0 / 257.0, 0).cast('uchar');
+    } else {
+      img8 = rgb.cast('uchar');
+    }
+  }
+
+  // Ensure RGBA
+  const rgba = toRgbaBands(img8, 255);
+
+  const width = rgba.width;
+  const height = rgba.height;
+  const data = rgba.writeToBuffer('.raw');
+
+  // Cleanup
+  image.delete();
+  if (rgb !== image) rgb.delete();
+  if (img8 !== rgb) img8.delete();
+  if (rgba !== img8) rgba.delete();
+
+  return { width, height, data: new Uint8Array(data) };
+}
+// ═══════════════════════════════════════════════════════════════════════════════
+// ICC colour management (migrated from engine IccHandler, 20260912)
+//
+// vips is fundamentally a file-transcoding library (Little CMS built in), so ICC
+// colour transforms belong to the files layer alongside TIFF/PNG container ops —
+// NOT the engine render worker. These are the byte-for-byte transcriptions of the
+// old `core/engine/worker/handlers/icc.ts` pipelines; moving them here lets the
+// engine worker drop wasm-vips entirely (one vips instance instead of two).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Convert image bytes with a non-sRGB ICC profile to sRGB RGBA (8-bit).
+ * vips reads the embedded profile and uses Little CMS for accurate conversion
+ * (Adobe RGB, ProPhoto, Display P3, CMYK, custom profiles, …).
+ *
+ * @param {Uint8Array} bytes - Encoded image bytes (JPEG/PNG/WebP/TIFF/…)
+ * @returns {{ width: number, height: number, data: Uint8Array, iccProfileData?: Uint8Array }}
+ */
+async function iccToSrgb(bytes) {
+  const v = await initVips();
+
+  // newFromBuffer automatically reads embedded ICC profiles.
+  const image = v.Image.newFromBuffer(bytes, '', { access: 'sequential' });
+
+  // Extract raw ICC profile bytes BEFORE conversion (for round-trip export).
+  let iccProfileData;
+  try {
+    const iccRaw = image.get('icc-profile-data');
+    if (iccRaw instanceof Uint8Array && iccRaw.length > 0) {
+      iccProfileData = new Uint8Array(iccRaw);
+    }
+  } catch { /* no ICC profile embedded */ }
+
+  // Convert to sRGB via Little CMS.
+  let rgb = image;
+  if (image.interpretation !== 'srgb' && image.interpretation !== 'b-w') {
+    rgb = image.colourspace('srgb');
+  }
+
+  // Ensure 8-bit.
+  let img8 = rgb;
+  if (rgb.format !== 'uchar') {
+    if (rgb.format === 'ushort') {
+      img8 = rgb.linear(1.0 / 257.0, 0).cast('uchar');
+    } else {
+      img8 = rgb.cast('uchar');
+    }
+  }
+
+  // Ensure RGBA (4 bands).
+  const rgba = toRgbaBands(img8, 255);
+
+  const width = rgba.width;
+  const height = rgba.height;
+  const rawBuffer = rgba.writeToBuffer('.raw');
+  const data = new Uint8Array(rawBuffer);
+
+  // Cleanup
+  image.delete();
+  if (rgb !== image) rgb.delete();
+  if (img8 !== rgb) img8.delete();
+  if (rgba !== img8) rgba.delete();
+
+  return { width, height, data, iccProfileData };
+}
+
+/**
+ * Wrap interleaved RGBA samples as a vips image at the requested bit depth.
+ *
+ * wasm-vips copies `newFromMemory` input ELEMENT by element through the typed
+ * array's own element type and ignores the `format` argument for that purpose:
+ * handing it a Uint8Array byte view of 16-bit samples turns every byte into its
+ * own ushort sample (garbage values, wrong pixel count). 16-bit data therefore
+ * has to be presented as a Uint16Array view over the same bytes.
+ *
+ * The 16-bit image is also re-tagged: `newFromMemory` yields the 'multiband'
+ * interpretation, and pngsave treats a 'multiband' ushort image as 8-bit data in
+ * a 16-bit container (shifts it >> 8 and writes an 8-bit PNG); only 'rgb16'
+ * keeps the 16-bit code values. tiffsave does not care, but both lanes share the
+ * tag so the two encoders stay on one contract. 8-bit input is left untouched.
+ *
+ * @param {object} v - Initialised wasm-vips module
+ * @param {Uint8Array|Uint16Array} rgbaData - Interleaved RGBA samples
+ * @param {number} width
+ * @param {number} height
+ * @param {8|16} bitDepth
+ * @returns {object} vips Image (caller owns it: call `.delete()` when done)
+ */
+function rgbaToVipsImage(v, rgbaData, width, height, bitDepth) {
+  const is16 = bitDepth === 16;
+  let samples = rgbaData;
+  if (is16 && !(rgbaData instanceof Uint16Array)) {
+    samples = new Uint16Array(rgbaData.buffer, rgbaData.byteOffset, rgbaData.byteLength / 2);
+  }
+  const expected = width * height * 4;
+  if (samples.length !== expected) {
+    throw new Error(`[vips-worker] RGBA sample count mismatch: got ${samples.length}, need ${expected} (${width}x${height}, ${bitDepth}-bit)`);
+  }
+  const raw = v.Image.newFromMemory(samples, width, height, 4, is16 ? 'ushort' : 'uchar');
+  if (!is16) return raw;
+  const tagged = raw.copy({ interpretation: 'rgb16' });
+  raw.delete();
+  return tagged;
+}
+
+/**
+ * Encode RGBA pixel data → TIFF bytes.
+ *
+ * @param {Uint8Array} rgbaData - RGBA pixel data (8-bit uchar or 16-bit ushort bytes)
+ * @param {number} width - Image width
+ * @param {number} height - Image height
+ * @param {object} options - Encode options
+ * @param {string} options.compression - 'none'|'lzw'|'zip'
+ * @param {number} options.dpi - Output DPI
+ * @param {Uint8Array} [options.iccProfileBytes] - Optional ICC Profile bytes to embed
+ * @param {number} [options.bitDepth=8] - 8 or 16
+ */
+async function encodeTiff(rgbaData, width, height, options) {
+  const v = await initVips();
+
+  const {
+    compression = 'lzw',
+    dpi = 72,
+    iccProfileBytes,
+    jpegQuality = 85,
+    // Advanced options
+    predictor = 'none',
+    bigtiff = false,
+    tile = false,
+    tileWidth = 256,
+    tileHeight = 256,
+  } = options || {};
+
+  let image = rgbaToVipsImage(v, rgbaData, width, height, options?.bitDepth === 16 ? 16 : 8);
+
+  // Attach ICC Profile if provided. wasm-vips 0.0.18 has no generic `set()` —
+  // metadata blobs go through `setBlob` (a plain `set` throws TypeError and a
+  // swallowed failure here silently ships untagged TIFFs).
+  if (iccProfileBytes && iccProfileBytes.length > 0) {
+    try {
+      image.setBlob('icc-profile-data', iccProfileBytes);
+    } catch (e) {
+      console.warn('[vips-worker] ICC attachment failed:', e?.message);
+    }
+  }
+
+  const compressionMap = { 'none': 'none', 'lzw': 'lzw', 'zip': 'deflate', 'jpeg': 'jpeg' };
+  const vipsCompression = compressionMap[compression] || 'lzw';
+
+  // Build tiff save options
+  const saveOpts = {
+    compression: vipsCompression,
+    xres: dpi / 25.4,
+    yres: dpi / 25.4,
+    resunit: 'inch',
+    bigtiff,
+  };
+
+  // JPEG compression requires tiling and quality parameter
+  if (compression === 'jpeg') {
+    saveOpts.Q = jpegQuality;
+    saveOpts.tile = true;
+    saveOpts.tile_width = tileWidth;
+    saveOpts.tile_height = tileHeight;
+  } else if (tile) {
+    // User-requested tiling for non-JPEG
+    saveOpts.tile = true;
+    saveOpts.tile_width = tileWidth;
+    saveOpts.tile_height = tileHeight;
+  }
+
+  // Predictor (only effective for LZW/ZIP)
+  if ((compression === 'lzw' || compression === 'zip') && predictor !== 'none') {
+    const predictorMap = { 'horizontal': 'horizontal', 'float': 'float' };
+    saveOpts.predictor = predictorMap[predictor] || 'none';
+  }
+
+  const tiffBuffer = image.writeToBuffer('.tiff', saveOpts);
+
+  image.delete();
+  return new Uint8Array(tiffBuffer);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Multi-page TIFF Support
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get page count and per-page dimensions of a multi-page TIFF.
+ *
+ * Strategy: probe successive pages (page=0, page=1, ...) until loading fails.
+ * This is the most reliable approach across all wasm-vips versions since
+ * metadata fields like 'n-pages' and 'page-height' may not be available.
+ *
+ * @param {Uint8Array} bytes - TIFF file bytes
+ * @returns {{ pages: number, pageWidth: number, pageHeight: number }}
+ */
+async function tiffPageCount(bytes) {
+  const v = await initVips();
+
+  // First, try metadata-based detection (fast path)
+  let metadataPages = 0;
+  try {
+    const testImg = v.Image.newFromBuffer(bytes, '', { access: 'sequential' });
+    // Try to get n-pages from the loader
+    try { metadataPages = testImg.get('n-pages'); } catch {}
+    testImg.delete();
+  } catch {}
+
+  if (metadataPages > 1) {
+    // Metadata gave us the answer — get first page dimensions
+    const firstPage = v.Image.newFromBuffer(bytes, '', { page: 0, access: 'sequential' });
+    const pageWidth = firstPage.width;
+    const pageHeight = firstPage.height;
+    firstPage.delete();
+    console.log('[vips-worker] tiffPageCount (metadata): pages=' + metadataPages + ', w=' + pageWidth + ', h=' + pageHeight);
+    return { pages: metadataPages, pageWidth, pageHeight };
+  }
+
+  // Fallback: probe pages by trying to load them sequentially
+  // Load page 0 to get base dimensions
+  const page0 = v.Image.newFromBuffer(bytes, '', { page: 0, access: 'sequential' });
+  const pageWidth = page0.width;
+  const pageHeight = page0.height;
+  page0.delete();
+
+  // Try loading page 1, 2, 3... until it fails
+  let pages = 1;
+  const MAX_PAGES = 1000; // Safety limit
+  for (let i = 1; i < MAX_PAGES; i++) {
+    try {
+      const testPage = v.Image.newFromBuffer(bytes, '', { page: i, access: 'sequential' });
+      testPage.delete();
+      pages++;
+    } catch {
+      // Page doesn't exist — we've found the count
+      break;
+    }
+  }
+
+  console.log('[vips-worker] tiffPageCount (probe): pages=' + pages + ', w=' + pageWidth + ', h=' + pageHeight);
+  return { pages, pageWidth, pageHeight };
+}
+
+/**
+ * Decode a specific page of a multi-page TIFF to RGBA pixel data.
+ *
+ * @param {Uint8Array} bytes - TIFF file bytes
+ * @param {number} page - Zero-based page index
+ * @returns {{ width: number, height: number, data: Uint8Array }}
+ */
+async function tiffDecodePage(bytes, page) {
+  const v = await initVips();
+
+  const image = v.Image.newFromBuffer(bytes, '', {
+    page,
+    access: 'sequential',
+  });
+
+  // Convert to sRGB if needed
+  let rgb = image;
+  if (image.interpretation !== 'srgb' && image.interpretation !== 'b-w') {
+    rgb = image.colourspace('srgb');
+  }
+
+  // Ensure 8-bit
+  let img8 = rgb;
+  if (rgb.format !== 'uchar') {
+    if (rgb.format === 'ushort') {
+      img8 = rgb.linear(1.0 / 257.0, 0).cast('uchar');
+    } else {
+      img8 = rgb.cast('uchar');
+    }
+  }
+
+  // Ensure RGBA
+  const rgba = toRgbaBands(img8, 255);
+
+  const width = rgba.width;
+  const height = rgba.height;
+  const data = rgba.writeToBuffer('.raw');
+
+  // Cleanup
+  image.delete();
+  if (rgb !== image) rgb.delete();
+  if (img8 !== rgb) img8.delete();
+  if (rgba !== img8) rgba.delete();
+
+  return { width, height, data: new Uint8Array(data) };
+}
+
+
+/**
+ * Unified files-layer decode entry (20260912 shared lib-vips proposal).
+ *
+ * ONE vips pass produces the 8-bit display RGBA AND, when `wantHighDepth`, the
+ * naked high-bit-depth RGBA (ushort or float) — mirroring RAW's dual output.
+ *
+ * ⚠️ BIT-EXACTNESS: the 8-bit path here is a byte-for-byte transcription of the
+ * engine FileIoHandler.decodeTiff (file-io.ts) so migrating TIFF/PNG off
+ * `pixels.fileIO` produces identical pixels (no color regression):
+ *   • honor `preserveColorSpace` (skip colourspace('srgb') when true)
+ *   • ushort → linear(1/257).cast('uchar'); other non-uchar → cast('uchar')
+ *   • ensure RGBA via bandjoin(255) / extractBand
+ *
+ * ⚠️ HIGH-DEPTH path mirrors engine FileIoHandler.decodeHighDepth: it is
+ * color-management-AGNOSTIC (NO colourspace()), reads a FRESH image, routes
+ * float/double → naked Float32Array and everything else → naked Uint16Array
+ * (uchar promoted via linear(257).cast('ushort')). f16 packing is done on the
+ * MAIN thread in lib-vips.ts (color/float16), so we only ship naked buffers.
+ *
+ * ⚠️ `page` (default 0) selects the page inside a multi-page container and MUST
+ * be honoured by BOTH reads below. This is the only vips entry that emits the
+ * 8-bit display pixels and the high-depth naked pixels from ONE pass, so it is
+ * also the only way per-page high-depth is physically obtainable; honouring it
+ * on just the 8-bit read would pair page i's tags with page 0's pixels — worse
+ * than not supporting it at all.
+ *
+ * @param {Uint8Array} bytes
+ * @param {{ preserveColorSpace?: boolean, wantHighDepth?: boolean, page?: number }} [opts]
+ */
+/**
+ * Normalise any band layout to the RGBA layout the naked-pixel packing and the
+ * raw display payload assume (exactly 4 bands). Grayscale (1 band, or 2 with
+ * alpha) is replicated to RGB via colourspace('srgb') — pure channel
+ * replication, no colour management — and a missing alpha then gets the
+ * constant `alphaValue`. Without this, a 1-band source bandjoined with the
+ * alpha constant yields 2 bands and every downstream `w*h*4` view breaks
+ * (16-bit: "Invalid typed array length"; 8-bit: silently truncated payload).
+ */
+function toRgbaBands(image, alphaValue) {
+  const format = image.format;
+  let x = image;
+  const step = (next) => {
+    const out = next(x);
+    if (x !== image) x.delete();
+    x = out;
+  };
+  // Grayscale is replicated to RGB at its OWN code-value scale. A
+  // colourspace('srgb') conversion must NOT be used here: for grey16 it
+  // silently recasts to uchar (the srgb interpretation is 8-bit), and the
+  // 4-band views below then run past the buffer.
+  if (x.bands === 1) {
+    step((i) => {
+      const g = i.extractBand(0);
+      const a = i.extractBand(0).linear(0, alphaValue);
+      const rgba = g.bandjoin([g, g, a]);
+      g.delete();
+      a.delete();
+      return rgba;
+    });
+  } else if (x.bands === 2) {
+    // Gray + alpha: replicate gray, keep the REAL alpha band.
+    step((i) => {
+      const g = i.extractBand(0);
+      const a = i.extractBand(1);
+      const rgba = g.bandjoin([g, g, a]);
+      g.delete();
+      return rgba;
+    });
+  } else if (x.bands > 4) {
+    step((i) => i.extractBand(0, { n: 4 }));
+  }
+  if (!x.hasAlpha()) step((i) => i.bandjoin(alphaValue));
+  // vips arithmetic (linear above) promotes to float unconditionally; cast
+  // back so the payload keeps the code-value format the caller unpacks.
+  if (x.format !== format) x = x.cast(format);
+  return x;
+}
+
+async function decode(bytes, opts) {
+  const v = await initVips();
+  const { preserveColorSpace = false, wantHighDepth = false, page = 0 } = opts || {};
+
+  // ⚠️ `page` is a LOADER-scoped property, not a universal option: tiffload and
+  // the other multi-page loaders define it, pngload does not, and libvips
+  // rejects unknown properties outright (`no property named 'page'`) regardless
+  // of the value — a hard fail even at page=0. page=0 is exactly what a loader
+  // does WITHOUT the option, so forward it only when a non-default page is
+  // actually requested (multi-page TIFF); single-page files — including every
+  // PNG — load option-free.
+  const loadOpts = page > 0
+    ? { page, access: 'sequential' }
+    : { access: 'sequential' };
+
+  // ── 8-bit display path (bit-exact with engine decodeTiff) ──────────────────
+  const image = v.Image.newFromBuffer(bytes, '', loadOpts);
+
+  let rgb = image;
+  if (!preserveColorSpace && image.interpretation !== 'srgb' && image.interpretation !== 'b-w') {
+    rgb = image.colourspace('srgb');
+  }
+
+  let img8 = rgb;
+  if (rgb.format !== 'uchar') {
+    if (rgb.format === 'ushort') {
+      img8 = rgb.linear(1.0 / 257.0, 0).cast('uchar');
+    } else {
+      img8 = rgb.cast('uchar');
+    }
+  }
+
+  const rgba = toRgbaBands(img8, 255);
+
+  const width = rgba.width;
+  const height = rgba.height;
+  const data = new Uint8Array(rgba.writeToBuffer('.raw'));
+
+  image.delete();
+  if (rgb !== image) rgb.delete();
+  if (img8 !== rgb) img8.delete();
+  if (rgba !== img8) rgba.delete();
+
+  const result = { width, height, data };
+
+  // ── High-bit-depth naked pixels (mirrors engine decodeHighDepth) ───────────
+  if (wantHighDepth) {
+    const hi = v.Image.newFromBuffer(bytes, '', loadOpts);
+    const fmt = hi.format;
+    const isFloat = fmt === 'float' || fmt === 'double';
+    const sourceBitDepth = fmt === 'ushort' ? 16 : isFloat ? 32 : 8;
+
+    const interp = hi.interpretation;
+    const sourceTrc = interp === 'scrgb' || interp === 'xyz' ? 'linear' : 'srgb-trc';
+
+    let hw;
+    let hh;
+    let naked;
+
+    if (isFloat) {
+      // double → float so the naked buffer is 4-byte f32 (main-thread packing
+      // reads Float32Array); precision-preserving down-cast.
+      const src = fmt === 'double' ? hi.cast('float') : hi;
+
+      const hrgba = toRgbaBands(src, 1); // opaque alpha in float space = 1.0
+
+      hw = hrgba.width;
+      hh = hrgba.height;
+      const raw = hrgba.writeToMemory();
+      const f32 = new Float32Array(raw.buffer, raw.byteOffset, hw * hh * 4);
+      naked = new Float32Array(f32); // copy → standalone transferable buffer
+
+      hi.delete();
+      if (src !== hi) src.delete();
+      if (hrgba !== src) hrgba.delete();
+    } else {
+      // ushort branch (+ uchar promotion). No colourspace() — precision axis is
+      // color-management-agnostic. uchar → linear(257).cast('ushort') so /65535
+      // downstream yields the same [0,1] value the 8-bit path would.
+      let src = hi;
+      if (fmt !== 'ushort') {
+        src = fmt === 'uchar' ? hi.linear(257, 0).cast('ushort') : hi.cast('ushort');
+      }
+
+      const hrgba = toRgbaBands(src, 65535); // opaque alpha in the 16-bit range
+
+      hw = hrgba.width;
+      hh = hrgba.height;
+      const raw = hrgba.writeToMemory();
+      const u16 = new Uint16Array(raw.buffer, raw.byteOffset, hw * hh * 4);
+      naked = new Uint16Array(u16); // copy → standalone transferable buffer
+
+      hi.delete();
+      if (src !== hi) src.delete();
+      if (hrgba !== src) hrgba.delete();
+    }
+
+    // Only surface high-depth when the source is GENUINELY >8-bit; an 8-bit
+    // source promoted to ushort must NOT fatten to f16 (caller keeps 8-bit path).
+    if (sourceBitDepth > 8) {
+      result.highDepth = { width: hw, height: hh, naked, isFloat, sourceBitDepth, sourceTrc };
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Encode RGBA pixel data → PNG bytes (supports 8/16-bit).
+ *
+ * Resolution (pHYs) is deliberately NOT written here: libvips' pngsave has no
+ * xres/yres save options (those belong to tiffsave), and the PNG handler rebuilds
+ * the pHYs chunk from the export DPI during its chunk reassembly pass anyway.
+ *
+ * @param {Uint8Array} rgbaData - RGBA pixel data (8-bit uchar or 16-bit ushort)
+ * @param {number} width - Image width
+ * @param {number} height - Image height
+ * @param {object} options - Encode options
+ * @param {number} [options.compression=6] - Compression level 0-9
+ * @param {Uint8Array} [options.iccProfileBytes] - Optional ICC Profile bytes
+ * @param {number} [options.bitDepth=8] - 8 or 16
+ * @returns {Promise<Uint8Array>}
+ */
+async function encodePng(rgbaData, width, height, options) {
+  const v = await initVips();
+
+  const {
+    compression = 6,
+    iccProfileBytes,
+    bitDepth = 8,
+  } = options || {};
+
+  let image = rgbaToVipsImage(v, rgbaData, width, height, bitDepth === 16 ? 16 : 8);
+
+  if (iccProfileBytes && iccProfileBytes.length > 0) {
+    try {
+      // `setBlob`, not `set`: wasm-vips 0.0.18 exposes no generic metadata
+      // setter, so a plain `set` would throw before the PNG handler's chunk
+      // reassembly could ever see the profile.
+      image.setBlob('icc-profile-data', iccProfileBytes);
+    } catch (e) {
+      console.warn('[vips-worker] ICC attachment failed in encodePng:', e?.message);
+    }
+  }
+
+  // Level 0 (NONE) is a legitimate choice, so only non-numeric input falls back.
+  const level = Number(compression);
+  const saveOpts = {
+    compression: Number.isFinite(level) ? level : 6,
+  };
+
+  const pngBuffer = image.writeToBuffer('.png', saveOpts);
+  image.delete();
+
+  return new Uint8Array(pngBuffer);
+}
+
+/**
+ * Encode 8-bit RGBA pixel data → JPEG bytes (libjpeg-turbo via wasm-vips).
+ *
+ * Chroma subsampling is FIXED to 4:4:4 (`subsample_mode: 'off'`): the browser
+ * `canvas.convertToBlob` encoder this replaces offers no subsampling control and
+ * always writes 4:2:0, visibly smearing saturated red/blue edges (measured
+ * Q92 PSNR 34 dB vs 47 dB on saturated content). Encoding here keeps libjpeg's
+ * exact 4:4:4 luma-preserving quantization under our control.
+ *
+ * ICC profiles are intentionally NOT attached here for the export path — the
+ * JPEG handler injects EXIF APP1 and ICC APP2 segments itself after encoding
+ * (byte-level segment surgery whose layout must stay identical to previous
+ * releases); this function only writes pixels + JFIF density.
+ *
+ * @param {Uint8Array} rgbaData - Interleaved 8-bit RGBA pixels
+ * @param {number} width
+ * @param {number} height
+ * @param {object} [options]
+ * @param {number} [options.quality=0.92] - 0..1, mapped to jpegsave Q 1..100
+ * @param {number} [options.dpi] - Written as JFIF density (dots per inch;
+ *   libvips converts image xres/yres dots-per-mm into the JFIF unit=1 field)
+ * @param {Uint8Array} [options.iccProfileBytes] - Optional ICC profile bytes;
+ *   attached as `icc-profile-data` so jpegsave writes it into an APP2 segment
+ * @returns {Promise<Uint8Array>}
+ */
+async function encodeJpeg(rgbaData, width, height, options) {
+  const v = await initVips();
+
+  const {
+    quality = 0.92,
+    dpi,
+    iccProfileBytes,
+  } = options || {};
+
+  let image = rgbaToVipsImage(v, rgbaData, width, height, 8);
+
+  // JPEG has no alpha channel: drop the alpha band before saving (an opaque
+  // export frame still carries the constant-255 band from the RGBA pipeline,
+  // and jpegsave rejects 4-band sRGB input).
+  let rgb = image.extractBand(0, { n: 3 });
+  image.delete();
+
+  // DPI → JFIF density. libvips' jpegsave has no xres/yres SAVE option (that
+  // belongs to tiffsave); it reads the image's own xres/yres resolution fields
+  // (dots per millimetre) and serialises them into the JFIF unit=1 density
+  // fields, so the resolution is attached on the image via `copy` first.
+  if (dpi && dpi > 0) {
+    const tagged = rgb.copy({ xres: dpi / 25.4, yres: dpi / 25.4 });
+    rgb.delete();
+    rgb = tagged;
+  }
+
+  if (iccProfileBytes && iccProfileBytes.length > 0) {
+    try {
+      // `setBlob`, not `set`: wasm-vips exposes no generic metadata setter, so
+      // a plain `set` would throw before jpegsave ever saw the profile.
+      rgb.setBlob('icc-profile-data', iccProfileBytes);
+    } catch (e) {
+      console.warn('[vips-worker] ICC attachment failed in encodeJpeg:', e?.message);
+    }
+  }
+
+  const q = Math.min(100, Math.max(1, Math.round(Number(quality) * 100) || 92));
+  const jpegBuffer = rgb.writeToBuffer('.jpg', {
+    Q: q,
+    // 4:4:4 — disable chroma subsampling entirely.
+    subsample_mode: 'off',
+  });
+
+  rgb.delete();
+  return new Uint8Array(jpegBuffer);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Worker Message Handler
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const handlers = { decode, decodeTiff, encodeTiff, encodePng, encodeJpeg, tiffPageCount, tiffDecodePage, iccToSrgb };
+
+// 🔍 Diagnostic: log available handlers on worker load
+console.log('[vips-worker] v2026-0708-phase6 loaded. Available handlers:', Object.keys(handlers).join(', '));
+
+self.onmessage = async ({ data: msg }) => {
+  const { id, fn, args } = msg;
+
+  if (!handlers[fn]) {
+    console.error('[vips-worker] Unknown function requested:', fn, '| Available:', Object.keys(handlers).join(', '));
+    self.postMessage({ id, error: `Unknown function: ${fn}` });
+    return;
+  }
+
+  try {
+    const result = await handlers[fn](...(args || []));
+    self.postMessage({ id, out: result }, getTransferables(result));
+  } catch (err) {
+    self.postMessage({ id, error: err?.message || String(err) });
+  }
+};
+
+function getTransferables(result) {
+  const transferables = [];
+  if (result && typeof result === 'object') {
+    if (result.data instanceof Uint8Array && result.data.buffer) {
+      transferables.push(result.data.buffer);
+    } else if (result instanceof Uint8Array && result.buffer) {
+      transferables.push(result.buffer);
+    }
+    // Unified `decode` also ships naked high-depth pixels (ushort/float).
+    if (result.highDepth && result.highDepth.naked && result.highDepth.naked.buffer) {
+      transferables.push(result.highDepth.naked.buffer);
+    }
+    // `iccToSrgb` also returns the raw ICC profile bytes (for round-trip export).
+    if (result.iccProfileData instanceof Uint8Array && result.iccProfileData.buffer) {
+      transferables.push(result.iccProfileData.buffer);
+    }
+  }
+  return transferables;
+}

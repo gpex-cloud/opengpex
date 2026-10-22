@@ -16,7 +16,6 @@
  * shared across multiple format handlers:
  *
  * - `isobmff-reader` — ISOBMFF (HEIC/AVIF) ICC/EXIF/NCLX extraction
- * - `isobmff-writer` — AVIF EXIF injection
  * - `tiff-ifd-reader` — TIFF IFD binary read/write utilities
  *
  * @module core/files/metadata
@@ -29,8 +28,6 @@ export {
   nclxToColorSpace,
 } from './isobmff-reader';
 export type { NclxParams } from './isobmff-reader';
-
-export { injectAvifExif } from './isobmff-writer';
 
 export {
   parseTiffByteOrder,

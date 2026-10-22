@@ -20,10 +20,9 @@
  */
 
 import type { GamutId } from '@opengpex/editor/core/types';
-import { toGamutId } from '@opengpex/editor/core/types';
 import type { EncodeOptions } from '../../types';
 import { bitmapToCanvas } from '../../index';
-import { base64ToIcc, getStockIccProfile } from '../../shared/icc';
+import { base64ToIcc, canEmbedSourceIccVerbatim, getStockIccProfile } from '../../shared/icc';
 import { toCanvasColorSpace } from '@opengpex/editor/core/engine/color';
 import { injectWebpIcc, stripWebpIcc, injectWebpExif } from './riff';
 import { resetExifOrientation } from '../../metadata/tiff-ifd-reader';
@@ -60,8 +59,10 @@ export async function encodeWebp(
   // Embed the SOURCE profile verbatim ONLY when the output gamut still equals the
   // source file's gamut (exact round-trip) — the pixels are then in the source's
   // numeric space, so a stock `targetGamut` profile would mislabel them.
-  const sourceIccMatchesTarget = !!meta?.raw?.icc?.data && toGamutId(meta?.colorSpace) === targetGamut;
-  const embedSourceIccVerbatim = sourceIccMatchesTarget;
+  // Verbatim round-trip only for a REAL gamut match: folded colour spaces
+  // (cmyk/grayscale/unknown) must never re-embed their retained source profile
+  // (a CMYK profile on sRGB pixels would mislabel the export).
+  const embedSourceIccVerbatim = !!meta?.raw?.icc?.data && canEmbedSourceIccVerbatim(meta?.colorSpace, targetGamut);
 
   // Pixels already carry targetGamut + its TRC — tag the canvas to match so the
   // browser encoder does not reinterpret them. NO color conversion here.

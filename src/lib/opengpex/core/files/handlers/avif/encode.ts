@@ -27,16 +27,19 @@
  *   consumer (TIFF/PNG/ICC) until a full page reload — with no restart path.
  *   Self-compiling vips to lift the heap cap was evaluated and judged not worth it.
  *
- * ⚠️ KNOWN DEFECT (accepted, tracked): AVIF export CANNOT embed an ICC profile.
- *   @jsquash/avif has no ICC-embed capability. Pixels are still encoded
- *   correctly (sRGB or P3 as prepared by the colour pipeline below), but the
- *   output carries NO colour-space marker. This is a metadata-only side issue —
- *   it does NOT corrupt the image data. Consequence: a P3 AVIF may be
- *   interpreted as sRGB by naive viewers. Acceptable trade-off for a simple,
- *   crash-safe pipeline. FUTURE FIX (no vips needed): inject an ISOBMFF `colr`
- *   box post-encode, or adopt an encoder library that supports ICC embedding —
- *   then this handler can regain profile embedding without the OOM risk.
- * ───────────────────────────────────────────────────────────────────────────
+ * ── CONTAINER TAGGING (post-encode, in THIS file's pipeline) ────────────────
+ * jsquash writes no usable colour metadata (one `nclx` colr with unspecified
+ * 2/2/6 CICP) and has no ICC/EXIF options. Everything the output carries is
+ * written here, post-encode, by this handler's own tooling:
+ *   - SDR lanes: `patchNclxCicp` overwrites the CICP in place (sRGB → 1/13/6,
+ *     Display P3 → 12/13/6) — byte length unchanged;
+ *   - HDR PQ lane: the same patch with 9/16/9;
+ *   - `embedIcc`: `injectAvifColourProfile` appends a `colr(prof)` box into
+ *     meta/iprp/ipco and associates it with the primary item;
+ *   - `preserveExif`: `injectAvifExifItem` appends an Exif item (iinf + iloc +
+ *     cdsc iref + trailing mdat). Both writers rebuild the meta box and shift
+ *     every existing iloc absolute offset accordingly — see avif/tagger.ts.
+ * The stock-vs-verbatim ICC rule matches the JPEG/PNG/WebP encoders exactly.
  */
 
 import type { GamutId } from '@opengpex/editor/core/types';
@@ -45,7 +48,10 @@ import { isRawPixelSource } from '../../types';
 import { bitmapToCanvas } from '../../index';
 import { toCanvasColorSpace } from '@opengpex/editor/core/engine/color';
 import { encodeAvifJsquash } from './worker';
-import { patchNclxCicp, HDR_AVIF_CICP } from './cicp';
+import { patchNclxCicp, HDR_AVIF_CICP, SDR_SRGB_AVIF_CICP, SDR_P3_AVIF_CICP } from './cicp';
+import { injectAvifColourProfile, injectAvifExifItem } from './tagger';
+import { base64ToIcc, canEmbedSourceIccVerbatim, getStockIccProfile } from '../../shared/icc';
+import { resetExifOrientation } from '../../metadata/tiff-ifd-reader';
 
 /**
  * Encode a canvas/bitmap — or the HDR PQ raw lane — to AVIF.
@@ -66,18 +72,33 @@ import { patchNclxCicp, HDR_AVIF_CICP } from './cicp';
  * internal color conversion — it only tags the canvas to match `config.targetGamut`
  * so the browser round-trip does not reinterpret the pixels. (Wide-gamut Adobe RGB /
  * ProPhoto targets are routed to the PNG/TIFF 16-bit path upstream and never reach
- * this handler.) See the KNOWN DEFECT note: AVIF still cannot embed an ICC profile.
+ * this handler.) Colour tagging of the OUTPUT container is described in the
+ * CONTAINER TAGGING note in the file header.
  *
  * `pixels` is retained in the signature for interface parity with the other
  * handlers (ImageFormatHandler), but AVIF encode no longer dispatches any vips
  * job — see the DESIGN DECISION note above.
  */
+/**
+ * Chroma subsampling by pixel count. 4:4:4 (`subsample: 3`) is the standing
+ * fidelity policy, but the jsquash/libaom wasm encoder returns null (its
+ * Emscripten heap ceiling) on roughly >16 MP payloads at 4:4:4 — observed as
+ * the 48 MP HEIC→AVIF export producing no file at all. Past that threshold a
+ * 4:2:0 encode that succeeds beats a 4:4:4 encode that fails, so fall back.
+ * The jsquash option value is the chroma DECIMATION factor: 3 = none (4:4:4),
+ * 1 = 2x2 (4:2:0).
+ */
+function chromaSubsampleForPixels(pixels: number): 1 | 3 {
+  return pixels > 16_000_000 ? 1 : 3;
+}
+
 export async function encodeAvif(
   source: EncodeSource,
   options: EncodeOptions,
 ): Promise<Blob> {
   const quality = Math.round((options.quality ?? 0.80) * 100);
   const config = options.exportConfig;
+  const meta = options.metadata;
 
   const embedIcc = config?.embedIcc ?? false;
 
@@ -92,6 +113,7 @@ export async function encodeAvif(
       quality,
       speed: 6,
       bitDepth: 10,
+      subsample: chromaSubsampleForPixels(source.width * source.height),
     });
     patchNclxCicp(avifBytes, HDR_AVIF_CICP);
     return new Blob([avifBytes.buffer as ArrayBuffer], { type: 'image/avif' });
@@ -112,19 +134,37 @@ export async function encodeAvif(
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const rgbaData = new Uint8Array(imageData.data.buffer);
 
-  // ⚠️ KNOWN DEFECT (see file header): ICC embedding is unsupported for AVIF.
-  if (embedIcc) {
-    console.warn(
-      '[AvifHandler] AVIF export cannot embed an ICC profile (@jsquash/avif ' +
-      'limitation). Pixels are encoded correctly but no colour-space marker is ' +
-      'written. Tracked defect — see avif/encode.ts header. Colours preserved, ' +
-      'profile omitted.',
-    );
-  }
-
   // Single encode path — isolated @jsquash Worker, ALLOW_MEMORY_GROWTH, no size
   // limit, crash-isolated from the shared vips singleton.
-  const avifBytes = await encodeAvifJsquash(rgbaData, canvas.width, canvas.height, { quality, speed: 6 });
-  return new Blob([avifBytes.buffer as ArrayBuffer], { type: 'image/avif' });
+  const avifBytes = await encodeAvifJsquash(rgbaData, canvas.width, canvas.height, {
+    quality,
+    speed: 6,
+    subsample: chromaSubsampleForPixels(canvas.width * canvas.height),
+  });
+
+  // ── Container tagging (jsquash writes none of this itself) ──
+  // 1. CICP: jsquash's nclx colr carries "unspecified" 2/2/6; overwrite the
+  //    three u16 values in place so consumers read the pixels as sRGB or P3.
+  patchNclxCicp(avifBytes, targetGamut === 'display-p3' ? SDR_P3_AVIF_CICP : SDR_SRGB_AVIF_CICP);
+
+  // 2. ICC: verbatim source profile on a same-gamut round-trip, otherwise the
+  //    stock profile for the OUTPUT gamut — identical to the JPEG/PNG/WebP rule.
+  let taggedBytes = avifBytes;
+  if (embedIcc) {
+    const verbatim = !!meta?.raw?.icc?.data && canEmbedSourceIccVerbatim(meta?.colorSpace, targetGamut);
+    const iccBytes = verbatim
+      ? base64ToIcc(meta!.raw!.icc!.data)
+      : getStockIccProfile(targetGamut)?.bytes;
+    if (iccBytes) taggedBytes = injectAvifColourProfile(taggedBytes, iccBytes);
+  }
+
+  // 3. EXIF: passthrough the retained source TIFF block with Orientation reset
+  //    (exported pixels are already upright), same as the PNG/WebP encoders.
+  if (config?.preserveExif && meta?.raw?.exif) {
+    const exifBytes = resetExifOrientation(base64ToIcc(meta.raw.exif));
+    taggedBytes = injectAvifExifItem(taggedBytes, exifBytes);
+  }
+
+  return new Blob([taggedBytes.buffer as ArrayBuffer], { type: 'image/avif' });
 }
 

@@ -122,3 +122,17 @@ export const HDR_AVIF_CICP: NclxCicp = {
   transferCharacteristics: 16,
   matrixCoefficients: 9,
 };
+
+/** sRGB: BT.709 primaries, sRGB transfer, identity matrix. */
+export const SDR_SRGB_AVIF_CICP: NclxCicp = {
+  colourPrimaries: 1,
+  transferCharacteristics: 13,
+  matrixCoefficients: 6, // identity for RGB stills
+};
+
+/** Display P3: SMPTE EG 432-1 primaries, sRGB transfer, identity matrix. */
+export const SDR_P3_AVIF_CICP: NclxCicp = {
+  colourPrimaries: 12,
+  transferCharacteristics: 13,
+  matrixCoefficients: 6,
+};

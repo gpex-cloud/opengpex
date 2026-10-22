@@ -9,6 +9,7 @@
  * Functions:
  * - decodeTiff(bytes: Uint8Array) → { width, height, data: Uint8Array (RGBA) }
  * - encodeTiff(rgbaData: Uint8Array, width, height, options) → Uint8Array (TIFF bytes)
+ * - encodeJpeg(rgbaData: Uint8Array, width, height, options) → Uint8Array (JPEG bytes, 4:4:4)
  *
  * SPDX-License-Identifier: GPL-3.0-only
  */
@@ -16,20 +17,32 @@
 let vips = null;
 
 /**
- * Initialize wasm-vips from locally-served files (/ext/wasm/vips/).
+ * Base URL for the wasm-vips module files (vips.js / vips.wasm / side modules).
+ *
+ * Defaults to the upstream npm build served from /ext/wasm/vips/. The
+ * self-built large-heap variant lives in a different static directory and is
+ * launched with a `base` query parameter on the worker script URL (see
+ * lib-vips.ts), e.g. `/hb/wasm/vips-2g/vips-worker.js?base=%2Fhb%2Fwasm%2Fvips-2g%2F`.
+ * WorkerGlobalScope.location exposes `search` just like window.location, so the
+ * same worker script serves both variants; only the glue/wasm binaries differ.
+ */
+const VIPS_BASE = new URLSearchParams(self.location.search).get('base') || '/hb/wasm/vips-2g/';
+
+/**
+ * Initialize wasm-vips from locally-served files.
  */
 async function initVips() {
   if (vips) return vips;
 
   // Import the JS glue from local static path (same origin as this worker)
-  importScripts('/ext/wasm/vips/vips.js');
+  importScripts(VIPS_BASE + 'vips.js');
 
   // The imported script exposes a global `Vips` factory function
   // NOTE: wasm-vips uses Emscripten pthreads — it spawns sub-Workers internally.
   // We must set mainScriptUrlOrBlob so pthread workers can find vips.js.
   vips = await self.Vips({
-    mainScriptUrlOrBlob: '/ext/wasm/vips/vips.js',
-    locateFile: (fileName) => `/ext/wasm/vips/${fileName}`,
+    mainScriptUrlOrBlob: VIPS_BASE + 'vips.js',
+    locateFile: (fileName) => VIPS_BASE + fileName,
     // Load vips-heif.wasm for AVIF/HEIC encoding support (libheif + libaom)
     dynamicLibraries: ['vips-heif.wasm'],
     print: () => {},
@@ -68,12 +81,7 @@ async function decodeTiff(bytes) {
   }
 
   // Ensure RGBA
-  let rgba = img8;
-  if (!img8.hasAlpha()) {
-    rgba = img8.bandjoin(255);
-  } else if (img8.bands > 4) {
-    rgba = img8.extractBand(0, { n: 4 });
-  }
+  const rgba = toRgbaBands(img8, 255);
 
   const width = rgba.width;
   const height = rgba.height;
@@ -137,12 +145,7 @@ async function iccToSrgb(bytes) {
   }
 
   // Ensure RGBA (4 bands).
-  let rgba = img8;
-  if (!img8.hasAlpha()) {
-    rgba = img8.bandjoin(255);
-  } else if (img8.bands > 4) {
-    rgba = img8.extractBand(0, { n: 4 });
-  }
+  const rgba = toRgbaBands(img8, 255);
 
   const width = rgba.width;
   const height = rgba.height;
@@ -227,10 +230,12 @@ async function encodeTiff(rgbaData, width, height, options) {
 
   let image = rgbaToVipsImage(v, rgbaData, width, height, options?.bitDepth === 16 ? 16 : 8);
 
-  // Attach ICC Profile if provided
+  // Attach ICC Profile if provided. wasm-vips 0.0.18 has no generic `set()` —
+  // metadata blobs go through `setBlob` (a plain `set` throws TypeError and a
+  // swallowed failure here silently ships untagged TIFFs).
   if (iccProfileBytes && iccProfileBytes.length > 0) {
     try {
-      image.set('icc-profile-data', iccProfileBytes);
+      image.setBlob('icc-profile-data', iccProfileBytes);
     } catch (e) {
       console.warn('[vips-worker] ICC attachment failed:', e?.message);
     }
@@ -366,12 +371,7 @@ async function tiffDecodePage(bytes, page) {
   }
 
   // Ensure RGBA
-  let rgba = img8;
-  if (!img8.hasAlpha()) {
-    rgba = img8.bandjoin(255);
-  } else if (img8.bands > 4) {
-    rgba = img8.extractBand(0, { n: 4 });
-  }
+  const rgba = toRgbaBands(img8, 255);
 
   const width = rgba.width;
   const height = rgba.height;
@@ -416,6 +416,55 @@ async function tiffDecodePage(bytes, page) {
  * @param {Uint8Array} bytes
  * @param {{ preserveColorSpace?: boolean, wantHighDepth?: boolean, page?: number }} [opts]
  */
+/**
+ * Normalise any band layout to the RGBA layout the naked-pixel packing and the
+ * raw display payload assume (exactly 4 bands). Grayscale (1 band, or 2 with
+ * alpha) is replicated to RGB via colourspace('srgb') — pure channel
+ * replication, no colour management — and a missing alpha then gets the
+ * constant `alphaValue`. Without this, a 1-band source bandjoined with the
+ * alpha constant yields 2 bands and every downstream `w*h*4` view breaks
+ * (16-bit: "Invalid typed array length"; 8-bit: silently truncated payload).
+ */
+function toRgbaBands(image, alphaValue) {
+  const format = image.format;
+  let x = image;
+  const step = (next) => {
+    const out = next(x);
+    if (x !== image) x.delete();
+    x = out;
+  };
+  // Grayscale is replicated to RGB at its OWN code-value scale. A
+  // colourspace('srgb') conversion must NOT be used here: for grey16 it
+  // silently recasts to uchar (the srgb interpretation is 8-bit), and the
+  // 4-band views below then run past the buffer.
+  if (x.bands === 1) {
+    step((i) => {
+      const g = i.extractBand(0);
+      const a = i.extractBand(0).linear(0, alphaValue);
+      const rgba = g.bandjoin([g, g, a]);
+      g.delete();
+      a.delete();
+      return rgba;
+    });
+  } else if (x.bands === 2) {
+    // Gray + alpha: replicate gray, keep the REAL alpha band.
+    step((i) => {
+      const g = i.extractBand(0);
+      const a = i.extractBand(1);
+      const rgba = g.bandjoin([g, g, a]);
+      g.delete();
+      return rgba;
+    });
+  } else if (x.bands > 4) {
+    step((i) => i.extractBand(0, { n: 4 }));
+  }
+  if (!x.hasAlpha()) step((i) => i.bandjoin(alphaValue));
+  // vips arithmetic (linear above) promotes to float unconditionally; cast
+  // back so the payload keeps the code-value format the caller unpacks.
+  if (x.format !== format) x = x.cast(format);
+  return x;
+}
+
 async function decode(bytes, opts) {
   const v = await initVips();
   const { preserveColorSpace = false, wantHighDepth = false, page = 0 } = opts || {};
@@ -448,12 +497,7 @@ async function decode(bytes, opts) {
     }
   }
 
-  let rgba = img8;
-  if (!img8.hasAlpha()) {
-    rgba = img8.bandjoin(255);
-  } else if (img8.bands > 4) {
-    rgba = img8.extractBand(0, { n: 4 });
-  }
+  const rgba = toRgbaBands(img8, 255);
 
   const width = rgba.width;
   const height = rgba.height;
@@ -485,12 +529,7 @@ async function decode(bytes, opts) {
       // reads Float32Array); precision-preserving down-cast.
       const src = fmt === 'double' ? hi.cast('float') : hi;
 
-      let hrgba = src;
-      if (!src.hasAlpha()) {
-        hrgba = src.bandjoin(1); // opaque alpha in float space = 1.0
-      } else if (src.bands > 4) {
-        hrgba = src.extractBand(0, { n: 4 });
-      }
+      const hrgba = toRgbaBands(src, 1); // opaque alpha in float space = 1.0
 
       hw = hrgba.width;
       hh = hrgba.height;
@@ -510,12 +549,7 @@ async function decode(bytes, opts) {
         src = fmt === 'uchar' ? hi.linear(257, 0).cast('ushort') : hi.cast('ushort');
       }
 
-      let hrgba = src;
-      if (!src.hasAlpha()) {
-        hrgba = src.bandjoin(65535); // opaque alpha in the 16-bit range
-      } else if (src.bands > 4) {
-        hrgba = src.extractBand(0, { n: 4 });
-      }
+      const hrgba = toRgbaBands(src, 65535); // opaque alpha in the 16-bit range
 
       hw = hrgba.width;
       hh = hrgba.height;
@@ -567,7 +601,10 @@ async function encodePng(rgbaData, width, height, options) {
 
   if (iccProfileBytes && iccProfileBytes.length > 0) {
     try {
-      image.set('icc-profile-data', iccProfileBytes);
+      // `setBlob`, not `set`: wasm-vips 0.0.18 exposes no generic metadata
+      // setter, so a plain `set` would throw before the PNG handler's chunk
+      // reassembly could ever see the profile.
+      image.setBlob('icc-profile-data', iccProfileBytes);
     } catch (e) {
       console.warn('[vips-worker] ICC attachment failed in encodePng:', e?.message);
     }
@@ -585,11 +622,84 @@ async function encodePng(rgbaData, width, height, options) {
   return new Uint8Array(pngBuffer);
 }
 
+/**
+ * Encode 8-bit RGBA pixel data → JPEG bytes (libjpeg-turbo via wasm-vips).
+ *
+ * Chroma subsampling is FIXED to 4:4:4 (`subsample_mode: 'off'`): the browser
+ * `canvas.convertToBlob` encoder this replaces offers no subsampling control and
+ * always writes 4:2:0, visibly smearing saturated red/blue edges (measured
+ * Q92 PSNR 34 dB vs 47 dB on saturated content). Encoding here keeps libjpeg's
+ * exact 4:4:4 luma-preserving quantization under our control.
+ *
+ * ICC profiles are intentionally NOT attached here for the export path — the
+ * JPEG handler injects EXIF APP1 and ICC APP2 segments itself after encoding
+ * (byte-level segment surgery whose layout must stay identical to previous
+ * releases); this function only writes pixels + JFIF density.
+ *
+ * @param {Uint8Array} rgbaData - Interleaved 8-bit RGBA pixels
+ * @param {number} width
+ * @param {number} height
+ * @param {object} [options]
+ * @param {number} [options.quality=0.92] - 0..1, mapped to jpegsave Q 1..100
+ * @param {number} [options.dpi] - Written as JFIF density (dots per inch;
+ *   libvips converts image xres/yres dots-per-mm into the JFIF unit=1 field)
+ * @param {Uint8Array} [options.iccProfileBytes] - Optional ICC profile bytes;
+ *   attached as `icc-profile-data` so jpegsave writes it into an APP2 segment
+ * @returns {Promise<Uint8Array>}
+ */
+async function encodeJpeg(rgbaData, width, height, options) {
+  const v = await initVips();
+
+  const {
+    quality = 0.92,
+    dpi,
+    iccProfileBytes,
+  } = options || {};
+
+  let image = rgbaToVipsImage(v, rgbaData, width, height, 8);
+
+  // JPEG has no alpha channel: drop the alpha band before saving (an opaque
+  // export frame still carries the constant-255 band from the RGBA pipeline,
+  // and jpegsave rejects 4-band sRGB input).
+  let rgb = image.extractBand(0, { n: 3 });
+  image.delete();
+
+  // DPI → JFIF density. libvips' jpegsave has no xres/yres SAVE option (that
+  // belongs to tiffsave); it reads the image's own xres/yres resolution fields
+  // (dots per millimetre) and serialises them into the JFIF unit=1 density
+  // fields, so the resolution is attached on the image via `copy` first.
+  if (dpi && dpi > 0) {
+    const tagged = rgb.copy({ xres: dpi / 25.4, yres: dpi / 25.4 });
+    rgb.delete();
+    rgb = tagged;
+  }
+
+  if (iccProfileBytes && iccProfileBytes.length > 0) {
+    try {
+      // `setBlob`, not `set`: wasm-vips exposes no generic metadata setter, so
+      // a plain `set` would throw before jpegsave ever saw the profile.
+      rgb.setBlob('icc-profile-data', iccProfileBytes);
+    } catch (e) {
+      console.warn('[vips-worker] ICC attachment failed in encodeJpeg:', e?.message);
+    }
+  }
+
+  const q = Math.min(100, Math.max(1, Math.round(Number(quality) * 100) || 92));
+  const jpegBuffer = rgb.writeToBuffer('.jpg', {
+    Q: q,
+    // 4:4:4 — disable chroma subsampling entirely.
+    subsample_mode: 'off',
+  });
+
+  rgb.delete();
+  return new Uint8Array(jpegBuffer);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Worker Message Handler
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const handlers = { decode, decodeTiff, encodeTiff, encodePng, tiffPageCount, tiffDecodePage, iccToSrgb };
+const handlers = { decode, decodeTiff, encodeTiff, encodePng, encodeJpeg, tiffPageCount, tiffDecodePage, iccToSrgb };
 
 // 🔍 Diagnostic: log available handlers on worker load
 console.log('[vips-worker] v2026-0708-phase6 loaded. Available handlers:', Object.keys(handlers).join(', '));

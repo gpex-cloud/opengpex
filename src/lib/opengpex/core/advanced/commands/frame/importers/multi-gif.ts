@@ -41,6 +41,16 @@ export interface GifFrameContent {
   canvas: Dimensions;
   camera: CameraState;
   canvasClipBox: LocalShape;
+  /**
+   * Asset id of the FIRST frame's registered StoredAsset (`${fileHash}#0`).
+   * The owning Frame points its `assetId` here — not at the naked `raw:` file
+   * hash — so every "document root asset" consumer (`assets.get(frame.assetId)`
+   * for egest gamut/bit-depth arbitration, export source lookup, GC protection,
+   * and the E2E StoredAsset readiness contract) resolves a real light record,
+   * exactly as single.ts/multi-tiff.ts trunks do. The raw blob itself stays
+   * reachable for revert: `getRaw` strips the `#index` suffix before lookup.
+   */
+  rootAssetId: string;
   gifSequenceId: string;
   gifFrameCount: number;
   metadata?: ImageMetadata;
@@ -161,6 +171,7 @@ export async function buildGifFrameContent(
     canvas: canvasDim,
     camera,
     canvasClipBox: getDefaultCanvasClipBox(canvasDim),
+    rootAssetId: frameAssets[0].assetId,
     gifSequenceId,
     gifFrameCount: framesToImport.length,
     metadata,
@@ -183,10 +194,12 @@ export async function importAnimatedGif(
   // 1. Store original GIF file as raw source (for future revert) — done first so
   //    buildGifFrameContent can mint per-frame asset ids of the same shape
   //    (`${fileHash}#${index}`) single.ts/multi-tiff.ts produce via storeBundle.
-  const originalGifAssetId = await assets.storeRaw(file);
+  //    The raw hash stays the `raw:` key; it is NOT used as frame.assetId (see
+  //    rootAssetId below — the frame points at the first frame's StoredAsset).
+  const rawFileHash = await assets.storeRaw(file);
 
   // 2. Build GIF content (includes frame count dialog)
-  const content = await buildGifFrameContent(ctx, decoded, originalGifAssetId);
+  const content = await buildGifFrameContent(ctx, decoded, rawFileHash);
   if (!content) return ''; // User cancelled
 
   // 3. Generate thumbnail
@@ -208,7 +221,7 @@ export async function importAnimatedGif(
     activeLayerId: content.activeLayerId,
     camera: content.camera,
     canvasClipBox: content.canvasClipBox,
-    assetId: originalGifAssetId,
+    assetId: content.rootAssetId,
     thumbnail: { src: thumbAssetUrl, assetId: thumbAssetId },
     extra: { ...extra, gifSequenceId: content.gifSequenceId, gifFrameCount: content.gifFrameCount },
     metadata: content.metadata,

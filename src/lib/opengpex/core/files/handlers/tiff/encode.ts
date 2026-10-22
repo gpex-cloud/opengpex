@@ -17,11 +17,10 @@
  */
 
 import type { GamutId } from '@opengpex/editor/core/types';
-import { toGamutId } from '@opengpex/editor/core/types';
 import type { EncodeOptions, EncodeSource } from '../../types';
 import { isRawPixelSource } from '../../types';
 import { bitmapToCanvas } from '../../index';
-import { base64ToIcc, getStockIccProfile } from '../../shared/icc';
+import { base64ToIcc, canEmbedSourceIccVerbatim, getStockIccProfile } from '../../shared/icc';
 import { resetExifOrientation } from '../../metadata/tiff-ifd-reader';
 import { toCanvasColorSpace } from '@opengpex/editor/core/engine/color';
 import { injectTiffIfd0Tags, TIFF_TAGS } from './ifd0-inject';
@@ -84,9 +83,10 @@ export async function encodeTiff(
   const targetGamut: GamutId = (config?.targetGamut as GamutId | undefined) ?? 'srgb';
   // Embed the SOURCE profile verbatim ONLY when the output gamut still equals the
   // source file's gamut (exact round-trip) — the pixels are then in the source's
-  // numeric space, so a stock `targetGamut` profile would mislabel them.
-  const sourceIccMatchesTarget = !!meta?.raw?.icc?.data && toGamutId(meta?.colorSpace) === targetGamut;
-  const embedSourceIccVerbatim = sourceIccMatchesTarget;
+  // numeric space, so a stock `targetGamut` profile would mislabel them. Folded
+  // colour spaces (cmyk/grayscale) never qualify: their retained profile is not
+  // an sRGB profile even though the GamutId fold says 'srgb'.
+  const embedSourceIccVerbatim = !!meta?.raw?.icc?.data && canEmbedSourceIccVerbatim(meta?.colorSpace, targetGamut);
 
   let rgbaData: Uint8Array;
   let outWidth: number;

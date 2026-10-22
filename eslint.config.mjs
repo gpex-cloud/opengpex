@@ -14,6 +14,7 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     ".open-next/**",
     "public/ext/**",
+    "public/hb/**",   // self-built wasm variants (minified emscripten output, plan §12.10)
   ]),
   // Editor library uses <img> for dynamic blob/asset URLs that are incompatible
   // with Next.js Image optimization. Suppress the warning for the editor core.

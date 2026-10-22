@@ -19,16 +19,33 @@
  * - No longer reads from `raw.piexifObj`
  * - Uses `raw.exif` (base64 TIFF IFD) for EXIF passthrough
  * - piexifjs only used in the WRITE path (dump/insert)
+ *
+ * ENCODER (4:4:4): base pixels no longer go through the browser canvas
+ * `convertToBlob` JPEG encoder — that encoder offers no chroma-subsampling
+ * control and always writes 4:2:0, visibly smearing saturated red/blue edges
+ * (measured Q92 PSNR 34 dB vs 47 dB). Pixels are read back from the canvas as
+ * RGBA and encoded by the files-layer wasm-vips worker (libjpeg-turbo) at a
+ * fixed 4:4:4 (`subsample_mode: 'off'`), with the DPI serialised into the JFIF
+ * density fields. EXIF APP1 and ICC APP2 segment injection below is UNCHANGED
+ * byte-level surgery, so the container metadata layout matches previous
+ * releases exactly (jpegsave only writes pixels + JFIF density).
+ *
+ * NOTE ON THE EGEST CHANNEL NAME: the JPEG egest decision still names its
+ * channel `canvas-8`. That name is now purely historical — since the switch to
+ * wasm-vips encoding, no canvas encoder is involved and the "8" merely denotes
+ * the 8-bit RGBA pixel payload handed to the worker. The name is kept because
+ * renaming it would ripple through the egest decision table, the expectation
+ * matrices and the harness panels, which is out of scope for the encoder swap.
  */
 
 // @ts-expect-error - piexifjs lacks official TypeScript declarations
 import * as piexif from 'piexifjs';
 import type { GamutId } from '@opengpex/editor/core/types';
-import { toGamutId } from '@opengpex/editor/core/types';
 import type { EncodeOptions } from '../../types';
 import { bitmapToCanvas } from '../../index';
-import { base64ToIcc, getStockIccProfile } from '../../shared/icc';
+import { base64ToIcc, canEmbedSourceIccVerbatim, getStockIccProfile } from '../../shared/icc';
 import { toCanvasColorSpace } from '@opengpex/editor/core/engine/color';
+import { getLibVips } from '../../shared/lib-vips';
 import { injectJpegExif, injectJpegIcc } from './jfif';
 import { blobToBase64, base64ToBlob } from '../../utils';
 
@@ -42,8 +59,10 @@ import { blobToBase64, base64ToBlob } from '../../utils';
  * performs ZERO internal color conversion: it only writes the JPEG container and
  * the EXIF/ICC metadata matching what the pixels now carry (the source ICC
  * verbatim on a same-gamut round-trip; a stock profile for `targetGamut`
- * otherwise). The canvas is tagged `toCanvasColorSpace(targetGamut)` purely to
- * prevent the browser encoder from reinterpreting the already-correct pixels.
+ * otherwise). The canvas is tagged `toCanvasColorSpace(targetGamut)` so a
+ * potential browser-side read-back never reinterprets the already-correct
+ * pixels; the canvas is now only the pixel SOURCE — the JPEG encoder itself is
+ * the wasm-vips worker, which does no color conversion either.
  */
 export async function encodeJpeg(
   source: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
@@ -60,8 +79,10 @@ export async function encodeJpeg(
   // Embed the SOURCE profile verbatim ONLY when the output gamut still equals the
   // source file's gamut (exact round-trip) — the pixels are then in the source's
   // numeric space, so a stock `targetGamut` profile would mislabel them.
-  const sourceIccMatchesTarget = !!meta?.raw?.icc?.data && toGamutId(meta?.colorSpace) === targetGamut;
-  const embedSourceIccVerbatim = sourceIccMatchesTarget;
+  // Verbatim round-trip only for a REAL gamut match: folded colour spaces
+  // (cmyk/grayscale/unknown) must never re-embed their retained source profile
+  // (a CMYK profile on sRGB pixels would mislabel the export).
+  const embedSourceIccVerbatim = !!meta?.raw?.icc?.data && canEmbedSourceIccVerbatim(meta?.colorSpace, targetGamut);
 
   // Pixels already carry targetGamut + its TRC — tag the canvas to match so the
   // browser encoder does not reinterpret them. NO color conversion here.
@@ -69,11 +90,28 @@ export async function encodeJpeg(
     ? bitmapToCanvas(source, toCanvasColorSpace(targetGamut))
     : source as OffscreenCanvas;
 
-  // 1. Get base JPEG blob from browser encoder
-  const baseBlob = await canvas.convertToBlob({
-    type: 'image/jpeg',
-    quality,
-  });
+  // 1. Read the pixels back from the (already target-gamut-tagged) canvas and
+  // encode them with the files-layer vips worker: libjpeg-turbo at a FIXED
+  // 4:4:4 chroma subsampling — the browser `convertToBlob` encoder this
+  // replaced had no subsampling knob and always wrote 4:2:0. DPI goes into the
+  // JFIF density fields (the EXIF XResolution/YResolution injection below is
+  // unchanged, so both density representations stay in agreement). Memory note:
+  // a 12MP frame costs 48MB as RGBA here plus the worker-side encode — the vips
+  // bridge never transfers/detaches the caller's buffer, so this is well within
+  // the wasm heap budget.
+  const ctx = canvas.getContext('2d')!;
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const dpi = config?.dpi || meta?.dpi;
+  const jpegBytes = await getLibVips().encodeJpeg(
+    new Uint8Array(imageData.data.buffer, imageData.data.byteOffset, imageData.data.byteLength),
+    canvas.width,
+    canvas.height,
+    {
+      quality,
+      dpi: dpi && dpi > 0 ? dpi : undefined,
+    },
+  );
+  const baseBlob = new Blob([jpegBytes.buffer as ArrayBuffer], { type: 'image/jpeg' });
 
   // 2. Inject EXIF metadata (DPI, camera info, software tag)
   if (!meta && !config) return baseBlob;
@@ -107,8 +145,8 @@ export async function encodeJpeg(
     if (!exifObj['0th']) exifObj['0th'] = {};
     if (!exifObj['Exif']) exifObj['Exif'] = {};
 
-    // Inject DPI
-    const dpi = config?.dpi || meta?.dpi;
+    // Inject DPI (EXIF representation; JFIF density was already written by the
+    // vips encoder, the two stay consistent by construction)
     if (dpi && dpi > 0) {
       exifObj['0th'][piexif.ImageIFD.XResolution] = [dpi, 1];
       exifObj['0th'][piexif.ImageIFD.YResolution] = [dpi, 1];

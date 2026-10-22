@@ -160,6 +160,29 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
   },
   // ── 4. PNG ──────────────────────────────────────────────────────────────
   {
+    // Sub-8-bit PALETTE PNG (IHDR colour type 3, bit depth 1/2/4 — reported
+    // as 'srgb' by the metadata extractor): the browser rasterizes these to
+    // ordinary 8-bit RGBA exactly like any other PNG, so the verbatim
+    // image-bitmap channel is sufficient; no vips pass is warranted. The
+    // colour identity keeps the TRUE source depth (ColorIdentity.bitDepth
+    // admits 1/2/4 precisely for this case) — only the decode route is
+    // decided here. Sub-8-bit GRAYSCALE (colour type 0) deliberately stays
+    // excluded — it keeps falling to the '00' sub-8-bit unsupported terminus,
+    // preserving the png_1bit_gray fail-fast negative.
+    id: '50',
+    condition: {
+      format: 'png',
+      bitDepth: (d) => d < 8,
+      colorSpace: ['srgb', 'display-p3'],
+    },
+    action: {
+      decodeChannel: 'image-bitmap',
+      trc: 'srgb-trc',
+      applyOrientation: 'explicit',
+      description: 'PNG sub-8-bit (palette / low-depth grayscale) — browser decode to 8-bit, source depth declared',
+    },
+  },
+  {
     // Grayscale (PNG colour type 0/4): same achromatic fold to sRGB; the
     // browser replicates the single channel into RGB on decode.
     id: '51',
@@ -461,11 +484,16 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     },
   },
   {
-    // Remaining 'unknown'-colourSpace files (ICC-tagged oddities, sub-10-bit
-    // BT.2020) and MULTI-FRAME HDR (the HDR rows above are single-frame):
-    // honest unsupported — the browser's own HDR→SDR mapping is uncontrolled
-    // (meanDev ≈ 30/255). SDR BT.2020 ≥10-bit moved UP to 73 (phase D4);
-    // HEIC/MOV-carried BT.2020 stays here (D3-table scope). Mirrors HEIC 86.
+    // Remaining 'unknown'-colourSpace files (ICC profiles whose name does not
+    // map to a known gamut, PQ/HLG with unnameable primaries) and MULTI-FRAME
+    // HDR (the HDR rows above are single-frame): honest unsupported — the
+    // browser's own HDR→SDR mapping is uncontrolled (meanDev ≈ 30/255).
+    // NOTE: untagged / unspecified-CICP (nclx 2/2/6, missing colr) containers
+    // no longer land here — the nclx map admits them as sRGB. What remains is
+    // genuinely unmappable colour metadata, NOT "untagged = HDR", so the
+    // description never calls an untagged file HDR. SDR BT.2020 ≥10-bit moved
+    // UP to 73 (phase D4); HEIC/MOV-carried BT.2020 stays here (D3-table
+    // scope). Mirrors HEIC 86.
     id: '75',
     condition: {
       format: 'avif',
@@ -478,7 +506,7 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
       decodeChannel: 'unsupported',
       trc: 'srgb-trc',
       applyOrientation: 'explicit',
-      description: 'AVIF PQ/HLG multi-frame + odd-tag leftovers (75) — unsupported',
+      description: 'AVIF unmappable colour CICP (possibly HDR) multi-frame + odd-tag leftovers (75) — unsupported',
     },
   },
   // ── 7. HEIC (labels 81–87) ─────────────────────────────────────────

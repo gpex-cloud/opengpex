@@ -104,6 +104,25 @@ export function parseIccProfileName(iccBytes: Uint8Array): string | undefined {
  * `resolveIngestDecision` to the `'unsupported'` terminus instead of silently
  * mis-tagging the pixels' true colour identity.
  */
+/**
+ * Whether the ingest-retained source ICC profile may be re-embedded VERBATIM
+ * into an export whose target gamut is `targetGamut`.
+ *
+ * Only TRUE when the source's recorded colour space IS the target gamut — a
+ * real round trip. Folded colour spaces break the rule: a `cmyk` or
+ * `grayscale` source reports 'srgb' after the GamutId fold, but its retained
+ * profile is a CMYK/Grey profile, and stamping it onto sRGB pixels mislabels
+ * the file. For those the encoder must fall back to the stock profile for the
+ * OUTPUT gamut (the pixels were converted at ingest).
+ */
+export function canEmbedSourceIccVerbatim(
+  colorSpace: ColorSpaceId | undefined,
+  targetGamut: string,
+): boolean {
+  const REAL_GAMUTS = new Set(['srgb', 'display-p3', 'adobe-rgb', 'prophoto-rgb', 'rec2020']);
+  return !!colorSpace && REAL_GAMUTS.has(colorSpace) && colorSpace === targetGamut;
+}
+
 export function inferColorSpaceFromIcc(profileName: string): ColorSpaceId {
   const name = profileName.toLowerCase();
   if (name.includes('adobe') && name.includes('rgb')) return 'adobe-rgb';

@@ -41,7 +41,7 @@ export async function encodeAvifJsquash(
   rgbaData: Uint8Array | Uint16Array,
   width: number,
   height: number,
-  options: { quality?: number; speed?: number; bitDepth?: number },
+  options: { quality?: number; speed?: number; bitDepth?: number; subsample?: 1 | 3 },
 ): Promise<Uint8Array> {
   const worker = getAvifWorker();
   const id = ++_avifReqId;

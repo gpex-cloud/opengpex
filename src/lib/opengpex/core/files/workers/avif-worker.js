@@ -32,7 +32,11 @@ const defaultOptions = {
   tileColsLog2: 0,
   tileRowsLog2: 0,
   speed: 6,
-  subsample: 1,   // YUV420
+  // YUV444: chroma subsampling is a user-facing fidelity policy decision
+  // (2026-10-22) — saturated hues (colour wheels, flat swatches) lose measurably
+  // at 4:2:0 (PSNR 34→44 dB on the calibration scene), and AVIF is the
+  // highest-fidelity lossy target, so it pays the ~20-50% size premium.
+  subsample: 3,
   chromaDeltaQ: false,
   sharpness: 0,
   tune: 0,        // AVIFTune.auto

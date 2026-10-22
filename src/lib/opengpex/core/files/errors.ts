@@ -22,7 +22,7 @@
 
 import type { ImageMetadata } from './types';
 
-export type UnsupportedIngestReason = 'hdr' | 'multiframe' | 'sub8bit' | 'generic';
+export type UnsupportedIngestReason = 'colour' | 'multiframe' | 'sub8bit' | 'generic';
 
 export class UnsupportedIngestError extends Error {
   constructor(
@@ -44,9 +44,14 @@ export function unsupportedIngestError(metadata: ImageMetadata): UnsupportedInge
     );
   }
   if (metadata.colorSpace === 'unknown') {
+    // 'unknown' here means genuinely UNMAPPABLE colour metadata — an ICC
+    // profile whose name matches no known gamut, or PQ/HLG with unnameable
+    // primaries. Untagged / unspecified-CICP files are admitted as sRGB
+    // upstream, so this notice must not accuse an ordinary file of being HDR;
+    // it names the actual ambiguity (possibly HDR, possibly exotic SDR).
     return new UnsupportedIngestError(
-      `${format}: HDR content (PQ / HLG / BT.2020) is not supported yet.`,
-      'hdr',
+      `${format}: untagged or unsupported colour metadata (possibly HDR) is not supported yet.`,
+      'colour',
     );
   }
   if (metadata.bitDepth < 8) {

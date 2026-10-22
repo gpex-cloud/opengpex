@@ -215,6 +215,13 @@ export async function revertGifFrame(ctx: EditorContextValue, frameId: string): 
 
   const originalGifAssetId = frame.assetId;
   if (!originalGifAssetId) return false;
+  // frame.assetId is a unified id (`${fileHash}#${index}`) pointing at the
+  // first frame's StoredAsset. `decodeAsset` accepts the whole id (the raw
+  // lookup strips the `#index` suffix), but the per-frame precomputedHash
+  // minting inside buildGifFrameContent needs the bare file hash — otherwise
+  // ids like `${hash}#0#${i}` would be produced.
+  const originalFileHash = originalGifAssetId.split('#')[0];
+  if (!originalFileHash) return false;
 
   try {
     // 1. Cold-recover original GIF bytes + decode
@@ -229,9 +236,10 @@ export async function revertGifFrame(ctx: EditorContextValue, frameId: string): 
     }
 
     // 2. Build GIF content (shared with import — includes frame count dialog).
-    //    originalGifAssetId IS the fileHash used to mint the frame asset ids
-    //    (same shape as import's storeRaw result) — pass it straight through.
-    const content = await buildGifFrameContent(ctx, decoded, originalGifAssetId);
+    //    The bare file hash mints per-frame asset ids of the same shape as
+    //    import (`${fileHash}#${index}`) — idempotent against the import-time
+    //    records, so revert reuses rather than duplicates them.
+    const content = await buildGifFrameContent(ctx, decoded, originalFileHash);
     if (!content) return false; // User cancelled
 
     // 3. Update frame in-place

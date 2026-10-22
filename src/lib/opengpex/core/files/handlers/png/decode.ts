@@ -45,12 +45,41 @@ export async function decodePng(
   let displayBlob: Blob = file;
   let dimensions: { w: number; h: number };
   let highDepthSource: DecodedPayload['highDepthSource'];
+  // True when the decode channel already delivered UPRIGHTED pixels (browser
+  // auto-applied the embedded eXIf Orientation), so the explicit
+  // `applyExifOrientation` pass below must be skipped.
+  let alreadyUprighted = false;
 
   switch (decision.decodeChannel) {
     case 'image-bitmap': {
-      // 8-bit sRGB / Display-P3 / grayscale: browser-native decode is sufficient,
-      // the original file bytes remain the verbatim displayBlob.
+      // 8-bit (and sub-8-bit palette) sRGB / Display-P3 / grayscale: browser-
+      // native decode is sufficient, the original file bytes remain the
+      // verbatim displayBlob.
+      //
+      // Orientation hand-off: recent Chrome auto-applies the embedded eXIf
+      // Orientation during createImageBitmap (and IGNORES the
+      // `imageOrientation: 'none'` override), while older engines leave the
+      // pixels untouched. Detect which happened by comparing the decoded
+      // geometry against the raw IHDR dimensions: if they disagree on an
+      // orientation-swapped file the browser already uprighted the bitmap,
+      // so the explicit `applyExifOrientation` pass below must be SKIPPED —
+      // applying it would double-rotate. Only when the browser delivered
+      // raw-oriented pixels does this decoder rotate them itself.
+      // Known edge: a SQUARE image with orientation 5-8 cannot be
+      // disambiguated by geometry alone (swapped dims are identical); it
+      // takes the manual path, which double-rotates on auto-rotating
+      // browsers — accepted, as orientation metadata on square PNGs is rare.
       dimensions = await readImageDimensions(file);
+      const ihdr = { w: metadata.width, h: metadata.height };
+      const browserRotated =
+        (ihdr.w !== dimensions.w || ihdr.h !== dimensions.h) &&
+        metadata.capture?.orientation !== undefined &&
+        metadata.capture.orientation !== 1;
+      if (!browserRotated) {
+        dimensions = ihdr;
+      } else {
+        alreadyUprighted = true;
+      }
       break;
     }
 
@@ -132,11 +161,12 @@ export async function decodePng(
   }
 
   // ── EXIF Orientation correction (PNG-specific: applyOrientation is 'explicit') ──
-  // Unlike JPEG (auto-uprighted by the browser), neither createImageBitmap nor
-  // vips rotates PNG pixels. If the PNG has an eXIf/XMP chunk with Orientation ≠ 1,
-  // we must manually rotate the produced displayBlob (and swap dimensions).
+  // If the PNG has an eXIf/XMP chunk with Orientation ≠ 1 and the decode
+  // channel did NOT already upright the pixels (the image-bitmap channel
+  // detects a browser that auto-applies eXIf during createImageBitmap), we
+  // manually rotate the produced displayBlob (and swap dimensions) here.
   const orientation = metadata.capture?.orientation;
-  if (orientation && orientation !== 1) {
+  if (orientation && orientation !== 1 && !alreadyUprighted) {
     const rotated = await applyExifOrientation(displayBlob, dimensions, orientation);
     displayBlob = rotated.blob;
     dimensions = rotated.dimensions;

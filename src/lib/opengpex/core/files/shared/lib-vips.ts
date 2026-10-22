@@ -155,43 +155,197 @@ interface WorkerDecodeOut {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Crash recovery + worker variants
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Default (upstream npm) wasm-vips worker: fixed 1 GiB heap. */
+const VIPS_WORKER_URL = '/hb/wasm/vips-2g/vips-worker.js?base=%2Fhb%2Fwasm%2Fvips-2g%2F';
+/**
+ * Self-built wasm-vips variant with MAXIMUM_MEMORY=2GB + ALLOW_MEMORY_GROWTH
+ * (see gpex-assets/wasm/). Served as a static copy under /hb/wasm/vips-2g/; the
+ * `base` query param tells vips-worker.js where to find the sibling vips.js /
+ * vips.wasm of THAT variant. The directory is committed to the repository.
+ */
+/**
+ * Pixel-count threshold above which callers are routed to the 2 GB variant.
+ * The fixed 1 GiB heap puts the practical ceiling at roughly 12-20 MP for
+ * 16-bit/float payloads and ~40 MP for 8-bit (see plan §12.10), so >16 MP is
+ * where the shared 1 GiB singleton starts aborting non-deterministically.
+ */
+
+/**
+ * A failure that justifies rebuilding the shared worker. Emscripten heap
+ * exhaustion surfaces as an `unreachable`/`unwind` abort (uncaught, kills the
+ * worker script) or a native `memory access out of bounds`; libvips also
+ * abort()s on internal invariant breaks. A plain `vips::Error` (bad/unsupported
+ * file) is a NORMAL, contained failure — the worker survives it — and must not
+ * trigger a rebuild.
+ */
+function isRecoverableVipsFailure(err: unknown): boolean {
+  if (err instanceof VipsWorkerCrashError || err instanceof VipsCallTimeoutError) return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return /\bunreachable\b|\bunwind\b|abort\(|out of memory|memory access out of bounds/i.test(msg);
+}
+
+/** Worker-level failure (uncaught exception / script load error) — the worker is dead. */
+class VipsWorkerCrashError extends Error {
+  constructor(message: string) {
+    super(`vips worker crashed: ${message}`);
+    this.name = 'VipsWorkerCrashError';
+  }
+}
+
+/** In-flight call aborted because the worker was rebuilt underneath it (a sibling call's recovery). */
+class VipsWorkerRebuiltError extends Error {
+  constructor() {
+    super('vips worker was rebuilt while the call was in flight');
+    this.name = 'VipsWorkerRebuiltError';
+  }
+}
+
+/** A single call exceeded the watchdog — the worker is presumed poisoned. */
+class VipsCallTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`vips call timed out after ${ms} ms`);
+    this.name = 'VipsCallTimeoutError';
+  }
+}
+
+/**
+ * Watchdog per in-flight call. wasm-vips aborts leave the shared singleton
+ * poisoned (every later call fails with vips::Error until the page is
+ * reloaded — observed twice on 48 MP HEIC→TIFF16 back-to-back exports), and a
+ * hard abort kills the worker script outright, so neither a response nor a
+ * worker `error` event may ever arrive. Every call therefore gets a timeout
+ * after which it is failed as recoverable and the worker is rebuilt.
+ */
+const VIPS_CALL_TIMEOUT_MS = 120_000;
+
+/** Maximum automatic rebuilds per instance lifetime (runaway-loop guard). */
+const MAX_WORKER_REBUILDS = 3;
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // LibVips Worker Class
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * Thin wrapper around the classic (importScripts-based) vips-worker.js Worker.
  * Serializes calls in order and handles the Worker lifecycle. Not exported —
- * callers obtain the shared instance via {@link getLibVips}.
+ * callers obtain a shared instance via {@link getLibVips}.
+ *
+ * CRASH RECOVERY: the underlying wasm-vips heap is finite (1 GiB upstream, 2 GB
+ * in the self-built variant) and the Emscripten module aborts — rather than
+ * throwing — when it is exhausted. An abort poisons the shared singleton and
+ * usually kills the worker script. On a recoverable failure (see
+ * {@link isRecoverableVipsFailure}) the whole worker is torn down and rebuilt,
+ * and the failed call retried ONCE on the fresh instance; retries are safe
+ * precisely because the bridge never transfers the caller's buffers (they
+ * survive structured clone and stay attached on this side). Plain vips::Error
+ * responses are passed through untouched.
  */
 class LibVips {
   private worker: Worker;
-  private pending: Map<number, { resolve: (val: unknown) => void; reject: (err: Error) => void }>;
+  private pending: Map<number, {
+    resolve: (val: unknown) => void;
+    reject: (err: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>;
   private nextId: number = 0;
   private tail: Promise<unknown> = Promise.resolve();
   private disposed: boolean = false;
+  /** Rebuilds consumed so far (lifetime cap {@link MAX_WORKER_REBUILDS}). */
+  private rebuildsUsed: number = 0;
+  /** Whether ANY call on this instance ever succeeded — distinguishes "variant never loaded" from "worn out". */
+  private everSucceeded: boolean = false;
+  private scriptUrl: string = VIPS_WORKER_URL;
 
   constructor() {
+    this.pending = new Map();
+    this.worker = this.spawn();
+  }
+
+  private spawn(): Worker {
     // Classic Worker (NOT { type: 'module' }): vips-worker.js uses importScripts,
     // which is only available in classic workers.
-    this.worker = new Worker('/ext/wasm/vips/vips-worker.js');
-    this.pending = new Map();
-    this.worker.onmessage = ({ data: e }) => {
+    const worker = new Worker(this.scriptUrl);
+    worker.onmessage = ({ data: e }) => {
       const t = this.pending.get(e?.id);
       if (t) {
+        clearTimeout(t.timer);
         this.pending.delete(e.id);
         if (e?.error) {
           t.reject(new Error(e.error));
         } else {
+          this.everSucceeded = true;
           t.resolve(e?.out);
         }
       }
     };
+    worker.onerror = (ev) => {
+      const detail = (ev as { message?: string })?.message || 'unknown error';
+      // Fail every in-flight call as RECOVERABLE: the script is dead (hard abort
+      // or failed variant load), so a rebuild is the only way forward.
+      for (const t of this.pending.values()) {
+        clearTimeout(t.timer);
+        t.reject(new VipsWorkerCrashError(detail));
+      }
+      this.pending.clear();
+    };
+    return worker;
+  }
+
+  /**
+   * Tear down the current worker and start a fresh one. If this instance was
+   * created for an optional variant (the self-built 2 GB build) and that
+   * variant never managed a single successful call, the rebuild silently
+   * switches to the default worker instead — the variant directory is simply
+   * not provisioned, and retrying it forever would fail every large call.
+   */
+  private rebuild(): void {
+    this.rebuildsUsed++;
+    this.worker.terminate();
+    // Calls already posted to the dead worker would otherwise hang until their
+    // own timeout: fail them now so each retries on the fresh worker. They are
+    // NOT counted as crashes — the recovery already happened once, here.
+    for (const t of this.pending.values()) {
+      clearTimeout(t.timer);
+      t.reject(new VipsWorkerRebuiltError());
+    }
+    this.pending.clear();
+    this.worker = this.spawn();
+  }
+
+  /**
+   * One serialized call with automatic crash recovery: a recoverable failure
+   * (heap abort / worker crash / watchdog timeout) rebuilds the worker and
+   * retries the call exactly once. Retrying is safe because the caller's
+   * buffers are never transferred — they are still attached on this side.
+   */
+  private async call(fn: string, ...args: unknown[]): Promise<unknown> {
+    try {
+      return await this.runFn(fn, ...args);
+    } catch (err) {
+      if (this.disposed) throw err;
+      if (err instanceof VipsWorkerRebuiltError) {
+        // A sibling call's recovery already replaced the worker: just re-post,
+        // without burning another rebuild from this call's budget.
+        return await this.runFn(fn, ...args);
+      }
+      if (!isRecoverableVipsFailure(err) || this.rebuildsUsed >= MAX_WORKER_REBUILDS) {
+        throw err;
+      }
+      const detail = err instanceof Error ? err.message : String(err);
+      console.warn(`[LibVips] recoverable failure in ${fn} (${detail}); rebuilding vips worker (rebuild ${this.rebuildsUsed + 1}/${MAX_WORKER_REBUILDS}) and retrying once`);
+      this.rebuild();
+      return await this.runFn(fn, ...args);
+    }
   }
 
   dispose() {
     this.disposed = true;
     this.worker.terminate();
-    for (const { reject } of this.pending.values()) {
+    for (const { reject, timer } of this.pending.values()) {
+      clearTimeout(timer);
       reject(new Error('LibVips disposed'));
     }
     this.pending.clear();
@@ -204,19 +358,24 @@ class LibVips {
         return;
       }
       const id = this.nextId++;
-      this.pending.set(id, { resolve, reject });
-
-      const transferables = args.map(r => {
-        if (r && typeof r === 'object' && 'buffer' in r && r.buffer instanceof ArrayBuffer) {
-          return r.buffer;
+      const timer = setTimeout(() => {
+        const t = this.pending.get(id);
+        if (t) {
+          this.pending.delete(id);
+          t.reject(new VipsCallTimeoutError(VIPS_CALL_TIMEOUT_MS));
         }
-        if (r instanceof ArrayBuffer) {
-          return r;
-        }
-        return null;
-      }).filter((r): r is ArrayBuffer => !!r);
+      }, VIPS_CALL_TIMEOUT_MS);
+      this.pending.set(id, { resolve, reject, timer });
 
-      this.worker.postMessage({ id, fn, args }, transferables);
+      // NO transfer list on purpose: transferring detaches the caller's
+      // ArrayBuffer, and several call sites legitimately reuse the same bytes
+      // across worker calls (TIFF vips-icc runs iccToSrgb then a high-depth
+      // decode on the same buffer; multi-page TIFF decodes the same buffer per
+      // page). postMessage's structured clone already copies the payload, so
+      // the only thing the transfer list ever bought was a copy we can afford —
+      // at the cost of opaque DataCloneErrors on the second call.
+
+      this.worker.postMessage({ id, fn, args });
     });
 
     const a = this.tail.then(n, n);
@@ -229,7 +388,7 @@ class LibVips {
    * pre-packed high-bit-depth f16 naked pixels — in a single vips pass.
    */
   async decode(bytes: Uint8Array, opts?: LibVipsDecodeOptions): Promise<LibVipsDecodeResult> {
-    const out = (await this.runFn('decode', bytes, opts || {})) as WorkerDecodeOut;
+    const out = (await this.call('decode', bytes, opts || {})) as WorkerDecodeOut;
 
     const wideGamutTarget: 'adobe-rgb' | 'prophoto-rgb' | undefined =
       opts?.wideGamutDegamma ??
@@ -306,7 +465,7 @@ class LibVips {
    * container op that belongs to the files layer.
    */
   async getPageCount(bytes: Uint8Array): Promise<{ pages: number; pageWidth: number; pageHeight: number }> {
-    return (await this.runFn('tiffPageCount', bytes)) as { pages: number; pageWidth: number; pageHeight: number };
+    return (await this.call('tiffPageCount', bytes)) as { pages: number; pageWidth: number; pageHeight: number };
   }
 
   /**
@@ -315,7 +474,7 @@ class LibVips {
    * `pixels.fileIO.decodePage`.
    */
   async decodePage(bytes: Uint8Array, page: number): Promise<{ width: number; height: number; data: Uint8Array }> {
-    return (await this.runFn('tiffDecodePage', bytes, page)) as { width: number; height: number; data: Uint8Array };
+    return (await this.call('tiffDecodePage', bytes, page)) as { width: number; height: number; data: Uint8Array };
   }
 
   /**
@@ -330,7 +489,7 @@ class LibVips {
     height: number,
     options: Record<string, unknown>,
   ): Promise<Uint8Array> {
-    return (await this.runFn('encodeTiff', rgbaData, width, height, options)) as Uint8Array;
+    return (await this.call('encodeTiff', rgbaData, width, height, options)) as Uint8Array;
   }
 
   /**
@@ -342,7 +501,23 @@ class LibVips {
     height: number,
     options: Record<string, unknown>,
   ): Promise<Uint8Array> {
-    return (await this.runFn('encodePng', rgbaData, width, height, options)) as Uint8Array;
+    return (await this.call('encodePng', rgbaData, width, height, options)) as Uint8Array;
+  }
+
+  /**
+   * Encode 8-bit RGBA pixels → JPEG container bytes via vips (libjpeg-turbo),
+   * at a FIXED 4:4:4 chroma subsampling (`subsample_mode: 'off'`). This replaced
+   * the browser canvas `convertToBlob` encoder, which offers no subsampling
+   * control and always writes 4:2:0 (measured Q92 PSNR 34 dB vs 47 dB on
+   * saturated content).
+   */
+  async encodeJpeg(
+    rgbaData: Uint8Array,
+    width: number,
+    height: number,
+    options: Record<string, unknown>,
+  ): Promise<Uint8Array> {
+    return (await this.call('encodeJpeg', rgbaData, width, height, options)) as Uint8Array;
   }
 
   /**
@@ -355,7 +530,7 @@ class LibVips {
   async iccToSrgb(
     bytes: Uint8Array,
   ): Promise<{ width: number; height: number; data: Uint8Array; iccProfileData?: Uint8Array }> {
-    return (await this.runFn('iccToSrgb', bytes)) as {
+    return (await this.call('iccToSrgb', bytes)) as {
       width: number;
       height: number;
       data: Uint8Array;
@@ -365,21 +540,23 @@ class LibVips {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Shared singleton accessor
+// Shared singleton accessor(s)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/** The process-wide shared instance (the 2 GB self-built build). */
 let sharedInstance: LibVips | null = null;
 
 /**
- * Returns the process-wide shared LibVips instance (lazily created). TIFF and
- * PNG handlers MUST go through this — never `new LibVips()` — so they share one
- * vips Worker (one pthread pool + one heap). See the file header for rationale.
+ * Returns a process-wide shared LibVips instance (lazily created). Handlers
+ * MUST go through this — never `new LibVips()` — so vips consumers share
+ * workers (one pthread pool + one heap each). See the file header for rationale.
+ *
+ * Every consumer shares ONE instance (the 2 GB self-built build); handlers
+ * MUST go through this — never `new LibVips()` — so vips consumers share
+ * workers (one pthread pool + one heap).
  */
 export function getLibVips(): LibVips {
-  if (!sharedInstance) {
-    sharedInstance = new LibVips();
-  }
+  if (!sharedInstance) sharedInstance = new LibVips();
   return sharedInstance;
 }
-
 export type { LibVips };

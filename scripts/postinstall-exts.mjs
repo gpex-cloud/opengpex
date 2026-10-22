@@ -10,7 +10,8 @@
  *
  * Directory layout:
  *   public/ext/wasm/resvg/   ← resvg.wasm + index.js + resvg-worker.js
- *   public/ext/wasm/vips/    ← vips.js + vips.wasm + vips-worker.js
+ *   (the vips engine is NOT installed here any more: the self-built 2 GB
+ *    build is committed under public/hb/wasm/vips-2g/ — see plan §12.10)
  *   public/ext/wasm/libraw/  ← libraw.wasm + libraw.js + libraw-worker.js
  *   public/ext/wasm/gs/      ← gs.wasm + gs.js + gs-worker.js
  *   public/ext/wasm/avif/    ← avif_enc.wasm + avif_enc.js + avif-worker.js (@jsquash/avif ST)
@@ -30,7 +31,7 @@ const ROOT = resolve(__dirname, '..');
 
 // ─── Ensure subdirectories exist ────────────────────────────────────────────────
 const WASM_BASE = resolve(ROOT, 'public/ext/wasm');
-const SUBDIRS = ['resvg', 'vips', 'libraw', 'gs', 'avif', 'avif/dec', 'libheif'];
+const SUBDIRS = ['resvg', 'libraw', 'gs', 'avif', 'avif/dec', 'libheif'];
 for (const sub of SUBDIRS) {
   mkdirSync(resolve(WASM_BASE, sub), { recursive: true });
 }
@@ -41,10 +42,6 @@ const vendorFiles = [
   { src: 'node_modules/@resvg/resvg-wasm/index_bg.wasm', dest: 'resvg/resvg.wasm' },
   { src: 'node_modules/@resvg/resvg-wasm/index.mjs',     dest: 'resvg/index.js' },
 
-  // ── vips ──
-  { src: 'node_modules/wasm-vips/lib/vips.js',        dest: 'vips/vips.js' },
-  { src: 'node_modules/wasm-vips/lib/vips.wasm',      dest: 'vips/vips.wasm' },
-  { src: 'node_modules/wasm-vips/lib/vips-heif.wasm', dest: 'vips/vips-heif.wasm' },
 
   // ── libraw ──
   { src: 'node_modules/libraw-wasm/dist/libraw.wasm', dest: 'libraw/libraw.wasm' },
@@ -92,8 +89,10 @@ const WORKERS_SRC = resolve(ROOT, 'src/lib/opengpex/core/files/workers');
 const workerFiles = [
   { src: 'resvg-worker.js', dest: 'resvg/resvg-worker.js' },
   { src: 'gs-worker.js',    dest: 'gs/gs-worker.js' },
-  { src: 'vips-worker.js',  dest: 'vips/vips-worker.js' },
   { src: 'avif-worker.js',  dest: 'avif/avif-worker.js' },
+  // The served vips worker is the self-built 2G build (plan §12.10); src is
+  // the single source of truth — this copy must never be edited by hand.
+  { src: 'vips-worker.js', dest: '../../hb/wasm/vips-2g/vips-worker.js' },
   { src: 'heic-worker.js',  dest: 'libheif/heic-worker.js' },
 ];
 

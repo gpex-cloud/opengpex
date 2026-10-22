@@ -152,8 +152,10 @@ export function isWideGamut(cs: ColorSpaceId): cs is 'adobe-rgb' | 'prophoto-rgb
 }
 
 /**
- * Determine whether to retain sourceBlob for pass-through lossless export
- * recovery — a module-local ingest-decision helper.
+ * Determine whether to retain sourceBlob for verbatim re-download — a
+ * module-local ingest-decision helper. The sole consumer of the retained blob
+ * is the explicit "Save Original" command (`downloadOriginal`, getRaw); Save
+ * itself always re-encodes through the egest pipeline.
  *
  * Retention reduces to a ONE-LINE inference on the decode channel:
  *

@@ -2,7 +2,19 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
-## v2.0.24
+## v2.0.25
+
+- Import: AVIF files without colour metadata (untagged, as written by many encoders) now open as sRGB instead of being rejected with a misleading HDR message; genuine PQ/HLG HDR AVIF is still declined
+- Import: 4-bit palette PNGs now open correctly, with EXIF orientation applied exactly once
+- Import: animated GIFs, 16-bit grayscale PNGs, 16-bit CMYK TIFFs and multi-page TIFFs now open again (they had silently failed since the decision-table refactor)
+- Import: WebP files with transparency are now detected correctly, so content bounds are measured instead of skipped
+- RAW: Edit → Export now offers "Keep EXIF Data" for RAW documents, preserving camera metadata into PNG/JPEG/TIFF/WebP exports
+- AVIF: exports now embed the colour profile and EXIF metadata they promise; color space is tagged for every AVIF so macOS Preview and other apps no longer misread exports as sRGB
+- AVIF & JPEG: chroma subsampling is now full 4:4:4 — visibly better color edges on saturated content; JPEG is encoded by a new high-fidelity engine (files are somewhat larger)
+- Export: Save always re-encodes through the export pipeline; the hidden shortcut that copied unedited files verbatim is gone (Save Original on the chevron menu is unchanged)
+
+---
+
 
 - Workspace: new markers, text boxes and brush strokes are no longer folded into automatically created "Group Markers" / "Group Texts" / "Group Strokes" layer groups — each one is placed as a plain layer directly above the active layer, leaving grouping entirely up to you
 - Export: the bit depth selector now follows the document by default, matching the behavior of the color space setting; the active tab is green while it matches the document and amber when it deviates

@@ -118,7 +118,16 @@ export async function applyExifOrientation(
   dims: { w: number; h: number },
   orientation: number,
 ): Promise<{ blob: Blob; dimensions: { w: number; h: number } }> {
-  const img = await createImageBitmap(blob instanceof File ? blob : new Blob([blob], { type: 'image/png' }));
+  // Request RAW pixels: the dims argument is the PRE-orientation geometry, so
+  // the bitmap must be un-rotated for the explicit transform below to land
+  // exactly once. Callers only reach this function when the browser did NOT
+  // auto-apply the embedded orientation (see png/decode.ts's geometry-based
+  // hand-off), but engines that honor `imageOrientation: 'none'` stay correct
+  // here too; engines that ignore the flag simply behave as before.
+  const img = await createImageBitmap(
+    blob instanceof File ? blob : new Blob([blob], { type: 'image/png' }),
+    { imageOrientation: 'none' },
+  );
   const { w, h } = dims;
 
   // Orientations 5-8 swap width/height — read from the shared table so this

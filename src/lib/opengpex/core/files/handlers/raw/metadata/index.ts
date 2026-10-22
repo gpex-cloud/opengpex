@@ -38,6 +38,7 @@ import type { ImageMetadata, ColorSpaceId } from '../../../types';
 import { iccToBase64, parseIccProfileName, inferColorSpaceFromIcc } from '../../../shared/icc';
 import { readTiffRawBitsPerSample } from '../../../metadata/tiff-ifd-reader';
 import { resolveRawIccBytes } from './icc';
+import { extractRawExif } from './exif';
 import {
   readDngProfileName,
   detectTransfer,
@@ -232,6 +233,15 @@ export async function extractRawMetadata(file: File): Promise<ImageMetadata> {
     const { colorSpace, transfer } = detectRawColorIdentity(iccProfileName, dngProfileName);
     meta.colorSpace = colorSpace;
     if (transfer) meta.raw.transfer = transfer; // write-only HDR seam (not consumed this phase)
+
+    // ── Raw EXIF bytes (base64 TIFF structure — export "Keep EXIF Data") ──
+    // Same convention as the raster handlers: a rebuilt IFD0 + Exif/GPS IFD
+    // blob with the RAW's pixel-storage tags and DNG-private tables stripped,
+    // so RAW sources exported to PNG/JPEG/TIFF/WebP keep camera metadata.
+    // The export path already runs `resetExifOrientation` over these bytes;
+    // the demosaiced pixels are upright, so Orientation must read 1.
+    const exifBytes = extractRawExif(fileBytes);
+    if (exifBytes) meta.raw.exif = iccToBase64(exifBytes);
 
     // ── DNG camera-profile colour tables: parsed, NOT stored ──
     // ProfileToneCurve / HueSatMap / LookTable were previously parsed into

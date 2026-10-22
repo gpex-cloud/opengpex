@@ -23,8 +23,10 @@
  * `resolveEgestDecision(request)` is the SINGLE authority that turns "user asked
  * for format F, gamut G, depth D" plus the DOCUMENT's own gamut into the complete
  * set of export instructions: which gamut the pixels must be encoded into, which
- * physical encode lane carries them, how to tag the canvas, whether to embed an
- * ICC profile, and whether the unedited-file pass-through is still colour-legal.
+ * physical encode lane carries them, how to tag the canvas, and whether to embed
+ * an ICC profile. There is no pass-through concept here: Save always re-encodes,
+ * and the verbatim source bytes are exclusively the explicit "Save Original"
+ * command (getRaw, outside this module).
  *
  * ONE-WAY CONSTRAINT SOLVE (no more three-gate clamp)
  * ---------------------------------------------------
@@ -125,13 +127,13 @@ export interface EgestRequest {
 
 /** Unified egest decision output. */
 export interface EgestDecision {
-  /** 1. The document's own gamut, for the pass-through comparison below. */
+  /** 1. The document's own gamut — the baseline the user's intent is judged against. */
   readonly sourceGamut: GamutId;
   /**
-   * 2. The user's gamut INTENT, before any container clamp. This — not `targetGamut`
-   *    — is the axis the pass-through gate compares, so an
-   *    "Adobe RGB → sRGB" request cannot ship the original Adobe RGB bytes just
-   *    because the clamp happened to land back on P3.
+   * 2. The user's gamut INTENT, before any container clamp. RequestedGamut (the
+   *    intent) and targetGamut (the clamp) are kept separate so an
+   *    "Adobe RGB → sRGB" request cannot silently land back on a wide gamut just
+   *    because the clamp happened to fall there.
    */
   readonly requestedGamut: GamutId;
   /**
@@ -159,18 +161,6 @@ export interface EgestDecision {
   readonly canvasColorSpace: PredefinedColorSpace;
   /** 7. Whether an ICC profile is written (format capability ∧ user toggle). */
   readonly embedIcc: boolean;
-  /**
-   * 8. The COLOUR half of the pass-through gate: true when the requested output
-   * gamut equals the document's gamut, so shipping the original bytes cannot
-   * silently change the colour. The caller ANDs this with its own non-colour
-   * conditions (unedited history, no clip, no resize, format match, a retained
-   * source blob) — those are not colour decisions and stay out of this module.
-   *
-   * `[!IMPORTANT]` Compares `requestedGamut` (the INTENT), never the clamped
-   * `targetGamut` — an "Adobe RGB → sRGB" request cannot ship the original Adobe RGB
-   * bytes just because the container clamp happened to land back on the working gamut.
-   */
-  readonly gamutPassThroughEligible: boolean;
 }
 
 function lookupCapability(format: SourceFormat): FormatEgestCapability {
@@ -244,7 +234,6 @@ export function resolveEgestDecision(request: EgestRequest): EgestDecision {
       channel: 'raw-10',
       canvasColorSpace: toCanvasColorSpace('srgb'),
       embedIcc: false,
-      gamutPassThroughEligible: (explicitGamut ?? (requestSourceGamut ?? 'srgb')) === (requestSourceGamut ?? 'srgb'),
     };
   }
 
@@ -312,6 +301,5 @@ export function resolveEgestDecision(request: EgestRequest): EgestDecision {
     channel,
     canvasColorSpace: toCanvasColorSpace(targetGamut),
     embedIcc: targetGamut === 'rec2020' ? false : resolveEmbedIcc(format, embedIccOverride),
-    gamutPassThroughEligible: requestedGamut === sourceGamut,
   };
 }

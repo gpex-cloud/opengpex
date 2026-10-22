@@ -241,7 +241,6 @@ export function EgestSection() {
               ['bitDepth', String(decision.value.bitDepth)],
               ['canvasColorSpace', decision.value.canvasColorSpace],
               ['embedIcc', String(decision.value.embedIcc)],
-              ['pass-through (colour)', String(decision.value.gamutPassThroughEligible)],
               ['src=exp fmt', String(srcFormat === format)],
               ['requestedGamut', decision.value.requestedGamut],
               ['sourceGamut', decision.value.sourceGamut],
