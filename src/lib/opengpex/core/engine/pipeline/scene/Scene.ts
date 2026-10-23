@@ -107,6 +107,17 @@ export interface ViewConfig {
   readonly transform: Mat3;
   /** Swapchain target size in physical pixels (viewport × DPR). */
   readonly target: { readonly width: number; readonly height: number };
+  /**
+   * FIXED composite density: texels per document pixel the interactive
+   * composite is baked at. CONSTANT with respect to camera zoom — the
+   * composite is baked once per document resolution and every zoom replays
+ * it (the zooming reveals the document's own pixels, never a sharper
+   * re-rasterization). Stamped by `SceneAssembler.composeView` from the
+   * adaptive-rendering preference × devicePixelRatio (ceil, ≥ 1); `1` is the
+   * strict-WYSIWYG value. Export supplies its own supersampling and ignores
+   * this. Optional so hand-built test scenes default to 1.
+   */
+  readonly density?: number;
 }
 
 // ────────────────────────────────────────────────────────────

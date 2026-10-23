@@ -35,7 +35,7 @@
  * Grayscale coverage upsamples BLURRY (a 1-2px transition band stretched 3×
  * stays blurry) — unlike an SDF's analytic edge, so the atlas MUST be
  * rasterized at the target physical font size: `rasterSize = fontSize × band`.
- * `quantizeDensityBand` snaps an arbitrary target density UP to one of a few
+ * `resolveGlyphBand` snaps an arbitrary target density UP to one of a few
  * bands (upsampling is never allowed; downsampling a higher band linearly is
  * acceptable). The interactive path is pinned to band 1 (the viewport's
  * density band is applied by the composite, not here); the export path
@@ -70,16 +70,23 @@ export const MAX_PAGES_PER_SET = 2;
 export const MAX_GLYPH_RASTER_SIZE = 512;
 
 /**
- * Quantized density bands. A glyph rasterized at band B sampled at target
- * density d ≤ B never upsamples (sharp); d > B would, so quantization rounds UP.
+ * Export density bands (logical supersampling factors). A glyph rasterized at
+ * band B sampled at target density d ≤ B never upsamples (sharp); d > B
+ * would, so quantization rounds UP.
+ *
+ * EXPORT-ONLY by design: the interactive composite renders text at the fixed
+ * composite density straight from `Scene.view.density` — it never passes
+ * through this quantizer. Keeping the quantizer out of the interactive path
+ * (and named for export) prevents the zoom-tracking density behaviour from
+ * ever being wired back in.
  */
 export const DENSITY_BANDS = [1, 1.5, 2, 3, 4] as const;
 
 /**
- * Snap a target density UP to the smallest band that covers it (largest band
- * when above every band). Band 1 covers the interactive path this phase.
+ * Snap an export supersampling density UP to the smallest band that covers it
+ * (largest band when above every band).
  */
-export function quantizeDensityBand(density: number): number {
+export function resolveGlyphBand(density: number): number {
   const d = Math.max(1, density);
   for (const band of DENSITY_BANDS) {
     if (d <= band) return band;

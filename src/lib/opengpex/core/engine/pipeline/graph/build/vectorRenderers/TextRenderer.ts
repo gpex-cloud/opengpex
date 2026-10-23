@@ -38,8 +38,9 @@
  *    paint pass).
  *
  * ── DENSITY ──
- * `args.density` (export supersampling today; viewport density band) is
- * quantized UP to a density band and the atlas rasterizes at that band. Same
+ * `args.density` (export supersampling, or the fixed interactive composite
+ * density) is quantized UP to a density band and the atlas rasterizes at that
+ * band. Same
  * band ⇒ on-screen glyph texels ≈ atlas texels (1:1, sharp); lower target
  * density downsamples linearly (acceptable); a higher one cannot happen by
  * construction of the quantization. The interactive path passes density 1
@@ -62,7 +63,7 @@ import { BufferRing } from '@opengpex/editor/core/engine/gpu/resources/BufferRin
 import {
   ATLAS_PAGE_SIZE,
   GlyphAtlasCache,
-  quantizeDensityBand,
+  resolveGlyphBand,
   type GlyphRasterizer,
   type GlyphRequest,
 } from '@opengpex/editor/core/engine/text/glyphAtlas';
@@ -341,7 +342,7 @@ export class TextRenderer implements VectorRenderer {
     }
 
     const density = args.density ?? 1;
-    const band = quantizeDensityBand(density);
+    const band = resolveGlyphBand(density);
     const setKey = `${p.fontKey}|${band}`;
     const rasterizer = (this.rasterizer ??= new CanvasGlyphRasterizer());
 
@@ -517,5 +518,5 @@ export const textRenderer = new TextRenderer();
  * (1×) atlas is never affected.
  */
 export function releaseExportGlyphAtlas(exportScale: number): void {
-  textRenderer.releaseBand(quantizeDensityBand(exportScale));
+  textRenderer.releaseBand(resolveGlyphBand(exportScale));
 }

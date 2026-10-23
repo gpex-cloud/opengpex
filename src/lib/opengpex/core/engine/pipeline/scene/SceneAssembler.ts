@@ -54,6 +54,7 @@ import type { HighDepthSource } from '@opengpex/editor/core/engine/sources/HighD
 import { translateLayerAdjustments } from './adjustments';
 import { layerToVectorSource } from './vectorSources';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
+import { resolveCompositeDensity } from '@opengpex/editor/core/engine/pipeline/graph/support/densityComposite';
 
 /**
  * UNIFIED raw-upload seam — the single convergence point for every
@@ -276,6 +277,14 @@ export interface SceneViewOptions {
   readonly camera: CameraState;
   readonly viewportDim: Dimensions;
   readonly dpr: number;
+  /**
+   * Adaptive composite rendering (the user preference): when true the
+   * interactive composite bakes at `ceil(dpr)` texels per document pixel so
+   * vector/text edges stay crisp at 100% on hi-dpi displays; when false (or
+   * omitted — tests, export, idle paths) it bakes at exactly 1. Either way the
+   * value is a per-frame CONSTANT independent of camera zoom.
+   */
+  readonly adaptiveDensity?: boolean;
   readonly geometry: GeometryService;
   readonly channelMask?: SceneChannelMask;
   /**
@@ -930,6 +939,10 @@ export class SceneAssembler {
 
     const targetW = Math.max(1, Math.floor(viewportDim.w * dpr));
     const targetH = Math.max(1, Math.floor(viewportDim.h * dpr));
+    // The fixed composite density (texels per document pixel). A zoom-free
+    // constant: the composite is baked once per document resolution and every
+    // camera frame replays it. See `resolveCompositeDensity` for the dpr fold.
+    const density = resolveCompositeDensity(dpr, options.adaptiveDensity ?? false);
 
     // Pixel-snap canvas boundary to integer physical pixels
     const snap = snapCanvasRect(cam, f.canvas, dpr);
@@ -985,6 +998,7 @@ export class SceneAssembler {
           ty: M_camera.ty,
         },
         target: { width: targetW, height: targetH },
+        density,
       },
       layers,
     };

@@ -102,9 +102,10 @@ export function prepareVectorSources(
     // quantity); a plain one supersamples to the export density. See the header.
     const filtered = hasEffectiveFilters(layer);
     const scale: readonly [number, number] = filtered ? [1, 1] : exportScale;
-    // maxTextureDimension2D clamp: a full-canvas vector layer at band density
-    // can exceed the device limit — uniform shrink beats a failed creation
-    // (same contract as the vmask bake clamp).
+    // maxTextureDimension2D clamp: a full-canvas vector layer at export
+    // superscale (or the interactive composite density) can exceed the device
+    // limit — uniform shrink beats a failed creation (same contract as the
+    // vmask bake clamp).
     const [reqW, reqH] = vectorTransientSize(
       layer.width ?? 1, layer.height ?? 1, scale,
       ctx.device.limits.maxTextureDimension2D,

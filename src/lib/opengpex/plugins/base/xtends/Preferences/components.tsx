@@ -20,7 +20,7 @@
 'use client';
 
 import React from 'react';
-import { Mouse, Scissors, Move, ShieldCheck, Gauge, Info } from 'lucide-react';
+import { Mouse, Scissors, Move, ShieldCheck, Gauge, Info, Monitor } from 'lucide-react';
 import Switch from '@opengpex/editor/widgets/Switch';
 import { usePreset } from '@opengpex/editor/core/helpers/preferences/usePreset';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
@@ -30,6 +30,7 @@ import { PRESET_MANIFEST, USER_ADJUSTABLE_KEYS, type PresetManifestEntry } from 
 // Maps `groupIcon` string in manifest to actual Lucide component.
 
 const ICON_MAP: Record<string, React.ComponentType<{ size?: number }>> = {
+  Monitor,
   Mouse,
   Scissors,
   Move,
@@ -92,18 +93,18 @@ function SwitchControl({ entry }: { entry: PresetManifestEntry }) {
   };
 
   return (
-    <div className="flex items-center justify-between rounded-xl p-3 bg-[var(--bg-stage)] border border-[var(--border-subtle)]">
-      <div className="flex flex-col gap-0.5">
+    <div className="flex items-center justify-between gap-4 rounded-xl p-3 bg-[var(--bg-stage)] border border-[var(--border-subtle)]">
+      <div className="flex flex-col gap-0.5 flex-1 min-w-0">
         <span className="text-[11px] font-semibold text-[var(--text-main)]">
           {entry.label}
         </span>
         {description && (
-          <span className="text-[9px] text-[var(--text-muted)]">
+          <span className="text-[9px] text-[var(--text-muted)] leading-relaxed">
             {description}
           </span>
         )}
       </div>
-      <Switch checked={isOn} onChange={handleToggle} />
+      <Switch checked={isOn} onChange={handleToggle} className="shrink-0" />
     </div>
   );
 }
@@ -122,13 +123,13 @@ function SelectControl({ entry }: { entry: PresetManifestEntry }) {
   };
 
   return (
-    <div className="flex items-center justify-between rounded-xl p-3 bg-[var(--bg-stage)] border border-[var(--border-subtle)]">
-      <div className="flex flex-col gap-0.5">
+    <div className="flex items-center justify-between gap-4 rounded-xl p-3 bg-[var(--bg-stage)] border border-[var(--border-subtle)]">
+      <div className="flex flex-col gap-0.5 flex-1 min-w-0">
         <span className="text-[11px] font-semibold text-[var(--text-main)]">
           {entry.label}
         </span>
         {description && (
-          <span className="text-[9px] text-[var(--text-muted)]">
+          <span className="text-[9px] text-[var(--text-muted)] leading-relaxed">
             {description}
           </span>
         )}
@@ -136,7 +137,7 @@ function SelectControl({ entry }: { entry: PresetManifestEntry }) {
       <select
         value={String(value)}
         onChange={handleChange}
-        className="text-[10px] bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-md px-2 py-1 text-[var(--text-main)]"
+        className="shrink-0 text-[10px] bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-md px-2 py-1 text-[var(--text-main)]"
       >
         {options.map(opt => (
           <option key={String(opt.value)} value={String(opt.value)}>

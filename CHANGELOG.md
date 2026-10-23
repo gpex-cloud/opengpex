@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.26
+
+- Rendering: the zoom-driven density-band compositing design has been removed entirely — the canvas is now composited once at the document's own resolution and simply magnified when you zoom in; a new "Retina-sharp rendering" option (on by default) keeps vector and text edges crisp at 100% on retina screens
+
+---
+
 ## v2.0.25
 
 - Import: AVIF files without colour metadata (untagged, as written by many encoders) now open as sRGB instead of being rejected with a misleading HDR message; genuine PQ/HLG HDR AVIF is still declined

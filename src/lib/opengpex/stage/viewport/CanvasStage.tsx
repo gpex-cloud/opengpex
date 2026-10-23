@@ -25,8 +25,8 @@ import { PERF_MON } from '@opengpex/editor/core/helpers/config';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { useOverlayRotationSync } from '@opengpex/editor/core/motion/hooks/animation';
+import { presets } from '@opengpex/editor/core/helpers/preferences';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color';
-import { quantizeDensityBand } from '@opengpex/editor/core/engine/text/glyphAtlas';
 import {
   sourceBitmapCache,
   getGpuEngine,
@@ -267,14 +267,6 @@ export default function CanvasStage() {
         // Constant today, so it never forces a rebuild; kept so the
         // key stays a faithful 1:1 image of SceneContent's inputs.
         colorSpace: WORKING_GAMUT,
-        // The quantized interactive density band — the ONLY
-        // camera-derived key dimension. Quantized onto the glyph-atlas bands,
-        // so pan/zoom inside a band keeps the cache hit; crossing a band costs
-        // exactly one rebuild (the CPU-side re-composite signal). Computed from
-        // cam.k × dpr, the same quantity the engine quantizes via
-        // `effectiveScale(scene.view.transform)`; band quantization absorbs the
-        // pixel-snap difference.
-        densityBand: quantizeDensityBand(cam.k * dpr),
         dirty: isDirty,
         animating: false,
       },
@@ -308,6 +300,11 @@ export default function CanvasStage() {
       camera: cam,
       viewportDim: state.ui.viewportDim,
       dpr,
+      // Fixed composite density (zoom-free): adaptive rendering bakes at
+      // ceil(dpr) texels per document pixel so 100% stays crisp on retina;
+      // off bakes at exactly 1 (strict WYSIWYG). Read synchronously — the
+      // presets factory is O(1) per frame.
+      adaptiveDensity: presets.get('COMPOSITE_ADAPTIVE_DENSITY') !== false,
       geometry,
       channelMask,
       // LIVE-EDIT probe (session → engine seam): while a vector edit gesture is

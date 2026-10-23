@@ -53,10 +53,11 @@
  *   `feather > 0` ⇒ `1 - smoothstep(-feather, feather, d)` (soft band wins);
  *   `feather == 0` + AA flag ⇒ `clamp(0.5 - d, 0, 1)` — a 1-document-pixel
  *   sub-pixel coverage ramp (formula B), the standard Photoshop AA ON edge;
- *   `feather == 0` + AA clear ⇒ binary `inside_doc ? 1 : 0` — the explicit hard,
- *   aliased edge (Photoshop AA OFF), quantized to the DOCUMENT pixel grid
- *   (even-odd sampled at the containing document pixel's center), so the
- *   staircase step stays exactly 1 document px at any bake density.
+ *   `feather == 0` + AA clear ⇒ binary `inside ? 1 : 0` — the explicit hard,
+ *   aliased edge (Photoshop AA OFF), even-odd sampled at the bake texel
+ *   center: the staircase step is 1/density document px (exactly 1 at the
+ *   strict-WYSIWYG density 1; finer than the export at a supersampled bake —
+ *   the accepted constant benign distortion, same as every vector source).
  *
  * ── FLAGS BAKED IN-PASS ──
  * Each sub-mask's `inverted` (flags bit0) is resolved HERE (`1 - cov_m`) BEFORE
@@ -152,21 +153,6 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
   // (1-document-px coverage ramp is defined on the physical pixel center).
   let p_test = p + vec2<f32>(0.015625, 0.0078125); // (+1/64, +1/128) — exact in f32
 
-  // AA-OFF sample point: the CENTER of the document pixel that contains this
-  // texel. A hard-edge mask's coverage is a piecewise-constant function over
-  // the document pixel grid (1 bit per document px — the Photoshop AA-off
-  // contract), so baking it at an interactive density scale must not
-  // re-quantize the edge at texel granularity: every physical texel covering
-  // one document pixel must read the SAME value, or the staircase steps come
-  // out at 1/density document px (sub-pixel jaggies) and drift off the pixel
-  // grid. Snapping the even-odd test to the document-pixel center (floor(p)
-  // + 0.5) makes the binary branch evaluate the document-pixel function
-  // directly — an identity at density 1 (px_scale = 1 means floor(p) + 0.5
-  // equals p up to the nudge), and the contract-true quantization at any
-  // density > 1. The continuous branches (feather ramp / AA linear coverage)
-  // are genuine signals at the texel center and keep sampling at p / p_test.
-  let p_doc = floor(p) + vec2<f32>(0.515625, 0.5078125); // doc-px center + same tie-break nudge
-
   // Intersection of all sub-masks: coverage = Π cov_m. Start at 1.0 so a
   // single sub-mask degrades to its own coverage.
   var coverage = 1.0;
@@ -177,10 +163,7 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
     //     oracle: pnpoly — same sample point as the CPU staircase).
     // (b) Nearest-edge unsigned distance at the TRUE center p, accumulated in
     //     the same loop — both restricted to THIS sub-mask's [start, end) edge slice.
-    // (c) Even-odd winding from the DOCUMENT-pixel center p_doc — same ray
-    //     cast, second accumulator, consumed only by the binary AA-OFF branch.
     var inside = false;
-    var inside_doc = false;
     var min_dist = 1e30;
     let start = sm.edge_start;
     let end = sm.edge_start + sm.edge_count;
@@ -194,13 +177,6 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
         let x_cross = a.x + t * (b.x - a.x);
         if (p_test.x < x_cross) {
           inside = !inside;
-        }
-      }
-      if ((a.y > p_doc.y) != (b.y > p_doc.y)) {
-        let t = (p_doc.y - a.y) / (b.y - a.y);
-        let x_cross = a.x + t * (b.x - a.x);
-        if (p_doc.x < x_cross) {
-          inside_doc = !inside_doc;
         }
       }
       min_dist = min(min_dist, sdf_segment(p, a, b));
@@ -229,10 +205,15 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
     } else {
       // AA OFF (flag bit1 clear): pure 1-bit binary hard edge — a jaggies-only
       // stair-stepped coverage, by explicit user choice (Photoshop AA off).
-      // The even-odd verdict comes from the DOCUMENT-pixel center (see p_doc):
-      // the hard edge is quantized to the document pixel grid regardless of
-      // the bake density, so the staircase step is always exactly 1 document px.
-      cov_m = select(0.0, 1.0, inside_doc);
+      // The even-odd verdict is sampled at the BAKE texel center (p_test):
+      // the composite density is a zoom-free constant, so a hard edge
+      // quantizes at 1/density document px — finer than the export at
+      // density > 1 (the accepted constant benign distortion of the
+      // adaptive-retina bake), exactly the export at density 1. There is
+      // deliberately NO document-pixel snap here: hard-edge alignment to the
+      // document grid is a density-1 (strict WYSIWYG) behaviour, not a
+      // per-path special case.
+      cov_m = select(0.0, 1.0, inside);
     }
 
     // Per-sub-mask flags baked BEFORE the product: the texel IS final.

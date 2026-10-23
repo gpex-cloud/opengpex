@@ -104,6 +104,18 @@ export const PRESET_MANIFEST: PresetManifestEntry[] = [
     order: 0,
   },
 
+  {
+    key: 'COMPOSITE_ADAPTIVE_DENSITY',
+    group: 'Rendering',
+    groupIcon: 'Monitor',
+    label: 'Retina-sharp rendering',
+    description:
+      'Render the canvas at your display density so vector and text edges stay crisp at 100% on retina screens. Turn off for pixel-exact editing: hard edges and masks align to the document pixel grid, and what you see is exactly what exports.',
+    control: 'switch',
+    switchMap: { onValue: true, offValue: false },
+    order: 0,
+  },
+
   // ─── Future examples (uncomment when ready to expose) ────────────────────
   //
   // {

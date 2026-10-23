@@ -18,101 +18,79 @@
  */
 
 /**
- * densityComposite.ts — Pure sizing for the density-banded interactive
- * composite.
+ * densityComposite.ts — Sizing for the fixed-density interactive composite.
  *
- * Split out of `WebGpuEngine`/`RenderGraph` so the band arithmetic — the part
- * that decides at which density the interactive composite renders and how the
- * VRAM hard cap degrades it — is a plain function testable without a GPU
- * device, and so the engine (which sizes its resident composite target) and
- * the graph (which sizes one-shot targets) cannot drift apart.
+ * The interactive composite is baked ONCE per document resolution at a FIXED
+ * density and every camera frame replays it (the Photoshop model: zooming in
+ * reveals the document's own pixels, never a sharper re-rasterization). This
+ * module owns the two pure pieces of that contract:
  *
- * ── MODEL ──
- *   • `screenScale` = physical screen px per document px = the camera's
- *     `effectiveScale(scene.view.transform)` (cam.k × dpr, pixel-snapped).
- *   • `band` = `quantizeDensityBand(screenScale)` — the SAME bands the glyph
- *     atlas uses, so the atlas and the composite always rasterize at a
- *     consistent density and pan/zoom inside a band is quantized away (zero
- *     re-composite; crossing a band costs exactly one).
- *   • The achieved scale is the band clamped UNIFORMLY by the caller-owned
- *     ceiling: `min(band, ceil / max(docW, docH))`, `ceil = max(1,
- *     maxTextureDimension2D)` — the caller passes
- *     `min(deviceMaxDim, budgetDerivedCeilPx(...))` — physics + byte budget;
- *     the old hard-coded 4096 fold is replaced. The clamp factor
- *     is shared by BOTH axes (driven by the LONGER
- *     edge) so the composite always preserves the document aspect ratio — the
- *     present channel (`ViewPass` / `densityScale`) consumes a single scalar
- *     and cannot express per-axis densities. 4K/8K canvases at high zoom land
- *     here, degrading toward document-resolution compositing instead of
- *     allocating an over-limit / 400 MB+ texture.
+ *   • `resolveCompositeDensity` — the dpr → density fold behind the
+ *     "adaptive rendering" preference: ON bakes at `ceil(dpr)` texels per
+ *     document pixel (integer, so texel boundaries coincide with document
+ *     pixel boundaries and the pixel-grid overlay aligns at every zoom);
+ *     OFF bakes at exactly 1 (strict WYSIWYG).
+ *   • `densityCompositeDims` — composite-target pixel dimensions at a given
+ *     per-axis scale. Both the engine's resident target and
+ *     `RenderGraph.composite` size through THIS function so their dims can
+ *     never disagree (the engine-owned `ctx.target` must match the graph's
+ *     `frameWidth/Height` exactly).
+ *
+ * The zoom-derived density-band quantization this module once performed is
+ * GONE by design: a density that moved with the camera is what produced the
+ * 1/16 edge quantization, the per-band re-composite stalls, and the
+ * document × band² memory multiplication. Do not reintroduce a camera term
+ * here — sharpness-tracking-zoom is a pure-vector-tool goal (Figma), not a
+ * raster editor's.
  *
  * @module core/engine/pipeline/graph/support/densityComposite
  */
 
-import { quantizeDensityBand } from '@opengpex/editor/core/engine/text/glyphAtlas';
-
 /**
- * Legacy composite-texture edge ceiling (px). The dual-channel policy
- * (`compositeBudget.ts`) REPLACED this hard clamp as the sizing
- * authority — the density ceiling is now owned by the CALLER
- * (`min(deviceMaxDim, budgetDerivedCeilPx(...))`, i.e. physics + byte budget).
- * The constant survives only as the engine's conservative fallback when the
- * negotiated limits are unavailable.
+ * Per-axis composite scale. Both axes always carry the SAME value: the
+ * present channel (`ViewPass` / `densityScale`) consumes a single scalar and
+ * cannot express per-axis densities, and an aspect-distorting density would
+ * stretch the composite against the pixel grid.
  */
-export const INTERACTIVE_COMPOSITE_CEIL_PX = 4096;
-
-/** Quantized interactive composite density (uniform scalar, shared by both axes). */
 export interface InteractiveDensity {
-  /**
-   * The quantized density band (glyph-atlas bands). Constant inside a
-   * pan/zoom gesture segment — the ONLY camera-derived dimension the content
-   * cache may key on.
-   */
-  readonly band: number;
-  /**
-   * Achieved composite scale on X (≤ band; < 1 only when hard-cap clamped).
-   * ALWAYS equal to `scaleY` — the hard cap clamps via the longer edge so the
-   * composite keeps the document aspect ratio.
-   */
+  /** Achieved composite scale on X (texels per document pixel). */
   readonly scaleX: number;
-  /** Achieved composite scale on Y (=== `scaleX`, see above). */
+  /** Achieved composite scale on Y (=== `scaleX`). */
   readonly scaleY: number;
 }
 
 /**
- * Resolve the interactive composite density for the current camera frame.
+ * Fold the "adaptive rendering" preference and the display's device pixel
+ * ratio into the fixed composite density.
  *
- * `screenScale ≤ 1` (fit / zoomed out / 100% on dpr 1) resolves to band 1 with
- * identity scale — byte-identical to the unbanded document-resolution composite.
+ * - `adaptive` false → 1: strict 1 document pixel : 1 CSS pixel composite.
+ * - `adaptive` true → `ceil(dpr)` (≥ 1): retina displays get texels to spare
+ *   at 100%; the CEIL (not round) matters on fractional-dpr displays
+ *   (Windows 1.25 / 1.5): the composite must never be coarser than the
+ *   screen, otherwise 100% presents a MAGNIFIED nearest-neighbour sampling
+ *   whose texel widths alternate n/n+1 device pixels — the exact phase
+ *   defect the integer density exists to prevent.
+ *
+ * The result is consumed per frame but changes only when the display or the
+ * preference changes; both flow into the composite target dims, so either
+ * change costs exactly one re-composite through the engine's dimsChanged
+ * rebuild path.
  */
-export function resolveInteractiveDensity(
-  screenScale: number,
-  docWidth: number,
-  docHeight: number,
-  maxTextureDimension2D: number,
-): InteractiveDensity {
-  const band = quantizeDensityBand(screenScale);
-  // The ceiling is OWNED BY THE CALLER since the dual-channel policy: pass
-  // `min(deviceMaxDim, budgetDerivedCeilPx(...))` — physics + byte budget
-  // prefolded. This function only applies the band-vs-ceiling clamp.
-  const ceil = Math.max(1, maxTextureDimension2D);
-  const w = Math.max(1, docWidth);
-  const h = Math.max(1, docHeight);
-  // Aspect-preserving clamp: BOTH axes share one factor driven by the longer
-  // edge. Per-edge clamping here produced non-uniform densities that the
-  // present channel flattened into a single `densityScale` scalar (visible as
-  // a ~1.33x horizontal stretch on a 3:4 canvas once band > ceil/shortEdge).
-  const scale = Math.min(band, ceil / Math.max(w, h));
-  return { band, scaleX: scale, scaleY: scale };
+export function resolveCompositeDensity(dpr: number, adaptive: boolean): number {
+  if (!adaptive) return 1;
+  return Math.max(1, Math.ceil(Math.max(0, dpr) || 1));
+}
+
+/** Wrap a scalar density as the per-axis scale (X === Y, see above). */
+export function uniformDensity(scale: number): InteractiveDensity {
+  const s = Math.max(1, scale);
+  return { scaleX: s, scaleY: s };
 }
 
 /**
  * Composite-target content dimensions at an interactive density: the document
  * extent scaled per axis, ≥ 1 and integer. `scale = [1, 1]` reproduces the
- * document-resolution composite exactly. Both the engine's resident target
- * and `RenderGraph.composite` size through THIS function so their dims can
- * never disagree (the engine-owned `ctx.target` must match the graph's
- * `frameWidth/Height` exactly).
+ * document-resolution composite exactly.
  */
 export function densityCompositeDims(
   docWidth: number,

@@ -453,7 +453,14 @@ export function TabDockComponent() {
     if (!dockEl) return;
     const rtlFactor = isRight ? -1 : 1;
     const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey) return; // pinch-zoom gesture: leave to the browser
+      // Pinch gesture (ctrl+wheel): swallow it. Letting it through sends the
+      // browser down the visual-viewport magnification path, which scales the
+      // whole page without changing the browser zoom level and can only be
+      // undone with Cmd+0 — not what anyone expects over the dock.
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        return;
+      }
       const delta = e.deltaX + e.deltaY;
       if (!delta) return;
       const strip = stripRef.current;

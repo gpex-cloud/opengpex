@@ -100,9 +100,9 @@ export const ENGINE_WORKING_SET_BUDGET_MULTIPLIER = 2;
  * uses: integrated / low-VRAM adapters → 128 MiB, discrete → 512 MiB. This is
  * the `budgetBytes` fed to the full/roi channel decision
  * (`resolveCompositePlan` with `residentTargets: RESIDENT_COMPOSITE_TARGETS`);
- * the density-clamp and roi-density budgets stay on the fixed
- * `COMPOSITE_BUDGET_DEFAULT_BYTES` constant so the channel flip and the
- * sharpness clamp never move together.
+ * the roi-density budget stays on the fixed `COMPOSITE_BUDGET_DEFAULT_BYTES`
+ * constant so the channel flip and the roi sharpness clamp never move
+ * together.
  */
 export function deriveEngineWorkingSetBudget(poolBudgetBytes: number): number {
   return Math.max(1, poolBudgetBytes) * ENGINE_WORKING_SET_BUDGET_MULTIPLIER;

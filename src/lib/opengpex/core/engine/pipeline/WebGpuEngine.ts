@@ -65,13 +65,12 @@ import {
 import { effectiveScale } from '@opengpex/editor/core/engine/pipeline/graph/support/layerGeometry';
 import { GainPresenter } from '@opengpex/editor/core/engine/pipeline/graph/support/gainPresenter';
 import {
-  resolveInteractiveDensity,
   densityCompositeDims,
-  INTERACTIVE_COMPOSITE_CEIL_PX,
+  uniformDensity,
 } from '@opengpex/editor/core/engine/pipeline/graph/support/densityComposite';
 import {
   resolveCompositePlan,
-  budgetDerivedCeilPx,
+  FALLBACK_MAX_TEXTURE_DIMENSION,
   COMPOSITE_BUDGET_DEFAULT_BYTES,
   workingFormatBpp,
 } from '@opengpex/editor/core/engine/pipeline/graph/support/compositeBudget';
@@ -154,7 +153,7 @@ export class WebGpuEngine implements IEngine {
       texture: null as LayerTexture | null,
       /** Content signature the cached roi was rendered at. */
       signature: null as string | null,
-      /** Quantized visible-rect rebuild key (`getVisibleRect` key + band) of the cache. */
+      /** Integer visible-rect rebuild key (`getVisibleRect` key) of the cache. */
       rectKey: null as string | null,
       /** Document-space rect (frame-local px) the cached roi texture covers. */
       rect: { x: 0, y: 0, w: 0, h: 0 },
@@ -171,8 +170,6 @@ export class WebGpuEngine implements IEngine {
        */
       docW: 0,
       docH: 0,
-      /** Density band the cached roi was rendered at (containment-hysteresis stamp). */
-      band: null as number | null,
     },
   };
 
@@ -230,15 +227,6 @@ export class WebGpuEngine implements IEngine {
   private compositeTargetW = 0;
   private compositeTargetH = 0;
   private compositeFormat: GPUTextureFormat | null = null;
-  /**
-   * The ACHIEVED interactive density scale (`min(scaleX, scaleY)` of
-   * {@link InteractiveDensity}) the cached composite was rendered at — the
-   * per-frame dirty signal for density-band crossings: a band change scales
-   * the composite dims → `dimsChanged` below → exactly one re-composite per
-   * crossing, while pan/zoom inside a band leaves the dims (and everything
-   * else) untouched → zero re-composites. Also feeds the present sampler.
-   */
-  private compositeDensityScale = 1;
 
   /**
    * BELOW-CACHE fast path (live vector editing on many-layer documents): the
@@ -321,6 +309,7 @@ export class WebGpuEngine implements IEngine {
    */
   private planMemo: {
     docW: number; docH: number; bpp: number; deviceMaxDim: number; budgetBytes: number;
+    density: number;
   } | null = null;
   private planMemoMode: 'full' | 'roi' = 'full';
 
@@ -594,22 +583,22 @@ export class WebGpuEngine implements IEngine {
     // compositing entirely and replay just the cheap view pass.
     const { frameWidth: docW, frameHeight: docH } = compositeDims(scene);
 
-    // Density-banded interactive composite: quantize the camera's screen
-    // scale (cam.k × dpr, pixel-snapped) onto the glyph-atlas density bands.
-    // Recomputing each frame is a few compares; only the QUANTIZED value
-    // matters downstream — inside a band pan/zoom leaves the composite dims
-    // unchanged (cache hit), crossing a band changes them → exactly one
-    // re-composite per crossing.
+    // Fixed-density interactive composite: the whole document is baked ONCE
+    // at the zoom-free constant `scene.view.density` (adaptive rendering ⇒
+    // ceil(dpr), else 1) and every camera frame replays it — zooming in
+    // reveals the document's own pixels, it never re-rasterizes sharper.
     //
-    // Dual channel: the byte budget (128 MiB policy constant,
-    // compositeBudget.ts) + the negotiated device limit decide — zoom-
-    // INDEPENDENTLY — whether the document holds a full-document 1:1 composite
-    // ('full': existing architecture) or must composite only its visible
-    // region ('roi'). The area-based budget is deliberately stricter than the
-    // old per-edge 4096 clamp on non-square documents.
+    // Dual channel: the byte budget priced AT that density (128 MiB policy
+    // constant, compositeBudget.ts) + the negotiated device limit decide —
+    // zoom-INDEPENDENTLY — whether the document holds a full-document
+    // composite ('full': existing architecture) or must composite only its
+    // visible region ('roi').
     const workingBpp = workingFormatBpp(workingFormat as 'rgba16float' | 'rgba32float');
     const deviceMaxDim =
-      device.limits?.maxTextureDimension2D ?? caps.limits.maxTextureDimension2D ?? INTERACTIVE_COMPOSITE_CEIL_PX;
+      device.limits?.maxTextureDimension2D ?? caps.limits.maxTextureDimension2D ?? FALLBACK_MAX_TEXTURE_DIMENSION;
+    // The zoom-free composite density stamped by SceneAssembler.composeView
+    // (tests / hand-built scenes without it render at document resolution).
+    const compositeDensity = Math.max(1, scene.view.density ?? 1);
     // Channel budget: device-derived engine working-set budget (pool tier ×2 —
     // integrated 128 MiB / discrete 512 MiB), pricing BOTH document-sized
     // residents (composite target + below cache) via residentTargets. The
@@ -685,13 +674,14 @@ export class WebGpuEngine implements IEngine {
       !memo ||
       memo.docW !== docW || memo.docH !== docH ||
       memo.bpp !== workingBpp || memo.deviceMaxDim !== deviceMaxDim ||
-      memo.budgetBytes !== budgetBytes
+      memo.budgetBytes !== budgetBytes || memo.density !== compositeDensity
     ) {
       this.planMemo = {
-        docW, docH, bpp: workingBpp, deviceMaxDim, budgetBytes,
+        docW, docH, bpp: workingBpp, deviceMaxDim, budgetBytes, density: compositeDensity,
       };
       this.planMemoMode = resolveCompositePlan({
         docW, docH, bpp: workingBpp, deviceMaxDim, budgetBytes,
+        compositeDensity,
         residentTargets: RESIDENT_COMPOSITE_TARGETS,
       }).mode;
     }
@@ -707,24 +697,18 @@ export class WebGpuEngine implements IEngine {
 
     if (planMode === 'full') {
       // ── FULL channel (existing architecture) ──
-      // Mode='full' guarantees density ≥ 1: the budget term ≥ 1 by the channel
-      // decision and the device term ≥ 1 by the physics veto — the mosaic
-      // failure mode is structurally impossible here.
-      const density = resolveInteractiveDensity(
-        screenScale,
-        docW,
-        docH,
-        // Budget-derived edge ceiling prefolded with the negotiated device limit:
-        // adds the area-budget clamp term to min(band, ceil/maxDocDim) without
-        // changing resolveInteractiveDensity's contract.
-        Math.min(deviceMaxDim, budgetDerivedCeilPx(docW, docH, workingBpp, densityBudgetBytes)),
-      );
+      // Mode='full' is priced AT the constant density (dims × density against
+      // the device limit and the byte budget), so it renders at EXACTLY that
+      // density — no fractional clamp exists; a document that cannot afford
+      // it belongs to the roi channel.
+      const density = uniformDensity(compositeDensity);
       const [compW, compH] = densityCompositeDims(docW, docH, [density.scaleX, density.scaleY]);
       const densityScale = Math.min(density.scaleX, density.scaleY);
 
       // Composite texture lifecycle: rebuild when the cached one is missing,
-      // its dims changed (document resize OR a density-band crossing — the
-      // band-scaled dims move), or the working format changed.
+      // its dims changed (document resize, a dpr change, or an
+      // adaptive-rendering preference flip — all three move the density-scaled
+      // dims), or the working format changed.
       const dimsChanged =
         this.compositeTargetW !== compW ||
         this.compositeTargetH !== compH ||
@@ -796,8 +780,7 @@ export class WebGpuEngine implements IEngine {
             device,
             workingFormat,
             target: this.compositeTexture!,
-            // Render the composite at the current density band's achieved
-            // scale.
+            // Render the composite at the fixed interactive density.
             interactiveScale: [density.scaleX, density.scaleY],
             perfStart: _pCompEncT0,
           });
@@ -806,7 +789,6 @@ export class WebGpuEngine implements IEngine {
         this.compositeTargetW = compW;
         this.compositeTargetH = compH;
         this.compositeFormat = workingFormat;
-        this.compositeDensityScale = densityScale;
       }
 
       if (presentRoiDuringFullRebuild) {
@@ -823,13 +805,13 @@ export class WebGpuEngine implements IEngine {
       }
     } else {
       // ── ROI channel ──
-      // Only the visible region composites, at band-clamped density ≥ 1 (the
-      // correctness root: every magnified texel is a real document pixel, so the
-      // pixel grid aligns at ANY zoom). Rebuild triggers: the needed extent
-      // escaping the resident rect at the same band (containment hysteresis —
-      // see roiFrame.ts), a band crossing, a content edit, or target
-      // dims/format change. Within the resident rect, pan/zoom still replays
-      // only the cheap present.
+      // Only the visible region composites, at the fixed density (integer
+      // outcomes — the density or 1 under the byte budget, see
+      // resolveRoiDensity): every magnified texel is a real document pixel, so
+      // the pixel grid aligns at ANY zoom. Rebuild triggers: the needed extent
+      // escaping the resident rect (containment hysteresis — see roiFrame.ts),
+      // a content edit, or target dims/format change. Within the resident
+      // rect, pan/zoom still replays only the cheap present.
       //
       // The full channel's resident target would go stale under roi-mode
       // edits and double-book the budget — drop it when roi takes over. The way
@@ -846,7 +828,6 @@ export class WebGpuEngine implements IEngine {
         this.compositeFormat = null;
         this.compositeTargetW = 0;
         this.compositeTargetH = 0;
-        this.compositeDensityScale = 1;
       }
       // The whole roi decision — rect, density, dims, rebuild key, rebuild
       // need — is one pure function of this frame's inputs plus the resident
@@ -857,6 +838,7 @@ export class WebGpuEngine implements IEngine {
         docW,
         docH,
         screenScale,
+        compositeDensity,
         workingFormat: workingFormat as 'rgba16float' | 'rgba32float',
         deviceMaxDim,
         budgetBytes: densityBudgetBytes,
@@ -872,7 +854,6 @@ export class WebGpuEngine implements IEngine {
           rectY: this.#channel.roi.rect.y,
           rectW: this.#channel.roi.rect.w,
           rectH: this.#channel.roi.rect.h,
-          band: this.#channel.roi.band,
         },
       });
 
@@ -944,7 +925,6 @@ export class WebGpuEngine implements IEngine {
           this.#channel.roi.densityScale = Math.min(roiDensity.scaleX, roiDensity.scaleY);
           this.#channel.roi.docW = docW;
           this.#channel.roi.docH = docH;
-          this.#channel.roi.band = roiDensity.band;
         }
       }
 
@@ -1185,7 +1165,6 @@ export class WebGpuEngine implements IEngine {
     this.#channel.roi.densityScale = 1;
     this.#channel.roi.docW = 0;
     this.#channel.roi.docH = 0;
-    this.#channel.roi.band = null;
   }
 
   /**
@@ -1226,7 +1205,6 @@ export class WebGpuEngine implements IEngine {
     this.compositeFormat = null;
     this.compositeTargetW = 0;
     this.compositeTargetH = 0;
-    this.compositeDensityScale = 1;
     // The below-cache is device-owned like the composite target — tear it down
     // with the same lifecycle (device loss / teardown); the next live-edit
     // gesture rebuilds it from the ordinary full composite.
@@ -1388,13 +1366,14 @@ export class WebGpuEngine implements IEngine {
 
   /**
    * Allocate the engine-owned composite target at its EXACT density-scaled
-   * document extent (no POT snap → no waste; band dims come from
+   * document extent (no POT snap → no waste; dims come from
    * `densityCompositeDims`, shared with RenderGraph so the graph's frame dims
    * always match) and OUTSIDE the TexturePool (a single-size,
    * single-instance resident texture gains nothing from bucketing).
    * Usage mirrors the pool's default set so any sampler/readback path that used
    * to see a pooled target behaves identically. Lifetime: reused in place until
-   * a dims/format change (incl. a density-band crossing) or teardown destroys it.
+   * a dims/format change (a resize, a dpr change, or an adaptive-rendering
+   * preference flip) or teardown destroys it.
    */
 
   #createCompositeTarget(

@@ -88,11 +88,11 @@ export interface CompositeContext {
    */
   readonly target?: LayerTexture;
   /**
-   * Interactive density-banded composite scale — the ACHIEVED
-   * per-axis scale from `resolveInteractiveDensity` (quantized band, clamped
-   * by the VRAM hard cap). Present on the render path only; the composite
-   * target, ping-pong buffers and vector/vmask transients then render at this
-   * density, so magnified text / vector content stays sharp. Absent on
+   * Fixed interactive composite density — the per-axis scale the composite
+   * renders at (`Scene.view.density`: a zoom-free constant, `uniformDensity`).
+   * Present on the render path only; the composite target, ping-pong buffers
+   * and vector/vmask transients then render at this density, so magnified
+   * text / vector content reveals the document's own pixels. Absent on
    * export/tests: `exportViewport` drives the scale there (`vectorExportScale`).
    */
   readonly interactiveScale?: readonly [number, number];
@@ -169,9 +169,9 @@ export interface PresentContext {
    * The interactive composite's ACHIEVED density scale — the
    * `min(scaleX, scaleY)` the composite was rendered at. One composited texel
    * is then `1/scale` document px, so the magnify/minify sampler sees
-   * `effectiveScale / scale` — inside the band the composite is always
-   * minified-or-1:1 (linear keeps text/vector edges smooth); beyond the cap
-   * (hard-clamped big canvases) nearest returns, the pre-banding behaviour.
+   * `effectiveScale / scale`: at 100% with the adaptive density the composite
+   * is exactly 1:1 against device pixels; zooming past 100% switches to
+   * nearest (crisp document pixels), zooming below to linear minification.
    */
   readonly densityScale?: number;
   /**
@@ -285,9 +285,10 @@ export class RenderGraph {
     const ev = ctx.exportViewport;
     const baseDims = compositeDims(scene);
     const density = ctx.interactiveScale;
-    // Interactive density band: scale the composite extent (and round via the
-    // SHARED `densityCompositeDims` so the engine-owned `ctx.target` matches);
-    // export keeps its own viewport-driven extent; plain tests stay 1:1.
+    // Interactive composite: scale the extent by the fixed density (and round
+    // via the SHARED `densityCompositeDims` so the engine-owned `ctx.target`
+    // matches); export keeps its own viewport-driven extent; plain tests stay
+    // 1:1.
     const [scaledW, scaledH] = density
       ? densityCompositeDims(baseDims.frameWidth, baseDims.frameHeight, density)
       : [baseDims.frameWidth, baseDims.frameHeight];
@@ -313,15 +314,16 @@ export class RenderGraph {
     // and merge into the SAME map, so the four composite guards below treat them as
     // ordinary straight-alpha raster sources. Also recorded before any composite
     // render pass opens (its per-source render passes cannot nest inside one).
-    // Supersample the transient to the target density so 2×/4× exports AND the
-    // density-banded interactive composite stay razor-sharp. Export derives it
-    // from the viewport; the interactive path receives the achieved band scale
-    // directly (`vectorExportScale` is [1,1] only when no density is given).
+    // Supersample the transient to the target density so 2×/4× exports AND
+    // the fixed-density interactive composite render at full target
+    // resolution. Export derives it from the viewport; the interactive path
+    // receives the fixed density directly (`vectorExportScale` is [1,1] only
+    // when no density is given).
     const vectorScale = ev
       ? vectorExportScale(ev, baseDims.frameWidth, baseDims.frameHeight)
       : (density ?? [1, 1]);
 
-    // Interactive density band expressed as a VIEWPORT: same world space (the
+    // The density-scaled interactive target expressed as a VIEWPORT: same world space (the
     // DOCUMENT rect — the NDC basis in packLayerUniforms must stay document
     // dims, world does not grow with the target) mapped onto the larger pixel
     // extent. Reuses the exact src→target machinery the export path exercises,

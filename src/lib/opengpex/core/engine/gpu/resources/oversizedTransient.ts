@@ -70,7 +70,7 @@ export function isOversizedTransient(width: number, height: number): boolean {
  * True when a layer's transient spans the WHOLE document canvas at LOGICAL
  * size (layer box ≥ frame box on both axes, scale-independent — the caller's
  * `reqW/reqH` may additionally be enlarged by export superscale or the
- * interactive density band, which must NOT influence this judgement).
+ * interactive composite density, which must NOT influence this judgement).
  *
  * WHY: a canvas-spanning transient POT-snaps to the very top of the pool
  * ladder — on a 3000×4000 canvas exactly 4096² — which is the pool's LARGEST

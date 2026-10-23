@@ -28,29 +28,33 @@
  *
  * ── MODEL ──
  *   • containment hysteresis: the raw needed extent (exact viewport, no
- *     margin/lattice, doc-clipped) is compared against the resident rect at
- *     the same density band — while contained, the resident rect is reused
- *     verbatim. The 128px camera lattice + half-diagonal margin only
- *     hystereses pans (margin and block are continuous in the camera scale);
- *     containment is what makes zoom rebuild-free inside a band.
- *   • derive (first frame, band crossing, or escape): the block-quantized
- *     visible rect (`getVisibleRect`) snapped OUTWARD to integer document
- *     pixels (`snapRectEdgesToPixel` — the texel-phase guarantee) then
- *     clipped to the document. Null when the viewport is fully off-document:
- *     NO rebuild, the stale roi keeps presenting (its quad mapping off-screen
+ *     margin/lattice, doc-clipped) is compared against the resident rect —
+ *     while contained, the resident rect is reused verbatim. The 128px
+ *     camera lattice + half-diagonal margin only hystereses pans (margin and
+ *     block are continuous in the camera scale); containment is what makes
+ *     zoom-IN rebuild-free: magnifying shrinks the needed extent, always
+ *     inside the resident rect. The composite density is a zoom-free
+ *     constant, so no zoom level ever forces a rebuild on its own — only
+ *     escaping the resident rect (zoom-out / pan) does.
+ *   • derive (first frame or escape): the block-quantized visible rect
+ *     (`getVisibleRect`) snapped OUTWARD to integer document pixels
+ *     (`snapRectEdgesToPixel` — the texel-phase guarantee) then clipped to
+ *     the document. Null when the viewport is fully off-document: NO
+ *     rebuild, the stale roi keeps presenting (its quad mapping off-screen
  *     is what clears the swapchain via the present pass loadOp:'clear').
- *   • density: `resolveRoiDensity` — band-quantized camera scale clamped by
- *     the byte budget (floored at 1) and the device edge limit (NOT floored:
- *     a texture wider than maxTextureDimension2D cannot exist; only deep
- *     zoom-outs hit this, where minified LINEAR sampling hides it).
- *   • rebuildKey: `${x},${y},${x+w},${y+h}|b${band}` of the INTEGER rect —
- *     the exact identity of the rendered texture. The block lattice supplies
- *     the pan hysteresis (small pans keep the rect → same key → present
- *     replay); crossing a block edge or a density band changes the key →
- *     exactly one re-composite.
+ *   • density: `resolveRoiDensity` — the fixed composite density clamped by
+ *     the byte budget (integer outcomes: the constant or 1) and the device
+ *     edge limit (NOT floored: a texture wider than maxTextureDimension2D
+ *     cannot exist; only deep zoom-outs hit this, where minified LINEAR
+ *     sampling hides it).
+ *   • rebuildKey: `${x},${y},${x+w},${y+h}` of the INTEGER rect — the exact
+ *     identity of the rendered texture. The block lattice supplies the pan
+ *     hysteresis (small pans keep the rect → same key → present replay);
+ *     crossing a block edge changes the key → exactly one re-composite.
  *   • needsComposite: true when nothing is resident, or the resident roi's
- *     dims/format (a resize or band crossing), rebuild key (a pan), or
- *     content signature (an edit) no longer matches this frame's decision.
+ *     dims/format (a resize, a density-preference flip, a dpr change),
+ *     rebuild key (a pan), or content signature (an edit) no longer matches
+ *     this frame's decision.
  *
  * @module core/engine/pipeline/graph/support/roiFrame
  */
@@ -62,7 +66,6 @@ import { getVisibleRect } from '@opengpex/editor/core/geometry/operators/camera'
 import { getRectIntersection } from '@opengpex/editor/core/geometry/operators/space';
 import { snapRectEdgesToPixel } from '@opengpex/editor/core/geometry/operators/snapping';
 import { resolveRoiDensity, workingFormatBpp } from './compositeBudget';
-import { quantizeDensityBand } from '@opengpex/editor/core/engine/text/glyphAtlas';
 import {
   densityCompositeDims,
   type InteractiveDensity,
@@ -86,8 +89,6 @@ export interface RoiFrameState {
   readonly rectY: number;
   readonly rectW: number;
   readonly rectH: number;
-  /** Density band the resident roi was rendered at (null when not resident). */
-  readonly band: number | null;
 }
 
 /** What the roi channel must render/present this frame. */
@@ -121,8 +122,10 @@ export function resolveRoiFrame(input: {
   /** Document dims (composite frame). */
   readonly docW: number;
   readonly docH: number;
-  /** Camera's physical screen scale (`effectiveScale(view.transform)`). */
+  /** Camera's physical screen scale (`effectiveScale(view.transform)`) — the camera term for the visible rect only. */
   readonly screenScale: number;
+  /** The fixed interactive composite density (`Scene.view.density`, ≥ 1). */
+  readonly compositeDensity: number;
   /** Working composite format — selects the bpp term of the budget clamp. */
   readonly workingFormat: 'rgba16float' | 'rgba32float';
   /** Negotiated `GPUDevice.limits.maxTextureDimension2D` — never hard-coded. */
@@ -150,20 +153,19 @@ export function resolveRoiFrame(input: {
   const needed = raw ? getRectIntersection(raw.rect, docRect) : null;
   if (!needed) return offDocument;
 
-  const band = quantizeDensityBand(input.screenScale);
   const cur = input.current;
   // Containment hysteresis: while the resident rect still covers the whole
-  // needed extent at the SAME density band, keep it verbatim. The block
-  // lattice's margin/block terms are continuous functions of the camera
-  // scale, so a zoom tick re-derives a different rect every frame — the
-  // lattice hystereses pans only. Containment covers zoom: magnifying
-  // shrinks the needed extent (always inside), so a pinch-in gesture inside
-  // one band performs ZERO rebuilds; zoom-out/pan escapes re-derive through
-  // the margin-padded path below, whose half-diagonal slack amortizes the
-  // next escape. Present maps the resident rect's quad, which by containment
-  // covers the viewport — reuse is pixel-exact.
+  // needed extent, keep it verbatim. The block lattice's margin/block terms
+  // are continuous functions of the camera scale, so a zoom tick re-derives
+  // a different rect every frame — the lattice hystereses pans only.
+  // Containment covers zoom: magnifying shrinks the needed extent (always
+  // inside), so a pinch-in gesture performs ZERO rebuilds at any zoom level;
+  // zoom-out/pan escapes re-derive through the margin-padded path below,
+  // whose half-diagonal slack amortizes the next escape. Present maps the
+  // resident rect's quad, which by containment covers the viewport — reuse is
+  // pixel-exact.
   const contained =
-    cur.resident && cur.band === band && cur.rectW > 0 && cur.rectH > 0 &&
+    cur.resident && cur.rectW > 0 && cur.rectH > 0 &&
     cur.rectX <= needed.x && cur.rectY <= needed.y &&
     cur.rectX + cur.rectW >= needed.x + needed.w &&
     cur.rectY + cur.rectH >= needed.y + needed.h;
@@ -177,8 +179,8 @@ export function resolveRoiFrame(input: {
     // Snap OUTWARD to integer document pixels FIRST: the block lattice's
     // fractional edges would otherwise offset the texel lattice against the
     // document pixel grid — rest misalignment + a phase jump on every rebuild.
-    // Integer origin × integer band = zero phase, so rebuilds change only
-    // sharpness, never block positions.
+    // Integer origin × integer density = zero phase, so rebuilds never move
+    // block positions.
     const snapped = snapRectEdgesToPixel(visible.rect);
     const clipped = getRectIntersection(snapped, docRect);
     if (!clipped) return offDocument;
@@ -186,7 +188,7 @@ export function resolveRoiFrame(input: {
   }
 
   const density = resolveRoiDensity({
-    screenScale: input.screenScale,
+    compositeDensity: input.compositeDensity,
     roiW: rect.w,
     roiH: rect.h,
     bpp: workingFormatBpp(input.workingFormat),
@@ -194,10 +196,11 @@ export function resolveRoiFrame(input: {
     budgetBytes: input.budgetBytes,
   });
   const [targetW, targetH] = densityCompositeDims(rect.w, rect.h, [density.scaleX, density.scaleY]);
-  // Rebuild key = the INTEGER roi extent + band (containment keeps the key
+  // Rebuild key = the INTEGER roi extent (containment keeps the key
   // literally identical across reuse; the pixel snap makes it the exact
-  // identity of the rendered texture).
-  const rebuildKey = `${rect.x},${rect.y},${rect.x + rect.w},${rect.y + rect.h}|b${density.band}`;
+  // identity of the rendered texture). Density changes (preference / dpr)
+  // surface through dimsChanged, not the key.
+  const rebuildKey = `${rect.x},${rect.y},${rect.x + rect.w},${rect.y + rect.h}`;
   const dimsChanged =
     input.current.targetW !== targetW ||
     input.current.targetH !== targetH ||
