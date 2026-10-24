@@ -226,11 +226,12 @@ export interface ClipToolStrategy {
 
   /**
    * Whether this tool is enabled (visible in UI and reachable via Tab cycling).
-   * Set to `false` to hide from the toolbar and keyboard cycle without removing
+   * Set to `false` to hide from the keyboard cycle without removing
    * from the type system (preserves compatibility with legacy frame data).
    * Defaults to `true` when omitted.
    */
   readonly enabled?: boolean;
+
 }
 
 // ─── Strategy Table ─────────────────────────────────────────────────────────────

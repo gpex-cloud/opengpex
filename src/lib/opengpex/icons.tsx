@@ -298,3 +298,16 @@ export function PipetteLayerIcon({ size = 13, className }: { size?: number; clas
 
 
 
+
+/**
+ * CLIP_PEN_CURSOR: Crosshair + nib badge (pen-tool selection slot; also the
+ * pen tool's "hover the first anchor = close path" hint when paired with the
+ * circle the overlay draws).
+ * Hotspot: (8, 8)
+ */
+export const CLIP_PEN_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M14 21l2.5-7.5L21 9l1.5 1.5-4.5 4.5L14 21z' stroke='white' stroke-width='2.5' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M14 21l2.5-7.5L21 9l1.5 1.5-4.5 4.5L14 21z' stroke='black' stroke-width='1' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
+/**
+ * MARKER_CURSOR: Crosshair + hollow five-pointed star badge (marker tool).
+ * Hotspot: (8, 8)
+ */
+export const MARKER_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M19 10.5L20.6 14.3L24.7 14.7L21.6 17.3L22.5 21.4L19 19.2L15.5 21.4L16.4 17.3L13.3 14.7L17.4 14.3Z' stroke='white' stroke-width='2.5' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M19 10.5L20.6 14.3L24.7 14.7L21.6 17.3L22.5 21.4L19 19.2L15.5 21.4L16.4 17.3L13.3 14.7L17.4 14.3Z' stroke='black' stroke-width='1' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;

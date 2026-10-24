@@ -158,17 +158,28 @@ export function translatePolygon(poly: LocalPolygon, dx: number, dy: number): Lo
  * @param rings  Array of closed rings (each ring is an array of Point2D vertices).
  * @returns `true` if the point is inside the polygon (evenodd sense).
  */
-export function isPointInPolygon(point: Point2D, rings: Point2D[][]): boolean {
+export function isPointInPolygon(point: Point2D, rings: readonly (readonly Point2D[])[]): boolean {
   let inside = false;
   for (const ring of rings) {
-    const n = ring.length;
-    for (let i = 0, j = n - 1; i < n; j = i++) {
-      const xi = ring[i].x, yi = ring[i].y;
-      const xj = ring[j].x, yj = ring[j].y;
-      const intersect = ((yi > point.y) !== (yj > point.y))
-        && (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
-      if (intersect) inside = !inside;
-    }
+    if (isPointInRing(point, ring)) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * isPointInRing: Even-odd containment against a SINGLE ring. The primitive
+ * behind {@link isPointInPolygon} — exported so core-internal consumers
+ * (poly-clip, tessellate) share one implementation instead of private copies.
+ */
+export function isPointInRing(point: Point2D, ring: readonly Point2D[]): boolean {
+  let inside = false;
+  const n = ring.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = ring[i].x, yi = ring[i].y;
+    const xj = ring[j].x, yj = ring[j].y;
+    const intersect = ((yi > point.y) !== (yj > point.y))
+      && (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
   }
   return inside;
 }
@@ -182,7 +193,7 @@ export function isPointInPolygon(point: Point2D, rings: Point2D[][]): boolean {
  * @param ring  Array of vertices forming a closed polygon ring.
  * @returns Absolute area in square units of the coordinate system.
  */
-export function computeRingArea(ring: Point2D[]): number {
+export function computeRingArea(ring: readonly Point2D[]): number {
   let area = 0;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     area += (ring[j].x + ring[i].x) * (ring[j].y - ring[i].y);

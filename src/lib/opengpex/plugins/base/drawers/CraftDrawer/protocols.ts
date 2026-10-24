@@ -54,6 +54,7 @@ export const CMD_BRUSH_SIZE_DOWN = 'cmd.brush_size_down';
 export const CMD_BRUSH_OPACITY_UP = 'cmd.brush_opacity_up';
 export const CMD_BRUSH_OPACITY_DOWN = 'cmd.brush_opacity_down';
 export const CMD_SET_CRAFT_MOSAIC = 'cmd.set_craft_mosaic';
+export const CMD_SET_CRAFT_PEN = 'cmd.set_craft_pen';
 
 export const CMD_BRUSH_HARDNESS_UP = 'cmd.brush_hardness_up';
 export const CMD_BRUSH_HARDNESS_DOWN = 'cmd.brush_hardness_down';
@@ -82,6 +83,8 @@ export const CraftDrawerAPI = {
     activateMarker: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CRAFT_MARKER}` } as { uid: string; _payload: void },
     /** Set the active marker sub-type (unknown kinds are ignored) */
     setMarkerKind: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_MARKER_KIND}` } as { uid: string; _payload: { kind: MarkerKind } },
+    /** Activate the pen tool (same toggle semantics as activateText: guard against already-active) */
+    activatePen: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CRAFT_PEN}` } as { uid: string; _payload: void },
   },
   /** pluginConfig storage key */
   configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
@@ -91,7 +94,7 @@ export const CraftDrawerAPI = {
 
 import type { MarkerDataBase, MarkerKind } from '../../overlays/MarkerOverlay/marker/types';
 
-export type CraftType = 'text' | 'brush' | 'eraser' | 'restore' | 'mosaic' | 'marker';
+export type CraftType = 'text' | 'brush' | 'eraser' | 'restore' | 'mosaic' | 'marker' | 'pen';
 export type ActiveCraft = CraftType | null;
 
 /** Pending text style preset (persisted across tool activations) */
@@ -141,6 +144,23 @@ export interface CraftDrawerConfig {
   mosaicSizePreset: 'S' | 'M' | 'L' | 'XL';
   /** Active marker sub-type (persisted across tool switches; default resolves to first registered kind) */
   activeMarkerKind?: MarkerKind;
+  /**
+   * Feather radius preset (px, 0-100) for the pen tool's "Apply as Mask"
+   * commit. Persisted across tool activations like the brush parameters.
+   */
+  penFeather?: number;
+  /**
+   * Anchor budget for "Apply as Bezier" (selection → pen draft). One of the
+   * four fixed detents 100/200/300/400 — the fit tolerance adapts until the
+   * converted draft stays within the budget, so dense AI contours (thousands
+   * of vertices) never explode into an uneditable, frame-dropping anchor
+   * count. Persisted like the other pen presets.
+   */
+  penAnchorBudget?: number;
+  /** Last-used pen shape-layer style (persisted across sessions like the marker pending style). */
+  penFillHex?: string;
+  penStrokeHex?: string;
+  penStrokeWidth?: number;
   /**
    * Legacy single pending marker style. Kept only as the fallback for kinds that
    * have no entry in `pendingMarkerByKind` yet; never written any more.

@@ -67,7 +67,7 @@ import { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTe
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
 import { hasEffectiveFilters } from '../composite/FilterPass';
 import type { VectorRenderContext } from './vectorRenderers/VectorRenderer';
-import { resolveVectorRenderer } from './vectorRenderers/resolveVectorRenderer';
+import { resolveVectorRenderer } from './vectorRenderers';
 import { vectorTransientSize } from '../support/vectorTransient';
 import { runFilterChain } from './runFilterChain';
 import type { BuildContext, PreparedSource } from './types';

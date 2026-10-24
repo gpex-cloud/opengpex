@@ -19,6 +19,7 @@ export interface CraftDrawerCommandsMap {
   setCraftEraserCmd: CommandInstance;
   setCraftMosaicCmd: CommandInstance;
   setCraftMarkerCmd: CommandInstance;
+  setCraftPenCmd: CommandInstance;
   cycleMarkerForwardCmd: CommandInstance;
   cycleMarkerBackwardCmd: CommandInstance;
   setMarkerKindCmd: CommandInstance<{ kind: MarkerKind }>;

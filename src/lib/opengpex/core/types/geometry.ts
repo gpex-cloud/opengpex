@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Layer, Frame, CameraState, NormalizedState } from './models';
+import { Layer, Frame, CameraState, NormalizedState, CubicSegment, PenAnchor, PenPathData } from './models';
 export * from './primitives';
 import {
   Point2D, Dimensions, Rect, IMatrix3x3, IMatrix3x3Constructor,
@@ -426,5 +426,40 @@ export interface GeometryService {
     isBoundingRing: (ring: readonly Point2D[], boundingW: number, boundingH: number) => boolean;
     /** Computes axis-aligned bounding box of a multi-ring point set (no brand). */
     computePolygonBounds: (rings: Point2D[][]) => Rect;
+  };
+
+  /**
+   * Bézier engine service: pure L0 cubic curve operators for pen-path data —
+   * evaluation, arc length, splitting, adaptive flattening (the exit form for
+   * mask baking / selections / stroke rendering), nearest-point hit queries,
+   * polyline → anchor-chain fitting, and SVG `d` serialization. Parallel to
+   * `polygon` / `point2d`; all coordinates are layer-local document pixels
+   * (screen-pixel thresholds are converted by the caller).
+   */
+  bezier: {
+    /** Evaluates the cubic bézier B(t) via de Casteljau. */
+    evaluateCubic: (p0: Point2D, p1: Point2D, p2: Point2D, p3: Point2D, t: number) => Point2D;
+    /** First-derivative tangent vector (not normalized) of the cubic at t. */
+    tangentAt: (p0: Point2D, p1: Point2D, p2: Point2D, p3: Point2D, t: number) => Point2D;
+    /** Cumulative arc length at adaptive subdivision nodes (last entry = total). */
+    arcLengths: (p0: Point2D, p1: Point2D, p2: Point2D, p3: Point2D) => number[];
+    /** Splits the cubic at t into two sub-segments joining exactly at B(t). */
+    splitCubic: (p0: Point2D, p1: Point2D, p2: Point2D, p3: Point2D, t: number) => [CubicSegment, CubicSegment];
+    /** Flattens a cubic chain to a polyline; deviation bounded by toleranceDocPx. */
+    flattenCubicChain: (segments: readonly CubicSegment[], toleranceDocPx: number) => Point2D[];
+    /** Closest point on a segment chain, or null beyond tolerance. */
+    nearestPointOnPath: (path: readonly CubicSegment[], pt: Point2D, tolerance: number) => { t: number; dist: number; segmentIndex: number } | null;
+    /** Fits draggable anchors to a dense polyline (Schneider least squares + corner detection). */
+    fitCubicsToPolyline: (ring: readonly Point2D[], toleranceDocPx: number, closed: boolean) => PenAnchor[];
+    /** Converts an anchor-based pen path into the flat cubic segment chain. */
+    penPathToCubicSegments: (path: PenPathData) => CubicSegment[];
+    /** Serializes a pen path to an absolute-command SVG `d` string. */
+    penPathToSvgD: (path: PenPathData) => string;
+    /** Applies an arbitrary point map to every anchor, re-basing relative handle endpoints. */
+    mapPathAnchors: (path: PenPathData, map: (pt: Point2D) => Point2D) => PenPathData;
+    /** Closest anchor element (anchor or handle endpoint) within tolerance, or null. */
+    nearestPathAnchor: (path: PenPathData, pt: Point2D, tolerance: number) => { pathIdx: number; anchorIdx: number; kind: 'anchor' | 'handleIn' | 'handleOut' } | null;
+    /** Parses an SVG `d` string (M/L/H/V/C/S/Q/T/Z) into pen path data; arcs throw. */
+    svgDToPenPath: (d: string) => PenPathData;
   };
 }

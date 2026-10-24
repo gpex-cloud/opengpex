@@ -19,6 +19,7 @@
 
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import {
   useEditorState,
   useEditorServices,
@@ -52,6 +53,32 @@ export const GlobalUI = () => {
       }))
     : [];
 
+  // HUD auto-dismiss: fixed 2000ms for all types. While the pointer hovers
+  // the notification the countdown is frozen; once the pointer leaves, the
+  // notification is dismissed after 200ms. A new HUD message resets the cycle.
+  const HUD_DISMISS_MS = 2000;
+  const HUD_HOVER_LEAVE_MS = 200;
+  // 'idle' = countdown running; 'hovered' = frozen; 'left' = pointer just left.
+  // The active HUD message is tracked alongside the phase so that replacing
+  // the message naturally resets the cycle without an extra effect.
+  const [hudHover, setHudHover] = useState<{
+    hud: unknown;
+    phase: "idle" | "hovered" | "left";
+  }>({ hud: null, phase: "idle" });
+  const hudPhase = hudHover.hud === hud ? hudHover.phase : "idle";
+
+  const dismissHud = useCallback(() => {
+    actions.setInteraction({ hud: null });
+    setHudHover({ hud: null, phase: "idle" });
+  }, [actions]);
+
+  useEffect(() => {
+    if (!hud || hudPhase === "hovered") return;
+    const delay = hudPhase === "left" ? HUD_HOVER_LEAVE_MS : HUD_DISMISS_MS;
+    const timer = setTimeout(dismissHud, delay);
+    return () => clearTimeout(timer);
+  }, [hud, hudPhase, dismissHud]);
+
   return (
     <>
       {/* 1. HUD feedback system */}
@@ -59,9 +86,14 @@ export const GlobalUI = () => {
         className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
         style={{ zIndex: EDITOR_Z_INDEX.UI.POPOVER + 50 }}
       >
-        <EditorHUD
-          isVisible={!!hud}
-          type={hud?.type}
+        <div
+          className="pointer-events-auto"
+          onMouseEnter={() => setHudHover({ hud, phase: "hovered" })}
+          onMouseLeave={() => setHudHover({ hud, phase: "left" })}
+        >
+          <EditorHUD
+            isVisible={!!hud}
+            type={hud?.type}
           icon={
             hud?.type === "success" ? (
               <CheckCircle2 size={16} />
@@ -83,8 +115,10 @@ export const GlobalUI = () => {
                   : "Editor Notice"
             )
           }
-        />
+          />
+        </div>
       </div>
+
 
       {/* 2. Confirmation dialog */}
       <FancyConfirm

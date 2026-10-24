@@ -157,6 +157,16 @@ export const CRAFT_COMMANDS = {
     shortcut: { key: 'u' },
   } as EditorCommand<void, void>,
 
+  setCraftPen: {
+    id: P.CMD_SET_CRAFT_PEN,
+    name: 'Pen Tool',
+    category: 'Drawing',
+    execute: (ctx: EditorContextValue) => {
+      activateCraft(ctx, 'pen');
+    },
+    shortcut: { key: 'p' },
+  } as EditorCommand<void, void>,
+
   // Marker sub-type cycling (mirrors ClipOptions.cycleToolForward/Backward).
   // Bound via local keydown listener in CraftDrawer (not HotkeyManager).
   cycleMarkerForward: {

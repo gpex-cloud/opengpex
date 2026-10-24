@@ -35,6 +35,7 @@ import {
   ScissorsLineDashed,
   Feather,
   Expand,
+  SplinePointer,
 } from "lucide-react";
 import {
   useEditorState,
@@ -43,6 +44,7 @@ import {
 } from "@opengpex/editor/core/context";
 import { getRegularClipShape } from "@opengpex/editor/core/helpers/selection";
 
+import { PenOverlayAPI } from "@opengpex/editor/plugins/base/overlays/PenOverlay/protocols";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import FancyGroup from "@opengpex/editor/widgets/FancyGroup";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
@@ -783,6 +785,37 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                   `}
                 >
                   <ScissorsLineDashed
+                    size={13}
+                    className={toolVisual.textClass}
+                  />
+                </button>
+              </Tooltip>
+            );
+          })()}
+
+          {/*
+           * Apply as Bezier: converts the CURRENT selection into an editable
+           * pen draft and activates the pen tool (the inverse of pen's
+           * "Convert to Selection"). Greyed for regular tools — a rect /
+           * ellipse converts to 4 / few anchors and carries no editing value;
+           * irregular selections (lasso / wand / SAM) are the real use case.
+           */}
+          {(() => {
+            const bezierDisabled = !hasAnySelection || !isIrregularTool || isPanMode || isReCanvas;
+            return (
+              <Tooltip
+                content="Apply as Bezier"
+                position="bottom"
+                display="inline-flex"
+              >
+                <button
+                  onClick={() => actions.executeCommand(PenOverlayAPI.commands.applyAsBezier.uid)}
+                  disabled={bezierDisabled}
+                  className={`flex items-center justify-center w-6 h-full transition-colors outline-none select-none
+                    ${bezierDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
+                  `}
+                >
+                  <SplinePointer
                     size={13}
                     className={toolVisual.textClass}
                   />

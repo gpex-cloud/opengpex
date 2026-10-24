@@ -170,7 +170,7 @@ export interface VolatileInteraction {
   /** Cursor override value set by plugins/tools (null = use default logic) */
   cursorOverride: string | null;
   /** HUD toast message (null = no message) */
-  hud: { message: string; type: 'info' | 'success' | 'error'; subtitle?: string; duration?: number } | null;
+  hud: { message: string; type: 'info' | 'success' | 'error'; subtitle?: string } | null;
   /** Smart guide alignment data during interactions */
   smartguides: SmartGuideData | null;
 }

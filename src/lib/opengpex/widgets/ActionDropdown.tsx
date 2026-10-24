@@ -28,7 +28,7 @@ export interface ActionOption {
   value?: string;
   description?: string;
   icon?: React.ReactNode;
-  variant?: 'default' | 'danger' | 'success';
+  variant?: 'default' | 'danger' | 'success' | 'warning';
   divider?: boolean;
   /** Show a checkmark on the right side of the option. */
   checked?: boolean;
@@ -191,11 +191,13 @@ export default function ActionDropdown({
                         flex items-center justify-between gap-3 w-full px-2 py-1.5 rounded-lg
                         text-[9px] font-black uppercase tracking-tight text-left
                         transition-all active:scale-[0.98] cursor-pointer
-                        ${opt.variant === 'danger' 
-                          ? 'text-rose-500 hover:bg-rose-500/10' 
-                          : opt.variant === 'success'
-                            ? 'text-emerald-500 hover:bg-emerald-500/10'
-                            : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-100'
+                        ${opt.variant === 'danger'
+                          ? 'text-rose-500 hover:bg-rose-500/10'
+                          : opt.variant === 'warning'
+                            ? 'text-amber-500 hover:bg-amber-500/10'
+                            : opt.variant === 'success'
+                              ? 'text-emerald-500 hover:bg-emerald-500/10'
+                              : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-100'
                         }
                       `}
                     >
@@ -289,7 +291,9 @@ function SubMenuOption({ option, onSelect }: { option: ActionOption; onSelect: (
                   transition-all active:scale-[0.98] cursor-pointer
                   ${child.variant === 'danger'
                     ? 'text-rose-500 hover:bg-rose-500/10'
-                    : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-100'
+                    : child.variant === 'warning'
+                      ? 'text-amber-500 hover:bg-amber-500/10'
+                      : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-100'
                   }
                 `}
               >

@@ -130,6 +130,11 @@ function vectorSourceSig(src: VectorParams): string {
       return strokeSourceFingerprint(src.stroke);
     case 'sdf':
       return `vector:sdf:${JSON.stringify(src.sdf, charXReplacer)}`;
+    case 'face':
+      // The translator's full-content digest (business payload + style) —
+      // mid-path anchor edits MUST flip the signature, so the stroke
+      // fingerprint's first/last-point shortcut does not apply here.
+      return `vector:face:${src.face.digest}`;
     case 'text':
       return `vector:text:${JSON.stringify(src.text, charXReplacer)}`;
   }

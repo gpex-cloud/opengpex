@@ -18,7 +18,8 @@
  */
 
 import { Matrix3x3, GeometryOp } from '../matrix';
-import { Layer, Frame, IMatrix3x3, asLocalRect, asLocalPoint, asLocalPolygon, LocalPolygon, LayerPoseOverride, Point2D, Dimensions } from '@opengpex/editor/core/types';
+import { mapPathAnchors } from './bezier';
+import { Layer, Frame, IMatrix3x3, asLocalRect, asLocalPoint, asLocalPolygon, LocalPolygon, LayerPoseOverride, Point2D, Dimensions, PenSubPath } from '@opengpex/editor/core/types';
 import { computePolygonBounds } from './polygon';
 
 /**
@@ -241,6 +242,34 @@ function transformPolygon(
 
   const nextBounds = asLocalRect(computePolygonBounds(nextRings));
   return asLocalPolygon(nextRings, nextBounds, poly.antiAliased);
+}
+
+/**
+ * transformAnchorPath: Transforms an anchor-path payload (the pen draft's
+ * shape) by the same D4 symmetry operation {@link transformFrame} applies to
+ * layer poses and selection polygons — frame-local geometry must all live in
+ * the SAME axes after a viewport rotate/flip, or overlays detach from the
+ * pixels. The point maps are the ones documented on {@link transformPolygon}.
+ * Pure; uses the L0 {@link mapPathAnchors} primitive (handles ride along).
+ */
+export function transformAnchorPath(
+  draft: { subpaths: PenSubPath[] },
+  container: { w: number; h: number },
+  op: GeometryOp
+): { subpaths: PenSubPath[] } {
+  const { w: oldW, h: oldH } = container;
+  const transformPoint = (px: number, py: number): Point2D => {
+    switch (op) {
+      case 'rotate_r': return { x: oldH - py, y: px };
+      case 'rotate_l': return { x: py, y: oldW - px };
+      case 'flip_h': return { x: oldW - px, y: py };
+      case 'flip_v': return { x: px, y: oldH - py };
+      default: return { x: px, y: py };
+    }
+  };
+  return {
+    subpaths: mapPathAnchors({ paths: draft.subpaths }, (p) => transformPoint(p.x, p.y)).paths,
+  };
 }
 
 /**

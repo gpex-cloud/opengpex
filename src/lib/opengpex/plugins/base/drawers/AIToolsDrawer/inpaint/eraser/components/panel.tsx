@@ -135,7 +135,7 @@ export function InpaintEraserPanel() {
         <div className="flex gap-1.5 items-start px-2 py-1.5 rounded-lg bg-[var(--bg-stage)] border border-[var(--border-subtle)]">
           <Info size={10} className="text-[var(--text-muted)] shrink-0 mt-0.5" />
           <p className="text-[9px] text-[var(--text-muted)] leading-relaxed">
-            Select an area first using any clip tool (rect, lasso, wand, or SAM), then click Erase.
+            Select an area first using any clip tool (rect, lasso, wand, SAM, or pen), then click Erase.
           </p>
         </div>
       )}

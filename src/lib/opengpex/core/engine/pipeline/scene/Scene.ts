@@ -232,7 +232,45 @@ export interface TextParams {
 }
 
 /** The built-in vector rendering strategies (static union — no runtime registry). */
-export type VectorRendererId = 'sdf' | 'stroke' | 'text';
+export type VectorRendererId = 'sdf' | 'stroke' | 'text' | 'face';
+
+/**
+ * GPU-side params for the `face` renderer (filled polygon regions — the
+ * FaceRenderer strategy). An engine-neutral triangle/edge stream: CPU-tessellated
+ * fill triangles + boundary edge quads of normalized simple polygons, packed by
+ * the scene mapper (plugin translator). Carries NO business model (that lives on
+ * `Layer.penData`); colours arrive working-gamut linear.
+ *
+ * NAMING NOTE: "face" = the REGION enclosed by boundary rings, unrelated to the
+ * mesh-topology sense of face (a mesh triangle / front-back culling).
+ */
+export interface FaceParams {
+  /**
+   * Packed vertex stream: [x, y, dist, kind] × N (logical layer-local px).
+   * kind 0 = fill triangle vertex (`dist` unused), kind 1 = edge quad/join
+   * vertex (`dist` = signed distance to the boundary centerline in px).
+   */
+  readonly verts: Float32Array;
+  /** Number of VERTICES in `verts` (verts.length === vertexCount × 4). */
+  readonly vertexCount: number;
+  /** Fill colour: working-gamut LINEAR straight-alpha RGBA (0..1). */
+  readonly fillColor: readonly [number, number, number, number];
+  /** Edge/stroke colour, or null when the face has no stroke. */
+  readonly edgeColor: readonly [number, number, number, number] | null;
+  /** Stroke width in px (the edge half-width is width/2). */
+  readonly strokeWidth: number;
+  /** Bounding width in LOGICAL pixels — the NDC map channel (see StrokeParams.width). */
+  readonly width: number;
+  /** Bounding height in LOGICAL pixels (see {@link FaceParams.width}). */
+  readonly height: number;
+  /**
+   * Content digest computed by the translator from the business payload +
+   * style (stable stringify). Drives the composite signature — unlike the
+   * stroke fingerprint's first/last-point O(1) shortcut, a face's MID-path
+   * anchor edits must flip the signature, so the digest is full-content.
+   */
+  readonly digest: string;
+}
 
 /**
  * GPU-side params for the `stroke` renderer (logic brush ribbon extrusion).
@@ -278,7 +316,8 @@ export interface StrokeParams {
 export type VectorParams =
   | { readonly renderer: 'sdf'; readonly sdf: SdfShapeParams }
   | { readonly renderer: 'stroke'; readonly stroke: StrokeParams }
-  | { readonly renderer: 'text'; readonly text: TextParams };
+  | { readonly renderer: 'text'; readonly text: TextParams }
+  | { readonly renderer: 'face'; readonly face: FaceParams };
 
 export type LayerSource =
   /** A resident GPUTexture, keyed by asset id (bitmap / pre-rasterized text / vector). */

@@ -37,6 +37,10 @@
 
 import type { Rect } from '@opengpex/editor/core/types';
 import { parsePathDataToRings } from './operators/point2d';
+import { isPointInRing } from './operators/polygon';
+
+/** The shared L0 primitive under the file's historical name. */
+const pointInRing = isPointInRing;
 import polygonClipping from 'polygon-clipping';
 
 type Pt = { x: number; y: number };
@@ -44,17 +48,6 @@ type Ring = [number, number][];
 type Polygon = Ring[];
 type MultiPolygon = Polygon[];
 
-function pointInRing(pt: Pt, ring: Pt[]): boolean {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i].x, yi = ring[i].y;
-    const xj = ring[j].x, yj = ring[j].y;
-    const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
-      (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi);
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
 
 /**
  * Representative interior point used to test ring-in-ring containment.
@@ -214,6 +207,48 @@ function multiPolygonToPathData(result: MultiPolygon): { pathData: string; rect:
  * @param ringSets - One or more ring sets (each Point2D[][]) to union together
  * @returns Combined pathData and tight bounding rect, or null if result is empty
  */
+/**
+ * Compute the geometric union of N ring sets, returning STRUCTURED geometry.
+ *
+ * Identical semantics to {@link unionRings} (Martinez-Rueda-Feito union of the
+ * ring sets; degenerate inputs yield null) but instead of serializing to a flat
+ * even-odd pathData string it returns the polygon-clipping MultiPolygon as
+ * `Pt[][][]`: one entry per result polygon, each `Pt[][]` = `[outer, hole1, …]`
+ * in the library's own nesting order. Consumers that need the hole STRUCTURE
+ * (CPU tessellation for GPU area fill) use this; consumers that feed an
+ * even-odd path consumer keep using {@link unionRings}.
+ */
+export function unionRingsMulti(...ringSets: Pt[][][]): Pt[][][] | null {
+  if (ringSets.length === 0) return null;
+
+  const multiPolygons = ringSets
+    .filter(rs => rs.length > 0)
+    .map(rs => ringsToMultiPolygon(rs));
+
+  if (multiPolygons.length === 0) return null;
+
+  let result: MultiPolygon;
+  try {
+    result = (polygonClipping.union as (...args: MultiPolygon[]) => MultiPolygon)(...multiPolygons);
+  } catch {
+    return null;
+  }
+
+  if (!result || result.length === 0) return null;
+
+  // Back to open Point2D rings (drop the closing duplicate the library appends).
+  return result.map(poly =>
+    poly.map(ring => {
+      const pts = ring.map(([x, y]) => ({ x, y }));
+      if (pts.length > 1) {
+        const first = pts[0], last = pts[pts.length - 1];
+        if (first.x === last.x && first.y === last.y) pts.pop();
+      }
+      return pts;
+    })
+  );
+}
+
 export function unionRings(...ringSets: Pt[][][]): { pathData: string; rect: Rect } | null {
   if (ringSets.length === 0) return null;
 

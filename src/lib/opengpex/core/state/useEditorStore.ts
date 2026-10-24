@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useReducer, useMemo, useRef, useCallback, useEffect } from 'react';
+import { useReducer, useMemo, useState, useRef, useCallback, useEffect } from 'react';
 import {
   EditorData, EditorState, EditorAction, Layer, Frame, CameraState, UIConfig,
   BuiltPlugin, EditorShortcut, BuiltCommand, Dimensions, NormalizedState,
@@ -30,6 +30,7 @@ import {
 import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import { initialState, editorReducer } from './reducer';
 import { useVolatileState, createFastFacade } from './volatile';
+import { createScratchService } from './scratch';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**
@@ -60,6 +61,12 @@ export function useEditorStore() {
     reset: resetVolatile,
     cleanup: cleanupVolatile
   } = useVolatileState();
+
+  // Scratch service singleton (plugin-owned work-in-progress sessions):
+  // per-frame draft slots + session-scoped undo/redo takeover. Deliberately
+  // self-held storage — see core/state/scratch/index.ts. Lazy useState
+  // initializer = created exactly once for the store's lifetime.
+  const [scratch] = useState(createScratchService);
 
   // Volatile Interaction event bus: lightweight per-field listener map
   const viListenersRef = useRef(new Map<string, Set<() => void>>());
@@ -142,6 +149,9 @@ export function useEditorStore() {
         });
       } else if (action.type === 'REMOVE_FRAME') {
         const { frameIds } = action.payload;
+        // Scratch slots/sessions of removed frames die with the frame (flag-
+        // neutral housekeeping, same spirit as cleanupVolatile above).
+        scratch.cleanup(frameIds);
         cleanupVolatile(v => {
           frameIds.forEach(fId => {
             Object.keys(v.buffered.layers).forEach(key => {
@@ -158,7 +168,7 @@ export function useEditorStore() {
     // canvasClipBox (LocalShape) snapping is handled at the SET_CANVAS_CLIP_BOX level
     // if needed in the future. For now, pass all actions through unmodified.
     dispatch(action);
-  }, [scheduleAssetSync, ASSET_CRITICAL_ACTIONS, cleanupVolatile]);
+  }, [scheduleAssetSync, ASSET_CRITICAL_ACTIONS, cleanupVolatile, scratch]);
 
   const confirmResolverRef = useRef<((val: boolean) => void) | null>(null);
   const choiceResolverRef = useRef<((val: string | ChoiceResult | null) => void) | null>(null);
@@ -258,6 +268,17 @@ export function useEditorStore() {
         }
       }
       return undefined as R;
+    };
+
+    // Helper: Redux visibility for gesture-granular scratch changes. The
+    // signal carries the scratch version so subscribers can also detect
+    // which write they reacted to; overlays that need per-frame freshness
+    // poll actions.scratch.version() on the ticker instead.
+    const emitScratchRevision = () => {
+      enhancedDispatch({
+        type: 'SET_INTERACTION',
+        payload: { signals: { 'scratch.revision': scratch.slots.version() } },
+      });
     };
 
     const frameActions = {
@@ -611,27 +632,89 @@ export function useEditorStore() {
       resetHistory: () => enhancedDispatch({ type: 'HISTORY_RESET' }),
       replaceFrame: (frameId: string, frame: Frame) => enhancedDispatch({ type: 'REPLACE_FRAME', payload: { frameId, frame } }),
       history: {
-        undo: () => enhancedDispatch({ type: 'HISTORY_UNDO' }),
-        redo: () => enhancedDispatch({ type: 'HISTORY_REDO' }),
+        // Session takeover: while a scratch session is alive on the active
+        // frame, undo/redo are served from the session stack (the takeover
+        // also writes the restored snapshot back to the slot). An empty
+        // session stack is FENCED — the step is swallowed with a HUD hint so
+        // no global-history step can interleave with the live draft. Both
+        // entries (keyboard shortcut and TimeTraveler button) funnel through
+        // these functions, so the fence covers both.
+        undo: () => {
+          const frameId = stateRef.current.activeFrameId;
+          if (frameId) {
+            const result = scratch.undoAt(frameId);
+            if (result !== 'inactive') {
+              if (result === 'empty') {
+                uiActions.notifyHUD('Finish or discard the path to undo earlier edits', 'info');
+              }
+              emitScratchRevision();
+              return;
+            }
+          }
+          enhancedDispatch({ type: 'HISTORY_UNDO' });
+        },
+        redo: () => {
+          const frameId = stateRef.current.activeFrameId;
+          if (frameId) {
+            const result = scratch.redoAt(frameId);
+            if (result !== 'inactive') {
+              if (result === 'empty') {
+                uiActions.notifyHUD('Finish or discard the path to redo earlier edits', 'info');
+              }
+              emitScratchRevision();
+              return;
+            }
+          }
+          enhancedDispatch({ type: 'HISTORY_REDO' });
+        },
         purge: () => enhancedDispatch({ type: 'SET_HISTORY', payload: { byFrameId: {} } }),
         canUndo: () => {
           const s = stateRef.current;
-          const h = (s.activeFrameId && s.history.byFrameId[s.activeFrameId]) || { past: [], future: [], checkpoint: null };
+          const frameId = s.activeFrameId;
+          if (frameId && scratch.session.active(frameId)) return scratch.session.active(frameId)!.history.canUndo();
+          const h = (frameId && s.history.byFrameId[frameId]) || { past: [], future: [], checkpoint: null };
           return h.past.length > 0 || !!h.checkpoint;
         },
         canRedo: () => {
           const s = stateRef.current;
-          const h = (s.activeFrameId && s.history.byFrameId[s.activeFrameId]) || { past: [], future: [], checkpoint: null };
+          const frameId = s.activeFrameId;
+          if (frameId) {
+            const sess = scratch.session.active(frameId);
+            if (sess) return sess.history.canRedo();
+          }
+          const h = (frameId && s.history.byFrameId[frameId]) || { past: [], future: [], checkpoint: null };
           return h.future.length > 0;
         },
       },
-      clearAllData: () => { resetVolatile(); enhancedDispatch({ type: 'CLEAR_ALL_DATA' }); },
+      scratch: {
+        begin: (frameId, ownerToolId, slotId) => {
+          scratch.session.begin(frameId, ownerToolId, slotId);
+          emitScratchRevision();
+        },
+        end: (frameId) => {
+          scratch.session.end(frameId);
+          emitScratchRevision();
+        },
+        activeSession: (frameId) => !!scratch.session.active(frameId),
+        record: (frameId, before) => {
+          if (!scratch.session.active(frameId)) return;
+          scratch.record(frameId, before);
+          emitScratchRevision();
+        },
+        get: (frameId, slotId) => scratch.slots.get(frameId, slotId),
+        // Pure write: pointer-frequency slot updates must NOT dispatch (the
+        // overlay repaint loop dirty-checks version() on the ticker instead);
+        // gesture-granular Redux visibility comes from record/undo/redo.
+        set: (frameId, slotId, payload) => { scratch.slots.set(frameId, slotId, payload); },
+        version: () => scratch.slots.version(),
+      },
+      clearAllData: () => { scratch.reset(); resetVolatile(); enhancedDispatch({ type: 'CLEAR_ALL_DATA' }); },
       mutateVolatile,
       updateVolatile,
       commitVolatile,
       resetVolatile,
     };
-  }, [enhancedDispatch, mutateVolatile, updateVolatile, commitVolatile, resetVolatile, volatileRef, viNotify]);
+  }, [enhancedDispatch, mutateVolatile, updateVolatile, commitVolatile, resetVolatile, volatileRef, viNotify, scratch]);
 
   // --- 5. State Synchronization and Facade ---
   const activeFrame = useMemo<Frame | null>(() =>
@@ -658,18 +741,8 @@ export function useEditorStore() {
     layerRef.current = activeLayer;
   }, [state, activeFrame, activeLayer]);
 
-  // --- 6. HUD Message Sentinel ---
-  // Enterprise design: Automatically manage the lifecycle of HUD, preventing messages from being "deadlocked" on the interface due to parallel operations or logical competition.
-  useEffect(() => {
-    if (state.interaction.hud) {
-      const defaultDuration = state.interaction.hud.type === 'error' ? 1200 : 2500;
-      const duration = state.interaction.hud.duration ?? defaultDuration;
-      const timer = setTimeout(() => {
-        actions.setInteraction({ hud: null });
-      }, duration);
-      return () => clearTimeout(timer);
-    }
-  }, [state.interaction.hud, actions]);
+  // HUD auto-dismiss is handled at the GlobalUI layer so that hovering the
+  // notification can freeze it and delay dismissal until the pointer leaves.
 
   // Exposed interface
   return {

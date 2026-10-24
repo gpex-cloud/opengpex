@@ -31,7 +31,7 @@ import {
   GeometryService, Frame, Layer, WorldRect, IMatrix3x3, LayerPoseOverride,
   CameraState, Rect, Point2D, Dimensions, WorldPoint,
   ViewportPoint, CameraCenterOptions, WorldShape, LocalShape, LocalRect, Shape, NormalizedState,
-  LocalPolygon, WorldPolygon
+  LocalPolygon, WorldPolygon, CubicSegment, PenPathData
 } from '@opengpex/editor/core/types';
 import {
   frameLocalToLayerLocal, layerLocalToFrameLocal, intersectWithLayer, getStairedSvgPath, getSmoothSvgPath,
@@ -59,6 +59,11 @@ import {
   transformFrame
 } from './operators/transform';
 import { normalizeAngle, snapAngle, poseScreenAngle } from './operators/rotator';
+import {
+  evaluateCubic, tangentAt, arcLengths, splitCubic, flattenCubicChain,
+  nearestPointOnPath, fitCubicsToPolyline, penPathToCubicSegments,
+  penPathToSvgD, svgDToPenPath, mapPathAnchors, nearestPathAnchor
+} from './operators/bezier';
 import {
   getFitCamera,
   projectZoom,
@@ -217,6 +222,20 @@ export function createGeometryService(): GeometryService {
       invertRings: (rings: Point2D[][], boundingW: number, boundingH: number) => invertRings(rings, boundingW, boundingH),
       isBoundingRing: (ring: readonly Point2D[], boundingW: number, boundingH: number) => isBoundingRing(ring, boundingW, boundingH),
       computePolygonBounds: (rings: Point2D[][]) => computePolygonBoundsP2D(rings),
+    },
+    bezier: {
+      evaluateCubic: (p0: Point2D, p1: Point2D, p2: Point2D, p3: Point2D, t: number) => evaluateCubic(p0, p1, p2, p3, t),
+      tangentAt: (p0: Point2D, p1: Point2D, p2: Point2D, p3: Point2D, t: number) => tangentAt(p0, p1, p2, p3, t),
+      arcLengths: (p0: Point2D, p1: Point2D, p2: Point2D, p3: Point2D) => arcLengths(p0, p1, p2, p3),
+      splitCubic: (p0: Point2D, p1: Point2D, p2: Point2D, p3: Point2D, t: number) => splitCubic(p0, p1, p2, p3, t),
+      flattenCubicChain: (segments: readonly CubicSegment[], toleranceDocPx: number) => flattenCubicChain(segments, toleranceDocPx),
+      nearestPointOnPath: (path: readonly CubicSegment[], pt: Point2D, tolerance: number) => nearestPointOnPath(path, pt, tolerance),
+      fitCubicsToPolyline: (ring: readonly Point2D[], toleranceDocPx: number, closed: boolean) => fitCubicsToPolyline(ring, toleranceDocPx, closed),
+      penPathToCubicSegments: (path: PenPathData) => penPathToCubicSegments(path),
+      penPathToSvgD: (path: PenPathData) => penPathToSvgD(path),
+      svgDToPenPath: (d: string) => svgDToPenPath(d),
+      mapPathAnchors: (path: PenPathData, map: (pt: Point2D) => Point2D) => mapPathAnchors(path, map),
+      nearestPathAnchor: (path: PenPathData, pt: Point2D, tolerance: number) => nearestPathAnchor(path, pt, tolerance),
     },
     getScale: (frame: Frame, camera?: CameraState) => (camera || frame.camera).k,
     asWorldRect: (r: Rect) => asWorldRect(r),

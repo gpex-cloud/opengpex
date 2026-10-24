@@ -32,9 +32,11 @@ import {
   Layers,
   FolderInput,
   FolderOutput,
+  PenTool,
 } from "lucide-react";
 import { useEditorServices, usePluginCommands } from "@opengpex/editor/core/context";
 import { ADV_LAYER_MERGE_BACK } from "@opengpex/editor/core/advanced/protocols";
+import { PenOverlayAPI } from "@opengpex/editor/plugins/base/overlays/PenOverlay/protocols";
 import ActionDropdown, {
   ActionOption,
 } from "@opengpex/editor/widgets/ActionDropdown";
@@ -48,6 +50,8 @@ interface LayerMenuProps {
   hasMasks: boolean;
   masksLength: number;
   canDelete: boolean;
+  /** Whether this layer holds a releasable pen path (vector + penData + host role) */
+  canReleasePath?: boolean;
   isSubLayersExpanded: boolean;
   setIsSubLayersExpanded: (v: boolean) => void;
   isMasksExpanded: boolean;
@@ -73,6 +77,7 @@ export const LayerMenu = React.memo(
     hasMasks,
     masksLength,
     canDelete,
+    canReleasePath,
     isSubLayersExpanded,
     setIsSubLayersExpanded,
     isMasksExpanded,
@@ -155,6 +160,17 @@ export const LayerMenu = React.memo(
       });
     }
 
+    // Release the pen path back into the pen tool's draft session and remove
+    // the layer (one undo step).
+    if (canReleasePath) {
+      options.push({
+        label: "Release Layer",
+        value: "release-path",
+        icon: <PenTool size={12} />,
+        variant: "warning",
+      });
+    }
+
     if (canDelete) {
       options.push({
         label: "Delete Layer",
@@ -179,6 +195,8 @@ export const LayerMenu = React.memo(
         // Both actions dispatch the same unified mergeBack command —
         // the command auto-detects fragment vs source role based on layer metadata.
         actions.executeCommand(ADV_LAYER_MERGE_BACK, { layerId });
+      } else if (val === "release-path") {
+        actions.executeCommand(PenOverlayAPI.commands.releaseToDraft.uid, { frameId: activeFrameId, layerId });
       } else if (val === "delete") {
         removeCmd?.execute({ frameId: activeFrameId, layerId });
       } else if (val === "move-out-of-group") {

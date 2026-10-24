@@ -93,12 +93,14 @@ const { runCommand, abortCommand } = createToolCommand<
     // Build polygon from contour rings
     const localRings = workerResult.rings.map(ring => ring.map(p => asLocalPoint({ x: p.x, y: p.y })));
     const bounds = asLocalRect(ctx.geometry.polygon.computePolygonBounds(localRings));
-    // Wand slot is always hard-edged pixel selection (antiAliased: false)
+    // AI contour is a hard-edged pixel selection (antiAliased: false); it
+    // lands in the lasso slot as a generic irregular polygon, same as any
+    // other tool-produced selection.
     const polygon = asLocalPolygon(localRings, bounds, false);
 
     // Apply clip box
-    actions.setClipBox(frameId, 'wand', polygon);
-    actions.updateFrame(frameId, { latestClipTool: 'wand' });
+    actions.setClipBox(frameId, 'lasso', polygon);
+    actions.updateFrame(frameId, { latestClipTool: 'lasso' });
     if (ctx.state.interaction.interactionMode !== 'clip') {
       actions.setInteraction({ interactionMode: 'clip' });
     }

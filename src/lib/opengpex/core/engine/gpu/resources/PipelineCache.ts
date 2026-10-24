@@ -34,6 +34,7 @@ import { LAYER_WGSL, LAYER_UNIFORM_BUFFER_SIZE } from '../shaders/layer';
 import { BLEND_WGSL, isHardwareBlendable } from '../shaders/blend';
 import { VIEW_WGSL, VIEW_WGSL_HDR, VIEW_UNIFORM_BUFFER_SIZE } from '../shaders/view';
 import { SDF_WGSL, SDF_UNIFORM_BUFFER_SIZE } from '../shaders/sdf';
+import { FACE_WGSL, FACE_UNIFORM_BUFFER_SIZE } from '../shaders/face';
 import { STROKE_EXTRUDE_WGSL, STROKE_PAINT_WGSL, STROKE_UNIFORM_BUFFER_SIZE } from '../shaders/stroke';
 import { TEXT_PAINT_WGSL, TEXT_UNIFORM_BUFFER_SIZE, TEXT_INSTANCE_STRIDE } from '../shaders/text';
 import { ADJUST_UNIFORM_BUFFER_SIZE } from '../shaders/adjust';
@@ -64,6 +65,24 @@ export const PREMULTIPLIED_OVER_BLEND: GPUBlendState = {
   color: {
     operation: 'add',
     srcFactor: 'one',
+    dstFactor: 'one-minus-src-alpha',
+  },
+  alpha: {
+    operation: 'add',
+    srcFactor: 'one',
+    dstFactor: 'one-minus-src-alpha',
+  },
+};
+
+/**
+ * Straight-alpha 'over' blend state: for targets holding NON-premultiplied
+ * color (the vector face renderer's output contract). src.rgb is weighted by
+ * src.a explicitly; the destination stays in straight form throughout.
+ */
+export const STRAIGHT_OVER_BLEND: GPUBlendState = {
+  color: {
+    operation: 'add',
+    srcFactor: 'src-alpha',
     dstFactor: 'one-minus-src-alpha',
   },
   alpha: {
@@ -165,6 +184,17 @@ export class PipelineCache {
   private sdfShaderModule: GPUShaderModule | null = null;
   private sdfBindGroupLayout: GPUBindGroupLayout | null = null;
   private sdfPipelineLayout: GPUPipelineLayout | null = null;
+
+  /**
+   * Vector spine FACE strategy (`shaders/face.ts`): one WGSL module, TWO render
+   * pipelines differing only in blend — fill (REPLACE; normalized interior
+   * triangles never overlap) and edge (MAX; boundary quads overlap at joins,
+   * per-channel max = coverage union, same white-speckle fix as the stroke
+   * paint pipeline). Both are keyed by target format in `this.pipelines`.
+   */
+  private faceShaderModule: GPUShaderModule | null = null;
+  private faceBindGroupLayout: GPUBindGroupLayout | null = null;
+  private facePipelineLayout: GPUPipelineLayout | null = null;
 
   /**
    * Vector spine STROKE strategy: compute-extrude + paint pipelines (`shaders/stroke.ts`).
@@ -1246,6 +1276,128 @@ export class PipelineCache {
     return pipeline;
   }
 
+  // ─── Vector spine FACE pipelines (CPU-tessellated fill + boundary edge) ───
+
+  getFaceShaderModule(): GPUShaderModule {
+    if (this.faceShaderModule) return this.faceShaderModule;
+    this.faceShaderModule = this.device.createShaderModule({
+      code: FACE_WGSL,
+      label: 'Face WGSL Module',
+    });
+    return this.faceShaderModule;
+  }
+
+  /**
+   * Group-0-only uniform layout (dynamic offset), same shape as the SDF layout:
+   * the face draw binds just the FaceUniforms block — vertex data rides slot 0
+   * as a vertex buffer, no textures.
+   */
+  getFaceBindGroupLayout(): GPUBindGroupLayout {
+    if (this.faceBindGroupLayout) return this.faceBindGroupLayout;
+    this.faceBindGroupLayout = this.device.createBindGroupLayout({
+      label: 'Face Bind Group Layout',
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+          buffer: {
+            type: 'uniform',
+            hasDynamicOffset: true,
+            minBindingSize: FACE_UNIFORM_BUFFER_SIZE,
+          },
+        },
+      ],
+    });
+    return this.faceBindGroupLayout;
+  }
+
+  getFacePipelineLayout(): GPUPipelineLayout {
+    if (this.facePipelineLayout) return this.facePipelineLayout;
+    this.facePipelineLayout = this.device.createPipelineLayout({
+      bindGroupLayouts: [this.getFaceBindGroupLayout()],
+      label: 'Face Pipeline Layout',
+    });
+    return this.facePipelineLayout;
+  }
+
+  /** Vertex layout shared by both face pipelines: [x, y, dist, kind] stride 16. */
+  private getFaceVertexBuffers(): GPUVertexBufferLayout[] {
+    return [
+      {
+        arrayStride: 16,
+        stepMode: 'vertex',
+        attributes: [
+          { format: 'float32x2', offset: 0, shaderLocation: 0 },  // pos (logical px)
+          { format: 'float32', offset: 8, shaderLocation: 1 },    // dist (signed px)
+          { format: 'float32', offset: 12, shaderLocation: 2 },   // kind (0 fill, 1 edge)
+        ],
+      },
+    ];
+  }
+
+  /** Fill triangles — REPLACE blend (normalized interior triangles never overlap). */
+  getFaceFillPipeline(targetFormat: GPUTextureFormat = 'rgba16float'): GPURenderPipeline {
+    const key = `face-fill:${targetFormat}`;
+    const cached = this.pipelines.get(key);
+    if (cached) return cached;
+
+    const pipeline = this.device.createRenderPipeline({
+      label: `Face Fill Pipeline (${key})`,
+      layout: this.getFacePipelineLayout(),
+      vertex: {
+        module: this.getFaceShaderModule(),
+        entryPoint: 'vs_face',
+        buffers: this.getFaceVertexBuffers(),
+      },
+      fragment: {
+        module: this.getFaceShaderModule(),
+        entryPoint: 'fs_face',
+        targets: [
+          { format: targetFormat, blend: REPLACE_BLEND, writeMask: GPUColorWrite.ALL },
+        ],
+      },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+    });
+    this.pipelines.set(key, pipeline);
+    return pipeline;
+  }
+
+  /**
+   * Boundary edge quads/joins — MAX blend: neighbouring edge quads overlap at
+   * joins, so a later quad's transparent AA rim must not REPLACE a neighbour's
+   * solid pixel (white speckle); per-channel max = coverage union (the stroke
+   * paint pipeline's documented fix).
+   */
+  getFaceEdgePipeline(targetFormat: GPUTextureFormat = 'rgba16float'): GPURenderPipeline {
+    const key = `face-edge:${targetFormat}`;
+    const cached = this.pipelines.get(key);
+    if (cached) return cached;
+
+    const pipeline = this.device.createRenderPipeline({
+      label: `Face Edge Pipeline (${key})`,
+      layout: this.getFacePipelineLayout(),
+      vertex: {
+        module: this.getFaceShaderModule(),
+        entryPoint: 'vs_face',
+        buffers: this.getFaceVertexBuffers(),
+      },
+      fragment: {
+        module: this.getFaceShaderModule(),
+        entryPoint: 'fs_face',
+        targets: [
+          // src-over, NOT max: the edge band must PAINT OVER the fill — a
+          // dark stroke over a lighter fill would vanish channel-wise under
+          // `max`. The band geometry (quads + bevel join triangles) is built
+          // to tile its corners, so same-colour overlaps here are benign.
+          { format: targetFormat, blend: STRAIGHT_OVER_BLEND, writeMask: GPUColorWrite.ALL },
+        ],
+      },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+    });
+    this.pipelines.set(key, pipeline);
+    return pipeline;
+  }
+
   // ─── Vector spine STROKE pipelines (compute-extrude ribbon → paint) ───
 
   getStrokeExtrudeShaderModule(): GPUShaderModule {
@@ -1693,6 +1845,9 @@ export class PipelineCache {
     this.sdfShaderModule = null;
     this.sdfBindGroupLayout = null;
     this.sdfPipelineLayout = null;
+    this.faceShaderModule = null;
+    this.faceBindGroupLayout = null;
+    this.facePipelineLayout = null;
     this.strokeExtrudeShaderModule = null;
     this.strokeExtrudeBindGroupLayout = null;
     this.strokeExtrudePipelineLayout = null;

@@ -27,6 +27,7 @@ import {
   Undo2,
   Settings,
   Star,
+  PenTool,
 } from "lucide-react";
 import { MosaicIcon } from "./icon";
 import { motion } from "framer-motion";
@@ -43,6 +44,7 @@ import { TextPanel } from "./panels/text";
 import { BrushPanel } from "./panels/brush";
 import { MosaicPanel } from "./panels/mosaic";
 import { MarkerPanel } from "./panels/marker";
+import { PenPanel } from "./panels/pen";
 import { useCraftDrawer, useCraftTrigger, useCraftButtonGroup } from "./hooks";
 import { CraftDrawerIcon } from "./icon";
 import type { CraftType } from "./protocols";
@@ -66,6 +68,12 @@ const CRAFT_BUTTONS: {
     icon: <Star size={13} />,
     iconSmall: <Star size={10} />,
     label: "Marker Tool (U)",
+  },
+  {
+    type: "pen",
+    icon: <PenTool size={13} />,
+    iconSmall: <PenTool size={10} />,
+    label: "Pen Tool (P)",
   },
   {
     type: "text",
@@ -105,6 +113,8 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
       ? "Drag empty canvas to place text\nClick text to select · drag to move\nDouble-click text to edit\nEsc to exit"
       : activeCraft === "marker"
         ? "Draw marker on canvas\nTab to cycle marker type\nEsc to exit"
+        : activeCraft === "pen"
+        ? "Click to place anchors · drag for curves\nClick first anchor or Enter to finish a subpath\nEsc to cancel / exit"
         : activeCraft === "brush"
           ? "Draw on canvas\nEsc to exit"
           : activeCraft === "eraser" || activeCraft === "restore"
@@ -243,6 +253,8 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
 
   const showMarkerPanel = activeCraft === "marker";
 
+  const showPenPanel = activeCraft === "pen";
+
   const showBrushPanel =
     activeCraft === "brush" ||
     activeCraft === "eraser" ||
@@ -250,7 +262,11 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
     (activeCraft === null && activeLayerIsPaint);
 
   const showPlaceholder =
-    !showTextPanel && !showBrushPanel && !showMosaicPanel && !showMarkerPanel;
+    !showTextPanel &&
+    !showBrushPanel &&
+    !showMosaicPanel &&
+    !showMarkerPanel &&
+    !showPenPanel;
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
@@ -294,6 +310,12 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
       {showMarkerPanel && (
         <motion.div layout="position" className="flex flex-col">
           <MarkerPanel />
+        </motion.div>
+      )}
+
+      {showPenPanel && (
+        <motion.div layout="position" className="flex flex-col">
+          <PenPanel />
         </motion.div>
       )}
 

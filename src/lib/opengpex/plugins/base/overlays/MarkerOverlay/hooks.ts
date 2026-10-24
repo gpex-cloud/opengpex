@@ -20,6 +20,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef } from 'react';
+import { MARKER_CURSOR } from '@opengpex/editor/icons';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { Layer } from '@opengpex/editor/core/types';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
@@ -95,7 +96,7 @@ export function useMarkerToolLifecycle(isMarkerMode: boolean) {
     if (!isMarkerMode) return;
 
     // Base cursor for empty canvas.
-    actions.fast.setCursor('crosshair');
+    actions.fast.setCursor(MARKER_CURSOR);
 
     const onPointerMove = (ev: PointerEvent) => {
       // A draw/move/rotate drag owns the cursor; skip to prevent oscillation.
@@ -121,7 +122,7 @@ export function useMarkerToolLifecycle(isMarkerMode: boolean) {
       // Hover an existing marker layer → `move` (MarkerMoveHandler will win).
       const hits = geometry.space.pickLayersAt(worldPt, frame.layers);
       const overMarker = hits.some((l: Layer) => l.type === 'vector' && !!l.markerData);
-      const desired = overMarker ? 'move' : 'crosshair';
+      const desired = overMarker ? 'move' : MARKER_CURSOR;
 
       // Compare against the LIVE cursor, not a cached copy: interaction handlers
       // set/clear the cursor on their own (grabbing → null/move on release), and a

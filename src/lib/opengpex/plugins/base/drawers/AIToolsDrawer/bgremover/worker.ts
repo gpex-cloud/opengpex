@@ -33,69 +33,16 @@
 
 import type { BgRemoverRequest, BgRemoverResult } from './worker.types';
 import { createInference } from '../_shared/inference';
+import { traceMaskRings } from '../_shared/maskRings';
 
 // ─── Contour Tracing ─────────────────────────────────────────────────────────
 
 /**
- * Trace the outer boundary of a binary mask using Moore neighborhood tracing.
- * Returns a clockwise-wound polygon in pixel coordinates.
+ * Legacy single-boundary trace, kept only for the test export: delegates to
+ * the shared multi-ring tracer and returns its first (outermost) ring.
  */
 function traceContour(mask: Uint8Array, width: number, height: number): { x: number; y: number }[] {
-  const points: { x: number; y: number }[] = [];
-
-  // Find the first foreground pixel (top-left scan)
-  let startX = -1, startY = -1;
-  outer:
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (mask[y * width + x] > 0) {
-        startX = x;
-        startY = y;
-        break outer;
-      }
-    }
-  }
-
-  if (startX === -1) return []; // No foreground pixels
-
-  // Moore neighborhood: 8 directions (clockwise from right)
-  const dx = [1, 1, 0, -1, -1, -1, 0, 1];
-  const dy = [0, 1, 1, 1, 0, -1, -1, -1];
-
-  const isFg = (x: number, y: number): boolean => {
-    if (x < 0 || x >= width || y < 0 || y >= height) return false;
-    return mask[y * width + x] > 0;
-  };
-
-  let cx = startX, cy = startY;
-  let dir = 7; // Start direction: up-right (looking for boundary from left)
-  const maxIter = width * height * 2; // Safety limit
-
-  for (let iter = 0; iter < maxIter; iter++) {
-    points.push({ x: cx, y: cy });
-
-    // Search clockwise from (dir + 5) % 8 for next boundary pixel
-    let found = false;
-    const searchStart = (dir + 6) % 8; // backtrack direction + 1
-    for (let i = 0; i < 8; i++) {
-      const d = (searchStart + i) % 8;
-      const nx = cx + dx[d];
-      const ny = cy + dy[d];
-      if (isFg(nx, ny)) {
-        cx = nx;
-        cy = ny;
-        dir = d;
-        found = true;
-        break;
-      }
-    }
-
-    if (!found) break;
-    // Termination: returned to start with same entry direction
-    if (cx === startX && cy === startY && points.length > 2) break;
-  }
-
-  return points;
+  return traceMaskRings(mask, width, height)[0] ?? [];
 }
 
 /**
@@ -216,16 +163,18 @@ const handleRequest = createInference<BgRemoverRequest, BgRemoverResultPayload>(
 
     progress(0.85);
 
-    // Trace contour + simplify
-    const rawContour = traceContour(binaryMask, width, height);
-    const simplified = rawContour.length > 0 ? simplifyRDP(rawContour, 1.5) : [];
+    // Trace every boundary (outer rings + enclosed holes) and simplify each.
+    const rawRings = traceMaskRings(binaryMask, width, height);
+    const simplified = rawRings
+      .map((ring) => simplifyRDP(ring, 1.5))
+      .filter((ring) => ring.length >= 3);
 
     const postProcessMs = performance.now() - postStart;
     const totalMs = performance.now() - totalStart;
 
     return {
       context,
-      rings: simplified.length >= 3 ? [simplified] : [],
+      rings: simplified,
       debug: { deviceUsed: device, inferenceMs, postProcessMs, totalMs },
     };
   },

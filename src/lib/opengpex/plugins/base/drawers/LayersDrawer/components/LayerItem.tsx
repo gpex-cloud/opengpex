@@ -22,7 +22,7 @@
 "use client";
 
 import React, { useRef, useEffect } from "react";
-import { Eye, EyeOff, Lock, Unlock, Maximize2, Star, Paintbrush, Image as ImageIcon, Folder } from "lucide-react";
+import { Eye, EyeOff, Lock, Unlock, Maximize2, Star, Paintbrush, PenTool, Image as ImageIcon, Folder } from "lucide-react";
 import { MosaicIcon } from "@opengpex/editor/plugins/base/drawers/CraftDrawer/icon";
 import { Motion } from "@opengpex/editor/core/motion";
 import {
@@ -234,6 +234,8 @@ export const LayerItem = React.memo(
                     <Star size={13} strokeWidth={2} />
                   ) : layer.metadata?.sourceTool === "brush" ? (
                     <Paintbrush size={13} strokeWidth={2} />
+                  ) : layer.metadata?.sourceTool === "pen" ? (
+                    <PenTool size={13} strokeWidth={2} />
                   ) : (
                     <ImageIcon size={13} strokeWidth={2} />
                   )}
@@ -406,6 +408,7 @@ export const LayerItem = React.memo(
                   (layer.bitmapMasks?.length || 0)
                 }
                 canDelete={canDelete}
+                canReleasePath={layer.type === "vector" && !!layer.penData && (!layer.role || layer.role === "host")}
                 isSubLayersExpanded={isSubLayersExpanded}
                 setIsSubLayersExpanded={setIsSubLayersExpanded}
                 isMasksExpanded={isMasksExpanded}

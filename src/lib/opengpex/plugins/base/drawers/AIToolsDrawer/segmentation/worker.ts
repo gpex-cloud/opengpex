@@ -28,13 +28,14 @@
  * Worker responsibilities (not delegated to TransformersSession):
  *   1. Action dispatch: encode / decode / segment-all
  *   2. Embedding cache: Map (max 3, keyed by assetId)
- *   3. Mask → polygon post-processing: traceContour + simplifyRDP
+ *   3. Mask → polygon post-processing: traceMaskRings (outer + holes) + simplifyRDP
  *   4. Segment-all: grid prompts + NMS
  *   5. Progress reporting to commands.ts
  */
 
 import type { SegRequest, SegProgress, SegResult, SegError, SegPrompt } from './worker.types';
 import { TransformersSession } from '../_shared/inference/tfm-session';
+import { traceMaskRings } from '../_shared/maskRings';
 
 // ─── Local Type Interfaces (for CDN-loaded transformers.js module) ───────────
 
@@ -316,61 +317,6 @@ async function decodeMask(
 
 // ─── Mask → Polygon Post-Processing ─────────────────────────────────────────
 
-function traceContour(mask: Float32Array, width: number, height: number): { x: number; y: number }[] {
-  const points: { x: number; y: number }[] = [];
-
-  // Find first foreground pixel
-  let startX = -1, startY = -1;
-  outer:
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (mask[y * width + x] > 0) {
-        startX = x;
-        startY = y;
-        break outer;
-      }
-    }
-  }
-
-  if (startX === -1) return [];
-
-  const dx = [1, 1, 0, -1, -1, -1, 0, 1];
-  const dy = [0, 1, 1, 1, 0, -1, -1, -1];
-
-  const isFg = (x: number, y: number): boolean => {
-    if (x < 0 || x >= width || y < 0 || y >= height) return false;
-    return mask[y * width + x] > 0;
-  };
-
-  let cx = startX, cy = startY;
-  let dir = 7;
-  const maxIter = width * height * 2;
-
-  for (let iter = 0; iter < maxIter; iter++) {
-    points.push({ x: cx, y: cy });
-
-    let found = false;
-    const searchStart = (dir + 6) % 8;
-    for (let i = 0; i < 8; i++) {
-      const d = (searchStart + i) % 8;
-      const nx = cx + dx[d];
-      const ny = cy + dy[d];
-      if (isFg(nx, ny)) {
-        cx = nx;
-        cy = ny;
-        dir = d;
-        found = true;
-        break;
-      }
-    }
-
-    if (!found) break;
-    if (cx === startX && cy === startY && points.length > 2) break;
-  }
-
-  return points;
-}
-
 function simplifyRDP(points: { x: number; y: number }[], epsilon: number): { x: number; y: number }[] {
   if (points.length <= 2) return points;
 
@@ -435,20 +381,17 @@ function maskToPolygonRings(
   origH: number,
   simplifyEpsilon: number = 1.5,
 ): { x: number; y: number }[][] {
-  const rawContour = traceContour(maskData, maskW, maskH);
-  if (rawContour.length < 3) return [];
+  // Every boundary — outer rings AND enclosed holes (an arm-torso gap is a
+  // hole); consumers are evenodd-capable so multi-ring output is safe.
+  const rawRings = traceMaskRings(maskData, maskW, maskH);
 
   const scaleX = origW / maskW;
   const scaleY = origH / maskH;
-  const scaled = rawContour.map(p => ({
-    x: p.x * scaleX,
-    y: p.y * scaleY,
-  }));
+  const simplified = rawRings
+    .map(ring => simplifyRDP(ring.map(p => ({ x: p.x * scaleX, y: p.y * scaleY })), simplifyEpsilon))
+    .filter(ring => ring.length >= 3);
 
-  const simplified = simplifyRDP(scaled, simplifyEpsilon);
-  if (simplified.length < 3) return [];
-
-  return [simplified];
+  return simplified;
 }
 
 // ─── NMS (Non-Maximum Suppression) ──────────────────────────────────────────

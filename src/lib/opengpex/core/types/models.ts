@@ -20,7 +20,7 @@
 /**
  * Model Types: Editor core business model definitions
  */
-import { Dimensions, LocalShape, LocalRect, LocalPolygon } from './primitives';
+import { Dimensions, LocalShape, LocalRect, LocalPolygon, Point2D } from './primitives';
 import type { ImageMetadata } from '../files/types';
 import type { ColorValue } from '@opengpex/editor/core/engine/color';
 // LocalShape is used by VectorMask, canvasClipBox, etc.
@@ -305,6 +305,71 @@ export interface StrokeData {
 }
 
 /**
+ * Pen-path anchor in layer-local coordinates. A run of anchors chained by
+ * cubic segments defines a bézier path: segment i goes from anchor i to
+ * anchor i+1 using `handleOut` of anchor i and `handleIn` of anchor i+1 as
+ * its control points. Handles are stored RELATIVE to their anchor.
+ *
+ * `handleIn`/`handleOut` = `null` (or missing) means that side has no handle:
+ * the adjacent segment's control point collapses onto the anchor itself, so
+ * the curve arrives/leaves straight. Two non-collinear handles on one anchor
+ * also read visually as a sharp corner; `null` is the canonical encoding for
+ * a fresh corner anchor.
+ */
+export interface PenAnchor {
+  x: number;
+  y: number;
+  /** Incoming control handle (relative to the anchor). null = sharp side. */
+  handleIn?: { x: number; y: number } | null;
+  /** Outgoing control handle (relative to the anchor). null = sharp side. */
+  handleOut?: { x: number; y: number } | null;
+}
+
+/** One contiguous subpath: an anchor chain, optionally closed back to its start. */
+export interface PenSubPath {
+  anchors: PenAnchor[];
+  closed: boolean;
+}
+
+/**
+ * Pen-tool path payload — stored on `Layer.penData` for a `type:'vector'`
+ * layer, sibling to `strokeData` / `markerData`. Persisted as curve data;
+ * consumers flatten it to plain point rings before it enters mask baking,
+ * selections or stroke rendering.
+ */
+/**
+ * Pen shape layer style — one fill channel and one stroke channel, at the
+ * same granularity as a marker layer (per-LAYER, not per-subpath). Absent or
+ * null = the channel paints nothing; a layer with both absent maps to no
+ * vector source.
+ */
+export interface PenLayerStyle {
+  fill?: ColorValue | null;
+  stroke?: { color: ColorValue; width: number } | null;
+}
+
+/** Scratch slot id (core/state/scratch) holding the pen draft payload. Declared
+ *  in core — not the plugin — so frame-level transforms (viewport rotate/flip)
+ *  can transform the draft's frame-local geometry without a core→plugin import. */
+export const PEN_DRAFT_SLOT_ID = 'penDraft';
+
+export interface PenPathData {
+  paths: PenSubPath[];
+}
+
+/**
+ * Single cubic bézier segment in plain absolute coordinates. The raw math
+ * currency of the L0 bézier operators; anchor-based payloads convert down to
+ * segments (and back via fitting) at the edges.
+ */
+export interface CubicSegment {
+  p0: Point2D;
+  p1: Point2D;
+  p2: Point2D;
+  p3: Point2D;
+}
+
+/**
  * UI-only provenance tag for the layers-panel icon — purely a display label for
  * "which tool produced this layer", decoupled from `Layer.type` (the render-engine
  * dispatch key). The render pipeline (Scene / SceneAssembler / RenderGraph /
@@ -320,6 +385,7 @@ export type LayerSourceTool =
   | 'eraser'   // Legacy eraser bake
   | 'restore'  // Legacy restore bake
   | 'mosaic'   // Mosaic bake
+  | 'pen'      // Pen shape layer (Phase 3 face renderer)
   | 'misc';    // Fallback: tag missing or unrecognised
 
 export interface Layer {
@@ -332,6 +398,21 @@ export interface Layer {
   textData?: TextLayerData;
   /** Vector brush point-stream data — only present when type='vector' and created by the Brush Tool. */
   strokeData?: StrokeData;
+  /**
+   * Pen-tool bézier path payload — only present on `type:'vector'` layers whose
+   * content came from the pen tool. Anchors are layer-local; consumers flatten
+   * (`GeometryService.bezier`) before the geometry enters mask baking,
+   * selections or rendering. Phase-3 note: nothing renders `penData` yet —
+   * the pen tool currently commits to masks / selections only.
+   */
+  penData?: PenPathData;
+  /**
+   * Pen shape layer style (Phase 3, "Create Shape Layer"). Absent/null
+   * channels render nothing for that channel; a pen layer with neither fill
+   * nor stroke maps to no vector source at all. Colours are ColorValue
+   * (TRC-encoded in `space`); the face renderer linearizes on translate.
+   */
+  penStyle?: PenLayerStyle;
   metadata?: {
     fillColor?: ColorValue;
     /** Layers-panel icon provenance tag, display-only. See `LayerSourceTool`. */

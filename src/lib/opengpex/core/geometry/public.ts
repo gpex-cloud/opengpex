@@ -54,11 +54,11 @@
  *
  * ── Current whitelist ─────────────────────────────────────────────────────────
  *
- * (empty) — every current plugin call site can reach `GeometryService`, so no
- * function has needed this hatch yet. Add re-exports here only when a concrete,
- * service-less plugin call site appears, e.g.:
- *
- *     export { polygonToShape } from './operators/polygon';
+ * - `penPathToCubicSegments` / `flattenCubicChain` / `fitCubicsToPolyline` — the face-render
+ *   translator (`PenOverlay/contribution.ts`) flattens `penData` during scene
+ *   assembly, which runs OUTSIDE any React/service context (no
+ *   `GeometryService` instance exists there). Both are pure L0 operators.
  */
 
-export {};
+export { penPathToCubicSegments, flattenCubicChain, fitCubicsToPolyline, mapPathAnchors, nearestPathAnchor } from './operators/bezier';
+export { computeRingArea, isPointInPolygon } from './operators/polygon';

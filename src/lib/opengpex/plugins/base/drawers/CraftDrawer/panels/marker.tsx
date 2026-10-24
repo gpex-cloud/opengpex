@@ -19,12 +19,11 @@
 
 'use client';
 
-import React, { useState } from 'react';
-import { ColorPickerPro } from '@opengpex/editor/widgets/ColorPickerPro';
+import React from 'react';
 import { fromHex } from '@opengpex/editor/core/engine/color';
-import Popover from '@opengpex/editor/widgets/Popover';
 import Tooltip from '@opengpex/editor/widgets/Tooltip';
 import Switch from '@opengpex/editor/widgets/Switch';
+import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
 import { useMarkerPanel } from '../hooks';
 import { ABSOLUTE_MARKER_STROKE_MAX } from '../protocols';
 import { hasCornerRadius } from '../../../overlays/MarkerOverlay/marker/types';
@@ -36,62 +35,6 @@ const COUNT_MAX = 12;
 const ROW_LABEL = 'text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-20 shrink-0';
 const NUM_INPUT = 'w-8 bg-transparent text-right focus:outline-none outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
 const RANGE_CLASS = 'flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner';
-
-/**
- * ColorSwatchRow: compact color control — a small swatch + hex label that opens
- * the full ColorPickerPro inside a Popover on click.
- *
- * This replaces the always-open inline picker (which occupied ~140px of vertical
- * space per color). Mirrors the mainstream editor pattern (Figma / Photoshop /
- * this app's own ColorOptions toolbar): the panel stays dense, and the heavy
- * SV-area picker only appears on demand.
- */
-const ColorSwatchRow = React.memo(function ColorSwatchRow({
-  label,
-  color,
-  onChange,
-}: {
-  label: string;
-  color: string;
-  onChange: (c: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div className="flex items-center gap-2 px-1">
-      <span className={ROW_LABEL}>{label}</span>
-      <Popover
-        isOpen={open}
-        onClose={() => setOpen(false)}
-        position="left"
-        align="start"
-        content={
-          <div className="w-52 p-2.5">
-            <ColorPickerPro
-              variant="compact"
-              color={color}
-              onChange={onChange}
-            />
-          </div>
-        }
-      >
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-2 flex-1 px-1.5 py-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-stage)] hover:border-indigo-500/40 transition-colors"
-        >
-          <span
-            className="w-4 h-4 rounded shadow-inner ring-1 ring-black/15 dark:ring-white/20 shrink-0"
-            style={{ backgroundColor: color }}
-          />
-          <span className="text-[10px] font-bold uppercase tabular-nums text-[var(--text-main)] tracking-tight">
-            {color}
-          </span>
-        </button>
-      </Popover>
-    </div>
-  );
-});
 
 /**
  * MarkerPanel: annotation marker attributes panel.
@@ -155,6 +98,7 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
       <div className="flex flex-col gap-1.5 p-1">
         <ColorSwatchRow
           label="Color"
+          labelClassName={ROW_LABEL}
           color={strokeColor.hex}
           onChange={(c) =>
             updateMarkerData({

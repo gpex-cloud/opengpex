@@ -74,7 +74,7 @@ const { runCommand, abortCommand } = createToolCommand<
   preCheck: (_imageData, _entry, ctx) => {
     const clipBox = getClipBox(ctx.activeFrame!);
     if (!clipBox || !clipBox.rings || clipBox.rings.length === 0) {
-      return 'No selection — use rect, lasso, wand, or SAM to select an area first';
+      return 'No selection — use rect, lasso, wand, SAM, or pen to select an area first';
     }
     return null;
   },

@@ -2,6 +2,14 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.27
+
+- Pen Tool: new vector pen — click to place anchors, click-drag to pull out curve handles, and close the path on the first anchor; anchors and handles stay editable afterwards (drag to move, add or delete points, straight or curved segments), with fill and stroke settings. A finished path can be rendered into a layer, turned into a selection, or applied as a layer mask. Drafts survive switching tools and frames, and Esc backs out in two steps: first the in-progress segment, then the whole draft
+- Editing: in-progress tool work now has its own undo/redo — while a pen path is being drawn, Undo/Redo step through the anchors you placed instead of touching document history, and return to the document once the path is committed or discarded
+- Selection: lasso and polygon selections can be converted into an editable pen path from the selection options ("Apply as Bezier", with an anchor-count setting); the separate "Import Selection" and "Edit with Pen" entries are gone
+
+---
+
 ## v2.0.26
 
 - Rendering: the zoom-driven density-band compositing design has been removed entirely — the canvas is now composited once at the document's own resolution and simply magnified when you zoom in; a new "Retina-sharp rendering" option (on by default) keeps vector and text edges crisp at 100% on retina screens
@@ -21,6 +29,7 @@ All notable changes to OpenGPEX are documented in this file.
 
 ---
 
+## v2.0.24
 
 - Workspace: new markers, text boxes and brush strokes are no longer folded into automatically created "Group Markers" / "Group Texts" / "Group Strokes" layer groups — each one is placed as a plain layer directly above the active layer, leaving grouping entirely up to you
 - Export: the bit depth selector now follows the document by default, matching the behavior of the color space setting; the active tab is green while it matches the document and amber when it deviates
