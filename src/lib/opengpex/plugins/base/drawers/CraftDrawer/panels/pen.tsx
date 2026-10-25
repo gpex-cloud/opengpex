@@ -28,6 +28,8 @@ import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import { PenOverlayAPI } from "../../../overlays/PenOverlay/protocols";
 import { getPenDraft } from "../../../overlays/PenOverlay/interactions";
 import { srgbHexToColorValue, PEN_DEFAULT_FILL_HEX } from "../../../overlays/PenOverlay/contribution";
+import { toHex } from "@opengpex/editor/core/engine/color";
+import type { ColorValue } from "@opengpex/editor/core/engine/color";
 import { hasCommittableGeometry } from "../../../overlays/PenOverlay/pen/penState";
 import type { CraftDrawerConfig } from "../protocols";
 
@@ -45,7 +47,7 @@ import type { CraftDrawerConfig } from "../protocols";
  * "Create Shape Layer" is pre-Phase-3: rendered disabled on purpose.
  */
 export const PenPanel = React.memo(function PenPanel() {
-  const { state, activeFrame } = useEditorState();
+  const { state, activeFrame, activeLayer } = useEditorState();
   const { actions } = useEditorServices();
   const [selfConfig, setSelfConfig] = usePluginSelfConfig<CraftDrawerConfig>();
 
@@ -84,13 +86,50 @@ export const PenPanel = React.memo(function PenPanel() {
     setSelfConfig({ penAnchorBudget: ANCHOR_BUDGET_DETENTS[idx] } as Partial<CraftDrawerConfig>);
   };
 
-  // Shape layer style: persisted in pluginConfig like the marker panel's
-  // pending style — the last-used fill/stroke carries into the next session.
-  const fillHex = selfConfig.penFillHex ?? PEN_DEFAULT_FILL_HEX;
-  const strokeHex = selfConfig.penStrokeHex ?? "#0f172a";
-  const strokeWidth = selfConfig.penStrokeWidth ?? 0;
+  // Shape layer style, DUAL-MODE like the marker panel:
+  // - LAYER mode (the selected layer is a committed shape AND no draft
+  //   session is being drawn): the style controls edit that layer's penStyle
+  //   through the undoable updatePenStyle command (colors AND stroke width —
+  //   the command re-runs the padded-bounds rebase for width changes), and
+  //   remember the values as the pending preset for the next session.
+  // - SESSION mode (a draft session is being drawn, or nothing editable is
+  //   selected): the style controls write the pending preset consumed by
+  //   "Create Shape Layer". The gate keys on the LIVE DRAWING PHASE, not on
+  //   draft existence — Create Shape Layer keeps its draft on purpose, so a
+  //   kept draft must not lock the user out of editing the committed shape.
+  //   While anchors are being placed the swatches mean "style of the shape
+  //   I am about to create" (the pick-color-then-commit mental model).
+  const draftSessionLive = phase === "drawing";
+  const styleTargetLayer =
+    activeLayer && activeLayer.type === "vector" && activeLayer.penData && !draftSessionLive
+      ? activeLayer
+      : null;
+  const layerPenStyle = styleTargetLayer?.penStyle;
+  const pendingFillHex = selfConfig.penFillHex ?? PEN_DEFAULT_FILL_HEX;
+  const pendingStrokeHex = selfConfig.penStrokeHex ?? "#0f172a";
+  const fillHex = layerPenStyle?.fill ? toHex(layerPenStyle.fill) : pendingFillHex;
+  const strokeHex = layerPenStyle?.stroke ? toHex(layerPenStyle.stroke.color) : pendingStrokeHex;
+  const strokeWidth = layerPenStyle?.stroke
+    ? layerPenStyle.stroke.width
+    : (selfConfig.penStrokeWidth ?? 0);
   const updateStyle = (patch: Partial<{ penFillHex: string; penStrokeHex: string; penStrokeWidth: number }>) => {
-    setSelfConfig(patch as Partial<CraftDrawerConfig>);
+    if (styleTargetLayer && activeFrame) {
+      const commandPatch: { fill?: ColorValue | null; strokeColor?: ColorValue; strokeWidth?: number } = {};
+      if (patch.penFillHex !== undefined) commandPatch.fill = srgbHexToColorValue(patch.penFillHex);
+      if (patch.penStrokeHex !== undefined) commandPatch.strokeColor = srgbHexToColorValue(patch.penStrokeHex);
+      if (patch.penStrokeWidth !== undefined) commandPatch.strokeWidth = patch.penStrokeWidth;
+      actions.executeCommand(PenOverlayAPI.commands.updatePenStyle.uid, {
+        frameId: activeFrame.id,
+        layerId: styleTargetLayer.id,
+        patch: commandPatch,
+      });
+    }
+    // Either mode remembers the values as the next-session preset (colors in
+    // both modes, stroke width in session mode — width never lands on the
+    // layer, see the mode comment above).
+    if (patch.penFillHex !== undefined || patch.penStrokeHex !== undefined || patch.penStrokeWidth !== undefined) {
+      setSelfConfig(patch as Partial<CraftDrawerConfig>);
+    }
   };
 
   return (
@@ -166,6 +205,7 @@ export const PenPanel = React.memo(function PenPanel() {
             type="number"
             suffix="px"
             className="w-16"
+            inputTestId="pen-stroke-width"
             onChange={() => {}}
             onCommit={(val) => updateStyle({ penStrokeWidth: Math.max(0, Number(val) || 0) })}
           />

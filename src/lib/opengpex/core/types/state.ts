@@ -22,7 +22,8 @@
  */
 import { Frame, Layer, CameraState, NormalizedState } from './models';
 import { Dimensions, SmartGuideData } from './geometry';
-import { LocalShape, LocalPolygon } from './primitives';
+import { LocalShape } from './primitives';
+import { SpringChannel } from './plugins';
 import { Patch } from 'immer';
 
 export type CoreEditorSlot = 'TL' | 'TR' | 'BL' | 'BR' | 'DOCK' | 'SIDE_BAR' | 'ROOT_OVERLAY' | 'VIEWPORT_OVERLAY' | 'STAGE_OVERLAY' | 'STAGE_GIZMOS' | 'OPTION_BAR' | 'TOOL_MENU' | 'HIDDEN';
@@ -57,8 +58,6 @@ export interface InteractionState {
     duration?: number;
   } | null;
   signals: Record<string, InteractionSignalValue>;
-  /** Cursor override value that plugin can set (null = use default logic) */
-  cursorOverride: string | null;
 }
 
 export interface UIConfig {
@@ -129,7 +128,6 @@ export type EditorAction =
   | { type: 'SET_LAYERS'; payload: { frameId: string; layers: Layer[] } }
   | { type: 'SET_ACTIVE_LAYER'; payload: { frameId: string; layerId: string | null } }
   | { type: 'UPDATE_CAMERA'; payload: { frameId: string; camera: CameraState } }
-  | { type: 'SET_CLIP_BOX'; payload: { frameId: string; toolId: string; value: LocalPolygon | null } }
   | { type: 'SET_CANVAS_CLIP_BOX'; payload: { frameId: string; clipBox: LocalShape } }
 
   | { type: 'SET_IMAGE_ASPECT'; payload: { frameId: string; aspect: number | undefined } }
@@ -167,8 +165,26 @@ export interface VolatileInteraction {
   hoveredLayerId: string | null;
   /** Whether the cursor is hovering the active (selected) layer */
   isHoveringActiveLayer: boolean;
-  /** Cursor override value set by plugins/tools (null = use default logic) */
-  cursorOverride: string | null;
+  /** THE cursor output — the single resolved value the viewport (and
+   * element-level consumers) display. Computed by the cursor service from
+   * the inputs below; never written by plugins directly. */
+  resolvedCursor: string | null;
+  /** The resolved cursor WHEN it carries global (object-manipulation)
+   * semantics — move/grab/grabbing — else null. Elements that own a base
+   * cursor of their own (e.g. a contenteditable's 'text' caret) yield to
+   * this value and keep their base otherwise; the global-family policy
+   * lives here in the service, not at the element. */
+  globalCursor: string | null;
+  /** Per-channel spring key engagement (the channel's physical key held,
+   * not suppressed). `meta` is the only channel with semantics attached
+   * today (cursor priority + press routing); `alt` / `shift` are reserved
+   * for future spring channels. */
+  springChannels: Record<SpringChannel, boolean>;
+  /** Spring key suppression: a modal context (e.g. Re-Canvas) claims every
+   * press and must not be overridden by the spring key — while true the
+   * cursor service skips the spring priority and the dispatcher routes
+   * Cmd+drag as a bare drag. */
+  springSuppressed: boolean;
   /** HUD toast message (null = no message) */
   hud: { message: string; type: 'info' | 'success' | 'error'; subtitle?: string } | null;
   /** Smart guide alignment data during interactions */

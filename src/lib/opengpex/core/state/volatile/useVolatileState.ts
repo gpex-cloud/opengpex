@@ -36,7 +36,12 @@ export const INITIAL_VOLATILE: VolatileState = {
   interaction: {
     hoveredLayerId: null,
     isHoveringActiveLayer: false,
-    cursorOverride: null,
+    resolvedCursor: null,
+    globalCursor: null,
+    /** Per-channel spring key engagement (see VolatileInteraction). */
+    springChannels: { meta: false, alt: false, shift: false },
+    /** Spring key suppression (modal contexts that own every press). */
+    springSuppressed: false,
     hud: null,
     smartguides: null,
   },

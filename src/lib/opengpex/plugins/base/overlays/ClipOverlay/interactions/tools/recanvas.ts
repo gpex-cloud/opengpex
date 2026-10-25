@@ -47,6 +47,11 @@ const EDGE_HIT_THRESHOLD_PX = 6;
 export const createReCanvasHandler = (): InteractionHandler => {
   return createTransformHandler({
     id: 'clip-recanvas',
+    // No springOverride needed: Re-Canvas is a modal that suppresses the
+    // spring key entirely (ClipOverlay hooks drive spring.setSuppressed from
+    // the same reCanvas signal), so the dispatcher's Cmd filter is off for
+    // the whole lifetime of this handler's jurisdiction.
+
     priority: 115,
     clampAnchor: false, // Re-Canvas must NOT clamp anchor to canvas bounds
 

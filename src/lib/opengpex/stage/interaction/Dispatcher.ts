@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionHandler, InteractionEvent } from '@opengpex/editor/core/types';
+import { InteractionHandler, InteractionEvent, SpringChannel } from '@opengpex/editor/core/types';
 
 /**
  * InteractionDispatcher: Interaction dispatcher
@@ -54,7 +54,23 @@ export class InteractionDispatcher {
       }
     }
 
+    // ── Spring keys: an ENGAGED channel (held, not suppressed) means
+    //    "move the object under the pointer". While any channel is engaged,
+    //    only handlers that declare a springOverride on one of the engaged
+    //    channels (tool-specific semantics such as selection peel) plus the
+    //    global layer-move fallback are consulted — every other handler is
+    //    treated as nonexistent, so craft tools cannot swallow the press and
+    //    the global temporary-move holds in any mode without per-tool
+    //    cooperation. Channel-generic: a future alt spring needs no change
+    //    here, only handlers declaring 'alt'.
+    const engagedChannels = (Object.keys(e.spring) as SpringChannel[]).filter(
+      (channel) => e.spring[channel],
+    );
+
     for (const handler of this.handlers) {
+      const overridesEngaged =
+        handler.springOverride !== undefined && engagedChannels.includes(handler.springOverride);
+      if (engagedChannels.length > 0 && !overridesEngaged && handler.id !== 'layer-move') continue;
       if (handler.test(e)) {
         this.activeHandler = handler;
         handler.onStart?.(e);

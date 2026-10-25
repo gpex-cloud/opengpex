@@ -207,7 +207,7 @@ export const createWandHandler = (): InteractionHandler => {
       );
 
       // 6. Commit to wand slot.
-      e.actions.setClipBox(e.activeFrame.id, 'wand', framePoly);
+      e.actions.updateFrame(e.activeFrame.id, { confinement: framePoly });
     },
   });
 };

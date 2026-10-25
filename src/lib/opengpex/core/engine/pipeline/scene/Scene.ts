@@ -306,6 +306,17 @@ export interface StrokeParams {
    * by the time params reach the renderer.
    */
   readonly antiAliased: boolean;
+  /**
+   * Frozen selection-confinement snapshot (from `StrokeData.confinement`):
+   * even-odd rings in LAYER-LOCAL logical px + the edge AA flag. When present,
+   * the paint fragment multiplies the stroke's coverage by this polygon's
+   * rasterized coverage (baked per layer by the vector spine), clipping the
+   * stroke to the selection it was drawn in. Absent = unconstrained.
+   */
+  readonly confinement?: {
+    readonly rings: readonly (readonly (readonly [number, number])[])[];
+    readonly antiAliased: boolean;
+  };
 }
 
 /**
@@ -636,6 +647,25 @@ export interface LayerNode {
   readonly adjustments?: readonly AdjustmentDesc[];
   /** Applied in order, after `adjustments`. */
   readonly filters?: readonly FilterDesc[];
+  /**
+   * FROZEN selection snapshot for Photoshop-style LOCAL adjustments — the
+   * polygon rings (layer-local px, crop-local: same re-base as `vmask`
+   * sub-masks) the grading shaders blend the grade against.
+   *
+   * The build bakes these rings into an exact-size coverage texture
+   (`prepareConfinementCoverage`, the shared frozen-selection cache under the
+   `adjust:` key namespace — never shared with the hole-mask vmask cache) and
+   binds it next to the grade
+   evaluation in `layer.wgsl` / `blend.wgsl` / `adjustPre.wgsl`. The shaders
+   compute `mix(color, graded, coverage)` — inside the polygon the grade
+   applies, outside it the original colour passes through, and the layer's
+   ALPHA IS NEVER CLIPPED (that is the whole difference from `vmask`).
+   Undefined ⇒ the grade applies to the whole layer (classic behaviour).
+   */
+  readonly adjustConfinement?: {
+    readonly rings: readonly (readonly (readonly [number, number])[])[];
+    readonly antiAliased: boolean;
+  };
   /** Clip to the layer below (Photoshop-style clipping mask). */
   readonly clip?: boolean;
   /**

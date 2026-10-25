@@ -208,6 +208,12 @@ struct StrokeUniforms {
 
 @group(0) @binding(0) var<uniform> u : StrokeUniforms;
 
+// Group 1 — confinement coverage (selection multiply). ALWAYS bound: a stroke
+// drawn without an active selection binds a 1×1 alpha=1 dummy, so one pipeline
+// serves constrained and free strokes alike. Coverage rides the RED channel.
+@group(1) @binding(0) var confinement_tex : texture_2d<f32>;
+@group(1) @binding(1) var confinement_smp : sampler;
+
 struct VSInput {
   @location(0) pos    : vec2<f32>,
   @location(1) core_a : vec2<f32>,
@@ -252,13 +258,22 @@ fn fs_paint(in : VSOut) -> @location(0) vec4<f32> {
   // Normalized radial distance: 0 on the core, 1 at the capsule edge, >1 outside.
   let dn = length(in.p - c) / r;
 
+  // Selection confinement: the fragment's normalized position samples the frozen
+  // selection's baked coverage 1:1 (the texture spans the transient's logical
+  // extent). COVERAGE RIDES THE ALPHA CHANNEL (vmask bake convention: .a =
+  // coverage, .rgb = 1). Unconstrained strokes sample the 1×1 dummy (coverage
+  // 1) — a free stroke multiplies by exactly 1 and stays bit-identical to the
+  // pre-confinement pipeline. Multiplied BEFORE the MAX union so every
+  // overlapping segment's contribution carries the same selection falloff.
+  let conf = textureSampleLevel(confinement_tex, confinement_smp, in.p / max(u.target_size, vec2<f32>(1.0, 1.0)), 0.0).a;
+
   // Hard-edge branch: binary capsule coverage — every sample inside the capsule
   // (dn <= 1) is fully opaque, everything outside fully transparent. hardness is
   // ignored (the hard-edge flag only makes sense with a fully-hard tip). No
   // fwidth term: the step lands exactly on the geometry edge (pixel-art look).
   if (u.hard_edge == 1u) {
     let cov = select(0.0, 1.0, dn <= 1.0);
-    return vec4<f32>(u.color.rgb, u.color.a * cov);
+    return vec4<f32>(u.color.rgb, u.color.a * cov * conf);
   }
 
   // Analytic edge AA from the screen-space gradient, so the geometric edge stays smooth
@@ -271,6 +286,6 @@ fn fs_paint(in : VSOut) -> @location(0) vec4<f32> {
   let cov = 1.0 - smoothstep(inner, 1.0, dn);
 
   // STRAIGHT alpha — downstream drawLayer premultiplies and applies layer.opacity.
-  return vec4<f32>(u.color.rgb, u.color.a * cov);
+  return vec4<f32>(u.color.rgb, u.color.a * cov * conf);
 }
 `;

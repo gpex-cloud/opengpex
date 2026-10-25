@@ -103,6 +103,27 @@ export default function HotkeyManager() {
         return;
       }
 
+      // Text-editing sessions yield undo/redo to the browser: when the focus
+      // is inside a contenteditable (the inline text editor), the platform's
+      // native undo stack handles caret-accurate text undo/redo for free, and
+      // the stack dies with the element on session commit — it can never leak
+      // into document history. IME composition is excluded: native undo over
+      // an uncommitted composition string behaves inconsistently across
+      // browsers, so the key falls through untouched there too.
+      if (
+        (e.key === "z" || e.key === "Z" || e.key === "y") &&
+        (e.ctrlKey || e.metaKey) &&
+        target.isContentEditable &&
+        !e.isComposing
+      ) {
+        return;
+      }
+
+      // NOTE: Space is intentionally NOT swallowed here — it is bound to the
+      // selection-mode toggle command, whose HotkeyManager match prevents the
+      // browser default (scrolling / focused-button activation) on every
+      // keystroke in every mode.
+
       // 2. Match hotkey
       const allShortcuts = plugins.getAllShortcuts();
       const shortcut = allShortcuts.find((s) => {

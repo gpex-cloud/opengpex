@@ -62,10 +62,10 @@ export function commitRefocusToOverlay(
             asLocalPoint({ x: x + w, y: y + h }),
             asLocalPoint({ x, y: y + h }),
         ];
-        ctx.actions.setClipBox(frame.id, target.clipToolId, asLocalPolygon([ring], rect, true));
+        ctx.actions.updateFrame(frame.id, { confinement: asLocalPolygon([ring], rect, true) });
     } else {
         // 3b. Write irregular polygon
-        ctx.actions.setClipBox(frame.id, target.clipToolId, target.polygon);
+        ctx.actions.updateFrame(frame.id, { confinement: target.polygon });
     }
 
     // 4. Enter clip mode

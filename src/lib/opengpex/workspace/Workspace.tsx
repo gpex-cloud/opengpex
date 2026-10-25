@@ -44,6 +44,7 @@ import DrawerBar from "./components/DrawerBar";
 
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
 import HotkeyManager from "./components/HotkeyManager";
+import SpringKeyManager from "./components/SpringKeyManager";
 
 /** Boot overlay subtitles keyed by the core.bootStage lifecycle signal. */
 const BOOT_SUBTITLES: Record<string, string> = {
@@ -180,6 +181,7 @@ export function Workspace() {
         <GlobalUI />
         <PluginSlot name="ROOT_OVERLAY" />
         <HotkeyManager />
+        <SpringKeyManager />
       </div>
     </LayoutProvider>
   );

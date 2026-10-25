@@ -84,6 +84,8 @@ export function useViewportEvents(
     const worldPoint = geometry.space.screenToWorld(screenPoint.x, screenPoint.y, frame, currentCam);
     const canvasPoint = geometry.space.worldToLocal(worldPoint.x, worldPoint.y, frame);
 
+    const springSuppressed = actions.fast.spring.isSuppressed();
+
     return {
       nativeEvent: e,
       point: {
@@ -95,6 +97,17 @@ export function useViewportEvents(
         shift: e.shiftKey,
         alt: e.altKey,
         meta: e.metaKey || e.ctrlKey,
+      },
+      // Every channel folds in spring-key suppression: a modal context that
+      // owns every press (e.g. Re-Canvas) makes spring keys route as bare
+      // drags, so consumers (dispatcher filter, handler gates) see
+      // disengaged channels uniformly — suppression is all-channel by
+      // definition, never per-key. `alt` / `shift` are reserved channels
+      // with no spring semantics attached yet.
+      spring: {
+        meta: (e.metaKey || e.ctrlKey) && !springSuppressed,
+        alt: e.altKey && !springSuppressed,
+        shift: e.shiftKey && !springSuppressed,
       },
       pointer: extractPointerInfo(e),
       geometry,

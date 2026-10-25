@@ -20,10 +20,18 @@
 'use client';
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
-import type { Layer } from '@opengpex/editor/core/types';
+import type { Layer, Frame, LocalPolygon } from '@opengpex/editor/core/types';
 import type { CurvePoints, CurvesState, LevelsState, ChannelMixState, ColorBalanceState, AdjustmentState } from '@opengpex/editor/core/types/models';
+import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { resolveEdgeFeatherRoute, buildFeatherRepadPatch } from '@opengpex/editor/core/layer/services/fragment';
 import * as P from './protocols';
+import {
+  DEFAULT_ADJUSTMENTS_STATE,
+  DEFAULT_CHANNEL_MIX_STATE,
+  DEFAULT_COLOR_BALANCE_STATE,
+  DEFAULT_LEVELS_STATE,
+  IDENTITY_CURVE_POINTS,
+} from './protocols';
 import type {
   GradingTool,
   AdjustmentDrawerConfig,
@@ -74,6 +82,104 @@ function openDrawerWithTool(ctx: EditorContextValue, tool: GradingTool) {
 
   // 2. Switch to the target tool panel
   setActiveTool(ctx, tool);
+}
+
+// ─── Local-adjustment confinement (Photoshop-style) ───────────────────────────
+
+/**
+ * Identity probes for the five per-layer grade fields. A layer "has a grade"
+ * when ANY field deviates from its identity baseline — the same semantics the
+ * render pipeline uses to decide whether grading work is needed at all.
+ */
+export function layerHasGrade(layer: Layer): boolean {
+  const a = layer.adjustments;
+  if (a) {
+    const d = DEFAULT_ADJUSTMENTS_STATE;
+    if (
+      (a.brightness ?? d.brightness) !== d.brightness ||
+      (a.contrast ?? d.contrast) !== d.contrast ||
+      (a.saturation ?? d.saturation) !== d.saturation ||
+      (a.hueRotate ?? d.hueRotate) !== d.hueRotate ||
+      (a.blur ?? d.blur) !== d.blur ||
+      (a.edgeFeather ?? 0) !== 0
+    ) return true;
+  }
+  const isIdentityCurve = (pts: CurvePoints | undefined) =>
+    pts === undefined || pts.every((p, i) => p[0] === IDENTITY_CURVE_POINTS[i]?.[0] && p[1] === IDENTITY_CURVE_POINTS[i]?.[1]);
+  const c = layer.curves;
+  if (c && !(isIdentityCurve(c.rgb) && isIdentityCurve(c.red) && isIdentityCurve(c.green) && isIdentityCurve(c.blue))) return true;
+  const l = layer.levels;
+  if (l) {
+    const dl = DEFAULT_LEVELS_STATE;
+    if (
+      l.inputBlack !== dl.inputBlack || l.inputWhite !== dl.inputWhite ||
+      l.gamma !== dl.gamma || l.outputBlack !== dl.outputBlack || l.outputWhite !== dl.outputWhite
+    ) return true;
+  }
+  const m = layer.channelMix;
+  if (m) {
+    const dm = DEFAULT_CHANNEL_MIX_STATE;
+    const row = (r: readonly number[], dr: readonly number[]) => r[0] !== dr[0] || r[1] !== dr[1] || r[2] !== dr[2];
+    if (
+      row(m.red, dm.red) || row(m.green, dm.green) || row(m.blue, dm.blue) ||
+      row(m.constant ?? [0, 0, 0], [0, 0, 0])
+    ) return true;
+  }
+  const b = layer.colorBalance;
+  if (b) {
+    const db = DEFAULT_COLOR_BALANCE_STATE;
+    const row = (r: readonly number[], dr: readonly number[]) => r[0] !== dr[0] || r[1] !== dr[1] || r[2] !== dr[2];
+    if (row(b.shadows, db.shadows) || row(b.midtones, db.midtones) || row(b.highlights, db.highlights)) return true;
+  }
+  return false;
+}
+
+/**
+ * Build the FROZEN selection snapshot patch for Photoshop-style local
+ * adjustments. Returns `{ adjustmentConfinement }` to spread into the SAME
+ * layer write that introduces the layer's FIRST grade — the mask is born
+ * attached, in one undo step, and from then on lives on the layer
+ * independently of the frame selection (editing or clearing the selection
+ * never changes a frozen adjustment).
+ *
+ * Returns `undefined` — i.e. no snapshot — when any of these holds:
+ *   • no active frame selection (`frame.confinement`);
+ *   • the layer already carries a frozen snapshot (never re-frozen);
+ *   • the layer ALREADY has a grade (only the first grade captures the
+ *     selection, matching "draw selection → add adjustment");
+ *   • the projected polygon is degenerate (zero area — same guard the
+ *     Apply-as-Mask converter uses).
+ *
+ * The snapshot is projected into the TARGET layer's local space (via the
+ * geometry service, mirroring the Apply-as-Layer-Mask converter) so it
+ * travels with the layer under later moves/transforms.
+ */
+export function adjustmentConfinementPatch(
+  ctx: EditorContextValue,
+  frame: Frame,
+  layer: Layer,
+): { adjustmentConfinement: LocalPolygon } | undefined {
+  if (layer.adjustmentConfinement) return undefined;
+  if (layerHasGrade(layer)) return undefined;
+  const selection = getClipBox(frame);
+  if (!selection) return undefined;
+  const layerPoly = ctx.geometry.polygon.frameLocalToLayerLocal(selection, frame, layer);
+  // Degenerate-selection guard (single click, collinear points): the shoelace
+  // area of every ring is ~0, so freezing it would attach an empty mask that
+  // silently localizes the grade to nothing. Same guard the Apply-as-Layer-Mask
+  // converter applies via its shape rect.
+  const ringArea = (ring: readonly { x: number; y: number }[]) => {
+    let a = 0;
+    for (let i = 0; i < ring.length; i++) {
+      const p = ring[i];
+      const q = ring[(i + 1) % ring.length];
+      a += p.x * q.y - q.x * p.y;
+    }
+    return Math.abs(a) / 2;
+  };
+  const totalArea = layerPoly.rings.reduce((sum, ring) => sum + ringArea(ring), 0);
+  if (!(totalArea > 0.5)) return undefined;
+  return { adjustmentConfinement: layerPoly };
 }
 
 // ─── Curves helpers ────────────────────────────────────────────────────────────
@@ -241,6 +347,10 @@ export const ADJUSTMENT_COMMANDS = {
         levels: undefined,
         channelMix: undefined,
         colorBalance: undefined,
+        // With every grade gone the frozen selection snapshot has nothing to
+        // localize — clear it so a FUTURE first grade captures the THEN-active
+        // selection, not this stale one.
+        adjustmentConfinement: undefined,
         // Edge Feather's routed carriers (visibleShape pad / vectorMask
         // feather) don't live in `adjustments` — clear them in the SAME write
         // so reset stays one undo step.
@@ -284,14 +394,24 @@ export const ADJUSTMENT_COMMANDS = {
           patch = { channelMix: undefined };
           break;
       }
+      // The frozen selection snapshot localizes the grades — once the reset
+      // leaves NO grade on the layer it has nothing to localize, so clear it
+      // (a future first grade then captures the then-active selection).
+      // When another family still carries a grade, the snapshot stays.
+      const remainingGrade = layerHasGrade({
+        ...activeLayer,
+        ...patch,
+        ...(tool === 'basic' ? { adjustments: undefined } : {}),
+      } as Layer);
+      const confClear = remainingGrade ? {} : { adjustmentConfinement: undefined };
       // Basic owns the Edge Feather slider — its routed carriers must reset
       // with the panel (other tools never touched them).
       actions.updateLayer(
         activeFrame.id,
         activeLayer.id,
         tool === 'basic'
-          ? { ...patch, ...clearEdgeFeatherPatch(activeLayer) }
-          : patch,
+          ? { ...patch, ...confClear, ...clearEdgeFeatherPatch(activeLayer) }
+          : { ...patch, ...confClear },
       );
     },
   } as EditorCommand<void, void>,
@@ -319,8 +439,11 @@ export const ADJUSTMENT_COMMANDS = {
     ) => {
       const { activeFrame, activeLayer, actions } = ctx;
       if (!activeFrame || !activeLayer) return;
+      // First-grade capture rides the same write (one undo step).
+      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
       actions.updateLayer(activeFrame.id, activeLayer.id, {
         curves: mergeCurves(activeLayer.curves, payload.channel, payload.points),
+        ...(conf ?? {}),
       });
     },
   } as EditorCommand<{ channel: CurveChannel; points: CurvePoints }, void>,
@@ -340,8 +463,11 @@ export const ADJUSTMENT_COMMANDS = {
         activeLayer.curves?.[payload.channel] ??
         P.IDENTITY_CURVE_POINTS.map((p) => [p[0], p[1]] as [number, number]);
       const nextPts = insertPointSorted(currentChannelPts, payload.x, payload.y);
+      // First-grade capture rides the same write (one undo step).
+      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
       actions.updateLayer(activeFrame.id, activeLayer.id, {
         curves: mergeCurves(activeLayer.curves, payload.channel, nextPts),
+        ...(conf ?? {}),
       });
     },
   } as EditorCommand<{ channel: CurveChannel; x: number; y: number }, void>,
@@ -409,7 +535,9 @@ export const ADJUSTMENT_COMMANDS = {
       // never accidentally drops the other three fields.
       const current = activeLayer.levels ?? P.DEFAULT_LEVELS_STATE;
       const next: LevelsState = { ...current, ...payload.patch };
-      actions.updateLayer(activeFrame.id, activeLayer.id, { levels: next });
+      // First-grade capture rides the same write (one undo step).
+      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
+      actions.updateLayer(activeFrame.id, activeLayer.id, { levels: next, ...(conf ?? {}) });
     },
   } as EditorCommand<{ patch: LevelsPatch }, void>,
 
@@ -440,7 +568,9 @@ export const ADJUSTMENT_COMMANDS = {
         inputBlack: ib,
         inputWhite: iw,
       };
-      actions.updateLayer(activeFrame.id, activeLayer.id, { levels: next });
+      // First-grade capture rides the same write (one undo step).
+      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
+      actions.updateLayer(activeFrame.id, activeLayer.id, { levels: next, ...(conf ?? {}) });
     },
   } as EditorCommand<{ inputBlack: number; inputWhite: number }, void>,
 
@@ -479,7 +609,9 @@ export const ADJUSTMENT_COMMANDS = {
       // coefficient. Same for `constant`. This keeps the merge O(1) and
       // avoids the deep-clone cost that comes with row-level assignment.
       const next: ChannelMixState = { ...current, ...payload.patch };
-      actions.updateLayer(activeFrame.id, activeLayer.id, { channelMix: next });
+      // First-grade capture rides the same write (one undo step).
+      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
+      actions.updateLayer(activeFrame.id, activeLayer.id, { channelMix: next, ...(conf ?? {}) });
     },
   } as EditorCommand<{ patch: ChannelMixPatch }, void>,
 
@@ -515,7 +647,9 @@ export const ADJUSTMENT_COMMANDS = {
           ? [preset.constant[0], preset.constant[1], preset.constant[2]]
           : [0, 0, 0],
       };
-      actions.updateLayer(activeFrame.id, activeLayer.id, { channelMix: next });
+      // First-grade capture rides the same write (one undo step).
+      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
+      actions.updateLayer(activeFrame.id, activeLayer.id, { channelMix: next, ...(conf ?? {}) });
     },
   } as EditorCommand<{ presetId: ChannelMixPresetId }, void>,
 
@@ -556,7 +690,13 @@ export const ADJUSTMENT_COMMANDS = {
       // AdjustmentState with all five keys populated.
       const current = (activeLayer.adjustments ?? P.DEFAULT_ADJUSTMENTS_STATE) as AdjustmentState;
       const next: AdjustmentState = { ...current, ...payload.patch };
-      actions.updateLayer(activeFrame.id, activeLayer.id, { adjustments: next });
+      // First-grade capture: attach the frozen selection snapshot in the SAME
+      // write (one undo step) when a frame selection is active.
+      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
+      actions.updateLayer(activeFrame.id, activeLayer.id, {
+        adjustments: next,
+        ...(conf ?? {}),
+      });
     },
   } as EditorCommand<{ patch: AdjustmentsPatch }, void>,
 
@@ -585,6 +725,9 @@ export const ADJUSTMENT_COMMANDS = {
       const latest = actions.fast.latestLayer(activeFrame.id, activeLayer.id) ?? activeLayer;
       const current = (latest.adjustments ?? P.DEFAULT_ADJUSTMENTS_STATE) as AdjustmentState;
       const next: AdjustmentState = { ...current, ...payload.patch };
+      // First-grade capture rides the SAME volatile draft — the gesture's
+      // commit lands the snapshot and the grade as one Redux write / undo step.
+      const conf = adjustmentConfinementPatch(ctx, activeFrame, latest);
 
       // ── Blur motion quantization (same cure as fastUpdateEdgeFeather) ──
       // The slider steps 0.1σ; a SLOW drag crosses a step on nearly every
@@ -601,7 +744,10 @@ export const ADJUSTMENT_COMMANDS = {
         next.blur = q;
       }
 
-      actions.fast.overrideLayer(activeFrame.id, activeLayer.id, { adjustments: next });
+      actions.fast.overrideLayer(activeFrame.id, activeLayer.id, {
+        adjustments: next,
+        ...(conf ?? {}),
+      });
     },
   } as EditorCommand<{ patch: AdjustmentsPatch; exact?: boolean }, void>,
 
@@ -823,7 +969,9 @@ export const ADJUSTMENT_COMMANDS = {
       if (!activeFrame || !activeLayer) return;
       const current = activeLayer.colorBalance ?? P.DEFAULT_COLOR_BALANCE_STATE;
       const next: ColorBalanceState = { ...current, ...payload.patch };
-      actions.updateLayer(activeFrame.id, activeLayer.id, { colorBalance: next });
+      // First-grade capture rides the same write (one undo step).
+      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
+      actions.updateLayer(activeFrame.id, activeLayer.id, { colorBalance: next, ...(conf ?? {}) });
     },
   } as EditorCommand<{ patch: ColorBalancePatch }, void>,
 } as const;

@@ -66,6 +66,7 @@ function resolveLayerSourceTexture(
   ctx: BuildContext,
   layer: LayerNode,
   asset: LayerTexture,
+  adjustConfinementSources: Map<string, GPUTexture>,
 ): PreparedSource {
   const { workingFormat, scratch } = ctx;
   if (!hasEffectiveFilters(layer)) {
@@ -130,6 +131,23 @@ function resolveLayerSourceTexture(
     // Viewport is the CONTENT rect: the pooled texture may be larger, and the
     // filter only ever reads [0,width)×[0,height).
     bakePass.setViewport(0, 0, asset.width, asset.height, 0, 1);
+    // Adjustment-confinement mapping: the coverage texture is baked over the
+    // layer's CONTENT rect (logical px), this pass samples the RAW asset
+    // (physical px) — scale the content rect through dprScale into asset px.
+    // A cropped fragment shares its source asset, so without this the
+    // confinement would misalign by the crop origin. Undefined crop → no
+    // override (identity mapping in the shader).
+    const confTexture = adjustConfinementSources.get(layer.id);
+    let adjRect: { cropX: number; cropY: number; contentW: number; contentH: number } | undefined;
+    if (confTexture && layer.crop) {
+      const dpr = layer.dprScale ?? 1;
+      adjRect = {
+        cropX: layer.crop.x * dpr,
+        cropY: layer.crop.y * dpr,
+        contentW: (layer.width ?? asset.width) * dpr,
+        contentH: (layer.height ?? asset.height) * dpr,
+      };
+    }
     AdjustPrePass.draw(bakePass, {
       device,
       pipelineCache,
@@ -137,7 +155,7 @@ function resolveLayerSourceTexture(
       targetFormat: workingFormat,
       resolveLutView: ctx.resolveLutView,
       resolveLut3dView: ctx.resolveLut3dView,
-    }, { layer, source: asset, sourceIsLinear: assetIsLinear });
+    }, { layer, source: asset, sourceIsLinear: assetIsLinear, adjustConfinementTexture: confTexture, adjRect });
     bakePass.end();
 
     filterInput = bake;
@@ -170,6 +188,7 @@ export function prepareFilteredSources(
   encoder: GPUCommandEncoder,
   compiled: CompiledScene,
   ctx: BuildContext,
+  adjustConfinementSources: Map<string, GPUTexture> = new Map(),
 ): Map<string, PreparedSource> {
   const out = new Map<string, PreparedSource>();
   for (const layer of compiled.scene.layers) {
@@ -177,7 +196,7 @@ export function prepareFilteredSources(
     if (layer.source.kind !== 'raster') continue;
     const asset = ctx.assets.get(layer.source.assetId);
     if (!asset) continue;
-    out.set(layer.id, resolveLayerSourceTexture(encoder, ctx, layer, asset));
+    out.set(layer.id, resolveLayerSourceTexture(encoder, ctx, layer, asset, adjustConfinementSources));
   }
   return out;
 }

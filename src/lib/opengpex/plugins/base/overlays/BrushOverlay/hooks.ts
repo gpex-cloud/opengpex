@@ -20,7 +20,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import { useEditorState, useEditorServices, usePluginConfig } from '@opengpex/editor/core/context';
+import { useEditorState, useEditorServices, usePluginConfig, useVolatileInteraction } from '@opengpex/editor/core/context';
 import { toCssColor4, type ColorValue } from '@opengpex/editor/core/engine/color';
 import { CraftDrawerAPI, type CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
@@ -82,6 +82,18 @@ export function useBrushCursorTracking(
   const pointerRef = useRef({ x: 0, y: 0 });
   const rafIdRef = useRef<number>(0);
   const isVisibleRef = useRef(false);
+  const springMetaRef = useRef(false);
+  const springChannels = useVolatileInteraction('springChannels');
+
+  // Cmd spring key state, read by the tracking loop below: while held the
+  // press routes away from this tool, so the ring must not REVEAL itself.
+  // The hide half (muting a visible ring while Cmd is down, restoring on
+  // release) is infrastructure: SpringKeyManager mirrors the flag onto
+  // <html data-spring-meta> and one global CSS rule mutes every element
+  // tagged `data-cursor-indicator` — no per-tool DOM write here.
+  useLayoutEffect(() => {
+    springMetaRef.current = springChannels.meta;
+  }, [springChannels]);
 
   useBrushCursorFastSync(cursorRef, isActive, brushSize);
 
@@ -108,7 +120,7 @@ export function useBrushCursorTracking(
         const el = cursorRef.current;
         if (!el) return;
         el.style.transform = `translate(${pointerRef.current.x}px, ${pointerRef.current.y}px)`;
-        if (!isVisibleRef.current) {
+        if (!isVisibleRef.current && !springMetaRef.current) {
           el.style.opacity = '1';
           isVisibleRef.current = true;
         }
@@ -161,10 +173,11 @@ export function useBrushToolLifecycle(isBrushMode: boolean) {
   // ─── Cursor: hide the native pointer, the ring replaces it ─────────────
   useEffect(() => {
     if (!isBrushMode) return;
-    actions.fast.setCursor('none');
+    actions.fast.cursor.register('brush', 'none');
+    // Unregister on tool switch / unmount; owner-scoped, so it can never
+    // clear another tool's declaration.
     return () => {
-      // Only release what we set — another tool may already own the cursor.
-      if (actions.fast.getCursor() === 'none') actions.fast.setCursor(null);
+      actions.fast.cursor.register('brush', null);
     };
   }, [isBrushMode, actions]);
 
@@ -179,17 +192,9 @@ export function useBrushToolLifecycle(isBrushMode: boolean) {
       e.preventDefault();
       e.stopPropagation();
       actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
-      actions.fast.setCursor(null);
     };
 
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isBrushMode, actions]);
-
-  // Safety net: never leave a hidden cursor behind on unmount.
-  useEffect(() => {
-    return () => {
-      if (actions.fast.getCursor() === 'none') actions.fast.setCursor(null);
-    };
-  }, [actions]);
 }

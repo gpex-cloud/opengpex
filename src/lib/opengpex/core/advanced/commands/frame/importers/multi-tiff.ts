@@ -154,7 +154,7 @@ async function rebuildOnePage(
     camera,
     canvasClipBox,
     metadata,
-    clipBoxes: {},
+    confinement: null,
   });
 }
 

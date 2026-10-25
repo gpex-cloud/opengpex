@@ -158,7 +158,8 @@ export function GuidePanel() {
           <div className="pt-4 mt-4 border-t border-[var(--border-subtle)] shrink-0">
             <p className="text-[9px] text-[var(--text-muted)] leading-relaxed font-bold italic uppercase tracking-tighter">
               Double-Click a layer in the panel to rename it. <br />
-              Hold Space + Drag to pan canvas at any time.
+              Press M / L / W / S to enter selection tools; Esc leaves.
+              Space toggles selection mode with your last-used tool.
             </p>
           </div>
         </div>

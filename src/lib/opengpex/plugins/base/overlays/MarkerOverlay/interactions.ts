@@ -122,11 +122,13 @@ function rescaleLocalGeometry(data: MarkerData, sx: number, sy: number): MarkerD
 /**
  * MarkerMoveHandler: drag an existing marker layer to move it.
  *
- * Priority 155 (> MarkerDrawHandler 145): when pointerdown lands on an existing
- * marker, we MOVE it instead of starting a new draw. Both handlers are gated to
- * craft mode + activeCraft==='marker', so their priorities only matter relative
- * to each other (all text handlers 150–170 are text-gated). Uses
- * InteractionTransaction for undo support (same shape as TextMoveHandler).
+ * Gated to the Cmd/Ctrl spring key — moving an existing marker is NEVER a
+ * bare-press affordance (a bare press draws a new marker through
+ * MarkerDrawHandler instead). Under the spring key this handler outranks
+ * LayerMoveHandler (priority 10) so the marker keeps its own move semantics:
+ * the click also selects the layer and arms its kind. Both handlers are gated
+ * to craft mode + activeCraft==='marker'. Uses InteractionTransaction for
+ * undo support (same shape as TextMoveHandler).
  */
 export const createMarkerMoveHandler = (): InteractionHandler => {
   let startCanvas = { x: 0, y: 0 };
@@ -141,6 +143,8 @@ export const createMarkerMoveHandler = (): InteractionHandler => {
     test: (e) => {
       if (e.state.interaction.interactionMode !== 'craft') return false;
       if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'marker') return false;
+      // Spring key only: bare press over a marker belongs to the draw handler.
+      if (!e.spring.meta) return false;
 
       // Exclude UI element clicks (buttons, panels, resize handles).
       const target = e.nativeEvent.target as HTMLElement;
@@ -175,7 +179,7 @@ export const createMarkerMoveHandler = (): InteractionHandler => {
 
       tx = new InteractionTransaction(e, { useIncreComp: true });
       tx.begin(false);
-      e.actions.fast.setCursor('grabbing');
+      e.actions.fast.cursor.notifyDragging('grabbing');
     },
 
     onMove: (e) => {
@@ -191,18 +195,17 @@ export const createMarkerMoveHandler = (): InteractionHandler => {
         tx = null;
       }
       targetLayerId = null;
-      // The pointer is still over the marker it just dragged: hand the hover
-      // cursor back directly instead of clearing to the arrow and waiting for
-      // the next pointermove (same fix as TextOverlay's move handler).
-      e.actions.fast.setCursor('move');
+      e.actions.fast.cursor.notifyDragging(null);
     },
 
-    onCancel: () => {
+    onCancel: (e) => {
       if (tx) {
         tx.abort();
         tx = null;
       }
       targetLayerId = null;
+      // Release the gesture cursor; the hover rule reasserts on the next move.
+      e.actions.fast.cursor.notifyDragging(null);
     },
   };
 };
@@ -437,7 +440,7 @@ export const createMarkerRotateHandler = (): InteractionHandler => {
 
       tx = new InteractionTransaction(e, { useIncreComp: true });
       tx.begin(false);
-      e.actions.fast.setCursor(ROTATE_CURSOR);
+      e.actions.fast.cursor.notifyDragging(ROTATE_CURSOR);
     },
 
     onMove: (e) => {
@@ -467,15 +470,17 @@ export const createMarkerRotateHandler = (): InteractionHandler => {
         tx = null;
       }
       rotateLayerId = null;
-      e.actions.fast.setCursor(null);
+      e.actions.fast.cursor.notifyDragging(null);
+      e.actions.fast.cursor.notifyHover(null);
     },
 
-    onCancel: () => {
+    onCancel: (e) => {
       if (tx) {
         tx.abort();
         tx = null;
       }
       rotateLayerId = null;
+      e.actions.fast.cursor.notifyDragging(null);
     },
   };
 };
@@ -516,14 +521,15 @@ export const createMarkerDrawHandler = (): InteractionHandler => {
       const target = e.nativeEvent.target as HTMLElement;
       if (target.closest('button, a, input, [data-role="ui"], [data-handle], [data-gizmo-handle], [data-gizmo-rotate], [data-marker-tail-handle]')) return false;
 
-      // Must be within the canvas and NOT over an existing marker (move wins).
+      // Must be within the canvas. Drawing OVER an existing marker is
+      // allowed — moving one requires the spring key (MarkerMoveHandler,
+      // which outranks this handler when engaged), so a bare press never
+      // needs to yield to the move gesture.
       const frame = e.activeFrame;
       const inCanvas = e.geometry.space.isPointInRect(e.point.canvas, {
         x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h,
       });
-      if (!inCanvas) return false;
-      if (findMarkerLayerAtPoint(e.geometry, frame, e.point.canvas)) return false;
-      return true;
+      return inCanvas;
     },
 
     onStart: (e) => {

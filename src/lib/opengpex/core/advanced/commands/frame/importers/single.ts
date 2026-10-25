@@ -188,7 +188,7 @@ export async function revertSingleImage(
       camera,
       canvasClipBox,
       metadata,
-      clipBoxes: {},
+      confinement: null,
     });
     actions.resetHistory();
     actions.setInteraction({ hud: { message: 'Reverted to original — all edits discarded.', type: 'success' } });

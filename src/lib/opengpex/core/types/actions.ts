@@ -18,9 +18,9 @@
  */
 
 import { Frame, Layer, CameraState, NormalizedState, BitmapMask } from './models';
-import { Dimensions, LocalShape, LocalRect, LocalPolygon } from './primitives';
+import { Dimensions, LocalShape, LocalRect } from './primitives';
 import { VolatileState, InteractionState, UIConfig, GlobalHistoryState, InteractionSignalValue, BitmapMaskOverrideMap } from './state';
-import { BuiltCommand, EditorShortcut, BuiltPlugin } from './plugins';
+import { BuiltCommand, EditorShortcut, BuiltPlugin, SpringChannel } from './plugins';
 import {
   ClipboardLayerMetadata,
   FrameExportResult,
@@ -109,15 +109,11 @@ export interface EditorActions {
 
   updateCamera: (frameId: string, camera: CameraState) => void;
   /**
-   * Sets or clears a clip selection slot for a specific tool.
-   *
-   * @param frameId     Target frame.
-   * @param clipToolId  Producing tool id (e.g. `'rect'`, `'pathellipse'`, `'lasso'`, `'wand'`).
-   *                    Each tool has its own slot in `Frame.clipBoxes`.
-   * @param value       The selection to store as a LocalPolygon, or `null` to
-   *                    clear the slot.
+   * The frame-level selection entity (confinement) is written through
+   * `updateFrame(id, { confinement })` — see Frame.confinement for the
+   * contract. Zero-area polygons are normalized to null by the reducer
+   * (both UPDATE_FRAME and any future channel must keep this rule).
    */
-  setClipBox: (frameId: string, clipToolId: string, value: LocalPolygon | null) => void;
   setCanvasClipBox: (frameId: string, clipBox: LocalShape) => void;
 
   setImageAspect: (frameId: string, aspect: number | undefined) => void;
@@ -290,10 +286,34 @@ export interface EditorActions {
     reset: () => void;
 
     // ─── Volatile Interaction (high-frequency transient state) ─────────
-    /** Set cursor override (null = use default logic) */
-    setCursor: (cursor: string | null) => void;
-    /** Get current cursor override */
-    getCursor: () => string | null;
+    /** Cursor service inputs, grouped: the service resolves one cursor from
+     * these facts (hover zones, live gestures, tool registrations) plus the
+     * spring channels; nothing here writes the cursor directly. */
+    cursor: {
+      /** Pointer entered (cursor value) / left (null) a hover zone. The
+       * caller owns the semantics and passes the concrete cursor value. */
+      notifyHover: (cursor: string | null) => void;
+      /** A gesture started (cursor value) or ended (null). */
+      notifyDragging: (cursor: string | null) => void;
+      /** Re-resolve after an ambient input (e.g. a spring channel) changed. */
+      notifyContext: () => void;
+      /** Register a tool's base cursor (owner-scoped; null unregisters). */
+      register: (owner: string, cursor: string | null) => void;
+    };
+    /** Spring key inputs, grouped: per-channel engagement, plus the modal
+     * suppression switch (all-channel by definition). */
+    spring: {
+      /** Engage/disengage a spring channel (the channel's physical key held,
+       * not suppressed). `meta` is the only channel with semantics attached
+       * today — the cursor service gives it top priority while engaged. */
+      setChannel: (channel: SpringChannel, active: boolean) => void;
+      /** Modal contexts that own every press (e.g. Re-Canvas) set this while
+       * active so the spring keys stand down — the cursor loses its spring
+       * priority and Cmd+drag routes as a bare drag. */
+      setSuppressed: (suppressed: boolean) => void;
+      /** Whether the spring keys are currently suppressed by a modal context. */
+      isSuppressed: () => boolean;
+    };
     /** Set hovered layer */
     setHover: (layerId: string | null, isHoveringActive?: boolean) => void;
     /** Subscribe to a volatile interaction field change. Returns unsubscribe function. */

@@ -87,6 +87,12 @@ export interface DrawLayerParams {
    * HAS_WINDOW flag so the shader re-maps the uv. Undefined → full-layer bake.
    */
   readonly vmaskWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  /**
+   * The polygon-baked ADJUSTMENT-CONFINEMENT coverage for this layer (the
+   * frozen selection snapshot localizing its grade). Absent → default white
+   * view binds and the grade applies to the whole layer.
+   */
+  readonly adjustConfinementTexture?: GPUTexture;
   readonly isBottomOpaque?: boolean;
   /**
    * Force the identity group-1 adjust bind group because `texture` ALREADY has the
@@ -254,7 +260,7 @@ export class CompositePass {
     ctx: CompositePassContext,
     params: DrawLayerParams,
   ): void {
-    const { layer, texture, maskTexture, vmaskTexture, isBottomOpaque } = params;
+    const { layer, texture, maskTexture, vmaskTexture, adjustConfinementTexture, isBottomOpaque } = params;
 
     let flags = 0;
     if (maskTexture) flags |= LAYER_FLAG_HAS_MASK;
@@ -368,6 +374,14 @@ export class CompositePass {
           // vmask_flags has no HAS_VMASK_TEX bit).
           binding: 4,
           resource: vmaskTexture ? vmaskTexture.view : ctx.pipelineCache.getDefaultMaskView(),
+        },
+        {
+          // Adjustment-confinement slot. Present → the baked coverage texture;
+          // absent → the 1×1 default white view (coverage 1 = whole-layer grade).
+          binding: 5,
+          resource: adjustConfinementTexture
+            ? adjustConfinementTexture.createView()
+            : ctx.pipelineCache.getDefaultMaskView(),
         },
       ],
       label: `Layer BindGroup (${layer.id})`,

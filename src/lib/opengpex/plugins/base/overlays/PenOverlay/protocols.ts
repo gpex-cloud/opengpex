@@ -56,6 +56,9 @@ export const CMD_CANCEL_DRAFT = 'cmd.pen_cancel_draft';
 /** Patches a committed layer's `penData` (anchor deletion etc., undoable). */
 export const CMD_UPDATE_PEN_DATA = 'cmd.pen_update_data';
 
+/** Patches a committed shape layer's `penStyle` colors (undoable). */
+export const CMD_UPDATE_PEN_STYLE = 'cmd.pen_update_style';
+
 /** Commits the session's paths as a new vector shape layer (undoable, Phase 3). */
 export const CMD_CREATE_SHAPE = 'cmd.pen_create_shape';
 
@@ -73,6 +76,7 @@ export const _CMD_TO_SELECTION_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_TO_SEL
 export const _CMD_APPLY_AS_BEZIER_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_APPLY_AS_BEZIER}`;
 export const _CMD_CANCEL_DRAFT_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_CANCEL_DRAFT}`;
 export const _CMD_UPDATE_PEN_DATA_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_UPDATE_PEN_DATA}`;
+export const _CMD_UPDATE_PEN_STYLE_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_UPDATE_PEN_STYLE}`;
 export const _CMD_CREATE_SHAPE_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_CREATE_SHAPE}`;
 export const _CMD_RELEASE_TO_DRAFT_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_RELEASE_TO_DRAFT}`;
 
@@ -94,6 +98,8 @@ export const PenOverlayAPI = {
     cancelDraft: { uid: _CMD_CANCEL_DRAFT_UID } as { uid: string; _payload: void },
     /** Patch a committed layer's penData (set null to clear) */
     updatePenData: { uid: _CMD_UPDATE_PEN_DATA_UID } as { uid: string; _payload: { frameId: string; layerId: string; penData: import('@opengpex/editor/core/types').PenPathData | null } },
+    /** Patch a committed shape layer's penStyle colors (colors only; stroke width stays panel-pending) */
+    updatePenStyle: { uid: _CMD_UPDATE_PEN_STYLE_UID } as { uid: string; _payload: { frameId: string; layerId: string; patch: { fill?: import('@opengpex/editor/core/engine/color').ColorValue | null; strokeColor?: import('@opengpex/editor/core/engine/color').ColorValue; strokeWidth?: number } } },
     /** Commit the session's paths as a new vector shape layer */
     createShape: { uid: _CMD_CREATE_SHAPE_UID } as { uid: string; _payload: import('./contribution').PenShapeStylePayload },
     /** Release a committed pen layer's path into the drawing session and remove the layer */

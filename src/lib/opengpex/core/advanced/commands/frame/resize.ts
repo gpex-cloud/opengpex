@@ -61,7 +61,7 @@ export const FrameResizeCommands = {
       actions.updateFrame(activeFrame.id, {
         canvas: newCanvas,
         layers: { byId: nextById, order: layers.order },
-        clipBoxes: {},
+        confinement: null,
         canvasClipBox: getDefaultCanvasClipBox(newCanvas)
       });
     }
@@ -107,7 +107,7 @@ export const FrameResizeCommands = {
       actions.updateFrame(activeFrame.id, {
         canvas: targetDim,
         camera: newCamera,
-        clipBoxes: {},
+        confinement: null,
         canvasClipBox: getDefaultCanvasClipBox(targetDim),
         ...(dpi ? { dpi } : {})
       });
@@ -209,7 +209,7 @@ export const FrameResizeCommands = {
       actions.updateFrame(activeFrame.id, {
         canvas: targetDim,
         camera: newCamera,
-        clipBoxes: {},
+        confinement: null,
         canvasClipBox: getDefaultCanvasClipBox({ w: newW, h: newH }),
         ...(dpi ? { dpi } : {})
       });

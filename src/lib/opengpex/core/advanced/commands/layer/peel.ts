@@ -89,7 +89,7 @@ export const LayerPeelCommands = {
 
         // Resolve the clip shape from `frame.latestClipTool`. Peel fires via
         // Meta+drag on the unified createSelectionMoveHandler, so the active
-        // tool's slot in clipBoxes is guaranteed non-empty at this point.
+        // frame-level selection entity is guaranteed non-empty at this point.
         // Supports both regular (LocalShape) and irregular (LocalPolygon) selections.
         const box = getClipBox(activeFrame);
         if (!box) return; // defensive — should never happen during a real peel

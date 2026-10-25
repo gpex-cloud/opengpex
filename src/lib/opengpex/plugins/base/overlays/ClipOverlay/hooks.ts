@@ -43,6 +43,17 @@ export function useClipOverlayCommands() {
   const isReCanvas = state.getStateSignal(ClipOptionsAPI.signals.reCanvas);
   const isClipActive = state.interaction.interactionMode === 'clip';
 
+  // Re-Canvas is a modal that owns EVERY press (its handler claims resize,
+  // move and redraw intents for the whole canvas). While it is active the
+  // spring key must stand down entirely — otherwise Cmd would show a move
+  // cursor that lies (the press goes to the canvas box, not a layer) and the
+  // dispatcher would filter the modal's handler out. Cleanup restores the
+  // default (unsuppressed) so the spring key survives unmount.
+  useEffect(() => {
+    actions.fast.spring.setSuppressed(isReCanvas);
+    return () => actions.fast.spring.setSuppressed(false);
+  }, [isReCanvas, actions]);
+
   // Active clip / selection tool — read from per-frame field.
   const rawTool = (activeFrame?.latestClipTool as ClipTool) || 'rect';
 
@@ -52,13 +63,13 @@ export function useClipOverlayCommands() {
   const isRegularTool = family === 'regular';
   const isIrregularTool = family === 'irregular';
 
-  const { clipBoxes, canvasClipBox, canvas: canvasDim } = activeFrame || {
-    clipBoxes: {} as Record<string, LocalPolygon>,
+  const { confinement, canvasClipBox, canvas: canvasDim } = activeFrame || {
+    confinement: null,
     canvasClipBox: asLocalShape({ x: 0, y: 0, w: 0, h: 0 }),
     canvas: { w: 0, h: 0 }
   };
 
-  const imageClipBox = getRegularClipShape({ clipBoxes });
+  const imageClipBox = getRegularClipShape({ confinement });
   const clipShape = isReCanvas ? canvasClipBox : (imageClipBox ? geometry.polygon.polygonToShape(imageClipBox) : asLocalShape({ x: 0, y: 0, w: 0, h: 0 }));
   const clipBox = clipShape.rect;
   const clipType = clipShape.type;
@@ -135,7 +146,7 @@ export function useClipCursor(
   // tool's persistent AA preset fills the fallback so the dashed cursor reflects
   // the toggle immediately, before anything is drawn.
   const toolAAMap = state.getStateSignal<ClipToolAAMap | null>(ClipOptionsAPI.signals.clipToolAA);
-  const clipBox_AA = (activeFrame?.clipBoxes?.[clipTool] as LocalPolygon | undefined)?.antiAliased
+  const clipBox_AA = activeFrame?.confinement?.antiAliased
     ?? toolAAMap?.[clipTool] ?? true;
 
   useEffect(() => {
@@ -145,9 +156,9 @@ export function useClipCursor(
       const toolCursor = isEllipseFamily && !clipBox_AA
         ? CLIP_ELLIPSE_AA_OFF_CURSOR
         : CLIP_TOOL_STRATEGIES[clipTool].cursor;
-      actions.fast.setCursor(toolCursor);
+      actions.fast.cursor.register('clip', toolCursor);
     } else {
-      actions.fast.setCursor(null);
+      actions.fast.cursor.register('clip', null);
     }
   }, [isClipActive, clipTool, clipBox_AA, actions]);
 
@@ -156,20 +167,14 @@ export function useClipCursor(
     const strategy = CLIP_TOOL_STRATEGIES[clipTool];
     if (!isClipActive || strategy.family !== 'irregular') return;
 
-    const toolCursor = strategy.cursor;
-    let currentCursor = toolCursor;
-
     const onPointerMove = (ev: PointerEvent) => {
       const frame = frameRef.current;
       if (!frame) return;
 
-      // Get polygon from clipBoxes
-      const poly = frame.clipBoxes?.[clipTool] as LocalPolygon | undefined;
+      // Get the frame-level selection entity
+      const poly = frame.confinement as LocalPolygon | null;
       if (!poly || !poly.rings || poly.rings.length === 0) {
-        if (currentCursor !== toolCursor) {
-          currentCursor = toolCursor;
-          actions.fast.setCursor(toolCursor);
-        }
+        actions.fast.cursor.notifyHover(null);
         return;
       }
 
@@ -184,23 +189,16 @@ export function useClipCursor(
       const worldPt = geometry.space.screenToWorld(vx, vy, frame, currentCam);
       const canvasPt = geometry.space.worldToLocal(worldPt.x, worldPt.y, frame);
 
-      // Point-in-polygon hit test
+      // Point-in-polygon hit test: inside an existing selection the pointer
+      // can drag it, so the move cursor wins over the tool base cursor.
       const inside = geometry.polygon.isPointInPolygon(canvasPt, poly.rings);
-      const desired = inside ? 'move' : toolCursor;
-
-      if (desired !== currentCursor) {
-        currentCursor = desired;
-        actions.fast.setCursor(desired);
-      }
+      actions.fast.cursor.notifyHover(inside ? 'move' : null);
     };
 
     document.addEventListener('pointermove', onPointerMove, { passive: true });
     return () => {
       document.removeEventListener('pointermove', onPointerMove);
-      // Restore tool cursor on cleanup
-      if (currentCursor !== toolCursor) {
-        actions.fast.setCursor(toolCursor);
-      }
+      actions.fast.cursor.notifyHover(null);
     };
   }, [isClipActive, clipTool, actions, geometry]);
 
@@ -220,13 +218,13 @@ export function useClipCursor(
     // it's a canvas-resize modal, not a selection tool. The subscript would
     // misleadingly suggest the rect selection tool is active.
     const toolCursor = isReCanvas ? 'crosshair' : strategy.cursor;
-    let currentCursor = toolCursor;
 
-    // Restore tool cursor on effect (re-)setup. This is critical when the
-    // effect re-runs due to isReCanvas toggling: cleanup sets cursor to null,
-    // but the tool-cursor useEffect (deps=[isClipActive, clipTool]) won't
-    // re-fire if those deps didn't change. We must actively restore here.
-    actions.fast.setCursor(toolCursor);
+    // Restore the base cursor on effect (re-)setup. This is critical when the
+    // effect re-runs due to isReCanvas toggling: cleanup clears the hover
+    // declaration, but the tool-cursor registration effect won't re-fire if
+    // its deps didn't change. Re-asserting the registration here (same owner)
+    // keeps the base cursor correct without a second write path.
+    actions.fast.cursor.register('clip', toolCursor);
 
     const onPointerMove = (ev: PointerEvent) => {
       // Skip cursor updates during active interaction (resize/move/create drag).
@@ -237,16 +235,13 @@ export function useClipCursor(
       const frame = frameRef.current;
       if (!frame) return;
 
-      // Get the bounding rect: Re-Canvas reads canvasClipBox, regular reads clipBoxes
+      // Get the bounding rect: Re-Canvas reads canvasClipBox, regular reads confinement
       const selRect = isReCanvas
         ? frame.canvasClipBox?.rect
         : getRegularClipShape(frame)?.rect;
 
       if (!selRect || selRect.w <= 0 || selRect.h <= 0) {
-        if (currentCursor !== toolCursor) {
-          currentCursor = toolCursor;
-          actions.fast.setCursor(toolCursor);
-        }
+        actions.fast.cursor.notifyHover(null);
         return;
       }
 
@@ -271,7 +266,7 @@ export function useClipCursor(
       const isEllipse = clipTool === 'pathellipse';
 
       // Determine desired cursor
-      let desired = toolCursor;
+      let desired: string | null = null;
 
       if (isEllipse) {
         // ─── Ellipse: distance to ellipse arc ─────────────────────────
@@ -309,14 +304,13 @@ export function useClipCursor(
         else if (dRight <= T && inVRange) desired = 'ew-resize';
       }
 
-      if (desired !== currentCursor) {
-        currentCursor = desired;
-        actions.fast.setCursor(desired);
-        // Override box div's cursor to match edge cursor (the box has static
-        // `cursor-move` which otherwise wins over the viewport-level cursor).
-        if (boxRef?.current) {
-          boxRef.current.style.cursor = desired === toolCursor ? 'move' : desired;
-        }
+      // null = off any edge → clear the hover declaration so the service
+      // falls back to the tool's base cursor.
+      actions.fast.cursor.notifyHover(desired);
+      // Override box div's cursor to match edge cursor (the box has static
+      // `cursor-move` which otherwise wins over the viewport-level cursor).
+      if (boxRef?.current) {
+        boxRef.current.style.cursor = desired === null ? 'move' : desired;
       }
     };
 
@@ -324,9 +318,9 @@ export function useClipCursor(
     document.addEventListener('pointermove', onPointerMove, { passive: true });
     return () => {
       document.removeEventListener('pointermove', onPointerMove);
-      // Reset to null — let the mode-level cursor (pan=grab, clip=crosshair)
-      // be re-applied by the first useEffect when dependencies change.
-      actions.fast.setCursor(null);
+      // Clear the hover declaration — let the tool/mode-level cursor be
+      // re-derived by the service from the remaining inputs.
+      actions.fast.cursor.notifyHover(null);
       if (boxEl) {
         boxEl.style.cursor = '';
       }
@@ -335,7 +329,8 @@ export function useClipCursor(
 
   useEffect(() => {
     return () => {
-      actions.fast.setCursor(null);
+      actions.fast.cursor.register('clip', null);
+      actions.fast.cursor.notifyHover(null);
     };
   }, [actions]);
 }

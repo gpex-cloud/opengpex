@@ -97,13 +97,21 @@ export function ClipOverlayMain() {
   const isEllipseSelection = clipType === "circle" || clipTool === "pathellipse";
 
   // ─── Activation gates ────────────────────────────────────────────────────
-  const isOverlayActive = isClipActive || isReCanvas;
+  // The selection is a document-level entity (frame.confinement), so the
+  // ants must be visible in ANY mode while a selection exists — not just
+  // inside clip mode. Two visual states:
+  //   editing  (clip mode or Re-Canvas) → interactive: box, handles, dim and
+  //             delta labels, marching animation per user preference
+  //   passive  (any other mode)        → ants only, static dashes, zero
+  //             interactivity (the whole overlay is pointer-events-none and
+  //             the box/handles are not rendered)
+  const hasSelection = !!activeFrame?.confinement;
+  const isEditing = isClipActive || isReCanvas;
+  const isOverlayActive = isEditing || hasSelection;
 
-  // Unified ants: always active when overlay is active (handles all data types)
-  const antsActive = isOverlayActive;
-
-  // Box (handles + dim label): only for regular tools or Re-Canvas
-  const boxActive = isOverlayActive && (isReCanvas || isRegularTool);
+  // Box (handles + dim label): only while editing, and only for regular
+  // tools or Re-Canvas — a passive-selection view is ants-only.
+  const boxActive = isEditing && (isReCanvas || isRegularTool);
 
   // ─── Staircase grid phase (ants/GPU alignment) ───────────────────────────
   // The aa/na ants are the pixel staircase of the TARGET layer's (active
@@ -124,7 +132,7 @@ export function ClipOverlayMain() {
   const groupRef = useRef<SVGGElement>(null);
   const pathBgRef = useRef<SVGPathElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
-  useSelectionAntsSync(groupRef, pathBgRef, pathRef, antsActive, isReCanvas, clipTool, antsGridOffset);
+  useSelectionAntsSync(groupRef, pathBgRef, pathRef, isOverlayActive, isReCanvas, antsGridOffset);
 
   // CSS box for drag handles + guides (regular tools only)
   const { guidesRef } = useRegularBoxSync(
@@ -137,7 +145,7 @@ export function ClipOverlayMain() {
   const { dimLabelRef } = useCropDimSync(boxActive, isReCanvas);
 
   // Move-delta label (shows "Δ dx, dy" during selection drag)
-  const { deltaContainerRef } = useMoveDeltaSync(isOverlayActive, clipTool);
+  const { deltaContainerRef } = useMoveDeltaSync(isOverlayActive);
 
   // ─── Lasso preview path ref callback ─────────────────────────────────────
   const previewPathRef = useRef<SVGPathElement | null>(null);
@@ -189,7 +197,7 @@ export function ClipOverlayMain() {
               vectorEffect="non-scaling-stroke"
               style={{
                 strokeDasharray: '6, 6',
-                ...(marchingAntsAnimated
+                ...(marchingAntsAnimated && isEditing
                   ? { animation: `clip-ants-flow ${MARCHING_ANTS_DURATION_S}s linear infinite` }
                   : {}),
               }}
@@ -216,8 +224,9 @@ export function ClipOverlayMain() {
       </div>
 
       {/* Regular crop box: handles + dim label + guides.
-          Hidden when tool is irregular or data is polygon (via visibility gate). */}
-      {isRegularTool && (
+          Hidden when tool is irregular, data is polygon (via visibility gate),
+          or the overlay is in passive (non-editing) view. */}
+      {boxActive && (
         <div
           ref={boxRef}
           className="absolute pointer-events-auto cursor-move transition-[border-radius] duration-300"

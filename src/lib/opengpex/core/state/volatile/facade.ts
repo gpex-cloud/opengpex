@@ -22,6 +22,8 @@ import {
   VolatileState, EditorData, EditorAction, Layer, Frame, CameraState,
 } from '@opengpex/editor/core/types';
 import { getCompositeKey, mergeLayerDraft } from './merge';
+import { createCursorService } from './cursors';
+import type { SpringChannel } from '@opengpex/editor/core/types';
 import type { BitmapMaskOverrideMap } from '@opengpex/editor/core/types';
 
 /**
@@ -53,13 +55,16 @@ export interface FastFacadeDeps {
  * This is the Facade layer of the Volatile fast-track:
  *   - write overrides (`override`), commit to Redux (`commit`), transaction signal (`signal`)
  *   - read fused "latest" values (`latestLayer` / `latestFrame` / `latestCamera`)
- *   - read/write high-frequency interaction fields (`setHover` / `setCursor` / ...)
+ *   - read/write high-frequency interaction fields (`setHover` / cursor
+ *     service notifications / ...)
  *
  * Behaviour is identical to the previous inline `fast: { ... }` object in
  * `useEditorStore`; this is a pure code-organization extraction.
  */
 export function createFastFacade(deps: FastFacadeDeps) {
   const { volatileRef, stateRef, mutateVolatile, resetVolatile, dispatch, notify, listenersRef } = deps;
+
+  const cursorService = createCursorService({ volatileRef, notify });
 
   return {
     latestLayer: (frameId: string, id: string): Layer | null => {
@@ -218,13 +223,33 @@ export function createFastFacade(deps: FastFacadeDeps) {
     reset: resetVolatile,
 
     // ─── Volatile Interaction (high-frequency transient state) ─────────
-    setCursor: (cursor: string | null) => {
-      const vi = volatileRef.current.interaction;
-      if (vi.cursorOverride === cursor) return;
-      vi.cursorOverride = cursor;
-      notify('cursorOverride');
+    // Cursor writes all funnel through the cursor service: plugins feed
+    // inputs (hover / gesture / tool registration) and the service computes
+    // the single `resolvedCursor` the viewport displays.
+    cursor: {
+      notifyHover: (cursor: string | null) => cursorService.notifyHover(cursor),
+      notifyDragging: (cursor: string | null) => cursorService.notifyDragging(cursor),
+      notifyContext: () => cursorService.notifyContext(),
+      register: (owner: string, cursor: string | null) => cursorService.register(owner, cursor),
     },
-    getCursor: () => volatileRef.current.interaction.cursorOverride,
+    spring: {
+      setChannel: (channel: SpringChannel, active: boolean) => {
+        const vi = volatileRef.current.interaction;
+        if (vi.springChannels[channel] === active) return;
+        vi.springChannels = { ...vi.springChannels, [channel]: active };
+        notify('springChannels');
+      },
+      setSuppressed: (suppressed: boolean) => {
+        const vi = volatileRef.current.interaction;
+        if (vi.springSuppressed === suppressed) return;
+        vi.springSuppressed = suppressed;
+        // Suppression changes whether spring channels win cursor priority,
+        // so the resolved value must be recomputed immediately (e.g. Cmd
+        // held while a modal engages must drop the move cursor in place).
+        cursorService.notifyContext();
+      },
+      isSuppressed: () => volatileRef.current.interaction.springSuppressed,
+    },
     setHover: (layerId: string | null, isHoveringActive = false) => {
       const vi = volatileRef.current.interaction;
       const hoverChanged = vi.hoveredLayerId !== layerId;

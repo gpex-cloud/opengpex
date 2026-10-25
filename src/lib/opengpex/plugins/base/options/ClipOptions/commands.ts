@@ -79,10 +79,10 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
         actions.setCanvasClipBox(activeFrame.id, { ...shape, ...patch } as LocalShape);
       } else {
         const toolId: 'rect' | 'pathellipse' = shape.type === 'circle' ? 'pathellipse' : 'rect';
-        // clipBoxes stores LocalPolygon — properly convert the patched rect to polygon with rings
+        // confinement stores LocalPolygon — properly convert the patched rect to polygon with rings
         const patched = { ...shape, ...patch } as LocalShape;
         const poly = geometry.polygon.regularShapeToLocalPolygon(toolId, patched.rect, patched.antiAliased);
-        actions.setClipBox(activeFrame.id, toolId, poly);
+        actions.updateFrame(activeFrame.id, { confinement: poly });
       }
     },
     clampRect: (box: LocalRect) => {
@@ -123,20 +123,55 @@ function cycleClipTool(ctx: EditorContextValue, step: 1 | -1): void {
 
 
 /**
+ * Shared entry point for the per-tool activation shortcuts (M / L / W / S).
+ *
+ * Enters clip mode when called from any other mode, and switches the active
+ * clip tool to whatever `resolveTool` decides. `resolveTool` receives the
+ * frame's current `latestClipTool` plus whether clip mode was already active
+ * (captured BEFORE `setInteraction`, because `ctx.state` is a render-time
+ * snapshot that will not reflect the write inside this call).
+ *
+ * Re-Canvas is an orthogonal modal: these shortcuts are no-ops while it is
+ * active, so the resize rectangle can never be disturbed by a tool switch.
+ *
+ * Tool switching delegates to `setClipTool` (same as Tab cycling) so the
+ * pluginConfig persistence path stays single-sourced.
+ */
+function activateClipTool(
+  ctx: EditorContextValue,
+  resolveTool: (current: ClipTool, wasInClip: boolean) => ClipTool
+): void {
+  if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
+  const wasInClip = ctx.state.interaction.interactionMode === 'clip';
+  const current = (ctx.activeFrame?.latestClipTool as ClipTool | undefined) ?? 'rect';
+  const tool = resolveTool(current, wasInClip);
+  if (!wasInClip) {
+    ctx.actions.setInteraction({ interactionMode: 'clip' });
+  }
+  ctx.actions.executeCommand(
+    `${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}.${P.CMD_SET_CLIP_TOOL}`,
+    { tool }
+  );
+}
+
+
+/**
  * CLIP_OPTIONS_COMMANDS: Declarative command configuration (Single Source of Truth).
  * Contains command metadata (ID, name, shortcuts) and implementation logic.
  */
 export const CLIP_OPTIONS_COMMANDS = {
   /**
-   * Space — pure toggle between pan and clip mode:
-   *   1) From any non-clip mode → enter clip mode (no tool change).
-   *   2) Already in clip mode  → exit clip mode (back to pan).
+   * Enter clip mode (toolbar button command — no keyboard shortcut).
    *
-   * Tool cycling is handled separately by Tab / Shift+Tab commands
-   * (`cycleToolForward` / `cycleToolBackward`), keeping Space as a clean
-   * enter/exit toggle — matching the mental model of a play/pause button.
+   * Historical note: this command used to own the Space key as a
+   * pan ↔ clip toggle. Space has been re-reserved as the camera key
+   * (viewport pan) — entering clip mode goes through the per-tool
+   * activation shortcuts (M / L / W / S) or the toolbar button, and
+   * leaving goes through Esc / Enter. The button keeps its toggle
+   * behaviour: from clip mode a click still merges any dirty peel and
+   * exits.
    *
-   * Re-Canvas guard: when Re-Canvas is active, Space is a no-op. Esc
+   * Re-Canvas guard: when Re-Canvas is active, the click is a no-op. Esc
    * remains the single exit (handled by `exitClip` below — it closes
    * Re-Canvas first, then leaves clip if applicable).
    */
@@ -145,7 +180,7 @@ export const CLIP_OPTIONS_COMMANDS = {
     name: 'Toggle Clip Mode',
     category: 'Selection',
     execute: async (ctx: EditorContextValue) => {
-      // Re-Canvas is a fully *orthogonal* modal — Space must not leak into it.
+      // Re-Canvas is a fully *orthogonal* modal — the button must not leak into it.
       if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
 
       // First press: enter clip mode, keep current tool.
@@ -161,8 +196,67 @@ export const CLIP_OPTIONS_COMMANDS = {
       await ctx.actions.adv.layer.merge.mergeHost.execute.noundo();
       exitClipMode(ctx);
     },
-    shortcut: { key: ' ' }
+    // Space re-rebound (2026-10-26 ruling): Space toggles selection mode and
+    // enters with the frame's last-used tool (latestClipTool is unchanged by
+    // the enter branch, so pressing Space always lands on the remembered
+    // tool). HotkeyManager's preventDefault on the match preserves the
+    // no-scroll / no-focused-button contract in every mode.
+    shortcut: { key: ' ' },
   } as EditorCommand<void, Promise<void>>,
+
+  /**
+   * M — marquee family entry. Remembers the last regular tool (rect /
+   * pathellipse) via `latestClipTool`; pressing M again while a marquee
+   * tool is active flips between rect and pathellipse. From a non-regular
+   * tool (lasso / wand / sam) M lands back on the last regular tool, or
+   * rect when none is recorded.
+   *
+   * The resolver stays on ONE line: the plugin type generator counts braces
+   * per line and drops commands whose `execute` contains multi-line inline
+   * closures.
+   */
+  activateMarquee: {
+    id: P.CMD_ACTIVATE_MARQUEE,
+    name: 'Marquee Selection Tool',
+    category: 'Selection',
+    shortcut: { key: 'm' },
+    execute: (ctx: EditorContextValue) => {
+      activateClipTool(ctx, (cur, was) => was && (cur === 'rect' || cur === 'pathellipse') ? (cur === 'rect' ? 'pathellipse' : 'rect') : (cur === 'pathellipse' ? 'pathellipse' : 'rect'));
+    }
+  } as EditorCommand<void, void>,
+
+  /** L — enter clip mode directly with the lasso tool. */
+  activateLasso: {
+    id: P.CMD_ACTIVATE_LASSO,
+    name: 'Lasso Selection Tool',
+    category: 'Selection',
+    shortcut: { key: 'l' },
+    execute: (ctx: EditorContextValue) => {
+      activateClipTool(ctx, () => 'lasso');
+    }
+  } as EditorCommand<void, void>,
+
+  /** W — enter clip mode directly with the magic wand tool. */
+  activateWand: {
+    id: P.CMD_ACTIVATE_WAND,
+    name: 'Wand Selection Tool',
+    category: 'Selection',
+    shortcut: { key: 'w' },
+    execute: (ctx: EditorContextValue) => {
+      activateClipTool(ctx, () => 'wand');
+    }
+  } as EditorCommand<void, void>,
+
+  /** S — enter clip mode directly with the SAM tool. */
+  activateSam: {
+    id: P.CMD_ACTIVATE_SAM,
+    name: 'SAM Selection Tool',
+    category: 'Selection',
+    shortcut: { key: 's' },
+    execute: (ctx: EditorContextValue) => {
+      activateClipTool(ctx, () => 'sam');
+    }
+  } as EditorCommand<void, void>,
 
   /**
    * Tab — cycle through clip tools forward while already in clip mode
@@ -427,7 +521,6 @@ export const CLIP_OPTIONS_COMMANDS = {
       const frame = ctx.activeFrame;
       if (!frame) return;
 
-      const tool = (frame.latestClipTool as ClipTool) || 'rect';
       const clipBox = getClipBox(frame);
       if (!clipBox) return; // already empty — nothing to clear
 
@@ -442,7 +535,7 @@ export const CLIP_OPTIONS_COMMANDS = {
         await ctx.actions.adv.layer.merge.mergeHost.execute.noundo();
       }
 
-      ctx.actions.setClipBox(frame.id, tool, null);
+      ctx.actions.updateFrame(frame.id, { confinement: null });
     }
   } as EditorCommand<void, Promise<void>>,
 
@@ -519,10 +612,10 @@ export const CLIP_OPTIONS_COMMANDS = {
       // defensive parity with the previous behaviour.
       if (tool === 'rect') {
         const newPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, clipBox.rect, newAA);
-        ctx.actions.setClipBox(frame.id, tool, newPoly);
+        ctx.actions.updateFrame(frame.id, { confinement: newPoly });
       } else {
         const newPoly = { ...clipBox, antiAliased: newAA, ssdepMode: false };
-        ctx.actions.setClipBox(frame.id, tool, newPoly);
+        ctx.actions.updateFrame(frame.id, { confinement: newPoly });
       }
     }
   } as EditorCommand<void, void>,
@@ -531,12 +624,13 @@ export const CLIP_OPTIONS_COMMANDS = {
   /**
    * setClipTool — strategy-driven tool switch.
    *
-   * Each tool owns its own independent slot in `frame.clipBoxes`, so switching
-   * writes only `latestClipTool`; the ants selector reads the new tool's slot
-   * (empty or shape) and the path updates accordingly. Inactive slots are
-   * preserved for round-trip symmetry (switch back to see the old selection).
+   * Writes only `latestClipTool`, which is pure UI memory: it decides which
+   * tool's editing handles / cursor the overlay presents (and what the M
+   * shortcut flips to). The selection itself lives in the frame-level
+   * `confinement` entity and is NEVER touched by a tool switch — switching
+   * to a different tool keeps the existing selection visible and active.
    *
-   * Slot clears only happen via:
+   * Selection clears only happen via:
    *   1) `adv.layer.clip.toMask` (mission accomplished);
    *   2) explicit "Clear Selection" command.
    *
@@ -708,8 +802,7 @@ export const CLIP_OPTIONS_COMMANDS = {
         // Select-from-Alpha produces a polygon selection semantically equivalent
         // to a magic wand result — switch clipTool so the overlay and subsequent
         // operations (AA toggle, offset, invert) target the correct irregular slot.
-        ctx.actions.updateFrame(frame.id, { latestClipTool: 'wand' });
-        ctx.actions.setClipBox(frame.id, 'wand', framePoly);
+        ctx.actions.updateFrame(frame.id, { latestClipTool: 'wand', confinement: framePoly });
 
         if (response.debug) {
           console.debug('[SelectFromAlpha]', response.debug);
@@ -729,7 +822,7 @@ export const CLIP_OPTIONS_COMMANDS = {
    *
    * Design principles (aligned with Photoshop):
    *   - Does NOT switch tools (`latestClipTool` unchanged).
-   *   - Writes result to the same slot (current tool's clipBoxes entry).
+   *   - Writes result to the frame-level selection entity (confinement).
    *   - For regular selections (rect/ellipse): converts to polygon first.
    *   - Double-invert = round-trip (attempts `tryPolygonToShape` restore).
    *   - Full-canvas selection inverted = clear (empty selection).
@@ -752,7 +845,6 @@ export const CLIP_OPTIONS_COMMANDS = {
       const clipBox = getClipBox(frame);
       if (!clipBox) return; // no selection to invert
 
-      const tool = (frame.latestClipTool as ClipTool) || 'rect';
       const { w: canvasW, h: canvasH } = frame.canvas;
       const antiAliased = clipBox.antiAliased ?? true;
       const localShape = ctx.geometry.polygon.polygonToShape(clipBox);
@@ -775,10 +867,10 @@ export const CLIP_OPTIONS_COMMANDS = {
 
       // 3. Rebox: Point2D[][] → best container, then write
       if (response.rings === null) {
-        ctx.actions.setClipBox(frame.id, tool, null);
+        ctx.actions.updateFrame(frame.id, { confinement: null });
       } else {
         const container = geo.point2dToLocalPolygon(response.rings as Point2D[][], antiAliased);
-        ctx.actions.setClipBox(frame.id, tool, container);
+        ctx.actions.updateFrame(frame.id, { confinement: container });
       }
     }
   } as EditorCommand<void, void>,
@@ -810,7 +902,6 @@ export const CLIP_OPTIONS_COMMANDS = {
       const { distance } = payload;
       if (distance === 0) return;
 
-      const tool = (frame.latestClipTool as ClipTool) || 'rect';
       const { w: canvasW, h: canvasH } = frame.canvas;
       const antiAliased = clipBox.antiAliased ?? true;
       const localShape = ctx.geometry.polygon.polygonToShape(clipBox);
@@ -837,10 +928,10 @@ export const CLIP_OPTIONS_COMMANDS = {
       // 3. Rebox: Point2D[][] → best container, then write
       if (response.rings === null) {
         // Contraction eliminated the selection
-        ctx.actions.setClipBox(frame.id, tool, null);
+        ctx.actions.updateFrame(frame.id, { confinement: null });
       } else {
         const container = geo.point2dToLocalPolygon(response.rings as Point2D[][], antiAliased);
-        ctx.actions.setClipBox(frame.id, tool, container);
+        ctx.actions.updateFrame(frame.id, { confinement: container });
       }
     }
   } as EditorCommand<{ distance: number }, Promise<void>>,
@@ -848,9 +939,12 @@ export const CLIP_OPTIONS_COMMANDS = {
   /**
    * CMD_SELECT_ALL — Select All (Cmd+A / Ctrl+A).
    *
-   * Creates a full-canvas selection matching the current regular tool shape
-   * (rect). Only active when already in clip mode with the rect tool
-   * selected. Does NOT switch tools or enter clip mode.
+   * Creates a full-canvas rectangular selection. Works in ANY mode — the
+   * selection is a document-level entity, not property of clip mode (outside
+   * clip mode it shows as static ants; press a selection-tool shortcut to
+   * edit it). Switches `latestClipTool` to 'rect' so the overlay presents
+   * editing handles that match the freshly-written rectangle (tool is UI
+   * memory only — the selection itself lives in `confinement`).
    *
    * Re-Canvas guard: no-op when active (canvas resize owns the rect).
    */
@@ -861,33 +955,24 @@ export const CLIP_OPTIONS_COMMANDS = {
     undoable: true,
     shortcuts: [{ key: 'a', meta: true }, { key: 'a', ctrl: true }],
     execute: (ctx: EditorContextValue) => {
-      // Only active in clip mode
-      if (ctx.state.interaction.interactionMode !== 'clip') return;
       const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
-      if (isReCanvas) return;
+      if (isReCanvas) return; // canvas resize owns the rect
 
       const frame = ctx.activeFrame;
       if (!frame) return;
 
-      // Only works with the rect tool
-      const tool = (frame.latestClipTool as ClipTool) || 'rect';
-      if (tool !== 'rect') return;
-
       const { w, h } = frame.canvas;
-      // Build a full-canvas polygon matching the current tool shape
-      const fullCanvasPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, asLocalRect({ x: 0, y: 0, w, h }), false);
-
-      // Write to the current tool's slot (no tool switch)
-      ctx.actions.setClipBox(frame.id, tool, fullCanvasPoly);
+      const fullCanvasPoly = ctx.geometry.polygon.regularShapeToLocalPolygon('rect', asLocalRect({ x: 0, y: 0, w, h }), false);
+      ctx.actions.updateFrame(frame.id, { latestClipTool: 'rect', confinement: fullCanvasPoly });
     }
   } as EditorCommand<void, void>,
 
   /**
    * CMD_DESELECT — Deselect / Clear Selection (Cmd+D / Ctrl+D).
    *
-   * Clears the active tool's selection without exiting clip mode.
-   * Equivalent to a single-click reset (same as `resetBox`).
-   * Only active when in clip mode with the rect tool.
+   * Clears the selection without changing the current mode. Works in ANY
+   * mode — the selection is a document-level entity, not property of clip
+   * mode.
    *
    * If a peel exchange layer exists, merges it before clearing.
    */
@@ -898,17 +983,11 @@ export const CLIP_OPTIONS_COMMANDS = {
     undoable: true,
     shortcuts: [{ key: 'd', meta: true }, { key: 'd', ctrl: true }],
     execute: async (ctx: EditorContextValue) => {
-      // Only active in clip mode
-      if (ctx.state.interaction.interactionMode !== 'clip') return;
       const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
       if (isReCanvas) return;
 
       const frame = ctx.activeFrame;
       if (!frame) return;
-
-      // Only works with the rect tool
-      const tool = (frame.latestClipTool as ClipTool) || 'rect';
-      if (tool !== 'rect') return;
 
       const clipBox = getClipBox(frame);
       if (!clipBox) return; // already empty — nothing to clear
@@ -924,7 +1003,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       }
 
       // Clear the active tool's slot (stay in clip mode)
-      ctx.actions.setClipBox(frame.id, tool, null);
+      ctx.actions.updateFrame(frame.id, { confinement: null });
     }
   } as EditorCommand<void, Promise<void>>
 

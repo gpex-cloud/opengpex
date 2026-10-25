@@ -72,7 +72,7 @@ const BrushCursor = React.memo(function BrushCursor({ activeCraft }: BrushCursor
   const { brushSize } = useBrushParams();
   const { activeFrame } = useEditorState();
 
-  // 60fps mouse position tracking + camera.k real-time sync size + Cmd/Ctrl modifier key listening
+  // 60fps mouse position tracking + camera.k real-time sync size + Alt modifier key listening
   useBrushCursorTracking(cursorRef, true, brushSize, activeCraft);
 
   // Calculate cursor diameter on screen (brushSize * camera zoom ratio)
@@ -83,6 +83,7 @@ const BrushCursor = React.memo(function BrushCursor({ activeCraft }: BrushCursor
   return (
     <div
       ref={cursorRef}
+      data-cursor-indicator
       className="absolute top-0 left-0 pointer-events-none"
       style={{
         opacity: 0, // initially hidden, shown on mousemove
@@ -162,12 +163,12 @@ const BrushCursor = React.memo(function BrushCursor({ activeCraft }: BrushCursor
         <path d="M22 21H7" stroke="white" strokeWidth="3" strokeLinecap="round" />
       </svg>
 
-      {/* Mode indicator badge: "+" (eraser + Cmd, controlled imperatively by hooks.ts) / undo-2 (restore, always visible) */}
+      {/* Mode indicator badge: "+" (eraser + Alt, controlled imperatively by hooks.ts) / undo-2 (restore, always visible) */}
       <div
         data-badge="new-layer"
         className="absolute"
         style={{
-          // restore: always visible; eraser: hidden by default, hooks.ts toggles on Cmd press
+          // restore: always visible; eraser: hidden by default, hooks.ts toggles on Alt press
           opacity: activeCraft === 'restore' ? 1 : 0,
           left: `${Math.max(screenDiameter - 1, halfSize + 2) + 17}px`,
           top: `${Math.max(screenDiameter - 1, halfSize + 2) + 1}px`,

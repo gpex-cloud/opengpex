@@ -37,7 +37,7 @@ import { makeClipToolGuard } from '../guard';
  * providing pixel-perfect fragment/hole complementarity even when the selection
  * extends beyond layer boundaries.
  *
- * Stored in `frame.clipBoxes['pathellipse']` as a LocalPolygon.
+ * Stored in `frame.confinement` as a LocalPolygon.
  */
 export const createPathEllipseHandler = (): InteractionHandler => {
   return createTransformHandler({
@@ -126,7 +126,7 @@ export const createPathEllipseHandler = (): InteractionHandler => {
       // The 64-point ellipseToLocalPolygon approximation is recognized as type:'circle'
       // by point2dToLocalShape, which breaks path ∩ path intersection in nested cuts.
       const newPoly = e.geometry.polygon.ellipsePathToLocalPolygon(newRect, antiAliased);
-      tx.update({ clipBoxes: { ...frame.clipBoxes, ['pathellipse']: newPoly } }, 'frame');
+      tx.update({ confinement: newPoly }, 'frame');
     },
 
     gestures: [
@@ -140,7 +140,7 @@ export const createPathEllipseHandler = (): InteractionHandler => {
           const toolAAMap = e.state.getStateSignal<ClipToolAAMap | undefined>(ClipOptionsAPI.signals.clipToolAA);
           const antiAliased = currentBox ? currentBox.antiAliased : (toolAAMap?.pathellipse ?? true);
           const newPoly = e.geometry.polygon.ellipsePathToLocalPolygon(fullCanvasRect, antiAliased);
-          tx.update({ clipBoxes: { ...frame.clipBoxes, ['pathellipse']: newPoly } }, 'frame');
+          tx.update({ confinement: newPoly }, 'frame');
         }
       },
       {

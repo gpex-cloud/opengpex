@@ -91,7 +91,7 @@ export interface AntsPathCache {
  *     fall below ANTS_MAX_VERTICES.
  *
  * The simplified polygon is ONLY used for SVG overlay display — the source data
- * in clipBoxes is never mutated, so cut/copy/mask operations remain pixel-precise.
+ * in confinement is never mutated, so cut/copy/mask operations remain pixel-precise.
  */
 export function simplifyPolygonForAnts(
   poly: LocalPolygon,

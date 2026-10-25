@@ -208,6 +208,9 @@ export class StrokeRenderer implements VectorRenderer {
     pass.setPipeline(pipelineCache.getStrokePipeline(targetFormat));
     pass.setVertexBuffer(0, this.pending.verts.buffer, this.pending.verts.offset, this.pending.verts.size);
     pass.setBindGroup(0, bindGroup, [slot.offset]);
+    // Group 1: the frozen selection coverage (or the 1×1 alpha=1 dummy when the
+    // stroke is unconstrained) — the fragment multiplies its coverage by it.
+    pass.setBindGroup(1, pipelineCache.getStrokeConfinementBindGroup(args.confinementCoverage));
     pass.draw(this.pending.vertexCount);
 
     this.pending = null;

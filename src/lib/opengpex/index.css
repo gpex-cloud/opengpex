@@ -133,3 +133,18 @@
   background: transparent !important;
 }
 
+
+/* ─── Cmd spring key: hide self-drawn pointer indicators ────────────────────
+   While the Cmd/Ctrl spring key is held, the press routes away from the
+   active craft tool (layer-move / peel / draft translate), so tools that
+   replace the system cursor with a self-drawn DOM indicator (brush ring,
+   eraser/mosaic circle) must not keep it lingering under the move cursor.
+   SpringKeyManager toggles the `data-spring-meta` flag on <html>; every
+   indicator just tags itself with `data-cursor-indicator` and this single
+   rule hides it. `!important` is required because the tracking loops write
+   `style.opacity` inline (initial 0, revealed on pointermove) — the flag
+   must win over any inline value while Cmd is held, and stop applying on
+   release without touching the inline state. */
+[data-spring-meta='true'] [data-cursor-indicator] {
+  opacity: 0 !important;
+}

@@ -74,6 +74,14 @@ function clamp(v: number, lo: number, hi: number): number {
  * @param size    Tip diameter at pressure 1 (`StrokeData.size`, logical px).
  * @param canvas  Canvas extent; the box is clamped into it, exactly as the
  *                legacy brush's bake-time crop is.
+ * @param clipRect  Optional additional clamp: the active selection's bounding
+ *                box (canvas coordinates) inflated by 1px of AA margin. The
+ *                box is clamped into the INTERSECTION of canvas and clipRect —
+ *                coverage outside the selection is zero by the confinement
+ *                multiply, so texels out there would be allocated for nothing.
+ *                A stroke fully outside the selection collapses to a degenerate
+ *                1px box on the selection edge and renders nothing (same
+ *                posture as a fully off-canvas stroke).
  * @returns The re-based trajectory + layer geometry, or `null` for an empty
  *          trajectory (nothing to place).
  *
@@ -87,31 +95,106 @@ export function tightenStroke(
   points: readonly StrokePoint[],
   size: number,
   canvas: { w: number; h: number },
+  clipRect?: { x: number; y: number; w: number; h: number },
 ): TightenedStroke | null {
   if (points.length === 0) return null;
 
+  // Box extent: when a selection clip rect is given, measure it from the
+  // parts of the trajectory that actually CROSS the rect — the raw trajectory
+  // bbox would drag in the clipped-away tails (a diagonal stroke crossing the
+  // selection corner-to-corner would keep the whole off-selection span as
+  // permanently transparent box area). Per-SEGMENT Liang-Barsky clip against
+  // the rect: segment-level, not point-level, because a sparse straight
+  // crossing can have BOTH endpoint samples outside the selection while the
+  // segment between them paints right through it. A lone point (no segments)
+  // counts only when it is itself inside. The POINT STREAM is never trimmed —
+  // this only decides the box; the coverage multiply clips the pixels.
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const p of points) {
-    if (p.x < minX) minX = p.x;
-    if (p.x > maxX) maxX = p.x;
-    if (p.y < minY) minY = p.y;
-    if (p.y > maxY) maxY = p.y;
+  if (clipRect) {
+    const rX0 = clipRect.x, rY0 = clipRect.y;
+    const rX1 = clipRect.x + clipRect.w, rY1 = clipRect.y + clipRect.h;
+    const grow = (x: number, y: number) => {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    };
+    // Liang-Barsky: parametric clip of segment (a→b) against the rect.
+    // Returns the visible sub-segment's endpoints, or null when it misses.
+    const clipSegment = (ax: number, ay: number, bx: number, by: number) => {
+      const dx = bx - ax, dy = by - ay;
+      let t0 = 0, t1 = 1;
+      const p = [-dx, dx, -dy, dy];
+      const q = [ax - rX0, rX1 - ax, ay - rY0, rY1 - ay];
+      for (let i = 0; i < 4; i++) {
+        if (p[i] === 0) {
+          if (q[i] < 0) return null;
+        } else {
+          const r = q[i] / p[i];
+          if (p[i] < 0) { if (r > t1) return null; if (r > t0) t0 = r; }
+          else { if (r < t0) return null; if (r < t1) t1 = r; }
+        }
+      }
+      return { x0: ax + t0 * dx, y0: ay + t0 * dy, x1: ax + t1 * dx, y1: ay + t1 * dy };
+    };
+    for (let i = 0; i < points.length; i++) {
+      const a = points[i];
+      if (i + 1 < points.length) {
+        const b = points[i + 1];
+        const seg = clipSegment(a.x, a.y, b.x, b.y);
+        if (seg) { grow(seg.x0, seg.y0); grow(seg.x1, seg.y1); }
+      } else if (points.length === 1 && a.x >= rX0 && a.x <= rX1 && a.y >= rY0 && a.y <= rY1) {
+        grow(a.x, a.y);
+      }
+    }
+  } else {
+    for (const p of points) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+  }
+
+  if (clipRect && (minX === Infinity || maxX < minX || maxY < minY)) {
+    // Nothing crosses the selection — collapse to a degenerate 1px box on the
+    // nearest selection edge (same posture as off-canvas strokes).
+    const cw0 = Math.max(1, canvas.w);
+    const ch0 = Math.max(1, canvas.h);
+    const loX = Math.max(0, clipRect.x);
+    const loY = Math.max(0, clipRect.y);
+    const hiX = Math.min(cw0, clipRect.x + clipRect.w);
+    const hiY = Math.min(ch0, clipRect.y + clipRect.h);
+    const cx = clamp(Math.floor(points[0].x), loX, hiX);
+    const cy = clamp(Math.floor(points[0].y), loY, hiY);
+    return {
+      points: points.map((p) => ({ x: p.x - cx, y: p.y - cy, pressure: p.pressure })),
+      box: { x: cx, y: cy, w: 1, h: 1 },
+      cx: cx + 0.5 - cw0 / 2,
+      cy: cy + 0.5 - ch0 / 2,
+    };
   }
 
   const pad = Math.max(0, size) / 2 + STROKE_BOX_PADDING_EXTRA_PX;
   const cw = Math.max(1, canvas.w);
   const ch = Math.max(1, canvas.h);
 
-  // Pixel-align outwards, then clamp into the canvas. A stroke drawn entirely
-  // outside the canvas collapses to a degenerate 1px box on that edge — it
-  // renders nothing, which is what a fully off-canvas stroke should do.
-  const x0 = clamp(Math.floor(minX - pad), 0, cw);
-  const y0 = clamp(Math.floor(minY - pad), 0, ch);
-  const x1 = clamp(Math.ceil(maxX + pad), 0, cw);
-  const y1 = clamp(Math.ceil(maxY + pad), 0, ch);
+  // Pixel-align outwards, then clamp into the canvas ∩ (optional) selection
+  // bounding box. A stroke drawn entirely outside either bound collapses to a
+  // degenerate 1px box on that edge — it renders nothing, which is what a
+  // fully off-canvas (or fully out-of-selection) stroke should do. The clip
+  // rect arrives pre-inflated by its AA margin from the caller.
+  const loX = clipRect ? Math.max(0, clipRect.x) : 0;
+  const loY = clipRect ? Math.max(0, clipRect.y) : 0;
+  const hiX = clipRect ? Math.min(cw, clipRect.x + clipRect.w) : cw;
+  const hiY = clipRect ? Math.min(ch, clipRect.y + clipRect.h) : ch;
+  const x0 = clamp(Math.floor(minX - pad), loX, hiX);
+  const y0 = clamp(Math.floor(minY - pad), loY, hiY);
+  const x1 = clamp(Math.ceil(maxX + pad), loX, hiX);
+  const y1 = clamp(Math.ceil(maxY + pad), loY, hiY);
 
   const w = Math.max(1, x1 - x0);
   const h = Math.max(1, y1 - y0);

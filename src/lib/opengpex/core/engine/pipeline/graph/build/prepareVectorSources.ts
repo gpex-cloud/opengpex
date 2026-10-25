@@ -70,6 +70,7 @@ import type { VectorRenderContext } from './vectorRenderers/VectorRenderer';
 import { resolveVectorRenderer } from './vectorRenderers';
 import { vectorTransientSize } from '../support/vectorTransient';
 import { runFilterChain } from './runFilterChain';
+import { prepareConfinementCoverage, CONFINEMENT_SOURCE_STROKE } from './prepareConfinementSources';
 import type { BuildContext, PreparedSource } from './types';
 
 const CLEAR_COLOR: GPUColor = { r: 0, g: 0, b: 0, a: 0 };
@@ -193,6 +194,21 @@ export function prepareVectorSources(
     const renderer = resolveVectorRenderer(source.renderer);
     renderer.encodePrepass?.(encoder, vectorCtx, { params: source, frameToken });
 
+    // Confinement multiply: bake the stroke's frozen selection snapshot into
+    // a coverage texture BEFORE the render pass opens (compute), sized to the
+    // transient's exact texel dims so the fragment samples it 1:1 via normalized
+    // uv. The snapshot travels with the stroke (layer-local, frozen at creation)
+    // — the pipeline never reads the live frame selection, so undo/redo replay
+    // reproduces bit-identical pixels regardless of later selection edits.
+    let confinementCoverage: GPUTextureView | undefined;
+    if (source.renderer === 'stroke' && source.stroke.confinement) {
+      const conf = source.stroke.confinement;
+      confinementCoverage = prepareConfinementCoverage(
+        encoder, ctx, `${CONFINEMENT_SOURCE_STROKE}${layer.id}`, conf.rings, conf.antiAliased,
+        layer.width ?? 1, layer.height ?? 1, scale,
+      ).createView();
+    }
+
     const vectorPass = encoder.beginRenderPass({
       label: `Vector Pass (${layer.id})`,
       colorAttachments: [
@@ -210,6 +226,7 @@ export function prepareVectorSources(
       params: source,
       density: Math.max(scale[0], scale[1]),
       frameToken,
+      confinementCoverage,
     });
     vectorPass.end();
 

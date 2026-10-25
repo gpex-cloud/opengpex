@@ -792,6 +792,24 @@ export class SceneAssembler {
         vmaskDesc = buildVectorMaskDesc(combinedMasks, layerWidth, layerHeight);
       }
 
+      // ── (3) adjustConfinement: the FROZEN selection snapshot for local
+      // adjustments. Same crop re-base as the explicit vmasks above (the
+      // snapshot is stored in the layer-local frame where visibleShape.rect
+      // lives; the GPU mask space is crop-local). Unlike vmask this NEVER
+      // clips alpha — the grading shaders blend the grade by this coverage.
+      let adjustConfinementDesc: LayerNode['adjustConfinement'] | undefined;
+      if (latestLayer.adjustmentConfinement && layerWidth > 0 && layerHeight > 0) {
+        const poly = latestLayer.adjustmentConfinement;
+        const vx = shape?.rect.x ?? 0;
+        const vy = shape?.rect.y ?? 0;
+        adjustConfinementDesc = {
+          rings: poly.rings.map((ring) =>
+            ring.map((p) => [p.x - vx, p.y - vy] as const),
+          ),
+          antiAliased: true,
+        };
+      }
+
       // Translate adjustment state once, split the LayerNode
       // fields (adjustments/filters) from the LUT upload plan (`luts`).
       const { luts: lutPlan, ...adjustmentResult } = translateLayerAdjustments(latestLayer);
@@ -860,6 +878,7 @@ export class SceneAssembler {
         // `luts` is NOT a LayerNode field — it is the curves/levels LUT UPLOAD
         // plan, collected separately below and flushed via syncAssets.
         ...adjustmentResult,
+        adjustConfinement: adjustConfinementDesc,
         clip: !!layer.clip,
       });
 

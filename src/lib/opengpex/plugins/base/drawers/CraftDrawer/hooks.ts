@@ -44,17 +44,68 @@ import type { CraftDrawerCommandsMap, CraftDrawerSignalsMap } from './commands.d
  * Provides currently active craft tool type and type inference of currently selected layer.
  * Panel display uses mutually exclusive logic:
  * - activeCraft has highest priority (explicitly active tool type determines panel)
- * - activeCraft=null infers panel by selected layer type (text -> TextPanel, paint -> BrushPanel)
+ * - activeCraft=null infers panel by selected layer type (text -> TextPanel,
+ *   paint -> BrushPanel, marker layer -> MarkerPanel, pen shape -> PenPanel)
  */
 export function useCraftDrawer() {
   const { activeCraftSignal } = usePluginSignals<CraftDrawerSignalsMap>();
   const { activeLayer } = useEditorState();
+  const [, setSelfConfig] = usePluginSelfConfig<CraftDrawerConfig>();
 
   const activeCraft = (activeCraftSignal?.value ?? null) as ActiveCraft;
   const activeLayerIsText = activeLayer?.type === 'text';
   const activeLayerIsPaint = activeLayer?.type === 'paint';
+  const activeLayerIsMarker = activeLayer?.type === 'vector' && !!activeLayer.markerData;
+  // Pen shape layer: a committed vector carrying penData (markerData and
+  // penData are mutually exclusive in practice, but the flags stay explicit).
+  const activeLayerIsPen = activeLayer?.type === 'vector' && !!activeLayer.penData;
+  // Mosaic identity: mosaic strokes bake into a PAINT layer, so the paint
+  // inference alone would show the BrushPanel for them. The bake stamps
+  // `metadata.sourceTool: 'mosaic'` on the layers it creates — that stamp
+  // routes the inferred panel to MosaicPanel instead.
+  const activeLayerIsMosaic =
+    activeLayer?.type === 'paint' && activeLayer.metadata?.sourceTool === 'mosaic';
 
-  return { activeCraft, activeLayerIsText, activeLayerIsPaint };
+  // Which tool the inferred panel belongs to (only meaningful while no tool
+  // is active; drives the button group's opt-in inverted state). Mosaic
+  // identity wins over the generic paint inference.
+  const inferredCraft: ActiveCraft | null =
+    activeCraft === null
+      ? activeLayerIsText
+        ? 'text'
+        : activeLayerIsMarker
+          ? 'marker'
+          : activeLayerIsPen
+            ? 'pen'
+            : activeLayerIsMosaic
+              ? 'mosaic'
+              : activeLayerIsPaint
+                ? 'brush'
+                : null
+      : null;
+
+  // With no tool active, the drawer infers the panel from the selection.
+  // Arming the selected marker's kind keeps the inferred panel's highlight
+  // and bindings on the selected layer (otherwise the panel would show a
+  // stale armed kind — the detached state activateCraft('marker') also
+  // avoids). Only fires while NO tool is active: an active tool owns its
+  // armed kind (handlers arm it on click). The last auto-armed layer id is
+  // tracked so arming happens ONCE per selection change — re-running on
+  // every config write would fight the panel's own kind selector (the user
+  // picks a kind, the effect would snap it back to the layer's kind).
+  const lastAutoArmedLayerIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (activeCraft !== null || !activeLayerIsMarker) return;
+    const layerId = activeLayer?.id ?? null;
+    if (layerId === lastAutoArmedLayerIdRef.current) return;
+    const kind = activeLayer?.markerData?.kind;
+    if (kind && MARKER_REGISTRY.get(kind)) {
+      lastAutoArmedLayerIdRef.current = layerId;
+      setSelfConfig({ activeMarkerKind: kind } as Partial<CraftDrawerConfig>);
+    }
+  }, [activeCraft, activeLayerIsMarker, activeLayer, setSelfConfig]);
+
+  return { activeCraft, activeLayerIsText, activeLayerIsPaint, activeLayerIsMarker, activeLayerIsMosaic, activeLayerIsPen, inferredCraft };
 }
 
 // ─── useCraftTrigger ───────────────────────────────────────────────────────────

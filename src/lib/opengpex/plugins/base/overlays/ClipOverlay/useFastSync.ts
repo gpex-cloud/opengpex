@@ -21,8 +21,6 @@ import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
 import { useFastSync, useFastRectSync, useFastSvgGroupSync, useFastMarchingAntsSync, useFastAnchorSync } from '@opengpex/editor/core/state/volatile';
 import { LocalShape, LocalPolygon, asLocalShape, Frame, CameraState } from '@opengpex/editor/core/types';
-import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
-import { ClipTool } from '../../options/ClipOptions/protocols';
 import { resolveAntsPath, simplifyPolygonForAnts, type AntsPathCache } from './antsPath';
 
 /** Grid phase identity: the target layer's origin fraction, 0 or 0.5 (see GeometryService.quantizeGridOffset). */
@@ -47,11 +45,11 @@ const EMPTY_SHAPE: LocalShape = asLocalShape({ x: 0, y: 0, w: 0, h: 0 });
  * Returns EMPTY_SHAPE when the slot is empty.
  */
 function resolveRegularClip(
-  f: { clipBoxes: Record<string, unknown>; canvasClipBox: LocalShape },
+  f: { confinement: LocalPolygon | null; canvasClipBox: LocalShape },
   isReCanvas: boolean
 ): LocalShape {
   if (isReCanvas) return f.canvasClipBox;
-  const poly = getRegularClipShape(f as { clipBoxes: Record<string, LocalPolygon> });
+  const poly = f.confinement;
   if (!poly) return EMPTY_SHAPE;
   // Convert LocalPolygon to LocalShape for CSS box positioning
   const { rect, antiAliased } = poly;
@@ -176,7 +174,6 @@ export function useSelectionAntsSync(
   pathRef: React.RefObject<SVGPathElement | null>,
   isActive: boolean,
   isReCanvas: boolean,
-  clipTool: string,
   gridOffset: GridOffset = { x: 0, y: 0 }
 ) {
   const { geometry } = useEditorServices();
@@ -205,7 +202,7 @@ export function useSelectionAntsSync(
   useFastSvgGroupSync(groupRef, isActive, {
     selector: (_v, f) => {
       if (isReCanvas) return f.canvasClipBox.rect;
-      const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
+      const entry = f.confinement as LocalPolygon | null;
       if (!entry) return null;
       return entry.rect.w > 0 ? entry.rect : null;
     },
@@ -215,7 +212,7 @@ export function useSelectionAntsSync(
   // Shared selector for both paths (bg + fg share the same geometry).
   const antsSelector = (_v: unknown, f: Frame, cam: CameraState): LocalShape | string | null => {
     if (isReCanvas) return f.canvasClipBox;
-    const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
+    const entry = f.confinement as LocalPolygon | null;
     if (!entry) return null;
 
     const gridOffsetKey = `${gridOffset.x}_${gridOffset.y}`;
@@ -254,13 +251,11 @@ export function useSelectionAntsSync(
   // Background path (black, offset phase) — fills the foreground gaps
   useFastMarchingAntsSync(pathBgRef, isActive, {
     selector: antsSelector,
-    resetKey: clipTool,
   });
 
   // Foreground path (white/red, standard phase)
   useFastMarchingAntsSync(pathRef, isActive, {
     selector: antsSelector,
-    resetKey: clipTool,
   });
 
   // Group visibility: hidden when no data
@@ -270,7 +265,7 @@ export function useSelectionAntsSync(
       groupRef.current.style.visibility = '';
       return;
     }
-    const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
+    const entry = f.confinement as LocalPolygon | null;
     const hasData = !!entry && entry.rect.w > 0;
     groupRef.current.style.visibility = hasData ? '' : 'hidden';
   });
@@ -298,7 +293,7 @@ export function useSelectionAntsSync(
  *
  * Visible only during an active drag; hidden otherwise (transient is null → label hidden).
  */
-export function useMoveDeltaSync(isActive: boolean, clipTool: ClipTool) {
+export function useMoveDeltaSync(isActive: boolean) {
   const deltaContainerRef = useRef<HTMLDivElement>(null);
   const { volatileRef } = useEditorServices();
 
@@ -309,7 +304,7 @@ export function useMoveDeltaSync(isActive: boolean, clipTool: ClipTool) {
       const start = volatileRef.current.transient['clipMoveStart'] as { x: number; y: number } | undefined;
       if (!start) return null;
 
-      const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
+      const entry = f.confinement as LocalPolygon | null;
       if (!entry) return null;
 
       // Anchor at bottom-left of the selection bounding rect
@@ -330,7 +325,7 @@ export function useMoveDeltaSync(isActive: boolean, clipTool: ClipTool) {
       return;
     }
 
-    const entry = f.clipBoxes[clipTool] as LocalPolygon | undefined;
+    const entry = f.confinement as LocalPolygon | null;
     if (!entry) {
       el.style.display = 'none';
       return;

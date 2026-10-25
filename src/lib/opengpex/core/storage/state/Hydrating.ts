@@ -246,6 +246,36 @@ export const Hydrating = {
       });
     }
 
+    // Legacy-document selection migration (per-tool slots → single
+    // confinement entity): frames saved before the single-slot refactor
+    // stored selections in `clipBoxes`, a record keyed by producing tool id.
+    // Under the old mutually-exclusive-slot model only the slot referenced by
+    // `latestClipTool` was ever visible on canvas — the other slots were
+    // unobservable hidden state. So the load-time migration takes exactly
+    // that slot as the sole selection and drops the rest, with no perceivable
+    // loss. Frames written after the refactor have no `clipBoxes` key and pass
+    // through untouched.
+    if (result.clipBoxes && typeof result.clipBoxes === 'object') {
+      const legacyBoxes = result.clipBoxes as Record<string, unknown>;
+      const activeTool = (result.latestClipTool as string) || 'rect';
+      if (result.confinement === undefined || result.confinement === null) {
+        const slot = legacyBoxes[activeTool];
+        // Only polygon selections migrate. Slots predating the polygon
+        // unification carry plain rect shapes the ants/mask pipeline cannot
+        // render — dropping the (ancient, low-value) selection beats
+        // crashing the overlay.
+        const isPolygon =
+          !!slot && typeof slot === 'object' && Array.isArray((slot as { rings?: unknown }).rings);
+        result.confinement = isPolygon ? slot : null;
+      }
+      delete result.clipBoxes;
+    } else if (result.latestClipTool !== undefined && result.confinement === undefined) {
+      // A frame without legacy slots but also without the new field (e.g. a
+      // hand-edited or partially-persisted snapshot) normalizes to "no
+      // selection".
+      result.confinement = null;
+    }
+
     // Defensive legacy-document migration (restore inverted-record architecture,
     // task T1): before T3, v2 had NO producer of `inverted: true` bmask records,
     // but a hypothetical legacy import must not load one verbatim — under the

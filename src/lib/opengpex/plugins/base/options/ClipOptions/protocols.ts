@@ -34,8 +34,28 @@ export const PLUGIN_AUTHOR = 'opengpex';
 
 // ─── Command IDs ────────────────────────────────────────────────────────────────
 
-/** Space — toggle clip mode (enter ↔ exit). Pairs with `CMD_EXIT_CLIP_MODE` (Esc). */
+/**
+ * Toolbar-button command — enter clip mode from pan, or (when already in
+ * clip) merge any dirty peel and exit. No keyboard shortcut: keyboard
+ * entry goes through the per-tool activation shortcuts (M / L / W / S),
+ * Space is reserved for the camera. Pairs with `CMD_EXIT_CLIP_MODE` (Esc).
+ */
 export const CMD_TOGGLE_MODE = 'cmd.toggle_mode';
+
+/**
+ * M — enter clip mode with the marquee family (rect / pathellipse).
+ * Pressing M again while a marquee tool is active flips rect ↔ pathellipse.
+ */
+export const CMD_ACTIVATE_MARQUEE = 'cmd.clip_tool.activate_marquee';
+
+/** L — enter clip mode directly with the lasso tool. */
+export const CMD_ACTIVATE_LASSO = 'cmd.clip_tool.activate_lasso';
+
+/** W — enter clip mode directly with the wand tool. */
+export const CMD_ACTIVATE_WAND = 'cmd.clip_tool.activate_wand';
+
+/** S — enter clip mode directly with the SAM tool. */
+export const CMD_ACTIVATE_SAM = 'cmd.clip_tool.activate_sam';
 
 /**
  * Tab — cycle through clip tools forward while already in clip mode
@@ -152,8 +172,8 @@ export const SIGNAL_CLIP_TOOL_AA = 'signal.clip_tool_aa.map';
  * - 'rect' / 'pathellipse' → regular shapes (amber UI accent).
  * - 'lasso' / 'wand'    → irregular polygon selections (purple UI accent).
  *
- * All tools write to the unified `clipBoxes[toolId]` record via
- * `actions.setClipBox(frameId, toolId, data)`.
+ * All tools write to the frame-level selection entity via
+ * `actions.updateFrame(frameId, { confinement: data })`.
  *
  * Anti-aliasing is **orthogonal** to tool identity — driven by the standalone
  * `AA` button (command `CMD_TOGGLE_ANTI_ALIAS`) which toggles the
@@ -220,7 +240,7 @@ export interface ClipToolStrategy {
 
   /**
    * Custom cursor for this clip tool — applied to the viewport via
-   * `cursorOverride` when this tool is active in clip mode.
+   * registered tool cursor when this tool is active in clip mode.
    */
   readonly cursor: string;
 

@@ -54,7 +54,7 @@ export function BgRemoverPanel() {
 
   const afterModelChange = useCallback(() => {
     if (lastResult?.frameId) {
-      actions.setClipBox(lastResult.frameId, 'lasso', null);
+      actions.updateFrame(lastResult.frameId, { confinement: null });
     }
   }, [lastResult, actions]);
 
@@ -63,8 +63,7 @@ export function BgRemoverPanel() {
     if (state.interaction.interactionMode !== 'clip') {
       actions.setInteraction({ interactionMode: 'clip' });
     }
-    actions.updateFrame(lastResult.frameId, { latestClipTool: 'lasso' });
-    actions.setClipBox(lastResult.frameId, 'lasso', lastResult.polygon);
+    actions.updateFrame(lastResult.frameId, { latestClipTool: 'lasso', confinement: lastResult.polygon });
   }, [lastResult, state.interaction.interactionMode, actions]);
 
   return (

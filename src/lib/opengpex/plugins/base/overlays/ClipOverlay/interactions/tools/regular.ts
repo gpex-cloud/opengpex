@@ -145,7 +145,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
       // (polygonToShape, localToWorldPolygon, etc.) never see rings=undefined.
       const antiAliased = currentShape?.antiAliased;
       const newPoly = e.geometry.polygon.regularShapeToLocalPolygon(activeTool, newRect, antiAliased);
-      tx.update({ clipBoxes: { ...frame.clipBoxes, [activeTool]: newPoly } }, 'frame');
+      tx.update({ confinement: newPoly }, 'frame');
 
       // Sync exchange layer if needed
       if (frame.activeLayerId) {
@@ -183,7 +183,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
           const currentShape = getRegularClipShape(frame);
           const antiAliased = currentShape?.antiAliased;
           const newPoly = e.geometry.polygon.regularShapeToLocalPolygon(activeTool, fullCanvasRect, antiAliased);
-          tx.update({ clipBoxes: { ...frame.clipBoxes, [activeTool]: newPoly } }, 'frame');
+          tx.update({ confinement: newPoly }, 'frame');
         }
       },
       {

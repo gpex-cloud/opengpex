@@ -246,7 +246,7 @@ export async function revertGifFrame(ctx: EditorContextValue, frameId: string): 
     actions.updateFrame(frameId, {
       canvas: content.canvas,
       camera: content.camera,
-      clipBoxes: {},
+      confinement: null,
       canvasClipBox: content.canvasClipBox,
       layers: content.layers,
       activeLayerId: content.activeLayerId,

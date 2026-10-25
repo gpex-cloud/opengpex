@@ -111,6 +111,21 @@ export interface InteractionEvent {
   };
   keys: { shift: boolean; alt: boolean; meta: boolean };
   /**
+   * Spring-key snapshot, resolved ONCE per event by the viewport event
+   * builder. Per-modifier spring channels; `meta` is the Cmd/Ctrl logical
+   * key (Meta on macOS, Ctrl elsewhere) ENGAGED as a spring key: physically
+   * held AND not suppressed by a modal context (e.g. Re-Canvas owns every
+   * press). While a channel is engaged, the dispatcher routes the press ONLY
+   * to handlers that declare `springOverride` for that channel (tool-specific
+   * spring semantics) plus the global layer-move fallback — every other
+   * handler is treated as nonexistent, so "spring key = move the object
+   * under the pointer" holds in any tool without per-tool cooperation.
+   * `alt` / `shift` are physical modifier states reserved for future spring
+   * channels — no spring semantics are attached to them yet (tools read
+   * `keys.alt` / `keys.shift` for their continuous mid-gesture semantics).
+   */
+  spring: { meta: boolean; alt: boolean; shift: boolean };
+  /**
    * Pointer device metadata extracted from the native PointerEvent.
    * Provides type-safe access to pressure, tilt, and device type without
    * needing unsafe `as PointerEvent` casts in handler code.
@@ -204,9 +219,25 @@ export interface BuiltSignal extends EditorSignal {
   uid: string;
 }
 
+/** Modifier channels that can carry spring-key semantics. `meta` is the
+ * Cmd/Ctrl logical key (Meta on macOS, Ctrl elsewhere) — the only channel
+ * with an engaged spring semantics today; `alt` / `shift` are reserved. */
+export type SpringChannel = 'meta' | 'alt' | 'shift';
+
 export interface InteractionHandler {
   id: string;
   priority: number;
+  /**
+   * Declare that this handler OVERRIDES a spring channel's default routing
+   * (global temporary-move) with a tool-specific meaning inside its own hit
+   * region (e.g. selection peel, editing-state text move, whole-draft
+   * translate). While the channel is engaged, the dispatcher consults ONLY
+   * handlers that declare an override for it (plus the layer-move fallback),
+   * so omitting it means the handler is filtered out entirely while the
+   * channel is down and the global fallback owns the press. Declare the
+   * channel this handler gives a spring meaning to.
+   */
+  springOverride?: SpringChannel;
   test: (e: InteractionEvent) => boolean;
   onStart: (e: InteractionEvent) => void;
   onMove: (e: InteractionEvent) => void;

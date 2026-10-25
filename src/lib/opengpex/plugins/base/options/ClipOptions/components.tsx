@@ -439,7 +439,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
             }
           >
             <Tooltip
-              content={`Toggle Mode (${toggleModeCmd?.shortcutLabel || ""})`}
+              content={`Toggle Selection Mode (M / L / W / S)`}
               position="bottom"
               display="inline-flex"
             >

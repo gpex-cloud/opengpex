@@ -107,7 +107,7 @@ interface VmaskCacheEntry {
  * per layer id, holding the last baked coverage texture. Single-threaded synchronous
  * render path, so no locking is needed.
  */
-class VmaskCache {
+export class VmaskCache {
   private device: GPUDevice | null = null;
   private readonly entries = new Map<string, VmaskCacheEntry>();
   private edgesRing: BufferRing | null = null;
@@ -318,9 +318,14 @@ class VmaskCache {
     });
   }
 
-  /** Destroy every entry whose layer id is not in `seen` this frame. */
-  sweep(seen: Set<string>): void {
+  /**
+   * Destroy every entry whose key is not in `seen` this frame. With `prefix`
+   * set (shared-cache namespaces), only entries under that prefix are eligible
+   * for destruction — another consumer's namespace is never touched.
+   */
+  sweep(seen: Set<string>, prefix?: string): void {
     for (const [id, entry] of this.entries) {
+      if (prefix && !id.startsWith(prefix)) continue;
       if (!seen.has(id)) {
         entry.texture.destroy();
         this.entries.delete(id);

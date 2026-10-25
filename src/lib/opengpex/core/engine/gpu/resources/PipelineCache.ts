@@ -211,6 +211,8 @@ export class PipelineCache {
   private strokePaintShaderModule: GPUShaderModule | null = null;
   private strokeRenderBindGroupLayout: GPUBindGroupLayout | null = null;
   private strokeRenderPipelineLayout: GPUPipelineLayout | null = null;
+  private strokeConfinementBindGroupLayout: GPUBindGroupLayout | null = null;
+  private strokeConfinementDummy: { texture: GPUTexture; view: GPUTextureView; sampler: GPUSampler } | null = null;
 
   /**
    * Vector spine TEXT strategy: instanced glyph quads over a grayscale coverage
@@ -390,6 +392,14 @@ export class PipelineCache {
           visibility: GPUShaderStage.FRAGMENT,
           texture: { sampleType: 'float' },
         },
+        {
+          // Adjustment-confinement coverage (frozen selection snapshot
+          // localizing the grade). Absent layers bind the 1×1 default white
+          // view so the slot is always valid.
+          binding: 5,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { sampleType: 'float' },
+        },
         // The bmask stack slots (retired bindings 5..7) are gone: the bmask
         // combine pass bakes ALL enabled records into ONE texture bound at
         // slot 3, so the layer pipeline needs no per-record slots.
@@ -442,7 +452,7 @@ export class PipelineCache {
           visibility: GPUShaderStage.FRAGMENT,
           texture: { sampleType: 'float', viewDimension: '3d' },
         },
-      ],
+            ],
     });
     return this.adjustBindGroupLayout;
   }
@@ -571,6 +581,14 @@ export class PipelineCache {
         },
         { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
         { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        {
+          // Adjustment-confinement coverage (frozen selection snapshot
+          // localizing the grade). Absent layers bind the 1×1 default white
+          // view so the slot is always valid.
+          binding: 3,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { sampleType: 'float' },
+        },
       ],
     });
     return this.adjustPreBindGroupLayout;
@@ -952,6 +970,14 @@ export class PipelineCache {
           // Vmask texture (polygon-baked coverage), symmetric to the
           // layer layout's binding(4). Default white view when absent/analytic.
           binding: 5,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { sampleType: 'float' },
+        },
+        {
+          // Adjustment-confinement coverage (frozen selection snapshot
+          // localizing the grade), symmetric to the layer layout's
+          // binding(5). Default white view when absent.
+          binding: 6,
           visibility: GPUShaderStage.FRAGMENT,
           texture: { sampleType: 'float' },
         },
@@ -1641,10 +1667,83 @@ export class PipelineCache {
   getStrokeRenderPipelineLayout(): GPUPipelineLayout {
     if (this.strokeRenderPipelineLayout) return this.strokeRenderPipelineLayout;
     this.strokeRenderPipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.getStrokeRenderBindGroupLayout()],
+      bindGroupLayouts: [this.getStrokeRenderBindGroupLayout(), this.getStrokeConfinementBindGroupLayout()],
       label: 'Stroke Render Pipeline Layout',
     });
     return this.strokeRenderPipelineLayout;
+  }
+
+  /**
+   * Group-1 layout: the confinement coverage texture + its sampler (FRAGMENT
+   * only). ALWAYS bound — unconstrained strokes bind a 1×1 alpha=1 dummy so a
+   * single pipeline serves confined and free strokes alike (no pipeline-pair
+   * explosion, no per-draw layout branching).
+   */
+  getStrokeConfinementBindGroupLayout(): GPUBindGroupLayout {
+    if (this.strokeConfinementBindGroupLayout) return this.strokeConfinementBindGroupLayout;
+    this.strokeConfinementBindGroupLayout = this.device.createBindGroupLayout({
+      label: 'Stroke Confinement Bind Group Layout',
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { sampleType: 'float' },
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.FRAGMENT,
+          sampler: { type: 'filtering' },
+        },
+      ],
+    });
+    return this.strokeConfinementBindGroupLayout;
+  }
+
+  /**
+   * The group-1 bind group: either the given confinement coverage texture, or
+   * the lazily-created 1×1 dummy whose red channel is 1 (coverage multiply by
+   * 1 = unconstrained). The dummy is OWNED (never pooled — it must live for
+   * the pipeline's lifetime) and destroyed only via device loss.
+   */
+  getStrokeConfinementBindGroup(coverageView?: GPUTextureView): GPUBindGroup {
+    if (!coverageView) {
+      if (!this.strokeConfinementDummy) {
+        const texture = this.device.createTexture({
+          size: [1, 1, 1],
+          format: 'rgba8unorm',
+          usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+          label: 'Stroke Confinement Dummy',
+        });
+        this.device.queue.writeTexture(
+          { texture },
+          new Uint8Array([255, 255, 255, 255]),
+          { bytesPerRow: 4, rowsPerImage: 1 },
+          [1, 1, 1],
+        );
+        this.strokeConfinementDummy = {
+          texture,
+          view: texture.createView(),
+          sampler: this.device.createSampler({ magFilter: 'linear', minFilter: 'linear' }),
+        };
+      }
+      coverageView = this.strokeConfinementDummy.view;
+    }
+    return this.device.createBindGroup({
+      layout: this.getStrokeConfinementBindGroupLayout(),
+      label: 'Stroke Confinement BindGroup',
+      entries: [
+        { binding: 0, resource: coverageView },
+        { binding: 1, resource: this.getStrokeConfinementSampler() },
+      ],
+    });
+  }
+
+  private getStrokeConfinementSampler(): GPUSampler {
+    if (!this.strokeConfinementDummy) {
+      // Ensure the dummy exists so its sampler is reused (single sampler).
+      this.getStrokeConfinementBindGroup(undefined);
+    }
+    return this.strokeConfinementDummy!.sampler;
   }
 
   /**

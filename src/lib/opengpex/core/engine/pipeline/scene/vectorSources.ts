@@ -126,6 +126,17 @@ export function strokeToVectorSource(
       antiAliased: data.antiAliased !== false,
       width: w,
       height: h,
+      // Frozen selection snapshot (layer-local, travels with the stroke). The
+      // vector spine bakes it into a coverage texture and the paint fragment
+      // multiplies by it — the stroke only paints inside its selection.
+      confinement: data.confinement
+        ? {
+            rings: data.confinement.rings.map((ring) =>
+              ring.map((p) => [p.x, p.y] as [number, number]),
+            ),
+            antiAliased: data.confinement.antiAliased !== false,
+          }
+        : undefined,
     },
   };
 }
@@ -173,8 +184,13 @@ export function strokeToVectorSource(
  */
 export function strokeSourceFingerprint(stroke: StrokeParams): string {
   const { points, pointCount, color, size, hardness, antiAliased, width, height } = stroke;
+  // Confinement lane: the snapshot is written once at stroke creation and is
+  // immutable for the stroke's lifetime, so a presence bit suffices as the
+  // writer contract (a future writer that mutates a frozen snapshot must
+  // extend this token — same rule as for the packed trajectory).
+  const confLane = stroke.confinement ? 'conf' : '-';
   if (pointCount <= 0) {
-    return `vector:stroke:0:-:${size}:${hardness}:${antiAliased ? 1 : 0}:${color.join(',')}:${width}x${height}`;
+    return `vector:stroke:0:-:${size}:${hardness}:${antiAliased ? 1 : 0}:${color.join(',')}:${width}x${height}:${confLane}`;
   }
   const lastBase = (pointCount - 1) * 4;
   return [
@@ -182,7 +198,7 @@ export function strokeSourceFingerprint(stroke: StrokeParams): string {
     pointCount,
     `${points[0]},${points[1]},${points[2]}`,
     `${points[lastBase]},${points[lastBase + 1]},${points[lastBase + 2]}`,
-    `${size}:${hardness}:${antiAliased ? 1 : 0}:${color.join(',')}:${width}x${height}`,
+    `${size}:${hardness}:${antiAliased ? 1 : 0}:${color.join(',')}:${width}x${height}:${confLane}`,
   ].join(':');
 }
 

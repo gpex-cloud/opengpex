@@ -48,14 +48,16 @@ const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
 export function createStrokeSession(e: InteractionEvent): StrokeSession | null {
   const frame = e.activeFrame;
   const craft = e.state.interaction.signals[ACTIVE_CRAFT_KEY] as string;
-  const isCmdPressed = e.keys.meta;
+  // Alt (Option) = force a NEW erase-mask record (since 2026-10-26; Cmd was
+  // reassigned to the global move-layer spring key).
+  const isAltPressed = e.keys.alt;
 
   const isEraser = craft === 'eraser';
   const isRestore = craft === 'restore';
 
   const config = readBrushConfig(e, frame);
 
-  return createMaskSession(e, frame, config, isEraser, isRestore, isCmdPressed);
+  return createMaskSession(e, frame, config, isEraser, isRestore, isAltPressed);
 }
 
 // ─── Mask Session Creation ─────────────────────────────────────────────────────
@@ -66,13 +68,13 @@ function createMaskSession(
   config: StrokeConfig,
   isEraser: boolean,
   isRestore: boolean,
-  isCmdPressed: boolean,
+  isAltPressed: boolean,
 ): StrokeSession | null {
-  // `forceNewMask` (Eraser + Cmd) bypasses ERASE-family record matching — the
+  // `forceNewMask` (Eraser + Alt) bypasses ERASE-family record matching — the
   // erase stroke always bakes as a brand-new record. The restore family keeps
-  // its normal targeting: Cmd is an erase-side gesture, and a Tab flip to
+  // its normal targeting: Alt is an erase-side gesture, and a Tab flip to
   // restore mid-stroke must still resume the matching restore record.
-  const forceNewMask = isEraser && isCmdPressed;
+  const forceNewMask = isEraser && isAltPressed;
 
   // Find target layer for mask editing
   const targetLayerInfo = findEraserTarget(frame);
@@ -197,6 +199,15 @@ function createMaskSession(
     maskH,
     records,
     initialIsRestore: isRestore,
+    // Gesture-start selection snapshot (factory runs at gesture start).
+    // DEEP COPY, not a reference: the live selection object gets replaced
+    // during the stroke. Degenerate (zero-area) selections normalize to null
+    // here too — the SET_CONFINEMENT reducer guards its channel, but tool
+    // commits can write a zero-area ring through UPDATE_FRAME, and erasing
+    // with a 0x0 "selection" must mean unconstrained, not clipped-to-nothing.
+    confinement: frame.confinement && frame.confinement.rect.w > 0 && frame.confinement.rect.h > 0
+      ? e.geometry.polygon.translatePolygon(frame.confinement, 0, 0)
+      : null,
   });
 
   // Materialize the session-start op's canvases, load existing record content

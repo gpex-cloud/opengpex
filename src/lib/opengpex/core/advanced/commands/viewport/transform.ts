@@ -27,7 +27,7 @@ import * as P from '@opengpex/editor/core/advanced/protocols';
  * transformPenDraft: Applies the viewport's D4 operation to the active frame's
  * pen draft (scratch slot), so the draft's frame-local anchors stay aligned
  * with the pixels — the same treatment transformFrame gives layer poses and
- * selection clipBoxes. No-op when no draft session exists on the frame. NOT a
+ * selection confinement. No-op when no draft session exists on the frame. NOT a
  * session undo step: a viewport rotation is a document-level op (and while a
  * session is alive the history fence blocks main-history undo anyway).
  */
@@ -57,7 +57,7 @@ export const ViewportTransformCommands = {
 
       actions.updateFrame(activeFrame.id, {
         ...nextFramePatch,
-        clipBoxes: nextFramePatch.clipBoxes,
+        confinement: nextFramePatch.confinement,
         canvasClipBox: nextFramePatch.canvasClipBox,
         imageAspect: activeFrame.imageAspect ? 1 / activeFrame.imageAspect : undefined,
         canvasAspect: activeFrame.canvasAspect ? 1 / activeFrame.canvasAspect : undefined
@@ -101,7 +101,7 @@ export const ViewportTransformCommands = {
 
       actions.updateFrame(activeFrame.id, {
         ...nextFramePatch,
-        clipBoxes: nextFramePatch.clipBoxes,
+        confinement: nextFramePatch.confinement,
         canvasClipBox: nextFramePatch.canvasClipBox,
       });
     }
@@ -164,7 +164,7 @@ export const ViewportTransformCommands = {
         canvas: nextFrame.canvas,
         rotation: 0,
         layers: nextFrame.layers,
-        clipBoxes: nextFrame.clipBoxes,
+        confinement: nextFrame.confinement,
         canvasClipBox: nextFrame.canvasClipBox,
         camera: nextFrame.camera
       });

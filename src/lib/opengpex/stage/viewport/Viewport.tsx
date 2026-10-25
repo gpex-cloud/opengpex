@@ -150,8 +150,12 @@ function ViewportInner({ frame }: ViewportInnerProps) {
 
   const isReady = isGroomed && hasPainted;
 
-  const cursorOverride = useVolatileInteraction('cursorOverride');
-  const cursorClass = cursorOverride
+  // The cursor service owns the pointer cursor: resolvedCursor already folds
+  // in the Cmd spring key at top priority, gesture cursors, hover parts and
+  // the active tool's base cursor. null falls back to the per-mode CSS class.
+  const resolvedCursor = useVolatileInteraction('resolvedCursor');
+  const cursor = resolvedCursor || undefined;
+  const cursorClass = cursor
     ? ""
     : state.interaction.interactionMode === "pan"
       ? "cursor-grab active:cursor-grabbing"
@@ -168,7 +172,7 @@ function ViewportInner({ frame }: ViewportInnerProps) {
       onPointerLeave={handlePointerLeave}
       onContextMenu={(e) => e.preventDefault()}
       className={`editor-viewport-container relative w-full h-full overflow-hidden select-none outline-none ${cursorClass}`}
-      style={{ touchAction: "none", cursor: cursorOverride || undefined }}
+      style={{ touchAction: "none", cursor }}
     >
       <div
         className="absolute inset-0 transition-opacity duration-150"

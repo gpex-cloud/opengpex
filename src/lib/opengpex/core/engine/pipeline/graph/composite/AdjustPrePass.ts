@@ -72,6 +72,20 @@ export class AdjustPrePass {
        * linear, so this only controls whether the sample is decoded first.
        */
       readonly sourceIsLinear?: boolean;
+      /**
+       * The polygon-baked ADJUSTMENT-CONFINEMENT coverage (frozen selection
+       * snapshot localizing the grade). Absent → default white view binds and
+       * the bake grades the whole layer.
+       */
+      readonly adjustConfinementTexture?: GPUTexture;
+      /**
+       * Adjustment-confinement mapping in ASSET pixels: the coverage texture
+       * is baked over the layer's CONTENT rect while this pass samples the raw
+       * (possibly shared, cropped-fragment) asset, so the shader re-maps
+       * `am_uv = (uv * assetSize - crop) / content`. Undefined → identity
+       * mapping (uncropped layer). Values are `crop × dprScale`-scaled.
+       */
+      readonly adjRect?: { cropX: number; cropY: number; contentW: number; contentH: number };
     },
   ): void {
     const { layer, source } = params;
@@ -95,6 +109,8 @@ export class AdjustPrePass {
       gamutId,
       resolveSourceRawIntentNibble(layer),
       rawWhiteDomain ?? FILMIC_WHITE_DOMAIN,
+      params.adjRect,
+      { width: source.width, height: source.height },
     );
     const slot = bufferRing.writeSlot(uniform);
 
@@ -115,6 +131,15 @@ export class AdjustPrePass {
         // sibling: the plain linear sampler.
         { binding: 1, resource: pipelineCache.getLinearSampler() },
         { binding: 2, resource: source.view },
+        {
+          // Adjustment-confinement slot. Present → the baked coverage
+          // texture; absent → the 1×1 default white view (coverage 1 =
+          // whole-layer grade).
+          binding: 3,
+          resource: params.adjustConfinementTexture
+            ? params.adjustConfinementTexture.createView()
+            : pipelineCache.getDefaultMaskView(),
+        },
       ],
     });
 

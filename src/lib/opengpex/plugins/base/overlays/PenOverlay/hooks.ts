@@ -32,7 +32,6 @@ import {
   getPenCommittedSelection,
   getPenDraft,
   getPenDraftSelection,
-  findPenLayerBoxAt,
   movePenRubberTip,
   penCommittedAnchorKey,
   penCommittedHandleKey,
@@ -51,10 +50,10 @@ import {
  * usePenToolLifecycle: cursor feedback + keyboard grammar + session-bound
  * lifecycle for the pen tool.
  *
- * Cursor: `crosshair` while drawing; `move` when hovering an anchor/handle of
- * a committed path (pen-edit will win the press) or anywhere inside a pen
- * layer's visible shape (pen-move will win the press — marker parity). During
- * a drag the owning handler owns the cursor (same guard as the marker
+ * Cursor: the tool cursor while drawing; `move` when hovering an anchor or
+ * handle of a committed path (pen-edit will win the press). Off-geometry
+ * hover keeps the tool cursor — moving a layer requires the spring key.
+ * During a drag the owning handler owns the cursor (same guard as the marker
  * lifecycle).
  *
  * Keyboard (mirrors the spec §5.2 operation table):
@@ -104,7 +103,7 @@ export function usePenToolLifecycle(isPenMode: boolean) {
     // Base cursor = the same crosshair+nib read as the pen selection slot
     // (CLIP_PEN_CURSOR), so the drawing tool and its selection slot share
     // one visual identity; anchor hover still switches to `move` below.
-    actions.fast.setCursor(CLIP_PEN_CURSOR);
+    actions.fast.cursor.register('pen', CLIP_PEN_CURSOR);
 
     // The curve/area hit tests' L0 ops, assembled from the geometry service
     // once per effect run (the service namespaces are stable across renders).
@@ -140,18 +139,14 @@ export function usePenToolLifecycle(isPenMode: boolean) {
         // the curve/area hit-tests only run under the modifier.
         const metaSegment = metaHeld && !hit
           && (hitTestDraftSegment(draft, canvasPt, tol * 2, hitOps) || hitTestDraftArea(draft, canvasPt, hitOps));
-        const desired = hit || metaSegment ? 'move' : CLIP_PEN_CURSOR;
-        if (actions.fast.getCursor() !== desired) actions.fast.setCursor(desired);
+        actions.fast.cursor.notifyHover(hit || metaSegment ? 'move' : null);
         return;
       }
 
       // Idle: hover a committed anchor → enlarge it + move cursor (pen-edit
-      // wins the press). Inside a pen layer's VISIBLE SHAPE (off-geometry)
-      // the move cursor previews pen-move claiming the press (marker parity:
-      // no modifier needed — the shape pick doubles as the move affordance).
-      // The shape pick is a per-layer world-matrix test, cheap enough to run
-      // on plain pointer moves; the curve hit-test stays gated to Cmd since
-      // the box pick already covers the geometry's footprint.
+      // wins the press). Off-geometry hover stays on the tool cursor —
+      // moving a layer requires the spring key, so the visible shape is not
+      // a move affordance.
       setPenAnchorHover(null);
       let overAnchor = false;
       const ordered = frame.layers.order.map((id) => frame.layers.byId[id]).reverse();
@@ -168,11 +163,7 @@ export function usePenToolLifecycle(isPenMode: boolean) {
           break;
         }
       }
-      if (!overAnchor) {
-        overAnchor = findPenLayerBoxAt(geometry, frame, canvasPt) !== null;
-      }
-      const desired = overAnchor ? 'move' : CLIP_PEN_CURSOR;
-      if (actions.fast.getCursor() !== desired) actions.fast.setCursor(desired);
+      actions.fast.cursor.notifyHover(overAnchor ? 'move' : null);
     };
 
     const toViewport = (ev: PointerEvent) => {
@@ -223,7 +214,8 @@ export function usePenToolLifecycle(isPenMode: boolean) {
       document.removeEventListener('pointermove', onPointerMove);
       document.removeEventListener('keydown', onModifierKey);
       document.removeEventListener('keyup', onModifierKey);
-      actions.fast.setCursor(null);
+      actions.fast.cursor.register('pen', null);
+      actions.fast.cursor.notifyHover(null);
     };
   }, [isPenMode, actions, geometry]);
 
@@ -294,7 +286,7 @@ export function usePenToolLifecycle(isPenMode: boolean) {
         // session's first click to the stale point. Dropping it is lossless.
         pruneLoneAnchors(scratch, frameId, actions.setStateSignal);
         actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
-        actions.fast.setCursor(null);
+        actions.fast.cursor.notifyHover(null);
         return;
       }
 
@@ -332,9 +324,12 @@ export function usePenToolLifecycle(isPenMode: boolean) {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [isPenMode, actions]);
 
-  // Safety net: clear any lingering cursor override on unmount.
+  // Safety net: drop this tool's cursor registration on unmount.
   useEffect(() => {
-    return () => { actions.fast.setCursor(null); };
+    return () => {
+      actions.fast.cursor.register('pen', null);
+      actions.fast.cursor.notifyHover(null);
+    };
   }, [actions]);
 }
 

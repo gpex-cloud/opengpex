@@ -33,7 +33,7 @@
  *   undoable unit through the batch command)
  */
 
-import type { Frame, InteractionEvent, IMatrix3x3 } from '@opengpex/editor/core/types';
+import type { Frame, InteractionEvent, IMatrix3x3, LocalPolygon } from '@opengpex/editor/core/types';
 import type { BitmapMaskOverrideMap } from '@opengpex/editor/core/types';
 import { CraftDrawerAPI } from '../../../drawers/CraftDrawer/protocols';
 import { StrokeSmoother, type Point2D } from './smoothing';
@@ -99,6 +99,15 @@ export interface MaskSessionParams {
   records: MaskSessionRecordDesc[];
   /** Which family the session's FIRST op routes to (craft at stroke start). */
   initialIsRestore: boolean;
+  /**
+   * Selection-confinement snapshot: the active frame selection in CANVAS
+   * coordinates, captured by reference at session open (the factory runs at
+   * gesture start; the reducer replaces objects, so the reference IS that
+   * state). Before encoding, every painted record canvas is clipped to this
+   * polygon (destination-in) so the erase/restore only takes effect inside
+   * the selection. `null` = unconstrained stroke.
+   */
+  confinement: LocalPolygon | null;
 }
 
 // ─── Internal session record ───────────────────────────────────────────────────
@@ -106,6 +115,16 @@ export interface MaskSessionParams {
 interface SessionRecord extends MaskSessionRecordDesc {
   /** Scratch canvas — lazily materialized on first write (null = untouched). */
   canvas: OffscreenCanvas | null;
+  /**
+   * Pre-stroke snapshot of the record canvas (white base for a new record, or
+   * the loaded historical mask incl. old erase holes). Captured at
+   * materialization — BEFORE this session's stamps — so the end()-time
+   * confinement compose can restore "everything outside the selection"
+   * verbatim. The white base IS VISIBILITY (mask alpha 1 = content shown):
+   * naively destination-in-ing the whole canvas would blank the visibility
+   * base outside the selection and hide the entire layer there.
+   */
+  initialSnapshot: OffscreenCanvas | null;
   ctx: OffscreenCanvasRenderingContext2D | null;
   /**
    * Per-record upload-dedup version. Bumped on EVERY content change of this
@@ -142,6 +161,7 @@ export class MaskStrokeSession implements StrokeSession {
   private frameId: string;
   private maskW: number;
   private maskH: number;
+  private confinement: LocalPolygon | null;
 
   /** Tracks the current eraser/restore op (may toggle via Tab during stroke) */
   private currentIsRestore: boolean;
@@ -166,12 +186,14 @@ export class MaskStrokeSession implements StrokeSession {
     this.maskW = params.maskW;
     this.maskH = params.maskH;
     this.currentIsRestore = params.initialIsRestore;
+    this.confinement = params.confinement;
 
     this.records = params.records.map(desc => ({
       ...desc,
       canvas: null,
       ctx: null,
       version: 0,
+      initialSnapshot: null,
     }));
     // Both family targets are ALWAYS pinned (the op may flip mid-stroke via
     // Tab, so both routing targets must exist from the start — see factory).
@@ -191,6 +213,7 @@ export class MaskStrokeSession implements StrokeSession {
         hard: this.config.hard,
         painted: false,
         canvas: null,
+        initialSnapshot: null,
         ctx: null,
         version: 0,
       };
@@ -302,6 +325,25 @@ export class MaskStrokeSession implements StrokeSession {
   ): boolean {
     if (!entry.ctx) return false;
     entry.ctx.save();
+    // Confinement at the SOURCE: clip this stamp to the frozen selection so a
+    // hole can never land outside it. Clipping the stamp (rather than
+    // post-clipping the canvas) keeps the live preview honest — a post-hoc
+    // visibility fix cannot work here, because the mask's white base IS
+    // visibility: blanking outside the selection would read as "erased" in
+    // the preview. The end()-time compose remains as belt-and-braces for the
+    // committed pixels.
+    if (this.confinement) {
+      entry.ctx.beginPath();
+      for (const ring of this.confinement.rings) {
+        for (let i = 0; i < ring.length; i++) {
+          const m = this.toMaskSpace(ring[i]);
+          if (i === 0) entry.ctx.moveTo(m.x, m.y);
+          else entry.ctx.lineTo(m.x, m.y);
+        }
+        entry.ctx.closePath();
+      }
+      entry.ctx.clip('evenodd');
+    }
     entry.ctx.globalCompositeOperation = compositeOp;
     stamp(entry.ctx);
     entry.ctx.restore();
@@ -388,12 +430,16 @@ export class MaskStrokeSession implements StrokeSession {
       if (!entry.existingMaskId || !entry.src) {
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, this.maskW, this.maskH);
+        // Snapshot only when a selection actually constrains this stroke —
+        // unconstrained sessions (and their tests) never need the copy.
+        if (this.confinement) entry.initialSnapshot = snapshotCanvas(canvas);
         return;
       }
 
       const bmp = e?.pixels.image.ensureBitmap(entry.src);
       if (bmp) {
         ctx.drawImage(bmp, 0, 0, this.maskW, this.maskH);
+        if (this.confinement) entry.initialSnapshot = snapshotCanvas(canvas);
       } else {
         loadImageBitmap(entry.src).then(bitmap => {
           if (entry.ctx) {
@@ -401,6 +447,12 @@ export class MaskStrokeSession implements StrokeSession {
             entry.ctx.globalCompositeOperation = 'destination-over';
             entry.ctx.drawImage(bitmap, 0, 0, this.maskW, this.maskH);
             entry.ctx.restore();
+            // Snapshot AFTER the destination-over restore so historical holes
+            // survive. Caveat: stamps that landed inside the async-load window
+            // are baked into this snapshot — a millisecond-scale race whose
+            // worst case is those early stamps counting as "initial" (kept
+            // outside the selection instead of clipped).
+            if (this.confinement) entry.initialSnapshot = snapshotCanvas(entry.canvas!);
           }
           bitmap.close();
           // Distinct per-record version — the engine's upload dedup must see
@@ -573,6 +625,51 @@ export class MaskStrokeSession implements StrokeSession {
     // dot — begin() stamps after the bootstrap dispatch.
     if (e) this.dispatchPreview(e);
 
+    // Selection confinement: compose each painted record canvas as
+    //   outside selection → the PRE-STROKE snapshot (history verbatim —
+    //     including old erase holes; the white base IS VISIBILITY, so it must
+    //     not be blanked there or the whole layer would hide outside),
+    //   inside selection  → this session's stamps (the stroke clipped to the
+    //     frozen selection polygon).
+    // Committed pixels only, so undo/redo replays stay self-sufficient. The
+    // polygon uses the SAME canvas→mask mapping as the stamps (toMaskSpace).
+    // NOTE: mask points are eagerly deconstructed — the matrix helper returns
+    // a shared scratch object, and Canvas2D path calls copy coordinates
+    // immediately, so a lazy reference would alias every vertex.
+    if (this.confinement) {
+      for (const entry of this.records) {
+        if (!entry.canvas || !entry.painted || !entry.initialSnapshot) continue;
+        const ctx = entry.canvas.getContext('2d');
+        if (!ctx) continue;
+        const path = new Path2D();
+        for (const ring of this.confinement.rings) {
+          for (let i = 0; i < ring.length; i++) {
+            const m = this.toMaskSpace(ring[i]);
+            if (i === 0) path.moveTo(m.x, m.y);
+            else path.lineTo(m.x, m.y);
+          }
+          path.closePath();
+        }
+        const working = new OffscreenCanvas(this.maskW, this.maskH);
+        working.getContext('2d')!.drawImage(entry.canvas, 0, 0);
+        ctx.save();
+        ctx.clearRect(0, 0, this.maskW, this.maskH);
+        ctx.drawImage(entry.initialSnapshot, 0, 0);
+        ctx.clip(path, 'evenodd');
+        // Blank the selection interior, THEN paste the working state: the
+        // erased holes are TRANSPARENT pixels in `working` — pasting them
+        // source-over onto the opaque white base would keep the base (a
+        // transparent paste changes nothing), silently resurrecting the
+        // erase. Clearing the clipped region first makes the paste land on
+        // transparency, so the holes survive.
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillRect(0, 0, this.maskW, this.maskH);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(working, 0, 0);
+        ctx.restore();
+      }
+    }
+
     // Encode EVERY painted record's canvas — the erase record AND each
     // hole-filled restore record. They must all land (one undoable batch, see
     // bake.ts) or undo/redo would tear the "erase and hole-fill move together"
@@ -610,6 +707,15 @@ export class MaskStrokeSession implements StrokeSession {
 
     return request;
   }
+}
+
+/**
+ * Copies a mask canvas 1:1 (pre-stroke state capture for confinement compose).
+ */
+function snapshotCanvas(canvas: OffscreenCanvas): OffscreenCanvas {
+  const copy = new OffscreenCanvas(canvas.width, canvas.height);
+  copy.getContext('2d')!.drawImage(canvas, 0, 0);
+  return copy;
 }
 
 /**

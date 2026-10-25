@@ -32,7 +32,7 @@ import {
   _CMD_MODIFY_COMMIT_UID,
 } from './protocols';
 import type { TextEditingSession } from './protocols';
-import { findTextLayerAtPoint, consumePendingEditCaretPoint, isTextMoveDragging } from './interactions';
+import { consumePendingEditCaretPoint } from './interactions';
 import { placeCaretAtPoint } from '@opengpex/editor/widgets/TextCaretKit';
 import { compensateCenterX, compensateCenterY } from './geometry';
 import { normalizeBoxMode } from '@opengpex/editor/core/types/models';
@@ -54,7 +54,7 @@ import {
  */
 export function useTextOverlayState() {
   const { state, activeFrame } = useEditorState();
-  const { actions, geometry } = useEditorServices();
+  const { actions } = useEditorServices();
 
   const activeCraft = state.interaction.signals[CraftDrawerAPI.signals.activeCraft];
   const editingLayerId = state.interaction.signals[TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID] as string | null;
@@ -85,127 +85,20 @@ export function useTextOverlayState() {
     return () => document.removeEventListener('keydown', handleEscape);
   }, [activeCraft, editingLayerId, actions]);
 
-  // Pre-edit cursor: SINGLE WRITER rule —
-  //   dragging (text-move gesture)  → gesture owns the cursor, untouched
-  //   pointer over any text box     → grab
-  //   otherwise                     → text-tool pre-edit cursor
-  // The rule is applied from both inputs that can change it: mousemove
-  // (hover position) and every reactive re-run of this effect (layer state
-  // changes, craft/entry switches) — so no other code path needs to restore
-  // or patch the cursor in this state.
-  // Pre-edit cursor: SINGLE WRITER rule —
-  //   dragging (text-move gesture)  → gesture owns the cursor, untouched
-  //   pointer over any text box     → grab
-  //   otherwise                     → text-tool pre-edit cursor
-  // The rule is REACTIVE: cursorOverride is a dependency, so ANY write to the
-  // cursor (hover mousemove, gesture start/end, the dispatcher's fast.reset
-  // wiping it after a gesture) re-runs the rule and restores the correct
-  // value. No other pre-edit code path writes or restores the cursor.
-  const cursorOverride = useVolatileInteraction('cursorOverride');
-  const hoverCanvasPosRef = useRef<{ x: number; y: number } | null>(null);
+  // Pre-edit cursor: the text tool registers its pre-edit cursor as a plain
+  // base cursor — NO hover affordance. Moving an existing text layer requires
+  // the Cmd spring key (TextMoveHandler's pre-edit branch is gated to it), so
+  // the pointer keeps the tool cursor whether or not it is over a text box.
+  // Live editing session: the contenteditable owns the cursor (its base
+  // 'text' comes from the element itself; Cmd shows the spring-key move
+  // cursor through the global-cursor rule), so nothing is registered.
   useEffect(() => {
-    if (activeCraft !== 'text' || !activeFrame) return;
-    const frame = activeFrame;
-
-    // Live editing session: the editor owns the cursor (default none, Cmd
-    // switches to grab via the dedicated effect below) — the pre-edit rule
-    // must not write while the contenteditable is up.
-    if (editingLayerId) {
-      if (cursorOverride === 'grab' || cursorOverride === TEXT_PREEDIT_CURSOR) {
-        actions.fast.setCursor(null);
-      }
-      return;
-    }
-
-    const applyCursorRule = () => {
-      // The move gesture owns the cursor while its drag is live.
-      if (cursorOverride === 'grabbing' || isTextMoveDragging()) return;
-      const overBox =
-        !!hoverCanvasPosRef.current &&
-        !!findTextLayerAtPoint(geometry, frame, hoverCanvasPosRef.current);
-      actions.fast.setCursor(overBox ? 'grab' : TEXT_PREEDIT_CURSOR);
-    };
-
-    applyCursorRule();
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isTextMoveDragging()) return;
-      const container = document.querySelector('.editor-viewport-container');
-      if (!container) return;
-      const containerRect = container.getBoundingClientRect();
-      const cam = actions.fast.latestCamera(frame.id) || frame.camera;
-      const world = geometry.space.screenToWorld(e.clientX - containerRect.left, e.clientY - containerRect.top, frame, cam);
-      hoverCanvasPosRef.current = geometry.space.worldToLocal(world.x, world.y, frame);
-      applyCursorRule();
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
+    if (activeCraft !== 'text' || !activeFrame || editingLayerId) return;
+    actions.fast.cursor.register('text', TEXT_PREEDIT_CURSOR);
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      // Cleanup deliberately does NOT touch the cursor: the rule re-applies
-      // on the next cursorOverride change or mousemove.
+      actions.fast.cursor.register('text', null);
     };
-  }, [activeCraft, editingLayerId, activeFrame, actions, geometry, cursorOverride]);
-
-  // Craft exit: the rule's reactive scope ends with the craft, so drop its
-  // cursor explicitly — otherwise the pre-edit cursor survives into pan mode.
-  useEffect(() => {
-    if (activeCraft === 'text') return;
-    if (cursorOverride === TEXT_PREEDIT_CURSOR || cursorOverride === 'grab') {
-      actions.fast.setCursor(null);
-    }
-  }, [activeCraft, cursorOverride, actions]);
-
-  // Editing state: Cmd/Ctrl press switches to the grab cursor for the
-  // editing-state Cmd-drag move; releasing restores the normal caret cursor.
-  // The PRE-edit state has no modifier logic — plain drag already moves
-  // (two-level click model), so its cursor is hover-driven only.
-  useEffect(() => {
-    const isEditing = activeCraft === 'text' && !!editingLayerId;
-    if (!isEditing) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey) {
-        if (
-          actions.fast.getCursor() !== 'grab' &&
-          actions.fast.getCursor() !== 'grabbing'
-        ) {
-          actions.fast.setCursor('grab');
-        }
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (!e.metaKey && !e.ctrlKey) {
-        if (actions.fast.getCursor() === 'grab') {
-          actions.fast.setCursor(null);
-        }
-      }
-    };
-
-    const handleWindowBlur = () => {
-      if (actions.fast.getCursor() === 'grab') {
-        actions.fast.setCursor(null);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('blur', handleWindowBlur);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('blur', handleWindowBlur);
-    };
-  }, [activeCraft, editingLayerId, actions]);
-
-  useEffect(() => {
-    return () => {
-      // Restore cursor when component unmounts
-      actions.fast.setCursor(null);
-    };
-  }, [actions]);
+  }, [activeCraft, editingLayerId, activeFrame, actions]);
 
   return {
     activeFrame,
@@ -251,7 +144,7 @@ export function useInlineTextEditing(
 ) {
   const { activeFrame, state } = useEditorState();
   const { actions, geometry } = useEditorServices();
-  const cursorOverride = useVolatileInteraction('cursorOverride');
+  const globalCursor = useVolatileInteraction('globalCursor');
 
   const layer = activeFrame?.layers.byId[layerId];
   const textData = layer?.textData;
@@ -617,7 +510,7 @@ export function useInlineTextEditing(
     boxMode,
     fixedVAlignOffset,
     screenMatrix,
-    cursorOverride,
+    globalCursor,
     handleInput,
     handleKeyDown,
     handleMouseDown,

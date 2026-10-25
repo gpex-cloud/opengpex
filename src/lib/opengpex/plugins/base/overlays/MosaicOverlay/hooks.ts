@@ -19,8 +19,8 @@
 
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { useEditorState, useEditorServices, usePluginConfig } from '@opengpex/editor/core/context';
+import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEditorState, useEditorServices, usePluginConfig, useVolatileInteraction } from '@opengpex/editor/core/context';
 import { useMosaicCursorFastSync } from './useFastSync';
 import { CraftDrawerAPI, MOSAIC_SIZE_PRESETS } from '../../drawers/CraftDrawer/protocols';
 import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
@@ -30,7 +30,7 @@ import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
 /**
  * useMosaicOverlayState: Hook for MosaicOverlay main component state
  *
- * Manages cursor hiding (cursorOverride: 'none') in mosaic mode
+ * Manages cursor hiding (base cursor 'none') in mosaic mode
  * and Escape exit logic. Returns whether in active mosaic mode.
  */
 export function useMosaicOverlayState() {
@@ -40,15 +40,14 @@ export function useMosaicOverlayState() {
   const activeCraft = state.interaction.signals[CraftDrawerAPI.signals.activeCraft] as string | null;
   const isMosaicMode = activeCraft === 'mosaic';
 
-  // Sets/clears cursorOverride: 'none' to hide system cursor (replaced by DOM circle)
+  // Registers the 'none' base cursor so the DOM circle replaces the system
+  // cursor; unregistering is owner-scoped to this tool.
   useEffect(() => {
-    if (isMosaicMode) {
-      actions.fast.setCursor('none');
-    } else {
-      if (actions.fast.getCursor() === 'none') {
-        actions.fast.setCursor(null);
-      }
-    }
+    if (!isMosaicMode) return;
+    actions.fast.cursor.register('mosaic', 'none');
+    return () => {
+      actions.fast.cursor.register('mosaic', null);
+    };
   }, [isMosaicMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Escape key exits mosaic mode
@@ -60,22 +59,12 @@ export function useMosaicOverlayState() {
         e.preventDefault();
         e.stopPropagation();
         actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
-        actions.fast.setCursor(null);
       }
     };
 
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isMosaicMode, actions]);
-
-  // Restore cursor on component unmount
-  useEffect(() => {
-    return () => {
-      if (actions.fast.getCursor() === 'none') {
-        actions.fast.setCursor(null);
-      }
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     isMosaicMode,
@@ -97,6 +86,18 @@ export function useMosaicCursorTracking(
   const pointerRef = useRef({ x: 0, y: 0 });
   const rafIdRef = useRef<number>(0);
   const isVisibleRef = useRef(false);
+  const springMetaRef = useRef(false);
+  const springChannels = useVolatileInteraction('springChannels');
+
+  // Cmd spring key state, read by the tracking loop below: while held the
+  // press routes away from this tool, so the ring must not REVEAL itself.
+  // The hide half (muting a visible ring while Cmd is down, restoring on
+  // release) is infrastructure: SpringKeyManager mirrors the flag onto
+  // <html data-spring-meta> and one global CSS rule mutes every element
+  // tagged `data-cursor-indicator` — no per-tool DOM write here.
+  useLayoutEffect(() => {
+    springMetaRef.current = springChannels.meta;
+  }, [springChannels]);
 
   // Real-time synchronization of cursor size
   useMosaicCursorFastSync(cursorRef, isActive, brushDiameter);
@@ -128,7 +129,7 @@ export function useMosaicCursorTracking(
 
           el.style.transform = `translate(${pointerRef.current.x}px, ${pointerRef.current.y}px)`;
 
-          if (!isVisibleRef.current) {
+          if (!isVisibleRef.current && !springMetaRef.current) {
             el.style.opacity = '1';
             isVisibleRef.current = true;
           }
@@ -162,7 +163,7 @@ export function useMosaicCursorTracking(
     };
   }, [isActive, cursorRef]);
 
-  // Cmd/Ctrl modifier key listening: control visibility of "+" force-new-layer badge
+  // Alt modifier key listening: control visibility of "+" force-new-layer badge
   useEffect(() => {
     if (!isActive) return;
 
@@ -176,13 +177,13 @@ export function useMosaicCursorTracking(
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Meta' || e.key === 'Control') {
+      if (e.key === 'Alt') {
         setBadgeVisibility(true);
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Meta' || e.key === 'Control') {
+      if (e.key === 'Alt') {
         setBadgeVisibility(false);
       }
     };

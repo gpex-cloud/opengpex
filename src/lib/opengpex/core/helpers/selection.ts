@@ -22,29 +22,31 @@ import { asLocalShape } from '@opengpex/editor/core/types';
 
 /**
  * getRegularClipShape — convenience wrapper over `getClipBox` that returns
- * the active selection ONLY when the active tool slot holds a regular
- * LocalPolygon (i.e. the 4-point rect polygon produced by the rect tool).
+ * the active selection ONLY when it is a regular LocalPolygon (i.e. the
+ * 4-point rect polygon produced by the rect tool).
  *
- * Delegates entirely to `getClipBox(frame)` which reads `frame.latestClipTool`
- * as the single source of truth. No more blind-scanning of slot arrays.
+ * Delegates entirely to `getClipBox(frame)` which reads the frame-level
+ * `confinement` entity. No more blind-scanning of slot arrays.
  *
- * Returns `undefined` when no valid clip polygon is active (slot is empty).
+ * Returns `undefined` when no valid clip polygon is active (no selection).
  */
-export function getRegularClipShape(frame: { latestClipTool?: string; clipBoxes: Record<string, LocalPolygon> }): LocalPolygon | undefined {
+export function getRegularClipShape(frame: { confinement: LocalPolygon | null }): LocalPolygon | undefined {
   return getClipBox(frame as Frame) ?? undefined;
 }
 
 /**
  * getClipBox — unified selection resolver for clip commands.
  *
- * Reads `frame.latestClipTool` to determine which slot in `frame.clipBoxes`
- * holds the active selection and returns the `LocalPolygon` directly.
+ * Returns the frame-level selection entity (`frame.confinement`) directly.
+ * The selection is a property of the document, not of the tool that drew
+ * it — `latestClipTool` is pure UI memory and does NOT route storage.
  *
- * All tool types (rect, pathellipse, lasso, wand) now store a `LocalPolygon`.
- * Consumers that need a `LocalShape` for the rendering pipeline should call
- * `polygonToShape(box)` from `@opengpex/editor/core/geometry/operators/polygon`.
+ * All tool types (rect, pathellipse, lasso, wand, sam) store a
+ * `LocalPolygon`. Consumers that need a `LocalShape` for the rendering
+ * pipeline should call `polygonToShape(box)` from
+ * `@opengpex/editor/core/geometry/operators/polygon`.
  *
- * Returns `null` when no valid selection exists (missing slot).
+ * Returns `null` when no selection exists.
  *
  * @example
  * ```ts
@@ -55,14 +57,8 @@ export function getRegularClipShape(frame: { latestClipTool?: string; clipBoxes:
  * ```
  */
 export function getClipBox(frame: Frame): LocalPolygon | null {
-  const clipToolId = frame.latestClipTool || 'rect';
-
-  // Guard: legacy imported data may not have clipBoxes at all.
-  const entry = frame.clipBoxes?.[clipToolId] ?? null;
-  if (!entry) return null;
-
-  // LocalPolygon — trust that it has valid points
-  return entry;
+  // Guard: legacy imported data may not have been normalized yet.
+  return frame.confinement ?? null;
 }
 
 // ─── Re-Canvas Default ClipBox ──────────────────────────────────────────────────

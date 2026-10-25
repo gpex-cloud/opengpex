@@ -215,8 +215,7 @@ export const useClipOptionsCommands = () => {
           // setShapeType is a legacy path — new code uses clipToolSetCmd.
           // For now, just switch the tool; the actual polygon will be written
           // by the tool interaction on next draw.
-          const toolId = type === 'circle' ? 'pathellipse' : 'rect';
-          actions.setClipBox(activeFrame.id, toolId, null);
+          actions.updateFrame(activeFrame.id, { confinement: null });
         }
       },
       closeReCanvas: () => reCanvasActiveSignal?.set(false),

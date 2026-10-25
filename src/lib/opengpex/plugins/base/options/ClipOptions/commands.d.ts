@@ -14,6 +14,10 @@ import type { ClipTool } from './protocols';
 export interface ClipOptionsCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   toggleModeCmd: CommandInstance<void, Promise<void>>;
+  clipToolActivateMarqueeCmd: CommandInstance;
+  clipToolActivateLassoCmd: CommandInstance;
+  clipToolActivateWandCmd: CommandInstance;
+  clipToolActivateSamCmd: CommandInstance;
   clipToolCycleForwardCmd: CommandInstance;
   clipToolCycleBackwardCmd: CommandInstance;
   exitClipModeCmd: CommandInstance;

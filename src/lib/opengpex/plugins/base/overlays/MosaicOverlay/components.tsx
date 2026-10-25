@@ -67,6 +67,7 @@ const MosaicCursor = React.memo(function MosaicCursor() {
   return (
     <div
       ref={cursorRef}
+      data-cursor-indicator
       className="absolute top-0 left-0 pointer-events-none"
       style={{
         opacity: 0,
@@ -147,7 +148,7 @@ const MosaicCursor = React.memo(function MosaicCursor() {
         <line x1="3" y1="12" x2="21" y2="12" stroke="white" strokeWidth="2" />
       </svg>
 
-      {/* Force-new-layer badge: "+" shown while Cmd/Ctrl is held */}
+      {/* Force-new-layer badge: "+" shown while Alt is held */}
       <div
         data-badge="new-layer"
         className="absolute"

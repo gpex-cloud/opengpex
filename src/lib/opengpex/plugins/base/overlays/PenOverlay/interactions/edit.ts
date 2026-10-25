@@ -88,7 +88,7 @@ export const createPenEditHandler = (): InteractionHandler => {
         const inserted = insertAnchorOnSegment(layer.penData!, sel.pathIdx, segHit!.segIdx, segHit!.t);
         if (inserted) tx.update({ penData: inserted.path }, 'layer', sel.layerId);
       }
-      e.actions.fast.setCursor('grabbing');
+      e.actions.fast.cursor.notifyDragging('grabbing');
     },
 
     onMove: (e) => {
@@ -138,10 +138,11 @@ export const createPenEditHandler = (): InteractionHandler => {
       segHit = null;
       // Pointer is still over the anchor just dragged — hand the hover cursor
       // back directly (same convention as MarkerMoveHandler).
-      e.actions.fast.setCursor('move');
+      e.actions.fast.cursor.notifyDragging(null);
+      e.actions.fast.cursor.notifyHover('move');
     },
 
-    onCancel: () => {
+    onCancel: (e) => {
       if (tx) {
         tx.abort();
         tx = null;
@@ -149,6 +150,8 @@ export const createPenEditHandler = (): InteractionHandler => {
       setPenCommittedSelection(null);
       target = null;
       segHit = null;
+      // Release the gesture cursor; the hover rule reasserts on the next move.
+      e.actions.fast.cursor.notifyDragging(null);
     },
   };
 };

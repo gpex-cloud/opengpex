@@ -55,6 +55,7 @@ import { effectiveScale } from './support/layerGeometry';
 import { prepareFilteredSources } from './build/prepareFilteredSources';
 import { prepareVectorSources } from './build/prepareVectorSources';
 import { prepareVmaskSources, type VmaskBake } from './build/prepareVmaskSources';
+import { prepareAdjustConfinementSources } from './build/prepareConfinementSources';
 import { prepareBmaskCombineSources } from './build/prepareBmaskCombine';
 import type { BuildContext, PreparedSource } from './build/types';
 
@@ -308,8 +309,6 @@ export class RenderGraph {
       workingFormat: workingFormat as 'rgba16float' | 'rgba32float',
       scratch: filterScratch,
     };
-    const filtered = prepareFilteredSources(commandEncoder, compiled, buildCtx);
-
     // Vector spine: render every vector layer to its own transient up-front
     // and merge into the SAME map, so the four composite guards below treat them as
     // ordinary straight-alpha raster sources. Also recorded before any composite
@@ -322,6 +321,17 @@ export class RenderGraph {
     const vectorScale = ev
       ? vectorExportScale(ev, baseDims.frameWidth, baseDims.frameHeight)
       : (density ?? [1, 1]);
+
+    // Bake every layer's ADJUSTMENT-CONFINEMENT coverage (frozen selection
+    // snapshot localizing its grade) BEFORE prepareFilteredSources — the
+    // AdjustPrePass bake samples it, so it must exist first. Compute phase,
+    // recorded before any composite render pass opens. Keyed by layer id;
+    // absent ⇒ the layer binds the default white view (unconfined grade).
+    const adjustConfinementSources = new Map<string, GPUTexture>();
+    prepareAdjustConfinementSources(commandEncoder, compiled, buildCtx, adjustConfinementSources, vectorScale);
+
+    const filtered = prepareFilteredSources(commandEncoder, compiled, buildCtx, adjustConfinementSources);
+
 
     // The density-scaled interactive target expressed as a VIEWPORT: same world space (the
     // DOCUMENT rect — the NDC basis in packLayerUniforms must stay document
@@ -420,6 +430,7 @@ export class RenderGraph {
             maskTexture: maskTex,
             vmaskTexture: vmaskSources.get(layer.id)?.texture,
           vmaskWindow: vmaskSources.get(layer.id)?.window,
+          adjustConfinementTexture: adjustConfinementSources.get(layer.id),
             isBottomOpaque: false,
             suppressAdjust: src?.suppressAdjust,
             vectorTransient: src?.vectorTransient,
@@ -447,6 +458,7 @@ export class RenderGraph {
       allocatedWidth,
       allocatedHeight,
       filtered,
+      adjustConfinementSources,
       vmaskSources,
       bmaskSources,
       filterScratch,
@@ -471,6 +483,7 @@ export class RenderGraph {
     allocatedWidth: number,
     allocatedHeight: number,
     filtered: Map<string, PreparedSource>,
+    adjustConfinementSources: Map<string, GPUTexture>,
     vmaskSources: Map<string, VmaskBake>,
     bmaskSources: Map<string, LayerTexture>,
     filterScratch: GPUTexture[],
@@ -576,6 +589,7 @@ export class RenderGraph {
             maskTexture: maskTex,
             vmaskTexture: vmaskSources.get(layer.id)?.texture,
             vmaskWindow: vmaskSources.get(layer.id)?.window,
+            adjustConfinementTexture: adjustConfinementSources.get(layer.id),
             isBottomOpaque: false,
             suppressAdjust: src?.suppressAdjust,
             vectorTransient: src?.vectorTransient,
@@ -647,6 +661,7 @@ export class RenderGraph {
           maskTexture: maskTex,
           vmaskTexture: vmaskSources.get(layer.id)?.texture,
             vmaskWindow: vmaskSources.get(layer.id)?.window,
+            adjustConfinementTexture: adjustConfinementSources.get(layer.id),
           suppressAdjust: src?.suppressAdjust,
           vectorTransient: src?.vectorTransient,
           sourceIsLinear: src?.sourceIsLinear,

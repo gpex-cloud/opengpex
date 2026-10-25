@@ -144,7 +144,9 @@ export const CRAFT_COMMANDS = {
     execute: (ctx: EditorContextValue) => {
       activateCraft(ctx, 'mosaic');
     },
-    shortcut: { key: 'm' },
+    // 'o' since 2026-10-25 — 'm' was reassigned to the marquee selection
+    // tool shortcut (ClipOptions activateMarquee).
+    shortcut: { key: 'o' },
   } as EditorCommand<void, void>,
 
   setCraftMarker: {

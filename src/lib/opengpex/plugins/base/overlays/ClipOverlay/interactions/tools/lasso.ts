@@ -233,7 +233,7 @@ export const createLassoHandler = (): InteractionHandler => {
 
         const bounds = e.geometry.polygon.computePolygonBounds([ring]);
         const polygon = asLocalPolygon([ring], asLocalRect(bounds), gestureAA);
-        e.actions.setClipBox(e.activeFrame.id, 'lasso', polygon);
+        e.actions.updateFrame(e.activeFrame.id, { confinement: polygon });
         committed = true;
 
       } finally {

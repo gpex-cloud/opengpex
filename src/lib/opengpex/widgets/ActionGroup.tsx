@@ -77,6 +77,17 @@ export interface ActionGroupItem<K extends string = string> {
   label: string;
   /** Whether this button is the currently-selected one in the group. */
   active: boolean;
+  /** Opt-in third state: "this button owns the content shown nearby, but the
+   * tool itself is NOT engaged" (e.g. CraftDrawer infers the panel from the
+   * selected layer). Rendered with the neutral fill + ring (quiet, "related,
+   * not engaged") — deliberately distinct from the engaged look. Ignored
+   * when `active` is true. */
+  inferred?: boolean;
+  /** Opt-in tone for the ACTIVE state: 'inverted' renders the engaged chip
+   * in the inverted scheme (light theme -> dark chip, dark theme -> light
+   * pair) — a strong "this tool owns the pointer" signal. Consumers that
+   * omit it keep the neutral fill + ring, so existing drawers are untouched. */
+  activeTone?: 'inverted';
 }
 
 export interface ActionGroupProps<K extends string = string> {
@@ -98,7 +109,21 @@ export default function ActionGroup<K extends string = string>({
       className={`flex items-center h-5 rounded-md overflow-hidden border border-[var(--border-subtle)] ${className}`}
     >
       {items.map((item, index) => {
-        const { key, icon, label, active } = item;
+        const { key, icon, label, active, inferred, activeTone } = item;
+        // Ladder: active > inferred > default. `active` keeps the neutral
+        // fill for every existing consumer; the opt-in `activeTone:
+        // 'inverted'` upgrades the engaged chip to the inverted scheme
+        // (light theme -> dark chip, dark theme -> light chip) — a strong
+        // "this tool owns the pointer" signal. `inferred` (panel derived
+        // from the selected layer) wears the quiet neutral fill, reading as
+        // "related, not engaged".
+        const scheme = active
+          ? activeTone === 'inverted'
+            ? "text-zinc-100 bg-zinc-700 dark:text-zinc-800 dark:bg-zinc-200"
+            : "text-[var(--text-main)] bg-zinc-200 dark:bg-white/10 ring-1 ring-inset ring-zinc-400/60 dark:ring-white/25"
+          : inferred
+            ? "text-[var(--text-main)] bg-zinc-200 dark:bg-white/10 ring-1 ring-inset ring-zinc-400/60 dark:ring-white/25"
+            : "hover:bg-[var(--bg-stage)] text-[var(--text-muted)] hover:text-[var(--text-main)]";
         return (
           <React.Fragment key={key}>
             {/* 1px vertical divider between adjacent buttons. Uses the same
@@ -109,15 +134,13 @@ export default function ActionGroup<K extends string = string>({
             )}
             <button
               onClick={() => onSelect(key)}
-              // Two-state class ladder:
-              //   active  -> gray fill + inset gray ring + main text color
-              //   default -> muted text + hover-stage bg + hover-brighten
+              // Three-state class ladder (both extra states opt-in):
+              //   active   -> neutral fill+ring, or inverted chip with
+              //               activeTone: 'inverted'
+              //   inferred -> neutral fill+ring ("related, not engaged")
+              //   default  -> muted text + hover-stage bg + hover-brighten
               className={`relative flex items-center justify-center w-6 h-full transition-all outline-none select-none focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0
-                ${
-                  active
-                    ? "text-[var(--text-main)] bg-zinc-200 dark:bg-white/10 ring-1 ring-inset ring-zinc-400/60 dark:ring-white/25"
-                    : "hover:bg-[var(--bg-stage)] text-[var(--text-muted)] hover:text-[var(--text-main)]"
-                }`}
+                ${scheme}`}
               // Triple-defense against the UA "click-focus outline":
               //   1. Tailwind classes above zero out :focus / :focus-visible
               //      outline + ring.
@@ -135,7 +158,7 @@ export default function ActionGroup<K extends string = string>({
               }}
               title={label}
               aria-label={label}
-              aria-pressed={active}
+              aria-pressed={active || !!inferred}
             >
               {icon}
             </button>

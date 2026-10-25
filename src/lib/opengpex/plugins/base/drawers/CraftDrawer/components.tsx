@@ -61,7 +61,7 @@ const CRAFT_BUTTONS: {
     type: "mosaic",
     icon: <MosaicIcon size={13} />,
     iconSmall: <MosaicIcon size={10} />,
-    label: "Mosaic Tool (M)",
+    label: "Mosaic Tool (O)",
   },
   {
     type: "marker",
@@ -110,7 +110,7 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
 
   const tipContent =
     activeCraft === "text"
-      ? "Drag empty canvas to place text\nClick text to select · drag to move\nDouble-click text to edit\nEsc to exit"
+      ? "Drag empty canvas to place text\nClick text to edit · Cmd+drag to move\nEsc to exit"
       : activeCraft === "marker"
         ? "Draw marker on canvas\nTab to cycle marker type\nEsc to exit"
         : activeCraft === "pen"
@@ -199,8 +199,9 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
  */
 const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
   const { activeCraft, handleButtonClick } = useCraftButtonGroup();
+  const { inferredCraft } = useCraftDrawer();
 
-  // Assemble items per render. Cheap (3 entries) and the icon/label swap
+  // Assemble items per render. Cheap (a few entries) and the icon/label swap
   // for eraser-in-restore-mode is a pure function of activeCraft, so any
   // memoization would just move the branch elsewhere without saving work.
   const items: ActionGroupItem<CraftType>[] = CRAFT_BUTTONS.map((btn) => {
@@ -209,6 +210,10 @@ const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
     const active =
       activeCraft === btn.type ||
       (btn.type === "eraser" && activeCraft === "restore");
+    // Opt-in third state: the inferred panel's owning tool lights up with
+    // the inverted scheme — "this button owns the panel, but is not
+    // engaged". Clicking it activates the tool (normal select path).
+    const inferred = !active && inferredCraft === btn.type;
     return {
       key: btn.type,
       // Dynamic icon: swap Eraser → Undo2 when we're in restore sub-mode.
@@ -217,6 +222,9 @@ const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
       // Dynamic label: mirror the icon swap so the tooltip stays truthful.
       label: isRestoreOnEraser ? "Restore Mode (Tab)" : btn.label,
       active,
+      // Engaged craft wears the inverted chip — the strong ownership signal.
+      activeTone: active ? ('inverted' as const) : undefined,
+      inferred,
     };
   });
 
@@ -233,10 +241,11 @@ const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
  * - activeCraft='brush'|'eraser' → BrushPanel
  * - activeCraft=null && layer.type='text' -> TextPanel (inferred)
  * - activeCraft=null && layer.type='paint' -> BrushPanel (inferred)
+ * - activeCraft=null && marker layer selected -> MarkerPanel (inferred)
  * - others -> generic tip
  */
 export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
-  const { activeCraft, activeLayerIsText, activeLayerIsPaint } =
+  const { activeCraft, activeLayerIsText, activeLayerIsPaint, activeLayerIsMarker, activeLayerIsMosaic, activeLayerIsPen } =
     useCraftDrawer();
   const { actions } = useEditorServices();
 
@@ -249,11 +258,14 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
   const showTextPanel =
     activeCraft === "text" || (activeCraft === null && activeLayerIsText);
 
-  const showMosaicPanel = activeCraft === "mosaic";
+  const showMarkerPanel =
+    activeCraft === "marker" || (activeCraft === null && activeLayerIsMarker);
 
-  const showMarkerPanel = activeCraft === "marker";
+  const showMosaicPanel =
+    activeCraft === "mosaic" || (activeCraft === null && activeLayerIsMosaic);
 
-  const showPenPanel = activeCraft === "pen";
+  const showPenPanel =
+    activeCraft === "pen" || (activeCraft === null && activeLayerIsPen);
 
   const showBrushPanel =
     activeCraft === "brush" ||

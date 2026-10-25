@@ -199,6 +199,11 @@ function layerSig(layer: LayerNode, opts: CompositeSignatureOptions): string {
     `src:${srcSig}`,
     `adj:${adjSig}`,
     `flt:${fltSig}`,
+    // FROZEN adjustment confinement — declarative layer-local geometry (no
+    // asset epoch), same posture as vmask: attaching/editing/clearing the
+    // snapshot changes the composited pixels and MUST re-composite; a pure
+    // layer move is already covered by the transform token.
+    `adjConf:${layer.adjustConfinement ? JSON.stringify(layer.adjustConfinement) : '-'}`,
   ].join('|');
 }
 

@@ -53,8 +53,12 @@ export const createLayerMoveHandler = (): InteractionHandler => {
     priority: 10,
     test: (e) => {
 
-      // Only pan mode allows layer movement (clip -> operates crop box, craft -> tool interactions)
-      if (e.state.interaction.interactionMode !== 'pan') return false;
+      // Pan mode allows layer movement with a bare drag; any other mode
+      // requires the Cmd spring key (temporarily moving the object under the
+      // pointer). Clip -> crop-box operations, craft -> tool interactions.
+      const isPanMode = e.state.interaction.interactionMode === 'pan';
+      const springMeta = e.spring.meta;
+      if (!isPanMode && !springMeta) return false;
 
       // In any mode, mouse outside canvas does not trigger layer movement (delegated to ViewportPanHandler)
       const frame = e.activeFrame;
@@ -62,8 +66,6 @@ export const createLayerMoveHandler = (): InteractionHandler => {
         x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h
       });
       if (isOutsideCanvas) return false;
-
-      const isPanMode = e.state.interaction.interactionMode === 'pan';
 
       const topLayer = e.geometry.space.pickTopLayer(e.point.world, e.activeFrame.layers);
 
@@ -73,8 +75,11 @@ export const createLayerMoveHandler = (): InteractionHandler => {
         return true;
       }
 
-      // If no layer is clicked, but not in pan mode, and there is a selected active layer
-      if (!isPanMode) {
+      // Active-layer fallback: bare drag in pan mode over empty canvas falls
+      // through to viewport-pan, so this only fires in tool modes. Under the
+      // Cmd spring key it must NOT fire — "Cmd+drag on empty canvas is a
+      // no-op", moving the (unrelated) active layer would be surprising.
+      if (!isPanMode && !springMeta) {
         const activeLayer = e.activeFrame.activeLayerId ? e.activeFrame.layers.byId[e.activeFrame.activeLayerId] : undefined;
         if (activeLayer && !activeLayer.locked && activeLayer.visible) {
           targetLayer = activeLayer;

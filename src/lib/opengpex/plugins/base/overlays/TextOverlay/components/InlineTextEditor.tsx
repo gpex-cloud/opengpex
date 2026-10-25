@@ -94,7 +94,7 @@ export const InlineTextEditor = React.memo(function InlineTextEditor({
     boxMode,
     fixedVAlignOffset,
     screenMatrix,
-    cursorOverride,
+    globalCursor,
     handleInput,
     handleKeyDown,
     handleMouseDown,
@@ -134,10 +134,12 @@ export const InlineTextEditor = React.memo(function InlineTextEditor({
     // CONTENT height, so a full outline would detach from the actual box
     // (boxWidth/boxHeight) after a resize (real-device acceptance 2026-10-07).
     padding: `${TEXT_LAYER_PADDING.y}px ${TEXT_LAYER_PADDING.x}px`,
-    cursor:
-      cursorOverride === "grab" || cursorOverride === "grabbing"
-        ? cursorOverride
-        : "text",
+    // Element-level cursor: the contenteditable's base is 'text', but when
+    // the cursor service resolves a global (object-manipulation) cursor —
+    // spring key engaged, an active move gesture — that value wins. The
+    // service publishes the filtered conclusion (globalCursor); the element
+    // never re-judges it.
+    cursor: globalCursor ?? "text",
     position: "relative",
     zIndex: 2,
   };

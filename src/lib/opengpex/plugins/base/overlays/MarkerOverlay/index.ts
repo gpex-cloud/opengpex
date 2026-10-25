@@ -66,7 +66,7 @@ export const plugin: EditorPlugin = {
     createMarkerDblClickActivateHandler(), // Priority 175 — pan mode: double-click a marker to enter the tool
     createMarkerRotateHandler(), // Priority 165 — rotate active marker (highest)
     createMarkerResizeHandler(), // Priority 160 — resize active marker
-    createMarkerMoveHandler(),   // Priority 155 — move existing marker
+    createMarkerMoveHandler(),   // Priority 155 — move existing marker (Cmd spring key only)
     createMarkerDrawHandler(),   // Priority 145 — draw new marker
     // Shape-specific handlers (e.g. callout tail drag, 162), owned by each shape.
     ...MARKER_REGISTRY.getAll().flatMap((def) => def.interactions?.() ?? []),

@@ -377,7 +377,7 @@ export const SEG_COMMANDS = {
         actions.updateFrame(frameId, { latestClipTool: 'sam' });
 
         if (framePolygons.length > 0) {
-          actions.setClipBox(frameId, 'sam', framePolygons[0]);
+          actions.updateFrame(frameId, { confinement: framePolygons[0] });
         }
 
         actions.setInteraction({

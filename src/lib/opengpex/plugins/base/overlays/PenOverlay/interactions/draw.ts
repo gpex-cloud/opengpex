@@ -86,6 +86,11 @@ export const createPenDrawHandler = (): InteractionHandler => {
   return {
     id: 'pen-draw',
     priority: 145,
+    // The whole-draft translate (Cmd/Ctrl + drag on a draft segment/area)
+    // routes through this handler, so it must stay consultable while the
+    // spring key filters the dispatcher: without this declaration a Cmd
+    // press never reaches test() and the draft becomes undraggable.
+    springOverride: 'meta',
 
     test: (e) => {
       if (!passesBaseGate(e)) return false;
@@ -93,10 +98,22 @@ export const createPenDrawHandler = (): InteractionHandler => {
       // to pen-move (162, which yields while a session is alive); during a
       // session it is the whole-draft translation modifier (routed in
       // onStart). A meta press with NO session must never start drawing — a
-      // missed Cmd+drag would drop a stray anchor on release. With a session
-      // alive the press is admitted here and onStart consumes it (translate
-      // or no-op).
-      if (e.keys.meta && getPenDraft(e.actions.scratch, e.activeFrame.id) === null) return false;
+      // missed Cmd+drag would drop a stray anchor on release.
+      const draft = getPenDraft(e.actions.scratch, e.activeFrame.id);
+      if (e.keys.meta) {
+        if (!draft) return false;
+        // During a session only a press that actually lands on the draft
+        // (segment or enclosed area) claims the gesture; a miss returns
+        // false so the press falls through to layer-move — other layers
+        // stay Cmd-draggable while a draft is alive. Because the claim
+        // itself requires the hit, no anchor can be placed by a missed
+        // Cmd+drag (only this handler places anchors).
+        const tol = canvasTolerance(e);
+        const hitOps: PenHitOps = { ...e.geometry.bezier, isPointInPolygon: e.geometry.polygon.isPointInPolygon };
+        const pt = e.point.canvas;
+        return hitTestDraftSegment(draft, pt, tol * 2, hitOps)
+          || hitTestDraftArea(draft, pt, hitOps);
+      }
       return true;
     },
 
@@ -134,8 +151,9 @@ export const createPenDrawHandler = (): InteractionHandler => {
       // closed area, so "inside" works whether the path is closed or not.
       // Plain presses still place anchors — the modifier marks the transform
       // intent. The route runs FIRST: with Cmd held, closing/resuming/placing
-      // are all off the table. A meta press that misses the draft entirely is
-      // consumed as a no-op so a missed Cmd+drag cannot drop a stray anchor.
+      // are all off the table. test() already guarantees a meta press only
+      // reaches here when it hit the draft, so this re-check is a cheap
+      // re-derivation (not a behavior branch).
       if (e.keys.meta) {
         const hitOps: PenHitOps = { ...e.geometry.bezier, isPointInPolygon: e.geometry.polygon.isPointInPolygon };
         startPt = { x: pt.x, y: pt.y };

@@ -14,16 +14,23 @@ export interface PenOverlayCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   penApplyMaskCmd: CommandInstance<{ feather?: number }>;
   penToSelectionCmd: CommandInstance;
-  penImportSelectionCmd: CommandInstance;
+  penApplyAsBezierCmd: CommandInstance;
   penUpdateDataCmd: CommandInstance<{ frameId: string; layerId: string; penData: PenPathData | null }>;
   penCancelDraftCmd: CommandInstance;
+  penCreateShapeCmd: CommandInstance<PenShapeStylePayload | undefined>;
+  penReleaseToDraftCmd: CommandInstance<{ frameId: string; layerId: string }>;
+  penUpdateStyleCmd: CommandInstance<{
+  frameId: string;
+  layerId: string;
+  patch: { fill?: ColorValue | null; strokeColor?: ColorValue; strokeWidth?: number };
+}>;
 }
 
 /** Type map for usePluginSignals<PenOverlaySignalsMap>() */
 export interface PenOverlaySignalsMap {
   [key: string]: { value: InteractionSignalValue; set: (val: InteractionSignalValue) => void };
-  penDraftActiveSignal: {
-    value: boolean;
-    set: (val: boolean) => void;
+  penPhaseSignal: {
+    value: string;
+    set: (val: string) => void;
   };
 }

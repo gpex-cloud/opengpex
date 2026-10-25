@@ -51,6 +51,8 @@ interface ComboInputProps<T extends string | number> {
    * `onChange` is still called live for callers that need it; pass a no-op if unused.
    */
   onCommit?: (val: T) => void;
+  /** Opt-in stable test id stamped on the inner <input> (automation/a11y). */
+  inputTestId?: string;
 }
 
 /**
@@ -71,6 +73,7 @@ export default function ComboInput<T extends string | number>({
   onCommit,
   suffix,
   bare = false,
+  inputTestId,
 }: ComboInputProps<T>) {
   const [isOpen, setIsOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
@@ -150,6 +153,7 @@ export default function ComboInput<T extends string | number>({
       )}
       
       <input 
+        data-testid={inputTestId}
         type="text" 
         value={isCommitMode ? (isFocused ? draft : String(value ?? '')) : (value || '')}
         readOnly={readOnly}

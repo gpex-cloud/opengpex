@@ -743,7 +743,7 @@ export function useOverlayRotationSync(
  * @example
  * ```tsx
  * const hoveredId = useVolatileInteraction('hoveredLayerId');
- * const cursor = useVolatileInteraction('cursorOverride');
+ * const cursor = useVolatileInteraction('resolvedCursor');
  * ```
  *
  */

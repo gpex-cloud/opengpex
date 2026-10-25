@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { EditorData, EditorAction, Frame, Layer, FrameHistoryState, GlobalHistoryState } from '@opengpex/editor/core/types';
+import { EditorData, EditorAction, Frame, Layer, FrameHistoryState, GlobalHistoryState, HistoryStep } from '@opengpex/editor/core/types';
 import { produceWithPatches, enablePatches, applyPatches, Patch } from 'immer';
 import { reconcileFrameState, mergeLiveCameraForFrame } from './reducer-utils';
 
@@ -60,7 +60,6 @@ export const initialState: EditorData = {
     interactionMode: 'pan',
     isInteracting: false,
     signals: {},
-    cursorOverride: null,
   },
   history: {
     byFrameId: {}
@@ -103,13 +102,23 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
       const { id, patch } = action.payload;
       const frame = state.frames.byId[id];
       if (!frame) return state;
+
+      // Same zero-area normalization as SET_CONFINEMENT: the selection tools
+      // commit through tx.update(..., 'frame') (this channel), and a drag
+      // whose release lands on its start writes a zero-area ring that would
+      // otherwise become an invisible-but-real selection entity.
+      let effectivePatch = patch;
+      if (patch.confinement && (patch.confinement.rect.w <= 0 || patch.confinement.rect.h <= 0)) {
+        effectivePatch = { ...patch, confinement: null };
+      }
+
       return {
         ...state,
         frames: {
           ...state.frames,
           byId: {
             ...state.frames.byId,
-            [id]: { ...frame, ...patch }
+            [id]: { ...frame, ...effectivePatch }
           }
         }
       };
@@ -281,35 +290,6 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
           byId: {
             ...state.frames.byId,
             [frameId]: { ...frame, camera }
-          }
-        }
-      };
-    }
-
-    case 'SET_CLIP_BOX': {
-      const { frameId, toolId, value } = action.payload;
-      const frame = state.frames.byId[frameId];
-      if (!frame) return state;
-
-      let nextClipBoxes: Record<string, typeof value & {}>;
-      if (value == null) {
-        // Clear: remove the tool's slot. Idempotent — no-op when already absent.
-        if (frame.clipBoxes[toolId] == null) return state;
-        const { [toolId]: _omit, ...rest } = frame.clipBoxes;
-        void _omit;
-        nextClipBoxes = rest;
-      } else {
-        // Set: write the tool's slot.
-        nextClipBoxes = { ...frame.clipBoxes, [toolId]: value };
-      }
-
-      return {
-        ...state,
-        frames: {
-          ...state.frames,
-          byId: {
-            ...state.frames.byId,
-            [frameId]: { ...frame, clipBoxes: nextClipBoxes }
           }
         }
       };
@@ -736,6 +716,29 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
       if (rawHistory && typeof rawHistory === 'object' && 'past' in (rawHistory as object) && !('byFrameId' in (rawHistory as object))) {
         // Old format: discard — patches used global frame paths, incompatible with per-frame
         migratedHistory = { byFrameId: {} };
+      }
+
+      // [Migration] legacy per-tool `clipBoxes` in PERSISTED history: the frame
+      // field itself is converted at the storage layer (Hydrating.ts), but
+      // history steps carry Immer patch PATHS (`['clipBoxes', …]`) that no
+      // object-key migration can reach — applying them now throws
+      // ([Immer] path doesn't resolve) and hard-crashes the undo walk. Any
+      // frame whose history references the dead field loses its history
+      // entirely (same convention as the Array-layers migration above:
+      // incompatible history is cleared, not repaired).
+      const historyToScan = (payload.history && 'byFrameId' in (payload.history as object))
+        ? (payload.history as GlobalHistoryState)
+        : undefined;
+      if (historyToScan) {
+        let historyReferencesClipBoxes = false;
+        const stepTouchesClipBoxes = (step: HistoryStep): boolean =>
+          [...(step.undoPatches || []), ...(step.redoPatches || [])]
+            .some(p => typeof p.path?.[0] === 'string' && p.path[0].includes('clipBoxes'));
+        Object.values(historyToScan.byFrameId || {}).forEach(h => {
+          if (h.checkpoint && (h.checkpoint as Frame & { clipBoxes?: unknown }).clipBoxes !== undefined) historyReferencesClipBoxes = true;
+          if (h.past.some(stepTouchesClipBoxes) || h.future.some(stepTouchesClipBoxes)) historyReferencesClipBoxes = true;
+        });
+        if (historyReferencesClipBoxes) migratedHistory = { byFrameId: {} };
       }
 
       // Determine final history: prefer migratedHistory > payload.history (if new format) > state.history > empty

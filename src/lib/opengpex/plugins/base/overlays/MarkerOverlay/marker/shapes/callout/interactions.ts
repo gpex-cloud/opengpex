@@ -83,7 +83,7 @@ export const createCalloutTailHandler = (): InteractionHandler => {
 
       tx = new InteractionTransaction(e, { useIncreComp: true });
       tx.begin(false);
-      e.actions.fast.setCursor('move');
+      e.actions.fast.cursor.notifyDragging('move');
     },
 
     onMove: (e) => {
@@ -108,7 +108,7 @@ export const createCalloutTailHandler = (): InteractionHandler => {
       startData = null;
       startWorld = null;
       startInverse = null;
-      e.actions.fast.setCursor(null);
+      e.actions.fast.cursor.notifyDragging(null);
     },
 
     onCancel: (e) => {
@@ -118,7 +118,7 @@ export const createCalloutTailHandler = (): InteractionHandler => {
       startData = null;
       startWorld = null;
       startInverse = null;
-      e.actions.fast.setCursor(null);
+      e.actions.fast.cursor.notifyDragging(null);
     },
   };
 };

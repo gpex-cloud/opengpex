@@ -2,6 +2,15 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.28
+
+- Selection: keyboard shortcuts M / L / W / S jump straight into the marquee, lasso, magic wand and AI selection tools (M again flips rectangle/ellipse, the Mosaic brush moves to O), and Space toggles selection mode
+- Selection: a selection is now a document-level entity — it survives switching tools and app restarts, stays visible as marching ants in every mode, and Select All / Deselect (Cmd/Ctrl+A / Cmd/Ctrl+D) work in every selection tool
+- Selection: draw a selection first and brush, eraser, restore, mosaic and all grading tools (adjustments, curves, levels, channel mixer, color balance) apply only inside it — Photoshop-style local editing
+- Editing: Cmd/Ctrl+drag moves the object under the pointer in every tool, with a matching move cursor; drawing over an existing marker or pen shape adds a new one instead of moving it, and in the text tool a single click on existing text starts editing
+
+---
+
 ## v2.0.27
 
 - Pen Tool: new vector pen — click to place anchors, click-drag to pull out curve handles, and close the path on the first anchor; anchors and handles stay editable afterwards (drag to move, add or delete points, straight or curved segments), with fill and stroke settings. A finished path can be rendered into a layer, turned into a selection, or applied as a layer mask. Drafts survive switching tools and frames, and Esc backs out in two steps: first the in-progress segment, then the whole draft

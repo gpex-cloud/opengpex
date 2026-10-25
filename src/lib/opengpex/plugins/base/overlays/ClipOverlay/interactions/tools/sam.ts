@@ -77,7 +77,7 @@ function isSamableLayer(layer: Layer): boolean {
  *   2. Ensure embedding via AIToolsDrawer's segEncode command (cached if same layer).
  *   3. Build prompt: point (single click) or box (drag).
  *   4. Call AIToolsDrawer's segDecode command → get polygon rings.
- *   5. Project layer-local rings → frame-local, write to clipBoxes['sam'].
+ *   5. Project layer-local rings → frame-local, write to the frame confinement.
  *
  * Decoupling: This handler communicates with the SAM Worker exclusively through
  * the AIToolsDrawerAPI facade commands (segEncode / segDecode). It does NOT
@@ -278,7 +278,7 @@ export const createSamHandler = (): InteractionHandler => {
         });
 
         // 6. Commit best mask to sam clip slot.
-        e.actions.setClipBox(e.activeFrame.id, 'sam', framePolygons[0]);
+        e.actions.updateFrame(e.activeFrame.id, { confinement: framePolygons[0] });
 
         if (decResult.debug) {
           console.info('[SAM] selected', {

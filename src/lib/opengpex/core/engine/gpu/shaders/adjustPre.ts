@@ -64,11 +64,10 @@ import { SOURCENORMALIZE_WGSL } from './sourceNormalize';
 import { FILMIC_WHITE_DOMAIN } from '@opengpex/editor/core/engine/color/filmic';
 
 /**
- * `AdjustPreUniforms` size in bytes: `uv_rect` vec4 (16) + `pad` vec4 (16) = 32.
- * A vec4 of padding keeps the struct a clean 2×16 B and leaves room for future
- * per-pass parameters without re-aligning.
+ * `AdjustPreUniforms` size in bytes: `uv_rect` vec4 (16) + `flags` vec4 (16)
+ * + `adj_rect` vec4 (16) + `src_size` vec4 (16) = 64.
  */
-export const ADJUST_PRE_UNIFORM_BUFFER_SIZE = 32;
+export const ADJUST_PRE_UNIFORM_BUFFER_SIZE = 64;
 
 /** Number of 4-byte slots in `AdjustPreUniforms`. */
 export const ADJUST_PRE_UNIFORM_FLOATS = ADJUST_PRE_UNIFORM_BUFFER_SIZE / 4;
@@ -99,14 +98,28 @@ struct AdjustPreUniforms {
   //    never tone-map a second time).
   // w: FILMIC_WHITE_DOMAIN — the layer's per-file filmic knee domain (an f32 in
   //    [0.31, 0.95]; only read when z ≠ 0).
-  // Kept in the padding slots the struct already reserved, so the 32-byte layout and
-  // every existing offset are unchanged.
+  // Occupies the padding slots the struct originally reserved, so the first
+  // 32 bytes and every pre-existing offset are unchanged.
   flags   : vec4<f32>,
+  // Adjustment-confinement mapping, in ASSET-PIXEL space: (cropX, cropY,
+  // contentW, contentH). The confinement coverage texture is baked over the
+  // layer's CONTENT rect while this pass samples the RAW asset (a cropped
+  // fragment shares its source asset), so the coverage uv is re-mapped:
+  // am_uv = (uv * src_size.xy - adj_rect.xy) / adj_rect.zw. An uncropped
+  // layer passes (0, 0, assetW, assetH), which collapses to uv (identity).
+  adj_rect : vec4<f32>,
+  // (assetWidth, assetHeight, 0, 0) — the source content size in asset pixels,
+  // so the fragment can convert its normalized uv to asset pixels.
+  src_size : vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> pre : AdjustPreUniforms;
 @group(0) @binding(1) var pre_samp : sampler;
 @group(0) @binding(2) var pre_tex  : texture_2d<f32>;
+// Adjustment-confinement coverage (frozen selection snapshot localizing the
+// grade). Default 1×1 white when absent — the mix collapses to the graded
+// colour, byte-identical to the unconfined path, so no flag bit is needed.
+@group(0) @binding(3) var pre_adjmask_tex : texture_2d<f32>;
 
 struct PreVSOut {
   @builtin(position) clip_pos : vec4<f32>,
@@ -155,9 +168,16 @@ fn fs_adjust_pre(in : PreVSOut) -> @location(0) vec4<f32> {
   if (adj.flags == 0u) {
     return vec4<f32>(linear_rgb, src.a);
   }
+  // Adjustment-confinement: re-map the asset-space uv into the content rect
+  // the coverage texture was baked over (identity for uncropped layers), then
+  // blend original vs graded — coverage 1 = fully graded, 0 = untouched, and
+  // alpha is never clipped. Default white coverage of 1 collapses the mix.
+  let src_px = in.uv * pre.src_size.xy;
+  let am_uv = (src_px - pre.adj_rect.xy) / max(pre.adj_rect.zw, vec2<f32>(1.0, 1.0));
+  let conf = textureSample(pre_adjmask_tex, pre_samp, am_uv).a;
   // Source is STRAIGHT alpha and apply_adjustments is defined on straight linear
   // RGB, so no un-premultiply is needed; alpha passes through untouched.
-  return vec4<f32>(apply_adjustments(linear_rgb), src.a);
+  return vec4<f32>(mix(linear_rgb, apply_adjustments(linear_rgb), conf), src.a);
 }
 `;
 
@@ -185,6 +205,11 @@ fn fs_adjust_pre(in : PreVSOut) -> @location(0) vec4<f32> {
  * `whiteDomain` is the layer's per-file filmic knee domain
  * (ColorIdentity.rawWhiteDomain), written to `flags.w` and consumed only when
  * `intent` ≠ 0.
+ *
+ * `adjRect` is the adjustment-confinement mapping in asset pixels
+ * `(cropX, cropY, contentW, contentH)` — see `AdjustPreUniforms.adj_rect`.
+ * `srcSize` is `(assetWidth, assetHeight)`; both default to the identity
+ * mapping for uncropped layers when the caller omits them.
  */
 export function packAdjustPreUniform(
   maxU: number,
@@ -193,6 +218,8 @@ export function packAdjustPreUniform(
   gamutId = 0,
   intent = 0,
   whiteDomain: number = FILMIC_WHITE_DOMAIN,
+  adjRect?: { cropX: number; cropY: number; contentW: number; contentH: number },
+  srcSize?: { width: number; height: number },
 ): Float32Array {
   const out = new Float32Array(ADJUST_PRE_UNIFORM_FLOATS);
   out[0] = 0;
@@ -203,5 +230,16 @@ export function packAdjustPreUniform(
   out[5] = gamutId;
   out[6] = intent;
   out[7] = whiteDomain;
+  // Adjustment-confinement mapping — defaults to the identity (content == asset).
+  const w = srcSize?.width ?? 0;
+  const h = srcSize?.height ?? 0;
+  out[8] = adjRect?.cropX ?? 0;
+  out[9] = adjRect?.cropY ?? 0;
+  out[10] = adjRect?.contentW ?? w;
+  out[11] = adjRect?.contentH ?? h;
+  out[12] = w;
+  out[13] = h;
+  out[14] = 0;
+  out[15] = 0;
   return out;
 }

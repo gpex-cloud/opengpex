@@ -99,12 +99,17 @@ function samplePressure(e: InteractionEvent): number {
   return raw > 0 ? Math.min(1, raw) : 0.5;
 }
 
-const buildStrokeData = (params: PaintParams, points: StrokePoint[]): StrokeData => ({
+const buildStrokeData = (
+  params: PaintParams,
+  points: StrokePoint[],
+  confinement?: StrokeData['confinement'],
+): StrokeData => ({
   points,
   color: params.color,
   size: params.size,
   hardness: params.hardness,
   antiAliased: params.antiAliased,
+  confinement,
 });
 
 // ─── BrushStrokeHandler ───────────────────────────────────────────────────────
@@ -121,6 +126,15 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
   let points: StrokePoint[] = [];
   let params: PaintParams | null = null;
   let drawing = false;
+  // Selection confinement, captured at GESTURE START (frozen semantics): the
+  // live selection object is held by reference — it is never mutated in place
+  // (the reducer replaces it), so this reference IS the gesture-start state and
+  // the selection cannot change mid-drag anyway. The in-drag layer is
+  // canvas-sized with cx=cy=0, so its layer-local space IS canvas coordinates
+  // and the canvas-space snapshot attaches verbatim for the live preview; at
+  // commit the snapshot is re-based by the same (x0, y0) shift as the
+  // trajectory (core translatePolygon) and deep-copied. `null` = unconstrained stroke.
+  let confinement: StrokeData['confinement'] = undefined;
   // Coordinates of the last LANDED sample — the fixed reference the sampling
   // threshold accumulates against. Kept separate from `points[n-1]` because the
   // transient tail (below) continuously moves that point; comparing against it
@@ -136,6 +150,7 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
     points = [];
     params = null;
     drawing = false;
+    confinement = undefined;
     e.actions.setStateSignal(DRAWING_STROKE_KEY, false);
   };
 
@@ -237,6 +252,7 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
 
     onStart: (e) => {
       params = readPaintParams(e);
+      confinement = e.activeFrame.confinement ?? undefined;
       points = [{ x: e.point.canvas.x, y: e.point.canvas.y, pressure: samplePressure(e) }];
       anchorX = e.point.canvas.x;
       anchorY = e.point.canvas.y;
@@ -263,7 +279,7 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
       if (Math.hypot(x - anchorX, y - anchorY) < P.MIN_SAMPLE_DISTANCE_PX) {
         if (points.length >= 2) {
           points[points.length - 1] = { x, y, pressure: samplePressure(e) };
-          if (layerId) tx?.update({ strokeData: buildStrokeData(params, points) }, 'layer', layerId);
+          if (layerId) tx?.update({ strokeData: buildStrokeData(params, points, confinement ?? undefined) }, 'layer', layerId);
         }
         return;
       }
@@ -279,7 +295,7 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
       // so wait for the second sample before placing the layer.
       if (points.length < 2 || !ensureLayer(e) || !layerId) return;
 
-      tx?.update({ strokeData: buildStrokeData(params, points) }, 'layer', layerId);
+      tx?.update({ strokeData: buildStrokeData(params, points, confinement ?? undefined) }, 'layer', layerId);
     },
 
     onEnd: (e) => {
@@ -306,7 +322,16 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
       // sample's pressure (width = size × pressure), same as any segment.
       const strokePoints =
         points.length === 1 ? [points[0], { ...points[0] }] : points;
-      const tight = tightenStroke(strokePoints, params.size, frame.canvas);
+      // Selection intersection: clamp the committed box to the selection's
+      // bounding rect (+1px AA margin) — coverage outside is zero, so those
+      // texels would be allocated for nothing. The snapshot is frozen
+      // (deep copy, re-based into the tightened box) so the committed stroke
+      // is replay-self-sufficient: undo/redo re-renders it identically even
+      // after the selection changes or clears.
+      const clipRect = confinement
+        ? { x: confinement.rect.x - 1, y: confinement.rect.y - 1, w: confinement.rect.w + 2, h: confinement.rect.h + 2 }
+        : undefined;
+      const tight = tightenStroke(strokePoints, params.size, frame.canvas, clipRect);
 
       if (!tight) {
         discardLayer(e);
@@ -314,7 +339,15 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
         return;
       }
 
-      const strokeData = buildStrokeData(params, tight.points);
+      const strokeData = buildStrokeData(
+        params,
+        tight.points,
+        // PAIRING OBLIGATION: the shift must be exactly the box origin the
+        // trajectory was re-based by above — snapshot and points land in one
+        // coordinate frame. Never re-read the live selection here (undo
+        // replay self-sufficiency).
+        confinement ? e.geometry.polygon.translatePolygon(confinement, -tight.box.x, -tight.box.y) : undefined,
+      );
       const geom = { w: tight.box.w, h: tight.box.h, cx: tight.cx, cy: tight.cy };
 
       if (layerId && tx) {

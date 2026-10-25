@@ -321,14 +321,11 @@ export function transformFrame(
 
   const nextCanvasCropBox = Matrix3x3.transformRect(frame.canvasClipBox.rect, frame.canvas, operation);
 
-  // Transform clipBoxes — all slots are LocalPolygon (unified selection type).
-  // Apply the same D4 symmetry operation so the selection stays aligned with
-  // pixels after rotation/flip.
-  const nextClipBoxes: Record<string, LocalPolygon> = {};
-  for (const [toolId, entry] of Object.entries(frame.clipBoxes)) {
-    if (!entry) continue;
-    nextClipBoxes[toolId] = transformPolygon(entry, frame.canvas, operation);
-  }
+  // Transform the frame-level selection entity. Apply the same D4 symmetry
+  // operation so the selection stays aligned with pixels after rotation/flip.
+  const nextConfinement = frame.confinement
+    ? transformPolygon(frame.confinement, frame.canvas, operation)
+    : null;
 
   return {
     ...frame,
@@ -336,7 +333,7 @@ export function transformFrame(
     rotation: (frame.rotation || 0) + delta,
     layers: { byId: nextById, order: frame.layers.order },
     camera: nextCamera,
-    clipBoxes: nextClipBoxes,
+    confinement: nextConfinement,
     canvasClipBox: { ...frame.canvasClipBox, rect: asLocalRect(nextCanvasCropBox) },
   };
 }

@@ -19,8 +19,8 @@
 
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { useEditorState, useEditorServices, usePluginConfig } from '@opengpex/editor/core/context';
+import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEditorState, useEditorServices, usePluginConfig, useVolatileInteraction } from '@opengpex/editor/core/context';
 import { useBrushCursorFastSync } from './useFastSync';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
@@ -31,7 +31,7 @@ import { DEFAULT_BRUSH_SIZE } from './protocols';
 /**
  * useEraserOverlayState: Hook for EraserOverlay main component state.
  *
- * Manages cursor hiding (cursorOverride: 'none') in eraser/restore mode,
+ * Manages cursor hiding (base cursor 'none') in eraser/restore mode,
  * Escape exit logic, and Tab toggling between eraser and restore.
  * Returns whether in active eraser/restore mode.
  */
@@ -42,17 +42,14 @@ export function useEraserOverlayState() {
   const activeCraft = state.interaction.signals[CraftDrawerAPI.signals.activeCraft] as string | null;
   const isEraserMode = activeCraft === 'eraser' || activeCraft === 'restore';
 
-  // Sets/clears cursorOverride: 'none' to hide system cursor (replaced by DOM circle)
+  // Registers the 'none' base cursor so the DOM circle replaces the system
+  // cursor; unregistering is owner-scoped to this tool.
   useEffect(() => {
-    if (isEraserMode) {
-      // Hide system cursor, use custom DOM cursor instead
-      actions.fast.setCursor('none');
-    } else {
-      // When exiting eraser mode, restore default if current cursor is 'none' (set by this plugin)
-      if (actions.fast.getCursor() === 'none') {
-        actions.fast.setCursor(null);
-      }
-    }
+    if (!isEraserMode) return;
+    actions.fast.cursor.register('eraser', 'none');
+    return () => {
+      actions.fast.cursor.register('eraser', null);
+    };
   }, [isEraserMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Escape key exits eraser/restore mode (via CraftDrawer's deactivate command, following cross-plugin boundaries)
@@ -65,7 +62,6 @@ export function useEraserOverlayState() {
         e.stopPropagation();
         // Deactivate tool via CraftDrawer's command system (following signal ownership boundaries)
         actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
-        actions.fast.setCursor(null);
       }
     };
 
@@ -89,15 +85,6 @@ export function useEraserOverlayState() {
     document.addEventListener('keydown', handleTab);
     return () => document.removeEventListener('keydown', handleTab);
   }, [activeCraft, isEraserMode, actions]);
-
-  // Restore cursor on component unmount
-  useEffect(() => {
-    return () => {
-      if (actions.fast.getCursor() === 'none') {
-        actions.fast.setCursor(null);
-      }
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     isEraserMode,
@@ -130,6 +117,18 @@ export function useBrushCursorTracking(
   const pointerRef = useRef({ x: 0, y: 0 });
   const rafIdRef = useRef<number>(0);
   const isVisibleRef = useRef(false);
+  const springMetaRef = useRef(false);
+  const springChannels = useVolatileInteraction('springChannels');
+
+  // Cmd spring key state, read by the tracking loop below: while held the
+  // press routes away from this tool, so the ring must not REVEAL itself.
+  // The hide half (muting a visible ring while Cmd is down, restoring on
+  // release) is infrastructure: SpringKeyManager mirrors the flag onto
+  // <html data-spring-meta> and one global CSS rule mutes every element
+  // tagged `data-cursor-indicator` — no per-tool DOM write here.
+  useLayoutEffect(() => {
+    springMetaRef.current = springChannels.meta;
+  }, [springChannels]);
 
   // ─── Fast track: camera.k real-time synchronization of cursor size (extracted to useFastSync.ts)
   useBrushCursorFastSync(cursorRef, isActive, brushSize);
@@ -161,7 +160,7 @@ export function useBrushCursorTracking(
 
           el.style.transform = `translate(${pointerRef.current.x}px, ${pointerRef.current.y}px)`;
 
-          if (!isVisibleRef.current) {
+          if (!isVisibleRef.current && !springMetaRef.current) {
             el.style.opacity = '1';
             isVisibleRef.current = true;
           }
@@ -201,7 +200,7 @@ export function useBrushCursorTracking(
     activeCraftRef.current = activeCraft;
   }, [activeCraft]);
 
-  // ─── Cmd/Ctrl modifier key listening: control visibility of "+" new mask badge ────────────────────────────
+  // ─── Alt modifier key listening: control visibility of "+" new mask badge ────────────────────────────
   useEffect(() => {
     if (!isActive) return;
 
@@ -215,22 +214,22 @@ export function useBrushCursorTracking(
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Meta' || e.key === 'Control') {
-        // Restore mode: Cmd has no effect (can't create new mask), badge stays as-is
+      if (e.key === 'Alt') {
+        // Restore mode: Alt has no effect (can't create new mask), badge stays as-is
         if (activeCraftRef.current === 'restore') return;
         setBadgeVisibility(true);
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Meta' || e.key === 'Control') {
+      if (e.key === 'Alt') {
         // Restore mode: badge is always visible (React controls it), don't hide
         if (activeCraftRef.current === 'restore') return;
         setBadgeVisibility(false);
       }
     };
 
-    // Also clear badge on window blur (prevents residual Meta key state after switching windows)
+    // Also clear badge on window blur (prevents residual Alt key state after switching windows)
     const handleBlur = () => {
       // Restore mode: badge is permanently visible, don't hide on blur
       if (activeCraftRef.current === 'restore') return;

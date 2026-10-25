@@ -21,9 +21,11 @@
 
 import { EditorCommand, EditorContextValue, type PenPathData } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer/factory';
-import { asLocalPolygon, asLocalRect, type LocalPolygon } from '@opengpex/editor/core/types';
+import { asLocalPolygon, asLocalRect, asLocalShape, type LocalPolygon } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import { penBoundsPad, rebasePenDataToBounds } from './pen/transform';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
+import type { ColorValue } from '@opengpex/editor/core/engine/color';
 import * as P from './protocols';
 import { committableSubpaths, draftToPenPathData } from './pen/penState';
 import { flattenSubPath, penDataToFrameSubPaths, ringsToPenSubPathsBudgeted } from './pen/geometry';
@@ -210,8 +212,7 @@ const toSelectionCommand: EditorCommand<void, void> = {
     // The 'pen' clip slot was retired (2026-10-24): the selection lands in
     // the lasso slot — an irregular polygon like any other, consumed by the
     // existing selection machinery, and re-importable via Apply-as-Bezier.
-    ctx.actions.updateFrame(frame.id, { latestClipTool: 'lasso' });
-    ctx.actions.setClipBox(frame.id, 'lasso', poly);
+    ctx.actions.updateFrame(frame.id, { latestClipTool: 'lasso', confinement: poly });
     endDraftSession(ctx);
   },
 } as EditorCommand<void, void>;
@@ -371,7 +372,6 @@ const createShapeCommand: EditorCommand<PenShapeStylePayload | undefined, void> 
       fill: payload?.fill ?? srgbHexToColorValue(PEN_DEFAULT_FILL_HEX),
       stroke: payload?.stroke ?? null,
     };
-
     // The boundary band extends HALF the stroke width beyond the path bounds
     // (round joins keep every band vertex within hw of the path; fill-only
     // faces keep a 0.75px AA hairline rim) — the layer's bounding must cover
@@ -467,6 +467,65 @@ const releaseToDraftCommand: EditorCommand<{ frameId: string; layerId: string },
   },
 } as EditorCommand<{ frameId: string; layerId: string }, void>;
 
+/**
+ * cmd.pen_update_style — patches a committed shape layer's `penStyle`
+ * (fill / stroke color / stroke width, used by the pen panel's dual-mode
+ * binding). Undoable. A stroke WIDTH change re-runs the padded-bounds rebase:
+ * the layer's extents key off the stroke width (penBoundsPad), so without the
+ * rebase a thinner stroke would leave the shape clipped inside its old
+ * visibleShape — same convention as anchor edits on the interaction side.
+ */
+const updatePenStyleCommand: EditorCommand<{
+  frameId: string;
+  layerId: string;
+  patch: { fill?: ColorValue | null; strokeColor?: ColorValue; strokeWidth?: number };
+}, void> = {
+  id: P.CMD_UPDATE_PEN_STYLE,
+  name: 'Update Pen Shape Style',
+  undoable: true,
+  execute: (ctx: EditorContextValue, payload: { frameId: string; layerId: string; patch: { fill?: ColorValue | null; strokeColor?: ColorValue; strokeWidth?: number } }) => {
+    const frame = ctx.state.frames.byId[payload.frameId];
+    const layer = frame?.layers.byId[payload.layerId];
+    if (!frame || !layer || layer.type !== 'vector' || !layer.penData) return;
+    const current = layer.penStyle ?? {};
+    const next = { ...current };
+    if (payload.patch.fill !== undefined) next.fill = payload.patch.fill;
+    if (payload.patch.strokeColor !== undefined || payload.patch.strokeWidth !== undefined) {
+      const color = payload.patch.strokeColor ?? current.stroke?.color ?? null;
+      const width = payload.patch.strokeWidth ?? current.stroke?.width ?? 0;
+      next.stroke = color ? { color, width } : null;
+    }
+    const widthChanged =
+      payload.patch.strokeWidth !== undefined && payload.patch.strokeWidth !== current.stroke?.width;
+    if (!widthChanged) {
+      ctx.actions.updateLayer(frame.id, layer.id, { penStyle: next });
+      return;
+    }
+    // Width changed: re-derive the padded bounds and re-anchor the payload so
+    // every path point stays exactly where it was on canvas (single undoable
+    // write carries geometry + style + frame together).
+    const rebase = rebasePenDataToBounds(layer.penData, penBoundsPad(next), ctx.geometry.bezier);
+    if (!rebase) {
+      ctx.actions.updateLayer(frame.id, layer.id, { penStyle: next });
+      return;
+    }
+    const M = ctx.geometry.transform.getLayerWorldMatrix(layer);
+    const growX = (rebase.bounding.w - layer.bounding.w) / 2;
+    const growY = (rebase.bounding.h - layer.bounding.h) / 2;
+    const dx = rebase.shift.x + growX;
+    const dy = rebase.shift.y + growY;
+    ctx.actions.updateLayer(frame.id, layer.id, {
+      penStyle: next,
+      penData: rebase.penData,
+      bounding: rebase.bounding,
+      visibleShape: asLocalShape({ x: 0, y: 0, w: rebase.bounding.w, h: rebase.bounding.h }),
+      cx: layer.cx + M.a * dx + M.c * dy,
+      cy: layer.cy + M.b * dx + M.d * dy,
+    });
+  },
+};
+
+
 // ─── Export ────────────────────────────────────────────────────────────────────
 
 export const PEN_OVERLAY_COMMANDS = [
@@ -475,6 +534,7 @@ export const PEN_OVERLAY_COMMANDS = [
   applyAsBezierCommand,
   cancelDraftCommand,
   updatePenDataCommand,
+  updatePenStyleCommand,
   createShapeCommand,
   releaseToDraftCommand,
 ];

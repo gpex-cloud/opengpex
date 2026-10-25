@@ -24,7 +24,7 @@ import { Dimensions, LocalShape, LocalRect, LocalPolygon, Point2D } from './prim
 import type { ImageMetadata } from '../files/types';
 import type { ColorValue } from '@opengpex/editor/core/engine/color';
 // LocalShape is used by VectorMask, canvasClipBox, etc.
-// LocalPolygon is used by clipBoxes (unified selection type after selection_layer_unification).
+// LocalPolygon is used by Frame.confinement (unified selection type after selection_layer_unification).
 
 // ─────────────────────────────────────────────────────────────
 // Color Management Types
@@ -302,6 +302,24 @@ export interface StrokeData {
    * pixel-art style). Persisted with the layer's strokeData.
    */
   readonly antiAliased?: boolean;
+  /**
+   * Selection-confinement snapshot, FROZEN at stroke creation. Layer-local
+   * deep copy of the active frame selection at the moment the stroke started;
+   * the render pipeline multiplies the stroke's coverage by this polygon so
+   * the stroke only paints inside it.
+   *
+   * INVARIANT (undo replay self-sufficiency): the rasterization pipeline must
+   * NEVER read the live `frame.confinement` for a stroke — replay after
+   * undo/redo must reproduce bit-identical pixels even though the selection
+   * has since changed or been cleared. Everything needed travels with the
+   * stroke: points (full trajectory, never trimmed to the selection) + this
+   * snapshot. `undefined` = unconstrained stroke (no selection existed).
+   *
+   * Never persisted at the LAYER level (`layer.confinement` is deliberately
+   * forbidden — a persistent per-layer constraint is what layer masks are
+   * for; the two semantics must not collide).
+   */
+  readonly confinement?: LocalPolygon;
 }
 
 /**
@@ -453,6 +471,25 @@ export interface Layer {
   // Filters & Adjustments (optional)
   adjustments?: AdjustmentState;
   /**
+   * FROZEN selection snapshot for Photoshop-style LOCAL adjustments, in the
+   * layer-local frame (same space as `vectorMasks` shapes).
+   *
+   * Attached ONCE — when the layer's FIRST grade (basic adjustments, curves,
+   * levels, channel mix or color balance) is written while a frame-level
+   * selection (`frame.confinement`) is active, the selection polygon is
+   * projected into this layer's local space and stored by value here. From
+   * then on it is independent state: editing or clearing the frame selection
+   * never changes an already-frozen snapshot, and the mask travels with the
+   * layer when it is moved/transformed (Photoshop mask semantics).
+   *
+   * RENDER CONTRACT: the pipeline bakes these rings into a coverage texture
+   * and the grading shaders blend `mix(original, graded, coverage)` — the
+   * grade only modulates colour INSIDE the polygon and the layer's alpha is
+   * never clipped (unlike `vectorMasks`, which multiply alpha). Absent or
+   * undefined ⇒ the grade applies to the whole layer.
+   */
+  adjustmentConfinement?: LocalPolygon;
+  /**
    * Declarative RGB / per-channel tone curves written by `AdjustmentDrawer`.
    * Consumed by IFilter. Does not change `assetId`.
    */
@@ -508,29 +545,38 @@ export interface Frame {
 
   // Clipping attributes
   /**
-   * Unified per-tool clip selection map — **keyed by producing tool id**
-   * (e.g. `'rect'`, `'pathellipse'`, `'lasso'`, `'wand'`, future `'polygon-lasso'`,
-   * `'ai-matting'`).
+   * Frame-level selection entity ("confinement") — a single active selection
+   * shared by all selection tools.
    *
-   * Each tool owns its own slot so switching tools never clobbers another
-   * tool's selection. The canvas only shows the selection belonging to the
-   * *currently active* tool (read via `latestClipTool`).
+   * Selections are a property of the document (not of the tool that drew
+   * them): M/L/W/S only choose the editing instrument; whatever polygon the
+   * user last drew or an AI feature produced IS the selection, and switching
+   * tools never discards it. `latestClipTool` is pure UI memory (which
+   * tool's editing handles / cursor to present, and what the M shortcut
+   * flips back to) — it does NOT route selection storage.
    *
-   * Value is a `LocalPolygon` for all tool types (rect/pathellipse/lasso/wand).
-   * The rect tool writes a 4-point LocalPolygon via `rectToLocalPolygon`; the
-   * pathellipse tool writes a 360-point LocalPolygon via
-   * `ellipsePathToLocalPolygon`. Consumers call
+   * Value is a `LocalPolygon` for all tool types (rect/pathellipse/lasso/
+   * wand/sam). The rect tool writes a 4-point LocalPolygon via
+   * `rectToLocalPolygon`; the pathellipse tool writes a 360-point
+   * LocalPolygon via `ellipsePathToLocalPolygon`. Consumers call
    * `polygonToShape` to convert back to a LocalShape when needed.
    *
-   * Missing key means "no selection produced by that tool yet".
+   * `null` means "no active selection". Documents saved before this field
+   * existed simply load with no selection (the legacy per-tool `clipBoxes`
+   * record is ignored by every reader via null-tolerant access and treated
+   * as expendable transient state — a deliberate product decision: saved
+   * selections are not worth a migration).
    */
-  clipBoxes: Record<string, LocalPolygon>;
+  confinement: LocalPolygon | null;
   /** Re-Canvas dedicated clip box — orthogonal to tool-based selections. */
   canvasClipBox: LocalShape;
 
   /**
-   * Per-frame active clip tool. Persisted with the frame so switching frames
-   * restores the tool the user last used on that specific frame.
+   * Per-frame active clip tool — **pure UI memory**. Persisted with the
+   * frame so switching frames restores the tool the user last used on that
+   * specific frame (which handles/cursor to show, what the M shortcut flips
+   * to). It does NOT participate in selection storage: the selection lives
+   * in `confinement` regardless of this value.
    * Default: 'rect'. Updated by `setClipTool`.
    */
   latestClipTool: string; // 'rect' | 'pathellipse' | 'lasso' | 'wand' | 'sam'

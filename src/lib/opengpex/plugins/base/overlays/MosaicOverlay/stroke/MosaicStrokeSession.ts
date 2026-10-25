@@ -43,7 +43,7 @@
  *   re-pixelating the same block within a single stroke.
  */
 
-import type { Layer, Frame, InteractionEvent } from '@opengpex/editor/core/types';
+import type { Layer, Frame, InteractionEvent, LocalPolygon } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import type { Point2D, StrokeSession, PaintBakeRequest, BakeRequest } from './types';
 
@@ -91,9 +91,13 @@ export class MosaicStrokeSession implements StrokeSession {
   get previewCanvas(): OffscreenCanvas { return this.canvas; }
   get version(): number { return this._version; }
 
-  constructor(config: MosaicStrokeConfig, compositePromise: Promise<ImageData>, forceNewLayer: boolean = false) {
+  /** Selection-confinement snapshot (canvas coords, gesture-start reference) — see factory. */
+  private confinement: LocalPolygon | null;
+
+  constructor(config: MosaicStrokeConfig, compositePromise: Promise<ImageData>, forceNewLayer: boolean = false, confinement: LocalPolygon | null = null) {
     this.config = config;
     this.forceNewLayer = forceNewLayer;
+    this.confinement = confinement;
 
     const { w, h } = config.canvasSize;
 
@@ -117,6 +121,11 @@ export class MosaicStrokeSession implements StrokeSession {
         for (const pt of this.bufferedPoints) {
           this.pixelateAt(pt.x, pt.y);
         }
+        // Same confinement contract as begin()/move(): a buffered point may
+        // sit outside the selection — clip before the replayed blocks reach
+        // the preview, or a first press outside the selection would flash a
+        // mosaic dot that then vanishes on the next move.
+        this.applyConfinementClip();
         this._version++;
         this.bufferedPoints = [];
       }
@@ -128,6 +137,7 @@ export class MosaicStrokeSession implements StrokeSession {
   begin(point: Point2D, _pressure: number): void {
     if (this.sourceImageData) {
       this.pixelateAt(point.x, point.y);
+      this.applyConfinementClip();
     } else {
       this.bufferedPoints.push({ x: point.x, y: point.y });
     }
@@ -137,10 +147,35 @@ export class MosaicStrokeSession implements StrokeSession {
   move(point: Point2D, _pressure: number, _e: InteractionEvent): void {
     if (this.sourceImageData) {
       this.pixelateAt(point.x, point.y);
+      this.applyConfinementClip();
     } else {
       this.bufferedPoints.push({ x: point.x, y: point.y });
     }
     this._version++;
+  }
+
+  /**
+   * Live confinement clip: keeps the stroke buffer clean at all times so the
+   * preview shows mosaic ONLY inside the selection (the preview renders this
+   * canvas directly — there is no downstream multiply to rely on). Re-applied
+   * after every stamp: the operation keeps everything inside the polygon and
+   * clears whatever a stamp just added outside it, so it is idempotent and
+   * costs one canvas-sized composite per move.
+   */
+  private applyConfinementClip(): void {
+    if (!this.confinement) return;
+    this.ctx.save();
+    this.ctx.globalCompositeOperation = 'destination-in';
+    this.ctx.beginPath();
+    for (const ring of this.confinement.rings) {
+      for (let i = 0; i < ring.length; i++) {
+        if (i === 0) this.ctx.moveTo(ring[i].x, ring[i].y);
+        else this.ctx.lineTo(ring[i].x, ring[i].y);
+      }
+      this.ctx.closePath();
+    }
+    this.ctx.fill('evenodd');
+    this.ctx.restore();
   }
 
   async end(frame: Frame): Promise<BakeRequest | null> {
@@ -149,6 +184,43 @@ export class MosaicStrokeSession implements StrokeSession {
 
     // If no blocks were processed, no-op
     if (this.dirtyMinX > this.dirtyMaxX) return null;
+
+    // Selection confinement: clip the stroke buffer to the frozen selection
+    // polygon (destination-in, even-odd) before handing the bitmap to the
+    // bake — mosaic then only paints inside the selection, and the clip is
+    // part of the committed pixels (undo/redo replays stay self-sufficient).
+    // The session canvas IS canvas space, so the polygon needs no transform.
+    if (this.confinement) {
+      this.ctx.globalCompositeOperation = 'destination-in';
+      this.ctx.beginPath();
+      for (const ring of this.confinement.rings) {
+        for (let i = 0; i < ring.length; i++) {
+          if (i === 0) this.ctx.moveTo(ring[i].x, ring[i].y);
+          else this.ctx.lineTo(ring[i].x, ring[i].y);
+        }
+        this.ctx.closePath();
+      }
+      this.ctx.fill('evenodd');
+      this.ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // Content check AFTER the confinement clip: blocks drawn inside the
+    // selection's bounding rect but outside an IRREGULAR selection polygon
+    // were cleared by the clip — if nothing survived, do not bake at all
+    // (a bake would create an empty mosaic layer for a click that never
+    // painted anything). Scans the dirty rect only.
+    const sx = Math.max(0, Math.floor(this.dirtyMinX));
+    const sy = Math.max(0, Math.floor(this.dirtyMinY));
+    const sw = Math.min(this.config.canvasSize.w, Math.ceil(this.dirtyMaxX)) - sx;
+    const sh = Math.min(this.config.canvasSize.h, Math.ceil(this.dirtyMaxY)) - sy;
+    if (sw > 0 && sh > 0) {
+      const data = this.ctx.getImageData(sx, sy, sw, sh).data;
+      let anyPaint = false;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] > 0) { anyPaint = true; break; }
+      }
+      if (!anyPaint) return null;
+    }
 
     const targetInfo = this.findOrCreatePaintLayer(frame);
     const strokeBitmap = await createImageBitmap(this.canvas);
@@ -235,6 +307,19 @@ export class MosaicStrokeSession implements StrokeSession {
         // Skip blocks completely outside canvas
         if (px + blockSize <= 0 || py + blockSize <= 0) continue;
         if (px >= canvasSize.w || py >= canvasSize.h) continue;
+
+        // Skip blocks completely outside the selection: a block whose whole
+        // area sits beyond the confinement rect would be clipped away by the
+        // confinement compose anyway, but drawing it first would still mark
+        // the session dirty — end() would then create an EMPTY mosaic layer
+        // for a click that never painted anything (observed on-device).
+        // Blocks straddling the selection edge still draw here; the clip
+        // trims the overhang.
+        if (this.confinement) {
+          const r = this.confinement.rect;
+          if (px + blockSize <= r.x || px >= r.x + r.w) continue;
+          if (py + blockSize <= r.y || py >= r.y + r.h) continue;
+        }
 
         // Circular brush check: block center must be within brush radius
         const blockCx = px + blockSize / 2;

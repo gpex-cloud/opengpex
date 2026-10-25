@@ -18,18 +18,20 @@
  */
 
 /**
- * PenMoveHandler (priority 162) — drag inside a pen layer's visible shape to
- * move the WHOLE layer (cx/cy only — penData is layer-local and untouched by
- * translation). MarkerMoveHandler parity: no modifier needed.
+ * PenMoveHandler (priority 162) — Cmd/Ctrl + drag to move the WHOLE pen
+ * layer (cx/cy only — penData is layer-local and untouched by translation).
+ * Spring key ONLY: a bare press over a pen layer belongs to the pen gestures
+ * (anchor editing on geometry, anchor placement while drawing).
  *
  * Press arbitration against the editing surface:
- * - ON the path geometry (anchor or curve hit): pen-edit keeps the press —
+ * - ON the path geometry (anchor or curve hit): pen-edit keeps a bare press —
  *   an anchor drag or a segment split must never degrade into a layer move.
- *   The one exception is Cmd/Ctrl (the Illustrator temporary-selection
- *   grammar), which claims geometry hits for the move.
+ *   The spring key claims geometry hits for the move (the Illustrator
+ *   temporary-selection grammar).
  * - OFF the geometry but inside the layer's visible shape (factory-seeded to
- *   the full bounding, tracked by pen-resize): THIS handler moves the layer —
- *   the same visibleShape pick `testLayerHit` gives the marker move.
+ *   the full bounding, tracked by pen-resize): THIS handler moves the layer
+ *   under the spring key — the same visibleShape pick `testLayerHit` gives
+ *   the marker move.
  * - Outside every pen layer's visible shape: pen-draw places a new anchor.
  *
  * Fragment-triplet sub-layers (frag/exchange) never hit (host-only filter in
@@ -56,6 +58,9 @@ export const createPenMoveHandler = (): InteractionHandler => {
 
   return {
     id: 'pen-move',
+    // Cmd+drag = move this pen draft/layer — more precise than the global top-layer fallback.
+    springOverride: 'meta',
+
     priority: 162,
 
     test: (e) => {
@@ -63,17 +68,15 @@ export const createPenMoveHandler = (): InteractionHandler => {
       // During a drawing session every click belongs to pen-draw.
       if (getPenDraft(e.actions.scratch, e.activeFrame.id) !== null) return false;
 
+      // Spring key ONLY: a bare press over a pen layer belongs to the pen
+      // gestures (anchor edit on geometry, anchor placement while drawing) —
+      // moving a committed layer is never a bare-press affordance.
+      if (!e.spring.meta) return false;
       const geometryLayerId = findCommittedPenLayerAt(e.geometry, e.activeFrame, e.point.canvas, cameraZoom(e));
-      if (e.keys.meta) {
-        // Cmd/Ctrl: full-move modifier — a geometry hit moves the layer
-        // instead of editing the anchor / splitting the segment.
-        targetLayerId = geometryLayerId ?? findPenLayerBoxAt(e.geometry, e.activeFrame, e.point.canvas);
-        return targetLayerId !== null;
-      }
-      // Plain press: on-geometry stays with pen-edit; off-geometry inside the
-      // visible shape moves the layer (marker parity, no modifier).
-      if (geometryLayerId) return false;
-      targetLayerId = findPenLayerBoxAt(e.geometry, e.activeFrame, e.point.canvas);
+      // A geometry hit moves the layer instead of editing the anchor /
+      // splitting the segment; a box hit (off-geometry, inside the visible
+      // shape) moves too.
+      targetLayerId = geometryLayerId ?? findPenLayerBoxAt(e.geometry, e.activeFrame, e.point.canvas);
       return targetLayerId !== null;
     },
 
@@ -92,7 +95,7 @@ export const createPenMoveHandler = (): InteractionHandler => {
 
       tx = new InteractionTransaction(e, { useIncreComp: true });
       tx.begin(false);
-      e.actions.fast.setCursor('grabbing');
+      e.actions.fast.cursor.notifyDragging('grabbing');
     },
 
     onMove: (e) => {
@@ -102,23 +105,25 @@ export const createPenMoveHandler = (): InteractionHandler => {
       tx.update({ cx: startLayerPos.x + dx, cy: startLayerPos.y + dy }, 'layer', targetLayerId);
     },
 
-    onEnd: (e) => {
+    onEnd: () => {
       if (tx) {
         tx.commit();
         tx = null;
       }
       targetLayerId = null;
-      // Pointer is still inside the shape just dragged — hand the hover
-      // cursor back directly (same convention as MarkerMoveHandler).
-      e.actions.fast.setCursor('move');
+      // No hover restoration: moving requires the spring key, so a
+      // still-held Cmd keeps 'move' via the spring input; a released one
+      // falls back to the tool cursor like any off-geometry hover.
     },
 
-    onCancel: () => {
+    onCancel: (e) => {
       if (tx) {
         tx.abort();
         tx = null;
       }
       targetLayerId = null;
+      // Release the gesture cursor; the hover rule reasserts on the next move.
+      e.actions.fast.cursor.notifyDragging(null);
     },
   };
 };

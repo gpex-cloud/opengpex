@@ -75,6 +75,7 @@ const BrushCursor = React.memo(function BrushCursor() {
   return (
     <div
       ref={cursorRef}
+      data-cursor-indicator
       className="absolute top-0 left-0 pointer-events-none"
       style={{
         opacity: 0, // revealed on the first pointermove

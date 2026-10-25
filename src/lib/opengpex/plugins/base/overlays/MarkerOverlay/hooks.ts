@@ -22,7 +22,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { MARKER_CURSOR } from '@opengpex/editor/icons';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
-import { Layer } from '@opengpex/editor/core/types';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
 import { resolveMarkerToolState, type MarkerToolState } from './protocols';
@@ -70,12 +69,8 @@ export function useMarkerOverlayState() {
  * effect teardown (tool switch / unmount).
  */
 export function useMarkerToolLifecycle(isMarkerMode: boolean) {
-  const { state, activeFrame, activeLayer } = useEditorState();
-  const { actions, geometry } = useEditorServices();
-
-  // Latest frame for the pointermove closure (avoids re-registering on change).
-  const frameRef = useRef(activeFrame);
-  useLayoutEffect(() => { frameRef.current = activeFrame; });
+  const { state, activeLayer } = useEditorState();
+  const { actions } = useEditorServices();
 
   // Latest tool state for the Escape ladder (a ref so the keydown listener is
   // registered once per tool activation, not per selection/kind change).
@@ -91,54 +86,21 @@ export function useMarkerToolLifecycle(isMarkerMode: boolean) {
   const isInteractingRef = useRef(false);
   useLayoutEffect(() => { isInteractingRef.current = !!state.interaction.isInteracting; });
 
-  // ─── Cursor: crosshair (idle) ↔ move (hover existing marker) ───────────
+  // ─── Cursor: crosshair base ─────────────────────────────────────────────
+  // No hover affordance: moving an existing marker requires the Cmd spring
+  // key (MarkerMoveHandler is gated to it), so the pointer stays on the
+  // tool's base cursor the whole time.
   useEffect(() => {
     if (!isMarkerMode) return;
 
-    // Base cursor for empty canvas.
-    actions.fast.setCursor(MARKER_CURSOR);
+    actions.fast.cursor.register('marker', MARKER_CURSOR);
 
-    const onPointerMove = (ev: PointerEvent) => {
-      // A draw/move/rotate drag owns the cursor; skip to prevent oscillation.
-      // Check both the React-state ref AND the fast-track cursor: the fast-track
-      // cursor is set synchronously by onStart before React processes the state
-      // update, so it catches the first frame of interaction that React misses.
-      if (isInteractingRef.current) return;
-      const activeCursor = actions.fast.getCursor();
-      if (activeCursor && activeCursor.startsWith('url(')) return;
-
-      const frame = frameRef.current;
-      if (!frame) return;
-
-      const container = document.querySelector('.editor-viewport-container');
-      if (!container) return;
-      const rect = container.getBoundingClientRect();
-      const vx = ev.clientX - rect.left;
-      const vy = ev.clientY - rect.top;
-
-      const cam = actions.fast.latestCamera(frame.id);
-      const worldPt = geometry.space.screenToWorld(vx, vy, frame, cam);
-
-      // Hover an existing marker layer → `move` (MarkerMoveHandler will win).
-      const hits = geometry.space.pickLayersAt(worldPt, frame.layers);
-      const overMarker = hits.some((l: Layer) => l.type === 'vector' && !!l.markerData);
-      const desired = overMarker ? 'move' : MARKER_CURSOR;
-
-      // Compare against the LIVE cursor, not a cached copy: interaction handlers
-      // set/clear the cursor on their own (grabbing → null/move on release), and a
-      // stale cache would skip the write and leave the arrow on screen.
-      if (desired !== activeCursor) {
-        actions.fast.setCursor(desired);
-      }
-    };
-
-    document.addEventListener('pointermove', onPointerMove, { passive: true });
     return () => {
-      document.removeEventListener('pointermove', onPointerMove);
-      // Restore to default; the mode-level cursor logic re-applies elsewhere.
-      actions.fast.setCursor(null);
+      // Unregister on tool switch / unmount so no stale base cursor survives
+      // the marker tool; the next tool registers its own.
+      actions.fast.cursor.register('marker', null);
     };
-  }, [isMarkerMode, actions, geometry]);
+  }, [isMarkerMode, actions]);
 
   // ─── Escape ladder: cancel drag → leave INACTIVE → exit the tool ───────
   // Mirrors the text tool (editing → pre-edit → exit): each Esc peels one
@@ -168,17 +130,18 @@ export function useMarkerToolLifecycle(isMarkerMode: boolean) {
       //    CraftDrawer's command system (respects signal ownership boundaries,
       //    same as Brush/Text).
       actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
-      actions.fast.setCursor(null);
+      actions.fast.cursor.notifyHover(null);
     };
 
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isMarkerMode, actions]);
 
-  // Safety net: clear any lingering cursor override on unmount.
+  // Safety net: drop this tool's cursor registration on unmount.
   useEffect(() => {
     return () => {
-      actions.fast.setCursor(null);
+      actions.fast.cursor.register('marker', null);
+      actions.fast.cursor.notifyHover(null);
     };
   }, [actions]);
 }

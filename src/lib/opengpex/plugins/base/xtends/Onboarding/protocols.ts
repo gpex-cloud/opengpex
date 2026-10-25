@@ -90,7 +90,7 @@ export interface TipDef {
 
 export const EVERYDAY_TIPS: TipDef[] = [
   { id: "tip-pan", text: "Middle-click drag (mouse) or two-finger drag (trackpad) to pan the canvas" },
-  { id: "tip-clip-space", text: "Press Space to enter Clip mode and crop your image quickly" },
+  { id: "tip-clip-space", text: "Press M, L, W or S to jump straight into a selection tool — or Space to toggle selection mode with your last-used tool" },
   { id: "tip-undo", text: "Press Ctrl+Z / ⌘Z to undo, Ctrl+Shift+Z / ⌘⇧Z to redo" },
   { id: "tip-fit", text: "Press Ctrl+1 / ⌘1 to fit the image to your viewport" },
   { id: "tip-ai", text: "Use AI Bridge or Comfy Bridge (top-right ✨) to generate images with text prompts" },

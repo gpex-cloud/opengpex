@@ -71,7 +71,7 @@ export function SegmentationPanel() {
     const frameId = lastResult.samFrameId;
     if (framePolygons && framePolygons[idx] && frameId) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      actions.setClipBox(frameId, 'sam', framePolygons[idx] as any);
+      actions.updateFrame(frameId, { confinement: framePolygons[idx] as any });
     }
   }, [lastResult, actions, state.interaction.interactionMode, state.activeFrameId, activeFrame]);
 

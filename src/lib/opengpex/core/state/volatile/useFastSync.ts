@@ -283,28 +283,10 @@ export function useFastMarchingAntsSync(
   options: {
     selector: (v: VolatileState, frame: Frame, cam: CameraState) => LocalShape | string | null;
     antiAliased?: boolean;
-    /**
-     * Optional cache-invalidation key. The hook keeps a `lastD` cache so a
-     * stable shape doesn't trigger a redundant `setAttribute('d', ...)` every
-     * tick. That cache is sufficient when the *only* thing that changes is
-     * the shape geometry, but it falls down when the **selector's logical
-     * target** changes while `isActive` stays `true` — for example, the
-     * irregular-selection sync hook switches between
-     * `irregularCropBoxes['lasso']` and `irregularCropBoxes['wand']` based on
-     * the active tool. If the new target's `d` happens to equal the old one,
-     * or the old `d` was just imperatively cleared by a sibling effect, the
-     * dirty-check would skip the write and the DOM would never repaint.
-     *
-     * Pass anything that uniquely identifies the current selector target
-     * (e.g. the active tool id); the hook resets `lastD` whenever it
-     * changes. Same effect as flipping `isActive` off-then-on, but without
-     * the visible animation reset.
-     */
-    resetKey?: unknown;
   }
 ) {
   const { geometry } = useEditorServices();
-  const { selector, antiAliased = true, resetKey } = options;
+  const { selector, antiAliased = true } = options;
   const lastD = useRef<string | null>(null);
   const lastEl = useRef<SVGPathElement | null>(null);
 
@@ -314,28 +296,6 @@ export function useFastMarchingAntsSync(
       lastEl.current = null;
     }
   }, [isActive]);
-
-  // Cache-invalidation point #2 — driven by callers that switch the
-  // selector's *logical target* without flipping `isActive`. We do not gate
-  // by `isActive` here: even when active, a target switch must invalidate
-  // the cache so the next tick is forced to re-write `d`. See `resetKey`
-  // option doc for the full rationale.
-  //
-  // IMPORTANT: we also proactively clear the DOM `d` attribute here. Without
-  // this, the "non-empty → empty" transition (e.g. lasso polygon → wand with
-  // no selection yet) leaves a stale path on screen: the cache is nulled by
-  // this effect, but on the next tick the selector returns null, and the
-  // `if (lastD.current !== null)` guard in the fast-sync callback already
-  // sees null — skipping the DOM clear entirely. Eagerly blanking `d` here
-  // closes that one-frame race. If the next tick's selector produces real
-  // data it will re-write `d` immediately, so we never lose a valid path.
-  useLayoutEffect(() => {
-    lastD.current = null;
-    lastEl.current = null;
-    if (pathRef.current) {
-      pathRef.current.setAttribute('d', '');
-    }
-  }, [resetKey, pathRef]);
 
 
   useFastSync(pathRef, isActive, (v, f, cam) => {

@@ -90,6 +90,13 @@ export interface DrawBlendParams {
    */
   readonly vmaskWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /**
+   * The polygon-baked ADJUSTMENT-CONFINEMENT coverage for this layer (the
+   * frozen selection snapshot localizing its grade). Absent → default white
+   * view binds and the grade applies to the whole layer. Same contract as
+   * `CompositePass.DrawLayerParams`.
+   */
+  readonly adjustConfinementTexture?: GPUTexture;
+  /**
    * Force the identity group-1 adjust bind group because `fgTexture` ALREADY has the
    * layer's adjustments baked in (AdjustPrePass → FilterPass path).
    */
@@ -140,7 +147,7 @@ export class BlendPass {
     ctx: BlendPassContext,
     params: DrawBlendParams,
   ): void {
-    const { layer, fgTexture, bgTexture, maskTexture, vmaskTexture } = params;
+    const { layer, fgTexture, bgTexture, maskTexture, vmaskTexture, adjustConfinementTexture } = params;
 
     let flags = 0;
     if (maskTexture) flags |= LAYER_FLAG_HAS_MASK;
@@ -325,6 +332,15 @@ export class BlendPass {
           binding: 5,
           resource: vmaskTexture
             ? vmaskTexture.texture.createView()
+            : ctx.pipelineCache.getDefaultMaskView(),
+        },
+        {
+          // Adjustment-confinement slot (binding 6). Present → the baked
+          // coverage texture; absent → the 1×1 default white view
+          // (coverage 1 = whole-layer grade).
+          binding: 6,
+          resource: adjustConfinementTexture
+            ? adjustConfinementTexture.createView()
             : ctx.pipelineCache.getDefaultMaskView(),
         },
       ],

@@ -50,8 +50,9 @@ import type { StrokeSession } from './types';
  */
 export function createMosaicSession(e: InteractionEvent): StrokeSession | null {
   const frame: Frame = e.activeFrame;
-  const isCmdPressed = e.keys.meta;
-  const forceNewLayer = isCmdPressed;
+  // Alt (Option) = force this stroke into a NEW mosaic layer (since
+  // 2026-10-26; Cmd was reassigned to the global move-layer spring key).
+  const forceNewLayer = e.keys.alt;
   const activeLayerId = frame.activeLayerId;
   const activeLayer = activeLayerId ? frame.layers.byId[activeLayerId] : null;
 
@@ -98,6 +99,13 @@ export function createMosaicSession(e: InteractionEvent): StrokeSession | null {
       { brushDiameter, blockSize, canvasSize: { w: frame.canvas.w, h: frame.canvas.h }, sampleScale },
       compositePromise,
       forceNewLayer,
+      // Gesture-start selection snapshot (factory runs at gesture start).
+      // Same contract as the eraser factory: deep copy (the live object gets
+      // replaced during the stroke) and degenerate (zero-area) selections
+      // normalize to null — a 0x0 "selection" must mean unconstrained.
+      frame.confinement && frame.confinement.rect.w > 0 && frame.confinement.rect.h > 0
+        ? e.geometry.polygon.translatePolygon(frame.confinement, 0, 0)
+        : null,
     );
   } catch (err) {
     console.warn('[MosaicOverlay] MosaicStrokeSession creation failed:', err);

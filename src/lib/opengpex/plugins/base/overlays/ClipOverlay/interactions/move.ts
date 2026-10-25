@@ -60,7 +60,6 @@ const EDGE_HIT_THRESHOLD_PX = 6;
  */
 export const createSelectionMoveHandler = (): InteractionHandler => {
   // ─── Closure state ─────────────────────────────────────────────────────────
-  let activeTool: ClipTool = 'rect';
   let startPolygon: LocalPolygon | null = null;
   let initialRect: LocalRect = asLocalRect({ x: 0, y: 0, w: 0, h: 0 });
   let hasPeeled = false;
@@ -69,6 +68,8 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
   return createTransformHandler({
     id: 'clip-selection-move',
     priority: 130,
+    // Cmd inside the selection = peel (Cmd+Alt = copy-peel) — owns Cmd over its hit region.
+    springOverride: 'meta',
 
     test: (e: InteractionEvent): TransformIntent | null => {
       // ─── Mode admission ───────────────────────────────────────────────
@@ -156,7 +157,6 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       const box = getClipBox(e.activeFrame);
       hasPeeled = false;
       labelActivated = false;
-      activeTool = (e.activeFrame.latestClipTool as ClipTool) || 'rect';
 
       if (!box) {
         startPolygon = null;
@@ -210,10 +210,7 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
         const polyDy = newRect.y - initialRect.y;
         const newPoly = e.geometry.polygon.translatePolygon(startPolygon, polyDx, polyDy);
         tx.update({
-          clipBoxes: {
-            ...frame.clipBoxes,
-            [activeTool]: newPoly
-          }
+          confinement: newPoly
         }, 'frame');
       }
 

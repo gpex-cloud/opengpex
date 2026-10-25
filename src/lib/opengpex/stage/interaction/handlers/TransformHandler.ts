@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionHandler, InteractionEvent, LocalRect, asWorldPoint } from '@opengpex/editor/core/types';
+import { InteractionHandler, InteractionEvent, LocalRect, asWorldPoint, SpringChannel } from '@opengpex/editor/core/types';
 import { Matrix3x3 } from '@opengpex/editor/core/geometry/matrix';
 import { isRotatedPose } from '@opengpex/editor/core/geometry/operators/transform';
 import { InteractionMath, type SnapOpState } from '../Math';
@@ -154,6 +154,13 @@ export const GestureMatcher = {
 export interface TransformHandlerConfig<T = LocalRect> {
   id: string;
   priority?: number;
+  /**
+   * Forwarded to the produced InteractionHandler: declares that this handler
+   * owns Cmd/Ctrl+drag inside its hit region (see InteractionHandler.
+   * springOverride). Handlers without it are filtered out while a spring
+   * spring key is held.
+   */
+  springOverride?: SpringChannel;
 
   /**
    * Whether to clamp the anchor point to canvas bounds for 'create' category.
@@ -362,6 +369,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
   return {
     id: config.id,
     priority: config.priority || 100,
+    springOverride: config.springOverride,
 
     test: (e) => {
       const result = config.test(e);

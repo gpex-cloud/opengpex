@@ -77,6 +77,7 @@ import {
 import { resolveRoiFrame } from '@opengpex/editor/core/engine/pipeline/graph/support/roiFrame';
 import { computeCompositeSignature } from '@opengpex/editor/core/engine/pipeline/scene/compositeSignature';
 import { clearVmaskCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareVmaskSources';
+import { clearConfinementCoverageCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareConfinementSources';
 import { releaseExportGlyphAtlas } from '@opengpex/editor/core/engine/pipeline/graph/build/vectorRenderers/TextRenderer';
 import { clearBmaskCombineCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareBmaskCombine';
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
@@ -1929,6 +1930,7 @@ export class WebGpuEngine implements IEngine {
     this.residentTransients = null;
     // Release owned vmask coverage textures + private compute rings.
     clearVmaskCache();
+    clearConfinementCoverageCache();
     // Release owned combined bmask textures + private uniform ring.
     clearBmaskCombineCache();
     this.lastScene = null;

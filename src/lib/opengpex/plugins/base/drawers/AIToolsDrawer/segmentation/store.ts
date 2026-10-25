@@ -40,7 +40,7 @@ export interface SegResult {
     rings: { x: number; y: number }[][];
     score: number;
   }>;
-  /** Index of the currently active candidate in clipBoxes */
+  /** Index of the currently active candidate selection */
   activeCandidateIdx: number;
   /** Performance stats from last decode (ms) */
   lastDecodeMs: number;

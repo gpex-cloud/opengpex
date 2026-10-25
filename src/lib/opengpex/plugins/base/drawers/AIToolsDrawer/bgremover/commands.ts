@@ -99,8 +99,7 @@ const { runCommand, abortCommand } = createToolCommand<
     const polygon = asLocalPolygon(localRings, bounds, false);
 
     // Apply clip box
-    actions.setClipBox(frameId, 'lasso', polygon);
-    actions.updateFrame(frameId, { latestClipTool: 'lasso' });
+    actions.updateFrame(frameId, { latestClipTool: 'lasso', confinement: polygon });
     if (ctx.state.interaction.interactionMode !== 'clip') {
       actions.setInteraction({ interactionMode: 'clip' });
     }

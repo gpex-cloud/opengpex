@@ -86,7 +86,7 @@ export const createPenRotateHandler = (): InteractionHandler => {
 
       tx = new InteractionTransaction(e, { useIncreComp: true });
       tx.begin(false);
-      e.actions.fast.setCursor(ROTATE_CURSOR);
+      e.actions.fast.cursor.notifyDragging(ROTATE_CURSOR);
     },
 
     onMove: (e) => {
@@ -116,15 +116,17 @@ export const createPenRotateHandler = (): InteractionHandler => {
         tx = null;
       }
       rotateLayerId = null;
-      e.actions.fast.setCursor(null);
+      e.actions.fast.cursor.notifyDragging(null);
+      e.actions.fast.cursor.notifyHover(null);
     },
 
-    onCancel: () => {
+    onCancel: (e) => {
       if (tx) {
         tx.abort();
         tx = null;
       }
       rotateLayerId = null;
+      e.actions.fast.cursor.notifyDragging(null);
     },
   };
 };
