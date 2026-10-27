@@ -79,19 +79,18 @@ export function useCropDimSync(isActive: boolean, isReCanvas: boolean) {
 // ─── useRegularBoxSync ─────────────────────────────────────────────────────────
 
 /**
- * CSS box positioning + visibility + rule-of-thirds guides.
+ * CSS box positioning + visibility.
  *
  * Active when the tool is regular (rect/ellipse) OR Re-Canvas. Drives the
- * draggable HTMLDivElement with resize handles. Reads only LocalShape data
- * (polygons in the slot produce EMPTY_SHAPE → box hidden via visibility gate).
+ * draggable HTMLDivElement (move surface + gizmo mount). Reads only
+ * LocalShape data (polygons in the slot produce EMPTY_SHAPE → box hidden via
+ * visibility gate).
  */
 export function useRegularBoxSync(
   ref: React.RefObject<HTMLElement | null>,
   isActive: boolean,
   isReCanvas: boolean
 ) {
-  const guidesRef = useRef<HTMLDivElement>(null);
-
   // Box position (fast-track CSS left/top/width/height)
   useFastRectSync(ref, isActive, {
     selector: (_v, f) => resolveRegularClip(f, isReCanvas).rect,
@@ -108,24 +107,12 @@ export function useRegularBoxSync(
     }
   });
 
-  // Cleanup: toggle box + guides visibility on active state changes
+  // Cleanup: toggle box visibility on active state changes
   useEffect(() => {
-    if (isActive) {
-      if (ref.current) (ref.current as HTMLElement).style.display = '';
-      if (guidesRef.current) {
-        guidesRef.current.style.display = '';
-        guidesRef.current.style.opacity = '0.2';
-      }
-    } else {
-      if (ref.current) (ref.current as HTMLElement).style.display = 'none';
-      if (guidesRef.current) {
-        guidesRef.current.style.display = 'none';
-        guidesRef.current.style.opacity = '0';
-      }
-    }
-  }, [isActive, ref, guidesRef]);
+    if (ref.current) (ref.current as HTMLElement).style.display = isActive ? '' : 'none';
+  }, [isActive, ref]);
 
-  return { guidesRef };
+  return {};
 }
 
 // ─── useSelectionAntsSync ──────────────────────────────────────────────────────

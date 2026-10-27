@@ -20,6 +20,7 @@
 import {
   InteractionHandler,
   LocalPoint,
+  LocalPolygon,
   Frame,
   GeometryService,
   asLocalPoint,
@@ -30,6 +31,7 @@ import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
 import type { ClipToolAAMap } from '../../../../options/ClipOptions/protocols';
 import { makeClipToolGuard } from '../guard';
+import { booleanOpFromModifiers, combineWithSelection } from '../boolean';
 
 /**
  * lassoPreviewPathRef
@@ -107,12 +109,20 @@ export const createLassoHandler = (): InteractionHandler => {
   let active = false;
   // Cached AA state for the current gesture — read once at onStart.
   let gestureAA = true;
+  // Selection entity present when the gesture started. Boolean combine
+  // (Shift/Alt) folds the freshly drawn polygon into this base instead of
+  // replacing it. Immutable store updates keep the captured reference intact
+  // while the gesture runs.
+  let gestureBase: LocalPolygon | null = null;
   // Whether the current pointer is snapped to start (within threshold).
   let snappedToStart = false;
 
   return {
     id: 'clip-lasso',
     priority: 110,
+    // Shift/Alt spring channels: lasso drawing claims them for boolean
+    // union/difference (see the rect handler for the full rationale).
+    springOverride: ['shift', 'alt'],
 
     test: (e) => {
       if (!makeClipToolGuard('lasso')(e)) return false;
@@ -124,6 +134,10 @@ export const createLassoHandler = (): InteractionHandler => {
       // Accept clicks outside canvas — onStart will clamp to canvas edge.
       // This allows starting a lasso selection from the canvas border
       // (Photoshop-style edge-aligned selection workflow).
+      // Bare spring fallback: Shift/Alt held with no selection to combine
+      // into → yield the press to the global layer-move spring. The handler
+      // declares the channels via springOverride (boolean union/difference).
+      if ((e.spring.shift || e.spring.alt) && !getClipBox(e.activeFrame)) return false;
       return true;
     },
 
@@ -134,6 +148,7 @@ export const createLassoHandler = (): InteractionHandler => {
       // persistent AA preset; an existing selection keeps its own entity flag.
       const toolAAMap = e.state.getStateSignal<ClipToolAAMap | undefined>(ClipOptionsAPI.signals.clipToolAA);
       gestureAA = clipBox ? (clipBox.antiAliased ?? true) : (toolAAMap?.lasso ?? true);
+      gestureBase = clipBox;
 
       let { x: clampedX, y: clampedY } = e.geometry.space.clampPointToRect(e.point.canvas, e.activeFrame.canvas);
       // Always snap to pixel grid — ensures integer coordinates regardless of AA mode.
@@ -233,7 +248,21 @@ export const createLassoHandler = (): InteractionHandler => {
 
         const bounds = e.geometry.polygon.computePolygonBounds([ring]);
         const polygon = asLocalPolygon([ring], asLocalRect(bounds), gestureAA);
-        e.actions.updateFrame(e.activeFrame.id, { confinement: polygon });
+
+        // Boolean combine (P5): Shift unions / Alt subtracts the new lasso
+        // into the selection that existed when the gesture started. The
+        // worker roundtrip is awaited in a detached async block — onEnd's
+        // return value is ignored by the dispatcher, and the single
+        // updateFrame below (whether raw or combined) keeps one undo step.
+        const op = booleanOpFromModifiers(e.spring.shift, e.spring.alt);
+        if (op && gestureBase) {
+          const base = gestureBase;
+          void combineWithSelection(base, polygon, op, e.geometry).then((combined) => {
+            e.actions.updateFrame(e.activeFrame.id, { confinement: combined });
+          });
+        } else {
+          e.actions.updateFrame(e.activeFrame.id, { confinement: polygon });
+        }
         committed = true;
 
       } finally {
@@ -241,6 +270,7 @@ export const createLassoHandler = (): InteractionHandler => {
         trail = [];
         active = false;
         gestureAA = true;
+        gestureBase = null;
         snappedToStart = false;
         clearPreview();
       }

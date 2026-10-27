@@ -145,6 +145,58 @@ export function translatePolygon(poly: LocalPolygon, dx: number, dy: number): Lo
   return asLocalPolygon(newRings, newRect, poly.antiAliased, poly.ssdepMode === true);
 }
 
+// ──────────────────────── Polygon Affine Transform (selection editing) ─────────
+
+/**
+ * scalePolygon: Scale all rings of a LocalPolygon by (sx, sy) around an
+ * anchor point, returning a new LocalPolygon.
+ *
+ * Negative factors mirror the geometry (the bbox is recomputed from the
+ * transformed points, so the result stays consistent). The bounding rect is
+ * recomputed from the transformed vertices — never derived from the old rect —
+ * because mirroring swaps corner roles.
+ *
+ * Used by the selection-transform interaction (P5): dragging a bbox corner
+ * handle of an irregular (lasso/wand) selection rescales every ring vertex
+ * relative to the opposite corner.
+ */
+export function scalePolygon(poly: LocalPolygon, anchor: Point2D, sx: number, sy: number): LocalPolygon {
+  const newRings = poly.rings.map(ring =>
+    ring.map(p => asLocalPoint({
+      x: anchor.x + (p.x - anchor.x) * sx,
+      y: anchor.y + (p.y - anchor.y) * sy,
+    }))
+  );
+  const newRect = asLocalRect(computePolygonBounds(newRings));
+  return asLocalPolygon(newRings, newRect, poly.antiAliased, poly.ssdepMode === true);
+}
+
+/**
+ * rotatePolygon: Rotate all rings of a LocalPolygon around a center point by
+ * `angleRad` (radians, clockwise in the canvas' y-down coordinate system),
+ * returning a new LocalPolygon with a recomputed bounding rect.
+ *
+ * Used by the selection-transform interaction (P5): dragging the rotation
+ * handle of an irregular selection spins the polygon geometry itself; the
+ * marching ants re-derive from the written confinement.
+ */
+export function rotatePolygon(poly: LocalPolygon, center: Point2D, angleRad: number): LocalPolygon {
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  const newRings = poly.rings.map(ring =>
+    ring.map(p => {
+      const dx = p.x - center.x;
+      const dy = p.y - center.y;
+      return asLocalPoint({
+        x: center.x + dx * cos - dy * sin,
+        y: center.y + dx * sin + dy * cos,
+      });
+    })
+  );
+  const newRect = asLocalRect(computePolygonBounds(newRings));
+  return asLocalPolygon(newRings, newRect, poly.antiAliased, poly.ssdepMode === true);
+}
+
 // ─────────────────────────── Polygon Utility Algorithms ────────────────────────
 
 /**

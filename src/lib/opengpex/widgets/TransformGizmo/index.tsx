@@ -19,9 +19,10 @@
 
 'use client';
 
-import React from 'react';
+import React, { useContext, useEffect, useRef } from 'react';
 import { poseScreenAngle } from '@opengpex/editor/core/geometry/operators/rotator';
 import { ROTATE_CURSOR } from '@opengpex/editor/icons';
+import { EditorServiceContext } from '@opengpex/editor/core/context';
 import { BoxCorners } from './knobs/BoxCorners';
 import { BoxCube } from './knobs/BoxCube';
 import { BoxChip } from './knobs/BoxChip';
@@ -29,8 +30,6 @@ import {
   CORNER_ANCHORS,
   EDGE_ANCHORS,
   MARK_STROKE_W,
-  markBoxStyle,
-  type EdgeDir,
 } from './geometry';
 
 export { BoxCorners, type BoxCornersProps } from './knobs/BoxCorners';
@@ -43,12 +42,8 @@ export { KNOB_OUTSET_X_PX, KNOB_OUTSET_Y_PX, type GizmoHandle, type CornerDir, t
 /** Hit-zone side for the corner handles (invisible, centred on each corner). */
 const CORNER_HIT_PX = 18;
 
-/** Hit-zone size for the edge handles: elongated along the edge for easy grab. */
-const EDGE_HIT_LONG_PX = 24;
-const EDGE_HIT_SHORT_PX = 14;
-
-/** Visible edge tick length (corner variant only). */
-const EDGE_TICK_LEN_PX = 12;
+/** Thickness of the full-edge resize strips rendered in `outline` mode. */
+const OUTLINE_EDGE_HIT_PX = 12;
 
 /** Opacity of a dimmed (non-selected sibling) ghost frame. */
 const GHOST_DIM_OPACITY = 0.45;
@@ -80,39 +75,10 @@ export function cursorForScreenAngle(angleDeg: number): string {
 }
 
 /**
- * EdgeTick: a short mark lying ALONG the border at an edge midpoint — the
- * visible half of the edge handle in the corner-bracket variant (n/s →
- * horizontal bar on the top/bottom border, e/w → vertical bar on the left/right
- * border). Same black-underlay + white-core dual stroke as BoxCorners. Centred
- * inside the (larger) hit zone whose own centre sits on the border midpoint,
- * so the tick lands on the border rather than at the hit zone's top-left.
- */
-const EdgeTick = React.memo(function EdgeTick({ dir }: { dir: EdgeDir }) {
-  const half = EDGE_TICK_LEN_PX / 2;
-  // n/s ticks lie along the horizontal border; e/w along the vertical border.
-  const points = dir === 'n' || dir === 's'
-    ? `0,${half} ${EDGE_TICK_LEN_PX},${half}`
-    : `${half},0 ${half},${EDGE_TICK_LEN_PX}`;
-  return (
-    <div style={markBoxStyle(EDGE_TICK_LEN_PX)}>
-      <svg
-        width={EDGE_TICK_LEN_PX}
-        height={EDGE_TICK_LEN_PX}
-        viewBox={`0 0 ${EDGE_TICK_LEN_PX} ${EDGE_TICK_LEN_PX}`}
-        style={{ width: '100%', height: '100%', display: 'block', overflow: 'visible' }}
-      >
-        <polyline points={points} fill="none" stroke="#000000" strokeWidth={MARK_STROKE_W + 2} strokeLinecap="square" />
-        <polyline points={points} fill="none" stroke="#ffffff" strokeWidth={MARK_STROKE_W} strokeLinecap="square" />
-      </svg>
-    </div>
-  );
-});
-
-/**
  * Handle look. All three ride on the same outset outline line (KNOB_OUTSET,
  * shared with the LayerOverlay hover outline), so switching variant never
  * moves the hit zones:
- *  - `corner` — crop-mark style: 4 corner brackets + 4 edge ticks (BoxCorners + EdgeTick);
+ *  - `corner` — crop-mark style: 4 corner brackets (BoxCorners);
  *  - `cube`   — 8 small squares (BoxCube);
  *  - `chip`   — 8 small discs (BoxChip).
  * The rotation handle is identical across variants.
@@ -146,6 +112,14 @@ export interface TransformGizmoProps {
    * opacity ghost) still reads as "the selection" among its dimmed siblings.
    */
   dimmed?: boolean;
+  /**
+   * Full-edge hit mode (selection frames): renders FULL-LENGTH edge strips
+   * instead of the retired short edge-midpoint zones, so any point on the
+   * border — not just the edge midpoint — starts a single-axis resize.
+   * Purely an interaction affordance: renders no outline visuals of its own.
+   * Corner handles keep priority at the corners (rendered after the strips).
+   */
+  outline?: boolean;
 }
 
 /**
@@ -159,13 +133,17 @@ export interface TransformGizmoProps {
  * decoration; interaction comes from invisible hit zones centred on the same
  * anchors — the mark IS the handle, visually:
  *  - 4 corner hit zones: diagonal resize, `data-gizmo-handle=<nw|ne|sw|se>`;
- *  - 4 edge hit zones: single-axis resize, `data-gizmo-handle=<n|s|e|w>`;
+ *  - in `outline` mode, 4 full-length edge strips: single-axis resize,
+ *    `data-gizmo-handle=<n|s|e|w>` (no extra visuals — strips are invisible);
  *  - a rotation handle dot above the top edge, `data-gizmo-rotate`.
  *
  * Each hit zone is `pointer-events-auto` while the wrapper stays
- * non-interactive, so the box never blocks move/draw on the layer body, and
- * gets a rotation-aware cursor recomputed from its LOCAL outward-normal angle
- * plus the layer's rotation/flip (CSS cursor keywords ignore CSS `transform`).
+ * non-interactive, so the box never blocks move/draw on the layer body. Hit
+ * zones NEVER write a CSS cursor: every zone carries its pose-resolved value
+ * in `data-gizmo-cursor`, and the internal pointermove sync feeds it into the
+ * CursorService hover channel — the single resolver for the viewport pointer
+ * cursor (CSS cursors ignore CSS `transform` anyway, so the pose math that
+ * produced the attribute value is unchanged).
  *
  * Purely presentational: owns no state and no pose sync — consuming overlays
  * keep their own fast-sync hooks. The frame box is expected to be screen-space
@@ -179,6 +157,7 @@ export const TransformGizmo = React.memo(function TransformGizmo({
   variant = 'corner',
   visualOnly = false,
   dimmed = false,
+  outline = false,
 }: TransformGizmoProps) {
   const marks =
     variant === 'cube' ? <BoxCube /> :
@@ -186,46 +165,91 @@ export const TransformGizmo = React.memo(function TransformGizmo({
     <BoxCorners />;
   const wrapperStyle: React.CSSProperties | undefined = dimmed ? { opacity: GHOST_DIM_OPACITY } : undefined;
 
+  // ─── CursorService sync ─────────────────────────────────────────────────
+  // Hit zones carry their pose-resolved cursor in `data-gizmo-cursor`; this
+  // document-level pass feeds it into the CursorService hover channel so the
+  // single resolver owns the viewport pointer cursor (no CSS cursor writes).
+  // Multiple gizmo instances coexist (active + ghost marks), so an instance
+  // only clears the hover it previously claimed — ghosts without hit zones
+  // never match and never stomp another instance's declaration.
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Read the service context directly (not via useEditorServices) so the
+  // widget degrades gracefully when rendered outside an EditorProvider
+  // (standalone stories/tests): without a store there is no CursorService to
+  // feed, and the sync simply never registers.
+  const services = useContext(EditorServiceContext);
+  const notifyHover = services?.actions.fast.cursor.notifyHover;
+  const ownsHoverRef = useRef(false);
+
+  useEffect(() => {
+    if (!notifyHover) return;
+    const onPointerMove = (ev: PointerEvent) => {
+      const el = ev.target as HTMLElement | null;
+      const zone = el?.closest?.('[data-gizmo-cursor]');
+      if (zone && rootRef.current?.contains(zone)) {
+        notifyHover(zone.getAttribute('data-gizmo-cursor'));
+        ownsHoverRef.current = true;
+      } else if (ownsHoverRef.current) {
+        notifyHover(null);
+        ownsHoverRef.current = false;
+      }
+    };
+    document.addEventListener('pointermove', onPointerMove, { passive: true });
+    return () => {
+      document.removeEventListener('pointermove', onPointerMove);
+      if (ownsHoverRef.current) {
+        notifyHover(null);
+        ownsHoverRef.current = false;
+      }
+    };
+  }, [notifyHover]);
+
   if (visualOnly) {
     return <div className="absolute inset-0 pointer-events-none" style={wrapperStyle}>{marks}</div>;
   }
 
+  // Pose-resolved cursor per hit zone (LOCAL outward-normal angle composed
+  // with the layer's rotation/flip), written into data-gizmo-cursor.
+  const edgeCursor = (angle: number) => cursorForScreenAngle(poseScreenAngle(angle, rotation, flip));
+
   return (
-    <div className="absolute inset-0 pointer-events-none" style={wrapperStyle}>
+    <div ref={rootRef} className="absolute inset-0 pointer-events-none" style={wrapperStyle}>
       {marks}
 
-      {/* Corner hit zones (invisible; cursor carries the direction cue) */}
-      {CORNER_ANCHORS.map(({ dir, angle, style }) => (
+      {/* Full-length edge strips (outline mode only): any point on the border
+          starts a single-axis resize. Rendered BEFORE the corner zones so the
+          corner handles keep priority where the strips overlap them. The
+          strips extend to the box corners so no dead zone remains between
+          strip and corner handle. */}
+      {outline && EDGE_ANCHORS.map(({ dir, angle, style }) => (
         <div
           key={dir}
           data-gizmo-handle={dir}
+          data-gizmo-cursor={edgeCursor(angle)}
           className="absolute pointer-events-auto"
           style={{
-            width: CORNER_HIT_PX,
-            height: CORNER_HIT_PX,
-            cursor: cursorForScreenAngle(poseScreenAngle(angle, rotation, flip)),
+            width: dir === 'n' || dir === 's' ? '100%' : OUTLINE_EDGE_HIT_PX,
+            height: dir === 'n' || dir === 's' ? OUTLINE_EDGE_HIT_PX : '100%',
             transform: 'translate(-50%, -50%)',
             ...style,
           }}
         />
       ))}
 
-      {/* Edge hit zones; the corner variant draws its tick inside the zone */}
-      {EDGE_ANCHORS.map(({ dir, angle, style }) => (
+      {/* Corner hit zones (invisible) */}
+      {CORNER_ANCHORS.map(({ dir, angle, style }) => (
         <div
           key={dir}
           data-gizmo-handle={dir}
+          data-gizmo-cursor={edgeCursor(angle)}
           className="absolute pointer-events-auto"
           style={{
-            width: dir === 'n' || dir === 's' ? EDGE_HIT_LONG_PX : EDGE_HIT_SHORT_PX,
-            height: dir === 'n' || dir === 's' ? EDGE_HIT_SHORT_PX : EDGE_HIT_LONG_PX,
-            cursor: cursorForScreenAngle(poseScreenAngle(angle, rotation, flip)),
+            width: CORNER_HIT_PX,
+            height: CORNER_HIT_PX,
             transform: 'translate(-50%, -50%)',
             ...style,
           }}
-        >
-          {variant === 'corner' && <EdgeTick dir={dir} />}
-        </div>
+        />
       ))}
 
       {/* Rotation handle: dot floating above the top edge (screen px — the
@@ -233,6 +257,7 @@ export const TransformGizmo = React.memo(function TransformGizmo({
           dual stroke as the marks, on a circular path. */}
       <div
         data-gizmo-rotate="true"
+        data-gizmo-cursor={ROTATE_CURSOR}
         className="pointer-events-auto hover:scale-125 transition-transform duration-150"
         style={{
           width: ROTATE_HANDLE_PX,
@@ -241,7 +266,6 @@ export const TransformGizmo = React.memo(function TransformGizmo({
           top: `${-ROTATE_HANDLE_OFFSET_PX}px`,
           position: 'absolute',
           transform: 'translate(-50%, -50%)',
-          cursor: ROTATE_CURSOR,
           overflow: 'visible',
         }}
       >

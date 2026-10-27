@@ -16,6 +16,7 @@
  * thread (client.ts) and the ClipOptions compute workers:
  *   - alpha.worker.ts  (Select from Alpha)
  *   - offset.worker.ts (Morphological/vertex-normal ring offset)
+ *   - invert.worker.ts (Selection invert + boolean combine via polygon-clipping)
  */
 
 // ─────────────────────────── Alpha Worker Protocol ──────────────────────────────
@@ -94,3 +95,30 @@ export interface InvertResponse {
   debug?: { ms: number };
   error?: string;
 }
+
+// ─────────────────────────── Boolean Worker Protocol ────────────────────────────
+
+import type { PolyBoolOp } from '@opengpex/editor/core/geometry/poly-bool';
+export type { PolyBoolOp };
+
+/** Main thread → invert.worker (boolean mode) */
+export interface BooleanRequest {
+  reqId: number;
+  type: 'boolean';
+  /** Boolean operation to apply. */
+  op: PolyBoolOp;
+  /** Existing selection rings (Point2D[][]) — the left operand. */
+  base: { x: number; y: number }[][];
+  /** Newly drawn selection rings (Point2D[][]) — the right operand. */
+  incoming: { x: number; y: number }[][];
+}
+
+/** invert.worker → Main thread (boolean mode) */
+export interface BooleanResponse {
+  reqId: number;
+  /** Combined rings, or null if the result is empty */
+  rings: { x: number; y: number }[][] | null;
+  debug?: { ms: number };
+  error?: string;
+}
+

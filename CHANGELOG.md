@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## v2.0.29
+
+- Selection: combine selections with the mouse — hold Shift while drawing a new selection to add it to the existing one, hold Alt to subtract from it; works with the rectangle, ellipse, lasso and magic wand tools, and the marching ants preview the combined shape live while you drag
+- Selection: every selection can now be transformed — hover a selection to reveal the handles, then drag corner knobs to resize (Shift for proportional), the border anywhere along its length for one-sided resizing, and the round handle above the top edge to rotate (Shift snaps to 15° steps, and a rotated selection can always be brought back upright)
+
+---
+
 ## v2.0.28
 
 - Selection: keyboard shortcuts M / L / W / S jump straight into the marquee, lasso, magic wand and AI selection tools (M again flips rectangle/ellipse, the Mosaic brush moves to O), and Space toggles selection mode

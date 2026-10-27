@@ -19,7 +19,7 @@
 
 import { EditorPlugin } from '@opengpex/editor/core/types';
 import { ClipOverlayMain, ClipOverlaySettings } from './components';
-import { createSelectionMoveHandler, createReCanvasHandler, createClipBoxHandler, createPathEllipseHandler, createLassoHandler, createWandHandler, createSamHandler } from './interactions';
+import { createSelectionMoveHandler, createSelectionTransformHandler, createReCanvasHandler, createClipBoxHandler, createPathEllipseHandler, createLassoHandler, createWandHandler, createSamHandler } from './interactions';
 import * as P from './protocols';
 
 /**
@@ -50,6 +50,7 @@ export const plugin: EditorPlugin = {
   },
   interactions: [
     createSelectionMoveHandler(),
+    createSelectionTransformHandler(),  // priority 120 — irregular selection scale/rotate handles
     createReCanvasHandler(),    // priority 115 — intercepts Re-Canvas before regular
     createClipBoxHandler(),     // priority 100
     createPathEllipseHandler(),    // priority 100 — path-based ellipse (guarded by handlerKind)

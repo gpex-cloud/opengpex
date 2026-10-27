@@ -156,11 +156,11 @@ export interface TransformHandlerConfig<T = LocalRect> {
   priority?: number;
   /**
    * Forwarded to the produced InteractionHandler: declares that this handler
-   * owns Cmd/Ctrl+drag inside its hit region (see InteractionHandler.
-   * springOverride). Handlers without it are filtered out while a spring
-   * spring key is held.
+   * owns the engaged spring channel(s) inside its hit region (see
+   * InteractionHandler.springOverride). Handlers without it are filtered out
+   * while a spring key is held.
    */
-  springOverride?: SpringChannel;
+  springOverride?: SpringChannel | SpringChannel[];
 
   /**
    * Whether to clamp the anchor point to canvas bounds for 'create' category.

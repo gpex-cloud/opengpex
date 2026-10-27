@@ -30,6 +30,7 @@
  */
 
 export { createSelectionMoveHandler } from './move';
+export { createSelectionTransformHandler } from './transform';
 export { createReCanvasHandler } from './tools/recanvas';
 export { createClipBoxHandler } from './tools/regular';
 export { createPathEllipseHandler } from './tools/pathellipse';

@@ -68,8 +68,12 @@ export class InteractionDispatcher {
     );
 
     for (const handler of this.handlers) {
-      const overridesEngaged =
-        handler.springOverride !== undefined && engagedChannels.includes(handler.springOverride);
+      const overrideChannels = handler.springOverride === undefined
+        ? []
+        : Array.isArray(handler.springOverride)
+          ? handler.springOverride
+          : [handler.springOverride];
+      const overridesEngaged = overrideChannels.some((channel) => engagedChannels.includes(channel));
       if (engagedChannels.length > 0 && !overridesEngaged && handler.id !== 'layer-move') continue;
       if (handler.test(e)) {
         this.activeHandler = handler;

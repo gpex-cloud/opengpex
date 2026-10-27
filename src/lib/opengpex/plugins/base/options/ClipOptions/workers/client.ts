@@ -25,6 +25,7 @@ import type {
   AlphaRequest, AlphaResponse,
   OffsetRequest, OffsetResponse,
   InvertRequest, InvertResponse,
+  BooleanRequest, BooleanResponse,
 } from './protocol';
 
 let nextReqId = 1;
@@ -137,6 +138,31 @@ class ClipComputeClient {
       worker.addEventListener('message', handler);
 
       const msg: InvertRequest = { ...params, reqId };
+      worker.postMessage(msg);
+    });
+  }
+
+  /**
+   * Boolean-combines two frame-local selections (Shift = union / Alt =
+   * difference / intersection). Shares the invert worker: both operations run
+   * on the same polygon-clipping library instance.
+   */
+  runBoolean(
+    params: Omit<BooleanRequest, 'reqId' | 'type'>
+  ): Promise<BooleanResponse> {
+    const reqId = nextReqId++;
+    const worker = this.getInvertWorker();
+
+    return new Promise<BooleanResponse>((resolve) => {
+      const handler = (ev: MessageEvent<BooleanResponse>) => {
+        if (ev.data.reqId === reqId) {
+          worker.removeEventListener('message', handler);
+          resolve(ev.data);
+        }
+      };
+      worker.addEventListener('message', handler);
+
+      const msg: BooleanRequest = { ...params, type: 'boolean', reqId };
       worker.postMessage(msg);
     });
   }

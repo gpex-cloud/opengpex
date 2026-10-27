@@ -19,21 +19,17 @@
 
 import {
   InteractionHandler,
+  LocalPolygon,
+  LocalRect,
   asLocalRect,
 } from '@opengpex/editor/core/types';
-import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import {
   ClipOptionsAPI,
 } from '../../../../options/ClipOptions/protocols';
-import { createTransformHandler, TransformIntent, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
+import { createTransformHandler, TransformIntent } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import { makeClipToolGuard } from '../guard';
-
-/**
- * Edge hit detection threshold in screen pixels.
- * When the pointer is within this distance from a selection edge (in screen space),
- * the click is interpreted as an edge resize instead of creating a new selection.
- */
-const EDGE_HIT_THRESHOLD_PX = 6;
+import { booleanOpFromModifiers, combineWithSelection, createLiveBooleanPreview } from '../boolean';
 
 /**
  * ClipBoxHandler: Core interaction handler for clip tool.
@@ -48,9 +44,26 @@ const EDGE_HIT_THRESHOLD_PX = 6;
  * is active. This handler explicitly skips Re-Canvas for safety.
  */
 export const createClipBoxHandler = (): InteractionHandler => {
+  // Selection entity present when a create gesture started, and the raw rect
+  // the drag last produced. Boolean combine (Shift/Alt) folds the freshly
+  // drawn rect into the base instead of replacing it. The base is captured in
+  // getInitialState because the drag's own streaming onUpdate overwrites
+  // frame.confinement with the in-progress rect — by gesture end the
+  // pre-drag entity is only reachable through this closure.
+  let gestureBase: LocalPolygon | null = null;
+  let lastCreateRect: LocalRect | null = null;
+  // Throttled live union/difference preview while a boolean create drag runs.
+  const liveBooleanPreview = createLiveBooleanPreview();
+
   return createTransformHandler({
     id: 'clip-box',
     priority: 100,
+    // Selection drawing attaches spring semantics to Shift (boolean union)
+    // and Alt (boolean difference): without this declaration the dispatcher
+    // filters the handler out while either key is held and the global
+    // layer-move fallback owns the press — Shift+drag would move a layer
+    // instead of drawing a selection.
+    springOverride: ['shift', 'alt'],
 
     test: (e): TransformIntent | null => {
       // Strategy-driven guard: only fires when the active tool declares
@@ -62,64 +75,29 @@ export const createClipBoxHandler = (): InteractionHandler => {
 
       const target = e.nativeEvent.target as HTMLElement;
 
-      const handleElement = target.closest('[data-handle]') as HTMLElement;
-      if (handleElement) {
-        const handle = handleElement.dataset.handle || 'move';
-        // Move and peel for clip selections are handled by createSelectionMoveHandler.
-        if (handle === 'move') {
-          // Fall through to edge detection below.
-          // If the pointer is near a selection edge, handle it as resize.
-          // If not: yield to the move handler (priority 130).
-        } else {
-          return { category: 'resize', handle: handle as ResizeHandle };
-        }
-      }
+      // Resize of an EXISTING selection is owned by the shared
+      // SelectionTransformHandler via the TransformGizmo hit zones, and the
+      // move handler owns drags on the move surface — this handler only
+      // creates new selections (its old corner/edge-resize branches are
+      // retired along with the custom corner marks).
 
       if (target.closest('button, a, [data-role="ui"]')) return null;
-
-      // ─── Edge hit detection ────────────────────────────────────────────
-      // When pointer is within EDGE_HIT_THRESHOLD_PX (screen pixels) of a
-      // selection edge, interpret as single-axis resize (n/s/e/w).
-      // This allows resizing from ANY point along the marching ants line,
-      // solving the "handles out of viewport after zoom" problem.
-      const currentShape = getRegularClipShape(e.activeFrame);
-      const rect = currentShape?.rect;
-
-      if (rect && rect.w > 0 && rect.h > 0) {
-        // Convert threshold from screen pixels to canvas-local pixels
-        const k = e.activeFrame.camera.k;
-        const T = EDGE_HIT_THRESHOLD_PX / k;
-
-        const px = e.point.canvas.x;
-        const py = e.point.canvas.y;
-
-        // ─── Rectangle: distance to bounding rect edges ───────────────
-        {
-          const dTop = Math.abs(py - rect.y);
-          const dBottom = Math.abs(py - (rect.y + rect.h));
-          const dLeft = Math.abs(px - rect.x);
-          const dRight = Math.abs(px - (rect.x + rect.w));
-
-          // Range checks: pointer must be within the edge's span (± tolerance)
-          const inHRange = px >= rect.x - T && px <= rect.x + rect.w + T;
-          const inVRange = py >= rect.y - T && py <= rect.y + rect.h + T;
-
-          // Check edges (single-axis resize)
-          if (dTop <= T && inHRange) return { category: 'resize', handle: 'n' };
-          if (dBottom <= T && inHRange) return { category: 'resize', handle: 's' };
-          if (dLeft <= T && inVRange) return { category: 'resize', handle: 'w' };
-          if (dRight <= T && inVRange) return { category: 'resize', handle: 'e' };
-        }
-      }
 
       // Accept clicks both inside AND outside canvas for creating selections.
       // Outside-canvas clicks allow the user to start a selection from the
       // canvas edge (Photoshop Marquee behavior). The TransformHandler will
       // clamp the starting anchor to the nearest canvas edge.
+      // Bare spring fallback: Shift/Alt is held but there is no selection to
+      // combine into — yield the press to the global layer-move spring.
+      if ((e.spring.shift || e.spring.alt) && !getClipBox(e.activeFrame)) return null;
       return { category: 'create' };
     },
 
-    getInitialState: (e) => {
+    getInitialState: (e, intent) => {
+      // Boolean combine: capture the pre-drag entity only for create intents
+      // (resize/move never replace the selection, so they need no base).
+      gestureBase = intent.category === 'create' ? getClipBox(e.activeFrame) : null;
+      lastCreateRect = null;
       const currentShape = getRegularClipShape(e.activeFrame);
       return currentShape?.rect || asLocalRect({ x: 0, y: 0, w: 0, h: 0 });
     },
@@ -145,7 +123,28 @@ export const createClipBoxHandler = (): InteractionHandler => {
       // (polygonToShape, localToWorldPolygon, etc.) never see rings=undefined.
       const antiAliased = currentShape?.antiAliased;
       const newPoly = e.geometry.polygon.regularShapeToLocalPolygon(activeTool, newRect, antiAliased);
-      tx.update({ confinement: newPoly }, 'frame');
+      const isCreate = _context.intent.category === 'create';
+      if (isCreate) {
+        lastCreateRect = newRect;
+      }
+
+      // Boolean drag: stream the COMBINED shape instead of the raw rect so
+      // the base selection never disappears mid-drag (WYSIWYG). The gesture's
+      // final exact combine still runs in the 'boolean-combine-create' action.
+      const previewOp = isCreate && gestureBase
+        ? booleanOpFromModifiers(e.spring.shift, e.spring.alt)
+        : null;
+      if (previewOp && gestureBase) {
+        liveBooleanPreview({
+          base: gestureBase,
+          incoming: newPoly,
+          op: previewOp,
+          geometry: e.geometry,
+          tx,
+        });
+      } else {
+        tx.update({ confinement: newPoly }, 'frame');
+      }
 
       // Sync exchange layer if needed
       if (frame.activeLayerId) {
@@ -184,6 +183,27 @@ export const createClipBoxHandler = (): InteractionHandler => {
           const antiAliased = currentShape?.antiAliased;
           const newPoly = e.geometry.polygon.regularShapeToLocalPolygon(activeTool, fullCanvasRect, antiAliased);
           tx.update({ confinement: newPoly }, 'frame');
+        }
+      },
+      {
+        // Boolean combine (P5): Shift unions / Alt subtracts the drawn rect
+        // into the pre-drag selection. Runs inside the same transaction —
+        // the streamed raw-rect updates and this final boolean write commit
+        // together, so undo is a single step back to the pre-drag state.
+        name: 'boolean-combine-create',
+        match: (ctx) => ctx.hasMoved
+          && ctx.intent.category === 'create'
+          && (ctx.endModifiers.shift || ctx.endModifiers.alt),
+        action: async (e, tx, ctx) => {
+          const op = booleanOpFromModifiers(ctx.endModifiers.shift, ctx.endModifiers.alt);
+          const base = gestureBase;
+          const rawRect = lastCreateRect;
+          if (!op || !base || !rawRect) return;
+          const incoming = e.geometry.polygon.regularShapeToLocalPolygon(
+            'rect', rawRect, base.antiAliased ?? true
+          );
+          const combined = await combineWithSelection(base, incoming, op, e.geometry);
+          tx.update({ confinement: combined }, 'frame');
         }
       },
       {

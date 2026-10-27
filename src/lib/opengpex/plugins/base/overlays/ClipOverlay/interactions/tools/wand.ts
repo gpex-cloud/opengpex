@@ -27,8 +27,10 @@ import {
 } from '@opengpex/editor/core/types';
 import { createAsyncHandler } from '../../../../../../stage/interaction/handlers/AsyncHandler';
 import { magicWandClient } from '../../workers/client';
+import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
 import { makeClipToolGuard } from '../guard';
+import { booleanOpFromModifiers, combineWithSelection } from '../boolean';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -98,6 +100,9 @@ export const createWandHandler = (): InteractionHandler => {
   return createAsyncHandler({
     id: 'clip-wand',
     priority: 110,
+    // Shift/Alt spring channels: wand clicks claim them for boolean
+    // union/difference (see the rect handler for the full rationale).
+    springOverride: ['shift', 'alt'],
 
     test: (e) => {
       if (!makeClipToolGuard('wand')(e)) return false;
@@ -107,6 +112,9 @@ export const createWandHandler = (): InteractionHandler => {
 
       // Accept clicks outside canvas — execute will clear selection for
       // outside-canvas clicks (unified single-click dismiss behavior).
+      // Bare spring fallback: Shift/Alt held with no selection to combine
+      // into → yield the press to the global layer-move spring.
+      if ((e.spring.shift || e.spring.alt) && !getClipBox(e.activeFrame)) return false;
       return true;
     },
 
@@ -206,8 +214,17 @@ export const createWandHandler = (): InteractionHandler => {
         layerPoly, layer, e.activeFrame
       );
 
-      // 6. Commit to wand slot.
-      e.actions.updateFrame(e.activeFrame.id, { confinement: framePoly });
+      // 6. Commit. Boolean combine (P5): Shift unions / Alt subtracts the
+      // wand region into the selection that existed before this click
+      // (wand never streams, so the pre-click entity is still intact here).
+      const op = booleanOpFromModifiers(e.spring.shift, e.spring.alt);
+      const base = op ? getClipBox(frame) : null;
+      if (op && base) {
+        const combined = await combineWithSelection(base, framePoly, op, e.geometry);
+        e.actions.updateFrame(e.activeFrame.id, { confinement: combined });
+      } else {
+        e.actions.updateFrame(e.activeFrame.id, { confinement: framePoly });
+      }
     },
   });
 };

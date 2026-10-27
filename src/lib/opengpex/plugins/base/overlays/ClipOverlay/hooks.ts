@@ -19,7 +19,7 @@
 
 import { useRef, useEffect, useLayoutEffect, type RefObject } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
-import { asLocalShape, LocalPolygon } from '@opengpex/editor/core/types';
+import { asLocalShape } from '@opengpex/editor/core/types';
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import {
   ClipOptionsAPI,
@@ -61,7 +61,6 @@ export function useClipOverlayCommands() {
   const clipTool: ClipTool = isReCanvas ? 'rect' : (CLIP_TOOL_STRATEGIES[rawTool] ? rawTool : 'rect');
   const family = CLIP_TOOL_STRATEGIES[clipTool].family;
   const isRegularTool = family === 'regular';
-  const isIrregularTool = family === 'irregular';
 
   const { confinement, canvasClipBox, canvas: canvasDim } = activeFrame || {
     confinement: null,
@@ -104,27 +103,155 @@ export function useClipOverlayCommands() {
     isClipActive,
     clipTool,
     isRegularTool,
-    isIrregularTool,
-    dragType: state.interaction.isInteracting ? 'move' : '',
     boxRef,
     reset: resetBox
   };
 }
 
-// ─── useClipCursor ─────────────────────────────────────────────────────────────
+// ─── useGizmoHoverSync ────────────────────────────────────────────────────────
 
 /**
- * useClipCursor: Sets per-tool custom cursor when clip mode is active.
+ * Hover-reveal for the selection TransformGizmo box (PS Transform-Selection
+ * feel): the handles stay hidden until the pointer enters the selection's
+ * bounding box (with a small handle-radius pad), and hide again while ANY
+ * gesture interaction is in flight — including the transform drag itself,
+ * where the moving pointer would keep re-triggering its own reveal.
  *
- * For irregular tools (lasso/wand), dynamically switches between the tool's
- * default cursor and 'move' cursor when the pointer hovers inside an existing
- * polygon selection. This gives the user visual feedback that they can drag
- * to move (or Meta+drag to peel) the selection.
+ * The gizmo box is pointer-events-none (handles carry their own hit zones),
+ * so CSS :hover cannot see it — the reveal is driven by a document
+ * pointermove listener projecting the pointer into canvas space, same
+ * projection the cursor hooks use.
+ */
+export function useGizmoHoverSync(
+  boxRef: RefObject<HTMLElement | null>,
+  isActive: boolean
+) {
+  const { actions, geometry } = useEditorServices();
+  const { state, activeFrame } = useEditorState();
+
+  const frameRef = useRef(activeFrame);
+  useLayoutEffect(() => { frameRef.current = activeFrame; });
+  const interactingRef = useRef(!!state.interaction.isInteracting);
+  useLayoutEffect(() => {
+    interactingRef.current = !!state.interaction.isInteracting;
+    // Hide immediately when a gesture starts; re-evaluate on release.
+    if (boxRef.current) {
+      boxRef.current.style.opacity = (!isActive || interactingRef.current) ? '0' : boxRef.current.style.opacity;
+    }
+  }, [state.interaction.isInteracting, isActive, boxRef]);
+
+  useEffect(() => {
+    if (!isActive) return;
+
+    const onPointerMove = (ev: PointerEvent) => {
+      const el = boxRef.current;
+      if (!el) return;
+      const frame = frameRef.current;
+      if (!frame || interactingRef.current) {
+        el.style.opacity = '0';
+        return;
+      }
+
+      // Project pointer → canvas-local (same recipe as useClipCursor).
+      const container = document.querySelector('.editor-viewport-container');
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const vx = ev.clientX - rect.left;
+      const vy = ev.clientY - rect.top;
+      const currentCam = actions.fast.latestCamera(frame.id);
+      const worldPt = geometry.space.screenToWorld(vx, vy, frame, currentCam);
+      const canvasPt = geometry.space.worldToLocal(worldPt.x, worldPt.y, frame);
+
+      const poly = frame.confinement;
+      if (!poly) {
+        el.style.opacity = '0';
+        return;
+      }
+      // Pad the bbox so the gizmo handles still count as "hovering the
+      // selection". The pad must reach BEYOND the box edge: the rotation
+      // handle floats 24 screen px above the top edge (plus its 10 px hit
+      // zone), so a 24 px pad put the dot outside the reveal zone — moving
+      // the pointer onto it faded the gizmo out and the press fell through
+      // to the move surface, making the handle impossible to grab.
+      // (screen px → local px via camera scale)
+      const k = currentCam?.k ?? frame.camera.k;
+      const pad = 36 / k;
+      const inside =
+        canvasPt.x >= poly.rect.x - pad && canvasPt.x <= poly.rect.x + poly.rect.w + pad &&
+        canvasPt.y >= poly.rect.y - pad && canvasPt.y <= poly.rect.y + poly.rect.h + pad;
+      el.style.opacity = inside ? '1' : '0';
+    };
+
+    document.addEventListener('pointermove', onPointerMove, { passive: true });
+    const el = boxRef.current;
+    return () => {
+      document.removeEventListener('pointermove', onPointerMove);
+      if (el) el.style.opacity = '';
+    };
+  }, [isActive, actions, geometry, boxRef]);
+}
+
+// ─── useClipCursor ─────────────────────────────────────────────────────────────
+
+// ─── Selection hover hit-test helpers ────────────────────────────────────────
+
+/** True when the canvas-local point lies within the axis-aligned rect
+ * (inclusive of the boundary). */
+function bboxContains(pt: { x: number; y: number }, rect: { x: number; y: number; w: number; h: number } | undefined): boolean {
+  if (!rect || rect.w <= 0 || rect.h <= 0) return false;
+  return pt.x >= rect.x && pt.x <= rect.x + rect.w && pt.y >= rect.y && pt.y <= rect.y + rect.h;
+}
+
+/**
+ * Directional resize cursor when the point sits within `threshold` (canvas
+ * px) of a rect edge, null otherwise. Pure geometry over the axis-aligned
+ * bounds — corners fall to the horizontal axis (the first match), matching
+ * the previous edge-proximity behavior.
+ */
+function rectEdgeCursor(
+  pt: { x: number; y: number },
+  rect: { x: number; y: number; w: number; h: number } | undefined,
+  threshold: number
+): string | null {
+  if (!rect || rect.w <= 0 || rect.h <= 0) return null;
+  const inHRange = pt.x >= rect.x - threshold && pt.x <= rect.x + rect.w + threshold;
+  const inVRange = pt.y >= rect.y - threshold && pt.y <= rect.y + rect.h + threshold;
+  if (inHRange && Math.abs(pt.y - rect.y) <= threshold) return 'ns-resize';
+  if (inHRange && Math.abs(pt.y - (rect.y + rect.h)) <= threshold) return 'ns-resize';
+  if (inVRange && Math.abs(pt.x - rect.x) <= threshold) return 'ew-resize';
+  if (inVRange && Math.abs(pt.x - (rect.x + rect.w)) <= threshold) return 'ew-resize';
+  return null;
+}
+
+/**
+ * useClipCursor: Sets the clip mode base cursor plus SELECTION-ENTITY-driven
+ * hover cursors.
+ *
+ * The hover logic is shape-driven, not tool-driven: whatever tool is active,
+ * the pointer feedback depends only on WHAT is under it — the frame-level
+ * selection entity (`frame.confinement`, classified by `polygonToShape`):
+ *
+ *   - Shift/Alt held  → yield to the tool's drawing cursor (a boolean
+ *     union/difference draw is the live intent; the move cursor would lie).
+ *   - Pointer over a TransformGizmo hit zone (corner handle / outline edge
+ *     strip / rotation dot) → not declared here; the gizmo's internal
+ *     CursorService sync owns that hover.
+ *   - Pointer inside ANY selection (rect bbox, ellipse interior, path rings
+ *     via point-in-polygon) → 'move'. Edge-proximity resize cursors are NOT
+ *     declared here for selections — the gizmo outline strips own the edges.
+ *   - Everywhere else → falls through to the tool's registered base cursor.
+ *
+ * All values flow through the CursorService; no element-level CSS cursor is
+ * written anywhere in the clip overlay (the viewport container's inline
+ * resolved cursor inherits down the un-styled subtree).
+ *
+ * Re-Canvas keeps its own variant: crosshair base, edge-proximity resize on
+ * the canvas box (it renders no gizmo), never 'move' (its press resizes the
+ * canvas, not a selection).
  */
 export function useClipCursor(
   isClipActive: boolean,
   clipTool: ClipTool,
-  boxRef?: RefObject<HTMLElement | null>,
   isReCanvas?: boolean
 ) {
   const { actions, geometry } = useEditorServices();
@@ -151,181 +278,110 @@ export function useClipCursor(
 
   useEffect(() => {
     if (isClipActive) {
-      // For the pathellipse tool: switch to dashed cursor when AA is off
-      const isEllipseFamily = clipTool === 'pathellipse';
-      const toolCursor = isEllipseFamily && !clipBox_AA
-        ? CLIP_ELLIPSE_AA_OFF_CURSOR
-        : CLIP_TOOL_STRATEGIES[clipTool].cursor;
+      // Re-Canvas is a canvas-resize modal, not a selection tool: plain
+      // crosshair (no tool subscript indicator that would misleadingly
+      // suggest the rect selection tool is active).
+      const toolCursor = isReCanvas
+        ? 'crosshair'
+        : clipTool === 'pathellipse' && !clipBox_AA
+          ? CLIP_ELLIPSE_AA_OFF_CURSOR
+          : CLIP_TOOL_STRATEGIES[clipTool].cursor;
       actions.fast.cursor.register('clip', toolCursor);
     } else {
       actions.fast.cursor.register('clip', null);
     }
-  }, [isClipActive, clipTool, clipBox_AA, actions]);
+  }, [isClipActive, isReCanvas, clipTool, clipBox_AA, actions]);
 
-  // ─── Polygon hover cursor for irregular tools ──────────────────────────
+  // ─── Unified selection-entity hover cursor ─────────────────────────────
+  // One document-level pointermove pass classifies the pointer against the
+  // selection entity's shape (NOT the active tool), so hover feedback is
+  // identical across rect / pathellipse / lasso / wand / sam.
   useEffect(() => {
-    const strategy = CLIP_TOOL_STRATEGIES[clipTool];
-    if (!isClipActive || strategy.family !== 'irregular') return;
-
-    const onPointerMove = (ev: PointerEvent) => {
-      const frame = frameRef.current;
-      if (!frame) return;
-
-      // Get the frame-level selection entity
-      const poly = frame.confinement as LocalPolygon | null;
-      if (!poly || !poly.rings || poly.rings.length === 0) {
-        actions.fast.cursor.notifyHover(null);
-        return;
-      }
-
-      // Project pointer position to canvas-local coordinates
-      const container = document.querySelector('.editor-viewport-container');
-      if (!container) return;
-      const rect = container.getBoundingClientRect();
-      const vx = ev.clientX - rect.left;
-      const vy = ev.clientY - rect.top;
-
-      const currentCam = actions.fast.latestCamera(frame.id);
-      const worldPt = geometry.space.screenToWorld(vx, vy, frame, currentCam);
-      const canvasPt = geometry.space.worldToLocal(worldPt.x, worldPt.y, frame);
-
-      // Point-in-polygon hit test: inside an existing selection the pointer
-      // can drag it, so the move cursor wins over the tool base cursor.
-      const inside = geometry.polygon.isPointInPolygon(canvasPt, poly.rings);
-      actions.fast.cursor.notifyHover(inside ? 'move' : null);
-    };
-
-    document.addEventListener('pointermove', onPointerMove, { passive: true });
-    return () => {
-      document.removeEventListener('pointermove', onPointerMove);
-      actions.fast.cursor.notifyHover(null);
-    };
-  }, [isClipActive, clipTool, actions, geometry]);
-
-  // ─── Edge proximity cursor for regular tools + Re-Canvas ───────────────
-  // Dynamically switches cursor to ns-resize / ew-resize when the pointer
-  // hovers near a selection edge. This provides visual feedback that the
-  // edge is draggable (edge hit detection without fixed-position handles).
-  // Also fires in Re-Canvas mode (which is always rectangular).
-  useEffect(() => {
-    const strategy = CLIP_TOOL_STRATEGIES[clipTool];
-    // Activate when: (clip mode + regular tool) OR Re-Canvas mode
-    const isActive = (isClipActive && strategy.family === 'regular') || !!isReCanvas;
+    const isActive = isClipActive || !!isReCanvas;
     if (!isActive) return;
 
     const EDGE_THRESHOLD_PX = 6; // screen pixels
-    // Re-Canvas uses plain 'crosshair' (no tool subscript indicator) because
-    // it's a canvas-resize modal, not a selection tool. The subscript would
-    // misleadingly suggest the rect selection tool is active.
-    const toolCursor = isReCanvas ? 'crosshair' : strategy.cursor;
-
-    // Restore the base cursor on effect (re-)setup. This is critical when the
-    // effect re-runs due to isReCanvas toggling: cleanup clears the hover
-    // declaration, but the tool-cursor registration effect won't re-fire if
-    // its deps didn't change. Re-asserting the registration here (same owner)
-    // keeps the base cursor correct without a second write path.
-    actions.fast.cursor.register('clip', toolCursor);
 
     const onPointerMove = (ev: PointerEvent) => {
-      // Skip cursor updates during active interaction (resize/move/create drag).
-      // The box dimensions change while dragging, causing distance-to-edge to
-      // oscillate → cursor flickers between resize/tool cursors.
+      // Freeze hover updates during an active gesture: the selection moves
+      // under the pointer, so inside/edge tests would oscillate and flicker
+      // the cursor mid-drag. The gesture cursor (dragging channel) wins
+      // anyway while a handler is live.
       if (isInteractingRef.current) return;
+
+      // TransformGizmo hit zones own their own hover declaration (the gizmo's
+      // internal CursorService sync) — hands off entirely so the two writers
+      // never fight over the same move event.
+      const el = ev.target as HTMLElement | null;
+      if (el?.closest?.('[data-gizmo-cursor]')) return;
 
       const frame = frameRef.current;
       if (!frame) return;
 
-      // Get the bounding rect: Re-Canvas reads canvasClipBox, regular reads confinement
-      const selRect = isReCanvas
-        ? frame.canvasClipBox?.rect
-        : getRegularClipShape(frame)?.rect;
-
-      if (!selRect || selRect.w <= 0 || selRect.h <= 0) {
+      // Shift/Alt carry boolean union/difference semantics: the press is a
+      // NEW selection draw even when it starts inside the existing selection
+      // (move handlers are spring-filtered on those channels), so the move
+      // cursor would lie. Yield → the tool's drawing cursor shows.
+      // Re-Canvas has no boolean draw — its modifiers never yield.
+      if (!isReCanvas && (ev.shiftKey || ev.altKey)) {
         actions.fast.cursor.notifyHover(null);
         return;
       }
 
-      // Project pointer position to canvas-local coordinates
+      // Project pointer → canvas-local (same recipe as the hover-reveal hook).
       const container = document.querySelector('.editor-viewport-container');
       if (!container) return;
       const domRect = container.getBoundingClientRect();
       const vx = ev.clientX - domRect.left;
       const vy = ev.clientY - domRect.top;
-
       const currentCam = actions.fast.latestCamera(frame.id);
       const worldPt = geometry.space.screenToWorld(vx, vy, frame, currentCam);
       const canvasPt = geometry.space.worldToLocal(worldPt.x, worldPt.y, frame);
 
-      // Convert threshold from screen pixels to canvas-local pixels
+      // Screen-px thresholds → canvas-local px via camera scale.
       const k = currentCam?.k ?? frame.camera.k;
       const T = EDGE_THRESHOLD_PX / k;
 
-      const px = canvasPt.x;
-      const py = canvasPt.y;
+      // Re-Canvas renders no gizmo: edge proximity against the canvas box is
+      // still declared here.
+      if (isReCanvas) {
+        actions.fast.cursor.notifyHover(rectEdgeCursor(canvasPt, frame.canvasClipBox?.rect, T));
+        return;
+      }
 
-      const isEllipse = clipTool === 'pathellipse';
+      // No selection entity → tool base cursor everywhere.
+      const poly = frame.confinement;
+      if (!poly || !poly.rings || poly.rings.length === 0) {
+        actions.fast.cursor.notifyHover(null);
+        return;
+      }
 
-      // Determine desired cursor
+      // Classify the entity's drawn shape once per move — this is the
+      // cross-tool contract: hit-testing follows what was DRAWN, regardless
+      // of which tool happens to be active right now. Interior hover → move;
+      // edges belong to the gizmo outline strips, not to this pass.
+      const shapeType = geometry.polygon.polygonToShape(poly).type;
+
       let desired: string | null = null;
-
-      if (isEllipse) {
-        // ─── Ellipse: distance to ellipse arc ─────────────────────────
-        const cx = selRect.x + selRect.w / 2;
-        const cy = selRect.y + selRect.h / 2;
-        const rx = selRect.w / 2;
-        const ry = selRect.h / 2;
-
-        const nx = (px - cx) / rx;
-        const ny = (py - cy) / ry;
-        const r = Math.sqrt(nx * nx + ny * ny);
-        const avgRadius = (rx + ry) / 2;
-        const distToEllipse = Math.abs(r - 1) * avgRadius;
-
-        if (distToEllipse <= T) {
-          // Quadrant-based direction: |cos| > |sin| → horizontal, else vertical
-          const dist = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy)) || 1;
-          const cosA = Math.abs((px - cx) / dist);
-          const sinA = Math.abs((py - cy) / dist);
-          desired = cosA > sinA ? 'ew-resize' : 'ns-resize';
-        }
+      if (shapeType === 'rect' || shapeType === 'circle') {
+        if (bboxContains(canvasPt, poly.rect)) desired = 'move';
       } else {
-        // ─── Rectangle: distance to bounding rect edges ───────────────
-        const dTop = Math.abs(py - selRect.y);
-        const dBottom = Math.abs(py - (selRect.y + selRect.h));
-        const dLeft = Math.abs(px - selRect.x);
-        const dRight = Math.abs(px - (selRect.x + selRect.w));
-
-        const inHRange = px >= selRect.x - T && px <= selRect.x + selRect.w + T;
-        const inVRange = py >= selRect.y - T && py <= selRect.y + selRect.h + T;
-
-        if (dTop <= T && inHRange) desired = 'ns-resize';
-        else if (dBottom <= T && inHRange) desired = 'ns-resize';
-        else if (dLeft <= T && inVRange) desired = 'ew-resize';
-        else if (dRight <= T && inVRange) desired = 'ew-resize';
+        // Path (lasso / wand / sam / boolean result): point-in-polygon over
+        // all rings → move.
+        if (geometry.polygon.isPointInPolygon(canvasPt, poly.rings)) desired = 'move';
       }
 
-      // null = off any edge → clear the hover declaration so the service
-      // falls back to the tool's base cursor.
       actions.fast.cursor.notifyHover(desired);
-      // Override box div's cursor to match edge cursor (the box has static
-      // `cursor-move` which otherwise wins over the viewport-level cursor).
-      if (boxRef?.current) {
-        boxRef.current.style.cursor = desired === null ? 'move' : desired;
-      }
     };
 
-    const boxEl = boxRef?.current;
     document.addEventListener('pointermove', onPointerMove, { passive: true });
     return () => {
       document.removeEventListener('pointermove', onPointerMove);
-      // Clear the hover declaration — let the tool/mode-level cursor be
-      // re-derived by the service from the remaining inputs.
+      // Clear the hover declaration — let the service re-derive the cursor
+      // from the remaining inputs.
       actions.fast.cursor.notifyHover(null);
-      if (boxEl) {
-        boxEl.style.cursor = '';
-      }
     };
-  }, [isClipActive, isReCanvas, clipTool, actions, geometry, boxRef]);
+  }, [isClipActive, isReCanvas, actions, geometry]);
 
   useEffect(() => {
     return () => {

@@ -41,6 +41,7 @@ import {
   computePolygonBounds, localToWorldPolygon, worldToLocalPolygon,
   frameLocalToLayerLocal as polyFrameToLayer, layerLocalToFrameLocal as polyLayerToFrame, polygonToSvgPathD,
   isPointInPolygon, computeRingArea, simplifyOpen, simplifyRing, translatePolygon,
+  scalePolygon, rotatePolygon,
   ellipsePathToLocalPolygon, polygonToShape, deriveEdgeDisplayMode
 } from './operators/polygon';
 import {
@@ -208,6 +209,8 @@ export function createGeometryService(): GeometryService {
       simplifyOpen: (points: Point2D[], epsilon: number) => simplifyOpen(points, epsilon),
       simplifyRing: (ring: Point2D[], epsilon: number) => simplifyRing(ring, epsilon),
       translatePolygon: (poly: LocalPolygon, dx: number, dy: number) => translatePolygon(poly, dx, dy),
+      scalePolygon: (poly: LocalPolygon, anchor: Point2D, sx: number, sy: number) => scalePolygon(poly, anchor, sx, sy),
+      rotatePolygon: (poly: LocalPolygon, center: Point2D, angleRad: number) => rotatePolygon(poly, center, angleRad),
       regularShapeToLocalPolygon: (tool: 'rect' | 'pathellipse', rect: LocalRect, antiAliased?: boolean) =>
         tool === 'rect'
           ? rectToLocalPolygon(rect, antiAliased ?? false)

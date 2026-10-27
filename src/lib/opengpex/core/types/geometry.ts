@@ -381,6 +381,18 @@ export interface GeometryService {
      */
     translatePolygon: (poly: LocalPolygon, dx: number, dy: number) => LocalPolygon;
     /**
+     * Scales all rings of a LocalPolygon by (sx, sy) around an anchor point.
+     * Returns a new polygon with recomputed bounding rect. Used by the
+     * selection-transform handler (irregular selection corner handles).
+     */
+    scalePolygon: (poly: LocalPolygon, anchor: Point2D, sx: number, sy: number) => LocalPolygon;
+    /**
+     * Rotates all rings of a LocalPolygon around a center point by angleRad
+     * (radians, clockwise in the y-down canvas space). Returns a new polygon
+     * with recomputed bounding rect. Used by the selection-transform handler.
+     */
+    rotatePolygon: (poly: LocalPolygon, center: Point2D, angleRad: number) => LocalPolygon;
+    /**
      * Generates a polygon for a regular clip shape.
      * 'rect' produces 4 corners; 'pathellipse' produces the 64-point ellipse
      * approximation ring that polygonToShape recognizes as type:'circle'.

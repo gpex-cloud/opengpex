@@ -24,7 +24,8 @@ import {
   useEditorServices,
 } from "@opengpex/editor/core/context";
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
-import { useClipOverlayCommands, useClipCursor } from "../hooks";
+import { TransformGizmo } from "@opengpex/editor/widgets/TransformGizmo";
+import { useClipOverlayCommands, useClipCursor, useGizmoHoverSync } from "../hooks";
 import {
   useCropDimSync,
   useRegularBoxSync,
@@ -57,7 +58,7 @@ const CLIP_ANTS_STYLE = `
  *   - Lasso preview <path> (screen-space): live trail during pointer drag.
  *     Updated imperatively by `createLassoHandler` via `lassoPreviewPathRef`.
  *
- *   - Regular box (CSS div): handles, dim label, rule-of-thirds guides.
+ *   - Regular box (CSS div): gizmo mount, dim label.
  *     Only active when tool is regular (rect/ellipse) or Re-Canvas.
  *
  *   - Plugin-internal `<style>`: keyframes for the marching animation are
@@ -69,15 +70,13 @@ export function ClipOverlayMain() {
     clipBox,
     isReCanvas,
     isClipActive,
-    dragType,
     boxRef,
     clipType,
     clipTool,
     isRegularTool,
-    isIrregularTool,
   } = useClipOverlayCommands();
 
-  useClipCursor(isClipActive, clipTool, boxRef, isReCanvas);
+  useClipCursor(isClipActive, clipTool, isReCanvas);
 
   const { state, activeLayer } = useEditorState();
   const { geometry } = useEditorServices();
@@ -87,14 +86,6 @@ export function ClipOverlayMain() {
 
   const clipConfig = state.pluginConfig[ClipOverlayAPI.configKey] as Partial<ClipOverlayConfig> | undefined;
   const marchingAntsAnimated = clipConfig?.marchingAntsAnimated ?? false;
-
-  // Ellipse-family selection: circle-shaped clip boxes (ShapeType 'circle',
-  // written by refocus paths) AND the 360-point path ellipse (tool
-  // 'pathellipse', ShapeType 'path' — never circle-recognized by
-  // polygonToShape). Used to clip the rule-of-thirds guides to the elliptical
-  // shape; without it the guide line ends poke out past the inscribed ellipse
-  // at the rect corners.
-  const isEllipseSelection = clipType === "circle" || clipTool === "pathellipse";
 
   // ─── Activation gates ────────────────────────────────────────────────────
   // The selection is a document-level entity (frame.confinement), so the
@@ -109,9 +100,21 @@ export function ClipOverlayMain() {
   const isEditing = isClipActive || isReCanvas;
   const isOverlayActive = isEditing || hasSelection;
 
-  // Box (handles + dim label): only while editing, and only for regular
-  // tools or Re-Canvas — a passive-selection view is ants-only.
-  const boxActive = isEditing && (isReCanvas || isRegularTool);
+  // Box (handles + dim label): only while editing, and only when the
+  // selection itself is a regular shape (rect/circle) — TRANSFORM IS
+  // SELECTION-ORIENTED, not tool-oriented: a path selection shows the shared
+  // TransformGizmo under ANY selection tool, so the rect-bracket box must
+  // yield whenever the entity is a path polygon.
+  const boxActive = isEditing
+    && (isReCanvas || (isRegularTool && clipTool !== "pathellipse" && clipType !== "path"));
+
+  // Gizmo box for every PATH selection regardless of the armed tool
+  // (lasso/wand/pathellipse/boolean results): TransformGizmo corner/edge
+  // scale handles + rotation dot (SelectionTransformHandler). Same fast-sync
+  // hook as the regular box — resolveRegularClip reads frame.confinement
+  // directly, so polygon bbox positioning works unchanged.
+  const gizmoBoxActive = isEditing && !isReCanvas && hasSelection
+    && clipType === "path";
 
   // ─── Staircase grid phase (ants/GPU alignment) ───────────────────────────
   // The aa/na ants are the pixel staircase of the TARGET layer's (active
@@ -134,12 +137,25 @@ export function ClipOverlayMain() {
   const pathRef = useRef<SVGPathElement>(null);
   useSelectionAntsSync(groupRef, pathBgRef, pathRef, isOverlayActive, isReCanvas, antsGridOffset);
 
-  // CSS box for drag handles + guides (regular tools only)
-  const { guidesRef } = useRegularBoxSync(
+  // CSS box (move surface + gizmo mount, regular tools only)
+  useRegularBoxSync(
     boxRef,
     boxActive,
     isReCanvas,
   );
+
+  // Gizmo box for path-polygon selections: corner scale handles + rotation
+  // handle via the shared TransformGizmo. Hover-reveal (PS Transform
+  // Selection): hidden until the pointer enters the selection, hidden again
+  // during any gesture drag.
+  const irregularBoxRef = useRef<HTMLDivElement>(null);
+  useRegularBoxSync(irregularBoxRef, gizmoBoxActive, false);
+  useGizmoHoverSync(irregularBoxRef, gizmoBoxActive);
+
+  // Rect-shaped selections ride the SAME gizmo (one transform logic for all
+  // selection shapes), rendered inside the regular box; hover-reveal identical.
+  const rectGizmoRef = useRef<HTMLDivElement>(null);
+  useGizmoHoverSync(rectGizmoRef, boxActive && hasSelection && !isReCanvas);
 
   // Dimension label
   const { dimLabelRef } = useCropDimSync(boxActive, isReCanvas);
@@ -156,17 +172,11 @@ export function ClipOverlayMain() {
 
   if (!activeFrame || !isOverlayActive) return null;
 
-  const cursor = dragType === "move"
-    ? "move"
-    : isIrregularTool
-      ? "crosshair"
-      : "default";
-
   return (
     <div
       ref={overlayRef}
       className="absolute inset-0 pointer-events-none"
-      style={{ cursor, zIndex: EDITOR_Z_INDEX.STAGE.SYSTEM_TOOLS }}
+      style={{ zIndex: EDITOR_Z_INDEX.STAGE.SYSTEM_TOOLS }}
     >
       {/* Plugin-internal keyframes for marching ants animation */}
       <style dangerouslySetInnerHTML={{ __html: CLIP_ANTS_STYLE }} />
@@ -223,60 +233,34 @@ export function ClipOverlayMain() {
         </svg>
       </div>
 
-      {/* Regular crop box: handles + dim label + guides.
+      {/* Regular crop box: gizmo mount + dim label.
           Hidden when tool is irregular, data is polygon (via visibility gate),
           or the overlay is in passive (non-editing) view. */}
       {boxActive && (
         <div
           ref={boxRef}
-          className="absolute pointer-events-auto cursor-move transition-[border-radius] duration-300"
+          className="absolute pointer-events-auto transition-[border-radius] duration-300"
           style={{ borderRadius: clipType === "circle" ? "50%" : "0%" }}
           data-handle="move"
         >
-          {/* Resize Handles (corners) — always visible for ellipse, hover for rect */}
-          {[
-            { h: "nw", c: "top-0 left-0", cursor: "nwse-resize" },
-            { h: "ne", c: "top-0 right-0", cursor: "nesw-resize" },
-            { h: "sw", c: "bottom-0 left-0", cursor: "nesw-resize" },
-            { h: "se", c: "bottom-0 right-0", cursor: "nwse-resize" },
-          ].map((p) => {
-            const isEllipse = clipTool === "pathellipse";
-            return (
-              <div
-                key={p.h}
-                className={`absolute w-4 h-4 transition-all group/handle ${p.c}`}
-                style={{
-                  cursor: p.cursor,
-                  transform: `translate(${p.h.includes("w") ? "-30%" : "-70%"}, ${p.h.includes("n") ? "-30%" : "-70%"})`,
-                  left: p.h.includes("e") ? "100%" : "0%",
-                  top: p.h.includes("s") ? "100%" : "0%",
-                  zIndex: 10,
-                }}
-                data-handle={p.h}
-              >
-                <div
-                  className={`absolute w-full h-[2px] transition-opacity duration-200 ${isEllipse ? "" : "opacity-0 group-hover/handle:opacity-100"} ${isReCanvas ? "bg-red-500" : "bg-white"} ${p.h.includes("n") ? "top-0" : "bottom-0"}`}
-                  style={isEllipse ? { opacity: 1 } : undefined}
-                />
-                <div
-                  className={`absolute w-[2px] h-full transition-opacity duration-200 ${isEllipse ? "" : "opacity-0 group-hover/handle:opacity-100"} ${isReCanvas ? "bg-red-500" : "bg-white"} ${p.h.includes("w") ? "left-0" : "right-0"}`}
-                  style={isEllipse ? { opacity: 1 } : undefined}
-                />
-              </div>
-            );
-          })}
-
-          {/* Rule of Thirds Grid */}
-          <div
-            ref={guidesRef}
-            className="absolute inset-0 opacity-20 pointer-events-none overflow-hidden"
-            style={{ borderRadius: isEllipseSelection ? "50%" : "0%" }}
-          >
-            <div className="absolute top-1/3 left-0 w-full h-px bg-white" />
-            <div className="absolute top-2/3 left-0 w-full h-px bg-white" />
-            <div className="absolute left-1/3 top-0 h-full w-px bg-white" />
-            <div className="absolute left-2/3 top-0 h-full w-px bg-white" />
-          </div>
+          {/* Shared TransformGizmo: THE selection handles for every shape —
+              corner/edge scale + rotation dot, same knobs as marker/text,
+              claimed by SelectionTransformHandler. Scale of a rect-shaped
+              selection through the gizmo drives the same ring-affine math as
+              path selections (one transform logic, per the selection-oriented
+              ruling). Re-Canvas keeps its own red-styled marks, so the gizmo
+              is skipped in that modal. Visibility: same JS hover-reveal as
+              the path gizmo box (hidden until the pointer enters the
+              selection, hidden during any gesture drag). */}
+          {!isReCanvas && hasSelection && (
+            <div
+              ref={rectGizmoRef}
+              className="absolute inset-0 pointer-events-none"
+              style={{ opacity: 0 }}
+            >
+              <TransformGizmo variant="cube" outline />
+            </div>
+          )}
 
           {/* Dimension Labels */}
           <div
@@ -297,6 +281,22 @@ export function ClipOverlayMain() {
             <span className="text-[11px] font-bold text-white/40 ml-0.5">px</span>
           </div>
 
+        </div>
+      )}
+
+      {/* Irregular selection box: shared TransformGizmo (corner + edge scale
+          handles and rotation dot, same knobs as marker/text). The container
+          is pointer-events-none (unlike the regular box, there is no "move
+          surface" — moving an irregular selection is a direct drag on the
+          polygon, handled by the move handler); the gizmo's hit zones are
+          individually interactive and consumed by SelectionTransformHandler. */}
+      {gizmoBoxActive && (
+        <div
+          ref={irregularBoxRef}
+          className="absolute pointer-events-none"
+          style={{ opacity: 0 }}
+        >
+          <TransformGizmo variant="cube" outline />
         </div>
       )}
 

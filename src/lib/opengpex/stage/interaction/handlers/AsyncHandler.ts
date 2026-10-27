@@ -33,7 +33,7 @@
  * paradigm rather than the "drag-to-transform" paradigm.
  */
 
-import type { InteractionHandler, InteractionEvent } from '@opengpex/editor/core/types';
+import type { InteractionHandler, InteractionEvent, SpringChannel } from '@opengpex/editor/core/types';
 
 // ─── Config Interface ──────────────────────────────────────────────────────────
 
@@ -42,6 +42,11 @@ export interface AsyncHandlerConfig {
   id: string;
   /** Priority in the dispatcher's handler queue */
   priority: number;
+  /**
+   * Forwarded to the produced InteractionHandler: spring channels this
+   * handler owns inside its hit region (see InteractionHandler.springOverride).
+   */
+  springOverride?: SpringChannel | SpringChannel[];
 
   /**
    * Test whether this handler should activate for the given event.
@@ -104,6 +109,7 @@ export function createAsyncHandler(config: AsyncHandlerConfig): InteractionHandl
   return {
     id: config.id,
     priority: config.priority,
+    springOverride: config.springOverride,
 
     test: (e) => config.test(e),
 

@@ -235,9 +235,11 @@ export interface InteractionHandler {
    * handlers that declare an override for it (plus the layer-move fallback),
    * so omitting it means the handler is filtered out entirely while the
    * channel is down and the global fallback owns the press. Declare the
-   * channel this handler gives a spring meaning to.
+   * channel(s) this handler gives a spring meaning to — one channel, or a
+   * list when the handler attaches semantics to several (selection drawing
+   * claims Shift = boolean-union and Alt = boolean-difference).
    */
-  springOverride?: SpringChannel;
+  springOverride?: SpringChannel | SpringChannel[];
   test: (e: InteractionEvent) => boolean;
   onStart: (e: InteractionEvent) => void;
   onMove: (e: InteractionEvent) => void;
