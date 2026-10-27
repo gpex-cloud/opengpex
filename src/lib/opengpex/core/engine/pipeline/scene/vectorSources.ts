@@ -53,7 +53,7 @@
  * @module core/engine/pipeline/scene/vectorSources
  */
 
-import type { Layer, WorkingColorSpace } from '@opengpex/editor/core/types';
+import type { Layer, StrokeData, WorkingColorSpace } from '@opengpex/editor/core/types';
 import { toWorkingLinearRgba } from '@opengpex/editor/core/engine/color';
 import {
   computeTextLayout,
@@ -70,136 +70,173 @@ export type { LayerSource };
 const FLOATS_PER_POINT = 4;
 
 /**
- * Map a logic-brush layer to a `vector` {@link LayerSource} (`renderer: 'stroke'`),
- * or `undefined` if the layer carries no `strokeData`.
+ * Re-base a stroke's box-local geometry into the PARENT layer's local space.
  *
- * `workingSpace` is the document compositing gamut (always `WORKING_GAMUT`,
- * ProPhoto RGB — see `SceneAssembler` invariant). `width`/`height` are read from the
- * layer's BOUNDING box (`layer.bounding.w/h`, same source the SDF translators take via `ctx.width/height`)
- * `SdfShapeParams.size`): they become the `LayerNode.width/height` the compositor
- * places the quad at, and the StrokeRenderer's vertex shader divides the logical-pixel
- * trajectory by them to reach NDC (see {@link StrokeParams.width}).
+ * A committed `StrokeData` stores its trajectory and frozen selection snapshot
+ * relative to its OWN box (`StrokeData.box`, in layer-local coordinates — i.e.
+ * offsets from the layer bounding's top-left). The same shift applies to the
+ * trajectory and to the confinement rings, keeping the pairing invariant
+ * (points and snapshot land in ONE coordinate frame).
  */
-export function strokeToVectorSource(
-  layer: Layer,
-  workingSpace: WorkingColorSpace,
-): LayerSource | undefined {
-  const data = layer.strokeData;
-  if (!data || layer.type !== 'vector') return undefined;
+function strokeBoxToLayerOffset(strokeBox: {
+  readonly x: number;
+  readonly y: number;
+}): { readonly dx: number; readonly dy: number } {
+  return { dx: strokeBox.x, dy: strokeBox.y };
+}
 
-  const w = Math.max(1, layer.bounding?.w ?? 0);
-  const h = Math.max(1, layer.bounding?.h ?? 0);
-
-  // Straight-alpha working-gamut linear rgba (never premultiplied here — the
-  // StrokeRenderer emits STRAIGHT alpha and the shared drawLayer tail applies
-  // layer.opacity / blend downstream).
-  const color = toWorkingLinearRgba(data.color, workingSpace);
-
-  // Pack the trajectory into [x, y, width, _pad] × N — the exact `Pt` layout
-  // `cs_extrude` reads. `_pad` stays 0 (WGSL struct alignment lane).
+/** Pack one stroke's trajectory into the `Pt` stream the extrude compute reads. */
+function packStrokePoints(
+  data: StrokeData,
+  dx: number,
+  dy: number,
+): { readonly points: Float32Array; readonly pointCount: number } {
+  // Pack the trajectory into [x, y, width, alpha] × N — the exact `Pt` layout
+  // `cs_extrude` reads.
   //
   // WIDTH LANE: the compute pass extrudes `half-width = lane * 0.5` and has no
   // access to the paint uniform's `size`, so the EFFECTIVE TIP DIAMETER
   // (`size × pressure`) has to ride the point stream. Packing raw 0..1 pressure here
   // would render every stroke as a ≤1px hairline regardless of the brush size.
+  // ALPHA LANE: the per-point paint-opacity multiplier (pressure-opacity
+  // dynamics); absent samples read as 1 (full opacity).
   const pointCount = data.points.length;
   const points = new Float32Array(pointCount * FLOATS_PER_POINT);
   for (let i = 0; i < pointCount; i++) {
     const p = data.points[i];
     const base = i * FLOATS_PER_POINT;
-    points[base + 0] = p.x;
-    points[base + 1] = p.y;
+    points[base + 0] = p.x + dx;
+    points[base + 1] = p.y + dy;
     points[base + 2] = data.size * p.pressure;
-    points[base + 3] = 0;
+    points[base + 3] = p.alpha ?? 1;
   }
+  return { points, pointCount };
+}
 
-  return {
-    kind: 'vector',
-    renderer: 'stroke',
-    stroke: {
+/**
+ * Map a logic-brush layer to a `vector` {@link LayerSource} (`renderer: 'stroke'`),
+ * or `undefined` if the layer carries no stroke payload.
+ *
+ * A collection layer (`Layer.strokes`) maps EVERY stroke to its own
+ * {@link StrokeParams}: each stroke extrudes and draws separately, but they all
+ * render into the layer's ONE shared transient (the strokes composite into each
+ * other inside the layer, then the layer composites once). The in-drag payload
+ * (`strokeData`, the gesture layer's live trajectory) maps as a one-element
+ * collection; its points are canvas coordinates, so the box offset is zero.
+ *
+ * `workingSpace` is the document compositing gamut (always `WORKING_GAMUT`,
+ * ProPhoto RGB — see `SceneAssembler` invariant). `width`/`height` are read from the
+ * layer's BOUNDING box (`layer.bounding.w/h`): they become the `LayerNode.width/height`
+ * the compositor places the quad at, and the StrokeRenderer's vertex shader divides the
+ * logical-pixel trajectory by them to reach NDC (see {@link StrokeParams.width}).
+ */
+export function strokeToVectorSource(
+  layer: Layer,
+  workingSpace: WorkingColorSpace,
+): LayerSource | undefined {
+  if (layer.type !== 'vector') return undefined;
+  const strokesData: readonly StrokeData[] | undefined = layer.strokes ?? (layer.strokeData ? [layer.strokeData] : undefined);
+  if (!strokesData || strokesData.length === 0) return undefined;
+
+  const w = Math.max(1, layer.bounding?.w ?? 0);
+  const h = Math.max(1, layer.bounding?.h ?? 0);
+  const params = strokesData.map((data) => {
+    // Straight-alpha working-gamut linear rgba (never premultiplied here — the
+    // StrokeRenderer emits STRAIGHT alpha and the shared drawLayer tail applies
+    // layer.opacity / blend downstream).
+    const color = toWorkingLinearRgba(data.color, workingSpace);
+    // Legacy strokes carry no box (points were layer-local).
+    const { dx, dy } = data.box
+      ? strokeBoxToLayerOffset(data.box)
+      : { dx: 0, dy: 0 };
+    const { points, pointCount } = packStrokePoints(data, dx, dy);
+
+    return {
       points,
       pointCount,
-      color,
+      color: [color[0], color[1], color[2], color[3]] as [number, number, number, number],
       size: data.size,
       hardness: data.hardness,
       // Normalize: undefined = AA on (zero-regression default for legacy strokes).
       antiAliased: data.antiAliased !== false,
       width: w,
       height: h,
-      // Frozen selection snapshot (layer-local, travels with the stroke). The
-      // vector spine bakes it into a coverage texture and the paint fragment
+      // Frozen selection snapshot (box-local, travels with the stroke, re-based
+      // into layer space by the same box shift as the trajectory). The vector
+      // spine bakes it into a coverage texture and the paint fragment
       // multiplies by it — the stroke only paints inside its selection.
       confinement: data.confinement
         ? {
             rings: data.confinement.rings.map((ring) =>
-              ring.map((p) => [p.x, p.y] as [number, number]),
+              ring.map((p) => [p.x + dx, p.y + dy] as [number, number]),
             ),
             antiAliased: data.confinement.antiAliased !== false,
           }
         : undefined,
-    },
+    } satisfies StrokeParams;
+  });
+
+  return {
+    kind: 'vector',
+    renderer: 'stroke',
+    strokes: params,
   };
 }
 
 /**
- * O(1) change fingerprint for a live stroke's packed trajectory — the
- * composite-once cache key for the stroke source. Lives HERE, not in
- * `compositeSignature.ts`, because its validity is a WRITER CONTRACT of this
- * renderer: it must flip on every mutation the packed trajectory can undergo,
- * and only this domain knows who writes it.
+ * O(1)-per-stroke change fingerprint for a stroke collection's packed
+ * trajectories — the composite-once cache key for the stroke source. Lives
+ * HERE, not in `compositeSignature.ts`, because its validity is a WRITER
+ * CONTRACT of this renderer: it must flip on every mutation the packed
+ * trajectories can undergo, and only this domain knows who writes it.
  *
- * WHY O(1) IS SOUND — the writer contract: the packed trajectory
- * (`[x, y, width, _pad] × N`, lane 2 = size × pressure) only ever changes in
- * three ways across its whole lifetime, and each is visible to a fingerprint of
- * (pointCount, first point, last point):
- *   1. APPEND while dragging — pointCount changes.
- *   2. TAIL-PREVIEW REPLACE — the last sample is re-written in place as the
- *      pointer moves (or as a stationary stylus changes ONLY its pressure:
- *      pointermove may deliver identical coordinates with a new pressure value,
- *      and pressure rides the width lane, so the lane MUST be fingerprinted or
- *      that frame never re-composites).
- *   3. COMMIT TIGHTEN — the trajectory is rebuilt once at pointer-up
- *      (pixel-identical by contract); pointCount / last point / bounding
- *      width/height move, and the LayerNode transform/bounding tokens flip the
- *      layer signature regardless.
- * There is NO writer that rewrites a mid-trajectory point. Any future writer
- * that mutates geometry the fingerprint cannot see (mid-point edits, lane 3,
- * reordering) would silently skip re-compositing — a new writer must either
- * touch one of the fingerprinted quantities or extend this token.
+ * WHY THIS SHAPE IS SOUND — the writer contract: within one stroke's packed
+ * trajectory (`[x, y, width, alpha] × N`) the writers are the live drag on the
+ * gesture's own layer (APPEND flips pointCount; TAIL-PREVIEW REPLACE rewrites
+ * the last sample, including a stationary stylus changing ONLY its pressure or
+ * alpha) and the pointerup tighten, which rebuilds the payload in place
+ * (pointCount changes when taper densification inserts samples; bounding moves
+ * flip the LayerNode tokens anyway, and undo/redo replaces the whole layer
+ * object). So a per-stroke (pointCount, first point, last point) token
+ * plus the stroke COUNT sees every mutation; the array walk is O(stroke count),
+ * which is tens at worst and cheap against the serialized-trajectory costs it
+ * guards. The first point's width/alpha lanes are technically redundant (the
+ * first sample is immutable during a drag) and kept anyway — they future-proof
+ * the token against new writers.
  *
- * Scalar brush attributes (colour / size / hardness / antiAliased) and the
- * bounding extent are included so undo/redo layer restoration and parameter
- * edits flip the signature too; bounding width/height also disambiguate the
- * commit-tighten rebuild. The first point's width lane is technically redundant
- * (the first sample is immutable during a drag) and is kept anyway — it costs
- * nothing and future-proofs the token against new writers.
+ * Scalar brush attributes (colour / size / hardness / antiAliased), the
+ * bounding extent, and each stroke's confinement presence ride the token so
+ * undo/redo restoration and parameter edits flip the signature too.
  *
- * Degenerate shapes: `pointCount === 0` (unreachable via {@link strokeToVectorSource}
- * — layer creation requires ≥1 sample — but kept total) yields a fixed token with
- * NO index arithmetic; `pointCount === 1` reads first and last at the SAME
- * offset, which is valid. The token is recomputed against the LIVE params every
- * frame by the composite signature — the trajectory buffer is mutated in place
- * while the assembled LayerNode is reused across frames, so a build-time string
- * would go stale; O(1) per frame is exactly the cost this shape was chosen for.
+ * Degenerate shapes: `pointCount <= 0` yields a fixed token with NO index
+ * arithmetic; `pointCount === 1` reads first and last at the SAME offset, which
+ * is valid. The token is recomputed against the LIVE params every frame by the
+ * composite signature — the trajectory buffer is mutated in place while the
+ * assembled LayerNode is reused across frames, so a build-time string would go
+ * stale; per-frame recomputation is exactly the cost this shape was chosen for.
  */
-export function strokeSourceFingerprint(stroke: StrokeParams): string {
-  const { points, pointCount, color, size, hardness, antiAliased, width, height } = stroke;
-  // Confinement lane: the snapshot is written once at stroke creation and is
-  // immutable for the stroke's lifetime, so a presence bit suffices as the
-  // writer contract (a future writer that mutates a frozen snapshot must
-  // extend this token — same rule as for the packed trajectory).
-  const confLane = stroke.confinement ? 'conf' : '-';
-  if (pointCount <= 0) {
-    return `vector:stroke:0:-:${size}:${hardness}:${antiAliased ? 1 : 0}:${color.join(',')}:${width}x${height}:${confLane}`;
+export function strokeSourceFingerprint(strokes: readonly StrokeParams[]): string {
+  const lanes: string[] = ['vector:stroke', String(strokes.length)];
+  for (const stroke of strokes) {
+    const { points, pointCount, color, size, hardness, antiAliased, width, height } = stroke;
+    // Confinement lane: the snapshot is written once at stroke creation and is
+    // immutable for the stroke's lifetime, so a presence bit suffices as the
+    // writer contract (a future writer that mutates a frozen snapshot must
+    // extend this token — same rule as for the packed trajectory).
+    const confLane = stroke.confinement ? 'conf' : '-';
+    if (pointCount <= 0) {
+      lanes.push(`0:-:${size}:${hardness}:${antiAliased ? 1 : 0}:${color.join(',')}:${width}x${height}:${confLane}`);
+      continue;
+    }
+    const lastBase = (pointCount - 1) * 4;
+    lanes.push([
+      pointCount,
+      `${points[0]},${points[1]},${points[2]},${points[3]}`,
+      `${points[lastBase]},${points[lastBase + 1]},${points[lastBase + 2]},${points[lastBase + 3]}`,
+      `${size}:${hardness}:${antiAliased ? 1 : 0}:${color.join(',')}:${width}x${height}:${confLane}`,
+    ].join('|'));
   }
-  const lastBase = (pointCount - 1) * 4;
-  return [
-    'vector:stroke',
-    pointCount,
-    `${points[0]},${points[1]},${points[2]}`,
-    `${points[lastBase]},${points[lastBase + 1]},${points[lastBase + 2]}`,
-    `${size}:${hardness}:${antiAliased ? 1 : 0}:${color.join(',')}:${width}x${height}:${confLane}`,
-  ].join(':');
+  return lanes.join(':');
 }
 
 // ─── text → glyph layout ────────────────────────────────────────────────────

@@ -280,16 +280,24 @@ export interface StrokePoint {
   readonly y: number;
   /** 0..1 pen pressure. */
   readonly pressure: number;
+  /**
+   * Per-sample paint opacity multiplier, 0..1 (undefined/absent = 1). Driven by
+   * pressure-opacity dynamics (pen pressure → ink density) and by input-side
+   * envelopes; rides the point stream's fourth packed lane into the renderer.
+   */
+  readonly alpha?: number;
 }
 
 /**
- * Vector brush point-stream model — stored on `Layer.strokeData` for a
- * `type:'vector'` layer, sibling to `markerData`. The scene-assembly mapper
- * (`vectorSources.ts`) converts `color` to working-gamut linear and packs the
- * points into the GPU-side {@link StrokeParams}; the StrokeRenderer extrudes a ribbon.
+ * One committed vector-brush stroke, stroke-box-local: `points` are relative to
+ * `box`'s origin (`box` is the stroke's snug bounding box), so a stroke's
+ * geometry is position-independent and re-basing it into a different parent
+ * layer is pure box arithmetic.
  */
 export interface StrokeData {
   readonly points: readonly StrokePoint[];
+  /** The stroke's snug bounding box; `points` are local to its origin. */
+  readonly box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /** Author-space colour (mapper converts to working-gamut linear). */
   readonly color: ColorValue;
   /** Tip diameter at pressure=1, in px. */
@@ -303,8 +311,9 @@ export interface StrokeData {
    */
   readonly antiAliased?: boolean;
   /**
-   * Selection-confinement snapshot, FROZEN at stroke creation. Layer-local
-   * deep copy of the active frame selection at the moment the stroke started;
+   * Selection-confinement snapshot, FROZEN at stroke creation. Stroke-box-local
+   * deep copy of the active frame selection at the moment the stroke started
+   * (re-based by the same box-origin shift as `points`);
    * the render pipeline multiplies the stroke's coverage by this polygon so
    * the stroke only paints inside it.
    *
@@ -414,7 +423,22 @@ export interface Layer {
   assetId: string;
   role?: LayerRole;
   textData?: TextLayerData;
-  /** Vector brush point-stream data — only present when type='vector' and created by the Brush Tool. */
+  /**
+   * Vector-brush stroke collection — only present when type='vector' and the
+   * content came from the Brush Tool. One layer holds MANY strokes (the
+   * CSP-vector-layer model): the layer's `bounding` is the union of all
+   * strokes' `box`es, and each stroke's geometry is `box`-local. Consecutive
+   * strokes append into the active collection layer; a new layer starts when
+   * the active layer is not a brush collection.
+   */
+  strokes?: StrokeData[];
+  /**
+   * Legacy single-stroke payload, superseded by `strokes`. Only ever present
+   * on documents saved before the stroke-collection refactor; the hydration
+   * migration lifts it into `strokes: [strokeData]` with no data loss. Kept
+   * in the type so unmigrated in-memory history steps still typecheck; the
+   * scene mapper accepts it as a one-element collection fallback.
+   */
   strokeData?: StrokeData;
   /**
    * Pen-tool bézier path payload — only present on `type:'vector'` layers whose

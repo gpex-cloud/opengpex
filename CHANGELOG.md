@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.30
+
+- Brush: new input dynamics in the Drawing panel — Smoothing (rope-model steadying for mouse and stylus), Taper (calligraphic stroke ends with independent Start and End sliders plus a link toggle — sharpen one end for calligraphy exits, or both for blade tips), Pressure Opacity (stylus pressure to ink density), and Velocity (fast-thin, slow-thick).
+- Brush: save, apply and delete named brush presets capturing the full parameter set.
+- Brush: pressure now also modulates ink opacity per point when Pressure Opacity is enabled; strokes replay and export identically.
+
 ## v2.0.29
 
 - Selection: combine selections with the mouse — hold Shift while drawing a new selection to add it to the existing one, hold Alt to subtract from it; works with the rectangle, ellipse, lasso and magic wand tools, and the marching ants preview the combined shape live while you drag

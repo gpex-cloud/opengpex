@@ -28,7 +28,7 @@ import { MARKER_REGISTRY } from '../../overlays/MarkerOverlay/marker/registry';
 // Side-effect import: ensures built-in markers are registered before panel reads.
 import '../../overlays/MarkerOverlay/marker';
 import { getReferenceFontSize, MOSAIC_SIZE_PRESETS, getDynamicMarkerStrokeMax } from './protocols';
-import type { ActiveCraft, CraftType, CraftDrawerConfig, PendingTextData } from './protocols';
+import type { ActiveCraft, BrushPreset, CraftType, CraftDrawerConfig, PendingTextData } from './protocols';
 import type { TextLayerData } from '@opengpex/editor/core/types';
 import type { MarkerData, MarkerKind } from '../../overlays/MarkerOverlay/marker/types';
 import { resolveNextMarkerData, resolvePendingMarkerStyle, mergePendingMarkerStyle, withPendingMarkerStyle } from '../../overlays/MarkerOverlay/marker/pending';
@@ -554,6 +554,61 @@ export function useBrushPanel() {
     [setSelfConfig]
   );
 
+  const updateBrushFlag = useCallback(
+    (key: 'brushPressureOpacity' | 'brushVelocity' | 'brushTaperLink', value: boolean) => {
+      setSelfConfig({ [key]: value });
+    },
+    [setSelfConfig]
+  );
+
+  const saveBrushPreset = useCallback(
+    (name: string) => {
+      const preset: BrushPreset = {
+        id: `bp_${Date.now().toString(36)}`,
+        name,
+        size: brushSize,
+        opacity: brushOpacity,
+        hardness: brushHardness,
+        antiAliased: brushAntiAliased,
+        stabilizer: selfConfig.brushStabilizer ?? 0,
+        pressureOpacity: selfConfig.brushPressureOpacity === true,
+        taper: selfConfig.brushTaper ?? 0,
+        taperStart: selfConfig.brushTaperStart ?? selfConfig.brushTaper ?? 0,
+        taperEnd: selfConfig.brushTaperEnd ?? selfConfig.brushTaper ?? 0,
+        velocity: selfConfig.brushVelocity === true,
+      };
+      setSelfConfig({ brushPresets: [...(selfConfig.brushPresets ?? []), preset].slice(-20) });
+    },
+    [setSelfConfig, selfConfig, brushSize, brushOpacity, brushHardness, brushAntiAliased],
+  );
+
+  const applyBrushPreset = useCallback(
+    (id: string) => {
+      const preset = (selfConfig.brushPresets ?? []).find((p) => p.id === id);
+      if (!preset) return;
+      setSelfConfig({
+        brushSize: preset.size,
+        brushOpacity: preset.opacity,
+        brushHardness: preset.hardness,
+        brushAntiAliased: preset.antiAliased,
+        brushStabilizer: preset.stabilizer,
+        brushPressureOpacity: preset.pressureOpacity,
+        brushTaper: preset.taper,
+        brushTaperStart: preset.taperStart ?? preset.taper,
+        brushTaperEnd: preset.taperEnd ?? preset.taper,
+        brushVelocity: preset.velocity,
+      });
+    },
+    [setSelfConfig, selfConfig],
+  );
+
+  const deleteBrushPreset = useCallback(
+    (id: string) => {
+      setSelfConfig({ brushPresets: (selfConfig.brushPresets ?? []).filter((p) => p.id !== id) });
+    },
+    [setSelfConfig, selfConfig],
+  );
+
   return useMemo(() => ({
     brushSize,
     brushOpacity,
@@ -566,7 +621,19 @@ export function useBrushPanel() {
     updateBrushColor,
     updateEraserAntiAliased,
     updateBrushAntiAliased,
-  }), [brushSize, brushOpacity, brushHardness, brushColor, isEraser, eraserAntiAliased, brushAntiAliased, updateBrushParam, updateBrushColor, updateEraserAntiAliased, updateBrushAntiAliased]);
+    brushStabilizer: selfConfig.brushStabilizer ?? 0,
+    brushPressureOpacity: selfConfig.brushPressureOpacity === true,
+    brushTaper: selfConfig.brushTaper ?? 0,
+    brushTaperStart: selfConfig.brushTaperStart ?? selfConfig.brushTaper ?? 0,
+    brushTaperEnd: selfConfig.brushTaperEnd ?? selfConfig.brushTaper ?? 0,
+    brushTaperLink: selfConfig.brushTaperLink !== false,
+    brushVelocity: selfConfig.brushVelocity === true,
+    brushPresets: selfConfig.brushPresets ?? [],
+    updateBrushFlag,
+    saveBrushPreset,
+    applyBrushPreset,
+    deleteBrushPreset,
+  }), [brushSize, brushOpacity, brushHardness, brushColor, isEraser, eraserAntiAliased, brushAntiAliased, updateBrushParam, updateBrushColor, updateEraserAntiAliased, updateBrushAntiAliased, selfConfig, updateBrushFlag, saveBrushPreset, applyBrushPreset, deleteBrushPreset]);
 }
 
 // ─── useMarkerPanel ────────────────────────────────────────────────────────────

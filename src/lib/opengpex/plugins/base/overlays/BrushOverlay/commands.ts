@@ -19,24 +19,28 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, Layer } from '@opengpex/editor/core/types';
+import {
+  EditorContextValue,
+  EditorCommand,
+  Layer,
+} from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import * as P from './protocols';
 
 // ─── Commands ──────────────────────────────────────────────────────────────────
 
 /**
- * cmd.place: Places a freshly started logic-brush stroke as a `type:'vector'`
- * layer directly above the active layer, as a plain top-level layer (no
- * auto-grouping).
+ * cmd.place: places ONE stroke's own layer above the active layer and
+ * activates it (ONE STROKE = ONE LAYER; multi-stroke grouping is manual, via
+ * layer groups in the layers panel).
  *
- * ONE STROKE = ONE LAYER.
- *
- * undoable: true → this is the ONLY undo checkpoint of a stroke gesture. The
- * whole in-progress trajectory afterwards rides the volatile fast track
- * (`InteractionTransaction.begin(silent)`, which does not signal a checkpoint),
- * and the pointerup commit writes it through `fast.commit`, which does not
- * either.
+ * undoable: true → this is the gesture's ONLY undo checkpoint, taken at the
+ * FIRST drawable sample — the layer created here is already the real,
+ * user-visible layer (its name is stable for the whole gesture; nothing gets
+ * created or renamed at pointerup). The in-progress trajectory afterwards
+ * rides the silent volatile track (`InteractionTransaction.begin(silent)`,
+ * which takes no checkpoint) onto this same layer, and the pointerup tighten
+ * commits through that same track. One undo step removes the stroke layer.
  */
 const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
   id: P.CMD_PLACE,
@@ -46,9 +50,6 @@ const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
     const frame = ctx.state.frames.byId[payload.frameId];
     if (!frame) return;
 
-    // Plain layer, inserted directly above the active layer
-    // (getInsertIndexAbove handles group / hostId targets). Falls back to
-    // append-on-top (undefined index → reducer push) when there is no active layer.
     const below = LayerFactory.resolveActiveHostLayer(frame);
     const insertAt = LayerFactory.getInsertIndexAbove(frame, below?.id);
     ctx.layers.addLayer(payload.frameId, payload.layer, insertAt);

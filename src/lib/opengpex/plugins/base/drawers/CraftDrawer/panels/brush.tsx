@@ -20,10 +20,9 @@
 "use client";
 
 import React from "react";
-import { ColorPickerPro } from "@opengpex/editor/widgets/ColorPickerPro";
+import ColorSwatchRow from "@opengpex/editor/widgets/ColorSwatchRow";
 import Switch from "@opengpex/editor/widgets/Switch";
 import { useBrushPanel } from "../hooks";
-
 // ─── Logarithmic Slider Helpers ────────────────────────────────────────────────
 
 /**
@@ -59,7 +58,20 @@ export const BrushPanel = React.memo(function BrushPanel() {
     brushSize, brushOpacity, brushHardness, brushColor, isEraser,
     eraserAntiAliased, brushAntiAliased, updateBrushParam, updateBrushColor,
     updateEraserAntiAliased, updateBrushAntiAliased,
+    brushStabilizer, brushPressureOpacity, brushTaperStart, brushTaperEnd,
+    brushTaperLink, brushVelocity, brushPresets,
+    updateBrushFlag, saveBrushPreset, applyBrushPreset, deleteBrushPreset,
   } = useBrushPanel();
+
+  // Inline preset naming state: replaces the blocking native window.prompt,
+  // which is focus-hostile and can be suppressed entirely inside embedded or
+  // sandboxed environments. When non-null the value is the draft name; the
+  // input row mounts in place of the Save button and commits on Enter or blur.
+  const [presetNaming, setPresetNaming] = React.useState<string | null>(null);
+  const commitPresetName = () => {
+    if (presetNaming && presetNaming.trim()) saveBrushPreset(presetNaming.trim());
+    setPresetNaming(null);
+  };
 
   // AA ⇔ hardness two-way binding, IDENTICAL for brush and eraser: a soft tip
   // (hardness < 100) always needs AA, so dragging hardness below 100 forces the
@@ -88,6 +100,16 @@ export const BrushPanel = React.memo(function BrushPanel() {
     <div className="flex flex-col gap-2">
       {/* Parameters */}
       <div className="flex flex-col gap-2 p-1">
+        {/* Color — mini swatch (marker-panel style): swatch + hex, full picker on demand */}
+        {!isEraser && (
+          <ColorSwatchRow
+            label="Color"
+            labelClassName="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16 shrink-0"
+            color={brushColor}
+            onChange={updateBrushColor}
+          />
+        )}
+
         {/* Size (logarithmic slider: small sizes get more resolution) */}
         <div className="flex items-center gap-2 px-1">
           <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
@@ -196,21 +218,175 @@ export const BrushPanel = React.memo(function BrushPanel() {
             activeColor="bg-indigo-500"
           />
         </div>
+
       </div>
 
-      {/* Color Picker (brush only, shared with ColorOptions) */}
+      {/* Input dynamics (brush only) */}
       {!isEraser && (
-        <div className="flex flex-col gap-1.5 p-1">
-          <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight px-1">
-            Color
-          </span>
-          <ColorPickerPro
-            variant="compact"
-            color={brushColor}
-            onChange={updateBrushColor}
-          />
-        </div>
+        <>
+          <div className="mx-1 border-t border-[var(--border-subtle)] dark:border-white/10" />
+          <div className="flex flex-col gap-2 p-1">
+          {/* Stabilizer — rope-model smoothing slack */}
+          <div className="flex items-center gap-2 px-1">
+              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
+                Smoothing
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={brushStabilizer}
+                onChange={(e) => updateBrushParam('brushStabilizer', Number(e.target.value))}
+                onMouseUp={(e) => e.currentTarget.blur()}
+                onTouchEnd={(e) => e.currentTarget.blur()}
+                className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
+              />
+              <div className="w-12 justify-end text-right text-indigo-600 dark:text-indigo-400 font-black text-[10px] tabular-nums">
+                {brushStabilizer}
+              </div>
+            </div>
+
+            {/* Taper — per-end calligraphic entry/exit, % of tip diameter.
+                Start = stroke beginning (尖入笔), End = stroke exit (出锋).
+                The link toggle mirrors a slider edit onto the other end;
+                unlink for asymmetric tips (sharp exit / round entry). */}
+            <div className="flex items-center gap-2 px-1">
+              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
+                Taper Start
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={brushTaperStart}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  updateBrushParam('brushTaperStart', v);
+                  if (brushTaperLink) updateBrushParam('brushTaperEnd', v);
+                }}
+                onMouseUp={(e) => e.currentTarget.blur()}
+                onTouchEnd={(e) => e.currentTarget.blur()}
+                className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
+              />
+              <div className="w-12 justify-end text-right text-indigo-600 dark:text-indigo-400 font-black text-[10px] tabular-nums">
+                {brushTaperStart}%
+              </div>
+            </div>
+            <div className="flex items-center gap-2 px-1">
+              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
+                Taper End
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={brushTaperEnd}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  updateBrushParam('brushTaperEnd', v);
+                  if (brushTaperLink) updateBrushParam('brushTaperStart', v);
+                }}
+                onMouseUp={(e) => e.currentTarget.blur()}
+                onTouchEnd={(e) => e.currentTarget.blur()}
+                className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
+              />
+              <div className="w-12 justify-end text-right text-indigo-600 dark:text-indigo-400 font-black text-[10px] tabular-nums">
+                {brushTaperEnd}%
+              </div>
+            </div>
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
+                Taper Link
+              </span>
+              <Switch
+                checked={brushTaperLink}
+                onChange={(v: boolean) => updateBrushFlag('brushTaperLink', v)}
+                activeColor="bg-indigo-500"
+              />
+            </div>
+
+            {/* Pressure → opacity; velocity → width */}
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
+                Pressure Opacity
+              </span>
+              <Switch
+                checked={brushPressureOpacity}
+                onChange={(v: boolean) => updateBrushFlag('brushPressureOpacity', v)}
+                activeColor="bg-indigo-500"
+              />
+            </div>
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
+                Velocity
+              </span>
+              <Switch
+                checked={brushVelocity}
+                onChange={(v: boolean) => updateBrushFlag('brushVelocity', v)}
+                activeColor="bg-indigo-500"
+              />
+            </div>
+          </div>
+        </>
       )}
+
+      {/* Presets (brush only) */}
+      {!isEraser && (
+        <>
+          <div className="mx-1 border-t border-[var(--border-subtle)] dark:border-white/10" />
+          <div className="flex flex-col gap-1.5 p-1">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight">
+                Presets
+              </span>
+            {presetNaming === null ? (
+              <button
+                onClick={() => setPresetNaming(`Preset ${brushPresets.length + 1}`)}
+                className="text-[9px] font-black uppercase tracking-tight text-indigo-600 dark:text-indigo-400 outline-none"
+              >
+                Save
+              </button>
+            ) : (
+              <div className="flex items-center gap-1">
+                <input
+                  autoFocus
+                  value={presetNaming}
+                  onChange={(e) => setPresetNaming(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitPresetName();
+                    if (e.key === 'Escape') setPresetNaming(null);
+                  }}
+                  onBlur={commitPresetName}
+                  placeholder="Preset name"
+                  className="w-24 h-5 px-1.5 text-[10px] font-bold bg-[var(--bg-stage)] border border-[var(--border-subtle)] rounded outline-none focus:border-indigo-500/50 text-[var(--text-primary)]"
+                />
+              </div>
+            )}
+          </div>
+          {brushPresets.map((p) => (
+            <div key={p.id} className="flex items-center gap-1 px-1">
+              <button
+                onClick={() => applyBrushPreset(p.id)}
+                className="flex-1 text-left text-[10px] font-bold text-[var(--text-primary)] truncate px-2 py-1 rounded bg-[var(--bg-stage)] hover:bg-[var(--border-subtle)] transition-colors outline-none"
+              >
+                {p.name}
+              </button>
+              <button
+                onClick={() => deleteBrushPreset(p.id)}
+                className="text-[10px] font-black text-[var(--text-muted)] hover:text-red-500 px-1 outline-none"
+                aria-label={`Delete preset ${p.name}`}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          </div>
+        </>
+      )}
+
     </div>
   );
 });

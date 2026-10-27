@@ -276,11 +276,16 @@ export interface FaceParams {
  * GPU-side params for the `stroke` renderer (logic brush ribbon extrusion).
  * An engine-neutral trajectory: the packed point stream + brush attributes the
  * StrokeRenderer's compute pass extrudes into a ribbon mesh. Carries NO business
- * model (that lives on `Layer.strokeData`); the scene-assembly mapper resolves colour
+ * model (that lives on `Layer.strokes`); the scene-assembly mapper resolves colour
  * to working-gamut linear and packs the geometry before it reaches here.
+ *
+ * A stroke COLLECTION layer carries one entry per stroke: every stroke renders
+ * as its own ribbon draw into the layer's single shared transient (the strokes
+ * composite into each other inside the layer, then the layer composites once).
  */
 export interface StrokeParams {
-  /** Packed trajectory: [x, y, pressure, _pad] × N (working/logical pixel geometry). */
+  /** Packed trajectory: [x, y, width, alpha] × N — lane 2 is the effective tip
+   *  diameter (size × pressure), lane 3 the per-point opacity multiplier. */
   readonly points: Float32Array;
   /** Number of points in `points` (points.length === pointCount × 4). */
   readonly pointCount: number;
@@ -326,7 +331,7 @@ export interface StrokeParams {
  */
 export type VectorParams =
   | { readonly renderer: 'sdf'; readonly sdf: SdfShapeParams }
-  | { readonly renderer: 'stroke'; readonly stroke: StrokeParams }
+  | { readonly renderer: 'stroke'; readonly strokes: readonly StrokeParams[] }
   | { readonly renderer: 'text'; readonly text: TextParams }
   | { readonly renderer: 'face'; readonly face: FaceParams };
 

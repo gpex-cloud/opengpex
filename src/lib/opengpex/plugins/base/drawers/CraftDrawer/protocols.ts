@@ -97,6 +97,26 @@ import type { MarkerDataBase, MarkerKind } from '../../overlays/MarkerOverlay/ma
 export type CraftType = 'text' | 'brush' | 'eraser' | 'restore' | 'mosaic' | 'marker' | 'pen';
 export type ActiveCraft = CraftType | null;
 
+/**
+ * One saved brush preset: a named snapshot of the brush parameter set the
+ * brush panel exposes. Applied wholesale by the presets UI.
+ */
+export interface BrushPreset {
+  id: string;
+  name: string;
+  size: number;
+  opacity: number;
+  hardness: number;
+  antiAliased: boolean;
+  stabilizer: number;
+  pressureOpacity: boolean;
+  taper: number;
+  /** Per-end taper snapshots; falling back to taper for pre-split presets. */
+  taperStart?: number;
+  taperEnd?: number;
+  velocity: boolean;
+}
+
 /** Pending text style preset (persisted across tool activations) */
 export interface PendingTextData {
   fontFamily?: string;
@@ -138,6 +158,43 @@ export interface CraftDrawerConfig {
    * Omitted = AA on (the historical behaviour).
    */
   brushAntiAliased?: boolean;
+  /**
+   * Rope-model stabilizer slack in SCREEN px (0 = off, 100 = very steady).
+   * The rope point chases the pointer and only moves the slack excess, so
+   * hand tremor inside the slack never enters the stroke; dividing by the
+   * camera zoom at sample time keeps the felt smoothness zoom-independent.
+   * Omitted = off.
+   */
+  brushStabilizer?: number;
+  /**
+   * Pen pressure → per-point ink opacity (pressure-opacity dynamics). The
+   * WIDTH lane always follows pressure; this toggle additionally multiplies
+   * the same effective pressure into each sample's ALPHA lane. Omitted = off.
+   */
+  brushPressureOpacity?: boolean;
+  /**
+   * Stroke start/end taper (calligraphic entry/exit) as a percentage of the
+   * tip diameter — the per-end arc-length zone that ramps pressure 0→1.
+   * Omitted = off.
+   */
+  brushTaper?: number;
+  /** Per-end taper overrides (0..100); falling back to brushTaper when omitted. */
+  brushTaperStart?: number;
+  brushTaperEnd?: number;
+  /** Start/End sliders move together (default true). */
+  brushTaperLink?: boolean;
+
+  /**
+   * Velocity dynamics (fast-thin / slow-thick): pointer speed above a
+   * reference thins the stroke, down to a fixed floor. Omitted = off.
+   */
+  brushVelocity?: boolean;
+  /**
+   * Saved brush presets (F7): a named snapshot of the full brush parameter
+   * set (size/opacity/hardness/AA + the four dynamics knobs). Persisted like
+   * the other brush parameters.
+   */
+  brushPresets?: BrushPreset[];
   /** User-configured text style preset for next text layer creation */
   pendingTextData?: PendingTextData;
   /** Mosaic brush size preset */

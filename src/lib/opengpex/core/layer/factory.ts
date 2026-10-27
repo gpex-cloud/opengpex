@@ -217,7 +217,7 @@ export const LayerFactory = {
   /**
    * getBlank: Returns a standardized "empty" layer patch. Invisible, non-interactive, no asset.
    * Per-tool payloads are cleared too: role clones are built via `{...hostLayer, ...getBlank()}`,
-   * and without these the clone would silently inherit penData/strokeData/markerData/textData.
+   * and without these the clone would silently inherit penData/strokes/markerData/textData.
    */
   getBlank(): Partial<Layer> {
     return {
@@ -229,6 +229,7 @@ export const LayerFactory = {
       bitmapMasks: [],
       visibleShape: { type: 'rect', rect: { x: 0, y: 0, w: 0, h: 0 }, __brand: 'local' } as LocalShape,
       penData: undefined,
+      strokes: undefined,
       strokeData: undefined,
       markerData: undefined,
       textData: undefined,

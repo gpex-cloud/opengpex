@@ -35,7 +35,7 @@ import { BLEND_WGSL, isHardwareBlendable } from '../shaders/blend';
 import { VIEW_WGSL, VIEW_WGSL_HDR, VIEW_UNIFORM_BUFFER_SIZE } from '../shaders/view';
 import { SDF_WGSL, SDF_UNIFORM_BUFFER_SIZE } from '../shaders/sdf';
 import { FACE_WGSL, FACE_UNIFORM_BUFFER_SIZE } from '../shaders/face';
-import { STROKE_EXTRUDE_WGSL, STROKE_PAINT_WGSL, STROKE_UNIFORM_BUFFER_SIZE } from '../shaders/stroke';
+import { STROKE_EXTRUDE_WGSL, STROKE_PAINT_WGSL, STROKE_UNIFORM_BUFFER_SIZE, STROKE_VERTEX_STRIDE } from '../shaders/stroke';
 import { TEXT_PAINT_WGSL, TEXT_UNIFORM_BUFFER_SIZE, TEXT_INSTANCE_STRIDE } from '../shaders/text';
 import { ADJUST_UNIFORM_BUFFER_SIZE } from '../shaders/adjust';
 import { ADJUST_PRE_WGSL, ADJUST_PRE_UNIFORM_BUFFER_SIZE } from '../shaders/adjustPre';
@@ -1747,8 +1747,9 @@ export class PipelineCache {
   }
 
   /**
-   * Acquire the stroke PAINT pipeline. The vertex buffer is the `array<vec4<f32>>`
-   * ribbon `cs_extrude` produced (arrayStride 16: pos @0, uv @8). MAX blend (coverage
+   * Acquire the stroke PAINT pipeline. The vertex buffer is the flat-f32 ribbon
+   * `cs_extrude` produced (arrayStride 40: pos @0, a @8, b @16, radii @24, alphas @32).
+   * MAX blend (coverage
    * union): per-segment quads overlap on the inner side of every turn, so a later
    * segment's AA edge must not REPLACE a neighbour's solid pixel with a transparent one
    * (the white-speckle artifact). The colour is constant across the stroke, so `max`
@@ -1768,13 +1769,14 @@ export class PipelineCache {
         entryPoint: 'vs_paint',
         buffers: [
           {
-            arrayStride: 32,
+            arrayStride: STROKE_VERTEX_STRIDE,
             stepMode: 'vertex',
             attributes: [
               { format: 'float32x2', offset: 0, shaderLocation: 0 },  // pos
               { format: 'float32x2', offset: 8, shaderLocation: 1 },  // core_a
               { format: 'float32x2', offset: 16, shaderLocation: 2 }, // core_b
               { format: 'float32x2', offset: 24, shaderLocation: 3 }, // radii (ra, rb)
+              { format: 'float32x2', offset: 32, shaderLocation: 4 }, // endpoint alphas
             ],
           },
         ],

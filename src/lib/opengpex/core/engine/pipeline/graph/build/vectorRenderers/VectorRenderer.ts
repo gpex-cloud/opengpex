@@ -80,13 +80,12 @@ export interface VectorRenderArgs {
    */
   readonly frameToken?: object;
   /**
-   * Frozen selection-confinement coverage for THIS source (stroke layers only):
-   * a rgba8unorm texture covering the transient's full logical extent, sampled
-   * 1:1 via normalized uv. Present only when the stroke carries a frozen
-   * `StrokeData.confinement`; the strategy multiplies its fragment coverage by
-   * it. Undefined = unconstrained stroke.
+   * Frozen selection-confinement coverage per stroke (stroke layers only): one
+   * rgba8unorm texture per stroke in the collection, covering the transient's
+   * full logical extent, sampled 1:1 via normalized uv. An entry is undefined
+   * for an unconstrained stroke (the renderer binds a 1×1 alpha=1 dummy there).
    */
-  readonly confinementCoverage?: GPUTextureView;
+  readonly confinementCoverages?: readonly (GPUTextureView | undefined)[];
 }
 
 export interface VectorRenderer {

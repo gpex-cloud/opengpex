@@ -246,6 +246,27 @@ export const Hydrating = {
       });
     }
 
+    // Legacy vector-brush migration (one stroke per layer → stroke collection):
+    // documents saved before the collection refactor stored the brush payload
+    // as a single `strokeData`. It lifts verbatim into a one-element `strokes`
+    // array — nothing is dropped. The stroke's box in that payload was the
+    // layer's own bounding (points were layer-local), so the box is derived
+    // from the layer bounding when missing. Runs inside the generic recursion,
+    // so layers referenced from undo history migrate identically.
+    if (result.strokeData && typeof result.strokeData === 'object' && !Array.isArray(result.strokes)) {
+      const sd = result.strokeData as { points?: unknown; box?: unknown };
+      const bounding = (result.bounding ?? result.rect) as { w?: unknown; h?: unknown } | undefined;
+      const legacyBox = {
+        x: 0,
+        y: 0,
+        w: typeof bounding?.w === 'number' ? bounding.w : 0,
+        h: typeof bounding?.h === 'number' ? bounding.h : 0,
+      };
+      const lifted = { ...(sd as Record<string, unknown>), box: sd.box ?? legacyBox };
+      result.strokes = [lifted];
+      delete result.strokeData;
+    }
+
     // Legacy-document selection migration (per-tool slots → single
     // confinement entity): frames saved before the single-slot refactor
     // stored selections in `clipBoxes`, a record keyed by producing tool id.

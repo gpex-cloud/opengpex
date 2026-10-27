@@ -34,12 +34,18 @@ export const SIGNAL_DRAWING_STROKE = 'signal.drawing_stroke';
 
 // ─── Command IDs ───────────────────────────────────────────────────────────────
 
-/** Places a freshly started stroke as a `type:'vector'` layer (undoable). */
+/**
+ * Places the in-progress stroke's own layer above the active layer, converting
+ * it to the strokes collection schema. Undoable — this IS the gesture's only
+ * checkpoint (taken at the first drawable sample; the rest of the trajectory
+ * rides the silent volatile track onto the same layer, so undo removes exactly
+ * the one stroke layer).
+ */
 export const CMD_PLACE = 'cmd.place';
 
 // ─── Internal UID Constants ──────────────────────────────────────────────────────
 
-/** Internal command UID: place a new stroke layer. */
+/** Internal command UID: place a stroke layer. */
 export const _CMD_PLACE_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PLACE}`;
 
 // ─── Tunables ──────────────────────────────────────────────────────────────────
@@ -77,6 +83,57 @@ export const MAX_STROKE_POINTS = 40_000;
  * plus 1px for the analytic edge feather.
  */
 export const STROKE_BOX_PADDING_EXTRA_PX = 1;
+
+// ─── Input-dynamics tunables ────────────────────────────────────────────────────
+
+/**
+ * Reference pointer speed for velocity dynamics, in SCREEN px per millisecond
+ * (canvas distances are multiplied by camera zoom before comparison — the
+ * hand moves the screen, and the dynamic must feel identical at any zoom).
+ * The width factor is the reciprocal of the speed normalized by this value:
+ * exactly 1 at reference speed, decaying smoothly and continuously above it
+ * down to {@link VELOCITY_MIN_FACTOR}. There is NO threshold step — ~1.2
+ * screen px/ms is a normal deliberate hand, so ordinary strokes ride the
+ * visible part of the curve instead of sitting in a dead zone below it.
+ */
+export const VELOCITY_REFERENCE_PXMS = 1.2;
+
+/** Floor for the velocity width factor — fast flicks never vanish entirely. */
+export const VELOCITY_MIN_FACTOR = 0.35;
+
+/**
+ * Floor for the adaptive EMA factor in the velocity estimator, 0..1. The
+ * GIMP-style factor is min(SMOOTHING, normalized speed); without this floor a
+ * near-stationary sample would freeze the estimator (factor ~0 = no update),
+ * leaving the width stuck at whatever the previous gesture's speed implied.
+ */
+export const VELOCITY_MIN_NORM = 0.05;
+
+/**
+ * Taper zone cap as a multiple of the tip diameter: the slider's 100% maps to
+ * this many diameters. One diameter (the pre-20261028 mapping) is same scale
+ * as the round end cap it replaces, so the taper was invisible on small tips;
+ * five diameters gives a clearly readable calligraphic tip at any size.
+ */
+export const TAPER_LENGTH_PER_SIZE = 5;
+
+/**
+ * Taper zone cap as a fraction of the stroke's total arc length, per end.
+ * The arc clamp keeps the diameter multiple from swallowing short strokes:
+ * a zone longer than a quarter of the stroke would taper most of the body
+ * away and make the slider feel nonlinear.
+ */
+export const TAPER_ARC_FRACTION = 0.25;
+
+/**
+ * EMA factor for the velocity-dynamics signal, 0..1 (higher = less smoothing).
+ * Pointer-event timestamps and trackpad/pointer-acceleration speeds are noisy,
+ * so the per-sample speed is smoothed twice before it drives width: the time
+ * delta is blended with the previous delta, then the resulting speed with the
+ * previous speed. Without this the width pulses with input noise on every
+ * fast gesture (the 'string of beads' artifact).
+ */
+export const VELOCITY_SMOOTHING = 0.3;
 
 // ─── Cross-Plugin Typed Facade ──────────────────────────────────────────────────
 

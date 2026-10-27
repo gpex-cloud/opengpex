@@ -108,9 +108,55 @@ export function prepareConfinementCoverage(
   return confinementCache.prepare(encoder, ctx, key, subMasks, maskW, maskH).texture;
 }
 
+/**
+ * Sweep the STROKE namespace of the shared coverage cache against the keys seen
+ * this frame. Stroke keys embed a per-stroke content token (index + rings
+ * digest), so undo/redo churn would otherwise accumulate stale bakes forever —
+ * the adjust namespace keys by layer id only and sweeps its own prefix in
+ * {@link prepareAdjustConfinementSources}.
+ */
+export function sweepStrokeConfinement(seen: Set<string>): void {
+  confinementCache.sweep(seen, CONFINEMENT_SOURCE_STROKE);
+}
+
 /** Teardown seam for the frozen-selection coverage cache — wire alongside clearVmaskCache(). */
 export function clearConfinementCoverageCache(): void {
   confinementCache.clear();
+}
+
+/**
+ * Compact content token for one stroke's frozen selection rings — a stable
+ * digest over the ring geometry (count, per-ring length, first/last point and
+ * a stride-sampled FNV-1a over coordinates). Selection snapshots are frozen at
+ * stroke creation and never mutate, so the token's only job is to distinguish
+ * DIFFERENT snapshots that land at the same cache-key slot after undo/redo
+ * re-arranged the stroke array; exact collision-freedom is not required (the
+ * rings are re-baked on any token change, never on a token match with
+ * different content — impossible under the immutability contract).
+ */
+export function confinementContentToken(
+  rings: readonly (readonly (readonly [number, number])[])[],
+): string {
+  let hash = 0x811c9dc5;
+  const step = (v: number) => {
+    hash ^= v & 0xffff;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  };
+  step(rings.length);
+  for (const ring of rings) {
+    step(ring.length);
+    const stride = Math.max(1, Math.floor(ring.length / 8));
+    for (let i = 0; i < ring.length; i += stride) {
+      step(Math.round(ring[i][0] * 4));
+      step(Math.round(ring[i][1] * 4));
+    }
+    if (ring.length > 0) {
+      const last = ring[ring.length - 1];
+      step(Math.round(last[0] * 4));
+      step(Math.round(last[1] * 4));
+    }
+  }
+  return hash.toString(36);
 }
 
 /**

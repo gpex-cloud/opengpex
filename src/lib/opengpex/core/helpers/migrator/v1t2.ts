@@ -150,6 +150,40 @@ export function sanitizeLayer(layer: Record<string, unknown>): boolean {
     }
   }
 
+  // 2b. Stroke collection migration (one stroke per layer → strokes[]):
+  // lift the legacy single `strokeData` verbatim into a one-element collection
+  // (its points were layer-local, so the box derives from the layer bounding)
+  // and drop the superseded field. Applied on packed-project sanitize so a
+  // .gpex round-trip lands on the current schema.
+  if (layer.strokeData && typeof layer.strokeData === 'object' && !Array.isArray(layer.strokes)) {
+    const sd = layer.strokeData as Record<string, unknown>;
+    const bounding = (layer.bounding ?? layer.rect) as { w?: unknown; h?: unknown } | undefined;
+    layer.strokes = [
+      {
+        ...sd,
+        box: sd.box ?? {
+          x: 0,
+          y: 0,
+          w: typeof bounding?.w === 'number' ? bounding.w : 0,
+          h: typeof bounding?.h === 'number' ? bounding.h : 0,
+        },
+      },
+    ];
+    delete layer.strokeData;
+    changed = true;
+  }
+  if (Array.isArray(layer.strokes)) {
+    for (const s of layer.strokes) {
+      if (s && typeof s === 'object' && (s as Record<string, unknown>).color !== undefined) {
+        const sd = s as Record<string, unknown>;
+        if (!isColorValueLike(sd.color)) {
+          sd.color = migrateToColorValue(sd.color);
+          changed = true;
+        }
+      }
+    }
+  }
+
   // 3. MarkerData: stroke.color, fill.color
   if (layer.markerData && typeof layer.markerData === 'object') {
     const md = layer.markerData as Record<string, unknown>;

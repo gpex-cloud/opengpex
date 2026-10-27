@@ -80,16 +80,19 @@
 /** Compute workgroup size for `cs_extrude` (one invocation per segment). */
 export const STROKE_EXTRUDE_WORKGROUP_SIZE = 64;
 
-/** Bytes per input point `Pt { pos: vec2<f32>, width: f32, _pad: f32 }`. */
+/** Bytes per input point `Pt { pos: vec2<f32>, width: f32, alpha: f32 }`. */
 export const STROKE_POINT_STRIDE = 16;
 
 /**
- * Bytes per output ribbon vertex (32 = 8 floats): `pos` vec2 (logical px, rasterized +
+ * Bytes per output ribbon vertex (40 = 10 floats): `pos` vec2 (logical px, rasterized +
  * interpolated as the fragment sample point) + segment core `a` vec2 + `b` vec2 + `radii`
- * vec2 (ra, rb). The compute writes each vertex as TWO `vec4<f32>`: `(pos, a)` then
- * `(b, radii)`. The paint pipeline reads it back with attributes at offsets 0/8/16/24.
+ * vec2 (ra, rb) + endpoint alphas vec2 (per-point opacity multipliers, interpolated by
+ * the fragment). The compute writes each vertex as TEN flat f32s — the stride is not a
+ * multiple of 16, so the verts storage is an `array<f32>` (f32 has 4-byte alignment),
+ * NOT an `array<vec4<f32>>`. The paint pipeline reads it back with attributes at
+ * offsets 0/8/16/24/32.
  */
-export const STROKE_VERTEX_STRIDE = 32;
+export const STROKE_VERTEX_STRIDE = 40;
 
 /** Ribbon vertices emitted per segment (one bounding quad = two triangles). */
 export const STROKE_VERTS_PER_SEGMENT = 6;
@@ -105,27 +108,32 @@ export const STROKE_UNIFORM_BUFFER_SIZE = 48;
  * COMPUTE module: extrude the capsule bounding quad from the trajectory point stream.
  *
  * Bindings (group 0):
- *   0 — `pts`   : `array<Pt>`          (read storage,       trajectory in)
- *   1 — `verts` : `array<vec4<f32>>`   (read_write storage, ribbon mesh out — 2 vec4/vertex)
+ *   0 — `pts`   : `array<Pt>`        (read storage,       trajectory in)
+ *   1 — `verts` : `array<f32>`       (read_write storage, ribbon mesh out — 10 f32/vertex)
  *
  * DISPATCH CONTRACT: `x = ceil((pointCount-1) / STROKE_EXTRUDE_WORKGROUP_SIZE)`,
  * `y = z = 1`. Each invocation owns exactly one segment i and writes the 6 vertices
- * (12 vec4) at verts[i*12 .. i*12+11].
+ * (60 floats) at verts[i*60 .. i*60+59].
  */
 export const STROKE_EXTRUDE_WGSL = /* wgsl */ `
 struct Pt {
   pos   : vec2<f32>,   // logical layer-local pixels
   width : f32,         // effective tip DIAMETER here (size × pressure); half-width = width * 0.5
-  _pad  : f32,
+  alpha : f32,         // per-point paint-opacity multiplier 0..1 (absent samples = 1)
 };
 
 @group(0) @binding(0) var<storage, read>       pts   : array<Pt>;
-@group(0) @binding(1) var<storage, read_write> verts : array<vec4<f32>>; // 2 vec4/vertex
+// Flat f32 ring: a vertex is 10 floats (40 bytes) — NOT a multiple of 16, so an
+// array<vec4<f32>> would misalign every vertex after the first.
+@group(0) @binding(1) var<storage, read_write> verts : array<f32>;
 
-// Write one ribbon vertex (2 vec4): (pos.xy, coreA.xy) then (coreB.xy, ra, rb).
-fn write_vert(idx : u32, pos : vec2<f32>, ca : vec2<f32>, cb : vec2<f32>, rr : vec2<f32>) {
-  verts[idx * 2u]        = vec4<f32>(pos, ca);
-  verts[idx * 2u + 1u]   = vec4<f32>(cb, rr);
+// Write one ribbon vertex (10 flat floats): pos, coreA, coreB, radii, endpoint alphas.
+fn write_vert(base : u32, pos : vec2<f32>, ca : vec2<f32>, cb : vec2<f32>, rr : vec2<f32>, al : vec2<f32>) {
+  verts[base + 0u] = pos.x;  verts[base + 1u] = pos.y;
+  verts[base + 2u] = ca.x;   verts[base + 3u] = ca.y;
+  verts[base + 4u] = cb.x;   verts[base + 5u] = cb.y;
+  verts[base + 6u] = rr.x;   verts[base + 7u] = rr.y;
+  verts[base + 8u] = al.x;   verts[base + 9u] = al.y;
 }
 
 @compute @workgroup_size(${STROKE_EXTRUDE_WORKGROUP_SIZE})
@@ -166,14 +174,19 @@ fn cs_extrude(@builtin(global_invocation_id) gid : vec3<u32>) {
   let cb = b.pos;
   let rr = vec2<f32>(ra, rb);
 
-  let base = i * ${STROKE_VERTS_PER_SEGMENT}u;
+  // Per-point paint opacity rides to the fragment through the quad's endpoints.
+  let al = vec2<f32>(a.alpha, b.alpha);
+
+  // Float offset of this segment's first vertex; per-vertex stride = 10 floats.
+  let vstride = ${STROKE_VERTEX_STRIDE / 4}u;
+  let base = i * ${STROKE_VERTS_PER_SEGMENT}u * vstride;
   // Two triangles: (c0,c1,c2) and (c3,c2,c1). cullMode 'none', winding irrelevant.
-  write_vert(base + 0u, c0, ca, cb, rr);
-  write_vert(base + 1u, c1, ca, cb, rr);
-  write_vert(base + 2u, c2, ca, cb, rr);
-  write_vert(base + 3u, c3, ca, cb, rr);
-  write_vert(base + 4u, c2, ca, cb, rr);
-  write_vert(base + 5u, c1, ca, cb, rr);
+  write_vert(base + 0u * vstride, c0, ca, cb, rr, al);
+  write_vert(base + 1u * vstride, c1, ca, cb, rr, al);
+  write_vert(base + 2u * vstride, c2, ca, cb, rr, al);
+  write_vert(base + 3u * vstride, c3, ca, cb, rr, al);
+  write_vert(base + 4u * vstride, c2, ca, cb, rr, al);
+  write_vert(base + 5u * vstride, c1, ca, cb, rr, al);
 }
 `;
 
@@ -185,7 +198,8 @@ fn cs_extrude(@builtin(global_invocation_id) gid : vec3<u32>) {
  *       VERTEX reads `target_size` (NDC map), FRAGMENT reads `color` + `hardness` +
  *       `hard_edge` (coverage).
  *
- * Vertex buffer: the `cs_extrude` output (arrayStride 32; pos @0, a @8, b @16, radii @24).
+ * Vertex buffer: the `cs_extrude` output (arrayStride 40; pos @0, a @8, b @16, radii @24,
+ * endpoint alphas @32).
  */
 export const STROKE_PAINT_WGSL = /* wgsl */ `
 struct StrokeUniforms {
@@ -219,7 +233,9 @@ struct VSInput {
   @location(1) core_a : vec2<f32>,
   @location(2) core_b : vec2<f32>,
   @location(3) radii  : vec2<f32>,
-};
+  // location(4): per-point opacity at the segment's endpoints.
+  @location(4) alphas : vec2<f32>,
+}
 
 struct VSOut {
   @builtin(position) clip_pos : vec4<f32>,
@@ -227,7 +243,8 @@ struct VSOut {
   @location(1) core_a : vec2<f32>,
   @location(2) core_b : vec2<f32>,
   @location(3) radii  : vec2<f32>,
-};
+  @location(4) alphas : vec2<f32>,
+}
 
 @vertex
 fn vs_paint(in : VSInput) -> VSOut {
@@ -241,6 +258,7 @@ fn vs_paint(in : VSInput) -> VSOut {
   out.core_a = in.core_a;
   out.core_b = in.core_b;
   out.radii = in.radii;
+  out.alphas = in.alphas;
   return out;
 }
 
@@ -254,6 +272,10 @@ fn fs_paint(in : VSOut) -> @location(0) vec4<f32> {
   let t = clamp(dot(pa, ba) / denom, 0.0, 1.0);
   let c = in.core_a + t * ba;
   let r = max(mix(in.radii.x, in.radii.y, t), 1e-4);
+
+  // Per-point paint opacity, interpolated along the segment the same way the
+  // radius is (pressure-opacity dynamics: pen pressure → ink density).
+  let ptAlpha = mix(in.alphas.x, in.alphas.y, t);
 
   // Normalized radial distance: 0 on the core, 1 at the capsule edge, >1 outside.
   let dn = length(in.p - c) / r;
@@ -273,7 +295,7 @@ fn fs_paint(in : VSOut) -> @location(0) vec4<f32> {
   // fwidth term: the step lands exactly on the geometry edge (pixel-art look).
   if (u.hard_edge == 1u) {
     let cov = select(0.0, 1.0, dn <= 1.0);
-    return vec4<f32>(u.color.rgb, u.color.a * cov * conf);
+    return vec4<f32>(u.color.rgb, u.color.a * cov * conf * ptAlpha);
   }
 
   // Analytic edge AA from the screen-space gradient, so the geometric edge stays smooth
@@ -286,6 +308,6 @@ fn fs_paint(in : VSOut) -> @location(0) vec4<f32> {
   let cov = 1.0 - smoothstep(inner, 1.0, dn);
 
   // STRAIGHT alpha — downstream drawLayer premultiplies and applies layer.opacity.
-  return vec4<f32>(u.color.rgb, u.color.a * cov * conf);
+  return vec4<f32>(u.color.rgb, u.color.a * cov * conf * ptAlpha);
 }
 `;

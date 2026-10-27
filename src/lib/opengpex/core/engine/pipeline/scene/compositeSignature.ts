@@ -127,7 +127,7 @@ function vmaskSig(mask: VectorMaskDesc | undefined): string {
 function vectorSourceSig(src: VectorParams): string {
   switch (src.renderer) {
     case 'stroke':
-      return strokeSourceFingerprint(src.stroke);
+      return strokeSourceFingerprint(src.strokes);
     case 'sdf':
       return `vector:sdf:${JSON.stringify(src.sdf, charXReplacer)}`;
     case 'face':

@@ -70,7 +70,12 @@ import type { VectorRenderContext } from './vectorRenderers/VectorRenderer';
 import { resolveVectorRenderer } from './vectorRenderers';
 import { vectorTransientSize } from '../support/vectorTransient';
 import { runFilterChain } from './runFilterChain';
-import { prepareConfinementCoverage, CONFINEMENT_SOURCE_STROKE } from './prepareConfinementSources';
+import {
+  prepareConfinementCoverage,
+  sweepStrokeConfinement,
+  confinementContentToken,
+  CONFINEMENT_SOURCE_STROKE,
+} from './prepareConfinementSources';
 import type { BuildContext, PreparedSource } from './types';
 
 const CLEAR_COLOR: GPUColor = { r: 0, g: 0, b: 0, a: 0 };
@@ -86,6 +91,11 @@ export function prepareVectorSources(
   // One opaque token per composite invocation — strategies use it as a frame
   // boundary (the text atlas applies deferred flushes once per frame).
   const frameToken: object = {};
+  // Frozen-selection coverage keys baked THIS frame, swept ONCE after the loop:
+  // a per-layer sweep would evict OTHER layers' freshly baked entries (their
+  // passes are already recorded on this frame's encoder), producing a destroyed
+  // texture used in the frame's submit.
+  const seenConfinementKeys = new Set<string>();
   const vectorCtx: VectorRenderContext = {
     device,
     pipelineCache,
@@ -194,19 +204,30 @@ export function prepareVectorSources(
     const renderer = resolveVectorRenderer(source.renderer);
     renderer.encodePrepass?.(encoder, vectorCtx, { params: source, frameToken });
 
-    // Confinement multiply: bake the stroke's frozen selection snapshot into
-    // a coverage texture BEFORE the render pass opens (compute), sized to the
+    // Confinement multiply: bake each stroke's frozen selection snapshot into a
+    // coverage texture BEFORE the render pass opens (compute), sized to the
     // transient's exact texel dims so the fragment samples it 1:1 via normalized
-    // uv. The snapshot travels with the stroke (layer-local, frozen at creation)
-    // — the pipeline never reads the live frame selection, so undo/redo replay
-    // reproduces bit-identical pixels regardless of later selection edits.
-    let confinementCoverage: GPUTextureView | undefined;
-    if (source.renderer === 'stroke' && source.stroke.confinement) {
-      const conf = source.stroke.confinement;
-      confinementCoverage = prepareConfinementCoverage(
-        encoder, ctx, `${CONFINEMENT_SOURCE_STROKE}${layer.id}`, conf.rings, conf.antiAliased,
-        layer.width ?? 1, layer.height ?? 1, scale,
-      ).createView();
+    // uv. The snapshot travels with the stroke (stroke-box-local, re-based into
+    // layer space by the mapper, frozen at creation) — the pipeline never reads
+    // the live frame selection, so undo/redo replay reproduces bit-identical
+    // pixels regardless of later selection edits. The cache key carries the
+    // stroke index AND a compact content token: appends shift a stroke's index
+    // only when new strokes land, but undo/redo can put a DIFFERENT stroke at
+    // the same index, and a position-free index-only key would then sample a
+    // stale bake. Rings are small selection polygons, so the token walk is cheap.
+    let confinementCoverages: (GPUTextureView | undefined)[] | undefined;
+    if (source.renderer === 'stroke' && source.strokes.some((s) => s.confinement)) {
+      confinementCoverages = source.strokes.map((s, i) => {
+        const conf = s.confinement;
+        if (!conf) return undefined;
+        const token = confinementContentToken(conf.rings);
+        const key = `${CONFINEMENT_SOURCE_STROKE}${layer.id}:${i}:${token}`;
+        seenConfinementKeys.add(key);
+        return prepareConfinementCoverage(
+          encoder, ctx, key, conf.rings, conf.antiAliased,
+          layer.width ?? 1, layer.height ?? 1, scale,
+        ).createView();
+      });
     }
 
     const vectorPass = encoder.beginRenderPass({
@@ -226,7 +247,7 @@ export function prepareVectorSources(
       params: source,
       density: Math.max(scale[0], scale[1]),
       frameToken,
-      confinementCoverage,
+      confinementCoverages,
     });
     vectorPass.end();
 
@@ -263,4 +284,5 @@ export function prepareVectorSources(
       ),
     );
   }
+  sweepStrokeConfinement(seenConfinementKeys);
 }
