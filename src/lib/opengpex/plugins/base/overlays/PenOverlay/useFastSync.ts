@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import type { CameraState, Frame, Layer, VolatileState } from '@opengpex/editor/core/types';
@@ -25,6 +25,7 @@ import {
   composePenToolState,
   getPenDraftSelection,
   getPenSelectionVersion,
+  getPenWorkVersion,
   placePenRubberTip,
   refreshPenAnchorHover,
 } from './interactions';
@@ -34,28 +35,44 @@ import { buildPenOverlaySvg, canvasToScreen, getPenRubberTip } from './pen/rende
  * usePenSurfaceSync: drives the pen tool's SVG surface.
  *
  * The surface is a viewport-sized, UNSCALED SVG: the fragment is rebuilt in
- * screen px whenever the scratch version, the selection version OR the
- * camera changes (points are projected through the camera at build time, so
- * camera moves must repaint — no CSS transform is involved; see render.ts
- * for why). The draft payload itself is read from the scratch slot
- * (actions.scratch.get) — useFastSync only lends its ticker beat, no
- * volatile data flows into the pen overlay. The rebuild is a small string
- * join (typical paths hold tens of anchors), safe at the 60Hz ticker cadence.
+ * screen px whenever the draft work version, the selection version, the
+ * frame identity OR the camera changes (points are projected through the
+ * camera at build time, so camera moves must repaint — no CSS transform is
+ * involved; see render.ts for why). The draft payload itself is read from
+ * the frame's drafts channel (persisted) plus the gesture working copy
+ * (module store) — useFastSync only lends its ticker beat. The rebuild is a
+ * small string join (typical paths hold tens of anchors), safe at the 60Hz
+ * ticker cadence.
+ *
+ * `outlineOnly` (pen tool INACTIVE) draws the persisted draft as a bare
+ * outline — the Photoshop Work Path behavior: the draft stays visible in
+ * every other tool so the user never loses track of it, but no anchors,
+ * handles or committed-path edit affordances are drawn. The rubber band tip
+ * and hover re-apply are skipped in this mode (both are edit affordances).
  */
 export function usePenSurfaceSync(
   containerRef: React.RefObject<HTMLDivElement | null>,
   groupRef: React.RefObject<SVGGElement | null>,
   isActive: boolean,
+  outlineOnly = false,
 ) {
-  const { geometry, actions } = useEditorServices();
-  const lastScratchVersionRef = useRef<number>(-1);
+  const { geometry } = useEditorServices();
+  const lastWorkVersionRef = useRef<number>(-1);
   const lastSelectionRef = useRef<number>(-1);
   const lastFrameRef = useRef<Frame | null>(null);
   const lastCamRef = useRef<{ x: number; y: number; k: number } | null>(null);
+  // The mode flag rides a ref (not the tick closure) so a tool enter/exit is
+  // seen even if the ticker still holds the previous callback identity.
+  const outlineRef = useRef<boolean>(outlineOnly);
+  const lastOutlineRef = useRef<boolean>(outlineOnly);
+  // Effect (not render) write: react-hooks/refs forbids mutating refs during
+  // render, and the ticker reads this on the following frame anyway.
+  useEffect(() => { outlineRef.current = outlineOnly; }, [outlineOnly]);
 
   useFastSync(containerRef, isActive, (_v: VolatileState, f: Frame, cam: CameraState) => {
     const g = groupRef.current;
     if (!g) return;
+    const outline = outlineRef.current;
 
     const camChanged = !lastCamRef.current ||
       lastCamRef.current.x !== cam.x ||
@@ -63,32 +80,39 @@ export function usePenSurfaceSync(
       lastCamRef.current.k !== cam.k;
     if (camChanged) lastCamRef.current = { x: cam.x, y: cam.y, k: cam.k };
 
-    const scratchVersion = actions.scratch.version();
+    // A tool enter/exit flips the render mode (anchors vs bare outline) —
+    // force one rebuild even when nothing else moved.
+    const modeChanged = lastOutlineRef.current !== outline;
+    lastOutlineRef.current = outline;
+
+    const workVersion = getPenWorkVersion();
     const selectionVersion = getPenSelectionVersion();
-    // The merged frame object changes identity whenever Redux commits layer
-    // work (move/delete/visibility/penData patches) or a volatile layer draft
-    // exists — both must repaint the committed paths even though the scratch
-    // version did not move.
+    // The frame object changes identity whenever Redux commits anything on
+    // it (a draft write, layer moves, visibility, penData patches) — all must
+    // repaint the committed paths even though the module versions did not
+    // move.
     const frameChanged = lastFrameRef.current !== f;
     lastFrameRef.current = f;
-    if (!camChanged && !frameChanged && scratchVersion === lastScratchVersionRef.current && selectionVersion === lastSelectionRef.current) return;
-    lastScratchVersionRef.current = scratchVersion;
+    if (!camChanged && !frameChanged && !modeChanged && workVersion === lastWorkVersionRef.current && selectionVersion === lastSelectionRef.current) return;
+    lastWorkVersionRef.current = workVersion;
     lastSelectionRef.current = selectionVersion;
 
     // Only structural changes and camera moves reach this ticker: the
     // rubber band follows the pointer directly in the pointermove listener
     // (see movePenRubberTip), with NO clock dependency. Its start point is
     // re-placed here in screen px alongside the fragment.
-    const toolState = composePenToolState(actions.scratch, f.id);
+    const toolState = composePenToolState(f);
     g.innerHTML = buildPenOverlaySvg(
       toolState,
       collectCommittedPenLayers(f),
       cam,
       f,
       (layer, frame) => geometry.transform.getLayerLocalMatrix(layer, frame),
-      getPenDraftSelection(),
+      outline ? null : getPenDraftSelection(),
       (path, map) => geometry.bezier.mapPathAnchors(path, map),
+      outline,
     );
+    if (outline) return;
     const tip = getPenRubberTip(toolState);
     placePenRubberTip(tip ? canvasToScreen(tip, cam) : null);
     refreshPenAnchorHover();

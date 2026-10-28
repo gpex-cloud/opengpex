@@ -20,6 +20,7 @@
 import { AssetService } from '@opengpex/editor/core/storage/asset/AssetService';
 import type { ColorIdentity } from '@opengpex/editor/core/storage/asset/AssetStore';
 import { Frame, HistoryStep } from '@opengpex/editor/core/types';
+import { sanitizeFrameDrafts } from '@opengpex/editor/core/state/drafts';
 
 /**
  * DehydratedAsset — one entry of the pool `dehydrate` fills while walking a
@@ -265,6 +266,19 @@ export const Hydrating = {
       const lifted = { ...(sd as Record<string, unknown>), box: sd.box ?? legacyBox };
       result.strokes = [lifted];
       delete result.strokeData;
+    }
+
+    // Frame drafts whitelist (see core/state/drafts.ts): a document may
+    // carry drafts saved by a NEWER build (tool ids this build has no codec
+    // for) or a corrupted payload. Both evaporate here — keys without a
+    // registered codec or failing validation are dropped, so opaque data
+    // never enters the state tree and every surviving entry is guaranteed to
+    // be interpretable by the readers. Frames written without drafts pass
+    // through untouched.
+    if (result.drafts !== undefined) {
+      const sanitized = sanitizeFrameDrafts(result.drafts);
+      if (sanitized) result.drafts = sanitized;
+      else delete result.drafts;
     }
 
     // Legacy-document selection migration (per-tool slots → single

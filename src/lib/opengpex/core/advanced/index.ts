@@ -35,6 +35,7 @@ import { LayerBitmapMaskCommands } from './commands/layer/bmask';
 import { ViewportTranslateCommands } from './commands/viewport/translate';
 import { SystemAssetCommands } from './commands/system/assets';
 import { ViewportTransformCommands } from './commands/viewport/transform';
+import { FrameDraftCommands } from './commands/frame/draft';
 
 /**
  * Advanced command protocol definitions
@@ -84,6 +85,7 @@ export function registerAdvancedCommands(ctx: EditorContextValue['actions']) {
     ViewportTranslateCommands,
     SystemAssetCommands,
     ViewportTransformCommands,
+    FrameDraftCommands,
   ];
 
   allCommandSets.forEach(cmdSet => {

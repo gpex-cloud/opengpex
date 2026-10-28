@@ -53,11 +53,16 @@ export const createPenEditHandler = (): InteractionHandler => {
   return {
     id: 'pen-edit',
     priority: 160,
+    // An Alt-held press on a committed handle breaks the opposite handle's
+    // symmetry from the first move; without this declaration the engaged
+    // alt channel filters the handler out of dispatch and the press falls to
+    // the global layer-move fallback.
+    springOverride: 'alt',
 
     test: (e) => {
       if (!passesBaseGate(e)) return false;
       // During a drawing session every click belongs to pen-draw.
-      if (getPenDraft(e.actions.scratch, e.activeFrame.id) !== null) return false;
+      if (getPenDraft(e.activeFrame) !== null) return false;
       return findAnchorHit(e, e.point.canvas) !== null || findSegmentHit(e, e.point.canvas) !== null;
     },
 

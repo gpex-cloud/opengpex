@@ -66,7 +66,7 @@ export const createPenMoveHandler = (): InteractionHandler => {
     test: (e) => {
       if (!passesBaseGate(e)) return false;
       // During a drawing session every click belongs to pen-draw.
-      if (getPenDraft(e.actions.scratch, e.activeFrame.id) !== null) return false;
+      if (getPenDraft(e.activeFrame) !== null) return false;
 
       // Spring key ONLY: a bare press over a pen layer belongs to the pen
       // gestures (anchor edit on geometry, anchor placement while drawing) —
@@ -105,15 +105,19 @@ export const createPenMoveHandler = (): InteractionHandler => {
       tx.update({ cx: startLayerPos.x + dx, cy: startLayerPos.y + dy }, 'layer', targetLayerId);
     },
 
-    onEnd: () => {
+    onEnd: (e) => {
       if (tx) {
         tx.commit();
         tx = null;
       }
       targetLayerId = null;
-      // No hover restoration: moving requires the spring key, so a
-      // still-held Cmd keeps 'move' via the spring input; a released one
-      // falls back to the tool cursor like any off-geometry hover.
+      // Release the gesture cursor: the dragging input outranks hover and
+      // tool cursors in the cursor service, so leaving it set would pin
+      // 'grabbing' until the next gesture. No hover restoration beyond that:
+      // moving requires the spring key, so a still-held Cmd keeps 'move' via
+      // the spring input; a released one falls back to the tool cursor like
+      // any off-geometry hover.
+      e.actions.fast.cursor.notifyDragging(null);
     },
 
     onCancel: (e) => {

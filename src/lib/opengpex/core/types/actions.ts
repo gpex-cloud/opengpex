@@ -320,31 +320,6 @@ export interface EditorActions {
     subscribeInteraction: (key: string, listener: () => void) => () => void;
   };
 
-  /**
-   * Scratch service facade — the ONLY path for plugin code to the per-frame
-   * draft slots and the session-scoped undo/redo takeover (plugins must not
-   * import `core/state/scratch/*` directly; an ESLint rule enforces this).
-   * While a session is alive on the active frame, `history.undo/redo` are
-   * served from the session stack; committing or discarding the draft hands
-   * control back to the global history.
-   */
-  scratch: {
-    /** Opens a session for the frame (throws when one is already active there). */
-    begin: (frameId: string, ownerToolId: string, slotId: string) => void;
-    /** Ends the frame's session: clears its stacks and releases the active slot. */
-    end: (frameId: string) => void;
-    /** Whether the frame currently holds an active session. */
-    activeSession: (frameId: string) => boolean;
-    /** Records a PRE-gesture snapshot as one session undo step (no-op without a session). */
-    record: (frameId: string, before: unknown) => void;
-    /** Reads a draft payload from the frame's slot. */
-    get: (frameId: string, slotId: string) => unknown | undefined;
-    /** Writes a draft payload to the frame's slot (bumps the scratch version). */
-    set: (frameId: string, slotId: string, payload: unknown) => void;
-    /** Monotonic write counter — dirty-check source for overlay repaint loops. */
-    version: () => number;
-  };
-
   mutateVolatile: (mutator: (v: VolatileState) => void) => void;
   updateVolatile: (patch: Partial<VolatileState>) => void;
   commitVolatile: () => void;

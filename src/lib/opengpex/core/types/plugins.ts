@@ -27,6 +27,7 @@ import type { EditorActions } from './actions';
 import type { EditorContextValue } from './context';
 import type { PixelService, AssetService } from './services';
 import type { EngineContribution } from '../engine/pipeline/scene/vectorSources';
+import type { DraftCodec } from '../state/drafts';
 
 export interface EditorShortcut {
   id: string;
@@ -96,6 +97,11 @@ export interface PluginContributions {
    *  anchor interface + registry live next to the engine module that consumes
    *  them — e.g. `vectorSources.ts` owns the vectorSource slot). */
   readonly engine?: EngineContribution;
+  /** State extension points, consumed by the drafts registry. A plugin
+   *  that keeps an in-progress session on `Frame.drafts` declares its payload
+   *  contract here; the codec doubles as the load-time whitelist (keys
+   *  without a codec are dropped when a document hydrates). */
+  readonly state?: { readonly draftCodec?: DraftCodec<unknown> };
 }
 
 export interface CommandInterceptor {

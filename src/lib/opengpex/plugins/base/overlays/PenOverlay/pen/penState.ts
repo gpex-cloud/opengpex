@@ -69,9 +69,21 @@ export interface PenToolState {
    * draft, so the selection is cleared whenever a session starts.
    */
   selected: PenSelection | null;
+  /**
+   * Freeze intent — Enter/Esc ended the receptive subpath and the NEXT
+   * placed anchor must open a fresh one. This is tool-session memory, NOT
+   * draft data: it never enters the draft payload, never persists across
+   * frame swaps, and is stored as a flag instead of the empty "marker"
+   * subpath the payload used to carry (a marker wrote an invisible undo
+   * step every time the user pressed Enter). The flag rides the state
+   * machine so the whole freeze grammar stays pure and testable; the
+   * session layer keeps it alive across gestures and clears it on any
+   * external draft change (undo, frame switch, another tool's commit).
+   */
+  frozen: boolean;
 }
 
-export const emptyPenToolState = (): PenToolState => ({ draft: null, selected: null });
+export const emptyPenToolState = (): PenToolState => ({ draft: null, selected: null, frozen: false });
 
 /**
  * The pen tool's coarse phase, published as the scoped public `pen_phase`
@@ -89,12 +101,12 @@ export interface PenDraftSelection {
 // ─── Draft session lifecycle ───────────────────────────────────────────────────
 
 /** Opens a drawing session with one empty, open subpath ready for anchors. */
-export function startDraft(_state: PenToolState): PenToolState {
-  return { draft: { subpaths: [{ anchors: [], closed: false }] }, selected: null };
+export function startDraft(state: PenToolState): PenToolState {
+  return { draft: { subpaths: [{ anchors: [], closed: false }] }, selected: null, frozen: state.frozen };
 }
 
 export function cancelDraft(state: PenToolState): PenToolState {
-  return { ...state, draft: null, selected: null };
+  return { ...state, draft: null, selected: null, frozen: false };
 }
 
 /**
@@ -113,22 +125,34 @@ function receptive(draft: PenDraft): PenDraftSubPath {
 
 
 /**
- * Places a sharp anchor at `pt`. Continues the receptive subpath, or starts a
- * new one when the previous subpath was just closed/ended. No-op without a
- * session (handlers call `startDraft` first).
+ * Places a sharp anchor at `pt`. Continues the receptive subpath; a pending
+ * freeze intent is CONSUMED here — the anchor opens a fresh subpath instead
+ * of extending the frozen one, and the intent clears (the marker subpath is
+ * created and consumed inside the same gesture's write, never as a step of
+ * its own). No-op without a session (handlers call `startDraft` first).
  */
 export function placeAnchor(state: PenToolState, pt: Point2D): PenToolState {
   if (!state.draft) return state;
+  let frozen = state.frozen;
+  if (frozen) {
+    state.draft.subpaths.push({ anchors: [], closed: false });
+    frozen = false;
+  }
   const sub = receptive(state.draft);
   sub.anchors.push({ x: pt.x, y: pt.y, handleIn: null, handleOut: null });
-  return { ...state };
+  return { ...state, frozen };
 }
 
 /**
  * Drag-follow for the freshly placed anchor: pulls its outgoing handle toward
  * `cursor` (relative offset) and mirrors it into the incoming handle for a
- * smooth anchor. `altKey` breaks the symmetry (outgoing handle only). A
- * near-zero drag collapses both handles back to sharp.
+ * smooth anchor. While `altKey` is held MID-DRAG (Photoshop's corner-fold
+ * gesture) the outgoing handle keeps following the cursor but the incoming
+ * handle is FROZEN — the previous segment keeps its curvature bit-for-bit
+ * while the next segment turns toward a new direction. A near-zero drag
+ * retracts the outgoing handle; the incoming handle only collapses with it
+ * in the plain symmetric path (where both sides were set together) — an
+ * Alt-frozen incoming handle always survives the collapse.
  */
 export function dragNewHandles(
   state: PenToolState,
@@ -144,19 +168,22 @@ export function dragNewHandles(
   const out = { x: cursor.x - anchor.x, y: cursor.y - anchor.y };
   if (Math.hypot(out.x, out.y) < 1) {
     anchor.handleOut = null;
-    anchor.handleIn = null;
+    if (!altKey) anchor.handleIn = null;
   } else {
     anchor.handleOut = out;
     // `|| 0` normalizes -0 so structural equality in tests/logs stays sane.
-    anchor.handleIn = altKey ? null : { x: -out.x || 0, y: -out.y || 0 };
+    anchor.handleIn = altKey ? anchor.handleIn : { x: -out.x || 0, y: -out.y || 0 };
   }
   return { ...state };
 }
 
 /**
  * Gesture-end settle for the freshly placed anchor: a click without a real
- * drag collapses its residual handles back to sharp; a real drag keeps the
- * pulled handles EXACTLY as the last move left them (Alt asymmetry included).
+ * drag leaves no outgoing handle (a sharp anchor); a real drag keeps its
+ * handles EXACTLY as the last move left them. The incoming handle is never
+ * touched here: in the plain symmetric path it is already null whenever the
+ * outgoing one retracts, and an Alt-frozen incoming handle (the previous
+ * segment's curvature) must survive even when the outgoing side collapses.
  */
 export function settleNewHandles(state: PenToolState): PenToolState {
   const draft = state.draft;
@@ -167,7 +194,6 @@ export function settleNewHandles(state: PenToolState): PenToolState {
   const out = anchor.handleOut;
   if (!out || Math.hypot(out.x, out.y) < 1) {
     anchor.handleOut = null;
-    anchor.handleIn = null;
   }
   return { ...state };
 }
@@ -187,40 +213,48 @@ export function closeActiveSubpath(state: PenToolState): PenToolState {
 }
 
 /**
- * Enter key: finishes the receptive open subpath in place (it stays open in
- * the committed sense — an unfinished but frozen polyline). A new subpath is
- * opened lazily by the next placement.
+ * Enter/Esc freeze of the receptive open subpath. The pure freeze (2+
+ * anchors) changes NO draft data — it only sets the freeze intent, so a
+ * pure freeze costs zero writes and never materializes as an invisible
+ * undo step. Dropping a lone dangling anchor IS a geometry change (the
+ * caller persists it as an undoable step). Either way the next placement
+ * opens a fresh subpath via the intent, not via a marker subpath stored
+ * in the payload.
  */
 export function endActiveSubpath(state: PenToolState): PenToolState {
   const draft = state.draft;
   if (!draft) return state;
   const sub = draft.subpaths[draft.subpaths.length - 1];
-  if (!sub || sub.closed) return state;
+  if (!sub || sub.closed) return { ...state, frozen: true };
   if (sub.anchors.length < 2) {
     // A lone dangling anchor carries no geometry — drop it.
     if (sub.anchors.length === 1 && draft.subpaths.length === 1) {
       return cancelDraft(state);
     }
     draft.subpaths.pop();
-    return { ...state };
+    return { ...state, frozen: true };
   }
-  // Freeze this subpath: the next placement must open a NEW one, so push an
-  // empty receptive subpath now (empties are filtered at projection).
-  draft.subpaths.push({ anchors: [], closed: false });
-  return { ...state };
+  // Pure freeze: the polyline stays exactly as drawn; only the intent moves.
+  return { ...state, frozen: true };
 }
 
 /**
  * Index of the FROZEN open subpath whose END anchor lies within `tol` of
- * `pt`, or -1. Frozen = open, non-empty, and not the receptive (last)
- * subpath — i.e. a polyline that Enter froze earlier in this session. Hit
- * from the newest subpath backwards so overlapping endpoints resolve to the
- * most recent one.
+ * `pt`, or -1. A subpath is frozen when it is open, non-empty, and not the
+ * receptive tail — with one refinement: while the freeze intent is pending
+ * (nothing placed after Enter yet), the LAST subpath is itself the frozen
+ * polyline and its endpoint is a resume target. Hit from the newest subpath
+ * backwards so overlapping endpoints resolve to the most recent one.
  */
 export function hitFrozenSubpathEnd(state: PenToolState, pt: Point2D, tol: number): number {
   const subs = state.draft?.subpaths;
   if (!subs) return -1;
-  for (let pi = subs.length - 2; pi >= 0; pi--) {
+  // The receptive tail is only out of bounds when no freeze intent is
+  // pending: with intent ON the tail IS a frozen polyline (Enter froze it
+  // and no new subpath exists yet), so its endpoint is a resume target.
+  const receptiveIdx = state.frozen ? -1 : subs.length - 1;
+  for (let pi = subs.length - 1; pi >= 0; pi--) {
+    if (pi === receptiveIdx) continue;
     const sub = subs[pi];
     if (sub.closed || sub.anchors.length === 0) continue;
     const end = sub.anchors[sub.anchors.length - 1];
@@ -234,9 +268,9 @@ export function hitFrozenSubpathEnd(state: PenToolState, pt: Point2D, tol: numbe
  * the path"): it becomes the receptive subpath again so the next placement
  * extends it and clicking its first anchor closes it. Implemented by moving
  * it to the end of the list (subpath order carries no geometric meaning —
- * fill/mask classification is containment-based) and dropping the empty
- * receptive marker Enter left behind. Pure bookkeeping with no visible
- * change: callers must NOT record it as a session step.
+ * fill/mask classification is containment-based) and clearing any pending
+ * freeze intent (continuing the subpath IS its unfreeze). Pure bookkeeping
+ * with no visible change: callers must NOT persist it as a step.
  */
 export function resumeFrozenSubpath(state: PenToolState, pathIdx: number): PenToolState {
   const draft = state.draft;
@@ -248,7 +282,7 @@ export function resumeFrozenSubpath(state: PenToolState, pathIdx: number): PenTo
     draft.subpaths.pop();
   }
   draft.subpaths.push(sub);
-  return { ...state };
+  return { ...state, frozen: false };
 }
 
 /**
@@ -347,6 +381,24 @@ export function toggleDraftAnchorSmooth(
   return { ...state };
 }
 
+/**
+ * Retracts ONLY the outgoing handle of a draft anchor (Photoshop's "click
+ * the anchor you just placed": the previous segment keeps its curvature via
+ * the untouched incoming handle, the next segment leaves as a straight
+ * line). Returns the same state object when there was nothing to retract so
+ * callers can skip persisting a no-op.
+ */
+export function retractDraftOutHandle(
+  state: PenToolState,
+  pathIdx: number,
+  anchorIdx: number,
+): PenToolState {
+  const anchor = state.draft?.subpaths[pathIdx]?.anchors[anchorIdx];
+  if (!anchor || !anchor.handleOut) return state;
+  anchor.handleOut = null;
+  return { ...state };
+}
+
 // ─── Commit-shaped outputs ─────────────────────────────────────────────────────
 
 /**
@@ -413,7 +465,9 @@ export function committableSubpaths(state: PenToolState): PenDraftSubPath[] {
 
 // ─── Segment insertion (click on a committed path's curve) ────────────────────
 
-/** de Casteljau split of one cubic at t into two halves joining at B(t). */
+/**
+ * de Casteljau split of one cubic at t into two halves joining at B(t).
+ */
 function splitCubicLocal(p0: Point2D, p1: Point2D, p2: Point2D, p3: Point2D, t: number) {
   const lerp = (a: Point2D, b: Point2D): Point2D => ({
     x: a.x + (b.x - a.x) * t,
@@ -429,23 +483,27 @@ function splitCubicLocal(p0: Point2D, p1: Point2D, p2: Point2D, p3: Point2D, t: 
 }
 
 /**
- * Inserts an anchor into subpath `pathIdx` at parameter `t` of its segment
- * `segIdx` (de Casteljau split; both halves keep the original curve shape
- * bit-for-bit). Closed subpaths address their closing segment as
- * `segIdx === anchors.length`. Returns the new anchor index, or null when
- * the indices are out of range.
+ * Splits the segment `segIdx` of an anchor chain at parameter `t` and returns
+ * the REWRITTEN anchor array with the new anchor spliced in. Both halves keep
+ * the original curve shape bit-for-bit (de Casteljau: the outer control
+ * points become the anchors' new handles, the split point B(t) becomes the
+ * new anchor with collinear handles). Closed chains address their closing
+ * segment as `segIdx === anchors.length`; the new anchor then appends at the
+ * end and `anchorIdx` reflects that. When the ORIGINAL side had no handle the
+ * incoming geometry was straight: the new handle is nulled when it is
+ * collinear with the (anchor → split point) chord — same shape, no spurious
+ * handle lines on straight segments. Returns null when the indices are out
+ * of range or the chain is too short to carry a segment.
  */
-export function insertAnchorOnSegment(
-  path: PenPathData,
-  pathIdx: number,
+function splitAnchorSegment(
+  anchors: PenAnchor[],
+  closed: boolean,
   segIdx: number,
   t: number,
-): { path: PenPathData; anchorIdx: number } | null {
-  const sub = path.paths[pathIdx];
-  if (!sub) return null;
-  const a = sub.anchors;
+): { anchors: PenAnchor[]; anchorIdx: number } | null {
+  const a = anchors;
   if (a.length < 2) return null;
-  const count = sub.closed ? a.length : a.length - 1;
+  const count = closed ? a.length : a.length - 1;
   if (segIdx < 0 || segIdx >= count) return null;
 
   const from = a[segIdx];
@@ -462,10 +520,7 @@ export function insertAnchorOnSegment(
   };
 
   // left = [from, a, d, m], right = [m, e, c, to]: the outer control points
-  // become the anchors' new handles. When the ORIGINAL side had no handle the
-  // incoming geometry was straight; keep it visually straight by nulling the
-  // new handle when it is collinear with the (anchor → split point) chord —
-  // same shape, no spurious handle lines on straight segments.
+  // become the anchors' new handles.
   const collinear = (base: Point2D, ctrl: Point2D, tip: Point2D): boolean => {
     const v1x = ctrl.x - base.x, v1y = ctrl.y - base.y;
     const v2x = tip.x - base.x, v2y = tip.y - base.y;
@@ -485,19 +540,90 @@ export function insertAnchorOnSegment(
     handleOut: rel(m, right[1]) ?? null,
   };
 
-  const anchors = a.slice();
-  anchors[segIdx] = nextFrom;
-  if (segIdx === count - 1 && sub.closed) {
+  const out = a.slice();
+  out[segIdx] = nextFrom;
+  let anchorIdx: number;
+  if (segIdx === count - 1 && closed) {
     // The closing segment: `to` is anchor 0; the new anchor appends at the end.
-    anchors[0] = nextTo;
-    anchors.push(inserted);
+    out[0] = nextTo;
+    out.push(inserted);
+    anchorIdx = out.length - 1;
   } else {
-    anchors[segIdx + 1] = nextTo;
-    anchors.splice(segIdx + 1, 0, inserted);
+    out[segIdx] = nextFrom;
+    out[segIdx + 1] = nextTo;
+    out.splice(segIdx + 1, 0, inserted);
+    anchorIdx = segIdx + 1;
   }
+  return { anchors: out, anchorIdx };
+}
+
+/**
+ * Inserts an anchor into subpath `pathIdx` at parameter `t` of its segment
+ * `segIdx` (de Casteljau split; both halves keep the original curve shape
+ * bit-for-bit). Returns the new path and the new anchor index, or null when
+ * the indices are out of range.
+ */
+export function insertAnchorOnSegment(
+  path: PenPathData,
+  pathIdx: number,
+  segIdx: number,
+  t: number,
+): { path: PenPathData; anchorIdx: number } | null {
+  const sub = path.paths[pathIdx];
+  if (!sub) return null;
+  const split = splitAnchorSegment(sub.anchors, sub.closed, segIdx, t);
+  if (!split) return null;
   const paths = path.paths.slice();
-  paths[pathIdx] = { ...sub, anchors };
-  return { path: { paths }, anchorIdx: sub.closed && segIdx === count - 1 ? anchors.length - 1 : segIdx + 1 };
+  paths[pathIdx] = { ...sub, anchors: split.anchors };
+  return { path: { paths }, anchorIdx: split.anchorIdx };
+}
+
+/**
+ * Draft variant of {@link insertAnchorOnSegment}: inserts an anchor into the
+ * draft subpath `pathIdx` at parameter `t` of its segment `segIdx`, in place
+ * on the gesture working copy (same bit-for-bit de Casteljau contract).
+ * Returns the new anchor index, or null when the indices are out of range.
+ */
+export function insertDraftSegmentAnchor(
+  state: PenToolState,
+  pathIdx: number,
+  segIdx: number,
+  t: number,
+): { state: PenToolState; anchorIdx: number } | null {
+  const sub = state.draft?.subpaths[pathIdx];
+  if (!sub) return null;
+  const split = splitAnchorSegment(sub.anchors, sub.closed, segIdx, t);
+  if (!split) return null;
+  state.draft!.subpaths[pathIdx] = { ...sub, anchors: split.anchors };
+  return { state: { ...state }, anchorIdx: split.anchorIdx };
+}
+
+/**
+ * Closing-seam handle drag (Photoshop's "hover the start anchor and DRAG to
+ * close"): the subpath has just been closed and the drag pulls the FIRST
+ * anchor's incoming handle toward `cursor`, mirroring it into the outgoing
+ * handle so the seam between the closing segment and the first drawn segment
+ * reads as one smooth curve. `breakSymmetry` (Alt) turns only the incoming
+ * handle, leaving the outgoing side as it was. A near-zero offset leaves the
+ * handles untouched (a plain click closed the path sharp, as before).
+ */
+export function dragCloseSeamHandles(
+  state: PenToolState,
+  cursor: Point2D,
+  breakSymmetry: boolean,
+): PenToolState {
+  const draft = state.draft;
+  if (!draft) return state;
+  const sub = draft.subpaths[draft.subpaths.length - 1];
+  const anchor = sub?.closed ? sub.anchors[0] : undefined;
+  if (!anchor) return state;
+  const rel = { x: cursor.x - anchor.x, y: cursor.y - anchor.y };
+  if (Math.hypot(rel.x, rel.y) < 1) return state;
+  anchor.handleIn = rel;
+  if (!breakSymmetry) {
+    anchor.handleOut = { x: -rel.x || 0, y: -rel.y || 0 };
+  }
+  return { ...state };
 }
 
 // ─── Committed-path selection helpers ─────────────────────────────────────────

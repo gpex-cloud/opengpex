@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.31
+
+- Editing: in-progress tool drafts are now document state — a new frame-level draft system keeps unfinished work per canvas, through restarts and saved files, with every change flowing through the normal undo history
+- Pen Tool: rebuilt on that draft system — paths survive closing the app and saved .gpex round-trips, stay visible when you switch tools (Cmd/Ctrl+drag moves the whole path), undoing a mask/selection/shape commit brings the path back with it, and canvas rotate/flip keeps the draft aligned with the pixels
+- Pen Tool: professional-grade path editing — natural corner folding and curve shaping while you draw, add or remove points directly on the path, smooth closing, per-shape moving, and a cursor that always shows what the next click will do
+
 ## 2.0.30
 
 - Brush: new input dynamics in the Drawing panel — Smoothing (rope-model steadying for mouse and stylus), Taper (calligraphic stroke ends with independent Start and End sliders plus a link toggle — sharpen one end for calligraphy exits, or both for blade tips), Pressure Opacity (stylus pressure to ink density), and Velocity (fast-thin, slow-thick).

@@ -24,58 +24,80 @@ import { useEditorState, useEditorServices } from '@opengpex/editor/core/context
 import type { Frame } from '@opengpex/editor/core/types';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import { PenOverlayAPI, PEN_HIT_TOLERANCE_SCREEN_PX } from './protocols';
-import { CLIP_PEN_CURSOR } from '@opengpex/editor/icons';
-import { deleteDraftAnchor, draftAnchorCount, endActiveSubpath, deleteCommittedAnchor } from './pen/penState';
-import { hitTestDraftArea, hitTestDraftSegment, type PenHitOps } from './pen/hitTest';
+import { deleteDraftAnchor, deleteCommittedAnchor, endActiveSubpath } from './pen/penState';
+import { findDraftSubpathAt, hitTestDraftSegment, type PenHitOps } from './pen/hitTest';
+import { resolveDraftHoverIntent } from './pen/hoverIntent';
+import { PEN_CURSOR_ADD_POINT, PEN_CURSOR_BASE, PEN_CURSOR_NEW_PATH, PEN_INTENT_CURSORS } from './pen/cursors';
 import { makeLayerPointMapping } from './pen/geometry';
+import { canvasToScreen, getPenRubberTip } from './pen/render';
 import {
+  beginPenGesture,
+  clearPenFreezeIntent,
+  commitPenToolState,
+  composePenToolState,
+  discardPenWork,
+  endPenGesture,
+  findSegmentHitAt,
   getPenCommittedSelection,
   getPenDraft,
   getPenDraftSelection,
+  isOwnDraftWrite,
+  settlePenFreezeIntent,
   movePenRubberTip,
   penCommittedAnchorKey,
   penCommittedHandleKey,
   penDraftAnchorKey,
   penDraftHandleKey,
-  setPenAnchorHover,
-  PEN_DRAFT_SLOT,
+  penDraftEquals,
   penPhaseFromDraft,
+  persistPenDraft,
+  placePenRubberTip,
   publishPenPhase,
+  setPenAnchorHover,
   setPenCommittedSelection,
   setPenDraftSelection,
   snapshotPenDraft,
 } from './interactions';
 
 /**
- * usePenToolLifecycle: cursor feedback + keyboard grammar + session-bound
- * lifecycle for the pen tool.
+ * usePenToolLifecycle: cursor feedback + keyboard grammar + lifecycle for
+ * the pen tool.
  *
- * Cursor: the tool cursor while drawing; `move` when hovering an anchor or
- * handle of a committed path (pen-edit will win the press). Off-geometry
- * hover keeps the tool cursor — moving a layer requires the spring key.
- * During a drag the owning handler owns the cursor (same guard as the marker
- * lifecycle).
+ * Cursor: the pen nib carries a badge announcing what the next plain press
+ * does (see pen/cursors.ts): nothing = continue the open subpath, `*` = new
+ * subpath, `o` = close, `/` = resume a frozen end, `+` = insert on segment,
+ * `-` = delete anchor, `^` = Alt convert / retract the just-placed anchor's
+ * out-handle, hollow arrow = drag a handle. The decision is the pure
+ * `resolveDraftHoverIntent`, shared with the draw handler's press routing so
+ * the badge can never promise something the press will not do. Committed
+ * geometry (no session): `move` over anchors/handles (pen-edit drags them),
+ * `+` over a committed segment, `*` elsewhere. Cmd/Ctrl held: the cursor
+ * service's spring rule shows `move`. During a drag the owning handler owns
+ * the cursor (same guard as the marker lifecycle).
  *
- * Keyboard (mirrors the spec §5.2 operation table):
- * - Enter finishes the receptive subpath (session continues).
+ * Keyboard (mirrors the pen operation grammar):
+ * - Enter freezes the receptive subpath. A PURE freeze (2+ anchors) is zero
+ *   write — only the session's freeze intent moves, so undoing afterwards
+ *   hits the last real anchor placement, never an invisible step. Dropping a
+ *   lone dangling anchor is a real geometry change and persists undoably.
  * - Esc ladder: draft-anchor selection → committed-path selection → freeze
- *   the receptive subpath ("exit edit", only when it holds 2+ anchors) →
- *   leave the tool with the draft PRESERVED. Mid-gesture lets the viewport
- *   handler cancel first.
- * - Delete/Backspace deletes the selected anchor — draft anchor (recorded
- *   session step) or committed anchor (undoable command).
- * - Undo/redo are NOT intercepted here: while a scratch session is alive,
- *   `actions.history`'s takeover point serves undo/redo from the session
- *   stack, so the keyboard shortcut and the TimeTraveler button behave
- *   identically with no per-tool key handling.
+ *   (Enter-equivalent) → leave the tool with the draft PRESERVED (PS-style
+ *   work path). While the rubber band is live, deselect and freeze collapse
+ *   into one press. Mid-gesture lets the viewport handler cancel first.
+ * - Delete/Backspace deletes the selected anchor — draft anchor (undoable
+ *   draft write) or committed anchor (undoable command).
+ * - Undo/redo need no interception here: the draft IS document state on
+ *   `frame.drafts.pen`, so the plain per-frame history serves undo/redo and
+ *   the resync pass below re-aligns session memory with the restored frame.
  *
- * Lifecycle: the pen draft SURVIVES tool deactivation (PS-style work path,
- * 2026-10-24) — the session and its slot stay on the frame, and re-activating
- * the craft resumes the draft via the phase re-publish below. Only Clear
- * Draft (HUD-confirmed) and successful commits end the session. Frame
- * switches suspend/resume the session implicitly; the phase signal is
- * re-published for the newly active frame so the panel reflects the resumed
- * state.
+ * Resync (single-point rule): whenever the active frame object is replaced
+ * by something OTHER than this tool's own write (undo/redo, frame switch,
+ * another tool's commit), session memory that references draft geometry by
+ * index must be invalidated or it goes stale: the freeze intent clears, the
+ * draft-anchor selection is validated against the restored payload (and
+ * dropped when its target is gone — a stale selection would delete the
+ * wrong anchor), and the phase signal re-publishes. The tool's own writes
+ * are recognized by payload reference and pass through untouched.
  */
 export function usePenToolLifecycle(isPenMode: boolean) {
   const { state, activeFrame } = useEditorState();
@@ -86,75 +108,124 @@ export function usePenToolLifecycle(isPenMode: boolean) {
   const isInteractingRef = useRef(false);
   useLayoutEffect(() => { isInteractingRef.current = !!state.interaction.isInteracting; });
 
-  const activeFrameId = activeFrame?.id ?? null;
+  // ─── Resync: external frame identity changes invalidate session memory ─────
+  // Where the draft came from decides whether its open tail is receptive:
+  // a draft that MATERIALIZED (appeared from null, arrived with a frame
+  // switch, or was already there when the tool was entered) starts frozen;
+  // a draft that merely changed while drawing (undo of one anchor) stays
+  // receptive. The three "materialized" signals are tracked here as the
+  // previous run's facts.
+  const hadDraftRef = useRef(false);
+  const wasPenModeRef = useRef(false);
+  const lastFrameIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeFrame) return;
+    const draft = getPenDraft(activeFrame);
+    const hadDraft = hadDraftRef.current;
+    const wasPenMode = wasPenModeRef.current;
+    const frameSwitched = lastFrameIdRef.current !== activeFrame.id;
+    hadDraftRef.current = draft !== null;
+    wasPenModeRef.current = isPenMode;
+    lastFrameIdRef.current = activeFrame.id;
+    const contextChanged = frameSwitched || (isPenMode && !wasPenMode);
+    // The tool's own write: memory stays coherent (the payload it just wrote
+    // is exactly what the frame now holds). The shortcut only applies while
+    // the session context is unchanged — after a frame switch or a tool
+    // re-entry the payload identity may still match (nothing else touched
+    // the draft) yet the receptiveness and phase below must be re-derived.
+    if (!contextChanged && isOwnDraftWrite(activeFrame)) return;
+    // A draft that appeared from null here is an EXTERNAL materialization
+    // (undo of a commit, another tool's write) — the tool's own first-anchor
+    // write never reaches this line.
+    const materialized = draft !== null && (!hadDraft || contextChanged);
+    settlePenFreezeIntent(draft, materialized);
+    const sel = getPenDraftSelection();
+    if (sel && (!draft
+      || !draft.subpaths[sel.pathIdx]
+      || !draft.subpaths[sel.pathIdx].anchors[sel.anchorIdx])) {
+      setPenDraftSelection(null);
+    }
+    if (isPenMode) {
+      publishPenPhase(actions.setStateSignal, penPhaseFromDraft(draft));
+    }
+  }, [activeFrame, isPenMode, actions]);
 
   // ─── Cursor: crosshair base; move over committed anchors (draft idle) ──────
   useEffect(() => {
     if (!isPenMode) {
-      // Pen craft deactivated: the draft SURVIVES (PS-style work path —
-      // 2026-10-24 change; the session and its slot stay on the frame, and
-      // re-activating the tool resumes the draft via the phase re-publish
-      // below). Only Clear Draft / commits end the session. Lone anchors
-      // are pruned: they carry no committable geometry and kept receptive
-      // would hijack the next session's first click.
-      pruneLoneAnchors(actions.scratch, frameRef.current?.id ?? '', actions.setStateSignal);
+      // Pen craft deactivated: the draft SURVIVES (PS-style work path — it
+      // lives on the frame and re-activating the tool resumes it via the
+      // phase re-publish below). Only Clear Draft / commits end the session.
+      // Lone anchors are pruned: they carry no committable geometry and kept
+      // receptive would hijack the next session's first click.
+      pruneLoneAnchors(actions, frameRef.current);
+      clearPenFreezeIntent();
+      discardPenWork();
       return;
     }
-    // Base cursor = the same crosshair+nib read as the pen selection slot
-    // (CLIP_PEN_CURSOR), so the drawing tool and its selection slot share
-    // one visual identity; anchor hover still switches to `move` below.
-    actions.fast.cursor.register('pen', CLIP_PEN_CURSOR);
+    // Base cursor = crosshair + nib (the same read as the pen selection
+    // slot); the hover rule below swaps in the badged variants (*, o, /, +,
+    // -, ^, direct-select arrow) that announce what the next press will do.
+    actions.fast.cursor.register('pen', PEN_CURSOR_BASE);
 
     // The curve/area hit tests' L0 ops, assembled from the geometry service
     // once per effect run (the service namespaces are stable across renders).
     const hitOps: PenHitOps = { ...geometry.bezier, isPointInPolygon: geometry.polygon.isPointInPolygon };
 
-    // Last known pointer position in viewport px — kept so a Cmd/Ctrl
+    // Last known pointer position in viewport px — kept so a Cmd/Ctrl/Alt
     // keydown/keyup can re-evaluate the cursor WITHOUT a pointer move
     // (pressing the modifier is a keyboard event; the hover decision depends
     // on it, so the cursor must react in place, not on the next mouse move).
     let lastPos: { vx: number; vy: number } | null = null;
 
     /** Hover highlight + cursor for one pointer position. Idempotent. */
-    const applyHoverAndCursor = (vx: number, vy: number, frame: Frame, metaHeld: boolean) => {
+    const applyHoverAndCursor = (vx: number, vy: number, frame: Frame, metaHeld: boolean, altHeld: boolean) => {
       const cam = actions.fast.latestCamera(frame.id);
       const canvasPt = geometry.space.screenToLocal(vx, vy, frame, cam);
+      const tol = PEN_HIT_TOLERANCE_SCREEN_PX / (cam?.k ?? 1);
 
-      if (getPenDraft(actions.scratch, frame.id) !== null) {
+      const draft = getPenDraft(frame);
+      if (draft !== null) {
         // Drawing session: the anchor hover highlight rides a synchronous
         // DOM write (the overlay is pointer-events-none and rebuilt from
         // strings, so CSS :hover cannot fire).
-        const draft = getPenDraft(actions.scratch, frame.id)!;
-        const tol = PEN_HIT_TOLERANCE_SCREEN_PX / (cam?.k ?? 1);
         const hit = geometry.bezier.nearestPathAnchor({ paths: draft.subpaths }, canvasPt, tol);
         setPenAnchorHover(!hit ? null
           : hit.kind === 'anchor'
             ? penDraftAnchorKey(hit.pathIdx, hit.anchorIdx)
             : penDraftHandleKey(hit.pathIdx, hit.anchorIdx, hit.kind));
-        // Over a draggable draft element the cursor announces the drag: a
-        // press on an anchor/handle never places a new point, so the pen nib
-        // would be a misleading affordance (matches the committed branch).
-        // With Cmd/Ctrl held, a SEGMENT or enclosed-AREA hit previews the
-        // whole-draft translation instead (the modifier re-routes the press);
-        // the curve/area hit-tests only run under the modifier.
-        const metaSegment = metaHeld && !hit
-          && (hitTestDraftSegment(draft, canvasPt, tol * 2, hitOps) || hitTestDraftArea(draft, canvasPt, hitOps));
-        actions.fast.cursor.notifyHover(hit || metaSegment ? 'move' : null);
+        // Cmd/Ctrl held: the press translates the subpath under the pointer
+        // — the cursor service's spring rule already shows `move` while the
+        // key is down; the hover declaration keeps element-level consumers
+        // in agreement about the target (same pick as the press).
+        if (metaHeld) {
+          const metaTarget = !!hit || findDraftSubpathAt(draft, canvasPt, tol * 2, hitOps) !== null;
+          actions.fast.cursor.notifyHover(metaTarget ? 'move' : null);
+          return;
+        }
+        // Plain / Alt hover: the same rung order the draw handler's press
+        // uses decides the badge (close, resume, convert, handle, delete,
+        // insert, continue, new path).
+        const segmentHit = !hit && hitTestDraftSegment(draft, canvasPt, tol * 2, hitOps);
+        const intent = resolveDraftHoverIntent(composePenToolState(frame), canvasPt, tol, hit, segmentHit, altHeld);
+        actions.fast.cursor.notifyHover(PEN_INTENT_CURSORS[intent]);
         return;
       }
 
-      // Idle: hover a committed anchor → enlarge it + move cursor (pen-edit
-      // wins the press). Off-geometry hover stays on the tool cursor —
-      // moving a layer requires the spring key, so the visible shape is not
-      // a move affordance.
+      // Idle (no session): hover a committed anchor/handle → enlarge it +
+      // move cursor (pen-edit wins the press and drags it); a committed
+      // SEGMENT previews the insert (pen-edit splits it on press); anything
+      // else is the "new path" read — the next press opens a session.
+      // Off-geometry hover never shows a move affordance: moving a layer
+      // requires the spring key.
       setPenAnchorHover(null);
       let overAnchor = false;
       const ordered = frame.layers.order.map((id) => frame.layers.byId[id]).reverse();
       for (const layer of ordered) {
         if (!layer || layer.type !== 'vector' || !layer.penData || layer.locked || (layer.role && layer.role !== 'host')) continue;
         const mapping = makeLayerPointMapping(geometry.transform.getLayerLocalMatrix(layer, frame));
-        const tol = PEN_HIT_TOLERANCE_SCREEN_PX / (cam?.k ?? 1) / mapping.scale;
-        const hit = geometry.bezier.nearestPathAnchor(layer.penData, mapping.toLayer(canvasPt), tol);
+        const layerTol = tol / mapping.scale;
+        const hit = geometry.bezier.nearestPathAnchor(layer.penData, mapping.toLayer(canvasPt), layerTol);
         if (hit) {
           overAnchor = true;
           setPenAnchorHover(hit.kind === 'anchor'
@@ -163,7 +234,12 @@ export function usePenToolLifecycle(isPenMode: boolean) {
           break;
         }
       }
-      actions.fast.cursor.notifyHover(overAnchor ? 'move' : null);
+      if (overAnchor) {
+        actions.fast.cursor.notifyHover('move');
+        return;
+      }
+      const overSegment = !metaHeld && findSegmentHitAt(geometry, frame, canvasPt, cam?.k ?? 1) !== null;
+      actions.fast.cursor.notifyHover(overSegment ? PEN_CURSOR_ADD_POINT : metaHeld ? null : PEN_CURSOR_NEW_PATH);
     };
 
     const toViewport = (ev: PointerEvent) => {
@@ -181,30 +257,40 @@ export function usePenToolLifecycle(isPenMode: boolean) {
       if (!pos) return;
       lastPos = pos;
 
-      // Drawing session: the rubber band tip is written DIRECTLY here (in
-      // viewport screen px — the band lives in an unscaled SVG) — a
-      // synchronous DOM write inside the pointer event has no clock
-      // dependency, so the idle ticker throttling (4fps after 2s without
-      // button-held input) can never stall the follow.
-      if (getPenDraft(actions.scratch, frame.id) !== null) {
-        movePenRubberTip({ x: pos.vx, y: pos.vy });
+      // Drawing session: the rubber band is driven ENTIRELY from here, in
+      // viewport screen px (the band lives in an unscaled SVG). Its start
+      // point is re-derived from the live state on every move — the same
+      // receptiveness read the cursor uses — so a zero-write transition
+      // (resume, freeze) shows or hides the band immediately without
+      // waiting for a ticker pass that an idle session may never get; its
+      // tip follows the pointer with a synchronous DOM write that has no
+      // clock dependency (the idle ticker throttles to 4fps after 2s without
+      // button-held input, which would stall any ticker-driven follow).
+      if (getPenDraft(frame) !== null) {
+        const tip = getPenRubberTip(composePenToolState(frame));
+        if (tip) {
+          placePenRubberTip(canvasToScreen(tip, actions.fast.latestCamera(frame.id)));
+          movePenRubberTip({ x: pos.vx, y: pos.vy });
+        } else {
+          placePenRubberTip(null);
+        }
       }
-      applyHoverAndCursor(pos.vx, pos.vy, frame, ev.metaKey || ev.ctrlKey);
+      applyHoverAndCursor(pos.vx, pos.vy, frame, ev.metaKey || ev.ctrlKey, ev.altKey);
     };
 
-    // Cmd/Ctrl press/release re-evaluates the hover + cursor at the last
+    // Cmd/Ctrl/Alt press/release re-evaluates the hover + cursor at the last
     // known pointer position — the modifier flips which gesture a press
-    // claims (whole-draft translate vs anchor edit), so the affordance must
+    // claims (transform vs edit, convert vs delete), so the affordance must
     // update in place, not on the next mouse move. Typing targets are
     // skipped (same guard as the keyboard grammar below).
     const onModifierKey = (ev: KeyboardEvent) => {
-      if (ev.key !== 'Meta' && ev.key !== 'Control') return;
+      if (ev.key !== 'Meta' && ev.key !== 'Control' && ev.key !== 'Alt') return;
       const target = ev.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
       if (isInteractingRef.current) return;
       const frame = frameRef.current;
       if (!frame || !lastPos) return;
-      applyHoverAndCursor(lastPos.vx, lastPos.vy, frame, ev.metaKey || ev.ctrlKey);
+      applyHoverAndCursor(lastPos.vx, lastPos.vy, frame, ev.metaKey || ev.ctrlKey, ev.altKey);
     };
 
     document.addEventListener('pointermove', onPointerMove, { passive: true });
@@ -219,15 +305,6 @@ export function usePenToolLifecycle(isPenMode: boolean) {
     };
   }, [isPenMode, actions, geometry]);
 
-  // ─── Frame switch: re-publish the phase for the newly active frame ─────────
-  // Transitions inside a frame are published by the handlers/commands; only a
-  // frame switch bypasses them (the session suspends/resumes untouched).
-  useEffect(() => {
-    if (!isPenMode || !activeFrameId) return;
-    const draft = getPenDraft(actions.scratch, activeFrameId);
-    publishPenPhase(actions.setStateSignal, penPhaseFromDraft(draft));
-  }, [isPenMode, activeFrameId, actions]);
-
   // ─── Keyboard grammar ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!isPenMode) return;
@@ -238,33 +315,49 @@ export function usePenToolLifecycle(isPenMode: boolean) {
 
       const frame = frameRef.current;
       if (!frame) return;
-      const frameId = frame.id;
-      const scratch = actions.scratch;
-      const draft = getPenDraft(scratch, frameId);
+      const draft = getPenDraft(frame);
 
       // Enter — freeze the receptive subpath; the session continues.
       if (e.key === 'Enter') {
         if (draft) {
           e.preventDefault();
-          freezeActiveSubpath(scratch, frameId);
+          freezeActiveSubpath(actions, frame);
         }
         return;
       }
 
       // Esc ladder — draft-anchor selection, then committed selection, then
-      // "exit edit": freeze the receptive subpath (Enter-equivalent; only
-      // when there is something to freeze — a lone anchor is kept as-is,
-      // Esc must never destroy), then "exit tool" with the draft PRESERVED
+      // "exit edit": freeze the receptive subpath (Enter-equivalent; a lone
+      // anchor is dropped instead — it carries no geometry), then "exit tool"
+      // with the draft PRESERVED
       // (re-activating pen resumes it). Draft discard lives in the panel's
-      // Clear Draft button (HUD-confirmed), never on a key.
+      // Clear Draft button (undoable), never on a key.
       // Mid-gesture the viewport cancel wins (skip here).
       if (e.key === 'Escape') {
         if (isInteractingRef.current) return;
+        // Freeze rung while the receptive subpath still takes anchors (the
+        // rubber band is showing). A lone anchor takes the same rung: it
+        // carries no geometry, so Esc drops it (endActiveSubpath's rule) and
+        // stays in the tool — exiting is the NEXT Esc. Once the freeze
+        // intent is pending there is nothing left to freeze: the
+        // marker-subpath era made the next Esc fall through to exit
+        // naturally (the appended empty subpath failed the ≥2 check), and
+        // the intent flag must play that role now — without this guard Esc
+        // would re-freeze forever and never reach the exit rung.
+        const subs = draft?.subpaths;
+        const receptive = subs?.[subs.length - 1];
+        const frozenPending = composePenToolState(frame).frozen;
+        const canFreeze = !!receptive && !receptive.closed && receptive.anchors.length >= 1 && !frozenPending;
         if (getPenDraftSelection()) {
           e.preventDefault();
           e.stopPropagation();
           setPenDraftSelection(null);
-          return;
+          // A selection is a by-product of dragging an anchor while drawing;
+          // when the rubber band is still live the user's Esc means "stop
+          // this line", so the deselect and the freeze happen in ONE press
+          // (the freeze below clears the selection itself). Only with no
+          // live line does Esc stop at the deselect.
+          if (!canFreeze) return;
         }
         const committed = getPenCommittedSelection();
         if (committed) {
@@ -273,18 +366,16 @@ export function usePenToolLifecycle(isPenMode: boolean) {
           setPenCommittedSelection(null);
           return;
         }
-        const subs = draft?.subpaths;
-        const receptive = subs?.[subs.length - 1];
-        if (receptive && !receptive.closed && receptive.anchors.length >= 2) {
+        if (canFreeze) {
           e.preventDefault();
           e.stopPropagation();
-          freezeActiveSubpath(scratch, frameId);
+          freezeActiveSubpath(actions, frame);
           return;
         }
         // Exit rung: prune lone anchors first — a 1-anchor subpath can never
         // be committed and, left receptive, would silently connect the next
         // session's first click to the stale point. Dropping it is lossless.
-        pruneLoneAnchors(scratch, frameId, actions.setStateSignal);
+        pruneLoneAnchors(actions, frame);
         actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
         actions.fast.cursor.notifyHover(null);
         return;
@@ -295,11 +386,13 @@ export function usePenToolLifecycle(isPenMode: boolean) {
         const draftSel = getPenDraftSelection();
         if (draftSel && draft) {
           e.preventDefault();
-          const before = snapshotPenDraft(draft);
-          const next = deleteDraftAnchor({ draft, selected: null }, draftSel.pathIdx, draftSel.anchorIdx);
-          scratch.set(frameId, PEN_DRAFT_SLOT, keepAliveDraft(next.draft));
+          const st = beginPenGesture(frame);
+          const before = snapshotPenDraft(st.draft);
+          const next = deleteDraftAnchor({ draft: st.draft, selected: null, frozen: st.frozen }, draftSel.pathIdx, draftSel.anchorIdx);
           setPenDraftSelection(null);
-          scratch.record(frameId, before);
+          commitPenToolState({ ...next, selected: null });
+          endPenGesture(actions, frame, before, true);
+          if (!next.draft) publishPenPhase(actions.setStateSignal, 'idle');
           return;
         }
         const committed = getPenCommittedSelection();
@@ -309,7 +402,7 @@ export function usePenToolLifecycle(isPenMode: boolean) {
           if (layer?.penData) {
             const next = deleteCommittedAnchor(layer.penData, committed);
             actions.executeCommand(PenOverlayAPI.commands.updatePenData.uid, {
-              frameId,
+              frameId: frame.id,
               layerId: layer.id,
               penData: next,
             });
@@ -336,61 +429,47 @@ export function usePenToolLifecycle(isPenMode: boolean) {
 // ─── Local helpers ─────────────────────────────────────────────────────────────
 
 /**
- * Draft-emptying operations inside a live session must not park null in the
- * slot (the next click would try to begin a second session and throw) — an
- * empty draft keeps the session coherent and renders nothing.
- */
-function keepAliveDraft(draft: ReturnType<typeof endActiveSubpath>['draft']) {
-  return draft ?? { subpaths: [] };
-}
-
-/**
  * Enter-equivalent freeze of the receptive subpath, shared by the Enter key
- * and the Esc ladder's freeze rung. Only a GEOMETRY change is a session
- * step: dropping a dangling anchor or cancelling a lone one is undoable, but
- * the plain freeze (an empty receptive subpath appended as the "next click
- * starts anew" marker) draws nothing, and recording it would cost the user
- * one invisible Cmd+Z. Undoing the last anchor of a frozen subpath simply
- * reopens it.
+ * and the Esc ladder's freeze rung. Only a GEOMETRY change persists: the
+ * pure freeze (an intent flag move that draws nothing) is zero write, so it
+ * never costs the user one invisible Cmd+Z — undoing after a pure freeze
+ * removes the last real anchor. Dropping a dangling anchor (the lone-anchor
+ * rung inside endActiveSubpath) IS a geometry change and persists undoably.
  */
 function freezeActiveSubpath(
-  scratch: ReturnType<typeof useEditorServices>['actions']['scratch'],
-  frameId: string,
+  actions: ReturnType<typeof useEditorServices>['actions'],
+  frame: Frame,
 ): boolean {
-  const draft = getPenDraft(scratch, frameId);
-  if (!draft) return false;
-  const before = snapshotPenDraft(draft);
-  const next = endActiveSubpath({ draft, selected: null });
-  scratch.set(frameId, PEN_DRAFT_SLOT, keepAliveDraft(next.draft));
+  const st = beginPenGesture(frame);
+  if (!st.draft) return false;
+  const before = snapshotPenDraft(st.draft);
+  const next = endActiveSubpath(st);
+  commitPenToolState(next);
   setPenDraftSelection(null);
-  if (draftAnchorCount(next) !== draftAnchorCount({ draft: before, selected: null })) {
-    scratch.record(frameId, before);
-  }
+  const changed = !penDraftEquals(before, next.draft);
+  endPenGesture(actions, frame, before, changed);
+  if (!next.draft) publishPenPhase(actions.setStateSignal, 'idle');
   return true;
 }
 
 /**
  * Drops every 1-anchor subpath from the frame's draft before leaving the
- * tool (and prunes the session entirely when nothing survives): a lone
- * anchor carries no committable geometry, and kept receptive it would
- * connect the next session's first click to the stale point. Subpaths with
- * 2+ anchors stay — a straight polyline is real (drawable/resumable)
- * geometry even though it needs a handle or a third anchor to commit.
+ * tool (and clears the draft entirely when nothing survives): a lone anchor
+ * carries no committable geometry, and kept receptive it would connect the
+ * next session's first click to the stale point. Subpaths with 2+ anchors
+ * stay — a straight polyline is real (drawable/resumable) geometry even
+ * though it needs a handle or a third anchor to commit. The prune is a real
+ * geometry change when it fires, so it persists as an undoable step.
  */
 function pruneLoneAnchors(
-  scratch: ReturnType<typeof useEditorServices>['actions']['scratch'],
-  frameId: string,
-  setSignal?: Parameters<typeof publishPenPhase>[0],
+  actions: ReturnType<typeof useEditorServices>['actions'],
+  frame: Frame | null,
 ): void {
-  const draft = getPenDraft(scratch, frameId);
+  if (!frame) return;
+  const draft = getPenDraft(frame);
   if (!draft) return;
   const kept = draft.subpaths.filter((s) => s.anchors.length >= 2 || s.closed);
   if (kept.length === draft.subpaths.length) return;
-  if (kept.length === 0) {
-    scratch.set(frameId, PEN_DRAFT_SLOT, null);
-    scratch.end(frameId);
-    if (setSignal) publishPenPhase(setSignal, 'idle');
-    return;
-  }
-  scratch.set(frameId, PEN_DRAFT_SLOT, { subpaths: kept });
+  persistPenDraft(actions, frame.id, kept.length > 0 ? { subpaths: kept } : null);
+  if (kept.length === 0) publishPenPhase(actions.setStateSignal, 'idle');
 }

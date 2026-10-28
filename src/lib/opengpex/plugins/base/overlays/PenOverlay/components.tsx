@@ -36,15 +36,18 @@ import { setPenRubberLine, setPenSurfaceGroup } from './interactions';
 /**
  * PenOverlayMain: SVG overlay for the pen tool.
  *
- * Renders in STAGE_OVERLAY while activeCraft === 'pen':
- * - PenSurface: viewport-sized SVG (screen px) with the draft session (anchors,
- *   handles) and every visible committed pen path, imperatively repainted
- *   by usePenSurfaceSync (60fps, no React re-render during gestures).
- * - PenRubberBand: screen-space marching-ants line from the last anchor to
- *   the cursor, moved directly by the pointer listener.
- * - PenGizmo: the shared TransformGizmo (corner variant) over the ACTIVE
- *   pen layer — the same self-rendered selection frame TextOverlay and
- *   MarkerOverlay draw in their own overlays.
+ * The PenSurface stays MOUNTED whenever a frame exists: with the pen tool
+ * inactive it shows the persisted draft as a bare outline (the Photoshop
+ * Work Path behavior — the draft is document state and must not vanish
+ * when the user switches tools). The edit affordances are tool-gated:
+ * - PenRubberBand (marching-ants line) and PenGizmo only render while
+ *   activeCraft === 'pen'.
+ * - PenSurface switches to outline mode via usePenSurfaceSync's flag.
+ *
+ * PenSurface: viewport-sized SVG (screen px) with the draft (anchors,
+ * handles when editing) and every visible committed pen path, imperatively
+ * repainted by usePenSurfaceSync (60fps, no React re-render during
+ * gestures).
  *
  * Cursor + keyboard grammar live in usePenToolLifecycle (called before the
  * early return so hook ordering holds).
@@ -57,12 +60,12 @@ export const PenOverlayMain = React.memo(function PenOverlayMain() {
   // Cursor + keyboard lifecycle (self-gated on isPenMode; runs every render).
   usePenToolLifecycle(isPenMode);
 
-  if (!isPenMode || !activeFrame) return null;
+  if (!activeFrame) return null;
   return (
     <>
-      <PenSurface />
-      <PenRubberBand />
-      <PenGizmo />
+      <PenSurface outlineOnly={!isPenMode} />
+      {isPenMode && <PenRubberBand />}
+      {isPenMode && <PenGizmo />}
     </>
   );
 });
@@ -113,12 +116,12 @@ const PEN_SURFACE_STYLE = `
   .pen-handle[data-hover] { transform: scale(2); fill: #ef4444; stroke: #0d99ff; stroke-width: 1px; }
 `;
 
-const PenSurface = React.memo(function PenSurface() {
+const PenSurface = React.memo(function PenSurface({ outlineOnly = false }: { outlineOnly?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const groupRef = useRef<SVGGElement>(null);
   const { activeFrame } = useEditorState();
 
-  usePenSurfaceSync(containerRef, groupRef, !!activeFrame);
+  usePenSurfaceSync(containerRef, groupRef, !!activeFrame, outlineOnly);
   // Ride the viewport rotation's counter-rotation tween (same protocol as the
   // marker/layer/clip overlays) — without it the draft anchors/lines snap to
   // the new orientation in one frame while the canvas tweens.

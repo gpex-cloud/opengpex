@@ -23,14 +23,15 @@ import { useEditorState, useEditorServices, usePluginSelfConfig } from "@opengpe
 import React from "react";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import ColorSwatchRow from "@opengpex/editor/widgets/ColorSwatchRow";
-import DelayedConfirm from "@opengpex/editor/widgets/DelayedConfirm";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
+import DelayedConfirm from "@opengpex/editor/widgets/DelayedConfirm";
 import { PenOverlayAPI } from "../../../overlays/PenOverlay/protocols";
-import { getPenDraft } from "../../../overlays/PenOverlay/interactions";
 import { srgbHexToColorValue, PEN_DEFAULT_FILL_HEX } from "../../../overlays/PenOverlay/contribution";
 import { toHex } from "@opengpex/editor/core/engine/color";
 import type { ColorValue } from "@opengpex/editor/core/engine/color";
 import { hasCommittableGeometry } from "../../../overlays/PenOverlay/pen/penState";
+import type { PenDraft } from "../../../overlays/PenOverlay/pen/penState";
+import { useFrameDraft } from "@opengpex/editor/core/state/drafts";
 import type { CraftDrawerConfig } from "../protocols";
 
 // ─── PenPanel ──────────────────────────────────────────────────────────────────
@@ -55,17 +56,18 @@ export const PenPanel = React.memo(function PenPanel() {
   // Cross-plugin signal: read straight from interaction state (usePluginSignals
   // only exposes the CURRENT plugin's own signals — the TextOverlay precedent).
   const phase = state.interaction.signals[PenOverlayAPI.signals.phase] as string | undefined;
-  // The draft payload itself lives in the frame's scratch slot (injected
-  // facade — never a direct core/state/scratch import). Re-renders on draft
-  // changes arrive via the 'scratch.revision' signal that record/undo/redo
-  // dispatch at gesture granularity.
-  const draft = activeFrame ? getPenDraft(actions.scratch, activeFrame.id) : null;
+  // The draft payload is document state on frame.drafts.pen; a draft write
+  // replaces the frame object, so this component re-renders through the
+  // normal state subscription — no dedicated revision signal needed.
+  // System-level drafts hook: frozen memoized read of frame.drafts.pen (R1a),
+  // no cross-plugin call into PenOverlay's interaction internals.
+  const draft = useFrameDraft<PenDraft>(activeFrame, 'pen');
 
-  // Committable = the tool is in its drawing phase AND the slot holds any
+  // Committable = the tool is in its drawing phase AND the draft holds any
   // committable geometry: a closed ring, or an open polyline of 2+ anchors
   // (open subpaths close implicitly on every commit target — SVG fill
   // semantics — so they light the buttons just like closed rings).
-  const canCommit = phase === "drawing" && hasCommittableGeometry({ draft, selected: null })
+  const canCommit = phase === "drawing" && hasCommittableGeometry({ draft, selected: null, frozen: false })
     && state.interaction.interactionMode === "craft";
 
   const updateFeather = (value: number) => {
@@ -250,6 +252,9 @@ export const PenPanel = React.memo(function PenPanel() {
         >
           Create Shape Layer
         </FancyButton>
+        {/* Hold-to-confirm: Clear Draft is undoable, but a whole work path
+            vanishing on a stray click still reads as loss — the delay makes
+            the intent explicit. */}
         <DelayedConfirm
           onConfirm={() => actions.executeCommand(PenOverlayAPI.commands.cancelDraft.uid)}
           confirmClassName="bg-red-500/10 dark:bg-red-400/5"
@@ -270,7 +275,7 @@ export const PenPanel = React.memo(function PenPanel() {
 
       {/* Session hint (mirrors the on-canvas grammar) */}
       <p className="px-1 pb-0.5 text-[8px] text-[var(--text-muted)] leading-relaxed">
-        Click: corner anchor · drag: smooth anchor · click first anchor / Enter: finish · Esc: finish / leave (draft kept) · Clear Draft: discard
+        Click: corner anchor · drag: smooth anchor · click first anchor / Enter: finish · Esc: finish / leave (draft kept) · Clear Draft (click twice): discard
       </p>
     </div>
   );

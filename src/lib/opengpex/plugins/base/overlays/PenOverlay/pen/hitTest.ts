@@ -52,12 +52,36 @@ export interface PenHitOps {
  * anchor — the anchor scan runs first anyway).
  */
 export function hitTestDraftSegment(draft: PenDraft, pt: Point2D, tolerance: number, ops: PenHitOps): boolean {
-  for (const sub of draft.subpaths) {
-    if (sub.anchors.length < 2) continue;
+  return findDraftSegmentHit(draft, pt, tolerance, ops) !== null;
+}
+
+/** Where a draft's curve passes nearest to `pt` (frame-local px). */
+export interface DraftSegmentHit {
+  pathIdx: number;
+  segIdx: number;
+  /** Parameter along the hit segment (de Casteljau split position). */
+  t: number;
+  dist: number;
+}
+
+/**
+ * Locates the nearest point on a draft's bézier curves within `tolerance`
+ * (frame-local px), returning the owning subpath, segment index and curve
+ * parameter — the full address a segment insertion needs. Ties resolve to
+ * the closest distance across all subpaths. Callers double the anchor
+ * tolerance for segments (the committed-side convention: a segment is a
+ * lower-value target than an anchor — the anchor scan runs first anyway).
+ */
+export function findDraftSegmentHit(draft: PenDraft, pt: Point2D, tolerance: number, ops: PenHitOps): DraftSegmentHit | null {
+  let best: DraftSegmentHit | null = null;
+  draft.subpaths.forEach((sub, pathIdx) => {
+    if (sub.anchors.length < 2) return;
     const segs = ops.penPathToCubicSegments({ paths: [sub] });
-    if (ops.nearestPointOnPath(segs, pt, tolerance)) return true;
-  }
-  return false;
+    const near = ops.nearestPointOnPath(segs, pt, tolerance);
+    if (!near) return;
+    if (!best || near.dist < best.dist) best = { pathIdx, segIdx: near.segmentIndex, t: near.t, dist: near.dist };
+  });
+  return best;
 }
 
 /**
@@ -79,4 +103,24 @@ export function hitTestDraftArea(draft: PenDraft, pt: Point2D, ops: PenHitOps): 
     if (ring.length >= 3) rings.push(ring);
   }
   return rings.length > 0 && ops.isPointInPolygon(pt, rings);
+}
+
+/**
+ * Which SUBPATH a Cmd press on the draft takes hold of (the black-arrow
+ * "move this path component" read): the subpath whose curve passes within
+ * `segmentTolerance` of `pt`, else the newest subpath whose own flattened
+ * ring (open polylines implicitly closed) contains `pt`. Each ring is
+ * judged alone — a point inside a hole ring still picks the hole, which is
+ * the component the user is pointing at. Returns null when the press misses
+ * every subpath.
+ */
+export function findDraftSubpathAt(draft: PenDraft, pt: Point2D, segmentTolerance: number, ops: PenHitOps): number | null {
+  const seg = findDraftSegmentHit(draft, pt, segmentTolerance, ops);
+  if (seg) return seg.pathIdx;
+  for (let pi = draft.subpaths.length - 1; pi >= 0; pi--) {
+    const segs = ops.penPathToCubicSegments({ paths: [draft.subpaths[pi]] });
+    const ring = ops.flattenCubicChain(segs, 0.25);
+    if (ring.length >= 3 && ops.isPointInPolygon(pt, [ring])) return pi;
+  }
+  return null;
 }

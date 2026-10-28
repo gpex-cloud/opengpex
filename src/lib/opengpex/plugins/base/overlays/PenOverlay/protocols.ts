@@ -21,9 +21,9 @@
  * PenOverlay Plugin Protocols
  *
  * Constants + typed facade for the pen (bézier path) tool overlay. Renders in
- * STAGE_OVERLAY; activated when activeCraft === 'pen'. The tool's draft lives
- * in the scratch service's per-frame slot (accessed via actions.scratch);
- * commit goes through the undoable commands declared here.
+ * STAGE_OVERLAY; activated when activeCraft === 'pen'. The tool's draft is
+ * document state on `frame.drafts.pen` (core drafts channel); commit
+ * goes through the undoable commands declared here.
  */
 
 export const PLUGIN_ID = 'overlays.pen_overlay';
@@ -44,13 +44,13 @@ export const SIGNAL_PEN_PHASE = 'signal.pen_phase';
 /** Applies the session's closed rings to the active layer as a feathered VectorMask (undoable). */
 export const CMD_APPLY_MASK = 'cmd.pen_apply_mask';
 
-/** Commits the session's closed rings as the frame's 'pen'-slot selection (undoable). */
+/** Commits the session's closed rings as the frame's selection (undoable). */
 export const CMD_TO_SELECTION = 'cmd.pen_to_selection';
 
-/** Converts the frame's current selection into an editable pen draft and activates the pen tool. */
+/** Converts the frame's current selection into an editable pen draft and activates the pen tool (undoable). */
 export const CMD_APPLY_AS_BEZIER = 'cmd.pen_apply_as_bezier';
 
-/** Aborts the drawing session (panel "Discard" / programmatic cancel). */
+/** Clears the drawing draft (panel "Clear Draft"; undoable). */
 export const CMD_CANCEL_DRAFT = 'cmd.pen_cancel_draft';
 
 /** Patches a committed layer's `penData` (anchor deletion etc., undoable). */
@@ -94,7 +94,7 @@ export const PenOverlayAPI = {
     toSelection: { uid: _CMD_TO_SELECTION_UID } as { uid: string; _payload: void },
 /** Convert the frame's current selection into an editable pen draft (activates the pen tool) */
     applyAsBezier: { uid: _CMD_APPLY_AS_BEZIER_UID } as { uid: string; _payload: void },
-    /** Abort the drawing session */
+    /** Abort the drawing session (clear the draft) */
     cancelDraft: { uid: _CMD_CANCEL_DRAFT_UID } as { uid: string; _payload: void },
     /** Patch a committed layer's penData (set null to clear) */
     updatePenData: { uid: _CMD_UPDATE_PEN_DATA_UID } as { uid: string; _payload: { frameId: string; layerId: string; penData: import('@opengpex/editor/core/types').PenPathData | null } },

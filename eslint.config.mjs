@@ -43,10 +43,6 @@ const eslintConfig = defineConfig([
             group: ["@opengpex/editor/core/geometry/operators/*"],
             message: "Plugins must not import internal geometry operators directly. Use the GeometryService via context or InteractionEvent instead (e.g. geometry.transform.*, e.geometry.space.*).",
           },
-          {
-            group: ["@opengpex/editor/core/state/scratch", "@opengpex/editor/core/state/scratch/*"],
-            message: "Plugins must not import the scratch service directly. Use the injected actions.scratch facade via context or InteractionEvent instead (e.g. actions.scratch.get/set/begin/end).",
-          },
         ],
       }],
     },

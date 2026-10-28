@@ -45,6 +45,7 @@ export const ADV_FRAME_RESAMPLE = 'adv.frame.resample';
 export const ADV_FRAME_REPLACE = 'adv.frame.replace';
 export const ADV_FRAME_REMOVE = 'adv.frame.remove';
 export const ADV_FRAME_TRUNK = 'adv.frame.trunk';
+export const ADV_FRAME_SET_DRAFT = 'adv.frame.set_draft';
 export const ADV_GPEX_PACK = 'adv.gpex.pack';
 export const ADV_GPEX_UNPACK = 'adv.gpex.unpack';
 /** @deprecated Alias for ADV_GPEX_PACK */

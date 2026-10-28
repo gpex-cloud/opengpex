@@ -19,26 +19,17 @@
 
 'use client';
 
-import { EditorCommand, EditorContextValue, Frame, PEN_DRAFT_SLOT_ID } from '@opengpex/editor/core/types';
-import { transformAnchorPath, transformFrame } from '@opengpex/editor/core/geometry/operators/transform';
+import { EditorCommand, EditorContextValue, Frame } from '@opengpex/editor/core/types';
+import { transformFrame } from '@opengpex/editor/core/geometry/operators/transform';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**
- * transformPenDraft: Applies the viewport's D4 operation to the active frame's
- * pen draft (scratch slot), so the draft's frame-local anchors stay aligned
- * with the pixels — the same treatment transformFrame gives layer poses and
- * selection confinement. No-op when no draft session exists on the frame. NOT a
- * session undo step: a viewport rotation is a document-level op (and while a
- * session is alive the history fence blocks main-history undo anyway).
- */
-function transformPenDraft(ctx: EditorContextValue, frameId: string, container: { w: number; h: number }, operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v'): void {
-  const draft = ctx.actions.scratch.get(frameId, PEN_DRAFT_SLOT_ID) as { subpaths?: unknown } | undefined;
-  if (!draft || !Array.isArray(draft.subpaths) || draft.subpaths.length === 0) return;
-  ctx.actions.scratch.set(frameId, PEN_DRAFT_SLOT_ID, transformAnchorPath(draft as { subpaths: Parameters<typeof transformAnchorPath>[0]['subpaths'] }, container, operation));
-}
-
-/**
  * VIEWPORT_TRANSFORM_COMMANDS: Handles core geometric transformations (rotation, flip, reset) for viewports and layers.
+ *
+ * Frame drafts need no separate treatment here: `transformFrame` remaps
+ * every transformable draft itself (via its codec's transform hook), so the
+ * spread patch below carries the realigned drafts in the SAME undoable
+ * updateFrame as the pixels.
  */
 export const ViewportTransformCommands = {
   rotate: {
@@ -53,7 +44,6 @@ export const ViewportTransformCommands = {
 
       const operation = payload.direction === 'right' ? 'rotate_r' : 'rotate_l';
       const nextFramePatch = transformFrame(activeFrame, operation);
-      transformPenDraft(ctx, activeFrame.id, activeFrame.canvas, operation);
 
       actions.updateFrame(activeFrame.id, {
         ...nextFramePatch,
@@ -97,7 +87,6 @@ export const ViewportTransformCommands = {
 
       const operation = payload.direction === 'horizontal' ? 'flip_h' : 'flip_v';
       const nextFramePatch = transformFrame(activeFrame, operation);
-      transformPenDraft(ctx, activeFrame.id, activeFrame.canvas, operation);
 
       actions.updateFrame(activeFrame.id, {
         ...nextFramePatch,
@@ -166,7 +155,8 @@ export const ViewportTransformCommands = {
         layers: nextFrame.layers,
         confinement: nextFrame.confinement,
         canvasClipBox: nextFrame.canvasClipBox,
-        camera: nextFrame.camera
+        camera: nextFrame.camera,
+        drafts: nextFrame.drafts,
       });
     },
     shortcuts: [{ key: 'r', meta: true, alt: true }, { key: 'r', ctrl: true, alt: true }]

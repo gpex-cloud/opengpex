@@ -87,9 +87,13 @@ function pathGraphic(d: string, fill: string): string {
 }
 
 /**
- * Builds the whole overlay fragment in screen px: committed paths first
- * (under), then the active draft (over). Empty string when there is nothing
- * to draw.
+ * Builds the whole overlay fragment in screen px. Two modes:
+ * - edit (default, pen tool active): committed paths under, the active draft
+ *   over, anchors/handles/selection highlights live.
+ * - outline (`outlineOnly`, pen tool INACTIVE — the Photoshop Work Path
+ *   read): the persisted draft outline only, no anchors, no committed-path
+ *   edit affordances — the draft stays visible so the user never loses
+ *   track of it, but nothing advertises editability.
  */
 export function buildPenOverlaySvg(
   state: PenToolState,
@@ -100,6 +104,7 @@ export function buildPenOverlaySvg(
   draftSelected?: PenDraftSelection | null,
   /** The L0 anchor-map op (handles re-basing) — injected by the caller. */
   mapPathAnchors?: (path: PenPathData, map: PointMap) => PenPathData,
+  outlineOnly = false,
 ): string {
   const mapOps = mapPathAnchors ?? ((path: PenPathData, map: PointMap) => ({
     paths: path.paths.map((sub) => ({
@@ -120,34 +125,44 @@ export function buildPenOverlaySvg(
 
   // ── Committed pen layers: curves + unselected anchors; handles only for
   //    the selected anchor (Illustrator's keep-the-noise-down convention).
-  for (const layer of committedLayers) {
-    const matrix = getLayerMatrix(layer, frame);
-    const toScreen: PointMap = (p) => canvasToView(matrix.apply(p));
-    const data: PenPathData = layer.penData!;
-    const d = penPathToSvgD({
-      paths: mapOps(data, toScreen).paths,
-    });
-    if (d) svg += pathGraphic(d, FILL);
-    const selected = state.selected;
-    for (let pi = 0; pi < data.paths.length; pi++) {
-      const sub = data.paths[pi];
-      for (let ai = 0; ai < sub.anchors.length; ai++) {
-        const a = sub.anchors[ai];
-        const isSel = selected && selected.pathIdx === pi && selected.anchorIdx === ai;
-        if (isSel) svg += handleGraphics(a, toScreen, true, `c:${layer.id}:${pi}:${ai}`);
-        svg += anchorSquare(toScreen({ x: a.x, y: a.y }), !!isSel, `c:${layer.id}:${pi}:${ai}`);
+  //    Skipped in outline mode — committed layers are engine-rendered
+  //    document content; their overlay drawing is a pen-tool edit affordance.
+  if (!outlineOnly) {
+    for (const layer of committedLayers) {
+      const matrix = getLayerMatrix(layer, frame);
+      const toScreen: PointMap = (p) => canvasToView(matrix.apply(p));
+      const data: PenPathData = layer.penData!;
+      const d = penPathToSvgD({
+        paths: mapOps(data, toScreen).paths,
+      });
+      if (d) svg += pathGraphic(d, FILL);
+      const selected = state.selected;
+      for (let pi = 0; pi < data.paths.length; pi++) {
+        const sub = data.paths[pi];
+        for (let ai = 0; ai < sub.anchors.length; ai++) {
+          const a = sub.anchors[ai];
+          const isSel = selected && selected.pathIdx === pi && selected.anchorIdx === ai;
+          if (isSel) svg += handleGraphics(a, toScreen, true, `c:${layer.id}:${pi}:${ai}`);
+          svg += anchorSquare(toScreen({ x: a.x, y: a.y }), !!isSel, `c:${layer.id}:${pi}:${ai}`);
+        }
       }
     }
   }
 
-  // ── Draft session (canvas-local): every anchor with its handles, the
-  //    selected draft anchor solid.
+  // ── Draft (canvas-local): in edit mode every anchor with its handles and
+  //    the selected draft anchor solid; in outline mode just the path lines
+  //    (the Work Path read — visible, not advertised as editable).
   if (state.draft) {
     for (let pi = 0; pi < state.draft.subpaths.length; pi++) {
       const sub = state.draft.subpaths[pi];
       if (sub.anchors.length === 0) continue;
       const d = penPathToSvgD({ paths: [mapOps({ paths: [sub] }, canvasToView).paths[0]] });
-      if (d) svg += pathGraphic(d, sub.closed ? FILL : 'none');
+      if (!d) continue;
+      if (outlineOnly) {
+        svg += pathGraphic(d, sub.closed ? FILL : 'none');
+        continue;
+      }
+      svg += pathGraphic(d, sub.closed ? FILL : 'none');
       for (let ai = 0; ai < sub.anchors.length; ai++) {
         const a = sub.anchors[ai];
         const isSel = !!draftSelected && draftSelected.pathIdx === pi && draftSelected.anchorIdx === ai;
@@ -161,13 +176,17 @@ export function buildPenOverlaySvg(
 }
 
 /**
- * Canvas-local start point of the rubber band (the open draft subpath's
- * last anchor), or null when no band should show. The band is a persistent
- * element outside the rebuilt fragment (see PenRubberBand) so the pointer
- * listener can move its tip without a rebuild.
+ * Canvas-local start point of the rubber band (the RECEPTIVE subpath's last
+ * anchor), or null when no band should show. The band previews the segment
+ * the next click will draw, so it exists only while a subpath actually takes
+ * the next anchor: the LAST subpath, open, non-empty and with no freeze
+ * intent pending. After Enter (frozen) or a close the next click opens a new
+ * subpath and nothing connects to the pointer — no band. The band is a
+ * persistent element outside the rebuilt fragment (see PenRubberBand) so the
+ * pointer listener can move its tip without a rebuild.
  */
 export function getPenRubberTip(state: PenToolState): Point2D | null {
-  if (!state.draft) return null;
+  if (!state.draft || state.frozen) return null;
   const last = state.draft.subpaths[state.draft.subpaths.length - 1];
   if (!last || last.closed || last.anchors.length === 0) return null;
   const tip = last.anchors[last.anchors.length - 1];

@@ -22,6 +22,7 @@ import { PenOverlayMain } from './components';
 import { createPenDblClickActivateHandler, createPenDrawHandler, createPenEditHandler, createPenMoveHandler, createPenResizeHandler, createPenRotateHandler } from './interactions';
 import { PEN_OVERLAY_COMMANDS } from './commands';
 import { penContributor } from './contribution';
+import { penDraftCodec } from './pen/draftCodec';
 import * as P from './protocols';
 
 /**
@@ -76,6 +77,7 @@ export const plugin: EditorPlugin = {
 
   contributions: {
     engine: { vectorSource: penContributor },
+    state: { draftCodec: penDraftCodec },
   },
 
   signals: [

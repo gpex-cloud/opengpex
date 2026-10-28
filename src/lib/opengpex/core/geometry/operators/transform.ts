@@ -18,9 +18,9 @@
  */
 
 import { Matrix3x3, GeometryOp } from '../matrix';
-import { mapPathAnchors } from './bezier';
-import { Layer, Frame, IMatrix3x3, asLocalRect, asLocalPoint, asLocalPolygon, LocalPolygon, LayerPoseOverride, Point2D, Dimensions, PenSubPath } from '@opengpex/editor/core/types';
+import { Layer, Frame, IMatrix3x3, asLocalRect, asLocalPoint, asLocalPolygon, LocalPolygon, LayerPoseOverride, Point2D, Dimensions } from '@opengpex/editor/core/types';
 import { computePolygonBounds } from './polygon';
+import { getFrameDraftCodec } from '../../state/drafts';
 
 /**
  * [Generic] Core geometric operator: calculate transform matrix of any asset in world coordinate system
@@ -244,33 +244,6 @@ function transformPolygon(
   return asLocalPolygon(nextRings, nextBounds, poly.antiAliased);
 }
 
-/**
- * transformAnchorPath: Transforms an anchor-path payload (the pen draft's
- * shape) by the same D4 symmetry operation {@link transformFrame} applies to
- * layer poses and selection polygons — frame-local geometry must all live in
- * the SAME axes after a viewport rotate/flip, or overlays detach from the
- * pixels. The point maps are the ones documented on {@link transformPolygon}.
- * Pure; uses the L0 {@link mapPathAnchors} primitive (handles ride along).
- */
-export function transformAnchorPath(
-  draft: { subpaths: PenSubPath[] },
-  container: { w: number; h: number },
-  op: GeometryOp
-): { subpaths: PenSubPath[] } {
-  const { w: oldW, h: oldH } = container;
-  const transformPoint = (px: number, py: number): Point2D => {
-    switch (op) {
-      case 'rotate_r': return { x: oldH - py, y: px };
-      case 'rotate_l': return { x: py, y: oldW - px };
-      case 'flip_h': return { x: oldW - px, y: py };
-      case 'flip_v': return { x: px, y: oldH - py };
-      default: return { x: px, y: py };
-    }
-  };
-  return {
-    subpaths: mapPathAnchors({ paths: draft.subpaths }, (p) => transformPoint(p.x, p.y)).paths,
-  };
-}
 
 /**
  * Execute artboard-level geometric update (rotation/flip)
@@ -335,7 +308,39 @@ export function transformFrame(
     camera: nextCamera,
     confinement: nextConfinement,
     canvasClipBox: { ...frame.canvasClipBox, rect: asLocalRect(nextCanvasCropBox) },
+    // Frame drafts travel with the pixels: every draft whose codec declares
+    // a viewport-transform hook is remapped through the same D4 operation
+    // (frame-local geometry must live in the SAME axes as the pixels). Keys
+    // without a hook pass through verbatim — unknown drafts are never
+    // corrupted by a viewport op. Same undo step as the pixels (the caller
+    // lands this whole patch in one updateFrame).
+    drafts: transformFrameDrafts(frame, operation),
   };
+}
+
+/**
+ * Remaps every transformable draft in `frame.drafts` through the D4
+ * operation, using the PRE-transform canvas as the mapping container (the
+ * point maps above are expressed against the old dimensions). Returns the
+ * input record untouched when no draft declares a transform hook.
+ */
+function transformFrameDrafts(
+  frame: Frame,
+  operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v',
+): Record<string, unknown> | undefined {
+  if (!frame.drafts) return undefined;
+  let next: Record<string, unknown> | null = null;
+  for (const [toolId, payload] of Object.entries(frame.drafts)) {
+    const codec = getFrameDraftCodec(toolId);
+    const transformed = codec?.transform && payload && typeof payload === 'object'
+      ? codec.transform(payload as never, { w: frame.canvas.w, h: frame.canvas.h }, operation)
+      : payload;
+    if (transformed !== payload) {
+      next ??= { ...frame.drafts };
+      next[toolId] = transformed;
+    }
+  }
+  return next ?? frame.drafts;
 }
 
 /**

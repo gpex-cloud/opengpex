@@ -20,8 +20,9 @@
 'use client';
 
 import { EditorCommand, EditorContextValue, type PenPathData } from '@opengpex/editor/core/types';
+import { writeFrameDraft } from '@opengpex/editor/core/state/drafts';
 import { LayerFactory } from '@opengpex/editor/core/layer/factory';
-import { asLocalPolygon, asLocalRect, asLocalShape, type LocalPolygon } from '@opengpex/editor/core/types';
+import { asLocalRect, asLocalPolygon, asLocalShape, type LocalPolygon } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { penBoundsPad, rebasePenDataToBounds } from './pen/transform';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
@@ -33,11 +34,10 @@ import {
   composePenToolState,
   getPenCommittedSelection,
   getPenDraft,
-  PEN_DRAFT_SLOT,
-  PEN_SESSION_OWNER,
   publishPenPhase,
   replacePenDraft,
   setPenCommittedSelection,
+  PEN_TOOL_ID,
 } from './interactions';
 import {
   srgbHexToColorValue,
@@ -47,6 +47,20 @@ import {
 } from './contribution';
 
 // ─── Shared helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Clears the frame's pen draft inside the CALLING command's undoable step:
+ * the caller has already triggered (or will trigger) the step via its own
+ * undoable command execution, and both writes land between the same
+ * pre-execution checkpoint and the next commit — undo restores the mask /
+ * selection / shape TOGETHER with the draft (the "undo brings the path
+ * back" contract).
+ */
+function clearPenDraftInStep(ctx: EditorContextValue, frameId: string): void {
+  const frame = ctx.state.frames.byId[frameId];
+  if (!frame?.drafts?.[PEN_TOOL_ID]) return;
+  ctx.actions.updateFrame(frameId, writeFrameDraft(frame, PEN_TOOL_ID, null));
+}
 
 /**
  * Flattens the session's committable subpaths (frame-local) to point rings.
@@ -60,7 +74,7 @@ function flattenDraftRings(ctx: EditorContextValue): { closed: { x: number; y: n
   const closed: { x: number; y: number }[][] = [];
   const open: { x: number; y: number }[][] = [];
   if (!frame) return { closed, open };
-  const state = composePenToolState(ctx.actions.scratch, frame.id);
+  const state = composePenToolState(frame);
   for (const sub of committableSubpaths(state)) {
     const pts = flattenSubPath(sub, ops, P.PEN_FLATTEN_TOLERANCE_DOC_PX);
     if (!pts) continue;
@@ -170,13 +184,11 @@ const applyMaskCommand: EditorCommand<{ feather?: number }, void> = {
     ctx.layers.updateLayer(frame.id, (tx) => {
       tx.edit(layer.id).applyMask(shape, { feather });
     });
-    // Commit keeps the draft alive (PS-style work path: adjust a few anchors,
-    // re-apply, compare): the session ENDS — the fence lifts so the mask
-    // step is immediately undoable in global history — but the slot is left
-    // untouched, and the pen tool exits so the user lands on the canvas to
-    // inspect the result. Re-entering the tool resumes the kept draft; the
-    // next click re-opens a session over it.
-    ctx.actions.scratch.end(frame.id);
+    // Commit semantics: the draft is cleared INSIDE this same undoable step
+    // (undo restores the mask AND the path together — "undo brings the path
+    // back"). The pen tool exits so the user lands on the canvas to inspect
+    // the result.
+    clearPenDraftInStep(ctx, frame.id);
     publishPenPhase(ctx.actions.setStateSignal, 'idle');
     ctx.actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
   },
@@ -184,11 +196,12 @@ const applyMaskCommand: EditorCommand<{ feather?: number }, void> = {
 
 /**
  * cmd.pen_to_selection — "Convert to Selection": flattens the session's
- * closed rings into a LocalPolygon and stores it in the frame's dedicated
- * `'pen'` clip slot (never overwriting lasso/wand/… selections), then shows
- * the marching ants by switching to clip mode with latestClipTool='pen'.
+ * closed rings into a LocalPolygon and stores it as the frame's selection
+ * (the lasso slot — an irregular polygon like any other), then shows the
+ * marching ants by switching to clip mode with latestClipTool='lasso'.
  *
- * undoable: the clip-box write rides the frame's undoable update path.
+ * undoable: the selection write and the same-step draft clear ride the
+ * frame's undoable update path (undo restores selection AND draft).
  */
 const toSelectionCommand: EditorCommand<void, void> = {
   id: P.CMD_TO_SELECTION,
@@ -209,11 +222,13 @@ const toSelectionCommand: EditorCommand<void, void> = {
     }
 
     ctx.actions.setInteraction({ interactionMode: 'clip' });
-    // The 'pen' clip slot was retired (2026-10-24): the selection lands in
-    // the lasso slot — an irregular polygon like any other, consumed by the
-    // existing selection machinery, and re-importable via Apply-as-Bezier.
+    // The selection lands in the lasso slot — an irregular polygon like any
+    // other, consumed by the existing selection machinery and re-importable
+    // via Apply-as-Bezier. The draft clears in this same undoable step (undo
+    // restores the selection AND the path together).
     ctx.actions.updateFrame(frame.id, { latestClipTool: 'lasso', confinement: poly });
-    endDraftSession(ctx);
+    clearPenDraftInStep(ctx, frame.id);
+    publishPenPhase(ctx.actions.setStateSignal, 'idle');
   },
 } as EditorCommand<void, void>;
 
@@ -221,13 +236,16 @@ const toSelectionCommand: EditorCommand<void, void> = {
  * cmd.pen_apply_as_bezier — "Apply as Bezier": converts the frame's
  * current selection (`latestClipTool` slot) into an editable pen draft via
  * Schneider fitting (1.0 doc-px default). The draft replaces any existing
- * session — a non-empty draft requires a second press within the confirm
- * window (HUD-confirmed destructive swap, session state is outside history).
+ * one — a non-empty draft requires a second press within the confirm
+ * window (HUD-confirmed destructive swap).
+ *
+ * undoable: true → the conversion is one history step; undo restores the
+ * previous draft (or no draft).
  */
 const applyAsBezierCommand: EditorCommand<void, void> = {
   id: P.CMD_APPLY_AS_BEZIER,
   name: 'Apply Selection as Bezier',
-  undoable: false,
+  undoable: true,
   execute: (ctx: EditorContextValue) => {
     const frame = ctx.activeFrame;
     if (!frame) return;
@@ -238,10 +256,9 @@ const applyAsBezierCommand: EditorCommand<void, void> = {
       return;
     }
 
-    // HUD-confirmed swap: the first press while a session is alive only arms
+    // HUD-confirmed swap: the first press while a draft is alive only arms
     // the confirm; the second press (however much later) performs the swap.
-    const scratch = ctx.actions.scratch;
-    if (getPenDraft(scratch, frame.id) !== null && !applyConfirmArmed) {
+    if (getPenDraft(frame) !== null && !applyConfirmArmed) {
       applyConfirmArmed = true;
       ctx.actions.notifyHUD('Applying replaces the current pen draft — press again to confirm', 'error');
       return;
@@ -267,14 +284,9 @@ const applyAsBezierCommand: EditorCommand<void, void> = {
       return;
     }
 
-    // Destructive swap: the replaced session dies with its stack (the HUD
-    // confirm above owns the warning), then a fresh session opens so the
-    // conversion itself is one recorded step inside it (undo restores an
-    // empty draft without ending the session).
-    scratch.end(frame.id);
-    scratch.begin(frame.id, PEN_SESSION_OWNER, PEN_DRAFT_SLOT);
-    replacePenDraft({ subpaths: subs }, scratch, frame.id);
-    scratch.record(frame.id, { subpaths: [] });
+    // Destructive swap: the replaced draft dies with this same undoable step
+    // (the HUD confirm above owns the warning; undo restores the old draft).
+    replacePenDraft(ctx.actions, frame, { subpaths: subs });
     ctx.actions.notifyHUD(
       `Converted to ${fit.anchorCount} anchors (from ${fit.vertexCount} vertices)`,
       'info',
@@ -303,18 +315,21 @@ const updatePenDataCommand: EditorCommand<{ frameId: string; layerId: string; pe
 };
 
 /**
- * cmd.pen_cancel_draft — discards the volatile session (the panel's
- * "Clear Draft"). Never undoable: the draft lives outside history by design
- * (same as an in-progress lasso). Confirmation is owned by the panel button
- * (DelayedConfirm press-and-hold), not by this command.
+ * cmd.pen_cancel_draft — "Clear Draft": clears the frame's pen draft.
+ * Undoable (undo restores the whole draft), so the press-and-hold
+ * destructive confirmation the panel used to require is retired — a
+ * mistake is one Cmd+Z away.
  */
 const cancelDraftCommand: EditorCommand<void, void> = {
   id: P.CMD_CANCEL_DRAFT,
-  name: 'Discard Pen Draft',
-  undoable: false,
+  name: 'Clear Pen Draft',
+  undoable: true,
   execute: (ctx: EditorContextValue) => {
-    if (!ctx.activeFrame) return;
-    endDraftSession(ctx);
+    const frame = ctx.activeFrame;
+    if (!frame) return;
+    if (!getPenDraft(frame)) return;
+    replacePenDraft(ctx.actions, frame, null);
+    publishPenPhase(ctx.actions.setStateSignal, 'idle');
   },
 } as EditorCommand<void, void>;
 
@@ -338,7 +353,7 @@ const createShapeCommand: EditorCommand<PenShapeStylePayload | undefined, void> 
     const frame = ctx.activeFrame;
     if (!frame) return;
 
-    const state = composePenToolState(ctx.actions.scratch, frame.id);
+    const state = composePenToolState(frame);
     const subs = committableSubpaths(state);
     if (subs.length === 0) {
       ctx.actions.setInteraction({ hud: { message: 'No path to commit', type: 'error' } });
@@ -409,7 +424,9 @@ const createShapeCommand: EditorCommand<PenShapeStylePayload | undefined, void> 
     ctx.layers.addLayer(frame.id, layer, insertAt);
     ctx.layers.activate(frame.id, layer.id);
 
-    endDraftSession(ctx);
+    // Same-step draft clear: undo restores the shape layer AND the path.
+    clearPenDraftInStep(ctx, frame.id);
+    publishPenPhase(ctx.actions.setStateSignal, 'idle');
   },
 } as EditorCommand<PenShapeStylePayload | undefined, void>;
 
@@ -419,10 +436,9 @@ let releaseConfirmArmed = false;
 /**
  * cmd.pen_release_to_draft — "Release Path to Draft" (LayerMenu on pen shape
  * layers): maps the layer's `penData` (layer-local) back into frame-local
- * draft subpaths, seeds the drawing session with it and removes the layer.
- * The layer removal rides the undoable update path; the draft write lives
- * outside history by design, so UNDO of a release re-adds the layer while
- * the restored draft stays (Clear Draft resolves the overlap).
+ * draft subpaths, seeds the frame's draft with it and removes the layer.
+ * Both writes ride this ONE undoable step: undo re-adds the layer AND
+ * restores the previous draft.
  */
 const releaseToDraftCommand: EditorCommand<{ frameId: string; layerId: string }, void> = {
   id: P.CMD_RELEASE_TO_DRAFT,
@@ -434,10 +450,9 @@ const releaseToDraftCommand: EditorCommand<{ frameId: string; layerId: string },
     if (!frame || !layer || layer.type !== 'vector' || !layer.penData) return;
     if (layer.role && layer.role !== 'host') return; // never release engine clones
 
-    // HUD-confirmed swap when a draft session is already alive (same latch
-    // discipline as Import selection).
-    const scratch = ctx.actions.scratch;
-    if (getPenDraft(scratch, frame.id) !== null && !releaseConfirmArmed) {
+    // HUD-confirmed swap when a draft is already alive (same latch
+    // discipline as Apply-as-Bezier).
+    if (getPenDraft(frame) !== null && !releaseConfirmArmed) {
       releaseConfirmArmed = true;
       ctx.actions.notifyHUD('Releasing replaces the current pen draft — press again to confirm', 'error');
       return;
@@ -452,13 +467,9 @@ const releaseToDraftCommand: EditorCommand<{ frameId: string; layerId: string },
       return;
     }
 
-    // Fresh session owning the released path (import-selection pattern): the
-    // release itself becomes the session's first recorded step, so undo pops
-    // back to an empty draft without ending the session.
-    scratch.end(frame.id);
-    scratch.begin(frame.id, PEN_SESSION_OWNER, PEN_DRAFT_SLOT);
-    replacePenDraft({ subpaths: subs }, scratch, frame.id);
-    scratch.record(frame.id, { subpaths: [] });
+    // The draft write and the layer removal land inside this command's
+    // single undoable step.
+    replacePenDraft(ctx.actions, frame, { subpaths: subs });
     publishPenPhase(ctx.actions.setStateSignal, 'drawing');
     if (getPenCommittedSelection()?.layerId === layer.id) setPenCommittedSelection(null);
 
@@ -539,22 +550,9 @@ export const PEN_OVERLAY_COMMANDS = [
   releaseToDraftCommand,
 ];
 
-/** The frame's live draft session as persistent PenPathData (empty when idle). */
+/** The frame's live draft as persistent PenPathData (empty when idle). */
 export function sessionPenPathData(ctx: EditorContextValue): ReturnType<typeof draftToPenPathData> {
   const frame = ctx.activeFrame;
   if (!frame) return { paths: [] };
-  return draftToPenPathData(composePenToolState(ctx.actions.scratch, frame.id));
-}
-
-/**
- * Commit/discard exit: clears the draft slot, ends the frame's scratch
- * session and publishes the idle phase. Undo of the committing step stays in
- * GLOBAL history (the session fence lifts the moment the session ends).
- */
-function endDraftSession(ctx: EditorContextValue): void {
-  const frame = ctx.activeFrame;
-  if (!frame) return;
-  replacePenDraft(null, ctx.actions.scratch, frame.id);
-  ctx.actions.scratch.end(frame.id);
-  publishPenPhase(ctx.actions.setStateSignal, 'idle');
+  return draftToPenPathData(composePenToolState(frame));
 }

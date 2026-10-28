@@ -95,6 +95,7 @@ const registryTemplate = `/**
  */
 
 import { registerVectorSourceContributor } from '../../core/engine/pipeline/scene/vectorSources';
+import { registerFrameDraftCodec } from '../../core/state/drafts';
 
 ${importStatements.join('\n')}
 
@@ -110,6 +111,17 @@ for (const p of PLUGINS) {
   const contributor = p.contributions?.engine?.vectorSource;
   if (contributor) {
     registerVectorSourceContributor(contributor);
+  }
+}
+
+// Frame-draft codec wiring: every plugin declaring
+// contributions.state.draftCodec registers its payload contract, so the
+// Frame.drafts read/write channel and the document hydrator's whitelist are
+// fully populated wherever the plugin registry is imported.
+for (const p of PLUGINS) {
+  const codec = p.contributions?.state?.draftCodec;
+  if (codec) {
+    registerFrameDraftCodec(codec);
   }
 }
 

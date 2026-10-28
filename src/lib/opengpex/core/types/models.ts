@@ -375,11 +375,6 @@ export interface PenLayerStyle {
   stroke?: { color: ColorValue; width: number } | null;
 }
 
-/** Scratch slot id (core/state/scratch) holding the pen draft payload. Declared
- *  in core — not the plugin — so frame-level transforms (viewport rotate/flip)
- *  can transform the draft's frame-local geometry without a core→plugin import. */
-export const PEN_DRAFT_SLOT_ID = 'penDraft';
-
 export interface PenPathData {
   paths: PenSubPath[];
 }
@@ -626,6 +621,22 @@ export interface Frame {
   } | null;
   history?: HistoryState;
   extra?: Record<string, unknown>;
+
+  /**
+   * Per-frame tool drafts — in-progress vector sessions keyed by tool id
+   * (the pen tool uses 'pen'). A draft is document state, not tool state:
+   * it survives tool switches, frame switches, page reloads and .gpex
+   * round-trips, and its changes flow through the SAME per-frame undo
+   * ledger as every other edit (one gesture = one history step).
+   *
+   * Readers never get the stored reference: `readFrameDraft` hands out a
+   * frozen deep copy (cached by payload reference), and the only write
+   * path is "mutate a private clone, then replace the whole entry" via
+   * `writeFrameDraft` (see core/state/drafts.ts). Keys without a
+   * registered DraftCodec are dropped at load time, which is what makes
+   * old documents load cleanly into newer builds.
+   */
+  drafts?: Record<string, unknown>;
 
   /** Document-level image metadata (EXIF, ICC, source info). Persists regardless of layer changes. */
   metadata?: ImageMetadata;
