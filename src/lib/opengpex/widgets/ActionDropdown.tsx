@@ -36,6 +36,9 @@ export interface ActionOption {
   children?: ActionOption[];
 }
 
+/** Floor used to predict submenu overflow before it is measured. */
+const SUBMENU_MIN_WIDTH = 120;
+
 interface ActionDropdownProps {
   trigger: React.ReactNode | ((isOpen: boolean) => React.ReactNode);
   options: ActionOption[];
@@ -129,15 +132,25 @@ export default function ActionDropdown({
             <motion.div
               ref={menuRef}
               initial={{ opacity: 0, y: direction === 'up' ? -8 : 8, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1, x: align === 'right' ? '-100%' : 0 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: direction === 'up' ? -8 : 8, scale: 0.95 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300, x: { duration: 0 } }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
               style={{
                 position: 'fixed',
                 ...(direction === 'up'
                   ? { bottom: window.innerHeight - coords.bottom + 8 }
                   : { top: coords.top + 8 }),
-                left: align === 'right' ? coords.left + coords.width : coords.left,
+                // Right-aligned menus anchor via `right` instead of
+                // `left` + translateX(-100%): a fixed element's shrink-to-fit
+                // width is measured from `left` to the viewport edge, so
+                // anchoring at a trigger near the right screen edge (right-
+                // docked drawer) would squeeze the menu down to its
+                // min-width and wrap every label. With `right`, the fit
+                // space extends leftward and the menu keeps its natural
+                // width regardless of dock side.
+                ...(align === 'right'
+                  ? { right: Math.max(8, window.innerWidth - (coords.left + coords.width)) }
+                  : { left: coords.left }),
                 ...(matchTriggerWidth ? { width: coords.width } : {}),
                 zIndex: 10000,
                 pointerEvents: 'auto'
@@ -235,9 +248,19 @@ function SubMenuOption({ option, onSelect }: { option: ActionOption; onSelect: (
   const [open, setOpen] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Submenus extend rightward by default; when the parent menu sits close
+  // to the viewport's right edge (right-docked drawer) the fly-out would
+  // clip offscreen, so it flips to extend leftward instead.
+  const [placement, setPlacement] = useState<'right' | 'left'>('right');
 
   const handleEnter = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (rect) {
+      setPlacement(
+        rect.right + 8 + SUBMENU_MIN_WIDTH > window.innerWidth ? 'left' : 'right',
+      );
+    }
     setOpen(true);
   };
   const handleLeave = () => {
@@ -272,11 +295,12 @@ function SubMenuOption({ option, onSelect }: { option: ActionOption; onSelect: (
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -4 }}
             transition={{ duration: 0.1 }}
-            className="absolute left-full top-0 ml-1 min-w-[120px]
+            className={`absolute top-0 min-w-[120px]
+              ${placement === 'right' ? 'left-full ml-1' : 'right-full mr-1'}
               bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl
               border border-zinc-200 dark:border-white/10
               rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] p-1
-              flex flex-col gap-0.5 z-[10001]"
+              flex flex-col gap-0.5 z-[10001]`}
           >
             {option.children!.map(child => (
               <button

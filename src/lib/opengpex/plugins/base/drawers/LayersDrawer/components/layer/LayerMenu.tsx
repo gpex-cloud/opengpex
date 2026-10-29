@@ -40,7 +40,7 @@ import { PenOverlayAPI } from "@opengpex/editor/plugins/base/overlays/PenOverlay
 import ActionDropdown, {
   ActionOption,
 } from "@opengpex/editor/widgets/ActionDropdown";
-import type { LayersDrawerCommandsMap } from "../commands.d";
+import type { LayersDrawerCommandsMap } from "../../commands.d";
 
 interface LayerMenuProps {
   layerId: string;

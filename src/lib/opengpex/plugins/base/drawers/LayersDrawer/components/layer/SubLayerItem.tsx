@@ -24,7 +24,7 @@
 import React from "react";
 import { Eye, EyeOff, Lock, Unlock } from "lucide-react";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
-import { useLayerCommands } from "../hooks";
+import { useLayerCommands } from "../../hooks";
 import { useEditorState } from "@opengpex/editor/core/context";
 
 export const SubLayerItem = React.memo(
@@ -32,7 +32,6 @@ export const SubLayerItem = React.memo(
     layerId,
   }: {
     layerId: string;
-    index: number;
   }) => {
     const { activeFrame } = useEditorState();
     const layer = activeFrame?.layers.byId[layerId];

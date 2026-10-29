@@ -30,7 +30,7 @@ import {
   Merge,
   FolderPlus,
 } from "lucide-react";
-import { Reorder, motion, AnimatePresence } from "framer-motion";
+import { Reorder, motion, useDragControls, type DragControls } from "framer-motion";
 import {
   usePluginCommands,
   usePluginSignals,
@@ -40,8 +40,8 @@ import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
 import { useLayerCommands, useMaskEditMonitor, useUnionMerge } from "../hooks";
 import { MergeVisibleIcon } from "@opengpex/editor/icons";
-import { LayerItem } from "./LayerItem";
-import { GroupHeader } from "./GroupHeader";
+import { LayerItem } from "./layer/LayerItem";
+import { GroupCollapsedRow, GroupCapLine } from "./layer/LayerGroupItem";
 import { LayerPropsBar } from "./LayerPropsBar";
 import type {
   LayersDrawerCommandsMap,
@@ -91,6 +91,13 @@ export function LayersPanel({
   const [blendCollapsed, setBlendCollapsed] = useState(true);
 
   const [isScrolling, setIsScrolling] = React.useState(false);
+  // While a group expand/collapse animation plays, the list height changes
+  // every frame; the browser re-evaluates scrollbar visibility per frame and
+  // any intermediate frame that crosses the overflow threshold paints the
+  // scrollbar for a single frame ("scrollbar flash"). Suppress scrolling for
+  // the animation window so the scrollbar is computed once, on the settled
+  // layout. Hidden rows are still clickable-free for 220ms at worst.
+  const [collapseAnimGuard, setCollapseAnimGuard] = React.useState(false);
   const scrollTimeout = useRef<NodeJS.Timeout | null>(null);
 
   const handleScroll = () => {
@@ -154,6 +161,22 @@ export function LayersPanel({
     return map;
   }, [hostLayers]);
 
+  // Layer-sized rows available for the min-slot fill: a collapsed group row
+  // counts like a layer, but an expanded group's cap line does not — only
+  // its child rows do. Otherwise the cap line would eat one placeholder slot.
+  const renderedRowCount = useMemo(
+    () =>
+      displayLayers.reduce((n, l) => {
+        if (l.type === "group") {
+          if (!(l.collapsed ?? false)) {
+            return n + (groupChildrenMap.get(l.id)?.length ?? 0);
+          }
+        }
+        return n + 1;
+      }, 0),
+    [displayLayers, groupChildrenMap],
+  );
+
   // Pre-compute child layers map for all host layers
   const childLayersMap = useMemo(() => {
     const map = new Map<string, Layer[]>();
@@ -173,19 +196,59 @@ export function LayersPanel({
     return map;
   }, [activeFrame.layers]);
 
-  const handleReorder = (newDisplayOrder: Layer[]) => {
+  const handleReorder = (newDisplayOrder: Layer[], childrenOverrides?: Map<string, Layer[]>) => {
     // Reconstruct the full host-layer order from the top-level display order.
-    // For each group layer, insert its children right after it (preserving their internal order).
+    // For each group layer, insert its children right after it (preserving
+    // their internal order, or the freshly dragged order passed in
+    // childrenOverrides).
     const fullHostOrder: Layer[] = [];
     for (const layer of [...newDisplayOrder].reverse()) {
       fullHostOrder.push(layer);
       if (layer.type === "group") {
-        const children = groupChildrenMap.get(layer.id);
+        const children =
+          childrenOverrides?.get(layer.id) ?? groupChildrenMap.get(layer.id);
         if (children) fullHostOrder.push(...children);
       }
     }
     reorder(fullHostOrder);
   };
+
+  // Suppress the list scrollbar for the window of a group expand/collapse
+  // animation: the browser re-evaluates scrollbar visibility every frame
+  // and intermediate animation frames can cross the overflow threshold,
+  // painting the scrollbar for a single frame. Started synchronously from
+  // the toggle click so the guard is active on the very first committed
+  // frame.
+  const collapseGuardTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startCollapseGuard = React.useCallback(() => {
+    if (collapseGuardTimerRef.current) clearTimeout(collapseGuardTimerRef.current);
+    setCollapseAnimGuard(true);
+    collapseGuardTimerRef.current = setTimeout(() => setCollapseAnimGuard(false), 220);
+  }, []);
+
+  // Renders one group-child layer row; shared by the expanded group block.
+  const renderChild = (child: Layer) => (
+    <LayerItem
+      key={child.id}
+      layerId={child.id}
+      layer={child}
+      index={hostIndexMap.get(child.id) ?? 0}
+      activeFrameId={activeFrame.id}
+      canvasSize={activeFrame.canvas}
+      isActive={
+        child.id === activeLayerId || activeLayerHostId === child.id
+      }
+      canDelete={hostLayers.length > 1}
+      isScrolling={isScrolling}
+      childLayers={childLayersMap.get(child.id) || emptyChildLayers}
+      showSubLayers={showSubLayers}
+      isMarked={unionSelection.includes(child.id)}
+      onToggleMarking={toggleUnionMark}
+      markedColor={unionStatus}
+      availableGroups={availableGroups}
+    />
+  );
+
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1 overflow-hidden">
@@ -305,7 +368,7 @@ export function LayersPanel({
       <div className="flex flex-col gap-0">
         <div
           onScroll={handleScroll}
-          className="flex flex-col min-h-[200px] max-h-[396px] overflow-y-auto px-1 pb-1 custom-scrollbar [mask-image:linear-gradient(to_bottom,transparent,black_4px,black_calc(100%-4px),transparent)]"
+          className={`flex flex-col min-h-[200px] max-h-[396px] px-1 pb-1 custom-scrollbar [mask-image:linear-gradient(to_bottom,transparent,black_4px,black_calc(100%-4px),transparent)] ${collapseAnimGuard ? "overflow-y-hidden" : "overflow-y-auto"}`}
         >
           <div
             className={`pt-1 flex flex-col gap-0.5 ${isScrolling ? "pointer-events-none" : ""}`}
@@ -319,8 +382,8 @@ export function LayersPanel({
               </div>
             ) : (
               <>
-                {nonGroupHostLayers.length < 6 &&
-                  Array.from({ length: 6 - nonGroupHostLayers.length }).map(
+                {renderedRowCount < 6 &&
+                  Array.from({ length: 6 - renderedRowCount }).map(
                     (_, i) => (
                       <div
                         key={`placeholder-${i}`}
@@ -341,7 +404,10 @@ export function LayersPanel({
                   className="flex flex-col gap-0.5"
                 >
                   {displayLayers.map((layer) => {
-                    // ── Group layer: render GroupHeader + indented children ──
+                    // ── Group layer: collapsed = a mask-group-style row;
+                    // expanded = a slim cap line over a gray surface holding
+                    // the children. The group itself never renders as a
+                    // LayerItem. ──
                     if (layer.type === "group") {
                       const groupChildren =
                         groupChildrenMap.get(layer.id) || emptyChildLayers;
@@ -351,70 +417,59 @@ export function LayersPanel({
                           cl.id === activeLayerId ||
                           activeLayerHostId === cl.id,
                       );
+                      const groupProps = {
+                        group: layer,
+                        childCount: groupChildren.length,
+                        activeFrameId: activeFrame.id,
+                        isActive: layer.id === activeLayerId,
+                        hasActiveChild,
+                        onCollapseAnimationStart: startCollapseGuard,
+                      };
+
                       return (
-                        <Reorder.Item
-                          key={layer.id}
-                          value={layer}
-                          className="list-none"
-                          transition={{ layout: { duration: 0 } }}
-                        >
-                          <GroupHeader
-                            group={layer}
-                            childCount={groupChildren.length}
-                            activeFrameId={activeFrame.id}
-                            isActive={layer.id === activeLayerId}
-                            hasActiveChild={hasActiveChild}
-                          />
-                          {/* Render children when expanded — animate height for smooth collapse */}
-                          <AnimatePresence initial={false}>
-                            {!isCollapsed && groupChildren.length > 0 && (
-                              <motion.div
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: "auto", opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                transition={{
-                                  duration: 0.15,
-                                  ease: "easeInOut",
-                                }}
-                                className="overflow-y-hidden overflow-x-visible"
-                              >
-                                <div className="pl-1.5 mt-0.5 pb-0.5 pr-0.5 flex flex-col gap-0.5 border-l border-amber-500/20 ml-1.5">
-                                  {[...groupChildren].reverse().map((child) => (
-                                    <LayerItem
-                                      key={child.id}
-                                      layerId={child.id}
-                                      layer={child}
-                                      index={hostIndexMap.get(child.id) ?? 0}
-                                      activeFrameId={activeFrame.id}
-                                      canvasSize={activeFrame.canvas}
-                                      isActive={
-                                        child.id === activeLayerId ||
-                                        activeLayerHostId === child.id
-                                      }
-                                      canDelete={hostLayers.length > 1}
-                                      isScrolling={isScrolling}
-                                      childLayers={
-                                        childLayersMap.get(child.id) ||
-                                        emptyChildLayers
-                                      }
-                                      showSubLayers={showSubLayers}
-                                      isMarked={unionSelection.includes(
-                                        child.id,
-                                      )}
-                                      onToggleMarking={toggleUnionMark}
-                                      markedColor={unionStatus}
-                                      availableGroups={availableGroups.filter(
-                                        (g) => g.id !== layer.id,
-                                      )}
-                                      isGroupChild
-                                      currentGroupName={layer.name}
-                                    />
-                                  ))}
+                        <GroupReorderItem
+                          // Key includes the collapsed state: collapsing/
+                          // expanding remounts the entry instead of letting
+                          // Framer layout-animate the shared Reorder.Item
+                          // from the expanded block height down to the row
+                          // (that remount-squash is the visible "stretch").
+                          key={`${layer.id}:${isCollapsed ? "c" : "e"}`}
+                          layer={layer}
+                          renderContent={(dragControls) =>
+                            isCollapsed ? (
+                              <GroupCollapsedRow
+                                {...groupProps}
+                                dragControls={dragControls}
+                              />
+                            ) : (
+                              <>
+                                <div className="rounded-lg bg-black/[0.05] dark:bg-white/[0.05] my-0.5 py-0.5">
+                                  <GroupCapLine {...groupProps} dragControls={dragControls} />
+                                  {groupChildren.length > 0 && (
+                                    <Reorder.Group
+                                  axis="y"
+                                  values={[...groupChildren].reverse()}
+                                  onReorder={(newChildren) =>
+                                    handleReorder(
+                                      displayLayers,
+                                      new Map([[layer.id, [...newChildren].reverse()]]),
+                                    )
+                                  }
+                                  className="pb-0.5 flex flex-col gap-0.5"
+                                >
+                                  {[...groupChildren].reverse().map((child) => renderChild(child))}
+                                </Reorder.Group>
+                                  )}
+                                  {groupChildren.length === 0 && (
+                                    <div className="pl-1 pr-0 pb-0.5 text-[10px] font-semibold text-[var(--text-muted)] leading-none tracking-tight">
+                                      Empty group
+                                    </div>
+                                  )}
                                 </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </Reorder.Item>
+                              </>
+                            )
+                          }
+                        />
                       );
                     }
 
@@ -484,3 +539,39 @@ export function LayersPanel({
 
 // Stable empty array reference to prevent unnecessary React.memo invalidation
 const emptyChildLayers: Layer[] = [];
+
+/**
+ * Collapsed group row wrapped in its own Reorder.Item. Dragging is started
+ * exclusively from the stacked badge inside GroupCollapsedRow (dragListener
+ * is off), so row clicks stay clean and the badge doubles as the grab
+ * handle — mirroring how a regular layer's thumbnail starts its drag.
+ */
+/**
+ * Unified Reorder.Item wrapper for both group presentations. Dragging is
+ * always gesture-started (dragListener off) from a handle inside the
+ * content — the collapsed row's stacked badge or the expanded cap line's
+ * grip — so the wrapper carries no click/drag discrimination of its own.
+ * No layout-transition overrides: order swaps animate with the same default
+ * layout animation as regular layer rows.
+ */
+function GroupReorderItem({
+  layer,
+  renderContent,
+}: {
+  layer: Layer;
+  renderContent: (dragControls: DragControls) => React.ReactNode;
+}) {
+  const dragControls = useDragControls();
+  return (
+    <Reorder.Item
+      value={layer}
+      dragListener={false}
+      dragControls={dragControls}
+      className="list-none"
+    >
+      {renderContent(dragControls)}
+    </Reorder.Item>
+  );
+}
+
+

@@ -43,7 +43,7 @@ export default defineConfig({
     environment: 'node',
     include: process.env.TEST_SAMPLES
       ? ['src/lib/opengpex/samples.test.ts', 'tests/**/*.samples.test.ts']
-      : ['tests/**/*.test.ts'],
+      : ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     globals: false,
     reporters: 'default',
   },

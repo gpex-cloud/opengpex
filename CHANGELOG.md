@@ -2,11 +2,14 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.33
+
+- Layers: layer groups rebuilt — collapsed groups take a single compact row, expanded groups show a slim header over a tinted surface, and both groups and their layers drag-reorder
+- Masks: two or more masks of the same family on a layer collapse into one row with a hover panel to manage them
+
 ## 2.0.32
 
-- Color: adjustments now stack as a chain — repeating an adjustment adds a step instead of overwriting, steps render in commit order, and each step can be confined to a selection
-- Color: pulling the same sliders again refines the latest step; committed steps are listed per layer with on/off and delete
-- Layers: each step shows a plain-language summary and a violet (whole layer) / amber (selection) dot
+- Color: adjustments are now non-destructive adjustment masks — every adjustment is a chain step that renders in commit order and can be confined to a selection
 
 ## 2.0.31
 

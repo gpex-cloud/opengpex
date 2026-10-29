@@ -39,13 +39,18 @@ import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import EditableLabel from "@opengpex/editor/widgets/EditableLabel";
 import ImageAsset from "@opengpex/editor/widgets/ImageAsset";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
-import { Layer, VectorMask, BitmapMask, Dimensions } from "@opengpex/editor/core/types";
+import { Layer, Dimensions } from "@opengpex/editor/core/types";
 import { SubLayerItem } from "./SubLayerItem";
-import { MaskItem } from "./MaskItem";
-import { AdjustMaskItem } from "./AdjustMaskItem";
+import { MaskItem } from "../mask/MaskItem";
+import {
+  MaskGroupItem,
+  familyMasks,
+  planMaskGroups,
+} from "../mask/MaskGroupItem";
+import type { MaskFamily } from "../mask/MaskGroupItem";
 import { LayerMenu } from "./LayerMenu";
-import { hasLayerAdjustments } from "../utils";
-import type { LayersDrawerCommandsMap } from "../commands.d";
+import { hasLayerAdjustments } from "../../utils";
+import type { LayersDrawerCommandsMap } from "../../commands.d";
 
 interface LayerItemProps {
   layerId: string;
@@ -66,8 +71,6 @@ interface LayerItemProps {
   markedColor?: 'green' | 'amber' | 'red';
   /** Available group layers this layer can be moved into */
   availableGroups?: Array<{ id: string; name: string }>;
-  /** When true, renders as a plain div instead of Reorder.Item (avoids nested <li>) */
-  isGroupChild?: boolean;
   /** Name of the current group this layer belongs to (for menu display) */
   currentGroupName?: string;
 }
@@ -87,7 +90,6 @@ export const LayerItem = React.memo(
     onToggleMarking,
     markedColor = 'red',
     availableGroups,
-    isGroupChild,
     currentGroupName,
   }: LayerItemProps) => {
     const { actions, assets } = useEditorServices();
@@ -136,17 +138,19 @@ export const LayerItem = React.memo(
       }
     }, [isActive]);
 
-    // Group children use <div> wrapper to avoid nested <li> (Reorder.Item renders <li>).
-    // Top-level layers use <Reorder.Item> for drag-to-reorder support.
-    // Typed as ElementType so the two components' differing prop requirements
-    // (Reorder.Item needs `value`, motion.div does not) can share one spread.
-    const Wrapper: React.ElementType = isGroupChild ? motion.div : Reorder.Item;
-    const wrapperProps = isGroupChild
-      ? {}
-      : { value: layer, dragListener: false, dragControls, id: layer.id };
+    // Every row is a Reorder.Item with dragListener off — drags start only
+    // from the thumbnail gesture (dragControls). Group children sit inside
+    // their group's nested Reorder.Group, top-level layers inside the main
+    // one; the two handles never conflict because they are separate
+    // elements.
 
     return (
-      <Wrapper {...wrapperProps}>
+      <Reorder.Item
+        value={layer}
+        dragListener={false}
+        dragControls={dragControls}
+        id={layer.id}
+      >
         <motion.div
           layout="position"
           className={`group/layer relative flex items-center h-[32px] cursor-pointer transition-opacity ${isScrolling ? "opacity-90" : "opacity-100"}`}
@@ -434,11 +438,10 @@ export const LayerItem = React.memo(
               exit={{ height: 0, opacity: 0 }}
               className="ml-4 mr-1 mt-0.5 mb-1 pl-2.5 border-l-2 border-[var(--border-light)] flex flex-col gap-0.5 overflow-hidden"
             >
-              {childLayers.map((subLayer, idx) => (
+              {childLayers.map((subLayer) => (
                 <SubLayerItem
                   key={subLayer.id}
                   layerId={subLayer.id}
-                  index={idx}
                 />
               ))}
             </motion.div>
@@ -451,54 +454,34 @@ export const LayerItem = React.memo(
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="ml-4 mr-1 mt-0.5 mb-1 pl-2.5 border-l-2 border-emerald-500/25 dark:border-emerald-500/40 flex flex-col gap-0.5 overflow-hidden"
+              className="ml-1.5 mr-0.5 mt-0.5 mb-0.5 pl-1.5 border-l border-emerald-500/25 dark:border-emerald-500/40 flex flex-col gap-0.5 overflow-hidden"
             >
-              {layer.vectorMasks &&
-                [...layer.vectorMasks].reverse().map((mask: VectorMask) => {
-                  const originalIdx = layer.vectorMasks!.findIndex(
-                    (m) => m.id === mask.id,
-                  );
+              {planMaskGroups(layer).map(({ family, mode }) => {
+                const masks = familyMasks(layer, family);
+                if (mode === "group") {
                   return (
-                    <MaskItem
-                      key={mask.id}
+                    <MaskGroupItem
+                      key={family}
                       layerId={layer.id}
-                      mask={mask}
-                      index={originalIdx}
+                      family={family as MaskFamily}
+                      masks={masks}
                     />
                   );
-                })}
-              {layer.bitmapMasks &&
-                [...layer.bitmapMasks].reverse().map((mask: BitmapMask) => {
-                  const originalIdx = layer.bitmapMasks!.findIndex(
-                    (m) => m.id === mask.id,
-                  );
-                  return (
-                    <MaskItem
-                      key={mask.id}
-                      layerId={layer.id}
-                      mask={mask}
-                      index={originalIdx}
-                    />
-                  );
-                })}
-              {layer.adjustMasks &&
-                [...layer.adjustMasks].reverse().map((mask) => {
-                  const originalIdx = layer.adjustMasks!.findIndex(
-                    (m) => m.id === mask.id,
-                  );
-                  return (
-                    <AdjustMaskItem
-                      key={mask.id}
-                      layerId={layer.id}
-                      mask={mask}
-                      index={originalIdx}
-                    />
-                  );
-                })}
+                }
+                return (
+                  <MaskItem
+                    key={masks[0].id}
+                    layerId={layer.id}
+                    family={family as MaskFamily}
+                    mask={masks[0]}
+                    index={0}
+                  />
+                );
+              })}
             </motion.div>
           )}
         </AnimatePresence>
-      </Wrapper>
+      </Reorder.Item>
     );
   },
 );
