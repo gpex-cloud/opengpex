@@ -22,7 +22,7 @@ import {
   Frame, Layer, LocalShape, LocalPolygon,
   asLocalShape, asLocalRect, isPolygon
 } from '@opengpex/editor/core/types';
-import { polygonToShape } from '@opengpex/editor/core/geometry/operators/polygon';
+import { polygonToShape, translatePolygon } from '@opengpex/editor/core/geometry/operators/polygon';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { isBoundingRing, point2dToLocalShape, shapeToPoint2D, ringsToPathData } from '@opengpex/editor/core/geometry/operators/point2d';
 import { computeFragmentCenter, getOrientationMatrix } from '@opengpex/editor/core/geometry/operators/transform';
@@ -44,6 +44,19 @@ const AA_MARGIN = 1;
  * turn a feathered fragment's TIGHT intersection geometry into the path that the
  * implicit shape mask feathers around, inset inside the padded crop window.
  */
+/**
+ * Sum of the `edgeFeather` of every enabled adjustment mask's basic arm —
+ * the bitmap route's effective edge feather (the alphaFeather filters are
+ * post-chain and additive).
+ */
+function totalEdgeFeather(layer: Layer): number {
+  let total = 0;
+  for (const m of layer.adjustMasks ?? []) {
+    if (m.enabled) total += m.grade.adjustments?.edgeFeather ?? 0;
+  }
+  return total;
+}
+
 function shapeToAbsPathData(shape: LocalShape): string {
   const pd = (shape as { pathData?: string }).pathData;
   if (shape.type === 'path' && pd) return pd;
@@ -105,7 +118,7 @@ export function readEdgeFeather(layer: Layer): number {
       return m?.feather ?? 0;
     }
     default:
-      return layer.adjustments?.edgeFeather ?? 0;
+      return totalEdgeFeather(layer);
   }
 }
 
@@ -499,7 +512,7 @@ export function createFragmentOperations(
       scale: 1,
       rotation: 0,
       flip: { h: false, v: false },
-      adjustments: { brightness: 100, contrast: 100, saturation: 100, hueRotate: 0, blur: 0 }
+      adjustMasks: undefined,
     });
 
     return { newLayer, localShape, url: assetUrl };
@@ -539,11 +552,12 @@ export function createFragmentOperations(
       interactive: true,
       opacity: 1,
       visible: true,
-      adjustments: sourceLayer.adjustments,
-      curves: sourceLayer.curves,
-      levels: sourceLayer.levels,
-      channelMix: sourceLayer.channelMix,
-      colorBalance: sourceLayer.colorBalance,
+      // The grade chain follows the pixels. A confined entry's shape is in the
+      // SOURCE layer's local frame; the target shows the intersection sub-rect
+      // (origin at v.x/v.y), so the rings re-base by that offset.
+      adjustMasks: sourceLayer.adjustMasks?.map((m) =>
+        m.shape ? { ...m, shape: translatePolygon(m.shape, -v.x, -v.y) } : m,
+      ),
     };
 
     return { updatedLayer, localShape };

@@ -95,6 +95,10 @@ export const ADV_LAYER_BITMAP_MASK_REMOVE = 'adv.layer.bitmapMask.remove';
 export const ADV_LAYER_BITMAP_MASK_TOGGLE = 'adv.layer.bitmapMask.toggle';
 export const ADV_LAYER_BITMAP_MASK_CLEAR = 'adv.layer.bitmapMask.clear_all';
 
+// Adjustment masks (the grade chain) — toggle / remove one entry.
+export const ADV_LAYER_ADJUST_MASK_TOGGLE = 'adv.layer.adjustMask.toggle';
+export const ADV_LAYER_ADJUST_MASK_REMOVE = 'adv.layer.adjustMask.remove';
+
 // 5. Irregular Selection (lasso / wand / AI matting → polygon → bitmap mask)
 //
 // Note: there is intentionally NO `set` / `clear` adv command

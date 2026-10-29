@@ -41,7 +41,11 @@ import type { BufferRing } from '@opengpex/editor/core/engine/gpu/resources/Buff
 import type { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTexture';
 import { ADJUST_PRE_UNIFORM_BUFFER_SIZE, packAdjustPreUniform } from '@opengpex/editor/core/engine/gpu/shaders/adjustPre';
 import { FILMIC_WHITE_DOMAIN } from '@opengpex/editor/core/engine/color/filmic';
-import { resolveAdjustBindGroup, type ResolveAdjustDeps } from '../support/adjustBindGroup';
+import {
+  resolveAdjustBindGroup,
+  type ResolveAdjustDeps,
+  type AdjustCoverageBinding,
+} from '../support/adjustBindGroup';
 import { resolveSourceGamutId } from '../support/sourceGamut';
 import { resolveSourceRawIntentNibble, resolveSourceRawWhiteDomain } from '../support/sourceIntent';
 
@@ -73,13 +77,13 @@ export class AdjustPrePass {
        */
       readonly sourceIsLinear?: boolean;
       /**
-       * The polygon-baked ADJUSTMENT-CONFINEMENT coverage (frozen selection
-       * snapshot localizing the grade). Absent → default white view binds and
-       * the bake grades the whole layer.
+       * The layer's baked coverage ARRAY (one array layer per confined stage)
+       * + its union window. Absent → the chain group binds the default white
+       * array and every stage grades the whole layer.
        */
-      readonly adjustConfinementTexture?: GPUTexture;
+      readonly adjustCoverage?: AdjustCoverageBinding;
       /**
-       * Adjustment-confinement mapping in ASSET pixels: the coverage texture
+       * Coverage mapping in ASSET pixels: the coverage array
        * is baked over the layer's CONTENT rect while this pass samples the raw
        * (possibly shared, cropped-fragment) asset, so the shader re-maps
        * `am_uv = (uv * assetSize - crop) / content`. Undefined → identity
@@ -131,15 +135,6 @@ export class AdjustPrePass {
         // sibling: the plain linear sampler.
         { binding: 1, resource: pipelineCache.getLinearSampler() },
         { binding: 2, resource: source.view },
-        {
-          // Adjustment-confinement slot. Present → the baked coverage
-          // texture; absent → the 1×1 default white view (coverage 1 =
-          // whole-layer grade).
-          binding: 3,
-          resource: params.adjustConfinementTexture
-            ? params.adjustConfinementTexture.createView()
-            : pipelineCache.getDefaultMaskView(),
-        },
       ],
     });
 
@@ -150,7 +145,7 @@ export class AdjustPrePass {
       resolveLutView: ctx.resolveLutView,
       resolveLut3dView: ctx.resolveLut3dView,
     };
-    const adjust = resolveAdjustBindGroup(deps, layer);
+    const adjust = resolveAdjustBindGroup(deps, layer, false, params.adjustCoverage);
 
     passEncoder.setPipeline(pipelineCache.getAdjustPrePipeline(ctx.targetFormat));
     passEncoder.setVertexBuffer(0, pipelineCache.getQuadVertexBuffer());

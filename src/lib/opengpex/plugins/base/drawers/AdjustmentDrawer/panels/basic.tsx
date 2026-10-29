@@ -50,7 +50,7 @@ import { readEdgeFeather } from "@opengpex/editor/core/layer/services/fragment";
 import FancySvgSlider from "@opengpex/editor/widgets/FancySvgSlider";
 import type { AdjustmentDrawerCommandsMap } from "../commands.d";
 import { DEFAULT_ADJUSTMENTS_STATE } from "../protocols";
-import { useAdjustmentDrawer, useFilterGesture } from "../hooks";
+import { useAdjustmentDrawer, useFilterGesture, useHotTailGrade } from "../hooks";
 
 // ─── Slider descriptors ────────────────────────────────────────────────────────
 
@@ -310,6 +310,7 @@ export function BasicPanel() {
     setEdgeFeatherCmd,
   } = usePluginCommands<AdjustmentDrawerCommandsMap>();
   const { activeLayer } = useAdjustmentDrawer();
+  const { grade: tailGrade } = useHotTailGrade('basic');
   const gesture = useFilterGesture(beginAdjustmentsEditCmd);
 
   // Cascade (碎片联动羽化源洞): opt-in checkbox, shown only on cut fragments
@@ -351,8 +352,8 @@ export function BasicPanel() {
   );
 
   const adjustments = useMemo(
-    () => readAdjustments(activeLayer?.adjustments),
-    [activeLayer?.adjustments],
+    () => readAdjustments(tailGrade.adjustments),
+    [tailGrade.adjustments],
   );
 
   // Which slider (if any) is currently being dragged. `null` = idle. Guards

@@ -129,7 +129,7 @@ export const LayerUnionCommands = {
           type: 'image',
           rotation: baseLayer.rotation,
           flip: { ...baseLayer.flip },
-          adjustments: baseLayer.adjustments ? { ...baseLayer.adjustments } : undefined,
+          adjustMasks: baseLayer.adjustMasks ? baseLayer.adjustMasks.map((m) => ({ ...m })) : undefined,
           opacity: baseLayer.opacity,
           blendMode: baseLayer.blendMode,
           groupId: commonGroupId,

@@ -44,7 +44,7 @@
  *
  * ⚠️ COLOUR SPACE: `.cube` LUTs are film-emulation looks authored on
  * ENCODED (sRGB) values, so — exactly like curves/levels — the LUT is sampled
- * inside `apply_adjustments`' TRC WRAP: the pipeline's linear light is encoded
+ * inside `apply_stage`'s TRC WRAP: the pipeline's linear light is encoded
  * before the sample and decoded after, so the table sees the values it was authored
  * for while the surrounding pipeline stays linear. `.cube` files
  * authored for a genuinely linear domain remain out of scope (no per-LUT domain

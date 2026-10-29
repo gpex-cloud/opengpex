@@ -148,6 +148,65 @@ export interface ColorBalanceState {
   preserveLuminosity: boolean;
 }
 
+/**
+ * Discriminator for the five grade categories. Every adjustment mask carries
+ * exactly ONE category's parameters (single-category commit), so the
+ * discriminator lets hot-tail matching, per-category reset and the mask-list
+ * summary avoid probing all five `GradeState` arms.
+ */
+export type GradeCategory = 'basic' | 'levels' | 'curves' | 'channelMix' | 'colorBalance';
+
+/** Ordered category list — also the fixed in-stage evaluation order (see `adjust.ts`). */
+export const GRADE_CATEGORIES: readonly GradeCategory[] = [
+  'basic', 'levels', 'curves', 'channelMix', 'colorBalance',
+];
+
+/**
+ * The parameter bundle of one adjustment mask. A mask written by the panel
+ * holds a single arm (its `category`); a mask produced by the legacy-document
+ * migration may hold several arms at once (the old flat layer fields collapsed
+ * into one mask), which the renderer evaluates in the fixed in-stage order so
+ * the migrated document renders bit-identically.
+ */
+export interface GradeState {
+  adjustments?: AdjustmentState;
+  levels?: LevelsState;
+  curves?: CurvesState;
+  channelMix?: ChannelMixState;
+  colorBalance?: ColorBalanceState;
+}
+
+/**
+ * Adjustment mask — the third member of the layer mask family (alongside
+ * `vectorMasks` / `bitmapMasks`). Each entry is ONE committed grade step; the
+ * array order is the commit order and the renderer evaluates the entries as a
+ * chain in that order (`cs = mix(cs, grade_i(cs), coverage_i)`), so two
+ * brightness commits stack instead of overwriting and a selection-confined
+ * grade sits between two whole-layer grades exactly where the user placed it.
+ *
+ * `shape` is the FROZEN selection snapshot in the layer-local frame (same space
+ * as `vectorMasks` shapes). Absent ⇒ the grade covers the whole layer. Unlike a
+ * vector mask the coverage never clips alpha: it only blends original vs graded
+ * colour.
+ *
+ * Entries are immutable once committed, except the HOT TAIL (the last entry)
+ * which the panel edits in place while the same category stays active — see
+ * the adjustment drawer commands.
+ */
+export interface AdjustmentMask {
+  id: string;
+  category: GradeCategory;
+  /** Frozen selection snapshot (layer-local); absent = whole-layer coverage. */
+  shape?: LocalPolygon;
+  grade: GradeState;
+  enabled: boolean;
+  /** Feather radius (px) applied to the coverage edge. */
+  feather?: number;
+}
+
+/** Hard per-layer cap on adjustment masks (product decision, not a performance limit). */
+export const MAX_ADJUSTMENT_MASKS_PER_LAYER = 16;
+
 export interface VectorMask {
   id: string;
   shape: LocalShape;          // Shape descriptor (local coordinate system)
@@ -477,6 +536,14 @@ export interface Layer {
   visibleShape?: LocalShape;
   vectorMasks?: VectorMask[];
   bitmapMasks?: BitmapMask[];
+  /**
+   * Non-destructive colour grading as an ordered chain of adjustment masks
+   * (commit order = render order). Absent / empty ⇒ no grade. Replaces the
+   * former flat per-category fields (adjustments / curves / levels /
+   * channelMix / colorBalance / adjustmentConfinement), which the load-time
+   * migration in `Hydrating.ts` folds into a single entry.
+   */
+  adjustMasks?: AdjustmentMask[];
 
   // State attributes
   visible: boolean;
@@ -487,47 +554,6 @@ export interface Layer {
   /** Layer fill opacity (0–1). Controls content opacity without affecting layer styles. Defaults to 1. */
   fill?: number;
 
-  // Filters & Adjustments (optional)
-  adjustments?: AdjustmentState;
-  /**
-   * FROZEN selection snapshot for Photoshop-style LOCAL adjustments, in the
-   * layer-local frame (same space as `vectorMasks` shapes).
-   *
-   * Attached ONCE — when the layer's FIRST grade (basic adjustments, curves,
-   * levels, channel mix or color balance) is written while a frame-level
-   * selection (`frame.confinement`) is active, the selection polygon is
-   * projected into this layer's local space and stored by value here. From
-   * then on it is independent state: editing or clearing the frame selection
-   * never changes an already-frozen snapshot, and the mask travels with the
-   * layer when it is moved/transformed (Photoshop mask semantics).
-   *
-   * RENDER CONTRACT: the pipeline bakes these rings into a coverage texture
-   * and the grading shaders blend `mix(original, graded, coverage)` — the
-   * grade only modulates colour INSIDE the polygon and the layer's alpha is
-   * never clipped (unlike `vectorMasks`, which multiply alpha). Absent or
-   * undefined ⇒ the grade applies to the whole layer.
-   */
-  adjustmentConfinement?: LocalPolygon;
-  /**
-   * Declarative RGB / per-channel tone curves written by `AdjustmentDrawer`.
-   * Consumed by IFilter. Does not change `assetId`.
-   */
-  curves?: CurvesState;
-  /**
-   * Declarative levels adjustment (histogram black/white/gamma remap).
-   * Consumed by IFilter. Does not change `assetId`.
-   */
-  levels?: LevelsState;
-  /**
-   * Declarative RGB channel-mixer matrix.
-   * Consumed by IFilter. Does not change `assetId`.
-   */
-  channelMix?: ChannelMixState;
-  /**
-   * Declarative color balance (shadow/midtone/highlight color offsets).
-   * Consumed by IFilter (luminance-aware). Does not change `assetId`.
-   */
-  colorBalance?: ColorBalanceState;
   interactive?: boolean; // Whether involved in collision detection (Hit-Testing)
   /**
    * Clip to the layer below (Photoshop-style clipping mask). Consumed by the v2

@@ -39,7 +39,7 @@ import {
   LAYER_GAMUT_SHIFT,
   LAYER_RENDER_INTENT_SHIFT,
 } from '@opengpex/editor/core/engine/gpu/shaders/layer';
-import { resolveAdjustBindGroup as resolveAdjust } from '../support/adjustBindGroup';
+import { resolveAdjustBindGroup as resolveAdjust, type AdjustCoverageBinding } from '../support/adjustBindGroup';
 import { resolveLayerGeometry, resolveLayerDprScale, effectiveScale } from '../support/layerGeometry';
 import { resolveVmaskUniform } from '../support/vmaskUniform';
 import { isSourceLinear } from '../support/sourceDomain';
@@ -88,11 +88,11 @@ export interface DrawLayerParams {
    */
   readonly vmaskWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /**
-   * The polygon-baked ADJUSTMENT-CONFINEMENT coverage for this layer (the
-   * frozen selection snapshot localizing its grade). Absent → default white
-   * view binds and the grade applies to the whole layer.
+   * The layer's baked coverage ARRAY (one array layer per confined stage) +
+   * its union window. Absent → the chain group binds the default white array
+   * and every stage grades the whole layer.
    */
-  readonly adjustConfinementTexture?: GPUTexture;
+  readonly adjustCoverage?: AdjustCoverageBinding;
   readonly isBottomOpaque?: boolean;
   /**
    * Force the identity group-1 adjust bind group because `texture` ALREADY has the
@@ -249,7 +249,7 @@ export function packLayerUniforms(
  * plus 3D-LUT binding and the `suppress` switch — see that module for the
  * behaviour contract.
  */
-export { resolveAdjustBindGroup, type ResolveAdjustDeps } from '../support/adjustBindGroup';
+export { resolveAdjustBindGroup, type ResolveAdjustDeps, type AdjustCoverageBinding } from '../support/adjustBindGroup';
 
 export class CompositePass {
   /**
@@ -260,7 +260,7 @@ export class CompositePass {
     ctx: CompositePassContext,
     params: DrawLayerParams,
   ): void {
-    const { layer, texture, maskTexture, vmaskTexture, adjustConfinementTexture, isBottomOpaque } = params;
+    const { layer, texture, maskTexture, vmaskTexture, isBottomOpaque } = params;
 
     let flags = 0;
     if (maskTexture) flags |= LAYER_FLAG_HAS_MASK;
@@ -375,14 +375,6 @@ export class CompositePass {
           binding: 4,
           resource: vmaskTexture ? vmaskTexture.view : ctx.pipelineCache.getDefaultMaskView(),
         },
-        {
-          // Adjustment-confinement slot. Present → the baked coverage texture;
-          // absent → the 1×1 default white view (coverage 1 = whole-layer grade).
-          binding: 5,
-          resource: adjustConfinementTexture
-            ? adjustConfinementTexture.createView()
-            : ctx.pipelineCache.getDefaultMaskView(),
-        },
       ],
       label: `Layer BindGroup (${layer.id})`,
     });
@@ -392,8 +384,8 @@ export class CompositePass {
     passEncoder.setVertexBuffer(0, ctx.pipelineCache.getQuadVertexBuffer());
     passEncoder.setBindGroup(0, bindGroup, [slot.offset]);
 
-    // 6. Group 1: per-layer colour adjustments. Identity layers bind the
-    // shared flags=0 group so `apply_adjustments` is a no-op (identity no-op).
+    // 6. Group 1: the per-layer grade chain. Identity layers bind the shared
+    // stage_count=0 group so `apply_adjust_chain` is a no-op (identity no-op).
     // `suppressAdjust` forces that identity group for a layer whose grade was
     // already BAKED by AdjustPrePass ahead of a FilterPass — without it the grade
     // would be applied twice (adjust→filter order path).
@@ -407,6 +399,7 @@ export class CompositePass {
       },
       layer,
       params.suppressAdjust,
+      params.adjustCoverage,
     );
     passEncoder.setBindGroup(1, adjust.bindGroup, [adjust.offset]);
 

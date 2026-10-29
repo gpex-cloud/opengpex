@@ -55,7 +55,8 @@ import { effectiveScale } from './support/layerGeometry';
 import { prepareFilteredSources } from './build/prepareFilteredSources';
 import { prepareVectorSources } from './build/prepareVectorSources';
 import { prepareVmaskSources, type VmaskBake } from './build/prepareVmaskSources';
-import { prepareAdjustConfinementSources } from './build/prepareConfinementSources';
+import { prepareAdjustCoverageSources } from './build/prepareAMaskSources';
+import type { AdjustCoverageBinding } from './support/adjustBindGroup';
 import { prepareBmaskCombineSources } from './build/prepareBmaskCombine';
 import type { BuildContext, PreparedSource } from './build/types';
 
@@ -322,15 +323,15 @@ export class RenderGraph {
       ? vectorExportScale(ev, baseDims.frameWidth, baseDims.frameHeight)
       : (density ?? [1, 1]);
 
-    // Bake every layer's ADJUSTMENT-CONFINEMENT coverage (frozen selection
-    // snapshot localizing its grade) BEFORE prepareFilteredSources — the
-    // AdjustPrePass bake samples it, so it must exist first. Compute phase,
-    // recorded before any composite render pass opens. Keyed by layer id;
-    // absent ⇒ the layer binds the default white view (unconfined grade).
-    const adjustConfinementSources = new Map<string, GPUTexture>();
-    prepareAdjustConfinementSources(commandEncoder, compiled, buildCtx, adjustConfinementSources, vectorScale);
+    // Bake every layer's grade-chain COVERAGE array (one array layer per
+    // confined stage) BEFORE prepareFilteredSources — the AdjustPrePass bake
+    // samples it, so it must exist first. Compute phase, recorded before any
+    // composite render pass opens. Keyed by layer id; absent ⇒ the layer
+    // binds the default white array (every stage grades the whole layer).
+    const adjustCoverageSources = new Map<string, AdjustCoverageBinding>();
+    prepareAdjustCoverageSources(commandEncoder, compiled, buildCtx, adjustCoverageSources, vectorScale);
 
-    const filtered = prepareFilteredSources(commandEncoder, compiled, buildCtx, adjustConfinementSources);
+    const filtered = prepareFilteredSources(commandEncoder, compiled, buildCtx, adjustCoverageSources);
 
 
     // The density-scaled interactive target expressed as a VIEWPORT: same world space (the
@@ -430,7 +431,7 @@ export class RenderGraph {
             maskTexture: maskTex,
             vmaskTexture: vmaskSources.get(layer.id)?.texture,
           vmaskWindow: vmaskSources.get(layer.id)?.window,
-          adjustConfinementTexture: adjustConfinementSources.get(layer.id),
+          adjustCoverage: adjustCoverageSources.get(layer.id),
             isBottomOpaque: false,
             suppressAdjust: src?.suppressAdjust,
             vectorTransient: src?.vectorTransient,
@@ -458,7 +459,7 @@ export class RenderGraph {
       allocatedWidth,
       allocatedHeight,
       filtered,
-      adjustConfinementSources,
+      adjustCoverageSources,
       vmaskSources,
       bmaskSources,
       filterScratch,
@@ -483,7 +484,7 @@ export class RenderGraph {
     allocatedWidth: number,
     allocatedHeight: number,
     filtered: Map<string, PreparedSource>,
-    adjustConfinementSources: Map<string, GPUTexture>,
+    adjustCoverageSources: Map<string, AdjustCoverageBinding>,
     vmaskSources: Map<string, VmaskBake>,
     bmaskSources: Map<string, LayerTexture>,
     filterScratch: GPUTexture[],
@@ -589,7 +590,7 @@ export class RenderGraph {
             maskTexture: maskTex,
             vmaskTexture: vmaskSources.get(layer.id)?.texture,
             vmaskWindow: vmaskSources.get(layer.id)?.window,
-            adjustConfinementTexture: adjustConfinementSources.get(layer.id),
+            adjustCoverage: adjustCoverageSources.get(layer.id),
             isBottomOpaque: false,
             suppressAdjust: src?.suppressAdjust,
             vectorTransient: src?.vectorTransient,
@@ -661,7 +662,7 @@ export class RenderGraph {
           maskTexture: maskTex,
           vmaskTexture: vmaskSources.get(layer.id)?.texture,
             vmaskWindow: vmaskSources.get(layer.id)?.window,
-            adjustConfinementTexture: adjustConfinementSources.get(layer.id),
+            adjustCoverage: adjustCoverageSources.get(layer.id),
           suppressAdjust: src?.suppressAdjust,
           vectorTransient: src?.vectorTransient,
           sourceIsLinear: src?.sourceIsLinear,

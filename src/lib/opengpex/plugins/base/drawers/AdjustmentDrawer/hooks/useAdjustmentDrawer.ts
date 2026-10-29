@@ -21,14 +21,48 @@
 
 import { useCallback, useMemo } from 'react';
 import {
+  useEditorServices,
   useEditorState,
   usePluginCommands,
   usePluginSignals,
   usePluginSelfConfig,
 } from '@opengpex/editor/core/context';
+import type { GradeCategory, GradeState } from '@opengpex/editor/core/types';
 import type { AdjustmentDrawerCommandsMap, AdjustmentDrawerSignalsMap } from '../commands.d';
 import type { ActiveGradingTool, GradingTool, AdjustmentDrawerConfig } from '../protocols';
 import { DEFAULT_GRADING_TOOL } from '../protocols';
+import { resolveEditableTail } from '../utils-hotTail';
+
+const EMPTY_GRADE: GradeState = {};
+
+// ─── useHotTailGrade ─────────────────────────────────────────────────────────
+
+/**
+ * useHotTailGrade — the grade a panel of `category` should display and edit.
+ *
+ * `grade` is the EDITABLE hot tail's parameter bundle (see `utils-hotTail.ts`):
+ * the chain's last mask when it is enabled, of this category, and its
+ * coverage matches the current selection — otherwise an empty bundle, which
+ * the panel renders as its defaults (cold start: the next write appends a
+ * new mask). `committedCount` is how many masks of this category the layer
+ * already carries, so the panel can tell the user that earlier steps exist
+ * in the chain (their values cannot be folded into one slider — the
+ * composition of two brightness curves is not a brightness curve).
+ */
+export function useHotTailGrade(category: GradeCategory): {
+  grade: GradeState;
+  tailId: string | undefined;
+  committedCount: number;
+} {
+  const { activeFrame, activeLayer } = useEditorState();
+  const { geometry } = useEditorServices();
+  return useMemo(() => {
+    if (!activeFrame || !activeLayer) return { grade: EMPTY_GRADE, tailId: undefined, committedCount: 0 };
+    const tail = resolveEditableTail(geometry, activeFrame, activeLayer, category);
+    const committedCount = (activeLayer.adjustMasks ?? []).filter((m) => m.category === category).length;
+    return { grade: tail?.grade ?? EMPTY_GRADE, tailId: tail?.id, committedCount };
+  }, [activeFrame, activeLayer, geometry, category]);
+}
 
 
 // ─── useAdjustmentDrawer ─────────────────────────────────────────────────────

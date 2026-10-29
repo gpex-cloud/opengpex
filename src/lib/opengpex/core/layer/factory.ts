@@ -87,13 +87,6 @@ export const LayerFactory = {
       role: 'host',
       interactive: true,
       flip: { h: false, v: false },
-      adjustments: {
-        brightness: 100,
-        contrast: 100,
-        saturation: 100,
-        hueRotate: 0,
-        blur: 0
-      },
       bounding: { w: 0, h: 0 },
       ...patch
     } as Layer;
@@ -134,6 +127,15 @@ export const LayerFactory = {
       collapsed: false,
       ...patch,
     } as Layer;
+  },
+
+  /**
+   * Fresh adjustment-mask id (time-prefixed base36 + random suffix, the same
+   * collision discipline as layer/frame ids — one slider gesture may create
+   * several masks within one millisecond).
+   */
+  newAdjustMaskId(): string {
+    return `amask-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   },
 
   /**

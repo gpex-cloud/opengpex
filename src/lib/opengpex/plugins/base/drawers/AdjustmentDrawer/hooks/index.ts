@@ -26,7 +26,7 @@
  * - useLayerHistogram: lazy luminance histogram for Levels panel
  */
 
-export { useAdjustmentDrawer, useGradingToolSwitch } from './useAdjustmentDrawer';
+export { useAdjustmentDrawer, useGradingToolSwitch, useHotTailGrade } from './useAdjustmentDrawer';
 export { useFilterGesture } from './useFilterGesture';
 export type { FilterGestureCommand, FilterGestureHandle } from './useFilterGesture';
 export { useLayerHistogram } from './useLayerHistogram';

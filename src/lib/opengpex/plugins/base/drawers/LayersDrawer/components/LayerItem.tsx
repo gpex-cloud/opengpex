@@ -42,6 +42,7 @@ import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import { Layer, VectorMask, BitmapMask, Dimensions } from "@opengpex/editor/core/types";
 import { SubLayerItem } from "./SubLayerItem";
 import { MaskItem } from "./MaskItem";
+import { AdjustMaskItem } from "./AdjustMaskItem";
 import { LayerMenu } from "./LayerMenu";
 import { hasLayerAdjustments } from "../utils";
 import type { LayersDrawerCommandsMap } from "../commands.d";
@@ -115,7 +116,8 @@ export const LayerItem = React.memo(
     const hasVisibleSubLayersDot = childLayers.some(cl => cl.role !== 'exchange' && cl.role !== 'frag') && showSubLayers;
     const hasMasks = !!(
       (layer.vectorMasks && layer.vectorMasks.length > 0) ||
-      (layer.bitmapMasks && layer.bitmapMasks.length > 0)
+      (layer.bitmapMasks && layer.bitmapMasks.length > 0) ||
+      (layer.adjustMasks && layer.adjustMasks.length > 0)
     );
     const hasAdjustments = hasLayerAdjustments(layer);
 
@@ -405,7 +407,8 @@ export const LayerItem = React.memo(
                 hasMasks={hasMasks}
                 masksLength={
                   (layer.vectorMasks?.length || 0) +
-                  (layer.bitmapMasks?.length || 0)
+                  (layer.bitmapMasks?.length || 0) +
+                  (layer.adjustMasks?.length || 0)
                 }
                 canDelete={canDelete}
                 canReleasePath={layer.type === "vector" && !!layer.penData && (!layer.role || layer.role === "host")}
@@ -471,6 +474,20 @@ export const LayerItem = React.memo(
                   );
                   return (
                     <MaskItem
+                      key={mask.id}
+                      layerId={layer.id}
+                      mask={mask}
+                      index={originalIdx}
+                    />
+                  );
+                })}
+              {layer.adjustMasks &&
+                [...layer.adjustMasks].reverse().map((mask) => {
+                  const originalIdx = layer.adjustMasks!.findIndex(
+                    (m) => m.id === mask.id,
+                  );
+                  return (
+                    <AdjustMaskItem
                       key={mask.id}
                       layerId={layer.id}
                       mask={mask}

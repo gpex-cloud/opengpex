@@ -580,6 +580,29 @@ export type AdjustmentDesc =
   | { readonly kind: 'lut3d'; readonly lutId: string; readonly strength: number };
 
 /**
+ * One stage of a layer's grade chain. `adjustments` is evaluated in the fixed
+ * in-stage order of `adjust.ts` (a panel-written stage holds ONE kind; a
+ * migrated legacy stage may hold several, exactly reproducing the old single
+ * pass). `coverage` is the FROZEN selection snapshot the stage is confined to —
+ * polygon rings in crop-local px (same re-base as `vmask` sub-masks). The
+ * build bakes every covered stage of a layer into one `texture_2d_array`
+ * (one array layer per covered stage, over the union window of their
+ * bounding boxes) and the shaders blend `mix(colour, graded, coverage)`:
+ * inside the polygon the grade applies, outside the original passes
+ * through, and the layer's ALPHA IS NEVER CLIPPED. Absent ⇒ whole-layer
+ * coverage, which the shader takes as a constant 1 without sampling.
+ */
+export interface AdjustStageDesc {
+  readonly adjustments: readonly AdjustmentDesc[];
+  readonly coverage?: {
+    readonly rings: readonly (readonly (readonly [number, number])[])[];
+    readonly antiAliased: boolean;
+    /** Coverage edge feather σ in px (0 = hard edge, AA only). */
+    readonly featherPx: number;
+  };
+}
+
+/**
  * A neighbourhood filter, executed by `FilterPass` compute shaders.
  * Replaces v1's `shared/filter2d.ts` per-pixel TypedArray loops.
  */
@@ -648,29 +671,23 @@ export interface LayerNode {
   readonly bmask?: BitmapMaskDesc;
   /** Analytic/polygon geometry selection mask, resolved on the GPU. */
   readonly vmask?: VectorMaskDesc;
-  /** Applied in order, before `filters`. */
-  readonly adjustments?: readonly AdjustmentDesc[];
-  /** Applied in order, after `adjustments`. */
-  readonly filters?: readonly FilterDesc[];
   /**
-   * FROZEN selection snapshot for Photoshop-style LOCAL adjustments — the
-   * polygon rings (layer-local px, crop-local: same re-base as `vmask`
-   * sub-masks) the grading shaders blend the grade against.
-   *
-   * The build bakes these rings into an exact-size coverage texture
-   (`prepareConfinementCoverage`, the shared frozen-selection cache under the
-   `adjust:` key namespace — never shared with the hole-mask vmask cache) and
-   binds it next to the grade
-   evaluation in `layer.wgsl` / `blend.wgsl` / `adjustPre.wgsl`. The shaders
-   compute `mix(color, graded, coverage)` — inside the polygon the grade
-   applies, outside it the original colour passes through, and the layer's
-   ALPHA IS NEVER CLIPPED (that is the whole difference from `vmask`).
-   Undefined ⇒ the grade applies to the whole layer (classic behaviour).
+   * The grade CHAIN: one stage per enabled, non-identity adjustment mask, in
+   * commit order. The grading shaders evaluate `cs = mix(cs, stage_i(cs),
+   * coverage_i)` stage by stage (`apply_adjust_chain` in `adjust.ts`), so the
+   * chain order IS the user's commit order. Absent ⇒ no grade. Always applied
+   * before `filters`.
    */
-  readonly adjustConfinement?: {
-    readonly rings: readonly (readonly (readonly [number, number])[])[];
-    readonly antiAliased: boolean;
-  };
+  readonly adjustStages?: readonly AdjustStageDesc[];
+  /**
+   * Resident per-layer 1D-LUT ATLAS id (`texture_2d`, row i = the table of
+   * stage i; levels and curves share the row since a stage samples at most one
+   * table). Present iff some stage samples a table. Content-hashed over the
+   * stages' table ids so identical chains share one resident atlas.
+   */
+  readonly adjustLutAtlasId?: string;
+  /** Applied in order, after `adjustStages`. */
+  readonly filters?: readonly FilterDesc[];
   /** Clip to the layer below (Photoshop-style clipping mask). */
   readonly clip?: boolean;
   /**

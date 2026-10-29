@@ -52,10 +52,8 @@ struct LayerUniforms {
 @group(0) @binding(2) var layer_tex     : texture_2d<f32>;
 @group(0) @binding(3) var mask_tex      : texture_2d<f32>;
 @group(0) @binding(4) var vmask_tex     : texture_2d<f32>;
-// Adjustment-confinement coverage (frozen selection snapshot localizing the
-// grade). Default 1×1 white when absent — the mix collapses to the graded
-// colour, byte-identical to the unconfined path, so no flag bit is needed.
-@group(0) @binding(5) var adjmask_tex   : texture_2d<f32>;
+// The grade chain (uniform, LUT atlas, coverage array, 3D LUT) is group 1 —
+// see adjust.ts.
 // The bmask stack slots (retired bindings 5..7) are gone: the bmask combine
 // pass bakes ALL enabled records (each record's hard bit + erase/restore
 // family) into the ONE texture bound at mask_tex, so a single sample covers
@@ -98,21 +96,19 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   // Alpha is never transfer-encoded; only .rgb is converted.
   color = normalize_layer_source(color, layer.flags, layer.filmic_white);
 
-  // Per-layer colour adjustments operate on STRAIGHT (un-premultiplied)
-  // rgb in LINEAR light; apply_adjustments TRC-wraps its own chain internally.
-  // Gated on adj.flags != 0 so an un-adjusted layer skips the round-trip entirely
-  // (identity no-op). The adjustment-confinement coverage (frozen selection
-  // snapshot, sampled in the same content uv as vmask_tex) blends original vs
-  // graded: coverage 1 = fully graded, 0 = untouched original — the layer's
-  // ALPHA is never clipped by it. Absent layers bind a 1×1 white default whose
-  // coverage of 1 makes the mix collapse to the plain graded colour.
-  if (adj.flags != 0u) {
+  // Per-layer grade CHAIN operates on STRAIGHT (un-premultiplied) rgb in
+  // LINEAR light; each stage TRC-wraps its own chain internally. Gated on
+  // adj.stage_count != 0 so an un-adjusted layer skips the round-trip entirely
+  // (identity no-op). Each stage blends original vs graded by its own coverage
+  // (frozen selection snapshot, sampled in the same content uv as vmask_tex):
+  // coverage 1 = fully graded, 0 = untouched original — the layer's ALPHA is
+  // never clipped by it.
+  if (adj.stage_count != 0u) {
     var straight = color.rgb;
     if ((layer.flags & 4u) != 0u && color.a > 0.0001) {
       straight = color.rgb / color.a;
     }
-    let conf = textureSample(adjmask_tex, samp, in.mask_uv).a;
-    straight = mix(straight, apply_adjustments(straight), conf);
+    straight = apply_adjust_chain(straight, in.mask_uv);
     if ((layer.flags & 4u) != 0u) {
       color = vec4<f32>(straight * color.a, color.a);
     } else {

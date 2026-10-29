@@ -20,18 +20,24 @@
 'use client';
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
-import type { Layer, Frame, LocalPolygon } from '@opengpex/editor/core/types';
-import type { CurvePoints, CurvesState, LevelsState, ChannelMixState, ColorBalanceState, AdjustmentState } from '@opengpex/editor/core/types/models';
-import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import type {
+  AdjustmentMask,
+  GradeCategory,
+  GradeState,
+  Layer,
+  Frame,
+  CurvePoints,
+  CurvesState,
+  LevelsState,
+  ChannelMixState,
+  ColorBalanceState,
+  AdjustmentState,
+} from '@opengpex/editor/core/types/models';
+import { MAX_ADJUSTMENT_MASKS_PER_LAYER } from '@opengpex/editor/core/types/models';
 import { resolveEdgeFeatherRoute, buildFeatherRepadPatch } from '@opengpex/editor/core/layer/services/fragment';
+import { LayerFactory } from '@opengpex/editor/core/layer/factory';
 import * as P from './protocols';
-import {
-  DEFAULT_ADJUSTMENTS_STATE,
-  DEFAULT_CHANNEL_MIX_STATE,
-  DEFAULT_COLOR_BALANCE_STATE,
-  DEFAULT_LEVELS_STATE,
-  IDENTITY_CURVE_POINTS,
-} from './protocols';
+import { resolveEditableTail, projectSelectionToLayer, toolCategory } from './utils-hotTail';
 import type {
   GradingTool,
   AdjustmentDrawerConfig,
@@ -46,8 +52,16 @@ import type {
 
 
 
-
 // ─── Shared Logic ──────────────────────────────────────────────────────────────
+
+/** The grade-state key that holds a category's parameters. */
+const GRADE_ARM_KEY = {
+  basic: 'adjustments',
+  levels: 'levels',
+  curves: 'curves',
+  channelMix: 'channelMix',
+  colorBalance: 'colorBalance',
+} as const;
 
 /**
  * Persists the active grading tool both to the shared signal (so other plugins
@@ -84,111 +98,99 @@ function openDrawerWithTool(ctx: EditorContextValue, tool: GradingTool) {
   setActiveTool(ctx, tool);
 }
 
-// ─── Local-adjustment confinement (Photoshop-style) ───────────────────────────
+// ─── Hot-tail grade reads (panel view) ────────────────────────────────────────
 
 /**
- * Identity probes for the five per-layer grade fields. A layer "has a grade"
- * when ANY field deviates from its identity baseline — the same semantics the
- * render pipeline uses to decide whether grading work is needed at all.
+ * The grade value a panel should display: the EDITABLE hot tail's arm when
+ * one exists (same category, same layer, coverage matching the current
+ * selection), otherwise `undefined` — the panel then starts from its
+ * defaults and the next write appends a new mask.
  */
-export function layerHasGrade(layer: Layer): boolean {
-  const a = layer.adjustments;
-  if (a) {
-    const d = DEFAULT_ADJUSTMENTS_STATE;
-    if (
-      (a.brightness ?? d.brightness) !== d.brightness ||
-      (a.contrast ?? d.contrast) !== d.contrast ||
-      (a.saturation ?? d.saturation) !== d.saturation ||
-      (a.hueRotate ?? d.hueRotate) !== d.hueRotate ||
-      (a.blur ?? d.blur) !== d.blur ||
-      (a.edgeFeather ?? 0) !== 0
-    ) return true;
-  }
-  const isIdentityCurve = (pts: CurvePoints | undefined) =>
-    pts === undefined || pts.every((p, i) => p[0] === IDENTITY_CURVE_POINTS[i]?.[0] && p[1] === IDENTITY_CURVE_POINTS[i]?.[1]);
-  const c = layer.curves;
-  if (c && !(isIdentityCurve(c.rgb) && isIdentityCurve(c.red) && isIdentityCurve(c.green) && isIdentityCurve(c.blue))) return true;
-  const l = layer.levels;
-  if (l) {
-    const dl = DEFAULT_LEVELS_STATE;
-    if (
-      l.inputBlack !== dl.inputBlack || l.inputWhite !== dl.inputWhite ||
-      l.gamma !== dl.gamma || l.outputBlack !== dl.outputBlack || l.outputWhite !== dl.outputWhite
-    ) return true;
-  }
-  const m = layer.channelMix;
-  if (m) {
-    const dm = DEFAULT_CHANNEL_MIX_STATE;
-    const row = (r: readonly number[], dr: readonly number[]) => r[0] !== dr[0] || r[1] !== dr[1] || r[2] !== dr[2];
-    if (
-      row(m.red, dm.red) || row(m.green, dm.green) || row(m.blue, dm.blue) ||
-      row(m.constant ?? [0, 0, 0], [0, 0, 0])
-    ) return true;
-  }
-  const b = layer.colorBalance;
-  if (b) {
-    const db = DEFAULT_COLOR_BALANCE_STATE;
-    const row = (r: readonly number[], dr: readonly number[]) => r[0] !== dr[0] || r[1] !== dr[1] || r[2] !== dr[2];
-    if (row(b.shadows, db.shadows) || row(b.midtones, db.midtones) || row(b.highlights, db.highlights)) return true;
-  }
-  return false;
+/** Any category's parameter arm (the panels narrow by their own category). */
+export type GradeArm = AdjustmentState | CurvesState | LevelsState | ChannelMixState | ColorBalanceState;
+
+export function readPanelArm(
+  ctx: EditorContextValue,
+  category: GradeCategory,
+): GradeArm | undefined {
+  const { activeFrame, activeLayer } = ctx;
+  if (!activeFrame || !activeLayer) return undefined;
+  const tail = resolveEditableTail(ctx.geometry, activeFrame, activeLayer, category);
+  return tail?.grade[GRADE_ARM_KEY[category]];
+}
+
+// ─── Hot-tail grade writes ────────────────────────────────────────────────────
+
+/** HUD message when the per-layer mask cap blocks a new commit. */
+function capBlocked(ctx: EditorContextValue, category: GradeCategory): boolean {
+  ctx.actions.setInteraction({
+    hud: {
+      message: `Adjustment limit reached: ${MAX_ADJUSTMENT_MASKS_PER_LAYER} masks per layer. Delete one in the Layers panel to add another.`,
+      type: 'error',
+    },
+  });
+  void category;
+  return true;
 }
 
 /**
- * Build the FROZEN selection snapshot patch for Photoshop-style local
- * adjustments. Returns `{ adjustmentConfinement }` to spread into the SAME
- * layer write that introduces the layer's FIRST grade — the mask is born
- * attached, in one undo step, and from then on lives on the layer
- * independently of the frame selection (editing or clearing the selection
- * never changes a frozen adjustment).
- *
- * Returns `undefined` — i.e. no snapshot — when any of these holds:
- *   • no active frame selection (`frame.confinement`);
- *   • the layer already carries a frozen snapshot (never re-frozen);
- *   • the layer ALREADY has a grade (only the first grade captures the
- *     selection, matching "draw selection → add adjustment");
- *   • the projected polygon is degenerate (zero area — same guard the
- *     Apply-as-Mask converter uses).
- *
- * The snapshot is projected into the TARGET layer's local space (via the
- * geometry service, mirroring the Apply-as-Layer-Mask converter) so it
- * travels with the layer under later moves/transforms.
+ * Compute the next `adjustMasks` array for a write of one category's arm:
+ * the EDITABLE hot tail is patched in place; otherwise a NEW single-category
+ * mask is appended, carrying the frozen selection snapshot when one is active.
+ * Returns `undefined` (no write) when the append hits the per-layer cap.
  */
-export function adjustmentConfinementPatch(
+function nextMasksForArm(
   ctx: EditorContextValue,
   frame: Frame,
   layer: Layer,
-): { adjustmentConfinement: LocalPolygon } | undefined {
-  if (layer.adjustmentConfinement) return undefined;
-  if (layerHasGrade(layer)) return undefined;
-  const selection = getClipBox(frame);
-  if (!selection) return undefined;
-  const layerPoly = ctx.geometry.polygon.frameLocalToLayerLocal(selection, frame, layer);
-  // Degenerate-selection guard (single click, collinear points): the shoelace
-  // area of every ring is ~0, so freezing it would attach an empty mask that
-  // silently localizes the grade to nothing. Same guard the Apply-as-Layer-Mask
-  // converter applies via its shape rect.
-  const ringArea = (ring: readonly { x: number; y: number }[]) => {
-    let a = 0;
-    for (let i = 0; i < ring.length; i++) {
-      const p = ring[i];
-      const q = ring[(i + 1) % ring.length];
-      a += p.x * q.y - q.x * p.y;
-    }
-    return Math.abs(a) / 2;
+  category: GradeCategory,
+  arm: GradeArm,
+): AdjustmentMask[] | undefined {
+  const masks = layer.adjustMasks ?? [];
+  const tail = resolveEditableTail(ctx.geometry, frame, layer, category);
+  const key = GRADE_ARM_KEY[category];
+  if (tail) {
+    return masks.map((m) => (m.id === tail.id ? { ...m, grade: { ...m.grade, [key]: arm } } : m));
+  }
+  if (masks.length >= MAX_ADJUSTMENT_MASKS_PER_LAYER) {
+    capBlocked(ctx, category);
+    return undefined;
+  }
+  const shape = projectSelectionToLayer(ctx.geometry, frame, layer);
+  const mask: AdjustmentMask = {
+    id: LayerFactory.newAdjustMaskId(),
+    category,
+    grade: { [key]: arm } as GradeState,
+    enabled: true,
   };
-  const totalArea = layerPoly.rings.reduce((sum, ring) => sum + ringArea(ring), 0);
-  if (!(totalArea > 0.5)) return undefined;
-  return { adjustmentConfinement: layerPoly };
+  if (shape) mask.shape = shape;
+  return [...masks, mask];
+}
+
+/**
+ * Write one category's arm through the hot-tail rules (one Redux write, one
+ * undo step with the gesture's checkpoint). A selection snapshot rides the
+ * SAME write when a new mask is born, matching "draw selection → adjust".
+ */
+function writeArm(
+  ctx: EditorContextValue,
+  category: GradeCategory,
+  arm: GradeArm,
+): void {
+  const { activeFrame, activeLayer, actions } = ctx;
+  if (!activeFrame || !activeLayer) return;
+  const masks = nextMasksForArm(ctx, activeFrame, activeLayer, category, arm);
+  if (!masks) return;
+  actions.updateLayer(activeFrame.id, activeLayer.id, {
+    adjustMasks: masks.length ? masks : undefined,
+  });
 }
 
 // ─── Curves helpers ────────────────────────────────────────────────────────────
 
 /**
- * Merge a channel-scoped `points` patch into `layer.curves` while keeping the
- * other channels intact. Writing `points === undefined` collapses the field
- * entirely (identity semantics from `IDENTITY_CURVE_POINTS`), which is what
- * `resetActivePanel` relies on to escape the AsyncFilterCache fast path.
+ * Merge a channel-scoped `points` patch into a curves arm while keeping the
+ * other channels intact.
  */
 function mergeCurves(
   current: CurvesState | undefined,
@@ -250,23 +252,28 @@ function clearEdgeFeatherPatch(layer: Layer): Partial<Layer> | undefined {
       vectorMasks: layer.vectorMasks.map((m) => (m.enabled !== false ? { ...m, feather: 0 } : m)),
     };
   }
-  // bitmap route: the value lives in `adjustments.edgeFeather`, which the
-  // reset patches already clear via `adjustments: undefined`.
+  // bitmap route: the value lives in the hot tail's basic arm, which the
+  // reset patches already drop via `adjustMasks: undefined`.
   return undefined;
+}
+
+/** Drop every mask of `category` from a layer's chain (`undefined` when none survive). */
+function dropCategoryMasks(layer: Layer, category: GradeCategory): Partial<Layer> {
+  const remaining = (layer.adjustMasks ?? []).filter((m) => m.category !== category);
+  return { adjustMasks: remaining.length ? remaining : undefined };
 }
 
 /**
  * ADJUSTMENT_COMMANDS: Command definitions for the AdjustmentDrawer.
  *
- * Curves editing follows the gesture-based Undo coalescing pattern (mirrors
- * `AdjustmentDrawer`): `beginCurvesEdit` is the ONLY undoable
- * command — it takes a snapshot before the drag; `updateChannelCurve` /
- * `addCurvePoint` / `removeCurvePoint` run non-undoable so intermediate
- * `pointermove` writes collapse into a single history step at `pointerup`.
- *
- * Only reset & begin-edit commands carry `undoable: true` — Steps 6/7 will add
- * the corresponding `beginLevelsEdit` / `beginChannelMixEdit` following the
- * same shape.
+ * Every grade write goes through the hot-tail rules of `utils-hotTail.ts`: the
+ * chain's last mask is edited in place while the user keeps working in the
+ * same category against the same selection; otherwise a new mask appends to
+ * the chain (commit order = render order). Editing follows the gesture-based
+ * Undo coalescing pattern: `begin*Edit` is the ONLY undoable command in a
+ * gesture — it takes a snapshot before the drag; the `update*` / `fast*`
+ * commands run non-undoable so intermediate `pointermove` writes collapse
+ * into a single history step at the final `commit*`.
  */
 export const ADJUSTMENT_COMMANDS = {
   setTool: {
@@ -334,26 +341,14 @@ export const ADJUSTMENT_COMMANDS = {
     execute: (ctx: EditorContextValue) => {
       const { activeFrame, activeLayer, actions } = ctx;
       if (!activeFrame || !activeLayer) return;
-      // Setting to undefined removes the fields entirely so `hasAdvancedFilters`
-      // returns false and the layer short-circuits back to the ctx.filter
-      // fast path.
-      // `adjustments` is now managed by the Basic panel inside this
-      // same drawer, so "Reset All Adjustment" also wipes it. Previously
-      // AdjustmentDrawer owned its own reset path; merging into a single
-      // reset preserves the mental model "one panel = one reset button".
+      // The whole chain goes: every category's masks are deleted (their
+      // filters — blur / edgeFeather — disappear with them, the translation
+      // derives those from the masks).
+      // Edge Feather's routed carriers (visibleShape pad / vectorMask
+      // feather) don't live in the chain — clear them in the SAME write
+      // so reset stays one undo step.
       actions.updateLayer(activeFrame.id, activeLayer.id, {
-        adjustments: undefined,
-        curves: undefined,
-        levels: undefined,
-        channelMix: undefined,
-        colorBalance: undefined,
-        // With every grade gone the frozen selection snapshot has nothing to
-        // localize — clear it so a FUTURE first grade captures the THEN-active
-        // selection, not this stale one.
-        adjustmentConfinement: undefined,
-        // Edge Feather's routed carriers (visibleShape pad / vectorMask
-        // feather) don't live in `adjustments` — clear them in the SAME write
-        // so reset stays one undo step.
+        adjustMasks: undefined,
         ...clearEdgeFeatherPatch(activeLayer),
       });
     },
@@ -369,49 +364,15 @@ export const ADJUSTMENT_COMMANDS = {
       const tool =
         (scoped!.getSignal(P.SIGNAL_ACTIVE_GRADING_TOOL, P.DEFAULT_GRADING_TOOL) as GradingTool) ??
         P.DEFAULT_GRADING_TOOL;
-      // Switch (not chained ternaries) so the `'basic'` case reads
-      // parallel to the existing three panels, and adding a fifth tool
-      // later slots in without re-flowing the diff.
-      let patch: Partial<Record<
-        'adjustments' | 'curves' | 'levels' | 'channelMix' | 'colorBalance',
-        undefined
-      >>;
-      switch (tool) {
-        case 'basic':
-          patch = { adjustments: undefined };
-          break;
-        case 'curves':
-          patch = { curves: undefined };
-          break;
-        case 'levels':
-          patch = { levels: undefined };
-          break;
-        case 'colorBalance':
-          patch = { colorBalance: undefined };
-          break;
-        case 'mixer':
-        default:
-          patch = { channelMix: undefined };
-          break;
-      }
-      // The frozen selection snapshot localizes the grades — once the reset
-      // leaves NO grade on the layer it has nothing to localize, so clear it
-      // (a future first grade then captures the then-active selection).
-      // When another family still carries a grade, the snapshot stays.
-      const remainingGrade = layerHasGrade({
-        ...activeLayer,
-        ...patch,
-        ...(tool === 'basic' ? { adjustments: undefined } : {}),
-      } as Layer);
-      const confClear = remainingGrade ? {} : { adjustmentConfinement: undefined };
+      const category = toolCategory(tool);
       // Basic owns the Edge Feather slider — its routed carriers must reset
       // with the panel (other tools never touched them).
       actions.updateLayer(
         activeFrame.id,
         activeLayer.id,
         tool === 'basic'
-          ? { ...patch, ...confClear, ...clearEdgeFeatherPatch(activeLayer) }
-          : { ...patch, ...confClear },
+          ? { ...dropCategoryMasks(activeLayer, category), ...clearEdgeFeatherPatch(activeLayer) }
+          : dropCategoryMasks(activeLayer, category),
       );
     },
   } as EditorCommand<void, void>,
@@ -419,9 +380,10 @@ export const ADJUSTMENT_COMMANDS = {
 
   // ─── Curves-specific commands ───────────────────────────────────────
   //
-  // These write to `layer.curves.{rgb|red|green|blue}`. `beginCurvesEdit` is
-  // the Undo checkpoint — its execute body is intentionally empty because the
-  // history plugin snapshots layer state on any undoable command dispatch.
+  // Writes go to the curves arm of the editable hot tail (or a new mask).
+  // `beginCurvesEdit` is the Undo checkpoint — its execute body is
+  // intentionally empty because the history plugin snapshots layer state on
+  // any undoable command dispatch.
 
   beginCurvesEdit: {
     id: P.CMD_BEGIN_CURVES_EDIT,
@@ -437,14 +399,8 @@ export const ADJUSTMENT_COMMANDS = {
       ctx: EditorContextValue,
       payload: { channel: CurveChannel; points: CurvePoints },
     ) => {
-      const { activeFrame, activeLayer, actions } = ctx;
-      if (!activeFrame || !activeLayer) return;
-      // First-grade capture rides the same write (one undo step).
-      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
-      actions.updateLayer(activeFrame.id, activeLayer.id, {
-        curves: mergeCurves(activeLayer.curves, payload.channel, payload.points),
-        ...(conf ?? {}),
-      });
+      const current = readPanelArm(ctx, 'curves') as CurvesState | undefined;
+      writeArm(ctx, 'curves', mergeCurves(current, payload.channel, payload.points));
     },
   } as EditorCommand<{ channel: CurveChannel; points: CurvePoints }, void>,
 
@@ -455,20 +411,14 @@ export const ADJUSTMENT_COMMANDS = {
       ctx: EditorContextValue,
       payload: { channel: CurveChannel; x: number; y: number },
     ) => {
-      const { activeFrame, activeLayer, actions } = ctx;
-      if (!activeFrame || !activeLayer) return;
       // Read current channel points; fall back to identity endpoints so the
       // very first add creates a proper 3-point curve.
+      const current = readPanelArm(ctx, 'curves') as CurvesState | undefined;
       const currentChannelPts =
-        activeLayer.curves?.[payload.channel] ??
+        current?.[payload.channel] ??
         P.IDENTITY_CURVE_POINTS.map((p) => [p[0], p[1]] as [number, number]);
       const nextPts = insertPointSorted(currentChannelPts, payload.x, payload.y);
-      // First-grade capture rides the same write (one undo step).
-      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
-      actions.updateLayer(activeFrame.id, activeLayer.id, {
-        curves: mergeCurves(activeLayer.curves, payload.channel, nextPts),
-        ...(conf ?? {}),
-      });
+      writeArm(ctx, 'curves', mergeCurves(current, payload.channel, nextPts));
     },
   } as EditorCommand<{ channel: CurveChannel; x: number; y: number }, void>,
 
@@ -479,9 +429,7 @@ export const ADJUSTMENT_COMMANDS = {
       ctx: EditorContextValue,
       payload: { channel: CurveChannel; index: number },
     ) => {
-      const { activeFrame, activeLayer, actions } = ctx;
-      if (!activeFrame || !activeLayer) return;
-      const currentPts: CurvePoints | undefined = activeLayer.curves?.[payload.channel];
+      const currentPts: CurvePoints | undefined = (readPanelArm(ctx, 'curves') as CurvesState | undefined)?.[payload.channel];
       if (!currentPts || currentPts.length <= 2) {
         // Endpoints (index 0 and last) are non-removable — a 2-point curve is
         // already the identity shape; going below 2 points would be undefined.
@@ -493,19 +441,17 @@ export const ADJUSTMENT_COMMANDS = {
       const nextPts: CurvePoints = currentPts.filter(
         (_pt: [number, number], i: number) => i !== payload.index,
       );
-      actions.updateLayer(activeFrame.id, activeLayer.id, {
-        curves: mergeCurves(activeLayer.curves, payload.channel, nextPts),
-      });
+      const current = readPanelArm(ctx, 'curves') as CurvesState | undefined;
+      writeArm(ctx, 'curves', mergeCurves(current, payload.channel, nextPts));
     },
   } as EditorCommand<{ channel: CurveChannel; index: number }, void>,
 
   // ─── Levels-specific commands ───────────────────────────────────────
   //
-  // These write to `layer.levels`. The interaction pattern mirrors Curves:
-  // `beginLevelsEdit` snapshots layer state as the undoable checkpoint;
-  // `updateLevels` fires non-undoable during pointer drags so the run of
-  // intermediate writes coalesces into a single history entry at pointerup
-  // (gesture-based coalescing).
+  // The interaction pattern mirrors Curves: `beginLevelsEdit` snapshots layer
+  // state as the undoable checkpoint; `updateLevels` fires non-undoable during
+  // pointer drags so the run of intermediate writes coalesces into a single
+  // history entry at pointerup (gesture-based coalescing).
   //
   // `autoLevels` is a one-shot: the panel already owns the histogram, so it
   // computes the 0.1 / 99.9 percentile inputBlack/inputWhite locally and hands
@@ -527,17 +473,11 @@ export const ADJUSTMENT_COMMANDS = {
       ctx: EditorContextValue,
       payload: { patch: LevelsPatch },
     ) => {
-      const { activeFrame, activeLayer, actions } = ctx;
-      if (!activeFrame || !activeLayer) return;
       // Merge onto whatever exists (starting from DEFAULT_LEVELS_STATE the
-      // first time). This keeps `hasAdvancedFilters()` correctly tripping the
-      // moment any field deviates from identity, and ensures a partial patch
-      // never accidentally drops the other three fields.
-      const current = activeLayer.levels ?? P.DEFAULT_LEVELS_STATE;
-      const next: LevelsState = { ...current, ...payload.patch };
-      // First-grade capture rides the same write (one undo step).
-      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
-      actions.updateLayer(activeFrame.id, activeLayer.id, { levels: next, ...(conf ?? {}) });
+      // first time). This keeps a partial patch from accidentally dropping
+      // the other fields.
+      const current = (readPanelArm(ctx, 'levels') as LevelsState | undefined) ?? P.DEFAULT_LEVELS_STATE;
+      writeArm(ctx, 'levels', { ...current, ...payload.patch });
     },
   } as EditorCommand<{ patch: LevelsPatch }, void>,
 
@@ -550,9 +490,7 @@ export const ADJUSTMENT_COMMANDS = {
       ctx: EditorContextValue,
       payload: { inputBlack: number; inputWhite: number },
     ) => {
-      const { activeFrame, activeLayer, actions } = ctx;
-      if (!activeFrame || !activeLayer) return;
-      const current = activeLayer.levels ?? P.DEFAULT_LEVELS_STATE;
+      const current = (readPanelArm(ctx, 'levels') as LevelsState | undefined) ?? P.DEFAULT_LEVELS_STATE;
       // Clamp defensively — the panel is expected to already clamp, but a
       // corrupt histogram (e.g. all-zero layer) shouldn't be able to write an
       // out-of-range value to layer state.
@@ -563,29 +501,16 @@ export const ADJUSTMENT_COMMANDS = {
       // the whole tonal range (see `generateLevelsLUT` degenerate branch).
       // Fall back to no-op if the histogram couldn't produce a valid split.
       if (iw <= ib) return;
-      const next: LevelsState = {
-        ...current,
-        inputBlack: ib,
-        inputWhite: iw,
-      };
-      // First-grade capture rides the same write (one undo step).
-      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
-      actions.updateLayer(activeFrame.id, activeLayer.id, { levels: next, ...(conf ?? {}) });
+      writeArm(ctx, 'levels', { ...current, inputBlack: ib, inputWhite: iw });
     },
   } as EditorCommand<{ inputBlack: number; inputWhite: number }, void>,
 
   // ─── Channel Mixer commands ─────────────────────────────────────────
   //
-  // Same gesture-coalescing shape as Curves & Levels. `beginChannelMixEdit`
-  // is the undoable checkpoint (empty body — history plugin snapshots layer
-  // state on any undoable dispatch). `updateChannelMix` deep-merges its
-  // partial patch onto whatever's currently on `layer.channelMix` (falling
-  // back to the identity matrix so a fresh layer's first slider tweak
-  // produces a fully-formed `ChannelMixState`). `applyChannelMixPreset` is
-  // the one-shot preset switch — undoable so a preset click is a single
-  // history entry, and `'none'` clears the field entirely so
-  // `hasAdvancedFilters()` short-circuits (same trick `resetActivePanel`
-  // uses).
+  // Same gesture-coalescing shape as Curves & Levels. `applyChannelMixPreset`
+  // is the one-shot preset switch — undoable so a preset click is a single
+  // history entry; `'none'` is the category reset (the masks are dropped so
+  // the layer short-circuits back to the no-grade fast path).
 
   beginChannelMixEdit: {
     id: P.CMD_BEGIN_CHANNEL_MIX_EDIT,
@@ -601,17 +526,11 @@ export const ADJUSTMENT_COMMANDS = {
       ctx: EditorContextValue,
       payload: { patch: ChannelMixPatch },
     ) => {
-      const { activeFrame, activeLayer, actions } = ctx;
-      if (!activeFrame || !activeLayer) return;
-      const current = activeLayer.channelMix ?? P.DEFAULT_CHANNEL_MIX_STATE;
+      const current = (readPanelArm(ctx, 'channelMix') as ChannelMixState | undefined) ?? P.DEFAULT_CHANNEL_MIX_STATE;
       // Shallow merge is enough because the patch's rows are whole triples —
       // callers write a full `[r,g,b]` per row rather than nudging a single
-      // coefficient. Same for `constant`. This keeps the merge O(1) and
-      // avoids the deep-clone cost that comes with row-level assignment.
-      const next: ChannelMixState = { ...current, ...payload.patch };
-      // First-grade capture rides the same write (one undo step).
-      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
-      actions.updateLayer(activeFrame.id, activeLayer.id, { channelMix: next, ...(conf ?? {}) });
+      // coefficient. Same for `constant`.
+      writeArm(ctx, 'channelMix', { ...current, ...payload.patch });
     },
   } as EditorCommand<{ patch: ChannelMixPatch }, void>,
 
@@ -625,13 +544,10 @@ export const ADJUSTMENT_COMMANDS = {
     ) => {
       const { activeFrame, activeLayer, actions } = ctx;
       if (!activeFrame || !activeLayer) return;
-      // `'none'` clears the field entirely — treated exactly like a
-      // reset from the render pipeline's perspective (short-circuits
-      // `hasAdvancedFilters()` back to the ctx.filter fast path).
+      // `'none'` drops the category's masks entirely — treated exactly like a
+      // reset from the render pipeline's perspective.
       if (payload.presetId === 'none') {
-        actions.updateLayer(activeFrame.id, activeLayer.id, {
-          channelMix: undefined,
-        });
+        actions.updateLayer(activeFrame.id, activeLayer.id, dropCategoryMasks(activeLayer, 'channelMix'));
         return;
       }
       const preset = P.CHANNEL_MIX_PRESETS[payload.presetId];
@@ -639,34 +555,25 @@ export const ADJUSTMENT_COMMANDS = {
       // Wholesale replacement — presets are complete matrices, not diffs.
       // We deep-clone the tuples so subsequent shallow mutations on the
       // layer state can't leak into the shared preset table.
-      const next: ChannelMixState = {
+      writeArm(ctx, 'channelMix', {
         red: [preset.red[0], preset.red[1], preset.red[2]],
         green: [preset.green[0], preset.green[1], preset.green[2]],
         blue: [preset.blue[0], preset.blue[1], preset.blue[2]],
         constant: preset.constant
           ? [preset.constant[0], preset.constant[1], preset.constant[2]]
           : [0, 0, 0],
-      };
-      // First-grade capture rides the same write (one undo step).
-      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
-      actions.updateLayer(activeFrame.id, activeLayer.id, { channelMix: next, ...(conf ?? {}) });
+      });
     },
   } as EditorCommand<{ presetId: ChannelMixPresetId }, void>,
 
-  // ─── Basic Adjustments commands (migrated from AdjustmentDrawer) ─
+  // ─── Basic Adjustments commands ─────────────────────────────────────
   //
-  // Mirrors the Levels / Channel-Mix shape but writes into `layer.adjustments`
-  // rather than `layer.curves|levels|channelMix`.
-  //
-  // ⚠️ v2: there is no longer a "fast path" vs "advanced" split. The old comment
-  // here described the deleted Canvas2D painter (`ctx.filter` + a CPU descriptor
-  // chain + an `adjustments: undefined` guard against double application). In v2
-  // every arm — Basic, Curves, Levels, Mixer, Colour Balance — is translated by
-  // `SceneAssembler` into `AdjustmentDesc[]` and evaluated ONCE per frame by
-  // `adjust.wgsl` on the GPU. Double
-  // application is prevented structurally: the descriptor list IS the single
-  // source, and the only place a grade is pre-baked (AdjustPrePass, ahead of a
-  // compute filter) explicitly suppresses the inline evaluation.
+  // Writes go to the basic arm of the editable hot tail (or a new mask).
+  // There is no "fast path" vs "advanced" split: the chain is translated by
+  // `SceneAssembler` into `AdjustStageDesc[]` and evaluated once per frame by
+  // the GPU. Double application is prevented structurally: the stage list IS
+  // the single source, and the only place a grade is pre-baked (AdjustPrePass,
+  // ahead of a compute filter) explicitly suppresses the inline evaluation.
 
   beginAdjustmentsEdit: {
     id: P.CMD_BEGIN_ADJUSTMENTS_EDIT,
@@ -682,21 +589,12 @@ export const ADJUSTMENT_COMMANDS = {
       ctx: EditorContextValue,
       payload: { patch: AdjustmentsPatch },
     ) => {
-      const { activeFrame, activeLayer, actions } = ctx;
-      if (!activeFrame || !activeLayer) return;
       // Merge onto the identity baseline so a partial patch (e.g. only
-      // brightness) never accidentally erases the other four values. This
-      // also keeps `getAdjustmentsData()` happy — it expects a fully-formed
-      // AdjustmentState with all five keys populated.
-      const current = (activeLayer.adjustments ?? P.DEFAULT_ADJUSTMENTS_STATE) as AdjustmentState;
-      const next: AdjustmentState = { ...current, ...payload.patch };
-      // First-grade capture: attach the frozen selection snapshot in the SAME
-      // write (one undo step) when a frame selection is active.
-      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
-      actions.updateLayer(activeFrame.id, activeLayer.id, {
-        adjustments: next,
-        ...(conf ?? {}),
-      });
+      // brightness) never accidentally erases the other values. This also
+      // keeps `getAdjustmentsData()` happy — it expects a fully-formed
+      // AdjustmentState with all keys populated.
+      const current = (readPanelArm(ctx, 'basic') as AdjustmentState | undefined) ?? P.DEFAULT_ADJUSTMENTS_STATE;
+      writeArm(ctx, 'basic', { ...current, ...payload.patch } as AdjustmentState);
     },
   } as EditorCommand<{ patch: AdjustmentsPatch }, void>,
 
@@ -709,6 +607,10 @@ export const ADJUSTMENT_COMMANDS = {
   // per-tick `mergeFrameSnapshot` folds it into the rendered frame (live canvas),
   // React stays idle, and `commitAdjustments` lands ONE Redux write at gesture
   // end. Same bookending as the move gesture (`fast.override` + `fast.commit`).
+  //
+  // Hot-tail detection runs against the FRESHEST draft: after the first
+  // override of a cold-start gesture appends a mask, the remaining moves edit
+  // it in place, so the whole gesture is exactly one new chain entry.
 
   fastUpdateAdjustments: {
     id: P.CMD_FAST_UPDATE_ADJUSTMENTS,
@@ -720,20 +622,17 @@ export const ADJUSTMENT_COMMANDS = {
       const { activeFrame, activeLayer, actions } = ctx;
       if (!activeFrame || !activeLayer) return;
       // Baseline on the FRESHEST draft (`fast.latestLayer`), not Redux — the
-      // draft replaces `adjustments` wholesale, so a Redux baseline would
+      // draft replaces the chain wholesale, so a Redux baseline would
       // resurrect last frame's values mid-gesture.
       const latest = actions.fast.latestLayer(activeFrame.id, activeLayer.id) ?? activeLayer;
-      const current = (latest.adjustments ?? P.DEFAULT_ADJUSTMENTS_STATE) as AdjustmentState;
+      const tail = resolveEditableTail(ctx.geometry, activeFrame, latest, 'basic');
+      const key = GRADE_ARM_KEY.basic;
+      const current = (tail?.grade[key] as AdjustmentState | undefined) ?? P.DEFAULT_ADJUSTMENTS_STATE;
       const next: AdjustmentState = { ...current, ...payload.patch };
-      // First-grade capture rides the SAME volatile draft — the gesture's
-      // commit lands the snapshot and the grade as one Redux write / undo step.
-      const conf = adjustmentConfinementPatch(ctx, activeFrame, latest);
 
       // ── Blur motion quantization (same cure as fastUpdateEdgeFeather) ──
       // The slider steps 0.1σ; a SLOW drag crosses a step on nearly every
-      // ticker frame and each step re-runs the full pipeline (both vmask
-      // bakes + whole-scene recomposite + the gaussian H/V dispatch — the
-      // latter at FULL-ASSET dims for an uncropped layer). Quantize the
+      // ticker frame and each step re-runs the full pipeline. Quantize the
       // MOTION value to 0.5σ (adjacent frames differ imperceptibly while
       // moving) so a slow drag re-renders ~5× less often; `basic.tsx` lands
       // the EXACT slider value in one final `exact` write at drag end.
@@ -744,9 +643,10 @@ export const ADJUSTMENT_COMMANDS = {
         next.blur = q;
       }
 
+      const masks = nextMasksForArm(ctx, activeFrame, latest, 'basic', next);
+      if (!masks) return;
       actions.fast.overrideLayer(activeFrame.id, activeLayer.id, {
-        adjustments: next,
-        ...(conf ?? {}),
+        adjustMasks: masks.length ? masks : undefined,
       });
     },
   } as EditorCommand<{ patch: AdjustmentsPatch; exact?: boolean }, void>,
@@ -770,9 +670,7 @@ export const ADJUSTMENT_COMMANDS = {
   // This pair parks BOTH sides on the volatile buffer per move: two drafts
   // (`fast.override` on the fragment AND on the source layer) merge in the
   // SAME `mergeFrameSnapshot` tick, so hole + fragment update in lockstep and
-  // the seam is structurally impossible — not just faster. Per-frame GPU cost
-  // is affordable because the hole's vmask bake is WINDOWED (hole-sized, see
-  // prepareVmaskSources `resolveVmaskWindow`).
+  // the seam is structurally impossible — not just faster.
   //
   // Same routing as `setEdgeFeather`, but every read baselines on
   // `fast.latestLayer` (the freshest draft) — the draft replaces the touched
@@ -812,7 +710,7 @@ export const ADJUSTMENT_COMMANDS = {
         ? ((latest.visibleShape as { featherPx?: number } | undefined)?.featherPx ?? 0)
         : route === 'vmask'
           ? (latest.vectorMasks?.find((m) => m.enabled !== false)?.feather ?? 0)
-          : ((latest.adjustments?.edgeFeather as number | undefined) ?? 0);
+          : (latest.adjustMasks?.reduce((sum, m) => sum + (m.grade.adjustments?.edgeFeather ?? 0), 0) ?? 0);
       if (parkedFeather === radius) return;
 
       if (route === 'geometry') {
@@ -824,10 +722,17 @@ export const ADJUSTMENT_COMMANDS = {
         );
         actions.fast.overrideLayer(frameId, activeLayer.id, { vectorMasks: masks });
       } else {
-        const current = (latest.adjustments ?? P.DEFAULT_ADJUSTMENTS_STATE) as AdjustmentState;
-        actions.fast.overrideLayer(frameId, activeLayer.id, {
-          adjustments: { ...current, edgeFeather: radius },
-        });
+        // Bitmap route: the value rides the editable hot tail's basic arm
+        // (created on first write when none exists).
+        const tail = resolveEditableTail(ctx.geometry, activeFrame, latest, 'basic');
+        const key = GRADE_ARM_KEY.basic;
+        const current = (tail?.grade[key] as AdjustmentState | undefined) ?? P.DEFAULT_ADJUSTMENTS_STATE;
+        const masks = nextMasksForArm(ctx, activeFrame, latest, 'basic', { ...current, edgeFeather: radius });
+        if (masks) {
+          actions.fast.overrideLayer(frameId, activeLayer.id, {
+            adjustMasks: masks.length ? masks : undefined,
+          });
+        }
       }
 
       // ── Hole side (same tick, same buffer — lockstep with the fragment) ──
@@ -869,7 +774,8 @@ export const ADJUSTMENT_COMMANDS = {
   //     lossless: the hard-cut-away pixels are still in the original asset);
   //   • vector-mask layer → every enabled mask's `feather` field (same
   //     semantics as selection-time feather);
-  //   • otherwise → `adjustments.edgeFeather` (the `alphaFeather` filter).
+  //   • otherwise → the editable hot tail's basic `edgeFeather` (the
+  //     `alphaFeather` filter).
   //
   // SOURCE-HOLE OWNERSHIP (the `hole` policy): when the layer is a cut
   // fragment (`metadata.assocMaskId`), the checkbox is the single source of
@@ -914,10 +820,8 @@ export const ADJUSTMENT_COMMANDS = {
           );
           actions.updateLayer(activeFrame.id, activeLayer.id, { vectorMasks: masks });
         } else {
-          const current = (activeLayer.adjustments ?? P.DEFAULT_ADJUSTMENTS_STATE) as AdjustmentState;
-          actions.updateLayer(activeFrame.id, activeLayer.id, {
-            adjustments: { ...current, edgeFeather: radius },
-          });
+          const current = (readPanelArm(ctx, 'basic') as AdjustmentState | undefined) ?? P.DEFAULT_ADJUSTMENTS_STATE;
+          writeArm(ctx, 'basic', { ...current, edgeFeather: radius });
         }
       }
 
@@ -945,11 +849,9 @@ export const ADJUSTMENT_COMMANDS = {
   // ─── Color Balance commands ─────────────────────────────────────────
   //
   // Same gesture-coalescing shape as Curves / Levels / Channel-Mixer.
-  // `beginColorBalanceEdit` is the undoable checkpoint (empty body — history
-  // plugin snapshots layer state on any undoable dispatch).
-  // `updateColorBalance` deep-merges its partial patch onto the current
-  // `layer.colorBalance` (falling back to the identity state so a fresh
-  // layer's first slider tweak produces a fully-formed `ColorBalanceState`).
+  // `updateColorBalance` merges its partial patch onto the editable hot
+  // tail's arm (falling back to the identity state so a fresh layer's first
+  // slider tweak produces a fully-formed `ColorBalanceState`).
 
   beginColorBalanceEdit: {
     id: P.CMD_BEGIN_COLOR_BALANCE_EDIT,
@@ -965,16 +867,8 @@ export const ADJUSTMENT_COMMANDS = {
       ctx: EditorContextValue,
       payload: { patch: ColorBalancePatch },
     ) => {
-      const { activeFrame, activeLayer, actions } = ctx;
-      if (!activeFrame || !activeLayer) return;
-      const current = activeLayer.colorBalance ?? P.DEFAULT_COLOR_BALANCE_STATE;
-      const next: ColorBalanceState = { ...current, ...payload.patch };
-      // First-grade capture rides the same write (one undo step).
-      const conf = adjustmentConfinementPatch(ctx, activeFrame, activeLayer);
-      actions.updateLayer(activeFrame.id, activeLayer.id, { colorBalance: next, ...(conf ?? {}) });
+      const current = (readPanelArm(ctx, 'colorBalance') as ColorBalanceState | undefined) ?? P.DEFAULT_COLOR_BALANCE_STATE;
+      writeArm(ctx, 'colorBalance', { ...current, ...payload.patch });
     },
   } as EditorCommand<{ patch: ColorBalancePatch }, void>,
 } as const;
-
-
-

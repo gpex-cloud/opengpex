@@ -162,7 +162,7 @@ export function deriveChannelHistogram(src: Uint32Array, lut: Float32Array): Uin
 
 /**
  * Derive the OUTPUT r/g/b/composite histograms for the levels→curves chain,
- * applied in the same order as the GPU (`apply_adjustments` in adjust.ts:
+ * applied in the same order as the GPU (`apply_stage` in adjust.ts:
  * levels LUT first, then the per-channel curves table).
  *
  * Luma is deliberately absent from the result: per-pixel luma cannot be
@@ -195,4 +195,36 @@ export function deriveLayerHistogram(
     composite[i] = r[i] + g[i] + b[i];
   }
   return { r, g, b, composite };
+}
+
+/** The table-bearing arms of one grade step, in chain order. */
+export interface HistogramGradeStep {
+  readonly levels?: LevelsState;
+  readonly curves?: CurvesState;
+}
+
+/**
+ * Derive the OUTPUT histograms for a whole grade CHAIN: every enabled step's
+ * levels→curves pair is scattered in turn, in commit order, so the display
+ * follows what the layer actually renders rather than only the step currently
+ * under the sliders. Steps without a table arm (basic / mixer / balance) are
+ * skipped — their colour math is not a per-channel 1D map and is not
+ * representable on a marginal histogram (same limitation as before, now
+ * explicit). Luma is passed through from the source (see
+ * {@link deriveLayerHistogram}).
+ */
+export function deriveChainHistogram(
+  src: LayerHistogramData,
+  steps: readonly HistogramGradeStep[],
+): { r: Uint32Array; g: Uint32Array; b: Uint32Array; composite: Uint32Array } {
+  let cur: LayerHistogramData = src;
+  let touched = false;
+  for (const step of steps) {
+    if (!step.levels && !step.curves) continue;
+    const next = deriveLayerHistogram(cur, step.levels, step.curves);
+    cur = { ...next, luma: src.luma };
+    touched = true;
+  }
+  if (!touched) return deriveLayerHistogram(src, undefined, undefined);
+  return { r: cur.r, g: cur.g, b: cur.b, composite: cur.composite };
 }

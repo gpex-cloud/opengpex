@@ -222,11 +222,7 @@ export const LayerPeelCommands = {
           // once by engine filter pass).
           const stripAdj = (l: typeof host) => ({
             ...l,
-            adjustments: undefined,
-            curves: undefined,
-            levels: undefined,
-            channelMix: undefined,
-            colorBalance: undefined,
+            adjustMasks: undefined,
           });
 
           // Participants in z-order: host (bottom) → frags (stamps) → exchange (top)

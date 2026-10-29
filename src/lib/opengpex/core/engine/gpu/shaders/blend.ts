@@ -99,11 +99,8 @@ struct BlendUniforms {
 @group(0) @binding(3) var bg_tex          : texture_2d<f32>;
 @group(0) @binding(4) var mask_tex        : texture_2d<f32>;
 @group(0) @binding(5) var vmask_tex       : texture_2d<f32>;
-// Adjustment-confinement coverage (frozen selection snapshot localizing the
-// grade). Default 1×1 white when absent — the mix collapses to the graded
-// colour, byte-identical to the unconfined path, so no flag bit is needed.
-@group(0) @binding(6) var adjmask_tex     : texture_2d<f32>;
-// The bmask stack slots (retired bindings 6..8) are gone: the bmask combine
+// The grade chain (uniform, LUT atlas, coverage array, 3D LUT) is group 1 —
+// see adjust.ts. The bmask stack slots (retired bindings 6..8) are gone: the bmask combine
 // pass bakes ALL enabled records (each record's hard bit + erase/restore
 // family) into the ONE texture bound at mask_tex, so a single sample covers
 // the whole mask set.
@@ -453,17 +450,15 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
     cs = fg_sample.rgb / fg_sample.a;
   }
 
-  // Per-layer colour adjustments on the STRAIGHT foreground rgb, before
-  // the blend math. Gated on adj.flags != 0 so an un-adjusted layer is
-  // bit-identical to un-adjusted input (identity no-op). The
-  // adjustment-confinement coverage (frozen selection snapshot, sampled in
-  // the same foreground-local unit coord as vmask_tex) blends original vs
-  // graded: coverage 1 = fully graded, 0 = untouched original — the layer's
-  // ALPHA is never clipped by it. Absent layers bind a 1×1 white default
-  // whose coverage of 1 makes the mix collapse to the plain graded colour.
-  if (adj.flags != 0u) {
-    let conf = textureSample(adjmask_tex, samp, local).a;
-    cs = mix(cs, apply_adjustments(cs), conf);
+  // Per-layer grade CHAIN on the STRAIGHT foreground rgb, before the blend
+  // math. Gated on adj.stage_count != 0 so an un-adjusted layer is
+  // bit-identical to un-adjusted input (identity no-op). Each stage blends
+  // original vs graded by its own coverage (frozen selection snapshot,
+  // sampled in the same foreground-local unit coord as vmask_tex): coverage
+  // 1 = fully graded, 0 = untouched original — the layer's ALPHA is never
+  // clipped by it.
+  if (adj.stage_count != 0u) {
+    cs = apply_adjust_chain(cs, local);
   }
 
   let alpha_s = fg_sample.a;

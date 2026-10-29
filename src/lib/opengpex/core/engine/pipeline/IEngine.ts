@@ -126,18 +126,21 @@ export type UploadSource =
 // ────────────────────────────────────────────────────────────
 
 /**
- * A resident 1D LUT for the curves/levels adjustment path. `data` is a
- * half-float (IEEE binary16) RGBA table of `width` entries — R/G/B hold the
- * per-channel tone mapping (levels replicates one table across all channels;
- * curves bakes `perChannel(master(x))`), A is unused. The engine dedups by
- * `lutId`: a deterministic content-hash id means an identical curve/level
- * config resolves to ONE resident texture and re-uploading is a no-op.
+ * A resident tone-table ATLAS for the grade chain's levels/curves stages: a
+ * `texture_2d` of `rows` rows × `width` entries, half-float (IEEE binary16)
+ * RGBA. Row `2·i` holds stage i's levels table, row `2·i+1` its curves table
+ * (R/G/B = the per-channel mapping — levels replicates one table across all
+ * channels, curves bakes `perChannel(master(x))` — A unused). The engine
+ * dedups by `lutId`: a deterministic content-hash id over the per-row table
+ * ids means an identical chain resolves to ONE resident texture and
+ * re-uploading is a no-op.
  */
 export interface LutUpload {
   readonly lutId: string;
-  /** RGBA half-float, 4 × `width` u16s (see color/float16). */
+  /** RGBA half-float, 4 × `width` × `rows` u16s, row-major (see color/float16). */
   readonly data: Uint16Array;
   readonly width: number;
+  readonly rows: number;
 }
 
 // ────────────────────────────────────────────────────────────

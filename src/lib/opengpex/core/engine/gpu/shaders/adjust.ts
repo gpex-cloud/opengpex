@@ -23,18 +23,18 @@
  *
  * ARCHITECTURAL ROLE — WHY A SHARED WGSL FRAGMENT, NOT A FULL-SCREEN PASS
  * ----------------------------------------------------------------------
- * `LayerNode.adjustments` is a PER-LAYER field ("applied in order, before
+ * `LayerNode.adjustStages` is a PER-LAYER field (the grade chain, "applied in order, before
  * filters"): a colour grade belongs to ONE layer, not the merged composite. A
  * layer reaches the framebuffer through one of two compositing fragment shaders:
  *   • `source-over`  → `layer.wgsl`  fs_main  (CompositePass, separable batch)
  *   • any other mode → `blend.wgsl`  fs_main  (BlendPass, ping-pong)
  * A standalone full-screen "AdjustPass" would (1) grade the MERGED result and
  * (2) break the separable-batch fast path. So attaching adjustments to the end
- * of the layer pipeline is realised as this SHARED `apply_adjustments()` function, concatenated
+ * of the layer pipeline is realised as this SHARED `apply_adjust_chain()` function, concatenated
  * into BOTH compositing shaders and invoked on the layer's STRAIGHT
  * (un-premultiplied) RGB just before re-premultiply. It lives entirely
  * inside the COMPOSITE passes (replayed with the composite cache;
- * `compositeSignature` already serialises `adjustments`) — never in view/present.
+ * `compositeSignature` already serialises `adjustStages`) — never in view/present.
  *
  * COLOUR SPACE — LINEAR-LIGHT PIPELINE WITH A TRC WRAP
  * -----------------------------------------------------------
@@ -141,11 +141,11 @@
  * design constraint.
  * Verified by operator domain assessment benchmark.
  *
- * IDENTITY INVARIANT: `flags == 0` returns the input bit-exactly (identity no-op) —
+ * IDENTITY INVARIANT: `stage_count == 0` (and a stage with `flags == 0`) returns the input bit-exactly (identity no-op) —
 
  * the wrap is INSIDE the flags guard, so an un-adjusted layer does not even pay
  * the TRC round-trip. Call sites also gate the un-premultiply/re-premultiply
- * round-trip on `flags != 0`.
+ * round-trip on `stage_count != 0`.
  *
  * MATH PROVENANCE (do NOT re-derive — keeps v1 saved effects byte-faithful)
  * ------------------------------------------------------------------------
@@ -157,11 +157,35 @@
  * @module core/gpu/shaders/adjust
  */
 
+
 import { COLORSPACE_WGSL } from './colorspace';
 
-/** WGSL: the `AdjustUniforms` struct + `@group(1) @binding(0)` binding. */
+/** Hard cap on grade stages per layer (mirrors `MAX_ADJUSTMENT_MASKS_PER_LAYER`). */
+export const ADJUST_MAX_STAGES = 16;
+
+/** Rows of the per-layer 1D-LUT atlas: two tables (levels, curves) per stage. */
+export const ADJUST_LUT_ATLAS_ROWS_WGSL = ADJUST_MAX_STAGES * 2;
+
+/**
+ * WGSL: the `AdjustStage` / `AdjustChain` structs + the group-1 bindings.
+ *
+ * GROUP 1 — the GRADE CHAIN group, shared by `layer.wgsl` / `blend.wgsl` /
+ * `adjustPre.wgsl` (one bind-group shape, one `apply_adjust_chain`):
+ *   0  AdjustChain uniform (dynamic offset): header + `ADJUST_MAX_STAGES` stages
+ *   1  linear/clamp sampler (LUT rows and coverage alike)
+ *   2  1D-LUT ATLAS `texture_2d` — row 2i = stage i levels, row 2i+1 = stage i curves
+ *   3  coverage `texture_2d_array` — one array layer per CONFINED stage, baked
+ *      over the union window of their bounding boxes (`adj.window`, in content-
+ *      unit fractions); a whole-layer stage never samples it (FULL_COVERAGE bit)
+ *   4  3D `.cube` LUT (single slot; applied in-stage when flagged)
+ *
+ * Sampled textures in this group: 3 — the atlas and the array REPLACE the
+ * former per-shader levels/curves 1D textures and the group-0 coverage
+ * binding, keeping every compositing stage inside WebGPU's default
+ * `maxSampledTexturesPerShaderStage = 16`.
+ */
 const ADJUST_WGSL_HEAD = /* wgsl */ `
-struct AdjustUniforms {
+struct AdjustStage {
   color_matrix  : mat3x3<f32>,   // fused saturation·hue·channelMix (48 bytes, offset 0)
   cb_shadows    : vec4<f32>,     // colorBalance shadow offsets ×(1/100), xyz (offset 48)
   cb_midtones   : vec4<f32>,     // colorBalance midtone offsets ×(1/100), xyz (offset 64)
@@ -170,17 +194,26 @@ struct AdjustUniforms {
   brightness_t  : f32,           // (brightness-100)/100 ∈ [-1,1] (offset 112)
   contrast_c    : f32,           // (contrast-100)/100 ∈ [-1,1] (offset 116)
   cb_preserve   : f32,           // colorBalance preserveLuminosity (1.0 / 0.0) (offset 120)
-  flags         : u32,           // bit0 basic, bit1 matrix, bit2 colorBalance, bit3 levels, bit4 curves, bit5 lut3d (offset 124)
+  flags         : u32,           // bit0 basic, bit1 matrix, bit2 colorBalance, bit3 levels, bit4 curves, bit5 lut3d, bit6 full coverage (offset 124)
   lut3d_strength : f32,          // 3D LUT blend amount ∈ [0,1] (offset 128)
-  _pad0         : f32,           // (offset 132) — struct padded to a 16-B multiple
+  coverage_layer : f32,          // array layer of this stage's coverage (offset 132)
   _pad1         : f32,           // (offset 136)
-  _pad2         : f32,           // (offset 140)
+  _pad2         : f32,           // (offset 140) — struct padded to a 16-B multiple
 };
 
-@group(1) @binding(0) var<uniform> adj : AdjustUniforms;
+struct AdjustChain {
+  stage_count : u32,             // stages in use (0 = identity, no grade)
+  _h0         : u32,
+  _h1         : u32,
+  _h2         : u32,
+  window      : vec4<f32>,       // coverage window (x0, y0, w, h) in content-unit fractions (offset 16)
+  stages      : array<AdjustStage, ${ADJUST_MAX_STAGES}>,   // (offset 32)
+};
+
+@group(1) @binding(0) var<uniform> adj : AdjustChain;
 @group(1) @binding(1) var lut_samp   : sampler;
-@group(1) @binding(2) var levels_lut : texture_1d<f32>;
-@group(1) @binding(3) var curve_lut  : texture_1d<f32>;
+@group(1) @binding(2) var lut_atlas  : texture_2d<f32>;
+@group(1) @binding(3) var adj_coverages : texture_2d_array<f32>;
 // 3D colour LUT (.cube film emulation). Sampled with HARDWARE trilinear
 // filtering via lut_samp; a 1×1×1 identity texture is bound when the layer has no
 // lut3d so the layout stays satisfied and flags=0 remains bit-exact.
@@ -196,6 +229,7 @@ struct AdjustUniforms {
 // same domain as the offsets it is undoing (cross-domain residual 9/255 vs ≤3/255).
 const ADJ_LUMA : vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 
+const ADJ_FLAG_FULL_COVERAGE : u32 = 64u;
 
 // 1D LUT entry count (matches generateCurveLUT/generateLevelsLUT default + v1's
 // 256-entry tables). Map a value x∈[0,1] to the texel-CENTRE coordinate for the
@@ -207,10 +241,17 @@ fn adj_lut_coord(x : f32) -> f32 {
   return (clamp(x, 0.0, 1.0) * (ADJ_LUT_N - 1.0) + 0.5) / ADJ_LUT_N;
 }
 
+// Atlas row centre for table \`row\` (rows are ${ADJUST_LUT_ATLAS_ROWS_WGSL} texels tall);
+// the linear sampler lands exactly on the row centre so no neighbouring row bleeds in.
+const ADJ_ATLAS_ROWS : f32 = ${ADJUST_LUT_ATLAS_ROWS_WGSL}.0;
+fn adj_atlas_v(row : u32) -> f32 {
+  return (f32(row) + 0.5) / ADJ_ATLAS_ROWS;
+}
+
 `;
 
 
-/** WGSL: the adjustment math functions + `apply_adjustments()` entry. */
+/** WGSL: the adjustment math functions + `apply_stage()` / `apply_adjust_chain()` entries. */
 const ADJUST_WGSL_BODY = /* wgsl */ `
 // Brightness — midtone-weighted quadratic curve (v1 generateBrightnessLUT):
 //   y = x + t·4·x·(1-x),  endpoints pinned, midtones lift/darken by t.
@@ -257,73 +298,81 @@ fn adj_contrast(x : vec3<f32>, c : f32) -> vec3<f32> {
 // pixel's unclamped L would fling the highlight weight past 1 and invert the
 // zone semantics — while the PIXEL flows through UNCLAMPED: the offsets are
 // additive and total, so an HDR highlight survives a colour balance.
-fn adj_color_balance(x : vec3<f32>) -> vec3<f32> {
+fn adj_color_balance(x : vec3<f32>, st : AdjustStage) -> vec3<f32> {
   let l_raw = (max(x.r, max(x.g, x.b)) + min(x.r, min(x.g, x.b))) * 0.5;
   let l = clamp(l_raw, 0.0, 1.0);
   let one_minus_l = 1.0 - l;
   let w_s = one_minus_l * one_minus_l * 0.25;
   let w_m = 4.0 * l * one_minus_l * 0.25;
   let w_h = l * l * 0.25;
-  var n = x + adj.cb_shadows.rgb * w_s + adj.cb_midtones.rgb * w_m + adj.cb_highlights.rgb * w_h;
-  if (adj.cb_preserve > 0.5) {
+  var n = x + st.cb_shadows.rgb * w_s + st.cb_midtones.rgb * w_m + st.cb_highlights.rgb * w_h;
+  if (st.cb_preserve > 0.5) {
     let d = dot(x, ADJ_LUMA) - dot(n, ADJ_LUMA);
     n = n + vec3<f32>(d);
   }
   return n;
 }
 
-// Apply the per-layer adjustment chain. INPUT AND OUTPUT ARE LINEAR LIGHT
-// the chain itself runs TRC-WRAPPED in the ENCODED domain so
-// every operator — LUTs and scalars alike — sees encoded values (see the
-// module header for why the wrap covers the whole chain).
-// Order mirrors v1 applyFilterChainRGBA8: basic point-ops → levels → curves →
-// colorBalance → fused matrix → 3D LUT.
-fn apply_adjustments(rgb_in : vec3<f32>) -> vec3<f32> {
-  if (adj.flags == 0u) {
+// Sample one atlas table (row) per channel — the stage's levels or curves
+// table. textureSampleLevel (explicit lod 0): the call sits inside the
+// per-fragment coverage branch of apply_adjust_chain, which is NON-UNIFORM
+// control flow where an implicit-derivative textureSample is not allowed; a
+// table lookup needs no derivative anyway.
+fn adj_sample_table(c : vec3<f32>, row : u32) -> vec3<f32> {
+  let v = adj_atlas_v(row);
+  return vec3<f32>(
+    textureSampleLevel(lut_atlas, lut_samp, vec2<f32>(adj_lut_coord(c.r), v), 0.0).r,
+    textureSampleLevel(lut_atlas, lut_samp, vec2<f32>(adj_lut_coord(c.g), v), 0.0).g,
+    textureSampleLevel(lut_atlas, lut_samp, vec2<f32>(adj_lut_coord(c.b), v), 0.0).b,
+  );
+}
+
+// Apply ONE grade stage. INPUT AND OUTPUT ARE LINEAR LIGHT; the stage itself
+// runs TRC-WRAPPED in the ENCODED domain so every operator — tables and scalars
+// alike — sees encoded values (see the module header for why the wrap covers
+// the whole chain). Order mirrors v1 applyFilterChainRGBA8: basic point-ops →
+// levels → curves → colorBalance → fused matrix → 3D LUT. A panel-written stage
+// carries ONE of these arms; a migrated legacy stage may carry several and
+// then reproduces the old single pass exactly.
+fn apply_stage(rgb_in : vec3<f32>, st : AdjustStage, idx : u32) -> vec3<f32> {
+  // Operator bits only (bit6 is the coverage hint): a stage with no operator
+  // is the identity and skips the TRC round-trip entirely.
+  if ((st.flags & 63u) == 0u) {
     return rgb_in;
   }
   // TRC wrap, enter: linear → encoded. Inside this boundary the domain is
   // encoded, which keeps stored curves and levels byte-faithful.
   var c = linear_to_srgb(rgb_in);
-  if ((adj.flags & 1u) != 0u) {
-
-    c = adj_brightness(c, adj.brightness_t);
-    c = adj_contrast(c, adj.contrast_c);
+  if ((st.flags & 1u) != 0u) {
+    c = adj_brightness(c, st.brightness_t);
+    c = adj_contrast(c, st.contrast_c);
   }
   // levels — one shared table applied to every channel (v1 generateLevelsLUT).
   // HDR identity extension: a channel above the encoded table domain (> 1) is
   // the identity — the table's [0,1] lookup coordinate stays clamped (its axis
   // is a bounded encoding axis), and out-of-domain values pass through.
-  if ((adj.flags & 8u) != 0u) {
-    let tbl = vec3<f32>(
-      textureSample(levels_lut, lut_samp, adj_lut_coord(c.r)).r,
-      textureSample(levels_lut, lut_samp, adj_lut_coord(c.g)).g,
-      textureSample(levels_lut, lut_samp, adj_lut_coord(c.b)).b,
-    );
+  if ((st.flags & 8u) != 0u) {
+    let tbl = adj_sample_table(c, idx * 2u);
     c = select(tbl, c, c > vec3<f32>(1.0));
   }
   // curves — per-channel tables baked as perChannel(master(x)) in the RGBA LUT
   // (v1 composition order); sample channel r/g/b from the matching LUT channel.
   // Same HDR identity extension as levels.
-  if ((adj.flags & 16u) != 0u) {
-    let tbl = vec3<f32>(
-      textureSample(curve_lut, lut_samp, adj_lut_coord(c.r)).r,
-      textureSample(curve_lut, lut_samp, adj_lut_coord(c.g)).g,
-      textureSample(curve_lut, lut_samp, adj_lut_coord(c.b)).b,
-    );
+  if ((st.flags & 16u) != 0u) {
+    let tbl = adj_sample_table(c, idx * 2u + 1u);
     c = select(tbl, c, c > vec3<f32>(1.0));
   }
-  if ((adj.flags & 4u) != 0u) {
-    c = adj_color_balance(c);
+  if ((st.flags & 4u) != 0u) {
+    c = adj_color_balance(c, st);
   }
   // Fused saturation·hue·channelMix matrix. The output clamp is GONE: the
   // operator is a linear (affine) map, total over all of ℝ — the v1-era clamp
   // was the [0,1] container ceiling, not part of the operator's math, and on
   // an HDR pixel it would crush every encoded > 1 highlight back to white.
-  if ((adj.flags & 2u) != 0u) {
-    c = adj.color_matrix * c + adj.mat_constant.rgb;
+  if ((st.flags & 2u) != 0u) {
+    c = st.color_matrix * c + st.mat_constant.rgb;
   }
-  // 3D LUT (.cube) — LAST in the chain (the film-emulation
+  // 3D LUT (.cube) — LAST in the stage (the film-emulation
   // look is applied to the already-graded colour). Hardware trilinear filtering
   // does the interpolation; lut3d_strength allows a partial application
   // (0 = bypass, 1 = full), so a strength of 0 is exactly the input.
@@ -331,40 +380,75 @@ fn apply_adjustments(rgb_in : vec3<f32>) -> vec3<f32> {
   // [0,1] domain is outside the table's colour solid — the look does not apply
   // and the pixel passes through (the sample-coordinate clamp below is the
   // bounded-axis contract, kept; it only keeps the lookup itself defined).
-  if ((adj.flags & 32u) != 0u) {
-    let lut_rgb = textureSample(lut3d_tex, lut_samp, clamp(c, vec3<f32>(0.0), vec3<f32>(1.0))).rgb;
-    let mixed = mix(c, lut_rgb, clamp(adj.lut3d_strength, 0.0, 1.0));
+  if ((st.flags & 32u) != 0u) {
+    let lut_rgb = textureSampleLevel(lut3d_tex, lut_samp, clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0).rgb;
+    let mixed = mix(c, lut_rgb, clamp(st.lut3d_strength, 0.0, 1.0));
     c = select(mixed, c, any(c > vec3<f32>(1.0)));
   }
   // TRC wrap, exit: encoded → linear. Restores linear working space for the caller,
   // which re-premultiplies and composites in linear light.
   return srgb_to_linear(c);
 }
+
+// Apply the layer's whole grade CHAIN to a STRAIGHT linear-light rgb:
+//   cs = mix(cs, apply_stage(cs, stage_i), coverage_i)   for i in commit order.
+// \`uv_c\` is the content-unit coordinate (0..1 across the layer's content rect,
+// the same space the vmask textures sample in). A confined stage samples its
+// coverage from its array layer, re-mapping uv_c into the union bake window;
+// a whole-layer stage takes coverage 1 without sampling. Coverage only blends
+// colour — the caller's alpha is never touched.
+//
+// Control flow: the loop bound and the per-stage flags come from the uniform,
+// so the coverage textureSample runs in UNIFORM control flow (derivatives
+// allowed). The \`conf > 0\` early-out is per-fragment (non-uniform): everything
+// inside apply_stage therefore samples with explicit lod only.
+fn apply_adjust_chain(rgb_in : vec3<f32>, uv_c : vec2<f32>) -> vec3<f32> {
+  var cs = rgb_in;
+  for (var i = 0u; i < adj.stage_count; i = i + 1u) {
+    let st = adj.stages[i];
+    var conf = 1.0;
+    if ((st.flags & ADJ_FLAG_FULL_COVERAGE) == 0u) {
+      let cuv = (uv_c - adj.window.xy) / adj.window.zw;
+      conf = textureSample(adj_coverages, lut_samp, cuv, i32(st.coverage_layer)).a;
+    }
+    if (conf > 0.0) {
+      cs = mix(cs, apply_stage(cs, st, i), conf);
+    }
+  }
+  return cs;
+}
 `;
 
 /**
- * Full WGSL fragment: sRGB TRC helpers + `AdjustUniforms` struct +
- * `@group(1) @binding(0)` binding + `apply_adjustments()`. Concatenated into
- * `layer.wgsl` / `blend.wgsl` / `adjustPre.wgsl`; each shader module gets its own
- * copy (WGSL forbids a duplicate top-level binding or function within a single
- * module, so this appears exactly once per module).
+ * Full WGSL fragment: sRGB TRC helpers + the chain structs + group-1 bindings +
+ * `apply_stage()` / `apply_adjust_chain()`. Concatenated into `layer.wgsl` /
+ * `blend.wgsl` / `adjustPre.wgsl`; each shader module gets its own copy (WGSL
+ * forbids a duplicate top-level binding or function within a single module,
+ * so this appears exactly once per module).
  *
  * `COLORSPACE_WGSL` leads so those three modules inherit `srgb_to_linear` /
- * `linear_to_srgb` for their own sample-side decode from the
- * SAME definition this function's TRC wrap uses — the two can never drift.
+ * `linear_to_srgb` for their own sample-side decode from the SAME definition
+ * this function's TRC wrap uses — the two can never drift.
  */
 export const ADJUST_WGSL = COLORSPACE_WGSL + ADJUST_WGSL_HEAD + ADJUST_WGSL_BODY;
 
 /**
- * Size of AdjustUniforms in bytes.
- *
- * Struct size is 144 B with `lut3d_strength` + 12 B of explicit tail padding
- * (WGSL requires a struct size that is a multiple of its largest member alignment,
- * 16 B here for the mat3x3/vec4 members).
+ * Size of ONE `AdjustStage` in bytes: 144 B — 128 B of operator state plus a
+ * 16-B tail (lut3d_strength, coverage_layer, 2 pads) so the uniform-array
+ * stride is a multiple of 16 B as WGSL requires.
  */
-export const ADJUST_UNIFORM_BUFFER_SIZE = 144;
+export const ADJUST_STAGE_BYTES = 144;
 
-/** Number of 4-byte slots in AdjustUniforms (buffer size / 4). */
+/** Number of 4-byte slots in one `AdjustStage` (stage bytes / 4). */
+export const ADJUST_STAGE_FLOATS = ADJUST_STAGE_BYTES / 4;
+
+/** Size of the `AdjustChain` header (stage_count + pads + window) in bytes. */
+export const ADJUST_HEADER_BYTES = 32;
+
+/** Size of the whole `AdjustChain` uniform in bytes (header + max stages). */
+export const ADJUST_UNIFORM_BUFFER_SIZE = ADJUST_HEADER_BYTES + ADJUST_MAX_STAGES * ADJUST_STAGE_BYTES;
+
+/** Number of 4-byte slots in the whole `AdjustChain` uniform. */
 export const ADJUST_UNIFORM_FLOATS = ADJUST_UNIFORM_BUFFER_SIZE / 4;
 
 /** `flags` bit: apply brightness + contrast scalar curves. */
@@ -373,12 +457,18 @@ export const ADJUST_FLAG_BASIC = 1 << 0;
 export const ADJUST_FLAG_MATRIX = 1 << 1;
 /** `flags` bit: apply the HSL-weighted colour balance offsets. */
 export const ADJUST_FLAG_COLOR_BALANCE = 1 << 2;
-/** `flags` bit: sample the levels 1D LUT. */
+/** `flags` bit: sample the levels table (atlas row 2i). */
 export const ADJUST_FLAG_LEVELS = 1 << 3;
-/** `flags` bit: sample the curves 1D LUT. */
+/** `flags` bit: sample the curves table (atlas row 2i+1). */
 export const ADJUST_FLAG_CURVES = 1 << 4;
 /** `flags` bit: sample the 3D `.cube` LUT with hardware trilinear. */
 export const ADJUST_FLAG_LUT3D = 1 << 5;
+/** `flags` bit: the stage covers the whole layer — coverage is 1, no array sample. */
+export const ADJUST_FLAG_FULL_COVERAGE = 1 << 6;
 
-/** Float slot of `lut3d_strength` in the packed uniform (byte offset 128 / 4). */
+/** Float slot of `lut3d_strength` in one packed stage (byte offset 128 / 4). */
 export const ADJUST_SLOT_LUT3D_STRENGTH = 32;
+/** Float slot of `coverage_layer` in one packed stage (byte offset 132 / 4). */
+export const ADJUST_SLOT_COVERAGE_LAYER = 33;
+/** u32 slot of `flags` in one packed stage (byte offset 124 / 4). */
+export const ADJUST_SLOT_FLAGS = 31;

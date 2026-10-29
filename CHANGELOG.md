@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.32
+
+- Color: adjustments now stack as a chain — repeating an adjustment adds a step instead of overwriting, steps render in commit order, and each step can be confined to a selection
+- Color: pulling the same sliders again refines the latest step; committed steps are listed per layer with on/off and delete
+- Layers: each step shows a plain-language summary and a violet (whole layer) / amber (selection) dot
+
 ## 2.0.31
 
 - Editing: in-progress tool drafts are now document state — a new frame-level draft system keeps unfinished work per canvas, through restarts and saved files, with every change flowing through the normal undo history

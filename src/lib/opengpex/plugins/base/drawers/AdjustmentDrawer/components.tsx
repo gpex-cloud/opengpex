@@ -33,7 +33,8 @@ import { LevelsPanel } from "./panels/levels";
 import { ChannelMixerPanel } from "./panels/mixer";
 import { ColorBalancePanel } from "./panels/balance";
 
-import { useAdjustmentDrawer, useGradingToolSwitch } from "./hooks";
+import { useAdjustmentDrawer, useGradingToolSwitch, useHotTailGrade } from "./hooks";
+import { toolCategory } from "./utils-hotTail";
 import type { GradingTool } from "./protocols";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -201,6 +202,7 @@ export const AdjustmentDrawerComponent = React.memo(function AdjustmentDrawerCom
         </motion.div>
       ) : (
         <motion.div layout="position" className="flex flex-col">
+          <ChainStatusLine tool={activeTool} />
           {activeTool === "basic" && <BasicPanel />}
           {activeTool === "curves" && <CurvesPanel />}
           {activeTool === "levels" && <LevelsPanel />}
@@ -213,6 +215,29 @@ export const AdjustmentDrawerComponent = React.memo(function AdjustmentDrawerCom
   );
 });
 
+
+// ─── ChainStatusLine ──────────────────────────────────────────────────────────
+
+/**
+ * One line above the active panel telling the user how this category sits in
+ * the layer's grade chain. Earlier committed steps cannot be folded into the
+ * sliders (the composition of two brightness curves is not a brightness
+ * curve), so the panel only reports that they exist and whether the current
+ * edit continues the latest step (hot tail) or will append a new one.
+ * Rendered only when the category already has committed steps.
+ */
+function ChainStatusLine({ tool }: { tool: GradingTool }) {
+  const { tailId, committedCount } = useHotTailGrade(toolCategory(tool));
+  if (committedCount === 0) return null;
+  const noun = committedCount === 1 ? "step" : "steps";
+  const mode = tailId ? "editing the latest" : "next edit adds a new step";
+  return (
+    <div className="flex items-center justify-between px-1 pb-1 text-[9px] text-[var(--text-muted)] tracking-tight">
+      <span>{committedCount} committed {noun} in chain</span>
+      <span className="opacity-80">{mode}</span>
+    </div>
+  );
+}
 
 // ─── NumberField (Photoshop-style typed input) ────────────────────────────────
 

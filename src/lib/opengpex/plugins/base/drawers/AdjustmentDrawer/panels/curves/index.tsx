@@ -87,7 +87,7 @@ import React, {
   useState,
 } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { deriveLayerHistogram } from "@opengpex/editor/core/engine/color";
+import { deriveChainHistogram } from "@opengpex/editor/core/engine/color";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { CurvesState } from "@opengpex/editor/core/types/models";
 import type { AdjustmentDrawerCommandsMap } from "../../commands.d";
@@ -108,6 +108,7 @@ import { clamp01, histogramToPathD } from "../helpers";
 import {
   useAdjustmentDrawer,
   useFilterGesture,
+  useHotTailGrade,
   useLayerHistogram,
 } from "../../hooks";
 
@@ -174,6 +175,8 @@ export function CurvesPanel() {
     removeCurvePointCmd,
   } = usePluginCommands<AdjustmentDrawerCommandsMap>();
   const { activeLayer } = useAdjustmentDrawer();
+  const { grade: tailGrade } = useHotTailGrade('curves');
+  const tailCurves = tailGrade.curves;
   const gesture = useFilterGesture(beginCurvesEditCmd);
   const { histogram: srcHistogram } = useLayerHistogram();
 
@@ -203,8 +206,8 @@ export function CurvesPanel() {
   const dragIndexRef = useRef<number>(-1);
 
   const points = useMemo(
-    () => readPointsFor(activeLayer?.curves, channel),
-    [activeLayer?.curves, channel],
+    () => readPointsFor(tailCurves, channel),
+    [tailCurves, channel],
   );
 
   const pathD = useMemo(() => curveToPathD(points), [points]);
@@ -214,7 +217,7 @@ export function CurvesPanel() {
   // the React-documented pattern). Two cases:
   //   pending anchor (authored write) → bind to this render's curves object;
   //   bound anchor that no longer matches (or index out of range) → drop it.
-  const curvesNow = activeLayer?.curves;
+  const curvesNow = tailCurves;
   let selection = selectionState;
   if (selection && selection.curves === null) {
     selection = { ...selection, curves: curvesNow };
@@ -229,15 +232,17 @@ export function CurvesPanel() {
   const selected: number | null = selection?.index ?? null;
   const selectedPoint = selected !== null ? points[selected] : null;
 
-  // Histogram background, derived through the SAME levels+curves chain the
-  // GPU applies (deps must include levels AND curves — dropping either would
-  // freeze the background while the canvas moves).
+  // Histogram background, derived through the WHOLE grade chain's
+  // levels/curves tables (every enabled mask, commit order) — the live curve
+  // edit is already in the chain, so this follows both the committed steps
+  // and the stroke under the pointer.
+  const chainSteps = useMemo(
+    () => (activeLayer?.adjustMasks ?? []).filter((m) => m.enabled).map((m) => ({ levels: m.grade.levels, curves: m.grade.curves })),
+    [activeLayer],
+  );
   const derivedHistogram = useMemo(
-    () =>
-      srcHistogram
-        ? deriveLayerHistogram(srcHistogram, activeLayer?.levels, activeLayer?.curves)
-        : null,
-    [srcHistogram, activeLayer?.levels, activeLayer?.curves],
+    () => (srcHistogram ? deriveChainHistogram(srcHistogram, chainSteps) : null),
+    [srcHistogram, chainSteps],
   );
 
   const histogramData = useMemo(() => {
@@ -278,7 +283,7 @@ export function CurvesPanel() {
     (evt: ReactPointerEvent<SVGSVGElement>) => {
       if (!activeLayer) return;
       const [vx, vy] = eventToVB(evt);
-      const currentPts = readPointsFor(activeLayer.curves, channel);
+      const currentPts = readPointsFor(tailCurves, channel);
       const hitIdx = findHitIndex(currentPts, vx, vy);
 
       // Ignore right/middle-button pointerdown here: right-click removal is
@@ -294,7 +299,7 @@ export function CurvesPanel() {
       if (hitIdx >= 0) {
         dragIndexRef.current = hitIdx;
         // Known object → anchor immediately.
-        setSelection({ index: hitIdx, curves: activeLayer.curves });
+        setSelection({ index: hitIdx, curves: tailCurves });
       } else {
         // No point close by — insert a new one at the click, then let the
         // subsequent pointermove drag the newly-inserted point around.
@@ -320,7 +325,7 @@ export function CurvesPanel() {
       // pointer strays outside the SVG (e.g. off the drawer entirely).
       svgRef.current?.setPointerCapture(evt.pointerId);
     },
-    [activeLayer, eventToVB, channel, addCurvePointCmd, gesture],
+    [activeLayer, tailCurves, eventToVB, channel, addCurvePointCmd, gesture],
   );
 
   const handlePointerMove = useCallback(
@@ -328,7 +333,7 @@ export function CurvesPanel() {
       if (dragIndexRef.current < 0 || !activeLayer) return;
       const [vx, vy] = eventToVB(evt);
       const [nx, ny] = svgToNormalized(vx, vy);
-      const currentPts = readPointsFor(activeLayer.curves, channel);
+      const currentPts = readPointsFor(tailCurves, channel);
       // Guard the drag index: if the array shrank (e.g. remove came in via
       // undo), skip this frame silently.
       if (dragIndexRef.current >= currentPts.length) return;
@@ -343,7 +348,7 @@ export function CurvesPanel() {
       // Authored write → re-pend the anchor for the next render.
       setSelection((s) => (s ? { ...s, curves: null } : s));
     },
-    [activeLayer, eventToVB, channel, updateChannelCurveCmd],
+    [activeLayer, tailCurves, eventToVB, channel, updateChannelCurveCmd],
   );
 
   const finishDrag = useCallback(
@@ -396,7 +401,7 @@ export function CurvesPanel() {
       evt.preventDefault();
       if (!activeLayer) return;
       const [vx, vy] = eventToVB(evt);
-      const currentPts = readPointsFor(activeLayer.curves, channel);
+      const currentPts = readPointsFor(tailCurves, channel);
       const hitIdx = findHitIndex(currentPts, vx, vy);
       if (hitIdx < 0) return;
       const isEndpoint = hitIdx === 0 || hitIdx === currentPts.length - 1;
@@ -413,7 +418,7 @@ export function CurvesPanel() {
         return nextIdx === null ? null : { index: nextIdx, curves: null };
       });
     },
-    [activeLayer, eventToVB, channel, removeCurvePointCmd, gesture],
+    [activeLayer, tailCurves, eventToVB, channel, removeCurvePointCmd, gesture],
   );
 
   // ── Selected-point numeric editing (PS Curves parity) ────────────────────────
@@ -428,7 +433,7 @@ export function CurvesPanel() {
   const commitSelectedPoint = useCallback(
     (axis: "x" | "y", value255: number) => {
       if (selected === null || !activeLayer) return;
-      const currentPts = readPointsFor(activeLayer.curves, channel);
+      const currentPts = readPointsFor(tailCurves, channel);
       if (selected >= currentPts.length) return;
       const nx = axis === "x" ? clamp01(value255 / 255) : currentPts[selected][0];
       const ny = axis === "y" ? clamp01(value255 / 255) : currentPts[selected][1];
@@ -439,7 +444,7 @@ export function CurvesPanel() {
       // Authored write → re-pend the anchor for the next render.
       setSelection((s) => (s ? { ...s, curves: null } : s));
     },
-    [selected, activeLayer, channel, updateChannelCurveCmd, gesture],
+    [selected, activeLayer, tailCurves, channel, updateChannelCurveCmd, gesture],
   );
 
   // ── Render ───────────────────────────────────────────────────────────────────

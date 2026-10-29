@@ -110,10 +110,13 @@ export const LayerMergeCommands = {
             : 'paint')
           : 'image';
 
+        // The composite burnt every participant's grade chain into the merged
+        // pixels; the target must not carry its chain forward (double grade).
         actions.updateLayer(activeFrame.id, targetLayer.id, {
           type: mergedType,
           textData: undefined,
           bitmapMasks: [],
+          adjustMasks: undefined,
         });
 
         layers.removeLayers(activeFrame.id, activeLayer.id);
@@ -168,10 +171,13 @@ export const LayerMergeCommands = {
           ? (uniqueTypes.length === 1 && uniqueTypes[0] !== 'color' ? uniqueTypes[0] as Layer['type'] : 'paint')
           : 'image';
 
+        // The composite burnt every participant's grade chain into the merged
+        // pixels; the target must not carry its chain forward (double grade).
         actions.updateLayer(activeFrame.id, targetLayer.id, {
           type: mergedType,
           textData: undefined,
           bitmapMasks: [],
+          adjustMasks: undefined,
         });
 
         // [Critical] Must batch-remove all items in a single call. React's useReducer
@@ -224,7 +230,7 @@ export const LayerMergeCommands = {
           textData: undefined,
           bitmapMasks: [],
           vectorMasks: [],
-          adjustments: undefined,
+          adjustMasks: undefined,
         });
 
       } catch (err) {

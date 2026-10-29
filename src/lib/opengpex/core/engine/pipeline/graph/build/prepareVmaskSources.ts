@@ -180,7 +180,9 @@ export class VmaskCache {
     const texture = device.createTexture({
       size: [maskW, maskH, 1],
       format: 'rgba8unorm',
-      usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+      // COPY_SRC: the adjust-coverage consumer gathers per-stage bakes into
+      // one array texture by texture copy (prepareConfinementSources).
+      usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
       label: `Vmask (${layerId})`,
     });
     const entry: VmaskCacheEntry = { key, texture, width: maskW, height: maskH };

@@ -166,6 +166,8 @@ export class PipelineCache {
   private lutSampler: GPUSampler | null = null;
   private identityLutTexture: GPUTexture | null = null;
   private identityLutView: GPUTextureView | null = null;
+  private defaultCoverageArrayTexture: GPUTexture | null = null;
+  private defaultCoverageArrayView: GPUTextureView | null = null;
   private identityLut3dTexture: GPUTexture | null = null;
   private identityLut3dView: GPUTextureView | null = null;
 
@@ -392,26 +394,20 @@ export class PipelineCache {
           visibility: GPUShaderStage.FRAGMENT,
           texture: { sampleType: 'float' },
         },
-        {
-          // Adjustment-confinement coverage (frozen selection snapshot
-          // localizing the grade). Absent layers bind the 1×1 default white
-          // view so the slot is always valid.
-          binding: 5,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
         // The bmask stack slots (retired bindings 5..7) are gone: the bmask
         // combine pass bakes ALL enabled records into ONE texture bound at
-        // slot 3, so the layer pipeline needs no per-record slots.
+        // slot 3, so the layer pipeline needs no per-record slots. The grade
+        // coverage lives in the group-1 chain group (adjust.ts), not here.
       ],
     });
     return this.layerBindGroupLayout;
   }
 
   /**
-   * Group-1 adjustment bind group layout. Shared by the layer and
-   * blend pipelines: binding 0 is the `AdjustUniforms` buffer (dynamic offset,
-   * FRAGMENT-only). Also accommodates the 1D LUT sampler + textures.
+   * Group-1 grade-chain bind group layout. Shared by the layer, blend and
+   * adjust-pre pipelines: binding 0 is the `AdjustChain` buffer (dynamic
+   * offset, FRAGMENT-only), 1 the LUT/coverage sampler, 2 the LUT atlas,
+   * 3 the coverage array, 4 the 3D LUT.
    */
   getAdjustBindGroupLayout(): GPUBindGroupLayout {
     if (this.adjustBindGroupLayout) return this.adjustBindGroupLayout;
@@ -434,14 +430,16 @@ export class PipelineCache {
           sampler: { type: 'filtering' },
         },
         {
+          // Per-layer 1D-LUT ATLAS (texture_2d, row = stage table).
           binding: 2,
           visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float', viewDimension: '1d' },
+          texture: { sampleType: 'float', viewDimension: '2d' },
         },
         {
+          // Per-layer coverage ARRAY (one array layer per confined stage).
           binding: 3,
           visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float', viewDimension: '1d' },
+          texture: { sampleType: 'float', viewDimension: '2d-array' },
         },
         {
           // 3D `.cube` LUT. `sampleType: 'float'` + the shared filtering
@@ -459,7 +457,7 @@ export class PipelineCache {
 
   /**
    * Persistent identity adjustment bind group (flags = 0). Bound at group 1 for
-   * every layer that has NO scalar/matrix adjustment, so `apply_adjustments`
+   * every layer that has NO grade stage, so `apply_adjust_chain`
    * returns its input bit-exactly. Uses a NON-dynamic-offset layout variant is
    * unnecessary — the buffer is exactly `ADJUST_UNIFORM_BUFFER_SIZE`, bound at
    * offset 0 via a dynamic offset of 0 by the passes.
@@ -467,7 +465,7 @@ export class PipelineCache {
   getDefaultAdjustBindGroup(): GPUBindGroup {
     if (this.defaultAdjustBindGroup) return this.defaultAdjustBindGroup;
 
-    // A zero-filled buffer is exactly the identity: flags = 0 (slot 31 = 0).
+    // A zero-filled buffer is exactly the identity: stage_count = 0.
     this.defaultAdjustBuffer = this.device.createBuffer({
       size: ADJUST_UNIFORM_BUFFER_SIZE,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -489,7 +487,7 @@ export class PipelineCache {
         },
         { binding: 1, resource: this.getLutSampler() },
         { binding: 2, resource: this.getIdentityLutView() },
-        { binding: 3, resource: this.getIdentityLutView() },
+        { binding: 3, resource: this.getAdjustCoverageArrayView() },
         { binding: 4, resource: this.getIdentityLut3dView() },
       ],
     });
@@ -513,22 +511,51 @@ export class PipelineCache {
   }
 
   /**
-   * A 1-texel identity 1D LUT bound at LUT slots for layers that do not sample
-   * that table. Its value is irrelevant when the corresponding flag is off — the
+   * A 1×1 placeholder LUT atlas bound at the atlas slot for layers that sample
+   * no table. Its value is irrelevant when the table flags are off — the
    * shader never samples it — but a valid texture MUST be bound to satisfy the
-   * bind group layout. rgba16float matches the resident curve/levels LUT format.
+   * bind group layout. rgba16float matches the resident atlas format.
    */
   getIdentityLutView(): GPUTextureView {
     if (this.identityLutView) return this.identityLutView;
     this.identityLutTexture = this.device.createTexture({
       size: [1, 1, 1],
-      dimension: '1d',
+      dimension: '2d',
       format: 'rgba16float',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-      label: 'Adjust Identity 1D LUT',
+      label: 'Adjust Identity LUT Atlas',
     });
-    this.identityLutView = this.identityLutTexture.createView({ dimension: '1d' });
+    this.identityLutView = this.identityLutTexture.createView({ dimension: '2d' });
     return this.identityLutView;
+  }
+
+  /**
+   * A 1×1×1-layer white coverage ARRAY bound at the coverage slot for layers
+   * with no confined stage. Whole-layer stages never sample it (FULL_COVERAGE
+   * bit), but the layout needs a valid `2d-array` view; white keeps an
+   * accidental sample a safe no-op (coverage 1).
+   */
+  getAdjustCoverageArrayView(): GPUTextureView {
+    if (this.defaultCoverageArrayView) return this.defaultCoverageArrayView;
+    const texture = this.device.createTexture({
+      size: [1, 1, 1],
+      dimension: '2d',
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      label: 'Adjust Default Coverage Array',
+    });
+    this.device.queue.writeTexture(
+      { texture },
+      new Uint8Array([255, 255, 255, 255]),
+      { bytesPerRow: 4, rowsPerImage: 1 },
+      [1, 1, 1],
+    );
+    this.defaultCoverageArrayTexture = texture;
+    this.defaultCoverageArrayView = texture.createView({
+      dimension: '2d-array',
+      label: 'Adjust Default Coverage Array View',
+    });
+    return this.defaultCoverageArrayView;
   }
 
   /**
@@ -562,7 +589,7 @@ export class PipelineCache {
   /**
    * Group-0 layout for {@link ADJUST_PRE_WGSL}: uv-rect uniform + sampler + source.
    * Group 1 is the SAME adjust layout the compositing pipelines use, so the bake
-   * and the inline path share one `apply_adjustments` and one bind-group shape.
+   * and the inline path share one `apply_adjust_chain` and one bind-group shape.
    */
   getAdjustPreBindGroupLayout(): GPUBindGroupLayout {
     if (this.adjustPreBindGroupLayout) return this.adjustPreBindGroupLayout;
@@ -581,14 +608,6 @@ export class PipelineCache {
         },
         { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
         { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
-        {
-          // Adjustment-confinement coverage (frozen selection snapshot
-          // localizing the grade). Absent layers bind the 1×1 default white
-          // view so the slot is always valid.
-          binding: 3,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
       ],
     });
     return this.adjustPreBindGroupLayout;
@@ -970,14 +989,6 @@ export class PipelineCache {
           // Vmask texture (polygon-baked coverage), symmetric to the
           // layer layout's binding(4). Default white view when absent/analytic.
           binding: 5,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
-        {
-          // Adjustment-confinement coverage (frozen selection snapshot
-          // localizing the grade), symmetric to the layer layout's
-          // binding(5). Default white view when absent.
-          binding: 6,
           visibility: GPUShaderStage.FRAGMENT,
           texture: { sampleType: 'float' },
         },
@@ -1928,6 +1939,9 @@ export class PipelineCache {
     this.defaultAdjustBuffer?.destroy();
     this.identityLutTexture?.destroy();
     this.identityLut3dTexture?.destroy();
+    this.defaultCoverageArrayTexture?.destroy();
+    this.defaultCoverageArrayTexture = null;
+    this.defaultCoverageArrayView = null;
     this.quadVertexBuffer = null;
     this.linearSampler = null;
     this.nearestSampler = null;

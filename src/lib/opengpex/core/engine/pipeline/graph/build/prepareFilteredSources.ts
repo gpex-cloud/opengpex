@@ -42,6 +42,7 @@ import { AdjustPrePass } from '../composite/AdjustPrePass';
 import { hasEffectiveFilters, resolveFilterWindow } from '../composite/FilterPass';
 import { isSourceLinear } from '../support/sourceDomain';
 import { runFilterChain } from './runFilterChain';
+import type { AdjustCoverageBinding } from '../support/adjustBindGroup';
 import type { BuildContext, PreparedSource } from './types';
 
 const CLEAR_COLOR: GPUColor = { r: 0, g: 0, b: 0, a: 0 };
@@ -66,7 +67,7 @@ function resolveLayerSourceTexture(
   ctx: BuildContext,
   layer: LayerNode,
   asset: LayerTexture,
-  adjustConfinementSources: Map<string, GPUTexture>,
+  adjustCoverageSources: Map<string, AdjustCoverageBinding>,
 ): PreparedSource {
   const { workingFormat, scratch } = ctx;
   if (!hasEffectiveFilters(layer)) {
@@ -98,7 +99,7 @@ function resolveLayerSourceTexture(
   // tone-map is non-linear so it does NOT commute with the convolution; running it
   // in the bake, before FilterPass, matches how adjustments are baked pre-filter.)
   let filterInputIntentApplied = false;
-  if (layer.adjustments && layer.adjustments.length > 0) {
+  if (layer.adjustStages && layer.adjustStages.length > 0) {
     const rawBake = texturePool.acquire({
       width: asset.width,
       height: asset.height,
@@ -131,15 +132,15 @@ function resolveLayerSourceTexture(
     // Viewport is the CONTENT rect: the pooled texture may be larger, and the
     // filter only ever reads [0,width)×[0,height).
     bakePass.setViewport(0, 0, asset.width, asset.height, 0, 1);
-    // Adjustment-confinement mapping: the coverage texture is baked over the
-    // layer's CONTENT rect (logical px), this pass samples the RAW asset
-    // (physical px) — scale the content rect through dprScale into asset px.
-    // A cropped fragment shares its source asset, so without this the
-    // confinement would misalign by the crop origin. Undefined crop → no
-    // override (identity mapping in the shader).
-    const confTexture = adjustConfinementSources.get(layer.id);
+    // Coverage mapping: the coverage array is baked over the layer's CONTENT
+    // rect (logical px), this pass samples the RAW asset (physical px) —
+    // scale the content rect through dprScale into asset px. A cropped
+    // fragment shares its source asset, so without this the coverage would
+    // misalign by the crop origin. Undefined crop → no override (identity
+    // mapping in the shader).
+    const coverage = adjustCoverageSources.get(layer.id);
     let adjRect: { cropX: number; cropY: number; contentW: number; contentH: number } | undefined;
-    if (confTexture && layer.crop) {
+    if (coverage && layer.crop) {
       const dpr = layer.dprScale ?? 1;
       adjRect = {
         cropX: layer.crop.x * dpr,
@@ -155,7 +156,7 @@ function resolveLayerSourceTexture(
       targetFormat: workingFormat,
       resolveLutView: ctx.resolveLutView,
       resolveLut3dView: ctx.resolveLut3dView,
-    }, { layer, source: asset, sourceIsLinear: assetIsLinear, adjustConfinementTexture: confTexture, adjRect });
+    }, { layer, source: asset, sourceIsLinear: assetIsLinear, adjustCoverage: coverage, adjRect });
     bakePass.end();
 
     filterInput = bake;
@@ -188,7 +189,7 @@ export function prepareFilteredSources(
   encoder: GPUCommandEncoder,
   compiled: CompiledScene,
   ctx: BuildContext,
-  adjustConfinementSources: Map<string, GPUTexture> = new Map(),
+  adjustCoverageSources: Map<string, AdjustCoverageBinding> = new Map(),
 ): Map<string, PreparedSource> {
   const out = new Map<string, PreparedSource>();
   for (const layer of compiled.scene.layers) {
@@ -196,7 +197,7 @@ export function prepareFilteredSources(
     if (layer.source.kind !== 'raster') continue;
     const asset = ctx.assets.get(layer.source.assetId);
     if (!asset) continue;
-    out.set(layer.id, resolveLayerSourceTexture(encoder, ctx, layer, asset, adjustConfinementSources));
+    out.set(layer.id, resolveLayerSourceTexture(encoder, ctx, layer, asset, adjustCoverageSources));
   }
   return out;
 }

@@ -180,9 +180,11 @@ function layerSig(layer: LayerNode, opts: CompositeSignatureOptions): string {
     srcSig = vectorSourceSig(layer.source);
   }
 
-  // adjustments/filters are small declarative arrays; JSON is
-  // deterministic for these plain-number descriptors and future-proofs the sig.
-  const adjSig = layer.adjustments && layer.adjustments.length ? JSON.stringify(layer.adjustments) : '-';
+  // adjustStages/filters are small declarative arrays; JSON is deterministic
+  // for these plain-number descriptors and future-proofs the sig. A stage's
+  // coverage rings (layer-local geometry, no asset epoch) ride inside it, so a
+  // re-confined or re-ordered chain dirties the composite like any edit.
+  const adjSig = layer.adjustStages && layer.adjustStages.length ? JSON.stringify(layer.adjustStages) : '-';
   const fltSig = layer.filters && layer.filters.length ? JSON.stringify(layer.filters) : '-';
 
   return [
@@ -199,11 +201,6 @@ function layerSig(layer: LayerNode, opts: CompositeSignatureOptions): string {
     `src:${srcSig}`,
     `adj:${adjSig}`,
     `flt:${fltSig}`,
-    // FROZEN adjustment confinement — declarative layer-local geometry (no
-    // asset epoch), same posture as vmask: attaching/editing/clearing the
-    // snapshot changes the composited pixels and MUST re-composite; a pure
-    // layer move is already covered by the transform token.
-    `adjConf:${layer.adjustConfinement ? JSON.stringify(layer.adjustConfinement) : '-'}`,
   ].join('|');
 }
 

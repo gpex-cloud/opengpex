@@ -792,27 +792,31 @@ export class SceneAssembler {
         vmaskDesc = buildVectorMaskDesc(combinedMasks, layerWidth, layerHeight);
       }
 
-      // ── (3) adjustConfinement: the FROZEN selection snapshot for local
-      // adjustments. Same crop re-base as the explicit vmasks above (the
-      // snapshot is stored in the layer-local frame where visibleShape.rect
-      // lives; the GPU mask space is crop-local). Unlike vmask this NEVER
-      // clips alpha — the grading shaders blend the grade by this coverage.
-      let adjustConfinementDesc: LayerNode['adjustConfinement'] | undefined;
-      if (latestLayer.adjustmentConfinement && layerWidth > 0 && layerHeight > 0) {
-        const poly = latestLayer.adjustmentConfinement;
-        const vx = shape?.rect.x ?? 0;
-        const vy = shape?.rect.y ?? 0;
-        adjustConfinementDesc = {
-          rings: poly.rings.map((ring) =>
-            ring.map((p) => [p.x - vx, p.y - vy] as const),
-          ),
-          antiAliased: true,
-        };
-      }
-
-      // Translate adjustment state once, split the LayerNode
-      // fields (adjustments/filters) from the LUT upload plan (`luts`).
+      // ── (3) Grade chain: translate the layer's adjustment masks into the
+      // declarative stage list. Each stage's coverage rings live in the
+      // layer-local frame where visibleShape.rect lives; the GPU mask space is
+      // crop-local, so the rings re-base exactly like the vmasks above. Unlike
+      // a vmask this NEVER clips alpha — the grading shaders blend each stage's
+      // grade by its own coverage.
+      // `adjustStages` / `adjustLutAtlasId` / `filters` spread into the node;
+      // `luts` is NOT a LayerNode field — it is the per-layer LUT ATLAS upload
+      // plan, collected separately below and flushed via syncAssets.
       const { luts: lutPlan, ...adjustmentResult } = translateLayerAdjustments(latestLayer);
+      const adjVx = shape?.rect.x ?? 0;
+      const adjVy = shape?.rect.y ?? 0;
+      const adjustStages = (adjVx !== 0 || adjVy !== 0) && adjustmentResult.adjustStages
+        ? adjustmentResult.adjustStages.map((st) =>
+          st.coverage
+            ? {
+              ...st,
+              coverage: {
+                ...st.coverage,
+                rings: st.coverage.rings.map((ring) => ring.map((p) => [p[0] - adjVx, p[1] - adjVy] as const)),
+              },
+            }
+            : st,
+        )
+        : adjustmentResult.adjustStages;
 
       sceneLayers.push({
         id: layer.id,
@@ -869,16 +873,14 @@ export class SceneAssembler {
         blendMode: layer.blendMode || 'source-over',
         bmask: bmaskDesc,
         vmask: vmaskDesc,
-        // Translate the layer's adjustment STATE into declarative
-        // AdjustmentDesc[] / FilterDesc[]. Identity state → undefined (no
+        // The grade chain / atlas id / filters. Identity state → undefined (no
         // signature contribution). This is the single fill point the composite
         // cache's dirty-detection depends on (stale-frame guard): the
-        // signature already serialises `adjustments`/`filters`, so filling them
-        // here is what makes a slider drag re-composite while pan/zoom stays clean.
-        // `luts` is NOT a LayerNode field — it is the curves/levels LUT UPLOAD
-        // plan, collected separately below and flushed via syncAssets.
+        // signature already serialises `adjustStages`/`filters`, so filling
+        // them here is what makes a slider drag re-composite while pan/zoom
+        // stays clean.
         ...adjustmentResult,
-        adjustConfinement: adjustConfinementDesc,
+        adjustStages,
         clip: !!layer.clip,
       });
 

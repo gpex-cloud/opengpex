@@ -47,7 +47,7 @@
  * producing a filtered transient that the compositor samples. The input is flagged
  * linear + working-gamut + intent-applied (the strategy already resolved all three),
  * so no `AdjustPrePass` bake runs and `suppressAdjust` stays false — the compositor
- * still applies `layer.adjustments` inline. A FILTERED source is NOT supersampled
+ * still applies `layer.adjustStages` inline. A FILTERED source is NOT supersampled
  * (scale `[1,1]`): the gaussian radius is a logical-pixel quantity, so filtering at
  * logical density and upscaling on export matches how a filtered raster layer
  * behaves.
@@ -72,7 +72,7 @@ import { vectorTransientSize } from '../support/vectorTransient';
 import { runFilterChain } from './runFilterChain';
 import {
   prepareConfinementCoverage,
-  sweepStrokeConfinement,
+  sweepFrozenSelectionNamespace,
   confinementContentToken,
   CONFINEMENT_SOURCE_STROKE,
 } from './prepareConfinementSources';
@@ -269,7 +269,7 @@ export function prepareVectorSources(
     // Cascade the filters over the vector transient. The bake is deliberately skipped:
     // the pixels are already linear/working-gamut/intent-applied, so running it would
     // re-decode the grade. `runFilterChain` keeps `suppressAdjust` false — the
-    // compositor applies `layer.adjustments` inline like any raster.
+    // compositor applies `layer.adjustStages` inline like any raster.
     out.set(
       layer.id,
       runFilterChain(
@@ -284,5 +284,5 @@ export function prepareVectorSources(
       ),
     );
   }
-  sweepStrokeConfinement(seenConfinementKeys);
+  sweepFrozenSelectionNamespace(seenConfinementKeys, 'stroke:');
 }

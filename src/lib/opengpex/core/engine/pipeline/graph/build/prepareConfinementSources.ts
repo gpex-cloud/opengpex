@@ -29,19 +29,20 @@
  *   • vector-brush strokes (`StrokeData.confinement`, `stroke:` namespace,
  *     baked from prepareVectorSources) — coverage multiplies the stroke
  *     transient's alpha so a stroke paints only inside its snapshot;
- *   • local adjustments (`Layer.adjustmentConfinement`, `adjust:` namespace,
- *     baked from RenderGraph before the filtered-source preparation) — the
- *     grading shaders blend `mix(original, graded, coverage)` so the grade
- *     only applies inside the snapshot and alpha is never clipped.
+ *   • adjustment masks (`AdjustStageDesc.coverage`, `adjust:` namespace,
+ *     baked from `prepareAMaskSources.ts`, which owns its consumer-specific
+ *     array gathering on top of the shared bake) — the grading shaders blend
+ *     `mix(original, graded, coverage)` so the grade only applies inside the
+ *     snapshot and alpha is never clipped.
  *
  * The cache key is `${prefix}${layerId}` — position-free (rings are layer-local
  * crop-space px, so a pan/move never re-bakes) and collision-free between the
- * two consumers at the same layer id. Each consumer sweeps only its own prefix.
+ * two consumers at the same layer id. Each consumer sweeps only its own prefix
+ * through {@link sweepFrozenSelectionNamespace}.
  *
  * @module core/gpu/graph/build/prepareConfinementSources
  */
 
-import type { CompiledScene } from '../SceneCompiler';
 import type { BuildContext } from './types';
 import { vectorTransientSize } from '../support/vectorTransient';
 import { VmaskCache, vmaskBakeTransform } from './prepareVmaskSources';
@@ -109,14 +110,35 @@ export function prepareConfinementCoverage(
 }
 
 /**
- * Sweep the STROKE namespace of the shared coverage cache against the keys seen
- * this frame. Stroke keys embed a per-stroke content token (index + rings
- * digest), so undo/redo churn would otherwise accumulate stale bakes forever —
- * the adjust namespace keys by layer id only and sweeps its own prefix in
- * {@link prepareAdjustConfinementSources}.
+ * Bake (or reuse) one namespaced entry of the shared cache with an explicit
+ * bake transform. The general shape behind {@link prepareConfinementCoverage}:
+ * consumers that need their own windowing / per-entry sub-mask composition
+ * (e.g. `prepareAMaskSources.ts`) drive the cache directly through this seam
+ * instead of the single-snapshot convenience wrapper.
  */
-export function sweepStrokeConfinement(seen: Set<string>): void {
-  confinementCache.sweep(seen, CONFINEMENT_SOURCE_STROKE);
+export function prepareFrozenSelectionBake(
+  encoder: GPUCommandEncoder,
+  ctx: BuildContext,
+  key: string,
+  subMasks: readonly VectorSubMask[],
+  maskW: number,
+  maskH: number,
+  transform: { readonly pxScaleX: number; readonly pxScaleY: number; readonly originX: number; readonly originY: number },
+): GPUTexture {
+  confinementCache.setPxScale(transform.pxScaleX, transform.pxScaleY);
+  confinementCache.setOrigin(transform.originX, transform.originY);
+  return confinementCache.prepare(encoder, ctx, key, subMasks, maskW, maskH).texture;
+}
+
+/**
+ * Sweep ONE namespace of the shared coverage cache against the keys seen this
+ * frame. Stroke keys embed a per-stroke content token (index + rings digest),
+ * so undo/redo churn would otherwise accumulate stale bakes forever — the
+ * adjust namespace keys by layer + stage index and sweeps its own prefix in
+ * `prepareAMaskSources.ts`.
+ */
+export function sweepFrozenSelectionNamespace(seen: Set<string>, prefix: string): void {
+  confinementCache.sweep(seen, prefix);
 }
 
 /** Teardown seam for the frozen-selection coverage cache — wire alongside clearVmaskCache(). */
@@ -157,38 +179,4 @@ export function confinementContentToken(
     }
   }
   return hash.toString(36);
-}
-
-/**
- * Bake the ADJUSTMENT-CONFINEMENT coverage for every scene layer that carries a
- * frozen snapshot (`LayerNode.adjustConfinement`), into `out` keyed by layer id.
- * Recorded BEFORE the filtered-source preparation because the AdjustPrePass bake
- * samples these textures. Layers without a snapshot are absent from the map (the
- * sampling passes bind the default white view → unconfined grade). The sweep
- * touches only this consumer's namespace — stroke snapshots in the shared cache
- * are never evicted by the adjustment pass.
- *
- * @param exportScale physical-texels-per-logical-px (same semantics as the vmask bake).
- */
-export function prepareAdjustConfinementSources(
-  encoder: GPUCommandEncoder,
-  compiled: CompiledScene,
-  ctx: BuildContext,
-  out: Map<string, GPUTexture>,
-  exportScale: readonly [number, number],
-): void {
-  const seen = new Set<string>();
-  for (const layer of compiled.scene.layers) {
-    const conf = layer.adjustConfinement;
-    if (!conf || conf.rings.length === 0) continue;
-    const logicalW = Math.max(1, layer.width ?? 1);
-    const logicalH = Math.max(1, layer.height ?? 1);
-    const texture = prepareConfinementCoverage(
-      encoder, ctx, CONFINEMENT_SOURCE_ADJUST + layer.id, conf.rings, true,
-      logicalW, logicalH, exportScale,
-    );
-    out.set(layer.id, texture);
-    seen.add(CONFINEMENT_SOURCE_ADJUST + layer.id);
-  }
-  confinementCache.sweep(seen, CONFINEMENT_SOURCE_ADJUST);
 }

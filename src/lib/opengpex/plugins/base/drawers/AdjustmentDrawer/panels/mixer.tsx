@@ -77,7 +77,7 @@ import {
   CHANNEL_MIX_PRESET_ORDER,
 } from "../protocols";
 import type { ChannelMixOutput, ChannelMixPresetId } from "../protocols";
-import { useAdjustmentDrawer, useFilterGesture } from "../hooks";
+import { useFilterGesture, useHotTailGrade } from "../hooks";
 import FancySvgSlider from "@opengpex/editor/widgets/FancySvgSlider";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
 import type { ActionOption } from "@opengpex/editor/widgets/ActionDropdown";
@@ -215,17 +215,17 @@ export function ChannelMixerPanel() {
     updateChannelMixCmd,
     applyChannelMixPresetCmd,
   } = usePluginCommands<AdjustmentDrawerCommandsMap>();
-  const { activeLayer } = useAdjustmentDrawer();
+  const { grade: tailGrade } = useHotTailGrade('channelMix');
   const gesture = useFilterGesture(beginChannelMixEditCmd);
 
   // Which output row the user selected to edit (R by default, matches Photoshop).
   const [outputPref, setOutputPref] = useState<ChannelMixOutput>("red");
 
-  const mix = useMemo(() => readMix(activeLayer?.channelMix), [activeLayer?.channelMix]);
+  const mix = useMemo(() => readMix(tailGrade.channelMix), [tailGrade.channelMix]);
   const monochrome = useMemo(() => isMonochrome(mix), [mix]);
   const activePreset = useMemo(
-    () => detectActivePreset(activeLayer?.channelMix),
-    [activeLayer?.channelMix],
+    () => detectActivePreset(tailGrade.channelMix),
+    [tailGrade.channelMix],
   );
 
   /**

@@ -78,6 +78,7 @@ import { resolveRoiFrame } from '@opengpex/editor/core/engine/pipeline/graph/sup
 import { computeCompositeSignature } from '@opengpex/editor/core/engine/pipeline/scene/compositeSignature';
 import { clearVmaskCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareVmaskSources';
 import { clearConfinementCoverageCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareConfinementSources';
+import { clearAMaskCoverageArrays } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareAMaskSources';
 import { releaseExportGlyphAtlas } from '@opengpex/editor/core/engine/pipeline/graph/build/vectorRenderers/TextRenderer';
 import { clearBmaskCombineCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareBmaskCombine';
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
@@ -1821,8 +1822,9 @@ export class WebGpuEngine implements IEngine {
    * Upload/dedup a resident 1D LUT (curves/levels residency). The
    * `lutId` is a deterministic content hash, so an already-resident id means the
    * pixels are identical → no-op (no re-transfer). Only a genuine curve/level
-   * edit produces a new id and thus a new upload. rgba16float 1D texture so the
-   * shared clamp/linear sampler interpolates entries at full working precision.
+   * edit produces a new id and thus a new upload. rgba16float 2D atlas (one row
+   * per stage table) so the shared clamp/linear sampler interpolates entries
+   * at full working precision.
    */
   uploadLut(lut: LutUpload): void {
     if (!this.gpu.isReady()) return;
@@ -1830,20 +1832,21 @@ export class WebGpuEngine implements IEngine {
     if (this.luts.has(lut.lutId)) return;
 
     const device = this.gpu.getDevice()!;
+    const rows = Math.max(1, lut.rows);
     const texture = device.createTexture({
-      size: [lut.width, 1, 1],
-      dimension: '1d',
+      size: [lut.width, rows, 1],
+      dimension: '2d',
       format: 'rgba16float',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-      label: `LUT (${lut.lutId})`,
+      label: `LUT atlas (${lut.lutId})`,
     });
     device.queue.writeTexture(
       { texture },
       lut.data,
-      { bytesPerRow: lut.width * 8, rowsPerImage: 1 },
-      [lut.width, 1, 1],
+      { bytesPerRow: lut.width * 8, rowsPerImage: rows },
+      [lut.width, rows, 1],
     );
-    this.luts.set(lut.lutId, { texture, view: texture.createView({ dimension: '1d' }) });
+    this.luts.set(lut.lutId, { texture, view: texture.createView({ dimension: '2d' }) });
   }
 
   releaseLut(lutId: string): void {
@@ -1931,6 +1934,7 @@ export class WebGpuEngine implements IEngine {
     // Release owned vmask coverage textures + private compute rings.
     clearVmaskCache();
     clearConfinementCoverageCache();
+    clearAMaskCoverageArrays();
     // Release owned combined bmask textures + private uniform ring.
     clearBmaskCombineCache();
     this.lastScene = null;

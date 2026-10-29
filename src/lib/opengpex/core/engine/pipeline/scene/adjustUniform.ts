@@ -39,18 +39,27 @@
  * each WGSL column as `(m[0][col], m[1][col], m[2][col])`.
  *
  * IDENTITY: an all-identity `AdjustmentDesc[]` yields `flags = 0` and an
- * identity matrix, so `apply_adjustments` returns its input bit-exactly.
+ * identity matrix, so `apply_stage` returns its input bit-exactly.
  *
  * @module core/gpu/scene/adjustUniform
  */
 
-import type { AdjustmentDesc } from './Scene';
+import type { AdjustmentDesc, AdjustStageDesc } from './Scene';
 import {
+  ADJUST_STAGE_FLOATS,
   ADJUST_UNIFORM_FLOATS,
+  ADJUST_HEADER_BYTES,
+  ADJUST_MAX_STAGES,
   ADJUST_FLAG_BASIC,
   ADJUST_FLAG_MATRIX,
   ADJUST_FLAG_COLOR_BALANCE,
+  ADJUST_FLAG_LEVELS,
+  ADJUST_FLAG_CURVES,
+  ADJUST_FLAG_LUT3D,
+  ADJUST_FLAG_FULL_COVERAGE,
   ADJUST_SLOT_LUT3D_STRENGTH,
+  ADJUST_SLOT_COVERAGE_LAYER,
+  ADJUST_SLOT_FLAGS,
 } from '@opengpex/editor/core/engine/gpu/shaders/adjust';
 
 // Rec.709 luma weights — MUST match v1 filter2d LUMA_R/G/B and adjust.wgsl.
@@ -139,7 +148,7 @@ const CB_STRENGTH = 1 / 100;
 export function packAdjustUniform(
   adjustments: readonly AdjustmentDesc[] | undefined,
 ): Float32Array {
-  const out = new Float32Array(ADJUST_UNIFORM_FLOATS);
+  const out = new Float32Array(ADJUST_STAGE_FLOATS);
   const uints = new Uint32Array(out.buffer);
   let flags = 0;
 
@@ -209,6 +218,83 @@ export function packAdjustUniform(
 
   if (matrixTouched) flags |= ADJUST_FLAG_MATRIX;
 
-  uints[31] = flags >>> 0;
+  uints[ADJUST_SLOT_FLAGS] = flags >>> 0;
   return out;
+}
+
+/** What the bind site knows about resident textures when packing a chain. */
+export interface PackAdjustChainOptions {
+  /** The per-layer LUT atlas is resident — levels/curves stages may set their sampling flag. */
+  readonly atlasResident: boolean;
+  /** Whether a stage's 3D LUT is resident (by lutId). */
+  readonly lut3dResident?: (lutId: string) => boolean;
+  /**
+   * Coverage window of the layer's baked coverage array, in content-unit
+   * fractions (x0, y0, w, h); `undefined` when no stage is confined. Confined
+   * stages are assigned array layers in chain order (0, 1, 2, …), matching the
+   * bake order in `prepareAdjustCoverageSources`.
+   */
+  readonly coverageWindow?: readonly [number, number, number, number];
+}
+
+/**
+ * Pack a layer's whole grade chain into the `AdjustChain` uniform layout
+ * (`ADJUST_UNIFORM_FLOATS` slots): header (stage_count, window) followed by
+ * one packed `AdjustStage` per stage. Stages past `ADJUST_MAX_STAGES` are not
+ * packed (the translation already caps them).
+ *
+ * A stage that samples a table but whose atlas is NOT resident yet keeps that
+ * flag CLEARED (correct-but-ungraded rather than sampling a placeholder); the
+ * same applies to a not-yet-resident 3D LUT. A stage without `coverage` gets the
+ * FULL_COVERAGE bit so the shader skips the array sample.
+ *
+ * Returns the packed buffer and the number of stages that ended up with ANY
+ * flag set (0 ⇒ the chain is an identity and the caller may bind the shared
+ * identity group instead).
+ */
+export function packAdjustChain(
+  stages: readonly AdjustStageDesc[] | undefined,
+  options: PackAdjustChainOptions,
+): { readonly packed: Float32Array; readonly activeStages: number } {
+  const out = new Float32Array(ADJUST_UNIFORM_FLOATS);
+  const uints = new Uint32Array(out.buffer);
+  const headerFloats = ADJUST_HEADER_BYTES / 4;
+  const win = options.coverageWindow ?? [0, 0, 1, 1];
+  out[4] = win[0];
+  out[5] = win[1];
+  out[6] = win[2];
+  out[7] = win[3];
+
+  let count = 0;
+  let active = 0;
+  let coverageLayer = 0;
+  if (stages) {
+    for (const stage of stages) {
+      if (count >= ADJUST_MAX_STAGES) break;
+      const packed = packAdjustUniform(stage.adjustments);
+      const pu = new Uint32Array(packed.buffer);
+      let flags = pu[ADJUST_SLOT_FLAGS];
+      const hasLevels = stage.adjustments.some((a) => a.kind === 'levels');
+      const hasCurves = stage.adjustments.some((a) => a.kind === 'curves');
+      const lut3d = stage.adjustments.find((a) => a.kind === 'lut3d') as
+        | { kind: 'lut3d'; lutId: string }
+        | undefined;
+      if (options.atlasResident) {
+        if (hasLevels) flags |= ADJUST_FLAG_LEVELS;
+        if (hasCurves) flags |= ADJUST_FLAG_CURVES;
+      }
+      if (lut3d && options.lut3dResident?.(lut3d.lutId)) flags |= ADJUST_FLAG_LUT3D;
+      if (stage.coverage && options.coverageWindow) {
+        packed[ADJUST_SLOT_COVERAGE_LAYER] = coverageLayer++;
+      } else {
+        flags |= ADJUST_FLAG_FULL_COVERAGE;
+      }
+      pu[ADJUST_SLOT_FLAGS] = flags >>> 0;
+      if ((flags & ~ADJUST_FLAG_FULL_COVERAGE) !== 0) active++;
+      out.set(packed, headerFloats + count * ADJUST_STAGE_FLOATS);
+      count++;
+    }
+  }
+  uints[0] = count >>> 0;
+  return { packed: out, activeStages: active };
 }

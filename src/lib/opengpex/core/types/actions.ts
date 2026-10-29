@@ -247,6 +247,10 @@ export interface EditorActions {
         remove: AdvCommandRef<{ frameId?: string; layerId: string; maskId: string }>;
         clearAll: AdvCommandRef<{ frameId?: string; layerId: string }>;
       };
+      adjustMask: {
+        toggle: AdvCommandRef<{ frameId?: string; layerId: string; maskId: string }>;
+        remove: AdvCommandRef<{ frameId?: string; layerId: string; maskId: string }>;
+      };
       merge: {
         mergeHost: AdvCommandRef;
         down: AdvCommandRef;

@@ -50,7 +50,7 @@ import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { ColorBalanceState } from "@opengpex/editor/core/types/models";
 import type { AdjustmentDrawerCommandsMap } from "../commands.d";
 import { DEFAULT_COLOR_BALANCE_STATE } from "../protocols";
-import { useAdjustmentDrawer, useFilterGesture } from "../hooks";
+import { useFilterGesture, useHotTailGrade } from "../hooks";
 import FancySvgSlider from "@opengpex/editor/widgets/FancySvgSlider";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -106,14 +106,14 @@ export function ColorBalancePanel() {
     beginColorBalanceEditCmd,
     updateColorBalanceCmd,
   } = usePluginCommands<AdjustmentDrawerCommandsMap>();
-  const { activeLayer } = useAdjustmentDrawer();
+  const { grade: tailGrade } = useHotTailGrade('colorBalance');
   const gesture = useFilterGesture(beginColorBalanceEditCmd);
 
   const [toneRegion, setToneRegion] = useState<ToneRegion>("midtones");
 
   const balance = useMemo(
-    () => readBalance(activeLayer?.colorBalance),
-    [activeLayer?.colorBalance],
+    () => readBalance(tailGrade.colorBalance),
+    [tailGrade.colorBalance],
   );
 
   const currentTriple = balance[toneRegion];

@@ -93,7 +93,7 @@ import React, {
   useState,
 } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { deriveLayerHistogram } from "@opengpex/editor/core/engine/color";
+import { deriveChainHistogram } from "@opengpex/editor/core/engine/color";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { LevelsState } from "@opengpex/editor/core/types/models";
 import type { AdjustmentDrawerCommandsMap } from "../../commands.d";
@@ -114,6 +114,7 @@ import {
 import {
   useAdjustmentDrawer,
   useFilterGesture,
+  useHotTailGrade,
   useLayerHistogram,
 } from "../../hooks";
 
@@ -215,24 +216,27 @@ export function LevelsPanel() {
     autoLevelsCmd,
   } = usePluginCommands<AdjustmentDrawerCommandsMap>();
   const { activeLayer } = useAdjustmentDrawer();
+  const { grade: tailGrade } = useHotTailGrade('levels');
   const { histogram: srcHistogram, loading: histLoading } = useLayerHistogram();
   const gesture = useFilterGesture(beginLevelsEditCmd);
 
-  const levels = useMemo(() => readLevels(activeLayer?.levels), [activeLayer?.levels]);
-  // The render path applies levels AND curves; the derived histogram must
-  // consume both. Missing `curves` in the memo deps below would freeze the
-  // bars while the canvas moves — the exact single-evaluator bug class this
-  // panel exists to prevent.
-  const curves = activeLayer?.curves;
+  const levels = useMemo(() => readLevels(tailGrade.levels), [tailGrade.levels]);
 
   const [displayMode, setDisplayMode] = useState<HistogramDisplayMode>("composite");
 
-  // Output distribution = SOURCE histograms scattered through the same
-  // levels+curves LUT chain the GPU applies. Microsecond-scale, so it
+  // Output distribution = SOURCE histograms scattered through the WHOLE grade
+  // chain's levels/curves tables (every enabled mask, commit order) — what the
+  // layer actually renders, not only the step under the sliders. The live
+  // edit is already in the chain (writes land in layer state), so one fold
+  // covers committed steps and the hot tail alike. Microsecond-scale, so it
   // recomputes on every slider frame with zero Worker traffic.
+  const chainSteps = useMemo(
+    () => (activeLayer?.adjustMasks ?? []).filter((m) => m.enabled).map((m) => ({ levels: m.grade.levels, curves: m.grade.curves })),
+    [activeLayer],
+  );
   const derivedHistogram = useMemo(
-    () => (srcHistogram ? deriveLayerHistogram(srcHistogram, levels, curves) : null),
-    [srcHistogram, levels, curves],
+    () => (srcHistogram ? deriveChainHistogram(srcHistogram, chainSteps) : null),
+    [srcHistogram, chainSteps],
   );
 
   const dragRef = useRef<DragTarget | null>(null);

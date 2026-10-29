@@ -23,6 +23,7 @@ import {
   asLocalShape, asLocalRect
 } from '@opengpex/editor/core/types';
 import { LayerFactory } from '../factory';
+import { scalePolygon } from '@opengpex/editor/core/geometry/operators/polygon';
 import { highDepthTextureCache, type HighDepthSource } from '../../engine/sources/HighDepthSource';
 import { resampleBilinear } from '@opengpex/editor/core/engine/color';
 
@@ -269,12 +270,28 @@ export function createResampleOperations(
         bitmapMasksPatch = { bitmapMasks: nextBitmapMasks };
       }
 
-      // adjustments.blur: px-quantity → scale. Only rewrite when blur > 0 to avoid
-      // an unnecessary patch.
+      // adjustMasks: every px-quantity scales — a basic entry's blur/edgeFeather
+      // (σ in px), a confined entry's rings (layer-local px) and its feather.
+      // Colour parameters are unit-free and stay as they are.
       let adjustmentsPatch: Partial<Layer> = {};
-      if (layer.adjustments && layer.adjustments.blur > 0) {
+      if (layer.adjustMasks && layer.adjustMasks.length > 0) {
         adjustmentsPatch = {
-          adjustments: { ...layer.adjustments, blur: layer.adjustments.blur * featherScale },
+          adjustMasks: layer.adjustMasks.map((m) => {
+            const next = { ...m, grade: { ...m.grade } };
+            const a = m.grade.adjustments;
+            if (a && ((a.blur ?? 0) > 0 || (a.edgeFeather ?? 0) > 0)) {
+              next.grade.adjustments = {
+                ...a,
+                blur: (a.blur ?? 0) * featherScale,
+                ...(a.edgeFeather !== undefined ? { edgeFeather: a.edgeFeather * featherScale } : {}),
+              };
+            }
+            if (m.shape) {
+              next.shape = scalePolygon(m.shape, { x: 0, y: 0 }, scaleX, scaleY);
+            }
+            if (m.feather !== undefined) next.feather = m.feather * featherScale;
+            return next;
+          }),
         };
       }
 

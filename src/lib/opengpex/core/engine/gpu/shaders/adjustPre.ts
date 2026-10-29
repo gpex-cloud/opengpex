@@ -18,7 +18,7 @@
  */
 
 /**
- * adjustPre.ts — 1:1 full-quad shader that BAKES `apply_adjustments` into an
+ * adjustPre.ts — 1:1 full-quad shader that BAKES `apply_adjust_chain` into an
  * offscreen texture before applying neighbourhood filters.
  *
  * WHY THIS EXISTS — THE ORDER CONTRACT
@@ -46,7 +46,7 @@
  *
  * ⚠️ COLOUR SPACE: this pass DECODES sRGB→linear on sample (unless the
  * source is already linear) and writes LINEAR light into its rgba16float bake —
- * `apply_adjustments` takes and returns linear light, TRC-wrapping its own chain.
+ * `apply_adjust_chain` takes and returns linear light, TRC-wrapping its own chain.
  * Consequently the bake is ALWAYS linear regardless of the input's encoding, which
  * is why `RenderGraph` tells the subsequent `FilterPass` `sourceIsLinear: true` and
  * the composite pass sets `LAYER_FLAG_SOURCE_LINEAR` for the filtered result.
@@ -54,7 +54,7 @@
  * ⚠️ IDENTITY PATH SUBTLETY: when `adj.flags == 0` this pass is a pure COPY used by
  * filter-only layers. It must therefore still perform the decode (the bake's domain
  * contract is "always linear"), but it must NOT run the TRC round-trip that
- * `apply_adjustments` would otherwise apply — hence the two separate branches below.
+ * `apply_adjust_chain` would otherwise apply — hence the two separate branches below.
  *
  * @module core/gpu/shaders/adjustPre
  */
@@ -74,11 +74,11 @@ export const ADJUST_PRE_UNIFORM_FLOATS = ADJUST_PRE_UNIFORM_BUFFER_SIZE / 4;
 
 /**
  * WGSL: a unit-quad vertex stage covering the whole render target plus a fragment
- * stage that samples the source at `uv_rect` and applies `apply_adjustments`.
+ * stage that samples the source at `uv_rect` and applies `apply_adjust_chain`.
  *
  * `ADJUST_WGSL` is prepended (not imported) because WGSL has no modules — the same
  * concatenation pattern `layer.wgsl` / `blend.wgsl` use, so all three share ONE
- * definition of `apply_adjustments` and can never drift. `SOURCENORMALIZE_WGSL`
+ * definition of `apply_adjust_chain` and can never drift. `SOURCENORMALIZE_WGSL`
  * follows it so this pass calls the SAME `normalize_source_components` the other two
  * consume (it needs `srgb_to_linear` / `gamut_to_working` / `tone_map_filmic` from
  * `COLORSPACE_WGSL`, which leads `ADJUST_WGSL`).
@@ -116,10 +116,8 @@ struct AdjustPreUniforms {
 @group(0) @binding(0) var<uniform> pre : AdjustPreUniforms;
 @group(0) @binding(1) var pre_samp : sampler;
 @group(0) @binding(2) var pre_tex  : texture_2d<f32>;
-// Adjustment-confinement coverage (frozen selection snapshot localizing the
-// grade). Default 1×1 white when absent — the mix collapses to the graded
-// colour, byte-identical to the unconfined path, so no flag bit is needed.
-@group(0) @binding(3) var pre_adjmask_tex : texture_2d<f32>;
+// The grade chain (uniform, LUT atlas, coverage array, 3D LUT) is group 1 —
+// see adjust.ts.
 
 struct PreVSOut {
   @builtin(position) clip_pos : vec4<f32>,
@@ -152,7 +150,9 @@ fn fs_adjust_pre(in : PreVSOut) -> @location(0) vec4<f32> {
   // STRAIGHT (CompositePass never premultiplies the bake source), so is_premult is
   // false and the intent's un-premultiply dance is a no-op. flags carry the fields as
   // exact integers in the f32 mantissa (0..7 / 0..3 exact; round discretises).
-  const normalized = normalize_source_components(
+  // let, not const: the call is a runtime expression and WGSL rejects a
+  // const initialised from one (the module then fails to compile).
+  let normalized = normalize_source_components(
     src,
     pre.flags.x >= 0.5,          // is_linear (skip decode)
     false,                       // is_premult — bake source is always straight
@@ -162,22 +162,20 @@ fn fs_adjust_pre(in : PreVSOut) -> @location(0) vec4<f32> {
   );
   let linear_rgb = normalized.rgb;
 
-  // Identity fast path: flags == 0 makes this a pure (linear) copy for a
-  // filter-only layer. Returning early SKIPS apply_adjustments' TRC round-trip,
+  // Identity fast path: an empty chain makes this a pure (linear) copy for a
+  // filter-only layer. Returning early SKIPS the stages' TRC round-trips,
   // preserving identity no-op through the bake.
-  if (adj.flags == 0u) {
+  if (adj.stage_count == 0u) {
     return vec4<f32>(linear_rgb, src.a);
   }
-  // Adjustment-confinement: re-map the asset-space uv into the content rect
-  // the coverage texture was baked over (identity for uncropped layers), then
-  // blend original vs graded — coverage 1 = fully graded, 0 = untouched, and
-  // alpha is never clipped. Default white coverage of 1 collapses the mix.
+  // Re-map the asset-space uv into the content rect the coverage array was
+  // baked over (identity for uncropped layers); each stage then blends
+  // original vs graded by its own coverage — alpha is never clipped.
   let src_px = in.uv * pre.src_size.xy;
   let am_uv = (src_px - pre.adj_rect.xy) / max(pre.adj_rect.zw, vec2<f32>(1.0, 1.0));
-  let conf = textureSample(pre_adjmask_tex, pre_samp, am_uv).a;
-  // Source is STRAIGHT alpha and apply_adjustments is defined on straight linear
-  // RGB, so no un-premultiply is needed; alpha passes through untouched.
-  return vec4<f32>(mix(linear_rgb, apply_adjustments(linear_rgb), conf), src.a);
+  // Source is STRAIGHT alpha and the chain is defined on straight linear RGB,
+  // so no un-premultiply is needed; alpha passes through untouched.
+  return vec4<f32>(apply_adjust_chain(linear_rgb, am_uv), src.a);
 }
 `;
 

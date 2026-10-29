@@ -32,7 +32,7 @@ import type { PipelineCache } from '@opengpex/editor/core/engine/gpu/resources/P
 import type { BufferRing } from '@opengpex/editor/core/engine/gpu/resources/BufferRing';
 import { BLEND_MODE_MAP, BLEND_UNIFORM_BUFFER_SIZE } from '@opengpex/editor/core/engine/gpu/shaders/blend';
 import { packLayerUniforms } from './CompositePass';
-import { resolveAdjustBindGroup as resolveAdjust } from '../support/adjustBindGroup';
+import { resolveAdjustBindGroup as resolveAdjust, type AdjustCoverageBinding } from '../support/adjustBindGroup';
 import { resolveLayerGeometry, resolveLayerDprScale, effectiveScale } from '../support/layerGeometry';
 import { resolveVmaskUniform } from '../support/vmaskUniform';
 import {
@@ -90,12 +90,12 @@ export interface DrawBlendParams {
    */
   readonly vmaskWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /**
-   * The polygon-baked ADJUSTMENT-CONFINEMENT coverage for this layer (the
-   * frozen selection snapshot localizing its grade). Absent → default white
-   * view binds and the grade applies to the whole layer. Same contract as
+   * The layer's baked coverage ARRAY (one array layer per confined stage) +
+   * its union window. Absent → the chain group binds the default white array
+   * and every stage grades the whole layer. Same contract as
    * `CompositePass.DrawLayerParams`.
    */
-  readonly adjustConfinementTexture?: GPUTexture;
+  readonly adjustCoverage?: AdjustCoverageBinding;
   /**
    * Force the identity group-1 adjust bind group because `fgTexture` ALREADY has the
    * layer's adjustments baked in (AdjustPrePass → FilterPass path).
@@ -147,7 +147,7 @@ export class BlendPass {
     ctx: BlendPassContext,
     params: DrawBlendParams,
   ): void {
-    const { layer, fgTexture, bgTexture, maskTexture, vmaskTexture, adjustConfinementTexture } = params;
+    const { layer, fgTexture, bgTexture, maskTexture, vmaskTexture } = params;
 
     let flags = 0;
     if (maskTexture) flags |= LAYER_FLAG_HAS_MASK;
@@ -334,15 +334,6 @@ export class BlendPass {
             ? vmaskTexture.texture.createView()
             : ctx.pipelineCache.getDefaultMaskView(),
         },
-        {
-          // Adjustment-confinement slot (binding 6). Present → the baked
-          // coverage texture; absent → the 1×1 default white view
-          // (coverage 1 = whole-layer grade).
-          binding: 6,
-          resource: adjustConfinementTexture
-            ? adjustConfinementTexture.createView()
-            : ctx.pipelineCache.getDefaultMaskView(),
-        },
       ],
     });
 
@@ -351,8 +342,8 @@ export class BlendPass {
     passEncoder.setVertexBuffer(0, ctx.pipelineCache.getQuadVertexBuffer());
     passEncoder.setBindGroup(0, bindGroup, [slot.offset]);
 
-    // Group 1: per-layer colour adjustments, applied to the un-premultiplied
-    // foreground before blend. Identity layers bind the shared flags=0 group;
+    // Group 1: the per-layer grade chain, applied to the un-premultiplied
+    // foreground before blend. Identity layers bind the shared stage_count=0 group;
     // `suppressAdjust` also forces it when the grade was already baked upstream.
     const adjust = resolveAdjust(
       {
@@ -364,6 +355,7 @@ export class BlendPass {
       },
       layer,
       params.suppressAdjust,
+      params.adjustCoverage,
     );
     passEncoder.setBindGroup(1, adjust.bindGroup, [adjust.offset]);
 

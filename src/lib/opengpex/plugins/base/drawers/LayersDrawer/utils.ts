@@ -19,8 +19,9 @@
 
 'use client';
 
-import { Layer, Frame, EditorContextValue, asLocalPolygon, asLocalRect, asLocalPoint, LocalPolygon, NormalizedState, ShapeType } from '@opengpex/editor/core/types';
+import { Layer, Frame, EditorContextValue, asLocalPolygon, asLocalRect, asLocalPoint, LocalPolygon, NormalizedState, ShapeType, AdjustmentMask } from '@opengpex/editor/core/types';
 import { findUpstreamAssetId, findDownstreamFragments } from '@opengpex/editor/core/layer/factory';
+import { isIdentityGrade } from '@opengpex/editor/core/helpers/adjustments';
 
 /**
  * Resolved refocus target: either a regular shape (rect/ellipse) or an irregular polygon.
@@ -75,53 +76,12 @@ export function commitRefocusToOverlay(
 // ─── Adjustment indicator ─────────────────────────────────────────────────────
 
 /**
- * Returns `true` when a layer carries any non-identity adjustment state
- * (basic sliders, curves, levels, channel mix, or color balance).
+ * Returns `true` when a layer carries any ENABLED, non-identity adjustment mask.
  *
  * Used by `LayerItem` to render the purple "has adjustments" indicator dot.
- * Self-contained by design — it reads `Layer` state directly rather than depending
- * on any render-engine module, keeping LayersDrawer free of engine coupling.
  */
 export function hasLayerAdjustments(layer: Layer): boolean {
-  // Basic adjustments (brightness/contrast/saturation/hueRotate/blur)
-  const adj = layer.adjustments;
-  if (adj) {
-    if (adj.brightness !== 100 || adj.contrast !== 100 || adj.saturation !== 100 ||
-        adj.hueRotate !== 0 || adj.blur !== 0) return true;
-  }
-
-  // Curves — identity is [[0,0],[1,1]] per channel (or undefined)
-  const c = layer.curves;
-  if (c) {
-    const isId = (pts?: Array<[number, number]>) =>
-      !pts || (pts.length === 2 && pts[0][0] === 0 && pts[0][1] === 0 && pts[1][0] === 1 && pts[1][1] === 1);
-    if (!isId(c.rgb) || !isId(c.red) || !isId(c.green) || !isId(c.blue)) return true;
-  }
-
-  // Levels — identity: 0/255/1.0/0/255
-  const l = layer.levels;
-  if (l) {
-    if (l.inputBlack !== 0 || l.inputWhite !== 255 || l.gamma !== 1 ||
-        l.outputBlack !== 0 || l.outputWhite !== 255) return true;
-  }
-
-  // Channel Mix — identity: red=[1,0,0], green=[0,1,0], blue=[0,0,1], constant=[0,0,0]
-  const m = layer.channelMix;
-  if (m) {
-    const eq3 = (v: [number, number, number], a: number, b: number, cc: number) =>
-      v[0] === a && v[1] === b && v[2] === cc;
-    if (!eq3(m.red, 1, 0, 0) || !eq3(m.green, 0, 1, 0) || !eq3(m.blue, 0, 0, 1)) return true;
-    if (m.constant && !eq3(m.constant, 0, 0, 0)) return true;
-  }
-
-  // Color Balance — identity: all zeros
-  const cb = layer.colorBalance;
-  if (cb) {
-    const z3 = (v: [number, number, number]) => v[0] === 0 && v[1] === 0 && v[2] === 0;
-    if (!z3(cb.shadows) || !z3(cb.midtones) || !z3(cb.highlights)) return true;
-  }
-
-  return false;
+  return (layer.adjustMasks ?? []).some((m) => m.enabled && !isIdentityGrade(m.grade));
 }
 
 // ─── Union merge status ───────────────────────────────────────────────────────
@@ -178,7 +138,7 @@ export function computeUnionStatus(selection: string[], frame: Frame): UnionStat
   const propsMatch =
     layers.every(l => l.opacity === base.opacity) &&
     layers.every(l => l.blendMode === base.blendMode) &&
-    layers.every(l => JSON.stringify(l.adjustments) === JSON.stringify(base.adjustments));
+    layers.every(l => JSON.stringify(l.adjustMasks ?? null) === JSON.stringify(base.adjustMasks ?? null));
 
   // Check if any fragment has been moved from its birth position
   const anyMoved = layers.some(l =>
@@ -209,4 +169,46 @@ export function calcFullLayerStack(
     });
 
     return fullLayers;
+}
+
+// ─── Adjustment-mask row summary ──────────────────────────────────────────────
+
+const CATEGORY_LABEL: Record<AdjustmentMask['category'], string> = {
+  basic: 'Basic',
+  levels: 'Levels',
+  curves: 'Curves',
+  channelMix: 'Mixer',
+  colorBalance: 'Balance',
+};
+
+/**
+ * One-line summary of an adjustment mask for the layers panel row: the
+ * category plus the parameters that deviate from identity (a migrated
+ * legacy entry may carry several categories and lists each).
+ */
+export function summarizeAdjustMask(mask: AdjustmentMask): string {
+  const g = mask.grade;
+  const parts: string[] = [];
+  const a = g.adjustments;
+  if (a) {
+    if ((a.brightness ?? 100) !== 100) parts.push(`Brightness ${Math.round(a.brightness)}`);
+    if ((a.contrast ?? 100) !== 100) parts.push(`Contrast ${Math.round(a.contrast)}`);
+    if ((a.saturation ?? 100) !== 100) parts.push(`Saturation ${Math.round(a.saturation)}`);
+    if ((a.hueRotate ?? 0) !== 0) parts.push(`Hue ${Math.round(a.hueRotate)}°`);
+    if ((a.blur ?? 0) !== 0) parts.push(`Blur ${a.blur.toFixed(1)}`);
+    if ((a.edgeFeather ?? 0) !== 0) parts.push(`Feather ${(a.edgeFeather ?? 0).toFixed(1)}`);
+  }
+  if (g.levels) {
+    const l = g.levels;
+    parts.push(`Levels ${l.inputBlack}–${l.inputWhite} γ${Number(l.gamma.toFixed(2))}`);
+  }
+  if (g.curves) {
+    const channels = (['rgb', 'red', 'green', 'blue'] as const).filter((c) => (g.curves![c]?.length ?? 0) > 2);
+    parts.push(channels.length ? `Curves ${channels.join('/')}` : 'Curves');
+  }
+  if (g.channelMix) parts.push('Mixer');
+  if (g.colorBalance) parts.push('Balance');
+  const label = CATEGORY_LABEL[mask.category];
+  if (parts.length === 0) return `${label} (identity)`;
+  return parts.join(' · ');
 }

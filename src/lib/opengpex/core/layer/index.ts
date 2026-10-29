@@ -109,13 +109,16 @@ export function createLayerService(
               return editor;
             },
             resetWithBounds: (w, h, cx, cy) => {
-              const { rotation, flip, opacity, adjustments, vectorMasks } = LayerFactory.getNewLayer();
+              const { rotation, flip, opacity, vectorMasks } = LayerFactory.getNewLayer();
               patches[layerId] = {
                 ...patches[layerId],
                 cx, cy,
                 bounding: { w, h },
                 visibleShape: asLocalShape({ x: 0, y: 0, w, h }),
-                scale: 1, rotation, flip, opacity, adjustments, vectorMasks,
+                scale: 1, rotation, flip, opacity, vectorMasks,
+                // A reset layer holds freshly baked pixels: the grade chain is
+                // already burnt in, so it must not be applied a second time.
+                adjustMasks: undefined,
               };
               return editor;
             },

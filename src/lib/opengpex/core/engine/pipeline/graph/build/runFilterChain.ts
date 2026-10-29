@@ -30,7 +30,7 @@
  * (a filter-only raster reaches here still in its source gamut / intent-unapplied,
  * so the compositor must finish the job). `suppressAdjust` defaults to "did this
  * layer's adjustments feed a bake"; the vector path overrides it to false because a
- * vector source bakes no grade and the compositor applies `layer.adjustments` inline.
+ * vector source bakes no grade and the compositor applies `layer.adjustStages` inline.
  *
  * @module core/gpu/graph/build/runFilterChain
  */
@@ -72,7 +72,7 @@ export function runFilterChain(
   // The grade is already in the pixels — do not let the composite re-apply it.
   return {
     texture: filtered,
-    suppressAdjust: suppressAdjust ?? (layer.adjustments !== undefined && layer.adjustments.length > 0),
+    suppressAdjust: suppressAdjust ?? (layer.adjustStages !== undefined && layer.adjustStages.length > 0),
     vectorTransient: layer.source?.kind === 'vector',
     sourceIsLinear: true,
     // ⚠️ NOT unconditionally true: gamut alignment only happened if a bake ran.

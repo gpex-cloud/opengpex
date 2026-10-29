@@ -21,6 +21,12 @@ import { AssetService } from '@opengpex/editor/core/storage/asset/AssetService';
 import type { ColorIdentity } from '@opengpex/editor/core/storage/asset/AssetStore';
 import { Frame, HistoryStep } from '@opengpex/editor/core/types';
 import { sanitizeFrameDrafts } from '@opengpex/editor/core/state/drafts';
+import {
+  migrateLegacyBmaskInverted,
+  migrateLegacyClipBoxes,
+  migrateLegacyLayerGrade,
+  migrateLegacyStrokeCollection,
+} from './migrators';
 
 /**
  * DehydratedAsset — one entry of the pool `dehydrate` fills while walking a
@@ -247,27 +253,6 @@ export const Hydrating = {
       });
     }
 
-    // Legacy vector-brush migration (one stroke per layer → stroke collection):
-    // documents saved before the collection refactor stored the brush payload
-    // as a single `strokeData`. It lifts verbatim into a one-element `strokes`
-    // array — nothing is dropped. The stroke's box in that payload was the
-    // layer's own bounding (points were layer-local), so the box is derived
-    // from the layer bounding when missing. Runs inside the generic recursion,
-    // so layers referenced from undo history migrate identically.
-    if (result.strokeData && typeof result.strokeData === 'object' && !Array.isArray(result.strokes)) {
-      const sd = result.strokeData as { points?: unknown; box?: unknown };
-      const bounding = (result.bounding ?? result.rect) as { w?: unknown; h?: unknown } | undefined;
-      const legacyBox = {
-        x: 0,
-        y: 0,
-        w: typeof bounding?.w === 'number' ? bounding.w : 0,
-        h: typeof bounding?.h === 'number' ? bounding.h : 0,
-      };
-      const lifted = { ...(sd as Record<string, unknown>), box: sd.box ?? legacyBox };
-      result.strokes = [lifted];
-      delete result.strokeData;
-    }
-
     // Frame drafts whitelist (see core/state/drafts.ts): a document may
     // carry drafts saved by a NEWER build (tool ids this build has no codec
     // for) or a corrupted payload. Both evaporate here — keys without a
@@ -281,53 +266,14 @@ export const Hydrating = {
       else delete result.drafts;
     }
 
-    // Legacy-document selection migration (per-tool slots → single
-    // confinement entity): frames saved before the single-slot refactor
-    // stored selections in `clipBoxes`, a record keyed by producing tool id.
-    // Under the old mutually-exclusive-slot model only the slot referenced by
-    // `latestClipTool` was ever visible on canvas — the other slots were
-    // unobservable hidden state. So the load-time migration takes exactly
-    // that slot as the sole selection and drops the rest, with no perceivable
-    // loss. Frames written after the refactor have no `clipBoxes` key and pass
-    // through untouched.
-    if (result.clipBoxes && typeof result.clipBoxes === 'object') {
-      const legacyBoxes = result.clipBoxes as Record<string, unknown>;
-      const activeTool = (result.latestClipTool as string) || 'rect';
-      if (result.confinement === undefined || result.confinement === null) {
-        const slot = legacyBoxes[activeTool];
-        // Only polygon selections migrate. Slots predating the polygon
-        // unification carry plain rect shapes the ants/mask pipeline cannot
-        // render — dropping the (ancient, low-value) selection beats
-        // crashing the overlay.
-        const isPolygon =
-          !!slot && typeof slot === 'object' && Array.isArray((slot as { rings?: unknown }).rings);
-        result.confinement = isPolygon ? slot : null;
-      }
-      delete result.clipBoxes;
-    } else if (result.latestClipTool !== undefined && result.confinement === undefined) {
-      // A frame without legacy slots but also without the new field (e.g. a
-      // hand-edited or partially-persisted snapshot) normalizes to "no
-      // selection".
-      result.confinement = null;
-    }
-
-    // Defensive legacy-document migration (restore inverted-record architecture,
-    // task T1): before T3, v2 had NO producer of `inverted: true` bmask records,
-    // but a hypothetical legacy import must not load one verbatim — under the
-    // two-family combine semantics an inverted record would silently change
-    // meaning (restore max instead of erase product). Since T3, restore-eraser
-    // strokes ARE a legitimate inverted producer, and they always stamp
-    // `painted: true` on their records — so the migration clears the bit ONLY
-    // on unpainted records (a pre-T3 legacy entry can never carry `painted`).
-    // VectorMask has no assetId/bounds, so it never matches.
-    if (
-      result.inverted === true &&
-      result.painted !== true &&
-      typeof result.assetId === 'string' &&
-      result.bounds !== undefined
-    ) {
-      result.inverted = false;
-    }
+    // Legacy-document migrations — every migrator lives in ./migrators.ts,
+    // gates itself on its own precondition and is a no-op on modern records,
+    // so they simply run on every object the recursion meets (undo-history
+    // snapshots migrate identically to live frames).
+    migrateLegacyLayerGrade(result);
+    migrateLegacyStrokeCollection(result);
+    migrateLegacyClipBoxes(result);
+    migrateLegacyBmaskInverted(result);
 
     return result;
   },

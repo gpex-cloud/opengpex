@@ -569,6 +569,10 @@ export function useEditorStore() {
             remove: advRef(P.ADV_LAYER_BITMAP_MASK_REMOVE, (payload: { frameId?: string; layerId: string; maskId: string }) => executeCommand(P.ADV_LAYER_BITMAP_MASK_REMOVE, payload)),
             clearAll: advRef(P.ADV_LAYER_BITMAP_MASK_CLEAR, (payload: { frameId?: string; layerId: string }) => executeCommand(P.ADV_LAYER_BITMAP_MASK_CLEAR, payload)),
           },
+          adjustMask: {
+            toggle: advRef(P.ADV_LAYER_ADJUST_MASK_TOGGLE, (payload: { frameId?: string; layerId: string; maskId: string }) => executeCommand(P.ADV_LAYER_ADJUST_MASK_TOGGLE, payload)),
+            remove: advRef(P.ADV_LAYER_ADJUST_MASK_REMOVE, (payload: { frameId?: string; layerId: string; maskId: string }) => executeCommand(P.ADV_LAYER_ADJUST_MASK_REMOVE, payload)),
+          },
           merge: {
             mergeHost: advRef(P.ADV_LAYER_MERGE_HOST, () => executeCommand(P.ADV_LAYER_MERGE_HOST)),
             down: advRef(P.ADV_LAYER_MERGE_DOWN, () => executeCommand(P.ADV_LAYER_MERGE_DOWN)),
