@@ -21,6 +21,7 @@
 
 import { EditorContextValue, EditorCommand, asLocalShape } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import { LayerFactory } from '@opengpex/editor/core/layer/factory';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 
@@ -42,7 +43,7 @@ export const LayerPeelCommands = {
         const triplet = layers.getTriplet(activeFrame.id, activeLayer.id);
         if (!triplet) return;
 
-        const { host, exchange } = triplet.group;
+        const { host, exchange, frags } = triplet;
 
         // ─── "Stamp" mode: exchange already has data → copy fragment ───
         // When CMD+Alt dragging an already-peeled fragment, leave a stamp (frag)
@@ -50,14 +51,10 @@ export const LayerPeelCommands = {
         // continued dragging. The hole mask is PRESERVED — the host pixels were
         // already cut out during the initial peel and the stamp is a copy placed
         // at a potentially different location.
-        if (triplet.dirty) {
+        if (triplet.state === 'dirty') {
           // ─── Create a temporary stamp (frag) layer at the current position ───
           // This ensures the stamp is visually left at the drag-start location instantly (0ms).
           // Both parentId and role ('frag') ensure it is treated as an internal sub-layer and hidden from the Layer List.
-          const frags = activeFrame.layers.order
-            .map(id => activeFrame.layers.byId[id])
-            .filter(l => l.hostId === host.id && l.role === 'frag');
-
           const isDuplicate = frags.some(f =>
             Math.abs(f.cx - exchange.cx) < 1 && Math.abs(f.cy - exchange.cy) < 1
           );
@@ -70,6 +67,9 @@ export const LayerPeelCommands = {
               role: 'frag' as const,
               hostId: host.id,
               interactive: false,
+              // Session bookkeeping lives on the exchange only; a stamp is a
+              // pure pixel clone and must not carry the hole pointer.
+              metadata: undefined,
             };
 
             const hostIndex = activeFrame.layers.order.indexOf(host.id);
@@ -87,6 +87,17 @@ export const LayerPeelCommands = {
         // ─── First peel: exchange is empty → standard peel from host ───
         const latestLayer = actions.fast.latestLayer(activeFrame.id, host.id) || host;
 
+        // A non-copy peel EDITS the host (digs the hole vmask), so a locked
+        // host must refuse it — same gate as the clip cut commands. Copy mode
+        // only READS the host, so it stays available on locked layers
+        // (Photoshop parity: Layer via Copy works where Layer via Cut is
+        // disabled). No gate is needed at commit/discard time: this is the
+        // only step that writes to the host outside rollback semantics.
+        if (!payload.isCopy && latestLayer.locked) {
+          actions.setInteraction({ hud: { message: 'Layer is locked', type: 'error' } });
+          return;
+        }
+
         // Resolve the clip shape from `frame.latestClipTool`. Peel fires via
         // Meta+drag on the unified createSelectionMoveHandler, so the active
         // frame-level selection entity is guaranteed non-empty at this point.
@@ -97,20 +108,40 @@ export const LayerPeelCommands = {
         if (!result) return;
 
         const timestamp = Date.now();
+        // The exact hole mask id for THIS session. The id template is a naming
+        // convention only — removal must never pattern-match it, because once
+        // a peel commits, its hole becomes a permanent user-facing mask and a
+        // substring/tag sweep would destroy historical holes.
+        const holeMaskId = `mask-peel-hole-${timestamp}`;
 
         // Start transaction: atomically update Exchange and Host
         ctx.layers.updateLayer(activeFrame.id, (tx) => {
-          // A. Update Exchange (fragment)
-          tx.edit(exchange.id).patch(result.updatedLayer);
+          // A. Update Exchange (fragment). In copy mode there is no session
+          // hole, so the pointer must stay unset — discardExchange removes a
+          // hole BY THIS EXACT ID and nothing else. The fragment never
+          // inherits the host's lock state: a locked exchange could not be
+          // dragged, defeating the whole peel gesture (same rule as the
+          // cut/duplicate flows).
+          tx.edit(exchange.id).patch({
+            ...result.updatedLayer,
+            locked: false,
+            metadata: payload.isCopy
+              ? result.updatedLayer.metadata
+              : {
+                  ...(result.updatedLayer.metadata ?? {}),
+                  activeHoleMaskId: holeMaskId,
+                },
+          });
 
           // B. If not in Copy mode, dig a hole in the Host
           if (!payload.isCopy) {
             const hostHoleMask = {
-              id: `mask-peel-hole-${timestamp}`,
+              id: holeMaskId,
               shape: result.localShape,
               inverted: true,
               feather: 0,
-              enabled: true
+              enabled: true,
+              tag: 'peel',
             };
             const currentMasks = latestLayer.vectorMasks || [];
             tx.edit(host.id).patch({
@@ -139,35 +170,42 @@ export const LayerPeelCommands = {
       const triplet = layers.getTriplet(activeFrame.id, activeLayer.id);
       if (!triplet) return;
 
-      const { host, exchange, frag } = triplet.group;
+      const { host, exchange } = triplet;
 
       // Clean triplet → just re-activate host (no data to discard).
-      if (!triplet.dirty) {
+      if (triplet.state === 'clean') {
         if (activeLayer.id !== host.id) {
           layers.activate(activeFrame.id, host.id);
         }
         return;
       }
 
-      // Find any temporary stamp layers
-      const frags = activeFrame.layers.order
-        .map(id => activeFrame.layers.byId[id])
-        .filter(l => l.hostId === host.id && l.role === 'frag');
+      // The hole dug by THIS session is tracked by its exact mask id on the
+      // exchange (set by peelToExchange). Removal is exact-ID only: substring
+      // or tag pattern sweeps would also destroy the PERMANENT holes left on
+      // the host by previously committed peels. This write is restorative
+      // (back to the pre-peel state), so it stays allowed even when the user
+      // locked the host while the session was in flight.
+      const holeMaskId = exchange.metadata?.activeHoleMaskId as string | undefined;
 
-      // Dirty triplet → rollback: remove the hole mask from host, reset
-      // exchange (and frag if present). This restores the host to its
-      // pre-peel state without any off-screen compositing.
+      // Dirty triplet → rollback: remove the session hole from the host,
+      // reset the exchange. This restores the host to its pre-peel state
+      // without any off-screen compositing.
       layers.updateLayer(activeFrame.id, (tx) => {
-        tx.edit(host.id).removeMask('mask-peel-hole');
-        tx.edit(exchange.id).reset();
-        if (frag) {
-          tx.edit(frag.id).reset();
+        if (holeMaskId) {
+          tx.edit(host.id).patch({
+            vectorMasks: (host.vectorMasks || []).filter(m => m.id !== holeMaskId),
+          });
         }
+        // reset() only writes the blank bitmap fields; the session hole
+        // pointer must be cleared explicitly so it can never outlive the
+        // session it belongs to.
+        tx.edit(exchange.id).reset().patch({ metadata: undefined });
       });
 
       // Clean up temporary stamp layers
-      if (frags.length > 0) {
-        layers.removeLayers(activeFrame.id, frags.map(f => f.id));
+      if (triplet.frags.length > 0) {
+        layers.removeLayers(activeFrame.id, triplet.frags.map(f => f.id));
       }
 
       layers.activate(activeFrame.id, host.id);
@@ -188,7 +226,7 @@ export const LayerPeelCommands = {
         const triplet = layers.getTriplet(activeFrame.id, activeLayer.id);
         if (!triplet) return;
 
-        const { host, exchange, frag } = triplet.group;
+        const { host, exchange, frags } = triplet;
 
         // [2] Admission check — when the triplet is clean (no peel happened
         // since last commit), short-circuit to avoid spending a Zustand
@@ -199,34 +237,31 @@ export const LayerPeelCommands = {
         // active layer is already host, so this whole branch becomes a few
         // hash lookups and returns immediately. Critical for keeping the
         // space-bar exit-clip latency imperceptible.
-        if (!triplet.dirty) {
+        if (triplet.state === 'clean') {
           if (activeLayer.id !== host.id) {
             layers.activate(activeFrame.id, host.id);
           }
           return;
         }
 
-        // Find all temporary stamp layers
-        const frags = activeFrame.layers.order
-          .map(id => activeFrame.layers.byId[id])
-          .filter(l => l.hostId === host.id && l.role === 'frag');
-
         try {
-          // [3] Composite via unified pipeline (compositeLayers).
-          // Merges host (base), all stamped frags, and the final exchange layer.
+          // [3] Composite ONLY the peeled content: stamps (z-order bottom) →
+          // exchange (top). The host is a pure bystander — its asset, pose,
+          // grade chain and hole masks stay untouched. The hole is a
+          // PERMANENT non-destructive vmask from here on: it shows up in the
+          // mask list (toggle / delete / feather), and deleting it restores
+          // the covered pixels (a natural "put the fragment back" flow).
           //
-          // 💡 Strip adjustment state from ALL layers before merge so the pipeline
-          // composites raw bitmaps only. The host retains its adjustment properties
-          // in the store — the renderer will apply them once at display time.
-          // This prevents double-application of adjustments (once by pipeline bake,
-          // once by engine filter pass).
-          const stripAdj = (l: typeof host) => ({
-            ...l,
-            adjustMasks: undefined,
-          });
-
-          // Participants in z-order: host (bottom) → frags (stamps) → exchange (top)
-          const participants = [stripAdj(host), ...frags.map(stripAdj), stripAdj(exchange)];
+          // Participants carry their grade chains INTO the bake:
+          // compositeLayers routes through SceneAssembler.buildScene, which
+          // bakes every participant's adjustMasks into the composite pixels.
+          // Re-attaching a chain to the product afterwards would apply the
+          // grade a SECOND time, so the promoted layer ships with
+          // adjustMasks: undefined — the same bake hygiene as
+          // mergeDown/mergeVisible (bake content, strip declarative grade).
+          // The appearance is frozen at merge time; further grading happens
+          // through new masks on the promoted layer like on any layer.
+          const participants = [...frags, exchange];
 
           const composited = await pixels.render.compositeLayers(participants, activeFrame);
           const { assetId, url: assetUrl } = await assets.storeBundle(composited);
@@ -236,30 +271,60 @@ export const LayerPeelCommands = {
           // loadBitmap is cache-first so this is instant, no network.
           await pixels.image.loadBitmap(assetUrl);
 
-          // [4] Start transaction update (commit all changes atomically)
-          layers.updateLayer(activeFrame.id, (tx) => {
-            // Update host: set merged asset, reset orientation (rotation/flip/scale
-            // are now baked into the composite bitmap), and clean up hole masks.
-            // Adjustment state is intentionally PRESERVED — the pipeline merged
-            // raw bitmaps without baking adjustments, so the renderer will
-            // apply the host's adjustments exactly once at display time.
-            tx.edit(host.id)
-              .setAsset({ assetId, url: assetUrl })
-              .patch({
-                cx: composited.bounds.x + composited.bounds.w / 2,
-                cy: composited.bounds.y + composited.bounds.h / 2,
-                bounding: { w: composited.bounds.w, h: composited.bounds.h },
-                visibleShape: asLocalShape({ x: 0, y: 0, w: composited.bounds.w, h: composited.bounds.h }),
-                scale: 1,
-                rotation: 0,
-                flip: { h: false, v: false },
-              })
-              .removeMask('mask-peel-hole');
+          // The hole dug by THIS session, if any (absent in copy mode). The
+          // exact mask id is the only sanctioned hole handle — never a
+          // substring pattern.
+          const sessionHoleMaskId = exchange.metadata?.activeHoleMaskId as string | undefined;
 
-            // Reset helper layers
-            tx.edit(exchange.id).reset();
-            if (frag) {
-              tx.edit(frag.id).reset();
+          // Single-fragment cut (no stamps, non-copy): wire the Merge Back
+          // cut-link both ways — the product points at its hole, the hole
+          // points at its product — so the existing mergeBack command and
+          // the delete-fragment hole cleanup work with zero new machinery.
+          const mergeBackHoleId = frags.length === 0 ? sessionHoleMaskId : undefined;
+
+          // [4] Promote the baked composite to a REGULAR user-owned layer at
+          // the exchange's slot (directly above the host). Deliberately not a
+          // triplet role: it is user output, so it stays visible, selectable,
+          // freely sortable and is NOT cascaded away with the host. The only
+          // retained link is the sourceLayerId provenance stamp.
+          const hostLayers = activeFrame.layers.order
+            .map(id => activeFrame.layers.byId[id])
+            .filter(l => !l.hostId);
+          const newLayer = LayerFactory.getNewLayer({
+            name: LayerFactory.getNewLayerName(hostLayers),
+            src: assetUrl,
+            assetId,
+            cx: composited.bounds.x + composited.bounds.w / 2,
+            cy: composited.bounds.y + composited.bounds.h / 2,
+            bounding: { w: composited.bounds.w, h: composited.bounds.h },
+            visibleShape: asLocalShape({ x: 0, y: 0, w: composited.bounds.w, h: composited.bounds.h }),
+            scale: 1,
+            rotation: 0,
+            flip: { h: false, v: false },
+            // The pipeline baked every participant's grade chain into these
+            // pixels; carrying a chain forward would grade twice.
+            adjustMasks: undefined,
+            metadata: {
+              sourceLayerId: host.id,
+              ...(mergeBackHoleId ? { assocMaskId: mergeBackHoleId } : {}),
+            },
+          });
+
+          const exchangeIndex = activeFrame.layers.order.indexOf(exchange.id);
+          layers.addLayer(activeFrame.id, newLayer, exchangeIndex !== -1 ? exchangeIndex : undefined);
+
+          layers.updateLayer(activeFrame.id, (tx) => {
+            // Reset the session helpers. metadata must be cleared explicitly:
+            // reset() only writes the blank bitmap fields, which would leave
+            // the stale session hole pointer behind.
+            tx.edit(exchange.id).reset().patch({ metadata: undefined });
+
+            if (mergeBackHoleId) {
+              tx.edit(host.id).patch({
+                vectorMasks: (host.vectorMasks || []).map(m =>
+                  m.id === mergeBackHoleId ? { ...m, assocLayerId: newLayer.id } : m,
+                ),
+              });
             }
           });
 
@@ -268,7 +333,8 @@ export const LayerPeelCommands = {
             layers.removeLayers(activeFrame.id, frags.map(f => f.id));
           }
 
-          layers.activate(activeFrame.id, host.id);
+          // PS "Layer via Cut" intuition: focus lands on the new fragment.
+          layers.activate(activeFrame.id, newLayer.id);
 
         } catch (err) {
           console.error('[Commit] Failed to commit composite layers:', err);

@@ -72,16 +72,15 @@ export interface LayerService {
 }
 
 /**
- * Triplet: Triplet structure (composite layer relationship)
+ * Triplet: Triplet structure (peel session: host / exchange / stamps)
  */
 export interface Triplet {
-  group: {
-    host: Layer;
-    exchange: Layer;
-    frag?: Layer;
-  };
-  /** Determines if the triplet is in a "pending settlement" dirty state */
-  dirty: boolean;
+  host: Layer;
+  exchange: Layer;
+  /** All temporary stamp sub-layers (role 'frag'), in frame z-order. */
+  frags: Layer[];
+  /** 'dirty' = a peel happened since last commit (pending settlement). */
+  state: 'clean' | 'dirty';
 }
 
 /**

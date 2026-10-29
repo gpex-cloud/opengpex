@@ -318,7 +318,12 @@ export const LayerFactory = {
   // =================================================================================
 
   /**
-   * getTriplet: Identifies and gets the triplet (Host/Exchange/Frag) the layer belongs to and its dirty state.
+   * getTriplet: Identifies the peel triplet (Host/Exchange/Frags) a layer
+   * belongs to and its settlement state.
+   *
+   * `frags` lists ALL temporary stamp sub-layers in frame z-order (multiple
+   * stamps accumulate across repeated Cmd+Alt drags within one peel session),
+   * so consumers never re-implement the host/role filter sweep.
    */
   getTriplet(layer: Layer, layers: Layer[]) {
     const isHost = !layer.hostId || layer.role === 'host';
@@ -328,16 +333,13 @@ export const LayerFactory = {
     if (!host) return null;
 
     const exchange = layers.find(l => l.hostId === hostId && l.role === 'exchange');
-    const frag = layers.find(l => l.hostId === hostId && l.role === 'frag');
-
     if (!exchange) return null;
 
-    const dirty = exchange.src !== TRANSPARENT_PIXEL && exchange.visible;
+    const frags = layers.filter(l => l.hostId === hostId && l.role === 'frag');
 
-    return {
-      group: { host, exchange, frag },
-      dirty
-    };
+    const state: 'clean' | 'dirty' = exchange.src !== TRANSPARENT_PIXEL && exchange.visible ? 'dirty' : 'clean';
+
+    return { host, exchange, frags, state };
   },
 
 

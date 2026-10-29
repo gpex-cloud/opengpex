@@ -217,6 +217,9 @@ export interface VectorMask {
 
   /** Associated fragment layer id — this hole mask corresponds to a cut fragment layer. */
   assocLayerId?: string;
+
+  /** Optional semantic tag (e.g. 'peel' marks a hole dug by Cmd+drag fragment peeling). */
+  tag?: string;
 }
 
 

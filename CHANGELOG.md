@@ -2,6 +2,10 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.34
+
+- Layers: peeling a fragment off a layer (Cmd/Ctrl+drag the selection) is now fully non-destructive — committing no longer bakes the source layer; the fragment lands as its own new layer above it and the hole stays as an editable mask, so deleting or toggling the mask puts the pixels back
+
 ## 2.0.33
 
 - Layers: layer groups rebuilt — collapsed groups take a single compact row, expanded groups show a slim header over a tinted surface, and both groups and their layers drag-reorder

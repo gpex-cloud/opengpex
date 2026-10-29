@@ -165,6 +165,10 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
         if (!hasPeeled) {
           if (Math.sqrt(context.dx * context.dx + context.dy * context.dy) >= 1) {
             hasPeeled = true;
+            // Yield to the macrotask queue so the in-flight pointermove batch
+            // (and its pending DOM/store writes) settles first — peelToExchange
+            // replaces the active layer and focus, which must not race the
+            // gesture handler still consuming this same event.
             setTimeout(() => e.actions.adv.layer.peel.peelToExchange.execute({
               isCopy: (e.nativeEvent as MouseEvent).altKey
             }), 0);
