@@ -31,7 +31,6 @@ import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
 import type { DecodeResult } from '@opengpex/editor/core/files/types';
 import type { ImportOptions } from './_types';
-import { transcodeBlob } from '@opengpex/editor/core/engine/utils/pixel-utils';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // importSingleImage — Creates a new frame and adds to store
@@ -71,13 +70,14 @@ export async function importSingleImage(
   // was never acceptable post-adjust).
   const bundle = await assets.storeBundle(page, sourceBlob);
 
-  // 2. Generate thumbnail (content bounds is precomputed during file decode)
-  const thumbResult = await pixels.image.resample(bundle.url, { maxSize: 512 });
-  const thumbBlob = await transcodeBlob(thumbResult.displayBlob, 'image/webp');
+  // 2. Generate thumbnail (content bounds is precomputed during file decode).
+  // WebP straight from the Worker: skips a PNG encode/decode round-trip, and
+  // the returned hash describes the stored artifact (register consumes it).
+  const thumbResult = await pixels.image.resample(bundle.url, { maxSize: 512, format: 'image/webp', quality: 0.9 });
   const contentBounds = page.contentBounds ?? { x: 0, y: 0, w: page.width, h: page.height };
 
   // 3. Register thumbnail asset (dimensions from resample output)
-  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, { width: thumbResult.width, height: thumbResult.height });
+  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbResult.displayBlob, { width: thumbResult.width, height: thumbResult.height, precomputedHash: thumbResult.precomputedHash });
 
   // 4. Camera calculation
   const { insets } = state.ui.theme.config;

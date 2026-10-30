@@ -79,5 +79,29 @@ export const LayerUtils = {
     const rect = layer.visibleShape?.rect;
     if (!rect) return { x: 0, y: 0 };
     return { x: rect.x || 0, y: rect.y || 0 };
+  },
+
+  /**
+   * collectAssetIds: every content-addressed asset id each layer REFERENCES —
+   * the layer's own pixel asset plus each bitmap mask's grayscale asset.
+   * Vector masks are pure geometry and adjustment masks are pure parameters
+   * (no assets), so they contribute nothing.
+   *
+   * Grouped by layer id; deduped WITHIN a layer, deliberately NOT across
+   * layers — per-layer independence is what per-layer adjudication and
+   * asset-GC decisions need (e.g. the paste-source check: a logical paste can
+   * reference the originals only while EVERY id of that one layer resolves).
+   */
+  collectAssetIds(layers: Layer[]): Record<string, string[]> {
+    const byLayer: Record<string, string[]> = {};
+    for (const layer of layers) {
+      const ids: string[] = [];
+      if (layer.assetId && !ids.includes(layer.assetId)) ids.push(layer.assetId);
+      for (const mask of layer.bitmapMasks ?? []) {
+        if (mask.assetId && !ids.includes(mask.assetId)) ids.push(mask.assetId);
+      }
+      byLayer[layer.id] = ids;
+    }
+    return byLayer;
   }
 };

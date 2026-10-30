@@ -410,8 +410,17 @@ export interface PixelService {
      * `sourceGamut` (optional) is the source's gamut, resolved by the caller from
      * its light asset record — threaded to the Worker so the OffscreenCanvas
      * colorSpace matches instead of defaulting to sRGB and clamping wide-gamut sources.
+     *
+     * `targetRect` (optional) is a SOURCE-space crop window applied before
+     * scaling: the output shows only that window, and `maxSize`/`scale` resolve
+     * against the window's own dimensions (paste's slice thumbnails).
+     *
+     * `format` (optional, default 'image/png') picks the terminal encode.
+     * Thumbnails pass 'image/webp' so the Worker emits the storage format
+     * directly — the returned `precomputedHash` then describes the final
+     * artifact and callers skip their own transcode pass.
      */
-    resample: (src: string, options: { targetSize?: { w: number; h: number }; maxSize?: number; scale?: number; sourceGamut?: GamutId }) => Promise<ResampledImage>;
+    resample: (src: string, options: { targetSize?: { w: number; h: number }; maxSize?: number; scale?: number; sourceGamut?: GamutId; targetRect?: Rect; format?: 'image/png' | 'image/webp'; quality?: number }) => Promise<ResampledImage>;
 
     /**
      * Clear all bitmap caches (SourceBitmapCache).

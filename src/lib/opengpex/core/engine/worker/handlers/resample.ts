@@ -39,7 +39,7 @@ export class ResampleHandler {
    * Handle a RESAMPLE job dispatched by the router.
    */
   async handle(job: ResampleJob): Promise<RouterResult> {
-    const { src, targetWidth, targetHeight, sourceGamut = 'srgb' } = job;
+    const { src, targetWidth, targetHeight, sourceGamut = 'srgb', targetRect, format = 'image/png', quality = 0.92 } = job;
 
     // 1. Fetch and decode source bitmap
     const response = await fetch(src);
@@ -63,11 +63,20 @@ export class ResampleHandler {
     const ctx = canvas.getContext('2d', { colorSpace })!;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(srcBitmap, 0, 0, targetWidth, targetHeight);
+    if (targetRect) {
+      // Source-space crop window: copy ONLY the requested region into the
+      // target size (9-arg drawImage) — the crop and the scale happen in one
+      // Worker pass, no main-thread decode needed (paste's slice thumbnails).
+      ctx.drawImage(srcBitmap, targetRect.x, targetRect.y, targetRect.w, targetRect.h, 0, 0, targetWidth, targetHeight);
+    } else {
+      ctx.drawImage(srcBitmap, 0, 0, targetWidth, targetHeight);
+    }
     srcBitmap.close();
 
-    // 3. Encode output to blob
-    const blob = await canvasToBlob(canvas);
+    // 3. Encode output to blob — in the CALLER'S requested format. Thumbnails
+    // request 'image/webp' here so the hash below describes the final stored
+    // artifact and the caller skips a PNG encode + decode + re-encode.
+    const blob = await canvasToBlob(canvas, format, quality);
 
     // 4. Compute content hash
     const hash = await calculateHash(blob);

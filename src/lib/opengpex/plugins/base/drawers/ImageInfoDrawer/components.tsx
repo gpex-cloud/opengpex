@@ -87,16 +87,14 @@ export function ImageInfoComponent() {
     const isHighRes = layerDim.w * layerDim.h > baseW * baseH * 1.2;
     const isUpScaled = layerDim.w * layerDim.h < baseW * baseH * 0.8;
 
-    // Bit depth info for display badges (read from frame-level metadata)
-    const layerBitDepth = activeFrame.metadata?.bitDepth;
-
-    // Document depth badge: the source asset's colour identity is the SSOT
-    // (frame.assetId → StoredAsset.bitDepth, same anchor the export rules use);
-    // frame metadata is the fallback for documents without a source asset
-    // (new canvas / imported content that never registered one).
-    const frameBitDepth =
-      (activeFrame.assetId ? assets.get(activeFrame.assetId)?.bitDepth : undefined)
-      ?? activeFrame.metadata?.bitDepth;
+    // Bit depth badge for the hovered/active layer card: the layer's OWN asset
+    // colour identity is the SSOT (same per-asset anchor as frameBitDepth below).
+    // Reading frame-level metadata here would show the document's depth even when
+    // the target layer carries a different one (cross-frame pasted fragments),
+    // which is exactly the mislabel this badge must never produce.
+    const layerBitDepth = targetLayer?.assetId
+      ? assets.get(targetLayer.assetId)?.bitDepth
+      : undefined;
 
     // Per-document HDR presentation: the badge availability comes from the
     // FILE (gain map / PQ·HLG transfer); the effective state is the frame's
@@ -154,7 +152,6 @@ export function ImageInfoComponent() {
           isHighRes={isHighRes}
           isUpScaled={isUpScaled}
           layerBitDepth={layerBitDepth}
-          frameBitDepth={frameBitDepth}
           imageMetadata={meta.imageMetadata}
           hdrAvailable={hdrAvailable}
           hdrEnabled={hdrEnabled}

@@ -67,6 +67,22 @@ export interface ResampleOptions {
    * colorSpace instead of defaulting to sRGB and clamping wide-gamut sources.
    */
   sourceGamut?: GamutId;
+  /**
+   * Optional SOURCE-space crop window applied before scaling: when present,
+   * `maxSize`/`scale` resolve against the RECT's dimensions (not the full
+   * bitmap's), and the output shows only this window scaled to the target.
+   * Absent → whole-image resample (legacy behavior).
+   */
+  targetRect?: Rect;
+  /**
+   * Terminal encode format of the output blob. Default 'image/png' (lossless —
+   * resampleLayer's user-content contract). Thumbnails pass 'image/webp' so
+   * the Worker emits the storage format directly and the content hash
+   * describes the final artifact (no PNG encode/decode round-trip).
+   */
+  format?: 'image/png' | 'image/webp';
+  /** Encoder quality for lossy formats. Default 0.92 (canvasToBlob's default). */
+  quality?: number;
 }
 
 export class ImageDispatcher {
@@ -245,6 +261,9 @@ export class ImageDispatcher {
   ): Promise<ResampledImage> {
     let target: { w: number; h: number };
     let sourceGamut: GamutId | undefined;
+    let targetRect: Rect | undefined;
+    let format: 'image/png' | 'image/webp' | undefined;
+    let quality: number | undefined;
 
     // Legacy overload: plain { w, h } object
     if ('w' in options && 'h' in options) {
@@ -252,25 +271,29 @@ export class ImageDispatcher {
     } else {
       const opts = options as ResampleOptions;
       sourceGamut = opts.sourceGamut;
+      targetRect = opts.targetRect;
+      format = opts.format;
+      quality = opts.quality;
+      // With a crop window, maxSize/scale resolve against the RECT's own
+      // dimensions — the thumbnail of a slice must fit maxSize by the slice's
+      // aspect ratio, not the full shared asset's. Bitmap resolution stays
+      // lazy: only maxSize/scale need it, targetSize does not.
+      const bitmap = (opts.maxSize != null || opts.scale != null)
+        ? (this.resolveSourceDimensions(src) ?? await this.loadSourceDimensions(src))
+        : null;
+      const extentW = targetRect ? targetRect.w : bitmap?.width ?? 0;
+      const extentH = targetRect ? targetRect.h : bitmap?.height ?? 0;
+
       if (opts.maxSize != null) {
-        // Resolve maxSize → targetSize from source bitmap dimensions
-        const bmp = this.resolveSourceDimensions(src);
-        const bitmap = bmp ?? await this.loadSourceDimensions(src);
-        const ratio = bitmap.width / bitmap.height;
+        const ratio = extentW / extentH;
         const ms = opts.maxSize;
         target = ratio > 1
           ? { w: Math.round(ms), h: Math.round(ms / ratio) }
           : { w: Math.round(ms * ratio), h: Math.round(ms) };
       } else if (opts.scale != null) {
-        // Resolve scale → targetSize from the source's TRUE pixel dimensions.
-        // Zero-cost on cache hit; decode round-trip otherwise. This is what lets
-        // the resample pipeline scale a shared full-image src correctly
-        // instead of squashing it into the selection window.
-        const bmp = this.resolveSourceDimensions(src);
-        const bitmap = bmp ?? await this.loadSourceDimensions(src);
         target = {
-          w: Math.max(1, Math.round(bitmap.width * opts.scale)),
-          h: Math.max(1, Math.round(bitmap.height * opts.scale)),
+          w: Math.max(1, Math.round(extentW * opts.scale)),
+          h: Math.max(1, Math.round(extentH * opts.scale)),
         };
       } else if (opts.targetSize) {
         target = opts.targetSize;
@@ -285,6 +308,9 @@ export class ImageDispatcher {
       targetWidth: target.w,
       targetHeight: target.h,
       sourceGamut,
+      targetRect,
+      format,
+      quality,
     });
 
     return {

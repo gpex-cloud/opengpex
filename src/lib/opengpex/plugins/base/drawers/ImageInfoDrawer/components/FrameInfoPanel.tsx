@@ -66,19 +66,8 @@ interface FrameInfoPanelProps {
   isHighRes: boolean;
   /** Layer is lower resolution than canvas */
   isUpScaled: boolean;
-  /** Layer card's source bit depth, from frame-level metadata (badge shows only above 8). */
+  /** Layer card's source bit depth, from the layer's own asset colour identity (badge shows only above 8). */
   layerBitDepth?: number;
-  /**
-   * Document bit depth shown on the Canvas card (badge shows only above 8).
-   *
-   * The GPU working buffer is always rgba16float, so the working frame carries no
-   * depth of its own — the document's depth truth is the source asset's
-   * `ColorIdentity.bitDepth`, reached via `frame.assetId`. That number is what
-   * document-level behaviour (export defaults, depth gating) keys off, which is
-   * why the Canvas card surfaces it. The parent performs the asset lookup and
-   * falls back to frame metadata for documents without a source asset.
-   */
-  frameBitDepth?: number;
   /** Image metadata (EXIF, ICC, color space etc.) */
   imageMetadata?: ImageMetadata;
   /**
@@ -114,7 +103,6 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
   isHighRes,
   isUpScaled,
   layerBitDepth,
-  frameBitDepth,
   imageMetadata,
   hdrAvailable,
   hdrEnabled,
@@ -213,7 +201,7 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
   return (
     <div className="space-y-2">
       {/* Source File Row */}
-      <div className="flex flex-col bg-[var(--bg-stage)] px-2.5 pt-2 pb-[9px] rounded-xl border border-[var(--border-subtle)]">
+      <div className="flex flex-col bg-[var(--bg-stage)] px-2.5 pt-1.5 pb-2 rounded-xl border border-[var(--border-subtle)]">
         {/* Header: label + badges */}
         <div className="flex justify-between items-center mb-1">
           <div className="flex items-center gap-2">
@@ -411,30 +399,27 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
 
       </div>
 
-      {/* Canvas / Layer Dimensions Grid */}
+      {/* Canvas / Layer Dimensions Grid — the two cards share one geometry:
+          fixed-height header row (so the layer card's badge cannot inflate
+          only one card's interior) + tightened vertical padding. */}
       <div className="grid grid-cols-2 gap-2">
-        <div className="flex flex-col bg-[var(--bg-stage)] px-2.5 pt-2 pb-[9px] rounded-xl border border-[var(--border-subtle)]">
-          <div className="flex justify-between items-center mb-1">
-            <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight">
+        <div className="flex flex-col bg-[var(--bg-stage)] px-2.5 pt-1.5 pb-2 rounded-xl border border-[var(--border-subtle)]">
+          <div className="flex justify-between items-center h-3.5 mb-0.5">
+            <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight leading-none">
               {isClipMode ? "Selection" : "Canvas"}
             </span>
-            {frameBitDepth != null && frameBitDepth > 8 && (
-              <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
-                {frameBitDepth}-bit
-              </span>
-            )}
           </div>
           <span className="text-[10px] font-bold text-[var(--text-main)] tabular-nums uppercase">
             {baseW} × {baseH}
           </span>
         </div>
-        <div className="flex flex-col bg-[var(--bg-stage)] px-2.5 pt-2 pb-[9px] rounded-xl border border-[var(--border-subtle)]">
-          <div className="flex justify-between items-center mb-1">
-            <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight">
+        <div className="flex flex-col bg-[var(--bg-stage)] px-2.5 pt-1.5 pb-2 rounded-xl border border-[var(--border-subtle)]">
+          <div className="flex justify-between items-center h-3.5 mb-0.5">
+            <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tight leading-none">
               {hoveredLayerId ? "Hovered Layer" : "Active Layer"}
             </span>
-            {layerBitDepth != null && layerBitDepth > 8 && (
-              <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0.5 rounded shadow-sm border border-[var(--border-subtle)] uppercase">
+            {layerBitDepth != null && (
+              <span className="text-[8px] font-bold text-[var(--text-muted)] bg-[var(--bg-stage)] px-1.5 py-0 rounded shadow-sm border border-[var(--border-subtle)] uppercase leading-none">
                 {layerBitDepth}-bit
               </span>
             )}

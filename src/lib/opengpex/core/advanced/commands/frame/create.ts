@@ -47,7 +47,6 @@ import { newBranchName, newBranchSourceFileName, newFrameId } from './_naming';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 import type { ImageMetadata } from '@opengpex/editor/core/files/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
-import { transcodeBlob } from '@opengpex/editor/core/engine/utils/pixel-utils';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
 
@@ -176,12 +175,14 @@ export const FrameCreateCommands = {
           hasAlpha: true,
         };
 
-        // ── Step 4: Generate thumbnail (bounds pre-aligned to composite region) ───
-        const thumbResult = await pixels.image.resample(bundle.url, { maxSize: 512 });
-        const thumbBlob = await transcodeBlob(thumbResult.displayBlob, 'image/webp');
-        const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, {
+        // ── Step 4: Generate thumbnail (bounds pre-aligned to composite region).
+        // WebP straight from the Worker: skips a PNG encode/decode round-trip,
+        // and the returned hash describes the stored artifact.
+        const thumbResult = await pixels.image.resample(bundle.url, { maxSize: 512, format: 'image/webp', quality: 0.9 });
+        const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbResult.displayBlob, {
           width: thumbResult.width,
           height: thumbResult.height,
+          precomputedHash: thumbResult.precomputedHash,
         });
         const contentBounds = { x: 0, y: 0, w: composited.width, h: composited.height };
 

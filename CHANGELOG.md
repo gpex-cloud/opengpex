@@ -2,6 +2,11 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.35
+
+- Clipboard: cross-document pasting reworked — pasted layers keep their original bit depth and color space, fragments land centered on the target canvas, and pasting as a new frame builds from the original pixels; a paste that has to fall back to an 8-bit image now says so
+- Workspace: the Info panel now shows the active layer's own true bit depth (including 8-bit) instead of the document's, and the Canvas card drops its depth badge
+
 ## 2.0.34
 
 - Layers: peeling a fragment off a layer (Cmd/Ctrl+drag the selection) is now fully non-destructive — committing no longer bakes the source layer; the fragment lands as its own new layer above it and the hole stays as an editable mask, so deleting or toggling the mask puts the pixels back

@@ -39,6 +39,24 @@ export interface ResampleJob {
    * silently clamped to sRGB during resample. Absent → handler defaults to 'srgb'.
    */
   sourceGamut?: GamutId;
+  /**
+   * Optional SOURCE-space crop window applied before scaling (9-arg drawImage):
+   * the output shows only `targetRect`, scaled to targetWidth×targetHeight.
+   * Absent → the whole image is resampled (legacy behavior). Lets a thumbnail
+   * be cut from a slice of a LARGER shared asset in the Worker instead of a
+   * main-thread decode (paste's "New Frame" path).
+   */
+  targetRect?: { x: number; y: number; w: number; h: number };
+  /**
+   * Terminal ENCODE format of the output blob. Default 'image/png' (lossless —
+   * the fidelity contract of resampleLayer's user-content bakes). Thumbnails
+   * pass 'image/webp' to get their storage format straight from the Worker's
+   * canvas, skipping a PNG encode + decode + re-encode round-trip in the
+   * caller (and making the content hash describe the FINAL artifact).
+   */
+  format?: 'image/png' | 'image/webp';
+  /** Encoder quality for lossy formats. Default 0.92 (canvasToBlob's default). */
+  quality?: number;
 }
 
 // ─── DecodeJob ───

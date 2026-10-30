@@ -23,8 +23,9 @@ import { EditorContextValue, EditorCommand, ClipboardLayerMetadata } from '@open
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { polygonToShape } from '@opengpex/editor/core/geometry/operators/polygon';
 import * as P from '@opengpex/editor/core/advanced/protocols';
-
-// Removed direct dependency on storage singleton, using ctx injection instead
+import { computeFragmentCenter } from '@opengpex/editor/core/geometry/operators/transform';
+import { LayerUtils } from '@opengpex/editor/core/layer/utils';
+import { createFrameFromAsset } from '../frame/importers';
 
 /**
  * Extract common logic of Cut and Copy: generate physical fragment and write to clipboard.
@@ -181,7 +182,7 @@ export const LayerClipCommands = {
     name: 'Paste',
     undoable: true,
     execute: async (ctx: EditorContextValue, payload?: ClipboardLayerMetadata | { e?: ClipboardEvent }): Promise<void> => {
-      const { activeFrame, activeLayer, clipboard, actions } = ctx;
+      const { activeFrame, activeLayer, clipboard, actions, state } = ctx;
 
       try {
         // ═══ Step 1: Read clipboard → always returns { metadata?, blob? } ═══
@@ -198,8 +199,49 @@ export const LayerClipCommands = {
         // Neither metadata nor blob available → abort
         if (!meta && !blob) return;
 
-        // ═══ Step 2: No active frame → create new frame from blob ═══
+        // ═══ Step 2: Adjudicate the paste target ═══
+        // No open frame → the only destination is a new frame (silent).
+        // Same-frame copy → a new layer pasted in place, no dialog.
+        // Cross-frame / external → the user picks the destination.
+        const sourceLayer = meta?.layer;
+        const sourceFrame = meta?.sourceFrameId ? state.frames.byId[meta.sourceFrameId] : undefined;
+        const isSameFrame = !!(sourceLayer && meta!.sourceFrameId === activeFrame?.id);
+        let target: 'layer' | 'frame';
         if (!activeFrame) {
+          target = 'frame';
+        } else if (isSameFrame) {
+          target = 'layer';
+        } else {
+          const choice = await actions.askChoice("Paste Image", [
+            { id: 'layer', label: 'New Layer', description: 'Add to current creation as a new layer', icon: 'Layers', iconGradient: 'from-indigo-500 to-purple-600' },
+            { id: 'frame', label: 'New Frame', description: 'Start a brand-new independent creation', icon: 'PlusSquare', iconGradient: 'from-amber-500 to-orange-600' },
+          ]);
+          if (choice === null) return; // User cancelled
+          target = choice as 'layer' | 'frame';
+        }
+
+        // ═══ Step 3A: Paste as a new frame ═══
+        // High-fidelity first: an image layer with a crop window REFERENCES the
+        // original asset (bit depth / gamut ride along) — the cold start (no
+        // open frame) and cross-frame destinations share this path. Falls back
+        // to the 8-bit PNG when the asset cannot be resolved.
+        if (target === 'frame') {
+          const source = sourceLayer?.type === 'image' ? sourceLayer : undefined;
+          if (source?.visibleShape && source.assetId) {
+            // Warm the pool so the assembler's asset lookup hits (cold after reload).
+            try {
+              await ctx.assets.hydrate(new Set([source.assetId]));
+            } catch {
+              // IndexedDB unavailable — the assembler's own lookup falls back
+            }
+            const created = await createFrameFromAsset(ctx, {
+              assetId: source.assetId,
+              bounding: source.bounding,
+              visibleShape: source.visibleShape.rect,
+              displayName: `Pasted Image ${new Date().toLocaleTimeString()}`,
+            });
+            if (created) return;
+          }
           if (blob) {
             const file = new File(
               [blob],
@@ -207,59 +249,102 @@ export const LayerClipCommands = {
               { type: blob.type || 'image/png' }
             );
             await actions.adv.frame.create.trunk.execute({ source: file });
+          } else if (sourceLayer?.type === 'image') {
+            // An image layer was announced but its pixels cannot be resolved
+            // and no PNG projection exists — degrade honestly.
+            actions.setInteraction({
+              hud: { message: 'New Frame failed — source data is unavailable', type: 'error' }
+            });
           }
           return;
         }
 
-        // ═══ Step 3: Determine same-frame vs cross-frame/external ═══
-        const isSameFrame = !!(meta?.layer && meta.sourceFrameId === activeFrame.id);
+        // ═══ Step 3B: Paste as a layer into the active frame ═══
+        if (!activeFrame) return; // target 'layer' implies an open frame
+        const targetGroupId = activeLayer?.type === 'group' ? activeLayer.id : activeLayer?.groupId;
+        const insertIndex = ctx.layers.getInsertIndexAbove(activeFrame, activeLayer?.id);
 
-        if (isSameFrame) {
-          // ── Same-frame paste → logical path (paste in place) ──
-          const { id: _oldId, locked: _locked, interactive: _inter, ...layerWithoutId } = meta!.layer!;
-          const smartName = ctx.layers.getNewLayerName(
-            activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), `${meta!.layer!.name} Copy`
-          );
-
-          const targetGroupId = activeLayer?.type === 'group' ? activeLayer.id : activeLayer?.groupId;
-          const newLayer = ctx.layers.getNewLayer({
-            ...layerWithoutId,
-            groupId: targetGroupId,
-            name: smartName
-          });
-
-          const insertIndex = ctx.layers.getInsertIndexAbove(activeFrame, activeLayer?.id);
-          ctx.layers.addLayer(activeFrame.id, newLayer, insertIndex);
-
-        } else if (blob) {
-          // ── Cross-frame or external paste → physical path (blob) ──
-          const choice = await actions.askChoice("Paste Image", [
-            { id: 'layer', label: 'New Layer', description: 'Add to current creation as a new layer', icon: 'Layers', iconGradient: 'from-indigo-500 to-purple-600' },
-            { id: 'frame', label: 'New Frame', description: 'Start a brand-new independent creation', icon: 'PlusSquare', iconGradient: 'from-amber-500 to-orange-600' },
-          ]);
-
-          if (choice === null) return; // User cancelled
-
-          if (choice === 'frame') {
-            const file = new File(
-              [blob],
-              `Pasted Image ${new Date().toLocaleTimeString()}.png`,
-              { type: blob.type || 'image/png' }
-            );
-            await actions.adv.frame.create.trunk.execute({ source: file });
-          } else {
-            // choice === 'layer' → physical layer via createLayerFromBlob
-            const newLayer = await ctx.layers.createLayerFromBlob(blob, activeFrame);
-            const targetGroupId = activeLayer?.type === 'group' ? activeLayer.id : activeLayer?.groupId;
-            if (targetGroupId) {
-              newLayer.groupId = targetGroupId;
+        // Availability probe: same-frame references the pooled source directly
+        // (no probing). Cross-frame requires EVERY asset the layer references —
+        // its own pixels plus each bitmap mask's — to still resolve: `hydrate`
+        // skips ids already in the pool and otherwise reloads the persisted
+        // light record from IndexedDB, covering warm-pool and after-reload in
+        // one call. An image layer that fails this is a DEGRADATION (8-bit
+        // fallback + HUD notice); external payloads and non-image layers are not.
+        let usable = isSameFrame;
+        if (!usable && sourceLayer?.type === 'image') {
+          const assetIds = LayerUtils.collectAssetIds([sourceLayer])[sourceLayer.id] ?? [];
+          usable = assetIds.length > 0;
+          for (const assetId of usable ? assetIds : []) {
+            try {
+              await ctx.assets.hydrate(new Set([assetId]));
+            } catch {
+              // IndexedDB unavailable — the get below answers from the pool alone
             }
-
-            const insertIndex = ctx.layers.getInsertIndexAbove(activeFrame, activeLayer?.id);
-            ctx.layers.addLayer(activeFrame.id, newLayer, insertIndex);
+            if (!ctx.assets.get(assetId)) {
+              usable = false;
+              break;
+            }
           }
         }
-        // else: meta exists but no blob and not same-frame — nothing to do
+
+        if (usable) {
+          // ── Logical path: insert by reference, zero re-encode. The src and
+          // assetId inherited from the clipboard render through the pool
+          // (`assets.resolve`), so a stale objectURL never matters. ──
+          const source = sourceLayer!;
+          const {
+            id: _id, locked: _locked, interactive: _inter, hostId: _hostId,
+            ...layerWithoutId
+          } = source;
+              // Pose rule: identical canvas sizes share one
+          // world coordinate system → keep the source pose verbatim (branch
+          // frames match their parent's canvas — in-place paste). Different
+          // sizes → re-derive the pose so the CONTENT center — cx is a pose
+          // value, not a position: content world center = cx + O(rect.origin)
+          // — lands on the target canvas center (world origin).
+          const sameCanvas = !!sourceFrame
+            && sourceFrame.canvas.w === activeFrame.canvas.w
+            && sourceFrame.canvas.h === activeFrame.canvas.h;
+          const centered = computeFragmentCenter(
+            { x: 0, y: 0 },
+            { x: source.visibleShape?.rect.x ?? 0, y: source.visibleShape?.rect.y ?? 0 },
+            source.rotation ?? 0,
+            source.flip ?? { h: false, v: false },
+          );
+          const pose = sameCanvas
+            ? { cx: source.cx, cy: source.cy }
+            : { cx: centered.x, cy: centered.y };
+          const smartName = ctx.layers.getNewLayerName(
+            activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), `${source.name} Copy`
+          );
+          const newLayer = ctx.layers.getNewLayer({
+            ...layerWithoutId,
+            cx: pose.cx,
+            cy: pose.cy,
+            birthCenter: { cx: pose.cx, cy: pose.cy },
+            groupId: targetGroupId,
+            name: smartName,
+          });
+          ctx.layers.addLayer(activeFrame.id, newLayer, insertIndex);
+        } else if (blob) {
+          // ── Physical fallback: 8-bit blob re-ingest ──
+          if (sourceLayer?.type === 'image') {
+            actions.setInteraction({
+              hud: { message: 'Pasted as 8-bit — original layer data is unavailable', type: 'info' }
+            });
+          }
+          const newLayer = await ctx.layers.createLayerFromBlob(blob, activeFrame);
+          if (targetGroupId) {
+            newLayer.groupId = targetGroupId;
+          }
+          ctx.layers.addLayer(activeFrame.id, newLayer, insertIndex);
+        } else if (sourceLayer?.type === 'image') {
+          // Degraded payload with no blob at all — nothing to materialize.
+          actions.setInteraction({
+            hud: { message: 'Paste failed — source data is unavailable', type: 'error' }
+          });
+        }
       } catch (err) {
         console.error('[ClipCommands] Paste operation failed:', err);
       }

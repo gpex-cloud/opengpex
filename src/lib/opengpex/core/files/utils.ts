@@ -193,3 +193,62 @@ export function isComfyUiWorkflow(meta?: ImageMetadata | null): string | undefin
     return undefined;
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Gamut sniff — paste-time identity inference from bare PNG bytes
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import { iterateChunks, verifySignature } from './handlers/png/chunks';
+import { readiCCP } from './handlers/png/readers';
+import { inferColorSpaceFromIcc, parseIccProfileName } from './shared/icc';
+import { toGamutId } from '../types';
+import type { GamutId } from '../types';
+
+/**
+ * sniffPngGamut — Best-effort gamut inference from a bare PNG byte stream.
+ *
+ * External pastes arrive as an opaque image blob with no ingest metadata, so
+ * the embedded ICC profile (iCCP chunk) is the only identity signal available.
+ * The sniff reuses the same parsing and name-inference stack the file ingest
+ * uses (PNG chunk iteration → zlib-decoded iCCP → profile-name → color space)
+ * so a pasted file is tagged exactly as the same file would be on import.
+ *
+ * Deliberately conservative: only `display-p3` is ever returned as a
+ * non-default tag. The 8-bit resident texture lane decodes with the standard
+ * sRGB EOTF, which is correct for sRGB and Display-P3 (both sRGB-curve) but
+ * WRONG for Adobe RGB / ProPhoto / Rec.2020 (pure-gamma curves) — tagging
+ * those here would promise an identity the render lane cannot honor and
+ * misdecode every sample. Wide-gamut 8-bit sources therefore keep the
+ * untagged default (an honest limitation of the external paste lane, and in
+ * practice a non-case: browsers flatten clipboard PNGs to sRGB/P3 anyway).
+ *
+ * Returns `undefined` when the bytes are not a decodable PNG, carry no iCCP
+ * chunk, or name a profile that must not be tagged on the 8-bit lane. Never
+ * throws: a sniff is metadata enrichment, and any failure means "keep the
+ * default".
+ */
+export async function sniffPngGamut(bytes: Uint8Array): Promise<GamutId | undefined> {
+  try {
+    if (!verifySignature(bytes)) return undefined;
+
+    for (const chunk of iterateChunks(bytes)) {
+      if (chunk.type !== 'iCCP') continue;
+      const iccp = await readiCCP(chunk.data);
+      if (!iccp) return undefined;
+
+      // The iCCP chunk's own name field is a free-form copy label; the profile
+      // description embedded in the ICC bytes is the authority, so prefer it.
+      const profileName = parseIccProfileName(iccp.iccBytes) ?? iccp.profileName;
+      const colorSpace = inferColorSpaceFromIcc(profileName);
+      if (colorSpace === 'unknown') return undefined;
+
+      // Only a gamut the 8-bit sRGB-EOTF lane decodes correctly may be tagged;
+      // wide gamuts fall through to the untagged default (see module comment).
+      const gamut = toGamutId(colorSpace);
+      return gamut === 'display-p3' ? gamut : undefined;
+    }
+  } catch {
+    return undefined; // malformed stream — metadata enrichment must not throw
+  }
+  return undefined;
+}

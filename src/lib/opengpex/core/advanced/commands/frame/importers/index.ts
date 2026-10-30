@@ -263,3 +263,148 @@ export async function revertGifFrame(ctx: EditorContextValue, frameId: string): 
     return false;
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// createFrameFromAsset — "Registered asset slice → new Frame"
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import { asLocalShape } from '@opengpex/editor/core/types';
+import { getDefaultCanvasClipBox } from '@opengpex/editor/core/helpers/selection';
+import { newFrameId } from '../_naming';
+import { LayerFactory } from '@opengpex/editor/core/layer';
+import { computeFragmentCenter } from '@opengpex/editor/core/geometry/operators/transform';
+import type { ImageMetadata } from '@opengpex/editor/core/files/types';
+import { presets } from '@opengpex/editor/core/helpers/preferences';
+
+const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
+
+/**
+ * createFrameFromAsset — assemble and commit a new trunk frame whose base layer
+ * REFERENCES an already-registered asset, cropped to `visibleShape`.
+ *
+ * The paste command's "New Frame" choice used to round-trip the clipboard's
+ * 8-bit PNG through `createFrameFromFile`, re-ingesting it as a fresh 8-bit
+ * sRGB asset — a silent bit-depth/gamut downgrade for internal copies whose
+ * source asset is still resident. This importer instead builds the frame
+ * natively (same assembly contract as `importSingleImage` /
+ * `branchFromSelection`) with the base layer referencing the original
+ * content-addressed asset: the fragment is expressed as a narrowed
+ * `visibleShape` crop window (the same shape every fragment layer carries),
+ * so the high-depth `dec:` truth and the true gamut tag ride along with the
+ * asset id — zero re-encode, zero identity loss.
+ *
+ * The thumbnail is cropped from the asset's display blob (NOT resampled
+ * whole): a fragment frame's canvas shows only the slice, so a full-asset
+ * thumbnail would picture a different document than the frame opens.
+ *
+ * @returns the new frame id, or `undefined` when the asset is not resolvable —
+ *          the caller is expected to fall back to the 8-bit blob path in that
+ *          case (degradations stay honest, never silent: surface the HUD
+ *          notice there).
+ */
+export async function createFrameFromAsset(
+  ctx: EditorContextValue,
+  params: {
+    /** Content-addressed id of the ALREADY-REGISTERED source asset. */
+    assetId: string;
+    /** Fragment bounding (layer-local px) — becomes the new frame's canvas size. */
+    bounding: { w: number; h: number };
+    /** Fragment crop window in source-asset pixel coords (the layer's visibleShape). */
+    visibleShape: { x: number; y: number; w: number; h: number };
+    /** Frame display name, e.g. the "Pasted Image …" convention of the blob path. */
+    displayName: string;
+  },
+): Promise<string | undefined> {
+  const { assets, actions, state, geometry, pixels } = ctx;
+  const { assetId, bounding, visibleShape, displayName } = params;
+
+  const asset = assets.get(assetId);
+  if (!asset) return undefined;
+
+  const canvas = { w: bounding.w, h: bounding.h };
+
+  // ── Thumbnail: crop the slice out of the shared asset and scale to the
+  // same 512 long edge the file-import thumbnails use (`importSingleImage`)
+  // — one Worker pass via resample's targetRect (crop + scale + WebP encode
+  // together); no main-thread decode of the (possibly huge) shared asset.
+  const thumbResult = await pixels.image.resample(asset.url, {
+    maxSize: 512,
+    targetRect: visibleShape,
+    sourceGamut: asset.gamut,
+    format: 'image/webp',
+    quality: 0.9,
+  });
+  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbResult.displayBlob, {
+    width: thumbResult.width,
+    height: thumbResult.height,
+    precomputedHash: thumbResult.precomputedHash,
+  });
+
+  // ── Frame metadata: the asset's own colour identity is the document truth
+  // (bit depth / gamut), same anchor `branchFromSelection` uses. No EXIF is
+  // inherited — a pasted slice is a new document, not the source file.
+  const frameMetadata: ImageMetadata = {
+    sourceFormat: 'unknown',
+    sourceFileName: asset.sourceFileName,
+    width: canvas.w,
+    height: canvas.h,
+    dpi: 72,
+    dpiSource: 'default',
+    colorSpace: asset.gamut,
+    bitDepth: asset.bitDepth,
+    hasAlpha: true,
+    raw: {},
+  };
+
+  // ── Camera + canvas clip box: identical contract to single-file imports ──
+  const { insets } = state.ui.theme.config;
+  const camera = geometry.camera.getFitCamera(
+    state.ui.viewportDim,
+    canvas,
+    { padding: VIEWPORT_FIT_PADDING, maxScale: 1, offsetTop: insets.top, offsetLeft: insets.fixed.left, offsetRight: insets.fixed.right },
+  );
+  const canvasClipBox = getDefaultCanvasClipBox(canvas);
+
+  // ── Base layer: reference the source asset, crop via visibleShape. The
+  // slice sits centered on the new canvas (world origin = canvas center).
+  // cx/cy is a POSE value, not the content position — the content world
+  // center sits at cx + O(rect.origin), so the pose is re-derived so the
+  // CONTENT lands centered even when the crop window sits far from the
+  // source asset's top-left (a slice from a big image carries a large
+  // rect origin; zeroing cx/cy would render the slice off-canvas).
+  const pose = computeFragmentCenter(
+    { x: 0, y: 0 },
+    { x: visibleShape.x, y: visibleShape.y },
+    0,
+    { h: false, v: false },
+  );
+  const baseLayer = LayerFactory.getNewLayer({
+    name: 'Background',
+    src: asset.url,
+    assetId,
+    cx: pose.x,
+    cy: pose.y,
+    locked: true,
+    bounding,
+    visibleShape: asLocalShape(visibleShape),
+  });
+  const expandedLayers = LayerFactory.expandLayers([baseLayer]);
+
+  const newFrame = LayerFactory.getNewFrame({
+    id: newFrameId(false),
+    name: displayName,
+    source: displayName,
+    layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
+    activeLayerId: baseLayer.id,
+    canvas,
+    camera,
+    canvasClipBox,
+    assetId,
+    thumbnail: { src: thumbAssetUrl, assetId: thumbAssetId },
+    dpi: 72,
+    metadata: frameMetadata,
+  });
+
+  actions.addFrame(newFrame, true);
+  return newFrame.id;
+}

@@ -238,6 +238,34 @@ export async function trimTransparentMargins(
 
   const trimW = right - left + 1;
   const trimH = bottom - top + 1;
+
+  // High-depth track: slice the naked buffer with the SAME window as the
+  // 8-bit display crop, so both tracks of the trimmed asset stay in register.
+  // The naked buffer shares the display bitmap's dimensions by contract
+  // (composite emits both tracks at the same size), which is what makes the
+  // 8-bit-derived alpha bbox map 1:1 onto naked-pixel rows. The slice is
+  // generic over the element type (Uint16Array / Float32Array) via the source
+  // array's own constructor — no per-format branching. If a producer breaks
+  // the dims contract, the track is DROPPED instead of sliced misaligned, and
+  // the identity claims that referenced it (dataFormat, linear trc) are
+  // stripped: the trimmed asset must never claim a truth that is not there.
+  let highDepthSource = image.highDepthSource;
+  let colorIdentity = image.colorIdentity;
+  if (highDepthSource) {
+    const naked = sliceNakedBuffer(highDepthSource, left, top, trimW, trimH, width, height);
+    if (naked) {
+      highDepthSource = naked;
+    } else {
+      highDepthSource = undefined;
+      colorIdentity = { ...image.colorIdentity, dataFormat: undefined, trc: 'srgb-trc' };
+    }
+  } else if (image.colorIdentity.dataFormat) {
+    // Identity claims a high-depth buffer that is absent (producer gap) — the
+    // same honesty rule applies: strip the claim so the persisted light record
+    // cannot send consumers hunting for a `dec:` payload that does not exist.
+    colorIdentity = { ...image.colorIdentity, dataFormat: undefined, trc: 'srgb-trc' };
+  }
+
   const trimmedCanvas = new OffscreenCanvas(trimW, trimH);
   const trimmedCtx = trimmedCanvas.getContext('2d', { colorSpace: canvasColorSpace })!;
   const trimmedBitmap = await createImageBitmap(imageData, left, top, trimW, trimH);
@@ -251,11 +279,39 @@ export async function trimTransparentMargins(
       displayBlob,
       width: trimW,
       height: trimH,
-      colorIdentity: image.colorIdentity,
+      colorIdentity,
+      highDepthSource,
       bounds: { x: image.bounds.x + left, y: image.bounds.y + top, w: trimW, h: trimH },
     },
     offset: { x: left, y: top },
   };
+}
+
+/**
+ * sliceNakedBuffer — crop a naked high-depth RGBA buffer to the given window,
+ * row by row, preserving the source element type (Uint16Array or Float32Array)
+ * via its own constructor. Returns `null` when the buffer's dimensions do not
+ * match the expected `fullW × fullH` display space — callers must drop the
+ * high-depth track in that case rather than slice misaligned rows.
+ */
+export function sliceNakedBuffer(
+  naked: { data: Uint16Array | Float32Array; width: number; height: number },
+  left: number,
+  top: number,
+  trimW: number,
+  trimH: number,
+  fullW: number,
+  fullH: number,
+): { data: Uint16Array | Float32Array; width: number; height: number } | null {
+  if (naked.width !== fullW || naked.height !== fullH) return null;
+
+  const ArrayCtor = naked.data.constructor as new (length: number) => Uint16Array | Float32Array;
+  const trimmedData = new ArrayCtor(trimW * trimH * 4);
+  for (let row = 0; row < trimH; row++) {
+    const srcOffset = ((top + row) * naked.width + left) * 4;
+    trimmedData.set(naked.data.subarray(srcOffset, srcOffset + trimW * 4), row * trimW * 4);
+  }
+  return { data: trimmedData, width: trimW, height: trimH };
 }
 
 /**

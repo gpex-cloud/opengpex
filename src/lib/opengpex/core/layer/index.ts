@@ -17,7 +17,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { GeometryService, PixelService, AssetService, LayerService, LayerUpdateTx, LayerEditor, asLocalShape, EditorActions, EditorData, Layer, VectorMask, BitmapMask } from '@opengpex/editor/core/types';
+import { GeometryService, PixelService, AssetService, LayerService, LayerUpdateTx, LayerEditor, asLocalShape, EditorActions, EditorData, Layer, VectorMask, BitmapMask, GamutId } from '@opengpex/editor/core/types';
+import { sniffPngGamut } from '@opengpex/editor/core/files/utils';
 import { LayerFactory } from './factory';
 import { createFragmentOperations } from './services/fragment';
 import { createResampleOperations } from './services/resample';
@@ -276,7 +277,23 @@ export function createLayerService(
       const bmp = await createImageBitmap(blob);
       const dim = { w: bmp.width, h: bmp.height };
       bmp.close();
-      const { assetId, url } = await assets.register(blob, {width: dim.w, height: dim.h});
+
+      // Best-effort gamut sniff from the blob's embedded ICC profile: external
+      // pastes carry no ingest metadata, and tagging a Display-P3 screenshot
+      // as sRGB would shift every hue. The sniff only ever returns gamuts the
+      // 8-bit resident lane decodes correctly (see gamutSniff.ts) — anything
+      // else falls through to the untagged sRGB default. Never throws.
+      let snGamut: GamutId | undefined;
+      try {
+        snGamut = await sniffPngGamut(new Uint8Array(await blob.arrayBuffer()));
+      } catch {
+        snGamut = undefined; // enrichment only — default identity wins
+      }
+      const { assetId, url } = await assets.register(blob, {
+        width: dim.w,
+        height: dim.h,
+        ...(snGamut ? { gamut: snGamut } : {}),
+      });
 
       // layer.cx/cy uses the world coordinate system (origin at canvas center), directly using the screenToWorld result
       let cx, cy;

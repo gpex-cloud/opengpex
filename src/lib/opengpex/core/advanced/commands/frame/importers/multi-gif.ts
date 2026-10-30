@@ -28,7 +28,6 @@ import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
 import type { DecodeResult } from '@opengpex/editor/core/files/types';
 import type { ImportOptions } from './_types';
-import { transcodeBlob } from '@opengpex/editor/core/engine/utils/pixel-utils';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // buildGifFrameContent — Pure GIF content builder (shared by import + revert)
@@ -202,12 +201,13 @@ export async function importAnimatedGif(
   const content = await buildGifFrameContent(ctx, decoded, rawFileHash);
   if (!content) return ''; // User cancelled
 
-  // 3. Generate thumbnail
+  // 3. Generate thumbnail — WebP straight from the Worker: skips a PNG
+  // encode/decode round-trip, and the returned hash describes the stored
+  // artifact (register consumes it).
   const firstLayerId = content.layers.order[0];
   const firstLayer = content.layers.byId[firstLayerId];
-  const thumbResult = await pixels.image.resample(firstLayer.src, { maxSize: 512 });
-  const thumbBlob = await transcodeBlob(thumbResult.displayBlob, 'image/webp');
-  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbBlob, { width: thumbResult.width, height: thumbResult.height });
+  const thumbResult = await pixels.image.resample(firstLayer.src, { maxSize: 512, format: 'image/webp', quality: 0.9 });
+  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbResult.displayBlob, { width: thumbResult.width, height: thumbResult.height, precomputedHash: thumbResult.precomputedHash });
 
   // 4. Assemble and add frame
   const frameName = file.name.replace(/\.[^.]+$/, '');
