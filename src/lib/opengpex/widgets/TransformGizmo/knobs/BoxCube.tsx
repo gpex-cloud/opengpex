@@ -47,7 +47,7 @@ export const BoxCube = React.memo(function BoxCube() {
             style={{ width: '100%', height: '100%', display: 'block', overflow: 'visible' }}
           >
             <rect x={inset} y={inset} width={side} height={side} fill="#ffffff" stroke="#000000" strokeWidth={MARK_STROKE_W + 2} />
-            <rect x={inset} y={inset} width={side} height={side} fill="none" stroke="#ffffff" strokeWidth={MARK_STROKE_W} />
+            <rect x={inset} y={inset} width={side} height={side} fill="#ffffff" stroke="#ffffff" strokeWidth={MARK_STROKE_W} />
           </svg>
         </div>
       ))}

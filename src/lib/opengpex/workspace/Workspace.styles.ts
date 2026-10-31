@@ -30,6 +30,10 @@ export const WORKSPACE_GEOMETRY = {
     HEADER_HEIGHT: 48,
     /** ToolMenu sidebar width in pinned mode (px). Adjust to change pinned width. */
     TOOL_MENU_WIDTH: 44,
+    /** Fallback width (px) for floating drawer panels whose plugin declares no preferredWidth. */
+    PANEL_WIDTH_NORMAL: 320,
+    /** Compact fallback width (px), selected via ui.drawerWidthMode. */
+    PANEL_WIDTH_COMPACT: 280,
 };
 
 // [REFACTOR-Step2] `getWorkspaceLayout()` (and its `offsets` field) was the static

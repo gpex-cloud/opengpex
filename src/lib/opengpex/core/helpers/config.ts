@@ -89,13 +89,6 @@ export const WORKER_RENDER_ENGINE: 'canvas2d' | 'wasm' = 'canvas2d';
 /** Whether in cloud service mode. Set to true for SaaS production environments, false for local/dev mode */
 export const IS_CLOUD_MODE = process.env.NEXT_PUBLIC_GPEX_CLOUD_MODE === 'true' || process.env.GPEX_CLOUD_MODE === 'true';
 
-/**
- * Text layer editor padding configuration (px)
- * Simultaneously affects: CSS padding of contenteditable in edit mode and the start offset of fillText during rasterization.
- * Keeping both consistent avoids visual jumping between edit and non-edit states.
- */
-export const TEXT_LAYER_PADDING = { x: 4, y: 2 } as const;
-
 /** Physical directory for persisted plugins (supports local adaptive relative path fallback), kept as a pure string, excluding Node's native path module to prevent browser-side compile crashes */
 export const PERSISTENT_PLUGINS_DIR = 'data/plugins/user';
 

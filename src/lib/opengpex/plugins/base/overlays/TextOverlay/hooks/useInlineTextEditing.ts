@@ -19,110 +19,30 @@
 
 'use client';
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { useEditorState, useEditorServices, useVolatileInteraction } from '@opengpex/editor/core/context';
-import { asLocalShape } from '@opengpex/editor/core/types';
-import type { TextLayerData } from '@opengpex/editor/core/types/models';
-import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
-import { LayersDrawerAPI } from '../../drawers/LayersDrawer/protocols';
+import { asLocalShape, VolatileState } from '@opengpex/editor/core/types';
+import { LayerUtils } from '@opengpex/editor/core/layer/utils';
+import { CraftDrawerAPI } from '../../../drawers/CraftDrawer/protocols';
+import { LayersDrawerAPI } from '../../../drawers/LayersDrawer/protocols';
 import {
   TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID,
   TEXT_OVERLAY_SIGNAL_SESSION_TYPE,
   TEXT_OVERLAY_EVT_COMMIT_REQUEST,
-  _CMD_MODIFY_COMMIT_UID,
-} from './protocols';
-import type { TextEditingSession } from './protocols';
-import { consumePendingEditCaretPoint } from './interactions';
+  TEXT_SESSION_RAW_EDITS,
+} from '../protocols';
+import type { TextEditingSession } from '../protocols';
+import { consumePendingEditCaretPoint } from '../interactions';
+import { isSessionDirty } from './session';
+import { textLayoutSignature } from './styling';
 import { placeCaretAtPoint } from '@opengpex/editor/widgets/TextCaretKit';
-import { compensateCenterX, compensateCenterY } from './geometry';
+import { compensateCenterX, compensateCenterY } from '../geometry';
 import { normalizeBoxMode } from '@opengpex/editor/core/types/models';
-import { measureEditorBox } from './geometry';
-import { TEXT_PREEDIT_CURSOR } from '@opengpex/editor/icons';
+import { getEditorMeasureContext, measureEditorBox } from './measuring';
 import { useTextEditorFastSync } from './useFastSync';
 import {
   computeTextLayout,
-  type TextMeasureContext,
 } from '@opengpex/editor/core/engine/text/textLayout';
-
-// ─── useTextOverlayState ───────────────────────────────────────────────────────
-
-/**
- * useTextOverlayState: TextOverlay main component state Hook
- *
- * Reads activeCraft and editingLayerId signals, handling layer validity check and Escape exit logic.
- * Returns core judgment data required for rendering.
- */
-export function useTextOverlayState() {
-  const { state, activeFrame } = useEditorState();
-  const { actions } = useEditorServices();
-
-  const activeCraft = state.interaction.signals[CraftDrawerAPI.signals.activeCraft];
-  const editingLayerId = state.interaction.signals[TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID] as string | null;
-
-  // Detect if the layer pointed by signal is still valid
-  const layerExists = !!(editingLayerId && activeFrame?.layers.byId[editingLayerId]?.type === 'text');
-
-  useEffect(() => {
-    if (editingLayerId && !layerExists) {
-      actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
-    }
-  }, [editingLayerId, layerExists, actions]);
-
-  // Escape in pre-edit state -> exits craft mode (via CraftDrawer's deactivate command, following cross-plugin boundaries)
-  useEffect(() => {
-    if (activeCraft !== 'text' || editingLayerId) return;
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        // Deactivate tool via CraftDrawer's command system (following signal ownership boundaries)
-        actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
-      }
-    };
-
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [activeCraft, editingLayerId, actions]);
-
-  // Pre-edit cursor: the text tool registers its pre-edit cursor as a plain
-  // base cursor — NO hover affordance. Moving an existing text layer requires
-  // the Cmd spring key (TextMoveHandler's pre-edit branch is gated to it), so
-  // the pointer keeps the tool cursor whether or not it is over a text box.
-  // Live editing session: the contenteditable owns the cursor (its base
-  // 'text' comes from the element itself; Cmd shows the spring-key move
-  // cursor through the global-cursor rule), so nothing is registered.
-  useEffect(() => {
-    if (activeCraft !== 'text' || !activeFrame || editingLayerId) return;
-    actions.fast.cursor.register('text', TEXT_PREEDIT_CURSOR);
-    return () => {
-      actions.fast.cursor.register('text', null);
-    };
-  }, [activeCraft, editingLayerId, activeFrame, actions]);
-
-  return {
-    activeFrame,
-    activeCraft,
-    editingLayerId,
-    layerExists,
-  };
-}
-
-/**
- * Shared offscreen measuring surface for the editor's layout calls (same
- * structurally-satisfied Canvas2D context the vector-source mapper uses).
- * Exported so the inline caret solver (TextCaretKit caretLayout) measures
- * with the identical context — caret geometry and GPU geometry must agree.
- */
-let editorMeasureContext: TextMeasureContext | null = null;
-export function getEditorMeasureContext(): TextMeasureContext | null {
-  if (editorMeasureContext) return editorMeasureContext;
-  if (typeof document === 'undefined') return null;
-  const ctx = document.createElement('canvas').getContext('2d');
-  if (!ctx) return null;
-  editorMeasureContext = ctx as unknown as TextMeasureContext;
-  return editorMeasureContext;
-}
 
 // ─── useInlineTextEditing ──────────────────────────────────────────────────────
 
@@ -154,6 +74,15 @@ export function useInlineTextEditing(
   const containerRef = internalContainerRef;
   const editorRef = externalEditorRef ?? internalEditorRef;
 
+  // Live content mirror for render-time consumers (fixed-mode vertical
+  // alignment offset, caret layout input). Typed content lives in the DOM and
+  // the fast-track draft only — the slow track is frozen during the session —
+  // so without this local mirror the render-time layout math would keep
+  // solving against the session-start content. Local component state (NOT the
+  // slow track): one re-render of this memoized editor per keystroke, no
+  // Redux dispatch.
+  const [liveContent, setLiveContent] = useState<string | null>(null);
+
   // Fast Track integration: make editing area follow camera changes
   const { notifyBoundingChange: internalNotifyBoundingChange } = useTextEditorFastSync(
     containerRef,
@@ -176,22 +105,46 @@ export function useInlineTextEditing(
       frameId: activeFrame.id,
       originalSnapshot: null,
       disposed: false,
+      historyMark: actions.history.mark(activeFrame.id),
     };
 
     if (session.type === 'modify') {
       // Content + layout only — geometry (cx/cy/rotation) is intentionally
       // excluded: Cmd/Ctrl+Drag during editing commits through its own
       // independent undoable transaction and must survive cancel.
+      //
+      // This snapshot exists ONLY for the commit's dirty gate ("did the
+      // session change anything?") and the empty-content restore on cancel.
+      // It is NOT a drift compensation: interim writes live in the fast-track
+      // draft and never dirty the slow track, so the snapshot always equals
+      // the state the session-start checkpoint froze.
       session.originalSnapshot = {
         textData: { ...layer.textData! },
         bounding: { ...layer.bounding },
         visibleShape: layer.visibleShape!,
       };
     }
+    // Create sessions capture nothing: the place command's checkpoint froze
+    // the placed state and the session never writes the slow track, so the
+    // empty-content exit needs only rewindTo + undo — the pending undo pops
+    // the creation step against a clean diff with no snapshot restore.
 
     sessionRef.current = session;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Session unmount safety net: commit/cancel are the normal bookends, but an
+  // abnormal exit (e.g. a document-history undo removed the layer mid-session,
+  // or the frame switched) tears the editor down without either running. The
+  // session's fast-track drafts must still be dropped, or they shadow Redux
+  // geometry forever (the pre-edit frozen-box leak, through the back door).
+  useEffect(() => () => {
+    const session = sessionRef.current;
+    if (session && !session.disposed) {
+      actions.fast.discardLayerDraft(session.layerId);
+      sessionRef.current = null;
+    }
+  }, [actions]);
 
   // Initialize content + auto focus
   useEffect(() => {
@@ -233,30 +186,93 @@ export function useInlineTextEditing(
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+
+  // ─── Style-driven box re-measure ──────────────────────────────────────
+  // Content-hugging modes re-measure the box from the DOM after every layout
+  // change. auto_width measures both axes; auto_height keeps the locked width
+  // and re-measures only the height (the CSS width never changes); fixed is
+  // excluded — the user owns that box, so clipping overflow is the mode's
+  // semantics, not a bug.
+  const remeasureEditorBox = useCallback(() => {
+    const el = editorRef.current;
+    if (!el || !activeFrame || !layer) return;
+    const mode = normalizeBoxMode(textData?.boxMode);
+    if (mode !== 'auto_width' && mode !== 'auto_height') return;
+    const { w, h } = measureEditorBox(el, activeFrame.camera.k);
+    const actualW = mode === 'auto_width' ? w : layer.bounding.w;
+    notifyBoundingChange(actualW, h);
+    // editorRef is a stable ref — the React Compiler tracks its `.current`
+    // read itself and forbids the ref in the manual deps (the legacy
+    // exhaustive-deps rule disagrees; it is suppressed here).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFrame, layer, textData, notifyBoundingChange]);
+
   // ─── handleInput ──────────────────────────────────────────────────────
   const handleInput = useCallback(() => {
     const el = editorRef.current;
     if (!el || !activeFrame) return;
     const content = el.innerText || '';
-    const mode = normalizeBoxMode(textData?.boxMode);
 
-    // Content-hugging modes re-measure the box from the DOM on every input.
-    // auto_width measures both axes; auto_height keeps the locked width and
-    // re-measures only the height (the CSS width never changes).
-    if (mode === 'auto_width' || mode === 'auto_height') {
-      const { w, h } = measureEditorBox(el, activeFrame.camera.k);
-      const actualW = mode === 'auto_width' ? w : layer!.bounding.w;
-      notifyBoundingChange(actualW, h);
-    }
+    remeasureEditorBox();
 
-    actions.updateLayer(activeFrame.id, layerId, {
-      textData: { ...textData!, content },
+    // Flag the raw span so the next LEDGERED write (a panel style command)
+    // flushes it into its own checkpoint step first — otherwise the style
+    // command's baseline diff would swallow the typing and one undo would
+    // revert text and style together. Cleared by whoever flushes, and at
+    // session commit/cancel.
+    TEXT_SESSION_RAW_EDITS.pending = true;
+
+    // Typed content lands ONLY in the fast-track draft: the volatile patch
+    // shallow-overlays the layer, so textData must be written as a whole
+    // object — the session's slow-track textData as the style base, with the
+    // fresh DOM content on top. The draft write follows the local-merge
+    // pattern (spread the existing patch; never assign a fresh patch object)
+    // so the geometry keys notifyBoundingChange wrote survive alongside the
+    // content key. The slow track is ledgered exclusively at the session
+    // bookends (commitEditing's final updateLayer) — an unledgered
+    // updateLayer here left the frame dirty above the session checkpoint.
+    const compositeKey = LayerUtils.getCompositeKey(activeFrame.id, layerId);
+    actions.mutateVolatile((v: VolatileState) => {
+      const draft = v.buffered.layers[compositeKey] ?? {};
+      v.buffered.layers[compositeKey] = {
+        ...draft,
+        patch: {
+          ...draft.patch,
+          textData: { ...(draft.patch?.textData ?? textData!), content },
+        },
+      };
     });
+
+    // Refresh the render-time layout consumers (fixed-mode vertical
+    // alignment, caret layout input) against the content that just landed in
+    // the DOM — see the liveContent note above.
+    setLiveContent(content);
     // editorRef is a stable ref — the React Compiler tracks its `.current`
     // read itself and forbids the ref in the manual deps (the legacy
     // exhaustive-deps rule disagrees; it is suppressed here).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actions, activeFrame, layerId, textData, layer, notifyBoundingChange]);
+  }, [actions, activeFrame, layerId, textData, layer, notifyBoundingChange, remeasureEditorBox]);
+
+  // ─── Style changes re-measure the box (layout-affecting fields only) ──
+  // Style changes arriving while a session is live (the CraftDrawer panel
+  // writes textData directly) re-lay-out the contenteditable and the GPU
+  // renderer immediately, but nothing re-measured the box — bounding and
+  // visibleShape stayed stale until commit, so GPU text clipped against its
+  // own visibleShape while typing re-measured in real time. This effect
+  // closes that gap: whenever a layout-affecting style field changes on the
+  // live layer, push the freshly laid-out DOM size through the same fast
+  // channel the input path uses. Keyed on the layout-affecting signature so
+  // decorative-only changes (italic, underline, …) don't trigger it, and
+  // skipped on mount — the session-mount effect owns the first measurement.
+  const layoutSignature = textLayoutSignature(textData);
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
+    remeasureEditorBox();
+  }, [layoutSignature, remeasureEditorBox]);
 
   // ─── cancelEditing (session-aware) ────────────────────────────────────
   const cancelEditing = useCallback(() => {
@@ -264,17 +280,37 @@ export function useInlineTextEditing(
     if (!session || session.disposed) return;
     session.disposed = true;
 
+    // Session-end fast-track bookend: the live box measurements wrote layer
+    // drafts into the volatile buffer as visibility aids; drop them (never
+    // land) BEFORE the undo/restore dispatches below, so the merged frame the
+    // Ticker renders reflects the restored Redux state instead of a stale
+    // geometry shadow. Without this the draft survives the session forever and
+    // freezes every pre-edit style-driven box update until an unrelated
+    // gesture happens to flush the buffer.
+    actions.fast.discardLayerDraft(session.layerId);
+    TEXT_SESSION_RAW_EDITS.pending = false;
+
+    // Session-cancel history bookend: any undo steps recorded inside the
+    // session (per-op panel style commands) die with the cancel — the state
+    // restore below replaces the states those steps were diffed against, and
+    // a linear patch chain must never be applied across that boundary.
+    actions.history.rewindTo(session.frameId, session.historyMark);
+
     if (session.type === 'create') {
       // CreateSession: clear signals FIRST to prevent one-frame state tearing,
-      // then undo removes the newly created layer. React batches both in same render.
+      // then rewind the stack and undo pops the creation step. The session
+      // never wrote the slow track, so the frame diffs clean against the
+      // place checkpoint and no snapshot restore is needed.
       actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
       actions.setStateSignal(TEXT_OVERLAY_SIGNAL_SESSION_TYPE, null);
+      actions.history.rewindTo(session.frameId, session.historyMark);
       actions.history.undo();
     } else {
       // ModifySession: restore the CONTENT snapshot silently (zero undo
-      // impact). Geometry (cx/cy/rotation) is never touched — deliberate
-      // Cmd/Ctrl+Drag moves during editing commit through their own undoable
-      // transactions and intentionally survive Esc.
+      // impact — the checkpoint already sits at the session-start state the
+      // snapshot restores, so no new step is recorded). Geometry (cx/cy/
+      // rotation) is never touched — deliberate Cmd/Ctrl+Drag moves during
+      // editing intentionally survive Esc.
       if (session.originalSnapshot) {
         actions.updateLayer(session.frameId, session.layerId, session.originalSnapshot);
       }
@@ -295,6 +331,24 @@ export function useInlineTextEditing(
       return;
     }
 
+    // The session's live truth: fast-track draft ⊕ slow track. The slow track
+    // is frozen during the session (interim writes land in the draft), so the
+    // geometry compensated while typing lives only in the draft, while a
+    // mid-session Cmd/Ctrl+Drag (its own undoable transaction) lives in the
+    // slow track. Only the merged layer contains both, so every final value
+    // below baselines against it — never against the frozen Redux snapshot.
+    // Read BEFORE the discard bookend below: it clears `interacting`
+    // synchronously, which would make latestLayer fall back to the slow track.
+    const liveLayer = actions.fast.latestLayer(session.frameId, session.layerId) ?? layer;
+
+    // Session-end fast-track bookend: drop this session's buffered layer draft
+    // (never land it) — the final state below lands to Redux through a plain
+    // updateLayer + history rebase, so the draft is stale the moment this
+    // runs. Left in place it would shadow Redux geometry for every
+    // merged-frame consumer and freeze pre-edit style-driven box updates.
+    actions.fast.discardLayerDraft(session.layerId);
+    TEXT_SESSION_RAW_EDITS.pending = false;
+
     // Empty determination trims, but the stored content must NOT: a trailing
     // space the user typed is a real edit, and trimming it here silently
     // discarded it on every commit (most visible in fixed/auto_height boxes
@@ -310,9 +364,13 @@ export function useInlineTextEditing(
     // Cmd+Z brings the layer back with its original text.
     if (!content) {
       if (session.type === 'create') {
-        // Clear signals FIRST to prevent state tearing, then undo
+        // Clear signals FIRST to prevent state tearing, then rewind the stack
+        // and undo pops the creation step. The session never wrote the slow
+        // track, so the frame diffs clean against the place checkpoint — the
+        // undo removes the freshly placed layer in one move.
         actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
         actions.setStateSignal(TEXT_OVERLAY_SIGNAL_SESSION_TYPE, null);
+        actions.history.rewindTo(session.frameId, session.historyMark);
         actions.history.undo();
       } else {
         if (session.originalSnapshot) {
@@ -330,39 +388,49 @@ export function useInlineTextEditing(
     }
 
     // ── Has content: measure final bounding ──
-    const mode = normalizeBoxMode(textData?.boxMode);
-    let finalBounding = layer.bounding;
-    let finalVisibleShape = layer.visibleShape!;
-    let finalCx = layer.cx;
-    let finalCy = layer.cy;
+    const liveLayerTextData = liveLayer.textData ?? textData!;
+    const mode = normalizeBoxMode(liveLayerTextData.boxMode);
+    let finalBounding = liveLayer.bounding;
+    let finalVisibleShape = liveLayer.visibleShape!;
+    let finalCx = liveLayer.cx;
+    let finalCy = liveLayer.cy;
 
     if (mode === 'auto_width' || mode === 'auto_height') {
       const el = editorRef.current;
       if (el) {
         const { w, h } = measureEditorBox(el, activeFrame.camera.k);
-        finalBounding = { w: mode === 'auto_width' ? w : layer.bounding.w, h };
-        finalVisibleShape = asLocalShape({ x: 0, y: 0, w, h });
+        // auto_height keeps its locked width: bounding, visibleShape and the
+        // horizontal anchor compensation must all read the same width, or the
+        // visible shape outgrows the box and the centre drifts on commit.
+        const actualW = mode === 'auto_width' ? w : liveLayer.bounding.w;
+        finalBounding = { w: actualW, h };
+        finalVisibleShape = asLocalShape({ x: 0, y: 0, w: actualW, h });
         // Align-aware anchor compensation, mirroring the live
         // notifyBoundingChange path: the width change anchors per textAlign
         // (left edge / centre / right edge), height growth anchors the top.
         // This compensates for style changes (fontSize…) that happened without
         // a subsequent input event, so committing never makes the box visibly
         // jump. Same axis-aligned approximation for rotated poses.
-        finalCx = compensateCenterX(layer.cx, layer.bounding.w, w, textData?.align);
-        finalCy = compensateCenterY(layer.cy, layer.bounding.h, h);
+        finalCx = compensateCenterX(liveLayer.cx, liveLayer.bounding.w, actualW, liveLayerTextData.align);
+        finalCy = compensateCenterY(liveLayer.cy, liveLayer.bounding.h, h);
       }
     }
 
-    // Build final state
+    // Build final state. Content comes from the DOM (the final measurement);
+    // every other textData field from the merged live layer.
     const finalState = {
       cx: finalCx,
       cy: finalCy,
       bounding: finalBounding,
       visibleShape: finalVisibleShape,
-      textData: { ...textData!, content },
+      textData: { ...liveLayerTextData, content },
     };
 
-    // ModifySession: check dirty and handle checkpoint via undoable command
+    // ModifySession: dirty gate = session-start snapshot vs the final DOM
+    // measurement + draft values (finalState above). The slow track never
+    // moved during the session, so the snapshot is compared against what the
+    // session actually produced, not against a Redux state polluted by
+    // interim writes.
     if (session.type === 'modify' && session.originalSnapshot) {
       const dirty = isSessionDirty(finalState, session.originalSnapshot);
       if (!dirty) {
@@ -373,16 +441,25 @@ export function useInlineTextEditing(
         return;
       }
 
-      // Has changes: restore snapshot → execute undoable command (creates checkpoint + applies patch)
-      actions.updateLayer(session.frameId, session.layerId, session.originalSnapshot);
-      actions.executeCommand(_CMD_MODIFY_COMMIT_UID, {
-        frameId: session.frameId,
-        layerId: session.layerId,
-        patch: finalState,
-      });
+      // Has changes: apply the final state and rebase the checkpoint. The
+      // session's LEDGERED writes (per-op panel style commands) already sit in
+      // history as their own steps; this rebase folds the remaining RAW
+      // interim edits (typing) into one final step on top of them. The old
+      // restore-snapshot + fold-into-one-command dance is gone: with
+      // edit_start having rebased the checkpoint to the session-start state,
+      // the session's writes were ledgered against a valid baseline all along.
+      actions.updateLayer(session.frameId, session.layerId, finalState);
+      actions.history.commitCheckpoint(session.frameId);
     } else {
-      // CreateSession: just apply final state (checkpoint already exists from cmd.place)
+      // CreateSession: apply final state and fold the session's raw interim
+      // edits (typing) into one final history step. The panel styling done
+      // during the session is already ledgered per-op (style commands baseline
+      // against the checkpoint the place command established); this rebase
+      // records the remaining raw span above it, so undo peels the session
+      // apart granularly: style steps first, then the text, then the whole
+      // layer (the creation step).
       actions.updateLayer(activeFrame.id, layerId, finalState);
+      actions.history.commitCheckpoint(activeFrame.id);
     }
 
     actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
@@ -441,6 +518,53 @@ export function useInlineTextEditing(
     return () => window.removeEventListener(TEXT_OVERLAY_EVT_COMMIT_REQUEST, requestCommit);
   }, [commitEditing]);
 
+  // ─── Undo/redo ownership: the SESSION claims it, not the focus ──────────
+  // While a session is live, document-history undo must never fire: the most
+  // recent checkpoint is cmd.place (create session) or a pre-session edit
+  // (modify session), and popping it under a live session deletes the layer or
+  // corrupts state. The historical judge was focus — HotkeyManager yields ⌘Z
+  // to the browser only when the caret sits in the contenteditable — but any
+  // panel interaction (a colour swatch click) moves focus away, silently
+  // handing undo to document history. Ownership follows the SESSION lifecycle
+  // instead: this capture-phase listener (window capture runs before any
+  // bubble-phase listener) intercepts ⌘Z/⌘Y/⇧⌘Z for the session's whole
+  // lifetime. With the caret in the editor it lets the native undo stack
+  // through untouched; with focus elsewhere (panel clicks) it refocuses the
+  // editor and drives the native stack there, so undo keeps reverting TEXT
+  // edits — never the document. Esc is claimed the same way: panel clicks
+  // steal focus, and the focus-based Esc arbitration then silently swallowed
+  // the key while the user believed they had left the session. Style changes
+  // made through the panel inside the session are ledgered per-op (see the
+  // CraftDrawer write path); IME composition is excluded, matching the yield
+  // rule in HotkeyManager.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+      const el = editorRef.current;
+      if (!el) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        commitEditing();
+        return;
+      }
+      if (!((e.key === 'z' || e.key === 'Z' || e.key === 'y' || e.key === 'Y') && (e.metaKey || e.ctrlKey))) return;
+      if (document.activeElement === el) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      el.focus();
+      const sel = window.getSelection();
+      if (sel) {
+        sel.selectAllChildren(el);
+        sel.collapseToEnd();
+      }
+      const redo = e.key.toLowerCase() === 'y' || e.shiftKey;
+      document.execCommand(redo ? 'redo' : 'undo');
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [editorRef, commitEditing]);
+
   // Switching away from the text tool (toolbar click or hotkey) commits the
   // session — the blur fallback was removed with the two-stage arbitration, so
   // this is the explicit replacement for that trigger.
@@ -471,15 +595,22 @@ export function useInlineTextEditing(
   // persistent <br>), which flex would center too and push the visible text
   // half a line high. Applied as paddingTop so the contenteditable itself
   // stays a plain block — caret/selection behaviour is untouched.
+  // Render-time text view: the slow-track textData with the live DOM content
+  // mirrored on top (see liveContent). Style fields stay authoritative from
+  // the slow track (panel commands land there); only content differs, and the
+  // layout math below (fixed-mode vertical alignment) must solve against what
+  // the user is actually typing.
+  const liveTextData = textData ? { ...textData, content: liveContent ?? textData.content } : textData;
+
   let fixedVAlignOffset = 0;
-  if (boxMode === 'fixed' && layer && textData) {
+  if (boxMode === 'fixed' && layer && liveTextData) {
     const mc = getEditorMeasureContext();
     if (mc) {
       fixedVAlignOffset = computeTextLayout(
         mc,
-        textData,
-        textData.boxWidth || layer.bounding.w,
-        textData.boxHeight || layer.bounding.h,
+        liveTextData,
+        liveTextData.boxWidth || layer.bounding.w,
+        liveTextData.boxHeight || layer.bounding.h,
       ).vAlignOffset;
     }
   }
@@ -506,7 +637,7 @@ export function useInlineTextEditing(
     containerRef,
     editorRef,
     layer,
-    textData,
+    textData: liveTextData,
     boxMode,
     fixedVAlignOffset,
     screenMatrix,
@@ -519,36 +650,3 @@ export function useInlineTextEditing(
   };
 }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Comprehensive dirty check: covers content and style (geometry lives outside the session snapshot) */
-function isSessionDirty(
-  current: { bounding: { w: number; h: number }; textData: TextLayerData },
-  original: NonNullable<TextEditingSession['originalSnapshot']>,
-): boolean {
-  // Bounding change
-  if (current.bounding.w !== original.bounding.w || current.bounding.h !== original.bounding.h) return true;
-  // Content change
-  if (current.textData.content !== original.textData.content) return true;
-  // Style changes
-  const c = current.textData;
-  const o = original.textData;
-  return (
-    c.fontFamily !== o.fontFamily ||
-    c.fontSize !== o.fontSize ||
-    c.fontWeight !== o.fontWeight ||
-    c.color.space !== o.color.space ||
-    c.color.alpha !== o.color.alpha ||
-    c.color.coords.r !== o.color.coords.r ||
-    c.color.coords.g !== o.color.coords.g ||
-    c.color.coords.b !== o.color.coords.b ||
-    c.align !== o.align ||
-    c.lineHeight !== o.lineHeight ||
-    c.italic !== o.italic ||
-    c.underline !== o.underline ||
-    c.strikethrough !== o.strikethrough ||
-    c.boxMode !== o.boxMode ||
-    c.boxWidth !== o.boxWidth ||
-    c.boxHeight !== o.boxHeight
-  );
-}

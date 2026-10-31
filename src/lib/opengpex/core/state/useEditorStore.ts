@@ -619,6 +619,33 @@ export function useEditorStore() {
         undo: () => enhancedDispatch({ type: 'HISTORY_UNDO' }),
         redo: () => enhancedDispatch({ type: 'HISTORY_REDO' }),
         purge: () => enhancedDispatch({ type: 'SET_HISTORY', payload: { byFrameId: {} } }),
+        /**
+         * commitCheckpoint: establish the history checkpoint AT the current
+         * frame state, recording one step that reverts to the previous
+         * checkpoint. This is the session-commit bookend for writers that
+         * mutate Redux directly (the inline text editing session): their
+         * interim edits sit ABOVE a stale checkpoint (one from BEFORE the
+         * layer existed), so the next undoable command's baseline diff spans
+         * the whole creation — one undo then reverted the entire layer
+         * instead of just that command's change. This dispatches the same
+         * SIGNAL_COMMIT the undoable-command wrapper performs, but AFTER the
+         * raw session write has landed instead of before a command executes.
+         */
+        commitCheckpoint: (frameId: string) =>
+          enhancedDispatch({ type: 'SIGNAL_COMMIT', payload: { frameId } }),
+        /**
+         * mark / rewindTo: the session-cancel pair for undo steps recorded
+         * inside a session scope. `mark` snapshots the current past length;
+         * `rewindTo` drops every step recorded after that mark (the undo
+         * stack is a linear patch chain, so steps whose surrounding states
+         * were replaced by an out-of-band restore must be dropped, not kept).
+         * The caller restores state itself and rebases the checkpoint with
+         * `commitCheckpoint` if needed.
+         */
+        mark: (frameId: string) =>
+          stateRef.current.history.byFrameId[frameId]?.past.length ?? 0,
+        rewindTo: (frameId: string, pastLength: number) =>
+          enhancedDispatch({ type: 'HISTORY_TRUNCATE', payload: { frameId, pastLength } }),
         canUndo: () => {
           const s = stateRef.current;
           const frameId = s.activeFrameId;

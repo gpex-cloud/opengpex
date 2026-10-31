@@ -50,6 +50,10 @@ function landPickedColor(ctx: EditorContextValue, color: ColorValue): void {
       metadata: { ...activeLayer.metadata, fillColor: stored },
     });
   }
+  // A pick is a definitive value: announce it as both the live step and the
+  // commit, so document consumers apply and checkpoint in one go.
+  P.dispatchColorApply(stored, 'live');
+  P.dispatchColorApply(stored, 'commit');
 }
 
 /**

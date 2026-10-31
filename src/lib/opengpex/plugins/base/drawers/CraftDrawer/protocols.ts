@@ -294,9 +294,6 @@ export function getReferenceFontSize(canvasW: number, canvasH: number): number {
   return snapToNiceSize(raw);
 }
 
-/** Line height used when the user has not chosen one (mirrors the layer default). */
-export const TEXT_DEFAULT_LINE_HEIGHT = 1.4;
-
 /**
  * Static fallback for slider max when canvas dimensions are unavailable.
  */

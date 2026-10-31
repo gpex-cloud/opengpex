@@ -19,12 +19,13 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, Layer, asLocalShape } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, Layer, asLocalShape, VolatileState } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
+import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
 import { normalizeBoxMode } from '@opengpex/editor/core/types/models';
-import { TEXT_LAYER_PADDING } from '@opengpex/editor/core/helpers/config';
-import { computeTextLayout } from '@opengpex/editor/core/engine/text/textLayout';
+import { measureTextBounding, measuredBoxesDiffer } from './hooks/measuring';
+import { affectsTextStyleLayout, type TextStyleField } from './hooks/styling';
 import { compensateCenterX, compensateCenterY } from './geometry';
 import * as P from './protocols';
 
@@ -50,6 +51,12 @@ const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
     const below = LayerFactory.resolveActiveHostLayer(frame);
     const insertAt = LayerFactory.getInsertIndexAbove(frame, below?.id);
     ctx.layers.addLayer(payload.frameId, payload.layer, insertAt);
+    // Establish the history checkpoint at the PLACED state, recording the
+    // creation as its own undo step. Everything the session does on top of it
+    // (typing, panel styling) then baselines against a valid checkpoint — the
+    // session's ledgered writes stay per-op granular, and undoing the creation
+    // step removes the layer in one move.
+    ctx.actions.history.commitCheckpoint(payload.frameId);
     finishPlace(ctx, payload.frameId, payload.layer.id);
   },
 };
@@ -79,6 +86,13 @@ const editStartCommand: EditorCommand<{ frameId: string; layerId: string }, void
     ctx.actions.setActiveLayer(payload.frameId, payload.layerId);
     ctx.scoped!.setSignal(P.SIGNAL_EDITING_TEXT_LAYER_ID, payload.layerId);
     ctx.scoped!.setSignal(P.SIGNAL_SESSION_TYPE, 'modify');
+    // Establish the history checkpoint at the session-start state: every
+    // ledgered write inside the session (panel style commands) baselines
+    // against it and stays its own undo step, and session cancel restores
+    // exactly this state. Without the rebase, the checkpoint would still sit
+    // wherever the last outside op left it, and the session's first ledgered
+    // write would swallow the raw interim edits above it.
+    ctx.actions.history.commitCheckpoint(payload.frameId);
   },
 };
 
@@ -91,109 +105,132 @@ const editStartCommand: EditorCommand<{ frameId: string; layerId: string }, void
  * Text layers render on the GPU from `textData` (vector spine), so a style
  * patch only needs the model update — no baked asset to refresh. Auto-mode
  * boxes are re-measured here, mirroring the editing commit's DOM measurement
- * (line-box model + padding, top-left anchored), so a larger font is never
+ * (line-box model, top-left anchored), so a larger font is never
  * clipped by the old bounding.
  */
+/**
+ * Shared implementation of the style-patch commands: merges the patch into the
+ * layer's textData, then re-measures content-hugging boxes so a style change
+ * never clips the glyphs. Both the undoable and the live variant run THIS body
+ * — the re-measure policy is not optional per caller.
+ *
+ * Re-measuring happens ONLY when the patch touches a layout-affecting field
+ * (styling.ts's catalog): a colour or alignment patch cannot change metrics,
+ * and measuring anyway makes the canvas engine fight the DOM engine's values
+ * (the editing session measures from the live contenteditable) — the two
+ * engines disagree by a pixel and ping-pong bounding corrections into history
+ * as phantom no-op undo steps.
+ */
+function executeStylePatch(ctx: EditorContextValue, payload: { frameId: string; layerId: string; patch: Partial<TextLayerData> }): void {
+  const frame = ctx.state.frames.byId[payload.frameId];
+  const layer = frame?.layers.byId[payload.layerId];
+  if (!frame || !layer || !layer.textData) return;
+
+  // Measurement baseline during a live editing session: the slow track is
+  // frozen while the session runs, so the typed content the box must measure
+  // against lives in the fast-track draft. The merged latest layer is
+  // slow ⊕ draft; stacking this patch last gives slow floor ⊕ draft content ⊕
+  // patch — an in-session style change therefore re-measures the text the
+  // user is actually looking at instead of the stale (create session: empty)
+  // slow-track content. Outside a session latestLayer IS the slow layer and
+  // the expression degenerates to the old baseline.
+  const liveLayer = ctx.actions.fast.latestLayer(payload.frameId, payload.layerId) ?? layer;
+  const measureBase: TextLayerData = { ...liveLayer.textData!, ...payload.patch };
+
+  // The LEDGERED landing stays slow-track based: only the style fields and
+  // the geometry they imply belong in this command's undo step. The draft's
+  // typed content is deliberately NOT folded in — content lands to the slow
+  // track exclusively at the session's commit exit, and baking it in here
+  // would break the commit's dirty baseline.
+  const textData: TextLayerData = { ...layer.textData, ...payload.patch };
+
+  // The live box (draft geometry) is the comparison baseline: the slow-track
+  // geometry is frozen during a session, so comparing against it would turn
+  // every in-session style patch into a phantom geometry write.
+  const liveBounding = liveLayer.bounding;
+
+  let bounding = layer.bounding;
+  let cx = layer.cx;
+  let cy = layer.cy;
+  const mode = normalizeBoxMode(measureBase.boxMode);
+  const layoutAffecting = Object.keys(payload.patch).some(
+    (key) => affectsTextStyleLayout(key as TextStyleField),
+  );
+  if (layoutAffecting && mode === 'auto_width') {
+    const measured = measureTextBounding(measureBase);
+    // Equality runs through the one-pixel tolerance: a canvas-engine answer
+    // within 1px of the DOM engine's is engine noise, not a layout change —
+    // writing it back would create a phantom undo step and invite the next
+    // commit to write the old value right back.
+    if (measuredBoxesDiffer(measured, liveBounding)) {
+      cx = compensateCenterX(layer.cx, bounding.w, measured.w, measureBase.align);
+      cy = compensateCenterY(layer.cy, bounding.h, measured.h);
+      bounding = measured;
+    }
+  } else if (layoutAffecting && mode === 'auto_height') {
+    // Width is locked (boxWidth); re-measure only the wrapped height so a
+    // style change never clips the paragraph.
+    const measured = measureTextBounding(measureBase, measureBase.boxWidth || liveBounding.w);
+    if (measuredBoxesDiffer({ w: liveBounding.w, h: measured.h }, liveBounding)) {
+      cy = compensateCenterY(layer.cy, bounding.h, measured.h);
+      bounding = { w: bounding.w, h: measured.h };
+    }
+  }
+  // 'fixed': the user owns the box — never re-measured here.
+  const visibleShape = asLocalShape({ x: 0, y: 0, w: bounding.w, h: bounding.h });
+
+  ctx.actions.updateLayer(payload.frameId, payload.layerId, {
+    textData,
+    bounding,
+    visibleShape,
+    cx,
+    cy,
+  });
+
+  // Draft refresh: when the layer sits in a live editing session, the fast
+  // track carries a whole-object textData draft whose only live key is the
+  // typed content. Without this refresh the merged frame would keep serving
+  // the pre-patch style to the GPU renderer until the next keystroke restacks
+  // the draft. The refresh applies the landed (slow-track) style over the
+  // draft while preserving the draft's content — content never lands to the
+  // slow track from this command.
+  if (ctx.state.interaction.signals[P.TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID] === payload.layerId) {
+    const compositeKey = LayerUtils.getCompositeKey(payload.frameId, payload.layerId);
+    ctx.actions.mutateVolatile((v: VolatileState) => {
+      const entry = v.buffered.layers[compositeKey];
+      const draftTextData = entry?.patch?.textData;
+      if (!draftTextData) return;
+      v.buffered.layers[compositeKey] = {
+        ...entry,
+        patch: { ...entry.patch, textData: { ...textData, content: draftTextData.content } },
+      };
+    });
+  }
+}
+
 const updatePropertiesCommand: EditorCommand<{ frameId: string; layerId: string; patch: Partial<TextLayerData> }, void> = {
   id: P.CMD_UPDATE_PROPERTIES,
   name: 'Update Text Properties',
   undoable: true,
-  execute: (ctx: EditorContextValue, payload: { frameId: string; layerId: string; patch: Partial<TextLayerData> }): void => {
-    const frame = ctx.state.frames.byId[payload.frameId];
-    const layer = frame?.layers.byId[payload.layerId];
-    if (!frame || !layer || !layer.textData) return;
-
-    const textData: TextLayerData = { ...layer.textData, ...payload.patch };
-
-    let bounding = layer.bounding;
-    let cx = layer.cx;
-    let cy = layer.cy;
-    const mode = normalizeBoxMode(textData.boxMode);
-    if (mode === 'auto_width') {
-      const measured = measureTextBounding(textData);
-      if (measured.w !== bounding.w || measured.h !== bounding.h) {
-        // Align-aware anchor compensation — same formula the editing commit
-        // path uses (left edge / centre / right edge per textAlign; the top
-        // edge anchors vertical growth).
-        cx = compensateCenterX(layer.cx, bounding.w, measured.w, textData.align);
-        cy = compensateCenterY(layer.cy, bounding.h, measured.h);
-        bounding = measured;
-      }
-    } else if (mode === 'auto_height') {
-      // Width is locked (boxWidth); re-measure only the wrapped height so a
-      // style change never clips the paragraph.
-      const measured = measureTextBounding(textData, textData.boxWidth || bounding.w);
-      if (measured.h !== bounding.h) {
-        cy = compensateCenterY(layer.cy, bounding.h, measured.h);
-        bounding = { w: bounding.w, h: measured.h };
-      }
-    }
-    // 'fixed': the user owns the box — never re-measured here.
-    const visibleShape = asLocalShape({ x: 0, y: 0, w: bounding.w, h: bounding.h });
-
-    ctx.actions.updateLayer(payload.frameId, payload.layerId, {
-      textData,
-      bounding,
-      visibleShape,
-      cx,
-      cy,
-    });
-  },
+  execute: executeStylePatch,
 };
 
 /**
- * Measure the content bounding of a text layer for the style-patch path
- * (cmd.update_properties), delegating wrapping and glyph measurement to the
- * shared `computeTextLayout` so this path can never drift from the layout the
- * GPU renderer and the DOM editor both consume. The height uses the same
- * line-box model as the DOM editor: one `fontSize × lineHeight` box per
- * content line, plus padding on both axes. With `wrapWidth` (auto_height
- * mode) lines wrap at the locked width first. Slightly generous is fine — it
- * only has to never clip the glyphs.
- */
-function measureTextBounding(td: TextLayerData, wrapWidth?: number): { w: number; h: number } {
-  const ctx = getMeasureCtx();
-  const layout = computeTextLayout(
-    ctx,
-    { ...td, boxMode: wrapWidth !== undefined ? 'auto_height' : 'auto_width' },
-    wrapWidth ?? 0,
-    0,
-  );
-  let maxLineW = 0;
-  for (const line of layout.lines) maxLineW = Math.max(maxLineW, line.width);
-  const h = Math.max(Math.ceil(layout.lines.length * layout.lineHeight) + TEXT_LAYER_PADDING.y * 2, 20);
-  if (wrapWidth !== undefined) {
-    // auto_height: the width is locked; only the height follows the content.
-    return { w: wrapWidth, h };
-  }
-  return {
-    w: Math.max(Math.ceil(maxLineW) + TEXT_LAYER_PADDING.x * 2, 4),
-    h,
-  };
-}
-
-let measureCtx: CanvasRenderingContext2D | null = null;
-function getMeasureCtx(): CanvasRenderingContext2D {
-  if (!measureCtx) {
-    measureCtx = document.createElement('canvas').getContext('2d')!;
-  }
-  return measureCtx;
-}
-
-/**
- * cmd.modify_commit: Commits a modify session with full layer patch
+ * cmd.update_properties_live: the non-undoable twin of cmd.update_properties.
  *
- * undoable: true → Creates the undo baseline automatically (SIGNAL_COMMIT).
- * Called AFTER restoring the original snapshot so that undo reverts to pre-edit state.
- * The payload contains the full final layer state to apply.
+ * Serves continuous slider dragging on a selected (pre-edit) text layer: the
+ * panel writes each pointermove step through this command so the box follows
+ * the style in real time, while the release event goes through the undoable
+ * cmd.update_properties for the single history checkpoint. Running the same
+ * body as the undoable variant is the point — before this existed the live
+ * path wrote textData directly and skipped the re-measure entirely, so the
+ * box only converged when the slider was released.
  */
-const modifyCommitCommand: EditorCommand<{ frameId: string; layerId: string; patch: Partial<Layer> }, void> = {
-  id: P.CMD_MODIFY_COMMIT,
-  name: 'Commit Text Modification',
-  undoable: true,
-  execute: (ctx: EditorContextValue, payload: { frameId: string; layerId: string; patch: Partial<Layer> }) => {
-    ctx.actions.updateLayer(payload.frameId, payload.layerId, payload.patch);
-  },
+const updatePropertiesLiveCommand: EditorCommand<{ frameId: string; layerId: string; patch: Partial<TextLayerData> }, void> = {
+  id: P.CMD_UPDATE_PROPERTIES_LIVE,
+  name: 'Update Text Properties (Live)',
+  undoable: false,
+  execute: executeStylePatch,
 };
 
 // ─── Export ────────────────────────────────────────────────────────────────────
@@ -202,5 +239,5 @@ export const TEXT_OVERLAY_COMMANDS = [
   placeCommand,
   editStartCommand,
   updatePropertiesCommand,
-  modifyCommitCommand,
+  updatePropertiesLiveCommand,
 ];

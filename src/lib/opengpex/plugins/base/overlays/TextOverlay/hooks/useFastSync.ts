@@ -23,9 +23,10 @@ import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { Motion } from '@opengpex/editor/core/motion';
 import { Frame, CameraState, VolatileState, asLocalShape } from '@opengpex/editor/core/types';
 import { LayerUtils } from '@opengpex/editor/core/layer/utils';
-import { compensateCenterX, compensateCenterY, reanchorCompensationBase } from './geometry';
-import { safeCornerArmRatio } from './geometry';
+import { compensateCenterX, compensateCenterY, reanchorCompensationBase } from '../geometry';
+import { safeCornerArmRatio } from '../geometry';
 import { normalizeBoxMode } from '@opengpex/editor/core/types/models';
+import { measuredBoxesDiffer } from './measuring';
 
 /**
  * useTextEditorFastSync: Text editor fast track synchronizer
@@ -143,8 +144,8 @@ export function useTextEditorFastSync(
       cy: layer.cy,
     };
 
-    // Debounce: write only when size actually changes
-    if (lastStateRef.current.w === w && lastStateRef.current.h === h) return;
+    // Debounce: write only when size actually changes beyond measurement tolerance
+    if (!measuredBoxesDiffer({ w, h }, { w: lastStateRef.current.w, h: lastStateRef.current.h })) return;
 
     // Compute cx/cy compensation. Horizontal: align-aware anchor (left edge
     // pinned for left-aligned text, centre for centred, right edge for right) —
@@ -175,13 +176,12 @@ export function useTextEditorFastSync(
       };
     });
 
-    // Also update slow track (Redux) to keep React state eventually consistent
-    actions.updateLayer(activeFrame.id, layerId, {
-      bounding: { w, h },
-      visibleShape: newVisibleShape,
-      cx: newCx,
-      cy: newCy,
-    });
+    // The slow track is intentionally NOT written here: during an editing
+    // session the fast-track draft is the only interim truth, and the slow
+    // track is ledgered exclusively at the session bookends (commitEditing's
+    // final updateLayer + the panel's undoable style commands). An unledgered
+    // updateLayer here left the frame dirty above the session checkpoint and
+    // forced undo-differsion / snapshot-restore compensations downstream.
   }, [activeFrame, layerId, actions]);
 
   return { notifyBoundingChange };

@@ -54,9 +54,9 @@ export const plugin: EditorPlugin = {
 
   // --- 3. Core Implementation ---
   component: LayersComponent,
-  initialConfig: {
-    preferredWidth: 320,
-  },
+  // No preferredWidth: the workspace drawer-width fallback (320px normal /
+  // 260px compact via ui.drawerWidthMode) drives this panel's width.
+  initialConfig: {},
 
   // --- 4. Auto-Reveal ---
   autoReveal: {

@@ -22,7 +22,7 @@
 import React from 'react';
 import { useEditorState, useOverlayRotationSync } from '@opengpex/editor/core/context';
 import { TransformGizmo } from '@opengpex/editor/widgets/TransformGizmo';
-import { usePreEditFrameSync } from '../useFastSync';
+import { usePreEditFrameSync } from '../hooks/useFastSync';
 import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID } from '../protocols';
 import { CraftDrawerAPI } from '../../../drawers/CraftDrawer/protocols';
 import type { Layer } from '@opengpex/editor/core/types';
@@ -99,7 +99,11 @@ export const PreEditFrame = React.memo(function PreEditFrame() {
         className="absolute top-0 left-0"
         style={{ display: 'none', transformOrigin: '0 0', willChange: 'transform, width, height' }}
       >
-        <TransformGizmo rotation={rotation} flip={flip} />
+        {/* outline: the invisible full-edge hit strips (n/s/e/w) that back the
+            edge-drag gesture — an explicit "fix this axis" declaration that
+            switches the box to fixed on the dragged axis only. Without them
+            only the corner brackets and the rotate handle are interactive. */}
+        <TransformGizmo rotation={rotation} flip={flip} outline />
       </div>
       )}
     </div>

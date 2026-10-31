@@ -491,6 +491,11 @@ export const useColorOptions = () => {
   // `ColorPickerPro.onValueChange`, sampler picks via `handleSampled`) hand in a
   // frame/view-gamut value; this is the one place that converts it before it is
   // ever persisted. Converted only on write (sample/edit) — this function IS the write.
+  //
+  // Every call here is a USER action on the global chip, so it also announces
+  // itself (COLOR_OPTIONS_EVT_APPLY) for consumers that recolour an existing
+  // document object — they write the document through their own commands on
+  // that explicit signal rather than by diffing `pendingColor`.
   const applyColor = useCallback((newColor: ColorValue) => {
     const stored = convertColorGamut(newColor, WORKING_GAMUT);
     setConfig({ pendingColor: stored });
@@ -501,7 +506,14 @@ export const useColorOptions = () => {
         metadata: { ...activeLayer.metadata, fillColor: stored },
       });
     }
+    P.dispatchColorApply(stored, 'live');
   }, [setConfig, isColorLayer, activeFrame, activeLayer, actions]);
+
+  /** Picker release: the definitive value of a drag, announced as a commit so
+   *  consumers can place their single undo checkpoint. */
+  const commitColor = useCallback((newColor: ColorValue) => {
+    P.dispatchColorApply(convertColorGamut(newColor, WORKING_GAMUT), 'commit');
+  }, []);
 
   /** Activate canvas color sampler (custom crosshair UI) */
   const sampleColor = useCallback(() => {
@@ -511,10 +523,12 @@ export const useColorOptions = () => {
   /** Handle sampled color from ColorSampler.
    *  Applies the picked colour but KEEPS the tool active (Photoshop point sample):
    *  a pick is not an exit. The user leaves the sampler via Esc / right-click
-   *  (`cancelSampling`), toggling `I`, or switching tools. */
+   *  (`cancelSampling`), toggling `I`, or switching tools. A pick is a
+   *  definitive value (no drag to release from), so it commits immediately. */
   const handleSampled = useCallback((color: ColorValue) => {
     applyColor(color);
-  }, [applyColor]);
+    commitColor(color);
+  }, [applyColor, commitColor]);
 
   /** Cancel sampling */
   const cancelSampling = useCallback(() => {
@@ -526,6 +540,7 @@ export const useColorOptions = () => {
     currentColor,
     isColorLayer,
     applyColor,
+    commitColor,
     sampleColor,
     isSampling,
     handleSampled,

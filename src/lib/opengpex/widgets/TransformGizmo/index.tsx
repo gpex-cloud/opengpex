@@ -30,6 +30,7 @@ import {
   CORNER_ANCHORS,
   EDGE_ANCHORS,
   MARK_STROKE_W,
+  markBoxStyle,
 } from './geometry';
 
 export { BoxCorners, type BoxCornersProps } from './knobs/BoxCorners';
@@ -44,6 +45,9 @@ const CORNER_HIT_PX = 18;
 
 /** Thickness of the full-edge resize strips rendered in `outline` mode. */
 const OUTLINE_EDGE_HIT_PX = 12;
+
+/** Screen-space length of the visible edge-midpoint ticks in outline mode. */
+const EDGE_TICK_PX = 10;
 
 /** Opacity of a dimmed (non-selected sibling) ghost frame. */
 const GHOST_DIM_OPACITY = 0.45;
@@ -116,8 +120,11 @@ export interface TransformGizmoProps {
    * Full-edge hit mode (selection frames): renders FULL-LENGTH edge strips
    * instead of the retired short edge-midpoint zones, so any point on the
    * border — not just the edge midpoint — starts a single-axis resize.
-   * Purely an interaction affordance: renders no outline visuals of its own.
-   * Corner handles keep priority at the corners (rendered after the strips).
+   * In the `corner` variant the strips also gain visible edge-midpoint ticks
+   * (same dual-stroke marks as the brackets) so the draggable edge has a
+   * handle to aim at; `cube`/`chip` keep their own full mark sets and gain
+   * no extra visuals. Corner handles keep priority at the corners (rendered
+   * after the strips).
    */
   outline?: boolean;
 }
@@ -134,7 +141,8 @@ export interface TransformGizmoProps {
  * anchors — the mark IS the handle, visually:
  *  - 4 corner hit zones: diagonal resize, `data-gizmo-handle=<nw|ne|sw|se>`;
  *  - in `outline` mode, 4 full-length edge strips: single-axis resize,
- *    `data-gizmo-handle=<n|s|e|w>` (no extra visuals — strips are invisible);
+ *    `data-gizmo-handle=<n|s|e|w>`, with visible edge-midpoint ticks in the
+ *    `corner` variant (the strips themselves stay invisible hit zones);
  *  - a rotation handle dot above the top edge, `data-gizmo-rotate`.
  *
  * Each hit zone is `pointer-events-auto` while the wrapper stays
@@ -215,6 +223,44 @@ export const TransformGizmo = React.memo(function TransformGizmo({
   return (
     <div ref={rootRef} className="absolute inset-0 pointer-events-none" style={wrapperStyle}>
       {marks}
+
+      {/* Visible edge-midpoint ticks (outline + corner variant only): a small
+          perpendicular dash on the outline line at each edge midpoint, same
+          black-underlay + white-core dual stroke as every other mark. The
+          full-length edge strips below carry the hit zone for the whole edge;
+          the tick is the visible affordance so the draggable edge has a
+          handle to aim at, matching the corner brackets' visual weight. The
+          cube/chip variants keep their own full mark sets and stay unticked. */}
+      {outline && variant === 'corner' && EDGE_ANCHORS.map(({ dir, style }) => (
+        <div key={dir} style={markBoxStyle(EDGE_TICK_PX, style)}>
+          <svg
+            width={EDGE_TICK_PX}
+            height={EDGE_TICK_PX}
+            viewBox={`0 0 ${EDGE_TICK_PX} ${EDGE_TICK_PX}`}
+            style={{ width: '100%', height: '100%', display: 'block', overflow: 'visible' }}
+          >
+            {/* Horizontal dash on n/s edges, vertical dash on e/w edges. */}
+            <line
+              x1={dir === 'n' || dir === 's' ? 0 : EDGE_TICK_PX / 2}
+              y1={dir === 'n' || dir === 's' ? EDGE_TICK_PX / 2 : 0}
+              x2={dir === 'n' || dir === 's' ? EDGE_TICK_PX : EDGE_TICK_PX / 2}
+              y2={dir === 'n' || dir === 's' ? EDGE_TICK_PX / 2 : EDGE_TICK_PX}
+              stroke="#000000"
+              strokeWidth={MARK_STROKE_W + 2}
+              strokeLinecap="square"
+            />
+            <line
+              x1={dir === 'n' || dir === 's' ? 0 : EDGE_TICK_PX / 2}
+              y1={dir === 'n' || dir === 's' ? EDGE_TICK_PX / 2 : 0}
+              x2={dir === 'n' || dir === 's' ? EDGE_TICK_PX : EDGE_TICK_PX / 2}
+              y2={dir === 'n' || dir === 's' ? EDGE_TICK_PX / 2 : EDGE_TICK_PX}
+              stroke="#ffffff"
+              strokeWidth={MARK_STROKE_W}
+              strokeLinecap="square"
+            />
+          </svg>
+        </div>
+      ))}
 
       {/* Full-length edge strips (outline mode only): any point on the border
           starts a single-axis resize. Rendered BEFORE the corner zones so the

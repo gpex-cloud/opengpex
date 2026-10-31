@@ -15,7 +15,7 @@ export interface TextOverlayCommandsMap {
   placeCmd: CommandInstance<{ frameId: string; layer: Layer }>;
   editStartCmd: CommandInstance<{ frameId: string; layerId: string }>;
   updatePropertiesCmd: CommandInstance<{ frameId: string; layerId: string; patch: Partial<TextLayerData> }>;
-  modifyCommitCmd: CommandInstance<{ frameId: string; layerId: string; patch: Partial<Layer> }>;
+  updatePropertiesLiveCmd: CommandInstance<{ frameId: string; layerId: string; patch: Partial<TextLayerData> }>;
 }
 
 /** Type map for usePluginSignals<TextOverlaySignalsMap>() */

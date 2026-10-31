@@ -100,7 +100,18 @@ export function createFastFacade(deps: FastFacadeDeps) {
     },
     isInteracting: () => volatileRef.current.activeState.interacting,
     getTransient: (key: string) => volatileRef.current.transient[key],
-    setTransient: (key: string, data: unknown) => mutateVolatile(v => { v.transient[key] = data as Record<string, unknown>; }),
+    // Transient writes go straight to the ref, NOT through mutate: transient
+    // never enters the merge snapshot, and these fire at pointermove rate
+    // (marquee, smartguides, gesture scratch data) — routing them through any
+    // buffer-mutating primitive would bump `_bufferVersion` per move and
+    // invalidate the shared merge snapshot every frame. Unlike the old
+    // mutateVolatile path this also does not flip `interacting`: every caller
+    // runs inside an active gesture that already opened the fast track; a
+    // future caller that needs fast-track participation must open its own
+    // interaction channel.
+    setTransient: (key: string, data: unknown) => {
+      volatileRef.current.transient[key] = data as Record<string, unknown>;
+    },
     overrideLayer: (frameId: string, id: string, props: Partial<Layer>, decl?: { useIncreComp?: boolean }) => {
       mutateVolatile(v => {
         const compositeKey = getCompositeKey(frameId, id);
@@ -113,14 +124,12 @@ export function createFastFacade(deps: FastFacadeDeps) {
           useIncreComp: decl?.useIncreComp || draft?.useIncreComp,
           mask: draft?.mask,
         };
-        v._bufferVersion++; // [Perf] Invalidate snapshot cache
       });
     },
 
     overrideFrame: (frameId: string, props: Partial<Frame>) => {
       mutateVolatile(v => {
         v.buffered.frames[frameId] = { ...v.buffered.frames[frameId], ...props };
-        v._bufferVersion++; // [Perf] Invalidate snapshot cache
       });
     },
 
@@ -134,7 +143,6 @@ export function createFastFacade(deps: FastFacadeDeps) {
           useIncreComp: draft?.useIncreComp,
           mask: map,
         };
-        v._bufferVersion++; // [Perf] Invalidate snapshot cache
       });
     },
 
@@ -219,6 +227,35 @@ export function createFastFacade(deps: FastFacadeDeps) {
     signal: (frameId: string) => {
       mutateVolatile(v => { v.activeState.interacting = true; });
       dispatch({ type: 'SIGNAL_COMMIT', payload: { frameId } });
+    },
+    /**
+     * discardLayerDraft: end a long-lived writer's fast-track participation by
+     * DROPPING its buffered layer draft — never landing it.
+     *
+     * The fast-track contract is gesture-scoped: `override*` opens a draft,
+     * `commit` lands it to Redux and clears it. The inline text editing session
+     * is the one non-gesture long-lived writer: its live box measurements write
+     * layer drafts purely as visibility aids (bridging the Ticker over React's
+     * async dispatch), while the real truth lands to Redux on every write and
+     * again at session commit/cancel. At session end the draft is therefore
+     * redundant-or-stale by definition, and landing it (commit) could REGRESS
+     * Redux — the session's final DOM measurement is newer than the last draft.
+     * The only correct teardown is a discard, which is the bookend leg the
+     * contract was missing for this writer class.
+     *
+     * Tearing mirrors `commit`: `interacting` flips false synchronously, the
+     * draft clears one frame later so the Ticker never reads an empty buffer
+     * against not-yet-applied Redux dispatches, and `_bufferVersion` bumps so
+     * the per-tick merge snapshot re-fuses from Redux truth after the clear.
+     */
+    discardLayerDraft: (id: string) => {
+      volatileRef.current.activeState.interacting = false;
+      requestAnimationFrame(() => {
+        const vRef = volatileRef.current;
+        const keys = Object.keys(vRef.buffered.layers).filter(k => k.endsWith(`:${id}`));
+        keys.forEach(k => delete vRef.buffered.layers[k]);
+        vRef._bufferVersion++;
+      });
     },
     reset: resetVolatile,
 

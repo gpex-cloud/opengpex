@@ -69,6 +69,12 @@ export interface UIConfig {
   sidebarOrder: Record<'left' | 'right', string[]>;
   sidebarMode: 'DOCKED' | 'FLOATING';
   isToolMenuPinned?: boolean;
+  /**
+   * Width mode for the floating drawer panels that do NOT declare their own
+   * `preferredWidth`. 'normal' falls back to 320px; 'compact' falls back to
+   * 280px. Plugin-declared widths are never overridden by this setting.
+   */
+  drawerWidthMode?: 'normal' | 'compact';
 
 }
 
@@ -152,6 +158,7 @@ export type EditorAction =
   | { type: 'HISTORY_UNDO' }
   | { type: 'HISTORY_REDO' }
   | { type: 'HISTORY_RESET' }
+  | { type: 'HISTORY_TRUNCATE'; payload: { frameId: string; pastLength: number } }
   | { type: 'REPLACE_FRAME'; payload: { frameId: string; frame: Frame } };
 
 /**

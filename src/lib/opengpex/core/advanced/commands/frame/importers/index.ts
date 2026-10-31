@@ -31,6 +31,7 @@ import type { ImportOptions } from './_types';
 import { promptVectorDpi } from './vector';
 
 export type { ImportOptions, ImportingSignalValue } from './_types';
+import { SIGNAL_IMPORTING } from './_types';
 export { SIGNAL_IMPORTING } from './_types';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -168,31 +169,39 @@ export async function revertFrame(ctx: EditorContextValue, frameId: string): Pro
     return false;
   }
 
-  // 1. Cold-recover original bytes + decode (raw-first, hydrate fallback).
-  //    Pin the decode to the frame's ORIGINAL canvas size + dpi: once retainSourceBlob
-  //    widened, a vector source (SVG/EPS) now hits the raw-first branch and
-  //    would otherwise re-rasterize at its intrinsic size (VectorHandler.decode uses
-  //    `options?.forcedWidth || intrinsicSize.w`), silently changing the canvas
-  //    resolution on revert. frame.canvas.{w,h}/frame.dpi hold the user's original
-  //    choice, so forwarding them keeps revert dimensionally faithful.
-  const originalFileName = frame.source || frame.name || 'image.png';
-  let decoded: DecodeResult | null = null;
+  // Revert re-decodes the original bytes (HEIC/RAW/large images take seconds)
+  // — surface the shared import HUD for the whole decode + rebuild span. No
+  // modal can interrupt this path, so the signal stays up until the finally.
+  actions.setStateSignal(SIGNAL_IMPORTING, { label: 'Reverting…', subtitle: 'Restoring the original image' });
   try {
-    decoded = await files.decodeAsset(originalAssetId, originalFileName, {
-      forcedWidth: frame.canvas.w,
-      forcedHeight: frame.canvas.h,
-      forcedDpi: frame.dpi,
-    });
-  } catch (err) {
-    console.error(`[FrameService] Revert decode failed (assetId=${originalAssetId}):`, err);
-  }
-  if (!decoded) {
-    actions.setInteraction({ hud: { message: 'Failed to revert. Original asset may be missing.', type: 'error' } });
-    return false;
-  }
+    // 1. Cold-recover original bytes + decode (raw-first, hydrate fallback).
+    //    Pin the decode to the frame's ORIGINAL canvas size + dpi: once retainSourceBlob
+    //    widened, a vector source (SVG/EPS) now hits the raw-first branch and
+    //    would otherwise re-rasterize at its intrinsic size (VectorHandler.decode uses
+    //    `options?.forcedWidth || intrinsicSize.w`), silently changing the canvas
+    //    resolution on revert. frame.canvas.{w,h}/frame.dpi hold the user's original
+    //    choice, so forwarding them keeps revert dimensionally faithful.
+    const originalFileName = frame.source || frame.name || 'image.png';
+    let decoded: DecodeResult | null = null;
+    try {
+      decoded = await files.decodeAsset(originalAssetId, originalFileName, {
+        forcedWidth: frame.canvas.w,
+        forcedHeight: frame.canvas.h,
+        forcedDpi: frame.dpi,
+      });
+    } catch (err) {
+      console.error(`[FrameService] Revert decode failed (assetId=${originalAssetId}):`, err);
+    }
+    if (!decoded) {
+      actions.setInteraction({ hud: { message: 'Failed to revert. Original asset may be missing.', type: 'error' } });
+      return false;
+    }
 
-  // 2. Rebuild + commit via shared revertSingleImage (mirrors importSingleImage's addFrame)
-  return revertSingleImage(ctx, frameId, decoded);
+    // 2. Rebuild + commit via shared revertSingleImage (mirrors importSingleImage's addFrame)
+    return revertSingleImage(ctx, frameId, decoded);
+  } finally {
+    actions.setStateSignal(SIGNAL_IMPORTING, null);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -224,9 +233,13 @@ export async function revertGifFrame(ctx: EditorContextValue, frameId: string): 
   if (!originalFileHash) return false;
 
   try {
-    // 1. Cold-recover original GIF bytes + decode
+    // 1. Cold-recover original GIF bytes + decode. The revert HUD covers the
+    //    decode span, then drops BEFORE the frame-count dialog (a modal must
+    //    not sit behind a dimmed HUD) and comes back for the rebuild span.
     const originalName = frame.source || frame.name + '.gif';
+    actions.setStateSignal(SIGNAL_IMPORTING, { label: 'Reverting…', subtitle: 'Restoring the original image' });
     const decoded = await files.decodeAsset(originalGifAssetId, originalName);
+    actions.setStateSignal(SIGNAL_IMPORTING, null);
     if (!decoded) {
       throw new Error('Original GIF asset not found in store');
     }
@@ -242,7 +255,9 @@ export async function revertGifFrame(ctx: EditorContextValue, frameId: string): 
     const content = await buildGifFrameContent(ctx, decoded, originalFileHash);
     if (!content) return false; // User cancelled
 
-    // 3. Update frame in-place
+    // 3. Update frame in-place — rebuild is per-frame decode/asset work, so
+    //    bring the revert HUD back up for this span too.
+    actions.setStateSignal(SIGNAL_IMPORTING, { label: 'Reverting…', subtitle: 'Restoring the original image' });
     actions.updateFrame(frameId, {
       canvas: content.canvas,
       camera: content.camera,
@@ -255,12 +270,14 @@ export async function revertGifFrame(ctx: EditorContextValue, frameId: string): 
     });
 
     actions.resetHistory();
-    actions.setInteraction({ hud: { message: `GIF reverted: ${content.gifFrameCount} frames restored.`, type: 'success' } });
+    // No success HUD: the revert HUD disappearing IS the completion feedback.
     return true;
   } catch (err) {
     console.error('[FrameService] GIF revert failed:', err);
     actions.setInteraction({ hud: { message: 'Failed to revert GIF. See console for details.', type: 'error' } });
     return false;
+  } finally {
+    actions.setStateSignal(SIGNAL_IMPORTING, null);
   }
 }
 

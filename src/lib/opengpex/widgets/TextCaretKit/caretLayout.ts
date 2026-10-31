@@ -35,7 +35,6 @@
  * @module widgets/TextCaretKit/caretLayout
  */
 
-import { TEXT_LAYER_PADDING } from '@opengpex/editor/core/helpers/config';
 import { normalizeBoxMode } from '@opengpex/editor/core/types/models';
 import {
   computeTextLayout,
@@ -246,7 +245,7 @@ export function solveCaretFromLayout(
     const boxMode = normalizeBoxMode(source.input.boxMode);
     const wrapMode = boxMode === 'fixed' || boxMode === 'auto_height';
     const maxWidth = wrapMode
-      ? (source.input.boxWidth || source.boxWidth) - TEXT_LAYER_PADDING.x * 2
+      ? (source.input.boxWidth || source.boxWidth)
       : 0;
     const paragraphs = text.split('\n');
     const wrapped: WrappedTextLine[][] = paragraphs.map((p) =>
@@ -354,18 +353,29 @@ export function solveCaretFromLayout(
     if ('letterSpacing' in measure) measure.letterSpacing = `${source.input.letterSpacing || 0}px`;
     measure.textAlign = 'left';
     const width = measure.measureText(caretLineText).width;
-    const padX = TEXT_LAYER_PADDING.x;
     const x =
       source.input.align === 'center'
         ? source.boxWidth / 2 - width / 2
         : source.input.align === 'right'
-          ? source.boxWidth - padX - width
-          : padX;
+          ? source.boxWidth - width
+          : 0;
     const prefix = paraChars.slice(lineStart, lineStart + col).join('');
     localX = x + measure.measureText(prefix).width;
   }
-  const lineTop = line.baselineY - entry.layout.fontAscent + overflowSteps * entry.layout.lineHeight;
-  const localY =
-    lineTop + verticalAlignOffset + Math.max(0, (entry.layout.lineHeight - caretHeight) / 2);
+  // Vertical anchor: the caret CENTER sits at baseline − (fontAscent −
+  // fontDescent) / 2. That point is algebraically the line-box center — CSS
+  // half-leading distributes the leftover space symmetrically around the
+  // content area, so boxTop + lineHeight/2 = baseline − (asc − desc)/2 for
+  // every lineHeight. Centering the caret inside the band
+  // [baseline − fontAscent, baseline − fontAscent + lineHeight] instead
+  // shifts it by exactly halfLeading (down when lineHeight exceeds the font's
+  // ascent+descent, up below that), growing linearly with lineHeight, and
+  // jumps on the first keystroke after empty content (the empty-content snap
+  // anchors at the true box top).
+  const caretCenter =
+    line.baselineY +
+    overflowSteps * entry.layout.lineHeight -
+    (entry.layout.fontAscent - entry.layout.fontDescent) / 2;
+  const localY = caretCenter - caretHeight / 2 + verticalAlignOffset;
   return { localX, localY };
 }

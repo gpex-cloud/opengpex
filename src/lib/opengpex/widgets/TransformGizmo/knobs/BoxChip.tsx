@@ -47,7 +47,7 @@ export const BoxChip = React.memo(function BoxChip() {
             style={{ width: '100%', height: '100%', display: 'block', overflow: 'visible' }}
           >
             <circle cx={c} cy={c} r={r} fill="#ffffff" stroke="#000000" strokeWidth={MARK_STROKE_W + 2} />
-            <circle cx={c} cy={c} r={r} fill="none" stroke="#ffffff" strokeWidth={MARK_STROKE_W} />
+            <circle cx={c} cy={c} r={r} fill="#ffffff" stroke="#ffffff" strokeWidth={MARK_STROKE_W} />
           </svg>
         </div>
       ))}

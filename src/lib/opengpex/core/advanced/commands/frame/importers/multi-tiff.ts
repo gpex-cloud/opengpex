@@ -20,10 +20,11 @@
  * `extra.gifSequenceId` grouping in `multi-gif.ts`).
  *
  * Import delegates each page to `importSingleImage` (single.ts). Revert
- * re-decodes the original file once and rebuilds every currently-alive group
- * member in place via the private `rebuildOnePage` helper — deliberately a
- * standalone copy of `revertSingleImage`'s steps 2-5 rather than a shared
- * extraction, keeping `single.ts` untouched.
+ * restores the original import shape: alive members rebuild in place via the
+ * private `rebuildOnePage` helper (deliberately a standalone copy of
+ * `revertSingleImage`'s steps 2-5 rather than a shared extraction, keeping
+ * `single.ts` untouched), deleted branches are re-imported through
+ * `importSingleImage`, and stray non-page branches are removed.
  */
 
 'use client';
@@ -35,6 +36,7 @@ import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
 import type { DecodeResult, DecodedImage, ImageMetadata } from '@opengpex/editor/core/files/types';
 import type { ImportOptions } from './_types';
+import { SIGNAL_IMPORTING } from './_types';
 import { importSingleImage } from './single';
 import { newMultiPageGroupId } from '../_naming';
 
@@ -104,9 +106,9 @@ export async function importMultiPageTiff(
  * in-place. Deliberately duplicates `revertSingleImage`'s steps 2-5 (single.ts)
  * rather than sharing them (single.ts stays at zero change).
  *
- * NOTE: does NOT reset history or set the HUD. It runs inside the group loop of
- * `revertMultiPageTiffGroup`, which owns the single history reset + HUD message
- * once for the whole group.
+ * NOTE: does NOT reset history. It runs inside the group loop of
+ * `revertMultiPageTiffGroup`, which owns the single history reset and the
+ * revert progress HUD for the whole group.
  */
 async function rebuildOnePage(
   ctx: EditorContextValue,
@@ -159,17 +161,23 @@ async function rebuildOnePage(
 }
 
 /**
- * Revert an entire multi-page TIFF group: re-decode the original file once (via
- * the trunk's assetId), then rebuild every currently-alive group member from its
- * own `tiffPageIndex` page. Does NOT resurrect deleted branches and does NOT
- * add/remove frames when the page count changes (same source, page count is
- * constant) — the post-revert structure is "trunk + whichever branches were
- * still alive", not the original full page set.
+ * Revert an entire multi-page TIFF group back to its ORIGINAL IMPORT SHAPE:
+ * re-decode the original file once (via the trunk's assetId), then
+ *
+ *   1. rebuild every currently-alive group member in place from its own
+ *      `tiffPageIndex` page (drops all edits),
+ *   2. re-create branch frames for pages whose branch was deleted (mirrors
+ *      import: `Branch#i` numbering, `${rootName}__Branch#i` naming, thumbnail),
+ *   3. remove stray branches under the trunk that are NOT original pages
+ *      (user-created branches carry no `tiffPageIndex`).
+ *
+ * Post-revert structure is therefore identical to a fresh import of the same
+ * file: one trunk + one branch per page 1..N-1, nothing else.
  *
  * @returns true if reverted successfully, false otherwise.
  */
 export async function revertMultiPageTiffGroup(ctx: EditorContextValue, frameId: string): Promise<boolean> {
-  const { actions, state, files } = ctx;
+  const { actions, state, files, layers } = ctx;
   const frame = state.frames.byId[frameId];
   const groupId = (frame?.extra as Record<string, unknown> | undefined)?.tiffGroupId as string | undefined;
   if (!frame || !groupId) return false;
@@ -184,6 +192,10 @@ export async function revertMultiPageTiffGroup(ctx: EditorContextValue, frameId:
   const trunkFrame = groupFrames.find(f => (f.extra as Record<string, unknown>)?.tiffPageIndex === 0);
   if (!trunkFrame?.assetId) return false;
 
+  // Re-decoding a multi-page TIFF takes seconds (HEIC-scale payloads) — the
+  // shared revert HUD covers the whole decode + rebuild span. No modal can
+  // interrupt this path, so the signal stays up until the finally.
+  actions.setStateSignal(SIGNAL_IMPORTING, { label: 'Reverting…', subtitle: 'Restoring the original image' });
   try {
     const originalFileName = trunkFrame.source || trunkFrame.name || 'image.tiff';
     const decoded = await files.decodeAsset(trunkFrame.assetId, originalFileName, {
@@ -192,7 +204,9 @@ export async function revertMultiPageTiffGroup(ctx: EditorContextValue, frameId:
       forcedDpi: trunkFrame.dpi,
     });
     if (!decoded) throw new Error('Original TIFF asset not found in store');
+    if (!decoded.sourceBlob) throw new Error('Original TIFF source bytes unavailable for branch resurrection');
 
+    // 1. Rebuild alive members in place (drops their edits)
     for (const f of groupFrames) {
       const pageIndex = (f.extra as Record<string, unknown>).tiffPageIndex as number;
       const page = decoded.pages[pageIndex];
@@ -200,12 +214,52 @@ export async function revertMultiPageTiffGroup(ctx: EditorContextValue, frameId:
       await rebuildOnePage(ctx, f.id, page, decoded.metadata, decoded.sourceBlob);
     }
 
+    // 2. Resurrect branches whose frames were deleted: re-import their page as
+    //    a branch frame with the exact import-time identity (Branch#i numbering,
+    //    `${rootName}__Branch#i` name, tiffGroupId/tiffPageIndex/tiffPageCount
+    //    extras, thumbnail). switchFrame stays false so the viewport keeps its
+    //    current position during revert.
+    const aliveIndexes = new Set(
+      groupFrames.map(f => (f.extra as Record<string, unknown>).tiffPageIndex as number),
+    );
+    const pageCount = decoded.pages.length;
+    const rootName = (trunkFrame.name || originalFileName).split('__')[0];
+    const sourceFile = new File([decoded.sourceBlob], originalFileName);
+    for (let i = 1; i < pageCount; i++) {
+      if (aliveIndexes.has(i)) continue;
+      const pageDecoded: DecodeResult = { metadata: decoded.metadata, pages: [decoded.pages[i]], sourceBlob: decoded.sourceBlob };
+      await importSingleImage(ctx, sourceFile, pageDecoded, {
+        switchFrame: false,
+        parentId: trunkFrame.id,
+        seqNum: `Branch#${i}`,
+        nameOverride: `${rootName}__Branch#${i}`,
+        extra: { tiffGroupId: groupId, tiffPageIndex: i, tiffPageCount: pageCount },
+      });
+    }
+
+    // 3. Remove stray branches under the trunk that are not original pages
+    //    (user-created branches carry no tiffGroupId/tiffPageIndex extras).
+    //    "Revert" restores the import shape, so anything beyond the page set
+    //    goes too.
+    const strays = state.frames.order
+      .map(id => state.frames.byId[id])
+      .filter(f =>
+        f &&
+        f.parentId === trunkFrame.id &&
+        (f.extra as Record<string, unknown> | undefined)?.tiffGroupId !== groupId,
+      );
+    for (const s of strays) {
+      layers.removeFrame(s.id);
+    }
+
     actions.resetHistory();
-    actions.setInteraction({ hud: { message: `Reverted ${groupFrames.length} frame(s) to original.`, type: 'success' } });
+    // No success HUD: the revert HUD disappearing IS the completion feedback.
     return true;
   } catch (err) {
     console.error('[FrameService] Multi-page TIFF group revert failed:', err);
     actions.setInteraction({ hud: { message: 'Failed to revert. Original asset may be missing.', type: 'error' } });
     return false;
+  } finally {
+    actions.setStateSignal(SIGNAL_IMPORTING, null);
   }
 }

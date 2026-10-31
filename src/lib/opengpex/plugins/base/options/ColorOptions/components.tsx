@@ -43,6 +43,7 @@ export const ColorOptionsComponent = React.memo(
     const {
       currentColor,
       applyColor,
+      commitColor,
       fillAsLayerCmd,
       sampleColor,
       isSampling,
@@ -65,10 +66,6 @@ export const ColorOptionsComponent = React.memo(
     const containerRef = useRef<HTMLDivElement>(null);
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [isPinned, setIsPinned] = useState(false);
-
-    const handleCommitColor = () => {
-      // Optional: push to recents, or trigger a definitive final change
-    };
 
     // Close dropdown on click outside (only if not pinned)
     useEffect(() => {
@@ -226,7 +223,7 @@ export const ColorOptionsComponent = React.memo(
                 <ColorPickerPro
                   value={currentColor}
                   onValueChange={applyColor}
-                  onValueCommit={handleCommitColor}
+                  onValueCommit={commitColor}
                   enablePro
                   frameGamut={frameGamut}
                   autoExpandPro={autoExpandPro}

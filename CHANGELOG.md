@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.36
+
+- Text: text boxes now hug their content — the invisible padding around text is gone, the box edge sits flush with the glyphs, and the caret stays vertically centered at any line height
+- Text: style changes (line height, letter spacing, font size, colour…) now resize the box in real time, both while editing and on a selected layer
+- Text: undo while editing is now predictable — each style adjustment is its own undo step, undo/redo pressed inside the editor never reaches the document history, and no style change can slip past undo
+- Text: resizing is now predictable — corner handles scale the box and text together, edge handles resize along one axis only, and each box edge can be grabbed directly
+
 ## 2.0.35
 
 - Clipboard: cross-document pasting reworked — pasted layers keep their original bit depth and color space, fragments land centered on the target canvas, and pasting as a new frame builds from the original pixels; a paste that has to fall back to an 8-bit image now says so

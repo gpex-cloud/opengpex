@@ -67,6 +67,37 @@ export const SIGNAL_SAMPLER_ACTIVE = 'signal.sampler.active';
 /** Contribution slot: tool trigger button injection slot (contributed by plugins like CraftDrawer) */
 export const COLOR_OPTIONS_CRAFT_SLOT = 'COLOR_OPTIONS_CRAFT_SLOT';
 
+/**
+ * Window event: the USER applied a colour through the global colour chip —
+ * a picker drag step or a sampler pick (`phase: 'live'`), or a picker release
+ * (`phase: 'commit'`). The colour is already in WORKING_GAMUT storage form.
+ *
+ * This is the one channel through which the global chip recolours an existing
+ * document object (e.g. the selected text layer). Consumers subscribe to this
+ * user action and write the document through their own commands; they must
+ * NOT derive the write by diffing `pendingColor` against their own data — a
+ * diff cannot tell a user edit from a history restore, so an undo that puts
+ * the document colour back gets "corrected" to the stale chip colour and
+ * pollutes history with a fresh step. Programmatic mirror writes of
+ * `pendingColor` (selection sync) never dispatch this event.
+ */
+export const COLOR_OPTIONS_EVT_APPLY = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.apply`;
+
+export interface ColorOptionsApplyEventDetail {
+  color: ColorValue;
+  phase: 'live' | 'commit';
+}
+
+/** Announce a user colour application (see COLOR_OPTIONS_EVT_APPLY). `color`
+ *  must already be in WORKING_GAMUT storage form. Shared by every writer of
+ *  `pendingColor` that represents a user action (hook picker, canvas sampler,
+ *  native eyedropper command). */
+export function dispatchColorApply(color: ColorValue, phase: ColorOptionsApplyEventDetail['phase']): void {
+  if (typeof window === 'undefined') return;
+  const detail: ColorOptionsApplyEventDetail = { color, phase };
+  window.dispatchEvent(new CustomEvent(COLOR_OPTIONS_EVT_APPLY, { detail }));
+}
+
 // ─── Sampler Tools ──────────────────────────────────────────────────────────────
 
 /**
@@ -197,5 +228,10 @@ export const ColorOptionsAPI = {
   slots: {
     /** Tool trigger buttons slot (contributed by CraftDrawer) */
     craft: COLOR_OPTIONS_CRAFT_SLOT,
+  },
+  /** Window events dispatched on explicit user actions */
+  events: {
+    /** The user applied a colour through the global chip (see COLOR_OPTIONS_EVT_APPLY) */
+    apply: COLOR_OPTIONS_EVT_APPLY,
   },
 } as const;

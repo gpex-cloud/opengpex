@@ -51,7 +51,8 @@ export const initialState: EditorData = {
     appearance: 'system',
     activeSidebarIds: [],
     sidebarOrder: { left: [], right: [] },
-    sidebarMode: 'FLOATING'
+    sidebarMode: 'FLOATING',
+    drawerWidthMode: 'normal'
   },
   isLoaded: false,
   confirm: null,
@@ -841,6 +842,32 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
           byId: {
             ...state.frames.byId,
             [frameId]: frame
+          }
+        }
+      };
+    }
+
+    case 'HISTORY_TRUNCATE': {
+      // Session-cancel bookend: an editing session that recorded undo steps
+      // (per-op style commands) is being cancelled with an out-of-band state
+      // restore. The undo stack is a linear patch chain — steps whose
+      // neighbors changed underneath would apply their patches onto a state
+      // they were never computed against, so everything recorded inside the
+      // session (everything after `pastLength`) must be dropped along with
+      // the state being restored.
+      const { frameId, pastLength } = action.payload;
+      const frameHistory = state.history.byFrameId[frameId];
+      if (!frameHistory || frameHistory.past.length <= pastLength) return state;
+      return {
+        ...state,
+        history: {
+          byFrameId: {
+            ...state.history.byFrameId,
+            [frameId]: {
+              past: frameHistory.past.slice(0, pastLength),
+              future: [],
+              checkpoint: frameHistory.checkpoint
+            }
           }
         }
       };

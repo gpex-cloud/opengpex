@@ -27,6 +27,7 @@ import { FontPicker } from "@opengpex/editor/widgets/FontPicker";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import { useTextPanel } from "../hooks";
 import { getDynamicTextSizeMax, TEXT_SIZE_MIN, ABSOLUTE_TEXT_SIZE_MAX } from "../protocols";
+import { TEXT_DEFAULT_LINE_HEIGHT } from "../../../overlays/TextOverlay/hooks/styling";
 import { useEditorState } from "@opengpex/editor/core/context";
 
 import { FONT_REGISTRY } from "@opengpex/editor/core/fonts/registry";
@@ -301,7 +302,7 @@ export const TextPanel = React.memo(function TextPanel() {
             min="1"
             max="2.5"
             step="0.1"
-            value={textData?.lineHeight || 1.4}
+            value={textData?.lineHeight || TEXT_DEFAULT_LINE_HEIGHT}
             onChange={(e) => updateTextDataLive({ lineHeight: Number(e.target.value) })}
             onMouseUp={(e) => {
               // Commit undoable snapshot when released (generates independent undo point in non-editing state)
@@ -315,7 +316,7 @@ export const TextPanel = React.memo(function TextPanel() {
             className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
           />
           <span className="text-[10px] font-black w-8 text-right tabular-nums text-indigo-600 dark:text-indigo-400">
-            {(textData?.lineHeight || 1.4).toFixed(1)}
+            {(textData?.lineHeight || TEXT_DEFAULT_LINE_HEIGHT).toFixed(1)}
           </span>
         </div>
 

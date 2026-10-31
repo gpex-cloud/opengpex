@@ -46,8 +46,8 @@ export const CMD_EDIT_START = 'cmd.edit_start';
 /** Updates text layer style attributes (font size/color/alignment, etc.) */
 export const CMD_UPDATE_PROPERTIES = 'cmd.update_properties';
 
-/** Commits a modify session with full layer patch (internal, creates undo point) */
-export const CMD_MODIFY_COMMIT = 'cmd.modify_commit';
+/** Non-undoable live variant of cmd.update_properties (continuous slider dragging) */
+export const CMD_UPDATE_PROPERTIES_LIVE = 'cmd.update_properties_live';
 
 // ─── Cross-Plugin Constants (cross-plugin references) ───────────────────────────────────────
 
@@ -56,9 +56,6 @@ export const TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID = `${PLUGIN_AUTHOR}.${PLU
 
 /** Cross-plugin signal storage key: current editing session type */
 export const TEXT_OVERLAY_SIGNAL_SESSION_TYPE = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_SESSION_TYPE}`;
-
-/** Cross-plugin command UID: update text attributes (for external plugins like CraftDrawer to call) */
-export const TEXT_OVERLAY_CMD_UPDATE_PROPERTIES = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_UPDATE_PROPERTIES}`;
 
 /** Cross-plugin command UID: enter editing state on an existing text layer (for the select-tool double-click path) */
 export const TEXT_OVERLAY_CMD_EDIT_START = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_EDIT_START}`;
@@ -71,8 +68,21 @@ export const _CMD_PLACE_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PLACE}`;
 /** Internal command UID: enter editing state */
 export const _CMD_EDIT_START_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_EDIT_START}`;
 
-/** Internal command UID: commit modify session */
-export const _CMD_MODIFY_COMMIT_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_MODIFY_COMMIT}`;
+/**
+ * Raw-edit-pending flag for the editing session's history flush rule.
+ *
+ * Typing during a session writes the document directly (the browser's native
+ * undo stack owns caret-accurate text undo), so those interim edits sit above
+ * the history checkpoint without a step of their own. When a LEDGERED write
+ * then happens (a panel style command), the raw edits must first be flushed
+ * into their own checkpoint step — otherwise the style command's baseline
+ * diff swallows them and one undo reverts typing and style together. The
+ * session sets this flag on every raw write; the panel clears it whenever it
+ * flushes before a command. Plain module state (not a store signal): one text
+ * session exists at a time and the flag is written and consumed synchronously
+ * within a single dispatch flow.
+ */
+export const TEXT_SESSION_RAW_EDITS = { pending: false };
 
 /**
  * DOM custom event used by the two-stage click arbitration: the TextPlaceHandler
@@ -103,6 +113,8 @@ export const TextOverlayAPI = {
   commands: {
     /** Update text layer style attributes (font size/color/alignment) */
     updateProperties: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_UPDATE_PROPERTIES}` } as { uid: string; _payload: { frameId: string; layerId: string; patch: unknown } },
+    /** Non-undoable live variant of updateProperties (continuous slider dragging) */
+    updatePropertiesLive: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.cmd.update_properties_live` } as { uid: string; _payload: { frameId: string; layerId: string; patch: unknown } },
     /** Activate an existing text layer and enter inline editing (select-tool double-click) */
     editStart: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_EDIT_START}` } as { uid: string; _payload: { frameId: string; layerId: string } },
   },
@@ -138,10 +150,15 @@ export interface TextEditingSession {
   layerId: string;
   frameId: string;
   /**
-   * modify session: layer snapshot captured before entering editing. Content
-   * and layout only — cx/cy/rotation are deliberately excluded: geometry moved
-   * with Cmd/Ctrl+Drag during editing commits through its own independent
-   * undoable transaction and must survive cancel (Esc restores content only).
+   * Layer snapshot captured when a MODIFY session opens (before entering
+   * editing). Create sessions capture nothing: their slow track is never
+   * written during the session, so the empty-content exit only needs
+   * rewindTo + undo against the place checkpoint.
+   *
+   * Content and layout only — cx/cy/rotation are deliberately excluded:
+   * geometry moved with Cmd/Ctrl+Drag during editing commits through its own
+   * independent undoable transaction and must survive cancel (Esc restores
+   * content only).
    */
   originalSnapshot: {
     textData: TextLayerData;
@@ -150,5 +167,12 @@ export interface TextEditingSession {
   } | null;
   /** Guard flag: session has ended, prevents subsequent blur callbacks */
   disposed: boolean;
+  /**
+   * Undo-stack length when the session opened (history.mark). Session-cancel
+   * rewinds the stack to this mark: steps recorded inside the session (per-op
+   * style commands) must die with the cancel, because the snapshot restore
+   * replaces the states those steps were diffed against.
+   */
+  historyMark: number;
 }
 

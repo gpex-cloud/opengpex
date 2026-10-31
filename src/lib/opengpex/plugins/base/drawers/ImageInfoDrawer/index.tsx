@@ -61,7 +61,8 @@ export const plugin: EditorPlugin = {
     quality: 92,
     dpi: 0,
     resample: false,
-    preferredWidth: 320,
+    // No preferredWidth: the workspace drawer-width fallback (320px normal /
+    // 260px compact via ui.drawerWidthMode) drives this panel's width.
     keepExif: true,
   },
 

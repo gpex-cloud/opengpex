@@ -27,6 +27,15 @@ import {
   type CaretResolveOptions,
 } from './geometry';
 
+/**
+ * Stable zero-padding default for `startPadding`. The value feeds the
+ * `useCallback`/`useEffect` dependency chains below, so it must keep a single
+ * identity across renders — an inline `{ x: 0, y: 0 }` default would allocate
+ * a fresh object per render and re-run the effect (and its `setAnchor`) on
+ * every pass, looping forever.
+ */
+const NO_START_PADDING: { x: number; y: number } = { x: 0, y: 0 };
+
 export interface UseCaretAnchorOptions {
   editorRef: RefObject<HTMLElement | null>;
   fontSize: number;
@@ -70,7 +79,7 @@ export function useCaretAnchor({
   fontSize,
   lineHeight = 1.4,
   verticalAlignOffset = 0,
-  startPadding = { x: 0, y: 0 },
+  startPadding = NO_START_PADDING,
   caretLayout,
   getLiveMatrix,
 }: UseCaretAnchorOptions): UseCaretAnchorResult {

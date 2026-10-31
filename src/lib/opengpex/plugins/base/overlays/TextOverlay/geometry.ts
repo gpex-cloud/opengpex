@@ -21,22 +21,18 @@
  * TextOverlay box geometry — two cooperating halves in one module:
  *
  * 1. Sizing: the single entry point for every value that ends up in a text
- *    layer's `bounding` (or clamps the editor's on-screen box). Four write
- *    paths consume this module and nothing else may compute a box size:
- *      1. creation       (interactions.ts — point text / dragged box)
- *      2. live input     (hooks.ts handleInput → measureEditorBox)
- *      3. commit         (hooks.ts commitEditing → measureEditorBox)
- *      4. style patch    (commands.ts update_properties → measureTextBounding)
- *    Keeping the floors and formulas in one place guarantees the model
- *    bounding and the DOM presentation never disagree by construction instead
- *    of by convention.
+ *    layer's `bounding` (or clamps the editor's on-screen box). The box-size
+ *    FORMULAS live here (initial creation sizes, minWidth policy); the
+ *    MEASUREMENT engines that feed live/commit/style-patch paths live in
+ *    hooks/measuring.ts (measureEditorBox / measureTextBounding). Keeping
+ *    floors and formulas split across exactly those two modules guarantees
+ *    the model bounding and the DOM presentation never disagree by
+ *    construction instead of by convention.
  *
  * 2. Anchoring: align-aware centre compensation for boxes whose size changed
  *    outside a drag (typing, style patches), so the visually anchored edge
  *    stays put instead of the box growing symmetrically.
  */
-
-import { TEXT_LAYER_PADDING } from '@opengpex/editor/core/helpers/config';
 
 // ─── Initial creation size ─────────────────────────────────────────────────────
 
@@ -53,12 +49,12 @@ export const POINT_TEXT_MIN_W_PX = 10;
 
 /**
  * Height of a freshly created single-line text box: one CSS line box
- * (fontSize × lineHeight) plus vertical padding on both sides. Shared by the
- * click (point text) and drag (paragraph box) creation paths so both start
- * from the same first-line height.
+ * (fontSize × lineHeight). Shared by the click (point text) and drag
+ * (paragraph box) creation paths so both start from the same first-line
+ * height.
  */
 export function getInitialLineBoxHeight(fontSize: number, lineHeight: number): number {
-  return Math.ceil(fontSize * lineHeight) + TEXT_LAYER_PADDING.y * 2;
+  return Math.ceil(fontSize * lineHeight);
 }
 
 /**
@@ -81,32 +77,6 @@ export function getInitialPointTextBoxWidth(availW: number): number {
  */
 export function getEditorMinWidth(): string {
   return `${INITIAL_TEXT_BOX_W_PX}px`;
-}
-
-// ─── Live DOM measurement ──────────────────────────────────────────────────────
-
-/** Width floor of a DOM-measured auto box (mirrors measureTextBounding's floor). */
-export const EDITOR_MEASURE_MIN_W = 4;
-
-/** Height floor of a DOM-measured box: always at least one full line box. */
-export const EDITOR_MEASURE_MIN_H = 20;
-
-/**
- * Measures the contenteditable's on-screen rect and converts it to canvas
- * space by dividing out the camera scale. Every live bounding measurement
- * (session mount, per-input, commit) goes through here so the floor policy —
- * width ≥ 4, height ≥ 20 — is defined exactly once.
- */
-export function measureEditorBox(
-  el: HTMLElement,
-  cameraScale: number,
-): { w: number; h: number } {
-  const rect = el.getBoundingClientRect();
-  const k = cameraScale || 1;
-  return {
-    w: Math.max(Math.ceil(rect.width / k), EDITOR_MEASURE_MIN_W),
-    h: Math.max(Math.ceil(rect.height / k), EDITOR_MEASURE_MIN_H),
-  };
 }
 
 // ─── Corner arm sizing ─────────────────────────────────────────────────────────

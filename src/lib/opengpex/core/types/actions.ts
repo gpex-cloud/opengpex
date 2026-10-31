@@ -165,6 +165,17 @@ export interface EditorActions {
     undo: () => void;
     redo: () => void;
     purge: () => void;
+    /** Establish the history checkpoint at the CURRENT frame state, recording
+     *  one step that reverts to the previous checkpoint. Session-commit
+     *  bookend for raw (non-command) writers: without it the next undoable
+     *  command's baseline diff spans the session's interim edits. */
+    commitCheckpoint: (frameId: string) => void;
+    /** Snapshot the frame's undo-stack length (session-scope entry mark). */
+    mark: (frameId: string) => number;
+    /** Drop every undo step recorded after the given mark (session-cancel
+     *  bookend — steps must never survive the out-of-band restore of the
+     *  states they were diffed against). */
+    rewindTo: (frameId: string, pastLength: number) => void;
     canUndo: () => boolean;
     canRedo: () => boolean;
   };
@@ -286,6 +297,14 @@ export interface EditorActions {
      * Please use `InteractionTransaction`.
      */
     commit: (id?: string | null, type?: 'layer' | 'layers' | 'frame' | 'frames' | 'project') => void;
+    /**
+     * Session-end bookend for a non-gesture long-lived fast-track writer (the
+     * inline text editing session): drop the layer's buffered draft WITHOUT
+     * landing it — the writer's truth already lives in Redux, so the draft is
+     * redundant-or-stale at teardown and landing it could regress state. Also
+     * clears the `interacting` flag the writer leaked through mutateVolatile.
+     */
+    discardLayerDraft: (id: string) => void;
     signal: (frameId: string) => void;
     reset: () => void;
 

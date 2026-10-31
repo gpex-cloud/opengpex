@@ -54,10 +54,11 @@ import { GITHUB_REPO_URL } from "@opengpex/editor/core/helpers/config";
 
 // ─── HUD Title/Subtitle Helpers ─────────────────────────────────────────────
 
-/** Compute the HUD title based on importing signal progress. */
+/** Compute the HUD title: explicit label wins, else batch-import progress. */
 function getImportingTitle(signal: ImportingSignalValue | null): string {
   if (!signal) return '';
-  const { current, total } = signal;
+  if (signal.label) return signal.label;
+  const { current = 1, total = 1 } = signal;
   const progress = total > 1 ? ` ${current}/${total}` : '';
   return `Loading${progress}…`;
 }
@@ -153,7 +154,7 @@ export function FileLoaderComponent() {
         <EditorHUD
           isVisible={isImporting}
           title={getImportingTitle(importingSignal)}
-          subtitle="Preparing image for workspace"
+          subtitle={importingSignal?.subtitle ?? "Preparing image for workspace"}
           icon={
             <div className="w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center shadow-lg shadow-amber-500/40">
               <Loader2

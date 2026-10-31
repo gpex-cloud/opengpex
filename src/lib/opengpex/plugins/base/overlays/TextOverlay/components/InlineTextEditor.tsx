@@ -20,7 +20,6 @@
 "use client";
 
 import React from "react";
-import { TEXT_LAYER_PADDING } from "@opengpex/editor/core/helpers/config";
 import { OUTER_CANVAS_PAN_IMMUNITY_ATTR } from "@opengpex/editor/stage/interaction/InteractionImmunity";
 import type { ColorValue } from "@opengpex/editor/core/engine/color";
 import { toCssColor4, toRgb8 } from "@opengpex/editor/core/engine/color";
@@ -133,7 +132,6 @@ export const InlineTextEditor = React.memo(function InlineTextEditor({
     // outline/border on the contenteditable — in fixed mode its height is the
     // CONTENT height, so a full outline would detach from the actual box
     // (boxWidth/boxHeight) after a resize (real-device acceptance 2026-10-07).
-    padding: `${TEXT_LAYER_PADDING.y}px ${TEXT_LAYER_PADDING.x}px`,
     // Element-level cursor: the contenteditable's base is 'text', but when
     // the cursor service resolves a global (object-manipulation) cursor —
     // spring key engaged, an active move gesture — that value wins. The
@@ -188,7 +186,6 @@ export const InlineTextEditor = React.memo(function InlineTextEditor({
         fontSize={textData.fontSize}
         lineHeight={textData.lineHeight}
         verticalAlignOffset={boxMode === "fixed" ? fixedVAlignOffset : 0}
-        startPadding={TEXT_LAYER_PADDING}
         caretLayout={{
           input: textData,
           boxWidth: textData.boxWidth || layer.bounding.w,

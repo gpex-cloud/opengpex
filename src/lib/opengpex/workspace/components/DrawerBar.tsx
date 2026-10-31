@@ -45,6 +45,17 @@ import { useLayout } from "../LayoutContext";
 import { WORKSPACE_GEOMETRY } from "../Workspace.styles";
 import { useDrawerReveal } from "../hooks/useDrawerReveal";
 
+/**
+ * Fallback panel width for drawer plugins that declare no preferredWidth.
+ * Plugin-declared widths always win; this only replaces the previous hard
+ * 320 default so the compact workspace setting can take effect.
+ */
+function panelWidthFallback(ui: EditorData["ui"]): number {
+  return ui.drawerWidthMode === "compact"
+    ? WORKSPACE_GEOMETRY.PANEL_WIDTH_COMPACT
+    : WORKSPACE_GEOMETRY.PANEL_WIDTH_NORMAL;
+}
+
 export default function DrawerBar({
   side = "right",
 }: {
@@ -132,11 +143,11 @@ export default function DrawerBar({
     for (const plugin of sortedPlugins) {
       if (!ids.includes(plugin.uid)) continue;
       const raw = plugin.initialConfig?.preferredWidth;
-      const width = typeof raw === "number" && raw > 0 ? raw : 320;
+      const width = typeof raw === "number" && raw > 0 ? raw : panelWidthFallback(ui);
       if (width > maxWidth) maxWidth = width;
     }
     return maxWidth;
-  }, [sortedPlugins, ui.activeSidebarIds]);
+  }, [sortedPlugins, ui]);
 
   React.useEffect(() => {
     const slotId = `drawerbar-active-${side}`;
@@ -315,7 +326,7 @@ function SidebarItem({
   const { plugins } = useEditorServices();
   const isActive = (ui.activeSidebarIds || []).includes(plugin.uid);
   const isBusy = plugins.isBusy(plugin.uid);
-  const panelWidth = plugin.initialConfig?.preferredWidth || 320;
+  const panelWidth = plugin.initialConfig?.preferredWidth || panelWidthFallback(ui);
   const dragControls = useDragControls();
 
   const [measuredHeight, setMeasuredHeight] = React.useState<number>(34);

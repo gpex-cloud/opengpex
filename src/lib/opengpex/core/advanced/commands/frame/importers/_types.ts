@@ -19,10 +19,23 @@
 /** Signal key for the unified importing progress indicator. */
 export const SIGNAL_IMPORTING = 'sys.asset.importing';
 
-/** Shape of the importing signal value stored in state.interaction.signals. */
+/**
+ * Shape of the importing signal value stored in state.interaction.signals.
+ *
+ * Two producers share one signal + HUD:
+ * - Batch file import fills `current`/`total` (title renders "Loading 2/5…").
+ * - Frame revert (always a single source) fills only `label` — the progress
+ *   pair would be meaningless noise there.
+ */
 export interface ImportingSignalValue {
-  current: number;  // 1-based index of current file
-  total: number;    // total number of files in the batch
+  /** Explicit HUD title override; takes precedence over progress rendering. */
+  label?: string;
+  /** Explicit HUD subtitle override; falls back to the import subtitle. */
+  subtitle?: string;
+  /** 1-based index of current file (batch import only). */
+  current?: number;
+  /** Total number of files in the batch (batch import only). */
+  total?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

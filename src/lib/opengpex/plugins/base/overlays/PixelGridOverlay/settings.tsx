@@ -21,6 +21,7 @@
 
 import { usePluginSelfConfig } from '@opengpex/editor/core/context';
 import { Grid } from 'lucide-react';
+import FunctionTabs from '@opengpex/editor/widgets/FunctionTabs';
 import * as P from './protocols';
 import type { GridLineStyle } from './protocols';
 
@@ -31,7 +32,7 @@ const LINE_STYLE_OPTIONS: ReadonlyArray<{
 }> = [
   {
     value: 'dual',
-    label: 'Dual-tone',
+    label: 'Dual',
     hint: 'Dark + light pair · visible on any image · tuned for Retina / high-dpi screens',
   },
   {
@@ -86,26 +87,18 @@ export function PixelGridSettings() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1" role="radiogroup" aria-label="Pixel grid line style">
-            {LINE_STYLE_OPTIONS.map((opt) => {
-              const selected = style === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  role="radio"
-                  aria-checked={selected}
-                  title={opt.hint}
-                  onClick={() => updateConfig({ lineStyle: opt.value })}
-                  className={`px-2 py-1 rounded-md border text-[9px] font-black uppercase tracking-tight transition-colors ${
-                    selected
-                      ? 'bg-indigo-500/10 border-indigo-500/40 text-indigo-500'
-                      : 'bg-[var(--bg-stage)] border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
+          <div role="radiogroup" aria-label="Pixel grid line style">
+            <FunctionTabs
+              size="sm"
+              className="w-40 shrink-0"
+              options={LINE_STYLE_OPTIONS.map((opt) => ({
+                label: opt.label,
+                value: opt.value,
+                tooltip: opt.hint,
+              }))}
+              value={style}
+              onChange={(next) => updateConfig({ lineStyle: next })}
+            />
           </div>
         </div>
 

@@ -21,14 +21,15 @@
 
 import { useCallback, useMemo, useEffect, useRef } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals, usePluginSelfConfig, usePluginConfig } from '@opengpex/editor/core/context';
-import { TextOverlayAPI } from '../../overlays/TextOverlay/protocols';
-import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
+import { TextOverlayAPI, TEXT_SESSION_RAW_EDITS } from '../../overlays/TextOverlay/protocols';
+import { DEFAULT_TEXT_STYLE, pickStyleFields } from '../../overlays/TextOverlay/hooks/styling';
+import { ColorOptionsAPI, type ColorOptionsApplyEventDetail } from '../../options/ColorOptions/protocols';
 import { MarkerOverlayAPI } from '../../overlays/MarkerOverlay/protocols';
 import { MARKER_REGISTRY } from '../../overlays/MarkerOverlay/marker/registry';
 // Side-effect import: ensures built-in markers are registered before panel reads.
 import '../../overlays/MarkerOverlay/marker';
 import { getReferenceFontSize, MOSAIC_SIZE_PRESETS, getDynamicMarkerStrokeMax } from './protocols';
-import type { ActiveCraft, BrushPreset, CraftType, CraftDrawerConfig, PendingTextData } from './protocols';
+import type { ActiveCraft, BrushPreset, CraftType, CraftDrawerConfig } from './protocols';
 import type { TextLayerData } from '@opengpex/editor/core/types';
 import type { MarkerData, MarkerKind } from '../../overlays/MarkerOverlay/marker/types';
 import { resolveNextMarkerData, resolvePendingMarkerStyle, mergePendingMarkerStyle, withPendingMarkerStyle } from '../../overlays/MarkerOverlay/marker/pending';
@@ -191,19 +192,6 @@ export function useCraftButtonGroup() {
 
 // ─── Default text style constants ──────────────────────────────────────────────
 
-const DEFAULT_TEXT_STYLE: Required<PendingTextData> = {
-  fontFamily: 'Inter',
-  fontSize: 24,
-  fontWeight: 400,
-  align: 'left',
-  lineHeight: 1.4,
-  letterSpacing: 0,
-  verticalAlign: 'top',
-  italic: false,
-  underline: false,
-  strikethrough: false,
-};
-
 /** Stable fallback ColorValue when no `pendingColor` exists yet (module-scoped so identity is stable across renders). Seeded in WORKING_GAMUT form — `pendingColor`'s canonical storage representation (white is gamut-invariant, so the seed is numerically identical to plain sRGB white). */
 const DEFAULT_TEXT_COLOR: ColorValue = convertColorGamut(fromHex('#FFFFFF'), WORKING_GAMUT);
 
@@ -227,7 +215,16 @@ export function useTextPanel() {
   // Gets text layer currently editing (prioritizes editing signal, followed by activeLayer)
   const targetLayerId = (editingLayerExists ? editingLayerId : null) || (activeLayer?.type === 'text' ? activeLayer.id : null);
   const targetLayer = targetLayerId && activeFrame ? activeFrame.layers.byId[targetLayerId] : null;
-  const layerTextData = targetLayer?.textData;
+  // Read the MERGED layer (fast-track draft ⊕ slow track), not the raw Redux
+  // layer: while an inline text editing session is live, typed content and
+  // live box geometry live only in the volatile draft — the slow track is
+  // frozen until the session's commit exit. A direct read per render keeps
+  // the panel's control values on the live truth; no reactive subscription is
+  // needed (style writes land in the slow track through ledgered commands and
+  // re-render this hook anyway). Outside a session this degenerates to the
+  // plain Redux layer.
+  const liveTargetLayer = targetLayerId && activeFrame ? actions.fast.latestLayer(activeFrame.id, targetLayerId) : null;
+  const layerTextData = liveTargetLayer?.textData ?? targetLayer?.textData;
 
   // ─── Pending Text Data (pre-edit state persistence) ─────────────────────────
   const pendingTextData = selfConfig.pendingTextData || DEFAULT_TEXT_STYLE;
@@ -269,17 +266,7 @@ export function useTextPanel() {
     (patch: Partial<TextLayerData>) => {
       if (!targetLayerId || !layerTextData) {
         // Pre-edit state: persist to pendingTextData in pluginConfig
-        const pendingPatch: Partial<PendingTextData> = {};
-        if (patch.fontFamily !== undefined) pendingPatch.fontFamily = patch.fontFamily;
-        if (patch.fontSize !== undefined) pendingPatch.fontSize = patch.fontSize;
-        if (patch.fontWeight !== undefined) pendingPatch.fontWeight = patch.fontWeight;
-        if (patch.align !== undefined) pendingPatch.align = patch.align;
-        if (patch.lineHeight !== undefined) pendingPatch.lineHeight = patch.lineHeight;
-        if (patch.letterSpacing !== undefined) pendingPatch.letterSpacing = patch.letterSpacing;
-        if (patch.verticalAlign !== undefined) pendingPatch.verticalAlign = patch.verticalAlign;
-        if (patch.italic !== undefined) pendingPatch.italic = patch.italic;
-        if (patch.underline !== undefined) pendingPatch.underline = patch.underline;
-        if (patch.strikethrough !== undefined) pendingPatch.strikethrough = patch.strikethrough;
+        const pendingPatch = pickStyleFields(patch);
 
         if (Object.keys(pendingPatch).length > 0) {
           setSelfConfig({
@@ -291,33 +278,24 @@ export function useTextPanel() {
 
       if (!activeFrame) return;
 
-      if (editingLayerId) {
-        // Editing state: directly updates via updateLayer (without creating independent undo point,
-        // attribute modifications are included in the overall editing transaction, rolling back with checkpoint of cmd.edit_start)
-        actions.updateLayer(activeFrame.id, targetLayerId, {
-          textData: { ...layerTextData, ...patch },
-        });
-      } else {
-        // Non-editing state: updates via undoable command (generates independent undo point)
-        actions.executeCommand(TextOverlayAPI.commands.updateProperties.uid, {
-          frameId: activeFrame.id,
-          layerId: targetLayerId,
-          patch,
-        });
+      // Editing and pre-edit states now share ONE ledgered path: session-start
+      // rebased the history checkpoint, so the undoable style command works
+      // identically in both — the in-session adjustment becomes its own undo
+      // step instead of being folded into the session. The raw-edit flush
+      // first gives typing its own step (otherwise the command's baseline
+      // diff would swallow the un-ledgered keystrokes above the checkpoint).
+      if (TEXT_SESSION_RAW_EDITS.pending) {
+        actions.history.commitCheckpoint(activeFrame.id);
+        TEXT_SESSION_RAW_EDITS.pending = false;
       }
+      actions.executeCommand(TextOverlayAPI.commands.updateProperties.uid, {
+        frameId: activeFrame.id,
+        layerId: targetLayerId,
+        patch,
+      });
 
       // Also sync to pendingTextData so next layer creation uses latest settings
-      const pendingSync: Partial<PendingTextData> = {};
-      if (patch.fontFamily !== undefined) pendingSync.fontFamily = patch.fontFamily;
-      if (patch.fontSize !== undefined) pendingSync.fontSize = patch.fontSize;
-      if (patch.fontWeight !== undefined) pendingSync.fontWeight = patch.fontWeight;
-      if (patch.align !== undefined) pendingSync.align = patch.align;
-      if (patch.lineHeight !== undefined) pendingSync.lineHeight = patch.lineHeight;
-      if (patch.letterSpacing !== undefined) pendingSync.letterSpacing = patch.letterSpacing;
-      if (patch.verticalAlign !== undefined) pendingSync.verticalAlign = patch.verticalAlign;
-      if (patch.italic !== undefined) pendingSync.italic = patch.italic;
-      if (patch.underline !== undefined) pendingSync.underline = patch.underline;
-      if (patch.strikethrough !== undefined) pendingSync.strikethrough = patch.strikethrough;
+      const pendingSync = pickStyleFields(patch);
 
       if (Object.keys(pendingSync).length > 0) {
         setSelfConfig({
@@ -325,28 +303,23 @@ export function useTextPanel() {
         } as Partial<CraftDrawerConfig>);
       }
     },
-    [actions, activeFrame, targetLayerId, layerTextData, editingLayerId, pendingTextData, setSelfConfig]
+    [actions, activeFrame, targetLayerId, layerTextData, pendingTextData, setSelfConfig]
   );
 
   /**
-   * updateTextDataLive: Always writes directly using non-undoable (used for continuous input scenarios like slider dragging).
-   * When slider is released, call updateTextData to generate independent undo point (non-editing state).
+   * updateTextDataLive: non-undoable write for continuous input (slider drag).
+   * Both states route through the live twin of cmd.update_properties so the
+   * box re-measures per step. In the editing session the command is ledged
+   * against the checkpoint rebased at session start; the pending-typing flush
+   * runs at most once per gesture (the first live step), so the keystrokes
+   * before the drag get their own step and the release's undoable command
+   * records just the drag.
    */
   const updateTextDataLive = useCallback(
     (patch: Partial<TextLayerData>) => {
       if (!targetLayerId || !layerTextData) {
         // Pre-edit state: same as updateTextData (write to pendingTextData)
-        const pendingPatch: Partial<PendingTextData> = {};
-        if (patch.fontFamily !== undefined) pendingPatch.fontFamily = patch.fontFamily;
-        if (patch.fontSize !== undefined) pendingPatch.fontSize = patch.fontSize;
-        if (patch.fontWeight !== undefined) pendingPatch.fontWeight = patch.fontWeight;
-        if (patch.align !== undefined) pendingPatch.align = patch.align;
-        if (patch.lineHeight !== undefined) pendingPatch.lineHeight = patch.lineHeight;
-        if (patch.letterSpacing !== undefined) pendingPatch.letterSpacing = patch.letterSpacing;
-        if (patch.verticalAlign !== undefined) pendingPatch.verticalAlign = patch.verticalAlign;
-        if (patch.italic !== undefined) pendingPatch.italic = patch.italic;
-        if (patch.underline !== undefined) pendingPatch.underline = patch.underline;
-        if (patch.strikethrough !== undefined) pendingPatch.strikethrough = patch.strikethrough;
+        const pendingPatch = pickStyleFields(patch);
 
         if (Object.keys(pendingPatch).length > 0) {
           setSelfConfig({
@@ -357,8 +330,14 @@ export function useTextPanel() {
       }
 
       if (!activeFrame) return;
-      actions.updateLayer(activeFrame.id, targetLayerId, {
-        textData: { ...layerTextData, ...patch },
+      if (TEXT_SESSION_RAW_EDITS.pending) {
+        actions.history.commitCheckpoint(activeFrame.id);
+        TEXT_SESSION_RAW_EDITS.pending = false;
+      }
+      actions.executeCommand(TextOverlayAPI.commands.updatePropertiesLive.uid, {
+        frameId: activeFrame.id,
+        layerId: targetLayerId,
+        patch,
       });
     },
     [actions, activeFrame, targetLayerId, layerTextData, pendingTextData, setSelfConfig]
@@ -372,9 +351,9 @@ export function useTextPanel() {
   const updateTextColor = useCallback(
     (color: ColorValue) => {
       // `pendingColor` / `textData.color` persist in WORKING_GAMUT form — the
-      // picker hands in a view-gamut value. Converting the SAME object into
-      // both keeps the selection-sync reference check
-      // (`layerTextData.color !== globalColor`) coherent.
+      // picker hands in a view-gamut value. The chip is mirrored directly
+      // (plain config write, not the chip's own apply path) so this panel
+      // control never announces itself back to the subscription below.
       const stored = convertColorGamut(color, WORKING_GAMUT);
       actions.updatePluginConfig(ColorOptionsAPI.configKey, { pendingColor: stored });
       if (targetLayerId && layerTextData) {
@@ -409,52 +388,65 @@ export function useTextPanel() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ─── Layer Selection Change: Sync color and pendingTextData ─────────────────
+  // ─── Layer Selection Change: mirror the layer into the global chip + pending style ─
+  // One-way, selection-driven only. The reverse direction (global chip →
+  // layer) is NOT derived by diffing `pendingColor` against the layer colour:
+  // a diff cannot tell a user edit from a history restore, so an undo that put
+  // the layer colour back got "corrected" to the stale chip colour through a
+  // fresh undoable command — the colour flashed back and history grew a step
+  // undo could never beat. The chip announces user applications explicitly
+  // instead (see the COLOR_OPTIONS_EVT_APPLY subscription below).
   const lastTargetLayerIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (targetLayerId !== lastTargetLayerIdRef.current) {
-      // Layer selection changed
-      lastTargetLayerIdRef.current = targetLayerId;
-      if (targetLayerId && layerTextData) {
-        // Synchronize color of selected layer to global Color Options,
-        // normalized to the WORKING_GAMUT storage form. Normally an identity
-        // (text colors descend from `pendingColor`, already working-form), so
-        // the reference the sync effect compares stays stable.
-        if (layerTextData.color) {
-          actions.updatePluginConfig(ColorOptionsAPI.configKey, {
-            pendingColor: convertColorGamut(layerTextData.color, WORKING_GAMUT),
-          });
-        }
-        // Sync selected layer's text style to pendingTextData.
-        // fontSize is intentionally CLEARED on layer selection change:
-        // - Only persisted when user explicitly changes it in the panel (updateTextData)
-        // - This allows getReferenceFontSize() to serve as the adaptive default
-        //   for new layer creation on different canvas sizes
-        // - Handles migration from old code that always synced fontSize: 24
-        setSelfConfig({
-          pendingTextData: {
-            fontSize: undefined,  // Clear: adaptive default will be used for new layers
-            fontFamily: layerTextData.fontFamily || DEFAULT_TEXT_STYLE.fontFamily,
-            fontWeight: layerTextData.fontWeight || DEFAULT_TEXT_STYLE.fontWeight,
-            align: layerTextData.align || DEFAULT_TEXT_STYLE.align,
-            lineHeight: layerTextData.lineHeight || DEFAULT_TEXT_STYLE.lineHeight,
-            italic: layerTextData.italic ?? DEFAULT_TEXT_STYLE.italic,
-            underline: layerTextData.underline ?? DEFAULT_TEXT_STYLE.underline,
-            strikethrough: layerTextData.strikethrough ?? DEFAULT_TEXT_STYLE.strikethrough,
-          },
-        } as Partial<CraftDrawerConfig>);
-      }
-    } else {
-      // Layer selection unchanged (only globalColor change or textData.color change could occur)
-      if (targetLayerId && layerTextData) {
-        if (layerTextData.color !== globalColor) {
-          // If it is a global pendingColor change (e.g. user operated the top global color palette), synchronize to text layer
-          updateTextData({ color: globalColor });
-        }
-      }
+    if (targetLayerId === lastTargetLayerIdRef.current) return;
+    lastTargetLayerIdRef.current = targetLayerId;
+    if (!targetLayerId || !layerTextData) return;
+
+    // Synchronize color of selected layer to global Color Options,
+    // normalized to the WORKING_GAMUT storage form.
+    if (layerTextData.color) {
+      actions.updatePluginConfig(ColorOptionsAPI.configKey, {
+        pendingColor: convertColorGamut(layerTextData.color, WORKING_GAMUT),
+      });
     }
-  }, [targetLayerId, layerTextData, globalColor, actions, updateTextData, setSelfConfig]);
+    // Sync selected layer's text style to pendingTextData.
+    // fontSize is intentionally CLEARED on layer selection change:
+    // - Only persisted when user explicitly changes it in the panel (updateTextData)
+    // - This allows getReferenceFontSize() to serve as the adaptive default
+    //   for new layer creation on different canvas sizes
+    // - Handles migration from old code that always synced fontSize: 24
+    setSelfConfig({
+      pendingTextData: {
+        fontSize: undefined,  // Clear: adaptive default will be used for new layers
+        fontFamily: layerTextData.fontFamily || DEFAULT_TEXT_STYLE.fontFamily,
+        fontWeight: layerTextData.fontWeight || DEFAULT_TEXT_STYLE.fontWeight,
+        align: layerTextData.align || DEFAULT_TEXT_STYLE.align,
+        lineHeight: layerTextData.lineHeight || DEFAULT_TEXT_STYLE.lineHeight,
+        italic: layerTextData.italic ?? DEFAULT_TEXT_STYLE.italic,
+        underline: layerTextData.underline ?? DEFAULT_TEXT_STYLE.underline,
+        strikethrough: layerTextData.strikethrough ?? DEFAULT_TEXT_STYLE.strikethrough,
+      },
+    } as Partial<CraftDrawerConfig>);
+  }, [targetLayerId, layerTextData, actions, setSelfConfig]);
+
+  // ─── Global chip → selected text layer: explicit user action only ─────────
+  // The global colour chip announces every USER application (picker drag step,
+  // release, sampler pick). With a text layer targeted, a live step writes
+  // through the live path (session raw write while editing, non-undoable
+  // command pre-edit) and the commit writes through the undoable command —
+  // the same two-phase contract the panel's own colour control uses. The
+  // event carries a WORKING_GAMUT value, so no conversion here.
+  useEffect(() => {
+    if (!targetLayerId || !layerTextData) return;
+    const onApply = (e: Event) => {
+      const { color, phase } = (e as CustomEvent<ColorOptionsApplyEventDetail>).detail;
+      if (phase === 'commit') updateTextData({ color });
+      else updateTextDataLive({ color });
+    };
+    window.addEventListener(ColorOptionsAPI.events.apply, onApply);
+    return () => window.removeEventListener(ColorOptionsAPI.events.apply, onApply);
+  }, [targetLayerId, layerTextData, updateTextData, updateTextDataLive]);
 
   return useMemo(() => ({
     targetLayer,

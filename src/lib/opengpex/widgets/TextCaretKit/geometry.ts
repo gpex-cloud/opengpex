@@ -293,6 +293,12 @@ export function resolveCaretAnchor(
   // padding anchor; any other failure keeps the previous caret rather than
   // hijacking it to the first line (the historical line-start bug).
   if (!linearization || linearization.text === '') {
+    // Empty content has no baseline to anchor to; with no padding the first
+    // line box starts at the box origin, so centering the caret in that first
+    // line box gives top = (lineH − caretH) / 2. This is algebraically
+    // identical to the layout solver's baseline anchor
+    // (baseline − (asc − desc)/2 − caretH/2) for a first line at the box
+    // origin, so the caret never jumps on the first keystroke.
     const lineH = options.fontSize * options.lineHeight;
     const offsetY = Math.max(0, (lineH - caretH) / 2);
     return {

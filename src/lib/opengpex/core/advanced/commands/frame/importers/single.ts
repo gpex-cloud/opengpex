@@ -191,7 +191,8 @@ export async function revertSingleImage(
       confinement: null,
     });
     actions.resetHistory();
-    actions.setInteraction({ hud: { message: 'Reverted to original — all edits discarded.', type: 'success' } });
+    // No success HUD on purpose: the revert progress HUD (sys.asset.importing)
+    // disappearing IS the completion feedback. Only failures get a HUD.
     return true;
   } catch (err) {
     console.error('[FrameService] Standard revert failed:', err);

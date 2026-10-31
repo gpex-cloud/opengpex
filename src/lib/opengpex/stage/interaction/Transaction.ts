@@ -40,7 +40,9 @@ export type TransactionState = 'idle' | 'active' | 'committed' | 'aborted';
 export class InteractionTransaction {
   private _state: TransactionState = 'idle';
   private activeFrameId: string | null = null;
-  
+  /** Whether begin() ran silently (no fold-window opened → commit must not close one). */
+  private silent = false;
+
   // Track what was modified during this transaction
   private hasFrameUpdates = false;
   private hasLayerUpdates = false;
@@ -75,6 +77,7 @@ export class InteractionTransaction {
     this.activeFrameId = this.e.activeFrame.id;
     this.hasFrameUpdates = false;
     this.hasLayerUpdates = false;
+    this.silent = silent;
 
     // Triggers underlying SIGNAL_COMMIT to generate Undo record and sets interacting = true
     if (!silent) {
@@ -131,6 +134,23 @@ export class InteractionTransaction {
     }
     if (this.hasFrameUpdates) {
       this.e.actions.fast.commit(this.activeFrameId, 'frame');
+    }
+
+    // Close the fold window begin() opened. The landing dispatch above is
+    // UNLEDGERED (BATCH_UPDATE_LAYER records no history step), so without
+    // this boundary the gesture's own changes stayed pending above the
+    // checkpoint and were folded into the NEXT unrelated boundary — a later
+    // panel style command or slider release then co-reverted the move with
+    // its own change in one undo. A non-silent gesture is therefore a
+    // self-contained undo step: begin opens the fold window, commit closes
+    // it. Uses history.commitCheckpoint (a plain SIGNAL_COMMIT dispatch)
+    // deliberately: fast.signal would flip `interacting` back to true and
+    // re-open the fast track this commit just closed. Silent transactions
+    // (pan/zoom/stroke streams) never opened a window and must not close
+    // one — their landing is either camera-only (excluded from history
+    // diffs) or ledgered by the bake command that owns the boundary.
+    if (!this.silent && this.activeFrameId) {
+      this.e.actions.history.commitCheckpoint(this.activeFrameId);
     }
 
     this.e.actions.setInteraction({ isInteracting: false });

@@ -22,7 +22,7 @@
  *
  * Single source of truth for text geometry shared by the GPU TextRenderer
  * and the DOM contenteditable. Input is `TextLayerData` (three-state `boxMode`,
- * `TEXT_LAYER_PADDING`, `letterSpacing`, `verticalAlign`); output is a pure
+ * `letterSpacing`, `verticalAlign`); output is a pure
  * `TextLayout` in logical (density-independent) pixels — GPU consumers scale
  * by target density themselves.
  *
@@ -34,7 +34,6 @@
  * @module core/engine/text/textLayout
  */
 
-import { TEXT_LAYER_PADDING } from '@opengpex/editor/core/helpers/config';
 import { normalizeBoxMode } from '@opengpex/editor/core/types/models';
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
 
@@ -268,8 +267,6 @@ export function computeTextLayout(
   // the lines that overflow the box height ('auto_height' grows downward).
   const wrapMode = boxMode === 'fixed' || boxMode === 'auto_height';
   const clipToBox = boxMode === 'fixed';
-  const padX = TEXT_LAYER_PADDING.x;
-  const padY = TEXT_LAYER_PADDING.y;
 
   // Layout owns the measurement state so every consumer measures identically
   // (a shared/reused context never inherits a previous layer's font/spacing).
@@ -288,10 +285,10 @@ export function computeTextLayout(
   const fbAsc = probe.fontBoundingBoxAscent || fontSize * 0.8;
   const fbDesc = probe.fontBoundingBoxDescent || fontSize * 0.2;
   const halfLeading = (lineH - (fbAsc + fbDesc)) / 2;
-  const firstBaselineTop = padY + halfLeading;
+  const firstBaselineTop = halfLeading;
 
   const paragraphs = (td.content || '').split('\n');
-  const maxWidth = wrapMode ? (td.boxWidth || boxW) - padX * 2 : undefined;
+  const maxWidth = wrapMode ? (td.boxWidth || boxW) : undefined;
 
   // Fixed-mode vertical alignment: shift the whole content block down so its
   // first line sits centered/bottom-aligned in the box (never negative —
@@ -318,10 +315,9 @@ export function computeTextLayout(
       .slice(0, visibleEnd)
       .reduce((sum, lines) => sum + lines.length, 0);
     const contentH = totalLines * lineH;
-    const availH = boxH - padY * 2;
     const verticalAlign = td.verticalAlign || 'top';
-    if (verticalAlign === 'middle') vAlignOffset = Math.max(0, (availH - contentH) / 2);
-    else if (verticalAlign === 'bottom') vAlignOffset = Math.max(0, availH - contentH);
+    if (verticalAlign === 'middle') vAlignOffset = Math.max(0, (boxH - contentH) / 2);
+    else if (verticalAlign === 'bottom') vAlignOffset = Math.max(0, boxH - contentH);
   }
 
   const underlines: TextDecorationRect[] = [];
@@ -336,8 +332,8 @@ export function computeTextLayout(
       td.align === 'center'
         ? boxW / 2 - width / 2
         : td.align === 'right'
-          ? boxW - padX - width
-          : padX;
+          ? boxW - width
+          : 0;
     // Per-character left edges via cumulative prefix measurement: the advance
     // of the first i code points (kerning + letterSpacing included) is the
     // browser's ink origin for character i. Array.from walks code points so

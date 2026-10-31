@@ -55,6 +55,18 @@ export const INITIAL_VOLATILE: VolatileState = {
  * The single owner of `volatileRef`. Exposes the lowest-level atomic
  * mutate / update / commit / reset handles. All higher-level fast-track
  * behaviour (facade, merge, consumers) is layered on top of this ref.
+ *
+ * Snapshot invalidation contract: the per-tick merge snapshot (useFastSync)
+ * is keyed on `_bufferVersion` plus the committed frame reference. Every
+ * primitive here that can change `buffered` bumps the version itself, so a
+ * buffered change can never be served stale by the snapshot — the writer
+ * has no invalidation duty. Before this lived in the primitives, each writer
+ * bumped by hand; the ones that forgot (an editing session's draft writes
+ * once the session stopped dispatching to the slow track) froze the GPU
+ * composite at a pre-write state while the DOM moved on. The `transient`
+ * domain does NOT go through these primitives (see the facade's setTransient):
+ * it never enters the merge, and bumping on its pointermove-rate writes
+ * would defeat the snapshot cache.
  */
 export function useVolatileState(): VolatileStateHandle {
   const volatileRef = useRef<VolatileState>({ ...INITIAL_VOLATILE });
@@ -62,11 +74,13 @@ export function useVolatileState(): VolatileStateHandle {
   const mutate = useCallback((mutator: (v: VolatileState) => void) => {
     mutator(volatileRef.current);
     volatileRef.current.activeState.interacting = true;
+    volatileRef.current._bufferVersion++;
   }, []);
 
   const update = useCallback((patch: Partial<VolatileState>) => {
     Object.assign(volatileRef.current, patch);
     volatileRef.current.activeState.interacting = true;
+    volatileRef.current._bufferVersion++;
   }, []);
 
   const commit = useCallback(() => {
@@ -78,6 +92,9 @@ export function useVolatileState(): VolatileStateHandle {
     volatileRef.current.activeState.interacting = false;
     volatileRef.current.buffered = { layers: {}, frames: {}, project: {} };
     volatileRef.current.transient = {};
+    // The buffer was replaced wholesale: the merge snapshot must not keep
+    // serving drafts that no longer exist.
+    volatileRef.current._bufferVersion++;
   }, []);
 
   // Flag-neutral cleanup: mutate the buffer WITHOUT touching `interacting`.
@@ -85,8 +102,11 @@ export function useVolatileState(): VolatileStateHandle {
   // which is not a user interaction. Using `mutate` there wrongly set
   // interacting=true and — with no following commit — left it stuck true after
   // REMOVE_FRAME, polluting fast-track throttle / merge gating / idle checks.
+  // Flag-neutral is about `interacting` only: a deleted draft is still a
+  // buffered change, so the snapshot version bumps like every other write.
   const cleanup = useCallback((mutator: (v: VolatileState) => void) => {
     mutator(volatileRef.current);
+    volatileRef.current._bufferVersion++;
   }, []);
 
   return { volatileRef, mutate, update, commit, reset, cleanup };
