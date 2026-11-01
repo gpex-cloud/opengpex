@@ -22,8 +22,10 @@
 import { useState, useEffect, useRef } from "react";
 import {
   ImagePlus,
+  ImageUp,
+  Import,
+  ClipboardCopy,
   Loader2,
-  Upload,
   Sparkles,
   Layers,
   Scissors,
@@ -38,8 +40,10 @@ import {
   Expand,
   Target,
   ImageMinus,
+  SquareMousePointer,
 } from "lucide-react";
 import EditorHUD from "@opengpex/editor/widgets/EditorHUD";
+import EditorPortal from "@opengpex/editor/widgets/Portal";
 import DelayedConfirm from "@opengpex/editor/widgets/DelayedConfirm";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import {
@@ -47,9 +51,10 @@ import {
   useEditorState,
   useEditorServices,
 } from "@opengpex/editor/core/context";
-import type { FileLoaderCommandsMap } from './commands.d';
-import type { ImportingSignalValue } from './protocols';
-import { SIGNAL_IMPORTING } from './protocols';
+import type { FileLoaderCommandsMap } from '../commands.d';
+import type { ImportingSignalValue, NewBlankFinalizeSignal } from '../protocols';
+import { SIGNAL_IMPORTING, SIGNAL_NEW_BLANK_MODAL, SIGNAL_NEW_BLANK_FINALIZE, NEW_DOCUMENT_THUMBNAIL_URL } from '../protocols';
+import { NewDocumentModal } from './NewDocument';
 import { GITHUB_REPO_URL } from "@opengpex/editor/core/helpers/config";
 
 // ─── HUD Title/Subtitle Helpers ─────────────────────────────────────────────
@@ -71,10 +76,51 @@ export function FileLoaderComponent() {
   const [isOver, setIsOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { state } = useEditorState();
+  const { actions, assets } = useEditorServices();
 
   // Unified importing signal (replaces separate transcoding/downloading booleans)
   const importingSignal = state.interaction.signals[SIGNAL_IMPORTING] as unknown as ImportingSignalValue | null;
   const isImporting = !!importingSignal;
+
+  // New Document dialog visibility is plugin-local signal state so the ⌥⌘N
+  // command, the landing card and the toolbar button all open the same instance.
+  const isNewBlankOpen = !!state.interaction.signals[SIGNAL_NEW_BLANK_MODAL];
+
+  // ── Blank-document finalization ──
+  // `cmd.create_blank` imports the synthesized PNG through the standard trunk
+  // road and then raises this signal; the frame is only observable from React
+  // state, so the two touches ingest cannot infer are applied here once the
+  // frame has actually landed in the rendered state.
+  const finalizeSignal = state.interaction.signals[SIGNAL_NEW_BLANK_FINALIZE] as unknown as NewBlankFinalizeSignal | null;
+  const finalizeFrame = finalizeSignal ? state.frames.byId[finalizeSignal.frameId] : undefined;
+  useEffect(() => {
+    if (!finalizeSignal || !finalizeFrame) return;
+    const { frameId, transparent } = finalizeSignal;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(NEW_DOCUMENT_THUMBNAIL_URL);
+        if (!res.ok) throw new Error(`Placeholder thumbnail unavailable (${res.status})`);
+        const thumb = await assets.register(await res.blob(), { width: 512, height: 512 });
+        if (cancelled) return;
+        actions.updateFrame(frameId, { thumbnail: { src: thumb.url, assetId: thumb.assetId } });
+        if (transparent) {
+          // A transparent canvas is a working surface, not a locked backdrop:
+          // the import road always builds a locked "Background", so re-label it.
+          const baseId = finalizeFrame.activeLayerId ?? finalizeFrame.layers.order[0];
+          if (baseId) actions.updateLayer(frameId, baseId, { name: 'Layer 1', locked: false });
+        }
+      } catch (err) {
+        console.warn('[FileLoader] Blank document finalization skipped:', err);
+      } finally {
+        if (!cancelled) actions.setStateSignal(SIGNAL_NEW_BLANK_FINALIZE, null);
+      }
+    })();
+    return () => { cancelled = true; };
+    // `finalizeFrame` identity changes on every frame patch; keying on the
+    // signal alone is what makes this run exactly once per creation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalizeSignal, !!finalizeFrame]);
 
   // Track restoreTimedOut signal in a ref so it's accessible inside event listeners.
   // Must sync via useEffect (not during render) per react-hooks/refs rule.
@@ -166,6 +212,15 @@ export function FileLoaderComponent() {
           }
         />
       </div>
+
+      {/* New Document dialog — portaled out of this pointer-events-none,
+          z-[100] overlay so it stacks like the other editor modals. */}
+      <EditorPortal>
+        <NewDocumentModal
+          isVisible={isNewBlankOpen}
+          onCancel={() => actions.setStateSignal(SIGNAL_NEW_BLANK_MODAL, null)}
+        />
+      </EditorPortal>
     </div>
   );
 }
@@ -174,10 +229,19 @@ export function FileLoaderComponent() {
  * FileLoaderAction: Trigger button contributed to TOOL_BAR
  */
 export function FileLoaderAction() {
-  const { pickCmd } = usePluginCommands<FileLoaderCommandsMap>();
+  const { pickCmd, newBlankCmd } = usePluginCommands<FileLoaderCommandsMap>();
 
   return (
     <>
+      <FancyButton
+        onClick={() => newBlankCmd?.execute()}
+        title={`New Document (${newBlankCmd?.shortcutLabel || ""})`}
+        tooltipPosition="right"
+        iconOnly
+        shape="rect"
+      >
+        <ImagePlus size={18} />
+      </FancyButton>
       <FancyButton
         onClick={() => pickCmd?.execute()}
         title={`Upload Image (${pickCmd?.shortcutLabel || ""})`}
@@ -185,7 +249,7 @@ export function FileLoaderAction() {
         iconOnly
         shape="rect"
       >
-        <ImagePlus size={18} />
+        <ImageUp size={18} />
       </FancyButton>
     </>
   );
@@ -201,6 +265,7 @@ export function FileLoaderAction() {
 const isMac =
   typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 const modKey = isMac ? "⌘" : "Ctrl";
+const altKey = isMac ? "⌥" : "Alt";
 
 /** Feature pill data */
 const FEATURES = [
@@ -218,7 +283,7 @@ const FEATURES = [
 ];
 
 export function FileLoaderLandingAction() {
-  const { pickCmd } = usePluginCommands<FileLoaderCommandsMap>();
+  const { pickCmd, newBlankCmd } = usePluginCommands<FileLoaderCommandsMap>();
   const { state } = useEditorState();
   const { actions, storage } = useEditorServices();
   const restoreTimedOut = !!state.getStateSignal("core.restoreTimedOut", false);
@@ -346,10 +411,49 @@ export function FileLoaderLandingAction() {
 
       {/* ─── Quick Actions ─── */}
       <div className="space-y-3">
+        {/* Primary: Create Image */}
+        <button
+          onClick={() => newBlankCmd?.execute()}
+          className="group relative w-full flex items-center gap-4 px-5 py-4 rounded-2xl outline-none
+            bg-[var(--bg-panel)]/60 dark:bg-white/[0.04]
+            border border-[var(--border-subtle)] dark:border-white/[0.08]
+            hover:border-indigo-500/40 dark:hover:border-indigo-400/30
+            hover:bg-[var(--bg-panel)] dark:hover:bg-white/[0.07]
+            backdrop-blur-md transition-all duration-300 cursor-pointer
+            shadow-sm hover:shadow-lg hover:shadow-indigo-500/5
+            active:scale-[0.98]"
+        >
+          <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-[var(--bg-stage)] dark:bg-white/[0.04] border border-[var(--border-subtle)] dark:border-white/[0.06] flex items-center justify-center">
+            <ImagePlus size={18} className="text-[var(--text-muted)]" strokeWidth={1.5} />
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <div className="text-sm font-bold text-[var(--text-main)] group-hover:text-indigo-500 dark:group-hover:text-indigo-400 transition-colors">
+              Create Image
+            </div>
+            <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
+              Blank canvas — size, background, colour profile, bit depth
+            </div>
+          </div>
+          <div className="flex-shrink-0 hidden sm:flex items-center gap-0.5">
+            <kbd className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-[var(--bg-stage)] dark:bg-white/[0.06] text-[var(--text-muted)] border border-[var(--border-subtle)]">
+              {altKey}
+            </kbd>
+            <span className="text-[9px] text-[var(--text-muted)]">+</span>
+            <kbd className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-[var(--bg-stage)] dark:bg-white/[0.06] text-[var(--text-muted)] border border-[var(--border-subtle)]">
+              {modKey}
+            </kbd>
+            <span className="text-[9px] text-[var(--text-muted)]">+</span>
+            <kbd className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-[var(--bg-stage)] dark:bg-white/[0.06] text-[var(--text-muted)] border border-[var(--border-subtle)]">
+              N
+            </kbd>
+          </div>
+          <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-indigo-500/0 to-purple-500/0 group-hover:from-indigo-500/[0.03] group-hover:to-purple-500/[0.03] transition-all duration-300 pointer-events-none" />
+        </button>
+
         {/* Primary: Open File */}
         <button
           onClick={() => pickCmd?.execute()}
-          className="group relative w-full flex items-center gap-4 px-5 py-4 rounded-2xl
+          className="group relative w-full flex items-center gap-4 px-5 py-4 rounded-2xl outline-none
             bg-[var(--bg-panel)]/60 dark:bg-white/[0.04]
             border border-[var(--border-subtle)] dark:border-white/[0.08]
             hover:border-indigo-500/40 dark:hover:border-indigo-400/30
@@ -359,8 +463,8 @@ export function FileLoaderLandingAction() {
             active:scale-[0.98]"
         >
           {/* Icon */}
-          <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-md shadow-indigo-500/20 group-hover:shadow-lg group-hover:shadow-indigo-500/30 transition-shadow">
-            <Upload size={18} className="text-white" strokeWidth={2.5} />
+          <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-[var(--bg-stage)] dark:bg-white/[0.04] border border-[var(--border-subtle)] dark:border-white/[0.06] flex items-center justify-center">
+            <ImageUp size={18} className="text-[var(--text-muted)]" strokeWidth={1.5} />
           </div>
           {/* Text */}
           <div className="flex-1 text-left min-w-0">
@@ -393,7 +497,7 @@ export function FileLoaderLandingAction() {
             transition-all duration-300"
         >
           <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-[var(--bg-stage)] dark:bg-white/[0.04] border border-[var(--border-subtle)] dark:border-white/[0.06] flex items-center justify-center">
-            <ImagePlus
+            <Import
               size={18}
               className="text-[var(--text-muted)]"
               strokeWidth={1.5}
@@ -407,6 +511,12 @@ export function FileLoaderLandingAction() {
               Drop any image file onto the workspace
             </div>
           </div>
+          {/* Fills the shortcut slot the other cards have: a mouse is the "key" here */}
+          <div className="flex-shrink-0 hidden sm:flex items-center">
+            <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-stage)] dark:bg-white/[0.06] text-[var(--text-muted)] border border-[var(--border-subtle)] flex items-center">
+              <SquareMousePointer size={11} strokeWidth={2.5} />
+            </kbd>
+          </div>
         </div>
 
         {/* Tertiary: Paste from Clipboard */}
@@ -417,7 +527,7 @@ export function FileLoaderLandingAction() {
             transition-all duration-300"
         >
           <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-[var(--bg-stage)] dark:bg-white/[0.04] border border-[var(--border-subtle)] dark:border-white/[0.06] flex items-center justify-center">
-            <Upload
+            <ClipboardCopy
               size={18}
               className="text-[var(--text-muted)]"
               strokeWidth={1.5}

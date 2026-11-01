@@ -19,7 +19,6 @@
 
 "use client";
 
-import React from "react";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import FunctionTabs from "@opengpex/editor/widgets/FunctionTabs";
 

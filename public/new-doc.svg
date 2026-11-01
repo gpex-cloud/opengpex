@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f87171"/>
+      <stop offset="0.21" stop-color="#f87171"/>
+      <stop offset="0.32" stop-color="#4ade80"/>
+      <stop offset="0.63" stop-color="#4ade80"/>
+      <stop offset="0.74" stop-color="#60a5fa"/>
+      <stop offset="1" stop-color="#60a5fa"/>
+    </linearGradient>
+    <clipPath id="rounded">
+      <rect width="512" height="512" rx="96"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#rounded)">
+    <rect width="512" height="512" fill="url(#band)"/>
+    <text x="256" y="253" font-family="Helvetica Neue" font-size="150" font-weight="900"
+      text-anchor="middle" letter-spacing="12"
+      fill="#ffffff" stroke="#18181b" stroke-width="15" paint-order="stroke fill">NEW</text>
+  </g>
+</svg>

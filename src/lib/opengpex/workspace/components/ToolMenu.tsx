@@ -301,24 +301,9 @@ export default function ToolMenu() {
 
           <div className={styles.divider.className} />
 
-          {/* 2. Editor Settings submenu (renders TOOL_SETTINGS slot internally) */}
-          {/* [Padding] Pinned mode px-1 compact, floating mode px-2 normal */}
+          {/* Tail group: the last three native items share one visual block, no dividers between them */}
           <div className={`flex flex-col gap-0.5 ${isToolMenuPinned ? 'px-1' : 'px-2'}`}>
-            <NativeMenuItem
-              data={{
-                label: "Help & Tooling",
-                icon: <Wrench size={14} />,
-                slotName: "TOOL_SETTINGS",
-              }}
-              styles={styles}
-              isPinned={isToolMenuPinned}
-            />
-          </div>
-
-          <div className={styles.divider.className} />
-
-          {/* ✅ 4. Appearance toggle */}
-          <div className={`flex flex-col gap-0.5 ${isToolMenuPinned ? 'px-1' : 'px-2'}`}>
+            {/* Appearance toggle */}
             <NativeMenuItem
               data={{
                 label: "Switch Appearance",
@@ -331,12 +316,8 @@ export default function ToolMenu() {
               styles={styles}
               isPinned={isToolMenuPinned}
             />
-          </div>
 
-          <div className={styles.divider.className} />
-
-          {/* 5. Update check */}
-          <div className={`flex flex-col gap-0.5 ${isToolMenuPinned ? 'px-1' : 'px-2'}`}>
+            {/* Update check */}
             <NativeMenuItem
               data={{
                 label: isChecking ? "Checking for Updates..." : "Check for Updates",
@@ -351,6 +332,17 @@ export default function ToolMenu() {
                   <CircleAlert size={14} />
                 ),
                 onClick: handleCheckUpdate,
+              }}
+              styles={styles}
+              isPinned={isToolMenuPinned}
+            />
+
+            {/* Editor Settings submenu (renders TOOL_SETTINGS slot internally) */}
+            <NativeMenuItem
+              data={{
+                label: "Help & Tooling",
+                icon: <Wrench size={14} />,
+                slotName: "TOOL_SETTINGS",
               }}
               styles={styles}
               isPinned={isToolMenuPinned}

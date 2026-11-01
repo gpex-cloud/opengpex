@@ -325,7 +325,7 @@ export function ResizeExportControls({
           className="flex items-center gap-1.5 w-full group cursor-pointer"
         >
           <SlidersHorizontal size={12} className="text-[var(--text-muted)] opacity-70" />
-          <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)] flex-1 text-left opacity-80">
+          <span className="text-[9px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)] flex-1 text-left opacity-80">
             Advanced Options
           </span>
           <ChevronDown

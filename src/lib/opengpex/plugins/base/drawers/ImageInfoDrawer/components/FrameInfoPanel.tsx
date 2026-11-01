@@ -173,6 +173,12 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
       value: formatDate(meta?.dates?.created),
     },
     {
+      // EXIF DateTime or PNG tIME — the only date a synthesized document
+      // (New Document writes tIME, no EXIF) carries.
+      label: "Modified Date",
+      value: formatDate(meta?.dates?.modified),
+    },
+    {
       // Non-default gamuts only: the default sRGB is not a fact worth a row
       // (it would open a one-row section on every bare EXIF-less JPEG).
       label: "Color Space",

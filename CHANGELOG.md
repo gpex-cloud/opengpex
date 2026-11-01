@@ -2,6 +2,10 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.40
+
+- Workspace: new Create Image command (both on the welcome page and in the main menu) — start from a blank canvas instead of an existing file, choosing a size preset or custom dimensions, background, colour profile and bit depth; new documents are created as PNG, a lossless container, so nothing is degraded before you start editing
+
 ## 2.0.39
 
 - HEIC: HDR mode now works for photos shot on older iPhones — iOS 16 and iOS 17 captures previously showed an HDR switch that did nothing; it now brightens highlights correctly (verified against real captures from all three generations)

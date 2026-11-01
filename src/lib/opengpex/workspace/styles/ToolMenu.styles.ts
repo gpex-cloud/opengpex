@@ -56,7 +56,7 @@ export const getToolMenuStyles = (isCollapsed: boolean, isPinned: boolean = fals
         // ✨ Globally unified high-precision divider
         // [Padding] Pinned mode mx-1 compact / Floating mode mx-2 normal
         divider: {
-            className: `h-px self-stretch bg-[var(--border-subtle)] ${isPinned ? 'mx-1' : 'mx-2'} my-0.5 shrink-0`
+            className: `h-px self-stretch bg-[var(--border-subtle)] dark:bg-white/10 ${isPinned ? 'mx-1' : 'mx-2'} my-0.5 shrink-0`
         },
         // ✨ Pure menu sub-panel container
         subMenuPanel: {
@@ -87,7 +87,7 @@ export const getToolMenuStyles = (isCollapsed: boolean, isPinned: boolean = fals
                 
                 /* 1. Basic typography and gap erasing */
                 [&_div:not(.slot-divider)]:!flex [&_div:not(.slot-divider)]:!flex-col [&_div:not(.slot-divider)]:!w-full [&_div:not(.slot-divider)]:!items-stretch [&_div:not(.slot-divider)]:!gap-0 [&_div:not(.slot-divider)]:!p-0 [&_div:not(.slot-divider)]:!m-0
-                [&_.slot-divider]:!w-auto [&_.slot-divider]:!self-stretch [&_.slot-divider]:!mx-0 [&_.slot-divider]:!my-1 [&_.slot-divider]:!h-[1px] [&_.slot-divider]:!min-h-[1px] [&_.slot-divider]:!shrink-0 [&_.slot-divider]:!bg-[var(--border-subtle)] [&_.slot-divider]:!block
+                [&_.slot-divider]:!w-auto [&_.slot-divider]:!self-stretch [&_.slot-divider]:!mx-0 [&_.slot-divider]:!my-1 [&_.slot-divider]:!h-[1px] [&_.slot-divider]:!min-h-[1px] [&_.slot-divider]:!shrink-0 [&_.slot-divider]:!bg-[var(--border-subtle)] [&_.slot-divider]:dark:!bg-white/10 [&_.slot-divider]:!block
                 
                 /* 2. Strict button form shield (30px ultra-compact version) */
                 [&_button]:!flex [&_button]:!items-center [&_button]:!justify-start [&_button]:!w-full [&_button]:!h-[30px] [&_button]:!px-3 [&_button]:!gap-3 [&_button]:!m-0
@@ -120,7 +120,7 @@ export const getToolMenuStyles = (isCollapsed: boolean, isPinned: boolean = fals
                 
                 /* 1. Basic typography and gap erasing */
                 [&_div:not(.slot-divider)]:!flex [&_div:not(.slot-divider)]:!flex-col [&_div:not(.slot-divider)]:!w-full [&_div:not(.slot-divider)]:!items-stretch [&_div:not(.slot-divider)]:!gap-0 [&_div:not(.slot-divider)]:!p-0 [&_div:not(.slot-divider)]:!m-0
-                [&_.slot-divider]:!w-auto [&_.slot-divider]:!self-stretch [&_.slot-divider]:!mx-0 [&_.slot-divider]:!my-1 [&_.slot-divider]:!h-[1px] [&_.slot-divider]:!min-h-[1px] [&_.slot-divider]:!shrink-0 [&_.slot-divider]:!bg-[var(--border-subtle)] [&_.slot-divider]:!block
+                [&_.slot-divider]:!w-auto [&_.slot-divider]:!self-stretch [&_.slot-divider]:!mx-0 [&_.slot-divider]:!my-1 [&_.slot-divider]:!h-[1px] [&_.slot-divider]:!min-h-[1px] [&_.slot-divider]:!shrink-0 [&_.slot-divider]:!bg-[var(--border-subtle)] [&_.slot-divider]:dark:!bg-white/10 [&_.slot-divider]:!block
                 
                 /* 2. Strict button form shield (30px ultra-compact version) */
                 [&_button]:!flex [&_button]:!items-center [&_button]:!w-full [&_button]:!h-[30px] [&_button]:!m-0
