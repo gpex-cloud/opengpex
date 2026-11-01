@@ -36,14 +36,28 @@ export class CameraTransaction {
 
   constructor(
     private actions: EditorActions,
-    private frameId: string
+    private frameId: string,
+    /**
+     * Concurrency guard: reports whether a pointer gesture
+     * (InteractionTransaction) is currently open. The debounced wheel commit
+     * can fire while such a gesture is live; in that case this transaction
+     * must NOT pull the shared volatile `interacting` flag down — the pointer
+     * transaction's own teardown owns the final close.
+     */
+    private isPointerGestureActive?: () => boolean
   ) {}
 
   /**
-   * Begin transaction: mark interacting, open fast-track
+   * Begin transaction: mark interacting, open fast-track.
+   *
+   * Gesture-lifecycle ownership: the volatile `interacting` flag is owned by
+   * the transactions. begin() opens this camera gesture's fast-track session
+   * explicitly — the buffer-write primitives no longer flip the flag as a
+   * side effect.
    */
   begin() {
     this.committed = false;
+    this.actions.mutateVolatile((v) => { v.activeState.interacting = true; });
     this.actions.setInteraction({ isInteracting: true });
   }
 
@@ -62,5 +76,13 @@ export class CameraTransaction {
     this.committed = true;
     this.actions.fast.commit(this.frameId, 'frame');
     this.actions.setInteraction({ isInteracting: false });
+    // Flag teardown with concurrency guard: the landing primitive above is
+    // flag-neutral, so this transaction closes its own gesture here — unless
+    // a pointer gesture is still live, in which case the flag belongs to that
+    // transaction's teardown.
+    const pointerGestureLive = this.isPointerGestureActive?.() ?? false;
+    if (!pointerGestureLive) {
+      this.actions.mutateVolatile((v) => { v.activeState.interacting = false; });
+    }
   }
 }

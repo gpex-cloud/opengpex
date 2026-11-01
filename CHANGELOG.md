@@ -2,6 +2,11 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.37
+
+- Text: the text panel's colour control is now a compact swatch row, matching the brush panel style
+- Workspace: fixed a family of state glitches when mixing typing, dragging, panning and zooming in quick succession — most visibly, text edits are no longer silently discarded by a follow-up click, and an editing session can no longer get stuck unable to exit
+
 ## 2.0.36
 
 - Text: text boxes now hug their content — the invisible padding around text is gone, the box edge sits flush with the glyphs, and the caret stays vertically centered at any line height

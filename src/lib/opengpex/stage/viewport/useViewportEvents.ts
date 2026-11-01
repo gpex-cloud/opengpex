@@ -75,6 +75,10 @@ export function useViewportEvents(
     ]);
   }, [pluginList]);
 
+  // Stable predicate for the camera transaction's concurrency guard: reports
+  // whether a pointer gesture (InteractionTransaction) is currently open.
+  const isGestureActive = useCallback(() => dispatcher.isActive(), [dispatcher]);
+
   // 2. Helper function to construct InteractionEvent
   const buildInteractionEvent = useCallback((e: React.PointerEvent | React.MouseEvent | MouseEvent | PointerEvent): InteractionEvent => {
     const rect = containerRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
@@ -198,12 +202,16 @@ export function useViewportEvents(
   }, [dispatcher, actions]);
 
   // --- Wheel Interaction: zoom and canvas panning (taken over by independent Hook) ---
-  useViewportScroll(containerRef, frame, actions, geometry);
+  useViewportScroll(containerRef, frame, actions, geometry, isGestureActive);
 
   return {
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,
-    handlePointerLeave
+    handlePointerLeave,
+    // Concurrency guard for the camera transaction's debounced commit: the
+    // scroll pipeline tears the shared volatile `interacting` flag down only
+    // when no pointer gesture is open.
+    isPointerGestureActive: isGestureActive,
   };
 }

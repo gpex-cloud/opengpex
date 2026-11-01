@@ -37,7 +37,7 @@ export interface FastFacadeDeps {
   volatileRef: RefObject<VolatileState>;
   /** Live ref to the latest reducer state. */
   stateRef: RefObject<EditorData>;
-  /** Atomic volatile mutate handle (marks interacting=true). */
+  /** Atomic volatile mutate handle (flag-neutral: gesture lifetime is owned by the transactions). */
   mutateVolatile: (mutator: (v: VolatileState) => void) => void;
   /** Atomic volatile reset handle. */
   resetVolatile: () => void;
@@ -75,7 +75,12 @@ export function createFastFacade(deps: FastFacadeDeps) {
 
       const compositeKey = getCompositeKey(frameId, id);
       const draft = v.buffered.layers[compositeKey];
-      return (v.activeState.interacting && draft?.patch) ? mergeLayerDraft(layer, draft.patch) : layer;
+      // Merge whenever a draft exists — no `interacting` gate. The flag means
+      // "a dispatcher gesture is open", not "the buffer is fresh": non-gesture
+      // long-lived writers (the inline text session) must be readable during
+      // their commit without any gesture being live. Same canonical rule as
+      // mergeFrameSnapshot ("do NOT gate on interacting").
+      return draft?.patch ? mergeLayerDraft(layer, draft.patch) : layer;
     },
     latestFrame: (id: string): Frame | null => {
       const v = volatileRef.current;
@@ -194,7 +199,10 @@ export function createFastFacade(deps: FastFacadeDeps) {
       // dispatch is asynchronous (React batches it), but delete is synchronous.
       // If cleared synchronously, the Ticker might read an empty draft + old State before React updates -> flash.
       // Delay clearing by one frame to ensure React has consumed the draft before removal.
-      volatileRef.current.activeState.interacting = false;
+      // Flag-neutral: the gesture lifetime (`interacting`) is owned by the
+      // transactions; this landing primitive must not close a gesture that a
+      // concurrent transaction (e.g. a pointer drag during a debounced camera
+      // commit) still has open.
       requestAnimationFrame(() => {
         const vRef = volatileRef.current;
         if (type === 'layers') vRef.buffered.layers = {};
@@ -243,13 +251,14 @@ export function createFastFacade(deps: FastFacadeDeps) {
      * The only correct teardown is a discard, which is the bookend leg the
      * contract was missing for this writer class.
      *
-     * Tearing mirrors `commit`: `interacting` flips false synchronously, the
-     * draft clears one frame later so the Ticker never reads an empty buffer
-     * against not-yet-applied Redux dispatches, and `_bufferVersion` bumps so
-     * the per-tick merge snapshot re-fuses from Redux truth after the clear.
+     * Tearing mirrors `commit`: the draft clears one frame later so the Ticker
+     * never reads an empty buffer against not-yet-applied Redux dispatches,
+     * and `_bufferVersion` bumps so the per-tick merge snapshot re-fuses from
+     * Redux truth after the clear. Flag-neutral: the gesture lifetime
+     * (`interacting`) is owned by the transactions, not by this buffer-GC
+     * primitive.
      */
     discardLayerDraft: (id: string) => {
-      volatileRef.current.activeState.interacting = false;
       requestAnimationFrame(() => {
         const vRef = volatileRef.current;
         const keys = Object.keys(vRef.buffered.layers).filter(k => k.endsWith(`:${id}`));

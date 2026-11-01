@@ -154,6 +154,13 @@ export class InteractionTransaction {
     }
 
     this.e.actions.setInteraction({ isInteracting: false });
+    // Gesture-lifecycle ownership: the landing primitives above are
+    // flag-neutral, so this transaction closes the volatile `interacting`
+    // flag itself. This MUST sit on the outermost trunk — never inside the
+    // hasLayerUpdates/hasFrameUpdates branches above: a zero-delta click
+    // (press+release without movement) runs neither branch, and skipping the
+    // close here would leave begin()'s flag stuck true.
+    this.e.actions.mutateVolatile((v: VolatileState) => { v.activeState.interacting = false; });
     this.activeFrameId = null;
   }
 
@@ -173,6 +180,9 @@ export class InteractionTransaction {
     // Clear all volatile overrides (rolls back visual state to pre-interaction)
     this.e.actions.fast.reset();
     this.e.actions.setInteraction({ isInteracting: false });
+    // Same ownership as commit(): abort closes this transaction's volatile
+    // flag explicitly.
+    this.e.actions.mutateVolatile((v: VolatileState) => { v.activeState.interacting = false; });
     this.activeFrameId = null;
   }
 }

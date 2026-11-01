@@ -21,7 +21,7 @@
 
 import React from "react";
 import { AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical } from "lucide-react";
-import { ColorPickerPro } from "@opengpex/editor/widgets/ColorPickerPro";
+import ColorSwatchRow from "@opengpex/editor/widgets/ColorSwatchRow";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import { FontPicker } from "@opengpex/editor/widgets/FontPicker";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
@@ -121,6 +121,15 @@ export const TextPanel = React.memo(function TextPanel() {
     <div className="flex flex-col gap-2">
       {/* Typography Card */}
       <div className="flex flex-col gap-2.5 p-1">
+        {/* Color — mini swatch (brush-panel style): swatch + hex, full picker on demand */}
+        <ColorSwatchRow
+          label="Color"
+          labelClassName="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16 shrink-0"
+          value={textColor}
+          onValueChange={updateTextColorLive}
+          onValueCommit={updateTextColor}
+        />
+
         {/* Size (logarithmic slider) */}
         <div className="flex items-center gap-2 px-1">
           <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
@@ -205,18 +214,6 @@ export const TextPanel = React.memo(function TextPanel() {
 
       {/* Style & Alignment Card */}
       <div className="flex flex-col gap-2.5 p-1">
-        {/* Color */}
-        <div className="flex flex-col gap-1.5">
-          <ColorPickerPro
-            variant="compact"
-            value={textColor}
-            onValueChange={updateTextColorLive}
-            onValueCommit={updateTextColor}
-            showHarmony={false}
-            showRecents={false}
-          />
-        </div>
-
         {/* Alignment & Style */}
         <div className="flex items-end gap-3 mt-0.5">
           {/* Alignment */}

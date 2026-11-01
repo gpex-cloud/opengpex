@@ -65,7 +65,8 @@ export function useViewportScroll(
   containerRef: React.RefObject<HTMLDivElement | null>,
   frame: Frame,
   actions: EditorActions,
-  geometry: GeometryService
+  geometry: GeometryService,
+  isPointerGestureActive?: () => boolean
 ) {
   // 1. Local accumulator state
   const sessionCamRef = useRef<CameraState | null>(null);
@@ -119,7 +120,7 @@ export function useViewportScroll(
 
     // --- A. Start Session (Virtual onStart) ---
     if (!txRef.current) {
-      const tx = new CameraTransaction(currentActions, currentFrame.id);
+      const tx = new CameraTransaction(currentActions, currentFrame.id, isPointerGestureActive);
       tx.begin();
       txRef.current = tx;
       // Capture baseline camera, all subsequent increments evolve based on it
@@ -166,7 +167,7 @@ export function useViewportScroll(
       forceCommit();
     }, presets.get('VIEWPORT_CAMERA_COMMIT_DEBOUNCE_MS'));
 
-  }, [containerRef, forceCommit]);
+  }, [containerRef, forceCommit, isPointerGestureActive]);
 
   useEffect(() => {
     const container = containerRef.current;

@@ -73,13 +73,19 @@ export function useVolatileState(): VolatileStateHandle {
 
   const mutate = useCallback((mutator: (v: VolatileState) => void) => {
     mutator(volatileRef.current);
-    volatileRef.current.activeState.interacting = true;
+    // Gesture-lifecycle ownership: this primitive only owns the buffered write
+    // and the snapshot invalidation above. It deliberately does NOT touch
+    // `activeState.interacting` — that flag means "a dispatcher gesture is
+    // open" and is owned exclusively by the interaction/camera transactions.
+    // Non-gesture writers (the inline text session's drafts) must be able to
+    // write without masquerading as a live gesture, which the viewport's
+    // pointerup cleanup would otherwise tear down as garbage.
     volatileRef.current._bufferVersion++;
   }, []);
 
   const update = useCallback((patch: Partial<VolatileState>) => {
     Object.assign(volatileRef.current, patch);
-    volatileRef.current.activeState.interacting = true;
+    // Flag-neutral for the same ownership reason as `mutate` above.
     volatileRef.current._bufferVersion++;
   }, []);
 
