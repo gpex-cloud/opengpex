@@ -63,7 +63,7 @@ export const plugin: EditorPlugin = {
     resample: false,
     // No preferredWidth: the workspace drawer-width fallback (320px normal /
     // 260px compact via ui.drawerWidthMode) drives this panel's width.
-    keepExif: true,
+    keepExif: false,
   },
 
   // --- 4. Auto-Reveal ---

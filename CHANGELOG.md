@@ -2,6 +2,11 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.39
+
+- HEIC: HDR mode now works for photos shot on older iPhones — iOS 16 and iOS 17 captures previously showed an HDR switch that did nothing; it now brightens highlights correctly (verified against real captures from all three generations)
+- Export: the Resize & Export panel's color space, bit depth, quality and metadata options now live under a collapsible Advanced Options section, collapsed by default
+
 ## 2.0.38
 
 - RAW: DNG files now render from their own embedded color, tone and exposure data, with sharpening and HDR highlights (iPhone ProRAW) as each file specifies

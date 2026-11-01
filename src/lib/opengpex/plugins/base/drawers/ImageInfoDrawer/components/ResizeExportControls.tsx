@@ -29,6 +29,7 @@ import {
   Download,
   ImageDown,
   Scaling,
+  SlidersHorizontal,
 } from "lucide-react";
 import FancyButton from "@opengpex/editor/widgets/FancyButton";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
@@ -86,6 +87,9 @@ export function ResizeExportControls({
   const effectiveDpi = config.dpi || frameDpi;
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
+  // Advanced options (color space, bit depth, quality, ICC/EXIF) start folded;
+  // casual users only need format + Save. Session-local, not persisted.
+  const [advancedCollapsed, setAdvancedCollapsed] = React.useState(true);
 
   const { currentW, currentH, currentPercent } = deriveResizeState(
     baseW,
@@ -314,6 +318,23 @@ export function ResizeExportControls({
       </div>
 
       <div className="mt-2.5 pt-3 border-t border-[var(--border-subtle)] dark:border-white/10 space-y-2.5">
+        {/* Collapsible Advanced Options header (nested inside "Resize & Export") */}
+        <button
+          onClick={() => setAdvancedCollapsed(!advancedCollapsed)}
+          onMouseDown={(e) => e.preventDefault()}
+          className="flex items-center gap-1.5 w-full group cursor-pointer"
+        >
+          <SlidersHorizontal size={12} className="text-[var(--text-muted)] opacity-70" />
+          <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)] flex-1 text-left opacity-80">
+            Advanced Options
+          </span>
+          <ChevronDown
+            size={12}
+            className={`text-[var(--text-muted)] opacity-50 group-hover:opacity-100 transition-transform duration-200 ${advancedCollapsed ? "-rotate-90" : ""}`}
+          />
+        </button>
+
+        {(!advancedCollapsed) && (
         <ResizeExportRules
           config={config}
           updateConfig={updateConfig}
@@ -321,6 +342,7 @@ export function ResizeExportControls({
           sourceBitDepth={sourceBitDepth}
           isSingleLayer={isSingleLayer}
         />
+        )}
 
         <div className="flex gap-2 pt-2">
           <FancyButton
