@@ -24,6 +24,7 @@
  */
 
 import { validateTiffHeader, readU16, readU32, TYPE_SIZES } from '../../../metadata/tiff-ifd-reader';
+import type { DngGainTableMap } from '@opengpex/editor/core/engine/color/raw/gainTableMap';
 
 /** DNG tag 50936 — `ProfileName`, the camera profile's human-readable name. */
 export const DNG_TAG_PROFILE_NAME = 0xC6F8;
@@ -63,6 +64,25 @@ export const DNG_TAG_PROFILE_GAIN_TABLE_MAP = 0xCD2D;
 
 /** DNG tag 50730 — `BaselineExposure`: the baked rendering offset (RATIONAL[1], in stops). */
 export const DNG_TAG_BASELINE_EXPOSURE = 0xC62A;
+
+/**
+ * DNG tag 50712 — `LinearizationTable`: SHORT[] sensor-response LUT applied to
+ * every raw sample before the black/white level math (DNG 1.4+). Phone linear-raw
+ * writers ship tables (e.g. 2641 entries) that map 10-bit stored samples onto the full
+ * 16-bit linear scale — a decoder that skips it renders every value at the
+ * wrong level (measured 20261031: up to 187× at the shadows).
+ */
+export const DNG_TAG_LINEARIZATION_TABLE = 50712;
+/** DNG tag 50713 — `BlackLevelRepeatDim`: SHORT[2] rows/cols of the black pattern. */
+export const DNG_TAG_BLACK_LEVEL_REPEAT_DIM = 50713;
+/** DNG tag 50714 — `BlackLevel`: the repeating black-level pattern (RATIONAL/SHORT[]). */
+export const DNG_TAG_BLACK_LEVEL = 50714;
+/** DNG tag 50717 — `WhiteLevel`: sensor saturation per plane (SHORT/LONG, count 1..planes). */
+export const DNG_TAG_WHITE_LEVEL = 50717;
+/** DNG tag 50829 — `ActiveArea`: LONG[4] (top, left, bottom, right) of the valid image. */
+export const DNG_TAG_ACTIVE_AREA = 50829;
+/** DNG tag 50739 — `ShadowScale`: scales the reference render's shadow pedestal. */
+export const DNG_TAG_SHADOW_SCALE = 50739;
 
 /** TIFF IFD entry type 5 = RATIONAL (u32/u32). */
 const TIFF_TYPE_RATIONAL = 5;
@@ -347,34 +367,10 @@ function findTiffEntry(
 
 // ─── ProfileGainTableMap (DNG 1.5+, tag 52525) ────────────────────────────────
 
-/**
- * A parsed DNG `ProfileGainTableMap`: a `pointsV × pointsH` grid of
- * `pointsN`-entry FLOAT gain tables, positioned over the image in relative
- * coordinates, plus the five `MapInputWeights` that fold a pixel's RGB into a
- * scalar table input.
- *
- * Application contract (DNG 1.6 §ProfileGainTableMap): per pixel, bilinearly
- * interpolate the four surrounding grid tables at the pixel's relative position
- * (pixel-centred / half-pixel convention), fold the RGB into
- * `clamp((R,G,B,min,max) · weights, 0, 1)`, index the interpolated table at
- * `input × pointsN`, and multiply the resulting scalar gain into the pixel —
- * in the RIMM (linear ProPhoto) domain, after the BaselineExposure adjustment.
- */
-export interface DngGainTableMap {
-  pointsV: number;
-  pointsH: number;
-  pointsN: number;
-  /** Vertical/horizontal grid spacing, relative to image height/width. */
-  spacingV: number;
-  spacingH: number;
-  /** Grid origin, relative to image height/width (may be negative). */
-  originV: number;
-  originH: number;
-  /** The five `MapInputWeights` floats: `[R, G, B, min(R,G,B), max(R,G,B)]`. */
-  weights: readonly [number, number, number, number, number];
-  /** `tables[v * pointsH + h][n]` — one gain table per grid point. */
-  tables: readonly Float32Array[];
-}
+// The map's TYPE and application math live in engine/color/raw/gainTableMap (the
+// render side owns the math; this module owns the bytes). Re-exported here so
+// existing `metadata/dng` import sites keep resolving.
+export type { DngGainTableMap } from '@opengpex/editor/core/engine/color/raw/gainTableMap';
 
 /**
  * Sanity gate for a candidate header decode: a real map has a sane grid, a
@@ -478,4 +474,601 @@ export function parseDngBaselineExposure(bytes: Uint8Array): number | undefined 
   const den = view.getUint32(at + 4, isLE);
   if (den === 0 || !Number.isFinite(num / den)) return undefined;
   return num / den;
+}
+
+// ─── Raw linearization block (levels + sensor LUT, DNG 1.4+ spec core) ────────
+
+/**
+ * Value location of a TIFF IFD entry per the standard rule: payloads of four
+ * bytes or less live INLINE in the entry (offset +8); anything larger is an
+ * absolute byte offset. Returns −1 when the payload would run past the buffer.
+ */
+function valueLocation(
+  bytes: Uint8Array,
+  entryOffset: number,
+  isLE: boolean,
+  type: number,
+  count: number,
+): number {
+  const unit = TYPE_SIZES[type] ?? 4;
+  if (unit * count <= 4) return entryOffset + 8;
+  const at = readU32(bytes, entryOffset + 8, isLE);
+  return at + unit * count <= bytes.length ? at : -1;
+}
+
+
+/**
+ * The raw-stage level facts the decode side needs to rebuild the reference
+ * pipeline's Stage2 exactly: sensor LUT, repeating black-level pattern, per-
+ * plane white levels, and the valid-image rectangle. All values are plain
+ * numbers — the stage math itself lives in `engine/color/raw/dng-stages.ts`.
+ */
+export interface DngLinearizationData {
+  /**
+   * Tag 50712, SHORT[] — sensor-response LUT indexed by the stored raw sample.
+   * Absent on most files (identity); phone linear-raw writers ship a real table.
+   */
+  linearizationTable?: readonly number[];
+  /** Tag 50714 — black level per (repeat row, repeat col, plane). */
+  blackLevel: {
+    rows: number;
+    cols: number;
+    /** `values[row * cols * planes + col * planes + plane]` — raw units. */
+    values: number[];
+  };
+  /** Tag 50717 — white level per plane (raw units). Single value repeats. */
+  whiteLevel: number[];
+  /** Tag 50829 — `[top, left, bottom, right]`; defaults to the full frame. */
+  activeArea?: readonly [number, number, number, number];
+}
+
+/**
+ * Parse the raw-stage linearization tags (50712/50713/50714/50717/50829) in
+ * one pass. Every member degrades individually to its documented default
+ * (no LUT, zero black, 65535 white, full-frame active area) so a partially
+ * broken raw IFD still yields a usable subset; the caller supplies the plane
+ * count so the black pattern's per-plane stride is known without parsing the
+ * photometric tag here.
+ */
+export function parseDngLinearizationData(
+  bytes: Uint8Array,
+  planes: number,
+): DngLinearizationData {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+  // LinearizationTable: SHORT[], sane size bounds (2 .. 64k entries).
+  let linearizationTable: number[] | undefined;
+  {
+    const entry = findTiffEntry(bytes, DNG_TAG_LINEARIZATION_TABLE);
+    if (entry && readU16(bytes, entry.entryOffset + 2, entry.isLE) === TIFF_TYPE_SHORT) {
+      const count = readU32(bytes, entry.entryOffset + 4, entry.isLE);
+      if (count >= 2 && count <= 65536) {
+        const at = readU32(bytes, entry.entryOffset + 8, entry.isLE);
+        if (at + count * 2 <= bytes.length) {
+          linearizationTable = new Array<number>(count);
+          for (let i = 0; i < count; i++) {
+            linearizationTable[i] = readU16(bytes, at + i * 2, entry.isLE);
+          }
+        }
+      }
+    }
+  }
+
+  // BlackLevelRepeatDim: SHORT[2] (rows, cols); defaults to 1×1. Four bytes
+  // fit inline in the entry — the value location follows the TIFF rule.
+  let repeatRows = 1;
+  let repeatCols = 1;
+  {
+    const entry = findTiffEntry(bytes, DNG_TAG_BLACK_LEVEL_REPEAT_DIM);
+    if (entry && readU16(bytes, entry.entryOffset + 2, entry.isLE) === TIFF_TYPE_SHORT) {
+      if (readU32(bytes, entry.entryOffset + 4, entry.isLE) === 2) {
+        const at = valueLocation(bytes, entry.entryOffset, entry.isLE, TIFF_TYPE_SHORT, 2);
+        if (at >= 0 && at + 4 <= bytes.length) {
+          const r = readU16(bytes, at, entry.isLE);
+          const c = readU16(bytes, at + 2, entry.isLE);
+          if (r > 0 && c > 0 && r * c * planes <= 64) {
+            repeatRows = r;
+            repeatCols = c;
+          }
+        }
+      }
+    }
+  }
+
+  // BlackLevel: RATIONAL[] (spec) or SHORT[] (lenient). The count is either
+  // planes × repeatRows × repeatCols, one per plane, or a single global value;
+  // shorter counts replicate across the repeat pattern.
+  const blackCount = repeatRows * repeatCols * planes;
+  const blackLevel = { rows: repeatRows, cols: repeatCols, values: new Array<number>(blackCount).fill(0) };
+  {
+    const entry = findTiffEntry(bytes, DNG_TAG_BLACK_LEVEL);
+    if (entry) {
+      const type = readU16(bytes, entry.entryOffset + 2, entry.isLE);
+      const count = readU32(bytes, entry.entryOffset + 4, entry.isLE);
+      if (count === blackCount || count === planes || count === 1) {
+        const at = valueLocation(bytes, entry.entryOffset, entry.isLE, type, count);
+        const perEntry = type === TIFF_TYPE_RATIONAL || type === TIFF_TYPE_SRATIONAL ? 8 : 2;
+        if ((type === TIFF_TYPE_RATIONAL || type === TIFF_TYPE_SRATIONAL || type === TIFF_TYPE_SHORT) &&
+            at + count * perEntry <= bytes.length) {
+          const flat = new Array<number>(count).fill(0);
+          for (let i = 0; i < count; i++) {
+            let v: number;
+            if (type === TIFF_TYPE_RATIONAL || type === TIFF_TYPE_SRATIONAL) {
+              const num = type === TIFF_TYPE_SRATIONAL
+                ? view.getInt32(at + i * 8, entry.isLE)
+                : view.getUint32(at + i * 8, entry.isLE);
+              const den = view.getUint32(at + i * 8 + 4, entry.isLE);
+              v = den === 0 ? 0 : num / den;
+            } else {
+              v = readU16(bytes, at + i * 2, entry.isLE);
+            }
+            flat[i] = Number.isFinite(v) ? v : 0;
+          }
+          for (let r = 0; r < repeatRows; r++) {
+            for (let c = 0; c < repeatCols; c++) {
+              for (let p = 0; p < planes; p++) {
+                const slot = (r * repeatCols + c) * planes + p;
+                blackLevel.values[slot] = count === blackCount
+                  ? flat[slot]
+                  : count === planes
+                    ? flat[p]
+                    : flat[0];
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // WhiteLevel: SHORT or LONG, count 1..planes. Absent → 65535 (spec default).
+  const whiteLevel: number[] = new Array<number>(planes).fill(65535);
+  {
+    const entry = findTiffEntry(bytes, DNG_TAG_WHITE_LEVEL);
+    if (entry) {
+      const type = readU16(bytes, entry.entryOffset + 2, entry.isLE);
+      const count = readU32(bytes, entry.entryOffset + 4, entry.isLE);
+      if (type === TIFF_TYPE_SHORT || type === TIFF_TYPE_LONG) {
+        if (count >= 1 && count <= planes) {
+          const at = valueLocation(bytes, entry.entryOffset, entry.isLE, type, count);
+          const perEntry = type === TIFF_TYPE_SHORT ? 2 : 4;
+          if (at + count * perEntry <= bytes.length) {
+            for (let p = 0; p < planes; p++) {
+              const i = Math.min(p, count - 1);
+              whiteLevel[p] = type === TIFF_TYPE_SHORT
+                ? readU16(bytes, at + i * 2, entry.isLE)
+                : readU32(bytes, at + i * 4, entry.isLE);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ActiveArea: LONG[4] (top, left, bottom, right).
+  let activeArea: readonly [number, number, number, number] | undefined;
+  {
+    const entry = findTiffEntry(bytes, DNG_TAG_ACTIVE_AREA);
+    if (entry && readU16(bytes, entry.entryOffset + 2, entry.isLE) === TIFF_TYPE_LONG) {
+      if (readU32(bytes, entry.entryOffset + 4, entry.isLE) === 4) {
+        const at = readU32(bytes, entry.entryOffset + 8, entry.isLE);
+        if (at + 16 <= bytes.length) {
+          const t = readU32(bytes, at, entry.isLE);
+          const l = readU32(bytes, at + 4, entry.isLE);
+          const b = readU32(bytes, at + 8, entry.isLE);
+          const r = readU32(bytes, at + 12, entry.isLE);
+          if (b > t && r > l) activeArea = [t, l, b, r];
+        }
+      }
+    }
+  }
+
+  return { linearizationTable, blackLevel, whiteLevel, activeArea };
+}
+
+/**
+ * Parse the DNG `ShadowScale` (tag 50739, RATIONAL[1]) — the factor the
+ * reference render's shadow pedestal is scaled by (the exposure ramp's black
+ * point = 0.005 × ShadowScale). Absent/malformed → `undefined` (treat as 1.0).
+ */
+export function parseDngShadowScale(bytes: Uint8Array): number | undefined {
+  const entry = findTiffEntry(bytes, DNG_TAG_SHADOW_SCALE);
+  if (!entry) return undefined;
+
+  const { isLE, entryOffset } = entry;
+  if (readU16(bytes, entryOffset + 2, isLE) !== TIFF_TYPE_RATIONAL) return undefined;
+  if (readU32(bytes, entryOffset + 4, isLE) < 1) return undefined;
+
+  const at = readU32(bytes, entryOffset + 8, isLE);
+  if (at + 8 > bytes.length) return undefined;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const num = view.getUint32(at, isLE);
+  const den = view.getUint32(at + 4, isLE);
+  if (den === 0 || !Number.isFinite(num / den)) return undefined;
+  return num / den;
+}
+
+/**
+ * Render-geometry and render-default facts the calibrated DNG chain needs
+ * beyond the color profile: the CFA layout (absent ⟹ already-linear file),
+ * the default crop window (relative to the active area), the stored
+ * orientation, and the two profile render overrides.
+ */
+export interface DngRenderFacts {
+  /** CFA pattern color indices (0=R 1=G 2=B), row-major; undefined for linear files. */
+  cfaPattern?: { rows: number; cols: number; colors: Uint8Array };
+  /** Tag 50711; only 1 (rectangular) is supported by the bilinear port. */
+  cfaLayout: number;
+  /** Tags 50719/50720 — origin + size inside the active area (pixels). */
+  defaultCrop?: { x: number; y: number; width: number; height: number };
+  /** Tag 274 — EXIF orientation of the stored pixels (1 = upright). */
+  orientation: number;
+  /** Tag 51109 — profile exposure offset (stops), added to BaselineExposure. */
+  baselineExposureOffset: number;
+  /** Tag 51110 — 1 = "None": the render applies no shadow pedestal. */
+  defaultBlackRender: number;
+  /**
+   * Tag 50732 — the relative capture sharpening the camera model needs
+   * (spec default 1.0). The reference pipeline only carries it; converters
+   * apply it.
+   */
+  baselineSharpness: number;
+}
+
+function readRationalPair(bytes: Uint8Array, tagId: number): [number, number] | undefined {
+  const entry = findTiffEntry(bytes, tagId);
+  if (!entry) return undefined;
+  const { isLE, entryOffset } = entry;
+  const type = readU16(bytes, entryOffset + 2, isLE);
+  if (readU32(bytes, entryOffset + 4, isLE) !== 2) return undefined;
+  const at = valueLocation(bytes, entryOffset, isLE, type, 2);
+  if (at < 0) return undefined;
+  if (type === TIFF_TYPE_SHORT) return [readU16(bytes, at, isLE), readU16(bytes, at + 2, isLE)];
+  if (type === TIFF_TYPE_LONG) return [readU32(bytes, at, isLE), readU32(bytes, at + 4, isLE)];
+  if (type === TIFF_TYPE_RATIONAL) {
+    const d0 = readU32(bytes, at + 4, isLE);
+    const d1 = readU32(bytes, at + 12, isLE);
+    if (d0 === 0 || d1 === 0) return undefined;
+    return [readU32(bytes, at, isLE) / d0, readU32(bytes, at + 8, isLE) / d1];
+  }
+  return undefined;
+}
+
+/**
+ * Find a tag in IFD0 ONLY. Camera-profile tags (DefaultBlackRender,
+ * BaselineExposureOffset) are defined at IFD0 / camera-profile level; some
+ * writers also drop copies into the raw SubIFD, which the reference reader
+ * ignores — so must we.
+ */
+function findIfd0Entry(bytes: Uint8Array, tagId: number): { isLE: boolean; entryOffset: number } | null {
+  const header = validateTiffHeader(bytes);
+  if (!header) return null;
+  const { isLE, ifd0Offset } = header;
+  if (ifd0Offset + 2 > bytes.length) return null;
+  const n = readU16(bytes, ifd0Offset, isLE);
+  for (let i = 0; i < n; i++) {
+    const e = ifd0Offset + 2 + i * 12;
+    if (e + 12 > bytes.length) break;
+    if (readU16(bytes, e, isLE) === tagId) return { isLE, entryOffset: e };
+  }
+  return null;
+}
+
+function readScalarShortOrLong(
+  bytes: Uint8Array,
+  tagId: number,
+  find: typeof findTiffEntry = findTiffEntry,
+): number | undefined {
+  const entry = find(bytes, tagId);
+  if (!entry) return undefined;
+  const { isLE, entryOffset } = entry;
+  const type = readU16(bytes, entryOffset + 2, isLE);
+  if (type === TIFF_TYPE_SHORT) return readU16(bytes, entryOffset + 8, isLE);
+  if (type === TIFF_TYPE_LONG) return readU32(bytes, entryOffset + 8, isLE);
+  return undefined;
+}
+
+/** One unsigned RATIONAL from IFD0, or undefined when absent/malformed. */
+function readIfd0Rational(bytes: Uint8Array, tagId: number): number | undefined {
+  const entry = findIfd0Entry(bytes, tagId);
+  if (!entry) return undefined;
+  const { isLE, entryOffset } = entry;
+  if (readU16(bytes, entryOffset + 2, isLE) !== TIFF_TYPE_RATIONAL) return undefined;
+  const at = readU32(bytes, entryOffset + 8, isLE);
+  if (at + 8 > bytes.length) return undefined;
+  const den = readU32(bytes, at + 4, isLE);
+  if (den === 0) return undefined;
+  const v = readU32(bytes, at, isLE) / den;
+  return Number.isFinite(v) && v >= 0 ? v : undefined;
+}
+
+/** Parse {@link DngRenderFacts}; every member degrades to its spec default. */
+export function parseDngRenderFacts(bytes: Uint8Array): DngRenderFacts {
+  let cfaPattern: DngRenderFacts['cfaPattern'];
+  const dim = readRationalPair(bytes, 33421);
+  const patEntry = findTiffEntry(bytes, 33422);
+  if (dim && patEntry) {
+    const [rows, cols] = dim;
+    const { isLE, entryOffset } = patEntry;
+    const count = readU32(bytes, entryOffset + 4, isLE);
+    if (rows > 0 && cols > 0 && count === rows * cols && count <= 64) {
+      const at = valueLocation(bytes, entryOffset, isLE, 1, count);
+      if (at >= 0) cfaPattern = { rows, cols, colors: bytes.slice(at, at + count) };
+    }
+  }
+
+  let defaultCrop: DngRenderFacts['defaultCrop'];
+  const origin = readRationalPair(bytes, 50719);
+  const size = readRationalPair(bytes, 50720);
+  if (size) {
+    defaultCrop = {
+      x: Math.round(origin?.[0] ?? 0),
+      y: Math.round(origin?.[1] ?? 0),
+      width: Math.round(size[0]),
+      height: Math.round(size[1]),
+    };
+  }
+
+  let baselineExposureOffset = 0;
+  {
+    const entry = findIfd0Entry(bytes, 51109);
+    if (entry) {
+      const { isLE, entryOffset } = entry;
+      const type = readU16(bytes, entryOffset + 2, isLE);
+      if (type === TIFF_TYPE_SRATIONAL || type === TIFF_TYPE_RATIONAL) {
+        const at = readU32(bytes, entryOffset + 8, isLE);
+        if (at + 8 <= bytes.length) {
+          const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+          const num = type === TIFF_TYPE_SRATIONAL ? view.getInt32(at, isLE) : view.getUint32(at, isLE);
+          const den = view.getUint32(at + 4, isLE);
+          if (den !== 0) baselineExposureOffset = num / den;
+        }
+      }
+    }
+  }
+
+  return {
+    cfaPattern,
+    cfaLayout: readScalarShortOrLong(bytes, 50711) ?? 1,
+    defaultCrop,
+    orientation: readScalarShortOrLong(bytes, 274) ?? 1,
+    baselineExposureOffset,
+    defaultBlackRender: readScalarShortOrLong(bytes, 51110, findIfd0Entry) ?? 0,
+    baselineSharpness: readIfd0Rational(bytes, 50732) ?? 1,
+  };
+}
+
+/**
+ * The IFD0 preview JPEG of a DNG — the writer's own rendition of the photo,
+ * stored as a single JPEG strip (StripOffsets/StripByteCounts, or the
+ * JPEGInterchangeFormat pair). Phone writers put an ISO 21496-1 HDR gain map
+ * inside this preview's MPF container; it is the only HDR description such
+ * files carry (the raw data and camera profile are SDR). Returns a subarray
+ * view, or null when IFD0 holds no JPEG.
+ */
+export function extractDngPreviewJpeg(bytes: Uint8Array): Uint8Array | null {
+  const header = validateTiffHeader(bytes);
+  if (!header) return null;
+  const { isLE, ifd0Offset } = header;
+  if (ifd0Offset + 2 > bytes.length) return null;
+  const n = readU16(bytes, ifd0Offset, isLE);
+  let offset = -1;
+  let length = -1;
+  for (let i = 0; i < n; i++) {
+    const e = ifd0Offset + 2 + i * 12;
+    if (e + 12 > bytes.length) break;
+    const tag = readU16(bytes, e, isLE);
+    const type = readU16(bytes, e + 2, isLE);
+    const count = readU32(bytes, e + 4, isLE);
+    if (count !== 1) continue;
+    const value = type === TIFF_TYPE_SHORT ? readU16(bytes, e + 8, isLE) : readU32(bytes, e + 8, isLE);
+    if (tag === 273 || tag === 513) offset = value;
+    if (tag === 279 || tag === 514) length = value;
+  }
+  if (offset <= 0 || length < 4 || offset + length > bytes.length) return null;
+  if (bytes[offset] !== 0xff || bytes[offset + 1] !== 0xd8) return null;
+  return bytes.subarray(offset, offset + length);
+}
+
+// ─── Camera color profile block (DNG 1.4+ spec core) ──────────────────────────
+
+/** Tag 50721 (0xC621) — `ColorMatrix1`: PCS-D50 XYZ → camera RGB under illuminant 1. */
+export const DNG_TAG_COLOR_MATRIX_1 = 0xC621;
+/** Tag 50722 (0xC622) — `ColorMatrix2` (dual-illuminant profiles only). */
+export const DNG_TAG_COLOR_MATRIX_2 = 0xC622;
+/** Tag 50723 (0xC623) — `CameraCalibration1`: per-unit sensor calibration under illuminant 1. */
+export const DNG_TAG_CAMERA_CALIBRATION_1 = 0xC623;
+/** Tag 50724 (0xC624) — `CameraCalibration2`. */
+export const DNG_TAG_CAMERA_CALIBRATION_2 = 0xC624;
+/** Tag 50727 (0xC627) — `AnalogBalance`: per-channel analog gain normalization. */
+export const DNG_TAG_ANALOG_BALANCE = 0xC627;
+/** Tag 50728 (0xC628) — `AsShotNeutral`: captured white-balance gains, G-normalized. */
+export const DNG_TAG_AS_SHOT_NEUTRAL = 0xC628;
+/** Tag 50778 (0xC65A) — `CalibrationIlluminant1` (EXIF light-source code for CM1). */
+export const DNG_TAG_CALIBRATION_ILLUMINANT_1 = 0xC65A;
+/** Tag 50779 (0xC65B) — `CalibrationIlluminant2`. */
+export const DNG_TAG_CALIBRATION_ILLUMINANT_2 = 0xC65B;
+/**
+ * Tag 50964 (0xC714) — `ForwardMatrix1`: PCS-D50 → camera under illuminant 1.
+ * ⚠️ NOT 50725/50726 — those are `ReductionMatrix1/2` (subsampling matrices for
+ * 4+ channel sensors, irrelevant to a 3-channel chain).
+ */
+export const DNG_TAG_FORWARD_MATRIX_1 = 0xC714;
+/** Tag 50965 (0xC715) — `ForwardMatrix2`. */
+export const DNG_TAG_FORWARD_MATRIX_2 = 0xC715;
+
+/**
+ * The DNG camera color profile as PURE DATA, one interface away from the file
+ * bytes so the render-side color math (`engine/color/raw/dng-spec.ts`, P2) never
+ * touches TIFF structure.
+ *
+ * All matrices are ROW-MAJOR 9-tuples; all channel vectors are 3-tuples. Writers
+ * store matrices as SRATIONAL (desktop DNG conversion tools) or FLOAT (phone
+ * vendor RAW writers); both spellings are accepted per member. A member
+ * whose tag is absent, mistyped, or out of bounds is `undefined` — the consumer
+ * applies the spec's documented defaults (identity calibration, unit analog
+ * balance, no forward matrix, illuminant 1 only).
+ */
+export interface DngCameraProfileData {
+  /** Tag 50728. Required by the spec chain; absent → no principled rendering. */
+  asShotNeutral?: readonly number[];
+  /** Tag 50721. The one mandatory color matrix. */
+  colorMatrix1?: readonly number[];
+  /** Tag 50722. Present on dual-illuminant profiles. */
+  colorMatrix2?: readonly number[];
+  /** Tag 50778, EXIF light-source code (17 = A, 21 = D65; 0 = unknown). */
+  calibrationIlluminant1?: number;
+  /** Tag 50779. */
+  calibrationIlluminant2?: number;
+  /** Tag 50723. Spec default: identity. */
+  cameraCalibration1?: readonly number[];
+  /** Tag 50724. Spec default: identity. */
+  cameraCalibration2?: readonly number[];
+  /** Tag 50727. Spec default: all ones. */
+  analogBalance?: readonly number[];
+  /** Tag 50964. Absent on most natural-camera profiles (the XYZ-adapt branch applies). */
+  forwardMatrix1?: readonly number[];
+  /** Tag 50965. */
+  forwardMatrix2?: readonly number[];
+  /**
+   * Tag 50730 via {@link parseDngBaselineExposure}, stops. The spec chain adds
+   * a fixed `2^BE` gain; absent = 0 stops.
+   */
+  baselineExposure?: number;
+}
+
+/** TIFF IFD entry type 3 = SHORT (the illuminant tags' storage type). */
+const TIFF_TYPE_SHORT = 3;
+
+/**
+ * Read one 3×3 matrix tag. Accepts SRATIONAL (10), RATIONAL (5) and FLOAT (11),
+ * each count 9 (always out-of-line: 36 or 72 bytes). Any other type/count, an
+ * out-of-bounds run, or a non-finite value yields `undefined`.
+ */
+function readMatrixTag(
+  bytes: Uint8Array,
+  tagId: number,
+): readonly number[] | undefined {
+  const entry = findTiffEntry(bytes, tagId);
+  if (!entry) return undefined;
+
+  const { isLE, entryOffset } = entry;
+  const type = readU16(bytes, entryOffset + 2, isLE);
+  const count = readU32(bytes, entryOffset + 4, isLE);
+  if (count !== 9) return undefined;
+  if (type !== TIFF_TYPE_SRATIONAL && type !== TIFF_TYPE_RATIONAL && type !== TIFF_TYPE_FLOAT) {
+    return undefined;
+  }
+
+  const at = readU32(bytes, entryOffset + 8, isLE);
+  const unit = type === TIFF_TYPE_FLOAT ? 4 : 8;
+  if (at + unit * 9 > bytes.length) return undefined;
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const out: number[] = new Array(9);
+  for (let i = 0; i < 9; i++) {
+    let v: number;
+    if (type === TIFF_TYPE_FLOAT) {
+      v = view.getFloat32(at + i * 4, isLE);
+    } else {
+      const num = type === TIFF_TYPE_SRATIONAL
+        ? view.getInt32(at + i * 8, isLE)
+        : view.getUint32(at + i * 8, isLE);
+      const den = view.getUint32(at + i * 8 + 4, isLE);
+      if (den === 0) return undefined;
+      v = num / den;
+    }
+    if (!Number.isFinite(v)) return undefined;
+    out[i] = v;
+  }
+  return out;
+}
+
+/**
+ * Read one 3-channel rational vector tag (AsShotNeutral / AnalogBalance).
+ * Accepts RATIONAL (5) and SRATIONAL (10), count 3 (24 bytes, out-of-line).
+ * Zero denominators and non-finite values yield `undefined`.
+ */
+function readRationalTriple(
+  bytes: Uint8Array,
+  tagId: number,
+): readonly number[] | undefined {
+  const entry = findTiffEntry(bytes, tagId);
+  if (!entry) return undefined;
+
+  const { isLE, entryOffset } = entry;
+  const type = readU16(bytes, entryOffset + 2, isLE);
+  if (type !== TIFF_TYPE_RATIONAL && type !== TIFF_TYPE_SRATIONAL) return undefined;
+  if (readU32(bytes, entryOffset + 4, isLE) !== 3) return undefined;
+
+  const at = readU32(bytes, entryOffset + 8, isLE);
+  if (at + 24 > bytes.length) return undefined;
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const out: number[] = new Array(3);
+  for (let i = 0; i < 3; i++) {
+    const num = type === TIFF_TYPE_SRATIONAL
+      ? view.getInt32(at + i * 8, isLE)
+      : view.getUint32(at + i * 8, isLE);
+    const den = view.getUint32(at + i * 8 + 4, isLE);
+    if (den === 0) return undefined;
+    const v = num / den;
+    if (!Number.isFinite(v)) return undefined;
+    out[i] = v;
+  }
+  return out;
+}
+
+/**
+ * Read one SHORT illuminant tag (CalibrationIlluminant1/2). Count 1, 2 bytes,
+ * stored inline. Anything else → `undefined`.
+ */
+function readIlluminantTag(bytes: Uint8Array, tagId: number): number | undefined {
+  const entry = findTiffEntry(bytes, tagId);
+  if (!entry) return undefined;
+
+  const { isLE, entryOffset } = entry;
+  if (readU16(bytes, entryOffset + 2, isLE) !== TIFF_TYPE_SHORT) return undefined;
+  if (readU32(bytes, entryOffset + 4, isLE) !== 1) return undefined;
+  return readU16(bytes, entryOffset + 8, isLE);
+}
+
+/**
+ * Parse the complete DNG camera color profile in one pass.
+ *
+ * `asShotNeutral` + `colorMatrix1` are the minimum for a principled render
+ * (single-illuminant chain); every other member carries the spec's documented
+ * default when absent. BaselineExposure rides along because the spec chain and
+ * the GainTableMap input both consume it (already parsed by
+ * {@link parseDngBaselineExposure} — same tag, one read).
+ *
+ * Malformed members degrade individually to `undefined` (spec defaults), so a
+ * partially-broken profile still renders; only a missing ColorMatrix1 disables
+ * the first-principles chain entirely.
+ */
+export function parseDngCameraProfileData(bytes: Uint8Array): DngCameraProfileData {
+  const asShotNeutral = readRationalTriple(bytes, DNG_TAG_AS_SHOT_NEUTRAL);
+  const colorMatrix1 = readMatrixTag(bytes, DNG_TAG_COLOR_MATRIX_1);
+  const colorMatrix2 = readMatrixTag(bytes, DNG_TAG_COLOR_MATRIX_2);
+  const calibrationIlluminant1 = readIlluminantTag(bytes, DNG_TAG_CALIBRATION_ILLUMINANT_1);
+  const calibrationIlluminant2 = readIlluminantTag(bytes, DNG_TAG_CALIBRATION_ILLUMINANT_2);
+
+  // ColorMatrix2 without its illuminant code is unusable for interpolation —
+  // drop the matrix so the consumer falls back to the single-illuminant chain
+  // rather than guessing a temperature for it.
+  const hasDual = colorMatrix2 !== undefined && calibrationIlluminant2 !== undefined;
+
+  return {
+    asShotNeutral,
+    colorMatrix1,
+    colorMatrix2: hasDual ? colorMatrix2 : undefined,
+    calibrationIlluminant1,
+    calibrationIlluminant2: hasDual ? calibrationIlluminant2 : undefined,
+    cameraCalibration1: readMatrixTag(bytes, DNG_TAG_CAMERA_CALIBRATION_1),
+    cameraCalibration2: readMatrixTag(bytes, DNG_TAG_CAMERA_CALIBRATION_2),
+    analogBalance: readRationalTriple(bytes, DNG_TAG_ANALOG_BALANCE),
+    forwardMatrix1: readMatrixTag(bytes, DNG_TAG_FORWARD_MATRIX_1),
+    forwardMatrix2: readMatrixTag(bytes, DNG_TAG_FORWARD_MATRIX_2),
+    baselineExposure: parseDngBaselineExposure(bytes),
+  };
 }

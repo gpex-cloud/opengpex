@@ -172,7 +172,7 @@ export interface ViewPassContext {
  * Everything the HDR fragment needs to reconstruct the HDR rendition from the
  * composited SDR base. Built by the engine per present (never cached across
  * frames): the decoded map texture view, the affine decode parameters
- * (`engine/color/gainMap.ts` owns the math), and the uv placement that maps
+ * (`engine/color/hdr/gainMap.ts` owns the math), and the uv placement that maps
  * the composite's document extent onto the map (full channel = [0,0]-[1,1];
  * the ROI channel folds its document origin in).
  */

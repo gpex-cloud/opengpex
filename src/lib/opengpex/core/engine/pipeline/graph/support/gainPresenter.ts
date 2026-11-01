@@ -25,10 +25,10 @@
  *
  *   - GPU residency: the decoded CPU payload (`gainMapSourceCache`) is
  *     uploaded to an r8unorm texture ONCE per asset and reused every present;
- *   - the reveal ease (the gradual brighten macOS Photos applies when an
- *     Adaptive-HDR image opens): transitioning INTO active gain
- *     presentation ramps the effective headroom from ×1 to the full factor
- *     over GAIN_REVEAL_MS instead of snapping (real-device feedback 2026-10-15);
+ *   - the gain ease (the gradual brighten macOS Photos applies when an
+ *     Adaptive-HDR image opens): one strength, eased over GAIN_RAMP_MS toward
+ *     1 when gain presentation starts and toward 0 when HDR is switched off,
+ *     instead of snapping either way;
  *   - the rAF self-pump: the render ticker skips static scenes, so while the
  *     ease is running the presenter re-presents the last frame itself through
  *     the injected `replayFrame` (the composite is signature-cached — each
@@ -64,11 +64,11 @@ export interface PresentGainMap {
   readonly gamma: number;
 }
 
-/** Reveal ramp duration for the gradual brighten when an Adaptive-HDR file
- * opens: the presenter eases exp2(s·gain) from ×1 to the full factor over
- * this window. Calibrated at 500ms — long enough to read as a calm fade
- * rather than a snap when the map decode lands late. */
-export const GAIN_REVEAL_MS = 500;
+/** Duration of the gain ease, both directions: switching HDR on (or the map
+ * decode landing) brightens from ×1 to the full factor, switching it off
+ * dims back to ×1 before the surface leaves HDR. 500ms reads as a calm fade
+ * rather than a snap. */
+export const GAIN_RAMP_MS = 500;
 
 interface GainPresenterDeps {
   /** The live device, or null before init / during loss (resolve degrades). */
@@ -79,7 +79,12 @@ interface GainPresenterDeps {
   readonly replayFrame: () => void;
 }
 
-type RevealState = 'idle' | 'animating' | 'done';
+/** One running ease: strength moves from `from` to `to` starting at `t0`. */
+interface Ramp {
+  readonly from: number;
+  readonly to: number;
+  readonly t0: number;
+}
 
 export class GainPresenter {
   private readonly deps: GainPresenterDeps;
@@ -89,9 +94,12 @@ export class GainPresenter {
    * every present; destroyed (and re-uploaded on demand) with the device. */
   private readonly textures = new Map<string, { texture: GPUTexture; view: GPUTextureView }>();
 
-  private revealState: RevealState = 'idle';
-  private revealT0 = 0;
-  private revealRaf = 0;
+  /** Applied gain strength, 0 (SDR base) … 1 (full HDR rendition). */
+  private strength = 0;
+  private ramp: Ramp | null = null;
+  private raf = 0;
+  /** Settles the pending {@link beginDim} once the strength reaches 0. */
+  private dimDone: (() => void) | null = null;
 
   constructor(deps: GainPresenterDeps, now: () => number = () => performance.now()) {
     this.deps = deps;
@@ -99,28 +107,80 @@ export class GainPresenter {
   }
 
   /**
-   * Resolve THIS present's gain context: undefined when anything is unresolved
-   * (HDR off, no eligible asset, map still decoding, no device) — the view
-   * pass then presents the authoritative SDR base with `gain_enabled = 0`.
-   * Entry into application starts the reveal ramp; while animating, the rAF
-   * pump re-presents so the ramp advances despite the static-skipping ticker.
+   * Resolve THIS present's gain context: undefined when nothing is applied
+   * (HDR off and not dimming, no eligible asset, map still decoding, no
+   * device) — the view pass then presents the SDR base with `gain_enabled = 0`.
+   * While enabled the strength eases toward 1; after {@link beginDim} it
+   * eases toward 0 on the still-HDR surface.
    */
   resolve(assetId: string | undefined): PresentGainMap | undefined {
-    if (!this.deps.isHdrActive() || !assetId) {
-      this.reset();
-      return undefined;
-    }
-    const src = gainMapSourceCache.get(assetId);
-    if (!src) {
-      this.reset();
-      return undefined;
-    }
+    const dimming = this.dimDone !== null;
+    const src = assetId ? gainMapSourceCache.get(assetId) : undefined;
     const device = this.deps.getDevice();
-    if (!device) {
-      this.reset();
+    if (!assetId || !src || !device || (!dimming && !this.deps.isHdrActive())) {
+      this.settle(0);
       return undefined;
     }
+    const entry = dimming ? this.textures.get(assetId) : this.ensureTexture(assetId, src, device);
+    if (!entry) {
+      this.settle(0);
+      return undefined;
+    }
+    if (!dimming && this.strength < 1 && (!this.ramp || this.ramp.to !== 1)) {
+      this.startRamp(1);
+    }
+    const strength = this.advance();
+    if (dimming && strength <= 0) return undefined;
+    return {
+      textureView: entry.view,
+      gainMin: src.gainMin * strength,
+      gainMax: src.gainMax * strength,
+      gamma: src.gamma,
+    };
+  }
 
+  /**
+   * HDR switched off: ease the applied strength to 0. The caller keeps the
+   * surface in HDR until the promise resolves, then reconfigures to SDR —
+   * dimming on an SDR surface would clip the highlights in one frame.
+   * Resolves immediately when no gain is applied.
+   */
+  beginDim(): Promise<void> {
+    this.advance();
+    if (this.strength <= 0) {
+      this.settle(0);
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.dimDone = resolve;
+      this.startRamp(0);
+    });
+  }
+
+  /** HDR switched back on mid-dim: the next resolve eases up from the current strength. */
+  cancelDim(): void {
+    if (!this.dimDone) return;
+    this.advance();
+    this.ramp = null;
+    this.finishDim();
+  }
+
+  /**
+   * Device loss / teardown: the textures belonged to the dead device (the CPU
+   * payload in gainMapSourceCache survives, so the next resolve re-uploads and
+   * re-runs the ease).
+   */
+  release(): void {
+    for (const entry of this.textures.values()) entry.texture.destroy();
+    this.textures.clear();
+    this.settle(0);
+  }
+
+  private ensureTexture(
+    assetId: string,
+    src: { map: Uint8Array; width: number; height: number },
+    device: GPUDevice,
+  ): { texture: GPUTexture; view: GPUTextureView } {
     let entry = this.textures.get(assetId);
     if (!entry) {
       const texture = device.createTexture({
@@ -140,76 +200,64 @@ export class GainPresenter {
       entry = { texture, view: texture.createView({ label: `Gain Map View (${assetId})` }) };
       this.textures.set(assetId, entry);
     }
+    return entry;
+  }
 
-    // Reveal ease: 'idle' → 'animating' on entering application; the ramp
-    // advances on wall-clock and settles into 'done' at t = 1 (the frame that
-    // observes t ≥ 1 already presents full strength). Dropping out of
-    // application anywhere resets to idle — re-entering restarts the ramp,
-    // which is exactly the HDR-toggle-on and map-just-decoded behaviours.
-    const t0 = this.now();
-    if (this.revealState === 'idle') {
-      this.revealState = 'animating';
-      this.revealT0 = t0;
-      this.pump();
+  private startRamp(to: number): void {
+    this.ramp = { from: this.strength, to, t0: this.now() };
+    this.pump();
+  }
+
+  /** Advance the running ease (smoothstep on wall-clock) and return the strength. */
+  private advance(): number {
+    const r = this.ramp;
+    if (!r) return this.strength;
+    const t = Math.min(1, (this.now() - r.t0) / GAIN_RAMP_MS);
+    this.strength = r.from + (r.to - r.from) * (t * t * (3 - 2 * t));
+    if (t >= 1) {
+      this.ramp = null;
+      this.strength = r.to;
+      if (r.to === 0) this.finishDim();
     }
-    let strength = 1;
-    if (this.revealState === 'animating') {
-      const t = Math.min(1, (t0 - this.revealT0) / GAIN_REVEAL_MS);
-      strength = t * t * (3 - 2 * t); // smoothstep — decelerating ramp like macOS
-      if (t >= 1) this.revealState = 'done';
+    return this.strength;
+  }
+
+  /** Jump to a strength with no ease (nothing presentable / teardown). */
+  private settle(strength: number): void {
+    this.strength = strength;
+    this.ramp = null;
+    if (this.raf) {
+      const cancel = typeof cancelAnimationFrame === 'function'
+        ? cancelAnimationFrame
+        : ((handle: number) => clearTimeout(handle as unknown as ReturnType<typeof setTimeout>));
+      cancel(this.raf);
+      this.raf = 0;
     }
-    return {
-      textureView: entry.view,
-      gainMin: src.gainMin * strength,
-      gainMax: src.gainMax * strength,
-      gamma: src.gamma,
-    };
+    this.finishDim();
+  }
+
+  private finishDim(): void {
+    const done = this.dimDone;
+    this.dimDone = null;
+    done?.();
   }
 
   /**
-   * Device loss / teardown: the textures belonged to the dead device (the CPU
-   * payload in gainMapSourceCache survives, so the next resolve re-uploads and
-   * — gracefully — re-runs the reveal ease).
-   */
-  release(): void {
-    for (const entry of this.textures.values()) {
-      entry.texture.destroy();
-    }
-    this.textures.clear();
-    this.reset();
-  }
-
-  /**
-   * rAF self-pump while the ease runs: re-present via the injected replay so
-   * `resolve` advances the ease next frame. Re-arms itself from inside the
-   * render it triggers until the state leaves 'animating'. Falls back to
-   * setTimeout where rAF does not exist (tests / non-window contexts).
+   * rAF self-pump while an ease runs: re-present via the injected replay so
+   * `resolve` advances the ease next frame, despite the static-skipping
+   * ticker. Falls back to setTimeout where rAF does not exist (tests).
    */
   private pump(): void {
-    if (this.revealRaf) return;
+    if (this.raf) return;
     const schedule = typeof requestAnimationFrame === 'function'
       ? requestAnimationFrame
       : (cb: () => void) => setTimeout(cb, 16) as unknown as number;
     const step = () => {
-      this.revealRaf = 0;
-      if (this.revealState !== 'animating') return;
+      this.raf = 0;
+      if (!this.ramp) return;
       this.deps.replayFrame();
-      if (this.revealState === 'animating') {
-        this.revealRaf = schedule(step);
-      }
+      if (this.ramp) this.raf = schedule(step);
     };
-    this.revealRaf = schedule(step);
-  }
-
-  private reset(): void {
-    if (this.revealState === 'idle' && !this.revealRaf) return;
-    this.revealState = 'idle';
-    if (this.revealRaf) {
-      const cancel = typeof cancelAnimationFrame === 'function'
-        ? cancelAnimationFrame
-        : ((handle: number) => clearTimeout(handle as unknown as ReturnType<typeof setTimeout>));
-      cancel(this.revealRaf);
-      this.revealRaf = 0;
-    }
+    this.raf = schedule(step);
   }
 }

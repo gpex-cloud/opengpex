@@ -321,7 +321,7 @@ export interface RawBinaryData {
  * are luminance-axis metadata and every real-world writer emits one plane.
  * The application math — `hdr = sdr_linear × 2^gain` with the affine
  * `gain = gainMin + (byte/255)^(1/γ)·(gainMax−gainMin)` — lives in
- * `core/engine/color/gainMap.ts` (`decodeGainSample`), mirrored in the view
+ * `core/engine/color/hdr/gainMap.ts` (`decodeGainSample`), mirrored in the view
  * shader.
  */
 export interface GainMapData {

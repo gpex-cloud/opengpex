@@ -164,6 +164,13 @@ export interface IEngine {
   /** Synchronously attach a new or remounted canvas to the existing device surface. */
   attachCanvas(canvas: HTMLCanvasElement, surface?: SurfaceConfig): boolean;
 
+  /** HDR gain-map presenter: gradual reveal, and the dim ramp before the
+   * surface leaves HDR. */
+  readonly gainPresenter: {
+    beginDim(): Promise<void>;
+    cancelDim(): void;
+  };
+
   /**
    * Declaratively render one frame to the swapchain.
    *

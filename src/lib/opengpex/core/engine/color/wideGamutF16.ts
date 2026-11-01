@@ -54,7 +54,7 @@
 
 import { gammaToLinear, ADOBE_RGB_GAMMA, PROPHOTO_GAMMA, rec2020ToLinear } from './trc';
 import { linearFloatToFloat16 } from './float16';
-import { pqToSceneLinear, hlgToSceneLinear } from './hdrTransfer';
+import { pqToSceneLinear, hlgToSceneLinear } from './hdr/hdrTransfer';
 
 /** Shape of the `highDepthSource` a wide-gamut degamma produces (mirrors DecodeResult). */
 export interface WideGamutHighDepth {

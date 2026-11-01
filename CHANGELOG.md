@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.38
+
+- RAW: DNG files now render from their own embedded color, tone and exposure data, with sharpening and HDR highlights (iPhone ProRAW) as each file specifies
+- Image Formats: JPEG HDR photos written in the plain ISO gain-map form (common on phones) are now recognized as HDR
+- Workspace: turning HDR off now fades smoothly back to standard range, matching the fade-in when it turns on
+
 ## 2.0.37
 
 - Text: the text panel's colour control is now a compact swatch row, matching the brush panel style

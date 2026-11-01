@@ -72,7 +72,7 @@
 import type { ImageMetadata } from '../../types';
 import { parseHeicContainer } from './metadata/container';
 import { heicWorkerCall } from './transcode';
-import { downscaleGainMap } from '@opengpex/editor/core/engine/color/gainMap';
+import { downscaleGainMap } from '@opengpex/editor/core/engine/color/hdr/gainMap';
 import { blobToBase64 } from '../../utils';
 
 /** The ISO 21496-1 tmap record's fixed rational denominator. */

@@ -40,6 +40,7 @@ import type {
   VectorMask,
   LocalShape,
   BitmapMaskOverrideMap,
+  GamutId,
 } from '@opengpex/editor/core/types';
 import { snapCanvasRect } from '@opengpex/editor/core/geometry/operators/snapping';
 import { resolveLayerGeometry } from '@opengpex/editor/core/engine/pipeline/graph/support/layerGeometry';
@@ -296,6 +297,20 @@ export interface SceneViewOptions {
    * stamped live (tests, export, idle frames).
    */
   readonly needIncreComp?: (layerId: string) => boolean;
+}
+
+/**
+ * The gamut an asset's 8-bit display bitmap is ACTUALLY encoded in. Browser
+ * canvases can only encode sRGB or Display P3, so every decoder writes its
+ * 8-bit proxy as sRGB for sRGB assets and as Display P3 for everything wider
+ * (Adobe RGB, ProPhoto, BT.2020 masters fold to P3 — the widest
+ * canvas-representable gamut). The asset's own gamut describes its HIGH-DEPTH
+ * master; tagging the bitmap with it would read P3 bytes as e.g. ProPhoto and
+ * massively oversaturate the frame shown before the master is resident.
+ */
+export function proxyBitmapGamut(assetGamut: GamutId | undefined): GamutId {
+  if (!assetGamut || assetGamut === 'srgb') return 'srgb';
+  return 'display-p3';
 }
 
 /**
@@ -616,7 +631,7 @@ export class SceneAssembler {
       if (rawUpload) {
         uploads.push({ assetId: sourceAssetId, source: rawUpload });
       } else if (!isVectorLayer && rawImg && typeof (rawImg as ImageBitmap).close === 'function') {
-        const resolvedGamut = assets?.get(sourceAssetId)?.gamut ?? 'srgb';
+        const resolvedGamut = proxyBitmapGamut(assets?.get(sourceAssetId)?.gamut);
         uploads.push({
           assetId: sourceAssetId,
           // Tag the 8-bit color raster with the asset's OWN
@@ -630,7 +645,7 @@ export class SceneAssembler {
           // `WebGpuEngine`'s untagged-source default).
           // SYNC ⚠️: this is the TRANSFER-time tag (steers copyExternalImageToTexture
           // into an identity copy). It MUST stay equal to the RENDER-time tag on the
-          // scene layer's `source.gamut` below — both read `assets?.get(sourceAssetId)?.gamut`.
+          // scene layer's `source.gamut` below — both go through `proxyBitmapGamut`.
           // They are two independent channels (upload identity vs. shader
           // gamut_to_working); diverging them double-converts or fails to align.
           source: { kind: 'bitmap', data: rawImg as ImageBitmap, gamut: resolvedGamut },
@@ -843,12 +858,14 @@ export class SceneAssembler {
           // the universal meaning of an untagged raster.
           // SYNC ⚠️ (8-bit): this RENDER-time tag must equal the TRANSFER-time
           // `UploadSource.gamut` set above — keep both sourced from
-          // `assets?.get(sourceAssetId)?.gamut`.
+          // `proxyBitmapGamut`.
           // A solid-colour source carries the ColorValue's OWN `space`
           // (the fill's gamut), which the shader aligns to working.
           // The 1×1 rgba16float texels are already in that space, so gamut_to_working
           // is the sole (lossless) conversion.
-          gamut: fillColor ? fillColor.space : highDepth?.gamut ?? assets?.get(sourceAssetId)?.gamut ?? 'srgb',
+          gamut: fillColor
+            ? fillColor.space
+            : highDepth?.gamut ?? proxyBitmapGamut(assets?.get(sourceAssetId)?.gamut),
           // Forwarding terminus: the per-asset raw white domain. Its PRESENCE is
           // the render intent — only scene-linear sources (camera RAW) carry a
           // high-depth entry with a domain; 8-bit bitmaps have no high-depth

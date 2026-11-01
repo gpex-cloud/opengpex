@@ -46,7 +46,7 @@ import {
   hlgToSceneLinear,
   deriveMatrix64,
 } from '@opengpex/editor/core/engine/color';
-import { renderSdrDown } from '@opengpex/editor/core/engine/color/shoulder';
+import { renderSdrDown } from '@opengpex/editor/core/engine/color/hdr/shoulder';
 import { linearToSrgb } from '@opengpex/editor/core/engine/color/trc';
 import { readImageDimensions } from '../../utils';
 import { buildGamutProxy } from '../heic/transcode';

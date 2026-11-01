@@ -98,7 +98,7 @@
  * asset carries the map, covering the canvas) and HDR presentation is on, the
  * engine binds the decoded map at binding 3 and sets `gain_enabled`; the
  * fragment multiplies the un-premultiplied straight colour by 2^gain —
- * reconstructing the file's HDR rendition (`engine/color/gainMap.ts` holds the
+ * reconstructing the file's HDR rendition (`engine/color/hdr/gainMap.ts` holds the
  * golden-locked math). `gain_enabled = 0` (not eligible, HDR off, or the map
  * still decoding — first frames present SDR and flip bright when the async
  * decode lands) binds a 1×1 dummy instead, so there is exactly ONE shader pair
@@ -305,7 +305,7 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   // ── GAIN MAP SAMPLE (uniform control flow is a WGSL REQUIREMENT) ──
   // A gain-map document's eligible HDR frame reconstructs the HDR rendition as
   // hdr = sdr_linear × 2^gain, gain decoded affinely from the map byte exactly
-  // as engine/color/gainMap.ts::decodeGainSample states it (pow(s, 1/gamma) →
+  // as engine/color/hdr/gainMap.ts::decodeGainSample states it (pow(s, 1/gamma) →
   // affine → exp2 — the golden-locked operation order). The sample MUST sit in
   // uniform control flow: WGSL forbids textureSample inside any branch
   // conditioned on a possibly-non-uniform value, and the alpha early-outs

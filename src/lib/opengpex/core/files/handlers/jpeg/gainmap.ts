@@ -391,3 +391,133 @@ export function readPrimaryExifOrientation(bytes: Uint8Array): number {
   return 1;
 }
 
+
+// ─── ISO 21496-1 carrier (MPF + ISO APP2, no GContainer XMP) ──────────────────
+
+/**
+ * Coded dimensions from any baseline/progressive SOF, including the
+ * single-component frames gain maps usually are (SOF length 11).
+ */
+function readAnySofDimensions(bytes: Uint8Array): { width: number; height: number } {
+  let i = 2;
+  while (i + 9 <= bytes.length) {
+    if (bytes[i] !== 0xff) { i++; continue; }
+    const marker = bytes[i + 1];
+    if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd9) || marker === 0x01) { i += 2; continue; }
+    if (marker === 0xda) break;
+    const length = (bytes[i + 2] << 8) | bytes[i + 3];
+    if ((marker === 0xc0 || marker === 0xc1 || marker === 0xc2) && length >= 11) {
+      return {
+        height: (bytes[i + 5] << 8) | bytes[i + 6],
+        width: (bytes[i + 7] << 8) | bytes[i + 8],
+      };
+    }
+    i += 2 + length;
+  }
+  return { width: 0, height: 0 };
+}
+
+/** APP2 payload prefix of an ISO 21496-1 gain-map metadata record. */
+const ISO_GAINMAP_PREFIX = 'urn:iso:std:iso:ts:21496:-1\0';
+
+/**
+ * Decode one ISO 21496-1 gain-map metadata record (the payload after the
+ * identifier) into the engine's single-set parameters. Returns null for
+ * version-only records (the 4-byte marker the PRIMARY image carries), for
+ * backward-direction maps (HDR base + inverse map — out of scope like
+ * BaseRenditionIsHDR), and for multichannel records whose channels disagree
+ * (the presentation chain is single-channel).
+ *
+ * Layout (big-endian): u16 minimum_version, u16 writer_version, u8 flags
+ * (bit 7 multichannel, bit 6 use-base-colour-space, bit 3 common denominator,
+ * bit 2 backward direction); then either a shared u32 denominator followed by
+ * numerators, or numerator/denominator pairs — base headroom, alternate
+ * headroom, and per channel: min (s), max (s), gamma (u), base offset (s),
+ * alternate offset (s).
+ */
+export function parseIsoGainmapRecord(record: Uint8Array): GainMapXmpParams | null {
+  if (record.length < 5) return null;
+  const dv = new DataView(record.buffer, record.byteOffset, record.byteLength);
+  const flags = record[4];
+  if (flags & 0x04) return null;
+  const multichannel = (flags & 0x80) !== 0;
+  const commonDenominator = (flags & 0x08) !== 0;
+  let o = 5;
+  let shared = 0;
+  const need = (n: number): boolean => o + n <= record.length;
+  if (commonDenominator) {
+    if (!need(4)) return null;
+    shared = dv.getUint32(o); o += 4;
+    if (shared === 0) return null;
+  }
+  const read = (signed: boolean): number | null => {
+    if (commonDenominator) {
+      if (!need(4)) return null;
+      const n = signed ? dv.getInt32(o) : dv.getUint32(o); o += 4;
+      return n / shared;
+    }
+    if (!need(8)) return null;
+    const n = signed ? dv.getInt32(o) : dv.getUint32(o);
+    const d = dv.getUint32(o + 4); o += 8;
+    return d === 0 ? null : n / d;
+  };
+  if (read(false) === null || read(false) === null) return null; // headrooms
+  const channels: GainMapXmpParams[] = [];
+  for (let c = 0; c < (multichannel ? 3 : 1); c++) {
+    const gainMin = read(true);
+    const gainMax = read(true);
+    const gamma = read(false);
+    if (read(true) === null || read(true) === null) return null; // offsets
+    if (gainMin === null || gainMax === null || gamma === null || gamma <= 0) return null;
+    channels.push({ gainMin, gainMax, gamma });
+  }
+  const first = channels[0];
+  for (const ch of channels) {
+    if (ch.gainMin !== first.gainMin || ch.gainMax !== first.gainMax || ch.gamma !== first.gamma) {
+      return null;
+    }
+  }
+  return first;
+}
+
+/** The ISO 21496-1 parameters carried by a gain image's own APP2, or null. */
+function findIsoGainmapParams(bytes: Uint8Array): GainMapXmpParams | null {
+  const segments = walkAppSegments(bytes);
+  if (!segments) return null;
+  for (const seg of segments) {
+    if (seg.marker !== 0xe2) continue;
+    if (!startsWith(bytes, seg.payloadOffset, ISO_GAINMAP_PREFIX)) continue;
+    const start = seg.payloadOffset + ISO_GAINMAP_PREFIX.length;
+    const end = seg.payloadOffset + seg.payloadLength;
+    const params = parseIsoGainmapRecord(bytes.subarray(start, end));
+    if (params) return params;
+  }
+  return null;
+}
+
+/**
+ * Locate an ISO 21496-1 gain map that is declared WITHOUT the GContainer XMP:
+ * the MPF secondary image carries the full ISO metadata record in its own
+ * APP2 (the layout phone cameras write into their embedded previews). This is
+ * a separate reader from {@link extractJpegGainMapCarrier} on purpose — that
+ * function's detection key and parameter source stay exactly as they are; the
+ * callers consult this one only when the GContainer form is absent.
+ */
+export function extractIsoGainMapCarrier(bytes: Uint8Array): JpegGainMapCarrier | null {
+  const mpf = findMpfDirectory(bytes);
+  if (!mpf) return null;
+  for (let e = 1; e < mpf.entries.length; e++) {
+    const entry = mpf.entries[e];
+    if (entry.size === 0) continue;
+    const gainOffset = mpf.tiffOrigin + entry.dataOffset;
+    const gainLength = Math.min(entry.size, bytes.length - gainOffset);
+    if (gainOffset < 0 || gainLength < 4) continue;
+    if (bytes[gainOffset] !== 0xff || bytes[gainOffset + 1] !== 0xd8) continue;
+    const gainBytes = bytes.subarray(gainOffset, gainOffset + gainLength);
+    const params = findIsoGainmapParams(gainBytes);
+    if (!params) continue;
+    const { width, height } = readAnySofDimensions(gainBytes);
+    return { gainOffset, gainLength, gainBytes, width, height, params };
+  }
+  return null;
+}

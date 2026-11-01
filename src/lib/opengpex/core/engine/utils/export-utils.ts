@@ -55,7 +55,7 @@ import { linearToSrgb, linearToGamma, linearToRec2020 } from '@opengpex/editor/c
 import { floatToHalf } from '@opengpex/editor/core/engine/color/float16';
 import { getConversionMatrix } from '@opengpex/editor/core/engine/color/matrices';
 import { deriveMatrix64, WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
-import { sceneLinearToPq } from '@opengpex/editor/core/engine/color/hdrTransfer';
+import { sceneLinearToPq } from '@opengpex/editor/core/engine/color/hdr/hdrTransfer';
 import type { WorkingColorSpace, GamutId } from '@opengpex/editor/core/types';
 
 /**
@@ -646,7 +646,7 @@ function workingToRec2020Matrix(): number[] {
  *      negative results floored at 0, headroom (> 1) preserved (see the matrix
  *      note above).
  *   3. PQ transfer — `sceneLinearToPq` (ST 2084 around the 203-nit scene-linear
- *      anchor from `core/engine/color/hdrTransfer.ts`), output already in [0,1].
+ *      anchor from `core/engine/color/hdr/hdrTransfer.ts`), output already in [0,1].
  *   4. quantize — `Math.round(× 1023)` into `Uint16Array`; alpha is coverage, NOT
  *      light: `clamp01(a) × 1023`, NO matrix, NO PQ.
  *

@@ -528,7 +528,7 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
     // source): a master baked with hdr = sdr·2^gain would make OFF present the
     // CLAMPED HDR rendition instead of the file's authoritative SDR base — a
     // 2× sky pins its blue channel at white and the image hue-skews. The gain
-    // application lives at the view pass (engine/color/gainMap.ts holds the
+    // application lives at the view pass (engine/color/hdr/gainMap.ts holds the
     // math); the linear f16 identity here is the precision-ready master that
     // application samples. Main decode follows the SAME capability gate as
     // 85 (fail-fast preserved); 87 still owns PQ/HLG (unknown colour tag) for
@@ -681,6 +681,10 @@ export const INGEST_DECISION_RULES: readonly DecisionRule[] = [
       bitDepth: '*',
       colorSpace: '*',
       transfer: '*',
+      // A DNG whose embedded preview carries an HDR gain map decodes exactly
+      // like any other RAW (the master is the linear render); the map only
+      // feeds view-time presentation.
+      hasGainmap: '*',
     },
     action: {
       decodeChannel: 'libraw',

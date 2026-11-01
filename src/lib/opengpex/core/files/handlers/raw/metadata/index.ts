@@ -42,7 +42,11 @@ import { extractRawExif } from './exif';
 import {
   readDngProfileName,
   detectTransfer,
+  extractDngPreviewJpeg,
+  parseDngLinearizationData,
+  parseDngRenderFacts,
 } from './dng';
+import { extractIsoGainMapCarrier, extractJpegGainMapCarrier } from '../../jpeg/gainmap';
 
 export { resolveRawIccBytes } from './icc';
 export {
@@ -55,6 +59,9 @@ export {
   parseDngProfileToneCurve,
   parseDngHueSatMap,
   parseDngLookTable,
+  // The camera color-profile block feeds the render-side color math
+  // (engine/color/dng-spec): pure data, one interface away from TIFF bytes.
+  parseDngCameraProfileData,
   DNG_TAG_PROFILE_NAME,
   DNG_TAG_PROFILE_TONE_CURVE,
   DNG_TAG_HUE_SAT_MAP_DIMS,
@@ -62,10 +69,16 @@ export {
   DNG_TAG_HUE_SAT_MAP_DATA2,
   DNG_TAG_LOOK_TABLE_DIMS,
   DNG_TAG_LOOK_TABLE_DATA,
+  DNG_TAG_COLOR_MATRIX_1,
+  DNG_TAG_COLOR_MATRIX_2,
+  DNG_TAG_AS_SHOT_NEUTRAL,
+  DNG_TAG_FORWARD_MATRIX_1,
+  DNG_TAG_FORWARD_MATRIX_2,
   type DngToneCurvePoint,
   type DngTableDims,
   type DngHueSatMap,
   type DngLookTable,
+  type DngCameraProfileData,
 } from './dng';
 
 /**
@@ -243,17 +256,66 @@ export async function extractRawMetadata(file: File): Promise<ImageMetadata> {
     const exifBytes = extractRawExif(fileBytes);
     if (exifBytes) meta.raw.exif = iccToBase64(exifBytes);
 
+    // ── HDR gain map from the DNG's embedded preview ──
+    // The raw data and camera profile describe an SDR render; the writer's
+    // HDR intent, when present, is an ISO 21496-1 gain map inside the IFD0
+    // preview JPEG. The map is a per-pixel log2 ratio over an SDR base that
+    // agrees with the calibrated render to within a few 8-bit levels, so it
+    // presents over our own master exactly like a JPEG/HEIC carrier. It is in
+    // stored-sensor (file) space — the runtime applies capture.orientation —
+    // and only attached when the preview frames the same region as the render
+    // (same aspect as the default crop / active area).
+    const preview = extractDngPreviewJpeg(fileBytes);
+    const carrier = preview
+      ? (extractJpegGainMapCarrier(preview) ?? extractIsoGainMapCarrier(preview))
+      : null;
+    if (preview && carrier) {
+      const facts = parseDngRenderFacts(fileBytes);
+      const area = parseDngLinearizationData(fileBytes, 1).activeArea;
+      const ref = facts.defaultCrop
+        ?? (area ? { width: area[3] - area[1], height: area[2] - area[0] } : null);
+      const sof = readJpegDimensions(preview);
+      const aligned = !ref || !sof ||
+        Math.abs(sof.width / sof.height - ref.width / ref.height) < 0.01 * (ref.width / ref.height);
+      if (aligned) {
+        meta.raw.hasGainmap = true;
+        meta.raw.gainMap = {
+          mime: 'image/jpeg',
+          data: iccToBase64(carrier.gainBytes),
+          width: carrier.width,
+          height: carrier.height,
+          gainMin: carrier.params.gainMin,
+          gainMax: carrier.params.gainMax,
+          gamma: carrier.params.gamma,
+        };
+      }
+    }
+
     // ── DNG camera-profile colour tables: parsed, NOT stored ──
-    // ProfileToneCurve / HueSatMap / LookTable were previously parsed into
-    // ImageMetadata on every import — with zero consumers anywhere (probe
-    // 2026-10-13 also showed ProRAW's ProfileToneCurve is near-identity; the
-    // Apple look lives in ProfileGainTableMap, which is deliberately not read:
-    // 3 MB per file). The parsers remain exported above for the future
-    // 'dng-profile' render-intent route; storage returns when a
-    // consumer exists. meta.raw.transfer above is the only retained seam.
+    // The render chain re-parses the profile from the source bytes at decode
+    // time; ImageMetadata keeps no copy of the (large) tables.
   } catch {
     // EXIF extraction failed — non-critical; keep the pre-detection defaults.
   }
 
   return meta;
+}
+
+/** Coded dimensions from a JPEG's SOF header, or null when unreadable. */
+function readJpegDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  let i = 2;
+  while (i + 9 <= bytes.length) {
+    if (bytes[i] !== 0xff) { i++; continue; }
+    const marker = bytes[i + 1];
+    if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd9) || marker === 0x01) { i += 2; continue; }
+    if (marker === 0xda) return null;
+    const length = (bytes[i + 2] << 8) | bytes[i + 3];
+    if (marker >= 0xc0 && marker <= 0xc3 && length >= 8) {
+      const height = (bytes[i + 5] << 8) | bytes[i + 6];
+      const width = (bytes[i + 7] << 8) | bytes[i + 8];
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
+    i += 2 + length;
+  }
+  return null;
 }

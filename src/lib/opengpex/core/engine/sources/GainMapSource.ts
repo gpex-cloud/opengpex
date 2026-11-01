@@ -22,7 +22,7 @@
  * by asset id. The presentation-side sibling of `HighDepthTextureCache`: where
  * that holds the resident f16 master pixels, this holds the low-resolution
  * log2 gain map the view pass samples to reconstruct the HDR rendition
- * (`engine/color/gainMap.ts` owns the math; the engine uploads the map to an
+ * (`engine/color/hdr/gainMap.ts` owns the math; the engine uploads the map to an
  * r8unorm texture when a gain-eligible frame presents).
  *
  * The map is deliberately NOT persisted with the asset: it is presentation

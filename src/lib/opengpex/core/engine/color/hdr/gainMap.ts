@@ -57,7 +57,7 @@
  * @module core/engine/color/gainMap
  */
 
-import type { GainMapSource } from '../sources/GainMapSource';
+import type { GainMapSource } from '../../sources/GainMapSource';
 
 /** Straight linear values at or below this are black for ratio purposes: the
  * log2 ratio diverges at 0 and both renditions are (near-)identical there, so

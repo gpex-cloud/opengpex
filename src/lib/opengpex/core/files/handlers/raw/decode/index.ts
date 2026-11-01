@@ -31,9 +31,10 @@
  */
 
 import type { WorkingColorSpace, GamutId } from '@opengpex/editor/core/types';
-import type { DecodedPayload, ImageMetadata } from '../../types';
-import type { IngestDecision } from '../../strategy';
-import { convertRawToBlob } from './libraw';
+import type { DecodedPayload, ImageMetadata } from '../../../types';
+import type { IngestDecision } from '../../../strategy';
+import { convertRawToBlob } from '../libraw';
+import { decodeDngFirstPrinciples, decodeDngHybrid, isDngFirstPrinciplesCandidate } from './dng';
 
 /**
  * Map the authoritative source gamut → LibRaw `-o` output-colour enum (defect B).
@@ -62,10 +63,17 @@ export function librawOutputColorFor(gamut: GamutId): number {
 
 /**
  * Decode a Camera RAW file by executing the entry-resolved ingest decision.
+ *
+ * DNG sub-routing: a DNG whose camera color profile is complete enough for a
+ * first-principles render (ColorMatrix1 present) renders through the DNG
+ * specification color chain (`./dng.ts`) — pixels land in the working space
+ * and the GPU does no gamut fold and no filmic pass. Everything else (non-DNG
+ * RAW, profile-less DNG, and any first-principles failure) falls through to
+ * the legacy strategy-driven chain below, unchanged.
  */
 export async function decodeRaw(
   file: File,
-  _metadata: ImageMetadata,
+  metadata: ImageMetadata,
   decision: IngestDecision,
 ): Promise<DecodedPayload[]> {
   if (decision.decodeChannel !== 'libraw') {
@@ -74,6 +82,30 @@ export async function decodeRaw(
     throw new Error(`decodeRaw: unexpected decodeChannel '${decision.decodeChannel}'`);
   }
 
+  if (isDngFirstPrinciplesCandidate(file)) {
+    try {
+      return await decodeDngFirstPrinciples(file, decision);
+    } catch (error) {
+      // The calibrated chain must never take a DNG import down: it degrades
+      // to the hybrid chain, then to the legacy chain.
+      console.warn('[RawHandler] DNG calibrated decode failed, trying hybrid', error);
+    }
+    try {
+      return await decodeDngHybrid(file, decision);
+    } catch (error) {
+      console.error('[RawHandler] DNG hybrid decode failed, falling back', error);
+    }
+  }
+
+  return decodeRawLegacy(file, metadata, decision);
+}
+
+/** The legacy strategy-driven chain (the shipped v1 DNG/RAW behaviour). */
+async function decodeRawLegacy(
+  file: File,
+  _metadata: ImageMetadata,
+  decision: IngestDecision,
+): Promise<DecodedPayload[]> {
   const gamut = decision.colorIdentity.gamut;
   const isWideGamut8 = gamut === 'adobe-rgb' || gamut === 'prophoto-rgb';
 

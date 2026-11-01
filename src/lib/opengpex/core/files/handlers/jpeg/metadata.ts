@@ -22,7 +22,7 @@ import ExifReader from 'exifreader';
 import type { ImageMetadata } from '../../types';
 import { iccToBase64, parseIccProfileName, inferColorSpaceFromIcc } from '../../shared/icc';
 import { extractJpegExif, extractJpegIcc } from './jfif';
-import { extractJpegGainMapCarrier } from './gainmap';
+import { extractJpegGainMapCarrier, extractIsoGainMapCarrier } from './gainmap';
 import { parseDateToISO } from '../../utils';
 
 /**
@@ -156,7 +156,11 @@ export async function extractJpegMetadata(file: File): Promise<ImageMetadata> {
   // `raw.gainMap` — a ~140 KB browser-decodable JPEG on real carriers, so the
   // runtime (`FileService.decodeGainMap` → createImageBitmap) never touches
   // the source blob. Pure byte surgery: no raster decode here.
-  const carrier = extractJpegGainMapCarrier(bytes);
+  // The ISO 21496-1-only form (MPF + ISO APP2 in the gain image, no
+  // GContainer XMP) is consulted ONLY when the GContainer reader finds
+  // nothing, so every file the GContainer path already accepts keeps its
+  // exact carrier and parameters.
+  const carrier = extractJpegGainMapCarrier(bytes) ?? extractIsoGainMapCarrier(bytes);
   if (carrier) {
     meta.raw.hasGainmap = true;
     meta.raw.gainMap = {

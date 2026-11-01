@@ -19,7 +19,7 @@
  */
 
 import type { WorkingColorSpace } from '@opengpex/editor/core/types';
-import type { RawImageData, LibRawSettings } from 'libraw-wasm';
+import type { RawImageData, RawSensorData, LibRawSettings } from 'libraw-wasm';
 import {
   getConversionMatrix,
   linearFloatToFloat16,
@@ -33,7 +33,7 @@ import {
   clampFilmicWhiteDomain,
   FILMIC_WHITE_DOMAIN,
 } from '@opengpex/editor/core/engine/color/filmic';
-import { applyGainTableMapF32, gainTableMapCentreCoords, gainTableMapGainAt, gainTableMapInput } from './gainTableMap';
+import { applyGainTableMapF32, gainTableMapCentreCoords, gainTableMapGainAt, gainTableMapInput } from '@opengpex/editor/core/engine/color/raw/gainTableMap';
 import { parseDngBaselineExposure, parseDngGainTableMap, type DngGainTableMap } from './metadata/dng';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -43,8 +43,11 @@ import { parseDngBaselineExposure, parseDngGainTableMap, type DngGainTableMap } 
 /**
  * Thin wrapper around libraw-worker.js Worker.
  * Serializes calls and handles Worker lifecycle.
+ * Exported for the DNG first-principles pipeline (decode/dng.ts), which drives
+ * the worker directly with `-o 0` (no color matrix) instead of the strategy
+ * color triple below.
  */
-class LibRaw {
+export class LibRaw {
   private worker: Worker;
   private pending: Map<number, { resolve: (val: unknown) => void; reject: (err: Error) => void }>;
   private nextId: number = 0;
@@ -109,6 +112,14 @@ class LibRaw {
 
   async imageData(): Promise<RawImageData | undefined> {
     return (await this.runFn('imageData')) as RawImageData | undefined;
+  }
+
+  /**
+   * The raw sensor frame before any processing — bit-exact sensor samples for
+   * CFA files; undefined for already-demosaiced linear files.
+   */
+  async rawImageData(): Promise<RawSensorData | undefined> {
+    return (await this.runFn('rawImageData')) as RawSensorData | undefined;
   }
 }
 

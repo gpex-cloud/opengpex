@@ -19,7 +19,7 @@
 
 'use client';
 
-import React, { useRef, useEffect, useLayoutEffect } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState } from 'react';
 import type { Frame, CameraState } from '@opengpex/editor/core/types';
 import { PERF_MON } from '@opengpex/editor/core/helpers/config';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
@@ -92,7 +92,29 @@ export default function CanvasStage() {
   // view variant) — it never touches pixel data. Re-running the layout effect
   // on this value makes the GpuDevice reconfigure (format + toneMapping)
   // before the next ticker frame.
-  const hdrPresentation = activeFrame ? activeFrame.hdrRender === true : false;
+  const hdrRequested = activeFrame ? activeFrame.hdrRender === true : false;
+
+  // Surface HDR lags the switch on the way OFF: the gain first eases back to
+  // the SDR base on the still-HDR surface (the dim mirrors the reveal), then
+  // the surface reconfigures — switching the surface first would clip the
+  // highlights in one frame. A frame change or a re-enable mid-dim applies
+  // immediately.
+  const [hdrPresentation, setHdrPresentation] = useState(hdrRequested);
+  const dimFrameRef = useRef(activeFrame?.id);
+  useEffect(() => {
+    const sameFrame = dimFrameRef.current === activeFrame?.id;
+    dimFrameRef.current = activeFrame?.id;
+    if (hdrRequested || !sameFrame || !gpuEngine.isReady()) {
+      gpuEngine.gainPresenter.cancelDim();
+      setHdrPresentation(hdrRequested);
+      return;
+    }
+    let live = true;
+    void gpuEngine.gainPresenter.beginDim().then(() => {
+      if (live) setHdrPresentation(false);
+    });
+    return () => { live = false; };
+  }, [gpuEngine, activeFrame?.id, hdrRequested]);
 
   // ─── WebGPU Canvas Mount & Surface Configuration ───
   // The swapchain gamut is NOT passed: it is a hard invariant (WORKING_GAMUT,
