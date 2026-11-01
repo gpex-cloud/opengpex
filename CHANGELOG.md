@@ -2,6 +2,10 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.41
+
+- Image Formats: on the hosted editor, creating a new image and every other 16-bit lane (TIFF and 16-bit PNG import, 16-bit export) work again — the image engine's worker was being blocked by a missing security header since 2.0.24
+
 ## 2.0.40
 
 - Workspace: new Create Image command (both on the welcome page and in the main menu) — start from a blank canvas instead of an existing file, choosing a size preset or custom dimensions, background, colour profile and bit depth; new documents are created as PNG, a lossless container, so nothing is degraded before you start editing
