@@ -61,7 +61,6 @@ import type { EditorContextValue, EditorCommand } from '@opengpex/editor/core/ty
 import type { WorkerProgress } from '../inference/types';
 import type { AIToolStore } from './createAIToolStore';
 import type { ModelEntry, ModelCatalog } from '../types';
-import { SpeedEstimator } from '../download';
 import { cleanupPartialModelCache } from '../download/model-cache';
 import { getActiveModelEntry } from '../useToolConfig';
 
@@ -307,13 +306,12 @@ export function createToolCommand<
         }
       }
 
-      // ── Setup abort + speed estimator ────────────────────────────────────
+      // ── Setup abort ──────────────────────────────────────────────────────
 
       const abortController = new AbortController();
       setAbortController(store, abortController);
       const { signal } = abortController;
 
-      const speedEstimator = new SpeedEstimator();
       const inferenceStart = performance.now();
 
       // ── Progress handler ─────────────────────────────────────────────────
@@ -327,24 +325,6 @@ export function createToolCommand<
             break;
           case 'loading':
             store.setState({ task: { message: 'Loading model...', progress: 0, device: null } });
-            break;
-          case 'downloading':
-            if (progress.loaded != null && progress.total != null) {
-              speedEstimator.update(progress.loaded, progress.total);
-              const dlProgress = progress.total > 0 ? progress.loaded / progress.total : 0;
-              store.setState({
-                task: {
-                  message: 'Downloading...',
-                  progress: dlProgress,
-                  device: null,
-                  download: {
-                    loaded: progress.loaded,
-                    total: progress.total,
-                    speedBps: speedEstimator.bytesPerSecond,
-                  },
-                },
-              });
-            }
             break;
           case 'processing':
             store.setState({

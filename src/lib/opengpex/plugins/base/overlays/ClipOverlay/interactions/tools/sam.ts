@@ -167,7 +167,11 @@ export const createSamHandler = (): InteractionHandler => {
         // executeCommand returns the result synchronously (the Promise itself)
         const encResult = await encodeResult;
         if (!encResult || !encResult.success) {
-          e.actions.setInteraction({ hud: { message: 'Segmentation encode failed', type: 'error' } });
+          // User-cancelled download was already reported (info HUD by the
+          // download boundary) — stay silent instead of stacking a failure.
+          if (!encResult?.cancelled) {
+            e.actions.setInteraction({ hud: { message: 'Segmentation encode failed', type: 'error' } });
+          }
           return;
         }
 
@@ -221,7 +225,10 @@ export const createSamHandler = (): InteractionHandler => {
 
         const decResult = await decodeResult;
         if (!decResult || !decResult.success) {
-          e.actions.setInteraction({ hud: { message: 'Segmentation decode failed', type: 'error' } });
+          // Same benign-cancellation contract as the encode path above.
+          if (!decResult?.cancelled) {
+            e.actions.setInteraction({ hud: { message: 'Segmentation decode failed', type: 'error' } });
+          }
           return;
         }
 

@@ -36,6 +36,7 @@
 import type { SegRequest, SegProgress, SegResult, SegError, SegPrompt } from './worker.types';
 import { TransformersSession } from '../_shared/inference/tfm-session';
 import { traceMaskRings } from '../_shared/maskRings';
+import { CACHE_NAME, getCacheUrl } from '../_shared/download/model-cache';
 
 // ─── Local Type Interfaces (for CDN-loaded transformers.js module) ───────────
 
@@ -94,24 +95,37 @@ const MAX_CACHED_EMBEDDINGS = 3;
 
 // ─── Model Loading ───────────────────────────────────────────────────────────
 
+/**
+ * Verify every manifest file is present in Cache Storage. The worker must
+ * never download: model acquisition happens on the main thread through the
+ * download singleton, and a cache miss here means that contract was broken.
+ */
+async function assertModelCached(modelId: string, cacheFiles: string[]): Promise<void> {
+  if (!cacheFiles || cacheFiles.length === 0) {
+    throw new Error('Model cache manifest missing from request — model acquisition must run on the main thread first.');
+  }
+  const cache = await caches.open(CACHE_NAME);
+  for (const filename of cacheFiles) {
+    const hit = await cache.match(getCacheUrl(modelId, filename));
+    if (!hit) {
+      throw new Error(`Model file not cached: ${filename}. Download the model from the panel first.`);
+    }
+  }
+}
+
 async function ensureModel(
   modelId: string,
-  report: (p: Partial<SegProgress>) => void,
+  cacheFiles: string[] | undefined,
 ): Promise<void> {
   if (cachedModelId === modelId && session.getModel()) return;
 
-  report({ stage: 'detecting-device' });
+  await assertModelCached(modelId, cacheFiles ?? []);
 
   await session.load({
     backend: 'transformers',
     modelId,
     transformersMode: 'auto-model',
-    onDownloadProgress: (loaded, total, file) => {
-      report({ stage: 'downloading', loaded, total, file });
-    },
   });
-
-  report({ stage: 'detecting-device', device: session.device as 'webgpu' | 'wasm' });
 
   // Invalidate embeddings on model change
   if (cachedModelId !== modelId) {
@@ -449,8 +463,7 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
     post({
       type: 'progress',
       reqId,
-      stage: 'detecting-device',
-      device: (session.device === 'cpu' ? 'wasm' : session.device) as 'webgpu' | 'wasm' | undefined,
+      stage: 'encoding',
       ...partial,
     } as SegProgress);
   };
@@ -459,22 +472,6 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
 
   try {
     switch (action) {
-      // ─── Download ──────────────────────────────────────────────────
-      case 'download': {
-        await ensureModel(modelId, report);
-        post({
-          type: 'result',
-          reqId,
-          action: 'download',
-          context: req.context ?? null,
-          debug: {
-            deviceUsed: session.device === 'cpu' ? 'wasm' : session.device,
-            totalMs: performance.now() - t0,
-          },
-        });
-        break;
-      }
-
       // ─── Encode ────────────────────────────────────────────────────
       case 'encode': {
         if (!req.imageData) {
@@ -482,7 +479,7 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
         }
         const assetId = req.context?.assetId ?? `anon_${reqId}`;
 
-        await ensureModel(modelId, report);
+        await ensureModel(modelId, req.cacheFiles);
         await encodeImage(req.imageData, assetId, report);
 
         post({
@@ -510,7 +507,7 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
           throw new Error('No embedding available. Run "encode" first.');
         }
 
-        await ensureModel(modelId, report);
+        await ensureModel(modelId, req.cacheFiles);
 
         const tDecode = performance.now();
         const masks = await decodeMask(decodeAssetId, req.prompts, report);
@@ -542,7 +539,7 @@ self.onmessage = async (ev: MessageEvent<SegRequest>) => {
         }
 
         const entry = embeddingCache.get(segAssetId)!;
-        await ensureModel(modelId, report);
+        await ensureModel(modelId, req.cacheFiles);
 
         report({ stage: 'decoding', progress: 0 });
 

@@ -2,6 +2,11 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.42
+
+- AI Tools: using the segmentation selection tool before its model is installed now downloads the model through the same progress panel as the model manager, and cancelling that download no longer reports an error
+- Color: Fill now respects the active selection in any mode, not only while the selection tool is active, and consumes the selection afterwards (one undo restores both); with no selection it fills the whole canvas instead of showing an error
+
 ## 2.0.41
 
 - Image Formats: on the hosted editor, creating a new image and every other 16-bit lane (TIFF and 16-bit PNG import, 16-bit export) work again — the image engine's worker was being blocked by a missing security header since 2.0.24

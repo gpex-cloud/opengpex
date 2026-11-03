@@ -33,7 +33,7 @@
  */
 
 import { downloadModel, INITIAL_DOWNLOAD_PROGRESS } from './model-download';
-import { deleteModelCache } from './model-cache';
+import { deleteModelCache, areFilesCached } from './model-cache';
 import type { ModelFile, DownloadProgress } from './model-download';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -216,4 +216,50 @@ export function clearDownloadTask(): void {
  */
 export function isDownloadActive(): boolean {
   return activeTask?.progress.stage === 'downloading';
+}
+
+/**
+ * Ensure a model is fully cached, downloading through the singleton if needed.
+ *
+ * This is the single entry point for lazy model acquisition (e.g. a canvas
+ * interaction that needs a model the user never downloaded explicitly).
+ * Downloads always flow through the singleton so every UI surface shows the
+ * same progress panel; workers only ever load from Cache Storage.
+ *
+ * Behavior:
+ *   - All files already cached → resolves immediately, no download task is
+ *     created (the UI never flashes a progress panel).
+ *   - Not cached → starts (or joins) the singleton download and resolves on
+ *     'done', rejecting on 'error' / 'cancelled'.
+ *   - Another model's download is active → rejects instead of cancelling the
+ *     user's in-flight download (same-model joins are fine).
+ */
+export async function ensureModelDownloaded(modelId: string, files: ModelFile[]): Promise<void> {
+  const filenames = files.map(f => f.filename);
+  if (await areFilesCached(modelId, filenames)) return;
+
+  const active = getActiveDownload();
+  if (active && active.modelId !== modelId && active.progress.stage === 'downloading') {
+    throw new Error('Another model download is in progress. Wait for it to finish or cancel it first.');
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const unsubscribe = subscribeDownload((task) => {
+      if (!task || task.modelId !== modelId) return;
+      if (task.progress.stage === 'done') {
+        unsubscribe();
+        resolve();
+      } else if (task.progress.stage === 'error') {
+        unsubscribe();
+        reject(new Error(task.progress.error ?? 'Download failed'));
+      } else if (task.progress.stage === 'cancelled') {
+        unsubscribe();
+        reject(new DOMException('Download cancelled', 'AbortError'));
+      }
+    });
+    // Join an already-running download for the same model; otherwise start one.
+    if (!(active && active.modelId === modelId && active.progress.stage === 'downloading')) {
+      startDownload(modelId, files);
+    }
+  });
 }

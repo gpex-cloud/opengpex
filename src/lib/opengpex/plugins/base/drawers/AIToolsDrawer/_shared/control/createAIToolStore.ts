@@ -45,12 +45,6 @@ export interface AIToolTask {
   progress: number;
   /** Detected device */
   device: 'webgpu' | 'wasm' | null;
-  /** Download details (downloading phase only) */
-  download?: {
-    loaded: number;
-    total: number;
-    speedBps: number;
-  };
 }
 
 /**

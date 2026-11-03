@@ -120,17 +120,16 @@ export const COLOR_OPTIONS_COMMANDS = {
       // opacity, not the colour value (Photoshop semantics — the foreground
       // colour has no alpha channel).
       const fillColor: ColorValue = { ...pickedColor, alpha: 1 };
-      const isClipMode = state.interaction.interactionMode === 'clip';
+      // The selection is a document-level entity (frame.confinement) that
+      // outlives the clip tool: like every consumer of `getClipBox`, fill
+      // honors it whenever it exists, regardless of which interaction mode
+      // is currently active. Only a degenerate (zero-area) polygon is an
+      // error; its absence simply means "fill the whole canvas".
+      const box = getClipBox(activeFrame);
       let w: number, h: number, box_cx: number, box_cy: number;
       let visibleShape: LocalShape;
 
-      if (isClipMode) {
-        const box = getClipBox(activeFrame);
-        if (!box) {
-          actions.setInteraction({ hud: { message: 'No active selection — draw a clip box first.', type: 'error' } });
-          return;
-        }
-
+      if (box) {
         {
           // ═══ All selections are now LocalPolygon ═══
           const bounds = box.rect;
@@ -206,10 +205,20 @@ export const COLOR_OPTIONS_COMMANDS = {
       layers.addLayer(activeFrame.id, newLayer);
       actions.setActiveLayer(activeFrame.id, newLayer.id);
 
+      // A fill consumes the selection: clear it in the same undo step as the
+      // fill itself (both writes sit under this command's checkpoint), so ⌘Z
+      // restores the pre-fill state with the selection intact. This holds
+      // regardless of which mode the fill was invoked from — the selection is
+      // a document-level entity and fill is a completed, selection-consuming
+      // action.
+      actions.updateFrame(activeFrame.id, { confinement: null });
+
       // A fill is a completed action: leave whichever transient mode was live
-      // (clip box consumed by the fill, or the colour sampler the fill was
-      // invoked from) instead of stranding the user in it.
-      if (isClipMode || state.interaction.interactionMode === 'sample') {
+      // (the clip tool or the colour sampler) instead of stranding the user in
+      // it. A selection that merely PERSISTS while another tool is active is
+      // not a mode — it stays in place for further operations, matching how
+      // every other confinement consumer treats it.
+      if (state.interaction.interactionMode === 'clip' || state.interaction.interactionMode === 'sample') {
         actions.setInteraction({ interactionMode: 'pan' });
       }
       if (state.interaction.interactionMode === 'sample') {

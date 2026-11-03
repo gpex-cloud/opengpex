@@ -63,22 +63,6 @@ function deriveDtype(onnxFile?: string): string {
   return 'fp32';
 }
 
-/**
- * Check if a model's files exist in browser Cache Storage.
- * Used to suppress download progress reporting for cached models.
- */
-async function isModelInCacheStorage(modelId: string): Promise<boolean> {
-  try {
-    const cache = await caches.open('opengpex-ai-models');
-    const keys = await cache.keys();
-    return keys.some(req =>
-      req.url.includes(modelId) || req.url.includes(modelId.replace('/', '%2F'))
-    );
-  } catch {
-    return false;
-  }
-}
-
 // ─── Session Introspection ───────────────────────────────────────────────────
 
 /**
@@ -158,8 +142,7 @@ function getSessionOutputNames(model: any): string[] {
  * ```ts
  * const session = new TransformersSession();
  * await session.load({ backend: 'transformers', modelId, onnxFile,
- *   transformersMode: 'auto-model',
- *   onDownloadProgress: (loaded, total) => reportProgress(loaded, total) });
+ *   transformersMode: 'auto-model' });
  * const output = await session.run({ type: 'image', data: rgbaUint8, width, height });
  * // output.type === 'tensor' — raw model output (logits)
  * ```
@@ -319,10 +302,12 @@ export class TransformersSession implements InferenceSession {
 
   /**
    * Load model using AutoModel + AutoProcessor.
-   * Includes: progress_callback, isModelInCacheStorage pre-check, WebGPU→WASM fallback.
+   * Includes: WebGPU→WASM fallback. Model files are read from Cache Storage
+   * (env.cacheKey matches the download singleton's bucket); network fetching
+   * is not part of this contract — acquisition happens on the main thread.
    */
   private async loadAutoModel(config: InferenceArgs): Promise<void> {
-    const { modelId, onnxFile, onDownloadProgress } = config;
+    const { modelId, onnxFile } = config;
     const { AutoModel, AutoProcessor, env } = this.transformers;
 
     // Configure cache — MUST match the cache name used by download service
@@ -330,24 +315,6 @@ export class TransformersSession implements InferenceSession {
     env.logLevel = 'error';
 
     const dtype = deriveDtype(onnxFile);
-
-    // Pre-check cache to suppress false download reports
-    const modelAlreadyCached = await isModelInCacheStorage(modelId);
-
-    // Build progress callback (only fires download reports if model is NOT cached)
-    let hasRealDownload = false;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const progressCallback = onDownloadProgress ? (progress: any) => {
-      if (modelAlreadyCached) return;
-      if (progress.status === 'download') hasRealDownload = true;
-      if (hasRealDownload && (progress.status === 'progress' || progress.status === 'download')) {
-        const loaded = progress.loaded ?? 0;
-        const total = progress.total ?? 0;
-        if (total > 0) {
-          onDownloadProgress(loaded, total, progress.file);
-        }
-      }
-    } : undefined;
 
     // Load processor (lightweight)
     this.autoProcessor = await AutoProcessor.from_pretrained(modelId);
@@ -357,7 +324,6 @@ export class TransformersSession implements InferenceSession {
       AutoModel.from_pretrained(modelId, {
         device: targetDevice,
         dtype,
-        ...(progressCallback ? { progress_callback: progressCallback } : {}),
       });
 
     if (this.device === 'webgpu') {

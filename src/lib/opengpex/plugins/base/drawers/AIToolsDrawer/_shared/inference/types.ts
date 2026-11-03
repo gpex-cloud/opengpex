@@ -65,20 +65,17 @@ export interface WorkerRequest {
  * WorkerProgress — Base progress message sent from any AI tool worker.
  *
  * Workers send multiple progress messages during a single request lifecycle:
- *   detecting-device → loading → downloading → processing
+ *   loading → detecting-device → processing
+ *
+ * Model download never happens in a worker — acquisition runs on the main
+ * thread through the download singleton, so there is no 'downloading' stage.
  */
 export interface WorkerProgress {
   type: 'progress';
   reqId: number;
-  stage: 'detecting-device' | 'loading' | 'downloading' | 'processing';
+  stage: 'detecting-device' | 'loading' | 'processing';
   /** Device detected (only set after device detection). */
   device?: 'webgpu' | 'wasm';
-  /** Current file being downloaded (only during 'downloading'). */
-  file?: string;
-  /** Download progress: bytes loaded so far. */
-  loaded?: number;
-  /** Download progress: total bytes expected. */
-  total?: number;
   /** Processing progress 0-1 (only during 'processing'). */
   progress?: number;
 }
@@ -142,12 +139,6 @@ export interface InferenceArgs {
    *     — returns raw tensor output (logits), caller does own post-processing
    */
   transformersMode?: 'pipeline' | 'auto-model';
-  /**
-   * Optional callback for reporting model download progress.
-   * Fired during `load()` when model files are fetched from the network.
-   * Only effective for transformers backend.
-   */
-  onDownloadProgress?: (loaded: number, total: number, file?: string) => void;
   /** Additional ORT-specific options. */
   ortOptions?: {
     /** Expected input data type. Auto-detected if not specified. */

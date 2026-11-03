@@ -42,6 +42,7 @@ export {
   cancelDownload,
   clearDownloadTask,
   isDownloadActive,
+  ensureModelDownloaded,
   initBusySync,
 } from './downloader';
 export type { DownloadTask, DownloadListener } from './downloader';

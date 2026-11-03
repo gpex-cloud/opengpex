@@ -22,6 +22,7 @@
 import { EditorContextValue, EditorCommand, asLocalPoint, asLocalPolygon, asLocalRect } from '@opengpex/editor/core/types';
 import { segClient } from './client';
 import { getActiveModelEntry } from '../_shared/useToolConfig';
+import { ensureModelDownloaded } from '../_shared/download';
 import type { SegEncodePayload, SegEncodeResult, SegDecodePayload, SegDecodeResult, SegModelEntry } from './protocols';
 import {
   BUILTIN_SEG_MODELS,
@@ -29,6 +30,7 @@ import {
   CMD_SEG_ENCODE,
   CMD_SEG_DECODE,
   CMD_SEG_ALL,
+  getSegModelFiles,
 } from './protocols';
 import { segStore } from './store';
 
@@ -75,12 +77,64 @@ export function abortSegmentation(): void {
 }
 
 /**
- * Helper: Get the active segmentation model ID from plugin config.
+ * Helper: Resolve the active segmentation model entry from plugin config.
  * Uses the shared getActiveModelEntry utility.
  */
-function getActiveSegModelId(ctx: EditorContextValue): string {
-  const entry = getActiveModelEntry<SegModelEntry>(ctx, 'seg', DEFAULT_SEG_CONFIG, BUILTIN_SEG_MODELS);
-  return entry.modelId;
+function getActiveSegModelEntry(ctx: EditorContextValue): SegModelEntry {
+  return getActiveModelEntry<SegModelEntry>(ctx, 'seg', DEFAULT_SEG_CONFIG, BUILTIN_SEG_MODELS);
+}
+
+/**
+ * Filenames the worker requires to be present in Cache Storage before it will
+ * load a model. The worker refuses to touch the network, so every model
+ * acquisition must go through ensureModelDownloaded (the download singleton)
+ * on the main thread.
+ */
+function segCacheFilenames(entry: SegModelEntry): string[] {
+  return getSegModelFiles(entry).map(f => f.filename);
+}
+
+/**
+ * Ensure the active segmentation model is cached, downloading through the
+ * shared singleton when missing.
+ *
+ * This is the single boundary that owns model-acquisition terminal semantics
+ * (mirroring useModelManager on the panel path): cancellation is NOT an error —
+ * it just clears the task state and reports an info HUD — while real failures
+ * land in the store error card. The returned outcome distinguishes cancelled
+ * from failed so callers can stay silent after a user cancel.
+ */
+/**
+ * Outcome of model acquisition. Cancelled and failed are distinct so callers
+ * can stay silent after a user cancel (the boundary already reported it)
+ * while still surfacing real failures.
+ */
+type SegModelReady =
+  | { status: 'ready'; modelId: string; cacheFiles: string[] }
+  | { status: 'cancelled' }
+  | { status: 'failed'; error: string };
+
+async function ensureSegModelReady(ctx: EditorContextValue): Promise<SegModelReady> {
+  const entry = getActiveSegModelEntry(ctx);
+  const modelId = entry.modelId;
+  const cacheFiles = segCacheFilenames(entry);
+  try {
+    await ensureModelDownloaded(modelId, getSegModelFiles(entry));
+  } catch (err) {
+    const cancelled = err instanceof DOMException
+      ? err.name === 'AbortError'
+      : err instanceof Error && err.name === 'AbortError';
+    if (cancelled) {
+      segStore.setState({ task: null, error: null });
+      ctx.actions.setInteraction({ hud: { message: 'Download cancelled', type: 'info' } });
+      return { status: 'cancelled' };
+    }
+    const error = err instanceof Error ? err.message : String(err);
+    segStore.setState({ task: null, error });
+    ctx.actions.setInteraction({ hud: { message: 'Model download failed — see error in panel', type: 'error' } });
+    return { status: 'failed', error };
+  }
+  return { status: 'ready', modelId, cacheFiles };
 }
 
 /**
@@ -116,11 +170,20 @@ export const SEG_COMMANDS = {
     name: 'SAM Encode Image',
     execute: async (ctx: EditorContextValue, payload: SegEncodePayload): Promise<SegEncodeResult> => {
       const { imageData, context } = payload;
-      const modelId = getActiveSegModelId(ctx);
 
       if (currentEmbeddingAssetId === context.assetId) {
         return { success: true };
       }
+
+      // Model acquisition — downloads flow through the shared singleton
+      // (DownloadPanel UI); the worker itself only ever reads Cache Storage.
+      const ready = await ensureSegModelReady(ctx);
+      if (ready.status !== 'ready') {
+        return ready.status === 'cancelled'
+          ? { success: false, cancelled: true }
+          : { success: false, error: ready.error };
+      }
+      const { modelId, cacheFiles } = ready;
 
       // Start — synchronous write to store
       segStore.setState({
@@ -132,6 +195,7 @@ export const SEG_COMMANDS = {
         await segClient.run({
           action: 'encode',
           modelId,
+          cacheFiles,
           imageData: {
             data: imageData.data,
             width: imageData.width,
@@ -141,29 +205,7 @@ export const SEG_COMMANDS = {
         }, {
           timeoutMs: 0,
           onProgress: (p) => {
-            if (p.stage === 'downloading') {
-              const dlProgress = (p.loaded && p.total) ? p.loaded / p.total : 0;
-              // Only show "Downloading..." with download details when actually fetching
-              // from network (total > 0 implies real network transfer).
-              // Otherwise stay with "Loading model..." (loading from cache).
-              const isRealDownload = p.total != null && p.total > 0;
-              segStore.setState({
-                task: {
-                  message: isRealDownload ? 'Downloading...' : 'Loading model...',
-                  progress: dlProgress,
-                  device: p.device ?? null,
-                  download: isRealDownload ? {
-                    loaded: p.loaded!,
-                    total: p.total!,
-                    speedBps: 0,
-                  } : undefined,
-                },
-              });
-            } else if (p.stage === 'detecting-device' && p.device) {
-              segStore.setState({
-                task: { message: 'Loading model...', progress: 0, device: p.device },
-              });
-            } else if (p.stage === 'encoding') {
+            if (p.stage === 'encoding') {
               segStore.setState({
                 task: { message: 'Analyzing image...', progress: p.progress ?? 0, device: null },
               });
@@ -195,7 +237,6 @@ export const SEG_COMMANDS = {
     name: 'SAM Decode Prompts',
     execute: async (ctx: EditorContextValue, payload: SegDecodePayload): Promise<SegDecodeResult> => {
       const { prompts, context } = payload;
-      const modelId = getActiveSegModelId(ctx);
 
       if (currentEmbeddingAssetId !== context.assetId) {
         return {
@@ -203,6 +244,14 @@ export const SEG_COMMANDS = {
           error: `No embedding cached for asset "${context.assetId}". Call segEncode first.`,
         };
       }
+
+      const ready = await ensureSegModelReady(ctx);
+      if (ready.status !== 'ready') {
+        return ready.status === 'cancelled'
+          ? { success: false, cancelled: true }
+          : { success: false, error: ready.error };
+      }
+      const { modelId, cacheFiles } = ready;
 
       // Start decoding — synchronous write to store
       segStore.setState({
@@ -213,6 +262,7 @@ export const SEG_COMMANDS = {
         const result = await segClient.run({
           action: 'decode',
           modelId,
+          cacheFiles,
           prompts,
           context,
         });
@@ -255,7 +305,6 @@ export const SEG_COMMANDS = {
       const frameId = activeFrame.id;
       const layerId = activeLayer.id;
       const assetId = activeLayer.assetId ?? `layer_${layerId}`;
-      const modelId = getActiveSegModelId(ctx);
 
       let imageData: ImageData;
       try {
@@ -264,6 +313,11 @@ export const SEG_COMMANDS = {
         actions.setInteraction({ hud: { message: 'Failed to read image data', type: 'error' } });
         return;
       }
+
+      // Model acquisition — same singleton path as segEncode.
+      const ready = await ensureSegModelReady(ctx);
+      if (ready.status !== 'ready') return;
+      const { modelId, cacheFiles } = ready;
 
       // Start — synchronous write to store
       segStore.setState({
@@ -277,6 +331,7 @@ export const SEG_COMMANDS = {
           await segClient.run({
             action: 'encode',
             modelId,
+            cacheFiles,
             imageData: {
               data: imageData.data.buffer,
               width: imageData.width,
@@ -286,26 +341,7 @@ export const SEG_COMMANDS = {
           }, {
             timeoutMs: 0,
             onProgress: (p) => {
-              if (p.stage === 'downloading') {
-                const dlProgress = (p.loaded && p.total) ? p.loaded / p.total : 0;
-                const isRealDownload = p.total != null && p.total > 0;
-                segStore.setState({
-                  task: {
-                    message: isRealDownload ? 'Downloading...' : 'Loading model...',
-                    progress: dlProgress,
-                    device: p.device ?? null,
-                    download: isRealDownload ? {
-                      loaded: p.loaded!,
-                      total: p.total!,
-                      speedBps: 0,
-                    } : undefined,
-                  },
-                });
-              } else if (p.stage === 'detecting-device' && p.device) {
-                segStore.setState({
-                  task: { message: 'Loading model...', progress: 0, device: p.device },
-                });
-              } else if (p.stage === 'encoding') {
+              if (p.stage === 'encoding') {
                 segStore.setState({
                   task: { message: 'Analyzing image...', progress: p.progress ?? 0, device: null },
                 });
@@ -323,6 +359,7 @@ export const SEG_COMMANDS = {
         const result = await segClient.run({
           action: 'segment-all',
           modelId,
+          cacheFiles,
           context: { frameId, layerId, assetId },
         }, {
           timeoutMs: 0,

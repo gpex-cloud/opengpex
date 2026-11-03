@@ -22,7 +22,7 @@
  *
  * Encapsulates the common lifecycle shared by all AI tool workers:
  *   1. Session creation / reuse / backend switching
- *   2. Model loading with download progress reporting
+ *   2. Model loading (Cache Storage only — acquisition runs on the main thread)
  *   3. Device detection progress
  *   4. Processing progress reporting
  *   5. Error handling with session invalidation
@@ -65,9 +65,8 @@ export interface PipelineConfig<TReq extends WorkerRequest, TResultPayload> {
 
   /**
    * Build InferenceArgs for `session.load()` from the incoming request.
-   * The `onDownloadProgress` callback is injected by the orchestrator — do NOT set it here.
    */
-  loadArgs(req: TReq): Omit<InferenceArgs, 'onDownloadProgress'>;
+  loadArgs(req: TReq): InferenceArgs;
 
   /**
    * The tool-specific core logic: inference + post-processing.
@@ -143,19 +142,10 @@ export function createInference<TReq extends WorkerRequest, TResultPayload>(
         currentBackend = backend;
       }
 
-      // 2. Load model with download progress reporting
+      // 2. Load model (Cache Storage only — no network in workers)
       self.postMessage({ type: 'progress', reqId, stage: 'loading' });
 
-      const loadArgs = config.loadArgs(req);
-      await session.load({
-        ...loadArgs,
-        onDownloadProgress: (loaded: number, total: number, file?: string) => {
-          self.postMessage({
-            type: 'progress', reqId, stage: 'downloading',
-            device: req.device, file, loaded, total,
-          });
-        },
-      });
+      await session.load(config.loadArgs(req));
 
       // 3. Device detection
       const device: 'webgpu' | 'wasm' = session.device !== 'cpu'

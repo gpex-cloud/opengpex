@@ -179,6 +179,12 @@ export interface SegEncodePayload {
 export interface SegEncodeResult {
   success: boolean;
   error?: string;
+  /**
+   * True when the run aborted because the user cancelled a model download.
+   * Callers must treat this as benign (no failure HUD) — the download
+   * boundary already reported the cancellation.
+   */
+  cancelled?: boolean;
 }
 
 /** Payload for `CMD_SEG_DECODE` — decode prompts against a cached embedding. */
@@ -195,6 +201,8 @@ export interface SegDecodePayload {
 /** Result of `CMD_SEG_DECODE`. */
 export interface SegDecodeResult {
   success: boolean;
+  /** Same benign-cancellation contract as SegEncodeResult.cancelled. */
+  cancelled?: boolean;
   /** Up to 3 candidate masks sorted by score descending. */
   masks?: Array<{
     rings: { x: number; y: number }[][];

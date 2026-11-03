@@ -25,7 +25,6 @@
  * (`segmentation.worker.ts`).
  *
  * SAM 2.1 two-stage architecture:
- *   - 'download': Download model ONNX files to Cache Storage
  *   - 'encode': Run Image Encoder on a full image → cache embedding in Worker memory
  *   - 'decode': Run Mask Decoder with prompts → return polygon rings
  *   - 'segment-all': Auto mode — grid prompts + NMS → return all detected objects
@@ -51,15 +50,24 @@ export interface SegRequest {
 
   /**
    * Action type:
-   *   - 'download': Only download model to cache (no inference)
    *   - 'encode': Run Image Encoder → cache embedding
    *   - 'decode': Run Mask Decoder with prompts → polygon results
    *   - 'segment-all': Auto mode (grid prompts + NMS)
+   *
+   * Model download never happens in the worker — the main thread acquires
+   * models through the download singleton before sending any request.
    */
-  action: 'download' | 'encode' | 'decode' | 'segment-all';
+  action: 'encode' | 'decode' | 'segment-all';
 
   /** HuggingFace model ID or custom model identifier */
   modelId: string;
+
+  /**
+   * Cache manifest: filenames that must already exist in Cache Storage before
+   * the model may be loaded. The worker verifies the manifest and refuses to
+   * touch the network on a miss.
+   */
+  cacheFiles?: string[];
 
   /**
    * Image pixels for 'encode' action.
@@ -87,14 +95,8 @@ export interface SegRequest {
 export interface SegProgress {
   type: 'progress';
   reqId: number;
-  stage: 'detecting-device' | 'downloading' | 'encoding' | 'decoding' | 'post-processing';
-  /** Device detected (set after detection). */
-  device?: 'webgpu' | 'wasm';
-  /** Download progress fields (only during 'downloading'). */
-  file?: string;
-  loaded?: number;
-  total?: number;
-  /** General 0-1 progress (encoding/decoding). */
+  stage: 'encoding' | 'decoding' | 'post-processing';
+  /** General 0-1 progress. */
   progress?: number;
 }
 
@@ -103,7 +105,7 @@ export interface SegProgress {
 export interface SegResult {
   type: 'result';
   reqId: number;
-  action: 'download' | 'encode' | 'decode' | 'segment-all';
+  action: 'encode' | 'decode' | 'segment-all';
 
   /** 'encode' success flag. */
   embeddingReady?: boolean;
