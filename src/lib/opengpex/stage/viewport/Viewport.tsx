@@ -31,6 +31,7 @@ import { useViewportEvents } from "./useViewportEvents";
 import { useCameraInit } from "./useCameraInit";
 import CanvasBackdrop from "./CanvasBackdrop";
 import CanvasStage from "./CanvasStage";
+import { DeltaLabel } from "@opengpex/editor/widgets/DeltaLabel";
 
 import { Frame, AssetService } from "@opengpex/editor/core/types";
 import { sourceBitmapCache, getGpuEngine, GpuDevice } from "@opengpex/editor/core/engine";
@@ -220,6 +221,10 @@ function ViewportInner({ frame }: ViewportInnerProps) {
           className="absolute inset-0 pointer-events-none overflow-visible"
           style={{ zIndex: EDITOR_Z_INDEX.STAGE.GIZMOS }}
         />
+
+        {/* System-level gesture feedback: the single displacement/angle chip
+            fed by InteractionTransaction.declareFeedback declarations. */}
+        <DeltaLabel />
       </div>
     </div>
   );

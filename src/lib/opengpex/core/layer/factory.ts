@@ -26,7 +26,7 @@ import {
 /** Type-safe role configuration index helper */
 const roleConfigMap = LAYER_ROLE_CONFIGS as Record<string, { label: string; order: number; follow: boolean } | undefined>;
 
-const TRANSPARENT_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+export const TRANSPARENT_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
 /**
  * LayerFactory: Core business domain logic
@@ -319,7 +319,14 @@ export const LayerFactory = {
 
   /**
    * getTriplet: Identifies the peel triplet (Host/Exchange/Frags) a layer
-   * belongs to and its settlement state.
+   * belongs to.
+   *
+   * Pure STRUCTURE query — it deliberately reports nothing about session
+   * state. "Where is the peel session in its lifecycle" is declared by
+   * `frame.drafts['peel']` (see the ClipOverlay plugin's commands/session.ts);
+   * the old pixel sniffing here (`src !== TRANSPARENT_PIXEL`) was retired
+   * because one stale read of it could roll back a committed peel and
+   * destroy a permanent hole.
    *
    * `frags` lists ALL temporary stamp sub-layers in frame z-order (multiple
    * stamps accumulate across repeated Cmd+Alt drags within one peel session),
@@ -337,9 +344,7 @@ export const LayerFactory = {
 
     const frags = layers.filter(l => l.hostId === hostId && l.role === 'frag');
 
-    const state: 'clean' | 'dirty' = exchange.src !== TRANSPARENT_PIXEL && exchange.visible ? 'dirty' : 'clean';
-
-    return { host, exchange, frags, state };
+    return { host, exchange, frags };
   },
 
 

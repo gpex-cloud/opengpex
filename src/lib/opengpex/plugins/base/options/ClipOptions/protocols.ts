@@ -301,6 +301,10 @@ export const ClipOptionsAPI = {
     toggleMode: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_TOGGLE_MODE}` } as { uid: string; _payload: void },
     /** Escape — close Re-Canvas if open, else exit clip mode (discard peel) */
     exitClip: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_EXIT_CLIP_MODE}` } as { uid: string; _payload: void },
+    /** Enter — commit the undecided peel session (mode-agnostic) */
+    commitPeel: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_COMMIT_PEEL}` } as { uid: string; _payload: void },
+    /** Cmd+D — commit the undecided peel session, then clear (stays in mode) */
+    deselect: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_DESELECT}` } as { uid: string; _payload: void },
     /** Invert the active selection */
     invertSelection: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_INVERT_SELECTION}` } as { uid: string; _payload: void },
     /** Set crop tool */

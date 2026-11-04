@@ -49,9 +49,10 @@
 
 import type { InteractionHandler, LocalPolygon } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import { readPeelSession } from '../../peel/session';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import { ROTATE_CURSOR } from '@opengpex/editor/icons';
-import { ClipOptionsAPI } from '../../../options/ClipOptions/protocols';
+import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
 
 type ScaleMode = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w';
 type TransformMode = ScaleMode | 'rotate';
@@ -66,18 +67,27 @@ export const createSelectionTransformHandler = (): InteractionHandler => {
   // Anchor (scale) / center (rotate) in canvas-local coordinates.
   let anchorX = 0;
   let anchorY = 0;
-  // Bbox dims at gesture start — denominators for the scale factors.
+  // Rotated-box dims at gesture start — denominators for the scale factors.
   let startW = 0;
   let startH = 0;
+  // ─── Local-frame scale state (rotated selections) ────────────────────────
+  // The selection's orientation at gesture start (radians) and its rotated
+  // content-box centre. All scale math runs in this LOCAL frame: the box's
+  // own axes, so a rotated rectangle stays a rectangle under non-uniform
+  // scale (world-axis factors would shear it into a parallelogram). For an
+  // upright selection the local frame IS the world frame and every value
+  // below degenerates to the historical axis-aligned math, bitwise.
+  let startThetaRad = 0;
+  let startBoxCx = 0;
+  let startBoxCy = 0;
   // Pointer angle at gesture start (rotate mode).
   let startAngleRad = 0;
   // The selection's absolute orientation at gesture start (rotate mode),
-  // derived from the first edge of the outer ring. Shift snapping works on
-  // the ABSOLUTE angle (base + delta) so 0° — the un-rotated pose — always
-  // sits on the 15° grid and any rotated selection can be brought back
-  // upright. rotatePolygon preserves vertex order, so the first edge is a
-  // stable orientation probe for tool-drawn polygons.
-  let baseOrientationRad = 0;
+  // The selection's orientation record at gesture start (degrees): the
+  // anchor the Shift snap grid accumulates onto. No vertex probing — the
+  // record lives on the polygon (orientationDeg) and rotatePolygon
+  // accumulates it.
+  let startOrientationDeg = 0;
   // rAF coalescing: the latest transformed polygon waits here while a frame
   // is already scheduled; at most one store write per display frame.
   let pendingPoly: LocalPolygon | null = null;
@@ -118,6 +128,11 @@ export const createSelectionTransformHandler = (): InteractionHandler => {
       const inReCanvas = !!e.state.getStateSignal(ClipOptionsAPI.signals.reCanvas);
       if (!inClip || inReCanvas) return false;
 
+      // Session yield (finding 13): while a peel session is undecided, ALL
+      // selection-gizmo transforms belong to the session drive (priority 125
+      // above this handler); a plain selection edit must never race it.
+      if (readPeelSession(e.activeFrame)?.status === 'peeled') return false;
+
       const box = getClipBox(e.activeFrame);
       if (!box) return false;
 
@@ -147,79 +162,81 @@ export const createSelectionTransformHandler = (): InteractionHandler => {
       tx = new InteractionTransaction(e);
       tx.begin(false);
 
-      const rect = box.rect;
-      startW = Math.max(rect.w, MIN_DIMENSION_PX);
-      startH = Math.max(rect.h, MIN_DIMENSION_PX);
-
       if (mode === 'rotate') {
+        const rect = box.rect;
         anchorX = rect.x + rect.w / 2;
         anchorY = rect.y + rect.h / 2;
         startAngleRad = Math.atan2(e.point.canvas.y - anchorY, e.point.canvas.x - anchorX);
-        const ring = box.rings[0];
-        if (ring && ring.length >= 2) {
-          baseOrientationRad = Math.atan2(ring[1].y - ring[0].y, ring[1].x - ring[0].x);
-        } else {
-          baseOrientationRad = 0;
-        }
+        startOrientationDeg = box.orientationDeg ?? 0;
+        // Finding 14: the selection displays its own accumulated rotation
+        // (the chip reads the live orientationDeg record; see DeltaLabel).
+        tx.declareFeedback({ kind: 'rotate', target: 'frame', origin: { x: anchorX, y: anchorY } });
         e.actions.fast.cursor.notifyDragging(ROTATE_CURSOR);
+        return;
       }
+
+      // Scale gesture: measure the content box along the selection's OWN
+      // orientation through THE shared gizmo basis (plain + session solve
+      // the same way). For an upright selection this degenerates to the
+      // axis-aligned rect.
+      startThetaRad = ((box.orientationDeg ?? 0) * Math.PI) / 180;
+      const basis = e.geometry.polygon.measureGizmoResizeAnchor(box, startThetaRad, mode);
+      startBoxCx = basis.cx;
+      startBoxCy = basis.cy;
+      startW = Math.max(basis.w, MIN_DIMENSION_PX);
+      startH = Math.max(basis.h, MIN_DIMENSION_PX);
+      anchorX = basis.anchorX;
+      anchorY = basis.anchorY;
     },
 
     onMove: (e) => {
       if (!startPoly || !tx || !mode) return;
       const p = e.point.canvas;
-      const rect = startPoly.rect;
 
       let newPoly: LocalPolygon;
       if (mode === 'rotate') {
         const angle = Math.atan2(p.y - anchorY, p.x - anchorX) - startAngleRad;
         let deltaRad = angle;
         if ((e.nativeEvent as MouseEvent).shiftKey) {
-          // Shift snaps the ABSOLUTE orientation (base + delta) to 15° steps
-          // (PS Transform Selection): the un-rotated pose stays on the grid,
-          // so a rotated selection can always be brought back to it. Snapping
-          // the raw gesture delta instead would strand off-grid accumulated
-          // angles (e.g. 17° could never return to 0°).
-          const step = (15 * Math.PI) / 180;
-          const absolute = baseOrientationRad + angle;
-          deltaRad = Math.round(absolute / step) * step - baseOrientationRad;
+          // Shift snaps the ACCUMULATED orientation to 15° steps (PS
+          // Transform Selection): the grid anchors on the record from
+          // gesture start, so a rotated selection can always be brought
+          // back to upright (or any 15° multiple) exactly.
+          deltaRad = e.geometry.transform.snapRotationRad(angle, (startOrientationDeg * Math.PI) / 180);
         }
         newPoly = e.geometry.polygon.rotatePolygon(startPoly, { x: anchorX, y: anchorY }, deltaRad);
       } else {
-        // Corner drag: both axes scale, anchor = opposite corner.
-        // Edge drag: single axis scales, anchor = the OPPOSITE EDGE itself
-        // (fixed line) so only the grabbed side moves; the cross axis keeps
-        // s=1 so its anchor coordinate is irrelevant.
-        const isCorner = mode.length === 2;
-        const anchorRight = mode.includes('w');
-        const anchorBottom = mode.includes('n');
-        const ax = isCorner
-          ? (anchorRight ? rect.x + rect.w : rect.x)
-          : (mode === 'e' ? rect.x : mode === 'w' ? rect.x + rect.w : rect.x + rect.w / 2);
-        const ay = isCorner
-          ? (anchorBottom ? rect.y + rect.h : rect.y)
-          : (mode === 'n' ? rect.y + rect.h : mode === 's' ? rect.y : rect.y + rect.h / 2);
-        const cornerX = anchorRight ? rect.x : rect.x + rect.w;
-        const cornerY = anchorBottom ? rect.y : rect.y + rect.h;
-        const addressesX = isCorner || mode === 'e' || mode === 'w';
-        const addressesY = isCorner || mode === 'n' || mode === 's';
-
-        const minSx = MIN_DIMENSION_PX / startW;
-        const minSy = MIN_DIMENSION_PX / startH;
-        let sx = addressesX ? (p.x - ax) / (cornerX - ax || 1) : 1;
-        let sy = addressesY ? (p.y - ay) / (cornerY - ay || 1) : 1;
-        if (addressesX && Math.abs(sx) < minSx) sx = Math.sign(sx) * minSx;
-        if (addressesY && Math.abs(sy) < minSy) sy = Math.sign(sy) * minSy;
-        // Shift = proportional scale (PS Transform Selection): one uniform
-        // factor from the mean of both axes, per-axis sign preserved so a
-        // mirrored drag stays mirrored. No conflict with Shift's boolean
-        // meaning — that lives on the CREATE gesture, this on gizmo handles.
-        if (isCorner && (e.nativeEvent as MouseEvent).shiftKey) {
-          const uniform = (Math.abs(sx) + Math.abs(sy)) / 2;
-          sx = Math.sign(sx) * uniform;
-          sy = Math.sign(sy) * uniform;
-        }
-        newPoly = e.geometry.polygon.scalePolygon(startPoly, { x: ax, y: ay }, sx, sy);
+        // Corner drag: both axes scale, anchor = opposite corner of the
+        // ROTATED box. Edge drag: single axis scales, anchor = the opposite
+        // edge LINE (fixed line) so only the grabbed side moves. Factors
+        // come from THE shared local-frame solve (the selection-driven peel
+        // session consumes the same one — the two gestures can never
+        // disagree); at θ=0 the local frame coincides with the world frame
+        // and the math reduces to the historical axis-aligned behavior
+        // bitwise. Shift = proportional scale (PS Transform Selection).
+        const cos = Math.cos(startThetaRad);
+        const sin = Math.sin(startThetaRad);
+        const pdx = p.x - startBoxCx;
+        const pdy = p.y - startBoxCy;
+        const { sx, sy } = e.geometry.polygon.solveGizmoResizeScale(
+          mode,
+          pdx * cos + pdy * sin,
+          -pdx * sin + pdy * cos,
+          startW,
+          startH,
+          { uniform: (e.nativeEvent as MouseEvent).shiftKey, minW: MIN_DIMENSION_PX, minH: MIN_DIMENSION_PX },
+        );
+        // Apply the factors in the local frame through the pure geometry
+        // primitive: the composite is anchor + R(θ)·S·R(-θ)·(p − anchor) —
+        // a rotated rectangle stays a rectangle. The two rotations cancel
+        // in orientationDeg, so the record is unchanged.
+        newPoly = e.geometry.polygon.scalePolygon(
+          startPoly,
+          { x: anchorX, y: anchorY },
+          sx,
+          sy,
+          startThetaRad,
+        );
       }
 
       scheduleWrite(newPoly);

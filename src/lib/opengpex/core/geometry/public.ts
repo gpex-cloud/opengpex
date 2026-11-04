@@ -61,4 +61,5 @@
  */
 
 export { penPathToCubicSegments, flattenCubicChain, fitCubicsToPolyline, mapPathAnchors, nearestPathAnchor } from './operators/bezier';
-export { computeRingArea, isPointInPolygon } from './operators/polygon';
+export { computeRingArea, isPointInPolygon, polygonToShape } from './operators/polygon';
+export { isPointInRect, isPointInShape } from './operators/space';

@@ -26,14 +26,123 @@ import {
   LocalPolygon, WorldPolygon
 } from './primitives';
 
-/** 
- * LayerPoseOverride: Layer pose override parameters
+/**
+ * A polygon's content box measured ALONG a caller-supplied orientation
+ * (see `computeRotationBox` — a pure measurement, not a rotation).
+ * All values are in the polygon's own coordinate units; HUD consumers map
+ * them to the screen with the usual space conversions.
  */
-export interface LayerPoseOverride {
+export interface RotationBox {
+  /** Orientation in radians the box was measured along (echoed back). */
+  angleRad: number;
+  /** Center of the projected bounding box, polygon-local coordinates. */
+  cx: number;
+  cy: number;
+  /** Extent along the rotated x-axis. */
+  w: number;
+  /** Extent along the rotated y-axis (perpendicular, y-down handed). */
+  h: number;
+}
+
+/**
+ * The screen-space counterpart of `RotationBox`: the entity's true box in
+ * SCREEN pixels — the top-left CORNER (not the center), extents already
+ * scaled by the camera, and the orientation as actually rendered (camera
+ * rotation folded in). This is the HUD framework's single geometry
+ * contract: `toScreenRotationBox` performs the local→screen conversion;
+ * the framework never derives it from entity internals itself.
+ */
+export interface ScreenRotationBox {
+  /** Screen-space position of the box's top-left corner. */
+  x: number;
+  y: number;
+  /** Screen-px extents along the entity's own rotated axes. */
+  w: number;
+  h: number;
+  /** Raw orientation in radians (screen space, y-down handedness). */
+  angleRad: number;
+}
+
+/**
+ * Scale-handle vocabulary of the fragment scale gesture: four corners
+ * (both axes scale, opposite corner anchored) and four edges (single axis
+ * scales, opposite edge line pinned).
+ */
+export type FragmentScaleHandle = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w';
+
+/**
+ * TransformParams: THE base pose-vocabulary of the editor — a PARTIAL pose
+ * patch over the four pose slots a layer-level transform can address
+ * (anchor cx/cy, rotation, gesture-time scale). Every slot is optional:
+ * consumers fill only the slots they mean, and resolvers fill the rest
+ * from live layer state. Slot names mirror `FragmentPose`'s pose slots
+ * one-to-one; an absent slot means "not touched" and is resolved by the
+ * consumer (gesture merge / bake command). `scale`/`scaleY` carry a
+ * GESTURE-TIME magnification only — they exist nowhere on `Layer` (whose
+ * `scale` stays deprecated and constantly 1.0) and are baked into pixels
+ * by whoever commits the gesture.
+ */
+export interface TransformParams {
+  /** Bounding-box anchor (world coords). */
   cx?: number;
   cy?: number;
+  /** Degrees; sign convention follows `getOrientationMatrix`. */
   rotation?: number;
+  /** Gesture-time magnification; defaults to 1 (and scaleY to scale). */
+  scale?: number;
+  scaleY?: number;
+  /**
+   * sourceAngle: the angle the CONTENT sits at inside the bitmap itself —
+   * the peel bake moves the orientation into pixels and zeroes the field,
+   * so a scale gesture solved along the content's own axes must cancel that
+   * tilt BEFORE stretching. The pose's linear part composes
+   * `O(rotation) · S · R(−sourceAngle)`; absent (= 0, every non-peel
+   * consumer) the matrix is bitwise the historical `O · S`.
+   */
+  sourceAngle?: number;
 }
+
+/**
+ * FragmentPose: the COMPLETE pose of a fragment layer at one instant —
+ * the frozen gesture-start snapshot every gesture operator recomputes
+ * from (`fragmentPoseFromLayer` produces it; nothing mutates it
+ * mid-gesture). Unlike the `TransformParams` patch, every slot is
+ * concrete: an absent value is meaningless here. `visibleOffset`/
+ * `bounding` carry the content-crop semantics (the CONTENT box, not the
+ * bounding anchor, is what every anchor/center/ROI is expressed on).
+ */
+export interface FragmentPose {
+  /** Bounding-box anchor (world coords). */
+  cx: number;
+  cy: number;
+  /** Degrees; sign convention follows `getOrientationMatrix`. */
+  rotation: number;
+  flip: { h: boolean; v: boolean };
+  /** Content (crop) dimensions — for an exchange, equal to `bounding`. */
+  bounding: { w: number; h: number };
+  /** Content offset inside the bounding box = visibleShape.rect.x/y. */
+  visibleOffset: Point2D;
+  /** Current magnification (1 outside a transform gesture). */
+  scale: number;
+  scaleY: number;
+  /**
+   * sourceAngle — the content's tilt inside the bitmap (see
+   * `TransformParams.sourceAngle`). Absent (= 0) for poses built from
+   * layer fields (`fragmentPoseFromLayer`); set live by the
+   * selection-driven scale gesture.
+   */
+  sourceAngle?: number;
+}
+
+/**
+ * LayerPoseOverride: Layer pose override parameters — TransformParams used
+ * as a RENDERING seam: `computeWorldMatrix` (and the GPU preview path)
+ * applies the supplied slots on top of the layer's committed pose. The
+ * override exists only on live channels (volatile gesture state, explicit
+ * bake requests) — never in committed documents. `scaleY` defaults to
+ * `scale` when omitted (uniform magnification).
+ */
+export type LayerPoseOverride = TransformParams;
 
 /** 
  * DecomposedMatrix: Semantic pose parameters after matrix decomposition
@@ -202,6 +311,59 @@ export interface GeometryService {
      * result to direction-keyed vocabulary (resize cursors) is the caller's.
      */
     poseScreenAngle: (angleDeg: number, rotationDeg: number, flip?: { h: boolean; v: boolean }) => number;
+    /** Snaps a rotation delta (radians) so `base + delta` lands on the stepDeg grid (default 15°). */
+    snapRotationRad: (deltaRad: number, baseRad: number, stepDeg?: number) => number;
+    /**
+     * Fragment free-transform pose math (peel exchange corner-scale /
+     * rotation). Operates on the CONTENT box (the visibleShape crop
+     * displaced by (vx, vy) inside the bounding box) in world coordinates —
+     * see `core/geometry/operators/fragment.ts` for the geometry model.
+     * Exposed on the service so plugins can drive the transform gesture
+     * without importing internal operators.
+     */
+    fragmentPoseFromLayer: (layer: {
+      cx: number;
+      cy: number;
+      rotation: number;
+      flip: { h: boolean; v: boolean };
+      bounding: { w: number; h: number };
+      visibleShape?: { rect?: { x: number; y: number; w?: number; h?: number } } | null;
+    }) => FragmentPose;
+    fragmentContentCenter: (params: FragmentPose) => Point2D;
+    /**
+     * Pose-derived bake ROI: the transformed content box's world AABB,
+     * padded and snapped outward to whole pixels. The DEGENERATE-session
+     * fallback for the selection-first bake ROI (a peel without a
+     * selection has no pristine geometry to derive the ROI from).
+     */
+    fragmentBakeRoi: (params: FragmentPose, pad?: number) => { x: number; y: number; w: number; h: number };
+    computeFragmentRotation: (
+      start: FragmentPose,
+      pointerWorld: Point2D,
+      startRotationDeg: number,
+      startPointerAngleRad: number,
+      opts?: { shift?: boolean; absoluteBaseDeg?: number },
+    ) => TransformParams;
+    /**
+     * Carries the selection polygon by the same map that moved the peeled
+     * fragment's content box from `start` to `end` (rotation, scaling along
+     * the fragment's own axes and mirroring included).
+     */
+    followFragmentSelection: (
+      selection: LocalPolygon,
+      start: FragmentPose,
+      end: FragmentPose,
+      frame: Frame,
+    ) => LocalPolygon;
+    /**
+     * Content box of the polygon measured along `angleRad`. The angle is
+     * NEVER guessed from the vertices — it is the caller's state: a peel
+     * session passes the fragment's true pose, a plain selection passes 0
+     * (degenerating to the historical upright AABB exactly).
+     */
+    rotatedPolygonBox: (poly: LocalPolygon, angleRad?: number) => RotationBox;
+    /** Screen-space conversion for the HUD anchor contract. */
+    toScreenRotationBox: (box: RotationBox, cam: CameraState) => ScreenRotationBox;
   };
 
   /** Camera service */
@@ -385,13 +547,55 @@ export interface GeometryService {
      * Returns a new polygon with recomputed bounding rect. Used by the
      * selection-transform handler (irregular selection corner handles).
      */
-    scalePolygon: (poly: LocalPolygon, anchor: Point2D, sx: number, sy: number) => LocalPolygon;
+    /**
+     * Scales a polygon by (sx, sy). With `angleRad` (radians, typically the
+     * polygon's orientationDeg) the factors stretch along the polygon's OWN
+     * axes — a rotated rectangle stays a rectangle under non-uniform scale.
+     * Absent (0) is the historical canvas-axis scale.
+     */
+    scalePolygon: (poly: LocalPolygon, anchor: Point2D, sx: number, sy: number, angleRad?: number) => LocalPolygon;
     /**
      * Rotates all rings of a LocalPolygon around a center point by angleRad
      * (radians, clockwise in the y-down canvas space). Returns a new polygon
      * with recomputed bounding rect. Used by the selection-transform handler.
      */
     rotatePolygon: (poly: LocalPolygon, center: Point2D, angleRad: number) => LocalPolygon;
+    /**
+     * Scales a polygon by (sx, sy) expressed in the polygon's OWN rotated
+     * frame (orientation thetaRad) about a fixed world anchor — the factors
+     * stretch along the rotated axes, so a rotated rectangle stays a
+     * rectangle under non-uniform scale. At theta = 0 this is bitwise
+     * scalePolygon. Used by the selection-transform handler.
+     */
+    /**
+     * The 8-handle gizmo scale factors solved in an entity's OWN rotated
+     * frame (pointer already projected into that frame, origin at the
+     * rotated-box centre). THE shared solve of the plain selection
+     * transform and the selection-driven peel session. Corner handles
+     * anchor the opposite corner; edge handles anchor the opposite edge
+     * line; negative factors are mirrors; `uniform` keeps both addressed
+     * axes at one magnitude.
+     */
+    solveGizmoResizeScale: (
+      mode: 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w',
+      pointerLocalX: number,
+      pointerLocalY: number,
+      boxW: number,
+      boxH: number,
+      opts?: { uniform?: boolean; minW?: number; minH?: number },
+    ) => { sx: number; sy: number };
+    /**
+     * The gesture-start basis of a gizmo scale on a polygon measured along
+     * its OWN orientation thetaRad — the rotated content box (centre +
+     * extents) and the world-space anchor point (opposite corner / edge
+     * midpoint of the handle). THE shared start-basis of both gizmo scale
+     * gestures (plain selection + selection-driven peel session).
+     */
+    measureGizmoResizeAnchor: (
+      poly: LocalPolygon,
+      thetaRad: number,
+      mode: 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w',
+    ) => { cx: number; cy: number; w: number; h: number; anchorX: number; anchorY: number };
     /**
      * Generates a polygon for a regular clip shape.
      * 'rect' produces 4 corners; 'pathellipse' produces the 64-point ellipse

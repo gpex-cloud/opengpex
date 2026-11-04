@@ -9,6 +9,7 @@
 
 import type { CommandInstance, InteractionSignalValue } from '@opengpex/editor/core/types';
 import type { CraftType } from './protocols';
+import type { MarkerKind } from '../../overlays/MarkerOverlay/marker/types';
 
 /** Type map for usePluginCommands<CraftDrawerCommandsMap>() */
 export interface CraftDrawerCommandsMap {

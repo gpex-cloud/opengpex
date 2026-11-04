@@ -23,6 +23,9 @@
  * Each handler is in its own module for maintainability:
  *   - guard.ts              — shared `makeClipToolGuard` strategy dispatch helper
  *   - move.ts              — unified move + peel for ALL selection types (tool-agnostic)
+ *   - transform/selection.ts — plain selection gizmo scale/rotate (ring-affine)
+ *   - transform/fragment.ts  — peel-session transform driven through the
+ *                              selection gizmo, the fragment follows affinely
  *   - tools/regular.ts      — rect/ellipse crop box handler (resize, create)
  *   - tools/recanvas.ts     — dedicated Re-Canvas handler (move, resize, create)
  *   - tools/lasso.ts        — free-form polygon selection handler (create)
@@ -30,7 +33,8 @@
  */
 
 export { createSelectionMoveHandler } from './move';
-export { createSelectionTransformHandler } from './transform';
+export { createSelectionTransformHandler } from './transform/selection';
+export { createSessionTransformHandler } from './transform/fragment';
 export { createReCanvasHandler } from './tools/recanvas';
 export { createClipBoxHandler } from './tools/regular';
 export { createPathEllipseHandler } from './tools/pathellipse';

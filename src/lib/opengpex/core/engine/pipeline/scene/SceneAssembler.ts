@@ -37,6 +37,7 @@ import type {
   GeometryService,
   AssetService,
   Layer,
+  LayerPoseOverride,
   VectorMask,
   LocalShape,
   BitmapMaskOverrideMap,
@@ -265,6 +266,19 @@ export interface SceneContentOptions {
    * The dispatch judges ONLY the single source's bit depth here — NEVER `frame.bitDepth`.
    */
   readonly getHighDepthSource?: (assetId: string) => HighDepthSource | undefined;
+  /**
+   * Live-pose seam (LIVE-EDIT stamp discipline, same family as
+   * `needIncreComp`): returns the GESTURE-TIME pose override for a layer —
+   * today only the scale slots (`LayerPoseOverride.scale/scaleY`), since
+   * cx/cy/rotation reach the scene through the regular fast-track layer
+   * patch merge. Consulted once per visible layer per assembly, never
+   * cached and never part of a composite signature: a gesture frame
+   * re-assembles anyway (the buffered patch gives `layers` a fresh
+   * reference every tick), and committed frames must resolve it to
+   * `undefined`. Omitted ⇒ no layer is ever overridden (tests, export,
+   * idle frames).
+   */
+  readonly getLayerPoseOverride?: (layerId: string) => LayerPoseOverride | undefined;
   readonly hdr?: boolean;
 }
 
@@ -425,6 +439,7 @@ export class SceneAssembler {
       assets,
       getBitmapMaskOverride,
       getHighDepthSource,
+      getLayerPoseOverride,
       hdr = false,
     } = options;
 
@@ -497,11 +512,20 @@ export class SceneAssembler {
         ...layer,
       };
 
+      // Live-pose override (gesture scale), resolved fresh per assembly and
+      // never cached — the LIVE-EDIT stamp discipline documented on
+      // `getLayerPoseOverride`.
+      const poseOverride = getLayerPoseOverride?.(layerId);
+
       // Cull layers whose world AABB is fully outside the
       // CANVAS. Skips packing the LayerNode and any upload check for layers that
       // lie entirely in the (now non-composited) off-canvas scratch area.
+      // The cull box must honor the live-pose override, or a fragment being
+      // scaled UP toward a canvas edge could be wrongly culled mid-gesture.
       if (canCull && canvasWorldRect) {
-        const layerBBox = geometry.space.getLayerBoundingBox(latestLayer);
+        const layerBBox = poseOverride
+          ? geometry.space.getLayerBoundingBox(latestLayer, geometry.transform.getLayerWorldMatrix(latestLayer, poseOverride))
+          : geometry.space.getLayerBoundingBox(latestLayer);
         if (!geometry.space.getRectIntersection(layerBBox, canvasWorldRect)) continue;
       }
 
@@ -509,7 +533,7 @@ export class SceneAssembler {
       // → canvas/document space only. The camera lives in `scene.view.transform`
       // and is applied by the view pass, NOT baked here (keeping camera changes from
       // forcing a full re-composite every frame).
-      const M_layer = geometry.transform.getLayerLocalMatrix(latestLayer, f);
+      const M_layer = geometry.transform.getLayerLocalMatrix(latestLayer, f, poseOverride);
 
       const transform: Mat3 = {
         a: M_layer.a,

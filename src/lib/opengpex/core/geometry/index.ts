@@ -41,7 +41,7 @@ import {
   computePolygonBounds, localToWorldPolygon, worldToLocalPolygon,
   frameLocalToLayerLocal as polyFrameToLayer, layerLocalToFrameLocal as polyLayerToFrame, polygonToSvgPathD,
   isPointInPolygon, computeRingArea, simplifyOpen, simplifyRing, translatePolygon,
-  scalePolygon, rotatePolygon,
+  scalePolygon, rotatePolygon, solveGizmoResizeScale, measureGizmoResizeAnchor, computeRotationBox, toScreenRotationBox,
   ellipsePathToLocalPolygon, polygonToShape, deriveEdgeDisplayMode
 } from './operators/polygon';
 import {
@@ -59,7 +59,14 @@ import {
   isRotatedPose,
   transformFrame
 } from './operators/transform';
-import { normalizeAngle, snapAngle, poseScreenAngle } from './operators/rotator';
+import {
+  fragmentPoseFromLayer,
+  getFragmentContentCenter,
+  getFragmentBakeRoi,
+  computeFragmentRotation,
+  followFragmentSelection,
+} from './operators/fragment';
+import { normalizeAngle, snapAngle, snapRotationRad, poseScreenAngle } from './operators/rotator';
 import {
   evaluateCubic, tangentAt, arcLengths, splitCubic, flattenCubicChain,
   nearestPointOnPath, fitCubicsToPolyline, penPathToCubicSegments,
@@ -146,7 +153,19 @@ export function createGeometryService(): GeometryService {
       computeLayerMovePose: (layer: Layer) => computeLayerMovePose(layer),
       normalizeAngle: (deg: number) => normalizeAngle(deg),
       snapAngle: (deg: number, step: number) => snapAngle(deg, step),
+      snapRotationRad: (deltaRad: number, baseRad: number, stepDeg?: number) => snapRotationRad(deltaRad, baseRad, stepDeg),
       poseScreenAngle: (angleDeg: number, rotationDeg: number, flip?: { h: boolean; v: boolean }) => poseScreenAngle(angleDeg, rotationDeg, flip),
+      // Fragment free-transform pose math (peel exchange): content-box
+      // corner-scale with a diagonal anchor + rotation about the content
+      // center. Exposed so plugin handlers never import operators directly.
+      fragmentPoseFromLayer: (l) => fragmentPoseFromLayer(l),
+      fragmentContentCenter: (params) => getFragmentContentCenter(params),
+      fragmentBakeRoi: (params, pad) => getFragmentBakeRoi(params, pad),
+      computeFragmentRotation: (start, pointerWorld, startRotationDeg, startPointerAngleRad, opts) => computeFragmentRotation(start, pointerWorld, startRotationDeg, startPointerAngleRad, opts),
+      followFragmentSelection: (selection, start, end, frame) =>
+        followFragmentSelection(selection, start, end, (p) => worldToLocal(p.x, p.y, frame.canvas)),
+      rotatedPolygonBox: (poly, angleRad) => computeRotationBox(poly, angleRad),
+      toScreenRotationBox: (box, cam) => toScreenRotationBox(box, cam),
     },
     camera: {
       getFitCamera: (viewport: Dimensions, content: Dimensions, options?: CameraCenterOptions) => getFitCamera(viewport, content, options),
@@ -209,8 +228,11 @@ export function createGeometryService(): GeometryService {
       simplifyOpen: (points: Point2D[], epsilon: number) => simplifyOpen(points, epsilon),
       simplifyRing: (ring: Point2D[], epsilon: number) => simplifyRing(ring, epsilon),
       translatePolygon: (poly: LocalPolygon, dx: number, dy: number) => translatePolygon(poly, dx, dy),
-      scalePolygon: (poly: LocalPolygon, anchor: Point2D, sx: number, sy: number) => scalePolygon(poly, anchor, sx, sy),
+      scalePolygon: (poly: LocalPolygon, anchor: Point2D, sx: number, sy: number, angleRad?: number) => scalePolygon(poly, anchor, sx, sy, angleRad),
       rotatePolygon: (poly: LocalPolygon, center: Point2D, angleRad: number) => rotatePolygon(poly, center, angleRad),
+      solveGizmoResizeScale: (mode, pointerLocalX, pointerLocalY, boxW, boxH, opts) =>
+        solveGizmoResizeScale(mode, pointerLocalX, pointerLocalY, boxW, boxH, opts),
+      measureGizmoResizeAnchor: (poly, thetaRad, mode) => measureGizmoResizeAnchor(poly, thetaRad, mode),
       regularShapeToLocalPolygon: (tool: 'rect' | 'pathellipse', rect: LocalRect, antiAliased?: boolean) =>
         tool === 'rect'
           ? rectToLocalPolygon(rect, antiAliased ?? false)

@@ -29,7 +29,6 @@ import { LayerMergeCommands } from './commands/layer/merge';
 import { LayerUnionCommands } from './commands/layer/union';
 import { LayerClipCommands } from './commands/layer/clip';
 import { LayerCmdJCommands } from './commands/layer/cmdj';
-import { LayerPeelCommands } from './commands/layer/peel';
 import { LayerMaskCommands } from './commands/layer/vmask';
 import { LayerBitmapMaskCommands } from './commands/layer/bmask';
 import { LayerAdjustMaskCommands } from './commands/layer/amask';
@@ -57,7 +56,6 @@ export * from './commands/layer/merge';
 export * from './commands/layer/union';
 export * from './commands/layer/clip';
 export * from './commands/layer/cmdj';
-export * from './commands/layer/peel';
 export * from './commands/layer/vmask';
 export * from './commands/layer/bmask';
 export * from './commands/layer/amask';
@@ -81,7 +79,6 @@ export function registerAdvancedCommands(ctx: EditorContextValue['actions']) {
     LayerUnionCommands,
     LayerClipCommands,
     LayerCmdJCommands,
-    LayerPeelCommands,
     LayerMaskCommands,
     LayerBitmapMaskCommands,
     LayerAdjustMaskCommands,

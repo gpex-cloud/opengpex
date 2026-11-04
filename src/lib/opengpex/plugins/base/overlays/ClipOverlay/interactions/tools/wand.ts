@@ -29,7 +29,7 @@ import { createAsyncHandler } from '../../../../../../stage/interaction/handlers
 import { magicWandClient } from '../../workers/client';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
-import { makeClipToolGuard } from '../guard';
+import { makeClipToolGuard, discardPeelOnFreshDraw } from '../guard';
 import { booleanOpFromModifiers, combineWithSelection } from '../boolean';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -123,6 +123,9 @@ export const createWandHandler = (): InteractionHandler => {
     },
 
     execute: async (e, ctx) => {
+      // A fresh plain click while a peel session is undecided cancels the
+      // session (Esc semantics) before the replacement selection runs.
+      discardPeelOnFreshDraw(e);
       // Single-click outside canvas = clear selection (Photoshop behavior).
       // Unified with clipbox/lasso: clicking outside the canvas dismisses.
       const frame = e.activeFrame;

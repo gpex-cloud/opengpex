@@ -8,6 +8,7 @@
  */
 
 import type { CommandInstance, InteractionSignalValue, Layer } from '@opengpex/editor/core/types';
+import type { TextLayerData } from '@opengpex/editor/core/types/models';
 
 /** Type map for usePluginCommands<TextOverlayCommandsMap>() */
 export interface TextOverlayCommandsMap {

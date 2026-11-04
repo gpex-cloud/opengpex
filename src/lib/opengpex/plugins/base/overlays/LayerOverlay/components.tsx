@@ -32,7 +32,7 @@ import {
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import { useLayerOverlayCommands } from "./hooks";
 
-import { useLayerOverlaySync, useLayerMoveDeltaSync, useLayerOverlayCameraHide } from "./useFastSync";
+import { useLayerOverlaySync, useLayerOverlayCameraHide } from "./useFastSync";
 
 /**
  * LayerOverlayItem: A single geometric helper element for a layer on the stage.
@@ -190,26 +190,9 @@ function LayerOverlayContent() {
           />
         ))}
 
-      {/* Layer move/rotate delta label: shows displacement and/or angle during drag */}
-      <LayerMoveDeltaLabel />
-    </div>
-  );
-}
-
-/**
- * LayerMoveDeltaLabel: Shows real-time displacement (dx, dy) during layer drag.
- * Positioned at the active layer's bottom-left corner via useFastAnchorSync.
- */
-function LayerMoveDeltaLabel() {
-  const { deltaRef } = useLayerMoveDeltaSync(true);
-
-  return (
-    <div
-      ref={deltaRef}
-      className="absolute top-0 left-0 bg-zinc-900/90 backdrop-blur-md border border-emerald-500/30 rounded flex items-center shadow-2xl pointer-events-none whitespace-nowrap"
-      style={{ display: 'none', padding: '3px 8px', zIndex: 100 }}
-    >
-      <span className="text-[10px] font-mono font-bold text-emerald-400 leading-none" />
+      {/* Layer move/rotate feedback moved to the system-level
+          widgets/DeltaLabel, fed by InteractionTransaction
+          declarations — this overlay no longer renders its own chip. */}
     </div>
   );
 }

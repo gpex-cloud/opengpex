@@ -20,7 +20,7 @@
 'use client';
 
 import React from 'react';
-import { CORNER_ANCHORS, EDGE_ANCHORS, MARK_STROKE_W, markBoxStyle } from '../geometry';
+import { CORNER_ANCHORS, EDGE_ANCHORS, GIZMO_CORE, GIZMO_EDGE, MARK_STROKE_W, markBoxStyle } from '../geometry';
 
 /** Diameter of each round mark (screen px). */
 export const CHIP_MARK_PX = 8;
@@ -46,8 +46,8 @@ export const BoxChip = React.memo(function BoxChip() {
             viewBox={`0 0 ${CHIP_MARK_PX} ${CHIP_MARK_PX}`}
             style={{ width: '100%', height: '100%', display: 'block', overflow: 'visible' }}
           >
-            <circle cx={c} cy={c} r={r} fill="#ffffff" stroke="#000000" strokeWidth={MARK_STROKE_W + 2} />
-            <circle cx={c} cy={c} r={r} fill="#ffffff" stroke="#ffffff" strokeWidth={MARK_STROKE_W} />
+            <circle cx={c} cy={c} r={r} style={{ fill: GIZMO_CORE, stroke: GIZMO_EDGE }} strokeWidth={MARK_STROKE_W + 2} />
+            <circle cx={c} cy={c} r={r} style={{ fill: GIZMO_CORE, stroke: GIZMO_CORE }} strokeWidth={MARK_STROKE_W} />
           </svg>
         </div>
       ))}

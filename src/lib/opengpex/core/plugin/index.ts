@@ -153,7 +153,21 @@ export function createPluginService(): PluginService {
       if (triggerNotify) notify();
     },
 
-    getCommand: (commandId: string) => commands.get(commandId),
+    getCommand: (commandId: string) => {
+      const exact = commands.get(commandId);
+      if (exact) return exact;
+      // Plugin-built commands register under the composite key
+      // `${pluginUid}.${cmd.id}`. Core code that must dispatch a plugin
+      // command without importing it (e.g. the frame-switch peel guard)
+      // addresses it by the DECLARED id; resolve that through a suffix
+      // scan. Exact hits always win, so this can never shadow a core or
+      // scoped dispatch; a declared id shared by two plugins is ambiguous
+      // by definition and stays the scoped-uid caller's responsibility.
+      for (const c of commands.values()) {
+        if (c.uid && c.uid.endsWith(`.${commandId}`)) return c;
+      }
+      return undefined;
+    },
 
     getAllCommands: () => {
       if (_commandsDirty) {

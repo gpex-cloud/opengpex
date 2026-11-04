@@ -29,8 +29,12 @@ import { BoxChip } from './knobs/BoxChip';
 import {
   CORNER_ANCHORS,
   EDGE_ANCHORS,
+  GIZMO_CORE,
+  GIZMO_EDGE,
+  GIZMO_TONE,
   MARK_STROKE_W,
   markBoxStyle,
+  type GizmoTone,
 } from './geometry';
 
 export { BoxCorners, type BoxCornersProps } from './knobs/BoxCorners';
@@ -127,6 +131,12 @@ export interface TransformGizmoProps {
    * after the strips).
    */
   outline?: boolean;
+  /**
+   * Color scheme of the marks. `default` is black outline + white core;
+   * `linked` (all sky blue) tells the user this transform also carries a
+   * coupled entity — e.g. a peeled fragment whose selection deforms with it.
+   */
+  tone?: GizmoTone;
 }
 
 /**
@@ -166,12 +176,17 @@ export const TransformGizmo = React.memo(function TransformGizmo({
   visualOnly = false,
   dimmed = false,
   outline = false,
+  tone = 'default',
 }: TransformGizmoProps) {
   const marks =
     variant === 'cube' ? <BoxCube /> :
     variant === 'chip' ? <BoxChip /> :
     <BoxCorners />;
-  const wrapperStyle: React.CSSProperties | undefined = dimmed ? { opacity: GHOST_DIM_OPACITY } : undefined;
+  const wrapperStyle = {
+    ...(dimmed ? { opacity: GHOST_DIM_OPACITY } : {}),
+    '--gizmo-edge': GIZMO_TONE[tone].edge,
+    '--gizmo-core': GIZMO_TONE[tone].core,
+  } as React.CSSProperties;
 
   // ─── CursorService sync ─────────────────────────────────────────────────
   // Hit zones carry their pose-resolved cursor in `data-gizmo-cursor`; this
@@ -245,7 +260,7 @@ export const TransformGizmo = React.memo(function TransformGizmo({
               y1={dir === 'n' || dir === 's' ? EDGE_TICK_PX / 2 : 0}
               x2={dir === 'n' || dir === 's' ? EDGE_TICK_PX : EDGE_TICK_PX / 2}
               y2={dir === 'n' || dir === 's' ? EDGE_TICK_PX / 2 : EDGE_TICK_PX}
-              stroke="#000000"
+              style={{ stroke: GIZMO_EDGE }}
               strokeWidth={MARK_STROKE_W + 2}
               strokeLinecap="square"
             />
@@ -254,7 +269,7 @@ export const TransformGizmo = React.memo(function TransformGizmo({
               y1={dir === 'n' || dir === 's' ? EDGE_TICK_PX / 2 : 0}
               x2={dir === 'n' || dir === 's' ? EDGE_TICK_PX : EDGE_TICK_PX / 2}
               y2={dir === 'n' || dir === 's' ? EDGE_TICK_PX / 2 : EDGE_TICK_PX}
-              stroke="#ffffff"
+              style={{ stroke: GIZMO_CORE }}
               strokeWidth={MARK_STROKE_W}
               strokeLinecap="square"
             />
@@ -271,6 +286,7 @@ export const TransformGizmo = React.memo(function TransformGizmo({
         <div
           key={dir}
           data-gizmo-handle={dir}
+          data-gizmo-local-angle={angle}
           data-gizmo-cursor={edgeCursor(angle)}
           className="absolute pointer-events-auto"
           style={{
@@ -287,6 +303,7 @@ export const TransformGizmo = React.memo(function TransformGizmo({
         <div
           key={dir}
           data-gizmo-handle={dir}
+          data-gizmo-local-angle={angle}
           data-gizmo-cursor={edgeCursor(angle)}
           className="absolute pointer-events-auto"
           style={{
@@ -325,16 +342,14 @@ export const TransformGizmo = React.memo(function TransformGizmo({
             cx={ROTATE_HANDLE_PX / 2}
             cy={ROTATE_HANDLE_PX / 2}
             r={ROTATE_HANDLE_PX / 2 - MARK_STROKE_W}
-            fill="#ffffff"
-            stroke="#000000"
+            style={{ fill: GIZMO_CORE, stroke: GIZMO_EDGE }}
             strokeWidth={MARK_STROKE_W + 2}
           />
           <circle
             cx={ROTATE_HANDLE_PX / 2}
             cy={ROTATE_HANDLE_PX / 2}
             r={ROTATE_HANDLE_PX / 2 - MARK_STROKE_W}
-            fill="none"
-            stroke="#ffffff"
+            style={{ fill: GIZMO_CORE, stroke: GIZMO_CORE }}
             strokeWidth={MARK_STROKE_W}
           />
         </svg>

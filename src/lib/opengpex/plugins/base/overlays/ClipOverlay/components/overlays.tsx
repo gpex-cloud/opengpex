@@ -24,23 +24,24 @@ import {
   useEditorServices,
 } from "@opengpex/editor/core/context";
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
-import { TransformGizmo } from "@opengpex/editor/widgets/TransformGizmo";
-import { useClipOverlayCommands, useClipCursor, useGizmoHoverSync } from "../hooks";
+import { readPeelSession } from "../peel/session";
+import { useClipOverlayCommands, useClipCursor, useSelectionHudAnchor } from "../hooks";
+import { TransformHud } from "@opengpex/editor/widgets/affordances";
 import {
   useCropDimSync,
-  useRegularBoxSync,
+  useReCanvasBoxSync,
   useSelectionAntsSync,
-  useMoveDeltaSync,
 } from "../useFastSync";
+import { PeelActionButtons } from "../peel/actions";
 import { lassoPreviewPathRef } from "../interactions";
 import { MARCHING_ANTS_DURATION_S, ClipOverlayAPI } from "../protocols";
 import type { ClipOverlayConfig } from "../protocols";
 
 /* ─── Inline keyframes for marching ants (plugin-internal, no global CSS) ─── */
 const CLIP_ANTS_STYLE = `
-@keyframes clip-ants-flow {
-  to { stroke-dashoffset: -12; }
-}
+  @keyframes clip-ants-flow {
+    to { stroke-dashoffset: -12; }
+  }
 `;
 
 /**
@@ -100,21 +101,25 @@ export function ClipOverlayMain() {
   const isEditing = isClipActive || isReCanvas;
   const isOverlayActive = isEditing || hasSelection;
 
-  // Box (handles + dim label): only while editing, and only when the
-  // selection itself is a regular shape (rect/circle) — TRANSFORM IS
-  // SELECTION-ORIENTED, not tool-oriented: a path selection shows the shared
-  // TransformGizmo under ANY selection tool, so the rect-bracket box must
-  // yield whenever the entity is a path polygon.
-  const boxActive = isEditing
-    && (isReCanvas || (isRegularTool && clipTool !== "pathellipse" && clipType !== "path"));
-
-  // Gizmo box for every PATH selection regardless of the armed tool
-  // (lasso/wand/pathellipse/boolean results): TransformGizmo corner/edge
-  // scale handles + rotation dot (SelectionTransformHandler). Same fast-sync
-  // hook as the regular box — resolveRegularClip reads frame.confinement
-  // directly, so polygon bbox positioning works unchanged.
-  const gizmoBoxActive = isEditing && !isReCanvas && hasSelection
-    && clipType === "path";
+  const peelSessionActive =
+    !!activeFrame && readPeelSession(activeFrame)?.status === 'peeled';
+  // Selection HUD (finding 17): ONE affordances-framework instance serves
+  // every selection flavor — plain AND peel-session alike. The selection
+  // polygon carries its orientation in its vertices for both flavors
+  // (plain rotation writes rotated rings; session follows write the same
+  // maps), so one anchor provider covers both and the flavor only changes
+  // the DECLARATION: session adds the action bar and the linked tone.
+  // Active in clip mode (gizmo + chips) and in pan sessions (action bar
+  // only — pan offers no transform affordance, finding 13). Re-Canvas is
+  // an exclusive modal and keeps its own decoupled box below.
+  //
+  // Wand exemption: a magic-wand result is a PICK, not a transformable
+  // entity — no HUD, no gizmo, no scale/rotate affordance. A peel session
+  // cut with the wand still shows the session HUD: the floating fragment
+  // is the entity there, and its pose has nothing to do with the wand.
+  const wandSelection = clipTool === 'wand' && !peelSessionActive;
+  const selectionHudActive =
+    ((isEditing && !wandSelection) || peelSessionActive) && !isReCanvas && hasSelection;
 
   // ─── Staircase grid phase (ants/GPU alignment) ───────────────────────────
   // The aa/na ants are the pixel staircase of the TARGET layer's (active
@@ -137,31 +142,34 @@ export function ClipOverlayMain() {
   const pathRef = useRef<SVGPathElement>(null);
   useSelectionAntsSync(groupRef, pathBgRef, pathRef, isOverlayActive, isReCanvas, antsGridOffset);
 
-  // CSS box (move surface + gizmo mount, regular tools only)
-  useRegularBoxSync(
+  // Re-Canvas box (DECOUPLED): the canvas-resize rect keeps the flat box
+  // container for itself — it is pinned to rect, carries no gizmo, no
+  // selection dim and no action bar, so it no longer shares the selection
+  // HUD's container or sync hooks.
+  useReCanvasBoxSync(
     boxRef,
-    boxActive,
     isReCanvas,
   );
 
-  // Gizmo box for path-polygon selections: corner scale handles + rotation
-  // handle via the shared TransformGizmo. Hover-reveal (PS Transform
-  // Selection): hidden until the pointer enters the selection, hidden again
-  // during any gesture drag.
-  const irregularBoxRef = useRef<HTMLDivElement>(null);
-  useRegularBoxSync(irregularBoxRef, gizmoBoxActive, false);
-  useGizmoHoverSync(irregularBoxRef, gizmoBoxActive);
+  // ─── Selection HUD declaration ──────────────────────────────────────────
+  // The dimension chip shows for EVERY selection shape in clip mode —
+  // never in pan — and honors the user toggle. The action bar shows
+  // whenever a peel session is undecided (both modes). The move surface
+  // rides the HUD container for rect/circle selections only (path
+  // selections move by direct polygon drag, never a surface).
+  const showDimensionLabel = clipConfig?.showDimensionLabel ?? true;
+  const selectionDimActive = showDimensionLabel && isClipActive && !isReCanvas && hasSelection;
+  const peelBarActive = peelSessionActive && !isReCanvas && hasSelection;
+  // Reset-size is offered only once a bake changed the fragment's SIZE —
+  // a rotation alone leaves nothing to reset.
+  const peelSession = activeFrame ? readPeelSession(activeFrame) : null;
+  const canResetSize = !!peelSession?.origin && !!peelSession.resized;
+  const selectionHud = useSelectionHudAnchor();
+  const selectionMoveSurface = isClipActive && !isReCanvas
+    && isRegularTool && clipTool !== "pathellipse" && clipType !== "path";
 
-  // Rect-shaped selections ride the SAME gizmo (one transform logic for all
-  // selection shapes), rendered inside the regular box; hover-reveal identical.
-  const rectGizmoRef = useRef<HTMLDivElement>(null);
-  useGizmoHoverSync(rectGizmoRef, boxActive && hasSelection && !isReCanvas);
-
-  // Dimension label
-  const { dimLabelRef } = useCropDimSync(boxActive, isReCanvas);
-
-  // Move-delta label (shows "Δ dx, dy" during selection drag)
-  const { deltaContainerRef } = useMoveDeltaSync(isOverlayActive);
+  // Re-Canvas dimension label (the canvas-resize rect keeps its in-box chip)
+  const { dimLabelRef } = useCropDimSync(isReCanvas);
 
   // ─── Lasso preview path ref callback ─────────────────────────────────────
   const previewPathRef = useRef<SVGPathElement | null>(null);
@@ -233,36 +241,16 @@ export function ClipOverlayMain() {
         </svg>
       </div>
 
-      {/* Regular crop box: gizmo mount + dim label.
-          Hidden when tool is irregular, data is polygon (via visibility gate),
-          or the overlay is in passive (non-editing) view. */}
-      {boxActive && (
+      {/* Re-Canvas box (DECOUPLED): the canvas-resize rect's own flat
+          container — pinned to rect, no gizmo, no selection chips. Presses
+          are claimed by the Re-Canvas handlers through the data-handle
+          attribute; the selection-gizmo scope does not apply here. */}
+      {isReCanvas && (
         <div
           ref={boxRef}
           className="absolute pointer-events-auto transition-[border-radius] duration-300"
-          style={{ borderRadius: clipType === "circle" ? "50%" : "0%" }}
           data-handle="move"
         >
-          {/* Shared TransformGizmo: THE selection handles for every shape —
-              corner/edge scale + rotation dot, same knobs as marker/text,
-              claimed by SelectionTransformHandler. Scale of a rect-shaped
-              selection through the gizmo drives the same ring-affine math as
-              path selections (one transform logic, per the selection-oriented
-              ruling). Re-Canvas keeps its own red-styled marks, so the gizmo
-              is skipped in that modal. Visibility: same JS hover-reveal as
-              the path gizmo box (hidden until the pointer enters the
-              selection, hidden during any gesture drag). */}
-          {!isReCanvas && hasSelection && (
-            <div
-              ref={rectGizmoRef}
-              className="absolute inset-0 pointer-events-none"
-              style={{ opacity: 0 }}
-            >
-              <TransformGizmo variant="cube" outline />
-            </div>
-          )}
-
-          {/* Dimension Labels */}
           <div
             className="absolute left-0 bg-zinc-900/90 backdrop-blur-md border border-white/10 rounded flex items-center shadow-2xl pointer-events-none whitespace-nowrap"
             style={{
@@ -280,40 +268,41 @@ export function ClipOverlayMain() {
             </span>
             <span className="text-[11px] font-bold text-white/40 ml-0.5">px</span>
           </div>
-
         </div>
       )}
 
-      {/* Irregular selection box: shared TransformGizmo (corner + edge scale
-          handles and rotation dot, same knobs as marker/text). The container
-          is pointer-events-none (unlike the regular box, there is no "move
-          surface" — moving an irregular selection is a direct drag on the
-          polygon, handled by the move handler); the gizmo's hit zones are
-          individually interactive and consumed by SelectionTransformHandler. */}
-      {gizmoBoxActive && (
-        <div
-          ref={irregularBoxRef}
-          className="absolute pointer-events-none"
-          style={{ opacity: 0 }}
-        >
-          <TransformGizmo variant="cube" outline />
-        </div>
+      {/* Selection HUD (finding 17, unified): ONE TransformHud serves every
+          selection flavor — plain and peel-session alike. The selection
+          polygon is the orientation probe for both (plain rotation writes
+          rotated rings; session follows write the same maps), so the gizmo
+          container, the dimension chip and the action bar all follow the
+          TRUE orientation live, at every angle. Flavor differences are
+          declaration-only: session adds the action bar and the linked
+          tone. The gizmo child mounts only in clip mode (pan offers no
+          transform affordance — finding 13); the hover reveal, the
+          move-surface attributes and the press scope attribute mirror the
+          historical boxes exactly, so press routing
+          (data-clip-selection-gizmo) is unchanged. */}
+      {selectionHudActive && (
+        <TransformHud
+          active
+          getAnchorFrame={selectionHud.getAnchorFrame}
+          reveal="hover"
+          gizmo={isClipActive ? {
+            variant: 'cube',
+            outline: true,
+            tone: peelSessionActive ? 'linked' : 'default',
+          } : undefined}
+          pressScope="clip-selection"
+          gizmoContainerProps={{ 'data-clip-selection-gizmo': true }}
+          moveSurface={selectionMoveSurface}
+          roundShape={clipType === 'circle'}
+          dimension={selectionDimActive ? { text: selectionHud.getDimensionText } : undefined}
+          actions={peelBarActive ? <PeelActionButtons canResetSize={canResetSize} /> : undefined}
+          delta
+        />
       )}
 
-      {/* Move-delta label: independently positioned via useFastAnchorSync.
-          Works for ALL selection types (regular + irregular). */}
-      <div
-        ref={deltaContainerRef}
-        className="absolute top-0 left-0 bg-zinc-900/90 backdrop-blur-md border border-white/10 rounded flex items-center shadow-2xl pointer-events-none whitespace-nowrap"
-        style={{
-          padding: "1px 5px",
-          gap: "2px",
-          display: 'none',
-        }}
-      >
-        <span className="text-[11px] font-black text-emerald-400 tabular-nums tracking-tighter" />
-        <span className="text-[11px] font-bold text-white/40 ml-0.5">px</span>
-      </div>
     </div>
   );
 }

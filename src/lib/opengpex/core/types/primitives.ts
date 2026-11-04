@@ -207,6 +207,17 @@ export interface Polygon {
    * invariant and normalization rule). Not persisted to GPU descriptors.
    */
   ssdepMode?: boolean;
+  /**
+   * Accumulated rotation (degrees) applied to the selection since it was
+   * drawn. Orientation DECREE: a selection is created at 0° and this field
+   * is the ONLY orientation record — the HUD/chips read it as caller
+   * state, never guessing from vertices (vertex probes misread every
+   * shape whose ring does not start along its x-axis). Carried by the
+   * rigid transforms (rotate adds, translate/scale pass through);
+   * rebuilding the selection (draw, boolean, invert, wand pick) forges a
+   * fresh polygon without the field — back to 0° by construction.
+   */
+  orientationDeg?: number;
 }
 
 /** Polygon in canvas-local coordinate space (origin (0,0) at canvas top-left). */
@@ -231,12 +242,14 @@ export const asLocalPolygon = (
   rings: LocalPoint[][],
   rect: LocalRect,
   antiAliased: boolean = true,
-  ssdepMode: boolean = false
+  ssdepMode: boolean = false,
+  orientationDeg?: number
 ): LocalPolygon => ({
   rings,
   rect,
   antiAliased,
   ssdepMode,
+  ...(orientationDeg !== undefined ? { orientationDeg } : {}),
   __brand: 'local'
 } as LocalPolygon);
 

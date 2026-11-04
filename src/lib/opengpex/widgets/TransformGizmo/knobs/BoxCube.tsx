@@ -20,7 +20,7 @@
 'use client';
 
 import React from 'react';
-import { CORNER_ANCHORS, EDGE_ANCHORS, MARK_STROKE_W, markBoxStyle } from '../geometry';
+import { CORNER_ANCHORS, EDGE_ANCHORS, GIZMO_CORE, GIZMO_EDGE, MARK_STROKE_W, markBoxStyle } from '../geometry';
 
 /** Side of each square mark (screen px). */
 export const CUBE_MARK_PX = 8;
@@ -46,8 +46,8 @@ export const BoxCube = React.memo(function BoxCube() {
             viewBox={`0 0 ${CUBE_MARK_PX} ${CUBE_MARK_PX}`}
             style={{ width: '100%', height: '100%', display: 'block', overflow: 'visible' }}
           >
-            <rect x={inset} y={inset} width={side} height={side} fill="#ffffff" stroke="#000000" strokeWidth={MARK_STROKE_W + 2} />
-            <rect x={inset} y={inset} width={side} height={side} fill="#ffffff" stroke="#ffffff" strokeWidth={MARK_STROKE_W} />
+            <rect x={inset} y={inset} width={side} height={side} style={{ fill: GIZMO_CORE, stroke: GIZMO_EDGE }} strokeWidth={MARK_STROKE_W + 2} />
+            <rect x={inset} y={inset} width={side} height={side} style={{ fill: GIZMO_CORE, stroke: GIZMO_CORE }} strokeWidth={MARK_STROKE_W} />
           </svg>
         </div>
       ))}

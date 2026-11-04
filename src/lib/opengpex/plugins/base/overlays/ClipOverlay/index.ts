@@ -19,7 +19,9 @@
 
 import { EditorPlugin } from '@opengpex/editor/core/types';
 import { ClipOverlayMain, ClipOverlaySettings } from './components';
-import { createSelectionMoveHandler, createSelectionTransformHandler, createReCanvasHandler, createClipBoxHandler, createPathEllipseHandler, createLassoHandler, createWandHandler, createSamHandler } from './interactions';
+import { createSelectionMoveHandler, createSelectionTransformHandler, createSessionTransformHandler, createReCanvasHandler, createClipBoxHandler, createPathEllipseHandler, createLassoHandler, createWandHandler, createSamHandler } from './interactions';
+import { PEEL_COMMANDS } from './commands';
+import { peelSessionCodec } from './peel/session';
 import * as P from './protocols';
 
 /**
@@ -47,9 +49,11 @@ export const plugin: EditorPlugin = {
   initialConfig: {
     maskOpacity: 0.15,
     marchingAntsAnimated: false,
+    showDimensionLabel: true,
   },
   interactions: [
     createSelectionMoveHandler(),
+    createSessionTransformHandler(),   // priority 125 — peel-session transforms driven through the SELECTION gizmo (the plain selection transform yields while a session is undecided)
     createSelectionTransformHandler(),  // priority 120 — irregular selection scale/rotate handles
     createReCanvasHandler(),    // priority 115 — intercepts Re-Canvas before regular
     createClipBoxHandler(),     // priority 100
@@ -58,16 +62,23 @@ export const plugin: EditorPlugin = {
     createWandHandler(),
     createSamHandler()
   ],
-  contributions: { ui: [
-    {
-      slot: 'SETTINGS_CONFIG_PANEL',
-      group: 'viewport',
-      component: ClipOverlaySettings,
-      title: 'Selection',
-      order: 200
-    }
-  ] },
-  commands: [],
+  contributions: {
+    ui: [
+      {
+        slot: 'SETTINGS_CONFIG_PANEL',
+        group: 'viewport',
+        component: ClipOverlaySettings,
+        title: 'Selection',
+        order: 200
+      }
+    ],
+    // The peel session record rides `frame.drafts['peel']`; this plugin owns
+    // the record (./helpers/session.ts), so it also owns the hydrate whitelist.
+    state: { draftCodec: peelSessionCodec },
+  },
+  // The peel command family (cmd.peel.*) — plugin-owned domain
+  // commands dispatched by id through the central executeCommand registry.
+  commands: Object.values(PEEL_COMMANDS),
 };
 
 export default plugin;

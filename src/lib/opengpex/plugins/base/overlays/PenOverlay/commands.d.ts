@@ -7,7 +7,9 @@
  * DO NOT EDIT MANUALLY — run `pnpm gen-plugin-types` to regenerate.
  */
 
-import type { CommandInstance, InteractionSignalValue } from '@opengpex/editor/core/types';
+import type { CommandInstance, InteractionSignalValue, PenPathData } from '@opengpex/editor/core/types';
+import type { PenShapeStylePayload } from './contribution';
+import type { ColorValue } from '@opengpex/editor/core/engine/color';
 
 /** Type map for usePluginCommands<PenOverlayCommandsMap>() */
 export interface PenOverlayCommandsMap {

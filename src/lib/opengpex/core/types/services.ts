@@ -35,6 +35,7 @@ import {
 import {
   Dimensions, Shape, LocalShape, WorldShape, GamutId, Rect
 } from './primitives';
+import type { LayerPoseOverride } from './geometry';
 import { EditorData } from './state';
 import type { ImageMetadata, EncodeSource, GainMapData } from '../files/types';
 import type { ImageAssetPayload } from '../storage/asset/AssetStore';
@@ -462,8 +463,17 @@ export interface PixelService {
      * When `roi` is provided, it is used as the composite region directly
      * (the effective output is the intersection of layer pixels and roi).
      * When omitted, the union bounding of all layers is used as the roi.
+     *
+     * `options.poseOverrides` carries explicit GESTURE-TIME pose overrides
+     * (scale slots) keyed by layer id — the same seam the live preview uses,
+     * so bake pixels ≡ preview pixels. See `CompositeRequest.poseOverrides`.
      */
-    compositeLayers: (layers: Layer[], frame: Frame, roi?: Shape) => Promise<CompositedImage>;
+    compositeLayers: (
+      layers: Layer[],
+      frame: Frame,
+      roi?: Shape,
+      options?: { poseOverrides?: Record<string, LayerPoseOverride> },
+    ) => Promise<CompositedImage>;
     /**
      * compositeResizedLayers — Composites the given layers at their natural bounds,
      * then outputs at the specified `outputSize` (single Worker round-trip).

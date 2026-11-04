@@ -225,47 +225,55 @@ function generateForPlugin(pluginDir) {
     return re.test(typeStr);
   }
 
-  // Detect protocol type imports
-  const protoTypeImports = new Set();
+  // Generic import map: EVERY named import in commands.ts (any module)
+  // maps a type name to its source. Used types are then emitted grouped by
+  // module - core/types first, other modules in encounter order. Inline
+  // `type` modifiers are stripped so `import { type Foo, Bar }` resolves
+  // both names.
+  const typeModuleMap = new Map();
+  if (fs.existsSync(commandsPath)) {
+    const cmdSrc = fs.readFileSync(commandsPath, 'utf-8');
+    for (const m of cmdSrc.matchAll(/import\s+(?:type\s+)?\{([^}]+)\}\s+from\s+['"]([^'"]+)['"]/g)) {
+      for (let t of m[1].split(',')) {
+        t = t.trim().replace(/^type\s+/, '');
+        if (t && !typeModuleMap.has(t)) typeModuleMap.set(t, m[2]);
+      }
+    }
+  }
+
+  // Local sources: types EXPORTED by commands.ts itself resolve to
+  // './commands'; types exported by protocols.ts resolve to './protocols'
+  // (the import scan above only covers types commands.ts IMPORTS).
+  if (fs.existsSync(commandsPath)) {
+    const cmdSrc = fs.readFileSync(commandsPath, 'utf-8');
+    for (const m of cmdSrc.matchAll(/export\s+(?:type|interface)\s+(\w+)/g)) {
+      if (!typeModuleMap.has(m[1])) typeModuleMap.set(m[1], './commands');
+    }
+  }
   if (fs.existsSync(protoPath)) {
     const protoSrc = fs.readFileSync(protoPath, 'utf-8');
-    const typeExports = [...protoSrc.matchAll(/export\s+(?:type|interface)\s+(\w+)/g)].map(m => m[1]);
-    for (const ts of allTypeStrings) {
-      for (const te of typeExports) {
-        if (typeUsedIn(te, ts)) protoTypeImports.add(te);
-      }
+    for (const m of protoSrc.matchAll(/export\s+(?:type|interface)\s+(\w+)/g)) {
+      if (!typeModuleMap.has(m[1])) typeModuleMap.set(m[1], './protocols');
     }
   }
 
-  // Detect command-local type imports (types exported from commands.ts itself)
-  const cmdTypeImports = new Set();
-  if (fs.existsSync(commandsPath)) {
-    const cmdSrc = fs.readFileSync(commandsPath, 'utf-8');
-    const typeExports = [...cmdSrc.matchAll(/export\s+(?:type|interface)\s+(\w+)/g)].map(m => m[1]);
-    for (const ts of allTypeStrings) {
-      for (const te of typeExports) {
-        if (typeUsedIn(te, ts)) cmdTypeImports.add(te);
+  // The always-needed framework types are emitted UNCONDITIONALLY
+
+  // Resolve every type used across payload/return strings to its module.
+  const importsByModule = new Map();
+  const resolved = new Set();
+  const INTERNAL_TYPES = new Set(['EditorCommand', 'EditorContextValue', 'AssetService']);
+  for (const ts of allTypeStrings) {
+    if (!ts) continue;
+    for (const [typeName, mod] of typeModuleMap) {
+      if (INTERNAL_TYPES.has(typeName) || resolved.has(typeName)) continue;
+      if (typeUsedIn(typeName, ts)) {
+        resolved.add(typeName);
+        if (!importsByModule.has(mod)) importsByModule.set(mod, []);
+        importsByModule.get(mod).push(typeName);
       }
     }
   }
-
-  // Detect core type imports (types imported from @opengpex/editor/core/types in commands.ts)
-  const coreTypeImports = new Set();
-  if (fs.existsSync(commandsPath)) {
-    const cmdSrc = fs.readFileSync(commandsPath, 'utf-8');
-    const coreImportMatch = cmdSrc.match(/import\s+\{([^}]+)\}\s+from\s+['"]@opengpex\/editor\/core\/types['"]/);
-    if (coreImportMatch) {
-      const coreTypes = coreImportMatch[1].split(',').map(t => t.trim()).filter(Boolean);
-      for (const ts of allTypeStrings) {
-        for (const ct of coreTypes) {
-          // Skip EditorCommand, EditorContextValue — those are internal, not needed in .d.ts
-          if (ct === 'EditorCommand' || ct === 'EditorContextValue' || ct === 'AssetService') continue;
-          if (typeUsedIn(ct, ts)) coreTypeImports.add(ct);
-        }
-      }
-    }
-  }
-
   const L = [];
   L.push('/**');
   L.push(' * ' + pluginName + '/commands.d.ts \u2014 Auto-generated type declarations');
@@ -277,16 +285,22 @@ function generateForPlugin(pluginDir) {
   L.push(' */');
   L.push('');
 
-  const coreImports = [];
-  if (commands.length > 0) coreImports.push('CommandInstance');
-  if (signals.length > 0) coreImports.push('InteractionSignalValue');
-  for (const ct of coreTypeImports) coreImports.push(ct);
-  L.push("import type { " + coreImports.join(', ') + " } from '@opengpex/editor/core/types';");
-  if (protoTypeImports.size > 0) {
-    L.push("import type { " + [...protoTypeImports].join(', ') + " } from './protocols';");
+  // Framework types are emitted UNCONDITIONALLY: they appear in the map
+  // header line, never in payload strings, so usage-based resolution would
+  // never pick them up.
+  const CORE_TYPES_PATH = '@opengpex/editor/core/types';
+  const coreTypesLine = [];
+  if (commands.length > 0) coreTypesLine.push('CommandInstance');
+  if (signals.length > 0) coreTypesLine.push('InteractionSignalValue');
+  if (importsByModule.has(CORE_TYPES_PATH)) {
+    for (const t of importsByModule.get(CORE_TYPES_PATH)) {
+      if (!coreTypesLine.includes(t)) coreTypesLine.push(t);
+    }
   }
-  if (cmdTypeImports.size > 0) {
-    L.push("import type { " + [...cmdTypeImports].join(', ') + " } from './commands';");
+  L.push("import type { " + coreTypesLine.join(', ') + " } from '" + CORE_TYPES_PATH + "';");
+  for (const [mod, types] of importsByModule) {
+    if (mod === CORE_TYPES_PATH) continue;
+    L.push("import type { " + types.join(', ') + " } from '" + mod + "';");
   }
   L.push('');
 

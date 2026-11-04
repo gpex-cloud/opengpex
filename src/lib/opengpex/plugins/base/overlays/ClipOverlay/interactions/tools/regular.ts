@@ -28,7 +28,7 @@ import {
   ClipOptionsAPI,
 } from '../../../../options/ClipOptions/protocols';
 import { createTransformHandler, TransformIntent } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
-import { makeClipToolGuard } from '../guard';
+import { makeClipToolGuard, discardPeelOnFreshDraw } from '../guard';
 import { booleanOpFromModifiers, combineWithSelection, createLiveBooleanPreview } from '../boolean';
 
 /**
@@ -94,6 +94,9 @@ export const createClipBoxHandler = (): InteractionHandler => {
     },
 
     getInitialState: (e, intent) => {
+      // A fresh plain draw while a peel session is undecided cancels the
+      // session (Esc semantics) before the replacement selection starts.
+      if (intent.category === 'create') discardPeelOnFreshDraw(e);
       // Boolean combine: capture the pre-drag entity only for create intents
       // (resize/move never replace the selection, so they need no base).
       gestureBase = intent.category === 'create' ? getClipBox(e.activeFrame) : null;

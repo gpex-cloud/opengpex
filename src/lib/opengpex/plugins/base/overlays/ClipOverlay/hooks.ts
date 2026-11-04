@@ -17,10 +17,14 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useRef, useEffect, useLayoutEffect, type RefObject } from 'react';
+import { useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { asLocalShape } from '@opengpex/editor/core/types';
+import type { Frame, CameraState, ScreenRotationBox } from '@opengpex/editor/core/types';
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+import { readPeelSession, fragmentTrueRotationDeg } from './peel/session';
+import { hitTestSelectionInterior } from './interactions/hitTest';
+import * as P from './protocols';
 import {
   ClipOptionsAPI,
   CLIP_TOOL_STRATEGIES,
@@ -73,9 +77,12 @@ export function useClipOverlayCommands() {
   const clipBox = clipShape.rect;
   const clipType = clipShape.type;
 
-  // Unmount cleanup: discard any in-flight peel.
-  // [noundo] discardExchange is called via `.noundo()` because this cleanup
-  // runs inside the peel interaction transaction — the undo boundary is already
+  // Unmount cleanup: settle any undecided peel session as a DISCARD (the
+  // "cancelled" semantic — identical to Esc). Idempotent: after a commit the
+  // session record is gone and this is a zero-cost no-op; while a commit is
+  // in flight the settle lock voids this call instead of rolling it back.
+  // [noundo] settle is called via `.noundo()` because this cleanup runs
+  // inside the peel interaction transaction — the undo boundary is already
   // owned by `peelToExchange`. Creating a checkpoint here would produce a
   // spurious undo step. See peel.ts for architecture notes.
   const actionsRef = useRef(actions);
@@ -83,13 +90,46 @@ export function useClipOverlayCommands() {
     actionsRef.current = actions;
   });
 
+  // The raw session payload reference present at MOUNT time. The unmount
+  // fallback below must never discard a session that predates its own
+  // overlay instance: React StrictMode (dev) drills every component with a
+  // mount → cleanup → mount cycle right at boot, and the first cleanup's
+  // discard used to land on the JUST-RESTORED session — a page refresh then
+  // swallowed the peel even though the record had been persisted. A session
+  // whose raw payload reference is unchanged since mount came from disk
+  // (restore) or from an earlier overlay lifetime; only a session CREATED
+  // during this lifetime (a live peel this overlay witnessed) is this
+  // overlay's to cancel. Reference identity suffices: every session write
+  // goes through writeFrameDraft and produces a new object.
+  const sessionAtMountRef = useRef<unknown>(null);
+  const mountedFrameIdRef = useRef<string | null>(null);
+
   useEffect(() => {
+    // Capture is MOUNT-ONLY by design: the fallback must compare the session
+    // against the one present when THIS overlay instance came up, so later
+    // renders must not refresh these refs (that would make every inherited
+    // session look "created during the lifetime").
+    sessionAtMountRef.current = activeFrame?.drafts?.peel ?? null;
+    mountedFrameIdRef.current = activeFrame?.id ?? null;
     return () => {
       const actions = actionsRef.current;
+      const frameId = mountedFrameIdRef.current;
+      const sessionAtMount = sessionAtMountRef.current;
+      const sessionNow = frameId
+        ? (actions.fast.latestFrame(frameId)?.drafts?.peel ?? null)
+        : null;
+      // The session predates this overlay instance (restored from disk or
+      // inherited): not this lifetime's to cancel.
+      const sessionIsInherited = !!sessionNow && sessionNow === sessionAtMount;
       queueMicrotask(() => {
-        actions.adv.layer.peel.discardExchange.execute.noundo();
+        // The discard (Esc semantics) applies only to a session this overlay
+        // lifetime CREATED; an inherited session stays persisted and either
+        // outlives the unmount or is settled by its owner.
+        if (sessionIsInherited) return;
+        void actions.executeCommand(P.CMD_PEEL_SETTLE, { mode: 'discard' });
       });
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return {
@@ -108,99 +148,9 @@ export function useClipOverlayCommands() {
   };
 }
 
-// ─── useGizmoHoverSync ────────────────────────────────────────────────────────
-
-/**
- * Hover-reveal for the selection TransformGizmo box (PS Transform-Selection
- * feel): the handles stay hidden until the pointer enters the selection's
- * bounding box (with a small handle-radius pad), and hide again while ANY
- * gesture interaction is in flight — including the transform drag itself,
- * where the moving pointer would keep re-triggering its own reveal.
- *
- * The gizmo box is pointer-events-none (handles carry their own hit zones),
- * so CSS :hover cannot see it — the reveal is driven by a document
- * pointermove listener projecting the pointer into canvas space, same
- * projection the cursor hooks use.
- */
-export function useGizmoHoverSync(
-  boxRef: RefObject<HTMLElement | null>,
-  isActive: boolean
-) {
-  const { actions, geometry } = useEditorServices();
-  const { state, activeFrame } = useEditorState();
-
-  const frameRef = useRef(activeFrame);
-  useLayoutEffect(() => { frameRef.current = activeFrame; });
-  const interactingRef = useRef(!!state.interaction.isInteracting);
-  useLayoutEffect(() => {
-    interactingRef.current = !!state.interaction.isInteracting;
-    // Hide immediately when a gesture starts; re-evaluate on release.
-    if (boxRef.current) {
-      boxRef.current.style.opacity = (!isActive || interactingRef.current) ? '0' : boxRef.current.style.opacity;
-    }
-  }, [state.interaction.isInteracting, isActive, boxRef]);
-
-  useEffect(() => {
-    if (!isActive) return;
-
-    const onPointerMove = (ev: PointerEvent) => {
-      const el = boxRef.current;
-      if (!el) return;
-      const frame = frameRef.current;
-      if (!frame || interactingRef.current) {
-        el.style.opacity = '0';
-        return;
-      }
-
-      // Project pointer → canvas-local (same recipe as useClipCursor).
-      const container = document.querySelector('.editor-viewport-container');
-      if (!container) return;
-      const rect = container.getBoundingClientRect();
-      const vx = ev.clientX - rect.left;
-      const vy = ev.clientY - rect.top;
-      const currentCam = actions.fast.latestCamera(frame.id);
-      const worldPt = geometry.space.screenToWorld(vx, vy, frame, currentCam);
-      const canvasPt = geometry.space.worldToLocal(worldPt.x, worldPt.y, frame);
-
-      const poly = frame.confinement;
-      if (!poly) {
-        el.style.opacity = '0';
-        return;
-      }
-      // Pad the bbox so the gizmo handles still count as "hovering the
-      // selection". The pad must reach BEYOND the box edge: the rotation
-      // handle floats 24 screen px above the top edge (plus its 10 px hit
-      // zone), so a 24 px pad put the dot outside the reveal zone — moving
-      // the pointer onto it faded the gizmo out and the press fell through
-      // to the move surface, making the handle impossible to grab.
-      // (screen px → local px via camera scale)
-      const k = currentCam?.k ?? frame.camera.k;
-      const pad = 36 / k;
-      const inside =
-        canvasPt.x >= poly.rect.x - pad && canvasPt.x <= poly.rect.x + poly.rect.w + pad &&
-        canvasPt.y >= poly.rect.y - pad && canvasPt.y <= poly.rect.y + poly.rect.h + pad;
-      el.style.opacity = inside ? '1' : '0';
-    };
-
-    document.addEventListener('pointermove', onPointerMove, { passive: true });
-    const el = boxRef.current;
-    return () => {
-      document.removeEventListener('pointermove', onPointerMove);
-      if (el) el.style.opacity = '';
-    };
-  }, [isActive, actions, geometry, boxRef]);
-}
-
 // ─── useClipCursor ─────────────────────────────────────────────────────────────
 
 // ─── Selection hover hit-test helpers ────────────────────────────────────────
-
-/** True when the canvas-local point lies within the axis-aligned rect
- * (inclusive of the boundary). */
-function bboxContains(pt: { x: number; y: number }, rect: { x: number; y: number; w: number; h: number } | undefined): boolean {
-  if (!rect || rect.w <= 0 || rect.h <= 0) return false;
-  return pt.x >= rect.x && pt.x <= rect.x + rect.w && pt.y >= rect.y && pt.y <= rect.y + rect.h;
-}
 
 /**
  * Directional resize cursor when the point sits within `threshold` (canvas
@@ -318,6 +268,20 @@ export function useClipCursor(
       const frame = frameRef.current;
       if (!frame) return;
 
+      // Cmd/Ctrl engages the peel/spring channel: this pass must not write
+      // the single hover slot at all while the spring key is held. The
+      // workspace-level peel cursor hook (ClipOverlay/peel/usePeelCursor) is the
+      // sole writer on that channel — it refines to the peel cut/copy cursors
+      // inside the selection and stays silent elsewhere — and a null write
+      // here would race and clobber that refinement (document-level
+      // pointermove listeners fire in registration order, so whichever hook
+      // registered later would win). Skipping keeps the two writers
+      // complementary; the resolver maps an empty hover to the same spring
+      // 'move' the old explicit write produced.
+      // Re-Canvas is excluded: it suppresses the spring keys entirely and
+      // its edge-proximity cursors must keep updating under modifiers.
+      if (!isReCanvas && (ev.metaKey || ev.ctrlKey)) return;
+
       // Shift/Alt carry boolean union/difference semantics: the press is a
       // NEW selection draw even when it starts inside the existing selection
       // (move handlers are spring-filtered on those channels), so the move
@@ -356,20 +320,12 @@ export function useClipCursor(
         return;
       }
 
-      // Classify the entity's drawn shape once per move — this is the
-      // cross-tool contract: hit-testing follows what was DRAWN, regardless
-      // of which tool happens to be active right now. Interior hover → move;
-      // edges belong to the gizmo outline strips, not to this pass.
-      const shapeType = geometry.polygon.polygonToShape(poly).type;
-
-      let desired: string | null = null;
-      if (shapeType === 'rect' || shapeType === 'circle') {
-        if (bboxContains(canvasPt, poly.rect)) desired = 'move';
-      } else {
-        // Path (lasso / wand / sam / boolean result): point-in-polygon over
-        // all rings → move.
-        if (geometry.polygon.isPointInPolygon(canvasPt, poly.rings)) desired = 'move';
-      }
+      // Interior hover → move; edges belong to the gizmo outline strips,
+      // not to this pass. The predicate is the shared selection-interior
+      // hit test so the hover cursor can never promise 'move' where the
+      // move surface's DOM (border-radius 50% for ellipses) would not
+      // accept the press.
+      const desired = hitTestSelectionInterior(canvasPt, poly) ? 'move' : null;
 
       actions.fast.cursor.notifyHover(desired);
     };
@@ -390,3 +346,59 @@ export function useClipCursor(
     };
   }, [actions]);
 }
+
+// ─── Selection HUD anchor (affordances framework consumer) ──────────────────
+
+/**
+ * useSelectionHudAnchor: the selection's TRUE box in screen space for the
+ * TransformHud framework — ONE anchor for every selection HUD flavor,
+ * both flavors — but the ORIENTATION comes from the flavor's own state,
+ * never guessed from the vertices (vertex probes misread every shape
+ * whose ring does not start along its x-axis):
+ *   - peel session → the fragment's TRUE pose (baked origin rotation +
+ *     accRotation + the live field rotation, which streams through the
+ *     buffered frame during gestures — bake-proof and live);
+ *   - plain selection → 0° — the historical upright AABB (a plain
+ *     selection has no persistent orientation record; its flat box was
+ *     always the accepted presentation, bitwise preserved).
+ * The box top-left and axis lengths are projected through the camera per
+ * tick, which also folds any frame-level screen rotation into the
+ * reported angle.
+ */
+export function useSelectionHudAnchor() {
+  const { geometry } = useEditorServices();
+
+  const sessionAngleRad = useCallback((f: Frame): number => {
+    const session = readPeelSession(f);
+    if (session && session.status === 'peeled') {
+      const exchange = f.layers.byId[session.exchangeId];
+      if (exchange) return (fragmentTrueRotationDeg(session, exchange) * Math.PI) / 180;
+    }
+    // Plain flavor: the selection's OWN orientation record (accumulated by
+    // rotatePolygon since creation; 0° for a freshly drawn shape).
+    return ((f.confinement?.orientationDeg ?? 0) * Math.PI) / 180;
+  }, []);
+
+  const getAnchorFrame = useCallback((
+    _v: unknown,
+    f: Frame,
+    cam: CameraState,
+  ): ScreenRotationBox | null => {
+    const poly = f.confinement;
+    if (!poly || poly.rect.w <= 0 || poly.rect.h <= 0) return null;
+    const box = geometry.transform.rotatedPolygonBox(poly, sessionAngleRad(f));
+    return geometry.transform.toScreenRotationBox(box, cam ?? f.camera);
+  }, [geometry, sessionAngleRad]);
+
+  const getDimensionText = useCallback((_v: unknown, f: Frame): string => {
+    const poly = f.confinement;
+    if (!poly) return '0 × 0';
+    // Same recipe as the anchor: extents along the flavor's orientation
+    // (session = true pose; plain = 0° → the historical AABB readout).
+    const rf = geometry.transform.rotatedPolygonBox(poly, sessionAngleRad(f));
+    return `${Math.round(rf.w)} × ${Math.round(rf.h)}`;
+  }, [geometry, sessionAngleRad]);
+
+  return { getAnchorFrame, getDimensionText };
+}
+

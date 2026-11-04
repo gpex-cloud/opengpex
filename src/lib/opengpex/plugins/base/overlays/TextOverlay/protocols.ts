@@ -132,7 +132,7 @@ import type { LocalShape } from '@opengpex/editor/core/types';
  * on heavy documents the concurrent renderer accumulates nested updates past
  * React's limit and crashes ("Maximum update depth exceeded"). The volatile
  * fast track drives the preview via a Ticker + DOM refs with zero renders
- * (same channel as ClipOverlay's `clipMoveStart`).
+ * — the same volatile fast-track discipline the gesture feedback and other transient payloads follow).
  */
 export const TEXT_PLACE_MARQUEE_TRANSIENT_KEY = 'textPlaceMarquee';
 

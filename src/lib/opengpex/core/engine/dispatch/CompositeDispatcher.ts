@@ -70,6 +70,7 @@ import type {
   WorldShape,
   AssetService,
   GeometryService,
+  LayerPoseOverride,
 } from '@opengpex/editor/core/types';
 import { asWorldShape } from '@opengpex/editor/core/types';
 
@@ -119,6 +120,19 @@ export interface CompositeRequest {
   frame: Frame;
   /** When specified, the composite is scaled (post-encode canvas scale) to exactly this size. */
   outputSize?: { w: number; h: number };
+  /**
+   * Explicit GESTURE-TIME pose overrides keyed by layer id — today only the
+   * scale slots (`LayerPoseOverride.scale/scaleY`), consumed by
+   * `computeWorldMatrix` about the layer's bounding center. This is how the
+   * fragment-transform bake renders a magnification that is NOT a persistent
+   * layer field (`Layer.scale` stays deprecated and constantly 1.0): the
+   * caller passes the final gesture scale here, the composite samples the
+   * full-resolution shared source texture through it, and the caller swaps
+   * the baked result in as a new asset with the pose reset. Deliberately
+   * per-request (never stored on the layer) so the same seam that drives the
+   * live preview drives the bake — bake pixels ≡ preview pixels.
+   */
+  poseOverrides?: Record<string, LayerPoseOverride>;
 }
 
 
@@ -180,6 +194,7 @@ export class CompositeDispatcher {
      * document pixel — the caller must record the factor and scale its indexing.
      */
     scale = 1,
+    poseOverrides?: Record<string, LayerPoseOverride>,
   ): Promise<{
     fpixels: Float32Array;
     width: number;
@@ -251,6 +266,7 @@ export class CompositeDispatcher {
       geometry: this.geometry,
       assets: this.assets,
       getHighDepthSource: (assetId: string) => highDepthTextureCache.get(assetId) ?? undefined,
+      ...(poseOverrides ? { getLayerPoseOverride: (layerId: string) => poseOverrides[layerId] } : {}),
     });
     SceneAssembler.syncAssets(uploads, engine, lutUploads);
 
@@ -287,7 +303,7 @@ export class CompositeDispatcher {
    */
   async composite(request: CompositeRequest): Promise<CompositedImage> {
     const { fpixels, width, height, docGamut, docBitDepth, roiRect } =
-      await this.renderReadback(request.layers, request.roi, request.frame);
+      await this.renderReadback(request.layers, request.roi, request.frame, 1, request.poseOverrides);
 
     const hasHighDepth = docBitDepth > 8 || !!(request.frame.assetId ? this.assets.get(request.frame.assetId)?.dataFormat : undefined);
     // `colorSpaceToGamut` never yields 'rec2020' today (no ingest path produces

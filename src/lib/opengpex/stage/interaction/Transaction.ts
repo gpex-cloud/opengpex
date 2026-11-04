@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionEvent, VolatileState } from '@opengpex/editor/core/types';
+import { InteractionEvent, InteractionGestureFeedback, VolatileState } from '@opengpex/editor/core/types';
 
 /**
  * Transaction lifecycle states.
@@ -116,6 +116,20 @@ export class InteractionTransaction {
   }
 
   /**
+   * Declare this gesture's feedback for the system-level displacement label:
+   * WHAT is being moved/rotated and its gesture-start reference. The shared
+   * widget (widgets/DeltaLabel) reads the transient and renders one
+   * delta chip; the write rides the volatile transient channel, and the
+   * terminal transitions below clear it — a gesture that declares never
+   * needs its own cleanup, and two gestures can never both declare (they
+   * are exclusive by the single-active-handler dispatch).
+   */
+  declareFeedback(feedback: InteractionGestureFeedback): void {
+    if (this._state !== 'active') return;
+    this.e.actions.fast.setTransient('gestureFeedback', feedback);
+  }
+
+  /**
    * Commit transaction: commit final fast-track data to Redux main state (Slow Track)
    * Idempotent: calling commit() on an already committed/aborted transaction is a safe no-op.
    */
@@ -128,6 +142,7 @@ export class InteractionTransaction {
     }
 
     this._state = 'committed';
+    this.e.actions.fast.setTransient('gestureFeedback', null);
 
     if (this.hasLayerUpdates) {
       this.e.actions.fast.commit(null, 'layers');
@@ -179,6 +194,7 @@ export class InteractionTransaction {
 
     // Clear all volatile overrides (rolls back visual state to pre-interaction)
     this.e.actions.fast.reset();
+    this.e.actions.fast.setTransient('gestureFeedback', null);
     this.e.actions.setInteraction({ isInteracting: false });
     // Same ownership as commit(): abort closes this transaction's volatile
     // flag explicitly.

@@ -9,6 +9,7 @@
 
 import type { CommandInstance, InteractionSignalValue } from '@opengpex/editor/core/types';
 import type { GradingTool, CurveChannel, LevelsPatch, ChannelMixPatch, ChannelMixPresetId, AdjustmentsPatch, ColorBalancePatch } from './protocols';
+import type { CurvePoints } from '@opengpex/editor/core/types/models';
 
 /** Type map for usePluginCommands<AdjustmentDrawerCommandsMap>() */
 export interface AdjustmentDrawerCommandsMap {

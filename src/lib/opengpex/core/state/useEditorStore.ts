@@ -260,6 +260,40 @@ export function useEditorStore() {
       return undefined as R;
     };
 
+    /**
+     * settleOutgoingPeel — the frame-switch peel guard (Phase 2 P2-3).
+     *
+     * A peel session lives in `frame.drafts['peel']` of the frame it was
+     * started on, so navigating away must not carry an UNDECIDED session
+     * across frames: every frame switch fires a settle(COMMIT) for the
+     * outgoing frame first (work-preserving — the fragment is baked into a
+     * regular layer and the hole becomes a permanent removable mask, both
+     * one undo step away; a silent DISCARD here would destroy user work on
+     * mere navigation).
+     *
+     * Fire-and-forget by design: settle is mode-agnostic and every write it
+     * eventually performs is keyed by the outgoing frame's id (captured in
+     * the command context before the switch dispatch), so the async bake
+     * lands on the old frame even after SWITCH_FRAME has flushed. The
+     * dispatch is UNCONDITIONAL: with no undecided session the command is a
+     * zero-cost no-op ("callers never need to know what happened before
+     * they arrived"), and a commit already in flight is voided by the
+     * settle lock, never queued. The core does not read the session record
+     * itself — the record is plugin-owned domain knowledge
+     * (ClipOverlay/commands/session.ts); dispatch is by protocol id only.
+     */
+    const settleOutgoingPeel = (): void => {
+      const currentStore = stateRef.current;
+      const outgoingId = currentStore.activeFrameId;
+      if (!outgoingId) return;
+      if (!currentStore.frames.byId[outgoingId]) return;
+      // The id literal is the plugin-owned peel protocol's settle command
+      // (ClipOverlay/commands/protocols.ts is the single source of truth); the
+      // core cannot import plugin modules, so the global id string is the
+      // contract — the registry resolves it via the declared-id fallback.
+      void executeCommand('cmd.peel.settle', { mode: 'commit' });
+    };
+
     const frameActions = {
       addFrame: (frame: Frame, switchFrame = true) => {
         const currentStore = stateRef.current;
@@ -267,7 +301,10 @@ export function useEditorStore() {
         // - If the artboard to be added or activated is already the currently active artboard, intercept and return directly; never execute reset and subsequent dispatch.
         // - This significantly optimizes React rendering performance under high-frequency interactions/redraws, and fundamentally eliminates the risk of history stack clearing due to repeated state synchronization or side effect backflow.
         if (currentStore.activeFrameId === frame.id) return;
-        if (switchFrame) resetVolatile();
+        if (switchFrame) {
+          settleOutgoingPeel();
+          resetVolatile();
+        }
         if (currentStore.activeFrameId) {
           enhancedDispatch({ type: 'SIGNAL_COMMIT', payload: { frameId: currentStore.activeFrameId } });
         }
@@ -278,6 +315,7 @@ export function useEditorStore() {
         // [Defensive Programming: Idempotent Defense Line]
         // If the target frame is already the currently active artboard, immediately return idempotently to prevent repeated SIGNAL_COMMIT from wiping out the Redo stack.
         if (currentStore.activeFrameId === id) return;
+        settleOutgoingPeel();
         resetVolatile();
         if (currentStore.activeFrameId) {
           enhancedDispatch({ type: 'SIGNAL_COMMIT', payload: { frameId: currentStore.activeFrameId } });
@@ -286,6 +324,16 @@ export function useEditorStore() {
       },
       updateFrame: (id: string, patch: Partial<Frame>) => enhancedDispatch({ type: 'UPDATE_FRAME', payload: { id, patch } }),
       removeFrame: (frameIds: string[], nextActiveFrameId: string | null) => {
+        const currentStore = stateRef.current;
+        // The guard only fires when the currently active frame SURVIVES the
+        // removal but loses focus: a removed frame dies together with its
+        // session record, and staying on the same frame keeps the session
+        // undecided on purpose.
+        const survivesButSwitches =
+          currentStore.activeFrameId !== null &&
+          !frameIds.includes(currentStore.activeFrameId) &&
+          nextActiveFrameId !== currentStore.activeFrameId;
+        if (survivesButSwitches) settleOutgoingPeel();
         resetVolatile();
         enhancedDispatch({ type: 'REMOVE_FRAME', payload: { frameIds, nextActiveFrameId } });
       },
@@ -551,10 +599,6 @@ export function useEditorStore() {
             copy: advRef(P.ADV_LAYER_CMDJ_COPY, (payload?: { feather?: number }) => executeCommand(P.ADV_LAYER_CMDJ_COPY, payload)),
             cut: advRef(P.ADV_LAYER_CMDJ_CUT, (payload?: { feather?: number }) => executeCommand(P.ADV_LAYER_CMDJ_CUT, payload)),
           },
-          peel: {
-            peelToExchange: advRef(P.ADV_LAYER_PEEL_EXCHANGE, (payload: { isCopy: boolean }) => executeCommand(P.ADV_LAYER_PEEL_EXCHANGE, payload)),
-            discardExchange: advRef(P.ADV_LAYER_PEEL_DISCARD, () => executeCommand(P.ADV_LAYER_PEEL_DISCARD)),
-          },
           mask: {
             toggle: advRef(P.ADV_LAYER_MASK_TOGGLE, (payload: { layerId: string; maskId: string; frameId?: string }) => executeCommand(P.ADV_LAYER_MASK_TOGGLE, payload)),
             invert: advRef(P.ADV_LAYER_MASK_INVERT, (payload: { layerId: string; frameId?: string }) => executeCommand(P.ADV_LAYER_MASK_INVERT, payload)),
@@ -574,7 +618,6 @@ export function useEditorStore() {
             remove: advRef(P.ADV_LAYER_ADJUST_MASK_REMOVE, (payload: { frameId?: string; layerId: string; maskId: string }) => executeCommand(P.ADV_LAYER_ADJUST_MASK_REMOVE, payload)),
           },
           merge: {
-            mergeHost: advRef(P.ADV_LAYER_MERGE_HOST, () => executeCommand(P.ADV_LAYER_MERGE_HOST)),
             down: advRef(P.ADV_LAYER_MERGE_DOWN, () => executeCommand(P.ADV_LAYER_MERGE_DOWN)),
             visible: advRef(P.ADV_LAYER_MERGE_VISIBLE, () => executeCommand(P.ADV_LAYER_MERGE_VISIBLE)),
             rasterize: advRef(P.ADV_LAYER_MERGE_RASTERIZE, (payload: { layerId?: string }) => executeCommand(P.ADV_LAYER_MERGE_RASTERIZE, payload)),

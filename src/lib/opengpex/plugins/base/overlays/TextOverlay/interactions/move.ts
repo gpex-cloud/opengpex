@@ -151,6 +151,14 @@ export const createTextMoveHandler = (): InteractionHandler => {
       // geometry, so the move must be undoable on its own).
       tx = new InteractionTransaction(e);
       tx.begin();
+      // Declare the gesture feedback for the system-level delta label.
+      // Cleared by the transaction's commit/abort.
+      tx.declareFeedback({
+        kind: 'translate',
+        target: 'layer',
+        targetId: targetLayerId,
+        origin: { x: startLayerPos.x, y: startLayerPos.y },
+      });
 
       // Set grabbing onStart (fast-track, no React re-render)
       e.actions.fast.cursor.notifyDragging('grabbing');

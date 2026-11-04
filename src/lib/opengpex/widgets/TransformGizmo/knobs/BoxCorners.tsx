@@ -20,7 +20,7 @@
 "use client";
 
 import React from "react";
-import { KNOB_OUTSET_X_PX, KNOB_OUTSET_Y_PX } from "../geometry";
+import { GIZMO_CORE, GIZMO_EDGE, KNOB_OUTSET_X_PX, KNOB_OUTSET_Y_PX } from "../geometry";
 
 /**
  * Corner bracket sizing (industry crop-bracket HUD practice):
@@ -101,7 +101,7 @@ export const BoxCorners = React.memo(function BoxCorners({
         <polyline
           points={points}
           fill="none"
-          stroke="#000000"
+          style={{ stroke: GIZMO_EDGE }}
           strokeWidth={strokeWidth + 2}
           strokeLinecap="square"
           strokeLinejoin="miter"
@@ -110,7 +110,7 @@ export const BoxCorners = React.memo(function BoxCorners({
         <polyline
           points={points}
           fill="none"
-          stroke="#ffffff"
+          style={{ stroke: GIZMO_CORE }}
           strokeWidth={strokeWidth}
           strokeLinecap="square"
           strokeLinejoin="miter"

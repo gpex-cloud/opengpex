@@ -240,10 +240,10 @@ export interface EditorActions {
         copy: AdvCommandRef<{ feather?: number } | undefined>;
         cut: AdvCommandRef<{ feather?: number } | undefined>;
       };
-      peel: {
-        peelToExchange: AdvCommandRef<{ isCopy: boolean }>;
-        discardExchange: AdvCommandRef;
-      };
+      // NOTE: the peel command family (cmd.peel.*) is plugin-owned
+      // (ClipOverlay/commands/peel.ts) — it is interaction-fused domain
+      // knowledge, not a core document service. Dispatch it by protocol id
+      // through actions.executeCommand.
       mask: {
         toggle: AdvCommandRef<{ layerId: string; maskId: string; frameId?: string }>;
         invert: AdvCommandRef<{ layerId: string; frameId?: string }>;
@@ -263,7 +263,6 @@ export interface EditorActions {
         remove: AdvCommandRef<{ frameId?: string; layerId: string; maskId: string }>;
       };
       merge: {
-        mergeHost: AdvCommandRef;
         down: AdvCommandRef;
         visible: AdvCommandRef;
         rasterize: AdvCommandRef<{ layerId?: string }>;

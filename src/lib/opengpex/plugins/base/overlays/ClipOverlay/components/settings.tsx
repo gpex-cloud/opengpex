@@ -21,12 +21,13 @@
 
 import { usePluginSelfConfig } from '@opengpex/editor/core/context';
 import Switch from '@opengpex/editor/widgets/Switch';
-import { Scissors } from 'lucide-react';
+import { Ruler, Scissors } from 'lucide-react';
 import type { ClipOverlayConfig } from '../protocols';
 
 /**
  * ClipOverlaySettings: Settings panel contribution for Selection / Clip Overlay.
- * Allows users to toggle marching ants animation.
+ * Allows users to toggle marching ants animation and the selection
+ * dimension chip.
  */
 export function ClipOverlaySettings() {
   const [config, updateConfig] = usePluginSelfConfig<ClipOverlayConfig>();
@@ -60,6 +61,33 @@ export function ClipOverlaySettings() {
         <Switch
           checked={config.marchingAntsAnimated ?? false}
           onChange={(v) => updateConfig({ marchingAntsAnimated: v })}
+          activeColor="bg-indigo-500"
+        />
+      </button>
+
+      {/* Selection Dimension Chip Toggle */}
+      <button
+        onClick={() => updateConfig({ showDimensionLabel: !(config.showDimensionLabel ?? true) })}
+        className="flex items-center justify-between w-full p-2.5 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] group outline-none"
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className={`w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center transition-colors ${(config.showDimensionLabel ?? true) ? 'bg-indigo-500/10 text-indigo-500' : 'bg-[var(--bg-stage)] text-[var(--text-muted)]'}`}
+          >
+            <Ruler size={13} />
+          </div>
+          <div className="flex flex-col items-start leading-tight text-left">
+            <span className="text-[10px] font-black text-[var(--text-main)] uppercase tracking-tight">
+              Show Selection Dimensions
+            </span>
+            <span className="text-[8px] text-[var(--text-muted)] font-bold uppercase">
+              Width × height under every selection · clip mode
+            </span>
+          </div>
+        </div>
+        <Switch
+          checked={config.showDimensionLabel ?? true}
+          onChange={(v) => updateConfig({ showDimensionLabel: v })}
           activeColor="bg-indigo-500"
         />
       </button>

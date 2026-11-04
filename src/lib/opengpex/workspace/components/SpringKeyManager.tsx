@@ -65,6 +65,24 @@ export default function SpringKeyManager() {
         engaged: (e) => e.metaKey || e.ctrlKey,
         released: (key) => key === 'Meta' || key === 'Control',
       },
+      {
+        // Alt: no dispatcher/cursor semantics yet (the boolean draw handlers
+        // read the raw event bit via their shift+alt springOverride and
+        // `e.spring` is built per-event), but the BLUR-SAFE channel state
+        // belongs here: consumers that re-derive a visual state from the
+        // modifier chord (e.g. the clip overlay's peel cursor re-classifying
+        // on a channel flip) must not hand-roll their own key listeners —
+        // they would miss the blur safety net below.
+        channel: 'alt',
+        engaged: (e) => e.altKey,
+        released: (key) => key === 'Alt',
+      },
+      {
+        // Shift: same rationale as alt.
+        channel: 'shift',
+        engaged: (e) => e.shiftKey,
+        released: (key) => key === 'Shift',
+      },
     ];
 
     const setDocFlag = (channel: SpringChannel, active: boolean) => {

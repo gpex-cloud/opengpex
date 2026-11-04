@@ -52,6 +52,7 @@ import Popover from "@opengpex/editor/widgets/Popover";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import { InvertIcon, AlphaIcon } from "@opengpex/editor/icons";
 import { useClipOptionsCommands } from "./hooks";
+import { usePeelCursor } from "@opengpex/editor/plugins/base/overlays/ClipOverlay/peel/usePeelCursor";
 import { CLIP_TOOL_STRATEGIES, type ClipToolStrategy } from "./protocols";
 import type { ClipOptionsSignalsMap } from "./commands.d";
 
@@ -102,6 +103,11 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
   } = useClipOptionsCommands();
 
   const { reCanvasActiveSignal } = usePluginSignals<ClipOptionsSignalsMap>();
+
+  // Workspace-level peel hover cursor (mode-agnostic Cmd-over-selection
+  // refinement). Persistent here because the clip overlay — the only other
+  // hover writer that could host it — is unmounted in pan mode.
+  usePeelCursor();
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isOffsetOpen, setIsOffsetOpen] = useState(false);
@@ -406,15 +412,12 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                 {/*
                  * Tool-strip close button — mirrors the Re-Canvas popover's
                  * "X" affordance (see the Re-Canvas Popover further down).
-                 * Clicking dispatches `toggleModeCmd` which, given we are
-                 * already in clip (the strip is `isOpen` only then), flips
-                 * mode → 'pan' via the unified `exitClipMode` path. We
-                 * intentionally use the *toggle* command rather than a
-                 * direct `setInteraction({ interactionMode: 'pan' })`
-                 * because `exitClipMode` schedules the deferred
-                 * `mergeHost` microtask that commits any in-flight peel /
-                 * exchange triplet — bypassing it would leak un-merged
-                 * fragments into the document.
+                 * Clicking dispatches `exitClipModeCmd` (the same command as
+                 * Esc), which settles any undecided peel session as a
+                 * DISCARD before flipping mode → 'pan'. We intentionally
+                 * route through the command rather than a direct
+                 * `setInteraction({ interactionMode: 'pan' })` so the exit
+                 * path stays single-sourced.
                  *
                  * NOTE: `toggleModeCmd` in clip mode CYCLES the active
                  * tool, it does NOT exit clip. The exit path is

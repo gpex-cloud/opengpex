@@ -91,6 +91,25 @@ export const EDGE_ANCHORS: readonly HandleAnchor<EdgeDir>[] = [
 export const MARK_STROKE_W = 2;
 
 /**
+ * The marks' two colors, resolved through custom properties the gizmo root
+ * sets from its `tone`: the outline (underlay) and the core (fill + inner
+ * stroke). Each tone keeps a darker outline under a lighter core so the
+ * dual-stroke mark still separates from any background.
+ */
+export const GIZMO_EDGE = 'var(--gizmo-edge, #000000)';
+export const GIZMO_CORE = 'var(--gizmo-core, #ffffff)';
+
+/** Outline/core colors per gizmo tone. `linked` (all blue) marks a box whose
+ * transform also carries a coupled entity (a peeled fragment and its
+ * selection): sky-400 core over a sky-700 outline. */
+export const GIZMO_TONE = {
+  default: { edge: '#000000', core: '#ffffff' },
+  linked: { edge: '#0369a1', core: '#38bdf8' },
+} as const;
+
+export type GizmoTone = keyof typeof GIZMO_TONE;
+
+/**
  * Wrapper style shared by every point mark (cube / chip / edge tick / rotate
  * dot): an absolutely positioned square of `sizePx`, centred on `anchor`
  * (default: the centre of its parent), counter-scaled through

@@ -20,7 +20,7 @@
 'use client';
 
 import React, { useRef, useEffect, useLayoutEffect, useState } from 'react';
-import type { Frame, CameraState } from '@opengpex/editor/core/types';
+import type { Frame, CameraState, TransformLayer } from '@opengpex/editor/core/types';
 import { PERF_MON } from '@opengpex/editor/core/helpers/config';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
@@ -301,6 +301,26 @@ export default function CanvasStage() {
             const compositeKey = `${f.id}:${layerId}`;
             const draft = v.buffered.layers[compositeKey];
             return draft?.mask || undefined;
+          },
+          // Live fragment-transform scale (LIVE-EDIT stamp discipline): the
+          // gesture streams its magnification through the `fragmentTransform`
+          // transient — no Layer field, no caching, no composite-signature
+          // participation. Committed frames carry no transient → undefined.
+          getLayerPoseOverride: (layerId: string) => {
+            const t = v.transient['fragmentTransform'] as Partial<TransformLayer> | undefined;
+            if (!t || t.layerId !== layerId || typeof t.scaleX !== 'number') return undefined;
+            // Hand-over guard: once the bake lands the layer on its new
+            // (already magnified) asset, the preview scale must not apply.
+            if (t.sourceAssetId && f.layers.byId[layerId]?.assetId !== t.sourceAssetId) return undefined;
+            return {
+              scale: t.scaleX,
+              scaleY: typeof t.scaleY === 'number' ? t.scaleY : t.scaleX,
+              // LOCAL-frame slots (selection-driven scale): both ride
+              // together; absent ⇒ the override stays bare `O · S`.
+              ...(typeof t.rotationDeg === 'number' && typeof t.sourceAngle === 'number'
+                ? { rotation: t.rotationDeg, sourceAngle: t.sourceAngle }
+                : {}),
+            };
           },
           // Per-layer precision: serve decoded 16/32-bit source pixels so
           // the base layer uploads as rgba16float. Import-time warm makes this a

@@ -27,7 +27,7 @@ import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
 import type { ClipToolAAMap } from '../../../../options/ClipOptions/protocols';
 import { createTransformHandler, TransformIntent } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
-import { makeClipToolGuard } from '../guard';
+import { makeClipToolGuard, discardPeelOnFreshDraw } from '../guard';
 import { booleanOpFromModifiers, combineWithSelection, createLiveBooleanPreview } from '../boolean';
 
 /**
@@ -78,6 +78,9 @@ export const createPathEllipseHandler = (): InteractionHandler => {
     },
 
     getInitialState: (e, intent) => {
+      // A fresh plain draw while a peel session is undecided cancels the
+      // session (Esc semantics) before the replacement selection starts.
+      if (intent.category === 'create') discardPeelOnFreshDraw(e);
       gestureBase = intent.category === 'create' ? getClipBox(e.activeFrame) : null;
       lastCreateRect = null;
       const currentBox = getClipBox(e.activeFrame);

@@ -185,8 +185,13 @@ export function writeFrameDraft(frame: Frame, toolId: string, payload: unknown):
  * Drops every drafts key this build cannot interpret: no codec registered,
  * or codec validation failed. Used by the document hydrator so a file saved
  * by a newer build loads with its unknown drafts evaporated instead of
- * carrying opaque data into the state tree. Returns undefined when nothing
- * survives, so the `drafts` key itself can be omitted.
+ * carrying opaque data into the state tree. Surviving entries are stored in
+ * their VALIDATED form — a codec may normalize a legacy/residue shape
+ * (e.g. the peel codec folds a persisted mid-commit 'committing' back to
+ * 'peeled'), and that fold must land in the state tree, not just in reader
+ * views, or a stale residue value would keep short-circuiting the live
+ * commands forever. Returns undefined when nothing survives, so the
+ * `drafts` key itself can be omitted.
  */
 export function sanitizeFrameDrafts(drafts: unknown): Record<string, unknown> | undefined {
   if (!drafts || typeof drafts !== 'object' || Array.isArray(drafts)) return undefined;
@@ -194,8 +199,9 @@ export function sanitizeFrameDrafts(drafts: unknown): Record<string, unknown> | 
   for (const [key, value] of Object.entries(drafts as Record<string, unknown>)) {
     const codec = codecs.get(key);
     if (!codec || !value || typeof value !== 'object') continue;
-    if (!codec.validate(value)) continue;
-    kept[key] = value;
+    const valid = codec.validate(value);
+    if (!valid) continue;
+    kept[key] = valid;
   }
   return Object.keys(kept).length > 0 ? kept : undefined;
 }

@@ -48,8 +48,8 @@ import type { PenHoverIntent } from './hoverIntent';
 const SVG_OPEN = `%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='24' fill='none'%3E`;
 const SVG_CLOSE = `%3C/svg%3E`;
 
-const CROSSHAIR = `%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E`
-  + `%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E`;
+const CROSSHAIR = `%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E`
+  + `%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E`;
 
 const NIB = `%3Cpath d='M14 21l2.5-7.5L21 9l1.5 1.5-4.5 4.5L14 21z' stroke='white' stroke-width='2.5' stroke-linejoin='round' fill='none'/%3E`
   + `%3Cpath d='M14 21l2.5-7.5L21 9l1.5 1.5-4.5 4.5L14 21z' stroke='black' stroke-width='1' stroke-linejoin='round' fill='none'/%3E`;

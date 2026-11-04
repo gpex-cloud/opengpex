@@ -66,9 +66,6 @@ export const ADV_ASSET_SYNC = 'adv.system.asset.sync';
 // 3. Layer Management
 export const ADV_LAYER_TOGGLE_ALL = 'adv.layer.toggle_all';
 export const ADV_LAYER_TOGGLE_OTHERS = 'adv.layer.toggle_others';
-export const ADV_LAYER_PEEL_EXCHANGE = 'adv.layer.peel.exchange';
-export const ADV_LAYER_PEEL_DISCARD = 'adv.layer.peel.discard';
-export const ADV_LAYER_MERGE_HOST = 'adv.layer.merge.host';
 export const ADV_LAYER_MERGE_DOWN = 'adv.layer.merge.down';
 export const ADV_LAYER_MERGE_VISIBLE = 'adv.layer.merge.visible';
 export const ADV_LAYER_MERGE_RASTERIZE = 'adv.layer.merge.rasterize';

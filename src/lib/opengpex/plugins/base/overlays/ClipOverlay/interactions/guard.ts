@@ -18,6 +18,7 @@
  */
 
 import { InteractionEvent } from '@opengpex/editor/core/types';
+import { readPeelSession } from '../peel/session';
 import {
   ClipOptionsAPI,
   CLIP_TOOL_STRATEGIES,
@@ -59,4 +60,29 @@ export function makeClipToolGuard(targetKind: ClipToolStrategy['handlerKind']) {
     const effectiveTool: ClipTool = inReCanvas ? 'rect' : rawTool;
     return CLIP_TOOL_STRATEGIES[effectiveTool].handlerKind === targetKind;
   };
+}
+
+/**
+ * discardPeelOnFreshDraw — call at the head of a selection tool's onStart:
+ * a FRESH selection draw while a peel session is undecided is an implicit
+ * CANCEL (Esc semantics — the fragment and its glued selection disappear),
+ * after which the tool draws the replacement selection immediately. A
+ * fresh draw in clip mode starts OUTSIDE the selection by construction
+ * (presses inside are claimed by the move/transform handlers), and the
+ * boolean-modifier drags (Shift/Alt add/subtract, Cmd peel family) keep
+ * their own flows — only a plain draw cancels.
+ */
+export function discardPeelOnFreshDraw(e: InteractionEvent): void {
+  const session = readPeelSession(e.activeFrame);
+  const target = e.nativeEvent.target as HTMLElement | null;
+  const scopeHit = !!target?.closest('[data-clip-selection-gizmo]');
+  if (!session || session.status !== 'peeled') return;
+  if (e.keys.shift || e.keys.alt || e.keys.meta) return;
+  // A press on the session's own gizmo (handles, rotation dot, move
+  // surface) belongs to the session transform handler — and the gizmo
+  // handles of a rotated fragment float OUTSIDE the selection polygon, so
+  // the press would otherwise read as a "fresh draw outside" and cancel
+  // the session the user was trying to transform.
+  if (scopeHit) return;
+  void e.actions.executeCommand(ClipOptionsAPI.commands.resetBox.uid);
 }

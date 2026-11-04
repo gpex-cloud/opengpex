@@ -30,7 +30,7 @@ import {
   asLocalPolygon, asLocalRect,
   LocalPolygon, LocalPoint, Point2D
 } from '@opengpex/editor/core/types';
-import { MARCHING_ANTS_MAX_VERTICES } from './protocols';
+import { MARCHING_ANTS_MAX_VERTICES } from '../protocols';
 
 /** Display-edge mode (`deriveEdgeDisplayMode` on the geometry service). */
 export type EdgeDisplayMode = 'ss' | 'aa' | 'na';

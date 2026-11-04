@@ -72,13 +72,18 @@ export const plugin: EditorPlugin = {
       beforeExecute: (id, ctx) => CLIP_INTERCEPTORS.beforeExecute(id, ctx),
     },
   },
-  contributions: { ui: [
-    {
-      slot: "TOOL_MENU",
-      component: ClipSelectionActions,
-      order: 300,
-    },
-  ] },
+  contributions: {
+    ui: [
+      {
+        slot: "TOOL_MENU",
+        component: ClipSelectionActions,
+        order: 300,
+      },
+    ],
+    // The peel session whitelist entry: `frame.drafts['peel']` becomes a
+    // typed, hydrate-guarded channel (malformed or foreign-version payloads
+    // degrade to "no session" at load instead of poisoning state).
+  },
 };
 
 export default plugin;

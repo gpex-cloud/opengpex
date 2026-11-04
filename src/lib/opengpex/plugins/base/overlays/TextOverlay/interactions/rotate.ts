@@ -80,6 +80,10 @@ export const createTextRotateHandler = (): InteractionHandler => {
       // Non-silent: own undoable history step (see TextMoveHandler).
       tx = new InteractionTransaction(e);
       tx.begin();
+      // Declare the gesture feedback for the system-level delta label (the
+      // widget shows the target's live absolute angle). Cleared by the
+      // transaction's commit/abort.
+      tx.declareFeedback({ kind: 'rotate', target: 'layer', targetId: rotateLayerId, origin: { x: layerCx, y: layerCy } });
       e.actions.fast.cursor.notifyDragging(ROTATE_CURSOR);
     },
 

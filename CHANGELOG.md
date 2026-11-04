@@ -2,6 +2,25 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.43
+
+- Workspace: a floating fragment that grows past what the GPU can bake now refuses the bake with a clear message instead of freezing the pointer — the fragment stays floating and you can simply try a smaller size
+- Workspace: a failed fragment bake now shows an error message and leaves the fragment editable instead of getting stuck half-previewed
+- Workspace: refreshing the page no longer discards a floating fragment — the cut stays exactly where you left it after a reload
+- Workspace: the floating cut-out fragment is now handled entirely through its marching-ants outline — drag the outline to move it, grab its handles to scale and rotate it (Shift snaps to 15° and restores exact proportions), and the outline travels with every change; the handles turn blue while a fragment is floating so you always know what you are gripping
+- Workspace: while a fragment is floating, clicking or drawing outside the outline now cancels it (like pressing Escape); Enter, Cmd+D or a click inside the outline places it; Space now only switches between clip and pan modes and no longer places the fragment
+- Workspace: a floating fragment shows a small action bar with visible buttons — place (Enter), cancel (Escape) and reset size (appears only after you resized it) — so every way to finish a fragment is discoverable without knowing the shortcuts
+- Workspace: copied fragments (Cmd+Alt drag) can be re-stamped repeatedly from the same cut, and every selection shape (rectangle, ellipse, lasso, magic wand) now shows a live size label, with a new Settings switch to hide it
+- Workspace: cutting and copying fragments is now guarded on locked layers — a locked layer refuses the cut with a clear message instead of sliding the selection around; the copy variant still works on locked layers
+- Workspace: transforming a fragment no longer degrades it — rotating away and back returns the exact original size, Shift rotation reliably lands on upright and 15° steps at any accumulated angle, and resizing keeps the original sharpness instead of resampling repeatedly
+- Workspace: fixed the mirrored fragment snapping back to unmirrored on release; fragment and outline now also move as one pair when dragging in pan mode, and a stray click in pan no longer clears the selection
+- Workspace: for ellipse selections the hover cursor and the inside/outside click split now follow the true elliptical outline instead of the bounding box — corner presses no longer claim a move that the outline would not accept
+- Workspace: displacement and rotation feedback is now one consistent chip for every transform (selection, fragment, layers, text and pen moves), it follows rotated objects correctly, and cursor changes (scissors, duplicate) now appear the instant Cmd or Alt is pressed without moving the mouse
+- Workspace: rotating a selection with Shift now actually snaps to 15° steps and can always be brought back to upright — the snap previously did nothing on plain selections
+- Workspace: resizing a rotated selection or a floating fragment keeps it a rectangle at any angle instead of skewing into a parallelogram, and the outline keeps hugging the fragment through every change
+- Workspace: the resize and rotate handles of a rotated selection or floating fragment now show direction-correct arrows at any angle (fine 6° steps, matching the outline), and they no longer vanish when hovering near the corners of rotated round shapes
+- Workspace: a click inside a floating fragment's outline no longer places it — an accidental tap can no longer lose the floating fragment; placing still works via Enter, Cmd+D or the action bar buttons
+
 ## 2.0.42
 
 - AI Tools: using the segmentation selection tool before its model is installed now downloads the model through the same progress panel as the model manager, and cancelling that download no longer reports an error

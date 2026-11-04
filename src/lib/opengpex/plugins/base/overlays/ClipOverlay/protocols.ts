@@ -25,6 +25,8 @@ export const PLUGIN_AUTHOR = 'opengpex';
 export interface ClipOverlayConfig {
   maskOpacity: number;
   marchingAntsAnimated: boolean;
+  /** Show the selection dimension chip (clip mode only; never in pan). */
+  showDimensionLabel: boolean;
 }
 
 /**
@@ -37,6 +39,37 @@ export const ClipOverlayAPI = {
   /** pluginConfig storage key */
   configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
 } as const;
+
+// ─── Peel Command Ids ────────────────────────────────────────────────────────
+// The peel command family lives in ./commands.ts. The core frame-switch
+// guard dispatches settleExchange by the bare id string (it cannot import
+// plugin modules) — this file is the single source of truth for it; the
+// command registry resolves declared ids through a uid-suffix fallback.
+
+/** Cmd+drag inside the selection: cut the fragment out (or stamp a copy while a session is undecided). */
+export const CMD_PEEL_EXCHANGE = 'cmd.peel.exchange';
+/** Cancel the undecided peel session (Esc semantics). */
+export const CMD_PEEL_DISCARD = 'cmd.peel.discard';
+/** Promote the floating fragment (composite stamps + exchange into a regular layer). Internal step of settle — never dispatched by id. */
+export const CMD_PEEL_MERGE = 'cmd.peel.merge';
+/** THE convergence API for every peel exit path (Enter / Cmd+D / outside cancel / frame switch). */
+export const CMD_PEEL_SETTLE = 'cmd.peel.settle';
+/** "Reset size": restore the fragment to its peel-time pixels and size. */
+export const CMD_PEEL_RESET_TRANSFORM = 'cmd.peel.reset_transform';
+/** Bake a finished transform gesture into new fragment pixels (write-copy). */
+export const CMD_PEEL_APPLY_TRANSFORM = 'cmd.peel.apply_transform';
+
+/** Cross-plugin facade for the peel commands (dispatch by uid). */
+export const PeelAPI = {
+  uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
+  commands: {
+    peelToExchange: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PEEL_EXCHANGE}` } as { uid: string; _payload: { isCopy: boolean } },
+    discardExchange: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PEEL_DISCARD}` } as { uid: string; _payload: void },
+    settleExchange: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PEEL_SETTLE}` } as { uid: string; _payload: { mode: 'commit' | 'discard'; clearSelection?: boolean } },
+    resetTransform: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PEEL_RESET_TRANSFORM}` } as { uid: string; _payload: void },
+    applyTransform: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PEEL_APPLY_TRANSFORM}` } as { uid: string; _payload: { pose: unknown } },
+  },
+};
 
 // ─── Marching Ants Performance Tuning ────────────────────────────────────────
 

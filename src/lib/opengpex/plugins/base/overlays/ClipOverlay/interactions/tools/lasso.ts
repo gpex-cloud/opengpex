@@ -30,7 +30,7 @@ import {
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
 import type { ClipToolAAMap } from '../../../../options/ClipOptions/protocols';
-import { makeClipToolGuard } from '../guard';
+import { makeClipToolGuard, discardPeelOnFreshDraw } from '../guard';
 import { booleanOpFromModifiers, combineWithSelection } from '../boolean';
 
 /**
@@ -142,6 +142,9 @@ export const createLassoHandler = (): InteractionHandler => {
     },
 
     onStart: (e) => {
+      // A fresh plain draw while a peel session is undecided cancels the
+      // session (Esc semantics) before the replacement selection starts.
+      discardPeelOnFreshDraw(e);
       active = true;
       const clipBox = getClipBox(e.activeFrame);
       // Fresh gesture with no selection on canvas: inherit the lasso tool's

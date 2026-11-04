@@ -26,11 +26,18 @@ import { getFrameDraftCodec } from '../../state/drafts';
  * [Generic] Core geometric operator: calculate transform matrix of any asset in world coordinate system
  *
  * Design contract:
- *   Matrix = Translate(cx, cy) × Orientation(rotation, flip) × Translate(-bounding.w/2, -bounding.h/2)
+ *   Matrix = Translate(cx, cy) × Orientation(rotation, flip) × Scale(sx, sy) × Translate(-bounding.w/2, -bounding.h/2)
  *
  * This places the center of the layer's BOUNDING BOX at world coordinate (cx, cy).
  * The painter (painter.ts) then draws content at visibleShape.rect offset (vx, vy) within
  * this bounding-local coordinate space, so content naturally appears at its correct position.
+ *
+ * The scale factors come from a `LayerPoseOverride` ONLY — `Layer.scale` is a
+ * deprecated, constantly-1.0 field and must never gain rendering semantics.
+ * Scale is applied about the bounding center (it commutes with the flip
+ * mirror because both are diagonal matrices), so a fragment gesture scales
+ * the content around (cx, cy) and the caller re-anchors (cx, cy) to keep the
+ * gesture's anchor corner fixed.
  *
  * [Historical note / Bugfix 2026-07-04]
  * Previously this function used visibleShape.rect for centering and included a -rect.x/-rect.y
@@ -48,11 +55,27 @@ function computeWorldMatrix(props: {
   rotation: number;
   flip: { h: boolean; v: boolean };
   bounding: { w: number; h: number };
+  scale?: number;
+  scaleY?: number;
+  sourceAngle?: number;
 }): Matrix3x3 {
   const { cx, cy, rotation, flip, bounding } = props;
 
+  const sx = props.scale ?? 1;
+  const sy = props.scaleY ?? props.scale ?? 1;
+  const S = (sx === 1 && sy === 1)
+    ? Matrix3x3.identity()
+    : new Matrix3x3(sx, 0, 0, sy, 0, 0);
+  // sourceAngle: the content's tilt inside the bitmap — cancelled BEFORE
+  // the stretch so axis factors act on the content's own axes (linear part
+  // `O · S · R(−sourceAngle)`). 0 ⇒ R(0) = identity ⇒ the historical
+  // matrix, bitwise.
+  const L = Matrix3x3.rotate(-(props.sourceAngle ?? 0));
+
   return Matrix3x3.translate(cx, cy)
     .multiply(getOrientationMatrix(rotation, flip))
+    .multiply(S)
+    .multiply(L)
     .multiply(Matrix3x3.translate(-bounding.w / 2, -bounding.h / 2));
 }
 
@@ -133,7 +156,10 @@ export function getLayerWorldMatrix(layer: Layer, override?: LayerPoseOverride):
     cy,
     rotation,
     flip: layer.flip,
-    bounding: layer.bounding
+    bounding: layer.bounding,
+    scale: override?.scale,
+    scaleY: override?.scaleY,
+    sourceAngle: override?.sourceAngle,
   });
 }
 

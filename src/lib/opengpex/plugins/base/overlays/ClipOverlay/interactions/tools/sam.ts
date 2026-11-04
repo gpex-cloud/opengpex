@@ -38,7 +38,7 @@ import type {
   SegDecodePayload,
   SegDecodeResult,
 } from '../../../../drawers/AIToolsDrawer/segmentation/protocols';
-import { makeClipToolGuard } from '../guard';
+import { makeClipToolGuard, discardPeelOnFreshDraw } from '../guard';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -100,6 +100,9 @@ export const createSamHandler = (): InteractionHandler => {
     },
 
     onStart: (e) => {
+      // A fresh plain draw while a peel session is undecided cancels the
+      // session (Esc semantics) before the replacement selection starts.
+      discardPeelOnFreshDraw(e);
       startWorld = { x: e.point.world.x, y: e.point.world.y };
     },
 

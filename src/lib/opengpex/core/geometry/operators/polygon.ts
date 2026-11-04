@@ -22,6 +22,8 @@ import {
   Layer, Frame,
   LocalPoint, WorldPoint,
   LocalRect, LocalPolygon, WorldPolygon,
+  RotationBox, ScreenRotationBox,
+  CameraState,
   LocalShape, WorldShape,
   asLocalPoint, asWorldPoint,
   asLocalRect, asWorldRect,
@@ -29,6 +31,7 @@ import {
 } from '@opengpex/editor/core/types';
 import { getLayerWorldMatrix } from './transform';
 import { isLayerSource } from './utils';
+import { localToScreen } from './space';
 // GridOffset / GridWindow / getVisibleRect / visibleGridWindow live in
 // `./camera` (viewport-culling infrastructure): the staircase consumes the
 // visible grid-cell window produced there, on the target layer's pixel grid.
@@ -142,7 +145,7 @@ export function translatePolygon(poly: LocalPolygon, dx: number, dy: number): Lo
     w: poly.rect.w,
     h: poly.rect.h,
   });
-  return asLocalPolygon(newRings, newRect, poly.antiAliased, poly.ssdepMode === true);
+  return asLocalPolygon(newRings, newRect, poly.antiAliased, poly.ssdepMode === true, poly.orientationDeg);
 }
 
 // ──────────────────────── Polygon Affine Transform (selection editing) ─────────
@@ -160,7 +163,22 @@ export function translatePolygon(poly: LocalPolygon, dx: number, dy: number): Lo
  * handle of an irregular (lasso/wand) selection rescales every ring vertex
  * relative to the opposite corner.
  */
-export function scalePolygon(poly: LocalPolygon, anchor: Point2D, sx: number, sy: number): LocalPolygon {
+export function scalePolygon(
+  poly: LocalPolygon,
+  anchor: Point2D,
+  sx: number,
+  sy: number,
+  angleRad = 0,
+): LocalPolygon {
+  // Optional LOCAL-FRAME factors: the factors stretch along the polygon's
+  // own axes rotated by `angleRad` (its orientationDeg), not the canvas
+  // axes — a rotated rectangle stays a rectangle under non-uniform scale
+  // (canvas-axis factors would shear it into a parallelogram). 0 (the
+  // default) is the historical canvas-axis scale, bitwise.
+  if (angleRad !== 0) {
+    const toBoxFrame = rotatePolygon(poly, anchor, -angleRad);
+    return rotatePolygon(scalePolygon(toBoxFrame, anchor, sx, sy), anchor, angleRad);
+  }
   const newRings = poly.rings.map(ring =>
     ring.map(p => asLocalPoint({
       x: anchor.x + (p.x - anchor.x) * sx,
@@ -168,7 +186,114 @@ export function scalePolygon(poly: LocalPolygon, anchor: Point2D, sx: number, sy
     }))
   );
   const newRect = asLocalRect(computePolygonBounds(newRings));
-  return asLocalPolygon(newRings, newRect, poly.antiAliased, poly.ssdepMode === true);
+  return asLocalPolygon(newRings, newRect, poly.antiAliased, poly.ssdepMode === true, poly.orientationDeg);
+}
+
+/**
+ * Per-handle gesture geometry, shared by `solveGizmoResizeScale` and
+ * `measureGizmoResizeAnchor`: corner handles (`nw/ne/sw/se`) scale BOTH
+ * axes and anchor the OPPOSITE corner (nw drags (−1,−1) → anchor (+1,+1),
+ * the Photoshop free-transform rule); edge handles (`n/s/e/w`) scale ONE
+ * axis and anchor the opposite edge midpoint (a pinned line).
+ */
+interface GizmoHandleGeometry {
+  axesX: boolean;
+  axesY: boolean;
+  drag: { x: number; y: number };
+  anchor: { x: number; y: number };
+}
+
+const GIZMO_HANDLE_GEOMETRY: Record<'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w', GizmoHandleGeometry> = {
+  nw: { axesX: true, axesY: true, drag: { x: -1, y: -1 }, anchor: { x: 1, y: 1 } },
+  ne: { axesX: true, axesY: true, drag: { x: 1, y: -1 }, anchor: { x: -1, y: 1 } },
+  sw: { axesX: true, axesY: true, drag: { x: -1, y: 1 }, anchor: { x: 1, y: -1 } },
+  se: { axesX: true, axesY: true, drag: { x: 1, y: 1 }, anchor: { x: -1, y: -1 } },
+  n: { axesX: false, axesY: true, drag: { x: 0, y: -1 }, anchor: { x: 0, y: 1 } },
+  s: { axesX: false, axesY: true, drag: { x: 0, y: 1 }, anchor: { x: 0, y: -1 } },
+  e: { axesX: true, axesY: false, drag: { x: 1, y: 0 }, anchor: { x: -1, y: 0 } },
+  w: { axesX: true, axesY: false, drag: { x: -1, y: 0 }, anchor: { x: 1, y: 0 } },
+};
+
+/**
+ * measureGizmoResizeAnchor: the gesture-start basis of a gizmo scale on a
+ * polygon measured along its OWN orientation `thetaRad` — the rotated
+ * content box (centre + extents) and the world-space ANCHOR point (the
+ * opposite corner / edge midpoint of the handle). THE shared start-basis
+ * of both gizmo scale gestures (plain selection + selection-driven peel
+ * session), so the two can never disagree on where the fixed point is.
+ */
+export function measureGizmoResizeAnchor(
+  poly: LocalPolygon,
+  thetaRad: number,
+  mode: 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w',
+): { cx: number; cy: number; w: number; h: number; anchorX: number; anchorY: number } {
+  const box = computeRotationBox(poly, thetaRad);
+  const g = GIZMO_HANDLE_GEOMETRY[mode];
+  const anchorLocalX = g.anchor.x * (box.w / 2);
+  const anchorLocalY = g.anchor.y * (box.h / 2);
+  const cos = Math.cos(thetaRad);
+  const sin = Math.sin(thetaRad);
+  return {
+    cx: box.cx,
+    cy: box.cy,
+    w: box.w,
+    h: box.h,
+    anchorX: box.cx + anchorLocalX * cos - anchorLocalY * sin,
+    anchorY: box.cy + anchorLocalX * sin + anchorLocalY * cos,
+  };
+}
+
+/**
+ * solveGizmoResizeScale: the 8-handle gizmo scale factors solved in an
+ * entity's OWN rotated frame (orientation `thetaRad`), given the pointer
+ * position already projected into that frame (origin at the entity's
+ * rotated-box centre, x along the box's width axis, y along its height
+ * axis). THE shared math of both scale gestures solved on a true-oriented
+ * entity — the plain selection transform and the selection-driven peel
+ * session — so the two can never disagree.
+ *
+ * Handle semantics (Photoshop free-transform rules):
+ *   - corner handles (`nw/ne/sw/se`): both axes scale, anchor = the
+ *     OPPOSITE corner of the rotated box;
+ *   - edge handles (`n/s/e/w`): one axis scales, anchor = the opposite
+ *     edge line (a pinned line — the cross axis keeps factor 1).
+ * Dragging past the anchor yields a NEGATIVE factor (a mirror). `uniform`
+ * (Shift) collapses both addressed axes to one magnitude — the mean of
+ * their absolute values — preserving per-axis signs. `minW`/`minH` clamp
+ * collapse: the scaled entity never gets smaller than that on an addressed
+ * axis.
+ */
+export function solveGizmoResizeScale(
+  mode: 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w',
+  pointerLocalX: number,
+  pointerLocalY: number,
+  boxW: number,
+  boxH: number,
+  opts?: { uniform?: boolean; minW?: number; minH?: number },
+): { sx: number; sy: number } {
+  const g = GIZMO_HANDLE_GEOMETRY[mode];
+  const hw = boxW / 2;
+  const hh = boxH / 2;
+  // Anchor = the opposite corner / edge line, in local box coordinates
+  // (half-dimension units × the box extents). The grabbed reference is the
+  // dragged corner / edge line itself — the factor denominator's span.
+  const anchorX = g.anchor.x * hw;
+  const anchorY = g.anchor.y * hh;
+  const grabbedX = g.drag.x * hw;
+  const grabbedY = g.drag.y * hh;
+
+  const minSx = (opts?.minW ?? 1) / boxW;
+  const minSy = (opts?.minH ?? 1) / boxH;
+  let sx = g.axesX ? (pointerLocalX - anchorX) / (grabbedX - anchorX || 1) : 1;
+  let sy = g.axesY ? (pointerLocalY - anchorY) / (grabbedY - anchorY || 1) : 1;
+  if (g.axesX && Math.abs(sx) < minSx) sx = Math.sign(sx || 1) * minSx;
+  if (g.axesY && Math.abs(sy) < minSy) sy = Math.sign(sy || 1) * minSy;
+  if (g.axesX && g.axesY && opts?.uniform) {
+    const uniform = (Math.abs(sx) + Math.abs(sy)) / 2;
+    sx = Math.sign(sx) * uniform;
+    sy = Math.sign(sy) * uniform;
+  }
+  return { sx, sy };
 }
 
 /**
@@ -194,7 +319,10 @@ export function rotatePolygon(poly: LocalPolygon, center: Point2D, angleRad: num
     })
   );
   const newRect = asLocalRect(computePolygonBounds(newRings));
-  return asLocalPolygon(newRings, newRect, poly.antiAliased, poly.ssdepMode === true);
+  // Orientation decree: rotation ACCUMULATES on the field — the HUD/chips
+  // read this record instead of guessing an orientation from the vertices.
+  const orientationDeg = (poly.orientationDeg ?? 0) + (angleRad * 180) / Math.PI;
+  return asLocalPolygon(newRings, newRect, poly.antiAliased, poly.ssdepMode === true, orientationDeg);
 }
 
 // ─────────────────────────── Polygon Utility Algorithms ────────────────────────
@@ -821,3 +949,168 @@ export function ellipsePathToLocalPolygon(rect: LocalRect, antiAliased: boolean 
 // Re-export point2d functions for backward compatibility (consumers may still
 // import from polygon.ts). Canonical source is now point2d.ts.
 export { isBoundingRing, point2dToLocalShape, point2dToLocalPolygon, invertRings } from './point2d';
+
+/** 2D affine map x' = a·x + c·y + tx, y' = b·x + d·y + ty (column-vector convention). */
+export interface Affine2D {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  tx: number;
+  ty: number;
+}
+
+/**
+ * transformPolygonAffine: apply a general 2D affine map to every ring of a
+ * LocalPolygon, returning a new polygon with a recomputed bounding rect.
+ * Covers what scalePolygon/rotatePolygon cannot express alone — scaling
+ * along ROTATED axes and mirrored maps — which is exactly what keeping a
+ * selection glued to a free-transformed fragment requires.
+ */
+export function transformPolygonAffine(poly: LocalPolygon, m: Affine2D): LocalPolygon {
+  const newRings = poly.rings.map(ring =>
+    ring.map(p => asLocalPoint({
+      x: m.a * p.x + m.c * p.y + m.tx,
+      y: m.b * p.x + m.d * p.y + m.ty,
+    }))
+  );
+  const newRect = asLocalRect(computePolygonBounds(newRings));
+  return asLocalPolygon(newRings, newRect, poly.antiAliased, poly.ssdepMode === true);
+}
+
+/**
+ * solveAffineFromTriangles: the unique affine map sending the three source
+ * points onto the three destination points. Returns null for a degenerate
+ * (collinear) source triangle, where no unique map exists.
+ */
+export function solveAffineFromTriangles(
+  src: [Point2D, Point2D, Point2D],
+  dst: [Point2D, Point2D, Point2D],
+): Affine2D | null {
+  const [p0, p1, p2] = src;
+  const [q0, q1, q2] = dst;
+  // Source basis vectors from p0; solve [a c; b d] · S = D for the edge
+  // matrices, then the translation from the p0 → q0 correspondence.
+  const s11 = p1.x - p0.x, s21 = p1.y - p0.y;
+  const s12 = p2.x - p0.x, s22 = p2.y - p0.y;
+  const det = s11 * s22 - s12 * s21;
+  if (Math.abs(det) < 1e-12) return null;
+  const i11 = s22 / det, i12 = -s12 / det;
+  const i21 = -s21 / det, i22 = s11 / det;
+  const d11 = q1.x - q0.x, d21 = q1.y - q0.y;
+  const d12 = q2.x - q0.x, d22 = q2.y - q0.y;
+  const a = d11 * i11 + d12 * i21;
+  const c = d11 * i12 + d12 * i22;
+  const b = d21 * i11 + d22 * i21;
+  const d = d21 * i12 + d22 * i22;
+  return { a, b, c, d, tx: q0.x - (a * p0.x + c * p0.y), ty: q0.y - (b * p0.x + d * p0.y) };
+}
+
+/**
+ * computeRotationBox: a polygon's content box measured ALONG a given
+ * orientation axis — NOT a rotation of the polygon (the vertex set is
+ * untouched; this is a pure measurement).
+ *
+ * Design ruling (2026-11-04): the orientation is NEVER derived from the
+ * polygon's own vertices. Vertex probes (first ring edge, min-area rect,
+ * principal axes) all guess, and every guess is wrong for some shape — an
+ * ellipse ring starts along its minor axis, a lasso's first edge points
+ * anywhere along the contour, a hand-drawn blob has no "true" tilt at
+ * all. Orientation is STATE that lives beside the shape:
+ *   - peel session → the fragment's true pose (baked origin rotation +
+ *     accRotation + the live field rotation, see
+ *     `fragmentTrueRotationDeg`);
+ *   - plain selection → 0° — the historical upright AABB behavior; a
+ *     plain selection has no persistent orientation record, and its flat
+ *     box was always the accepted presentation.
+ * With angle 0 the projection degenerates to the axis-aligned bounding
+ * box exactly, so the plain flavor is bitwise the historical flat box.
+ */
+export function computeRotationBox(poly: LocalPolygon, angleRad = 0): RotationBox {
+  const ring = poly.rings[0] ?? [];
+  const { rect } = poly;
+  const fallback: RotationBox = {
+    angleRad: 0,
+    cx: rect.x + rect.w / 2,
+    cy: rect.y + rect.h / 2,
+    w: rect.w,
+    h: rect.h,
+  };
+  if (ring.length < 2) return fallback;
+
+  const ux = Math.cos(angleRad);
+  const uy = Math.sin(angleRad);
+  const vx = -uy;
+  const vy = ux;
+  let minU = Infinity;
+  let maxU = -Infinity;
+  let minV = Infinity;
+  let maxV = -Infinity;
+  for (const p of ring) {
+    const pu = p.x * ux + p.y * uy;
+    const pv = p.x * vx + p.y * vy;
+    if (!Number.isFinite(pu) || !Number.isFinite(pv)) return fallback;
+    if (pu < minU) minU = pu;
+    if (pu > maxU) maxU = pu;
+    if (pv < minV) minV = pv;
+    if (pv > maxV) maxV = pv;
+  }
+  const w = maxU - minU;
+  const h = maxV - minV;
+  if (!(w > 0) || !(h > 0)) return fallback;
+
+  // Center: the projected-frame midpoint converted back to xy
+  // (p = (p·u)·u + (p·v)·v for the orthonormal axis pair).
+  const cu = minU + w / 2;
+  const cv = minV + h / 2;
+  return {
+    angleRad,
+    cx: cu * ux + cv * vx,
+    cy: cu * uy + cv * vy,
+    w,
+    h,
+  };
+}
+
+/**
+ * toScreenRotationBox: the local→screen conversion of a measured rotation
+ * box (`computeRotationBox`) into the HUD framework's screen-space
+ * anchor contract (`ScreenRotationBox`). Three steps:
+ *   1. Corner: the local box is CENTER-anchored; the screen contract wants
+ *      the top-left corner, so step back half extents along both rotated
+ *      axes (the center is the only anchor that survives rotation without
+ *      a second conversion, hence the input shape).
+ *   2. Projection scale: a local unit is not a screen pixel (camera k, and
+ *      possibly rotation), so project the corner and two one-unit axis
+ *      steps and measure each axis separately — tolerant of non-uniform
+ *      or rotated cameras.
+ *   3. Assembly: screen corner, extents scaled per axis (the HUD folds
+ *      scale into w/h and renders the container as a pure rotation), and
+ *      the orientation re-derived from the projected axis so the camera's
+ *      own rotation is folded in — never trust the local angle verbatim.
+ */
+export function toScreenRotationBox(
+  box: RotationBox,
+  cam: CameraState,
+): ScreenRotationBox {
+  const ux = Math.cos(box.angleRad);
+  const uy = Math.sin(box.angleRad);
+  const vx = -uy;
+  const vy = ux;
+  const topLeft = {
+    x: box.cx - ux * (box.w / 2) - vx * (box.h / 2),
+    y: box.cy - uy * (box.w / 2) - vy * (box.h / 2),
+  };
+  const p0 = localToScreen(topLeft.x, topLeft.y, cam);
+  const pu = localToScreen(topLeft.x + ux, topLeft.y + uy, cam);
+  const pv = localToScreen(topLeft.x + vx, topLeft.y + vy, cam);
+  const ku = Math.hypot(pu.x - p0.x, pu.y - p0.y);
+  const kv = Math.hypot(pv.x - p0.x, pv.y - p0.y);
+  return {
+    x: p0.x,
+    y: p0.y,
+    w: box.w * ku,
+    h: box.h * kv,
+    angleRad: Math.atan2(pu.y - p0.y, pu.x - p0.x),
+  };
+}

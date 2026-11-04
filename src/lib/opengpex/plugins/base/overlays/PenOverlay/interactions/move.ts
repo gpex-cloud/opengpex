@@ -95,6 +95,14 @@ export const createPenMoveHandler = (): InteractionHandler => {
 
       tx = new InteractionTransaction(e, { useIncreComp: true });
       tx.begin(false);
+      // Declare the gesture feedback for the system-level delta label.
+      // Cleared by the transaction's commit/abort.
+      tx.declareFeedback({
+        kind: 'translate',
+        target: 'layer',
+        targetId: targetLayerId,
+        origin: { x: startLayerPos.x, y: startLayerPos.y },
+      });
       e.actions.fast.cursor.notifyDragging('grabbing');
     },
 

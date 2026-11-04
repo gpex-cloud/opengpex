@@ -19,14 +19,12 @@
 
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
-import { useFastSync, useFastRectSync, useFastSvgGroupSync, useFastMarchingAntsSync, useFastAnchorSync } from '@opengpex/editor/core/state/volatile';
-import { LocalShape, LocalPolygon, asLocalShape, Frame, CameraState } from '@opengpex/editor/core/types';
-import { resolveAntsPath, simplifyPolygonForAnts, type AntsPathCache } from './antsPath';
+import { useFastSync, useFastRectSync, useFastSvgGroupSync, useFastMarchingAntsSync } from '@opengpex/editor/core/state/volatile';
+import { LocalShape, LocalPolygon, Frame, CameraState } from '@opengpex/editor/core/types';
+import { resolveAntsPath, simplifyPolygonForAnts, type AntsPathCache } from './helpers/antsPath';
 
 /** Grid phase identity: the target layer's origin fraction, 0 or 0.5 (see GeometryService.quantizeGridOffset). */
 type GridOffset = { readonly x: number; readonly y: number };
-
-const EMPTY_SHAPE: LocalShape = asLocalShape({ x: 0, y: 0, w: 0, h: 0 });
 
 // ─── Marching Ants Path Derivation ──────────────────────────────────────────────
 
@@ -40,34 +38,18 @@ const EMPTY_SHAPE: LocalShape = asLocalShape({ x: 0, y: 0, w: 0, h: 0 });
 // × device zoom), which is what burned energy on 4K selections at high
 // magnification.
 
-/**
- * Resolve the regular clip shape for the CSS box (handles + dim label).
- * Returns EMPTY_SHAPE when the slot is empty.
- */
-function resolveRegularClip(
-  f: { confinement: LocalPolygon | null; canvasClipBox: LocalShape },
-  isReCanvas: boolean
-): LocalShape {
-  if (isReCanvas) return f.canvasClipBox;
-  const poly = f.confinement;
-  if (!poly) return EMPTY_SHAPE;
-  // Convert LocalPolygon to LocalShape for CSS box positioning
-  const { rect, antiAliased } = poly;
-  return { type: 'rect', rect, antiAliased, __brand: 'local' } as LocalShape;
-}
-
 // ─── useCropDimSync ────────────────────────────────────────────────────────────
 
 /**
- * Fast-track hook for the dimension label (e.g. "400 × 300 px").
- * Only meaningful for regular shapes and Re-Canvas.
+ * Fast-track hook for the Re-Canvas dimension label (e.g. "400 × 300 px").
+ * Re-Canvas-exclusive: the selection chips live in the affordances
+ * framework (TransformHud), so this reads only the canvas-resize box.
  */
-export function useCropDimSync(isActive: boolean, isReCanvas: boolean) {
+export function useCropDimSync(isActive: boolean) {
   const dimLabelRef = useRef<HTMLSpanElement>(null);
 
   useFastSync(dimLabelRef, isActive, (_v, f) => {
-    const shape = resolveRegularClip(f, isReCanvas);
-    const rect = shape.rect;
+    const rect = f.canvasClipBox.rect;
     if (dimLabelRef.current) {
       dimLabelRef.current.textContent = `${Math.round(rect.w)} × ${Math.round(rect.h)}`;
     }
@@ -76,31 +58,26 @@ export function useCropDimSync(isActive: boolean, isReCanvas: boolean) {
   return { dimLabelRef };
 }
 
-// ─── useRegularBoxSync ─────────────────────────────────────────────────────────
+// ─── useReCanvasBoxSync ────────────────────────────────────────────────────────
 
 /**
- * CSS box positioning + visibility.
- *
- * Active when the tool is regular (rect/ellipse) OR Re-Canvas. Drives the
- * draggable HTMLDivElement (move surface + gizmo mount). Reads only
- * LocalShape data (polygons in the slot produce EMPTY_SHAPE → box hidden via
- * visibility gate).
+ * Re-Canvas box positioning + visibility (Re-Canvas-exclusive since the
+ * selection HUD unification): drives the draggable HTMLDivElement (resize
+ * / move surface for the canvas-resize rect). Reads only canvasClipBox.
  */
-export function useRegularBoxSync(
+export function useReCanvasBoxSync(
   ref: React.RefObject<HTMLElement | null>,
-  isActive: boolean,
-  isReCanvas: boolean
+  isActive: boolean
 ) {
   // Box position (fast-track CSS left/top/width/height)
   useFastRectSync(ref, isActive, {
-    selector: (_v, f) => resolveRegularClip(f, isReCanvas).rect,
+    selector: (_v, f) => f.canvasClipBox.rect,
     space: 'local'
   });
 
   // Visibility gate: hide when shape is empty (0×0)
   useFastSync(ref, isActive, (_v, f) => {
-    const shape = resolveRegularClip(f, isReCanvas);
-    const rect = shape.rect;
+    const rect = f.canvasClipBox.rect;
     const isEmpty = rect.w <= 0 || rect.h <= 0;
     if (ref.current) {
       (ref.current as HTMLElement).style.visibility = isEmpty ? 'hidden' : '';
@@ -267,69 +244,4 @@ export function useSelectionAntsSync(
       if (pathRef.current) pathRef.current.setAttribute('d', '');
     }
   }, [isActive, groupRef, pathBgRef, pathRef]);
-}
-
-// ─── useMoveDeltaSync ──────────────────────────────────────────────────────────
-
-/**
- * Fast-track hook for the move-delta label (e.g. "Δ 42, −18 px").
- *
- * Same pattern as `useCropDimSync`: on each Ticker frame, reads the current
- * clip box position from the merged frame data and computes the difference
- * from the drag-start position (stored in volatile transient by the move handler).
- *
- * Visible only during an active drag; hidden otherwise (transient is null → label hidden).
- */
-export function useMoveDeltaSync(isActive: boolean) {
-  const deltaContainerRef = useRef<HTMLDivElement>(null);
-  const { volatileRef } = useEditorServices();
-
-  // ─── Position: anchor to selection's bottom-left corner (local space) ───
-  useFastAnchorSync(deltaContainerRef, isActive, {
-    selector: (_v, f) => {
-      // Only position when a drag is active (transient has start data)
-      const start = volatileRef.current.transient['clipMoveStart'] as { x: number; y: number } | undefined;
-      if (!start) return null;
-
-      const entry = f.confinement as LocalPolygon | null;
-      if (!entry) return null;
-
-      // Anchor at bottom-left of the selection bounding rect
-      return { x: entry.rect.x, y: entry.rect.y + entry.rect.h };
-    },
-    offset: { x: 0, y: 24 }, // below dimension label (6px for dim + ~18px gap)
-    space: 'local',
-  });
-
-  // ─── Content: compute and display dx/dy text + visibility ───
-  useFastSync(deltaContainerRef, isActive, (_v, f) => {
-    const el = deltaContainerRef.current;
-    if (!el) return;
-
-    const start = volatileRef.current.transient['clipMoveStart'] as { x: number; y: number } | undefined;
-    if (!start) {
-      el.style.display = 'none';
-      return;
-    }
-
-    const entry = f.confinement as LocalPolygon | null;
-    if (!entry) {
-      el.style.display = 'none';
-      return;
-    }
-
-    const dx = Math.round(entry.rect.x - start.x);
-    const dy = Math.round(entry.rect.y - start.y);
-
-    // Format with directional arrows + absolute values (no negatives)
-    // When displacement is 0, show "→ 0  ↓ 0" to indicate drag is active
-    const hArrow = dx >= 0 ? '→' : '←';
-    const vArrow = dy >= 0 ? '↓' : '↑';
-
-    const span = el.firstElementChild as HTMLSpanElement;
-    if (span) span.textContent = `${hArrow} ${Math.abs(dx)}  ${vArrow} ${Math.abs(dy)}`;
-    el.style.display = '';
-  });
-
-  return { deltaContainerRef };
 }

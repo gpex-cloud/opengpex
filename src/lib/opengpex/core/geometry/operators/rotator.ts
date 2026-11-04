@@ -56,6 +56,22 @@ export function snapAngle(deg: number, step: number): number {
 }
 
 /**
+ * snapRotationRad: snap a rotation DELTA so that `baseRad + deltaRad` lands
+ * exactly on the `stepDeg` grid (PS transform rotation: the grid anchors on
+ * the entity's absolute orientation, so a rotated entity can always be
+ * brought back to upright or any grid multiple). All-radians by contract —
+ * the degree/radion mix in an inline copy of this formula once quantized
+ * the snap to ~0.26° and silently disabled it.
+ *
+ * Returns the snapped delta (radians); the caller's output stays in its
+ * own field space, only the GRID is absolute.
+ */
+export function snapRotationRad(deltaRad: number, baseRad: number, stepDeg = 15): number {
+  const step = (stepDeg * Math.PI) / 180;
+  return Math.round((baseRad + deltaRad) / step) * step - baseRad;
+}
+
+/**
  * Screen-space angle of a LOCAL direction angle under the layer's current
  * pose (flip + rotation).
  *

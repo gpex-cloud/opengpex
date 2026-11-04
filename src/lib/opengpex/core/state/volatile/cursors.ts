@@ -71,7 +71,25 @@ export interface CursorInput {
  * priority contract is unit-testable in isolation.
  */
 export function resolveCursor(input: CursorInput): string | null {
-  if (input.springMeta && !input.springSuppressed) return 'move';
+  // Spring channel = "move the object under the pointer" — but a geometry-
+  // aware hover pass may refine the GENERIC move with a SPECIFIC intent
+  // (e.g. the clip overlay's scissors cut/copy cursor when Cmd hovers a
+  // selection). Such refinements are any hover value OTHER than plain
+  // 'move': every existing hover writer either stays silent under Cmd or
+  // writes 'move' itself (the pen pass is meta-aware), so the equality check
+  // keeps all pre-existing behavior byte-identical while letting the peel
+  // cursors win. Mid-gesture the refinement stands down: hover writers
+  // freeze while a gesture runs (their pointermove passes bail on the
+  // interacting flag), so a pre-gesture refinement would otherwise hijack
+  // the gesture's own declared cursor for the whole drag — the spring
+  // declaration stays authoritative there (documented order, pinned by
+  // test). Stale-hover caveat on keyup remains: keyup does not re-run
+  // pointermove passes, so a refinement can linger one beat until the next
+  // move.
+  if (input.springMeta && !input.springSuppressed) {
+    if (input.dragging !== null) return 'move';
+    return input.hover !== null && input.hover !== 'move' ? input.hover : 'move';
+  }
   if (input.dragging !== null) return input.dragging;
   if (input.hover !== null) return input.hover;
   return input.tool;

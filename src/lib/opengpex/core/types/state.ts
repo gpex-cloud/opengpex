@@ -271,6 +271,79 @@ export interface LayerDraft {
   mask?: BitmapMaskOverrideMap;
 }
 
+/**
+ * TransformLayer — live payload of an in-flight FRAGMENT scale gesture
+ * (peel exchange — key `fragmentTransform` in `VolatileState.transient`).
+ *
+ * The gesture lands cx/cy/rotation through the regular buffered layer patch
+ * (real Layer fields the merge already streams), but the magnification has NO
+ * Layer field to ride (`Layer.scale` is deprecated and must not gain
+ * rendering semantics), so it lives here and reaches the renderer through
+ * SceneAssembler's `getLayerPoseOverride` seam — recomputed every frame,
+ * never cached, never part of a composite signature. The bake command reads
+ * the same payload to render the final composite, so the baked pixels are
+ * the exact ones the preview showed.
+ */
+export interface TransformLayer {
+  /** The layer being transformed (the peel exchange id). */
+  layerId: string;
+  /**
+   * The asset the gesture is magnifying. The overlay applies ONLY while the
+   * layer still renders this asset: once the bake swaps the layer onto its
+   * new (already magnified) asset, the overlay stands down by itself, so the
+   * hand-over from preview to baked pixels can never double-scale a frame.
+   */
+  sourceAssetId?: string;
+  /** Per-axis magnification relative to the gesture-start pose. */
+  scaleX: number;
+  scaleY: number;
+  /**
+   * sourceAngle slots (degrees): the preview linear part composes
+   * `O(rotationDeg) · diag(scaleX, scaleY) · R(−sourceAngle)`. sourceAngle
+   * is the content's tilt inside the bitmap (left by earlier peel bakes);
+   * cancelling it BEFORE the stretch lets the factors scale along the
+   * content's own axes. Both slots ride together; absent (→ bare `O·S`)
+   * when the tilt is 0.
+   */
+  rotationDeg?: number;
+  sourceAngle?: number;
+}
+
+/**
+ * Declarative gesture-feedback record for the system-level displacement
+ * label (key `gestureFeedback` in `VolatileState.transient`). A gesture
+ * that moves or rotates an entity DECLARES what it is moving and where it
+ * started; the shared delta label widget reads this record and renders one
+ * `→ dx ↓ dy` / `↻ angle` chip. The declaration rides the gesture's
+ * InteractionTransaction, so commit/abort clear it with the rest of the
+ * volatile state — no per-handler cleanup and no cross-plugin sniffing of
+ * who is moving what.
+ */
+export interface InteractionGestureFeedback {
+  /** Translate shows the entity's displacement; rotate shows its live absolute angle. */
+  kind: 'translate' | 'rotate';
+  /** Which entity the delta is measured against. */
+  target: 'frame' | 'layer';
+  /** Layer id when `target` is 'layer' (the merged frame resolves the live pose). */
+  targetId?: string;
+  /**
+   * Gesture-start reference of the moved entity: for 'frame' the selection
+   * rect's top-left, for 'layer' the layer's (cx, cy). The widget subtracts
+   * it from the live value every frame.
+   */
+  origin: { x: number; y: number };
+  /**
+   * Overrides the widget's default chip clearance below the (live-derived)
+   * anchor. The default exists to clear a co-located label — e.g. the frame
+   * chip's 24px reserves space for the dimension label sharing the
+   * selection's corner — but that label is mode-dependent (never shows in
+   * pan), so the pan selection move declares a tighter clearance instead of
+   * leaving the label slot empty. The anchor itself is still derived from
+   * the LIVE entity every frame; only the clearance is overridden.
+   */
+  anchorOffsetY?: number;
+}
+
 export interface VolatileState {
   /** Synthesized active state signal */
   activeState: {

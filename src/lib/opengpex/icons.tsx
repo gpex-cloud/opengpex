@@ -21,30 +21,32 @@
 
 import React from 'react';
 
+// ─── Icons ─────────────────────────────────────────────────────────────────────
+
 /**
  * Custom SVG: Merge Down Icon
  * Representation: two horizontal lines at the top and bottom, with a merge-down arrow in the middle
  */
 export function MergeDownIcon({ size = 12 }: { size?: number }) {
   return (
-    <svg 
-      viewBox="0 0 16 16" 
-      width={size} 
-      height={size} 
-      fill="none" 
-      stroke="currentColor" 
-      strokeWidth="1.5" 
-      strokeLinecap="round" 
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
       strokeLinejoin="round"
       className="lucide-icon"
     >
       {/* Top layer */}
       <path d="M2 3h12" />
-      
+
       {/* Down arrow - leaving a 2.5px symmetrical gap with upper and lower layers */}
       <path d="M8 5.5v3.5" />
       <path d="M5.5 9L8 11.5l2.5-2.5" />
-      
+
       {/* Bottom layer */}
       <path d="M2 14h12" />
     </svg>
@@ -57,14 +59,14 @@ export function MergeDownIcon({ size = 12 }: { size?: number }) {
  */
 export function MergeVisibleIcon({ size = 12 }: { size?: number }) {
   return (
-    <svg 
-      viewBox="0 0 16 16" 
-      width={size} 
-      height={size} 
-      fill="none" 
-      stroke="currentColor" 
-      strokeWidth="1.5" 
-      strokeLinecap="round" 
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
       strokeLinejoin="round"
       className="lucide-icon"
     >
@@ -73,61 +75,13 @@ export function MergeVisibleIcon({ size = 12 }: { size?: number }) {
       <path d="M2 6.3h5.5" />
       <path d="M2 9.7h4.5" />
       <path d="M2 13h5" />
-      
+
       {/* Right side: elegant sorting down arrow */}
       <path d="M12 3v10" />
       <path d="M9.5 10.5L12 13l2.5-2.5" />
     </svg>
   );
 }
-
-/**
- * TEXT_PREEDIT_CURSOR: Custom cursor for pre-edit state
- * Appearance: a small arrow pointer in the top-left corner + T character in the bottom-right
- * Hotspot: (3, 1) - tip of the arrow
- */
-export const TEXT_PREEDIT_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3C!-- Arrow pointer (top-left) --%3E%3Cpath d='M3 1 L3 14 L6.5 10.5 L9.5 16 L11.5 15 L8.5 9 L13 9 Z' fill='white' stroke='black' stroke-width='1' stroke-linejoin='round'/%3E%3C!-- T character (bottom-right) --%3E%3Cpath d='M14 13 L22 13 M18 13 L18 23' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3Cpath d='M14 13 L22 13 M18 13 L18 23' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E") 3 1, default`;
-
-// ─── Clip Tool Cursors ─────────────────────────────────────────────────────────
-// Each clip tool has a unique cursor: crosshair (center) + tool badge (bottom-right).
-// 24×24 SVG, hotspot at crosshair center (8,8), fallback: crosshair.
-// Double-stroke (white thick + black thin) ensures visibility on all backgrounds.
-
-/**
- * CLIP_RECT_CURSOR: Crosshair + small square badge
- * Hotspot: (8, 8)
- */
-export const CLIP_RECT_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Crect x='15' y='15' width='7' height='7' rx='1' stroke='white' stroke-width='2.5' fill='none'/%3E%3Crect x='15' y='15' width='7' height='7' rx='1' stroke='black' stroke-width='1' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
-
-/**
- * CLIP_ELLIPSE_AA_CURSOR: Crosshair + small circle badge (AA on)
- * Hotspot: (8, 8)
- */
-export const CLIP_ELLIPSE_AA_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Ccircle cx='18.5' cy='18.5' r='3.5' stroke='white' stroke-width='2.5' fill='none'/%3E%3Ccircle cx='18.5' cy='18.5' r='3.5' stroke='black' stroke-width='1' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
-
-/**
- * CLIP_LASSO_CURSOR: Crosshair + freehand curve badge
- * Hotspot: (8, 8)
- */
-export const CLIP_LASSO_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M15 20c1-3 3-5 5-5s3 2 3 3.5c0 2-2 3-4 2.5' stroke='white' stroke-width='2.5' stroke-linecap='round' fill='none'/%3E%3Cpath d='M15 20c1-3 3-5 5-5s3 2 3 3.5c0 2-2 3-4 2.5' stroke='black' stroke-width='1' stroke-linecap='round' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
-
-/**
- * CLIP_WAND_CURSOR: Crosshair + magic wand badge (angled stick + sparkle)
- * Hotspot: (8, 8)
- */
-export const CLIP_WAND_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M15 22l6-6' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3Cpath d='M15 22l6-6' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M19 14v-1M20 15h1M17 15h-1M19 17v1' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M19 14v-1M20 15h1M17 15h-1M19 17v1' stroke='black' stroke-width='0.8' stroke-linecap='round'/%3E%3C/svg%3E") 8 8, crosshair`;
-
-/**
- * CLIP_SAM_CURSOR: Crosshair + AI brain/network badge (small neural-net icon)
- * Hotspot: (8, 8)
- */
-export const CLIP_SAM_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Ccircle cx='18' cy='15' r='1.5' stroke='white' stroke-width='2'/%3E%3Ccircle cx='18' cy='15' r='1.5' stroke='black' stroke-width='0.8'/%3E%3Ccircle cx='15' cy='19' r='1.5' stroke='white' stroke-width='2'/%3E%3Ccircle cx='15' cy='19' r='1.5' stroke='black' stroke-width='0.8'/%3E%3Ccircle cx='21' cy='19' r='1.5' stroke='white' stroke-width='2'/%3E%3Ccircle cx='21' cy='19' r='1.5' stroke='black' stroke-width='0.8'/%3E%3Cpath d='M18 16.5v1M16.2 18.3l-0.5 0.4M19.8 18.3l0.5 0.4' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M18 16.5v1M16.2 18.3l-0.5 0.4M19.8 18.3l0.5 0.4' stroke='black' stroke-width='0.8' stroke-linecap='round'/%3E%3C/svg%3E") 8 8, crosshair`;
-
-/**
- * CLIP_ELLIPSE_AA_OFF_CURSOR: Crosshair + dashed circle badge (AA off)
- * Hotspot: (8, 8)
- */
-export const CLIP_ELLIPSE_AA_OFF_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Ccircle cx='18.5' cy='18.5' r='3.5' stroke='white' stroke-width='2.5' stroke-dasharray='3 2' fill='none'/%3E%3Ccircle cx='18.5' cy='18.5' r='3.5' stroke='black' stroke-width='1' stroke-dasharray='3 2' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
 
 /**
  * InvertIcon: Square with a single diagonal from bottom-left to top-right.
@@ -225,22 +179,6 @@ export function PremiumCloudIcon({ className }: { className?: string }) {
   );
 }
 
-// ─── Rotation Cursor ────────────────────────────────────────────────────────────
-
-/**
- * ROTATE_CURSOR: Custom cursor for the rotation handle (↻ circular arrow).
- *
- * CSS has no built-in rotation cursor, so we use an inline SVG data URI.
- * 24×24 canvas with a ~240° arc + filled triangle arrowhead. Dual-layer
- * rendering: white outline (5px / fill) underneath + black detail (2.5px / fill)
- * on top — visible on any background (same approach as TEXT_PREEDIT_CURSOR).
- * Hotspot at (12,12) = centre of the arc.
- *
- * Used as both the CSS hover cursor on the rotate handle dot AND the fast-track
- * cursor override during the rotation drag.
- */
-export const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M20.5 12a8.5 8.5 0 1 1-4.3-7.4' stroke='white' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolygon points='22,1 22,8 15,8' fill='white' stroke='white' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M20.5 12a8.5 8.5 0 1 1-4.3-7.4' stroke='%23222' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolygon points='22,1 22,8 15,8' fill='%23222'/%3E%3C/svg%3E") 12 12, pointer`;
-
 /**
  * PipetteAllIcon: Eyedropper with stacked layers badge (Sample All Layers).
  * Combines the primary Pipette with a stacked layers indicator in the corner.
@@ -296,18 +234,139 @@ export function PipetteLayerIcon({ size = 13, className }: { size?: number; clas
   );
 }
 
-
-
+// ─── Cursors ───────────────────────────────────────────────────────────────────
+// Crosshair-body cursors share one grammar: crosshair (center) + tool badge
+// (bottom-right). 24×24 SVG (MARKER 26×26), hotspot at crosshair center (8,8),
+// fallback: crosshair. Double-stroke (white thick + black thin) ensures
+// visibility on all backgrounds.
 
 /**
- * CLIP_PEN_CURSOR: Crosshair + nib badge (pen-tool selection slot; also the
- * pen tool's "hover the first anchor = close path" hint when paired with the
- * circle the overlay draws).
+ * CLIP_RECT_CURSOR: Crosshair + small square badge
  * Hotspot: (8, 8)
  */
-export const CLIP_PEN_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M14 21l2.5-7.5L21 9l1.5 1.5-4.5 4.5L14 21z' stroke='white' stroke-width='2.5' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M14 21l2.5-7.5L21 9l1.5 1.5-4.5 4.5L14 21z' stroke='black' stroke-width='1' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
+export const CLIP_RECT_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Crect x='15' y='15' width='7' height='7' rx='1' stroke='white' stroke-width='2.5' fill='none'/%3E%3Crect x='15' y='15' width='7' height='7' rx='1' stroke='black' stroke-width='1' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+/**
+ * CLIP_ELLIPSE_AA_CURSOR: Crosshair + small circle badge (AA on)
+ * Hotspot: (8, 8)
+ */
+export const CLIP_ELLIPSE_AA_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Ccircle cx='18.5' cy='18.5' r='3.5' stroke='white' stroke-width='2.5' fill='none'/%3E%3Ccircle cx='18.5' cy='18.5' r='3.5' stroke='black' stroke-width='1' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+/**
+ * CLIP_ELLIPSE_AA_OFF_CURSOR: Crosshair + dashed circle badge (AA off)
+ * Hotspot: (8, 8)
+ */
+export const CLIP_ELLIPSE_AA_OFF_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Ccircle cx='18.5' cy='18.5' r='3.5' stroke='white' stroke-width='2.5' stroke-dasharray='3 2' fill='none'/%3E%3Ccircle cx='18.5' cy='18.5' r='3.5' stroke='black' stroke-width='1' stroke-dasharray='3 2' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+/**
+ * CLIP_LASSO_CURSOR: Crosshair + freehand curve badge
+ * Hotspot: (8, 8)
+ */
+export const CLIP_LASSO_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M15 20c1-3 3-5 5-5s3 2 3 3.5c0 2-2 3-4 2.5' stroke='white' stroke-width='2.5' stroke-linecap='round' fill='none'/%3E%3Cpath d='M15 20c1-3 3-5 5-5s3 2 3 3.5c0 2-2 3-4 2.5' stroke='black' stroke-width='1' stroke-linecap='round' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+/**
+ * CLIP_WAND_CURSOR: Crosshair + magic wand badge (angled stick + sparkle)
+ * Hotspot: (8, 8)
+ */
+export const CLIP_WAND_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M15 22l6-6' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3Cpath d='M15 22l6-6' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M19 14v-1M20 15h1M17 15h-1M19 17v1' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M19 14v-1M20 15h1M17 15h-1M19 17v1' stroke='black' stroke-width='0.8' stroke-linecap='round'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+/**
+ * CLIP_SAM_CURSOR: Crosshair + AI brain/network badge (small neural-net icon)
+ * Hotspot: (8, 8)
+ */
+export const CLIP_SAM_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Ccircle cx='18' cy='15' r='1.5' stroke='white' stroke-width='2'/%3E%3Ccircle cx='18' cy='15' r='1.5' stroke='black' stroke-width='0.8'/%3E%3Ccircle cx='15' cy='19' r='1.5' stroke='white' stroke-width='2'/%3E%3Ccircle cx='15' cy='19' r='1.5' stroke='black' stroke-width='0.8'/%3E%3Ccircle cx='21' cy='19' r='1.5' stroke='white' stroke-width='2'/%3E%3Ccircle cx='21' cy='19' r='1.5' stroke='black' stroke-width='0.8'/%3E%3Cpath d='M18 16.5v1M16.2 18.3l-0.5 0.4M19.8 18.3l0.5 0.4' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M18 16.5v1M16.2 18.3l-0.5 0.4M19.8 18.3l0.5 0.4' stroke='black' stroke-width='0.8' stroke-linecap='round'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+/**
+ * CLIP_PEEL_CUT_CURSOR / CLIP_PEEL_COPY_CURSOR: peel intent cursors — the
+ * selection crosshair body with a bottom-right intent badge, announcing the
+ * press BEFORE it lands: Cmd over a peellable target = scissors (cut peel,
+ * host loses the pixels); Cmd+Alt = two offset squares, the standard
+ * duplicate glyph (copy peel, host keeps its pixels). Declared by the
+ * ClipOverlay hover pass; resolveCursor lets this specific hover refinement
+ * win over the generic spring 'move'. Deliberately NOT in the cursor
+ * service's GLOBAL_CURSORS family — viewport-level intents must never leak
+ * into element-level consumers.
+ */
+export const CLIP_PEEL_CUT_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M15.5 14.5L21 20M21 14.5L15.5 20' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M15.5 14.5L21 20M21 14.5L15.5 20' stroke='black' stroke-width='1' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Ccircle cx='15' cy='21.8' r='1.4' stroke='white' stroke-width='2' fill='none'/%3E%3Ccircle cx='15' cy='21.8' r='1.4' stroke='black' stroke-width='0.8' fill='none'/%3E%3Ccircle cx='21.5' cy='21.8' r='1.4' stroke='white' stroke-width='2' fill='none'/%3E%3Ccircle cx='21.5' cy='21.8' r='1.4' stroke='black' stroke-width='0.8' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+export const CLIP_PEEL_COPY_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Crect x='14.5' y='14.5' width='5' height='5' stroke='white' stroke-width='2.5' stroke-linejoin='round' fill='none'/%3E%3Crect x='14.5' y='14.5' width='5' height='5' stroke='black' stroke-width='1' stroke-linejoin='round' fill='none'/%3E%3Crect x='17.5' y='17.5' width='5' height='5' stroke='white' stroke-width='2.5' stroke-linejoin='round' fill='none'/%3E%3Crect x='17.5' y='17.5' width='5' height='5' stroke='black' stroke-width='1' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+/**
+ * ROTATE_CURSOR: Custom cursor for the rotation handle (↻ circular arrow).
+ *
+ * CSS has no built-in rotation cursor, so we use an inline SVG data URI.
+ * 24×24 canvas with a ~240° arc + filled triangle arrowhead. Dual-layer
+ * rendering: white outline (5px / fill) underneath + black detail (2.5px / fill)
+ * on top — visible on any background (same approach as TEXT_CURSOR).
+ * Hotspot at (12,12) = centre of the arc.
+ *
+ * Used as both the CSS hover cursor on the rotate handle dot AND the fast-track
+ * cursor override during the rotation drag.
+ */
+export const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 26 26' fill='none'%3E%3Cpath d='M16.9 9.2A5.6 5.6 0 1 0 18.6 13' stroke='white' stroke-width='4.5' stroke-linecap='round'/%3E%3Cpath d='M16 5.8L19 9.3L14.4 10.1Z' fill='white' stroke='white' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M16.9 9.2A5.6 5.6 0 1 0 18.6 13' stroke='%23222' stroke-width='2.2' stroke-linecap='round'/%3E%3Cpath d='M16 5.8L19 9.3L14.4 10.1Z' fill='%23222'/%3E%3C/svg%3E") 13 13, pointer`;
+
 /**
  * MARKER_CURSOR: Crosshair + hollow five-pointed star badge (marker tool).
  * Hotspot: (8, 8)
  */
-export const MARKER_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' fill='none'%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 11v5M1 8h5M11 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M19 10.5L20.6 14.3L24.7 14.7L21.6 17.3L22.5 21.4L19 19.2L15.5 21.4L16.4 17.3L13.3 14.7L17.4 14.3Z' stroke='white' stroke-width='2.5' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M19 10.5L20.6 14.3L24.7 14.7L21.6 17.3L22.5 21.4L19 19.2L15.5 21.4L16.4 17.3L13.3 14.7L17.4 14.3Z' stroke='black' stroke-width='1' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
+export const MARKER_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' fill='none'%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M19 10.5L20.6 14.3L24.7 14.7L21.6 17.3L22.5 21.4L19 19.2L15.5 21.4L16.4 17.3L13.3 14.7L17.4 14.3Z' stroke='white' stroke-width='2.5' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M19 10.5L20.6 14.3L24.7 14.7L21.6 17.3L22.5 21.4L19 19.2L15.5 21.4L16.4 17.3L13.3 14.7L17.4 14.3Z' stroke='black' stroke-width='1' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+/**
+ * TEXT_CURSOR: Custom cursor for text tools (creation + pre-edit state)
+ * Appearance: the shared tool crosshair (center) + T glyph badge in the
+ * bottom-right — the same body/badge grammar as the tool cursors.
+ * Hotspot: (8, 8) - the crosshair center
+ */
+export const TEXT_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M14 13 L22 13 M18 13 L18 23' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3Cpath d='M14 13 L22 13 M18 13 L18 23' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+/**
+ * PEN_CURSOR: Crosshair + nib badge (pen tool; also the
+ * pen tool's "hover the first anchor = close path" hint when paired with the
+ * circle the overlay draws).
+ * Hotspot: (8, 8)
+ */
+export const PEN_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none'%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M8 1v5M8 10v5M1 8h5M10 8h5' stroke='black' stroke-width='1' stroke-linecap='round'/%3E%3Cpath d='M14 21l2.5-7.5L21 9l1.5 1.5-4.5 4.5L14 21z' stroke='white' stroke-width='2.5' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M14 21l2.5-7.5L21 9l1.5 1.5-4.5 4.5L14 21z' stroke='black' stroke-width='1' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E") 8 8, crosshair`;
+
+// ─── Generated resize cursors ────────────────────────────────────────────────
+// The OS ships only 4 resize glyph orientations (0°/45°/90°/135°), so a
+// rotated transform handle can mismatch its cursor by up to 22.5°. These
+// generated cursors close that gap: a browser-style double-headed solid
+// arrow drawn along the handle's ACTUAL screen direction, quantized to 9°
+// steps (max error 4.5°), cached per step. Glyph grammar: white fill +
+// white outline underlay beneath a black fill core (same visibility trick
+// as ROTATE_CURSOR). Consumers feed the pose-resolved SCREEN angle (local
+// handle direction composed with the entity's live orientation) — pure
+// data-URI text, no external assets.
+
+/** Angular quantization step (degrees) of the generated cursor glyphs. */
+const RESIZE_CURSOR_STEP_DEG = 6;
+
+/** Cache of the 30 distinct (bidirectional → mod 180°) generated cursors. */
+const RESIZE_CURSOR_CACHE = new Map<number, string>();
+
+/**
+ * Build (and cache) the resize cursor whose arrow points along
+ * `screenAngleDeg` (screen convention: 0° = +x east, clockwise, +y down).
+ * Quantized to RESIZE_CURSOR_STEP_DEG and folded into [0, 180) because the
+ * double-headed arrow is direction-symmetric.
+ */
+export function AngleAwareResizeCursor(angleDeg: number): string {
+  const step = Math.round(angleDeg / RESIZE_CURSOR_STEP_DEG) * RESIZE_CURSOR_STEP_DEG;
+  const key = ((step % 180) + 180) % 180;
+  const cached = RESIZE_CURSOR_CACHE.get(key);
+  if (cached) return cached;
+  // Browser ew-resize-style glyph (slim solid heads + thin connecting
+  // bar), drawn along +x on the 26×26 canvas then rotated about the
+  // centre; hotspot sits on the bar centre (13,13). White fill/outline
+  // underlay first, black fill on top.
+  const glyph = 'M4 13L9 8V11.5H17V8L22 13L17 18V14.5H9V18Z';
+  const svg =
+    `<svg xmlns='http://www.w3.org/2000/svg' width='26' height='26' fill='none'>` +
+    `<g transform='rotate(${key} 13 13)'>` +
+    `<path d='${glyph}' fill='white' stroke='white' stroke-width='1.5' stroke-linejoin='round'/>` +
+    `<path d='${glyph}' fill='#222'/>` +
+    `</g></svg>`;
+  const cursor = `url("data:image/svg+xml,${encodeURIComponent(svg)}") 13 13, default`;
+  RESIZE_CURSOR_CACHE.set(key, cursor);
+  return cursor;
+}

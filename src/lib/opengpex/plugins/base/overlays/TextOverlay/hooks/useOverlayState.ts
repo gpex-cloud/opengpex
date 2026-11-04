@@ -21,7 +21,7 @@ import { useEffect } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { CraftDrawerAPI } from '../../../drawers/CraftDrawer/protocols';
 import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID } from '../protocols';
-import { TEXT_PREEDIT_CURSOR } from '@opengpex/editor/icons';
+import { TEXT_CURSOR } from '@opengpex/editor/icons';
 
 // ─── useTextOverlayState ───────────────────────────────────────────────────────
 
@@ -73,7 +73,7 @@ export function useTextOverlayState() {
   // cursor through the global-cursor rule), so nothing is registered.
   useEffect(() => {
     if (activeCraft !== 'text' || !activeFrame || editingLayerId) return;
-    actions.fast.cursor.register('text', TEXT_PREEDIT_CURSOR);
+    actions.fast.cursor.register('text', TEXT_CURSOR);
     return () => {
       actions.fast.cursor.register('text', null);
     };

@@ -21,6 +21,8 @@
 
 import { EditorContextValue, EditorCommand, asLocalRect, asLocalShape, Frame, LocalRect, LocalShape, EditorActions, GeometryService, Point2D } from '@opengpex/editor/core/types';
 import { getClipBox, getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
+import { readPeelSession } from '@opengpex/editor/plugins/base/overlays/ClipOverlay/peel/session';
+import { PeelAPI } from '@opengpex/editor/plugins/base/overlays/ClipOverlay/protocols';
 import { blobToImageData } from '@opengpex/editor/core/engine/utils/pixel-utils';
 import { clipComputeClient } from './workers/client';
 import * as P from './protocols';
@@ -28,32 +30,63 @@ import type { ClipTool } from './protocols';
 
 
 /**
- * Single source of truth for "leave clip mode and discard any in-flight
- * peel/exchange triplet". Used by `exitClip` (Esc) and the `ClipOverlay`
- * unmount cleanup.
+ * Single source of truth for "leave clip mode". Since the peel session
+ * state machine landed, this helper owns NOTHING but the mode flip: every
+ * settle decision (commit / discard / "a commit just landed, hands off")
+ * is made by `cmd.peel.settle` against the `frame.drafts['peel']`
+ * record, and the ClipOverlay unmount fallback catches any exit that
+ * bypasses the explicit settle calls.
  *
  * 2026-06-25 refactor: ESC now means "cancel" — if a peel was in progress,
  * the exchange is discarded (host hole mask removed, exchange reset) instead
  * of being baked. Baking is explicitly triggered by Enter (`commitPeel`).
  * This matches the universal "Enter = confirm, Esc = cancel" mental model.
- *
- * Order matters: flip mode FIRST so React/Zustand can tear down ClipOverlay
- * synchronously; defer `discardExchange` to a microtask so the dirty-check
- * fast path (no peel happened) doesn't block the visible mode flip.
- * `discardExchange` is idempotent — duplicate calls short-circuit.
- *
- * [noundo] discardExchange is called via `.execute.noundo()` because it runs
- * inside the peel interaction transaction — the undo boundary is already owned
- * by `peelToExchange` (undoable: true). Generating an additional checkpoint
- * here would create a spurious undo step. See peel.ts for architecture notes.
+ * (The microtask-deferred discard this helper used to schedule is gone with
+ * the pixel sniffing it existed to shortcut: settle reads the session
+ * record, and with no undecided session it is a zero-cost no-op.)
  */
 export function exitClipMode(ctx: EditorContextValue): void {
   ctx.actions.setInteraction({ interactionMode: 'pan' });
-  queueMicrotask(() => {
-    ctx.actions.adv.layer.peel.discardExchange.execute.noundo();
-  });
 }
 
+/**
+ * Discard any undecided peel session, then clear the selection — the
+ * semantics of every interaction OUTSIDE the floating fragment (static
+ * click outside, fresh selection draw): the peel is CANCELLED (Esc
+ * semantics — the fragment and its glued selection disappear), the slot
+ * clears, and a replacement selection can start immediately. Enter and
+ * Cmd+D keep the COMMIT semantics via `settleCommitThenClearSelection`.
+ */
+async function settleDiscardThenClear(ctx: EditorContextValue, frame: Frame): Promise<void> {
+  if (readPeelSession(frame)) {
+    await ctx.actions.executeCommand(PeelAPI.commands.settleExchange.uid, { mode: 'discard' });
+  }
+  ctx.actions.updateFrame(frame.id, { confinement: null });
+}
+
+/**
+ * Commit any undecided peel session, then drop the selection — the shared
+ * tail of every "land and clear" entry (Enter / action button, click to
+ * deselect, Cmd+D). The selection is KEPT only when a session existed and
+ * its commit did not land (merge failure, or a commit already in flight):
+ * the fragment is still floating then, and the selection it is glued to
+ * must survive for the retry. With no session the selection clears as a
+ * plain deselect.
+ *
+ * The landed/failed decision is made inside settle from the commit's
+ * RESOLVED outcome, never from a state re-read: the visible store lags the
+ * commit's writes until React renders.
+ */
+async function settleCommitThenClearSelection(ctx: EditorContextValue, frame: Frame): Promise<void> {
+  if (!readPeelSession(frame)) {
+    ctx.actions.updateFrame(frame.id, { confinement: null });
+    return;
+  }
+  // [noundo] settle brackets its own undo step; the clear rides inside it
+  // (only when the commit lands), so one undo restores fragment and
+  // selection together.
+  await ctx.actions.executeCommand(PeelAPI.commands.settleExchange.uid, { mode: 'commit', clearSelection: true });
+}
 /**
  * Helper: Unifies the retrieval and updating of the active crop target (Image vs Canvas).
  */
@@ -161,17 +194,18 @@ function activateClipTool(
  */
 export const CLIP_OPTIONS_COMMANDS = {
   /**
-   * Enter clip mode (toolbar button command — no keyboard shortcut).
+   * Enter clip mode (toolbar button command + Space selection-mode toggle).
    *
-   * Historical note: this command used to own the Space key as a
-   * pan ↔ clip toggle. Space has been re-reserved as the camera key
-   * (viewport pan) — entering clip mode goes through the per-tool
-   * activation shortcuts (M / L / W / S) or the toolbar button, and
-   * leaving goes through Esc / Enter. The button keeps its toggle
-   * behaviour: from clip mode a click still merges any dirty peel and
-   * exits.
+   * PURE mode switch — never settles a peel session. The session record is
+   * frame-level, so an undecided peel simply crosses the mode boundary
+   * alive: entering clip from pan and leaving clip back to pan are both
+   * settlement-free. Commit and discard live on their own explicit entries
+   * (Enter / Cmd+D commit; Esc, click outside and a fresh selection draw
+   * discard; the peel action
+   * buttons fire the same commands). The peel action bar over the floating
+   * fragment is the visible affordance in modes without a toolbar exit.
    *
-   * Re-Canvas guard: when Re-Canvas is active, the click is a no-op. Esc
+   * Re-Canvas guard: when Re-Canvas is active, the toggle is a no-op. Esc
    * remains the single exit (handled by `exitClip` below — it closes
    * Re-Canvas first, then leaves clip if applicable).
    */
@@ -179,22 +213,12 @@ export const CLIP_OPTIONS_COMMANDS = {
     id: P.CMD_TOGGLE_MODE,
     name: 'Toggle Clip Mode',
     category: 'Selection',
-    execute: async (ctx: EditorContextValue) => {
+    execute: (ctx: EditorContextValue) => {
       // Re-Canvas is a fully *orthogonal* modal — the button must not leak into it.
       if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
 
-      // First press: enter clip mode, keep current tool.
-      if (ctx.state.interaction.interactionMode !== 'clip') {
-        ctx.actions.setInteraction({ interactionMode: 'clip' });
-        return;
-      }
-
-      // Already in clip mode: merge any dirty peel first (same as Enter),
-      // then exit. This ensures peeled fragments are committed, not discarded.
-      // [noundo] mergeHost runs inside the peel transaction — the undo boundary
-      // is owned by `peelToExchange`. See peel.ts for architecture notes.
-      await ctx.actions.adv.layer.merge.mergeHost.execute.noundo();
-      exitClipMode(ctx);
+      const inClip = ctx.state.interaction.interactionMode === 'clip';
+      ctx.actions.setInteraction({ interactionMode: inClip ? 'pan' : 'clip' });
     },
     // Space re-rebound (2026-10-26 ruling): Space toggles selection mode and
     // enters with the frame's last-used tool (latestClipTool is unchanged by
@@ -202,7 +226,7 @@ export const CLIP_OPTIONS_COMMANDS = {
     // tool). HotkeyManager's preventDefault on the match preserves the
     // no-scroll / no-focused-button contract in every mode.
     shortcut: { key: ' ' },
-  } as EditorCommand<void, Promise<void>>,
+  } as EditorCommand<void, void>,
 
   /**
    * M — marquee family entry. Remembers the last regular tool (rect /
@@ -299,21 +323,33 @@ export const CLIP_OPTIONS_COMMANDS = {
 
 
   /**
-   * Escape — context-sensitive exit. Three branches, in priority order:
+   * Escape — context-sensitive exit. Four branches, in priority order:
    *   1) Re-Canvas open  → close Re-Canvas only (its rect / popover collapses).
    *                        Mode is preserved. If we were in pure Re-Canvas
    *                        from pan, we stay in pan; if we were in clip,
    *                        we stay in clip.
-   *   2) Clip mode       → exit clip via the standard `exitClipMode` helper
-   *                        (mode → 'pan' + microtask mergeHost).
-   *   3) Neither         → no-op (let overlay-level Esc handlers — text,
+   *   2) Undecided peel  → settle(discard) (cancel) and stay in the current
+   *                        session → mode, whatever it is. The session is
+   *                        frame-level, so Esc peels one layer of state at a
+   *                        time: a peel inside clip mode costs one Escape to
+   *                        cancel the peel and a second, session-less Escape
+   *                        to leave clip mode.
+   *   3) Clip mode       → exit clip via the standard `exitClipMode` helper
+   *                        (mode → 'pan'). Nothing is pending at this point
+   *                        (branch 2 already handled it), so this is purely
+   *                        a mode change.
+   *   4) Neither         → no-op (let overlay-level Esc handlers — text,
    *                        brush, etc. — run their own logic without
    *                        conflict).
    *
    * Why split (1) and (2)? Before 2026-06-23 Re-Canvas was a sub-modal of
    * clip, so closing it always implied "still in clip". Re-Canvas is now an
    * orthogonal modal (you can be in pure pan + Re-Canvas), so the two
-   * dismissals must be independent.
+   * dismissals must be independent. Branch (2) is mode-agnostic for the
+   * same pan/clip unification reason: the session record lives on the
+   * frame, so Esc must reach it without a mode detour. Craft tools own
+   * their own Esc handling and a peel session there still settles via the
+   * overlay unmount fallback when the user leaves.
    */
   exitClip: {
     id: P.CMD_EXIT_CLIP_MODE,
@@ -324,43 +360,65 @@ export const CLIP_OPTIONS_COMMANDS = {
         ctx.scoped.setSignal(P.SIGNAL_RE_CANVAS, false);
         return;
       }
-      if (ctx.state.interaction.interactionMode !== 'clip') return;
-      exitClipMode(ctx);
+      const mode = ctx.state.interaction.interactionMode;
+      // An undecided peel session consumes this Escape first, regardless of
+      // mode: settle it as a DISCARD and stop there, leaving the mode
+      // untouched. Exiting clip mode then requires a second, session-less
+      // Escape — one keystroke per layer of state.
+      if (ctx.activeFrame && readPeelSession(ctx.activeFrame)) {
+        void ctx.actions.executeCommand(PeelAPI.commands.settleExchange.uid, { mode: 'discard' });
+        return;
+      }
+      if (mode === 'clip') {
+        // Session-less clip exit: leave clip mode. There is nothing pending
+        // to settle (the guard above returned already), so this is purely a
+        // mode change.
+        exitClipMode(ctx);
+        return;
+      }
     },
     shortcut: { key: 'Escape' }
   } as EditorCommand<void, void>,
 
   /**
-   * Enter — commit the peel (bake exchange into host) and exit clip mode.
+   * Enter — commit the peel (bake exchange into host). The explicit
+   * "confirm" gesture for peel operations, now MODE-AGNOSTIC (pan/clip
+   * unification): the only admission gate is the undecided session record
+   * in `frame.drafts['peel']` — Enter with no session pending is a no-op.
    *
-   * This is the explicit "confirm" gesture for peel operations. If no peel
-   * is in progress (triplet is clean), the command still exits clip mode as
-   * a convenient "done editing selections" shortcut — matching Photoshop's
-   * Enter-exits-transform behaviour.
+   * In clip mode the commit is followed by the mode exit (the session
+   * record is gone after the commit, so the unmount fallback settles as a
+   * no-op). In pan mode `exitClipMode` writes the same 'pan' value back —
+   * a no-op — so the session settles without any mode change.
+   *
+   * Note the deliberate gate change from the historical behavior: Enter
+   * used to exit clip mode even with nothing pending ("done editing
+   * selections" shortcut). Since the peel session state machine the
+   * command is about the SESSION, not the mode, and a session-less Enter
+   * does nothing.
    *
    * Flow:
-   *   1) Call `mergeHost` to bake any dirty peel triplet.
-   *   2) Exit clip mode via `exitClipMode` (which now only discards —
-   *      but since we just merged, the triplet is already clean so the
-   *      discard call inside `exitClipMode` becomes a no-op).
-   *
-   * Only active while in clip mode; no-op otherwise so Enter doesn't
-   * interfere with text inputs or other overlay interactions.
+   *   1) Settle the peel as a COMMIT (a no-op when no session is pending).
+   *   2) Exit clip mode.
    */
   commitPeel: {
     id: P.CMD_COMMIT_PEEL,
     name: 'Commit Peel & Exit Clip',
     category: 'Selection',
     execute: async (ctx: EditorContextValue) => {
-      if (ctx.state.interaction.interactionMode !== 'clip') return;
+      // Session-only gate, mode-independent: the undecided record in
+      // `drafts['peel']` is the single source of truth for "a peel is in
+      // flight". (A dangling record here is harmless: settle validates the
+      // participants and silently clears it.)
+      if (!ctx.activeFrame || !readPeelSession(ctx.activeFrame)) return;
 
-      // Bake the peel (mergeHost is async — waits for off-screen composite).
-      // [noundo] mergeHost runs inside the peel transaction — the undo boundary
-      // is owned by `peelToExchange`. See peel.ts for architecture notes.
-      await ctx.actions.adv.layer.merge.mergeHost.execute.noundo();
+      // Bake the peel, then drop the selection that traced the fragment —
+      // the landed fragment is a regular layer and the area it came from is
+      // a hole, so the outline has nothing left to act on (Photoshop's Layer
+      // via Cut clears it too). A failed commit keeps it for the retry.
+      await settleCommitThenClearSelection(ctx, ctx.activeFrame);
 
-      // Exit clip mode. Since we just merged, the triplet is now clean and
-      // the discardExchange inside exitClipMode will be a no-op.
+      // Exit clip mode. In pan mode this writes 'pan' back — a no-op.
       exitClipMode(ctx);
     },
     shortcut: { key: 'Enter' }
@@ -510,9 +568,12 @@ export const CLIP_OPTIONS_COMMANDS = {
      * Uses `getClipBox` to resolve the active slot, then writes `null` to
      * clear it. This is the "Clear Selection" entry point.
      *
-     * BUG FIX (2026-07-13): If there's an active peel (exchange layer), we
-     * must commit/merge it before clearing. Otherwise the exchange layer
-     * remains dangling and the peeled pixels are lost.
+     * 2026-11-04 ruling: an interaction OUTSIDE the floating fragment is an
+     * implicit CANCEL — this path settles the session as a DISCARD (Esc
+     * semantics: the fragment and its glued selection disappear) and then
+     * clears the slot, so a replacement selection can start immediately.
+     * The commit-on-clear semantics remain with Enter / Cmd+D
+     * (`settleCommitThenClearSelection`).
      */
     execute: async (ctx: EditorContextValue) => {
       const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
@@ -524,18 +585,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       const clipBox = getClipBox(frame);
       if (!clipBox) return; // already empty — nothing to clear
 
-      // If an exchange layer exists (from peel), merge it into host first.
-      // This mirrors the Enter (commitPeel) behaviour: bake before discard.
-      const activeLayer = frame.activeLayerId ? frame.layers.byId[frame.activeLayerId] : undefined;
-      const exchangeLayer = (activeLayer?.role === 'exchange')
-        ? activeLayer
-        : frame.layers.order.map(id => frame.layers.byId[id]).find(l => l.role === 'exchange' && l.hostId === frame.activeLayerId);
-
-      if (exchangeLayer) {
-        await ctx.actions.adv.layer.merge.mergeHost.execute.noundo();
-      }
-
-      ctx.actions.updateFrame(frame.id, { confinement: null });
+      await settleDiscardThenClear(ctx, frame);
     }
   } as EditorCommand<void, Promise<void>>,
 
@@ -974,7 +1024,9 @@ export const CLIP_OPTIONS_COMMANDS = {
    * mode — the selection is a document-level entity, not property of clip
    * mode.
    *
-   * If a peel exchange layer exists, merges it before clearing.
+   * If a peel session is pending, commits it before clearing (session
+   * record keyed — not derived from the active layer, so a mid-peel layer
+   * switch cannot drop the merge).
    */
   deselect: {
     id: P.CMD_DESELECT,
@@ -992,18 +1044,9 @@ export const CLIP_OPTIONS_COMMANDS = {
       const clipBox = getClipBox(frame);
       if (!clipBox) return; // already empty — nothing to clear
 
-      // If an exchange layer exists (from peel), merge it first
-      const activeLayer = frame.activeLayerId ? frame.layers.byId[frame.activeLayerId] : undefined;
-      const exchangeLayer = (activeLayer?.role === 'exchange')
-        ? activeLayer
-        : frame.layers.order.map(id => frame.layers.byId[id]).find(l => l.role === 'exchange' && l.hostId === frame.activeLayerId);
-
-      if (exchangeLayer) {
-        await ctx.actions.adv.layer.merge.mergeHost.execute.noundo();
-      }
-
-      // Clear the active tool's slot (stay in clip mode)
-      ctx.actions.updateFrame(frame.id, { confinement: null });
+      // Commit any undecided peel session, then clear (stays in the current
+      // mode) — same rule as Enter: a failed commit keeps the selection.
+      await settleCommitThenClearSelection(ctx, frame);
     }
   } as EditorCommand<void, Promise<void>>
 

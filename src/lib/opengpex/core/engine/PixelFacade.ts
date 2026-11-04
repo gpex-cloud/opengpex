@@ -50,6 +50,7 @@ import type {
   GeometryService,
   AssetService,
   Layer,
+  LayerPoseOverride,
   Frame,
   Shape,
   WorldShape,
@@ -188,13 +189,23 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
 
         return compositeDispatcher.composite({ layers, roi: worldRoi, frame });
       },
-      async compositeLayers(layers: Layer[], frame: Frame, roi?: Shape): Promise<CompositedImage> {
+      async compositeLayers(
+        layers: Layer[],
+        frame: Frame,
+        roi?: Shape,
+        options?: { poseOverrides?: Record<string, LayerPoseOverride> },
+      ): Promise<CompositedImage> {
         const effectiveRoi = roi
           ? geometry.shape.localToWorldShape(roi, frame)
           : geometry.shape.unitedShapeOfLayers(layers);
         if (!effectiveRoi) throw new Error('Could not calculate bounding union');
 
-        return compositeDispatcher.composite({ layers, roi: effectiveRoi, frame });
+        return compositeDispatcher.composite({
+          layers,
+          roi: effectiveRoi,
+          frame,
+          ...(options?.poseOverrides ? { poseOverrides: options.poseOverrides } : {}),
+        });
       },
       async compositeResizedLayers(layers: Layer[], frame: Frame, outputSize: { w: number; h: number }): Promise<CompositedImage> {
         const effectiveRoi = geometry.shape.unitedShapeOfLayers(layers);
