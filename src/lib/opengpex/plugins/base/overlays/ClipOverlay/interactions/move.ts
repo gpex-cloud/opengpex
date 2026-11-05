@@ -169,7 +169,11 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
     },
 
     getConstraints: () => ({
-      clamp: true,  // Strict canvas bounds clamping for all selection moves
+      // Entity-domain release (Photoshop marquee alignment): a selection may
+      // be moved partly or wholly outside the canvas and persist there. This
+      // is a pure translation (the rect only carries position deltas — the
+      // shape itself is never clamped), so there is no shape-clipping risk.
+      clamp: false,
     }),
 
     onUpdate: (e: InteractionEvent, newRect: LocalRect, tx, context) => {

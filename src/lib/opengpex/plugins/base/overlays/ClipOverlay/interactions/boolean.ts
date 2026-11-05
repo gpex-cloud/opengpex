@@ -39,6 +39,7 @@ import {
   asLocalRect,
 } from '@opengpex/editor/core/types';
 import { clipComputeClient } from '../../../options/ClipOptions/workers/client';
+import { intersectRingsWithRect } from '@opengpex/editor/core/geometry/poly-clip';
 import type { PolyBoolOp } from '@opengpex/editor/core/geometry/poly-bool';
 
 /** Minimal slice of GeometryService used to rebuild the result bbox. */
@@ -91,6 +92,32 @@ export async function combineWithSelection(
     base.antiAliased ?? true,
     base.ssdepMode ?? false
   );
+}
+
+/**
+ * Intersect a drawn selection's rings with the canvas rectangle and rebuild
+ * the LocalPolygon — the write-time half of the draw-entry canvas
+ * intersection (the selection entity itself may live outside the canvas;
+ * only DRAWN selections are clipped). The clipping math is the core
+ * `intersectRingsWithRect` primitive; this wrapper is the geometry-result →
+ * LocalPolygon assembly (tight bbox + AA flag), the same responsibility
+ * {@link combineWithSelection} carries for boolean results. Returns null
+ * when nothing of the polygon lies inside the canvas.
+ */
+export function intersectPolygonWithCanvas(
+  rings: LocalPoint[][],
+  antiAliased: boolean,
+  canvas: { w: number; h: number },
+  geometry: PolygonBoundsService
+): LocalPolygon | null {
+  const clipped = intersectRingsWithRect(
+    rings.map(ring => ring.map(p => ({ x: p.x, y: p.y }))),
+    { x: 0, y: 0, w: canvas.w, h: canvas.h }
+  );
+  if (!clipped || clipped.length === 0) return null;
+  const outRings = clipped.map(ring => ring.map(p => asLocalPoint(p))) as LocalPoint[][];
+  const bounds = geometry.polygon.computePolygonBounds(outRings);
+  return asLocalPolygon(outRings, asLocalRect(bounds), antiAliased);
 }
 
 /**

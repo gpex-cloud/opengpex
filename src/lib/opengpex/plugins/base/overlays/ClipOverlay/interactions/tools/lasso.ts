@@ -24,14 +24,13 @@ import {
   Frame,
   GeometryService,
   asLocalPoint,
-  asLocalRect,
-  asLocalPolygon,
 } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
 import type { ClipToolAAMap } from '../../../../options/ClipOptions/protocols';
 import { makeClipToolGuard, discardPeelOnFreshDraw } from '../guard';
-import { booleanOpFromModifiers, combineWithSelection } from '../boolean';
+import { booleanOpFromModifiers, combineWithSelection, intersectPolygonWithCanvas } from '../boolean';
+
 
 /**
  * lassoPreviewPathRef
@@ -171,10 +170,15 @@ export const createLassoHandler = (): InteractionHandler => {
 
     onMove: (e) => {
       if (!active) return;
-      let { x: clampedX, y: clampedY } = e.geometry.space.clampPointToRect(e.point.canvas, e.activeFrame.canvas);
-      const snappedMove = e.geometry.snapping.snapToPixel({ x: clampedX, y: clampedY });
-      clampedX = snappedMove.x;
-      clampedY = snappedMove.y;
+      // Drag-time freedom: the trail may wander outside the canvas (the
+      // preview line draws into the workspace — accepted display state). The
+      // canvas constraint applies at COMMIT time (onEnd intersects the ring
+      // with the canvas). The start point stays edge-clamped in onStart: an
+      // outside-canvas press begins the trail at the nearest canvas edge
+      // (Photoshop Marquee behavior).
+      const snappedMove = e.geometry.snapping.snapToPixel({ x: e.point.canvas.x, y: e.point.canvas.y });
+      const pointX = snappedMove.x;
+      const pointY = snappedMove.y;
 
       // ── Snap-to-start: dynamic threshold (constant screen px regardless of zoom) ──
       // Mirrors the pattern from core/geometry/operators/snapping.ts:
@@ -182,7 +186,7 @@ export const createLassoHandler = (): InteractionHandler => {
       const start = trail[0];
       if (trail.length >= 8 && start) {
         const startScreen = e.geometry.space.localToScreen(start.x, start.y, e.activeFrame);
-        const curScreen = e.geometry.space.localToScreen(clampedX, clampedY, e.activeFrame);
+        const curScreen = e.geometry.space.localToScreen(pointX, pointY, e.activeFrame);
         const screenDist = Math.hypot(curScreen.x - startScreen.x, curScreen.y - startScreen.y);
 
         if (screenDist < SNAP_TO_START_SCREEN_PX) {
@@ -197,7 +201,7 @@ export const createLassoHandler = (): InteractionHandler => {
 
       // Not snapped — reset flag and append normally
       snappedToStart = false;
-      const p = asLocalPoint({ x: clampedX, y: clampedY });
+      const p = asLocalPoint({ x: pointX, y: pointY });
       trail.push(p);
       if (lassoPreviewPathRef.current) {
         lassoPreviewPathRef.current.setAttribute('d', buildScreenPathD(trail, e));
@@ -243,14 +247,26 @@ export const createLassoHandler = (): InteractionHandler => {
 
         const ring = trail.slice();
 
-        // Area validation: discard micro-drags.
-        const MIN_LASSO_AREA = 8;
-        if (e.geometry.polygon.computeRingArea(ring) < MIN_LASSO_AREA) {
+        // ── Draw-entry canvas intersection ──
+        // The draw entry is the one canvas-constrained entry: the committed
+        // ring is intersected with the canvas first. A ring entirely outside
+        // clips to nothing → discard the write ("drawn outside the canvas =
+        // nothing drawn"). Area validation runs AFTER the clip so a huge
+        // sweep that lands entirely outside the canvas is not counted as a
+        // valid selection.
+        const clipped = intersectPolygonWithCanvas([ring], gestureAA, e.activeFrame.canvas, e.geometry);
+        if (!clipped) {
           return;
         }
 
-        const bounds = e.geometry.polygon.computePolygonBounds([ring]);
-        const polygon = asLocalPolygon([ring], asLocalRect(bounds), gestureAA);
+        // Area validation: discard micro-drags (measured on the clipped ring
+        // — the part that will actually become the selection).
+        const MIN_LASSO_AREA = 8;
+        if (e.geometry.polygon.computeRingArea(clipped.rings[0]) < MIN_LASSO_AREA) {
+          return;
+        }
+
+        const polygon = clipped;
 
         // Boolean combine (P5): Shift unions / Alt subtracts the new lasso
         // into the selection that existed when the gesture started. The

@@ -108,7 +108,12 @@ export const createClipBoxHandler = (): InteractionHandler => {
     getConstraints: (e) => {
       return {
         aspect: e.activeFrame.imageAspect,
-        clamp: true,
+        // Drag-time freedom: the cursor is NOT clamped to the canvas (the
+        // create anchor still snaps to the nearest canvas edge — see the
+        // TransformHandler create-anchor clamp, Photoshop Marquee behavior).
+        // The canvas constraint applies at WRITE time: onUpdate intersects
+        // the drag result with the canvas before it streams anywhere.
+        clamp: false,
         alignToLayerId: e.activeFrame.activeLayerId || undefined
       };
     },
@@ -122,14 +127,26 @@ export const createClipBoxHandler = (): InteractionHandler => {
       // This handler only serves the rect clipbox (pathellipse owns its own
       // handler), so the slot id is always 'rect'.
       const activeTool = 'rect' as const;
-      // Write a proper LocalPolygon (with rings) so downstream consumers
-      // (polygonToShape, localToWorldPolygon, etc.) never see rings=undefined.
+      // ── Draw-entry canvas intersection ──
+      // The drawn selection is what ends up in `frame.confinement`, and the
+      // draw entry is the one canvas-constrained entry: intersect BEFORE any
+      // streaming write so every consumer of this gesture (live preview,
+      // boolean live preview, exchange-layer sync, and the transaction
+      // commit itself) sees the clipped shape. Dragging entirely outside
+      // clips to nothing: a plain draw writes no selection ("drawn outside
+      // the canvas = nothing drawn"); a boolean drag streams nothing and
+      // keeps the pre-drag base on screen (base ∪ ∅ / base − ∅ = base, which
+      // the gesture-end combine reproduces exactly via the null
+      // lastCreateRect short-circuit).
       const antiAliased = currentShape?.antiAliased;
-      const newPoly = e.geometry.polygon.regularShapeToLocalPolygon(activeTool, newRect, antiAliased);
+      const clippedRect = e.geometry.space.getRectIntersection(newRect, asLocalRect({ x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h }));
       const isCreate = _context.intent.category === 'create';
       if (isCreate) {
-        lastCreateRect = newRect;
+        lastCreateRect = clippedRect;
       }
+      const newPoly = clippedRect
+        ? e.geometry.polygon.regularShapeToLocalPolygon(activeTool, clippedRect, antiAliased)
+        : null;
 
       // Boolean drag: stream the COMBINED shape instead of the raw rect so
       // the base selection never disappears mid-drag (WYSIWYG). The gesture's
@@ -138,19 +155,22 @@ export const createClipBoxHandler = (): InteractionHandler => {
         ? booleanOpFromModifiers(e.spring.shift, e.spring.alt)
         : null;
       if (previewOp && gestureBase) {
-        liveBooleanPreview({
-          base: gestureBase,
-          incoming: newPoly,
-          op: previewOp,
-          geometry: e.geometry,
-          tx,
-        });
+        if (newPoly) {
+          liveBooleanPreview({
+            base: gestureBase,
+            incoming: newPoly,
+            op: previewOp,
+            geometry: e.geometry,
+            tx,
+          });
+        }
       } else {
         tx.update({ confinement: newPoly }, 'frame');
       }
 
-      // Sync exchange layer if needed
-      if (frame.activeLayerId) {
+      // Sync exchange layer if needed (only while the drag intersects the
+      // canvas — nothing visible to sync otherwise).
+      if (frame.activeLayerId && clippedRect) {
         const activeLayer = frame.activeLayerId ? frame.layers.byId[frame.activeLayerId] : undefined;
         const exchangeLayer = (activeLayer?.role === 'exchange')
           ? activeLayer
@@ -158,7 +178,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
 
         if (exchangeLayer) {
           // Convert clip box center from frame-local to world coordinates
-          const worldCenter = e.geometry.space.localToWorld(newRect.x + newRect.w / 2, newRect.y + newRect.h / 2, frame);
+          const worldCenter = e.geometry.space.localToWorld(clippedRect.x + clippedRect.w / 2, clippedRect.y + clippedRect.h / 2, frame);
           // Account for layer orientation (rotation/flip) when computing anchor.
           const vr = exchangeLayer.visibleShape?.rect;
           const vox = vr?.x ?? 0;

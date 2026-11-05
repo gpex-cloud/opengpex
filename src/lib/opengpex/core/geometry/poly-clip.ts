@@ -249,6 +249,46 @@ export function unionRingsMulti(...ringSets: Pt[][][]): Pt[][][] | null {
   );
 }
 
+/**
+ * Intersect Point2D rings with an axis-aligned rectangle anchored at the
+ * origin (e.g. the canvas), returning the clipped rings in the same open
+ * Point2D format. Hole structure is preserved (ringsToMultiPolygon nests
+ * holes into their outers); the result flattens the library's polygon
+ * nesting back into one flat ring list, matching the even-odd ring list
+ * convention of LocalPolygon consumers. Returns null when nothing of the
+ * rings lies inside the rect.
+ */
+export function intersectRingsWithRect(rings: Pt[][], rect: Rect): Pt[][] | null {
+  const subject = ringsToMultiPolygon(rings);
+  if (subject.length === 0) return null;
+
+  const clipRing: Ring = [[0, 0], [rect.w, 0], [rect.w, rect.h], [0, rect.h], [0, 0]];
+  let result: MultiPolygon;
+  try {
+    result = (polygonClipping.intersection as (...args: MultiPolygon[]) => MultiPolygon)(
+      subject,
+      [[clipRing]]
+    );
+  } catch {
+    return null;
+  }
+
+  if (!result || result.length === 0) return null;
+
+  const outputRings: Pt[][] = [];
+  for (const polygon of result) {
+    for (const ring of polygon) {
+      const pts: Pt[] = ring.map(([x, y]) => ({ x, y }));
+      if (pts.length > 1) {
+        const first = pts[0], last = pts[pts.length - 1];
+        if (first.x === last.x && first.y === last.y) pts.pop();
+      }
+      if (pts.length >= 3) outputRings.push(pts);
+    }
+  }
+  return outputRings.length > 0 ? outputRings : null;
+}
+
 export function unionRings(...ringSets: Pt[][][]): { pathData: string; rect: Rect } | null {
   if (ringSets.length === 0) return null;
 

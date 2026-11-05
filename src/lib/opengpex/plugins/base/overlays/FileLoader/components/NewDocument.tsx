@@ -282,7 +282,7 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
         <div className="flex items-center justify-between px-5 pt-5 pb-4">
           <h3 className="flex items-center gap-2 text-[var(--text-main)] text-base font-black tracking-tight leading-tight">
             <ImagePlus size={16} strokeWidth={2.5} className="text-indigo-500" />
-            Create A Blank Image
+            Create a blank image
           </h3>
           <button
             onClick={onCancel}
