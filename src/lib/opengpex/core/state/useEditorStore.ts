@@ -693,7 +693,15 @@ export function useEditorStore() {
           const s = stateRef.current;
           const frameId = s.activeFrameId;
           const h = (frameId && s.history.byFrameId[frameId]) || { past: [], future: [], checkpoint: null };
-          return h.past.length > 0 || !!h.checkpoint;
+          // O(1) reference-equality tail test: since undo/redo re-base the
+          // checkpoint on the restored frame, a checkpoint that is NOT the
+          // current frame object proves unsolicited writes exist above the
+          // last boundary (a pending tail that the next undo would fold).
+          // Plain camera/viewport writes also swap the frame reference, so
+          // the button may light up for a harmless no-op — accepted. This
+          // must NOT be mirrored into canRedo: a camera write would
+          // wrongly gray out a live redo chain there.
+          return h.past.length > 0 || (!!h.checkpoint && s.frames.byId[frameId!] !== h.checkpoint);
         },
         canRedo: () => {
           const s = stateRef.current;

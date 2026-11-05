@@ -555,7 +555,16 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
         });
 
         if (patches.length > 0) {
-          // There are unsaved changes since last commit — treat them as a step
+          // There are unsaved changes since last commit — treat them as a
+          // step and TRUNCATE the redo chain. The untracked tail may have
+          // changed structure (added/removed layers) or values underneath
+          // the recorded future steps; keeping them would let a later redo
+          // graft old patches onto content they no longer describe — up to
+          // an Immer "path doesn't resolve" when a tail removal orphaned a
+          // successor's patch path. This is the Photoshop "a new edit
+          // discards the states after it" rule, applied at the earliest
+          // point the tail becomes observable (the redo branch applies the
+          // same rule for tails written after this undo).
           undoPatches = inversePatches;
           const step = {
             id: Math.random().toString(36).substring(2, 9),
@@ -563,7 +572,7 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
             undoPatches: inversePatches,
             redoPatches: patches,
           };
-          future = [step, ...future];
+          future = [step];
         } else if (past.length > 0) {
           const step = past.pop()!;
           undoPatches = step.undoPatches;
@@ -584,7 +593,17 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
       const updatedFrameHistory: FrameHistoryState = {
         past,
         future,
-        checkpoint: null
+        // Keep the ledger invariant intact across the undo: every frame
+        // change must be either recorded in a step or diffable against the
+        // open checkpoint. Re-basing the checkpoint on the restored frame
+        // guarantees that writes landing after this undo (noundo commands,
+        // untracked direct writes) are captured by the next boundary diff
+        // instead of falling outside every step and desynchronizing the
+        // undo walk (Immer "path doesn't resolve"). restoredFrame already
+        // carries the live camera (merged above), and the camera is
+        // excluded from reconciliation, so this baseline produces no
+        // phantom step at the next boundary.
+        checkpoint: restoredFrame
       };
 
       return {
@@ -614,6 +633,42 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
       if (!frameHistory || frameHistory.future.length === 0) return state;
 
       const currentFrame = state.frames.byId[frameId];
+
+      // Unsolicited-tail guard (Photoshop semantics: a new edit after an
+      // undo truncates the redo chain). Because undo/redo keep an open
+      // checkpoint on the restored frame, any write landing between the
+      // undo and this redo is captured as a diff against that checkpoint.
+      // Applying the queued redo patches on top of such a frame would
+      // graft old states onto new content (silent misplacement), so the
+      // tail is folded into a step of its own and the whole future chain
+      // is discarded instead.
+      if (frameHistory.checkpoint) {
+        const [, tailPatches, tailInversePatches] = produceWithPatches(frameHistory.checkpoint, (draft) => {
+          reconcileFrameState(draft, currentFrame);
+        });
+        if (tailPatches.length > 0) {
+          const tailStep: HistoryStep = {
+            id: Math.random().toString(36).substring(2, 9),
+            name: 'Edit',
+            undoPatches: tailInversePatches,
+            redoPatches: tailPatches,
+          };
+          return {
+            ...state,
+            history: {
+              byFrameId: {
+                ...state.history.byFrameId,
+                [frameId]: {
+                  past: [...frameHistory.past, tailStep],
+                  future: [],
+                  checkpoint: currentFrame
+                }
+              }
+            }
+          };
+        }
+      }
+
       const future = [...frameHistory.future];
       const step = future.shift()!;
 
@@ -623,7 +678,10 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
       const updatedFrameHistory: FrameHistoryState = {
         past: [...frameHistory.past, step],
         future,
-        checkpoint: null
+        // Rebuild the diff baseline on the restored frame: writes landing
+        // after this redo must stay accountable to the ledger (see the
+        // HISTORY_UNDO branch for the full invariant).
+        checkpoint: restoredFrame
       };
 
       return {

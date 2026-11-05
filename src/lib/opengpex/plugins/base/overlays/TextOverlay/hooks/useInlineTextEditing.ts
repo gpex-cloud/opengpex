@@ -316,6 +316,16 @@ export function useInlineTextEditing(
       }
       actions.setStateSignal(TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, null);
       actions.setStateSignal(TEXT_OVERLAY_SIGNAL_SESSION_TYPE, null);
+      // Checkpoint-drift bookend: per-op style commands executed INSIDE the
+      // session are undoable, so each one's pre-execution SIGNAL_COMMIT
+      // folds the previous one into a step and advances the checkpoint.
+      // rewindTo above drops those steps but HISTORY_TRUNCATE keeps the
+      // (now drifted) checkpoint — left in place, the next undoable boundary
+      // would diff the drifted baseline against the restored layer and
+      // record the style rollback as a phantom step. Re-basing the
+      // checkpoint onto the restored state makes the cancel a true no-op
+      // for the ledger.
+      actions.history.commitCheckpoint(session.frameId);
     }
     sessionRef.current = null;
   }, [actions]);

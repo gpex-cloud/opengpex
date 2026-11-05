@@ -2,6 +2,11 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.45
+
+- Workspace: fixed an undo ledger defect where edits made right after an undo could fall outside every recorded step and crash the next undo with an internal patch error — undo/redo now always keep an edit baseline on the restored state, so any follow-up edit (tool cleanups, panel writes, peel settle) stays undoable; redoing after new edits now follows the standard "new edits discard redo" behavior, and the Undo button state reflects pending edits more accurately
+- Workspace: cancelling a text editing session after changing text styles no longer leaves a phantom undo step
+
 ## 2.0.44
 
 - Workspace: selections are no longer confined to the canvas — a selection can be moved partly or wholly outside the canvas and persists there, while newly drawn selections (rectangle, ellipse, lasso) still land inside it; a press outside the canvas starts drawing at the nearest canvas edge, and the marching ants now draw into the workspace instead of being cut off at the boundary

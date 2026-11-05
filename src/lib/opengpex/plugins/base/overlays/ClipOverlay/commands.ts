@@ -331,6 +331,14 @@ export const PEEL_COMMANDS = {
       if (!resolved) return;
       const { host, exchange, frags } = resolved;
 
+      // Self-ledgered bracket (defense in depth). The ledger now keeps an
+      // open checkpoint after every undo, so these writes would never throw
+      // — but left unbracketed they fold into whatever unrelated boundary
+      // closes next, replaying the whole abandoned session as a stray edit
+      // mixed into someone else's undo step. Opening and closing a boundary
+      // here keeps the rollback as one isolated, reviewable step.
+      ctx.actions.history.commitCheckpoint(activeFrame.id);
+
       // Rollback: remove the session hole from the host, reset the exchange.
       // This restores the host to its pre-peel state without any off-screen
       // compositing.
@@ -366,6 +374,10 @@ export const PEEL_COMMANDS = {
       // Focus returns to the host — the layer the user was working on before
       // the peel. (This is the one path that owns this write.)
       layers.activate(activeFrame.id, host.id);
+
+      // Close the bracket opened above: the rollback is now one isolated
+      // undo step regardless of which boundary fires next.
+      ctx.actions.history.commitCheckpoint(activeFrame.id);
     }
   } as EditorCommand<void, void>,
 
@@ -411,6 +423,15 @@ export const PEEL_COMMANDS = {
           ...session,
           status: 'committing',
         }));
+
+        // Self-ledgered bracket (defense in depth): the promotion writes land
+        // after an ASYNC bake window. Left unbracketed they would fold into
+        // whatever unrelated boundary closes next (or entangle with writes
+        // landing in the same window), replaying the whole commit as a stray
+        // edit inside someone else's undo step. Opening the boundary before
+        // the awaits and closing it once the record deletion lands keeps the
+        // promotion as one isolated step.
+        ctx.actions.history.commitCheckpoint(activeFrame.id);
 
         try {
           // ─── Composite ONLY the peeled content: stamps (z-order bottom) →
@@ -512,6 +533,11 @@ export const PEEL_COMMANDS = {
 
           // PS "Layer via Cut" intuition: focus lands on the new fragment.
           layers.activate(activeFrame.id, newLayer.id);
+
+          // Close the bracket opened before the bake: the promotion (bake
+          // swap, session deletion, stamp cleanup, focus) is one isolated
+          // undo step.
+          ctx.actions.history.commitCheckpoint(activeFrame.id);
           return true;
 
         } catch (err) {
@@ -525,6 +551,11 @@ export const PEEL_COMMANDS = {
             ...session,
             status: 'peeled',
           }));
+          // Close the bracket on the failure path too — the only write that
+          // landed here is the adjudication flip and this restore, which
+          // cancel each other out; the boundary must not stay open across
+          // whatever the user does next.
+          actions.history.commitCheckpoint(activeFrame.id);
           return false;
         }
       });
