@@ -22,6 +22,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import type { AuthUser, Branding } from "../types";
 import { popupOAuth } from "../oauth-popup";
+import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
 import { API_AUTH_LOGIN, API_AUTH_VERIFY_OTP, API_AUTH_RESEND, API_AUTH_SESSION } from "../../protocol";
 import { OtpInput } from "./OtpInput";
 import { AlertBanner } from "./AlertBanner";
@@ -223,7 +224,8 @@ export function LoginModal({ isOpen, onClose, onSuccess, apiBaseUrl, branding, o
 
   // ─── Render ───
   return (
-    <div className="fixed inset-0 z-[6000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-lg">
+    <div className="fixed inset-0 flex items-center justify-center p-4 bg-black/60 backdrop-blur-lg pointer-events-auto"
+      style={{ zIndex: EDITOR_Z_INDEX.MODAL.DIALOG }}>
       <div
         className="relative w-full max-w-[400px] bg-[var(--bg-panel,#1a1a2e)] border border-[var(--border-subtle,#333)] rounded-2xl p-8 text-[var(--text-main,#eee)] overflow-hidden"
         onClick={(e) => e.stopPropagation()}

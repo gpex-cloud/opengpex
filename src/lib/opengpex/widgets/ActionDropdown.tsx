@@ -22,6 +22,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import EditorPortal from './Portal';
+import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 
 export interface ActionOption {
   label?: string;
@@ -128,7 +129,7 @@ export default function ActionDropdown({
       {/* Menu Area (Rendered via Portal) */}
       <AnimatePresence>
         {isOpen && (
-          <EditorPortal>
+          <EditorPortal segment="window">
             <motion.div
               ref={menuRef}
               initial={{ opacity: 0, y: direction === 'up' ? -8 : 8, scale: 0.95 }}
@@ -152,7 +153,7 @@ export default function ActionDropdown({
                   ? { right: Math.max(8, window.innerWidth - (coords.left + coords.width)) }
                   : { left: coords.left }),
                 ...(matchTriggerWidth ? { width: coords.width } : {}),
-                zIndex: 10000,
+                zIndex: EDITOR_Z_INDEX.WINDOW.CONTEXT_MENU,
                 pointerEvents: 'auto'
               }}
               className={`
@@ -300,7 +301,7 @@ function SubMenuOption({ option, onSelect }: { option: ActionOption; onSelect: (
               bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl
               border border-zinc-200 dark:border-white/10
               rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] p-1
-              flex flex-col gap-0.5 z-[10001]`}
+              flex flex-col gap-0.5 z-[1]`}
           >
             {option.children!.map(child => (
               <button

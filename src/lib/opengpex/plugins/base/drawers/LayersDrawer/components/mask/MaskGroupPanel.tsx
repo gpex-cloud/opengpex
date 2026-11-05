@@ -19,8 +19,9 @@
 
 "use client";
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import EditorPortal from "@opengpex/editor/widgets/Portal";
+import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
 import { MaskItem } from "./MaskItem";
 import type { MaskFamily, AnyLayerMask } from "./MaskGroupItem";
 
@@ -81,9 +82,10 @@ interface MaskGroupPanelProps {
 }
 
 /**
- * Floating member list for a mask group row. Portaled to document.body with
- * fixed positioning because the layer list is a scrolling, height-animated
- * container that would clip in-row absolute positioning. Members reuse the
+ * Floating member list for a mask group row. Portaled into the popup root
+ * (same seat as Popover, below every dialog) with fixed positioning because
+ * the layer list is a scrolling, height-animated container that would clip
+ * in-row absolute positioning. Members reuse the
  * exact flat-row components (newest first), so toggling and deleting go
  * through the same existing commands as before — this panel adds no
  * commands, no reordering, and no editing surface of its own.
@@ -101,7 +103,43 @@ export const MaskGroupPanel = ({
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
+  // Positioning timing. Unlike Popover (which places itself purely from the
+  // trigger rect plus a CSS transform), this panel must know its OWN rendered
+  // size before it can be placed: computePanelPosition flips it to the left
+  // side when it would overflow the right viewport edge and pulls it up when
+  // it would overflow the bottom, and both decisions need the panel's real
+  // width and height. So the panel mounts hidden (visibility: hidden,
+  // off-screen), is measured, then shown at the computed spot.
+  //
+  // The panel element lives in a portal root that EditorPortal attaches one
+  // effect after mount, so it can appear a render later than this component;
+  // a mount-time layout effect would find no element. Measurement therefore
+  // happens in a ref callback, which fires exactly when the element attaches.
+  // That callback MUST be referentially stable: an inline arrow is a new
+  // function every render, and React re-invokes a changed ref callback (null,
+  // then the element) on every commit — combined with the setPos below that
+  // is an infinite render loop. Hence useCallback with no dependencies, and
+  // anchorRect read through a ref instead of the closure.
+  const anchorRectRef = useRef(anchorRect);
+  const attachPanel = useCallback((el: HTMLDivElement | null) => {
+    panelRef.current = el;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setPos(
+      computePanelPosition(
+        anchorRectRef.current,
+        rect.width || PANEL_WIDTH,
+        rect.height,
+        window.innerWidth,
+        window.innerHeight,
+      ),
+    );
+  }, []);
+
+  // Re-measure whenever the anchor row moves or the member count changes the
+  // panel height (the ref callback above only covers the initial attach).
   useLayoutEffect(() => {
+    anchorRectRef.current = anchorRect;
     const el = panelRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
@@ -145,33 +183,37 @@ export const MaskGroupPanel = ({
   // row and toggle selection / expansion state.
   const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
 
-  return createPortal(
-    <div
-      ref={panelRef}
-      data-testid="mask-group-panel"
-      onPointerDown={stopPropagation}
-      onClick={stopPropagation}
-      onPointerEnter={onPointerEnter}
-      onPointerLeave={onPointerLeave}
-      style={{
-        position: "fixed",
-        left: pos?.left ?? -9999,
-        top: pos?.top ?? -9999,
-        width: PANEL_WIDTH,
-        visibility: pos ? "visible" : "hidden",
-      }}
-      className="z-50 rounded-lg border border-[var(--border-light)] bg-[var(--bg-panel)] shadow-xl p-1 flex flex-col gap-0.5"
-    >
-      {[...masks].reverse().map((mask) => (
-        <MaskItem
-          key={mask.id}
-          layerId={layerId}
-          family={family}
-          mask={mask}
-          index={masks.findIndex((m) => m.id === mask.id)}
-        />
-      ))}
-    </div>,
-    document.body,
+  return (
+    <EditorPortal>
+      <div
+        ref={attachPanel}
+        data-testid="mask-group-panel"
+        onPointerDown={stopPropagation}
+        onClick={stopPropagation}
+        onPointerEnter={onPointerEnter}
+        onPointerLeave={onPointerLeave}
+        style={{
+          position: "fixed",
+          left: pos?.left ?? -9999,
+          top: pos?.top ?? -9999,
+          width: PANEL_WIDTH,
+          visibility: pos ? "visible" : "hidden",
+          zIndex: EDITOR_Z_INDEX.POPUP.POPOVER,
+          // Portal roots are pointer-events: none (inherited); opt back in.
+          pointerEvents: "auto",
+        }}
+        className="rounded-lg border border-[var(--border-light)] bg-[var(--bg-panel)] shadow-xl p-1 flex flex-col gap-0.5"
+      >
+        {[...masks].reverse().map((mask) => (
+          <MaskItem
+            key={mask.id}
+            layerId={layerId}
+            family={family}
+            mask={mask}
+            index={masks.findIndex((m) => m.id === mask.id)}
+          />
+        ))}
+      </div>
+    </EditorPortal>
   );
 };

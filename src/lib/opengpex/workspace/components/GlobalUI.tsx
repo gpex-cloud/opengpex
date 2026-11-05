@@ -81,10 +81,13 @@ export const GlobalUI = () => {
 
   return (
     <>
-      {/* 1. HUD feedback system */}
+      {/* 1. HUD feedback system — NOTIFICATION seat: above dialogs and the
+          blocking prompts (FancyChoice/Confirm at PROMPT, one step below), so
+          an error raised while any of them is open stays visible; below the
+          context menu island (5000). */}
       <div
         className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-        style={{ zIndex: EDITOR_Z_INDEX.UI.POPOVER + 50 }}
+        style={{ zIndex: EDITOR_Z_INDEX.MODAL.NOTIFICATION }}
       >
         <div
           className="pointer-events-auto"
@@ -151,11 +154,24 @@ export const GlobalUI = () => {
       {/* 4. Branch animation */}
       <BranchFlyEffect />
 
-      {/* 4. Portal root node */}
+      {/* 5. Portal root nodes — one island per segment so hosted content can
+          never be trapped under a higher segment by sharing a single root.
+         popup: popovers/tooltips · modal: dialogs and their forModal
+          popovers/tooltips · window: context menus. */}
       <div
         id="editor-portal-root"
         className="absolute inset-0 pointer-events-none"
-        style={{ zIndex: EDITOR_Z_INDEX.UI.POPOVER + 100 }}
+        style={{ zIndex: EDITOR_Z_INDEX.POPUP.PORTAL_ROOT }}
+      />
+      <div
+        id="editor-portal-root-modal"
+        className="absolute inset-0 pointer-events-none"
+        style={{ zIndex: EDITOR_Z_INDEX.MODAL.PORTAL_ROOT }}
+      />
+      <div
+        id="editor-portal-root-window"
+        className="absolute inset-0 pointer-events-none"
+        style={{ zIndex: EDITOR_Z_INDEX.WINDOW.PORTAL_ROOT }}
       />
     </>
   );

@@ -21,6 +21,7 @@
 
 import React, { useRef } from 'react';
 import { useEditorState } from '@opengpex/editor/core/context';
+import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 import {
   useBrushOverlayState,
   useBrushToolLifecycle,
@@ -80,7 +81,7 @@ const BrushCursor = React.memo(function BrushCursor() {
       style={{
         opacity: 0, // revealed on the first pointermove
         willChange: 'transform',
-        zIndex: 9999,
+        zIndex: EDITOR_Z_INDEX.FULLSCREEN.OVERLAY,
         marginLeft: `-${halfSize}px`,
         marginTop: `-${halfSize}px`,
       }}

@@ -21,6 +21,7 @@
 
 import React, { useRef } from 'react';
 import { useEditorState } from '@opengpex/editor/core/context';
+import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 import { useMosaicOverlayState, useMosaicCursorTracking, useMosaicParams } from './hooks';
 import { useStrokePreviewFastSync } from './useFastSync';
 
@@ -72,7 +73,7 @@ const MosaicCursor = React.memo(function MosaicCursor() {
       style={{
         opacity: 0,
         willChange: 'transform',
-        zIndex: 9999,
+        zIndex: EDITOR_Z_INDEX.FULLSCREEN.OVERLAY,
         marginLeft: `-${halfSize}px`,
         marginTop: `-${halfSize}px`,
       }}

@@ -124,7 +124,7 @@ export function DeltaLabel() {
         padding: '1px 5px',
         gap: '2px',
         display: 'none',
-        zIndex: EDITOR_Z_INDEX.STAGE.SYSTEM_TOOLS,
+        zIndex: EDITOR_Z_INDEX.STAGE.FEEDBACK,
       }}
     >
       <span className="text-[11px] font-black text-emerald-400 tabular-nums tracking-tighter" />

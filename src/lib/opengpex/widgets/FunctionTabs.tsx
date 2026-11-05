@@ -59,6 +59,8 @@ interface FunctionTabsProps<T> {
   size?: 'sm' | 'md';
   /** Colour accent of the active tab; see FunctionTabsActiveTone. */
   activeTone?: FunctionTabsActiveTone;
+  /** Declare only when the tabs sit inside a modal dialog (option tooltips render above it). */
+  forModal?: boolean;
 }
 
 export default function FunctionTabs<T extends string>({
@@ -69,6 +71,7 @@ export default function FunctionTabs<T extends string>({
   className = '',
   size = 'md',
   activeTone = 'default',
+  forModal = false,
 }: FunctionTabsProps<T>) {
   const isSm = size === 'sm';
 
@@ -112,6 +115,7 @@ export default function FunctionTabs<T extends string>({
               key={opt.value} 
               content={opt.tooltip} 
               align={opt.tooltipAlign || 'center'}
+              forModal={forModal}
               display="block" 
               containerClassName="flex-1"
             >

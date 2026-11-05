@@ -39,7 +39,7 @@ export function SmartGuides() {
   useSmartGuidesFastSync(xRef, yRef, !!isEnabled);
 
   return (
-    <div className="absolute inset-0 pointer-events-none" style={{ zIndex: EDITOR_Z_INDEX.UI.OVERLAY }}>
+    <div className="absolute inset-0 pointer-events-none" style={{ zIndex: EDITOR_Z_INDEX.STAGE.GUIDES }}>
       {/* Vertical Guide (X) */}
       <div 
         ref={xRef}

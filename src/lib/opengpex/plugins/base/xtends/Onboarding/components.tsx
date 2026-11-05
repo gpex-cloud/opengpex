@@ -22,6 +22,8 @@
 import React from "react";
 import { useEditorState } from "@opengpex/editor/core/context";
 import { useOnboarding } from "./hooks";
+import EditorPortal from "@opengpex/editor/widgets/Portal";
+import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
 import { SpotlightBubble } from "./panels/SpotlightBubble";
 import { EverydayTips } from "./panels/EverydayTips";
 import { WelcomeModal } from "./panels/WelcomeModal";
@@ -32,6 +34,16 @@ import { WelcomeModal } from "./panels/WelcomeModal";
  * Full-screen pointer-events-none container; individual elements opt-in to interaction.
  */
 export function OnboardingComponent() {
+  // Modal segment island interior (4010): onboarding floats above popups
+  // but below dialogs, matching its historical 5500 (popover-band) order.
+  return (
+    <EditorPortal segment="modal">
+      <OnboardingSurfaces />
+    </EditorPortal>
+  );
+}
+
+function OnboardingSurfaces() {
   const { state } = useEditorState();
   const hasFrames = state.frames.order.length > 0;
   const trigger = hasFrames ? "has-frame" : "no-frame";
@@ -41,7 +53,7 @@ export function OnboardingComponent() {
   return (
     <div
       className="fixed inset-0 pointer-events-none"
-      style={{ zIndex: 5500 }}
+      style={{ zIndex: EDITOR_Z_INDEX.MODAL.ONBOARDING }}
     >
       {/* WelcomeModal: shown once per browser on first v2 visit */}
       {onboarding.showWelcomeModal && (

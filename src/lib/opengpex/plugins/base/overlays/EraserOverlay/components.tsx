@@ -21,6 +21,7 @@
 
 import React, { useRef, useEffect } from 'react';
 import { useEditorState } from '@opengpex/editor/core/context';
+import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 import { useEraserOverlayState, useBrushCursorTracking, useBrushParams } from './hooks';
 import { useStrokePreviewFastSync, useMaskFocusOverlayFastSync } from './useFastSync';
 import { MASK_EDITING_KEY, MASK_FOCUS_KEY, type MaskEditingSignal } from '../../drawers/LayersDrawer/protocols';
@@ -88,7 +89,7 @@ const BrushCursor = React.memo(function BrushCursor({ activeCraft }: BrushCursor
       style={{
         opacity: 0, // initially hidden, shown on mousemove
         willChange: 'transform',
-        zIndex: 9999,
+        zIndex: EDITOR_Z_INDEX.FULLSCREEN.OVERLAY,
         // translate aligns circle center with mouse
         marginLeft: `-${halfSize}px`,
         marginTop: `-${halfSize}px`,

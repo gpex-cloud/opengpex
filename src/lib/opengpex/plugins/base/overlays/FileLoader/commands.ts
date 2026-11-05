@@ -151,8 +151,11 @@ export const FILE_LOADER_COMMANDS = {
       // The PNG container is written by wasm-vips, a pthreads build that needs
       // SharedArrayBuffer (cross-origin isolation). Without it the worker never
       // answers and the call only dies on the 120 s watchdog — fail fast instead.
+      // Since Chrome 92, SharedArrayBuffer is only exposed to cross-origin
+      // isolated pages; legacy-Chromium browsers never expose it even with
+      // correct COOP/COEP headers.
       if (typeof SharedArrayBuffer === 'undefined') {
-        actions.setInteraction({ hud: { message: 'New Document needs cross-origin isolation (SharedArrayBuffer), which this browser context does not provide.', type: 'error' } });
+        actions.setInteraction({ hud: { message: 'This browser does not support COI. Chrome 92+ or Safari 15.2+ required.', type: 'error' } });
         return;
       }
 

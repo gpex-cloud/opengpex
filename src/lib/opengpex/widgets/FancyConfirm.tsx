@@ -24,6 +24,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Motion } from '@opengpex/editor/core/motion';
 import { AlertTriangle, Check, X, HelpCircle } from 'lucide-react';
+import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 
 interface FancyConfirmProps {
   isVisible: boolean;
@@ -269,7 +270,8 @@ export default function FancyConfirm({
   return (
     <div 
       ref={containerRef}
-      className="fixed inset-0 z-[6000] flex items-center justify-center p-4 bg-zinc-950/20 opacity-0 pointer-events-none"
+      className="fixed inset-0 flex items-center justify-center p-4 bg-zinc-950/20 opacity-0 pointer-events-none"
+      style={{ zIndex: EDITOR_Z_INDEX.MODAL.PROMPT }}
     >
       {isRect ? RectLayout : SquareLayout}
     </div>

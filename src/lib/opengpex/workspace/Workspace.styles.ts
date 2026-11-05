@@ -95,7 +95,7 @@ export const getWorkspaceStyles = (
         topBarOuter: {
             className: `absolute top-0 left-[var(--v-offset-fixed-left)] right-[var(--v-offset-fixed-right)] border-transparent pointer-events-none flex items-center justify-center transition-all duration-500`,
             style: {
-                zIndex: EDITOR_Z_INDEX.UI.OVERLAY + 5,
+                zIndex: EDITOR_Z_INDEX.CHROME.FLOATING_MENU,
                 height: `${WORKSPACE_GEOMETRY.HEADER_HEIGHT}px`
             }
         },
@@ -120,7 +120,7 @@ export const getWorkspaceStyles = (
                 ? `relative pointer-events-auto h-full shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-panel)]/80 backdrop-blur-xl shadow-[4px_0_24px_rgba(0,0,0,0.05)]`
                 : `absolute pointer-events-auto transition-all duration-300 left-[11px] top-2`,
             style: {
-                zIndex: EDITOR_Z_INDEX.UI.POPOVER + 5,
+                zIndex: EDITOR_Z_INDEX.CHROME.FLOATING_MENU,
                 width: isToolMenuPinned ? `${WORKSPACE_GEOMETRY.TOOL_MENU_WIDTH}px` : undefined,
                 maxWidth: isToolMenuPinned ? `${WORKSPACE_GEOMETRY.TOOL_MENU_WIDTH}px` : undefined,
             }
@@ -129,7 +129,7 @@ export const getWorkspaceStyles = (
         xtendButton: {
             className: `absolute pointer-events-auto transition-all duration-300 right-[11px] top-2`,
             style: {
-                zIndex: EDITOR_Z_INDEX.UI.POPOVER + 5
+                zIndex: EDITOR_Z_INDEX.CHROME.FLOATING_MENU
             }
         },
 
@@ -137,7 +137,7 @@ export const getWorkspaceStyles = (
         drawerBar: {
             className: `shrink-0 flex flex-col items-center gap-0 absolute top-2 bottom-4 pt-0 pb-0 px-0 pointer-events-none transition-all duration-500`,
             style: {
-                zIndex: EDITOR_Z_INDEX.UI.OVERLAY,
+                zIndex: EDITOR_Z_INDEX.CHROME.DRAWER_BAR,
                 width: `${WORKSPACE_GEOMETRY.DRAWER_BAR_WIDTH}px`
             }
         },

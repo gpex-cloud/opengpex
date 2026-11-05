@@ -24,37 +24,58 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+/**
+ * Portal segment: which z-index isolation domain the hosted content belongs
+ * to. Each segment has its own root container in GlobalUI, so content can
+ * never be trapped under a higher segment by sharing a single island.
+ *  - popup:    popovers, dropdowns and tooltips of the workspace (default)
+ *  - modal:    modal dialogs and their forModal popovers / tooltips
+ *  - window: context menus and other surfaces that must beat dialogs
+ */
+export type PortalSegment = 'popup' | 'modal' | 'window';
+
+const SEGMENT_ROOT_IDS: Record<PortalSegment, string> = {
+  popup: 'editor-portal-root',
+  modal: 'editor-portal-root-modal',
+  window: 'editor-portal-root-window',
+};
+
 interface PortalProps {
   children: ReactNode;
-  /** Mount target DOM ID, defaults to the editor-defined root node */
+  /** Mount target DOM ID; overrides the segment-derived root when set */
   targetId?: string;
+  /** Segment root to mount into; ignored when targetId is given */
+  segment?: PortalSegment;
 }
 
 /**
  * EditorPortal: Editor unified Portal utility component
- * 
+ *
  * Specification responsibilities:
  * 1. Automatically handles safe mount under SSR environment, avoiding injection hydration errors.
- * 2. Unifies DOM lookup logic, defaulting to 'editor-portal-root'.
+ * 2. Unifies DOM lookup logic, defaulting to the popup segment root
+ *    'editor-portal-root' (override with segment or targetId).
  * 3. Intended for all UI elements needing to escape local containers (like sidebars, toolbars).
  */
-export default function EditorPortal({ 
-  children, 
-  targetId = 'editor-portal-root' 
+export default function EditorPortal({
+  children,
+  targetId,
+  segment = 'popup',
 }: PortalProps) {
+  const resolvedTargetId = targetId ?? SEGMENT_ROOT_IDS[segment];
   const [mounted, setMounted] = useState(false);
   const [target, setTarget] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     // 1. Set mounted flag (SSR safe)
     setMounted(true);
-    
+
     // 2. Locate target DOM
-    const el = document.getElementById(targetId);
+    const el = document.getElementById(resolvedTargetId);
     if (el) {
       setTarget(el);
     } else {
-      console.warn(`[EditorPortal] Target ID "#${targetId}" not found. Falling back to body.`);
+      console.warn(`[EditorPortal] Target ID "#${resolvedTargetId}" not found. Falling back to body.`);
       setTarget(document.body);
     }
 
@@ -62,7 +83,7 @@ export default function EditorPortal({
       setMounted(false);
       setTarget(null);
     };
-  }, [targetId]);
+  }, [resolvedTargetId]);
 
   // No render if not mounted or target missing
   if (!mounted || !target) return null;

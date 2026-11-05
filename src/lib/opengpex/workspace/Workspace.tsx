@@ -115,7 +115,7 @@ export function Workspace() {
           subtitle={BOOT_SUBTITLES[
             state.getStateSignal<string>("core.bootStage", "checking")
           ] || "Loading workspace..."}
-          style={{ zIndex: EDITOR_Z_INDEX.UI.POPOVER + 10 }}
+          style={{ zIndex: EDITOR_Z_INDEX.CHROME.BOOT_OVERLAY }}
         />
 
         {/* --- Drawer Bar (Left) --- */}
@@ -160,7 +160,7 @@ export function Workspace() {
               <PluginSlot
                 name="DOCK"
                 className="absolute inset-0 pointer-events-none"
-                style={{ zIndex: EDITOR_Z_INDEX.UI.OVERLAY + 20 }}
+                style={{ zIndex: EDITOR_Z_INDEX.CHROME.DOCK }}
               />
             )}
           </div>

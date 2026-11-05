@@ -184,7 +184,7 @@ export function ClipOverlayMain() {
     <div
       ref={overlayRef}
       className="absolute inset-0 pointer-events-none"
-      style={{ zIndex: EDITOR_Z_INDEX.STAGE.SYSTEM_TOOLS }}
+      style={{ zIndex: EDITOR_Z_INDEX.STAGE.OVERLAY }}
     >
       {/* Plugin-internal keyframes for marching ants animation */}
       <style dangerouslySetInnerHTML={{ __html: CLIP_ANTS_STYLE }} />

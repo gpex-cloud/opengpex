@@ -47,6 +47,8 @@ type ColorSwatchRowBinding =
 const ColorSwatchRow = React.memo(function ColorSwatchRow(props: {
   label: string;
   labelClassName?: string;
+  /** Declare only when the row sits inside a modal dialog (the picker popover renders above it). */
+  forModal?: boolean;
 } & ColorSwatchRowBinding) {
   const {
     label,
@@ -64,6 +66,7 @@ const ColorSwatchRow = React.memo(function ColorSwatchRow(props: {
         onClose={() => setOpen(false)}
         position="left"
         align="start"
+        forModal={props.forModal}
         content={
           <div className="w-52 p-2.5">
             {props.value ? (

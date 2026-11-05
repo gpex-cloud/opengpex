@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.46
+
+- Workspace: redefined the z-index system — how panels, dialogs, menus, tooltips and notifications overlap on screen, so they always stack in the right order
+- Workspace: clearer error message when the browser cannot create a blank document due to missing cross-origin isolation
+- Developer Tools: the Layout Blueprint inspector now shows the stacking hierarchy and can scan the live page for layering issues
+
 ## 2.0.45
 
 - Workspace: fixed an undo ledger defect where edits made right after an undo could fall outside every recorded step and crash the next undo with an internal patch error — undo/redo now always keep an edit baseline on the restored state, so any follow-up edit (tool cleanups, panel writes, peel settle) stays undoable; redoing after new edits now follows the standard "new edits discard redo" behavior, and the Undo button state reflects pending edits more accurately

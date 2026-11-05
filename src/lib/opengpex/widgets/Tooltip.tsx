@@ -18,8 +18,8 @@
  */
 
 import React, { ReactNode, useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
+import EditorPortal from '@opengpex/editor/widgets/Portal';
 
 export type TooltipPosition = 'top' | 'bottom' | 'left' | 'right';
 export type TooltipAlign = 'start' | 'center' | 'end';
@@ -38,6 +38,12 @@ interface TooltipProps {
   contentClassName?: string;
   /** Max width for long tooltip content (e.g. '240px'). Default: unlimited (nowrap). */
   maxWidth?: string;
+  /**
+   * Declare ONLY for tooltips inside a modal dialog: they then render in the
+   * modal root one step above the dialog. Omitted (the workspace default),
+   * they render in the popup root, below every dialog.
+   */
+  forModal?: boolean;
 }
 
 export default function Tooltip({
@@ -53,6 +59,7 @@ export default function Tooltip({
   uppercase = true,
   contentClassName = '',
   maxWidth,
+  forModal = false,
 }: TooltipProps) {
   const [isVisible, setIsVisible] = useState(false);
   const [tooltipPos, setTooltipPos] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
@@ -151,7 +158,7 @@ export default function Tooltip({
       top,
       left,
       transform,
-      zIndex: EDITOR_Z_INDEX.UI.TOOLTIP,
+      zIndex: forModal ? EDITOR_Z_INDEX.MODAL.TOOLTIP : EDITOR_Z_INDEX.POPUP.TOOLTIP,
       pointerEvents: 'none' as const
     };
   };
@@ -207,7 +214,8 @@ export default function Tooltip({
       onMouseLeave={handleMouseLeave}
     >
       {children}
-      {(alwaysShow || (isVisible && showOnHover)) && typeof document !== 'undefined' && createPortal(
+      {(alwaysShow || (isVisible && showOnHover)) && (
+        <EditorPortal segment={forModal ? 'modal' : 'popup'}>
         <div
           ref={tooltipRef}
           style={getTooltipStyle()}
@@ -220,8 +228,8 @@ export default function Tooltip({
             {content}
           </div>
           <div className={`border-4 border-transparent w-0 h-0 absolute ${arrowStyles[position][align]}`}></div>
-        </div>,
-        document.body
+        </div>
+        </EditorPortal>
       )}
     </div>
   );

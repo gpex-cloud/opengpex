@@ -20,7 +20,8 @@
 'use client';
 
 import React, { ReactNode, useRef, useEffect, useState, useCallback } from 'react';
-import { createPortal } from 'react-dom';
+import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
+import EditorPortal from '@opengpex/editor/widgets/Portal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,13 +54,20 @@ interface PopoverProps {
   /** Gap between trigger and popover (px) */
   offset?: number;
   /**
-   * Z-index of the rendered popover (it lives in a body-level portal, so this
-   * is the *global* z used to layer it against the rest of the editor chrome).
-   * Defaults to 9999. Callers can lower it (e.g. when they need a sibling
+   * Z-index of the bubble INSIDE its portal root (an island interior value:
+   * it only orders siblings within that root). Defaults to the matrix seat
+   * of the chosen root. Callers can lower it (e.g. when they need a sibling
    * popover/dropdown to overlap *on top* of this one — see the Clip-tool
    * popover vs the aspect-ratio dropdown in `ClipOptions/components.tsx`).
    */
   zIndex?: number;
+  /**
+   * Declare ONLY when the popover is opened from inside a modal dialog: it
+   * then renders in the modal root one step above the dialog. Omitted (the
+   * workspace default), it renders in the popup root, below every dialog —
+   * so an omitted flag inside a dialog would hide the popover behind it.
+   */
+  forModal?: boolean;
   /**
    * CSS selector, queried INSIDE the trigger subtree, naming the element that
    * the popover bubble (and by default the arrow) should position against.
@@ -103,10 +111,12 @@ export default function Popover({
   dismissOnEscape = true,
   display = 'inline-flex',
   offset = 8,
-  zIndex = 5000,
+  zIndex,
   anchorSelector,
   arrowAnchorSelector,
+  forModal = false,
 }: PopoverProps) {
+  const bubbleZIndex = zIndex ?? (forModal ? EDITOR_Z_INDEX.MODAL.POPOVER : EDITOR_Z_INDEX.POPUP.POPOVER);
 
   const triggerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -130,7 +140,20 @@ export default function Popover({
     }
   }
 
-  // Compute position from trigger bounding rect
+  // Positioning timing. The bubble renders through a portal root that
+  // EditorPortal attaches one effect after mount, so the bubble element may
+  // not exist yet when the position is computed. The design never needs it:
+  //  - Placement reads ONLY the trigger rect. The bubble is then offset from
+  //    that anchor point by a CSS transform (see getTransform), which sizes
+  //    itself against the bubble's own box, so the first painted frame is
+  //    already in place without measuring the bubble.
+  //  - The only bubble-dependent detail, the arrow offset, is filled in one
+  //    frame later (requestAnimationFrame here, with the effect below as a
+  //    fallback for when the bubble mounts after that frame).
+  //  - The bubble binds a plain ref object, never a ref callback, so
+  //    attaching it cannot trigger a render on its own.
+  // Trade-off: no viewport clamping — a bubble near a screen edge can
+  // overflow, because clamping would require measuring the bubble first.
   const updatePosition = useCallback(() => {
     if (!triggerRef.current) return;
     const triggerEl = triggerRef.current;
@@ -373,43 +396,46 @@ export default function Popover({
   return (
     <div ref={triggerRef} className={containerClass}>
       {children}
-      {isOpen && coords && typeof document !== 'undefined' && createPortal(
-        <div
-          ref={popoverRef}
-          className={[
-            'absolute',
-            'animate-in fade-in zoom-in-95 duration-150',
-            className,
-          ].join(' ')}
-          style={{
-            top: coords.top,
-            left: coords.left,
-            transform: getTransform() + getExtraTransform(),
-            zIndex,
-          }}
+      {isOpen && coords && (
+        <EditorPortal segment={forModal ? 'modal' : 'popup'}>
+          <div
+            ref={popoverRef}
+            className={[
+              'absolute',
+              'animate-in fade-in zoom-in-95 duration-150',
+              className,
+            ].join(' ')}
+            style={{
+              top: coords.top,
+              left: coords.left,
+              transform: getTransform() + getExtraTransform(),
+              zIndex: bubbleZIndex,
+              // Portal roots are pointer-events: none (inherited); opt back in.
+              pointerEvents: 'auto',
+            }}
 
-        >
-          <div className="relative">
-            {/* Arrow — anchored to trigger center via inline style (see getArrowStyle) */}
-            <div className={getArrowClasses()} style={getArrowStyle()} />
-            {/*
-             * Content bubble — themed via CSS tokens so light & dark modes
-             * pick up the right surface (`--bg-panel` is `#fff` in light,
-             * `#2b2b2b` in dark; see `index.css`). The `popover-bubble`
-             * utility class adds the cross-cutting "kill native UA chrome"
-             * rules (no focus rings on internal buttons, no text-selection
-             * highlight, no native focus outline on the bubble itself) so
-             * keyboard / click interactions inside the popover don't show
-             * the browser's blue/purple highlights that fight with our
-             * accent palette.
-             */}
-            <div className="popover-bubble bg-[var(--bg-panel)] text-[var(--text-main)] rounded-xl shadow-2xl border border-[var(--border-subtle)] backdrop-blur-xl overflow-hidden">
-              {content}
+          >
+            <div className="relative">
+              {/* Arrow — anchored to trigger center via inline style (see getArrowStyle) */}
+              <div className={getArrowClasses()} style={getArrowStyle()} />
+              {/*
+               * Content bubble — themed via CSS tokens so light & dark modes
+               * pick up the right surface (`--bg-panel` is `#fff` in light,
+               * `#2b2b2b` in dark; see `index.css`). The `popover-bubble`
+               * utility class adds the cross-cutting "kill native UA chrome"
+               * rules (no focus rings on internal buttons, no text-selection
+               * highlight, no native focus outline on the bubble itself) so
+               * keyboard / click interactions inside the popover don't show
+               * the browser's blue/purple highlights that fight with our
+               * accent palette.
+               */}
+              <div className="popover-bubble bg-[var(--bg-panel)] text-[var(--text-main)] rounded-xl shadow-2xl border border-[var(--border-subtle)] backdrop-blur-xl overflow-hidden">
+                {content}
+              </div>
             </div>
-          </div>
 
-        </div>,
-        document.body
+          </div>
+        </EditorPortal>
       )}
     </div>
   );

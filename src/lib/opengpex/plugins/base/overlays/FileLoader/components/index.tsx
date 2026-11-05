@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import EditorHUD from "@opengpex/editor/widgets/EditorHUD";
 import EditorPortal from "@opengpex/editor/widgets/Portal";
+import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
 import DelayedConfirm from "@opengpex/editor/widgets/DelayedConfirm";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import {
@@ -164,29 +165,49 @@ export function FileLoaderComponent() {
   }, [importCmd]);
 
   return (
-    <div
-      className={`absolute inset-0 z-[100] pointer-events-none transition-all duration-300 ${isOver ? "bg-indigo-600/5 backdrop-blur-[2px]" : ""}`}
-    >
-      <input
-        type="file"
-        ref={fileInputRef}
-        onChange={(e) => {
-          if (e.target.files && e.target.files.length > 0) {
-            importCmd?.execute(Array.from(e.target.files));
-          }
-          e.target.value = "";
-        }}
-        accept="image/*,.eps,.epsf,application/postscript"
-        multiple
-        className="hidden"
-      />
-
-      {/* Drag visual feedback */}
+    <>
       <div
-        className={`absolute inset-0 border-[6px] border-dashed border-indigo-500/20 transition-opacity duration-300 ${isOver ? "opacity-100" : "opacity-0"}`}
-      />
+        className={`absolute inset-0 z-[100] pointer-events-none transition-all duration-300 ${isOver ? "bg-indigo-600/5 backdrop-blur-[2px]" : ""}`}
+      >
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={(e) => {
+            if (e.target.files && e.target.files.length > 0) {
+              importCmd?.execute(Array.from(e.target.files));
+            }
+            e.target.value = "";
+          }}
+          accept="image/*,.eps,.epsf,application/postscript"
+          multiple
+          className="hidden"
+        />
 
-      <div className="absolute inset-0 flex items-center justify-center p-4">
+        {/* Drag visual feedback */}
+        <div
+          className={`absolute inset-0 border-[6px] border-dashed border-indigo-500/20 transition-opacity duration-300 ${isOver ? "opacity-100" : "opacity-0"}`}
+        />
+
+        {/* New Document dialog — portaled into the modal segment root so it
+            stacks in the dialog band like the other editor modals. */}
+        <EditorPortal segment="modal">
+          <NewDocumentModal
+            isVisible={isNewBlankOpen}
+            onCancel={() => actions.setStateSignal(SIGNAL_NEW_BLANK_MODAL, null)}
+          />
+        </EditorPortal>
+      </div>
+
+      {/* Notification HUDs — a SIBLING of the drag-feedback container, never
+          its child: that container carries z-[100] and becomes its own
+          stacking context, which would cap this layer at 100 and let stage
+          overlays (marching ants, 300) paint over it. As a sibling it competes
+          in the root context at NOTIFICATION, above stage overlays and modal
+          backdrops alike. */}
+      <div
+        className="fixed inset-0 flex items-center justify-center p-4 pointer-events-none"
+        style={{ zIndex: EDITOR_Z_INDEX.MODAL.NOTIFICATION }}
+      >
         <EditorHUD
           isVisible={isOver}
           title="Ready to Drop"
@@ -212,16 +233,7 @@ export function FileLoaderComponent() {
           }
         />
       </div>
-
-      {/* New Document dialog — portaled out of this pointer-events-none,
-          z-[100] overlay so it stacks like the other editor modals. */}
-      <EditorPortal>
-        <NewDocumentModal
-          isVisible={isNewBlankOpen}
-          onCancel={() => actions.setStateSignal(SIGNAL_NEW_BLANK_MODAL, null)}
-        />
-      </EditorPortal>
-    </div>
+    </>
   );
 }
 

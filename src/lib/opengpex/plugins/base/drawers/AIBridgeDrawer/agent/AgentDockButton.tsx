@@ -35,6 +35,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { usePluginSelfConfig } from '@opengpex/editor/core/context';
 import Tooltip from '@opengpex/editor/widgets/Tooltip';
 import EditorPortal from '@opengpex/editor/widgets/Portal';
+import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 import type { AIBridgeConfig, AgentDef } from '../protocols';
 import { AgentChatPanel } from './AgentChatPanel';
 
@@ -122,8 +123,8 @@ export function AgentDockButton() {
         <AnimatePresence>
           {open && hasAgent && (
             <motion.div
-              className="fixed z-[9999] pointer-events-auto rounded-2xl overflow-hidden border border-[var(--border-subtle)] bg-[var(--bg-panel)]/85 backdrop-blur-xl shadow-2xl shadow-black/40"
-              style={{ left: panelPos.left, bottom: panelPos.bottom }}
+              className="fixed pointer-events-auto rounded-2xl overflow-hidden border border-[var(--border-subtle)] bg-[var(--bg-panel)]/85 backdrop-blur-xl shadow-2xl shadow-black/40"
+              style={{ left: panelPos.left, bottom: panelPos.bottom, zIndex: EDITOR_Z_INDEX.POPUP.POPOVER }}
               initial={{ opacity: 0, y: 24, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 24, scale: 0.96 }}

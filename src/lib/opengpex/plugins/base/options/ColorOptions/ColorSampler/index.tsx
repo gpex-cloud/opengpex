@@ -21,6 +21,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
 import { sampleGpuRawData } from "@opengpex/editor/core/engine/utils/sample-utils";
 
 import { SAMPLER_PICK_ATTR } from "./constants";
@@ -622,7 +623,8 @@ export function ColorSampler({
   return createPortal(
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-[99999] select-none pointer-events-none"
+      className="fixed inset-0 select-none pointer-events-none"
+      style={{ zIndex: EDITOR_Z_INDEX.TOP.FULLSCREEN_CAPTURE }}
     >
       {/* ===== Custom Crosshair Cursor ===== */}
       {/* Only over the document image (or while dragging a pick) — off-image the

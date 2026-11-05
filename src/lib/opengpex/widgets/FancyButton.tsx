@@ -39,6 +39,8 @@ export type FancyButtonShape = "rect" | "pill";
 export type FancyButtonSize = "xs" | "sm" | "md" | "lg";
 
 interface FancyButtonProps {
+  /** Declare only when the button sits inside a modal dialog (its tooltip renders above it). */
+  forModal?: boolean;
   onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
   loading?: boolean;
@@ -261,6 +263,7 @@ export function FancyButton({
   iconOnly = false,
   tooltipAlign = "center",
   tooltipPosition = "top",
+  forModal = false,
   dropdownOptions,
   onDropdownSelect,
   dropdownDirection = "down",
@@ -428,6 +431,7 @@ export function FancyButton({
           content={resolvedTooltip}
           align={tooltipAlign}
           position={tooltipPosition}
+          forModal={forModal}
           display="inline-flex"
           containerClassName={className}
         >
@@ -444,6 +448,7 @@ export function FancyButton({
         content={resolvedTooltip}
         align={tooltipAlign}
         position={tooltipPosition}
+        forModal={forModal}
         display="inline-flex"
         containerClassName={className}
       >

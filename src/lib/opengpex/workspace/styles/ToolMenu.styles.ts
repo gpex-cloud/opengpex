@@ -66,7 +66,7 @@ export const getToolMenuStyles = (isCollapsed: boolean, isPinned: boolean = fals
                 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.2)]
                 animate-in fade-in slide-in-from-left-2 duration-200
             `,
-            style: { zIndex: EDITOR_Z_INDEX?.UI?.POPOVER ? EDITOR_Z_INDEX.UI.POPOVER + 5 : 999 }
+            style: { zIndex: EDITOR_Z_INDEX.CHROME.FLOATING_MENU }
         },
         // ✨ Native atomic menu item
         menuItem: {

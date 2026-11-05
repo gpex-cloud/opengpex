@@ -23,6 +23,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Motion } from '@opengpex/editor/core/motion';
 import { X, AlertCircle, type LucideIcon } from 'lucide-react';
 import Switch from '@opengpex/editor/widgets/Switch';
+import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 
 export interface ChoiceOption {
   id: string;
@@ -126,7 +127,8 @@ export default function FancyChoice({
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-[6000] flex items-center justify-center p-4 bg-zinc-950/30 backdrop-blur-[2px] opacity-0 pointer-events-none"
+      className="fixed inset-0 flex items-center justify-center p-4 bg-zinc-950/30 backdrop-blur-[2px] opacity-0 pointer-events-none"
+      style={{ zIndex: EDITOR_Z_INDEX.MODAL.PROMPT }}
     >
       <div
         ref={modalRef}

@@ -30,7 +30,7 @@
  */
 
 import React, { createContext, useState, useEffect, useCallback, useRef } from "react";
-import { createPortal } from "react-dom";
+import EditorPortal from "@opengpex/editor/widgets/Portal";
 import type { AuthContextValue, AuthProviderProps, AuthUser } from "./types";
 import { getAccessToken, getRefreshToken, setAccessToken, setRefreshToken, clearTokens } from "./token-store";
 import { initHttpClient, authFetch } from "./http-client";
@@ -176,16 +176,19 @@ export function AuthProvider({ apiBaseUrl, branding, oauthProviders, children }:
   return (
     <AuthContext.Provider value={value}>
       {children}
-      {typeof document !== "undefined" && createPortal(
-        <LoginModal
-          isOpen={isLoginOpen}
-          onClose={closeLogin}
-          onSuccess={handleLoginSuccess}
-          apiBaseUrl={apiBaseUrl}
-          branding={branding}
-          oauthProviders={oauthProviders}
-        />,
-        document.body
+      {/* Mounted only while open: the modal portal root is guaranteed to
+          exist by then (LoginModal renders nothing when closed anyway). */}
+      {isLoginOpen && (
+        <EditorPortal segment="modal">
+          <LoginModal
+            isOpen={isLoginOpen}
+            onClose={closeLogin}
+            onSuccess={handleLoginSuccess}
+            apiBaseUrl={apiBaseUrl}
+            branding={branding}
+            oauthProviders={oauthProviders}
+          />
+        </EditorPortal>
       )}
     </AuthContext.Provider>
   );

@@ -32,7 +32,7 @@ export const ViewportHUD = () => (
       name="TL"
       className="absolute top-6 left-6 pointer-events-auto"
       style={{
-        zIndex: EDITOR_Z_INDEX.UI.WORKSPACE_BASE,
+        zIndex: EDITOR_Z_INDEX.CHROME.VIEWPORT_HUD,
         left: "calc(var(--v-offset-left) + 24px)",
       }}
     />
@@ -40,7 +40,7 @@ export const ViewportHUD = () => (
       name="TR"
       className="absolute top-6 right-6 pointer-events-auto"
       style={{
-        zIndex: EDITOR_Z_INDEX.UI.WORKSPACE_BASE,
+        zIndex: EDITOR_Z_INDEX.CHROME.VIEWPORT_HUD,
         right: "calc(var(--v-offset-right) + 24px)",
       }}
     />
@@ -48,7 +48,7 @@ export const ViewportHUD = () => (
       name="BL"
       className="absolute bottom-6 left-6 pointer-events-auto"
       style={{
-        zIndex: EDITOR_Z_INDEX.UI.WORKSPACE_BASE,
+        zIndex: EDITOR_Z_INDEX.CHROME.VIEWPORT_HUD,
         left: "calc(var(--v-offset-left) + 24px)",
       }}
     />
@@ -56,7 +56,7 @@ export const ViewportHUD = () => (
       name="BR"
       className="absolute bottom-6 right-6 flex flex-row-reverse items-end gap-3 pointer-events-none"
       style={{
-        zIndex: EDITOR_Z_INDEX.UI.WORKSPACE_BASE,
+        zIndex: EDITOR_Z_INDEX.CHROME.VIEWPORT_HUD,
         right: "calc(var(--v-offset-right) + 24px)",
       }}
     />

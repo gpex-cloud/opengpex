@@ -17,24 +17,76 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+/**
+ * Segmented z-index matrix — the single source of truth for every z-index that
+ * competes across stacking contexts (see gpex-assets arch/21 spec).
+ *
+ * Model: SEGMENT × 1000 span, LAYER × 100 step, COMPONENT × 10 step.
+ *  - A segment is an absolute isolation domain: no member of a lower segment
+ *    can ever paint above a member of a higher segment, no matter how its
+ *    internals are arranged. Offsets that cross a layer/segment boundary are
+ *    forbidden; add a named seat instead.
+ *  - Islands (stacking-context containers such as portal roots) expose exactly
+ *    one segment seat to the outside; their interior values are component-level
+ *    (×10) free space and never compare with the outside.
+ *  - Segment order anchors: notifications above dialogs; canvas overlays below
+ *    dialogs; fullscreen canvas overlays below dialogs but above popups;
+ *    popovers/tooltips inside dialogs above every dialog; blocking prompts
+ *    and notification HUDs above all of them; context menu above modals;
+ *    the colour-sampler capture above everything.
+ */
 export const EDITOR_Z_INDEX = {
-  // Stage (Inside Artboard) - Overlapping conflict zone
+  // Segment 0 · STAGE (0–999) — canvas interior, below every UI band
   STAGE: {
-    BACKDROP: 0,
-    CONTENT: 100,      // Starting level of layer (LayerStack)
-    GIZMOS: 1000,       // Basic interactive entities (guide lines, anchor points)
-    SYSTEM_TOOLS: 2000, // Core tools (selection box, crop box)
-    DEVELOPER_ZONE: 3000, // Third-party safety zone
+    BACKDROP: 0,          // L0: canvas backdrop
+    CONTENT: 100,         // L1: LayerStack (CanvasStage artboard wrapper)
+    GIZMOS: 200,          // L2: STAGE_GIZMOS slot — guide lines, anchor points (island inside the transform stage)
+    OVERLAY: 300,         // L3: STAGE_OVERLAY slot — marching ants, brush canvas surface, text editor
+    GUIDES: 310,          // L3 component step: SmartGuides snap lines (one step above the ants, DOM order independent)
+    FEEDBACK: 400,        // L4: DeltaLabel displacement/angle chip
+    PLUGIN_CANVAS: 700,   // L7: 700–999 canvas plugin autonomy band (former DEVELOPER_ZONE)
   },
-  // Workspace (Global UI) - Layout tiling zone
-  UI: {
-    WORKSPACE_BASE: 2000, // Sidebar, top bar, action bar
-    OVERLAY: 4000,        // Global overlay plugins
-    POPOVER: 5000,        // Popover, Dropdown (requires Portal)
-    MODAL: 6000,          // Modal dialogs and warnings
-    TOOLTIP: 10100,       // Tooltip — must float above Popover (default 9999)
-  }
-};
+  // Segment 1 · CHROME (1000–1999) — workspace skeleton
+  CHROME: {
+    DRAWER_BAR: 1000,     // L0: side drawers
+    VIEWPORT_HUD: 1100,   // L1: ViewportHUD corner slots (TL/TR/BL/BR)
+    DOCK: 1110,           // L1 component step: global DOCK slot
+    FLOATING_MENU: 1200,  // L2: floating ToolMenu, ExtendButton, OptionBar top bar
+    BOOT_OVERLAY: 1400,   // L4: boot FancyOverlay — covers the workspace, below every floating layer
+  },
+  // Segment 2 · POPUP (2000–2999) — portal-hosted floating layers
+  POPUP: {
+    PORTAL_ROOT: 2000,    // L0: popup portal root (the only seat the island exposes)
+    POPOVER: 2010,        // island interior: Popover default
+    TOOLTIP: 2020,        // island interior: Tooltip default — one step above popovers
+  },
+  // Segment 3 · FULLSCREEN (3000–3999) — canvas fullscreen overlays, above
+  // every popup but below dialogs (a dialog must cover the brush)
+  FULLSCREEN: {
+    OVERLAY: 3000,        // L0: brush / eraser / mosaic cursor surfaces
+  },
+  // Segment 4 · MODAL (4000–4999) — dialogs and their floating children,
+  // with the system-to-user message family on top
+  MODAL: {
+    PORTAL_ROOT: 4000,    // L0: modal portal root (island seat)
+    ONBOARDING: 4010,     // island interior: onboarding guide — above popups, below dialogs
+    DIALOG: 4020,         // island interior: NewDocument / LoginModal / ReleaseGuideCard
+    POPOVER: 4030,        // island interior: Popover opened from inside a dialog (forModal)
+    TOOLTIP: 4040,        // island interior: Tooltip shown inside a dialog (forModal)
+    PROMPT: 4800,         // L8: blocking system prompts — FancyChoice / FancyConfirm (no forModal children)
+    NOTIFICATION: 4810,   // L8 component step: notification HUDs (GlobalUI + FileLoader) — above prompts
+  },
+  // Segment 5 · WINDOW (5000–5999) — window surfaces above modals
+  WINDOW: {
+    PORTAL_ROOT: 5000,    // L0: window portal root (context menu island seat)
+    CONTEXT_MENU: 5010,   // island interior: ActionDropdown menus
+    BRANCH_FLY: 5200,     // L2: branch fly animation
+  },
+  // Segment 6 · TOP (6000–6999) — must beat everything conventional
+  TOP: {
+    FULLSCREEN_CAPTURE: 6900, // L9: colour-sampler fullscreen capture — absolute top
+  },
+} as const;
 
 /** Agreed stacking value for the Host layer is 10 */
 export const HOST_LAYER_ORDER = 10;

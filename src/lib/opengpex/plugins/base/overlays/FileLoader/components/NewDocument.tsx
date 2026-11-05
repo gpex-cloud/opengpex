@@ -22,6 +22,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X, AlertCircle, ImagePlus, RectangleHorizontal, RectangleVertical } from 'lucide-react';
 import { Motion } from '@opengpex/editor/core/motion';
+import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 import FancyButton from '@opengpex/editor/widgets/FancyButton';
 import ComboInput from '@opengpex/editor/widgets/ComboInput';
 import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
@@ -272,7 +273,8 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-[6000] flex items-center justify-center p-4 bg-zinc-950/30 backdrop-blur-[2px] opacity-0 pointer-events-none"
+      className="fixed inset-0 flex items-center justify-center p-4 bg-zinc-950/30 backdrop-blur-[2px] opacity-0 pointer-events-none"
+      style={{ zIndex: EDITOR_Z_INDEX.MODAL.DIALOG }}
     >
       <div
         ref={modalRef}
@@ -315,7 +317,7 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
           {/* Presets */}
           <div className="flex items-center gap-2">
             <FieldLabel>Preset</FieldLabel>
-            <FunctionTabs<SizePresetId | ''>
+            <FunctionTabs<SizePresetId | ''> forModal
               options={SIZE_PRESET_OPTIONS}
               value={activePreset}
               onChange={(v) => { if (v) applyPreset(v); }}
@@ -347,7 +349,8 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
                 className="flex-1"
               />
               {/* DPI dropdown rendered in-container: the portal variant sits at
-                  z-index 1100, underneath this z-[6000] dialog. */}
+                  portal variant sits at z-index 1100 inside the popup root,
+                  underneath this dialog. */}
               <ComboInput<number>
                 type="number"
                 value={dpi}
@@ -357,7 +360,7 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
                 suffix={<span className="text-[9px] text-[var(--text-muted)]">dpi</span>}
                 className="w-[7.5rem] shrink-0"
               />
-              <FancyButton
+              <FancyButton forModal
                 onClick={swapOrientation}
                 title={isPortrait ? 'Switch to landscape' : 'Switch to portrait'}
                 iconOnly
@@ -373,7 +376,7 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
           </div>
           <div className="flex items-center gap-2">
             <FieldLabel>Unit</FieldLabel>
-            <FunctionTabs<BlankSizeUnit> options={UNITS} value={unit} onChange={handleUnitChange} size="sm" className="w-44" />
+            <FunctionTabs<BlankSizeUnit> forModal options={UNITS} value={unit} onChange={handleUnitChange} size="sm" className="w-44" />
             <span className="ml-auto text-[10px] tabular-nums text-[var(--text-muted)]/70">
               {widthPx} × {heightPx} px
             </span>
@@ -382,7 +385,7 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
           {/* Background: preset tabs, or a custom swatch (no tab active when custom). */}
           <div className="flex items-center gap-2">
             <FieldLabel>Background</FieldLabel>
-            <FunctionTabs<BackgroundPreset | ''>
+            <FunctionTabs<BackgroundPreset | ''> forModal
               options={BACKGROUNDS}
               value={background === 'custom' ? '' : background}
               onChange={(v) => { if (v) setBackground(v); }}
@@ -391,7 +394,7 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
             />
             <span className="text-[9px] font-black uppercase tracking-tight text-[var(--text-muted)]/60">-or-</span>
             <div className="flex-1 min-w-0">
-              <ColorSwatchRow
+              <ColorSwatchRow forModal
                 label="Fill"
                 labelClassName="hidden"
                 color={customHex}
@@ -403,11 +406,11 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
           {/* Colour profile + bit depth */}
           <div className="flex items-center gap-2">
             <FieldLabel>Profile</FieldLabel>
-            <FunctionTabs<BlankGamut> options={GAMUTS} value={gamut} onChange={setGamut} size="sm" className="flex-1" />
+            <FunctionTabs<BlankGamut> forModal options={GAMUTS} value={gamut} onChange={setGamut} size="sm" className="flex-1" />
           </div>
           <div className="flex items-center gap-2">
             <FieldLabel>Depth</FieldLabel>
-            <FunctionTabs<BitDepthKey>
+            <FunctionTabs<BitDepthKey> forModal
               options={BIT_DEPTHS}
               value={String(bitDepth) as BitDepthKey}
               onChange={(v) => setBitDepth(v === '16' ? 16 : 8)}
@@ -432,7 +435,7 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
 
           {/* Create */}
           <div className="pt-2">
-            <FancyButton
+            <FancyButton forModal
               onClick={handleCreate}
               disabled={!canCreate}
               variant="green"

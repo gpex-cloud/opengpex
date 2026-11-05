@@ -211,7 +211,7 @@ function ViewportInner({ frame }: ViewportInnerProps) {
 
         <div
           className="absolute inset-0 pointer-events-none"
-          style={{ zIndex: 5 }}
+          style={{ zIndex: EDITOR_Z_INDEX.STAGE.CONTENT }}
         >
           <CanvasStage />
         </div>
@@ -219,7 +219,7 @@ function ViewportInner({ frame }: ViewportInnerProps) {
         <PluginSlot
           name="STAGE_OVERLAY"
           className="absolute inset-0 pointer-events-none overflow-visible"
-          style={{ zIndex: EDITOR_Z_INDEX.STAGE.GIZMOS }}
+          style={{ zIndex: EDITOR_Z_INDEX.STAGE.OVERLAY }}
         />
 
         {/* System-level gesture feedback: the single displacement/angle chip

@@ -20,7 +20,8 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { createPortal } from "react-dom";
+import EditorPortal from "@opengpex/editor/widgets/Portal";
+import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
 
 /* ─────────────────────────── Types ─────────────────────────── */
 
@@ -60,6 +61,8 @@ export interface FancyGroupProps {
   highlighted?: boolean;
   /** Additional className for the outer container. */
   className?: string;
+  /** Declare only when the group sits inside a modal dialog (item tooltips render above it). */
+  forModal?: boolean;
 }
 
 /* ─────────────────────────── Size Config ─────────────────────────── */
@@ -89,21 +92,22 @@ const SHAPE_CONFIG: Record<FancyGroupShape, {
  * Lightweight inline tooltip — renders via portal, matches project Tooltip styling.
  * Does NOT wrap the trigger element (avoiding the parent-height problem).
  */
-function InlineTooltip({ text, anchorRect }: { text: string; anchorRect: DOMRect | null }) {
+function InlineTooltip({ text, anchorRect, forModal }: { text: string; anchorRect: DOMRect | null; forModal: boolean }) {
   if (!anchorRect || !text) return null;
 
   const offset = 8;
   const top = anchorRect.top + anchorRect.height + offset;
   const left = anchorRect.left + anchorRect.width / 2;
 
-  return createPortal(
+  return (
+    <EditorPortal segment={forModal ? "modal" : "popup"}>
     <div
       style={{
         position: "fixed",
         top,
         left,
         transform: "translateX(-50%)",
-        zIndex: 10100,
+        zIndex: forModal ? EDITOR_Z_INDEX.MODAL.TOOLTIP : EDITOR_Z_INDEX.POPUP.TOOLTIP,
         pointerEvents: "none",
       }}
       className="whitespace-nowrap animate-in fade-in zoom-in-95 duration-200"
@@ -113,8 +117,8 @@ function InlineTooltip({ text, anchorRect }: { text: string; anchorRect: DOMRect
       </div>
       {/* Arrow */}
       <div className="border-4 border-transparent w-0 h-0 absolute bottom-full left-1/2 -translate-x-1/2 border-b-white dark:border-b-zinc-900 border-l-transparent border-r-transparent border-t-0" />
-    </div>,
-    document.body
+    </div>
+    </EditorPortal>
   );
 }
 
@@ -126,6 +130,7 @@ export default function FancyGroup({
   shape = "pill",
   highlighted = false,
   className = "",
+  forModal = false,
 }: FancyGroupProps) {
   const config = SIZE_CONFIG[size];
   const shapeConfig = SHAPE_CONFIG[shape];
@@ -237,7 +242,7 @@ export default function FancyGroup({
 
       {/* Portal-based tooltip */}
       {tooltipState && typeof document !== "undefined" && (
-        <InlineTooltip text={tooltipState.text} anchorRect={tooltipState.rect} />
+        <InlineTooltip text={tooltipState.text} anchorRect={tooltipState.rect} forModal={forModal} />
       )}
     </>
   );

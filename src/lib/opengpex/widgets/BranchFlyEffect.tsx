@@ -21,6 +21,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Motion } from '@opengpex/editor/core/motion';
+import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 
 interface BranchFlyDetail {
   rect: DOMRect;
@@ -67,7 +68,8 @@ export default function BranchFlyEffect() {
   }, [handleFly]);
 
   return (
-    <div className="fixed inset-0 pointer-events-none z-[9999] overflow-hidden">
+    <div className="fixed inset-0 pointer-events-none overflow-hidden"
+      style={{ zIndex: EDITOR_Z_INDEX.WINDOW.BRANCH_FLY }}>
       {flies.map(fly => (
         <FlyItem key={fly.id} fly={fly} />
       ))}
