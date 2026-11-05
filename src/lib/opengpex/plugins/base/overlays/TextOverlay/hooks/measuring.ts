@@ -115,20 +115,32 @@ export const EDITOR_MEASURE_MIN_W = 4;
 export const EDITOR_MEASURE_MIN_H = 20;
 
 /**
- * Measures the contenteditable's on-screen rect and converts it to canvas
- * space by dividing out the camera scale. Every live bounding measurement
- * (session mount, per-input, commit) goes through here so the floor policy —
- * width ≥ 4, height ≥ 20 — is defined exactly once.
+ * Measures the contenteditable's LAYOUT box (offsetWidth/offsetHeight —
+ * already canvas-space px, unaffected by the camera transform AND by the
+ * layer's own rotation; getBoundingClientRect would return the rotated
+ * screen AABB and inflate every measurement). Every live bounding
+ * measurement (session mount, per-input, commit) goes through here so the
+ * floor policy — width ≥ 4, height ≥ 20 — is defined exactly once.
  */
 export function measureEditorBox(
   el: HTMLElement,
   cameraScale: number,
 ): { w: number; h: number } {
+  // The LAYOUT box (offsetWidth/offsetHeight), not the screen AABB: the
+  // editor lives inside the camera-transformed container, so its own CSS
+  // layout size is already canvas-space px and is UNAFFECTED by ancestor
+  // transforms — while getBoundingClientRect returns the screen-space AABB,
+  // which for a ROTATED layer is inflated by the rotation itself (a 510x170
+  // box rotated 28.5 deg measured 530x393, writing a two-line-tall
+  // bounding/visibleShape and misplacing the selection highlight). No
+  // camera-scale division needed: offset sizes are layout px, not screen px.
+  // rect fallback covers a hidden element (offset sizes are 0 then).
+  // rect fallback covers a hidden element (offset sizes are 0 then).
   const rect = el.getBoundingClientRect();
   const k = cameraScale || 1;
   return normalizeMeasuredBox({
-    w: rect.width / k,
-    h: rect.height / k,
+    w: el.offsetWidth || rect.width / k,
+    h: el.offsetHeight || rect.height / k,
   });
 }
 

@@ -118,7 +118,7 @@ export class InteractionTransaction {
   /**
    * Declare this gesture's feedback for the system-level displacement label:
    * WHAT is being moved/rotated and its gesture-start reference. The shared
-   * widget (widgets/DeltaLabel) reads the transient and renders one
+   * entity HUD's delta chip (widgets/affordances) reads the transient and renders one
    * delta chip; the write rides the volatile transient channel, and the
    * terminal transitions below clear it — a gesture that declares never
    * needs its own cleanup, and two gestures can never both declare (they

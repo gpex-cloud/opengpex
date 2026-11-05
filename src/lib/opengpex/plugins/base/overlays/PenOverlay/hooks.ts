@@ -19,7 +19,7 @@
 
 'use client';
 
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import type { Frame } from '@opengpex/editor/core/types';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
@@ -107,6 +107,13 @@ export function usePenToolLifecycle(isPenMode: boolean) {
 
   const isInteractingRef = useRef(false);
   useLayoutEffect(() => { isInteractingRef.current = !!state.interaction.isInteracting; });
+
+  // Whether the last pointer position sat on a gizmo hit zone. The gizmo's
+  // internal CursorService sync owns the hover channel there; the pen cursor
+  // write must yield or it would paint the pen cursor over the handle (the
+  // same yield rule ClipOverlay's hover pass runs). Tracked so modifier
+  // key-ups re-evaluating at the last position also stay silent.
+  const overGizmoRef = useRef(false);
 
   // ─── Resync: external frame identity changes invalidate session memory ─────
   // Where the draft came from decides whether its open tail is receptive:
@@ -256,6 +263,7 @@ export function usePenToolLifecycle(isPenMode: boolean) {
       const pos = toViewport(ev);
       if (!pos) return;
       lastPos = pos;
+      overGizmoRef.current = !!(ev.target as HTMLElement | null)?.closest?.('[data-gizmo-cursor]');
 
       // Drawing session: the rubber band is driven ENTIRELY from here, in
       // viewport screen px (the band lives in an unscaled SVG). Its start
@@ -275,7 +283,9 @@ export function usePenToolLifecycle(isPenMode: boolean) {
           placePenRubberTip(null);
         }
       }
-      applyHoverAndCursor(pos.vx, pos.vy, frame, ev.metaKey || ev.ctrlKey, ev.altKey);
+      if (!overGizmoRef.current) {
+        applyHoverAndCursor(pos.vx, pos.vy, frame, ev.metaKey || ev.ctrlKey, ev.altKey);
+      }
     };
 
     // Cmd/Ctrl/Alt press/release re-evaluates the hover + cursor at the last
@@ -305,6 +315,46 @@ export function usePenToolLifecycle(isPenMode: boolean) {
     };
   }, [isPenMode, actions, geometry]);
 
+  // ─── Escape ladder: draft-anchor selection → committed selection → freeze
+  // receptive subpath (lone anchor dropped) → exit the tool (draft PRESERVED —
+  // re-activating pen resumes it; discard lives only in the panel's Clear
+  // Draft button). ONE implementation, two triggers: this keyboard leg and
+  // the gizmo HUD's Exit button. Returns whether the press was consumed.
+  const runEscape = useCallback((): boolean => {
+    if (isInteractingRef.current) return false;
+    const frame = frameRef.current;
+    if (!frame) return false;
+    const draft = getPenDraft(frame);
+    const subs = draft?.subpaths;
+    const receptive = subs?.[subs.length - 1];
+    const frozenPending = composePenToolState(frame).frozen;
+    const canFreeze = !!receptive && !receptive.closed && receptive.anchors.length >= 1 && !frozenPending;
+    if (getPenDraftSelection()) {
+      setPenDraftSelection(null);
+      // A selection is a by-product of dragging an anchor while drawing;
+      // when the rubber band is still live the user's Esc means "stop this
+      // line", so the deselect and the freeze happen in ONE press (the
+      // freeze below clears the selection itself). Only with no live line
+      // does Esc stop at the deselect.
+      if (!canFreeze) return true;
+    }
+    if (getPenCommittedSelection()) {
+      setPenCommittedSelection(null);
+      return true;
+    }
+    if (canFreeze) {
+      freezeActiveSubpath(actions, frame);
+      return true;
+    }
+    // Exit rung: prune lone anchors first — a 1-anchor subpath can never be
+    // committed and, left receptive, would silently connect the next
+    // session's first click to the stale point. Dropping it is lossless.
+    pruneLoneAnchors(actions, frame);
+    actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
+    actions.fast.cursor.notifyHover(null);
+    return true;
+  }, [actions]);
+
   // ─── Keyboard grammar ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!isPenMode) return;
@@ -326,58 +376,14 @@ export function usePenToolLifecycle(isPenMode: boolean) {
         return;
       }
 
-      // Esc ladder — draft-anchor selection, then committed selection, then
-      // "exit edit": freeze the receptive subpath (Enter-equivalent; a lone
-      // anchor is dropped instead — it carries no geometry), then "exit tool"
-      // with the draft PRESERVED
-      // (re-activating pen resumes it). Draft discard lives in the panel's
-      // Clear Draft button (undoable), never on a key.
-      // Mid-gesture the viewport cancel wins (skip here).
+      // Esc ladder — THE shared ladder lives in runEscape (returned by the
+      // hook; the gizmo's Exit button is the second trigger). Keyboard leg:
+      // consumed press → the standard preventDefault/stopPropagation.
       if (e.key === 'Escape') {
         if (isInteractingRef.current) return;
-        // Freeze rung while the receptive subpath still takes anchors (the
-        // rubber band is showing). A lone anchor takes the same rung: it
-        // carries no geometry, so Esc drops it (endActiveSubpath's rule) and
-        // stays in the tool — exiting is the NEXT Esc. Once the freeze
-        // intent is pending there is nothing left to freeze: the
-        // marker-subpath era made the next Esc fall through to exit
-        // naturally (the appended empty subpath failed the ≥2 check), and
-        // the intent flag must play that role now — without this guard Esc
-        // would re-freeze forever and never reach the exit rung.
-        const subs = draft?.subpaths;
-        const receptive = subs?.[subs.length - 1];
-        const frozenPending = composePenToolState(frame).frozen;
-        const canFreeze = !!receptive && !receptive.closed && receptive.anchors.length >= 1 && !frozenPending;
-        if (getPenDraftSelection()) {
-          e.preventDefault();
-          e.stopPropagation();
-          setPenDraftSelection(null);
-          // A selection is a by-product of dragging an anchor while drawing;
-          // when the rubber band is still live the user's Esc means "stop
-          // this line", so the deselect and the freeze happen in ONE press
-          // (the freeze below clears the selection itself). Only with no
-          // live line does Esc stop at the deselect.
-          if (!canFreeze) return;
-        }
-        const committed = getPenCommittedSelection();
-        if (committed) {
-          e.preventDefault();
-          e.stopPropagation();
-          setPenCommittedSelection(null);
-          return;
-        }
-        if (canFreeze) {
-          e.preventDefault();
-          e.stopPropagation();
-          freezeActiveSubpath(actions, frame);
-          return;
-        }
-        // Exit rung: prune lone anchors first — a 1-anchor subpath can never
-        // be committed and, left receptive, would silently connect the next
-        // session's first click to the stale point. Dropping it is lossless.
-        pruneLoneAnchors(actions, frame);
-        actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
-        actions.fast.cursor.notifyHover(null);
+        if (!runEscape()) return;
+        e.preventDefault();
+        e.stopPropagation();
         return;
       }
 
@@ -415,7 +421,7 @@ export function usePenToolLifecycle(isPenMode: boolean) {
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [isPenMode, actions]);
+  }, [isPenMode, actions, runEscape]);
 
   // Safety net: drop this tool's cursor registration on unmount.
   useEffect(() => {
@@ -424,6 +430,8 @@ export function usePenToolLifecycle(isPenMode: boolean) {
       actions.fast.cursor.notifyHover(null);
     };
   }, [actions]);
+
+  return runEscape;
 }
 
 // ─── Local helpers ─────────────────────────────────────────────────────────────

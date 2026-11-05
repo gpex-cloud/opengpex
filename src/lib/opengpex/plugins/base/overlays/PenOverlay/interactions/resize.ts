@@ -45,6 +45,8 @@
 import type { InteractionEvent, InteractionHandler, Layer, LocalRect, PenPathData } from '@opengpex/editor/core/types';
 import { asLocalShape } from '@opengpex/editor/core/types';
 import { createTransformHandler, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
+
+const CORNER_HANDLES: ReadonlySet<string> = new Set(['nw', 'ne', 'sw', 'se']);
 import { ACTIVE_CRAFT_KEY } from './shared';
 
 /** Minimum bounding side (layer-local px) so a resize can never collapse. */
@@ -66,6 +68,7 @@ export const createPenResizeHandler = (): InteractionHandler => {
   let resizeLayerId: string | null = null;
   let startPenData: PenPathData | null = null;
   let startBounding = { w: 0, h: 0 };
+  let gestureHandle: ResizeHandle | null = null;
   // Orientation-aware resize snapshot (non-null only for rotated/mirrored
   // layers): the world centre and the local-axes rect at gesture start, used
   // to map the local resize result back to world cx/cy.
@@ -78,7 +81,7 @@ export const createPenResizeHandler = (): InteractionHandler => {
 
     test: (e) => {
       const target = e.nativeEvent.target as HTMLElement;
-      const handleEl = target.closest('[data-gizmo-handle]') as HTMLElement | null;
+      const handleEl = target.closest('[data-pen-gizmo] [data-gizmo-handle]') as HTMLElement | null;
       if (!handleEl) return null;
 
       const handle = handleEl.dataset.gizmoHandle;
@@ -90,6 +93,7 @@ export const createPenResizeHandler = (): InteractionHandler => {
       resizeLayerId = layer.id;
       startPenData = layer.penData!;
       startBounding = { w: layer.bounding.w, h: layer.bounding.h };
+      gestureHandle = handle as ResizeHandle;
 
       return { category: 'resize', handle: handle as ResizeHandle };
     },
@@ -134,7 +138,16 @@ export const createPenResizeHandler = (): InteractionHandler => {
 
     // Free-form resize (aspect lock only via Shift, handled by the framework);
     // unclamped so paths may extend past the canvas edge like marker boxes.
-    getConstraints: () => ({ aspect: undefined, clamp: false }),
+    // Figma-style corner semantics (§6.1 alignment with the text contract):
+    // corner drags run aspect-locked at the gesture-start ratio (proportional
+    // scale — the penData anchors/handles rescale per axis with sx === sy, so
+    // the path shape scales uniformly), Shift temporarily unlocks free
+    // two-axis drag. Edge handles stay free on their single axis.
+    getConstraints: () => {
+      const isCorner = gestureHandle !== null && CORNER_HANDLES.has(gestureHandle);
+      const ratio = startBounding.w > 0 && startBounding.h > 0 ? startBounding.w / startBounding.h : undefined;
+      return { aspect: isCorner ? ratio : undefined, shiftUnlocksAspect: true, clamp: false };
+    },
 
     onUpdate: (e, newRect, tx, context) => {
       if (!resizeLayerId || !startPenData) return;

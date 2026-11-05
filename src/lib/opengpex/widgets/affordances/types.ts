@@ -76,10 +76,24 @@ export interface TransformHudProps {
   /**
    * Delta chip affordance: renders the framework-owned displacement /
    * rotation chip while a transform gesture on this HUD's entity is in
-   * flight (reads the shared gesture-feedback record; frame-target HUDs
-   * own the frame feedback). Anchored under the HUD's rotated bottom-left
-   * corner, rotated with the entity. Viewport-level DeltaLabel stands
-   * down for frame-target gestures while a HUD owns them.
+   * flight (reads the shared gesture-feedback record). Anchored under the
+   * HUD's rotated bottom-left corner, rotated with the entity. The
+   * record flavor this HUD claims is the declaration:
+   *   - `true`        → FRAME-target gestures (selection moves: the
+   *                     readout keys on the confinement rect);
+   *   - `{ targetId }` → the LAYER-target gestures of that entity
+   *                     (tool-owned moves/rotates: the chip claims records
+   *                     whose `targetId` matches — layer ids are unique,
+   *                     so each entity's chip renders on its own HUD and a
+   *                     gesture without a mounted HUD shows no chip).
    */
-  delta?: boolean;
+  delta?: boolean | { targetId: string };
+  /**
+   * Shape-owned control points (e.g. a callout's tail tip) rendered inside
+   * the rotated gizmo container, next to the TransformGizmo — they inherit
+   * the container's live anchor transform, so extra consumer fast-sync
+   * boxes are never needed. Still consumer content: the framework renders
+   * it verbatim and knows nothing about its semantics.
+   */
+  gizmoExtras?: ReactNode;
 }

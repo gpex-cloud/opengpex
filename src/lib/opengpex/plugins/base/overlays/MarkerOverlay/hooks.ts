@@ -19,7 +19,7 @@
 
 'use client';
 
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { MARKER_CURSOR } from '@opengpex/editor/icons';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
@@ -61,8 +61,10 @@ export function useMarkerOverlayState() {
  *
  * Escape: if a drag is in progress the viewport-level Esc handler cancels
  * it via `dispatcher.cancelAll()` (→ draw `onCancel` clears the preview) and we
- * stay in the tool; if idle, Esc deactivates the marker tool through
- * CraftDrawer's command (mirrors BrushOverlay / TextOverlay pre-edit Escape).
+ * stay in the tool; if idle, the escape ladder peels one state level per
+ * press (INACTIVE → re-arm the selected kind; ACTIVE/no selection → exit
+ * the tool). The LADDER lives in `useMarkerEscapeAction` so the HUD's Exit
+ * button runs the exact same steps as the keyboard; this hook returns it.
  *
  * Follows the always-mounted-component pattern: the hook is called before the
  * overlay's early return, gates on `isMarkerMode`, and cleans the cursor up on
@@ -71,6 +73,9 @@ export function useMarkerOverlayState() {
 export function useMarkerToolLifecycle(isMarkerMode: boolean) {
   const { state, activeLayer } = useEditorState();
   const { actions } = useEditorServices();
+  const runEscape = useMarkerEscapeAction();
+  const runEscapeRef = useRef(runEscape);
+  useLayoutEffect(() => { runEscapeRef.current = runEscape; }, [runEscape]);
 
   // Latest tool state for the Escape ladder (a ref so the keydown listener is
   // registered once per tool activation, not per selection/kind change).
@@ -81,10 +86,6 @@ export function useMarkerToolLifecycle(isMarkerMode: boolean) {
     )?.activeMarkerKind;
     toolStateRef.current = resolveMarkerToolState(activeLayer, armedKind);
   });
-
-  // Track active-interaction state so cursor/Escape don't fight an ongoing drag.
-  const isInteractingRef = useRef(false);
-  useLayoutEffect(() => { isInteractingRef.current = !!state.interaction.isInteracting; });
 
   // ─── Cursor: crosshair base ─────────────────────────────────────────────
   // No hover affordance: moving an existing marker requires the Cmd spring
@@ -102,40 +103,23 @@ export function useMarkerToolLifecycle(isMarkerMode: boolean) {
     };
   }, [isMarkerMode, actions]);
 
-  // ─── Escape ladder: cancel drag → leave INACTIVE → exit the tool ───────
-  // Mirrors the text tool (editing → pre-edit → exit): each Esc peels one
-  // level of state before leaving the tool.
+  // ─── Escape ladder (keyboard leg) ───────────────────────────────────────
   useEffect(() => {
     if (!isMarkerMode) return;
 
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      // 1. Mid-drag: let the viewport-level Esc handler cancel the gesture
-      //    (dispatcher.cancelAll → handler.onCancel); remain in the marker tool.
-      if (isInteractingRef.current) return;
-
+      // Mid-drag: runEscape declines (returns false) so the viewport-level
+      // Esc handler cancels the gesture (dispatcher.cancelAll →
+      // handler.onCancel) and we remain in the marker tool.
+      if (!runEscapeRef.current()) return;
       e.preventDefault();
       e.stopPropagation();
-
-      // 2. INACTIVE (a marker is selected but another kind is armed): re-arm the
-      //    selected layer's kind so it returns to the ACTIVE state — the "I
-      //    changed my mind about drawing a star" exit. Stay in the tool.
-      const toolState = toolStateRef.current;
-      if (toolState.phase === 'inactive' && toolState.selectedKind) {
-        actions.executeCommand(CraftDrawerAPI.commands.setMarkerKind.uid, { kind: toolState.selectedKind });
-        return;
-      }
-
-      // 3. ACTIVE or nothing selected: deactivate the marker tool via
-      //    CraftDrawer's command system (respects signal ownership boundaries,
-      //    same as Brush/Text).
-      actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
-      actions.fast.cursor.notifyHover(null);
     };
 
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [isMarkerMode, actions]);
+  }, [isMarkerMode]);
 
   // Safety net: drop this tool's cursor registration on unmount.
   useEffect(() => {
@@ -144,5 +128,52 @@ export function useMarkerToolLifecycle(isMarkerMode: boolean) {
       actions.fast.cursor.notifyHover(null);
     };
   }, [actions]);
+
+  return runEscape;
 }
 
+// ─── useMarkerEscapeAction ─────────────────────────────────────────────────────
+
+/**
+ * useMarkerEscapeAction: THE marker escape ladder, shared by the keyboard
+ * (useMarkerToolLifecycle) and the HUD's Exit button — one implementation,
+ * two triggers. Per press:
+ *   1. Mid-drag → decline (returns false): the viewport-level Esc handler
+ *      cancels the gesture via dispatcher.cancelAll and the tool stays.
+ *   2. INACTIVE (a marker is selected but another kind is armed) → re-arm
+ *      the selected layer's kind so it returns to the ACTIVE state — the
+ *      "I changed my mind about drawing a star" exit. Stays in the tool.
+ *   3. ACTIVE or nothing selected → deactivate the marker tool via
+ *      CraftDrawer's command system (respects signal ownership boundaries,
+ *      same as Brush/Text).
+ * Returns whether the ladder consumed the press.
+ */
+export function useMarkerEscapeAction() {
+  const { state, activeLayer } = useEditorState();
+  const { actions } = useEditorServices();
+
+  const toolStateRef = useRef<MarkerToolState>(resolveMarkerToolState(null, undefined));
+  useLayoutEffect(() => {
+    const armedKind = (
+      state.pluginConfig[CraftDrawerAPI.configKey] as Partial<CraftDrawerConfig> | undefined
+    )?.activeMarkerKind;
+    toolStateRef.current = resolveMarkerToolState(activeLayer, armedKind);
+  });
+
+  const isInteractingRef = useRef(false);
+  useLayoutEffect(() => { isInteractingRef.current = !!state.interaction.isInteracting; });
+
+  return useCallback((): boolean => {
+    if (isInteractingRef.current) return false;
+
+    const toolState = toolStateRef.current;
+    if (toolState.phase === 'inactive' && toolState.selectedKind) {
+      actions.executeCommand(CraftDrawerAPI.commands.setMarkerKind.uid, { kind: toolState.selectedKind });
+      return true;
+    }
+
+    actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid);
+    actions.fast.cursor.notifyHover(null);
+    return true;
+  }, [actions]);
+}

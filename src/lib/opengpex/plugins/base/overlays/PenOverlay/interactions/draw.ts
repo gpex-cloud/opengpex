@@ -141,7 +141,7 @@ export const createPenDrawHandler = (): InteractionHandler => {
       if (!passesBaseGate(e)) {
         if (!e.keys.meta || !draft) return false;
         const target = e.nativeEvent.target as HTMLElement;
-        if (target.closest('button, a, input, [data-role="ui"], [data-handle], [data-gizmo-handle], [data-gizmo-rotate]')) return false;
+        if (target.closest('button, a, input, [data-role="ui"], [data-handle], [data-pen-gizmo] [data-gizmo-handle], [data-pen-gizmo] [data-gizmo-rotate]')) return false;
         const frame = e.activeFrame;
         if (!e.geometry.space.isPointInRect(e.point.canvas, { x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h })) return false;
         const hitOps: PenHitOps = { ...e.geometry.bezier, isPointInPolygon: e.geometry.polygon.isPointInPolygon };

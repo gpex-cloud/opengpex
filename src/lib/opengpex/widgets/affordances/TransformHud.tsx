@@ -54,6 +54,7 @@ export function TransformHud({
   moveSurface,
   roundShape,
   gizmoContainerProps,
+  gizmoExtras,
   dimension,
   actions,
   delta,
@@ -87,8 +88,12 @@ export function TransformHud({
     });
   }, []);
 
+  // The delta flavor decides which feedback records this HUD claims:
+  // boolean true = frame-target, { targetId } = that entity's layer-target.
+  const deltaTargetId = typeof delta === 'object' ? delta.targetId : undefined;
+
   useHudAnchorSync({ ref: containerRef, active, getAnchorFrame, reveal, hitTest, onAnchorSync });
-  useHudDeltaChip(labelsRootRef, deltaChipRef, active, getAnchorFrame, !!delta);
+  useHudDeltaChip(labelsRootRef, deltaChipRef, active, getAnchorFrame, !!delta, deltaTargetId, !!dimension);
   const { dimRef, dimTextRef, barRef } = useHudLabelRow({
     rootRef: labelsRootRef,
     active,
@@ -96,7 +101,10 @@ export function TransformHud({
     dimensionText: dimension?.text,
   });
 
-  const showLabels = active && !!(dimension || actions);
+  // The delta chip shares the label row's positioned root — a chips-only
+  // HUD (delta without dimension/actions) must still mount that root or
+  // the chip has nowhere to render.
+  const showLabels = active && !!(dimension || actions || delta);
 
   return (
     <>
@@ -135,6 +143,7 @@ export function TransformHud({
           ref={containerRef}
         >
           <TransformGizmo {...gizmo} />
+          {gizmoExtras}
         </div>
       )}
 

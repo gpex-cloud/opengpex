@@ -212,6 +212,14 @@ export interface TransformHandlerConfig<T = LocalRect> {
   /** Get constraints such as aspect ratio, whether to clamp to canvas, or a specific layer ID to snap to. */
   getConstraints?: (e: InteractionEvent, intent: TransformIntent) => {
     aspect?: number;
+    /**
+     * Figma-style corner semantics: `aspect` is the DEFAULT (corner drag =
+     * proportional scale) and holding Shift temporarily DROPS the lock so
+     * the corner follows the pointer freely. Without this flag Shift does
+     * the opposite (adds an aspect when none was declared — the PS-style
+     * text contract, where Shift is a no-op on locked corners).
+     */
+    shiftUnlocksAspect?: boolean;
     clamp?: boolean;
     alignToLayerId?: string;
   };
@@ -563,6 +571,15 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
         if (!effectiveAspect && isShiftPressed) {
           effectiveAspect = (startState.w > 0 && startState.h > 0) ? startState.w / startState.h : 1;
         }
+        // Corner-proportional default (shiftUnlocksAspect): Shift temporarily
+        // drops the lock so the corner tracks the pointer freely. The aspect
+        // math itself is dominant-axis projection (calculateResizedRect): the
+        // handle follows the pointer on the dominant axis and moves
+        // proportionally on the other — the pointer detaches only on the
+        // non-dominant axis, the accepted Figma behaviour.
+        if (effectiveAspect && constraints.shiftUnlocksAspect && isShiftPressed) {
+          effectiveAspect = undefined;
+        }
 
         // Reuse the shared, coordinate-system-agnostic rect math.
         const resized = e.geometry.space.calculateResizedRect(
@@ -639,6 +656,10 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
         let effectiveAspect = constraints.aspect;
         if (!effectiveAspect && isShiftPressed) {
           effectiveAspect = (startState.w > 0 && startState.h > 0) ? startState.w / startState.h : 1;
+        }
+        // Same corner-proportional rule as the orientation path above.
+        if (effectiveAspect && constraints.shiftUnlocksAspect && isShiftPressed) {
+          effectiveAspect = undefined;
         }
 
         // Read edge snap scope from PresetsFactory

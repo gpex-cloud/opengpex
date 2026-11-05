@@ -191,7 +191,7 @@ function LayerOverlayContent() {
         ))}
 
       {/* Layer move/rotate feedback moved to the system-level
-          widgets/DeltaLabel, fed by InteractionTransaction
+          the entity HUD's delta chip, fed by InteractionTransaction
           declarations — this overlay no longer renders its own chip. */}
     </div>
   );

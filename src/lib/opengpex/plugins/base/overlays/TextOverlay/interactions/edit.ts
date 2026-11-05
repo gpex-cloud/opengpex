@@ -84,7 +84,7 @@ export const createTextDblClickEditHandler = (): InteractionHandler => {
       if (e.state.interaction.interactionMode !== 'pan') return false;
 
       const target = e.nativeEvent.target as HTMLElement | null;
-      if (target?.closest('button, a, input, [data-role="ui"], [contenteditable], [data-handle], [data-gizmo-handle], [data-gizmo-rotate]')) return false;
+      if (target?.closest('button, a, input, [data-role="ui"], [contenteditable], [data-handle], [data-text-gizmo] [data-gizmo-handle], [data-text-gizmo] [data-gizmo-rotate]')) return false;
 
       const now = performance.now();
       const isDoubleClick =

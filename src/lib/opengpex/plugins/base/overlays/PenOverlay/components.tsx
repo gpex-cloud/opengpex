@@ -22,12 +22,11 @@
 import React, { useRef } from 'react';
 import {
   useEditorState,
-  useEditorServices,
   useOverlayRotationSync,
 } from '@opengpex/editor/core/context';
-import { TransformGizmo } from '@opengpex/editor/widgets/TransformGizmo';
-import type { Frame, Layer, VolatileState, CameraState } from '@opengpex/editor/core/types';
-import { useFastSync } from '@opengpex/editor/core/state/volatile';
+import { TransformHud } from '@opengpex/editor/widgets/affordances';
+import { usePenHudAnchor } from './usePenHudAnchor';
+import type { Layer } from '@opengpex/editor/core/types';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import { usePenSurfaceSync } from './useFastSync';
 import { usePenToolLifecycle } from './hooks';
@@ -58,14 +57,20 @@ export const PenOverlayMain = React.memo(function PenOverlayMain() {
   const isPenMode = activeCraft === 'pen';
 
   // Cursor + keyboard lifecycle (self-gated on isPenMode; runs every render).
-  usePenToolLifecycle(isPenMode);
+  // Returns THE pen escape ladder — the gizmo's Exit button runs it too.
+  const runEscape = usePenToolLifecycle(isPenMode);
 
   if (!activeFrame) return null;
   return (
     <>
       <PenSurface outlineOnly={!isPenMode} />
+      {/* The pen delta chip is NOT tool-gated: a pen layer can be moved or
+          rotated by the generic LayerMoveHandler in any mode (pan-mode bare
+          drag, Cmd spring drag), and its chip must follow. Chip-only — the
+          framework renders no gizmo container for it. */}
+      <PenChipHud />
       {isPenMode && <PenRubberBand />}
-      {isPenMode && <PenGizmo />}
+      {isPenMode && <PenGizmo onExit={runEscape} />}
     </>
   );
 });
@@ -141,23 +146,61 @@ const PenSurface = React.memo(function PenSurface({ outlineOnly = false }: { out
   );
 });
 
+// ─── PenChipHud ────────────────────────────────────────────────────────────────
+
+/**
+ * PenChipHud: the pen tool's chips-only TransformHud — the ONE owner of
+ * every layer-target pen gesture's delta chip, in every mode.
+ *
+ * Keying mirrors MarkerChipHud: the chip anchors to the ACTIVE layer while
+ * it is a host pen layer. All movers (pen move/rotate handlers and the
+ * generic LayerMoveHandler) set the dragged layer active in onStart, so
+ * the active layer id always equals the gesture record's `targetId`.
+ * Non-pen active layers yield a null anchor and the chip stays hidden.
+ *
+ * The gizmo HUD (PenGizmo) deliberately carries NO delta: in the pen tool
+ * both HUDs are alive and a delta there would paint a second chip.
+ */
+const PenChipHud = React.memo(function PenChipHud() {
+  const { activeLayer } = useEditorState();
+  const isPenLayer =
+    !!activeLayer && activeLayer.type === 'vector' && !!activeLayer.penData
+    && (!activeLayer.role || activeLayer.role === 'host');
+  const { getAnchorFrame } = usePenHudAnchor(
+    isPenLayer && activeLayer ? activeLayer.id : null,
+  );
+
+  if (!isPenLayer || !activeLayer) return null;
+  return (
+    <TransformHud
+      active
+      getAnchorFrame={getAnchorFrame}
+      delta={{ targetId: activeLayer.id }}
+    />
+  );
+});
+
 // ─── PenGizmo ──────────────────────────────────────────────────────────────────
 
 /**
- * Selection frame (TransformGizmo, corner variant) over the active pen layer.
- * Positioned outside React by usePenGizmoSync at 60fps — identical mechanics
- * to MarkerSelectionBox's active box. The handles are LIVE: pen-resize
- * (priority 165) claims `[data-gizmo-handle]` presses and bakes the scale
- * into penData; pen-rotate (166) claims `[data-gizmo-rotate]` and rides the
- * layer's rotation channel. Both handlers gate on the pen craft, so pen-edit
- * / pen-draw never see handle presses (their shared gate also filters the
- * gizmo elements defensively).
+ * PenGizmo: the active pen layer's transform HUD — the gizmo declaration
+ * (corner brackets, live rotation/flip) presented through the TransformHud
+ * framework. The framework's anchor sync positions the rotated container
+ * per tick (usePenHudAnchor — the same live world-matrix x camera
+ * projection the historical fast-sync box hand-rolled). NO delta here:
+ * the always-mounted PenChipHud owns every layer-target pen chip; a delta
+ * on this HUD would paint a second chip for the same gesture.
+ *
+ * Press routing stays with the pen handlers: pen-resize (priority 165)
+ * claims `[data-pen-gizmo] [data-gizmo-handle]` presses and bakes the
+ * scale into penData; pen-rotate (166) claims `[data-pen-gizmo]
+ * [data-gizmo-rotate]` and rides the layer's rotation channel. Both
+ * handlers gate on the pen craft, so pen-edit / pen-draw never see handle
+ * presses (their shared gate also filters the gizmo elements defensively).
  */
-const PenGizmo = React.memo(function PenGizmo() {
+const PenGizmo = React.memo(function PenGizmo({ onExit }: { onExit: () => void }) {
   const { activeFrame } = useEditorState();
   const { state } = useEditorState();
-  const containerRef = useRef<HTMLDivElement>(null);
-  const boxRef = useRef<HTMLDivElement>(null);
 
   const activeLayer: Layer | null = activeFrame?.activeLayerId
     ? activeFrame.layers.byId[activeFrame.activeLayerId] ?? null
@@ -169,71 +212,40 @@ const PenGizmo = React.memo(function PenGizmo() {
     ? activeLayer.id
     : null;
 
-  useOverlayRotationSync(containerRef, activeFrame);
-  usePenGizmoSync(boxRef, layerId);
+  const { getAnchorFrame } = usePenHudAnchor(layerId);
 
   if (!activeFrame || !layerId) return null;
 
   return (
     <div
-      ref={containerRef}
       className="absolute inset-0 pointer-events-none overflow-visible"
       style={{ zIndex: 20 }}
     >
-      <div
-        ref={boxRef}
-        data-overlay-gizmo-layer={layerId}
-        className="absolute top-0 left-0"
-        style={{ display: 'none', transformOrigin: '0 0', willChange: 'transform, width, height' }}
-      >
-        <TransformGizmo
-          rotation={state.interaction.isInteracting ? undefined : activeLayer?.rotation ?? 0}
-          flip={activeLayer?.flip}
-        />
-      </div>
+      <TransformHud
+        active
+        getAnchorFrame={getAnchorFrame}
+        gizmo={{
+          // Edge-resize mode: full-length hit strips on all four sides
+          // (drag anywhere on a border for single-axis resize) plus the
+          // visible midpoint ticks. The corner brackets stay as-is.
+          outline: true,
+          rotation: state.interaction.isInteracting ? undefined : activeLayer?.rotation ?? 0,
+          flip: activeLayer?.flip,
+        }}
+        pressScope="pen-gizmo"
+        actions={
+          <button
+            type="button"
+            onClick={onExit}
+            title="Exit (Esc)"
+            aria-label="Exit"
+            className="flex items-center outline-none rounded px-1 text-[10px] font-bold leading-none text-rose-400 hover:bg-white/10 pointer-events-auto cursor-pointer"
+            style={{ height: '16px' }}
+          >
+            Esc
+          </button>
+        }
+      />
     </div>
   );
 });
-
-/**
- * usePenGizmoSync: positions the gizmo box over the active pen layer,
- * following camera + live fast-track pose (same math as the marker
- * selection box sync: full world matrix × camera, scale split from rotation
- * so the outline keeps constant screen weight).
- */
-function usePenGizmoSync(
-  boxRef: React.RefObject<HTMLDivElement | null>,
-  layerId: string | null,
-) {
-  const { geometry } = useEditorServices();
-
-  useFastSync(boxRef, !!layerId, (_v: VolatileState, f: Frame, cam: CameraState) => {
-    const el = boxRef.current;
-    if (!el || !layerId) return;
-
-    const layer = f.layers.byId[layerId];
-    if (!layer || layer.type !== 'vector' || !layer.penData) {
-      el.style.display = 'none';
-      return;
-    }
-
-    const worldMatrix = geometry.transform.getLayerWorldMatrix(layer);
-    const viewMatrix = geometry.camera.getCameraMatrix(f, cam);
-    const screenMatrix = viewMatrix.multiply(worldMatrix);
-
-    const w = layer.bounding.w;
-    const h = layer.bounding.h;
-    const matrix = { ...screenMatrix, w, h };
-    const { scaleX, scaleY } = geometry.transform.decomposeMatrix(matrix);
-
-    const pureA = matrix.a / (scaleX || 0.001);
-    const pureB = matrix.b / (scaleX || 0.001);
-    const pureC = matrix.c / (scaleY || 0.001);
-    const pureD = matrix.d / (scaleY || 0.001);
-
-    el.style.display = 'block';
-    el.style.width = `${w * scaleX}px`;
-    el.style.height = `${h * scaleY}px`;
-    el.style.transform = `matrix(${pureA}, ${pureB}, ${pureC}, ${pureD}, ${matrix.tx}, ${matrix.ty})`;
-  }, { throttleHz: 60 });
-}

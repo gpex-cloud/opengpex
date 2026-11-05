@@ -87,7 +87,7 @@ export const createTextMoveHandler = (): InteractionHandler => {
       // Resize/rotate handles own their gestures (this handler's priority 170
       // would otherwise swallow them), so a pointerdown on one must never
       // become a move.
-      if (target.closest('[data-gizmo-handle], [data-gizmo-rotate]')) return false;
+      if (target.closest('[data-text-gizmo] [data-gizmo-handle], [data-text-gizmo] [data-gizmo-rotate]')) return false;
 
       // Case 1: Layer being edited -> use as target directly.
       // Editing state: ONLY Cmd/Ctrl + drag moves the layer. Every plain

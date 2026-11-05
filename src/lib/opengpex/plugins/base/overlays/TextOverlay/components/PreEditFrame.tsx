@@ -20,8 +20,10 @@
 'use client';
 
 import React from 'react';
-import { useEditorState, useOverlayRotationSync } from '@opengpex/editor/core/context';
+import { useEditorServices, useEditorState, useOverlayRotationSync } from '@opengpex/editor/core/context';
 import { TransformGizmo } from '@opengpex/editor/widgets/TransformGizmo';
+import { TransformHud } from '@opengpex/editor/widgets/affordances';
+import { useTextHudAnchor } from '../useTextHudAnchor';
 import { usePreEditFrameSync } from '../hooks/useFastSync';
 import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID } from '../protocols';
 import { CraftDrawerAPI } from '../../../drawers/CraftDrawer/protocols';
@@ -38,10 +40,11 @@ import type { Layer } from '@opengpex/editor/core/types';
  *
  * Interaction contract with the interaction handlers is unchanged: the gizmo
  * handles carry the same data attributes they had inside LayerOverlayItem, and
- * the frame box itself carries `data-overlay-gizmo-layer={layer.id}` so
- * resolveGizmoTargetLayer keeps resolving the owning layer. Position/size is
- * maintained outside React by usePreEditFrameSync (60fps camera + live-resize
- * following), like MarkerSelectionBox.
+ * the HUD container carries `data-overlay-gizmo-layer={layer.id}` (via
+ * gizmoContainerProps) so resolveGizmoTargetLayer keeps resolving the owning
+ * layer. Position/size is maintained by the framework's anchor sync
+ * (useTextHudAnchor — live world matrix x camera per tick), like the marker
+ * and pen HUDs.
  *
  * Display scope: the ACTIVE layer gets the full interactive gizmo. Every OTHER
  * visible text layer gets a visual-only corner bracket ghost (no hit zones,
@@ -50,8 +53,8 @@ import type { Layer } from '@opengpex/editor/core/types';
  */
 export const PreEditFrame = React.memo(function PreEditFrame() {
   const { activeFrame, activeCraft, editingLayerId } = useTextOverlayGate();
+  const { actions } = useEditorServices();
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const boxRef = React.useRef<HTMLDivElement>(null);
 
   const activeLayer: Layer | null = activeFrame?.activeLayerId
     ? activeFrame.layers.byId[activeFrame.activeLayerId] ?? null
@@ -59,7 +62,7 @@ export const PreEditFrame = React.memo(function PreEditFrame() {
   const isText = !!activeLayer && activeLayer.type === 'text' && !!activeLayer.textData && activeLayer.visible;
   const layerId = isText ? activeLayer!.id : null;
 
-  usePreEditFrameSync(boxRef, layerId);
+  const { getAnchorFrame } = useTextHudAnchor(layerId);
   useOverlayRotationSync(containerRef, activeFrame);
 
   if (!activeFrame || activeCraft !== 'text' || editingLayerId) return null;
@@ -93,18 +96,35 @@ export const PreEditFrame = React.memo(function PreEditFrame() {
       ))}
 
       {!layerId ? null : (
-      <div
-        ref={boxRef}
-        data-overlay-gizmo-layer={layerId}
-        className="absolute top-0 left-0"
-        style={{ display: 'none', transformOrigin: '0 0', willChange: 'transform, width, height' }}
-      >
-        {/* outline: the invisible full-edge hit strips (n/s/e/w) that back the
-            edge-drag gesture — an explicit "fix this axis" declaration that
-            switches the box to fixed on the dragged axis only. Without them
-            only the corner brackets and the rotate handle are interactive. */}
-        <TransformGizmo rotation={rotation} flip={flip} outline />
-      </div>
+      <TransformHud
+        active
+        getAnchorFrame={getAnchorFrame}
+        gizmo={{
+          // outline: the invisible full-edge hit strips (n/s/e/w) that back the
+          // edge-drag gesture — an explicit "fix this axis" declaration that
+          // switches the box to fixed on the dragged axis only. Without them
+          // only the corner brackets and the rotate handle are interactive.
+          outline: true,
+          rotation,
+          flip,
+        }}
+        pressScope="text-gizmo"
+        // resolveGizmoTargetLayer resolves the owning layer from this
+        // attribute on the hit-zone host — the HUD container is that host now.
+        gizmoContainerProps={{ 'data-overlay-gizmo-layer': layerId }}
+        actions={
+          <button
+            type="button"
+            onClick={() => actions.executeCommand(CraftDrawerAPI.commands.deactivate.uid)}
+            title="Exit (Esc)"
+            aria-label="Exit"
+            className="flex items-center outline-none rounded px-1 text-[10px] font-bold leading-none text-rose-400 hover:bg-white/10 pointer-events-auto cursor-pointer"
+            style={{ height: '16px' }}
+          >
+            Esc
+          </button>
+        }
+      />
       )}
     </div>
   );

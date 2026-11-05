@@ -231,7 +231,7 @@ export const createSessionTransformHandler = (): InteractionHandler => {
         const pivot = e.geometry.transform.fragmentContentCenter(startParams);
         startPointerAngleRad = Math.atan2(e.point.world.y - pivot.y, e.point.world.x - pivot.x);
         // Shift snap grid anchors on the TRUE on-screen orientation (see the
-        // field comment). One shared probe with the HUD/DeltaLabel so all
+        // field comment). One shared probe with the HUD delta chip so all
         // three can never disagree.
         rotationSnapBaseDeg = fragmentTrueRotationDeg(session, exchange);
       } else if (startConfinement) {

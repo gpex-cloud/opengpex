@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.47
+
+- Markers: the marker frame now supports resizing from any point on all four edges, proportional scaling from the corner handles (hold Shift for free resizing), an Esc button that exits the tool, and a displacement/angle readout that follows moves and rotations in every mode
+- Pen: the pen layer frame gains the same four-edge resizing, proportional corner scaling (Shift to unlock), Esc button, and an every-mode displacement/angle readout
+- Text: the displacement/angle readout now follows text-layer moves and rotations in every mode, including while editing; resize handles on rotated text boxes show direction-accurate cursors; fixed rotated boxes growing while typing and the selection highlight drifting off the selected characters
+- Workspace: displacement and angle readouts are temporarily shown for selections, markers, pen and text layers only; plain-layer drags will regain their readout in a later update
+
 ## 2.0.46
 
 - Workspace: redefined the z-index system — how panels, dialogs, menus, tooltips and notifications overlap on screen, so they always stack in the right order

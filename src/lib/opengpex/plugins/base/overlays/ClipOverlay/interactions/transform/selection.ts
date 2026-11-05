@@ -169,7 +169,7 @@ export const createSelectionTransformHandler = (): InteractionHandler => {
         startAngleRad = Math.atan2(e.point.canvas.y - anchorY, e.point.canvas.x - anchorX);
         startOrientationDeg = box.orientationDeg ?? 0;
         // Finding 14: the selection displays its own accumulated rotation
-        // (the chip reads the live orientationDeg record; see DeltaLabel).
+        // (the chip reads the live orientationDeg record; see the HUD delta chip).
         tx.declareFeedback({ kind: 'rotate', target: 'frame', origin: { x: anchorX, y: anchorY } });
         e.actions.fast.cursor.notifyDragging(ROTATE_CURSOR);
         return;

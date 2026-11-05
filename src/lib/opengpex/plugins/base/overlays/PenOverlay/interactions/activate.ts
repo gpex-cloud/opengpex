@@ -53,7 +53,7 @@ export const createPenDblClickActivateHandler = (): InteractionHandler => {
       if (e.state.interaction.interactionMode !== 'pan') return false;
 
       const target = e.nativeEvent.target as HTMLElement | null;
-      if (target?.closest('button, a, input, [data-role="ui"], [data-handle], [data-gizmo-handle], [data-gizmo-rotate]')) return false;
+      if (target?.closest('button, a, input, [data-role="ui"], [data-handle], [data-pen-gizmo] [data-gizmo-handle], [data-pen-gizmo] [data-gizmo-rotate]')) return false;
 
       const now = performance.now();
       const isDoubleClick =

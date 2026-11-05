@@ -20,7 +20,10 @@
 "use client";
 
 import React from 'react';
+import { useEditorState } from '@opengpex/editor/core/context';
 import { useTextOverlayState } from '../hooks';
+import { TransformHud } from '@opengpex/editor/widgets/affordances';
+import { useTextHudAnchor } from '../useTextHudAnchor';
 import { InlineTextEditor } from './InlineTextEditor';
 import { PlaceMarquee } from './PlaceMarquee';
 import { PreEditFrame } from './PreEditFrame';
@@ -39,15 +42,21 @@ export const TextOverlayMain = React.memo(function TextOverlayMain() {
   const { activeFrame, activeCraft, editingLayerId, layerExists } =
     useTextOverlayState();
 
-  // Editing state: render InlineTextEditor
+  // Editing state: render InlineTextEditor (+ the always-on chip HUD)
   if (editingLayerId && layerExists && activeFrame) {
-    return <InlineTextEditor layerId={editingLayerId} />;
+    return (
+      <>
+        <TextChipHud />
+        <InlineTextEditor layerId={editingLayerId} />
+      </>
+    );
   }
 
   // Pre-editing state: self-drawn active-layer frame + marquee watcher
   if (activeCraft === 'text' && activeFrame) {
     return (
       <>
+        <TextChipHud />
         <PreEditFrame />
         <PlaceMarquee />
       </>
@@ -55,6 +64,33 @@ export const TextOverlayMain = React.memo(function TextOverlayMain() {
   }
 
   return null;
+});
+
+/**
+ * TextChipHud: the text tool's chips-only TransformHud — the ONE owner of
+ * every layer-target text gesture's delta chip. Keyed on the ACTIVE layer
+ * while it is a text layer; it renders in BOTH overlay states (pre-edit
+ * and editing session) because the layer stays active while its box is
+ * moved or rotated. Non-text active layers yield a null anchor and the
+ * chip stays hidden. The InlineTextEditor surface is untouched — the HUD
+ * mounts beside it, never inside the caret/IME plumbing.
+ */
+const TextChipHud = React.memo(function TextChipHud() {
+  const { activeLayer } = useEditorState();
+  const isTextLayer =
+    !!activeLayer && activeLayer.type === 'text' && !!activeLayer.textData;
+  const { getAnchorFrame } = useTextHudAnchor(
+    isTextLayer && activeLayer ? activeLayer.id : null,
+  );
+
+  if (!isTextLayer || !activeLayer) return null;
+  return (
+    <TransformHud
+      active
+      getAnchorFrame={getAnchorFrame}
+      delta={{ targetId: activeLayer.id }}
+    />
+  );
 });
 
 export { InlineTextEditor, type InlineTextEditorProps } from './InlineTextEditor';

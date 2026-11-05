@@ -25,8 +25,11 @@ import type { ScreenRotationBox, HudTickArgs } from './types';
 /** The shared volatile record every transform gesture declares into. */
 const FEEDBACK_KEY = 'gestureFeedback';
 
-/** Screen-px gap between the entity's (rotated) bottom edge and the chip. */
-const HUD_DELTA_CLEARANCE_PX = 28;
+/** Screen-px gap between the entity's (rotated) bottom edge and the chip
+ *  while a dimension chip shares the corner (the default reservation). */
+const HUD_DIMENSION_CLEARANCE_PX = 28;
+/** Screen-px gap with no dimension chip to clear — hug the bounding box. */
+const HUD_TIGHT_CLEARANCE_PX = 8;
 
 /**
  * useHudDeltaChip — the HUD-owned displacement / rotation chip. Rendered
@@ -35,18 +38,35 @@ const HUD_DELTA_CLEARANCE_PX = 28;
  * WHAT it moves once (kind + gesture-start origin), and the chip resolves
  * the live numbers against this HUD's own anchor frame. Pure technical:
  *   - position/rotation come from getAnchorFrame (whose angle is the
- *     consumer's flavor state — session true pose or plain 0°/record);
- *   - the frame readout uses only core frame facts (confinement rect for
- *     translate, the echoed anchor angle for rotate) — no business probe.
- * Frame-target gestures are owned by frame HUDs; while this chip shows,
- * the viewport-level DeltaLabel stands down for the same feedback.
+ *     consumer's flavor state — session true pose, plain record, or a
+ *     live layer box);
+ *   - the readout uses only core frame facts — no business probe:
+ *     frame flavor → confinement rect (translate) / echoed anchor angle
+ *                    (rotate);
+ *     layer flavor → the live layer's cx/cy (translate) / rotation
+ *                    (rotate), resolved from the frame by the declared
+ *                    `deltaTargetId`.
+ * The record this HUD claims is the declared flavor: frame-target records
+ * when no target id is given; layer-target records whose `targetId` equals
+ * the declared id otherwise. Layer ids are unique per frame, so entity
+ * HUDs can never claim each other's gestures — each entity's chip renders
+ * on that entity's own HUD, and a gesture without a mounted HUD shows no
+ * chip at all (the retired viewport DeltaLabel is NOT coming back).
+ *
+ * The clearance below the entity is the FRAMEWORK'S OWN rule, derived from
+ * this HUD's dimension affordance: a dimension chip sharing the corner
+ * reserves the wide gap; without one the chip hugs the bounding box.
+ * Gestures carry no clearance hints — whether a label slot exists is
+ * knowable by the HUD alone.
  */
 export function useHudDeltaChip(
   rootRef: React.RefObject<HTMLDivElement | null>,
   chipRef: React.RefObject<HTMLDivElement | null>,
   active: boolean,
   getAnchorFrame: (...args: HudTickArgs) => ScreenRotationBox | null,
-  enabled: boolean
+  enabled: boolean,
+  deltaTargetId?: string,
+  hasDimension = false
 ): void {
   const lastFbRef = useRef<InteractionGestureFeedback | null>(null);
 
@@ -54,7 +74,10 @@ export function useHudDeltaChip(
     const el = chipRef.current;
     if (!el) return;
     const fb = v.transient[FEEDBACK_KEY] as unknown as InteractionGestureFeedback | undefined;
-    const anchor = enabled && fb && fb.target === 'frame' ? getAnchorFrame(v, f, cam) : null;
+    const claimed = !!fb && (deltaTargetId
+      ? fb.target === 'layer' && fb.targetId === deltaTargetId
+      : fb.target === 'frame');
+    const anchor = enabled && claimed ? getAnchorFrame(v, f, cam) : null;
     if (!fb || !anchor) {
       if (lastFbRef.current !== null || el.style.display !== 'none') {
         lastFbRef.current = null;
@@ -72,7 +95,7 @@ export function useHudDeltaChip(
     const uy = Math.sin(angleRad);
     const vx = -uy;
     const vy = ux;
-    const clear = fb.anchorOffsetY ?? HUD_DELTA_CLEARANCE_PX;
+    const clear = hasDimension ? HUD_DIMENSION_CLEARANCE_PX : HUD_TIGHT_CLEARANCE_PX;
     const ax = anchor.x + vx * (anchor.h + clear);
     const ay = anchor.y + vy * (anchor.h + clear);
     el.style.left = `${ax}px`;
@@ -80,19 +103,31 @@ export function useHudDeltaChip(
     el.style.transformOrigin = '0 0';
     el.style.transform = `rotate(${(angleRad * 180) / Math.PI}deg)`;
 
-    // ── Content: displacement from origin, or the live absolute angle
-    // (the anchor's echoed orientation — already the flavor's angle).
+    // ── Content: displacement from origin, or the live absolute angle.
+    // The layer flavor reads the live layer named by the declaration (a
+    // gesture writes cx/cy/rotation to the fast track, so the merged frame
+    // is the live truth); a record whose layer vanished hides the chip.
+    const liveLayer = deltaTargetId ? f.layers.byId[deltaTargetId] : undefined;
+    if (deltaTargetId && !liveLayer) {
+      el.style.display = 'none';
+      return;
+    }
     const span = el.firstElementChild as HTMLSpanElement;
     const unit = el.lastElementChild as HTMLSpanElement;
     if (fb.kind === 'rotate') {
-      const displayAngle = Math.abs(angleRad * 180 / Math.PI) < 0.05
-        ? 0
-        : Math.round((angleRad * 180 / Math.PI) * 10) / 10;
+      const liveDeg = liveLayer
+        ? liveLayer.rotation
+        : (angleRad * 180) / Math.PI;
+      const displayAngle = Math.abs(liveDeg) < 0.05 ? 0 : Math.round(liveDeg * 10) / 10;
       if (span) span.textContent = `↻ ${displayAngle}`;
       if (unit) unit.textContent = '°';
     } else {
-      const dx = Math.round((f.confinement?.rect.x ?? fb.origin.x) - fb.origin.x);
-      const dy = Math.round((f.confinement?.rect.y ?? fb.origin.y) - fb.origin.y);
+      const dx = liveLayer
+        ? Math.round(liveLayer.cx - fb.origin.x)
+        : Math.round((f.confinement?.rect.x ?? fb.origin.x) - fb.origin.x);
+      const dy = liveLayer
+        ? Math.round(liveLayer.cy - fb.origin.y)
+        : Math.round((f.confinement?.rect.y ?? fb.origin.y) - fb.origin.y);
       const hArrow = dx >= 0 ? '→' : '←';
       const vArrow = dy >= 0 ? '↓' : '↑';
       if (span) span.textContent = `${hArrow} ${Math.abs(dx)}  ${vArrow} ${Math.abs(dy)}`;

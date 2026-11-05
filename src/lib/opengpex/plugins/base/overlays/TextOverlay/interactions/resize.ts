@@ -138,9 +138,9 @@ export const createTextResizeHandler = (): InteractionHandler => {
 
       // Only responds to resize handle clicks
       const target = e.nativeEvent.target as HTMLElement;
-      if (!target.closest('[data-gizmo-handle]')) return null;
+      if (!target.closest('[data-text-gizmo] [data-gizmo-handle]')) return null;
 
-      const handleEl = target.closest('[data-gizmo-handle]') as HTMLElement;
+      const handleEl = target.closest('[data-text-gizmo] [data-gizmo-handle]') as HTMLElement;
       const handleType = handleEl.dataset.gizmoHandle;
       // Exclude 'move' (clicks inside the box fall through to other handlers)
       if (!handleType || handleType === 'move') return null;

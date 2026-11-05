@@ -184,7 +184,7 @@ export const createTextPlaceHandler = (): InteractionHandler => {
 
       // Exclude UI element clicks, the live editor, and gizmo handles
       const target = e.nativeEvent.target as HTMLElement;
-      if (target.closest('button, a, input, [data-role="ui"], [contenteditable], [data-handle], [data-gizmo-handle], [data-gizmo-rotate]')) return false;
+      if (target.closest('button, a, input, [data-role="ui"], [contenteditable], [data-handle], [data-text-gizmo] [data-gizmo-handle], [data-text-gizmo] [data-gizmo-rotate]')) return false;
 
       // Click within canvas range
       const frame = e.activeFrame;

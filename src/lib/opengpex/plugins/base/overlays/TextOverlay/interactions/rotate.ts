@@ -54,7 +54,7 @@ export const createTextRotateHandler = (): InteractionHandler => {
       if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'text') return false;
 
       const target = e.nativeEvent.target as HTMLElement;
-      if (!target.closest('[data-gizmo-rotate]')) return false;
+      if (!target.closest('[data-text-gizmo] [data-gizmo-rotate]')) return false;
 
       const layer = resolveGizmoTargetLayer(e);
       if (!layer) return false;

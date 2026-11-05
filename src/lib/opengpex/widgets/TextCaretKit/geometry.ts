@@ -406,8 +406,6 @@ export function resolveSelectionRects(
 
   const matrix = options.getLiveMatrix();
   if (!matrix) return [];
-
-  const currentScale = Math.hypot(matrix.a, matrix.b) || 1;
   // Maximum line highlight height is strictly bounded by the line pitch (fontSize × lineHeight).
   // When lineHeight is 1.0, height is exactly 1.0 × fontSize, so adjacent lines meet flush with 0 overlap.
   const linePitch = options.fontSize * (options.lineHeight ?? 1.4);
@@ -438,25 +436,54 @@ export function resolveSelectionRects(
   }
 
   const results: TextSelectionRect[] = [];
+  // The live matrix's rotation: range client rects come back as SCREEN-space
+  // axis-aligned AABBs of the rotated line boxes — the rotation inflates
+  // them (a WxH line at angle θ measures s*(W·cosθ + H·sinθ) x
+  // s*(W·sinθ + H·cosθ)), so scale-only unprojection misplaces the
+  // highlight. With θ known from the matrix the true line box SOLVES out of
+  // the two AABB extents (center is AABB-invariant: inverse-project it, not
+  // the corners — inverse-projecting the corners would re-inflate the box).
+  const scale = Math.hypot(matrix.a, matrix.b) || 1;
+  const theta = Math.atan2(matrix.b, matrix.a);
+  const cos = Math.abs(Math.cos(theta));
+  const sin = Math.abs(Math.sin(theta));
+  const det = cos * cos - sin * sin; // cos(2θ) — degrades only near ±45°
+
   for (const m of mergedRects) {
     const screenW = m.right - m.left;
     const screenH = m.bottom - m.top;
     if (screenW <= 0 || screenH <= 0) continue;
 
-    const localTopLeft = projectScreenRectToLocal(
-      { left: m.left, top: m.top, height: screenH },
+    const center = projectScreenRectToLocal(
+      { left: m.left + screenW / 2, top: m.top + screenH / 2, height: screenH },
       matrix,
     );
-    if (!localTopLeft) continue;
+    if (!center) continue;
 
-    const rowH = screenH / currentScale;
+    let lineW: number;
+    let rowH: number;
+    if (Math.abs(det) < 0.05) {
+      // Near ±45° the two extents equations degenerate — fall back to an
+      // even split of the AABB (wrong-ish but stable; the clamp below still
+      // bounds the drawn height by the line pitch).
+      lineW = screenW / scale;
+      rowH = screenH / scale;
+    } else {
+      lineW = (screenW * cos - screenH * sin) / (scale * det);
+      rowH = (screenH * cos - screenW * sin) / (scale * det);
+    }
+    lineW = Math.abs(lineW);
+    rowH = Math.abs(rowH);
+
+    const localX = center.localX - lineW / 2;
+    const localY = center.localY - rowH / 2;
     const clampedH = Math.min(rowH, targetH);
     const offsetY = Math.max(0, (rowH - clampedH) / 2);
 
     results.push({
-      localX: localTopLeft.localX,
-      localY: localTopLeft.localY + offsetY,
-      width: screenW / currentScale,
+      localX,
+      localY: localY + offsetY,
+      width: lineW,
       height: clampedH,
     });
   }

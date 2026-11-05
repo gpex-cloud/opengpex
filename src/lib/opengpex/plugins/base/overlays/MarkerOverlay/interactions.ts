@@ -148,7 +148,7 @@ export const createMarkerMoveHandler = (): InteractionHandler => {
 
       // Exclude UI element clicks (buttons, panels, resize handles).
       const target = e.nativeEvent.target as HTMLElement;
-      if (target.closest('button, a, input, [data-role="ui"], [data-handle], [data-gizmo-handle], [data-gizmo-rotate], [data-marker-tail-handle]')) return false;
+      if (target.closest('button, a, input, [data-role="ui"], [data-handle], [data-marker-gizmo] [data-gizmo-handle], [data-marker-gizmo] [data-gizmo-rotate], [data-marker-tail-handle]')) return false;
 
       const hitLayer = findMarkerLayerAtPoint(e.geometry, e.activeFrame, e.point.canvas);
       if (hitLayer) {
@@ -179,6 +179,14 @@ export const createMarkerMoveHandler = (): InteractionHandler => {
 
       tx = new InteractionTransaction(e, { useIncreComp: true });
       tx.begin(false);
+      // Declare the gesture feedback for the marker HUD's delta chip.
+      // Cleared by the transaction's commit/abort.
+      tx.declareFeedback({
+        kind: 'translate',
+        target: 'layer',
+        targetId: targetLayerId,
+        origin: { x: startLayerPos.x, y: startLayerPos.y },
+      });
       e.actions.fast.cursor.notifyDragging('grabbing');
     },
 
@@ -212,14 +220,16 @@ export const createMarkerMoveHandler = (): InteractionHandler => {
 
 // ─── MarkerResizeHandler ───────────────────────────────────────────────────────
 
+const CORNER_HANDLES: ReadonlySet<string> = new Set(['nw', 'ne', 'sw', 'se']);
+
 /**
  * MarkerResizeHandler: drag a corner/edge handle to resize the selected marker.
  *
  * Priority 160 (> MarkerMoveHandler 155 > MarkerDrawHandler 145): a pointerdown
  * on a resize handle must win over move / draw. Built on the shared
  * `createTransformHandler` (same infra as TextOverlay's text-resize), gated to
- * craft mode + activeCraft==='marker'. The handles are DOM dots rendered by the
- * overlay carrying `data-gizmo-handle`; `test` only fires when one is hit.
+ * craft mode + activeCraft==='marker'. The handles are DOM dots rendered inside
+ * the marker HUD's `data-marker-gizmo` scope; `test` only fires when one is hit.
  *
  * onUpdate writes the new bounding + recentered cx/cy to the fast track. For
  * arrow markers the tail/head endpoints are rescaled proportionally so the
@@ -230,6 +240,7 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
   let resizeLayerId: string | null = null;
   let startMarkerData: MarkerData | null = null;
   let startBounding = { w: 0, h: 0 };
+  let gestureHandle: ResizeHandle | null = null;
   // Orientation-aware resize snapshot (non-null only for rotated/mirrored markers):
   // the world centre and the local-axes rect at gesture start, used to map the
   // local resize result back to world cx/cy.
@@ -248,7 +259,7 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
       if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'marker') return null;
 
       const target = e.nativeEvent.target as HTMLElement;
-      const handleEl = target.closest('[data-gizmo-handle]') as HTMLElement | null;
+      const handleEl = target.closest('[data-marker-gizmo] [data-gizmo-handle]') as HTMLElement | null;
       if (!handleEl) return null;
 
       const handle = handleEl.dataset.gizmoHandle;
@@ -263,6 +274,7 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
       resizeLayerId = layer.id;
       startMarkerData = layer.markerData;
       startBounding = { w: layer.bounding.w, h: layer.bounding.h };
+      gestureHandle = handle as ResizeHandle;
 
       return { category: 'resize', handle: handle as ResizeHandle };
     },
@@ -305,9 +317,17 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
       return { rotation: layer.rotation, flip: layer.flip, cx: layer.cx, cy: layer.cy };
     },
 
-    // Free-form resize (no aspect lock unless Shift, handled by the framework);
-    // unclamped so markers can extend to the canvas edge like text boxes.
-    getConstraints: () => ({ aspect: undefined, clamp: false }),
+    // Figma-style corner semantics (§6.1 alignment with the text contract):
+    // corner drags run aspect-locked at the gesture-start ratio (proportional
+    // scale, matching how the callout tail and arrow endpoints track the
+    // box), Shift temporarily unlocks free two-axis drag. Edge handles stay
+    // free on their single axis. Unclamped so markers can extend to the
+    // canvas edge like text boxes.
+    getConstraints: () => {
+      const isCorner = gestureHandle !== null && CORNER_HANDLES.has(gestureHandle);
+      const ratio = startBounding.w > 0 && startBounding.h > 0 ? startBounding.w / startBounding.h : undefined;
+      return { aspect: isCorner ? ratio : undefined, shiftUnlocksAspect: true, clamp: false };
+    },
 
     onUpdate: (e, newRect, tx, context) => {
       if (!resizeLayerId || !startMarkerData) return;
@@ -381,8 +401,9 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
  *
  * Priority 165 (> MarkerResizeHandler 160 > MarkerMoveHandler 155): a
  * pointerdown on the rotate handle must win over resize / move. Gated to
- * craft mode + activeCraft==='marker'. The handle is a DOM dot rendered by
- * the overlay carrying `data-gizmo-rotate`; `test` only fires when it is hit.
+ * craft mode + activeCraft==='marker'. The handle is a DOM dot rendered
+ * inside the marker HUD's `data-marker-gizmo` scope (see also the resize
+ * handler); `test` only fires when it is hit.
  *
  * Math:
  *   startAngle = atan2(pointer.world − layer center)
@@ -411,7 +432,7 @@ export const createMarkerRotateHandler = (): InteractionHandler => {
       if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'marker') return false;
 
       const target = e.nativeEvent.target as HTMLElement;
-      const rotateEl = target.closest('[data-gizmo-rotate]') as HTMLElement | null;
+      const rotateEl = target.closest('[data-marker-gizmo] [data-gizmo-rotate]') as HTMLElement | null;
       if (!rotateEl) return false;
 
       // Bind to the currently active marker layer.
@@ -440,6 +461,15 @@ export const createMarkerRotateHandler = (): InteractionHandler => {
 
       tx = new InteractionTransaction(e, { useIncreComp: true });
       tx.begin(false);
+      // Declare the gesture feedback for the marker HUD's delta chip: the
+      // readout is the layer's live rotation, resolved from the merged
+      // frame via targetId. Cleared by commit/abort.
+      tx.declareFeedback({
+        kind: 'rotate',
+        target: 'layer',
+        targetId: rotateLayerId,
+        origin: { x: layerCx, y: layerCy },
+      });
       e.actions.fast.cursor.notifyDragging(ROTATE_CURSOR);
     },
 
@@ -519,7 +549,7 @@ export const createMarkerDrawHandler = (): InteractionHandler => {
       if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'marker') return false;
 
       const target = e.nativeEvent.target as HTMLElement;
-      if (target.closest('button, a, input, [data-role="ui"], [data-handle], [data-gizmo-handle], [data-gizmo-rotate], [data-marker-tail-handle]')) return false;
+      if (target.closest('button, a, input, [data-role="ui"], [data-handle], [data-marker-gizmo] [data-gizmo-handle], [data-marker-gizmo] [data-gizmo-rotate], [data-marker-tail-handle]')) return false;
 
       // Must be within the canvas. Drawing OVER an existing marker is
       // allowed — moving one requires the spring key (MarkerMoveHandler,
@@ -675,7 +705,7 @@ export const createMarkerDblClickActivateHandler = (): InteractionHandler => {
       if (e.state.interaction.interactionMode !== 'pan') return false;
 
       const target = e.nativeEvent.target as HTMLElement | null;
-      if (target?.closest('button, a, input, [data-role="ui"], [data-handle], [data-gizmo-handle], [data-gizmo-rotate], [data-marker-tail-handle]')) return false;
+      if (target?.closest('button, a, input, [data-role="ui"], [data-handle], [data-marker-gizmo] [data-gizmo-handle], [data-marker-gizmo] [data-gizmo-rotate], [data-marker-tail-handle]')) return false;
 
       const now = performance.now();
       const isDoubleClick =

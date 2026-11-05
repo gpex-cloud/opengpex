@@ -332,16 +332,6 @@ export interface InteractionGestureFeedback {
    * it from the live value every frame.
    */
   origin: { x: number; y: number };
-  /**
-   * Overrides the widget's default chip clearance below the (live-derived)
-   * anchor. The default exists to clear a co-located label — e.g. the frame
-   * chip's 24px reserves space for the dimension label sharing the
-   * selection's corner — but that label is mode-dependent (never shows in
-   * pan), so the pan selection move declares a tighter clearance instead of
-   * leaving the label slot empty. The anchor itself is still derived from
-   * the LIVE entity every frame; only the clearance is overridden.
-   */
-  anchorOffsetY?: number;
 }
 
 export interface VolatileState {

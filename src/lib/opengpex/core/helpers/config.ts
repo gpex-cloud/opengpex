@@ -43,7 +43,7 @@ export const EDITOR_Z_INDEX = {
     GIZMOS: 200,          // L2: STAGE_GIZMOS slot — guide lines, anchor points (island inside the transform stage)
     OVERLAY: 300,         // L3: STAGE_OVERLAY slot — marching ants, brush canvas surface, text editor
     GUIDES: 310,          // L3 component step: SmartGuides snap lines (one step above the ants, DOM order independent)
-    FEEDBACK: 400,        // L4: DeltaLabel displacement/angle chip
+    FEEDBACK: 400,        // L4: stage-level displacement/angle chip
     PLUGIN_CANVAS: 700,   // L7: 700–999 canvas plugin autonomy band (former DEVELOPER_ZONE)
   },
   // Segment 1 · CHROME (1000–1999) — workspace skeleton

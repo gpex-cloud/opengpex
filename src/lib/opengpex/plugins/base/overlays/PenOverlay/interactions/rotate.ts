@@ -57,7 +57,7 @@ export const createPenRotateHandler = (): InteractionHandler => {
       if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'pen') return false;
 
       const target = e.nativeEvent.target as HTMLElement;
-      const rotateEl = target.closest('[data-gizmo-rotate]') as HTMLElement | null;
+      const rotateEl = target.closest('[data-pen-gizmo] [data-gizmo-rotate]') as HTMLElement | null;
       if (!rotateEl) return false;
 
       // Bind to the currently active pen layer.

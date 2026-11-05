@@ -107,9 +107,9 @@ export const createLayerMoveHandler = (): InteractionHandler => {
       // ★ Core change: compute rotation-aware pose once at drag start
       pose = e.geometry.transform.computeLayerMovePose(targetLayer);
 
-      // Declare the gesture feedback for the system-level delta label: the
-      // moved layer and its gesture-start center. Cleared by the
-      // transaction's commit/abort.
+      // Declare the gesture feedback for the moved layer's delta chip (a
+      // marker layer's always-on chip HUD renders it; plain layers carry no
+      // chip HUD yet). Cleared by the transaction's commit/abort.
       tx.declareFeedback({
         kind: 'translate',
         target: 'layer',

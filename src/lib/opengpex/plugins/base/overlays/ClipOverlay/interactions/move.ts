@@ -190,11 +190,6 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
           kind: 'translate',
           target: 'frame',
           origin: { x: initialRect.x, y: initialRect.y },
-          // Pan never shows the dimension label the default 24px clearance
-          // reserves space for — tighten the clearance instead of leaving
-          // the label slot empty. (Clearance only: the anchor itself keeps
-          // following the live selection every frame.)
-          ...(e.state.interaction.interactionMode === 'pan' ? { anchorOffsetY: 8 } : {}),
         });
       }
 
