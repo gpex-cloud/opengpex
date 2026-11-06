@@ -58,12 +58,15 @@ export function layerLocalToFrameLocal(shape: Shape, layer: Layer, frame: Frame)
 const MASK_AWARE_INTERSECTION = true;
 
 /**
- * shapeToPathData — Obtain the pathData for any LocalShape. Path shapes return
- * their pathData directly; rect/circle shapes are first decomposed into rings
- * (via `shapeToPoint2D`) and serialized (via `ringsToPathData`), so they can
- * participate in boolean ops.
+ * shapeToPathData — Obtain the ABSOLUTE-coordinate pathData for any LocalShape.
+ * Path shapes return their pathData directly; rect/circle shapes are first
+ * decomposed into rings (via `shapeToPoint2D`, which already emits absolute
+ * coords from `shape.rect`) and serialized (via `ringsToPathData`), so they
+ * can participate in boolean ops and in the feathered-cut data shape (tight
+ * geometry as a path inset inside a padded crop window — see
+ * LayerFactory.patchEdgeFeatherRepad / clipToLogicalLayer).
  */
-function shapeToPathData(shape: LocalShape): string {
+export function shapeToPathData(shape: LocalShape): string {
   const pd = (shape as { pathData?: string }).pathData;
   if (shape.type === 'path' && pd) return pd;
   return ringsToPathData(shapeToPoint2D(shape));
@@ -79,7 +82,7 @@ function shapeToPathData(shape: LocalShape): string {
  * Feathering is NOT a boolean-topology change: a soft edge never moves
  * which pixels are inside the shape, only the alpha falloff at the boundary. So the
  * fold runs on the HARD contours as usual and returns the participating `featherPx`
- * alongside the tight geometry — the caller (`fragmentToNewLayer`) turns that into a
+ * alongside the tight geometry — the caller (`clipToLogicalLayer`) turns that into a
  * padded bbox + a feathered vmask instead of the old whole-layer fallback.
  *
  * Degradation (returns the untouched `visibleShape` with `degraded:true`) only when
@@ -178,7 +181,7 @@ export function intersectWithLayer(shape: LocalShape, layer: Layer): { visibleSh
     : { shape: layer.visibleShape!, degraded: false, featherPx: 0 };
 
   // Degraded (bitmap mask / divergent feather) → return null so callers fall
-  // back to the vectorMask render path (fragmentToNewLayer's else branch).
+  // back to the vectorMask render path (clipToLogicalLayer's else branch).
   if (eff.degraded) return null;
 
   const layerShape = eff.shape;

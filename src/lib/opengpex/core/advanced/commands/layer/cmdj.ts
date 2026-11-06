@@ -26,7 +26,7 @@ import * as P from '@opengpex/editor/core/advanced/protocols';
 /**
  * CMD+J commands: Create new layers by copying or cutting selections.
  *
- * Uses the unified `fragmentToNewLayer` entry point which resolves the optimal
+ * Uses the unified `clipToLogicalLayer` entry point which resolves the optimal
  * strategy (logical / vectorMask) based on selection type, layer
  * geometry, feather, and AA settings.
  */
@@ -52,7 +52,7 @@ export const LayerCmdJCommands = {
         const feather = payload?.feather ?? 0;
 
         if (box) {
-          const result = await ctx.layers.fragmentToNewLayer(activeFrame, latestLayer, { feather });
+          const result = await ctx.layers.clipToLogicalLayer(activeFrame, latestLayer, { feather });
           if (!result) {
             ctx.actions.setInteraction({
               hud: { message: 'Area is empty', type: 'error' }
@@ -127,7 +127,7 @@ export const LayerCmdJCommands = {
         const feather = payload?.feather ?? 0;
 
         // Create fragment via unified strategy resolver (mode:'cut' generates sourceHole)
-        const result = await ctx.layers.fragmentToNewLayer(activeFrame, latestLayer, { feather, mode: 'cut' });
+        const result = await ctx.layers.clipToLogicalLayer(activeFrame, latestLayer, { feather, mode: 'cut' });
         if (!result) {
           actions.setInteraction({
             hud: { message: 'Area is empty', type: 'error' }
@@ -135,12 +135,15 @@ export const LayerCmdJCommands = {
           return;
         }
 
-        // Punch a hole in the source layer using the pre-computed holeMask descriptor.
+        // Punch the hole into the source layer: the service hands back a
+        // fully-formed VectorMask, appended verbatim (same write shape the
+        // peel session uses for its hole).
         if (result.holeMask) {
-          const { shape, inverted, assocLayerId, feather: maskFeather, maskId } = result.holeMask;
+          const holeMask = result.holeMask;
           ctx.layers.updateLayer(activeFrame.id, (tx) => {
-            tx.edit(latestLayer.id)
-              .applyMask(shape, { maskId, assocLayerId, inverted, feather: maskFeather });
+            tx.edit(latestLayer.id).patch({
+              vectorMasks: [...(latestLayer.vectorMasks || []), holeMask],
+            });
           });
         }
 

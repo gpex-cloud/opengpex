@@ -58,8 +58,13 @@
  *   translator (`PenOverlay/contribution.ts`) flattens `penData` during scene
  *   assembly, which runs OUTSIDE any React/service context (no
  *   `GeometryService` instance exists there). Both are pure L0 operators.
+ * - `traceAlphaRings` — the alpha-contour tracer (marching squares →
+ *   smoothing/simplification). Consumed by the ClipOptions alpha worker
+ *   ("Select from Alpha") and the bake family's outline rebuild
+ *   (services/baking.ts); the worker runs outside any service context.
  */
 
 export { penPathToCubicSegments, flattenCubicChain, fitCubicsToPolyline, mapPathAnchors, nearestPathAnchor } from './operators/bezier';
 export { computeRingArea, isPointInPolygon, polygonToShape } from './operators/polygon';
 export { isPointInRect, isPointInShape } from './operators/space';
+export { traceAlphaRings } from './operators/alpha';

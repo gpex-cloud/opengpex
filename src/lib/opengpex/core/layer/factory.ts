@@ -17,10 +17,12 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+import { shapeToPathData } from '@opengpex/editor/core/geometry/operators/shape';
+import { computeFragmentCenter, getOrientationMatrix } from '@opengpex/editor/core/geometry/operators/transform';
 import { LAYER_ROLE_CONFIGS, HOST_LAYER_ORDER } from '@opengpex/editor/core/helpers/config';
 import {
   Layer, Frame, VectorMask, BitmapMask, LayerRole,
-  LocalShape, LocalRect, asLocalShape
+  LocalShape, LocalRect, asLocalShape, asLocalRect
 } from '@opengpex/editor/core/types';
 
 /** Type-safe role configuration index helper */
@@ -490,6 +492,179 @@ export const LayerFactory = {
     return l.hostId ? (frame.layers.byId[l.hostId] ?? null) : l;
   },
 
+  // =================================================================================
+  // 7. Layer Edge Identity
+  // =================================================================================
+
+  /**
+   * resolveLayerEdgeType: which physical carrier holds this layer's EDGE.
+   * Feather-agnostic — it answers "where does the edge live", and every
+   * edge-affecting edit (feather today, outline tools tomorrow) dispatches
+   * on the answer:
+   *
+   *   - `'geometry'` — a LOGICAL fragment: no (enabled) vectorMasks, a
+   *     `visibleShape` that actually clips a SHARED source asset (a `path`
+   *     with `pathData`, a carried `featherPx`, or a rect strictly inside the
+   *     content box), AND the layer DECLARES itself logical
+   *     (`metadata.physicalPixels === false`). The edge lives in the geometry;
+   *     the hard-cut-away pixels still exist in the source, so geometric
+   *     edits (outward pad) are lossless.
+   *   - `'vmask'`    — any layer with enabled vectorMasks: the edge is the
+   *     mask boundary.
+   *   - `'bitmap'`   — everything else (baked products, imports, plain photo
+   *     layers): the edge is the asset's own alpha.
+   *
+   * The declaration gate is strict-equality and fail-safe: tight geometry
+   * ALONE never earns `'geometry'`. A baked physical layer carrying a tight
+   * path (peel products after the outline rebuild) has nothing outside its
+   * alpha, so routing it to a geometric outward edit would fade into empty
+   * pixels — anything unmarked is treated physical. A full-bounds rect clips
+   * nothing and is `'bitmap'` regardless.
+   */
+  resolveLayerEdgeType(layer: Layer): 'geometry' | 'vmask' | 'bitmap' {
+    if (layer.vectorMasks?.some((m) => m.enabled !== false)) return 'vmask';
+    const vs = layer.visibleShape;
+    if (!vs) return 'bitmap';
+    const typed = vs as { featherPx?: number; pathData?: string };
+    const isLogical = layer.metadata?.physicalPixels === false;
+    if (vs.type === 'path' && typed.pathData) return isLogical ? 'geometry' : 'bitmap';
+    if ((typed.featherPx ?? 0) > 0) return isLogical ? 'geometry' : 'bitmap';
+    if (vs.type === 'rect') {
+      const r = vs.rect;
+      const b = layer.bounding;
+      const fullBounds = r.x <= 0 && r.y <= 0 && r.w >= b.w && r.h >= b.h;
+      return fullBounds ? 'bitmap' : (isLogical ? 'geometry' : 'bitmap');
+    }
+    return 'bitmap';
+  },
+
+  /**
+   * getEdgeFeatherValue: the CURRENT effective edge-feather radius of a
+   * layer, read from whichever carrier its edge type routes to — the single
+   * UI slider displays this. The value does not live in one field:
+   *   - geometry → `visibleShape.featherPx`;
+   *   - vmask    → the first enabled mask's `feather`;
+   *   - bitmap   → the sum of `edgeFeather` over every ENABLED adjustment
+   *                mask's basic arm (the alphaFeather filters are post-chain
+   *                and additive, so the effective radius is their total).
+   */
+  getEdgeFeatherValue(layer: Layer): number {
+    switch (this.resolveLayerEdgeType(layer)) {
+      case 'geometry':
+        return ((layer.visibleShape as { featherPx?: number } | undefined)?.featherPx ?? 0);
+      case 'vmask': {
+        const m = layer.vectorMasks?.find((k) => k.enabled !== false);
+        return m?.feather ?? 0;
+      }
+      default: {
+        let total = 0;
+        for (const m of layer.adjustMasks ?? []) {
+          if (m.enabled) total += m.grade.adjustments?.edgeFeather ?? 0;
+        }
+        return total;
+      }
+    }
+  },
+
+
+  // =================================================================================
+  // 8. Edge Feather re-pad (the `'geometry'` edge-type edit — see
+  // resolveLayerEdgeType / getEdgeFeatherValue above for routing & reads)
+  // =================================================================================
+
+  /**
+ * patchEdgeFeatherRepad — the `'geometry'` edge-type feather edit as a PURE data
+ * transform. Returns the full layer patch to apply (or `null` for a no-op).
+ *
+ * The fragment's visibleShape is the TIGHT cut geometry (`pathData`, in source-
+ * asset pixel coords) inset inside a symmetrically PADDED rect (`rect`, carrying
+ * `featherPx`); SceneAssembler renders it as an implicit feathered vmask
+ * (`buildVectorMaskDesc` crops by `rect` and normalises the path by the rect
+ * origin — the invariant that `bounding` == padded-rect size is load-bearing).
+ * Re-feathering therefore: insets the current rect by the OLD pad to recover the
+ * tight geometry, re-outsets by the NEW pad (`ceil(r + AA_MARGIN)`, the same
+ * rule `clipToLogicalLayer`'s feathered branch uses), and rewrites
+ * `visibleShape` + `bounding` as one consistent patch. `pathData` is carried
+ * verbatim (still the same tight geometry, still source-asset coords); a hard
+ * rect fragment (pad was 0, no pathData) is serialised to pathData here — the
+ * exact data shape a feathered cut of the same geometry would have produced.
+ *
+ * POSE: symmetric padding keeps the padded rect's local centre (= the tight
+ * region's centre) fixed, and the layer's (cx, cy) IS that centre's world
+ * anchor (`computeFragmentCenter` inverted/re-applied around the rect origin
+ * change below) — so the pose is re-derived, not left stale, and stays correct
+ * under rotation/flip.
+ */
+patchEdgeFeatherRepad(
+  layer: Pick<Layer, 'bounding' | 'visibleShape' | 'cx' | 'cy' | 'rotation' | 'flip'>,
+  radius: number,
+): {
+  visibleShape: LocalShape;
+  bounding: { w: number; h: number };
+  cx: number;
+  cy: number;
+  birthCenter: { cx: number; cy: number };
+} | null {
+  const vs = layer.visibleShape as {
+    type: string;
+    rect: { x: number; y: number; w: number; h: number };
+    antiAliased?: boolean;
+    pathData?: string;
+    featherPx?: number;
+  } | undefined;
+  if (!vs) return null;
+
+  const curFeather = vs.featherPx ?? 0;
+  const pad0 = curFeather > 0 ? Math.ceil(curFeather + AA_MARGIN) : 0;
+  const pad1 = radius > 0 ? Math.ceil(radius + AA_MARGIN) : 0;
+  if (curFeather === radius && pad0 === pad1) return null;
+
+  // Tight geometry = current rect inset by the current symmetric pad.
+  const tight = {
+    x: vs.rect.x + pad0,
+    y: vs.rect.y + pad0,
+    w: vs.rect.w - 2 * pad0,
+    h: vs.rect.h - 2 * pad0,
+  };
+  const paddedRect = asLocalRect({
+    x: tight.x - pad1,
+    y: tight.y - pad1,
+    w: tight.w + 2 * pad1,
+    h: tight.h + 2 * pad1,
+  });
+
+  const pathData = vs.type === 'path' && vs.pathData ? vs.pathData : shapeToPathData(vs as unknown as LocalShape);
+  const visibleShape = {
+    type: 'path',
+    rect: paddedRect,
+    antiAliased: vs.antiAliased ?? true,
+    pathData,
+    featherPx: radius,
+    __brand: 'local',
+  } as unknown as LocalShape;
+
+  // Re-derive the pose: recover the invariant tight-centre world anchor from the
+  // current pose (computeFragmentCenter inverted), then re-apply for the new
+  // rect origin — equivalent to computeFragmentCenter(center, rect1) with the
+  // SAME centre the fragment was born with.
+  const O = getOrientationMatrix(layer.rotation, layer.flip);
+  const rotatedOrigin0 = O.apply({ x: vs.rect.x, y: vs.rect.y });
+  const worldCenter = { x: layer.cx + rotatedOrigin0.x, y: layer.cy + rotatedOrigin0.y };
+  const pose = computeFragmentCenter(worldCenter, { x: paddedRect.x, y: paddedRect.y }, layer.rotation, layer.flip);
+
+  return {
+    visibleShape,
+    bounding: { w: paddedRect.w, h: paddedRect.h },
+    cx: pose.x,
+    cy: pose.y,
+    // birthCenter MUST track the new pose: snap-to-birth (snapping.ts) compares
+    // the layer's cx/cy against the stored birth centre — a stale one would snap
+    // the re-feathered fragment to the pre-re-pad position, offsetting the
+    // content by exactly the pad delta (real-device finding 2026-10-12).
+    birthCenter: { cx: pose.x, cy: pose.y },
+  };
+},
+
 };
 
 // =================================================================================
@@ -546,3 +721,10 @@ export function findUpstreamAssetId(layerId: string, frame: Frame): string | nul
   }
   return null;
 }
+
+/**
+ * Anti-alias safety margin (px) added to the feather radius when expanding a
+ * fragment's crop bbox. Guards the soft edge's outermost falloff row
+ * from being clipped by the crop window.
+ */
+export const AA_MARGIN = 1;

@@ -19,7 +19,8 @@
 
 import { Frame, Layer, VectorMask, BitmapMask } from '@opengpex/editor/core/types/models';
 import { LocalShape, LocalPolygon, LocalRect, Dimensions } from '@opengpex/editor/core/types/primitives';
-import type { FragmentResult } from './services/fragment';
+import type { BakeToAssetOptions, BakeToAssetResult, BuildPhysicalPatchOptions } from './services/baking';
+import type { CompositedImage } from '../engine/types';
 
 /**
  * LayerService: Layer domain model service (Domain: Layer)
@@ -51,13 +52,34 @@ export interface LayerService {
   getNewLayerName: (layers: Array<{ name: string }>, baseName?: string) => string;
   sortLayers: (layers: Layer[]) => Layer[];
   /** Unified fragment entry point — logical first, vectorMask fallback */
-  fragmentToNewLayer: (frame: Frame, layer: Layer, options?: { feather?: number; mode?: 'copy' | 'cut' }) => Promise<FragmentResult | null>;
+  /** Returns the fragment layer plus, in cut mode, the fully-formed hole VectorMask to append to the source layer. */
+  clipToLogicalLayer: (frame: Frame, layer: Layer, options?: { feather?: number; mode?: 'copy' | 'cut' }) => Promise<{ newLayer: Layer; holeMask?: VectorMask } | null>;
   /** Physical fragment: always produces a baked PNG blob (needed for clipboard external paste) */
-  fragmentToNewLayerPhysical: (frame: Frame, layer: Layer) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
+  clipToPhysicalLayer: (frame: Frame, layer: Layer) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
   /** Resamples layer to a new resolution: uniform scale preserves the non-destructive structure (zero-copy shared src, visibleShape offset, vector/bitmap masks scaled geometrically); non-uniform scale flattens (bakes) the layer. */
   resampleLayer: (frame: Frame, layer: Layer, scaleX: number, scaleY: number) => Promise<{ newUrl: string, newAssetId: string, patch: Partial<Layer> } | null>;
   /** Applies a fragment to an existing layer (e.g. Exchange layer) */
-  fragmentToExistLayer: (frame: Frame, sourceLayer: Layer, targetLayer: Layer, selection: LocalShape | LocalPolygon) => { updatedLayer: Layer, localShape: LocalShape } | null;
+  clipToExistLayer: (frame: Frame, sourceLayer: Layer, targetLayer: Layer, selection: LocalShape | LocalPolygon) => { updatedLayer: Layer, localShape: LocalShape } | null;
+  /**
+   * Physical-bake family (services/baking.ts): composite the participants
+   * through the single WebGPU RenderGraph, register the result as an asset,
+   * and warm the decoded bitmap BEFORE the caller's state update. The one
+   * pipeline every bake site shares (whole-layer merges, peel commit,
+   * fragment transform bake).
+   */
+  bakeToAsset: (frame: Frame, participants: Layer[], opts?: BakeToAssetOptions) => Promise<BakeToAssetResult>;
+  /**
+   * Physical-bake product-record conventions: pose reset to factory values,
+   * full-bounds rect crop release, grade chain stripped, plus the caller's
+   * record specifics (snapHalf center, preserved flip, snap-to-birth anchor).
+   */
+  bakedLayerPatch: (bounds: { x: number; y: number; w: number; h: number }, opts?: BuildPhysicalPatchOptions) => Partial<Layer>;
+  /**
+   * Rebuilds a baked composite's contour from its own pixel alpha and
+   * serialises it to pathData (product-local space). Failure-safe: null on
+   * any decode/trace failure — callers keep the full-bounds rect.
+   */
+  traceAlphaOutline: (composited: CompositedImage) => Promise<string | null>;
   /** Creates a layer from an external image Blob (handles asset registration and position calculation) */
   createLayerFromBlob: (blob: Blob, frame: Frame, screenPoint?: { x: number, y: number }) => Promise<Layer>;
   getBlank: () => Partial<Layer>;

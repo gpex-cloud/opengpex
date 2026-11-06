@@ -22,32 +22,6 @@
 import { EditorContextValue, EditorCommand, Layer } from '@opengpex/editor/core/types';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
-// ─── Shared composite helper ────────────────────────────────────────────────
-/**
- * compositeLayersToAsset — Delegates to `pixels.render.compositeLayers()` to
- * compute the union shape and composite, then registers the result as an asset.
- * Returns the asset reference and the composite's bounds (world-space, corner Rect).
- */
-async function compositeLayersToAsset(
-  layers: Layer[],
-  ctx: Pick<EditorContextValue, 'pixels' | 'assets' | 'activeFrame'>,
-) {
-  const { pixels, assets, activeFrame } = ctx;
-  if (!activeFrame) throw new Error('No active frame');
-
-  const composited = await pixels.render.compositeLayers(layers, activeFrame);
-
-  const asset = await assets.storeBundle(composited);
-  if (!asset.assetId) throw new Error('Composite failed');
-
-  // Ensure bitmap is decoded into SourceBitmapCache before state update.
-  // storeBundle() registers the asset (onRegistered hook warms both caches);
-  // loadBitmap is cache-first so this is instant, no network.
-  await pixels.image.loadBitmap(asset.url);
-
-  return { asset, bounds: composited.bounds };
-}
-
 /**
  * LayerMergeCommands: Advanced layer merge commands.
  *
@@ -88,14 +62,13 @@ export const LayerMergeCommands = {
 
 
       try {
-        const { asset: assetResult, bounds } = await compositeLayersToAsset(
-          [targetLayer, activeLayer], ctx,
-        );
+        // Shared bake primitive (services/baking.ts): composite → register → warm.
+        const bake = await layers.bakeToAsset(activeFrame, [targetLayer, activeLayer]);
 
         layers.updateLayer(activeFrame.id, (tx) => {
           tx.edit(targetLayer.id)
-            .setAsset(assetResult)
-            .resetWithBounds(bounds.w, bounds.h, bounds.x + bounds.w / 2, bounds.y + bounds.h / 2);
+            .setAsset({ assetId: bake.assetId, url: bake.url })
+            .resetWithBounds(bake.bounds.w, bake.bounds.h, bake.bounds.x + bake.bounds.w / 2, bake.bounds.y + bake.bounds.h / 2);
         });
 
         // Type inference after merging:
@@ -149,14 +122,13 @@ export const LayerMergeCommands = {
       const items = visibleLayers.slice(1);
 
       try {
-        const { asset: assetResult, bounds } = await compositeLayersToAsset(
-          visibleLayers, ctx,
-        );
+        // Shared bake primitive (services/baking.ts): composite → register → warm.
+        const bake = await layers.bakeToAsset(activeFrame, visibleLayers);
 
         layers.updateLayer(activeFrame.id, (tx) => {
           tx.edit(targetLayer.id)
-            .setAsset(assetResult)
-            .resetWithBounds(bounds.w, bounds.h, bounds.x + bounds.w / 2, bounds.y + bounds.h / 2);
+            .setAsset({ assetId: bake.assetId, url: bake.url })
+            .resetWithBounds(bake.bounds.w, bake.bounds.h, bake.bounds.x + bake.bounds.w / 2, bake.bounds.y + bake.bounds.h / 2);
         });
 
         // Type inference after merging (consistent with mergeDown):
@@ -212,14 +184,13 @@ export const LayerMergeCommands = {
       if (!layer) return;
 
       try {
-        const { asset: assetResult, bounds } = await compositeLayersToAsset(
-          [layer], ctx,
-        );
+        // Shared bake primitive (services/baking.ts): composite → register → warm.
+        const bake = await layers.bakeToAsset(activeFrame, [layer]);
 
         layers.updateLayer(activeFrame.id, (tx) => {
           tx.edit(layer.id)
-            .setAsset(assetResult)
-            .resetWithBounds(bounds.w, bounds.h, bounds.x + bounds.w / 2, bounds.y + bounds.h / 2);
+            .setAsset({ assetId: bake.assetId, url: bake.url })
+            .resetWithBounds(bake.bounds.w, bake.bounds.h, bake.bounds.x + bake.bounds.w / 2, bake.bounds.y + bake.bounds.h / 2);
         });
 
         // After rasterization, the layer becomes a pure bitmap — all non-destructive

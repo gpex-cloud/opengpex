@@ -44,7 +44,7 @@ async function copyCropBoxToClipboard(
   const latestLayer = actions.fast.latestLayer(activeFrame.id, activeLayer.id) || activeLayer;
 
   // 1. Physical blob: always needed for external clipboard (WeChat, Word, etc.)
-  const physicalResult = await ctx.layers.fragmentToNewLayerPhysical(activeFrame, latestLayer);
+  const physicalResult = await ctx.layers.clipToPhysicalLayer(activeFrame, latestLayer);
   if (!physicalResult) {
     actions.setInteraction({
       hud: { message: 'Area is empty', type: 'error' }
@@ -54,7 +54,7 @@ async function copyCropBoxToClipboard(
 
   // 2. Preferred layer via unified strategy: lossless logical layer when possible,
   //    falls back to physical. Also provides sourceHole for correct cut hole.
-  const preferredResult = await ctx.layers.fragmentToNewLayer(activeFrame, latestLayer, { mode });
+  const preferredResult = await ctx.layers.clipToLogicalLayer(activeFrame, latestLayer, { mode });
 
   // 3. Composite clipboard write: external software reads physicalResult.url (Blob),
   //    internal Paste command reads Metadata.layer (preferred strategy result)
@@ -66,7 +66,6 @@ async function copyCropBoxToClipboard(
   return {
     ...physicalResult,
     newLayer: preferredResult ? preferredResult.newLayer : physicalResult.newLayer,
-    invertedRegular: preferredResult?.invertedRegular ?? false,
     holeMask: preferredResult?.holeMask,
   };
 }
@@ -149,12 +148,15 @@ export const LayerClipCommands = {
             const result = await copyCropBoxToClipboard(ctx, 'cut');
             if (!result) return;
 
-            // Punch hole using pre-computed holeMask descriptor
+            // Punch the hole into the source layer: the service hands back a
+            // fully-formed VectorMask, appended verbatim (same write shape the
+            // peel session uses for its hole).
             if (result.holeMask) {
-              const { shape, inverted, assocLayerId, feather: maskFeather, maskId } = result.holeMask;
+              const holeMask = result.holeMask;
               ctx.layers.updateLayer(activeFrame.id, tx => {
-                tx.edit(latestLayer.id)
-                  .applyMask(shape, { maskId, assocLayerId, inverted, feather: maskFeather });
+                tx.edit(latestLayer.id).patch({
+                  vectorMasks: [...(latestLayer.vectorMasks || []), holeMask],
+                });
               });
             }
 

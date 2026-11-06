@@ -34,7 +34,7 @@ import type {
   AdjustmentState,
 } from '@opengpex/editor/core/types/models';
 import { MAX_ADJUSTMENT_MASKS_PER_LAYER } from '@opengpex/editor/core/types/models';
-import { resolveEdgeFeatherRoute, buildFeatherRepadPatch } from '@opengpex/editor/core/layer/services/fragment';
+
 import { LayerFactory } from '@opengpex/editor/core/layer/factory';
 import * as P from './protocols';
 import { resolveEditableTail, projectSelectionToLayer, toolCategory } from './utils-hotTail';
@@ -238,11 +238,11 @@ function insertPointSorted(
  * already at 0), so callers can spread it into their patch unconditionally.
  */
 function clearEdgeFeatherPatch(layer: Layer): Partial<Layer> | undefined {
-  const route = resolveEdgeFeatherRoute(layer);
+  const route = LayerFactory.resolveLayerEdgeType(layer);
   if (route === 'geometry') {
     // Re-pad to 0: restores the tight rect, bounding, pose and birthCenter in
     // one consistent patch; returns undefined when already unfeathered.
-    return buildFeatherRepadPatch(layer, 0) ?? undefined;
+    return LayerFactory.patchEdgeFeatherRepad(layer, 0) ?? undefined;
   }
   if (route === 'vmask') {
     if (!layer.vectorMasks?.some((m) => m.enabled !== false && (m.feather ?? 0) !== 0)) {
@@ -702,7 +702,7 @@ export const ADJUSTMENT_COMMANDS = {
 
       // ── Fragment side (routed carrier, baselined on the freshest draft) ──
       const latest = actions.fast.latestLayer(frameId, activeLayer.id) ?? activeLayer;
-      const route = resolveEdgeFeatherRoute(latest);
+      const route = LayerFactory.resolveLayerEdgeType(latest);
 
       // Skip when the quantized value is already parked (a slow drag between
       // integer steps produces zero drafts — the merge stays byte-stable).
@@ -714,7 +714,7 @@ export const ADJUSTMENT_COMMANDS = {
       if (parkedFeather === radius) return;
 
       if (route === 'geometry') {
-        const patch = buildFeatherRepadPatch(latest, radius);
+        const patch = LayerFactory.patchEdgeFeatherRepad(latest, radius);
         if (patch) actions.fast.overrideLayer(frameId, activeLayer.id, patch);
       } else if (route === 'vmask') {
         const masks = (latest.vectorMasks ?? []).map(
@@ -768,9 +768,9 @@ export const ADJUSTMENT_COMMANDS = {
   // ─── Edge Feather (落层后边缘羽化) ───────────────────────────────────────────
   //
   // One slider, three edge carriers — the write is ROUTED by the layer's
-  // structure (`resolveEdgeFeatherRoute`), because a "fragment" carries its
+  // structure (`LayerFactory.resolveLayerEdgeType`), because a "fragment" carries its
   // edge in different places depending on how it was produced:
-  //   • logical fragment → visibleShape re-pad (`buildFeatherRepadPatch`,
+  //   • logical fragment → visibleShape re-pad (`LayerFactory.patchEdgeFeatherRepad`,
   //     lossless: the hard-cut-away pixels are still in the original asset);
   //   • vector-mask layer → every enabled mask's `feather` field (same
   //     semantics as selection-time feather);
@@ -806,9 +806,9 @@ export const ADJUSTMENT_COMMANDS = {
       const radius = Math.max(0, payload.radius);
 
       if (!payload.holeOnly) {
-        const route = resolveEdgeFeatherRoute(activeLayer);
+        const route = LayerFactory.resolveLayerEdgeType(activeLayer);
         if (route === 'geometry') {
-          const patch = buildFeatherRepadPatch(activeLayer, radius);
+          const patch = LayerFactory.patchEdgeFeatherRepad(activeLayer, radius);
           if (patch) {
             actions.updateLayer(activeFrame.id, activeLayer.id, patch);
           }

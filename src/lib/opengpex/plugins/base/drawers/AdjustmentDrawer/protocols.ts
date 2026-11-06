@@ -260,7 +260,7 @@ export const CMD_COMMIT_EDGE_FEATHER = 'cmd.commit_edge_feather';
  * Route an Edge Feather edit to the layer's actual edge carrier. Payload:
  * `{ radius: number; cascade?: boolean }`. Non-undoable — the slider gesture's
  * `CMD_BEGIN_ADJUSTMENTS_EDIT` checkpoint is what makes the whole drag one undo
- * step. Routing (see `resolveEdgeFeatherRoute`): logical fragment → visibleShape
+ * step. Routing (see `LayerFactory.resolveLayerEdgeType`): logical fragment → visibleShape
  * re-pad; vector-mask layer → mask `feather` fields; otherwise →
  * `adjustments.edgeFeather` (the `alphaFeather` filter).
  */

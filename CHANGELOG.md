@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.48
+
+- Peel: fragments peeled from a layer now rebuild their outline from the actual pixels (alpha tracing) at the moment they are committed — the fragment layer records its true cut shape, and it survives later transforms; a bounding box is only used when the trace finds nothing
+- Refocus: peeling a region and pressing Refocus now selects the fragment's actual outline and re-arms the tool it was cut with (including rotated or scaled fragments, and ellipse/lasso/wand/sam cuts) instead of a bounding rectangle with the lasso tool
+- Workspace: fixed undoing a fragment peel commit — the first undo previously landed on a stateless intermediate (fragment visible, no confirm/cancel buttons) and needed a second undo to reach the live peel session; undoing now rewinds the commit in one step straight back to the undecided peel
+- Layer Service: the layer service internals were reorganized — clip/cut fragment creation, size changes and baking now live in dedicated service families (clipping/resizing/baking), and every layer now explicitly declares whether it owns its pixels or shares a source (this drives edge-feather routing and the new outline records)
+
 ## 2.0.47
 
 - Markers: the marker frame now supports resizing from any point on all four edges, proportional scaling from the corner handles (hold Shift for free resizing), an Esc button that exits the tool, and a displacement/angle readout that follows moves and rotations in every mode

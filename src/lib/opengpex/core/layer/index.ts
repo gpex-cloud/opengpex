@@ -20,8 +20,9 @@
 import { GeometryService, PixelService, AssetService, LayerService, LayerUpdateTx, LayerEditor, asLocalShape, EditorActions, EditorData, Layer, VectorMask, BitmapMask, GamutId } from '@opengpex/editor/core/types';
 import { sniffPngGamut } from '@opengpex/editor/core/files/utils';
 import { LayerFactory } from './factory';
-import { createFragmentOperations } from './services/fragment';
-import { createResampleOperations } from './services/resample';
+import { createFragmentOperations } from './services/clipping';
+import { createResampleOperations } from './services/resizing';
+import { createBakeOperations } from './services/baking';
 
 export function createLayerService(
   geometry: GeometryService,
@@ -33,6 +34,7 @@ export function createLayerService(
   // ── Delegate fragment and resample operations to dedicated modules ──
   const fragmentOps = createFragmentOperations(geometry, pixels, assets);
   const resampleOps = createResampleOperations(geometry, pixels, assets);
+  const bakeOps = createBakeOperations(geometry, pixels, assets);
 
   return {
     ...LayerFactory,
@@ -110,16 +112,22 @@ export function createLayerService(
               return editor;
             },
             resetWithBounds: (w, h, cx, cy) => {
-              const { rotation, flip, opacity, vectorMasks } = LayerFactory.getNewLayer();
+              const { flip, opacity, vectorMasks } = LayerFactory.getNewLayer();
               patches[layerId] = {
                 ...patches[layerId],
-                cx, cy,
-                bounding: { w, h },
-                visibleShape: asLocalShape({ x: 0, y: 0, w, h }),
-                scale: 1, rotation, flip, opacity, vectorMasks,
-                // A reset layer holds freshly baked pixels: the grade chain is
-                // already burnt in, so it must not be applied a second time.
-                adjustMasks: undefined,
+                // Shared physical-record core (services/baking.ts): pose reset,
+                // full-bounds rect crop release, grade chain stripped. The
+                // patch is rect-driven (it derives the center from the rect),
+                // so the incoming center is reconstructed into a bounds rect
+                // — values come out identical (no rounding on this path).
+                ...bakeOps.bakedLayerPatch({ x: cx - w / 2, y: cy - h / 2, w, h }),
+                // A reset layer holds freshly baked pixels: pose extras that
+                // the shared core deliberately leaves to the caller.
+                flip, opacity, vectorMasks,
+                // The physical-layer declaration (see services/baking.ts): a
+                // reset layer OWNS its pixels. Existing metadata keys
+                // (lineage pointers) survive the declaration.
+                metadata: { ...(layer?.metadata ?? {}), physicalPixels: true },
               };
               return editor;
             },
@@ -265,13 +273,18 @@ export function createLayerService(
       return LayerFactory.getTriplet(layer, frame.layers.order.map(id => frame.layers.byId[id]));
     },
 
-    // ── Fragment operations (delegated to fragment.ts) ──────────────────────────
-    fragmentToNewLayer: fragmentOps.fragmentToNewLayer,
-    fragmentToNewLayerPhysical: fragmentOps.fragmentToNewLayerPhysical,
-    fragmentToExistLayer: fragmentOps.fragmentToExistLayer,
+    // ── Clip operations (delegated to clipping.ts) ──────────────────────────
+    clipToLogicalLayer: fragmentOps.clipToLogicalLayer,
+    clipToPhysicalLayer: fragmentOps.clipToPhysicalLayer,
+    clipToExistLayer: fragmentOps.clipToExistLayer,
 
-    // ── Resample operations (delegated to resample.ts) ──────────────────────────
+    // ── Resample operations (delegated to resizing.ts) ──────────────────────────
     resampleLayer: resampleOps.resampleLayer,
+
+    // ── Bake operations (delegated to baking.ts) ──────────────────────────────────
+    bakeToAsset: bakeOps.bakeToAsset,
+    bakedLayerPatch: bakeOps.bakedLayerPatch,
+    traceAlphaOutline: bakeOps.traceAlphaOutline,
 
     createLayerFromBlob: async (blob, frame, screenPoint) => {
       const bmp = await createImageBitmap(blob);

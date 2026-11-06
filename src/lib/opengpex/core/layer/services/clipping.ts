@@ -19,266 +19,24 @@
 
 import {
   GeometryService, PixelService, AssetService,
-  Frame, Layer, LocalShape, LocalPolygon,
+  Frame, Layer, VectorMask, LocalShape, LocalPolygon,
   asLocalShape, asLocalRect, isPolygon
 } from '@opengpex/editor/core/types';
 import { polygonToShape, translatePolygon } from '@opengpex/editor/core/geometry/operators/polygon';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
-import { isBoundingRing, point2dToLocalShape, shapeToPoint2D, ringsToPathData } from '@opengpex/editor/core/geometry/operators/point2d';
-import { computeFragmentCenter, getOrientationMatrix } from '@opengpex/editor/core/geometry/operators/transform';
+import { isBoundingRing, point2dToLocalShape } from '@opengpex/editor/core/geometry/operators/point2d';
 import { trimTransparentMargins } from '@opengpex/editor/core/engine/utils/pixel-utils';
-import { LayerFactory } from '../factory';
+import { shapeToPathData } from '@opengpex/editor/core/geometry/operators/shape';
+import { AA_MARGIN, LayerFactory } from '../factory';
 
-/**
- * Anti-alias safety margin (px) added to the feather radius when expanding a
- * fragment's crop bbox. Guards the soft edge's outermost falloff row
- * from being clipped by the crop window.
- */
-const AA_MARGIN = 1;
-
-/**
- * shapeToAbsPathData — Serialise any LocalShape into ABSOLUTE-coordinate SVG
- * pathData (layer-local px). Path shapes return their pathData verbatim; rect /
- * circle shapes decompose into rings via `shapeToPoint2D` (which already emits
- * absolute coords from `shape.rect`) and serialise via `ringsToPathData`. Used to
- * turn a feathered fragment's TIGHT intersection geometry into the path that the
- * implicit shape mask feathers around, inset inside the padded crop window.
- */
-/**
- * Sum of the `edgeFeather` of every enabled adjustment mask's basic arm —
- * the bitmap route's effective edge feather (the alphaFeather filters are
- * post-chain and additive).
- */
-function totalEdgeFeather(layer: Layer): number {
-  let total = 0;
-  for (const m of layer.adjustMasks ?? []) {
-    if (m.enabled) total += m.grade.adjustments?.edgeFeather ?? 0;
-  }
-  return total;
-}
-
-function shapeToAbsPathData(shape: LocalShape): string {
-  const pd = (shape as { pathData?: string }).pathData;
-  if (shape.type === 'path' && pd) return pd;
-  return ringsToPathData(shapeToPoint2D(shape));
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Edge Feather routing (落层后边缘羽化 — single UI slider, per-shape dispatch)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Which physical carrier holds the edge of this layer — i.e. where an
- * "Edge Feather" edit must be routed. The three shapes a "cut-out fragment"
- * can take carry their edge in DIFFERENT places (see `fragmentToNewLayer`):
- *
- *   - `'geometry'` — LOGICAL fragment: no (enabled) vectorMasks, and a
- *     `visibleShape` that actually clips the original asset (a `path` with
- *     `pathData`, a carried `featherPx`, or a rect strictly inside the content
- *     box). The edge lives in the geometry; feathering is a pure data transform
- *     (`featherPx` + symmetric pad, see `buildFeatherRepadPatch`) — lossless,
- *     because the hard-cut-away pixels are still in the original asset.
- *   - `'vmask'`    — DEGRADED fragment / any layer with explicit vectorMasks:
- *     the edge is the mask boundary; feather = write the masks' `feather` field
- *     (same semantics as selection-time feather, missing only the edit entry).
- *   - `'bitmap'`   — everything else (baked fragments, AI-cutout imports, plain
- *     photo layers): the edge is the asset's own bitmap alpha; feather = the
- *     non-destructive `alphaFeather` filter via `adjustments.edgeFeather`.
- *
- * A full-bounds rect visibleShape clips nothing, so it counts as `'bitmap'` —
- * that is exactly the shape `fragmentToNewLayerPhysical` gives a baked fragment.
- */
-export function resolveEdgeFeatherRoute(layer: Layer): 'geometry' | 'vmask' | 'bitmap' {
-  if (layer.vectorMasks?.some((m) => m.enabled !== false)) return 'vmask';
-  const vs = layer.visibleShape;
-  if (!vs) return 'bitmap';
-  const typed = vs as { featherPx?: number; pathData?: string };
-  if (vs.type === 'path' && typed.pathData) return 'geometry';
-  if ((typed.featherPx ?? 0) > 0) return 'geometry';
-  if (vs.type === 'rect') {
-    const r = vs.rect;
-    const b = layer.bounding;
-    const fullBounds = r.x <= 0 && r.y <= 0 && r.w >= b.w && r.h >= b.h;
-    return fullBounds ? 'bitmap' : 'geometry';
-  }
-  return 'bitmap';
-}
-
-/**
- * Read the CURRENT effective edge-feather radius off a layer, honouring the
- * route — the UI slider displays this (the value does not live in
- * `adjustments.edgeFeather` for the geometry/vmask routes).
- */
-export function readEdgeFeather(layer: Layer): number {
-  switch (resolveEdgeFeatherRoute(layer)) {
-    case 'geometry':
-      return ((layer.visibleShape as { featherPx?: number } | undefined)?.featherPx ?? 0);
-    case 'vmask': {
-      const m = layer.vectorMasks?.find((k) => k.enabled !== false);
-      return m?.feather ?? 0;
-    }
-    default:
-      return totalEdgeFeather(layer);
-  }
-}
-
-/**
- * buildFeatherRepadPatch — the route-`'geometry'` feather edit as a PURE data
- * transform. Returns the full layer patch to apply (or `null` for a no-op).
- *
- * The fragment's visibleShape is the TIGHT cut geometry (`pathData`, in source-
- * asset pixel coords) inset inside a symmetrically PADDED rect (`rect`, carrying
- * `featherPx`); SceneAssembler renders it as an implicit feathered vmask
- * (`buildVectorMaskDesc` crops by `rect` and normalises the path by the rect
- * origin — the invariant that `bounding` == padded-rect size is load-bearing).
- * Re-feathering therefore: insets the current rect by the OLD pad to recover the
- * tight geometry, re-outsets by the NEW pad (`ceil(r + AA_MARGIN)`, the same
- * rule `fragmentToNewLayer`'s feathered branch uses), and rewrites
- * `visibleShape` + `bounding` as one consistent patch. `pathData` is carried
- * verbatim (still the same tight geometry, still source-asset coords); a hard
- * rect fragment (pad was 0, no pathData) is serialised to pathData here — the
- * exact data shape a feathered cut of the same geometry would have produced.
- *
- * POSE: symmetric padding keeps the padded rect's local centre (= the tight
- * region's centre) fixed, and the layer's (cx, cy) IS that centre's world
- * anchor (`computeFragmentCenter` inverted/re-applied around the rect origin
- * change below) — so the pose is re-derived, not left stale, and stays correct
- * under rotation/flip.
- */
-export function buildFeatherRepadPatch(
-  layer: Pick<Layer, 'bounding' | 'visibleShape' | 'cx' | 'cy' | 'rotation' | 'flip'>,
-  radius: number,
-): {
-  visibleShape: LocalShape;
-  bounding: { w: number; h: number };
-  cx: number;
-  cy: number;
-  birthCenter: { cx: number; cy: number };
-} | null {
-  const vs = layer.visibleShape as {
-    type: string;
-    rect: { x: number; y: number; w: number; h: number };
-    antiAliased?: boolean;
-    pathData?: string;
-    featherPx?: number;
-  } | undefined;
-  if (!vs) return null;
-
-  const curFeather = vs.featherPx ?? 0;
-  const pad0 = curFeather > 0 ? Math.ceil(curFeather + AA_MARGIN) : 0;
-  const pad1 = radius > 0 ? Math.ceil(radius + AA_MARGIN) : 0;
-  if (curFeather === radius && pad0 === pad1) return null;
-
-  // Tight geometry = current rect inset by the current symmetric pad.
-  const tight = {
-    x: vs.rect.x + pad0,
-    y: vs.rect.y + pad0,
-    w: vs.rect.w - 2 * pad0,
-    h: vs.rect.h - 2 * pad0,
-  };
-  const paddedRect = asLocalRect({
-    x: tight.x - pad1,
-    y: tight.y - pad1,
-    w: tight.w + 2 * pad1,
-    h: tight.h + 2 * pad1,
-  });
-
-  const pathData = vs.type === 'path' && vs.pathData ? vs.pathData : shapeToAbsPathData(vs as unknown as LocalShape);
-  const visibleShape = {
-    type: 'path',
-    rect: paddedRect,
-    antiAliased: vs.antiAliased ?? true,
-    pathData,
-    featherPx: radius,
-    __brand: 'local',
-  } as unknown as LocalShape;
-
-  // Re-derive the pose: recover the invariant tight-centre world anchor from the
-  // current pose (computeFragmentCenter inverted), then re-apply for the new
-  // rect origin — equivalent to computeFragmentCenter(center, rect1) with the
-  // SAME centre the fragment was born with.
-  const O = getOrientationMatrix(layer.rotation, layer.flip);
-  const rotatedOrigin0 = O.apply({ x: vs.rect.x, y: vs.rect.y });
-  const worldCenter = { x: layer.cx + rotatedOrigin0.x, y: layer.cy + rotatedOrigin0.y };
-  const pose = computeFragmentCenter(worldCenter, { x: paddedRect.x, y: paddedRect.y }, layer.rotation, layer.flip);
-
-  return {
-    visibleShape,
-    bounding: { w: paddedRect.w, h: paddedRect.h },
-    cx: pose.x,
-    cy: pose.y,
-    // birthCenter MUST track the new pose: snap-to-birth (snapping.ts) compares
-    // the layer's cx/cy against the stored birth centre — a stale one would snap
-    // the re-feathered fragment to the pre-re-pad position, offsetting the
-    // content by exactly the pad delta (real-device finding 2026-10-12).
-    birthCenter: { cx: pose.x, cy: pose.y },
-  };
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * FragmentResult: Unified result from all fragment operations.
- *
- * Provides enough information for callers to:
- * - Add the fragment layer (newLayer)
- * - Punch a hole in the source layer for cut operations (holeMask)
- */
-export interface FragmentResult {
-  newLayer: Layer;
-  localShape: LocalShape;
-  invertedRegular: boolean;
-  /** Pre-computed hole mask for cut mode — callers apply this to the source layer */
-  holeMask?: { shape: LocalShape; inverted: boolean; feather: number; maskId: string; assocLayerId: string };
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Shape Resolution
 // ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * resolveLocalShape: Resolve the selection box into a LocalShape in the target layer's local coordinates.
- *
- * Special handling for "inverted regular" polygons:
- *   When a rect/ellipse is inverted (Cmd+Shift+I), it becomes a polygon with
- *   [canvasBoundaryRing, originalShapeRing]. If we naively convert this to a
- *   `type:'path'` shape, the path renderer applies anti-aliasing at the inner
- *   ring boundary — causing visible seams against the original pixel-perfect
- *   rect/ellipse mask from a prior cut/copy.
- *
- *   Detection: 2-ring polygon where ring[0] ≈ canvas boundary and ring[1] is
- *   recognizable as a rect (4 axis-aligned points) or ellipse (64-point fit).
- *   When detected, we extract the inner ring as a proper LocalShape and signal
- *   `invertedRegular: true` so callers can flip their mask inversion flag —
- *   achieving the same visual result with pixel-perfect boundaries.
- */
-export function resolveLocalShape(
-  box: LocalPolygon,
-  frame: Frame,
-  layer: Layer,
-  geometry: GeometryService
-): { shape: LocalShape; invertedRegular: boolean } {
-  const layerPoly = geometry.polygon.frameLocalToLayerLocal(box, frame, layer);
-
-  // Detect "inverted regular" pattern: [canvasBoundary, regularShape]
-  if (layerPoly.rings.length === 2) {
-    const outerRing = layerPoly.rings[0];
-    const innerRing = layerPoly.rings[1];
-    const layerW = layer.bounding.w;
-    const layerH = layer.bounding.h;
-
-    if (isBoundingRing(outerRing, layerW, layerH)) {
-      const innerShape = point2dToLocalShape([innerRing], box.antiAliased ?? true);
-      if (innerShape) {
-        return { shape: innerShape, invertedRegular: true };
-      }
-    }
-  }
-
-  return { shape: polygonToShape(layerPoly), invertedRegular: false };
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Fragment Operations Factory
@@ -294,9 +52,9 @@ export function createFragmentOperations(
   assets: AssetService
 ) {
 
-  // ─── fragmentToNewLayer (Unified Entry Point) ────────────────────────────────
+  // ─── clipToLogicalLayer (Unified Entry Point) ────────────────────────────────
   /**
-   * fragmentToNewLayer: Unified entry point for all fragment operations.
+   * clipToLogicalLayer: Unified entry point for all fragment operations.
    *
    * Simple two-path routing:
    *   1. Try logical (geometric crop) — zero overhead, lossless, precise bounding.
@@ -307,16 +65,39 @@ export function createFragmentOperations(
    * - Copy: just add result.newLayer
    * - Cut: add result.newLayer + punch hole using result.sourceHole
    */
-  async function fragmentToNewLayer(
+  async function clipToLogicalLayer(
     frame: Frame,
     layer: Layer,
     options?: { feather?: number; mode?: 'copy' | 'cut' }
-  ): Promise<FragmentResult | null> {
+  ): Promise<{ newLayer: Layer; holeMask?: VectorMask } | null> {
     const box = getClipBox(frame);
     if (!box) return null;
 
     const feather = options?.feather ?? 0;
-    const { shape: localShape, invertedRegular } = resolveLocalShape(box, frame, layer, geometry);
+
+    // ── Resolve the cut shape: selection (frame coords) → layer-local shape ──
+    // Special handling for "inverted regular" polygons: when a rect/ellipse is
+    // inverted (Cmd+Shift+I), it becomes a polygon with
+    // [canvasBoundaryRing, originalShapeRing]. Naively converting this to a
+    // `type:'path'` shape makes the path renderer anti-alias the inner ring
+    // boundary — a visible seam against the pixel-perfect rect/ellipse mask
+    // from the prior cut. Detection: 2-ring polygon where ring[0] ≈ layer
+    // boundary and ring[1] is recognizable as a rect (4 axis-aligned points)
+    // or ellipse (64-point fit). When detected, the inner ring becomes the cut
+    // shape and `invertedRegular` flips the mask direction — same visual
+    // region, pixel-perfect boundary.
+    const layerPoly = geometry.polygon.frameLocalToLayerLocal(box, frame, layer);
+    let detectedInner: LocalShape | undefined;
+    if (layerPoly.rings.length === 2) {
+      const outerRing = layerPoly.rings[0];
+      const innerRing = layerPoly.rings[1];
+      if (isBoundingRing(outerRing, layer.bounding.w, layer.bounding.h)) {
+        detectedInner = point2dToLocalShape([innerRing], box.antiAliased ?? true) ?? undefined;
+      }
+    }
+    const { shape: localShape, invertedRegular } = detectedInner
+      ? { shape: detectedInner, invertedRegular: true }
+      : { shape: polygonToShape(layerPoly), invertedRegular: false };
 
     let newLayer: Layer;
 
@@ -361,7 +142,7 @@ export function createFragmentOperations(
         // implicit (feathered) vmask; symmetric padding keeps the tight region's
         // world centre fixed, so `intersection.center` is still the anchor and the
         // visibleOffset is simply the padded rect's origin.
-        const tightPath = shapeToAbsPathData(intersection.visibleShape);
+        const tightPath = shapeToPathData(intersection.visibleShape);
         const paddedRect = asLocalRect({ x: v.x - pad, y: v.y - pad, w: v.w + 2 * pad, h: v.h + 2 * pad });
         newLayer.bounding = { w: paddedRect.w, h: paddedRect.h };
         newLayer.visibleShape = {
@@ -418,9 +199,7 @@ export function createFragmentOperations(
 
     }
 
-    const baseResult: FragmentResult = { newLayer, localShape, invertedRegular };
-
-    // ═══ Cut mode: generate hole mask descriptor + bidirectional pointers ═══
+    // ═══ Cut mode: generate the hole mask + bidirectional pointers ═══
     if (options?.mode === 'cut') {
       const maskId = `mask-hole-${newLayer.id}`;
 
@@ -437,19 +216,21 @@ export function createFragmentOperations(
         ? { ...intersection.visibleShape }
         : localShape;
 
-      baseResult.holeMask = {
-        shape: holeShape,
-        inverted: !invertedRegular,
-        feather,
+      // The hole is a fully-formed VectorMask (via the standard factory) —
+      // callers append it to the source layer's vectorMasks verbatim.
+      const holeMask = LayerFactory.getNewVectorMask(holeShape, {
         maskId,
         assocLayerId: newLayer.id,
-      };
+        inverted: !invertedRegular,
+        feather,
+      });
 
       newLayer.metadata = {
         ...newLayer.metadata,
         sourceLayerId: layer.id,
         assocMaskId: maskId,
       };
+      return { newLayer, holeMask };
     }
 
     // ═══ Copy mode (or any non-cut): write sourceLayerId for lineage tracking ═══
@@ -460,16 +241,16 @@ export function createFragmentOperations(
       };
     }
 
-    return baseResult;
+    return { newLayer };
   }
 
-  // ─── fragmentToNewLayerPhysical ──────────────────────────────────────────────
+  // ─── clipToPhysicalLayer ──────────────────────────────────────────────
   /**
    * Physical path: Composites the layer content within the selection, trims
    * transparent pixels, and registers the result as a new asset.
    * Used exclusively for clipboard export (always needs a real PNG blob).
    */
-  async function fragmentToNewLayerPhysical(
+  async function clipToPhysicalLayer(
     frame: Frame,
     layer: Layer
   ): Promise<{ newLayer: Layer; localShape: LocalShape; url: string } | null> {
@@ -513,17 +294,20 @@ export function createFragmentOperations(
       rotation: 0,
       flip: { h: false, v: false },
       adjustMasks: undefined,
+      // Physical-layer declaration (see services/baking.ts): this export always
+      // bakes a fresh asset the layer owns.
+      metadata: { ...(layerData.metadata ?? {}), physicalPixels: true },
     });
 
     return { newLayer, localShape, url: assetUrl };
   }
 
-  // ─── fragmentToExistLayer ────────────────────────────────────────────────────
+  // ─── clipToExistLayer ────────────────────────────────────────────────────
   /**
    * Applies a fragment to an existing target layer (e.g. Exchange layer for peel).
    * Uses logical intersection to determine the visible portion.
    */
-  function fragmentToExistLayer(
+  function clipToExistLayer(
     frame: Frame,
     sourceLayer: Layer,
     targetLayer: Layer,
@@ -567,10 +351,10 @@ export function createFragmentOperations(
 
   return {
     /** Unified entry point for all fragment operations */
-    fragmentToNewLayer,
+    clipToLogicalLayer,
     /** Physical fragment: always produces a baked PNG blob (needed for clipboard) */
-    fragmentToNewLayerPhysical,
+    clipToPhysicalLayer,
     /** Fragment to existing layer (peel exchange) */
-    fragmentToExistLayer,
+    clipToExistLayer,
   };
 }

@@ -46,7 +46,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { AdjustmentState } from "@opengpex/editor/core/types/models";
-import { readEdgeFeather } from "@opengpex/editor/core/layer/services/fragment";
+import { LayerFactory } from "@opengpex/editor/core/layer/factory";
 import FancySvgSlider from "@opengpex/editor/widgets/FancySvgSlider";
 import type { AdjustmentDrawerCommandsMap } from "../commands.d";
 import { DEFAULT_ADJUSTMENTS_STATE } from "../protocols";
@@ -342,7 +342,7 @@ export function BasicPanel() {
       if (!activeLayer) return;
       gesture.begin();
       setEdgeFeatherCmd?.execute({
-        radius: readEdgeFeather(activeLayer),
+        radius: LayerFactory.getEdgeFeatherValue(activeLayer),
         holeOnly: true,
         hole: checked ? "match" : "clear",
       });
@@ -381,7 +381,7 @@ export function BasicPanel() {
         if (cascade) {
           // Checked drag (dual-write): fragment + hole parked on the fast track in
           // one dispatch — lockstep merge, no Redux/React storm. `fastDrag`
-          // keeps the thumb honest (readEdgeFeather reads the store, which only
+          // keeps the thumb honest (getEdgeFeatherValue reads the store, which only
           // updates at commit).
           if (fastUpdateEdgeFeatherCmd && commitEdgeFeatherCmd) {
             fastUpdateEdgeFeatherCmd.execute({ radius: value });
@@ -513,13 +513,13 @@ export function BasicPanel() {
             <AdjustmentSliderRow
               spec={spec}
               value={
-                // Fast-tracked drag value FIRST — readEdgeFeather/adjustments
+                // Fast-tracked drag value FIRST — getEdgeFeatherValue/adjustments
                 // read the STORE, which stays frozen until the gesture's single
                 // commit (the thumb would otherwise not move at all).
                 fastDrag?.key === spec.key
                   ? fastDrag.value
                   : spec.key === "edgeFeather" && activeLayer
-                    ? readEdgeFeather(activeLayer)
+                    ? LayerFactory.getEdgeFeatherValue(activeLayer)
                     : adjustments[spec.key] ?? identityFor(spec.key)
               }
               onDragStart={handleDragStart(spec.key)}

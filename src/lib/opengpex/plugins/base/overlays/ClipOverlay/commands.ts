@@ -221,7 +221,7 @@ export const PEEL_COMMANDS = {
         // Supports both regular (LocalShape) and irregular (LocalPolygon) selections.
         const box = getClipBox(activeFrame);
         if (!box) return; // defensive — should never happen during a real peel
-        const result = ctx.layers.fragmentToExistLayer(activeFrame, latestLayer, exchange, box);
+        const result = ctx.layers.clipToExistLayer(activeFrame, latestLayer, exchange, box);
         if (!result) return;
 
         const timestamp = Date.now();
@@ -388,7 +388,7 @@ export const PEEL_COMMANDS = {
     execute: (ctx: EditorContextValue): Promise<boolean> => {
       const { assets } = ctx;
       return assets.withSession(async (): Promise<boolean> => {
-        const { activeFrame, activeLayer, actions, pixels, layers } = ctx;
+        const { activeFrame, activeLayer, actions, layers } = ctx;
         if (!activeFrame) return false;
 
         // ─── Session gate ───
@@ -418,20 +418,21 @@ export const PEEL_COMMANDS = {
         // This is the verdict that wins the race: every settle call from
         // here until the record is deleted is void (the settle lock covers
         // the visibility gap until the write flushes into view).
+        //
+        // No history boundary of its own: this write must stay INSIDE the
+        // diff window the caller (settleExchange) opened before invoking
+        // this command. An internal SIGNAL_COMMIT here would record the
+        // 'peeled' → 'committing' intermediate as its own undo step, and
+        // undoing the commit would walk back through a state no UI can
+        // render (status 'committing' shows no confirm/cancel affordances).
+        // The caller's bracket spans the whole async bake window, so every
+        // write below lands inside one step by construction; this command
+        // has no other invocation site than settleExchange.
         const freshFrameForAdjudication = actions.fast.latestFrame(activeFrame.id) ?? activeFrame;
         actions.updateFrame(activeFrame.id, writePeelSession(freshFrameForAdjudication, {
           ...session,
           status: 'committing',
         }));
-
-        // Self-ledgered bracket (defense in depth): the promotion writes land
-        // after an ASYNC bake window. Left unbracketed they would fold into
-        // whatever unrelated boundary closes next (or entangle with writes
-        // landing in the same window), replaying the whole commit as a stray
-        // edit inside someone else's undo step. Opening the boundary before
-        // the awaits and closing it once the record deletion lands keeps the
-        // promotion as one isolated step.
-        ctx.actions.history.commitCheckpoint(activeFrame.id);
 
         try {
           // ─── Composite ONLY the peeled content: stamps (z-order bottom) →
@@ -452,13 +453,18 @@ export const PEEL_COMMANDS = {
           // through new masks on the promoted layer like on any layer.
           const participants = [...frags, exchange];
 
-          const composited = await pixels.render.compositeLayers(participants, activeFrame);
-          const { assetId, url: assetUrl } = await assets.storeBundle(composited);
+          const { composited, assetId, url: assetUrl } = await ctx.layers.bakeToAsset(activeFrame, participants);
 
-          // Ensure bitmap is decoded into SourceBitmapCache BEFORE state update.
-          // storeBundle() registers the asset (onRegistered hook warms both caches);
-          // loadBitmap is cache-first so this is instant, no network.
-          await pixels.image.loadBitmap(assetUrl);
+          // Outline rebuild — ALWAYS traced, unconditionally (supersedes the
+          // earlier per-tool gate): a rotated host turns even a rect-tool cut
+          // into a tilted contour inside the composite AABB, and an
+          // ellipse/lasso contour never equals its bounding box, so no tool
+          // can safely skip the trace. A fully-opaque product (unrotated
+          // rect cut) short-circuits inside traceAlphaRings to the exact
+          // full-bounds ring — equivalent to the rect, so tracing is correct
+          // in every case. Failure-safe: null falls back to the full-bounds
+          // rect and never blocks the landing.
+          const outlinePath = await ctx.layers.traceAlphaOutline(composited);
 
           // The hole dug by THIS session, if any (null in copy mode). The
           // exact mask id is the only sanctioned hole handle — never a
@@ -483,17 +489,16 @@ export const PEEL_COMMANDS = {
             name: LayerFactory.getNewLayerName(hostLayers),
             src: assetUrl,
             assetId,
-            cx: composited.bounds.x + composited.bounds.w / 2,
-            cy: composited.bounds.y + composited.bounds.h / 2,
-            bounding: { w: composited.bounds.w, h: composited.bounds.h },
-            visibleShape: asLocalShape({ x: 0, y: 0, w: composited.bounds.w, h: composited.bounds.h }),
-            scale: 1,
-            rotation: 0,
-            flip: { h: false, v: false },
-            // The pipeline baked every participant's grade chain into these
-            // pixels; carrying a chain forward would grade twice.
-            adjustMasks: undefined,
+            // Product-record conventions from the shared bake primitive
+            // (services/baking.ts): pose reset, full-bounds rect crop release
+            // (or the traced alpha contour for irregular selections), grade
+            // chain stripped. Declaration inlined: the metadata object is
+            // freshly composed here — nothing to merge. `clipTool` lets the
+            // LayersDrawer Refocus re-arm the tool the fragment was cut with.
+            ...ctx.layers.bakedLayerPatch(composited.bounds, { outlinePath: outlinePath ?? undefined }),
             metadata: {
+              physicalPixels: true,
+              clipTool: activeFrame.latestClipTool,
               sourceLayerId: host.id,
               ...(mergeBackHoleId ? { assocMaskId: mergeBackHoleId } : {}),
             },
@@ -533,11 +538,6 @@ export const PEEL_COMMANDS = {
 
           // PS "Layer via Cut" intuition: focus lands on the new fragment.
           layers.activate(activeFrame.id, newLayer.id);
-
-          // Close the bracket opened before the bake: the promotion (bake
-          // swap, session deletion, stamp cleanup, focus) is one isolated
-          // undo step.
-          ctx.actions.history.commitCheckpoint(activeFrame.id);
           return true;
 
         } catch (err) {
@@ -551,11 +551,6 @@ export const PEEL_COMMANDS = {
             ...session,
             status: 'peeled',
           }));
-          // Close the bracket on the failure path too — the only write that
-          // landed here is the adjudication flip and this restore, which
-          // cancel each other out; the boundary must not stay open across
-          // whatever the user does next.
-          actions.history.commitCheckpoint(activeFrame.id);
           return false;
         }
       });
@@ -590,7 +585,7 @@ export const PEEL_COMMANDS = {
     name: 'Bake Fragment Transform',
     undoable: true,
     execute: async (ctx: EditorContextValue, payload: { pose: TransformParams }): Promise<void> => {
-      const { activeFrame, pixels, assets, geometry } = ctx;
+      const { activeFrame, geometry } = ctx;
       if (!activeFrame) return;
 
       // Session gate: transforms are pose edits WITHIN a peeled session.
@@ -693,54 +688,53 @@ export const PEEL_COMMANDS = {
       // (retryable), no escape into the gesture teardown.
       const posed: Layer = { ...exchange, cx, cy, rotation };
       try {
-        const composited = await pixels.render.compositeLayers(
-          [posed],
+        const { composited, assetId: newAssetId, url: newUrl } = await ctx.layers.bakeToAsset(
           activeFrame,
-          roiLocal,
-          { poseOverrides: { [exchange.id]: { scale, scaleY, sourceAngle } } },
+          [posed],
+          { roi: roiLocal, poseOverrides: { [exchange.id]: { scale, scaleY, sourceAngle } } },
         );
-        const { assetId: newAssetId, url: newUrl } = await assets.storeBundle(composited);
 
-        // Warm the bitmap BEFORE the state swap so the next render frame hits
-        // the cache (same discipline as mergeExchange — no flash).
-        await pixels.image.loadBitmap(newUrl);
+        // Always rebuild the outline from the baked alpha: the previous bake
+        // (if any) already released the crop to a full rect, so tracing is the
+        // only way this product keeps a true-contour record. Failure-safe —
+        // null keeps the full-bounds rect.
+        const outlinePath = await ctx.layers.traceAlphaOutline(composited);
 
         // The baked pixels ARE the transform: reset the pose and re-anchor on
         // the composite bounds center (world coords, half-pixel aligned — even
         // dimensions integer, odd .5 — same convention as resizeCanvas). The
         // bounds are tight by construction: the composite ran on the
         // selection-derived ROI (see above), so the new asset carries no
-        // historical padding.
+        // historical padding. Product-record conventions come from the shared
+        // bake primitive (services/baking.ts).
         const bounds = composited.bounds;
-        const snapHalf = (v: number) => Math.round(v * 2) / 2;
-        const newCx = snapHalf(bounds.x + bounds.w / 2);
-        const newCy = snapHalf(bounds.y + bounds.h / 2);
-
-        const bakedPatch: Partial<Layer> = {
-          assetId: newAssetId,
-          src: newUrl,
-          cx: newCx,
-          cy: newCy,
-          rotation: 0,
-          scale: 1,
+        const record = ctx.layers.bakedLayerPatch(bounds, {
+          snapHalf: true,
+          outlinePath: outlinePath ?? undefined,
           // flip UNCHANGED: the composite's pose scale is signed, so a
-          // mirror drag is already baked INTO the pixels — toggling flip
+          // mirror drag is already baked INTO the pixels — resetting flip
           // here would mirror the baked asset a second time (negative ×
           // negative = the fragment visually snaps back to unmirrored,
           // diverging from the mirrored selection).
           flip: exchange.flip,
-          bounding: { w: bounds.w, h: bounds.h },
-          // Crop released to the full new asset — the fragment now owns its
-          // pixels (the visible edge is the bitmap alpha from here on), and
-          // the asset itself is tight because the ROI came from the
-          // selection.
-          visibleShape: asLocalShape({ x: 0, y: 0, w: bounds.w, h: bounds.h }),
-          // The composite baked the grade chain into the pixels; carrying it
-          // forward would grade twice (mergeExchange bake hygiene).
-          adjustMasks: undefined,
+        });
+
+        const bakedPatch: Partial<Layer> = {
+          assetId: newAssetId,
+          src: newUrl,
+          ...record,
           // Snap-to-birth compares against this anchor; a stale one would
           // snap the baked fragment back to its pre-transform position.
-          birthCenter: { cx: newCx, cy: newCy },
+          birthCenter: { cx: record.cx!, cy: record.cy! },
+          // The declaration must MERGE into the session metadata: the
+          // exchange carries the session hole pointer (activeHoleMaskId)
+          // through transform bakes — replacing metadata wholesale would
+          // sever the session's hole link.
+          metadata: {
+            ...exchange.metadata,
+            physicalPixels: true,
+            clipTool: activeFrame.latestClipTool,
+          },
         };
 
         // nextConfinement was derived above (selection-first ROI); the

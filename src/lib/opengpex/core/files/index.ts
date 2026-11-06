@@ -375,7 +375,7 @@ export function createFileService(
       // 1. Persisted self-describing high-depth buffer (bake products + RAW
       //    imports): a direct warm, no decode. Fastest, and the ONLY viable path
       //    for RAW (its `raw:` blob is the original camera file vips cannot read).
-      //    Mirrors the layer-service cold-reload pattern (core/layer/services/resample.ts):
+      //    Mirrors the layer-service cold-reload pattern (core/layer/services/resizing.ts):
       //    the light record's `dataFormat` is the persisted "a dec: truth exists"
       //    predicate; geometry/colour identity are reassembled from THAT record,
       //    not from the bare `getDec` buffer (which carries no metadata).

@@ -150,9 +150,11 @@ export const LAYERS_COMMANDS = {
                 const localPoly = ctx.geometry.point2d.point2dToLocalPolygon(rings, shape.antiAliased !== false);
                 const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(localPoly, layer, frame);
 
-                // Use the recorded source clip tool if available, otherwise default to 'lasso'
-                const sourceClipTool = (layer.metadata?.clipTool as string) || 'lasso';
-                const clipToolId = (sourceClipTool === 'wand' || sourceClipTool === 'sam') ? sourceClipTool : 'lasso';
+                // Use the recorded source clip tool if available, otherwise default to 'lasso'.
+                // Pass through verbatim: peel commits and cmdj cuts record
+                // `metadata.clipTool`, and re-arming the SAME tool (not a
+                // lasso downgrade) is what makes Refocus round-trip.
+                const clipToolId = (layer.metadata?.clipTool as string) || 'lasso';
 
                 target = { regular: false, clipToolId, polygon: framePoly };
             } else {
@@ -283,9 +285,9 @@ export const LAYERS_COMMANDS = {
                 const localPoly = ctx.geometry.point2d.point2dToLocalPolygon(rings, shape.antiAliased !== false);
                 const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(localPoly, latestLayer, frame);
 
-                // Read source clip tool from parent layer metadata
-                const sourceClipTool = (layer.metadata?.clipTool as string) || 'lasso';
-                const clipToolId = (sourceClipTool === 'wand' || sourceClipTool === 'sam') ? sourceClipTool : 'lasso';
+                // Read source clip tool from parent layer metadata — pass
+                // through verbatim (see syncToOverlay above).
+                const clipToolId = (layer.metadata?.clipTool as string) || 'lasso';
 
                 target = { regular: false, clipToolId, polygon: framePoly };
             } else {
