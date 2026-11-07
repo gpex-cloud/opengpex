@@ -737,7 +737,7 @@ export const ADJUSTMENT_COMMANDS = {
 
       // ── Hole side (same tick, same buffer — lockstep with the fragment) ──
       // A dangling assocMaskId (source layer or hole deleted, e.g. after a
-      // heal) degrades SILENTLY — advisory metadata, never a hard dependency.
+      // Merge Back / bake) degrades SILENTLY — advisory metadata, never a hard dependency.
       const assocMaskId = activeLayer.metadata?.assocMaskId;
       const sourceLayerId = activeLayer.metadata?.sourceLayerId;
       if (!assocMaskId || !sourceLayerId) return;
@@ -829,7 +829,7 @@ export const ADJUSTMENT_COMMANDS = {
       if (holePolicy === 'none') return;
 
       // The hole write itself. A dangling assocMaskId (source layer or hole
-      // deleted, e.g. after a heal) degrades SILENTLY — the pointer is
+      // deleted, e.g. after a Merge Back / bake) degrades SILENTLY — the pointer is
       // advisory metadata, never a hard dependency.
       const assocMaskId = activeLayer.metadata?.assocMaskId;
       const sourceLayerId = activeLayer.metadata?.sourceLayerId;

@@ -26,7 +26,6 @@ import { FrameResizeCommands } from './commands/frame/resize';
 import { FrameExportCommands } from './commands/frame/export';
 import { LayerToggleCommands } from './commands/layer/toggle';
 import { LayerMergeCommands } from './commands/layer/merge';
-import { LayerUnionCommands } from './commands/layer/union';
 import { LayerClipCommands } from './commands/layer/clip';
 import { LayerCmdJCommands } from './commands/layer/cmdj';
 import { LayerMaskCommands } from './commands/layer/vmask';
@@ -53,7 +52,6 @@ export * from './commands/frame/resize';
 export * from './commands/frame/export';
 export * from './commands/layer/toggle';
 export * from './commands/layer/merge';
-export * from './commands/layer/union';
 export * from './commands/layer/clip';
 export * from './commands/layer/cmdj';
 export * from './commands/layer/vmask';
@@ -76,7 +74,7 @@ export function registerAdvancedCommands(ctx: EditorContextValue['actions']) {
     FrameExportCommands,
     LayerToggleCommands,
     LayerMergeCommands,
-    LayerUnionCommands,
+
     LayerClipCommands,
     LayerCmdJCommands,
     LayerMaskCommands,

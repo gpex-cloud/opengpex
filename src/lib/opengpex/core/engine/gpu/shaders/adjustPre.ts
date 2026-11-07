@@ -141,7 +141,19 @@ fn vs_adjust_pre(in : PreVSIn) -> PreVSOut {
 
 @fragment
 fn fs_adjust_pre(in : PreVSOut) -> @location(0) vec4<f32> {
-  let src = textureSample(pre_tex, pre_samp, in.uv);
+  var src = textureSample(pre_tex, pre_samp, in.uv);
+  // ── Bitmap-extent gate ──
+  // uv_rect is derived from visibleShape.rect and can legitimately extend past
+  // the texture: a feathered-cut fragment pads its bounding outward so the soft
+  // edge fades against real pixels, and its crop origin goes negative. The
+  // sampler is clamp-to-edge, so those texels would smear the bitmap's edge
+  // colour outward; there is no content beyond the bitmap — transparency, not
+  // the edge texel, is what lives there. (Sample stays in uniform control flow;
+  // the gate zeroes AFTER it.)
+  let src_in_bitmap = !(in.uv.x < 0.0 || in.uv.y < 0.0 || in.uv.x > 1.0 || in.uv.y > 1.0);
+  if (!src_in_bitmap) {
+    src = vec4<f32>(0.0);
+  }
 
   // Normalise the raw sample into WORKING-space
   // (Display-P3) linear light with its rendering intent applied — the SAME pipeline

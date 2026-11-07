@@ -28,7 +28,12 @@ import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
 import type { ClipToolAAMap } from '../../../../options/ClipOptions/protocols';
 import { createTransformHandler, TransformIntent } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import { makeClipToolGuard, discardPeelOnFreshDraw } from '../guard';
-import { booleanOpFromModifiers, combineWithSelection, createLiveBooleanPreview, intersectPolygonWithCanvas } from '../boolean';
+import {
+  booleanOpFromModifiers,
+  combineWithSelection,
+  createLiveBooleanPreview,
+  intersectPolygonWithCanvas
+} from '../boolean';
 
 
 /**
@@ -108,12 +113,12 @@ export const createPathEllipseHandler = (): InteractionHandler => {
       // (configurable with no selection on canvas). Subsequent updates keep
       // the entity flag already stamped on the in-progress polygon.
       const toolAAMap = e.state.getStateSignal<ClipToolAAMap | undefined>(ClipOptionsAPI.signals.clipToolAA);
-      const antiAliased = currentBox ? currentBox.antiAliased : (toolAAMap?.pathellipse ?? true);
+      const antiAliased = currentBox ? currentBox.antiAliased : (toolAAMap?.pathellipse ?? false);
 
       // Use 360-point ellipsePathToLocalPolygon to stay on type:'path' pipeline.
       // The 64-point ellipseToLocalPolygon approximation is recognized as type:'circle'
       // by point2dToLocalShape, which breaks path ∩ path intersection in nested cuts.
-      const rawPoly = e.geometry.polygon.ellipsePathToLocalPolygon(newRect, antiAliased);
+      const rawPoly = e.geometry.polygon.ellipsePathToLocalPolygon(newRect, { antiAliased });
       // ── Draw-entry canvas intersection ──
       // The draw entry is the one canvas-constrained entry: clip the drawn
       // ellipse against the canvas BEFORE any streaming write so the live
@@ -125,7 +130,11 @@ export const createPathEllipseHandler = (): InteractionHandler => {
       // lastCreateRect keeps the RAW drag rect: the gesture-end combine
       // rebuilds the full ellipse and intersects it with the canvas again,
       // so the committed shape matches the streamed preview exactly.
-      const newPoly = intersectPolygonWithCanvas(rawPoly.rings, antiAliased ?? true, frame.canvas, e.geometry);
+      const gestureFeather = e.state.getStateSignal<number | undefined>(ClipOptionsAPI.signals.clipFeather) ?? 0;
+      const newPoly = intersectPolygonWithCanvas(rawPoly.rings, frame.canvas, e.geometry, {
+        antiAliased: antiAliased ?? true,
+        feather: gestureFeather,
+      });
       const isCreate = context.intent.category === 'create';
       if (isCreate) {
         lastCreateRect = newRect;
@@ -161,8 +170,11 @@ export const createPathEllipseHandler = (): InteractionHandler => {
           const fullCanvasRect = asLocalRect({ x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h });
           const currentBox = getClipBox(frame);
           const toolAAMap = e.state.getStateSignal<ClipToolAAMap | undefined>(ClipOptionsAPI.signals.clipToolAA);
-          const antiAliased = currentBox ? currentBox.antiAliased : (toolAAMap?.pathellipse ?? true);
-          const newPoly = e.geometry.polygon.ellipsePathToLocalPolygon(fullCanvasRect, antiAliased);
+          const antiAliased = currentBox ? currentBox.antiAliased : (toolAAMap?.pathellipse ?? false);
+          const gestureFeather = e.state.getStateSignal<number | undefined>(ClipOptionsAPI.signals.clipFeather) ?? 0;
+          const newPoly = e.geometry.polygon.ellipsePathToLocalPolygon(fullCanvasRect, {
+            antiAliased, feather: gestureFeather,
+          });
           tx.update({ confinement: newPoly }, 'frame');
         }
       },
@@ -180,13 +192,15 @@ export const createPathEllipseHandler = (): InteractionHandler => {
           const rawRect = lastCreateRect;
           if (!op || !base || !rawRect) return;
           const rawIncoming = e.geometry.polygon.ellipsePathToLocalPolygon(
-            rawRect, base.antiAliased ?? true
+            rawRect, { antiAliased: base.antiAliased ?? true }
           );
           // The committed shape must match the streamed preview: intersect
           // the full ellipse with the canvas here too (the preview streamed
           // canvas-clipped ellipses — an unclipped combine would add the
           // outside-canvas lens back at gesture end).
-          const incoming = intersectPolygonWithCanvas(rawIncoming.rings, base.antiAliased ?? true, e.activeFrame.canvas, e.geometry);
+          const incoming = intersectPolygonWithCanvas(rawIncoming.rings, e.activeFrame.canvas, e.geometry, {
+            antiAliased: base.antiAliased ?? true,
+          });
           if (!incoming) return;
           const combined = await combineWithSelection(base, incoming, op, e.geometry);
           tx.update({ confinement: combined }, 'frame');

@@ -22,7 +22,7 @@
 "use client";
 
 import React, { useRef, useEffect } from "react";
-import { Eye, EyeOff, Lock, Unlock, Maximize2, Star, Paintbrush, PenTool, Image as ImageIcon, Folder } from "lucide-react";
+import { Eye, EyeOff, Lock, Unlock, Star, Paintbrush, PenTool, Image as ImageIcon, Folder } from "lucide-react";
 import { MosaicIcon } from "@opengpex/editor/plugins/base/drawers/CraftDrawer/icon";
 import { Motion } from "@opengpex/editor/core/motion";
 import {
@@ -68,11 +68,17 @@ interface LayerItemProps {
   /** Callback to toggle marking state for this layer */
   onToggleMarking?: (layerId: string) => void;
   /** Semantic color for the marked badge — mapped to CSS internally */
-  markedColor?: 'green' | 'amber' | 'red';
+  markedColor?: 'green' | 'red';
   /** Available group layers this layer can be moved into */
   availableGroups?: Array<{ id: string; name: string }>;
   /** Name of the current group this layer belongs to (for menu display) */
   currentGroupName?: string;
+  /** Merge Back is offered only while BOTH pointers resolve (fragment link + live source) */
+  canMergeBack?: boolean;
+  /** Hole masks whose assocLayerId still resolves to a living fragment */
+  canMergeBackAll?: boolean;
+  /** Count behind `canMergeBackAll`, for the menu description */
+  mergeFragmentsCount?: number;
 }
 
 export const LayerItem = React.memo(
@@ -91,13 +97,15 @@ export const LayerItem = React.memo(
     markedColor = 'red',
     availableGroups,
     currentGroupName,
+    canMergeBack,
+    canMergeBackAll,
+    mergeFragmentsCount,
   }: LayerItemProps) => {
     const { actions, assets } = useEditorServices();
     const {
       visibilityCmd,
       lockCmd,
       renameCmd,
-      syncOverlayCmd,
     } = usePluginCommands<LayersDrawerCommandsMap>();
 
     const containerRef = useRef<HTMLDivElement>(null);
@@ -176,7 +184,7 @@ export const LayerItem = React.memo(
           >
             {isActive && (
               <div
-                className={`absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r-full transition-all duration-300 ${layer.metadata?.physicalPixels === false ? "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.4)]" : "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]"} ${isScrolling ? "opacity-50" : "opacity-100"}`}
+                className={`absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r-full transition-all duration-300 ${layer.metadata?.physicalPixels === false ? "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.4)]" : "bg-pink-400 shadow-[0_0_8px_rgba(244,114,182,0.4)]"} ${isScrolling ? "opacity-50" : "opacity-100"}`}
               />
             )}
           </div>
@@ -297,7 +305,7 @@ export const LayerItem = React.memo(
                 }}
                 className={`shrink-0 text-[9px] font-black italic transition-colors select-none tracking-tighter cursor-pointer hover:opacity-100
  ${isMarked
-   ? `${markedColor === 'green' ? 'text-emerald-400' : markedColor === 'amber' ? 'text-amber-400' : 'text-rose-400'} opacity-100`
+   ? `${markedColor === 'green' ? 'text-emerald-400' : 'text-rose-400'} opacity-100`
    : `opacity-50 ${isActive ? "text-[var(--text-main)]" : "text-[var(--text-muted)] group-hover/layer:text-[var(--text-main)]"}`
  }
 `}
@@ -348,20 +356,6 @@ export const LayerItem = React.memo(
             </div>
 
             <div className="flex items-center gap-0 opacity-40 group-hover:opacity-100 transition-opacity">
-              <ActionButton
-                onClick={(e) => {
-                  e.stopPropagation();
-                  syncOverlayCmd?.execute({
-                    frameId: activeFrameId,
-                    layerId: layer.id,
-                  });
-                }}
-                icon={<Maximize2 size={12} />}
-                tooltip="Refocus"
-                variant="glass"
-                size="sm"
-                className={`w-6 h-6 ${isActive ? "text-blue-400" : "text-[var(--text-muted)] group-hover/layer"}`}
-              />
               <ActionButton
                 onClick={(e) => {
                   e.stopPropagation();
@@ -420,8 +414,9 @@ export const LayerItem = React.memo(
                 setIsSubLayersExpanded={setIsSubLayersExpanded}
                 isMasksExpanded={isMasksExpanded}
                 setIsMasksExpanded={setIsMasksExpanded}
-                canMergeBack={Boolean(layer.metadata?.sourceLayerId && layer.metadata?.assocMaskId)}
-                canMergeBackAll={Boolean(layer.vectorMasks?.some(m => m.assocLayerId))}
+                canMergeBack={canMergeBack}
+                canMergeBackAll={canMergeBackAll}
+                mergeFragmentsCount={mergeFragmentsCount}
                 availableGroups={availableGroups}
                 currentGroupId={layer.groupId}
                 currentGroupName={currentGroupName}

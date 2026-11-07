@@ -18,62 +18,47 @@
  */
 
 /**
- * Minimal first-match-wins rule evaluator for the declarative ingest engine.
+ * Ingest binding of the shared first-match-wins decision table runtime.
  *
- * Zero dependencies, pure function. Each field of a `DecisionCondition` is
- * tested against the normalized context; a rule matches only when ALL fields
- * pass. Rules are evaluated in declaration order (priority = matrix row
- * order), and the first matching rule wins.
+ * The evaluation semantics (field patterns, `'*'` as the only wildcard,
+ * undeclared field = value equality against `undefined`, row order = priority)
+ * live in `core/helpers/decision-table`. This module only fixes the ingest
+ * context's field list and table name so call sites keep their two-argument
+ * signatures.
  *
  * @module core/files/strategy/engine/matcher
  */
 
-import type { DecisionRule, MatchPattern, NormalizedMatchContext } from './types';
+import {
+  matchesRule as matchesTableRule,
+  matchRule as matchTableRule,
+} from '@opengpex/editor/core/helpers/decision-table';
+import type { DecisionRule, NormalizedMatchContext } from './types';
 
-function testField<T>(pattern: MatchPattern<T> | undefined, value: T): boolean {
-  // 2026-10-19 semantics: an UNDECLARED condition compares by VALUE equality —
-  // an `undefined` pattern matches only an `undefined` context (the SDR case
-  // for `transfer`), and any concrete pattern matches by strict equality.
-  // '*' is the ONLY explicit wildcard; there is no implicit any.
-  if (pattern === '*') return true;
-  if (typeof pattern === 'function') {
-    return (pattern as (val: T) => boolean)(value);
-  }
-  if (Array.isArray(pattern)) {
-    return (pattern as readonly T[]).includes(value);
-  }
-  return pattern === value;
-}
+/** Every ingest context field a rule condition is evaluated against. */
+const INGEST_FIELDS: readonly (keyof NormalizedMatchContext)[] = [
+  'format',
+  'bitDepth',
+  'colorSpace',
+  'isMultiFrame',
+  'hevcHardDecode',
+  'transfer',
+  'hasGainmap',
+];
 
 /**
- * Whether ONE rule's condition matches the context — the single-row form of the
- * first-match evaluator above. Exported so inspection tooling (strategy review
- * panels) can evaluate every row individually and distinguish the winning row
- * from earlier-priority rows it shadows, with semantics guaranteed identical to
- * {@link matchRule} by construction (matchRule IS a loop over this).
+ * Whether ONE rule's condition matches the context — the single-row form of
+ * {@link matchRule}. Exported so inspection tooling (strategy review panels)
+ * can evaluate every row individually and distinguish the winning row from
+ * earlier-priority rows it shadows.
  */
 export function matchesRule(rule: DecisionRule, ctx: NormalizedMatchContext): boolean {
-  const { condition } = rule;
-  return (
-    testField(condition.format, ctx.format) &&
-    testField(condition.bitDepth, ctx.bitDepth) &&
-    testField(condition.colorSpace, ctx.colorSpace) &&
-    testField(condition.isMultiFrame, ctx.isMultiFrame) &&
-    testField(condition.hevcHardDecode, ctx.hevcHardDecode) &&
-    testField(condition.transfer, ctx.transfer) &&
-    testField(condition.hasGainmap, ctx.hasGainmap)
-  );
+  return matchesTableRule(rule, ctx, INGEST_FIELDS);
 }
 
 export function matchRule(
   rules: readonly DecisionRule[],
   ctx: NormalizedMatchContext,
 ): DecisionRule {
-  for (const rule of rules) {
-    if (matchesRule(rule, ctx)) {
-      return rule;
-    }
-  }
-  // Rule '00' is theoretically the wildcard fallback; this guard is for type safety.
-  throw new Error(`[DecisionEngine] No rule matched for input: ${JSON.stringify(ctx)}`);
+  return matchTableRule(rules, ctx, INGEST_FIELDS, 'ingest');
 }

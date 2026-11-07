@@ -73,19 +73,21 @@ export const VIEWPORT_ZOOM_MAX = 128;
  * document's own pixels, never a sharper re-rasterization). This toggle only
  * decides the FIXED density of that single bake:
  *
- * - true (default): the composite renders at `ceil(devicePixelRatio)` texels
- *   per document pixel (an integer constant, 1 on classic displays, 2 on
- *   retina). Vector/text edges stay crisp at 100% on hi-dpi screens — the
- *   accepted trade-off is that their edges quantize at 1/D document pixels
- *   (a constant, zoom-independent "benign distortion" vs the exported file).
- * - false: the composite renders at exactly 1 texel per document pixel —
- *   strict WYSIWYG (100% = 1 document pixel : 1 CSS pixel).
+ * - true: the composite renders at `ceil(devicePixelRatio)` texels per
+ *   document pixel (an integer constant, 1 on classic displays, 2 on retina).
+ *   Vector/text edges stay crisp at 100% on hi-dpi screens — the accepted
+ *   trade-off is that their edges quantize at 1/D document pixels (a
+ *   constant, zoom-independent "benign distortion" vs the exported file).
+ * - false (default): the composite renders at exactly 1 texel per document
+ *   pixel — strict WYSIWYG (100% = 1 document pixel : 1 CSS pixel): hard
+ *   edges and masks align to the document pixel grid, and what you see is
+ *   exactly what exports.
  *
  * Switching the toggle changes the composite target dims, which flows through
  * the engine's dimsChanged rebuild path: exactly one re-composite, no extra
  * invalidation signal needed.
  */
-export const COMPOSITE_ADAPTIVE_DENSITY: boolean = true;
+export const COMPOSITE_ADAPTIVE_DENSITY: boolean = false;
 
 
 /**

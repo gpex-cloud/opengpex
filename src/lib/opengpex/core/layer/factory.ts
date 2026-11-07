@@ -619,29 +619,21 @@ patchEdgeFeatherRepad(
   const pad1 = radius > 0 ? Math.ceil(radius + AA_MARGIN) : 0;
   if (curFeather === radius && pad0 === pad1) return null;
 
-  // Tight geometry = current rect inset by the current symmetric pad.
+  // Tight geometry = current rect inset by the current symmetric pad, then
+  // re-outset at the new radius through the canonical-form kernel. The input
+  // keeps the shape's REAL type/pathData (a 'rect' fragment must serialize
+  // here) with only the rect swapped to the tight inset.
   const tight = {
     x: vs.rect.x + pad0,
     y: vs.rect.y + pad0,
     w: vs.rect.w - 2 * pad0,
     h: vs.rect.h - 2 * pad0,
   };
-  const paddedRect = asLocalRect({
-    x: tight.x - pad1,
-    y: tight.y - pad1,
-    w: tight.w + 2 * pad1,
-    h: tight.h + 2 * pad1,
-  });
-
-  const pathData = vs.type === 'path' && vs.pathData ? vs.pathData : shapeToPathData(vs as unknown as LocalShape);
-  const visibleShape = {
-    type: 'path',
-    rect: paddedRect,
-    antiAliased: vs.antiAliased ?? true,
-    pathData,
-    featherPx: radius,
-    __brand: 'local',
-  } as unknown as LocalShape;
+  const { visibleShape } = computeFragmentFeathering(
+    { ...vs, rect: asLocalRect(tight) } as unknown as LocalShape,
+    radius,
+  );
+  const paddedRect = visibleShape.rect;
 
   // Re-derive the pose: recover the invariant tight-centre world anchor from the
   // current pose (computeFragmentCenter inverted), then re-apply for the new
@@ -728,3 +720,42 @@ export function findUpstreamAssetId(layerId: string, frame: Frame): string | nul
  * from being clipped by the crop window.
  */
 export const AA_MARGIN = 1;
+
+/**
+ * computeFragmentFeathering — the CANONICAL feathered-fragment shape as a pure
+ * transform: the tight cut geometry serialized to pathData, inset inside a
+ * symmetrically PADDED rect (pad = ceil(f) + AA_MARGIN) that carries
+ * featherPx. `padded` is the size the fragment's bounding must take so the
+ * soft band (which extends f beyond the cut contour) has pixels to render
+ * over — an unpadded plane clips the fade and the edges read as hard cuts.
+ *
+ * Consumers: feathered peel fragment construction (`clipToExistLayer`) and
+ * the edge-feather re-pad edit (`patchEdgeFeatherRepad`, which recovers the
+ * tight shape by insetting the OLD pad first, then re-outsets through here).
+ * Non-path inputs (rect/circle selections) are serialized — a 'rect' shape
+ * cannot carry the tight-inside-padded invariant because its rect IS its
+ * geometry.
+ */
+export function computeFragmentFeathering(
+  tightShape: LocalShape,
+  feather: number,
+): { visibleShape: LocalShape; padded: { w: number; h: number } } {
+  const pathData = tightShape.type === 'path' && tightShape.pathData
+    ? tightShape.pathData
+    : shapeToPathData(tightShape);
+  // Feather 0 = the historical hard fragment: NO pad at all (the tight form
+  // restores bit-exactly — patchEdgeFeatherRepad's radius-0 contract).
+  const pad = feather > 0 ? Math.ceil(feather) + AA_MARGIN : 0;
+  const tight = tightShape.rect;
+  return {
+    visibleShape: {
+      type: 'path',
+      pathData,
+      rect: asLocalRect({ x: tight.x - pad, y: tight.y - pad, w: tight.w + 2 * pad, h: tight.h + 2 * pad }),
+      antiAliased: tightShape.antiAliased ?? true,
+      featherPx: feather,
+      __brand: 'local',
+    } as unknown as LocalShape,
+    padded: { w: tight.w + 2 * pad, h: tight.h + 2 * pad },
+  };
+}

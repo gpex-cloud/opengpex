@@ -23,7 +23,7 @@ import {
   Point2D, Dimensions, Rect, IMatrix3x3, IMatrix3x3Constructor,
   WorldPoint, WorldRect, LocalPoint, LocalRect, ViewportPoint, ViewportRect,
   WorldShape, LocalShape, Shape,
-  LocalPolygon, WorldPolygon
+  LocalPolygon, WorldPolygon, PolygonFlags
 } from './primitives';
 
 /**
@@ -602,9 +602,9 @@ export interface GeometryService {
      * approximation ring that polygonToShape recognizes as type:'circle'.
      * Returns a branded LocalPolygon ready for clipBox storage.
      */
-    regularShapeToLocalPolygon: (tool: 'rect' | 'pathellipse', rect: LocalRect, antiAliased?: boolean) => LocalPolygon;
+    regularShapeToLocalPolygon: (tool: 'rect' | 'pathellipse', rect: LocalRect, flags?: PolygonFlags) => LocalPolygon;
     /** 360-point path-based ellipse polygon (stays on type:'path' pipeline, never recognized as circle) */
-    ellipsePathToLocalPolygon: (rect: LocalRect, antiAliased?: boolean) => LocalPolygon;
+    ellipsePathToLocalPolygon: (rect: LocalRect, flags?: PolygonFlags) => LocalPolygon;
     /**
      * Serializes a Polygon into an equivalent Shape descriptor (the lossy, one-way
      * Polygon → Shape entry point). Recognizes 4-point rects and 64-point ellipses
@@ -635,7 +635,7 @@ export interface GeometryService {
     /** Attempts to convert Point2D rings back into a LocalShape (null if not representable). */
     point2dToLocalShape: (rings: readonly Point2D[][], antiAliased: boolean) => LocalShape | null;
     /** Builds a LocalPolygon from raw Point2D rings, computing bounding rect automatically. */
-    point2dToLocalPolygon: (rings: Point2D[][], antiAliased: boolean) => LocalPolygon;
+    point2dToLocalPolygon: (rings: Point2D[][], flags?: PolygonFlags) => LocalPolygon;
     /** Inverts rings against bounding area (evenodd semantics). Null = empty selection. */
     invertRings: (rings: Point2D[][], boundingW: number, boundingH: number) => Point2D[][] | null;
     /** Checks if a ring matches the canvas bounding rectangle. */

@@ -108,6 +108,10 @@ export const createLassoHandler = (): InteractionHandler => {
   let active = false;
   // Cached AA state for the current gesture — read once at onStart.
   let gestureAA = true;
+  // Cached toolbar feather for the current gesture — a fresh (replacing)
+  // draw bakes the current slider value into the new selection; a boolean
+  // combine ignores this (the result inherits the BASE selection's flags).
+  let gestureFeather = 0;
   // Selection entity present when the gesture started. Boolean combine
   // (Shift/Alt) folds the freshly drawn polygon into this base instead of
   // replacing it. Immutable store updates keep the captured reference intact
@@ -149,7 +153,8 @@ export const createLassoHandler = (): InteractionHandler => {
       // Fresh gesture with no selection on canvas: inherit the lasso tool's
       // persistent AA preset; an existing selection keeps its own entity flag.
       const toolAAMap = e.state.getStateSignal<ClipToolAAMap | undefined>(ClipOptionsAPI.signals.clipToolAA);
-      gestureAA = clipBox ? (clipBox.antiAliased ?? true) : (toolAAMap?.lasso ?? true);
+      gestureAA = clipBox ? (clipBox.antiAliased ?? true) : (toolAAMap?.lasso ?? false);
+      gestureFeather = e.state.getStateSignal<number | undefined>(ClipOptionsAPI.signals.clipFeather) ?? 0;
       gestureBase = clipBox;
 
       let { x: clampedX, y: clampedY } = e.geometry.space.clampPointToRect(e.point.canvas, e.activeFrame.canvas);
@@ -254,7 +259,10 @@ export const createLassoHandler = (): InteractionHandler => {
         // nothing drawn"). Area validation runs AFTER the clip so a huge
         // sweep that lands entirely outside the canvas is not counted as a
         // valid selection.
-        const clipped = intersectPolygonWithCanvas([ring], gestureAA, e.activeFrame.canvas, e.geometry);
+        const clipped = intersectPolygonWithCanvas([ring], e.activeFrame.canvas, e.geometry, {
+          antiAliased: gestureAA,
+          feather: gestureFeather,
+        });
         if (!clipped) {
           return;
         }
@@ -289,6 +297,7 @@ export const createLassoHandler = (): InteractionHandler => {
         trail = [];
         active = false;
         gestureAA = true;
+        gestureFeather = 0;
         gestureBase = null;
         snappedToStart = false;
         clearPreview();

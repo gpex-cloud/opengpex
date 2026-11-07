@@ -589,15 +589,15 @@ export function useEditorStore() {
             }),
           },
           clip: {
-            cut: advRef(P.ADV_LAYER_CLIP_CUT, () => executeCommand(P.ADV_LAYER_CLIP_CUT)),
-            copy: advRef(P.ADV_LAYER_CLIP_COPY, () => executeCommand(P.ADV_LAYER_CLIP_COPY)),
+            cut: advRef(P.ADV_LAYER_CLIP_CUT, () => executeCommand(P.ADV_LAYER_CLIP_CUT, undefined)),
+            copy: advRef(P.ADV_LAYER_CLIP_COPY, () => executeCommand(P.ADV_LAYER_CLIP_COPY, undefined)),
             paste: advRef(P.ADV_LAYER_CLIP_PASTE, (payload?: ClipboardLayerMetadata | { e?: ClipboardEvent } | undefined) => executeCommand(P.ADV_LAYER_CLIP_PASTE, payload)),
-            drill: advRef(P.ADV_LAYER_CLIP_DRILL, (payload?: { feather?: number }) => executeCommand(P.ADV_LAYER_CLIP_DRILL, payload)),
-            toMask: advRef(P.ADV_LAYER_CLIP_TO_MASK, (payload?: { layerId?: string; feather?: number }) => executeCommand<{ layerId?: string; feather?: number } | undefined, Promise<void>>(P.ADV_LAYER_CLIP_TO_MASK, payload)),
+            drill: advRef(P.ADV_LAYER_CLIP_DRILL, () => executeCommand(P.ADV_LAYER_CLIP_DRILL, undefined)),
+            toMask: advRef(P.ADV_LAYER_CLIP_TO_MASK, (payload?: { layerId?: string }) => executeCommand<{ layerId?: string } | undefined, Promise<void>>(P.ADV_LAYER_CLIP_TO_MASK, payload)),
           },
           cmdj: {
-            copy: advRef(P.ADV_LAYER_CMDJ_COPY, (payload?: { feather?: number }) => executeCommand(P.ADV_LAYER_CMDJ_COPY, payload)),
-            cut: advRef(P.ADV_LAYER_CMDJ_CUT, (payload?: { feather?: number }) => executeCommand(P.ADV_LAYER_CMDJ_CUT, payload)),
+            copy: advRef(P.ADV_LAYER_CMDJ_COPY, () => executeCommand(P.ADV_LAYER_CMDJ_COPY, undefined)),
+            cut: advRef(P.ADV_LAYER_CMDJ_CUT, () => executeCommand(P.ADV_LAYER_CMDJ_CUT, undefined)),
           },
           mask: {
             toggle: advRef(P.ADV_LAYER_MASK_TOGGLE, (payload: { layerId: string; maskId: string; frameId?: string }) => executeCommand(P.ADV_LAYER_MASK_TOGGLE, payload)),

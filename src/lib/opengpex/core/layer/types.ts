@@ -20,7 +20,16 @@
 import { Frame, Layer, VectorMask, BitmapMask } from '@opengpex/editor/core/types/models';
 import { LocalShape, LocalPolygon, LocalRect, Dimensions } from '@opengpex/editor/core/types/primitives';
 import type { BakeToAssetOptions, BakeToAssetResult, BuildPhysicalPatchOptions } from './services/baking';
+import type { ClipMode, ClipFragmentResult } from './services/clipping/route';
+import type { MergeStrategyOp, MergeOptions } from './services/merging';
 import type { CompositedImage } from '../engine/types';
+
+/**
+ * Cut-link cleanup when removing cut fragments: 'break-link' (default, a plain
+ * delete — the hole stays as content, pointer cleared), 'ignore-link' (touch no
+ * mask: the caller already wrote the masks, or the rendering must stay
+ * exactly as it is).
+ */
 
 /**
  * LayerService: Layer domain model service (Domain: Layer)
@@ -38,8 +47,14 @@ export interface LayerService {
   /** Activates (selects) a specific layer */
   activate: (frameId: string, layerId: string | null) => void;
 
-  /** Removes layer(s) (supports single or multi selection) */
-  removeLayers: (frameId: string, layerIds: string | string[]) => void;
+  /**
+   * Removes layer(s) (supports single or multi selection). `cutLinks` decides
+   * what happens to a removed cut fragment's hole on its source —
+   * `'break-link'` (default) clears the deleted fragments' cut pointers on
+   * their sources; `'ignore-link'` touches no mask (for callers that already
+   * wrote masks themselves: bake, Merge Back). A plain delete never heals.
+   */
+  removeLayers: (frameId: string, layerIds: string | string[], opts?: { cutLinks?: 'break-link' | 'ignore-link' }) => void;
 
   /** Removes an artboard (automatically cascades deletes to descendant artboards and migrates focus) */
   removeFrame: (frameId: string) => void;
@@ -55,9 +70,24 @@ export interface LayerService {
   /** Returns the fragment layer plus, in cut mode, the fully-formed hole VectorMask to append to the source layer. */
   clipToLogicalLayer: (frame: Frame, layer: Layer, options?: { feather?: number; mode?: 'copy' | 'cut' }) => Promise<{ newLayer: Layer; holeMask?: VectorMask } | null>;
   /** Physical fragment: always produces a baked PNG blob (needed for clipboard external paste) */
-  clipToPhysicalLayer: (frame: Frame, layer: Layer) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
+  clipToPhysicalLayer: (frame: Frame, layer: Layer, options?: { feather?: number }) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
   /** Resamples layer to a new resolution: uniform scale preserves the non-destructive structure (zero-copy shared src, visibleShape offset, vector/bitmap masks scaled geometrically); non-uniform scale flattens (bakes) the layer. */
   resampleLayer: (frame: Frame, layer: Layer, scaleX: number, scaleY: number) => Promise<{ newUrl: string, newAssetId: string, patch: Partial<Layer> } | null>;
+  /**
+   * Single entry for Copy / Layer via Copy / Cut / Layer via Cut: routes by
+   * layer type, selection overlap and mode through the clip decision table and
+   * returns the product plus the mask to append to the source layer.
+   */
+  clipFragment: (frame: Frame, layer: Layer, options: { mode: ClipMode; feather?: number }) => Promise<ClipFragmentResult>;
+  /**
+   * Single entry for the merge commands (merge selected, merge down): routes the
+   * participant set through the merge decision table and runs the chosen
+   * executor — a zero-rasterization logical union for same-source fragment
+   * sets, a physical bake for everything else. A refused merge (group
+   * participants, cross-group boundary) surfaces the table's HUD message.
+   * Participants are ordered bottom to top.
+   */
+  mergeLayers: (frame: Frame, participants: readonly Layer[], options?: MergeOptions) => Promise<MergeStrategyOp>;
   /** Applies a fragment to an existing layer (e.g. Exchange layer) */
   clipToExistLayer: (frame: Frame, sourceLayer: Layer, targetLayer: Layer, selection: LocalShape | LocalPolygon) => { updatedLayer: Layer, localShape: LocalShape } | null;
   /**

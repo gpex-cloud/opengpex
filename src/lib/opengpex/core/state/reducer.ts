@@ -502,6 +502,18 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
           reconcileFrameState(draft, currentFrame);
         });
 
+        // [Selection-only diff guard] SET_ACTIVE_LAYER dispatches directly without
+        // opening a checkpoint, and EVERY undoable command fires SIGNAL_COMMIT
+        // pre-execution — so a pure focus change made since the last checkpoint
+        // lands in this diff. A diff touching nothing but `activeLayerId` is not
+        // an edit: pushing it would create a ghost undo step that only flips the
+        // selection. Skip the step, keep the redo stack, and keep the OLD
+        // checkpoint so the focus change rides along with the next physical
+        // edit's step (undo restores focus together with the document, per the
+        // reconciliation rules in reducer-utils).
+        const selectionOnly = patches.length > 0 && patches.every(p => p.path.length > 0 && p.path[0] === 'activeLayerId');
+        if (selectionOnly) return state;
+
         if (patches.length > 0) {
           // [Architecture Design: Strict physical change determination and Redo stack protection rules]
           // - Only when actual document physical changes occur (patches.length > 0) is a new historical Edit Step generated.

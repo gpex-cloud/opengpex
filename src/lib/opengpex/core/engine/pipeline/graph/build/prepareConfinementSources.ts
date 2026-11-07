@@ -90,14 +90,16 @@ export function prepareConfinementCoverage(
   key: string,
   rings: readonly (readonly (readonly [number, number])[])[],
   antiAliased: boolean,
+  featherPx: number,
   logicalW: number,
   logicalH: number,
   exportScale: readonly [number, number],
 ): GPUTexture {
   const subMasks: VectorSubMask[] = [
-    // A frozen selection snapshot is a plain even-odd region: no feather, never
-    // inverted; AA per the snapshot's own edge flag.
-    { rings, featherPx: 0, inverted: false, antiAliased, distBiasPx: 0 },
+    // A frozen selection snapshot is a single even-odd region, never inverted;
+    // AA per the snapshot's own edge flag, feather per the snapshot's radius
+    // (0 = the historical hard selection).
+    { rings, featherPx, inverted: false, antiAliased, distBiasPx: 0 },
   ];
   const [maskW, maskH] = vectorTransientSize(
     Math.max(1, logicalW), Math.max(1, logicalH), exportScale,

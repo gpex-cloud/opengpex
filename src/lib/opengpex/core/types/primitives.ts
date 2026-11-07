@@ -218,6 +218,44 @@ export interface Polygon {
    * fresh polygon without the field — back to 0° by construction.
    */
   orientationDeg?: number;
+  /**
+   * Selection feather radius in px (undefined / 0 = hard selection). The
+   * soft-mask weight is derived on the GPU as `1 - smoothstep(-f, f, d)`
+   * from the signed distance to the polygon edge, so the 50% isoline is
+   * ALWAYS the polygon itself (marching ants need no change). This is a
+   * property of the selection entity (frame.confinement and the frozen
+   * stroke snapshots), NOT a command parameter: the ClipOptions toolbar
+   * value is the input that seeds it at creation time and edits it live
+   * while a selection is active. Field-fidelity decree: every polygon
+   * REBUILDER (translate/scale/rotate/affine/viewport transforms, ants
+   * simplification, boolean intersection) must carry this field through —
+   * dropping it silently de-feathers the selection.
+   */
+  feather?: number;
+}
+
+/**
+ * Construction flags for polygon-building factories (GeometryService polygon
+ * factories and the raw point2d builders). An options object, NOT positional
+ * parameters: flag-style fields grow (feather joined antiAliased/ssdepMode),
+ * and positional booleans force unreadable `undefined` placeholders at call
+ * sites. Omitted = per-factory default (see each factory's doc).
+ */
+export interface PolygonFlags {
+  /** Anti-aliased edge. Defaults per factory (rect: false; ellipse/point2d: true). */
+  antiAliased?: boolean;
+  /** Selection feather radius in px. Defaults to 0 (hard). */
+  feather?: number;
+  /** Display-only SSDEP flag. Defaults to false. */
+  ssdepMode?: boolean;
+  /**
+   * Accumulated rotation record (degrees). CARRY-ONLY: construction sites
+   * must not set it (the orientation decree — a fresh polygon is 0° by
+   * construction); it exists in the flags so whole-polygon pass-through
+   * (rebuilders hand the old polygon in AS the flags argument) transports
+   * the record across rebuild/transit paths without dropping it.
+   */
+  orientationDeg?: number;
 }
 
 /** Polygon in canvas-local coordinate space (origin (0,0) at canvas top-left). */
@@ -241,28 +279,27 @@ export interface WorldPolygon extends Polygon {
 export const asLocalPolygon = (
   rings: LocalPoint[][],
   rect: LocalRect,
-  antiAliased: boolean = true,
-  ssdepMode: boolean = false,
-  orientationDeg?: number
+  flags?: PolygonFlags
 ): LocalPolygon => ({
   rings,
   rect,
-  antiAliased,
-  ssdepMode,
-  ...(orientationDeg !== undefined ? { orientationDeg } : {}),
+  antiAliased: flags?.antiAliased ?? true,
+  ssdepMode: flags?.ssdepMode ?? false,
+  ...(flags?.orientationDeg !== undefined ? { orientationDeg: flags.orientationDeg } : {}),
+  ...(flags?.feather !== undefined && flags.feather > 0 ? { feather: flags.feather } : {}),
   __brand: 'local'
 } as LocalPolygon);
 
 export const asWorldPolygon = (
   rings: WorldPoint[][],
   rect: WorldRect,
-  antiAliased: boolean = true,
-  ssdepMode: boolean = false
+  flags?: PolygonFlags
 ): WorldPolygon => ({
   rings,
   rect,
-  antiAliased,
-  ssdepMode,
+  antiAliased: flags?.antiAliased ?? true,
+  ssdepMode: flags?.ssdepMode ?? false,
+  ...(flags?.feather !== undefined && flags.feather > 0 ? { feather: flags.feather } : {}),
   __brand: 'world'
 } as WorldPolygon);
 

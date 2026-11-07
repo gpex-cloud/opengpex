@@ -379,6 +379,17 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   // outside the rect instead of branching around the sample.
   let fg_uv = blend_u.uv_rect.xy + local * blend_u.uv_rect.zw;
   var fg_sample = textureSample(fg_tex, samp, fg_uv);
+  // ── Bitmap-extent gate ──
+  // uv_rect is derived from visibleShape.rect and can legitimately extend past
+  // the texture: a feathered-cut fragment pads its bounding outward so the soft
+  // edge fades against real pixels, and its crop origin goes negative. The
+  // sampler is clamp-to-edge, so those texels would smear the bitmap's edge
+  // colour outward; there is no content beyond the bitmap — transparency, not
+  // the edge texel, is what lives there. (Sample stays in uniform control flow;
+  // the gate zeroes AFTER it.)
+  if (fg_uv.x < 0.0 || fg_uv.y < 0.0 || fg_uv.x > 1.0 || fg_uv.y > 1.0) {
+    fg_sample = vec4<f32>(0.0);
+  }
   fg_sample.a *= coverage;
 
   // ── NORMALISE THE FOREGROUND ──

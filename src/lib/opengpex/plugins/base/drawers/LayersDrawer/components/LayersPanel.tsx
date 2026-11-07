@@ -29,6 +29,7 @@ import {
   ChevronDown,
   Merge,
   FolderPlus,
+  Loader2,
 } from "lucide-react";
 import { Reorder, motion, useDragControls, type DragControls } from "framer-motion";
 import {
@@ -38,8 +39,8 @@ import {
 import { Layer, Frame } from "@opengpex/editor/core/types";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
-import { useLayerCommands, useMaskEditMonitor, useUnionMerge } from "../hooks";
-import { MergeVisibleIcon } from "@opengpex/editor/icons";
+import { useLayerCommands, useMaskEditMonitor, useMergeSelected } from "../hooks";
+import { MergeDownIcon, MergeVisibleIcon } from "@opengpex/editor/icons";
 import { LayerItem } from "./layer/LayerItem";
 import { GroupCollapsedRow, GroupCapLine } from "./layer/LayerGroupItem";
 import { LayerPropsBar } from "./LayerPropsBar";
@@ -63,6 +64,7 @@ export function LayersPanel({
 }: LayersPanelProps) {
   const {
     reorder,
+    mergeDown,
     mergeVisible,
     toggleAll,
     isolateSelection,
@@ -74,14 +76,44 @@ export function LayersPanel({
   // Monitor mask edit exit conditions (tool switch, mode change, mask deletion)
   useMaskEditMonitor();
 
-  // ─── Union merge multi-selection (encapsulated in hook) ───────────────────────
+  // ─── Merge-selected multi-selection (encapsulated in hook) ───────────────────────
   const {
-    unionSelection,
-    unionStatus,
-    canUnionMerge,
-    toggleUnionMark,
-    handleUnionMerge,
-  } = useUnionMerge(activeFrame);
+    mergeSelection,
+    mergeStatus,
+    canMergeSelected,
+    merging,
+    toggleMergeMark,
+    handleMergeSelected,
+  } = useMergeSelected(activeFrame);
+
+  // Merge-down and merge-visible in-flight flags. Merge selected's own flag
+  // lives in useMergeSelected; the buttons below treat ANY running merge as
+  // one document-wide operation (mirroring the command family lock): the
+  // running button spins, the other two are disabled, all release together.
+  const [mergingDown, setMergingDown] = useState(false);
+  const [mergingVisible, setMergingVisible] = useState(false);
+  const anyMergeInFlight = merging || mergingDown || mergingVisible;
+
+  // Cut-link liveness for the layer menu: a hole mask counts as a mergeable
+  // fragment only while its assocLayerId resolves in the frame. Masks whose
+  // fragment is gone are kept content (deletion never heals) and are
+  // excluded from the count; Merge Back additionally requires a live source.
+  const cutLinkStats = (l: Layer) => {
+    let liveFragments = 0;
+    for (const m of l.vectorMasks ?? []) {
+      // Bidirectional: the target layer must point BACK at this mask
+      // (`assocMaskId`). A bake demotes its survivor while the source hole
+      // keeps the survivor's id as a dead end; that one-way id must not
+      // count as a mergeable fragment.
+      const target = m.assocLayerId ? activeFrame.layers.byId[m.assocLayerId] : undefined;
+      if (target && target.metadata?.assocMaskId === m.id) liveFragments++;
+    }
+    const meta = l.metadata as { sourceLayerId?: string; assocMaskId?: string } | undefined;
+    const canMergeBack = Boolean(
+      meta?.sourceLayerId && meta?.assocMaskId && activeFrame.layers.byId[meta.sourceLayerId],
+    );
+    return { canMergeBack, canMergeBackAll: liveFragments > 0, mergeFragmentsCount: liveFragments };
+  };
 
   // Read showSubLayers signal once in parent — pass value to children
   const { showSubLayersSignal } = usePluginSignals<LayersDrawerSignalsMap>();
@@ -239,12 +271,13 @@ export function LayersPanel({
         child.id === activeLayerId || activeLayerHostId === child.id
       }
       canDelete={hostLayers.length > 1}
+      {...cutLinkStats(child)}
       isScrolling={isScrolling}
       childLayers={childLayersMap.get(child.id) || emptyChildLayers}
       showSubLayers={showSubLayers}
-      isMarked={unionSelection.includes(child.id)}
-      onToggleMarking={toggleUnionMark}
-      markedColor={unionStatus}
+      isMarked={mergeSelection.includes(child.id)}
+      onToggleMarking={toggleMergeMark}
+      markedColor={mergeStatus}
       availableGroups={availableGroups}
     />
   );
@@ -330,36 +363,51 @@ export function LayersPanel({
           <ActionButton
             onClick={(e) => {
               e.stopPropagation();
-              handleUnionMerge();
+              handleMergeSelected();
             }}
-            icon={<Merge size={12} className="rotate-180" />}
+            icon={merging ? <Loader2 size={12} className="animate-spin" /> : <Merge size={12} className="rotate-180" />}
             tooltip={
-              canUnionMerge
-                ? `Union Merge (${unionSelection.length})`
-                : "Union Merge"
+              canMergeSelected
+                ? `Merge Selected (${mergeSelection.length})`
+                : "Merge Selected"
             }
             variant="glass"
             size="sm"
-            disabled={!canUnionMerge}
+            disabled={!canMergeSelected || anyMergeInFlight}
             className={
-              canUnionMerge
-                ? unionStatus === "green"
+              canMergeSelected
+                ? mergeStatus === "green"
                   ? "text-emerald-400 hover:text-emerald-300"
-                  : unionStatus === "amber"
-                    ? "text-amber-400 hover:text-amber-300"
-                    : "text-rose-400 hover:text-rose-300"
+                  : "text-rose-400 hover:text-rose-300"
                 : "text-[var(--text-muted)] opacity-40 cursor-not-allowed"
             }
           />
           <ActionButton
             onClick={(e) => {
               e.stopPropagation();
-              mergeVisible.execute();
+              if (anyMergeInFlight) return;
+              setMergingDown(true);
+              void Promise.resolve(mergeDown.execute()).finally(() => setMergingDown(false));
             }}
-            icon={<MergeVisibleIcon size={12} />}
+            icon={mergingDown ? <Loader2 size={12} className="animate-spin" /> : <MergeDownIcon size={12} />}
+            tooltip="Merge Down"
+            variant="glass"
+            size="sm"
+            disabled={anyMergeInFlight}
+            className="text-[var(--text-muted)] hover:text-teal-500"
+          />
+          <ActionButton
+            onClick={(e) => {
+              e.stopPropagation();
+              if (anyMergeInFlight) return;
+              setMergingVisible(true);
+              void Promise.resolve(mergeVisible.execute()).finally(() => setMergingVisible(false));
+            }}
+            icon={mergingVisible ? <Loader2 size={12} className="animate-spin" /> : <MergeVisibleIcon size={12} />}
             tooltip="Merge Visible"
             variant="glass"
             size="sm"
+            disabled={anyMergeInFlight}
             className="text-[var(--text-muted)] hover:text-teal-500"
           />
         </div>
@@ -487,14 +535,15 @@ export function LayersPanel({
                           activeLayerHostId === layer.id
                         }
                         canDelete={hostLayers.length > 1}
+                        {...cutLinkStats(layer)}
                         isScrolling={isScrolling}
                         childLayers={
                           childLayersMap.get(layer.id) || emptyChildLayers
                         }
                         showSubLayers={showSubLayers}
-                        isMarked={unionSelection.includes(layer.id)}
-                        onToggleMarking={toggleUnionMark}
-                        markedColor={unionStatus}
+                        isMarked={mergeSelection.includes(layer.id)}
+                        onToggleMarking={toggleMergeMark}
+                        markedColor={mergeStatus}
                         availableGroups={availableGroups}
                       />
                     );

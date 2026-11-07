@@ -34,6 +34,7 @@ import {
   Point2D, Rect, LocalPoint, LocalRect,
   LocalShape, LocalPolygon,
   asLocalRect, asLocalShape, asLocalPolygon,
+  PolygonFlags,
 } from '@opengpex/editor/core/types';
 
 // ─────────────────────────── Shape ↔ Point2D Conversions ───────────────────────
@@ -211,9 +212,9 @@ export function computePolygonBounds(rings: Point2D[][]): Rect {
  * point2dToLocalPolygon: Build a LocalPolygon from raw Point2D rings,
  * computing the bounding rect automatically.
  */
-export function point2dToLocalPolygon(rings: Point2D[][], antiAliased: boolean): LocalPolygon {
+export function point2dToLocalPolygon(rings: Point2D[][], flags?: PolygonFlags): LocalPolygon {
   const rect = asLocalRect(computePolygonBounds(rings));
-  return asLocalPolygon(rings as unknown as LocalPoint[][], rect, antiAliased);
+  return asLocalPolygon(rings as unknown as LocalPoint[][], rect, flags);
 }
 
 // ─────────────────────────── Ring Inversion ────────────────────────────────────
@@ -273,7 +274,7 @@ export function invertRings(rings: Point2D[][], boundingW: number, boundingH: nu
  * @param rect        The bounding rectangle in local (canvas) coordinates.
  * @param antiAliased Whether the selection edge should be anti-aliased (default false for pixel-aligned rect).
  */
-export function rectToLocalPolygon(rect: LocalRect, antiAliased: boolean = false): LocalPolygon {
+export function rectToLocalPolygon(rect: LocalRect, flags?: PolygonFlags): LocalPolygon {
   const { x, y, w, h } = rect;
   const ring: LocalPoint[] = [
     { x, y } as LocalPoint,
@@ -281,7 +282,14 @@ export function rectToLocalPolygon(rect: LocalRect, antiAliased: boolean = false
     { x: x + w, y: y + h } as LocalPoint,
     { x, y: y + h } as LocalPoint,
   ];
-  return asLocalPolygon([ring], asLocalRect({ x, y, w, h }), antiAliased);
+  // NOT `{ antiAliased: false, ...flags }`: a caller passing an EXPLICIT
+  // undefined (e.g. `{ antiAliased: maybeUndefined }`) would spread over and
+  // silently flip the rect default from hard to AA-on.
+  return asLocalPolygon([ring], asLocalRect({ x, y, w, h }), {
+    antiAliased: flags?.antiAliased ?? false,
+    ssdepMode: flags?.ssdepMode,
+    feather: flags?.feather,
+  });
 }
 
 /**
@@ -298,7 +306,7 @@ export function rectToLocalPolygon(rect: LocalRect, antiAliased: boolean = false
  * @param rect        The bounding rectangle of the ellipse in local (canvas) coordinates.
  * @param antiAliased Whether the selection edge should be anti-aliased (default true).
  */
-export function ellipseToLocalPolygon(rect: LocalRect, antiAliased: boolean = true): LocalPolygon {
+export function ellipseToLocalPolygon(rect: LocalRect, flags?: PolygonFlags): LocalPolygon {
   const { x, y, w, h } = rect;
   const cx = x + w / 2;
   const cy = y + h / 2;
@@ -310,6 +318,6 @@ export function ellipseToLocalPolygon(rect: LocalRect, antiAliased: boolean = tr
     const angle = (2 * Math.PI * i) / N;
     ring.push({ x: cx + rx * Math.cos(angle), y: cy + ry * Math.sin(angle) } as LocalPoint);
   }
-  return asLocalPolygon([ring], asLocalRect({ x, y, w, h }), antiAliased);
+  return asLocalPolygon([ring], asLocalRect({ x, y, w, h }), flags);
 }
 

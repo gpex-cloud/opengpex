@@ -117,6 +117,20 @@ export const CMD_LAYER_VIA_COPY = 'cmd.layer_via_copy';
 export const CMD_LAYER_VIA_CUT = 'cmd.layer_via_cut';
 
 /**
+ * Plugin-level wrapper around `adv.layer.clip.copy`.
+ * Owns the Cmd+C keyboard shortcut and reads the feather signal before
+ * delegating to the core command with the feather payload.
+ */
+export const CMD_CLIPBOARD_COPY = 'cmd.clipboard_copy';
+
+/**
+ * Plugin-level wrapper around `adv.layer.clip.cut`.
+ * Owns the Cmd+X keyboard shortcut and reads the feather signal before
+ * delegating to the core command with the feather payload.
+ */
+export const CMD_CLIPBOARD_CUT = 'cmd.clipboard_cut';
+
+/**
  * Cmd+Shift+I — Invert selection (selected ↔ unselected).
  * Constructs a polygon where the outer ring = canvas boundary and inner rings =
  * original selection, using evenodd fill rule. Does NOT switch tools.
@@ -194,16 +208,16 @@ export type ClipFamily = 'regular' | 'irregular';
 export type ClipToolAAMap = Record<ClipTool, boolean>;
 
 /**
- * Factory defaults for per-tool AA presets. Matches the historical behaviour
- * of a fresh selection (curved/irregular AA tools default ON; rect / wand are
- * hard-edged). The toggle command persists user overrides on top of this map.
+ * Factory defaults for per-tool AA presets. Every tool starts hard-edged
+ * (AA off — pixel-exact selections are the default product behaviour); the
+ * toggle command persists session overrides on top of this map.
  */
 export const DEFAULT_CLIP_TOOL_AA: ClipToolAAMap = {
   rect: false,
-  pathellipse: true,
-  lasso: true,
+  pathellipse: false,
+  lasso: false,
   wand: false,
-  sam: true,
+  sam: false,
 };
 
 export interface ClipToolStrategy {

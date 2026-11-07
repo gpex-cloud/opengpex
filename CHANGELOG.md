@@ -2,6 +2,23 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.49
+
+- Layers: Copy, Cut and both "Layer via" commands are now driven by a single clip strategy — one rules table decides the outcome for every layer type, replacing scattered per-command logic. Bitmap layers (images, mosaic paint, solid color) keep their lossless crops; text, brush, pen and shape layers produce exact pixel fragments of the selected area while the source layer stays fully editable behind the cut hole
+- Layers: merging is now driven by one merge strategy — merge selected layers, merge down and merge visible share a single rules table. A set of cut fragments from the same source merges losslessly into one logical layer; a set that includes its own source heals that source in place instead of duplicating it; everything else (mixed layer kinds, different grades, cross-asset sets) bakes into the bottom layer with every layer's color treatment intact. Text layers now merge into a complete paint layer — previously merging two text layers produced a broken text layer
+- Layers: merged results keep the identity of the bottom layer involved — its name and its group. Merging layer1/layer2/layer3 yields layer3, and merging across group boundaries lands the result in the bottom layer's group
+- Layers panel: merge buttons show a spinner while a merge is running and lock the other merge actions; layer rows color-code logical (cyan) and baked (pink) layers; Delete in the layer menu now requires a double-click confirmation; Refocus moved into the layer menu, and Move In no longer lists the layer's current group
+- Layers: a new setting, "Heal cut holes on delete" (layers panel / workspace settings), controls whether deleting a cut fragment also removes its hole from the source layer. Turning it off keeps the hole as content — the Merge Fragments menu counts only fragments that still exist
+- Layers: the Merge Back and Merge Fragments menu entries now reflect reality — entries disappear when their counterpart layer was deleted, and the fragments counter only lists layers that can actually be merged
+- Reliability: changing the selected layer no longer produces an undo step. Undo now always rewinds the last real edit, restoring the layer selection together with the document
+- Engine: a shared decision-table runtime now drives both the file ingest matrix and the new clip strategy (first-match rules with explicit wildcards); the ingest decision behavior is unchanged and fully regression-covered
+- Selection: Feather is now part of the selection itself. Drawing a selection picks up the toolbar's feather value, and with a selection active the toolbar edits that selection's feather immediately as you type — no extra click needed (clicking away in a selection tool clears the selection). With no selection, the toolbar value sets the default for the next one, and it always shows the active selection's feather
+- Selection: feather now travels with the selection everywhere — Copy, Cut, Layer via Copy, Layer via Cut, Apply as Mask and Delete (drill) all follow the selection's own feather instead of a toolbar value. Combining selections (Shift/Alt), Invert and Offset keep the feather attached to the new outline
+- Selection: brush strokes inside a feathered selection fade out softly across the selection edge instead of clipping hard at it (eraser and mosaic keep their hard-edged constraint for now)
+- Layers: a color layer created with "Fill as New Layer" gets soft edges when the selection is feathered
+- Peel: peeling a feathered selection produces a soft-edged fragment and a matching soft hole in the source layer — peel previously always cut hard regardless of the selection's feather
+- Workspace: rotating or flipping the canvas now keeps the selection's recorded angle, so displacement/angle readouts stay correct after canvas transforms
+
 ## 2.0.48
 
 - Peel: fragments peeled from a layer now rebuild their outline from the actual pixels (alpha tracing) at the moment they are committed — the fragment layer records its true cut shape, and it survives later transforms; a bounding box is only used when the trace finds nothing

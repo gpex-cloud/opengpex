@@ -29,7 +29,7 @@ import {
 import {
   asWorldRect, asLocalRect, asWorldPoint, asViewportRect,
   GeometryService, Frame, Layer, WorldRect, IMatrix3x3, LayerPoseOverride,
-  CameraState, Rect, Point2D, Dimensions, WorldPoint,
+  CameraState, Rect, Point2D, Dimensions, WorldPoint, PolygonFlags,
   ViewportPoint, CameraCenterOptions, WorldShape, LocalShape, LocalRect, Shape, NormalizedState,
   LocalPolygon, WorldPolygon, CubicSegment, PenPathData
 } from '@opengpex/editor/core/types';
@@ -233,17 +233,17 @@ export function createGeometryService(): GeometryService {
       solveGizmoResizeScale: (mode, pointerLocalX, pointerLocalY, boxW, boxH, opts) =>
         solveGizmoResizeScale(mode, pointerLocalX, pointerLocalY, boxW, boxH, opts),
       measureGizmoResizeAnchor: (poly, thetaRad, mode) => measureGizmoResizeAnchor(poly, thetaRad, mode),
-      regularShapeToLocalPolygon: (tool: 'rect' | 'pathellipse', rect: LocalRect, antiAliased?: boolean) =>
+      regularShapeToLocalPolygon: (tool: 'rect' | 'pathellipse', rect: LocalRect, flags?: PolygonFlags) =>
         tool === 'rect'
-          ? rectToLocalPolygon(rect, antiAliased ?? false)
-          : ellipseToLocalPolygon(rect, antiAliased ?? true),
-      ellipsePathToLocalPolygon: (rect: LocalRect, antiAliased?: boolean) => ellipsePathToLocalPolygon(rect, antiAliased),
+          ? rectToLocalPolygon(rect, flags)
+          : ellipseToLocalPolygon(rect, flags ?? { antiAliased: true }),
+      ellipsePathToLocalPolygon: (rect: LocalRect, flags?: PolygonFlags) => ellipsePathToLocalPolygon(rect, flags),
       polygonToShape: ((poly: LocalPolygon | WorldPolygon) => polygonToShape(poly as LocalPolygon)) as GeometryService['polygon']['polygonToShape'],
     },
     point2d: {
       shapeToPoint2D: (shape: LocalShape) => shapeToPoint2D(shape),
       point2dToLocalShape: (rings: readonly Point2D[][], antiAliased: boolean) => point2dToLocalShape(rings, antiAliased),
-      point2dToLocalPolygon: (rings: Point2D[][], antiAliased: boolean) => point2dToLocalPolygon(rings, antiAliased),
+      point2dToLocalPolygon: (rings: Point2D[][], flags?: PolygonFlags) => point2dToLocalPolygon(rings, flags),
       invertRings: (rings: Point2D[][], boundingW: number, boundingH: number) => invertRings(rings, boundingW, boundingH),
       isBoundingRing: (ring: readonly Point2D[], boundingW: number, boundingH: number) => isBoundingRing(ring, boundingW, boundingH),
       computePolygonBounds: (rings: Point2D[][]) => computePolygonBoundsP2D(rings),

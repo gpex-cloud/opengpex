@@ -20,9 +20,11 @@
 import { GeometryService, PixelService, AssetService, LayerService, LayerUpdateTx, LayerEditor, asLocalShape, EditorActions, EditorData, Layer, VectorMask, BitmapMask, GamutId } from '@opengpex/editor/core/types';
 import { sniffPngGamut } from '@opengpex/editor/core/files/utils';
 import { LayerFactory } from './factory';
-import { createFragmentOperations } from './services/clipping';
+import { createFragmentOperations } from './services/clipping/strategies';
 import { createResampleOperations } from './services/resizing';
 import { createBakeOperations } from './services/baking';
+import { createClipRoutingOperations } from './services/clipping/route';
+import { createMergeOperations } from './services/merging';
 
 export function createLayerService(
   geometry: GeometryService,
@@ -35,9 +37,22 @@ export function createLayerService(
   const fragmentOps = createFragmentOperations(geometry, pixels, assets);
   const resampleOps = createResampleOperations(geometry, pixels, assets);
   const bakeOps = createBakeOperations(geometry, pixels, assets);
+  const clipRoutingOps = createClipRoutingOperations(geometry, fragmentOps, bakeOps);
 
-  return {
+  // The merge entry consumes the service itself (bakeToAsset, updateLayer,
+  // removeLayers, activate), so it cannot be built inside the literal — the
+  // method here just delegates to an implementation that is wired right
+  // after the literal, over the assembled service.
+  const mergeOps: { impl: LayerService['mergeLayers'] } = {
+    // Replaced synchronously right after the service literal below — never
+    // called before that.
+    impl: (_frame, _participants, _options) => {
+      throw new Error('[LayerService] mergeLayers is wired after service construction');
+    },
+  };
+  const service: LayerService = {
     ...LayerFactory,
+    mergeLayers: (frame, participants, options) => mergeOps.impl(frame, participants, options),
 
     updateLayer: (frameId, runner) => {
       const state = getState();
@@ -203,36 +218,52 @@ export function createLayerService(
     },
 
     // Upgraded version: supports passing either a single ID or an array of IDs (multi-selection delete)
-    removeLayers: (frameId: string, layerIds: string | string[]) => {
+    removeLayers: (frameId: string, layerIds: string | string[], opts?: { cutLinks?: 'break-link' | 'ignore-link' }) => {
       const frame = getState().frames.byId[frameId];
       if (!frame) return;
 
+      // What happens to a removed cut fragment's hole on its source:
+      //   'break-link' (default — a plain delete): deletion never heals (2026-11-08
+      //     ruling). The hole stays as content but loses its `assocLayerId`,
+      //     so it renders at its true cut line (the renderer reads that
+      //     field's presence as the cut-seam backing switch) and no longer
+      //     counts as a mergeable fragment. Restoring the source is Merge
+      //     Back / Merge Fragments' job.
+      //   'ignore-link': touch no mask — for callers that already wrote the
+      //     sources' masks themselves (Merge Back) or must leave the
+      //     rendering exactly as it is (bake: the merge preserves
+      //     the picture, and a backed hole re-rendered unlinked would grow by
+      //     the backing bias). Writing from this snapshot would also clobber
+      //     those callers' just-dispatched mask writes.
+      const cutLinks: 'break-link' | 'ignore-link' = opts?.cutLinks ?? 'break-link';
       const targetIds = Array.isArray(layerIds) ? layerIds : [layerIds];
       const allLayers = frame.layers.order.map(id => frame.layers.byId[id]);
       const idsToRemove = LayerFactory.collectDescendants(targetIds, allLayers);
 
-      // ── Cut-link cleanup: when deleting a cut fragment, auto-remove its hole mask from the source layer ──
-      // Collect all mask IDs to remove per source layer first (avoid stale-snapshot overwrites
-      // when multiple fragments / triplet sub-layers target the same source).
-      const maskRemovalMap = new Map<string, Set<string>>();
-      for (const removeId of idsToRemove) {
+      // Per source layer: mask ids whose pointer to unlink (delete).
+      // Collected up front to avoid stale-snapshot overwrites when multiple
+      // fragments / triplet sub-layers target the same source.
+      const maskIdsBySource = new Map<string, Set<string>>();
+      for (const removeId of cutLinks === 'ignore-link' ? [] : idsToRemove) {
         const layer = frame.layers.byId[removeId];
         if (!layer || layer.hostId) continue; // Only host layers trigger cleanup (skip exchange/frag triplet sub-layers)
         const sourceLayerId = layer.metadata?.sourceLayerId as string | undefined;
         const assocMaskId = layer.metadata?.assocMaskId as string | undefined;
         if (sourceLayerId && assocMaskId && !idsToRemove.has(sourceLayerId)) {
-          if (!maskRemovalMap.has(sourceLayerId)) maskRemovalMap.set(sourceLayerId, new Set());
-          maskRemovalMap.get(sourceLayerId)!.add(assocMaskId);
+          if (!maskIdsBySource.has(sourceLayerId)) maskIdsBySource.set(sourceLayerId, new Set());
+          maskIdsBySource.get(sourceLayerId)!.add(assocMaskId);
         }
       }
-      // Apply collected removals in a single updateLayer per source (no stale-read issues)
-      for (const [sourceLayerId, maskIds] of maskRemovalMap) {
+      for (const [sourceLayerId, maskIds] of maskIdsBySource) {
         const sourceLayer = frame.layers.byId[sourceLayerId];
-        if (sourceLayer?.vectorMasks) {
-          const updatedMasks = sourceLayer.vectorMasks.filter(m => !maskIds.has(m.id));
-          if (updatedMasks.length !== sourceLayer.vectorMasks.length) {
-            actions.updateLayer(frameId, sourceLayerId, { vectorMasks: updatedMasks });
-          }
+        if (!sourceLayer?.vectorMasks) continue;
+        const updatedMasks = sourceLayer.vectorMasks
+          .map(m => (cutLinks === 'break-link' && maskIds.has(m.id)) ? { ...m, assocLayerId: undefined } : m);
+        const original = sourceLayer.vectorMasks;
+        const changed = updatedMasks.length !== original.length
+          || updatedMasks.some((m, i) => m !== original[i]);
+        if (changed) {
+          actions.updateLayer(frameId, sourceLayerId, { vectorMasks: updatedMasks });
         }
       }
 
@@ -277,6 +308,7 @@ export function createLayerService(
     clipToLogicalLayer: fragmentOps.clipToLogicalLayer,
     clipToPhysicalLayer: fragmentOps.clipToPhysicalLayer,
     clipToExistLayer: fragmentOps.clipToExistLayer,
+    clipFragment: clipRoutingOps.clipFragment,
 
     // ── Resample operations (delegated to resizing.ts) ──────────────────────────
     resampleLayer: resampleOps.resampleLayer,
@@ -337,6 +369,10 @@ export function createLayerService(
       });
     },
   };
+
+  mergeOps.impl = createMergeOperations(geometry, service, actions).mergeLayers;
+
+  return service;
 }
 
 export * from './factory';

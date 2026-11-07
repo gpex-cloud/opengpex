@@ -177,7 +177,7 @@ export function writePeelSession(frame: Frame, session: PeelSession | null): Pic
 }
 
 /**
- * The peel session codec, registered by the ClipOptions plugin. Normalizing
+ * The peel session codec, registered by the ClipOverlay plugin. Normalizing
  * on purpose: a hydrated 'committing' folds to 'peeled' so a refresh landing
  * mid-commit recovers a RETRYABLE session. No `clone` (tiny payload,
  * structuredClone fallback is fine) and no `transform` (the record holds only

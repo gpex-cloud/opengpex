@@ -245,7 +245,7 @@ export function decomposeMatrix(M: IMatrix3x3, refRotation: number = 0): Decompo
  *   flip_h:   (px, py) → (oldW - px, py)
  *   flip_v:   (px, py) → (px, oldH - py)
  */
-function transformPolygon(
+export function transformPolygon(
   poly: LocalPolygon,
   container: { w: number; h: number },
   op: GeometryOp
@@ -266,8 +266,24 @@ function transformPolygon(
     ring.map(p => asLocalPoint(transformPoint(p.x, p.y)))
   );
 
+  // Orientation record folds with the SAME rigid transform as the vertices
+  // (orientation decree — the record must always reflect the polygon's real
+  // on-canvas direction, never reset by a transport): rotate adds ±90° in the
+  // same clockwise-positive convention as rotatePolygon; a single mirror
+  // reverses the rotation direction, so both flips negate the record.
+  const orientation = poly.orientationDeg ?? 0;
+  const nextOrientation =
+    op === 'rotate_r' ? orientation + 90
+    : op === 'rotate_l' ? orientation - 90
+    : op === 'flip_h' || op === 'flip_v' ? -orientation
+    : orientation;
+
   const nextBounds = asLocalRect(computePolygonBounds(nextRings));
-  return asLocalPolygon(nextRings, nextBounds, poly.antiAliased);
+  return asLocalPolygon(nextRings, nextBounds, {
+    antiAliased: poly.antiAliased,
+    feather: poly.feather,
+    orientationDeg: nextOrientation,
+  });
 }
 
 

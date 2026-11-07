@@ -321,6 +321,13 @@ export interface StrokeParams {
   readonly confinement?: {
     readonly rings: readonly (readonly (readonly [number, number])[])[];
     readonly antiAliased: boolean;
+    /**
+     * Feather radius (px) frozen with the snapshot (undefined/0 = hard).
+     * The coverage bake derives `1 - smoothstep(-f, f, d)` around the rings,
+     * so a feathered stroke falls off across the selection edge instead of
+     * clipping hard at it. Same multiply-once contract as the hard case.
+     */
+    readonly feather?: number;
   };
 }
 
@@ -521,17 +528,11 @@ export interface VectorSubMask {
   readonly antiAliased: boolean;
   /**
    * Signed distance-field bias in document px, added to `d_signed` before the
-   * coverage ramp (`d_used = d + distBiasPx`). Positive values push the ramp
-   * INWARD (the mask erodes): a bias of 1 on an INVERTED sub-mask makes it
-   * fully opaque across the entire 1px AA band of its complement instead of
-   * exactly complementary.
-   *
-   * Used by cut-to-layer seam backing: a hole mask associated with a fragment
-   * layer (`assocLayerId`) must fully back the fragment's partial edge
-   * coverage — two complementary semi-transparent layers composite to
-   * α = 1 − c(1−c) (a 25% background dip at c=0.5, the visible seam), while
-   * "hole opaque wherever the fragment is partial" composites to α ≡ 1, making
-   * the unmoved cut invisible. `undefined`/0 ⇒ exact geometric ramp (default).
+   * coverage ramp (`d_used = d + distBiasPx`); positive values erode the mask.
+   * No producer sets it today — a cut is an exact complementary split (the
+   * hole keeps 1 − c where the fragment keeps c), so every sub-mask renders
+   * its exact geometric ramp. The slot stays in the sub-mask table layout and
+   * the fill-pass honours it, so the packing is unchanged.
    */
   readonly distBiasPx?: number;
 }

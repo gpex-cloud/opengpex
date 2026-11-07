@@ -115,22 +115,15 @@ export function translateLocalShapeToOrigin(shape: LocalShape, dx: number, dy: n
 }
 
 /**
- * Cut-to-layer seam-backing distance bias (document px). The minimum bias that
- * makes an inverted hole mask fully opaque across the fragment's whole 1px AA
- * band: with `d_used = d + 1`, `1 − clamp(0.5 − d_used) = clamp(d + 1.5)` is 1
- * wherever the fragment's `clamp(0.5 − d)` is partial (d > −0.5), so
- * `1 − (1 − cov_fragment)(1 − cov_hole) ≡ 1` — the unmoved cut composites back
- * to the original pixels with no background dip.
- */
-export const CUT_SEAM_BACKING_BIAS_PX = 1;
-
-/**
  * Build the DECLARATIVE {@link VectorMaskDesc} for a layer's vmask set.
  * No CPU rasterization, no upload — the descriptor is consumed on the GPU:
  *   • analytic — a SINGLE unfeathered-or-feathered rect/circle collapses to a
- *     per-fragment SDF in `layer.ts`/`blend.ts`, no intermediate texture. `rect`
- *     is a NORMALIZED FRACTION `[cx/w, cy/h, halfW/w, halfH/h]` so it is
- *     resolution-independent (vmaskUniform multiplies back to content px).
+ *     per-fragment SDF in `layer.ts`/`blend.ts`, no intermediate texture.
+ *     `rect` is a NORMALIZED FRACTION `[cx/w, cy/h, halfW/w, halfH/h]` so it
+ *     is resolution-independent (vmaskUniform multiplies back to content px).
+ *     A cut hole renders exactly like any other mask: its coverage is the
+ *     complement of the fragment's along the same contour and feather, so a
+ *     cut is a complementary split (the fragment keeps m, the source 1−m).
  *   • polygon — every other case (paths, ≥2 stacked masks) becomes a sub-mask
  *     table baked by the compute fill-pass (`prepareVmaskSources.ts`). Each mask
  *     contributes its rings (layer-local px, via `shapeToPoint2D`) plus its own
@@ -166,8 +159,10 @@ export function buildVectorMaskDesc(
         // UI to set it). A rect's edges are pixel-snapped upstream
         // (geometry/operators/snapping.ts), so the flag is effectively a no-op
         // for plain rects, but the mapping stays uniform for the ellipse
-        // legacy branch.
-        hard: m.shape.antiAliased === false,
+        // legacy branch. Feather takes precedence over the flag, exactly as
+        // on the polygon path: the shader binarizes AFTER the smoothstep, so a
+        // hard bit on a feathered mask would silently discard the feather.
+        hard: m.shape.antiAliased === false && !((m.feather ?? 0) > 0),
       };
     }
   }
@@ -180,36 +175,6 @@ export function buildVectorMaskDesc(
     // downgrades the fill-pass to the 1-bit binary edge. Display-only modes
     // (e.g. the future ssdepMode) must never reach the GPU descriptor.
     antiAliased: m.shape.antiAliased !== false,
-    // Cut-to-layer seam backing: a hole mask tied to a cut fragment
-    // (`assocLayerId`) must fully back the
-    // fragment's edge band instead of being exactly complementary — two
-    // complementary semi-transparent layers composite to α = 1 − c(1−c), a 25%
-    // background dip at the seam center (the visible "dirty seam"; aa-off is
-    // immune because its binary halves never both go partial).
-    //
-    //   • HARD AA cut (feather 0): the fragment's partial band is the 1 px
-    //     `clamp(0.5−d)` ramp; distBiasPx = CUT_SEAM_BACKING_BIAS_PX keeps the
-    //     hole fully opaque across it (isocline 1 px tighter).
-    //   • FEATHERED cut (feather f > 0): the same dip re-appears spread over the
-    //     2f smoothstep band (real-device finding 2026-10-12 — the old
-    //     "feathered cuts are inherently seamless" assumption ignored that
-    //     complementary ≠ backing under source-over). Fragment coverage
-    //     αf(d) = 1 − smoothstep(−f, f, d) is partial on d ∈ (−f, f); the
-    //     inverted hole's keep-coverage is αh(d) = smoothstep(−f, f, d + b),
-    //     which saturates at 1 for d ≥ f − b. Full backing therefore needs
-    //     f − b ≤ −f, i.e. b = 2f exactly: the hole's erase ramp lives entirely
-    //     where the fragment is already opaque, the unmoved composite is
-    //     α ≡ 1, and each separated piece keeps its own smoothstep edge (the
-    //     hole's soft contour just sits 2f tighter than the cut line).
-    //   • Binary hard edges (antiAliased: false, feather 0) need no backing —
-    //     never partial. The feather branch ignores the AA flag on purpose:
-    //     feather > 0 always takes the smoothstep branch (feather takes
-    //     precedence over the AA flag).
-    distBiasPx: m.assocLayerId === undefined
-      ? undefined
-      : (m.feather ?? 0) === 0
-        ? (m.shape.antiAliased !== false ? CUT_SEAM_BACKING_BIAS_PX : undefined)
-        : (m.feather ?? 0) * 2,
   }));
   return { kind: 'polygon', subMasks };
 }

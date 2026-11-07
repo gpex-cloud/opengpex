@@ -22,9 +22,9 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands } from '@opengpex/editor/core/context';
 import { Layer, Frame } from '@opengpex/editor/core/types';
-import { ADV_LAYER_UNION_MERGE } from '@opengpex/editor/core/advanced/protocols';
+import { ADV_LAYER_MERGE_SELECTED } from '@opengpex/editor/core/advanced/protocols';
 import type { LayersDrawerCommandsMap } from './commands.d';
-import { calcFullLayerStack, computeUnionStatus, type UnionStatus } from './utils';
+import { calcFullLayerStack, computeMergeStatus, type MergeStatus } from './utils';
 import { MASK_EDITING_KEY, type MaskEditingSignal } from './protocols';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 
@@ -226,25 +226,28 @@ export function useMaskEditMonitor() {
     }, [maskEditing, interactionMode, activeCraft, activeFrame, actions]);
 }
 
-// ─── useUnionMerge ─────────────────────────────────────────────────────────────
+// ─── useMergeSelected ─────────────────────────────────────────────────────────────
 
 /**
- * useUnionMerge: Union merge multi-selection state and logic.
+ * useMergeSelected: Merge selected multi-selection state and logic.
  *
  * Encapsulates:
- * - Selection state (which layers are marked for union)
- * - Status computation (green/amber/red via computeUnionStatus)
- * - Derived values (canUnionMerge, color class)
- * - Action handler (execute union merge command)
+ * - Selection state (which layers are marked for merge)
+ * - Status computation (green/red via computeMergeStatus)
+ * - Derived values (canMergeSelected, color class)
+ * - Action handler (execute the merge-selected command)
  */
-export function useUnionMerge(activeFrame: Frame) {
+export function useMergeSelected(activeFrame: Frame) {
     const { actions } = useEditorServices();
 
-    const [unionSelection, setUnionSelection] = useState<string[]>([]);
+    const [mergeSelection, setMergeSelection] = useState<string[]>([]);
+    // True while the merge command (potentially a long bake on large images)
+    // is in flight; drives the button's spinner and disables re-dispatch.
+    const [merging, setMerging] = useState(false);
 
-    // Toggle union mark — sort by layer order index (lowest index first) on insertion
-    const toggleUnionMark = useCallback((layerId: string) => {
-        setUnionSelection(prev => {
+    // Toggle merge mark — sort by layer order index (lowest index first) on insertion
+    const toggleMergeMark = useCallback((layerId: string) => {
+        setMergeSelection(prev => {
             if (prev.includes(layerId)) {
                 return prev.filter(id => id !== layerId);
             }
@@ -255,26 +258,32 @@ export function useUnionMerge(activeFrame: Frame) {
         });
     }, [activeFrame.layers.order]);
 
-    // Compute union status for smart color indicator
-    const unionStatus: UnionStatus = useMemo(
-        () => computeUnionStatus(unionSelection, activeFrame),
-        [unionSelection, activeFrame]
+    // Compute merge status for the smart color indicator
+    const mergeStatus: MergeStatus = useMemo(
+        () => computeMergeStatus(mergeSelection, activeFrame),
+        [mergeSelection, activeFrame]
     );
 
-    // Button is only enabled when status is green or amber (mergeable).
-    const canUnionMerge = unionStatus !== 'red';
+    // Button is only enabled when status is green (mergeable).
+    const canMergeSelected = mergeStatus !== 'red';
 
-    const handleUnionMerge = useCallback(() => {
-        if (!canUnionMerge) return;
-        actions.executeCommand(ADV_LAYER_UNION_MERGE, { layerIds: unionSelection });
-        setUnionSelection([]);
-    }, [unionSelection, canUnionMerge, actions]);
+    const handleMergeSelected = useCallback(() => {
+        if (!canMergeSelected || merging) return;
+        setMergeSelection([]);
+        setMerging(true);
+        // The dispatcher forwards the command's return value, so the async
+        // bake route can be awaited here to drive the loading state.
+        void Promise.resolve(
+            actions.executeCommand(ADV_LAYER_MERGE_SELECTED, { layerIds: mergeSelection })
+        ).finally(() => setMerging(false));
+    }, [mergeSelection, canMergeSelected, merging, actions]);
 
     return {
-        unionSelection,
-        unionStatus,
-        canUnionMerge,
-        toggleUnionMark,
-        handleUnionMerge,
+        mergeSelection,
+        mergeStatus,
+        canMergeSelected,
+        merging,
+        toggleMergeMark,
+        handleMergeSelected,
     };
 }

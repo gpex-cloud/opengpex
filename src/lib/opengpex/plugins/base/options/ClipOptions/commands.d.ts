@@ -33,6 +33,8 @@ export interface ClipOptionsCommandsMap {
   drillSelectionCmd: CommandInstance;
   layerViaCopyCmd: CommandInstance;
   layerViaCutCmd: CommandInstance;
+  clipboardCopyCmd: CommandInstance;
+  clipboardCutCmd: CommandInstance;
   selectFromAlphaCmd: CommandInstance<void, Promise<void>>;
   invertSelectionCmd: CommandInstance;
   offsetSelectionCmd: CommandInstance<{ distance: number }, Promise<void>>;

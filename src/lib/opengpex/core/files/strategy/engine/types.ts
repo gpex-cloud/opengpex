@@ -30,6 +30,7 @@
 import type { TRC } from '@opengpex/editor/core/types';
 import type { ColorIdentity } from '@opengpex/editor/core/storage/asset/AssetStore';
 import type { SourceFormat, ColorSpaceId } from '../../types';
+import type { MatchPattern } from '@opengpex/editor/core/helpers/decision-table';
 
 /**
  * Decode channel / primary asset producer.
@@ -88,8 +89,8 @@ export type DecodeChannel =
  */
 export type OrientationResponsibility = 'auto' | 'explicit' | 'none';
 
-/** Matching pattern for decision input conditions */
-export type MatchPattern<T> = T | readonly T[] | ((val: T) => boolean) | '*';
+/** Matching pattern for decision input conditions (shared decision table runtime). */
+export type { MatchPattern } from '@opengpex/editor/core/helpers/decision-table';
 
 /** Normalized matching input context */
 export interface NormalizedMatchContext {
@@ -131,7 +132,7 @@ export interface DecisionCondition {
   readonly bitDepth: MatchPattern<number>;
   readonly colorSpace: MatchPattern<ColorSpaceId>;
   readonly isMultiFrame?: MatchPattern<boolean | undefined>; // undeclared = single-frame (value equality)
-  readonly hevcHardDecode?: MatchPattern<boolean | undefined>; // Defaults to '*'
+  readonly hevcHardDecode?: MatchPattern<boolean | undefined>; // undeclared = probe not admitted (value equality)
   /**
    * Source transfer characteristic (`metadata.raw.transfer`, the HDR seam):
    * `'pq' | 'hlg'` admit the HDR rows; real SDR files leave the field UNSET
@@ -143,7 +144,8 @@ export interface DecisionCondition {
   readonly transfer?: MatchPattern<'pq' | 'hlg' | 'sdr' | undefined>;
   /**
    * Gain-map carrier flag (`metadata.raw.hasGainmap`): `true` admits the
-   * 19-gm rows (linear f16 SDR-base master). Absent pattern = '*'.
+   * 19-gm rows (linear f16 SDR-base master). Undeclared = non-carrier only
+   * (value equality against `undefined`); use '*' to ignore the flag.
    */
   readonly hasGainmap?: MatchPattern<boolean | undefined>;
 }

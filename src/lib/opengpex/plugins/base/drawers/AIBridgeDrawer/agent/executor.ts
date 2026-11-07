@@ -130,7 +130,9 @@ export async function executeAgentTool(
 
       // ── Selection operations ────────────────────────────────────────────
       case 'drill_selection': {
-        actions.adv.layer.clip.drill.execute({ feather: 0 });
+        // The drill follows the selection's own feather (selection-feather
+        // upgrade) — the command layer carries no feather parameter.
+        actions.adv.layer.clip.drill.execute();
         // Exit clip mode (back to pan) — selection data stays on the frame
         // but the clip overlay is dismissed so the user sees the clean result.
         // Uses the ClipOptions exit command which properly discards any peel triplet.

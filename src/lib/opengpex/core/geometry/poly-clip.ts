@@ -385,3 +385,109 @@ export function differencePathWithPath(
 
   return multiPolygonToPathData(result);
 }
+
+// ─── Selection ↔ Region Overlap ─────────────────────────────────────────────
+
+/**
+ * How a selection relates to a region it is applied to.
+ * - `full`: the region lies entirely inside the selection AND every point of
+ *   the region is at least `featherPx` away from the selection boundary, so
+ *   the soft transition band never touches the region.
+ * - `partial`: any other non-empty overlap — the region pokes outside the
+ *   selection, or the feather band crosses into the region. A selection that
+ *   sits wholly inside the region is also `partial`: the result is cropped to
+ *   the selection either way.
+ * - `none`: the interiors do not overlap.
+ */
+export type RegionOverlap = 'full' | 'partial' | 'none';
+
+/**
+ * Overlap area below this (square pixels) is treated as empty. Rigid
+ * transforms between coordinate spaces leave floating-point slivers along
+ * coincident edges; anything this small cannot affect a single rendered pixel.
+ */
+const OVERLAP_AREA_EPSILON = 1e-3;
+
+function multiPolygonArea(mp: MultiPolygon): number {
+  let area = 0;
+  for (const polygon of mp) {
+    for (let k = 0; k < polygon.length; k++) {
+      const ringArea = ringAreaFromCoords(polygon[k]);
+      area += k === 0 ? ringArea : -ringArea;
+    }
+  }
+  return area;
+}
+
+function pointSegmentDistance(p: Pt, a: Pt, b: Pt): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+function segmentsCross(a: Pt, b: Pt, c: Pt, d: Pt): boolean {
+  const orient = (p: Pt, q: Pt, r: Pt) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  const o1 = orient(a, b, c), o2 = orient(a, b, d), o3 = orient(c, d, a), o4 = orient(c, d, b);
+  return o1 * o2 < 0 && o3 * o4 < 0;
+}
+
+/** Smallest distance between any edge of `ringsA` and any edge of `ringsB`. */
+function minBoundaryDistance(ringsA: Pt[][], ringsB: Pt[][]): number {
+  let best = Infinity;
+  for (const ra of ringsA) {
+    for (let i = 0; i < ra.length; i++) {
+      const a = ra[i], b = ra[(i + 1) % ra.length];
+      for (const rb of ringsB) {
+        for (let j = 0; j < rb.length; j++) {
+          const c = rb[j], d = rb[(j + 1) % rb.length];
+          if (segmentsCross(a, b, c, d)) return 0;
+          best = Math.min(
+            best,
+            pointSegmentDistance(a, c, d),
+            pointSegmentDistance(b, c, d),
+            pointSegmentDistance(c, a, b),
+            pointSegmentDistance(d, a, b),
+          );
+        }
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * Classify how `selection` overlaps `region` (both even-odd ring lists in ONE
+ * coordinate space, outer rings before their holes).
+ *
+ * The `full` test is deliberately strict: a feathered selection only counts
+ * as covering the region when the whole feather band stays outside it,
+ * measured as the boundary-to-boundary distance against `featherPx` (the band
+ * is taken to extend `featherPx` on both sides of the selection edge). With no
+ * feather, a region exactly flush with the selection edge is `full`.
+ *
+ * When the boolean library rejects degenerate input the result is `partial`:
+ * that routes the caller onto the per-selection fragment path, which is
+ * correct for any real overlap, whereas a wrong `full` would hand back the
+ * whole layer untouched.
+ */
+export function classifyRegionOverlap(selection: Pt[][], region: Pt[][], featherPx = 0): RegionOverlap {
+  const sel = ringsToMultiPolygon(selection);
+  const reg = ringsToMultiPolygon(region);
+  if (sel.length === 0 || reg.length === 0) return 'none';
+
+  let intersection: MultiPolygon;
+  let outside: MultiPolygon;
+  try {
+    intersection = polygonClipping.intersection(reg, sel) as MultiPolygon;
+    outside = polygonClipping.difference(reg, sel) as MultiPolygon;
+  } catch {
+    return 'partial';
+  }
+
+  if (multiPolygonArea(intersection) < OVERLAP_AREA_EPSILON) return 'none';
+  if (multiPolygonArea(outside) >= OVERLAP_AREA_EPSILON) return 'partial';
+  if (featherPx <= 0) return 'full';
+  return minBoundaryDistance(region, selection) >= featherPx ? 'full' : 'partial';
+}

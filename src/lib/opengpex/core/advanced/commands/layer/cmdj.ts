@@ -20,137 +20,76 @@
 'use client';
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
-import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**
- * CMD+J commands: Create new layers by copying or cutting selections.
- *
- * Uses the unified `clipToLogicalLayer` entry point which resolves the optimal
- * strategy (logical / vectorMask) based on selection type, layer
- * geometry, feather, and AA settings.
+ * Insert a clip product directly above its source layer and, for Layer via
+ * Cut, append the source mask in the same undo step.
+ */
+async function clipToNewLayer(
+  ctx: EditorContextValue,
+  mode: 'copyToLayer' | 'cutToLayer',
+): Promise<void> {
+  const { activeFrame, activeLayer, actions, state } = ctx;
+  const isClipMode = state.interaction.interactionMode === 'clip';
+  const latestLayer = (activeFrame && activeLayer)
+    ? (actions.fast?.latestLayer?.(activeFrame.id, activeLayer.id) || activeLayer)
+    : null;
+
+  if (!activeFrame || !latestLayer || !isClipMode) {
+    actions.setInteraction({ hud: { message: 'No editable layer selected', type: 'error' } });
+    return;
+  }
+  // Layer via Cut edits the source (mask); Layer via Copy only reads it.
+  if (mode === 'cutToLayer' && latestLayer.locked) {
+    actions.setInteraction({ hud: { message: 'Layer is locked', type: 'error' } });
+    return;
+  }
+
+  const result = await ctx.layers.clipFragment(activeFrame, latestLayer, { mode });
+  if (!result.newLayer) {
+    if (result.hud) actions.setInteraction({ hud: { message: result.hud, type: 'error' } });
+    return;
+  }
+
+  if (result.sourceMask) {
+    const sourceMask = result.sourceMask;
+    ctx.layers.updateLayer(activeFrame.id, (tx) => {
+      tx.edit(latestLayer.id).patch({
+        vectorMasks: [...(latestLayer.vectorMasks || []), sourceMask],
+      });
+    });
+  }
+  const insertAt = ctx.layers.getInsertIndexAbove(activeFrame, latestLayer.id);
+  ctx.layers.addLayer(activeFrame.id, result.newLayer, insertAt);
+}
+
+/**
+ * CMD+J commands: create a new layer from the selection (or the whole layer)
+ * by copying or cutting. Routing for every layer type lives in the clip
+ * decision table behind `LayerService.clipFragment`.
  */
 export const LayerCmdJCommands = {
   copyToLayer: {
     id: P.ADV_LAYER_CMDJ_COPY,
     name: 'Copy to Layer',
     undoable: true,
-    execute: async (ctx: EditorContextValue, payload?: { feather?: number }): Promise<void> => {
-      const { activeFrame, activeLayer, state } = ctx;
-      const isClipMode = state.interaction.interactionMode === 'clip';
-
-      if (!activeFrame || !activeLayer || !isClipMode || activeLayer.type !== 'image') {
-        ctx.actions.setInteraction({
-          hud: { message: 'No editable layer selected', type: 'error' }
-        });
-        return;
-      }
-
+    execute: async (ctx: EditorContextValue): Promise<void> => {
       try {
-        const latestLayer = ctx.actions.fast.latestLayer(activeFrame.id, activeLayer.id) || activeLayer;
-        const box = getClipBox(activeFrame);
-        const feather = payload?.feather ?? 0;
-
-        if (box) {
-          const result = await ctx.layers.clipToLogicalLayer(activeFrame, latestLayer, { feather });
-          if (!result) {
-            ctx.actions.setInteraction({
-              hud: { message: 'Area is empty', type: 'error' }
-            });
-            return;
-          }
-          result.newLayer.locked = false;
-          const insertAt = ctx.layers.getInsertIndexAbove(activeFrame, latestLayer.id);
-          ctx.layers.addLayer(activeFrame.id, result.newLayer, insertAt);
-        } else {
-          // No selection: duplicate entire layer
-          const newName = ctx.layers.getNewLayerName(
-            activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), `${latestLayer.name} Copy`
-          );
-          const { id: _, hostId: _h, role: _r, locked: _l, interactive: _i, ...layerData } = latestLayer;
-          let metadata = layerData.metadata;
-          if (metadata?.assocMaskId) {
-            const { assocMaskId: _, ...restMeta } = metadata;
-            metadata = restMeta;
-          }
-          const newLayer = ctx.layers.getNewLayer({
-            ...layerData,
-            metadata,
-            name: newName,
-            vectorMasks: ctx.layers.cleanInheritedMasks(layerData.vectorMasks),
-            bitmapMasks: ctx.layers.cleanInheritedMasks(layerData.bitmapMasks),
-          });
-          const insertAt = ctx.layers.getInsertIndexAbove(activeFrame, latestLayer.id);
-          ctx.layers.addLayer(activeFrame.id, newLayer, insertAt);
-        }
+        await clipToNewLayer(ctx, 'copyToLayer');
       } catch (err) {
         console.error('[ClipCommands] Layer via Copy failed:', err);
       }
     },
-  } as EditorCommand<{ feather?: number } | undefined, Promise<void>>,
+  } as EditorCommand<undefined, Promise<void>>,
 
   cutToLayer: {
     id: P.ADV_LAYER_CMDJ_CUT,
     name: 'Cut to Layer',
     undoable: true,
-    execute: async (ctx: EditorContextValue, payload?: { feather?: number }): Promise<void> => {
-      const { activeFrame, activeLayer, actions, state } = ctx;
-      const isClipMode = state.interaction.interactionMode === 'clip';
-
-      const latestLayer = (activeFrame && activeLayer)
-        ? (actions.fast?.latestLayer?.(activeFrame.id, activeLayer.id) || activeLayer)
-        : null;
-
-      if (!activeFrame || !latestLayer || !isClipMode || latestLayer.type !== 'image') {
-        actions.setInteraction({
-          hud: { message: 'No editable layer selected', type: 'error' }
-        });
-        return;
-      }
-
-      if (latestLayer.locked) {
-        actions.setInteraction({
-          hud: { message: 'Layer is locked', type: 'error' }
-        });
-        return;
-      }
-
+    execute: async (ctx: EditorContextValue): Promise<void> => {
       try {
-        const box = getClipBox(activeFrame);
-        if (!box) {
-          actions.setInteraction({
-            hud: { message: 'No active selection', type: 'error' }
-          });
-          return;
-        }
-
-        const feather = payload?.feather ?? 0;
-
-        // Create fragment via unified strategy resolver (mode:'cut' generates sourceHole)
-        const result = await ctx.layers.clipToLogicalLayer(activeFrame, latestLayer, { feather, mode: 'cut' });
-        if (!result) {
-          actions.setInteraction({
-            hud: { message: 'Area is empty', type: 'error' }
-          });
-          return;
-        }
-
-        // Punch the hole into the source layer: the service hands back a
-        // fully-formed VectorMask, appended verbatim (same write shape the
-        // peel session uses for its hole).
-        if (result.holeMask) {
-          const holeMask = result.holeMask;
-          ctx.layers.updateLayer(activeFrame.id, (tx) => {
-            tx.edit(latestLayer.id).patch({
-              vectorMasks: [...(latestLayer.vectorMasks || []), holeMask],
-            });
-          });
-        }
-
-        // Add the fragment layer directly above the source layer
-        result.newLayer.locked = false; // New layers must never inherit lock state
-        const insertAt = ctx.layers.getInsertIndexAbove(activeFrame, latestLayer.id);
-        ctx.layers.addLayer(activeFrame.id, result.newLayer, insertAt);
+        await clipToNewLayer(ctx, 'cutToLayer');
       } catch (err) {
         console.error('[ClipCommands] Layer via Cut failed:', err);
       }

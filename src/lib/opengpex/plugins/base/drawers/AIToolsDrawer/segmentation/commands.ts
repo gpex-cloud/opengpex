@@ -389,7 +389,7 @@ export const SEG_COMMANDS = {
             ring.map(p => asLocalPoint({ x: Math.round(p.x), y: Math.round(p.y) }))
           );
           const layerBounds = asLocalRect(ctx.geometry.polygon.computePolygonBounds(layerRings));
-          const layerPoly = asLocalPolygon(layerRings, layerBounds, true);
+          const layerPoly = asLocalPolygon(layerRings, layerBounds, { antiAliased: true });
           const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(
             layerPoly, activeLayer!, activeFrame!
           );
