@@ -37,6 +37,7 @@ import {
   asLocalPoint,
   asLocalPolygon,
   asLocalRect,
+  PolygonFlags,
 } from '@opengpex/editor/core/types';
 import { clipComputeClient } from '../../../options/ClipOptions/workers/client';
 import { intersectRingsWithRect } from '@opengpex/editor/core/geometry/poly-clip';
@@ -86,12 +87,10 @@ export async function combineWithSelection(
 
   const rings = resp.rings.map(ring => ring.map(p => asLocalPoint(p)));
   const bounds = geometry.polygon.computePolygonBounds(rings);
-  return asLocalPolygon(
-    rings as LocalPoint[][],
-    asLocalRect(bounds),
-    base.antiAliased ?? true,
-    base.ssdepMode ?? false
-  );
+  // Entity-flag inheritance: the BASE selection owns the combined result's
+  // rendering flags (AA / ssdep / feather) — the incoming drawn shape only
+  // contributes geometry, matching the AA inheritance rule documented above.
+  return asLocalPolygon(rings as LocalPoint[][], asLocalRect(bounds), base);
 }
 
 /**
@@ -106,9 +105,9 @@ export async function combineWithSelection(
  */
 export function intersectPolygonWithCanvas(
   rings: LocalPoint[][],
-  antiAliased: boolean,
   canvas: { w: number; h: number },
-  geometry: PolygonBoundsService
+  geometry: PolygonBoundsService,
+  flags?: PolygonFlags
 ): LocalPolygon | null {
   const clipped = intersectRingsWithRect(
     rings.map(ring => ring.map(p => ({ x: p.x, y: p.y }))),
@@ -117,7 +116,7 @@ export function intersectPolygonWithCanvas(
   if (!clipped || clipped.length === 0) return null;
   const outRings = clipped.map(ring => ring.map(p => asLocalPoint(p))) as LocalPoint[][];
   const bounds = geometry.polygon.computePolygonBounds(outRings);
-  return asLocalPolygon(outRings, asLocalRect(bounds), antiAliased);
+  return asLocalPolygon(outRings, asLocalRect(bounds), flags);
 }
 
 /**

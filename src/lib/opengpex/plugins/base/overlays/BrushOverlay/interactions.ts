@@ -496,13 +496,21 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
       const strokePoints =
         points.length === 1 ? [points[0], { ...points[0] }] : points;
       // Selection intersection: clamp the committed box to the selection's
-      // bounding rect (+1px AA margin) — coverage outside is zero, so those
-      // texels would be allocated for nothing. The snapshot is frozen
-      // (deep copy, re-based into the tightened box) so the committed stroke
-      // is replay-self-sufficient: undo/redo re-renders it identically even
-      // after the selection changes or clears.
+      // reach — the polygon bbox expanded by the feather's soft band (each
+      // side f, coverage only reaches zero at distance f beyond the contour;
+      // under-clipping here would cut off the stroke's soft falloff) plus the
+      // 1px AA margin. The snapshot is frozen (deep copy, re-based into the
+      // tightened box) so the committed stroke is replay-self-sufficient:
+      // undo/redo re-renders it identically even after the selection changes
+      // or clears.
+      const featherPad = confinement?.feather ? Math.ceil(confinement.feather) : 0;
       const clipRect = confinement
-        ? { x: confinement.rect.x - 1, y: confinement.rect.y - 1, w: confinement.rect.w + 2, h: confinement.rect.h + 2 }
+        ? {
+            x: confinement.rect.x - featherPad - 1,
+            y: confinement.rect.y - featherPad - 1,
+            w: confinement.rect.w + 2 * featherPad + 2,
+            h: confinement.rect.h + 2 * featherPad + 2,
+          }
         : undefined;
       const tight = tightenStroke(strokePoints, params.size, frame.canvas, clipRect);
 

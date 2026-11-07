@@ -29,7 +29,11 @@ import {
 } from '../../../../options/ClipOptions/protocols';
 import { createTransformHandler, TransformIntent } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import { makeClipToolGuard, discardPeelOnFreshDraw } from '../guard';
-import { booleanOpFromModifiers, combineWithSelection, createLiveBooleanPreview } from '../boolean';
+import {
+  booleanOpFromModifiers,
+  combineWithSelection,
+  createLiveBooleanPreview
+} from '../boolean';
 
 /**
  * ClipBoxHandler: Core interaction handler for clip tool.
@@ -144,8 +148,9 @@ export const createClipBoxHandler = (): InteractionHandler => {
       if (isCreate) {
         lastCreateRect = clippedRect;
       }
+      const gestureFeather = e.state.getStateSignal<number | undefined>(ClipOptionsAPI.signals.clipFeather) ?? 0;
       const newPoly = clippedRect
-        ? e.geometry.polygon.regularShapeToLocalPolygon(activeTool, clippedRect, antiAliased)
+        ? e.geometry.polygon.regularShapeToLocalPolygon(activeTool, clippedRect, { antiAliased, feather: gestureFeather })
         : null;
 
       // Boolean drag: stream the COMBINED shape instead of the raw rect so
@@ -204,7 +209,10 @@ export const createClipBoxHandler = (): InteractionHandler => {
           const activeTool = 'rect' as const;
           const currentShape = getRegularClipShape(frame);
           const antiAliased = currentShape?.antiAliased;
-          const newPoly = e.geometry.polygon.regularShapeToLocalPolygon(activeTool, fullCanvasRect, antiAliased);
+          const gestureFeather = e.state.getStateSignal<number | undefined>(ClipOptionsAPI.signals.clipFeather) ?? 0;
+          const newPoly = e.geometry.polygon.regularShapeToLocalPolygon(activeTool, fullCanvasRect, {
+            antiAliased, feather: gestureFeather,
+          });
           tx.update({ confinement: newPoly }, 'frame');
         }
       },
@@ -223,7 +231,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
           const rawRect = lastCreateRect;
           if (!op || !base || !rawRect) return;
           const incoming = e.geometry.polygon.regularShapeToLocalPolygon(
-            'rect', rawRect, base.antiAliased ?? true
+            'rect', rawRect, { antiAliased: base.antiAliased ?? true }
           );
           const combined = await combineWithSelection(base, incoming, op, e.geometry);
           tx.update({ confinement: combined }, 'frame');

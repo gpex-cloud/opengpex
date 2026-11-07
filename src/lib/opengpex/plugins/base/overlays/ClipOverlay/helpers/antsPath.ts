@@ -123,7 +123,7 @@ export function simplifyPolygonForAnts(
 
   // Safe cast: simplifyRing preserves the original LocalPoint objects (Douglas–Peucker
   // only drops vertices, never creates new ones), so the output is still LocalPoint[].
-  return asLocalPolygon(simplified as unknown as LocalPoint[][], asLocalRect(poly.rect), poly.antiAliased, poly.ssdepMode === true);
+  return asLocalPolygon(simplified as unknown as LocalPoint[][], asLocalRect(poly.rect), poly);
 }
 
 /**

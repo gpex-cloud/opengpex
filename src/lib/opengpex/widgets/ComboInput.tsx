@@ -51,8 +51,20 @@ interface ComboInputProps<T extends string | number> {
    * `onChange` is still called live for callers that need it; pass a no-op if unused.
    */
   onCommit?: (val: T) => void;
+  /**
+   * Live-draft echo mode: while focused the field edits an internal draft (seeded
+   * from `value`, reverted on Escape, cleared on blur) so every keystroke echoes
+   * instantly without waiting for the external value to round-trip through an
+   * async store. Unlike commit mode nothing fires on blur — `onChange` fires per
+   * keystroke and the caller owns commit timing (e.g. a debounced write). Pair
+   * with a `value` that lags the keystrokes.
+   */
+  liveDraft?: boolean;
   /** Opt-in stable test id stamped on the inner <input> (automation/a11y). */
   inputTestId?: string;
+  /** Live mode focus hooks — for callers that manage a local editing draft. */
+  onFocus?: () => void;
+  onBlur?: () => void;
 }
 
 /**
@@ -74,16 +86,21 @@ export default function ComboInput<T extends string | number>({
   suffix,
   bare = false,
   inputTestId,
+  liveDraft = false,
+  onFocus: onFocusProp,
+  onBlur: onBlurProp,
 }: ComboInputProps<T>) {
   const [isOpen, setIsOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // ─── Commit-on-blur mode: internal local state ─────────────────────────
-  // When `onCommit` is provided, the input uses local draft state during editing.
-  // The external value is only updated on Enter / blur / Tab (commit gestures).
+  // ─── Draft modes: internal local state while focused ────────────────────
+  // Commit mode (onCommit): draft commits on Enter / blur / Tab.
+  // Live-draft mode (liveDraft): draft NEVER commits — pure local echo, the
+  // caller owns commit timing (debounced writes etc).
   const isCommitMode = !!onCommit;
+  const isDraftMode = isCommitMode || liveDraft;
   const [draft, setDraft] = useState(String(value ?? ''));
   const [isFocused, setIsFocused] = useState(false);
 
@@ -155,11 +172,14 @@ export default function ComboInput<T extends string | number>({
       <input 
         data-testid={inputTestId}
         type="text" 
-        value={isCommitMode ? (isFocused ? draft : String(value ?? '')) : (value || '')}
+        value={isDraftMode ? (isFocused ? draft : String(value ?? '')) : (value ?? '')}
         readOnly={readOnly}
         onClick={handleInputClick}
         inputMode={type === 'number' ? 'numeric' : 'text'}
-        onFocus={() => { if (isCommitMode) { setIsFocused(true); setDraft(String(value ?? '')); } }}
+        onFocus={() => {
+          if (isDraftMode) { setIsFocused(true); setDraft(String(value ?? '')); }
+          onFocusProp?.();
+        }}
         onBlur={() => {
           if (isCommitMode) {
             setIsFocused(false);
@@ -167,13 +187,26 @@ export default function ComboInput<T extends string | number>({
             const parsed = type === 'number' ? (parseInt(draft.replace(/\D/g, '')) || 0) : draft;
             if (parsed !== value) onCommit!(parsed as T);
             else setDraft(String(value ?? ''));
+          } else if (liveDraft) {
+            setIsFocused(false);
           }
+          onBlurProp?.();
         }}
         onChange={(e) => {
           if (readOnly) return;
           if (isCommitMode) {
             // Commit mode: only update local draft, do NOT call onChange
             setDraft(type === 'number' ? e.target.value.replace(/[^\d]/g, '') : e.target.value);
+          } else if (liveDraft) {
+            // Live-draft mode: echo into the local draft AND fire onChange —
+            // the caller commits on its own schedule (debounced, etc).
+            const raw = type === 'number' ? e.target.value.replace(/[^\d]/g, '') : e.target.value;
+            setDraft(raw);
+            if (type === 'number') {
+              onChange((parseInt(raw) || 0) as T);
+            } else {
+              onChange(raw as T);
+            }
           } else {
             if (type === 'number') {
               const val = parseInt(e.target.value.replace(/\D/g, '')) || 0;
@@ -186,7 +219,7 @@ export default function ComboInput<T extends string | number>({
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
             setIsOpen(false);
-            if (isCommitMode) {
+            if (isDraftMode) {
               // Revert draft to external value on Escape
               setDraft(String(value ?? ''));
               e.currentTarget.blur();

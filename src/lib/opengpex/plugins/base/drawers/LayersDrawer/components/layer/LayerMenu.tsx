@@ -33,6 +33,7 @@ import {
   FolderInput,
   FolderOutput,
   PenTool,
+  Maximize2,
 } from "lucide-react";
 import { useEditorServices, usePluginCommands } from "@opengpex/editor/core/context";
 import { ADV_LAYER_MERGE_BACK } from "@opengpex/editor/core/advanced/protocols";
@@ -58,8 +59,10 @@ interface LayerMenuProps {
   setIsMasksExpanded: (v: boolean) => void;
   /** Whether this layer can be merged back to its source (is a cut fragment with sourceLayerId + assocMaskId) */
   canMergeBack?: boolean;
-  /** Whether this layer has fragments that can be merged back (has hole masks with assocLayerId) */
+  /** Whether this layer has fragments that can be merged back (hole masks whose fragment still exists) */
   canMergeBackAll?: boolean;
+  /** Live fragment count behind `canMergeBackAll` (menu description) */
+  mergeFragmentsCount?: number;
   /** Available group layers this layer can be moved into (empty if none or already in a group) */
   availableGroups?: Array<{ id: string; name: string }>;
   /** If this layer is in a group, its current groupId */
@@ -84,18 +87,26 @@ export const LayerMenu = React.memo(
     setIsMasksExpanded,
     canMergeBack,
     canMergeBackAll,
+    mergeFragmentsCount,
     availableGroups,
     currentGroupId,
     currentGroupName,
   }: LayerMenuProps) => {
     const { actions } = useEditorServices();
-    const { removeCmd, duplicateLayerCmd, moveToGroupCmd, moveOutOfGroupCmd } = usePluginCommands<LayersDrawerCommandsMap>();
+    const { removeCmd, duplicateLayerCmd, moveToGroupCmd, moveOutOfGroupCmd, syncOverlayCmd } = usePluginCommands<LayersDrawerCommandsMap>();
 
     const options: ActionOption[] = [];
 
-    // Duplicate Layer — always available
+    // Refocus — re-project the layer's clip state onto the overlay (always available)
     options.push({
-      label: "Duplicate Layer",
+      label: "Refocus",
+      value: "refocus",
+      icon: <Maximize2 size={12} />,
+    });
+
+    // Duplicate — always available
+    options.push({
+      label: "Duplicate",
       value: "duplicate",
       icon: <Copy size={12} />,
     });
@@ -134,6 +145,7 @@ export const LayerMenu = React.memo(
         label: "Merge Fragments",
         value: "merge-all-fragments",
         icon: <Layers size={12} />,
+        description: `(${mergeFragmentsCount ?? 0})`,
       });
     }
 
@@ -147,12 +159,14 @@ export const LayerMenu = React.memo(
       });
     }
 
-    // Move to group — sub-menu with available groups
-    if (availableGroups && availableGroups.length > 0) {
+    // Move to group — sub-menu with available groups, EXCLUDING the layer's
+    // current group (moving into the group it already belongs to is a no-op).
+    const targetGroups = (availableGroups ?? []).filter(g => g.id !== currentGroupId);
+    if (targetGroups.length > 0) {
       options.push({
         label: "Move In",
         icon: <FolderInput size={12} />,
-        children: availableGroups.map(g => ({
+        children: targetGroups.map(g => ({
           label: g.name,
           value: `move-to-group:${g.id}`,
           icon: <FolderInput size={12} />,
@@ -173,15 +187,20 @@ export const LayerMenu = React.memo(
 
     if (canDelete) {
       options.push({
-        label: "Delete Layer",
+        label: "Delete",
         value: "delete",
         icon: <Trash2 size={12} />,
         variant: "danger",
+        // Double-click confirmation: first click arms a rose progress bar,
+        // second click within the window deletes (DelayedConfirm).
+        confirm: 1600,
       });
     }
 
     const handleSelect = (val: string) => {
-      if (val === "duplicate") {
+      if (val === "refocus") {
+        syncOverlayCmd?.execute({ frameId: activeFrameId, layerId });
+      } else if (val === "duplicate") {
         duplicateLayerCmd?.execute({ layerId });
       } else if (val === "open-sublayers") {
         setIsSubLayersExpanded(true);

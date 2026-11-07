@@ -52,6 +52,8 @@ export const LAYERS_COMMANDS = {
             if (!frame) return;
 
             const layer = frame.layers.byId[layerId];
+            // Deleting never heals cut holes (restoring the source is Merge
+            // Back / Merge Fragments); removeLayers' default is exactly that.
             if (layer?.type === 'group') {
                 // Deleting a group → also delete all children that belong to this group
                 const childIds = frame.layers.order.filter(id => frame.layers.byId[id].groupId === layerId);
@@ -147,7 +149,7 @@ export const LAYERS_COMMANDS = {
                 const rings = ctx.geometry.point2d.shapeToPoint2D(shape);
                 if (rings.length === 0) return;
 
-                const localPoly = ctx.geometry.point2d.point2dToLocalPolygon(rings, shape.antiAliased !== false);
+                const localPoly = ctx.geometry.point2d.point2dToLocalPolygon(rings, { antiAliased: shape.antiAliased !== false });
                 const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(localPoly, layer, frame);
 
                 // Use the recorded source clip tool if available, otherwise default to 'lasso'.
@@ -282,7 +284,7 @@ export const LAYERS_COMMANDS = {
                 const rings = ctx.geometry.point2d.shapeToPoint2D(shape);
                 if (rings.length === 0) return;
 
-                const localPoly = ctx.geometry.point2d.point2dToLocalPolygon(rings, shape.antiAliased !== false);
+                const localPoly = ctx.geometry.point2d.point2dToLocalPolygon(rings, { antiAliased: shape.antiAliased !== false });
                 const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(localPoly, latestLayer, frame);
 
                 // Read source clip tool from parent layer metadata — pass

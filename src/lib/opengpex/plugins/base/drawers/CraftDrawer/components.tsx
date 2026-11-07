@@ -240,12 +240,14 @@ const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
  * - activeCraft='text' → TextPanel
  * - activeCraft='brush'|'eraser' → BrushPanel
  * - activeCraft=null && layer.type='text' -> TextPanel (inferred)
- * - activeCraft=null && layer.type='paint' -> BrushPanel (inferred)
+ * - activeCraft=null && mosaic-stamped paint layer -> MosaicPanel (inferred)
+ * - activeCraft=null && brush-stamped paint layer -> BrushPanel (inferred)
+ * - activeCraft=null && unstamped paint layer (e.g. baked text) -> generic tip
  * - activeCraft=null && marker layer selected -> MarkerPanel (inferred)
  * - others -> generic tip
  */
 export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
-  const { activeCraft, activeLayerIsText, activeLayerIsPaint, activeLayerIsMarker, activeLayerIsMosaic, activeLayerIsPen } =
+  const { activeCraft, activeLayerIsText, activeLayerIsBrush, activeLayerIsMarker, activeLayerIsMosaic, activeLayerIsPen } =
     useCraftDrawer();
   const { actions } = useEditorServices();
 
@@ -271,7 +273,7 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
     activeCraft === "brush" ||
     activeCraft === "eraser" ||
     activeCraft === "restore" ||
-    (activeCraft === null && activeLayerIsPaint);
+    (activeCraft === null && activeLayerIsBrush);
 
   const showPlaceholder =
     !showTextPanel &&

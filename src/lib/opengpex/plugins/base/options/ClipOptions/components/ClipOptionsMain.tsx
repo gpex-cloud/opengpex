@@ -29,9 +29,6 @@ import {
   Hand,
   Move,
   ImageUpscale,
-  Scissors,
-  Copy as CopyIcon,
-  ClipboardPaste,
   ScissorsLineDashed,
   Feather,
   Expand,
@@ -43,6 +40,7 @@ import {
   usePluginSignals,
 } from "@opengpex/editor/core/context";
 import { getRegularClipShape } from "@opengpex/editor/core/helpers/selection";
+import { asLocalPolygon } from "@opengpex/editor/core/types";
 
 import { PenOverlayAPI } from "@opengpex/editor/plugins/base/overlays/PenOverlay/protocols";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
@@ -51,29 +49,32 @@ import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import Popover from "@opengpex/editor/widgets/Popover";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
 import { InvertIcon, AlphaIcon } from "@opengpex/editor/icons";
-import { useClipOptionsCommands } from "./hooks";
+import { useClipOptionsCommands } from "../hooks";
+import { useDebouncedCallback } from "@opengpex/editor/widgets/hooks/useDebouncedCallback";
 import { usePeelCursor } from "@opengpex/editor/plugins/base/overlays/ClipOverlay/peel/usePeelCursor";
-import { CLIP_TOOL_STRATEGIES, type ClipToolStrategy } from "./protocols";
-import type { ClipOptionsSignalsMap } from "./commands.d";
+import { CLIP_TOOL_STRATEGIES, type ClipToolStrategy } from "../protocols";
+import type { ClipOptionsSignalsMap } from "../commands.d";
+import { ASPECT_RATIOS, AspectGrid } from "./AspectGrid";
 
-const ASPECT_RATIOS = [
-  { label: "FREE", value: undefined },
-  { label: "1:1", value: 1 },
-  { label: "4:3", value: 4 / 3 },
-  { label: "3:4", value: 3 / 4 },
-  { label: "16:9", value: 16 / 9 },
-  { label: "9:16", value: 9 / 16 },
-  { label: "2:3", value: 2 / 3 },
-  { label: "3:2", value: 3 / 2 },
-];
-
-/**
- * ClipOptionsMain: Integrated persistent component for clipping and canvas operations
- * Includes clip mode switching, ratio adjustment, and WebP export functions
- */
 export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
   const { state, activeFrame } = useEditorState();
   const { actions, volatileRef } = useEditorServices();
+
+  // Live feather edits: BOTH writes are debounced into one trailing call —
+  // the undoable selection update AND the pluginConfig persistence. The
+  // draft echo covers the display, so nothing needs to happen per keystroke;
+  // blur flushes the pending call (otherwise the field would flash the old
+  // store value and jump 350ms later).
+  const { schedule: scheduleFeatherWrite, flush: flushFeatherWrite } = useDebouncedCallback((value: number) => {
+    persistFeather(value);
+    if (!activeFrame) return;
+    const frame = actions.fast?.latestFrame?.(activeFrame.id);
+    const sel = frame?.confinement;
+    if (!sel) return;
+    actions.updateFrame(activeFrame.id, {
+      confinement: asLocalPolygon(sel.rings, sel.rect, { ...sel, feather: value }),
+    });
+  }, 350);
   const {
     toggleModeCmd,
     exitClipModeCmd,
@@ -98,7 +99,6 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
     supportsAntiAlias,
     isAntiAliased,
     featherValue,
-    setFeatherValue,
     persistFeather,
   } = useClipOptionsCommands();
 
@@ -721,17 +721,27 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
 
           {/*
            * Segment 4: Feather — Independent selection modifier (parallel to AA).
-           * Inline numeric input (commit-on-blur, like the Re-Canvas W/H inputs):
-           * type a value, Enter/blur commits, Escape reverts. Feather is a
-           * selection-level attribute consumed by Apply Mask, Drill, and Cmd+J
-           * operations — not a sub-property of any single action.
+           * Inline numeric input, LIVE apply: every keystroke commits — no
+           * blur/Enter gesture needed (committing on blur forces a click
+           * that, in clip mode, clears the selection via static-click-clear).
+           * Signal + persisted default update immediately; the UNDOABLE
+           * selection write is debounced so typing "10" lands as one undo
+           * step instead of per-digit churn. Feather is a selection-level
+           * attribute consumed by clip commands and stroke constraints —
+           * not a sub-property of any single action.
            */}
           {(() => {
             const featherDisabled = isPanMode || isReCanvas;
             const commitFeather = (val: number) => {
               const clamped = Math.min(250, Math.max(0, Math.round(val) || 0));
-              setFeatherValue(clamped);
-              persistFeather(clamped);
+              // Signal is NOT written here — the linkage effect in hooks.ts
+              // is its single writer and re-derives it from these stores.
+              // Ruling (feather upgrade §A3.4): while a selection is active
+              // the input edits THAT selection's feather live (one undoable
+              // updateFrame — the frozen stroke snapshots are deep copies and
+              // are unaffected); with no selection the debounced write only
+              // settles the creation default.
+              scheduleFeatherWrite(clamped);
             };
             return (
               <Tooltip
@@ -752,9 +762,15 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                   />
                   <ComboInput
                     type="number"
+                    liveDraft
                     value={featherValue}
-                    onChange={() => {}}
-                    onCommit={(val) => commitFeather(Number(val))}
+                    onChange={(val) => commitFeather(Number(val))}
+                    onBlur={() => {
+                      // Flush the pending write BEFORE the field reverts to
+                      // the store value — otherwise it shows stale and jumps
+                      // when the debounce lands.
+                      flushFeatherWrite();
+                    }}
                     disabled={featherDisabled}
                     suffix="px"
                     bare
@@ -781,7 +797,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                 display="inline-flex"
               >
                 <button
-                  onClick={() => applyMaskCmd?.execute({ feather: featherValue })}
+                  onClick={() => applyMaskCmd?.execute(undefined)}
                   disabled={maskDisabled}
                   className={`flex items-center justify-center w-6 h-full transition-colors outline-none select-none
                     ${maskDisabled ? disabledClasses : "hover:bg-[var(--bg-stage)]"}
@@ -977,111 +993,5 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
         </Popover>
       </div>
     </div>
-  );
-});
-
-/**
- * AspectGrid: Shared UI for aspect ratio selection
- */
-function AspectGrid({
-  activeAspect,
-  onSelect,
-}: {
-  activeAspect: number | undefined;
-  onSelect: (val: number | undefined) => void;
-}) {
-  const { activeFrame } = useEditorState();
-  const { geometry } = useEditorServices();
-  const { reCanvasActiveSignal } = usePluginSignals<ClipOptionsSignalsMap>();
-  const isReCanvas = !!reCanvasActiveSignal.value;
-  const clipPoly = (!isReCanvas && activeFrame) ? getRegularClipShape(activeFrame) : undefined;
-  const clipBox = isReCanvas ? activeFrame?.canvasClipBox : (clipPoly ? geometry.polygon.polygonToShape(clipPoly) : undefined);
-  const isEllipse = clipBox?.type === "circle";
-  const isDashed = isEllipse && clipBox?.antiAliased === false;
-
-  return (
-    <div className="grid grid-cols-2 gap-1 mb-1.5">
-      {ASPECT_RATIOS.map((ratio) => (
-        <button
-          key={ratio.label}
-          onClick={() => onSelect(ratio.value)}
-          className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all group/ratio
-            ${
-              activeAspect === ratio.value
-                ? "bg-amber-500/10 border border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]"
-                : "hover:bg-[var(--bg-stage)] border border-transparent"
-            }
-          `}
-        >
-          <div className="relative mb-1">
-            <div
-              className={`border-2 mb-0.5 transition-all
-              ${isDashed ? "border-dashed" : "border-solid"}
-              ${
-                activeAspect === ratio.value
-                  ? "border-amber-500"
-                  : "border-[var(--text-muted)] opacity-30 group-hover/ratio:opacity-100 group-hover/ratio:border-[var(--border-light)]"
-              }
-            `}
-              style={{
-                width: 14,
-                height: Math.max(4, 14 / (ratio.value || 1)),
-                borderRadius: isEllipse ? "50%" : "2px",
-              }}
-            ></div>
-          </div>
-          <span
-            className={`text-[9px] font-black uppercase tracking-widest
-            ${activeAspect === ratio.value ? "text-amber-600 dark:text-amber-400" : "text-[var(--text-muted)]"}
-          `}
-          >
-            {ratio.label}
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/**
- * ClipSelectionActions: Clipboard button group contributed to TOOL_BAR
- * Migrated from LayerPanel to ClipOptions to reinforce semantic consistency of selection operations.
- */
-export const ClipSelectionActions = React.memo(function ClipSelectionActions() {
-  const { state } = useEditorState();
-  const { cutCmd, copyCmd, pasteCmd } = useClipOptionsCommands();
-  return (
-    <>
-      <FancyButton shape="rect" iconOnly
-        onClick={() => cutCmd.execute()}
-        disabled={state.interaction.interactionMode !== "clip"}
-        title={`${cutCmd.name} (${cutCmd.shortcutLabel})`}
-        tooltipPosition="right"
-        variant="ghost"
-        className="w-6 h-6"
-      >
-        <Scissors size={13} />
-      </FancyButton>
-      <FancyButton shape="rect" iconOnly
-        onClick={() => copyCmd.execute()}
-        disabled={state.interaction.interactionMode !== "clip"}
-        title={`${copyCmd.name} (${copyCmd.shortcutLabel})`}
-        tooltipPosition="right"
-        variant="ghost"
-        className="w-6 h-6"
-      >
-        <CopyIcon size={13} />
-      </FancyButton>
-      <FancyButton shape="rect" iconOnly
-        onClick={() => pasteCmd.execute(undefined)}
-        disabled={false}
-        title={`${pasteCmd.name} (${pasteCmd.shortcutLabel})`}
-        tooltipPosition="right"
-        variant="ghost"
-        className="w-6 h-6"
-      >
-        <ClipboardPaste size={13} />
-      </FancyButton>
-    </>
   );
 });

@@ -66,10 +66,14 @@ export function useCraftDrawer() {
   // routes the inferred panel to MosaicPanel instead.
   const activeLayerIsMosaic =
     activeLayer?.type === 'paint' && activeLayer.metadata?.sourceTool === 'mosaic';
+  // Brush identity follows the same stamp. Unstamped paint layers (e.g. the
+  // product of baking text layers together) are plain pixels with no owning
+  // tool, so they infer no panel rather than defaulting to the BrushPanel.
+  const activeLayerIsBrush =
+    activeLayer?.type === 'paint' && activeLayer.metadata?.sourceTool === 'brush';
 
   // Which tool the inferred panel belongs to (only meaningful while no tool
-  // is active; drives the button group's opt-in inverted state). Mosaic
-  // identity wins over the generic paint inference.
+  // is active; drives the button group's opt-in inverted state).
   const inferredCraft: ActiveCraft | null =
     activeCraft === null
       ? activeLayerIsText
@@ -80,7 +84,7 @@ export function useCraftDrawer() {
             ? 'pen'
             : activeLayerIsMosaic
               ? 'mosaic'
-              : activeLayerIsPaint
+              : activeLayerIsBrush
                 ? 'brush'
                 : null
       : null;
@@ -106,7 +110,7 @@ export function useCraftDrawer() {
     }
   }, [activeCraft, activeLayerIsMarker, activeLayer, setSelfConfig]);
 
-  return { activeCraft, activeLayerIsText, activeLayerIsPaint, activeLayerIsMarker, activeLayerIsMosaic, activeLayerIsPen, inferredCraft };
+  return { activeCraft, activeLayerIsText, activeLayerIsPaint, activeLayerIsBrush, activeLayerIsMarker, activeLayerIsMosaic, activeLayerIsPen, inferredCraft };
 }
 
 // ─── useCraftTrigger ───────────────────────────────────────────────────────────

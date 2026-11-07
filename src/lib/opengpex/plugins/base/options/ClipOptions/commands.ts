@@ -114,7 +114,7 @@ export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: Edito
         const toolId: 'rect' | 'pathellipse' = shape.type === 'circle' ? 'pathellipse' : 'rect';
         // confinement stores LocalPolygon — properly convert the patched rect to polygon with rings
         const patched = { ...shape, ...patch } as LocalShape;
-        const poly = geometry.polygon.regularShapeToLocalPolygon(toolId, patched.rect, patched.antiAliased);
+        const poly = geometry.polygon.regularShapeToLocalPolygon(toolId, patched.rect, { antiAliased: patched.antiAliased });
         actions.updateFrame(activeFrame.id, { confinement: poly });
       }
     },
@@ -633,7 +633,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       // an active selection is patched afterwards as a secondary effect.
       const currentMap = (ctx.scoped!.getSignal(P.SIGNAL_CLIP_TOOL_AA) as P.ClipToolAAMap | undefined)
         ?? P.DEFAULT_CLIP_TOOL_AA;
-      const currentAA = currentMap[tool] ?? true;
+      const currentAA = currentMap[tool] ?? false;
       const newAA = !currentAA;
       ctx.scoped!.setSignal(P.SIGNAL_CLIP_TOOL_AA, { ...currentMap, [tool]: newAA });
 
@@ -661,7 +661,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       // rect's toggle pass the supportsAntiAlias guard, so this is dead-path
       // defensive parity with the previous behaviour.
       if (tool === 'rect') {
-        const newPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, clipBox.rect, newAA);
+        const newPoly = ctx.geometry.polygon.regularShapeToLocalPolygon(tool, clipBox.rect, { antiAliased: newAA });
         ctx.actions.updateFrame(frame.id, { confinement: newPoly });
       } else {
         const newPoly = { ...clipBox, antiAliased: newAA, ssdepMode: false };
@@ -705,28 +705,31 @@ export const CLIP_OPTIONS_COMMANDS = {
 
   /**
    * CMD_DRILL_SELECTION — Plugin-level wrapper around `adv.layer.clip.drill`.
-   * Owns the Backspace/Delete keyboard shortcuts and reads the feather signal
-   * before delegating to the core drill command with the feather payload.
+   * Owns the Backspace/Delete keyboard shortcuts. The core drill command
+   * resolves the feather from the active selection (selection-feather
+   * upgrade); no payload is passed here.
    * This keeps core (`clip.ts`) completely independent of plugin signal knowledge.
    */
   drillSelection: {
     id: P.CMD_DRILL_SELECTION,
-    name: 'Delete Selection (Feathered)',
+    name: 'Delete Selection',
     category: 'Selection',
     shortcuts: [
       { key: 'Backspace' },
       { key: 'Delete' }
     ],
     execute: (ctx: EditorContextValue) => {
-      const feather = (ctx.scoped?.getSignal(P.SIGNAL_CLIP_FEATHER) as number) || 0;
-      ctx.actions.adv.layer.clip.drill.execute({ feather });
+      // Feather source decree (selection-feather upgrade): the selection
+      // entity owns the feather — the core command resolves it from
+      // frame.confinement, so no payload is passed here.
+      ctx.actions.adv.layer.clip.drill.execute();
     }
   } as EditorCommand<void, void>,
 
   /**
    * CMD_LAYER_VIA_COPY — Plugin-level wrapper around `adv.layer.cmdj.copy`.
-   * Owns the Cmd+J keyboard shortcut and reads the feather signal before
-   * delegating to the core command with the feather payload.
+   * Owns the Cmd+J keyboard shortcut. The core command resolves the feather
+   * from the active selection (selection-feather upgrade).
    */
   layerViaCopy: {
     id: P.CMD_LAYER_VIA_COPY,
@@ -734,15 +737,17 @@ export const CLIP_OPTIONS_COMMANDS = {
     category: 'Selection',
     shortcuts: [{ key: 'j', meta: true }, { key: 'j', ctrl: true }],
     execute: (ctx: EditorContextValue) => {
-      const feather = (ctx.scoped?.getSignal(P.SIGNAL_CLIP_FEATHER) as number) || 0;
-      ctx.actions.adv.layer.cmdj.copy.execute({ feather });
+      // Feather source decree (selection-feather upgrade): the selection
+      // entity owns the feather — the core command resolves it from
+      // frame.confinement, so no payload is passed here.
+      ctx.actions.adv.layer.cmdj.copy.execute();
     }
   } as EditorCommand<void, void>,
 
   /**
    * CMD_LAYER_VIA_CUT — Plugin-level wrapper around `adv.layer.cmdj.cut`.
-   * Owns the Cmd+Shift+J keyboard shortcut and reads the feather signal before
-   * delegating to the core command with the feather payload.
+   * Owns the Cmd+Shift+J keyboard shortcut. The core command resolves the
+   * feather from the active selection (selection-feather upgrade).
    */
   layerViaCut: {
     id: P.CMD_LAYER_VIA_CUT,
@@ -750,8 +755,51 @@ export const CLIP_OPTIONS_COMMANDS = {
     category: 'Selection',
     shortcuts: [{ key: 'j', meta: true, shift: true }, { key: 'j', ctrl: true, shift: true }],
     execute: (ctx: EditorContextValue) => {
-      const feather = (ctx.scoped?.getSignal(P.SIGNAL_CLIP_FEATHER) as number) || 0;
-      ctx.actions.adv.layer.cmdj.cut.execute({ feather });
+      // Feather source decree (selection-feather upgrade): the selection
+      // entity owns the feather — the core command resolves it from
+      // frame.confinement, so no payload is passed here.
+      ctx.actions.adv.layer.cmdj.cut.execute();
+    }
+  } as EditorCommand<void, void>,
+
+  /**
+   * CMD_CLIPBOARD_COPY — Plugin-level wrapper around `adv.layer.clip.copy`.
+   * Owns the Cmd+C keyboard shortcut (moved off the core command); the core
+   * command resolves the feather from the active selection (selection-feather
+   * upgrade). A feathered partial Copy bakes a soft-edged clipboard PNG; a
+   * whole-layer Copy ignores feather (no contour to soften).
+   */
+  clipboardCopy: {
+    id: P.CMD_CLIPBOARD_COPY,
+    name: 'Copy',
+    category: 'Clipboard',
+    shortcuts: [{ key: 'c', meta: true }, { key: 'c', ctrl: true }],
+    execute: (ctx: EditorContextValue) => {
+      // Feather source decree (selection-feather upgrade): the selection
+      // entity owns the feather — the core command resolves it from
+      // frame.confinement, so no payload is passed here.
+      ctx.actions.adv.layer.clip.copy.execute();
+    }
+  } as EditorCommand<void, void>,
+
+  /**
+   * CMD_CLIPBOARD_CUT — Plugin-level wrapper around `adv.layer.clip.cut`.
+   * Owns the Cmd+X keyboard shortcut (moved off the core command); the core
+   * command resolves the feather from the active selection (selection-feather
+   * upgrade). The source hole carries the same feather, so hole and
+   * clipboard product are complementary; the hole stays unlinked (clipboard
+   * boundary ruling is untouched by feathering).
+   */
+  clipboardCut: {
+    id: P.CMD_CLIPBOARD_CUT,
+    name: 'Cut',
+    category: 'Clipboard',
+    shortcuts: [{ key: 'x', meta: true }, { key: 'x', ctrl: true }],
+    execute: (ctx: EditorContextValue) => {
+      // Feather source decree (selection-feather upgrade): the selection
+      // entity owns the feather — the core command resolves it from
+      // frame.confinement, so no payload is passed here.
+      ctx.actions.adv.layer.clip.cut.execute();
     }
   } as EditorCommand<void, void>,
 
@@ -845,7 +893,7 @@ export const CLIP_OPTIONS_COMMANDS = {
         // Wand results are PIXEL selections: pinned to a hard binary edge
         // (`antiAliased:false, ssdepMode:false`), matching the
         // wand click handler. Softening is Feather's job, not AA's.
-        const layerPoly = ctx.geometry.point2d.point2dToLocalPolygon(adjustedRings, false);
+        const layerPoly = ctx.geometry.point2d.point2dToLocalPolygon(adjustedRings, { antiAliased: false });
         const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(layerPoly, layer, frame);
 
         // ─── Write to wand slot and switch tool to wand ──────────────
@@ -919,7 +967,11 @@ export const CLIP_OPTIONS_COMMANDS = {
       if (response.rings === null) {
         ctx.actions.updateFrame(frame.id, { confinement: null });
       } else {
-        const container = geo.point2dToLocalPolygon(response.rings as Point2D[][], antiAliased);
+        // Feather decree: inverting keeps the region's feather attached to
+        // its (new) contour — geometry changes, the soft band follows.
+        const container = geo.point2dToLocalPolygon(response.rings as Point2D[][], {
+          antiAliased, feather: clipBox.feather,
+        });
         ctx.actions.updateFrame(frame.id, { confinement: container });
       }
     }
@@ -980,7 +1032,11 @@ export const CLIP_OPTIONS_COMMANDS = {
         // Contraction eliminated the selection
         ctx.actions.updateFrame(frame.id, { confinement: null });
       } else {
-        const container = geo.point2dToLocalPolygon(response.rings as Point2D[][], antiAliased);
+        // Feather decree: offsetting moves the contour; the soft band stays
+        // attached to it at the same radius.
+        const container = geo.point2dToLocalPolygon(response.rings as Point2D[][], {
+          antiAliased, feather: clipBox.feather,
+        });
         ctx.actions.updateFrame(frame.id, { confinement: container });
       }
     }
@@ -1012,7 +1068,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       if (!frame) return;
 
       const { w, h } = frame.canvas;
-      const fullCanvasPoly = ctx.geometry.polygon.regularShapeToLocalPolygon('rect', asLocalRect({ x: 0, y: 0, w, h }), false);
+      const fullCanvasPoly = ctx.geometry.polygon.regularShapeToLocalPolygon('rect', asLocalRect({ x: 0, y: 0, w, h }), { antiAliased: false });
       ctx.actions.updateFrame(frame.id, { latestClipTool: 'rect', confinement: fullCanvasPoly });
     }
   } as EditorCommand<void, void>,

@@ -28,46 +28,62 @@ import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import { createFrameFromAsset } from '../frame/importers';
 
 /**
- * Extract common logic of Cut and Copy: generate physical fragment and write to clipboard.
- * Caller must pass an already-resolved non-null `selection`.
+ * Shared body of Copy and Cut: route the active layer through the clip
+ * decision table, write the product to the clipboard (rendered PNG for
+ * external applications, the layer record for in-app paste) and, for Cut,
+ * append the source mask in the same undo step.
  *
- * @param mode - 'copy' (default) or 'cut'. When 'cut', the returned result includes
- *   `sourceHole` so callers can punch a hole in the source layer.
+ * `feather` resolves from the active selection (selection-feather upgrade;
+ * the payload form is an explicit override). A feathered partial
+ * clip routes to the rasterize executor (the routing's `shouldRoutePhysical`
+ * forces it), so the clipboard PNG and the source hole are complementary
+ * across the soft band, and the hole stays UNLINKED — feathering never
+ * changes the clipboard boundary ruling. A whole-layer clip (no selection or
+ * a covering one) ignores feather: feathering softens a selection contour,
+ * and copying a whole layer has no contour.
  */
-async function copyCropBoxToClipboard(
-  ctx: EditorContextValue,
-  mode: 'copy' | 'cut' = 'copy'
-) {
-  const { activeFrame, activeLayer, actions } = ctx;
-  if (!activeFrame || !activeLayer) return null;
+async function clipToClipboard(ctx: EditorContextValue, mode: 'copy' | 'cut'): Promise<void> {
+  const { activeFrame, activeLayer, actions, state } = ctx;
+  const isClipMode = state.interaction.interactionMode === 'clip';
+  const latestLayer = (activeFrame && activeLayer)
+    ? (actions.fast?.latestLayer?.(activeFrame.id, activeLayer.id) || activeLayer)
+    : null;
 
-  const latestLayer = actions.fast.latestLayer(activeFrame.id, activeLayer.id) || activeLayer;
-
-  // 1. Physical blob: always needed for external clipboard (WeChat, Word, etc.)
-  const physicalResult = await ctx.layers.clipToPhysicalLayer(activeFrame, latestLayer);
-  if (!physicalResult) {
-    actions.setInteraction({
-      hud: { message: 'Area is empty', type: 'error' }
-    });
-    return null;
+  if (!activeFrame || !latestLayer || !isClipMode) {
+    actions.setInteraction({ hud: { message: 'No editable layer selected', type: 'error' } });
+    return;
+  }
+  // Cut edits the source (mask); Copy only reads it.
+  if (mode === 'cut' && latestLayer.locked) {
+    actions.setInteraction({ hud: { message: 'Layer is locked', type: 'error' } });
+    return;
   }
 
-  // 2. Preferred layer via unified strategy: lossless logical layer when possible,
-  //    falls back to physical. Also provides sourceHole for correct cut hole.
-  const preferredResult = await ctx.layers.clipToLogicalLayer(activeFrame, latestLayer, { mode });
+  const result = await ctx.layers.clipFragment(activeFrame, latestLayer, { mode });
+  if (!result.newLayer || !result.clipboardUrl) {
+    if (result.hud) actions.setInteraction({ hud: { message: result.hud, type: 'error' } });
+    return;
+  }
 
-  // 3. Composite clipboard write: external software reads physicalResult.url (Blob),
-  //    internal Paste command reads Metadata.layer (preferred strategy result)
-  await ctx.clipboard.writeByUrl(physicalResult.url, {
-    layer: preferredResult ? preferredResult.newLayer : physicalResult.newLayer,
+  await ctx.clipboard.writeByUrl(result.clipboardUrl, {
+    layer: result.newLayer,
     sourceFrameId: activeFrame.id,
   });
 
-  return {
-    ...physicalResult,
-    newLayer: preferredResult ? preferredResult.newLayer : physicalResult.newLayer,
-    holeMask: preferredResult?.holeMask,
-  };
+  if (result.sourceMask) {
+    // A clipboard Cut's hole is written UNLINKED (no assocLayerId): Cut and
+    // Paste are two independent operations, the product goes to the
+    // clipboard and never enters the document, and Paste inserts a plain
+    // layer. Nothing merges back or degrades through this hole — it is
+    // ordinary source content, like any hole whose fragment was deleted
+    // (deletion never heals).
+    const sourceMask = result.sourceMask;
+    ctx.layers.updateLayer(activeFrame.id, tx => {
+      tx.edit(latestLayer.id).patch({
+        vectorMasks: [...(latestLayer.vectorMasks || []), sourceMask],
+      });
+    });
+  }
 }
 
 
@@ -79,38 +95,21 @@ export const LayerClipCommands = {
     id: P.ADV_LAYER_CLIP_COPY,
     name: 'Copy',
     category: 'Clipboard',
+    // The Cmd+C / Ctrl+C shortcut lives on the ClipOptions plugin wrappers
+    // (`clipboardCopy` / `clipboardCut`), which read the persisted feather
+    // signal and delegate here with the payload — the same ownership split
+    // as the Layer via Copy / Cut commands.
     execute: (ctx: EditorContextValue): Promise<void> => {
       const { assets } = ctx;
       return assets.withSession(async () => {
-        const { activeFrame, activeLayer, actions, state } = ctx;
-        const isClipMode = state.interaction.interactionMode === 'clip';
-
-        if (!activeFrame || !activeLayer || !isClipMode || activeLayer.type !== 'image') {
-          actions.setInteraction({
-            hud: { message: 'No editable layer selected', type: 'error' }
-          });
-          return;
-        }
-
         try {
-          const box = getClipBox(activeFrame);
-
-          if (box) {
-            await copyCropBoxToClipboard(ctx);
-          } else {
-            // Without selection: copy the entire layer
-            await ctx.clipboard.writeByUrl(activeLayer.src, {
-              layer: activeLayer,
-              sourceFrameId: activeFrame.id,
-            });
-          }
+          await clipToClipboard(ctx, 'copy');
         } catch (err) {
           console.error('[ClipCommands] Copy operation failed:', err);
         }
       });
     },
-    shortcuts: [{ key: 'c', meta: true }, { key: 'c', ctrl: true }]
-  } as EditorCommand<void, Promise<void>>,
+  } as EditorCommand<undefined, Promise<void>>,
 
   cut: {
     id: P.ADV_LAYER_CLIP_CUT,
@@ -120,64 +119,14 @@ export const LayerClipCommands = {
     execute: (ctx: EditorContextValue): Promise<void> => {
       const { assets } = ctx;
       return assets.withSession(async () => {
-        const { activeFrame, activeLayer, actions, state } = ctx;
-        const isClipMode = state.interaction.interactionMode === 'clip';
-
-        const latestLayer = (activeFrame && activeLayer)
-          ? (actions.fast?.latestLayer?.(activeFrame.id, activeLayer.id) || activeLayer)
-          : null;
-
-        if (!activeFrame || !latestLayer || !isClipMode || latestLayer.type !== 'image') {
-          actions.setInteraction({
-            hud: { message: 'No editable layer selected', type: 'error' }
-          });
-          return;
-        }
-
-        if (latestLayer.locked) {
-          actions.setInteraction({
-            hud: { message: 'Layer is locked', type: 'error' }
-          });
-          return;
-        }
-
         try {
-          const box = getClipBox(activeFrame);
-
-          if (box) {
-            const result = await copyCropBoxToClipboard(ctx, 'cut');
-            if (!result) return;
-
-            // Punch the hole into the source layer: the service hands back a
-            // fully-formed VectorMask, appended verbatim (same write shape the
-            // peel session uses for its hole).
-            if (result.holeMask) {
-              const holeMask = result.holeMask;
-              ctx.layers.updateLayer(activeFrame.id, tx => {
-                tx.edit(latestLayer.id).patch({
-                  vectorMasks: [...(latestLayer.vectorMasks || []), holeMask],
-                });
-              });
-            }
-
-          } else {
-            // Without selection: cut the entire layer (clear content, keep layer)
-            await ctx.clipboard.writeByUrl(latestLayer.src, {
-              layer: latestLayer,
-              sourceFrameId: activeFrame.id,
-            });
-
-            ctx.layers.updateLayer(activeFrame.id, tx => {
-              tx.edit(latestLayer.id).maskLayer();
-            });
-          }
+          await clipToClipboard(ctx, 'cut');
         } catch (err) {
           console.error('[ClipCommands] Cut operation failed:', err);
         }
       });
     },
-    shortcuts: [{ key: 'x', meta: true }, { key: 'x', ctrl: true }]
-  } as EditorCommand<void, Promise<void>>,
+  } as EditorCommand<undefined, Promise<void>>,
 
   paste: {
     id: P.ADV_LAYER_CLIP_PASTE,
@@ -299,6 +248,19 @@ export const LayerClipCommands = {
             id: _id, locked: _locked, interactive: _inter, hostId: _hostId,
             ...layerWithoutId
           } = source;
+          // The clipboard is a boundary for cut links and lineage: Cut and
+          // Paste are independent operations, so the pasted layer is a plain
+          // new layer even when pasted into the frame it was cut from. Its
+          // `assocMaskId` / `sourceLayerId` must not survive — otherwise
+          // Merge Back would restore the source from it and merging with the
+          // source would treat it as a cut fragment, as if the paste
+          // continued the cut.
+          // (The clipboard Cut's source hole is unlinked for the same reason,
+          // see the clipboard Cut above.)
+          const {
+            assocMaskId: _assocMaskId, sourceLayerId: _sourceLayerId,
+            ...pastedMetadata
+          } = source.metadata ?? {};
               // Pose rule: identical canvas sizes share one
           // world coordinate system → keep the source pose verbatim (branch
           // frames match their parent's canvas — in-place paste). Different
@@ -322,6 +284,7 @@ export const LayerClipCommands = {
           );
           const newLayer = ctx.layers.getNewLayer({
             ...layerWithoutId,
+            metadata: pastedMetadata,
             cx: pose.cx,
             cy: pose.cy,
             birthCenter: { cx: pose.cx, cy: pose.cy },
@@ -357,7 +320,7 @@ export const LayerClipCommands = {
     id: P.ADV_LAYER_CLIP_TO_MASK,
     name: 'Apply as Layer Mask',
     undoable: true,
-    execute: async (ctx: EditorContextValue, payload?: { layerId?: string; feather?: number }): Promise<void> => {
+    execute: async (ctx: EditorContextValue, payload?: { layerId?: string }): Promise<void> => {
       const { activeFrame, activeLayer, actions, geometry, layers } = ctx;
       if (!activeFrame) return;
 
@@ -391,8 +354,9 @@ export const LayerClipCommands = {
         return;
       }
 
-      // Read feather radius from payload (0 = no feather)
-      const feather = payload?.feather ?? 0;
+      // Feather source decree (selection-feather upgrade): the selection
+      // entity owns the feather — no command parameter exists.
+      const feather = box.feather ?? 0;
 
       // ═══ Unified VectorMask path (regular + irregular) ═══
       // Project the selection to the target layer's local space *first* so the
@@ -433,13 +397,13 @@ export const LayerClipCommands = {
       // masks are non-destructive to selections. Users can explicitly clear
       // via "Clear Selection" (double-click / resetBox command) if desired.
     },
-  } as EditorCommand<{ layerId?: string; feather?: number } | undefined, Promise<void>>,
+  } as EditorCommand<{ layerId?: string } | undefined, Promise<void>>,
 
   drill: {
     id: P.ADV_LAYER_CLIP_DRILL,
     name: 'Delete Selection',
     undoable: true,
-    execute: async (ctx: EditorContextValue, payload?: { feather?: number }): Promise<void> => {
+    execute: async (ctx: EditorContextValue): Promise<void> => {
       const { activeFrame, activeLayer, actions, geometry } = ctx;
       const isClipActive = ctx.state.interaction.interactionMode === 'clip';
       if (!activeFrame || !activeLayer || !isClipActive) return;
@@ -461,7 +425,9 @@ export const LayerClipCommands = {
           return;
         }
 
-        const feather = payload?.feather ?? 0;
+        // Feather source decree (selection-feather upgrade): the selection
+        // entity owns the feather — no command parameter exists.
+        const feather = box.feather ?? 0;
 
         // ═══ VectorMask path: add inverted VectorMask (no offscreen, no seam) ═══
         // Irregular (path) selections project through the polygon path so multi-ring

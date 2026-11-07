@@ -20,9 +20,9 @@
 
 'use client';
 
-import { useMemo, useEffect, useRef } from 'react';
+import { useMemo, useEffect } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals, usePluginSelfConfig } from '@opengpex/editor/core/context';
-import { asLocalRect, ShapeType, LocalShape } from '@opengpex/editor/core/types';
+import { asLocalRect } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { getActiveTarget } from './commands';
 import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn, CLIP_TOOL_STRATEGIES, DEFAULT_CLIP_TOOL_AA } from './protocols';
@@ -54,21 +54,32 @@ export const useClipOptionsCommands = () => {
     invertSelectionCmd, // ← derived from CMD_INVERT_SELECTION = 'cmd.invert_selection'
     selectFromAlphaCmd, // ← derived from CMD_SELECT_FROM_ALPHA = 'cmd.select_from_alpha'
     offsetSelectionCmd, // ← derived from CMD_OFFSET_SELECTION = 'cmd.offset_selection'
+    clipboardCopyCmd, // ← derived from CMD_CLIPBOARD_COPY = 'cmd.clipboard_copy'
+    clipboardCutCmd, // ← derived from CMD_CLIPBOARD_CUT = 'cmd.clipboard_cut'
   } = usePluginCommands<ClipOptionsCommandsMap>();
 
   const { reCanvasActiveSignal, clipFeatherValueSignal, clipToolAaMapSignal } = usePluginSignals<ClipOptionsSignalsMap>();
 
-  // ─── Feather persistence (Path B: signal for real-time, config for persistence) ──
-  // Read persisted feather from pluginConfig on mount and hydrate the signal.
-  // The signal drives real-time UI; pluginConfig survives page refresh via IndexedDB.
+  // pluginConfig is the ONLY persistent feather store; the signal below is a
+  // derived session mirror of it (single writer: the linkage effect).
   const [selfConfig, setSelfConfig] = usePluginSelfConfig<{ feather?: number }>();
-  const hydratedRef = useRef(false);
+
+  // ─── Feather input ↔ selection linkage (feather upgrade §A3.4) ─────────────
+  // The input displays ONE derived value: the active selection's feather
+  // while a selection exists, otherwise the persisted creation default.
+  // This effect is the SIGNAL'S SINGLE WRITER — the signal is a pure session
+  // mirror of that derived value (creation-time reads in the tool handlers
+  // and this input's display both consume the mirror). One-way state →
+  // signal, no feedback loop: the write path (commitFeather in
+  // components.tsx) updates pluginConfig + selection only, and this effect
+  // re-derives the mirror from them.
+  const hasSelection = !!activeFrame?.confinement;
+  const featherDisplay = hasSelection
+    ? (activeFrame.confinement!.feather ?? 0)
+    : (selfConfig.feather ?? 0);
   useEffect(() => {
-    if (!hydratedRef.current && clipFeatherValueSignal && selfConfig.feather != null) {
-      clipFeatherValueSignal.set(selfConfig.feather);
-      hydratedRef.current = true;
-    }
-  }, [clipFeatherValueSignal, selfConfig.feather]);
+    clipFeatherValueSignal?.set(featherDisplay);
+  }, [clipFeatherValueSignal, featherDisplay]);
 
   // ─── Per-tool AA presets (reactive signal only, no persistence) ────────────
   // The per-tool AA map is a session-scoped tool preference: the signal starts
@@ -111,7 +122,7 @@ export const useClipOptionsCommands = () => {
     // not a selection exists, and toggling keeps both in sync via the command.
     // Tools without AA support (rect/wand) are always hard-edged (false).
     const toolAAMap = (clipToolAaMapSignal?.value as ClipToolAAMap | undefined) ?? DEFAULT_CLIP_TOOL_AA;
-    const isAntiAliased = supportsAntiAlias ? (toolAAMap[clipTool] ?? true) : false;
+    const isAntiAliased = supportsAntiAlias ? (toolAAMap[clipTool] ?? false) : false;
 
 
     return {
@@ -133,8 +144,12 @@ export const useClipOptionsCommands = () => {
       offsetSelectionCmd,
 
       // System Commands (cross-plugin, via actions.adv API — AdvCommandRef)
-      cutCmd: actions.adv.layer.clip.cut,
-      copyCmd: actions.adv.layer.clip.copy,
+      // Clipboard Copy / Cut go through the plugin wrapper commands, which
+      // own the Cmd+C / Cmd+X shortcuts and read the persisted feather
+      // signal — toolbar buttons and keyboard carry the same feathered
+      // semantics.
+      cutCmd: clipboardCutCmd,
+      copyCmd: clipboardCopyCmd,
       pasteCmd: actions.adv.layer.clip.paste,
       drillCmd: actions.adv.layer.clip.drill,
       // Apply selection as bitmap mask on the active layer (purple "Apply Mask" button).
@@ -199,31 +214,12 @@ export const useClipOptionsCommands = () => {
         const finalBox = target.clampRect(nextBox);
         target.updateShape({ rect: finalBox });
       },
-      /**
-       * setShapeType — preserved for backward compatibility (internal callers still
-       * use it via the legacy shape dropdown path). New code should call
-       * `clipToolSetCmd.execute({ tool })` instead, which is the unified entry
-       * for tool switching (covers regular + irregular branches).
-       */
-      setShapeType: (type: ShapeType, antiAliased?: boolean) => {
-        if (!activeFrame) return;
-        if (isReCanvas) {
-          const patch: LocalShape = { ...activeFrame.canvasClipBox, type };
-          if (antiAliased !== undefined) patch.antiAliased = antiAliased;
-          actions.setCanvasClipBox(activeFrame.id, patch);
-        } else {
-          // setShapeType is a legacy path — new code uses clipToolSetCmd.
-          // For now, just switch the tool; the actual polygon will be written
-          // by the tool interaction on next draw.
-          actions.updateFrame(activeFrame.id, { confinement: null });
-        }
-      },
       closeReCanvas: () => reCanvasActiveSignal?.set(false),
 
-      // Feather signal (read/write) — consumed by Apply Mask button and Feather Popover.
-      // Signal drives real-time UI; `persistFeather` writes to pluginConfig for IndexedDB survival.
+      // Feather display value — the signal is a derived session mirror (the
+      // linkage effect above is its single writer); `persistFeather` writes
+      // the ONLY persistent store (pluginConfig, IndexedDB).
       featherValue: (clipFeatherValueSignal?.value as number) || 0,
-      setFeatherValue: (val: number) => clipFeatherValueSignal?.set(val),
       persistFeather: (val: number) => setSelfConfig({ feather: val }),
     };
   }, [
@@ -249,6 +245,8 @@ export const useClipOptionsCommands = () => {
     invertSelectionCmd,
     selectFromAlphaCmd,
     offsetSelectionCmd,
+    clipboardCopyCmd,
+    clipboardCutCmd,
     activeLayer,
   ]);
 

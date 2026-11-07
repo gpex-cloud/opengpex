@@ -2,6 +2,16 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.49
+
+- Layers: Copy, Cut and both "Layer via" commands are now driven by a single clip strategy — one rules table decides the outcome for every layer type, replacing scattered per-command logic. Hard-edged cuts on plain bitmap layers keep their lossless crops; feathered cuts and cuts on layers carrying bitmap masks bake exact pixel fragments instead — and text, brush, pen and shape layers always do. The source layer stays fully editable behind the cut hole
+- Layers: merging now always composites the selected layers exactly as seen into the bottom layer (Photoshop-style). The lossless merge re-routing is gone, and deleting a cut fragment never heals the source — restoring a cut is Merge Back / Merge Fragments. Text layers now merge into a complete paint layer, and merged results keep the bottom layer's name and group
+- Selection: feather is now part of the selection itself — a fresh draw bakes in the toolbar value, editing while a selection is active updates it live, and the feather travels with everything: Copy, Cut, Layer via Copy/Cut, clipboard, Apply as Mask, brush strokes (soft falloff at the selection edge), Fill as New Layer and peel (soft fragment and soft hole)
+- Layers panel: merge buttons show a spinner while a merge runs and lock the other merge actions; layer rows color-code logical (cyan) and baked (pink) layers; Delete in the layer menu requires a double-click confirmation; Refocus moved into the layer menu; Move In no longer lists the layer's current group; Merge Back / Merge Fragments menu entries only appear when they can act
+- Reliability: changing the selected layer no longer produces an undo step. Undo now always rewinds the last real edit, restoring the layer selection together with the document
+- Workspace: rotating or flipping the canvas now keeps the selection's recorded angle, so displacement/angle readouts stay correct after canvas transforms
+- Engine: a shared decision-table runtime now drives both the file ingest matrix and the new clip strategy (first-match rules with explicit wildcards); the ingest decision behavior is unchanged and fully regression-covered
+
 ## 2.0.48
 
 - Peel: fragments peeled from a layer now rebuild their outline from the actual pixels (alpha tracing) at the moment they are committed — the fragment layer records its true cut shape, and it survives later transforms; a bounding box is only used when the trace finds nothing

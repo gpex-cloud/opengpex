@@ -22,7 +22,6 @@ import {
   InteractionEvent,
   Layer,
   asLocalPoint,
-  asLocalRect,
   asLocalPolygon,
 } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
@@ -251,7 +250,7 @@ export const createSamHandler = (): InteractionHandler => {
         //    persistent AA preset instead of a hard-coded default.
         const clipBox = getClipBox(e.activeFrame);
         const toolAAMap = e.state.getStateSignal<ClipToolAAMap | undefined>(ClipOptionsAPI.signals.clipToolAA);
-        const samAA = clipBox ? clipBox.antiAliased : (toolAAMap?.sam ?? true);
+        const samAA = clipBox ? clipBox.antiAliased : (toolAAMap?.sam ?? false);
 
         const framePolygons: Array<ReturnType<typeof asLocalPolygon>> = [];
         for (const mask of decResult.masks) {
@@ -260,8 +259,8 @@ export const createSamHandler = (): InteractionHandler => {
           const layerRings = mask.rings.map(ring =>
             ring.map(p => asLocalPoint({ x: Math.round(p.x), y: Math.round(p.y) }))
           );
-          const layerBounds = asLocalRect(e.geometry.polygon.computePolygonBounds(layerRings));
-          const layerPoly = asLocalPolygon(layerRings, layerBounds, samAA);
+          const gestureFeather = e.state.getStateSignal<number | undefined>(ClipOptionsAPI.signals.clipFeather) ?? 0;
+          const layerPoly = e.geometry.point2d.point2dToLocalPolygon(layerRings, { antiAliased: samAA, feather: gestureFeather });
           const framePoly = e.geometry.polygon.layerLocalToFrameLocal(
             layerPoly, layer, e.activeFrame
           );

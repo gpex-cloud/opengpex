@@ -27,6 +27,7 @@
 
 import { useEffect, useState } from 'react';
 import type { MatchPattern } from '@opengpex/editor/core/files/strategy/engine/types';
+import { testField } from '@opengpex/editor/core/helpers/decision-table';
 
 /** Column sort state shared by the strategy tables. */
 export interface ColumnSort {
@@ -128,17 +129,10 @@ function describeNumericPredicate(fn: (v: number) => boolean): string {
 }
 
 /**
- * Whether one condition pattern admits the filter value — the same semantics
- * as the engine matcher's per-field test (`'*'`/undefined admit everything,
- * then predicate → array → scalar), applied to a single axis so the strategy
- * table can filter rows without dragging in the first-match evaluator.
+ * Whether one condition pattern admits the filter value — the shared decision
+ * table's per-field test applied to a single axis, so the strategy table can
+ * filter rows without dragging in the first-match evaluator.
  */
 export function patternAdmits(pattern: MatchPattern<unknown> | undefined, value: unknown): boolean {
-  // Mirrors the engine matcher's per-field test: '*' is the only wildcard; an
-  // undeclared pattern matches only an equally-undefined value.
-  if (pattern === '*') return true;
-  if (pattern === undefined) return value === undefined;
-  if (typeof pattern === 'function') return (pattern as (v: unknown) => boolean)(value);
-  if (Array.isArray(pattern)) return (pattern as unknown[]).includes(value);
-  return pattern === value;
+  return testField(pattern, value);
 }

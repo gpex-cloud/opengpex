@@ -230,15 +230,17 @@ export interface EditorActions {
         others: AdvCommandRef<string>;
       };
       clip: {
-        cut: AdvCommandRef;
-        copy: AdvCommandRef;
+        // Feather is resolved from the active selection (selection-feather
+        // upgrade) — the command layer carries no feather parameter.
+        cut: AdvCommandRef<undefined>;
+        copy: AdvCommandRef<undefined>;
         paste: AdvCommandRef<ClipboardLayerMetadata | { e?: ClipboardEvent } | undefined>;
-        drill: AdvCommandRef<{ feather?: number } | undefined>;
-        toMask: AdvCommandRef<{ layerId?: string; feather?: number } | undefined, Promise<void>>;
+        drill: AdvCommandRef<undefined>;
+        toMask: AdvCommandRef<{ layerId?: string } | undefined, Promise<void>>;
       };
       cmdj: {
-        copy: AdvCommandRef<{ feather?: number } | undefined>;
-        cut: AdvCommandRef<{ feather?: number } | undefined>;
+        copy: AdvCommandRef<undefined>;
+        cut: AdvCommandRef<undefined>;
       };
       // NOTE: the peel command family (cmd.peel.*) is plugin-owned
       // (ClipOverlay/commands/peel.ts) — it is interaction-fused domain

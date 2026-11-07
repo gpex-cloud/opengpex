@@ -252,11 +252,15 @@ export const PEEL_COMMANDS = {
 
           // B. If not in Copy mode, dig a hole in the Host
           if (!payload.isCopy) {
+            // The hole carries the session selection's feather (ruling: hole
+            // = the selection including feather — completion of the peel
+            // implementation, same complementary split as a feathered cut).
+            const sessionFeather = box.feather ?? 0;
             const hostHoleMask = {
               id: holeMaskId,
               shape: result.localShape,
               inverted: true,
-              feather: 0,
+              feather: sessionFeather,
               enabled: true,
               tag: 'peel',
             };
@@ -651,7 +655,11 @@ export const PEEL_COMMANDS = {
       const nextConfinement = activeFrame.confinement
         ? geometry.transform.followFragmentSelection(activeFrame.confinement, startParams, params, activeFrame)
         : null;
-      const AA_MARGIN_PX = 1;
+      // The ROI must contain the selection's feather band: the soft coverage
+      // reaches zero only at distance f beyond the contour, so the pad is
+      // ceil(f) + the AA margin. Under-padding clips the fragment's soft edge.
+      const featherPad = nextConfinement?.feather ? Math.ceil(nextConfinement.feather) : 0;
+      const AA_MARGIN_PX = 1 + featherPad;
       const roiLocal: LocalShape = nextConfinement && nextConfinement.rect.w > 0 && nextConfinement.rect.h > 0
         ? asLocalShape({
             x: nextConfinement.rect.x - AA_MARGIN_PX,

@@ -21,6 +21,55 @@
 
 import { EditorContextValue, EditorCommand, Layer } from '@opengpex/editor/core/types';
 import * as P from '@opengpex/editor/core/advanced/protocols';
+import { EditorActions } from '@opengpex/editor/core/types';
+
+/**
+ * removeSourceHoles — remove the given hole masks from one source layer in a
+ * SINGLE atomic write. Callers collect the mask set on their (stale) command
+ * snapshot first; this function only performs the authoritative write. No
+ * activation, no HUD, no fragment deletion — those stay with the caller
+ * (mergeBack loops this once per source before its single batch delete).
+ */
+function removeSourceHoles(
+  actions: EditorActions,
+  frameId: string,
+  sourceLayer: Layer,
+  maskIds: ReadonlySet<string>,
+): void {
+  const remaining = (sourceLayer.vectorMasks ?? []).filter(m => !maskIds.has(m.id));
+  actions.updateLayer(frameId, sourceLayer.id, { vectorMasks: remaining });
+}
+
+/**
+ * Module-level reentry guard for the WHOLE merge family: while any one merge
+ * command is executing, every other merge dispatch is void, not queued. All
+ * commands read the same stale command snapshot, and the bake routes are
+ * asynchronous with fire-and-forget callers — two concurrent merges would
+ * compose on stale layer tables (resurrecting deleted participants, writing
+ * back over rewritten layers). The lock makes such dispatches no-ops; it
+ * lives outside the render tree on purpose, same adjudication rule as the
+ * peel settle lock.
+ */
+let mergeInFlight = false;
+
+function acquireMergeLock(): boolean {
+  if (mergeInFlight) return false;
+  mergeInFlight = true;
+  return true;
+}
+
+function releaseMergeLock(): void {
+  mergeInFlight = false;
+}
+
+/** Test isolation only: forces the merge lock open between tests. */
+export function resetMergeLockForTests(): void {
+  mergeInFlight = false;
+}
+
+interface MergeSelectedPayload {
+  layerIds: string[];
+}
 
 /**
  * LayerMergeCommands: Advanced layer merge commands.
@@ -58,46 +107,18 @@ export const LayerMergeCommands = {
         return;
       }
 
+      // Restricted union merge: the participant set is fixed to the adjacent
+      // pair (target below, active layer), ordered bottom to top.
       const targetLayer = hostLayers[activeIndex - 1];
+      const participants = [targetLayer, activeLayer];
 
-
+      // One merge at a time document-wide (see the family lock above).
+      if (!acquireMergeLock()) return;
       try {
-        // Shared bake primitive (services/baking.ts): composite → register → warm.
-        const bake = await layers.bakeToAsset(activeFrame, [targetLayer, activeLayer]);
-
-        layers.updateLayer(activeFrame.id, (tx) => {
-          tx.edit(targetLayer.id)
-            .setAsset({ assetId: bake.assetId, url: bake.url })
-            .resetWithBounds(bake.bounds.w, bake.bounds.h, bake.bounds.x + bake.bounds.w / 2, bake.bounds.y + bake.bounds.h / 2);
-        });
-
-        // Type inference after merging:
-        // - paint + paint -> paint | text + text -> text | color + color -> paint
-        // - craft mixing (any combination of paint/text/color) -> paint (the merged result is essentially bitmap drawing content)
-        // - involving image -> image (degrades to a general bitmap)
-        const isCraftLayer = (t: string) => t === 'paint' || t === 'text' || t === 'color';
-        const bothCraft = isCraftLayer(activeLayer.type) && isCraftLayer(targetLayer.type);
-        const mergedType = bothCraft
-          ? (activeLayer.type === targetLayer.type && activeLayer.type !== 'color'
-            ? activeLayer.type
-            : 'paint')
-          : 'image';
-
-        // The composite burnt every participant's grade chain into the merged
-        // pixels; the target must not carry its chain forward (double grade).
-        actions.updateLayer(activeFrame.id, targetLayer.id, {
-          type: mergedType,
-          textData: undefined,
-          bitmapMasks: [],
-          adjustMasks: undefined,
-        });
-
-        layers.removeLayers(activeFrame.id, activeLayer.id);
-        layers.activate(activeFrame.id, targetLayer.id);
-
-      } catch (err) {
-        console.error('[LayerPanel] Merge down failed:', err);
-        actions.setInteraction({ hud: { message: 'Merge down failed.', type: 'error' } });
+        // The shared merge entry: the pair bakes into the bottom layer.
+        await layers.mergeLayers(activeFrame, participants, { errorHud: 'Merge down failed.' });
+      } finally {
+        releaseMergeLock();
       }
     }
   } as EditorCommand<void, Promise<void>>,
@@ -118,56 +139,61 @@ export const LayerMergeCommands = {
         return;
       }
 
-      const targetLayer = visibleLayers[0];
-      const items = visibleLayers.slice(1);
-
+      // Groups are not participants of a visible merge: they are containers
+      // with no pixels, and treating one as a participant would DELETE it
+      // (non-bottom) or overwrite it with a bitmap (bottom), orphaning its
+      // children. Filter them out — the group and its structure stay intact.
+      const mergeable = visibleLayers.filter(l => l.type !== 'group');
+      if (mergeable.length < 2) {
+        actions.setInteraction({ hud: { message: 'Need at least 2 visible layers to merge.', type: 'error' } });
+        return;
+      }
+      if (!acquireMergeLock()) return;
       try {
-        // Shared bake primitive (services/baking.ts): composite → register → warm.
-        const bake = await layers.bakeToAsset(activeFrame, visibleLayers);
-
-        layers.updateLayer(activeFrame.id, (tx) => {
-          tx.edit(targetLayer.id)
-            .setAsset({ assetId: bake.assetId, url: bake.url })
-            .resetWithBounds(bake.bounds.w, bake.bounds.h, bake.bounds.x + bake.bounds.w / 2, bake.bounds.y + bake.bounds.h / 2);
+        await layers.mergeLayers(activeFrame, mergeable, {
+          errorHud: 'Merge visible failed.',
         });
-
-        // Type inference after merging (consistent with mergeDown):
-        // - all paint -> paint | all text -> text
-        // - craft mixing (any combination of paint/text/color) -> paint
-        // - involving image -> image (degrades to a general bitmap)
-        const isCraftLayer = (t: string) => t === 'paint' || t === 'text' || t === 'color';
-        const allCraft = visibleLayers.every(l => isCraftLayer(l.type));
-        const allTypes = visibleLayers.map(l => l.type);
-        const uniqueTypes = [...new Set(allTypes)];
-        const mergedType: Layer['type'] = allCraft
-          ? (uniqueTypes.length === 1 && uniqueTypes[0] !== 'color' ? uniqueTypes[0] as Layer['type'] : 'paint')
-          : 'image';
-
-        // The composite burnt every participant's grade chain into the merged
-        // pixels; the target must not carry its chain forward (double grade).
-        actions.updateLayer(activeFrame.id, targetLayer.id, {
-          type: mergedType,
-          textData: undefined,
-          bitmapMasks: [],
-          adjustMasks: undefined,
-        });
-
-        // [Critical] Must batch-remove all items in a single call. React's useReducer
-        // dispatch is async — getState() returns the same stale snapshot throughout a
-        // command execution. If we remove items one-by-one, each removeLayers' cut-link
-        // cleanup hook reads the same stale vectorMasks and the last write wins, leaving
-        // residual hole masks on the source layer. The batch call's internal maskRemovalMap
-        // correctly collects all masks and filters them in one operation.
-        layers.removeLayers(activeFrame.id, items.map(item => item.id));
-
-        layers.activate(activeFrame.id, targetLayer.id);
-
       } catch (err) {
         console.error('[LayerPanel] Merge visible failed:', err);
         actions.setInteraction({ hud: { message: 'Merge visible failed.', type: 'error' } });
+      } finally {
+        releaseMergeLock();
       }
     }
   } as EditorCommand<void, Promise<void>>,
+
+  /**
+   * mergeSelected: merges the user-marked N-layer selection. Refusal HUD
+   * and bake execution live in the layer service (`layers.mergeLayers`):
+   * the set composites as seen into the bottom participant, and group /
+   * fewer-than-two sets are refused with the resolver's HUD. The command
+   * only guards its payload and serializes reentries.
+   */
+  mergeSelected: {
+    id: P.ADV_LAYER_MERGE_SELECTED,
+    name: 'Merge Selected Layers',
+    undoable: true,
+    execute: async (ctx: EditorContextValue, payload?: MergeSelectedPayload): Promise<void> => {
+      const { activeFrame, layers, actions } = ctx;
+      if (!activeFrame || !payload?.layerIds || payload.layerIds.length < 2) return;
+      if (!acquireMergeLock()) return;
+
+      try {
+        const participants = payload.layerIds
+          .map(id => activeFrame.layers.byId[id])
+          .filter(Boolean) as Layer[];
+
+        if (participants.length < 2) {
+          actions.setInteraction({ hud: { message: 'Need at least 2 valid layers to merge.', type: 'error' } });
+          return;
+        }
+
+        await layers.mergeLayers(activeFrame, participants, { physicalSuccessHud: `Merged ${participants.length} layers.` });
+      } finally {
+        releaseMergeLock();
+      }
+    }
+  } as EditorCommand<MergeSelectedPayload, Promise<void>>,
 
   rasterize: {
     id: P.ADV_LAYER_MERGE_RASTERIZE,
@@ -317,16 +343,19 @@ export const LayerMergeCommands = {
         if (fragmentsToRemove.length === 0) return;
 
         // ── Phase 2: Batch execution ──
-        // Remove all collected masks from each source layer (single write per source)
+        // Remove all collected masks from each source layer via the shared
+        // primitive (single atomic write per source, stale snapshot).
         for (const [sourceId, maskIds] of maskRemovalMap) {
           const srcLayer = activeFrame.layers.byId[sourceId];
           if (!srcLayer) continue;
-          const updatedMasks = (srcLayer.vectorMasks || []).filter(m => !maskIds.has(m.id));
-          actions.updateLayer(activeFrame.id, sourceId, { vectorMasks: updatedMasks });
+          removeSourceHoles(actions, activeFrame.id, srcLayer, maskIds);
         }
 
-        // Delete all fragments in one batch (removeLayers handles triplet sub-layers internally)
-        layers.removeLayers(activeFrame.id, fragmentsToRemove);
+        // Delete all fragments in one batch (removeLayers handles triplet
+        // sub-layers internally). The holes were removed above; touch no
+        // mask — a plain delete would rewrite them from this snapshot,
+        // unlinked.
+        layers.removeLayers(activeFrame.id, fragmentsToRemove, { cutLinks: 'ignore-link' });
 
       } catch (err) {
         console.error('[MergeBack] Failed:', err);

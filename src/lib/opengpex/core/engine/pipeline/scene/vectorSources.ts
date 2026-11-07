@@ -171,6 +171,7 @@ export function strokeToVectorSource(
               ring.map((p) => [p.x + dx, p.y + dy] as [number, number]),
             ),
             antiAliased: data.confinement.antiAliased !== false,
+            feather: data.confinement.feather,
           }
         : undefined,
     } satisfies StrokeParams;
@@ -222,8 +223,13 @@ export function strokeSourceFingerprint(strokes: readonly StrokeParams[]): strin
     // Confinement lane: the snapshot is written once at stroke creation and is
     // immutable for the stroke's lifetime, so a presence bit suffices as the
     // writer contract (a future writer that mutates a frozen snapshot must
-    // extend this token — same rule as for the packed trajectory).
-    const confLane = stroke.confinement ? 'conf' : '-';
+    // extend this token — same rule as for the packed trajectory). The feather
+    // radius rides the lane because the coverage bake derives from it: two
+    // snapshots with identical rings but different feather must not share
+    // signatures (and downstream, cache keys).
+    const confLane = stroke.confinement
+      ? `conf${stroke.confinement.feather ? `:f${stroke.confinement.feather}` : ''}`
+      : '-';
     if (pointCount <= 0) {
       lanes.push(`0:-:${size}:${hardness}:${antiAliased ? 1 : 0}:${color.join(',')}:${width}x${height}:${confLane}`);
       continue;

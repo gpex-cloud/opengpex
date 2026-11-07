@@ -28,6 +28,7 @@ import {
   asLocalPoint, asWorldPoint,
   asLocalRect, asWorldRect,
   asLocalPolygon, asWorldPolygon,
+  PolygonFlags,
 } from '@opengpex/editor/core/types';
 import { getLayerWorldMatrix } from './transform';
 import { isLayerSource } from './utils';
@@ -66,7 +67,7 @@ export function localToWorldPolygon(poly: LocalPolygon, source: Layer | Frame): 
   }
 
   const worldBounds = asWorldRect(computePolygonBounds(worldRings));
-  return asWorldPolygon(worldRings, worldBounds, poly.antiAliased, poly.ssdepMode === true);
+  return asWorldPolygon(worldRings, worldBounds, poly);
 }
 
 /**
@@ -95,7 +96,7 @@ export function worldToLocalPolygon(poly: WorldPolygon, target: Layer | Frame): 
   }
 
   const localBounds = asLocalRect(computePolygonBounds(localRings));
-  return asLocalPolygon(localRings, localBounds, poly.antiAliased, poly.ssdepMode === true);
+  return asLocalPolygon(localRings, localBounds, poly);
 }
 
 /**
@@ -145,7 +146,7 @@ export function translatePolygon(poly: LocalPolygon, dx: number, dy: number): Lo
     w: poly.rect.w,
     h: poly.rect.h,
   });
-  return asLocalPolygon(newRings, newRect, poly.antiAliased, poly.ssdepMode === true, poly.orientationDeg);
+  return asLocalPolygon(newRings, newRect, poly);
 }
 
 // ──────────────────────── Polygon Affine Transform (selection editing) ─────────
@@ -186,7 +187,7 @@ export function scalePolygon(
     }))
   );
   const newRect = asLocalRect(computePolygonBounds(newRings));
-  return asLocalPolygon(newRings, newRect, poly.antiAliased, poly.ssdepMode === true, poly.orientationDeg);
+  return asLocalPolygon(newRings, newRect, poly);
 }
 
 /**
@@ -322,7 +323,7 @@ export function rotatePolygon(poly: LocalPolygon, center: Point2D, angleRad: num
   // Orientation decree: rotation ACCUMULATES on the field — the HUD/chips
   // read this record instead of guessing an orientation from the vertices.
   const orientationDeg = (poly.orientationDeg ?? 0) + (angleRad * 180) / Math.PI;
-  return asLocalPolygon(newRings, newRect, poly.antiAliased, poly.ssdepMode === true, orientationDeg);
+  return asLocalPolygon(newRings, newRect, { ...poly, orientationDeg });
 }
 
 // ─────────────────────────── Polygon Utility Algorithms ────────────────────────
@@ -929,7 +930,7 @@ function loopsToPathD(
  *
  * 360 points never trigger the 64-point circle recognition in `point2dToLocalShape`.
  */
-export function ellipsePathToLocalPolygon(rect: LocalRect, antiAliased: boolean = true): LocalPolygon {
+export function ellipsePathToLocalPolygon(rect: LocalRect, flags?: PolygonFlags): LocalPolygon {
   const { x, y, w, h } = rect;
   const cx = x + w / 2;
   const cy = y + h / 2;
@@ -943,7 +944,7 @@ export function ellipsePathToLocalPolygon(rect: LocalRect, antiAliased: boolean 
     ring.push({ x: cx + rx * Math.cos(theta), y: cy + ry * Math.sin(theta) } as LocalPoint);
   }
 
-  return asLocalPolygon([ring], asLocalRect({ x, y, w, h }), antiAliased);
+  return asLocalPolygon([ring], asLocalRect({ x, y, w, h }), flags);
 }
 
 // Re-export point2d functions for backward compatibility (consumers may still
@@ -975,7 +976,7 @@ export function transformPolygonAffine(poly: LocalPolygon, m: Affine2D): LocalPo
     }))
   );
   const newRect = asLocalRect(computePolygonBounds(newRings));
-  return asLocalPolygon(newRings, newRect, poly.antiAliased, poly.ssdepMode === true);
+  return asLocalPolygon(newRings, newRect, poly);
 }
 
 /**

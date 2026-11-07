@@ -96,7 +96,7 @@ const { runCommand, abortCommand } = createToolCommand<
     // AI contour is a hard-edged pixel selection (antiAliased: false); it
     // lands in the lasso slot as a generic irregular polygon, same as any
     // other tool-produced selection.
-    const polygon = asLocalPolygon(localRings, bounds, false);
+    const polygon = asLocalPolygon(localRings, bounds, { antiAliased: false });
 
     // Apply clip box
     actions.updateFrame(frameId, { latestClipTool: 'lasso', confinement: polygon });

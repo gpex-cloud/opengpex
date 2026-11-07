@@ -23,6 +23,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import EditorPortal from './Portal';
 import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
+import DelayedConfirm from './DelayedConfirm';
 
 export interface ActionOption {
   label?: string;
@@ -35,6 +36,12 @@ export interface ActionOption {
   checked?: boolean;
   /** Sub-menu options — renders a nested fly-out on hover. */
   children?: ActionOption[];
+  /**
+   * Delayed double-click confirmation (ms window). When set, the first click
+   * arms an in-row progress confirmation (DelayedConfirm) and keeps the menu
+   * open; a second click within the window fires onSelect and closes.
+   */
+  confirm?: number;
 }
 
 /** Floor used to predict submenu overflow before it is measured. */
@@ -191,6 +198,49 @@ export default function ActionDropdown({
                         option={opt}
                         onSelect={(val) => { onSelect(val); setIsOpen(false); }}
                       />
+                    );
+                  }
+                  if (opt.confirm) {
+                    return (
+                      <DelayedConfirm
+                        key={opt.value}
+                        delayTime={opt.confirm}
+                        onConfirm={() => {
+                          if (opt.value) onSelect(opt.value);
+                          setIsOpen(false);
+                        }}
+                        className="w-full rounded-lg"
+                        roundedClassName="rounded-lg"
+                        confirmClassName="bg-rose-500/10 dark:bg-rose-400/10"
+                        progressColor="bg-rose-500/25 dark:bg-rose-400/20"
+                      >
+                        <div
+                          className={`
+                            flex items-center justify-between gap-3 w-full px-2 py-1.5 rounded-lg
+                            text-[9px] font-black uppercase tracking-tight text-left cursor-pointer
+                            ${opt.variant === 'danger'
+                              ? 'text-rose-500'
+                              : opt.variant === 'warning'
+                                ? 'text-amber-500'
+                                : opt.variant === 'success'
+                                  ? 'text-emerald-500'
+                                  : 'text-zinc-600 dark:text-zinc-300'
+                            }
+                          `}
+                        >
+                          <div className="flex items-center gap-2">
+                            {opt.icon && <span className="opacity-70 flex items-center justify-center scale-90">{opt.icon}</span>}
+                            <span>{opt.label}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {opt.description && (
+                              <span className="text-[7.5px] font-bold opacity-40 tabular-nums">
+                                {opt.description}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </DelayedConfirm>
                     );
                   }
                   return (

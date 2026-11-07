@@ -220,11 +220,14 @@ export function prepareVectorSources(
       confinementCoverages = source.strokes.map((s, i) => {
         const conf = s.confinement;
         if (!conf) return undefined;
-        const token = confinementContentToken(conf.rings);
+        // The feather radius MUST ride the token: identical rings with a
+        // different feather bake different coverage, and a feather-blind key
+        // would serve the stale hard bake after a feather edit.
+        const token = `${confinementContentToken(conf.rings)}:f${conf.feather ?? 0}`;
         const key = `${CONFINEMENT_SOURCE_STROKE}${layer.id}:${i}:${token}`;
         seenConfinementKeys.add(key);
         return prepareConfinementCoverage(
-          encoder, ctx, key, conf.rings, conf.antiAliased,
+          encoder, ctx, key, conf.rings, conf.antiAliased, conf.feather ?? 0,
           layer.width ?? 1, layer.height ?? 1, scale,
         ).createView();
       });

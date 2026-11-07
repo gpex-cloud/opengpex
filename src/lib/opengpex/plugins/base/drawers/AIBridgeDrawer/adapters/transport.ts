@@ -216,7 +216,7 @@ export async function postJsonForImage(opts: JsonImageRequestOptions): Promise<B
       contentType: 'application/json',
     });
     if (retryRes.ok) {
-      console.warn(`[AIBridge] Self-healed: stripped rejected parameter "${param}" and retried`);
+      console.warn(`[AIBridge] Self-recovery: stripped rejected parameter "${param}" and retried`);
       return extractImageFromResponse(retryRes, endpoint.apiKey);
     }
     throw new Error((await readErrorInfo(retryRes)).message);

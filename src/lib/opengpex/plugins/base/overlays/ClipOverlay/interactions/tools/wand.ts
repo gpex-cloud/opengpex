@@ -22,8 +22,6 @@ import {
   InteractionEvent,
   Layer,
   asLocalPoint,
-  asLocalRect,
-  asLocalPolygon,
 } from '@opengpex/editor/core/types';
 import { createAsyncHandler } from '../../../../../../stage/interaction/handlers/AsyncHandler';
 import { magicWandClient } from '../../workers/client';
@@ -211,8 +209,8 @@ export const createWandHandler = (): InteractionHandler => {
       // test) and the ants staircase derive from the same rule, so the ants
       // coincide with the cut pixels. Softening is Feather's job, not AA's.
       const layerRings = resp.rings.map(ring => ring.map(p => asLocalPoint({ x: p.x, y: p.y })));
-      const layerBounds = asLocalRect(e.geometry.polygon.computePolygonBounds(layerRings));
-      const layerPoly = asLocalPolygon(layerRings, layerBounds, false);
+      const gestureFeather = e.state.getStateSignal<number | undefined>(ClipOptionsAPI.signals.clipFeather) ?? 0;
+      const layerPoly = e.geometry.point2d.point2dToLocalPolygon(layerRings, { antiAliased: false, feather: gestureFeather });
       const framePoly = e.geometry.polygon.layerLocalToFrameLocal(
         layerPoly, layer, e.activeFrame
       );
