@@ -155,7 +155,6 @@ function layerSig(layer: LayerNode, opts: CompositeSignatureOptions): string {
   // texture space), so it affects the composited pixels and must be part of the
   // signature. Defaults to 1 (bitmap/fragment) so existing sigs are unchanged.
   const dpr = layer.dprScale ?? 1;
-
   let srcSig: string;
   if (layer.source.kind === 'raster') {
     // Include the epoch so an in-place pixel edit (same assetId) is detected.
@@ -190,6 +189,13 @@ function layerSig(layer: LayerNode, opts: CompositeSignatureOptions): string {
   return [
     `id:${layer.id}`,
     `t:${tSig}`,
+    // Explicit content dims size the draw quad whenever `crop` is absent
+    // (resolveLayerGeometry: crop dims, else width/height, else texture dims) —
+    // they MUST ride the sig: a first frame that raced its own bounding
+    // (fresh fast-track draft) bakes a texture-sized quad, and without this
+    // token the late-arriving bounding would never invalidate the
+    // dot-sized composite (2026-11-12 finding: solid fills rendered as a 1px
+    // dot at their top-left corner, cached forever).
     `wh:${layer.width ?? ''},${layer.height ?? ''}`,
     `crop:${crop}`,
     `dpr:${dpr}`,

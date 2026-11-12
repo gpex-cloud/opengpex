@@ -68,9 +68,9 @@ export interface LayerService {
   sortLayers: (layers: Layer[]) => Layer[];
   /** Unified fragment entry point — logical first, vectorMask fallback */
   /** Returns the fragment layer plus, in cut mode, the fully-formed hole VectorMask to append to the source layer. */
-  clipToLogicalLayer: (frame: Frame, layer: Layer, options?: { feather?: number; mode?: 'copy' | 'cut' }) => Promise<{ newLayer: Layer; holeMask?: VectorMask } | null>;
+  clipToLogicalLayer: (frame: Frame, layer: Layer, options?: { feather?: number; mode?: 'copy' | 'cut'; linkHole?: boolean; selection?: LocalShape | LocalPolygon }) => Promise<{ newLayer: Layer; holeMask?: VectorMask } | null>;
   /** Physical fragment: always produces a baked PNG blob (needed for clipboard external paste) */
-  clipToPhysicalLayer: (frame: Frame, layer: Layer, options?: { feather?: number }) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
+  clipToPhysicalLayer: (frame: Frame, layer: Layer, options?: { feather?: number; clampPlane?: boolean }) => Promise<{ newLayer: Layer, localShape: LocalShape, url: string } | null>;
   /** Resamples layer to a new resolution: uniform scale preserves the non-destructive structure (zero-copy shared src, visibleShape offset, vector/bitmap masks scaled geometrically); non-uniform scale flattens (bakes) the layer. */
   resampleLayer: (frame: Frame, layer: Layer, scaleX: number, scaleY: number) => Promise<{ newUrl: string, newAssetId: string, patch: Partial<Layer> } | null>;
   /**
@@ -88,8 +88,13 @@ export interface LayerService {
    * Participants are ordered bottom to top.
    */
   mergeLayers: (frame: Frame, participants: readonly Layer[], options?: MergeOptions) => Promise<MergeStrategyOp>;
-  /** Applies a fragment to an existing layer (e.g. Exchange layer) */
-  clipToExistLayer: (frame: Frame, sourceLayer: Layer, targetLayer: Layer, selection: LocalShape | LocalPolygon) => { updatedLayer: Layer, localShape: LocalShape } | null;
+  /**
+   * Applies a fragment to an existing layer (the peel Exchange layer):
+   * logical (shared source asset) when the source's masks fold into hard
+   * geometry, otherwise a baked bitmap the target owns (`physical`). Null
+   * when the selection holds no pixel of the source.
+   */
+  clipToExchangeLayer: (frame: Frame, sourceLayer: Layer, targetLayer: Layer, selection: LocalShape | LocalPolygon) => Promise<{ updatedLayer: Layer, localShape: LocalShape, physical: boolean } | null>;
   /**
    * Physical-bake family (services/baking.ts): composite the participants
    * through the single WebGPU RenderGraph, register the result as an asset,

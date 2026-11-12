@@ -212,6 +212,15 @@ export function calculateContentBoundsFromImageData(
  */
 export async function trimTransparentMargins(
   image: CompositedImage,
+  /**
+   * Model clamp (contour/visibleShape contract): the trimmed plane may only
+   * sit inside this canvas-space rect. The content scan is unchanged; the
+   * resulting plane = content bbox ∩ clampRect — transparent content inside
+   * the clamp stays in the plane instead of being cut away (e.g. a bitmap
+   * mask erasure inside the selection), and the plane never shrinks below
+   * the selection extent. Omit for the unrestricted behaviour.
+   */
+  clampRect?: { x: number; y: number; w: number; h: number },
 ): Promise<{ image: CompositedImage; offset: { x: number; y: number } } | null> {
   const canvasColorSpace = toCanvasColorSpace(image.colorIdentity.gamut);
   const bitmap = await createImageBitmap(image.displayBlob);
@@ -236,8 +245,27 @@ export async function trimTransparentMargins(
   }
   if (top > bottom || left > right) return null;
 
-  const trimW = right - left + 1;
-  const trimH = bottom - top + 1;
+  let trimW = right - left + 1;
+  let trimH = bottom - top + 1;
+  if (clampRect) {
+    // The plane IS the clamp window (canvas-space rect, integral): for cut
+    // products the clamp is selection ∩ source extent + feather, and the
+    // content bbox is proven to sit inside it — transparent areas within the
+    // clamp (erased regions, source transparency) belong to the plane as
+    // transparency instead of pulling it inward. Content scanned outside the
+    // clamp (a caller passing a wrong extent) is DROPPED, not silently kept.
+    const cx0 = Math.max(0, Math.round(clampRect.x));
+    const cy0 = Math.max(0, Math.round(clampRect.y));
+    const cx1 = Math.min(width, Math.round(clampRect.x + clampRect.w));
+    const cy1 = Math.min(height, Math.round(clampRect.y + clampRect.h));
+    if (cx1 > cx0 && cy1 > cy0 && left >= cx0 && top >= cy0
+        && left + trimW <= cx1 && top + trimH <= cy1) {
+      left = cx0;
+      top = cy0;
+      trimW = cx1 - cx0;
+      trimH = cy1 - cy0;
+    }
+  }
 
   // High-depth track: slice the naked buffer with the SAME window as the
   // 8-bit display crop, so both tracks of the trimmed asset stay in register.

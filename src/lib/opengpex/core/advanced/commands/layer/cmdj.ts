@@ -21,6 +21,7 @@
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
 import * as P from '@opengpex/editor/core/advanced/protocols';
+import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
 /**
  * Insert a clip product directly above its source layer and, for Layer via
@@ -29,6 +30,10 @@ import * as P from '@opengpex/editor/core/advanced/protocols';
 async function clipToNewLayer(
   ctx: EditorContextValue,
   mode: 'copyToLayer' | 'cutToLayer',
+  /** Caller-resolved selection policy (the plugin wrapper reads the user
+   *  preference — core commands never read plugin config). Default: clear
+   *  on cutToLayer, the Photoshop behavior. */
+  keepClipBoxAfter = false,
 ): Promise<void> {
   const { activeFrame, activeLayer, actions, state } = ctx;
   const isClipMode = state.interaction.interactionMode === 'clip';
@@ -62,6 +67,19 @@ async function clipToNewLayer(
   }
   const insertAt = ctx.layers.getInsertIndexAbove(activeFrame, latestLayer.id);
   ctx.layers.addLayer(activeFrame.id, result.newLayer, insertAt);
+
+  // Selection lifecycle on landing — same rule as the clipboard family: a
+  // Cut to Layer dissolves the selection unless the preference keeps the
+  // ants, and a KEPT selection converges onto the inserted fragment's cut
+  // outline (Copy to Layer always converges — the source is untouched and
+  // the ants should describe the new fragment).
+  if (mode === 'cutToLayer' && !keepClipBoxAfter) {
+    actions.updateFrame(activeFrame.id, { confinement: null });
+  } else if (result.newLayer && getClipBox(activeFrame) && result.confinement) {
+    // Converge only when a selection existed (same guard as the clipboard
+    // family); the projection rode the fragment result from the core.
+    actions.updateFrame(activeFrame.id, { confinement: result.confinement });
+  }
 }
 
 /**
@@ -87,12 +105,12 @@ export const LayerCmdJCommands = {
     id: P.ADV_LAYER_CMDJ_CUT,
     name: 'Cut to Layer',
     undoable: true,
-    execute: async (ctx: EditorContextValue): Promise<void> => {
+    execute: async (ctx: EditorContextValue, payload?: { keepClipBoxAfter?: boolean }): Promise<void> => {
       try {
-        await clipToNewLayer(ctx, 'cutToLayer');
+        await clipToNewLayer(ctx, 'cutToLayer', payload?.keepClipBoxAfter);
       } catch (err) {
         console.error('[ClipCommands] Layer via Cut failed:', err);
       }
     },
-  } as EditorCommand<{ feather?: number } | undefined, Promise<void>>
+  } as EditorCommand<{ keepClipBoxAfter?: boolean; feather?: number } | undefined, Promise<void>>
 };

@@ -19,7 +19,7 @@
 
 'use client';
 
-import { CornerDownLeft, Scaling } from 'lucide-react';
+import { CornerDownLeft, Loader2, Scaling } from 'lucide-react';
 import { useEditorServices } from '@opengpex/editor/core/context';
 import * as P from '../protocols';
 import { ClipOptionsAPI } from '../../../options/ClipOptions/protocols';
@@ -47,7 +47,7 @@ import { ClipOptionsAPI } from '../../../options/ClipOptions/protocols';
  * (which does not inspect targets) never opens a transaction under a click
  * meant for a button.
  */
-export function PeelActionButtons({ canResetSize = false }: { canResetSize?: boolean }) {
+export function PeelActionButtons({ canResetSize = false, committing = false }: { canResetSize?: boolean; committing?: boolean }) {
   const { actions } = useEditorServices();
 
   return (
@@ -63,6 +63,7 @@ export function PeelActionButtons({ canResetSize = false }: { canResetSize?: boo
         aria-label="Revert fragment"
         className="flex items-center outline-none rounded px-1 text-[10px] font-bold leading-none text-rose-400 hover:bg-white/10"
         style={{ height: '16px' }}
+        disabled={committing}
         onClick={() => actions.executeCommand(ClipOptionsAPI.commands.exitClip.uid)}
       >
         Esc
@@ -81,13 +82,14 @@ export function PeelActionButtons({ canResetSize = false }: { canResetSize?: boo
       )}
       <button
         type="button"
-        title="Settle fragment (Enter)"
+        title='Settle fragment (Enter)'
         aria-label="Settle fragment"
         className="flex items-center outline-none rounded px-1 text-emerald-400 hover:bg-white/10"
         style={{ height: '16px' }}
+        disabled={committing}
         onClick={() => actions.executeCommand(ClipOptionsAPI.commands.commitPeel.uid)}
       >
-        <CornerDownLeft size={12} strokeWidth={2.5} />
+        {committing ? <Loader2 size={12} className="animate-spin" strokeWidth={2.5} /> : <CornerDownLeft size={12} strokeWidth={2.5} />}
       </button>
     </div>
   );

@@ -184,7 +184,7 @@ export const LayerItem = React.memo(
           >
             {isActive && (
               <div
-                className={`absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r-full transition-all duration-300 ${layer.metadata?.physicalPixels === false ? "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.4)]" : "bg-pink-400 shadow-[0_0_8px_rgba(244,114,182,0.4)]"} ${isScrolling ? "opacity-50" : "opacity-100"}`}
+                className={`absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r-full transition-all duration-300 ${layer.nature === 'logical' ? "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.4)]" : "bg-pink-400 shadow-[0_0_8px_rgba(244,114,182,0.4)]"} ${isScrolling ? "opacity-50" : "opacity-100"}`}
               />
             )}
           </div>

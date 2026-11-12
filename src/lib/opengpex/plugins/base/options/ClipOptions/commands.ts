@@ -50,44 +50,6 @@ export function exitClipMode(ctx: EditorContextValue): void {
 }
 
 /**
- * Discard any undecided peel session, then clear the selection — the
- * semantics of every interaction OUTSIDE the floating fragment (static
- * click outside, fresh selection draw): the peel is CANCELLED (Esc
- * semantics — the fragment and its glued selection disappear), the slot
- * clears, and a replacement selection can start immediately. Enter and
- * Cmd+D keep the COMMIT semantics via `settleCommitThenClearSelection`.
- */
-async function settleDiscardThenClear(ctx: EditorContextValue, frame: Frame): Promise<void> {
-  if (readPeelSession(frame)) {
-    await ctx.actions.executeCommand(PeelAPI.commands.settleExchange.uid, { mode: 'discard' });
-  }
-  ctx.actions.updateFrame(frame.id, { confinement: null });
-}
-
-/**
- * Commit any undecided peel session, then drop the selection — the shared
- * tail of every "land and clear" entry (Enter / action button, click to
- * deselect, Cmd+D). The selection is KEPT only when a session existed and
- * its commit did not land (merge failure, or a commit already in flight):
- * the fragment is still floating then, and the selection it is glued to
- * must survive for the retry. With no session the selection clears as a
- * plain deselect.
- *
- * The landed/failed decision is made inside settle from the commit's
- * RESOLVED outcome, never from a state re-read: the visible store lags the
- * commit's writes until React renders.
- */
-async function settleCommitThenClearSelection(ctx: EditorContextValue, frame: Frame): Promise<void> {
-  if (!readPeelSession(frame)) {
-    ctx.actions.updateFrame(frame.id, { confinement: null });
-    return;
-  }
-  // [noundo] settle brackets its own undo step; the clear rides inside it
-  // (only when the commit lands), so one undo restores fragment and
-  // selection together.
-  await ctx.actions.executeCommand(PeelAPI.commands.settleExchange.uid, { mode: 'commit', clearSelection: true });
-}
-/**
  * Helper: Unifies the retrieval and updating of the active crop target (Image vs Canvas).
  */
 export function getActiveTarget(ctx: { activeFrame: Frame | null; actions: EditorActions; geometry: GeometryService }, isReCanvas: boolean) {
@@ -416,7 +378,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       // the landed fragment is a regular layer and the area it came from is
       // a hole, so the outline has nothing left to act on (Photoshop's Layer
       // via Cut clears it too). A failed commit keeps it for the retry.
-      await settleCommitThenClearSelection(ctx, ctx.activeFrame);
+      await ctx.actions.executeCommand(PeelAPI.commands.commitExit.uid);
 
       // Exit clip mode. In pan mode this writes 'pan' back — a no-op.
       exitClipMode(ctx);
@@ -573,7 +535,7 @@ export const CLIP_OPTIONS_COMMANDS = {
      * semantics: the fragment and its glued selection disappear) and then
      * clears the slot, so a replacement selection can start immediately.
      * The commit-on-clear semantics remain with Enter / Cmd+D
-     * (`settleCommitThenClearSelection`).
+     * (the peel plugin's discard-exit command).
      */
     execute: async (ctx: EditorContextValue) => {
       const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
@@ -585,7 +547,7 @@ export const CLIP_OPTIONS_COMMANDS = {
       const clipBox = getClipBox(frame);
       if (!clipBox) return; // already empty — nothing to clear
 
-      await settleDiscardThenClear(ctx, frame);
+      await ctx.actions.executeCommand(PeelAPI.commands.discardExit.uid);
     }
   } as EditorCommand<void, Promise<void>>,
 
@@ -723,83 +685,6 @@ export const CLIP_OPTIONS_COMMANDS = {
       // entity owns the feather — the core command resolves it from
       // frame.confinement, so no payload is passed here.
       ctx.actions.adv.layer.clip.drill.execute();
-    }
-  } as EditorCommand<void, void>,
-
-  /**
-   * CMD_LAYER_VIA_COPY — Plugin-level wrapper around `adv.layer.cmdj.copy`.
-   * Owns the Cmd+J keyboard shortcut. The core command resolves the feather
-   * from the active selection (selection-feather upgrade).
-   */
-  layerViaCopy: {
-    id: P.CMD_LAYER_VIA_COPY,
-    name: 'Layer via Copy',
-    category: 'Selection',
-    shortcuts: [{ key: 'j', meta: true }, { key: 'j', ctrl: true }],
-    execute: (ctx: EditorContextValue) => {
-      // Feather source decree (selection-feather upgrade): the selection
-      // entity owns the feather — the core command resolves it from
-      // frame.confinement, so no payload is passed here.
-      ctx.actions.adv.layer.cmdj.copy.execute();
-    }
-  } as EditorCommand<void, void>,
-
-  /**
-   * CMD_LAYER_VIA_CUT — Plugin-level wrapper around `adv.layer.cmdj.cut`.
-   * Owns the Cmd+Shift+J keyboard shortcut. The core command resolves the
-   * feather from the active selection (selection-feather upgrade).
-   */
-  layerViaCut: {
-    id: P.CMD_LAYER_VIA_CUT,
-    name: 'Layer via Cut',
-    category: 'Selection',
-    shortcuts: [{ key: 'j', meta: true, shift: true }, { key: 'j', ctrl: true, shift: true }],
-    execute: (ctx: EditorContextValue) => {
-      // Feather source decree (selection-feather upgrade): the selection
-      // entity owns the feather — the core command resolves it from
-      // frame.confinement, so no payload is passed here.
-      ctx.actions.adv.layer.cmdj.cut.execute();
-    }
-  } as EditorCommand<void, void>,
-
-  /**
-   * CMD_CLIPBOARD_COPY — Plugin-level wrapper around `adv.layer.clip.copy`.
-   * Owns the Cmd+C keyboard shortcut (moved off the core command); the core
-   * command resolves the feather from the active selection (selection-feather
-   * upgrade). A feathered partial Copy bakes a soft-edged clipboard PNG; a
-   * whole-layer Copy ignores feather (no contour to soften).
-   */
-  clipboardCopy: {
-    id: P.CMD_CLIPBOARD_COPY,
-    name: 'Copy',
-    category: 'Clipboard',
-    shortcuts: [{ key: 'c', meta: true }, { key: 'c', ctrl: true }],
-    execute: (ctx: EditorContextValue) => {
-      // Feather source decree (selection-feather upgrade): the selection
-      // entity owns the feather — the core command resolves it from
-      // frame.confinement, so no payload is passed here.
-      ctx.actions.adv.layer.clip.copy.execute();
-    }
-  } as EditorCommand<void, void>,
-
-  /**
-   * CMD_CLIPBOARD_CUT — Plugin-level wrapper around `adv.layer.clip.cut`.
-   * Owns the Cmd+X keyboard shortcut (moved off the core command); the core
-   * command resolves the feather from the active selection (selection-feather
-   * upgrade). The source hole carries the same feather, so hole and
-   * clipboard product are complementary; the hole stays unlinked (clipboard
-   * boundary ruling is untouched by feathering).
-   */
-  clipboardCut: {
-    id: P.CMD_CLIPBOARD_CUT,
-    name: 'Cut',
-    category: 'Clipboard',
-    shortcuts: [{ key: 'x', meta: true }, { key: 'x', ctrl: true }],
-    execute: (ctx: EditorContextValue) => {
-      // Feather source decree (selection-feather upgrade): the selection
-      // entity owns the feather — the core command resolves it from
-      // frame.confinement, so no payload is passed here.
-      ctx.actions.adv.layer.clip.cut.execute();
     }
   } as EditorCommand<void, void>,
 
@@ -1102,7 +987,7 @@ export const CLIP_OPTIONS_COMMANDS = {
 
       // Commit any undecided peel session, then clear (stays in the current
       // mode) — same rule as Enter: a failed commit keeps the selection.
-      await settleCommitThenClearSelection(ctx, frame);
+      await ctx.actions.executeCommand(PeelAPI.commands.commitExit.uid);
     }
   } as EditorCommand<void, Promise<void>>
 

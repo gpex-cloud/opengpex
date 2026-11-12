@@ -543,6 +543,24 @@ export class SceneAssembler {
         };
       }
 
+      // A `color` layer is a PURE FILL — synthesize a 1×1
+      // wide-gamut solid source from its ColorValue instead of leaning on an
+      // uploaded bitmap (whose only resident asset is the transparent-pixel
+      // placeholder). The texels are working-LINEAR rgba16float (converted by
+      // the builder), so the scene node tags them `trc: 'linear'` + working
+      // gamut and the sampling shader applies neither a TRC decode nor a gamut
+      // alignment.
+      const fillColor = latestLayer.type === 'color' ? latestLayer.metadata?.fillColor : undefined;
+      const solid = fillColor ? buildSolidColorSource(fillColor, WORKING_GAMUT) : undefined;
+      // NOTE (solid × crop): the crop STAYS on solid layers — it carries the
+      // quad's localOffset, which for a logical color fragment is the
+      // source-continued coordinate offset (D6 contract) that places the fill
+      // at the cut position. The 1×1 stretched texel's UV is pinned to
+      // [0,0,1,1] in `resolveLayerGeometry` instead (a 1-px texture has no
+      // croppable content; normalizing the crop against it once put the UVs
+      // far beyond 1 and the layer shader's bitmap-extent gate zeroed the
+      // whole layer — 2026-11-12 finding).
+
       // Resolve source bitmap
       const currentSrc = layer.src
         ? assets
@@ -565,14 +583,6 @@ export class SceneAssembler {
       // edit (draw/erase/filter yields a fresh ImageBitmap), leaving a stale image
       // on screen. The engine's reference check is both zero-transfer on pan/zoom
       // AND correct on edit (a new bitmap ref → re-DMA).
-      // A `color` layer is a PURE FILL — synthesize a 1×1
-      // wide-gamut solid source from its ColorValue instead of leaning on an
-      // uploaded bitmap (whose only resident asset is the transparent-pixel
-      // placeholder). The ColorValue's TRC-encoded float coords ride a 1×1
-      // rgba16float texture (STRAIGHT RGBA) tagged with their OWN `space` gamut, so
-      // the existing gamut_to_working alignment carries them losslessly.
-      const fillColor = latestLayer.type === 'color' ? latestLayer.metadata?.fillColor : undefined;
-      const solid = fillColor ? buildSolidColorSource(fillColor) : undefined;
       const sourceAssetId = solid ? solid.assetId : layer.assetId || layer.id;
       // A DPR-aware rasterized texture (e.g. a resampled
       // layer bitmap sized `bounding × dpr`) tags its asset with `dprScale = dpr`. `crop` here is in LOGICAL (document)
@@ -774,8 +784,17 @@ export class SceneAssembler {
       // A non-rect visibleShape is an implicit clip mask; a rect visibleShape that
       // carries a feather (feathered fragment) also needs one so its soft edge
       // renders. A plain rect fragment (featherPx 0/absent) keeps the crop-only path.
-      const implicitFeatherPx = (shape as { featherPx?: number } | undefined)?.featherPx ?? 0;
-      const hasImplicitShapeMask = shape !== undefined && (shape.type !== 'rect' || implicitFeatherPx > 0);
+      // PHYSICAL layers take the crop-only path unconditionally: their exact
+      // contour lives in the baked alpha (`layer.nature` is the declaration
+      // the geometry/shape route keys on — a recorded visibleShape feather
+      // must not re-soften baked pixels), and a redundant clip can only
+      // double-apply edge treatment.
+      const isPhysicalLayer = latestLayer.nature !== 'logical';
+      const implicitFeatherPx = isPhysicalLayer
+        ? 0
+        : (shape as { featherPx?: number } | undefined)?.featherPx ?? 0;
+      const hasImplicitShapeMask = shape !== undefined && !isPhysicalLayer
+        && (shape.type !== 'rect' || implicitFeatherPx > 0);
       let combinedMasks: VectorMask[] = explicitMasks;
       if (hasImplicitShapeMask) {
         const vx = shape!.rect.x;
@@ -834,7 +853,11 @@ export class SceneAssembler {
           // reported interpretation. 8-bit bitmap assets have no high-depth entry, so
           // this stays undefined ⇒ 'srgb-trc' (correct: browser decoders always emit
           // sRGB-encoded pixels). NEVER derived from `frame.trc` — see LayerSource.trc.
-          trc: highDepth?.trc ?? 'srgb-trc',
+          // A solid-colour source carries WORKING-LINEAR texels (the builder
+          // converted the ColorValue), so it tags 'linear' — the shader must
+          // skip the TRC decode, or a non-sRGB colour is decoded with the
+          // wrong curve (2026-11-12 finding: the fill painted dark).
+          trc: fillColor ? 'linear' : highDepth?.trc ?? 'srgb-trc',
           // Forwarding terminus: the per-asset source gamut the GPU sampling
           // shader converts to the working space (ProPhoto RGB). High-depth sources
           // carry their own decoded gamut; 8-bit bitmap sources (no high-depth
@@ -848,12 +871,11 @@ export class SceneAssembler {
           // SYNC ⚠️ (8-bit): this RENDER-time tag must equal the TRANSFER-time
           // `UploadSource.gamut` set above — keep both sourced from
           // `proxyBitmapGamut`.
-          // A solid-colour source carries the ColorValue's OWN `space`
-          // (the fill's gamut), which the shader aligns to working.
-          // The 1×1 rgba16float texels are already in that space, so gamut_to_working
-          // is the sole (lossless) conversion.
+          // A solid-colour source is already IN the working space (the
+          // builder converted to working-linear), so its gamut tag resolves
+          // to the passthrough id — the shader applies no alignment.
           gamut: fillColor
-            ? fillColor.space
+            ? WORKING_GAMUT
             : highDepth?.gamut ?? proxyBitmapGamut(assets?.get(sourceAssetId)?.gamut),
           // Forwarding terminus: the per-asset raw white domain. Its PRESENCE is
           // the render intent — only scene-linear sources (camera RAW) carry a

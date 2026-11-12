@@ -2,6 +2,15 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.50
+
+- Clip & Cut: the four clip commands now share a single decision table driven by the product's nature — a covering "Layer via Cut" behaves exactly like a Cut, cutting without a selection works, a landed Cut dissolves the selection (a preference can keep it) and Copy keeps it with the marching ants converging onto the region that was actually taken
+- Fragments: every fragment records its true cut outline — at clip time, through peel commits and across later transform bakes — so Refocus always re-arms the exact shape, and re-cutting a fragment keeps the result where it was placed
+- Peel: commits are race-guarded (confirming twice in quick succession or editing while a commit bakes can no longer corrupt the session), and paint, text, marker and solid-fill layers can now be peeled — the fragment form follows the same rules as copy/cut
+- Rendering: solid-color layers now render reliably and true to the picked color — fixes fills showing as nothing (or a single pixel), and fills rendering darker than picked; new text layers always render fully opaque
+- Layers: merging layers that have other layers sandwiched between them now shows a notice that stacking may change
+- Workspace: the clip toolbar gains a dedicated Deselect button; the hub panel gains a runtime diagnostics view (per-plugin configuration and state)
+
 ## 2.0.49
 
 - Layers: Copy, Cut and both "Layer via" commands are now driven by a single clip strategy — one rules table decides the outcome for every layer type, replacing scattered per-command logic. Hard-edged cuts on plain bitmap layers keep their lossless crops; feathered cuts and cuts on layers carrying bitmap masks bake exact pixel fragments instead — and text, brush, pen and shape layers always do. The source layer stays fully editable behind the cut hole

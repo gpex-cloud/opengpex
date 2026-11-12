@@ -24,10 +24,10 @@
  * WHY THIS EXISTS: a `color` layer is a pure fill. The legacy path rasterised it
  * with Canvas2D `fillStyle = hex` (`rasterizer.ts` `drawLayerContent`) into an
  * 8-bit sRGB bitmap, collapsing any wide-gamut value at the door (avoiding gamut
- * collapse). Instead we upload the ColorValue's float `coords` straight into a 1×1
- * `rgba16float` texture and tag it with the colour's own `space` gamut, so the
- * existing per-source gamut-alignment machinery (`resolveSourceGamutId` →
- * `gamut_to_working`) carries it into the working space with ZERO collapse.
+ * collapse). Instead we convert the ColorValue to working-LINEAR rgba and upload
+ * the float texels into a 1×1 `rgba16float` texture tagged `trc: 'linear'` +
+ * working gamut, so the composite consumes it with ZERO collapse and ZERO
+ * re-encoding.
  *
  * The texels are STRAIGHT (un-premultiplied) RGBA `[r, g, b, alpha]`, matching
  * every other raster source: no pass sets `LAYER_FLAG_PREMULTIPLIED_SOURCE`, so
@@ -42,7 +42,9 @@
  */
 
 import type { ColorValue } from '@opengpex/editor/core/engine/color/ColorValue';
+import { toWorkingLinearRgba } from '@opengpex/editor/core/engine/color';
 import { floatToHalf } from '@opengpex/editor/core/engine/color/float16';
+import type { WorkingColorSpace } from '@opengpex/editor/core/types';
 
 /** The GPU texture format the {@link SolidColorSource.texels} are encoded for. */
 export const SOLID_COLOR_SOURCE_FORMAT = 'rgba16float' as const;
@@ -63,22 +65,31 @@ export interface SolidColorSource {
 /**
  * Encode a {@link ColorValue} as a 1×1 wide-gamut solid-colour GPU source.
  *
- * `coords` are the TRC-ENCODED normalized channels in `value.space` (NOT linear
- * light — see {@link ColorValue}) and are written VERBATIM (no clamp: wide-gamut
- * channels may exceed 1); the sampling shader decodes (srgb-trc) and aligns
- * `space` → working. `alpha` rides channel A straight.
+ * The value is CONVERTED to the working space's linear light up front
+ * (`toWorkingLinearRgba`: gamut matrix + working-space TRC decode) and the
+ * texels hold working-LINEAR RGBA — so the scene node tags the source with
+ * `trc: 'linear'` and the working gamut, and the sampling shader skips both
+ * the TRC decode and the gamut alignment. Encoding the TRC-encoded `coords`
+ * verbatim (an earlier design) mis-tagged the texture as `'srgb-trc'`, and a
+ * non-sRGB colour was decoded with the wrong curve (2026-11-12 finding).
+ * The conversion clamps out-of-working-gamut channels into the working range
+ * (the desired behaviour for a FILL: a fill's colour must be representable in
+ * the space it composites in). `alpha` rides channel A straight.
  */
-export function buildSolidColorSource(value: ColorValue): SolidColorSource {
-  const { r, g, b } = value.coords;
+export function buildSolidColorSource(
+  value: ColorValue,
+  workingSpace: WorkingColorSpace,
+): SolidColorSource {
+  const [lr, lg, lb, la] = toWorkingLinearRgba(value, workingSpace);
   const texels = new Uint16Array(4);
-  texels[0] = floatToHalf(r);
-  texels[1] = floatToHalf(g);
-  texels[2] = floatToHalf(b);
-  texels[3] = floatToHalf(value.alpha);
-  // Key from the ACTUAL uploaded bits + `space`: exact dedup of pixel-identical
-  // uploads, while the gamut tag (which rides `space`, not the texels) stays a
-  // distinct dimension — two colours with identical coords in different spaces
-  // are different sources.
-  const assetId = `solid:${value.space}:${texels[0]}-${texels[1]}-${texels[2]}-${texels[3]}`;
+  texels[0] = floatToHalf(lr);
+  texels[1] = floatToHalf(lg);
+  texels[2] = floatToHalf(lb);
+  texels[3] = floatToHalf(la);
+  // Key from the ACTUAL uploaded bits + the working space: exact dedup of
+  // pixel-identical uploads. Two colours from different source spaces that
+  // convert to the same working-linear texels ARE pixel-identical and share
+  // one resident texture.
+  const assetId = `solid:${workingSpace}:${texels[0]}-${texels[1]}-${texels[2]}-${texels[3]}`;
   return { assetId, texels };
 }

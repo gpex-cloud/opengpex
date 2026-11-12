@@ -487,7 +487,15 @@ export function classifyRegionOverlap(selection: Pt[][], region: Pt[][], feather
   }
 
   if (multiPolygonArea(intersection) < OVERLAP_AREA_EPSILON) return 'none';
-  if (multiPolygonArea(outside) >= OVERLAP_AREA_EPSILON) return 'partial';
-  if (featherPx <= 0) return 'full';
-  return minBoundaryDistance(region, selection) >= featherPx ? 'full' : 'partial';
+  // Region ⊆ selection: the selection covers the region (equality included —
+  // a flush cut is a covering cut). The feather check guards the soft band
+  // overhanging the region edge.
+  if (multiPolygonArea(outside) < OVERLAP_AREA_EPSILON) {
+    if (featherPx <= 0) return 'full';
+    return minBoundaryDistance(region, selection) >= featherPx ? 'full' : 'partial';
+  }
+  // A fully interior selection (the region's boundary is never cut) is also
+  // 'partial': every cut edge is the selection's own contour either way, so
+  // the routing and the vs2/vs plane formula are identical.
+  return 'partial';
 }

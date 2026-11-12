@@ -25,12 +25,18 @@
  * Fragments) is a different family and does not go through here.
  *
  * Merging is ALWAYS a bake: the participants are composited as seen into the
- * BOTTOM participant as one physical bitmap (`physicalPixels: true`). The
+ * BOTTOM participant as one physical bitmap (`nature: 'physical'`). The
  * product type comes from `resolveMergedType`; every craft payload is
  * stripped because the pixels now carry that content. Cross-group
  * participation is NOT a refusal: the product anchors to the BOTTOM
  * participant (its group membership wins), so merging across a group edge is
  * explicit intent.
+ *
+ * A merge yields ONE stacking slot. When a non-participant layer sits between
+ * the participants and overlaps a participant above it, the picture changes
+ * whichever slot the product takes — that is inherent to merging non-adjacent
+ * layers, not a defect of the bake. It is accepted, never refused: the merge
+ * runs and the HUD names the in-between layers (`findStackingConflicts`).
  *
  * Participants are always ordered bottom to top: the composite stacking
  * order and the survivor choice depend on it.
@@ -74,6 +80,63 @@ export function resolveMergeStrategy(
   return { op: 'bake' };
 }
 
+/**
+ * Find the non-participant layers whose stacking against the merged result
+ * will differ from what is on screen now.
+ *
+ * The product takes the BOTTOM participant's slot, so every other participant
+ * drops to that slot. A layer X left in between used to be covered by the
+ * participants above it; after the merge it sits on top of their pixels. The
+ * picture can only change where X and such a participant share area, hence
+ * the test: X lies strictly between the bottom and the top participant in the
+ * frame's z order, and X's world bounding box intersects the bounding box of
+ * at least one participant ABOVE it. Participants below X keep their relative
+ * order with X and are irrelevant.
+ *
+ * Pure geometry on bounding boxes — deliberately conservative: transparent
+ * pixels inside a bounding box, masks and blend modes are not inspected, so a
+ * hit means "may change", never "does change". Hidden layers, groups (no
+ * pixels of their own) and hosted sub-layers (covered by their host) are
+ * never reported. Reads the frame's own z order, so the participants may be
+ * passed in any order. Returned bottom to top.
+ */
+export function findStackingConflicts(
+  frame: Frame,
+  participants: readonly Layer[],
+  geometry: GeometryService,
+): Layer[] {
+  const order = frame.layers.order;
+  const participantIds = new Set(participants.map(l => l.id));
+  const indices = participants.map(l => order.indexOf(l.id)).filter(i => i >= 0);
+  if (indices.length < 2) return [];
+  const bottom = Math.min(...indices);
+  const top = Math.max(...indices);
+
+  const conflicts: Layer[] = [];
+  for (let i = bottom + 1; i < top; i++) {
+    const between = frame.layers.byId[order[i]];
+    if (!between || participantIds.has(between.id)) continue;
+    if (!between.visible || between.type === 'group' || between.hostId) continue;
+
+    const box = geometry.space.getLayerBoundingBox(between);
+    const coveredNow = participants.some(p =>
+      order.indexOf(p.id) > i &&
+      geometry.space.getRectIntersection(box, geometry.space.getLayerBoundingBox(p)) !== null
+    );
+    if (coveredNow) conflicts.push(between);
+  }
+  return conflicts;
+}
+
+/** HUD text for a merge that changed the stacking against in-between layers. */
+export function stackingNotice(conflicts: readonly Layer[]): string | undefined {
+  if (conflicts.length === 0) return undefined;
+  const subject = conflicts.length === 1
+    ? `layer "${conflicts[0].name}" in between now sits`
+    : `${conflicts.length} layers in between now sit`;
+  return `Merged. Stacking changed: ${subject} above the merged result.`;
+}
+
 export interface MergeOptions {
   /** Success HUD for the bake. */
   readonly physicalSuccessHud?: string;
@@ -102,7 +165,10 @@ export function createMergeOperations(
       if (strategy.hud) actions.setInteraction({ hud: { message: strategy.hud, type: 'error' } });
       return 'noop';
     }
-    await physicalMerge(deps, frame, participants, options);
+    // Detect on the pre-merge frame: the bake rewrites the survivor and
+    // removes the other participants, after which the gap no longer exists.
+    const notice = stackingNotice(findStackingConflicts(frame, participants, geometry));
+    await physicalMerge(deps, frame, participants, options, notice);
     return strategy.op;
   }
 
@@ -171,6 +237,10 @@ export function craftPayloadStrip(): Record<string, undefined> {
  *   Phase 4  commit — type/payload strip, remove participants
  *   Phase 5  demote outside children of participants to plain layers
  *
+ * `stackingNoticeHud`, when set, replaces the success HUD (see
+ * `findStackingConflicts`); it is resolved by the caller on the pre-merge
+ * frame.
+ *
  * Phase ordering is load-bearing: removeLayers with `'ignore-link'` never touches
  * the sources' masks, and the survivor's own mask state was just reset by
  * the bake write — any mask rewrite from the stale command snapshot would
@@ -181,6 +251,7 @@ export async function physicalMerge(
   frame: Frame,
   participants: readonly Layer[],
   options?: MergeOptions,
+  stackingNoticeHud?: string,
 ): Promise<void> {
   const { layers, actions } = deps;
   if (participants.length < 2) return;
@@ -206,10 +277,10 @@ export async function physicalMerge(
       tx.edit(target.id)
         .setAsset({ assetId: bake.assetId, url: bake.url })
         .resetWithBounds(bake.bounds.w, bake.bounds.h, bake.bounds.x + bake.bounds.w / 2, bake.bounds.y + bake.bounds.h / 2)
-        // physicalPixels must ride along: the patch replaces the metadata the
-        // resetWithBounds above just declared (stripLineage reads the stale
-        // pre-bake snapshot).
-        .patch({ metadata: { ...stripLineage(target.metadata), physicalPixels: true } });
+        // nature must ride along, and the stale lineage keys must go with
+        // it: the patch replaces the metadata the resetWithBounds above just
+        // declared (stripLineage reads the stale pre-bake snapshot).
+        .patch({ metadata: { ...stripLineage(target.metadata) }, nature: 'physical' });
     });
 
     // The composite burnt every participant's grade chain and payload into
@@ -252,7 +323,11 @@ export async function physicalMerge(
 
     layers.activate(frame.id, target.id);
 
-    if (options?.physicalSuccessHud) {
+    // A stacking change outranks the plain success message: the merge did
+    // succeed, but the picture may differ from what the user was looking at.
+    if (stackingNoticeHud) {
+      actions.setInteraction({ hud: { message: stackingNoticeHud, type: 'info' } });
+    } else if (options?.physicalSuccessHud) {
       actions.setInteraction({ hud: { message: options.physicalSuccessHud, type: 'success' } });
     }
   } catch (err) {

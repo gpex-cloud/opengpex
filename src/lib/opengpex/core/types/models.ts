@@ -476,6 +476,14 @@ export interface Layer {
   id: string;
   name: string;
   type: 'image' | 'text' | 'vector' | 'color' | 'paint' | 'group';
+  /**
+   * Layer nature — how this layer's pixels exist: `'physical'` owns a baked
+   * bitmap (the fail-safe default; originals, imports, baked products), and
+   * `'logical'` is a fragment that clips a SHARED source asset through
+   * geometry (its exact contour lives in `visibleShape`/`contour`). Replaces
+   * the temporary `metadata.physicalPixels` boolean key.
+   */
+  nature: 'logical' | 'physical';
   src: string;
   assetId: string;
   role?: LayerRole;
@@ -512,6 +520,7 @@ export interface Layer {
    * (TRC-encoded in `space`); the face renderer linearizes on translate.
    */
   penStyle?: PenLayerStyle;
+  
   metadata?: {
     fillColor?: ColorValue;
     /** Layers-panel icon provenance tag, display-only. See `LayerSourceTool`. */
@@ -537,6 +546,20 @@ export interface Layer {
   // Physical attributes
   bounding: Dimensions;
   visibleShape?: LocalShape;
+
+  /**
+   * The cut's 50% contour as pure geometry, recorded at
+   * cut time for Refocus: the selection intersected with the source layer's
+   * selection extent, in this fragment's own coordinate space. Deliberately
+   * rings only: the 50% line is independent of any feather radius, so the
+   * cut's feather and AA are not part of the selection extent (the tool
+   * already lives in `clipTool`). Also NOT the render plane: a physical
+   * fragment's `visibleShape` is its trimmed bounding box enclosing the
+   * whole feather band, far outside this contour; a logical tight-crop
+   * fragment's `visibleShape` carries the same rings. Present on fragments
+   * cut through the clip/peel pipelines; absent on layers never cut.
+   */
+  contour?: { rings: Array<Array<{ x: number; y: number }>> };
   vectorMasks?: VectorMask[];
   bitmapMasks?: BitmapMask[];
   /**

@@ -506,7 +506,7 @@ export const LayerFactory = {
    *     `visibleShape` that actually clips a SHARED source asset (a `path`
    *     with `pathData`, a carried `featherPx`, or a rect strictly inside the
    *     content box), AND the layer DECLARES itself logical
-   *     (`metadata.physicalPixels === false`). The edge lives in the geometry;
+   *     (`nature === 'logical'`). The edge lives in the geometry;
    *     the hard-cut-away pixels still exist in the source, so geometric
    *     edits (outward pad) are lossless.
    *   - `'vmask'`    — any layer with enabled vectorMasks: the edge is the
@@ -526,7 +526,7 @@ export const LayerFactory = {
     const vs = layer.visibleShape;
     if (!vs) return 'bitmap';
     const typed = vs as { featherPx?: number; pathData?: string };
-    const isLogical = layer.metadata?.physicalPixels === false;
+    const isLogical = layer.nature === 'logical';
     if (vs.type === 'path' && typed.pathData) return isLogical ? 'geometry' : 'bitmap';
     if ((typed.featherPx ?? 0) > 0) return isLogical ? 'geometry' : 'bitmap';
     if (vs.type === 'rect') {
@@ -729,7 +729,7 @@ export const AA_MARGIN = 1;
  * soft band (which extends f beyond the cut contour) has pixels to render
  * over — an unpadded plane clips the fade and the edges read as hard cuts.
  *
- * Consumers: feathered peel fragment construction (`clipToExistLayer`) and
+ * Consumers: feathered peel fragment construction (`clipToExchangeLayer`) and
  * the edge-feather re-pad edit (`patchEdgeFeatherRepad`, which recovers the
  * tight shape by insetting the OLD pad first, then re-outsets through here).
  * Non-path inputs (rect/circle selections) are serialized — a 'rect' shape

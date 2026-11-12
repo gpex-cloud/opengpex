@@ -51,10 +51,13 @@
 import { Matrix3x3 } from '../matrix';
 import { getOrientationMatrix } from './transform';
 import { snapRotationRad } from './rotator';
-import { solveAffineFromTriangles, transformPolygonAffine } from './polygon';
+import { solveAffineFromTriangles, transformPolygonAffine, layerLocalToFrameLocal } from './polygon';
+import { point2dToLocalPolygon } from './point2d';
 import type {
   FragmentScaleHandle,
   FragmentPose,
+  Frame,
+  Layer,
   LocalPolygon,
   Point2D,
   TransformParams,
@@ -204,4 +207,39 @@ export function followFragmentSelection(
   const [e0, e1, , e3] = getFragmentContentCorners(end).map(worldToLocal);
   const m = solveAffineFromTriangles([s0, s1, s3], [e0, e1, e3]);
   return m ? transformPolygonAffine(selection, m) : selection;
+}
+
+/**
+ * migrateFragmentContour: carries the fragment's recorded cut contour
+ * (`Layer.contour`, rings in the layer's own plane coordinates) through a
+ * transform bake. The bake rewrites the pixel space (fresh asset, rotation
+ * zeroed, the plane re-anchored on the composite bounds), so the contour
+ * must ride the SAME rigid-plus-scale map that moved the content box from
+ * `start` to `end` — the map the bake renders with, solved from three
+ * content-box corners exactly like `followFragmentSelection`. The rings are
+ * first projected into frame-local space (the space that corner map is
+ * solved in), mapped, then shifted into WORLD coordinates (canvas-center
+ * origin — the same space as `layer.cx`/`cy` and the bake's composite
+ * bounds) so the caller can re-base them onto the new plane origin in one
+ * subtraction. Null when the pose map degenerates (collapsed box) — the
+ * caller drops the contour rather than recording a wrong line.
+ */
+export function migrateFragmentContour(
+  rings: Point2D[][],
+  layer: Layer,
+  frame: Frame,
+  start: FragmentPose,
+  end: FragmentPose,
+  worldToLocal: (p: Point2D) => Point2D,
+): Point2D[][] | null {
+  const [s0, s1, , s3] = getFragmentContentCorners(start).map(worldToLocal);
+  const [e0, e1, , e3] = getFragmentContentCorners(end).map(worldToLocal);
+  const m = solveAffineFromTriangles([s0, s1, s3], [e0, e1, e3]);
+  if (!m) return null;
+  const local = transformPolygonAffine(layerLocalToFrameLocal(point2dToLocalPolygon(rings), layer, frame), m).rings;
+  // frame-local (canvas top-left origin) → world (canvas-center origin):
+  // worldToLocal adds the half-canvas, so its inverse subtracts it.
+  const hw = frame.canvas.w / 2;
+  const hh = frame.canvas.h / 2;
+  return local.map(ring => ring.map(p => ({ x: p.x - hw, y: p.y - hh })));
 }

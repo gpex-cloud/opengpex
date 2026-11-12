@@ -17,8 +17,10 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import type { Frame, LocalPolygon, LocalShape, Dimensions } from '@opengpex/editor/core/types';
+import type { Frame, Layer, LocalPolygon, LocalShape, Dimensions } from '@opengpex/editor/core/types';
 import { asLocalShape } from '@opengpex/editor/core/types';
+import { point2dToLocalPolygon, shapeToPoint2D } from '@opengpex/editor/core/geometry/operators/point2d';
+import { layerLocalToFrameLocal } from '@opengpex/editor/core/geometry/operators/polygon';
 
 /**
  * getRegularClipShape — convenience wrapper over `getClipBox` that returns
@@ -128,4 +130,44 @@ export function getDefaultCanvasClipBox(dim: Dimensions, anchor: ClipBoxAnchor =
   }
 
   return asLocalShape({ x, y, w: newW, h: newH });
+}
+
+
+// ─── Selection Convergence ──────────────────────────────────────────────────────
+
+/**
+ * buildFragmentConfinement — project a fragment's cut outline into a frame
+ * selection polygon ("selection convergence": after an operation lands a
+ * fragment, the surviving selection should describe the TAKEN piece, not the
+ * once-drawn region).
+ *
+ * Coordinate contract (mirrors Refocus syncToOverlay): the rings — the
+ * recorded `contour` when present, else the `visibleShape` outline — live in
+ * the layer-local frame the fragment's geometry fields live in, and are
+ * projected through the fragment's own world matrix. Feather and AA ride the
+ * fragment's edge record (`visibleShape.featherPx` / `antiAliased`): the
+ * rings are the 50% contour, so re-arming with the same radius reproduces the
+ * exact soft band a re-cut would take.
+ *
+ * Returns null when the fragment carries no outline (no contour and no
+ * visibleShape) — callers keep the current selection in that case.
+ */
+export function computeConfinementFromLayer(
+  frame: Frame,
+  fragment: Layer,
+): LocalPolygon | null {
+  const vs = fragment.visibleShape as ({ featherPx?: number; antiAliased?: boolean } & LocalShape) | undefined;
+  const rings = fragment.contour?.rings?.length
+    ? fragment.contour.rings
+    : vs
+      ? shapeToPoint2D(vs)
+      : null;
+  if (!rings || rings.length === 0) return null;
+  const feather = vs?.featherPx ?? 0;
+  const antiAliased = vs?.antiAliased !== false;
+  const localPoly = point2dToLocalPolygon(rings as never, {
+    antiAliased,
+    ...(feather > 0 ? { feather } : {}),
+  });
+  return layerLocalToFrameLocal(localPoly, fragment, frame);
 }

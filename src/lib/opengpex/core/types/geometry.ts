@@ -356,6 +356,22 @@ export interface GeometryService {
       frame: Frame,
     ) => LocalPolygon;
     /**
+     * Carries a fragment's recorded cut contour (`Layer.contour` rings, in
+     * the layer's own plane coordinates) through a transform bake: the rings
+     * ride the same start→end pose map `followFragmentSelection` uses,
+     * projected into frame-local space for the solve, then shifted into
+     * WORLD coordinates (canvas-center origin — the space of `layer.cx` and
+     * the composite bounds) so the caller re-bases them onto the new plane
+     * origin in one subtraction. Null when the pose map degenerates.
+     */
+    migrateFragmentContour: (
+      rings: Array<Array<{ x: number; y: number }>>,
+      layer: Layer,
+      frame: Frame,
+      start: FragmentPose,
+      end: FragmentPose,
+    ) => Array<Array<{ x: number; y: number }>> | null;
+    /**
      * Content box of the polygon measured along `angleRad`. The angle is
      * NEVER guessed from the vertices — it is the caller's state: a peel
      * session passes the fragment's true pose, a plain selection passes 0

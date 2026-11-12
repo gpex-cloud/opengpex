@@ -25,6 +25,7 @@ import {
 } from "@opengpex/editor/core/context";
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
 import { readPeelSession } from "../peel/session";
+import { isPeelSettleInFlight } from "../peel/controller";
 import { useClipOverlayCommands, useClipCursor, useSelectionHudAnchor } from "../hooks";
 import { TransformHud } from "@opengpex/editor/widgets/affordances";
 import {
@@ -101,8 +102,14 @@ export function ClipOverlayMain() {
   const isEditing = isClipActive || isReCanvas;
   const isOverlayActive = isEditing || hasSelection;
 
-  const peelSessionActive =
-    !!activeFrame && readPeelSession(activeFrame)?.status === 'peeled';
+  // A commit in flight (the 'committing' adjudication while the settle lock
+  // is held) keeps the peel session VISIBLE: the HUD, its linked tone and the
+  // action bar must not flicker away for the length of the bake, and the bar
+  // is where the in-flight spinner lives. A persisted residue 'committing'
+  // (no lock) stays invisible, exactly as before.
+  const rawPeelSession = activeFrame ? readPeelSession(activeFrame) : null;
+  const peelCommitting = rawPeelSession?.status === 'committing' && isPeelSettleInFlight();
+  const peelSessionActive = rawPeelSession?.status === 'peeled' || peelCommitting;
   // Selection HUD (finding 17): ONE affordances-framework instance serves
   // every selection flavor — plain AND peel-session alike. The selection
   // polygon carries its orientation in its vertices for both flavors
@@ -298,7 +305,7 @@ export function ClipOverlayMain() {
           moveSurface={selectionMoveSurface}
           roundShape={clipType === 'circle'}
           dimension={selectionDimActive ? { text: selectionHud.getDimensionText } : undefined}
-          actions={peelBarActive ? <PeelActionButtons canResetSize={canResetSize} /> : undefined}
+          actions={peelBarActive ? <PeelActionButtons canResetSize={canResetSize} committing={peelCommitting} /> : undefined}
           delta
         />
       )}

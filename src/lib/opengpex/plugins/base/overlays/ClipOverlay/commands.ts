@@ -29,8 +29,10 @@
  * central executeCommand registry.
  */
 
-import { EditorContextValue, EditorCommand, asLocalShape, asWorldRect, type Frame, type Layer, type LocalShape, type TransformParams, type FragmentPose } from '@opengpex/editor/core/types';
-import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import { EditorContextValue, EditorCommand, asLocalShape, asWorldRect, type Frame, type Layer, type LocalShape, type TransformParams, type FragmentPose, type Point2D } from '@opengpex/editor/core/types';
+import { computeConfinementFromLayer, getClipBox } from '@opengpex/editor/core/helpers/selection';
+
+import { unionRingsMulti } from '@opengpex/editor/core/geometry/poly-clip';
 import { LayerFactory } from '@opengpex/editor/core/layer/factory';
 import {
   CMD_PEEL_EXCHANGE,
@@ -39,33 +41,33 @@ import {
   CMD_PEEL_SETTLE,
   CMD_PEEL_RESET_TRANSFORM,
   CMD_PEEL_APPLY_TRANSFORM,
+  CMD_PEEL_COMMIT_EXIT,
+  CMD_PEEL_DISCARD_EXIT,
+  CMD_LAYER_VIA_COPY,
+  CMD_LAYER_VIA_CUT,
+  CMD_CLIPBOARD_COPY,
+  CMD_CLIPBOARD_CUT,
+  ClipOverlayAPI,
+  type ClipOverlayConfig,
 } from './protocols';
 import {
   readPeelSession,
   writePeelSession,
   type PeelSession,
 } from './peel/session';
-import {
-  consumeInflightFragmentTransform,
-} from './peel/inflight';
 
-/**
- * Module-level settle lock (the command-layer mutex). The store is a React
- * reducer whose visible state (`stateRef.current`) only refreshes after a
- * render — a write dispatched mid-command is invisible to readers on the
- * same stack and for the whole async window that follows. While a commit is
- * in flight, a concurrently arriving settle (Esc, unmount fallback, …) would
- * read the stale pre-commit session and could roll a COMPLETED peel back,
- * destroying a permanent hole. The lock makes such calls VOID (not queued —
- * during committing, Esc means "nothing to do"). It lives outside the render
- * tree and outside persistence on purpose: it guards a single call-stack
- * adjudication, not a document fact.
- */
-let peelSettleInFlight = false;
+import {
+  markSelectionConverged,
+  commitExit as controllerCommitExit,
+  discardExit as controllerDiscardExit,
+  consumeInflightFragmentTransform,
+  isPeelSettleInFlight,
+  setPeelSettleInFlight,
+} from './peel/controller';
 
 /** Test isolation only: forces the settle lock open between tests. */
 export function resetPeelSettleLockForTests(): void {
-  peelSettleInFlight = false;
+  setPeelSettleInFlight(false);
 }
 
 /** Resolves on the next animation frame (immediately where none exists, e.g. headless tests). */
@@ -149,7 +151,12 @@ export const PEEL_COMMANDS = {
     undoable: true,
     execute: async (ctx: EditorContextValue, payload: { isCopy: boolean }): Promise<void> => {
       const { activeFrame, activeLayer, actions, layers } = ctx;
-      if (!activeFrame || !activeLayer || activeLayer.type !== 'image') return;
+      // Groups are the only refusal: no pixels of their own to peel. Every
+      // other type routes through `clipToExchangeLayer`, whose form choice is
+      // the same `resolveNature` arbitration the copy/cut commands use
+      // (text/marker/vector bake to an image exchange; paint/color/image keep
+      // logical or bake per their own masks/feather).
+      if (!activeFrame || !activeLayer || activeLayer.type === 'group') return;
 
       try {
         // ─── Session-first branching: the record decides, pixels follow ───
@@ -221,8 +228,40 @@ export const PEEL_COMMANDS = {
         // Supports both regular (LocalShape) and irregular (LocalPolygon) selections.
         const box = getClipBox(activeFrame);
         if (!box) return; // defensive — should never happen during a real peel
-        const result = ctx.layers.clipToExistLayer(activeFrame, latestLayer, exchange, box);
-        if (!result) return;
+        // Logical when the host's masks fold into hard geometry; a baked
+        // bitmap otherwise (enabled bitmap mask, feathered holes). The bake
+        // is a real GPU round trip, so this await can span pointer moves.
+        const result = await ctx.layers.clipToExchangeLayer(activeFrame, latestLayer, exchange, box);
+        if (!result) {
+          // The gesture already latched onto the peel: without feedback the
+          // selection would slide away with no fragment and no explanation.
+          actions.setInteraction({ hud: { message: 'Nothing to peel: the selection holds no pixels of this layer.', type: 'error' } });
+          return;
+        }
+
+        // ─── Re-validate against the live document ───
+        // Everything read before the await is a snapshot. While a bake was
+        // in flight the drag kept translating the selection, and the user
+        // may even have released the pointer — after which no pointer move
+        // will re-centre the fragment on the selection. Carry the fragment
+        // by the selection's travel so the pair lands together. (A logical
+        // fragment resolves within the same task: the travel is zero.)
+        const liveFrame = actions.fast.latestFrame(activeFrame.id) ?? activeFrame;
+        if (readPeelSession(liveFrame)) return; // another peel settled in first
+        const liveBox = getClipBox(liveFrame);
+        if (!liveBox) return; // the selection was dropped mid-bake: nothing to attach the fragment to
+        const travel = { x: liveBox.rect.x - box.rect.x, y: liveBox.rect.y - box.rect.y };
+        // `result.updatedLayer` stays the fragment AS CUT (the session's
+        // reset reference, paired with the selection it was cut with);
+        // `landed` is what the exchange is written as.
+        const landed = {
+          ...result.updatedLayer,
+          cx: result.updatedLayer.cx + travel.x,
+          cy: result.updatedLayer.cy + travel.y,
+        };
+
+        // The host's mask list may have changed during the await as well.
+        const hostAtWrite = actions.fast.latestLayer(activeFrame.id, host.id) || latestLayer;
 
         const timestamp = Date.now();
         // The exact hole mask id for THIS session. The id template is a naming
@@ -240,12 +279,12 @@ export const PEEL_COMMANDS = {
           // dragged, defeating the whole peel gesture (same rule as the
           // cut/duplicate flows).
           tx.edit(exchange.id).patch({
-            ...result.updatedLayer,
+            ...landed,
             locked: false,
             metadata: payload.isCopy
-              ? result.updatedLayer.metadata
+              ? landed.metadata
               : {
-                  ...(result.updatedLayer.metadata ?? {}),
+                  ...(landed.metadata ?? {}),
                   activeHoleMaskId: holeMaskId,
                 },
           });
@@ -264,12 +303,26 @@ export const PEEL_COMMANDS = {
               enabled: true,
               tag: 'peel',
             };
-            const currentMasks = latestLayer.vectorMasks || [];
+            const currentMasks = hostAtWrite.vectorMasks || [];
             tx.edit(host.id).patch({
               vectorMasks: [...currentMasks, hostHoleMask]
             });
           }
         });
+
+        // Selection convergence: the ants converge onto the cut geometry
+        // (the taken piece), not the once-drawn region — the gesture adopts
+        // the converged polygon as its translation base on the next move.
+        // The session's reset reference records the DRAWN selection: a
+        // discard/reset must re-peel the ORIGINAL region. Recording the
+        // converged spindle here would shrink every Esc→re-peel cycle by the
+        // soft-alpha fringe beyond the 50% contour (the fringe rides the
+        // fragment's crop window, and a spindle-shaped re-cut excludes it).
+        const converged = computeConfinementFromLayer(activeFrame, landed);
+        if (converged) {
+          ctx.actions.updateFrame(activeFrame.id, { confinement: converged });
+          markSelectionConverged();
+        }
 
         // Declare the session. From here the lifecycle is explicit: commit
         // and discard both key off THIS record, not off pixel content. The
@@ -299,6 +352,7 @@ export const PEEL_COMMANDS = {
             confinement: box,
           },
           accRotation: 0,
+          ...(result.physical ? { bakedFragment: true } : {}),
         }));
 
         // Switch focus to the fragment, taking over subsequent drag operations
@@ -306,6 +360,7 @@ export const PEEL_COMMANDS = {
 
       } catch (err) {
         console.error('[ClipCommands] Peel to exchange failed:', err);
+        actions.setInteraction({ hud: { message: 'Peel failed.', type: 'error' } });
       }
     }
   } as EditorCommand<{ isCopy: boolean }, Promise<void>>,
@@ -392,7 +447,7 @@ export const PEEL_COMMANDS = {
     execute: (ctx: EditorContextValue): Promise<boolean> => {
       const { assets } = ctx;
       return assets.withSession(async (): Promise<boolean> => {
-        const { activeFrame, activeLayer, actions, layers } = ctx;
+        const { activeFrame, activeLayer, actions, layers, geometry } = ctx;
         if (!activeFrame) return false;
 
         // ─── Session gate ───
@@ -468,7 +523,16 @@ export const PEEL_COMMANDS = {
           // full-bounds ring — equivalent to the rect, so tracing is correct
           // in every case. Failure-safe: null falls back to the full-bounds
           // rect and never blocks the landing.
-          const outlinePath = await ctx.layers.traceAlphaOutline(composited);
+          //
+          // Exception: a fragment that was CUT as a baked bitmap skips the
+          // trace. Its contour already lives in the pixels' alpha, hard
+          // interior edges included (the rim an eraser stroke left on the
+          // host), and the tracer's smoothing would clip real coverage off
+          // those. The product keeps the full-bounds rect; the pad around
+          // the content is transparent and clips nothing.
+          const outlinePath = session.bakedFragment
+            ? null
+            : await ctx.layers.traceAlphaOutline(composited);
 
           // The hole dug by THIS session, if any (null in copy mode). The
           // exact mask id is the only sanctioned hole handle — never a
@@ -489,6 +553,55 @@ export const PEEL_COMMANDS = {
           const hostLayers = activeFrame.layers.order
             .map(id => activeFrame.layers.byId[id])
             .filter(l => !l.hostId);
+          // Birth anchor = where the fragment was PEELED FROM, not where it
+          // landed: the content centre of the fragment as cut (the session's
+          // origin record, untouched by the drag and by transform bakes), so
+          // snap-to-birth brings the product back over its hole. The product
+          // shows its full bounds, hence its centre and its content centre
+          // coincide. Records written before the origin existed fall back to
+          // the landing position.
+          const birth = session.origin
+            ? ctx.geometry.transform.fragmentContentCenter(
+                ctx.geometry.transform.fragmentPoseFromLayer({ ...exchange, ...session.origin.layer }),
+              )
+            : {
+                x: composited.bounds.x + composited.bounds.w / 2,
+                y: composited.bounds.y + composited.bounds.h / 2,
+              };
+          // ── Cut-contour migration ──
+          // The promoted product's contour is the UNION of every
+          // participant's recorded cut contour (a peel may carry stamped
+          // fragments alongside the exchange), each projected from its own
+          // plane into world space and re-based onto the composite plane
+          // (bounds origin — no half-pixel snapping on this path, so
+          // bounds.x/y IS the plane origin). The union comes back as
+          // disjoint polygons (outer + holes each); flattening to one ring
+          // list preserves the even-odd semantics every contour consumer
+          // reads. No participant carrying a contour (logical peel) leaves
+          // the product contour-free — Refocus then falls back to the
+          // traced visibleShape, exactly as before this record existed.
+          let productContour: Layer['contour'];
+          {
+            const ringSets: Point2D[][][] = [];
+            for (const p of participants) {
+              if (p.contour?.rings?.length) {
+                // Project into WORLD coordinates (canvas-center origin) —
+                // the space composited.bounds lives in — not frame-local.
+                ringSets.push(geometry.polygon.localToWorldPolygon(
+                  geometry.point2d.point2dToLocalPolygon(p.contour.rings), p,
+                ).rings);
+              }
+            }
+            const unioned = ringSets.length > 0 ? unionRingsMulti(...ringSets) : null;
+            if (unioned && unioned.length > 0) {
+              productContour = {
+                rings: unioned.flat().map(ring =>
+                  ring.map(pt => ({ x: pt.x - composited.bounds.x, y: pt.y - composited.bounds.y })),
+                ),
+              };
+            }
+          }
+
           const newLayer = LayerFactory.getNewLayer({
             name: LayerFactory.getNewLayerName(hostLayers),
             src: assetUrl,
@@ -500,8 +613,10 @@ export const PEEL_COMMANDS = {
             // freshly composed here — nothing to merge. `clipTool` lets the
             // LayersDrawer Refocus re-arm the tool the fragment was cut with.
             ...ctx.layers.bakedLayerPatch(composited.bounds, { outlinePath: outlinePath ?? undefined }),
+            ...(productContour ? { contour: productContour } : {}),
+            birthCenter: { cx: birth.x, cy: birth.y },
+            nature: 'physical',
             metadata: {
-              physicalPixels: true,
               clipTool: activeFrame.latestClipTool,
               sourceLayerId: host.id,
               ...(mergeBackHoleId ? { assocMaskId: mergeBackHoleId } : {}),
@@ -598,7 +713,9 @@ export const PEEL_COMMANDS = {
       const resolved = resolveSessionParticipants(ctx, activeFrame, session);
       if (!resolved) return;
       const { exchange } = resolved;
-      if (exchange.type !== 'image') return;
+      // The exchange's type follows the peel form (physical bakes to image;
+      // a logical paint/color exchange keeps its own type) — the transform
+      // bake composites through SceneAssembler either way.
 
       const pose = payload?.pose;
       if (!pose) return;
@@ -671,6 +788,23 @@ export const PEEL_COMMANDS = {
         // content-box ROI so the bake never loses its reference.
         : asLocalShape(geometry.space.worldToLocalRect(asWorldRect(geometry.transform.fragmentBakeRoi(params, 1)), activeFrame));
 
+      // ── Cut-contour migration ──
+      // The recorded cut contour (`exchange.contour`) lives in the exchange's
+      // CURRENT plane coordinates, but this bake REWRITES that plane (fresh
+      // asset, rotation zeroed, the center re-anchored on the composite
+      // bounds). The rings therefore ride the same start→end pose map the
+      // bake renders with — the very map that carried the selection — and
+      // are re-based onto the new plane afterwards (see the record below).
+      // A session without a live selection, a degenerate pose map, or an
+      // empty migration drops the contour: the product then degrades to the
+      // plane rect, never to a wrong line.
+      const migratedContourRings = activeFrame.confinement && exchange.contour?.rings?.length
+        ? geometry.transform.migrateFragmentContour(exchange.contour.rings, exchange, activeFrame, startParams, params)
+        : undefined;
+      const migratedContour = migratedContourRings && migratedContourRings.length > 0
+        ? { rings: migratedContourRings }
+        : undefined;
+
       // ── Bake ROI budget gate ──
       // The composite below renders the ROI through a GPU staging buffer for
       // readback (width × height × 8 bytes on the RGBA16Float pipeline). Past
@@ -705,8 +839,13 @@ export const PEEL_COMMANDS = {
         // Always rebuild the outline from the baked alpha: the previous bake
         // (if any) already released the crop to a full rect, so tracing is the
         // only way this product keeps a true-contour record. Failure-safe —
-        // null keeps the full-bounds rect.
-        const outlinePath = await ctx.layers.traceAlphaOutline(composited);
+        // null keeps the full-bounds rect. A fragment cut as a baked bitmap
+        // never takes a traced outline (same rule as the commit): its
+        // contour is in the alpha, and the tracer's smoothing would clip
+        // coverage off the hard edges a pure scale keeps hard.
+        const outlinePath = session.bakedFragment
+          ? null
+          : await ctx.layers.traceAlphaOutline(composited);
 
         // The baked pixels ARE the transform: reset the pose and re-anchor on
         // the composite bounds center (world coords, half-pixel aligned — even
@@ -726,6 +865,21 @@ export const PEEL_COMMANDS = {
           // diverging from the mirrored selection).
           flip: exchange.flip,
         });
+        // Re-base the migrated cut contour (see above) onto the new plane
+        // origin. The patch already cleared the stale contour key; the
+        // origin is recovered from the SNAPPED record center — record.cx
+        // went through half-pixel snapping, so bounds.x + w/2 would sit up
+        // to half a pixel off.
+        if (migratedContour) {
+          record.contour = {
+            rings: migratedContour.rings.map(ring =>
+              ring.map((p: Point2D) => ({
+                x: p.x - (record.cx! - bounds.w / 2),
+                y: p.y - (record.cy! - bounds.h / 2),
+              })),
+            ),
+          };
+        }
 
         const bakedPatch: Partial<Layer> = {
           assetId: newAssetId,
@@ -738,9 +892,9 @@ export const PEEL_COMMANDS = {
           // exchange carries the session hole pointer (activeHoleMaskId)
           // through transform bakes — replacing metadata wholesale would
           // sever the session's hole link.
+          nature: 'physical',
           metadata: {
             ...exchange.metadata,
-            physicalPixels: true,
             clipTool: activeFrame.latestClipTool,
           },
         };
@@ -916,7 +1070,7 @@ export const PEEL_COMMANDS = {
       if (payload?.mode !== 'commit' && payload?.mode !== 'discard') return false;
 
       // In-flight adjudication: any concurrent settle is void, not queued.
-      if (peelSettleInFlight) return false;
+      if (isPeelSettleInFlight()) return false;
 
       const session = readPeelSession(frame);
       if (!session) return false; // zero-cost short-circuit — no undecided session
@@ -928,7 +1082,7 @@ export const PEEL_COMMANDS = {
       // Dangling record → clear, nothing to settle.
       if (!resolveSessionParticipants(ctx, frame, session)) return false;
 
-      peelSettleInFlight = true;
+      setPeelSettleInFlight(true);
       // Self-ledgered undo step. settle runs as a noundo command, and right
       // after an undo the history has NO open checkpoint: unbracketed writes
       // would then land outside every recorded step, and the next undo would
@@ -955,10 +1109,25 @@ export const PEEL_COMMANDS = {
             ctx.actions.fast.setTransient('fragmentTransform', null);
           }
           const landed = await PEEL_COMMANDS.mergeExchange.execute(ctx);
-          // Dropping the selection rides INSIDE the bracket so the landing
-          // and the clear are one undo step.
-          if (landed && payload.clearSelection) {
-            ctx.actions.updateFrame(frame.id, { confinement: null });
+          // Selection lifecycle rides INSIDE the bracket so the landing and
+          // the write are one undo step: the preference clears the ants, and
+          // a kept selection converges onto the promoted fragment's outline
+          // (same rule as the clip command family).
+          if (landed) {
+            if (payload.clearSelection) {
+              ctx.actions.updateFrame(frame.id, { confinement: null });
+            } else {
+              const freshFrame = ctx.actions.fast.latestFrame(frame.id) ?? frame;
+              const promoted = freshFrame.activeLayerId
+                ? ctx.actions.fast.latestLayer(freshFrame.id, freshFrame.activeLayerId)
+                : undefined;
+              const converged = promoted
+                ? computeConfinementFromLayer(freshFrame, promoted)
+                : null;
+              if (converged) {
+                ctx.actions.updateFrame(frame.id, { confinement: converged });
+              }
+            }
           }
           return landed;
         } else {
@@ -973,8 +1142,95 @@ export const PEEL_COMMANDS = {
         }
       } finally {
         ctx.actions.history.commitCheckpoint(frame.id);
-        peelSettleInFlight = false;
+        setPeelSettleInFlight(false);
       }
     }
-  } as EditorCommand<{ mode: 'commit' | 'discard' }, Promise<boolean>>
+  } as EditorCommand<{ mode: 'commit' | 'discard' }, Promise<boolean>>,
+
+  /**
+   * CMD_PEEL_COMMIT_EXIT — the shared commit tail of every "land and clear"
+   * entry (Enter / action button, click to deselect, Cmd+D), registered
+   * here so the entry plugins dispatch by uid instead of importing this
+   * plugin's internals. Commit any undecided peel session, then apply the
+   * selection-lifecycle preference: the ants are dropped when the commit
+   * lands, or CONVERGED onto the promoted fragment when the keep
+   * preference is on. The selection is also KEPT when the commit did not
+   * land (merge failure / in-flight commit) — the floating fragment must
+   * stay glued to its selection for the retry. With no session this is a
+   * plain deselect (not gated by the preference: a deselect action, not an
+   * operation). The landed/failed decision is made inside settle from its
+   * RESOLVED outcome, never from a state re-read.
+   */
+  commitExit: {
+    id: CMD_PEEL_COMMIT_EXIT,
+    name: 'Commit Peel and Apply Selection Policy',
+    undoable: false,
+    execute: (ctx: EditorContextValue) => controllerCommitExit(ctx),
+  } as EditorCommand<void, Promise<void>>,
+
+  /**
+   * CMD_PEEL_DISCARD_EXIT — the implicit-cancel tail (click outside the
+   * floating fragment, Esc): discard any undecided session, then clear the
+   * selection so a replacement selection can start immediately. NOT gated
+   * by the keep preference — a discard is a cancellation, not a landed
+   * operation.
+   */
+  discardExit: {
+    id: CMD_PEEL_DISCARD_EXIT,
+    name: 'Discard Peel and Clear Selection',
+    undoable: false,
+    execute: (ctx: EditorContextValue) => controllerDiscardExit(ctx),
+  } as EditorCommand<void, Promise<void>>,
+};
+
+/**
+ * CLIP_ENTRY_COMMANDS — the clipboard / layer-via entry wrappers, owned here
+ * (the selection lifecycle preference `keepClipBoxAfter` lives in this
+ * plugin's config) and dispatched by the ClipOptions shell through the
+ * command registry.
+ */
+export const CLIP_ENTRY_COMMANDS = {
+  layerViaCopy: {
+    id: CMD_LAYER_VIA_COPY,
+    name: 'Layer via Copy',
+    category: 'Selection',
+    shortcuts: [{ key: 'j', meta: true }, { key: 'j', ctrl: true }],
+    execute: (ctx: EditorContextValue) => {
+      ctx.actions.adv.layer.cmdj.copy.execute();
+    }
+  } as EditorCommand<void, void>,
+
+  layerViaCut: {
+    id: CMD_LAYER_VIA_CUT,
+    name: 'Layer via Cut',
+    category: 'Selection',
+    shortcuts: [{ key: 'j', meta: true, shift: true }, { key: 'j', ctrl: true, shift: true }],
+    execute: (ctx: EditorContextValue) => {
+      const keepClipBoxAfter =
+        ((ctx.state.pluginConfig as Record<string, Partial<ClipOverlayConfig>> | undefined)?.[ClipOverlayAPI.configKey]?.keepClipBoxAfter === true);
+      ctx.actions.adv.layer.cmdj.cut.execute({ keepClipBoxAfter });
+    }
+  } as EditorCommand<void, void>,
+
+  clipboardCopy: {
+    id: CMD_CLIPBOARD_COPY,
+    name: 'Copy',
+    category: 'Clipboard',
+    shortcuts: [{ key: 'c', meta: true }, { key: 'c', ctrl: true }],
+    execute: (ctx: EditorContextValue) => {
+      ctx.actions.adv.layer.clip.copy.execute();
+    }
+  } as EditorCommand<void, void>,
+
+  clipboardCut: {
+    id: CMD_CLIPBOARD_CUT,
+    name: 'Cut',
+    category: 'Clipboard',
+    shortcuts: [{ key: 'x', meta: true }, { key: 'x', ctrl: true }],
+    execute: (ctx: EditorContextValue) => {
+      const keepClipBoxAfter =
+        ((ctx.state.pluginConfig as Record<string, Partial<ClipOverlayConfig>> | undefined)?.[ClipOverlayAPI.configKey]?.keepClipBoxAfter === true);
+      ctx.actions.adv.layer.clip.cut.execute({ keepClipBoxAfter });
+    }
+  } as EditorCommand<void, void>,
 };

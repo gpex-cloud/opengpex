@@ -137,6 +137,35 @@ export const LAYERS_COMMANDS = {
             const layer = frame?.layers.byId[payload.layerId];
             if (!frame || !layer) return;
 
+            // The recorded cut contour is the primary source: the exact
+            // selection∩layer geometry at cut time (rings in the fragment's
+            // own coordinate space), with its edge falloff and tool — NOT the
+            // fragment's visibleShape, which for a physical fragment is only
+            // the trimmed bounding box enclosing the whole feather band.
+            // Fragments cut before this record existed fall through to the
+            // shape-based reconstruction below.
+            const contour = layer.contour;
+            if (contour && Array.isArray(contour.rings) && contour.rings.length > 0) {
+                const latestLayer = ctx.actions.fast.latestLayer(frameId, payload.layerId) || layer;
+                // The cut's feather rides the fragment's edge record
+                // (`visibleShape.featherPx`, written by the bake at cut time
+                // precisely for this read-back) — the contour itself is
+                // rings-only by design. Feather decree: the re-armed
+                // selection is a selection entity and MUST carry the same
+                // radius, or the next cut silently de-feathers.
+                const cutFeather = (latestLayer.visibleShape as { featherPx?: number } | undefined)?.featherPx ?? 0;
+                const localPoly = ctx.geometry.point2d.point2dToLocalPolygon(
+                    contour.rings as never,
+                    cutFeather > 0 ? { feather: cutFeather } : undefined,
+                );
+                const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(localPoly, latestLayer, frame);
+                // The cut's tool rides `metadata.clipTool` (pre-existing).
+                const clipToolId = (layer.metadata?.clipTool as string) || 'lasso';
+                const target: RefocusTarget = { regular: false, clipToolId, polygon: framePoly };
+                commitRefocusToOverlay(ctx, frame, target);
+                return;
+            }
+
             const shape = layer.visibleShape;
             const rect = shape?.rect || { x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h };
             const shapeType = shape?.type || 'rect';
@@ -149,7 +178,13 @@ export const LAYERS_COMMANDS = {
                 const rings = ctx.geometry.point2d.shapeToPoint2D(shape);
                 if (rings.length === 0) return;
 
-                const localPoly = ctx.geometry.point2d.point2dToLocalPolygon(rings, { antiAliased: shape.antiAliased !== false });
+                // Legacy feathered logical fragments carry the soft edge on
+                // `visibleShape.featherPx` — arm it back with the shape.
+                const shapeFeather = (shape as { featherPx?: number }).featherPx ?? 0;
+                const localPoly = ctx.geometry.point2d.point2dToLocalPolygon(rings, {
+                    antiAliased: shape.antiAliased !== false,
+                    ...(shapeFeather > 0 ? { feather: shapeFeather } : {}),
+                });
                 const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(localPoly, layer, frame);
 
                 // Use the recorded source clip tool if available, otherwise default to 'lasso'.

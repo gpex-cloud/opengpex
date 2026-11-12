@@ -26,6 +26,7 @@ import {
 } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { readPeelSession } from '../peel/session';
+import { consumeSelectionConvergence } from '../peel/controller';
 import * as P from '../protocols';
 import { createTransformHandler, TransformIntent } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import {
@@ -72,6 +73,13 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
   // ─── Closure state ─────────────────────────────────────────────────────────
   let startPolygon: LocalPolygon | null = null;
   let initialRect: LocalRect = asLocalRect({ x: 0, y: 0, w: 0, h: 0 });
+  // Selection-convergence state: once the peel lands and rewrites the
+  // confinement onto the cut geometry, the gesture adopts that polygon as
+  // its translation base, offset by the delta already applied to the
+  // once-drawn outline (later moves translate the CUT region by the pointer
+  // travel since adoption, not since gesture start).
+  let convergedBase: LocalPolygon | null = null;
+  let convergedDelta: { x: number; y: number } = { x: 0, y: 0 };
   let hasPeeled = false;
   let feedbackDeclared = false; // the gesture feedback declaration is issued once per gesture
   /**
@@ -85,7 +93,15 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
    * damage.
    */
   let peelRefusal: 'locked' | 'silent' | null = null;
-
+  /**
+   * Selection-convergence adoption, once per gesture. The peel command
+   * converges the confinement onto the cut geometry, but this gesture owns
+   * the selection while the pointer is down and would overwrite it with the
+   * DRAWN shape on the very next move. Once the session's origin appears,
+   * the gesture adopts the converged polygon as its new translation base
+   * (and zeroes the accumulated delta), so every later move translates the
+   * CUT region, not the once-drawn outline.
+   */
   return createTransformHandler({
     id: 'clip-selection-move',
     priority: 130,
@@ -154,6 +170,8 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       hasPeeled = false;
       peelRefusal = null;
       feedbackDeclared = false;
+      convergedBase = null;
+      convergedDelta = { x: 0, y: 0 };
 
       if (!box) {
         startPolygon = null;
@@ -213,7 +231,14 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
               const host = activeLayer?.role === 'exchange' && activeLayer.hostId
                 ? frame.layers.byId[activeLayer.hostId]
                 : activeLayer;
-              if (!host || host.type !== 'image') {
+              // Groups are the only refusal: they carry no pixels of their own
+              // (children composite through them) so there is nothing to peel.
+              // Every other type peels — the form follows `resolveNature` in
+              // `clipToExchangeLayer` (text/marker/vector bake to an image
+              // exchange; paint/color/image keep logical or bake per their
+              // own mask/feather situation), identical arbitration to the
+              // copy/cut commands.
+              if (!host || host.type === 'group') {
                 peelRefusal = 'silent'; // the command no-ops quietly — so does the gesture
               } else if (!me.altKey && host.locked) {
                 // Copy peels only READ the host and stay available on locked
@@ -237,10 +262,29 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
       }
 
       // ─── Move: update selection position ──────────────────────────────
-      if (startPolygon) {
-        const polyDx = newRect.x - initialRect.x;
-        const polyDy = newRect.y - initialRect.y;
-        const newPoly = e.geometry.polygon.translatePolygon(startPolygon, polyDx, polyDy);
+      // Convergence adoption (once per gesture): the peel command marked the
+      // flag when it rewrote the confinement onto the cut geometry — adopt
+      // the live polygon as the translation base, anchored at THIS move's
+      // delta so the switch is invisible (offset 0 at adoption).
+      if (consumeSelectionConvergence()) {
+        const live = getClipBox(frame);
+        if (live) {
+          convergedBase = live;
+          convergedDelta = { x: newRect.x - initialRect.x, y: newRect.y - initialRect.y };
+        }
+      }
+
+      let polyDx = 0;
+      let polyDy = 0;
+      const basePoly = convergedBase ?? startPolygon;
+      if (basePoly) {
+        polyDx = newRect.x - initialRect.x;
+        polyDy = newRect.y - initialRect.y;
+        const newPoly = e.geometry.polygon.translatePolygon(
+          basePoly,
+          polyDx - convergedDelta.x,
+          polyDy - convergedDelta.y,
+        );
         tx.update({
           confinement: newPoly
         }, 'frame');
@@ -267,16 +311,41 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
             })();
 
         if (exchangeLayer) {
+          const vr = exchangeLayer.visibleShape?.rect;
+          const vox = vr?.x ?? 0;
+          const voy = vr?.y ?? 0;
+          // The content follows the selection with its CUT-TIME offset
+          // preserved: the fragment's content center is the center of the
+          // selection ∩ the source's visible extent — NOT the selection's
+          // own bbox center. The two diverge whenever the selection
+          // overhangs the source's extent (a bottom-clipped ellipse), and
+          // anchoring the bbox center teleported the fragment by that
+          // overhang on the first pointer move (real-device finding
+          // 2026-11-12). The offset is read from the CURRENT pair (same
+          // frame snapshot, so pose and selection are consistent) and is
+          // translation-invariant, so carrying it through (polyDx, polyDy)
+          // keeps the cut relationship exact for any selection shape.
+          // After a convergence adoption the ANTS translate by the reduced
+          // delta (polyDx − convergedDelta) — the fragment must ride the SAME
+          // reduced delta, or it keeps stepping by the full gesture delta and
+          // drifts ahead of the ants by the offset frozen at the adoption
+          // frame (device finding 2026-11-12: the peeled spindle ended up
+          // shifted right of its ants by exactly the adoption delta).
+          const selCenterBefore = e.geometry.space.localToWorld(
+            newRect.x - (polyDx - convergedDelta.x) + newRect.w / 2,
+            newRect.y - (polyDy - convergedDelta.y) + newRect.h / 2,
+            frame
+          );
+          const contentCenter = e.geometry.transform.fragmentContentCenter(
+            e.geometry.transform.fragmentPoseFromLayer(exchangeLayer)
+          );
           const worldCenter = e.geometry.space.localToWorld(
             newRect.x + newRect.w / 2,
             newRect.y + newRect.h / 2,
             frame
           );
-          const vr = exchangeLayer.visibleShape?.rect;
-          const vox = vr?.x ?? 0;
-          const voy = vr?.y ?? 0;
           const pose = e.geometry.transform.computeFragmentCenter(
-            worldCenter,
+            { x: worldCenter.x + (contentCenter.x - selCenterBefore.x), y: worldCenter.y + (contentCenter.y - selCenterBefore.y) },
             { x: vox, y: voy },
             exchangeLayer.rotation,
             exchangeLayer.flip

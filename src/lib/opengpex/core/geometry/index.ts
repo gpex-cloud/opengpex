@@ -65,6 +65,7 @@ import {
   getFragmentBakeRoi,
   computeFragmentRotation,
   followFragmentSelection,
+  migrateFragmentContour,
 } from './operators/fragment';
 import { normalizeAngle, snapAngle, snapRotationRad, poseScreenAngle } from './operators/rotator';
 import {
@@ -164,6 +165,8 @@ export function createGeometryService(): GeometryService {
       computeFragmentRotation: (start, pointerWorld, startRotationDeg, startPointerAngleRad, opts) => computeFragmentRotation(start, pointerWorld, startRotationDeg, startPointerAngleRad, opts),
       followFragmentSelection: (selection, start, end, frame) =>
         followFragmentSelection(selection, start, end, (p) => worldToLocal(p.x, p.y, frame.canvas)),
+      migrateFragmentContour: (rings, layer, frame, start, end) =>
+        migrateFragmentContour(rings, layer, frame, start, end, (p) => worldToLocal(p.x, p.y, frame.canvas)),
       rotatedPolygonBox: (poly, angleRad) => computeRotationBox(poly, angleRad),
       toScreenRotationBox: (box, cam) => toScreenRotationBox(box, cam),
     },

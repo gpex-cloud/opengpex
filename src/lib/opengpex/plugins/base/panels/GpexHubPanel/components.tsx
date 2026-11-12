@@ -40,6 +40,7 @@ import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import FancyConfirm from "@opengpex/editor/widgets/FancyConfirm";
 import TabSwitcher from "@opengpex/editor/widgets/TabSwitcher";
 import { useGpexHubConfig } from "./hooks";
+import { DiagnosticsTab } from "./Diagnostics";
 import {
   useEditorServices,
   usePluginList,
@@ -109,15 +110,17 @@ export const GpexHubPanel = React.memo(function GpexHubPanel() {
           tabs={[
             { id: "explore", label: "Exploring" },
             { id: "installed", label: "Installed" },
+            { id: "diagnostics", label: "Diagnostics" },
           ]}
           activeTab={activeTab}
-          onTabChange={(id) => setActiveTab(id as "explore" | "installed")}
+          onTabChange={(id) => setActiveTab(id as "explore" | "installed" | "diagnostics")}
         />
 
         {/* Core content rendering view: perfectly fills large HUD blank area */}
         <div className="flex-1 overflow-hidden relative mt-4">
           {activeTab === "explore" && <ExploreTab />}
           {activeTab === "installed" && <InstalledTab />}
+          {activeTab === "diagnostics" && <DiagnosticsTab />}
         </div>
       </div>
     </PopupPanel>

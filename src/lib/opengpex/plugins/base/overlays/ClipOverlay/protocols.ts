@@ -27,6 +27,16 @@ export interface ClipOverlayConfig {
   marchingAntsAnimated: boolean;
   /** Show the selection dimension chip (clip mode only; never in pan). */
   showDimensionLabel: boolean;
+  /**
+   * Selection lifecycle policy (default false): a landed Cut / Cut to
+   * Layer / peel commit dissolves the active selection; Copy / Copy to
+   * Layer always keep it (the source is untouched). Turn on to keep the
+   * ants after every operation (e.g. to re-cut the same region). Read
+   * cross-plugin by the clear sites — core clip.ts / cmdj.ts receive it
+   * as a payload from the ClipOptions wrappers; the peel exit reads it
+   * here directly. Absent = the default: readers test `=== true`.
+   */
+  keepClipBoxAfter?: boolean;
 }
 
 /**
@@ -56,6 +66,16 @@ export const CMD_PEEL_MERGE = 'cmd.peel.merge';
 export const CMD_PEEL_SETTLE = 'cmd.peel.settle';
 /** "Reset size": restore the fragment to its peel-time pixels and size. */
 export const CMD_PEEL_RESET_TRANSFORM = 'cmd.peel.reset_transform';
+
+// ─── Clip Entry Command Ids (owned here since the selection-lifecycle
+// preference `keepClipBoxAfter` lives in this plugin's config; the entry
+// wrappers were moved over from ClipOptions) ─────────────────────────────────
+export const CMD_LAYER_VIA_COPY = 'cmd.layer_via_copy';
+export const CMD_LAYER_VIA_CUT = 'cmd.layer_via_cut';
+export const CMD_CLIPBOARD_COPY = 'cmd.clipboard_copy';
+export const CMD_CLIPBOARD_CUT = 'cmd.clipboard_cut';
+export const CMD_PEEL_COMMIT_EXIT = 'cmd.peel.commit_exit';
+export const CMD_PEEL_DISCARD_EXIT = 'cmd.peel.discard_exit';
 /** Bake a finished transform gesture into new fragment pixels (write-copy). */
 export const CMD_PEEL_APPLY_TRANSFORM = 'cmd.peel.apply_transform';
 
@@ -68,6 +88,18 @@ export const PeelAPI = {
     settleExchange: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PEEL_SETTLE}` } as { uid: string; _payload: { mode: 'commit' | 'discard'; clearSelection?: boolean } },
     resetTransform: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PEEL_RESET_TRANSFORM}` } as { uid: string; _payload: void },
     applyTransform: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PEEL_APPLY_TRANSFORM}` } as { uid: string; _payload: { pose: unknown } },
+    commitExit: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PEEL_COMMIT_EXIT}` } as { uid: string; _payload: void },
+    discardExit: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PEEL_DISCARD_EXIT}` } as { uid: string; _payload: void },
+  },
+};
+
+// ─── Clip Entry Commands (public facade for the ClipOptions shell) ──────────
+export const ClipEntryAPI = {
+  commands: {
+    layerViaCopy: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_LAYER_VIA_COPY}` } as { uid: string; _payload: void },
+    layerViaCut: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_LAYER_VIA_CUT}` } as { uid: string; _payload: void },
+    clipboardCopy: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_CLIPBOARD_COPY}` } as { uid: string; _payload: void },
+    clipboardCut: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_CLIPBOARD_CUT}` } as { uid: string; _payload: void },
   },
 };
 

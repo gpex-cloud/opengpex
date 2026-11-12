@@ -91,6 +91,36 @@ export function ClipOverlaySettings() {
           activeColor="bg-indigo-500"
         />
       </button>
+      {/* Selection Lifecycle Policy Toggle — behavior, not display: ON keeps
+          the active selection after a landed Cut / Cut to Layer / peel commit
+          (converged onto the fragment); OFF dissolves it (Photoshop parity).
+          Read cross-plugin by core clip.ts / cmdj.ts (via the ClipOptions
+          wrapper payloads) and the peel exit. */}
+      <button
+        onClick={() => updateConfig({ keepClipBoxAfter: !(config.keepClipBoxAfter ?? false) })}
+        className="flex items-center justify-between w-full p-2.5 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] group outline-none"
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className={`w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center transition-colors ${(config.keepClipBoxAfter ?? false) ? 'bg-indigo-500/10 text-indigo-500' : 'bg-[var(--bg-stage)] text-[var(--text-muted)]'}`}
+          >
+            <Scissors size={13} />
+          </div>
+          <div className="flex flex-col items-start leading-tight text-left">
+            <span className="text-[10px] font-black text-[var(--text-main)] uppercase tracking-tight">
+              Keep Selection After Cut
+            </span>
+            <span className="text-[8px] text-[var(--text-muted)] font-bold uppercase">
+              Cut / Cut to Layer / peel commit · Copy always keeps
+            </span>
+          </div>
+        </div>
+        <Switch
+          checked={config.keepClipBoxAfter ?? false}
+          onChange={(v) => updateConfig({ keepClipBoxAfter: v })}
+          activeColor="bg-indigo-500"
+        />
+      </button>
     </div>
   );
 }

@@ -88,11 +88,20 @@ export function resolveLayerGeometry(
   const localOffset: [number, number] = [layer.crop?.x ?? 0, layer.crop?.y ?? 0];
 
   let uvRect: [number, number, number, number] = [0, 0, 1, 1];
-  if (layer.crop) {
-    const texW = Math.max(1, textureWidth);
-    const texH = Math.max(1, textureHeight);
+  // A GENUINELY 1×1 texture is a STRETCHED CONSTANT (the solid-colour fill's
+  // texel): it has no croppable content, so the crop rides quad placement only
+  // (localOffset above) and the sampled uv stays the full [0,1] domain.
+  // Normalizing the crop against the 1-px size would produce UVs far beyond 1,
+  // which the layer shader's bitmap-extent gate turns into a fully transparent
+  // layer (2026-11-12 finding: fills painted a single texel at the layer's
+  // local origin). Judged on the RAW dims — the 0-size clamp below is a
+  // divide-by-zero guard for degenerate textures, not a stretched constant.
+  const isStretchedConstant = textureWidth === 1 && textureHeight === 1;
+  if (layer.crop && !isStretchedConstant) {
     // Scale the logical crop into physical texture space (see DPR NOTE above).
     const d = dprScale > 0 ? dprScale : 1;
+    const texW = Math.max(1, textureWidth);
+    const texH = Math.max(1, textureHeight);
     // Windowed: the texture's content starts at rect.x/y in the source, so the
     // crop's physical offset shifts by the rect origin. (texW/texH are already
     // the WINDOW's dims — the caller passes the filtered texture's own size.)

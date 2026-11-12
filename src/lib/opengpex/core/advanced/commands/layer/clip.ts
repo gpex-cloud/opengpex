@@ -20,12 +20,12 @@
 'use client';
 
 import { EditorContextValue, EditorCommand, ClipboardLayerMetadata } from '@opengpex/editor/core/types';
-import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { polygonToShape } from '@opengpex/editor/core/geometry/operators/polygon';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 import { computeFragmentCenter } from '@opengpex/editor/core/geometry/operators/transform';
 import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import { createFrameFromAsset } from '../frame/importers';
+import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
 /**
  * Shared body of Copy and Cut: route the active layer through the clip
@@ -35,14 +35,21 @@ import { createFrameFromAsset } from '../frame/importers';
  *
  * `feather` resolves from the active selection (selection-feather upgrade;
  * the payload form is an explicit override). A feathered partial
- * clip routes to the rasterize executor (the routing's `shouldRoutePhysical`
+ * clip routes to the physical executor (the routing's `shouldRoutePhysical`.
  * forces it), so the clipboard PNG and the source hole are complementary
  * across the soft band, and the hole stays UNLINKED — feathering never
  * changes the clipboard boundary ruling. A whole-layer clip (no selection or
  * a covering one) ignores feather: feathering softens a selection contour,
  * and copying a whole layer has no contour.
  */
-async function clipToClipboard(ctx: EditorContextValue, mode: 'copy' | 'cut'): Promise<void> {
+async function clipToClipboard(
+  ctx: EditorContextValue,
+  mode: 'copy' | 'cut',
+  /** Caller-resolved selection policy (the plugin wrapper reads the user
+   *  preference — core commands never read plugin config). Default: clear
+   *  on Cut, the Photoshop behavior. */
+  keepClipBoxAfter = false,
+): Promise<void> {
   const { activeFrame, activeLayer, actions, state } = ctx;
   const isClipMode = state.interaction.interactionMode === 'clip';
   const latestLayer = (activeFrame && activeLayer)
@@ -84,6 +91,24 @@ async function clipToClipboard(ctx: EditorContextValue, mode: 'copy' | 'cut'): P
       });
     });
   }
+
+  // Selection lifecycle on landing. A Copy keeps the selection; a Cut
+  // dissolves it (what it referred to is gone from the layer) unless the
+  // user preference keeps the ants. A KEPT selection always CONVERGES onto
+  // the fragment's cut outline (selection convergence): the ants describe
+  // the taken piece, not the once-drawn region, so a follow-up Copy or re-cut
+  // operates on exactly what the last operation took. Whole-layer and
+  // contour-less products keep the drawn selection as-is (the helper returns
+  // null). The caller (the plugin wrapper) resolves the user preference —
+  // core commands never read plugin config (layering).
+  if (mode === 'cut' && !keepClipBoxAfter) {
+    actions.updateFrame(activeFrame.id, { confinement: null });
+  } else if (result.newLayer && getClipBox(activeFrame) && result.confinement) {
+    // Converge only when a selection existed (a whole-layer op with no
+    // selection must not conjure one out of the fragment's bounds); the
+    // projection itself rode the fragment result from the core.
+    actions.updateFrame(activeFrame.id, { confinement: result.confinement });
+  }
 }
 
 
@@ -109,24 +134,24 @@ export const LayerClipCommands = {
         }
       });
     },
-  } as EditorCommand<undefined, Promise<void>>,
+  } as EditorCommand<{ keepClipBoxAfter?: boolean } | undefined, Promise<void>>,
 
   cut: {
     id: P.ADV_LAYER_CLIP_CUT,
     name: 'Cut',
     category: 'Clipboard',
     undoable: true,
-    execute: (ctx: EditorContextValue): Promise<void> => {
+    execute: (ctx: EditorContextValue, payload?: { keepClipBoxAfter?: boolean }): Promise<void> => {
       const { assets } = ctx;
       return assets.withSession(async () => {
         try {
-          await clipToClipboard(ctx, 'cut');
+          await clipToClipboard(ctx, 'cut', payload?.keepClipBoxAfter);
         } catch (err) {
           console.error('[ClipCommands] Cut operation failed:', err);
         }
       });
     },
-  } as EditorCommand<undefined, Promise<void>>,
+  } as EditorCommand<{ keepClipBoxAfter?: boolean } | undefined, Promise<void>>,
 
   paste: {
     id: P.ADV_LAYER_CLIP_PASTE,

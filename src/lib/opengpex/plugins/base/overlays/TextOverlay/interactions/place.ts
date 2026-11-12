@@ -74,7 +74,12 @@ export const createTextPlaceHandler = (): InteractionHandler => {
 
   const readPendingColor = (e: InteractionEvent): ColorValue => {
     const colorConfig = e.state.pluginConfig[ColorOptionsAPI.configKey] as { pendingColor?: ColorValue } | undefined;
-    return colorConfig?.pendingColor ?? fromHex('#FFFFFF');
+    // The pending colour is a FOREGROUND colour (same semantics as the fill's):
+    // a layer's own opacity governs its coverage, so a persisted alpha — e.g. an
+    // eyedropper sample over a transparent region landing on alpha 0 — must not
+    // leak into new text and render it invisible (2026-11-12 finding).
+    const color = colorConfig?.pendingColor ?? fromHex('#FFFFFF');
+    return { ...color, alpha: 1 };
   };
 
   const buildTextLayer = (

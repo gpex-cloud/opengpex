@@ -140,9 +140,8 @@ export function createLayerService(
                 // the shared core deliberately leaves to the caller.
                 flip, opacity, vectorMasks,
                 // The physical-layer declaration (see services/baking.ts): a
-                // reset layer OWNS its pixels. Existing metadata keys
-                // (lineage pointers) survive the declaration.
-                metadata: { ...(layer?.metadata ?? {}), physicalPixels: true },
+                // reset layer OWNS its pixels.
+                nature: 'physical',
               };
               return editor;
             },
@@ -307,7 +306,7 @@ export function createLayerService(
     // ── Clip operations (delegated to clipping.ts) ──────────────────────────
     clipToLogicalLayer: fragmentOps.clipToLogicalLayer,
     clipToPhysicalLayer: fragmentOps.clipToPhysicalLayer,
-    clipToExistLayer: fragmentOps.clipToExistLayer,
+    clipToExchangeLayer: fragmentOps.clipToExchangeLayer,
     clipFragment: clipRoutingOps.clipFragment,
 
     // ── Resample operations (delegated to resizing.ts) ──────────────────────────

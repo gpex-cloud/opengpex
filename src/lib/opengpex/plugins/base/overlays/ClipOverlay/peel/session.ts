@@ -114,6 +114,16 @@ export interface PeelSession {
    * when there is a size to reset.
    */
   resized?: boolean;
+  /**
+   * The fragment was cut as a BAKED bitmap (the host carried an enabled
+   * bitmap mask or feathered holes), so its exact contour lives in the
+   * pixels' alpha — hard interior edges an eraser left included. The commit
+   * then keeps the product's full-bounds rect instead of clipping it with a
+   * traced outline: the tracer smooths and simplifies (about a pixel of
+   * play), which is harmless on an edge that is already anti-aliased but
+   * shaves real coverage off a hard one.
+   */
+  bakedFragment?: boolean;
 }
 
 /**
@@ -140,6 +150,9 @@ export function validatePeelSessionRaw(v: unknown): PeelSession | null {
   }
   if (s.accRotation !== undefined && typeof s.accRotation !== 'number') {
     return { ...(s as PeelSession), accRotation: 0 };
+  }
+  if (s.bakedFragment !== undefined && typeof s.bakedFragment !== 'boolean') {
+    return { ...(s as PeelSession), bakedFragment: false };
   }
   return v as PeelSession;
 }

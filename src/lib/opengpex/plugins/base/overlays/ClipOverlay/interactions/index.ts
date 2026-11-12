@@ -22,6 +22,7 @@
  *
  * Each handler is in its own module for maintainability:
  *   - guard.ts              — shared `makeClipToolGuard` strategy dispatch helper
+ *   - freeze.ts             — inert stage while a peel commit is baking
  *   - move.ts              — unified move + peel for ALL selection types (tool-agnostic)
  *   - transform/selection.ts — plain selection gizmo scale/rotate (ring-affine)
  *   - transform/fragment.ts  — peel-session transform driven through the
@@ -32,6 +33,7 @@
  *   - tools/wand.ts         — magic wand flood-fill selection handler (create)
  */
 
+export { createCommitFreezeHandler } from './freeze';
 export { createSelectionMoveHandler } from './move';
 export { createSelectionTransformHandler } from './transform/selection';
 export { createSessionTransformHandler } from './transform/fragment';

@@ -24,6 +24,7 @@ import {
   Split,
   ChevronDown,
   Maximize,
+  SquareDashed,
   Check,
   X,
   Hand,
@@ -92,6 +93,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
     invertSelectionCmd,
     selectFromAlphaCmd,
     offsetSelectionCmd,
+    deselectCmd,
     isImageLayer,
     clipTool,
     isIrregularTool,
@@ -267,7 +269,27 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
       {/* 1. Header Section */}
       <div className="flex items-center">
         <div className="flex items-center gap-1">
-          {isPanMode ? (
+          {hasAnySelection && !isReCanvas ? (
+            // The selection is a document-level entity, not property of clip
+            // mode, so ANY mode carrying one shows the dashed rectangle with
+            // an X inside; clicking it deselects (same command as Cmd+D),
+            // after which the mode's plain icon returns on its own.
+            // The deselect command is a no-op during Re-Canvas, so the
+            // clickable state is withheld there rather than offering a dead
+            // button.
+            <Tooltip
+              content={`Deselect (${deselectCmd?.shortcutLabel || "Cmd+D"})`}
+              position="bottom"
+              display="inline-flex"
+            >
+              <button
+                onClick={() => deselectCmd?.execute()}
+                className="relative flex items-center justify-center w-4 h-4 -mx-0.5 cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors outline-none select-none"
+              >
+                <SquareDashed size={14} />
+              </button>
+            </Tooltip>
+          ) : isPanMode ? (
             <Move size={12} className="text-[var(--text-muted)]" />
           ) : (
             <Maximize size={12} className="text-[var(--text-muted)]" />
@@ -425,6 +447,8 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                  * affordance of the "X" — see commands.ts for the full
                  * matrix.
                  */}
+                <div className="mx-1 w-px h-5 bg-[var(--border-subtle)]" />
+
                 <div className="mx-1 w-px h-5 bg-[var(--border-subtle)]" />
                 <Tooltip
                   content={`Exit Clip Mode (${exitClipModeCmd?.shortcutLabel || "Esc"})`}

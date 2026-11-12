@@ -21,8 +21,8 @@
  * Clip routing: one decision table drives Copy (Cmd+C), Layer via Copy
  * (Cmd+J), Cut (Cmd+X) and Layer via Cut (Shift+Cmd+J) for every layer type.
  *
- * Routing inputs are computed once per command (layer type, whether a
- * selection exists, how the selection overlaps the layer, which command), the
+ * Routing inputs are computed once per command (whether a selection exists,
+ * how the selection overlaps the layer, the product nature, which command), the
  * table picks an operation and a source-layer action, and one executor per
  * operation builds the product. Commands only decide WHERE the product goes
  * (clipboard or a new layer above the source) and apply the source mask.
@@ -33,7 +33,7 @@
  *   narrows its visible shape. Only exact when the fragment's whole edge is
  *   the selection contour: a hard selection on a raster-backed layer whose
  *   holes fold into hard geometry.
- * - `rasterize`: bake the selected part into a new image layer — text and
+ * - `physical`: bake the selected part into a new image layer — text and
  *   vector layers (their geometry cannot be cropped without changing it), and
  *   every cut whose edge is soft or not geometric (feathered selection,
  *   bitmap-mask source, source holes with feather). The baked fragment is a
@@ -52,35 +52,37 @@
  */
 
 import {
-  Frame, Layer, VectorMask, GeometryService, asLocalShape,
+  Frame, Layer, VectorMask, GeometryService, asLocalShape, type LocalPolygon,
 } from '@opengpex/editor/core/types';
 import { matchRule, type DecisionRule } from '@opengpex/editor/core/helpers/decision-table';
-import { getClipBox } from '@opengpex/editor/core/helpers/selection';
-import { classifyRegionOverlap, type RegionOverlap } from '@opengpex/editor/core/geometry/poly-clip';
-import { shapeToPoint2D } from '@opengpex/editor/core/geometry/operators/point2d';
+import { computeConfinementFromLayer } from '@opengpex/editor/core/helpers/selection';
+import { type RegionOverlap } from '@opengpex/editor/core/geometry/poly-clip';
 import { LayerFactory } from '../../factory';
 import type { createFragmentOperations } from './strategies';
 import type { createBakeOperations } from '../baking';
 
 export type ClipMode = 'copy' | 'copyToLayer' | 'cut' | 'cutToLayer';
-export type ClipOp = 'whole' | 'logical' | 'rasterize' | 'noop';
+export type ClipOp = 'whole' | 'logical' | 'physical' | 'noop';
 export type ClipSourceAction = 'none' | 'fullMask' | 'fullHoleLink' | 'holeLink';
 
 export interface ClipRouteContext {
-  readonly layerType: Layer['type'];
-  readonly hasSelection: boolean;
-  /** Undefined when there is no selection. */
-  readonly overlap: RegionOverlap | undefined;
+  /**
+   * The selection's relation to the source's visible extent: 'full' covers
+   * it, 'partial' crosses its boundary, 'none' misses it. No selection
+   * counts as 'full' — a whole-layer cut is exactly a covering cut.
+   */
+  readonly overlap: RegionOverlap;
   readonly mode: ClipMode;
   /**
-   * A partial clip of a raster-backed layer must bake its product instead of
-   * cropping it logically. Always true for rasterize-type layers (their
-   * geometry cannot be cropped); for raster-backed layers it marks feathered
-   * selections, bitmap-mask sources and sources whose holes do not fold into
-   * hard geometry. Routing guarantees every partial cut picks exactly one of
-   * the two rows per mode, so no context is ever ambiguous.
+   * The product fragment's nature as decided by `resolveNature` (in the
+   * fragment operations): 'logical' crops the shared source asset through
+   * geometry; 'physical' bakes a snapshot. `undefined` = the layer cannot
+   * produce a fragment (group containers) → the R00 noop refusal. Layer
+   * types themselves are NOT a routing field: bake-type sources
+   * (text / vector) and mask-soft sources are folded into `resolveNature`,
+   * so the table reasons about the product, not the source's name.
    */
-  readonly needsPhysical: boolean;
+  readonly nature?: 'logical' | 'physical';
 }
 
 export interface ClipRouteAction {
@@ -89,29 +91,20 @@ export interface ClipRouteAction {
   readonly hud?: string;
 }
 
-const ROUTE_FIELDS: readonly (keyof ClipRouteContext)[] = ['layerType', 'hasSelection', 'overlap', 'mode', 'needsPhysical'];
+const ROUTE_FIELDS: readonly (keyof ClipRouteContext)[] = ['overlap', 'mode', 'nature'];
 
 const COPY_MODES: readonly ClipMode[] = ['copy', 'copyToLayer'];
 const CUT_MODES: readonly ClipMode[] = ['cut', 'cutToLayer'];
-/** Raster-backed content: narrowing the bounds crops it without altering it. */
-const LOGICAL_TYPES: readonly Layer['type'][] = ['image', 'paint', 'color'];
-/** Geometry derived from the bounds (text layout, marker fit, stroke space). */
-const RASTERIZE_TYPES: readonly Layer['type'][] = ['text', 'vector'];
-
 /** First match wins; row order is priority. */
 export const CLIP_ROUTE_RULES: readonly DecisionRule<ClipRouteContext, ClipRouteAction>[] = [
-  { id: 'R1', condition: { layerType: '*', hasSelection: false, overlap: '*', mode: COPY_MODES, needsPhysical: '*' }, action: { op: 'whole', sourceAction: 'none' } },
-  { id: 'R2', condition: { layerType: '*', hasSelection: false, overlap: '*', mode: 'cut', needsPhysical: '*' }, action: { op: 'whole', sourceAction: 'fullMask' } },
-  { id: 'R3', condition: { layerType: '*', hasSelection: false, overlap: '*', mode: 'cutToLayer', needsPhysical: '*' }, action: { op: 'noop', sourceAction: 'none', hud: 'No active selection' } },
-  { id: 'R4', condition: { layerType: '*', hasSelection: true, overlap: 'full', mode: COPY_MODES, needsPhysical: '*' }, action: { op: 'whole', sourceAction: 'none' } },
-  { id: 'R5', condition: { layerType: '*', hasSelection: true, overlap: 'full', mode: 'cut', needsPhysical: '*' }, action: { op: 'whole', sourceAction: 'fullMask' } },
-  { id: 'R6', condition: { layerType: '*', hasSelection: true, overlap: 'full', mode: 'cutToLayer', needsPhysical: '*' }, action: { op: 'whole', sourceAction: 'fullHoleLink' } },
-  { id: 'R7', condition: { layerType: '*', hasSelection: true, overlap: 'none', mode: '*', needsPhysical: '*' }, action: { op: 'noop', sourceAction: 'none', hud: 'Selection does not overlap the layer' } },
-  { id: 'R8', condition: { layerType: LOGICAL_TYPES, hasSelection: true, overlap: 'partial', mode: COPY_MODES, needsPhysical: false }, action: { op: 'logical', sourceAction: 'none' } },
-  { id: 'R9', condition: { layerType: LOGICAL_TYPES, hasSelection: true, overlap: 'partial', mode: CUT_MODES, needsPhysical: false }, action: { op: 'logical', sourceAction: 'holeLink' } },
-  { id: 'R10', condition: { layerType: '*', hasSelection: true, overlap: 'partial', mode: COPY_MODES, needsPhysical: true }, action: { op: 'rasterize', sourceAction: 'none' } },
-  { id: 'R11', condition: { layerType: '*', hasSelection: true, overlap: 'partial', mode: CUT_MODES, needsPhysical: true }, action: { op: 'rasterize', sourceAction: 'holeLink' } },
-  { id: 'R00', condition: { layerType: '*', hasSelection: '*', overlap: '*', mode: '*', needsPhysical: '*' }, action: { op: 'noop', sourceAction: 'none' } },
+  { id: 'R1', condition: { overlap: ['full'], mode: COPY_MODES, nature: '*' }, action: { op: 'whole', sourceAction: 'none' } },
+  { id: 'R2', condition: { overlap: ['full'], mode: CUT_MODES, nature: '*' }, action: { op: 'whole', sourceAction: 'fullMask' } },
+  { id: 'R3', condition: { overlap: ['none'], mode: '*', nature: '*' }, action: { op: 'noop', sourceAction: 'none', hud: 'Selection does not overlap the layer' } },
+  { id: 'R4', condition: { overlap: ['partial'], mode: COPY_MODES, nature: 'logical' }, action: { op: 'logical', sourceAction: 'none' } },
+  { id: 'R5', condition: { overlap: ['partial'], mode: CUT_MODES, nature: 'logical' }, action: { op: 'logical', sourceAction: 'holeLink' } },
+  { id: 'R6', condition: { overlap: ['partial'], mode: COPY_MODES, nature: 'physical' }, action: { op: 'physical', sourceAction: 'none' } },
+  { id: 'R7', condition: { overlap: ['partial'], mode: CUT_MODES, nature: 'physical' }, action: { op: 'physical', sourceAction: 'holeLink' } },
+  { id: 'R0', condition: { overlap: '*', mode: '*', nature: '*' }, action: { op: 'noop', sourceAction: 'none' } },
 ];
 
 export function routeClip(ctx: ClipRouteContext): ClipRouteAction {
@@ -120,12 +113,22 @@ export function routeClip(ctx: ClipRouteContext): ClipRouteAction {
 
 export interface ClipFragmentResult {
   readonly op: ClipOp;
+  /** The classifier's verdict for this exact cut; filled by `clipFragment`
+   *  (the executors themselves don't know it). */
+  readonly overlap?: RegionOverlap;
   /** The product: written to the clipboard or inserted above the source. */
   readonly newLayer?: Layer;
   /** PNG for external applications; produced only for clipboard modes. */
   readonly clipboardUrl?: string;
   /** Mask to append to the source layer's vectorMasks (cut modes only). */
   readonly sourceMask?: VectorMask;
+  /**
+   * The converged selection for the produced fragment (its cut outline
+   * projected into frame space), ready to write into `frame.confinement`.
+   * Computed here — the fragment's pose is final at this point — so the
+   * command layer only decides WHETHER to write it. Undefined for a noop.
+   */
+  readonly confinement?: LocalPolygon;
   readonly hud?: string;
 }
 
@@ -149,21 +152,6 @@ export function createClipRoutingOperations(
   fragmentOps: ReturnType<typeof createFragmentOperations>,
   bakeOps: ReturnType<typeof createBakeOperations>,
 ) {
-  /**
-   * Layer-local comparison: the selection is mapped into the layer's own space
-   * (a rigid transform, so feather distances are preserved) and compared with
-   * the layer's visible shape, defaulting to its full bounds.
-   */
-  function resolveOverlap(frame: Frame, layer: Layer, feather: number): RegionOverlap | undefined {
-    const box = getClipBox(frame);
-    if (!box) return undefined;
-    const selection = geometry.polygon.frameLocalToLayerLocal(box, frame, layer).rings;
-    const region = shapeToPoint2D(
-      layer.visibleShape ?? asLocalShape({ x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h }),
-    );
-    return classifyRegionOverlap(selection, region, feather);
-  }
-
   /**
    * Full-bounds inverted rect: hides the whole layer. The rect extends 1 px
    * beyond the bounding on every side because a rotated layer's resampled
@@ -236,8 +224,15 @@ export function createClipRoutingOperations(
     return { op: 'logical', newLayer: unlocked(result.newLayer), sourceMask: result.holeMask, clipboardUrl };
   };
 
-  const executeRasterize: Executor = async (frame, layer, mode, action, feather) => {
-    const physical = await fragmentOps.clipToPhysicalLayer(frame, layer, { feather });
+  const executePhysical: Executor = async (frame, layer, mode, action, feather) => {
+    // clampPlane: only a product that ENTERS THE DOCUMENT follows the
+    // contour/visibleShape contract (selection extent + feather, transparent
+    // content gaps kept inside). A clipboard-mode product never lands — the
+    // external projection stays content-tight.
+    const physical = await fragmentOps.clipToPhysicalLayer(frame, layer, {
+      feather,
+      clampPlane: !CLIPBOARD_MODES.includes(mode),
+    });
     if (!physical) return { op: 'noop', hud: 'Area is empty' };
 
     // The product is an image layer; the source keeps its original type.
@@ -268,7 +263,7 @@ export function createClipRoutingOperations(
 
     let clipboardUrl: string | undefined;
     if (CLIPBOARD_MODES.includes(mode)) clipboardUrl = physical.url;
-    return { op: 'rasterize', newLayer, sourceMask, clipboardUrl };
+    return { op: 'physical', newLayer, sourceMask, clipboardUrl };
   };
 
   const executeNoop: Executor = async (_frame, _layer, _mode, action) => ({ op: 'noop', hud: action.hud });
@@ -276,7 +271,7 @@ export function createClipRoutingOperations(
   const EXECUTORS: Record<ClipOp, Executor> = {
     whole: executeWhole,
     logical: executeLogical,
-    rasterize: executeRasterize,
+    physical: executePhysical,
     noop: executeNoop,
   };
 
@@ -294,19 +289,25 @@ export function createClipRoutingOperations(
     // entity OWNS the feather — it is resolved here, from the frame, and no
     // caller may pass it in (the service signature carries no feather).
     const feather = frame.confinement?.feather ?? 0;
-    const overlap = resolveOverlap(frame, layer, feather);
+    // Both halves of the routing decision live in the fragment operations:
+    // the overlap (selection vs source extent) and the product nature
+    // (logical vs physical, including bake-type sources).
+    const overlap = fragmentOps.resolveOverlap(frame, layer, feather);
     const action = routeClip({
-      layerType: layer.type,
-      hasSelection: overlap !== undefined,
       overlap,
       mode: options.mode,
-      // A rasterize-type layer always bakes; a raster-backed layer bakes only
-      // when its fragment's edge would not be exact geometry.
-      needsPhysical: RASTERIZE_TYPES.includes(layer.type)
-        || fragmentOps.shouldRoutePhysical(frame, layer, feather),
+      nature: fragmentOps.resolveNature(frame, layer, feather),
     });
 
-    return EXECUTORS[action.op](frame, layer, options.mode, action, feather);
+    const result = await EXECUTORS[action.op](frame, layer, options.mode, action, feather);
+    // The convergence rides the result: the fragment's pose is final here,
+    // so the selection is projected once and the command layer only applies
+    // its write/no-write policy.
+    const confinement = result.newLayer
+      ? (computeConfinementFromLayer(frame, result.newLayer) ?? undefined)
+      : undefined;
+    // Route truth for tests: the classifier's verdict for this exact cut.
+    return { ...result, confinement, overlap };
   }
 
   return { clipFragment };

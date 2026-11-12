@@ -232,7 +232,7 @@ export interface EditorActions {
       clip: {
         // Feather is resolved from the active selection (selection-feather
         // upgrade) — the command layer carries no feather parameter.
-        cut: AdvCommandRef<undefined>;
+        cut: AdvCommandRef<{ keepClipBoxAfter?: boolean } | undefined>;
         copy: AdvCommandRef<undefined>;
         paste: AdvCommandRef<ClipboardLayerMetadata | { e?: ClipboardEvent } | undefined>;
         drill: AdvCommandRef<undefined>;
@@ -240,7 +240,7 @@ export interface EditorActions {
       };
       cmdj: {
         copy: AdvCommandRef<undefined>;
-        cut: AdvCommandRef<undefined>;
+        cut: AdvCommandRef<{ keepClipBoxAfter?: boolean } | undefined>;
       };
       // NOTE: the peel command family (cmd.peel.*) is plugin-owned
       // (ClipOverlay/commands/peel.ts) — it is interaction-fused domain

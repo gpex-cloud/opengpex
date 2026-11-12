@@ -32,6 +32,20 @@ import {
 export const PLUGIN_ID = 'options.clip_options';
 export const PLUGIN_AUTHOR = 'opengpex';
 
+/**
+ * ClipOptionsConfig — the plugin's persisted self-config (usePluginSelfConfig).
+ * Currently empty: the selection-lifecycle preference lives in the
+ * ClipOverlay plugin's own config (`ClipOverlayConfig.keepClipBoxAfter`,
+ * read cross-plugin by core clip.ts / cmdj.ts and ClipOverlay's peel exit
+ * via `state.pluginConfig[ClipOverlayAPI.configKey]`).
+ */
+/** Placeholder until the options plugin gains persisted self-config. */
+export type ClipOptionsConfig = Record<string, never>;
+
+export const CLIP_OPTIONS_DEFAULT_CONFIG: ClipOptionsConfig = {};
+
+
+
 // ─── Command IDs ────────────────────────────────────────────────────────────────
 
 /**
@@ -101,34 +115,6 @@ export const CMD_SET_CLIP_TOOL = 'cmd.clip_tool.set';
  * before delegating to the core drill command with the feather payload.
  */
 export const CMD_DRILL_SELECTION = 'cmd.drill_selection';
-
-/**
- * Plugin-level wrapper around `adv.layer.cmdj.copy`.
- * Owns the Cmd+J keyboard shortcut and reads the feather signal before
- * delegating to the core command with the feather payload.
- */
-export const CMD_LAYER_VIA_COPY = 'cmd.layer_via_copy';
-
-/**
- * Plugin-level wrapper around `adv.layer.cmdj.cut`.
- * Owns the Cmd+Shift+J keyboard shortcut and reads the feather signal before
- * delegating to the core command with the feather payload.
- */
-export const CMD_LAYER_VIA_CUT = 'cmd.layer_via_cut';
-
-/**
- * Plugin-level wrapper around `adv.layer.clip.copy`.
- * Owns the Cmd+C keyboard shortcut and reads the feather signal before
- * delegating to the core command with the feather payload.
- */
-export const CMD_CLIPBOARD_COPY = 'cmd.clipboard_copy';
-
-/**
- * Plugin-level wrapper around `adv.layer.clip.cut`.
- * Owns the Cmd+X keyboard shortcut and reads the feather signal before
- * delegating to the core command with the feather payload.
- */
-export const CMD_CLIPBOARD_CUT = 'cmd.clipboard_cut';
 
 /**
  * Cmd+Shift+I — Invert selection (selected ↔ unselected).
@@ -324,7 +310,8 @@ export const ClipOptionsAPI = {
     /** Set crop tool */
     setClipTool: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CLIP_TOOL}` } as { uid: string; _payload: { tool: ClipTool } },
   },
-  /** pluginConfig storage key */
+  /** pluginConfig storage key. The persisted self-config is
+   *  `ClipOptionsConfig` (see the top of this file). */
   configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
 } as const;
 

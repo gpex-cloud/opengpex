@@ -63,7 +63,7 @@ import {
   registerInflightFragmentTransform,
   clearInflightFragmentTransform,
   isInflightFragmentTransformConsumed,
-} from '../../peel/inflight';
+} from '../../peel/controller';
 import * as P from '../../protocols';
 import type { FragmentPose, FragmentScaleHandle, LocalPolygon, InteractionEvent as GestureEvent } from '@opengpex/editor/core/types';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
@@ -180,7 +180,11 @@ export const createSessionTransformHandler = (): InteractionHandler => {
       const session = readPeelSession(frame);
       if (!session || session.status !== 'peeled') return false;
       const exchange = frame.layers.byId[session.exchangeId];
-      if (!exchange || exchange.type !== 'image' || exchange.locked) return false;
+      // Type-agnostic: the exchange carries whatever type the peel form gave
+      // it (physical bakes to image; a logical paint/color exchange keeps its
+      // own type) — the session transform composites through SceneAssembler
+      // either way.
+      if (!exchange || exchange.locked) return false;
 
       // The press must land on the CLIP SELECTION's gizmo (scoped by
       // data-clip-selection-gizmo on the overlay's gizmo containers) — a
@@ -212,7 +216,7 @@ export const createSessionTransformHandler = (): InteractionHandler => {
       const exchange = session && session.status === 'peeled'
         ? frame.layers.byId[session.exchangeId]
         : undefined;
-      if (!session || !exchange || exchange.type !== 'image') {
+      if (!session || !exchange) {
         reset();
         return;
       }

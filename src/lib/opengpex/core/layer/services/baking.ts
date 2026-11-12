@@ -105,6 +105,14 @@ export interface BuildPhysicalPatchOptions {
    * transparent. Absent = full-bounds rect (regular selections, fallback).
    */
   outlinePath?: string;
+  /**
+   * Migrated cut contour (`Layer.contour`) for peel products, already in the
+   * NEW plane's coordinates — the caller maps the rings; the patch only
+   * records. ALWAYS present as a key (undefined included): peel bakes patch
+   * an EXISTING layer whose previous contour belongs to the old plane, so it
+   * must be cleared whenever the migration yields nothing, not silently kept.
+   */
+  contour?: { rings: Array<Array<{ x: number; y: number }>> };
 }
 
 export function createBakeOperations(
@@ -179,6 +187,9 @@ export function createBakeOperations(
         : asLocalShape({ x: 0, y: 0, w: bounds.w, h: bounds.h }),
       scale: 1,
       rotation: 0,
+      // Always a key (see BuildPhysicalPatchOptions.contour): patching an
+      // existing peel product must be able to CLEAR a stale contour.
+      contour: opts?.contour,
       ...(opts?.flip ? { flip: opts.flip } : {}),
       ...(opts?.birthCenter ? { birthCenter: opts.birthCenter } : {}),
       adjustMasks: undefined,
@@ -211,7 +222,7 @@ export function createBakeOperations(
   }
 
   /**
-   * The physical-layer declaration (metadata.physicalPixels) is deliberately
+   * The physical-layer declaration (layer.nature) is deliberately
    * NOT a helper here: every write site has different merge semantics —
    * fresh-object composition (peel commit), session-pointer merge (transform
    * bake), lineage merge (resetWithBounds), logical marker (fragment paths).

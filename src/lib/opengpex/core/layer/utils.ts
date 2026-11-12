@@ -17,7 +17,11 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Layer } from '@opengpex/editor/core/types';
+import {
+  Layer, asLocalShape, type Point2D,
+} from '@opengpex/editor/core/types';
+import { intersectPathWithPath } from '@opengpex/editor/core/geometry/poly-clip';
+import { parsePathDataToRings, ringsToPathData, shapeToPoint2D } from '@opengpex/editor/core/geometry/operators/point2d';
 
 /**
  * LayerUtils: High-frequency pure function toolset for layer operations
@@ -103,5 +107,36 @@ export const LayerUtils = {
       byLayer[layer.id] = ids;
     }
     return byLayer;
+  },
+
+  /**
+   * intersectContour: ct2 = S ∩ ct1 — the new cut contour is the selection
+   * intersected with the source's selection extent (both in the source's
+   * coordinate space), the `Layer.contour` record a fragment carries for
+   * Refocus. The source's extent resolves in three tiers: the recorded
+   * `layer.contour` when the source is itself a fragment; otherwise the
+   * source plane (original layers — and legacy feathered logical fragments,
+   * whose `visibleShape` pathData carries the tight rings); otherwise the
+   * full bounds. Holes and bitmap masks do NOT participate — they are
+   * render facts carried by the source's masks, and Refocus must re-arm
+   * the selection AS DRAWN; the subtraction happens again at re-cut time
+   * through those same masks. Empty intersection (selection entirely
+   * outside the source's selection extent — possible over a feather band
+   * whose 50% line lies elsewhere) yields undefined: there is no contour
+   * to record.
+   */
+  intersectContour(layer: Layer, selRings: Point2D[][]): Point2D[][] | undefined {
+    const recorded = layer.contour;
+    const ct = recorded && Array.isArray(recorded.rings) && recorded.rings.length > 0
+      ? recorded.rings
+      : layer.visibleShape?.type === 'path' && layer.visibleShape.pathData
+        ? shapeToPoint2D(layer.visibleShape)
+        : shapeToPoint2D(asLocalShape({ x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h }, 'rect'));
+    const res = intersectPathWithPath(
+      ringsToPathData(selRings),
+      ringsToPathData(ct),
+    );
+    if (!res || !res.pathData) return undefined;
+    return parsePathDataToRings(res.pathData);
   }
 };

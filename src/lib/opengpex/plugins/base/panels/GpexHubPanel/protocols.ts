@@ -33,6 +33,6 @@ export const CMD_TOGGLE = 'cmd.toggle';
  */
 export interface GpexHubConfig {
   open: boolean;
-  activeTab: 'explore' | 'installed';
+  activeTab: 'explore' | 'installed' | 'diagnostics';
   panelPosition: 'BR' | 'BL' | 'CT' | 'AN';
 }

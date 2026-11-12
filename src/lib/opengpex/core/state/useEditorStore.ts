@@ -589,7 +589,7 @@ export function useEditorStore() {
             }),
           },
           clip: {
-            cut: advRef(P.ADV_LAYER_CLIP_CUT, () => executeCommand(P.ADV_LAYER_CLIP_CUT, undefined)),
+            cut: advRef(P.ADV_LAYER_CLIP_CUT, (payload?: { keepClipBoxAfter?: boolean }) => executeCommand(P.ADV_LAYER_CLIP_CUT, payload)),
             copy: advRef(P.ADV_LAYER_CLIP_COPY, () => executeCommand(P.ADV_LAYER_CLIP_COPY, undefined)),
             paste: advRef(P.ADV_LAYER_CLIP_PASTE, (payload?: ClipboardLayerMetadata | { e?: ClipboardEvent } | undefined) => executeCommand(P.ADV_LAYER_CLIP_PASTE, payload)),
             drill: advRef(P.ADV_LAYER_CLIP_DRILL, () => executeCommand(P.ADV_LAYER_CLIP_DRILL, undefined)),
@@ -597,7 +597,7 @@ export function useEditorStore() {
           },
           cmdj: {
             copy: advRef(P.ADV_LAYER_CMDJ_COPY, () => executeCommand(P.ADV_LAYER_CMDJ_COPY, undefined)),
-            cut: advRef(P.ADV_LAYER_CMDJ_CUT, () => executeCommand(P.ADV_LAYER_CMDJ_CUT, undefined)),
+            cut: advRef(P.ADV_LAYER_CMDJ_CUT, (payload?: { keepClipBoxAfter?: boolean }) => executeCommand(P.ADV_LAYER_CMDJ_CUT, payload)),
           },
           mask: {
             toggle: advRef(P.ADV_LAYER_MASK_TOGGLE, (payload: { layerId: string; maskId: string; frameId?: string }) => executeCommand(P.ADV_LAYER_MASK_TOGGLE, payload)),

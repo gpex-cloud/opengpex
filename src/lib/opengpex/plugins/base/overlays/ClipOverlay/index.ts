@@ -19,8 +19,8 @@
 
 import { EditorPlugin } from '@opengpex/editor/core/types';
 import { ClipOverlayMain, ClipOverlaySettings } from './components';
-import { createSelectionMoveHandler, createSelectionTransformHandler, createSessionTransformHandler, createReCanvasHandler, createClipBoxHandler, createPathEllipseHandler, createLassoHandler, createWandHandler, createSamHandler } from './interactions';
-import { PEEL_COMMANDS } from './commands';
+import { createSelectionMoveHandler, createSelectionTransformHandler, createSessionTransformHandler, createReCanvasHandler, createClipBoxHandler, createPathEllipseHandler, createLassoHandler, createWandHandler, createSamHandler, createCommitFreezeHandler } from './interactions';
+import { PEEL_COMMANDS, CLIP_ENTRY_COMMANDS } from './commands';
 import { peelSessionCodec } from './peel/session';
 import * as P from './protocols';
 
@@ -52,6 +52,7 @@ export const plugin: EditorPlugin = {
     showDimensionLabel: true,
   },
   interactions: [
+    createCommitFreezeHandler(),  // priority 140 — swallows every stage press while a peel commit is baking
     createSelectionMoveHandler(),
     createSessionTransformHandler(),   // priority 125 — peel-session transforms driven through the SELECTION gizmo (the plain selection transform yields while a session is undecided)
     createSelectionTransformHandler(),  // priority 120 — irregular selection scale/rotate handles
@@ -78,7 +79,7 @@ export const plugin: EditorPlugin = {
   },
   // The peel command family (cmd.peel.*) — plugin-owned domain
   // commands dispatched by id through the central executeCommand registry.
-  commands: Object.values(PEEL_COMMANDS),
+  commands: [...Object.values(PEEL_COMMANDS), ...Object.values(CLIP_ENTRY_COMMANDS)],
 };
 
 export default plugin;

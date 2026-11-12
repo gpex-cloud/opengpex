@@ -25,6 +25,7 @@ import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals,
 import { asLocalRect } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { getActiveTarget } from './commands';
+import { ClipEntryAPI } from '@opengpex/editor/plugins/base/overlays/ClipOverlay/protocols';
 import { isRegularTool as isRegularToolFn, isIrregularTool as isIrregularToolFn, CLIP_TOOL_STRATEGIES, DEFAULT_CLIP_TOOL_AA } from './protocols';
 import type { ClipTool, ClipToolAAMap } from './protocols';
 import type { ClipOptionsCommandsMap, ClipOptionsSignalsMap } from './commands.d';
@@ -54,8 +55,7 @@ export const useClipOptionsCommands = () => {
     invertSelectionCmd, // ← derived from CMD_INVERT_SELECTION = 'cmd.invert_selection'
     selectFromAlphaCmd, // ← derived from CMD_SELECT_FROM_ALPHA = 'cmd.select_from_alpha'
     offsetSelectionCmd, // ← derived from CMD_OFFSET_SELECTION = 'cmd.offset_selection'
-    clipboardCopyCmd, // ← derived from CMD_CLIPBOARD_COPY = 'cmd.clipboard_copy'
-    clipboardCutCmd, // ← derived from CMD_CLIPBOARD_CUT = 'cmd.clipboard_cut'
+    deselectCmd, // ← derived from CMD_DESELECT = 'cmd.deselect'
   } = usePluginCommands<ClipOptionsCommandsMap>();
 
   const { reCanvasActiveSignal, clipFeatherValueSignal, clipToolAaMapSignal } = usePluginSignals<ClipOptionsSignalsMap>();
@@ -142,14 +142,23 @@ export const useClipOptionsCommands = () => {
       invertSelectionCmd,
       selectFromAlphaCmd,
       offsetSelectionCmd,
+      deselectCmd,
 
       // System Commands (cross-plugin, via actions.adv API — AdvCommandRef)
-      // Clipboard Copy / Cut go through the plugin wrapper commands, which
-      // own the Cmd+C / Cmd+X shortcuts and read the persisted feather
-      // signal — toolbar buttons and keyboard carry the same feathered
-      // semantics.
-      cutCmd: clipboardCutCmd,
-      copyCmd: clipboardCopyCmd,
+      // Clipboard Copy / Cut are ClipOverlay plugin commands now (they own
+      // the Cmd+C / Cmd+X shortcuts and the keep-selection preference);
+      // the toolbar dispatches them by uid through the command registry —
+      // toolbar buttons and keyboard carry the same feathered semantics.
+      cutCmd: {
+        name: 'Cut',
+        shortcutLabel: 'Cmd+X',
+        execute: () => actions.executeCommand(ClipEntryAPI.commands.clipboardCut.uid)
+      },
+      copyCmd: {
+        name: 'Copy',
+        shortcutLabel: 'Cmd+C',
+        execute: () => actions.executeCommand(ClipEntryAPI.commands.clipboardCopy.uid)
+      },
       pasteCmd: actions.adv.layer.clip.paste,
       drillCmd: actions.adv.layer.clip.drill,
       // Apply selection as bitmap mask on the active layer (purple "Apply Mask" button).
@@ -245,8 +254,7 @@ export const useClipOptionsCommands = () => {
     invertSelectionCmd,
     selectFromAlphaCmd,
     offsetSelectionCmd,
-    clipboardCopyCmd,
-    clipboardCutCmd,
+    deselectCmd,
     activeLayer,
   ]);
 
